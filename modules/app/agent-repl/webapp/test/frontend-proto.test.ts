@@ -175,6 +175,21 @@ describe("decodeFrontendFrame — protojson field coercion", () => {
     expect(frame.frame.value.mergeLeaseHeld).toBe(true);
   });
 
+  it("decodes the instant a merge landed", () => {
+    // The daemon stamps this on every frame for a merged workspace. It was
+    // absent from the decoder's field set, so the frames that mattered most
+    // were the ones it threw on.
+    const frame = decode({ workspaceState: { ...WS_STATE, mergedAtMs: "1700000000000" } });
+    if (frame.frame.case !== "workspaceState") throw new Error("wrong variant");
+    expect(frame.frame.value.mergedAtMs).toBe(1700000000000);
+  });
+
+  it("reads an ABSENT merged instant as never merged", () => {
+    const frame = decode({ workspaceState: WS_STATE });
+    if (frame.frame.case !== "workspaceState") throw new Error("wrong variant");
+    expect(frame.frame.value.mergedAtMs).toBe(0);
+  });
+
   it("reads an ABSENT merge lease as not held, the proto3 default protojson omits", () => {
     const frame = decode({ workspaceState: WS_STATE });
     if (frame.frame.case !== "workspaceState") throw new Error("wrong variant");
