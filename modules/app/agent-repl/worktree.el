@@ -1573,76 +1573,27 @@ fails on worker\".  The cost is negligible — the timer queue drains
 on the very next event-loop tick."
   (run-at-time 0 nil thunk))
 
-(defun agent-repl--maybe-run-postprocessing-prompt (current-ws target-ws)
-  "Deliver TARGET-WS's `:postprocessing-prompt' to CURRENT-WS, exactly once.
-Intended to run once TARGET-WS's merge is FULLY finished, so a workspace
-dispatched with a `postprocessing_prompt' field has that prompt run as a
-new turn in the SOURCE workspace (CURRENT-WS) it merged into.  TARGET-WS
-itself is torn down by the merge, so the prompt cannot run there; the key
-survives the tombstone because it is not a runtime key.  The key is
-cleared after reading so it fires once, and a nil/blank prompt is a
-no-op.
-
-NOTE: currently UNCALLED.  Its trigger was the local merge finalizer, and
-merging is now daemon-owned end to end, so the daemon must drive this
-handoff (or the `postprocessing_prompt' field must be retired)."
-  (let ((pp (agent-repl--ws-get target-ws :postprocessing-prompt)))
-    (when (and (stringp pp) (not (string-empty-p pp)))
-      (agent-repl--ws-put target-ws :postprocessing-prompt nil)
-      (agent-repl--log current-ws
-                        "postprocessing-prompt: merge of %s fully finished, delivering its prompt to source %s"
-                        target-ws current-ws)
-      (agent-repl--dispatch-prompt-command current-ws pp))))
-
-(defconst agent-repl--before-ws-merge-reinvoke-instruction
-  (concat
-   "\n\n"
-   "The instruction above is a pre-merge action to perform BEFORE this "
-   "workspace merges back into its source.  Its "
-   "`/create-or-update-workspace merge` has been deferred until you finish "
-   "it.  Once the action is complete, invoke the "
-   "`/create-or-update-workspace merge` skill again to merge this workspace "
-   "back into its source.")
-  "Resume directive appended to a delivered `before_ws_merge' action.
-The action itself carries no sequencing text — the producer strips it —
-so the editor supplies this directive at delivery time, telling the
-child to re-invoke `/create-or-update-workspace merge' once the pre-merge
-action finishes (the first invocation is intercepted and deferred by
-`agent-repl--handle-merge-command').")
-
-(defun agent-repl--before-ws-merge-turn (action)
-  "Compose the turn delivered to a child for its before_ws_merge ACTION.
-ACTION is the verbatim `before_ws_merge' field; the resume directive
-`agent-repl--before-ws-merge-reinvoke-instruction' is appended so the
-child re-invokes `/create-or-update-workspace merge' after completing
-ACTION."
-  (concat action agent-repl--before-ws-merge-reinvoke-instruction))
-
-(defun agent-repl--maybe-run-before-ws-merge-prompt (target-ws)
-  "Deliver TARGET-WS's `:before-ws-merge-prompt' to TARGET-WS itself, once.
-Called from `agent-repl--handle-merge-command' BEFORE the merge action
-tears TARGET-WS down, so a workspace dispatched with a `before_ws_merge'
-field runs that action as a new turn in its OWN session before it merges
-— the mirror of `agent-repl--maybe-run-postprocessing-prompt', which
-runs in the SOURCE after the merge is fully finished.
-
-Returns non-nil when an action was delivered, signalling the caller to
-DEFER the merge: the child re-invokes `/create-or-update-workspace merge'
-once the action completes (see
-`agent-repl--before-ws-merge-reinvoke-instruction'), and that second
-command — finding the key cleared — proceeds with the merge.  Returns
-nil when nothing was pending, so the caller merges immediately.  The key
-is cleared before delivery so it fires exactly once and the re-invoked
-merge is never deferred again; a nil/blank action is a no-op."
-  (let ((bwm (agent-repl--ws-get target-ws :before-ws-merge-prompt)))
-    (when (and (stringp bwm) (not (string-empty-p bwm)))
-      (agent-repl--ws-put target-ws :before-ws-merge-prompt nil)
-      (agent-repl--log target-ws
-                        "before-ws-merge: delivering pre-merge action to %s and deferring its merge"
-                        target-ws)
-      (agent-repl--dispatch-prompt-command
-       target-ws (agent-repl--before-ws-merge-turn bwm))
-      t)))
+;;;; ---- The pre-merge and post-merge actions: RETIRED ------------------
+;;
+;; `agent-repl--maybe-run-before-ws-merge-prompt',
+;; `agent-repl--before-ws-merge-turn',
+;; `agent-repl--before-ws-merge-reinvoke-instruction' and
+;; `agent-repl--maybe-run-postprocessing-prompt' lived here.  Between them
+;; they implemented the whole editor-side action policy: intercept a merge
+;; command, deliver the `before_ws_merge' action to the child as a turn,
+;; DEFER the merge until the child re-invoked the merge skill, and after
+;; the merge finished deliver the `postprocessing_prompt' to the source.
+;;
+;; The daemon now runs both ends of the pipeline itself and reports them as
+;; `MergeStatus' phases (`before_action' / `after_action'), so a second
+;; implementation here would be a second owner of the merge's ordering —
+;; the same failure class as the geometry Emacs used to compute.
+;;
+;; Nothing was left half-deleted: no production code SET either
+;; `:before-ws-merge-prompt' or `:postprocessing-prompt' by the time they
+;; went, and the postprocessing path — the only parent-notification
+;; coupling on this axis — had already been documented as UNCALLED after
+;; its trigger, the local merge finalizer, left with the merge itself.
 
 ;;;; ---- Thread-safe process teardown ----
 ;;
@@ -2289,85 +2240,23 @@ calltree)."
                             (length report-text) file)
           file)))))
 
-(defun agent-repl--resolve-merge-workspace-name (ws &optional project-dir)
-  "Resolve a merge target to a registered workspace name.
-
-Resolution order:
-
-  1. If PROJECT-DIR is a non-empty string and the registry has a live
-     workspace whose `:project-dir' canonicalizes to the same path,
-     return that workspace name.  Project-dir wins because it is the
-     unambiguous identifier any caller can produce from `$PWD' /
-     `git rev-parse --show-toplevel' without consulting the editor's
-     name registry — names can collide or drift (e.g. a branch is
-     checked out on the repo's main tree where the registry uses the
-     bare repo name, not the branch).
-  2. Otherwise, try WS as a literal name.
-  3. Otherwise, if WS contains a `/', try the substring after the last
-     `/' (the branch tail).
-
-Returns the matched workspace name on success, or nil if every lookup
-misses.  Used by `agent-repl--handle-merge-command' to convert the
-JSON `project_dir' and `workspace' fields into a registry key.
-
-Branch-style workspace names (e.g. \"DWC/foo\") still arrive via the
-WS argument when the dispatcher doesn't supply a project-dir; the
-literal-then-tail fallback preserves the historical name-only contract
-for those callers."
-  (or (when (and project-dir (stringp project-dir)
-                 (not (string-empty-p project-dir)))
-        (agent-repl--ws-name-for-dir project-dir))
-      (cond
-       ((and (stringp ws) (agent-repl--ws-get ws :project-dir)) ws)
-       ((and (stringp ws) (string-match-p "/" ws))
-        (let ((tail (agent-repl--bare-workspace-name ws)))
-          (when (agent-repl--ws-get tail :project-dir) tail))))))
-
-(defun agent-repl--handle-merge-command (cmd)
-  "Handle a \"merge\" workspace command CMD by asking the daemon to merge.
-
-Reads two optional fields from CMD:
-  - `project_dir\' — canonical filesystem path of the target workspace
-    (preferred, since paths are unambiguous across the name/branch
-    drift that bites the bare-name path; see
-    `agent-repl--resolve-merge-workspace-name\' for the order).
-  - `workspace\' — workspace name or branch (fallback when project_dir
-    is absent or doesn\='t match a live workspace).
-
-Resolution exists only to name the workspace the request is keyed by;
-everything the merge itself needs is already the daemon\='s.
-
-When neither field resolves, logs an `unknown workspace\' line (with both
-attempted inputs so the failure is debuggable) and returns — no error
-is raised, since a missing workspace is not actionable here."
-  (let* ((ws (alist-get 'workspace cmd))
-         (project-dir (alist-get 'project_dir cmd))
-         (resolved (agent-repl--resolve-merge-workspace-name ws project-dir)))
-    (cond
-     (resolved
-      (agent-repl--log ws
-                        "host-action legacy-command merge: ws=%s project_dir=%s resolved=%s"
-                        ws (or project-dir "nil") resolved)
-      ;; If RESOLVED carries a `before_ws_merge\' action, deliver it to
-      ;; RESOLVED\='s own session and DEFER the merge — the child performs
-      ;; the action and re-invokes `/create-or-update-workspace merge\',
-      ;; whose second command (key now cleared) actually merges.
-      (if (agent-repl--maybe-run-before-ws-merge-prompt resolved)
-          (agent-repl--log ws
-                            "host-action legacy-command merge: deferring merge of %s until its before-ws-merge action completes"
-                            resolved)
-        (agent-repl--workspace-merge-async resolved)))
-     (t
-      (let ((tail (and (stringp ws) (string-match-p "/" ws)
-                       (agent-repl--bare-workspace-name ws))))
-        (agent-repl--log ws
-                          "host-action legacy-command merge: unknown workspace: %s%s%s — skipping"
-                          ws
-                          (if tail (format " (also tried tail %s)" tail) "")
-                          (if (and project-dir (stringp project-dir)
-                                   (not (string-empty-p project-dir)))
-                              (format " (also tried project_dir %s)" project-dir)
-                            "")))))))
+;;;; ---- The "merge" host action: RETIRED -------------------------------
+;;
+;; `agent-repl--handle-merge-command' and its
+;; `agent-repl--resolve-merge-workspace-name' name-resolution chain lived
+;; here.  The daemon has removed the host action entirely: a merge is a
+;; daemon COMMAND (`mergeWorkspace') and never a UI effect Emacs is asked
+;; to perform on its behalf.
+;;
+;; The resolver went with it rather than being kept "just for lookups".
+;; It answered a missing workspace with nil and let the handler log-and-
+;; return, which is precisely the silent-degradation shape AGENTS.md
+;; forbids: a merge the user asked for produced a log line and nothing
+;; else.  The two surviving merge entry points —
+;; `agent-repl-workspace-merge-current-into-source' and the skill's
+;; `mergeWorkspace' request — are both keyed by a workspace Emacs already
+;; holds, and an unkeyed request now signals through
+;; `agent-repl--merge-command-payload' instead of resolving anything.
 
 (defcustom agent-repl-eval-output-max-chars 8000
   "Maximum number of characters of eval output to forward to a workspace.

@@ -782,13 +782,16 @@ slash produced a key the daemon has no session for."
                      '("host-legacy-ack" "hostActionCompleted" "ws1"))))))
 
 (ert-deftest agent-repl-test-host-action-legacy-types-are-exact ()
-  "Only the nine daemon legacy-command types resolve to host handlers."
+  "Only the eight daemon legacy-command types resolve to host handlers.
+\"merge\" is pointedly absent: a merge is a daemon COMMAND
+\(`mergeWorkspace'), not a UI effect the daemon asks Emacs to perform."
   (should
    (equal
     (mapcar #'car agent-repl--legacy-host-action-handlers)
     '("prompt" "finish" "close" "open"
-      "clipboard" "send" "merge" "eval" "set-view")))
-  (should-not (assoc "create" agent-repl--legacy-host-action-handlers)))
+      "clipboard" "send" "eval" "set-view")))
+  (should-not (assoc "create" agent-repl--legacy-host-action-handlers))
+  (should-not (assoc "merge" agent-repl--legacy-host-action-handlers)))
 
 (ert-deftest agent-repl-test-host-action-unknown-legacy-type-nacks ()
   "Unknown legacy types fail loudly and send an unsuccessful completion."
