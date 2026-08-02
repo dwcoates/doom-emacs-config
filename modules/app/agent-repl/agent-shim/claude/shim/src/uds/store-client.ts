@@ -18,20 +18,34 @@
  * fallback — store downtime is honest downtime and the display goes stale
  * until it returns.
  *
- * "Until it returns" is load-bearing, and one thing is needed to make it
- * true: the producer connection is REDIALED, once, by the next write that
- * finds it down. The store is launchd-managed and restarts under a live shim,
- * which kills that connection for good; without the redial every later write
- * would drop against a corpse and downtime would be permanent, not honest.
- * The redial is a connection lifecycle (the daemon<->shim link already works
- * this way, §4.4), not a fallback absorbing a failure: one attempt, no timer,
- * no background loop, and a redial that fails drops the batch exactly as a
- * down connection always did. A deliberate close() is final and never
- * redials.
+ * "Until it returns" is load-bearing, and the LINK STATE MACHINE below is what
+ * makes it true. The store is launchd-managed and restarts under a live shim,
+ * which kills BOTH connections for good. Without recovery every later write
+ * drops against a corpse, the merged tail never resumes, and the connectivity
+ * fault the daemon opened for the outage never closes — every workspace stays
+ * painted degraded until something bounces the shim. That is what a deploy's
+ * store restart did on 2026-08-02, fleet-wide.
  *
- * The SUBSCRIPTION connection has no such recovery: its `from_seq` belongs to
- * the daemon (§4.4), which re-sends `Subscribe` on daemon<->shim reconnect,
- * so the merged tail resumes there rather than here.
+ * SO THE LINK RECOVERS, AS A LINK, AND SAYS SO:
+ *
+ *   - A dropped producer connection or a dropped standing subscription arms a
+ *     relink (bounded backoff, immediate first attempt, 100ms doubling to a 5s
+ *     ceiling — the same discipline the sidecar's store link and the
+ *     daemon<->shim link use).
+ *   - A relink re-establishes the producer connection and, when the daemon has
+ *     a standing subscription, REOPENS it at {@link resumeSeq} — the last seq
+ *     actually forwarded to the sink, so the store replays the gap rather than
+ *     leaving it silently missing.
+ *   - Once both are live again the client reports `DegradedState{recovered:
+ *     true}`, which is the close edge of the fault window the outage opened.
+ *     The daemon's fault machinery closes the session_fault row on it and
+ *     re-resolves the workspace, so the color leaves the blue band unaided.
+ *
+ * NONE OF THAT SOFTENS THE SAD PATH. There is still no spill buffer, a
+ * rejected batch is still never retried, and a write landing during an outage
+ * is still dropped loudly. Recovery restores the LINK; it never resurrects the
+ * events that fell while the link was down. A deliberate close() is final and
+ * never relinks.
  *
  * THE SUBSCRIPTION KEY is the VENDOR session id (Claude's uuid), not this
  * shim's `--session-id` — see `storeKey`. Writes were always keyed that way
@@ -115,10 +129,22 @@ export interface StoreClientOptions {
    * `adoptStoreKey` sets it on the first converted event. See storeKey.
    */
   storeSessionId?: string;
+  /** First relink delay after a failed attempt; default 100ms. */
+  relinkBackoffMinMs?: number;
+  /** Relink backoff ceiling; default 5000ms. */
+  relinkBackoffMaxMs?: number;
 }
 
 const COMPONENT = "shim-store-client";
 const HEALTH_TIMEOUT_MS = 2000;
+/**
+ * Relink backoff bounds, matching the discipline the sidecar's store link and
+ * the daemon<->shim link already use: an immediate first attempt, then 100ms
+ * doubling to a 5s ceiling. Bounded rather than unbounded because a store that
+ * is down stays down for a deploy's length, not forever.
+ */
+const RELINK_BACKOFF_MIN_MS = 100;
+const RELINK_BACKOFF_MAX_MS = 5000;
 
 export interface StoreHealth {
   healthy: boolean;
@@ -209,6 +235,40 @@ export class StoreClient {
    * to it like a rotation away from the real conversation.
    */
   private vendorKnown: boolean;
+  /**
+   * Whether an UNRECOVERED degraded window is open — i.e. this client has
+   * reported a `DegradedState` the daemon turned into an open session_fault
+   * row and has not yet reported the recovery that closes it.
+   *
+   * It is what makes the two edges a WINDOW rather than two unrelated
+   * reports: exactly one `recovered: true` is sent per outage, and none at all
+   * when nothing was ever degraded. The daemon rejects a close with no open
+   * window (ErrFaultWindowNotOpen), so an unpaired recovery would be a loud
+   * error in its log rather than a no-op.
+   */
+  private linkDegraded = false;
+  /** The armed relink attempt, or null when none is pending. */
+  private relinkTimer: NodeJS.Timeout | null = null;
+  /** The delay the NEXT relink attempt waits; 0 means immediate. */
+  private relinkDelayMs = 0;
+  /** Guards against two relink attempts overlapping on one outage. */
+  private relinking = false;
+  private readonly relinkMinMs: number;
+  private readonly relinkMaxMs: number;
+  /**
+   * The highest seq actually handed to the sink under the current store key,
+   * which is where a reopened subscription must resume from.
+   *
+   * The daemon's `from_seq` is only its position at HANDSHAKE time; by the
+   * time a store restart drops the tail the daemon has consumed everything
+   * this client forwarded since. Resubscribing at the handshake position would
+   * replay all of it, and resubscribing at 0 would replay the conversation —
+   * but resubscribing ABOVE what was forwarded would silently lose the events
+   * that fell in the gap, which is the failure that matters. `Subscribe.
+   * from_seq` is EXCLUSIVE, so the last forwarded seq resumes exactly after
+   * the last event the daemon saw.
+   */
+  private lastForwardedSeq: bigint | null = null;
   /** The daemon-link bounce for a rotation; see {@link RotationHandler}. */
   private rotator: RotationHandler | null = null;
   /**
@@ -222,6 +282,8 @@ export class StoreClient {
 
   constructor(private readonly opts: StoreClientOptions) {
     this.heartbeatIntervalMs = opts.heartbeatIntervalMs ?? 5000;
+    this.relinkMinMs = opts.relinkBackoffMinMs ?? RELINK_BACKOFF_MIN_MS;
+    this.relinkMaxMs = opts.relinkBackoffMaxMs ?? RELINK_BACKOFF_MAX_MS;
     this.storeKey = opts.storeSessionId ?? opts.sessionId;
     this.vendorKnown = (opts.storeSessionId ?? "") !== "";
   }
@@ -359,6 +421,13 @@ export class StoreClient {
     // with the key; the bounce's re-handshake opens the new one at the
     // daemon's from_seq, which that handshake resets to zero.
     this.dropStandingSubscription();
+    // ...and retire its POSITION with it. Both numbers count in the seq space
+    // that just ended, so a later relink resuming from either would reopen the
+    // new key's tail at a position belonging to the old one. Nulling
+    // lastFromSeq is also what tells relink there is no standing subscription
+    // to restore until the re-handshake asks for one.
+    this.lastFromSeq = null;
+    this.lastForwardedSeq = null;
     LOGGER.log({ agent_repl_session_id: this.opts.sessionId, store_key: next },
       `retired the standing subscription of the old seq space; the re-handshake gate opens the new one at the daemon's from_seq`);
   }
@@ -493,14 +562,35 @@ export class StoreClient {
     // the daemon's hello. Nothing is lost by that late reopen — the store
     // replays every event with seq > from_seq from disk.
     this.lastFromSeq = fromSeq;
+    // The DAEMON's position supersedes whatever this client last forwarded:
+    // it is the authority on where its own tail resumes, and a stale forwarded
+    // seq from a retired subscription must not outrank it on a later relink.
+    this.lastForwardedSeq = null;
     this.dropStandingSubscription();
+    return this.openSubscription(fromSeq).catch((err: unknown) => {
+      // The dial failure IS the outage this client exists to report: the
+      // daemon has no merged tail until it is fixed. A relink is NOT armed
+      // here — an explicit subscribe belongs to its caller (the bring-up gate
+      // withholds readiness on it), and arming one would race that caller's
+      // own retry.
+      this.degrade(errText(err), 0);
+      throw new Error(`store-client: ${errText(err)}`);
+    });
+  }
+
+  /**
+   * Open the standing subscription connection at `fromSeq` and settle once its
+   * Subscribe frame is on the wire.
+   *
+   * It REPORTS NOTHING on failure — it is the shared mechanism under both the
+   * daemon's explicit {@link subscribe} (which degrades) and a relink attempt
+   * (which does not, because the window it would open is already open). Who
+   * owns the account of a failure is the caller's decision, not this dial's.
+   */
+  private openSubscription(fromSeq: bigint): Promise<void> {
     return new Promise((resolve, reject) => {
       const socket = net.connect(this.opts.socketPath);
-      const onDialError = (err: Error) => {
-        const reason = `cannot subscribe: ${err.message}`;
-        this.degrade(reason, 0);
-        reject(new Error(`store-client: ${reason}`));
-      };
+      const onDialError = (err: Error) => reject(new Error(`cannot subscribe: ${err.message}`));
       socket.once("error", onDialError);
       socket.once("connect", () => {
         socket.removeListener("error", onDialError);
@@ -522,9 +612,7 @@ export class StoreClient {
             fromSeq,
           }));
         } catch (err) {
-          const reason = `cannot subscribe: ${err instanceof Error ? err.message : String(err)}`;
-          this.degrade(reason, 0);
-          reject(new Error(`store-client: ${reason}`));
+          reject(new Error(`cannot subscribe: ${errText(err)}`));
           return;
         }
         LOGGER.log({
@@ -536,6 +624,117 @@ export class StoreClient {
         resolve();
       });
     });
+  }
+
+  /**
+   * Where a REOPENED standing subscription resumes: after the last event this
+   * client actually forwarded, else at the daemon's own handshake position.
+   *
+   * Only ever called with a standing subscription in existence — `relink`
+   * checks `lastFromSeq` first — so the absence of both positions is a bug in
+   * this state machine rather than a condition to default away.
+   */
+  private resumeSeq(): bigint {
+    if (this.lastForwardedSeq !== null) return this.lastForwardedSeq;
+    if (this.lastFromSeq !== null) return this.lastFromSeq;
+    throw new Error("store-client: resume position requested with no standing subscription");
+  }
+
+  /**
+   * Arm the next relink attempt. Every drop and every failed attempt funnels
+   * through here, so "how often does a down link retry" is one decision in one
+   * place. A deliberate close() disarms it permanently.
+   */
+  private armRelink(delayMs: number): void {
+    if (this.closed) return;
+    if (this.relinkTimer) clearTimeout(this.relinkTimer);
+    this.relinkTimer = setTimeout(() => {
+      this.relinkTimer = null;
+      void this.relink();
+    }, delayMs);
+    this.relinkTimer.unref?.();
+  }
+
+  /**
+   * Note a dropped connection and start recovering IMMEDIATELY (the store's
+   * replacement is usually already listening — a launchd restart takes about
+   * as long as one dial). Backoff only builds behind attempts that fail.
+   */
+  private linkLost(): void {
+    this.relinkDelayMs = 0;
+    this.armRelink(0);
+  }
+
+  /**
+   * One recovery attempt: re-establish the producer connection, reopen the
+   * standing subscription at {@link resumeSeq}, and — only once BOTH hold —
+   * report the recovery that closes the daemon's fault window.
+   *
+   * A partial success is not a recovery and is never reported as one: the
+   * attempt re-arms itself and the window stays open, which is the honest
+   * account of a link that can write but has no merged tail.
+   */
+  private async relink(): Promise<void> {
+    if (this.closed || this.relinking) return;
+    this.relinking = true;
+    try {
+      if (!this.connected || this.conn === null) {
+        await this.ensureProducerConn();
+      }
+      if (this.lastFromSeq !== null && this.subConn === null) {
+        await this.openSubscription(this.resumeSeq());
+      }
+    } catch (err) {
+      this.relinkDelayMs = nextRelinkDelay(this.relinkDelayMs, this.relinkMinMs, this.relinkMaxMs);
+      LOGGER.log({
+        level: "error",
+        agent_repl_session_id: this.opts.sessionId,
+        store_key: this.storeKey,
+        retry_in_ms: this.relinkDelayMs,
+      }, `store relink attempt failed, retrying in ${this.relinkDelayMs}ms: ${errText(err)}`);
+      this.armRelink(this.relinkDelayMs);
+      return;
+    } finally {
+      this.relinking = false;
+    }
+    this.relinkDelayMs = 0;
+    this.reportRecovered();
+  }
+
+  /**
+   * Close the degraded window this client opened, as the `recovered: true`
+   * edge of the SAME DegradedState report — the contract the daemon's fault
+   * machinery closes a session_fault row on (sessioncontroller/sinks.go), and
+   * the reason a recovered store link repaints the workspace without a bounce.
+   *
+   * Silent when no window is open, so a link that never dropped never claims
+   * to have recovered.
+   */
+  private reportRecovered(): void {
+    if (!this.linkDegraded) return;
+    this.linkDegraded = false;
+    const resumed = this.lastFromSeq !== null;
+    const reason = resumed
+      ? `store link recovered: producer connection re-established and the standing subscription resumed`
+      : `store link recovered: producer connection re-established`;
+    LOGGER.log({
+      agent_repl_session_id: this.opts.sessionId,
+      store_key: this.storeKey,
+      subscribed: resumed,
+      last_forwarded_seq: this.lastForwardedSeq,
+    }, reason);
+    const report = create(DegradedStateSchema, {
+      component: COMPONENT,
+      reason,
+      droppedCount: 0n,
+      recovered: true,
+    });
+    if (this.reporter) {
+      this.reporter(report);
+    } else {
+      LOGGER.log({ level: "error", agent_repl_session_id: this.opts.sessionId, reason },
+        `RECOVERED (no reporter bound): ${reason}`);
+    }
   }
 
   /**
@@ -560,13 +759,12 @@ export class StoreClient {
    * event is loud-logged as dropped, a DegradedState is reported, and the
    * promise rejects.
    *
-   * A DOWN connection is redialed ONCE first (see ensureProducerConn). The
-   * store is launchd-managed and restarts under us; the connection it kills is
-   * never re-established otherwise, so "the display goes stale until the store
-   * returns" (design §4.4) would never end — every later write would drop
-   * against a corpse. This does not soften the sad path: there is still no
-   * spill buffer, a rejected batch is still never retried, and a redial that
-   * fails drops the batch exactly as a down connection always did.
+   * A DOWN connection is redialed first (see ensureProducerConn), so a batch
+   * arriving between a store restart and the next relink tick still reaches
+   * the store rather than racing the timer. This does not soften the sad path:
+   * there is still no spill buffer, a rejected batch is still never retried,
+   * and a redial that fails drops the batch exactly as a down connection
+   * always did.
    */
   write(events: Event[]): Promise<StoreWriteAck> {
     LOGGER.logVerbose({ agent_repl_session_id: this.opts.sessionId, store_key: this.storeKey, event_count: events.length, event_kinds: events.map(envelopeKind) }, "queueing persistent event batch for store write");
@@ -601,11 +799,15 @@ export class StoreClient {
     try {
       await this.ensureProducerConn();
     } catch (err) {
-      const why = err instanceof Error ? err.message : String(err);
-      this.dropBatch(pending.events, `store connection is down (redial failed: ${why})`);
+      this.dropBatch(pending.events, `store connection is down (redial failed: ${errText(err)})`);
       pending.reject(new Error("store-client: write on a down connection"));
       return;
     }
+    // A write that redialed successfully has restored HALF the link. Hand the
+    // rest to the state machine rather than duplicating it here: it reopens
+    // the standing subscription and reports the recovery, or re-arms if the
+    // store is only partly back.
+    if (this.linkDegraded) this.armRelink(0);
     // Send BEFORE enqueueing: a send that throws never reached the wire, so no
     // ack will ever match it, and an entry queued first would silently steal
     // the NEXT batch's ack. Nothing can interleave, since an ack is only ever
@@ -650,6 +852,12 @@ export class StoreClient {
   /** Close both connections deliberately (not an error path). */
   close(): void {
     this.closed = true;
+    // Disarm recovery FIRST: a relink firing after teardown would redial the
+    // store out from under a shim that is shutting down.
+    if (this.relinkTimer) {
+      clearTimeout(this.relinkTimer);
+      this.relinkTimer = null;
+    }
     this.stopHeartbeat();
     this.connected = false;
     if (this.subConn) {
@@ -679,6 +887,12 @@ export class StoreClient {
       if (this.sink) {
         // Settles the store key: see adoptStoreKey.
         this.forwardedAny = true;
+        // The resume position for a reopened subscription (see
+        // lastForwardedSeq). Recorded BEFORE the sink so a sink that throws
+        // cannot leave the client claiming an event it never counted.
+        if (this.lastForwardedSeq === null || evt.seq > this.lastForwardedSeq) {
+          this.lastForwardedSeq = evt.seq;
+        }
         this.sink(evt);
       } else {
         LOGGER.log({ level: "error", agent_repl_session_id: this.opts.sessionId, claude_session_id: evt.sessionId, seq: evt.seq }, `merged event dropped: no sink bound`);
@@ -697,6 +911,10 @@ export class StoreClient {
     const reason = err ? "store subscription lost after a framing failure" : "store subscription closed";
     // The daemon's view goes stale without the tail; report honestly.
     this.degrade(reason, 0);
+    // ...and then recover it. A dropped tail is never re-opened by anyone
+    // else: the daemon only re-sends Subscribe when the daemon<->shim link
+    // itself bounces, which a store restart does not touch.
+    this.linkLost();
   }
 
   private onAck(ack: StoreWriteAck): void {
@@ -736,6 +954,10 @@ export class StoreClient {
     // Report the outage even if nothing was in flight: the subscription is
     // dead, so the daemon's view is now stale until the store returns.
     this.degrade(reason, 0);
+    // A write may never come — an idle session that lost its store link would
+    // sit degraded forever waiting for one — so recovery is driven by the link
+    // itself rather than by the next batch that happens to need it.
+    this.linkLost();
   }
 
   /** Loud-log each dropped event and report a DegradedState. */
@@ -857,6 +1079,10 @@ export class StoreClient {
   }
 
   private degrade(reason: string, droppedCount: number): void {
+    // Opens the window reportRecovered closes. Set on EVERY degrade, including
+    // a store-rejected batch: the daemon holds one fault row per component, so
+    // whatever opened it, the next genuine link recovery is what closes it.
+    this.linkDegraded = true;
     const report = create(DegradedStateSchema, {
       component: COMPONENT,
       reason,
@@ -892,4 +1118,15 @@ export class StoreClient {
 /** Best-effort event-kind label for drop logs (the payload oneof case). */
 function envelopeKind(evt: Event): string {
   return evt.payload.case ?? "unknown";
+}
+
+/** The message of a thrown value, whatever it was thrown as. */
+function errText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/** Double `delayMs` from `minMs` up to the `maxMs` ceiling. */
+function nextRelinkDelay(delayMs: number, minMs: number, maxMs: number): number {
+  if (delayMs <= 0) return minMs;
+  return Math.min(delayMs * 2, maxMs);
 }
