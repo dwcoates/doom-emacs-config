@@ -167,6 +167,65 @@ func TestPublishedEntriesSurviveANewQueueOverTheSameDir(t *testing.T) {
 	}
 }
 
+// THE RUN'S NAME IS DURABLE. A bounce mid-queue must interrupt the run the user
+// is watching rather than replace it, and the id is the only part of a run that
+// can be written down at all.
+func TestAPublishedEntryCarriesItsRunIDAcrossABounce(t *testing.T) {
+	// Arrange — a request whose run publisher is alive at publish time.
+	q, dir := newTestQueue(t)
+	req := testRequest("a")
+	run, err := NewRunStatus(&recordingSink{}, t.Logf, req.Workspace, testClock())
+	if err != nil {
+		t.Fatalf("NewRunStatus: %v", err)
+	}
+	req.Run = run
+	if _, err := q.Publish(context.Background(), testRepoKey, req); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+
+	// Act — the next daemon reads the same directory.
+	next, err := NewFileQueue(dir, t.Logf)
+	if err != nil {
+		t.Fatalf("NewFileQueue: %v", err)
+	}
+
+	// Assert.
+	got := next.Snapshot()[testRepoKey]
+	if len(got) != 1 {
+		t.Fatalf("snapshot = %+v, want 1 entry", got)
+	}
+	if got[0].RunID != run.RunID() {
+		t.Fatalf("replayed RunID = %q, want the admission's %q", got[0].RunID, run.RunID())
+	}
+}
+
+// A replayed entry carries NO publisher: a *RunStatus is bound to the process's
+// sink and clock, and one restored from disk would publish into a dead one.
+func TestAReplayedEntryCarriesNoRunPublisher(t *testing.T) {
+	// Arrange.
+	q, dir := newTestQueue(t)
+	req := testRequest("a")
+	run, err := NewRunStatus(&recordingSink{}, t.Logf, req.Workspace, testClock())
+	if err != nil {
+		t.Fatalf("NewRunStatus: %v", err)
+	}
+	req.Run = run
+	if _, err := q.Publish(context.Background(), testRepoKey, req); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+
+	// Act.
+	next, err := NewFileQueue(dir, t.Logf)
+	if err != nil {
+		t.Fatalf("NewFileQueue: %v", err)
+	}
+
+	// Assert.
+	if got := next.Snapshot()[testRepoKey][0].Run; got != nil {
+		t.Fatalf("replayed Run = %+v, want nil", got)
+	}
+}
+
 func TestSnapshotOmitsRepositoriesWithNoOutstandingEntries(t *testing.T) {
 	// Arrange.
 	q, _ := newTestQueue(t)

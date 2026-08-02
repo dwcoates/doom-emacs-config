@@ -279,10 +279,10 @@ func (c *QueueCoordinator) Enqueue(ctx context.Context, req Request) (Position, 
 
 	// THE RUN IS MINTED HERE, at the admission, and lives until this entry
 	// reaches a terminal outcome — so the `enqueued` phase a user watches and the
-	// `merged` that ends it carry ONE id. It rides the in-memory request through
-	// the queue and is deliberately absent from the durable entry, so a merge
-	// replayed by the next boot mints a new run: nothing about the dead process's
-	// progress is still true.
+	// `merged` that ends it carry ONE id. The publisher rides the in-memory
+	// request; its ID rides the DURABLE entry beside it, so a bounce mid-queue
+	// interrupts the run rather than replacing it with one the user never
+	// submitted.
 	run, err := NewRunStatus(c.status, c.logf, req.Workspace, c.now)
 	if err != nil {
 		c.logf("merge: enqueue run construction FAILED {repo=%s ws=%s name=%s}: %v", repo, req.Workspace, req.Name, err)
@@ -733,12 +733,13 @@ func (c *QueueCoordinator) runOne(repo string, req Request) bool {
 
 	// The run was minted at Enqueue and rides the in-memory request, so the
 	// `enqueued` phase a user already saw and everything that follows carry ONE
-	// id. An entry replayed from disk by a boot Drain has none — its run died
-	// with the process that was executing it — so this pop mints a fresh one,
-	// which is exactly right: it is a new attempt.
+	// id. An entry replayed from disk by a boot Drain has no PUBLISHER — that died
+	// with the process executing it — but it does carry the run's ID, so the
+	// publisher rebuilt here resumes the same run: a bounce interrupts a merge, it
+	// does not start a different one.
 	driven := req
 	if driven.Run == nil {
-		run, err := NewRunStatus(c.status, c.logf, req.Workspace, c.now)
+		run, err := c.rebuildRun(repo, req)
 		if err != nil {
 			c.logf("merge: run status construction FAILED {repo=%s ws=%s name=%s}: %v", repo, req.Workspace, req.Name, err)
 			c.failed(req, "merge run could not be published: "+err.Error())
@@ -748,7 +749,6 @@ func (c *QueueCoordinator) runOne(repo string, req Request) bool {
 		// identifies the head by struct equality, so the request the drain loop
 		// retires must be the one it received. The run rides a copy.
 		driven.Run = run
-		c.logf("merge: run MINTED for a replayed entry {repo=%s ws=%s name=%s run=%s}", repo, req.Workspace, req.Name, run.RunID())
 	}
 	c.logf("merge: run START {repo=%s ws=%s name=%s run=%s}", repo, req.Workspace, req.Name, driven.Run.RunID())
 
@@ -797,6 +797,32 @@ func (c *QueueCoordinator) runOne(repo string, req Request) bool {
 	}
 
 	return c.settle(repo, req, driven, park, release, res)
+}
+
+// rebuildRun makes a publisher for an entry the queue delivered without one:
+// a boot replay, whose RunStatus died with the process that admitted it.
+//
+// THE ID IS RESUMED WHENEVER THE ENTRY CARRIES ONE, which is every entry this
+// daemon's Enqueue wrote. An entry with no id is one written before the durable
+// record carried it; it is loud-logged and replayed under a fresh id, because a
+// run with no name at all is one no frontend can follow.
+func (c *QueueCoordinator) rebuildRun(repo string, req Request) (*RunStatus, error) {
+	if req.RunID == "" {
+		c.logf("merge: replayed entry carries NO run id {repo=%s ws=%s name=%s} — the run is renamed, so anything watching the admission loses track of it",
+			repo, req.Workspace, req.Name)
+		run, err := NewRunStatus(c.status, c.logf, req.Workspace, c.now)
+		if err != nil {
+			return nil, err
+		}
+		c.logf("merge: run MINTED for an unnamed replayed entry {repo=%s ws=%s name=%s run=%s}", repo, req.Workspace, req.Name, run.RunID())
+		return run, nil
+	}
+	run, err := ResumeRunStatus(c.status, c.logf, req.Workspace, c.now, req.RunID)
+	if err != nil {
+		return nil, err
+	}
+	c.logf("merge: run RESUMED for a replayed entry {repo=%s ws=%s name=%s run=%s}", repo, req.Workspace, req.Name, run.RunID())
+	return run, nil
 }
 
 // runBeforeAction resolves and delivers the workspace's before_ws_merge action,

@@ -19,9 +19,11 @@ import (
 // context every phase after the plan shares, so no call site has to reassemble
 // them and no two call sites can assemble them differently.
 //
-// A RUN, NOT A WORKSPACE. The id is minted when the repository's drain
-// goroutine pops the entry, so a retry after a failure and a boot replay are
-// each a DIFFERENT run. A frontend keying progress on the workspace alone would
+// A RUN, NOT A WORKSPACE. The id is minted when merge.Coordinator ADMITS the
+// request and lives until that entry reaches a terminal outcome — across a
+// daemon bounce included, because the queue entry carries the id and a boot
+// replay resumes it. A retry submitted after a failure is a different run and
+// gets a different id. A frontend keying progress on the workspace alone would
 // blend two attempts into one nonsensical commit count.
 
 // StatusSink receives every MergeStatus the pipeline publishes, together with
@@ -121,6 +123,26 @@ type RunStatus struct {
 // NewRunStatus mints a run and its publisher. now returns unix millis and is
 // injectable so a test can pin both timestamps.
 func NewRunStatus(sink StatusSink, logf dlog.Logf, workspace string, now func() int64) (*RunStatus, error) {
+	return newRunStatus(sink, logf, workspace, now, newRunID())
+}
+
+// ResumeRunStatus rebuilds the publisher for a run that ALREADY HAS AN IDENTITY:
+// the durable queue entry a boot replays carries the id its admission published
+// under, and the resumed run must keep publishing under it.
+//
+// ONLY THE NAME IS RESTORED, never the progress. The commit cursor and the phase
+// clock start clean, because the process that was advancing them is gone and its
+// figures describe work this one has not done. What the caller gets is a run a
+// frontend can still recognize, reporting what the resumed drain actually
+// observes.
+func ResumeRunStatus(sink StatusSink, logf dlog.Logf, workspace string, now func() int64, runID string) (*RunStatus, error) {
+	if runID == "" {
+		return nil, fmt.Errorf("merge: resuming a RunStatus needs the run id it was admitted under")
+	}
+	return newRunStatus(sink, logf, workspace, now, runID)
+}
+
+func newRunStatus(sink StatusSink, logf dlog.Logf, workspace string, now func() int64, runID string) (*RunStatus, error) {
 	switch {
 	case sink == nil:
 		return nil, fmt.Errorf("merge: RunStatus needs a StatusSink")
@@ -134,7 +156,7 @@ func NewRunStatus(sink StatusSink, logf dlog.Logf, workspace string, now func() 
 	return &RunStatus{
 		emit:      &statusEmitter{sink: sink, logf: logf},
 		logf:      logf,
-		runID:     newRunID(),
+		runID:     runID,
 		workspace: workspace,
 		now:       now,
 	}, nil

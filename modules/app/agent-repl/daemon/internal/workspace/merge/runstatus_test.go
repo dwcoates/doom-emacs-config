@@ -74,6 +74,39 @@ func TestTwoRunsGetDifferentIDs(t *testing.T) {
 	}
 }
 
+// A resumed run keeps the name it was admitted under: a boot replay continues
+// the merge the user submitted, and a fresh id would make it look abandoned.
+func TestResumeRunStatusKeepsTheAdmittedID(t *testing.T) {
+	// Arrange.
+	sink := &recordingSink{}
+
+	// Act.
+	run, err := ResumeRunStatus(sink, t.Logf, "/ws/a", testClock(), "run-admitted")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ResumeRunStatus: %v", err)
+	}
+	if got := run.RunID(); got != "run-admitted" {
+		t.Fatalf("RunID = %q, want the admitted run-admitted", got)
+	}
+}
+
+// The VIOLATION EDGE: resuming with no id is a caller that lost the very thing
+// the resume exists to carry, and minting one silently would rename the run.
+func TestResumeRunStatusRefusesAnEmptyID(t *testing.T) {
+	// Arrange.
+	sink := &recordingSink{}
+
+	// Act.
+	_, err := ResumeRunStatus(sink, t.Logf, "/ws/a", testClock(), "")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("ResumeRunStatus(\"\") error = nil, want the empty id refused")
+	}
+}
+
 // --- the two timestamps -------------------------------------------------
 
 // THE GUARANTEE: updated_at_ms is strictly increasing within a run, even when
