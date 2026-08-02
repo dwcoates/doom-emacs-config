@@ -75,7 +75,7 @@ func bootGeometryDaemon(t *testing.T) *geometryBoot {
 
 	forwarder := &server.PushForwarder{Logf: t.Logf}
 	shimListener := shimlisten.New(t.Logf)
-	if err := shimListener.Listen(filepath.Join(os.Getenv("HOME"), ".cache", "agent-repl", "sock", "daemon-shim.sock")); err != nil {
+	if err := shimListener.Listen(isolatedShimSocket(t, os.Getenv("HOME"))); err != nil {
 		t.Fatalf("listen for shims: %v", err)
 	}
 	if err := sessionlock.EnsureDir(); err != nil {

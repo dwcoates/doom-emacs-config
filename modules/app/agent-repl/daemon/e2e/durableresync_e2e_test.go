@@ -86,9 +86,7 @@ func newBouncedHarness(t *testing.T) *bouncedHarness {
 	// dialStoreProducer resolves the store socket as $HOME/store.sock, the
 	// same convention newUDSHarness establishes.
 	t.Setenv("HOME", sockDir)
-	if err := os.MkdirAll(filepath.Join(sockDir, ".cache", "agent-repl", "sock"), 0o700); err != nil {
-		t.Fatalf("make session socket dir: %v", err)
-	}
+	shimSock := isolatedShimSocket(t, sockDir)
 	startShimStore(t, storeBin, storeSock)
 
 	stateStore, err := statedb.Open(filepath.Join(t.TempDir(), "state.db"))
@@ -125,7 +123,6 @@ func newBouncedHarness(t *testing.T) *bouncedHarness {
 	}
 
 	forwarder := &server.PushForwarder{Logf: t.Logf}
-	shimSock := filepath.Join(sockDir, ".cache", "agent-repl", "sock", "daemon-shim.sock")
 	shimListener := shimlisten.New(t.Logf)
 	if err := shimListener.Listen(shimSock); err != nil {
 		t.Fatalf("listen for shims: %v", err)
