@@ -46,6 +46,7 @@ import (
 	"claude-repld/internal/shimlisten"
 	"claude-repld/internal/ssm"
 	"claude-repld/internal/statedb"
+	"claude-repld/internal/workspace/geometry"
 	"claude-repld/internal/workspace/merge"
 )
 
@@ -54,7 +55,12 @@ import (
 // mergeBoot is ONE boot of the daemon stack over a caller-owned state store
 // path. Two of them in sequence over the same path is a bounce.
 type mergeBoot struct {
-	ts        *httptest.Server
+	ts *httptest.Server
+	// geometry is this boot's handle on THE daemon's workspace -> merge-geometry
+	// map. It lives in the same durable state store the bounce reopens, so a
+	// record the first boot's test wrote is still the second boot's answer —
+	// which is what makes the resume after the bounce resolvable at all.
+	geometry  *geometry.Store
 	stop      func()
 	stopOnce  sync.Once
 	stateFile string
@@ -141,6 +147,10 @@ func bootMergeDaemon(t *testing.T, stateFile string) *mergeBoot {
 	if err != nil {
 		t.Fatalf("build merge lease: %v", err)
 	}
+	geometryStore, err := geometry.Open(stateStore, t.Logf)
+	if err != nil {
+		t.Fatalf("open geometry: %v", err)
+	}
 	agentShim, err := server.WireAgentShim(server.AgentShimConfig{
 		Resumes:           &server.ConversationResolver{Reg: reg, Logf: t.Logf},
 		SSM:               ssmMgr,
@@ -155,6 +165,7 @@ func bootMergeDaemon(t *testing.T, stateFile string) *mergeBoot {
 		WorkspaceCreation: newEmptyWorkspaceCreation(),
 		MergeLease:        mergeLease,
 		MergeQueue:        mergeQueue,
+		MergeGeometry:     geometryStore,
 		Logf:              t.Logf,
 		LogVerbosef:       t.Logf,
 	})
@@ -179,7 +190,7 @@ func bootMergeDaemon(t *testing.T, stateFile string) *mergeBoot {
 	mux.HandleFunc("/frontend", agentShim.Server.ServeWS)
 	ts := httptest.NewServer(mux)
 
-	boot := &mergeBoot{ts: ts, stateFile: stateFile}
+	boot := &mergeBoot{ts: ts, geometry: geometryStore, stateFile: stateFile}
 	// Teardown in reverse construction order: stop accepting, then release the
 	// listeners, then close the state store LAST so nothing writes to a closed
 	// database on its way down.
@@ -259,8 +270,8 @@ func TestE2EAQueuedMergeSurvivesADaemonBounce(t *testing.T) {
 	first := bootMergeDaemon(t, stateFile)
 	firstConn := first.dialFrontend(t)
 	w1 := newMergeWatch(t, firstConn)
-	parkedCmd := parkTheQueueHead(t, w1, repo, parkedDir, "feature-parked", "r-merge-parked")
-	sendMerge(t, firstConn, "r-merge-queued", mergeCmdFor(repo, queuedDir, "feature-queued"))
+	parkedCmd := parkTheQueueHead(t, first.geometry, w1, repo, parkedDir, "feature-parked", "r-merge-parked")
+	sendMerge(t, firstConn, "r-merge-queued", mergeCmdFor(t, first.geometry, repo, queuedDir, "feature-queued"))
 	w1.awaitOKAck("r-merge-queued")
 	assertQueuePosition(t, w1.awaitPhase(queuedDir, phaseMergeQueued), 2, 2)
 

@@ -169,7 +169,7 @@ func TestDispatchRoutesEachCommand(t *testing.T) {
 		},
 		{
 			name:    "merge workspace",
-			cmd:     &frontendv1.FrontendCommand{RequestId: "r4", Command: &frontendv1.FrontendCommand_MergeWorkspace{MergeWorkspace: &frontendv1.MergeWorkspaceCmd{Handler: "cherry-pick"}}},
+			cmd:     &frontendv1.FrontendCommand{RequestId: "r4", Command: &frontendv1.FrontendCommand_MergeWorkspace{MergeWorkspace: &frontendv1.MergeWorkspaceCmd{}}},
 			wantHit: "merge_workspace",
 		},
 		{

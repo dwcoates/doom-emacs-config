@@ -1040,13 +1040,21 @@ message PermissionAnswerCmd {
 }
 
 message MergeWorkspaceCmd {
-  string handler = 1;  // e.g. "cherry-pick"
+  // 1 was handler (string, e.g. "cherry-pick"), 3/4/5 were the caller-stated
+  // merge geometry (source_branch, source_dir, target_dir): RETIRED.
+  //
+  // THE DAEMON OWNS THE GEOMETRY MAP (internal/workspace/geometry). It records
+  // a workspace's source branch, source worktree and merge target when it
+  // CREATES the workspace, and derives them at boot for pre-cutover ones, so a
+  // merge command has nothing left to state. Emacs already sends a bare
+  // request keyed by workspace; the caller-stated path was the second owner of
+  // one map, which is how a cherry-pick reached a target the daemon had never
+  // heard of. `handler` went the same way: there has only ever been one merge
+  // handler, and a field naming it invited a caller to select a mechanism the
+  // daemon does not dispatch on.
+  reserved 1, 3, 4, 5;
+  reserved "handler", "source_branch", "source_dir", "target_dir";
   bool conflict_resolved_continue = 2;  // the resolve-and-continue handoff
-  // Additive (S6): the daemon has no workspace→worktree mapping of its own,
-  // so the frontend supplies the merge geometry with the command.
-  string source_branch = 3;
-  string source_dir = 4;
-  string target_dir = 5;
   // Additive: the workspace's DISPLAY name, for the `merge/<name>` completion
   // tag and the daemon's merge logs.
   //
