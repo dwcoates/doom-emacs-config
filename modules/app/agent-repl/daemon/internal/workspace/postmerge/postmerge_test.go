@@ -247,8 +247,8 @@ func TestMainWorktreeTargetSendsNoPhoneHome(t *testing.T) {
 }
 
 func TestMainWorktreeTargetNeverLooksUpAPostprocessingPrompt(t *testing.T) {
-	// Arrange — the trunk is nobody's session, so there is no parent to run a
-	// postprocessing task in either.
+	// Arrange — the trunk is nobody's session, so the handoff stops before it
+	// would reach any creation record at all.
 	req := childRequest()
 	req.TargetDir = trunkDir
 	h := newHarness(t, harnessOpts{probe: &fakeProbe{linked: map[string]bool{}}})
@@ -395,8 +395,8 @@ func TestPhoneHomeSubmitFailureIsSurfaced(t *testing.T) {
 	}
 }
 
-func TestPhoneHomeFailureStopsThePostprocessingPrompt(t *testing.T) {
-	// Arrange — a refused phone-home plus a postprocessing prompt waiting.
+func TestPhoneHomeFailureIsTheOnlySubmissionAttempted(t *testing.T) {
+	// Arrange — a refused phone-home plus a postprocessing prompt on record.
 	parents := newFakeParents(parentWS)
 	parents.errs = []error{errors.New("session refused")}
 	h := newHarness(t, harnessOpts{
@@ -416,9 +416,16 @@ func TestPhoneHomeFailureStopsThePostprocessingPrompt(t *testing.T) {
 }
 
 // --- the postprocessing prompt ------------------------------------------
+//
+// The prompt is RESOLVED here and DELIVERED elsewhere. It is the merge run's
+// after-action -- a turn in the MERGED WORKSPACE'S OWN session, run under the
+// merge lease while the run publishes `merge_after_action` -- so this notifier
+// reports it (AfterAction) and the parent handoff never submits it. Delivering
+// it from both places ran one user-requested task twice per merge into a linked
+// worktree.
 
-func TestPostprocessingPromptIsDeliveredAfterThePhoneHome(t *testing.T) {
-	// Arrange — the merged child was created with a postprocessing prompt.
+func TestAfterMergedNeverDeliversThePostprocessingPrompt(t *testing.T) {
+	// Arrange -- the merged child was created with a postprocessing prompt.
 	h := newHarness(t, harnessOpts{
 		postprocessing: &fakePostprocessing{prompts: map[string]string{childWS: "run the release checklist"}},
 	})
@@ -426,34 +433,46 @@ func TestPostprocessingPromptIsDeliveredAfterThePhoneHome(t *testing.T) {
 	// Act.
 	err := h.notifier.AfterMerged(context.Background(), childRequest())
 
-	// Assert — two prompts, in order, both on the parent.
+	// Assert -- the phone-home alone; the task itself ran in the child.
 	if err != nil {
 		t.Fatalf("AfterMerged() error = %v", err)
 	}
 	got := h.parents.submissions()
-	if len(got) != 2 {
-		t.Fatalf("submissions = %v, want the phone-home then the postprocessing prompt", got)
+	if len(got) != 1 {
+		t.Fatalf("submissions = %v, want ONLY the phone-home: the postprocessing task is the merge run's after-action and already ran in the child's own session", got)
 	}
 	if !strings.Contains(got[0].text, "MERGED into the worktree") {
-		t.Fatalf("first submission = %q, want the phone-home first", got[0].text)
-	}
-	if !strings.Contains(got[1].text, "run the release checklist") {
-		t.Fatalf("second submission = %q, want the postprocessing prompt second", got[1].text)
-	}
-	if got[1].workspace != parentWS {
-		t.Fatalf("postprocessing workspace = %q, want the parent %q", got[1].workspace, parentWS)
+		t.Fatalf("submission = %q, want the phone-home", got[0].text)
 	}
 }
 
-func TestPostprocessingPromptIsLookedUpByTheChildsWorktree(t *testing.T) {
-	// Arrange — the record is keyed by the MERGED workspace's own worktree.
+func TestAfterActionReportsTheRecordedPostprocessingPrompt(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, harnessOpts{
+		postprocessing: &fakePostprocessing{prompts: map[string]string{childWS: "run the release checklist"}},
+	})
+
+	// Act.
+	got, err := h.notifier.AfterAction(childRequest())
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("AfterAction() error = %v", err)
+	}
+	if got != "run the release checklist" {
+		t.Fatalf("AfterAction() = %q, want the recorded prompt", got)
+	}
+}
+
+func TestAfterActionIsLookedUpByTheChildsWorktree(t *testing.T) {
+	// Arrange -- the record is keyed by the MERGED workspace's own worktree.
 	h := newHarness(t, harnessOpts{
 		postprocessing: &fakePostprocessing{prompts: map[string]string{childWS: "tidy up"}},
 	})
 
 	// Act.
-	if err := h.notifier.AfterMerged(context.Background(), childRequest()); err != nil {
-		t.Fatalf("AfterMerged() error = %v", err)
+	if _, err := h.notifier.AfterAction(childRequest()); err != nil {
+		t.Fatalf("AfterAction() error = %v", err)
 	}
 
 	// Assert.
@@ -462,82 +481,35 @@ func TestPostprocessingPromptIsLookedUpByTheChildsWorktree(t *testing.T) {
 	}
 }
 
-func TestAbsentPostprocessingPromptSendsNothingExtra(t *testing.T) {
-	// Arrange — the ordinary case: a workspace created without one.
+func TestAfterActionReportsNoneForAWorkspaceCreatedWithoutOne(t *testing.T) {
+	// Arrange -- the ordinary case.
 	h := newHarness(t, harnessOpts{postprocessing: &fakePostprocessing{}})
 
 	// Act.
-	err := h.notifier.AfterMerged(context.Background(), childRequest())
+	got, err := h.notifier.AfterAction(childRequest())
 
 	// Assert.
 	if err != nil {
-		t.Fatalf("AfterMerged() error = %v", err)
+		t.Fatalf("AfterAction() error = %v", err)
 	}
-	if got := h.parents.submissions(); len(got) != 1 {
-		t.Fatalf("submissions = %v, want only the phone-home", got)
-	}
-	if !h.logged("no postprocessing prompt recorded") {
-		t.Fatalf("logs = %v, want the absence recorded", h.logs)
+	if got != "" {
+		t.Fatalf("AfterAction() = %q, want none", got)
 	}
 }
 
-func TestPostprocessingLookupFailureIsSurfaced(t *testing.T) {
-	// Arrange — the creation records could not be read.
+func TestAfterActionLookupFailureIsSurfaced(t *testing.T) {
+	// Arrange -- the creation records could not be read.
 	boom := errors.New("store unreadable")
 	h := newHarness(t, harnessOpts{postprocessing: &fakePostprocessing{err: boom}})
 
 	// Act.
-	err := h.notifier.AfterMerged(context.Background(), childRequest())
+	_, err := h.notifier.AfterAction(childRequest())
 
-	// Assert — surfaced, and never collapsed into "there was none".
+	// Assert -- surfaced, and never collapsed into "there was none".
 	if !errors.Is(err, boom) {
-		t.Fatalf("AfterMerged() error = %v, want the lookup failure surfaced", err)
+		t.Fatalf("AfterAction() error = %v, want the lookup failure surfaced", err)
 	}
-	if !h.logged("postprocessing lookup FAILED") {
+	if !h.logged("after-action prompt lookup FAILED") {
 		t.Fatalf("logs = %v, want the lookup failure recorded", h.logs)
-	}
-}
-
-func TestPostprocessingSubmitFailureIsSurfaced(t *testing.T) {
-	// Arrange — the phone-home lands, the postprocessing prompt is refused.
-	parents := newFakeParents(parentWS)
-	boom := errors.New("session refused")
-	parents.errs = []error{nil, boom}
-	h := newHarness(t, harnessOpts{
-		parents:        parents,
-		postprocessing: &fakePostprocessing{prompts: map[string]string{childWS: "tidy up"}},
-	})
-
-	// Act.
-	err := h.notifier.AfterMerged(context.Background(), childRequest())
-
-	// Assert.
-	if !errors.Is(err, boom) {
-		t.Fatalf("AfterMerged() error = %v, want the submit failure surfaced", err)
-	}
-	if !h.logged("postprocessing submit FAILED") {
-		t.Fatalf("logs = %v, want the submit failure recorded", h.logs)
-	}
-}
-
-func TestPostprocessingPromptCarriesItsProvenance(t *testing.T) {
-	// Arrange — the parent never asked for this turn, so the task must say
-	// which child caused it.
-	h := newHarness(t, harnessOpts{
-		postprocessing: &fakePostprocessing{prompts: map[string]string{childWS: "tidy up"}},
-	})
-
-	// Act.
-	if err := h.notifier.AfterMerged(context.Background(), childRequest()); err != nil {
-		t.Fatalf("AfterMerged() error = %v", err)
-	}
-
-	// Assert.
-	got := h.parents.submissions()
-	if len(got) != 2 {
-		t.Fatalf("submissions = %v, want two", got)
-	}
-	if !strings.Contains(got[1].text, childName) {
-		t.Fatalf("postprocessing text = %q, want it to name the child %q", got[1].text, childName)
 	}
 }

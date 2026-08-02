@@ -103,6 +103,12 @@ type CoordinatorConfig struct {
 	// BeforeActionRunner delivers that action to the workspace's own session.
 	// Required for the same reason.
 	BeforeActionRunner BeforeActionRunner
+	// AfterActionRunner delivers the workspace's postprocessing action to that
+	// same session once every commit has landed. Required: without it a
+	// workspace created with a postprocessing prompt merges and the prompt is
+	// never run at all, which is indistinguishable from it having run and done
+	// nothing.
+	AfterActionRunner AfterActionRunner
 	// Now returns unix millis for the phase timestamps. Nil uses the wall clock;
 	// a test injects one so both stamps are pinned.
 	Now func() int64
@@ -134,6 +140,7 @@ type QueueCoordinator struct {
 	deaths         SessionDeaths
 	beforeActions  BeforeActionSource
 	beforeActionFn BeforeActionRunner
+	afterActionFn  AfterActionRunner
 	now            func() int64
 
 	// ctx bounds every DRIVEN merge, and is deliberately not the caller's
@@ -229,6 +236,8 @@ func NewCoordinator(cfg CoordinatorConfig) (*QueueCoordinator, error) {
 		return nil, fmt.Errorf("merge: Coordinator BeforeActions source is required")
 	case cfg.BeforeActionRunner == nil:
 		return nil, fmt.Errorf("merge: Coordinator BeforeActionRunner is required")
+	case cfg.AfterActionRunner == nil:
+		return nil, fmt.Errorf("merge: Coordinator AfterActionRunner is required")
 	}
 	now := cfg.Now
 	if now == nil {
@@ -252,6 +261,7 @@ func NewCoordinator(cfg CoordinatorConfig) (*QueueCoordinator, error) {
 		deaths:         cfg.Deaths,
 		beforeActions:  cfg.BeforeActions,
 		beforeActionFn: cfg.BeforeActionRunner,
+		afterActionFn:  cfg.AfterActionRunner,
 		now:            now,
 
 		ctx:      ctx,
@@ -605,6 +615,97 @@ func (c *QueueCoordinator) finish(repo string, req Request, release func()) bool
 	return true
 }
 
+// completeMergedRun runs the workspace's after-action and publishes the run's
+// ONE terminal `merged` status, carrying whatever the action did.
+//
+// IT RUNS UNDER THE LEASE, BEFORE THE QUEUE ENTRY IS RETIRED, and that is the
+// whole ordering: the after-action is a turn in the MERGED WORKSPACE'S OWN
+// session, admissible only on the prompt path the merge lease holds open. The
+// parent handoff that follows is the opposite — it prompts ANOTHER workspace's
+// session and therefore must wait until the lease is gone (finishTerminal).
+//
+// THE AFTER-ACTION CANNOT FAIL THE RUN. Every commit is on the target before the
+// action starts, and reporting `failed` because a courtesy turn did not land
+// would deny a merge that demonstrably happened. Its error rides on the terminal
+// merged status as after_action_error, which is why the status is published from
+// HERE and not from merge.Driver: publishing it as the last commit landed put
+// the run's terminal word on the wire before the after_action phase existed.
+//
+// It returns the after-action's failure text so the post-merge hook's own
+// republication can carry it too: the merged FACT is set-once, but a hook that
+// fails later must not drop the action's error off the status while adding its
+// own.
+func (c *QueueCoordinator) completeMergedRun(repo string, req Request, res Result) string {
+	afterActionErr := c.runAfterAction(repo, req)
+	cause := "cherry-pick landed on target"
+	if res.AlreadyIncorporated {
+		cause = "range already incorporated (no-op merge)"
+	}
+	if err := req.Run.Merged(afterActionErr, cause); err != nil {
+		c.logf("merge: terminal merged status FAILED {repo=%s ws=%s run=%s}: %v — the merge STANDS (the commits are on the target); only its final status did not publish",
+			repo, req.Workspace, req.Run.RunID(), err)
+	}
+	return afterActionErr
+}
+
+// runAfterAction resolves, publishes and DELIVERS the workspace's postprocessing
+// action, and reports its failure as the text the terminal status carries ("" when
+// there was nothing to do or the turn ended cleanly).
+//
+// A WORKSPACE WITH NO ACTION IS THE COMMON CASE and publishes no phase at all:
+// an empty after_action arm would tell every frontend the run was executing a
+// turn that does not exist. A lookup FAILURE still publishes the phase — the
+// action may well be configured and the daemon merely unable to read it, so
+// suppressing it there would downgrade a broken read to "this workspace has
+// none" — and the read failure is carried onto the merged status rather than
+// swallowed.
+func (c *QueueCoordinator) runAfterAction(repo string, req Request) string {
+	prompt, err := c.postMerge.AfterAction(req)
+	if err != nil {
+		c.logf("merge: after-action prompt lookup FAILED {repo=%s ws=%s name=%s run=%s}: %v — the phase is published without its text; the merge STANDS",
+			repo, req.Workspace, req.Name, req.Run.RunID(), err)
+		// Published without text rather than with invented text.
+		c.publishAfterActionPhase(repo, req, "")
+		return "the workspace's after-merge action could not be read: " + err.Error()
+	}
+	if prompt == "" {
+		c.logf("merge: no after-action recorded {repo=%s ws=%s name=%s run=%s} — no after_action phase is published",
+			repo, req.Workspace, req.Name, req.Run.RunID())
+		return ""
+	}
+
+	act := AfterAction{
+		Workspace: req.Workspace,
+		RequestID: newAfterActionRequestID(),
+		Prompt:    prompt,
+	}
+	if err := act.validate(); err != nil {
+		c.logf("merge: after-action NOT HANDED to the shim {repo=%s ws=%s name=%s}: %v — the merge STANDS", repo, req.Workspace, req.Name, err)
+		c.publishAfterActionPhase(repo, req, prompt)
+		return "the workspace's after-merge action is not deliverable: " + err.Error()
+	}
+	c.publishAfterActionPhase(repo, req, prompt)
+
+	c.logf("merge: after-action HANDED TO THE SHIM {repo=%s ws=%s name=%s run=%s request_id=%s}",
+		repo, req.Workspace, req.Name, req.Run.RunID(), act.RequestID)
+	if err := c.afterActionFn.Run(c.ctx, act); err != nil {
+		c.logf("merge: after-action FAILED {repo=%s ws=%s name=%s run=%s request_id=%s}: %v — the merge STANDS (the commits are on the target); the failure rides on the terminal merged status",
+			repo, req.Workspace, req.Name, req.Run.RunID(), act.RequestID, err)
+		return "the workspace's after-merge action did not complete: " + err.Error()
+	}
+	c.logf("merge: after-action TURN COMPLETE {repo=%s ws=%s name=%s run=%s request_id=%s}",
+		repo, req.Workspace, req.Name, req.Run.RunID(), act.RequestID)
+	return ""
+}
+
+// publishAfterActionPhase puts the after_action arm on the wire. A publication
+// failure is loud-logged and never fatal: the commits are already on the target.
+func (c *QueueCoordinator) publishAfterActionPhase(repo string, req Request, prompt string) {
+	if err := req.Run.AfterAction(prompt, "running the workspace's after-merge action"); err != nil {
+		c.logf("merge: after-action status FAILED {repo=%s ws=%s run=%s}: %v", repo, req.Workspace, req.Run.RunID(), err)
+	}
+}
+
 // finishTerminal retires a merge that reached a terminal OUTCOME and fires the
 // post-merge hook when that outcome is `merged`.
 //
@@ -616,7 +717,7 @@ func (c *QueueCoordinator) finish(repo string, req Request, release func()) bool
 // A merge whose queue entry could NOT be dropped does not fire the hook. That
 // entry is replayed by the next boot's Drain, so notifying now would phone the
 // parent home twice for one child.
-func (c *QueueCoordinator) finishTerminal(repo string, req, driven Request, release func(), outcome Outcome) bool {
+func (c *QueueCoordinator) finishTerminal(repo string, req, driven Request, release func(), outcome Outcome, afterActionErr string) bool {
 	ok := c.finish(repo, req, release)
 	if outcome != OutcomeMerged {
 		return ok
@@ -626,7 +727,7 @@ func (c *QueueCoordinator) finishTerminal(repo string, req, driven Request, rele
 			repo, req.Workspace, req.Name)
 		return ok
 	}
-	c.fireAfterAction(repo, driven)
+	c.firePostMerge(repo, driven, afterActionErr)
 	return ok
 }
 
@@ -638,63 +739,39 @@ func (c *QueueCoordinator) finishTerminal(repo string, req, driven Request, rele
 // — a queue stalled by a nicety. The goroutine is tracked on c.wg and bounded
 // by c.ctx, so Close still waits for a hook that honors cancellation rather
 // than leaking it.
-func (c *QueueCoordinator) fireAfterAction(repo string, req Request) {
+func (c *QueueCoordinator) firePostMerge(repo string, req Request, afterActionErr string) {
 	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
-		c.publishAfterAction(repo, req)
+		c.publishPostMerge(repo, req, afterActionErr)
 	}()
 }
 
-// publishAfterAction runs the after-action and publishes the run's TERMINAL
-// merged status.
+// publishPostMerge runs the child-to-parent handoff and republishes the terminal
+// merged status when it fails.
 //
-// THE AFTER-ACTION CANNOT FAIL THE RUN. The commits are on the target the moment
-// the driver said `merged`, and reporting `failed` because a courtesy prompt did
-// not land would make the pushed status lie about the tree. Its error is carried
-// on the terminal merged status instead (after_action_error) and retained as a
-// merge.PostMergeFailure, so it is visible without being fatal.
-func (c *QueueCoordinator) publishAfterAction(repo string, req Request) {
-	prompt, err := c.postMerge.AfterAction(req)
-	// THE PHASE IS PUBLISHED IFF THERE IS AN ACTION, which is the same rule the
-	// before-action follows. A workspace created with no postprocessing prompt
-	// has no after-action phase to be in, and publishing an empty one would tell
-	// every frontend the run was running a turn that does not exist.
-	//
-	// A lookup FAILURE still publishes. The action may well be configured — the
-	// daemon just could not read it — so suppressing the phase there would
-	// silently downgrade a broken read to "this workspace has none".
-	publish := err != nil || prompt != ""
-	switch {
-	case err != nil:
-		// The hook still runs: it also carries the child-to-parent phone-home,
-		// which does not depend on the prompt. The phase goes out without prompt
-		// text rather than with invented text.
-		c.logf("merge: after-action prompt lookup FAILED {repo=%s ws=%s name=%s run=%s}: %v — the phase is published without its text; the merge STANDS",
-			repo, req.Workspace, req.Name, req.Run.RunID(), err)
-	case prompt == "":
-		c.logf("merge: no after-action recorded {repo=%s ws=%s name=%s run=%s} — no after_action phase is published",
-			repo, req.Workspace, req.Name, req.Run.RunID())
-	}
-	if publish {
-		if err := req.Run.AfterAction(prompt, "running the workspace's after-merge action"); err != nil {
-			c.logf("merge: after-action status FAILED {repo=%s ws=%s run=%s}: %v", repo, req.Workspace, req.Run.RunID(), err)
-		}
-	}
-
+// THE HOOK CANNOT FAIL THE RUN either: the commits are on the target, and
+// recording a merge as failed because its notification did not land would make
+// the pushed state lie about the tree. Its error is retained as a
+// merge.PostMergeFailure and carried onto the merged status BESIDE the
+// after-action's, never instead of it.
+func (c *QueueCoordinator) publishPostMerge(repo string, req Request, afterActionErr string) {
 	c.logf("merge: post-merge hook RUNNING {repo=%s ws=%s name=%s run=%s target=%s}", repo, req.Workspace, req.Name, req.Run.RunID(), req.TargetDir)
-	afterErr := c.postMerge.AfterMerged(c.ctx, req)
-	if afterErr != nil {
-		c.recordPostMergeFailure(repo, req, afterErr)
-	} else {
+	hookErr := c.postMerge.AfterMerged(c.ctx, req)
+	if hookErr == nil {
 		c.logf("merge: post-merge hook COMPLETE {repo=%s ws=%s name=%s run=%s}", repo, req.Workspace, req.Name, req.Run.RunID())
+		return
 	}
+	c.recordPostMergeFailure(repo, req, hookErr)
 
-	var afterActionErr string
-	if afterErr != nil {
-		afterActionErr = afterErr.Error()
+	// The merged FACT is set-once and does not move; only the error text on it
+	// grows. Replacing afterActionErr instead of joining it would drop the
+	// action's failure off the very status a frontend reads it from.
+	combined := hookErr.Error()
+	if afterActionErr != "" {
+		combined = afterActionErr + "; " + combined
 	}
-	if err := req.Run.Merged(afterActionErr, "the merge landed"); err != nil {
+	if err := req.Run.Merged(combined, "the merge landed"); err != nil {
 		c.logf("merge: terminal merged status FAILED {repo=%s ws=%s run=%s}: %v — the merge STANDS (the commits are on the target); only its final status did not publish",
 			repo, req.Workspace, req.Run.RunID(), err)
 	}
@@ -970,7 +1047,14 @@ func (c *QueueCoordinator) settle(repo string, req, driven Request, park *confli
 			res = next
 		default:
 			c.logf("merge: terminal {repo=%s ws=%s name=%s run=%s outcome=%s}", repo, req.Workspace, req.Name, driven.Run.RunID(), res.Outcome)
-			return c.finishTerminal(repo, req, driven, release, res.Outcome)
+			// THE AFTER-ACTION RUNS BEFORE THE MERGE IS RETIRED, because it is a
+			// turn in this workspace's own session and the lease that admits it is
+			// still held here. finishTerminal releases that lease.
+			var afterActionErr string
+			if res.Outcome == OutcomeMerged {
+				afterActionErr = c.completeMergedRun(repo, driven, res)
+			}
+			return c.finishTerminal(repo, req, driven, release, res.Outcome, afterActionErr)
 		}
 	}
 }

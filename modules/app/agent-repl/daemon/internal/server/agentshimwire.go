@@ -251,6 +251,17 @@ func (r mergeBeforeActionRunner) Run(ctx context.Context, act merge.BeforeAction
 
 var _ merge.BeforeActionRunner = mergeBeforeActionRunner{}
 
+// mergeAfterActionRunner adapts the PromptRouter to merge.AfterActionRunner. It
+// is derived from Prompts for the reason every other merge-driven prompt is: the
+// action is admissible only against the session the merge lease was taken over.
+type mergeAfterActionRunner struct{ prompts PromptRouter }
+
+func (r mergeAfterActionRunner) Run(ctx context.Context, act merge.AfterAction) error {
+	return r.prompts.RunMergeAfterAction(ctx, act)
+}
+
+var _ merge.AfterActionRunner = mergeAfterActionRunner{}
+
 // MergeBeforeActionSource resolves the before_ws_merge action a workspace was
 // CREATED with, keyed by that workspace's worktree path.
 //
@@ -430,6 +441,7 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 		// prompt comes out of.
 		BeforeActions:      mergeBeforeActions{creation: beforeActions},
 		BeforeActionRunner: mergeBeforeActionRunner{prompts: cfg.Prompts},
+		AfterActionRunner:  mergeAfterActionRunner{prompts: cfg.Prompts},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("server: build merge coordinator: %w", err)

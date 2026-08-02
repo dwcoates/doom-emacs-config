@@ -363,27 +363,155 @@ func TestARunWithNoAfterActionConfiguredPublishesNoAfterActionPhase(t *testing.T
 	}
 }
 
+// THE ACTION IS DELIVERED to the merged workspace's OWN session, carrying the
+// recorded prompt verbatim -- the same session, the same lease and the same
+// turn-boundary wait the before-action uses.
+func TestAConfiguredAfterActionIsDeliveredToTheWorkspacesSession(t *testing.T) {
+	// Arrange.
+	delivered := make(chan AfterAction, 1)
+	h := newHarnessWith(t, harnessOpts{afterRunner: &fakeAfterActionRunner{done: delivered}})
+	if _, err := h.coord.Enqueue(context.Background(), testRequest("a")); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	<-h.picker.merges
+
+	// Act.
+	h.picker.results <- pickResult{res: Result{Outcome: OutcomeMerged}}
+
+	// Assert.
+	act := <-delivered
+	if act.Workspace != "/ws/a" || act.Prompt != testAfterActionPrompt {
+		t.Fatalf("delivered %+v, want the recorded prompt against the merged workspace", act)
+	}
+}
+
+// A WORKSPACE WITH NO AFTER-ACTION HANDS ITS SESSION NOTHING. The phase is
+// suppressed (above) and so is the turn: a run that submitted an empty prompt
+// would take the user's session for a turn that says nothing.
+func TestARunWithNoAfterActionConfiguredDeliversNothing(t *testing.T) {
+	// Arrange.
+	h := newHarnessWith(t, harnessOpts{postMerge: unconfiguredPostMergeHook{inner: newAutoPostMergeHook(4)}})
+	if _, err := h.coord.Enqueue(context.Background(), testRequest("a")); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	<-h.picker.merges
+
+	// Act.
+	h.picker.results <- pickResult{res: Result{Outcome: OutcomeMerged}}
+
+	// Assert.
+	waitForPhase(t, h, PhaseMerged)
+	if got := h.afterRunner.calls(); len(got) != 0 {
+		t.Fatalf("delivered %v for a workspace created with no after-action", got)
+	}
+}
+
 // THE FAILURE EDGE, and the load-bearing one: a failed after-action does NOT
 // fail the run. The commits are on the target either way, and reporting
 // merge_failed would make the pushed status lie about the tree.
 func TestAFailedAfterActionStillEndsTheRunMerged(t *testing.T) {
+	// Arrange -- the action's turn ends in error.
+	h := newHarnessWith(t, harnessOpts{
+		afterRunner: &fakeAfterActionRunner{err: sentinelError("the turn ENDED IN ERROR")},
+	})
+	if _, err := h.coord.Enqueue(context.Background(), testRequest("a")); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	<-h.picker.merges
+
+	// Act.
+	h.picker.results <- pickResult{res: Result{Outcome: OutcomeMerged}}
+
+	// Assert -- merged, not failed.
+	waitForPhase(t, h, PhaseMerged)
+}
+
+// AND ITS ERROR RIDES ON THAT TERMINAL STATUS. A swallowed after-action failure
+// is a nudge the user asked for that never fired, with nothing anywhere saying
+// so -- which is why the error is on the FIRST merged a frontend sees rather
+// than on a later republication nothing is still reading.
+func TestAFailedAfterActionsErrorRidesOnTheMergedStatus(t *testing.T) {
 	// Arrange.
+	h := newHarnessWith(t, harnessOpts{
+		afterRunner: &fakeAfterActionRunner{err: sentinelError("the turn ENDED IN ERROR")},
+	})
+	if _, err := h.coord.Enqueue(context.Background(), testRequest("a")); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	<-h.picker.merges
+
+	// Act.
+	h.picker.results <- pickResult{res: Result{Outcome: OutcomeMerged}}
+	waitForPhase(t, h, PhaseMerged)
+
+	// Assert.
+	status := lastStatusOfPhase(t, h, func(s *frontendv1.MergeStatus) bool { return s.GetMerged() != nil })
+	if got := status.GetMerged().GetAfterActionError(); !strings.Contains(got, "ENDED IN ERROR") {
+		t.Fatalf("after_action_error = %q, want the action's failure carried on the merged status", got)
+	}
+}
+
+// AN UNREADABLE AFTER-ACTION RECORD IS NOT "THERE IS NONE": the phase is still
+// published (the action may well be configured) and the read failure reaches
+// the merged status rather than being swallowed.
+func TestAnUnreadableAfterActionRecordReachesTheMergedStatus(t *testing.T) {
+	// Arrange.
+	h := newHarnessWith(t, harnessOpts{postMerge: unreadableAfterActionHook{inner: newAutoPostMergeHook(4)}})
+	if _, err := h.coord.Enqueue(context.Background(), testRequest("a")); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	<-h.picker.merges
+
+	// Act.
+	h.picker.results <- pickResult{res: Result{Outcome: OutcomeMerged}}
+	waitForPhase(t, h, PhaseMerged)
+
+	// Assert.
+	status := lastStatusOfPhase(t, h, func(s *frontendv1.MergeStatus) bool { return s.GetMerged() != nil })
+	if got := status.GetMerged().GetAfterActionError(); !strings.Contains(got, "records unreadable") {
+		t.Fatalf("after_action_error = %q, want the lookup failure carried on the merged status", got)
+	}
+}
+
+// unreadableAfterActionHook models creation records that cannot be read at all.
+type unreadableAfterActionHook struct{ inner *autoPostMergeHook }
+
+func (h unreadableAfterActionHook) AfterAction(Request) (string, error) {
+	return "", sentinelError("records unreadable")
+}
+
+func (h unreadableAfterActionHook) AfterMerged(ctx context.Context, req Request) error {
+	return h.inner.AfterMerged(ctx, req)
+}
+
+// THE PARENT HANDOFF'S OWN FAILURE republishes the terminal status BESIDE the
+// after-action's error rather than instead of it: the merged fact is set-once,
+// but a frontend must not lose one failure to gain the other.
+func TestAFailedPostMergeHandoffJoinsTheAfterActionErrorOnTheMergedStatus(t *testing.T) {
+	// Arrange -- both the action's turn and the parent handoff fail.
 	hook := newFakePostMergeHook(4)
-	h := newHarnessWith(t, harnessOpts{postMerge: hook})
+	h := newHarnessWith(t, harnessOpts{
+		postMerge:   hook,
+		afterRunner: &fakeAfterActionRunner{err: sentinelError("the turn ENDED IN ERROR")},
+	})
 	if _, err := h.coord.Enqueue(context.Background(), testRequest("a")); err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}
 	<-h.picker.merges
 	h.picker.results <- pickResult{res: Result{Outcome: OutcomeMerged}}
+	waitForPhase(t, h, PhaseMerged)
 	<-hook.calls
 
-	// Act — the handoff refuses.
+	// Act -- the handoff refuses.
 	hook.results <- sentinelError("the parent refused the prompt")
 
-	// Assert.
-	waitForPhase(t, h, PhaseMerged)
+	// Assert -- the republished merged carries both.
+	if tr := <-h.sink.ch; tr.phase != PhaseMerged {
+		t.Fatalf("phase after the failed handoff = %s, want a republished merged", tr.phase)
+	}
 	status := lastStatusOfPhase(t, h, func(s *frontendv1.MergeStatus) bool { return s.GetMerged() != nil })
-	if got := status.GetMerged().GetAfterActionError(); !strings.Contains(got, "refused the prompt") {
-		t.Fatalf("after_action_error = %q, want the handoff's failure carried on the merged status", got)
+	got := status.GetMerged().GetAfterActionError()
+	if !strings.Contains(got, "ENDED IN ERROR") || !strings.Contains(got, "refused the prompt") {
+		t.Fatalf("after_action_error = %q, want BOTH the action's and the handoff's failure", got)
 	}
 }
