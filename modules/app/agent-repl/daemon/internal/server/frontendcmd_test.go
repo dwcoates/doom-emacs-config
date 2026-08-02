@@ -68,6 +68,7 @@ type fakePrompts struct {
 	// drive the workspace's own session through.
 	testFailures  []merge.TestFailureResolution
 	beforeActions []merge.BeforeAction
+	afterActions  []merge.AfterAction
 }
 
 // TurnActive makes the prompt double the gate's turn source.
@@ -92,6 +93,13 @@ func (f *fakePrompts) ResolveMergeTestFailure(_ context.Context, res merge.TestF
 // runner too, on the same footing as the two resolvers.
 func (f *fakePrompts) RunMergeBeforeAction(_ context.Context, act merge.BeforeAction) error {
 	f.beforeActions = append(f.beforeActions, act)
+	return f.err
+}
+
+// RunMergeAfterAction makes the prompt double merge.Coordinator's after-action
+// runner too, on the same footing as the before-action's.
+func (f *fakePrompts) RunMergeAfterAction(_ context.Context, act merge.AfterAction) error {
+	f.afterActions = append(f.afterActions, act)
 	return f.err
 }
 
@@ -1261,6 +1269,7 @@ func newTestMergeCoordinator(t *testing.T) *merge.QueueCoordinator {
 		// which is the common case; the run goes straight to the plan.
 		BeforeActions:      stubBeforeActions{},
 		BeforeActionRunner: stubBeforeActionRunner{},
+		AfterActionRunner:  stubAfterActionRunner{},
 	})
 	if err != nil {
 		t.Fatalf("coordinator: %v", err)
@@ -1301,6 +1310,11 @@ func (stubBeforeActions) BeforeAction(string) (string, error) { return "", nil }
 type stubBeforeActionRunner struct{}
 
 func (stubBeforeActionRunner) Run(context.Context, merge.BeforeAction) error { return nil }
+
+// stubAfterActionRunner is the merge.AfterActionRunner a unit harness binds.
+type stubAfterActionRunner struct{}
+
+func (stubAfterActionRunner) Run(context.Context, merge.AfterAction) error { return nil }
 
 // noopPhases is the merge.PhaseSource a unit harness binds: no workspace is
 // pinned on any phase, so the boot sweep has nothing to sweep.

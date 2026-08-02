@@ -103,8 +103,12 @@ daemon-side:
 - CHILD TO PARENT. A workspace spawned from another workspace merges into its
   PARENT's worktree, not into the repository's main checkout. The parent's
   agent session is told its child merged.
-- THE POSTPROCESSING PROMPT. A workspace created with a `postprocessing_prompt`
-  has that prompt run in the parent once the merge fully finishes.
+- THE AFTER-ACTION. A workspace created with a `postprocessing_prompt` has that
+  prompt run as a TURN IN ITS OWN SESSION, under the merge lease, once every
+  commit has landed and before the queue entry is retired
+  (`merge.AfterActionRunner`). `merge.PostMergeHook.AfterAction` only RESOLVES
+  the text; the parent handoff does not deliver it, because delivering it in both
+  places ran one user-requested task twice per merge into a parent worktree.
 
 The port's contract:
 
@@ -129,6 +133,20 @@ The port's contract:
 The implementation is `internal/workspace/postmerge` (`postmerge.Notifier`),
 reached — like `merge.ConflictResolver` — through the server's wiring, so this
 package still never imports the session controller.
+
+THE TERMINAL `merged` STATUS IS `merge.Coordinator`'s, NOT `merge.Driver`'s.
+The driver finishes the replay and returns `OutcomeMerged`; the coordinator then
+runs the after-action and publishes `merged` ONCE, carrying the action's failure
+as `after_action_error`. Publishing it from the driver put the run's terminal
+word on the wire before the `after_action` phase existed, so every frontend saw
+the merge finish and then watched a phase begin after it.
+
+A MERGE OF A DELETED SESSION IS REFUSED. `merge.SessionDeaths` (the pipeline's
+fourth outbound port) reports whether the workspace's newest session is terminal
+by deletion, and is asked BEFORE `merge.SessionBringUp` -- asking after would be
+asking about a session the bring-up had already spawned back. A hibernated
+session is rehydrated and merged; a deleted one fails the run with a cause that
+names the deletion.
 
 Every merge-state transition (`merge_enqueuing`, `merging`, `merge_queued`,
 `merge_conflict`, `merge_failed`, `merged`) is written to the SSM. The
