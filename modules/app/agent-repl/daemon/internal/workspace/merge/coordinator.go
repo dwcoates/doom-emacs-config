@@ -257,12 +257,15 @@ func NewCoordinator(cfg CoordinatorConfig) (*QueueCoordinator, error) {
 // Enqueue implements merge.Coordinator. It returns once the request is DURABLY
 // on its repository's queue, not when the merge completes.
 //
-// merge_queued is emitted for any request that does not land at the head, and
-// it is emitted UNDER THE REPOSITORY'S ADVANCE GATE. That gate is also held
-// across the drain loop's Complete, so the head cannot finish (and this entry
-// cannot start merging) between the publish that observed index > 1 and the
-// merge_queued that explains it. The ordering is structural, not a hoped-for
-// window.
+// The run's `enqueued` status is published here for EVERY admission, and it is
+// published UNDER THE REPOSITORY'S ADVANCE GATE. That gate is also held across
+// the drain loop's Complete, so the head cannot finish (and this entry cannot
+// start merging) between the publish that observed the position and the status
+// that reports it. The ordering is structural, not a hoped-for window.
+//
+// The coarse axis token that rides the status is merge_queued only when the
+// entry did not land at the head; a head admission stays at merge_enqueuing
+// until the cherry-pick moves it on.
 func (c *QueueCoordinator) Enqueue(ctx context.Context, req Request) (Position, error) {
 	if err := req.validate(); err != nil {
 		c.logf("merge: enqueue REFUSED invalid request {ws=%s name=%s}: %v", req.Workspace, req.Name, err)
@@ -295,13 +298,24 @@ func (c *QueueCoordinator) Enqueue(ctx context.Context, req Request) (Position, 
 		c.logf("merge: enqueue publish FAILED {repo=%s ws=%s name=%s}: %v", repo, req.Workspace, req.Name, err)
 		return Position{}, fmt.Errorf("merge: enqueue %q: %w", req.Name, err)
 	}
-	var queuedErr error
+	// THE ADMISSION IS ALWAYS PUBLISHED, at the head as well as behind another
+	// merge. `enqueued` is the run's FIRST status and the only one that reports
+	// where it landed, so skipping it for a head admission would leave the run's
+	// stream starting mid-flight with no admission to correlate against.
+	//
+	// The coarse axis still distinguishes the two: a head admission stays at
+	// merge_enqueuing (the handler's own mark, which the cherry-pick supersedes),
+	// and only a deferred one is merge_queued.
+	phase := PhaseMergeEnqueuing
+	cause := fmt.Sprintf("admitted at the head of repo %s", repo)
 	if pos.Index > 1 {
-		cause := fmt.Sprintf("queued at position %d of %d behind another merge on repo %s", pos.Index, pos.Depth, repo)
-		if err := run.Enqueued(int32(pos.Index), int32(pos.Depth), cause); err != nil {
-			c.logf("merge: enqueue merge_queued emit FAILED {repo=%s ws=%s name=%s}: %v", repo, req.Workspace, req.Name, err)
-			queuedErr = fmt.Errorf("merge: enqueue %q: record merge_queued: %w", req.Name, err)
-		}
+		phase = PhaseMergeQueued
+		cause = fmt.Sprintf("queued at position %d of %d behind another merge on repo %s", pos.Index, pos.Depth, repo)
+	}
+	var queuedErr error
+	if err := run.Enqueued(phase, int32(pos.Index), int32(pos.Depth), cause); err != nil {
+		c.logf("merge: enqueue %s emit FAILED {repo=%s ws=%s name=%s}: %v", phase, repo, req.Workspace, req.Name, err)
+		queuedErr = fmt.Errorf("merge: enqueue %q: record %s: %w", req.Name, phase, err)
 	}
 	gate.Unlock()
 

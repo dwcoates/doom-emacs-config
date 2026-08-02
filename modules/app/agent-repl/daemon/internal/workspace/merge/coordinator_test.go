@@ -315,6 +315,24 @@ func (s *syncSink) RecordMergeStatus(ws string, phase Phase, cause string, statu
 	return s.RecordMergeTransition(ws, phase, cause)
 }
 
+// awaitPhase drains the sink's channel until a transition on phase arrives.
+//
+// It exists because every run now announces its ADMISSION before anything else
+// does (the `enqueued` status, on merge_enqueuing at the head and merge_queued
+// behind it), so a test waiting for a LATER phase has a record ahead of it that
+// is not the one under assertion. Draining the ordered channel the fakes already
+// use is the wait; there is nothing to sleep on.
+func (s *syncSink) awaitPhase(t *testing.T, phase Phase) transition {
+	t.Helper()
+	for {
+		tr := <-s.ch
+		if tr.phase == phase {
+			return tr
+		}
+		t.Logf("sink: skipped %s on %s while waiting for %s", tr.phase, tr.ws, phase)
+	}
+}
+
 // transitions returns a copy of every transition recorded so far, in order.
 func (s *syncSink) transitions() []transition {
 	s.mu.Lock()
@@ -722,8 +740,8 @@ func TestEnqueueBehindTheHeadRecordsMergeQueued(t *testing.T) {
 	if pos.Index != 2 || pos.Depth != 2 {
 		t.Fatalf("position = %+v, want index 2 depth 2", pos)
 	}
-	rec := <-h.sink.ch
-	if rec.phase != PhaseMergeQueued || rec.ws != second.Workspace {
+	rec := h.sink.awaitPhase(t, PhaseMergeQueued)
+	if rec.ws != second.Workspace {
 		t.Fatalf("transition = %+v, want merge_queued on %q", rec, second.Workspace)
 	}
 }
@@ -742,19 +760,47 @@ func TestEnqueueBehindTheHeadPublishesItsQueuePosition(t *testing.T) {
 	if _, err := h.coord.Enqueue(context.Background(), testRequest("b")); err != nil {
 		t.Fatalf("Enqueue(b): %v", err)
 	}
-	<-h.sink.ch
+	h.sink.awaitPhase(t, PhaseMergeQueued)
 
-	// Assert.
+	// Assert — the head's own admission is published first, so the deferred
+	// entry's is the second of the two.
 	statuses := h.sink.publishedStatuses()
-	if len(statuses) != 1 {
-		t.Fatalf("published %d statuses, want 1", len(statuses))
+	if len(statuses) != 2 {
+		t.Fatalf("published %d statuses, want 2 (one admission each)", len(statuses))
 	}
-	enq := statuses[0].GetEnqueued()
+	enq := statuses[1].GetEnqueued()
 	if enq == nil {
-		t.Fatalf("status phase = %T, want MergeStatusEnqueued", statuses[0].GetPhase())
+		t.Fatalf("status phase = %T, want MergeStatusEnqueued", statuses[1].GetPhase())
 	}
 	if enq.GetPosition() != 2 || enq.GetDepth() != 2 {
 		t.Fatalf("enqueued position/depth = %d/%d, want 2/2", enq.GetPosition(), enq.GetDepth())
+	}
+}
+
+// A HEAD admission is published too, and it reports the head's own place. It is
+// the run's FIRST status: a stream that began mid-cherry-pick would give a
+// frontend nothing to correlate the run against.
+func TestEnqueueAtTheHeadPublishesItsAdmission(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	if _, err := h.coord.Enqueue(context.Background(), testRequest("a")); err != nil {
+		t.Fatalf("Enqueue(a): %v", err)
+	}
+	<-h.picker.merges
+
+	// Assert.
+	statuses := h.sink.publishedStatuses()
+	if len(statuses) == 0 {
+		t.Fatal("a head admission published no status at all")
+	}
+	enq := statuses[0].GetEnqueued()
+	if enq == nil {
+		t.Fatalf("the run's first status phase = %T, want MergeStatusEnqueued", statuses[0].GetPhase())
+	}
+	if enq.GetPosition() != 1 || enq.GetDepth() != 1 {
+		t.Fatalf("enqueued position/depth = %d/%d, want 1/1", enq.GetPosition(), enq.GetDepth())
 	}
 }
 
@@ -772,7 +818,7 @@ func TestAPublishedPhaseCarriesARunID(t *testing.T) {
 	if _, err := h.coord.Enqueue(context.Background(), testRequest("b")); err != nil {
 		t.Fatalf("Enqueue(b): %v", err)
 	}
-	<-h.sink.ch
+	h.sink.awaitPhase(t, PhaseMergeQueued)
 
 	// Assert.
 	statuses := h.sink.publishedStatuses()
@@ -788,11 +834,11 @@ func TestEnqueueSurfacesAMergeQueuedRecordFailure(t *testing.T) {
 	// Arrange — the head is mid-merge and the queued transition cannot be
 	// recorded.
 	h := newHarness(t)
-	h.sink.failNext(errFakeSink)
 	if _, err := h.coord.Enqueue(context.Background(), testRequest("a")); err != nil {
 		t.Fatalf("Enqueue(a): %v", err)
 	}
 	<-h.picker.merges
+	h.sink.failNext(errFakeSink)
 
 	// Act.
 	pos, err := h.coord.Enqueue(context.Background(), testRequest("b"))
@@ -825,9 +871,9 @@ func TestDrainRunsOneMergePerRepositoryAtATime(t *testing.T) {
 	if _, err := h.coord.Enqueue(context.Background(), second); err != nil {
 		t.Fatalf("Enqueue(b): %v", err)
 	}
-	// The enqueued phase now travels the sink, not the picker: one publication
-	// per event, through the same channel every other phase uses.
-	<-h.sink.ch
+	// The deferred entry's admission travels the sink, not the picker: one
+	// publication per event, through the same channel every other phase uses.
+	h.sink.awaitPhase(t, PhaseMergeQueued)
 
 	// Act — the second merge must not have started while the first is running.
 	if len(h.picker.merges) != 0 {
@@ -945,8 +991,8 @@ func TestLeaseAcquireFailureRecordsMergeFailed(t *testing.T) {
 
 	// Assert — a terminal state is recorded rather than a silent stall, and no
 	// cherry-pick is attempted without the lease.
-	got := <-h.sink.ch
-	if got.phase != PhaseMergeFailed || got.ws != req.Workspace {
+	got := h.sink.awaitPhase(t, PhaseMergeFailed)
+	if got.ws != req.Workspace {
 		t.Fatalf("transition = %+v, want merge_failed on %q", got, req.Workspace)
 	}
 	if len(h.picker.merges) != 0 {
@@ -963,7 +1009,7 @@ func TestLeaseAcquireFailureStillCompletesTheDurableEntry(t *testing.T) {
 	if _, err := h.coord.Enqueue(context.Background(), testRequest("a")); err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}
-	<-h.sink.ch
+	h.sink.awaitPhase(t, PhaseMergeFailed)
 
 	// Assert — a merge that can never run must not block the queue forever.
 	if got := len(h.queue.Snapshot()[testRepoKey]); got != 0 {
@@ -985,10 +1031,7 @@ func TestDriverFailureRecordsMergeFailedAndReleasesTheLease(t *testing.T) {
 	h.picker.results <- pickResult{err: sentinelError("dirty source worktree")}
 
 	// Assert.
-	got := <-h.sink.ch
-	if got.phase != PhaseMergeFailed {
-		t.Fatalf("transition = %+v, want merge_failed", got)
-	}
+	h.sink.awaitPhase(t, PhaseMergeFailed)
 	if released := <-h.lease.releases; released != req.Workspace {
 		t.Fatalf("lease released for %q, want %q", released, req.Workspace)
 	}
@@ -1008,9 +1051,9 @@ func TestConflictHoldsTheHeadAndTheLeaseUntilResumed(t *testing.T) {
 	if _, err := h.coord.Enqueue(context.Background(), second); err != nil {
 		t.Fatalf("Enqueue(b): %v", err)
 	}
-	// The enqueued phase now travels the sink, not the picker: one publication
-	// per event, through the same channel every other phase uses.
-	<-h.sink.ch
+	// The deferred entry's admission travels the sink, not the picker: one
+	// publication per event, through the same channel every other phase uses.
+	h.sink.awaitPhase(t, PhaseMergeQueued)
 
 	// Act — resolve the conflict.
 	go func() {
@@ -1395,9 +1438,9 @@ func TestAbandonReleasesAParkedConflictAndAdvancesTheQueue(t *testing.T) {
 	if _, err := h.coord.Enqueue(context.Background(), second); err != nil {
 		t.Fatalf("Enqueue(b): %v", err)
 	}
-	// The enqueued phase now travels the sink, not the picker: one publication
-	// per event, through the same channel every other phase uses.
-	<-h.sink.ch
+	// The deferred entry's admission travels the sink, not the picker: one
+	// publication per event, through the same channel every other phase uses.
+	h.sink.awaitPhase(t, PhaseMergeQueued)
 
 	// Act.
 	abandoned, err := h.coord.Abandon(context.Background(), first.Workspace)
@@ -1601,10 +1644,7 @@ func TestTestFailureThatSurvivesTheFixRecordsMergeFailedWithTheTail(t *testing.T
 	<-h.picker.rollbacks
 
 	// Assert — the failure the user sees names the commit and carries the tail.
-	got := <-h.sink.ch
-	if got.phase != PhaseMergeFailed {
-		t.Fatalf("transition = %+v, want merge_failed", got)
-	}
+	got := h.sink.awaitPhase(t, PhaseMergeFailed)
 	if !strings.Contains(got.cause, "abc1234") || !strings.Contains(got.cause, "FAIL: still") {
 		t.Fatalf("merge_failed cause = %q, want the failing commit and the suite tail", got.cause)
 	}
@@ -1700,10 +1740,7 @@ func TestAFailedRollbackStillFailsTheMergeAndSaysSo(t *testing.T) {
 	<-h.picker.rollbacks
 
 	// Assert — merge_failed names the rollback failure too.
-	got := <-h.sink.ch
-	if got.phase != PhaseMergeFailed {
-		t.Fatalf("transition = %+v, want merge_failed", got)
-	}
+	got := h.sink.awaitPhase(t, PhaseMergeFailed)
 	if !strings.Contains(got.cause, "rollback to head0 FAILED") {
 		t.Fatalf("merge_failed cause = %q, want it to name the failed rollback", got.cause)
 	}
@@ -1726,10 +1763,7 @@ func TestATestFailureWithNoPreMergeHeadIsFailedAndNamed(t *testing.T) {
 
 	// Assert — no rollback was attempted against a head that does not exist,
 	// and the merge_failed cause says the target was left as it stands.
-	got := <-h.sink.ch
-	if got.phase != PhaseMergeFailed {
-		t.Fatalf("transition = %+v, want merge_failed", got)
-	}
+	got := h.sink.awaitPhase(t, PhaseMergeFailed)
 	if !strings.Contains(got.cause, "no pre-merge HEAD was recorded") {
 		t.Fatalf("merge_failed cause = %q, want it to name the missing rollback point", got.cause)
 	}
