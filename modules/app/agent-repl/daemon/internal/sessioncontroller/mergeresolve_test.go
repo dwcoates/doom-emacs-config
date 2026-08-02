@@ -367,3 +367,74 @@ func TestAMergeTurnThatEndsCleanlyIsReportedAsComplete(t *testing.T) {
 		t.Fatalf("RunMergeBeforeAction() = %v, want nil for a turn that ended cleanly", err)
 	}
 }
+
+// --- the after-action ----------------------------------------------------
+
+// THE GUARANTEE: the after-action's errored turn is reported as an error too.
+// merge.Coordinator carries it onto the terminal merged status, so softening it
+// here would leave that status blank about a nudge that never fired.
+func TestAMergeAfterActionTurnThatEndsInErrorIsReportedAsAFailure(t *testing.T) {
+	// Arrange.
+	h := newMergeResolveHarness(t)
+	submitted := submitHook(h)
+	done := make(chan error, 1)
+
+	// Act.
+	go func() {
+		done <- h.m.RunMergeAfterAction(context.Background(), merge.AfterAction{
+			Workspace: "ws", RequestID: "req-1", Prompt: "run the release checklist",
+		})
+	}()
+	<-submitted
+	d := h.controller()
+	h.m.onTurnEvent(d, true, "t1", turnOutcome{})
+	h.m.onTurnEvent(d, false, "t1", turnOutcome{isError: true, stopReason: "error_during_execution"})
+
+	// Assert.
+	err := <-done
+	if err == nil {
+		t.Fatal("RunMergeAfterAction() = nil for a turn that ended in error: the failure was swallowed")
+	}
+	if !strings.Contains(err.Error(), "error_during_execution") {
+		t.Fatalf("error = %q, want it to carry the turn's own stop reason", err)
+	}
+}
+
+// The mirror edge: a clean after-action turn reports complete.
+func TestAMergeAfterActionTurnThatEndsCleanlyIsReportedAsComplete(t *testing.T) {
+	// Arrange.
+	h := newMergeResolveHarness(t)
+	submitted := submitHook(h)
+	done := make(chan error, 1)
+
+	// Act.
+	go func() {
+		done <- h.m.RunMergeAfterAction(context.Background(), merge.AfterAction{
+			Workspace: "ws", RequestID: "req-1", Prompt: "run the release checklist",
+		})
+	}()
+	<-submitted
+	d := h.controller()
+	h.m.onTurnEvent(d, true, "t1", turnOutcome{})
+	h.m.onTurnEvent(d, false, "t1", turnOutcome{stopReason: "end_turn"})
+
+	// Assert.
+	if err := <-done; err != nil {
+		t.Fatalf("RunMergeAfterAction() = %v, want nil for a turn that ended cleanly", err)
+	}
+}
+
+// An after-action with no prompt is refused before anything is submitted: a
+// turn carrying nothing would take the user's session and say nothing in it.
+func TestAMergeAfterActionWithNoPromptIsRefused(t *testing.T) {
+	// Arrange.
+	h := newMergeResolveHarness(t)
+
+	// Act.
+	err := h.m.RunMergeAfterAction(context.Background(), merge.AfterAction{Workspace: "ws", RequestID: "req-1"})
+
+	// Assert.
+	if err == nil {
+		t.Fatal("RunMergeAfterAction() = nil for an action with no prompt, want a refusal")
+	}
+}
