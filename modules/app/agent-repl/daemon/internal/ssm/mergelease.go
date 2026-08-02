@@ -188,22 +188,54 @@ func (m *Manager) bindMergeQueue(q merge.Queue) error {
 
 // openMergeLease writes the opening edge of a lease window and re-pushes the
 // workspace so merge_lease_held reaches the frontends immediately.
+//
+// AN ORPHANED OPEN WINDOW IS ADOPTED, NOT AN ERROR. The ledger deliberately
+// keeps open windows across a daemon bounce (warmMergeLeasesLocked), and the
+// merge that reopens the workspace — Drain resuming the durable queue head, or
+// the user re-issuing the merge — must become the window's holder. Before this,
+// the resume path INSERTed a second window and wedged forever on the unique
+// open-window index: the very lease the restart preserved refused every merge
+// that could have released it. A live in-process holder still rejects a second
+// acquire — that is the double-merge protection the index exists for.
 func (m *Manager) openMergeLease(workspace string) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	at := m.nextAt()
+	if open := m.openMergeWindowsLocked(workspace); len(open) > 0 {
+		if m.mergeLeaseHolders[workspace] {
+			err := fmt.Errorf("ssm: open merge lease for workspace %q: its open window is already held by a live merge in this process", workspace)
+			m.logf("ssm: merge lease decision=reject workspace=%s at=%d open_windows=%d error=%v",
+				workspace, at, len(open), err)
+			return 0, err
+		}
+		// The window's holder died with a prior daemon, so no release can ever
+		// arrive for it. Adopting the window — rather than closing and
+		// reopening it — keeps the ledger honest: the shim never left merge
+		// ownership (prompts were refused across the whole bounce), so
+		// provenance keeps stamping the gap CONVERSATION_SOURCE_MERGE.
+		m.mergeLeaseHolders[workspace] = true
+		m.logf("ssm: merge lease decision=adopt workspace=%s acquired_at=%d at=%d — the open window was orphaned by a daemon restart and this merge resumes as its holder",
+			workspace, open[0].acquiredAt, at)
+		if err := m.pushCurrentLocked(workspace); err != nil {
+			return 0, err
+		}
+		return open[0].acquiredAt, nil
+	}
 	if _, err := m.db.Exec(
 		`INSERT INTO merge_lease(workspace, acquired_at) VALUES (?,?)`,
 		workspace, at,
 	); err != nil {
-		// The unique partial index is what turns a double-acquire into this
-		// error rather than into two coordinators believing they own one shim.
+		// The unique partial index stays as defense in depth under the
+		// in-process holder check: it is what turns a racing double-acquire
+		// into this error rather than into two coordinators believing they
+		// own one shim.
 		wrapped := fmt.Errorf("ssm: open merge lease for workspace %q: %w", workspace, err)
 		m.logf("ssm: merge lease decision=reject workspace=%s at=%d open_windows=%d error=%v",
 			workspace, at, len(m.openMergeWindowsLocked(workspace)), err)
 		return 0, wrapped
 	}
 	m.mergeLeases[workspace] = append(m.mergeLeases[workspace], leaseWindow{acquiredAt: at})
+	m.mergeLeaseHolders[workspace] = true
 	if err := m.pushCurrentLocked(workspace); err != nil {
 		return 0, err
 	}
@@ -243,6 +275,7 @@ func (m *Manager) closeMergeLease(workspace string) error {
 			windows[i].releasedAt = at
 		}
 	}
+	delete(m.mergeLeaseHolders, workspace)
 	return m.pushCurrentLocked(workspace)
 }
 
