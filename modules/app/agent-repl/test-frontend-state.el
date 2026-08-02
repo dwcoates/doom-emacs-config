@@ -1030,6 +1030,166 @@ first."
     ;; Assert — no entry invented to hold it.
     (should-not (agent-repl--ws-known-p "/Users/x/not-open"))))
 
+(ert-deftest agent-repl-test-merge-failed-for-a-closed-workspace-resurrects-it ()
+  "A merge_failed push for a torn-down workspace re-establishes its tab."
+  ;; Arrange — an on-disk worktree Emacs has no live workspace for, and an
+  ;; establish stub that registers the dir the way the real one does.
+  (agent-repl-test--with-clean-state
+    (let ((dir (make-temp-file "agent-repl-resurrect" t))
+          established reordered)
+      (unwind-protect
+          (let ((ws (file-name-nondirectory (directory-file-name dir))))
+            (cl-letf (((symbol-function 'agent-repl--establish-workspace)
+                       (lambda (w d)
+                         (setq established (list w d))
+                         (agent-repl--ws-put w :project-dir d)))
+                      ((symbol-function 'agent-repl--reorder-workspace-to-front)
+                       (lambda (w) (setq reordered w))))
+              ;; Act
+              (agent-repl-test--apply-workspace-state
+               (list :workspace dir :state "RENDER_STATE_MERGE_FAILED"))
+              ;; Assert — resurrected, fronted, and the frame re-applied.
+              (should (equal established (list ws dir)))
+              (should (equal reordered ws))
+              (should (eq (agent-repl--ws-get ws :pushed-render-state)
+                          :merge-failed))))
+        (delete-directory dir t)))))
+
+(ert-deftest agent-repl-test-merge-failed-resurrection-flags-merge-failed ()
+  "The resurrected workspace carries the :merge-failed badge flag."
+  (agent-repl-test--with-clean-state
+    (let ((dir (make-temp-file "agent-repl-resurrect" t)))
+      (unwind-protect
+          (let ((ws (file-name-nondirectory (directory-file-name dir))))
+            (cl-letf (((symbol-function 'agent-repl--establish-workspace)
+                       (lambda (w d) (agent-repl--ws-put w :project-dir d)))
+                      ((symbol-function 'agent-repl--reorder-workspace-to-front)
+                       (lambda (_w) nil)))
+              ;; Act
+              (agent-repl-test--apply-workspace-state
+               (list :workspace dir :state "RENDER_STATE_MERGE_FAILED"))
+              ;; Assert
+              (should (eq (agent-repl--ws-get ws :merge-failed) t))))
+        (delete-directory dir t)))))
+
+(ert-deftest agent-repl-test-merge-failed-resurrection-skips-a-missing-worktree ()
+  "A merge_failed for a worktree gone from disk stays retained-only."
+  (agent-repl-test--with-clean-state
+    (let (established)
+      (cl-letf (((symbol-function 'agent-repl--establish-workspace)
+                 (lambda (&rest args) (setq established args))))
+        ;; Act
+        (agent-repl-test--apply-workspace-state
+         '(:workspace "/nonexistent/agent-repl-gone"
+           :state "RENDER_STATE_MERGE_FAILED"))
+        ;; Assert — nothing established, nothing stub-created.
+        (should-not established)
+        (should-not (agent-repl--ws-known-p "agent-repl-gone"))))))
+
+(ert-deftest agent-repl-test-merge-failed-resurrection-bounds-the-recursion ()
+  "An establish that fails to register the dir does not loop the re-apply."
+  (agent-repl-test--with-clean-state
+    (let ((dir (make-temp-file "agent-repl-resurrect" t))
+          (establish-calls 0))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--establish-workspace)
+                     (lambda (&rest _) (cl-incf establish-calls)))
+                    ((symbol-function 'agent-repl--reorder-workspace-to-front)
+                     (lambda (_w) nil)))
+            ;; Act — the stub registers nothing, so ownership never appears.
+            (agent-repl-test--apply-workspace-state
+             (list :workspace dir :state "RENDER_STATE_MERGE_FAILED"))
+            ;; Assert — exactly one establish attempt, no infinite re-apply.
+            (should (= establish-calls 1)))
+        (delete-directory dir t)))))
+
+(ert-deftest agent-repl-test-merge-failed-for-a-tab-less-owned-workspace-resurrects-it ()
+  "A merge_failed for a data-only (owned, no tab) workspace re-opens its tab."
+  ;; Arrange — a registered workspace whose persp tab is gone (the entry a
+  ;; completed merge leaves behind), with the tab predicate answering closed.
+  (agent-repl-test--with-clean-state
+    (let ((dir (make-temp-file "agent-repl-dataonly" t))
+          established reordered)
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "ws1" :project-dir dir)
+            (cl-letf (((symbol-function 'agent-repl--ws-open-p)
+                       (lambda (_w) nil))
+                      ((symbol-function 'agent-repl--establish-workspace)
+                       (lambda (w d) (setq established (list w d))))
+                      ((symbol-function 'agent-repl--reorder-workspace-to-front)
+                       (lambda (w) (setq reordered w))))
+              ;; Act
+              (agent-repl-test--apply-workspace-state
+               '(:workspace "ws1" :state "RENDER_STATE_MERGE_FAILED"))
+              ;; Assert — promoted back to a real, leftmost tab.
+              (should (equal established (list "ws1" dir)))
+              (should (equal reordered "ws1"))
+              (should (eq (agent-repl--ws-get "ws1" :merge-failed) t))))
+        (delete-directory dir t)))))
+
+(ert-deftest agent-repl-test-merge-failed-with-an-open-tab-establishes-nothing ()
+  "A merge_failed for a workspace whose tab is open re-establishes nothing."
+  (agent-repl-test--with-clean-state
+    (let (established)
+      (agent-repl-test--register-ws "ws1")
+      (cl-letf (((symbol-function 'agent-repl--ws-open-p)
+                 (lambda (_w) t))
+                ((symbol-function 'agent-repl--establish-workspace)
+                 (lambda (&rest args) (setq established args))))
+        ;; Act
+        (agent-repl-test--apply-workspace-state
+         '(:workspace "ws1" :state "RENDER_STATE_MERGE_FAILED"))
+        ;; Assert
+        (should-not established)))))
+
+(ert-deftest agent-repl-test-non-failure-states-resurrect-no-tab ()
+  "Non-merge-failed transitions never trigger the tab resurrection."
+  (agent-repl-test--with-clean-state
+    (let (established)
+      (agent-repl-test--register-ws "ws1")
+      (cl-letf (((symbol-function 'agent-repl--ws-open-p)
+                 (lambda (_w) nil))
+                ((symbol-function 'agent-repl--establish-workspace)
+                 (lambda (&rest args) (setq established args))))
+        ;; Act
+        (agent-repl-test--apply-workspace-state
+         '(:workspace "ws1" :state "RENDER_STATE_READY"))
+        ;; Assert
+        (should-not established)))))
+
+(ert-deftest agent-repl-test-tab-resurrection-skips-a-missing-worktree-dir ()
+  "A tab-less merge_failed whose worktree is gone from disk is left alone."
+  (agent-repl-test--with-clean-state
+    (let (established)
+      (agent-repl--ws-put "ws1" :project-dir "/nonexistent/agent-repl-gone")
+      (cl-letf (((symbol-function 'agent-repl--ws-open-p)
+                 (lambda (_w) nil))
+                ((symbol-function 'agent-repl--establish-workspace)
+                 (lambda (&rest args) (setq established args))))
+        ;; Act
+        (agent-repl-test--apply-workspace-state
+         '(:workspace "ws1" :state "RENDER_STATE_MERGE_FAILED"))
+        ;; Assert
+        (should-not established)))))
+
+(ert-deftest agent-repl-test-tab-resurrection-is-subscribed-to-the-transition-hook ()
+  "The tab resurrector is registered on the state-transition hook."
+  (should (memq #'agent-repl--merge-resurrect-on-failure
+                agent-repl-ws-state-transition-functions)))
+
+(ert-deftest agent-repl-test-non-merge-states-for-a-closed-workspace-stay-dropped ()
+  "Only merge_failed resurrects; every other unowned state is still dropped."
+  (agent-repl-test--with-clean-state
+    (let (established)
+      (cl-letf (((symbol-function 'agent-repl--establish-workspace)
+                 (lambda (&rest args) (setq established args))))
+        ;; Act — a benign state for an unowned cwd.
+        (agent-repl-test--apply-workspace-state
+         '(:workspace "/Users/x/not-open" :state "RENDER_STATE_MERGED"))
+        ;; Assert
+        (should-not established)))))
+
 (ert-deftest agent-repl-test-inbound-frame-accepts-a-workspace-name ()
   "A frame already naming a known workspace still applies."
   ;; Arrange

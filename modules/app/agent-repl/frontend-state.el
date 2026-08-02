@@ -44,6 +44,11 @@
 ;; `agent-repl--frontend-note-boot-id' lives in frontend-client.el (it owns the
 ;; reattach give-up state the boot-id change resets); resolved at call time.
 (declare-function agent-repl--frontend-note-boot-id "frontend-client" (boot-id))
+;; The merge-failed resurrection (below) reuses snapshot-load's promotion
+;; primitives; both live outside this module and resolve at call time.
+(declare-function agent-repl--establish-workspace "commands" (ws dir))
+(declare-function agent-repl--reorder-workspace-to-front "workspace" (ws))
+(declare-function agent-repl--ws-open-p "workspace" (ws))
 
 ;;;; ---- State-transition hook -------------------------------------------
 
@@ -450,11 +455,89 @@ Fails loudly on a missing/blank `workspace' (invariant violation)."
       ;; run AFTER the pushed state is stored so subscribers observe it.
       (agent-repl--frontend-run-state-transition-hook workspace keyword previous)
       keyword)
+      (if (eq keyword :merge-failed)
+          ;; A failed merge of a workspace Emacs already tore down (its merge
+          ;; had appeared to land, so the tab was closed) must not vanish
+          ;; into the retained-state hash: the user has to see the failure
+          ;; and act on it.  Resurrect the tab and re-apply this same frame
+          ;; so the ordinary path stores it and runs the transition hook.
+          (agent-repl--frontend-resurrect-merge-failed raw-workspace ws-state)
+        (agent-repl--log nil
+                         "frontend-apply-workspace-state: no live workspace owns %s — retained for restart safety, render skipped (state=%s session=%s turn-active=%S)"
+                         raw-workspace state (plist-get ws-state :sessionId)
+                         (plist-get ws-state :turnActive))
+        nil)))))
+
+(defun agent-repl--merge-resurrect-on-failure (ws new _previous)
+  "Re-open WS's tab when a pushed `:merge-failed' finds it closed.
+Subscriber for `agent-repl-ws-state-transition-functions'.  The COMPLEMENT
+of `agent-repl--frontend-resurrect-merge-failed': that path covers a cwd no
+live workspace owns at all, while this one covers the data-only entry a
+completed merge leaves behind (registered in `agent-repl--workspaces' with
+no persp tab — see snapshot-load's register-merged case).  Both converge on
+the same promotion: establish + front-reorder, so the failure is the
+leftmost tab rather than invisible state.
+
+Idempotent: once the tab is open `agent-repl--ws-open-p' is non-nil and a
+re-pushed `:merge-failed' changes nothing.  A worktree gone from disk is
+loud-logged and left alone."
+  (when (and (eq new :merge-failed)
+             (not (agent-repl--ws-open-p ws)))
+    (let ((dir (agent-repl--ws-get ws :project-dir)))
+      (if (and dir (file-directory-p dir))
+          (progn
+            (agent-repl--log ws
+                             "merge-resurrect-on-failure: merge_failed pushed for tab-less workspace ws=%s dir=%s — re-establishing its tab"
+                             ws dir)
+            (agent-repl--establish-workspace ws dir)
+            (agent-repl--reorder-workspace-to-front ws)
+            (agent-repl--ws-put ws :merge-failed t))
+        (agent-repl--log ws
+                         "merge-resurrect-on-failure: ws=%s dir=%S MISSING on disk — cannot resurrect"
+                         ws dir)))))
+
+;; Registered like the sidebar/death reactors: `add-hook' auto-vivifies the
+;; hook variable, and its `defvar ... nil' above does not reset a bound one.
+(add-hook 'agent-repl-ws-state-transition-functions
+          #'agent-repl--merge-resurrect-on-failure)
+
+(defun agent-repl--frontend-resurrect-merge-failed (raw-workspace ws-state)
+  "Re-establish the closed workspace at RAW-WORKSPACE and re-apply WS-STATE.
+Called from `agent-repl--frontend-apply-workspace-state' when a pushed
+`:merge-failed' names a cwd no live Emacs workspace owns.  Reuses
+snapshot-load's merge-failure promotion (`agent-repl--establish-workspace'
+plus `agent-repl--reorder-workspace-to-front', commands.el): a failed
+cherry-pick must not hide as retained-but-unrendered state — surfacing it
+as the leftmost tab forces the user to notice and act.
+
+A worktree missing on disk cannot be resurrected; that case is loud-logged
+and the frame stays retained-only.  Returns the re-applied render keyword,
+or nil when resurrection was impossible."
+  (let ((ws (file-name-nondirectory (directory-file-name raw-workspace))))
+    (cond
+     ((not (file-directory-p raw-workspace))
       (agent-repl--log nil
-                       "frontend-apply-workspace-state: no live workspace owns %s — retained for restart safety, render skipped (state=%s session=%s turn-active=%S)"
-                       raw-workspace state (plist-get ws-state :sessionId)
-                       (plist-get ws-state :turnActive))
-      nil))))
+                       "frontend-resurrect-merge-failed: ws=%s dir=%s MISSING on disk — cannot resurrect; state retained only"
+                       ws raw-workspace)
+      nil)
+     (t
+      (agent-repl--log ws
+                       "frontend-resurrect-merge-failed: merge_failed pushed for closed workspace ws=%s dir=%s — re-establishing its tab"
+                       ws raw-workspace)
+      (agent-repl--establish-workspace ws raw-workspace)
+      (agent-repl--reorder-workspace-to-front ws)
+      (agent-repl--ws-put ws :merge-failed t)
+      (if (agent-repl--frontend-ws-name raw-workspace)
+          ;; A live workspace owns the cwd now, so the ordinary apply path
+          ;; stores the pushed state and runs the transition hook (sidebar
+          ;; repaint, minibuffer narration).  The ownership check above is
+          ;; the recursion bound: an establish that did not register the
+          ;; dir would loop here forever, so it fails loudly instead.
+          (agent-repl--frontend-apply-workspace-state ws-state)
+        (agent-repl--log ws
+                         "frontend-resurrect-merge-failed: ws=%s establish did NOT register dir=%s — state not re-applied"
+                         ws raw-workspace)
+        nil)))))
 
 (defun agent-repl--frontend-maybe-latch-agent-ready (workspace)
   "Set the `:agent-ready' latch bit for WORKSPACE on its FIRST pushed state.
