@@ -93,9 +93,7 @@ func newReceiptWorld(t *testing.T) *receiptWorld {
 	// dialStoreProducer resolves the store socket as $HOME/store.sock, and the
 	// session locks resolve under $HOME too.
 	t.Setenv("HOME", sockDir)
-	if err := os.MkdirAll(filepath.Join(sockDir, ".cache", "agent-repl", "sock"), 0o700); err != nil {
-		t.Fatalf("make session socket dir: %v", err)
-	}
+	shimSock := isolatedShimSocket(t, sockDir)
 	if err := sessionlock.EnsureDir(); err != nil {
 		t.Fatalf("make session lock dir: %v", err)
 	}
@@ -106,7 +104,7 @@ func newReceiptWorld(t *testing.T) *receiptWorld {
 		statePath:       filepath.Join(t.TempDir(), "state.db"),
 		storeSock:       storeSock,
 		sockDir:         sockDir,
-		shimSock:        filepath.Join(sockDir, ".cache", "agent-repl", "sock", "daemon-shim.sock"),
+		shimSock:        shimSock,
 		workspace:       filepath.Join(sockDir, "ws"),
 		sessionID:       "s_receipt",
 		vendorSessionID: "vendor-uuid-receipt",
