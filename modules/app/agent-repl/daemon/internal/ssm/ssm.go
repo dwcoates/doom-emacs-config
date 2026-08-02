@@ -115,6 +115,13 @@ type Manager struct {
 	// lookup be total, and the TABLE remains the authority both are warmed
 	// from.
 	mergeLeases map[string][]leaseWindow
+	// mergeLeaseHolders marks the workspaces whose open lease window is held
+	// by a live merge IN THIS PROCESS. The durable table cannot carry this
+	// distinction: after a daemon bounce an open window's holder is provably
+	// gone, and openMergeLease uses the absence of an in-process holder to
+	// ADOPT the orphaned window instead of wedging every later merge on the
+	// unique open-window index. See mergelease.go.
+	mergeLeaseHolders map[string]bool
 	// mergedAt is the in-memory projection of the durable workspace_merged
 	// table: the instant each workspace's merge landed. See merged.go — the
 	// projection is what lets the WorkspaceState construction funnel stamp
@@ -174,21 +181,22 @@ func Open(opts Options) (*Manager, error) {
 		afterFunc = func(d time.Duration, f func()) Timer { return time.AfterFunc(d, f) }
 	}
 	m := &Manager{
-		db:              db,
-		ownsDB:          ownsDB,
-		logf:            logf,
-		resolver:        opts.Resolver,
-		clock:           clock,
-		last:            make(map[string]frontendv1.RenderState),
-		lastTasks:       make(map[string]int64),
-		pushedAtMs:      make(map[string]int64),
-		interruptedTurn: make(map[string]*interruptMark),
-		mergeLeases:     make(map[string][]leaseWindow),
-		mergedAt:        make(map[string]int64),
-		clearingTimers:  make(map[string]Timer),
-		clearingTimeout: clearingTimeout,
-		afterFunc:       afterFunc,
-		subs:            make(map[int]chan *frontendv1.WorkspaceState),
+		db:                db,
+		ownsDB:            ownsDB,
+		logf:              logf,
+		resolver:          opts.Resolver,
+		clock:             clock,
+		last:              make(map[string]frontendv1.RenderState),
+		lastTasks:         make(map[string]int64),
+		pushedAtMs:        make(map[string]int64),
+		interruptedTurn:   make(map[string]*interruptMark),
+		mergeLeases:       make(map[string][]leaseWindow),
+		mergeLeaseHolders: make(map[string]bool),
+		mergedAt:          make(map[string]int64),
+		clearingTimers:    make(map[string]Timer),
+		clearingTimeout:   clearingTimeout,
+		afterFunc:         afterFunc,
+		subs:              make(map[int]chan *frontendv1.WorkspaceState),
 	}
 	if err := m.warm(); err != nil {
 		if ownsDB {

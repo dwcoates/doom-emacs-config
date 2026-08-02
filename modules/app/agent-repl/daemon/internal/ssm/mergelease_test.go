@@ -352,6 +352,151 @@ func TestMergeLeaseSurvivesAReopen(t *testing.T) {
 	}
 }
 
+// A daemon bounce mid-merge leaves the workspace's lease window open with no
+// holder alive to release it. The next Acquire — Drain resuming the durable
+// queue head, or the user re-issuing the merge — must ADOPT that window rather
+// than wedge on the unique open-window index, which is exactly how every merge
+// of a bounced workspace failed forever with "shim lease unavailable".
+func TestMergeLeaseAcquireAdoptsAnOrphanedWindow(t *testing.T) {
+	// Arrange — a held lease whose daemon dies (Close without release).
+	m, cl, path := openTest(t, fakeResolver{"s1": "ws1"})
+	l, err := NewMergeLease(MergeLeaseConfig{Manager: m, Queue: &fakeQueue{}, Interrupter: &fakeSessionAuthority{}})
+	if err != nil {
+		t.Fatalf("NewMergeLease: %v", err)
+	}
+	if _, err := l.Acquire(context.Background(), "ws1"); err != nil {
+		t.Fatalf("first Acquire: %v", err)
+	}
+	if err := m.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	reopened, err := Open(Options{DBPath: path, Logf: cl.logf, Resolver: fakeResolver{"s1": "ws1"}})
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	t.Cleanup(func() { reopened.Close() })
+	in := &fakeSessionAuthority{}
+	rl, err := NewMergeLease(MergeLeaseConfig{Manager: reopened, Queue: &fakeQueue{}, Interrupter: in})
+	if err != nil {
+		t.Fatalf("NewMergeLease over the reopened manager: %v", err)
+	}
+
+	// Act — the resumed merge acquires over the orphaned window.
+	release, err := rl.Acquire(context.Background(), "ws1")
+
+	// Assert — adopted, not wedged, and still exactly one window in the ledger.
+	if err != nil {
+		t.Fatalf("Acquire over the orphaned window = %v, want adoption", err)
+	}
+	if release == nil {
+		t.Fatal("the adopting Acquire returned no release func")
+	}
+	if !cl.contains("merge lease decision=adopt workspace=ws1") {
+		t.Fatal("the adoption was not recorded through the canonical logger")
+	}
+	var windows int
+	if err := reopened.db.QueryRow(
+		`SELECT COUNT(*) FROM merge_lease WHERE workspace='ws1'`).Scan(&windows); err != nil {
+		t.Fatalf("count windows: %v", err)
+	}
+	if windows != 1 {
+		t.Fatalf("ledger holds %d windows after adoption, want the original one alone", windows)
+	}
+	if len(in.stopped) != 1 {
+		t.Fatalf("interrupted = %v, want the adopting merge to stop the workspace's turn once", in.stopped)
+	}
+}
+
+// The adopted window must close like any other on release, handing the shim
+// back to the user with the ORIGINAL acquiring edge preserved for provenance.
+func TestMergeLeaseReleaseClosesAnAdoptedWindow(t *testing.T) {
+	// Arrange — an orphaned window adopted by a post-reopen Acquire.
+	m, cl, path := openTest(t, fakeResolver{"s1": "ws1"})
+	l, err := NewMergeLease(MergeLeaseConfig{Manager: m, Queue: &fakeQueue{}, Interrupter: &fakeSessionAuthority{}})
+	if err != nil {
+		t.Fatalf("NewMergeLease: %v", err)
+	}
+	if _, err := l.Acquire(context.Background(), "ws1"); err != nil {
+		t.Fatalf("first Acquire: %v", err)
+	}
+	if err := m.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	reopened, err := Open(Options{DBPath: path, Logf: cl.logf, Resolver: fakeResolver{"s1": "ws1"}})
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	t.Cleanup(func() { reopened.Close() })
+	rl, err := NewMergeLease(MergeLeaseConfig{Manager: reopened, Queue: &fakeQueue{}, Interrupter: &fakeSessionAuthority{}})
+	if err != nil {
+		t.Fatalf("NewMergeLease over the reopened manager: %v", err)
+	}
+	release, err := rl.Acquire(context.Background(), "ws1")
+	if err != nil {
+		t.Fatalf("adopting Acquire: %v", err)
+	}
+
+	// Act.
+	release()
+
+	// Assert — the one window is closed and the workspace is open to prompts.
+	if reopened.MergeLeaseHeld("ws1") {
+		t.Fatal("the lease is still held after releasing the adopted window")
+	}
+	var open int
+	if err := reopened.db.QueryRow(
+		`SELECT COUNT(*) FROM merge_lease WHERE workspace='ws1' AND released_at IS NULL`).Scan(&open); err != nil {
+		t.Fatalf("count open windows: %v", err)
+	}
+	if open != 0 {
+		t.Fatalf("ledger holds %d open windows after release, want none", open)
+	}
+}
+
+// A live in-process holder must still exclude a second acquire: adoption is
+// for windows whose holder died with a prior daemon, never a bypass of the
+// double-merge protection.
+func TestMergeLeaseAcquireStillRefusesALiveHolderAfterAdoption(t *testing.T) {
+	// Arrange — an adopted window whose holder is alive in this process.
+	m, cl, path := openTest(t, fakeResolver{"s1": "ws1"})
+	l, err := NewMergeLease(MergeLeaseConfig{Manager: m, Queue: &fakeQueue{}, Interrupter: &fakeSessionAuthority{}})
+	if err != nil {
+		t.Fatalf("NewMergeLease: %v", err)
+	}
+	if _, err := l.Acquire(context.Background(), "ws1"); err != nil {
+		t.Fatalf("first Acquire: %v", err)
+	}
+	if err := m.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	reopened, err := Open(Options{DBPath: path, Logf: cl.logf, Resolver: fakeResolver{"s1": "ws1"}})
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	t.Cleanup(func() { reopened.Close() })
+	rl, err := NewMergeLease(MergeLeaseConfig{Manager: reopened, Queue: &fakeQueue{}, Interrupter: &fakeSessionAuthority{}})
+	if err != nil {
+		t.Fatalf("NewMergeLease over the reopened manager: %v", err)
+	}
+	if _, err := rl.Acquire(context.Background(), "ws1"); err != nil {
+		t.Fatalf("adopting Acquire: %v", err)
+	}
+
+	// Act.
+	release, err := rl.Acquire(context.Background(), "ws1")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("a second Acquire over a live adopted holder = nil, want an error")
+	}
+	if release != nil {
+		t.Fatal("the refused Acquire returned a release func")
+	}
+	if !cl.contains("already held by a live merge in this process") {
+		t.Fatal("the live-holder refusal was not recorded through the canonical logger")
+	}
+}
+
 func TestConversationSourceAt(t *testing.T) {
 	// Arrange.
 	m, l, _, _, _ := openLeaseTest(t, "ws1")
