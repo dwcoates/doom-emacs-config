@@ -15,7 +15,8 @@
     "'none' is a real answer, not a gap. The merge states deliberately carry",
     "badges and glyphs instead of colors so they never spend one of the",
     "six, and UNSPECIFIED is the absence of a verdict rather than a verdict",
-    "of its own.",
+    "of its own. A surface may override that per state — see",
+    "'surface_overrides' — but only by DECLARING the override here.",
     "",
     "TEAL IS THE SIXTH, and it exists because blue was carrying two",
     "incompatible jobs. A single DORMANT state meant both 'we put this",
@@ -78,6 +79,41 @@
     "RENDER_STATE_MERGE_CONFLICT": "none",
     "RENDER_STATE_MERGE_FAILED": "none",
     "RENDER_STATE_MERGED": "none"
+  },
+
+  "_surface_overrides_comment": [
+    "A surface may paint a state differently from the shared assignment",
+    "above, but ONLY by naming the divergence here. Undeclared drift is",
+    "exactly what this file exists to prevent, so the escape hatch is a",
+    "declaration rather than a silent local table: a reader of any one",
+    "renderer still learns from this file that the surfaces disagree, and",
+    "each renderer asserts its own overrides against this section row for",
+    "row. A surface absent from this map takes 'render_states' verbatim.",
+    "",
+    "EMACS_TAB_BAR OVERRIDES THE THREE IN-FLIGHT MERGE STATES TO RED. The",
+    "tab bar has no badges and no glyphs — state reaches it only as the",
+    "[N] bracket's COLOR — so 'none' there means a workspace whose merge",
+    "is running renders exactly like one nobody has touched. Red is the",
+    "existing claim 'work is in flight and you cannot act on this', which",
+    "is precisely a merge the daemon is carrying, so the tab bar spends a",
+    "color the badge-bearing surfaces do not need to.",
+    "",
+    "The three are the merge states with no verdict yet: about to enqueue,",
+    "waiting behind a sibling, and running. MERGE_CONFLICT, MERGE_FAILED",
+    "and MERGED are deliberately NOT overridden — a conflict wants the",
+    "user, and the other two are terminal, so none of them is 'in flight'.",
+    "",
+    "The webapp takes NO overrides. Its rail carries a glyph and a status",
+    "word beside every dot, so 'none' already reads as the merge pipeline",
+    "reporting itself, and spending red there would collide with the",
+    "thinking dot it renders in the same list."
+  ],
+  "surface_overrides": {
+    "emacs_tab_bar": {
+      "RENDER_STATE_MERGE_ENQUEUING": "red",
+      "RENDER_STATE_MERGE_QUEUED": "red",
+      "RENDER_STATE_MERGING": "red"
+    }
   },
 
   "_error_classes_comment": [
