@@ -177,6 +177,82 @@ func TestPhaseStartedAtMovesOnAPhaseChange(t *testing.T) {
 	}
 }
 
+// THE REGRESSION THIS PINS: cherry_picking and testing both ride PhaseMerging,
+// so a clock keyed on the merge AXIS left the testing arm claiming to have begun
+// when the pick before it did. A frontend rendering "testing for 40s" was
+// reading the age of the cherry-pick.
+func TestPhaseStartedAtMovesWhenTheArmChangesWithinOneAxisPhase(t *testing.T) {
+	// Arrange — a pick published on the merging axis.
+	sink := &recordingSink{}
+	run := newTestRun(t, sink, testClock())
+	if err := run.PickingCurrent("picking"); err != nil {
+		t.Fatalf("PickingCurrent: %v", err)
+	}
+
+	// Act — the testing arm, on that SAME axis phase.
+	if err := run.Testing("testing"); err != nil {
+		t.Fatalf("Testing: %v", err)
+	}
+
+	// Assert.
+	if sink.got[0].phase != sink.got[1].phase {
+		t.Fatalf("the two statuses rode axis phases %s then %s; this edge needs them to share one",
+			sink.got[0].phase, sink.got[1].phase)
+	}
+	if got, want := sink.statuses[1].GetPhaseStartedAtMs(), sink.statuses[0].GetPhaseStartedAtMs(); got <= want {
+		t.Fatalf("phase_started_at_ms = %d for the testing arm, want later than the cherry_picking arm's %d", got, want)
+	}
+}
+
+// The VIOLATION EDGE for the same clock: an arm change under a STOPPED clock
+// must still land strictly later, or the new arm is indistinguishable from the
+// one it replaced.
+func TestPhaseStartedAtAdvancesOnAnArmChangeUnderAStoppedClock(t *testing.T) {
+	// Arrange — a clock pinned to one instant.
+	sink := &recordingSink{}
+	run := newTestRun(t, sink, pinnedClock(5000))
+	if err := run.PickingCurrent("picking"); err != nil {
+		t.Fatalf("PickingCurrent: %v", err)
+	}
+
+	// Act.
+	if err := run.Testing("testing"); err != nil {
+		t.Fatalf("Testing: %v", err)
+	}
+
+	// Assert.
+	if got, want := sink.statuses[1].GetPhaseStartedAtMs(), sink.statuses[0].GetPhaseStartedAtMs(); got <= want {
+		t.Fatalf("phase_started_at_ms = %d under a stopped clock, want strictly later than %d", got, want)
+	}
+}
+
+// The other half of the keying rule: a REPEATED arm leaves the phase clock
+// alone even when the axis phase is the same, so "cherry-picking for 40s" does
+// not reset every time a commit lands.
+func TestPhaseStartedAtHoldsAcrossARepeatedArmOnAnotherCommit(t *testing.T) {
+	// Arrange.
+	plan := CommitPlan{Commits: []PlannedCommit{
+		{SHA: "a", Short: "a00000000000", Subject: "first"},
+		{SHA: "b", Short: "b00000000000", Subject: "second"},
+	}}
+	sink := &recordingSink{}
+	run := newTestRun(t, sink, testClock())
+	run.SetPlan(plan)
+	if err := run.CherryPicking(plan.Commits[0], "picking 1/2"); err != nil {
+		t.Fatalf("CherryPicking: %v", err)
+	}
+
+	// Act — the same arm for the NEXT commit.
+	if err := run.CherryPicking(plan.Commits[1], "picking 2/2"); err != nil {
+		t.Fatalf("CherryPicking: %v", err)
+	}
+
+	// Assert.
+	if got, want := sink.statuses[1].GetPhaseStartedAtMs(), sink.statuses[0].GetPhaseStartedAtMs(); got != want {
+		t.Fatalf("phase_started_at_ms = %d on a repeated cherry_picking arm, want the unchanged %d", got, want)
+	}
+}
+
 // --- the admission arm --------------------------------------------------
 
 // THE GUARANTEE: the `enqueued` ARM and the merge-axis TOKEN are separate. A
