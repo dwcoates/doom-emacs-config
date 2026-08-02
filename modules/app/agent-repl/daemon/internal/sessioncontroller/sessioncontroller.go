@@ -541,6 +541,25 @@ func (m *Manager) Ensure(workspace string) error {
 	return err
 }
 
+// EnsureDriveable is Ensure plus the WAIT: it returns only once the workspace's
+// shim has connected and handshaked, so the caller's very next SEND cannot lose
+// the race against the shim's boot.
+//
+// It exists because Ensure deliberately does not wait (see above) and a merge
+// run's first act after the bring-up is a send — the lease's interrupt. Against
+// a workspace the idle sweeper had hibernated, Ensure returned while the
+// respawned shim was still handshaking and the interrupt failed with "no live
+// shim connection" a few tens of milliseconds before the link came up, which
+// failed the merge for a session that was in fact coming back.
+//
+// The wait is on the connection EVENT and bounded by the CALLER'S context, so
+// nothing here sleeps or polls, and a caller with a deadline gets its own
+// deadline back as a loud error rather than a hang.
+func (m *Manager) EnsureDriveable(ctx context.Context, workspace string) error {
+	_, err := m.ensure(ctx, workspace)
+	return err
+}
+
 // Live reports whether this manager holds a live session controller for workspace — i.e.
 // whether Ensure would be a no-op.
 //
