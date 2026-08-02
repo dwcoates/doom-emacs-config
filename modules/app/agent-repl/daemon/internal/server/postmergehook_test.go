@@ -224,6 +224,7 @@ func TestWireAgentShimBindsThePostMergeHook(t *testing.T) {
 		Prompts:           &fakePrompts{},
 		Turns:             &fakePrompts{},
 		Lifecycle:         &fakeLifecycle{},
+		SessionDeaths:     stubSessionDeaths{},
 		SessionCommands:   &SessionCommandBinding{},
 		WorkspaceCreation: newFakeWorkspaceCreation(),
 		MergeLease:        stubMergeLease{},

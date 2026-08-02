@@ -34,6 +34,30 @@ type SessionBringUp interface {
 	EnsureLive(ctx context.Context, ws string) error
 }
 
+// SessionDeaths answers the ONE question merge.SessionBringUp cannot: was this
+// workspace's newest session destroyed ON PURPOSE?
+//
+// The two facts look identical from the bring-up path — neither a hibernated nor
+// a deleted workspace has a live session — and they resolve in OPPOSITE
+// directions. Hibernation is recoverable and a merge rehydrates it, because a
+// workspace that became unmergeable by sitting idle is the one thing hibernation
+// must never cost. A deletion is the user destroying the session, and bringing
+// it back to run a merge action would resurrect exactly what they asked to be
+// rid of.
+//
+// It is asked BEFORE SessionBringUp for that reason: `EnsureLive` on a deleted
+// workspace would spawn the resurrection this port exists to refuse.
+type SessionDeaths interface {
+	// DeletedSession names the deleted session and reports the deletion, or
+	// ("", false, nil) when the workspace's newest session is alive, asleep, or
+	// terminal for some other reason.
+	//
+	// A read failure is an ERROR, never the benign answer: "the records could
+	// not be read" and "the session is fine" differ by exactly the resurrection
+	// this port refuses.
+	DeletedSession(ws string) (sessionID string, deleted bool, err error)
+}
+
 // BeforeActionSource resolves the before_ws_merge action a workspace was created
 // with, from the daemon's own creation-time record.
 //
