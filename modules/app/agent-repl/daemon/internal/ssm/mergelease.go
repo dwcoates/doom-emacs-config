@@ -61,9 +61,8 @@ type MergeLeaseConfig struct {
 	// Manager owns the durable ledger the lease is written to. Required.
 	Manager *Manager
 	// Queue is the merge subsystem's durable per-repository request channel.
-	// It is the ONLY source of merge_queue_position / merge_queue_depth: those
-	// are cross-workspace facts, and no per-workspace row can carry them.
-	// Required.
+	// Binding it is what makes a held lease well-formed: the push path treats a
+	// lease with no queue behind it as a wiring bug and says so. Required.
 	Queue merge.Queue
 	// Interrupter is the merge's authority over the workspace's session: it
 	// stops the USER turn the lease displaces, and stands the session down once
@@ -80,14 +79,14 @@ type MergeLease struct {
 // The frozen contract is the compile-time obligation, not a comment.
 var _ merge.Lease = (*MergeLease)(nil)
 
-// NewMergeLease validates cfg, binds the merge queue to the manager so the
-// pushed WorkspaceState can carry the queue facts, and returns the lease.
+// NewMergeLease validates cfg, binds the merge queue to the manager so a held
+// lease is verifiably well-formed, and returns the lease.
 func NewMergeLease(cfg MergeLeaseConfig) (*MergeLease, error) {
 	if cfg.Manager == nil {
 		return nil, fmt.Errorf("ssm: MergeLeaseConfig.Manager is required")
 	}
 	if cfg.Queue == nil {
-		return nil, fmt.Errorf("ssm: MergeLeaseConfig.Queue is required; merge_queue_position and merge_queue_depth have no other source")
+		return nil, fmt.Errorf("ssm: MergeLeaseConfig.Queue is required; a lease with no queue behind it is a merge subsystem assembled by a path that skipped construction")
 	}
 	if cfg.Interrupter == nil {
 		return nil, fmt.Errorf("ssm: MergeLeaseConfig.Interrupter is required; a lease that cannot interrupt the turn it displaces would leave the user driving the shim it claims to own")
@@ -170,9 +169,9 @@ func (w leaseWindow) contains(tsMs int64) bool {
 	return w.releasedAt == 0 || tsMs < w.releasedAt
 }
 
-// bindMergeQueue attaches the merge subsystem's queue, the sole source of the
-// cross-workspace queue facts. Binding twice is a wiring bug: two queues would
-// give two answers to one question, so the second is refused loudly.
+// bindMergeQueue attaches the merge subsystem's queue. Binding twice is a
+// wiring bug: two queues means two merge subsystems contending for one
+// manager's leases, so the second is refused loudly.
 func (m *Manager) bindMergeQueue(q merge.Queue) error {
 	if q == nil {
 		return fmt.Errorf("ssm: bindMergeQueue got a nil merge.Queue")
@@ -180,7 +179,7 @@ func (m *Manager) bindMergeQueue(q merge.Queue) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.mergeQueue != nil {
-		return fmt.Errorf("ssm: a merge.Queue is already bound; a second one would make merge_queue_position ambiguous")
+		return fmt.Errorf("ssm: a merge.Queue is already bound; a second one would put two merge subsystems behind one manager's leases")
 	}
 	m.mergeQueue = q
 	return nil
@@ -388,56 +387,50 @@ func (m *Manager) warmMergeLeasesLocked() error {
 	return nil
 }
 
-// mergeQueueFactsLocked resolves the workspace's position on and the depth of
-// its repository's merge queue. Caller holds mu.
+// mergeWiringCheckLocked reports the one combination the merge wiring must not
+// produce: a workspace holding a merge LEASE while no merge.Queue is bound.
 //
-// Both are ZERO when the workspace is not enqueued, which is what the frozen
-// contract defines index 0 to mean. A daemon assembled without a merge
-// subsystem has no queue at all, so nothing can be enqueued on it and zero is
-// the true answer there too — but a workspace holding a LEASE with no queue
-// bound is a wiring bug (only NewMergeLease can produce a lease, and it binds
-// the queue), so that combination is logged rather than passed over.
-func (m *Manager) mergeQueueFactsLocked(workspace string) (position, depth int32) {
-	if m.mergeQueue == nil {
-		if len(m.openMergeWindowsLocked(workspace)) > 0 {
-			m.logf("ssm: INVARIANT VIOLATION ws=%s holds a merge lease with NO merge.Queue bound — merge_queue_position and merge_queue_depth are reported as 0 for a workspace that is demonstrably merging",
-				workspace)
-		}
-		return 0, 0
+// A daemon assembled without a merge subsystem has no queue at all, and nothing
+// can be enqueued on it, so no lease can exist either. Only NewMergeLease can
+// produce a lease and it binds the queue, so a held lease with no queue is a
+// wiring bug — the merge subsystem was assembled by some path that skipped
+// construction. It is logged rather than passed over.
+//
+// It used to guard the flat merge_queue_position / merge_queue_depth stamped
+// from a queue snapshot at push time. Those fields are retired (MergeStatus's
+// enqueued arm reports the place the run was ADMITTED at instead), but the
+// wiring bug the check detects is unchanged, so the check outlives them.
+func (m *Manager) mergeWiringCheckLocked(workspace string, leaseHeld bool) {
+	if m.mergeQueue != nil || !leaseHeld {
+		return
 	}
-	for _, requests := range m.mergeQueue.Snapshot() {
-		for i, req := range requests {
-			if req.Workspace != workspace {
-				continue
-			}
-			return int32(i + 1), int32(len(requests))
-		}
-	}
-	return 0, 0
+	m.logf("ssm: INVARIANT VIOLATION ws=%s holds a merge lease with NO merge.Queue bound — only NewMergeLease can produce a lease and it binds the queue, so the merge subsystem is mis-wired",
+		workspace)
 }
 
 // stampMergeFactsLocked writes the merge fields no per-workspace state row can
 // carry onto a WorkspaceState about to be pushed. Caller holds mu.
 //
-// merged_at_ms rides here rather than off the resolution for the same reason
-// the queue facts do: it is a fact about the workspace's HISTORY, not about
-// which row currently wins, so resolving it would tie a permanent instant to
-// whichever transition happened to be newest.
+// merged_at_ms rides here rather than off the resolution because it is a fact
+// about the workspace's HISTORY, not about which row currently wins, so
+// resolving it would tie a permanent instant to whichever transition happened
+// to be newest.
 //
 // It is called from workspaceMessageLocked and nowhere else, which is what
 // makes every push, snapshot and synchronous publication carry the same
 // answer: one construction funnel, so a frame that omits them is
 // unrepresentable rather than merely unlikely.
-func (m *Manager) stampMergeFactsLocked(workspace string, msg *frontendv1.WorkspaceState) {
-	position, depth := m.mergeQueueFactsLocked(workspace)
-	msg.MergeQueuePosition = position
-	msg.MergeQueueDepth = depth
-	msg.MergeLeaseHeld = len(m.openMergeWindowsLocked(workspace)) > 0
+func (m *Manager) stampMergeFactsLocked(workspace string, r resolved, msg *frontendv1.WorkspaceState) {
+	leaseHeld := len(m.openMergeWindowsLocked(workspace)) > 0
+	m.mergeWiringCheckLocked(workspace, leaseHeld)
+	msg.MergeLeaseHeld = leaseHeld
 	msg.MergedAtMs = m.mergedAtLocked(workspace)
 	// merge_status carries its own queue place: the enqueued arm reports the
 	// position the run was ADMITTED at, observed by the coordinator under the
 	// repository's advance gate, rather than a snapshot re-read at push time.
-	m.stampMergeStatusLocked(workspace, msg)
+	// It is the ONLY queue surface on the message now that the flat
+	// merge_queue_position / merge_queue_depth pair is retired.
+	m.stampMergeStatusLocked(workspace, r.mergePhase, msg)
 }
 
 // pushCurrentLocked re-resolves the workspace and pushes it unconditionally.

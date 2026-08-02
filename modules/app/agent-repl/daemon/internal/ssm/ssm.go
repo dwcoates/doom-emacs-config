@@ -157,8 +157,12 @@ type Manager struct {
 	// noted at the transition).
 	mergedTeardown MergedTeardown
 	// mergeQueue is the merge subsystem's queue, bound by ssm.NewMergeLease.
-	// It is the sole source of merge_queue_position / merge_queue_depth, which
-	// are cross-workspace facts no per-workspace row can carry.
+	// Its presence is what makes a held merge lease well-formed: only
+	// NewMergeLease can produce a lease and it binds the queue, so a lease with
+	// no queue behind it is a wiring bug the push path reports
+	// (mergeWiringCheckLocked). It no longer feeds any wire field — the flat
+	// merge_queue_position / merge_queue_depth pair is retired, and MergeStatus's
+	// enqueued arm reports the place the run was ADMITTED at instead.
 	mergeQueue merge.Queue
 	subs       map[int]chan *frontendv1.WorkspaceState
 	nextSub    int
@@ -781,9 +785,9 @@ func (m *Manager) ApplyMergeTransition(workspace, phase, cause string) error {
 // rendering a phase word that disagrees with the progress beneath it.
 //
 // The status rides the ONE WorkspaceState construction site
-// (workspaceMessageLocked, via stampMergeStatusLocked), exactly as the merge
-// queue facts and the merged-at instant do — never stamped onto a frame around
-// it.
+// (workspaceMessageLocked, via stampMergeStatusLocked), exactly as
+// merge_lease_held and the merged-at instant do — never stamped onto a frame
+// around it.
 func (m *Manager) ApplyMergeStatus(workspace, phase, cause string, status *frontendv1.MergeStatus) error {
 	if status == nil {
 		// A pipeline publication with no status is the caller having lost the
@@ -935,12 +939,12 @@ func (m *Manager) reresolveLocked(workspace, causeKind string, causeSeq uint64) 
 		}
 		// §12 SSM contract: every transition logged old→new + cause kind + seq.
 		m.logf("ssm: transition ws=%s %s→%s cause_kind=%s cause_seq=%d turn_active=%t live_tasks=%d merge=%q",
-			workspace, oldName, renderName(msg.GetState()), causeKind, causeSeq, msg.GetTurnActive(), msg.GetLiveTaskCount(), msg.GetMergePhase())
+			workspace, oldName, renderName(msg.GetState()), causeKind, causeSeq, msg.GetTurnActive(), msg.GetLiveTaskCount(), r.mergePhase)
 	} else if !tasksMoved {
 		// A merge-progress-only push. Logged on its own axis so a within-phase
 		// tick is not reported as a live_tasks delta it did not cause.
 		m.logf("ssm: merge_status ws=%s run=%s phase=%T cause_kind=%s cause_seq=%d merge=%q",
-			workspace, msg.GetMergeStatus().GetRunId(), msg.GetMergeStatus().GetPhase(), causeKind, causeSeq, msg.GetMergePhase())
+			workspace, msg.GetMergeStatus().GetRunId(), msg.GetMergeStatus().GetPhase(), causeKind, causeSeq, r.mergePhase)
 	} else {
 		m.logf("ssm: live_tasks ws=%s %d→%d cause_kind=%s cause_seq=%d state=%s",
 			workspace, oldTasks, msg.GetLiveTaskCount(), causeKind, causeSeq, renderName(msg.GetState()))
@@ -985,7 +989,7 @@ func (m *Manager) workspaceMessageLocked(workspace string, r resolved) (*fronten
 			return nil, err
 		}
 	}
-	m.stampMergeFactsLocked(workspace, msg)
+	m.stampMergeFactsLocked(workspace, r, msg)
 	m.stampFreshnessLocked(workspace, msg)
 	return msg, nil
 }
@@ -1187,7 +1191,6 @@ func (r resolved) toProto(workspace string) *frontendv1.WorkspaceState {
 		State:         r.state,
 		TurnActive:    r.turnActive,
 		LiveTaskCount: r.liveTaskCount,
-		MergePhase:    r.mergePhase,
 		CauseKind:     r.causeKind,
 		CauseSeq:      r.causeSeq,
 		AtMs:          r.atMs,
