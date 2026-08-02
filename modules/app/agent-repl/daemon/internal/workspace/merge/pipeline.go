@@ -2,6 +2,7 @@ package merge
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
 
@@ -28,11 +29,36 @@ type SessionBringUp interface {
 	// EnsureLive returns once ws has a live, promptable session, or with the
 	// error that makes that impossible.
 	//
+	// "PROMPTABLE" IS THE WHOLE CONTRACT, not "a process was started". The run's
+	// very next act is a SEND — the lease's interrupt — so an implementation that
+	// returns while the shim is still handshaking hands the merge a session it
+	// cannot drive, and the lease fails on a connection that was milliseconds
+	// away.
+	//
 	// A workspace whose newest session was DELETED is a hard failure: there is
 	// nothing to bring up and nothing to prompt, and a merge that needs the
 	// session cannot proceed without one.
+	//
+	// A workspace with NO session record at all reports ErrNoSession, which is
+	// not a failure — see that sentinel.
 	EnsureLive(ctx context.Context, ws string) error
 }
+
+// ErrNoSession reports that a workspace has NO session record to bring up.
+//
+// IT IS NOT A BRING-UP FAILURE, and conflating the two is what this sentinel
+// exists to prevent. A plain worktree that nobody has ever opened a session on
+// is perfectly mergeable: the cherry-pick, the test gate and the rollback are
+// all git, and none of them needs an agent. Failing such a merge would make
+// "has this workspace ever been opened in the editor?" a precondition of
+// merging it, which it has never been.
+//
+// The merge therefore proceeds SESSIONLESS on it. That is not a degraded mode
+// papering over an absence: the steps that genuinely need a session — the
+// before-action, a conflict resolution, a test fix — each fail loudly on their
+// own path when there is no session to run them, and they are the only steps
+// that can tell whether the absence matters.
+var ErrNoSession = errors.New("merge: the workspace has no session record to bring up")
 
 // SessionDeaths answers the ONE question merge.SessionBringUp cannot: was this
 // workspace's newest session destroyed ON PURPOSE?
