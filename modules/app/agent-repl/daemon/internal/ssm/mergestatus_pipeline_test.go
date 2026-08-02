@@ -147,3 +147,169 @@ func TestASecondMergedRowDoesNotTearTheSessionDownAgain(t *testing.T) {
 		t.Fatalf("the session was stood down %d times, want exactly 1", got)
 	}
 }
+
+// --- the merge-progress push key ---------------------------------------------
+//
+// Every row below is a publication that does NOT move the render state, which
+// is the whole reason the key exists: the run's middle — every pick, every test
+// gate, and the second `merged` carrying the after-action's outcome — resolves
+// to a state the previous frame already reported.
+
+// drainStatuses reads every merge_status a subscriber has been handed for ws
+// without blocking, in arrival order.
+func drainStatuses(states <-chan *frontendv1.WorkspaceState, ws string) []*frontendv1.MergeStatus {
+	var out []*frontendv1.MergeStatus
+	for {
+		select {
+		case msg := <-states:
+			if msg.GetWorkspace() != ws {
+				continue
+			}
+			if status := msg.GetMergeStatus(); status != nil {
+				out = append(out, status)
+			}
+		default:
+			return out
+		}
+	}
+}
+
+// testingStatus builds the testing status the gate publishes for the commit
+// that just landed.
+func testingStatus(runID string, total, landed int32, sha string) *frontendv1.MergeStatus {
+	return &frontendv1.MergeStatus{
+		RunId:            runID,
+		PhaseStartedAtMs: 2000,
+		UpdatedAtMs:      2001,
+		Phase: &frontendv1.MergeStatus_Testing{Testing: &frontendv1.MergeStatusTesting{
+			CommitsTotal:  total,
+			CommitsLanded: landed,
+			CurrentSha:    sha,
+		}},
+	}
+}
+
+// mergedStatus builds a terminal merged status.
+func mergedStatus(runID string, total int32, afterActionErr string, updatedAt int64) *frontendv1.MergeStatus {
+	return &frontendv1.MergeStatus{
+		RunId:            runID,
+		PhaseStartedAtMs: 3000,
+		UpdatedAtMs:      updatedAt,
+		Phase: &frontendv1.MergeStatus_Merged{Merged: &frontendv1.MergeStatusMerged{
+			CommitsTotal:     total,
+			AfterActionError: afterActionErr,
+		}},
+	}
+}
+
+// THE GUARANTEE: a phase change within one render state is pushed. cherry_picking
+// and testing both resolve to `merging`, so a push keyed on the render state
+// alone drops the testing arm entirely and a frontend never learns the suite ran.
+func TestAStatusPhaseChangeWithinOneRenderStateIsPushed(t *testing.T) {
+	// Arrange — a run already picking, so the render state is settled on merging.
+	m, _, _ := openUnwiredTest(t, fakeResolver{"s1": "ws1"})
+	if err := m.ApplyMergeStatus("ws1", string(merge.PhaseMerging), "cherry-picking 1/3",
+		pipelineStatus("run-1", 3, 0, "aaaa", "first")); err != nil {
+		t.Fatalf("cherry_picking: %v", err)
+	}
+	states, cancel := m.Subscribe()
+	t.Cleanup(cancel)
+
+	// Act — the same render state, a different phase.
+	if err := m.ApplyMergeStatus("ws1", string(merge.PhaseMerging), "testing 1/3",
+		testingStatus("run-1", 3, 1, "aaaa")); err != nil {
+		t.Fatalf("testing: %v", err)
+	}
+
+	// Assert.
+	got := drainStatuses(states, "ws1")
+	if len(got) != 1 {
+		t.Fatalf("the testing phase produced %d pushes, want 1: cherry_picking and testing share the `merging` render state, so a state-keyed push drops it", len(got))
+	}
+	if got[0].GetTesting() == nil {
+		t.Fatalf("the pushed status carries phase %T, want testing", got[0].GetPhase())
+	}
+}
+
+// A within-phase TICK is pushed too: the pick cursor advancing is the progress a
+// user is watching, and it never changes either the arm or the render state.
+func TestAWithinPhaseProgressTickIsPushed(t *testing.T) {
+	// Arrange.
+	m, _, _ := openUnwiredTest(t, fakeResolver{"s1": "ws1"})
+	if err := m.ApplyMergeStatus("ws1", string(merge.PhaseMerging), "cherry-picking 1/3",
+		pipelineStatus("run-1", 3, 0, "aaaa", "first")); err != nil {
+		t.Fatalf("first pick: %v", err)
+	}
+	states, cancel := m.Subscribe()
+	t.Cleanup(cancel)
+
+	// Act — the same arm, a moved cursor.
+	if err := m.ApplyMergeStatus("ws1", string(merge.PhaseMerging), "cherry-picking 2/3",
+		pipelineStatus("run-1", 3, 1, "bbbb", "second")); err != nil {
+		t.Fatalf("second pick: %v", err)
+	}
+
+	// Assert.
+	got := drainStatuses(states, "ws1")
+	if len(got) != 1 {
+		t.Fatalf("the advanced pick cursor produced %d pushes, want 1", len(got))
+	}
+	if landed := got[0].GetCherryPicking().GetCommitsLanded(); landed != 1 {
+		t.Fatalf("the pushed status reports commits_landed=%d, want 1", landed)
+	}
+}
+
+// The SECOND `merged` — republished once the after-action has run — must reach
+// the wire, because it is the only frame carrying after_action_error. The first
+// already put the workspace in the merged render state, so nothing but the
+// status itself has moved.
+func TestTheSecondMergedStatusCarryingTheAfterActionErrorIsPushed(t *testing.T) {
+	// Arrange.
+	m, _, _ := openUnwiredTest(t, fakeResolver{"s1": "ws1"})
+	if err := m.ApplyMergeStatus("ws1", string(merge.PhaseMerged), "the merge landed",
+		mergedStatus("run-1", 2, "", 3001)); err != nil {
+		t.Fatalf("first merged: %v", err)
+	}
+	states, cancel := m.Subscribe()
+	t.Cleanup(cancel)
+
+	// Act.
+	if err := m.ApplyMergeStatus("ws1", string(merge.PhaseMerged), "the merge landed",
+		mergedStatus("run-1", 2, "the after-action turn errored", 3002)); err != nil {
+		t.Fatalf("second merged: %v", err)
+	}
+
+	// Assert.
+	got := drainStatuses(states, "ws1")
+	if len(got) != 1 {
+		t.Fatalf("the after-action outcome produced %d pushes, want 1: without it the failure is swallowed", len(got))
+	}
+	if errText := got[0].GetMerged().GetAfterActionError(); errText != "the after-action turn errored" {
+		t.Fatalf("after_action_error = %q, want the after-action's failure", errText)
+	}
+}
+
+// An UNCHANGED status is not republished. The pipeline builds a fresh
+// MergeStatus per publication, so a pointer-keyed push would fire on every
+// re-resolve and report progress the run did not make.
+func TestAnUnchangedStatusIsNotRepublished(t *testing.T) {
+	// Arrange.
+	m, _, _ := openUnwiredTest(t, fakeResolver{"s1": "ws1"})
+	if err := m.ApplyMergeStatus("ws1", string(merge.PhaseMerging), "cherry-picking 1/3",
+		pipelineStatus("run-1", 3, 0, "aaaa", "first")); err != nil {
+		t.Fatalf("first pick: %v", err)
+	}
+	states, cancel := m.Subscribe()
+	t.Cleanup(cancel)
+
+	// Act — the identical status, rebuilt.
+	if err := m.ApplyMergeStatus("ws1", string(merge.PhaseMerging), "cherry-picking 1/3",
+		pipelineStatus("run-1", 3, 0, "aaaa", "first")); err != nil {
+		t.Fatalf("republish: %v", err)
+	}
+
+	// Assert.
+	if got := drainStatuses(states, "ws1"); len(got) != 0 {
+		t.Fatalf("an unchanged status produced %d pushes, want 0", len(got))
+	}
+}
