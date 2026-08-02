@@ -278,7 +278,8 @@ func TestE2EAQueuedMergeSurvivesADaemonBounce(t *testing.T) {
 	parkedCmd := parkTheQueueHead(t, first.geometry, w1, repo, parkedDir, "feature-parked", "r-merge-parked")
 	sendMerge(t, firstConn, "r-merge-queued", mergeCmdFor(t, first.geometry, repo, queuedDir, "feature-queued"))
 	w1.awaitOKAck("r-merge-queued")
-	assertQueuePosition(t, w1.awaitPhase(queuedDir, phaseMergeQueued), 2, 2)
+	w1.awaitPhase(queuedDir, phaseMergeQueued)
+	assertAdmittedQueuePosition(t, w1, queuedDir, 2, 2)
 
 	// Act — the daemon goes away with the queue outstanding, comes back, and is
 	// handed nothing but the resolution of the head it left parked.
@@ -299,9 +300,20 @@ func TestE2EAQueuedMergeSurvivesADaemonBounce(t *testing.T) {
 	if !strings.Contains(readMergeFile(t, repo.target, "feature-queued.txt"), "hello from feature-queued") {
 		t.Error("the queued workspace reported merged but its file is not in the target: the drain reported work it did not do")
 	}
-	if state := w2.latest(queuedDir); state.GetMergeQueuePosition() != 0 {
-		t.Errorf("merge_queue_position for the drained workspace = %d, want 0 (Position: zero means not enqueued)",
-			state.GetMergeQueuePosition())
+	// REWRITTEN off the retired flat merge_queue_position, which this asserted
+	// had returned to 0 once the entry drained. The field is gone, and the
+	// structured statement of the same guarantee is stronger: a drained run has
+	// LEFT the queue, so its newest status must have moved off the `enqueued`
+	// arm entirely rather than merely reporting index 0 on it.
+	state := w2.latest(queuedDir)
+	if state.GetMergeStatus().GetEnqueued() != nil {
+		t.Errorf("the drained workspace still presents an enqueued merge_status (position=%d depth=%d): a run that has merged has left the queue",
+			state.GetMergeStatus().GetEnqueued().GetPosition(),
+			state.GetMergeStatus().GetEnqueued().GetDepth())
+	}
+	if state.GetMergeStatus().GetMerged() == nil {
+		t.Errorf("the drained workspace's newest merge_status is %T, want the terminal merged arm",
+			state.GetMergeStatus().GetPhase())
 	}
 }
 

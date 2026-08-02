@@ -1,8 +1,8 @@
 // THE MERGE QUEUE, end to end over the REAL processes: two workspaces of the
 // same repository contending for one target worktree, driven as real
 // MergeWorkspaceCmd frames over the frontend WebSocket, landing in real git
-// repositories on disk, and observed as the merge_phase / merge_queue_position
-// / merge_queue_depth facts on the pushed WorkspaceState.
+// repositories on disk, and observed as the resolved RenderState plus the
+// MergeStatus facts on the pushed WorkspaceState.
 //
 // WHY THE HEAD OF THE QUEUE IS A CONFLICT. Serialization is only observable if
 // the head of the queue is still holding it when the second request arrives. A
@@ -308,20 +308,19 @@ func sendMergeResume(t *testing.T, conn *websocket.Conn, requestID string, m mer
 
 // --- observation -------------------------------------------------------------
 
-// The merge phase vocabulary, as it appears on WorkspaceState.merge_phase. The
-// strings are merge.Phase's own values (merge.go: "the snake_case render-state
-// vocabulary the SSM and the frontend.v1 RenderState enum share"), and they are
-// what these tests assert on rather than RenderState: `state` is a COMPOSITE
-// that connectivity and session status also contribute to, so asserting the
-// merge's own account of itself on the merge's own field keeps the assertion
-// about the merge.
+// The merge phase vocabulary. These used to be the strings that appeared on
+// WorkspaceState.merge_phase; that field is RETIRED, so the suite names the
+// merge axis's own resolved RenderState instead -- the same axis, read off the
+// surface that still carries it. merge.Phase's values were always "the
+// snake_case render-state vocabulary the SSM and the frontend.v1 RenderState
+// enum share" (merge.go), so this is a change of surface and not of meaning.
 const (
-	phaseMergeEnqueuing = "merge_enqueuing"
-	phaseMerging        = "merging"
-	phaseMergeQueued    = "merge_queued"
-	phaseMergeConflict  = "merge_conflict"
-	phaseMergeFailed    = "merge_failed"
-	phaseMerged         = "merged"
+	phaseMergeEnqueuing = frontendv1.RenderState_RENDER_STATE_MERGE_ENQUEUING
+	phaseMerging        = frontendv1.RenderState_RENDER_STATE_MERGING
+	phaseMergeQueued    = frontendv1.RenderState_RENDER_STATE_MERGE_QUEUED
+	phaseMergeConflict  = frontendv1.RenderState_RENDER_STATE_MERGE_CONFLICT
+	phaseMergeFailed    = frontendv1.RenderState_RENDER_STATE_MERGE_FAILED
+	phaseMerged         = frontendv1.RenderState_RENDER_STATE_MERGED
 )
 
 // mergeWatch is an accumulating reader over ONE frontend connection.
@@ -380,25 +379,68 @@ func (w *mergeWatch) until(what string, cond func() bool) {
 	}
 }
 
-// firstPhase returns the first recorded WorkspaceState for ws whose merge_phase
-// is phase, or nil.
-func (w *mergeWatch) firstPhase(ws, phase string) *frontendv1.WorkspaceState {
+// stateInPhase reports whether state PRESENTS phase.
+//
+// TWO SURFACES ARE READ, because the retired flat merge_phase was a third that
+// neither reproduces alone.
+//
+//   - The resolved RenderState is the merge axis's own output, but `state` is a
+//     COMPOSITE: connectivity and session status contribute to it too. A merged
+//     workspace is hibernated moments after it lands, so its render state moves
+//     off `merged` while the run's terminal account is still on the frame.
+//   - MergeStatus is the run's own arm, and it survives that move -- but it
+//     cannot name every axis row either: `enqueued` rides merge_enqueuing for a
+//     head admission and merge_queued for a deferred one, so it pins neither.
+//
+// The union is what the coarse field used to stand in for, and reading both is
+// what keeps these assertions about the MERGE rather than about whichever
+// surface happened to still be carrying it.
+func stateInPhase(state *frontendv1.WorkspaceState, phase frontendv1.RenderState) bool {
+	if state.GetState() == phase {
+		return true
+	}
+	return phase != frontendv1.RenderState_RENDER_STATE_UNSPECIFIED &&
+		mergeStatusPhase(state.GetMergeStatus()) == phase
+}
+
+// mergeStatusPhase maps a run's status arm onto the render state it rides, or
+// UNSPECIFIED for an arm that pins none.
+func mergeStatusPhase(status *frontendv1.MergeStatus) frontendv1.RenderState {
+	switch status.GetPhase().(type) {
+	case *frontendv1.MergeStatus_BeforeAction, *frontendv1.MergeStatus_CherryPicking,
+		*frontendv1.MergeStatus_Testing, *frontendv1.MergeStatus_AfterAction:
+		return frontendv1.RenderState_RENDER_STATE_MERGING
+	case *frontendv1.MergeStatus_Conflict:
+		return frontendv1.RenderState_RENDER_STATE_MERGE_CONFLICT
+	case *frontendv1.MergeStatus_Merged:
+		return frontendv1.RenderState_RENDER_STATE_MERGED
+	case *frontendv1.MergeStatus_Failed:
+		return frontendv1.RenderState_RENDER_STATE_MERGE_FAILED
+	}
+	return frontendv1.RenderState_RENDER_STATE_UNSPECIFIED
+}
+
+// firstPhase returns the first recorded WorkspaceState for ws presenting phase,
+// or nil.
+func (w *mergeWatch) firstPhase(ws string, phase frontendv1.RenderState) *frontendv1.WorkspaceState {
 	for _, state := range w.states {
-		if state.GetWorkspace() == ws && state.GetMergePhase() == phase {
+		if state.GetWorkspace() == ws && stateInPhase(state, phase) {
 			return state
 		}
 	}
 	return nil
 }
 
-func (w *mergeWatch) sawPhase(ws, phase string) bool { return w.firstPhase(ws, phase) != nil }
+func (w *mergeWatch) sawPhase(ws string, phase frontendv1.RenderState) bool {
+	return w.firstPhase(ws, phase) != nil
+}
 
 // awaitPhase blocks until ws has been seen in phase and returns the FIRST such
 // state — the one whose queue facts describe the transition rather than some
 // later republication of it.
-func (w *mergeWatch) awaitPhase(ws, phase string) *frontendv1.WorkspaceState {
+func (w *mergeWatch) awaitPhase(ws string, phase frontendv1.RenderState) *frontendv1.WorkspaceState {
 	w.t.Helper()
-	w.until(fmt.Sprintf("a WorkspaceState for %s with merge_phase=%s", ws, phase), func() bool {
+	w.until(fmt.Sprintf("a WorkspaceState for %s presenting %s", ws, phase), func() bool {
 		return w.sawPhase(ws, phase)
 	})
 	return w.firstPhase(ws, phase)
@@ -449,16 +491,39 @@ func (w *mergeWatch) awaitItem(ws, what string, match func(*frontendv1.Conversat
 	return found
 }
 
-// assertQueuePosition is the shared queue-fact assertion: a 1-based index and
-// the depth of the repository's whole queue at that moment.
-func assertQueuePosition(t *testing.T, state *frontendv1.WorkspaceState, wantIndex, wantDepth int32) {
-	t.Helper()
-	if got := state.GetMergeQueuePosition(); got != wantIndex {
-		t.Errorf("merge_queue_position for %s = %d, want %d (1-based; the merge cherry-picking now is 1)",
-			state.GetWorkspace(), got, wantIndex)
+// firstEnqueued returns the first recorded WorkspaceState for ws carrying a
+// merge_status on its `enqueued` arm, or nil.
+func (w *mergeWatch) firstEnqueued(ws string) *frontendv1.WorkspaceState {
+	for _, state := range w.states {
+		if state.GetWorkspace() == ws && state.GetMergeStatus().GetEnqueued() != nil {
+			return state
+		}
 	}
-	if got := state.GetMergeQueueDepth(); got != wantDepth {
-		t.Errorf("merge_queue_depth for %s = %d, want %d", state.GetWorkspace(), got, wantDepth)
+	return nil
+}
+
+// assertAdmittedQueuePosition is the shared queue-fact assertion: the 1-based
+// index and the queue depth the run was ADMITTED at.
+//
+// REWRITTEN off the retired flat merge_queue_position / merge_queue_depth pair,
+// which was a queue snapshot re-read at push time and therefore readable on any
+// frame. MergeStatus reports the place ONCE, on the `enqueued` arm the
+// coordinator publishes under the repository's advance gate, so the assertion
+// is scoped to that admission rather than to whatever frame happened to be
+// latest. That is the stronger reading: it pins where the run entered the
+// queue, which no later re-read can contradict.
+func assertAdmittedQueuePosition(t *testing.T, w *mergeWatch, ws string, wantIndex, wantDepth int32) {
+	t.Helper()
+	w.until("a WorkspaceState for "+ws+" carrying an enqueued merge_status", func() bool {
+		return w.firstEnqueued(ws) != nil
+	})
+	enqueued := w.firstEnqueued(ws).GetMergeStatus().GetEnqueued()
+	if got := enqueued.GetPosition(); got != wantIndex {
+		t.Errorf("admitted queue position for %s = %d, want %d (1-based; the merge cherry-picking now is 1)",
+			ws, got, wantIndex)
+	}
+	if got := enqueued.GetDepth(); got != wantDepth {
+		t.Errorf("admitted queue depth for %s = %d, want %d", ws, got, wantDepth)
 	}
 }
 
@@ -470,8 +535,8 @@ func parkTheQueueHead(t *testing.T, geo mergeGeometryRecorder, w *mergeWatch, re
 	t.Helper()
 	cmd := mergeCmdFor(t, geo, repo, worktreeDir, branch)
 	sendMerge(t, w.conn, requestID, cmd)
-	head := w.awaitPhase(worktreeDir, phaseMergeConflict)
-	assertQueuePosition(t, head, 1, 1)
+	w.awaitPhase(worktreeDir, phaseMergeConflict)
+	assertAdmittedQueuePosition(t, w, worktreeDir, 1, 1)
 	return cmd
 }
 
@@ -504,8 +569,8 @@ func TestE2EASecondMergeOnTheSameRepoIsQueuedBehindTheFirst(t *testing.T) {
 
 	// Assert — admitted to the queue, behind the parked head, and not landed.
 	w.awaitOKAck("r-merge-second")
-	queued := w.awaitPhase(second, phaseMergeQueued)
-	assertQueuePosition(t, queued, 2, 2)
+	w.awaitPhase(second, phaseMergeQueued)
+	assertAdmittedQueuePosition(t, w, second, 2, 2)
 	if w.sawPhase(second, phaseMerged) {
 		t.Error("the second merge reported merged before it was ever seen queued: the two merges were not serialized")
 	}
@@ -538,7 +603,7 @@ func TestE2EQueueDepthIsKeyedByRepositoryNotByWorktree(t *testing.T) {
 		// admissionPhase is the phase the merge is ADMITTED in: deferred behind
 		// the parked head on a shared queue, cherry-picking straight away on
 		// its own.
-		admissionPhase string
+		admissionPhase frontendv1.RenderState
 		// wantIndex / wantDepth are that admission's queue facts.
 		wantIndex int32
 		wantDepth int32
@@ -587,8 +652,8 @@ func TestE2EQueueDepthIsKeyedByRepositoryNotByWorktree(t *testing.T) {
 			// Assert — the queue the merge was admitted to is the repository's,
 			// not the worktree's.
 			w.awaitOKAck("r-merge-subject")
-			admission := w.awaitPhase(subjectDir, tc.admissionPhase)
-			assertQueuePosition(t, admission, tc.wantIndex, tc.wantDepth)
+			w.awaitPhase(subjectDir, tc.admissionPhase)
+			assertAdmittedQueuePosition(t, w, subjectDir, tc.wantIndex, tc.wantDepth)
 			if tc.wantDrains {
 				w.awaitPhase(subjectDir, phaseMerged)
 			} else if w.sawPhase(subjectDir, phaseMerged) {
