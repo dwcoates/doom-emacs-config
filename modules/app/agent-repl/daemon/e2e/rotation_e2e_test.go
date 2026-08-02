@@ -47,42 +47,64 @@ import (
 // the daemon's own account of which conversation the session is filing under,
 // and the value a re-handshake's announcement is compared against.
 //
-// It POLLS because the rotation is asynchronous end to end (the shim bounces,
+// It WAITS because the rotation is asynchronous end to end (the shim bounces,
 // the daemon re-handshakes, and only then is the record rewritten), and it
 // takes a `want` predicate rather than a fixed wait so the test names the
 // condition it is waiting for instead of a duration.
+//
+// The wait is driven by the daemon's own vendor-uuid WRITE (h.vendors), not by
+// a poll interval: each attempt takes the next-write signal, re-reads
+// /sessions, and blocks on that signal if the value has not arrived yet. Taking
+// the signal BEFORE the read is what makes it airtight — a write landing
+// between the read and the block has already closed the channel the block is
+// about to select on, so it cannot be missed.
+//
+// /sessions remains the value actually inspected. The notification says only
+// WHEN to look; what the test asserts on is still the daemon's published
+// account of the session, exactly as before.
 func vendorSessionID(t *testing.T, h *e2eHarness, sessionID string, want func(string) bool, what string) string {
 	t.Helper()
-	deadline := time.Now().Add(frameTimeout)
+	timeout := time.After(frameTimeout)
 	last := ""
-	for time.Now().Before(deadline) {
-		resp, err := http.Get(h.ts.URL + "/sessions")
-		if err != nil {
-			t.Fatalf("GET /sessions: %v", err)
+	for {
+		written := h.vendors.pending()
+		last = readVendorSessionID(t, h, sessionID)
+		if want(last) {
+			return last
 		}
-		var body struct {
-			Sessions []struct {
-				SessionID       string `json:"session_id"`
-				ClaudeSessionID string `json:"claude_session_id"`
-			} `json:"sessions"`
+		select {
+		case <-written:
+		case <-timeout:
+			t.Fatalf("session %s never reported %s (last claude_session_id = %q)", sessionID, what, last)
+			return ""
 		}
-		decodeErr := json.NewDecoder(resp.Body).Decode(&body)
-		resp.Body.Close()
-		if decodeErr != nil {
-			t.Fatalf("decode /sessions: %v", decodeErr)
-		}
-		for _, s := range body.Sessions {
-			if s.SessionID != sessionID {
-				continue
-			}
-			last = s.ClaudeSessionID
-			if want(last) {
-				return last
-			}
-		}
-		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("session %s never reported %s (last claude_session_id = %q)", sessionID, what, last)
+}
+
+// readVendorSessionID reads sessionID's claude_session_id off GET /sessions
+// once, reporting "" when the daemon has not recorded one (or does not know the
+// session yet).
+func readVendorSessionID(t *testing.T, h *e2eHarness, sessionID string) string {
+	t.Helper()
+	resp, err := http.Get(h.ts.URL + "/sessions")
+	if err != nil {
+		t.Fatalf("GET /sessions: %v", err)
+	}
+	defer resp.Body.Close()
+	var body struct {
+		Sessions []struct {
+			SessionID       string `json:"session_id"`
+			ClaudeSessionID string `json:"claude_session_id"`
+		} `json:"sessions"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode /sessions: %v", err)
+	}
+	for _, s := range body.Sessions {
+		if s.SessionID == sessionID {
+			return s.ClaudeSessionID
+		}
+	}
 	return ""
 }
 
