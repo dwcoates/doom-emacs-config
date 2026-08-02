@@ -46,8 +46,26 @@ type turnWaiter struct {
 	// turnID is the turn this waiter is bound to, valid once bound is true.
 	turnID string
 	bound  bool
+	// outcome is what the matching TurnEnded said about itself. Written before
+	// done is closed and read only after, so the close is its handoff.
+	outcome turnOutcome
 	// done is closed by the matching TurnEnded, exactly once.
 	done chan struct{}
+}
+
+// turnOutcome is a completed turn's own verdict on itself.
+//
+// IT EXISTS BECAUSE "THE TURN ENDED" IS NOT "THE TURN WORKED". A merge action is
+// a turn the run demanded — the user's stated precondition for merging, or the
+// postprocessing they asked to follow it — and a waiter that reported success
+// for any end at all told merge.Coordinator an errored action had completed. The
+// before-action's failure then landed a plan the action was meant to change, and
+// the after-action's never reached after_action_error at all.
+type turnOutcome struct {
+	// isError is TurnEnded.is_error: the turn ended badly.
+	isError bool
+	// stopReason is TurnEnded.stop_reason, the vendor's own word for why.
+	stopReason string
 }
 
 // armTurnWaiter registers an unbound waiter on d. Caller must NOT hold m.mu.
@@ -78,7 +96,7 @@ func (m *Manager) dropTurnWaiter(d *sessionController, w *turnWaiter) {
 // Called on the shim read-loop goroutine for EVERY accepted turn boundary, so
 // it does nothing but bookkeeping and a channel close — never a send that needs
 // that loop to make progress.
-func (m *Manager) onTurnEvent(d *sessionController, started bool, turnID string) {
+func (m *Manager) onTurnEvent(d *sessionController, started bool, turnID string, outcome turnOutcome) {
 	m.mu.Lock()
 	var completed []*turnWaiter
 	var bound int
@@ -90,6 +108,9 @@ func (m *Manager) onTurnEvent(d *sessionController, started bool, turnID string)
 			bound++
 			kept = append(kept, w)
 		case !started && w.bound && w.turnID == turnID:
+			// Under m.mu and before the close below, which is what publishes it
+			// to the waiting goroutine.
+			w.outcome = outcome
 			completed = append(completed, w)
 		default:
 			kept = append(kept, w)
@@ -105,8 +126,8 @@ func (m *Manager) onTurnEvent(d *sessionController, started bool, turnID string)
 	if bound == 0 && len(completed) == 0 {
 		return
 	}
-	m.logf("session-controller: turn waiter bookkeeping ws=%q session=%s started=%v turn_id=%q bound=%d completed=%d still_waiting=%d",
-		d.workspace, d.sessionID, started, turnID, bound, len(completed), waiting)
+	m.logf("session-controller: turn waiter bookkeeping ws=%q session=%s started=%v turn_id=%q is_error=%v stop_reason=%q bound=%d completed=%d still_waiting=%d",
+		d.workspace, d.sessionID, started, turnID, outcome.isError, outcome.stopReason, bound, len(completed), waiting)
 }
 
 // SubmitMergePromptAwaitingTurn submits a prompt on behalf of the merge lease
@@ -133,6 +154,17 @@ func (m *Manager) SubmitMergePromptAwaitingTurn(ctx context.Context, workspace, 
 	}
 	select {
 	case <-w.done:
+		// THE TURN'S OWN VERDICT, not merely that it ended. A turn that ended
+		// badly is a merge action that did not happen, and reporting it as
+		// complete is how an errored before-action came to gate nothing and an
+		// errored after-action came to reach no frontend.
+		if outcome := m.turnWaiterOutcome(w); outcome.isError {
+			err := fmt.Errorf("session-controller: the merge turn for workspace %q (request %s) ENDED IN ERROR (stop_reason=%q)",
+				workspace, requestID, outcome.stopReason)
+			m.logf("session-controller: merge resolution turn ERRORED ws=%q session=%s request_id=%s turn_id=%q stop_reason=%q — the caller is told the action did not happen",
+				workspace, d.sessionID, requestID, m.turnWaiterID(w), outcome.stopReason)
+			return err
+		}
 		m.logf("session-controller: merge resolution turn ENDED ws=%q session=%s request_id=%s turn_id=%q",
 			workspace, d.sessionID, requestID, m.turnWaiterID(w))
 		return nil
@@ -150,6 +182,14 @@ func (m *Manager) turnWaiterID(w *turnWaiter) string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return w.turnID
+}
+
+// turnWaiterOutcome reads w's completed outcome under the manager mutex. Only
+// called after w.done is closed, which is when the field is final.
+func (m *Manager) turnWaiterOutcome(w *turnWaiter) turnOutcome {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return w.outcome
 }
 
 // mergeResolutionPermissionMode is the permission mode the resolution prompt is

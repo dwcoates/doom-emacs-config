@@ -243,6 +243,42 @@ func TestAMergedRunPublishesTheAfterActionThenMerged(t *testing.T) {
 	}
 }
 
+// unconfiguredPostMergeHook is a hook for a workspace created with NO
+// postprocessing prompt. Its AfterMerged still completes: the hook also carries
+// the child-to-parent phone-home, which does not depend on the prompt.
+type unconfiguredPostMergeHook struct{ inner *autoPostMergeHook }
+
+func (h unconfiguredPostMergeHook) AfterAction(Request) (string, error) { return "", nil }
+
+func (h unconfiguredPostMergeHook) AfterMerged(ctx context.Context, req Request) error {
+	return h.inner.AfterMerged(ctx, req)
+}
+
+// THE OTHER HALF OF "IFF CONFIGURED": a workspace with no after-action has no
+// after_action phase to be in. Publishing an empty one would tell every
+// frontend the run was running a turn that does not exist.
+func TestARunWithNoAfterActionConfiguredPublishesNoAfterActionPhase(t *testing.T) {
+	// Arrange.
+	h := newHarnessWith(t, harnessOpts{postMerge: unconfiguredPostMergeHook{inner: newAutoPostMergeHook(4)}})
+	if _, err := h.coord.Enqueue(context.Background(), testRequest("a")); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	<-h.picker.merges
+
+	// Act.
+	h.picker.results <- pickResult{res: Result{Outcome: OutcomeMerged}}
+
+	// Assert — the run reaches merged, and nothing on the way there was an
+	// after_action.
+	waitForPhase(t, h, PhaseMerged)
+	for _, status := range h.sink.publishedStatuses() {
+		if status.GetAfterAction() != nil {
+			t.Fatalf("the run published an after_action status with prompt %q although the workspace has no after-action configured",
+				status.GetAfterAction().GetPrompt())
+		}
+	}
+}
+
 // THE FAILURE EDGE, and the load-bearing one: a failed after-action does NOT
 // fail the run. The commits are on the target either way, and reporting
 // merge_failed would make the pushed status lie about the tree.
