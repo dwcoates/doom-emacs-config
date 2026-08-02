@@ -804,6 +804,108 @@ func TestMergeUntrackedCollisionFails(t *testing.T) {
 	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging, PhaseMerging, PhaseMergeFailed)
 }
 
+// --- the resumed run's commit cursor ------------------------------------
+
+// lastMergedStatus returns the terminal merged arm the sink recorded.
+func lastMergedStatus(t *testing.T, sink *recordingSink) *frontendv1.MergeStatusMerged {
+	t.Helper()
+	for i := len(sink.statuses) - 1; i >= 0; i-- {
+		if merged := sink.statuses[i].GetMerged(); merged != nil {
+			return merged
+		}
+	}
+	t.Fatalf("no merged status was published; statuses = %v", sink.phases())
+	return nil
+}
+
+// THE REGRESSION THIS PINS: a resume recomputes its cherry-pick base, which has
+// advanced past the commit the resolution just landed, so the range it reads is
+// EMPTY. Recording that as the run's plan made the terminal `merged` status
+// report commits_total=0 for a merge that plainly landed a commit.
+func TestResumeReportsTheRunsWholeRangeRatherThanTheEmptyRemainder(t *testing.T) {
+	// Arrange — a single-commit branch parked on a conflict, then resolved.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "base.txt", "feature\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "feature edit")
+	writeFile(t, target, "base.txt", "target\n")
+	gitRun(t, target, "add", ".")
+	gitRun(t, target, "commit", "-q", "-m", "target edit")
+
+	sink := &recordingSink{}
+	e := newTestDriver(t, sink)
+	req := withRun(t, sink, Request{Workspace: "/ws/rz-total", Name: "rz-total", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+	if res, err := e.Merge(context.Background(), req); err != nil || res.Outcome != OutcomeConflict {
+		t.Fatalf("setup Merge() res=%+v err=%v, want conflict", res, err)
+	}
+	writeFile(t, target, "base.txt", "resolved\n")
+	gitRun(t, target, "add", "base.txt")
+
+	// Act.
+	res, err := e.Resume(context.Background(), req)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Resume() err = %v", err)
+	}
+	if res.Outcome != OutcomeMerged {
+		t.Fatalf("Resume() outcome = %s, want merged", res.Outcome)
+	}
+	if got := lastMergedStatus(t, sink).GetCommitsTotal(); got != 1 {
+		t.Fatalf("the merged status reports commits_total = %d, want 1 (the branch's single commit)", got)
+	}
+}
+
+// The bounce edge: a resume driven by a publisher REBUILT from nothing (the
+// process that held the cursor is gone) has no total to keep, so it counts the
+// workspace's whole contribution off git rather than reporting zero.
+func TestResumeRebuildsTheCursorForAPublisherThatLostIt(t *testing.T) {
+	// Arrange — two commits, the FIRST clean and the second colliding, so a
+	// rebuilt cursor that merely counted the remainder would report 1, not 2.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "feature.txt", "hello\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "feature adds its own file")
+	writeFile(t, featureDir, "base.txt", "feature\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "feature edit")
+	writeFile(t, target, "base.txt", "target\n")
+	gitRun(t, target, "add", ".")
+	gitRun(t, target, "commit", "-q", "-m", "target edit")
+
+	sink := &recordingSink{}
+	e := newTestDriver(t, sink)
+	req := withRun(t, sink, Request{Workspace: "/ws/rz-bounce", Name: "rz-bounce", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+	if res, err := e.Merge(context.Background(), req); err != nil || res.Outcome != OutcomeConflict {
+		t.Fatalf("setup Merge() res=%+v err=%v, want conflict", res, err)
+	}
+	writeFile(t, target, "base.txt", "resolved\n")
+	gitRun(t, target, "add", "base.txt")
+	// The daemon that was publishing this run is gone; its successor rebuilds
+	// the publisher from the durable run id alone.
+	rebuilt, err := ResumeRunStatus(sink, t.Logf, req.Workspace, testClock(), req.Run.RunID())
+	if err != nil {
+		t.Fatalf("ResumeRunStatus: %v", err)
+	}
+	req.Run = rebuilt
+
+	// Act.
+	res, err := e.Resume(context.Background(), req)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Resume() err = %v", err)
+	}
+	if res.Outcome != OutcomeMerged {
+		t.Fatalf("Resume() outcome = %s, want merged", res.Outcome)
+	}
+	if got := lastMergedStatus(t, sink).GetCommitsTotal(); got != 2 {
+		t.Fatalf("the rebuilt run reports commits_total = %d, want 2 (the branch's whole range)", got)
+	}
+}
+
 // --- resume that hits a further conflict --------------------------------
 
 func TestResumeSecondConflictReEmitsConflict(t *testing.T) {
