@@ -22,6 +22,13 @@ interface FakeStore {
   peer: () => FramedPeer;
   /** The most recently accepted connection (the newest subscription conn). */
   latest: () => FramedPeer;
+  /**
+   * Resolves with successive accepted connections, in accept order, whether
+   * they arrived before or after the call. It is how a test watches the client
+   * RELINK after an outage without polling for it: the connection itself is
+   * the signal.
+   */
+  nextConn: () => Promise<FramedPeer>;
   count: () => number;
   close: () => void;
 }
@@ -43,9 +50,15 @@ function fakeStoreAt(socketPath: string): Promise<FakeStore> {
     // No stale file: the normal case for a fresh path.
   }
   const accepted: FramedPeer[] = [];
+  const unclaimed: FramedPeer[] = [];
+  const waiting: Array<(p: FramedPeer) => void> = [];
   return new Promise((resolve, reject) => {
     const server = net.createServer((socket) => {
-      accepted.push(new FramedPeer(socket));
+      const peer = new FramedPeer(socket);
+      accepted.push(peer);
+      const claim = waiting.shift();
+      if (claim) claim(peer);
+      else unclaimed.push(peer);
     });
     server.once("error", reject);
     server.listen(socketPath, () => {
@@ -60,6 +73,12 @@ function fakeStoreAt(socketPath: string): Promise<FakeStore> {
           if (!last) throw new Error("no store connection accepted yet");
           return last;
         },
+        nextConn: () =>
+          new Promise<FramedPeer>((claim) => {
+            const ready = unclaimed.shift();
+            if (ready) claim(ready);
+            else waiting.push(claim);
+          }),
         count: () => accepted.length,
         close: () => {
           accepted.forEach((p) => p.destroy());
@@ -495,6 +514,229 @@ describe("StoreClient producer redial", () => {
     // Act / Assert: dropped without dialing, store untouched.
     await expect(client.write([create(EventSchema, { sessionId: "sess-1", seq: 1n })])).rejects.toThrow();
     expect(store.count()).toBe(before);
+  });
+});
+
+describe("StoreClient store link recovery", () => {
+  // A shim-store restart (a deploy step) kills BOTH connections under a live
+  // shim. Before the link recovered as a link, the producer was redialed only
+  // by the next write and the standing subscription was never reopened at all
+  // — so the connectivity fault the daemon opened for the outage never closed
+  // and every workspace stayed painted degraded until something was bounced.
+
+  interface LinkRig {
+    client: StoreClient;
+    /** Every report the client made, in order. */
+    reports: DegradedState[];
+    /** Resolves on the FIRST `recovered: true` report. */
+    recovered: Promise<DegradedState>;
+    /** Events handed to the sink. */
+    forwarded: Event[];
+    /** Resolves once `n` events have been forwarded. */
+    awaitForwarded: (n: number) => Promise<void>;
+  }
+
+  /**
+   * A client whose relink backoff is compressed to milliseconds. The backoff
+   * BOUNDS are the only thing a test needs to shrink: every wait below is on a
+   * connection or a report, never on a duration.
+   */
+  async function linkRig(store: FakeStore): Promise<LinkRig> {
+    const reports: DegradedState[] = [];
+    const forwarded: Event[] = [];
+    const forwardWaiters: Array<{ n: number; resolve: () => void }> = [];
+    let announceRecovery!: (d: DegradedState) => void;
+    const recovered = new Promise<DegradedState>((resolve) => {
+      announceRecovery = resolve;
+    });
+    const client = new StoreClient({
+      socketPath: store.socketPath,
+      sessionId: "sess-1",
+      producer: "claude-shim:sess-1",
+      heartbeatIntervalMs: 0,
+      relinkBackoffMinMs: 2,
+      relinkBackoffMaxMs: 10,
+    });
+    clients.push(client);
+    client.onDegraded((d) => {
+      reports.push(d);
+      if (d.recovered) announceRecovery(d);
+    });
+    client.onMerged((e) => {
+      forwarded.push(e);
+      for (const w of forwardWaiters.splice(0)) {
+        if (forwarded.length >= w.n) w.resolve();
+        else forwardWaiters.push(w);
+      }
+    });
+    await client.connect();
+    await store.nextConn();
+    return {
+      client,
+      reports,
+      recovered,
+      forwarded,
+      awaitForwarded: (n) =>
+        new Promise<void>((resolve) => {
+          if (forwarded.length >= n) resolve();
+          else forwardWaiters.push({ n, resolve });
+        }),
+    };
+  }
+
+  /** Kill the store and stand its replacement up on the same socket path. */
+  async function restart(store: FakeStore): Promise<FakeStore> {
+    const socketPath = store.socketPath;
+    store.close();
+    const restarted = await fakeStoreAt(socketPath);
+    stores.push(restarted);
+    return restarted;
+  }
+
+  it("reports recovery once both connections are back after a store restart", async () => {
+    // Arrange: a fully wired link — producer connection plus the daemon's
+    // standing subscription.
+    const store = await fakeStore();
+    stores.push(store);
+    const rig = await linkRig(store);
+    await rig.client.subscribe(0n);
+    await (await store.nextConn()).next(SubscribeSchema);
+
+    // Act: the deploy restarts the store under the live client.
+    await restart(store);
+
+    // Assert: the close edge of the window the outage opened, which is what
+    // the daemon's fault machinery closes the session_fault row on.
+    const report = await rig.recovered;
+    expect(report.component).toBe("shim-store-client");
+    expect(report.recovered).toBe(true);
+  });
+
+  it("reopens the subscription after the last forwarded seq so the gap replays", async () => {
+    // Arrange: two merged events reach the daemon before the store dies, so
+    // the daemon's handshake position is already stale.
+    const store = await fakeStore();
+    stores.push(store);
+    const rig = await linkRig(store);
+    await rig.client.subscribe(0n);
+    const sub = await store.nextConn();
+    await sub.next(SubscribeSchema);
+    sub.send(EventSchema, create(EventSchema, { sessionId: "sess-1", seq: 1n }));
+    sub.send(EventSchema, create(EventSchema, { sessionId: "sess-1", seq: 2n }));
+    await rig.awaitForwarded(2);
+
+    // Act
+    const restarted = await restart(store);
+    await restarted.nextConn(); // the relinked producer connection
+    const resubscribed = await restarted.nextConn();
+
+    // Assert: EXCLUSIVE from_seq at the last forwarded event — everything the
+    // store accepted during the gap replays, and nothing already seen repeats.
+    expect((await resubscribed.next(SubscribeSchema)).fromSeq).toBe(2n);
+  });
+
+  it("reopens at the daemon's own position when no event was forwarded yet", async () => {
+    // Arrange: a subscription that never delivered anything has no position of
+    // its own, so the daemon's handshake from_seq is still the truth.
+    const store = await fakeStore();
+    stores.push(store);
+    const rig = await linkRig(store);
+    await rig.client.subscribe(7n);
+    await (await store.nextConn()).next(SubscribeSchema);
+
+    // Act
+    const restarted = await restart(store);
+    await restarted.nextConn(); // the relinked producer connection
+    const resubscribed = await restarted.nextConn();
+
+    // Assert
+    expect((await resubscribed.next(SubscribeSchema)).fromSeq).toBe(7n);
+  });
+
+  it("recovers on the producer connection alone when the daemon never subscribed", async () => {
+    // Arrange: a session whose bring-up gate has not run yet still loses its
+    // producer connection to a store restart, and still owes the daemon the
+    // recovery that closes the fault.
+    const store = await fakeStore();
+    stores.push(store);
+    const rig = await linkRig(store);
+
+    // Act
+    const restarted = await restart(store);
+    await rig.recovered;
+
+    // Assert: exactly the producer connection, and no subscription invented
+    // for a daemon that never asked for one.
+    expect(restarted.count()).toBe(1);
+    expect(rig.client.isSubscribed()).toBe(false);
+  });
+
+  it("reports one recovery for an outage that dropped both connections", async () => {
+    // Arrange: a restart drops the producer AND the subscription, so both
+    // report the outage — but the daemon holds ONE fault row per component and
+    // rejects a second close of a window that is no longer open.
+    const store = await fakeStore();
+    stores.push(store);
+    const rig = await linkRig(store);
+    await rig.client.subscribe(0n);
+    await (await store.nextConn()).next(SubscribeSchema);
+
+    // Act
+    const restarted = await restart(store);
+    await rig.recovered;
+    // A full write round-trip on the recovered link, so the assertion below
+    // stands after the client has gone on working rather than at the instant
+    // the first recovery landed.
+    const ackP = rig.client.write([create(EventSchema, { sessionId: "sess-1", seq: 1n })]);
+    await restarted.peer().next(StoreWriteSchema);
+    restarted.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { accepted: 1n }));
+    await ackP;
+
+    // Assert
+    expect(rig.reports.filter((r) => r.recovered)).toHaveLength(1);
+  });
+
+  it("reports no recovery for a subscription the daemon deliberately replaced", async () => {
+    // Arrange: a reopen at a new from_seq is not an outage, so it must neither
+    // degrade nor claim a recovery — an unpaired close is an error in the
+    // daemon's fault machinery, not a no-op.
+    const store = await fakeStore();
+    stores.push(store);
+    const rig = await linkRig(store);
+    await rig.client.subscribe(0n);
+    await (await store.nextConn()).next(SubscribeSchema);
+
+    // Act
+    await rig.client.subscribe(9n);
+    await (await store.nextConn()).next(SubscribeSchema);
+
+    // Assert
+    expect(rig.reports).toHaveLength(0);
+  });
+
+  it("never relinks after a deliberate close", async () => {
+    // Arrange: an outage arms recovery, then the shim shuts down. A relink
+    // firing after teardown would redial the store out from under it.
+    const store = await fakeStore();
+    stores.push(store);
+    const rig = await linkRig(store);
+    await rig.client.subscribe(0n);
+    await (await store.nextConn()).next(SubscribeSchema);
+    const socketPath = store.socketPath;
+    store.close();
+    await until(() => !rig.client.isConnected(), "producer conn observed down");
+
+    // Act: close, then stand the store back up.
+    rig.client.close();
+    const restarted = await fakeStoreAt(socketPath);
+    stores.push(restarted);
+    // The awaited rejection carries the send chain through the exact place a
+    // redial would happen, so the assertion below is about a path that ran.
+    await expect(rig.client.write([create(EventSchema, { sessionId: "sess-1", seq: 1n })])).rejects.toThrow();
+
+    // Assert
+    expect(restarted.count()).toBe(0);
+    expect(rig.reports.some((r) => r.recovered)).toBe(false);
   });
 });
 
