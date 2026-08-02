@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"testing"
 
+	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 	"claude-repld/internal/workspace/merge"
 )
 
@@ -144,6 +145,83 @@ func TestMergeEnqueuingIsTheWeakestMergeState(t *testing.T) {
 	for _, state := range []string{sigMerging, sigMergeQueued, sigMergeConflict, sigMergeFailed, sigMerged} {
 		if got := mergeRank(t, state); got >= enqueuing {
 			t.Fatalf("%s rank = %d, merge_enqueuing rank = %d; want merge_enqueuing weakest", state, got, enqueuing)
+		}
+	}
+}
+
+// THE GUARANTEE for the two agent-driven phases: each is a merge-axis token the
+// resolver reads back, so a run parked on one is not invisible to the boot sweep
+// or to any other phase query.
+func TestWorkspacesAtMergePhaseFindsTheAgentDrivenPhases(t *testing.T) {
+	// Arrange.
+	tests := []struct {
+		name  string
+		phase merge.Phase
+	}{
+		{name: "before action", phase: merge.PhaseMergeBeforeAction},
+		{name: "after action", phase: merge.PhaseMergeAfterAction},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m, _, _ := openUnwiredTest(t, fakeResolver{})
+			applyPhases(t, m, "ws1", merge.PhaseMerging, tc.phase)
+
+			// Act.
+			got, err := m.WorkspacesAtMergePhase(tc.phase)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("WorkspacesAtMergePhase(%s): %v", tc.phase, err)
+			}
+			if len(got) != 1 || got[0] != "ws1" {
+				t.Fatalf("workspaces = %v, want [ws1]", got)
+			}
+		})
+	}
+}
+
+// THE VIOLATION EDGE: a run that reached the after-action and then merged must
+// no longer read as resting on the after-action. Without the token in the
+// resolver's latest_merge CTE the newest row would be invisible and the sweep
+// would see a phase the run has left.
+func TestWorkspacesAtMergePhaseDropsASupersededAfterAction(t *testing.T) {
+	// Arrange.
+	m, _, _ := openUnwiredTest(t, fakeResolver{})
+	applyPhases(t, m, "ws1", merge.PhaseMergeAfterAction, merge.PhaseMerged)
+
+	// Act.
+	got, err := m.WorkspacesAtMergePhase(merge.PhaseMergeAfterAction)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("WorkspacesAtMergePhase: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("workspaces = %v, want none", got)
+	}
+}
+
+// The two agent-driven phases make the same actionability claim `merging` does
+// — the merge run owns this session — so they share its rank.
+func TestTheAgentDrivenPhasesShareMergingsRank(t *testing.T) {
+	// Arrange / Act.
+	merging := mergeRank(t, sigMerging)
+
+	// Assert.
+	for _, token := range []string{sigMergeBeforeAction, sigMergeAfterAction} {
+		if got := mergeRank(t, token); got != merging {
+			t.Fatalf("%s rank = %d, want merging's %d", token, got, merging)
+		}
+	}
+}
+
+// Both phases project to MERGING: the render state answers what the user can
+// do, and a merge run owns the session in either.
+func TestTheAgentDrivenPhasesRenderAsMerging(t *testing.T) {
+	// Arrange / Act / Assert.
+	for _, token := range []string{sigMergeBeforeAction, sigMergeAfterAction} {
+		if got := renderStateOf(token); got != frontendv1.RenderState_RENDER_STATE_MERGING {
+			t.Fatalf("renderStateOf(%q) = %v, want RENDER_STATE_MERGING", token, got)
 		}
 	}
 }
