@@ -1214,6 +1214,40 @@ func TestWireAgentShimRejectsNilWorkspaceCreation(t *testing.T) {
 	}
 }
 
+func TestWireAgentShimRejectsAScheduleStoreWithNoQueueBackend(t *testing.T) {
+	// A daemon that can PARK a prompt but has neither force nor cancel to
+	// release it would strand the user with a chip and no verb. That is a
+	// construction error, not something to discover under a live drain.
+	// Arrange.
+	reg := openTestRegistry(t)
+
+	// Act.
+	_, err := WireAgentShim(AgentShimConfig{
+		Resumes:           &fakeResumes{},
+		SSM:               openTestSSM(t, reg),
+		Progress:          progress.New(progress.Options{Logf: func(string, ...any) {}}),
+		Prompts:           &fakePrompts{},
+		Turns:             &fakePrompts{},
+		Lifecycle:         &fakeLifecycle{},
+		SessionDeaths:     stubSessionDeaths{},
+		SessionCommands:   &SessionCommandBinding{},
+		WorkspaceCreation: newFakeWorkspaceCreation(),
+		MergeLease:        stubMergeLease{},
+		MergeQueue:        newTestMergeQueue(t),
+		LogVerbosef:       t.Logf,
+		ShutdownSchedules: &fakeScheduleStore{},
+		DrainHolds:        &fakeHoldSource{},
+		DrainEvidence:     newFakeEvidence(),
+		RequestShutdown:   func(bool) {},
+		// Queues is deliberately nil.
+	})
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "Queues") {
+		t.Fatalf("WireAgentShim = %v, want a refusal naming the missing Queues backend", err)
+	}
+}
+
 // --- merge runner ---------------------------------------------------------
 
 // The MergeRunner IS merge.Coordinator now, so the runner resolves nothing and

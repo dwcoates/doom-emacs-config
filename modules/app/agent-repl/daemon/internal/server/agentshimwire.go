@@ -555,6 +555,16 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 			cancelWorkspaceAvailable()
 			cancelHostActions()
 			return nil, fmt.Errorf("server: a durable shutdown-schedule store was supplied with no DrainEvidence source; a lease restored mid-drain would judge quiescence against a fleet nothing has wired yet and bounce the daemon over every surviving mid-turn shim")
+		case cfg.Queues == nil:
+			// PARKING WITHOUT EXITS IS UNSHIPPABLE. Taking the lease parks every
+			// submitted prompt, and a parked prompt's only ways out short of the
+			// bounce are the queue's force and cancel commands. A daemon wired to
+			// park prompts it can then neither run nor drop would strand the user
+			// with a chip and no verb, so it is refused at construction rather
+			// than discovered by the first person who types under a drain.
+			cancelWorkspaceAvailable()
+			cancelHostActions()
+			return nil, fmt.Errorf("server: a durable shutdown-schedule store was supplied with no Queues backend; the drain lease would park prompts that no force and no cancel could ever release")
 		}
 		scheduler, err = NewShutdownScheduler(ShutdownSchedulerConfig{
 			Store:     cfg.ShutdownSchedules,
