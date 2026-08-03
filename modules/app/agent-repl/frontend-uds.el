@@ -54,6 +54,7 @@
 ;; before it reaches a log call.  The raw wire value stays in the message
 ;; TEXT so an operator can still correlate an unowned path.
 (declare-function agent-repl--frontend-ws-name "frontend-state" (workspace))
+(declare-function agent-repl-connection-notice-echo "connection-notice" (text))
 (declare-function agent-repl--frontend-invalidate-daemon-view "frontend-state" (reason))
 
 ;;;; ---- Configuration ---------------------------------------------------
@@ -477,12 +478,17 @@ Returns the process on success, nil on a failed dial."
          ;; cannot report that Emacs could not reach it, so this is one of
          ;; the very few facts this end classifies for itself — and it
          ;; carries the reserved `client.' prefix that says so.
-         (agent-repl-failure-surface
-          nil
-          (agent-repl-failure-local
-           "client.daemon_unreachable"
-           "the agent-repl daemon is unreachable; reconnecting"
-           (format "socket=%s %s" sock (error-message-string err))))
+         ;; RECORDED AS A CONNECTION NOTICE (connection-notice.el) so the
+         ;; reconnect can take it back: "the daemon is unreachable" left in
+         ;; the echo area under a session that is once again streaming is a
+         ;; standing claim about a condition that has ended.
+         (when-let ((text (agent-repl-failure-surface
+                           nil
+                           (agent-repl-failure-local
+                            "client.daemon_unreachable"
+                            "the agent-repl daemon is unreachable; reconnecting"
+                            (format "socket=%s %s" sock (error-message-string err))))))
+           (agent-repl-connection-notice-echo text))
          (agent-repl--uds-schedule-reconnect))
        nil))))
 
@@ -541,14 +547,50 @@ runs guarded: one subscriber's failure is loud-logged and the remaining
 subscribers still run, since dropping the rest of a reconnect's recovery
 because the first step failed would compound one outage into several.")
 
-(defun agent-repl--uds-run-connected-hook ()
-  "Run `agent-repl-uds-connected-functions', surfacing any failure loudly."
-  (dolist (fn agent-repl-uds-connected-functions)
+(defvar agent-repl-uds-snapshot-applied-functions nil
+  "Abnormal hook run with no args once a `StateSnapshot' has been APPLIED.
+
+THE OTHER RECONNECT EDGE, and the difference from
+`agent-repl-uds-connected-functions' is the whole reason both exist.  A
+socket that has opened is a link, not a recovery: nothing of the daemon's
+state has landed yet, so a subscriber that reads the session roster there
+reads an empty one.  This hook fires after
+`agent-repl--frontend-apply-snapshot' has rebuilt that roster, which is
+the first instant Emacs holds the state of the world as of reconnection.
+
+It is the same edge the webapp calls `current' (ws.ts `adoptSnapshot'),
+deliberately: both frontends declare themselves reconnected when
+authoritative state has landed, never when a socket merely opened.
+
+Subscribers run guarded, exactly as the connected hook's do.")
+
+(defun agent-repl--uds-run-lifecycle-hook (hook label)
+  "Run every function on abnormal HOOK, surfacing each failure loudly.
+
+HOOK is the hook SYMBOL and LABEL names it in the log.  One subscriber's
+failure is loud-logged and the remaining subscribers still run: dropping
+the rest of a reconnect's recovery because its first step failed would
+compound one outage into several.
+
+Shared by both connection lifecycle hooks so the guarantee cannot drift
+between them — two copies of a runner is exactly how one of them quietly
+stops containing failures."
+  (dolist (fn (and (boundp hook) (symbol-value hook)))
     (condition-case err
         (funcall fn)
       (error
-       (agent-repl--log nil "uds-connected-hook: subscriber %S FAILED: %s"
-                        fn (error-message-string err))))))
+       (agent-repl--log nil "%s: subscriber %S FAILED: %s"
+                        label fn (error-message-string err))))))
+
+(defun agent-repl--uds-run-connected-hook ()
+  "Run `agent-repl-uds-connected-functions', surfacing any failure loudly."
+  (agent-repl--uds-run-lifecycle-hook 'agent-repl-uds-connected-functions
+                                      "uds-connected-hook"))
+
+(defun agent-repl--uds-run-snapshot-applied-hook ()
+  "Run `agent-repl-uds-snapshot-applied-functions', surfacing failures loudly."
+  (agent-repl--uds-run-lifecycle-hook 'agent-repl-uds-snapshot-applied-functions
+                                      "uds-snapshot-applied-hook"))
 
 (defun agent-repl--uds-sentinel (proc event)
   "Process sentinel: on any non-live transition, schedule a reconnect.

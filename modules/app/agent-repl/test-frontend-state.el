@@ -645,6 +645,35 @@ merge inputs are the pushed render state plus `:pushed-merge-status'."
     ;; Act / Assert
     (should (= (agent-repl-test--apply-snapshot '(:workspaces nil)) 0))))
 
+(ert-deftest agent-repl-test-apply-snapshot-runs-the-snapshot-applied-hook ()
+  "Applying a snapshot fires the reconnect edge every recovery hangs off."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let* ((ran 0)
+           (agent-repl-uds-snapshot-applied-functions
+            (list (lambda () (cl-incf ran)))))
+      ;; Act
+      (agent-repl-test--apply-snapshot '(:workspaces nil))
+      ;; Assert
+      (should (= ran 1)))))
+
+(ert-deftest agent-repl-test-apply-snapshot-runs-the-hook-after-a-failed-item ()
+  "A partial resync is still a live link, so the recovery edge still fires.
+Withholding it would leave the outage notices standing over a daemon that
+is demonstrably answering."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let* ((ran 0)
+           (agent-repl-uds-snapshot-applied-functions
+            (list (lambda () (cl-incf ran)))))
+      (cl-letf (((symbol-function 'agent-repl--frontend-apply-session-view)
+                 (lambda (_v) (error "undecodable session view"))))
+        ;; Act
+        (agent-repl-test--apply-snapshot
+         '(:workspaces nil :sessions ((:sessionId "s_1" :workspace "/w")))))
+      ;; Assert
+      (should (= ran 1)))))
+
 (ert-deftest agent-repl-test-apply-snapshot-applies-sessions-and-tolerates-catalogs ()
   "A snapshot applies workspaces AND rebuilds the SessionView store from
 `:sessions'; the `:catalogs' array (no handler here) does not break it."
