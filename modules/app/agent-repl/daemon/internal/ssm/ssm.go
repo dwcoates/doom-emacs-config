@@ -14,13 +14,34 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// Resolver maps a session id to the workspace it is bound to. The binding
-// lives in the daemon's session registry (the stitch phase wires the real
-// one); the SSM takes it injected so it stays free of registry knowledge.
+// Resolver maps ANY identity a session is known by to the one binding that
+// session has. The binding lives in the daemon's session registry (the stitch
+// phase wires the real one); the SSM takes it injected so it stays free of
+// registry knowledge.
 type Resolver interface {
-	// Workspace returns the workspace bound to sessionID, and whether a
-	// binding exists.
-	Workspace(sessionID string) (string, bool)
+	// Session returns the binding for sessionID, and whether one exists.
+	// sessionID may be either the daemon-minted s_<hex> id or the vendor
+	// session uuid the store files events under.
+	Session(sessionID string) (Binding, bool)
+}
+
+// Binding is one session's resolved identity: the workspace it drives and the
+// DAEMON-MINTED id that names it everywhere the SSM records or compares
+// ownership.
+//
+// THE WORKSPACE AND THE CANONICAL ID COME FROM ONE LOOKUP, deliberately. They
+// are two fields of one registry record, and resolving them separately is what
+// allowed the SSM to file a row under an identity no claimant check would ever
+// match (see normalizeSessionIdentity). A resolver that can answer one can
+// always answer the other, so the pair is returned together and the mismatch is
+// unrepresentable.
+type Binding struct {
+	// Workspace is the session's CWD. A binding is never reported for a
+	// session with no workspace.
+	Workspace string
+	// SessionID is the daemon-minted s_<hex> id, whatever identity was asked
+	// about.
+	SessionID string
 }
 
 // Options configure a Manager.
@@ -191,12 +212,12 @@ func Open(opts Options) (*Manager, error) {
 	}
 	db, ownsDB := opts.DB, false
 	if db == nil {
-		opened, err := openDB(path)
+		opened, err := openDB(path, logf)
 		if err != nil {
 			return nil, err
 		}
 		db, ownsDB = opened, true
-	} else if err := migrate(db); err != nil {
+	} else if err := migrate(db, logf); err != nil {
 		return nil, err
 	}
 	clearingTimeout := opts.ClearingTimeout
@@ -376,15 +397,36 @@ func (m *Manager) Apply(ev *corev1.Event) error {
 	if m.resolver == nil {
 		return fmt.Errorf("ssm: no resolver injected; cannot bind session %s to a workspace", sid)
 	}
-	ws, bound := m.resolver.Workspace(sid)
+	binding, bound := m.resolver.Session(sid)
 	if !bound {
 		return fmt.Errorf("ssm: no workspace bound to session %s (kind=%s seq=%d)", sid, causeKind, ev.GetSeq())
+	}
+	ws := binding.Workspace
+	// THE ROW IS OWNED BY THE DAEMON SESSION, NOT BY THE EVENT'S IDENTITY. The
+	// store files events under the VENDOR uuid, while every party that closes,
+	// invalidates or re-claims a turn — CloseStaleTurn, MarkPromptAccepted, the
+	// durable turn ledger — names the session by its daemon id. Writing the
+	// vendor uuid here put two names for one session on one axis, and every
+	// claimant comparison then read them as two sessions: the turn's own
+	// teardown declined to close its `thinking` and the session's own next
+	// prompt was refused as another session's. Canonicalizing at the write
+	// boundary is what makes that unrepresentable. The event's own identity is
+	// still recorded, in event_session_id, because idempotency is a fact about
+	// the store's seq space rather than about the session.
+	owner := binding.SessionID
+	if owner == "" {
+		return fmt.Errorf("ssm: session %s resolved to workspace %q with no daemon session id (kind=%s seq=%d); a status row with no owner can never be claimed or closed", sid, ws, causeKind, ev.GetSeq())
+	}
+	if owner != sid {
+		m.logf("ssm: event identity canonicalized ws=%s event_session=%s owner_session=%s kind=%s seq=%d — the store files this conversation under its vendor uuid; the row is owned by the daemon session so claim checks compare one identity",
+			ws, sid, owner, causeKind, ev.GetSeq())
 	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Idempotency: a replayed event (same session+seq) makes no change.
+	// Idempotency: a replayed event (same store identity + seq) makes no
+	// change.
 	applied, err := seqApplied(m.db, sid, ev.GetSeq())
 	if err != nil {
 		return err
@@ -433,24 +475,24 @@ func (m *Manager) Apply(ev *corev1.Event) error {
 			return err
 		}
 		switch {
-		case active && (claimant == "" || claimant == sid):
+		case active && (claimant == "" || claimant == owner):
 			m.logf("ssm: readiness suppressed (turn in flight) ws=%s session=%s seq=%d — the running turn is the stronger claim",
-				ws, sid, ev.GetSeq())
+				ws, owner, ev.GetSeq())
 			return nil
 		case active:
 			m.logf("ssm: turn claim INVALIDATED ws=%s stale_session=%s new_session=%s seq=%d — the session holding `thinking` no longer drives this workspace and can never report that turn's end, so readiness supersedes it rather than being suppressed by it",
-				ws, claimant, sid, ev.GetSeq())
+				ws, claimant, owner, ev.GetSeq())
 		}
 	}
 
 	causeSeq := sql.NullInt64{Int64: int64(ev.GetSeq()), Valid: true}
 	if state == sigTaskEnded {
-		if err := m.appendTaskEndLocked(ws, sid, causeKind, causeSeq, taskIDOf(ev)); err != nil {
+		if err := m.appendTaskEndLocked(ws, owner, sid, causeKind, causeSeq, taskIDOf(ev)); err != nil {
 			return err
 		}
 	} else {
 		at := m.nextAt()
-		if err := appendRow(m.db, ws, sid, state, causeKind, causeSeq, at, taskIDOf(ev)); err != nil {
+		if err := appendEventRow(m.db, ws, owner, sid, state, causeKind, causeSeq, at, taskIDOf(ev)); err != nil {
 			return err
 		}
 	}

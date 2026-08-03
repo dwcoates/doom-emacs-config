@@ -12,6 +12,7 @@ import (
 	"database/sql"
 	"fmt"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/statedb"
 )
 
@@ -19,7 +20,10 @@ import (
 // whenever the on-disk shape changes; migrate() refuses to open a DB
 // written by a NEWER schema than this binary understands (loud, no
 // silent downgrade).
-const schemaVersion = 6
+//
+// v7 splits the two identities that shared workspace_state.session_id. See
+// normalizeSessionIdentity.
+const schemaVersion = 7
 
 // defaultDBPath is the daemon's ONE state store — the SSM's log and the
 // session registry's identity tables share it (§9.2: "own SQLite DB",
@@ -35,12 +39,12 @@ func defaultDBPath() (string, error) {
 // openDB opens the state store (see internal/statedb for the WAL/busy-timeout/
 // immediate-transaction discipline every owner of the store shares) and runs
 // the SSM's migrations.
-func openDB(path string) (*sql.DB, error) {
+func openDB(path string, logf dlog.Logf) (*sql.DB, error) {
 	db, err := statedb.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("ssm: %w", err)
 	}
-	if err := migrate(db); err != nil {
+	if err := migrate(db, logf); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -53,7 +57,10 @@ func openDB(path string) (*sql.DB, error) {
 // resolve.go); the `state` column holds a SIGNAL token (a superset of the
 // RenderState vocabulary — e.g. task_started/merge_none — that the resolve
 // query maps back onto render states).
-func migrate(db *sql.DB) error {
+func migrate(db *sql.DB, logf dlog.Logf) error {
+	if logf == nil {
+		return fmt.Errorf("ssm: migrate requires a logger; a schema migration that normalizes rows may never run silently")
+	}
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS schema_meta (version INTEGER NOT NULL);
 		CREATE TABLE IF NOT EXISTS workspace_state (
@@ -185,6 +192,9 @@ func migrate(db *sql.DB) error {
 	if err := addTurnClaimColumns(db); err != nil {
 		return err
 	}
+	if err := addEventSessionIDColumn(db); err != nil {
+		return err
+	}
 
 	var version sql.NullInt64
 	if err := db.QueryRow(`SELECT version FROM schema_meta LIMIT 1`).Scan(&version); err != nil {
@@ -202,14 +212,153 @@ func migrate(db *sql.DB) error {
 		return fmt.Errorf("ssm: db schema version %d is newer than this binary understands (%d); refusing to open", version.Int64, schemaVersion)
 	}
 	if version.Int64 < schemaVersion {
-		// Every forward migration to date is idempotent and already ran above;
-		// record the new version so the stamp keeps describing the DB. Leaving
-		// it stale would make the version meaningless as a guard.
+		// Column-adding migrations are idempotent and already ran above. The
+		// v7 identity normalization is NOT idempotent in the same trivial way
+		// — it rewrites row VALUES — so it is gated on the stamp and runs
+		// exactly once, on a database written before the write path stopped
+		// producing the rows it repairs.
+		if version.Int64 < 7 {
+			if err := normalizeSessionIdentity(db, logf); err != nil {
+				return err
+			}
+		}
 		if _, err := db.Exec(`UPDATE schema_meta SET version = ?`, schemaVersion); err != nil {
 			return fmt.Errorf("ssm: record schema version %d: %w", schemaVersion, err)
 		}
 	}
 	return nil
+}
+
+// addEventSessionIDColumn installs workspace_state.event_session_id, the STORE
+// coordinate half of what the session_id column used to carry alone.
+//
+// See normalizeSessionIdentity for what the split is for. The short version:
+// session_id names the SESSION that owns a row (always the daemon-minted
+// s_<hex> id, the one every claimant comparison uses), and event_session_id
+// names the identity the STORE filed the causing event under (the vendor
+// uuid). The two are different strings for the same conversation, and the
+// idempotency check needs the second one — a vendor uuid rotation restarts the
+// store's seq space at 1, so deduplicating on the daemon id would read a new
+// space's seq 1 as a replay of the retired space's.
+func addEventSessionIDColumn(db *sql.DB) error {
+	has, err := hasColumn(db, "workspace_state", "event_session_id")
+	if err != nil {
+		return err
+	}
+	if has {
+		return nil
+	}
+	if _, err := db.Exec(`ALTER TABLE workspace_state ADD COLUMN event_session_id TEXT`); err != nil {
+		return fmt.Errorf("ssm: add workspace_state.event_session_id: %w", err)
+	}
+	if _, err := db.Exec(
+		`CREATE INDEX IF NOT EXISTS workspace_state_event_seq ON workspace_state(event_session_id, cause_seq)`,
+	); err != nil {
+		return fmt.Errorf("ssm: index workspace_state.event_session_id: %w", err)
+	}
+	return nil
+}
+
+// normalizeSessionIdentity is the v7 migration: it gives the session-status
+// axis exactly ONE identity per session.
+//
+// THE BUG IT REPAIRS. Every event the store streams back is filed under the
+// VENDOR session uuid, and Apply used to stamp that uuid into
+// workspace_state.session_id — while MarkPromptAccepted, CloseStaleTurn,
+// InvalidateTurnClaim and the durable turn ledger all name the session by its
+// daemon-minted s_<hex> id. One session therefore held rows under two names,
+// and every claimant comparison between them read "a different session". A
+// `thinking` written by a TurnStarted was consequently unclosable by its own
+// session's teardown ("DECLINED — the standing `thinking` is held by session=…,
+// which is not this stop's to spend") and unclaimable by its own session's next
+// prompt ("while session … owns the active turn"). The workspace rendered
+// thinking forever and could not be driven again — observed on
+// merge-proto-json at 2026-08-03T01:26Z, wedged across restarts because the
+// rows are durable.
+//
+// THE WRITE PATH IS THE FIX (Apply now canonicalizes through the resolver
+// before it appends), which makes recurrence impossible. This migration exists
+// only for databases that already hold the bad rows, and it is a ONE-TIME
+// normalization rather than a tolerated equivalence: nothing downstream is
+// taught that two ids may mean one session, because after this nothing writes
+// the second id.
+//
+// THE MAPPING IS THE REGISTRY'S, read from the same database (the SSM's log and
+// the session registry's identity tables deliberately share one store). A row
+// is rewritten only when a session record for that row's OWN workspace claims
+// the row's session_id as its vendor uuid; a uuid that matches no record for
+// that workspace is left alone rather than guessed at.
+func normalizeSessionIdentity(db *sql.DB, logf dlog.Logf) error {
+	hasRecords, err := hasTable(db, "session_record")
+	if err != nil {
+		return err
+	}
+	if !hasRecords {
+		// The registry's tables are created before the SSM opens in the daemon,
+		// so this is a store the registry has never touched (a bare test or
+		// tooling handle). There is no mapping to normalize against, and
+		// guessing is not an option, so the split still happens and the rewrite
+		// does not.
+		logf("ssm: schema v7 normalization SKIPPED the session_id rewrite — this state store carries no session_record table, so no vendor→daemon mapping exists to rewrite against")
+	}
+
+	// The store coordinate first: every existing seq-bearing row's session_id
+	// IS the event identity, because that is exactly what the old write path
+	// put there. Copying it before the rewrite is what keeps idempotency
+	// working across the migration.
+	split, err := db.Exec(`
+		UPDATE workspace_state
+		   SET event_session_id = session_id
+		 WHERE event_session_id IS NULL
+		   AND cause_seq IS NOT NULL
+		   AND session_id IS NOT NULL`)
+	if err != nil {
+		return fmt.Errorf("ssm: schema v7 split of workspace_state.event_session_id: %w", err)
+	}
+	splitRows, err := split.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("ssm: schema v7 split row count: %w", err)
+	}
+
+	var rewrittenRows int64
+	if hasRecords {
+		rewrite, err := db.Exec(`
+			UPDATE workspace_state
+			   SET session_id = (
+				   SELECT r.session_id FROM session_record r
+				    WHERE r.claude_session_id = workspace_state.session_id
+				      AND r.cwd = workspace_state.workspace
+				    ORDER BY r.created_at DESC LIMIT 1)
+			 WHERE session_id IS NOT NULL
+			   AND EXISTS (
+				   SELECT 1 FROM session_record r
+				    WHERE r.claude_session_id = workspace_state.session_id
+				      AND r.cwd = workspace_state.workspace)`)
+		if err != nil {
+			return fmt.Errorf("ssm: schema v7 normalization of workspace_state.session_id: %w", err)
+		}
+		rewrittenRows, err = rewrite.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("ssm: schema v7 normalization row count: %w", err)
+		}
+	}
+	logf("ssm: schema v7 normalization COMPLETE store_coordinates_split=%d vendor_ids_rewritten_to_daemon_ids=%d — the session-status axis now names every session by its daemon id alone, so a turn claim can be closed and re-claimed by the session that made it",
+		splitRows, rewrittenRows)
+	return nil
+}
+
+// hasTable reports whether the state store carries table.
+func hasTable(db *sql.DB, table string) (bool, error) {
+	var name string
+	err := db.QueryRow(
+		`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&name)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("ssm: look up table %q: %w", table, err)
+	}
+	return true, nil
 }
 
 // addTurnClaimColumns installs the receipt coordinates used to distinguish the
@@ -298,37 +447,58 @@ type rowExecer interface {
 // empty for every other signal. It is what makes the live-task counter
 // idempotent per task rather than per row.
 func appendRow(db rowExecer, workspace, sessionID, state, causeKind string, causeSeq sql.NullInt64, at int64, taskID string) error {
+	return appendEventRow(db, workspace, sessionID, "", state, causeKind, causeSeq, at, taskID)
+}
+
+// appendEventRow appends a row whose cause is a STORE event, recording both
+// identities the event has: sessionID is the daemon-minted id that OWNS the row
+// (the one every claimant comparison reads), and eventSessionID is the vendor
+// uuid the store filed the event under (the one the idempotency check reads).
+//
+// Callers with no store event behind them use appendRow, which leaves the
+// store coordinate NULL. See normalizeSessionIdentity for why the two are
+// separate columns rather than one.
+func appendEventRow(db rowExecer, workspace, sessionID, eventSessionID, state, causeKind string, causeSeq sql.NullInt64, at int64, taskID string) error {
 	var sid any
 	if sessionID != "" {
 		sid = sessionID
+	}
+	var esid any
+	if eventSessionID != "" {
+		esid = eventSessionID
 	}
 	var tid any
 	if taskID != "" {
 		tid = taskID
 	}
 	_, err := db.Exec(
-		`INSERT INTO workspace_state(workspace, session_id, state, cause_kind, cause_seq, at, task_id) VALUES (?,?,?,?,?,?,?)`,
-		workspace, sid, state, causeKind, causeSeq, at, tid)
+		`INSERT INTO workspace_state(workspace, session_id, event_session_id, state, cause_kind, cause_seq, at, task_id) VALUES (?,?,?,?,?,?,?,?)`,
+		workspace, sid, esid, state, causeKind, causeSeq, at, tid)
 	if err != nil {
 		return fmt.Errorf("ssm: append %q for workspace %q: %w", state, workspace, err)
 	}
 	return nil
 }
 
-// seqApplied reports whether an event with (sessionID, seq) already
+// seqApplied reports whether an event with (eventSessionID, seq) already
 // produced a row. It backs Apply's idempotency: the store assigns gapless
-// per-session seqs, so (session_id, cause_seq) uniquely identifies an
-// event and a replayed event is a no-op.
-func seqApplied(db *sql.DB, sessionID string, seq uint64) (bool, error) {
+// per-conversation seqs, so (event_session_id, cause_seq) uniquely identifies
+// an event and a replayed event is a no-op.
+//
+// IT READS THE STORE COORDINATE, never the owning session id. A vendor uuid
+// rotation restarts the seq space at 1 under the SAME daemon session, so a
+// check keyed on the owner would read the new space's first event as a replay
+// of the retired space's and drop the turn it starts.
+func seqApplied(db *sql.DB, eventSessionID string, seq uint64) (bool, error) {
 	var one int
 	err := db.QueryRow(
-		`SELECT 1 FROM workspace_state WHERE session_id = ? AND cause_seq = ? LIMIT 1`,
-		sessionID, int64(seq)).Scan(&one)
+		`SELECT 1 FROM workspace_state WHERE event_session_id = ? AND cause_seq = ? LIMIT 1`,
+		eventSessionID, int64(seq)).Scan(&one)
 	if err == sql.ErrNoRows {
 		return false, nil
 	}
 	if err != nil {
-		return false, fmt.Errorf("ssm: idempotency check for session %q seq %d: %w", sessionID, seq, err)
+		return false, fmt.Errorf("ssm: idempotency check for event session %q seq %d: %w", eventSessionID, seq, err)
 	}
 	return true, nil
 }
