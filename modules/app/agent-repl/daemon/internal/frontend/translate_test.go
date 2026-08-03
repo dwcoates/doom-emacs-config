@@ -1,6 +1,7 @@
 package frontend
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -8,6 +9,7 @@ import (
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/errclass"
 
 	"google.golang.org/protobuf/proto"
@@ -17,6 +19,18 @@ import (
 
 // A fixed producer stamp so item ts_ms fields are deterministic across goldens.
 const producedMs int64 = 1700000000000
+
+// discardLogf satisfies the logger a translation requires in tests that assert
+// on the translated frames rather than on the records a refusal writes.
+func discardLogf(string, ...any) {}
+
+// recordingLogf collects the formatted records a translation emits so a
+// refusal's account can be asserted.
+func recordingLogf(lines *[]string) dlog.Logf {
+	return func(format string, args ...any) {
+		*lines = append(*lines, fmt.Sprintf(format, args...))
+	}
+}
 
 // mustAny wraps a proto message in an Any or fails the test.
 func mustAny(t *testing.T, m proto.Message) *anypb.Any {
@@ -611,7 +625,7 @@ func TestBuildTaskCatalog(t *testing.T) {
 	}
 
 	// Act.
-	got := BuildTaskCatalog("ws", "s1", events)
+	got := BuildTaskCatalog("ws", "s1", events, discardLogf)
 
 	// Assert.
 	want := &frontendv1.TaskCatalog{
@@ -636,7 +650,7 @@ func TestBuildTaskCatalogFoldsADuplicateTaskEndedOntoOneEntry(t *testing.T) {
 	}
 
 	// Act.
-	got := BuildTaskCatalog("ws", "s1", events)
+	got := BuildTaskCatalog("ws", "s1", events, discardLogf)
 
 	// Assert — one entry, not two.
 	if len(got.GetTasks()) != 1 {
@@ -653,7 +667,7 @@ func TestBuildTaskCatalogKeepsTheTaskEndedOnADuplicate(t *testing.T) {
 	}
 
 	// Act.
-	got := BuildTaskCatalog("ws", "s1", events)
+	got := BuildTaskCatalog("ws", "s1", events, discardLogf)
 
 	// Assert.
 	if s := got.GetTasks()[0].GetStatus(); s != "error" {
@@ -745,7 +759,7 @@ func TestBuildTaskCatalogSweepsAGhostAbsentFromTheLiveSet(t *testing.T) {
 	}
 
 	// Act.
-	got := BuildTaskCatalog("ws", "s1", events)
+	got := BuildTaskCatalog("ws", "s1", events, discardLogf)
 
 	// Assert.
 	if len(got.GetTasks()) != 1 || got.GetTasks()[0].GetStatus() != "lost" {
@@ -756,12 +770,12 @@ func TestBuildTaskCatalogSweepsAGhostAbsentFromTheLiveSet(t *testing.T) {
 func TestBuildTaskCatalogStampsTheSweepAtTheSnapshotTime(t *testing.T) {
 	// Arrange
 	events := []*corev1.Event{
-		{ProducedAtMs: 100, Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{TaskId: "ghost"}}},
+		{ProducedAtMs: 100, Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{TaskId: "ghost", Kind: corev1.TaskKind_TASK_KIND_AGENT}}},
 		backgroundTasksEvent(t, 300),
 	}
 
 	// Act.
-	got := BuildTaskCatalog("ws", "s1", events)
+	got := BuildTaskCatalog("ws", "s1", events, discardLogf)
 
 	// Assert.
 	if got.GetTasks()[0].GetEndedAtMs() != 300 {
@@ -773,13 +787,13 @@ func TestBuildTaskCatalogLeavesASettledTaskAlone(t *testing.T) {
 	// Arrange — a task that genuinely finished must keep its real status, not
 	// be re-reported as lost because it is absent from the live set.
 	events := []*corev1.Event{
-		{ProducedAtMs: 100, Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{TaskId: "a1"}}},
+		{ProducedAtMs: 100, Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{TaskId: "a1", Kind: corev1.TaskKind_TASK_KIND_AGENT}}},
 		{ProducedAtMs: 200, Payload: &corev1.Event_TaskEnded{TaskEnded: &corev1.TaskEnded{TaskId: "a1", Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE}}},
 		backgroundTasksEvent(t, 300),
 	}
 
 	// Act.
-	got := BuildTaskCatalog("ws", "s1", events)
+	got := BuildTaskCatalog("ws", "s1", events, discardLogf)
 
 	// Assert.
 	if got.GetTasks()[0].GetStatus() != "done" {
@@ -790,11 +804,11 @@ func TestBuildTaskCatalogLeavesASettledTaskAlone(t *testing.T) {
 func TestBuildTaskCatalogAdoptsATaskItNeverSawStart(t *testing.T) {
 	// Arrange — the live set names a task with no TaskStarted in the window.
 	events := []*corev1.Event{
-		backgroundTasksEvent(t, 300, &datav1.BackgroundTaskRef{TaskId: "unseen", TaskType: "shell", Description: "npm test"}),
+		backgroundTasksEvent(t, 300, &datav1.BackgroundTaskRef{TaskId: "unseen", TaskType: "local_bash", Description: "npm test"}),
 	}
 
 	// Act.
-	got := BuildTaskCatalog("ws", "s1", events)
+	got := BuildTaskCatalog("ws", "s1", events, discardLogf)
 
 	// Assert.
 	want := &frontendv1.TaskEntry{TaskId: "unseen", Kind: "shell", Description: "npm test", Status: "running", StartedAtMs: 300}
@@ -811,7 +825,7 @@ func TestBuildTaskCatalogKeepsALiveTaskRunning(t *testing.T) {
 	}
 
 	// Act.
-	got := BuildTaskCatalog("ws", "s1", events)
+	got := BuildTaskCatalog("ws", "s1", events, discardLogf)
 
 	// Assert — its own start time and description survive the reconciliation.
 	want := &frontendv1.TaskEntry{TaskId: "a1", Kind: "agent", Description: "d", Status: "running", StartedAtMs: 100}
@@ -824,17 +838,156 @@ func TestBuildTaskCatalogLetsALaterTaskEndedCloseAnAdoptedTask(t *testing.T) {
 	// Arrange — the live set is authoritative AT ITS POINT in the stream; a
 	// TaskEnded that folds after it still closes the task.
 	events := []*corev1.Event{
-		backgroundTasksEvent(t, 300, &datav1.BackgroundTaskRef{TaskId: "a1"}),
+		backgroundTasksEvent(t, 300, &datav1.BackgroundTaskRef{TaskId: "a1", TaskType: "local_bash"}),
 		{ProducedAtMs: 400, Payload: &corev1.Event_TaskEnded{TaskEnded: &corev1.TaskEnded{TaskId: "a1", Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE}}},
 	}
 
 	// Act.
-	got := BuildTaskCatalog("ws", "s1", events)
+	got := BuildTaskCatalog("ws", "s1", events, discardLogf)
 
 	// Assert.
 	if got.GetTasks()[0].GetStatus() != "done" {
 		t.Fatalf("status = %q, want done", got.GetTasks()[0].GetStatus())
 	}
+}
+
+// --- BuildTaskCatalog: the shim task_type → frontend kind boundary ----------
+
+func TestBuildTaskCatalogTranslatesTheShimTaskTypeOnTheRefPath(t *testing.T) {
+	tests := []struct {
+		name     string
+		taskType string
+		want     string
+	}{
+		{name: "local_agent is the frontend's agent kind", taskType: "local_agent", want: "agent"},
+		{name: "local_bash is the frontend's shell kind", taskType: "local_bash", want: "shell"},
+		{name: "local_workflow is the frontend's workflow kind", taskType: "local_workflow", want: "workflow"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange — a task referenced by the live set with no TaskStarted
+			// folded, which is what a restart or a replay leaves behind.
+			events := []*corev1.Event{
+				backgroundTasksEvent(t, 300, &datav1.BackgroundTaskRef{TaskId: "t1", TaskType: tc.taskType}),
+			}
+
+			// Act.
+			got := BuildTaskCatalog("ws", "s1", events, discardLogf)
+
+			// Assert.
+			if len(got.GetTasks()) != 1 || got.GetTasks()[0].GetKind() != tc.want {
+				t.Fatalf("catalog = %v, want one entry of kind %q", got.GetTasks(), tc.want)
+			}
+		})
+	}
+}
+
+func TestBuildTaskCatalogRefusesAnUnrecognizedShimTaskType(t *testing.T) {
+	// Arrange — a task_type outside the shim vocabulary maps to no frontend
+	// kind, and the frontend contract has no value for "unknown".
+	events := []*corev1.Event{
+		backgroundTasksEvent(t, 300, &datav1.BackgroundTaskRef{TaskId: "t1", TaskType: "local_teleport"}),
+	}
+
+	// Act.
+	got := BuildTaskCatalog("ws", "s1", events, discardLogf)
+
+	// Assert — the entry never reaches the contract, in any form.
+	if len(got.GetTasks()) != 0 {
+		t.Fatalf("catalog = %v, want the out-of-vocabulary entry omitted", got.GetTasks())
+	}
+}
+
+func TestBuildTaskCatalogRecordsTheUnrecognizedShimTaskType(t *testing.T) {
+	// Arrange — the refusal must leave a trace naming the task and the string.
+	var lines []string
+	events := []*corev1.Event{
+		backgroundTasksEvent(t, 300, &datav1.BackgroundTaskRef{TaskId: "t1", TaskType: "local_teleport"}),
+	}
+
+	// Act.
+	BuildTaskCatalog("ws", "s1", events, recordingLogf(&lines))
+
+	// Assert.
+	var found bool
+	for _, line := range lines {
+		if strings.Contains(line, `"t1"`) && strings.Contains(line, `"local_teleport"`) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("records = %q, want one naming task t1 and the offending task_type", lines)
+	}
+}
+
+func TestBuildTaskCatalogNeverPassesARawShimTaskTypeThroughAsAKind(t *testing.T) {
+	// Arrange — the exact live poisoning: a retained ref-only entry whose raw
+	// task_type used to be copied into the frontend kind, which the webapp's
+	// validating decoder then rejected for every snapshot of the session.
+	events := []*corev1.Event{
+		backgroundTasksEvent(t, 300, &datav1.BackgroundTaskRef{TaskId: "t1", TaskType: "local_agent"}),
+	}
+
+	// Act.
+	got := BuildTaskCatalog("ws", "s1", events, discardLogf)
+
+	// Assert.
+	if got.GetTasks()[0].GetKind() == "local_agent" {
+		t.Fatalf("kind = %q, want the frontend vocabulary rather than the shim's", got.GetTasks()[0].GetKind())
+	}
+}
+
+func TestBuildTaskCatalogRefusesAnUnspecifiedTaskKind(t *testing.T) {
+	// Arrange — a TaskStarted the shim could not type resolves to
+	// "unspecified", which is no more decodable to a frontend than a raw
+	// task_type is.
+	events := []*corev1.Event{
+		{ProducedAtMs: 100, Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{TaskId: "t1"}}},
+	}
+
+	// Act.
+	got := BuildTaskCatalog("ws", "s1", events, discardLogf)
+
+	// Assert.
+	if len(got.GetTasks()) != 0 {
+		t.Fatalf("catalog = %v, want the unspecified-kind entry omitted", got.GetTasks())
+	}
+}
+
+func TestBuildTaskCatalogRecordsARefusedEntryByTaskID(t *testing.T) {
+	// Arrange.
+	var lines []string
+	events := []*corev1.Event{
+		{ProducedAtMs: 100, Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{TaskId: "t1"}}},
+	}
+
+	// Act.
+	BuildTaskCatalog("ws", "s1", events, recordingLogf(&lines))
+
+	// Assert.
+	var found bool
+	for _, line := range lines {
+		if strings.Contains(line, "REFUSING task \"t1\"") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("records = %q, want one naming the refused task", lines)
+	}
+}
+
+func TestBuildTaskCatalogRequiresALogger(t *testing.T) {
+	// Arrange — a refusal that cannot be recorded is a silent drop, so the
+	// translation refuses to run without somewhere to record it.
+	defer func() {
+		// Assert.
+		if recover() == nil {
+			t.Fatalf("BuildTaskCatalog with a nil logger returned normally, want a panic")
+		}
+	}()
+
+	// Act.
+	BuildTaskCatalog("ws", "s1", nil, nil)
 }
 
 func TestBackgroundTasksFromVendorIgnoresAnotherStreamArm(t *testing.T) {
