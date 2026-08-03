@@ -30,6 +30,12 @@ import {
 /** Log component for this session's loud anomaly lines. */
 const LOG_COMPONENT = "claude-shim-session";
 const LOGGER = bindLog({ component: LOG_COMPONENT, operation: "shim.session.lifecycle" });
+const CACHE_LOGGER = bindLog({ component: LOG_COMPONENT, operation: "shim.session.cache" });
+
+/** Materially sized results below this read ratio require operator attention. */
+const CACHE_HIT_RATE_WARNING_THRESHOLD = 0.8;
+/** Ignore token totals too small to represent a cacheable conversation prefix. */
+const CACHE_OBSERVATION_MIN_INPUT_TOKENS = 4096;
 
 // ---------------------------------------------------------------------------
 // SDK boundary types (structural, so tests can inject fakes)
@@ -697,8 +703,53 @@ export class ShimSession {
     if (subtype === "success" && typeof msg.result === "string") {
       evt.result = msg.result;
     }
+    this.logCacheUsage(evt);
     LOGGER.log({ agent_repl_session_id: this.deps.sessionId, result_subtype: subtype, is_error: evt.is_error, turns_in_flight: this.turnsInFlight }, "mapped SDK result event");
     this.deps.emit(evt);
+  }
+
+  private logCacheUsage(evt: ResultEvt): void {
+    const modelCacheUsage = evt.model_usage === undefined
+      ? undefined
+      : Object.fromEntries(
+          Object.entries(evt.model_usage).map(([model, usage]) => [
+            model,
+            summarizeCacheUsage(usage),
+          ]),
+        );
+    const usage = evt.model_usage === undefined
+      ? summarizeCacheUsage(evt.usage)
+      : sumCacheUsage(Object.values(evt.model_usage));
+    const fields = {
+      agent_repl_session_id: this.deps.sessionId,
+      sdk_uuid: evt.uuid,
+      result_subtype: evt.subtype,
+      is_error: evt.is_error,
+      cache_usage_scope: evt.model_usage === undefined ? "top_level" : "whole_tree",
+      uncached_input_tokens: usage.uncached_input_tokens,
+      cache_creation_input_tokens: usage.cache_creation_input_tokens,
+      cache_read_input_tokens: usage.cache_read_input_tokens,
+      cache_observed_input_tokens: usage.cache_observed_input_tokens,
+      cache_hit_rate: usage.cache_hit_rate,
+      cache_hit_percent: usage.cache_hit_percent,
+      ...(modelCacheUsage === undefined ? {} : { model_cache_usage: modelCacheUsage }),
+    };
+    CACHE_LOGGER.log(fields, "SDK result prompt-cache usage");
+    if (
+      usage.cache_observed_input_tokens >= CACHE_OBSERVATION_MIN_INPUT_TOKENS &&
+      usage.cache_hit_rate !== null &&
+      usage.cache_hit_rate < CACHE_HIT_RATE_WARNING_THRESHOLD
+    ) {
+      CACHE_LOGGER.log(
+        {
+          level: "warn",
+          ...fields,
+          cache_hit_rate_warning_threshold: CACHE_HIT_RATE_WARNING_THRESHOLD,
+          cache_observation_min_input_tokens: CACHE_OBSERVATION_MIN_INPUT_TOKENS,
+        },
+        "LOW PROMPT CACHE HIT RATE: materially sized SDK result is below 80%",
+      );
+    }
   }
 
   private mapSystemMessage(msg: SdkMessageLike): void {
@@ -778,6 +829,54 @@ function normalizeUsage(usage: unknown): ResultEvt["usage"] {
       ? { cache_read_input_tokens: u.cache_read_input_tokens }
       : {}),
   };
+}
+
+interface CacheUsageLike {
+  input_tokens: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
+}
+
+interface CacheUsageSummary {
+  uncached_input_tokens: number;
+  cache_creation_input_tokens: number;
+  cache_read_input_tokens: number;
+  cache_observed_input_tokens: number;
+  cache_hit_rate: number | null;
+  cache_hit_percent: number | null;
+}
+
+function summarizeCacheUsage(usage: CacheUsageLike): CacheUsageSummary {
+  const uncachedInputTokens = usage.input_tokens;
+  const cacheCreationInputTokens = usage.cache_creation_input_tokens ?? 0;
+  const cacheReadInputTokens = usage.cache_read_input_tokens ?? 0;
+  const cacheObservedInputTokens =
+    uncachedInputTokens + cacheCreationInputTokens + cacheReadInputTokens;
+  const cacheHitRate = cacheObservedInputTokens === 0
+    ? null
+    : cacheReadInputTokens / cacheObservedInputTokens;
+  return {
+    uncached_input_tokens: uncachedInputTokens,
+    cache_creation_input_tokens: cacheCreationInputTokens,
+    cache_read_input_tokens: cacheReadInputTokens,
+    cache_observed_input_tokens: cacheObservedInputTokens,
+    cache_hit_rate: cacheHitRate,
+    cache_hit_percent: cacheHitRate === null ? null : cacheHitRate * 100,
+  };
+}
+
+function sumCacheUsage(usages: CacheUsageLike[]): CacheUsageSummary {
+  return summarizeCacheUsage({
+    input_tokens: usages.reduce((sum, usage) => sum + usage.input_tokens, 0),
+    cache_creation_input_tokens: usages.reduce(
+      (sum, usage) => sum + (usage.cache_creation_input_tokens ?? 0),
+      0,
+    ),
+    cache_read_input_tokens: usages.reduce(
+      (sum, usage) => sum + (usage.cache_read_input_tokens ?? 0),
+      0,
+    ),
+  });
 }
 
 /**

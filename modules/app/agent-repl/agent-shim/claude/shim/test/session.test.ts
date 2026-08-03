@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { writeSync } from "node:fs";
+import { describe, expect, it, vi } from "vitest";
 import { AsyncQueue } from "../src/input-queue.js";
 import { ModelInfo, PermissionMode, ShimEvent, SlashCommand } from "../src/protocol.js";
 import {
@@ -48,6 +49,20 @@ interface HarnessOpts {
   /** What a `refresh-commands` probe resolves to (defaults to REFRESHED_COMMANDS). */
   probeCommands?: SlashCommand[];
   probeCommandsError?: Error;
+}
+
+function persistedCacheLogs(): Array<Record<string, unknown>> {
+  const calls = vi.mocked(writeSync).mock.calls as unknown as Array<[
+    number,
+    Buffer,
+    number,
+    number,
+  ]>;
+  return calls
+    .map(([, bytes, offset, length]) =>
+      JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as Record<string, unknown>,
+    )
+    .filter((record) => record.operation === "shim.session.cache");
 }
 
 const FAKE_MODELS: ModelInfo[] = [
@@ -1067,6 +1082,118 @@ describe("ShimSession SDK message mapping", () => {
         context_window: 1000000,
       },
     });
+  });
+
+  it("logs whole-tree cache usage without warning at or above 80%", async () => {
+    // Arrange
+    const h = makeHarness();
+    vi.mocked(writeSync).mockClear();
+    // Act — the top-level usage is cold, but whole-tree model usage is authoritative.
+    await drive(h, {
+      type: "result",
+      uuid: "cache-warm",
+      subtype: "success",
+      usage: {
+        input_tokens: 2000,
+        output_tokens: 10,
+        cache_creation_input_tokens: 8000,
+      },
+      modelUsage: {
+        "claude-opus": {
+          inputTokens: 100,
+          outputTokens: 10,
+          cacheCreationInputTokens: 1900,
+          cacheReadInputTokens: 3000,
+        },
+        "claude-haiku": {
+          inputTokens: 0,
+          outputTokens: 5,
+          cacheCreationInputTokens: 0,
+          cacheReadInputTokens: 5000,
+        },
+      },
+      is_error: false,
+    });
+    // Assert
+    expect(persistedCacheLogs()).toEqual([
+      expect.objectContaining({
+        level: "info",
+        context: expect.objectContaining({
+          sdk_uuid: "cache-warm",
+          cache_usage_scope: "whole_tree",
+          uncached_input_tokens: 100,
+          cache_creation_input_tokens: 1900,
+          cache_read_input_tokens: 8000,
+          cache_observed_input_tokens: 10000,
+          cache_hit_rate: 0.8,
+          cache_hit_percent: 80,
+          model_cache_usage: expect.objectContaining({
+            "claude-opus": expect.objectContaining({ cache_hit_rate: 0.6 }),
+            "claude-haiku": expect.objectContaining({ cache_hit_rate: 1 }),
+          }),
+        }),
+      }),
+    ]);
+  });
+
+  it("loudly warns when a materially sized result is below 80% cache reads", async () => {
+    // Arrange
+    const h = makeHarness();
+    vi.mocked(writeSync).mockClear();
+    // Act
+    await drive(h, {
+      type: "result",
+      uuid: "cache-cold",
+      subtype: "success",
+      usage: {
+        input_tokens: 100,
+        output_tokens: 10,
+        cache_creation_input_tokens: 4000,
+        cache_read_input_tokens: 900,
+      },
+      is_error: false,
+    });
+    // Assert
+    const logs = persistedCacheLogs();
+    expect(logs).toHaveLength(2);
+    expect(logs[0]).toMatchObject({
+      level: "info",
+      context: {
+        cache_usage_scope: "top_level",
+        cache_observed_input_tokens: 5000,
+        cache_hit_rate: 0.18,
+        cache_hit_percent: 18,
+      },
+    });
+    expect(logs[1]).toMatchObject({
+      level: "warn",
+      message: "LOW PROMPT CACHE HIT RATE: materially sized SDK result is below 80%",
+      context: {
+        cache_hit_rate: 0.18,
+        cache_hit_rate_warning_threshold: 0.8,
+        cache_observation_min_input_tokens: 4096,
+      },
+    });
+  });
+
+  it("does not warn for token totals below the cache observation floor", async () => {
+    // Arrange
+    const h = makeHarness();
+    vi.mocked(writeSync).mockClear();
+    // Act
+    await drive(h, {
+      type: "result",
+      uuid: "cache-small",
+      subtype: "success",
+      usage: {
+        input_tokens: 100,
+        output_tokens: 10,
+        cache_creation_input_tokens: 900,
+      },
+      is_error: false,
+    });
+    // Assert
+    expect(persistedCacheLogs()).toHaveLength(1);
   });
 
   it("omits model_usage when the SDK reports an empty map", async () => {
