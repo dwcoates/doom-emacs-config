@@ -1951,7 +1951,12 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 //     checkpoint at zero rather than the retired one.
 //   - shimclient Client.lastSeen — re-read from the SeqStore on every
 //     runOnce, which is why OnHandshake (this hook) must run BEFORE the
-//     Subscribe reads it.
+//     Subscribe reads it. It is ALSO reset outside this hook: a rotation is not
+//     the only way a seq space is retired, and a shim that restarts under an
+//     unchanged vendor uuid announces nothing here while still renumbering
+//     from 1. The mark carries the shim generation that advanced it and is
+//     rebased on the new generation's first event — shimclient
+//     seqgeneration.go.
 //   - consumer.ring — purged here (purgeRetainedOnRotation). NAMED
 //     CONSEQUENCE: the frontend TaskCatalog is rebuilt from this same ring, so
 //     a detached task whose start was only ever seen in the retired space drops
