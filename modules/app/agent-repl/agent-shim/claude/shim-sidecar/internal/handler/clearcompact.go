@@ -20,10 +20,25 @@ package handler
 // — a stable name for a line the sidecar may re-read after a restart or a
 // cursor rewind — rather than a cross-producer merge contract.
 //
-// Session identity is not at risk in this attribution: shim-driven and SDK
-// sessions keep ONE vendor session id across a clear (only an interactive TUI
-// session rotates it), so the transcript path the line was read from remains
-// the session it belongs to.
+// Session identity is not at risk in this attribution, but NOT for the reason
+// this comment used to give. It claimed shim-driven and SDK sessions keep ONE
+// vendor session id across a clear, and that only an interactive TUI session
+// rotates it. That is false: a shim-driven `/clear` rotates the uuid too, live
+// and every time (the shim's own store client re-keys on it, see the shim's
+// StoreClient.rotateStoreKey). What holds regardless is the weaker and
+// sufficient statement — the line is attributed to the transcript path it was
+// READ from, whichever uuid that path names — so a clear recorded under a fresh
+// uuid is filed under that fresh uuid, which is the identity the daemon has
+// rotated its own subscription onto.
+//
+// WHAT THAT COSTS, AND WHO PAYS IT. The daemon must not depend on this event to
+// learn that a dispatched `/clear` finished: this producer is a separate,
+// launchd-managed process reading a file, and a sidecar that is down, behind, or
+// has not yet discovered the new uuid's transcript emits nothing at all. The
+// daemon closes its clearing axis on the ROTATION instead (ssm
+// closeClearingLocked) and treats a ContextCleared arriving afterwards as the
+// no-op it is. This event remains the only producer of the cleared BUBBLE and
+// of the conversation's replay floor.
 //
 // CLEAR DETECTION. The harness never writes the literal prompt "/clear" to the
 // transcript. It writes the EXPANDED command envelope:
