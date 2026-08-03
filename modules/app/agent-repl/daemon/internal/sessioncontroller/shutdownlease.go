@@ -286,12 +286,22 @@ func newParkedEntry(id, requestID, text, permissionMode string, queuedAtMs int64
 // durable row behind it. Caller holds m.mu; the durable write happens under it
 // deliberately — the parked entry must not be publishable before the record
 // that makes it recoverable exists.
-func (m *Manager) parkForDrain(d *sessionController, e *queueEntry, scheduleID string) {
+//
+// THE ERROR IS THE WHOLE POINT OF THE RETURN. Parking makes a promise — "your
+// prompt is delayed, not dropped" — and the durable row is the only thing that
+// keeps it across the very bounce that caused the delay. A park with no row
+// behind it is that promise with nothing under it, and the caller that told the
+// user the submit succeeded would be the one telling the lie. So the failure is
+// handed back rather than logged and swallowed, and each caller answers for it
+// where it can: the submit path REFUSES (queueSubmitLocked), and the acquisition
+// path, which has no submitter left to tell, keeps the in-memory hold so a drain
+// cannot be restarted by its own backlog.
+func (m *Manager) parkForDrain(d *sessionController, e *queueEntry, scheduleID string) error {
 	e.shutdownHoldScheduleID = scheduleID
 	if m.cfg.ShutdownHolds == nil {
-		m.logf("session-controller: drain-held prompt NOT recorded durably entry=%s ws=%q session=%s schedule=%s — no ShutdownHoldStore is wired, so this prompt will be LOST if the scheduled bounce happens before it is delivered",
+		m.logf("session-controller: drain-held prompt NOT recorded durably entry=%s ws=%q session=%s schedule=%s — no ShutdownHoldStore is wired, so this prompt could not survive the scheduled bounce",
 			e.id, d.workspace, d.sessionID, scheduleID)
-		return
+		return fmt.Errorf("session-controller: prompt %s for workspace %q cannot be parked by shutdown schedule %s: no durable hold store is wired, so the park could not survive the scheduled bounce", e.id, d.workspace, scheduleID)
 	}
 	if err := m.cfg.ShutdownHolds.RecordHeldPrompt(statedb.HeldPrompt{
 		EntryID:        e.id,
@@ -303,11 +313,12 @@ func (m *Manager) parkForDrain(d *sessionController, e *queueEntry, scheduleID s
 		PermissionMode: e.permissionMode,
 		QueuedAtMs:     e.queuedAtMs,
 	}); err != nil {
-		m.logf("session-controller: drain-held prompt durable record FAILED entry=%s ws=%q session=%s schedule=%s error=%v — the prompt is parked in memory only and will not survive the scheduled bounce",
+		m.logf("session-controller: drain-held prompt durable record FAILED entry=%s ws=%q session=%s schedule=%s error=%v — the park is not recoverable, so it is refused rather than kept in memory behind a successful-looking submit",
 			e.id, d.workspace, d.sessionID, scheduleID, err)
-		return
+		return fmt.Errorf("session-controller: prompt %s for workspace %q cannot be parked by shutdown schedule %s: recording its durable hold failed: %w", e.id, d.workspace, scheduleID, err)
 	}
 	e.drainRowPending = true
+	return nil
 }
 
 // AcquireShutdownHolds parks EVERY prompt already queued across the fleet under
@@ -339,12 +350,27 @@ func (m *Manager) AcquireShutdownHolds(scheduleID string) int {
 	m.mu.Lock()
 	for _, d := range m.byWS {
 		var ids []string
+		var undurable []string
 		for _, e := range d.queue.entries {
 			if e.drainHeld() {
 				continue
 			}
-			m.parkForDrain(d, e, scheduleID)
+			if err := m.parkForDrain(d, e, scheduleID); err != nil {
+				// THE HOLD STANDS ANYWAY, and this is the one site where that
+				// is the right answer. There is no submitter left to refuse —
+				// the prompt was accepted before the lease existed — and
+				// shedding the hold would leave the entry deliverable, which is
+				// the drain restarting from its own backlog: exactly what the
+				// acquisition exists to stop. So the entry stays parked in
+				// memory, the failure is stated as a DURABILITY loss rather
+				// than a parking one, and the lease keeps its guarantee.
+				undurable = append(undurable, e.id)
+			}
 			ids = append(ids, e.id)
+		}
+		if len(undurable) > 0 {
+			m.logf("session-controller: drain holds acquired WITHOUT durable rows ws=%q session=%s schedule=%s entries=%v — these prompts are parked in memory and the lease still holds them back, but they will NOT be replayed by the daemon that comes back from the scheduled bounce",
+				d.workspace, d.sessionID, scheduleID, undurable)
 		}
 		if len(ids) == 0 {
 			continue
