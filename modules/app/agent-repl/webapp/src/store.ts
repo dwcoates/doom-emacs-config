@@ -126,6 +126,7 @@ export interface TextItem extends FeedOrderedItem {
    * start rather than the end so the stamp holds still while the block streams.
    */
   ts: string;
+  tokenUtilization?: import("./frontend-proto.js").TokenUtilization[];
 }
 export interface ThinkingItem extends FeedOrderedItem {
   kind: "thinking";
