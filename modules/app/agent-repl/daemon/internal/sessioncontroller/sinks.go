@@ -1,6 +1,7 @@
 package sessioncontroller
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -713,16 +714,39 @@ func (c *consumer) ApplyTurnClaimBridge(ev *corev1.Event) error {
 		ev.GetTurnClaimBridge().GetPreviousSessionId(), ev.GetRequestId(),
 		turnBridgeDecision(err), replayed, err)
 	if err != nil {
+		// The dead-claim refusal is the one bridge failure the transport must
+		// SURVIVE. The ledger already refused it (nothing was written), and the
+		// turn it names ended before this bridge arrived, so there is no live
+		// correlation left to protect by severing the link. Escalating it did
+		// protect nothing and cost everything: the shim replays from
+		// last_seen_seq, so a bridge that kills the session is redelivered on
+		// every reattach and kills it again, forever.
+		//
+		// Returning nil here lets last_seen_seq advance PAST the dead bridge,
+		// which is what ends the loop. It is not a swallow: the refusal is
+		// recorded twice above — once by the SSM as decision=refuse_dead_claim,
+		// once on the line below — and the bridge is still refused. Only the
+		// session's life is spared.
+		if errors.Is(err, ssm.ErrTurnBridgeDeadClaim) {
+			c.logf("session-controller: turn bridge REFUSED session=%s seq=%d turn_id=%q previous_session=%q — the claim is already closed, so this bridge is proof about a retired epoch and is recorded nowhere; the session SURVIVES and last_seen_seq advances past it: %v",
+				c.sessionID, ev.GetSeq(), ev.GetTurnClaimBridge().GetTurnId(),
+				ev.GetTurnClaimBridge().GetPreviousSessionId(), err)
+			return nil
+		}
 		return fmt.Errorf("session-controller: turn bridge rejected: %w", err)
 	}
 	return nil
 }
 
 func turnBridgeDecision(err error) string {
-	if err != nil {
+	switch {
+	case err == nil:
+		return "accept_durable_bridge_without_lifecycle_edge"
+	case errors.Is(err, ssm.ErrTurnBridgeDeadClaim):
+		return "refuse_dead_claim_bridge_session_survives"
+	default:
 		return "reject_durable_bridge"
 	}
-	return "accept_durable_bridge_without_lifecycle_edge"
 }
 
 // Consume translates a data/ephemeral event into a frontend push (design step
