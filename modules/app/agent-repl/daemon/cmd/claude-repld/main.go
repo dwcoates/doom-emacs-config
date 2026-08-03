@@ -800,7 +800,7 @@ func main() {
 			Connected: shimListener.Connected,
 			Held:      sessionlock.Held,
 		},
-		ClientLogs:        clientLogs,
+		ClientLogs: clientLogs,
 		// The daemon resolves a workspace's conversation for itself. Frontends
 		// send an intent (continue / fresh / explicit), never a remembered
 		// vendor uuid — see server.ConversationResolver.

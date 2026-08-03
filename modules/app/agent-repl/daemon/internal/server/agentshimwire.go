@@ -648,7 +648,7 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 	return &AgentShim{
 		Server: srv, SSM: mgr, Progress: prog, Merge: driver, MergeCoordinator: coordinator, MergeDispatch: mergeDispatch,
 		ShutdownScheduler: scheduler,
-		cancelPush: cancel, cancelProgress: cancelProgress,
+		cancelPush:        cancel, cancelProgress: cancelProgress,
 		cancelWorkspaceAvailable: cancelWorkspaceAvailable, cancelHostActions: cancelHostActions, logf: logf,
 	}, nil
 }
