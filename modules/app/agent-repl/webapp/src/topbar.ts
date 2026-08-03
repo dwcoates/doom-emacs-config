@@ -163,6 +163,7 @@ export function sessionTopbarDatapoints(
       contextSize: state.contextTokens,
       topLevel: topLevelUsage(state),
       models: state.modelUsage,
+      timing: state.tokenUtilization?.all_agents.timing,
     },
     agents: [],
     tasks: [],

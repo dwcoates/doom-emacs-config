@@ -42,6 +42,7 @@ import {
   ContentBlock,
   ModelInfo,
   ModelUsage,
+  SessionTokenUtilization,
   PermissionMode,
   PermissionPreview,
   QueuedItem,
@@ -306,6 +307,7 @@ export interface SystemFailureCard extends FeedOrderedItem {
    * already scrolled off.
    */
   uuid: string;
+  resumeFailure?: import("./frontend-proto.js").SessionResumeFailure;
 }
 export interface SystemItem extends FeedOrderedItem {
   kind: "system";
@@ -486,6 +488,7 @@ export interface StoreState {
    * that carries a map; `null` until the first one does.
    */
   modelUsage: Record<string, ModelUsage> | null;
+  tokenUtilization?: SessionTokenUtilization | null;
   /**
    * Whether the running turn is being INTERRUPTED. GAP after the cutover: no
    * interrupt frame in `frontend.v1`; stays false (the SSM-resolved
@@ -576,6 +579,7 @@ function initialState(): StoreState {
     resultUsage: null,
     turnUsage: new Map(),
     modelUsage: null,
+    tokenUtilization: null,
     interrupting: false,
     turnRetracted: false,
     costUsd: null,
@@ -1079,6 +1083,7 @@ export class ConversationStore {
     if (sv.permissionMode !== "") s.permissionMode = sv.permissionMode as PermissionMode;
     s.costUsd = sv.totalCostUsd;
     s.contextTokens = sv.totalTokens > 0 ? sv.totalTokens : null;
+    if (sv.tokenUtilization !== undefined) s.tokenUtilization = sv.tokenUtilization;
     if (sv.title !== "") s.taskSummary = sv.title;
     // The durable resume keys feed the client-side rebind (main.ts); an
     // empty value never clobbers a filled record.
