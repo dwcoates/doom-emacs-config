@@ -97,15 +97,17 @@ type CommandHandler interface {
 // in the tree funnels through the one `err != nil` below, which makes it both
 // the only place a classifier is needed and the natural one. logf carries the
 // classifier's loud unclassified-fallthrough line.
-func Dispatch(ctx context.Context, logf dlog.Logf, h CommandHandler, cmd *frontendv1.FrontendCommand) *frontendv1.CommandAck {
-	ack, _ := DispatchWithResponse(ctx, logf, h, cmd)
+// rosters retains and fans out the editor-global workspace roster; a nil one
+// makes publishWorkspaceRoster a loud refusal rather than a nil-deref.
+func Dispatch(ctx context.Context, logf dlog.Logf, h CommandHandler, rosters RosterRetainer, cmd *frontendv1.FrontendCommand) *frontendv1.CommandAck {
+	ack, _ := DispatchWithResponse(ctx, logf, h, rosters, cmd)
 	return ack
 }
 
 // DispatchWithResponse is Dispatch plus the command-specific correlated frame
 // health commands require.  Only health has a result frame today; all other
 // commands return nil so the existing CommandAck contract stays unchanged.
-func DispatchWithResponse(ctx context.Context, logf dlog.Logf, h CommandHandler, cmd *frontendv1.FrontendCommand) (*frontendv1.CommandAck, *frontendv1.FrontendFrame) {
+func DispatchWithResponse(ctx context.Context, logf dlog.Logf, h CommandHandler, rosters RosterRetainer, cmd *frontendv1.FrontendCommand) (*frontendv1.CommandAck, *frontendv1.FrontendFrame) {
 	if cmd == nil {
 		return failAck(logf, "", fmt.Errorf("frontend: nil command")), nil
 	}
@@ -153,13 +155,17 @@ func DispatchWithResponse(ctx context.Context, logf dlog.Logf, h CommandHandler,
 	case *frontendv1.FrontendCommand_SetModel:
 		selectedModel, err = h.SetModel(ctx, ws, reqID, c.SetModel)
 	case *frontendv1.FrontendCommand_PublishWorkspaceRoster:
-		// The roster contract is frozen and its types are generated, but the
-		// daemon does not yet retain or rebroadcast a roster. The arm is
-		// answered with an explicit unimplemented NACK rather than left to the
-		// default branch: a publisher must be able to tell "the daemon does
-		// not do this yet" from "the daemon did not understand you", and
-		// neither may be silently accepted as a successful publish.
-		err = fmt.Errorf("frontend: publishWorkspaceRoster is not implemented yet (revision=%d)", c.PublishWorkspaceRoster.GetRoster().GetRevision())
+		// The roster is retained by the TRANSPORT, not by the CommandHandler:
+		// it is editor-global frontend surface with no session or workspace of
+		// its own, and the thing that must hold it is the same thing that fans
+		// it out and snapshots it on connect. So it routes to the retainer
+		// rather than to h.
+		if rosters == nil {
+			err = fmt.Errorf("frontend: publishWorkspaceRoster has no roster retainer configured (revision=%d)",
+				c.PublishWorkspaceRoster.GetRoster().GetRevision())
+		} else {
+			err = rosters.PublishWorkspaceRoster(c.PublishWorkspaceRoster.GetRoster())
+		}
 	case *frontendv1.FrontendCommand_ClientLog:
 		err = h.ClientLog(ctx, ws, reqID, c.ClientLog)
 	case *frontendv1.FrontendCommand_QueueForce:

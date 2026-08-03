@@ -83,6 +83,14 @@ type Server struct {
 	// latestWorkspaceAt is the newest WorkspaceState revision that crossed the
 	// delivery lock. Snapshot paths use it to detect a concurrent publication.
 	latestWorkspaceAt map[string]int64
+	// roster is the newest workspace roster Emacs published, or nil when none
+	// has been. It lives under the DELIVERY lock rather than a lock of its own
+	// so retention, fan-out and a concurrent connect are serialized against
+	// each other by the same mechanism that already serializes emissions —
+	// see PublishWorkspaceRoster. In-memory only, by design: the revision is
+	// monotonic per Emacs BOOT, so a retained roster must not outlive its
+	// publisher.
+	roster *frontendv1.WorkspaceRoster
 }
 
 // client is one connected frontend's outbound state. out is never closed
@@ -517,7 +525,7 @@ func (s *Server) dispatchClientCommand(cl *client, cmd *frontendv1.FrontendComma
 		s.logf("frontend: host-only command rejected kind=%s request_id=%s", cl.kind, cmd.GetRequestId())
 		return failAck(s.logf, cmd.GetRequestId(), err), nil
 	}
-	return DispatchWithResponse(context.Background(), s.logf, s.handler, cmd)
+	return DispatchWithResponse(context.Background(), s.logf, s.handler, s, cmd)
 }
 
 // ---------------------------------------------------------------------------
@@ -570,6 +578,32 @@ func (s *Server) serveClient(c conn, scope *Scope, kind ClientKind) {
 				kind, scopeWorkspace(scope), scopeSession(scope))
 			_ = c.close()
 			return
+		}
+		// The retained roster rides the SAME delivery-lock operation as the
+		// snapshot and the registration. That is what makes a connect racing a
+		// publication safe: this client either sees the roster here or as the
+		// broadcast that follows its registration, never neither and never the
+		// older one after the newer. It is a separate frame because the roster
+		// is not a StateSnapshot field — StateSnapshot is session-scoped state
+		// and the roster is editor-global — and it is OMITTED entirely when
+		// nothing has been published, so "no roster yet" stays distinguishable
+		// from "an empty roster".
+		if held := s.retainedRosterLocked(); held != nil {
+			rosterData, rosterErr := marshalFrame(WorkspaceRosterFrame(held))
+			if rosterErr != nil {
+				s.mu.Unlock()
+				s.logf("frontend: marshal connect roster kind=%s scope_workspace=%q revision=%d: %v",
+					kind, scopeWorkspace(scope), held.GetRevision(), rosterErr)
+				_ = c.close()
+				return
+			}
+			if queued, _ := enqueueLocked(cl, outFrame{key: coalesceKey(WorkspaceRosterFrame(held)), data: rosterData}); !queued {
+				s.mu.Unlock()
+				s.logf("frontend: connect roster rejected by a near-empty outbox kind=%s scope_workspace=%q revision=%d",
+					kind, scopeWorkspace(scope), held.GetRevision())
+				_ = c.close()
+				return
+			}
 		}
 		s.clients[cl] = struct{}{}
 		s.mu.Unlock()

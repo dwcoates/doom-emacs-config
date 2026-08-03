@@ -45,6 +45,14 @@ import (
 //     effect. Keyed by workspace+session+tool_use_id, because two tools running
 //     concurrently do NOT supersede each other.
 //
+//   - WorkspaceRoster — ABSOLUTE, and keyed GLOBALLY with no discriminator at
+//     all. The proto states the roster is "always whole, never a delta", the
+//     frontends replace their entire sidebar model with it, and there is
+//     exactly one roster for the whole editor. So any two queued rosters are
+//     redundant with each other and the newer one alone is the whole truth.
+//     The daemon already refuses a publication that does not advance the
+//     revision, so the survivor of a compaction is always the newest revision.
+//
 // Everything else is irreplaceable, and the two that most look coalescable are
 // deliberately not:
 //
@@ -75,6 +83,8 @@ func coalesceKey(frame *frontendv1.FrontendFrame) string {
 	case *frontendv1.FrontendFrame_Heartbeat:
 		return "heartbeat\x00" + f.Heartbeat.GetWorkspace() + "\x00" +
 			f.Heartbeat.GetSessionId() + "\x00" + f.Heartbeat.GetProgress().GetToolUseId()
+	case *frontendv1.FrontendFrame_WorkspaceRoster:
+		return "workspace_roster"
 	default:
 		return ""
 	}
