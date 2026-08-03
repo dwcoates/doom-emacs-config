@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   METAPROMPT_REL_PATH,
   metapromptPath,
@@ -78,6 +79,20 @@ describe("readMetaprompt", () => {
     // Act + Assert: degrading this to "no guidelines" would run the session
     // unguided and look identical to the normal absent case.
     expect(() => readMetaprompt(root)).toThrow(/reading the metaprompt at/);
+  });
+});
+
+/** This repository's own checkout root, seven levels above `shim/test`. */
+const REPO_ROOT = fileURLToPath(new URL("../../../../../../..", import.meta.url));
+
+describe("this repository's committed metaprompt", () => {
+  it("pins subagent dispatch to opus at medium effort", () => {
+    // Arrange + Act — the real file, read exactly as a session reads it.
+    const text = readMetaprompt(REPO_ROOT);
+    // Assert — the directive only governs a session if it survives into the
+    // system-prompt append, so the guard is on the delivered text.
+    expect(text).toContain("Every subagent runs as opus at medium reasoning effort");
+    expect(text).toContain("subagent_type: opus-medium");
   });
 });
 

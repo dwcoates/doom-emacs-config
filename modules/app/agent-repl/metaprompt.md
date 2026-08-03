@@ -139,6 +139,20 @@
 - Stream the results of multiple concurrent backgrounded processes back concurrently when they are of equal significance.
   - When several equally significant backgrounded processes run at once, their results are streamed back concurrently too.
 
+## Subagents
+
+### Every subagent runs as opus at medium reasoning effort
+
+- Every subagent I dispatch MUST run on the `opus` model at `medium` reasoning effort unless I am told otherwise for that dispatch.
+  - "Told otherwise" means the user names a different model or a different effort level for the subagent, and NOTHING else licenses a deviation.
+  - The default is never inherited implicitly from the session's own model or effort, since inheritance silently changes the subagent's tier whenever the session's tier changes.
+- The default is expressed by dispatching through the `opus-medium` subagent type, which pins both the model and the effort in one place.
+  - Use `subagent_type: opus-medium` for any dispatch that does not require a different specialized agent type.
+  - When a different agent type is genuinely required, pass `model: "opus"` explicitly on that dispatch rather than leaving the model unset.
+- A subagent dispatched at a weaker tier than opus is a defect, not an optimization.
+  - Cheaper subagent tiers trade correctness for a cost that does not matter here, which the design-expedience rule already forbids.
+  - Effort above `medium` is reserved for dispatches the user explicitly asks to run deeper.
+
 ## Response behavior
 
 ### No rhetorical questions
