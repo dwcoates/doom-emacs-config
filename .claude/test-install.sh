@@ -71,7 +71,7 @@ LAST_RC=0
 run_install() {
   local repo="$1" home="$2" action="${3:-install}"
   set +e
-  INSTALL_SH_SKIP_SANDBOX_DETECT=1 HOME="$home" bash "$repo/.claude/install.sh" "$action" >"$repo/.install.log" 2>&1
+  HOME="$home" bash "$repo/.claude/install.sh" "$action" >"$repo/.install.log" 2>&1
   LAST_RC=$?
   set -e
 }
@@ -181,7 +181,7 @@ test_uninstall_default_action_exits_zero() {
 # --- install: a pre-existing (stale) symlink is repaired to the impl ---
 test_install_relinks_existing_symlink_to_impl() {
   local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
-  ln -s /some/stale/sandbox/path "$home/.claude/skills/foo"
+  ln -s /some/stale/path "$home/.claude/skills/foo"
   run_install "$repo" "$home"
   local actual; actual="$(readlink "$home/.claude/skills/foo")"
   if [ "$LAST_RC" -eq 0 ] && [ "$actual" = "$repo/impl/foo" ]; then
@@ -237,7 +237,7 @@ test_local_skills_link_to_main_worktree() {
   git -C "$repo" worktree add -q --detach "$repo/linked-wt" >/dev/null 2>&1
   # Invoke install.sh from the LINKED worktree's own checkout.
   set +e
-  INSTALL_SH_SKIP_SANDBOX_DETECT=1 HOME="$home" \
+  HOME="$home" \
     bash "$repo/linked-wt/.claude/install.sh" install >"$repo/.install.log" 2>&1
   LAST_RC=$?
   set -e
