@@ -390,12 +390,20 @@ phase to render — `agent-repl--frontend-merge-status-arm' errors on it
     (:failingSha        . :failing-sha)
     (:failingSubject    . :failing-subject)
     (:cause             . :cause)
+    (:failedJson        . :failed-json)
     (:afterActionError  . :after-action-error))
   "Every field a `MergeStatus' oneof arm can carry: wire key to plist key.
 The union across all arms, deliberately flat: a caller asks for
 `:commits-landed' without first knowing which arm produced it.  A field
 outside this table is a wire addition Emacs has not been taught, which
-fails loudly for the same reason an unknown frame arm does.")
+fails loudly for the same reason an unknown frame arm does.
+
+`:failedJson' is the `failed' arm serialized as JSON BY THE DAEMON, using
+proto3's own JSON mapping — it is kept verbatim, and Emacs never
+assembles or re-serializes a record of its own from the sibling fields
+beside it.  `merge-handlers.el' reports it as a field of the merge error,
+which is how a failure that fits on one echo line still hands the reader
+every field the arm carried.")
 
 (defconst agent-repl--frontend-merge-status-numeric-fields
   '(:position :depth :commits-total :commits-landed)
