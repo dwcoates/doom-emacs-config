@@ -683,19 +683,54 @@ foreign directory the xwidget session inherited at creation."
 
 ;;;; ---- Placement ---------------------------------------------------------------
 
+(defun agent-repl--frontend-largest-main-area-window ()
+  "Return the largest live non-side window of the selected frame.
+Used as the parent to split a host out of when every main-area window
+is dedicated.  Side windows are excluded because splitting one keeps
+the child inside the side-window tree, which is not the main area.
+Returns nil only when the frame carries no non-side window at all."
+  (car (sort (seq-remove #'agent-repl-window--side-window-p
+                         (window-list nil 'no-minibuffer))
+             (lambda (a b)
+               (> (* (window-total-height a) (window-total-width a))
+                  (* (window-total-height b) (window-total-width b)))))))
+
 (defun agent-repl--frontend-main-area-window ()
-  "Return a live main-area window able to host the webview.
+  "Return a live, UNDEDICATED main-area window able to host the webview.
 `window-main-window' can return an INTERNAL window when the main area
 is split, and `select-window' on an internal window errors — so walk
 the frame's live windows and take the first that is neither a side
 window nor DEDICATED (a dedicated window rejects `set-window-buffer',
 and the workspace's own hardened input panel is exactly such a window).
-Falls back to the selected window (always live) when nothing matches."
+
+When NO undedicated candidate exists, a host is MADE by splitting the
+frame's largest main-area window.  This is the routine shape on a
+workspace switch, not an exotic one: `agent-repl--maybe-autoselect-input'
+leaves the previous workspace's input panel selected, and that panel is
+hardened dedicated — so the frame can genuinely be all-dedicated at
+mount time.  The old fallback returned `(selected-window)' WITHOUT
+re-checking dedication, handed that dedicated window to
+`set-window-buffer', and the mount died with \"Window is dedicated
+to ...\" — the new workspace's webview never appeared.
+
+Splitting is deliberately preferred over lifting the dedication: the
+child of a split is undedicated and unhardened even when its parent is
+dedicated and size-fixed, so a host is obtained without ever clearing
+a dedication some other workspace's panel recipe set.  The stale-input
+reclaim in `agent-repl--frontend-display-webview' does un-dedicate, but
+only ever the CALLING workspace's own input window."
   (or (seq-find (lambda (win)
                   (and (not (agent-repl-window--side-window-p win))
                        (not (window-dedicated-p win))))
                 (window-list nil 'no-minibuffer))
-      (selected-window)))
+      (let* ((ws (agent-repl--ws-current-name))
+             (parent (or (agent-repl--frontend-largest-main-area-window)
+                         (selected-window)))
+             (host (split-window parent nil 'below)))
+        (agent-repl--log ws
+                         "frontend-main-area-window: no undedicated host; split parent=%S host=%S"
+                         parent host)
+        host)))
 
 (defun agent-repl--frontend-display-webview (ws buf)
   "Display BUF as the workspace's frontend view filling the frame's main area.
@@ -744,6 +779,24 @@ panels — the extra-windows-on-first-switch bug."
     (let ((win (agent-repl--frontend-main-area-window)))
       (select-window win)
       (agent-repl--clear-main-area-for-panels)
+      ;; Re-validate the host between the clear and the mount.
+      ;; `--clear-main-area-for-panels' keeps `(selected-window)'
+      ;; unconditionally, so whatever WIN is at this point is what
+      ;; `set-window-buffer' gets — and a dedicated WIN is precisely
+      ;; how the mount used to die ("Window is dedicated to ...")
+      ;; when a foreign workspace's hardened input panel was
+      ;; selected.  `--frontend-main-area-window' now guarantees an
+      ;; undedicated host, so neither branch below should ever fire;
+      ;; they exist so a regression surfaces as a named failure
+      ;; instead of a raw dedication error from deep inside redisplay.
+      (unless (window-live-p win)
+        (error "agent-repl--frontend-display-webview: host window died during main-area clear (ws=%s)"
+               ws))
+      (when (window-dedicated-p win)
+        (agent-repl--warn ws
+                          "display-webview: host window %S still dedicated to %s after clear; reclaiming"
+                          win (buffer-name (window-buffer win)))
+        (set-window-dedicated-p win nil))
       (set-window-buffer win buf)
       ;; Hybrid UI: the classic input panel sits below the webview,
       ;; hardened with the standard panel recipe (dedicated,
