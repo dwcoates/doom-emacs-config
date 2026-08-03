@@ -39,14 +39,37 @@ type fakeSessionAuthority struct {
 	err         error
 	tornDown    []string
 	teardownErr error
+	// displaced is what InterruptForMerge reports it stopped, or nil for a
+	// lease that displaced nothing (the common case in these tests).
+	displaced *DisplacedTurn
+	// resumed records every turn handed back on release, in order, so a test
+	// can pin exactly-once as a count rather than as a boolean.
+	resumed   []DisplacedTurn
+	resumeErr error
 	// teardownHook runs inside TeardownMerged, so a test can observe what the
 	// rest of the daemon looks like at the instant the teardown is entered.
 	teardownHook func(workspace string)
+	// interruptHook runs inside InterruptForMerge, which is the ONE point in
+	// Acquire between the window being opened and the displaced turn being
+	// recorded onto it — the only place a test can break the record without
+	// also breaking the acquire it is meant to survive.
+	interruptHook func(workspace string)
 }
 
-func (f *fakeSessionAuthority) InterruptForMerge(_ context.Context, workspace string) error {
+func (f *fakeSessionAuthority) InterruptForMerge(_ context.Context, workspace string) (*DisplacedTurn, error) {
 	f.stopped = append(f.stopped, workspace)
-	return f.err
+	if f.interruptHook != nil {
+		f.interruptHook(workspace)
+	}
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.displaced, nil
+}
+
+func (f *fakeSessionAuthority) ResumeDisplacedTurn(_ context.Context, _ string, turn DisplacedTurn) error {
+	f.resumed = append(f.resumed, turn)
+	return f.resumeErr
 }
 
 func (f *fakeSessionAuthority) TeardownMerged(workspace string) error {

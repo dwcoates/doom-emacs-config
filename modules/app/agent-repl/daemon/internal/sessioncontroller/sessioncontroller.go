@@ -406,6 +406,11 @@ type sessionController struct {
 	// this daemon saw it. It is the classifier's "what is already running"
 	// context, and is empty when the turn predates this daemon.
 	runningText string
+	// runningPermissionMode is the mode that turn was submitted under, kept
+	// beside runningText because both describe the SAME turn and a resume that
+	// carried only the text would put the turn back under a different mode
+	// than the one it was cut from (mergelease.go, ResumeDisplacedTurn).
+	runningPermissionMode string
 	// phantomTurnClosed names the durable turn claims the shim handshake just
 	// contradicted and the SSM synthesized an end for (phantomturn.go). It is
 	// carried from the handshake to ShimReady, where the queue is released on
