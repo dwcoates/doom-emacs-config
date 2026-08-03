@@ -1790,7 +1790,7 @@ func TestBackgroundTasksChangedRepublishesTheTaskCatalog(t *testing.T) {
 	c := newTestConsumer(push, &fakeApplier{})
 	c.Apply(&corev1.Event{
 		SessionId: "s1", Seq: 1, ProducedAtMs: 100,
-		Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{TaskId: "ghost"}},
+		Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{TaskId: "ghost", Kind: corev1.TaskKind_TASK_KIND_AGENT}},
 	})
 	push.mu.Lock()
 	push.catalog = nil

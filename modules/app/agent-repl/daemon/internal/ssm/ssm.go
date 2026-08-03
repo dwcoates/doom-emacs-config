@@ -1038,15 +1038,44 @@ func (m *Manager) workspaceMessageLocked(workspace string, r resolved) (*fronten
 	switch {
 	case !found || composite.LifecycleTop == "":
 		msg = r.toProto(workspace)
+		// A WORKSPACE WITH NO CONTROLLER-GENERATION LIFECYCLE IS HIBERNATED,
+		// which is the enum's own definition of the case: no generation is
+		// current, no fault is implied, and the session may be brought up on
+		// demand (frontend.proto SESSION_CONNECTIVITY_HIBERNATED). Leaving the
+		// field at its zero value published an UNSPECIFIED connectivity, which
+		// names a malformed frame rather than a verdict, and the webapp's
+		// validating decoder refuses the whole frame over it.
+		msg.Connectivity = frontendv1.SessionConnectivity_SESSION_CONNECTIVITY_HIBERNATED
+		m.logf("ssm: workspace state ws=%s has no controller-generation lifecycle; connectivity=hibernated (no generation is current)", workspace)
 	default:
 		msg, err = compositeWorkspaceState(workspace, r, composite)
 		if err != nil {
 			return nil, err
 		}
 	}
+	if err := connectivityResolved(workspace, msg, composite, found); err != nil {
+		return nil, err
+	}
 	m.stampMergeFactsLocked(workspace, r, msg)
 	m.stampFreshnessLocked(workspace, msg)
 	return msg, nil
+}
+
+// connectivityResolved is THE LAST GATE BEFORE THE WIRE. Every pushed,
+// snapshotted and published WorkspaceState is built by workspaceMessageLocked,
+// so refusing an unresolved connectivity there makes an UNSPECIFIED one
+// unrepresentable downstream rather than merely unlikely: the frontend contract
+// has no reading for it, and the webapp's validating decoder refuses the whole
+// frame — including every snapshot a retained frame is replayed into.
+//
+// It is an error, never a substituted default: the daemon is the sole authority
+// for this verdict and has no honest guess to offer.
+func connectivityResolved(workspace string, msg *frontendv1.WorkspaceState, composite CompositeState, found bool) error {
+	if msg.GetConnectivity() != frontendv1.SessionConnectivity_SESSION_CONNECTIVITY_UNSPECIFIED {
+		return nil
+	}
+	return fmt.Errorf("ssm: workspace %q resolved to UNSPECIFIED session connectivity (composite connectivity=%q lifecycle_top=%q composite_found=%t); refusing to publish a frame no frontend can read",
+		workspace, composite.Connectivity, composite.LifecycleTop, found)
 }
 
 // stampFreshnessLocked makes AtMs MONOTONIC per workspace within this
