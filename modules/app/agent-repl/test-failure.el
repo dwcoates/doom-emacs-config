@@ -52,6 +52,32 @@ wire would mean a frontend's failure was laundered through the daemon."
       (should (string-match-p "client-type-p=nil" (cadr (car logs))))
       (should (string-match-p "client-type-p=t" (cadr (cadr logs)))))))
 
+(ert-deftest agent-repl-test-failure-text-renders-typed-resume-transcript-action ()
+  "Typed transcript evidence tells the user what to restore before retrying."
+  (let ((failure (agent-repl-failure-from-wire
+                  '(:errorClass "ERROR_CLASS_INTERNAL"
+                    :errorType "session.resume_failed"
+                    :message "resume failed"
+                    :sessionResume
+                    (:claudeSessionId "c_authoritative" :cwd "/repo"
+                     :automaticRestore ()
+                     :transcriptUnavailable (:searchedPaths ("/cfg/a.jsonl")))))))
+    (should (equal (agent-repl-failure-text failure "ws1")
+                   "Resume restoration for Claude session c_authoritative in /repo cannot continue: transcript unavailable at /cfg/a.jsonl. Restore that transcript, then retry."))))
+
+(ert-deftest agent-repl-test-failure-text-renders-typed-resume-identity-action ()
+  "Typed identity evidence rejects a replacement conversation actionably."
+  (let ((failure (agent-repl-failure-from-wire
+                  '(:errorClass "ERROR_CLASS_INTERNAL"
+                    :errorType "session.resume_failed"
+                    :message "resume failed"
+                    :sessionResume
+                    (:claudeSessionId "c_authoritative" :cwd "/repo"
+                     :create ()
+                     :identityMismatch (:replacementClaudeSessionId "c_other"))))))
+    (should (string-match-p "recovery proposed Claude session c_other"
+                            (agent-repl-failure-text failure "ws1")))))
+
 ;;;; ---- Class decoding --------------------------------------------------
 
 (ert-deftest agent-repl-test-failure-class-internal ()
