@@ -677,13 +677,13 @@ describe("renderItem", () => {
     );
   });
 
-  it("keeps a streaming response's cursor inside the body column", () => {
+  it("closes a streaming response's body column with no trailing caret", () => {
     // Arrange
     const item: ConversationItem = { ...(textAt(14, 33, "hel") as TextItem), done: false };
     // Act
     const html = renderItem(item);
-    // Assert — the cursor trails the text, not the corner.
-    expect(html).toContain(`<span class="cursor">▍</span></div><span class="turn-meta">`);
+    // Assert — the text runs straight into the corner, uninterrupted.
+    expect(html).toContain(`<p>hel</p>\n</div><span class="turn-meta">`);
   });
 
   it("hides the host's injected spans from the user bubble", () => {
@@ -710,7 +710,7 @@ describe("renderItem", () => {
     expect(renderItem(item)).toBe("");
   });
 
-  it("renders a streaming text block with a cursor", () => {
+  it("renders a streaming text block without a cursor", () => {
     // Arrange
     const item: ConversationItem = {
       kind: "text",
@@ -721,7 +721,7 @@ describe("renderItem", () => {
       done: false,
     };
     // Act + Assert
-    expect(renderItem(item)).toContain("cursor");
+    expect(renderItem(item)).not.toContain("cursor");
   });
 
   it("renders text blocks through the markdown engine", () => {
