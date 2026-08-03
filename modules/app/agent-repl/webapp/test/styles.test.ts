@@ -2753,16 +2753,37 @@ describe("sidebar init dot", () => {
     expect(init).toContain("var(--init)");
   });
 
-  it("keeps the init dot breathing like the other live states", () => {
-    // Arrange + Act
+  it("leaves the init dot still, because blue marks a route rather than work", () => {
+    // Arrange + Act — the breath belonged to the live states; init is blue,
+    // and every blue dot states a standing route condition.
     const init = blockAfter(css, "#ws-sidebar .st-init {");
     // Assert
-    expect(init).toContain("ws-pulse");
+    expect(init).not.toContain("ws-pulse");
   });
 
   it("defines --init as the Emacs tab-bar's init blue", () => {
     // Arrange + Act + Assert
     expect(lightTheme).toMatch(/--init:\s*#3366cc/);
+  });
+});
+
+describe("sidebar blue dots are static", () => {
+  // Every sidebar status painted in the route blue --init. One breathing
+  // while the rest sat still made the same color carry two claims.
+  const BLUE = ["init", "severed", "dead", "start-failed", "degraded"];
+
+  it.each(BLUE)("paints .st-%s in the route blue", (status: string) => {
+    // Arrange + Act
+    const dot = blockAfter(css, `#ws-sidebar .st-${status} {`);
+    // Assert
+    expect(dot).toContain("var(--init)");
+  });
+
+  it.each(BLUE)("leaves .st-%s unanimated", (status: string) => {
+    // Arrange + Act
+    const dot = blockAfter(css, `#ws-sidebar .st-${status} {`);
+    // Assert
+    expect(dot).not.toContain("animation");
   });
 });
 

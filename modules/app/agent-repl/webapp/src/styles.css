@@ -497,7 +497,8 @@ body::after {
 #ws-sidebar .row:hover { background: var(--card); }
 
 /* Lifecycle dot: the row's single status element, class-keyed by the
-   status name (statusDotHtml). Breathing red = thinking (and init), solid
+   status name (statusDotHtml). Breathing red = thinking, still blue = init
+   and the other route states, solid
    green = done, solid orange = done+viewed, breathing yellow = awaiting
    permission, hollow = idle, grey = dead; `none` holds the column's
    alignment invisibly. */
@@ -516,10 +517,13 @@ body::after {
    breathes the async amber while background work continues — the sidebar
    home of the signal the topbar `monitoring…` datapoint used to carry. */
 #ws-sidebar .st-monitoring { background: var(--async); animation: ws-pulse 1.3s ease-in-out infinite; }
-/* Booting breathes like thinking because both are live, but in the tab-bar's
-   init blue: red here read as an error on a workspace that was merely
-   starting, and as identical to a thinking one. */
-#ws-sidebar .st-init { background: var(--init); animation: ws-pulse 1.3s ease-in-out infinite; }
+/* Booting wears the tab-bar's init blue: red here read as an error on a
+   workspace that was merely starting, and as identical to a thinking one.
+   STILL, like every other blue dot below (severed, dead, start-failed,
+   degraded): blue marks the state of the ROUTE, and a route reads as a
+   standing condition rather than as work ticking over. One blue rule
+   breathing while the rest sat still made the same color mean two things. */
+#ws-sidebar .st-init { background: var(--init); }
 /* GREEN, breathing: a pending permission means the agent is READY for the
    user to view the response and answer. The breath distinguishes "ready AND
    waiting on you" from "ready"; the color says it is not a fault. */
