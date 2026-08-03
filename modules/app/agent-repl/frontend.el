@@ -173,16 +173,99 @@ webview).  Body does nothing but the external calls; tests mock via
       (xwidget-webkit-goto-uri (xwidget-webkit-current-session) url))
     buf))
 
-(defun agent-repl--frontend-webview-execute-script (buf script)
+(defun agent-repl--frontend-webview-execute-script-1 (buf script)
   "External-boundary wrapper: evaluate SCRIPT inside BUF's webview.
 Evaluating JavaScript against the live document is the ONLY channel
-Emacs has into a mounted webview, so every host-driven action on the
-webapp goes through here.  Body does nothing but the external calls;
-tests mock via `cl-letf'.  Registered in
-`agent-repl--external-boundary-functions'."
+Emacs has into a mounted webview.  Every host-driven action reaches it
+through `agent-repl--frontend-webview-execute-script', which wraps this
+with the keyboard-release epilogue; nothing else may call it directly.
+Body does nothing but the external calls; tests mock via `cl-letf'.
+Registered in `agent-repl--external-boundary-functions'."
   (require 'xwidget)
   (with-current-buffer buf
     (xwidget-webkit-execute-script (xwidget-webkit-current-session) script))) ;; ALLOW-EXTERNAL-BOUNDARY
+
+;;;; ---- Returning the keyboard to Emacs after a script evaluation -------------
+
+;; Symptom: after a prompt send, keys stop reaching Emacs — RET draws the
+;; macOS beep, evil-mode never sees the event — until the user clicks the
+;; Emacs text area.  It is NOT app-level focus loss; the frame stays key.
+;;
+;; Mechanism, from the NS port's own source (src/nsxwidget.m).  When the
+;; WKWebView holds first responder, its `keyDown:' override does not
+;; swallow the event: it evaluates the injected `xwHasFocus()' and
+;; FORWARDS the key to Emacs unless that returns true.  `xwHasFocus()' is
+;; exactly
+;;
+;;     var ae = document.activeElement;
+;;     return ae && (ae.nodeName == 'INPUT' || ae.nodeName == 'TEXTAREA');
+;;
+;; So the thing that eats the keyboard is not the webview being first
+;; responder — it is an INPUT or TEXTAREA inside the page holding DOM
+;; focus.  Our scripts re-render the feed and the sidebar under the page's
+;; own focus management, so a render can leave one of the webapp's inputs
+;; focused; whether it does depends on what the page had mounted and
+;; selected, which is why the bug reads as "often, not always".
+;;
+;; The cure therefore has to be applied in the DOM, not in Emacs.  There
+;; is no lisp lever here at all: `select-frame-set-input-focus',
+;; `x-focus-frame' and `redirect-frame-focus' land in `ns_focus_frame'
+;; (src/nsterm.m), which only does `makeKeyAndOrderFront:' — a no-op on an
+;; already-key window, and it never calls `makeFirstResponder:'.
+;; `select-window' is pure lisp bookkeeping and touches nothing.
+;; `xwidget-perform-lispy-event' is `#ifdef USE_GTK' in its entirety
+;; (src/xwidget.c), a silent no-op on this port.  The only built-in escape
+;; is the page-side `C-g' handler, which is not reachable from lisp.
+;;
+;; Hence: every host-driven script carries a blur epilogue that drops DOM
+;; focus, re-opening the `keyDown:' forwarding path.  Because the epilogue
+;; rides IN the script rather than in a follow-up evaluation, it needs no
+;; timer and cannot stack: a sidebar push across six webviews issues the
+;; same six evaluations it always did, each self-contained and ordered
+;; after its own render.
+
+(defconst agent-repl-frontend-keyboard-release-js
+  "if(document.activeElement&&document.activeElement.blur)document.activeElement.blur();"
+  "JavaScript that drops the page's DOM focus so keys reach Emacs again.
+Blurring is what flips the NS port's `xwHasFocus()' back to false — see
+the commentary above.  Guarded on `blur' existing because
+`document.activeElement' is null in a document with no body yet, and a
+webview mid-navigation is an expected state rather than a violated
+invariant.
+
+Not a cure for a page that asynchronously re-focuses an input AFTER the
+script runs; nothing host-side can be.  That case belongs to the webapp's
+own focus management.")
+
+(defun agent-repl--frontend-keyboard-release-wanted-p ()
+  "Return non-nil when a script must hand the keyboard back to Emacs.
+True unless the selected window is itself displaying a webview.  A user
+who has deliberately selected the webview window is driving the page —
+typing into its inputs is the whole point — and blurring underneath them
+would break the very thing this release exists to protect."
+  (let ((win (selected-window)))
+    (not (and (window-live-p win)
+              (agent-repl--agent-view-buffer-p (window-buffer win))))))
+
+(defun agent-repl--frontend-script-with-keyboard-release (script)
+  "Return SCRIPT with the keyboard-release epilogue appended, when wanted.
+Returns SCRIPT unchanged when the webview's own window is selected (see
+`agent-repl--frontend-keyboard-release-wanted-p').  The separating
+semicolon is unconditional: SCRIPT's own terminator is its business, and
+a doubled semicolon is an empty statement in JavaScript."
+  (if (agent-repl--frontend-keyboard-release-wanted-p)
+      (concat script ";\n" agent-repl-frontend-keyboard-release-js)
+    script))
+
+(defun agent-repl--frontend-webview-execute-script (buf script)
+  "Evaluate SCRIPT inside BUF's webview, then hand the keyboard back to Emacs.
+The single chokepoint every host-driven script goes through — tail snap,
+sidebar push, topbar close, text size, chess step, output nav — so the
+keyboard release is applied here once rather than at each caller.  See
+the commentary above `agent-repl-frontend-keyboard-release-js' for why
+the release is a DOM blur and not any of the lisp focus functions."
+  (agent-repl--frontend-webview-execute-script-1
+   buf (agent-repl--frontend-script-with-keyboard-release script)))
 
 ;;;; ---- Snapping the feed to its newest message -------------------------------
 

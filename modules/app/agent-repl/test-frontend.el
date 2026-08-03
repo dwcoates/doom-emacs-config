@@ -1807,3 +1807,91 @@ side silently turns the keys into no-ops."
   "The reload wrapper is registered as an external boundary wrapper."
   (should (memq 'agent-repl--frontend-webview-reload-widget
                 agent-repl--external-boundary-functions)))
+
+;;;; ---- Returning the keyboard to Emacs after a script evaluation ------------
+
+(defmacro agent-repl-test--capturing-scripts (var &rest body)
+  "Run BODY with the raw execute-script boundary collecting scripts into VAR.
+VAR is bound to a list in reverse call order."
+  (declare (indent 1))
+  `(let ((,var nil))
+     (cl-letf (((symbol-function 'agent-repl--frontend-webview-execute-script-1)
+                (lambda (_buf script) (push script ,var))))
+       ,@body)))
+
+(defmacro agent-repl-test--with-window-buffer (buf &rest body)
+  "Display BUF in the selected window for BODY, restoring the old buffer after."
+  (declare (indent 1))
+  `(let ((agent-repl-test--previous (window-buffer (selected-window))))
+     (unwind-protect
+         (progn (set-window-buffer (selected-window) ,buf) ,@body)
+       (set-window-buffer (selected-window) agent-repl-test--previous))))
+
+(defun agent-repl-test--count-substring (needle haystack)
+  "Return how many non-overlapping times NEEDLE occurs in HAYSTACK."
+  (let ((n 0) (start 0) hit)
+    (while (setq hit (string-search needle haystack start))
+      (setq n (1+ n)
+            start (+ hit (length needle))))
+    n))
+
+(ert-deftest agent-repl-test-frontend-execute-script-appends-keyboard-release ()
+  "A script evaluated while another window is selected carries the blur."
+  ;; Arrange
+  (agent-repl-test--with-webview-buffers '("*agent-frontend-ws1*")
+    (agent-repl-test--capturing-scripts scripts
+      ;; Act
+      (agent-repl--frontend-webview-execute-script
+       (get-buffer "*agent-frontend-ws1*") "noop();")
+      ;; Assert
+      (should (string-suffix-p agent-repl-frontend-keyboard-release-js
+                               (car scripts))))))
+
+(ert-deftest agent-repl-test-frontend-execute-script-keeps-the-callers-script ()
+  "The keyboard release is appended to the caller's script, never replacing it."
+  ;; Arrange
+  (agent-repl-test--with-webview-buffers '("*agent-frontend-ws1*")
+    (agent-repl-test--capturing-scripts scripts
+      ;; Act
+      (agent-repl--frontend-webview-execute-script
+       (get-buffer "*agent-frontend-ws1*") "window.someHook();")
+      ;; Assert
+      (should (string-prefix-p "window.someHook();" (car scripts))))))
+
+(ert-deftest agent-repl-test-frontend-execute-script-spares-the-selected-webview ()
+  "No keyboard release is appended when the webview's own window is selected."
+  ;; Arrange
+  (agent-repl-test--with-webview-buffers '("*agent-frontend-ws1*")
+    (let ((buf (get-buffer "*agent-frontend-ws1*")))
+      (agent-repl-test--capturing-scripts scripts
+        (agent-repl-test--with-window-buffer buf
+          ;; Act
+          (agent-repl--frontend-webview-execute-script buf "noop();"))
+        ;; Assert
+        (should (equal (car scripts) "noop();"))))))
+
+(ert-deftest agent-repl-test-frontend-execute-script-burst-releases-once-each ()
+  "A burst of evaluations issues no extra evaluations and blurs once per script."
+  ;; Arrange
+  (agent-repl-test--with-webview-buffers '("*agent-frontend-ws1*")
+    (let ((buf (get-buffer "*agent-frontend-ws1*")))
+      (agent-repl-test--capturing-scripts scripts
+        ;; Act
+        (dotimes (_ 6)
+          (agent-repl--frontend-webview-execute-script buf "noop();"))
+        ;; Assert
+        (should (= (length scripts) 6))
+        (should (cl-every (lambda (s)
+                            (= 1 (agent-repl-test--count-substring
+                                  agent-repl-frontend-keyboard-release-js s)))
+                          scripts))))))
+
+(ert-deftest agent-repl-test-frontend-keyboard-release-blurs-the-active-element ()
+  "The release script blurs `document.activeElement', the NS focus gate."
+  (should (string-match-p "document\\.activeElement\\.blur()"
+                          agent-repl-frontend-keyboard-release-js)))
+
+(ert-deftest agent-repl-test-frontend-execute-script-raw-is-a-registered-boundary ()
+  "The raw execute-script wrapper is registered as an external boundary."
+  (should (memq 'agent-repl--frontend-webview-execute-script-1
+                agent-repl--external-boundary-functions)))
