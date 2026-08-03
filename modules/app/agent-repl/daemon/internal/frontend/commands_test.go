@@ -78,6 +78,14 @@ func (m *mockHandler) Shutdown(_ context.Context, ws, rid string, _ *frontendv1.
 	m.called, m.lastWorkspace, m.lastRequestID = "shutdown", ws, rid
 	return m.err
 }
+func (m *mockHandler) ScheduleShutdown(_ context.Context, ws, rid string, _ *frontendv1.ScheduleShutdownCmd) error {
+	m.called, m.lastWorkspace, m.lastRequestID = "schedule_shutdown", ws, rid
+	return m.err
+}
+func (m *mockHandler) CancelScheduledShutdown(_ context.Context, ws, rid string, _ *frontendv1.CancelScheduledShutdownCmd) error {
+	m.called, m.lastWorkspace, m.lastRequestID = "cancel_scheduled_shutdown", ws, rid
+	return m.err
+}
 func (m *mockHandler) ClientLog(_ context.Context, ws, rid string, _ *frontendv1.ClientLogCmd) error {
 	m.called, m.lastWorkspace, m.lastRequestID = "client_log", ws, rid
 	return m.err
