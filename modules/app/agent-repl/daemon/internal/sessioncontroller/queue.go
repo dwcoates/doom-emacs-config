@@ -368,9 +368,16 @@ func (m *Manager) queueSubmitLocked(d *sessionController, requestID, text, permi
 // The caller pushes and persists AFTER unlocking, so neither the frontend write
 // nor the registry write happens under the manager mutex.
 func (m *Manager) publishQueueLocked(d *sessionController) (*frontendv1.QueueView, []registry.QueuedPrompt) {
-	view := d.queue.view(d.workspace, d.sessionID)
-	recs := make([]registry.QueuedPrompt, 0, len(d.queue.entries))
-	for _, e := range d.queue.entries {
+	return d.queue.view(d.workspace, d.sessionID), d.queue.records()
+}
+
+// records renders the queue as the durable registry evidence of what this
+// daemon is holding. Shared with the materialized parked ledger, which persists
+// the same evidence for a session that has not wired: two renderings of "what
+// is queued" would be two answers to it.
+func (q *promptQueue) records() []registry.QueuedPrompt {
+	recs := make([]registry.QueuedPrompt, 0, len(q.entries))
+	for _, e := range q.entries {
 		recs = append(recs, registry.QueuedPrompt{
 			ID:             e.id,
 			Text:           e.text,
@@ -378,7 +385,7 @@ func (m *Manager) publishQueueLocked(d *sessionController) (*frontendv1.QueueVie
 			QueuedAtMs:     e.queuedAtMs,
 		})
 	}
-	return view, recs
+	return recs
 }
 
 // publish pushes the view and persists the records produced by
@@ -752,6 +759,14 @@ func (m *Manager) beginInterject(d *sessionController, entryID, source string) {
 // INTERJECT verdict runs, user-initiated. An unknown id is a loud error — the
 // user asked for something specific and it is not there.
 func (m *Manager) ForceQueueEntry(workspace, entryID string) error {
+	// THE MATERIALIZED LEDGER IS CONSULTED FIRST, because a client can now see
+	// and aim at a prompt whose session has not wired. It can only refuse, and
+	// it refuses with the session named rather than with the generic
+	// no-live-session error, so the user is told what to do about it
+	// (parkedledger.go).
+	if owned, err := m.forceParkedEntry(workspace, entryID); owned {
+		return err
+	}
 	d, err := m.existing(workspace)
 	if err != nil {
 		return err
@@ -808,6 +823,11 @@ func (m *Manager) AcceptQueueEntry(workspace, entryID string) error {
 
 // CancelQueueEntry drops a held prompt. It is never delivered.
 func (m *Manager) CancelQueueEntry(workspace, entryID string) error {
+	// A materialized prompt is cancellable with no session at all: nothing has
+	// to run to take a prompt back (parkedledger.go).
+	if m.cancelParkedEntry(workspace, entryID) {
+		return nil
+	}
 	d, err := m.existing(workspace)
 	if err != nil {
 		return err
@@ -829,17 +849,24 @@ func (m *Manager) CancelQueueEntry(workspace, entryID string) error {
 	return nil
 }
 
-// QueueViews returns every live session's queue, sorted by workspace, for the
+// QueueViews returns every session's queue, sorted by workspace, for the
 // connect/resync StateSnapshot. A session with an empty queue still contributes
 // its (empty) view, so a reconnecting frontend is told the queue is empty rather
 // than being left to assume it.
+//
+// IT SPANS BOTH LEDGERS, and that is not a convenience. A successor daemon
+// holds prompts a previous one parked for sessions that have not wired yet
+// (parkedledger.go); reading only the live fleet made every one of them
+// invisible to every client until its session happened to come back, which is
+// precisely the promise the drain lease exists to keep.
 func (m *Manager) QueueViews() []*frontendv1.QueueView {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	out := make([]*frontendv1.QueueView, 0, len(m.byWS))
+	out := make([]*frontendv1.QueueView, 0, len(m.byWS)+len(m.parked))
 	for _, d := range m.byWS {
 		out = append(out, d.queue.view(d.workspace, d.sessionID))
 	}
+	out = append(out, m.parkedViewsLocked()...)
 	sort.Slice(out, func(i, j int) bool { return out[i].GetWorkspace() < out[j].GetWorkspace() })
 	return out
 }
