@@ -975,6 +975,214 @@ whenever a real session happened to be mid-turn."
       (agent-repl--frontend-request-foreign-shutdown t)
       (should (equal sent (list "shutdown" (list :stopShims t)))))))
 
+;;;; ---- Scheduled shutdown (the drain lease) --------------------------------
+
+(defmacro agent-repl-test--with-lease (lease-id &rest body)
+  "Run BODY with the recorded drain lease reporting LEASE-ID and a stub link.
+LEASE-ID is the live schedule id, or nil for \"no schedule known\".  The
+lease readers live in frontend-state.el, which this batch file does not
+load, so they are stubbed here rather than reached."
+  (declare (indent 1))
+  `(cl-letf (((symbol-function 'agent-repl-frontend-scheduled-shutdown-id)
+              (lambda () ,lease-id))
+             ((symbol-function 'agent-repl-frontend-shutdown-schedule)
+              (lambda () (when ,lease-id (list :state :draining :scheduleId ,lease-id))))
+             ((symbol-function 'agent-repl--uds-connected-p) (lambda () t))
+             ((symbol-function 'agent-repl--uds-track-command)
+              (lambda (request-id &rest _) request-id)))
+     ,@body))
+
+(ert-deftest agent-repl-test-scheduled-shutdown-sends-the-schedule-command ()
+  "Scheduling emits `scheduleShutdown' carrying its cause."
+  ;; Arrange
+  (let (sent)
+    (agent-repl-test--with-lease nil
+      (cl-letf (((symbol-function 'agent-repl--uds-send-command)
+                 (lambda (field payload &rest _) (setq sent (list field payload)) "req-1")))
+        ;; Act
+        (agent-repl--frontend-request-scheduled-shutdown "manual restart")
+        ;; Assert
+        (should (equal sent '("scheduleShutdown" (:cause "manual restart"))))))))
+
+(ert-deftest agent-repl-test-scheduled-shutdown-omits-stop-shims-by-default ()
+  "The default schedule PRESERVES shims, exactly as the immediate path does."
+  ;; Arrange
+  (let (sent)
+    (agent-repl-test--with-lease nil
+      (cl-letf (((symbol-function 'agent-repl--uds-send-command)
+                 (lambda (_field payload &rest _) (setq sent payload) "req-1")))
+        ;; Act
+        (agent-repl--frontend-request-scheduled-shutdown "manual restart")
+        ;; Assert
+        (should-not (plist-member sent :stopShims))))))
+
+(ert-deftest agent-repl-test-scheduled-shutdown-sets-stop-shims ()
+  "A stop-shims schedule fixes `stop_shims' at schedule time."
+  ;; Arrange
+  (let (sent)
+    (agent-repl-test--with-lease nil
+      (cl-letf (((symbol-function 'agent-repl--uds-send-command)
+                 (lambda (_field payload &rest _) (setq sent payload) "req-1")))
+        ;; Act
+        (agent-repl--frontend-request-scheduled-shutdown "bundle changed" t)
+        ;; Assert
+        (should (equal sent '(:cause "bundle changed" :stopShims t)))))))
+
+(ert-deftest agent-repl-test-scheduled-shutdown-tracks-its-ack ()
+  "The schedule command is tracked so a daemon nack surfaces loudly."
+  ;; Arrange
+  (let (tracked)
+    (agent-repl-test--with-lease nil
+      (cl-letf (((symbol-function 'agent-repl--uds-send-command) (lambda (&rest _) "req-3"))
+                ((symbol-function 'agent-repl--uds-track-command)
+                 (lambda (request-id field &rest _) (setq tracked (list request-id field))
+                   request-id)))
+        ;; Act
+        (agent-repl--frontend-request-scheduled-shutdown "manual restart")
+        ;; Assert
+        (should (equal tracked '("req-3" "scheduleShutdown")))))))
+
+(ert-deftest agent-repl-test-scheduled-shutdown-dials-when-disconnected ()
+  "A down link is dialed first — a foreign daemon owns the same socket."
+  ;; Arrange
+  (let ((dials 0))
+    (agent-repl-test--with-lease nil
+      (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () nil))
+                ((symbol-function 'agent-repl-uds-connect)
+                 (lambda (&optional _p) (cl-incf dials) nil))
+                ((symbol-function 'agent-repl--uds-send-command) (lambda (&rest _) "req-1")))
+        ;; Act
+        (agent-repl--frontend-request-scheduled-shutdown "manual restart")
+        ;; Assert
+        (should (= dials 1))))))
+
+(ert-deftest agent-repl-test-scheduled-shutdown-refuses-a-blank-cause ()
+  "A blank cause is refused: the lease's only readable field must say something."
+  ;; Arrange
+  (agent-repl-test--with-lease nil
+    (cl-letf (((symbol-function 'agent-repl--uds-send-command)
+               (lambda (&rest _) (error "must not send"))))
+      ;; Act / Assert
+      (should-error (agent-repl--frontend-request-scheduled-shutdown "   ")
+                    :type 'user-error))))
+
+(ert-deftest agent-repl-test-scheduled-shutdown-refuses-a-second-schedule ()
+  "Scheduling over a live lease is refused, never a silent replace."
+  ;; Arrange
+  (agent-repl-test--with-lease "sch-live"
+    (cl-letf (((symbol-function 'agent-repl--uds-send-command)
+               (lambda (&rest _) (error "must not send"))))
+      ;; Act / Assert
+      (should-error (agent-repl--frontend-request-scheduled-shutdown "second")
+                    :type 'user-error))))
+
+(ert-deftest agent-repl-test-cancel-scheduled-shutdown-sends-the-live-id ()
+  "The cancel names the live schedule, so it can never kill a newer one."
+  ;; Arrange
+  (let (sent)
+    (agent-repl-test--with-lease "sch-live"
+      (cl-letf (((symbol-function 'agent-repl--uds-send-command)
+                 (lambda (field payload &rest _) (setq sent (list field payload)) "req-4")))
+        ;; Act
+        (agent-repl--frontend-request-cancel-scheduled-shutdown)
+        ;; Assert
+        (should (equal sent '("cancelScheduledShutdown" (:scheduleId "sch-live"))))))))
+
+(ert-deftest agent-repl-test-cancel-scheduled-shutdown-tracks-its-ack ()
+  "The cancel is tracked so a stale-id nack surfaces loudly."
+  ;; Arrange
+  (let (tracked)
+    (agent-repl-test--with-lease "sch-live"
+      (cl-letf (((symbol-function 'agent-repl--uds-send-command) (lambda (&rest _) "req-5"))
+                ((symbol-function 'agent-repl--uds-track-command)
+                 (lambda (request-id field &rest _) (setq tracked (list request-id field))
+                   request-id)))
+        ;; Act
+        (agent-repl--frontend-request-cancel-scheduled-shutdown)
+        ;; Assert
+        (should (equal tracked '("req-5" "cancelScheduledShutdown")))))))
+
+(ert-deftest agent-repl-test-cancel-without-a-schedule-errors-loudly ()
+  "A cancel with no known schedule is a loud refusal, never a silent no-op."
+  ;; Arrange
+  (agent-repl-test--with-lease nil
+    (cl-letf (((symbol-function 'agent-repl--uds-send-command)
+               (lambda (&rest _) (error "must not send"))))
+      ;; Act / Assert
+      (should-error (agent-repl--frontend-request-cancel-scheduled-shutdown)
+                    :type 'user-error))))
+
+(ert-deftest agent-repl-test-cancel-without-a-schedule-logs-the-refusal ()
+  "The refused cancel is instrumented, not merely signalled."
+  ;; Arrange
+  (let (logged)
+    (agent-repl-test--with-lease nil
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+        ;; Act
+        (ignore-errors (agent-repl--frontend-request-cancel-scheduled-shutdown))
+        ;; Assert
+        (should (seq-find (lambda (m) (string-match-p "REFUSING — no live schedule" m))
+                          logged))))))
+
+(ert-deftest agent-repl-test-scheduled-restart-composes-its-cause ()
+  "The interactive scheduled restart folds the reason into a named cause."
+  ;; Arrange
+  (let (cause)
+    (cl-letf (((symbol-function 'agent-repl--frontend-request-scheduled-shutdown)
+               (lambda (c &optional _stop-shims) (setq cause c) "req-6"))
+              ((symbol-function 'message) (lambda (&rest _) nil)))
+      ;; Act
+      (agent-repl-frontend-daemon-restart-scheduled "daemon rebuilt")
+      ;; Assert
+      (should (equal cause "scheduled restart from Emacs (daemon rebuilt)")))))
+
+(ert-deftest agent-repl-test-scheduled-restart-forwards-stop-shims ()
+  "The prefix argument reaches the schedule as the stop-shims mode."
+  ;; Arrange
+  (let (arg)
+    (cl-letf (((symbol-function 'agent-repl--frontend-request-scheduled-shutdown)
+               (lambda (_cause &optional stop-shims) (setq arg (list stop-shims)) "req-6"))
+              ((symbol-function 'message) (lambda (&rest _) nil)))
+      ;; Act
+      (agent-repl-frontend-daemon-restart-scheduled "bundle changed" '(4))
+      ;; Assert
+      (should (equal arg (list t))))))
+
+(ert-deftest agent-repl-test-scheduled-restart-refuses-a-blank-reason ()
+  "A blank reason is refused before any command is composed."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--frontend-request-scheduled-shutdown)
+             (lambda (&rest _) (error "must not send"))))
+    ;; Act / Assert
+    (should-error (agent-repl-frontend-daemon-restart-scheduled "  ")
+                  :type 'user-error)))
+
+(ert-deftest agent-repl-test-scheduled-restart-leaves-the-immediate-path-alone ()
+  "The immediate restart still bounces now — the schedule is a second door."
+  ;; Arrange
+  (let (arg)
+    (cl-letf (((symbol-function 'agent-repl-runtime-restart)
+               (lambda (&optional stop-shims) (setq arg (list stop-shims)) 0))
+              ((symbol-function 'agent-repl--frontend-request-scheduled-shutdown)
+               (lambda (&rest _) (error "the immediate path must not schedule"))))
+      ;; Act
+      (agent-repl-frontend-daemon-restart)
+      ;; Assert
+      (should (equal arg (list nil))))))
+
+(ert-deftest agent-repl-test-cancel-scheduled-restart-command-delegates ()
+  "The interactive cancel routes through the one sender that owns the id."
+  ;; Arrange
+  (let (called)
+    (cl-letf (((symbol-function 'agent-repl--frontend-request-cancel-scheduled-shutdown)
+               (lambda () (setq called t) "req-7"))
+              ((symbol-function 'message) (lambda (&rest _) nil)))
+      ;; Act
+      (agent-repl-frontend-daemon-cancel-scheduled-restart)
+      ;; Assert
+      (should called))))
+
 ;;;; ---- Widget-assets auto-discovery -----------------------------------------
 
 (ert-deftest agent-repl-test--widget-override-wins ()
