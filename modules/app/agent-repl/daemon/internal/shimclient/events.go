@@ -108,8 +108,12 @@ func (c *Client) modelCatalogInvariant(format string, args ...any) error {
 func (c *Client) dispatchEvent(ev *corev1.Event) error {
 	if seq := ev.GetSeq(); seq > 0 {
 		if seq <= c.lastSeen {
-			return fmt.Errorf("%w: session=%s got seq=%d after last_seen=%d",
-				ErrSeqRegression, ev.GetSessionId(), seq, c.lastSeen)
+			// Fatal inside the mark's own generation, a rebase across a proven
+			// generation change, and fatal again when the generation cannot be
+			// identified. See seqgeneration.go.
+			if err := c.reconcileSeqGeneration(ev, seq); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -176,6 +180,11 @@ func (c *Client) dispatchEvent(ev *corev1.Event) error {
 	}
 	if seq := ev.GetSeq(); seq > 0 {
 		c.lastSeen = seq
+		// The mark is only comparable against a later seq from the SAME seq
+		// space, so it is stamped with the generation that advanced it. An
+		// unidentifiable generation ("") is recorded honestly as such — see
+		// reconcileSeqGeneration, which never grants it an amnesty.
+		c.seqGeneration = c.connGeneration
 		c.cfg.SeqStore.SetLastSeq(c.cfg.SessionID, seq)
 	}
 	return nil
