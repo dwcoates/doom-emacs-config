@@ -208,18 +208,43 @@ func (s *ShutdownSchedules) HeldPrompts(workspace string) ([]HeldPrompt, error) 
 	if err != nil {
 		return nil, fmt.Errorf("statedb: read the drain-held prompts of workspace %q: %w", workspace, err)
 	}
+	return scanHeldPrompts(rows, fmt.Sprintf("workspace %q", workspace))
+}
+
+// AllHeldPrompts returns EVERY workspace's parked prompts, ordered by workspace
+// and then by submit order within it.
+//
+// It exists because the ledger has a reader that does not yet know which
+// workspaces to ask about: the successor daemon's boot materialization, which
+// runs before any session has wired and so cannot enumerate workspaces from the
+// fleet. Asking per workspace there would mean deriving the workspace set from
+// somewhere other than the ledger itself, and a workspace the derivation missed
+// would be a parked prompt no client could ever see.
+func (s *ShutdownSchedules) AllHeldPrompts() ([]HeldPrompt, error) {
+	rows, err := s.db.Query(
+		`SELECT entry_id, schedule_id, workspace, session_id, request_id, text, permission_mode, queued_at_ms
+		 FROM shutdown_hold_prompt ORDER BY workspace, queued_at_ms, entry_id`)
+	if err != nil {
+		return nil, fmt.Errorf("statedb: read every drain-held prompt: %w", err)
+	}
+	return scanHeldPrompts(rows, "every workspace")
+}
+
+// scanHeldPrompts drains a held-prompt query into records. scope names the
+// query's subject for the error text and nothing else.
+func scanHeldPrompts(rows *sql.Rows, scope string) ([]HeldPrompt, error) {
 	defer rows.Close()
 	var out []HeldPrompt
 	for rows.Next() {
 		var p HeldPrompt
 		if err := rows.Scan(&p.EntryID, &p.ScheduleID, &p.Workspace, &p.SessionID,
 			&p.RequestID, &p.Text, &p.PermissionMode, &p.QueuedAtMs); err != nil {
-			return nil, fmt.Errorf("statedb: scan a drain-held prompt of workspace %q: %w", workspace, err)
+			return nil, fmt.Errorf("statedb: scan a drain-held prompt of %s: %w", scope, err)
 		}
 		out = append(out, p)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("statedb: iterate the drain-held prompts of workspace %q: %w", workspace, err)
+		return nil, fmt.Errorf("statedb: iterate the drain-held prompts of %s: %w", scope, err)
 	}
 	return out, nil
 }
