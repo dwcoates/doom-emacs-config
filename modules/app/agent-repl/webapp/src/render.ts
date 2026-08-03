@@ -464,7 +464,51 @@ function queuedBadge(item: QueuedItem): { label: string; cls: string } {
  * classifier's reason once known, and the three controls the daemon actually
  * honors. Each button carries the entry id for delegated click handling.
  */
+/**
+ * The DRAIN-LEASE bubble: a prompt parked not by a running turn but by a
+ * scheduled daemon bounce.
+ *
+ * A DEDICATED element rather than a variant badge on the classifier card,
+ * because the two say opposite things about what happens next. A classifier
+ * bubble reports a verdict on the prompt and promises delivery at the end of
+ * the current turn; this prompt has NO verdict — the classifier never ran on
+ * it — and waits on an event in a different part of the system entirely. Its
+ * controls differ for the same reason: there is no verdict to Accept, and
+ * forcing it does not merely preempt a turn, it pushes the whole bounce back.
+ */
+export function LeaseHeldCard(item: QueuedItem, scheduleId: string): string {
+  const qid = escapeHtml(item.id);
+  return `
+    <div class="queued-card lease-card" data-schedule-id="${escapeHtml(scheduleId)}">
+      <div class="queued-head">
+        <span class="queued-badge lease">held — daemon bounce scheduled</span>
+      </div>
+      <pre class="queued-content">${escapeHtml(item.text)}</pre>
+      <div class="lease-reason">${escapeHtml(LEASE_HELD_REASON)}</div>
+      <div class="queued-actions">
+        <button data-queue-cancel="${qid}">Cancel</button>
+        <button data-queue-run-now="${qid}" title="${escapeHtml(LEASE_FORCE_TITLE)}">Deliver now</button>
+      </div>
+    </div>`;
+}
+
+/** Why the prompt is parked, said plainly — assertable without parsing markup. */
+export const LEASE_HELD_REASON =
+  "A daemon bounce is scheduled, so no new turn may start. This prompt is held " +
+  "until the bounce completes and is delivered afterwards — it is not lost, and " +
+  "it has not been judged by the classifier.";
+
+/** The Force control's promise, and its cost. */
+export const LEASE_FORCE_TITLE = "deliver now, delays the bounce";
+
 export function QueuedCard(item: QueuedItem): string {
+  // THE LEASE HOLD OUTRANKS THE CLASSIFICATION, and there is nothing to weigh:
+  // the classifier never ran on a lease-held entry, so its classification
+  // field carries no verdict to show. Rendering the classifier card here would
+  // put a badge on screen claiming a judgment nothing made.
+  if (item.shutdownHold !== undefined) {
+    return LeaseHeldCard(item, item.shutdownHold.scheduleId);
+  }
   const badge = queuedBadge(item);
   const qid = escapeHtml(item.id);
   const reason = item.rationale
