@@ -15,6 +15,30 @@ content, no frontend's render pace gating another's delivery. `PushWorkspaceStat
 fans out under the client-registry lock, so an emission, a connect and a
 disconnect are serialized against each other, and that is the whole mechanism.
 
+## A saturated queue is compacted before the connection is given up on
+
+Each connection's outbound queue is bounded. A hidden or backgrounded webview
+consumes slowly and used to fill it during a busy turn, and the forced
+reconnect-plus-full-snapshot replay that followed was a leading cause of slow
+workspace switching.
+
+A full queue is now COMPACTED first: every queued frame that a LATER queued
+frame supersedes is replaced by that newer version, and the survivor keeps the
+newest occurrence's position so nothing overtakes content that preceded it.
+Only `WorkspaceState` (per workspace), `ProgressView` and `QueueView` (per
+workspace+session) and `HeartbeatView` (per workspace+session+tool) supersede
+anything — each is applied by both frontends as a WHOLESALE assignment, so the
+newest value alone leaves the consumer in the state the whole run would have.
+
+`TypingDelta` is deliberately excluded: it carries a `core.v1.ContentDelta`
+chunk that GROWS an open block, so dropping one deletes prose. `StateSnapshot`
+is excluded too — the lease is the browser's bounded freshness proof, and a
+full lease queue stays a hard disconnect rather than a silent skip.
+
+The hard disconnect remains, unchanged, for a queue still full of frames
+nothing may replace. Its log line reports how many frames compaction freed, so
+"we gave up" is always distinguishable from "we never tried".
+
 GUI stream connections also receive a renewable authoritative `StateSnapshot`
 lease. Socket-open does not attest current state. The browser becomes current
 only after it has decoded and atomically adopted a snapshot, and it expires all
