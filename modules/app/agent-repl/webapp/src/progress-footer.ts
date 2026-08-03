@@ -580,10 +580,25 @@ export function rateLimitActivity(p: ProgressInput, nowMs: number): Activity {
  * The tool call running at the feed's tail, or null when none is. Scans
  * tail-first and takes the newest unsettled call, which is the one whose
  * heartbeat is still arriving.
+ *
+ * THE SCAN STOPS AT THE NEWEST USER TURN, which is what confines the rung to
+ * the turn now running. A call that never received its result — the shape an
+ * interrupted or crashed turn leaves behind — stays unsettled in the feed
+ * forever, and without this bound the cell went on naming it, with a clock
+ * counting up, through every later turn. Bounding by FEED ORDER rather than by
+ * comparing the call's timestamp against the turn's start is deliberate: both
+ * are one seq space the store already ranks, so no clock and no skew between
+ * two stamps can put a call on the wrong side of the boundary.
+ *
+ * It is also the webapp's half of "a sent prompt clears the activity cell": the
+ * daemon retires the previous turn's windows on the accepted edge
+ * (openTurnLocked), and the user-turn bubble that same submit produces is what
+ * puts every earlier tool call out of this scan's reach.
  */
 export function runningTool(items: readonly ConversationItem[]): ToolItem | null {
   for (let i = items.length - 1; i >= 0; i--) {
     const item = items[i];
+    if (item.kind === "user-turn") return null;
     if (item.kind !== "tool") continue;
     if (item.result) continue;
     if (item.toolName === "") continue; // a result-only shell awaiting its pair

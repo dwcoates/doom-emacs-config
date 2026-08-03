@@ -113,6 +113,16 @@ function tool(over: Partial<ToolItem> = {}): ToolItem {
   } as ToolItem;
 }
 
+/** The prompt bubble a submit produces, which bounds the running-tool scan. */
+function userTurn(): ConversationItem {
+  return {
+    kind: "user-turn",
+    requestId: "r1",
+    ts: "",
+    content: [{ type: "text", text: "next question" }],
+  } as ConversationItem;
+}
+
 /** An active roster entry. */
 function counterEntry(over: Partial<CounterEntry> = {}): CounterEntry {
   return { id: "a1", summary: "verify", detail: "", status: "running", nested: false, ...over };
@@ -834,6 +844,25 @@ describe("runningTool: which call the detail cell is about", () => {
     const got = runningTool(items);
     // Assert
     expect(got).toBeNull();
+  });
+
+  it("drops a call the newest user turn has already scrolled past", () => {
+    // Arrange — an interrupted turn's call never settled, then a prompt was sent.
+    const orphan = tool({ toolUseId: "orphan", toolName: "Bash" });
+    // Act
+    const got = runningTool([orphan, userTurn()]);
+    // Assert
+    expect(got).toBeNull();
+  });
+
+  it("takes a call the newest user turn precedes", () => {
+    // Arrange — the same feed, with this turn's own call appended after the prompt.
+    const orphan = tool({ toolUseId: "orphan", toolName: "Bash" });
+    const live = tool({ toolUseId: "live", toolName: "Read" });
+    // Act
+    const got = runningTool([orphan, userTurn(), live]);
+    // Assert
+    expect(got?.toolUseId).toBe("live");
   });
 });
 
