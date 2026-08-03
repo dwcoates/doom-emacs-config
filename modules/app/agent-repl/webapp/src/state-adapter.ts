@@ -510,6 +510,12 @@ export class StateAdapter {
       case "hostAction":
         // Host actions are consumed by Emacs, never rendered by the GUI.
         return [this.ignore("hostAction")];
+      case "workspaceRoster":
+        // Registered unsupported shape: the roster frame's contract and
+        // decoder exist, but the rail still renders from the script-injection
+        // host hook, so there is no effect to emit yet. A typed ignore keeps
+        // an arriving roster diagnosable instead of crashing the adapter.
+        return [this.ignore("workspaceRoster")];
       default: {
         // Exhaustiveness guard: a new frame variant is a compile error here,
         // never a silent skip.

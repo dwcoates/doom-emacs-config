@@ -139,6 +139,108 @@ const RENDER_STATE_BY_NAME: Readonly<Record<string, RenderState>> = {
   RENDER_STATE_DEGRADED: RenderState.DEGRADED,
 };
 
+/**
+ * `frontend.v1.RosterRowStatus` — the closed lifecycle vocabulary a sidebar
+ * roster row may carry. Mirrors frontend.proto, and is the same value set as
+ * `WORKSPACE_STATUSES` in `sidebar.ts` and the wire table in `sidebar.el`.
+ *
+ * NOT `RenderState`: the roster carries statuses no render state produces
+ * (`INACTIVE`, `NONE`), and coarsens idle and ready onto one dot.
+ *
+ * UNSPECIFIED is INVALID on the wire and rejected loudly by the decoder rather
+ * than adopted — a row with no lifecycle is a contract breach, not a default
+ * dot (the same no-silent-fallback stance `RenderState` takes).
+ */
+export enum RosterRowStatus {
+  UNSPECIFIED = 0,
+  SUBMITTING = 1,
+  THINKING = 2,
+  CLEARING = 3,
+  COMPACTING = 4,
+  PERMISSION = 5,
+  DONE = 6,
+  INTERRUPTED = 7,
+  READY = 8,
+  IDLE_ASYNC = 9,
+  VENDOR_BLOCKED = 10,
+  INIT = 11,
+  SEVERED = 12,
+  HIBERNATED = 13,
+  START_FAILED = 14,
+  DEGRADED = 15,
+  DEAD = 16,
+  MERGE_ENQUEUING = 17,
+  MERGING = 18,
+  MERGE_QUEUED = 19,
+  MERGE_CONFLICT = 20,
+  MERGE_FAILED = 21,
+  MERGED = 22,
+  NONE = 23,
+  INACTIVE = 24,
+}
+
+const ROSTER_ROW_STATUS_BY_NAME: Readonly<Record<string, RosterRowStatus>> = {
+  ROSTER_ROW_STATUS_UNSPECIFIED: RosterRowStatus.UNSPECIFIED,
+  ROSTER_ROW_STATUS_SUBMITTING: RosterRowStatus.SUBMITTING,
+  ROSTER_ROW_STATUS_THINKING: RosterRowStatus.THINKING,
+  ROSTER_ROW_STATUS_CLEARING: RosterRowStatus.CLEARING,
+  ROSTER_ROW_STATUS_COMPACTING: RosterRowStatus.COMPACTING,
+  ROSTER_ROW_STATUS_PERMISSION: RosterRowStatus.PERMISSION,
+  ROSTER_ROW_STATUS_DONE: RosterRowStatus.DONE,
+  ROSTER_ROW_STATUS_INTERRUPTED: RosterRowStatus.INTERRUPTED,
+  ROSTER_ROW_STATUS_READY: RosterRowStatus.READY,
+  ROSTER_ROW_STATUS_IDLE_ASYNC: RosterRowStatus.IDLE_ASYNC,
+  ROSTER_ROW_STATUS_VENDOR_BLOCKED: RosterRowStatus.VENDOR_BLOCKED,
+  ROSTER_ROW_STATUS_INIT: RosterRowStatus.INIT,
+  ROSTER_ROW_STATUS_SEVERED: RosterRowStatus.SEVERED,
+  ROSTER_ROW_STATUS_HIBERNATED: RosterRowStatus.HIBERNATED,
+  ROSTER_ROW_STATUS_START_FAILED: RosterRowStatus.START_FAILED,
+  ROSTER_ROW_STATUS_DEGRADED: RosterRowStatus.DEGRADED,
+  ROSTER_ROW_STATUS_DEAD: RosterRowStatus.DEAD,
+  ROSTER_ROW_STATUS_MERGE_ENQUEUING: RosterRowStatus.MERGE_ENQUEUING,
+  ROSTER_ROW_STATUS_MERGING: RosterRowStatus.MERGING,
+  ROSTER_ROW_STATUS_MERGE_QUEUED: RosterRowStatus.MERGE_QUEUED,
+  ROSTER_ROW_STATUS_MERGE_CONFLICT: RosterRowStatus.MERGE_CONFLICT,
+  ROSTER_ROW_STATUS_MERGE_FAILED: RosterRowStatus.MERGE_FAILED,
+  ROSTER_ROW_STATUS_MERGED: RosterRowStatus.MERGED,
+  ROSTER_ROW_STATUS_NONE: RosterRowStatus.NONE,
+  ROSTER_ROW_STATUS_INACTIVE: RosterRowStatus.INACTIVE,
+};
+
+/**
+ * `RosterRowStatus` → the sidebar's CSS/wire spelling (`WorkspaceStatus` in
+ * `sidebar.ts`). The enum is the wire vocabulary; this is the presentation
+ * spelling of the SAME closed set, which is what makes the cross-language
+ * completeness test able to compare them member for member.
+ */
+export const ROSTER_ROW_STATUS_KEYWORD: Readonly<Record<RosterRowStatus, string>> = {
+  [RosterRowStatus.UNSPECIFIED]: "",
+  [RosterRowStatus.SUBMITTING]: "submitting",
+  [RosterRowStatus.THINKING]: "thinking",
+  [RosterRowStatus.CLEARING]: "clearing",
+  [RosterRowStatus.COMPACTING]: "compacting",
+  [RosterRowStatus.PERMISSION]: "permission",
+  [RosterRowStatus.DONE]: "done",
+  [RosterRowStatus.INTERRUPTED]: "interrupted",
+  [RosterRowStatus.READY]: "ready",
+  [RosterRowStatus.IDLE_ASYNC]: "idle-async",
+  [RosterRowStatus.VENDOR_BLOCKED]: "vendor-blocked",
+  [RosterRowStatus.INIT]: "init",
+  [RosterRowStatus.SEVERED]: "severed",
+  [RosterRowStatus.HIBERNATED]: "hibernated",
+  [RosterRowStatus.START_FAILED]: "start-failed",
+  [RosterRowStatus.DEGRADED]: "degraded",
+  [RosterRowStatus.DEAD]: "dead",
+  [RosterRowStatus.MERGE_ENQUEUING]: "merge-enqueuing",
+  [RosterRowStatus.MERGING]: "merging",
+  [RosterRowStatus.MERGE_QUEUED]: "merge-queued",
+  [RosterRowStatus.MERGE_CONFLICT]: "merge-conflict",
+  [RosterRowStatus.MERGE_FAILED]: "merge-failed",
+  [RosterRowStatus.MERGED]: "merged",
+  [RosterRowStatus.NONE]: "none",
+  [RosterRowStatus.INACTIVE]: "inactive",
+};
+
 /** Daemon-resolved reliability of the current session-controller generation. */
 export enum SessionConnectivity {
   UNSPECIFIED = 0,
@@ -738,6 +840,66 @@ export interface WorkspaceAvailable {
   initialPromptQueued: boolean;
 }
 
+/**
+ * `frontend.v1.WorkspaceRoster` — one complete picture of the sidebar.
+ *
+ * Emacs authors it; the daemon retains and rebroadcasts it. Always whole,
+ * never a delta, so a partially-applied roster is unrepresentable.
+ */
+export interface WorkspaceRoster {
+  /** Monotonic per-Emacs-boot revision; a frame older than the held one is dropped. */
+  revision: number;
+  /** The active grouping — the set arm IS the grouping, with no separate mode flag. */
+  view:
+    | { case: "repository"; value: RosterRepositoryView }
+    | { case: "task"; value: RosterTaskView };
+  /** Settled merges, hoisted out of the grouping and rendered under both views. */
+  recentlyMerged: RosterSection;
+  /** Absolute worktree dir of the current workspace; empty when there is none. */
+  currentDir: string;
+  /** Absolute worktree dir the keyboard cursor rests on; empty when there is none. */
+  navDir: string;
+}
+
+/** The repository grouping's sections, in author-supplied render order. */
+export interface RosterRepositoryView {
+  sections: RosterRepoSection[];
+}
+
+/** The task grouping's sections, in author-supplied render order. */
+export interface RosterTaskView {
+  sections: RosterTaskSection[];
+}
+
+/** One repository's workspaces. `folded` hides rows the model still carries. */
+export interface RosterRepoSection {
+  repoKey: string;
+  folded: boolean;
+  rows: RosterRow[];
+}
+
+/** One task's workspaces. `taskId` is the identity; `title` is display only. */
+export interface RosterTaskSection {
+  taskId: string;
+  title: string;
+  done: boolean;
+  rows: RosterRow[];
+}
+
+/** A bare row list: the shell for a section with no fold key and no done axis. */
+export interface RosterSection {
+  rows: RosterRow[];
+}
+
+/** One workspace row. `dir` is the identity and the join key to every command. */
+export interface RosterRow {
+  dir: string;
+  name: string;
+  status: RosterRowStatus;
+  current: boolean;
+  children: RosterRow[];
+}
+
 /** A typed UI-only action from the daemon-owned workspace-command inbox. */
 export type HostAction = {
   actionId: string;
@@ -804,7 +966,8 @@ export type FrontendFrame = {
     | { case: "queue"; value: QueueView }
     | { case: "progress"; value: ProgressView }
     | { case: "workspaceAvailable"; value: WorkspaceAvailable }
-    | { case: "hostAction"; value: HostAction };
+    | { case: "hostAction"; value: HostAction }
+    | { case: "workspaceRoster"; value: WorkspaceRoster };
 };
 
 /** The frame-variant discriminators FrontendFrame.frame.case may hold. */
@@ -847,6 +1010,12 @@ export const UNSUPPORTED_SHAPES: ReadonlyMap<string, string> = new Map<string, s
     "host-only workspace materialization directive; GUI transports never receive it",
   ],
   ["hostAction", "host-only UI inbox action; GUI transports never receive it"],
+  [
+    "workspaceRoster",
+    "the sidebar's roster model (agentshim.frontend.v1.WorkspaceRoster); decoded " +
+      "and validated here for wire parity, but the rail still renders from the " +
+      "script-injection host hook — the frame-driven rendering is not wired yet",
+  ],
 ]);
 
 /** Whether a frame variant is mapped to a webapp visual (not in the registry). */
@@ -916,6 +1085,10 @@ const FRAME_DECODERS: ReadonlyMap<string, (v: unknown) => FrontendFrame["frame"]
     (v: unknown) => ({ case: "workspaceAvailable" as const, value: decodeWorkspaceAvailable(v) }),
   ],
   ["hostAction", (v: unknown) => ({ case: "hostAction" as const, value: decodeHostAction(v) })],
+  [
+    "workspaceRoster",
+    (v: unknown) => ({ case: "workspaceRoster" as const, value: decodeWorkspaceRoster(v) }),
+  ],
 ]);
 
 // --- per-message decoders (strict: reject unknown fields, validate required) -
@@ -1967,6 +2140,143 @@ function decodeHostAction(v: unknown): HostAction {
       rejectUnknown(payload, new Set(["id"]), `HostAction.${arm}`);
       return { actionId, action: { case: arm, id: str(payload, "id", `HostAction.${arm}`) } };
   }
+}
+
+// --- workspace roster -------------------------------------------------------
+
+const WORKSPACE_ROSTER_KEYS = new Set([
+  "revision",
+  "repository",
+  "task",
+  "recentlyMerged",
+  "currentDir",
+  "navDir",
+]);
+
+/**
+ * Decode a `WorkspaceRoster`, validating loudly.
+ *
+ * The grouping oneof is REQUIRED: a roster with no view arm names no grouping,
+ * and there is no defensible default to pick between repository and task, so
+ * it throws rather than guessing. Setting both is equally a breach.
+ */
+function decodeWorkspaceRoster(v: unknown): WorkspaceRoster {
+  const o = ensureObject(v, "WorkspaceRoster");
+  rejectUnknown(o, WORKSPACE_ROSTER_KEYS, "WorkspaceRoster");
+
+  const hasRepository = o.repository !== undefined && o.repository !== null;
+  const hasTask = o.task !== undefined && o.task !== null;
+  if (hasRepository && hasTask) {
+    throw new Error("frontend-proto: WorkspaceRoster sets both view arms (repository, task)");
+  }
+  if (!hasRepository && !hasTask) {
+    throw new Error(
+      "frontend-proto: WorkspaceRoster carries no view variant (empty or unrecognized oneof)",
+    );
+  }
+
+  const view: WorkspaceRoster["view"] = hasRepository
+    ? { case: "repository", value: decodeRosterRepositoryView(o.repository) }
+    : { case: "task", value: decodeRosterTaskView(o.task) };
+
+  return {
+    revision: num(o, "revision", "WorkspaceRoster"),
+    view,
+    // Absent recently-merged is an EMPTY section, not a missing one: proto3
+    // omits an unset message, and "nothing merged lately" is the normal case.
+    recentlyMerged:
+      o.recentlyMerged === undefined || o.recentlyMerged === null
+        ? { rows: [] }
+        : decodeRosterSection(o.recentlyMerged, "WorkspaceRoster.recentlyMerged"),
+    currentDir: str(o, "currentDir", "WorkspaceRoster"),
+    navDir: str(o, "navDir", "WorkspaceRoster"),
+  };
+}
+
+function decodeRosterRepositoryView(v: unknown): RosterRepositoryView {
+  const o = ensureObject(v, "RosterRepositoryView");
+  rejectUnknown(o, new Set(["sections"]), "RosterRepositoryView");
+  return { sections: rosterArray(o.sections, "RosterRepositoryView.sections").map(decodeRosterRepoSection) };
+}
+
+function decodeRosterTaskView(v: unknown): RosterTaskView {
+  const o = ensureObject(v, "RosterTaskView");
+  rejectUnknown(o, new Set(["sections"]), "RosterTaskView");
+  return { sections: rosterArray(o.sections, "RosterTaskView.sections").map(decodeRosterTaskSection) };
+}
+
+function decodeRosterRepoSection(v: unknown): RosterRepoSection {
+  const o = ensureObject(v, "RosterRepoSection");
+  rejectUnknown(o, new Set(["repoKey", "folded", "rows"]), "RosterRepoSection");
+  return {
+    repoKey: str(o, "repoKey", "RosterRepoSection"),
+    folded: bool(o, "folded", "RosterRepoSection"),
+    rows: rosterArray(o.rows, "RosterRepoSection.rows").map((r) => decodeRosterRow(r, "RosterRepoSection.rows")),
+  };
+}
+
+function decodeRosterTaskSection(v: unknown): RosterTaskSection {
+  const o = ensureObject(v, "RosterTaskSection");
+  rejectUnknown(o, new Set(["taskId", "title", "done", "rows"]), "RosterTaskSection");
+  return {
+    taskId: str(o, "taskId", "RosterTaskSection"),
+    title: str(o, "title", "RosterTaskSection"),
+    done: bool(o, "done", "RosterTaskSection"),
+    rows: rosterArray(o.rows, "RosterTaskSection.rows").map((r) => decodeRosterRow(r, "RosterTaskSection.rows")),
+  };
+}
+
+function decodeRosterSection(v: unknown, ctx: string): RosterSection {
+  const o = ensureObject(v, ctx);
+  rejectUnknown(o, new Set(["rows"]), ctx);
+  return { rows: rosterArray(o.rows, `${ctx}.rows`).map((r) => decodeRosterRow(r, `${ctx}.rows`)) };
+}
+
+function decodeRosterRow(v: unknown, ctx: string): RosterRow {
+  const o = ensureObject(v, ctx);
+  rejectUnknown(o, new Set(["dir", "name", "status", "current", "children"]), ctx);
+  return {
+    dir: str(o, "dir", ctx),
+    name: str(o, "name", ctx),
+    status: enumRosterRowStatus(o, "status", ctx),
+    current: bool(o, "current", ctx),
+    // Recursive by construction: a spawned family nests under its parent.
+    children: rosterArray(o.children, `${ctx}.children`).map((c) =>
+      decodeRosterRow(c, `${ctx}.children`),
+    ),
+  };
+}
+
+/** A repeated field: absent is an empty list, present must be a JSON array. */
+function rosterArray(v: unknown, ctx: string): unknown[] {
+  if (v === undefined || v === null) return [];
+  return ensureArray(v, ctx);
+}
+
+/**
+ * `RosterRowStatus`, REJECTED at UNSPECIFIED rather than adopted.
+ *
+ * Unlike `ConversationSource`, there is no layer downstream that owns this
+ * error: the status IS the row's whole lifecycle assertion, and a row drawn
+ * with no dot would silently misreport a workspace. An absent field is the
+ * same breach as an explicit UNSPECIFIED — proto3 cannot tell them apart, and
+ * neither is a lifecycle.
+ */
+function enumRosterRowStatus(o: Obj, key: string, ctx: string): RosterRowStatus {
+  const status = enumValue(
+    o,
+    key,
+    ctx,
+    RosterRowStatus,
+    ROSTER_ROW_STATUS_BY_NAME,
+    RosterRowStatus.UNSPECIFIED,
+  );
+  if (status === RosterRowStatus.UNSPECIFIED) {
+    throw new Error(
+      `frontend-proto: ${ctx}.${key} is ROSTER_ROW_STATUS_UNSPECIFIED, which is not a lifecycle`,
+    );
+  }
+  return status;
 }
 
 // --- primitive readers (loud, protojson-aware) ------------------------------

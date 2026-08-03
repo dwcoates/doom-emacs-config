@@ -296,6 +296,11 @@ message FrontendFrame {
     HostAction host_action = 15;
     DaemonHealthView daemon_health = 16;
     SessionHealthView session_health = 17;
+    // The workspace roster, the sidebar's entire model, previously delivered
+    // by Emacs script-injection per webview. Emacs remains the single author;
+    // the daemon retains the latest roster, includes it in every connect
+    // snapshot, and rebroadcasts on change.
+    WorkspaceRoster workspace_roster = 18;
   }
 }
 
@@ -852,7 +857,24 @@ message FrontendCommand {
     SessionHealthCmd session_health = 22;
     RestartSessionCmd restart_session = 23;
     SetModelCmd set_model = 24;
+    PublishWorkspaceRosterCmd publish_workspace_roster = 25;
   }
+}
+
+// Emacs→daemon publication of the whole workspace roster.
+//
+// Emacs is the roster's SINGLE author; this is the only way a roster enters
+// the daemon. The daemon retains the published roster, folds it into every
+// connect snapshot, and rebroadcasts it — it never synthesizes or amends one.
+// The ack semantics are every other frontend command's: a refused publish (a
+// stale, out-of-order revision) is a loud nack on the correlated CommandAck,
+// never a silent drop, so a publisher whose revision counter has fallen
+// behind learns it instead of believing it published.
+message PublishWorkspaceRosterCmd {
+  // The complete roster as of this publication. Always whole, never a delta:
+  // the roster is small and Emacs holds the entire model, so a full replace
+  // makes a partially-applied roster unrepresentable.
+  WorkspaceRoster roster = 1;
 }
 
 // (The retired PaintAckCmd rode the command oneof at field 17, with its
@@ -1517,4 +1539,204 @@ message StateSnapshot {
   // GUI client, regardless of observer/painter role.
   repeated WorkspaceAvailable workspace_available = 8;
   repeated HostAction host_actions = 9;
+}
+
+// ---------------------------------------------------------------------------
+// The workspace roster — the sidebar's entire model.
+//
+// Emacs is the single author. It knows which workspaces exist, how they group,
+// what each one's lifecycle is, and where the cursor sits; the daemon knows
+// none of that. The roster used to reach the webapp by script injection into
+// each webview, which made it per-view state that a second view could not
+// share and a reconnect could not recover. As a frame it is ordinary daemon
+// surface: retained, snapshotted on connect, rebroadcast on change.
+// ---------------------------------------------------------------------------
+
+// One complete, self-contained picture of the sidebar.
+//
+// Always whole, never a delta — the model is small and Emacs holds all of it,
+// so a full replace makes a partially-applied roster unrepresentable.
+message WorkspaceRoster {
+  // Monotonic per-Emacs-boot revision, incremented on every publication. The
+  // daemon refuses a publish whose revision is not newer than the one it
+  // holds, so an out-of-order delivery cannot resurrect a superseded roster;
+  // clients apply the same rule and drop any frame older than what they hold.
+  // Per-BOOT, not global: a restarted Emacs restarts the counter, and the
+  // daemon's retained roster does not outlive the publisher that authored it.
+  int64 revision = 1;
+
+  // The active grouping. The SET ARM IS THE GROUPING — there is no separate
+  // mode enum to disagree with the payload, and the rows of the inactive
+  // grouping are simply absent rather than carried and ignored.
+  oneof view {
+    // Group by repository: the default, one section per repo.
+    RosterRepositoryView repository = 2;
+    // Group by task: one section per task, workspaces filed under the task
+    // they serve.
+    RosterTaskView task = 3;
+  }
+
+  // Workspaces whose merge has settled, hoisted out of the grouping above and
+  // rendered under BOTH views. Hoisted because a merged workspace's repo or
+  // task is no longer the interesting fact about it — that it is done is.
+  RosterSection recently_merged = 4;
+
+  // Absolute worktree dir of the current workspace, empty when there is none.
+  // The dir is the identity: this is compared against RosterRow.dir, never
+  // against a display name, which is not unique.
+  string current_dir = 5;
+
+  // Absolute worktree dir the keyboard-navigation cursor rests on, empty when
+  // there is none. Distinct from current_dir on purpose: the cursor moves
+  // through the roster without switching workspaces.
+  string nav_dir = 6;
+}
+
+// The repository grouping's sections, in the order they render.
+message RosterRepositoryView {
+  // One section per repository. Order is the author's; clients do not re-sort.
+  repeated RosterRepoSection sections = 1;
+}
+
+// The task grouping's sections, in the order they render.
+message RosterTaskView {
+  // One section per task. Order is the author's; clients do not re-sort.
+  repeated RosterTaskSection sections = 1;
+}
+
+// One repository's workspaces.
+message RosterRepoSection {
+  // Stable key identifying the repository, and the fold state's key. Identity,
+  // not decoration: the fold a user sets must survive a roster republish.
+  string repo_key = 1;
+
+  // Whether the section renders collapsed. A folded section STILL CARRIES its
+  // rows — folding is a display state, so the client hides the rows rather
+  // than the author omitting them, and unfolding needs no republish.
+  bool folded = 2;
+
+  // The section's workspaces, in render order.
+  repeated RosterRow rows = 3;
+}
+
+// One task's workspaces.
+message RosterTaskSection {
+  // Stable task identity. The ID is the identity, NOT the title: a task can be
+  // renamed without becoming a different task.
+  string task_id = 1;
+
+  // Human-readable task title, for display only.
+  string title = 2;
+
+  // Whether the task is complete. This axis exists ONLY here — a repository is
+  // never "done", so RosterRepoSection has no counterpart and cannot be asked
+  // a question that has no answer.
+  bool done = 3;
+
+  // The workspaces filed under this task, in render order.
+  repeated RosterRow rows = 4;
+}
+
+// A bare list of rows: the shared shell for a section that has no grouping key
+// of its own. Used by recently_merged, which has neither a fold key (nothing
+// to remember it against) nor a done axis (it is definitionally settled).
+message RosterSection {
+  // The section's workspaces, in render order.
+  repeated RosterRow rows = 1;
+}
+
+// One workspace in the sidebar.
+message RosterRow {
+  // Absolute worktree dir. THE IDENTITY, and the join key to every
+  // workspace-scoped frame and command: a gesture on this row travels back to
+  // the daemon as this dir. Names collide across repos; dirs do not.
+  string dir = 1;
+
+  // Display name, for rendering only. Never an identity or a join key.
+  string name = 2;
+
+  // The workspace's lifecycle, as Emacs classifies it.
+  RosterRowStatus status = 3;
+
+  // Whether this row is the current workspace. Redundant with a dir comparison
+  // against WorkspaceRoster.current_dir and deliberately so: the author
+  // resolves it once, so no client can compute it differently.
+  bool current = 4;
+
+  // Nested workspaces (a spawned family under its parent), in render order.
+  repeated RosterRow children = 5;
+}
+
+// The closed lifecycle vocabulary a roster row may carry.
+//
+// It mirrors the sidebar's existing status set exactly — the webapp's
+// WorkspaceRow.status union and sidebar.el's wire table are one contract, and
+// this enum is now the third face of it. It is deliberately NOT RenderState:
+// the roster carries statuses no render state produces (INACTIVE, NONE), and
+// coarsens two render states (idle and ready) onto one dot.
+enum RosterRowStatus {
+  // Never emitted and INVALID on the wire. Proto3 reserves 0 for "not
+  // populated", and a row whose lifecycle is unset is a contract breach, not a
+  // default dot — consumers reject it loudly, matching RenderState's
+  // no-silent-fallback convention.
+  ROSTER_ROW_STATUS_UNSPECIFIED = 0;
+
+  // A prompt is committed and not yet acked by the shim.
+  ROSTER_ROW_STATUS_SUBMITTING = 1;
+  // A turn is in flight.
+  ROSTER_ROW_STATUS_THINKING = 2;
+  // The conversation is being cleared.
+  ROSTER_ROW_STATUS_CLEARING = 3;
+  // The context is being compacted.
+  ROSTER_ROW_STATUS_COMPACTING = 4;
+  // A tool-permission request is waiting on the user.
+  ROSTER_ROW_STATUS_PERMISSION = 5;
+  // The turn finished and its response is unread.
+  ROSTER_ROW_STATUS_DONE = 6;
+  // The turn was interrupted by the user.
+  ROSTER_ROW_STATUS_INTERRUPTED = 7;
+  // Live, proven usable, and idle. Emacs maps BOTH its idle and ready render
+  // states here — the sidebar draws them identically.
+  ROSTER_ROW_STATUS_READY = 8;
+  // No foreground turn, but detached work is still running.
+  ROSTER_ROW_STATUS_IDLE_ASYNC = 9;
+  // Blocked on the vendor or the account, not on agent-repl.
+  ROSTER_ROW_STATUS_VENDOR_BLOCKED = 10;
+  // Starting up; the route is not yet proven.
+  ROSTER_ROW_STATUS_INIT = 11;
+  // The session's backing process is gone but the workspace is recoverable.
+  ROSTER_ROW_STATUS_SEVERED = 12;
+  // Deliberately parked, resumable on demand.
+  ROSTER_ROW_STATUS_HIBERNATED = 13;
+  // Startup failed outright.
+  ROSTER_ROW_STATUS_START_FAILED = 14;
+  // Running, but with a compromised route.
+  ROSTER_ROW_STATUS_DEGRADED = 15;
+  // Terminal: no live session backs the workspace.
+  ROSTER_ROW_STATUS_DEAD = 16;
+
+  // The merge pipeline. These render a recycle glyph rather than a lifecycle
+  // dot, except MERGED, which is settled and files under recently_merged.
+  // The first instant of a merge, before anything durable exists for it.
+  ROSTER_ROW_STATUS_MERGE_ENQUEUING = 17;
+  // A merge is actively running.
+  ROSTER_ROW_STATUS_MERGING = 18;
+  // Enqueued behind another workspace's merge.
+  ROSTER_ROW_STATUS_MERGE_QUEUED = 19;
+  // The merge stopped on a conflict awaiting resolution.
+  ROSTER_ROW_STATUS_MERGE_CONFLICT = 20;
+  // The merge failed outright.
+  ROSTER_ROW_STATUS_MERGE_FAILED = 21;
+  // The merge settled successfully.
+  ROSTER_ROW_STATUS_MERGED = 22;
+
+  // Registered and open, but Emacs holds no render status for it (tombstoned
+  // or not yet born). Distinct from UNSPECIFIED: "the author looked and there
+  // is none" is an assertion, where UNSPECIFIED is the absence of one.
+  ROSTER_ROW_STATUS_NONE = 23;
+  // Registered in the roster but with no open perspective, so no live session
+  // whose lifecycle a dot could report. Drawn as a question mark. Dominates
+  // every render state: a perspective-less workspace is INACTIVE whatever its
+  // session once was.
+  ROSTER_ROW_STATUS_INACTIVE = 24;
 }
