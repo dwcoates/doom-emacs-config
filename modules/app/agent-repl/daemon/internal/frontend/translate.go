@@ -79,12 +79,14 @@ package frontend
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/errclass"
 
 	"google.golang.org/protobuf/types/known/anypb"
@@ -634,7 +636,19 @@ func resultItems(r *datav1.ResultMessage, tsMs int64, requestID string) []*front
 // running until a LOST staleness sweep gets to them — which is what let
 // replayed HISTORICAL task events masquerade as live activity in the footer's
 // roster.
-func BuildTaskCatalog(workspace, sessionID string, events []*corev1.Event) *frontendv1.TaskCatalog {
+//
+// The catalog it returns can only ever carry kinds the frontend contract names
+// ("agent" | "shell" | "workflow"). An entry whose kind resolves to anything
+// else — an unrecognized shim `task_type`, or a TaskKind the shim left
+// UNSPECIFIED — is REFUSED at assembly and recorded by task id with the kind it
+// carried. A single out-of-vocabulary entry is rejected by the webapp's
+// validating decoder, and because a retained catalog is replayed into every
+// connect snapshot for its session, one such entry used to make the workspace
+// unrenderable forever rather than costing one task's row.
+func BuildTaskCatalog(workspace, sessionID string, events []*corev1.Event, logf dlog.Logf) *frontendv1.TaskCatalog {
+	if logf == nil {
+		panic("frontend: BuildTaskCatalog requires a logger")
+	}
 	index := map[string]*frontendv1.TaskEntry{}
 	var order []string
 	get := func(id string) *frontendv1.TaskEntry {
@@ -669,13 +683,19 @@ func BuildTaskCatalog(workspace, sessionID string, events []*corev1.Event) *fron
 			}
 		case *corev1.Event_Vendor:
 			if btc := BackgroundTasksFromVendor(p.Vendor); btc != nil {
-				applyBackgroundTasks(btc, ev.GetProducedAtMs(), index, get)
+				applyBackgroundTasks(btc, ev.GetProducedAtMs(), index, get, logf)
 			}
 		}
 	}
 	catalog := &frontendv1.TaskCatalog{Workspace: workspace, SessionId: sessionID}
 	for _, id := range order {
-		catalog.Tasks = append(catalog.Tasks, index[id])
+		entry := index[id]
+		if !isFrontendTaskKind(entry.GetKind()) {
+			logf("frontend: REFUSING task %q from the catalog of workspace=%s session=%s — its kind %q is not in the frontend contract's vocabulary (%s); the entry is omitted rather than sent, because one out-of-vocabulary entry makes the whole snapshot undecodable",
+				id, workspace, sessionID, entry.GetKind(), strings.Join(frontendTaskKinds[:], " | "))
+			continue
+		}
+		catalog.Tasks = append(catalog.Tasks, entry)
 	}
 	return catalog
 }
@@ -717,6 +737,7 @@ func applyBackgroundTasks(
 	atMs int64,
 	index map[string]*frontendv1.TaskEntry,
 	get func(string) *frontendv1.TaskEntry,
+	logf dlog.Logf,
 ) {
 	live := make(map[string]struct{}, len(btc.GetTasks()))
 	for _, ref := range btc.GetTasks() {
@@ -742,7 +763,16 @@ func applyBackgroundTasks(
 			e.StartedAtMs = atMs
 		}
 		if e.GetKind() == "" {
-			e.Kind = ref.GetTaskType()
+			// The ref carries the SHIM's task_type vocabulary. It is a different
+			// vocabulary from the frontend contract's kind and must be translated
+			// here; copying it through is what put `local_agent` into a retained
+			// catalog and made every snapshot for that session undecodable.
+			if kind, ok := frontendTaskKindFromTaskType(ref.GetTaskType()); ok {
+				e.Kind = kind
+			} else {
+				logf("frontend: task %q was referenced with an UNRECOGNIZED shim task_type %q — it maps to no frontend task kind (%s), so the entry stays kindless and is refused by the catalog rather than passed through",
+					ref.GetTaskId(), ref.GetTaskType(), strings.Join(frontendTaskKinds[:], " | "))
+			}
 		}
 		if e.GetDescription() == "" {
 			e.Description = ref.GetDescription()
@@ -807,6 +837,42 @@ func applyResultUsage(view *frontendv1.SessionView, a *anypb.Any) {
 // Enum/value-to-string mappings (the frontend TaskCatalog vocabulary uses
 // lowercase strings; conversation payloads carry their typed enums through)
 // ---------------------------------------------------------------------------
+
+// frontendTaskKinds is the CLOSED vocabulary frontendv1.TaskEntry.kind may
+// name (proto/agentshim/frontend/v1/frontend.proto). The webapp's validating
+// decoder rejects a frame carrying anything else, so nothing outside this set
+// may be written into a TaskEntry.
+var frontendTaskKinds = [...]string{"agent", "shell", "workflow"}
+
+func isFrontendTaskKind(kind string) bool {
+	for _, known := range frontendTaskKinds {
+		if kind == known {
+			return true
+		}
+	}
+	return false
+}
+
+// frontendTaskKindFromTaskType translates the SHIM's background-task
+// `task_type` vocabulary ("local_agent" | "local_bash" | "local_workflow", see
+// proto/agentshim/data/v1/stream.proto's TaskStartedMsg) into the frontend
+// contract's kind vocabulary. It is the same mapping the shim applies when it
+// has a typed core.v1 TaskKind to fill (agent-shim taskKindEnum); a
+// BackgroundTaskRef carries only the raw string, so the translation lands here.
+// The second result is false for anything the shim vocabulary does not name —
+// never a guessed kind.
+func frontendTaskKindFromTaskType(taskType string) (string, bool) {
+	switch taskType {
+	case "local_agent":
+		return "agent", true
+	case "local_bash":
+		return "shell", true
+	case "local_workflow":
+		return "workflow", true
+	default:
+		return "", false
+	}
+}
 
 func taskKindString(k corev1.TaskKind) string {
 	switch k {
