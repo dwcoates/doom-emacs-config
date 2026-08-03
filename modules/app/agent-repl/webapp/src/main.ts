@@ -492,8 +492,6 @@ async function boot(): Promise<void> {
       // THE structured status, on the same revisioned message as the phase
       // above and the only merge input the footer takes.
       mergeStatus: s.mergeStatus,
-      connectivity: s.sessionConnectivity,
-      sessionStatus: s.sessionStatus,
       agents: sessionSubagents(s.items),
       tasks: store.taskRoster,
       items: s.items,

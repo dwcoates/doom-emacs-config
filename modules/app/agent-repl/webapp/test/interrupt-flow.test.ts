@@ -145,8 +145,6 @@ function flow(): Flow {
         progress: store.progress,
         renderState: s.renderState,
         mergeStatus: s.mergeStatus,
-        connectivity: s.sessionConnectivity,
-        sessionStatus: s.sessionStatus,
         agents: sessionSubagents(s.items),
         tasks: store.taskRoster,
         items: s.items,

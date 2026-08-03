@@ -36,8 +36,6 @@ import type {
   MergeStatus,
   ProgressInput,
   WebRenderState,
-  WebSessionConnectivity,
-  WebSessionStatus,
 } from "./state-adapter.js";
 import { ConversationItem, ToolItem } from "./store.js";
 import { TASKS_SPEC, tasksMenuHtml } from "./tasks.js";
@@ -77,10 +75,6 @@ export interface FooterInput {
    * sit here was exactly that second copy, and it is retired.
    */
   mergeStatus: MergeStatus | null;
-  /** Daemon-resolved route reliability for the same WorkspaceState. */
-  connectivity: WebSessionConnectivity | null;
-  /** Activity fact retained beneath a non-operational connectivity verdict. */
-  sessionStatus: WebSessionStatus;
   /** The session's subagent roster, relocated from the topbar. */
   agents: readonly CounterEntry[];
   /** The session's task roster, relocated from the topbar. */
@@ -808,18 +802,11 @@ export function footerHtml(
     mergeStatusPhaseLabel(input.mergeStatus) ??
     (input.renderState === null ? null : phaseLabel(input.renderState));
   if (phase !== null) {
-    // The secondary exists to keep an ACTIVITY visible when the route verdict
-    // has taken over the phase word — "severed" plus the fact that a turn is
-    // still thinking underneath. `ready` is the absence of activity, so it
-    // qualifies nothing and only puts a grey word beside the colored one; it is
-    // suppressed outright rather than rendered as an empty claim.
-    const secondary =
-      input.connectivity !== null &&
-      input.connectivity !== "operational" &&
-      input.sessionStatus !== null &&
-      input.sessionStatus !== "ready"
-        ? `<span class="pfooter-secondary">${escapeHtml(input.sessionStatus.replaceAll("_", " "))}</span>`
-        : "";
+    // NO SECONDARY WORD. The phase cell carries the phase word and nothing
+    // else: a grey session-status word beside the colored one read as a second,
+    // competing status, and the activity cell to its right is already the home
+    // of what is happening underneath a degraded route.
+    //
     // A working phase wears the WORD as its own liveness signal — no arc beside
     // it. Both of the breath's channels are inline styles rather than classes,
     // and neither is optional:
@@ -839,7 +826,7 @@ export function footerHtml(
         `animation-delay:-${Math.round(breath.elapsedMs)}ms">${escapeHtml(phase.word)}</span>`
       : escapeHtml(phase.word);
     cells.push(
-      `<div class="pfooter-cell pfooter-phase ${phase.tone}">${word}${secondary}</div>`,
+      `<div class="pfooter-cell pfooter-phase ${phase.tone}">${word}</div>`,
     );
   }
   // The merge figures sit immediately right of the phase word they qualify, so

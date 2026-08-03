@@ -2570,12 +2570,6 @@ pre {
   font-weight: 650;
   padding: 11px;
 }
-.pfooter-secondary {
-  margin-left: 0.45em;
-  color: var(--muted);
-  font-size: 0.82em;
-  font-weight: 500;
-}
 .pfooter-phase.thinking { color: var(--thinking); }
 /* The five state tones, matching the tab-bar and the sidebar dots exactly so
    a workspace never reads one way here and another there. */
