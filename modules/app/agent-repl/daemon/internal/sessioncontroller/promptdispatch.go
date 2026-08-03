@@ -387,7 +387,7 @@ func (m *Manager) noteClearDispatched(workspace string, cmd sessionCommand) {
 	if !cmd.clear {
 		return
 	}
-	m.logf("session-controller: /clear dispatched ws=%q — opening the SSM's clearing axis until its ContextCleared lands", workspace)
+	m.logf("session-controller: /clear dispatched ws=%q — opening the SSM's clearing axis until the vendor session rotation it causes lands, or its ContextCleared arrives first", workspace)
 	if err := m.cfg.SSM.ApplyClearing(workspace, true, "clear_dispatched"); err != nil {
 		m.logf("session-controller: opening the clearing axis FAILED ws=%q: %v (the cut will render as an ordinary turn)", workspace, err)
 	}
