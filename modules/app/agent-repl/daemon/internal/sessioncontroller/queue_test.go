@@ -85,6 +85,20 @@ func newQueueHarness(t *testing.T, cls *fakeClassifier) *queueHarness {
 // Both may be nil, which is the plain harness.
 func newQueueHarnessWithPusher(t *testing.T, cls *fakeClassifier, wrap func(*fakePusher) Pusher, logf func(string, ...any)) *queueHarness {
 	t.Helper()
+	return newQueueHarnessFull(t, cls, wrap, logf, nil)
+}
+
+// newQueueHarnessWithHolds is newQueueHarness with the drain lease's durable
+// parking ledger wired (shutdownlease_test.go).
+func newQueueHarnessWithHolds(t *testing.T, cls *fakeClassifier, holds ShutdownHoldStore, logf func(string, ...any)) *queueHarness {
+	t.Helper()
+	return newQueueHarnessFull(t, cls, nil, logf, holds)
+}
+
+// newQueueHarnessFull is the one constructor the variants above delegate to, so
+// a new injection point is added in exactly one place.
+func newQueueHarnessFull(t *testing.T, cls *fakeClassifier, wrap func(*fakePusher) Pusher, logf func(string, ...any), holds ShutdownHoldStore) *queueHarness {
+	t.Helper()
 	rec := &fakePusher{}
 	var push Pusher = rec
 	if wrap != nil {
@@ -105,6 +119,7 @@ func newQueueHarnessWithPusher(t *testing.T, cls *fakeClassifier, wrap func(*fak
 		ClearCompactStore: newFakeClearCompactStore(),
 		Registrar:         reg,
 		ProtocolVersion:   "1",
+		ShutdownHolds:     holds,
 		Logf:              logf,
 		now:               func() int64 { return 1000 },
 		Source:            stubSource{},

@@ -85,6 +85,12 @@ func coalesceKey(frame *frontendv1.FrontendFrame) string {
 			f.Heartbeat.GetSessionId() + "\x00" + f.Heartbeat.GetProgress().GetToolUseId()
 	case *frontendv1.FrontendFrame_WorkspaceRoster:
 		return "workspace_roster"
+	case *frontendv1.FrontendFrame_ShutdownSchedule:
+		// ABSOLUTE and keyed GLOBALLY, exactly as the roster is. The view is
+		// always the WHOLE lease — schedule plus its complete holds list — so
+		// any two queued ones are redundant with each other and the newer alone
+		// is the whole truth. Nothing incremental is lost by dropping the older.
+		return "shutdown_schedule"
 	default:
 		return ""
 	}
