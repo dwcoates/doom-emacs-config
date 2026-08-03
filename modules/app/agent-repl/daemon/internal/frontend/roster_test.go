@@ -3,6 +3,7 @@ package frontend
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"net"
 	"strconv"
 	"strings"
@@ -22,14 +23,25 @@ func readyRow(dir string) *frontendv1.RosterRow {
 	}
 }
 
+// testBootID is the publisher epoch every single-epoch test publishes under.
+// Tests that care about the epoch boundary name their own ids instead.
+const testBootID = "boot-a"
+
 // validRoster builds the smallest roster the daemon accepts at the given
-// revision: a positive revision, a set view arm, and one fully-formed row.
+// revision, under the default publisher epoch.
 func validRoster(revision int64, rows ...*frontendv1.RosterRow) *frontendv1.WorkspaceRoster {
+	return validRosterInEpoch(testBootID, revision, rows...)
+}
+
+// validRosterInEpoch builds the smallest roster the daemon accepts: a positive
+// revision, a non-empty boot_id, a set view arm, and one fully-formed row.
+func validRosterInEpoch(bootID string, revision int64, rows ...*frontendv1.RosterRow) *frontendv1.WorkspaceRoster {
 	if len(rows) == 0 {
 		rows = []*frontendv1.RosterRow{readyRow("/w1")}
 	}
 	return &frontendv1.WorkspaceRoster{
 		Revision: revision,
+		BootId:   bootID,
 		View: &frontendv1.WorkspaceRoster_Repository{
 			Repository: &frontendv1.RosterRepositoryView{
 				Sections: []*frontendv1.RosterRepoSection{{RepoKey: "repo", Rows: rows}},
@@ -118,9 +130,10 @@ func TestPublishWorkspaceRosterAdvancesTheRetainedRevision(t *testing.T) {
 
 // --- publish: the refusals --------------------------------------------------
 
-// TestPublishWorkspaceRosterRefusesAStaleRevision covers the monotonicity rule.
-// The refusal must name BOTH revisions: a publisher that cannot see which
-// revision beat it cannot tell a lost race from a bug.
+// TestPublishWorkspaceRosterRefusesAStaleRevision covers the monotonicity rule
+// WITHIN one publisher epoch (both publishes carry the same boot_id). The
+// refusal must name BOTH revisions: a publisher that cannot see which revision
+// beat it cannot tell a lost race from a bug.
 func TestPublishWorkspaceRosterRefusesAStaleRevision(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -178,6 +191,129 @@ func TestDispatchNacksAStaleRosterRevision(t *testing.T) {
 	}
 	if !strings.Contains(ack.GetError(), "revision=8") || !strings.Contains(ack.GetError(), "revision=9") {
 		t.Errorf("Nack %q does not name both the offered and retained revisions", ack.GetError())
+	}
+}
+
+// --- publish: the publisher epoch -------------------------------------------
+
+// TestPublishWorkspaceRosterAcceptsALowerRevisionFromANewEpoch covers the whole
+// point of boot_id: a fresh Emacs boot publishing revision=1 against a daemon
+// still retaining revision=500 from the previous boot is ACCEPTED, because the
+// two counters were minted by different publishers and are not comparable.
+// Without this the new boot would be refused forever, with no honest resync
+// available (a nack carries no retained revision to resync against).
+func TestPublishWorkspaceRosterAcceptsALowerRevisionFromANewEpoch(t *testing.T) {
+	// Arrange.
+	s, _ := newTestServer(t, 0)
+	if err := s.PublishWorkspaceRoster(validRosterInEpoch("boot-old", 500)); err != nil {
+		t.Fatalf("seed publish: %v", err)
+	}
+
+	// Act.
+	err := s.PublishWorkspaceRoster(validRosterInEpoch("boot-new", 1))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("PublishWorkspaceRoster from a new epoch = %v, want acceptance", err)
+	}
+	s.mu.Lock()
+	held := s.retainedRosterLocked()
+	s.mu.Unlock()
+	if held.GetBootId() != "boot-new" || held.GetRevision() != 1 {
+		t.Errorf("retained boot_id=%q revision=%d, want boot-new/1", held.GetBootId(), held.GetRevision())
+	}
+}
+
+// TestPublishWorkspaceRosterResetsTheFloorToTheNewEpoch covers the floor reset:
+// after an epoch change the monotonicity rule applies against the NEW epoch's
+// revision, so the old epoch's high-water mark no longer gates anything.
+func TestPublishWorkspaceRosterResetsTheFloorToTheNewEpoch(t *testing.T) {
+	// Arrange.
+	s, _ := newTestServer(t, 0)
+	if err := s.PublishWorkspaceRoster(validRosterInEpoch("boot-old", 500)); err != nil {
+		t.Fatalf("seed publish: %v", err)
+	}
+	if err := s.PublishWorkspaceRoster(validRosterInEpoch("boot-new", 3)); err != nil {
+		t.Fatalf("epoch-change publish: %v", err)
+	}
+
+	// Act.
+	err := s.PublishWorkspaceRoster(validRosterInEpoch("boot-new", 2))
+
+	// Assert.
+	if err == nil {
+		t.Fatal("PublishWorkspaceRoster = nil, want a refusal against the new epoch's floor")
+	}
+	if !strings.Contains(err.Error(), "revision=2") || !strings.Contains(err.Error(), "revision=3") {
+		t.Errorf("refusal %q does not name both the offered and the new epoch's retained revision", err)
+	}
+}
+
+// TestPublishWorkspaceRosterLogsTheEpochChange covers the observability of a
+// floor reset: an epoch change discards a monotonicity guarantee, so it is
+// recorded loudly through the canonical log rather than passing silently.
+func TestPublishWorkspaceRosterLogsTheEpochChange(t *testing.T) {
+	// Arrange.
+	var logged []string
+	s := New(Config{
+		Logf:        func(format string, args ...any) { logged = append(logged, fmt.Sprintf(format, args...)) },
+		LogVerbosef: testLogf(t),
+		State:       staticState{snap: sampleSnapshot()},
+		Handler:     &mockHandler{},
+	})
+	if err := s.PublishWorkspaceRoster(validRosterInEpoch("boot-old", 500)); err != nil {
+		t.Fatalf("seed publish: %v", err)
+	}
+
+	// Act.
+	if err := s.PublishWorkspaceRoster(validRosterInEpoch("boot-new", 1)); err != nil {
+		t.Fatalf("epoch-change publish: %v", err)
+	}
+
+	// Assert.
+	joined := strings.Join(logged, "\n")
+	for _, want := range []string{"epoch changed", `boot_id="boot-old"`, "revision=500", `boot_id="boot-new"`, "revision=1"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("epoch-change log %q does not name %q", joined, want)
+		}
+	}
+}
+
+// TestPublishWorkspaceRosterRefusesAnEmptyBootId covers the epoch-identity
+// contract: a publisher that will not name its epoch cannot be told apart from
+// one whose epoch ended, so it is refused rather than folded into the held one.
+func TestPublishWorkspaceRosterRefusesAnEmptyBootId(t *testing.T) {
+	// Arrange.
+	s, _ := newTestServer(t, 0)
+	roster := validRosterInEpoch("", 1)
+
+	// Act.
+	err := s.PublishWorkspaceRoster(roster)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("PublishWorkspaceRoster = nil, want a refusal for an empty boot_id")
+	}
+	if !strings.Contains(err.Error(), "empty boot_id") {
+		t.Errorf("refusal %q does not name the missing epoch identity", err)
+	}
+}
+
+// TestDispatchNacksARosterWithNoBootId covers the empty-epoch publication
+// reaching a client: a loud Nack on the wire, never a silent drop.
+func TestDispatchNacksARosterWithNoBootId(t *testing.T) {
+	// Arrange.
+	s, h := newTestServer(t, 0)
+
+	// Act.
+	ack := Dispatch(context.Background(), testLogf(t), h, s, publishRosterCmd("r-3", validRosterInEpoch("", 1)))
+
+	// Assert.
+	if ack.GetOk() {
+		t.Fatalf("boot_id-less publish ack = %+v, want a Nack", ack)
+	}
+	if !strings.Contains(ack.GetError(), "empty boot_id") {
+		t.Errorf("Nack %q does not name the missing epoch identity", ack.GetError())
 	}
 }
 
@@ -251,7 +387,7 @@ func TestPublishWorkspaceRosterRefusesAnUnsetView(t *testing.T) {
 	s, _ := newTestServer(t, 0)
 
 	// Act.
-	err := s.PublishWorkspaceRoster(&frontendv1.WorkspaceRoster{Revision: 1})
+	err := s.PublishWorkspaceRoster(&frontendv1.WorkspaceRoster{Revision: 1, BootId: testBootID})
 
 	// Assert.
 	if err == nil {
