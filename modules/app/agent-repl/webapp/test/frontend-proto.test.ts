@@ -714,10 +714,11 @@ describe("UNSUPPORTED_SHAPES registry", () => {
       "daemonView",
       "workspaceAvailable",
       "hostAction",
-      // The roster frame decodes and validates, but the rail still renders
-      // from the script-injection host hook, so it maps to no visual yet.
-      "workspaceRoster",
     ]);
+  });
+
+  it("reports workspaceRoster as visually supported (it IS the sidebar rail)", () => {
+    expect(isVisuallySupportedFrame("workspaceRoster")).toBe(true);
   });
 
   it("reports commandAck as visually unsupported", () => {
