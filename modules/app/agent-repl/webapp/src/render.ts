@@ -51,6 +51,16 @@ import {
   splitChessGameSegments,
 } from "./chess-game.js";
 import { inline, renderMarkdown } from "./markdown.js";
+import {
+  DEFERRED_CLASS,
+  HEIGHT_VAR,
+  LazyUpgrader,
+  canDeferItems,
+  estimateHeightPx,
+  isHeavyItem,
+  itemPlainText,
+  placeholderHtml,
+} from "./lazy-item.js";
 import { renderPromptBody } from "./prompt-body.js";
 import { findTreeRegion, looksLikeIntendedTree, renderTreeHtml } from "./metaprompt-tree.js";
 import { AsyncSource, ModelInfo, QueuedItem } from "./protocol.js";
@@ -2599,6 +2609,20 @@ export class FeedRenderer {
    * header's one-overlay-at-a-time rule feed-wide.
    */
   private agentMenus = new Map<string, TopbarMenu>();
+  /**
+   * Entry keys currently drawn as a cheap placeholder rather than their real
+   * render (see lazy-item.ts). Populated ONLY by `renderRestored`, for the
+   * replayed history above the tail chunk, and drained as the reader scrolls
+   * near — so a live append is never in it and renders in full, exactly as it
+   * did before deferral existed.
+   */
+  private deferred = new Set<string>();
+  /**
+   * Watches the deferred nodes and says when one has come near enough to be
+   * worth its real render. Inert where `IntersectionObserver` is absent, in
+   * which case nothing is ever deferred in the first place.
+   */
+  private upgrader: LazyUpgrader;
 
   constructor(
     container: HTMLElement,
@@ -2606,6 +2630,7 @@ export class FeedRenderer {
   ) {
     this.container = container;
     this.actions = actions;
+    this.upgrader = new LazyUpgrader(container, (keys) => this.upgradeKeys(keys));
     if (actions.fetchTaskTail) {
       const fetchTail = actions.fetchTaskTail;
       this.watcherPoller = new WatcherPoller(fetchTail, () => {
@@ -3018,17 +3043,96 @@ export class FeedRenderer {
     }
   }
 
-  /** One grouped-feed entry's HTML: the item's own, or its group's card. */
+  /**
+   * The one item ENTRY stands for: a lone item is itself, and a tab group is
+   * whichever member its card is currently showing — the member whose text a
+   * placeholder must carry, since that is the text the full render would put
+   * in the DOM for the search to walk.
+   */
+  private entryItem(entry: FeedEntry): ConversationItem {
+    if (entry.kind === "item") return entry.item;
+    const active = activeGroupMember(entry.members, this.activeTabs.get(this.entryKey(entry)));
+    return entry.members.find((m) => m.toolUseId === active) ?? entry.members[0];
+  }
+
+  /**
+   * One grouped-feed entry's HTML: the item's own, or its group's card —
+   * unless the entry is still DEFERRED, in which case its cheap placeholder
+   * stands in (see lazy-item.ts) and neither markdown nor highlighting runs.
+   */
   private entryHtml(
     entry: FeedEntry,
     finals: FinalResponses,
     panels: PanelContext,
   ): string {
+    if (this.deferred.has(this.entryKey(entry))) {
+      return placeholderHtml(this.entryItem(entry));
+    }
     if (entry.kind === "group") {
       const active = activeGroupMember(entry.members, this.activeTabs.get(this.entryKey(entry)));
       return groupHtml(entry.members, active, panels);
     }
     return this.itemHtml(entry.item, finals, panels);
+  }
+
+  /**
+   * Promote the named entries out of placeholder form and repaint. Called by
+   * the upgrader when they have scrolled near; a key already promoted (a
+   * clear rebuilt the feed under the observer, say) is simply not a change,
+   * so a stale batch cannot cost a render.
+   */
+  private upgradeKeys(keys: readonly string[]): void {
+    let changed = false;
+    for (const key of keys) {
+      if (this.deferred.delete(key)) changed = true;
+    }
+    if (changed) this.rerender();
+  }
+
+  /**
+   * Render every deferred entry in full, now.
+   *
+   * The feed search's contract is that it sees the conversation's DOM text
+   * (search.ts), and a placeholder is a REDUCTION of the item it stands for —
+   * it carries the item's prose but not a tool card's chrome, its tab chips,
+   * or the folds `unsearchedRegions` counts. So starting a search drains the
+   * deferral first, and the search then walks exactly the DOM it always did.
+   * A no-op once nothing is deferred, which is the steady state.
+   */
+  upgradeAll(): void {
+    if (this.deferred.size === 0) return;
+    log("info", `feed: upgrading ${this.deferred.size} deferred item(s) in full`, {
+      operation: "render.lazy-upgrade-all",
+    });
+    this.deferred.clear();
+    this.upgrader.reset();
+    this.rerender();
+  }
+
+  /**
+   * Draw EL as ENTRY's placeholder: flag it for the stylesheet's
+   * `content-visibility` rule and stamp the estimated height that rule sizes
+   * the skipped box with, then hand it to the upgrader to watch.
+   */
+  private deferEntry(el: HTMLElement, entry: FeedEntry): void {
+    const key = this.entryKey(entry);
+    this.deferred.add(key);
+    el.classList.add(DEFERRED_CLASS);
+    el.style.setProperty(HEIGHT_VAR, `${estimateHeightPx(itemPlainText(this.entryItem(entry)))}px`);
+    this.upgrader.watch(el);
+  }
+
+  /**
+   * Whether ENTRY may be drawn as a placeholder at all: heavy enough to be
+   * worth it, carrying text to stand in for it, and not one of the items the
+   * feed draws nothing for — an empty placeholder would mount a sized box
+   * where `.feed-item:empty` hides the real render entirely.
+   */
+  private deferrableEntry(entry: FeedEntry, finals: FinalResponses): boolean {
+    const item = this.entryItem(entry);
+    return (
+      isHeavyItem(item) && !rendersEmpty(item, finals) && itemPlainText(item) !== ""
+    );
   }
 
 
@@ -3129,6 +3233,10 @@ export class FeedRenderer {
     releaseChessGames(this.container);
     this.container.innerHTML = "";
     this.nodes.clear();
+    // The nodes the upgrader was watching are being discarded wholesale, so
+    // the deferral is re-decided from scratch below rather than carried.
+    this.deferred.clear();
+    this.upgrader.reset();
     // A clear or a compaction clears the screen: the feed opens on its own
     // rule and the discarded turns are not drawn at all. On a REPLAY the
     // daemon has already floored the history at the newest of the two, so this
@@ -3207,6 +3315,23 @@ export class FeedRenderer {
       this.actions.onRendered?.();
     };
     const chunks = backfillChunks(shells.length, BACKFILL_CHUNK);
+    // Lazy heavy rendering (lazy-item.ts). The NEWEST chunk — the one filled
+    // synchronously below, and the region the feed is about to park on —
+    // renders in full; everything above it is drawn as a placeholder until the
+    // reader scrolls near. Decided BEFORE any chunk is filled, since the fill
+    // is what asks `entryHtml` which form each entry takes.
+    if (canDeferItems()) {
+      const tail = new Set(chunks.length > 0 ? chunks[0] : []);
+      let count = 0;
+      shells.forEach(({ el, entry }, i) => {
+        if (tail.has(i) || !this.deferrableEntry(entry, finals)) return;
+        this.deferEntry(el, entry);
+        count++;
+      });
+      log("info", `feed: replay deferred ${count}/${shells.length} item(s) to first view`, {
+        operation: "render.lazy-defer",
+      });
+    }
     if (chunks.length > 0) fillChunk(chunks[0]);
     else this.actions.onRendered?.();
     parkAtTail(this.container);
@@ -3315,6 +3440,11 @@ export class FeedRenderer {
     if (boundary !== this.lastClearOrCompactKey) {
       this.container.innerHTML = "";
       this.nodes.clear();
+      // Every watched node just went with the feed. What the rebuild mounts
+      // is drawn in full: a boundary move is rare, and this render is the
+      // live path, where nothing is ever deferred (see `deferred`).
+      this.deferred.clear();
+      this.upgrader.reset();
     }
     this.lastClearOrCompactKey = boundary;
     // The gns-sockets fold: bridge upkeep leaves the top feed and every
@@ -3361,6 +3491,13 @@ export class FeedRenderer {
         : this.container.firstChild;
       if (entry.el !== desiredNext) this.container.insertBefore(entry.el, desiredNext);
       prevNode = entry.el;
+      // An upgraded entry drops the placeholder marking with the placeholder
+      // itself, so the stylesheet stops skipping its box and stops sizing it
+      // from an estimate the real render has just superseded.
+      if (!this.deferred.has(key) && entry.el.classList.contains(DEFERRED_CLASS)) {
+        entry.el.classList.remove(DEFERRED_CLASS);
+        entry.el.style.removeProperty(HEIGHT_VAR);
+      }
       this.stampNav(entry.el, feedEntry, finals, html);
       if (entry.html !== html) {
         // A section the user clicked open outlives the re-render of the
