@@ -2,6 +2,7 @@ package ssm
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
@@ -75,10 +76,94 @@ func (m *Manager) MarkPromptAccepted(
 	}
 	m.logf("ssm: prompt accepted ws=%s session=%s request_id=%q — appended daemon-local `submitting` before command completion; the shim ack advances it to `thinking`",
 		workspace, sessionID, requestID)
+	// THE ACCEPTED EDGE IS ALL-OR-NOTHING FROM HERE. Everything below runs
+	// under the same lock hold as the append above, so a failure retracts the
+	// row this call wrote rather than returning over it. See
+	// retractUnpublishedAcceptLocked for why leaving it standing wedged the
+	// workspace permanently.
 	if err := m.reresolveLocked(workspace, causePromptAccepted, 0); err != nil {
-		return err
+		return m.retractUnpublishedAcceptLocked(workspace, sessionID, requestID, err)
 	}
-	return m.publishPromptAcceptedLocked(workspace, sessionID, requestID, "appended", publish)
+	if err := m.publishPromptAcceptedLocked(workspace, sessionID, requestID, "appended", publish); err != nil {
+		return m.retractUnpublishedAcceptLocked(workspace, sessionID, requestID, err)
+	}
+	return nil
+}
+
+// retractUnpublishedAcceptLocked withdraws the `submitting` row THIS call just
+// appended, for an accepted edge that failed before any frontend could be shown
+// it. It returns the caller's original CAUSE, never its own success.
+//
+// THE FAILURE PATH USED TO RETURN OVER THE APPENDED ROW, and that is what
+// wedged a workspace forever. The row is a turn CLAIM: `turnClaim` reads it,
+// the queue latches on it, and only a turn that genuinely began ever reports an
+// end that could retire it. So a claim left behind by a rejected accept is a
+// claim nothing will ever close — and the very next prompt then took the
+// IDEMPOTENT branch above ("the lifecycle already claims this turn"), failed the
+// same publish invariant, and returned over the same row again. Every prompt
+// after it did the same. The session-controller's own retraction cannot reach
+// this: it restores its daemon-local latch and its comment promises "the latch
+// is put back where it was found", but the SSM's half of the edge is ours to
+// put back.
+//
+// IT RETRACTS ONLY WHAT THIS CALL WROTE, exactly as MarkPromptRejected does. The
+// top row must still be this session's own `prompt_accepted` row; anything else
+// means something authoritative owns the axis, and closing a turn on that
+// evidence would report an idle workspace over a working session. Nothing can
+// legitimately land in that window — the whole span runs under m.mu — so a top
+// row that is not ours is logged as the invariant violation it is.
+//
+// A retraction failure is JOINED onto the cause rather than replacing it: the
+// caller's error is the news, and a workspace left holding an unwithdrawn claim
+// is a second, independent fault that must not be swallowed to report the first.
+func (m *Manager) retractUnpublishedAcceptLocked(workspace, sessionID, requestID string, cause error) error {
+	var (
+		topState string
+		topCause string
+		topSID   sql.NullString
+	)
+	err := m.db.QueryRow(
+		`SELECT state, cause_kind, session_id FROM workspace_state
+		 WHERE workspace = ? AND state IN `+sessionStatusMembers+`
+		 ORDER BY at DESC LIMIT 1`,
+		workspace,
+	).Scan(&topState, &topCause, &topSID)
+	if err != nil {
+		readErr := fmt.Errorf("ssm: read back the accepted row to retract for workspace %q session %q request %q: %w",
+			workspace, sessionID, requestID, err)
+		m.logf("ssm: prompt accepted RETRACTION FAILED ws=%s session=%s request_id=%q stage=read_back accept_error=%v error=%v — the workspace holds a turn claim for a turn that never began",
+			workspace, sessionID, requestID, cause, readErr)
+		return errors.Join(cause, readErr)
+	}
+	if topState != sigSubmitting || topCause != causePromptAccepted ||
+		(topSID.String != "" && topSID.String != sessionID) {
+		invariant := fmt.Errorf("ssm: the accepted row to retract for workspace %q session %q request %q is no longer on top: state=%s cause_kind=%s session=%q",
+			workspace, sessionID, requestID, topState, topCause, topSID.String)
+		m.logf("ssm: prompt accepted RETRACTION FAILED ws=%s session=%s request_id=%q stage=identify state=%s cause_kind=%s top_session=%q accept_error=%v error=%v — nothing may write this axis inside the accept's own lock hold",
+			workspace, sessionID, requestID, topState, topCause, topSID.String, cause, invariant)
+		return errors.Join(cause, invariant)
+	}
+
+	if err := appendRow(
+		m.db, workspace, sessionID, sigIdle, causePromptRejected,
+		sql.NullInt64{}, m.nextAt(), "",
+	); err != nil {
+		writeErr := fmt.Errorf("ssm: retract the unpublished accepted prompt for workspace %q session %q request %q: %w",
+			workspace, sessionID, requestID, err)
+		m.logf("ssm: prompt accepted RETRACTION FAILED ws=%s session=%s request_id=%q stage=append accept_error=%v error=%v — the workspace holds a turn claim for a turn that never began",
+			workspace, sessionID, requestID, cause, writeErr)
+		return errors.Join(cause, writeErr)
+	}
+	m.logf("ssm: prompt accepted RETRACTED ws=%s session=%s request_id=%q accept_error=%v — the accepted edge failed before publication, so the turn claim it appended is withdrawn and the next prompt starts from an unclaimed axis",
+		workspace, sessionID, requestID, cause)
+	if err := m.reresolveLocked(workspace, causePromptRejected, 0); err != nil {
+		resolveErr := fmt.Errorf("ssm: re-resolve after retracting the unpublished accepted prompt for workspace %q session %q request %q: %w",
+			workspace, sessionID, requestID, err)
+		m.logf("ssm: prompt accepted RETRACTION FAILED ws=%s session=%s request_id=%q stage=reresolve accept_error=%v error=%v — the claim is withdrawn in the log but no frontend was told",
+			workspace, sessionID, requestID, cause, resolveErr)
+		return errors.Join(cause, resolveErr)
+	}
+	return cause
 }
 
 // publishPromptAcceptedLocked resolves and synchronously publishes the state

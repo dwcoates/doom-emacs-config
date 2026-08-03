@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 )
 
 func connectOperational(t *testing.T, m *Manager, workspace, sessionID, generationID string) {
@@ -774,4 +776,27 @@ func connectivityRowCount(t *testing.T, db *sql.DB, workspace string) int {
 		t.Fatalf("count session_connectivity rows: %v", err)
 	}
 	return count
+}
+
+// A live turn claim outranks a `connecting` lifecycle only when the bring-up
+// that lifecycle belongs to is the one that produced the claim. This is the
+// other half of that rule.
+func TestCompositeConnectingKeepsInitForAClaimOlderThanTheBringUp(t *testing.T) {
+	m, _, _ := openUnwiredTest(t, fakeResolver{"session-1": "ws"})
+	connectOperational(t, m, "ws", "session-1", "generation-1")
+	if err := m.Apply(evTurnStarted("session-1", 1)); err != nil {
+		t.Fatalf("Apply(TurnStarted): %v", err)
+	}
+	if err := m.ApplySessionConnectivity(
+		"ws", "session-1", "generation-2", SessionConnectivityConnecting, "re_bring_up",
+	); err != nil {
+		t.Fatalf("ApplySessionConnectivity(connecting): %v", err)
+	}
+
+	got := mustCurrent(t, m, "ws")
+
+	if got.GetState() != frontendv1.RenderState_RENDER_STATE_INIT || got.GetTurnActive() {
+		t.Fatalf("state = %s turn_active=%v, want INIT/false — a claim from the retired wiring may not paint a reconnecting workspace",
+			got.GetState(), got.GetTurnActive())
+	}
 }
