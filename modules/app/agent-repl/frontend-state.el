@@ -693,6 +693,40 @@ only the first `WorkspaceState' push arms the latch.  Loud-logged.  See
 
 ;;;; ---- StateSnapshot resync --------------------------------------------
 
+(defun agent-repl--frontend-snapshot-item-id (item id-keys)
+  "Return a diagnostic identity string for snapshot ITEM from ID-KEYS.
+ID-KEYS is a list of plist keywords whose values identify the item on the
+wire.  A non-plist ITEM still yields a printable form rather than erroring
+— this runs on the failure path, where an unusable item is exactly what is
+being reported."
+  (if (not (keywordp (car-safe item)))
+      (format "item=%S" item)
+    (mapconcat (lambda (key)
+                 (format "%s=%S" (substring (symbol-name key) 1)
+                         (plist-get item key)))
+               id-keys " ")))
+
+(defun agent-repl--frontend-apply-snapshot-items (kind items id-keys apply-fn)
+  "Apply each of ITEMS through APPLY-FN, containing per-item failures.
+KIND names the snapshot list for the log; ID-KEYS identifies an item within
+it (see `agent-repl--frontend-snapshot-item-id').  A signal from APPLY-FN is
+loud-logged with the item's identity and the error, then swallowed FOR THIS
+ITEM ONLY so the resync continues — the aggregate is re-surfaced by
+`agent-repl--frontend-apply-snapshot', which is what keeps this from being a
+silent fallback.  Returns the number of items that failed."
+  (let ((failures 0))
+    (dolist (item items)
+      (condition-case err
+          (funcall apply-fn item)
+        (error
+         (setq failures (1+ failures))
+         (agent-repl--log
+          nil
+          "frontend-apply-snapshot: %s item FAILED — %s err-type=%s err=%s; CONTAINED, resync continues"
+          kind (agent-repl--frontend-snapshot-item-id item id-keys)
+          (car err) (error-message-string err)))))
+    failures))
+
 (defun agent-repl--frontend-apply-snapshot (snapshot)
   "Apply a `StateSnapshot' frame SNAPSHOT (a plist) — full resync.
 Handler for the `snapshot' oneof arm.  Applies every `WorkspaceState' in
@@ -704,6 +738,20 @@ longer knows, unlike an upsert), and applies `:daemon' (DaemonView) for
 boot detection.  The `:catalogs' array belongs to the webapp's detached-task
 roster; Emacs counts it for diagnostics but deliberately applies none of it.
 Returns the count of workspace states applied.
+
+CONTAINMENT CONTRACT: a failure applying ONE snapshot item is loud-logged
+with the item's identity, counted, and surfaced afterwards both in the log
+and via `message' — but it NEVER aborts the resync.  Readiness (the
+DaemonView) and every remaining item must land regardless, because this is
+the only frame that establishes them: a retained host action whose handler
+signals (the executor in workspace-create-client.el acknowledges failures to
+the daemon and then deliberately RE-SIGNALS) used to propagate out of here
+and leave `agent-repl--frontend-daemon-view' nil forever, so every later
+readiness read failed with \"daemon never became ready\".  Containment is
+per-item only; a host action arriving as its own live frame keeps the
+executor's re-signal behavior untouched.  This is not a silent fallback: no
+error is swallowed without a log line, and an aggregate failure count is
+pushed to the user.
 
 On the scoped per-session webapp connection the daemon omits `:daemon' and
 retains only that session's catalog; a nil `:daemon' is therefore skipped,
@@ -726,32 +774,63 @@ receives every catalog but has no per-task roster."
     ;; linger in the store where the orphan/live-p reads would still see it.
     (clrhash agent-repl--frontend-session-views)
     (clrhash agent-repl--frontend-workspace-state-views)
-    (dolist (view sessions)
-      (agent-repl--frontend-apply-session-view view))
-    ;; Rebuild the retained-SystemInit roster wholesale too (same rationale):
-    ;; the slash-command menu source must not carry a bounced daemon's stale
-    ;; session inits.
-    (clrhash agent-repl--frontend-session-inits)
-    (dolist (view inits)
-      (agent-repl--frontend-apply-session-init view))
-    ;; Replayed daemon-owned creation jobs materialize before their ACK.  The
-    ;; handlers are defined later in load order by workspace-create-client.el;
-    ;; snapshots arrive only after the full module has loaded and connected.
-    (dolist (item available)
-      (agent-repl--workspace-create-handle-available item))
-    ;; Apply render state only AFTER WorkspaceAvailable has established the
-    ;; local perspective/bookkeeping owner for a newly-created path.
-    (dolist (ws-state workspaces)
-      (agent-repl--frontend-apply-workspace-state ws-state))
-    (dolist (item host-actions)
-      (agent-repl--workspace-create-handle-host-action item))
-    (when daemon
-      (agent-repl--frontend-apply-daemon-view daemon))
-    (agent-repl--log nil
-                     "frontend-apply-snapshot: applied %d workspace state(s), %d session(s), %d init(s), %d workspace-available, %d host-action(s); ignored %d webapp-only catalog(s)"
-                     (length workspaces) (length sessions) (length inits)
-                     (length available) (length host-actions)
-                     (length catalogs))
+    (let ((failures 0))
+      (setq failures
+            (+ failures
+               (agent-repl--frontend-apply-snapshot-items
+                "session-view" sessions '(:sessionId :workspace)
+                #'agent-repl--frontend-apply-session-view)))
+      ;; Rebuild the retained-SystemInit roster wholesale too (same rationale):
+      ;; the slash-command menu source must not carry a bounced daemon's stale
+      ;; session inits.
+      (clrhash agent-repl--frontend-session-inits)
+      (setq failures
+            (+ failures
+               (agent-repl--frontend-apply-snapshot-items
+                "session-init" inits '(:sessionId)
+                #'agent-repl--frontend-apply-session-init)))
+      ;; Identity/readiness lands BEFORE any item that can fail on side
+      ;; effects: `agent-repl--frontend-daemon-ready-p' reads the DaemonView,
+      ;; and nothing about the daemon's own identity depends on a workspace,
+      ;; an init, or a host action having applied cleanly.
+      (when daemon
+        (agent-repl--frontend-apply-daemon-view daemon))
+      ;; Replayed daemon-owned creation jobs materialize before their ACK.  The
+      ;; handlers are defined later in load order by workspace-create-client.el;
+      ;; snapshots arrive only after the full module has loaded and connected.
+      (setq failures
+            (+ failures
+               (agent-repl--frontend-apply-snapshot-items
+                "workspace-available" available '(:jobId :finalName :worktreePath)
+                #'agent-repl--workspace-create-handle-available)))
+      ;; Apply render state only AFTER WorkspaceAvailable has established the
+      ;; local perspective/bookkeeping owner for a newly-created path.
+      (setq failures
+            (+ failures
+               (agent-repl--frontend-apply-snapshot-items
+                "workspace-state" workspaces '(:workspace :sessionId :state)
+                #'agent-repl--frontend-apply-workspace-state)))
+      ;; Last, and deliberately after the DaemonView: the host-action executor
+      ;; re-signals handler failures by contract, and a retained action for a
+      ;; dir with no live workspace must not cost the resync its readiness.
+      (setq failures
+            (+ failures
+               (agent-repl--frontend-apply-snapshot-items
+                "host-action" host-actions '(:actionId)
+                #'agent-repl--workspace-create-handle-host-action)))
+      (agent-repl--log nil
+                       "frontend-apply-snapshot: applied %d workspace state(s), %d session(s), %d init(s), %d workspace-available, %d host-action(s); ignored %d webapp-only catalog(s); %d item failure(s)"
+                       (length workspaces) (length sessions) (length inits)
+                       (length available) (length host-actions)
+                       (length catalogs) failures)
+      (when (> failures 0)
+        ;; Loud on BOTH channels: a contained failure that only reached the log
+        ;; would be a silent fallback from the user's seat.
+        (agent-repl--log nil
+                         "frontend-apply-snapshot: %d item(s) FAILED during snapshot resync — see the per-item lines above; resync completed for the rest"
+                         failures)
+        (message "agent-repl: %d item(s) FAILED during snapshot resync (see the agent-repl log)"
+                 failures)))
     (length workspaces)))
 
 ;;;; ---- DegradedNotice: RETIRED (F4, wire removed in step 11) -----------
