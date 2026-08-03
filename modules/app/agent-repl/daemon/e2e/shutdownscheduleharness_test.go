@@ -168,7 +168,7 @@ func (w *shutdownWorld) boot(t *testing.T) *shutdownBoot {
 		t.Fatalf("build file diagnostic persister: %v", err)
 	}
 
-	udsSpawn := func(sessionID string, opts server.CreateOpts) (func() error, error) {
+	udsSpawn := func(sessionID string, opts server.CreateOpts) (server.ShimStopFunc, error) {
 		workspace, err := dlog.WorkspaceFromDirectory(opts.CWD)
 		if err != nil {
 			return nil, err
@@ -205,10 +205,10 @@ func (w *shutdownWorld) boot(t *testing.T) *shutdownBoot {
 			close(tracked.exited)
 		}()
 		t.Cleanup(func() {
-			_ = proc.Terminate()
+			_ = proc.Terminate(shim.Stop{Initiator: "e2e_harness_cleanup", Reason: "test teardown"})
 			<-tracked.exited
 		})
-		return func() error { return proc.Terminate() }, nil
+		return func(by server.ShimStop) error { return proc.Terminate(by) }, nil
 	}
 
 	seqStore := server.NewRegistrySeqStore(reg, t.Logf)
