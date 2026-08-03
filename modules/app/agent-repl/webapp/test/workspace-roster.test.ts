@@ -40,6 +40,7 @@ function roster(overrides: Record<string, unknown> = {}): unknown {
   return {
     workspaceRoster: {
       revision: "7",
+      bootId: "boot-a",
       repository: { sections: [{ repoKey: "repo", folded: false, rows: [ROW] }] },
       currentDir: "/worktrees/alpha",
       ...overrides,
@@ -71,6 +72,30 @@ describe("decodeFrontendFrame — workspaceRoster arm", () => {
 
     // Assert.
     expect(value.revision).toBe(9007);
+  });
+
+  it("carries the publisher epoch the revision is scoped by", () => {
+    // Arrange + Act.
+    const value = rosterOf(roster({ bootId: "boot-xyz" }));
+
+    // Assert.
+    expect(value.bootId).toBe("boot-xyz");
+  });
+
+  it("rejects a roster whose bootId is empty", () => {
+    // Arrange + Act + Assert — the epoch key cannot be defaulted, since "" would
+    // silently merge two publishers' independent revision counters.
+    expect(() => decode(roster({ bootId: "" }))).toThrow(/bootId is empty/);
+  });
+
+  it("rejects a roster that omits bootId entirely", () => {
+    // Arrange + Act + Assert.
+    expect(() => decode(roster({ bootId: undefined }))).toThrow(/bootId is empty/);
+  });
+
+  it("rejects a bootId that is not a string", () => {
+    // Arrange + Act + Assert.
+    expect(() => decode(roster({ bootId: 7 }))).toThrow(/bootId must be a string/);
   });
 
   it("carries the repository grouping as the set view arm", () => {

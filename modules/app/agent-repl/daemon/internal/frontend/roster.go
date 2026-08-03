@@ -19,11 +19,16 @@ import (
 // is therefore never scope-filtered (see scopeFrame) — a session-scoped webview
 // renders the same sidebar as the Emacs host.
 //
-// Retention is IN-MEMORY ONLY and deliberately so. The roster's revision is
-// monotonic per-Emacs-BOOT, so a roster that outlived the Emacs that authored
-// it would carry a revision a restarted publisher could no longer beat, and
-// every publication until the counter caught up would be refused. A restarted
-// daemon therefore has no roster until Emacs republishes on reconnect.
+// Retention is IN-MEMORY ONLY. A restarted daemon has no roster until Emacs
+// republishes on reconnect.
+//
+// The monotonicity floor is keyed by PUBLISHER EPOCH — the roster's boot_id,
+// minted once per Emacs boot — not held globally. Revisions are monotonic only
+// WITHIN one boot_id; a publish carrying a different boot_id opens a new epoch
+// and is accepted whatever its revision, resetting the floor to it. That is
+// what lets a fresh Emacs publish successfully against a surviving daemon still
+// retaining a high revision from the previous boot, and it is why no resync
+// path exists: there is no retained state a new publisher must first learn.
 
 // RosterRetainer accepts a roster publication, retains it if it supersedes what
 // is already held, and fans it out. It is the narrow contract the command
@@ -37,11 +42,15 @@ type RosterRetainer interface {
 
 // validateRoster rejects a roster no client could render.
 //
-// Three things make a roster unrenderable, and all three are refused loudly
+// Four things make a roster unrenderable, and all four are refused loudly
 // rather than normalized into something plausible:
 //
 //   - A non-positive revision. Revisions are monotonic and start at 1, so 0 is
 //     the zero value of an unset field, not a legitimate first publication.
+//   - An empty boot_id. boot_id is the epoch key the revision floor is keyed
+//     by, so a publisher that will not identify its epoch cannot be told apart
+//     from one whose epoch ended. Refused rather than silently folded into
+//     whatever epoch happens to be retained.
 //   - An unset `view` oneof. The SET ARM IS THE GROUPING; with none set there
 //     is no grouping and no rows, which is not the same thing as an empty
 //     roster (an empty repository view is a perfectly good empty roster).
@@ -54,6 +63,9 @@ func validateRoster(roster *frontendv1.WorkspaceRoster) error {
 	}
 	if roster.GetRevision() <= 0 {
 		return fmt.Errorf("frontend: workspace roster revision must be positive, got %d", roster.GetRevision())
+	}
+	if roster.GetBootId() == "" {
+		return fmt.Errorf("frontend: workspace roster revision=%d has an empty boot_id; a publisher must identify its epoch", roster.GetRevision())
 	}
 	if roster.GetView() == nil {
 		return fmt.Errorf("frontend: workspace roster revision=%d has no view set; exactly one of repository/task is required", roster.GetRevision())
@@ -106,31 +118,51 @@ func validateRosterRows(revision int64, where string, rows []*frontendv1.RosterR
 //   - Two concurrent publications are serialized, so the roster that survives
 //     retention is also the roster that was broadcast last.
 //
-// A revision that does not advance is REFUSED, naming both revisions. Delivery
-// is not idempotent-by-revision downstream, so silently dropping a stale
+// The monotonicity check is SCOPED TO THE PUBLISHER EPOCH. Within one boot_id a
+// revision that does not advance is REFUSED, naming both revisions: delivery is
+// not idempotent-by-revision downstream, so silently dropping a stale
 // publication would leave the publisher believing a roster it authored is on
 // screen when a newer one is.
+//
+// A publish whose boot_id DIFFERS from the retained roster's is a different
+// publisher epoch, and its revision is not comparable to the retained one at
+// all — the two counters were minted by different Emacs boots. It is accepted
+// unconditionally, resetting the floor, and the epoch change is logged. Without
+// this a fresh Emacs booting against a surviving daemon would be refused
+// forever, with no honest resync available to it (a nack carries no retained
+// revision to resync against).
 func (s *Server) PublishWorkspaceRoster(roster *frontendv1.WorkspaceRoster) error {
 	if err := validateRoster(roster); err != nil {
 		s.logf("frontend: workspace roster rejected: %v", err)
 		return err
 	}
 	s.mu.Lock()
-	if held := s.roster; held != nil && roster.GetRevision() <= held.GetRevision() {
+	held := s.roster
+	epochChanged := held != nil && held.GetBootId() != roster.GetBootId()
+	if held != nil && !epochChanged && roster.GetRevision() <= held.GetRevision() {
 		heldRevision := held.GetRevision()
 		s.mu.Unlock()
-		err := fmt.Errorf("frontend: workspace roster revision=%d does not supersede the retained revision=%d; refusing",
-			roster.GetRevision(), heldRevision)
+		err := fmt.Errorf("frontend: workspace roster revision=%d does not supersede the retained revision=%d for boot_id=%q; refusing",
+			roster.GetRevision(), heldRevision, roster.GetBootId())
 		s.logf("frontend: workspace roster rejected: %v", err)
 		return err
+	}
+	var heldBootID string
+	var heldRevision int64
+	if epochChanged {
+		heldBootID, heldRevision = held.GetBootId(), held.GetRevision()
 	}
 	s.roster = roster
 	slow := s.deliverLocked(WorkspaceRosterFrame(roster), func(*client) bool { return true })
 	clients := len(s.clients)
 	s.mu.Unlock()
 	s.disconnectAll(slow)
-	s.logVerbosef("frontend: workspace roster retained revision=%d current_dir=%q nav_dir=%q clients=%d",
-		roster.GetRevision(), roster.GetCurrentDir(), roster.GetNavDir(), clients)
+	if epochChanged {
+		s.logf("frontend: workspace roster publisher epoch changed: boot_id=%q revision=%d -> boot_id=%q revision=%d; monotonicity floor reset",
+			heldBootID, heldRevision, roster.GetBootId(), roster.GetRevision())
+	}
+	s.logVerbosef("frontend: workspace roster retained boot_id=%q revision=%d current_dir=%q nav_dir=%q clients=%d",
+		roster.GetBootId(), roster.GetRevision(), roster.GetCurrentDir(), roster.GetNavDir(), clients)
 	return nil
 }
 

@@ -1115,6 +1115,7 @@ describe("the roster frame", () => {
   function frame(over: Partial<RosterFrame> = {}): RosterFrame {
     return {
       revision: 3,
+      bootId: "boot-a",
       view: {
         case: "repository",
         value: { sections: [{ repoKey: "doom", folded: false, label: "doom", rows: [frameRow()] }] },
@@ -1246,6 +1247,7 @@ describe("the roster revision gate", () => {
   function frameAt(revision: number, dir: string): RosterFrame {
     return {
       revision,
+      bootId: "boot-a",
       view: {
         case: "repository",
         value: {
