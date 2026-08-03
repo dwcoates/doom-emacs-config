@@ -16,9 +16,20 @@ import (
 //
 // os.Setenv rather than t.Setenv: t.Setenv is per-test and refuses to coexist
 // with t.Parallel, and this posture must hold for the whole binary.
+//
+// It also captures the operator's REAL home before the first test runs, which
+// is the only moment at which that value is knowable: once any harness has
+// called t.Setenv("HOME", ...), os.UserHomeDir reports the isolated directory
+// and the question "is this path the live daemon's?" can no longer be asked.
+// requireIsolatedHome answers it from this captured value.
 func TestMain(m *testing.M) {
 	if err := os.Setenv(vendorguard.EnvVar, "1"); err != nil {
 		panic("e2e: set " + vendorguard.EnvVar + ": " + err.Error())
 	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		panic("e2e: resolving the real home dir: " + err.Error())
+	}
+	realHome = home
 	os.Exit(m.Run())
 }
