@@ -1537,7 +1537,10 @@ Keys: `:queue' (list of (NORMALIZED-WS . PLIST) entries still to do),
 `:origin' (workspace to switch back to at end), `:awaiting' (ws-name
 the loader is currently waiting on a ready signal for, or nil),
 `:loaded' (successfully established + ready/awaiting), `:skipped'
-(dir missing/nil), `:load-error' (establish-workspace signaled),
+(dir missing/nil), `:load-error' (establish-workspace signaled, or the
+per-entry watchdog timed the entry out — see
+`agent-repl--snapshot-load-timeout', which reclassifies the entry out
+of `:loaded' into this counter),
 `:total' (entry count from the file), `:timeout-timer' (the per-entry
 watchdog timer).
 
@@ -1547,9 +1550,12 @@ Non-nil means a load is in flight — concurrent invocations of
 (defcustom agent-repl-snapshot-load-per-entry-timeout 30
   "Per-entry watchdog in seconds for the recursive snapshot loader.
 If the awaited workspace's `agent-repl--on-session-start-event' hasn't
-fired by then, the loader advances to the next entry anyway and logs
-a warning.  Tuned long enough for a first-time claude startup but short
-enough that a wedged workspace doesn't lock the entire load."
+fired by then, `agent-repl--snapshot-load-timeout' faults that one
+workspace — counting it under `:load-error' and surfacing it through
+`agent-repl--error' — and the loader advances to the next entry anyway.
+Readiness is never synthesized for the timed-out workspace.  Tuned long
+enough for a first-time claude startup but short enough that a wedged
+workspace doesn't lock the entire load."
   :type 'number
   :group 'agent-repl)
 
@@ -1639,10 +1645,13 @@ step is logged but never propagated — finish must remain robust."
 (defun agent-repl--snapshot-load-on-loaded (ws &optional _marker)
   "Ws-fully-loaded hook handler: advance the snapshot load queue iff WS is awaited.
 Called from `agent-repl-ws-fully-loaded-functions' with the ws name and
-an optional MARKER (e.g. `:timed-out' when the watchdog synthesized the
-event).  Loader doesn't distinguish the marker — once a ws is loaded
-or timed out, it advances.  Idempotent: the `:awaiting' equality guard
-makes second fires for the same ws no-ops."
+an optional MARKER supplied by whoever emitted the event.  The loader
+doesn't distinguish the marker — a fully-loaded event for the awaited
+ws advances the queue.  The watchdog never routes through here: it
+emits no event and advances via `agent-repl--snapshot-load-timeout'
+instead, so a timed-out ws is never mistaken for a loaded one.
+Idempotent: the `:awaiting' equality guard makes second fires for the
+same ws no-ops."
   (let ((state agent-repl--snapshot-load-state))
     (if (and state (equal ws (plist-get state :awaiting)))
         (progn
@@ -1656,19 +1665,52 @@ makes second fires for the same ws no-ops."
                         (if state "active" "nil")))))
 
 (defun agent-repl--snapshot-load-timeout (ws)
-  "Abort snapshot restoration when WS never becomes genuinely ready.
-The former watchdog synthesized `:agent-ready' and a fully-loaded hook,
-allowing a broken backend to render as if its session shim existed.  A
-timeout is instead an invariant failure: clean up the recursive loader and
-surface the fault; do not mutate either readiness latch."
+  "Fault WS and advance the snapshot load when WS never becomes genuinely ready.
+A missing barrier is a fault for WS alone — it is not a reason to strand
+every entry behind it in the queue.  The watchdog therefore scopes the
+failure to WS and keeps the loader moving:
+
+- it never synthesizes readiness.  An older watchdog set `:agent-ready'
+  and ran the fully-loaded hook, letting a broken backend render as if
+  its session shim existed; neither readiness latch is touched here, and
+  no fully-loaded event is emitted, so WS keeps whatever unverified state
+  it actually has,
+- the entry is reclassified from `:loaded' (optimistically counted when
+  `--establish-workspace' returned) to `:load-error', so the END line and
+  the iteration counter both describe what really happened,
+- WS is untagged from `agent-repl--restored-workspaces' so a later
+  `agent-repl-nuke-restored-workspaces' sweep of the restore batch leaves
+  the faulted workspace standing for the user to inspect,
+- the half-established persp/tab is deliberately left in place rather than
+  torn down.  `--establish-workspace' already returned, so the tab, its
+  buffers and its frontend boot are real; the barrier is the only thing
+  missing, and it may still arrive.  A visible, faulted workspace is what
+  the user needs to see, and tearing it down would also destroy the
+  `:origin' window-configuration bookkeeping finish relies on,
+- `--snapshot-load-step' then runs the remaining queue, and only after it
+  returns is the fault raised through `agent-repl--error'.  The error is
+  last precisely because it signals: raising it first would unwind the
+  timer callback before the queue advanced, which is the abort this
+  function exists to avoid.  `agent-repl--error' writes the logfile line
+  before signalling, so the fault is durable either way."
   (let ((state agent-repl--snapshot-load-state))
     (when (and state (equal ws (plist-get state :awaiting)))
-      (agent-repl--log ws "snapshot-load: TIMEOUT awaiting ws=%s — aborting without synthetic readiness" ws)
+      (agent-repl--log ws "snapshot-load: TIMEOUT awaiting ws=%s — faulting ws and advancing without synthetic readiness" ws)
       (setq agent-repl--snapshot-load-state
             (plist-put agent-repl--snapshot-load-state :timeout-timer nil))
-      (agent-repl--snapshot-load-finish)
+      (setq agent-repl--snapshot-load-state
+            (plist-put agent-repl--snapshot-load-state :awaiting nil))
+      (setq agent-repl--snapshot-load-state
+            (plist-put agent-repl--snapshot-load-state :loaded
+                       (max 0 (1- (plist-get agent-repl--snapshot-load-state :loaded)))))
+      (setq agent-repl--snapshot-load-state
+            (plist-put agent-repl--snapshot-load-state :load-error
+                       (1+ (or (plist-get agent-repl--snapshot-load-state :load-error) 0))))
+      (setq agent-repl--restored-workspaces
+            (delete ws agent-repl--restored-workspaces))
+      (agent-repl--snapshot-load-step)
       (agent-repl--error ws
-                         "snapshot-load timeout awaiting ws=%s; restore aborted without rendering an unverified session"
+                         "snapshot-load timeout awaiting ws=%s; workspace left faulted, restore continued with the remaining entries"
                          ws))))
 
 (defun agent-repl--snapshot-load-step ()
@@ -1830,9 +1872,12 @@ entry, fully sets up the workspace via `agent-repl--establish-workspace'
 Recursive queue driver: establishes one entry, then yields to the main
 loop until that workspace's `agent-repl-ws-fully-loaded-functions'
 hook fires (i.e., both agent-side ready and emacs-side switch-settle
-have completed), then advances.  Per-entry watchdog
-\(`agent-repl-snapshot-load-per-entry-timeout') aborts on a missing
-barrier; it never synthesizes readiness for an unverified session.
+have completed), then advances.  On a missing barrier the per-entry
+watchdog \(`agent-repl-snapshot-load-per-entry-timeout') faults that
+single workspace and advances to the next entry, so one wedged
+workspace can no longer strand the entries behind it; it never
+synthesizes readiness for an unverified session.  Only loader-state
+corruption (the `--snapshot-load-step' error path) aborts the load.
 
 Returns to the workspace that was active when the load began.
 
