@@ -2,6 +2,7 @@ package sessioncontroller
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -111,6 +112,14 @@ func (f *fakeHoldStore) HeldPrompts(workspace string) ([]statedb.HeldPrompt, err
 		}
 	}
 	return out, nil
+}
+
+// failWith makes every subsequent RecordHeldPrompt fail, for the durable-park
+// failure branch.
+func (f *fakeHoldStore) failWith(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.err = err
 }
 
 func (f *fakeHoldStore) count() int {
@@ -223,6 +232,58 @@ func TestAParkedPromptIsNeverClassified(t *testing.T) {
 	// Assert.
 	if got := cls.requests(); len(got) != 0 {
 		t.Fatalf("classifier ran %d time(s) on a drain-held entry, want 0", len(got))
+	}
+}
+
+func TestAPromptWhoseDurableParkFailsIsRefusedToTheSubmitter(t *testing.T) {
+	// The submit ack used to claim success while the prompt was parked in
+	// memory only, so the bounce it was waiting for ate it and nobody was told.
+	// Arrange.
+	h := newLeaseHarness(t)
+	h.lease.hold("sd_1")
+	h.store.failWith(errors.New("disk is gone"))
+
+	// Act.
+	err := h.submit("hello")
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "disk is gone") {
+		t.Fatalf("submit under an unrecordable park = %v, want a refusal carrying the durable failure", err)
+	}
+}
+
+func TestAPromptWhoseDurableParkFailsIsNotParkedInMemory(t *testing.T) {
+	// Arrange.
+	h := newLeaseHarness(t)
+	h.lease.hold("sd_1")
+	h.store.failWith(errors.New("disk is gone"))
+
+	// Act.
+	if err := h.submit("hello"); err == nil {
+		t.Fatal("submit under an unrecordable park succeeded, want a refusal")
+	}
+
+	// Assert — a refused submit leaves nothing behind to be lost.
+	if got := h.entries(); len(got) != 0 {
+		t.Fatalf("queue = %d entries after a refused park, want none kept in memory", len(got))
+	}
+}
+
+func TestAPromptWhoseDurableParkFailsIsNeverForwarded(t *testing.T) {
+	// Arrange.
+	h := newLeaseHarness(t)
+	h.lease.hold("sd_1")
+	h.store.failWith(errors.New("disk is gone"))
+
+	// Act.
+	if err := h.submit("hello"); err == nil {
+		t.Fatal("submit under an unrecordable park succeeded, want a refusal")
+	}
+
+	// Assert — refusing must not fall back to running the prompt under a lease
+	// whose whole point is that no new turn may start.
+	if got := h.client.promptTexts(); len(got) != 0 {
+		t.Fatalf("prompts forwarded = %v, want none — the lease still stands", got)
 	}
 }
 

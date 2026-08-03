@@ -797,7 +797,16 @@ func (m *Manager) submitPromptAs(ctx context.Context, workspace, requestID, text
 	leaseScheduleID, _ := m.heldSchedule()
 
 	m.mu.Lock()
-	entry, queued := m.queueSubmitLocked(d, requestID, text, permissionMode, leaseScheduleID)
+	entry, queued, err := m.queueSubmitLocked(d, requestID, text, permissionMode, leaseScheduleID)
+	if err != nil {
+		// A REFUSED submit is refused whole: nothing was queued, nothing is
+		// forwarded, and the caller's ack carries the reason. The only refusal
+		// reachable here is a drain park the daemon could not make durable, and
+		// keeping the prompt anyway would be the daemon promising a delivery it
+		// has no way to make.
+		m.mu.Unlock()
+		return err
+	}
 	if !queued {
 		m.mu.Unlock()
 		// The reading of the prompt, the receipt, and the forward all happen
