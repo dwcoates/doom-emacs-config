@@ -93,6 +93,7 @@ import {
   type RuntimeFault,
   type SessionInitView,
   type SessionView,
+  type ShutdownScheduleView,
   type TaskCatalog,
   type TaskEntry,
   type TypingDelta,
@@ -404,6 +405,14 @@ export type AdapterEffect =
    * feed and the footer render from.
    */
   | { kind: "workspace-roster"; value: WorkspaceRoster }
+  /**
+   * The daemon-global scheduled-shutdown lease. Carried as the DECODED VIEW,
+   * not as a pre-flattened "draining or not" boolean: `idle` is a real
+   * broadcast value the store has to adopt (it is what clears the banner), and
+   * collapsing it here would make an absent frame and an idle one look alike
+   * one layer further down.
+   */
+  | { kind: "shutdown-schedule"; value: ShutdownScheduleView }
   | { kind: "ignored"; shape: string };
 
 export type AdapterLogLevel = "debug" | "info" | "warn" | "error";
@@ -489,6 +498,13 @@ export class StateAdapter {
           ...s.inits.map((si) => this.sessionInitEffect(si)),
           ...s.queues.map((q) => this.queueEffect(q)),
           ...s.progress.map((p) => this.progressEffect(p)),
+          // SEEDED ONLY WHEN THE SNAPSHOT CARRIES IT. A daemon that does not
+          // know the lease at all sends no field, and that is the absence of
+          // information — synthesizing an `idle` effect here would let a
+          // pre-feature snapshot silently clear a banner nothing retracted.
+          ...(s.shutdownSchedule === undefined
+            ? []
+            : [this.shutdownScheduleEffect(s.shutdownSchedule)]),
         ];
       }
       case "workspaceState":
@@ -526,6 +542,8 @@ export class StateAdapter {
         return [this.ignore("hostAction")];
       case "workspaceRoster":
         return [this.rosterEffect(frame.frame.value)];
+      case "shutdownSchedule":
+        return [this.shutdownScheduleEffect(frame.frame.value)];
       default: {
         // Exhaustiveness guard: a new frame variant is a compile error here,
         // never a silent skip.
@@ -795,6 +813,23 @@ export class StateAdapter {
         `current_dir=${roster.currentDir || "none"} nav_dir=${roster.navDir || "none"}`,
     );
     return { kind: "workspace-roster", value: roster };
+  }
+
+  /**
+   * The drain lease, passed through structurally. The daemon resolved which
+   * workspaces are holding it and why; the adapter re-derives none of that.
+   */
+  private shutdownScheduleEffect(view: ShutdownScheduleView): AdapterEffect {
+    const draining = view.state.case === "draining" ? view.state.value : null;
+    this.log(
+      "debug",
+      `state-adapter: shutdown schedule state=${view.state.case} ` +
+        `schedule=${draining?.scheduleId ?? "none"} ` +
+        `holds=${draining?.holds.length ?? 0} ` +
+        `stop_shims=${draining?.stopShims ?? false} ` +
+        `cause=${draining?.cause ?? "none"}`,
+    );
+    return { kind: "shutdown-schedule", value: view };
   }
 
   // --- explicit ignore path -------------------------------------------------

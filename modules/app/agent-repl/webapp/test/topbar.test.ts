@@ -105,6 +105,7 @@ function storeState(over: Partial<StoreState> = {}): StoreState {
     workspaceStateAtMs: 0,
     mergeLeaseHeld: false,
     mergeStatus: null,
+    shutdownSchedule: null,
     workspaceStateCauseSeq: 0,
     ...over,
   };

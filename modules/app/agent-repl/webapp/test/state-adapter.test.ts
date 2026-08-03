@@ -1584,3 +1584,64 @@ describe("userTurnReceipt (ingest-time arrival receipt)", () => {
     expect(receipt?.requestId).toBe("req-1");
   });
 });
+
+describe("shutdown schedule", () => {
+  const DRAINING = {
+    scheduleId: "sched-1",
+    scheduledAtMs: "1700000000000",
+    cause: "manual restart",
+    stopShims: false,
+    holds: [{ workspace: "/w/app", sessionId: "s1", turn: { turnId: "t-1" } }],
+  };
+
+  it("maps a draining broadcast to a lease effect", () => {
+    // Arrange / Act
+    const effects = applyOne({ shutdownSchedule: { draining: DRAINING } });
+    // Assert
+    expect(effects).toEqual([
+      { kind: "shutdown-schedule", value: { state: { case: "draining", value: expect.anything() } } },
+    ]);
+  });
+
+  it("maps an idle broadcast to a lease effect, since idle clears the banner", () => {
+    // Arrange / Act
+    const effects = applyOne({ shutdownSchedule: { idle: {} } });
+    // Assert
+    expect(effects).toEqual([
+      { kind: "shutdown-schedule", value: { state: { case: "idle", value: {} } } },
+    ]);
+  });
+
+  it("seeds the lease from a connect snapshot", () => {
+    // Arrange — a client joining mid-drain must see it without an edge.
+    const effects = applyOne({
+      snapshot: { workspaces: [], shutdownSchedule: { draining: DRAINING } },
+    });
+    // Act
+    const lease = effects.filter((e) => e.kind === "shutdown-schedule");
+    // Assert
+    expect(lease).toHaveLength(1);
+  });
+
+  it("emits NO lease effect for a snapshot that does not carry the lease", () => {
+    // Arrange — absence is the absence of information; synthesizing an idle
+    // effect here would let a pre-feature snapshot clear a live banner.
+    const effects = applyOne({ snapshot: { workspaces: [] } });
+    // Act
+    const lease = effects.filter((e) => e.kind === "shutdown-schedule");
+    // Assert
+    expect(lease).toEqual([]);
+  });
+
+  it("logs the adopted lease with its schedule and hold count", () => {
+    // Arrange
+    const lines: string[] = [];
+    const adapter = new StateAdapter((_level: AdapterLogLevel, message: string) => {
+      lines.push(message);
+    });
+    // Act
+    adapter.apply(frame({ shutdownSchedule: { draining: DRAINING } }));
+    // Assert
+    expect(lines.join("\n")).toContain("shutdown schedule state=draining schedule=sched-1 holds=1");
+  });
+});
