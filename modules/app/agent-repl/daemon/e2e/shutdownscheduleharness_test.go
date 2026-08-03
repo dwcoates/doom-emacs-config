@@ -36,6 +36,7 @@
 package e2e
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -130,15 +131,57 @@ type shutdownBoot struct {
 	shimsMu sync.Mutex
 	shims   []*trackedShim
 
+	// recheck fires the boot sweeper's one re-check pass. It is INJECTED for
+	// the same reason bootsweep.go injects it: the pass must be an event the
+	// test drives, never a timer the test waits out.
+	recheck chan time.Time
+
+	// shimConnected reports whether a session's shim has a PARKED CONNECTION on
+	// this boot's listener — a shim that outlived the previous daemon and has
+	// redialled this one, but has not been claimed by anything yet. It is the
+	// boot sweeper's own evidence (server.BootSweeper.Connected), so a test can
+	// fire the re-check on the observed fact the pass exists to act on rather
+	// than on where it happens to sit in the test.
+	shimConnected func(sessionID string) (bool, error)
+
 	stop     func()
 	stopOnce sync.Once
+}
+
+// sweep fires this boot's boot-sweeper re-check pass. The channel is
+// buffered(1), so the send is safe even when the sweeper is not waiting on it.
+func (b *shutdownBoot) sweepRecheck() { b.recheck <- time.Now() }
+
+// sweepRecheckWhenParked fires the re-check pass only once the session's shim
+// is OBSERVED parked on this boot's listener.
+//
+// The gate is the point. The re-check exists to claim shims that redialled
+// after the first pass ran, so firing it before the redial lands is firing it at
+// nothing — and a test that "worked" that way was relying on the redial
+// happening to beat the send, which is a race, not a sequence. Waiting on the
+// listener's own answer is the same evidence the sweeper acts on.
+func (b *shutdownBoot) sweepRecheckWhenParked(t *testing.T, sessionID string) {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		parked, err := b.shimConnected(sessionID)
+		if err != nil {
+			t.Fatalf("parked-connection probe for session %s: %v", sessionID, err)
+		}
+		if parked {
+			b.sweepRecheck()
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("session %s never parked a connection on the successor's listener, so the boot sweep's re-check would have had nothing to claim", sessionID)
 }
 
 // boot stands a complete daemon up over the world's durable state. Calling it
 // twice (with a bounce in between) is the durability scenario.
 func (w *shutdownWorld) boot(t *testing.T) *shutdownBoot {
 	t.Helper()
-	b := &shutdownBoot{world: w, executed: make(chan bool, 4)}
+	b := &shutdownBoot{world: w, executed: make(chan bool, 4), recheck: make(chan time.Time, 1)}
 
 	stateStore, err := statedb.Open(filepath.Join(w.stateDir, "state.db"))
 	if err != nil {
@@ -168,7 +211,7 @@ func (w *shutdownWorld) boot(t *testing.T) *shutdownBoot {
 		t.Fatalf("build file diagnostic persister: %v", err)
 	}
 
-	udsSpawn := func(sessionID string, opts server.CreateOpts) (func() error, error) {
+	udsSpawn := func(sessionID string, opts server.CreateOpts) (server.ShimStopFunc, error) {
 		workspace, err := dlog.WorkspaceFromDirectory(opts.CWD)
 		if err != nil {
 			return nil, err
@@ -205,16 +248,28 @@ func (w *shutdownWorld) boot(t *testing.T) *shutdownBoot {
 			close(tracked.exited)
 		}()
 		t.Cleanup(func() {
-			_ = proc.Terminate()
+			_ = proc.Terminate(shim.Stop{Initiator: "e2e_harness_cleanup", Reason: "test teardown"})
 			<-tracked.exited
 		})
-		return func() error { return proc.Terminate() }, nil
+		return func(by server.ShimStop) error { return proc.Terminate(by) }, nil
 	}
 
 	seqStore := server.NewRegistrySeqStore(reg, t.Logf)
 	modelCatalogs := server.NewSessionModelCatalogs()
 	registrar := &server.RegistryRegistrar{Reg: reg, Logf: t.Logf, ModelCatalogs: modelCatalogs}
 	progressMgr := progress.New(progress.Options{Logf: t.Logf})
+	// The drain lease's durable record, opened over the SAME state store the
+	// world owns — so a bounce reads back the schedule its predecessor wrote
+	// rather than starting idle.
+	//
+	// It is opened BEFORE the controller because the controller needs it too:
+	// the parking ledger behind a drain-held prompt is what makes the THIRD
+	// exit — delivery after the bounce — durable, and main.go wires it in the
+	// same place for the same reason.
+	shutdownSchedules, err := statedb.NewShutdownSchedules(stateStore)
+	if err != nil {
+		t.Fatalf("open shutdown schedule store: %v", err)
+	}
 	controller, err := sessioncontroller.New(sessioncontroller.Config{
 		Push:              forwarder,
 		SSM:               ssmMgr,
@@ -225,6 +280,7 @@ func (w *shutdownWorld) boot(t *testing.T) *shutdownBoot {
 		FileDiagnostics:   fileDiagnostics,
 		SeqStore:          seqStore,
 		ClearCompactStore: seqStore,
+		ShutdownHolds:     shutdownSchedules,
 		PermissionModes:   server.NewRegistryModeStore(reg),
 		Registrar:         registrar,
 		ModelCatalogs:     registrar,
@@ -254,41 +310,82 @@ func (w *shutdownWorld) boot(t *testing.T) *shutdownBoot {
 	if err != nil {
 		t.Fatalf("open geometry: %v", err)
 	}
-
-	// srv is assigned below and read only from inside the hook, which cannot
-	// fire before a frontend connection exists — i.e. long after the assignment.
-	var srv *server.Server
+	// THE SHUTDOWN REQUEST IS A CHANNEL, exactly as main.go's is, and for the
+	// reason main.go's is: the hook is called from wherever a drain completes —
+	// including from INSIDE Restore, before `srv` has been assigned — so a
+	// closure that dereferences srv races its own assignment. A buffered(1)
+	// channel plus a sync.Once sender carries the one stop_shims decision, and
+	// the consumer that acts on it does not exist until srv does.
+	shutdownReq := make(chan bool, 1)
+	var shutdownOnce sync.Once
 	requestShutdown := func(stopShims bool) {
-		srv.ShutdownAll(stopShims)
-		b.executed <- stopShims
+		shutdownOnce.Do(func() { shutdownReq <- stopShims; close(shutdownReq) })
 	}
 
 	agentShim, err := server.WireAgentShim(server.AgentShimConfig{
-		Resumes:           &server.ConversationResolver{Reg: reg, Logf: t.Logf},
-		SSM:               ssmMgr,
-		Progress:          progressMgr,
-		Prompts:           controller,
-		Turns:             controller,
-		Health:            controller,
-		Lifecycle:         &server.WorkspaceOpener{Reg: reg, Ensurer: controller, Logf: t.Logf},
-		SessionDeaths:     server.RegistrySessionDeaths{Reg: reg},
-		Resyncer:          controller,
-		Catalogs:          controller,
+		Resumes:       &server.ConversationResolver{Reg: reg, Logf: t.Logf},
+		SSM:           ssmMgr,
+		Progress:      progressMgr,
+		Prompts:       controller,
+		Turns:         controller,
+		Health:        controller,
+		Lifecycle:     &server.WorkspaceOpener{Reg: reg, Ensurer: controller, Logf: t.Logf},
+		SessionDeaths: server.RegistrySessionDeaths{Reg: reg},
+		Resyncer:      controller,
+		Catalogs:      controller,
+		// The registry-backed SessionView source main.go wires, so a connect
+		// snapshot taken mid-drain lists the registry's sessions rather than
+		// nothing at all.
+		Sessions: server.RegistrySessions{Reg: reg, Controller: controller, ModelCatalogs: modelCatalogs, Logf: t.Logf},
+		// The queue backend, and therefore the force and cancel EXITS a parked
+		// prompt has. Without it the daemon refuses to construct at all: a lease
+		// that can park prompts it cannot release is not shippable.
+		Queues:            controller,
 		SessionCommands:   binding,
 		WorkspaceCreation: newEmptyWorkspaceCreation(),
 		RequestShutdown:   requestShutdown,
-		MergeLease:        mergeLease,
-		MergeQueue:        mergeQueue,
-		MergeGeometry:     geometryStore,
-		Logf:              t.Logf,
-		LogVerbosef:       t.Logf,
+		// The scheduled-shutdown drain lease: its durable record, the fleet it
+		// derives its holds from (the controller satisfies DrainHoldSource), and
+		// the boot evidence a RESTORED lease seeds its unresolved set from —
+		// exactly as main.go wires them. Without these the daemon nacks every
+		// ScheduleShutdownCmd as unsupported.
+		ShutdownSchedules: shutdownSchedules,
+		DrainHolds:        controller,
+		DrainEvidence: server.RegistryDrainEvidence{
+			Reg:       reg,
+			Connected: shimListener.Connected,
+			Held:      sessionlock.Held,
+		},
+		MergeLease:    mergeLease,
+		MergeQueue:    mergeQueue,
+		MergeGeometry: geometryStore,
+		Logf:          t.Logf,
+		LogVerbosef:   t.Logf,
 	})
 	if err != nil {
 		t.Fatalf("WireAgentShim: %v", err)
 	}
 	forwarder.SetTarget(agentShim.Server)
+	// A schedule this boot's PREDECESSOR took and did not finish draining is
+	// re-taken here, before any client connects — the durability half of the
+	// lease contract, done exactly once at boot, as main.go does it.
+	if agentShim.ShutdownScheduler != nil {
+		if rerr := agentShim.ShutdownScheduler.Restore(); rerr != nil {
+			t.Fatalf("restore the scheduled-shutdown drain lease: %v", rerr)
+		}
+	}
+	// The prompts that lease PARKED are materialized immediately after it and
+	// before any client connects, exactly as main.go does it: their sessions
+	// have not wired yet, and until this runs the connect snapshot carries no
+	// QueueView for them at all.
+	if _, merr := controller.MaterializeShutdownHolds(); merr != nil {
+		t.Fatalf("materialize the drain-lease parked-prompt ledger: %v", merr)
+	}
+	// The listener is kept so a test can observe WHEN a surviving shim has
+	// redialled this boot, instead of inferring it from test phase order.
+	b.shimConnected = shimListener.Connected
 
-	srv = server.New(server.Config{
+	srv := server.New(server.Config{
 		DaemonVersion: "0.1.0-e2e-drain",
 		Registry:      reg,
 		ModelCatalogs: modelCatalogs,
@@ -304,9 +401,43 @@ func (w *shutdownWorld) boot(t *testing.T) *shutdownBoot {
 	mux.HandleFunc("/frontend", agentShim.Server.ServeWS)
 	b.ts = httptest.NewServer(mux)
 
+	// THE SHUTDOWN CONSUMER, started only now that srv exists. A drain that
+	// completed inside Restore has already parked its decision on the buffered
+	// channel; this picks it up and runs the real teardown, and records
+	// stop_shims only AFTER ShutdownAll returns, so a test that has read from
+	// `executed` may assert on shim liveness without racing the teardown.
+	teardown := make(chan struct{})
+	go func() {
+		select {
+		case stopShims, ok := <-shutdownReq:
+			if !ok {
+				return
+			}
+			srv.ShutdownAll(stopShims)
+			b.executed <- stopShims
+		case <-teardown:
+		}
+	}()
+
+	// BOOT RECONCILIATION, as main.go runs it: the shims that outlived the
+	// previous daemon are redialling this one's listener, and without this pass
+	// nothing ever claims them. The re-check is an INJECTED channel, so a test
+	// fires the second pass as an event instead of waiting out a timer.
+	sweepCtx, cancelSweep := context.WithCancel(context.Background())
+	go (&server.BootSweeper{
+		Reg:       reg,
+		Connected: shimListener.Connected,
+		Held:      sessionlock.Held,
+		Ensurer:   controller,
+		Logf:      t.Logf,
+		Recheck:   b.recheck,
+	}).Run(sweepCtx)
+
 	// Teardown in reverse construction order, so nothing writes to a closed
 	// database on its way down.
 	b.stop = func() {
+		cancelSweep()
+		close(teardown)
 		b.ts.Close()
 		_ = agentShim.Close()
 		controller.Close()
@@ -345,16 +476,27 @@ func (b *shutdownBoot) dialFrontend(t *testing.T) *websocket.Conn {
 }
 
 // shimFor returns the tracked shim process this boot spawned for workspace.
+//
+// THE LOOKUP GOES THROUGH THE SAME CANONICALIZER THE SPAWN DID. The spawn path
+// records dlog.WorkspaceFromDirectory(...).Directory, and a test passes the raw
+// t.TempDir() path it created the session with — which on macOS is /var/... while
+// the canonical form is /private/var/.... Comparing those two derivations is a
+// silent no-match dressed up as "this daemon spawned no shim", so the argument is
+// put through the one canonicalizer rather than compared against it.
 func (b *shutdownBoot) shimFor(t *testing.T, workspace string) *trackedShim {
 	t.Helper()
+	canonical, err := dlog.WorkspaceFromDirectory(workspace)
+	if err != nil {
+		t.Fatalf("canonicalize workspace %s: %v", workspace, err)
+	}
 	b.shimsMu.Lock()
 	defer b.shimsMu.Unlock()
 	for _, s := range b.shims {
-		if s.workspace == workspace {
+		if s.workspace == canonical.Directory {
 			return s
 		}
 	}
-	t.Fatalf("this daemon spawned no shim for workspace %s", workspace)
+	t.Fatalf("this daemon spawned no shim for workspace %s (canonical %s)", workspace, canonical.Directory)
 	return nil
 }
 

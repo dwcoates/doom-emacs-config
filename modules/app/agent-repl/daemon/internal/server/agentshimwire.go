@@ -129,6 +129,24 @@ type AgentShimConfig struct {
 	// repositories the daemon never created — and a nil map can therefore never
 	// silently produce a guessed target.
 	MergeGeometry MergeGeometrySource
+	// ShutdownSchedules is the DURABLE half of the scheduled-shutdown drain
+	// lease. Supplying it is what turns the scheduled-shutdown commands on: a
+	// nil store leaves them loud unsupported-capability nacks, because a lease
+	// nothing records could be erased by a crash while every client kept waiting
+	// for a bounce nothing was driving. main always supplies it, opened over the
+	// shared state store; focused harnesses leave it nil.
+	ShutdownSchedules ShutdownScheduleStore
+	// DrainHolds is the session fleet the drain lease binds itself to, and the
+	// authority on which workspaces hold the drain open. Required whenever
+	// ShutdownSchedules is set. Satisfied by *sessioncontroller.Manager.
+	DrainHolds DrainHoldSource
+	// DrainEvidence is the durable evidence a RESTORED lease seeds its
+	// unresolved set from — the registry plus the parked-connection and
+	// session-lock probes. Required whenever ShutdownSchedules is set: without
+	// it a lease restored mid-drain would read the not-yet-wired fleet as
+	// quiescent and bounce over every surviving mid-turn shim. Satisfied by
+	// RegistryDrainEvidence.
+	DrainEvidence DrainEvidenceSource
 	// Logf is the daemon logger. Nil discards.
 	Logf func(string, ...any)
 	// LogVerbosef persists frequent lease-success diagnostics without forcing
@@ -154,6 +172,9 @@ type AgentShim struct {
 	// a workspace command file) through the same command path a frontend merge
 	// takes. main binds it into the workspace-command inbox.
 	MergeDispatch *MergeDispatch
+	// ShutdownScheduler is the daemon-global drain lease, or nil when the
+	// capability is unconfigured. main calls Restore on it once, at boot.
+	ShutdownScheduler *ShutdownScheduler
 
 	cancelPush               func()
 	cancelProgress           func()
@@ -506,16 +527,67 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 		return nil, err
 	}
 
+	snapshots := &ssmSnapshotProvider{
+		ssm: mgr, sessions: cfg.Sessions, inits: cfg.Inits,
+		catalogs: cfg.Catalogs, queues: cfg.Queues, daemon: cfg.SessionCommands,
+		progress: cfg.Progress, workspaceCreation: cfg.WorkspaceCreation, logf: logf,
+	}
 	srv := frontend.New(frontend.Config{
 		Logf:        logf,
 		LogVerbosef: cfg.LogVerbosef,
-		State: &ssmSnapshotProvider{
-			ssm: mgr, sessions: cfg.Sessions, inits: cfg.Inits,
-			catalogs: cfg.Catalogs, queues: cfg.Queues, daemon: cfg.SessionCommands,
-			progress: cfg.Progress, workspaceCreation: cfg.WorkspaceCreation, logf: logf,
-		},
-		Handler: handler,
+		State:       snapshots,
+		Handler:     handler,
 	})
+
+	// THE DRAIN LEASE, constructed last because it needs the frontend server to
+	// broadcast through and the fleet to bind to, and bound into the handler and
+	// the snapshot provider immediately afterwards. Both bindings are set
+	// together: a lease that commands could take but snapshots did not carry
+	// would leave a client that connected mid-drain seeing nothing at all.
+	var scheduler *ShutdownScheduler
+	if cfg.ShutdownSchedules != nil {
+		switch {
+		case cfg.DrainHolds == nil:
+			cancelWorkspaceAvailable()
+			cancelHostActions()
+			return nil, fmt.Errorf("server: a durable shutdown-schedule store was supplied with no DrainHolds source; the lease would have nothing to derive its holds from and would bounce the daemon over a live turn")
+		case cfg.DrainEvidence == nil:
+			cancelWorkspaceAvailable()
+			cancelHostActions()
+			return nil, fmt.Errorf("server: a durable shutdown-schedule store was supplied with no DrainEvidence source; a lease restored mid-drain would judge quiescence against a fleet nothing has wired yet and bounce the daemon over every surviving mid-turn shim")
+		case cfg.Queues == nil:
+			// PARKING WITHOUT EXITS IS UNSHIPPABLE. Taking the lease parks every
+			// submitted prompt, and a parked prompt's only ways out short of the
+			// bounce are the queue's force and cancel commands. A daemon wired to
+			// park prompts it can then neither run nor drop would strand the user
+			// with a chip and no verb, so it is refused at construction rather
+			// than discovered by the first person who types under a drain.
+			cancelWorkspaceAvailable()
+			cancelHostActions()
+			return nil, fmt.Errorf("server: a durable shutdown-schedule store was supplied with no Queues backend; the drain lease would park prompts that no force and no cancel could ever release")
+		}
+		scheduler, err = NewShutdownScheduler(ShutdownSchedulerConfig{
+			Store:     cfg.ShutdownSchedules,
+			Holds:     cfg.DrainHolds,
+			Evidence:  cfg.DrainEvidence,
+			LiveTasks: cfg.Progress,
+			Broadcast: srv.PushShutdownSchedule,
+			// THE SAME graceful teardown the ordinary shutdown command runs.
+			// A parallel path would be a second definition of what an orderly
+			// exit means, and the two would drift.
+			Shutdown: cfg.RequestShutdown,
+			Logf:     logf,
+		})
+		if err != nil {
+			cancelWorkspaceAvailable()
+			cancelHostActions()
+			return nil, err
+		}
+		handler.schedules = scheduler
+		snapshots.shutdownSchedule = scheduler
+	} else {
+		logf("server: scheduled shutdown UNCONFIGURED — no durable schedule store was supplied, so schedule_shutdown and cancel_scheduled_shutdown are loud unsupported-capability nacks")
+	}
 
 	// SSM state changes -> frontend WorkspaceState pushes, AND the progress
 	// resolver's phase mirror (F1). Feeding the progress resolver from the same
@@ -540,6 +612,14 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 			srv.PushWorkspaceState(ws)
 			if err := prog.ObserveWorkspaceState(ws); err != nil {
 				logf("server: progress observe workspace state: %v", err)
+			}
+			// A drain hold's LIVE-TASK half moves on this subscription, and it
+			// is told AFTER the progress resolver has absorbed the state — the
+			// lease reads the count from that resolver, so telling it first
+			// would have it re-derive the holds from the previous count and
+			// then never hear about the new one.
+			if scheduler != nil {
+				scheduler.NoteDrainActivity()
 			}
 		}
 	}()
@@ -567,7 +647,8 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 
 	return &AgentShim{
 		Server: srv, SSM: mgr, Progress: prog, Merge: driver, MergeCoordinator: coordinator, MergeDispatch: mergeDispatch,
-		cancelPush: cancel, cancelProgress: cancelProgress,
+		ShutdownScheduler: scheduler,
+		cancelPush:        cancel, cancelProgress: cancelProgress,
 		cancelWorkspaceAvailable: cancelWorkspaceAvailable, cancelHostActions: cancelHostActions, logf: logf,
 	}, nil
 }

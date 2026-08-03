@@ -65,6 +65,9 @@ type queueHarness struct {
 	reg     *fakeRegistrar
 	applier *fakeApplier
 	prog    *fakeProgress
+	// newestClient reports the most recently constructed fake shim client, so a
+	// harness wired after construction can bind to the one its bring-up made.
+	newestClient func() *fakeClient
 }
 
 // newQueueHarness brings a session up for workspace "ws" and returns the
@@ -84,6 +87,38 @@ func newQueueHarness(t *testing.T, cls *fakeClassifier) *queueHarness {
 //
 // Both may be nil, which is the plain harness.
 func newQueueHarnessWithPusher(t *testing.T, cls *fakeClassifier, wrap func(*fakePusher) Pusher, logf func(string, ...any)) *queueHarness {
+	t.Helper()
+	return newQueueHarnessFull(t, cls, wrap, logf, nil)
+}
+
+// newQueueHarnessWithHolds is newQueueHarness with the drain lease's durable
+// parking ledger wired (shutdownlease_test.go).
+func newQueueHarnessWithHolds(t *testing.T, cls *fakeClassifier, holds ShutdownHoldStore, logf func(string, ...any)) *queueHarness {
+	t.Helper()
+	return newQueueHarnessFull(t, cls, nil, logf, holds)
+}
+
+// newQueueHarnessFull is the one constructor the variants above delegate to, so
+// a new injection point is added in exactly one place.
+func newQueueHarnessFull(t *testing.T, cls *fakeClassifier, wrap func(*fakePusher) Pusher, logf func(string, ...any), holds ShutdownHoldStore) *queueHarness {
+	t.Helper()
+	return buildQueueHarness(t, cls, wrap, logf, holds, true)
+}
+
+// newQueueHarnessUnwired is the harness with the fleet left EMPTY: no session
+// is brought up, so m.byWS has no controller for "ws".
+//
+// It is what the boot materialization needs to be tested against. That path
+// runs before any session has wired, and a harness that had already wired one
+// could only ever exercise the case the defect was NOT in.
+func newQueueHarnessUnwired(t *testing.T, holds ShutdownHoldStore, logf func(string, ...any)) *queueHarness {
+	t.Helper()
+	return buildQueueHarness(t, nil, nil, logf, holds, false)
+}
+
+// buildQueueHarness constructs the manager and its doubles, bringing "ws" up
+// only when wire is set.
+func buildQueueHarness(t *testing.T, cls *fakeClassifier, wrap func(*fakePusher) Pusher, logf func(string, ...any), holds ShutdownHoldStore, wire bool) *queueHarness {
 	t.Helper()
 	rec := &fakePusher{}
 	var push Pusher = rec
@@ -105,6 +140,7 @@ func newQueueHarnessWithPusher(t *testing.T, cls *fakeClassifier, wrap func(*fak
 		ClearCompactStore: newFakeClearCompactStore(),
 		Registrar:         reg,
 		ProtocolVersion:   "1",
+		ShutdownHolds:     holds,
 		Logf:              logf,
 		now:               func() int64 { return 1000 },
 		Source:            stubSource{},
@@ -125,13 +161,25 @@ func newQueueHarnessWithPusher(t *testing.T, cls *fakeClassifier, wrap func(*fak
 		t.Fatalf("New: %v", err)
 	}
 	t.Cleanup(m.Close)
-	if err := m.Ensure("ws"); err != nil {
-		t.Fatalf("Ensure: %v", err)
+	h := &queueHarness{t: t, m: m, push: rec, cls: cls, reg: reg, applier: applier, prog: prog}
+	h.newestClient = func() *fakeClient {
+		mu.Lock()
+		defer mu.Unlock()
+		return last
 	}
-	mu.Lock()
-	client := last
-	mu.Unlock()
-	return &queueHarness{t: t, m: m, push: rec, client: client, cls: cls, reg: reg, applier: applier, prog: prog}
+	if wire {
+		h.wire()
+	}
+	return h
+}
+
+// wire brings "ws" up and rebinds the harness to the client that came with it.
+func (h *queueHarness) wire() {
+	h.t.Helper()
+	if err := h.m.Ensure("ws"); err != nil {
+		h.t.Fatalf("Ensure: %v", err)
+	}
+	h.client = h.newestClient()
 }
 
 // controller returns the live session controller for "ws".
@@ -650,7 +698,7 @@ func TestInterjectVerdictAfterTheTurnEndedDeliversWithoutInterrupting(t *testing
 	// re-queue is not needed; the drain takes it, so use a second entry.
 	d := h.controller()
 	h.m.mu.Lock()
-	d.turnActive = false
+	d.turn = turnRecord{}
 	h.m.mu.Unlock()
 
 	// Act.
@@ -1062,7 +1110,7 @@ func TestInterjectMootPathDoesNotSubmitIntoATurnThatStartedMeanwhile(t *testing.
 	// entry; the test below owns the racing start explicitly.
 	d := h.controller()
 	h.m.mu.Lock()
-	d.turnActive = false
+	d.turn = turnRecord{}
 	h.m.mu.Unlock()
 
 	// Act — force the held entry. With no turn running this takes the moot

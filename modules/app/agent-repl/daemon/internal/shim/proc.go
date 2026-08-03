@@ -120,9 +120,48 @@ type Proc struct {
 	// dies without ever speaking the protocol still has evidence to hand the
 	// bring-up that was waiting for it.
 	stderr *stderrTail
+	// pid and pgid are captured at spawn so a stop record names the same
+	// process the spawn record did, even after the process has exited.
+	pid  int
+	pgid int
 
 	mu      sync.Mutex
 	stdinOK bool
+}
+
+// Pid is the shim process's pid.
+func (p *Proc) Pid() int { return p.pid }
+
+// Pgid is the process group the shim was observed in immediately after its
+// spawn. It equals Pid when the detachment took effect, and 0 when the group
+// could not be read (which Spawn logs loudly).
+func (p *Proc) Pgid() int { return p.pgid }
+
+// Stop attributes a DELIBERATE shim stop: who asked and why.
+//
+// It is a REQUIRED argument rather than a convenience: a shim that dies for a
+// reason nobody recorded is indistinguishable, from the log alone, from a shim
+// that died because something went wrong. Making the attribution impossible to
+// omit is what keeps that distinction real.
+type Stop struct {
+	// Initiator names the component that commanded the stop, e.g.
+	// "session_controller_hibernate" or "daemon_shutdown".
+	Initiator string
+	// Reason states why, in a form a log reader can act on.
+	Reason string
+}
+
+// Validate rejects an unattributed stop. Both halves are load-bearing: an
+// initiator with no reason and a reason with no initiator each leave the log
+// unable to answer the question the record exists for.
+func (s Stop) Validate() error {
+	switch {
+	case s.Initiator == "":
+		return fmt.Errorf("stop attribution needs an Initiator")
+	case s.Reason == "":
+		return fmt.Errorf("stop attribution needs a Reason")
+	}
+	return nil
 }
 
 // StderrTail returns the bounded tail of everything the child has written to
@@ -162,6 +201,58 @@ type Logger interface {
 // shim owns the durable fd. Malformed stderr remains a daemon-owned error.
 type stderrMirror interface{ MirrorShimRecord(line string) }
 
+// detachedSysProcAttr is the process-attribute set that decouples a spawned
+// shim's LIFETIME from the daemon's.
+//
+// THE DETACHMENT IS THE POINT, and it is the system's stated design premise:
+// bootsweep.go says "a shim survives its daemon by design", and ShutdownCmd's
+// default (stop_shims=false) PRESERVES shims across a daemon bounce. Without
+// Setpgid that premise was false in practice — the shim was born into the
+// DAEMON's process group, so the one signal that stops a daemon (delivered to
+// its group by a supervisor or a shell) reached every shim too, and a bounce
+// took all live sessions down with it.
+//
+// Setpgid puts the child in a NEW process group whose id is the child's own
+// pid, so a group-directed signal aimed at the daemon can no longer reach it.
+// It deliberately does NOT detach the child in any other way:
+//
+//   - No Setsid. The shim keeps the daemon's session, so it stays reapable by
+//     the daemon that spawned it and Wait() keeps working exactly as before.
+//   - No Pdeathsig (Linux) or equivalent: a parent-death signal would re-create
+//     the very coupling this removes.
+//   - The command is built with exec.Command and NOT exec.CommandContext, so no
+//     Cancel/WaitDelay binds the child to a daemon-scoped context.
+func detachedSysProcAttr() *syscall.SysProcAttr {
+	return &syscall.SysProcAttr{Setpgid: true}
+}
+
+// reportProcessGroup reads the freshly spawned child's process group and
+// reports the detachment invariant Setpgid is supposed to have established:
+// the child's group id equals its own pid.
+//
+// A violated or unreadable invariant is LOUD but not fatal to the spawn. The
+// child is already running, so returning an error here would leak it; and the
+// daemon losing the ability to name the group is exactly the condition that
+// must not pass quietly, because the next daemon bounce is when it is paid for.
+// A group that could not be read is reported as 0 — an obviously impossible
+// group rather than a plausible wrong one.
+//
+// getpgid is a parameter so both failure branches are exercised by tests: a
+// process whose group cannot be read, and a process that did NOT get its own
+// group, are conditions no test can arrange against the real kernel call.
+func reportProcessGroup(pid int, logger Logger, getpgid func(int) (int, error)) int {
+	pgid, err := getpgid(pid)
+	switch {
+	case err != nil:
+		logger.Log("shim: spawned pid %d but its process group could NOT be read, so its detachment from the daemon's process group is UNVERIFIED and a daemon bounce may take it down: %v", pid, err)
+		return 0
+	case pgid != pid:
+		logger.Log("shim: spawned pid %d landed in process group %d instead of its own; it is STILL COUPLED to the daemon's process group and will die with the daemon", pid, pgid)
+		return pgid
+	}
+	return pgid
+}
+
 // Spawn starts the shim subprocess and its stdout/stderr pumps.
 func Spawn(opts Options) (*Proc, error) {
 	if len(opts.Argv) == 0 {
@@ -174,6 +265,7 @@ func Spawn(opts Options) (*Proc, error) {
 	cmd := exec.Command(opts.Argv[0], opts.Argv[1:]...)
 	cmd.Dir = opts.Dir
 	cmd.ExtraFiles = opts.ExtraFiles
+	cmd.SysProcAttr = detachedSysProcAttr()
 	if len(opts.ExtraEnv) > 0 {
 		cmd.Env = append(os.Environ(), opts.ExtraEnv...)
 	}
@@ -202,11 +294,16 @@ func Spawn(opts Options) (*Proc, error) {
 		return nil, fmt.Errorf("shim: start %q: %w", opts.Argv[0], err)
 	}
 
+	pid := cmd.Process.Pid
+	pgid := reportProcessGroup(pid, logger, syscall.Getpgid)
+
 	p := &Proc{
 		cmd:     cmd,
 		stdin:   stdin,
 		events:  make(chan *protocol.L1Event, 64),
 		stderr:  tail,
+		pid:     pid,
+		pgid:    pgid,
 		stdinOK: true,
 	}
 
@@ -354,20 +451,46 @@ func (p *Proc) CloseStdin() error {
 	return nil
 }
 
-// Kill forcibly terminates the shim subprocess.
-func (p *Proc) Kill() error {
+// Kill forcibly terminates the shim subprocess. by attributes the stop and is
+// required; see Stop.
+//
+// SIGNALLED BY PID, NEVER BY GROUP. os.Process.Kill delivers to this one pid.
+// Since the shim now leads its OWN process group, a group-directed kill would
+// reach whatever the shim itself spawned; that is a different, wider act and
+// this is deliberately not it.
+func (p *Proc) Kill(by Stop) error {
+	if err := p.stopAttribution(by, "kill"); err != nil {
+		return err
+	}
 	if err := p.cmd.Process.Kill(); err != nil {
-		return fmt.Errorf("shim: kill: %w", err)
+		return fmt.Errorf("shim: kill pid %d (initiator=%s reason=%s): %w", p.pid, by.Initiator, by.Reason, err)
 	}
 	return nil
 }
 
 // Terminate sends SIGTERM so the shim can stop cleanly (flush its transcript,
 // close its listener) — the cooperative stop the daemon uses to hibernate a
-// UDS shim. The caller reaps it via Wait separately.
-func (p *Proc) Terminate() error {
+// UDS shim. The caller reaps it via Wait separately. by attributes the stop and
+// is required; see Stop.
+//
+// SIGNALLED BY PID, NEVER BY GROUP, for the reason given on Kill.
+func (p *Proc) Terminate(by Stop) error {
+	if err := p.stopAttribution(by, "terminate"); err != nil {
+		return err
+	}
 	if err := p.cmd.Process.Signal(syscall.SIGTERM); err != nil {
-		return fmt.Errorf("shim: terminate: %w", err)
+		return fmt.Errorf("shim: terminate pid %d (initiator=%s reason=%s): %w", p.pid, by.Initiator, by.Reason, err)
+	}
+	return nil
+}
+
+// stopAttribution refuses an unattributed stop. Refusing rather than defaulting
+// is the point: a stop nobody is named for produces a shim death the log cannot
+// distinguish from a crash, which is the confusion this attribution exists to
+// end.
+func (p *Proc) stopAttribution(by Stop, verb string) error {
+	if err := by.Validate(); err != nil {
+		return fmt.Errorf("shim: refusing to %s pid %d: %w", verb, p.pid, err)
 	}
 	return nil
 }

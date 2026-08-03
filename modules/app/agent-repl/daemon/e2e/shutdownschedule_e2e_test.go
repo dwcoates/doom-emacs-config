@@ -224,8 +224,11 @@ func TestE2EAMidDrainConnectSnapshotCarriesTheLease(t *testing.T) {
 	if view == nil {
 		t.Fatal("the connect StateSnapshot carried no shutdown_schedule at all: exactly one arm is always set, so an absent field is never a legal answer")
 	}
+	// Reported rather than fatal: the arm, the schedule identity and the hold
+	// are independent facts about the SAME snapshot, and the getters below are
+	// nil-safe, so all three are worth reporting from one run.
 	if view.GetDraining() == nil {
-		t.Fatalf("the connect StateSnapshot's shutdown_schedule is %T, want the draining arm: a lease is held", view.GetState())
+		t.Errorf("the connect StateSnapshot's shutdown_schedule is %T, want the draining arm: a lease is held", view.GetState())
 	}
 	if got, want := view.GetDraining().GetScheduleId(), draining.GetScheduleId(); got != want {
 		t.Errorf("snapshot schedule_id = %q, want the live schedule %q", got, want)
@@ -261,10 +264,13 @@ func TestE2EScheduleWithLiveTasksBroadcastsATasksHold(t *testing.T) {
 	if hold.GetSessionId() != id {
 		t.Errorf("hold session_id = %q, want %q", hold.GetSessionId(), id)
 	}
+	// The tasks arm and the ABSENCE of a turn arm are independent facts about
+	// the same hold, so a missing tasks arm is reported rather than fatal. The
+	// count is chained off it, since a count read from a missing arm would only
+	// restate the same failure.
 	if hold.GetTasks() == nil {
-		t.Fatalf("the hold on %s carries no tasks, but a task is live; hold=%v", cwd, hold)
-	}
-	if got := hold.GetTasks().GetCount(); got != 1 {
+		t.Errorf("the hold on %s carries no tasks, but a task is live; hold=%v", cwd, hold)
+	} else if got := hold.GetTasks().GetCount(); got != 1 {
 		t.Errorf("tasks hold count = %d, want 1: the count is the display-grade summary of the live tasks", got)
 	}
 	if hold.GetTurn() != nil {
@@ -689,10 +695,13 @@ func TestE2EACancelWithAStaleScheduleIdIsALoudNack(t *testing.T) {
 			return false
 		},
 	})
+	// Reported rather than fatal: whether the stale cancel was refused and
+	// whether the live lease survived it are independent, and the survival check
+	// is the more important of the two. The error-text check is chained, since a
+	// nack's text only exists once there is a nack.
 	if ack.GetOk() {
-		t.Fatal("a cancelScheduledShutdown naming a schedule that is not live was acked ok: a stale id is a loud nack")
-	}
-	if ack.GetError() == "" {
+		t.Error("a cancelScheduledShutdown naming a schedule that is not live was acked ok: a stale id is a loud nack")
+	} else if ack.GetError() == "" {
 		t.Error("the rejected stale cancel carries an empty error")
 	}
 

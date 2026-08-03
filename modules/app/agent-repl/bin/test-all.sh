@@ -10,6 +10,10 @@
 # --record atomically appends one successful timing row per suite to
 # ../test_time.csv, then compares the run with recent entries on the same
 # branch. Failed runs never update the timing history.
+#
+# Every suite runs on every invocation. A failing suite is reported loudly the
+# moment it fails, the run continues through the remaining suites, and the run
+# ends with a summary of every failure plus a non-zero exit status.
 set -euo pipefail
 
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,6 +27,10 @@ CSV_TMP=""
 CSV_LOCK=""
 SUITES=()
 DURATIONS=()
+FAILED_SUITES=()
+FAILED_DURATIONS=()
+FAILED_CODES=()
+FAILURE_COUNT=0
 
 cleanup() {
     [ -z "$CSV_TMP" ] || rm -f "$CSV_TMP"
@@ -35,8 +43,12 @@ log() {
     printf '[agent-repl-tests] %s\n' "$*"
 }
 
-die() {
+err() {
     printf '[agent-repl-tests] ERROR: %s\n' "$*" >&2
+}
+
+die() {
+    err "$*"
     exit 1
 }
 
@@ -82,8 +94,14 @@ run_timed() {
         die "$suite timing output is missing"
     [[ "$duration" =~ ^[0-9]+([.][0-9]+)?$ ]] ||
         die "$suite timing output is malformed: $duration"
-    [ "$rc" -eq 0 ] ||
-        die "$suite failed after ${duration}s with exit code $rc"
+    if [ "$rc" -ne 0 ]; then
+        err "$suite failed after ${duration}s with exit code $rc"
+        FAILED_SUITES+=("$suite")
+        FAILED_DURATIONS+=("$duration")
+        FAILED_CODES+=("$rc")
+        FAILURE_COUNT=$((FAILURE_COUNT + 1))
+        return 0
+    fi
 
     SUITES+=("$suite")
     DURATIONS+=("$duration")
@@ -189,6 +207,8 @@ print_timing_summary() {
     local summary_file="$RUN_TMP/timing-summary.csv"
     local index suite duration
 
+    [ "${#SUITES[@]}" -gt 0 ] || return 0
+
     for index in "${!SUITES[@]}"; do
         printf '%s,%s\n' "${SUITES[$index]}" "${DURATIONS[$index]}" \
             >>"$summary_file"
@@ -198,6 +218,18 @@ print_timing_summary() {
     while IFS=, read -r suite duration; do
         log "timing: $suite ${duration}s"
     done < <(sort -t, -k2,2nr "$summary_file")
+}
+
+print_failure_summary() {
+    local index suite duration code
+
+    err "failure summary, $FAILURE_COUNT of $((FAILURE_COUNT + ${#SUITES[@]})) suites failed"
+    for index in "${!FAILED_SUITES[@]}"; do
+        suite="${FAILED_SUITES[$index]}"
+        duration="${FAILED_DURATIONS[$index]}"
+        code="${FAILED_CODES[$index]}"
+        err "failed: $suite exit code $code after ${duration}s"
+    done
 }
 
 validate_timing_csv
@@ -242,6 +274,11 @@ done
 run_timed logging-density "$THIS_DIR/report-logging-density.sh"
 
 print_timing_summary
+
+if [ "$FAILURE_COUNT" -gt 0 ]; then
+    print_failure_summary
+    exit 1
+fi
 
 if [ "$RECORD" -eq 1 ]; then
     record_timings "$START_BRANCH" "$START_COMMIT"
