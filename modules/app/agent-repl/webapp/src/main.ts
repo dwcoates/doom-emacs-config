@@ -35,7 +35,7 @@ import {
 } from "./merge-gate.js";
 import { mergeStatusLogValue } from "./merge-status.js";
 import { configureChessGames, installChessNavHook } from "./chess-game.js";
-import { RenderCoalescer, windowFrameHost } from "./coalesce.js";
+import { RenderCoalescer, windowEagerHost, windowFrameHost } from "./coalesce.js";
 import { SmoothReveal } from "./smooth.js";
 import { installCopyKeys } from "./copy.js";
 import { installClickExpand } from "./expand.js";
@@ -730,39 +730,49 @@ async function boot(): Promise<void> {
     if (shown.pending) frames.schedule();
   };
 
-  // Renders are coalesced onto animation frames: a burst of ingested effects
-  // — the backlog draining when this webview's hidden workspace is switched
-  // back to, a reconnect's snapshot, a fast delta stream — otherwise runs a
-  // full feed render per effect, and that churn is the switch-in jitter. One
-  // paint drains however many effects landed since it was scheduled.
+  // Renders are coalesced: a burst of ingested effects — a reconnect's
+  // snapshot, a fast delta stream — otherwise runs a full feed render per
+  // effect, and that churn is the switch-in jitter. One render drains
+  // however many effects landed since it was scheduled. While the page is
+  // VISIBLE that ride is an animation frame, as it has always been; while
+  // it is HIDDEN, rAF does not run at all under WKWebView, so the ride is
+  // an eager timer instead — otherwise a background workspace banks the
+  // whole interval's renders and pays for them at the moment it is
+  // switched back to.
   const frames = new RenderCoalescer(
     windowFrameHost(window),
     () => {
       rerender();
     },
     {
+      isHidden: () => document.visibilityState === "hidden",
+      eagerHost: windowEagerHost(window),
       // Stall watchdog: a webview whose WebKit process wrongly believes
       // it is occluded (xwidget reparenting) suspends rAF while CSS
       // animations keep breathing — the feed freezes with no error
-      // anywhere. The visibility/focus snapshot is the evidence that
-      // distinguishes that state from a genuinely hidden page.
+      // anywhere. A genuinely hidden page no longer reaches this path at
+      // the frame threshold, because it no longer schedules on rAF; the
+      // eager ride keeps its own, slacker threshold so that a hidden host
+      // which has stopped running timers entirely still reports.
       now: () => performance.now(),
-      onStall: (ms) =>
+      onStall: (ms, kind) =>
         clog(
           "warn",
-          `render stall: rAF pending ${Math.round(ms)}ms while frames keep arriving (visibility=${document.visibilityState} focus=${document.hasFocus()})`,
+          `render stall: ${kind === "eager" ? "hidden-page timer" : "rAF"} pending ${Math.round(ms)}ms while frames keep arriving (visibility=${document.visibilityState} focus=${document.hasFocus()})`,
           // The same facts as fields, so the daemon's log can be read back by
           // something other than a human eye — this is the stall investigation's
           // primary evidence, and grepping a sentence for a number is not a plan.
           {
             pendingMs: Math.round(ms),
+            scheduler: kind,
             visibility: document.visibilityState,
             focus: document.hasFocus(),
           },
         ),
-      onStallRecover: (ms) =>
+      onStallRecover: (ms, kind) =>
         clog("warn", `render stall recovered after ${Math.round(ms)}ms`, {
           stalledMs: Math.round(ms),
+          scheduler: kind,
         }),
     },
   );
@@ -789,17 +799,19 @@ async function boot(): Promise<void> {
   // rides; reconciliation no-ops every node whose HTML did not change.
   window.setInterval(() => frames.schedule(), 30_000);
 
-  // REPAINT ON SHOW. A hidden webview's animation frames are suspended, so
-  // whatever is on screen is the frame from before it was hidden while the
-  // store behind it has moved on — the socket keeps delivering either way.
-  // Becoming visible therefore repaints from the CURRENT snapshot rather than
-  // waiting for the next arriving frame to trigger one.
+  // REPAINT ON SHOW. Whatever is on screen is at best the last hidden tick's
+  // render while the store behind it has moved on — the socket keeps
+  // delivering either way. Becoming visible therefore repaints from the
+  // CURRENT snapshot rather than waiting for the next arriving frame.
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") return;
     // The rail's roster is PUSHED by Emacs rather than streamed, so it is the
     // one surface the feed render would not refresh on its own.
     sidebar.repaint();
-    frames.schedule();
+    // A pending render is flushed synchronously so the FIRST visible frame is
+    // current; with nothing pending, an ordinary scheduled render picks up the
+    // repainted rail on the next frame.
+    if (!frames.flush()) frames.schedule();
   });
 
   // swapTo rebinds the live view onto a successor session id (the
