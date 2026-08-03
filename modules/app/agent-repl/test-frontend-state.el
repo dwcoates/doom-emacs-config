@@ -726,6 +726,105 @@ daemon no longer knows."
         ;; Assert
         (should (equal noted "b_1"))))))
 
+;;;; ---- StateSnapshot resync: per-item failure containment ---------------
+;;
+;; The host-action executor acknowledges a handler failure to the daemon and
+;; then deliberately re-signals it (that contract lives in
+;; workspace-create-client.el and is unchanged).  Inside a snapshot that
+;; signal used to abort the whole resync, so a single retained action for a
+;; dead directory left the DaemonView unapplied and every later readiness
+;; read failed forever.
+
+(ert-deftest agent-repl-test-apply-snapshot-failing-host-action-still-applies-daemon-view ()
+  "A host action whose handler signals does not cost the snapshot its DaemonView."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--frontend-last-daemon-view nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-note-boot-id) #'ignore)
+                ((symbol-function 'agent-repl--workspace-create-handle-host-action)
+                 (lambda (_item) (error "no live workspace owns that dir")))
+                ((symbol-function 'message) #'ignore))
+        ;; Act
+        (agent-repl-test--apply-snapshot
+         '(:workspaces nil
+           :hostActions ((:actionId "act-1"))
+           :daemon (:bootId "b_1" :protocolVersion "1")))
+        ;; Assert
+        (should (equal (plist-get agent-repl--frontend-last-daemon-view :bootId)
+                       "b_1"))))))
+
+(ert-deftest agent-repl-test-apply-snapshot-failing-host-action-still-applies-workspaces ()
+  "A failing host action leaves the workspace states applied and the count returned."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "a")
+    (cl-letf (((symbol-function 'agent-repl--workspace-create-handle-host-action)
+               (lambda (_item) (error "no live workspace owns that dir")))
+              ((symbol-function 'message) #'ignore))
+      ;; Act
+      (let ((count (agent-repl-test--apply-snapshot
+                    '(:workspaces ((:workspace "a" :state "RENDER_STATE_IDLE"))
+                      :hostActions ((:actionId "act-1"))))))
+        ;; Assert
+        (should (= count 1))
+        (should (eq (agent-repl--ws-get "a" :pushed-render-state) :idle))))))
+
+(ert-deftest agent-repl-test-apply-snapshot-item-failure-is-logged ()
+  "A contained item failure names the item and its error in the log."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let (logged)
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged)))
+                ((symbol-function 'agent-repl--workspace-create-handle-host-action)
+                 (lambda (_item) (error "no live workspace owns that dir")))
+                ((symbol-function 'message) #'ignore))
+        ;; Act
+        (agent-repl-test--apply-snapshot
+         '(:workspaces nil :hostActions ((:actionId "act-1")))))
+      ;; Assert
+      (should (cl-find-if
+               (lambda (line)
+                 (and (string-match-p "host-action item FAILED" line)
+                      (string-match-p "act-1" line)
+                      (string-match-p "no live workspace owns that dir" line)))
+               logged)))))
+
+(ert-deftest agent-repl-test-apply-snapshot-item-failure-is-messaged ()
+  "A contained item failure is also surfaced to the user, never only logged."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let (echoed)
+      (cl-letf (((symbol-function 'message)
+                 (lambda (fmt &rest args) (push (apply #'format fmt args) echoed)))
+                ((symbol-function 'agent-repl--workspace-create-handle-host-action)
+                 (lambda (_item) (error "no live workspace owns that dir"))))
+        ;; Act
+        (agent-repl-test--apply-snapshot
+         '(:workspaces nil :hostActions ((:actionId "act-1")))))
+      ;; Assert
+      (should (cl-find-if
+               (lambda (line) (string-match-p "1 item(s) FAILED during snapshot resync" line))
+               echoed)))))
+
+(ert-deftest agent-repl-test-apply-snapshot-failing-workspace-state-still-applies-the-rest ()
+  "One rejected WorkspaceState does not stop the remaining ones from applying."
+  ;; Arrange — the first state omits the mandatory connectivity verdict, so
+  ;; its application signals; the second is complete.
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "a")
+    (agent-repl-test--register-ws "b")
+    (cl-letf (((symbol-function 'message) #'ignore))
+      ;; Act
+      (agent-repl--frontend-apply-snapshot
+       (list :workspaces
+             (list '(:workspace "a" :state "RENDER_STATE_IDLE" :sessionId "s_a")
+                   (agent-repl-test--complete-workspace-state
+                    '(:workspace "b" :state "RENDER_STATE_THINKING")))))
+      ;; Assert
+      (should-not (agent-repl--ws-get "a" :pushed-render-state))
+      (should (eq (agent-repl--ws-get "b" :pushed-render-state) :thinking)))))
+
 ;;;; ---- SessionView store + handler -------------------------------------
 
 (ert-deftest agent-repl-test-apply-session-view-stores-by-id ()
