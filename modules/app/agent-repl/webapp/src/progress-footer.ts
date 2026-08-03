@@ -808,10 +808,16 @@ export function footerHtml(
     mergeStatusPhaseLabel(input.mergeStatus) ??
     (input.renderState === null ? null : phaseLabel(input.renderState));
   if (phase !== null) {
+    // The secondary exists to keep an ACTIVITY visible when the route verdict
+    // has taken over the phase word — "severed" plus the fact that a turn is
+    // still thinking underneath. `ready` is the absence of activity, so it
+    // qualifies nothing and only puts a grey word beside the colored one; it is
+    // suppressed outright rather than rendered as an empty claim.
     const secondary =
       input.connectivity !== null &&
       input.connectivity !== "operational" &&
-      input.sessionStatus !== null
+      input.sessionStatus !== null &&
+      input.sessionStatus !== "ready"
         ? `<span class="pfooter-secondary">${escapeHtml(input.sessionStatus.replaceAll("_", " "))}</span>`
         : "";
     // A working phase wears the WORD as its own liveness signal — no arc beside
