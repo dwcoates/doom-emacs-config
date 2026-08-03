@@ -75,7 +75,13 @@ func bootGeometryDaemon(t *testing.T) *geometryBoot {
 
 	forwarder := &server.PushForwarder{Logf: t.Logf}
 	shimListener := shimlisten.New(t.Logf)
-	if err := shimListener.Listen(isolatedShimSocket(t, os.Getenv("HOME"))); err != nil {
+	// stateDir, not os.Getenv("HOME"): the socket is derived from the directory
+	// this harness OWNS rather than from whatever $HOME happens to hold at this
+	// line. Reading the ambient value is what bound the operator's real
+	// ~/.cache/agent-repl/sock/daemon-shim.sock — Server.Listen removes the path
+	// before binding, so the live daemon's listener was unlinked out from under
+	// it and every shim spawned afterwards dialled a path that no longer existed.
+	if err := shimListener.Listen(isolatedShimSocket(t, stateDir)); err != nil {
 		t.Fatalf("listen for shims: %v", err)
 	}
 	if err := sessionlock.EnsureDir(); err != nil {
@@ -196,6 +202,14 @@ const errNoSpawnInGeometryHarness = geometryHarnessError(
 // geometryStateDir is a short-path state directory. Not t.TempDir(): the
 // test-name-derived path exceeds the 104-byte sun_path limit, so bind(2) fails
 // on macOS (e2e_test.go, same reason).
+//
+// It MOVES $HOME onto that directory, exactly as bounceStateDir does. Every
+// other path this harness resolves — sessionlock.EnsureDir's
+// ~/.cache/agent-repl/run, statedb's ssm/state.db — derives from $HOME through
+// os.UserHomeDir, so leaving $HOME on the operator's real home pointed those
+// resolutions at the LIVE daemon's state. The repositories these tests build
+// set user.email/user.name in the repo-local config (newMergeRepo), so a moved
+// $HOME costs git nothing.
 func geometryStateDir(t *testing.T) string {
 	t.Helper()
 	dir, err := os.MkdirTemp("/tmp", "agent-repl-merge-geometry-")
@@ -203,6 +217,7 @@ func geometryStateDir(t *testing.T) string {
 		t.Fatalf("make state dir: %v", err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	t.Setenv("HOME", dir)
 	return dir
 }
 
