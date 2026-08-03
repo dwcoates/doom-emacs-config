@@ -513,6 +513,20 @@ the whole contract, so a broken arm must name itself in the failure."
                             :cause)
                  "lease unavailable")))
 
+(ert-deftest agent-repl-test-merge-status-flattens-the-failure-record ()
+  "The failed arm's own JSON record lands VERBATIM as `:failed-json'.
+The daemon serialized it with proto3's JSON mapping, so Emacs carries the
+string it was handed rather than re-deriving a record from the sibling
+fields beside it."
+  ;; Act / Assert
+  (should (equal (plist-get (agent-repl--frontend-parse-merge-status
+                             '(:runId "r1" :failed
+                               (:cause "lease unavailable"
+                                :failedJson "{\"cause\":\"lease unavailable\"}"))
+                             nil)
+                            :failed-json)
+                 "{\"cause\":\"lease unavailable\"}")))
+
 (ert-deftest agent-repl-test-merge-status-flattens-the-after-action-error ()
   "A merged run reports an after-action that failed."
   ;; Act / Assert

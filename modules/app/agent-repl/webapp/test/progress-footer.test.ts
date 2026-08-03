@@ -1823,6 +1823,8 @@ describe("the footer's structured merge status", () => {
         commitsLanded: 3,
         failingSha: "fee1234",
         failingSubject: "break it",
+        failedJson:
+          '{"cause":"tests failed","commitsTotal":4,"commitsLanded":3,"failingSha":"fee1234","failingSubject":"break it"}',
       },
     });
     // Act

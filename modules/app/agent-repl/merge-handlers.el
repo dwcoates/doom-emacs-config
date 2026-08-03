@@ -176,12 +176,34 @@ entirely rather than narrate an empty one."
         text
       (concat (substring text 0 agent-repl--merge-echo-detail-max) "…"))))
 
+(defun agent-repl--merge-failed-record (json)
+  "Return the reported clause carrying JSON, the failed arm's own record.
+
+JSON is `MergeStatusFailed.failed_json' — the WHOLE failed arm as the
+daemon serialized it through proto3's JSON mapping.  It rides the merge
+error as a field of its own so a reader gets the counts, the failing sha
+and anything the schema learns later, none of which the prose clauses
+beside it quote.
+
+DELIBERATELY UNCLIPPED, unlike every other clause: the clip exists to
+keep a long commit subject from pushing the counts off the echo line,
+and a record truncated at 60 characters is not a record — it is a
+fragment of JSON that cannot be read back.  A merge failure is the one
+merge status a person has to diagnose rather than watch, and this is the
+line they copy out of `*Messages*' to do it.
+
+Answers nil for a nil or blank JSON so the clause is dropped rather than
+narrated empty, exactly as `agent-repl--merge-echo-clip' does."
+  (when (and (stringp json) (not (string-empty-p json)))
+    (format "record %s" json)))
+
 (defun agent-repl--merge-echo-facts (phase status)
   "Return the narration clauses for PHASE of decoded merge STATUS.
 A list of strings, already clipped, with the absent ones dropped.  Each
 phase names only what it actually knows: a queue position while enqueued,
 the landed/total counts and the commit on the table while picking or
-testing, the conflicted subject on a conflict, the cause on a failure."
+testing, the conflicted subject on a conflict, and on a failure the cause
+plus the failed arm's whole JSON record (`agent-repl--merge-failed-record')."
   (let ((total (plist-get status :commits-total))
         (landed (plist-get status :commits-landed)))
     (delq nil
@@ -208,7 +230,9 @@ testing, the conflicted subject on a conflict, the cause on a failure."
             (:failed
              (list (agent-repl--merge-echo-clip (plist-get status :cause))
                    (agent-repl--merge-echo-clip
-                    (plist-get status :failing-subject))))))))
+                    (plist-get status :failing-subject))
+                   (agent-repl--merge-failed-record
+                    (plist-get status :failed-json))))))))
 
 (defun agent-repl--merge-echo-pushed-state (ws new previous)
   "Echo WS's merge progress NEW in the minibuffer, one line per transition.

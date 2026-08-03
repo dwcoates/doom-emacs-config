@@ -2,7 +2,11 @@ package merge
 
 import (
 	"errors"
+	"strings"
 	"testing"
+
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 )
@@ -796,6 +800,140 @@ func TestMergedCarriesTheAfterActionErrorWithoutFailingTheRun(t *testing.T) {
 	}
 	if got := last.GetMerged().GetAfterActionError(); got != "the parent refused the prompt" {
 		t.Fatalf("after_action_error = %q, want the after-action's failure", got)
+	}
+}
+
+// --- failed_json, the failure's own record -------------------------------
+
+// The record is the WHOLE failed arm, so a frontend that reports it reports
+// every field the arm carries rather than the two its one-line narration
+// quotes. Asserted by decoding the record back and comparing it with the arm
+// it was taken from — an equality that holds for a field added later without
+// this test being touched, which a field-by-field assertion would not.
+func TestAFailedArmCarriesItsWholeRecordAsJSON(t *testing.T) {
+	// Arrange.
+	plan := CommitPlan{Commits: []PlannedCommit{
+		{SHA: "a0000000000000000000000000000000000000", Short: "a00000000000", Subject: "first"},
+	}}
+	sink := &recordingSink{}
+	run := newTestRun(t, sink, testClock())
+	run.SetPlan(plan)
+	if err := run.CherryPicking(plan.Commits[0], "picking"); err != nil {
+		t.Fatalf("CherryPicking: %v", err)
+	}
+
+	// Act.
+	if err := run.Failed("the suite broke"); err != nil {
+		t.Fatalf("Failed: %v", err)
+	}
+
+	// Assert.
+	failed := sink.statuses[len(sink.statuses)-1].GetFailed()
+	if failed.GetFailedJson() == "" {
+		t.Fatal("failed_json is empty, want the failure's own protojson record")
+	}
+	decoded := &frontendv1.MergeStatusFailed{}
+	if err := protojson.Unmarshal([]byte(failed.GetFailedJson()), decoded); err != nil {
+		t.Fatalf("failed_json is not protojson: %v", err)
+	}
+	want := proto.Clone(failed).(*frontendv1.MergeStatusFailed)
+	want.FailedJson = ""
+	if !proto.Equal(decoded, want) {
+		t.Fatalf("failed_json decoded to %v, want the arm it was taken from %v", decoded, want)
+	}
+}
+
+// The record carries the fields the narration DROPS — the counts and the sha —
+// which is the entire reason it exists.
+func TestTheFailedRecordCarriesWhatTheNarrationDrops(t *testing.T) {
+	// Arrange.
+	plan := CommitPlan{Commits: []PlannedCommit{
+		{SHA: "a0000000000000000000000000000000000000", Short: "a00000000000", Subject: "first"},
+		{SHA: "b0000000000000000000000000000000000000", Short: "b00000000000", Subject: "second"},
+	}}
+	sink := &recordingSink{}
+	run := newTestRun(t, sink, testClock())
+	run.SetPlan(plan)
+	if err := run.CherryPicking(plan.Commits[0], "picking"); err != nil {
+		t.Fatalf("CherryPicking: %v", err)
+	}
+	run.CommitLanded()
+
+	// Act.
+	if err := run.Failed("the suite broke"); err != nil {
+		t.Fatalf("Failed: %v", err)
+	}
+
+	// Assert.
+	record := sink.statuses[len(sink.statuses)-1].GetFailed().GetFailedJson()
+	for _, want := range []string{`"commitsTotal":2`, `"commitsLanded":1`, `"failingSha":"a00000000000"`} {
+		if !strings.Contains(strings.ReplaceAll(record, " ", ""), want) {
+			t.Fatalf("failed_json = %s, want it to carry %s", record, want)
+		}
+	}
+}
+
+// A record taken from an arm that already carries one would nest the first
+// serialization inside the second, so the publication is REFUSED rather than
+// re-serialized over.
+func TestAPreStampedFailedRecordRefusesThePublication(t *testing.T) {
+	// Arrange.
+	sink := &recordingSink{}
+	run := newTestRun(t, sink, testClock())
+
+	// Act.
+	err := run.publish(PhaseMergeFailed, "the suite broke", func(s *frontendv1.MergeStatus) {
+		s.Phase = &frontendv1.MergeStatus_Failed{Failed: &frontendv1.MergeStatusFailed{
+			Cause:      "the suite broke",
+			FailedJson: `{"cause":"an earlier serialization"}`,
+		}}
+	})
+
+	// Assert.
+	if err == nil {
+		t.Fatal("publish() error = nil, want a pre-stamped failed_json refused")
+	}
+	if len(sink.statuses) != 0 {
+		t.Fatalf("a self-nesting failed record reached the sink: %+v", sink.statuses)
+	}
+}
+
+// A refused record must not burn an updated_at_ms either: the clocks belong to
+// statuses that were actually published.
+func TestAPreStampedFailedRecordLeavesTheClockUntouched(t *testing.T) {
+	// Arrange.
+	sink := &recordingSink{}
+	run := newTestRun(t, sink, testClock())
+	if err := run.BeforeAction("bump the version", "running"); err != nil {
+		t.Fatalf("BeforeAction: %v", err)
+	}
+	before := sink.statuses[0].GetUpdatedAtMs()
+
+	// Act.
+	if err := run.publish(PhaseMergeFailed, "the suite broke", func(s *frontendv1.MergeStatus) {
+		s.Phase = &frontendv1.MergeStatus_Failed{Failed: &frontendv1.MergeStatusFailed{FailedJson: "{}"}}
+	}); err == nil {
+		t.Fatal("publish() error = nil, want the refusal")
+	}
+	if err := run.AfterAction("tag the release", "running"); err != nil {
+		t.Fatalf("AfterAction: %v", err)
+	}
+
+	// Assert.
+	if got := sink.statuses[1].GetUpdatedAtMs(); got != before+1 {
+		t.Fatalf("updated_at_ms = %d, want %d — the refused publication burned a tick", got, before+1)
+	}
+}
+
+// A failed arm reported present with no payload is a construction bug, not a
+// record to serialize.
+func TestStampFailedJSONRefusesAnAbsentPayload(t *testing.T) {
+	// Act.
+	err := stampFailedJSON(nil)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("stampFailedJSON(nil) error = nil, want the absent payload refused")
 	}
 }
 

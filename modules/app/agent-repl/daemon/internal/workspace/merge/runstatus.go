@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"sync"
 
+	"google.golang.org/protobuf/encoding/protojson"
+
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 	"claude-repld/internal/dlog"
 )
@@ -458,6 +460,14 @@ func (r *RunStatus) publish(phase Phase, cause string, fill func(*frontendv1.Mer
 	status := &frontendv1.MergeStatus{RunId: r.runID}
 	fill(status)
 	arm := statusArm(status)
+	if arm == armFailed {
+		if err := stampFailedJSON(status.GetFailed()); err != nil {
+			r.mu.Unlock()
+			r.logf("merge: status failed_json FAILED {ws=%s run=%s phase=%s cause=%s}: %v — the status is NOT published, because a failed arm without its own record is the report the field exists to replace",
+				r.workspace, r.runID, phase, cause, err)
+			return fmt.Errorf("merge: serialize failed status for %q run %s: %w", r.workspace, r.runID, err)
+		}
+	}
 	if arm == armNone {
 		// A fill that set no arm is a construction bug at the call site, and the
 		// emitter refuses it. The clocks are left untouched on the way out: a
@@ -487,6 +497,46 @@ func (r *RunStatus) publish(phase Phase, cause string, fill func(*frontendv1.Mer
 	status.UpdatedAtMs = r.updatedAtMs
 	r.mu.Unlock()
 	return r.emit.emit(r.workspace, phase, cause, status)
+}
+
+// failedJSON is the marshaler that produces MergeStatusFailed.failed_json.
+//
+// DEFAULT OPTIONS ON PURPOSE, which is to say the same protojson mapping the
+// frontend wire itself uses (internal/frontend.marshalFrame): zero-valued
+// fields are omitted, and a reader that already reads this daemon's frames
+// reads this record by the identical rule. Emitting unpopulated fields instead
+// would give the record a second, private convention AND write an empty
+// `failedJson` key into it — the one field that is necessarily unset at the
+// instant the record is taken.
+var failedJSON = protojson.MarshalOptions{}
+
+// stampFailedJSON fills failed's own protojson serialization into its
+// failed_json field.
+//
+// CALLED FROM publish, NOT FROM THE CALL SITE THAT BUILT THE ARM, so a failed
+// status cannot reach a frontend without its record: the stamping is a
+// property of publishing a failed arm rather than a step a producer has to
+// remember. Every failed arm goes through publish, so there is nowhere else to
+// forget it.
+//
+// The field is stamped onto a message whose failed_json is still empty, which
+// is what makes the serialization the record WITHOUT itself nested inside it.
+// A non-empty failed_json on entry means the arm was published twice or
+// stamped by hand, and is refused rather than re-serialized over: the second
+// serialization would carry the first one inside it.
+func stampFailedJSON(failed *frontendv1.MergeStatusFailed) error {
+	if failed == nil {
+		return fmt.Errorf("merge: failed arm reported present with no payload")
+	}
+	if failed.GetFailedJson() != "" {
+		return fmt.Errorf("merge: failed arm already carries failed_json (%d bytes) — it would nest inside its own serialization", len(failed.GetFailedJson()))
+	}
+	encoded, err := failedJSON.Marshal(failed)
+	if err != nil {
+		return fmt.Errorf("merge: marshal failed status as json: %w", err)
+	}
+	failed.FailedJson = string(encoded)
+	return nil
 }
 
 // The oneof arm names, as the proto declares them. They are the words a

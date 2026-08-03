@@ -467,6 +467,40 @@ itself instead of silently going unmentioned."
       (agent-repl--merge-echo-pushed-state "ws1" :merge-failed :merging))
     (should (equal msgs '("agent-repl: ws1 merge failed — lease unavailable")))))
 
+(ert-deftest agent-repl-test-merge-echo-reports-the-failure-record ()
+  "A failed status reports the arm's whole JSON record as its own field.
+The prose clauses quote the cause and the failing subject; the record is
+what carries the counts and the sha a diagnosis needs."
+  (agent-repl-test--with-captured-messages msgs
+    (agent-repl-test--with-merge-echo
+        '(:phase :failed :cause "lease unavailable"
+          :failed-json "{\"cause\":\"lease unavailable\",\"commitsTotal\":4}")
+        nil
+      (agent-repl--merge-echo-pushed-state "ws1" :merge-failed :merging))
+    (should (equal msgs
+                   '("agent-repl: ws1 merge failed — lease unavailable, record {\"cause\":\"lease unavailable\",\"commitsTotal\":4}")))))
+
+(ert-deftest agent-repl-test-merge-echo-does-not-clip-the-failure-record ()
+  "The record rides UNCLIPPED — a JSON cut at 60 characters cannot be read.
+Every other clause is clipped so a long subject cannot push the counts
+off the line; the record is the exception because a fragment of it is
+worth nothing to the reader who came for it."
+  (agent-repl-test--with-captured-messages msgs
+    (let ((record (format "{\"cause\":\"%s\"}" (make-string 100 ?x))))
+      (agent-repl-test--with-merge-echo
+          (list :phase :failed :cause "broke" :failed-json record)
+          nil
+        (agent-repl--merge-echo-pushed-state "ws1" :merge-failed :merging))
+      (should (string-suffix-p (concat "record " record) (car msgs))))))
+
+(ert-deftest agent-repl-test-merge-echo-omits-an-empty-failure-record ()
+  "An empty record is no record — the clause is dropped, never narrated blank."
+  (agent-repl-test--with-captured-messages msgs
+    (agent-repl-test--with-merge-echo
+        '(:phase :failed :cause "lease unavailable" :failed-json "") nil
+      (agent-repl--merge-echo-pushed-state "ws1" :merge-failed :merging))
+    (should (equal msgs '("agent-repl: ws1 merge failed — lease unavailable")))))
+
 (ert-deftest agent-repl-test-merge-echo-narrates-a-failed-after-action ()
   "A merge that landed with a failed post-merge action says so."
   (agent-repl-test--with-captured-messages msgs
