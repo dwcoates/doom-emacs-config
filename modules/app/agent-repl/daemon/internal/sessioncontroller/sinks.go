@@ -390,6 +390,15 @@ type consumer struct {
 	// echoes are the prompt receipts this daemon has pushed and the durable
 	// transcript has not yet claimed, OLDEST FIRST. See pushUserEcho.
 	echoes []*promptEcho
+	// cmdItems retains the session-command invocation items this daemon has
+	// pushed, in first-seen order, on the same footing as permItems and
+	// failItems and for the same reason (sessioncommand.go). They are the ONLY
+	// account a frontend gets of an invocation — the command earns no prompt
+	// bubble and the CLI's own transcript bookkeeping for it is withheld as
+	// machinery — so a resync that could not replay them would leave the feed
+	// silent about a command the user ran.
+	cmdItems map[string]*frontendv1.ConversationItem
+	cmdOrder []string
 	// backfill is the last never-blue state reported for this session (F2).
 	// In-memory latch: it is what keeps a long transcript from writing the
 	// registry record once per line.
@@ -858,6 +867,12 @@ func (c *consumer) noteClearOrCompact(ev *corev1.Event) {
 	// discarded would replay pre-clear text back above the floor.
 	if dropped := c.dropEchoes(); dropped > 0 {
 		logf("session-controller: dropped %d unclaimed prompt receipt(s) with the history this floor hides", dropped)
+	}
+	// The session-command invocations go with them, for the identical reason:
+	// they carry no seq either, and an invocation from below the cut replayed
+	// above it would sit in a feed the cut exists to open.
+	if dropped := c.dropCommandItems(); dropped > 0 {
+		logf("session-controller: dropped %d session-command invocation item(s) with the history this floor hides", dropped)
 	}
 	// And their DURABLE records, or the very next replay would put the
 	// pre-cut prompts back above the floor this event just raised.
@@ -1335,6 +1350,13 @@ func (c *consumer) resync(fromSeq uint64) (floor uint64, haveFloor bool) {
 	// covers them — and a frontend that reconnects between a submit and its
 	// transcript line would otherwise find the user's own prompt missing.
 	for _, item := range c.snapshotEchoes() {
+		c.pushLocalItem(item)
+	}
+	// And the session-command invocations (sessioncommand.go). Same reasoning a
+	// third time, with one addition: a session command earns no prompt receipt
+	// by design, so this item is the ONLY thing that will ever tell a
+	// reconnecting frontend the command was run.
+	for _, item := range c.snapshotCommandItems() {
 		c.pushLocalItem(item)
 	}
 	return c.ringFloor()

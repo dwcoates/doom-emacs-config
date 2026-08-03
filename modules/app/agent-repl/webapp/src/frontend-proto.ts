@@ -10,7 +10,7 @@
  * - `ConversationDelta.items` is a repeated typed `ConversationItem`: a thin
  *   envelope {uuid, tsMs, requestId} carrying EXACTLY ONE typed data.v1/core.v1
  *   payload arm (assistantMessage, userMessage, toolUse, toolResult,
- *   toolUseResult, result, contextCleared, contextCompacted,
+ *   toolUseResult, result, contextCleared, contextCompacted, sessionCommand,
  *   permission, systemFailure). The webapp DECOMPOSES those typed payloads back into its
  *   render vocabulary in `state-adapter.ts`; the OLD `kind`-discriminated
  *   pre-rendered Struct vocabulary is gone.
@@ -503,8 +503,74 @@ export const CONVERSATION_ITEM_ARMS = [
   "permission",
   "systemFailure",
   "skillBody",
+  "sessionCommand",
 ] as const;
 export type ConversationItemArm = (typeof CONVERSATION_ITEM_ARMS)[number];
+
+/**
+ * `frontend.v1.SessionCommand` — the slash commands the CLI answers ITSELF,
+ * as a closed set.
+ *
+ * The daemon recognizes one of these before it forwards the submit and pushes
+ * a `SessionCommandItem` INSTEAD of a prompt bubble, so this list is also the
+ * complete set of things that can suppress a bubble. Anything not named here
+ * is a prompt and is always drawn.
+ *
+ * The names are the wire's, minus the `SESSION_COMMAND_` prefix. The slash
+ * form a reader sees is derived from them at render time (`sessionCommandLabel`),
+ * never carried on the wire: the item deliberately has no text field, which is
+ * what makes it structurally incapable of putting the user's `/model opus`
+ * back on screen.
+ */
+export const SESSION_COMMANDS = [
+  "CLEAR",
+  "COMPACT",
+  "MODEL",
+  "COST",
+  "USAGE",
+  "STATUS",
+  "CONTEXT",
+  "CONFIG",
+  "HELP",
+  "DOCTOR",
+  "LOGIN",
+  "LOGOUT",
+  "MEMORY",
+  "PERMISSIONS",
+  "AGENTS",
+  "MCP",
+  "HOOKS",
+  "OUTPUT_STYLE",
+  "RELEASE_NOTES",
+  "TODOS",
+  "EXPORT",
+  "ADD_DIR",
+  "RESUME",
+  "EXIT",
+  "PRIVACY_SETTINGS",
+  "STATUSLINE",
+  "TERMINAL_SETUP",
+  "VIM",
+  "REWIND",
+  "BUG",
+] as const;
+export type SessionCommand = (typeof SESSION_COMMANDS)[number];
+
+/**
+ * The `SessionCommand` a wire value names.
+ *
+ * An UNSPECIFIED or unrecognized command THROWS rather than defaulting. The
+ * command IS the item's entire content — there is nothing else in the message
+ * — so an item that cannot say which command it reports is empty, and drawing
+ * a guessed one would tell the user they ran something they did not.
+ */
+export function sessionCommandOf(name: string, where: string): SessionCommand {
+  const known = SESSION_COMMANDS.find((c) => name === c || name === `SESSION_COMMAND_${c}`);
+  if (known === undefined) {
+    throw new Error(`frontend-proto: ${where}.command has unrecognized value '${name}'`);
+  }
+  return known;
+}
 
 /**
  * `frontend.v1.ErrorClass` — the SEMANTIC class of a system failure.

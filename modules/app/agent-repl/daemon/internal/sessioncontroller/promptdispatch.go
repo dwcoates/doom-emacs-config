@@ -3,7 +3,6 @@ package sessioncontroller
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
@@ -30,46 +29,61 @@ import (
 // Deciding all of it from a single classification at a single site is what makes
 // those disagreements unrepresentable rather than merely fixed.
 
-// clearSessionCommand is the session command that discards a conversation's
-// context. Matched on the SUBMITTED text, which is where the daemon sees it:
-// the harness recognizes `/clear` itself and expands it into a command
-// envelope inside the CLI, so by the time anything is on the file plane the
-// clear has already happened.
-const clearSessionCommand = "/clear"
-
 // sessionCommand is what the daemon RECOGNIZED in one submitted prompt's text:
 // a command it has its own consequences for, beyond handing the text along.
 //
 // A zero value is the ordinary prompt — text meant for the agent and nothing
 // else — which is what the overwhelming majority of submits are.
 type sessionCommand struct {
-	// clear is a bare `/clear`, the command that cuts the conversation.
-	clear bool
+	// command is the recognized session command, or UNSPECIFIED for a prompt.
+	// The set of recognizable commands and the matching rule both live in
+	// sessioncommand.go, which is also where the wire enum they map to is
+	// documented.
+	command frontendv1.SessionCommand
 }
 
 // classifyPrompt reads a submitted prompt's text for meaning. THE ONLY PLACE
 // the daemon does so.
-//
-// Matched on the whole trimmed string: an argument after the command means the
-// user asked for something else entirely ("/clear the build cache" is a prompt),
-// and the CLI's own expansion is just as literal — it recognizes the command
-// only when the command is the entire prompt.
 func classifyPrompt(text string) sessionCommand {
-	return sessionCommand{clear: strings.TrimSpace(text) == clearSessionCommand}
+	return sessionCommand{command: lookupSessionCommand(text)}
 }
 
 // recognized reports whether the daemon found a command it handles itself.
-func (c sessionCommand) recognized() bool { return c.clear }
+func (c sessionCommand) recognized() bool {
+	return c.command != frontendv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED
+}
+
+// clear reports whether the recognized command is the one that CUTS the
+// conversation, which is the only session command with a state axis of its own.
+func (c sessionCommand) clear() bool {
+	return c.command == frontendv1.SessionCommand_SESSION_COMMAND_CLEAR
+}
 
 // echoes reports whether the prompt earns a receipt bubble in the frontend.
 //
-// A recognized command earns none. `/clear` is not something the user SAID to
-// the agent, it is something they DID to the conversation, and the cut already
-// draws its own divider exactly where it happened. A bubble beside that divider
-// reading "/clear" is the machinery narrating itself, and it is worse than
-// noise: it sits above the divider, which is the region the clear exists to
-// discard.
+// A recognized command earns none. `/model` is not something the user SAID to
+// the agent, it is something they DID to the session — the CLI answers it
+// locally and the model never sees it — so a purple bubble reading "/model"
+// claims a question was asked that nobody received. `/clear` is worse still:
+// the cut already draws its own divider exactly where it happened, and the
+// bubble sits ABOVE that divider, in the region the clear exists to discard.
+//
+// What the frontend gets instead is the invocation item (pushSessionCommand),
+// which carries the command's identity and no text at all.
 func (c sessionCommand) echoes() bool { return !c.recognized() }
+
+// claimsTurn reports whether the submit takes the accepted-prompt state edge —
+// the `submitting`/`thinking` claim, its durable turn latch, and the footer
+// clock.
+//
+// EVERY RECOGNIZED COMMAND EXCEPT `/clear` DOES, and the split is not the same
+// one `echoes` makes. A `/model` or a `/compact` really does occupy the shim:
+// the CLI runs it and closes a turn with a result, so a workspace that stayed
+// green through it would be lying about a session that is busy. `/clear` alone
+// runs no turn — it cuts the conversation and re-inits — and its truthful
+// status premise is the SSM's clearing axis (noteClearDispatched), which is why
+// claiming a turn for it would be the false statement instead.
+func (c sessionCommand) claimsTurn() bool { return !c.clear() }
 
 // forwardPrompt hands one submitted prompt to its shim.
 //
@@ -108,8 +122,10 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 	// So the claim is now made on the daemon's OWN decision to submit, which it
 	// has already taken by this line, and the honesty of the claim is
 	// maintained on the failure path instead (retractPromptAccepted below).
-	// Only an ordinary prompt creates the edge: `/clear` is a session command,
-	// not a turn, and its clearing axis below is the truthful status premise.
+	// `/clear` alone creates no edge: it is a session command that runs no turn,
+	// and its clearing axis below is the truthful status premise. Every OTHER
+	// session command does occupy the shim exactly as a prompt would (see
+	// claimsTurn), so it takes the edge while still earning no bubble.
 	// MarkPromptAccepted holds the SSM transition lock through the frontend
 	// publication, so neither the asynchronous SSM subscriber nor a later
 	// TurnEnded can overtake it.
@@ -122,9 +138,21 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 	// invariant fails outright, so claiming the edge here would fail every
 	// conflict-resolution submit on a state the merge axis rightly owns. The
 	// turn itself is still claimed durably, by the shim's own TurnStarted.
+	//
+	// THE TWO GATES ARE SEPARATE, and separating them is what lets a session
+	// command be honest on both axes at once. `claimsTurn` decides whether the
+	// shim is about to be busy; `echoes` decides whether the user said something.
+	// A `/model` is the first without being the second, and collapsing the two
+	// (as one gate did) forced a choice between a green workspace over a running
+	// command and a purple bubble for a prompt nobody wrote. `echoes` implies
+	// `claimsTurn` by construction — an ordinary prompt is both — so the receipt
+	// below always sits inside a claimed turn.
+	claimsTurn := cmd.claimsTurn() && who != submitterMergeLeaseHolder
+	echoes := cmd.echoes() && who != submitterMergeLeaseHolder
+
 	accepted, activeBefore := false, false
 	var acceptedAtMs int64
-	if cmd.echoes() && who != submitterMergeLeaseHolder {
+	if claimsTurn {
 		before, err := m.notePromptAccepted(d, requestID)
 		if err != nil {
 			// NOTHING EXTERNAL HAS HAPPENED YET, which is the whole advantage
@@ -135,6 +163,14 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 			return err
 		}
 		accepted, activeBefore = true, before
+	}
+
+	// THE DURABLE RECEIPT is written only for a prompt that EARNS A BUBBLE. Its
+	// sole purpose is replaying that bubble across a daemon bounce, so recording
+	// one for a session command would resurrect exactly the "/model" bubble this
+	// whole path exists to withhold — and would resurrect it from durable
+	// storage, where nothing downstream could tell it from a real prompt.
+	if echoes {
 		// THE DURABLE RECEIPT, PART OF THE ACCEPTANCE ITSELF and therefore
 		// ahead of BOTH the submit and the pushed bubble.
 		//
@@ -186,9 +222,19 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 	// prompt no session received, which is why it stays behind the submit while
 	// the state edge moved ahead of it: a state edge can be retracted, a
 	// conversation item the frontend has already drawn cannot.
-	if accepted {
+	if echoes {
 		m.echo(d, requestID, text, acceptedAtMs)
 	}
+
+	// THE INVOCATION ITEM, in the receipt's place and on the receipt's terms:
+	// after the submit, so nothing is drawn for a command no session took.
+	//
+	// It is the ONLY thing the feed will ever say about this command. The
+	// receipt was withheld above, and the CLI's own transcript bookkeeping for
+	// the command is withheld as machinery (machinery.go), so without this the
+	// user's `/model` would vanish from the conversation entirely and the
+	// session's model would appear to change for no reason.
+	m.noteSessionCommand(d, requestID, cmd)
 
 	// AFTER THE ACCEPT, never before: an axis opened for a prompt that never
 	// reached the shim would be waiting on a cut that is not coming, and would
@@ -370,6 +416,27 @@ func (m *Manager) notePromptDelivered(d *sessionController, requestID string) {
 		d.workspace, d.sessionID, requestID)
 }
 
+// noteSessionCommand pushes the invocation item for a recognized session
+// command the daemon just handed to a shim, and does nothing at all for an
+// ordinary prompt.
+//
+// Takes the CLASSIFICATION rather than the text, which is what keeps the
+// recognition in one place — and, here, is also what keeps the text off the
+// wire: this function is not given the prompt, so it cannot pass it on.
+//
+// A submit with no request id behind it (an internal re-submit, a harness)
+// pushes nothing, exactly as the receipt path does: the item's uuid is derived
+// from that identity, and a minted one would name an item nothing could ever
+// reconcile or replace.
+//
+// Must be called with m.mu RELEASED: the push reaches the frontend server.
+func (m *Manager) noteSessionCommand(d *sessionController, requestID string, cmd sessionCommand) {
+	if !cmd.recognized() || requestID == "" {
+		return
+	}
+	d.consumer.pushSessionCommand(requestID, cmd.command)
+}
+
 // noteClearDispatched opens the SSM's clearing axis for a `/clear` the daemon
 // just handed to a shim.
 //
@@ -384,7 +451,7 @@ func (m *Manager) notePromptDelivered(d *sessionController, requestID string) {
 // submit — the prompt was accepted, and losing it over a footer word would be
 // the larger harm.
 func (m *Manager) noteClearDispatched(workspace string, cmd sessionCommand) {
-	if !cmd.clear {
+	if !cmd.clear() {
 		return
 	}
 	m.logf("session-controller: /clear dispatched ws=%q — opening the SSM's clearing axis until the vendor session rotation it causes lands, or its ContextCleared arrives first", workspace)
