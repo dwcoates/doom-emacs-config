@@ -317,9 +317,14 @@ type Manager struct {
 	// dependency, so it cannot be a Config field.
 	shutdownLease shutdownLeaseBinding
 
-	mu       sync.Mutex
-	byWS     map[string]*sessionController // workspace -> live session controller
-	lastCSID map[string]string             // session id -> last-persisted claude session uuid
+	mu   sync.Mutex
+	byWS map[string]*sessionController // workspace -> live session controller
+	// parked is the boot-materialized drain-park ledger: workspace -> the
+	// prompts a previous daemon parked whose session has NOT wired to this one
+	// (parkedledger.go). A workspace is in exactly one of the two maps, and the
+	// entries move from this one to the controller's own queue at wire time.
+	parked   map[string]*parkedSession
+	lastCSID map[string]string // session id -> last-persisted claude session uuid
 	// shimPID is the pid each session's shim announced on its ShimHello. It is
 	// the ONLY way to stop a shim this daemon did not spawn, and it is kept in
 	// memory rather than persisted deliberately: it is trustworthy exactly
@@ -547,6 +552,7 @@ func New(cfg Config) (*Manager, error) {
 		newControllerGenerationID: newControllerGenerationID,
 		now:                       now,
 		byWS:                      make(map[string]*sessionController),
+		parked:                    make(map[string]*parkedSession),
 		lastCSID:                  make(map[string]string),
 		shimPID:                   make(map[string]int32),
 		buildBounced:              make(map[string]bool),
