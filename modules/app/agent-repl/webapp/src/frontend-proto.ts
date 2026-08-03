@@ -456,6 +456,7 @@ export interface SessionView {
    * SystemFailureItem.
    */
   death?: SystemFailure;
+  tokenUtilization?: import("./protocol.js").SessionTokenUtilization;
 }
 
 export interface ModelOption {
@@ -610,6 +611,18 @@ export interface SystemFailure {
    * reached OUTSIDE the feed (a footer row, an ack) addresses its card.
    */
   itemUuid: string;
+  sessionResume?: SessionResumeFailure;
+}
+
+/** Typed evidence for a failed authoritative-conversation resume. */
+export interface SessionResumeFailure {
+  agentReplSessionId: string;
+  claudeSessionId: string;
+  cwd: string;
+  configDir: string;
+  resolvedConfigDir: string;
+  attempt: "create" | "automaticRestore";
+  cause: { case: "transcriptUnavailable"; searchedPaths: string[] } | { case: "identityMismatch"; replacementClaudeSessionId: string };
 }
 
 /**
@@ -1571,6 +1584,7 @@ const SESSION_VIEW_KEYS = new Set([
   "backfill",
   "death",
   "modelOptions",
+  "tokenUtilization",
 ]);
 function decodeSessionView(v: unknown): SessionView {
   const o = ensureObject(v, "SessionView");
@@ -1615,6 +1629,7 @@ function decodeSessionView(v: unknown): SessionView {
   if (o.death !== undefined) {
     sv.death = decodeSystemFailure(o.death, "SessionView.death");
   }
+  if (o.tokenUtilization !== undefined) sv.tokenUtilization = decodeSessionTokenUtilization(o.tokenUtilization);
   if (sv.sessionId === "") {
     throw new Error("frontend-proto: SessionView missing required `session_id`");
   }
@@ -2096,7 +2111,54 @@ const SYSTEM_FAILURE_KEYS = new Set([
   "sourceDetail",
   "resolvedAtMs",
   "itemUuid",
+  "sessionResume",
 ]);
+
+function decodeUsageTotals(v: unknown, where: string): import("./protocol.js").TokenUsageTotals {
+  const o = ensureObject(v, where);
+  const keys = ["inputTokens", "outputTokens", "cacheReadInputTokens", "cacheCreationInputTokens", "timing"];
+  rejectUnknown(o, new Set(keys), where);
+  const totals = { input_tokens: num(o, "inputTokens", where), output_tokens: num(o, "outputTokens", where), cache_read_input_tokens: num(o, "cacheReadInputTokens", where), cache_creation_input_tokens: num(o, "cacheCreationInputTokens", where) };
+  if (o.timing === undefined) return totals;
+  const timing = ensureObject(o.timing, `${where}.timing`);
+  const timingKeys = ["outputTokensWithGenerationDuration", "outputGenerationDurationMs", "responsesWithGenerationDuration", "responsesWithoutGenerationDuration", "totalTimeToFirstTokenMs", "responsesWithTimeToFirstToken", "responsesWithoutTimeToFirstToken"];
+  rejectUnknown(timing, new Set(timingKeys), `${where}.timing`);
+  return { ...totals, timing: { output_tokens_with_generation_duration: num(timing, timingKeys[0], `${where}.timing`), output_generation_duration_ms: num(timing, timingKeys[1], `${where}.timing`), responses_with_generation_duration: num(timing, timingKeys[2], `${where}.timing`), responses_without_generation_duration: num(timing, timingKeys[3], `${where}.timing`), total_time_to_first_token_ms: num(timing, timingKeys[4], `${where}.timing`), responses_with_time_to_first_token: num(timing, timingKeys[5], `${where}.timing`), responses_without_time_to_first_token: num(timing, timingKeys[6], `${where}.timing`) } };
+}
+
+function decodeSessionTokenUtilization(v: unknown): import("./protocol.js").SessionTokenUtilization {
+  const o = ensureObject(v, "SessionTokenUtilization");
+  rejectUnknown(o, new Set(["allAgents", "mainAgent", "subagents", "models"]), "SessionTokenUtilization");
+  const subagents = ensureArray(o.subagents, "SessionTokenUtilization.subagents").map((raw, i) => {
+    const entry = ensureObject(raw, `SessionTokenUtilization.subagents[${i}]`);
+    rejectUnknown(entry, new Set(["agent", "totals", "models"]), `SessionTokenUtilization.subagents[${i}]`);
+    const agent = ensureObject(entry.agent, `SessionTokenUtilization.subagents[${i}].agent`);
+    return { agent_id: str(agent, "agentId", `SessionTokenUtilization.subagents[${i}].agent`), totals: decodeUsageTotals(entry.totals, `SessionTokenUtilization.subagents[${i}].totals`) };
+  });
+  const models = ensureArray(o.models, "SessionTokenUtilization.models").map((raw, i) => {
+    const entry = ensureObject(raw, `SessionTokenUtilization.models[${i}]`);
+    return { model: str(entry, "model", `SessionTokenUtilization.models[${i}]`), totals: decodeUsageTotals(entry.totals, `SessionTokenUtilization.models[${i}].totals`) };
+  });
+  return { all_agents: decodeUsageTotals(o.allAgents, "SessionTokenUtilization.allAgents"), main_agent: decodeUsageTotals(o.mainAgent, "SessionTokenUtilization.mainAgent"), subagents, models };
+}
+
+function decodeSessionResumeFailure(v: unknown, where: string): SessionResumeFailure {
+  const o = ensureObject(v, where);
+  const keys = ["agentReplSessionId", "claudeSessionId", "cwd", "configDir", "resolvedConfigDir", "create", "automaticRestore", "transcriptUnavailable", "identityMismatch"];
+  rejectUnknown(o, new Set(keys), where);
+  const attempts = ["create", "automaticRestore"].filter((key) => o[key] !== undefined);
+  const causes = ["transcriptUnavailable", "identityMismatch"].filter((key) => o[key] !== undefined);
+  if (attempts.length !== 1 || causes.length !== 1) throw new Error(`frontend-proto: ${where} requires exactly one attempt and cause`);
+  const base = { agentReplSessionId: str(o, "agentReplSessionId", where), claudeSessionId: str(o, "claudeSessionId", where), cwd: str(o, "cwd", where), configDir: str(o, "configDir", where), resolvedConfigDir: str(o, "resolvedConfigDir", where), attempt: attempts[0] as "create" | "automaticRestore" };
+  if (causes[0] === "identityMismatch") {
+    const cause = ensureObject(o.identityMismatch, `${where}.identityMismatch`);
+    rejectUnknown(cause, new Set(["replacementClaudeSessionId"]), `${where}.identityMismatch`);
+    return { ...base, cause: { case: "identityMismatch", replacementClaudeSessionId: str(cause, "replacementClaudeSessionId", `${where}.identityMismatch`) } };
+  }
+  const cause = ensureObject(o.transcriptUnavailable, `${where}.transcriptUnavailable`);
+  rejectUnknown(cause, new Set(["searchedPaths"]), `${where}.transcriptUnavailable`);
+  return { ...base, cause: { case: "transcriptUnavailable", searchedPaths: ensureArray(cause.searchedPaths, `${where}.transcriptUnavailable.searchedPaths`).map((path, i) => { if (typeof path !== "string") throw new Error(`frontend-proto: ${where}.transcriptUnavailable.searchedPaths[${i}] must be a string`); return path; }) } };
+}
 
 /**
  * Decode a `SystemFailureItem`.
@@ -2114,7 +2176,7 @@ export function decodeSystemFailure(v: unknown, where: string): SystemFailure {
   if (known === undefined) {
     throw new Error(`frontend-proto: ${where}.error_class has unrecognized value '${cls}'`);
   }
-  return {
+  const failure: SystemFailure = {
     errorClass: known,
     errorType: str(o, "errorType", where),
     message: str(o, "message", where),
@@ -2122,6 +2184,8 @@ export function decodeSystemFailure(v: unknown, where: string): SystemFailure {
     resolvedAtMs: num(o, "resolvedAtMs", where),
     itemUuid: str(o, "itemUuid", where),
   };
+  if (o.sessionResume !== undefined) failure.sessionResume = decodeSessionResumeFailure(o.sessionResume, `${where}.sessionResume`);
+  return failure;
 }
 
 const COMMAND_ACK_KEYS = new Set([
