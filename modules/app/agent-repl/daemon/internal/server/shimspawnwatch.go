@@ -43,6 +43,10 @@ type spawnedShim struct {
 	stderrTail func() string
 	// died is closed when the process is reaped WITHOUT having connected.
 	died chan struct{}
+	// diedAfterConnect receives the reap evidence when this generation exits
+	// after connecting. It stays silent for a pre-connect spawn failure so the
+	// two failure owners cannot both claim one process exit.
+	diedAfterConnect chan shimclient.ShimExit
 	// connected latches the moment the daemon took this session's shim
 	// connection.
 	connected bool
@@ -53,6 +57,7 @@ type spawnedShim struct {
 }
 
 var _ shimclient.ShimDeaths = (*ShimSpawnWatch)(nil)
+var _ shimclient.ShimExits = (*ShimSpawnWatch)(nil)
 
 // NewShimSpawnWatch builds a watch. connected may be nil (the watch then relies
 // on its own Connected mark alone); a nil logf discards.
@@ -72,7 +77,11 @@ func (w *ShimSpawnWatch) Spawned(sessionID string, stderrTail func() string) {
 		stderrTail = func() string { return "" }
 	}
 	w.mu.Lock()
-	w.sessions[sessionID] = &spawnedShim{stderrTail: stderrTail, died: make(chan struct{})}
+	w.sessions[sessionID] = &spawnedShim{
+		stderrTail:       stderrTail,
+		died:             make(chan struct{}),
+		diedAfterConnect: make(chan shimclient.ShimExit, 1),
+	}
 	w.mu.Unlock()
 	w.logf("server: session %s: shim spawn watch armed — an exit before this shim connects will fail the bring-up immediately", sessionID)
 }
@@ -131,10 +140,13 @@ func (w *ShimSpawnWatch) Exited(sessionID string, waitErr error) error {
 	}
 	sh.exited = true
 	if alreadyConnected {
-		// NOT published as a death: `died` means "never connected", and a shim
-		// that connected and later exited is the reconnect loop's business, not
-		// a spawn failure. Firing here would make a reattach report a bring-up
-		// that never failed.
+		// A dead process cannot reattach. Publish the process-owned evidence on
+		// the post-connect channel, leaving the pre-connect death channel silent.
+		sh.diedAfterConnect <- shimclient.ShimExit{
+			Description: shim.ExitDescription(waitErr),
+			ExitCode:    shim.ExitCode(waitErr),
+			StderrTail:  tail,
+		}
 		w.logf("server: session %s: the daemon-spawned shim exited (%s) AFTER connecting", sessionID, shim.ExitDescription(waitErr))
 		return nil
 	}
@@ -146,6 +158,18 @@ func (w *ShimSpawnWatch) Exited(sessionID string, waitErr error) error {
 	w.logf("server: session %s: SHIM SPAWN FAILURE — %v; shim stderr tail: %s", sessionID, sh.failure, tailOrNone(tail))
 	close(sh.died)
 	return sh.failure
+}
+
+// DiedAfterConnect implements shimclient.ShimExits. A nil channel means this
+// daemon owns no process generation for the session.
+func (w *ShimSpawnWatch) DiedAfterConnect(sessionID string) <-chan shimclient.ShimExit {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	sh, ok := w.sessions[sessionID]
+	if !ok {
+		return nil
+	}
+	return sh.diedAfterConnect
 }
 
 // DiedBeforeConnect implements shimclient.ShimDeaths.

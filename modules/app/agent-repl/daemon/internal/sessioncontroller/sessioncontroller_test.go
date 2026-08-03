@@ -60,14 +60,6 @@ type fakeSpawner struct {
 	// resume is the vendor conversation pointer each session would be spawned
 	// with.
 	resume map[string]string
-	// staleDropped is reported by the NEXT EnsureShim, standing in for the
-	// spawner's validate-before-resume repair.
-	staleDropped string
-	// drops is a tripwire proving recovery never clears durable identity through
-	// the legacy concrete-only DropResume method.
-	drops []string
-	// dropErr, when set, makes every drop fail.
-	dropErr error
 	// entered / gate, when set, park every EnsureShim: entry is announced on
 	// entered and the call blocks until gate closes. That is how a test holds
 	// a bring-up mid-flight (past its entry closed-check) without a sleep.
@@ -78,8 +70,7 @@ type fakeSpawner struct {
 func (s *fakeSpawner) EnsureShim(_ context.Context, sessionID string) (SpawnResult, error) {
 	s.mu.Lock()
 	s.calls = append(s.calls, sessionID)
-	res := SpawnResult{StaleResumeDropped: s.staleDropped, Resumed: s.resume[sessionID]}
-	s.staleDropped = ""
+	res := SpawnResult{Resumed: s.resume[sessionID]}
 	entered, gate := s.entered, s.gate
 	s.mu.Unlock()
 	if entered != nil {
@@ -91,35 +82,12 @@ func (s *fakeSpawner) EnsureShim(_ context.Context, sessionID string) (SpawnResu
 	return res, s.err
 }
 
-// DropResume clears the fake's resume pointer. It remains outside the Spawner
-// interface as a test tripwire for any accidental legacy recovery call.
-func (s *fakeSpawner) DropResume(sessionID string) (string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.dropErr != nil {
-		return "", s.dropErr
-	}
-	dropped := s.resume[sessionID]
-	s.drops = append(s.drops, sessionID)
-	if s.resume != nil {
-		delete(s.resume, sessionID)
-	}
-	return dropped, nil
-}
-
 func (s *fakeSpawner) StopShim(sessionID string, hintPID int32) error {
 	s.mu.Lock()
 	s.stopped = append(s.stopped, sessionID)
 	s.stopPIDs = append(s.stopPIDs, hintPID)
 	s.mu.Unlock()
 	return s.stopErr
-}
-
-// dropCalls returns every accidental legacy DropResume call.
-func (s *fakeSpawner) dropCalls() []string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return append([]string(nil), s.drops...)
 }
 
 // stoppedSessions returns every session the spawner was asked to stop, taken

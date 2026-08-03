@@ -2,7 +2,13 @@ import { afterEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { parseArgs, probeQueryOptions, realQueryOptions, validateUdsLoggingArgs } from "../src/main.js";
+import {
+  makeUdsQueryFactory,
+  parseArgs,
+  probeQueryOptions,
+  realQueryOptions,
+  validateUdsLoggingArgs,
+} from "../src/main.js";
 import { METAPROMPT_REL_PATH } from "../src/metaprompt.js";
 
 const metapromptRoots: string[] = [];
@@ -108,6 +114,15 @@ describe("realQueryOptions", () => {
     expect(full.resume).toBe("cli-1");
   });
 
+  it("passes the UDS session-owned abort controller to the Agent SDK", () => {
+    // Arrange
+    const abortController = new AbortController();
+    // Act
+    const opts = realQueryOptions(parseArgs(["--session-id", "s1"]), noopCanUse, abortController);
+    // Assert
+    expect(opts.abortController).toBe(abortController);
+  });
+
   it("omits empty and synthetic model overrides identically", () => {
     // Arrange / Act
     const empty = realQueryOptions(
@@ -154,6 +169,23 @@ describe("probeQueryOptions", () => {
     const opts = probeQueryOptions(parseArgs(["--session-id", "s1"]), controller);
     // Assert
     expect(opts.abortController).toBe(controller);
+  });
+});
+
+describe("makeUdsQueryFactory", () => {
+  it("gives fake UDS query shutdown one abort capability that ends its stream", async () => {
+    // Arrange
+    const factory = makeUdsQueryFactory(parseArgs(["--fake", "--session-id", "s1"]));
+    const prompt = (async function* () {})() as never;
+    const canUseTool = (async () => ({ behavior: "allow" as const, updatedInput: {} })) as never;
+    const owned = factory(prompt, canUseTool);
+    const iterator = owned.query[Symbol.asyncIterator]();
+    await iterator.next(); // fake SDK init
+    const next = iterator.next();
+    // Act
+    owned.abort();
+    // Assert
+    await expect(next).resolves.toMatchObject({ done: true });
   });
 });
 

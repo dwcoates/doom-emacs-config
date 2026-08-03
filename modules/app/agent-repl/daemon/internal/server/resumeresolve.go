@@ -6,7 +6,6 @@ import (
 
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/registry"
-	"claude-repld/internal/session"
 )
 
 // ConversationResolver answers "which conversation belongs to this workspace?"
@@ -21,29 +20,22 @@ import (
 // fully intact transcripts and nothing noticed, because "I have no pointer"
 // and "start me fresh" were indistinguishable on the wire.
 //
-// The resolution rule is: the NEWEST conversation at this (config_dir, cwd)
-// whose transcript actually exists on disk, excluding conversations the user
-// deliberately deleted.
+// The resolution rule is: the NEWEST conversation at this (config_dir, cwd),
+// excluding conversations the user deliberately deleted. Transcript viability
+// belongs exclusively to CreateSession's shared resume gate, which makes
+// CONTINUE, explicit create, and automatic restoration reject the same
+// unavailable target rather than letting any path start fresh.
 type ConversationResolver struct {
 	// Reg is the persistent session registry (required).
 	Reg *registry.Registry
 	// Logf receives the resolution account. Optional.
 	Logf func(string, ...any)
-	// transcriptExists is session.TranscriptExists, injected for tests.
-	transcriptExists func(configDir, cwd, claudeSessionID string) (string, bool)
 }
 
 func (r *ConversationResolver) logf(format string, args ...any) {
 	if r != nil && r.Logf != nil {
 		r.Logf(format, args...)
 	}
-}
-
-func (r *ConversationResolver) exists(configDir, cwd, csid string) (string, bool) {
-	if r.transcriptExists != nil {
-		return r.transcriptExists(configDir, cwd, csid)
-	}
-	return session.TranscriptExists(configDir, cwd, csid)
 }
 
 // ObservedClaudeSessionID reports the vendor uuid currently on sessionID's
@@ -77,18 +69,11 @@ type resumeCandidate struct {
 // ResolveResume returns the vendor conversation uuid a create for this
 // (configDir, cwd) should resume, and whether one was found. A false return is
 // the honest "this workspace has no conversation yet" — the caller starts
-// fresh, which is correct for a brand-new workspace and for one whose every
-// transcript has been deleted out from under it.
-//
-// THE ON-DISK CHECK IS THE LOAD-BEARING PART, and it is why this can be
-// resolved late rather than guarded early. The CLI hard-exits when asked to
-// --resume a transcript that does not exist, so the danger has always been
-// pointing at a conversation the vendor never actually wrote. The daemon used
-// to defend against that by REFUSING TO WRITE DOWN a uuid until a turn proved
-// the vendor had written the file (the "adopt late" hold). Checking the disk
-// here is strictly stronger: it consults the same authority, but at the moment
-// the answer is used rather than at the moment it was first guessed, so a
-// stale or never-written uuid is skipped instead of poisoning the record.
+// fresh only when the registry names no eligible conversation. Transcript
+// viability is intentionally not checked here: returning the newest durable
+// identity gives the shared create gate the exact UUID it must either resume
+// or reject. Skipping a missing target here would turn a recorded conversation
+// into an unmarked fresh start before that gate runs.
 func (r *ConversationResolver) ResolveResume(configDir, cwd string) (string, bool) {
 	if r == nil || r.Reg == nil || cwd == "" {
 		return "", false
@@ -106,20 +91,10 @@ func (r *ConversationResolver) ResolveResume(configDir, cwd string) (string, boo
 		return candidates[i].createdAt.After(candidates[j].createdAt)
 	})
 
-	for _, c := range candidates {
-		path, ok := r.exists(configDir, cwd, c.claudeSessionID)
-		if !ok {
-			r.logf("resume-resolve: SKIPPING uuid=%s (%s) for cwd=%q — no transcript at %s; the vendor never wrote this conversation, so --resume would hard-exit",
-				c.claudeSessionID, c.source, cwd, path)
-			continue
-		}
-		r.logf("resume-resolve: cwd=%q config_dir=%q RESUMES uuid=%s (%s, created_at=%s) — transcript present at %s",
-			cwd, configDir, c.claudeSessionID, c.source, c.createdAt.Format(time.RFC3339), path)
-		return c.claudeSessionID, true
-	}
-
-	r.logf("resume-resolve: %d conversation(s) on record for cwd=%q but NO transcript survives on disk — this create starts fresh", len(candidates), cwd)
-	return "", false
+	candidate := candidates[0]
+	r.logf("resume-resolve: cwd=%q config_dir=%q SELECTS uuid=%s (%s, created_at=%s) — CreateSession validates the exact target before spawn",
+		cwd, configDir, candidate.claudeSessionID, candidate.source, candidate.createdAt.Format(time.RFC3339))
+	return candidate.claudeSessionID, true
 }
 
 // candidates gathers every conversation the registry knows for this location,

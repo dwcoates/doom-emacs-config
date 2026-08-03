@@ -195,6 +195,10 @@ type Config struct {
 	// process — the daemon's listener adapter and its spawn watch are the same
 	// object, so binding it here costs no extra seam in the layers between.
 	ShimDeaths ShimDeaths
+	// ShimExits reports the death of a daemon-owned shim after it connected.
+	// It is separate from ShimDeaths because bring-up failure and loss of an
+	// established process have different owners and different responses.
+	ShimExits ShimExits
 
 	// DaemonVersion / ProtocolVersion travel in DaemonHello; ProtocolVersion
 	// must equal the shim's or the handshake fails with ErrVersionMismatch.
@@ -352,6 +356,11 @@ type Client struct {
 	// (replay.go). Its own registry, not `pending`: a replay is a STREAM
 	// closed by a ReplayDone, not a one-shot Ack.
 	replays *replayRegistry
+
+	// connectedOnce is owned by Run's goroutine. Once true, every subsequent
+	// connection wait races the live process's exit event so a dead process can
+	// never leave the reconnect loop waiting for a dial that cannot occur.
+	connectedOnce bool
 }
 
 // activeConn is the mutable per-connection state.
@@ -397,6 +406,11 @@ func New(cfg Config) *Client {
 	if cfg.ShimDeaths == nil {
 		if deaths, ok := cfg.Source.(ShimDeaths); ok {
 			cfg.ShimDeaths = deaths
+		}
+	}
+	if cfg.ShimExits == nil {
+		if exits, ok := cfg.Source.(ShimExits); ok {
+			cfg.ShimExits = exits
 		}
 	}
 	logf := dlog.Tag(cfg.Logf, "component", "shimclient", "session", cfg.SessionID)
@@ -514,7 +528,7 @@ func (c *Client) Run(ctx context.Context) error {
 			}
 		case errors.Is(err, ErrVersionMismatch), errors.Is(err, ErrSeqRegression),
 			errors.Is(err, ErrHandshakeRejected), errors.Is(err, ErrLifecycleRejected),
-			errors.Is(err, ErrTurnClaimRejected):
+			errors.Is(err, ErrTurnClaimRejected), errors.Is(err, ErrShimDiedAfterConnect):
 			c.logf("terminal protocol error, not reconnecting: %v", err)
 			return err
 		default:
@@ -524,9 +538,20 @@ func (c *Client) Run(ctx context.Context) error {
 			return nil
 		}
 		c.logf("reconnecting to live shim in %s (reattach, resume from seq=%d)", backoff, c.lastSeen)
+		var died <-chan ShimExit
+		if c.connectedOnce && c.cfg.ShimExits != nil {
+			died = c.cfg.ShimExits.DiedAfterConnect(c.cfg.SessionID)
+		}
 		select {
 		case <-ctx.Done():
 			return nil
+		case exit := <-died:
+			if ctx.Err() != nil {
+				return nil
+			}
+			err := c.afterConnectDeathError(exit)
+			c.logf("terminal shim process death, not reconnecting: %v", err)
+			return err
 		case <-time.After(backoff):
 		}
 		backoff *= 2
@@ -545,10 +570,11 @@ func (c *Client) runOnce(ctx context.Context) (retErr error) {
 		return errors.New("shimclient: no ConnSource configured")
 	}
 	c.logf("awaiting shim connection")
-	conn, hello, err := c.cfg.Source.Next(ctx, c.cfg.SessionID)
+	conn, hello, err := c.nextConnection(ctx)
 	if err != nil {
 		return err
 	}
+	c.connectedOnce = true
 
 	ac := &activeConn{conn: conn, hello: hello, pending: make(map[string]chan ackResult), health: make(map[string]chan healthResult)}
 
@@ -651,6 +677,43 @@ func (c *Client) runOnce(ctx context.Context) (retErr error) {
 	// come.
 	c.replays.failAll(fmt.Sprintf("shim connection closed: %v", retErr))
 	return retErr
+}
+
+type connectionResult struct {
+	conn  net.Conn
+	hello *corev1.ShimHello
+	err   error
+}
+
+// nextConnection waits on the transport and, after the process has connected
+// once, on that process's exit event. The derived context makes the losing
+// transport wait stop immediately, so the observer adds no goroutine leak.
+func (c *Client) nextConnection(ctx context.Context) (net.Conn, *corev1.ShimHello, error) {
+	if !c.connectedOnce || c.cfg.ShimExits == nil {
+		return c.cfg.Source.Next(ctx, c.cfg.SessionID)
+	}
+	died := c.cfg.ShimExits.DiedAfterConnect(c.cfg.SessionID)
+	if died == nil {
+		return c.cfg.Source.Next(ctx, c.cfg.SessionID)
+	}
+	nextCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	result := make(chan connectionResult, 1)
+	go func() {
+		conn, hello, err := c.cfg.Source.Next(nextCtx, c.cfg.SessionID)
+		result <- connectionResult{conn: conn, hello: hello, err: err}
+	}()
+	select {
+	case <-ctx.Done():
+		return nil, nil, ctx.Err()
+	case exit := <-died:
+		if ctx.Err() != nil {
+			return nil, nil, ctx.Err()
+		}
+		return nil, nil, c.afterConnectDeathError(exit)
+	case got := <-result:
+		return got.conn, got.hello, got.err
+	}
 }
 
 // checkVersion refuses an incompatible shim BEFORE any other stage of the gate

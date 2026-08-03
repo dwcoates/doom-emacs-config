@@ -1080,13 +1080,60 @@ const frontendProtocolVersion = "1"
 // Callers map it to their transport — HTTP a 422 with the structured body, UDS a
 // loud CommandAck error — rather than silently downgrading to a fresh session.
 type ResumeTranscriptMissingError struct {
-	ResumeID      string
-	SearchedPaths []string
+	ResumeID          string
+	CWD               string
+	ConfigDir         string
+	ResolvedConfigDir string
+	TranscriptPath    string
+	SearchedPaths     []string
 }
 
 func (e *ResumeTranscriptMissingError) Error() string {
 	return fmt.Sprintf("resume target %s has no transcript in this daemon's config dir (searched %s); refusing to start a fresh conversation",
 		e.ResumeID, strings.Join(e.SearchedPaths, ", "))
+}
+
+// validateResumeTarget is the sole resume-viability gate. Every path that
+// names a Claude conversation delegates here before it can launch a shim.
+// A non-empty resume target is a continuity commitment: it either names a
+// readable transcript under the session's recorded config root and cwd, or
+// the operation fails without starting a different conversation.
+func validateResumeTarget(opts CreateOpts, skip bool) *ResumeTranscriptMissingError {
+	if opts.Resume == "" || skip {
+		return nil
+	}
+	resolvedConfigDir := session.ClaudeConfigDir(opts.ConfigDir)
+	path, ok := session.TranscriptExists(opts.ConfigDir, opts.CWD, opts.Resume)
+	if ok {
+		return nil
+	}
+	return &ResumeTranscriptMissingError{
+		ResumeID:          opts.Resume,
+		CWD:               opts.CWD,
+		ConfigDir:         opts.ConfigDir,
+		ResolvedConfigDir: resolvedConfigDir,
+		TranscriptPath:    path,
+		SearchedPaths:     []string{path},
+	}
+}
+
+// logResumeContinuityFailure emits the one ownership-point diagnostic for a
+// failed exact resume. Propagation layers return the typed error unchanged and
+// never log it again.
+func logResumeContinuityFailure(logf func(string, ...any), operation, sessionID string, opts CreateOpts, missing *ResumeTranscriptMissingError) {
+	dlog.Tag(dlog.Logf(logf),
+		"event", "resume_continuity_failure",
+		"operation", operation,
+		"decision", "hard_fail",
+		"reason", "transcript_missing_or_unreadable",
+		"agent_repl_session_id", sessionID,
+		"claude_session_id", missing.ResumeID,
+		"cwd", missing.CWD,
+		"config_dir", missing.ConfigDir,
+		"resolved_config_dir", missing.ResolvedConfigDir,
+		"transcript_path", missing.TranscriptPath,
+		"fake", opts.Fake,
+	)("Claude resume rejected because its transcript is unavailable")
 }
 
 // InvalidCreateError reports a malformed create request (currently only an
@@ -1147,12 +1194,9 @@ func (s *Server) CreateSession(_ context.Context, opts CreateOpts) (string, erro
 	// downgrading to a FRESH conversation buries a genuinely lost session, so
 	// HARD-FAIL the create before bringing anything up. Fake sessions skip the
 	// gate — the scripted SDK has no transcripts by design.
-	if opts.Resume != "" && !opts.Fake && !s.forceFake {
-		if path, ok := session.TranscriptExists(opts.ConfigDir, opts.CWD, opts.Resume); !ok {
-			s.logf("session create REJECTED: resume target %s has no transcript at %s — hard-failing so the client opens an investigation workspace",
-				opts.Resume, path)
-			return "", &ResumeTranscriptMissingError{ResumeID: opts.Resume, SearchedPaths: []string{path}}
-		}
+	if missing := validateResumeTarget(opts, opts.Fake || s.forceFake); missing != nil {
+		logResumeContinuityFailure(s.logf, "session_create", "", opts, missing)
+		return "", missing
 	}
 	// A workspace takes exactly one live session and a transcript exactly one
 	// writer, and this create is the newest claim on both, so any older

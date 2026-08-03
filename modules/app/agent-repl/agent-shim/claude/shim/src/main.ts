@@ -25,13 +25,21 @@ import { realpathSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { bindLog, configureLog, emergencyStderr } from "./uds/log.js";
-import { UdsSession } from "./uds/uds-session.js";
+import {
+  UdsSession,
+  isUnexpectedSdkStreamTerminationError,
+  type UdsQuery,
+} from "./uds/uds-session.js";
 import { acquireSessionLock } from "./uds/session-lock.js";
 import { SessionSource } from "./uds/proto.js";
 import { FAKE_COMMANDS, createFakeQuery } from "./fake-query.js";
 import { importRealSDK } from "./vendor-guard.js";
 import { normalizeOptionalModel } from "./model.js";
 import { systemPromptOption } from "./metaprompt.js";
+import type {
+  SubscriptionUsageQuery,
+  SubscriptionUsageResponse,
+} from "./subscription-usage.js";
 import {
   ModelInfo,
   PermissionMode,
@@ -191,6 +199,7 @@ function packageVersion(spec: string): string {
 export function realQueryOptions(
   args: CliArgs,
   canUseTool: CanUseToolLike,
+  abortController?: AbortController,
 ): Record<string, unknown> {
   const model = normalizeOptionalModel(args.model);
   return {
@@ -205,6 +214,7 @@ export function realQueryOptions(
     ...(args.cwd !== undefined ? { cwd: args.cwd } : {}),
     ...(model !== undefined ? { model } : {}),
     ...(args.resume !== undefined ? { resume: args.resume } : {}),
+    ...(abortController !== undefined ? { abortController } : {}),
   };
 }
 
@@ -212,11 +222,12 @@ async function realQueryFactory(
   args: CliArgs,
   prompt: AsyncIterable<SdkUserMessageLike>,
   canUseTool: CanUseToolLike,
+  abortController?: AbortController,
 ): Promise<QueryLike> {
   const sdk = await importRealSDK("realQueryFactory");
   return sdk.query({
     prompt: prompt as never,
-    options: realQueryOptions(args, canUseTool) as never,
+    options: realQueryOptions(args, canUseTool, abortController) as never,
   }) as unknown as QueryLike;
 }
 
@@ -300,6 +311,48 @@ export function makeCreateQuery(args: CliArgs): SessionDeps["createQuery"] {
   };
 }
 
+/**
+ * Construct the one query owned by a UDS shim session.
+ *
+ * The streaming SDK has no Query.close() method. Its AbortController is the
+ * query's sole lifecycle capability, so only UdsSession receives the abort
+ * function and only its intentional shutdown path can invoke it.
+ */
+export function makeUdsQueryFactory(args: CliArgs): (
+  prompt: AsyncIterable<SdkUserMessageLike>,
+  canUseTool: CanUseToolLike,
+) => UdsQuery {
+  return (prompt, canUseTool): UdsQuery => {
+    const abortController = new AbortController();
+    if (args.fake) {
+      const query = createFakeQuery(prompt, canUseTool, {
+        sessionId: args.sessionId,
+        newUuid: randomUUID,
+        ...(args.resume !== undefined ? { resume: args.resume } : {}),
+        abortSignal: abortController.signal,
+      });
+      return {
+        query,
+        subscriptionUsage: async (): Promise<SubscriptionUsageResponse> => ({
+          subscription_type: null,
+          rate_limits_available: false,
+          rate_limits: null,
+        }),
+        abort: () => abortController.abort(),
+      };
+    }
+    const queryPromise = realQueryFactory(args, prompt, canUseTool, abortController);
+    return {
+      query: lazyQuery(queryPromise),
+      subscriptionUsage: async (): Promise<SubscriptionUsageResponse> => {
+        const query = await queryPromise as QueryLike & SubscriptionUsageQuery;
+        return query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET();
+      },
+      abort: () => abortController.abort(),
+    };
+  };
+}
+
 export async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
 
@@ -342,7 +395,7 @@ export async function main(): Promise<void> {
   LOGGER.log({ agent_repl_session_id: args.sessionId, query_source: args.fake ? "fake" : "vendor-sdk" }, "selecting shim query implementation");
   if (sdkModulePromise) await sdkModulePromise;
 
-  const createQuery = makeCreateQuery(args);
+  const createQuery = makeUdsQueryFactory(args);
 
   await runUdsMode(args, createQuery);
 }
@@ -353,7 +406,13 @@ export async function main(): Promise<void> {
  * §4.4), and there is no stdin, so stdin-EOF is not a stop path. The explicit
  * stop path is SIGTERM/SIGINT, which cleanly shuts the session down.
  */
-async function runUdsMode(args: CliArgs, createQuery: SessionDeps["createQuery"]): Promise<void> {
+export async function runUdsMode(
+  args: CliArgs,
+  createQuery: (
+    prompt: AsyncIterable<SdkUserMessageLike>,
+    canUseTool: CanUseToolLike,
+  ) => UdsQuery,
+): Promise<void> {
   // Claim the session BEFORE anything else. Uniqueness used to come free from
   // binding session-<id>.sock — a second shim could not exist. Dialling out
   // removes that, and two shims on one conversation means two writers on one
@@ -385,16 +444,33 @@ async function runUdsMode(args: CliArgs, createQuery: SessionDeps["createQuery"]
     createQuery,
     newRequestId: randomUUID,
   });
-  let stopping = false;
+  let stopping: Promise<void> | null = null;
   const stop = (sig: string): void => {
-    if (stopping) return;
-    stopping = true;
+    if (stopping !== null) return;
     LOGGER.log({ agent_repl_session_id: args.sessionId, signal: sig }, "received shutdown signal");
-    void session.shutdown(sig).finally(() => process.exit(0));
+    stopping = session.shutdown(sig);
   };
-  process.on("SIGTERM", () => stop("SIGTERM"));
-  process.on("SIGINT", () => stop("SIGINT"));
-  await session.start();
+  const onSigterm = (): void => stop("SIGTERM");
+  const onSigint = (): void => stop("SIGINT");
+  process.on("SIGTERM", onSigterm);
+  process.on("SIGINT", onSigint);
+  try {
+    await session.start();
+    if (stopping === null) {
+      throw new Error("UDS session completed without an intentional shutdown signal");
+    }
+    await stopping;
+  } catch (err) {
+    if (stopping !== null) {
+      await stopping;
+      return;
+    }
+    throw err;
+  } finally {
+    process.off("SIGTERM", onSigterm);
+    process.off("SIGINT", onSigint);
+    releaseLock();
+  }
 }
 
 /** Adapt a Promise<QueryLike> to the synchronous QueryLike surface. */
@@ -447,7 +523,7 @@ const isDirectRun =
   process.argv[1] !== undefined && import.meta.url === invokedAs(process.argv[1]);
 if (isDirectRun) {
   main().catch((err: unknown) => {
-    reportFatal(err);
+    if (!isUnexpectedSdkStreamTerminationError(err)) reportFatal(err);
     process.exit(1);
   });
 }

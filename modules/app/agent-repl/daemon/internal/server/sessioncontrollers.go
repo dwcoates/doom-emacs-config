@@ -25,7 +25,6 @@ import (
 
 	"claude-repld/internal/frontend"
 	"claude-repld/internal/registry"
-	"claude-repld/internal/session"
 	"claude-repld/internal/sessioncontroller"
 	"claude-repld/internal/sessionlock"
 	"claude-repld/internal/shim"
@@ -107,6 +106,7 @@ type ShimConnSource struct {
 }
 
 var _ shimclient.ShimDeaths = (*ShimConnSource)(nil)
+var _ shimclient.ShimExits = (*ShimConnSource)(nil)
 
 // DiedBeforeConnect implements shimclient.ShimDeaths by delegating to the
 // spawn watch, so the client picks the seam up from its ConnSource without
@@ -124,6 +124,16 @@ func (s *ShimConnSource) SpawnState(sessionID string) shimclient.ShimSpawnState 
 		return shimclient.ShimSpawnState{}
 	}
 	return s.Deaths.SpawnState(sessionID)
+}
+
+// DiedAfterConnect implements shimclient.ShimExits by delegating to the
+// daemon-owned process watch. A surviving shim from another daemon has no
+// local process handle and therefore no exit channel.
+func (s *ShimConnSource) DiedAfterConnect(sessionID string) <-chan shimclient.ShimExit {
+	if s.Deaths == nil {
+		return nil
+	}
+	return s.Deaths.DiedAfterConnect(sessionID)
 }
 
 var _ shimclient.ConnSource = (*ShimConnSource)(nil)
@@ -233,14 +243,12 @@ func NewShimSpawner(reg *registry.Registry, connected ConnectedFunc, evict Evict
 // paper over. Spawning a second one is the exact duplicate this prevents, and
 // killing the holder would destroy the in-flight turn §4.4 protects.
 //
-// VALIDATE BEFORE RESUME. A record can name a conversation that does not
-// exist — a uuid adopted before the vendor wrote anything, a transcript
-// deleted underneath us, a config dir that moved. Handing that to the CLI is
-// an immediate exit 1, and the shim's death during bring-up used to leave the
-// workspace in `starting` with nothing to explain it. So the pointer is
-// checked against the disk here, and a missing transcript starts the session
-// FRESH with the pointer dropped and the drop reported to the caller, which
-// owes the user a feed note about the history that is not coming back.
+// VALIDATE BEFORE RESUME. A record can name a conversation that no longer
+// exists — a uuid adopted before the vendor wrote anything, a transcript
+// deleted underneath us, or a config dir that moved. Handing that to the CLI
+// is an immediate exit 1. The shared resume-viability gate rejects that state
+// before spawn while leaving the durable identity untouched, so restoration
+// can never become a different fresh conversation.
 func (s *ShimSpawner) EnsureShim(ctx context.Context, sessionID string) (sessioncontroller.SpawnResult, error) {
 	var res sessioncontroller.SpawnResult
 	if s.reg == nil {
@@ -270,19 +278,6 @@ func (s *ShimSpawner) EnsureShim(ctx context.Context, sessionID string) (session
 	if !ok {
 		return res, fmt.Errorf("server: session %s has no registry record; cannot spawn its UDS shim", sessionID)
 	}
-	resume := rec.ClaudeSessionID
-	if resume != "" {
-		if path, exists := session.TranscriptExists(rec.ConfigDir, rec.CWD, resume); !exists {
-			s.logf("server: session %s: STALE RESUME POINTER — the record names vendor conversation %s but no transcript exists at %s; dropping the pointer and starting FRESH rather than handing the CLI a --resume it will exit 1 on",
-				sessionID, resume, path)
-			dropped, dropErr := s.DropResume(sessionID)
-			if dropErr != nil {
-				return res, dropErr
-			}
-			res.StaleResumeDropped = dropped
-			resume = ""
-		}
-	}
 	model := registry.NormalizeModel(rec.Model)
 	if model != rec.Model {
 		s.logf("server: session %s: normalized legacy record model marker %q to empty for respawn (shim chooses)",
@@ -293,10 +288,14 @@ func (s *ShimSpawner) EnsureShim(ctx context.Context, sessionID string) (session
 		Model:          model,
 		PermissionMode: rec.PermissionMode,
 		ConfigDir:      rec.ConfigDir,
-		Resume:         resume,
+		Resume:         rec.ClaudeSessionID,
 	}
-	res.Resumed = resume
-	s.logf("server: session %s: no live shim — spawning fresh UDS shim (resume=%q)", sessionID, resume)
+	if missing := validateResumeTarget(opts, false); missing != nil {
+		logResumeContinuityFailure(s.logf, "automatic_restore", sessionID, opts, missing)
+		return res, missing
+	}
+	res.Resumed = opts.Resume
+	s.logf("server: session %s: no live shim — spawning UDS shim (resume=%q)", sessionID, opts.Resume)
 	stop, err := s.spawn(sessionID, opts)
 	if err != nil {
 		return res, err
@@ -312,9 +311,10 @@ func (s *ShimSpawner) EnsureShim(ctx context.Context, sessionID string) (session
 // DropResume clears the session's vendor conversation pointer so the next spawn
 // starts fresh, reporting what it dropped.
 //
-// A write failure is SURFACED rather than swallowed: leaving a pointer standing
-// that the daemon has already decided not to honour would make the next
-// bring-up repeat the same failed resume, which is the loop this exists to end.
+// This is an explicit administrative operation. Automatic restoration never
+// calls it: an invalid resume target hard-fails without mutating durable
+// identity. A write failure is surfaced so callers cannot mistake an unchanged
+// record for a successful administrative reset.
 func (s *ShimSpawner) DropResume(sessionID string) (string, error) {
 	if s.reg == nil {
 		return "", fmt.Errorf("server: ShimSpawner has no registry; cannot drop session %s's resume pointer", sessionID)
@@ -325,7 +325,7 @@ func (s *ShimSpawner) DropResume(sessionID string) (string, error) {
 		rec.ClaudeSessionID = ""
 	})
 	if err != nil {
-		return "", fmt.Errorf("server: session %s: dropping the stale resume pointer FAILED — the next bring-up would repeat the same failed resume: %w", sessionID, err)
+		return "", fmt.Errorf("server: session %s: dropping the resume pointer failed: %w", sessionID, err)
 	}
 	if !found {
 		return "", fmt.Errorf("server: session %s: dropping the resume pointer found no record (never registered)", sessionID)
