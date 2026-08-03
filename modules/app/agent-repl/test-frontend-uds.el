@@ -727,6 +727,49 @@ workspace open."
         (should-not (seq-find (lambda (m) (string-match-p "no handler registered" m))
                               logged))))))
 
+(ert-deftest agent-repl-test-uds-workspace-roster-is-a-known-frame ()
+  "The `workspaceRoster' broadcast echo is a recognized frame field.
+The daemon broadcasts the roster to every connected client, including
+the Emacs host client that published it, so an unregistered arm surfaced
+as a user-visible malformed-frame error on every roster publish."
+  ;; Act / Assert
+  (should (member "workspaceRoster" agent-repl--uds-known-frame-fields)))
+
+(ert-deftest agent-repl-test-uds-workspace-roster-is-a-deliberately-ignored-frame ()
+  "`workspaceRoster' is declared ignored: Emacs is the roster's sole author."
+  ;; Act / Assert
+  (should (member "workspaceRoster" agent-repl--uds-ignored-frame-fields)))
+
+(ert-deftest agent-repl-test-uds-dispatch-workspace-roster-frame-returns-nil ()
+  "Dispatching a workspaceRoster frame is a no-op, not a signal."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    ;; Act / Assert
+    (should-not (agent-repl--uds-dispatch-frame
+                 '(:workspaceRoster (:workspaces [(:workspace "ws1")]))))))
+
+(ert-deftest agent-repl-test-uds-dispatch-workspace-roster-invokes-no-handler ()
+  "A workspaceRoster frame must reach no handler — the echo renders nothing."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    ;; Act
+    (agent-repl--uds-dispatch-frame '(:workspaceRoster (:workspaces [])))
+    ;; Assert
+    (should-not (assoc "workspaceRoster" agent-repl--uds-frame-handlers))))
+
+(ert-deftest agent-repl-test-uds-dispatch-workspace-roster-skips-unwired-warning ()
+  "A workspaceRoster frame must NOT log the unfinished-wiring message."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (logged)
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+        ;; Act
+        (agent-repl--uds-dispatch-frame '(:workspaceRoster (:workspaces [])))
+        ;; Assert
+        (should-not (seq-find (lambda (m) (string-match-p "no handler registered" m))
+                              logged))))))
+
 (ert-deftest agent-repl-test-uds-queue-commands-are-known ()
   "The three E4 queue control arms are in the command mirror."
   ;; Act / Assert
