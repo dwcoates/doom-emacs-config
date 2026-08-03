@@ -549,7 +549,6 @@ function TextStream(
   chip: ResultItem | null,
   panels?: PanelContext,
 ): string {
-  const cursor = item.done ? "" : `<span class="cursor">▍</span>`;
   // The async-quiescence invariant: a bubble owning LIVE async wears the
   // amber border and lists that work as selectable badges inside it (see
   // AsyncCatalog). Amber outranks the green final-response — the answer is
@@ -597,7 +596,7 @@ function TextStream(
       return renderMarkdown(seg.text);
     })
     .join("");
-  return Bubble(cls, `${body}${cursor}${catalog}${gns}`, item.ts, meta);
+  return Bubble(cls, `${body}${catalog}${gns}`, item.ts, meta);
 }
 
 function Thinking(item: ThinkingItem): string {
