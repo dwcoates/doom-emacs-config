@@ -3879,8 +3879,8 @@ without waiting for a hook fire."
         (delete-file snapshot-file)
         (delete-directory real-dir t)))))
 
-(ert-deftest agent-repl-cmd-test-snapshot-load/timeout-aborts-queue ()
-  "Per-entry watchdog aborts rather than treating a wedged workspace as ready."
+(ert-deftest agent-repl-cmd-test-snapshot-load/timeout-advances-to-next-entry ()
+  "Per-entry watchdog establishes the next queue entry instead of aborting."
   (agent-repl-test--with-clean-state
     (let ((snapshot-file (make-temp-file "agent-snap-"))
           (dir-a (make-temp-file "agent-proj-a-" t))
@@ -3903,14 +3903,152 @@ without waiting for a hook fire."
                       ((symbol-function 'cancel-timer) #'ignore))
               (agent-repl-load-workspace-snapshot)
               (should (equal established '("ws-a")))
-              ;; Fire the timeout for ws-a manually.
+              ;; Fire the timeout for ws-a manually; it surfaces the fault via
+              ;; `agent-repl--error' (which signals) after advancing the queue.
               (should-error
                (apply (car captured-timer-callback) (cdr captured-timer-callback)))
-              (should (equal established '("ws-a")))
-              (should-not agent-repl--snapshot-load-state)))
+              (should (equal (reverse established) '("ws-a" "ws-b")))))
         (delete-file snapshot-file)
         (delete-directory dir-a t)
         (delete-directory dir-b t)))))
+
+(ert-deftest agent-repl-cmd-test-snapshot-load/timeout-reflected-in-end-line ()
+  "A timed-out entry is reclassified out of `:loaded' into `:load-error'
+in the END accounting line."
+  (agent-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
+          (dir-a (make-temp-file "agent-proj-a-" t))
+          (log-lines nil)
+          captured-timer-callback)
+      (unwind-protect
+          (let ((agent-repl-workspace-snapshot-file snapshot-file))
+            (agent-repl--write-sexp-file snapshot-file `(("ws-a" . ,dir-a)))
+            (cl-letf (((symbol-function 'agent-repl--establish-workspace) #'ignore)
+                      ((symbol-function 'agent-repl--snapshot-load-ws-ready-p)
+                       (lambda (_ws) nil))
+                      ((symbol-function 'agent-repl--log)
+                       (lambda (_ws fmt &rest args)
+                         (when (stringp fmt)
+                           (push (apply #'format fmt args) log-lines))))
+                      ((symbol-function 'run-with-timer)
+                       (lambda (_secs _rep fn &rest args)
+                         (setq captured-timer-callback (cons fn args))
+                         'fake-timer))
+                      ((symbol-function 'timerp) (lambda (_t) nil))
+                      ((symbol-function 'cancel-timer) #'ignore))
+              (agent-repl-load-workspace-snapshot)
+              (should-error
+               (apply (car captured-timer-callback) (cdr captured-timer-callback)))
+              (should (cl-find-if
+                       (lambda (line)
+                         (string-match-p "snapshot-load: END loaded=0 skipped=0 load-error=1"
+                                         line))
+                       log-lines))))
+        (delete-file snapshot-file)
+        (delete-directory dir-a t)))))
+
+(ert-deftest agent-repl-cmd-test-snapshot-load/timeout-for-stale-ws-is-noop ()
+  "A watchdog fire for a ws the loader is no longer awaiting changes nothing."
+  (agent-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
+          (dir-a (make-temp-file "agent-proj-a-" t))
+          (dir-b (make-temp-file "agent-proj-b-" t))
+          (established nil)
+          captured-timer-callback)
+      (unwind-protect
+          (let ((agent-repl-workspace-snapshot-file snapshot-file))
+            (agent-repl--write-sexp-file snapshot-file
+                                          `(("ws-a" . ,dir-a) ("ws-b" . ,dir-b)))
+            (cl-letf (((symbol-function 'agent-repl--establish-workspace)
+                       (lambda (ws _dir) (push ws established)))
+                      ((symbol-function 'agent-repl--snapshot-load-ws-ready-p)
+                       (lambda (_ws) nil))
+                      ((symbol-function 'run-with-timer)
+                       (lambda (_secs _rep fn &rest args)
+                         (setq captured-timer-callback (cons fn args))
+                         'fake-timer))
+                      ((symbol-function 'timerp) (lambda (_t) nil))
+                      ((symbol-function 'cancel-timer) #'ignore))
+              (agent-repl-load-workspace-snapshot)
+              ;; Loader is awaiting ws-a; a stale watchdog for some other ws
+              ;; must neither advance the queue nor touch the counters.
+              (agent-repl--snapshot-load-timeout "ws-stale")
+              (should (equal established '("ws-a")))
+              (should (equal "ws-a"
+                             (plist-get agent-repl--snapshot-load-state :awaiting)))
+              (should (equal 0 (or (plist-get agent-repl--snapshot-load-state
+                                              :load-error)
+                                   0)))))
+        (delete-file snapshot-file)
+        (delete-directory dir-a t)
+        (delete-directory dir-b t)))))
+
+(ert-deftest agent-repl-cmd-test-snapshot-load/timeout-untags-restored-workspace ()
+  "The timed-out ws is dropped from `agent-repl--restored-workspaces'."
+  (agent-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
+          (dir-a (make-temp-file "agent-proj-a-" t))
+          (dir-b (make-temp-file "agent-proj-b-" t))
+          (agent-repl--restored-workspaces nil)
+          captured-timer-callback)
+      (unwind-protect
+          (let ((agent-repl-workspace-snapshot-file snapshot-file))
+            (agent-repl--write-sexp-file snapshot-file
+                                          `(("ws-a" . ,dir-a) ("ws-b" . ,dir-b)))
+            (cl-letf (((symbol-function 'agent-repl--establish-workspace) #'ignore)
+                      ((symbol-function 'agent-repl--snapshot-load-ws-ready-p)
+                       (lambda (_ws) nil))
+                      ((symbol-function 'run-with-timer)
+                       (lambda (_secs _rep fn &rest args)
+                         (setq captured-timer-callback (cons fn args))
+                         'fake-timer))
+                      ((symbol-function 'timerp) (lambda (_t) nil))
+                      ((symbol-function 'cancel-timer) #'ignore))
+              (agent-repl-load-workspace-snapshot)
+              (should (member "ws-a" agent-repl--restored-workspaces))
+              (should-error
+               (apply (car captured-timer-callback) (cdr captured-timer-callback)))
+              (should-not (member "ws-a" agent-repl--restored-workspaces))))
+        (delete-file snapshot-file)
+        (delete-directory dir-a t)
+        (delete-directory dir-b t)))))
+
+(ert-deftest agent-repl-cmd-test-snapshot-load/timeout-lets-remaining-entries-finish ()
+  "Every entry queued behind a timed-out one still establishes and the load ends."
+  (agent-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
+          (dir-a (make-temp-file "agent-proj-a-" t))
+          (dir-b (make-temp-file "agent-proj-b-" t))
+          (dir-c (make-temp-file "agent-proj-c-" t))
+          (established nil)
+          captured-timer-callback)
+      (unwind-protect
+          (let ((agent-repl-workspace-snapshot-file snapshot-file))
+            (agent-repl--write-sexp-file
+             snapshot-file
+             `(("ws-a" . ,dir-a) ("ws-b" . ,dir-b) ("ws-c" . ,dir-c)))
+            (cl-letf (((symbol-function 'agent-repl--establish-workspace)
+                       (lambda (ws _dir) (push ws established)))
+                      ;; ws-a wedges (never ready); ws-b and ws-c come up
+                      ;; already-ready so the tail runs to completion.
+                      ((symbol-function 'agent-repl--snapshot-load-ws-ready-p)
+                       (lambda (ws) (not (equal ws "ws-a"))))
+                      ((symbol-function 'run-with-timer)
+                       (lambda (_secs _rep fn &rest args)
+                         (setq captured-timer-callback (cons fn args))
+                         'fake-timer))
+                      ((symbol-function 'timerp) (lambda (_t) nil))
+                      ((symbol-function 'cancel-timer) #'ignore))
+              (agent-repl-load-workspace-snapshot)
+              (should (equal established '("ws-a")))
+              (should-error
+               (apply (car captured-timer-callback) (cdr captured-timer-callback)))
+              (should (equal (reverse established) '("ws-a" "ws-b" "ws-c")))
+              (should-not agent-repl--snapshot-load-state)))
+        (delete-file snapshot-file)
+        (delete-directory dir-a t)
+        (delete-directory dir-b t)
+        (delete-directory dir-c t)))))
 
 (ert-deftest agent-repl-cmd-test-snapshot-load/timeout-never-fires-synthetic-loaded-hook ()
   "Watchdog timeout does not invent a fully-loaded event for an unhealthy ws."
