@@ -290,8 +290,9 @@ type ClassifyResult struct {
 }
 
 // queueSubmitLocked decides what to do with a prompt submitted for d, and
-// reports whether it was QUEUED (true) or should be forwarded now (false).
-// Caller holds m.mu.
+// reports whether it was QUEUED (true) or should be forwarded now (false). A
+// non-nil error is a REFUSED submit: nothing was queued and nothing is to be
+// forwarded. Caller holds m.mu.
 //
 // The queue forms ONLY while a turn is running. With the session idle there is
 // nothing to hold the prompt behind, so it goes straight through and no queue
@@ -313,10 +314,22 @@ type ClassifyResult struct {
 // manager mutex. It is passed in rather than read here on purpose: the lease
 // engine calls back into this package to recompute its holds, so a read of the
 // engine underneath the manager mutex would invert the two locks.
-func (m *Manager) queueSubmitLocked(d *sessionController, requestID, text, permissionMode, leaseScheduleID string) (*queueEntry, bool) {
+func (m *Manager) queueSubmitLocked(d *sessionController, requestID, text, permissionMode, leaseScheduleID string) (*queueEntry, bool, error) {
 	if scheduleID := leaseScheduleID; scheduleID != "" {
 		e := newParkedEntry(newQueueEntryID(), requestID, text, permissionMode, m.now())
-		m.parkForDrain(d, e, scheduleID)
+		if err := m.parkForDrain(d, e, scheduleID); err != nil {
+			// THE SUBMIT IS REFUSED, NOT SILENTLY DEGRADED. The lease's whole
+			// promise to this prompt is that it is delayed rather than dropped,
+			// and the durable row is what carries that promise across the
+			// bounce. Without one the daemon can only keep the prompt in memory
+			// until the very bounce it is waiting for eats it — so the entry
+			// never joins the queue, and the submitter is told now, while they
+			// can still retype it, instead of being handed a success and
+			// discovering the loss after the deploy.
+			m.logf("session-controller: prompt submit REFUSED by the drain lease entry=%s ws=%q session=%s schedule=%s error=%v — the prompt could not be parked durably, so it is neither queued nor forwarded",
+				e.id, d.workspace, d.sessionID, scheduleID, err)
+			return nil, false, err
+		}
 		// Appended at the BACK even against a paused queue: a head jump is the
 		// paused queue's one deliverable, and a drain-held entry is by
 		// definition not deliverable, so claiming that position would be a lie
@@ -324,7 +337,7 @@ func (m *Manager) queueSubmitLocked(d *sessionController, requestID, text, permi
 		d.queue.add(e)
 		m.logf("session-controller: prompt PARKED by the drain lease entry=%s ws=%q session=%s schedule=%s turn_active=%v — a scheduled shutdown holds the lease, so this prompt is delayed until the bounce completes; it is not classified and not refused",
 			e.id, d.workspace, d.sessionID, scheduleID, d.turnActive)
-		return e, true
+		return e, true, nil
 	}
 	if !d.turnActive {
 		d.runningText = text
@@ -333,7 +346,7 @@ func (m *Manager) queueSubmitLocked(d *sessionController, requestID, text, permi
 			// will deliver nothing behind it until this turn ends cleanly.
 			d.pausedRunner = true
 		}
-		return nil, false
+		return nil, false, nil
 	}
 	e := &queueEntry{
 		id:             newQueueEntryID(),
@@ -345,10 +358,10 @@ func (m *Manager) queueSubmitLocked(d *sessionController, requestID, text, permi
 	}
 	if d.paused {
 		d.queue.addHeadJump(e)
-		return e, true
+		return e, true, nil
 	}
 	d.queue.add(e)
-	return e, true
+	return e, true, nil
 }
 
 // publishQueueLocked snapshots the queue for publication. Caller holds m.mu.
