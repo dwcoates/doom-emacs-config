@@ -140,106 +140,92 @@ const RENDER_STATE_BY_NAME: Readonly<Record<string, RenderState>> = {
 };
 
 /**
- * `frontend.v1.RosterRowStatus` — the closed lifecycle vocabulary a sidebar
- * roster row may carry. Mirrors frontend.proto, and is the same value set as
- * `WORKSPACE_STATUSES` in `sidebar.ts` and the wire table in `sidebar.el`.
+ * `frontend.v1.RosterRow.status` — the closed lifecycle vocabulary a sidebar
+ * roster row may carry, as the ARM NAMES of the row's `status` oneof.
+ *
+ * WHICH arm is set IS the status. There is no enum here on purpose: a proto3
+ * enum has a zero value that means both "unset" and "a legal member", and the
+ * roster has no defensible default lifecycle. With a oneof, an unset status is
+ * simply the absence of an arm, which the decoder refuses outright.
+ *
+ * These are the protojson spellings (lowerCamelCase), which is what the daemon
+ * puts on the wire — `idle_async` in the .proto arrives here as `idleAsync`.
  *
  * NOT `RenderState`: the roster carries statuses no render state produces
- * (`INACTIVE`, `NONE`), and coarsens idle and ready onto one dot.
- *
- * UNSPECIFIED is INVALID on the wire and rejected loudly by the decoder rather
- * than adopted — a row with no lifecycle is a contract breach, not a default
- * dot (the same no-silent-fallback stance `RenderState` takes).
+ * (`inactive`, `none`), and coarsens idle and ready onto one dot.
  */
-export enum RosterRowStatus {
-  UNSPECIFIED = 0,
-  SUBMITTING = 1,
-  THINKING = 2,
-  CLEARING = 3,
-  COMPACTING = 4,
-  PERMISSION = 5,
-  DONE = 6,
-  INTERRUPTED = 7,
-  READY = 8,
-  IDLE_ASYNC = 9,
-  VENDOR_BLOCKED = 10,
-  INIT = 11,
-  SEVERED = 12,
-  HIBERNATED = 13,
-  START_FAILED = 14,
-  DEGRADED = 15,
-  DEAD = 16,
-  MERGE_ENQUEUING = 17,
-  MERGING = 18,
-  MERGE_QUEUED = 19,
-  MERGE_CONFLICT = 20,
-  MERGE_FAILED = 21,
-  MERGED = 22,
-  NONE = 23,
-  INACTIVE = 24,
-}
+export type RosterRowStatusCase =
+  | "submitting"
+  | "thinking"
+  | "clearing"
+  | "compacting"
+  | "permission"
+  | "done"
+  | "interrupted"
+  | "ready"
+  | "idleAsync"
+  | "vendorBlocked"
+  | "init"
+  | "severed"
+  | "hibernated"
+  | "startFailed"
+  | "degraded"
+  | "dead"
+  | "mergeEnqueuing"
+  | "merging"
+  | "mergeQueued"
+  | "mergeConflict"
+  | "mergeFailed"
+  | "merged"
+  | "none"
+  | "inactive";
 
-const ROSTER_ROW_STATUS_BY_NAME: Readonly<Record<string, RosterRowStatus>> = {
-  ROSTER_ROW_STATUS_UNSPECIFIED: RosterRowStatus.UNSPECIFIED,
-  ROSTER_ROW_STATUS_SUBMITTING: RosterRowStatus.SUBMITTING,
-  ROSTER_ROW_STATUS_THINKING: RosterRowStatus.THINKING,
-  ROSTER_ROW_STATUS_CLEARING: RosterRowStatus.CLEARING,
-  ROSTER_ROW_STATUS_COMPACTING: RosterRowStatus.COMPACTING,
-  ROSTER_ROW_STATUS_PERMISSION: RosterRowStatus.PERMISSION,
-  ROSTER_ROW_STATUS_DONE: RosterRowStatus.DONE,
-  ROSTER_ROW_STATUS_INTERRUPTED: RosterRowStatus.INTERRUPTED,
-  ROSTER_ROW_STATUS_READY: RosterRowStatus.READY,
-  ROSTER_ROW_STATUS_IDLE_ASYNC: RosterRowStatus.IDLE_ASYNC,
-  ROSTER_ROW_STATUS_VENDOR_BLOCKED: RosterRowStatus.VENDOR_BLOCKED,
-  ROSTER_ROW_STATUS_INIT: RosterRowStatus.INIT,
-  ROSTER_ROW_STATUS_SEVERED: RosterRowStatus.SEVERED,
-  ROSTER_ROW_STATUS_HIBERNATED: RosterRowStatus.HIBERNATED,
-  ROSTER_ROW_STATUS_START_FAILED: RosterRowStatus.START_FAILED,
-  ROSTER_ROW_STATUS_DEGRADED: RosterRowStatus.DEGRADED,
-  ROSTER_ROW_STATUS_DEAD: RosterRowStatus.DEAD,
-  ROSTER_ROW_STATUS_MERGE_ENQUEUING: RosterRowStatus.MERGE_ENQUEUING,
-  ROSTER_ROW_STATUS_MERGING: RosterRowStatus.MERGING,
-  ROSTER_ROW_STATUS_MERGE_QUEUED: RosterRowStatus.MERGE_QUEUED,
-  ROSTER_ROW_STATUS_MERGE_CONFLICT: RosterRowStatus.MERGE_CONFLICT,
-  ROSTER_ROW_STATUS_MERGE_FAILED: RosterRowStatus.MERGE_FAILED,
-  ROSTER_ROW_STATUS_MERGED: RosterRowStatus.MERGED,
-  ROSTER_ROW_STATUS_NONE: RosterRowStatus.NONE,
-  ROSTER_ROW_STATUS_INACTIVE: RosterRowStatus.INACTIVE,
+/**
+ * The status arm name → the sidebar's CSS/wire spelling (`WorkspaceStatus` in
+ * `sidebar.ts`). The oneof arms are the wire vocabulary; this is the
+ * presentation spelling of the SAME closed set, which is what makes the
+ * cross-language completeness test able to compare them arm for arm.
+ *
+ * Being a total `Record` over `RosterRowStatusCase` is load-bearing: a new arm
+ * added to the union without a keyword here is a compile error, not a status
+ * that silently renders as `undefined`.
+ */
+export const ROSTER_ROW_STATUS_KEYWORD: Readonly<Record<RosterRowStatusCase, string>> = {
+  submitting: "submitting",
+  thinking: "thinking",
+  clearing: "clearing",
+  compacting: "compacting",
+  permission: "permission",
+  done: "done",
+  interrupted: "interrupted",
+  ready: "ready",
+  idleAsync: "idle-async",
+  vendorBlocked: "vendor-blocked",
+  init: "init",
+  severed: "severed",
+  hibernated: "hibernated",
+  startFailed: "start-failed",
+  degraded: "degraded",
+  dead: "dead",
+  mergeEnqueuing: "merge-enqueuing",
+  merging: "merging",
+  mergeQueued: "merge-queued",
+  mergeConflict: "merge-conflict",
+  mergeFailed: "merge-failed",
+  merged: "merged",
+  none: "none",
+  inactive: "inactive",
 };
 
 /**
- * `RosterRowStatus` → the sidebar's CSS/wire spelling (`WorkspaceStatus` in
- * `sidebar.ts`). The enum is the wire vocabulary; this is the presentation
- * spelling of the SAME closed set, which is what makes the cross-language
- * completeness test able to compare them member for member.
+ * Every status arm name, derived from the keyword table so the two can never
+ * disagree about the vocabulary's size.
  */
-export const ROSTER_ROW_STATUS_KEYWORD: Readonly<Record<RosterRowStatus, string>> = {
-  [RosterRowStatus.UNSPECIFIED]: "",
-  [RosterRowStatus.SUBMITTING]: "submitting",
-  [RosterRowStatus.THINKING]: "thinking",
-  [RosterRowStatus.CLEARING]: "clearing",
-  [RosterRowStatus.COMPACTING]: "compacting",
-  [RosterRowStatus.PERMISSION]: "permission",
-  [RosterRowStatus.DONE]: "done",
-  [RosterRowStatus.INTERRUPTED]: "interrupted",
-  [RosterRowStatus.READY]: "ready",
-  [RosterRowStatus.IDLE_ASYNC]: "idle-async",
-  [RosterRowStatus.VENDOR_BLOCKED]: "vendor-blocked",
-  [RosterRowStatus.INIT]: "init",
-  [RosterRowStatus.SEVERED]: "severed",
-  [RosterRowStatus.HIBERNATED]: "hibernated",
-  [RosterRowStatus.START_FAILED]: "start-failed",
-  [RosterRowStatus.DEGRADED]: "degraded",
-  [RosterRowStatus.DEAD]: "dead",
-  [RosterRowStatus.MERGE_ENQUEUING]: "merge-enqueuing",
-  [RosterRowStatus.MERGING]: "merging",
-  [RosterRowStatus.MERGE_QUEUED]: "merge-queued",
-  [RosterRowStatus.MERGE_CONFLICT]: "merge-conflict",
-  [RosterRowStatus.MERGE_FAILED]: "merge-failed",
-  [RosterRowStatus.MERGED]: "merged",
-  [RosterRowStatus.NONE]: "none",
-  [RosterRowStatus.INACTIVE]: "inactive",
-};
+export const ROSTER_ROW_STATUS_CASES: readonly RosterRowStatusCase[] = Object.keys(
+  ROSTER_ROW_STATUS_KEYWORD,
+) as RosterRowStatusCase[];
+
+const ROSTER_ROW_STATUS_CASE_SET: ReadonlySet<string> = new Set(ROSTER_ROW_STATUS_CASES);
 
 /** Daemon-resolved reliability of the current session-controller generation. */
 export enum SessionConnectivity {
@@ -895,7 +881,13 @@ export interface RosterSection {
 export interface RosterRow {
   dir: string;
   name: string;
-  status: RosterRowStatus;
+  /**
+   * The set arm IS the status. Modeled as `{ case }` alone rather than the
+   * `{ case, value }` shape the file's other oneofs use, because every status
+   * arm message is EMPTY by contract — a `value` here could only ever hold
+   * `{}`, and offering one would invite a payload the wire cannot carry.
+   */
+  status: { case: RosterRowStatusCase };
   current: boolean;
   children: RosterRow[];
 }
@@ -2232,13 +2224,25 @@ function decodeRosterSection(v: unknown, ctx: string): RosterSection {
   return { rows: rosterArray(o.rows, `${ctx}.rows`).map((r) => decodeRosterRow(r, `${ctx}.rows`)) };
 }
 
+/**
+ * A row's own fields plus every status arm, which sit directly on the row
+ * because a oneof is flattened into its parent message on the wire.
+ */
+const ROSTER_ROW_KEYS: ReadonlySet<string> = new Set([
+  "dir",
+  "name",
+  "current",
+  "children",
+  ...ROSTER_ROW_STATUS_CASES,
+]);
+
 function decodeRosterRow(v: unknown, ctx: string): RosterRow {
   const o = ensureObject(v, ctx);
-  rejectUnknown(o, new Set(["dir", "name", "status", "current", "children"]), ctx);
+  rejectUnknown(o, ROSTER_ROW_KEYS, ctx);
   return {
     dir: str(o, "dir", ctx),
     name: str(o, "name", ctx),
-    status: enumRosterRowStatus(o, "status", ctx),
+    status: decodeRosterRowStatus(o, ctx),
     current: bool(o, "current", ctx),
     // Recursive by construction: a spawned family nests under its parent.
     children: rosterArray(o.children, `${ctx}.children`).map((c) =>
@@ -2254,30 +2258,38 @@ function rosterArray(v: unknown, ctx: string): unknown[] {
 }
 
 /**
- * `RosterRowStatus`, REJECTED at UNSPECIFIED rather than adopted.
+ * The row's status oneof, REJECTED when unset rather than defaulted.
  *
  * Unlike `ConversationSource`, there is no layer downstream that owns this
  * error: the status IS the row's whole lifecycle assertion, and a row drawn
- * with no dot would silently misreport a workspace. An absent field is the
- * same breach as an explicit UNSPECIFIED — proto3 cannot tell them apart, and
- * neither is a lifecycle.
+ * with no dot would silently misreport a workspace. So an unset oneof throws,
+ * exactly as the retired `ROSTER_ROW_STATUS_UNSPECIFIED` did — the breach did
+ * not go away with the enum, it just moved to the arm's absence.
+ *
+ * Setting more than one arm is refused for the same reason: two lifecycles is
+ * no more a lifecycle than none, and picking one would be a silent guess.
  */
-function enumRosterRowStatus(o: Obj, key: string, ctx: string): RosterRowStatus {
-  const status = enumValue(
-    o,
-    key,
-    ctx,
-    RosterRowStatus,
-    ROSTER_ROW_STATUS_BY_NAME,
-    RosterRowStatus.UNSPECIFIED,
-  );
-  if (status === RosterRowStatus.UNSPECIFIED) {
+function decodeRosterRowStatus(o: Obj, ctx: string): RosterRow["status"] {
+  const armKeys = Object.keys(o).filter((k) => ROSTER_ROW_STATUS_CASE_SET.has(k));
+  if (armKeys.length === 0) {
     throw new Error(
-      `frontend-proto: ${ctx}.${key} is ROSTER_ROW_STATUS_UNSPECIFIED, which is not a lifecycle`,
+      `frontend-proto: ${ctx} sets no status arm, which is not a lifecycle ` +
+        `(WHICH member of the oneof is set IS the status)`,
     );
   }
-  return status;
+  if (armKeys.length > 1) {
+    throw new Error(`frontend-proto: ${ctx} sets multiple status arms: ${armKeys.join(", ")}`);
+  }
+  const arm = armKeys[0] as RosterRowStatusCase;
+  // Every status message is empty by contract, so the arm's payload must be an
+  // object with nothing in it. A field inside is a wire this build does not
+  // understand, and accepting it would silently drop whatever it carried.
+  rejectUnknown(ensureObject(o[arm], `${ctx}.${arm}`), EMPTY_KEY_SET, `${ctx}.${arm}`);
+  return { case: arm };
 }
+
+/** The allowed-key set for a message with no fields at all. */
+const EMPTY_KEY_SET: ReadonlySet<string> = new Set<string>();
 
 // --- primitive readers (loud, protojson-aware) ------------------------------
 

@@ -1656,7 +1656,89 @@ message RosterRow {
   string name = 2;
 
   // The workspace's lifecycle, as Emacs classifies it.
-  RosterRowStatus status = 3;
+  //
+  // THE SET ARM IS THE STATUS. Every arm is a dedicated message rather than a
+  // member of an enum, so the lifecycle is named by which field is populated
+  // and nothing else — there is no numeric value to widen, and no "unset but
+  // still a legal value" state the way a proto3 enum's zero is.
+  //
+  // AN UNSET ONEOF IS INVALID and is rejected LOUDLY. A row with no lifecycle
+  // is a contract breach, not a default dot, and consumers throw rather than
+  // draw one — the same no-silent-fallback stance RenderState takes. (This is
+  // where the retired RosterRowStatus enum's UNSPECIFIED-rejection semantics
+  // now live: absence is refused at the oneof instead of at a zero value.)
+  //
+  // Setting more than one arm is the same breach from the other side, and is
+  // rejected just as loudly.
+  //
+  // The vocabulary mirrors the sidebar's existing status set exactly — the
+  // webapp's WorkspaceStatus union and sidebar.el's wire table are one
+  // contract, and this oneof is the third face of it. It is deliberately NOT
+  // RenderState: the roster carries statuses no render state produces
+  // (inactive, none), and coarsens two render states (idle and ready) onto one
+  // dot. Every arm message is deliberately EMPTY: the status is the whole
+  // assertion, and a payload would be a second place for it to disagree.
+  oneof status {
+    // A prompt is committed and not yet acked by the shim.
+    RosterRowStatusSubmitting submitting = 3;
+    // A turn is in flight.
+    RosterRowStatusThinking thinking = 6;
+    // The conversation is being cleared.
+    RosterRowStatusClearing clearing = 7;
+    // The context is being compacted.
+    RosterRowStatusCompacting compacting = 8;
+    // A tool-permission request is waiting on the user.
+    RosterRowStatusPermission permission = 9;
+    // The turn finished and its response is unread.
+    RosterRowStatusDone done = 10;
+    // The turn was interrupted by the user.
+    RosterRowStatusInterrupted interrupted = 11;
+    // Live, proven usable, and idle. Emacs maps BOTH its idle and ready render
+    // states here — the sidebar draws them identically.
+    RosterRowStatusReady ready = 12;
+    // No foreground turn, but detached work is still running.
+    RosterRowStatusIdleAsync idle_async = 13;
+    // Blocked on the vendor or the account, not on agent-repl.
+    RosterRowStatusVendorBlocked vendor_blocked = 14;
+    // Starting up; the route is not yet proven.
+    RosterRowStatusInit init = 15;
+    // The session's backing process is gone but the workspace is recoverable.
+    RosterRowStatusSevered severed = 16;
+    // Deliberately parked, resumable on demand.
+    RosterRowStatusHibernated hibernated = 17;
+    // Startup failed outright.
+    RosterRowStatusStartFailed start_failed = 18;
+    // Running, but with a compromised route.
+    RosterRowStatusDegraded degraded = 19;
+    // Terminal: no live session backs the workspace.
+    RosterRowStatusDead dead = 20;
+
+    // The merge pipeline. These render a recycle glyph rather than a lifecycle
+    // dot, except merged, which is settled and files under recently_merged.
+    // The first instant of a merge, before anything durable exists for it.
+    RosterRowStatusMergeEnqueuing merge_enqueuing = 21;
+    // A merge is actively running.
+    RosterRowStatusMerging merging = 22;
+    // Enqueued behind another workspace's merge.
+    RosterRowStatusMergeQueued merge_queued = 23;
+    // The merge stopped on a conflict awaiting resolution.
+    RosterRowStatusMergeConflict merge_conflict = 24;
+    // The merge failed outright.
+    RosterRowStatusMergeFailed merge_failed = 25;
+    // The merge settled successfully.
+    RosterRowStatusMerged merged = 26;
+
+    // Registered and open, but Emacs holds no render status for it (tombstoned
+    // or not yet born). Distinct from an unset oneof: "the author looked and
+    // there is none" is an assertion, where an unset oneof is the absence of
+    // one.
+    RosterRowStatusNone none = 27;
+    // Registered in the roster but with no open perspective, so no live session
+    // whose lifecycle a dot could report. Drawn as a question mark. Dominates
+    // every render state: a perspective-less workspace is inactive whatever its
+    // session once was.
+    RosterRowStatusInactive inactive = 28;
+  }
 
   // Whether this row is the current workspace. Redundant with a dir comparison
   // against WorkspaceRoster.current_dir and deliberately so: the author
@@ -1667,76 +1749,31 @@ message RosterRow {
   repeated RosterRow children = 5;
 }
 
-// The closed lifecycle vocabulary a roster row may carry.
-//
-// It mirrors the sidebar's existing status set exactly — the webapp's
-// WorkspaceRow.status union and sidebar.el's wire table are one contract, and
-// this enum is now the third face of it. It is deliberately NOT RenderState:
-// the roster carries statuses no render state produces (INACTIVE, NONE), and
-// coarsens two render states (idle and ready) onto one dot.
-enum RosterRowStatus {
-  // Never emitted and INVALID on the wire. Proto3 reserves 0 for "not
-  // populated", and a row whose lifecycle is unset is a contract breach, not a
-  // default dot — consumers reject it loudly, matching RenderState's
-  // no-silent-fallback convention.
-  ROSTER_ROW_STATUS_UNSPECIFIED = 0;
+// The roster row statuses. Each is EMPTY BY DESIGN — being set is the entire
+// assertion, and a field inside would be a second thing to keep consistent
+// with the arm that carries it. See RosterRow.status for what each means.
 
-  // A prompt is committed and not yet acked by the shim.
-  ROSTER_ROW_STATUS_SUBMITTING = 1;
-  // A turn is in flight.
-  ROSTER_ROW_STATUS_THINKING = 2;
-  // The conversation is being cleared.
-  ROSTER_ROW_STATUS_CLEARING = 3;
-  // The context is being compacted.
-  ROSTER_ROW_STATUS_COMPACTING = 4;
-  // A tool-permission request is waiting on the user.
-  ROSTER_ROW_STATUS_PERMISSION = 5;
-  // The turn finished and its response is unread.
-  ROSTER_ROW_STATUS_DONE = 6;
-  // The turn was interrupted by the user.
-  ROSTER_ROW_STATUS_INTERRUPTED = 7;
-  // Live, proven usable, and idle. Emacs maps BOTH its idle and ready render
-  // states here — the sidebar draws them identically.
-  ROSTER_ROW_STATUS_READY = 8;
-  // No foreground turn, but detached work is still running.
-  ROSTER_ROW_STATUS_IDLE_ASYNC = 9;
-  // Blocked on the vendor or the account, not on agent-repl.
-  ROSTER_ROW_STATUS_VENDOR_BLOCKED = 10;
-  // Starting up; the route is not yet proven.
-  ROSTER_ROW_STATUS_INIT = 11;
-  // The session's backing process is gone but the workspace is recoverable.
-  ROSTER_ROW_STATUS_SEVERED = 12;
-  // Deliberately parked, resumable on demand.
-  ROSTER_ROW_STATUS_HIBERNATED = 13;
-  // Startup failed outright.
-  ROSTER_ROW_STATUS_START_FAILED = 14;
-  // Running, but with a compromised route.
-  ROSTER_ROW_STATUS_DEGRADED = 15;
-  // Terminal: no live session backs the workspace.
-  ROSTER_ROW_STATUS_DEAD = 16;
-
-  // The merge pipeline. These render a recycle glyph rather than a lifecycle
-  // dot, except MERGED, which is settled and files under recently_merged.
-  // The first instant of a merge, before anything durable exists for it.
-  ROSTER_ROW_STATUS_MERGE_ENQUEUING = 17;
-  // A merge is actively running.
-  ROSTER_ROW_STATUS_MERGING = 18;
-  // Enqueued behind another workspace's merge.
-  ROSTER_ROW_STATUS_MERGE_QUEUED = 19;
-  // The merge stopped on a conflict awaiting resolution.
-  ROSTER_ROW_STATUS_MERGE_CONFLICT = 20;
-  // The merge failed outright.
-  ROSTER_ROW_STATUS_MERGE_FAILED = 21;
-  // The merge settled successfully.
-  ROSTER_ROW_STATUS_MERGED = 22;
-
-  // Registered and open, but Emacs holds no render status for it (tombstoned
-  // or not yet born). Distinct from UNSPECIFIED: "the author looked and there
-  // is none" is an assertion, where UNSPECIFIED is the absence of one.
-  ROSTER_ROW_STATUS_NONE = 23;
-  // Registered in the roster but with no open perspective, so no live session
-  // whose lifecycle a dot could report. Drawn as a question mark. Dominates
-  // every render state: a perspective-less workspace is INACTIVE whatever its
-  // session once was.
-  ROSTER_ROW_STATUS_INACTIVE = 24;
-}
+message RosterRowStatusSubmitting {}
+message RosterRowStatusThinking {}
+message RosterRowStatusClearing {}
+message RosterRowStatusCompacting {}
+message RosterRowStatusPermission {}
+message RosterRowStatusDone {}
+message RosterRowStatusInterrupted {}
+message RosterRowStatusReady {}
+message RosterRowStatusIdleAsync {}
+message RosterRowStatusVendorBlocked {}
+message RosterRowStatusInit {}
+message RosterRowStatusSevered {}
+message RosterRowStatusHibernated {}
+message RosterRowStatusStartFailed {}
+message RosterRowStatusDegraded {}
+message RosterRowStatusDead {}
+message RosterRowStatusMergeEnqueuing {}
+message RosterRowStatusMerging {}
+message RosterRowStatusMergeQueued {}
+message RosterRowStatusMergeConflict {}
+message RosterRowStatusMergeFailed {}
+message RosterRowStatusMerged {}
+message RosterRowStatusNone {}
+message RosterRowStatusInactive {}
