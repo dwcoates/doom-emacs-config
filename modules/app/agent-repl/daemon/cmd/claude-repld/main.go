@@ -826,6 +826,18 @@ func main() {
 			daemonFatal(daemonLog, "claude-repld: restore the scheduled-shutdown drain lease: %v", rerr)
 		}
 	}
+	// The prompts that lease PARKED are materialized here, immediately after it
+	// and before the frontend serves its first snapshot. Their sessions have not
+	// wired yet — after a bounce that stopped the shims, some may not wire for a
+	// long time — and until this ran they were invisible to every client and
+	// unreachable by cancel for the whole of that window, which is the promise
+	// the lease made to their submitters going unkept.
+	if materialized, merr := controller.MaterializeShutdownHolds(); merr != nil {
+		daemonFatal(daemonLog, "claude-repld: materialize the drain-lease parked-prompt ledger: %v", merr)
+	} else if materialized > 0 {
+		daemonLog.With("operation", "materialize-drain-holds").Log(
+			"claude-repld: materialized %d prompt(s) parked by a previous daemon's scheduled bounce", materialized)
+	}
 	defer func() {
 		if cerr := agentShim.Close(); cerr != nil {
 			daemonLog.With("operation", "close-frontend-surface").Log("claude-repld: frontend surface close: %v", cerr)

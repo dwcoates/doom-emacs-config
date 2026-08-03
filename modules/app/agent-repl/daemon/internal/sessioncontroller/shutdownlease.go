@@ -93,6 +93,10 @@ type ShutdownHoldStore interface {
 	DropHeldPrompt(entryID string) (bool, error)
 	DropHeldPromptsForSchedule(scheduleID string) (int, error)
 	HeldPrompts(workspace string) ([]statedb.HeldPrompt, error)
+	// AllHeldPrompts reads the whole ledger, for the boot materialization,
+	// which runs before any session has wired and so has no workspace list to
+	// ask with.
+	AllHeldPrompts() ([]statedb.HeldPrompt, error)
 }
 
 // shutdownLeaseBinding late-binds the engine. The engine is constructed with
@@ -457,6 +461,12 @@ func (m *Manager) ReleaseShutdownHolds(scheduleID string) {
 	}
 	m.mu.Unlock()
 
+	// The materialized ledger holds the same schedule's parks for sessions that
+	// have not wired. A cancelled schedule leaves nothing behind THERE either,
+	// or those clients would keep rendering a lease bubble for a schedule that
+	// no longer exists (parkedledger.go).
+	m.releaseParkedHolds(scheduleID)
+
 	if m.cfg.ShutdownHolds != nil {
 		dropped, err := m.cfg.ShutdownHolds.DropHeldPromptsForSchedule(scheduleID)
 		if err != nil {
@@ -494,16 +504,36 @@ func (m *Manager) ReleaseShutdownHolds(scheduleID string) {
 //
 // Caller must hold neither m.mu nor the shim read loop.
 func (m *Manager) restoreShutdownHolds(d *sessionController) {
-	if m.cfg.ShutdownHolds == nil {
-		return
+	// THE ADOPTION COMES FIRST. The boot materialization may already be holding
+	// this workspace's parked entries (parkedledger.go), and handing them to the
+	// controller under their own ids is what makes the row loop below a NO-OP
+	// for them: its `d.queue.get(row.EntryID)` dedupe finds each one already
+	// present, so the replay cannot produce a second copy of a prompt the user
+	// submitted once.
+	m.mu.Lock()
+	adopted := m.adoptParkedLocked(d)
+	m.mu.Unlock()
+	if len(adopted) > 0 {
+		m.logf("session-controller: materialized drain-held prompts ADOPTED ws=%q session=%s entries=%v — the session has wired, so the boot ledger hands its parked entries to the controller that now owns the queue",
+			d.workspace, d.sessionID, adopted)
 	}
-	rows, err := m.cfg.ShutdownHolds.HeldPrompts(d.workspace)
-	if err != nil {
-		m.logf("session-controller: drain-held prompt restore FAILED ws=%q session=%s error=%v — prompts parked by a previous daemon's scheduled bounce are not being replayed",
-			d.workspace, d.sessionID, err)
-		return
+
+	var rows []statedb.HeldPrompt
+	if m.cfg.ShutdownHolds != nil {
+		var err error
+		rows, err = m.cfg.ShutdownHolds.HeldPrompts(d.workspace)
+		if err != nil {
+			// The read failed, but the entries ADOPTED above are already in the
+			// controller's queue and must still be published and drained: they
+			// came from the boot ledger, not from this read, and stranding them
+			// on an unrelated failure would lose exactly the prompts the whole
+			// mechanism exists to keep. The failure itself stays loud.
+			m.logf("session-controller: drain-held prompt restore FAILED ws=%q session=%s error=%v adopted=%d — prompts parked by a previous daemon's scheduled bounce are not being replayed from the ledger",
+				d.workspace, d.sessionID, err, len(adopted))
+			rows = nil
+		}
 	}
-	if len(rows) == 0 {
+	if len(rows) == 0 && len(adopted) == 0 {
 		return
 	}
 	liveSchedule, held := m.heldSchedule()
@@ -512,6 +542,9 @@ func (m *Manager) restoreShutdownHolds(d *sessionController) {
 	restored := make([]string, 0, len(rows))
 	stillHeld := 0
 	for _, row := range rows {
+		// THE DEDUPE. It covers a second restore and, since the boot ledger
+		// exists, the ordinary case: every adopted entry is already here under
+		// the id its durable row names, so this loop adds nothing for it.
 		if d.queue.get(row.EntryID) != nil {
 			continue
 		}
@@ -524,6 +557,14 @@ func (m *Manager) restoreShutdownHolds(d *sessionController) {
 		d.queue.add(e)
 		restored = append(restored, e.id)
 	}
+	if len(restored) == 0 && len(adopted) == 0 {
+		// Nothing entered the queue here, so nothing is owed a delivery kick.
+		// Returning BEFORE the pop matters: a pop taken and then dropped on
+		// this path would silently eat a deliverable entry that was already
+		// queued.
+		m.mu.Unlock()
+		return
+	}
 	var kick *queueEntry
 	if !d.turnActive && !d.paused {
 		kick = d.queue.popFrontDeliverable()
@@ -531,11 +572,8 @@ func (m *Manager) restoreShutdownHolds(d *sessionController) {
 	view, recs := m.publishQueueLocked(d)
 	m.mu.Unlock()
 
-	if len(restored) == 0 {
-		return
-	}
-	m.logf("session-controller: drain-held prompts RESTORED ws=%q session=%s restored=%d still_held=%d live_schedule=%q entries=%v — these prompts were parked by a scheduled bounce and are being honored by the daemon that came back",
-		d.workspace, d.sessionID, len(restored), stillHeld, liveSchedule, restored)
+	m.logf("session-controller: drain-held prompts RESTORED ws=%q session=%s restored=%d adopted=%d still_held=%d live_schedule=%q entries=%v — these prompts were parked by a scheduled bounce and are being honored by the daemon that came back",
+		d.workspace, d.sessionID, len(restored), len(adopted), stillHeld, liveSchedule, restored)
 	m.publish(d.sessionID, view, recs)
 	if kick != nil {
 		m.logf("session-controller: restored prompt delivering entry=%s ws=%q session=%s — the bounce that delayed it is over and no turn is running",

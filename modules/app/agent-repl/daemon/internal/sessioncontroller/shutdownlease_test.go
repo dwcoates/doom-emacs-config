@@ -3,6 +3,7 @@ package sessioncontroller
 import (
 	"context"
 	"errors"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -111,6 +112,28 @@ func (f *fakeHoldStore) HeldPrompts(workspace string) ([]statedb.HeldPrompt, err
 			out = append(out, p)
 		}
 	}
+	return out, nil
+}
+
+func (f *fakeHoldStore) AllHeldPrompts() ([]statedb.HeldPrompt, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]statedb.HeldPrompt, 0, len(f.rows))
+	for _, p := range f.rows {
+		out = append(out, p)
+	}
+	// The real store answers in (workspace, submit) order, and the boot
+	// materialization relies on it for within-workspace ordering, so the fake
+	// answers in it too rather than in map order.
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Workspace != out[j].Workspace {
+			return out[i].Workspace < out[j].Workspace
+		}
+		if out[i].QueuedAtMs != out[j].QueuedAtMs {
+			return out[i].QueuedAtMs < out[j].QueuedAtMs
+		}
+		return out[i].EntryID < out[j].EntryID
+	})
 	return out, nil
 }
 
