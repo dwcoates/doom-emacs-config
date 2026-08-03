@@ -30,6 +30,10 @@ import {
 /** Log component for this session's loud anomaly lines. */
 const LOG_COMPONENT = "claude-shim-session";
 const LOGGER = bindLog({ component: LOG_COMPONENT, operation: "shim.session.lifecycle" });
+const CACHE_LOGGER = bindLog({ component: LOG_COMPONENT, operation: "shim.session.cache" });
+
+/** Results below this cache-read ratio require operator attention. */
+const CACHE_HIT_RATE_WARNING_THRESHOLD = 0.8;
 
 // ---------------------------------------------------------------------------
 // SDK boundary types (structural, so tests can inject fakes)
@@ -697,8 +701,61 @@ export class ShimSession {
     if (subtype === "success" && typeof msg.result === "string") {
       evt.result = msg.result;
     }
+    this.logCacheUsage(evt);
     LOGGER.log({ agent_repl_session_id: this.deps.sessionId, result_subtype: subtype, is_error: evt.is_error, turns_in_flight: this.turnsInFlight }, "mapped SDK result event");
     this.deps.emit(evt);
+  }
+
+  private logCacheUsage(evt: ResultEvt): void {
+    const topLevelUsage = summarizeUsage(evt.usage);
+    const modelUsage = evt.model_usage === undefined
+      ? undefined
+      : Object.fromEntries(
+          Object.entries(evt.model_usage).map(([model, usage]) => [
+            model,
+            summarizeUsage(usage),
+          ]),
+        );
+    const usage = evt.model_usage === undefined
+      ? { ...topLevelUsage, cost_usd: evt.total_cost_usd }
+      : sumUsage(Object.values(evt.model_usage));
+    const fields = {
+      agent_repl_session_id: this.deps.sessionId,
+      sdk_uuid: evt.uuid,
+      result_subtype: evt.subtype,
+      is_error: evt.is_error,
+      cache_usage_scope: evt.model_usage === undefined ? "top_level" : "whole_tree",
+      input_tokens: usage.input_tokens,
+      output_tokens: usage.output_tokens,
+      cache_creation_input_tokens: usage.cache_creation_input_tokens,
+      cache_read_input_tokens: usage.cache_read_input_tokens,
+      total_input_tokens: usage.total_input_tokens,
+      cache_hit_rate: usage.cache_hit_rate,
+      cache_hit_percent: usage.cache_hit_percent,
+      cost_usd: usage.cost_usd,
+      web_search_requests: usage.web_search_requests,
+      duration_ms: evt.duration_ms,
+      duration_api_ms: evt.duration_api_ms,
+      num_turns: evt.num_turns,
+      sdk_reported_total_cost_usd: evt.total_cost_usd,
+      top_level_usage: topLevelUsage,
+      model_count: modelUsage === undefined ? 0 : Object.keys(modelUsage).length,
+      ...(modelUsage === undefined ? {} : { model_usage: modelUsage }),
+    };
+    CACHE_LOGGER.log(fields, "SDK result token and prompt-cache usage");
+    if (
+      usage.cache_hit_rate !== null &&
+      usage.cache_hit_rate < CACHE_HIT_RATE_WARNING_THRESHOLD
+    ) {
+      CACHE_LOGGER.log(
+        {
+          level: "warn",
+          ...fields,
+          cache_hit_rate_warning_threshold: CACHE_HIT_RATE_WARNING_THRESHOLD,
+        },
+        "SDK result prompt-cache hit rate is below the configured threshold",
+      );
+    }
   }
 
   private mapSystemMessage(msg: SdkMessageLike): void {
@@ -778,6 +835,71 @@ function normalizeUsage(usage: unknown): ResultEvt["usage"] {
       ? { cache_read_input_tokens: u.cache_read_input_tokens }
       : {}),
   };
+}
+
+interface UsageLike {
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
+  web_search_requests?: number;
+  cost_usd?: number;
+  context_window?: number;
+}
+
+interface UsageSummary {
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_input_tokens: number;
+  cache_read_input_tokens: number;
+  total_input_tokens: number;
+  cache_hit_rate: number | null;
+  cache_hit_percent: number | null;
+  cost_usd: number | null;
+  web_search_requests: number | null;
+  context_window: number | null;
+}
+
+function summarizeUsage(usage: UsageLike): UsageSummary {
+  const cacheCreationInputTokens = usage.cache_creation_input_tokens ?? 0;
+  const cacheReadInputTokens = usage.cache_read_input_tokens ?? 0;
+  const totalInputTokens =
+    usage.input_tokens + cacheCreationInputTokens + cacheReadInputTokens;
+  const cacheHitRate = totalInputTokens === 0
+    ? null
+    : cacheReadInputTokens / totalInputTokens;
+  return {
+    input_tokens: usage.input_tokens,
+    output_tokens: usage.output_tokens,
+    cache_creation_input_tokens: cacheCreationInputTokens,
+    cache_read_input_tokens: cacheReadInputTokens,
+    total_input_tokens: totalInputTokens,
+    cache_hit_rate: cacheHitRate,
+    cache_hit_percent: cacheHitRate === null ? null : cacheHitRate * 100,
+    cost_usd: usage.cost_usd ?? null,
+    web_search_requests: usage.web_search_requests ?? null,
+    context_window: usage.context_window ?? null,
+  };
+}
+
+function sumUsage(usages: ModelUsage[]): UsageSummary {
+  return summarizeUsage({
+    input_tokens: usages.reduce((sum, usage) => sum + usage.input_tokens, 0),
+    output_tokens: usages.reduce((sum, usage) => sum + usage.output_tokens, 0),
+    cache_creation_input_tokens: usages.reduce(
+      (sum, usage) => sum + (usage.cache_creation_input_tokens ?? 0),
+      0,
+    ),
+    cache_read_input_tokens: usages.reduce(
+      (sum, usage) => sum + (usage.cache_read_input_tokens ?? 0),
+      0,
+    ),
+    web_search_requests: usages.reduce(
+      (sum, usage) => sum + usage.web_search_requests,
+      0,
+    ),
+    cost_usd: usages.reduce((sum, usage) => sum + usage.cost_usd, 0),
+  });
 }
 
 /**

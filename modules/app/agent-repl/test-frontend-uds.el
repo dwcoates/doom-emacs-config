@@ -541,6 +541,88 @@ would compound one outage into several."
     (should ran)
     (should (cl-find-if (lambda (l) (string-match-p "subscriber blew up" l)) logged))))
 
+(ert-deftest agent-repl-test-uds-snapshot-applied-hook-runs-its-subscribers ()
+  "The snapshot-applied hook runs every subscriber."
+  ;; Arrange
+  (let ((ran 0))
+    (let ((agent-repl-uds-snapshot-applied-functions
+           (list (lambda () (cl-incf ran)) (lambda () (cl-incf ran)))))
+      ;; Act
+      (agent-repl--uds-run-snapshot-applied-hook))
+    ;; Assert
+    (should (= ran 2))))
+
+(ert-deftest agent-repl-test-uds-snapshot-applied-hook-survives-a-failure ()
+  "One subscriber's failure is logged and the remaining subscribers still run.
+The same containment the connected hook keeps, from the same shared runner."
+  ;; Arrange
+  (let ((ran nil)
+        (logged nil))
+    (cl-letf (((symbol-function 'agent-repl--log)
+               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+      (let ((agent-repl-uds-snapshot-applied-functions
+             (list (lambda () (error "subscriber blew up"))
+                   (lambda () (setq ran t)))))
+        ;; Act
+        (agent-repl--uds-run-snapshot-applied-hook)))
+    ;; Assert
+    (should ran)
+    (should (cl-find-if (lambda (l) (string-match-p "uds-snapshot-applied-hook" l)) logged))))
+
+(ert-deftest agent-repl-test-uds-sentinel-open-never-runs-the-snapshot-hook ()
+  "A socket that merely OPENED has not finished reconnecting.
+The roster a snapshot subscriber reads is still empty there, which is why
+the two lifecycle edges are two hooks."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let ((ran 0))
+      (cl-letf (((symbol-function 'process-live-p) (lambda (_p) t))
+                ((symbol-function 'process-name) (lambda (_p) "fake")))
+        (let ((agent-repl--uds-process 'fake-proc)
+              (agent-repl--uds-connection-state 'dialing)
+              (agent-repl--uds-connect-started-at (float-time))
+              (agent-repl--uds-outbound-queue nil)
+              (agent-repl-uds-snapshot-applied-functions
+               (list (lambda () (cl-incf ran)))))
+          ;; Act
+          (agent-repl--uds-sentinel 'fake-proc "open\n")
+          ;; Assert
+          (should (= ran 0)))))))
+
+(ert-deftest agent-repl-test-uds-failed-dial-records-a-retractable-notice ()
+  "A refused dial records its echoed notice so the reconnect can take it back."
+  ;; Arrange
+  (let ((echoed nil))
+    (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () nil))
+              ((symbol-function 'agent-repl--frontend-invalidate-daemon-view) #'ignore)
+              ((symbol-function 'agent-repl--uds-connect)
+               (lambda (&rest _) (error "connection refused")))
+              ((symbol-function 'agent-repl--uds-schedule-reconnect) #'ignore)
+              ((symbol-function 'agent-repl-connection-notice-echo)
+               (lambda (text) (setq echoed text))))
+      ;; Act
+      (agent-repl-uds-connect "/tmp/agent-repl-test.sock")
+      ;; Assert
+      (should (stringp echoed))
+      (should (string-match-p "unreachable" echoed)))))
+
+(ert-deftest agent-repl-test-uds-readiness-dial-records-no-notice ()
+  "A cold-start dial under the readiness loop raises no outage alarm.
+The readiness continuation owns retry pacing and the final hard error, so
+a notice here would be an alarm about a startup that has not failed yet."
+  ;; Arrange
+  (let ((echoed nil))
+    (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () nil))
+              ((symbol-function 'agent-repl--frontend-invalidate-daemon-view) #'ignore)
+              ((symbol-function 'agent-repl--uds-connect)
+               (lambda (&rest _) (error "connection refused")))
+              ((symbol-function 'agent-repl-connection-notice-echo)
+               (lambda (text) (setq echoed text))))
+      ;; Act
+      (agent-repl-uds-connect "/tmp/agent-repl-test.sock" t)
+      ;; Assert
+      (should-not echoed))))
+
 (ert-deftest agent-repl-test-uds-publish-workspace-roster-is-sendable ()
   "The roster publish arm is a known, sendable command field."
   (should (member "publishWorkspaceRoster" agent-repl--uds-known-command-fields)))
