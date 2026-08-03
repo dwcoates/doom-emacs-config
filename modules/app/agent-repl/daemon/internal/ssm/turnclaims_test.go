@@ -130,12 +130,12 @@ func TestTurnClaimLedgerRejectsEnvelopeAndHandshakeIdentityAmbiguity(t *testing.
 	); err == nil || !strings.Contains(err.Error(), "envelope mismatch") {
 		t.Fatalf("envelope mismatch err = %v", err)
 	}
-	if _, _, err := m.ReconcileTurnHandshake(
+	if _, _, _, err := m.ReconcileTurnHandshake(
 		"ws", "daemon-session", []string{"turn-1", "turn-1"}, true,
 	); err == nil || !strings.Contains(err.Error(), "duplicate identity") {
 		t.Fatalf("duplicate handshake identity err = %v", err)
 	}
-	if before, after, err := m.ReconcileTurnHandshake(
+	if before, after, _, err := m.ReconcileTurnHandshake(
 		"ws", "daemon-session", nil, false,
 	); err != nil {
 		t.Fatalf("confirm empty ledger: %v", err)
@@ -237,7 +237,7 @@ func TestTurnStartedNeverActsAsRotationProof(t *testing.T) {
 func TestTurnClaimHandshakeAdoptsSnapshotAndRejectsContradictionBeforeMutation(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.db")
 	first := openTurnClaimManager(t, path)
-	before, after, err := first.ReconcileTurnHandshake(
+	before, after, _, err := first.ReconcileTurnHandshake(
 		"ws", "daemon-session", []string{"turn-live"}, true,
 	)
 	if err != nil {
@@ -251,7 +251,7 @@ func TestTurnClaimHandshakeAdoptsSnapshotAndRejectsContradictionBeforeMutation(t
 	}
 
 	second := openTurnClaimManager(t, path)
-	before, after, err = second.ReconcileTurnHandshake(
+	before, after, _, err = second.ReconcileTurnHandshake(
 		"ws", "daemon-session", []string{"turn-other"}, true,
 	)
 	if err == nil || !strings.Contains(err.Error(), "disagree") {
@@ -277,7 +277,7 @@ func TestTurnClaimHandshakeAdoptsSnapshotAndRejectsContradictionBeforeMutation(t
 
 func TestLegacyHandshakeClaimBindsToFirstOrderedStreamStart(t *testing.T) {
 	m, _, _ := openUnwiredTest(t, fakeResolver{"vendor-session": "ws"})
-	if _, after, err := m.ReconcileTurnHandshake("ws", "daemon-session", nil, true); err != nil {
+	if _, after, _, err := m.ReconcileTurnHandshake("ws", "daemon-session", nil, true); err != nil {
 		t.Fatalf("legacy handshake: %v", err)
 	} else if !reflect.DeepEqual(after, []string{""}) {
 		t.Fatalf("legacy active claims = %v, want one anonymous claim", after)
@@ -304,7 +304,7 @@ func TestHandshakeWithNoTurnsClosesAStaleThinking(t *testing.T) {
 		t.Fatalf("turn started: %v", err)
 	}
 	// Act.
-	if _, _, err := m.ReconcileTurnHandshake("ws1", "s1", nil, false); err != nil {
+	if _, _, _, err := m.ReconcileTurnHandshake("ws1", "s1", nil, false); err != nil {
 		t.Fatalf("ReconcileTurnHandshake: %v", err)
 	}
 	// Assert.
@@ -324,7 +324,7 @@ func TestHandshakeNamingLiveTurnsLeavesTheAxisAlone(t *testing.T) {
 		t.Fatalf("turn started: %v", err)
 	}
 	// Act.
-	if _, _, err := m.ReconcileTurnHandshake("ws1", "s1", []string{"turn-a"}, false); err != nil {
+	if _, _, _, err := m.ReconcileTurnHandshake("ws1", "s1", []string{"turn-a"}, false); err != nil {
 		t.Fatalf("ReconcileTurnHandshake: %v", err)
 	}
 	// Assert.
@@ -345,7 +345,7 @@ func TestHandshakeWithLegacyActiveLeavesTheAxisAlone(t *testing.T) {
 		t.Fatalf("turn started: %v", err)
 	}
 	// Act.
-	if _, _, err := m.ReconcileTurnHandshake("ws1", "s1", nil, true); err != nil {
+	if _, _, _, err := m.ReconcileTurnHandshake("ws1", "s1", nil, true); err != nil {
 		t.Fatalf("ReconcileTurnHandshake: %v", err)
 	}
 	// Assert.
@@ -368,7 +368,7 @@ func TestHandshakeOverASettledAxisAppendsNothing(t *testing.T) {
 		t.Fatalf("turn ended: %v", err)
 	}
 	// Act.
-	if _, _, err := m.ReconcileTurnHandshake("ws1", "s1", nil, false); err != nil {
+	if _, _, _, err := m.ReconcileTurnHandshake("ws1", "s1", nil, false); err != nil {
 		t.Fatalf("ReconcileTurnHandshake: %v", err)
 	}
 	// Assert.
@@ -390,7 +390,7 @@ func TestHandshakeCloseFailureIsLoggedWithoutFailingTheHandshake(t *testing.T) {
 		t.Fatalf("drop workspace_state: %v", err)
 	}
 	// Act.
-	before, after, err := m.ReconcileTurnHandshake("ws1", "s1", nil, false)
+	before, after, _, err := m.ReconcileTurnHandshake("ws1", "s1", nil, false)
 	// Assert.
 	if err != nil {
 		t.Fatalf("ReconcileTurnHandshake = %v, want nil — the ledger reconciliation itself succeeded", err)
@@ -418,7 +418,7 @@ func TestHandshakeCloseUnblocksTheSuppressedReadiness(t *testing.T) {
 		t.Fatalf("arrangement did not reproduce the suppression; log:\n%s", strings.Join(cl.lines, "\n"))
 	}
 	// Act — the shim comes back reporting nothing, then announces readiness.
-	if _, _, err := m.ReconcileTurnHandshake("ws1", "s1", nil, false); err != nil {
+	if _, _, _, err := m.ReconcileTurnHandshake("ws1", "s1", nil, false); err != nil {
 		t.Fatalf("ReconcileTurnHandshake: %v", err)
 	}
 	if err := m.Apply(evSessionStarted("s1", 3)); err != nil {
@@ -430,5 +430,210 @@ func TestHandshakeCloseUnblocksTheSuppressedReadiness(t *testing.T) {
 	}
 	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_READY {
 		t.Fatalf("state = %s, want READY", renderName(got))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The PHANTOM turn: a durable claim contradicted by the live shim.
+//
+// The claim and the shim are two authorities on "is a turn in flight", and only
+// the shim can see the process the turn would be running in. These tests pin
+// the reconciling edge, and pin just as hard that it fires ONLY where the
+// contradiction is unambiguous.
+// ---------------------------------------------------------------------------
+
+// claimTurn seeds one durable turn claim held by claimant for ws.
+func claimTurn(t *testing.T, m *Manager, ws, claimant, vendorSession, id string, seq uint64) {
+	t.Helper()
+	ev := turnClaimEvent(true, seq, id)
+	ev.SessionId = vendorSession
+	if _, _, _, err := m.ResolveTurnLifecycle(ws, claimant, ev); err != nil {
+		t.Fatalf("seed durable turn claim %q: %v", id, err)
+	}
+}
+
+func TestHandshakeReportingNoTurnClosesThePhantomClaim(t *testing.T) {
+	// Arrange — a claim survives a restart the shim knows nothing about.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	claimTurn(t, m, "ws1", "s1", "s1", "daemon-prompt-1", 1)
+
+	// Act — the returning shim reports no turn in flight and no turn ids.
+	_, after, closed, err := m.ReconcileTurnHandshake("ws1", "s1", nil, false)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ReconcileTurnHandshake: %v", err)
+	}
+	if !reflect.DeepEqual(closed, []string{"daemon-prompt-1"}) {
+		t.Fatalf("closed = %v, want the phantom claim", closed)
+	}
+	if len(after) != 0 {
+		t.Fatalf("durable active turns = %v, want none — the shim says nothing is running", after)
+	}
+}
+
+func TestHandshakePhantomCloseRecordsTheRestartInterruptCause(t *testing.T) {
+	// Arrange — the user must be able to see the turn was CUT, not merely lost.
+	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+		t.Fatalf("turn started: %v", err)
+	}
+	claimTurn(t, m, "ws1", "s1", "s1", "daemon-prompt-1", 2)
+
+	// Act.
+	if _, _, _, err := m.ReconcileTurnHandshake("ws1", "s1", nil, false); err != nil {
+		t.Fatalf("ReconcileTurnHandshake: %v", err)
+	}
+
+	// Assert.
+	if got := mustCurrent(t, m, "ws1").GetCauseKind(); got != causeShimStopped+":"+TurnCloseRestartInterrupted {
+		t.Fatalf("cause_kind = %q, want the restart interrupt named on the workspace state", got)
+	}
+	if !cl.contains("ssm: turn claims INTERRUPTED BY RESTART workspace=ws1 claimant_session=s1 closed=[daemon-prompt-1]") {
+		t.Fatalf("missing the loud restart-interrupt record; log:\n%s", strings.Join(cl.lines, "\n"))
+	}
+}
+
+func TestHandshakeConfirmingItsOwnClaimClosesNothing(t *testing.T) {
+	// Arrange — the shim names the very turn the ledger holds.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	claimTurn(t, m, "ws1", "s1", "s1", "turn-live", 1)
+
+	// Act.
+	_, after, closed, err := m.ReconcileTurnHandshake("ws1", "s1", []string{"turn-live"}, true)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ReconcileTurnHandshake: %v", err)
+	}
+	if len(closed) != 0 {
+		t.Fatalf("closed = %v, want none — the shim CONFIRMS the claim", closed)
+	}
+	if !reflect.DeepEqual(after, []string{"turn-live"}) {
+		t.Fatalf("durable active turns = %v, want the confirmed claim intact", after)
+	}
+}
+
+func TestLegacyHandshakeClaimingATurnClosesNothing(t *testing.T) {
+	// Arrange — an empty id list under turn_in_flight=true says nothing at all
+	// about which turn is running, only that one IS.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	claimTurn(t, m, "ws1", "s1", "s1", "turn-live", 1)
+
+	// Act.
+	_, after, closed, err := m.ReconcileTurnHandshake("ws1", "s1", nil, true)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ReconcileTurnHandshake: %v", err)
+	}
+	if len(closed) != 0 || !reflect.DeepEqual(after, []string{"turn-live"}) {
+		t.Fatalf("closed = %v after = %v, want the legacy claim believed", closed, after)
+	}
+}
+
+func TestSynthesizeTurnCloseEndsTheHeldClaim(t *testing.T) {
+	// Arrange — the ALREADY_COMPLETE Ack's ledger half.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	claimTurn(t, m, "ws1", "s1", "s1", "turn-held", 1)
+
+	// Act.
+	closed, err := m.SynthesizeTurnClose("ws1", "s1", TurnCloseAlreadyComplete)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("SynthesizeTurnClose: %v", err)
+	}
+	if !reflect.DeepEqual(closed, []string{"turn-held"}) {
+		t.Fatalf("closed = %v, want the held claim", closed)
+	}
+}
+
+func TestSynthesizeTurnCloseWithNoClaimIsABenignNoOp(t *testing.T) {
+	// Arrange — the turn's own end got there first, which is the ordinary case.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+
+	// Act.
+	closed, err := m.SynthesizeTurnClose("ws1", "s1", TurnCloseAlreadyComplete)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("SynthesizeTurnClose = %v, want nil on an empty ledger", err)
+	}
+	if len(closed) != 0 {
+		t.Fatalf("closed = %v, want none", closed)
+	}
+}
+
+func TestSynthesizeTurnCloseRejectsAnUnnamedCause(t *testing.T) {
+	// Arrange — a synthesized end must name the observation that authorized it.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	claimTurn(t, m, "ws1", "s1", "s1", "turn-held", 1)
+
+	// Act.
+	closed, err := m.SynthesizeTurnClose("ws1", "s1", "because")
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "must name one of the observations") {
+		t.Fatalf("SynthesizeTurnClose err = %v, want a loud refusal", err)
+	}
+	if len(closed) != 0 {
+		t.Fatalf("closed = %v, want none on a refused cause", closed)
+	}
+}
+
+func TestSynthesizeTurnCloseRefusesAnEmptyClaimant(t *testing.T) {
+	// Arrange — a claim is only ever ended on behalf of the session holding it.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+
+	// Act.
+	_, err := m.SynthesizeTurnClose("ws1", "", TurnCloseAlreadyComplete)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "empty claimant session id") {
+		t.Fatalf("SynthesizeTurnClose err = %v, want a loud refusal", err)
+	}
+}
+
+func TestGenuineTurnEndAfterASynthesizedCloseIsAdmittedAsAReplay(t *testing.T) {
+	// Arrange — the pre-restart turn's own end, replayed off the store after the
+	// subscription reopened. It reports what the synthesized close already
+	// recorded, so it is accounted for rather than read as a contradiction.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	claimTurn(t, m, "ws1", "s1", "s1", "turn-cut", 1)
+	if _, _, _, err := m.ReconcileTurnHandshake("ws1", "s1", nil, false); err != nil {
+		t.Fatalf("ReconcileTurnHandshake: %v", err)
+	}
+	end := turnClaimEvent(false, 2, "turn-cut")
+	end.SessionId = "s1"
+
+	// Act.
+	_, after, replayed, err := m.ResolveTurnLifecycle("ws1", "s1", end)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ResolveTurnLifecycle = %v, want the already-accounted boundary admitted", err)
+	}
+	if !replayed {
+		t.Fatal("late genuine end reported as a first delivery, want an already-accounted replay")
+	}
+	if len(after) != 0 {
+		t.Fatalf("durable active turns = %v, want none", after)
+	}
+}
+
+func TestUnknownTurnEndWithoutAnyClaimIsStillRejected(t *testing.T) {
+	// Arrange — the synthesized-close tolerance must not become a blanket
+	// amnesty for ends nothing ever claimed.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	end := turnClaimEvent(false, 2, "turn-unknown")
+	end.SessionId = "s1"
+
+	// Act.
+	_, _, _, err := m.ResolveTurnLifecycle("ws1", "s1", end)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "no durable active claim") {
+		t.Fatalf("ResolveTurnLifecycle err = %v, want the unclaimed end rejected", err)
 	}
 }
