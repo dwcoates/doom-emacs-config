@@ -1731,6 +1731,35 @@ pre {
   margin-right: auto;
 }
 
+/* --- the session-command chip ---------------------------------------------
+   A slash command the CLI answered ITSELF (/model, /compact, /clear, …),
+   drawn as a small centered pill.
+
+   DELIBERATELY NOT A BUBBLE, and deliberately hueless. A bubble on the user's
+   side of the feed says "this is what I said to the agent", and the agent
+   never saw it — the CLI resolved it locally and the model was not in the
+   loop. So the chip takes the muted chrome treatment the compaction stamp and
+   the system note take: it reports an act on the SESSION, and the conversation
+   proper carries on above and below it undisturbed.
+
+   It carries no argument and no prompt text, because the wire item carries
+   none: `frontend.v1.SessionCommandItem` has exactly one field, the command
+   enum, and the name below is derived from it. */
+.session-command {
+  display: flex;
+  justify-content: center;
+  margin: 0.4rem 0;
+}
+.session-command-name {
+  padding: 0.1rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+
 /* --- the system-failure card (F4) -----------------------------------------
    Where a user whose workspace changed color finds out WHY. It replaces both
    the grey one-line retry badge and the red error banner, and absorbs the

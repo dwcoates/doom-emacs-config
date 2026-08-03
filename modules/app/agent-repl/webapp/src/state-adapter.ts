@@ -34,7 +34,11 @@
  *   complete fact; permission (core.v1.PermissionItem) →
  *   PermissionItem; systemFailure (SystemFailureItem) → the classified
  *   failure card (F4) — the ApiErrorLine `apiError` arm it superseded is
- *   RETIRED (step 11).
+ *   RETIRED (step 11); sessionCommand (SessionCommandItem) →
+ *   SessionCommandItem — a slash command the CLI answered ITSELF, which is
+ *   drawn as a chip rather than as the prompt bubble the daemon withheld for
+ *   it. The wire message carries the command enum and NO text, so this end
+ *   cannot put the submitted prompt back on screen.
  * - sessionInit (SessionInitView) → the /status panel's SystemInit source.
  *
  * EXPLICIT IGNORE (no new visuals; §11): a frame variant in `UNSUPPORTED_SHAPES`
@@ -56,6 +60,7 @@ import type {
   ConversationItem,
   PermissionItem,
   ResultItem,
+  SessionCommandItem,
   SystemFailureCard,
   TextItem,
   ThinkingItem,
@@ -66,6 +71,7 @@ import {
   ConversationSource,
   ERROR_CLASSES,
   RenderState,
+  sessionCommandOf,
   SessionConnectivity,
   SessionStatus,
   UNSUPPORTED_SHAPES,
@@ -985,6 +991,10 @@ function itemsFromFrame(frame: ConversationItemFrame): { items: ConversationItem
       return { items: [systemFailureCard(frame.payload, frame.uuid)], ignores: [] };
     case "skillBody":
       return { items: [skillBodyToolItem(frame.payload, frame.uuid, tsFromMs(frame.tsMs))], ignores: [] };
+    case "sessionCommand":
+      // The command enum is the ENTIRE payload — there is no text field on
+      // the wire message — so this is everything there is to read.
+      return { items: [sessionCommandItem(frame.payload, frame.uuid)], ignores: [] };
     default: {
       const never: never = arm;
       throw new Error(`state-adapter: unhandled conversation item arm ${JSON.stringify(never)}`);
@@ -1352,6 +1362,24 @@ export function systemFailureFrom(f: SystemFailure): SystemFailureCard {
     sourceDetail: f.sourceDetail,
     resolvedAtMs: f.resolvedAtMs,
     uuid: f.itemUuid,
+  };
+}
+
+/**
+ * Adopt a `frontend.v1.SessionCommandItem` as the store's item.
+ *
+ * NOTHING BUT THE COMMAND IS READ, because nothing else is there: the wire
+ * message has exactly one field, so there is no submitted prompt on this
+ * payload to accidentally carry into the feed. An unrecognized command throws
+ * (`sessionCommandOf`) rather than defaulting — the command is the item's
+ * whole content, and a guessed one would tell the user they ran something
+ * they did not.
+ */
+function sessionCommandItem(e: Obj, uuid: string): SessionCommandItem {
+  return {
+    kind: "session-command",
+    command: sessionCommandOf(pstr(e, "command"), "SessionCommandItem"),
+    uuid,
   };
 }
 

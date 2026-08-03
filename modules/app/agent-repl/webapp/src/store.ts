@@ -14,7 +14,7 @@
  * whether anything visible changed; the caller schedules the render.
  */
 import type { CounterEntry } from "./counter-menu.js";
-import type { ErrorClass, MergeStatus, RuntimeFault } from "./frontend-proto.js";
+import type { ErrorClass, MergeStatus, RuntimeFault, SessionCommand } from "./frontend-proto.js";
 import type {
   AdapterEffect,
   ProgressInput,
@@ -372,6 +372,27 @@ export function stringField(item: ToolItem, key: string): string {
   return typeof value === "string" ? value : "";
 }
 
+/**
+ * A SESSION COMMAND the user invoked (`frontend.v1.SessionCommandItem`):
+ * `/model`, `/compact`, `/clear`, and the rest of the closed set the CLI
+ * answers itself.
+ *
+ * IT IS NOT A PROMPT, and that is the whole reason it exists as its own item.
+ * The model never sees `/model` — the CLI resolves it locally — so drawing the
+ * submitted text as a purple user bubble claimed a question was asked that
+ * nobody received. The daemon withholds that bubble and pushes this instead.
+ *
+ * THERE IS NO TEXT HERE, and there is no way for there to be. The wire message
+ * carries the command enum and nothing else, so this end could not render the
+ * prompt (or an argument like `opus`) even if a future renderer wanted to. The
+ * slash form drawn on screen is derived from `command`, never received.
+ */
+export interface SessionCommandItem extends FeedOrderedItem {
+  kind: "session-command";
+  uuid: string;
+  command: SessionCommand;
+}
+
 export type ConversationItem =
   | UserTurnItem
   | TextItem
@@ -381,6 +402,7 @@ export type ConversationItem =
   | ResultItem
   | ContextClearedItem
   | ContextCompactedItem
+  | SessionCommandItem
   | SystemFailureCard
   | SystemItem;
 
