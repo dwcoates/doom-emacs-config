@@ -87,14 +87,14 @@ const (
 	sigMergeBeforeAction = "merge_before_action"
 	sigMergeAfterAction  = "merge_after_action"
 	sigMergeQueued       = "merge_queued"
-	sigMergeConflict  = "merge_conflict"
-	sigMergeFailed    = "merge_failed"
-	sigMerged         = "merged"
-	sigMergeNone      = "merge_none" // merge axis cleared (no merge in flight).
-	sigDegraded       = "degraded"
-	sigDegradedClear  = "degraded_clear" // legacy impairment projection cleared (recovered).
-	sigTaskStarted    = "task_started"
-	sigTaskEnded      = "task_ended"
+	sigMergeConflict     = "merge_conflict"
+	sigMergeFailed       = "merge_failed"
+	sigMerged            = "merged"
+	sigMergeNone         = "merge_none" // merge axis cleared (no merge in flight).
+	sigDegraded          = "degraded"
+	sigDegradedClear     = "degraded_clear" // legacy impairment projection cleared (recovered).
+	sigTaskStarted       = "task_started"
+	sigTaskEnded         = "task_ended"
 )
 
 // Cause-kind strings recorded per row and surfaced on WorkspaceState.
