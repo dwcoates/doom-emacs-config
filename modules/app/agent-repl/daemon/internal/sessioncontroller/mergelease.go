@@ -4,7 +4,10 @@ import (
 	"context"
 	"fmt"
 
+	corev1 "agentrepl/proto/agentshim/core/v1"
+
 	"claude-repld/internal/errclass"
+	"claude-repld/internal/ssm"
 )
 
 // This file is the session controller's half of the merge exclusivity lease.
@@ -100,7 +103,14 @@ func (m *Manager) SubmitMergePrompt(ctx context.Context, workspace, requestID, t
 //
 // ALREADY_COMPLETE IS A SUCCESS. The lease wants no turn running; a turn that
 // had already ended is that condition, reached without this call's help.
-func (m *Manager) InterruptForMerge(ctx context.Context, workspace string) error {
+//
+// IT REPORTS WHAT IT DISPLACED. A non-nil *ssm.DisplacedTurn is the user's
+// prompt that was cut mid-sentence, handed to the lease so releasing it can put
+// the turn back (ssm/mergelease.go). Nil means there was nothing of the user's
+// to displace: no live session controller, no turn in flight, or a turn the
+// shim reported ALREADY_COMPLETE — in each case there is no work the merge
+// took away, so there is nothing to give back.
+func (m *Manager) InterruptForMerge(ctx context.Context, workspace string) (*ssm.DisplacedTurn, error) {
 	d, err := m.existing(workspace)
 	if err != nil {
 		// NO SESSION IS NO TURN. The lease's requirement is that nothing of the
@@ -110,19 +120,67 @@ func (m *Manager) InterruptForMerge(ctx context.Context, workspace string) error
 		// worth seeing in the log.
 		m.logf("session-controller: merge interrupt ws=%q found no live session controller (%v) — nothing of the user's is in flight, so the lease's precondition already holds",
 			workspace, err)
-		return nil
+		return nil, nil
 	}
+	// READ BEFORE THE STOP. The interrupt is what makes the turn stop being the
+	// running one, so anything read afterwards describes a session that has
+	// already been taken away.
+	displaced := m.runningTurn(d)
 	outcome, err := d.client.Interrupt(ctx)
 	if err != nil {
 		m.logf("session-controller: merge interrupt FAILED ws=%q session=%s: %v — the user's turn is still running and the merge lease must not stand over it",
 			workspace, d.sessionID, err)
-		return err
+		return nil, err
 	}
 	if failed := errclass.InterruptError(outcome); failed != nil {
 		m.logf("session-controller: merge interrupt UNDELIVERABLE ws=%q session=%s outcome=%s", workspace, d.sessionID, outcome)
-		return failed
+		return nil, failed
 	}
-	m.logf("session-controller: merge interrupt ws=%q session=%s outcome=%s — the shim is handed to merge.Coordinator",
-		workspace, d.sessionID, outcome)
-	return nil
+	// A turn that was ALREADY COMPLETE was not displaced by this stop, so
+	// resubmitting its prompt would be re-running work that FINISHED rather
+	// than restoring work that was cut.
+	if outcome != corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED {
+		displaced = nil
+	}
+	m.logf("session-controller: merge interrupt ws=%q session=%s outcome=%s displaced_turn=%t — the shim is handed to merge.Coordinator",
+		workspace, d.sessionID, outcome, displaced != nil)
+	return displaced, nil
+}
+
+// runningTurn returns the turn currently in flight for d, or nil when none is.
+//
+// A turn with NO recorded prompt is reported as nothing displaced rather than
+// as an empty one: `runningText` is empty when the turn predates this daemon
+// (see sessionController.runningText), and an empty prompt is not something
+// that can be resubmitted — submitting it would be this end inventing a turn.
+func (m *Manager) runningTurn(d *sessionController) *ssm.DisplacedTurn {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !d.turnActive || d.runningText == "" {
+		return nil
+	}
+	return &ssm.DisplacedTurn{
+		Prompt:         d.runningText,
+		PermissionMode: d.runningPermissionMode,
+	}
+}
+
+// ResumeDisplacedTurn re-submits the user turn the merge lease displaced.
+//
+// IT IS AN ORDINARY USER SUBMISSION, deliberately — `submitterUser`, not the
+// lease holder's path. The prompt is the user's; the merge merely borrowed the
+// shim it was running on. Routing it through the ordinary path is also what
+// makes the resumed turn behave like every other user turn: it is refused if a
+// lease is somehow still held, it queues behind a turn already in flight, and
+// the conversation item it produces is stamped CONVERSATION_SOURCE_USER off the
+// lease ledger, because by now the window it fell inside has closed.
+func (m *Manager) ResumeDisplacedTurn(ctx context.Context, workspace string, turn ssm.DisplacedTurn) error {
+	if turn.Prompt == "" {
+		return fmt.Errorf("session-controller: resume of a displaced turn for workspace %q carries no prompt; there is nothing to put back", workspace)
+	}
+	requestID := "merge-resume:" + newQueueEntryID()
+	m.logf("session-controller: resuming the turn the merge lease displaced ws=%q request_id=%s permission_mode=%q",
+		workspace, requestID, turn.PermissionMode)
+	return m.submitPromptAs(ctx, workspace, requestID, turn.Prompt, turn.PermissionMode,
+		"merge-resume:"+requestID, submitterUser)
 }

@@ -3,6 +3,7 @@ package ssm
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -49,8 +50,42 @@ import (
 // its own port rather than the frontend interrupt command's entry point.
 type SessionAuthority interface {
 	// InterruptForMerge delivers the stop and reports a failure to deliver it.
-	InterruptForMerge(ctx context.Context, workspace string) error
+	//
+	// It also reports WHAT it stopped. A nil DisplacedTurn means the lease
+	// displaced nothing (no live session, or a turn that had already ended);
+	// a non-nil one is the user's prompt that was cut, which the release path
+	// hands back through ResumeDisplacedTurn.
+	InterruptForMerge(ctx context.Context, workspace string) (*DisplacedTurn, error)
+	// ResumeDisplacedTurn re-submits the turn the lease displaced, once the
+	// lease is gone. It is an ordinary USER submission: the prompt is the
+	// user's, it was never theirs to cancel, and the conversation it lands in
+	// is out from under the merge.
+	ResumeDisplacedTurn(ctx context.Context, workspace string, turn DisplacedTurn) error
 	MergedTeardown
+}
+
+// DisplacedTurn is the user turn a merge lease's interrupt stopped.
+//
+// IT EXISTS BECAUSE THE STOP IS NOT THE USER'S. The lease's interrupt is
+// machinery: the user asked for work and a merge took the shim away
+// mid-sentence. Before this the turn simply ended, the workspace went quiet,
+// and the user's only sign was the refusal text telling them to resubmit once
+// the merge finished — a manual step for something the daemon knew everything
+// about.
+//
+// IT IS DURABLE, and that is the whole reason it rides the lease LEDGER rather
+// than a field on the live session controller. A workspace merge of this repo
+// bounces the daemon while the lease is still open — the ledger keeps that
+// window on purpose (warmMergeLeasesLocked) and the resuming coordinator adopts
+// it (openMergeLease) — so anything about the displaced turn held only in
+// memory is exactly what the bounce would throw away, in exactly the case the
+// resume matters most.
+type DisplacedTurn struct {
+	// Prompt is the text that started the stopped turn.
+	Prompt string
+	// PermissionMode is the mode that turn was running under, carried so the
+	// resumption is the same turn rather than a similar one.
+	PermissionMode string
 }
 
 // MergeLeaseConfig constructs a MergeLease. EVERY field is required: a lease
@@ -123,7 +158,8 @@ func (l *MergeLease) Acquire(ctx context.Context, ws string) (func(), error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := l.interrupter.InterruptForMerge(ctx, ws); err != nil {
+	displaced, err := l.interrupter.InterruptForMerge(ctx, ws)
+	if err != nil {
 		wrapped := fmt.Errorf("ssm: merge lease for workspace %q could not interrupt the in-flight turn: %w", ws, err)
 		l.m.logf("ssm: merge lease decision=rollback workspace=%s acquired_at=%d error=%v — the displaced turn is still running, so the claim is withdrawn rather than held over a shim the user still drives",
 			ws, at, err)
@@ -133,20 +169,157 @@ func (l *MergeLease) Acquire(ctx context.Context, ws string) (func(), error) {
 		}
 		return nil, wrapped
 	}
-	l.m.logf("ssm: merge lease decision=acquire workspace=%s acquired_at=%d — the merge owns this shim; user prompts are refused and every conversation item is stamped CONVERSATION_SOURCE_MERGE until release",
-		ws, at)
+	// RECORDED BEFORE THE MERGE RUNS, on the window itself. From here the
+	// displaced turn is the ledger's fact, so the bounce a self-merge causes
+	// carries it to the daemon that resumes the merge instead of losing it.
+	if displaced != nil {
+		if err := l.m.recordDisplacedTurn(ws, *displaced); err != nil {
+			// LOUD AND NON-FATAL. The lease itself is sound and the merge it
+			// exists for must proceed; what is lost is the automatic resume,
+			// which is precisely the kind of degradation that must be visible
+			// rather than inferred from a turn that never came back.
+			l.m.logf("ssm: merge lease displaced-turn record FAILED workspace=%s acquired_at=%d: %v — the merge proceeds, but the user's stopped turn will NOT be resumed automatically",
+				ws, at, err)
+		}
+	}
+	l.m.logf("ssm: merge lease decision=acquire workspace=%s acquired_at=%d displaced_turn=%t — the merge owns this shim; user prompts are refused and every conversation item is stamped CONVERSATION_SOURCE_MERGE until release",
+		ws, at, displaced != nil)
 
 	var once sync.Once
 	return func() {
 		once.Do(func() {
+			// READ AND CLEARED AS PART OF THE CLOSE, so the resume is
+			// exactly-once by the same write that ends the window: a second
+			// release finds nothing, and a crash between the close and the
+			// submit loses the resume rather than repeating the user's turn.
+			// Losing it is the safe direction — a duplicated prompt is work
+			// the user did not ask for twice.
+			resume, err := l.m.takeDisplacedTurn(ws)
+			if err != nil {
+				l.m.logf("ssm: merge lease displaced-turn read FAILED workspace=%s acquired_at=%d: %v — the lease is still released, but nothing is resumed",
+					ws, at, err)
+			}
 			if err := l.m.closeMergeLease(ws); err != nil {
 				l.m.logf("ssm: merge lease RELEASE FAILED workspace=%s acquired_at=%d: %v — the window stays open and user prompts stay refused",
 					ws, at, err)
 				return
 			}
-			l.m.logf("ssm: merge lease decision=release workspace=%s acquired_at=%d — the shim is handed back to the user", ws, at)
+			l.m.logf("ssm: merge lease decision=release workspace=%s acquired_at=%d resume_displaced_turn=%t — the shim is handed back to the user",
+				ws, at, resume != nil)
+			if resume == nil {
+				return
+			}
+			// AFTER the close, never before: the submit is an ordinary USER
+			// prompt and guardMergeLease refuses those while the window is
+			// open. Resuming under the lease would refuse the very turn the
+			// lease displaced.
+			//
+			// WithoutCancel because the resume outlives the acquisition. The
+			// ctx here is whatever the caller took the lease under, and a
+			// caller that scopes it to the merge RUN would cancel it at
+			// exactly the terminal phase that triggers this release — making
+			// the resume fail precisely when it is due. Today's coordinator
+			// passes a lifetime context; nothing about this path should
+			// depend on that staying true.
+			if err := l.interrupter.ResumeDisplacedTurn(context.WithoutCancel(ctx), ws, *resume); err != nil {
+				l.m.logf("ssm: merge lease displaced-turn RESUME FAILED workspace=%s acquired_at=%d: %v — the user's stopped turn was not put back and they will have to resubmit it",
+					ws, at, err)
+				return
+			}
+			l.m.logf("ssm: merge lease displaced-turn RESUMED workspace=%s acquired_at=%d — the turn the merge stopped is running again",
+				ws, at)
 		})
 	}, nil
+}
+
+// recordDisplacedTurn writes the stopped user turn onto the workspace's OPEN
+// lease window.
+//
+// An absent open window is an error rather than a no-op: it means the caller
+// recorded a displacement against a lease this ledger does not believe is held,
+// and answering "fine" would silently drop a turn the user is owed.
+func (m *Manager) recordDisplacedTurn(workspace string, turn DisplacedTurn) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	res, err := m.db.Exec(
+		`UPDATE merge_lease SET displaced_prompt=?, displaced_permission_mode=?
+		   WHERE workspace=? AND released_at IS NULL`,
+		turn.Prompt, turn.PermissionMode, workspace,
+	)
+	if err != nil {
+		return fmt.Errorf("ssm: record displaced turn for workspace %q: %w", workspace, err)
+	}
+	updated, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("ssm: inspect displaced turn write for workspace %q: %w", workspace, err)
+	}
+	if updated != 1 {
+		return fmt.Errorf("ssm: displaced turn write for workspace %q affected %d open window(s), want exactly one", workspace, updated)
+	}
+	return nil
+}
+
+// takeDisplacedTurn reads the workspace's open window's displaced turn and
+// clears it in the SAME statement, returning nil when there is nothing to
+// resume.
+//
+// THE CLEAR IS THE EXACTLY-ONCE GUARANTEE. It is not a courtesy tidy-up: the
+// row is what a second release, a replayed release, or a coordinator resuming
+// this window after a bounce would read, and a resume that is merely
+// idempotent-by-convention is a duplicated prompt waiting for a schedule that
+// exposes it.
+func (m *Manager) takeDisplacedTurn(workspace string) (*DisplacedTurn, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var prompt, mode sql.NullString
+	err := m.db.QueryRow(
+		`SELECT displaced_prompt, displaced_permission_mode FROM merge_lease
+		   WHERE workspace=? AND released_at IS NULL`,
+		workspace,
+	).Scan(&prompt, &mode)
+	if errors.Is(err, sql.ErrNoRows) {
+		// No open window. The release path reaches this whenever the lease was
+		// already closed, which carries no displaced turn by construction.
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("ssm: read displaced turn for workspace %q: %w", workspace, err)
+	}
+	if !prompt.Valid || prompt.String == "" {
+		return nil, nil
+	}
+	if _, err := m.db.Exec(
+		`UPDATE merge_lease SET displaced_prompt=NULL, displaced_permission_mode=NULL
+		   WHERE workspace=? AND released_at IS NULL`,
+		workspace,
+	); err != nil {
+		return nil, fmt.Errorf("ssm: clear displaced turn for workspace %q: %w", workspace, err)
+	}
+	return &DisplacedTurn{Prompt: prompt.String, PermissionMode: mode.String}, nil
+}
+
+// DisplacedTurnFor reports the turn the workspace's open lease window stopped,
+// or nil when there is none. Read-only: it never clears, so it is safe for the
+// diagnostics and tests that ask what a held lease is holding.
+func (m *Manager) DisplacedTurnFor(workspace string) (*DisplacedTurn, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var prompt, mode sql.NullString
+	err := m.db.QueryRow(
+		`SELECT displaced_prompt, displaced_permission_mode FROM merge_lease
+		   WHERE workspace=? AND released_at IS NULL`,
+		workspace,
+	).Scan(&prompt, &mode)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("ssm: read displaced turn for workspace %q: %w", workspace, err)
+	}
+	if !prompt.Valid || prompt.String == "" {
+		return nil, nil
+	}
+	return &DisplacedTurn{Prompt: prompt.String, PermissionMode: mode.String}, nil
 }
 
 // Held reports whether the lease on ws is currently held.

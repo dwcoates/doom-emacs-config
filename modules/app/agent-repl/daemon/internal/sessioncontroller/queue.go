@@ -233,6 +233,7 @@ type ClassifyResult struct {
 func (m *Manager) queueSubmitLocked(d *sessionController, requestID, text, permissionMode string) (*queueEntry, bool) {
 	if !d.turnActive {
 		d.runningText = text
+		d.runningPermissionMode = permissionMode
 		if d.paused {
 			// It runs ALONE: the pause still stands, so the turn-end handler
 			// will deliver nothing behind it until this turn ends cleanly.
@@ -393,6 +394,7 @@ func (m *Manager) deliver(d *sessionController, e *queueEntry) {
 	if err == nil {
 		m.mu.Lock()
 		d.runningText = e.text
+		d.runningPermissionMode = e.permissionMode
 		m.mu.Unlock()
 		return
 	}

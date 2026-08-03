@@ -145,11 +145,19 @@ func migrate(db *sql.DB, logf dlog.Logf) error {
 		-- survives a daemon bounce on purpose: merge.Coordinator.Drain
 		-- reconstructs the merge behind it rather than the lease being silently
 		-- dropped and the workspace quietly re-opened to user prompts.
+		--
+		-- displaced_prompt / displaced_permission_mode carry the USER TURN the
+		-- window's interrupt stopped, so the release can put it back. They ride
+		-- the ledger rather than the live session controller precisely because a
+		-- self-merge BOUNCES the daemon with the window still open: anything
+		-- held in memory is thrown away in the one case the resume matters most.
 		CREATE TABLE IF NOT EXISTS merge_lease (
 			lease_id     INTEGER PRIMARY KEY AUTOINCREMENT,
 			workspace    TEXT    NOT NULL,
 			acquired_at  INTEGER NOT NULL,
-			released_at  INTEGER
+			released_at  INTEGER,
+			displaced_prompt          TEXT,
+			displaced_permission_mode TEXT
 		);
 		CREATE INDEX IF NOT EXISTS merge_lease_window
 			ON merge_lease(workspace, acquired_at, released_at);
@@ -193,6 +201,9 @@ func migrate(db *sql.DB, logf dlog.Logf) error {
 		return err
 	}
 	if err := addEventSessionIDColumn(db); err != nil {
+		return err
+	}
+	if err := addMergeLeaseDisplacedColumns(db); err != nil {
 		return err
 	}
 
@@ -408,6 +419,34 @@ func addTaskIDColumn(db *sql.DB) error {
 	}
 	if _, err := db.Exec(`ALTER TABLE workspace_state ADD COLUMN task_id TEXT`); err != nil {
 		return fmt.Errorf("ssm: add workspace_state.task_id: %w", err)
+	}
+	return nil
+}
+
+// addMergeLeaseDisplacedColumns installs the two columns that carry the user
+// turn a merge lease's interrupt stopped, so releasing the lease can put it
+// back (mergelease.go, DisplacedTurn).
+//
+// Added out-of-band, like every other column-adding migration here: SQLite's
+// ALTER TABLE ADD COLUMN is not idempotent, so an existing column is this
+// migration's SUCCESS condition rather than an error. A database written
+// before the columns existed carries NULL in both, which reads as "this window
+// displaced nothing" — the correct answer for a lease taken by a daemon that
+// had no idea it should have been recording one.
+func addMergeLeaseDisplacedColumns(db *sql.DB) error {
+	for _, column := range []string{"displaced_prompt", "displaced_permission_mode"} {
+		has, err := hasColumn(db, "merge_lease", column)
+		if err != nil {
+			return err
+		}
+		if has {
+			continue
+		}
+		if _, err := db.Exec(
+			fmt.Sprintf(`ALTER TABLE merge_lease ADD COLUMN %s TEXT`, column),
+		); err != nil {
+			return fmt.Errorf("ssm: add merge_lease.%s: %w", column, err)
+		}
 	}
 	return nil
 }
