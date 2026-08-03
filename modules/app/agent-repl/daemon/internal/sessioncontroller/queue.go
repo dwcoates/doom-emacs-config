@@ -47,7 +47,34 @@ type queueEntry struct {
 	// verdict, or a user force). It is the flag the turn-end handler looks for
 	// before falling back to the ordinary FIFO drain.
 	interjecting bool
+
+	// shutdownHoldScheduleID names the scheduled shutdown whose DRAIN LEASE is
+	// parking this entry, and is empty for every ordinary entry.
+	//
+	// It is a different KIND of hold from a classification, which is why it is
+	// a field of its own rather than a fifth QueueClassification: a classified
+	// entry is waiting on the turn in front of it, and a drain-held entry is
+	// waiting on the whole daemon. The classifier NEVER runs on one of these —
+	// there is nothing to interject into and nothing to decide — so the entry
+	// stays PENDING for its whole parked life, and the frontend renders the
+	// lease bubble off this field instead of the classifier bubble.
+	//
+	// The three exits are a user force (delivered now, further delaying the
+	// bounce), a user cancel, and the schedule ending — by cancel, which sheds
+	// the hold in place, or by the bounce, after which the daemon that comes
+	// back restores the entry un-held.
+	shutdownHoldScheduleID string
+
+	// drainRowPending marks an entry that still has a durable parking row
+	// behind it. It stays true after the hold itself is shed — a prompt
+	// restored after the bounce is UN-HELD but its row must not go until the
+	// prompt is actually delivered or cancelled, or a second crash in the
+	// window would lose the very prompt the row exists to save.
+	drainRowPending bool
 }
+
+// drainHeld reports whether a scheduled shutdown's lease is parking this entry.
+func (e *queueEntry) drainHeld() bool { return e.shutdownHoldScheduleID != "" }
 
 // promptQueue is one session's ordered FIFO of held prompts. It is not
 // goroutine-safe; the Manager serializes every access under its own mutex.
@@ -93,6 +120,38 @@ func (q *promptQueue) popFront() *queueEntry {
 	return e
 }
 
+// popFrontDeliverable removes and returns the frontmost entry the ORDINARY
+// turn-end drain may deliver, skipping every entry parked by a shutdown drain
+// lease. Nil when the queue holds nothing deliverable.
+//
+// While a lease stands nothing is skipped in practice: taking the lease parks
+// the entries already queued as well as every later one, so a deliverable entry
+// and a parked one never coexist. The skip is the STRUCTURAL guarantee behind
+// that rather than a second mechanism — a future path that parks one entry
+// without parking the rest still cannot deliver a parked one, and the relative
+// order of whatever is deliverable is untouched.
+func (q *promptQueue) popFrontDeliverable() *queueEntry {
+	for i, e := range q.entries {
+		if e.drainHeld() {
+			continue
+		}
+		q.entries = append(q.entries[:i], q.entries[i+1:]...)
+		return e
+	}
+	return nil
+}
+
+// drainHeldCount reports how many entries the drain lease is parking.
+func (q *promptQueue) drainHeldCount() int {
+	n := 0
+	for _, e := range q.entries {
+		if e.drainHeld() {
+			n++
+		}
+	}
+	return n
+}
+
 // pushFront puts an entry back at the head of the queue: the position for one
 // that was taken for delivery and could not be delivered after all, so it keeps
 // its claim on the next delivery slot rather than going to the back.
@@ -121,9 +180,11 @@ func (q *promptQueue) addHeadJump(e *queueEntry) {
 
 // takeHeadJump removes and returns the first head-jump entry, or nil when
 // none is waiting. It is the ONLY delivery a paused queue makes.
+// A DRAIN-HELD head jump is skipped, not taken: the drain lease outranks the
+// pause, and the entry keeps its head-jump claim for whenever the lease ends.
 func (q *promptQueue) takeHeadJump() *queueEntry {
 	for i, e := range q.entries {
-		if e.headJump {
+		if e.headJump && !e.drainHeld() {
 			q.entries = append(q.entries[:i], q.entries[i+1:]...)
 			return e
 		}
@@ -134,9 +195,13 @@ func (q *promptQueue) takeHeadJump() *queueEntry {
 // takeInterjecting removes and returns the first entry flagged for interjection,
 // or nil when none is. Front-to-back so two forces in quick succession still
 // deliver in the order they were requested.
+// A DRAIN-HELD entry is skipped whatever its verdict: a classification decided
+// before the lease was taken cannot authorize starting a turn the lease exists
+// to prevent. The flag is kept, so a cancelled schedule leaves the entry's
+// claim on the next boundary exactly as it found it.
 func (q *promptQueue) takeInterjecting() *queueEntry {
 	for i, e := range q.entries {
-		if e.interjecting {
+		if e.interjecting && !e.drainHeld() {
 			q.entries = append(q.entries[:i], q.entries[i+1:]...)
 			return e
 		}
@@ -158,14 +223,18 @@ func (q *promptQueue) drainAll() []*queueEntry {
 func (q *promptQueue) view(workspace, sessionID string) *frontendv1.QueueView {
 	v := &frontendv1.QueueView{Workspace: workspace, SessionId: sessionID}
 	for _, e := range q.entries {
-		v.Entries = append(v.Entries, &frontendv1.QueueEntry{
+		entry := &frontendv1.QueueEntry{
 			Id:             e.id,
 			Text:           e.text,
 			QueuedAtMs:     e.queuedAtMs,
 			Classification: e.classification,
 			Rationale:      e.rationale,
 			Accepted:       e.accepted,
-		})
+		}
+		if e.drainHeld() {
+			entry.ShutdownHold = &frontendv1.QueueEntryShutdownHold{ScheduleId: e.shutdownHoldScheduleID}
+		}
+		v.Entries = append(v.Entries, entry)
 	}
 	return v
 }
@@ -230,7 +299,38 @@ type ClassifyResult struct {
 // no turn running the prompt still goes straight through, and it becomes the
 // LONE RUNNER whose clean end resumes the drain; with a turn running it is
 // queued as a HEAD JUMP, ahead of everything the pause retained.
-func (m *Manager) queueSubmitLocked(d *sessionController, requestID, text, permissionMode string) (*queueEntry, bool) {
+//
+// THE DRAIN LEASE OVERRIDES ALL OF IT. While a scheduled shutdown holds the
+// lease, no new turn may start anywhere, so EVERY submitted prompt is parked —
+// from any source, on an idle session as readily as a busy one — and the
+// classifier never runs on it. That is the one condition under which an idle
+// session does show a chip, and it is the honest one: the prompt genuinely is
+// not going to run until the bounce is over.
+//
+// leaseScheduleID is the drain lease as the CALLER read it, before taking the
+// manager mutex. It is passed in rather than read here on purpose: the lease
+// engine calls back into this package to recompute its holds, so a read of the
+// engine underneath the manager mutex would invert the two locks.
+func (m *Manager) queueSubmitLocked(d *sessionController, requestID, text, permissionMode, leaseScheduleID string) (*queueEntry, bool) {
+	if scheduleID := leaseScheduleID; scheduleID != "" {
+		e := &queueEntry{
+			id:             newQueueEntryID(),
+			requestID:      requestID,
+			text:           text,
+			permissionMode: permissionMode,
+			queuedAtMs:     m.now(),
+			classification: frontendv1.QueueClassification_QUEUE_CLASSIFICATION_PENDING,
+		}
+		m.parkForDrain(d, e, scheduleID)
+		// Appended at the BACK even against a paused queue: a head jump is the
+		// paused queue's one deliverable, and a drain-held entry is by
+		// definition not deliverable, so claiming that position would be a lie
+		// about when it runs.
+		d.queue.add(e)
+		m.logf("session-controller: prompt PARKED by the drain lease entry=%s ws=%q session=%s schedule=%s turn_active=%v — a scheduled shutdown holds the lease, so this prompt is delayed until the bounce completes; it is not classified and not refused",
+			e.id, d.workspace, d.sessionID, scheduleID, d.turnActive)
+		return e, true
+	}
 	if !d.turnActive {
 		d.runningText = text
 		if d.paused {
@@ -311,6 +411,9 @@ func (m *Manager) onTurnBoundary(d *sessionController, active bool) {
 	d.turnActive = active
 	if active {
 		m.mu.Unlock()
+		// A turn STARTING is a new drain hold. Told after the mutex is released
+		// (the engine re-reads DrainHolds, which takes it).
+		m.noteDrainActivity()
 		return
 	}
 	// The turn that just ended: was it one a user-commanded stop was delivered
@@ -345,7 +448,11 @@ func (m *Manager) onTurnBoundary(d *sessionController, active bool) {
 		e = d.queue.takeInterjecting()
 		reason = "interject"
 		if e == nil {
-			e = d.queue.popFront()
+			// THE ORDINARY DRAIN SKIPS DRAIN-HELD ENTRIES. This turn ending is
+			// exactly the event the scheduled bounce is waiting for, so
+			// delivering the prompt it parked would start the very turn the
+			// lease exists to prevent and the drain would never finish.
+			e = d.queue.popFrontDeliverable()
 			reason = "turn-end drain"
 		}
 	}
@@ -354,7 +461,15 @@ func (m *Manager) onTurnBoundary(d *sessionController, active bool) {
 			m.logf("session-controller: queue PAUSED at a turn boundary session=%s ws=%q — %d entr(ies) retained, none delivered",
 				d.sessionID, d.workspace, len(d.queue.entries))
 		}
+		if held := d.queue.drainHeldCount(); held > 0 {
+			m.logf("session-controller: queue DRAIN-HELD at a turn boundary session=%s ws=%q — %d entr(ies) parked by a scheduled shutdown, none delivered; they run once the bounce completes",
+				d.sessionID, d.workspace, held)
+		}
 		m.mu.Unlock()
+		// The turn that just ended may have been the last thing holding the
+		// drain open. Told AFTER the mutex is released: the engine re-reads the
+		// holds through DrainHolds, which takes it.
+		m.noteDrainActivity()
 		return
 	}
 	if e.headJump {
@@ -368,6 +483,7 @@ func (m *Manager) onTurnBoundary(d *sessionController, active bool) {
 	m.logf("session-controller: queue delivering entry=%s (%s) session=%s ws=%q",
 		e.id, reason, d.sessionID, d.workspace)
 	m.publish(d.sessionID, view, recs)
+	m.noteDrainActivity()
 	go m.deliver(d, e)
 }
 
@@ -389,11 +505,33 @@ func (m *Manager) onTurnBoundary(d *sessionController, active bool) {
 // reading an immediate one gets: it is recognized, echoed to nobody, and opens
 // the clearing axis. This path used to recognize nothing at all.
 func (m *Manager) deliver(d *sessionController, e *queueEntry) {
+	// THE DRAIN LEASE'S BACKSTOP, at the one funnel every delivery reaches.
+	// Every selection path already refuses a parked entry; this is what makes a
+	// path that FORGETS to unable to start a turn during a drain, rather than
+	// merely unlikely to. It is a loud requeue, never a silent drop: the prompt
+	// is still the user's and still owed.
+	if e.drainHeld() {
+		m.mu.Lock()
+		d.queue.pushFront(e)
+		view, recs := m.publishQueueLocked(d)
+		m.mu.Unlock()
+		m.logf("session-controller: queue delivery REFUSED entry=%s session=%s ws=%q schedule=%s — the entry is parked by a scheduled shutdown's drain lease and a delivery path selected it anyway; requeued at the head, nothing was submitted",
+			e.id, d.sessionID, d.workspace, e.shutdownHoldScheduleID)
+		m.publish(d.sessionID, view, recs)
+		return
+	}
 	err := m.forwardPrompt(m.rootCtx, d, e.requestID, e.text, "frontend", e.permissionMode, submitterUser)
 	if err == nil {
 		m.mu.Lock()
 		d.runningText = e.text
 		m.mu.Unlock()
+		// The durable parking row outlived the hold on purpose (see
+		// drainRowPending). The prompt has now reached the shim, so the row has
+		// nothing left to protect and goes.
+		if e.drainRowPending {
+			e.drainRowPending = false
+			m.releaseDrainRow(e.id, "delivered")
+		}
 		return
 	}
 	m.logf("session-controller: queue delivery FAILED entry=%s session=%s ws=%q: %v (prompt requeued)",
@@ -610,11 +748,29 @@ func (m *Manager) ForceQueueEntry(workspace, entryID string) error {
 	if err != nil {
 		return err
 	}
+	// A FORCE OVERRIDES THE DRAIN LEASE, and that is the point of the control.
+	// The user is looking at a bubble that says their prompt is waiting for a
+	// scheduled bounce and is telling the daemon to run it anyway. The turn it
+	// starts then becomes a drain hold of its own and delays the bounce further
+	// — which is exactly what they asked for, so it is honored rather than
+	// second-guessed, and loud-logged so the delay has a stated author.
 	m.mu.Lock()
-	known := d.queue.get(entryID) != nil
-	m.mu.Unlock()
-	if !known {
+	e := d.queue.get(entryID)
+	if e == nil {
+		m.mu.Unlock()
 		return fmt.Errorf("session-controller: no queued prompt %q on workspace %q", entryID, workspace)
+	}
+	forcedSchedule := e.shutdownHoldScheduleID
+	e.shutdownHoldScheduleID = ""
+	hadRow := e.drainRowPending
+	e.drainRowPending = false
+	m.mu.Unlock()
+	if forcedSchedule != "" {
+		m.logf("session-controller: drain hold FORCED entry=%s ws=%q session=%s schedule=%s initiator=user — the user asked for a prompt parked by a scheduled shutdown to run now; the turn it starts will hold the drain open until it ends",
+			entryID, workspace, d.sessionID, forcedSchedule)
+	}
+	if hadRow {
+		m.releaseDrainRow(entryID, "forced_by_user")
 	}
 	m.beginInterject(d, entryID, "user")
 	return nil
@@ -654,9 +810,13 @@ func (m *Manager) CancelQueueEntry(workspace, entryID string) error {
 		m.mu.Unlock()
 		return fmt.Errorf("session-controller: no queued prompt %q on workspace %q", entryID, workspace)
 	}
+	heldBy, hadRow := e.shutdownHoldScheduleID, e.drainRowPending
 	view, recs := m.publishQueueLocked(d)
 	m.mu.Unlock()
-	m.logf("session-controller: queue entry=%s cancelled session=%s", entryID, d.sessionID)
+	m.logf("session-controller: queue entry=%s cancelled session=%s drain_schedule=%q initiator=user", entryID, d.sessionID, heldBy)
+	if hadRow {
+		m.releaseDrainRow(entryID, "cancelled_by_user")
+	}
 	m.publish(d.sessionID, view, recs)
 	return nil
 }

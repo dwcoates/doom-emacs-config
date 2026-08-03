@@ -269,6 +269,12 @@ type Config struct {
 	// feature degrades to plain FIFO rather than silently pretending to have
 	// judged anything.
 	Classifier Classifier
+	// ShutdownHolds is the durable ledger of prompts parked by a scheduled
+	// shutdown's drain lease. Optional: a nil store means a parked prompt does
+	// not survive the bounce that parked it, which is loud-logged at every
+	// parking site rather than silently tolerated. Satisfied by
+	// *statedb.ShutdownSchedules.
+	ShutdownHolds ShutdownHoldStore
 	// SessionConfigDir resolves a session's CLAUDE_CONFIG_DIR so the
 	// classifier runs under the same account as the session it is about. Nil
 	// leaves it empty, which inherits the daemon's own environment.
@@ -305,6 +311,11 @@ type Manager struct {
 	newControllerGenerationID func() (string, error)
 	// now is the queue's clock (queued_at_ms), injected by tests.
 	now func() int64
+
+	// shutdownLease binds the daemon-global scheduled-shutdown drain lease
+	// (shutdownlease.go). Late-bound because the engine takes this fleet as a
+	// dependency, so it cannot be a Config field.
+	shutdownLease shutdownLeaseBinding
 
 	mu       sync.Mutex
 	byWS     map[string]*sessionController // workspace -> live session controller
@@ -383,7 +394,14 @@ type sessionController struct {
 	// must act on what the session really reported, at the moment it reported
 	// it, not on a resolved view of it.
 	turnActive bool
-	queue      promptQueue
+	// activeTurnID names the turn now in flight, bound off the SAME correlated
+	// boundary the merge waiters use (onTurnEvent) and cleared at its end. It
+	// is what a scheduled shutdown's drain hold reports, so the log, the
+	// webapp, and the turn ledger all name the same turn. Empty for a turn this
+	// daemon adopted rather than started: the hold is the fact that a turn runs,
+	// not that this process can name it.
+	activeTurnID string
+	queue        promptQueue
 	// paused stops the queue DRAINING while retaining every entry (I1). Set by
 	// a user-commanded interrupt: the user asked for work to stop, and
 	// delivering the next held prompt the moment the stopped turn ends would
@@ -773,8 +791,13 @@ func (m *Manager) submitPromptAs(ctx context.Context, workspace, requestID, text
 		return err
 	}
 
+	// THE DRAIN LEASE IS READ BEFORE THE MUTEX, never under it: the lease engine
+	// calls back into this fleet to recompute its holds, and reading it here
+	// keeps the two locks in one order.
+	leaseScheduleID, _ := m.heldSchedule()
+
 	m.mu.Lock()
-	entry, queued := m.queueSubmitLocked(d, requestID, text, permissionMode)
+	entry, queued := m.queueSubmitLocked(d, requestID, text, permissionMode, leaseScheduleID)
 	if !queued {
 		m.mu.Unlock()
 		// The reading of the prompt, the receipt, and the forward all happen
@@ -802,6 +825,18 @@ func (m *Manager) submitPromptAs(ctx context.Context, workspace, requestID, text
 	view, recs := m.publishQueueLocked(d)
 	m.mu.Unlock()
 
+	// THE CLASSIFIER NEVER RUNS ON A DRAIN-HELD ENTRY. It answers exactly one
+	// question — should this prompt interrupt the turn in front of it — and a
+	// prompt parked by a scheduled bounce has no turn in front of it to
+	// interrupt. Asking anyway would spend a model call to produce a verdict
+	// that could only be wrong: an INTERJECT would demand an interrupt on
+	// behalf of a prompt the lease exists to hold back.
+	if entry.drainHeld() {
+		m.logf("session-controller: queued prompt entry=%s session=%s ws=%q origin=%q schedule=%s classifier=SKIPPED (parked by the drain lease)",
+			entry.id, d.sessionID, workspace, origin, entry.shutdownHoldScheduleID)
+		m.publish(d.sessionID, view, recs)
+		return nil
+	}
 	m.logf("session-controller: queued prompt entry=%s session=%s ws=%q origin=%q (turn in flight)",
 		entry.id, d.sessionID, workspace, origin)
 	m.publish(d.sessionID, view, recs)
@@ -1667,6 +1702,11 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 	// edges do, but correlated by turn id rather than by edge. Bound before Run,
 	// so no boundary can reach the consumer with this unset.
 	cons.onTurnEvent = func(started bool, turnID string, outcome turnOutcome) {
+		// The drain lease's hold names the turn it is waiting on, and this is
+		// the only place this package is told a turn's own id.
+		m.mu.Lock()
+		d.noteActiveTurnID(started, turnID)
+		m.mu.Unlock()
 		m.onTurnEvent(d, started, turnID, outcome)
 	}
 	// Every PERSISTENT store event names the conversation it belongs to.
@@ -2189,6 +2229,15 @@ func (m *Manager) onConnectedForGeneration(workspace, sessionID, generationID st
 	// the session is genuinely driveable (phantomturn.go). No-op when nothing
 	// is owed, which is every ordinary reattach.
 	m.releasePhantomTurn(d)
+	// Prompts a PREVIOUS daemon parked behind a scheduled shutdown are put back
+	// on this session's queue now, for the same reason the phantom release
+	// waits for this frame: the session is genuinely driveable, so a restored
+	// prompt can actually be delivered rather than parked a second time
+	// (shutdownlease.go).
+	m.restoreShutdownHolds(d)
+	// This session is live, so it may be holding the drain open — a reattach
+	// mid-turn does exactly that.
+	m.noteDrainActivity()
 }
 
 func (m *Manager) onConnected(workspace, sessionID string, hello *corev1.ShimHello) {
