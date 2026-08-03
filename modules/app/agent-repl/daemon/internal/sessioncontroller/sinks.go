@@ -693,7 +693,7 @@ func (c *consumer) Apply(ev *corev1.Event) error {
 	}
 	switch ev.GetPayload().(type) {
 	case *corev1.Event_TaskStarted, *corev1.Event_TaskEnded:
-		catalog := frontend.BuildTaskCatalog(c.workspace, c.sessionID, c.snapshotRing())
+		catalog := frontend.BuildTaskCatalog(c.workspace, c.sessionID, c.snapshotRing(), c.logf)
 		c.logf("session-controller: task catalog push session=%s ws=%s seq=%d event=%s tasks=%d",
 			c.sessionID, c.workspace, ev.GetSeq(), stateKind(ev), len(catalog.GetTasks()))
 		c.push.PushTaskCatalog(catalog)
@@ -950,7 +950,7 @@ func (c *consumer) reconcileTasks(ev *corev1.Event, btc *datav1.BackgroundTasksC
 	if err := c.ssm.ReconcileTasks(ev.GetSessionId(), ids); err != nil {
 		c.logf("session-controller: task reconciliation failed session=%s seq=%d: %v", c.sessionID, ev.GetSeq(), err)
 	}
-	c.push.PushTaskCatalog(frontend.BuildTaskCatalog(c.workspace, c.sessionID, c.snapshotRing()))
+	c.push.PushTaskCatalog(frontend.BuildTaskCatalog(c.workspace, c.sessionID, c.snapshotRing(), c.logf))
 }
 
 // Backfill states persisted on the registry record and mapped onto
