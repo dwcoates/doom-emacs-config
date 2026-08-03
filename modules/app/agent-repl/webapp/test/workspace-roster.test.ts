@@ -117,6 +117,79 @@ describe("decodeFrontendFrame — workspaceRoster arm", () => {
     expect(value.recentlyMerged.rows).toEqual([]);
   });
 
+  it("defaults an absent recently-merged fold to unfolded", () => {
+    // Arrange + Act.
+    const value = rosterOf(roster());
+
+    // Assert.
+    expect(value.recentlyMerged.folded).toBe(false);
+  });
+
+  it("defaults an absent recently-merged label to the empty string", () => {
+    // Arrange + Act.
+    const value = rosterOf(roster());
+
+    // Assert.
+    expect(value.recentlyMerged.label).toBe("");
+  });
+
+  it("decodes the recently-merged section's fold state", () => {
+    // Arrange + Act.
+    const value = rosterOf(roster({ recentlyMerged: { rows: [], folded: true } }));
+
+    // Assert.
+    expect(value.recentlyMerged.folded).toBe(true);
+  });
+
+  it("decodes the recently-merged section's display label", () => {
+    // Arrange + Act.
+    const value = rosterOf(roster({ recentlyMerged: { rows: [], label: "Recently Merged" } }));
+
+    // Assert.
+    expect(value.recentlyMerged.label).toBe("Recently Merged");
+  });
+
+  it("rejects a non-boolean recently-merged fold", () => {
+    // Arrange + Act + Assert.
+    expect(() => decode(roster({ recentlyMerged: { rows: [], folded: "yes" } }))).toThrow(
+      /folded must be a boolean/,
+    );
+  });
+
+  it("rejects a non-string recently-merged label", () => {
+    // Arrange + Act + Assert.
+    expect(() => decode(roster({ recentlyMerged: { rows: [], label: 7 } }))).toThrow(
+      /label must be a string/,
+    );
+  });
+
+  it("decodes a repo section's display label", () => {
+    // Arrange + Act.
+    const value = rosterOf(
+      roster({ repository: { sections: [{ repoKey: "/p/.git", label: "p", rows: [ROW] }] } }),
+    );
+
+    // Assert.
+    if (value.view.case !== "repository") throw new Error("wrong view arm");
+    expect(value.view.value.sections[0]?.label).toBe("p");
+  });
+
+  it("defaults an absent repo section label to the empty string", () => {
+    // Arrange + Act.
+    const value = rosterOf(roster());
+
+    // Assert.
+    if (value.view.case !== "repository") throw new Error("wrong view arm");
+    expect(value.view.value.sections[0]?.label).toBe("");
+  });
+
+  it("rejects a non-string repo section label", () => {
+    // Arrange + Act + Assert.
+    expect(() =>
+      decode(roster({ repository: { sections: [{ repoKey: "r", label: 7, rows: [] }] } })),
+    ).toThrow(/RosterRepoSection.label must be a string/);
+  });
+
   it("decodes the recently-merged section shared by both views", () => {
     // Arrange + Act.
     const value = rosterOf(
@@ -230,6 +303,148 @@ describe("RosterRow.status — the set arm is the status", () => {
     expect(() => decode(withRows([row("ready", { ready: { since: 1 } })]))).toThrow(
       /unrecognized field/,
     );
+  });
+});
+
+describe("RosterRow — the rail's display fields", () => {
+  /** Decode a single row carrying OVERRIDES, and hand back the decoded row. */
+  function rowOf(overrides: Record<string, unknown>) {
+    const value = rosterOf(
+      roster({ repository: { sections: [{ repoKey: "r", rows: [row("ready", overrides)] }] } }),
+    );
+    if (value.view.case !== "repository") throw new Error("wrong view arm");
+    const decoded = value.view.value.sections[0]?.rows[0];
+    if (decoded === undefined) throw new Error("no row decoded");
+    return decoded;
+  }
+
+  it("parses the int64 last-viewed stamp from its protojson string form", () => {
+    // Arrange + Act.
+    const decoded = rowOf({ lastViewedAtMs: "1750000000000" });
+
+    // Assert.
+    expect(decoded.lastViewedAtMs).toBe(1750000000000);
+  });
+
+  it("defaults an absent last-viewed stamp to zero, meaning never viewed", () => {
+    // Arrange + Act.
+    const decoded = rowOf({});
+
+    // Assert.
+    expect(decoded.lastViewedAtMs).toBe(0);
+  });
+
+  it("rejects a last-viewed stamp that is neither number nor numeric string", () => {
+    // Arrange + Act + Assert.
+    expect(() => rowOf({ lastViewedAtMs: true })).toThrow(/lastViewedAtMs must be a number/);
+  });
+
+  it("parses the int64 merged stamp from its protojson string form", () => {
+    // Arrange + Act.
+    const decoded = rowOf({ mergedAtMs: "1750000001000" });
+
+    // Assert.
+    expect(decoded.mergedAtMs).toBe(1750000001000);
+  });
+
+  it("defaults an absent merged stamp to zero, meaning not merged", () => {
+    // Arrange + Act.
+    const decoded = rowOf({});
+
+    // Assert.
+    expect(decoded.mergedAtMs).toBe(0);
+  });
+
+  it("decodes the row's branch", () => {
+    // Arrange + Act.
+    const decoded = rowOf({ branch: "feat/alpha" });
+
+    // Assert.
+    expect(decoded.branch).toBe("feat/alpha");
+  });
+
+  it("defaults an absent branch to the empty string, meaning unknown", () => {
+    // Arrange + Act.
+    const decoded = rowOf({});
+
+    // Assert.
+    expect(decoded.branch).toBe("");
+  });
+
+  it("rejects a non-string branch", () => {
+    // Arrange + Act + Assert.
+    expect(() => rowOf({ branch: 7 })).toThrow(/branch must be a string/);
+  });
+
+  it("decodes the row's parent branch", () => {
+    // Arrange + Act.
+    const decoded = rowOf({ parentBranch: "master" });
+
+    // Assert.
+    expect(decoded.parentBranch).toBe("master");
+  });
+
+  it("defaults an absent parent branch to the empty string", () => {
+    // Arrange + Act.
+    const decoded = rowOf({});
+
+    // Assert.
+    expect(decoded.parentBranch).toBe("");
+  });
+
+  it("decodes the row's summary", () => {
+    // Arrange + Act.
+    const decoded = rowOf({ summary: "wiring the rail" });
+
+    // Assert.
+    expect(decoded.summary).toBe("wiring the rail");
+  });
+
+  it("defaults an absent summary to the empty string, meaning none", () => {
+    // Arrange + Act.
+    const decoded = rowOf({});
+
+    // Assert.
+    expect(decoded.summary).toBe("");
+  });
+
+  it("decodes the closed flag that recedes a row", () => {
+    // Arrange + Act.
+    const decoded = rowOf({ closed: true });
+
+    // Assert.
+    expect(decoded.closed).toBe(true);
+  });
+
+  it("defaults an absent closed flag to false", () => {
+    // Arrange + Act.
+    const decoded = rowOf({});
+
+    // Assert.
+    expect(decoded.closed).toBe(false);
+  });
+
+  it("rejects a non-boolean closed flag", () => {
+    // Arrange + Act + Assert.
+    expect(() => rowOf({ closed: "yes" })).toThrow(/closed must be a boolean/);
+  });
+
+  it("keeps closed orthogonal to the status oneof", () => {
+    // Arrange + Act.
+    const decoded = rowOf({ closed: true });
+
+    // Assert.
+    expect(decoded.status.case).toBe("ready");
+  });
+
+  it("carries the display fields down into nested child rows", () => {
+    // Arrange + Act.
+    const decoded = rowOf({
+      children: [row("ready", { dir: "/worktrees/child", branch: "feat/child" })],
+    });
+
+    // Assert.
+    expect(decoded.children[0]?.branch).toBe("feat/child");
   });
 });
 
