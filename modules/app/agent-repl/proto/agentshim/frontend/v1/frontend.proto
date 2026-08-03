@@ -301,6 +301,7 @@ message FrontendFrame {
     // the daemon retains the latest roster, includes it in every connect
     // snapshot, and rebroadcasts on change.
     WorkspaceRoster workspace_roster = 18;
+    ShutdownScheduleView shutdown_schedule = 19;  // Additive (drain lease)
   }
 }
 
@@ -935,6 +936,8 @@ message FrontendCommand {
     RestartSessionCmd restart_session = 23;
     SetModelCmd set_model = 24;
     PublishWorkspaceRosterCmd publish_workspace_roster = 25;
+    ScheduleShutdownCmd schedule_shutdown = 26;          // Additive (drain lease)
+    CancelScheduledShutdownCmd cancel_scheduled_shutdown = 27;  // Additive (drain lease)
   }
 }
 
@@ -1026,6 +1029,20 @@ message QueueEntry {
   // Set by QueueAcceptCmd: the user has seen and confirmed this entry's HOLD.
   // View state only — it changes nothing about when the entry is delivered.
   bool accepted = 6;
+  QueueEntryShutdownHold shutdown_hold = 7;  // Additive (drain lease)
+}
+
+// Present when this QueueEntry is held by a scheduled shutdown's drain lease
+// rather than by a running turn. The classifier NEVER runs on such an entry:
+// the only exits are the user's explicit QueueForceCmd (deliver now, further
+// delaying the bounce), QueueCancelCmd, or delivery after the bounce
+// completes — held entries are durable and survive the daemon swap, so a held
+// prompt is delayed, never lost. The webapp renders a dedicated lease bubble
+// from this field instead of the classifier bubble.
+message QueueEntryShutdownHold {
+  // The schedule holding this entry, joining the bubble to the
+  // ShutdownScheduleView it should explain.
+  string schedule_id = 1;
 }
 
 // The session's queue, pushed on EVERY change and carried in StateSnapshot.
@@ -1104,6 +1121,98 @@ message ShutdownCmd {
   // alongside the daemon's own version-driven stale-shim refresh, never the
   // only thing standing between a deploy and stale shims.
   bool stop_shims = 1;
+}
+
+// The daemon-global scheduled-shutdown lease. Pushed to every connected
+// client on EVERY change and carried in StateSnapshot, so a client that
+// connects mid-drain sees the lease without waiting for an edge. Exactly one
+// arm is always set: "idle" is a real broadcast value (a cancel or a
+// completed drain), never an absent field, so clearing the lease is
+// representable and a client cannot confuse "no information" with "no
+// lease". The draining state is durably persisted, so a daemon that crashes
+// mid-drain reboots knowing a schedule existed rather than silently
+// dropping it.
+message ShutdownScheduleView {
+  oneof state {
+    // No shutdown is scheduled; prompts flow normally.
+    ShutdownScheduleIdle idle = 1;
+    // A shutdown is scheduled and its drain lease is held: no NEW turn may
+    // start anywhere, and the daemon executes the shutdown the moment the
+    // holds list becomes empty.
+    ShutdownScheduleDraining draining = 2;
+  }
+}
+
+// Deliberately empty: the arm being set IS the state.
+message ShutdownScheduleIdle {}
+
+// The held lease. The holds list is the complete, live answer to "what is
+// the bounce waiting on", so the webapp renders drain progress from this
+// frame alone without deriving it from per-workspace states.
+message ShutdownScheduleDraining {
+  // Identity of this schedule, minted at ScheduleShutdownCmd time.
+  // Correlates CancelScheduledShutdownCmd and QueueEntryShutdownHold to one
+  // schedule, so a cancel can never race a newer schedule.
+  string schedule_id = 1;
+  // When the lease was taken (epoch ms), for elapsed-time display.
+  int64 scheduled_at_ms = 2;
+  // Why the bounce was scheduled ("merge of <ws> rebuilt the daemon",
+  // "manual restart"). Free text for display; never parsed.
+  string cause = 3;
+  // Whether the executed shutdown will also SIGTERM every session shim (the
+  // ShutdownCmd.stop_shims semantics, decided at schedule time because the
+  // decision is a property of WHAT was rebuilt, not of when the drain
+  // finishes). False preserves shims for reattach.
+  bool stop_shims = 4;
+  // Every workspace still blocking quiescence. Never empty on the wire: the
+  // daemon executes the shutdown instead of broadcasting a drained frame.
+  repeated ShutdownHold holds = 5;
+}
+
+// One workspace the drain is waiting on, and why. At least one of turn and
+// tasks is set; both may be, since a session can hold an active turn and
+// live background tasks simultaneously — co-occurring facts, not mutually
+// exclusive states, hence sibling messages rather than a oneof.
+message ShutdownHold {
+  // Absolute workspace CWD, the same key every session-routed command uses,
+  // so a client can join this hold to its workspace model.
+  string workspace = 1;
+  // The owning session, so a hold cannot be attributed to a successor
+  // session of the same workspace.
+  string session_id = 2;
+  // Set when a turn is in flight in this workspace.
+  ShutdownHoldTurn turn = 3;
+  // Set when live background tasks are running in this workspace.
+  ShutdownHoldTasks tasks = 4;
+}
+
+// An active turn blocks the drain. Carries the turn id so logs, the webapp,
+// and the turn ledger all name the same turn.
+message ShutdownHoldTurn { string turn_id = 1; }
+
+// Live async tasks block the drain. The count is display-grade summary; the
+// task catalog remains the authority on which tasks they are.
+message ShutdownHoldTasks { int32 count = 1; }
+
+// Schedule a graceful shutdown instead of demanding one now. Takes the
+// drain lease immediately (broadcast via ShutdownScheduleView), blocks new
+// turns daemon-side at the prompt queue, and executes ShutdownCmd semantics
+// the moment every hold clears. Scheduling while a schedule already exists
+// is a loud nack, never a silent replace: the caller must cancel first, so
+// two deploy flows cannot silently merge their intents.
+message ScheduleShutdownCmd {
+  // Same semantics as ShutdownCmd.stop_shims, fixed at schedule time.
+  bool stop_shims = 1;
+  // Why (for the broadcast view and the durable log). Display only.
+  string cause = 2;
+}
+
+// Cancel a scheduled shutdown and release the drain lease. schedule_id must
+// match the live schedule; a stale id is a loud nack, so a cancel aimed at
+// an old schedule can never kill a newer one.
+message CancelScheduledShutdownCmd {
+  // The schedule to cancel, from ShutdownScheduleDraining.schedule_id.
+  string schedule_id = 1;
 }
 
 // HARD RESTART of one workspace's session: stop whatever shim is serving it
