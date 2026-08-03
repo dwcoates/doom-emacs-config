@@ -968,17 +968,162 @@ path removes or reclaims it instead of erroring \"Window is dedicated\"."
         (kill-buffer buf)
         (kill-buffer input-buf)))))
 
+(ert-deftest agent-repl-test-frontend-display-mounts-over-foreign-dedicated-input ()
+  "Mounting succeeds when a FOREIGN workspace's dedicated input window is selected.
+The real crash: `agent-repl--maybe-autoselect-input' leaves the previous
+workspace's hardened (dedicated) input panel selected, the stale-input
+reclaim only knows the NEW workspace's own input buffer, and the host
+search handed that foreign dedicated window to `set-window-buffer'."
+  ;; Arrange — selected window is dedicated to ANOTHER workspace's input.
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((buf (generate-new-buffer "*fake-webview*"))
+          (foreign (generate-new-buffer "*agent-panel-input-other*"))
+          (mine (generate-new-buffer "*agent-panel-input-ws1*")))
+      (unwind-protect
+          (progn
+            (set-window-buffer (selected-window) foreign)
+            (set-window-dedicated-p (selected-window) t)
+            (cl-letf (((symbol-function 'agent-repl--panels-visible-p)
+                       (lambda () nil))
+                      ((symbol-function 'agent-repl--ensure-input-buffer)
+                       (lambda (_ws) mine))
+                      ((symbol-function 'agent-repl-window--harden)
+                       (lambda (&rest _) nil)))
+              ;; Act — must not signal "Window is dedicated to ...".
+              (agent-repl--frontend-display-webview "ws1" buf)
+              ;; Assert — the webview actually mounted.
+              (should (get-buffer-window buf))))
+        (dolist (win (window-list nil 'no-minibuffer))
+          (set-window-dedicated-p win nil))
+        (delete-other-windows)
+        (kill-buffer buf)
+        (kill-buffer foreign)
+        (kill-buffer mine)))))
+
+(ert-deftest agent-repl-test-frontend-display-clears-foreign-dedicated-input ()
+  "The foreign workspace's dedicated input window does not survive the mount.
+Fullscreen is the sole display format: after the mount the main area
+holds this workspace's webview + input and nothing else."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((buf (generate-new-buffer "*fake-webview*"))
+          (foreign (generate-new-buffer "*agent-panel-input-other*"))
+          (mine (generate-new-buffer "*agent-panel-input-ws1*")))
+      (unwind-protect
+          (progn
+            (set-window-buffer (selected-window) foreign)
+            (set-window-dedicated-p (selected-window) t)
+            (cl-letf (((symbol-function 'agent-repl--panels-visible-p)
+                       (lambda () nil))
+                      ((symbol-function 'agent-repl--ensure-input-buffer)
+                       (lambda (_ws) mine))
+                      ((symbol-function 'agent-repl-window--harden)
+                       (lambda (&rest _) nil)))
+              ;; Act
+              (agent-repl--frontend-display-webview "ws1" buf)
+              ;; Assert
+              (should-not (get-buffer-window foreign))))
+        (dolist (win (window-list nil 'no-minibuffer))
+          (set-window-dedicated-p win nil))
+        (delete-other-windows)
+        (kill-buffer buf)
+        (kill-buffer foreign)
+        (kill-buffer mine)))))
+
+(ert-deftest agent-repl-test-frontend-display-mounts-own-input-over-foreign-dedicated ()
+  "The mounting workspace's own input panel comes up beside its webview.
+Recovering from the foreign dedicated window must rebuild the FULL
+canonical layout, not just get the webview on screen."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((buf (generate-new-buffer "*fake-webview*"))
+          (foreign (generate-new-buffer "*agent-panel-input-other*"))
+          (mine (generate-new-buffer "*agent-panel-input-ws1*")))
+      (unwind-protect
+          (progn
+            (set-window-buffer (selected-window) foreign)
+            (set-window-dedicated-p (selected-window) t)
+            (cl-letf (((symbol-function 'agent-repl--panels-visible-p)
+                       (lambda () nil))
+                      ((symbol-function 'agent-repl--ensure-input-buffer)
+                       (lambda (_ws) mine))
+                      ((symbol-function 'agent-repl-window--harden)
+                       (lambda (&rest _) nil)))
+              ;; Act
+              (agent-repl--frontend-display-webview "ws1" buf)
+              ;; Assert
+              (should (get-buffer-window mine))))
+        (dolist (win (window-list nil 'no-minibuffer))
+          (set-window-dedicated-p win nil))
+        (delete-other-windows)
+        (kill-buffer buf)
+        (kill-buffer foreign)
+        (kill-buffer mine)))))
+
 (ert-deftest agent-repl-test-frontend-main-area-window-skips-dedicated ()
-  "The host search never returns a dedicated window."
-  ;; Arrange — every window reads as dedicated except none: expect the
-  ;; selected-window fallback rather than a dedicated pick.
-  (cl-letf (((symbol-function 'agent-repl-window--side-window-p)
-             (lambda (_win) nil))
-            ((symbol-function 'window-dedicated-p)
-             (lambda (_win) t)))
-    ;; Act / Assert — falls back to selected-window instead of a
-    ;; dedicated candidate.
-    (should (eq (agent-repl--frontend-main-area-window) (selected-window)))))
+  "The host search never returns the dedicated selected window.
+Regression: the fallback used to hand back `(selected-window)' WITHOUT
+re-checking dedication — contradicting this test's own contract — so a
+hardened input panel became the mount target and `set-window-buffer'
+signalled \"Window is dedicated to ...\"."
+  (let ((sel (selected-window)))
+    (unwind-protect
+        (progn
+          ;; Arrange — the frame's only main-area window is dedicated.
+          (set-window-dedicated-p sel t)
+          ;; Act
+          (let ((host (agent-repl--frontend-main-area-window)))
+            ;; Assert
+            (should-not (eq host sel))))
+      (set-window-dedicated-p sel nil)
+      (delete-other-windows))))
+
+(ert-deftest agent-repl-test-frontend-main-area-window-host-is-undedicated ()
+  "The host made when every window is dedicated is itself undedicated.
+A split's child does not inherit its parent's dedication, which is why
+splitting beats lifting a dedication another panel recipe set."
+  (let ((sel (selected-window)))
+    (unwind-protect
+        (progn
+          ;; Arrange
+          (set-window-dedicated-p sel t)
+          ;; Act
+          (let ((host (agent-repl--frontend-main-area-window)))
+            ;; Assert
+            (should-not (window-dedicated-p host))))
+      (set-window-dedicated-p sel nil)
+      (delete-other-windows))))
+
+(ert-deftest agent-repl-test-frontend-main-area-window-preserves-dedication ()
+  "Making a host must not clear the dedication of the window it split.
+The dedicated window belongs to another workspace's panel recipe;
+reclaiming it here would orphan that panel."
+  (let ((sel (selected-window)))
+    (unwind-protect
+        (progn
+          ;; Arrange
+          (set-window-dedicated-p sel t)
+          ;; Act
+          (agent-repl--frontend-main-area-window)
+          ;; Assert
+          (should (window-dedicated-p sel)))
+      (set-window-dedicated-p sel nil)
+      (delete-other-windows))))
+
+(ert-deftest agent-repl-test-frontend-largest-main-area-window-excludes-side-windows ()
+  "The split parent is never a side window.
+Splitting a side window keeps the child inside the side-window tree,
+so the webview would not land in the main area at all."
+  (let ((sel (selected-window)))
+    (unwind-protect
+        (progn
+          ;; Arrange — a second window, and everything but SEL reads as side.
+          (split-window sel nil 'below)
+          (cl-letf (((symbol-function 'agent-repl-window--side-window-p)
+                     (lambda (win &optional _ws) (not (eq win sel)))))
+            ;; Act / Assert
+            (should (eq (agent-repl--frontend-largest-main-area-window) sel))))
+      (delete-other-windows))))
 
 (ert-deftest agent-repl-test-frontend-main-area-window-skips-side-windows ()
   "The webview host window is never a side window."
