@@ -808,6 +808,101 @@ as a user-visible malformed-frame error on every roster publish."
         ;; Assert — the arm must be present as an object for oneof detection
         (should (string-match-p "\"closeWorkspace\":{}" sent))))))
 
+;;;; ---- Drain lease: frame vocabulary and command mirror ---------------
+
+(ert-deftest agent-repl-test-uds-shutdown-schedule-is-a-known-frame ()
+  "The drain lease's `shutdownSchedule' arm is a recognized frame field."
+  ;; Act / Assert
+  (should (member "shutdownSchedule" agent-repl--uds-known-frame-fields)))
+
+(ert-deftest agent-repl-test-uds-shutdown-schedule-is-not-an-ignored-frame ()
+  "`shutdownSchedule' is recorded, not ignored: the cancel needs its id."
+  ;; Act / Assert
+  (should-not (member "shutdownSchedule" agent-repl--uds-ignored-frame-fields)))
+
+(ert-deftest agent-repl-test-uds-decode-shutdown-schedule-idle-arm ()
+  "An `idle' lease decodes: the empty message is a present arm with a nil body."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let ((line "{\"shutdownSchedule\":{\"idle\":{}}}"))
+      ;; Act
+      (let ((frame (agent-repl--uds-decode-frame line)))
+        ;; Assert
+        (should (plist-member (plist-get frame :shutdownSchedule) :idle))))))
+
+(ert-deftest agent-repl-test-uds-decode-shutdown-schedule-draining-arm ()
+  "A `draining' lease decodes with its schedule id intact."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let ((line (concat "{\"shutdownSchedule\":{\"draining\":{"
+                        "\"scheduleId\":\"sch-1\",\"cause\":\"merge\"}}}")))
+      ;; Act
+      (let ((frame (agent-repl--uds-decode-frame line)))
+        ;; Assert
+        (should (equal (plist-get (plist-get (plist-get frame :shutdownSchedule)
+                                             :draining)
+                                  :scheduleId)
+                       "sch-1"))))))
+
+(ert-deftest agent-repl-test-uds-dispatch-shutdown-schedule-reaches-its-handler ()
+  "A shutdownSchedule frame dispatches to its registered handler, not a signal."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (seen)
+      (agent-repl--uds-register-handler "shutdownSchedule"
+                                        (lambda (view) (setq seen view) :ok))
+      ;; Act
+      (let ((result (agent-repl--uds-dispatch-frame '(:shutdownSchedule (:idle nil)))))
+        ;; Assert
+        (should (eq result :ok))
+        (should (equal seen '(:idle nil)))))))
+
+(ert-deftest agent-repl-test-uds-dispatch-queue-frame-with-shutdown-hold-is-a-no-op ()
+  "A queue entry held by the drain lease still decodes and is still ignored."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    ;; Act / Assert
+    (should-not (agent-repl--uds-dispatch-frame
+                 '(:queue (:workspace "ws1" :sessionId "s1"
+                           :entries ((:id "q1" :text "hi"
+                                      :shutdownHold (:scheduleId "sch-1")))))))))
+
+(ert-deftest agent-repl-test-uds-schedule-shutdown-is-a-known-command ()
+  "The drain lease's `scheduleShutdown' arm is an accepted outbound command."
+  ;; Act / Assert
+  (should (member "scheduleShutdown" agent-repl--uds-known-command-fields)))
+
+(ert-deftest agent-repl-test-uds-cancel-scheduled-shutdown-is-a-known-command ()
+  "The drain lease's `cancelScheduledShutdown' arm is an accepted command."
+  ;; Act / Assert
+  (should (member "cancelScheduledShutdown" agent-repl--uds-known-command-fields)))
+
+(ert-deftest agent-repl-test-uds-send-command-accepts-schedule-shutdown ()
+  "`scheduleShutdown' serializes its cause under the protojson field name."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (sent)
+      (agent-repl-test--capturing-send sent
+        ;; Act
+        (agent-repl--uds-send-command "scheduleShutdown"
+                                      '(:cause "manual restart") nil 'fake-proc)
+        ;; Assert
+        (should (string-match-p "\"scheduleShutdown\":{\"cause\":\"manual restart\"}"
+                                sent))))))
+
+(ert-deftest agent-repl-test-uds-send-command-accepts-cancel-scheduled-shutdown ()
+  "`cancelScheduledShutdown' serializes the schedule id it must match."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (sent)
+      (agent-repl-test--capturing-send sent
+        ;; Act
+        (agent-repl--uds-send-command "cancelScheduledShutdown"
+                                      '(:scheduleId "sch-9") nil 'fake-proc)
+        ;; Assert
+        (should (string-match-p "\"cancelScheduledShutdown\":{\"scheduleId\":\"sch-9\"}"
+                                sent))))))
+
 (ert-deftest agent-repl-test-uds-send-command-no-connection-errors ()
   "Sending with no live connection fails loudly (no queue, no silent drop)."
   ;; Arrange
