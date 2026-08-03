@@ -892,6 +892,166 @@ Folding is display state, so unfolding must need no republish."
   (agent-repl-test--with-clean-state
     (should (null (assq 'navDir (agent-repl-test--sidebar-publish-once))))))
 
+;;;; ---- Row display fields --------------------------------------------------
+
+(ert-deftest agent-repl-test-sidebar-epoch-ms-converts-seconds-to-milliseconds ()
+  "A known `float-time' seconds value converts to its exact millisecond."
+  (should (= (agent-repl--sidebar-epoch-ms 1750000000.123) 1750000000123)))
+
+(ert-deftest agent-repl-test-sidebar-epoch-ms-absent-stamp-is-zero ()
+  "The build's `:null' for an absent stamp converts to the contract's 0."
+  (should (= (agent-repl--sidebar-epoch-ms :null) 0)))
+
+(ert-deftest agent-repl-test-sidebar-wire-row-last-viewed-at-ms ()
+  "A viewed row publishes its view stamp in MILLISECONDS, not seconds."
+  (agent-repl-test--with-clean-state
+    (let* ((wire (agent-repl-test--sidebar-publish-once :last-viewed-at 1000.5))
+           (row (aref (agent-repl-test--sidebar-wire-rows wire) 0)))
+      (should (= (alist-get 'lastViewedAtMs row) 1000500)))))
+
+(ert-deftest agent-repl-test-sidebar-wire-row-never-viewed-omits-last-viewed-at-ms ()
+  "A never-viewed row omits the stamp: proto3 drops the 0 that means never."
+  (agent-repl-test--with-clean-state
+    (let* ((wire (agent-repl-test--sidebar-publish-once))
+           (row (aref (agent-repl-test--sidebar-wire-rows wire) 0)))
+      (should (null (assq 'lastViewedAtMs row))))))
+
+(ert-deftest agent-repl-test-sidebar-wire-row-merged-at-ms ()
+  "A merged row publishes its merge instant in MILLISECONDS."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "merged" "/tmp/merged" :merge-completed-at 100.0)
+    (agent-repl-test--sidebar-with-persps '("other")
+      (agent-repl-test--sidebar-with-link
+        (agent-repl--sidebar-push)
+        (let* ((wire (agent-repl-test--sidebar-wire))
+               (row (aref (alist-get 'rows (alist-get 'recentlyMerged wire)) 0)))
+          (should (= (alist-get 'mergedAtMs row) 100000)))))))
+
+(ert-deftest agent-repl-test-sidebar-wire-row-not-merged-omits-merged-at-ms ()
+  "An unmerged row omits the stamp: proto3 drops the 0 that means not merged."
+  (agent-repl-test--with-clean-state
+    (let* ((wire (agent-repl-test--sidebar-publish-once))
+           (row (aref (agent-repl-test--sidebar-wire-rows wire) 0)))
+      (should (null (assq 'mergedAtMs row))))))
+
+(ert-deftest agent-repl-test-sidebar-wire-row-branch ()
+  "A row publishes its own git branch for the detail panel."
+  (agent-repl-test--with-clean-state
+    (let* ((wire (agent-repl-test--sidebar-publish-once :branch-name "feat/roster"))
+           (row (aref (agent-repl-test--sidebar-wire-rows wire) 0)))
+      (should (equal (alist-get 'branch row) "feat/roster")))))
+
+(ert-deftest agent-repl-test-sidebar-wire-row-unknown-branch-omitted ()
+  "An unknown branch is omitted, which reads back as the empty string."
+  (agent-repl-test--with-clean-state
+    (let* ((wire (agent-repl-test--sidebar-publish-once))
+           (row (aref (agent-repl-test--sidebar-wire-rows wire) 0)))
+      (should (null (assq 'branch row))))))
+
+(ert-deftest agent-repl-test-sidebar-wire-row-parent-branch ()
+  "A row publishes the branch it was cut from as `parentBranch'."
+  (agent-repl-test--with-clean-state
+    (let* ((wire (agent-repl-test--sidebar-publish-once
+                  :parent-branch-name "master"))
+           (row (aref (agent-repl-test--sidebar-wire-rows wire) 0)))
+      (should (equal (alist-get 'parentBranch row) "master")))))
+
+(ert-deftest agent-repl-test-sidebar-wire-row-summary ()
+  "A row publishes its last prompt summary as the detail panel's prose line."
+  (agent-repl-test--with-clean-state
+    (let* ((wire (agent-repl-test--sidebar-publish-once
+                  :last-prompt-summary "wiring the roster"))
+           (row (aref (agent-repl-test--sidebar-wire-rows wire) 0)))
+      (should (equal (alist-get 'summary row) "wiring the roster")))))
+
+(ert-deftest agent-repl-test-sidebar-wire-row-absent-summary-omitted ()
+  "No summary is omitted rather than published as JSON null."
+  (agent-repl-test--with-clean-state
+    (let* ((wire (agent-repl-test--sidebar-publish-once))
+           (row (aref (agent-repl-test--sidebar-wire-rows wire) 0)))
+      (should (null (assq 'summary row))))))
+
+(ert-deftest agent-repl-test-sidebar-wire-row-closed ()
+  "A panels-dismissed row publishes closed=true beside its status arm."
+  (agent-repl-test--with-clean-state
+    (let* ((wire (agent-repl-test--sidebar-publish-once :repl-state :inactive))
+           (row (aref (agent-repl-test--sidebar-wire-rows wire) 0)))
+      (should (eq (alist-get 'closed row) t)))))
+
+(ert-deftest agent-repl-test-sidebar-wire-row-open-omits-closed ()
+  "An open row omits `closed' entirely: proto3 drops a false bool."
+  (agent-repl-test--with-clean-state
+    (let* ((wire (agent-repl-test--sidebar-publish-once))
+           (row (aref (agent-repl-test--sidebar-wire-rows wire) 0)))
+      (should (null (assq 'closed row))))))
+
+;;;; ---- Section display fields ----------------------------------------------
+
+(ert-deftest agent-repl-test-sidebar-wire-repo-section-label ()
+  "A repository section carries its display label beside its fold key."
+  (agent-repl-test--with-clean-state
+    (let* ((wire (agent-repl-test--sidebar-publish-once))
+           (section (aref (alist-get 'sections (alist-get 'repository wire)) 0)))
+      (should (equal (alist-get 'label section) "doom")))))
+
+(ert-deftest agent-repl-test-sidebar-wire-merged-section-label ()
+  "The Recently Merged section carries its heading, authored in one place."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "merged" "/tmp/merged" :merge-completed-at 100.0)
+    (agent-repl-test--sidebar-with-persps '("other")
+      (agent-repl-test--sidebar-with-link
+        (agent-repl--sidebar-push)
+        (let ((section (alist-get 'recentlyMerged
+                                  (agent-repl-test--sidebar-wire))))
+          (should (equal (alist-get 'label section) "Recently Merged")))))))
+
+(ert-deftest agent-repl-test-sidebar-wire-merged-section-folded ()
+  "Folding Recently Merged publishes folded=true on the section."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "merged" "/tmp/merged" :merge-completed-at 100.0)
+    (agent-repl--toggle-repo-fold agent-repl--sidebar-merged-key)
+    (agent-repl-test--sidebar-with-persps '("other")
+      (agent-repl-test--sidebar-with-link
+        (agent-repl--sidebar-push)
+        (let ((section (alist-get 'recentlyMerged
+                                  (agent-repl-test--sidebar-wire))))
+          (should (eq (alist-get 'folded section) t)))))))
+
+;;;; ---- The publisher epoch -------------------------------------------------
+
+(ert-deftest agent-repl-test-sidebar-wire-carries-boot-id ()
+  "Every roster names its publisher epoch: an empty `bootId' is nacked."
+  (agent-repl-test--with-clean-state
+    (let ((boot-id (alist-get 'bootId (agent-repl-test--sidebar-publish-once))))
+      (should (stringp boot-id))
+      (should-not (string-empty-p boot-id)))))
+
+(ert-deftest agent-repl-test-sidebar-wire-boot-id-stable-across-publishes ()
+  "Two publishes of one boot carry the identical epoch, so both are same-epoch."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (agent-repl-test--sidebar-with-link
+      (agent-repl--sidebar-push)
+      (agent-repl--sidebar-push)
+      (let ((ids (mapcar (lambda (r) (plist-get r :bootId))
+                         (agent-repl-test--sidebar-rosters))))
+        (should (= (length ids) 2))
+        (should (equal (nth 0 ids) (nth 1 ids)))))))
+
+(ert-deftest agent-repl-test-sidebar-boot-id-minted-once-per-boot ()
+  "The minted epoch is memoized: a second call returns the same string."
+  (let ((agent-repl--sidebar-boot-id nil))
+    (should (equal (agent-repl--sidebar-boot-id)
+                   (agent-repl--sidebar-boot-id)))))
+
+(ert-deftest agent-repl-test-sidebar-boot-id-fresh-boot-mints-a-new-epoch ()
+  "A fresh boot mints a different epoch, so its revision 1 is never stale."
+  (let* ((first (let ((agent-repl--sidebar-boot-id nil))
+                  (agent-repl--sidebar-boot-id)))
+         (second (let ((agent-repl--sidebar-boot-id nil))
+                   (agent-repl--sidebar-boot-id))))
+    (should-not (equal first second))))
+
 ;;;; ---- The revision counter ------------------------------------------------
 
 (ert-deftest agent-repl-test-sidebar-first-publish-is-revision-one ()

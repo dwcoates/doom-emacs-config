@@ -816,20 +816,63 @@ invariant compares two exact counts.  They render instead in the
 ;;     `json-encode' away from the `:false' sentinel, which is the JSON
 ;;     library's spelling, not this wire's.
 
+(defun agent-repl--sidebar-epoch-ms (seconds)
+  "Return epoch SECONDS as integer epoch MILLISECONDS.
+
+The contract's stamps are MILLISECONDS while every Emacs-side stamp is
+`float-time' SECONDS, so this is the single conversion site — one place
+to be wrong rather than one per field.
+
+A non-numeric value (`:null' for a stamp the build had none for) and a
+non-positive one both answer 0, which is not a missing value on this
+wire: `last_viewed_at_ms' reads 0 as NEVER VIEWED and `merged_at_ms'
+reads it as NOT MERGED, so the zero IS the assertion the row means.
+Rounded rather than truncated so a stamp round-trips to the millisecond
+it names instead of to the one below it."
+  (if (and (numberp seconds) (> seconds 0))
+      (round (* 1000 seconds))
+    0))
+
+(defun agent-repl--sidebar-proto-string (value)
+  "Return VALUE when it is a non-empty string, else nil.
+The built roster spells an absent optional `:null'; this wire spells it
+by OMITTING the field, which both consumers read back as the proto3
+empty string — the contract's \"unknown / none\".  Returning nil lets
+each caller drop the field with the same `when' every other zero-valued
+field here uses."
+  (and (stringp value) (not (string-empty-p value)) value))
+
 (defun agent-repl--sidebar-proto-row (row)
   "Translate one built ROW plist into a protojson `RosterRow' plist.
 Recurses through `:children', which is the family nesting the build
 already resolved.  ROW's wire status selects the oneof ARM; the arm's
-value is the empty object every status message is by contract."
-  (append
-   (list :dir (plist-get row :dir)
-         :name (plist-get row :name))
-   (list (agent-repl--sidebar-status-arm (plist-get row :status))
-         ;; `{}', not `null': the arm must be a present empty MESSAGE, and
-         ;; only a hash table encodes as an empty JSON object.
-         (make-hash-table :test 'equal))
-   (when (eq (plist-get row :current) t) (list :current t))
-   (list :children (agent-repl--sidebar-proto-rows (plist-get row :children)))))
+value is the empty object every status message is by contract.
+
+The display fields (the when-column stamps, the detail panel's branch
+lines and summary, and `closed') ride alongside the status arm, each
+carrying a MEANINGFUL proto3 zero, so each is omitted at its zero rather
+than sent as an explicit null."
+  (let ((viewed-ms (agent-repl--sidebar-epoch-ms (plist-get row :lastViewedAt)))
+        (merged-ms (agent-repl--sidebar-epoch-ms (plist-get row :mergedAt)))
+        (branch (agent-repl--sidebar-proto-string (plist-get row :branch)))
+        (parent-branch (agent-repl--sidebar-proto-string
+                        (plist-get row :parentBranch)))
+        (summary (agent-repl--sidebar-proto-string (plist-get row :summary))))
+    (append
+     (list :dir (plist-get row :dir)
+           :name (plist-get row :name))
+     (list (agent-repl--sidebar-status-arm (plist-get row :status))
+           ;; `{}', not `null': the arm must be a present empty MESSAGE, and
+           ;; only a hash table encodes as an empty JSON object.
+           (make-hash-table :test 'equal))
+     (when (eq (plist-get row :current) t) (list :current t))
+     (when (> viewed-ms 0) (list :lastViewedAtMs viewed-ms))
+     (when (> merged-ms 0) (list :mergedAtMs merged-ms))
+     (when branch (list :branch branch))
+     (when parent-branch (list :parentBranch parent-branch))
+     (when summary (list :summary summary))
+     (when (eq (plist-get row :closed) t) (list :closed t))
+     (list :children (agent-repl--sidebar-proto-rows (plist-get row :children))))))
 
 (defun agent-repl--sidebar-proto-rows (rows)
   "Translate the vector ROWS into a vector of protojson `RosterRow's."
@@ -838,11 +881,15 @@ value is the empty object every status message is by contract."
 (defun agent-repl--sidebar-proto-repo-section (group)
   "Translate a built GROUP plist into a protojson `RosterRepoSection'.
 The group's key IS the `repoKey' — identity, and the fold state's key.
-The label is dropped: the frozen section carries no label field, and the
-webapp derives the display name from the key."
+The label rides beside it as DISPLAY ONLY (`agent-repl--repo-label',
+already resolved by the build), deliberately not as the identity: the
+fold a user set is keyed by `repoKey', so renaming what a section is
+called can never orphan it."
   (append
    (list :repoKey (plist-get group :key))
    (when (eq (plist-get group :folded) t) (list :folded t))
+   (let ((label (agent-repl--sidebar-proto-string (plist-get group :label))))
+     (when label (list :label label)))
    ;; A FOLDED SECTION STILL CARRIES ITS ROWS: folding is display state,
    ;; so unfolding must need no republish.
    (list :rows (agent-repl--sidebar-proto-rows (plist-get group :rows)))))
@@ -874,6 +921,10 @@ author settles the question once and no consumer can answer it two ways."
 (defun agent-repl--sidebar-proto-roster (roster revision)
   "Translate built ROSTER into a protojson `WorkspaceRoster' at REVISION.
 
+REVISION is scoped by `bootId', this boot's publisher epoch, which every
+publication carries: the daemon nacks a roster that names no epoch, so
+it is emitted unconditionally rather than at the author's discretion.
+
 The built roster always carries both groupings with the inactive one
 empty; the contract carries only the ACTIVE one, because the set arm is
 the grouping.  An unrecognized view signals rather than defaulting to
@@ -902,10 +953,20 @@ row instead of failing where the bad value is still named."
                                             (plist-get section :rows)))
                           (agent-repl--sidebar-proto-current-dir merged-rows))))
     (append
-     (list :revision revision)
+     (list :revision revision
+           :bootId (agent-repl--sidebar-boot-id))
      (list (if task-view :task :repository) (list :sections sections))
      (when (> (length merged-rows) 0)
-       (list :recentlyMerged (list :rows merged-rows)))
+       (list :recentlyMerged
+             (append
+              (list :rows merged-rows)
+              ;; The section folds through the same fold set the repo
+              ;; sections use, and the author reports the resolved state
+              ;; rather than every client re-deriving the same key.
+              (when (eq (plist-get merged :folded) t) (list :folded t))
+              (let ((label (agent-repl--sidebar-proto-string
+                            (plist-get merged :label))))
+                (when label (list :label label))))))
      (when (and (stringp current-dir) (not (string-empty-p current-dir)))
        (list :currentDir current-dir))
      (when (and (stringp nav) (not (string-empty-p nav)))
@@ -954,11 +1015,43 @@ Mirrors `publish_workspace_roster' in frontend.proto — one contract.")
 (defvar agent-repl--sidebar-roster-revision 0
   "Revision of the last roster published; 0 before the first publish.
 
-Monotonic PER EMACS BOOT, as the contract specifies: the daemon refuses
-a publish whose revision is not newer than the one it holds, so an
-out-of-order delivery cannot resurrect a superseded roster.  A restarted
-Emacs restarts this counter, which is sound only because the daemon's
-retained roster does not outlive the publisher that authored it.")
+Monotonic WITHIN ONE PUBLISHER EPOCH (`agent-repl--sidebar-boot-id'), as
+the contract specifies: the daemon refuses a same-epoch publish whose
+revision is not newer than the one it holds, so an out-of-order delivery
+cannot resurrect a superseded roster.  A restarted Emacs restarts this
+counter AND opens a new epoch, so its revision 1 is accepted against a
+retained revision 500 rather than refused until the counter caught up.")
+
+(defvar agent-repl--sidebar-boot-id nil
+  "This Emacs boot's opaque roster-publisher identity, or nil before minting.
+
+The EPOCH KEY the revision counter is scoped by: the daemon compares it
+for equality and nothing else — never for order, never for a time — and
+a publish carrying a boot id different from the retained roster's opens
+a fresh epoch that resets the monotonicity floor.  An EMPTY one is
+nacked, so this is a hard prerequisite of every publish rather than an
+optional annotation.
+
+Minted lazily and exactly once per boot (`agent-repl--sidebar-boot-id'),
+and `defvar' so a module hot reload keeps the epoch it already published
+under — re-minting mid-boot would silently reset the daemon's floor and
+make a genuinely stale roster acceptable.")
+
+(defun agent-repl--sidebar-boot-id ()
+  "Return this Emacs boot's roster-publisher identity, minting it once.
+
+Opaque by construction: an md5 over the pid, the wall clock and a random
+draw, which is the module's established shape for a locally-minted
+identity (`agent-repl--task-new-id',
+`agent-repl--workspace-create-command-id').  Nothing downstream parses
+it, so its only job is to differ across boots and never within one."
+  (or agent-repl--sidebar-boot-id
+      (let ((id (substring (md5 (format "%s-%s-%s"
+                                        (emacs-pid) (float-time)
+                                        (random most-positive-fixnum)))
+                           0 16)))
+        (agent-repl--log nil "sidebar-boot-id: minted publisher epoch id=%s" id)
+        (setq agent-repl--sidebar-boot-id id))))
 
 (defun agent-repl--sidebar-publish-nacked (revision err)
   "Surface a REVISION publish rejected by the daemon, with reason ERR.
@@ -1001,8 +1094,9 @@ would instead fire on every 1Hz tick for the whole of an outage."
       (agent-repl--uds-track-command
        request-id agent-repl--sidebar-publish-field nil
        (lambda (err) (agent-repl--sidebar-publish-nacked revision err)))
-      (agent-repl--log nil "sidebar-publish: revision=%d request-id=%s view=%s"
-                       revision request-id (plist-get roster :view))
+      (agent-repl--log nil "sidebar-publish: boot-id=%s revision=%d request-id=%s view=%s"
+                       (agent-repl--sidebar-boot-id) revision request-id
+                       (plist-get roster :view))
       request-id)))
 
 (defun agent-repl--sidebar-push ()
