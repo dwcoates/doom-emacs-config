@@ -275,11 +275,11 @@ func (w *receiptWorld) submitThenDie(t *testing.T, requestID, text string) {
 	progressMgr := progress.New(progress.Options{Logf: t.Logf})
 	seqStore := server.NewRegistrySeqStore(reg, t.Logf)
 	shim := newAcceptOnceShim(w.sessionID, w.vendorSessionID)
-	spawn := func(sessionID string, _ server.CreateOpts) (func() error, error) {
+	spawn := func(sessionID string, _ server.CreateOpts) (server.ShimStopFunc, error) {
 		if err := shim.run(t, w.shimSock); err != nil {
 			return nil, err
 		}
-		return func() error { return nil }, nil
+		return func(server.ShimStop) error { return nil }, nil
 	}
 	controller, err := sessioncontroller.New(sessioncontroller.Config{
 		Push:              &server.PushForwarder{Logf: t.Logf},
@@ -406,7 +406,7 @@ func (w *receiptWorld) restart(t *testing.T) *bouncedFrontend {
 	seqStore := server.NewRegistrySeqStore(reg, t.Logf)
 	// A read must never start a session: the receipt has to come from the
 	// record, not from bringing the vendor back to ask it.
-	refuseSpawn := func(sessionID string, _ server.CreateOpts) (func() error, error) {
+	refuseSpawn := func(sessionID string, _ server.CreateOpts) (server.ShimStopFunc, error) {
 		return nil, fmt.Errorf("e2e: the bounced half tried to spawn a shim for %s", sessionID)
 	}
 	controller, err := sessioncontroller.New(sessioncontroller.Config{

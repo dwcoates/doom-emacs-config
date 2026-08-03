@@ -595,7 +595,7 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 		procMu.Lock()
 		defer procMu.Unlock()
 		for _, p := range procs {
-			_ = p.Terminate()
+			_ = p.Terminate(shim.Stop{Initiator: "e2e_harness_cleanup", Reason: "test teardown reaps every spawned shim"})
 			_ = p.Wait()
 		}
 	})
@@ -649,7 +649,7 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 	}
 	targets := dlog.NewTargetManager()
 	t.Cleanup(func() { _ = targets.Close() })
-	udsSpawn := func(sessionID string, opts server.CreateOpts) (func() error, error) {
+	udsSpawn := func(sessionID string, opts server.CreateOpts) (server.ShimStopFunc, error) {
 		workspace, err := dlog.WorkspaceFromDirectory(opts.CWD)
 		if err != nil {
 			return nil, err
@@ -681,13 +681,13 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 			}
 		}()
 		t.Cleanup(func() {
-			_ = proc.Terminate()
+			_ = proc.Terminate(shim.Stop{Initiator: "e2e_per_session_cleanup", Reason: "test teardown stops the session shim"})
 			_ = proc.Wait()
 			if !tuning.wedgeShim {
 				assertCanonicalShimLog(t, shimTarget.Name(), workspace, sessionID)
 			}
 		})
-		return func() error { return proc.Terminate() }, nil
+		return func(by server.ShimStop) error { return proc.Terminate(by) }, nil
 	}
 	e2eSeqStore := server.NewRegistrySeqStore(reg, t.Logf)
 	modelCatalogs := server.NewSessionModelCatalogs()

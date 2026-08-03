@@ -140,7 +140,7 @@ func newBouncedHarness(t *testing.T) *bouncedHarness {
 	h.seq = seqStore
 	// A read must never start a session. Any spawn attempt is a failure of the
 	// property under test, so it is refused loudly rather than served.
-	refuseSpawn := func(sessionID string, _ server.CreateOpts) (func() error, error) {
+	refuseSpawn := func(sessionID string, _ server.CreateOpts) (server.ShimStopFunc, error) {
 		h.spawns.Add(1)
 		return nil, fmt.Errorf("e2e: a durable resync tried to spawn a shim for %s", sessionID)
 	}
