@@ -624,10 +624,23 @@ export function toolElapsed(tool: ToolItem, nowMs: number): string {
  * `resultMeta`), where it persists and replays with the conversation. A
  * footer that kept showing it would be reporting a turn the feed has already
  * accounted for, and would go on doing so until the next turn overwrote it.
+ *
+ * IN FLIGHT WITH NOTHING SPENT YET it reads an explicit `0 in` rather than the
+ * idle dash, so the counter is visibly ARMED the instant the daemon acks the
+ * prompt instead of looking as dead as a session between turns. The armed
+ * signal is `turnStartedAtMs`, not the workspace's render state: the daemon
+ * stamps it on the prompt-accept path, in the same synchronous publish that
+ * turns the workspace `submitting`, and it is the very field the clock cell
+ * beside this one already reads to decide it is running. The render state is
+ * not available here at all (F5 removed the footer's copy of the phase), and
+ * routing a second armed-ness signal in would give one cell two sources that
+ * could disagree. The zero is a display of the absence of a figure, not a
+ * fabricated one: the daemon sends no count until the first assistant usage
+ * lands, and that real figure then overwrites this.
  */
 export function tokenCellHtml(p: ProgressInput): string {
   const parts: string[] = [];
-  if (p.inputTokens > 0) {
+  if (p.inputTokens > 0 || p.turnStartedAtMs > 0) {
     parts.push(`<span class="info-tokens">${escapeHtml(compactTokens(p.inputTokens))} in</span>`);
   } else if (p.thinkingTokens === 0) {
     parts.push(`<span class="info-tokens">${escapeHtml(IDLE_LABEL)}</span>`);
