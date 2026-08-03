@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
+	datav1 "agentrepl/proto/agentshim/data/v1"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 func TestReplayFromStreamsLargeHistoryInOrder(t *testing.T) {
@@ -111,6 +113,70 @@ func TestReplayIsSessionScoped(t *testing.T) {
 	// Assert
 	if len(got) != 1 || got[0].GetSessionId() != "a" {
 		t.Fatalf("replay for session a returned %d events (want 1 for 'a')", len(got))
+	}
+}
+
+func TestReplayPreservesResultCacheUsage(t *testing.T) {
+	// Arrange: cache usage lives inside the opaque vendor payload rather than
+	// indexed store columns. Exercise the complete protobuf -> SQLite ->
+	// protobuf path so persistence cannot silently shed either top-level or
+	// whole-tree model counters.
+	d := openTemp(t)
+	stream := &datav1.ClaudeStreamMessage{
+		Msg: &datav1.ClaudeStreamMessage_Result{Result: &datav1.ResultMessage{
+			Usage: &datav1.Usage{
+				InputTokens:              11,
+				OutputTokens:             13,
+				CacheCreationInputTokens: 17,
+				CacheReadInputTokens:     19,
+			},
+			ModelUsage: map[string]*datav1.ModelUsage{
+				"claude-opus": {
+					InputTokens:              23,
+					OutputTokens:             29,
+					CacheCreationInputTokens: 31,
+					CacheReadInputTokens:     37,
+					CostUsd:                  0.42,
+				},
+			},
+		}},
+	}
+	vendor, err := anypb.New(stream)
+	if err != nil {
+		t.Fatalf("packing cache-bearing result: %v", err)
+	}
+	event := &corev1.Event{
+		SessionId: "cache-session",
+		Plane:     corev1.Plane_PLANE_STREAM,
+		Class:     corev1.EventClass_EVENT_CLASS_PERSISTENT,
+		Payload:   &corev1.Event_Vendor{Vendor: vendor},
+	}
+	if _, err := d.Ingest("claude-shim", []*corev1.Event{event}, nil); err != nil {
+		t.Fatalf("persisting cache-bearing result: %v", err)
+	}
+
+	// Act
+	got := collectReplay(t, d, "cache-session", 0)
+
+	// Assert
+	if len(got) != 1 {
+		t.Fatalf("replayed %d cache-bearing events, want 1", len(got))
+	}
+	replayed := new(datav1.ClaudeStreamMessage)
+	if err := got[0].GetVendor().UnmarshalTo(replayed); err != nil {
+		t.Fatalf("unpacking replayed result: %v", err)
+	}
+	result := replayed.GetResult()
+	usage := result.GetUsage()
+	if usage.GetInputTokens() != 11 || usage.GetOutputTokens() != 13 ||
+		usage.GetCacheCreationInputTokens() != 17 || usage.GetCacheReadInputTokens() != 19 {
+		t.Fatalf("replayed top-level usage = %+v, want all cache and token counters", usage)
+	}
+	model := result.GetModelUsage()["claude-opus"]
+	if model.GetInputTokens() != 23 || model.GetOutputTokens() != 29 ||
+		model.GetCacheCreationInputTokens() != 31 || model.GetCacheReadInputTokens() != 37 ||
+		model.GetCostUsd() != 0.42 {
+		t.Fatalf("replayed model usage = %+v, want all cache, token, and cost counters", model)
 	}
 }
 

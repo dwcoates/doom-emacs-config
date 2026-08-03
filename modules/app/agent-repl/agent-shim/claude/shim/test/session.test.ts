@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { writeSync } from "node:fs";
+import { describe, expect, it, vi } from "vitest";
 import { AsyncQueue } from "../src/input-queue.js";
 import { ModelInfo, PermissionMode, ShimEvent, SlashCommand } from "../src/protocol.js";
 import {
@@ -48,6 +49,20 @@ interface HarnessOpts {
   /** What a `refresh-commands` probe resolves to (defaults to REFRESHED_COMMANDS). */
   probeCommands?: SlashCommand[];
   probeCommandsError?: Error;
+}
+
+function persistedCacheLogs(): Array<Record<string, unknown>> {
+  const calls = vi.mocked(writeSync).mock.calls as unknown as Array<[
+    number,
+    Buffer,
+    number,
+    number,
+  ]>;
+  return calls
+    .map(([, bytes, offset, length]) =>
+      JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as Record<string, unknown>,
+    )
+    .filter((record) => record.operation === "shim.session.cache");
 }
 
 const FAKE_MODELS: ModelInfo[] = [
@@ -1065,6 +1080,230 @@ describe("ShimSession SDK message mapping", () => {
         web_search_requests: 2,
         cost_usd: 0.12,
         context_window: 1000000,
+      },
+    });
+  });
+
+  it("logs whole-tree cache usage without warning at or above 80%", async () => {
+    // Arrange
+    const h = makeHarness();
+    vi.mocked(writeSync).mockClear();
+    // Act — the top-level usage is cold, but whole-tree model usage is authoritative.
+    await drive(h, {
+      type: "result",
+      uuid: "cache-warm",
+      subtype: "success",
+      duration_ms: 1200,
+      duration_api_ms: 900,
+      num_turns: 2,
+      total_cost_usd: 0.42,
+      usage: {
+        input_tokens: 2000,
+        output_tokens: 10,
+        cache_creation_input_tokens: 8000,
+      },
+      modelUsage: {
+        "claude-opus": {
+          inputTokens: 100,
+          outputTokens: 10,
+          cacheCreationInputTokens: 1900,
+          cacheReadInputTokens: 3000,
+          webSearchRequests: 2,
+          costUSD: 0.3,
+          contextWindow: 200000,
+        },
+        "claude-haiku": {
+          inputTokens: 0,
+          outputTokens: 5,
+          cacheCreationInputTokens: 0,
+          cacheReadInputTokens: 5000,
+          webSearchRequests: 1,
+          costUSD: 0.12,
+          contextWindow: 200000,
+        },
+      },
+      is_error: false,
+    });
+    // Assert
+    expect(persistedCacheLogs()).toEqual([
+      expect.objectContaining({
+        level: "info",
+        context: expect.objectContaining({
+          sdk_uuid: "cache-warm",
+          cache_usage_scope: "whole_tree",
+          input_tokens: 100,
+          output_tokens: 15,
+          cache_creation_input_tokens: 1900,
+          cache_read_input_tokens: 8000,
+          total_input_tokens: 10000,
+          cache_hit_rate: 0.8,
+          cache_hit_percent: 80,
+          cost_usd: 0.42,
+          web_search_requests: 3,
+          duration_ms: 1200,
+          duration_api_ms: 900,
+          num_turns: 2,
+          sdk_reported_total_cost_usd: 0.42,
+          model_count: 2,
+          top_level_usage: {
+            input_tokens: 2000,
+            output_tokens: 10,
+            cache_creation_input_tokens: 8000,
+            cache_read_input_tokens: 0,
+            total_input_tokens: 10000,
+            cache_hit_rate: 0,
+            cache_hit_percent: 0,
+            cost_usd: null,
+            web_search_requests: null,
+            context_window: null,
+          },
+          model_usage: {
+            "claude-opus": {
+              input_tokens: 100,
+              output_tokens: 10,
+              cache_creation_input_tokens: 1900,
+              cache_read_input_tokens: 3000,
+              total_input_tokens: 5000,
+              cache_hit_rate: 0.6,
+              cache_hit_percent: 60,
+              cost_usd: 0.3,
+              web_search_requests: 2,
+              context_window: 200000,
+            },
+            "claude-haiku": {
+              input_tokens: 0,
+              output_tokens: 5,
+              cache_creation_input_tokens: 0,
+              cache_read_input_tokens: 5000,
+              total_input_tokens: 5000,
+              cache_hit_rate: 1,
+              cache_hit_percent: 100,
+              cost_usd: 0.12,
+              web_search_requests: 1,
+              context_window: 200000,
+            },
+          },
+        }),
+      }),
+    ]);
+  });
+
+  it("loudly warns when a result is below 80% cache reads", async () => {
+    // Arrange
+    const h = makeHarness();
+    vi.mocked(writeSync).mockClear();
+    // Act
+    await drive(h, {
+      type: "result",
+      uuid: "cache-cold",
+      subtype: "success",
+      duration_ms: 2500,
+      duration_api_ms: 2100,
+      num_turns: 3,
+      total_cost_usd: 0.09,
+      usage: {
+        input_tokens: 100,
+        output_tokens: 10,
+        cache_creation_input_tokens: 4000,
+        cache_read_input_tokens: 900,
+      },
+      is_error: false,
+    });
+    // Assert
+    const logs = persistedCacheLogs();
+    expect(logs).toHaveLength(2);
+    expect(logs[0]).toMatchObject({
+      level: "info",
+      context: {
+        cache_usage_scope: "top_level",
+        input_tokens: 100,
+        output_tokens: 10,
+        cache_creation_input_tokens: 4000,
+        cache_read_input_tokens: 900,
+        total_input_tokens: 5000,
+        cache_hit_rate: 0.18,
+        cache_hit_percent: 18,
+        cost_usd: 0.09,
+        web_search_requests: null,
+        duration_ms: 2500,
+        duration_api_ms: 2100,
+        num_turns: 3,
+        sdk_reported_total_cost_usd: 0.09,
+        model_count: 0,
+      },
+    });
+    expect(logs[1]).toMatchObject({
+      level: "warn",
+      message: "SDK result prompt-cache hit rate is below the configured threshold",
+      context: {
+        sdk_uuid: "cache-cold",
+        cache_usage_scope: "top_level",
+        input_tokens: 100,
+        output_tokens: 10,
+        cache_creation_input_tokens: 4000,
+        cache_read_input_tokens: 900,
+        total_input_tokens: 5000,
+        cache_hit_rate: 0.18,
+        cache_hit_percent: 18,
+        cost_usd: 0.09,
+        web_search_requests: null,
+        duration_ms: 2500,
+        duration_api_ms: 2100,
+        num_turns: 3,
+        sdk_reported_total_cost_usd: 0.09,
+        model_count: 0,
+        top_level_usage: {
+          input_tokens: 100,
+          output_tokens: 10,
+          cache_creation_input_tokens: 4000,
+          cache_read_input_tokens: 900,
+          total_input_tokens: 5000,
+          cache_hit_rate: 0.18,
+          cache_hit_percent: 18,
+          cost_usd: null,
+          web_search_requests: null,
+          context_window: null,
+        },
+        cache_hit_rate_warning_threshold: 0.8,
+      },
+    });
+    expect(logs[1].context).toEqual({
+      ...(logs[0].context as Record<string, unknown>),
+      cache_hit_rate_warning_threshold: 0.8,
+    });
+  });
+
+  it("warns below 80% even for a small token total", async () => {
+    // Arrange
+    const h = makeHarness();
+    vi.mocked(writeSync).mockClear();
+    // Act
+    await drive(h, {
+      type: "result",
+      uuid: "cache-small",
+      subtype: "success",
+      usage: {
+        input_tokens: 100,
+        output_tokens: 10,
+        cache_creation_input_tokens: 900,
+      },
+      is_error: false,
+    });
+    // Assert
+    const logs = persistedCacheLogs();
+    expect(logs).toHaveLength(2);
+    expect(logs[1]).toMatchObject({
+      level: "warn",
+      context: {
+        sdk_uuid: "cache-small",
+        input_tokens: 100,
+        output_tokens: 10,
+        cache_creation_input_tokens: 900,
+        cache_read_input_tokens: 0,
+        total_input_tokens: 1000,
+        cache_hit_rate: 0,
+        cache_hit_percent: 0,
+        cache_hit_rate_warning_threshold: 0.8,
       },
     });
   });

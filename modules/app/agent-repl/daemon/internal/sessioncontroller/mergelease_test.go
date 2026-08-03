@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"claude-repld/internal/ssm"
 )
 
 // newLeaseGateManager builds the smallest Manager guardMergeLease needs: the
@@ -179,13 +181,75 @@ func TestInterruptForMergeWithNoLiveSessionIsSatisfied(t *testing.T) {
 	m := &Manager{logf: func(format string, args ...any) { lines = append(lines, format) }}
 
 	// Act.
-	err := m.InterruptForMerge(context.Background(), "ws")
+	displaced, err := m.InterruptForMerge(context.Background(), "ws")
 
 	// Assert.
 	if err != nil {
 		t.Fatalf("InterruptForMerge with no live session = %v, want nil", err)
 	}
+	if displaced != nil {
+		t.Fatalf("InterruptForMerge with no live session displaced %+v, want nothing", displaced)
+	}
 	if len(lines) != 1 {
 		t.Fatalf("logged %d line(s), want the absent-session note recorded exactly once", len(lines))
+	}
+}
+
+func TestRunningTurnReportsNothingWhileIdle(t *testing.T) {
+	// Arrange. An idle session has no turn to displace, whatever text the last
+	// one left behind.
+	m := &Manager{}
+	d := &sessionController{turnActive: false, runningText: "do the thing"}
+
+	// Act / Assert.
+	if got := m.runningTurn(d); got != nil {
+		t.Fatalf("runningTurn on an idle session = %+v, want nil", got)
+	}
+}
+
+func TestRunningTurnReportsNothingForAPreDaemonTurn(t *testing.T) {
+	// Arrange. A turn that predates this daemon leaves runningText empty, and
+	// an empty prompt is not something that can be put back.
+	m := &Manager{}
+	d := &sessionController{turnActive: true, runningText: ""}
+
+	// Act / Assert.
+	if got := m.runningTurn(d); got != nil {
+		t.Fatalf("runningTurn over a pre-daemon turn = %+v, want nil", got)
+	}
+}
+
+func TestRunningTurnCarriesPromptAndPermissionMode(t *testing.T) {
+	// Arrange. Both halves describe the SAME turn, so a resume needs both.
+	m := &Manager{}
+	d := &sessionController{
+		turnActive:            true,
+		runningText:           "do the thing",
+		runningPermissionMode: "acceptEdits",
+	}
+
+	// Act.
+	got := m.runningTurn(d)
+
+	// Assert.
+	if got == nil {
+		t.Fatal("runningTurn over a live turn = nil, want the displaced turn")
+	}
+	if got.Prompt != "do the thing" || got.PermissionMode != "acceptEdits" {
+		t.Fatalf("runningTurn = %+v, want the running prompt and its mode", got)
+	}
+}
+
+func TestResumeDisplacedTurnRefusesAnEmptyPrompt(t *testing.T) {
+	// Arrange. Nothing to put back is a caller bug, not a quiet no-op: a
+	// swallowed one would look exactly like a resume that worked.
+	m := &Manager{}
+
+	// Act.
+	err := m.ResumeDisplacedTurn(context.Background(), "ws", ssm.DisplacedTurn{})
+
+	// Assert.
+	if err == nil {
+		t.Fatal("ResumeDisplacedTurn with no prompt = nil, want a refusal")
 	}
 }

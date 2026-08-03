@@ -1475,7 +1475,7 @@ the user merely switches to stays blue despite having a transcript."
                 ((symbol-function 'agent-repl--drain-pending-initial-buffers) #'ignore)
                 ((symbol-function 'agent-repl--drain-pending-show-panels) #'ignore)
                 ((symbol-function 'agent-repl--maybe-autoselect-input) #'ignore)
-                ((symbol-function 'agent-repl--frontend-notify-workspace-switch)
+                ((symbol-function 'agent-repl--frontend-ensure-workspace)
                  (lambda (ws) (setq notified ws))))
         ;; Act
         (agent-repl--on-workspace-switch "ws1")
@@ -1494,7 +1494,7 @@ sit behind anything that could return early."
                 ((symbol-function 'agent-repl--drain-pending-initial-buffers) #'ignore)
                 ((symbol-function 'agent-repl--drain-pending-show-panels) #'ignore)
                 ((symbol-function 'agent-repl--maybe-autoselect-input) #'ignore)
-                ((symbol-function 'agent-repl--frontend-notify-workspace-switch)
+                ((symbol-function 'agent-repl--frontend-ensure-workspace)
                  (lambda (_ws)
                    (setq latched-at-notify (agent-repl--ws-get "ws1" :ws-loaded)))))
         ;; Act
