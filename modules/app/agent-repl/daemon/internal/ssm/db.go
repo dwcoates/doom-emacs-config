@@ -19,7 +19,7 @@ import (
 // whenever the on-disk shape changes; migrate() refuses to open a DB
 // written by a NEWER schema than this binary understands (loud, no
 // silent downgrade).
-const schemaVersion = 5
+const schemaVersion = 6
 
 // defaultDBPath is the daemon's ONE state store — the SSM's log and the
 // session registry's identity tables share it (§9.2: "own SQLite DB",
@@ -77,7 +77,13 @@ func migrate(db *sql.DB) error {
 			bridge_seq           INTEGER,
 			bridge_event_session_id TEXT NOT NULL DEFAULT '',
 			end_seq              INTEGER,
-			end_event_session_id TEXT NOT NULL DEFAULT ''
+			end_event_session_id TEXT NOT NULL DEFAULT '',
+			-- end_cause names the SYNTHESIZED terminal close, for a claim the
+			-- daemon ended without a TurnEnded because the live shim stated the
+			-- turn does not exist. Empty on every claim closed by a real
+			-- boundary, which is what lets recordTurnEnd tell a late-arriving
+			-- genuine end for an already-accounted turn from a contradiction.
+			end_cause            TEXT NOT NULL DEFAULT ''
 		);
 		CREATE INDEX IF NOT EXISTS turn_lifecycle_claim_active
 			ON turn_lifecycle_claim(workspace, claimant_session_id, end_seq, claim_id);
@@ -219,6 +225,7 @@ func addTurnClaimColumns(db *sql.DB) error {
 		{"bridge_seq", `INTEGER`},
 		{"bridge_event_session_id", `TEXT NOT NULL DEFAULT ''`},
 		{"end_event_session_id", `TEXT NOT NULL DEFAULT ''`},
+		{"end_cause", `TEXT NOT NULL DEFAULT ''`},
 	}
 	for _, column := range columns {
 		has, err := hasColumn(db, "turn_lifecycle_claim", column.name)
