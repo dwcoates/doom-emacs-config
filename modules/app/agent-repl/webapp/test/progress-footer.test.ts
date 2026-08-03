@@ -893,6 +893,45 @@ describe("tokenCellHtml: the turn's input tokens, and never its output", () => {
     // Assert
     expect(got).toBe('<span class="pfooter-thinking-tokens">1.4k thought</span>');
   });
+
+  it("arms the counter at zero the moment the daemon acks the prompt", () => {
+    // Arrange — the ack's publish stamps the turn's start before any usage.
+    const p = progress({ turnStartedAtMs: 1_700_000_000_000, inputTokens: 0 });
+    // Act
+    const got = tokenCellHtml(p);
+    // Assert
+    expect(got).toBe('<span class="info-tokens">0 in</span>');
+  });
+
+  it("shows the real figure once usage lands on the armed turn", () => {
+    // Arrange
+    const p = progress({ turnStartedAtMs: 1_700_000_000_000, inputTokens: 41_200 });
+    // Act
+    const got = tokenCellHtml(p);
+    // Assert — the arming zero is displaced, never added to.
+    expect(got).toBe('<span class="info-tokens">41k in</span>');
+  });
+
+  it("keeps the idle dash when no turn is in flight", () => {
+    // Arrange — an unstamped turn start is the daemon saying nothing is running.
+    const p = progress({ turnStartedAtMs: 0, inputTokens: 0 });
+    // Act
+    const got = tokenCellHtml(p);
+    // Assert
+    expect(got).toBe('<span class="info-tokens">--</span>');
+  });
+
+  it("composes the arming zero beside a running thinking ticker", () => {
+    // Arrange
+    const p = progress({ turnStartedAtMs: 1_700_000_000_000, thinkingTokens: 1_400 });
+    // Act
+    const got = tokenCellHtml(p);
+    // Assert
+    expect(got).toBe(
+      '<span class="info-tokens">0 in</span> ' +
+        '<span class="pfooter-thinking-tokens">1.4k thought</span>',
+    );
+  });
 });
 
 // --- the counters cluster ----------------------------------------------------
