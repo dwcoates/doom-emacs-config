@@ -32,10 +32,8 @@ const LOG_COMPONENT = "claude-shim-session";
 const LOGGER = bindLog({ component: LOG_COMPONENT, operation: "shim.session.lifecycle" });
 const CACHE_LOGGER = bindLog({ component: LOG_COMPONENT, operation: "shim.session.cache" });
 
-/** Materially sized results below this read ratio require operator attention. */
+/** Results below this cache-read ratio require operator attention. */
 const CACHE_HIT_RATE_WARNING_THRESHOLD = 0.8;
-/** Ignore token totals too small to represent a cacheable conversation prefix. */
-const CACHE_OBSERVATION_MIN_INPUT_TOKENS = 4096;
 
 // ---------------------------------------------------------------------------
 // SDK boundary types (structural, so tests can inject fakes)
@@ -746,7 +744,6 @@ export class ShimSession {
     };
     CACHE_LOGGER.log(fields, "SDK result token and prompt-cache usage");
     if (
-      usage.total_input_tokens >= CACHE_OBSERVATION_MIN_INPUT_TOKENS &&
       usage.cache_hit_rate !== null &&
       usage.cache_hit_rate < CACHE_HIT_RATE_WARNING_THRESHOLD
     ) {
@@ -755,7 +752,6 @@ export class ShimSession {
           level: "warn",
           ...fields,
           cache_hit_rate_warning_threshold: CACHE_HIT_RATE_WARNING_THRESHOLD,
-          cache_observation_min_input_tokens: CACHE_OBSERVATION_MIN_INPUT_TOKENS,
         },
         "SDK result prompt-cache hit rate is below the configured threshold",
       );
