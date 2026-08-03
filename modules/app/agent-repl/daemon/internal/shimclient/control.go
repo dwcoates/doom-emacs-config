@@ -39,8 +39,11 @@ type protoControl interface {
 // Nacks it (or ctx / the AckTimeout elapses). A Nack or timeout is a loud
 // error — this layer never retries (the caller decides).
 func (c *Client) SubmitPrompt(ctx context.Context, text, origin, permissionMode string) error {
-	reqID := c.newRequestID("prompt")
-	_, err := c.sendAwait(ctx, &corev1.SubmitPrompt{
+	reqID, err := c.newRequestID("prompt")
+	if err != nil {
+		return err
+	}
+	_, err = c.sendAwait(ctx, &corev1.SubmitPrompt{
 		RequestId:      reqID,
 		Text:           text,
 		Origin:         origin,
@@ -57,7 +60,10 @@ func (c *Client) SubmitPrompt(ctx context.Context, text, origin, permissionMode 
 // already ended arrive as the same silence, which is how a no-op stop came to
 // be painted as a failed one. A Nack or timeout is still an error, unchanged.
 func (c *Client) Interrupt(ctx context.Context) (corev1.InterruptOutcome, error) {
-	reqID := c.newRequestID("interrupt")
+	reqID, err := c.newRequestID("interrupt")
+	if err != nil {
+		return corev1.InterruptOutcome_INTERRUPT_OUTCOME_UNSPECIFIED, err
+	}
 	ack, err := c.sendAwait(ctx, &corev1.Interrupt{RequestId: reqID})
 	if err != nil {
 		return corev1.InterruptOutcome_INTERRUPT_OUTCOME_UNSPECIFIED, err
@@ -72,7 +78,10 @@ func (c *Client) SetModel(ctx context.Context, model string) (string, error) {
 	if requested == "" {
 		return "", fmt.Errorf("set model: model id is empty")
 	}
-	reqID := c.newRequestID("set-model")
+	reqID, err := c.newRequestID("set-model")
+	if err != nil {
+		return "", err
+	}
 	ack, nack, err := c.sendAwaitReceipt(ctx, &corev1.SetModel{RequestId: reqID, Model: requested})
 	if err != nil {
 		return "", err

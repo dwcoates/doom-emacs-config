@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -285,5 +286,86 @@ func TestPermissionRequestRoundTrip(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("never received PermissionResponse")
+	}
+}
+
+// TestRequestIDsStayDistinctAcrossDaemonBootsAndRotations pins the property the
+// durable turn ledger depends on: a request id names ONE turn for all time.
+//
+// The counter cannot supply that. It restarts at 1 in every process and in every
+// fresh Client, so two boots reach `daemon-prompt-2` for two different turns.
+// Only the random suffix separates them, and a turn id that repeats is not a
+// cosmetic collision: the second turn lands on the first turn's ledger row, and
+// if that row is already closed its bridge is refused against a claim it never
+// owned.
+func TestRequestIDsStayDistinctAcrossDaemonBootsAndRotations(t *testing.T) {
+	tests := []struct {
+		name    string
+		boots   int
+		perBoot int
+	}{
+		{name: "two boots reaching the same counter position", boots: 2, perBoot: 4},
+		{name: "many rotations of one workspace's session", boots: 16, perBoot: 4},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange — each boot is a fresh Client for the SAME session, so every
+			// one of them walks the counter from 1 exactly as a restart does.
+			seen := make(map[string]struct{})
+
+			// Act.
+			for boot := 0; boot < tc.boots; boot++ {
+				c := New(Config{SessionID: "s_33107324a26398ef", Logf: func(string, ...any) {}})
+				for i := 0; i < tc.perBoot; i++ {
+					id, err := c.newRequestID("prompt")
+					if err != nil {
+						t.Fatalf("newRequestID: %v", err)
+					}
+					// Assert — no id may ever repeat, within a boot or across boots.
+					if _, dup := seen[id]; dup {
+						t.Fatalf("request id %q minted twice (boot %d, mint %d)", id, boot, i)
+					}
+					seen[id] = struct{}{}
+				}
+			}
+
+			if want := tc.boots * tc.perBoot; len(seen) != want {
+				t.Fatalf("distinct ids = %d, want %d", len(seen), want)
+			}
+		})
+	}
+}
+
+// TestRequestIDCounterAloneIsNotAnIdentity pins WHY the suffix is load-bearing:
+// two boots really do reach the same counter value, so an id built from the
+// counter alone would collide by construction.
+func TestRequestIDCounterAloneIsNotAnIdentity(t *testing.T) {
+	// Arrange.
+	first := New(Config{SessionID: "s_33107324a26398ef", Logf: func(string, ...any) {}})
+	second := New(Config{SessionID: "s_33107324a26398ef", Logf: func(string, ...any) {}})
+
+	// Act — mint the second id from each, the position the live collision named.
+	var ids [2]string
+	for i, c := range []*Client{first, second} {
+		if _, err := c.newRequestID("prompt"); err != nil {
+			t.Fatalf("newRequestID: %v", err)
+		}
+		id, err := c.newRequestID("prompt")
+		if err != nil {
+			t.Fatalf("newRequestID: %v", err)
+		}
+		ids[i] = id
+	}
+
+	// Assert — same counter prefix, different id.
+	const prefix = "daemon-prompt-2-"
+	for _, id := range ids {
+		if !strings.HasPrefix(id, prefix) {
+			t.Fatalf("id %q lacks prefix %q — the boots did not reach the same counter position", id, prefix)
+		}
+	}
+	if ids[0] == ids[1] {
+		t.Fatalf("both boots minted %q — the counter position alone decided the identity", ids[0])
 	}
 }
