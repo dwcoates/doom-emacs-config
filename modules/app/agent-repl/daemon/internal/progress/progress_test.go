@@ -111,7 +111,7 @@ func (h *harness) last() *frontendv1.ProgressView {
 // apply folds an event, failing on error.
 func (h *harness) apply(ev *corev1.Event) {
 	h.t.Helper()
-	if err := h.m.Apply(testWS, ev); err != nil {
+	if err := h.m.Apply(testWS, testSID, ev); err != nil {
 		h.t.Fatalf("Apply: %v", err)
 	}
 }
@@ -1418,10 +1418,86 @@ func TestApplyRejectsANilEvent(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	// Act
-	err := h.m.Apply(testWS, nil)
+	err := h.m.Apply(testWS, testSID, nil)
 	// Assert
 	if err == nil {
 		t.Fatal("wanted an error for a nil event, got nil")
+	}
+}
+
+// --- session identity -------------------------------------------------------
+
+// vendorSID is the VENDOR conversation uuid the store files events under. It is
+// deliberately nothing like the daemon-minted testSID, because the frontend's
+// scope filter compares the two for exact equality.
+const vendorSID = "f59e9d4b-a7c1-4b5f-baec-981de8aa872c"
+
+// A store event carries the VENDOR conversation uuid on its envelope; the view
+// it moves must still carry the daemon session id, because the frontend's
+// agent-session scope filter compares that id for exact equality.
+func TestApplyStampsTheDaemonSessionIdOnAVendorStampedEvent(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ev := &corev1.Event{
+		SessionId: vendorSID, ProducedAtMs: atMs,
+		Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{}},
+	}
+	// Act
+	if err := h.m.Apply(testWS, testSID, ev); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	// Assert
+	if got := h.last().GetSessionId(); got != testSID {
+		t.Fatalf("sessionId = %q, want the daemon id %q", got, testSID)
+	}
+}
+
+// THE LIVE DEFECT, in its exact shape: mid-turn the daemon-local accept had
+// stamped the daemon id, then each vendor-stamped token update overwrote it,
+// and every one of those pushes was dropped by the scope filter — so the
+// footer's input-token count never moved.
+func TestApplyKeepsTheDaemonSessionIdOnAVendorStampedTokenUpdate(t *testing.T) {
+	// Arrange — a daemon-local path stamps first, as the accept does live.
+	h := newHarness(t)
+	h.openTurn()
+	ev := streamEvent(t, assistantWithUsage("m1", &datav1.ApiUsage{InputTokens: 500}))
+	ev.SessionId = vendorSID
+	// Act
+	if err := h.m.Apply(testWS, testSID, ev); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	// Assert
+	got := h.last()
+	if got.GetSessionId() != testSID {
+		t.Fatalf("sessionId = %q, want the daemon id %q still", got.GetSessionId(), testSID)
+	}
+	if got.GetInputTokens() != 500 {
+		t.Fatalf("inputTokens = %d, want 500 (the fold itself must be unaffected)", got.GetInputTokens())
+	}
+}
+
+// The daemon-local paths keep stamping the daemon id they are handed.
+func TestNoteTurnAcceptedStampsTheDaemonSessionId(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	// Act
+	h.m.NoteTurnAccepted(testWS, testSID)
+	// Assert
+	if got := h.last().GetSessionId(); got != testSID {
+		t.Fatalf("sessionId = %q, want %q", got, testSID)
+	}
+}
+
+// A caller with no canonical id has nothing this resolver may stamp: guessing
+// from the event is exactly the defect, so the miss is surfaced instead.
+func TestApplyRejectsAnEmptyCanonicalSessionId(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	// Act
+	err := h.m.Apply(testWS, "", &corev1.Event{SessionId: vendorSID})
+	// Assert
+	if err == nil {
+		t.Fatal("wanted an error for an event applied with no canonical session id, got nil")
 	}
 }
 
@@ -1429,7 +1505,7 @@ func TestApplyRejectsAnEmptyWorkspace(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	// Act
-	err := h.m.Apply("", &corev1.Event{SessionId: testSID})
+	err := h.m.Apply("", testSID, &corev1.Event{SessionId: testSID})
 	// Assert
 	if err == nil {
 		t.Fatal("wanted an error for an event with no workspace, got nil")
@@ -1440,7 +1516,7 @@ func TestApplyRejectsACorruptVendorPayload(t *testing.T) {
 	// Arrange — an Any whose type URL names nothing the schema set knows.
 	h := newHarness(t)
 	// Act
-	err := h.m.Apply(testWS, &corev1.Event{
+	err := h.m.Apply(testWS, testSID, &corev1.Event{
 		SessionId: testSID,
 		Payload:   &corev1.Event_Vendor{Vendor: &anypb.Any{TypeUrl: "type.googleapis.com/nope.Nope"}},
 	})

@@ -239,6 +239,44 @@ func TestScopeFramePassesMatchingProgressView(t *testing.T) {
 	}
 }
 
+// The round trip the live footer defect broke: a workspace-scoped client is
+// scoped to the DAEMON session id, so a token-bearing progress view stamped
+// with that id reaches it. It used to be stamped with the vendor conversation
+// uuid the store files events under, and this filter — correctly — dropped
+// every one of them, which is why the footer's input-token count never moved.
+func TestScopeFrameKeepsATokenBearingProgressViewStampedWithTheDaemonSession(t *testing.T) {
+	// Arrange
+	sc := Scope{SessionID: "s_f564d136dad4f25c", Workspace: "/w1"}
+	frame := ProgressViewFrame(&frontendv1.ProgressView{
+		SessionId: "s_f564d136dad4f25c", Workspace: "/w1", InputTokens: 46000,
+	})
+	// Act
+	got, keep := scopeFrame(frame, sc)
+	// Assert
+	if !keep {
+		t.Fatal("the token-bearing progress view for this connection's own session must pass")
+	}
+	if n := got.GetProgress().GetInputTokens(); n != 46000 {
+		t.Fatalf("inputTokens = %d, want 46000", n)
+	}
+}
+
+// The vendor-stamped frame the resolver used to emit stays dropped: the filter
+// is right and the stamp was wrong, so loosening this was never the fix.
+func TestScopeFrameDropsAVendorStampedProgressView(t *testing.T) {
+	// Arrange
+	sc := Scope{SessionID: "s_f564d136dad4f25c", Workspace: "/w1"}
+	frame := ProgressViewFrame(&frontendv1.ProgressView{
+		SessionId: "f59e9d4b-a7c1-4b5f-baec-981de8aa872c", Workspace: "/w1", InputTokens: 46000,
+	})
+	// Act
+	_, keep := scopeFrame(frame, sc)
+	// Assert
+	if keep {
+		t.Fatal("a progress view stamped with the vendor conversation uuid must still be dropped")
+	}
+}
+
 func TestFilterSnapshotKeepsOnlyTheScopedProgressView(t *testing.T) {
 	// Arrange
 	sc := Scope{SessionID: "s1", Workspace: "/w1"}

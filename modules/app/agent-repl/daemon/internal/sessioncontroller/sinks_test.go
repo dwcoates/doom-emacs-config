@@ -793,6 +793,10 @@ type fakeProgress struct {
 	applied    []*corev1.Event
 	workspaces []string
 	err        error
+	// sessionIDs records the CANONICAL session id fed alongside each applied
+	// event, so a test can prove the daemon id reaches the resolver rather
+	// than the vendor id the event's own envelope carries.
+	sessionIDs []string
 	// interrupts records one entry per NoteInterrupt call — the interrupt
 	// windows a USER-COMMANDED stop opened.
 	interrupts []interruptNote
@@ -808,8 +812,9 @@ type interruptNote struct {
 	outcome   corev1.InterruptOutcome
 }
 
-func (p *fakeProgress) Apply(workspace string, ev *corev1.Event) error {
+func (p *fakeProgress) Apply(workspace, sessionID string, ev *corev1.Event) error {
 	p.workspaces = append(p.workspaces, workspace)
+	p.sessionIDs = append(p.sessionIDs, sessionID)
 	p.applied = append(p.applied, ev)
 	return p.err
 }
@@ -868,6 +873,29 @@ func TestLifecycleEventsReachTheProgressResolver(t *testing.T) {
 	}
 	if prog.workspaces[0] != "ws" {
 		t.Fatalf("progress workspace = %q, want %q", prog.workspaces[0], "ws")
+	}
+}
+
+// The feed seam names the session by the CONTROLLER'S daemon id, never by the
+// vendor conversation uuid the store stamped on the event. A view stamped from
+// the event is dropped by the frontend's exact agent-session scope filter, so
+// the token ticks folded from store events never reached the footer.
+func TestProgressIsFedTheDaemonSessionIdNotTheEventsVendorId(t *testing.T) {
+	// Arrange
+	prog := &fakeProgress{}
+	c := newProgressConsumer(prog)
+	// Act — a store event filed under the vendor conversation uuid.
+	c.Apply(&corev1.Event{
+		SessionId: "f59e9d4b-a7c1-4b5f-baec-981de8aa872c",
+		Plane:     corev1.Plane_PLANE_STREAM,
+		Payload:   &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{}},
+	})
+	// Assert
+	if len(prog.sessionIDs) != 1 {
+		t.Fatalf("progress fed %d session ids, want 1", len(prog.sessionIDs))
+	}
+	if prog.sessionIDs[0] != "s1" {
+		t.Fatalf("progress session id = %q, want the controller's daemon id %q", prog.sessionIDs[0], "s1")
 	}
 }
 
