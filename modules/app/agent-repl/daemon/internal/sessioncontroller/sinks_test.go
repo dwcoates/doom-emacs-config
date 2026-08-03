@@ -163,6 +163,8 @@ type fakeApplier struct {
 	alreadyCompletes   []alreadyCompleteCall
 	alreadyCompleteDid bool
 	alreadyCompleteErr error
+	// onApply observes each event at the instant the SSM is fed it. See Apply.
+	onApply func(*corev1.Event)
 	// activeTurnIDsErr fails the durable turn-claim READ, which is what a drain
 	// hold falls back from when it cannot name the turn it is waiting on.
 	activeTurnIDsErr error
@@ -618,6 +620,15 @@ type reconcileCall struct {
 }
 
 func (a *fakeApplier) Apply(ev *corev1.Event) error {
+	// THE ACCEPT-TO-CONSUMPTION SEAM. The SSM apply is where a boundary stops
+	// being the daemon's private business: it resolves the workspace state and
+	// publishes it, which is the first moment any frontend can observe that a
+	// turn is in flight. A test that needs to prove the controller's turn record
+	// is already NAMED by then reads it from here — the window used to be racy
+	// precisely because the name bound after this call returned.
+	if a.onApply != nil {
+		a.onApply(ev)
+	}
 	a.applied = append(a.applied, ev)
 	return a.err
 }
@@ -692,6 +703,22 @@ func (a *fakeApplier) ReconcileTurnHandshake(_ string, _ string, ids []string, l
 		a.turns = nil
 	}
 	return before, append([]string(nil), a.turns...), closed, nil
+}
+
+// setDurableTurns seeds the durable claim set directly, for a test standing in
+// the window where the ledger already holds a claim the controller has not
+// observed the boundary for.
+func (a *fakeApplier) setDurableTurns(ids ...string) {
+	a.reconcMutex.Lock()
+	defer a.reconcMutex.Unlock()
+	a.turns = append([]string(nil), ids...)
+}
+
+// setActiveTurnIDsErr fails the durable claim READ.
+func (a *fakeApplier) setActiveTurnIDsErr(err error) {
+	a.reconcMutex.Lock()
+	defer a.reconcMutex.Unlock()
+	a.activeTurnIDsErr = err
 }
 
 // ActiveTurnIDs reads the durable claim set, exactly as the SSM's does.

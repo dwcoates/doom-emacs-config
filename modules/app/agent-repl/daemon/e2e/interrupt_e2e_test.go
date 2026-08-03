@@ -191,10 +191,21 @@ func holdTurnOpen(t *testing.T, conn *websocket.Conn, workspace, requestID, comm
 		// The permission item travels the DIRECT shim control path and can
 		// beat the store-plane TurnStarted; a prompt submitted before the
 		// daemon OBSERVES the turn is delivered rather than queued. The
-		// receipt that the observation happened is a pushed WorkspaceState
-		// with the SSM's turn_active set: it resolves off the store-plane
-		// TurnStarted's own apply, and the same consumer pass sets the
-		// queue's turn-in-flight flag, so the next prompt queues.
+		// receipt that a turn is claimed is a pushed WorkspaceState with the
+		// SSM's turn_active set.
+		//
+		// WHAT THAT RECEIPT DOES AND DOES NOT PROVE. turn_active resolves off
+		// the accepted edge as well as off the durable TurnStarted (ssm's
+		// resolve: prompt_accepted, prompt_delivered and turn_started all set
+		// it), so this wait proves a turn is CLAIMED, not that the daemon has
+		// consumed the turn's start. What makes that enough for a caller that
+		// then asks the daemon to name the turn is on the daemon's side of the
+		// line, not this file's: the controller's turn record binds its name
+		// from the durable claim ledger BEFORE the SSM apply that publishes
+		// this very state, and a hold still in the accepted phase resolves its
+		// name from that same ledger (sessioncontroller, turnrecord.go and
+		// nameAcceptedHold). Neither is a property this wait can assert, and
+		// both are covered by unit tests there.
 		"the daemon's observation of the turn (turn_active)": func(frame *frontendv1.FrontendFrame) bool {
 			state := workspaceStateFor(frame, workspace)
 			return state != nil && state.GetTurnActive()

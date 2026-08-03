@@ -453,6 +453,61 @@ func claimTurn(t *testing.T, m *Manager, ws, claimant, vendorSession, id string,
 	}
 }
 
+// TestActiveTurnIDsNamesTheSessionsOpenClaim covers the ledger READ the drain
+// hold names an accepted-but-not-yet-observed turn from: process memory cannot
+// answer that question and the ledger can.
+func TestActiveTurnIDsNamesTheSessionsOpenClaim(t *testing.T) {
+	// Arrange.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	claimTurn(t, m, "ws1", "s1", "s1", "daemon-prompt-1", 1)
+
+	// Act.
+	ids, err := m.ActiveTurnIDs("ws1", "s1")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ActiveTurnIDs: %v", err)
+	}
+	if !reflect.DeepEqual(ids, []string{"daemon-prompt-1"}) {
+		t.Fatalf("ActiveTurnIDs = %v, want the open claim", ids)
+	}
+}
+
+// TestActiveTurnIDsReportsNothingForASessionHoldingNoClaim pins that holding
+// nothing is an ANSWER rather than a failure: a hold with no name is decided by
+// the caller, and an error here would make an empty ledger indistinguishable
+// from an unreadable one.
+func TestActiveTurnIDsReportsNothingForASessionHoldingNoClaim(t *testing.T) {
+	// Arrange.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+
+	// Act.
+	ids, err := m.ActiveTurnIDs("ws1", "s1")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ActiveTurnIDs: %v", err)
+	}
+	if len(ids) != 0 {
+		t.Fatalf("ActiveTurnIDs = %v, want none", ids)
+	}
+}
+
+// TestActiveTurnIDsRefusesAnUnidentifiedSession keeps the read from answering
+// for a caller that named neither the workspace nor the session.
+func TestActiveTurnIDsRefusesAnUnidentifiedSession(t *testing.T) {
+	// Arrange.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+
+	// Act.
+	_, err := m.ActiveTurnIDs("ws1", "")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("ActiveTurnIDs with no claimant session id = nil error, want a refusal")
+	}
+}
+
 func TestHandshakeReportingNoTurnClosesThePhantomClaim(t *testing.T) {
 	// Arrange — a claim survives a restart the shim knows nothing about.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
