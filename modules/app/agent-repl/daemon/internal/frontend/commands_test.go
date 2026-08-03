@@ -122,7 +122,7 @@ func TestDispatchRefusesWireWorkspaceCreation(t *testing.T) {
 	}
 
 	// Act.
-	ack := Dispatch(context.Background(), func(string, ...any) {}, h, cmd)
+	ack := Dispatch(context.Background(), func(string, ...any) {}, h, nil, cmd)
 
 	// Assert.
 	if ack.GetOk() {
@@ -239,7 +239,7 @@ func TestDispatchRoutesEachCommand(t *testing.T) {
 			h := &mockHandler{}
 
 			// Act.
-			ack := Dispatch(context.Background(), nil, h, tc.cmd)
+			ack := Dispatch(context.Background(), nil, h, nil, tc.cmd)
 
 			// Assert.
 			if h.called != tc.wantHit {
@@ -261,7 +261,7 @@ func TestDispatchResyncCarriesSeq(t *testing.T) {
 	cmd := &frontendv1.FrontendCommand{RequestId: "r", Command: &frontendv1.FrontendCommand_Resync{Resync: &frontendv1.ResyncCmd{FromSeq: 99}}}
 
 	// Act.
-	Dispatch(context.Background(), nil, h, cmd)
+	Dispatch(context.Background(), nil, h, nil, cmd)
 
 	// Assert.
 	if h.lastResyncSeq != 99 {
@@ -275,7 +275,7 @@ func TestDispatchWithResponseCarriesCorrelatedHealthView(t *testing.T) {
 	cmd := &frontendv1.FrontendCommand{RequestId: "health-1", Workspace: "/ws", Command: &frontendv1.FrontendCommand_SessionHealth{SessionHealth: &frontendv1.SessionHealthCmd{SessionId: "s1"}}}
 
 	// Act.
-	ack, response := DispatchWithResponse(context.Background(), nil, h, cmd)
+	ack, response := DispatchWithResponse(context.Background(), nil, h, nil, cmd)
 
 	// Assert: the response has the same correlation id and is a health frame,
 	// not merely an OK command ack that a frontend could mistake for readiness.
@@ -294,7 +294,7 @@ func TestDispatchHandlerErrorBecomesFailingAck(t *testing.T) {
 	cmd := &frontendv1.FrontendCommand{RequestId: "r8", Command: &frontendv1.FrontendCommand_SubmitPrompt{SubmitPrompt: &frontendv1.SubmitPromptCmd{}}}
 
 	// Act.
-	ack := Dispatch(context.Background(), nil, h, cmd)
+	ack := Dispatch(context.Background(), nil, h, nil, cmd)
 
 	// Assert.
 	if ack.GetOk() {
@@ -308,13 +308,11 @@ func TestDispatchHandlerErrorBecomesFailingAck(t *testing.T) {
 	}
 }
 
-// TestDispatchNacksUnimplementedRosterPublish pins the wave-1 state of the
-// roster contract: the arm is recognized and answered with an explicit
-// unimplemented Nack. Silently accepting it would tell a publisher its roster
-// was retained when nothing holds it, and falling through to the unknown-
-// command branch would tell it the daemon did not understand a command that is
-// on the frozen wire.
-func TestDispatchNacksUnimplementedRosterPublish(t *testing.T) {
+// TestDispatchNacksRosterPublishWithoutRetainer covers the one dispatcher a
+// roster publication can reach with nothing to retain it. Accepting it would
+// tell a publisher its roster is held when nothing holds it, so the arm refuses
+// rather than nil-dereferencing or silently succeeding.
+func TestDispatchNacksRosterPublishWithoutRetainer(t *testing.T) {
 	tests := []struct {
 		name string
 		cmd  *frontendv1.PublishWorkspaceRosterCmd
@@ -327,7 +325,7 @@ func TestDispatchNacksUnimplementedRosterPublish(t *testing.T) {
 		},
 		{
 			// The Nack must not depend on the payload: an empty command is
-			// still an understood-but-unimplemented arm, not a panic.
+			// still an understood arm with no retainer, not a panic.
 			name: "roster absent",
 			cmd:  &frontendv1.PublishWorkspaceRosterCmd{},
 		},
@@ -342,14 +340,14 @@ func TestDispatchNacksUnimplementedRosterPublish(t *testing.T) {
 			}
 
 			// Act.
-			ack := Dispatch(context.Background(), func(string, ...any) {}, h, cmd)
+			ack := Dispatch(context.Background(), func(string, ...any) {}, h, nil, cmd)
 
 			// Assert.
 			if ack.GetOk() {
 				t.Fatalf("publishWorkspaceRoster ack = %+v, want a Nack", ack)
 			}
-			if !strings.Contains(ack.GetError(), "not implemented") {
-				t.Errorf("Nack %q does not say the arm is unimplemented", ack.GetError())
+			if !strings.Contains(ack.GetError(), "no roster retainer configured") {
+				t.Errorf("Nack %q does not name the missing retainer", ack.GetError())
 			}
 			if h.called != "" {
 				t.Errorf("publishWorkspaceRoster reached handler %q", h.called)
@@ -367,7 +365,7 @@ func TestDispatchUnknownCommandFailsLoudly(t *testing.T) {
 	cmd := &frontendv1.FrontendCommand{RequestId: "r9", Workspace: "wsX"}
 
 	// Act.
-	ack := Dispatch(context.Background(), nil, h, cmd)
+	ack := Dispatch(context.Background(), nil, h, nil, cmd)
 
 	// Assert: loud failing ack, no handler method invoked.
 	if h.called != "" {
@@ -386,7 +384,7 @@ func TestDispatchUnknownCommandFailsLoudly(t *testing.T) {
 
 func TestDispatchNilCommand(t *testing.T) {
 	// Act.
-	ack := Dispatch(context.Background(), nil, &mockHandler{}, nil)
+	ack := Dispatch(context.Background(), nil, &mockHandler{}, nil, nil)
 
 	// Assert.
 	if ack.GetOk() || ack.GetError() == "" {
@@ -406,7 +404,7 @@ func TestDispatchFailingAckCarriesAClassifiedFailure(t *testing.T) {
 	cmd := &frontendv1.FrontendCommand{RequestId: "r", Command: &frontendv1.FrontendCommand_SubmitPrompt{SubmitPrompt: &frontendv1.SubmitPromptCmd{}}}
 
 	// Act.
-	ack := Dispatch(context.Background(), nil, h, cmd)
+	ack := Dispatch(context.Background(), nil, h, nil, cmd)
 
 	// Assert.
 	if ack.GetFailure() == nil {
@@ -420,7 +418,7 @@ func TestDispatchOkAckCarriesNoFailure(t *testing.T) {
 	cmd := &frontendv1.FrontendCommand{RequestId: "r", Command: &frontendv1.FrontendCommand_SubmitPrompt{SubmitPrompt: &frontendv1.SubmitPromptCmd{}}}
 
 	// Act.
-	ack := Dispatch(context.Background(), nil, h, cmd)
+	ack := Dispatch(context.Background(), nil, h, nil, cmd)
 
 	// Assert.
 	if ack.GetFailure() != nil {
@@ -451,7 +449,7 @@ func TestDispatchClassifiesEachSentinel(t *testing.T) {
 			cmd := &frontendv1.FrontendCommand{RequestId: "r", Command: &frontendv1.FrontendCommand_SubmitPrompt{SubmitPrompt: &frontendv1.SubmitPromptCmd{}}}
 
 			// Act.
-			ack := Dispatch(context.Background(), nil, h, cmd)
+			ack := Dispatch(context.Background(), nil, h, nil, cmd)
 
 			// Assert.
 			if got := ack.GetFailure().GetErrorType(); got != string(tc.want) {
@@ -468,7 +466,7 @@ func TestDispatchClassifiesAWrappedNackWithItsReason(t *testing.T) {
 	cmd := &frontendv1.FrontendCommand{RequestId: "r", Command: &frontendv1.FrontendCommand_SubmitPrompt{SubmitPrompt: &frontendv1.SubmitPromptCmd{}}}
 
 	// Act.
-	ack := Dispatch(context.Background(), nil, h, cmd)
+	ack := Dispatch(context.Background(), nil, h, nil, cmd)
 
 	// Assert.
 	if !strings.Contains(ack.GetFailure().GetSourceDetail(), "store rejected batch") {
@@ -484,7 +482,7 @@ func TestDispatchFallsThroughLoudlyForAnUnclassifiedError(t *testing.T) {
 	cmd := &frontendv1.FrontendCommand{RequestId: "r", Command: &frontendv1.FrontendCommand_SubmitPrompt{SubmitPrompt: &frontendv1.SubmitPromptCmd{}}}
 
 	// Act.
-	ack := Dispatch(context.Background(), logf, h, cmd)
+	ack := Dispatch(context.Background(), logf, h, nil, cmd)
 
 	// Assert.
 	if ack.GetFailure().GetErrorType() != string(errclass.TypeInternalUnclassified) {
@@ -502,7 +500,7 @@ func TestDispatchKeepsTheLegacyErrorStringBesideTheFailure(t *testing.T) {
 	cmd := &frontendv1.FrontendCommand{RequestId: "r", Command: &frontendv1.FrontendCommand_SubmitPrompt{SubmitPrompt: &frontendv1.SubmitPromptCmd{}}}
 
 	// Act.
-	ack := Dispatch(context.Background(), nil, h, cmd)
+	ack := Dispatch(context.Background(), nil, h, nil, cmd)
 
 	// Assert.
 	if ack.GetError() != "submit exploded" {
@@ -515,7 +513,7 @@ func TestDispatchClassifiesAnUnknownCommand(t *testing.T) {
 	cmd := &frontendv1.FrontendCommand{RequestId: "r", Workspace: "wsX"}
 
 	// Act.
-	ack := Dispatch(context.Background(), nil, &mockHandler{}, cmd)
+	ack := Dispatch(context.Background(), nil, &mockHandler{}, nil, cmd)
 
 	// Assert.
 	if ack.GetFailure() == nil {
@@ -526,7 +524,7 @@ func TestDispatchClassifiesAnUnknownCommand(t *testing.T) {
 func TestDispatchClassifiesANilCommand(t *testing.T) {
 	// Arrange.
 	// Act.
-	ack := Dispatch(context.Background(), nil, &mockHandler{}, nil)
+	ack := Dispatch(context.Background(), nil, &mockHandler{}, nil, nil)
 
 	// Assert.
 	if ack.GetFailure() == nil {
@@ -540,7 +538,7 @@ func TestDispatchNeverEmitsAClientPrefixedType(t *testing.T) {
 	cmd := &frontendv1.FrontendCommand{RequestId: "r", Command: &frontendv1.FrontendCommand_SubmitPrompt{SubmitPrompt: &frontendv1.SubmitPromptCmd{}}}
 
 	// Act.
-	ack := Dispatch(context.Background(), nil, h, cmd)
+	ack := Dispatch(context.Background(), nil, h, nil, cmd)
 
 	// Assert.
 	if !errclass.IsDaemonType(ack.GetFailure().GetErrorType()) {
@@ -560,7 +558,7 @@ func TestDispatchInterruptChallengeTakesTheChallengeArm(t *testing.T) {
 	cmd := &frontendv1.FrontendCommand{RequestId: "r", Command: &frontendv1.FrontendCommand_Interrupt{Interrupt: &frontendv1.InterruptCmd{}}}
 
 	// Act.
-	ack := Dispatch(context.Background(), nil, h, cmd)
+	ack := Dispatch(context.Background(), nil, h, nil, cmd)
 
 	// Assert.
 	if ack.GetOk() || ack.GetInterruptConfirmRequired().GetLiveTasks() != 3 {
@@ -574,7 +572,7 @@ func TestDispatchInterruptChallengeCarriesNoClassifiedFailure(t *testing.T) {
 	cmd := &frontendv1.FrontendCommand{RequestId: "r", Command: &frontendv1.FrontendCommand_Interrupt{Interrupt: &frontendv1.InterruptCmd{}}}
 
 	// Act.
-	ack := Dispatch(context.Background(), nil, h, cmd)
+	ack := Dispatch(context.Background(), nil, h, nil, cmd)
 
 	// Assert — a challenge is not a failure, so nothing may render it as one.
 	if ack.GetFailure() != nil {
@@ -588,7 +586,7 @@ func TestDispatchInterruptChallengeCarriesNoErrorString(t *testing.T) {
 	cmd := &frontendv1.FrontendCommand{RequestId: "r", Command: &frontendv1.FrontendCommand_Interrupt{Interrupt: &frontendv1.InterruptCmd{}}}
 
 	// Act.
-	ack := Dispatch(context.Background(), nil, h, cmd)
+	ack := Dispatch(context.Background(), nil, h, nil, cmd)
 
 	// Assert — Emacs echoes `error`, and there is nothing here to echo.
 	if ack.GetError() != "" {

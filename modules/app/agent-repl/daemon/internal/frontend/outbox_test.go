@@ -73,6 +73,12 @@ func TestCoalesceKeyClassifiesFrames(t *testing.T) {
 			frame:     SnapshotFrame(sampleSnapshot()),
 			wantKeyed: false,
 		},
+		{
+			name:       "workspace roster is absolute for the whole editor",
+			frame:      WorkspaceRosterFrame(validRoster(1)),
+			wantKeyed:  true,
+			wantSubstr: "workspace_roster",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -90,6 +96,58 @@ func TestCoalesceKeyClassifiesFrames(t *testing.T) {
 				t.Fatalf("coalesceKey = %q, want it to name %q", key, tc.wantSubstr)
 			}
 		})
+	}
+}
+
+// TestCoalesceKeyMergesEveryRoster covers the roster's GLOBAL key: unlike every
+// other coalescable frame it has no discriminator, because there is exactly one
+// roster for the whole editor and any newer one is the whole truth.
+func TestCoalesceKeyMergesEveryRoster(t *testing.T) {
+	// Arrange: two rosters that differ in revision, view and current workspace.
+	older := WorkspaceRosterFrame(validRoster(1))
+	newer := validRoster(2)
+	newer.CurrentDir = "/elsewhere"
+
+	// Act.
+	a, b := coalesceKey(older), coalesceKey(WorkspaceRosterFrame(newer))
+
+	// Assert.
+	if a != b {
+		t.Fatalf("roster keys = %q and %q, want one shared key", a, b)
+	}
+}
+
+// TestOutboxCompactionKeepsOnlyTheNewestRoster covers roster supersession in
+// the queue: a slow consumer's backlog collapses to the newest roster alone.
+func TestOutboxCompactionKeepsOnlyTheNewestRoster(t *testing.T) {
+	// Arrange: a full queue holding two rosters.
+	o := newOutbox(2)
+	o.push(outFrame{key: coalesceKey(WorkspaceRosterFrame(validRoster(1))), data: []byte("r1")})
+	o.push(outFrame{key: coalesceKey(WorkspaceRosterFrame(validRoster(2))), data: []byte("r2")})
+
+	// Act: a third roster forces a compaction.
+	queued, compacted := o.push(outFrame{key: coalesceKey(WorkspaceRosterFrame(validRoster(3))), data: []byte("r3")})
+
+	// Assert: the superseded roster made room for the new one instead of the
+	// connection being given up on. Compaction rewrites what is ALREADY queued,
+	// so the survivor of that pass (r2) still precedes the frame that triggered
+	// it (r3) — the roster the consumer ends on is the newest either way.
+	if !queued {
+		t.Fatal("push after compaction was refused, want the newest roster queued")
+	}
+	if compacted != 1 {
+		t.Errorf("compacted = %d, want 1 superseded roster removed", compacted)
+	}
+	var drained []string
+	for {
+		data, ok := o.pop()
+		if !ok {
+			break
+		}
+		drained = append(drained, string(data))
+	}
+	if len(drained) != 2 || drained[0] != "r2" || drained[1] != "r3" {
+		t.Fatalf("queue drained to %v, want the oldest roster dropped and [r2 r3] left", drained)
 	}
 }
 

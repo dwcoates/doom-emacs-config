@@ -184,6 +184,26 @@ func TestScopeFramePassesGlobalCommandAck(t *testing.T) {
 	}
 }
 
+// TestScopeFramePassesTheEditorGlobalRoster covers the roster's pass-through
+// arm. The sidebar shows every workspace, so a session-scoped webview that had
+// its roster filtered out would render an empty sidebar next to a live session.
+func TestScopeFramePassesTheEditorGlobalRoster(t *testing.T) {
+	// Arrange — a scope that matches nothing in the roster.
+	sc := Scope{SessionID: "s-unrelated", Workspace: "/unrelated"}
+	frame := WorkspaceRosterFrame(validRoster(1))
+
+	// Act.
+	got, keep := scopeFrame(frame, sc)
+
+	// Assert.
+	if !keep {
+		t.Fatal("the editor-global roster must pass a scoped connection")
+	}
+	if got.GetWorkspaceRoster().GetRevision() != 1 {
+		t.Errorf("scoped roster = %v, want the roster unmodified", got.GetWorkspaceRoster())
+	}
+}
+
 func TestScopeFrameFiltersSnapshotContents(t *testing.T) {
 	// Arrange — a snapshot with two workspaces + two sessions, one matching.
 	sc := Scope{SessionID: "s1", Workspace: "/w"}

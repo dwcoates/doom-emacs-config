@@ -175,6 +175,11 @@ func SessionHealthFrame(v *frontendv1.SessionHealthView) *frontendv1.FrontendFra
 	return &frontendv1.FrontendFrame{Frame: &frontendv1.FrontendFrame_SessionHealth{SessionHealth: v}}
 }
 
+// WorkspaceRosterFrame wraps the editor-global workspace roster.
+func WorkspaceRosterFrame(r *frontendv1.WorkspaceRoster) *frontendv1.FrontendFrame {
+	return &frontendv1.FrontendFrame{Frame: &frontendv1.FrontendFrame_WorkspaceRoster{WorkspaceRoster: r}}
+}
+
 // ---------------------------------------------------------------------------
 // ContentDelta -> TypingDelta (ephemeral live typing)
 // ---------------------------------------------------------------------------

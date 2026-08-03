@@ -40,7 +40,7 @@ func TestDispatchedInterruptChallengeCarriesTheCountAndNoFailure(t *testing.T) {
 	h, p := newGatedHandler(t, false, fakeLiveTasks{count: 3})
 
 	// Act — the command goes through the real dispatch funnel.
-	ack, response := frontend.DispatchWithResponse(context.Background(), nil, h, interruptCmd("r1", false))
+	ack, response := frontend.DispatchWithResponse(context.Background(), nil, h, nil, interruptCmd("r1", false))
 
 	// Assert.
 	if ack.GetOk() {
@@ -73,7 +73,7 @@ func TestADispatchedConfirmedInterruptReachesTheShim(t *testing.T) {
 	h, p := newGatedHandler(t, false, fakeLiveTasks{count: 3})
 
 	// Act — the client resends with the user's explicit yes.
-	ack, _ := frontend.DispatchWithResponse(context.Background(), nil, h, interruptCmd("r2", true))
+	ack, _ := frontend.DispatchWithResponse(context.Background(), nil, h, nil, interruptCmd("r2", true))
 
 	// Assert.
 	if !ack.GetOk() {

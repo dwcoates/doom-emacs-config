@@ -39,6 +39,34 @@ The hard disconnect remains, unchanged, for a queue still full of frames
 nothing may replace. Its log line reports how many frames compaction freed, so
 "we gave up" is always distinguishable from "we never tried".
 
+`WorkspaceRoster` is the one coalescable frame with a GLOBAL key: there is
+exactly one roster for the whole editor, it is always whole and never a delta,
+so any newer one is the entire truth.
+
+## The workspace roster is retained here, and it is editor-global
+
+Emacs is the roster's single author; this package is its retainer and fan-out.
+`PublishWorkspaceRoster` validates a publication (positive revision, a set
+`view` arm, a set `status` arm on every row and every descendant row), refuses
+one whose revision does not advance — naming both revisions, never a silent
+drop — retains it, and delivers it to every connected client. Retention and
+fan-out are ONE operation under the delivery lock, the same lock a connect
+registers under, so a connect racing a publication gets the roster exactly once
+and never gets the older one after the newer.
+
+The roster is EDITOR-GLOBAL, not workspace state. It carries no session or
+workspace routing key, so `scopeFrame` passes it to every connection
+explicitly rather than by falling through the default arm, and a session-scoped
+webview renders the same sidebar the Emacs host does. It is not a
+`StateSnapshot` field either: connect sends it as its own frame, and OMITS that
+frame entirely when nothing has been published, so "no roster yet" stays
+distinguishable from an empty roster.
+
+Retention is IN-MEMORY ONLY, deliberately. The revision is monotonic per Emacs
+BOOT, so a roster outliving its publisher would hold a revision a restarted
+Emacs could not beat. A restarted daemon has no roster until Emacs republishes
+on reconnect.
+
 GUI stream connections also receive a renewable authoritative `StateSnapshot`
 lease. Socket-open does not attest current state. The browser becomes current
 only after it has decoded and atomically adopted a snapshot, and it expires all
