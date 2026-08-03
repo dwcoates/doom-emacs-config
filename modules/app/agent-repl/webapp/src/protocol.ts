@@ -18,9 +18,9 @@
  *   controls, model/mode pickers and diagnostics talk to the daemon.
  */
 
-import type { QueueClassification } from "./frontend-proto.js";
+import type { QueueClassification, QueueEntryShutdownHold } from "./frontend-proto.js";
 
-export type { QueueClassification };
+export type { QueueClassification, QueueEntryShutdownHold };
 
 /**
  * Every mode the CLI accepts at session LAUNCH.
@@ -103,6 +103,13 @@ export interface QueuedItem {
   rationale: string;
   /** The user has confirmed this entry's classification (view state only). */
   accepted: boolean;
+  /**
+   * Set ONLY while a scheduled shutdown's drain lease is holding this prompt.
+   * Its presence is what selects the lease bubble over the classifier bubble:
+   * the classifier never ran on such an entry, so `classification` above says
+   * nothing about why it is waiting.
+   */
+  shutdownHold?: QueueEntryShutdownHold;
 }
 
 export type ResultSubtype =
