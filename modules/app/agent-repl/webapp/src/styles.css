@@ -1221,12 +1221,11 @@ pre {
    the color changes, so the reserved 0.3px stays put — no reflow on the flip. */
 .bubble.assistant.async-live,
 .bubble.user.async-live { border-color: var(--async); }
-/* The working-frontier BREATH is gone with the pulse machinery that drove it:
-   the consolidated progress footer is the one place a still-running turn
-   announces itself now, so no bubble rocks its background any more. The
-   streaming cursor below is untouched — it is a per-bubble signal about THAT
-   bubble's own text, not a stand-in for the turn. */
-.cursor { animation: pulse 1s infinite; color: var(--accent); }
+/* The working-frontier BREATH is gone with the pulse machinery that drove it,
+   and so is the streaming caret that used to trail a live bubble's text: the
+   consolidated progress footer is the one place a still-running turn
+   announces itself now, so neither a bubble's background nor its text tail
+   carries a liveness signal any more. */
 
 /* Markdown-rendered assistant text */
 .md { font-size: 0.9rem; line-height: 1.5; }
