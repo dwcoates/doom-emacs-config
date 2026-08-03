@@ -254,6 +254,13 @@ func (w *readyWriter) Write(p []byte) (int, error) {
 // real one.
 func isolatedShimSocket(t *testing.T, sockDir string) string {
 	t.Helper()
+	// Every harness in this package routes through here, so this is the one
+	// place that can ask whether the caller actually moved off the operator's
+	// live state BEFORE a socket gets derived from it — and before MkdirAll
+	// below creates the directory. mergegeometry's harness did not, and handed
+	// the real $HOME in; requireIsolatedHome turns that omission into a failure
+	// at the offending line rather than an unlinked live socket.
+	requireIsolatedHome(t, sockDir)
 	sock := filepath.Join(sockDir, ".cache", "agent-repl", "sock", "daemon-shim.sock")
 	// Production daemon boot creates the shared sock dir (frontend.ServeUDS
 	// MkdirAll for daemon-frontend.sock) before any shim spawn; the harness
