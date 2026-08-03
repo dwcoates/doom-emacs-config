@@ -173,7 +173,7 @@ func (s *FileJobStore) HostActionsForDelivery() ([]HostAction, error) {
 
 // PendingHostActions returns actions that still require a host result.  It is
 // the reconnect snapshot source: a previously published but uncompleted action
-// remains visible until the host explicitly reports success or failure.
+// remains visible until the host reports a result, success or failure alike.
 func (s *FileJobStore) PendingHostActions() ([]HostAction, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -222,33 +222,26 @@ func (s *FileJobStore) CompleteHostAction(id string, ok bool, failure string) er
 		return fmt.Errorf("workspace create: unknown host action %q", id)
 	}
 	if action.Completed {
-		if !ok {
-			return fmt.Errorf("workspace create: host action %q was already completed successfully", id)
+		// A completion is terminal, so a second one is a late duplicate (the
+		// host resending across a reconnect), not a new verdict. It is
+		// idempotent rather than an error, but it is never silent: a duplicate
+		// that DISAGREES with the recorded verdict is logged loudly.
+		if (action.Failure != "") != !ok || (!ok && action.Failure != failure) {
+			s.logf("workspace-create: host action DUPLICATE COMPLETION DISAGREES id=%s type=%s recorded_failure=%q late_ok=%t late_failure=%q — the recorded verdict stands", id, action.Type, action.Failure, ok, failure)
 		}
 		return nil
 	}
 	old := action
-	if ok {
-		action.Completed = true
-		action.Failure = ""
-	} else if action.Failure == failure {
-		// The host refused this action with the IDENTICAL failure it already
-		// reported: a deterministic refusal (e.g. "unsupported type"), not a
-		// transient one. Re-publishing it on the drain tick would loop the
-		// host through the same refusal every second — which is exactly what
-		// stalled Emacs startup on a stuck set-view action. The action is
-		// PARKED instead: it stays incomplete with its durable failure, and
-		// the next frontend reconnect snapshot re-surfaces it once, so the
-		// evidence is never hidden and a host that has since learned the type
-		// can still complete it.
-		s.logf("workspace-create: host action PARKED after repeated identical refusal id=%s type=%s failure=%q — active redelivery stops; the reconnect snapshot re-surfaces it", id, action.Type, failure)
-	} else {
-		// A failed host action deliberately remains incomplete and becomes
-		// publishable again. Its failure is durable diagnostic evidence, while
-		// clearing Published makes the active daemon drain retry it rather than
-		// waiting indefinitely for a frontend reconnect snapshot.
-		action.Failure = failure
-		action.Published = false
+	// ANY host verdict releases the action: it stops being redelivered on the
+	// drain tick AND stops appearing in the reconnect snapshot. A failure is
+	// terminal on purpose — the host has definitively refused the action, so
+	// re-handing it the same action is a poison-pill loop that fails on every
+	// connect forever. The refusal text is retained durably as evidence and is
+	// logged loudly below.
+	action.Completed = true
+	action.Failure = failure
+	if !ok {
+		s.logf("workspace-create: host action FAILED id=%s type=%s failure=%q — released from redelivery and from the reconnect snapshot", id, action.Type, failure)
 	}
 	s.doc.HostActions[id] = action
 	if err := s.saveLocked(); err != nil {
