@@ -232,6 +232,12 @@ func (m *Manager) notePromptAccepted(d *sessionController, requestID string) (ac
 		// would queue every subsequent prompt behind a turn end that can never
 		// arrive. Fail the frontend command loudly and withhold every dependent
 		// frame.
+		//
+		// THIS RESTORES THIS SIDE'S HALF ONLY, and the SSM restores its own: a
+		// failed accepted edge retracts the `submitting` row it appended before
+		// returning (MarkPromptAccepted), so the two representations of "a turn
+		// is claimed" cannot come apart on the failure path. They used to, and
+		// the surviving row wedged the workspace against every later prompt.
 		m.mu.Lock()
 		d.turnActive = controllerActiveBefore
 		m.mu.Unlock()
