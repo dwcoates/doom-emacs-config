@@ -125,7 +125,7 @@ New code added to the agent-repl module must include instrumentation via `agent-
 
 The skill installer (`.claude/install.sh` + `modules/app/agent-repl/skills-cache/manifest.sh`) symlinks each managed skill into `~/.claude/skills/`. **Every symlink MUST point into the MAIN worktree of its repo, never a transient linked worktree.**
 
-- A linked worktree (anything under `~/.config/doom-worktrees/*`, sandbox worktrees, etc.) is ephemeral — its path dangles the moment the worktree is pruned, leaving a broken skill symlink.
+- A linked worktree (anything under `~/.config/doom-worktrees/*`, agent worktrees, etc.) is ephemeral — its path dangles the moment the worktree is pruned, leaving a broken skill symlink.
 - `install.sh` resolves the main worktree via `git worktree list --porcelain` (its first `worktree` entry) and sources repo-local skills from there, regardless of which worktree the script is invoked from.
 - `install.sh` **fails hard** (`_impl_in_nonmain_worktree`) when any manifest impl path resolves inside a non-main worktree. Do not add such an entry to `manifest.sh`.
 - A skill with no home in the main worktree is NOT eligible to be managed. Re-home it (commit it into `modules/app/agent-repl/skills/` for repo-local skills, or its repo's main checkout for external skills) before adding it back.
@@ -444,9 +444,9 @@ When adding any new fullscreen entry point, call `agent-repl--enter-fullscreen` 
 
 The comment must explain *why*, not *what*. "Calls foo before bar" describes the code; "foo must run first because bar reads state foo writes via hook X" is the comment. If you can delete the comment without losing information a reader needs, it shouldn't have been written; if a reader would have to git-blame or grep to understand the line, the comment is required.
 
-## Sandbox-portable paths in `settings.json`
+## Home-relative paths in `settings.json`
 
-When adding or updating hooks/permissions that reference a home-relative path, use `~` rather than a hardcoded host home like `/Users/dodgecoates`, so the path resolves in both the host and the `DOOM_SANDBOX` container (whose `$HOME` is `/home/claude`).
+When adding or updating hooks/permissions that reference a home-relative path, use `~` rather than a hardcoded host home like `/Users/dodgecoates`, so the path resolves under whatever `$HOME` the process actually runs with.
 
 ## Cross-worktree code handoff — `git stash create`, not `push`
 
