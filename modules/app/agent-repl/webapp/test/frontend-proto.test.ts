@@ -1231,3 +1231,232 @@ describe("WorkspaceState.mergeStatus decoding", () => {
     );
   });
 });
+
+// --- the scheduled-shutdown drain lease -------------------------------------
+
+const DRAIN_HOLD = { workspace: "/w/app", sessionId: "s1", turn: { turnId: "t-1" } };
+const DRAINING = {
+  scheduleId: "sched-1",
+  scheduledAtMs: "1700000000000",
+  cause: "merge of ws-7 rebuilt the daemon",
+  stopShims: false,
+  holds: [DRAIN_HOLD],
+};
+
+/** Decode a shutdownSchedule frame carrying VIEW. */
+function schedule(view: unknown): ReturnType<typeof decodeFrontendFrame> {
+  return decode({ shutdownSchedule: view });
+}
+
+describe("decodeFrontendFrame — ShutdownScheduleView", () => {
+  it("decodes the idle arm", () => {
+    // Arrange / Act — a cancel or a completed drain broadcasts idle.
+    const frame = schedule({ idle: {} });
+    // Assert
+    if (frame.frame.case !== "shutdownSchedule") throw new Error("wrong variant");
+    expect(frame.frame.value.state.case).toBe("idle");
+  });
+
+  it("decodes the draining arm", () => {
+    const frame = schedule({ draining: DRAINING });
+    if (frame.frame.case !== "shutdownSchedule") throw new Error("wrong variant");
+    expect(frame.frame.value.state.case).toBe("draining");
+  });
+
+  it("carries the schedule id the cancel command must name", () => {
+    const frame = schedule({ draining: DRAINING });
+    if (frame.frame.case !== "shutdownSchedule") throw new Error("wrong variant");
+    if (frame.frame.value.state.case !== "draining") throw new Error("wrong arm");
+    expect(frame.frame.value.state.value.scheduleId).toBe("sched-1");
+  });
+
+  it("rejects a view that sets no arm, since idle is a real value", () => {
+    expect(() => schedule({})).toThrow(/ShutdownScheduleView sets no state/);
+  });
+
+  it("rejects a view that sets both arms", () => {
+    expect(() => schedule({ idle: {}, draining: DRAINING })).toThrow(
+      /sets multiple states: idle, draining/,
+    );
+  });
+
+  it("rejects an arm this build has never heard of", () => {
+    expect(() => schedule({ paused: {} })).toThrow(
+      /ShutdownScheduleView has unrecognized field\(s\): paused/,
+    );
+  });
+
+  it("rejects an idle arm carrying fields", () => {
+    expect(() => schedule({ idle: { scheduleId: "x" } })).toThrow(
+      /ShutdownScheduleIdle has unrecognized field\(s\): scheduleId/,
+    );
+  });
+
+  it("rejects a draining lease with no schedule id", () => {
+    expect(() => schedule({ draining: { ...DRAINING, scheduleId: "" } })).toThrow(
+      /ShutdownScheduleDraining missing required `scheduleId`/,
+    );
+  });
+
+  it("rejects a draining lease with no stamp to count elapsed from", () => {
+    expect(() => schedule({ draining: { ...DRAINING, scheduledAtMs: "0" } })).toThrow(
+      /non-positive scheduledAtMs/,
+    );
+  });
+
+  it("rejects a draining lease whose holds list is empty", () => {
+    // A drained lease is EXECUTED, never broadcast.
+    expect(() => schedule({ draining: { ...DRAINING, holds: [] } })).toThrow(
+      /carries an empty holds list/,
+    );
+  });
+
+  it("rejects a draining lease with no holds field at all", () => {
+    const { holds: _holds, ...noHolds } = DRAINING;
+    expect(() => schedule({ draining: noHolds })).toThrow(/carries an empty holds list/);
+  });
+
+  it("rejects an unrecognized field on the draining arm", () => {
+    expect(() => schedule({ draining: { ...DRAINING, deadlineMs: "1" } })).toThrow(
+      /ShutdownScheduleDraining has unrecognized field\(s\): deadlineMs/,
+    );
+  });
+});
+
+describe("decodeFrontendFrame — ShutdownHold", () => {
+  /** Decode a draining lease whose single hold is HOLD. */
+  function withHold(hold: unknown): ReturnType<typeof decodeFrontendFrame> {
+    return schedule({ draining: { ...DRAINING, holds: [hold] } });
+  }
+
+  /** The decoded single hold of a draining lease. */
+  function holdOf(frame: ReturnType<typeof decodeFrontendFrame>) {
+    if (frame.frame.case !== "shutdownSchedule") throw new Error("wrong variant");
+    if (frame.frame.value.state.case !== "draining") throw new Error("wrong arm");
+    return frame.frame.value.state.value.holds[0];
+  }
+
+  it("decodes a turn-only hold", () => {
+    expect(holdOf(withHold(DRAIN_HOLD)).turn?.turnId).toBe("t-1");
+  });
+
+  it("decodes a tasks-only hold", () => {
+    const hold = { workspace: "/w/app", sessionId: "s1", tasks: { count: 3 } };
+    expect(holdOf(withHold(hold)).tasks?.count).toBe(3);
+  });
+
+  it("decodes a hold carrying a turn AND tasks, which co-occur", () => {
+    const hold = { ...DRAIN_HOLD, tasks: { count: 2 } };
+    const decoded = holdOf(withHold(hold));
+    expect([decoded.turn?.turnId, decoded.tasks?.count]).toEqual(["t-1", 2]);
+  });
+
+  it("leaves the tasks arm absent on a turn-only hold", () => {
+    expect(holdOf(withHold(DRAIN_HOLD)).tasks).toBeUndefined();
+  });
+
+  it("rejects a hold that names neither a turn nor tasks", () => {
+    expect(() => withHold({ workspace: "/w/app", sessionId: "s1" })).toThrow(
+      /names neither a turn nor tasks/,
+    );
+  });
+
+  it("rejects a hold with no workspace to attribute it to", () => {
+    expect(() => withHold({ ...DRAIN_HOLD, workspace: "" })).toThrow(
+      /ShutdownHold missing `workspace` or `sessionId`/,
+    );
+  });
+
+  it("rejects a hold with no session id, which could be pinned on a successor", () => {
+    expect(() => withHold({ ...DRAIN_HOLD, sessionId: "" })).toThrow(
+      /ShutdownHold missing `workspace` or `sessionId`/,
+    );
+  });
+
+  it("rejects a turn hold that names no turn", () => {
+    expect(() => withHold({ ...DRAIN_HOLD, turn: {} })).toThrow(
+      /ShutdownHoldTurn missing required `turnId`/,
+    );
+  });
+
+  it("rejects a tasks hold whose count denies the tasks it claims", () => {
+    const hold = { workspace: "/w/app", sessionId: "s1", tasks: { count: 0 } };
+    expect(() => withHold(hold)).toThrow(/non-positive count/);
+  });
+
+  it("rejects an unrecognized field on a hold", () => {
+    expect(() => withHold({ ...DRAIN_HOLD, permission: {} })).toThrow(
+      /ShutdownHold has unrecognized field\(s\): permission/,
+    );
+  });
+
+  it("rejects a holds list that is not an array", () => {
+    expect(() => schedule({ draining: { ...DRAINING, holds: DRAIN_HOLD } })).toThrow(
+      /ShutdownScheduleDraining.holds must be a JSON array/,
+    );
+  });
+});
+
+describe("decodeFrontendFrame — the lease in a StateSnapshot", () => {
+  it("seeds the lease from a connect snapshot", () => {
+    const frame = decode({ snapshot: { ...SNAPSHOT, shutdownSchedule: { draining: DRAINING } } });
+    if (frame.frame.case !== "snapshot") throw new Error("wrong variant");
+    expect(frame.frame.value.shutdownSchedule?.state.case).toBe("draining");
+  });
+
+  it("leaves the lease absent when the snapshot does not carry it", () => {
+    // Absence is the absence of INFORMATION, never a claim of idle.
+    const frame = decode({ snapshot: SNAPSHOT });
+    if (frame.frame.case !== "snapshot") throw new Error("wrong variant");
+    expect(frame.frame.value.shutdownSchedule).toBeUndefined();
+  });
+
+  it("rejects a malformed lease inside an otherwise valid snapshot", () => {
+    expect(() => decode({ snapshot: { ...SNAPSHOT, shutdownSchedule: {} } })).toThrow(
+      /ShutdownScheduleView sets no state/,
+    );
+  });
+});
+
+describe("decodeFrontendFrame — QueueEntry.shutdownHold", () => {
+  /** Decode a queue whose single entry carries HOLD. */
+  function entryWith(hold: unknown): ReturnType<typeof decodeFrontendFrame> {
+    return decode({
+      queue: {
+        sessionId: "s1",
+        entries: [
+          {
+            id: "q1",
+            text: "later",
+            classification: "QUEUE_CLASSIFICATION_PENDING",
+            shutdownHold: hold,
+          },
+        ],
+      },
+    });
+  }
+
+  /** The decoded single entry of a queue frame. */
+  function entryOf(frame: ReturnType<typeof decodeFrontendFrame>) {
+    if (frame.frame.case !== "queue") throw new Error("wrong variant");
+    return frame.frame.value.entries[0];
+  }
+
+  it("decodes the schedule holding a parked prompt", () => {
+    expect(entryOf(entryWith({ scheduleId: "sched-1" })).shutdownHold?.scheduleId).toBe("sched-1");
+  });
+
+  it("leaves the hold absent on an ordinary classifier-held entry", () => {
+    expect(entryOf(decode({ queue: QUEUE })).shutdownHold).toBeUndefined();
+  });
+
+  it("rejects a hold that names no schedule", () => {
+    expect(() => entryWith({})).toThrow(/QueueEntryShutdownHold missing required `scheduleId`/);
+  });
+
+  it("rejects an unrecognized field on the hold", () => {
+    expect(() => entryWith({ scheduleId: "sched-1", cause: "x" })).toThrow(
+      /QueueEntryShutdownHold has unrecognized field\(s\): cause/,
+    );
+  });
+});
