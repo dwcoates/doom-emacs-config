@@ -136,12 +136,46 @@ type shutdownBoot struct {
 	// test drives, never a timer the test waits out.
 	recheck chan time.Time
 
+	// shimConnected reports whether a session's shim has a PARKED CONNECTION on
+	// this boot's listener — a shim that outlived the previous daemon and has
+	// redialled this one, but has not been claimed by anything yet. It is the
+	// boot sweeper's own evidence (server.BootSweeper.Connected), so a test can
+	// fire the re-check on the observed fact the pass exists to act on rather
+	// than on where it happens to sit in the test.
+	shimConnected func(sessionID string) (bool, error)
+
 	stop     func()
 	stopOnce sync.Once
 }
 
-// sweep fires this boot's boot-sweeper re-check pass.
+// sweep fires this boot's boot-sweeper re-check pass. The channel is
+// buffered(1), so the send is safe even when the sweeper is not waiting on it.
 func (b *shutdownBoot) sweepRecheck() { b.recheck <- time.Now() }
+
+// sweepRecheckWhenParked fires the re-check pass only once the session's shim
+// is OBSERVED parked on this boot's listener.
+//
+// The gate is the point. The re-check exists to claim shims that redialled
+// after the first pass ran, so firing it before the redial lands is firing it at
+// nothing — and a test that "worked" that way was relying on the redial
+// happening to beat the send, which is a race, not a sequence. Waiting on the
+// listener's own answer is the same evidence the sweeper acts on.
+func (b *shutdownBoot) sweepRecheckWhenParked(t *testing.T, sessionID string) {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		parked, err := b.shimConnected(sessionID)
+		if err != nil {
+			t.Fatalf("parked-connection probe for session %s: %v", sessionID, err)
+		}
+		if parked {
+			b.sweepRecheck()
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("session %s never parked a connection on the successor's listener, so the boot sweep's re-check would have had nothing to claim", sessionID)
+}
 
 // boot stands a complete daemon up over the world's durable state. Calling it
 // twice (with a bounce in between) is the durability scenario.
@@ -340,6 +374,16 @@ func (w *shutdownWorld) boot(t *testing.T) *shutdownBoot {
 			t.Fatalf("restore the scheduled-shutdown drain lease: %v", rerr)
 		}
 	}
+	// The prompts that lease PARKED are materialized immediately after it and
+	// before any client connects, exactly as main.go does it: their sessions
+	// have not wired yet, and until this runs the connect snapshot carries no
+	// QueueView for them at all.
+	if _, merr := controller.MaterializeShutdownHolds(); merr != nil {
+		t.Fatalf("materialize the drain-lease parked-prompt ledger: %v", merr)
+	}
+	// The listener is kept so a test can observe WHEN a surviving shim has
+	// redialled this boot, instead of inferring it from test phase order.
+	b.shimConnected = shimListener.Connected
 
 	srv := server.New(server.Config{
 		DaemonVersion: "0.1.0-e2e-drain",
