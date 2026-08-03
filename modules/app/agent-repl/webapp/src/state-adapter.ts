@@ -220,6 +220,7 @@ export interface SessionViewInput {
   configDir: string;
   /** SDK-published menu; the browser renders it but never owns selection. */
   models: ModelInfo[];
+  tokenUtilization?: import("./protocol.js").SessionTokenUtilization;
 }
 
 /**
@@ -621,6 +622,7 @@ export class StateAdapter {
           displayName: model.displayName,
           description: model.description,
         })),
+        tokenUtilization: sv.tokenUtilization,
       },
     };
   }
@@ -1397,6 +1399,7 @@ export function systemFailureFrom(f: SystemFailure): SystemFailureCard {
     sourceDetail: f.sourceDetail,
     resolvedAtMs: f.resolvedAtMs,
     uuid: f.itemUuid,
+    resumeFailure: f.sessionResume,
   };
 }
 

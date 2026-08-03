@@ -2081,14 +2081,25 @@ function SystemFailureBubble(item: SystemFailureCard): string {
   const stamp = resolved
     ? `<div class="failure-resolved">resolved ${escapeHtml(formatClockTime(item.resolvedAtMs))}</div>`
     : "";
+  const resume = item.resumeFailure === undefined ? "" : resumeFailureHtml(item.resumeFailure);
   return (
     `<div class="${cls}" data-error-type="${escapeHtml(item.errorType)}">` +
     `<div class="failure-head"><span class="failure-mark">${mark}</span>` +
     `<span class="failure-message">${escapeHtml(item.message)}</span></div>` +
     detail +
+    resume +
     stamp +
     `</div>`
   );
+}
+
+/** Render resume-continuity evidence without reducing it to a generic death. */
+function resumeFailureHtml(failure: import("./frontend-proto.js").SessionResumeFailure): string {
+  const attempt = failure.attempt === "create" ? "session creation" : "automatic restoration";
+  const cause = failure.cause.case === "transcriptUnavailable"
+    ? `transcript unavailable: ${failure.cause.searchedPaths.join(" | ") || "no readable transcript path"}`
+    : `identity mismatch: ${failure.cause.replacementClaudeSessionId || "recovery would start a fresh conversation"}`;
+  return `<div class="failure-detail">resume blocked during ${escapeHtml(attempt)}<br>${escapeHtml(cause)}<br>conversation: ${escapeHtml(failure.claudeSessionId)}</div>`;
 }
 
 /** Wall-clock HH:MM:SS for a resolution stamp. */
