@@ -204,6 +204,54 @@ func TestHeldPromptsComeBackInSubmitOrder(t *testing.T) {
 	}
 }
 
+func TestAllHeldPromptsSpansEveryWorkspace(t *testing.T) {
+	// Arrange.
+	s := openSchedules(t)
+	for _, p := range []HeldPrompt{
+		{EntryID: "q_b", ScheduleID: "sd_1", Workspace: "/ws/b", QueuedAtMs: 10},
+		{EntryID: "q_a", ScheduleID: "sd_1", Workspace: "/ws/a", QueuedAtMs: 20},
+	} {
+		if err := s.RecordHeldPrompt(p); err != nil {
+			t.Fatalf("RecordHeldPrompt: %v", err)
+		}
+	}
+
+	// Act.
+	got, err := s.AllHeldPrompts()
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("AllHeldPrompts: %v", err)
+	}
+	if len(got) != 2 || got[0].EntryID != "q_a" || got[1].EntryID != "q_b" {
+		t.Fatalf("AllHeldPrompts = %+v, want q_a (/ws/a) then q_b (/ws/b)", got)
+	}
+}
+
+func TestAllHeldPromptsOrdersWithinAWorkspaceBySubmitOrder(t *testing.T) {
+	// Arrange.
+	s := openSchedules(t)
+	for _, p := range []HeldPrompt{
+		{EntryID: "q_late", ScheduleID: "sd_1", Workspace: "/ws/a", QueuedAtMs: 20},
+		{EntryID: "q_early", ScheduleID: "sd_1", Workspace: "/ws/a", QueuedAtMs: 10},
+	} {
+		if err := s.RecordHeldPrompt(p); err != nil {
+			t.Fatalf("RecordHeldPrompt: %v", err)
+		}
+	}
+
+	// Act.
+	got, err := s.AllHeldPrompts()
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("AllHeldPrompts: %v", err)
+	}
+	if len(got) != 2 || got[0].EntryID != "q_early" || got[1].EntryID != "q_late" {
+		t.Fatalf("AllHeldPrompts order = %+v, want q_early then q_late", got)
+	}
+}
+
 func TestRecordHeldPromptRefusesAPromptWithNoEntryID(t *testing.T) {
 	// Arrange.
 	s := openSchedules(t)
