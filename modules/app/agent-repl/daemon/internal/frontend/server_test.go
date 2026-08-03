@@ -74,6 +74,17 @@ func sampleSnapshot() *frontendv1.StateSnapshot {
 	}
 }
 
+// mustPop takes the next queued payload off a client's outbox, failing the
+// test when nothing is waiting.
+func mustPop(t *testing.T, cl *client) []byte {
+	t.Helper()
+	data, ok := cl.out.pop()
+	if !ok {
+		t.Fatalf("client %d outbox is empty, want a queued frame", cl.id)
+	}
+	return data
+}
+
 func newTestServer(t *testing.T, buf int) (*Server, *mockHandler) {
 	t.Helper()
 	h := &mockHandler{}
@@ -97,7 +108,7 @@ func TestRenewSnapshotLeaseEnqueuesRevisionedCurrentState(t *testing.T) {
 		Handler: h,
 	})
 	cl := &client{
-		id: 9, send: make(chan []byte, 1), done: make(chan struct{}),
+		id: 9, out: newOutbox(1), done: make(chan struct{}),
 		scope: &Scope{Workspace: "/w", SessionID: "s1"}, kind: ClientKindGUIStream,
 	}
 	s.clients[cl] = struct{}{}
@@ -106,7 +117,7 @@ func TestRenewSnapshotLeaseEnqueuesRevisionedCurrentState(t *testing.T) {
 		t.Fatal("renewSnapshotLease = false, want live lease")
 	}
 	frame := &frontendv1.FrontendFrame{}
-	if err := protojson.Unmarshal(<-cl.send, frame); err != nil {
+	if err := protojson.Unmarshal(mustPop(t, cl), frame); err != nil {
 		t.Fatalf("decode lease snapshot: %v", err)
 	}
 	state := frame.GetSnapshot().GetWorkspaces()[0]
@@ -129,10 +140,10 @@ func TestRenewSnapshotLeaseHardDisconnectsAFullQueue(t *testing.T) {
 		Handler:     &mockHandler{},
 	})
 	cl := &client{
-		id: 10, send: make(chan []byte, 1), done: make(chan struct{}),
+		id: 10, out: newOutbox(1), done: make(chan struct{}),
 		scope: &Scope{Workspace: "w1", SessionID: "s1"}, kind: ClientKindGUIStream,
 	}
-	cl.send <- []byte("occupied")
+	cl.out.push(outFrame{data: []byte("occupied")})
 	s.clients[cl] = struct{}{}
 
 	if s.renewSnapshotLease(cl) {
@@ -162,7 +173,7 @@ func TestRenewSnapshotLeaseRetriesCaptureOlderThanDeliveredState(t *testing.T) {
 		State: provider, Handler: &mockHandler{},
 	})
 	cl := &client{
-		id: 12, send: make(chan []byte, 1), done: make(chan struct{}),
+		id: 12, out: newOutbox(1), done: make(chan struct{}),
 		scope: &Scope{Workspace: "/w", SessionID: "s1"}, kind: ClientKindGUIStream,
 	}
 	s.clients[cl] = struct{}{}
@@ -172,7 +183,7 @@ func TestRenewSnapshotLeaseRetriesCaptureOlderThanDeliveredState(t *testing.T) {
 		t.Fatal("renewSnapshotLease = false, want retry then renewal")
 	}
 	frame := &frontendv1.FrontendFrame{}
-	if err := protojson.Unmarshal(<-cl.send, frame); err != nil {
+	if err := protojson.Unmarshal(mustPop(t, cl), frame); err != nil {
 		t.Fatalf("decode renewed snapshot: %v", err)
 	}
 	if got := frame.GetSnapshot().GetWorkspaces()[0].GetAtMs(); got != 42 {
@@ -195,7 +206,7 @@ func TestRenewSnapshotLeaseHardDisconnectsMarshalFailure(t *testing.T) {
 		}}},
 		Handler: &mockHandler{},
 	})
-	cl := &client{id: 11, send: make(chan []byte, 1), done: make(chan struct{}), kind: ClientKindGUIStream}
+	cl := &client{id: 11, out: newOutbox(1), done: make(chan struct{}), kind: ClientKindGUIStream}
 	s.clients[cl] = struct{}{}
 
 	if s.renewSnapshotLease(cl) {
@@ -500,21 +511,21 @@ func TestBroadcastReachesClient(t *testing.T) {
 func TestSlowConsumerHardDisconnect(t *testing.T) {
 	// Arrange: a registered client whose writer never drains, buffer size 2.
 	s, _ := newTestServer(t, 2)
-	cl := &client{send: make(chan []byte, s.bufSize), done: make(chan struct{})}
+	cl := newClient(s.bufSize, nil, ClientKindHost)
 	s.mu.Lock()
 	s.clients[cl] = struct{}{}
 	s.mu.Unlock()
 
 	// Act 1: fill the buffer exactly — still connected.
-	s.enqueue(cl, []byte("a"))
-	s.enqueue(cl, []byte("b"))
+	s.enqueue(cl, outFrame{data: []byte("a")})
+	s.enqueue(cl, outFrame{data: []byte("b")})
 	// Assert 1.
 	if s.clientCount() != 1 {
 		t.Fatalf("client should remain connected with a full-but-not-overflowed buffer, count=%d", s.clientCount())
 	}
 
 	// Act 2: one more overflows the bounded buffer.
-	s.enqueue(cl, []byte("c"))
+	s.enqueue(cl, outFrame{data: []byte("c")})
 
 	// Assert 2: hard disconnect.
 	if s.clientCount() != 0 {
@@ -524,6 +535,135 @@ func TestSlowConsumerHardDisconnect(t *testing.T) {
 	case <-cl.done:
 	default:
 		t.Fatal("client done channel was not closed on disconnect")
+	}
+}
+
+func TestSlowConsumerDisconnectReportsTheCompactionItAttempted(t *testing.T) {
+	// Arrange: a client whose queue is full of frames nothing may replace.
+	var logs []string
+	s := New(Config{
+		Logf:        func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) },
+		LogVerbosef: testLogf(t),
+		State:       staticState{snap: sampleSnapshot()},
+		Handler:     &mockHandler{},
+		BufSize:     2,
+	})
+	cl := newClient(s.bufSize, nil, ClientKindHost)
+	s.clients[cl] = struct{}{}
+	s.enqueue(cl, outFrame{data: []byte("a")})
+	s.enqueue(cl, outFrame{data: []byte("b")})
+
+	// Act.
+	s.enqueue(cl, outFrame{data: []byte("c")})
+
+	// Assert: the disconnect line says compaction ran and freed nothing.
+	if len(logs) == 0 || !strings.Contains(logs[0], "after compacting 0 superseded frames") {
+		t.Fatalf("disconnect logs = %v, want the compaction attempt reported", logs)
+	}
+}
+
+// --- Slow-consumer compaction -----------------------------------------------
+
+func TestDeliverCompactsSupersededWorkspaceStatesForASlowConsumer(t *testing.T) {
+	// Arrange: a registered client whose writer never drains, buffer size 3,
+	// already holding one irreplaceable frame.
+	s, _ := newTestServer(t, 3)
+	cl := newClient(s.bufSize, nil, ClientKindHost)
+	s.mu.Lock()
+	s.clients[cl] = struct{}{}
+	s.mu.Unlock()
+	s.enqueue(cl, outFrame{data: []byte("irreplaceable")})
+
+	// Act: far more revisions of one workspace's state than the queue holds.
+	for _, at := range []int64{1, 2, 3, 4, 5} {
+		s.PushWorkspaceState(&frontendv1.WorkspaceState{
+			Workspace: "w1", SessionId: "s1", AtMs: at,
+			State: frontendv1.RenderState_RENDER_STATE_THINKING,
+		})
+	}
+
+	// Assert: the connection survived, the irreplaceable frame is still first,
+	// the newest revision is queued and no stale revision is.
+	if s.clientCount() != 1 {
+		t.Fatalf("client count = %d, want the slow consumer kept via compaction", s.clientCount())
+	}
+	if got := string(mustPop(t, cl)); got != "irreplaceable" {
+		t.Fatalf("first queued frame = %q, want the irreplaceable one preserved", got)
+	}
+	var revisions []int64
+	for {
+		data, ok := cl.out.pop()
+		if !ok {
+			break
+		}
+		frame := &frontendv1.FrontendFrame{}
+		if err := protojson.Unmarshal(data, frame); err != nil {
+			t.Fatalf("decode compacted state: %v", err)
+		}
+		revisions = append(revisions, frame.GetWorkspaceState().GetAtMs())
+	}
+	if len(revisions) == 0 || revisions[len(revisions)-1] != 5 {
+		t.Fatalf("queued revisions = %v, want the newest revision 5 last", revisions)
+	}
+	for _, at := range revisions {
+		if at < 4 {
+			t.Fatalf("queued revisions = %v, want every superseded revision compacted away", revisions)
+		}
+	}
+}
+
+func TestDeliverNeverCompactsConversationDeltasForASlowConsumer(t *testing.T) {
+	// Arrange: a client whose buffer holds exactly two conversation deltas.
+	s, _ := newTestServer(t, 2)
+	cl := newClient(s.bufSize, nil, ClientKindHost)
+	s.mu.Lock()
+	s.clients[cl] = struct{}{}
+	s.mu.Unlock()
+	s.PushConversationDelta(&frontendv1.ConversationDelta{Workspace: "w1", SessionId: "s1", ThroughSeq: 1})
+	s.PushConversationDelta(&frontendv1.ConversationDelta{Workspace: "w1", SessionId: "s1", ThroughSeq: 2})
+
+	// Act: a third append-semantic frame with no room and nothing to compact.
+	s.PushConversationDelta(&frontendv1.ConversationDelta{Workspace: "w1", SessionId: "s1", ThroughSeq: 3})
+
+	// Assert: the disconnect path still fires rather than dropping content.
+	if s.clientCount() != 0 {
+		t.Fatalf("client count = %d, want the hard disconnect to still fire", s.clientCount())
+	}
+	select {
+	case <-cl.done:
+	default:
+		t.Fatal("client done channel was not closed on disconnect")
+	}
+}
+
+func TestDeliverKeepsEveryFrameForAFastConsumer(t *testing.T) {
+	// Arrange: a client with headroom for every frame.
+	s, _ := newTestServer(t, 8)
+	cl := newClient(s.bufSize, nil, ClientKindHost)
+	s.mu.Lock()
+	s.clients[cl] = struct{}{}
+	s.mu.Unlock()
+
+	// Act: three revisions of the same workspace state.
+	for _, at := range []int64{1, 2, 3} {
+		s.PushWorkspaceState(&frontendv1.WorkspaceState{Workspace: "w1", SessionId: "s1", AtMs: at})
+	}
+
+	// Assert: nothing was coalesced — a consumer keeping up sees every frame.
+	var revisions []int64
+	for {
+		data, ok := cl.out.pop()
+		if !ok {
+			break
+		}
+		frame := &frontendv1.FrontendFrame{}
+		if err := protojson.Unmarshal(data, frame); err != nil {
+			t.Fatalf("decode state: %v", err)
+		}
+		revisions = append(revisions, frame.GetWorkspaceState().GetAtMs())
+	}
+	if len(revisions) != 3 || revisions[0] != 1 || revisions[1] != 2 || revisions[2] != 3 {
+		t.Fatalf("delivered revisions = %v, want every revision in order", revisions)
 	}
 }
 
