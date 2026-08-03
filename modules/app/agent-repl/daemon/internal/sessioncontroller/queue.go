@@ -56,8 +56,10 @@ type queueEntry struct {
 	// entry is waiting on the turn in front of it, and a drain-held entry is
 	// waiting on the whole daemon. The classifier NEVER runs on one of these —
 	// there is nothing to interject into and nothing to decide — so the entry
-	// stays PENDING for its whole parked life, and the frontend renders the
-	// lease bubble off this field instead of the classifier bubble.
+	// carries the HOLD stamp newParkedEntry gives it for its whole parked life
+	// (PENDING would claim a classifier is running that never will), and the
+	// frontend renders the lease bubble off this field instead of the
+	// classifier bubble.
 	//
 	// The three exits are a user force (delivered now, further delaying the
 	// bounce), a user cancel, and the schedule ending — by cancel, which sheds
@@ -313,14 +315,7 @@ type ClassifyResult struct {
 // engine underneath the manager mutex would invert the two locks.
 func (m *Manager) queueSubmitLocked(d *sessionController, requestID, text, permissionMode, leaseScheduleID string) (*queueEntry, bool) {
 	if scheduleID := leaseScheduleID; scheduleID != "" {
-		e := &queueEntry{
-			id:             newQueueEntryID(),
-			requestID:      requestID,
-			text:           text,
-			permissionMode: permissionMode,
-			queuedAtMs:     m.now(),
-			classification: frontendv1.QueueClassification_QUEUE_CLASSIFICATION_PENDING,
-		}
+		e := newParkedEntry(newQueueEntryID(), requestID, text, permissionMode, m.now())
 		m.parkForDrain(d, e, scheduleID)
 		// Appended at the BACK even against a paused queue: a head jump is the
 		// paused queue's one deliverable, and a drain-held entry is by
