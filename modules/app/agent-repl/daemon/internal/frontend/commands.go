@@ -62,6 +62,14 @@ type CommandHandler interface {
 	// Shutdown begins the daemon's graceful teardown (the UDS replacement for
 	// POST /shutdown), the same path SIGTERM triggers.
 	Shutdown(ctx context.Context, workspace, requestID string, cmd *frontendv1.ShutdownCmd) error
+	// ScheduleShutdown takes the daemon-global drain lease: no new turn may
+	// start anywhere, submitted prompts are parked rather than refused, and the
+	// daemon bounces the moment every hold clears. Synchronous, because the ack
+	// is the caller's only report that the lease is actually theirs.
+	ScheduleShutdown(ctx context.Context, workspace, requestID string, cmd *frontendv1.ScheduleShutdownCmd) error
+	// CancelScheduledShutdown releases the drain lease. A stale schedule id is
+	// a loud nack, so a cancel aimed at an old schedule can never kill a newer.
+	CancelScheduledShutdown(ctx context.Context, workspace, requestID string, cmd *frontendv1.CancelScheduledShutdownCmd) error
 	// ClientLog mirrors a frontend-side diagnostic line into the daemon's own
 	// log. It is EVIDENCE, not a control signal: the handler records it and
 	// changes no daemon state.
@@ -150,6 +158,10 @@ func DispatchWithResponse(ctx context.Context, logf dlog.Logf, h CommandHandler,
 		err = h.DeleteSession(ctx, ws, reqID, c.DeleteSession)
 	case *frontendv1.FrontendCommand_Shutdown:
 		err = h.Shutdown(ctx, ws, reqID, c.Shutdown)
+	case *frontendv1.FrontendCommand_ScheduleShutdown:
+		err = h.ScheduleShutdown(ctx, ws, reqID, c.ScheduleShutdown)
+	case *frontendv1.FrontendCommand_CancelScheduledShutdown:
+		err = h.CancelScheduledShutdown(ctx, ws, reqID, c.CancelScheduledShutdown)
 	case *frontendv1.FrontendCommand_RestartSession:
 		err = h.RestartSession(ctx, ws, reqID, c.RestartSession)
 	case *frontendv1.FrontendCommand_SetModel:
