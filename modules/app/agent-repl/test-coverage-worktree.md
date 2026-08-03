@@ -36,7 +36,7 @@
 |----------|--------|----------------------|
 | `agent-repl--switch-to-workspace` | Requires `+workspace-switch-to` and `+workspace/switch-to` (Doom). | (1) Primary succeeds, (2) primary fails and fallback succeeds, (3) both fail -- messages but does not error. |
 | `agent-repl--register-worktree-ws` | Requires `+workspace-current-name` side effect. | (1) Explicit ws arg used, (2) defaults to `+workspace-current-name`, (3) stores :worktree-p and :project-dir correctly. |
-| `agent-repl--setup-worktree-session` | Requires `make-agent-repl-instantiation`, `agent-repl--initialize-claude`. | (1) force-bare-metal=t sets :active-env to :bare-metal, (2) force-bare-metal=nil sets :active-env to :sandbox, (3) default-directory is bound to path during initialize-claude. |
+| `agent-repl--setup-worktree-session` | Requires `make-agent-repl-instantiation`, `agent-repl--initialize-claude`. | (1) force-bare-metal=t sets :active-env to :bare-metal, (2) default-directory is bound to path during initialize-claude. |
 | `agent-repl--async-git-sentinel` | Requires process objects. | (1) exit with code 0 -> callback(t, output), (2) exit with non-zero -> callback(nil, output), (3) signal -> callback invoked, (4) process buffer killed after callback. |
 | `agent-repl--async-git` | Requires `start-process`. | (1) Creates temp buffer, (2) stores callback as process property, (3) sets sentinel. |
 | `agent-repl--resolve-worktree-paths` | Requires `agent-repl--git-string` to call real git. | (1) Not in git repo -> user-error, (2) inside worktree (.git is file) -> sibling path, (3) normal repo (.git is dir) -> creates -worktrees directory, (4) nested name extracts dirname correctly. |

@@ -41,7 +41,7 @@ Reach for this skill **proactively** — do not wait to be told to "eval some el
   - Run `bash ~/.claude/skills/runtime-eval-code/run.sh resolve-ws`.
   - EXIT CODE 0: capture stdout as `WS` and continue. This value is the return-address routing key and the scoping anchor for every later step.
   - EXIT CODE 1: unknown verb / usage error. IMMEDIATELY terminate and surface the raw stderr.
-  - EXIT CODE 2: missing prerequisite. IMMEDIATELY terminate and tell the user to rebuild the sandbox image by running `.claude/install.sh`.
+  - EXIT CODE 2: missing prerequisite. IMMEDIATELY terminate and tell the user which binary the stderr names as missing (currently only `uuidgen`) so they can install it.
   - **Why this lives here**: every later dispatch needs `WS`, and computing it once up front (rather than per snippet) keeps the scoping rule in one place.
 
 1. **Interpret the user's intent** and construct exactly one elisp snippet. Keep it small and self-contained — prefer pure functions that return data over side-effecting commands. Common shapes (use as templates, adapt to the intent rather than picking blindly):
@@ -95,7 +95,7 @@ Reach for this skill **proactively** — do not wait to be told to "eval some el
    ```
    - EXIT CODE 0: continue to step 3.
    - EXIT CODE 1: usage error from the wrapper. IMMEDIATELY terminate and surface the raw stderr.
-   - EXIT CODE 2: missing prerequisite. IMMEDIATELY terminate and tell the user to rebuild the sandbox image by running `.claude/install.sh`.
+   - EXIT CODE 2: missing prerequisite. IMMEDIATELY terminate and tell the user which binary the stderr names as missing (currently only `uuidgen`) so they can install it.
 
 3. **Tell the user** what was dispatched in one short line. Name the intent (e.g. "dumped `*Messages*` for `<WS>`", "evaluated `<expr>` in `<WS>`") and mention that the result will arrive as a follow-up user message in this session.
 

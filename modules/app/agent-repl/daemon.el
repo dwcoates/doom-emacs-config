@@ -20,8 +20,8 @@
 ;; It is idempotent and cheap on the hot path (a live-process check),
 ;; so the session-open path may call it unconditionally.
 ;;
-;; Everything no-ops under `noninteractive' (batch/test) and inside the
-;; agent sandbox, mirroring `install.el's auto-install guard.
+;; Everything no-ops under `noninteractive' (batch/test), mirroring
+;; `install.el's auto-install guard.
 
 ;;; Code:
 
@@ -31,7 +31,6 @@
 (declare-function agent-repl--log-verbose "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--doctor-log "agent-repl-doctor" (fmt &rest args))
-(declare-function agent-repl--in-sandbox-p "agent-repl-install" ())
 (declare-function agent-repl--frontend-turn-active-sessions "agent-repl-frontend-client" ())
 (declare-function agent-repl-runtime-restart "services" ())
 (declare-function agent-repl--uds-connected-p "frontend-uds" ())
@@ -291,41 +290,35 @@ broken load contract."
   "Return (LEVEL . MESSAGE) issues for the chess-widget capability.
 Warns when no widget-assets dir resolves (the capability is off, so a
 chess-game bubble would render nothing) or when the resolved dir lacks
-the `chess-widget.js' the webapp imports.  No-ops in the sandbox, where
-the daemon and its assets are a host concern.  Aggregated by `doctor.el'
+the `chess-widget.js' the webapp imports.  Aggregated by `doctor.el'
 alongside the install and codex checks."
-  (if (agent-repl--in-sandbox-p)
-      (progn
-        (agent-repl--widget-doctor-log
-         "widget doctor: sandbox=t; skipping host asset checks")
-        nil)
-    (let ((dir (agent-repl--frontend-discover-widget-assets-dir)))
-      (cond
-       ((null dir)
-        (agent-repl--widget-doctor-log
-         "widget doctor: result=missing configured-dir=%S search-root=%S"
-         agent-repl-frontend-widget-assets-dir
-         agent-repl-frontend-widget-assets-search-root)
-        (list (cons 'warn
-                    (format (concat "chess-widget capability OFF: no widget-assets dir resolves"
-                                    " — set agent-repl-frontend-widget-assets-dir or put a"
-                                    " cee-web-widget/dist under %s, then"
-                                    " M-x agent-repl-frontend-daemon-restart")
-                            (or agent-repl-frontend-widget-assets-search-root
-                                "your explanation-engine checkout")))))
-       ((not (file-exists-p (expand-file-name "chess-widget.js" dir)))
-        (agent-repl--widget-doctor-log
-         "widget doctor: result=invalid dir=%s widget-exists=nil" dir)
-        (list (cons 'warn
-                    (format (concat "chess-widget dir %s lacks chess-widget.js"
-                                    " — point agent-repl-frontend-widget-assets-dir at a real"
-                                    " cee-web-widget/dist, then"
-                                    " M-x agent-repl-frontend-daemon-restart")
-                            dir))))
-       (t
-        (agent-repl--widget-doctor-log
-         "widget doctor: result=ready dir=%s widget-exists=t" dir)
-        nil)))))
+  (let ((dir (agent-repl--frontend-discover-widget-assets-dir)))
+    (cond
+     ((null dir)
+      (agent-repl--widget-doctor-log
+       "widget doctor: result=missing configured-dir=%S search-root=%S"
+       agent-repl-frontend-widget-assets-dir
+       agent-repl-frontend-widget-assets-search-root)
+      (list (cons 'warn
+                  (format (concat "chess-widget capability OFF: no widget-assets dir resolves"
+                                  " — set agent-repl-frontend-widget-assets-dir or put a"
+                                  " cee-web-widget/dist under %s, then"
+                                  " M-x agent-repl-frontend-daemon-restart")
+                          (or agent-repl-frontend-widget-assets-search-root
+                              "your explanation-engine checkout")))))
+     ((not (file-exists-p (expand-file-name "chess-widget.js" dir)))
+      (agent-repl--widget-doctor-log
+       "widget doctor: result=invalid dir=%s widget-exists=nil" dir)
+      (list (cons 'warn
+                  (format (concat "chess-widget dir %s lacks chess-widget.js"
+                                  " — point agent-repl-frontend-widget-assets-dir at a real"
+                                  " cee-web-widget/dist, then"
+                                  " M-x agent-repl-frontend-daemon-restart")
+                          dir))))
+     (t
+      (agent-repl--widget-doctor-log
+       "widget doctor: result=ready dir=%s widget-exists=t" dir)
+      nil))))
 
 ;;;; ---- State ------------------------------------------------------------
 
@@ -347,10 +340,9 @@ alongside the install and codex checks."
 
 (defun agent-repl--frontend-init-inhibited-p ()
   "Return non-nil when automatic frontend init must not run.
-No-op under batch (tests) and inside the agent sandbox, matching the
-`install.el' auto-install guard."
-  (or noninteractive
-      (agent-repl--in-sandbox-p)))
+No-op under batch (tests), matching the `install.el' auto-install
+guard."
+  noninteractive)
 
 (defun agent-repl--frontend-probe-daemon-async (on-open on-failure)
   "Resolve frontend UDS liveness without blocking the main thread.
@@ -986,7 +978,7 @@ any stale artifact and launches `claude-repld'.  FORCE skips adoption:
 an explicit restart wants a fresh process (a foreign daemon cannot be
 stopped from here — only its owner can).  Returns nil without acting
 when `agent-repl-frontend-auto-start' is nil or automatic init is
-inhibited (batch/sandbox).  The post-snapshot startup coordinator in
+inhibited (batch).  The post-snapshot startup coordinator in
 services.el owns the once-per-Emacs full-runtime bounce; this function
 remains the cheap idempotent session-open ensure.  Every probe or lifecycle
 transition returns `:pending' immediately and completes from its callback."
@@ -1102,7 +1094,7 @@ inherited-pipe EOF."
 ;;;###autoload
 (defun agent-repl-frontend-daemon-ensure ()
   "Interactively build-if-stale and start the frontend daemon.
-Bypasses `agent-repl-frontend-auto-start' and the batch/sandbox guard
+Bypasses `agent-repl-frontend-auto-start' and the batch guard
 so a user can force initialization on demand."
   (interactive)
   (let ((agent-repl-frontend-auto-start t))

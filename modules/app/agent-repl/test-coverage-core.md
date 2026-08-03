@@ -177,7 +177,6 @@
 - (none)
 ### Missing edge cases:
 - Workspace with no `:active-env` set (defaults to `:bare-metal`)
-- Workspace with `:active-env` set to `:sandbox`
 - First call creates the struct; second call returns the same struct
 - Verify returned value is a `agent-repl-instantiation` struct
 - Verify struct fields are properly initialized (nil by default)

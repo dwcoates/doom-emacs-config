@@ -1758,7 +1758,7 @@ transcript is missing."
     "of `projects/`, `session-env/`, and `tasks/`. Report every hit (transcript, env stub, task "
     "record) with its full path, or confirm its absence in each location.\n"
     "2. Determine WHY the transcript is missing: never written, cleaned up/rotated, or minted "
-    "under a different id (e.g. inside the Docker sandbox). Cross-reference the live session's "
+    "under a different id. Cross-reference the live session's "
     "transcript in the same project dir to see which id actually persisted.\n"
     "3. Summarize the most likely cause and the fastest way to recover the lost conversation, if "
     "any.")

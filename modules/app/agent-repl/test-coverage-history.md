@@ -2,7 +2,7 @@
 
 ## Constant: `agent-repl--environment-keys`
 ### Existing tests:
-- `agent-repl-test-environment-keys-value`: verifies :bare-metal and :sandbox are members
+- `agent-repl-test-environment-keys-value`: verifies `:bare-metal` is the sole member (the retired `:sandbox` env is gone)
 ### Missing edge cases:
 - None; this is a constant.
 
