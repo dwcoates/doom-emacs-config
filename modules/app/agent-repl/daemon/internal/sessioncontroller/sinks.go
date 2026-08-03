@@ -46,8 +46,16 @@ type StateApplier interface {
 	// applying lifecycle state. This is the only route for TurnClaimBridge.
 	ResolveTurnClaimBridge(workspace, claimantSessionID string, ev *corev1.Event) (replayed bool, err error)
 	// ReconcileTurnHandshake validates/persists the shim's active-turn snapshot
-	// before DaemonHello opens its standing store subscription.
-	ReconcileTurnHandshake(workspace, claimantSessionID string, ids []string, legacyActive bool) (before, after []string, err error)
+	// before DaemonHello opens its standing store subscription. closed names the
+	// PHANTOM claims it synthesized an end for — turns the returning shim says
+	// do not exist — which is what the caller releases its prompt queue on.
+	ReconcileTurnHandshake(workspace, claimantSessionID string, ids []string, legacyActive bool) (before, after, closed []string, err error)
+	// SynthesizeTurnClose ends every durable turn claim held by the session
+	// WITHOUT a TurnEnded, for a live shim observation that contradicts it. It
+	// is the turn-lifecycle half of ReconcileAlreadyComplete's status-axis
+	// reconciliation: the Ack says no foreground turn exists, so the claim the
+	// queue holds prompts behind must not outlive it.
+	SynthesizeTurnClose(workspace, claimantSessionID, cause string) (closed []string, err error)
 	// ReconcileTasks adopts an AUTHORITATIVE live-task set for the session's
 	// workspace, so live_task_count becomes exactly len(liveTaskIDs). Fed from
 	// data.BackgroundTasksChanged, the only event carrying the whole live set.

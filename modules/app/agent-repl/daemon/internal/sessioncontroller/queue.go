@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 
+	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"claude-repld/internal/errclass"
@@ -583,6 +584,16 @@ func (m *Manager) beginInterject(d *sessionController, entryID, source string) {
 			view, recs := m.publishQueueLocked(d)
 			m.mu.Unlock()
 			m.publish(d.sessionID, view, recs)
+			return
+		}
+		if outcome == corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE {
+			// THE ACK IS THE BOUNDARY. This interject is waiting for a TurnEnded
+			// before it submits, and the shim has just answered that there is no
+			// foreground turn to end — so the wait it is holding can never be
+			// satisfied by the stream. Both authorities are reconciled to the
+			// Ack and the boundary is delivered here (phantomturn.go), which is
+			// what actually submits the prompt the user typed.
+			m.settleInterjectAlreadyComplete(d, entryID)
 		}
 	}()
 }
