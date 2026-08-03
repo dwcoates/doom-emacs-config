@@ -226,6 +226,57 @@ func TestAParkedPromptIsNeverClassified(t *testing.T) {
 	}
 }
 
+func TestAParkedPromptIsStampedHoldWithNoRationale(t *testing.T) {
+	// PENDING would claim the classifier is running; it never runs on a parked
+	// entry, so the honest stamp is HOLD — deliver later, never interrupt.
+	// Arrange.
+	h := newLeaseHarness(t)
+	h.lease.hold("sd_1")
+
+	// Act.
+	if err := h.submit("hello"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	// Assert.
+	entries := h.entries()
+	if len(entries) != 1 {
+		t.Fatalf("queue = %d entries, want the prompt parked", len(entries))
+	}
+	if got := entries[0].classification; got != frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD {
+		t.Fatalf("parked entry classification = %v, want HOLD", got)
+	}
+	if got := entries[0].rationale; got != "" {
+		t.Fatalf("parked entry rationale = %q, want empty — no classifier produced one", got)
+	}
+}
+
+func TestARestoredParkedPromptIsStampedHoldWithNoRationale(t *testing.T) {
+	// Arrange.
+	h := newLeaseHarness(t)
+	h.lease.hold("sd_live")
+	if err := h.store.RecordHeldPrompt(statedb.HeldPrompt{
+		EntryID: "q_restored", ScheduleID: "sd_live", Workspace: "ws", SessionID: "s1", Text: "delayed",
+	}); err != nil {
+		t.Fatalf("RecordHeldPrompt: %v", err)
+	}
+
+	// Act.
+	h.m.restoreShutdownHolds(h.controller())
+
+	// Assert.
+	entries := h.entries()
+	if len(entries) != 1 {
+		t.Fatalf("queue = %d entries, want the parked prompt restored", len(entries))
+	}
+	if got := entries[0].classification; got != frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD {
+		t.Fatalf("restored parked entry classification = %v, want HOLD", got)
+	}
+	if got := entries[0].rationale; got != "" {
+		t.Fatalf("restored parked entry rationale = %q, want empty", got)
+	}
+}
+
 func TestAParkedPromptIsRecordedDurably(t *testing.T) {
 	// Arrange.
 	h := newLeaseHarness(t)
