@@ -14,7 +14,14 @@
  * whether anything visible changed; the caller schedules the render.
  */
 import type { CounterEntry } from "./counter-menu.js";
-import type { ErrorClass, MergeStatus, RuntimeFault, SessionCommand } from "./frontend-proto.js";
+import type {
+  ErrorClass,
+  MergeStatus,
+  RuntimeFault,
+  SessionCommand,
+  ShutdownScheduleDraining,
+  ShutdownScheduleView,
+} from "./frontend-proto.js";
 import type {
   AdapterEffect,
   ProgressInput,
@@ -534,6 +541,17 @@ export interface StoreState {
    * queue place the run was ADMITTED at.
    */
   mergeStatus: MergeStatus | null;
+  /**
+   * THE daemon-global scheduled-shutdown drain lease, or null when no bounce
+   * is pending. Not a per-workspace fact: while it is held no new turn starts
+   * anywhere, so it paints one global banner rather than a per-session chip.
+   *
+   * Null covers "the daemon broadcast `idle`" and "no daemon has said yet"
+   * alike, because neither is a drain. Only a frame that CARRIES the lease
+   * ever writes this field, so a snapshot from a daemon that does not know
+   * about the lease leaves whatever is standing alone.
+   */
+  shutdownSchedule: ShutdownScheduleDraining | null;
   /** Monotonic SSM revision of the adopted WorkspaceState. */
   workspaceStateAtMs: number;
   /** Store sequence that caused the adopted state, or zero for daemon-local. */
@@ -570,6 +588,7 @@ function initialState(): StoreState {
     activeFaults: [],
     mergeLeaseHeld: false,
     mergeStatus: null,
+    shutdownSchedule: null,
     workspaceStateAtMs: 0,
     workspaceStateCauseSeq: 0,
   };
@@ -820,6 +839,9 @@ export class ConversationStore {
         case "queue":
           changed = this.applyQueue(effect.value) || changed;
           break;
+        case "shutdown-schedule":
+          changed = this.applyShutdownSchedule(effect.value) || changed;
+          break;
         case "task-catalog":
           this.taskRoster = effect.value.entries;
           changed = true;
@@ -858,6 +880,7 @@ export class ConversationStore {
       s.turnInFlight ||
       s.mergeLeaseHeld ||
       s.mergeStatus !== null ||
+      s.shutdownSchedule !== null ||
       this.progress !== null;
     this.log(
       "warn",
@@ -876,6 +899,11 @@ export class ConversationStore {
     // after the state that claimed it stopped being current.
     s.mergeLeaseHeld = false;
     s.mergeStatus = null;
+    // THE DRAIN LEASE IS A LIVE DAEMON FACT, held by a daemon this client can
+    // no longer hear from. A banner announcing a pending bounce that may
+    // already have happened is exactly the stale claim this invalidation
+    // exists to retract; the next snapshot re-seeds it from the wire.
+    s.shutdownSchedule = null;
     s.turnInFlight = false;
     s.turnStartedAt = null;
     this.progress = null;
@@ -1260,7 +1288,34 @@ export class ConversationStore {
       classification: e.classification,
       rationale: e.rationale,
       accepted: e.accepted,
+      // Carried through as the daemon sent it: the lease hold is WHY this
+      // entry is parked, and the renderer picks the lease bubble off its
+      // presence rather than guessing from the classification.
+      shutdownHold: e.shutdownHold,
     }));
+    return true;
+  }
+
+  /**
+   * Adopt the daemon-global drain lease.
+   *
+   * `idle` CLEARS it, which is the whole reason the daemon broadcasts idle as
+   * a value rather than by omission: a cancelled or completed drain has to be
+   * able to take the banner down. A repeated frame carrying the same schedule
+   * still re-adopts the holds, since the holds list is what shrinks as the
+   * drain progresses.
+   */
+  private applyShutdownSchedule(view: ShutdownScheduleView): boolean {
+    const next = view.state.case === "draining" ? view.state.value : null;
+    const before = this.state.shutdownSchedule;
+    this.state.shutdownSchedule = next;
+    if (before === null && next === null) return false;
+    this.log(
+      "info",
+      `shutdown schedule adopted state=${view.state.case} ` +
+        `schedule=${next?.scheduleId ?? "none"} holds=${next?.holds.length ?? 0} ` +
+        `previous_schedule=${before?.scheduleId ?? "none"} session=${this.state.sessionId || "none"}`,
+    );
     return true;
   }
 

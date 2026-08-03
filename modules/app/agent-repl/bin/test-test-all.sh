@@ -71,9 +71,11 @@ EOF
 #!/usr/bin/env bash
 component="${1:?component required}"
 printf '%s\n' "$component" >>"$STUB_LOG"
-if [ "${STUB_FAIL_SUITE:-}" = "$component" ]; then
-    exit 7
-fi
+for spec in ${STUB_FAIL_SUITES:-}; do
+    if [ "${spec%%:*}" = "$component" ]; then
+        exit "${spec##*:}"
+    fi
+done
 if [ "${STUB_SLOW_SUITE:-}" = "$component" ]; then
     sleep 1.1
 fi
@@ -125,7 +127,7 @@ run_test_all() {
     set +e
     PATH="$tree/stubs:/usr/bin:/bin" \
         STUB_LOG="$STUB_LOG" \
-        STUB_FAIL_SUITE="${STUB_FAIL_SUITE:-}" \
+        STUB_FAIL_SUITES="${STUB_FAIL_SUITES:-}" \
         STUB_SLOW_SUITE="${STUB_SLOW_SUITE:-}" \
         GIT_STUB_FAIL="${GIT_STUB_FAIL:-0}" \
         GIT_STUB_BRANCH="${GIT_STUB_BRANCH:-master}" \
@@ -170,18 +172,52 @@ test_record_appends_every_suite() {
     fi
 }
 
-test_failure_stops_and_never_records() {
-    local tree="$TMP/failure"
+test_failure_continues_and_summarizes_every_failure() {
+    local tree="$TMP/failure-continues"
     make_tree "$tree"
-    STUB_FAIL_SUITE=store run_test_all "$tree" --record
+    STUB_FAIL_SUITES="store:7 wire:9" run_test_all "$tree"
+
+    if grep -q '^wire$' "$tree/stub.log" &&
+        grep -q '^proto$' "$tree/stub.log" &&
+        grep -q '^logging-density$' "$tree/stub.log" &&
+        grep -q "store failed after .*with exit code 7" "$tree/stderr" &&
+        grep -q "wire failed after .*with exit code 9" "$tree/stderr" &&
+        grep -q "failure summary, 2 of 18 suites failed" "$tree/stderr" &&
+        grep -q "failed: store exit code 7 after" "$tree/stderr" &&
+        grep -q "failed: wire exit code 9 after" "$tree/stderr"; then
+        pass "suite failures run every later suite and summarize each failure"
+    else
+        fail "suite failures run every later suite and summarize each failure"
+    fi
+}
+
+test_failure_exits_non_zero_and_never_records() {
+    local tree="$TMP/failure-exit"
+    make_tree "$tree"
+    STUB_FAIL_SUITES="store:7" run_test_all "$tree" --record
 
     if [ "$RUN_RC" -ne 0 ] &&
         [ "$(wc -l <"$tree/modules/app/agent-repl/test_time.csv" | tr -d ' ')" -eq 1 ] &&
-        grep -q "store failed" "$tree/stderr" &&
-        ! grep -q '^wire$' "$tree/stub.log"; then
-        pass "suite failure aborts before later suites and leaves history unchanged"
+        ! grep -q "all agent-repl tests and coverage suites passed" "$tree/stdout"; then
+        pass "a failed suite exits non-zero and leaves history unchanged"
     else
-        fail "suite failure aborts before later suites and leaves history unchanged"
+        fail "a failed suite exits non-zero and leaves history unchanged"
+    fi
+}
+
+test_all_pass_output_is_unchanged() {
+    local tree="$TMP/all-pass"
+    make_tree "$tree"
+    run_test_all "$tree"
+
+    if [ "$RUN_RC" -eq 0 ] &&
+        [ ! -s "$tree/stderr" ] &&
+        grep -q "timing summary, slowest suite first" "$tree/stdout" &&
+        [ "$(tail -n 1 "$tree/stdout")" = \
+            "[agent-repl-tests] all agent-repl tests and coverage suites passed" ]; then
+        pass "the all-pass path keeps its summary output and clean stderr"
+    else
+        fail "the all-pass path keeps its summary output and clean stderr"
     fi
 }
 
@@ -250,7 +286,9 @@ trap 'rm -rf "$TMP"' EXIT
 
 test_default_runs_every_suite_without_recording
 test_record_appends_every_suite
-test_failure_stops_and_never_records
+test_failure_continues_and_summarizes_every_failure
+test_failure_exits_non_zero_and_never_records
+test_all_pass_output_is_unchanged
 test_unknown_argument_fails_before_running_suites
 test_malformed_csv_fails_before_running_suites
 test_git_failure_fails_before_running_suites

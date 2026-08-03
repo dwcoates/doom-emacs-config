@@ -59,6 +59,14 @@ func scopeFrame(frame *frontendv1.FrontendFrame, sc Scope) (*frontendv1.Frontend
 		return frame, sc.matchesAgentSession(f.Queue.GetSessionId(), f.Queue.GetWorkspace())
 	case *frontendv1.FrontendFrame_Progress:
 		return frame, sc.matchesAgentSession(f.Progress.GetSessionId(), f.Progress.GetWorkspace())
+	case *frontendv1.FrontendFrame_ShutdownSchedule:
+		// DAEMON-GLOBAL, listed explicitly rather than left to the default arm.
+		// There is exactly one drain lease for the whole daemon, it carries no
+		// session or workspace key to filter on, and it blocks EVERY session —
+		// so a session-scoped webview is entitled to the same view the host
+		// gets, and filtering it out would leave that client's prompts parked
+		// with nothing on screen explaining why.
+		return frame, true
 	case *frontendv1.FrontendFrame_WorkspaceRoster:
 		// EDITOR-GLOBAL, and listed explicitly rather than left to the default
 		// arm. The roster is the whole sidebar — every workspace, not just this
@@ -110,6 +118,10 @@ func filterSnapshot(snap *frontendv1.StateSnapshot, sc Scope) *frontendv1.StateS
 		// aborting its post-adoption resync and leaving the conversation pane
 		// empty while freshness read "current".
 		Daemon: snap.GetDaemon(),
+		// The drain lease is daemon-global for the same reason the roster is,
+		// and a scoped client that lost it would see its own prompts parked
+		// with no schedule to explain them.
+		ShutdownSchedule: snap.GetShutdownSchedule(),
 		// Host-only data has no session routing key. Server strips it from every
 		// non-host client after this scope pass; preserve it here so a future
 		// host-scoped transport cannot accidentally erase durable work.

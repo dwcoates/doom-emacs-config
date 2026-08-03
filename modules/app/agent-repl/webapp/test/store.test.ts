@@ -26,6 +26,10 @@ import type {
   TypingReveal,
   WorkspaceStatusInput,
 } from "../src/state-adapter.js";
+import type {
+  ShutdownScheduleDraining,
+  ShutdownScheduleView,
+} from "../src/frontend-proto.js";
 import type { CounterEntry } from "../src/counter-menu.js";
 import type { ModelUsage, Usage } from "../src/protocol.js";
 
@@ -1839,5 +1843,131 @@ describe("resolved connectivity failures", () => {
       "client.daemon_unreachable",
       "shim.degraded",
     ]);
+  });
+});
+
+// --- the scheduled-shutdown drain lease --------------------------------------
+
+function drainingLease(over: Partial<ShutdownScheduleDraining> = {}): ShutdownScheduleDraining {
+  return {
+    scheduleId: "sched-1",
+    scheduledAtMs: 1_700_000_000_000,
+    cause: "manual restart",
+    stopShims: false,
+    holds: [{ workspace: "/w/app", sessionId: "s1", turn: { turnId: "t-1" } }],
+    ...over,
+  };
+}
+
+function leaseEffect(view: ShutdownScheduleView): AdapterEffect {
+  return { kind: "shutdown-schedule", value: view };
+}
+
+const IDLE_LEASE: ShutdownScheduleView = { state: { case: "idle", value: {} } };
+
+describe("ingest shutdown schedule", () => {
+  it("holds no lease before any frame carries one", () => {
+    // Arrange / Act / Assert — null is "no drain", not "unknown drain".
+    expect(new ConversationStore().state.shutdownSchedule).toBeNull();
+  });
+
+  it("adopts a draining lease from a broadcast edge", () => {
+    // Arrange
+    const store = new ConversationStore();
+    // Act
+    store.ingest([leaseEffect({ state: { case: "draining", value: drainingLease() } })]);
+    // Assert
+    expect(store.state.shutdownSchedule?.scheduleId).toBe("sched-1");
+  });
+
+  it("re-adopts a shrinking holds list under the same schedule", () => {
+    // Arrange — the holds list IS the drain's progress.
+    const store = new ConversationStore();
+    store.ingest([
+      leaseEffect({
+        state: {
+          case: "draining",
+          value: drainingLease({
+            holds: [
+              { workspace: "/w/a", sessionId: "s1", turn: { turnId: "t-1" } },
+              { workspace: "/w/b", sessionId: "s2", tasks: { count: 2 } },
+            ],
+          }),
+        },
+      }),
+    ]);
+    // Act
+    store.ingest([leaseEffect({ state: { case: "draining", value: drainingLease() } })]);
+    // Assert
+    expect(store.state.shutdownSchedule?.holds).toHaveLength(1);
+  });
+
+  it("CLEARS the lease on an idle broadcast", () => {
+    // Arrange — a cancel or a completed drain has to take the banner down.
+    const store = new ConversationStore();
+    store.ingest([leaseEffect({ state: { case: "draining", value: drainingLease() } })]);
+    // Act
+    store.ingest([leaseEffect(IDLE_LEASE)]);
+    // Assert
+    expect(store.state.shutdownSchedule).toBeNull();
+  });
+
+  it("reports no visible change when idle follows idle", () => {
+    // Arrange
+    const store = new ConversationStore();
+    // Act
+    const result = store.ingest([leaseEffect(IDLE_LEASE)]);
+    // Assert
+    expect(result.changed).toBe(false);
+  });
+
+  it("reports a visible change when a drain starts", () => {
+    // Arrange
+    const store = new ConversationStore();
+    // Act
+    const result = store.ingest([
+      leaseEffect({ state: { case: "draining", value: drainingLease() } }),
+    ]);
+    // Assert
+    expect(result.changed).toBe(true);
+  });
+
+  it("drops the lease when frontend state is invalidated", () => {
+    // Arrange — the lease belongs to a daemon this client can no longer hear
+    // from, so the banner must not outlive the connection that claimed it.
+    const store = new ConversationStore();
+    store.ingest([leaseEffect({ state: { case: "draining", value: drainingLease() } })]);
+    // Act
+    store.invalidateFrontendState("transport dropped");
+    // Assert
+    expect(store.state.shutdownSchedule).toBeNull();
+  });
+
+  it("counts a standing lease as state worth invalidating", () => {
+    // Arrange
+    const store = new ConversationStore();
+    store.ingest([leaseEffect({ state: { case: "draining", value: drainingLease() } })]);
+    // Act
+    const changed = store.invalidateFrontendState("transport dropped");
+    // Assert
+    expect(changed).toBe(true);
+  });
+
+  it("carries a queue entry's lease hold through to the render state", () => {
+    // Arrange
+    const store = new ConversationStore();
+    // Act
+    store.ingest([queueEffect([queueEntry({ shutdownHold: { scheduleId: "sched-1" } })])]);
+    // Assert
+    expect(store.state.queued[0].shutdownHold?.scheduleId).toBe("sched-1");
+  });
+
+  it("leaves an ordinary entry's lease hold absent", () => {
+    // Arrange
+    const store = new ConversationStore();
+    // Act
+    store.ingest([queueEffect([queueEntry()])]);
+    // Assert
+    expect(store.state.queued[0].shutdownHold).toBeUndefined();
   });
 });

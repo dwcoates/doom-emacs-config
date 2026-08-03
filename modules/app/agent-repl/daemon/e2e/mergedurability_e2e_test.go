@@ -109,7 +109,7 @@ func bootMergeDaemon(t *testing.T, stateFile string) *mergeBoot {
 	if err != nil {
 		t.Fatalf("build file diagnostic persister: %v", err)
 	}
-	noSpawn := func(string, server.CreateOpts) (func() error, error) {
+	noSpawn := func(string, server.CreateOpts) (server.ShimStopFunc, error) {
 		return nil, errNoSpawnInBounceHarness
 	}
 	seqStore := server.NewRegistrySeqStore(reg, t.Logf)
