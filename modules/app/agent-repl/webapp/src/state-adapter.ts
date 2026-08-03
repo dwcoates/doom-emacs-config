@@ -90,6 +90,7 @@ import {
   type TaskCatalog,
   type TaskEntry,
   type TypingDelta,
+  type WorkspaceRoster,
   type WorkspaceState,
 } from "./frontend-proto.js";
 
@@ -390,6 +391,13 @@ export type AdapterEffect =
   | { kind: "task-catalog"; value: TaskCatalogInput }
   | { kind: "progress"; value: ProgressInput }
   | { kind: "session-init"; value: SessionInitInput }
+  /**
+   * The sidebar rail's whole roster. NOT store state: the rail is an
+   * independent surface with its own revision lease, so the effect carries
+   * the decoded frame to the sidebar rather than folding into the store the
+   * feed and the footer render from.
+   */
+  | { kind: "workspace-roster"; value: WorkspaceRoster }
   | { kind: "ignored"; shape: string };
 
 export type AdapterLogLevel = "debug" | "info" | "warn" | "error";
@@ -511,11 +519,7 @@ export class StateAdapter {
         // Host actions are consumed by Emacs, never rendered by the GUI.
         return [this.ignore("hostAction")];
       case "workspaceRoster":
-        // Registered unsupported shape: the roster frame's contract and
-        // decoder exist, but the rail still renders from the script-injection
-        // host hook, so there is no effect to emit yet. A typed ignore keeps
-        // an arriving roster diagnosable instead of crashing the adapter.
-        return [this.ignore("workspaceRoster")];
+        return [this.rosterEffect(frame.frame.value)];
       default: {
         // Exhaustiveness guard: a new frame variant is a compile error here,
         // never a silent skip.
@@ -765,6 +769,26 @@ export class StateAdapter {
       },
       ...ignored,
     ];
+  }
+
+  /**
+   * The roster frame, forwarded whole to the rail.
+   *
+   * No projection happens here: the frame IS the rail's input, and the
+   * sidebar owns both the mapping onto its render model and the revision gate
+   * (the daemon rebroadcasts the retained roster, so a reconnect can replay
+   * one older than the page holds). The adapter's job is to make the arrival
+   * a typed effect and to say so in the log.
+   */
+  private rosterEffect(roster: WorkspaceRoster): AdapterEffect {
+    const sections = roster.view.value.sections.length;
+    this.log(
+      "debug",
+      `state-adapter: workspace roster revision=${roster.revision} view=${roster.view.case} ` +
+        `sections=${sections} recently_merged=${roster.recentlyMerged.rows.length} ` +
+        `current_dir=${roster.currentDir || "none"} nav_dir=${roster.navDir || "none"}`,
+    );
+    return { kind: "workspace-roster", value: roster };
   }
 
   // --- explicit ignore path -------------------------------------------------

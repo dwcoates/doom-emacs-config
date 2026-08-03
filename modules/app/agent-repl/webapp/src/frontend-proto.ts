@@ -1002,12 +1002,6 @@ export const UNSUPPORTED_SHAPES: ReadonlyMap<string, string> = new Map<string, s
     "host-only workspace materialization directive; GUI transports never receive it",
   ],
   ["hostAction", "host-only UI inbox action; GUI transports never receive it"],
-  [
-    "workspaceRoster",
-    "the sidebar's roster model (agentshim.frontend.v1.WorkspaceRoster); decoded " +
-      "and validated here for wire parity, but the rail still renders from the " +
-      "script-injection host hook — the frame-driven rendering is not wired yet",
-  ],
 ]);
 
 /** Whether a frame variant is mapped to a webapp visual (not in the registry). */
