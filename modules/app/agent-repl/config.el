@@ -204,6 +204,12 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; set it is allowed to classify for itself. Loaded BEFORE the transport,
 ;; which surfaces a refused command's classified ack through it.
 (agent-repl--load-module "failure")
+;; Retractable daemon-connection notices: the ONE place Emacs says it cannot
+;; reach the daemon, and the ONE place it takes that back once the reconnect's
+;; snapshot lands.  Loaded beside failure.el because it is the same vocabulary
+;; seen from the other end — failure.el classifies, this decides what survives
+;; the condition ending.
+(agent-repl--load-module "connection-notice")
 ;; The agent-shim frontend UDS transport + state application (design §10,
 ;; G10).  Loaded right after frontend-client: `frontend-uds' owns the
 ;; connection/framing/dispatch, `frontend-state' registers the state-bearing
