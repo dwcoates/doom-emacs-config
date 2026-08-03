@@ -7174,7 +7174,15 @@ type RosterRepoSection struct {
 	// than the author omitting them, and unfolding needs no republish.
 	Folded bool `protobuf:"varint,2,opt,name=folded,proto3" json:"folded,omitempty"`
 	// The section's workspaces, in render order.
-	Rows          []*RosterRow `protobuf:"bytes,3,rep,name=rows,proto3" json:"rows,omitempty"`
+	Rows []*RosterRow `protobuf:"bytes,3,rep,name=rows,proto3" json:"rows,omitempty"`
+	// The repository's human display label, as Emacs derives it from repo_key
+	// (agent-repl--repo-label: the project directory's basename, or the
+	// unknown-repo sentinel spelled out). DISPLAY ONLY, and deliberately not the
+	// identity — repo_key remains the fold key and the join key, so renaming
+	// what a section is CALLED can never orphan the fold a user set on it.
+	// Carried rather than derived client-side so the label is computed in
+	// exactly one place; empty when the author has no label to offer.
+	Label         string `protobuf:"bytes,4,opt,name=label,proto3" json:"label,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -7228,6 +7236,13 @@ func (x *RosterRepoSection) GetRows() []*RosterRow {
 		return x.Rows
 	}
 	return nil
+}
+
+func (x *RosterRepoSection) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
 }
 
 // One task's workspaces.
@@ -7307,12 +7322,23 @@ func (x *RosterTaskSection) GetRows() []*RosterRow {
 }
 
 // A bare list of rows: the shared shell for a section that has no grouping key
-// of its own. Used by recently_merged, which has neither a fold key (nothing
-// to remember it against) nor a done axis (it is definitionally settled).
+// of its own. Used by recently_merged, which has no done axis (it is
+// definitionally settled) but does fold and does carry a display name.
 type RosterSection struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The section's workspaces, in render order.
-	Rows          []*RosterRow `protobuf:"bytes,1,rep,name=rows,proto3" json:"rows,omitempty"`
+	Rows []*RosterRow `protobuf:"bytes,1,rep,name=rows,proto3" json:"rows,omitempty"`
+	// Whether the section renders collapsed, exactly as a repo section folds:
+	// the rows stay in the model and the client hides them. The section has no
+	// key field of its own because its fold identity is fixed and singular (the
+	// roster carries exactly one such section), so the author resolves the fold
+	// and reports it here rather than every client inventing the same key.
+	Folded bool `protobuf:"varint,2,opt,name=folded,proto3" json:"folded,omitempty"`
+	// The section's human display label ("Recently Merged"). DISPLAY ONLY.
+	// Carried rather than hardcoded per client so the heading has one author,
+	// the same one that decides which rows belong under it; empty when the
+	// author has no label to offer.
+	Label         string `protobuf:"bytes,3,opt,name=label,proto3" json:"label,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -7352,6 +7378,20 @@ func (x *RosterSection) GetRows() []*RosterRow {
 		return x.Rows
 	}
 	return nil
+}
+
+func (x *RosterSection) GetFolded() bool {
+	if x != nil {
+		return x.Folded
+	}
+	return false
+}
+
+func (x *RosterSection) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
 }
 
 // One workspace in the sidebar.
@@ -7419,7 +7459,38 @@ type RosterRow struct {
 	// resolves it once, so no client can compute it differently.
 	Current bool `protobuf:"varint,4,opt,name=current,proto3" json:"current,omitempty"`
 	// Nested workspaces (a spawned family under its parent), in render order.
-	Children      []*RosterRow `protobuf:"bytes,5,rep,name=children,proto3" json:"children,omitempty"`
+	Children []*RosterRow `protobuf:"bytes,5,rep,name=children,proto3" json:"children,omitempty"`
+	// When the user last viewed this workspace, in epoch MILLISECONDS. Drives
+	// the row's when-column, the relative-age text the rail renders on the
+	// right ("3m", "2h"). ZERO MEANS NEVER VIEWED, and renders as no age at all
+	// rather than as the epoch — a workspace nobody has opened has no age to
+	// report, and 0 is that assertion rather than a missing value.
+	LastViewedAtMs int64 `protobuf:"varint,29,opt,name=last_viewed_at_ms,json=lastViewedAtMs,proto3" json:"last_viewed_at_ms,omitempty"`
+	// When this workspace's merge settled, in epoch MILLISECONDS. ZERO MEANS
+	// NOT MERGED. Takes precedence over last_viewed_at_ms in the when-column
+	// for a merged row: once a workspace is done, how long ago it merged is the
+	// fact worth showing, not when someone last looked at it.
+	MergedAtMs int64 `protobuf:"varint,30,opt,name=merged_at_ms,json=mergedAtMs,proto3" json:"merged_at_ms,omitempty"`
+	// The workspace's own git branch, for the expanded detail panel. Display
+	// only — the join key is dir, and two workspaces may sit on branches with
+	// the same name in different repos. EMPTY MEANS UNKNOWN: the row renders
+	// without the branch line rather than with a blank one.
+	Branch string `protobuf:"bytes,31,opt,name=branch,proto3" json:"branch,omitempty"`
+	// The branch this workspace was cut from and merges back into, for the
+	// detail panel. Display only, same emptiness rule as branch.
+	ParentBranch string `protobuf:"bytes,32,opt,name=parent_branch,json=parentBranch,proto3" json:"parent_branch,omitempty"`
+	// A short human summary of what the workspace is doing, shown as the detail
+	// panel's prose line. Emacs sources it from the workspace's last prompt
+	// summary. EMPTY MEANS NONE — no summary yet, or none worth showing — and
+	// the line is omitted rather than rendered blank.
+	Summary string `protobuf:"bytes,33,opt,name=summary,proto3" json:"summary,omitempty"`
+	// Whether the workspace is closed: it still exists and is still switchable,
+	// but its agent-repl panes are dismissed. Renders RECEDED (greyed), the
+	// same visual treatment a merged row gets, because both are workspaces the
+	// user has finished with for now. Deliberately NOT a status arm: closed is
+	// orthogonal to the lifecycle — a closed workspace still has one — so it
+	// rides alongside the oneof rather than displacing an arm inside it.
+	Closed        bool `protobuf:"varint,34,opt,name=closed,proto3" json:"closed,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -7703,6 +7774,48 @@ func (x *RosterRow) GetChildren() []*RosterRow {
 		return x.Children
 	}
 	return nil
+}
+
+func (x *RosterRow) GetLastViewedAtMs() int64 {
+	if x != nil {
+		return x.LastViewedAtMs
+	}
+	return 0
+}
+
+func (x *RosterRow) GetMergedAtMs() int64 {
+	if x != nil {
+		return x.MergedAtMs
+	}
+	return 0
+}
+
+func (x *RosterRow) GetBranch() string {
+	if x != nil {
+		return x.Branch
+	}
+	return ""
+}
+
+func (x *RosterRow) GetParentBranch() string {
+	if x != nil {
+		return x.ParentBranch
+	}
+	return ""
+}
+
+func (x *RosterRow) GetSummary() string {
+	if x != nil {
+		return x.Summary
+	}
+	return ""
+}
+
+func (x *RosterRow) GetClosed() bool {
+	if x != nil {
+		return x.Closed
+	}
+	return false
 }
 
 type isRosterRow_Status interface {
@@ -9239,18 +9352,21 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\x14RosterRepositoryView\x12D\n" +
 	"\bsections\x18\x01 \x03(\v2(.agentshim.frontend.v1.RosterRepoSectionR\bsections\"V\n" +
 	"\x0eRosterTaskView\x12D\n" +
-	"\bsections\x18\x01 \x03(\v2(.agentshim.frontend.v1.RosterTaskSectionR\bsections\"|\n" +
+	"\bsections\x18\x01 \x03(\v2(.agentshim.frontend.v1.RosterTaskSectionR\bsections\"\x92\x01\n" +
 	"\x11RosterRepoSection\x12\x19\n" +
 	"\brepo_key\x18\x01 \x01(\tR\arepoKey\x12\x16\n" +
 	"\x06folded\x18\x02 \x01(\bR\x06folded\x124\n" +
-	"\x04rows\x18\x03 \x03(\v2 .agentshim.frontend.v1.RosterRowR\x04rows\"\x8c\x01\n" +
+	"\x04rows\x18\x03 \x03(\v2 .agentshim.frontend.v1.RosterRowR\x04rows\x12\x14\n" +
+	"\x05label\x18\x04 \x01(\tR\x05label\"\x8c\x01\n" +
 	"\x11RosterTaskSection\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12\x12\n" +
 	"\x04done\x18\x03 \x01(\bR\x04done\x124\n" +
-	"\x04rows\x18\x04 \x03(\v2 .agentshim.frontend.v1.RosterRowR\x04rows\"E\n" +
+	"\x04rows\x18\x04 \x03(\v2 .agentshim.frontend.v1.RosterRowR\x04rows\"s\n" +
 	"\rRosterSection\x124\n" +
-	"\x04rows\x18\x01 \x03(\v2 .agentshim.frontend.v1.RosterRowR\x04rows\"\x94\x10\n" +
+	"\x04rows\x18\x01 \x03(\v2 .agentshim.frontend.v1.RosterRowR\x04rows\x12\x16\n" +
+	"\x06folded\x18\x02 \x01(\bR\x06folded\x12\x14\n" +
+	"\x05label\x18\x03 \x01(\tR\x05label\"\xd0\x11\n" +
 	"\tRosterRow\x12\x10\n" +
 	"\x03dir\x18\x01 \x01(\tR\x03dir\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12R\n" +
@@ -9289,7 +9405,14 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\x04none\x18\x1b \x01(\v2*.agentshim.frontend.v1.RosterRowStatusNoneH\x00R\x04none\x12L\n" +
 	"\binactive\x18\x1c \x01(\v2..agentshim.frontend.v1.RosterRowStatusInactiveH\x00R\binactive\x12\x18\n" +
 	"\acurrent\x18\x04 \x01(\bR\acurrent\x12<\n" +
-	"\bchildren\x18\x05 \x03(\v2 .agentshim.frontend.v1.RosterRowR\bchildrenB\b\n" +
+	"\bchildren\x18\x05 \x03(\v2 .agentshim.frontend.v1.RosterRowR\bchildren\x12)\n" +
+	"\x11last_viewed_at_ms\x18\x1d \x01(\x03R\x0elastViewedAtMs\x12 \n" +
+	"\fmerged_at_ms\x18\x1e \x01(\x03R\n" +
+	"mergedAtMs\x12\x16\n" +
+	"\x06branch\x18\x1f \x01(\tR\x06branch\x12#\n" +
+	"\rparent_branch\x18  \x01(\tR\fparentBranch\x12\x18\n" +
+	"\asummary\x18! \x01(\tR\asummary\x12\x16\n" +
+	"\x06closed\x18\" \x01(\bR\x06closedB\b\n" +
 	"\x06status\"\x1b\n" +
 	"\x19RosterRowStatusSubmitting\"\x19\n" +
 	"\x17RosterRowStatusThinking\"\x19\n" +
