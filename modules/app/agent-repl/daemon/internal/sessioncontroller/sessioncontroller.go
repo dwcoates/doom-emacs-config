@@ -400,6 +400,12 @@ type sessionController struct {
 	// this daemon saw it. It is the classifier's "what is already running"
 	// context, and is empty when the turn predates this daemon.
 	runningText string
+	// phantomTurnClosed names the durable turn claims the shim handshake just
+	// contradicted and the SSM synthesized an end for (phantomturn.go). It is
+	// carried from the handshake to ShimReady, where the queue is released on
+	// that synthesized boundary — the boundary no process is left to send.
+	// Empty whenever nothing is owed.
+	phantomTurnClosed []string
 
 	// turnWaiters are the waits for a SPECIFIC turn to end (mergeresolve.go),
 	// guarded by the manager mutex. Only merge.Coordinator's conflict-resolution
@@ -1030,6 +1036,11 @@ func (m *Manager) noteUserInterrupt(d *sessionController, outcome corev1.Interru
 		wasActive := d.turnActive
 		d.turnActive = false
 		m.mu.Unlock()
+		// The DURABLE half of the same statement. The status axis above is what
+		// the footer renders; the turn claim is what the queue holds prompts
+		// behind, and a claim left standing against an Ack that says no turn
+		// exists queues every later prompt behind a boundary that is not coming.
+		m.closeTurnClaimsOnAlreadyComplete(d)
 		m.logf("session-controller: already-complete reconciliation CONFIRMED ws=%s session=%s outcome=%s ssm_closed=%v session_controller_turn_active_before=%v session_controller_turn_active_after=false",
 			d.workspace, d.sessionID, outcome, closed, wasActive)
 	}
@@ -1979,7 +1990,7 @@ func (m *Manager) onHandshakeForGeneration(workspace, sessionID, generationID st
 			workspace, sessionID, generationID, controllerSessionID(d), controllerGenerationID(d), hello.GetActiveTurnIds(), err)
 		return err
 	}
-	active, err := d.consumer.reconcileTurnHandshake(hello)
+	active, phantomClosed, err := d.consumer.reconcileTurnHandshake(hello)
 	if err != nil {
 		reason := fmt.Sprintf("turn handshake correlation failed: %v", err)
 		m.logf("session-controller: turn handshake decision=reject_correlation ws=%q session=%q generation=%q active_turn_ids=%v error=%v",
@@ -1988,6 +1999,10 @@ func (m *Manager) onHandshakeForGeneration(workspace, sessionID, generationID st
 		return fmt.Errorf("%s", reason)
 	}
 	m.reconcileTurnSnapshot(d, active, hello)
+	// A claim the returning shim contradicted has just been ended durably, so
+	// the queue is owed the boundary that ending stands for. It is released at
+	// ShimReady rather than here — see notePhantomTurnClosed.
+	m.notePhantomTurnClosed(d, phantomClosed)
 	// The pid rides EVERY hello, so a reconnect refreshes it and a bounce onto
 	// a fresh process never carries the retired one's number forward.
 	m.noteShimPID(sessionID, hello.GetPid())
@@ -2163,6 +2178,11 @@ func (m *Manager) onConnectedForGeneration(workspace, sessionID, generationID st
 	// again here — the link being back IS the event it was waiting for, which is
 	// why nothing sleeps or polls for it.
 	m.runPendingResync(workspace, sessionID)
+	// The queue owed a boundary by this connection's handshake — a turn cut by
+	// a restart, whose claim the handshake ended durably — is released now that
+	// the session is genuinely driveable (phantomturn.go). No-op when nothing
+	// is owed, which is every ordinary reattach.
+	m.releasePhantomTurn(d)
 }
 
 func (m *Manager) onConnected(workspace, sessionID string, hello *corev1.ShimHello) {

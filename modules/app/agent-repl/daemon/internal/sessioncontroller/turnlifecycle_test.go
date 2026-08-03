@@ -133,7 +133,7 @@ func TestTurnLifecycleHandshakeRestoresCorrelationForAnUnseenEnd(t *testing.T) {
 		logf:   func(string, ...any) {},
 		onTurn: func(active bool) { snapshots = append(snapshots, active) },
 	}
-	active, err := consumer.reconcileTurnHandshake(&corev1.ShimHello{
+	active, closed, err := consumer.reconcileTurnHandshake(&corev1.ShimHello{
 		ActiveTurnIds: []string{"turn-live"}, TurnInFlight: true,
 	})
 	if err != nil {
@@ -141,6 +141,9 @@ func TestTurnLifecycleHandshakeRestoresCorrelationForAnUnseenEnd(t *testing.T) {
 	}
 	if !active {
 		t.Fatal("handshake resolved idle, want active")
+	}
+	if len(closed) != 0 {
+		t.Fatalf("handshake closed turns %v, want none — the shim confirmed the very claim the ledger holds", closed)
 	}
 	if len(snapshots) != 0 {
 		t.Fatalf("handshake emitted boundary callbacks = %v, want none", snapshots)
@@ -209,7 +212,7 @@ func TestTurnLifecycleReplayDoesNotPaintIdleWhileQueuedTurnRemains(t *testing.T)
 
 func TestContradictoryTurnHandshakeAbortsBeforeHandshakeSideEffects(t *testing.T) {
 	h := newQueueHarness(t, nil)
-	if _, _, err := h.applier.ReconcileTurnHandshake(
+	if _, _, _, err := h.applier.ReconcileTurnHandshake(
 		"ws", "s1", []string{"turn-current"}, true,
 	); err != nil {
 		t.Fatalf("seed durable turn: %v", err)

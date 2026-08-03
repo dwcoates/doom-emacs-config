@@ -163,6 +163,11 @@ type fakeApplier struct {
 	alreadyCompletes   []alreadyCompleteCall
 	alreadyCompleteDid bool
 	alreadyCompleteErr error
+	// synthesizedCauses records one entry per SynthesizeTurnClose call — the
+	// terminal causes the daemon ended a turn claim with when no TurnEnded
+	// could ever arrive for it.
+	synthesizedCauses []string
+	synthesizeErr     error
 	// interruptMarks records one workspace per MarkTurnInterrupted call — the
 	// user-commanded stops that will paint their turn's end `interrupted`.
 	interruptMarks   []string
@@ -372,6 +377,14 @@ func (f *fakeApplier) promptDeliverCalls() []promptAcceptCall {
 	f.reconcMutex.Lock()
 	defer f.reconcMutex.Unlock()
 	return append([]promptAcceptCall(nil), f.promptDelivers...)
+}
+
+// alreadyCompleteCalls returns the recorded ALREADY_COMPLETE status
+// reconciliations, taken under the lock.
+func (f *fakeApplier) alreadyCompleteCalls() []alreadyCompleteCall {
+	f.reconcMutex.Lock()
+	defer f.reconcMutex.Unlock()
+	return append([]alreadyCompleteCall(nil), f.alreadyCompletes...)
 }
 
 // promptRejectCalls returns the recorded retractions, taken under the lock.
@@ -658,7 +671,7 @@ func (a *fakeApplier) ResolveTurnClaimBridge(_ string, _ string, ev *corev1.Even
 	return false, nil
 }
 
-func (a *fakeApplier) ReconcileTurnHandshake(_ string, _ string, ids []string, legacyActive bool) (before, after []string, err error) {
+func (a *fakeApplier) ReconcileTurnHandshake(_ string, _ string, ids []string, legacyActive bool) (before, after, closed []string, err error) {
 	a.reconcMutex.Lock()
 	defer a.reconcMutex.Unlock()
 	before = append([]string(nil), a.turns...)
@@ -666,11 +679,38 @@ func (a *fakeApplier) ReconcileTurnHandshake(_ string, _ string, ids []string, l
 	case len(ids) > 0 && len(a.turns) == 0:
 		a.turns = append([]string(nil), ids...)
 	case len(ids) > 0 && !reflect.DeepEqual(ids, a.turns):
-		return before, before, fmt.Errorf("handshake ids %v disagree with durable ids %v", ids, a.turns)
+		return before, before, nil, fmt.Errorf("handshake ids %v disagree with durable ids %v", ids, a.turns)
 	case legacyActive && len(a.turns) == 0:
 		a.turns = []string{""}
+	case len(ids) == 0 && !legacyActive && len(a.turns) > 0:
+		// The PHANTOM claim: the shim says no turn, the ledger says otherwise,
+		// so the ledger's claims are ended and named to the caller.
+		closed = append([]string(nil), a.turns...)
+		a.turns = nil
 	}
-	return before, append([]string(nil), a.turns...), nil
+	return before, append([]string(nil), a.turns...), closed, nil
+}
+
+// SynthesizeTurnClose ends every active claim, exactly as the SSM's does, and
+// records the causes it was asked for so a test can assert the terminal reason.
+func (a *fakeApplier) SynthesizeTurnClose(_ string, _ string, cause string) (closed []string, err error) {
+	a.reconcMutex.Lock()
+	defer a.reconcMutex.Unlock()
+	a.synthesizedCauses = append(a.synthesizedCauses, cause)
+	if a.synthesizeErr != nil {
+		return nil, a.synthesizeErr
+	}
+	closed = append([]string(nil), a.turns...)
+	a.turns = nil
+	return closed, nil
+}
+
+// synthesizedTurnCloses returns a copy of the causes SynthesizeTurnClose was
+// called with.
+func (a *fakeApplier) synthesizedTurnCloses() []string {
+	a.reconcMutex.Lock()
+	defer a.reconcMutex.Unlock()
+	return append([]string(nil), a.synthesizedCauses...)
 }
 
 func (a *fakeApplier) ReconcileTasks(sessionID string, liveTaskIDs []string) error {

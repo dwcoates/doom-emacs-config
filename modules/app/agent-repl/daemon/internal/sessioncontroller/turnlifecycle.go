@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
+
+	"claude-repld/internal/ssm"
 )
 
 // turnResolution is the one decision every daemon consumer makes before a
@@ -37,18 +39,26 @@ func newTurnLifecycle(store StateApplier, workspace, claimantSessionID string) t
 // reconcileTurnHandshake runs at ShimHello, before DaemonHello opens the store
 // subscription. A contradictory snapshot therefore fails the bring-up gate
 // before any replay or live event can mutate state.
-func (c *consumer) reconcileTurnHandshake(hello *corev1.ShimHello) (bool, error) {
-	before, after, err := c.ssm.ReconcileTurnHandshake(
+// closed names the phantom claims the reconciliation ended, and it is what the
+// caller releases its queue on: a prompt held behind one of them is waiting for
+// a boundary the process that owed it no longer exists to send.
+func (c *consumer) reconcileTurnHandshake(hello *corev1.ShimHello) (active bool, closed []string, err error) {
+	before, after, closed, err := c.ssm.ReconcileTurnHandshake(
 		c.workspace, c.sessionID, hello.GetActiveTurnIds(), hello.GetTurnInFlight(),
 	)
-	c.logf("session-controller: turn handshake plane=stream kind=shim_hello session=%s seq=none turn_ids=%s turn_in_flight=%v durable_before=%s durable_after=%s decision=%s notify=%v error=%v",
+	c.logf("session-controller: turn handshake plane=stream kind=shim_hello session=%s seq=none turn_ids=%s turn_in_flight=%v durable_before=%s durable_after=%s phantom_closed=%s decision=%s notify=%v error=%v",
 		c.sessionID, formatTurnIDs(hello.GetActiveTurnIds()), hello.GetTurnInFlight(),
-		formatTurnIDs(before), formatTurnIDs(after), handshakeDecision(before, after, err),
-		true, err)
+		formatTurnIDs(before), formatTurnIDs(after), formatTurnIDs(closed),
+		handshakeDecision(before, after, err), true, err)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
-	return len(after) > 0, nil
+	if len(closed) > 0 {
+		c.logf("session-controller: turn INTERRUPTED BY RESTART ws=%q session=%s closed=%s cause=%s — the shim came back reporting no turn in flight over a workspace still claiming %s; those turns were CUT when the process behind them went away and are reported interrupted rather than left thinking",
+			c.workspace, c.sessionID, formatTurnIDs(closed), ssm.TurnCloseRestartInterrupted,
+			formatTurnIDs(before))
+	}
+	return len(after) > 0, closed, nil
 }
 
 // resolve decides whether ev may mutate live turn state.
