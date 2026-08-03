@@ -79,6 +79,27 @@ const WORKSPACE_AVAILABLE = {
   worktreePath: "/worktrees/new-workspace",
   sessionId: "session-1",
 };
+
+const TOKEN_UTILIZATION = {
+  apiMessageId: "msg-1", model: "claude-opus", mainAgent: {},
+  usage: { inputTokens: "10", outputTokens: "20", cacheReadInputTokens: "30", cacheCreationInputTokens: "40", cacheCreation: { ephemeral5mInputTokens: "4", ephemeral1hInputTokens: "36" }, serviceTier: "priority", speed: "fast", inferenceGeo: "us", cacheRates: { totalPromptInputTokens: "80", cacheHitRate: 0.375, cacheWriteRate: 0.5, uncachedInputRate: 0.125 } },
+  responseTiming: { timeToFirstTokenMs: "50", outputGenerationDurationMs: "100" },
+};
+
+describe("ConversationItem token utilization", () => {
+  it("strictly decodes response timing and complete cache accounting", () => {
+    const frame = decode({ conversationDelta: { ...CONV_DELTA, items: [{ ...CONV_DELTA.items[0], tokenUtilization: [TOKEN_UTILIZATION] }] } });
+    if (frame.frame.case !== "conversationDelta") throw new Error("wrong frame");
+    expect(frame.frame.value.items[0].tokenUtilization[0]).toMatchObject({ model: "claude-opus", usage: { cacheCreation5m: 4, cacheCreation1h: 36, cacheHitRate: 0.375 }, responseTiming: { timeToFirstTokenMs: 50, outputGenerationDurationMs: 100 } });
+  });
+
+  it("rejects malformed response actor and unknown usage fields", () => {
+    const item = { ...CONV_DELTA.items[0], tokenUtilization: [{ ...TOKEN_UTILIZATION, subagent: {} }] };
+    expect(() => decode({ conversationDelta: { ...CONV_DELTA, items: [item] } })).toThrow(/exactly one actor/);
+    const usage = { ...TOKEN_UTILIZATION.usage, unrecognized: 1 };
+    expect(() => decode({ conversationDelta: { ...CONV_DELTA, items: [{ ...CONV_DELTA.items[0], tokenUtilization: [{ ...TOKEN_UTILIZATION, usage }] }] } })).toThrow(/unrecognized field/);
+  });
+});
 const HOST_ACTION = { actionId: "action-1", setRepositoryFold: { repoKey: "repo", folded: false } };
 
 describe("decodeFrontendFrame — every frame variant decodes", () => {
