@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -48,6 +49,7 @@ import (
 type ShutdownScheduler struct {
 	store     ShutdownScheduleStore
 	holds     DrainHoldSource
+	evidence  DrainEvidenceSource
 	tasks     sessioncontroller.LiveTaskCounter
 	broadcast func(*frontendv1.ShutdownScheduleView)
 	shutdown  func(stopShims bool)
@@ -62,6 +64,20 @@ type ShutdownScheduler struct {
 	// notification that changed nothing does not put a redundant frame on every
 	// client's queue.
 	lastHolds []sessioncontroller.DrainHold
+	// unresolved is the pessimistic set a RESTORED lease seeds itself with: the
+	// sessions whose real hold state this daemon has not observed yet, keyed by
+	// session id.
+	//
+	// IT IS A THIRD STATE, and that is the whole point. Before it existed a
+	// session contributed either a hold or nothing, and "nothing" was produced
+	// both by a session that genuinely holds nothing and by a session nobody has
+	// asked — which at boot is EVERY session. An unresolved entry counts as a
+	// hold, so the two can no longer be confused into a bounce.
+	//
+	// It empties only by AFFIRMATIVE RESOLUTION (resolveUnresolved), never by
+	// elapsed time: there is no timer here for the same reason there is no drain
+	// timeout anywhere in this engine.
+	unresolved map[string]RegisteredSession
 }
 
 // shutdownSchedule is one held lease.
@@ -101,6 +117,10 @@ type DrainHoldSource interface {
 	// ReleaseShutdownHolds sheds the hold from every prompt one schedule parked,
 	// returning them to ordinary delivery flow.
 	ReleaseShutdownHolds(scheduleID string)
+	// WiredSessions names every session the fleet currently holds a controller
+	// for. It is what lets "absent from DrainHolds" be read as "holds nothing"
+	// rather than "has not wired yet".
+	WiredSessions() []string
 }
 
 // ShutdownSchedulerConfig collects the engine's dependencies. Every field is
@@ -108,8 +128,12 @@ type DrainHoldSource interface {
 // schedule time, and — for the shutdown func especially — rather than a lease
 // that drains perfectly and then never bounces anything.
 type ShutdownSchedulerConfig struct {
-	Store     ShutdownScheduleStore
-	Holds     DrainHoldSource
+	Store ShutdownScheduleStore
+	Holds DrainHoldSource
+	// Evidence is the durable evidence a RESTORED lease seeds its unresolved set
+	// from. Required: without it Restore would judge quiescence against a fleet
+	// that has not been wired yet and bounce the daemon over live turns.
+	Evidence  DrainEvidenceSource
 	LiveTasks sessioncontroller.LiveTaskCounter
 	Broadcast func(*frontendv1.ShutdownScheduleView)
 	Shutdown  func(stopShims bool)
@@ -134,6 +158,8 @@ func NewShutdownScheduler(cfg ShutdownSchedulerConfig) (*ShutdownScheduler, erro
 		return nil, fmt.Errorf("server: the shutdown scheduler needs a durable store; without one a crash mid-drain would erase a lease every client is waiting on")
 	case cfg.Holds == nil:
 		return nil, fmt.Errorf("server: the shutdown scheduler needs a drain-hold source")
+	case cfg.Evidence == nil:
+		return nil, fmt.Errorf("server: the shutdown scheduler needs a drain-evidence source; without one a lease restored mid-drain would judge quiescence against a fleet that has not been wired yet, see zero holds, and bounce the daemon over every surviving mid-turn shim")
 	case cfg.LiveTasks == nil:
 		return nil, fmt.Errorf("server: the shutdown scheduler needs a live-task counter; without one a workspace running background tasks would read as quiescent")
 	case cfg.Broadcast == nil:
@@ -142,7 +168,7 @@ func NewShutdownScheduler(cfg ShutdownSchedulerConfig) (*ShutdownScheduler, erro
 		return nil, fmt.Errorf("server: the shutdown scheduler needs the graceful-shutdown func; without it a completed drain would never actually bounce the daemon")
 	}
 	s := &ShutdownScheduler{
-		store: cfg.Store, holds: cfg.Holds, tasks: cfg.LiveTasks,
+		store: cfg.Store, holds: cfg.Holds, evidence: cfg.Evidence, tasks: cfg.LiveTasks,
 		broadcast: cfg.Broadcast, shutdown: cfg.Shutdown,
 		logf: cfg.Logf, now: cfg.Now, newID: cfg.NewScheduleID,
 	}
@@ -325,6 +351,7 @@ func (s *ShutdownScheduler) Cancel(scheduleID string) error {
 	}
 	s.cur = nil
 	s.lastHolds = nil
+	s.unresolved = nil
 	view := s.viewLocked(nil)
 	s.mu.Unlock()
 
@@ -358,6 +385,11 @@ func (s *ShutdownScheduler) reevaluate(trigger string) {
 		return
 	}
 	holds := s.holds.DrainHolds(s.tasks)
+	// THE UNRESOLVED SET IS RESOLVED BEFORE THE MUTEX, alongside the holds read
+	// and for the same reason: it reads the fleet and runs the two probes, and
+	// doing either under this engine's lock would invert it against the fleet's.
+	holds = append(holds, s.resolveUnresolved(trigger, holds)...)
+	sortHolds(holds)
 
 	s.mu.Lock()
 	if s.cur == nil || s.cur.executing {
@@ -388,14 +420,21 @@ func (s *ShutdownScheduler) reevaluate(trigger string) {
 		s.broadcast(view)
 		return
 	}
-	// DRAINED. The lease is retired here, before the shutdown runs, and the
-	// durable row goes with it: a lease that survived its own successful
-	// shutdown would block every prompt on the next daemon forever, with nobody
-	// left who remembers asking for it.
+	// DRAINED — and reaching here means BOTH the fleet's holds and the
+	// unresolved set are empty, because the unresolved entries were folded into
+	// holds above. Affirmative emptiness, not "nobody answered": every session
+	// the registry remembers has either wired and been observed holding nothing,
+	// or been proven to have no shim at all.
+	//
+	// The lease is retired here, before the shutdown runs, and the durable row
+	// goes with it: a lease that survived its own successful shutdown would
+	// block every prompt on the next daemon forever, with nobody left who
+	// remembers asking for it.
 	s.cur.executing = true
 	sched := *s.cur
 	s.cur = nil
 	s.lastHolds = nil
+	s.unresolved = nil
 	view := s.viewLocked(nil)
 	s.mu.Unlock()
 
@@ -451,11 +490,156 @@ func (s *ShutdownScheduler) Restore() error {
 	}
 	s.mu.Unlock()
 
+	// THE PESSIMISTIC SEED, before anything can conclude the fleet is quiet.
+	// Restore runs ahead of the boot sweeper and ahead of every reattach, so the
+	// fleet is empty here by construction; seeding from the registry and the two
+	// probes is what stops "empty fleet" from being read as "nothing running".
+	seed := s.seedUnresolved()
+	s.mu.Lock()
+	s.unresolved = seed
+	s.mu.Unlock()
+
 	parked := s.holds.AcquireShutdownHolds(rec.ScheduleID)
-	s.logf("server: shutdown schedule RESTORED initiator=boot schedule_id=%s cause=%q stop_shims=%v scheduled_at_ms=%d parked_prompts=%d — a previous daemon took this lease and did not finish draining; it stands",
-		rec.ScheduleID, rec.Cause, rec.StopShims, rec.ScheduledAtMs, parked)
+	s.logf("server: shutdown schedule RESTORED initiator=boot schedule_id=%s cause=%q stop_shims=%v scheduled_at_ms=%d parked_prompts=%d unresolved_sessions=%d — a previous daemon took this lease and did not finish draining; it stands, and every session whose shim state is not yet known HOLDS it",
+		rec.ScheduleID, rec.Cause, rec.StopShims, rec.ScheduledAtMs, parked, len(seed))
 	s.reevaluate("restored")
 	return nil
+}
+
+// seedUnresolved classifies every session the registry remembers into the
+// pessimistic UNRESOLVED set. Called once, from Restore, with no lock held.
+//
+// The verdicts are the boot sweeper's verdicts, deliberately: a session whose
+// shim is connected, whose lock is held, or whose probe FAILED is one this
+// daemon cannot yet say anything about, and the lease treats all three the same
+// way — as work it must not cut. Only the neither-connected-nor-locked verdict
+// is an affirmative "there is no shim here", and it is the only one that keeps a
+// session out of the set.
+func (s *ShutdownScheduler) seedUnresolved() map[string]RegisteredSession {
+	out := map[string]RegisteredSession{}
+	for _, rs := range s.evidence.RegisteredSessions() {
+		if !s.probeUnresolved(rs, "seed") {
+			continue
+		}
+		out[rs.SessionID] = rs
+	}
+	return out
+}
+
+// probeUnresolved reports whether the durable evidence leaves this session's
+// hold state UNKNOWN. An error is never read as free.
+func (s *ShutdownScheduler) probeUnresolved(rs RegisteredSession, phase string) bool {
+	connected, err := s.evidence.ShimConnected(rs.SessionID)
+	if err != nil {
+		s.logf("server: shutdown drain %s: session %s (ws %q) parked-connection probe FAILED, so whether a shim is alive is UNKNOWN; it HOLDS the drain rather than being counted quiescent: %v",
+			phase, rs.SessionID, rs.Workspace, err)
+		return true
+	}
+	if connected {
+		s.logf("server: shutdown drain %s: session %s (ws %q) has a shim connected but not yet wired to this daemon; it HOLDS the drain until its real turn state is observed",
+			phase, rs.SessionID, rs.Workspace)
+		return true
+	}
+	held, err := s.evidence.ShimLockHeld(rs.SessionID)
+	if err != nil {
+		s.logf("server: shutdown drain %s: session %s (ws %q) lock probe FAILED, so whether a shim is alive is UNKNOWN; it HOLDS the drain rather than being counted quiescent: %v",
+			phase, rs.SessionID, rs.Workspace, err)
+		return true
+	}
+	if held {
+		s.logf("server: shutdown drain %s: session %s (ws %q) has a live shim holding its lock but has not redialled yet; it HOLDS the drain until its real turn state is observed",
+			phase, rs.SessionID, rs.Workspace)
+		return true
+	}
+	return false
+}
+
+// resolveUnresolved clears every unresolved session that has since been
+// AFFIRMATIVELY resolved, and returns the rest as holds. Called with no lock
+// held: it reads the fleet and runs the probes.
+//
+// THE TWO RESOLUTIONS, and there are no others:
+//
+//   - THE SESSION WIRED. The fleet now holds a controller for it, so its real
+//     hold state is in the holds list this was called with — present if it holds
+//     something, absent because it genuinely holds nothing. Either way the
+//     question has been answered by the authority that owns it.
+//   - THE SESSION IS PROVEN SHIMLESS. Neither connected nor locked, the one
+//     verdict that positively asserts there is nothing there.
+//
+// Elapsed time is not on the list. An entry nobody can resolve holds the drain
+// forever, exactly as a hung turn does, and the broadcast holds are what make
+// that visible rather than mysterious.
+func (s *ShutdownScheduler) resolveUnresolved(trigger string, holds []sessioncontroller.DrainHold) []sessioncontroller.DrainHold {
+	s.mu.Lock()
+	if len(s.unresolved) == 0 {
+		s.mu.Unlock()
+		return nil
+	}
+	pending := make([]RegisteredSession, 0, len(s.unresolved))
+	for _, rs := range s.unresolved {
+		pending = append(pending, rs)
+	}
+	s.mu.Unlock()
+
+	wired := make(map[string]bool)
+	for _, id := range s.holds.WiredSessions() {
+		wired[id] = true
+	}
+	held := make(map[string]bool, len(holds))
+	for _, h := range holds {
+		held[h.SessionID] = true
+	}
+
+	var resolved []string
+	for _, rs := range pending {
+		switch {
+		case wired[rs.SessionID]:
+			s.logf("server: shutdown drain resolve trigger=%s: session %s (ws %q) has WIRED; its real hold state is now observed and it no longer holds the drain as unresolved",
+				trigger, rs.SessionID, rs.Workspace)
+			resolved = append(resolved, rs.SessionID)
+		case !s.probeUnresolved(rs, "resolve"):
+			s.logf("server: shutdown drain resolve trigger=%s: session %s (ws %q) is PROVEN SHIMLESS (neither connected nor locked); it no longer holds the drain",
+				trigger, rs.SessionID, rs.Workspace)
+			resolved = append(resolved, rs.SessionID)
+		}
+	}
+
+	s.mu.Lock()
+	for _, id := range resolved {
+		delete(s.unresolved, id)
+	}
+	out := make([]sessioncontroller.DrainHold, 0, len(s.unresolved))
+	for _, rs := range s.unresolved {
+		// A session already named in the real holds list is not named twice: it
+		// wired between the holds read and this resolve, and the fleet's answer
+		// is the better one.
+		if held[rs.SessionID] {
+			continue
+		}
+		// THE TURN ARM WITH AN EMPTY ID. The proto requires a hold to explain
+		// itself with a turn and/or a task count, and neither is knowable for a
+		// session nobody has talked to. The empty-id turn is the established
+		// encoding for "work we cannot name but must not cut" — it is exactly
+		// what an ADOPTED turn broadcasts — and that is precisely this case.
+		out = append(out, sessioncontroller.DrainHold{
+			Workspace: rs.Workspace, SessionID: rs.SessionID, TurnActive: true,
+		})
+	}
+	s.mu.Unlock()
+	return out
+}
+
+// sortHolds orders a holds list by workspace then session, so two reads of an
+// unchanged fleet compare equal under sameHolds. DrainHolds already sorts what
+// it returns; this re-sorts the union once the unresolved entries are folded in.
+func sortHolds(holds []sessioncontroller.DrainHold) {
+	sort.Slice(holds, func(i, j int) bool {
+		if holds[i].Workspace != holds[j].Workspace {
+			return holds[i].Workspace < holds[j].Workspace
+		}
+		return holds[i].SessionID < holds[j].SessionID
+	})
 }
 
 // sameHolds reports whether two holds lists are identical. Both come from

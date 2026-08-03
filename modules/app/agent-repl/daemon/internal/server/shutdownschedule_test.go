@@ -74,6 +74,73 @@ type fakeHoldSource struct {
 	released  []string
 	acquireN  int
 	holdsRead int
+	wired     []string
+}
+
+// fakeEvidence is a controllable DrainEvidenceSource: a registry roster plus the
+// two boot probes, each answerable per session and each able to fail.
+type fakeEvidence struct {
+	mu           sync.Mutex
+	sessions     []RegisteredSession
+	connected    map[string]bool
+	held         map[string]bool
+	connectedErr map[string]error
+	heldErr      map[string]error
+}
+
+func newFakeEvidence() *fakeEvidence {
+	return &fakeEvidence{
+		connected: map[string]bool{}, held: map[string]bool{},
+		connectedErr: map[string]error{}, heldErr: map[string]error{},
+	}
+}
+
+func (f *fakeEvidence) RegisteredSessions() []RegisteredSession {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]RegisteredSession(nil), f.sessions...)
+}
+
+func (f *fakeEvidence) ShimConnected(sessionID string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.connectedErr[sessionID]; err != nil {
+		return false, err
+	}
+	return f.connected[sessionID], nil
+}
+
+func (f *fakeEvidence) ShimLockHeld(sessionID string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.heldErr[sessionID]; err != nil {
+		return false, err
+	}
+	return f.held[sessionID], nil
+}
+
+func (f *fakeEvidence) register(sessions ...RegisteredSession) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.sessions = sessions
+}
+
+func (f *fakeEvidence) setHeld(sessionID string, held bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.held[sessionID] = held
+}
+
+func (f *fakeEvidence) setConnected(sessionID string, connected bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.connected[sessionID] = connected
+}
+
+func (f *fakeEvidence) failConnected(sessionID string, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.connectedErr[sessionID] = err
 }
 
 func (f *fakeHoldSource) DrainHolds(sessioncontroller.LiveTaskCounter) []sessioncontroller.DrainHold {
@@ -106,6 +173,18 @@ func (f *fakeHoldSource) ReleaseShutdownHolds(scheduleID string) {
 	f.released = append(f.released, scheduleID)
 }
 
+func (f *fakeHoldSource) WiredSessions() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.wired...)
+}
+
+func (f *fakeHoldSource) wire(sessionIDs ...string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.wired = sessionIDs
+}
+
 func (f *fakeHoldSource) set(holds ...sessioncontroller.DrainHold) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -136,6 +215,7 @@ type schedulerHarness struct {
 	s        *ShutdownScheduler
 	store    *fakeScheduleStore
 	holds    *fakeHoldSource
+	evidence *fakeEvidence
 	mu       sync.Mutex
 	views    []*frontendv1.ShutdownScheduleView
 	stops    []bool
@@ -148,10 +228,11 @@ func newSchedulerHarness(t *testing.T) *schedulerHarness {
 	t.Helper()
 	h := &schedulerHarness{
 		t: t, store: &fakeScheduleStore{}, holds: &fakeHoldSource{},
-		stopped: make(chan struct{}),
+		evidence: newFakeEvidence(),
+		stopped:  make(chan struct{}),
 	}
 	s, err := NewShutdownScheduler(ShutdownSchedulerConfig{
-		Store: h.store, Holds: h.holds, LiveTasks: fakeTaskCounter{},
+		Store: h.store, Holds: h.holds, Evidence: h.evidence, LiveTasks: fakeTaskCounter{},
 		Broadcast: func(v *frontendv1.ShutdownScheduleView) {
 			h.mu.Lock()
 			h.views = append(h.views, v)
@@ -216,7 +297,8 @@ func TestNewShutdownSchedulerRequiresEachDependency(t *testing.T) {
 	// Arrange.
 	full := func() ShutdownSchedulerConfig {
 		return ShutdownSchedulerConfig{
-			Store: &fakeScheduleStore{}, Holds: &fakeHoldSource{}, LiveTasks: fakeTaskCounter{},
+			Store: &fakeScheduleStore{}, Holds: &fakeHoldSource{}, Evidence: newFakeEvidence(),
+			LiveTasks: fakeTaskCounter{},
 			Broadcast: func(*frontendv1.ShutdownScheduleView) {}, Shutdown: func(bool) {},
 		}
 	}
@@ -227,6 +309,7 @@ func TestNewShutdownSchedulerRequiresEachDependency(t *testing.T) {
 	}{
 		{"no store", func(c *ShutdownSchedulerConfig) { c.Store = nil }, "durable store"},
 		{"no holds", func(c *ShutdownSchedulerConfig) { c.Holds = nil }, "drain-hold source"},
+		{"no evidence", func(c *ShutdownSchedulerConfig) { c.Evidence = nil }, "drain-evidence source"},
 		{"no live tasks", func(c *ShutdownSchedulerConfig) { c.LiveTasks = nil }, "live-task counter"},
 		{"no broadcast", func(c *ShutdownSchedulerConfig) { c.Broadcast = nil }, "broadcast func"},
 		{"no shutdown", func(c *ShutdownSchedulerConfig) { c.Shutdown = nil }, "graceful-shutdown func"},
@@ -268,7 +351,8 @@ func TestConstructionFailsWhenTheFleetRefusesTheBinding(t *testing.T) {
 
 	// Act.
 	_, err := NewShutdownScheduler(ShutdownSchedulerConfig{
-		Store: &fakeScheduleStore{}, Holds: holds, LiveTasks: fakeTaskCounter{},
+		Store: &fakeScheduleStore{}, Holds: holds, Evidence: newFakeEvidence(),
+		LiveTasks: fakeTaskCounter{},
 		Broadcast: func(*frontendv1.ShutdownScheduleView) {}, Shutdown: func(bool) {},
 	})
 
@@ -851,9 +935,16 @@ func TestRestoreOnAStoreWithNoScheduleLeavesTheDaemonIdle(t *testing.T) {
 
 func TestRestoreRetakesADurableLease(t *testing.T) {
 	// The deploy that asked for the bounce is still waiting for it.
+	//
+	// AMENDED: this used to arrange a fleet already reporting a hold, which the
+	// real boot cannot produce — Restore runs ahead of the boot sweeper and
+	// ahead of every reattach, so the fleet is structurally empty at that
+	// instant. The honest arrangement is a session the REGISTRY remembers whose
+	// lock is still held, which is what a mid-drain crash actually leaves.
 	// Arrange.
 	h := newSchedulerHarness(t)
-	h.holds.set(oneHold())
+	h.evidence.register(RegisteredSession{Workspace: "/ws/a", SessionID: "s1"})
+	h.evidence.setHeld("s1", true)
 	if err := h.store.PutSchedule(statedb.ShutdownSchedule{
 		ScheduleID: "sd_prev", ScheduledAtMs: 99, Cause: "previous daemon", StopShims: true,
 	}); err != nil {
@@ -891,10 +982,18 @@ func TestRestoreRebroadcastsTheDrainingView(t *testing.T) {
 	}
 }
 
-func TestRestoreExecutesTheShutdownWhenNothingHoldsTheDrain(t *testing.T) {
+func TestRestoreExecutesTheShutdownWhenEverySessionIsProvenShimless(t *testing.T) {
 	// The crash may have taken the last hold with it.
+	//
+	// AMENDED: this used to execute off an empty fleet, which at boot means
+	// "nobody has been asked" rather than "nothing is running". Executing now
+	// requires AFFIRMATIVE emptiness, so the registry's session is proven dead
+	// by both probes before the bounce is allowed.
 	// Arrange.
 	h := newSchedulerHarness(t)
+	h.evidence.register(RegisteredSession{Workspace: "/ws/a", SessionID: "s1"})
+	h.evidence.setConnected("s1", false)
+	h.evidence.setHeld("s1", false)
 	if err := h.store.PutSchedule(statedb.ShutdownSchedule{ScheduleID: "sd_prev", StopShims: true}); err != nil {
 		t.Fatalf("PutSchedule: %v", err)
 	}
@@ -908,6 +1007,175 @@ func TestRestoreExecutesTheShutdownWhenNothingHoldsTheDrain(t *testing.T) {
 	<-h.stopped
 	if got := h.shutdowns(); len(got) != 1 || !got[0] {
 		t.Fatalf("shutdown = %v, want one honoring the restored stop_shims", got)
+	}
+}
+
+// --- restore: the unresolved set --------------------------------------------
+
+func TestRestoreHoldsForASessionWhoseLockIsHeldButHasNotConnected(t *testing.T) {
+	// THE PRODUCTION DEFECT. A mid-turn shim survives the crash still holding
+	// its lock and is mid-redial when Restore runs; the fleet is empty, so the
+	// pre-fix lease saw zero holds and bounced straight over it.
+	// Arrange.
+	h := newSchedulerHarness(t)
+	h.evidence.register(RegisteredSession{Workspace: "/ws/a", SessionID: "s1"})
+	h.evidence.setConnected("s1", false)
+	h.evidence.setHeld("s1", true)
+	if err := h.store.PutSchedule(statedb.ShutdownSchedule{ScheduleID: "sd_prev", StopShims: true}); err != nil {
+		t.Fatalf("PutSchedule: %v", err)
+	}
+
+	// Act.
+	if err := h.s.Restore(); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+
+	// Assert.
+	if got := h.shutdowns(); len(got) != 0 {
+		t.Fatalf("shutdown = %v, want none — an unresolved session holds the drain", got)
+	}
+	if _, held := h.s.HeldSchedule(); !held {
+		t.Fatal("the restored lease was released while a session's shim state was still unknown")
+	}
+}
+
+func TestAnUnresolvedSessionIsBroadcastAsAHoldWithAnUnnamedTurn(t *testing.T) {
+	// Arrange.
+	h := newSchedulerHarness(t)
+	h.evidence.register(RegisteredSession{Workspace: "/ws/a", SessionID: "s1"})
+	h.evidence.setHeld("s1", true)
+	if err := h.store.PutSchedule(statedb.ShutdownSchedule{ScheduleID: "sd_prev"}); err != nil {
+		t.Fatalf("PutSchedule: %v", err)
+	}
+
+	// Act.
+	if err := h.s.Restore(); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+
+	// Assert.
+	got := h.lastView().GetDraining().GetHolds()
+	if len(got) != 1 {
+		t.Fatalf("broadcast holds = %v, want the unresolved session named", got)
+	}
+	if got[0].GetWorkspace() != "/ws/a" || got[0].GetSessionId() != "s1" {
+		t.Fatalf("hold = %v, want the unresolved session's workspace and session", got[0])
+	}
+	if got[0].GetTurn() == nil || got[0].GetTurn().GetTurnId() != "" {
+		t.Fatalf("hold turn arm = %v, want the empty-id turn that encodes unnamed work", got[0].GetTurn())
+	}
+}
+
+func TestAFailedConnectionProbeLeavesTheSessionUnresolved(t *testing.T) {
+	// "I could not tell" is never read as free.
+	// Arrange.
+	h := newSchedulerHarness(t)
+	h.evidence.register(RegisteredSession{Workspace: "/ws/a", SessionID: "s1"})
+	h.evidence.failConnected("s1", fmt.Errorf("listener unreadable"))
+	if err := h.store.PutSchedule(statedb.ShutdownSchedule{ScheduleID: "sd_prev"}); err != nil {
+		t.Fatalf("PutSchedule: %v", err)
+	}
+
+	// Act.
+	if err := h.s.Restore(); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+
+	// Assert.
+	if got := h.shutdowns(); len(got) != 0 {
+		t.Fatalf("shutdown = %v, want none — a failed probe holds the drain", got)
+	}
+}
+
+func TestAConnectedButUnwiredSessionHoldsTheRestoredDrain(t *testing.T) {
+	// The shim has redialled but nothing has claimed it yet, so its turn state
+	// is still unobserved.
+	// Arrange.
+	h := newSchedulerHarness(t)
+	h.evidence.register(RegisteredSession{Workspace: "/ws/a", SessionID: "s1"})
+	h.evidence.setConnected("s1", true)
+	if err := h.store.PutSchedule(statedb.ShutdownSchedule{ScheduleID: "sd_prev"}); err != nil {
+		t.Fatalf("PutSchedule: %v", err)
+	}
+
+	// Act.
+	if err := h.s.Restore(); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+
+	// Assert.
+	if got := h.shutdowns(); len(got) != 0 {
+		t.Fatalf("shutdown = %v, want none — a connected but unwired session holds the drain", got)
+	}
+}
+
+func TestWiringAnUnresolvedSessionResolvesItAndCompletesTheDrain(t *testing.T) {
+	// AFFIRMATIVE RESOLUTION: the session wired and the fleet reports it holding
+	// nothing, which is a real answer rather than an unasked question.
+	// Arrange.
+	h := newSchedulerHarness(t)
+	h.evidence.register(RegisteredSession{Workspace: "/ws/a", SessionID: "s1"})
+	h.evidence.setHeld("s1", true)
+	if err := h.store.PutSchedule(statedb.ShutdownSchedule{ScheduleID: "sd_prev"}); err != nil {
+		t.Fatalf("PutSchedule: %v", err)
+	}
+	if err := h.s.Restore(); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	h.holds.wire("s1")
+
+	// Act.
+	h.s.NoteDrainActivity()
+
+	// Assert.
+	<-h.stopped
+	if got := h.shutdowns(); len(got) != 1 {
+		t.Fatalf("shutdown = %v, want one once the last unresolved session wired", got)
+	}
+}
+
+func TestProvingAnUnresolvedSessionShimlessResolvesIt(t *testing.T) {
+	// The other affirmative resolution: the shim died during the redial window.
+	// Arrange.
+	h := newSchedulerHarness(t)
+	h.evidence.register(RegisteredSession{Workspace: "/ws/a", SessionID: "s1"})
+	h.evidence.setHeld("s1", true)
+	if err := h.store.PutSchedule(statedb.ShutdownSchedule{ScheduleID: "sd_prev"}); err != nil {
+		t.Fatalf("PutSchedule: %v", err)
+	}
+	if err := h.s.Restore(); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	h.evidence.setHeld("s1", false)
+
+	// Act.
+	h.s.NoteDrainActivity()
+
+	// Assert.
+	<-h.stopped
+	if got := h.shutdowns(); len(got) != 1 {
+		t.Fatalf("shutdown = %v, want one once the last session was proven shimless", got)
+	}
+}
+
+func TestAScheduleTakenOnALiveDaemonSeedsNoUnresolvedSessions(t *testing.T) {
+	// The seed is a BOOT construct. A running daemon has already wired what it
+	// is going to wire, so seeding here would hold a drain open on sessions the
+	// fleet can already answer for.
+	// Arrange.
+	h := newSchedulerHarness(t)
+	h.evidence.register(RegisteredSession{Workspace: "/ws/a", SessionID: "s1"})
+	h.evidence.setHeld("s1", true)
+
+	// Act.
+	if _, err := h.s.Schedule(true, "deploy"); err != nil {
+		t.Fatalf("Schedule: %v", err)
+	}
+
+	// Assert.
+	<-h.stopped
+	if got := h.shutdowns(); len(got) != 1 {
+		t.Fatalf("shutdown = %v, want one — a live schedule reads the fleet, not the boot evidence", got)
 	}
 }
 

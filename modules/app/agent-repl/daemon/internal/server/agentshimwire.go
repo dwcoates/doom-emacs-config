@@ -140,6 +140,13 @@ type AgentShimConfig struct {
 	// authority on which workspaces hold the drain open. Required whenever
 	// ShutdownSchedules is set. Satisfied by *sessioncontroller.Manager.
 	DrainHolds DrainHoldSource
+	// DrainEvidence is the durable evidence a RESTORED lease seeds its
+	// unresolved set from — the registry plus the parked-connection and
+	// session-lock probes. Required whenever ShutdownSchedules is set: without
+	// it a lease restored mid-drain would read the not-yet-wired fleet as
+	// quiescent and bounce over every surviving mid-turn shim. Satisfied by
+	// RegistryDrainEvidence.
+	DrainEvidence DrainEvidenceSource
 	// Logf is the daemon logger. Nil discards.
 	Logf func(string, ...any)
 	// LogVerbosef persists frequent lease-success diagnostics without forcing
@@ -539,14 +546,20 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 	// would leave a client that connected mid-drain seeing nothing at all.
 	var scheduler *ShutdownScheduler
 	if cfg.ShutdownSchedules != nil {
-		if cfg.DrainHolds == nil {
+		switch {
+		case cfg.DrainHolds == nil:
 			cancelWorkspaceAvailable()
 			cancelHostActions()
 			return nil, fmt.Errorf("server: a durable shutdown-schedule store was supplied with no DrainHolds source; the lease would have nothing to derive its holds from and would bounce the daemon over a live turn")
+		case cfg.DrainEvidence == nil:
+			cancelWorkspaceAvailable()
+			cancelHostActions()
+			return nil, fmt.Errorf("server: a durable shutdown-schedule store was supplied with no DrainEvidence source; a lease restored mid-drain would judge quiescence against a fleet nothing has wired yet and bounce the daemon over every surviving mid-turn shim")
 		}
 		scheduler, err = NewShutdownScheduler(ShutdownSchedulerConfig{
 			Store:     cfg.ShutdownSchedules,
 			Holds:     cfg.DrainHolds,
+			Evidence:  cfg.DrainEvidence,
 			LiveTasks: cfg.Progress,
 			Broadcast: srv.PushShutdownSchedule,
 			// THE SAME graceful teardown the ordinary shutdown command runs.
