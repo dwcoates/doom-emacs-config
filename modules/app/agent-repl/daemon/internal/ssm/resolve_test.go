@@ -13,7 +13,7 @@ import (
 // and reopen behavior are exercised).
 func newTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := openDB(filepath.Join(t.TempDir(), "state.db"))
+	db, err := openDB(filepath.Join(t.TempDir(), "state.db"), t.Logf)
 	if err != nil {
 		t.Fatalf("openDB: %v", err)
 	}

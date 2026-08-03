@@ -195,11 +195,11 @@ func NewRegistryResolver(reg *registry.Registry) *RegistryResolver {
 
 var _ ssm.Resolver = (*RegistryResolver)(nil)
 
-// Workspace returns the workspace (CWD) bound to sessionID, and whether the
-// session is known and carries a workspace. A known session with an empty CWD
-// reports (", false): a workspace-less session has no per-workspace state to
-// resolve, which the SSM surfaces as an explicit miss rather than binding
-// state to the empty-string workspace.
+// Session returns the workspace (CWD) bound to sessionID TOGETHER WITH the
+// session's canonical daemon-minted id, and whether the session is known and
+// carries a workspace. A known session with an empty CWD reports a miss: a
+// workspace-less session has no per-workspace state to resolve, which the SSM
+// surfaces explicitly rather than binding state to the empty-string workspace.
 //
 // sessionID may be EITHER identity a session has:
 //
@@ -213,26 +213,33 @@ var _ ssm.Resolver = (*RegistryResolver)(nil)
 // controller applied failed with "no workspace bound to session <uuid>", so no
 // turn or task state ever reached a workspace.
 //
+// THE CANONICAL ID RIDES ALONG because the SSM must RECORD one identity per
+// session even though it is fed two. Answering only the workspace is what let
+// the vendor uuid reach the state log's session_id column, where no claimant
+// check that names sessions by their s_ id could ever match it — the permanent
+// thinking wedge normalizeSessionIdentity repairs. Both fields come off the
+// same record, so they cannot disagree.
+//
 // The uuid lookup is a scan because the registry is keyed by the other id, and
 // several records can carry one uuid (a superseded resume, a rehydrated
 // record). The newest by CreatedAt wins, matching SessionLocator; an
 // unparseable timestamp sorts as the zero time so it never shadows a real one.
-func (r *RegistryResolver) Workspace(sessionID string) (string, bool) {
+func (r *RegistryResolver) Session(sessionID string) (ssm.Binding, bool) {
 	if sessionID == "" {
-		return "", false
+		return ssm.Binding{}, false
 	}
 	// The registry's own key first: an exact hit needs no scan.
 	if rec, ok := r.reg.Get(sessionID); ok {
 		if rec.CWD == "" {
-			return "", false
+			return ssm.Binding{}, false
 		}
-		return rec.CWD, true
+		return ssm.Binding{Workspace: rec.CWD, SessionID: rec.SessionID}, true
 	}
 
 	var (
-		bestCWD string
-		bestAt  time.Time
-		found   bool
+		best   ssm.Binding
+		bestAt time.Time
+		found  bool
 	)
 	for _, rec := range r.reg.All() {
 		if rec.ClaudeSessionID != sessionID || rec.CWD == "" {
@@ -243,8 +250,9 @@ func (r *RegistryResolver) Workspace(sessionID string) (string, bool) {
 			at = time.Time{}
 		}
 		if !found || at.After(bestAt) {
-			bestCWD, bestAt, found = rec.CWD, at, true
+			best = ssm.Binding{Workspace: rec.CWD, SessionID: rec.SessionID}
+			bestAt, found = at, true
 		}
 	}
-	return bestCWD, found
+	return best, found
 }

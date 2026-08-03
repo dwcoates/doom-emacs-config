@@ -277,7 +277,7 @@ func TestAbnormalTurnEndWritesExactlyOneAgentRow(t *testing.T) {
 		t.Fatalf("turn ended: %v", err)
 	}
 	// Assert.
-	db, err := openDB(path)
+	db, err := openDB(path, t.Logf)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -300,7 +300,7 @@ func TestCleanTurnEndWritesExactlyOneDoneRow(t *testing.T) {
 		t.Fatalf("turn ended: %v", err)
 	}
 	// Assert.
-	db, err := openDB(path)
+	db, err := openDB(path, t.Logf)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -506,7 +506,7 @@ func TestBackgroundWorkDoesNotPromoteVendorBlockedToYellow(t *testing.T) {
 func TestHistoricalVendorClearRowsAreInert(t *testing.T) {
 	// Arrange — a pre-remodel log: a block, its old clearing row, a later turn.
 	path := filepath.Join(t.TempDir(), "state.db")
-	seed, err := openDB(path)
+	seed, err := openDB(path, t.Logf)
 	if err != nil {
 		t.Fatalf("openDB: %v", err)
 	}

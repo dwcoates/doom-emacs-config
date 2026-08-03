@@ -129,10 +129,10 @@ func TestRegistryResolverMissWorkspaceless(t *testing.T) {
 	}
 	r := NewRegistryResolver(reg)
 	// Act
-	ws, ok := r.Workspace("s1")
+	b, ok := r.Session("s1")
 	// Assert
-	if ok || ws != "" {
-		t.Fatalf("Workspace = (%q,%v), want (\"\",false) for a workspace-less session", ws, ok)
+	if ok || b.Workspace != "" {
+		t.Fatalf("Session = (%+v,%v), want an empty miss for a workspace-less session", b, ok)
 	}
 }
 
@@ -158,11 +158,11 @@ func TestRegistryResolverResolvesTheVendorSessionID(t *testing.T) {
 	}
 
 	// Act: resolve by the id an EVENT would carry.
-	ws, ok := NewRegistryResolver(reg).Workspace("96a0baaf-uuid")
+	b, ok := NewRegistryResolver(reg).Session("96a0baaf-uuid")
 
 	// Assert
-	if !ok || ws != "/w" {
-		t.Fatalf("Workspace(uuid) = (%q, %v), want (/w, true)", ws, ok)
+	if !ok || b.Workspace != "/w" {
+		t.Fatalf("Session(uuid).Workspace = (%q, %v), want (/w, true)", b.Workspace, ok)
 	}
 }
 
@@ -174,9 +174,9 @@ func TestRegistryResolverStillResolvesTheDaemonSessionID(t *testing.T) {
 	}
 
 	// Act / Assert: the registry's own key must keep working.
-	ws, ok := NewRegistryResolver(reg).Workspace("s_abc")
-	if !ok || ws != "/w" {
-		t.Fatalf("Workspace(s_id) = (%q, %v), want (/w, true)", ws, ok)
+	b, ok := NewRegistryResolver(reg).Session("s_abc")
+	if !ok || b.Workspace != "/w" {
+		t.Fatalf("Session(s_id).Workspace = (%q, %v), want (/w, true)", b.Workspace, ok)
 	}
 }
 
@@ -194,11 +194,11 @@ func TestRegistryResolverPrefersTheNewestRecordForAVendorID(t *testing.T) {
 	}
 
 	// Act
-	ws, ok := NewRegistryResolver(reg).Workspace("shared-uuid")
+	b, ok := NewRegistryResolver(reg).Session("shared-uuid")
 
 	// Assert
-	if !ok || ws != "/new" {
-		t.Fatalf("Workspace(shared uuid) = (%q, %v), want (/new, true)", ws, ok)
+	if !ok || b.Workspace != "/new" {
+		t.Fatalf("Session(shared uuid).Workspace = (%q, %v), want (/new, true)", b.Workspace, ok)
 	}
 }
 
@@ -211,8 +211,8 @@ func TestRegistryResolverMissesAnUnknownVendorID(t *testing.T) {
 
 	// Act / Assert: an unknown id is an explicit miss the SSM surfaces loudly,
 	// never a bind to some arbitrary workspace.
-	if ws, ok := NewRegistryResolver(reg).Workspace("nobody-uuid"); ok {
-		t.Fatalf("Workspace(unknown) = (%q, true), want a miss", ws)
+	if b, ok := NewRegistryResolver(reg).Session("nobody-uuid"); ok {
+		t.Fatalf("Session(unknown) = (%+v, true), want a miss", b)
 	}
 }
 
@@ -224,8 +224,8 @@ func TestRegistryResolverIgnoresAVendorMatchWithNoWorkspace(t *testing.T) {
 	}
 
 	// Act / Assert
-	if ws, ok := NewRegistryResolver(reg).Workspace("96a0baaf-uuid"); ok {
-		t.Fatalf("Workspace(uuid with no cwd) = (%q, true), want a miss", ws)
+	if b, ok := NewRegistryResolver(reg).Session("96a0baaf-uuid"); ok {
+		t.Fatalf("Session(uuid with no cwd) = (%+v, true), want a miss", b)
 	}
 }
 
