@@ -50,6 +50,14 @@
            control — it is a pure function of the live mode, re-rendered from
            state on every chrome frame. -->
       <div id="ungated-banner"></div>
+      <!-- The scheduled-shutdown drain banner (drain.ts): filled whenever the
+           daemon holds a drain lease, i.e. a bounce is scheduled and is
+           waiting on the workspaces it enumerates. GLOBAL, not per-workspace:
+           while the lease is held no new turn starts anywhere, so a reader
+           whose own session is idle still needs to see it. Empty (and so
+           collapsed via :empty) whenever the lease is idle, and carries no
+           dismiss control — it is a pure function of the live lease. -->
+      <div id="drain-banner"></div>
       <!-- The compaction-in-progress banner slot: filled with an indeterminate
            "Compacting conversation…" bar while a /compact runs, empty (and so
            collapsed) otherwise. -->

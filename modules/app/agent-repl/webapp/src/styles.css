@@ -1879,6 +1879,32 @@ pre {
 .queued-actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
 .queued-actions button { cursor: pointer; font: inherit; }
 
+/* --- the drain-lease bubble (render.ts LeaseHeldCard) ---------------------
+   A prompt held by a SCHEDULED DAEMON BOUNCE, not by a running turn. It
+   shares the queued card's geometry (same column, same fit-content width) so
+   it sits in the feed as one more parked prompt, and departs from it in
+   every cue that carries meaning: the border goes SOLID in the merge/bounce
+   amber rather than dashed user-blue, and the card carries the bounce wash.
+   The dashed blue card means "waiting on the turn above you"; this one means
+   "waiting on the whole daemon", and the reader must not have to read the
+   badge to tell them apart. */
+.queued-card.lease-card {
+  border: 1px solid var(--merge-border);
+  background: var(--merge-card);
+  opacity: 1;
+}
+/* The badge says WHY, and takes the same amber so the pill and the frame
+   agree — it is never the classifier's grey, because no classification
+   happened. */
+.queued-badge.lease {
+  color: var(--merge-border);
+  border-color: var(--merge-border);
+  font-weight: 700;
+}
+/* The standing explanation of the hold. Not italic like `.queued-reason`:
+   that is the classifier quoting itself, this is the app stating a rule. */
+.lease-reason { margin-top: 0.3rem; font-size: 0.8rem; color: var(--fg); }
+
 #composer {
   display: flex;
   gap: 0.5rem;
@@ -2813,6 +2839,56 @@ pre {
 .pfooter-counters .tasks-overlay {
   top: auto;
   bottom: calc(100% + 6px);
+}
+
+/* --- the scheduled-shutdown drain banner (drain.ts) -----------------------
+   A daemon bounce is scheduled and the drain lease is held: no NEW turn may
+   start in ANY workspace until every hold clears. That is a daemon-global
+   fact, so it draws as chrome above the central column rather than as a
+   per-workspace chip — a reader whose own session is idle is still affected,
+   because the prompt they are about to type will be parked.
+
+   It is deliberately NOT dressed like #ungated-banner: an open permission
+   gate is an alarm, a pending bounce is an announcement, and painting the
+   two the same would spend the alarm's red on a routine restart. It takes
+   the merge/bounce amber the rest of the app already uses for coordinated
+   daemon work, outlined rather than filled. */
+#drain-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  background: var(--merge-card);
+  color: var(--fg);
+  border: 1px solid var(--merge-border);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  margin: 0.25rem 0.75rem;
+  font-size: 0.85rem;
+}
+/* An idle lease pays no layout at all. */
+#drain-banner:empty { display: none; }
+.drain-mark {
+  flex: 0 0 auto;
+  color: var(--merge-border);
+  font-size: 1rem;
+  line-height: 1.2;
+}
+.drain-body { flex: 1 1 auto; }
+/* The cause and the elapsed clock: the one line a reader needs to decide
+   whether to wait it out. */
+.drain-head { font-weight: 700; }
+.drain-note { color: var(--muted); font-size: 0.8rem; margin-top: 0.15rem; }
+/* The holds ARE the drain's progress: the list shrinks as workspaces go
+   quiet, so it is enumerated rather than summarized to a count. */
+.drain-holds { list-style: none; margin: 0.3rem 0 0; padding: 0; }
+.drain-hold { font-size: 0.8rem; }
+
+/* The viewport frame's counterpart for a pending bounce: NONE. A drain is not
+   an emergency and the banner scrolls with the column it heads, so the only
+   document-wide mark is the class itself, which exists for the composer's
+   own hint below. */
+body.draining #composer-input::placeholder {
+  color: var(--merge-border);
 }
 
 /* --- the ungated-session surface (ungated.ts) -----------------------------
