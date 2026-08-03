@@ -1728,6 +1728,9 @@ message StateSnapshot {
   // GUI client, regardless of observer/painter role.
   repeated WorkspaceAvailable workspace_available = 8;
   repeated HostAction host_actions = 9;
+  // The daemon-global lease state as of this connect, so a client joining
+  // mid-drain renders the banner without waiting for the next edge.
+  ShutdownScheduleView shutdown_schedule = 10;  // Additive (drain lease)
 }
 
 // ---------------------------------------------------------------------------
