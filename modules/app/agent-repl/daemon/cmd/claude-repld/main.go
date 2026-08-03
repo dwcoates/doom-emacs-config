@@ -452,7 +452,7 @@ func main() {
 	// hands them to the bring-up that is waiting for the connection, which
 	// would otherwise sit out its whole deadline with nothing to report.
 	shimSpawnWatch := server.NewShimSpawnWatch(shimListener.Connected, legacyLog)
-	udsSpawn := func(sessionID string, opts server.CreateOpts) (func() error, error) {
+	udsSpawn := func(sessionID string, opts server.CreateOpts) (server.ShimStopFunc, error) {
 		workspace, canonicalOpts, workspaceErr := canonicalShimCreateOpts(opts)
 		if workspaceErr != nil {
 			return nil, fmt.Errorf("resolve UDS shim workspace for %q: %w", opts.CWD, workspaceErr)
@@ -490,7 +490,17 @@ func main() {
 			return nil, spawnErr
 		}
 		shimSpawnWatch.Spawned(sessionID, proc.StderrTail)
-		spawnEvent(dlog.LevelInfo, "UDS shim spawned", map[string]any{"argv": strings.Join(argv, " "), "cwd": workspace.Directory})
+		// pid AND pgid, always. The shim is spawned into its OWN process group
+		// precisely so a signal aimed at the daemon's group cannot reach it, and
+		// a claim like that is only worth anything if the log lets you check it:
+		// pgid == pid means detached, anything else means still coupled.
+		spawnEvent(dlog.LevelInfo, "UDS shim spawned", map[string]any{
+			"argv":     strings.Join(argv, " "),
+			"cwd":      workspace.Directory,
+			"pid":      proc.Pid(),
+			"pgid":     proc.Pgid(),
+			"detached": proc.Pgid() == proc.Pid(),
+		})
 		// In UDS mode the shim streams over its socket, not stdout, so its
 		// stdout event channel stays empty — drain it so the stdout pump never
 		// blocks, and reap the process when it exits.
@@ -521,7 +531,30 @@ func main() {
 				spawnEvent(dlog.LevelInfo, "UDS shim exited", context)
 			}
 		}()
-		return func() error { return proc.Terminate() }, nil
+		// The DELIBERATE-STOP record, and the counterpart to the spawn record
+		// above: a shim death with one of these next to it was ordered, and a
+		// shim death without one was not. That distinction is the whole reason
+		// the attribution is a required argument.
+		return func(by shim.Stop) error {
+			spawnEvent(dlog.LevelInfo, "stopping UDS shim (SIGTERM)", map[string]any{
+				"cwd":       workspace.Directory,
+				"pid":       proc.Pid(),
+				"pgid":      proc.Pgid(),
+				"initiator": by.Initiator,
+				"reason":    by.Reason,
+			})
+			if err := proc.Terminate(by); err != nil {
+				spawnEvent(dlog.LevelError, "stopping UDS shim FAILED", map[string]any{
+					"cwd":       workspace.Directory,
+					"pid":       proc.Pid(),
+					"initiator": by.Initiator,
+					"reason":    by.Reason,
+					"error":     err.Error(),
+				})
+				return err
+			}
+			return nil
+		}, nil
 	}
 	// Held by pointer so its SessionView re-push can be late-bound below: the
 	// Server it pushes through does not exist yet (same shape as forwarder).

@@ -30,7 +30,7 @@ func spawnerWithRecord(t *testing.T, cfgDir, resumeID string) (*ShimSpawner, *re
 	sp := NewShimSpawner(reg,
 		func(string) (bool, error) { return false, nil },
 		nil,
-		func(_ string, opts CreateOpts) (func() error, error) { *got = opts; return nil, nil },
+		func(_ string, opts CreateOpts) (ShimStopFunc, error) { *got = opts; return nil, nil },
 		func(string, ...any) {})
 	return sp, reg, got
 }
@@ -102,7 +102,7 @@ func TestSpawnAnnouncesAStalePointerLoudly(t *testing.T) {
 	sp := NewShimSpawner(reg,
 		func(string) (bool, error) { return false, nil },
 		nil,
-		func(string, CreateOpts) (func() error, error) { return nil, nil },
+		func(string, CreateOpts) (ShimStopFunc, error) { return nil, nil },
 		func(f string, a ...any) { logged = append(logged, f) })
 
 	// Act.
@@ -158,7 +158,7 @@ func TestDropResumeOnAFreshSessionReportsNothing(t *testing.T) {
 func TestDropResumeOnAnUnknownSessionIsLoud(t *testing.T) {
 	// Arrange.
 	reg := openTestRegistry(t)
-	sp := NewShimSpawner(reg, nil, nil, func(string, CreateOpts) (func() error, error) { return nil, nil }, nil)
+	sp := NewShimSpawner(reg, nil, nil, func(string, CreateOpts) (ShimStopFunc, error) { return nil, nil }, nil)
 
 	// Act.
 	_, err := sp.DropResume("ghost")
