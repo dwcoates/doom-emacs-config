@@ -862,6 +862,8 @@ export interface RosterRepoSection {
   repoKey: string;
   folded: boolean;
   rows: RosterRow[];
+  /** Human display label; `repoKey` stays the fold identity. Empty when none. */
+  label: string;
 }
 
 /** One task's workspaces. `taskId` is the identity; `title` is display only. */
@@ -872,9 +874,13 @@ export interface RosterTaskSection {
   rows: RosterRow[];
 }
 
-/** A bare row list: the shell for a section with no fold key and no done axis. */
+/** A bare row list: the shell for a section with no key of its own. It still
+ * folds and still carries a heading — the author resolves both, so no client
+ * has to synthesize a fold key or hardcode the label. */
 export interface RosterSection {
   rows: RosterRow[];
+  folded: boolean;
+  label: string;
 }
 
 /** One workspace row. `dir` is the identity and the join key to every command. */
@@ -890,6 +896,18 @@ export interface RosterRow {
   status: { case: RosterRowStatusCase };
   current: boolean;
   children: RosterRow[];
+  /** Epoch ms the user last viewed this workspace; 0 means never viewed. */
+  lastViewedAtMs: number;
+  /** Epoch ms the merge settled; 0 means not merged. Wins the when-column. */
+  mergedAtMs: number;
+  /** The workspace's branch; empty means unknown. */
+  branch: string;
+  /** The branch it was cut from and merges back into; empty means unknown. */
+  parentBranch: string;
+  /** Short prose describing the workspace's work; empty means none. */
+  summary: string;
+  /** Panes dismissed but still switchable — renders receded, like merged. */
+  closed: boolean;
 }
 
 /** A typed UI-only action from the daemon-owned workspace-command inbox. */
@@ -2178,7 +2196,7 @@ function decodeWorkspaceRoster(v: unknown): WorkspaceRoster {
     // omits an unset message, and "nothing merged lately" is the normal case.
     recentlyMerged:
       o.recentlyMerged === undefined || o.recentlyMerged === null
-        ? { rows: [] }
+        ? { rows: [], folded: false, label: "" }
         : decodeRosterSection(o.recentlyMerged, "WorkspaceRoster.recentlyMerged"),
     currentDir: str(o, "currentDir", "WorkspaceRoster"),
     navDir: str(o, "navDir", "WorkspaceRoster"),
@@ -2199,11 +2217,14 @@ function decodeRosterTaskView(v: unknown): RosterTaskView {
 
 function decodeRosterRepoSection(v: unknown): RosterRepoSection {
   const o = ensureObject(v, "RosterRepoSection");
-  rejectUnknown(o, new Set(["repoKey", "folded", "rows"]), "RosterRepoSection");
+  rejectUnknown(o, new Set(["repoKey", "folded", "rows", "label"]), "RosterRepoSection");
   return {
     repoKey: str(o, "repoKey", "RosterRepoSection"),
     folded: bool(o, "folded", "RosterRepoSection"),
     rows: rosterArray(o.rows, "RosterRepoSection.rows").map((r) => decodeRosterRow(r, "RosterRepoSection.rows")),
+    // Display only, and optional: absent is the proto3 empty string, meaning
+    // the author offered no label. The fold identity is repoKey regardless.
+    label: str(o, "label", "RosterRepoSection"),
   };
 }
 
@@ -2220,8 +2241,15 @@ function decodeRosterTaskSection(v: unknown): RosterTaskSection {
 
 function decodeRosterSection(v: unknown, ctx: string): RosterSection {
   const o = ensureObject(v, ctx);
-  rejectUnknown(o, new Set(["rows"]), ctx);
-  return { rows: rosterArray(o.rows, `${ctx}.rows`).map((r) => decodeRosterRow(r, `${ctx}.rows`)) };
+  rejectUnknown(o, new Set(["rows", "folded", "label"]), ctx);
+  return {
+    rows: rosterArray(o.rows, `${ctx}.rows`).map((r) => decodeRosterRow(r, `${ctx}.rows`)),
+    // Both optional with proto3 zeros: an unfolded, unlabeled section is a
+    // legal thing for the author to publish, so absence defaults rather than
+    // throwing. A wrong TYPE still throws — that is a wire bug, not a default.
+    folded: bool(o, "folded", ctx),
+    label: str(o, "label", ctx),
+  };
 }
 
 /**
@@ -2233,6 +2261,12 @@ const ROSTER_ROW_KEYS: ReadonlySet<string> = new Set([
   "name",
   "current",
   "children",
+  "lastViewedAtMs",
+  "mergedAtMs",
+  "branch",
+  "parentBranch",
+  "summary",
+  "closed",
   ...ROSTER_ROW_STATUS_CASES,
 ]);
 
@@ -2248,6 +2282,17 @@ function decodeRosterRow(v: unknown, ctx: string): RosterRow {
     children: rosterArray(o.children, `${ctx}.children`).map((c) =>
       decodeRosterRow(c, `${ctx}.children`),
     ),
+    // The display fields, every one optional with a MEANINGFUL proto3 zero —
+    // 0 is "never viewed" / "not merged" and "" is "unknown / none", each an
+    // assertion the renderer can act on rather than a missing value. So an
+    // absent field defaults; a field of the wrong TYPE still throws, because
+    // that is a publisher speaking a wire this build cannot read.
+    lastViewedAtMs: num(o, "lastViewedAtMs", ctx),
+    mergedAtMs: num(o, "mergedAtMs", ctx),
+    branch: str(o, "branch", ctx),
+    parentBranch: str(o, "parentBranch", ctx),
+    summary: str(o, "summary", ctx),
+    closed: bool(o, "closed", ctx),
   };
 }
 

@@ -1617,6 +1617,15 @@ message RosterRepoSection {
 
   // The section's workspaces, in render order.
   repeated RosterRow rows = 3;
+
+  // The repository's human display label, as Emacs derives it from repo_key
+  // (agent-repl--repo-label: the project directory's basename, or the
+  // unknown-repo sentinel spelled out). DISPLAY ONLY, and deliberately not the
+  // identity — repo_key remains the fold key and the join key, so renaming
+  // what a section is CALLED can never orphan the fold a user set on it.
+  // Carried rather than derived client-side so the label is computed in
+  // exactly one place; empty when the author has no label to offer.
+  string label = 4;
 }
 
 // One task's workspaces.
@@ -1638,11 +1647,24 @@ message RosterTaskSection {
 }
 
 // A bare list of rows: the shared shell for a section that has no grouping key
-// of its own. Used by recently_merged, which has neither a fold key (nothing
-// to remember it against) nor a done axis (it is definitionally settled).
+// of its own. Used by recently_merged, which has no done axis (it is
+// definitionally settled) but does fold and does carry a display name.
 message RosterSection {
   // The section's workspaces, in render order.
   repeated RosterRow rows = 1;
+
+  // Whether the section renders collapsed, exactly as a repo section folds:
+  // the rows stay in the model and the client hides them. The section has no
+  // key field of its own because its fold identity is fixed and singular (the
+  // roster carries exactly one such section), so the author resolves the fold
+  // and reports it here rather than every client inventing the same key.
+  bool folded = 2;
+
+  // The section's human display label ("Recently Merged"). DISPLAY ONLY.
+  // Carried rather than hardcoded per client so the heading has one author,
+  // the same one that decides which rows belong under it; empty when the
+  // author has no label to offer.
+  string label = 3;
 }
 
 // One workspace in the sidebar.
@@ -1747,6 +1769,48 @@ message RosterRow {
 
   // Nested workspaces (a spawned family under its parent), in render order.
   repeated RosterRow children = 5;
+
+  // Field numbers 6-28 belong to the status oneof above. The display fields
+  // below continue from 29 and are ADDITIVE: every one is optional with a
+  // meaningful proto3 zero, so a publisher that has not learned them yet
+  // still produces a valid row.
+
+  // When the user last viewed this workspace, in epoch MILLISECONDS. Drives
+  // the row's when-column, the relative-age text the rail renders on the
+  // right ("3m", "2h"). ZERO MEANS NEVER VIEWED, and renders as no age at all
+  // rather than as the epoch — a workspace nobody has opened has no age to
+  // report, and 0 is that assertion rather than a missing value.
+  int64 last_viewed_at_ms = 29;
+
+  // When this workspace's merge settled, in epoch MILLISECONDS. ZERO MEANS
+  // NOT MERGED. Takes precedence over last_viewed_at_ms in the when-column
+  // for a merged row: once a workspace is done, how long ago it merged is the
+  // fact worth showing, not when someone last looked at it.
+  int64 merged_at_ms = 30;
+
+  // The workspace's own git branch, for the expanded detail panel. Display
+  // only — the join key is dir, and two workspaces may sit on branches with
+  // the same name in different repos. EMPTY MEANS UNKNOWN: the row renders
+  // without the branch line rather than with a blank one.
+  string branch = 31;
+
+  // The branch this workspace was cut from and merges back into, for the
+  // detail panel. Display only, same emptiness rule as branch.
+  string parent_branch = 32;
+
+  // A short human summary of what the workspace is doing, shown as the detail
+  // panel's prose line. Emacs sources it from the workspace's last prompt
+  // summary. EMPTY MEANS NONE — no summary yet, or none worth showing — and
+  // the line is omitted rather than rendered blank.
+  string summary = 33;
+
+  // Whether the workspace is closed: it still exists and is still switchable,
+  // but its agent-repl panes are dismissed. Renders RECEDED (greyed), the
+  // same visual treatment a merged row gets, because both are workspaces the
+  // user has finished with for now. Deliberately NOT a status arm: closed is
+  // orthogonal to the lifecycle — a closed workspace still has one — so it
+  // rides alongside the oneof rather than displacing an arm inside it.
+  bool closed = 34;
 }
 
 // The roster row statuses. Each is EMPTY BY DESIGN — being set is the entire
