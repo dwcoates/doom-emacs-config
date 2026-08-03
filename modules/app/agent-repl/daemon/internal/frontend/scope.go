@@ -59,6 +59,13 @@ func scopeFrame(frame *frontendv1.FrontendFrame, sc Scope) (*frontendv1.Frontend
 		return frame, sc.matchesAgentSession(f.Queue.GetSessionId(), f.Queue.GetWorkspace())
 	case *frontendv1.FrontendFrame_Progress:
 		return frame, sc.matchesAgentSession(f.Progress.GetSessionId(), f.Progress.GetWorkspace())
+	case *frontendv1.FrontendFrame_WorkspaceRoster:
+		// EDITOR-GLOBAL, and listed explicitly rather than left to the default
+		// arm. The roster is the whole sidebar — every workspace, not just this
+		// connection's — and it carries no session or workspace routing key to
+		// filter on. A session-scoped webview renders the same sidebar the
+		// Emacs host does, so it passes to everyone.
+		return frame, true
 	default:
 		// CommandAck / unknown: connection-global, pass through.
 		return frame, true
