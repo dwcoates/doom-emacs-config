@@ -1144,6 +1144,23 @@ describe("footerHtml: the phase comes from the workspace state (F5)", () => {
     expect(got).toContain('<span class="pfooter-secondary">thinking</span>');
   });
 
+  it("renders no grey secondary for a merely ready session", () => {
+    // Arrange / Act — `ready` is the absence of activity, so beside an impaired
+    // route it qualifies nothing and used to sit there as a grey word.
+    const got = footerHtml(
+      input({
+        renderState: "severed",
+        connectivity: "unavailable",
+        sessionStatus: "ready",
+      }),
+      CLOSED,
+      NOW,
+    );
+    // Assert
+    expect(got).toContain("severed");
+    expect(got).not.toContain("pfooter-secondary");
+  });
+
   it("names no phase at all before a state has been resolved", () => {
     // Arrange / Act — naming one anyway is exactly the fabrication the stale
     // mirror committed.
