@@ -749,10 +749,7 @@ func TestATurnAndLiveTasksAreBothReportedOnOneHold(t *testing.T) {
 func TestAHoldNamesTheTurnItIsWaitingOn(t *testing.T) {
 	// Arrange.
 	h := newLeaseHarness(t)
-	d := h.controller()
-	h.m.mu.Lock()
-	d.noteActiveTurnID(true, "t_42")
-	h.m.mu.Unlock()
+	h.m.noteTurnClaims(h.controller(), []string{"t_42"})
 	h.turn(true)
 
 	// Act.
@@ -780,38 +777,40 @@ func TestAnAdoptedTurnHoldsTheDrainWithNoTurnID(t *testing.T) {
 }
 
 func TestATurnsIDIsClearedAtItsOwnEnd(t *testing.T) {
-	// Arrange.
+	// Arrange. Its own end leaves the durable ledger holding nothing, and the
+	// idle edge releases the record whole.
 	h := newLeaseHarness(t)
 	d := h.controller()
-	h.m.mu.Lock()
-	d.noteActiveTurnID(true, "t_42")
+	h.m.noteTurnClaims(d, []string{"t_42"})
 
 	// Act.
-	d.noteActiveTurnID(false, "t_42")
-	got := d.activeTurnID
-	h.m.mu.Unlock()
+	h.turn(false)
 
 	// Assert.
-	if got != "" {
-		t.Fatalf("activeTurnID = %q after its own end, want cleared", got)
+	h.m.mu.Lock()
+	got := d.turn
+	h.m.mu.Unlock()
+	if got.active() {
+		t.Fatalf("turn record = %s after its own end, want cleared", got)
 	}
 }
 
 func TestADifferentTurnsEndDoesNotClearTheActiveTurnID(t *testing.T) {
-	// Arrange.
+	// Arrange. t_42 is in flight when ANOTHER turn ends: the ledger's claim set
+	// still holds t_42 afterwards, and the record is projected from the ledger.
 	h := newLeaseHarness(t)
 	d := h.controller()
-	h.m.mu.Lock()
-	d.noteActiveTurnID(true, "t_42")
+	h.m.noteTurnClaims(d, []string{"t_42"})
 
-	// Act.
-	d.noteActiveTurnID(false, "t_other")
-	got := d.activeTurnID
-	h.m.mu.Unlock()
+	// Act — the surviving claim set the other turn's end resolved to.
+	h.m.noteTurnClaims(d, []string{"t_42"})
 
 	// Assert.
-	if got != "t_42" {
-		t.Fatalf("activeTurnID = %q, want t_42 to survive another turn's end", got)
+	h.m.mu.Lock()
+	got := d.turn
+	h.m.mu.Unlock()
+	if id, named := got.name(); !named || id != "t_42" {
+		t.Fatalf("turn record = %s, want t_42 to survive another turn's end", got)
 	}
 }
 

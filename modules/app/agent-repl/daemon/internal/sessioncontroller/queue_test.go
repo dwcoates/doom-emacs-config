@@ -698,7 +698,7 @@ func TestInterjectVerdictAfterTheTurnEndedDeliversWithoutInterrupting(t *testing
 	// re-queue is not needed; the drain takes it, so use a second entry.
 	d := h.controller()
 	h.m.mu.Lock()
-	d.turnActive = false
+	d.turn = turnRecord{}
 	h.m.mu.Unlock()
 
 	// Act.
@@ -1110,7 +1110,7 @@ func TestInterjectMootPathDoesNotSubmitIntoATurnThatStartedMeanwhile(t *testing.
 	// entry; the test below owns the racing start explicitly.
 	d := h.controller()
 	h.m.mu.Lock()
-	d.turnActive = false
+	d.turn = turnRecord{}
 	h.m.mu.Unlock()
 
 	// Act — force the held entry. With no turn running this takes the moot

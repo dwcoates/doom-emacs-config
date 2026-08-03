@@ -394,19 +394,18 @@ type sessionController struct {
 
 	// Prompt-queue state (E4), guarded by the manager mutex.
 	//
-	// turnActive tracks the OBSERVED turn boundary (TurnStarted/TurnEnded off
-	// the shim stream) rather than the SSM's derived turn_active: the queue
-	// must act on what the session really reported, at the moment it reported
-	// it, not on a resolved view of it.
-	turnActive bool
-	// activeTurnID names the turn now in flight, bound off the SAME correlated
-	// boundary the merge waiters use (onTurnEvent) and cleared at its end. It
-	// is what a scheduled shutdown's drain hold reports, so the log, the
-	// webapp, and the turn ledger all name the same turn. Empty for a turn this
-	// daemon adopted rather than started: the hold is the fact that a turn runs,
-	// not that this process can name it.
-	activeTurnID string
-	queue        promptQueue
+	// turn is the ONE record of whether a turn is in flight and which turn it
+	// is (turnrecord.go). It tracks the OBSERVED boundary — the daemon's own
+	// accept edge and the durable turn ledger's claims — rather than the SSM's
+	// derived turn_active: the queue must act on what the session really
+	// reported, at the moment it reported it, not on a resolved view of it.
+	//
+	// It is ONE field rather than an active flag beside an id because those two
+	// were written at different edges, and every schedule that landed between
+	// them broadcast a drain hold that said a turn was running and could not say
+	// which. Only the validating transitions in turnrecord.go write it.
+	turn  turnRecord
+	queue promptQueue
 	// paused stops the queue DRAINING while retaining every entry (I1). Set by
 	// a user-commanded interrupt: the user asked for work to stop, and
 	// delivering the next held prompt the moment the stopped turn ends would
@@ -1094,16 +1093,15 @@ func (m *Manager) noteUserInterrupt(d *sessionController, outcome corev1.Interru
 			return err
 		}
 		m.mu.Lock()
-		wasActive := d.turnActive
-		d.turnActive = false
+		turnBefore, _ := d.noteTurnIdleLocked()
 		m.mu.Unlock()
 		// The DURABLE half of the same statement. The status axis above is what
 		// the footer renders; the turn claim is what the queue holds prompts
 		// behind, and a claim left standing against an Ack that says no turn
 		// exists queues every later prompt behind a boundary that is not coming.
 		m.closeTurnClaimsOnAlreadyComplete(d)
-		m.logf("session-controller: already-complete reconciliation CONFIRMED ws=%s session=%s outcome=%s ssm_closed=%v session_controller_turn_active_before=%v session_controller_turn_active_after=false",
-			d.workspace, d.sessionID, outcome, closed, wasActive)
+		m.logf("session-controller: already-complete reconciliation CONFIRMED ws=%s session=%s outcome=%s ssm_closed=%v session_controller_turn_before=%s session_controller_turn_after=idle",
+			d.workspace, d.sessionID, outcome, closed, turnBefore)
 	}
 
 	m.progress().NoteInterrupt(d.workspace, d.sessionID, outcome)
@@ -1135,7 +1133,7 @@ func (m *Manager) noteUserInterrupt(d *sessionController, outcome corev1.Interru
 // TurnActive reports whether the workspace's session has a turn IN FLIGHT, as
 // the session controller observed it off the shim's own TurnStarted/TurnEnded stream.
 //
-// It is the same fact the queue acts on (sessionController.turnActive), deliberately
+// It is the same fact the queue acts on (sessionController.turn), deliberately
 // rather than the SSM's resolved turn_active: the interrupt confirm gate is
 // deciding whether there is a turn to stop RIGHT NOW, which is a question
 // about what the session reported, not about how a workspace resolves.
@@ -1149,7 +1147,7 @@ func (m *Manager) TurnActive(workspace string) (bool, error) {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return d.turnActive, nil
+	return d.turn.active(), nil
 }
 
 // Health proves one named live session is connected to this daemon and that
@@ -1722,12 +1720,17 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 	// edges do, but correlated by turn id rather than by edge. Bound before Run,
 	// so no boundary can reach the consumer with this unset.
 	cons.onTurnEvent = func(started bool, turnID string, outcome turnOutcome) {
-		// The drain lease's hold names the turn it is waiting on, and this is
-		// the only place this package is told a turn's own id.
-		m.mu.Lock()
-		d.noteActiveTurnID(started, turnID)
-		m.mu.Unlock()
+		// THE WAITERS ONLY. This hook used to bind the drain hold's turn id too,
+		// which put the id's write AFTER the boundary latch and after everything
+		// the SSM apply publishes; the record is now bound from the durable claim
+		// set instead (onTurnClaims, below), and this is left to the one thing it
+		// is for.
 		m.onTurnEvent(d, started, turnID, outcome)
+	}
+	// The turn record's binding edge: the SSM's durable claim ledger has just
+	// accepted a boundary, and nothing user-visible has moved yet.
+	cons.onTurnClaims = func(activeIDs []string) {
+		m.noteTurnClaims(d, activeIDs)
 	}
 	// Every PERSISTENT store event names the conversation it belongs to.
 	// Keeping the record current off the live stream is what gives a later
@@ -2132,13 +2135,13 @@ func (m *Manager) onHandshake(workspace, sessionID string, hello *corev1.ShimHel
 // real boundary as the sole drain trigger.
 func (m *Manager) reconcileTurnSnapshot(d *sessionController, active bool, hello *corev1.ShimHello) {
 	m.mu.Lock()
-	before := d.turnActive
-	d.turnActive = active
+	before, changed := d.noteTurnAdoptedLocked(active)
+	after := d.turn
 	queueDepth := len(d.queue.entries)
 	paused := d.paused
 	m.mu.Unlock()
-	m.logf("session-controller: turn snapshot reconciled ws=%q session=%s process_before=%v process_after=%v hello_turn_in_flight=%v hello_turn_ids=%v queue_depth=%d paused=%v decision=set_without_boundary_effects",
-		d.workspace, d.sessionID, before, active, hello.GetTurnInFlight(),
+	m.logf("session-controller: turn snapshot reconciled ws=%q session=%s process_before=%s process_after=%s changed=%v hello_turn_in_flight=%v hello_turn_ids=%v queue_depth=%d paused=%v decision=set_without_boundary_effects",
+		d.workspace, d.sessionID, before, after, changed, hello.GetTurnInFlight(),
 		hello.GetActiveTurnIds(), queueDepth, paused)
 }
 
@@ -2203,12 +2206,12 @@ func (m *Manager) clearTurnOnRotation(workspace, sessionID, previous, next strin
 		m.logf("session-controller: interrupt mark DROPPED as stale ws=%q session=%s (vendor session rotated %s -> %s) — the stopped turn's end belongs to the retired identity",
 			workspace, sessionID, previous, next)
 	}
-	if !d.turnActive {
+	before, changed := d.noteTurnIdleLocked()
+	if !changed {
 		return
 	}
-	d.turnActive = false
-	m.logf("session-controller: turn-in-flight observation CLEARED ws=%q session=%s (vendor session rotated %s -> %s) — the running turn's end will be reported under the new identity",
-		workspace, sessionID, previous, next)
+	m.logf("session-controller: turn-in-flight observation CLEARED ws=%q session=%s before=%s (vendor session rotated %s -> %s) — the running turn's end will be reported under the new identity, and the record drops its phase and its id in ONE assignment so no name outlives the identity it was minted under",
+		workspace, sessionID, before, previous, next)
 }
 
 // onConnected reconciles SSM turn state on a mid-turn reattach (task step 1):

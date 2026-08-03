@@ -199,7 +199,7 @@ func TestRunningTurnReportsNothingWhileIdle(t *testing.T) {
 	// Arrange. An idle session has no turn to displace, whatever text the last
 	// one left behind.
 	m := &Manager{}
-	d := &sessionController{turnActive: false, runningText: "do the thing"}
+	d := &sessionController{runningText: "do the thing"}
 
 	// Act / Assert.
 	if got := m.runningTurn(d); got != nil {
@@ -211,7 +211,7 @@ func TestRunningTurnReportsNothingForAPreDaemonTurn(t *testing.T) {
 	// Arrange. A turn that predates this daemon leaves runningText empty, and
 	// an empty prompt is not something that can be put back.
 	m := &Manager{}
-	d := &sessionController{turnActive: true, runningText: ""}
+	d := &sessionController{turn: turnRecord{phase: turnPhaseNamed, turnID: "t_42"}, runningText: ""}
 
 	// Act / Assert.
 	if got := m.runningTurn(d); got != nil {
@@ -223,7 +223,7 @@ func TestRunningTurnCarriesPromptAndPermissionMode(t *testing.T) {
 	// Arrange. Both halves describe the SAME turn, so a resume needs both.
 	m := &Manager{}
 	d := &sessionController{
-		turnActive:            true,
+		turn:                  turnRecord{phase: turnPhaseNamed, turnID: "t_42"},
 		runningText:           "do the thing",
 		runningPermissionMode: "acceptEdits",
 	}
