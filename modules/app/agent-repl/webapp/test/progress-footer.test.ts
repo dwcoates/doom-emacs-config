@@ -86,14 +86,17 @@ function input(over: Partial<FooterInput> = {}): FooterInput {
     progress: progress(),
     renderState: "idle",
     mergeStatus: null,
-    connectivity: "operational",
-    sessionStatus: "ready",
     agents: [],
     tasks: [],
     items: [],
     timerLabel: "0:24",
     ...over,
   };
+}
+
+/** The footer's phase cell markup, or "" when the strip renders no phase. */
+function phaseCell(html: string): string {
+  return html.match(/<div class="pfooter-cell pfooter-phase[^]*?<\/div>/)?.[0] ?? "";
 }
 
 /** A running tool call at the feed tail. */
@@ -1130,35 +1133,12 @@ describe("footerHtml: the phase comes from the workspace state (F5)", () => {
     expect(got).not.toContain("starting");
   });
 
-  it("subordinates session activity beneath impaired connectivity", () => {
-    const got = footerHtml(
-      input({
-        renderState: "degraded",
-        connectivity: "degraded",
-        sessionStatus: "thinking",
-      }),
-      CLOSED,
-      NOW,
-    );
-    expect(got).toContain("degraded");
-    expect(got).toContain('<span class="pfooter-secondary">thinking</span>');
-  });
-
-  it("renders no grey secondary for a merely ready session", () => {
-    // Arrange / Act — `ready` is the absence of activity, so beside an impaired
-    // route it qualifies nothing and used to sit there as a grey word.
-    const got = footerHtml(
-      input({
-        renderState: "severed",
-        connectivity: "unavailable",
-        sessionStatus: "ready",
-      }),
-      CLOSED,
-      NOW,
-    );
+  it("carries the phase word alone in the phase cell", () => {
+    // Arrange / Act — an impaired route is the case that used to hang a grey
+    // session-status word beside the colored phase.
+    const got = footerHtml(input({ renderState: "degraded" }), CLOSED, NOW);
     // Assert
-    expect(got).toContain("severed");
-    expect(got).not.toContain("pfooter-secondary");
+    expect(phaseCell(got)).toBe('<div class="pfooter-cell pfooter-phase error">degraded</div>');
   });
 
   it("names no phase at all before a state has been resolved", () => {
@@ -1228,16 +1208,15 @@ describe("footerHtml: the breathing phase word", () => {
     expect(got).toContain("animation-delay:-1235ms");
   });
 
-  it("keeps the secondary status outside the breathing word", () => {
-    // Arrange / Act — the status qualifies the phase and does not itself claim
-    // the agent is working, so it neither breathes nor takes the ramp color.
-    const got = footerHtml(
-      input({ renderState: "thinking", connectivity: "degraded", sessionStatus: "thinking" }),
-      CLOSED,
-      NOW,
-    );
+  it("ends the phase cell at the breathing word", () => {
+    // Arrange / Act — nothing trails the working word inside its cell, so the
+    // cell can never pair the breathing phase with a second, still word.
+    const got = footerHtml(input({ renderState: "thinking" }), CLOSED, NOW, {
+      shade: 0,
+      elapsedMs: 0,
+    });
     // Assert
-    expect(got).toContain('</span><span class="pfooter-secondary">thinking</span>');
+    expect(phaseCell(got)).toMatch(/thinking<\/span><\/div>$/);
   });
 });
 
