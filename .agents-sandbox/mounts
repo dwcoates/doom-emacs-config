@@ -1,0 +1,13 @@
+{
+  "defaults": [
+    {
+      "source": "~",
+      "target": "/home/claude/workspace",
+      "type": "bind",
+      "readonly": false
+    }
+  ],
+  "custom": [
+    "/Users/dodgecoates/.gitconfig:/home/claude/.gitconfig:ro"
+  ]
+}

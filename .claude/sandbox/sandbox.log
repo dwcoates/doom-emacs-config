@@ -1,0 +1,39 @@
+=== 2026-04-05 09:56:44 ===
+image:    doom-sandbox:latest
+workdir:  /doom
+mounts:
+  /Users/dodgecoates/.config/doom:/doom
+  /Users/dodgecoates/.claude:/home/claude/.claude
+  /Users/dodgecoates/.claude.json:/home/claude/.claude.json
+claude args: --dangerously-skip-permissions 
+
+=== 2026-04-07 13:57:09 ===
+image:    doom-sandbox:latest
+workdir:  /doom
+mounts:
+  /Users/dodgecoates/.config/doom:/doom
+  /Users/dodgecoates/.claude:/home/claude/.claude
+  /Users/dodgecoates/.claude.json:/home/claude/.claude.json
+  GH_TOKEN: injected
+claude args: --dangerously-skip-permissions 
+
+=== 2026-04-07 14:15:27 ===
+image:    doom-sandbox:latest
+workdir:  /doom
+mounts:
+  /Users/dodgecoates/.config/doom:/doom
+  /Users/dodgecoates/.claude:/home/claude/.claude
+  /Users/dodgecoates/.claude.json:/home/claude/.claude.json
+  GH_TOKEN: injected
+claude args: --dangerously-skip-permissions 
+
+=== 2026-04-07 14:17:15 ===
+image:    doom-sandbox:latest
+workdir:  /doom
+mounts:
+  /Users/dodgecoates/.config/doom:/doom
+  /Users/dodgecoates/.claude:/home/claude/.claude
+  /Users/dodgecoates/.claude.json:/home/claude/.claude.json
+  GH_TOKEN: injected
+claude args: --dangerously-skip-permissions 
+

@@ -1,0 +1,11 @@
+{
+  "defaults": [
+    {
+      "source": "~/.gns",
+      "target": "/home/claude/.gns",
+      "type": "bind",
+      "readonly": false
+    }
+  ],
+  "custom": []
+}
