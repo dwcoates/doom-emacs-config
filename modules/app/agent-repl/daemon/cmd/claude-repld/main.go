@@ -778,7 +778,7 @@ func main() {
 		// The registry's own record of a deliberate deletion, exposed so a merge
 		// can tell a hibernated session (rehydrate) from a deleted one (refuse).
 		SessionDeaths:     server.RegistrySessionDeaths{Reg: sessionRegistry},
-		Sessions:          registrySessions{reg: sessionRegistry, controller: controller, modelCatalogs: modelCatalogs, logf: legacyLog},
+		Sessions:          server.RegistrySessions{Reg: sessionRegistry, Controller: controller, ModelCatalogs: modelCatalogs, Logf: legacyLog},
 		Inits:             controller,
 		Catalogs:          controller,
 		Queues:            controller,
