@@ -2243,14 +2243,18 @@ func (h permHandler) HandlePermission(sessionID string, req *corev1.PermissionRe
 	// earlier WorkspaceState-only decision but does NOT replace the PERMISSION
 	// render-state, which stays alongside.
 	h.cons.pushPermission(permissionItem(req, corev1.PermissionItem_RESOLUTION_PENDING, ""))
-	// Surface a permission render-state so the frontend shows the prompt while
-	// the shim's canUseTool blocks. Eventually-consistent: the SSM re-pushes
-	// the resolved state as events flow, and a frontend resync corrects any lag.
-	h.cons.push.PushWorkspaceState(&frontendv1.WorkspaceState{
-		Workspace: h.cons.workspace,
-		SessionId: h.cons.sessionID,
-		State:     frontendv1.RenderState_RENDER_STATE_PERMISSION,
-	})
+	// THE PERMISSION RENDER-STATE IS NOT PUSHED FROM HERE. A hand-built
+	// WorkspaceState carrying only a render state is a frame that cannot say
+	// its session connectivity, status, controller generation or revision, and
+	// the frontend contract has no reading for an UNSPECIFIED connectivity: the
+	// webapp's validating decoder refuses the whole frame, so this shortcut
+	// bought nothing and cost the frame it was trying to deliver.
+	//
+	// The authority is the SSM's permission row (ssm.ApplyPermission, THE only
+	// producer of RENDER_STATE_PERMISSION), which the count edge below reaches
+	// through onPermsChanged the moment this waiter parks. That push is
+	// resolved, fully stamped and monotonically revisioned like every other
+	// WorkspaceState this daemon emits.
 	ch, release := h.reg.await(req.GetRequestId(), h.cons.workspace)
 	// The waiter is parked, so the workspace's pending count just went up; and
 	// however this returns, releasing it brings the count back down.
