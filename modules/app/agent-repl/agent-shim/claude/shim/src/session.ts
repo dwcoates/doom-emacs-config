@@ -709,34 +709,44 @@ export class ShimSession {
   }
 
   private logCacheUsage(evt: ResultEvt): void {
-    const modelCacheUsage = evt.model_usage === undefined
+    const topLevelUsage = summarizeUsage(evt.usage);
+    const modelUsage = evt.model_usage === undefined
       ? undefined
       : Object.fromEntries(
           Object.entries(evt.model_usage).map(([model, usage]) => [
             model,
-            summarizeCacheUsage(usage),
+            summarizeUsage(usage),
           ]),
         );
     const usage = evt.model_usage === undefined
-      ? summarizeCacheUsage(evt.usage)
-      : sumCacheUsage(Object.values(evt.model_usage));
+      ? { ...topLevelUsage, cost_usd: evt.total_cost_usd }
+      : sumUsage(Object.values(evt.model_usage));
     const fields = {
       agent_repl_session_id: this.deps.sessionId,
       sdk_uuid: evt.uuid,
       result_subtype: evt.subtype,
       is_error: evt.is_error,
       cache_usage_scope: evt.model_usage === undefined ? "top_level" : "whole_tree",
-      uncached_input_tokens: usage.uncached_input_tokens,
+      input_tokens: usage.input_tokens,
+      output_tokens: usage.output_tokens,
       cache_creation_input_tokens: usage.cache_creation_input_tokens,
       cache_read_input_tokens: usage.cache_read_input_tokens,
-      cache_observed_input_tokens: usage.cache_observed_input_tokens,
+      total_input_tokens: usage.total_input_tokens,
       cache_hit_rate: usage.cache_hit_rate,
       cache_hit_percent: usage.cache_hit_percent,
-      ...(modelCacheUsage === undefined ? {} : { model_cache_usage: modelCacheUsage }),
+      cost_usd: usage.cost_usd,
+      web_search_requests: usage.web_search_requests,
+      duration_ms: evt.duration_ms,
+      duration_api_ms: evt.duration_api_ms,
+      num_turns: evt.num_turns,
+      sdk_reported_total_cost_usd: evt.total_cost_usd,
+      top_level_usage: topLevelUsage,
+      model_count: modelUsage === undefined ? 0 : Object.keys(modelUsage).length,
+      ...(modelUsage === undefined ? {} : { model_usage: modelUsage }),
     };
-    CACHE_LOGGER.log(fields, "SDK result prompt-cache usage");
+    CACHE_LOGGER.log(fields, "SDK result token and prompt-cache usage");
     if (
-      usage.cache_observed_input_tokens >= CACHE_OBSERVATION_MIN_INPUT_TOKENS &&
+      usage.total_input_tokens >= CACHE_OBSERVATION_MIN_INPUT_TOKENS &&
       usage.cache_hit_rate !== null &&
       usage.cache_hit_rate < CACHE_HIT_RATE_WARNING_THRESHOLD
     ) {
@@ -747,7 +757,7 @@ export class ShimSession {
           cache_hit_rate_warning_threshold: CACHE_HIT_RATE_WARNING_THRESHOLD,
           cache_observation_min_input_tokens: CACHE_OBSERVATION_MIN_INPUT_TOKENS,
         },
-        "LOW PROMPT CACHE HIT RATE: materially sized SDK result is below 80%",
+        "SDK result prompt-cache hit rate is below the configured threshold",
       );
     }
   }
@@ -831,43 +841,55 @@ function normalizeUsage(usage: unknown): ResultEvt["usage"] {
   };
 }
 
-interface CacheUsageLike {
+interface UsageLike {
   input_tokens: number;
+  output_tokens: number;
   cache_creation_input_tokens?: number;
   cache_read_input_tokens?: number;
+  web_search_requests?: number;
+  cost_usd?: number;
+  context_window?: number;
 }
 
-interface CacheUsageSummary {
-  uncached_input_tokens: number;
+interface UsageSummary {
+  input_tokens: number;
+  output_tokens: number;
   cache_creation_input_tokens: number;
   cache_read_input_tokens: number;
-  cache_observed_input_tokens: number;
+  total_input_tokens: number;
   cache_hit_rate: number | null;
   cache_hit_percent: number | null;
+  cost_usd: number | null;
+  web_search_requests: number | null;
+  context_window: number | null;
 }
 
-function summarizeCacheUsage(usage: CacheUsageLike): CacheUsageSummary {
-  const uncachedInputTokens = usage.input_tokens;
+function summarizeUsage(usage: UsageLike): UsageSummary {
   const cacheCreationInputTokens = usage.cache_creation_input_tokens ?? 0;
   const cacheReadInputTokens = usage.cache_read_input_tokens ?? 0;
-  const cacheObservedInputTokens =
-    uncachedInputTokens + cacheCreationInputTokens + cacheReadInputTokens;
-  const cacheHitRate = cacheObservedInputTokens === 0
+  const totalInputTokens =
+    usage.input_tokens + cacheCreationInputTokens + cacheReadInputTokens;
+  const cacheHitRate = totalInputTokens === 0
     ? null
-    : cacheReadInputTokens / cacheObservedInputTokens;
+    : cacheReadInputTokens / totalInputTokens;
   return {
-    uncached_input_tokens: uncachedInputTokens,
+    input_tokens: usage.input_tokens,
+    output_tokens: usage.output_tokens,
     cache_creation_input_tokens: cacheCreationInputTokens,
     cache_read_input_tokens: cacheReadInputTokens,
-    cache_observed_input_tokens: cacheObservedInputTokens,
+    total_input_tokens: totalInputTokens,
     cache_hit_rate: cacheHitRate,
     cache_hit_percent: cacheHitRate === null ? null : cacheHitRate * 100,
+    cost_usd: usage.cost_usd ?? null,
+    web_search_requests: usage.web_search_requests ?? null,
+    context_window: usage.context_window ?? null,
   };
 }
 
-function sumCacheUsage(usages: CacheUsageLike[]): CacheUsageSummary {
-  return summarizeCacheUsage({
+function sumUsage(usages: ModelUsage[]): UsageSummary {
+  return summarizeUsage({
     input_tokens: usages.reduce((sum, usage) => sum + usage.input_tokens, 0),
+    output_tokens: usages.reduce((sum, usage) => sum + usage.output_tokens, 0),
     cache_creation_input_tokens: usages.reduce(
       (sum, usage) => sum + (usage.cache_creation_input_tokens ?? 0),
       0,
@@ -876,6 +898,11 @@ function sumCacheUsage(usages: CacheUsageLike[]): CacheUsageSummary {
       (sum, usage) => sum + (usage.cache_read_input_tokens ?? 0),
       0,
     ),
+    web_search_requests: usages.reduce(
+      (sum, usage) => sum + usage.web_search_requests,
+      0,
+    ),
+    cost_usd: usages.reduce((sum, usage) => sum + usage.cost_usd, 0),
   });
 }
 
