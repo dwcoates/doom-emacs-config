@@ -15,6 +15,7 @@ import {
   REVEAL_ATTR,
   REVEAL_CLASS,
   SEARCH_HOOK,
+  SEARCHING_CLASS,
   SearchHost,
   buildTextIndex,
   findMatches,
@@ -746,5 +747,85 @@ describe("installSearchHook", () => {
     expect(() => (target[SEARCH_HOOK] as (c: string) => string)("sideways")).toThrow(
       /unknown search command/,
     );
+  });
+});
+
+/**
+ * Lazy heavy rendering (lazy-item.ts) leaves replayed history the reader has
+ * not scrolled to standing in as placeholders, which carry the item's prose
+ * but not the tool cards, tab chips or folds its real render would. A search
+ * must not silently under-report because of that, so starting one drains the
+ * deferral first and then walks exactly the DOM it always did.
+ */
+describe("FeedSearch over a feed with deferred renders", () => {
+  it("drains the feed's deferred renders as the search begins", () => {
+    // Arrange
+    const feed = feedWith("<p>needle</p>");
+    const { search } = searchOn(feed);
+    let drained = 0;
+    search.setPrepare(() => {
+      drained++;
+    });
+    // Act
+    press(search, "s", { ctrlKey: true });
+    // Assert
+    expect(drained).toBe(1);
+  });
+
+  it("drains BEFORE the first query lands, so the walk never misses an item", () => {
+    // Arrange — the prepare hook is what a renderer upgrades from, so it must
+    // have run by the time the first keystroke collects matches.
+    const feed = feedWith("<p>placeholder text</p>");
+    const { search } = searchOn(feed);
+    search.setPrepare(() => {
+      feed.querySelectorAll<HTMLElement>(".feed-item").forEach((el) => {
+        el.innerHTML = "<p>the upgraded needle</p>";
+      });
+    });
+    // Act
+    searchFor(search, "needle");
+    // Assert — the match is in the text the upgrade put there.
+    expect(feed.querySelectorAll(`.${MARK_CLASS}`)).toHaveLength(1);
+  });
+
+  it("finds a placeholder's own text even with no upgrade wired at all", () => {
+    // Arrange — the placeholder carries the item's prose (lazy-item.ts), so a
+    // host that never installed a prepare hook still searches the history.
+    const feed = feedWith('<div class="feed-placeholder">the missing needle</div>');
+    // Act
+    searchFor(searchOn(feed).search, "needle");
+    // Assert
+    expect(feed.querySelectorAll(`.${MARK_CLASS}`)).toHaveLength(1);
+  });
+
+  it("suppresses the feed's render skipping for as long as it runs", () => {
+    // Arrange
+    const feed = feedWith("<p>needle</p>");
+    // Act
+    searchFor(searchOn(feed).search, "needle");
+    // Assert — item positions are measured, so no box may go unlaid-out.
+    expect(feed.classList.contains(SEARCHING_CLASS)).toBe(true);
+  });
+
+  it("re-arms the render skipping once the search is accepted", () => {
+    // Arrange
+    const feed = feedWith("<p>needle</p>");
+    const { search } = searchOn(feed);
+    searchFor(search, "needle");
+    // Act
+    press(search, "Enter");
+    // Assert
+    expect(feed.classList.contains(SEARCHING_CLASS)).toBe(false);
+  });
+
+  it("re-arms the render skipping once the search is aborted", () => {
+    // Arrange
+    const feed = feedWith("<p>needle</p>");
+    const { search } = searchOn(feed);
+    searchFor(search, "needle");
+    // Act
+    press(search, "g", { ctrlKey: true });
+    // Assert
+    expect(feed.classList.contains(SEARCHING_CLASS)).toBe(false);
   });
 });
