@@ -324,9 +324,15 @@ type Manager struct {
 	// the production constant; only a test assigns one, so the timeout branch
 	// can be driven without a ten-second wait (see turnstop.go).
 	interruptDrain time.Duration
-	closed         bool
-	rootCtx        context.Context
-	rootStop       context.CancelFunc
+	// repullWaitGraceOverride overrides the grace a serialized re-pull request
+	// allows the in-flight one to unwind in, once that one's own deadline has
+	// tripped. Zero means the production constant; only a test assigns one, so
+	// the wedged-pull branch can be driven without a minute-long wait (see
+	// repull.go).
+	repullWaitGraceOverride time.Duration
+	closed                  bool
+	rootCtx                 context.Context
+	rootStop                context.CancelFunc
 	// exits counts every session-controller-exit goroutine (the tail of bringUp's `go
 	// func`), so Close can JOIN them. Unjoined, that tail — which drains the
 	// queue, publishes the empty view, and persists queued_prompts through the
@@ -2105,7 +2111,7 @@ func (m *Manager) purgeRetainedOnRotation(workspace, sessionID, previous, next s
 		"purged", dropped, "retired_ceiling", ceiling, "rotation_epoch", epoch)
 	logf("session-controller: retained conversation ring PURGED across the vendor session rotation — every item and every seq ceiling it carried counted in the retired space; the ring is empty until the new space's events arrive")
 	if inflight != nil {
-		logf("session-controller: a history re-pull is IN FLIGHT across the rotation (from_seq=%d stop_at=%d, both retired-space numbers) — its bounds cannot cover the new space, so no later request will be coalesced onto it",
+		logf("session-controller: a history re-pull is IN FLIGHT across the rotation (from_seq=%d stop_at=%d, both retired-space numbers) — its bounds cannot cover the new space, so no later request will be coalesced onto it; a new-space request waits it out and then pulls its own range",
 			inflight.fromSeq, inflight.stopAt)
 	}
 }
