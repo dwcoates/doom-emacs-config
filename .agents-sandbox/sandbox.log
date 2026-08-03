@@ -1,0 +1,32 @@
+=== 2026-06-20 14:01:37 ===
+tool:     claude
+image:    doom-sandbox:latest
+workdir:  /fullscreen-repl-toggle
+mounts:
+  /Users/dodgecoates/.config/doom-worktrees/fullscreen-repl-toggle:/fullscreen-repl-toggle
+  /Users/dodgecoates/.claude:/home/claude/.claude
+  /Users/dodgecoates/.claude-sandbox/.credentials.json:/home/claude/.claude/.credentials.json
+  /Users/dodgecoates/.claude-sandbox.json:/home/claude/.claude.json
+  GH_TOKEN: injected
+  git SSH->HTTPS rewrite: enabled
+  sandbox override: in-container claude tool sandbox disabled
+  gns: ~/.gns mounted (read-only)
+  /Users/dodgecoates/.config/doom:/Users/dodgecoates/.config/doom (worktree)
+claude args: --dangerously-skip-permissions --system-prompt .
+
+=== 2026-06-20 14:19:06 ===
+tool:     claude
+image:    doom-sandbox:latest
+workdir:  /fullscreen-repl-toggle
+mounts:
+  /Users/dodgecoates/.config/doom-worktrees/fullscreen-repl-toggle:/fullscreen-repl-toggle
+  /Users/dodgecoates/.claude:/home/claude/.claude
+  /Users/dodgecoates/.claude-sandbox/.credentials.json:/home/claude/.claude/.credentials.json
+  /Users/dodgecoates/.claude-sandbox.json:/home/claude/.claude.json
+  GH_TOKEN: injected
+  git SSH->HTTPS rewrite: enabled
+  sandbox override: in-container claude tool sandbox disabled
+  gns: ~/.gns mounted (read-only)
+  /Users/dodgecoates/.config/doom:/Users/dodgecoates/.config/doom (worktree)
+claude args: --dangerously-skip-permissions --system-prompt .
+
