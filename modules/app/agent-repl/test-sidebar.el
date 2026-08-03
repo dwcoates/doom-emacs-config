@@ -1392,5 +1392,70 @@ Both read the one minibuffer, so the guard is shared rather than per-action."
   ;; Act / Assert
   (should (equal (alist-get :compacting agent-repl--sidebar-status-wire) "compacting")))
 
+;;;; ---- The RosterRowStatus proto vocabulary ----------------------------
+
+;; `frontend.v1.RosterRowStatus' is the third face of the sidebar's status
+;; contract, beside this file's wire table and the webapp's WorkspaceRow
+;; union.  These tests pin the enum against the elisp list so a status added
+;; on one side and forgotten on the other fails here rather than drawing a
+;; wrong dot.  The proto text is READ, not duplicated: a copy of the
+;; vocabulary in the test would be a fourth list to drift.
+
+(defconst agent-repl-test--frontend-proto-file
+  (expand-file-name "proto/agentshim/frontend/v1/frontend.proto"
+                    (file-name-directory (or load-file-name buffer-file-name)))
+  "Absolute path to frontend.proto, resolved at LOAD time.
+`load-file-name' is nil once loading finishes, so a helper that reads it
+when CALLED would resolve nothing under `emacs -batch -l'.")
+
+(defun agent-repl-test--roster-status-keywords ()
+  "Return the RosterRowStatus wire strings declared in frontend.proto.
+Each ROSTER_ROW_STATUS_FOO member maps to \"foo\" with underscores as
+hyphens, which is the sidebar's wire spelling.  UNSPECIFIED is excluded:
+it is invalid on the wire and has no wire string."
+  (let ((proto agent-repl-test--frontend-proto-file)
+        (names nil))
+    (with-temp-buffer
+      (insert-file-contents proto)
+      (goto-char (point-min))
+      (while (re-search-forward "^ *ROSTER_ROW_STATUS_\\([A-Z_]+\\) *=" nil t)
+        (let ((name (match-string 1)))
+          (unless (equal name "UNSPECIFIED")
+            (push (downcase (replace-regexp-in-string "_" "-" name)) names)))))
+    (nreverse names)))
+
+(defun agent-repl-test--sidebar-wire-vocabulary ()
+  "Return every wire status string the sidebar can emit.
+The mapped render states, plus the two `agent-repl--sidebar-wire-status'
+derives structurally rather than from the table."
+  (delete-dups
+   (append (mapcar #'cdr agent-repl--sidebar-status-wire)
+           '("inactive" "none"))))
+
+(ert-deftest agent-repl-test-sidebar-roster-enum-covers-every-wire-status ()
+  "Every status the sidebar emits has a RosterRowStatus member."
+  ;; Arrange
+  (let ((enum (agent-repl-test--roster-status-keywords)))
+    ;; Act
+    (let ((missing (cl-remove-if (lambda (s) (member s enum))
+                                 (agent-repl-test--sidebar-wire-vocabulary))))
+      ;; Assert
+      (should (null missing)))))
+
+(ert-deftest agent-repl-test-sidebar-roster-enum-adds-no-unknown-status ()
+  "RosterRowStatus declares no member the sidebar cannot emit."
+  ;; Arrange
+  (let ((vocab (agent-repl-test--sidebar-wire-vocabulary)))
+    ;; Act
+    (let ((extra (cl-remove-if (lambda (s) (member s vocab))
+                               (agent-repl-test--roster-status-keywords))))
+      ;; Assert
+      (should (null extra)))))
+
+(ert-deftest agent-repl-test-sidebar-roster-enum-excludes-unspecified ()
+  "UNSPECIFIED carries no wire string: it is invalid, not a status."
+  ;; Act / Assert
+  (should-not (member "unspecified" (agent-repl-test--roster-status-keywords))))
+
 (provide 'test-sidebar)
 ;;; test-sidebar.el ends here

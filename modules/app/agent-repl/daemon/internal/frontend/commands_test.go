@@ -308,6 +308,59 @@ func TestDispatchHandlerErrorBecomesFailingAck(t *testing.T) {
 	}
 }
 
+// TestDispatchNacksUnimplementedRosterPublish pins the wave-1 state of the
+// roster contract: the arm is recognized and answered with an explicit
+// unimplemented Nack. Silently accepting it would tell a publisher its roster
+// was retained when nothing holds it, and falling through to the unknown-
+// command branch would tell it the daemon did not understand a command that is
+// on the frozen wire.
+func TestDispatchNacksUnimplementedRosterPublish(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  *frontendv1.PublishWorkspaceRosterCmd
+	}{
+		{
+			name: "roster present",
+			cmd: &frontendv1.PublishWorkspaceRosterCmd{
+				Roster: &frontendv1.WorkspaceRoster{Revision: 3},
+			},
+		},
+		{
+			// The Nack must not depend on the payload: an empty command is
+			// still an understood-but-unimplemented arm, not a panic.
+			name: "roster absent",
+			cmd:  &frontendv1.PublishWorkspaceRosterCmd{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := &mockHandler{}
+			cmd := &frontendv1.FrontendCommand{
+				RequestId: "roster-1",
+				Command:   &frontendv1.FrontendCommand_PublishWorkspaceRoster{PublishWorkspaceRoster: tt.cmd},
+			}
+
+			// Act.
+			ack := Dispatch(context.Background(), func(string, ...any) {}, h, cmd)
+
+			// Assert.
+			if ack.GetOk() {
+				t.Fatalf("publishWorkspaceRoster ack = %+v, want a Nack", ack)
+			}
+			if !strings.Contains(ack.GetError(), "not implemented") {
+				t.Errorf("Nack %q does not say the arm is unimplemented", ack.GetError())
+			}
+			if h.called != "" {
+				t.Errorf("publishWorkspaceRoster reached handler %q", h.called)
+			}
+			if ack.GetRequestId() != "roster-1" {
+				t.Errorf("ack request_id = %q, want roster-1", ack.GetRequestId())
+			}
+		})
+	}
+}
+
 func TestDispatchUnknownCommandFailsLoudly(t *testing.T) {
 	// Arrange: a command with an empty oneof (no command arm set).
 	h := &mockHandler{}
