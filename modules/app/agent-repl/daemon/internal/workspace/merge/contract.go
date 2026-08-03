@@ -57,6 +57,12 @@ type Coordinator interface {
 //     silently dropping them),
 //   - only the holder may submit prompts, and every conversation item the
 //     session produces is stamped CONVERSATION_SOURCE_MERGE.
+//
+// AND THE INTERRUPTED TURN IS PUT BACK. The stop is machinery, not the user's:
+// they asked for work and a merge took the shim away mid-sentence. So the
+// displaced turn rides the durable lease window (ssm.DisplacedTurn) and is
+// resubmitted, exactly once, as the lease is released — including across the
+// daemon bounce a self-merge causes, which is the case it exists for.
 type Lease interface {
 	// Acquire takes the lease for ws and returns the release func. Release is
 	// called on EVERY terminal phase — merged, merge_failed, and an abandoned
