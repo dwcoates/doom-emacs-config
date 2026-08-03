@@ -302,6 +302,10 @@ type commandHandler struct {
 	// queues backs the queue force/accept/cancel commands (E4). Nil makes each
 	// of them a loud failing ack rather than a silent no-op, same as shutdown.
 	queues QueueController
+	// schedules backs the schedule/cancel scheduled-shutdown commands. Nil is a
+	// loud unsupported capability: a caller told its bounce was scheduled when
+	// nothing took a lease would wait for a shutdown that is never coming.
+	schedules ShutdownScheduleController
 	// restarts backs the restartSession command. Nil is a loud unsupported
 	// capability, never a success-shaped no-op.
 	restarts SessionRestarter
@@ -365,6 +369,9 @@ type LiveTaskSource interface {
 // CommandHandlerConfig collects the independently optional capabilities used
 // by focused unit harnesses. Production WireAgentShim supplies every field.
 type CommandHandlerConfig struct {
+	// Schedules backs the scheduled-shutdown commands. Nil is a loud
+	// unsupported capability, never a success-shaped no-op.
+	Schedules         ShutdownScheduleController
 	WorkspaceCreation WorkspaceCreationBridge
 	// MergeGeometry answers a bare merge request's three coordinates. Nil is a
 	// loud failing ack for a name-only merge, NEVER a guessed geometry.
@@ -474,6 +481,7 @@ func newCommandHandler(prompts PromptRouter, merges MergeRunner, lifecycle Works
 		restarts:         config.Restarts,
 		establishTimeout: config.EstablishTimeout,
 		resumes:          config.Resumes,
+		schedules:        config.Schedules,
 	}, nil
 }
 
@@ -975,6 +983,36 @@ func (h *commandHandler) CancelQueueEntry(_ context.Context, workspace, requestI
 	return h.queues.CancelQueueEntry(workspace, cmd.GetEntryId())
 }
 
+// ScheduleShutdown takes the daemon-global drain lease instead of bouncing now.
+//
+// Synchronous, unlike Shutdown: the ack carries whether the lease was actually
+// TAKEN, and a caller that was told ok while a rival schedule already stood
+// would sit waiting for a bounce belonging to someone else's intent.
+func (h *commandHandler) ScheduleShutdown(_ context.Context, workspace, requestID string, cmd *frontendv1.ScheduleShutdownCmd) error {
+	h.logf("frontend cmd: schedule_shutdown ws=%s request_id=%s stop_shims=%v cause=%q",
+		workspace, requestID, cmd.GetStopShims(), cmd.GetCause())
+	if h.schedules == nil {
+		return fmt.Errorf("server: scheduled shutdown is not supported by this daemon")
+	}
+	scheduleID, err := h.schedules.Schedule(cmd.GetStopShims(), cmd.GetCause())
+	if err != nil {
+		return err
+	}
+	h.logf("frontend cmd: schedule_shutdown ws=%s request_id=%s schedule_id=%s TAKEN", workspace, requestID, scheduleID)
+	return nil
+}
+
+// CancelScheduledShutdown releases the drain lease. A stale schedule id is a
+// loud nack from the engine and is surfaced verbatim.
+func (h *commandHandler) CancelScheduledShutdown(_ context.Context, workspace, requestID string, cmd *frontendv1.CancelScheduledShutdownCmd) error {
+	h.logf("frontend cmd: cancel_scheduled_shutdown ws=%s request_id=%s schedule_id=%s",
+		workspace, requestID, cmd.GetScheduleId())
+	if h.schedules == nil {
+		return fmt.Errorf("server: scheduled shutdown is not supported by this daemon")
+	}
+	return h.schedules.Cancel(cmd.GetScheduleId())
+}
+
 func (h *commandHandler) ClientLog(_ context.Context, workspace, requestID string, cmd *frontendv1.ClientLogCmd) error {
 	if h.clientLogs == nil {
 		return fmt.Errorf("server: client-log persistence is not wired")
@@ -1168,6 +1206,12 @@ type ssmSnapshotProvider struct {
 	// mtime / version) carried on every connect snapshot. Nil-safe: a nil
 	// source leaves snapshot.daemon unset rather than nil-derefing.
 	daemon DaemonViewSource
+	// shutdownSchedule supplies the daemon-global drain lease carried on every
+	// connect snapshot, so a client that connects MID-DRAIN sees the lease
+	// without waiting for an edge — the edge may never come, because a drain
+	// waiting on one long turn is silent for as long as that turn runs. Nil-safe
+	// only for focused unit construction; production always supplies it.
+	shutdownSchedule ShutdownScheduleSource
 	// progress supplies each workspace's resolved ProgressView (F1), so a
 	// (re)connecting frontend's footer is populated before the next change
 	// pushes. Nil-safe: a nil source leaves snapshot.progress empty.
@@ -1220,6 +1264,21 @@ type ProgressSource interface {
 	Snapshot() []*frontendv1.ProgressView
 }
 
+// ShutdownScheduleSource supplies the daemon-global drain lease for the
+// connect/resync snapshot. Satisfied by *ShutdownScheduler. Its answer is never
+// absent: an idle daemon reports the idle arm, which is a real value.
+type ShutdownScheduleSource interface {
+	View() *frontendv1.ShutdownScheduleView
+}
+
+// ShutdownScheduleController is the command half of the drain lease. Satisfied
+// by *ShutdownScheduler. Every method reports a refusal as an error: a schedule
+// that was not taken, or a cancel that hit nothing, must never ack ok.
+type ShutdownScheduleController interface {
+	Schedule(stopShims bool, cause string) (string, error)
+	Cancel(scheduleID string) error
+}
+
 // QueueBackend is the daemon's whole prompt-queue surface: the command half
 // and the snapshot half. Satisfied by *sessioncontroller.Manager, which owns both.
 type QueueBackend interface {
@@ -1254,6 +1313,9 @@ func (p *ssmSnapshotProvider) Snapshot() *frontendv1.StateSnapshot {
 	}
 	if p.progress != nil {
 		snap.Progress = p.progress.Snapshot()
+	}
+	if p.shutdownSchedule != nil {
+		snap.ShutdownSchedule = p.shutdownSchedule.View()
 	}
 	if p.workspaceCreation == nil {
 		panic("server: snapshot provider requires workspace creation bridge")

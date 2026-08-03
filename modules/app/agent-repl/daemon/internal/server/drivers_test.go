@@ -288,6 +288,12 @@ func (nopHandler) DeleteSession(context.Context, string, string, *frontendv1.Del
 func (nopHandler) Shutdown(context.Context, string, string, *frontendv1.ShutdownCmd) error {
 	return nil
 }
+func (nopHandler) ScheduleShutdown(context.Context, string, string, *frontendv1.ScheduleShutdownCmd) error {
+	return nil
+}
+func (nopHandler) CancelScheduledShutdown(context.Context, string, string, *frontendv1.CancelScheduledShutdownCmd) error {
+	return nil
+}
 func (nopHandler) RestartSession(context.Context, string, string, *frontendv1.RestartSessionCmd) error {
 	return nil
 }
