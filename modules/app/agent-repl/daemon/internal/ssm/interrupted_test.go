@@ -87,7 +87,7 @@ func TestInterruptedTurnEndWritesExactlyOneAgentRow(t *testing.T) {
 		t.Fatalf("turn ended: %v", err)
 	}
 	// Assert.
-	db, err := openDB(path)
+	db, err := openDB(path, t.Logf)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
