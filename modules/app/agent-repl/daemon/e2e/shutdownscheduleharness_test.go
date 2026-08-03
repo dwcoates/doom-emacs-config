@@ -254,6 +254,13 @@ func (w *shutdownWorld) boot(t *testing.T) *shutdownBoot {
 	if err != nil {
 		t.Fatalf("open geometry: %v", err)
 	}
+	// The drain lease's durable record, opened over the SAME state store the
+	// world owns — so a bounce reads back the schedule its predecessor wrote
+	// rather than starting idle.
+	shutdownSchedules, err := statedb.NewShutdownSchedules(stateStore)
+	if err != nil {
+		t.Fatalf("open shutdown schedule store: %v", err)
+	}
 
 	// srv is assigned below and read only from inside the hook, which cannot
 	// fire before a frontend connection exists — i.e. long after the assignment.
@@ -277,6 +284,12 @@ func (w *shutdownWorld) boot(t *testing.T) *shutdownBoot {
 		SessionCommands:   binding,
 		WorkspaceCreation: newEmptyWorkspaceCreation(),
 		RequestShutdown:   requestShutdown,
+		// The scheduled-shutdown drain lease: its durable record and the fleet
+		// it derives its holds from (the controller satisfies DrainHoldSource),
+		// exactly as main.go wires them. Without these the daemon nacks every
+		// ScheduleShutdownCmd as unsupported.
+		ShutdownSchedules: shutdownSchedules,
+		DrainHolds:        controller,
 		MergeLease:        mergeLease,
 		MergeQueue:        mergeQueue,
 		MergeGeometry:     geometryStore,
@@ -287,6 +300,14 @@ func (w *shutdownWorld) boot(t *testing.T) *shutdownBoot {
 		t.Fatalf("WireAgentShim: %v", err)
 	}
 	forwarder.SetTarget(agentShim.Server)
+	// A schedule this boot's PREDECESSOR took and did not finish draining is
+	// re-taken here, before any client connects — the durability half of the
+	// lease contract, done exactly once at boot, as main.go does it.
+	if agentShim.ShutdownScheduler != nil {
+		if rerr := agentShim.ShutdownScheduler.Restore(); rerr != nil {
+			t.Fatalf("restore the scheduled-shutdown drain lease: %v", rerr)
+		}
+	}
 
 	srv = server.New(server.Config{
 		DaemonVersion: "0.1.0-e2e-drain",
