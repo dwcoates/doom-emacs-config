@@ -152,6 +152,14 @@ func DispatchWithResponse(ctx context.Context, logf dlog.Logf, h CommandHandler,
 		err = h.RestartSession(ctx, ws, reqID, c.RestartSession)
 	case *frontendv1.FrontendCommand_SetModel:
 		selectedModel, err = h.SetModel(ctx, ws, reqID, c.SetModel)
+	case *frontendv1.FrontendCommand_PublishWorkspaceRoster:
+		// The roster contract is frozen and its types are generated, but the
+		// daemon does not yet retain or rebroadcast a roster. The arm is
+		// answered with an explicit unimplemented NACK rather than left to the
+		// default branch: a publisher must be able to tell "the daemon does
+		// not do this yet" from "the daemon did not understand you", and
+		// neither may be silently accepted as a successful publish.
+		err = fmt.Errorf("frontend: publishWorkspaceRoster is not implemented yet (revision=%d)", c.PublishWorkspaceRoster.GetRoster().GetRevision())
 	case *frontendv1.FrontendCommand_ClientLog:
 		err = h.ClientLog(ctx, ws, reqID, c.ClientLog)
 	case *frontendv1.FrontendCommand_QueueForce:

@@ -714,6 +714,9 @@ describe("UNSUPPORTED_SHAPES registry", () => {
       "daemonView",
       "workspaceAvailable",
       "hostAction",
+      // The roster frame decodes and validates, but the rail still renders
+      // from the script-injection host hook, so it maps to no visual yet.
+      "workspaceRoster",
     ]);
   });
 
