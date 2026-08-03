@@ -53,6 +53,67 @@ PLIST key/value pairs are applied after it and may override it."
   (cl-find-if (lambda (g) (equal (plist-get g :key) key))
               (append (plist-get roster :tasks) nil)))
 
+;;;; ---- Capturing what gets published ------------------------------------
+
+(defvar agent-repl-test--sidebar-published nil
+  "Every `(FIELD . PAYLOAD)' sent under `agent-repl-test--sidebar-with-link'.")
+
+(defvar agent-repl-test--sidebar-tracked nil
+  "Every tracked publish under the link mock: `(:request-id :field :on-failure)'.")
+
+(defmacro agent-repl-test--sidebar-with-link (&rest body)
+  "Run BODY with a live frontend link mocked and every publish captured.
+Stands in for the UDS boundary only: `agent-repl--uds-connected-p' reports
+open, sends are recorded instead of written, and tracked commands keep
+their `:on-failure' callback reachable so a NACK can be delivered."
+  (declare (indent 0) (debug t))
+  `(let ((agent-repl-test--sidebar-published nil)
+         (agent-repl-test--sidebar-tracked nil)
+         (agent-repl-test--sidebar-request-n 0))
+     (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () t))
+               ((symbol-function 'agent-repl--uds-send-command)
+                (lambda (field payload &optional _ws _proc)
+                  (push (cons field payload) agent-repl-test--sidebar-published)
+                  (format "req-%d" (cl-incf agent-repl-test--sidebar-request-n))))
+               ((symbol-function 'agent-repl--uds-track-command)
+                (lambda (request-id field _ws &optional on-failure &rest _)
+                  (push (list :request-id request-id :field field
+                              :on-failure on-failure)
+                        agent-repl-test--sidebar-tracked)
+                  request-id)))
+       ,@body)))
+
+(defvar agent-repl-test--sidebar-request-n 0
+  "Request-id counter for the link mock, rebound per capture.")
+
+(defun agent-repl-test--sidebar-rosters ()
+  "Return every published `WorkspaceRoster' payload plist, oldest first."
+  (mapcar (lambda (sent) (plist-get (cdr sent) :roster))
+          (reverse agent-repl-test--sidebar-published)))
+
+(defun agent-repl-test--sidebar-wire ()
+  "Return the LAST published roster as parsed protojson.
+Encoded and re-parsed on purpose: the assertion subject is the wire text
+the daemon receives, not the plist that happens to produce it."
+  (json-parse-string (json-encode (car (last (agent-repl-test--sidebar-rosters))))
+                     :object-type 'alist :array-type 'array
+                     :null-object :null :false-object :false))
+
+(defun agent-repl-test--sidebar-wire-rows (wire)
+  "Return the row vector of WIRE's first repository section."
+  (alist-get 'rows (aref (alist-get 'sections (alist-get 'repository wire)) 0)))
+
+(defun agent-repl-test--sidebar-publish-once (&rest plist)
+  "Register one workspace from PLIST, publish, and return the parsed wire.
+PLIST is passed to `agent-repl-test--sidebar-ws' after NAME and DIR,
+which default to \"ws\" and \"/tmp/ws\".  The perspective is held open so
+rows carry a live lifecycle rather than the perspective-less shortcut."
+  (apply #'agent-repl-test--sidebar-ws "ws" "/tmp/ws" plist)
+  (cl-letf (((symbol-function 'agent-repl--ws-open-p) (lambda (_ws) t)))
+    (agent-repl-test--sidebar-with-link
+      (agent-repl--sidebar-push)
+      (agent-repl-test--sidebar-wire))))
+
 (defun agent-repl-test--sidebar-task (id title &rest plist)
   "Register a task ID titled TITLE directly in the task hash, return ID.
 PLIST key/value pairs (e.g. `:done t') are merged onto the task; the
@@ -272,25 +333,23 @@ merge instant, so that is what the arrangement carries."
         (should (agent-repl-test--sidebar-row (plist-get repo :rows) "ws"))))))
 
 (ert-deftest agent-repl-test-sidebar-kill-repaints-without-the-killed-row ()
-  "Killing a workspace pushes a roster that no longer carries its row.
-The push fires from the kill itself (`agent-repl--ws-repaint-sidebar'),
+  "Killing a workspace publishes a roster that no longer carries its row.
+The publish fires from the kill itself (`agent-repl--ws-repaint-sidebar'),
 so the row goes with the tab rather than lingering until the next tick."
   (agent-repl-test--with-clean-state
     (agent-repl-test--sidebar-ws "kept" "/tmp/kept")
     (agent-repl-test--sidebar-ws "doomed" "/tmp/doomed")
-    (let ((persp-names-cache '("kept" "doomed"))
-          (scripts nil))
-      (agent-repl--ws-put "kept" :frontend-buffer (current-buffer))
-      (cl-letf (((symbol-function 'agent-repl--frontend-webview-execute-script)
-                 (lambda (_buf script) (push script scripts)))
-                ;; The kill: the persp leaves the cache, exactly as
-                ;; `+workspace/kill' would make it.
-                ((symbol-function '+workspace/kill)
-                 (lambda (ws) (setq persp-names-cache (delete ws persp-names-cache)))))
-        (agent-repl--ws-kill "doomed"))
-      (should (= (length scripts) 1))
-      (should (string-match-p "/tmp/kept" (car scripts)))
-      (should-not (string-match-p "/tmp/doomed" (car scripts))))))
+    (let ((persp-names-cache '("kept" "doomed")))
+      (agent-repl-test--sidebar-with-link
+        (cl-letf ((;; The kill: the persp leaves the cache, exactly as
+                   ;; `+workspace/kill' would make it.
+                   (symbol-function '+workspace/kill)
+                   (lambda (ws) (setq persp-names-cache (delete ws persp-names-cache)))))
+          (agent-repl--ws-kill "doomed"))
+        (let ((published (json-encode (car (last (agent-repl-test--sidebar-rosters))))))
+          (should (= (length agent-repl-test--sidebar-published) 1))
+          (should (string-match-p "/tmp/kept" published))
+          (should-not (string-match-p "/tmp/doomed" published)))))))
 
 (ert-deftest agent-repl-test-sidebar-entries-keeps-all-when-persp-cache-unusable ()
   "With no usable persp cache the roster falls back to plain registration.
@@ -573,42 +632,345 @@ to be greyed."
 
 ;;;; ---- Pushing ------------------------------------------------------------
 
-(ert-deftest agent-repl-test-sidebar-push-targets-live-webviews-only ()
-  "The push script lands in live frontend buffers and skips dead ones."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--sidebar-ws "live" "/tmp/live")
-    (agent-repl-test--sidebar-ws "dead" "/tmp/dead")
-    (let ((buf (generate-new-buffer " sidebar-live-view")))
-      (unwind-protect
-          (progn
-            (agent-repl--ws-put "live" :frontend-buffer buf)
-            (agent-repl--ws-put "dead" :frontend-buffer
-                                (let ((b (generate-new-buffer " dead-view")))
-                                  (kill-buffer b) b))
-            (let (pushed)
-              (cl-letf (((symbol-function 'agent-repl--frontend-webview-execute-script)
-                         (lambda (b script) (push (cons b script) pushed))))
-                (agent-repl--sidebar-push))
-              (should (= 1 (length pushed)))
-              (should (eq (caar pushed) buf))
-              (should (string-match-p "agentReplWorkspaceRoster" (cdar pushed)))))
-        (kill-buffer buf)))))
-
 (ert-deftest agent-repl-test-sidebar-push-refreshes-flat-dirs ()
   "A push rewrites `agent-repl--sidebar-flat-dirs' from the fresh build."
   (agent-repl-test--with-clean-state
     (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
     (setq agent-repl--sidebar-flat-dirs '("/stale"))
-    (cl-letf (((symbol-function 'agent-repl--frontend-webview-execute-script)
-               (lambda (_b _s))))
+    (agent-repl-test--sidebar-with-link
       (agent-repl--sidebar-push))
     (should (equal agent-repl--sidebar-flat-dirs
                    (list (agent-repl--path-canonical "/tmp/ws"))))))
 
-(ert-deftest agent-repl-test-sidebar-push-script-guards-missing-hook ()
-  "The push script no-ops (page side) when the hook is not yet planted."
-  (should (equal (agent-repl--sidebar-push-script "{}")
-                 "window.agentReplWorkspaceRoster && window.agentReplWorkspaceRoster({});")))
+;;;; ---- Publishing the roster to the daemon ---------------------------------
+
+(ert-deftest agent-repl-test-sidebar-push-sends-the-publish-command ()
+  "A push emits exactly one `publishWorkspaceRoster' frontend command."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (agent-repl-test--sidebar-with-link
+      (agent-repl--sidebar-push)
+      (should (equal (mapcar #'car agent-repl-test--sidebar-published)
+                     '("publishWorkspaceRoster"))))))
+
+(ert-deftest agent-repl-test-sidebar-push-no-longer-executes-a-script ()
+  "The per-webview injection path is GONE: a push evaluates no script.
+The roster now reaches views through the daemon's retained copy, so an
+execute-script here would be a second, divergent delivery channel."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (agent-repl--ws-put "ws" :frontend-buffer (current-buffer))
+    (let (scripts)
+      (cl-letf (((symbol-function 'agent-repl--frontend-webview-execute-script)
+                 (lambda (_buf script) (push script scripts))))
+        (agent-repl-test--sidebar-with-link
+          (agent-repl--sidebar-push)))
+      (should (null scripts)))))
+
+(ert-deftest agent-repl-test-sidebar-roster-hook-constant-is-gone ()
+  "The webview roster hook constant no longer exists to be pushed through."
+  (should-not (boundp 'agent-repl--sidebar-roster-hook)))
+
+(ert-deftest agent-repl-test-sidebar-push-script-builder-is-gone ()
+  "The roster push-script builder no longer exists."
+  (should-not (fboundp 'agent-repl--sidebar-push-script)))
+
+(ert-deftest agent-repl-test-sidebar-publish-skipped-when-link-down ()
+  "With no live link the publish is skipped rather than raised.
+A daemon that is not there cannot receive a roster, and the reconnect
+publish delivers a fresher one than the frame that could not be sent."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () nil)))
+      (should (null (agent-repl--sidebar-push))))))
+
+(ert-deftest agent-repl-test-sidebar-publish-holds-revision-when-link-down ()
+  "A skipped publish consumes no revision, so the counter stays truthful."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () nil)))
+      (agent-repl--sidebar-push))
+    (should (= agent-repl--sidebar-roster-revision 0))))
+
+;;;; ---- The published protojson shape ---------------------------------------
+
+(ert-deftest agent-repl-test-sidebar-wire-repository-view-arm ()
+  "The repository grouping is carried as the `repository' oneof arm."
+  (agent-repl-test--with-clean-state
+    (let ((wire (agent-repl-test--sidebar-publish-once)))
+      (should (alist-get 'repository wire))
+      (should (null (alist-get 'task wire))))))
+
+(ert-deftest agent-repl-test-sidebar-wire-task-view-arm ()
+  "The task grouping is carried as the `task' oneof arm, excluding the other."
+  (agent-repl-test--with-clean-state
+    (setq agent-repl--sidebar-view :task)
+    (let ((wire (agent-repl-test--sidebar-publish-once)))
+      (should (alist-get 'task wire))
+      (should (null (alist-get 'repository wire))))))
+
+(ert-deftest agent-repl-test-sidebar-wire-carries-no-view-mode-field ()
+  "The set arm IS the grouping: no `view' field rides beside it."
+  (agent-repl-test--with-clean-state
+    (should (null (alist-get 'view (agent-repl-test--sidebar-publish-once))))))
+
+(ert-deftest agent-repl-test-sidebar-wire-repo-section-key ()
+  "A repository section carries its fold key as `repoKey'."
+  (agent-repl-test--with-clean-state
+    (let* ((wire (agent-repl-test--sidebar-publish-once))
+           (section (aref (alist-get 'sections (alist-get 'repository wire)) 0)))
+      (should (equal (alist-get 'repoKey section) "/repos/doom/.git")))))
+
+(ert-deftest agent-repl-test-sidebar-wire-folded-section-keeps-its-rows ()
+  "A folded section publishes folded=true AND still carries its rows.
+Folding is display state, so unfolding must need no republish."
+  (agent-repl-test--with-clean-state
+    (agent-repl--toggle-repo-fold "/repos/doom/.git")
+    (let* ((wire (agent-repl-test--sidebar-publish-once))
+           (section (aref (alist-get 'sections (alist-get 'repository wire)) 0)))
+      (should (eq (alist-get 'folded section) t))
+      (should (= 1 (length (alist-get 'rows section)))))))
+
+(ert-deftest agent-repl-test-sidebar-wire-unfolded-section-omits-folded ()
+  "An unfolded section omits `folded' entirely: proto3 drops a false bool."
+  (agent-repl-test--with-clean-state
+    (let* ((wire (agent-repl-test--sidebar-publish-once))
+           (section (aref (alist-get 'sections (alist-get 'repository wire)) 0)))
+      (should (null (assq 'folded section))))))
+
+(ert-deftest agent-repl-test-sidebar-wire-task-section-identity-and-title ()
+  "A task section carries the task id as identity and the title for display."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-task "t1" "Ship the roster")
+    (setq agent-repl--sidebar-view :task)
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws" :task-id "t1")
+    (cl-letf (((symbol-function 'agent-repl--ws-open-p) (lambda (_ws) t)))
+      (agent-repl-test--sidebar-with-link
+        (agent-repl--sidebar-push)
+        (let* ((wire (agent-repl-test--sidebar-wire))
+               (section (cl-find-if (lambda (s) (equal (alist-get 'taskId s) "t1"))
+                                    (append (alist-get 'sections
+                                                       (alist-get 'task wire))
+                                            nil))))
+          (should section)
+          (should (equal (alist-get 'title section) "Ship the roster")))))))
+
+(ert-deftest agent-repl-test-sidebar-wire-task-section-done ()
+  "A completed task section publishes done=true."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-task "t1" "Done task" :done t)
+    (setq agent-repl--sidebar-view :task)
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws" :task-id "t1")
+    (cl-letf (((symbol-function 'agent-repl--ws-open-p) (lambda (_ws) t)))
+      (agent-repl-test--sidebar-with-link
+        (agent-repl--sidebar-push)
+        (let* ((wire (agent-repl-test--sidebar-wire))
+               (section (cl-find-if (lambda (s) (equal (alist-get 'taskId s) "t1"))
+                                    (append (alist-get 'sections
+                                                       (alist-get 'task wire))
+                                            nil))))
+          (should (eq (alist-get 'done section) t)))))))
+
+(ert-deftest agent-repl-test-sidebar-wire-row-identity-fields ()
+  "A row carries its dir (identity) and name (display)."
+  (agent-repl-test--with-clean-state
+    (let* ((wire (agent-repl-test--sidebar-publish-once))
+           (row (aref (agent-repl-test--sidebar-wire-rows wire) 0)))
+      (should (equal (alist-get 'dir row) (agent-repl--path-canonical "/tmp/ws")))
+      (should (equal (alist-get 'name row) "ws")))))
+
+(ert-deftest agent-repl-test-sidebar-wire-row-has-no-status-field ()
+  "A row carries NO `status' field: the set arm is the whole assertion."
+  (agent-repl-test--with-clean-state
+    (let* ((wire (agent-repl-test--sidebar-publish-once
+                  :pushed-render-state :thinking))
+           (row (aref (agent-repl-test--sidebar-wire-rows wire) 0)))
+      (should (null (assq 'status row))))))
+
+(ert-deftest agent-repl-test-sidebar-wire-row-status-arm-is-empty-object ()
+  "The status arm's value is the empty object every arm message is."
+  (agent-repl-test--with-clean-state
+    (let* ((wire (agent-repl-test--sidebar-publish-once
+                  :pushed-render-state :thinking))
+           (row (aref (agent-repl-test--sidebar-wire-rows wire) 0)))
+      (should (equal (alist-get 'thinking row) nil)))))
+
+(ert-deftest agent-repl-test-sidebar-wire-row-sets-exactly-one-status-arm ()
+  "Exactly one arm is set: two lifecycles is no more a lifecycle than none."
+  (agent-repl-test--with-clean-state
+    (let* ((wire (agent-repl-test--sidebar-publish-once
+                  :pushed-render-state :thinking))
+           (row (aref (agent-repl-test--sidebar-wire-rows wire) 0))
+           (arms (cl-count-if (lambda (cell)
+                                (rassoc (car cell)
+                                        (mapcar (lambda (m)
+                                                  (cons (car m)
+                                                        (intern (substring
+                                                                 (symbol-name (cdr m)) 1))))
+                                                agent-repl--sidebar-status-arm)))
+                              row)))
+      (should (= arms 1)))))
+
+(ert-deftest agent-repl-test-sidebar-wire-row-camel-case-arm-idle-async ()
+  "A kebab-case wire status publishes under its lowerCamel arm key."
+  (agent-repl-test--with-clean-state
+    (let* ((wire (agent-repl-test--sidebar-publish-once
+                  :pushed-render-state :idle-async))
+           (row (aref (agent-repl-test--sidebar-wire-rows wire) 0)))
+      (should (assq 'idleAsync row))
+      (should (null (assq 'idle-async row))))))
+
+(ert-deftest agent-repl-test-sidebar-wire-row-camel-case-arm-merge-conflict ()
+  "A merge-conflict row publishes under the `mergeConflict' arm key."
+  (agent-repl-test--with-clean-state
+    (let* ((wire (agent-repl-test--sidebar-publish-once
+                  :pushed-render-state :merge-conflict))
+           (row (aref (agent-repl-test--sidebar-wire-rows wire) 0)))
+      (should (assq 'mergeConflict row)))))
+
+(ert-deftest agent-repl-test-sidebar-wire-row-inactive-arm ()
+  "A perspective-less row publishes the `inactive' arm."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (agent-repl-test--sidebar-with-link
+      (agent-repl--sidebar-push)
+      (let* ((wire (agent-repl-test--sidebar-wire))
+             (row (aref (agent-repl-test--sidebar-wire-rows wire) 0)))
+        (should (assq 'inactive row))))))
+
+(ert-deftest agent-repl-test-sidebar-status-arm-table-covers-every-wire-status ()
+  "Every wire status the sidebar can emit maps to an arm key."
+  (dolist (pair agent-repl--sidebar-status-wire)
+    (should (agent-repl--sidebar-status-arm (cdr pair)))))
+
+(ert-deftest agent-repl-test-sidebar-status-arm-unmapped-errors ()
+  "An unmapped wire status signals rather than publishing an armless row."
+  (should-error (agent-repl--sidebar-status-arm "not-a-status")))
+
+(ert-deftest agent-repl-test-sidebar-wire-row-children-nest ()
+  "A spawned child rides nested in its parent's `children'."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "parent" "/tmp/parent")
+    (agent-repl-test--sidebar-ws "child" "/tmp/child"
+                                 :source-ws-dir "/tmp/parent")
+    (cl-letf (((symbol-function 'agent-repl--ws-open-p) (lambda (_ws) t)))
+      (agent-repl-test--sidebar-with-link
+        (agent-repl--sidebar-push)
+        (let* ((wire (agent-repl-test--sidebar-wire))
+               (rows (agent-repl-test--sidebar-wire-rows wire))
+               (parent (aref rows 0)))
+          (should (= 1 (length rows)))
+          (should (equal (alist-get 'name parent) "parent"))
+          (should (equal (alist-get 'name (aref (alist-get 'children parent) 0))
+                         "child")))))))
+
+(ert-deftest agent-repl-test-sidebar-wire-current-dir ()
+  "The current workspace's dir is published as `currentDir'."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (cl-letf (((symbol-function 'agent-repl--ws-open-p) (lambda (_ws) t))
+              ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws")))
+      (agent-repl-test--sidebar-with-link
+        (agent-repl--sidebar-push)
+        (should (equal (alist-get 'currentDir (agent-repl-test--sidebar-wire))
+                       (agent-repl--path-canonical "/tmp/ws")))))))
+
+(ert-deftest agent-repl-test-sidebar-wire-current-dir-omitted-when-none ()
+  "With no current workspace the empty `currentDir' is omitted."
+  (agent-repl-test--with-clean-state
+    (should (null (assq 'currentDir (agent-repl-test--sidebar-publish-once))))))
+
+(ert-deftest agent-repl-test-sidebar-wire-nav-dir ()
+  "The keyboard cursor's dir is published as `navDir'."
+  (agent-repl-test--with-clean-state
+    (setq agent-repl--sidebar-nav-dir "/tmp/ws")
+    (should (equal (alist-get 'navDir (agent-repl-test--sidebar-publish-once))
+                   "/tmp/ws"))))
+
+(ert-deftest agent-repl-test-sidebar-wire-nav-dir-omitted-when-unset ()
+  "With no cursor the empty `navDir' is omitted rather than sent as null."
+  (agent-repl-test--with-clean-state
+    (should (null (assq 'navDir (agent-repl-test--sidebar-publish-once))))))
+
+;;;; ---- The revision counter ------------------------------------------------
+
+(ert-deftest agent-repl-test-sidebar-first-publish-is-revision-one ()
+  "The first roster of an Emacs boot publishes revision 1, not 0."
+  (agent-repl-test--with-clean-state
+    (should (= (alist-get 'revision (agent-repl-test--sidebar-publish-once)) 1))))
+
+(ert-deftest agent-repl-test-sidebar-revision-increments-per-publish ()
+  "Each publish carries the next revision, so ordering is decidable."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (agent-repl-test--sidebar-with-link
+      (agent-repl--sidebar-push)
+      (agent-repl--sidebar-push)
+      (agent-repl--sidebar-push)
+      (should (equal (mapcar (lambda (r) (plist-get r :revision))
+                             (agent-repl-test--sidebar-rosters))
+                     '(1 2 3))))))
+
+;;;; ---- Reconnect -----------------------------------------------------------
+
+(ert-deftest agent-repl-test-sidebar-publishes-on-connect ()
+  "A freshly opened link is handed the roster, so a restarted daemon regains it."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (agent-repl-test--sidebar-with-link
+      (agent-repl--sidebar-publish-on-connect)
+      (should (equal (mapcar #'car agent-repl-test--sidebar-published)
+                     '("publishWorkspaceRoster"))))))
+
+(ert-deftest agent-repl-test-sidebar-connect-publisher-is-registered ()
+  "The reconnect publish is wired to the UDS connected hook, not to a timer."
+  (should (memq #'agent-repl--sidebar-publish-on-connect
+                agent-repl-uds-connected-functions)))
+
+;;;; ---- A rejected publish is never silent ----------------------------------
+
+(ert-deftest agent-repl-test-sidebar-publish-is-tracked-for-its-ack ()
+  "The publish is tracked, so its ack can be matched rather than ignored."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (agent-repl-test--sidebar-with-link
+      (agent-repl--sidebar-push)
+      (should (equal (mapcar (lambda (e) (plist-get e :field))
+                             agent-repl-test--sidebar-tracked)
+                     '("publishWorkspaceRoster"))))))
+
+(ert-deftest agent-repl-test-sidebar-publish-nack-is-logged-loudly ()
+  "A NACKed publish names the refused revision in the durable log."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (let (logged)
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+        (agent-repl-test--sidebar-with-link
+          (agent-repl--sidebar-push)
+          (funcall (plist-get (car agent-repl-test--sidebar-tracked) :on-failure)
+                   "daemon said no")))
+      (should (cl-find-if (lambda (line)
+                            (and (string-match-p "sidebar-publish: NACKED" line)
+                                 (string-match-p "revision=1" line)
+                                 (string-match-p "daemon said no" line)))
+                          logged)))))
+
+(ert-deftest agent-repl-test-sidebar-publish-nack-does-not-rewind-revision ()
+  "A NACK leaves the counter climbing: no retained revision is guessed at.
+`CommandAck' carries no retained-revision field, so rewinding could only
+invent one — and a counter that silently reverses could publish a stale
+roster over a newer one."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (agent-repl-test--sidebar-with-link
+      (agent-repl--sidebar-push)
+      (funcall (plist-get (car agent-repl-test--sidebar-tracked) :on-failure)
+               "revision 7 is not newer than 9")
+      (agent-repl--sidebar-push)
+      (should (equal (mapcar (lambda (r) (plist-get r :revision))
+                             (agent-repl-test--sidebar-rosters))
+                     '(1 2))))))
 
 (ert-deftest agent-repl-test-sidebar-expand-script-guards-missing-hook ()
   "The expand script no-ops (page side) when the hook is not yet planted."

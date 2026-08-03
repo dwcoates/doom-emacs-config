@@ -505,6 +505,46 @@ The request-id generator is stubbed deterministic (\"req-fixed\")."
           (agent-repl--uds-sentinel 'fake-proc "open\n")
           (should (stringp sent)))))))
 
+(ert-deftest agent-repl-test-uds-sentinel-open-runs-the-connected-hook ()
+  "An `open' transition runs `agent-repl-uds-connected-functions'."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let ((ran 0))
+      (cl-letf (((symbol-function 'process-live-p) (lambda (_p) t))
+                ((symbol-function 'process-name) (lambda (_p) "fake")))
+        (let ((agent-repl--uds-process 'fake-proc)
+              (agent-repl--uds-connection-state 'dialing)
+              (agent-repl--uds-connect-started-at (float-time))
+              (agent-repl--uds-outbound-queue nil)
+              (agent-repl-uds-connected-functions
+               (list (lambda () (cl-incf ran)))))
+          ;; Act
+          (agent-repl--uds-sentinel 'fake-proc "open\n")
+          ;; Assert
+          (should (= ran 1)))))))
+
+(ert-deftest agent-repl-test-uds-connected-hook-survives-a-failing-subscriber ()
+  "One subscriber's failure is logged and the remaining subscribers still run.
+Dropping the rest of a reconnect's recovery because its first step failed
+would compound one outage into several."
+  ;; Arrange
+  (let ((ran nil)
+        (logged nil))
+    (cl-letf (((symbol-function 'agent-repl--log)
+               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+      (let ((agent-repl-uds-connected-functions
+             (list (lambda () (error "subscriber blew up"))
+                   (lambda () (setq ran t)))))
+        ;; Act
+        (agent-repl--uds-run-connected-hook)))
+    ;; Assert
+    (should ran)
+    (should (cl-find-if (lambda (l) (string-match-p "subscriber blew up" l)) logged))))
+
+(ert-deftest agent-repl-test-uds-publish-workspace-roster-is-sendable ()
+  "The roster publish arm is a known, sendable command field."
+  (should (member "publishWorkspaceRoster" agent-repl--uds-known-command-fields)))
+
 (ert-deftest agent-repl-test-uds-send-command-returns-request-id ()
   "Send returns the generated request-id."
   ;; Arrange

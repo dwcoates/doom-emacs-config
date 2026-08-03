@@ -235,7 +235,8 @@ though there is intentionally nothing for Emacs to apply.")
     "closeWorkspace" "openWorkspace" "resync" "createSession" "deleteSession"
     "shutdown" "clientLog" "queueForce" "queueAccept" "queueCancel"
     "workspaceMaterialized" "hostActionCompleted"
-    "daemonHealth" "sessionHealth" "restartSession")
+    "daemonHealth" "sessionHealth" "restartSession"
+    "publishWorkspaceRoster")
   "The protojson names of every SENDABLE `FrontendCommand' oneof arm.
 Mirrors the `command' oneof in frontend.proto.  Sending an unknown
 command field is a programming error and fails loudly.
@@ -258,7 +259,12 @@ needs it because its console is invisible and unpersisted.
 
 `queueForce' / `queueAccept' / `queueCancel' (E4) act on a held prompt.
 Listed for the same mirror reason; Emacs does not send them, because it
-does not render the queue they act on.")
+does not render the queue they act on.
+
+`publishWorkspaceRoster' carries the sidebar roster (sidebar.el).  Emacs
+is its ONLY publisher: Emacs owns the workspace model, so the roster is
+authored here and handed to the daemon to retain and rebroadcast, which
+is what replaced the per-webview execute-script injection.")
 
 (defvar agent-repl--uds-frame-handlers nil
   "Alist mapping a `FrontendFrame' oneof field name (string) to a handler fn.
@@ -503,6 +509,34 @@ disconnect signals collapses to one attempt."
         (agent-repl--uds-run-timer agent-repl-uds-reconnect-delay
                                    #'agent-repl-uds-connect)))
 
+(defvar agent-repl-uds-connected-functions nil
+  "Abnormal hook run with no args once a frontend UDS connection is OPEN.
+
+Fires on the sentinel's `open' transition — every connection, the first
+and each reconnect alike, because a reconnect is indistinguishable from
+a first connect as far as the daemon's memory goes: a daemon that just
+restarted retains nothing Emacs authored.
+
+The hook exists for state EMACS OWNS and the daemon cannot reconstruct.
+The daemon's own state travels the other way (it pushes a StateSnapshot
+on connect); this is the return leg for the workspace roster, which no
+snapshot can carry because Emacs is its only author.
+
+Subscribers run AFTER the outbound queue is flushed, so a subscriber's
+own send lands behind whatever was already waiting on the link.  Each
+runs guarded: one subscriber's failure is loud-logged and the remaining
+subscribers still run, since dropping the rest of a reconnect's recovery
+because the first step failed would compound one outage into several.")
+
+(defun agent-repl--uds-run-connected-hook ()
+  "Run `agent-repl-uds-connected-functions', surfacing any failure loudly."
+  (dolist (fn agent-repl-uds-connected-functions)
+    (condition-case err
+        (funcall fn)
+      (error
+       (agent-repl--log nil "uds-connected-hook: subscriber %S FAILED: %s"
+                        fn (error-message-string err))))))
+
 (defun agent-repl--uds-sentinel (proc event)
   "Process sentinel: on any non-live transition, schedule a reconnect.
 EVENT is the raw sentinel string.  A closed/failed/deleted link clears
@@ -527,7 +561,10 @@ and reconnects (design §4.4)."
       (agent-repl--log nil "uds-connect: complete proc=%s elapsed=%.3fs queued=%d"
                        (process-name proc) elapsed (length queued))
       (dolist (entry queued)
-        (agent-repl--uds-write-frame proc entry))))
+        (agent-repl--uds-write-frame proc entry))
+      ;; AFTER the flush: a subscriber's send belongs behind the frames
+      ;; that were already waiting on this link, not ahead of them.
+      (agent-repl--uds-run-connected-hook)))
    ((not (process-live-p proc))
     (when (eq proc agent-repl--uds-process)
       (let ((elapsed (and agent-repl--uds-connect-started-at
