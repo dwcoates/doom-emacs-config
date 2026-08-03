@@ -189,6 +189,10 @@ type repullHarness struct {
 	// adopts a new vendor uuid, so a rotation test cannot pass against a fake
 	// that forgot the reset.
 	reg *rotatingRegistrar
+	// history is the DurableHistorySource the gap's store-covered prefix is
+	// read from. Nil in the plain harness, which is the "no durable source is
+	// wired" shape: the whole gap then goes to the shim.
+	history DurableHistorySource
 }
 
 func newRepullHarness(t *testing.T, client *replayClient) *repullHarness {
@@ -200,6 +204,15 @@ func newRepullHarness(t *testing.T, client *replayClient) *repullHarness {
 // tests asserting on a loud line. logf may be nil (the plain harness).
 func newRepullHarnessWithLog(t *testing.T, client *replayClient, logf func(string, ...any)) *repullHarness {
 	t.Helper()
+	return newRepullHarnessWithStore(t, client, nil, logf)
+}
+
+// newRepullHarnessWithStore is newRepullHarnessWithLog with a
+// DurableHistorySource wired, which is the production shape: the gap's
+// store-covered prefix is served from durable history and only the remainder
+// above the high-water mark is asked of the shim.
+func newRepullHarnessWithStore(t *testing.T, client *replayClient, history DurableHistorySource, logf func(string, ...any)) *repullHarness {
+	t.Helper()
 	h := &repullHarness{
 		push:     &fakePusher{},
 		applier:  &fakeApplier{},
@@ -207,6 +220,7 @@ func newRepullHarnessWithLog(t *testing.T, client *replayClient, logf func(strin
 		client:   client,
 		seq:      &fakeSeqStore{seq: map[string]uint64{}},
 		floors:   newFakeClearCompactStore(),
+		history:  history,
 	}
 	h.reg = &rotatingRegistrar{seq: h.seq, floors: h.floors}
 	m, err := New(Config{
@@ -217,6 +231,7 @@ func newRepullHarnessWithLog(t *testing.T, client *replayClient, logf func(strin
 		Locator:           fakeLocator{m: map[string]string{"ws": "s1"}},
 		SeqStore:          h.seq,
 		ClearCompactStore: h.floors,
+		DurableHistory:    history,
 		Registrar:         h.reg,
 		ProtocolVersion:   "1",
 		Logf:              logf,
@@ -524,5 +539,237 @@ func TestRePullClearsItsInFlightMarkOnFailure(t *testing.T) {
 	// Assert
 	if client.callCount() != 2 {
 		t.Fatalf("replayed %d time(s), want 2 (the first failure released the mark)", client.callCount())
+	}
+}
+
+// --- the gap is split at the durable high-water mark -------------------------
+//
+// A below-floor gap is history that was already ingested, so the store the shim
+// itself reads normally holds every row of it. Asking the shim for a range the
+// store demonstrably covers made a frontend resync require a live shim it did
+// not need, and a session with no shim answered the whole gap with
+// ErrReplayNotConnected while every row sat in the store.
+
+func TestGapSplitsAtTheStoreHighWater(t *testing.T) {
+	tests := []struct {
+		name string
+		// ringSeq, when non-zero, is the one event retained, which puts the
+		// ring floor there. Zero leaves the ring empty (a restarted daemon).
+		ringSeq uint64
+		// highWater is the durable last_seen_seq: how far the store's seq
+		// space is known to reach for this session.
+		highWater uint64
+		// wireStore is false for the "no DurableHistorySource" shape.
+		wireStore  bool
+		resyncFrom uint64
+		wantStore  [][2]uint64
+		wantShim   [][2]uint64
+	}{
+		{
+			name:       "fully covered by the store, so no shim is involved",
+			highWater:  1172,
+			wireStore:  true,
+			resyncFrom: 1136,
+			wantStore:  [][2]uint64{{1135, 1173}},
+			wantShim:   nil,
+		},
+		{
+			name:       "partially above the high-water, so the shim serves the remainder only",
+			ringSeq:    20,
+			highWater:  9,
+			wireStore:  true,
+			resyncFrom: 0,
+			wantStore:  [][2]uint64{{0, 10}},
+			wantShim:   [][2]uint64{{9, 20}},
+		},
+		{
+			name:       "entirely above the high-water, so the whole gap is the shim's",
+			ringSeq:    20,
+			highWater:  0,
+			wireStore:  true,
+			resyncFrom: 5,
+			wantStore:  nil,
+			wantShim:   [][2]uint64{{4, 20}},
+		},
+		{
+			name:       "no durable source wired, so the whole gap is the shim's",
+			ringSeq:    20,
+			highWater:  9,
+			wireStore:  false,
+			resyncFrom: 0,
+			wantStore:  nil,
+			wantShim:   [][2]uint64{{0, 20}},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			client := &replayClient{}
+			store := &durableHistorySpy{}
+			var history DurableHistorySource
+			if tc.wireStore {
+				history = store
+			}
+			h := newRepullHarnessWithStore(t, client, history, nil)
+			if tc.ringSeq != 0 {
+				h.controller(t).consumer.Consume(assistantEvent(t, tc.ringSeq, "ring"))
+			}
+			h.seq.SetLastSeq("s1", tc.highWater)
+
+			// Act
+			if err := h.m.Resync("ws", tc.resyncFrom); err != nil {
+				t.Fatalf("Resync: %v", err)
+			}
+
+			// Assert
+			if got := store.replays(); !equalReplayRanges(got, tc.wantStore) {
+				t.Fatalf("store replays = %v, want %v", got, tc.wantStore)
+			}
+			client.mu.Lock()
+			defer client.mu.Unlock()
+			if !equalReplayRanges(client.calls, tc.wantShim) {
+				t.Fatalf("shim replays = %v, want %v", client.calls, tc.wantShim)
+			}
+		})
+	}
+}
+
+// equalReplayRanges compares two replay-bound lists, treating nil and empty alike.
+func equalReplayRanges(got, want [][2]uint64) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func TestStoreCoveredGapIsServedWithNoLiveShim(t *testing.T) {
+	// Arrange — the session has NO live shim connection, and the whole gap is
+	// at or below the store's high-water mark.
+	client := &replayClient{err: shimclient.ErrReplayNotConnected}
+	store := &durableHistorySpy{events: []*corev1.Event{assistantEvent(t, 1136, "stored")}}
+	h := newRepullHarnessWithStore(t, client, store, nil)
+	h.seq.SetLastSeq("s1", 1172)
+
+	// Act
+	err := h.m.Resync("ws", 1136)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Resync: %v, want the store to have served the gap without a shim", err)
+	}
+	h.push.mu.Lock()
+	defer h.push.mu.Unlock()
+	if len(h.push.convo) != 1 || h.push.convo[0].GetItems()[0].GetUuid() != "stored" {
+		t.Fatalf("conversation pushes = %v, want one item uuid=stored", h.push.convo)
+	}
+}
+
+func TestStoreServedGapNamesTheStoreAsItsSource(t *testing.T) {
+	// Arrange — which route served which range must be readable from the log.
+	client := &replayClient{}
+	store := &durableHistorySpy{events: []*corev1.Event{assistantEvent(t, 1136, "stored")}}
+	logs := &logCapture{}
+	h := newRepullHarnessWithStore(t, client, store, logs.logf)
+	h.seq.SetLastSeq("s1", 1172)
+
+	// Act
+	if err := h.m.Resync("ws", 1136); err != nil {
+		t.Fatalf("Resync: %v", err)
+	}
+
+	// Assert
+	if !logs.contains(`fully covered by the store high-water 1172`) ||
+		!logs.contains(`re-pull segment COMPLETE ws="ws" session=s1 source=store from_seq=1135 stop_at=1173 delivered=1`) {
+		t.Fatal("store-served gap log names neither the source nor the range it covered")
+	}
+}
+
+func TestSplitGapLogsTheRangeEachSourceCovers(t *testing.T) {
+	// Arrange — a gap straddling the high-water mark.
+	client := &replayClient{}
+	store := &durableHistorySpy{}
+	logs := &logCapture{}
+	h := newRepullHarnessWithStore(t, client, store, logs.logf)
+	h.controller(t).consumer.Consume(assistantEvent(t, 20, "ring"))
+	h.seq.SetLastSeq("s1", 9)
+
+	// Act
+	if err := h.m.Resync("ws", 0); err != nil {
+		t.Fatalf("Resync: %v", err)
+	}
+
+	// Assert
+	if !logs.contains(`SPLIT at the store high-water 9: store serves (0,10), the shim serves the remainder (9,20)`) {
+		t.Fatal("split log does not state which source covers which range")
+	}
+}
+
+func TestRemainderAboveTheHighWaterWithNoShimFailsNamingTheUncoveredRange(t *testing.T) {
+	// Arrange — the store covers the gap's prefix; the remainder above its
+	// high-water has no shim to serve it, which stays a loud failure.
+	client := &replayClient{err: shimclient.ErrReplayNotConnected}
+	store := &durableHistorySpy{}
+	logs := &logCapture{}
+	h := newRepullHarnessWithStore(t, client, store, logs.logf)
+	h.controller(t).consumer.Consume(assistantEvent(t, 20, "ring"))
+	h.seq.SetLastSeq("s1", 9)
+
+	// Act
+	err := h.m.Resync("ws", 0)
+
+	// Assert
+	if !errors.Is(err, shimclient.ErrReplayNotConnected) {
+		t.Fatalf("err = %v, want ErrReplayNotConnected for the uncovered remainder", err)
+	}
+	if !strings.Contains(err.Error(), "from_seq=9 stop_at=20") {
+		t.Fatalf("err = %v, want the uncovered remainder named", err)
+	}
+	if !logs.contains(`history re-pull FAILED ws="ws" session=s1 source=shim from_seq=9 stop_at=20`) {
+		t.Fatal("remainder failure log names neither the source nor the uncovered range")
+	}
+}
+
+func TestStoreReadFailureIsSurfacedAndTheShimIsNotAskedInstead(t *testing.T) {
+	// Arrange — a broken store must not be answered by re-asking the shim for
+	// the same range, which is the fallback this path refuses to be.
+	client := &replayClient{}
+	store := &durableHistorySpy{err: errors.New("store socket refused")}
+	logs := &logCapture{}
+	h := newRepullHarnessWithStore(t, client, store, logs.logf)
+	h.seq.SetLastSeq("s1", 1172)
+
+	// Act
+	err := h.m.Resync("ws", 1136)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "store socket refused") {
+		t.Fatalf("err = %v, want the store failure surfaced", err)
+	}
+	if client.callCount() != 0 {
+		t.Fatalf("shim replayed %d time(s) after a store read failure, want 0", client.callCount())
+	}
+	if !logs.contains(`history re-pull FAILED ws="ws" session=s1 source=store from_seq=1135 stop_at=1173`) {
+		t.Fatal("store failure log does not name the store as the source that failed")
+	}
+}
+
+func TestTruncatedStoreReadIsReportedNotPassedOffAsComplete(t *testing.T) {
+	// Arrange — the store hit a bound before reaching the ring floor.
+	client := &replayClient{}
+	store := &durableHistorySpy{truncated: "event cap 20000 reached"}
+	h := newRepullHarnessWithStore(t, client, store, nil)
+	h.seq.SetLastSeq("s1", 1172)
+
+	// Act
+	err := h.m.Resync("ws", 1136)
+
+	// Assert
+	if !errors.Is(err, ErrRepullTruncated) {
+		t.Fatalf("err = %v, want ErrRepullTruncated", err)
 	}
 }

@@ -8,6 +8,7 @@ import (
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/shimclient"
 )
@@ -187,7 +188,7 @@ func (a *repullActivity) snapshotLocked() repullSnapshot {
 }
 
 // ---------------------------------------------------------------------------
-// Why a below-floor re-pull exists, and why it goes THROUGH THE SHIM
+// Why a below-floor re-pull exists, and which route serves it
 // ---------------------------------------------------------------------------
 //
 // The daemon deliberately subscribes each shim from its HIGH-WATER mark. That
@@ -203,50 +204,74 @@ func (a *repullActivity) snapshotLocked() repullSnapshot {
 // retained seq would otherwise answer with silence, which is precisely the
 // blank-feed bug.
 //
-// # The store stays behind the agent-shim facade
+// # The gap is split at the durable high-water mark
 //
-// An earlier version of this dialled the shim-store DIRECTLY (a deleted
-// internal/storesub package). It worked, and it was wrong twice over:
+// The range a re-pull covers is history that has, by construction, already
+// been INGESTED: it lies below the ring floor, and the ring floor is at most
+// one past the durable last_seen_seq. So the store — the same store the shim
+// itself reads — normally holds every row of it, and the daemon already knows
+// how far the store's seq space reaches for this session (SeqStore.LastSeq, the
+// mark settleBackfillFromStore settles the backfill from).
 //
-//   - It LEAKED FACADE INTERNALS into the daemon. The store's socket location,
-//     its connection lifecycle, and the rule that its seq space is keyed by the
-//     vendor uuid all became daemon knowledge. The agent-shim exists so the
-//     daemon consumes exactly one totally-ordered stream per session and knows
-//     nothing about how it is produced; a second, private route to the same
-//     data dissolves that boundary.
-//   - Its one apparent ADVANTAGE — history still served while the shim is down
-//     — is a FALLBACK under the metaprompt's no-fallbacks rule. The shim IS the
-//     session's transport. Serving history through a side door while it is down
-//     masks an outage that eager-ensure already surfaces loudly, and trades a
-//     visible failure for a quietly half-working display.
+// The gap is therefore SPLIT at that mark:
 //
-// So the range is asked for over the shim connection (core.proto
-// ReplayRequest) and the shim serves it from a throwaway store subscription of
-// its own. Four standing constraints hold:
+//   - (from_seq, min(stop_at, high_water+1)) is served from DURABLE history
+//     directly (storehistory.Reader), with no shim in the loop.
+//   - [high_water+1, stop_at), if it is non-empty, is history the store cannot
+//     be shown to hold, so it is asked for over the SHIM connection
+//     (core.proto ReplayRequest) exactly as the whole range used to be. When
+//     no shim can serve it, the failure is the loud one it always was, and it
+//     names the remainder that went unserved.
+//
+// WHY THE STORE HALF IS NOT A FALLBACK. An earlier version of this dialled the
+// store while the shim was DOWN, as a second route to the range the shim was
+// supposed to serve, and that was correctly deleted: it masked an outage and
+// traded a visible failure for a quietly half-working display. This is not
+// that. The split is not "try the shim, then try the store"; it is a
+// PARTITION, decided before either route is used, by a fact the daemon holds
+// about the store's own coverage. Nothing about a shim's health enters the
+// decision, no failure of one route is answered by the other, and the range
+// the store cannot be shown to cover is never quietly excused — it is still
+// the shim's to serve or to fail on.
+//
+// WHY THE FACADE SURVIVES IT. The store's socket location, its connection
+// lifecycle, and the vendor-uuid keying rule stay in storehistory (see that
+// package's header), reached through the DurableHistorySource interface, so
+// none of it becomes session-controller knowledge. With no source wired the
+// whole range goes to the shim, and the log says so.
+//
+// Four standing constraints hold on either route:
 //
 //  1. FRONTEND-INITIATED. Nothing in the daemon starts one. It exists only as
 //     the tail of a ResyncCmd a frontend sent.
 //  2. BOUNDED. to_seq is the ring floor (the first seq the live window already
-//     covers); max_events caps one replay; the shim adds an idle window; this
-//     side adds a progress-rearmed idle deadline. A tripped bound comes back
-//     as a TRUNCATED ReplayDone and becomes ErrRepullTruncated here.
+//     covers); max_events caps one replay; each route adds an idle window;
+//     this side adds a progress-rearmed idle deadline. A tripped bound comes
+//     back TRUNCATED and becomes ErrRepullTruncated here, from either route.
 //  3. SIDE CHANNEL. The shim opens a throwaway store subscription and leaves
-//     its standing one alone, so the daemon's own consumption position never
+//     its standing one alone; the durable read opens its own throwaway
+//     subscription. Either way the daemon's own consumption position never
 //     moves and no SeqStore write happens.
-//  4. CONVERSATION ONLY — and now STRUCTURALLY so. Replayed events arrive as
-//     `ReplayEvent`, a different wire type from live `Event`s, so shimclient's
-//     read loop cannot route them into the SSM, the task catalog, or the
-//     progress resolver even by mistake. Those planes consumed this history
-//     once already; applying it again is what makes historical tasks
-//     masquerade as live activity. This used to be a daemon-side convention at
-//     one choke point; it is now the frame type.
+//  4. CONVERSATION ONLY. Replayed events reach repullConversation and nothing
+//     else. Over the shim this is STRUCTURAL — they arrive as `ReplayEvent`, a
+//     different wire type from live `Event`s, so shimclient's read loop cannot
+//     route them into the SSM, the task catalog, or the progress resolver even
+//     by mistake. The durable read has no read loop to be routed by: it hands
+//     each row to the callback given here, and that callback is
+//     repullConversation. Those planes consumed this history once already;
+//     applying it again is what makes historical tasks masquerade as live
+//     activity.
 //
 // A daemon-standing version of any of this would be the replay storm the
 // high-water subscribe exists to prevent. This is not that, and must not become
 // it.
 
-// startRepull runs a below-floor history re-pull for d over the session's shim,
-// delivering replayed events to CONVERSATION TRANSLATION ONLY (constraint 4).
+// startRepull runs a below-floor history re-pull for d, delivering replayed
+// events to CONVERSATION TRANSLATION ONLY (constraint 4).
+//
+// The gap is split at the durable high-water mark: the covered prefix is read
+// from the store with no shim in the loop, and only the remainder above it is
+// asked of the shim (see the section above).
 //
 // Concurrency: at most one re-pull per workspace. A second request whose range
 // is already COVERED by the in-flight one is coalesced onto it — the pull's
@@ -291,12 +316,112 @@ func (m *Manager) startRepull(d *sessionController, fromSeq, stopAt uint64) erro
 
 	activity := newRepullActivity(m.rootCtx, repullIdleTimeout)
 	defer activity.stop()
+
+	storeFrom, storeStop, shimFrom, shimStop := m.splitRepullRange(d, fromSeq, stopAt)
+	if storeStop > storeFrom {
+		if err := m.repullFromStore(d, activity, storeFrom, storeStop, fromSeq, stopAt); err != nil {
+			return err
+		}
+	}
+	if shimStop <= shimFrom {
+		return nil
+	}
+	return m.repullFromShim(d, activity, shimFrom, shimStop)
+}
+
+// splitRepullRange partitions the requested exclusive range (fromSeq, stopAt)
+// into the prefix the DURABLE store is known to cover and the remainder that is
+// the shim's to serve.
+//
+// The mark is SeqStore.LastSeq — the highest store seq this daemon has durably
+// observed for the session, and the same evidence settleBackfillFromStore
+// treats as proof the store holds the history. Everything at or below it is the
+// store's; everything above it is not shown to be, so it stays the shim's.
+//
+// Both returned ranges are exclusive at both ends, and either may be empty
+// (stop <= from), which is how "no store portion" and "no shim remainder" are
+// expressed. With no durable source wired the whole range is the shim's, which
+// is exactly the behavior that predates the split.
+func (m *Manager) splitRepullRange(d *sessionController, fromSeq, stopAt uint64) (storeFrom, storeStop, shimFrom, shimStop uint64) {
+	logf := dlog.Tag(dlog.Logf(m.logf), "ws", d.workspace, "session", d.sessionID,
+		"from_seq", fromSeq, "stop_at", stopAt)
+	if m.cfg.DurableHistory == nil {
+		logf("session-controller: re-pull gap ws=%q session=%s from_seq=%d stop_at=%d has NO durable history source wired, so the whole range is asked of the SHIM (nothing is being read from the store)",
+			d.workspace, d.sessionID, fromSeq, stopAt)
+		return fromSeq, fromSeq, fromSeq, stopAt
+	}
+	highWater := m.cfg.SeqStore.LastSeq(d.sessionID)
+	storeFrom, storeStop = fromSeq, stopAt
+	if highWater+1 < storeStop {
+		storeStop = highWater + 1
+	}
+	// (from, stop) is exclusive at both ends, so it holds a seq only when
+	// stop > from+1. Anything narrower is an EMPTY segment, reported as such
+	// rather than dispatched as a replay that could never deliver a row.
+	if storeStop <= storeFrom+1 {
+		logf("session-controller: re-pull gap ws=%q session=%s from_seq=%d stop_at=%d is entirely ABOVE the store high-water %d, so the whole range is asked of the SHIM",
+			d.workspace, d.sessionID, fromSeq, stopAt, highWater)
+		return fromSeq, fromSeq, fromSeq, stopAt
+	}
+	shimFrom, shimStop = storeStop-1, stopAt
+	if shimStop <= shimFrom+1 {
+		logf("session-controller: re-pull gap ws=%q session=%s from_seq=%d stop_at=%d is fully covered by the store high-water %d, so it is served from DURABLE history with no shim in the loop",
+			d.workspace, d.sessionID, fromSeq, stopAt, highWater)
+		return storeFrom, storeStop, shimFrom, shimFrom
+	}
+	logf("session-controller: re-pull gap ws=%q session=%s from_seq=%d stop_at=%d SPLIT at the store high-water %d: store serves (%d,%d), the shim serves the remainder (%d,%d)",
+		d.workspace, d.sessionID, fromSeq, stopAt, highWater, storeFrom, storeStop, shimFrom, shimStop)
+	return storeFrom, storeStop, shimFrom, shimStop
+}
+
+// repullFromStore serves the store-covered prefix of one gap straight from
+// DURABLE history, delivering to conversation translation only.
+//
+// A store read that FAILS fails the whole re-pull. It is never answered by
+// re-asking the shim for the same range: that would be the fallback this path
+// is explicitly not, and it would hide a broken store behind a route that
+// happens to be up. The log names the store as the source that failed.
+func (m *Manager) repullFromStore(d *sessionController, activity *repullActivity, fromSeq, stopAt, reqFrom, reqStop uint64) error {
+	logf := dlog.Tag(dlog.Logf(m.logf), "ws", d.workspace, "session", d.sessionID, "source", "shim-store")
+	logf("session-controller: re-pulling history ws=%q session=%s from_seq=%d stop_at=%d max_events=%d idle_timeout_ms=%d (frontend-initiated, from DURABLE history, conversation only; requested gap was (%d,%d))",
+		d.workspace, d.sessionID, fromSeq, stopAt, repullMaxEvents, repullIdleTimeout.Milliseconds(), reqFrom, reqStop)
+	res, err := m.cfg.DurableHistory.ReplayHistory(activity.ctx, d.workspace, d.sessionID, fromSeq, stopAt, repullMaxEvents,
+		func(ev *corev1.Event) {
+			progress := activity.observe(ev.GetSeq())
+			if progress.delivered == 1 || progress.delivered%repullProgressLogEvery == 0 {
+				logf("session-controller: re-pull progress ws=%q session=%s source=store from_seq=%d stop_at=%d delivered=%d first_seq=%d last_seq=%d elapsed_ms=%d idle_timeout_ms=%d",
+					d.workspace, d.sessionID, fromSeq, stopAt, progress.delivered, progress.firstSeq, progress.lastSeq,
+					progress.elapsed.Milliseconds(), repullIdleTimeout.Milliseconds())
+			}
+			d.consumer.repullConversation(ev)
+		})
+	if err != nil {
+		logf("session-controller: history re-pull FAILED ws=%q session=%s source=store from_seq=%d stop_at=%d delivered=%d: %v — the store is the source that failed, and the shim is NOT asked for this range instead",
+			d.workspace, d.sessionID, fromSeq, stopAt, res.Delivered, err)
+		return fmt.Errorf("session-controller: history re-pull for ws %q (from_seq=%d stop_at=%d) from durable history failed: %w",
+			d.workspace, fromSeq, stopAt, err)
+	}
+	if res.Truncated {
+		logf("session-controller: history re-pull TRUNCATED ws=%q session=%s source=store from_seq=%d stop_at=%d delivered=%d first_seq=%d last_seq=%d reason=%q",
+			d.workspace, d.sessionID, fromSeq, stopAt, res.Delivered, res.FirstSeq, res.LastSeq, res.Reason)
+		return fmt.Errorf("%w: ws=%q from_seq=%d stop_at=%d delivered %d event(s) from durable history: %s",
+			ErrRepullTruncated, d.workspace, fromSeq, stopAt, res.Delivered, res.Reason)
+	}
+	logf("session-controller: re-pull segment COMPLETE ws=%q session=%s source=store from_seq=%d stop_at=%d delivered=%d first_seq=%d last_seq=%d",
+		d.workspace, d.sessionID, fromSeq, stopAt, res.Delivered, res.FirstSeq, res.LastSeq)
+	return nil
+}
+
+// repullFromShim serves the remainder of one gap — the part ABOVE the store's
+// high-water mark, or the whole gap when no durable source is wired — over the
+// session's shim connection.
+func (m *Manager) repullFromShim(d *sessionController, activity *repullActivity, fromSeq, stopAt uint64) error {
 	m.logf("session-controller: re-pulling history ws=%q session=%s from_seq=%d stop_at=%d max_events=%d idle_timeout_ms=%d (frontend-initiated, via the shim, conversation only)",
 		d.workspace, d.sessionID, fromSeq, stopAt, repullMaxEvents, repullIdleTimeout.Milliseconds())
 	res, err := d.client.Replay(activity.ctx, fromSeq, stopAt, repullMaxEvents, func(ev *corev1.Event) {
 		progress := activity.observe(ev.GetSeq())
 		if progress.delivered == 1 || progress.delivered%repullProgressLogEvery == 0 {
-			m.logf("session-controller: re-pull progress ws=%q session=%s from_seq=%d stop_at=%d delivered=%d first_seq=%d last_seq=%d elapsed_ms=%d idle_timeout_ms=%d",
+			m.logf("session-controller: re-pull progress ws=%q session=%s source=shim from_seq=%d stop_at=%d delivered=%d first_seq=%d last_seq=%d elapsed_ms=%d idle_timeout_ms=%d",
 				d.workspace, d.sessionID, fromSeq, stopAt, progress.delivered, progress.firstSeq, progress.lastSeq,
 				progress.elapsed.Milliseconds(), repullIdleTimeout.Milliseconds())
 		}
@@ -304,7 +429,7 @@ func (m *Manager) startRepull(d *sessionController, fromSeq, stopAt uint64) erro
 	})
 	progress := activity.stop()
 	if err != nil {
-		m.logf("session-controller: history re-pull FAILED ws=%q session=%s from_seq=%d stop_at=%d delivered=%d first_seq=%d last_seq=%d elapsed_ms=%d idle_timeout_ms=%d cause=%q",
+		m.logf("session-controller: history re-pull FAILED ws=%q session=%s source=shim from_seq=%d stop_at=%d delivered=%d first_seq=%d last_seq=%d elapsed_ms=%d idle_timeout_ms=%d cause=%q — this is the range the store was not shown to cover, and it is left unserved",
 			d.workspace, d.sessionID, fromSeq, stopAt, progress.delivered, progress.firstSeq, progress.lastSeq,
 			progress.elapsed.Milliseconds(), repullIdleTimeout.Milliseconds(), err)
 		return fmt.Errorf("session-controller: history re-pull for ws %q (from_seq=%d stop_at=%d) failed: %w",
@@ -313,13 +438,15 @@ func (m *Manager) startRepull(d *sessionController, fromSeq, stopAt uint64) erro
 	if res.Truncated {
 		// A partial answer is reported as one. The frontend rendered whatever
 		// did arrive; the ack tells it the rest is still missing.
-		m.logf("session-controller: history re-pull TRUNCATED ws=%q session=%s from_seq=%d stop_at=%d delivered=%d observed=%d first_seq=%d last_seq=%d elapsed_ms=%d idle_timeout_ms=%d reason=%q",
+		m.logf("session-controller: history re-pull TRUNCATED ws=%q session=%s source=shim from_seq=%d stop_at=%d delivered=%d observed=%d first_seq=%d last_seq=%d elapsed_ms=%d idle_timeout_ms=%d reason=%q",
 			d.workspace, d.sessionID, fromSeq, stopAt, res.Delivered, progress.delivered, progress.firstSeq, progress.lastSeq,
 			progress.elapsed.Milliseconds(), repullIdleTimeout.Milliseconds(), res.Reason)
 		return fmt.Errorf("%w: ws=%q from_seq=%d stop_at=%d delivered %d event(s): %s",
 			ErrRepullTruncated, d.workspace, fromSeq, stopAt, res.Delivered, res.Reason)
 	}
-	m.logf("session-controller: re-pull complete ws=%q session=%s delivered=%d observed=%d first_seq=%d last_seq=%d from_seq=%d stop_at=%d elapsed_ms=%d idle_timeout_ms=%d",
+	// observed counts EVERY event this re-pull delivered, including a store-served
+	// prefix, because the activity deadline spans the whole re-pull.
+	m.logf("session-controller: re-pull complete ws=%q session=%s source=shim delivered=%d observed=%d first_seq=%d last_seq=%d from_seq=%d stop_at=%d elapsed_ms=%d idle_timeout_ms=%d",
 		d.workspace, d.sessionID, res.Delivered, progress.delivered, progress.firstSeq, progress.lastSeq,
 		fromSeq, stopAt, progress.elapsed.Milliseconds(), repullIdleTimeout.Milliseconds())
 	return nil
