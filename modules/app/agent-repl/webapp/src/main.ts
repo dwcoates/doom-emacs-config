@@ -78,6 +78,7 @@ import { ConnectResync } from "./connect-resync.js";
 import type { CommandStruct } from "./frontend-command.js";
 import { PendingPermissionMode } from "./pending-mode.js";
 import { ungatedBannerHtml, ungatedModeOf, unswitchableModeOptionHtml } from "./ungated.js";
+import { DRAINING_BODY_CLASS, drainBannerHtml } from "./drain.js";
 import { rebindSession, rememberResumeKeys } from "./rebind.js";
 import { SessionRebase, claudeSessionIdOf } from "./session-rebase.js";
 import { remediationNotice, requestRemediation } from "./remediation.js";
@@ -404,6 +405,7 @@ async function boot(): Promise<void> {
   const spinnerEl = must("spinner");
   const compactBarEl = must("compact-progress-slot");
   const ungatedBannerEl = must("ungated-banner");
+  const drainBannerEl = must("drain-banner");
   // The composer's own elements, resolved HERE rather than in the wiring block
   // below because `renderChrome` repaints the merge gate on them every frame.
   // Null when the host owns input (Emacs's `composer=0`), which is also the one
@@ -583,6 +585,13 @@ async function boot(): Promise<void> {
     });
     ungatedBannerEl.innerHTML = ungatedBannerHtml(ungatedMode);
     document.body.classList.toggle("ungated", ungatedMode !== "");
+    // THE DRAIN LEASE (drain.ts): a daemon-global banner, repainted on the
+    // chrome cadence so its elapsed clock advances with every frame and so a
+    // cancelled or completed drain takes it down the moment the daemon says
+    // `idle`. Read straight off the adopted lease — the webapp derives no
+    // drain fact of its own.
+    drainBannerEl.innerHTML = drainBannerHtml(s.shutdownSchedule, Date.now());
+    document.body.classList.toggle(DRAINING_BODY_CLASS, s.shutdownSchedule !== null);
     // THE MERGE GATE (merge-gate.ts). Both halves are pure functions of the
     // revisioned `WorkspaceState` lease, repainted on the chrome cadence, so
     // the composer un-gates the moment the merge releases without any local

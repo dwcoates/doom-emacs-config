@@ -51,6 +51,11 @@ type StateApplier interface {
 	// PHANTOM claims it synthesized an end for — turns the returning shim says
 	// do not exist — which is what the caller releases its prompt queue on.
 	ReconcileTurnHandshake(workspace, claimantSessionID string, ids []string, legacyActive bool) (before, after, closed []string, err error)
+	// ActiveTurnIDs names every turn claim the session still holds OPEN in the
+	// durable ledger. It is how a drain hold whose prompt was ACCEPTED but whose
+	// TurnStarted has not been observed yet still names the turn it is waiting
+	// on: process memory cannot answer that, and the ledger can.
+	ActiveTurnIDs(workspace, claimantSessionID string) ([]string, error)
 	// SynthesizeTurnClose ends every durable turn claim held by the session
 	// WITHOUT a TurnEnded, for a live shim observation that contradicts it. It
 	// is the turn-lifecycle half of ReconcileAlreadyComplete's status-axis
@@ -343,6 +348,27 @@ type consumer struct {
 	// Called on the shim read-loop goroutine, with the same non-blocking
 	// obligation onTurn carries.
 	onTurnEvent func(started bool, turnID string, outcome turnOutcome)
+	// onTurnClaims reports the SSM turn ledger's ACTIVE CLAIM SET the instant
+	// the ledger accepted a boundary, before this delivery mutates anything
+	// user-visible. It is what binds the controller's turn record to the turn's
+	// own id (turnrecord.go).
+	//
+	// IT FIRES BEFORE THE SSM APPLY, and that ordering is the fix rather than an
+	// optimization. The SSM's apply publishes the WorkspaceState that tells every
+	// frontend — and every test — that a turn is in flight, and a scheduled
+	// shutdown taken on the strength of that publication used to derive its drain
+	// hold from a record that had latched "active" and not yet learned "which".
+	// Binding the name first makes the hold nameable by the time anyone can
+	// observe the turn at all.
+	//
+	// It is called ONLY when the claim set is non-empty: a boundary that binds or
+	// renames a hold may run ahead of the SSM (it can only make the daemon hold
+	// MORE), while the one that RELEASES the last claim waits for the SSM and
+	// rides the queue's own end edge (onTurn) instead.
+	//
+	// Called on the shim read-loop goroutine, with the same non-blocking
+	// obligation onTurn carries.
+	onTurnClaims func(activeIDs []string)
 	// onBackfill reports a never-blue backfill transition (F2), once per
 	// distinct state. The controller persists it and re-pushes the SessionView.
 	onBackfill func(state string)
@@ -657,6 +683,12 @@ func (c *consumer) Apply(ev *corev1.Event) error {
 		}
 		turnResult = &res
 		applyState = res.apply
+		// THE NAME BINDS FIRST, on the durable ledger's own acceptance and
+		// before this delivery touches the SSM, the frontend, or the progress
+		// footer. See onTurnClaims for why the release direction does not.
+		if len(res.afterIDs) > 0 && c.onTurnClaims != nil {
+			c.onTurnClaims(res.afterIDs)
+		}
 	}
 	if applyState {
 		if err := c.ssm.Apply(ev); err != nil {

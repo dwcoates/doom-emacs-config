@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"path/filepath"
@@ -26,7 +26,7 @@ func TestRegistrySessionViewsPopulatesRegistryFields(t *testing.T) {
 	}
 
 	// Act.
-	views := registrySessions{reg: reg}.SessionViews()
+	views := RegistrySessions{Reg: reg}.SessionViews()
 
 	// Assert.
 	if len(views) != 1 {
@@ -71,7 +71,7 @@ func TestRegistrySessionViewsIncludesTerminalRecords(t *testing.T) {
 	}
 
 	// Act.
-	views := registrySessions{reg: reg}.SessionViews()
+	views := RegistrySessions{Reg: reg}.SessionViews()
 
 	// Assert.
 	if len(views) != 1 {
@@ -96,7 +96,7 @@ func TestRegistrySessionViewsSkipsDirlessRecords(t *testing.T) {
 	}
 
 	// Act.
-	views := registrySessions{reg: reg}.SessionViews()
+	views := RegistrySessions{Reg: reg}.SessionViews()
 
 	// Assert.
 	if len(views) != 0 {
@@ -122,7 +122,7 @@ func TestRegistrySessionViewsReportNoShimWithoutASessionController(t *testing.T)
 	}
 
 	// Act.
-	views := registrySessions{reg: reg}.SessionViews()
+	views := RegistrySessions{Reg: reg}.SessionViews()
 
 	// Assert.
 	if len(views) != 1 {

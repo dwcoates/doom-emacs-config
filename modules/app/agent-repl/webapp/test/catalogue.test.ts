@@ -128,6 +128,36 @@ describe("catalogue scenarios", () => {
     expect(html).toContain("stream-row");
   });
 
+  it("drain-banner renders the global bounce banner with its cause", () => {
+    const html = renderScenarioHtml(scenario("drain-banner"), closed);
+    expect(html).toContain("Daemon bounce scheduled");
+    expect(html).toContain("rebuilt the daemon");
+  });
+
+  it("drain-banner enumerates a hold that carries a turn AND live tasks", () => {
+    const html = renderScenarioHtml(scenario("drain-banner"), closed);
+    expect(html).toContain("app-infra — turn in flight, 1 live task");
+  });
+
+  it("lease-bubble shows the leased prompt in its own dedicated card", () => {
+    const html = renderScenarioHtml(scenario("lease-bubble"), closed);
+    expect(html).toContain("lease-card");
+    expect(html).toContain("Rebase onto master");
+  });
+
+  it("lease-bubble shows the classifier card beside it for contrast", () => {
+    const html = renderScenarioHtml(scenario("lease-bubble"), closed);
+    expect(html).toContain("will run after this turn");
+  });
+
+  it("lease-bubble offers no accept control on the leased prompt", () => {
+    // The classifier entry beside it DOES offer one, so this asserts the
+    // dispatch and not merely the absence of any accept button.
+    const html = renderScenarioHtml(scenario("lease-bubble"), closed);
+    expect(html).toContain('data-queue-accept="q-classified"');
+    expect(html).not.toContain('data-queue-accept="q-leased"');
+  });
+
   it("thinking renders the streaming disclosure open and the settled one closed", () => {
     const html = renderScenarioHtml(scenario("thinking"), closed);
     expect(html).toContain('<details class="thinking" open>');

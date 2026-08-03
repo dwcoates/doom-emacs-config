@@ -321,6 +321,16 @@ func main() {
 		daemonFatal(daemonLog, "claude-repld: open prompt receipt store: %v", err)
 	}
 
+	// The scheduled-shutdown drain lease and the prompts it parks. A daemon
+	// that cannot install these cannot promise that a bounce it scheduled
+	// survives a crash, nor that a prompt it parked behind that bounce is
+	// delivered afterwards — and starting anyway would make both promises
+	// silently false, which is exactly the shape of loss they exist to end.
+	shutdownSchedules, err := statedb.NewShutdownSchedules(stateStore)
+	if err != nil {
+		daemonFatal(daemonLog, "claude-repld: open shutdown schedule store: %v", err)
+	}
+
 	// Persistent session registry: the in-memory session map dies with
 	// the process, so this write-through record store is what lets a
 	// restarted daemon keep resolving the s_<hex> ids its frontends
@@ -452,7 +462,7 @@ func main() {
 	// hands them to the bring-up that is waiting for the connection, which
 	// would otherwise sit out its whole deadline with nothing to report.
 	shimSpawnWatch := server.NewShimSpawnWatch(shimListener.Connected, legacyLog)
-	udsSpawn := func(sessionID string, opts server.CreateOpts) (func() error, error) {
+	udsSpawn := func(sessionID string, opts server.CreateOpts) (server.ShimStopFunc, error) {
 		workspace, canonicalOpts, workspaceErr := canonicalShimCreateOpts(opts)
 		if workspaceErr != nil {
 			return nil, fmt.Errorf("resolve UDS shim workspace for %q: %w", opts.CWD, workspaceErr)
@@ -490,7 +500,17 @@ func main() {
 			return nil, spawnErr
 		}
 		shimSpawnWatch.Spawned(sessionID, proc.StderrTail)
-		spawnEvent(dlog.LevelInfo, "UDS shim spawned", map[string]any{"argv": strings.Join(argv, " "), "cwd": workspace.Directory})
+		// pid AND pgid, always. The shim is spawned into its OWN process group
+		// precisely so a signal aimed at the daemon's group cannot reach it, and
+		// a claim like that is only worth anything if the log lets you check it:
+		// pgid == pid means detached, anything else means still coupled.
+		spawnEvent(dlog.LevelInfo, "UDS shim spawned", map[string]any{
+			"argv":     strings.Join(argv, " "),
+			"cwd":      workspace.Directory,
+			"pid":      proc.Pid(),
+			"pgid":     proc.Pgid(),
+			"detached": proc.Pgid() == proc.Pid(),
+		})
 		// In UDS mode the shim streams over its socket, not stdout, so its
 		// stdout event channel stays empty — drain it so the stdout pump never
 		// blocks, and reap the process when it exits.
@@ -521,7 +541,30 @@ func main() {
 				spawnEvent(dlog.LevelInfo, "UDS shim exited", context)
 			}
 		}()
-		return func() error { return proc.Terminate() }, nil
+		// The DELIBERATE-STOP record, and the counterpart to the spawn record
+		// above: a shim death with one of these next to it was ordered, and a
+		// shim death without one was not. That distinction is the whole reason
+		// the attribution is a required argument.
+		return func(by shim.Stop) error {
+			spawnEvent(dlog.LevelInfo, "stopping UDS shim (SIGTERM)", map[string]any{
+				"cwd":       workspace.Directory,
+				"pid":       proc.Pid(),
+				"pgid":      proc.Pgid(),
+				"initiator": by.Initiator,
+				"reason":    by.Reason,
+			})
+			if err := proc.Terminate(by); err != nil {
+				spawnEvent(dlog.LevelError, "stopping UDS shim FAILED", map[string]any{
+					"cwd":       workspace.Directory,
+					"pid":       proc.Pid(),
+					"initiator": by.Initiator,
+					"reason":    by.Reason,
+					"error":     err.Error(),
+				})
+				return err
+			}
+			return nil
+		}, nil
 	}
 	// Held by pointer so its SessionView re-push can be late-bound below: the
 	// Server it pushes through does not exist yet (same shape as forwarder).
@@ -571,6 +614,7 @@ func main() {
 		ClearCompactStore: seqStore,
 		DurableHistory:    durableHistory,
 		PromptReceipts:    promptReceipts,
+		ShutdownHolds:     shutdownSchedules,
 		PermissionModes:   server.NewRegistryModeStore(sessionRegistry),
 		Registrar:         registrar,
 		ModelCatalogs:     registrar,
@@ -734,7 +778,7 @@ func main() {
 		// The registry's own record of a deliberate deletion, exposed so a merge
 		// can tell a hibernated session (rehydrate) from a deleted one (refuse).
 		SessionDeaths:     server.RegistrySessionDeaths{Reg: sessionRegistry},
-		Sessions:          registrySessions{reg: sessionRegistry, controller: controller, modelCatalogs: modelCatalogs, logf: legacyLog},
+		Sessions:          server.RegistrySessions{Reg: sessionRegistry, Controller: controller, ModelCatalogs: modelCatalogs, Logf: legacyLog},
 		Inits:             controller,
 		Catalogs:          controller,
 		Queues:            controller,
@@ -742,7 +786,21 @@ func main() {
 		Resyncer:          controller,
 		WorkspaceCreation: workspaceBridge,
 		RequestShutdown:   requestShutdown,
-		ClientLogs:        clientLogs,
+		// The scheduled-shutdown drain lease: its durable record and the fleet
+		// it derives its holds from. The controller satisfies DrainHoldSource,
+		// and the scheduler binds itself to it at construction.
+		ShutdownSchedules: shutdownSchedules,
+		DrainHolds:        controller,
+		// The durable evidence a RESTORED lease seeds itself from. It is the
+		// SAME registry and the SAME two probes the boot sweeper classifies
+		// with, below, so the sweeper's verdict about a surviving shim and the
+		// lease's verdict about it cannot be two different verdicts.
+		DrainEvidence: server.RegistryDrainEvidence{
+			Reg:       sessionRegistry,
+			Connected: shimListener.Connected,
+			Held:      sessionlock.Held,
+		},
+		ClientLogs: clientLogs,
 		// The daemon resolves a workspace's conversation for itself. Frontends
 		// send an intent (continue / fresh / explicit), never a remembered
 		// vendor uuid — see server.ConversationResolver.
@@ -758,6 +816,28 @@ func main() {
 	}
 	// Bind the session controller's push target now that the frontend server exists.
 	forwarder.SetTarget(agentShim.Server)
+	// A schedule this daemon's PREDECESSOR took and did not finish draining is
+	// re-taken here, before any client connects: the deploy that asked for the
+	// bounce is still waiting for it, and coming back idle would strand it
+	// while the next prompt started a turn under a lease it still believes
+	// stands. Restoring is done exactly once, at boot.
+	if agentShim.ShutdownScheduler != nil {
+		if rerr := agentShim.ShutdownScheduler.Restore(); rerr != nil {
+			daemonFatal(daemonLog, "claude-repld: restore the scheduled-shutdown drain lease: %v", rerr)
+		}
+	}
+	// The prompts that lease PARKED are materialized here, immediately after it
+	// and before the frontend serves its first snapshot. Their sessions have not
+	// wired yet — after a bounce that stopped the shims, some may not wire for a
+	// long time — and until this ran they were invisible to every client and
+	// unreachable by cancel for the whole of that window, which is the promise
+	// the lease made to their submitters going unkept.
+	if materialized, merr := controller.MaterializeShutdownHolds(); merr != nil {
+		daemonFatal(daemonLog, "claude-repld: materialize the drain-lease parked-prompt ledger: %v", merr)
+	} else if materialized > 0 {
+		daemonLog.With("operation", "materialize-drain-holds").Log(
+			"claude-repld: materialized %d prompt(s) parked by a previous daemon's scheduled bounce", materialized)
+	}
 	defer func() {
 		if cerr := agentShim.Close(); cerr != nil {
 			daemonLog.With("operation", "close-frontend-surface").Log("claude-repld: frontend surface close: %v", cerr)
