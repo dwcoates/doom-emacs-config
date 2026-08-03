@@ -10,13 +10,14 @@
  * asserted. Until the first roster arrives the mount stays hidden, so a
  * bare-browser session keeps the single-column layout.
  *
- * TWO PUBLISH PATHS, ONE ADOPTION. The roster reaches the rail either as a
- * `frontend.v1.WorkspaceRoster` frame off the same websocket the feed and
- * the footer read (the destination), or through the legacy
- * `window.agentReplWorkspaceRoster` script injection the host evaluates (the
- * origin). Both converge on `adopt`, so the reveal, the revision gate, and
- * the diagnostics can never differ by path — see `adopt` for how a hook push,
- * which carries no revision, is ranked against a frame that does.
+ * ONE PUBLISH PATH. The roster reaches the rail as a
+ * `frontend.v1.WorkspaceRoster` frame off the same websocket the feed and the
+ * footer read, decoded by `frontend-proto.ts` and mapped here by
+ * `rosterFromFrame`. The legacy `window.agentReplWorkspaceRoster` script
+ * injection is GONE: it could not carry the revision the gate ranks by, and a
+ * second ingress meant the reveal and the diagnostics could differ by path.
+ * With one ingress the frame's validation is the only door in, so a malformed
+ * roster fails at the decoder rather than halfway down the render.
  */
 import type { RosterRow as FrameRosterRow, WorkspaceRoster as RosterFrame } from "./frontend-proto.js";
 import { ROSTER_ROW_STATUS_KEYWORD } from "./frontend-proto.js";
@@ -155,11 +156,14 @@ export interface WorkspaceRow {
   status: WorkspaceStatus;
   closed: boolean;
   current: boolean;
-  /** Epoch SECONDS (Emacs time), or null for a workspace never viewed. */
+  /** Epoch SECONDS, or null for a workspace never viewed. The WIRE carries
+   * milliseconds; `stampFromMs` converts at the mapping seam so the render
+   * path below stays in the one unit `formatRecency` has always spoken. */
   lastViewedAt: number | null;
-  /** Epoch SECONDS the merge completed, or null when never merged. Drives
-   * the when-column for Recently Merged rows, where merge age is the fact
-   * worth showing rather than when the workspace was last looked at. */
+  /** Epoch SECONDS the merge completed, or null when never merged (same
+   * millisecond conversion as `lastViewedAt`). Drives the when-column for
+   * Recently Merged rows, where merge age is the fact worth showing rather
+   * than when the workspace was last looked at. */
   mergedAt: number | null;
   branch: string | null;
   parentBranch: string | null;
@@ -178,15 +182,8 @@ export interface RepoGroup {
   rows: WorkspaceRow[];
 }
 
-/** Which publisher an adoption came from, for the diagnostics that must be
- * able to say which path painted the rail while both are live. */
-export type RosterPath = "frame" | "hook";
-
 /** Which grouping the rail shows: repositories (default) or user tasks. */
 export type SidebarView = "repository" | "task";
-
-/** Every view the roster may carry; anything else is a contract breach. */
-const SIDEBAR_VIEWS: ReadonlySet<string> = new Set(["repository", "task"]);
 
 /** Section key of the catch-all "No task" group (matches the Emacs
  * `agent-repl--sidebar-no-task-key`): workspaces in no task collect here,
@@ -252,138 +249,45 @@ function describeBreach(v: unknown): string {
   return s.length > BREACH_PAYLOAD_MAX ? `${s.slice(0, BREACH_PAYLOAD_MAX)}…` : s;
 }
 
-function fail(path: string, want: string, got: unknown): never {
-  // A malformed push only throws inside Emacs's script eval, which the
-  // operator reading the daemon log never sees — so the breach is logged
-  // here too, immediately before the throw that stays the enforcement.
-  log("error", `workspace roster: ${path} must be ${want}, got ${describeBreach(got)}`, { operation: "sidebar.roster-contract-breach", context: { path, expected: want, received: got } });
-  throw new Error(
-    `workspace roster: ${path} must be ${want}, got ${JSON.stringify(got) ?? String(got)}`,
-  );
-}
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
-}
-
-function asString(v: unknown, path: string): string {
-  if (typeof v !== "string") fail(path, "a string", v);
-  return v;
-}
-
-function asNullableString(v: unknown, path: string): string | null {
-  if (v !== null && typeof v !== "string") fail(path, "a string or null", v);
-  return v;
-}
-
-function asBoolean(v: unknown, path: string): boolean {
-  if (typeof v !== "boolean") fail(path, "a boolean", v);
-  return v;
-}
-
-function asNullableNumber(v: unknown, path: string): number | null {
-  if (v !== null && typeof v !== "number") fail(path, "a number or null", v);
-  return v;
-}
-
-function validateRow(value: unknown, path: string): WorkspaceRow {
-  if (!isRecord(value)) fail(path, "an object", value);
-  const status = asString(value.status, `${path}.status`);
-  // An unrecognized status is an invariant violation, never a default: a
-  // new Emacs-side lifecycle state must be taught here, not silently
-  // painted as something it is not.
-  if (!WORKSPACE_STATUSES.has(status)) {
-    log(
-      "error",
-      `workspace roster: unknown status ${JSON.stringify(status)} at ${path}.status — row: ${describeBreach(value)}`,
-      { operation: "sidebar.roster-status-invalid", context: { path, status, row: value } },
-    );
-    throw new Error(`workspace roster: unknown status ${JSON.stringify(status)} at ${path}.status`);
-  }
-  if (!Array.isArray(value.children)) fail(`${path}.children`, "an array", value.children);
-  return {
-    name: asString(value.name, `${path}.name`),
-    dir: asString(value.dir, `${path}.dir`),
-    status: status as WorkspaceStatus,
-    closed: asBoolean(value.closed, `${path}.closed`),
-    current: asBoolean(value.current, `${path}.current`),
-    lastViewedAt: asNullableNumber(value.lastViewedAt, `${path}.lastViewedAt`),
-    mergedAt: asNullableNumber(value.mergedAt, `${path}.mergedAt`),
-    branch: asNullableString(value.branch, `${path}.branch`),
-    parentBranch: asNullableString(value.parentBranch, `${path}.parentBranch`),
-    summary: asNullableString(value.summary, `${path}.summary`),
-    children: value.children.map((c, i) => validateRow(c, `${path}.children[${i}]`)),
-  };
-}
-
-function validateGroup(value: unknown, path: string): RepoGroup {
-  if (!isRecord(value)) fail(path, "an object", value);
-  if (!Array.isArray(value.rows)) fail(`${path}.rows`, "an array", value.rows);
-  return {
-    key: asString(value.key, `${path}.key`),
-    label: asString(value.label, `${path}.label`),
-    folded: asBoolean(value.folded, `${path}.folded`),
-    done: asBoolean(value.done, `${path}.done`),
-    rows: value.rows.map((r, i) => validateRow(r, `${path}.rows[${i}]`)),
-  };
-}
-
-/** The roster as pushed by Emacs, checked field-by-field. Throws on any
- * breach of the contract — the push is machine-built, so a malformed one
- * is a bug to surface, not an input to accommodate. */
-export function validateWorkspaceRoster(value: unknown): WorkspaceRoster {
-  if (!isRecord(value)) fail("roster", "an object", value);
-  if (!Array.isArray(value.repos)) fail("roster.repos", "an array", value.repos);
-  if (!Array.isArray(value.tasks)) fail("roster.tasks", "an array", value.tasks);
-  const view = asString(value.view, "roster.view");
-  // An unrecognized view is an invariant violation, never a default: a new
-  // Emacs-side grouping must be taught here, not silently painted as one
-  // the webapp already knows.
-  if (!SIDEBAR_VIEWS.has(view)) {
-    log("error", `workspace roster: unknown view ${JSON.stringify(view)} — roster: ${describeBreach(value)}`, { operation: "sidebar.roster-view-invalid", context: { view, roster: value } });
-    throw new Error(`workspace roster: unknown view ${JSON.stringify(view)} at roster.view`);
-  }
-  return {
-    view: view as SidebarView,
-    repos: value.repos.map((g, i) => validateGroup(g, `roster.repos[${i}]`)),
-    tasks: value.tasks.map((g, i) => validateGroup(g, `roster.tasks[${i}]`)),
-    // Explicit null is the "no recent merges" signal Emacs sends; anything
-    // else must be a well-formed group, so an absent key falls through to
-    // validateGroup and fails loudly rather than defaulting to empty.
-    recentlyMerged:
-      value.recentlyMerged === null
-        ? null
-        : validateGroup(value.recentlyMerged, "roster.recentlyMerged"),
-    navDir: asNullableString(value.navDir, "roster.navDir"),
-  };
-}
-
 // --- the roster frame -------------------------------------------------------
 
 /**
- * Roster key and label of the Recently Merged section.
+ * Roster key of the Recently Merged section.
  *
- * The FRAME does not carry them: `frontend.v1.RosterSection` is a bare row
- * list, deliberately, since the section is a fixed singleton rather than one
- * of an open set of groups. The key still has to match
- * `agent-repl--sidebar-merged-key` exactly, because the fold gesture POSTs it
- * back as `repo_key` and Emacs looks the section up by it.
+ * SYNTHESIZED, and deliberately still so: `frontend.v1.RosterSection` carries
+ * `folded` and `label` but no key, because the section is a fixed singleton
+ * rather than one of an open set of groups. The fold gesture nonetheless POSTs
+ * a `repo_key` back, and Emacs looks the section up by it, so this constant
+ * must match `agent-repl--sidebar-merged-key` exactly. The LABEL and the FOLD
+ * are no longer synthesized alongside it — the author resolves both and the
+ * frame carries them.
  */
 export const RECENTLY_MERGED_KEY = "__recently_merged__";
-const RECENTLY_MERGED_LABEL = "Recently Merged";
 
 /**
- * The revision a hook push is ranked at.
+ * A wire epoch-MILLISECOND stamp as the rail's internal epoch SECONDS, or null
+ * for the proto3 zero that spells "never".
  *
- * The script-injection path predates the revision and cannot carry one, so it
- * enters the gate at the floor. That makes the ordering between the paths
- * explicit rather than accidental: hook pushes stay adoptable among
- * themselves (the gate admits an equal revision), and a frame that has
- * asserted any revision above the floor outranks every later hook push —
- * which is the precedence we want while both publishers are live, since only
- * the frame path can prove its age.
+ * THE UNIT CHANGES HERE, and only here. `frontend.v1.RosterRow` carries
+ * milliseconds; `formatRecency` and the `WorkspaceRow` fields feeding it have
+ * always been seconds. Converting at this single seam keeps the factor of 1000
+ * out of the render path, where getting it wrong reads not as a crash but as
+ * every workspace being eternally "now" — a wrong answer that looks plausible.
  */
-export const HOOK_ROSTER_REVISION = 0;
+function stampFromMs(ms: number): number | null {
+  return ms === 0 ? null : Math.floor(ms / 1000);
+}
+
+/**
+ * A proto3 string field as the rail's nullable text.
+ *
+ * The empty string is the wire's only way to say "unknown" for `branch`,
+ * `parentBranch`, and `summary` (proto3 scalars have no presence), and the
+ * detail panel omits a line entirely rather than printing an empty one.
+ */
+function textFromWire(s: string): string | null {
+  return s === "" ? null : s;
+}
 
 /**
  * A frame row's status arm mapped onto the rail's status vocabulary.
@@ -417,28 +321,30 @@ function statusFromFrameRow(row: FrameRosterRow, path: string): WorkspaceStatus 
 /**
  * One frame row as a rail row.
  *
- * The frame carries `dir`, `name`, the status arm, `current`, and the family.
- * It carries NOTHING ELSE the rail knows how to draw — no `closed`, no viewed
- * or merged stamp, no branch, parent branch, or summary — because the frozen
- * `frontend.v1.RosterRow` has no fields for them. They are defaulted here to
- * the same values the hook path sends for a row that genuinely has none, so
- * the render path stays single; what a frame-fed rail LOSES against a
- * hook-fed one (the when-column, the detail panel's branch lines, the grey of
- * a closed-but-unmerged row) is a gap in the wire contract, recorded here so
- * it is not mistaken for a rendering bug.
+ * The frame now carries EVERY fact the rail knows how to draw — the identity
+ * and family, the status arm, the two timestamps behind the when-column, the
+ * detail panel's branch lines and summary, and `closed`. Nothing is defaulted
+ * away here any more; the gaps this mapping used to record (a blank
+ * when-column, an empty detail panel, a closed row that refused to recede)
+ * closed with the display fields landing on `frontend.v1.RosterRow`.
+ *
+ * The two nullable spellings are wire-shaped, not lost data: 0 is the only
+ * "never" a proto3 int64 can express and "" the only "unknown" a string can,
+ * so `stampFromMs` and `textFromWire` translate them at this seam rather than
+ * leaving every render site to test for the sentinel.
  */
 function rowFromFrame(row: FrameRosterRow, path: string): WorkspaceRow {
   return {
     name: row.name,
     dir: row.dir,
     status: statusFromFrameRow(row, path),
-    closed: false,
+    closed: row.closed,
     current: row.current,
-    lastViewedAt: null,
-    mergedAt: null,
-    branch: null,
-    parentBranch: null,
-    summary: null,
+    lastViewedAt: stampFromMs(row.lastViewedAtMs),
+    mergedAt: stampFromMs(row.mergedAtMs),
+    branch: textFromWire(row.branch),
+    parentBranch: textFromWire(row.parentBranch),
+    summary: textFromWire(row.summary),
     children: row.children.map((child, i) => rowFromFrame(child, `${path}.children[${i}]`)),
   };
 }
@@ -448,9 +354,10 @@ function rowFromFrame(row: FrameRosterRow, path: string): WorkspaceRow {
  *
  * The view ONEOF's set arm is the grouping — there is no separate mode flag
  * to disagree with it — so the inactive grouping's section list is empty by
- * construction rather than by convention. Repo sections carry only their key,
- * so the key doubles as the header label (the frame has no display label to
- * carry); task sections carry `title` as the label and `taskId` as the key,
+ * construction rather than by convention. Repo sections carry a display
+ * `label` alongside the `repoKey` that stays their fold identity, and an empty
+ * label means the author has none, so the key shows through as the header
+ * text; task sections carry `title` as the label and `taskId` as the key,
  * which is what every task command addresses.
  *
  * The frame's `currentDir` is not read: the rail marks the current row from
@@ -462,7 +369,10 @@ export function rosterFromFrame(frame: RosterFrame): WorkspaceRoster {
     frame.view.case === "repository"
       ? frame.view.value.sections.map((section, i) => ({
           key: section.repoKey,
-          label: section.repoKey,
+          // The key is the fallback, not a placeholder string: a section with
+          // no author label still has to head with something the fold gesture
+          // and the operator can both recognize.
+          label: section.label === "" ? section.repoKey : section.label,
           folded: section.folded,
           // Repo sections have no done axis; the shared group shape carries
           // the field, and Emacs sends `false` on every repo group today.
@@ -484,8 +394,10 @@ export function rosterFromFrame(frame: RosterFrame): WorkspaceRoster {
       : [];
   // An empty section is the frame's "no recent merges": proto3 has no absent
   // repeated field, so emptiness is the only signal available, and the rail
-  // renders no section at all rather than an empty header. The frame carries
-  // no fold state for it either, so it renders unfolded.
+  // renders no section at all rather than an empty header. The FOLD and the
+  // LABEL now come off the frame — the author resolves both — leaving only the
+  // key synthesized, because the fold command has to address the section by a
+  // name the wire has no field for.
   const mergedRows = frame.recentlyMerged.rows.map((r, i) =>
     rowFromFrame(r, `roster.recentlyMerged.rows[${i}]`),
   );
@@ -498,8 +410,8 @@ export function rosterFromFrame(frame: RosterFrame): WorkspaceRoster {
         ? null
         : {
             key: RECENTLY_MERGED_KEY,
-            label: RECENTLY_MERGED_LABEL,
-            folded: false,
+            label: frame.recentlyMerged.label,
+            folded: frame.recentlyMerged.folded,
             done: false,
             rows: mergedRows,
           },
@@ -855,39 +767,26 @@ export class WorkspaceSidebar {
   }
 
   /**
-   * Adopt a roster pushed through the legacy host hook (validated — a
-   * malformed push throws) and paint.
-   *
-   * The injection carries no revision, so it enters the shared gate at
-   * `HOOK_ROSTER_REVISION`; everything else about the adoption — the reveal,
-   * the re-park, the diagnostics — is the frame path's, by construction.
-   */
-  update(roster: unknown): void {
-    this.adopt(validateWorkspaceRoster(roster), HOOK_ROSTER_REVISION, "hook");
-  }
-
-  /**
    * Adopt a decoded `frontend.v1.WorkspaceRoster` frame and paint.
    *
-   * This is the destination path: the roster arrives on the SAME websocket
-   * the feed and the footer read, so a connect snapshot paints all three
-   * surfaces from one burst instead of leaving the rail waiting on a separate
-   * script injection.
+   * THE ONLY INGRESS. The roster arrives on the SAME websocket the feed and
+   * the footer read, so a connect snapshot paints all three surfaces from one
+   * burst rather than leaving the rail waiting on a separate script injection.
    */
   adoptRosterFrame(frame: RosterFrame): void {
-    this.adopt(rosterFromFrame(frame), frame.revision, "frame");
+    this.adopt(rosterFromFrame(frame), frame.revision);
   }
 
   /**
-   * THE adoption point, shared by both publish paths.
+   * THE adoption point.
    *
    * REVISION GATE. The daemon retains the roster and rebroadcasts it, so a
    * reconnect replays a snapshot that may reorder against what this page
    * already holds; a roster older than the held one is stale by definition
    * and is dropped. An EQUAL revision is adopted, not dropped: a redelivery
-   * of the held revision asserts the same picture, and the hook path — which
-   * has no revision to advance — would otherwise adopt exactly once and then
-   * freeze. A drop is always logged with both revisions, never silent.
+   * of the held revision asserts the same picture, so re-adopting it is a
+   * no-op repaint while dropping it would strand a page whose publisher has
+   * not moved. A drop is always logged with both revisions, never silent.
    *
    * THE REVEAL is the gui's other half arriving: while the rail is hidden it
    * sits out of the flex row and the feed fills the frame, so flipping it
@@ -899,7 +798,11 @@ export class WorkspaceSidebar {
    * reflow and re-parked AFTER, forcing the intended sequencing: output +
    * sidebar rendered, then scroll to the bottom.
    */
-  private adopt(roster: WorkspaceRoster, revision: number, path: RosterPath): void {
+  private adopt(roster: WorkspaceRoster, revision: number): void {
+    // The frame is the only ingress now, but the diagnostics keep naming the
+    // path: an operator reading the log should not have to know which release
+    // retired the hook to tell what painted the rail.
+    const path = "frame";
     const held = this.rosterRevision;
     if (held !== null && revision < held) {
       log(
@@ -1146,20 +1049,6 @@ function rosterRows(roster: WorkspaceRoster): WorkspaceRow[] {
   groups.forEach((group) => group.rows.forEach(visit));
   roster.recentlyMerged?.rows.forEach(visit);
   return out;
-}
-
-/**
- * Name of the global Emacs pushes the roster through: the host evaluates
- * `window.agentReplWorkspaceRoster(<json literal>)`, so the hook receives
- * the already-parsed roster object. The lisp side MUST match this string.
- */
-export const ROSTER_HOOK = "agentReplWorkspaceRoster";
-
-/** Plants the roster hook on the host global (main.ts boot). */
-export function installWorkspaceRosterHook(target: HostGlobal, sidebar: WorkspaceSidebar): void {
-  target[ROSTER_HOOK] = (roster: unknown): void => {
-    sidebar.update(roster);
-  };
 }
 
 /**

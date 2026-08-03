@@ -6,7 +6,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
+  RosterRepoSection,
   RosterRow as FrameRosterRow,
+  RosterTaskSection,
   WorkspaceRoster as RosterFrame,
 } from "../src/frontend-proto.js";
 import { HostGlobal } from "../src/host.js";
@@ -16,19 +18,17 @@ import {
   COMMAND_FAILED_NOTICE_MS,
   EXPAND_HOOK,
   NO_TASK_KEY,
-  ROSTER_HOOK,
   RepoGroup,
   WorkspaceRoster,
   WorkspaceRow,
   WorkspaceSidebar,
   formatRecency,
   installWorkspaceExpandHook,
-  installWorkspaceRosterHook,
   mergeRowHtml,
+  rosterFromFrame,
   sidebarHtml,
   statusDotHtml,
   taskSectionHtml,
-  validateWorkspaceRoster,
   workspaceStatusFromRenderState,
 } from "../src/sidebar.js";
 import type { MergeStatus } from "../src/state-adapter.js";
@@ -76,6 +76,76 @@ function html(r: WorkspaceRoster, open: ReadonlySet<string> = new Set()): string
   return sidebarHtml(r, open, NOW_MS, null);
 }
 
+// --- frame builders: the rail's ONLY ingress ---------------------------------
+//
+// The roster reaches WorkspaceSidebar solely as a decoded
+// `frontend.v1.WorkspaceRoster`, so every sidebar-level test drives it through
+// a frame. The wire spellings are deliberately literal here — 0 for "never",
+// "" for "unknown" — so a test that cares about a stamp or a branch has to say
+// so, and the defaults exercise the sentinel mapping on every other test.
+
+/** A frame row, defaulted to a quiet idle workspace with no family. */
+function wireRow(over: Partial<FrameRosterRow> = {}): FrameRosterRow {
+  return {
+    dir: "/tmp/ws",
+    name: "ws",
+    status: { case: "ready" },
+    current: false,
+    children: [],
+    lastViewedAtMs: 0,
+    mergedAtMs: 0,
+    branch: "",
+    parentBranch: "",
+    summary: "",
+    closed: false,
+    ...over,
+  };
+}
+
+/** A repository section, defaulted to the one "doom" repo carrying one row. */
+function wireRepo(over: Partial<RosterRepoSection> = {}): RosterRepoSection {
+  return { repoKey: "doom", label: "doom", folded: false, rows: [wireRow()], ...over };
+}
+
+/** A task section, defaulted to an open task carrying no rows. */
+function wireTask(over: Partial<RosterTaskSection> = {}): RosterTaskSection {
+  return { taskId: "t1", title: "T", done: false, rows: [], ...over };
+}
+
+/**
+ * A decoded roster frame in the repository grouping.
+ *
+ * Revision 0 by default so successive pushes in one test adopt through the
+ * gate's equal-revision rule rather than needing a hand-cranked counter; the
+ * gate's own tests set revisions explicitly.
+ */
+function wireFrame(over: Partial<RosterFrame> = {}): RosterFrame {
+  return {
+    revision: 0,
+    bootId: "boot-a",
+    view: { case: "repository", value: { sections: [wireRepo()] } },
+    recentlyMerged: { rows: [], folded: false, label: "" },
+    currentDir: "",
+    navDir: "",
+    ...over,
+  };
+}
+
+/** Adopt a frame through the sole ingress. */
+function push(sidebar: WorkspaceSidebar, over: Partial<RosterFrame> = {}): void {
+  sidebar.adoptRosterFrame(wireFrame(over));
+}
+
+/** Adopt a repository frame whose single "doom" section carries ROWS. */
+function pushRows(sidebar: WorkspaceSidebar, rows: FrameRosterRow[]): void {
+  push(sidebar, { view: { case: "repository", value: { sections: [wireRepo({ rows })] } } });
+}
+
+/** Adopt a task-grouping frame carrying SECTIONS. */
+function pushTasks(sidebar: WorkspaceSidebar, sections: RosterTaskSection[]): void {
+  push(sidebar, { view: { case: "task", value: { sections } } });
+}
+
 describe("the session monitoring overlay", () => {
   it("breathes only the current row's dot, leaving the roster's other rows alone", () => {
     // Arrange — two idle rows, one current.
@@ -101,101 +171,6 @@ describe("the session monitoring overlay", () => {
     const r = roster({ repos: [group({ rows: [row({ current: true })] })] });
     // Act / Assert
     expect(sidebarHtml(r, new Set(), NOW_MS, null, false)).not.toContain("st-monitoring");
-  });
-});
-
-describe("validateWorkspaceRoster", () => {
-  it("passes a well-formed roster through intact", () => {
-    // Arrange
-    const r = roster({ navDir: "/tmp/ws" });
-    // Act + Assert
-    expect(validateWorkspaceRoster(r)).toEqual(r);
-  });
-
-  it("throws on an unknown status rather than defaulting it", () => {
-    // Arrange
-    const r = roster({ repos: [group({ rows: [row({ status: "exploded" as never })] })] });
-    // Act + Assert
-    expect(() => validateWorkspaceRoster(r)).toThrow(/unknown status "exploded"/);
-  });
-
-  it("accepts the inactive status a perspective-less row carries", () => {
-    // Arrange
-    const r = roster({ repos: [group({ rows: [row({ status: "inactive" })] })] });
-    // Act + Assert
-    expect(() => validateWorkspaceRoster(r)).not.toThrow();
-  });
-
-  it("throws on an unknown status buried in a child row", () => {
-    // Arrange
-    const child = row({ dir: "/tmp/kid", status: "exploded" as never });
-    const r = roster({ repos: [group({ rows: [row({ children: [child] })] })] });
-    // Act + Assert
-    expect(() => validateWorkspaceRoster(r)).toThrow(/children\[0\]\.status/);
-  });
-
-  it("throws when repos is not an array", () => {
-    // Arrange + Act + Assert
-    expect(() => validateWorkspaceRoster({ repos: {}, navDir: null })).toThrow(/repos/);
-  });
-
-  it("throws when a row's lastViewedAt is a string", () => {
-    // Arrange
-    const r = roster({ repos: [group({ rows: [row({ lastViewedAt: "5m" as never })] })] });
-    // Act + Assert
-    expect(() => validateWorkspaceRoster(r)).toThrow(/lastViewedAt/);
-  });
-
-  it("logs the breach before throwing on an unknown status", () => {
-    // Arrange — the throw surfaces only in Emacs's script eval, so the
-    // breach must also reach the daemon log the operator reads.
-    const lines: string[] = [];
-    setLogger(new ForwardingLogger(() => true, (level, line) => lines.push(`${level}: ${line}`)));
-    const r = roster({ repos: [group({ rows: [row({ status: "exploded" as never })] })] });
-    // Act + Assert
-    expect(() => validateWorkspaceRoster(r)).toThrow(/unknown status "exploded"/);
-    expect(lines.some((l) => l.startsWith("error:") && l.includes("unknown status"))).toBe(true);
-  });
-
-  it("logs the breach before throwing on a malformed shape", () => {
-    // Arrange
-    const lines: string[] = [];
-    setLogger(new ForwardingLogger(() => true, (level, line) => lines.push(`${level}: ${line}`)));
-    // Act + Assert
-    expect(() => validateWorkspaceRoster({ repos: {}, navDir: null })).toThrow(/repos/);
-    expect(lines.some((l) => l.startsWith("error:") && l.includes("repos"))).toBe(true);
-  });
-
-  it("throws when navDir is neither string nor null", () => {
-    // Arrange + Act + Assert
-    expect(() => validateWorkspaceRoster(roster({ navDir: 7 as never }))).toThrow(/navDir/);
-  });
-
-  it("carries the view and task sections through intact", () => {
-    // Arrange
-    const r = roster({ view: "task", tasks: [group({ key: "t1", label: "T", done: true })] });
-    // Act + Assert
-    expect(validateWorkspaceRoster(r)).toEqual(r);
-  });
-
-  it("throws on an unknown view rather than defaulting it", () => {
-    // Arrange
-    const r = roster({ view: "kanban" as never });
-    // Act + Assert
-    expect(() => validateWorkspaceRoster(r)).toThrow(/unknown view "kanban"/);
-  });
-
-  it("throws when tasks is not an array", () => {
-    // Arrange + Act + Assert
-    expect(() => validateWorkspaceRoster(roster({ tasks: {} as never }))).toThrow(/tasks/);
-  });
-
-  it("throws when a group's done flag is missing", () => {
-    // Arrange — a group object with no `done` key.
-    const bad = { key: "doom", label: "doom", folded: false, rows: [] };
-    const r = { ...roster(), repos: [bad] };
-    // Act + Assert
-    expect(() => validateWorkspaceRoster(r)).toThrow(/done/);
   });
 });
 
@@ -657,7 +632,7 @@ function breachHarness(): { mount: HTMLElement; reported: string[] } {
   window.addEventListener("error", onError);
   cleanups.push(() => window.removeEventListener("error", onError));
   const { mount, sidebar } = harness();
-  sidebar.update(roster());
+  push(sidebar);
   mount.querySelector(".sb-head")!.insertAdjacentHTML("beforeend", `<span data-task-check></span>`);
   return { mount, reported };
 }
@@ -677,10 +652,10 @@ afterEach(() => {
 describe("WorkspaceSidebar", () => {
   it("uses the revisioned webapp authority for the current row only", () => {
     const { mount, sidebar } = harness();
-    sidebar.update(roster({ repos: [group({ rows: [
-      row({ name: "current", current: true, status: "thinking" }),
-      row({ name: "other", current: false, status: "done" }),
-    ] })] }));
+    pushRows(sidebar, [
+      wireRow({ name: "current", dir: "/tmp/current", current: true, status: { case: "thinking" } }),
+      wireRow({ name: "other", dir: "/tmp/other", current: false, status: { case: "done" } }),
+    ]);
 
     sidebar.setAuthoritativeCurrentStatus("interrupted");
 
@@ -691,7 +666,7 @@ describe("WorkspaceSidebar", () => {
   it("keeps applying current status authority across later Emacs roster pushes", () => {
     const { mount, sidebar } = harness();
     sidebar.setAuthoritativeCurrentStatus("degraded");
-    sidebar.update(roster({ repos: [group({ rows: [row({ current: true, status: "thinking" })] })] }));
+    pushRows(sidebar, [wireRow({ current: true, status: { case: "thinking" } })]);
     expect(mount.querySelector(".ws.current .st")?.getAttribute("title")).toBe("degraded");
   });
 
@@ -707,7 +682,7 @@ describe("WorkspaceSidebar", () => {
   it("repaints the rail when the monitoring gate flips", () => {
     // Arrange — a pushed roster whose only row is the current workspace.
     const { mount, sidebar } = harness();
-    sidebar.update(roster({ repos: [group({ rows: [row({ current: true })] })] }));
+    pushRows(sidebar, [wireRow({ current: true })]);
     // Act
     sidebar.setMonitoring(true);
     // Assert — the current row's dot breathes amber without a fresh push.
@@ -718,7 +693,7 @@ describe("WorkspaceSidebar", () => {
     // Arrange — a pushed roster, then the rail is blown away as a hidden
     // webview's stale frame would be.
     const { mount, sidebar } = harness();
-    sidebar.update(roster({ repos: [group({ rows: [row({ name: "alpha" })] })] }));
+    pushRows(sidebar, [wireRow({ name: "alpha" })]);
     mount.innerHTML = "";
     // Act — the repaint-on-show pass.
     sidebar.repaint();
@@ -746,7 +721,7 @@ describe("WorkspaceSidebar", () => {
     // Arrange
     const { mount, sidebar } = harness();
     // Act
-    sidebar.update(roster());
+    push(sidebar);
     // Assert
     expect(mount.hidden).toBe(false);
   });
@@ -755,7 +730,7 @@ describe("WorkspaceSidebar", () => {
     // Arrange — a feed sitting at its tail when the first push arrives.
     const { sidebar, parkCalls } = harness({ isPinned: () => true });
     // Act — the first push reveals the rail and reflows the feed.
-    sidebar.update(roster());
+    push(sidebar);
     // Assert — the reveal snapped the reflowed feed back to its tail.
     expect(parkCalls()).toBe(1);
   });
@@ -764,7 +739,7 @@ describe("WorkspaceSidebar", () => {
     // Arrange — a feed the user scrolled off its tail before the first push.
     const { sidebar, parkCalls } = harness({ isPinned: () => false });
     // Act
-    sidebar.update(roster());
+    push(sidebar);
     // Assert — no re-park, so the user's place survives the reveal.
     expect(parkCalls()).toBe(0);
   });
@@ -772,9 +747,9 @@ describe("WorkspaceSidebar", () => {
   it("does not re-park on a later push once the rail is already revealed", () => {
     // Arrange — a pinned feed whose rail is already revealed by a first push.
     const { sidebar, parkCalls } = harness({ isPinned: () => true });
-    sidebar.update(roster());
+    push(sidebar);
     // Act — a second push repaints the already-visible rail (no reflow).
-    sidebar.update(roster());
+    push(sidebar);
     // Assert — only the reveal re-parked; the later push left the feed alone.
     expect(parkCalls()).toBe(1);
   });
@@ -794,22 +769,15 @@ describe("WorkspaceSidebar", () => {
       parkFeed: () => {},
     });
     // Act
-    sidebar.update(roster());
+    push(sidebar);
     // Assert — the pin was read while the rail was still hidden (pre-reflow).
     expect(hiddenWhenProbed).toBe(true);
-  });
-
-  it("rejects a malformed push loudly instead of painting it", () => {
-    // Arrange
-    const { sidebar } = harness();
-    // Act + Assert
-    expect(() => sidebar.update({ repos: "nope" })).toThrow(/repos/);
   });
 
   it("POSTs a switch command when a row body is clicked", () => {
     // Arrange
     const { mount, sidebar, calls } = harness();
-    sidebar.update(roster());
+    push(sidebar);
     // Act
     click(mount.querySelector(".row")!);
     // Assert
@@ -821,7 +789,7 @@ describe("WorkspaceSidebar", () => {
   it("resolves a click on a row's inner span to the row's switch", () => {
     // Arrange
     const { mount, sidebar, calls } = harness();
-    sidebar.update(roster());
+    push(sidebar);
     // Act
     click(mount.querySelector(".row .name")!);
     // Assert
@@ -831,7 +799,7 @@ describe("WorkspaceSidebar", () => {
   it("POSTs a fold asking for the folded state an unfolded repo lacks", () => {
     // Arrange
     const { mount, sidebar, calls } = harness();
-    sidebar.update(roster());
+    push(sidebar);
     // Act
     click(mount.querySelector(".repo-head")!);
     // Assert
@@ -856,7 +824,7 @@ describe("WorkspaceSidebar", () => {
     });
     const mount = document.createElement("nav");
     const sidebar = new WorkspaceSidebar(mount, { httpBase: "http://daemon" });
-    sidebar.update(roster());
+    push(sidebar);
 
     // Act
     click(mount.querySelector(".repo-head")!);
@@ -869,7 +837,9 @@ describe("WorkspaceSidebar", () => {
   it("POSTs a fold asking to unfold an already-folded repo", () => {
     // Arrange
     const { mount, sidebar, calls } = harness();
-    sidebar.update(roster({ repos: [group({ folded: true })] }));
+    push(sidebar, {
+      view: { case: "repository", value: { sections: [wireRepo({ folded: true })] } },
+    });
     // Act
     click(mount.querySelector(".repo-head")!);
     // Assert
@@ -879,7 +849,7 @@ describe("WorkspaceSidebar", () => {
   it("never folds locally — Emacs answers with the fresh roster", () => {
     // Arrange
     const { mount, sidebar } = harness();
-    sidebar.update(roster());
+    push(sidebar);
     // Act
     click(mount.querySelector(".repo-head")!);
     // Assert
@@ -889,7 +859,7 @@ describe("WorkspaceSidebar", () => {
   it("POSTs a set-view command when a view button is clicked", () => {
     // Arrange
     const { mount, sidebar, calls } = harness();
-    sidebar.update(roster());
+    push(sidebar);
     // Act
     click(mount.querySelector(`[data-set-view="task"]`)!);
     // Assert
@@ -899,7 +869,7 @@ describe("WorkspaceSidebar", () => {
   it("POSTs a task-create command when the add-task button is clicked", () => {
     // Arrange
     const { mount, sidebar, calls } = harness();
-    sidebar.update(roster({ view: "task", repos: [], tasks: [] }));
+    pushTasks(sidebar, []);
     // Act
     click(mount.querySelector("[data-add-task]")!);
     // Assert
@@ -909,9 +879,7 @@ describe("WorkspaceSidebar", () => {
   it("POSTs a task-toggle-done command when a task checkbox is clicked", () => {
     // Arrange
     const { mount, sidebar, calls } = harness();
-    sidebar.update(
-      roster({ view: "task", repos: [], tasks: [group({ key: "t1", label: "T", rows: [] })] }),
-    );
+    pushTasks(sidebar, [wireTask()]);
     // Act
     click(mount.querySelector("[data-task-check]")!);
     // Assert
@@ -921,9 +889,7 @@ describe("WorkspaceSidebar", () => {
   it("POSTs a task-open command when a task label is clicked", () => {
     // Arrange
     const { mount, sidebar, calls } = harness();
-    sidebar.update(
-      roster({ view: "task", repos: [], tasks: [group({ key: "t1", label: "T", rows: [] })] }),
-    );
+    pushTasks(sidebar, [wireTask()]);
     // Act
     click(mount.querySelector("[data-task-open]")!);
     // Assert
@@ -933,9 +899,7 @@ describe("WorkspaceSidebar", () => {
   it("POSTs a task-add-workspace command when a task add button is clicked", () => {
     // Arrange
     const { mount, sidebar, calls } = harness();
-    sidebar.update(
-      roster({ view: "task", repos: [], tasks: [group({ key: "t1", label: "T", rows: [] })] }),
-    );
+    pushTasks(sidebar, [wireTask()]);
     // Act
     click(mount.querySelector("[data-task-add]")!);
     // Assert
@@ -945,13 +909,7 @@ describe("WorkspaceSidebar", () => {
   it("switches a workspace row inside a task section, not the task", () => {
     // Arrange — a task section whose row must still post a plain switch.
     const { mount, sidebar, calls } = harness();
-    sidebar.update(
-      roster({
-        view: "task",
-        repos: [],
-        tasks: [group({ key: "t1", label: "T", rows: [row({ dir: "/tmp/inside" })] })],
-      }),
-    );
+    pushTasks(sidebar, [wireTask({ rows: [wireRow({ dir: "/tmp/inside" })] })]);
     // Act
     click(mount.querySelector(".row")!);
     // Assert
@@ -961,7 +919,7 @@ describe("WorkspaceSidebar", () => {
   it("opens a row's detail panel from its chevron", () => {
     // Arrange
     const { mount, sidebar } = harness();
-    sidebar.update(roster());
+    push(sidebar);
     // Act
     click(mount.querySelector("[data-chev]")!);
     // Assert
@@ -971,7 +929,7 @@ describe("WorkspaceSidebar", () => {
   it("does not POST anything for a chevron click", () => {
     // Arrange
     const { mount, sidebar, calls } = harness();
-    sidebar.update(roster());
+    push(sidebar);
     // Act
     click(mount.querySelector("[data-chev]")!);
     // Assert
@@ -981,10 +939,10 @@ describe("WorkspaceSidebar", () => {
   it("keeps an opened panel open across a roster re-push", () => {
     // Arrange
     const { mount, sidebar } = harness();
-    sidebar.update(roster());
+    push(sidebar);
     click(mount.querySelector("[data-chev]")!);
     // Act — Emacs pushes again; the rendered DOM is rebuilt wholesale.
-    sidebar.update(roster());
+    push(sidebar);
     // Assert
     expect(mount.querySelector(".ws")!.classList.contains("open")).toBe(true);
   });
@@ -992,7 +950,7 @@ describe("WorkspaceSidebar", () => {
   it("closes an opened panel on the chevron's second click", () => {
     // Arrange
     const { mount, sidebar } = harness();
-    sidebar.update(roster());
+    push(sidebar);
     click(mount.querySelector("[data-chev]")!);
     // Act
     click(mount.querySelector("[data-chev]")!);
@@ -1003,7 +961,7 @@ describe("WorkspaceSidebar", () => {
   it("opens a row's detail panel from toggleDetail (the keyboard path)", () => {
     // Arrange
     const { mount, sidebar } = harness();
-    sidebar.update(roster());
+    push(sidebar);
     // Act
     sidebar.toggleDetail("/tmp/ws");
     // Assert
@@ -1013,7 +971,7 @@ describe("WorkspaceSidebar", () => {
   it("closes the panel on a second toggleDetail", () => {
     // Arrange
     const { mount, sidebar } = harness();
-    sidebar.update(roster());
+    push(sidebar);
     sidebar.toggleDetail("/tmp/ws");
     // Act
     sidebar.toggleDetail("/tmp/ws");
@@ -1024,7 +982,7 @@ describe("WorkspaceSidebar", () => {
   it("does not POST anything for a toggleDetail", () => {
     // Arrange
     const { sidebar, calls } = harness();
-    sidebar.update(roster());
+    push(sidebar);
     // Act
     sidebar.toggleDetail("/tmp/ws");
     // Assert
@@ -1035,7 +993,7 @@ describe("WorkspaceSidebar", () => {
     // Arrange
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const { mount, sidebar } = harness({ ok: false });
-    sidebar.update(roster());
+    push(sidebar);
     // Act
     click(mount.querySelector(".row")!);
     await flush();
@@ -1047,7 +1005,7 @@ describe("WorkspaceSidebar", () => {
     // Arrange
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const { mount, sidebar } = harness({ reject: true });
-    sidebar.update(roster());
+    push(sidebar);
     // Act
     click(mount.querySelector(".row")!);
     await flush();
@@ -1078,7 +1036,7 @@ describe("WorkspaceSidebar", () => {
     vi.useFakeTimers();
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const { mount, sidebar } = harness({ reject: true });
-    sidebar.update(roster());
+    push(sidebar);
     click(mount.querySelector(".row")!);
     await vi.advanceTimersByTimeAsync(0);
     // Act
@@ -1243,6 +1201,254 @@ describe("the roster frame", () => {
   });
 });
 
+/**
+ * The display fields `frontend.v1.RosterRow` and the section messages carry:
+ * the two timestamps behind the when-column, the detail panel's branch lines
+ * and summary, `closed`, and the section labels. Every one of them travels the
+ * frame — there is no second ingress to supply them.
+ */
+describe("the roster frame's display fields", () => {
+  /** The one row of a default repository frame, mapped. */
+  function mappedRow(over: Partial<FrameRosterRow>): WorkspaceRow {
+    return rosterFromFrame(wireFrame({
+      view: { case: "repository", value: { sections: [wireRepo({ rows: [wireRow(over)] })] } },
+    })).repos[0]!.rows[0]!;
+  }
+
+  it("converts a millisecond viewed stamp to the seconds the rail counts in", () => {
+    // Arrange — the wire's unit is ms, `formatRecency`'s is seconds, so this
+    // pins the factor of 1000 a wrong seam would silently drop.
+    const viewedMs = NOW_MS - 330_000;
+    // Act
+    const mapped = mappedRow({ lastViewedAtMs: viewedMs });
+    // Assert
+    expect(mapped.lastViewedAt).toBe(NOW_S - 330);
+  });
+
+  it("renders that converted stamp as its compact age in the when-column", () => {
+    // Arrange — 5m30s ago, which truncates to 5m.
+    const { mount, sidebar } = harness();
+    // Act
+    pushRows(sidebar, [wireRow({ lastViewedAtMs: NOW_MS - 330_000 })]);
+    // Assert — a seam that forgot to divide would read "now" forever.
+    expect(mount.querySelector(".when")!.textContent).toBe("5m");
+  });
+
+  it("reads a zero viewed stamp as a workspace never viewed", () => {
+    // Arrange + Act — 0 is proto3's only spelling of "never".
+    const mapped = mappedRow({ lastViewedAtMs: 0 });
+    // Assert
+    expect(mapped.lastViewedAt).toBeNull();
+  });
+
+  it("converts a millisecond merge stamp to seconds too", () => {
+    // Arrange + Act
+    const mapped = mappedRow({ mergedAtMs: NOW_MS - 7_200_000 });
+    // Assert
+    expect(mapped.mergedAt).toBe(NOW_S - 7200);
+  });
+
+  it("prefers the merge stamp over the viewed stamp in the when-column", () => {
+    // Arrange — a merged row viewed a minute ago but merged two hours back;
+    // the proto says the merge wins, since merge age is the fact worth showing.
+    const { mount, sidebar } = harness();
+    // Act
+    pushRows(sidebar, [
+      wireRow({ lastViewedAtMs: NOW_MS - 60_000, mergedAtMs: NOW_MS - 7_200_000 }),
+    ]);
+    // Assert
+    expect(mount.querySelector(".when")!.textContent).toBe("2h");
+  });
+
+  it("falls back to the viewed stamp when the row never merged", () => {
+    // Arrange + Act
+    const { mount, sidebar } = harness();
+    pushRows(sidebar, [wireRow({ lastViewedAtMs: NOW_MS - 7_200_000, mergedAtMs: 0 })]);
+    // Assert
+    expect(mount.querySelector(".when")!.textContent).toBe("2h");
+  });
+
+  it("recedes a closed row, the treatment a merged row gets", () => {
+    // Arrange + Act — a pane dismissed but still switchable.
+    const { mount, sidebar } = harness();
+    pushRows(sidebar, [wireRow({ closed: true })]);
+    // Assert
+    expect(mount.querySelector(".ws")!.classList.contains("gone")).toBe(true);
+  });
+
+  it("leaves an open row un-receded", () => {
+    // Arrange + Act
+    const { mount, sidebar } = harness();
+    pushRows(sidebar, [wireRow({ closed: false })]);
+    // Assert
+    expect(mount.querySelector(".ws")!.classList.contains("gone")).toBe(false);
+  });
+
+  it("renders the row's branch in its detail panel", () => {
+    // Arrange + Act
+    const { mount, sidebar } = harness();
+    pushRows(sidebar, [wireRow({ branch: "wave2b-sidebar" })]);
+    // Assert
+    expect(mount.querySelector(".detail")!.textContent).toContain("wave2b-sidebar");
+  });
+
+  it("renders the row's parent branch in its detail panel", () => {
+    // Arrange + Act
+    const { mount, sidebar } = harness();
+    pushRows(sidebar, [wireRow({ parentBranch: "master" })]);
+    // Assert
+    expect(mount.querySelector(".detail")!.textContent).toContain("master");
+  });
+
+  it("renders the row's summary in its detail panel", () => {
+    // Arrange + Act
+    const { mount, sidebar } = harness();
+    pushRows(sidebar, [wireRow({ summary: "retire the hook ingress" })]);
+    // Assert
+    expect(mount.querySelector(".detail .summary")!.textContent).toBe("retire the hook ingress");
+  });
+
+  it("omits the summary entirely when the wire carries none", () => {
+    // Arrange + Act — "" is the only "none" a proto3 string has.
+    const { mount, sidebar } = harness();
+    pushRows(sidebar, [wireRow({ summary: "" })]);
+    // Assert — an empty paragraph would take space saying nothing.
+    expect(mount.querySelector(".detail .summary")).toBeNull();
+  });
+
+  it("maps an empty branch to no branch line rather than a blank one", () => {
+    // Arrange + Act
+    const mapped = mappedRow({ branch: "" });
+    // Assert
+    expect(mapped.branch).toBeNull();
+  });
+
+  it("heads a repo section with the label the author supplied", () => {
+    // Arrange + Act — the label is display only; repoKey stays the identity.
+    const { mount, sidebar } = harness();
+    push(sidebar, {
+      view: {
+        case: "repository",
+        value: { sections: [wireRepo({ repoKey: "/src/doom", label: "doom" })] },
+      },
+    });
+    // Assert
+    expect(mount.querySelector(".repo-head")!.textContent).toContain("doom");
+  });
+
+  it("falls back to the repo key when the section carries no label", () => {
+    // Arrange + Act — empty means the author has no label, per the field comment.
+    const { mount, sidebar } = harness();
+    push(sidebar, {
+      view: {
+        case: "repository",
+        value: { sections: [wireRepo({ repoKey: "/src/doom", label: "" })] },
+      },
+    });
+    // Assert
+    expect(mount.querySelector(".repo-head")!.textContent).toContain("/src/doom");
+  });
+
+  it("keeps the repo key as the fold identity even when a label differs", () => {
+    // Arrange + Act
+    const { mount, sidebar } = harness();
+    push(sidebar, {
+      view: {
+        case: "repository",
+        value: { sections: [wireRepo({ repoKey: "/src/doom", label: "doom" })] },
+      },
+    });
+    // Assert — the fold command POSTs this key back to Emacs.
+    expect(mount.querySelector('[data-repo-key="/src/doom"]')).not.toBeNull();
+  });
+
+  it("labels the Recently Merged section from the frame", () => {
+    // Arrange + Act — the author resolves the heading; nothing is hardcoded.
+    const { mount, sidebar } = harness();
+    push(sidebar, {
+      recentlyMerged: {
+        rows: [wireRow({ dir: "/w/m", status: { case: "merged" } })],
+        folded: false,
+        label: "Recently Merged",
+      },
+    });
+    // Assert
+    expect(mount.querySelector(".merged-section .repo-head")!.textContent).toContain(
+      "Recently Merged",
+    );
+  });
+
+  it("folds the Recently Merged section when the frame says it is folded", () => {
+    // Arrange + Act
+    const { mount, sidebar } = harness();
+    push(sidebar, {
+      recentlyMerged: {
+        rows: [wireRow({ dir: "/w/m", status: { case: "merged" } })],
+        folded: true,
+        label: "Recently Merged",
+      },
+    });
+    // Assert
+    expect(mount.querySelector(".merged-section")!.classList.contains("folded")).toBe(true);
+  });
+
+  it("leaves the Recently Merged section unfolded when the frame says so", () => {
+    // Arrange + Act — the fold is read off the frame, never defaulted.
+    const { mount, sidebar } = harness();
+    push(sidebar, {
+      recentlyMerged: {
+        rows: [wireRow({ dir: "/w/m", status: { case: "merged" } })],
+        folded: false,
+        label: "Recently Merged",
+      },
+    });
+    // Assert
+    expect(mount.querySelector(".merged-section")!.classList.contains("folded")).toBe(false);
+  });
+});
+
+/**
+ * The legacy `window.agentReplWorkspaceRoster` script injection is retired.
+ * It could not carry the revision the gate ranks by, and a second ingress meant
+ * the reveal and the diagnostics could differ by path.
+ */
+describe("the retired roster hook ingress", () => {
+  it("exports no roster hook name", async () => {
+    // Arrange + Act
+    const mod = await import("../src/sidebar.js");
+    // Assert
+    expect(Object.keys(mod)).not.toContain("ROSTER_HOOK");
+  });
+
+  it("exports no roster hook installer", async () => {
+    // Arrange + Act
+    const mod = await import("../src/sidebar.js");
+    // Assert
+    expect(Object.keys(mod)).not.toContain("installWorkspaceRosterHook");
+  });
+
+  it("exports no hook-shaped roster validator", async () => {
+    // Arrange + Act — the frame path validates in the decoder instead.
+    const mod = await import("../src/sidebar.js");
+    // Assert
+    expect(Object.keys(mod)).not.toContain("validateWorkspaceRoster");
+  });
+
+  it("leaves the sidebar with no external update entry", () => {
+    // Arrange
+    const { sidebar } = harness();
+    // Act + Assert — `adoptRosterFrame` is the single ingress.
+    expect((sidebar as unknown as Record<string, unknown>).update).toBeUndefined();
+  });
+
+  it("still keeps the expand hook, which is a keyboard gesture and not an ingress", async () => {
+    // Arrange + Act — retiring the roster hook must not take C-S-RET with it.
+    const mod = await import("../src/sidebar.js");
+    // Assert
+    expect(Object.keys(mod)).toContain("installWorkspaceExpandHook");
+  });
+});
+
 describe("the roster revision gate", () => {
   function frameAt(revision: number, dir: string): RosterFrame {
     return {
@@ -1324,36 +1530,6 @@ describe("the roster revision gate", () => {
     expect(mount.hidden).toBe(false);
   });
 
-  it("still adopts a hook push, ranked at the hook revision", () => {
-    // Arrange — the legacy path, live until the Emacs publisher migrates.
-    const { mount, sidebar } = harness();
-    // Act
-    sidebar.update(roster({ repos: [group({ rows: [row({ dir: "/w/hooked" })] })] }));
-    // Assert
-    expect(mount.querySelector('[data-row-dir="/w/hooked"]')).not.toBeNull();
-  });
-
-  it("adopts a second hook push, which carries no advancing revision", () => {
-    // Arrange
-    const { mount, sidebar } = harness();
-    sidebar.update(roster({ repos: [group({ rows: [row({ dir: "/w/first" })] })] }));
-    // Act
-    sidebar.update(roster({ repos: [group({ rows: [row({ dir: "/w/second" })] })] }));
-    // Assert — an equal revision must not freeze the hook path.
-    expect(mount.querySelector('[data-row-dir="/w/second"]')).not.toBeNull();
-  });
-
-  it("names the hook as the adopting path in the log", () => {
-    // Arrange
-    const lines: string[] = [];
-    setLogger(new ForwardingLogger(() => true, (level, line) => lines.push(`${level}: ${line}`)));
-    const { sidebar } = harness();
-    // Act
-    sidebar.update(roster());
-    // Assert
-    expect(lines.some((l) => l.includes("workspace roster adopted path=hook"))).toBe(true);
-  });
-
   it("names the frame as the adopting path in the log", () => {
     // Arrange
     const lines: string[] = [];
@@ -1365,45 +1541,6 @@ describe("the roster revision gate", () => {
     expect(lines.some((l) => l.includes("workspace roster adopted path=frame revision=7"))).toBe(
       true,
     );
-  });
-
-  it("drops a hook push once a frame has asserted a higher revision", () => {
-    // Arrange — during the transition only the frame path can prove its age,
-    // so it outranks a later injection.
-    const { mount, sidebar } = harness();
-    sidebar.adoptRosterFrame(frameAt(9, "/w/framed"));
-    // Act
-    sidebar.update(roster({ repos: [group({ rows: [row({ dir: "/w/hooked" })] })] }));
-    // Assert
-    expect(mount.querySelector('[data-row-dir="/w/hooked"]')).toBeNull();
-  });
-});
-
-describe("installWorkspaceRosterHook", () => {
-  it("names the hook the way the Emacs side must call it", () => {
-    // Arrange + Act + Assert
-    expect(ROSTER_HOOK).toBe("agentReplWorkspaceRoster");
-  });
-
-  it("plants the hook under that name", () => {
-    // Arrange
-    const target: HostGlobal = {};
-    const { sidebar } = harness();
-    // Act
-    installWorkspaceRosterHook(target, sidebar);
-    // Assert
-    expect(typeof target[ROSTER_HOOK]).toBe("function");
-  });
-
-  it("drives the sidebar's update when fired", () => {
-    // Arrange
-    const target: HostGlobal = {};
-    const { mount, sidebar } = harness();
-    installWorkspaceRosterHook(target, sidebar);
-    // Act — the way an Emacs host script fires it, roster pre-parsed.
-    (target[ROSTER_HOOK] as (r: unknown) => void)(roster());
-    // Assert
-    expect(mount.hidden).toBe(false);
   });
 });
 
@@ -1427,7 +1564,7 @@ describe("installWorkspaceExpandHook", () => {
     // Arrange
     const target: HostGlobal = {};
     const { mount, sidebar } = harness();
-    sidebar.update(roster());
+    push(sidebar);
     installWorkspaceExpandHook(target, sidebar);
     // Act — the way an Emacs host script fires it, dir as a plain string.
     (target[EXPAND_HOOK] as (d: unknown) => void)("/tmp/ws");
@@ -1439,7 +1576,7 @@ describe("installWorkspaceExpandHook", () => {
     // Arrange
     const target: HostGlobal = {};
     const { mount, sidebar } = harness();
-    sidebar.update(roster());
+    push(sidebar);
     installWorkspaceExpandHook(target, sidebar);
     (target[EXPAND_HOOK] as (d: unknown) => void)("/tmp/ws");
     // Act
@@ -1474,9 +1611,9 @@ describe("the rail's structured merge status", () => {
     value: { commitsTotal: 4, commitsLanded: 1, currentSha: "abc1234", currentSubject: "fix it" },
   });
 
-  /** A roster whose single row is THIS session's, mid-merge. */
-  const mergingRoster = (): WorkspaceRoster =>
-    roster({ repos: [group({ rows: [row({ current: true, status: "merging" })] })] });
+  /** Adopt a frame whose single row is THIS session's, mid-merge. */
+  const pushMerging = (sidebar: WorkspaceSidebar): void =>
+    pushRows(sidebar, [wireRow({ current: true, status: { case: "merging" } })]);
 
   it("renders nothing when no merge touches the workspace", () => {
     // Arrange / Act
@@ -1591,7 +1728,7 @@ describe("the rail's structured merge status", () => {
   it("draws the merge on THIS session's row", () => {
     // Arrange
     const { mount, sidebar } = harness();
-    sidebar.update(mergingRoster());
+    pushMerging(sidebar);
     // Act
     sidebar.setMergeStatus(PICKING);
     // Assert
@@ -1601,11 +1738,10 @@ describe("the rail's structured merge status", () => {
   it("leaves every OTHER row exactly as Emacs asserted it", () => {
     // Arrange — the status describes this session only.
     const { mount, sidebar } = harness();
-    sidebar.update(
-      roster({
-        repos: [group({ rows: [row({ dir: "/tmp/other" }), row({ current: true, status: "merging" })] })],
-      }),
-    );
+    pushRows(sidebar, [
+      wireRow({ dir: "/tmp/other" }),
+      wireRow({ current: true, status: { case: "merging" } }),
+    ]);
     // Act
     sidebar.setMergeStatus(PICKING);
     // Assert
@@ -1615,7 +1751,7 @@ describe("the rail's structured merge status", () => {
   it("repaints when a per-commit tick moves the run on", () => {
     // Arrange
     const { mount, sidebar } = harness();
-    sidebar.update(mergingRoster());
+    pushMerging(sidebar);
     sidebar.setMergeStatus(PICKING);
     // Act
     sidebar.setMergeStatus({
@@ -1633,7 +1769,7 @@ describe("the rail's structured merge status", () => {
   it("clears the lines when the merge status goes away", () => {
     // Arrange
     const { mount, sidebar } = harness();
-    sidebar.update(mergingRoster());
+    pushMerging(sidebar);
     sidebar.setMergeStatus(PICKING);
     // Act
     sidebar.setMergeStatus(null);
