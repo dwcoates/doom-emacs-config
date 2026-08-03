@@ -735,11 +735,27 @@ func (c *Client) reportRecovered() {
 // markRecv records that an inbound frame just arrived.
 func (c *Client) markRecv() { c.lastRecvNanos.Store(time.Now().UnixNano()) }
 
-// newRequestID mints a process-unique, correlation-friendly request id.
-func (c *Client) newRequestID(kind string) string {
+// newRequestID mints a request id that is unique across daemon restarts and
+// vendor-session rotations, not merely within one process.
+//
+// The counter carries NO identity of its own: it restarts at 1 in every daemon
+// process and in every fresh Client, so `daemon-prompt-2` names a different turn
+// on each boot. Uniqueness rests entirely on the random suffix, which is why a
+// crypto/rand failure cannot be tolerated here — a zeroed suffix would make the
+// id a pure function of the counter and hand two different turns the same
+// identity. These ids become durable turn-claim keys, so a collision is not a
+// cosmetic correlation glitch: a new turn inherits a retired turn's ledger row
+// and its bridge is refused against a claim it never owned.
+//
+// This mirrors newSecureControllerGenerationID in sessioncontroller: entropy
+// failure is surfaced, never papered over with a weaker id. Every caller already
+// returns an error, so the failure has somewhere honest to go.
+func (c *Client) newRequestID(kind string) (string, error) {
 	var b [6]byte
-	_, _ = rand.Read(b[:])
-	return fmt.Sprintf("daemon-%s-%d-%s", kind, c.reqCounter.Add(1), hex.EncodeToString(b[:]))
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", fmt.Errorf("shimclient: mint %s request id for session %s: %w", kind, c.cfg.SessionID, err)
+	}
+	return fmt.Sprintf("daemon-%s-%d-%s", kind, c.reqCounter.Add(1), hex.EncodeToString(b[:])), nil
 }
 
 // --- frame codec: one proto message per length-prefixed frame, wrapped in a
