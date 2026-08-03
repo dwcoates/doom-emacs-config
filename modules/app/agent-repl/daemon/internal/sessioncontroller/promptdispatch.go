@@ -150,7 +150,8 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 	claimsTurn := cmd.claimsTurn() && who != submitterMergeLeaseHolder
 	echoes := cmd.echoes() && who != submitterMergeLeaseHolder
 
-	accepted, activeBefore := false, false
+	accepted := false
+	var turnBefore turnRecord
 	var acceptedAtMs int64
 	if claimsTurn {
 		before, err := m.notePromptAccepted(d, requestID)
@@ -162,7 +163,7 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 			// as it was found. The user can resubmit.
 			return err
 		}
-		accepted, activeBefore = true, before
+		accepted, turnBefore = true, before
 	}
 
 	// THE DURABLE RECEIPT is written only for a prompt that EARNS A BUBBLE. Its
@@ -191,7 +192,7 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 		// the two ways to be wrong.
 		acceptedAtMs = m.now()
 		if err := m.recordPromptReceipt(d, requestID, text, acceptedAtMs); err != nil {
-			m.retractPromptAccepted(d, requestID, activeBefore, err)
+			m.retractPromptAccepted(d, requestID, turnBefore, err)
 			return err
 		}
 	}
@@ -202,7 +203,7 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 			// that is not going to happen, and nothing else will ever close it:
 			// the lifecycle retires `thinking` on a TurnEnded, and no turn that
 			// never began reports an end.
-			m.retractPromptAccepted(d, requestID, activeBefore, err)
+			m.retractPromptAccepted(d, requestID, turnBefore, err)
 		}
 		return err
 	}
@@ -252,14 +253,14 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 // the footer clock. The session controller's queue latch moves on the same
 // edge. Waiting for the durable TurnStarted would let a second prompt bypass
 // the queue while every frontend already reported an active turn.
-func (m *Manager) notePromptAccepted(d *sessionController, requestID string) (activeBefore bool, err error) {
+func (m *Manager) notePromptAccepted(d *sessionController, requestID string) (turnBefore turnRecord, err error) {
 	// The accepted edge is authoritative for BOTH user-visible state and queue
 	// ordering. If the SSM says turn_active while the queue manager still says
 	// idle, a second prompt can bypass the queue before the durable TurnStarted
 	// arrives. The observed TurnStarted is an idempotent confirmation.
 	m.mu.Lock()
-	controllerActiveBefore := d.turnActive
-	d.turnActive = true
+	turnBefore = d.noteTurnAcceptedLocked(requestID)
+	turnAfter := d.turn
 	m.mu.Unlock()
 
 	publish := func(state *frontendv1.WorkspaceState) {
@@ -285,17 +286,17 @@ func (m *Manager) notePromptAccepted(d *sessionController, requestID string) (ac
 		// is claimed" cannot come apart on the failure path. They used to, and
 		// the surviving row wedged the workspace against every later prompt.
 		m.mu.Lock()
-		d.turnActive = controllerActiveBefore
+		d.noteTurnRestoreLocked(turnBefore)
 		m.mu.Unlock()
 		err = fmt.Errorf("session-controller: synchronous state publication failed before submitting for workspace %q session %q request %q: %w",
 			d.workspace, d.sessionID, requestID, err)
-		m.logf("session-controller: prompt accepted state edge FAILED ws=%s session=%s request_id=%q session_controller_turn_active_before=%v session_controller_turn_active_after=%v publish_sync=true prompt_submitted=false dependent_frames=withheld error=%v",
-			d.workspace, d.sessionID, requestID, controllerActiveBefore, controllerActiveBefore, err)
-		return controllerActiveBefore, err
+		m.logf("session-controller: prompt accepted state edge FAILED ws=%s session=%s request_id=%q session_controller_turn_before=%s session_controller_turn_after=%s publish_sync=true prompt_submitted=false dependent_frames=withheld error=%v",
+			d.workspace, d.sessionID, requestID, turnBefore, turnBefore, err)
+		return turnBefore, err
 	}
-	m.logf("session-controller: prompt accepted state edge APPLIED ws=%s session=%s request_id=%q session_controller_turn_active_before=%v session_controller_turn_active_after=true publish_sync=true next=shim_submit_then_prompt_echo",
-		d.workspace, d.sessionID, requestID, controllerActiveBefore)
-	return controllerActiveBefore, nil
+	m.logf("session-controller: prompt accepted state edge APPLIED ws=%s session=%s request_id=%q session_controller_turn_before=%s session_controller_turn_after=%s publish_sync=true next=shim_submit_then_prompt_echo",
+		d.workspace, d.sessionID, requestID, turnBefore, turnAfter)
+	return turnBefore, nil
 }
 
 // recordPromptReceipt persists the durable evidence that this daemon accepted
@@ -360,9 +361,9 @@ func (m *Manager) recordPromptReceipt(d *sessionController, requestID, text stri
 // Every failure here is loud-logged and swallowed: the caller is already
 // returning the submit's own error, which is the news, and a retraction failure
 // must not replace the account of why the prompt did not go.
-func (m *Manager) retractPromptAccepted(d *sessionController, requestID string, activeBefore bool, cause error) {
+func (m *Manager) retractPromptAccepted(d *sessionController, requestID string, turnBefore turnRecord, cause error) {
 	m.mu.Lock()
-	d.turnActive = activeBefore
+	d.noteTurnRestoreLocked(turnBefore)
 	m.mu.Unlock()
 
 	// The durable receipt goes with the edge it was written beside. It was
@@ -379,18 +380,18 @@ func (m *Manager) retractPromptAccepted(d *sessionController, requestID string, 
 	}
 	retracted, err := m.cfg.SSM.MarkPromptRejected(d.workspace, d.sessionID, requestID, publish)
 	if err != nil {
-		m.logf("session-controller: prompt rejected state edge FAILED ws=%s session=%s request_id=%q session_controller_turn_active_restored=%v submit_error=%v error=%v (the workspace may hold `thinking` for a turn that never began)",
-			d.workspace, d.sessionID, requestID, activeBefore, cause, err)
+		m.logf("session-controller: prompt rejected state edge FAILED ws=%s session=%s request_id=%q session_controller_turn_restored=%s submit_error=%v error=%v (the workspace may hold `thinking` for a turn that never began)",
+			d.workspace, d.sessionID, requestID, turnBefore, cause, err)
 		return
 	}
 	if !retracted {
-		m.logf("session-controller: prompt rejected state edge PRESERVED ws=%s session=%s request_id=%q session_controller_turn_active_restored=%v submit_error=%v — something more authoritative owns the state axis, so neither it nor the footer clock is touched",
-			d.workspace, d.sessionID, requestID, activeBefore, cause)
+		m.logf("session-controller: prompt rejected state edge PRESERVED ws=%s session=%s request_id=%q session_controller_turn_restored=%s submit_error=%v — something more authoritative owns the state axis, so neither it nor the footer clock is touched",
+			d.workspace, d.sessionID, requestID, turnBefore, cause)
 		return
 	}
 	m.progress().NoteTurnRejected(d.workspace, d.sessionID)
-	m.logf("session-controller: prompt rejected state edge APPLIED ws=%s session=%s request_id=%q session_controller_turn_active_restored=%v publish_sync=true turn_clock=closed submit_error=%v",
-		d.workspace, d.sessionID, requestID, activeBefore, cause)
+	m.logf("session-controller: prompt rejected state edge APPLIED ws=%s session=%s request_id=%q session_controller_turn_restored=%s publish_sync=true turn_clock=closed submit_error=%v",
+		d.workspace, d.sessionID, requestID, turnBefore, cause)
 }
 
 // notePromptDelivered advances the workspace from `submitting` to `thinking` on

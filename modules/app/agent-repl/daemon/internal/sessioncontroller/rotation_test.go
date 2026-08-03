@@ -40,7 +40,7 @@ func (h *queueHarness) turnActiveFlag() bool {
 	d := h.controller()
 	h.m.mu.Lock()
 	defer h.m.mu.Unlock()
-	return d.turnActive
+	return d.turn.active()
 }
 
 // logCapture is a concurrency-safe Logf sink.

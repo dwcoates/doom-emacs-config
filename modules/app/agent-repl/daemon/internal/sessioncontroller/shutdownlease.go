@@ -179,21 +179,13 @@ func (m *Manager) noteDrainActivity() {
 // that is waiting on nothing is not an answer to it.
 func (m *Manager) DrainHolds(tasks LiveTaskCounter) []DrainHold {
 	type live struct {
-		workspace, sessionID, turnID string
-		turnActive                   bool
+		workspace, sessionID string
+		turn                 turnRecord
 	}
 	m.mu.Lock()
 	sessions := make([]live, 0, len(m.byWS))
 	for _, d := range m.byWS {
-		s := live{workspace: d.workspace, sessionID: d.sessionID, turnActive: d.turnActive}
-		if d.turnActive {
-			// A turn this daemon adopted rather than started has no id this
-			// process ever learned. It still HOLDS — the hold is the fact that
-			// a turn is running, not that we can name it — and the wire carries
-			// the empty id rather than inventing one.
-			s.turnID = d.activeTurnID
-		}
-		sessions = append(sessions, s)
+		sessions = append(sessions, live{workspace: d.workspace, sessionID: d.sessionID, turn: d.turn})
 	}
 	m.mu.Unlock()
 
@@ -205,19 +197,73 @@ func (m *Manager) DrainHolds(tasks LiveTaskCounter) []DrainHold {
 				liveTasks = n
 			}
 		}
-		if !s.turnActive && liveTasks <= 0 {
+		if !s.turn.active() && liveTasks <= 0 {
 			continue
+		}
+		// THE HOLD IS NAMED HERE, off the record's PROVENANCE rather than off
+		// whether some string happens to be empty. Each phase can honestly answer
+		// a different amount, and this is the one place that difference is spent:
+		//
+		//   - named    — the turn ledger accepted a start for it, so it names it.
+		//   - accepted — this daemon committed to a submit and no TurnStarted has
+		//     been observed yet. Its id is resolved from the DURABLE turn claims
+		//     below, outside the manager mutex the way LiveTasks already is.
+		//   - adopted  — a turn is running that this process never saw begin, so
+		//     the wire carries the empty id rather than inventing one. The hold
+		//     is the fact that a turn is running, not that we can name it, and
+		//     collapsing the two would make that turn read as no turn at all —
+		//     the one reading that lets a bounce cut live work.
+		turnID, _ := s.turn.name()
+		if s.turn.phase == turnPhaseAccepted {
+			turnID = m.nameAcceptedHold(s.workspace, s.sessionID, s.turn.requestID)
 		}
 		out = append(out, DrainHold{
 			Workspace:  s.workspace,
 			SessionID:  s.sessionID,
-			TurnActive: s.turnActive,
-			TurnID:     s.turnID,
+			TurnActive: s.turn.active(),
+			TurnID:     turnID,
 			LiveTasks:  liveTasks,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Workspace < out[j].Workspace })
 	return out
+}
+
+// nameAcceptedHold resolves the turn id of a hold whose record is still in the
+// ACCEPTED phase — the daemon committed to a submit and has not yet observed the
+// turn's start — from the SSM's DURABLE turn claims.
+//
+// WHY THE LEDGER CAN ANSWER WHEN PROCESS MEMORY CANNOT. The claim is written by
+// the SSM as the turn ledger accepts the shim's TurnStarted, and it is written
+// under the workspace's own session id, so it names the turn without this
+// package having to have witnessed the boundary itself.
+//
+// THE ORDERING THIS PINS. It relies on the shim making a turn's start DURABLE
+// before it emits any control-path observable of that turn (its permission
+// question, its content). The shim link is a single-goroutine demux
+// (shimclient.readLoop), so shim send order is daemon apply order: a caller that
+// has seen a control-path observable of the turn has, by then, a durable claim to
+// read. Where that ordering does not hold, the honest answer is the EMPTY id and
+// a loud line saying so — never a guess, and never a hold dropped, because a
+// hold dropped is a bounce cutting live work.
+//
+// Must be called with m.mu RELEASED: it reads the state store.
+func (m *Manager) nameAcceptedHold(workspace, sessionID, requestID string) string {
+	ids, err := m.cfg.SSM.ActiveTurnIDs(workspace, sessionID)
+	if err != nil {
+		m.logf("session-controller: drain hold turn id UNRESOLVED ws=%q session=%s request_id=%q — reading the durable turn claims failed: %v; the hold STANDS and is broadcast without a turn id",
+			workspace, sessionID, requestID, err)
+		return ""
+	}
+	id, named := firstNamedClaim(ids)
+	if !named {
+		m.logf("session-controller: drain hold turn id UNNAMED ws=%q session=%s request_id=%q claims=%s — the prompt was accepted and the turn ledger holds no name for it yet; the hold STANDS and is broadcast without a turn id",
+			workspace, sessionID, requestID, formatTurnIDs(ids))
+		return ""
+	}
+	m.logf("session-controller: drain hold turn id RESOLVED from the durable turn claims ws=%q session=%s request_id=%q turn_id=%q claims=%s",
+		workspace, sessionID, requestID, id, formatTurnIDs(ids))
+	return id
 }
 
 // WiredSessions reports the session id of every session this fleet currently
@@ -244,19 +290,38 @@ func (m *Manager) WiredSessions() []string {
 	return out
 }
 
-// noteActiveTurnID records the turn now in flight, or clears it at its end. It
-// rides the SAME correlated boundary the merge waiters bind on (onTurnEvent),
-// which is the only place this package is told a turn's own id.
+// noteTurnClaims binds the controller's turn record to the SSM turn ledger's
+// active claim set, at the moment the ledger accepted a boundary and before this
+// delivery moves anything user-visible (sinks.go, consumer.Apply).
 //
-// Caller holds m.mu.
-func (d *sessionController) noteActiveTurnID(started bool, turnID string) {
-	if started {
-		d.activeTurnID = turnID
+// The engine is told AFTER the mutex is released, and it is told on the NAMING
+// edge as well as on the active/idle one. A turn that starts while another is
+// still ending produces no active/idle edge at all, so the drain used to learn
+// about the rename from nothing, and a hold broadcast in that window named the
+// turn that had ended.
+//
+// Must be called with m.mu RELEASED.
+func (m *Manager) noteTurnClaims(d *sessionController, activeIDs []string) {
+	m.mu.Lock()
+	p := d.noteTurnClaimsLocked(activeIDs)
+	m.mu.Unlock()
+
+	if p.unnamed {
+		// LOUD, NEVER AN EMPTY STRING IN A NAMED RECORD. A legacy start carries
+		// no turn id, so the ledger holds a claim nothing can name. The record
+		// says exactly that (adopted) and the drain still holds for the turn.
+		m.logf("session-controller: turn claim set NAMES NOTHING ws=%q session=%s claims=%s before=%s after=%s edge=turn_claims — the boundary carried no turn id, so the record is held as adopted rather than named with an empty id; the drain hold for this turn cannot be correlated with the ledger",
+			d.workspace, d.sessionID, formatTurnIDs(activeIDs), p.before, p.after)
+	}
+	if !p.changed {
 		return
 	}
-	if d.activeTurnID == turnID {
-		d.activeTurnID = ""
-	}
+	m.logf("session-controller: turn record BOUND ws=%q session=%s before=%s after=%s claims=%s edge=turn_claims",
+		d.workspace, d.sessionID, p.before, p.after, formatTurnIDs(activeIDs))
+	// The hold this daemon reports for the session just gained a name (or a
+	// different one). The engine never trusts a delta, so it is simply told a
+	// fact moved and re-reads DrainHolds itself.
+	m.noteDrainActivity()
 }
 
 // newParkedEntry builds the queue entry that a drain lease parks, and is the
@@ -453,7 +518,7 @@ func (m *Manager) ReleaseShutdownHolds(scheduleID string) {
 			continue
 		}
 		var kick *queueEntry
-		if !d.turnActive && !d.paused {
+		if !d.turn.active() && !d.paused {
 			kick = d.queue.popFrontDeliverable()
 		}
 		view, recs := m.publishQueueLocked(d)
@@ -566,7 +631,7 @@ func (m *Manager) restoreShutdownHolds(d *sessionController) {
 		return
 	}
 	var kick *queueEntry
-	if !d.turnActive && !d.paused {
+	if !d.turn.active() && !d.paused {
 		kick = d.queue.popFrontDeliverable()
 	}
 	view, recs := m.publishQueueLocked(d)

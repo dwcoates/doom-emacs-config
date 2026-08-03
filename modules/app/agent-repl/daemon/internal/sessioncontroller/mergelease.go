@@ -156,7 +156,7 @@ func (m *Manager) InterruptForMerge(ctx context.Context, workspace string) (*ssm
 func (m *Manager) runningTurn(d *sessionController) *ssm.DisplacedTurn {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if !d.turnActive || d.runningText == "" {
+	if !d.turn.active() || d.runningText == "" {
 		return nil
 	}
 	return &ssm.DisplacedTurn{

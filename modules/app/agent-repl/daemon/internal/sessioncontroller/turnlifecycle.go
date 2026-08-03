@@ -20,6 +20,11 @@ type turnResolution struct {
 	after       string
 	correlation string
 	replayed    bool
+	// afterIDs is the durable claim set the ledger holds AFTER this boundary,
+	// unformatted. It is what the session controller's turn record is projected
+	// from: the ledger is the authority on which turns are in flight, so the
+	// record is derived from it rather than accumulated beside it.
+	afterIDs []string
 }
 
 // turnLifecycle routes every turn boundary through the SSM-owned durable
@@ -74,6 +79,7 @@ func (t turnLifecycle) resolve(ev *corev1.Event) (turnResolution, error) {
 	)
 	base.before = formatTurnIDs(before)
 	base.after = formatTurnIDs(after)
+	base.afterIDs = after
 	base.replayed = replayed
 	if err != nil {
 		base.decision = "reject_durable_claim"
