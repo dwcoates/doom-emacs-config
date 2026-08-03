@@ -447,6 +447,11 @@ func main() {
 	// exec stays here (main owns node/shim paths); production omits
 	// --store-socket so the shim defaults to the launchd singleton store. The
 	// returned stop func SIGTERMs the shim on hibernation.
+	// The spawn watch is what makes a shim that dies between exec and its first
+	// frame observable: it holds the child's exit status and stderr tail and
+	// hands them to the bring-up that is waiting for the connection, which
+	// would otherwise sit out its whole deadline with nothing to report.
+	shimSpawnWatch := server.NewShimSpawnWatch(shimListener.Connected, legacyLog)
 	udsSpawn := func(sessionID string, opts server.CreateOpts) (func() error, error) {
 		workspace, canonicalOpts, workspaceErr := canonicalShimCreateOpts(opts)
 		if workspaceErr != nil {
@@ -484,6 +489,7 @@ func main() {
 			spawnEvent(dlog.LevelError, "UDS shim spawn failed", map[string]any{"error": spawnErr.Error(), "cwd": workspace.Directory})
 			return nil, spawnErr
 		}
+		shimSpawnWatch.Spawned(sessionID, proc.StderrTail)
 		spawnEvent(dlog.LevelInfo, "UDS shim spawned", map[string]any{"argv": strings.Join(argv, " "), "cwd": workspace.Directory})
 		// In UDS mode the shim streams over its socket, not stdout, so its
 		// stdout event channel stays empty — drain it so the stdout pump never
@@ -493,8 +499,26 @@ func main() {
 			}
 		}()
 		go func() {
-			if werr := proc.Wait(); werr != nil {
-				spawnEvent(dlog.LevelError, "UDS shim exited", map[string]any{"error": werr.Error(), "cwd": workspace.Directory})
+			werr := proc.Wait()
+			// The exit is recorded FIRST: the watch is what unblocks a
+			// bring-up still waiting for this shim's connection, and it must
+			// not wait behind the log write.
+			failure := shimSpawnWatch.Exited(sessionID, werr)
+			context := map[string]any{
+				"cwd":         workspace.Directory,
+				"exit":        shim.ExitDescription(werr),
+				"exit_code":   shim.ExitCode(werr),
+				"stderr_tail": proc.StderrTail(),
+			}
+			switch {
+			case failure != nil:
+				context["error"] = failure.Error()
+				spawnEvent(dlog.LevelError, "UDS shim exited BEFORE it ever connected to the daemon", context)
+			case werr != nil:
+				context["error"] = werr.Error()
+				spawnEvent(dlog.LevelError, "UDS shim exited", context)
+			default:
+				spawnEvent(dlog.LevelInfo, "UDS shim exited", context)
 			}
 		}()
 		return func() error { return proc.Terminate() }, nil
@@ -540,7 +564,7 @@ func main() {
 		SSM:               ssmMgr,
 		Progress:          progressMgr,
 		Spawner:           server.NewShimSpawner(sessionRegistry, shimListener.Connected, shimListener.Evict, udsSpawn, legacyLog),
-		Source:            &server.ShimConnSource{Listener: shimListener},
+		Source:            &server.ShimConnSource{Listener: shimListener, Deaths: shimSpawnWatch},
 		FileDiagnostics:   fileDiagnostics,
 		Locator:           &server.SessionLocator{Reg: sessionRegistry},
 		SeqStore:          seqStore,
