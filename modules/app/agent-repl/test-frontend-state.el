@@ -875,6 +875,71 @@ daemon no longer knows."
   ;; Arrange / Act / Assert
   (should-error (agent-repl--frontend-store-session-view '(:workspace "/w"))))
 
+(ert-deftest agent-repl-test-session-token-summary-uses-authoritative-timing-pairs ()
+  "Token summary derives generation rate and TTFT from their coupled totals."
+  (agent-repl-test--with-clean-state
+    (clrhash agent-repl--frontend-session-views)
+    (agent-repl--frontend-store-session-view
+     '(:sessionId "s_usage"
+       :tokenUtilization
+       (:allAgents
+        (:inputTokens "11" :outputTokens "22" :cacheReadInputTokens "33"
+         :cacheCreationInputTokens "44" :cacheRates (:cacheHitRate 0.5)
+         :timing (:outputTokensWithGenerationDuration "120"
+                  :outputGenerationDurationMs "3000"
+                  :totalTimeToFirstTokenMs "450"
+                  :responsesWithTimeToFirstToken "3")))))
+    (should (equal (agent-repl--frontend-session-token-summary "s_usage" "ws1")
+                   "tok i11 o22 cache r33 w44 h 50% gen 40.0 tok/s ttft 150.0ms"))))
+
+(ert-deftest agent-repl-test-session-token-summary-marks-missing-cache-rate-unavailable ()
+  "Missing cache-hit data is explicit rather than silently absent from tabs."
+  (agent-repl-test--with-clean-state
+    (clrhash agent-repl--frontend-session-views)
+    (agent-repl--frontend-store-session-view
+     '(:sessionId "s_no_cache_rate" :tokenUtilization (:allAgents ())))
+    (should (string-match-p "cache r0 w0 h n/a"
+                            (agent-repl--frontend-session-token-summary
+                             "s_no_cache_rate" "ws1")))))
+
+(ert-deftest agent-repl-test-session-token-summary-rejects-out-of-range-cache-rate ()
+  "An out-of-range cache hit rate fails loudly rather than being rendered."
+  (agent-repl-test--with-clean-state
+    (clrhash agent-repl--frontend-session-views)
+    (agent-repl--frontend-store-session-view
+     '(:sessionId "s_bad_cache_rate"
+       :tokenUtilization (:allAgents (:cacheRates (:cacheHitRate 1.1)))))
+    (should-error (agent-repl--frontend-session-token-summary
+                   "s_bad_cache_rate" "ws1"))))
+
+(ert-deftest agent-repl-test-session-token-summary-marks-unmeasured-timing-unavailable ()
+  "Missing and zero-duration timing never borrow session wall-clock time."
+  (agent-repl-test--with-clean-state
+    (clrhash agent-repl--frontend-session-views)
+    (agent-repl--frontend-store-session-view
+     '(:sessionId "s_unmeasured"
+       :tokenUtilization
+       (:allAgents (:timing (:outputGenerationDurationMs "0"
+                             :responsesWithTimeToFirstToken "0")))))
+    (should (string-match-p "gen n/a ttft n/a"
+                            (agent-repl--frontend-session-token-summary
+                             "s_unmeasured" "ws1")))))
+
+(ert-deftest agent-repl-test-session-token-summary-rejects-malformed-timing ()
+  "Malformed timing fails loudly through the canonical frontend logger."
+  (agent-repl-test--with-clean-state
+    (clrhash agent-repl--frontend-session-views)
+    (agent-repl--frontend-store-session-view
+     '(:sessionId "s_bad"
+       :tokenUtilization
+       (:allAgents (:timing (:outputGenerationDurationMs "not-a-number")))))
+    (let (logs)
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (ws fmt &rest args)
+                   (push (list ws (apply #'format fmt args)) logs))))
+        (should-error (agent-repl--frontend-session-token-summary "s_bad" "ws1"))
+        (should (string-match-p "MALFORMED" (cadr (car logs))))))))
+
 (ert-deftest agent-repl-test-live-session-id-for-cwd-finds-non-terminal ()
   "The cwd correlation returns the non-terminal session bound to that cwd."
   ;; Arrange

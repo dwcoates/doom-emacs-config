@@ -29,6 +29,7 @@
 
 ;;; Code:
 
+(require 'cl-lib)
 (require 'subr-x)
 
 ;;;; ---- Namespace partition ---------------------------------------------
@@ -117,7 +118,7 @@ a mis-colored failure rather than a missing one."
 
 ITEM is the protojson-decoded arm; the result is the plist every surfacing
 site here consumes: `:class' `:type' `:message' `:detail' `:resolved-at'
-`:item-uuid'.
+`:item-uuid' and `:session-resume'.
 
 This is an ADOPTION, not a derivation.  Nothing is re-decided: the class,
 the type and the prose are the daemon's verdict."
@@ -126,16 +127,77 @@ the type and the prose are the daemon's verdict."
          (message (or (plist-get item :message) ""))
          (detail (or (plist-get item :sourceDetail) ""))
          (resolved-at (or (plist-get item :resolvedAtMs) 0))
-         (item-uuid (or (plist-get item :itemUuid) "")))
+         (item-uuid (or (plist-get item :itemUuid) ""))
+         (session-resume (plist-get item :sessionResume)))
     (agent-repl--log nil
-                     "failure-from-wire: adopting error-class=%S type=%S message=%S detail=%S resolved-at=%S item-uuid=%S"
-                     error-class type message detail resolved-at item-uuid)
+                     "failure-from-wire: adopting error-class=%S type=%S message=%S detail=%S resolved-at=%S item-uuid=%S session-resume=%S"
+                     error-class type message detail resolved-at item-uuid
+                     (and session-resume t))
     (list :class (agent-repl-failure-class error-class)
           :type type
           :message message
           :detail detail
           :resolved-at resolved-at
-          :item-uuid item-uuid)))
+          :item-uuid item-uuid
+          :session-resume session-resume)))
+
+(defun agent-repl-failure--session-resume-text (resume workspace)
+  "Return actionable prose for typed `SessionResumeFailure' RESUME.
+WORKSPACE is threaded to canonical logging.  The oneof cause is closed: a
+typed resume failure without exactly one recognized cause is malformed and
+signals rather than being flattened into generic failure text."
+  (let* ((claude-id (plist-get resume :claudeSessionId))
+         (cwd (plist-get resume :cwd))
+         (automatic-restore (plist-member resume :automaticRestore))
+         (create (plist-member resume :create))
+         (transcript (plist-get resume :transcriptUnavailable))
+         (mismatch (plist-get resume :identityMismatch))
+         (causes (cl-remove-if-not #'identity
+                                   (list (and transcript :transcript-unavailable)
+                                         (and mismatch :identity-mismatch)))))
+    (unless (and (stringp claude-id) (not (string-empty-p claude-id))
+                 (stringp cwd) (not (string-empty-p cwd))
+                 (= (length causes) 1)
+                 (= (+ (if automatic-restore 1 0) (if create 1 0)) 1))
+      (agent-repl--log workspace
+                       "failure-session-resume-text: MALFORMED claude-id=%S cwd=%S causes=%S automatic-restore=%S create=%S resume=%S"
+                       claude-id cwd causes automatic-restore create resume)
+      (error "agent-repl failure: malformed SessionResumeFailure"))
+    (pcase (car causes)
+      (:transcript-unavailable
+       (let ((searched-paths (plist-get transcript :searchedPaths)))
+         (unless (listp searched-paths)
+           (agent-repl--log workspace
+                            "failure-session-resume-text: MALFORMED transcript searched-paths=%S claude-id=%S cwd=%S"
+                            searched-paths claude-id cwd)
+           (error "agent-repl failure: SessionResumeFailure transcript paths missing"))
+         (let ((text (format "Resume %s for Claude session %s in %s cannot continue: transcript unavailable at %s. Restore that transcript, then retry."
+                             (if automatic-restore "restoration" "creation")
+                             claude-id cwd
+                             (if searched-paths
+                                 (mapconcat #'identity searched-paths ", ")
+                               "the configured transcript locations"))))
+           (agent-repl--log workspace
+                            "failure-session-resume-text: cause=transcript-unavailable claude-id=%S cwd=%S searched-paths=%S text=%S"
+                            claude-id cwd searched-paths text)
+           text)))
+      (:identity-mismatch
+       (let ((replacement (plist-get mismatch :replacementClaudeSessionId)))
+         (unless (stringp replacement)
+           (agent-repl--log workspace
+                            "failure-session-resume-text: MALFORMED identity replacement=%S claude-id=%S cwd=%S"
+                            replacement claude-id cwd)
+           (error "agent-repl failure: SessionResumeFailure replacement id missing"))
+         (let ((text (format "Resume %s for Claude session %s in %s was refused because recovery proposed %s. Restore the authoritative conversation, then retry."
+                             (if automatic-restore "restoration" "creation")
+                             claude-id cwd
+                             (if (string-empty-p replacement)
+                                 "a fresh conversation"
+                               (format "Claude session %s" replacement)))))
+           (agent-repl--log workspace
+                            "failure-session-resume-text: cause=identity-mismatch claude-id=%S cwd=%S replacement=%S text=%S"
+                            claude-id cwd replacement text)
+           text))))))
 
 (defun agent-repl-failure-local (type message &optional detail)
   "Build a LOCALLY-classified failure of TYPE with MESSAGE and DETAIL.
@@ -184,9 +246,12 @@ The prose leads and the raw account follows in parens, rather than the
 raw account replacing the prose.  The two are separate fields precisely so
 a reader gets the sentence and a debugger still gets the evidence."
   (let ((message (plist-get failure :message))
-        (detail (plist-get failure :detail)))
+        (detail (plist-get failure :detail))
+        (session-resume (plist-get failure :session-resume)))
     (let ((text
            (cond
+            (session-resume
+             (agent-repl-failure--session-resume-text session-resume workspace))
             ((and (stringp detail) (not (string-empty-p detail)))
              (format "%s (%s)" message detail))
             (t message))))

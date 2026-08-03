@@ -903,6 +903,90 @@ GET /sessions for it.")
   "Return every stored `SessionView' plist (the full known roster)."
   (hash-table-values agent-repl--frontend-session-views))
 
+(defun agent-repl--frontend-token-counter (container field workspace)
+  "Read non-negative protojson int64 FIELD from CONTAINER.
+Returns zero for an omitted proto3 counter.  Signals for malformed or
+negative values rather than displaying invented usage.  WORKSPACE threads
+failure diagnostics to the canonical log."
+  (let* ((raw (plist-get container field))
+         (value (agent-repl--frontend-int64 raw)))
+    (cond
+     ((null raw) 0)
+     ((and (numberp value) (>= value 0)) value)
+     (t
+      (agent-repl--log workspace
+                       "frontend-token-counter: MALFORMED field=%S raw=%S value=%S container=%S"
+                       field raw value container)
+      (error "agent-repl frontend: malformed token counter %S" field)))))
+
+(defun agent-repl--frontend-token-rate (timing workspace)
+  "Return generation rate from TIMING's coupled token and duration totals.
+Only `outputTokensWithGenerationDuration' divided by
+`outputGenerationDurationMs' is valid.  A missing or zero duration is
+explicitly unavailable, never approximated from session wall time."
+  (let ((duration (agent-repl--frontend-token-counter
+                   timing :outputGenerationDurationMs workspace)))
+    (if (zerop duration)
+        "n/a"
+      (format "%.1f tok/s"
+              (/ (* 1000.0
+                    (agent-repl--frontend-token-counter
+                     timing :outputTokensWithGenerationDuration workspace))
+                 duration)))))
+
+(defun agent-repl--frontend-token-ttft (timing workspace)
+  "Return average first-token latency from TIMING's measured-response totals.
+Only `totalTimeToFirstTokenMs' divided by
+`responsesWithTimeToFirstToken' is valid.  A missing response count is
+explicitly unavailable."
+  (let ((responses (agent-repl--frontend-token-counter
+                    timing :responsesWithTimeToFirstToken workspace)))
+    (if (zerop responses)
+        "n/a"
+      (format "%.1fms"
+              (/ (float (agent-repl--frontend-token-counter
+                         timing :totalTimeToFirstTokenMs workspace))
+                 responses)))))
+
+(defun agent-repl--frontend-session-token-summary (session-id workspace)
+  "Return SESSION-ID's dense all-agent token summary for WORKSPACE's tab.
+Reads the retained `SessionView.token_utilization' wire payload and uses
+only `allAgents' totals.  Returns nil when the daemon has not reported
+usage.  This function is deliberately pure and unlogged because the tab-bar
+calls it in redisplay; malformed wire data logs and fails loudly through the
+counter reader."
+  (let* ((view (agent-repl--frontend-session-view session-id))
+         (utilization (and view (plist-get view :tokenUtilization))))
+    (when utilization
+      (let ((totals (plist-get utilization :allAgents)))
+        (unless (plist-member utilization :allAgents)
+          (agent-repl--log workspace
+                           "frontend-session-token-summary: MISSING allAgents session-id=%S utilization=%S"
+                           session-id utilization)
+          (error "agent-repl frontend: SessionTokenUtilization missing allAgents"))
+        (let* ((input (agent-repl--frontend-token-counter totals :inputTokens workspace))
+               (output (agent-repl--frontend-token-counter totals :outputTokens workspace))
+               (cache-read (agent-repl--frontend-token-counter totals :cacheReadInputTokens workspace))
+               (cache-write (agent-repl--frontend-token-counter totals :cacheCreationInputTokens workspace))
+               (rates (plist-get totals :cacheRates))
+               (hit-rate (and rates (plist-get rates :cacheHitRate)))
+               (timing (plist-get totals :timing)))
+          (unless (or (null hit-rate)
+                      (and (numberp hit-rate)
+                           (not (isnan hit-rate))
+                           (not (string-match-p "[Ii][Nn][Ff]"
+                                                (format "%s" hit-rate)))
+                           (<= 0 hit-rate 1)))
+            (agent-repl--log workspace
+                             "frontend-session-token-summary: MALFORMED cache-hit-rate session-id=%S value=%S totals=%S"
+                             session-id hit-rate totals)
+            (error "agent-repl frontend: malformed cache hit rate"))
+          (format "tok i%d o%d cache r%d w%d h %s gen %s ttft %s"
+                  input output cache-read cache-write
+                  (if hit-rate (format "%.0f%%" (* 100 hit-rate)) "n/a")
+                  (if timing (agent-repl--frontend-token-rate timing workspace) "n/a")
+                  (if timing (agent-repl--frontend-token-ttft timing workspace) "n/a")))))))
+
 (defun agent-repl--frontend-live-session-id-for-cwd (cwd)
   "Return the id of a NON-TERMINAL stored SessionView whose workspace is CWD.
 The daemon supersedes every older session on the same cwd at create time
@@ -957,10 +1041,11 @@ same fact classified, so it can finally be shown."
     ;; a name.  The raw wire value stays in the message text, since that is the
     ;; field an operator correlates against the daemon.
     (agent-repl--log (agent-repl--frontend-ws-name (plist-get view :workspace))
-                     "frontend-apply-session-view: id=%s ws=%s terminal=%S claude-id=%s pending=%s"
+                     "frontend-apply-session-view: id=%s ws=%s terminal=%S claude-id=%s pending=%s token-utilization=%S"
                      id (plist-get view :workspace) (plist-get view :terminal)
                      (or (plist-get view :claudeSessionId) "nil")
-                     (or (plist-get view :pendingPermissions) "0"))
+                     (or (plist-get view :pendingPermissions) "0")
+                     (and (plist-get view :tokenUtilization) t))
     (agent-repl--frontend-surface-session-death id view)
     id))
 
