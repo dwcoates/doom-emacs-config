@@ -187,6 +187,15 @@ type Config struct {
 	// disconnected session simply waits here for its shim to dial back in.
 	Source ConnSource
 
+	// ShimDeaths reports the death of the shim process this daemon spawned for
+	// the session, so a bring-up waiting at AwaitReady fails on the process's
+	// exit rather than on the caller's deadline. Optional.
+	//
+	// Left nil it is taken from Source when the source can also answer for the
+	// process — the daemon's listener adapter and its spawn watch are the same
+	// object, so binding it here costs no extra seam in the layers between.
+	ShimDeaths ShimDeaths
+
 	// DaemonVersion / ProtocolVersion travel in DaemonHello; ProtocolVersion
 	// must equal the shim's or the handshake fails with ErrVersionMismatch.
 	DaemonVersion   string
@@ -368,6 +377,11 @@ func New(cfg Config) *Client {
 	if cfg.BackoffMax == 0 {
 		cfg.BackoffMax = DefaultBackoffMax
 	}
+	if cfg.ShimDeaths == nil {
+		if deaths, ok := cfg.Source.(ShimDeaths); ok {
+			cfg.ShimDeaths = deaths
+		}
+	}
 	logf := dlog.Tag(cfg.Logf, "component", "shimclient", "session", cfg.SessionID)
 	// An OPEN latch: a freshly built client has no connection yet.
 	return &Client{cfg: cfg, logf: logf, ready: make(chan struct{}), replays: newReplayRegistry()}
@@ -426,7 +440,19 @@ func (c *Client) markNotReadyLocked() {
 //
 // The loop re-checks under the lock because the connection can drop again
 // between the latch closing and this goroutine being scheduled.
+//
+// IT ALSO WATCHES THE PROCESS, not only the latch. A shim that dies between
+// exec and its first frame closes no latch and dials no socket, so the only
+// thing that used to end this wait was the caller's deadline — thirty seconds
+// of silence naming neither the exit nor the reason. The death channel ends the
+// wait at the instant of the exit and carries the process's own evidence, and
+// the deadline path (still reached when the process is alive and simply never
+// dialled) now says which of the two it was.
 func (c *Client) AwaitReady(ctx context.Context) error {
+	var died <-chan struct{}
+	if c.cfg.ShimDeaths != nil {
+		died = c.cfg.ShimDeaths.DiedBeforeConnect(c.cfg.SessionID)
+	}
 	for {
 		c.mu.Lock()
 		if c.active != nil && c.wired {
@@ -439,8 +465,15 @@ func (c *Client) AwaitReady(ctx context.Context) error {
 		select {
 		case <-ch:
 			// Latch closed; loop to confirm `active` under the lock.
+		case <-died:
+			err := c.spawnDeathError()
+			c.logf("bring-up ABORTED: %v", err)
+			return err
 		case <-ctx.Done():
-			return fmt.Errorf("shimclient: awaiting shim connection for session %s: %w", c.cfg.SessionID, ctx.Err())
+			err := fmt.Errorf("shimclient: awaiting shim connection for session %s: %w%s",
+				c.cfg.SessionID, ctx.Err(), c.spawnEvidence())
+			c.logf("bring-up wait ENDED without a ready shim: %v", err)
+			return err
 		}
 	}
 }
