@@ -8,13 +8,9 @@ import (
 	"os"
 	"sync"
 	"time"
-)
 
-// TimestampLayout is the log timestamp representation shared by every
-// agent-repl runtime: RFC 3339 in the machine's local zone, on a 24-hour
-// clock, with fixed-width microseconds and an explicit numeric offset.
-// Fixed width keeps records from different runtimes lexically comparable.
-const TimestampLayout = "2006-01-02T15:04:05.000000-07:00"
+	sharedlogging "agentrepl/logging"
+)
 
 // Context is the structured runtime attribution attached to a log record.
 // Empty fields are omitted so callers only provide context they actually own.
@@ -202,7 +198,7 @@ func (l *Logger) write(verbose bool, ctx Context, format string, args ...any) {
 		Context:   context,
 	}
 	payload, err := json.Marshal(record{
-		Timestamp:          now.Format(TimestampLayout),
+		Timestamp:          sharedlogging.Timestamp(now),
 		Runtime:            "sidecar",
 		PID:                diagnostic.PID,
 		Level:              level,
@@ -234,7 +230,7 @@ func (l *Logger) write(verbose bool, ctx Context, format string, args ...any) {
 			// The persistent sink is the canonical record. Its failure can only be
 			// reported through the terminal before the caller is stopped.
 			emergency, encodeErr := json.Marshal(record{
-				Timestamp: now.Format(TimestampLayout),
+				Timestamp: sharedlogging.Timestamp(now),
 				Runtime:   "sidecar",
 				PID:       diagnostic.PID,
 				Level:     "error",

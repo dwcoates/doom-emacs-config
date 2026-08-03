@@ -13,18 +13,15 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"agentrepl/logging"
 )
 
 const daemonRuntime Runtime = "daemon"
 
-// TimestampLayout is the log timestamp representation shared by every
-// agent-repl runtime: RFC 3339 in the machine's local zone, on a 24-hour
-// clock, with fixed-width microseconds and an explicit numeric offset.
-// Fixed width keeps records from different runtimes lexically comparable.
-const TimestampLayout = "2006-01-02T15:04:05.000000-07:00"
-
-// Stamp renders an instant in TimestampLayout. It carries a time.Time so
-// callers keep the usual comparison helpers.
+// Stamp renders an instant through logging.Timestamp, the representation
+// shared by every agent-repl runtime. It carries a time.Time so callers keep
+// the usual comparison helpers.
 type Stamp struct{ time.Time }
 
 // NewStamp converts an instant into the shared local-zone representation.
@@ -33,7 +30,7 @@ func NewStamp(at time.Time) Stamp { return Stamp{at.Local()} }
 // MarshalJSON writes the canonical representation rather than Go's
 // variable-precision RFC 3339 default.
 func (s Stamp) MarshalJSON() ([]byte, error) {
-	return json.Marshal(s.Time.Local().Format(TimestampLayout))
+	return json.Marshal(logging.Timestamp(s.Time))
 }
 
 // UnmarshalJSON accepts any RFC 3339 timestamp so records forwarded by other

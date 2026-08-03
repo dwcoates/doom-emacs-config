@@ -10,7 +10,7 @@ set -euo pipefail
 
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$THIS_DIR/.." && pwd)"
-ALL_COMPONENTS=(daemon sidecar store wire shim webapp)
+ALL_COMPONENTS=(daemon sidecar store wire logging shim webapp)
 COMPONENTS=()
 
 die() {
@@ -55,6 +55,11 @@ component_spec() {
             ;;
         wire)
             COMPONENT_DIR="$ROOT/agent-shim/wire"
+            COMPONENT_LANGUAGE=go
+            LOG_PATTERN='\.(Log|LogVerbose)\('
+            ;;
+        logging)
+            COMPONENT_DIR="$ROOT/agent-shim/logging/go"
             COMPONENT_LANGUAGE=go
             LOG_PATTERN='\.(Log|LogVerbose)\('
             ;;

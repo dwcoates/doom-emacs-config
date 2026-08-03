@@ -36,5 +36,5 @@
   // mapping -- which resolves @bufbuild/protobuf twice and degrades
   // MessageShape<Desc> inference to the bare `Message | Message<string>`
   // constraint, producing phantom property-access errors on framed messages.
-  "include": ["src/**/*.ts", "test/**/*.ts", "../../../proto/gen/ts/**/*.ts"]
+  "include": ["src/**/*.ts", "test/**/*.ts", "../../../proto/gen/ts/**/*.ts", "../../logging/ts/**/*.ts"]
 }

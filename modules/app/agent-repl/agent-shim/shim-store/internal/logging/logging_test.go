@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	sharedlogging "agentrepl/logging"
 )
 
 type failingWriter struct{ err error }
@@ -41,7 +43,7 @@ func TestLogFormatsBoundAndRecordContext(t *testing.T) {
 	if err := json.Unmarshal(file.Bytes(), &got); err != nil {
 		t.Fatalf("persistent record is not JSON: %v\n%s", err, file.String())
 	}
-	if got.Timestamp != at.Local().Format(TimestampLayout) || got.Runtime != "store" || got.PID != 84 {
+	if got.Timestamp != at.Local().Format(sharedlogging.TimestampLayout) || got.Runtime != "store" || got.PID != 84 {
 		t.Fatalf("runtime identity = %#v", got)
 	}
 	if got.Level != "info" || got.Verbosity != "normal" || got.Operation != "ingest" || got.Message != "accepted=2" {
@@ -254,7 +256,7 @@ func TestLogTimestampUsesLocalZoneRatherThanUTC(t *testing.T) {
 	if err := json.Unmarshal(file.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Timestamp != at.Local().Format(TimestampLayout) || strings.HasSuffix(got.Timestamp, "Z") {
-		t.Fatalf("timestamp = %q, want %q", got.Timestamp, at.Local().Format(TimestampLayout))
+	if got.Timestamp != at.Local().Format(sharedlogging.TimestampLayout) || strings.HasSuffix(got.Timestamp, "Z") {
+		t.Fatalf("timestamp = %q, want %q", got.Timestamp, at.Local().Format(sharedlogging.TimestampLayout))
 	}
 }

@@ -58,6 +58,7 @@
   (load (expand-file-name "test-input.el" dir) nil t)
   (load (expand-file-name "test-install.el" dir) nil t)
   (load (expand-file-name "test-keybindings.el" dir) nil t)
+  (load (expand-file-name "test-log-timestamp.el" dir) nil t)
   (load (expand-file-name "test-magit.el" dir) nil t)
   (load (expand-file-name "test-memory-state.el" dir) nil t)
   (load (expand-file-name "test-merge-handlers.el" dir) nil t)

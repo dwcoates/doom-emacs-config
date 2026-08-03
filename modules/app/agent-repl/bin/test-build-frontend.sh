@@ -38,6 +38,7 @@ make_tree() {
              "$root/agent-shim/claude/shim-sidecar" \
              "$root/agent-shim/shim-store" \
              "$root/agent-shim/wire" \
+             "$root/agent-shim/logging/go" \
              "$root/proto/gen/go" \
              "$root/webapp/src" "$root/webapp/dist" \
              "$root/daemon/cmd/claude-repld" "$root/daemon/bin"
@@ -51,6 +52,7 @@ make_tree() {
     echo "package main" > "$root/agent-shim/shim-store/main.go"
     echo "package main" > "$root/agent-shim/claude/shim-sidecar/main.go"
     echo "package wire" > "$root/agent-shim/wire/wire.go"
+    echo "package logging" > "$root/agent-shim/logging/go/timestamp.go"
     echo "package proto" > "$root/proto/gen/go/proto.go"
     echo '{"scripts":{"build":"true"}}' > "$root/agent-shim/claude/shim/package.json"
     echo '{"scripts":{"build":"true"}}' > "$root/webapp/package.json"
@@ -58,6 +60,7 @@ make_tree() {
     echo "module store" > "$root/agent-shim/shim-store/go.mod"
     echo "module sidecar" > "$root/agent-shim/claude/shim-sidecar/go.mod"
     echo "module wire" > "$root/agent-shim/wire/go.mod"
+    echo "module logging" > "$root/agent-shim/logging/go/go.mod"
     echo "module proto" > "$root/proto/gen/go/go.mod"
 
     # node_modules present so the stubs are never asked to `npm install`.
@@ -654,6 +657,29 @@ t_services_fresh_then_shared_dependency_stales_both() {
     rm -rf "$root"
 }
 
+t_services_shared_logging_edit_rebuilds_both() {
+    local root; root="$(mktemp -d)"
+    make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
+    : > "$root/stub.log"
+    run_script "$root" store sidecar >/dev/null
+    if [ -s "$root/stub.log" ]; then
+        fail "services: fresh installed binaries skip go build (logging case)" \
+             "stub.log: $(cat "$root/stub.log")"
+        rm -rf "$root"
+        return
+    fi
+    sleep 1
+    touch "$root/agent-shim/logging/go/timestamp.go"
+    run_script "$root" store sidecar >/dev/null
+    if [ "$(grep -c '^go build' "$root/stub.log")" -eq 2 ]; then
+        pass "services: shared logging edit rebuilds store and sidecar"
+    else
+        fail "services: shared logging edit rebuilds both" \
+             "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
 t_services_missing_shared_source_fails_loudly() {
     local root rc; root="$(mktemp -d)"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
@@ -681,6 +707,7 @@ t_stale_source_with_space_in_name
 t_stale_source_with_glob_chars
 t_stale_empty_source_set
 t_services_fresh_then_shared_dependency_stales_both
+t_services_shared_logging_edit_rebuilds_both
 t_services_missing_shared_source_fails_loudly
 
 # --- the shim bundle carries the SAME revision its stamp records ------------

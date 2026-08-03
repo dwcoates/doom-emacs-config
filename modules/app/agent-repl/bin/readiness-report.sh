@@ -142,11 +142,11 @@ system_stamp() {
 # (still /bin/bash on macOS, no associative arrays) carry a per-system table.
 system_paths() {
     case "$1" in
-        daemon)              printf '%s %s %s' "$(prefix daemon)" "$(prefix proto)" "$(prefix agent-shim/wire)" ;;
-        shim)                printf '%s %s' "$(prefix agent-shim/claude/shim)" "$(prefix proto)" ;;
-        webapp)              printf '%s %s' "$(prefix webapp)" "$(prefix proto)" ;;
-        shim-store)          printf '%s %s %s' "$(prefix agent-shim/shim-store)" "$(prefix agent-shim/wire)" "$(prefix proto)" ;;
-        shim-claude-sidecar) printf '%s %s %s' "$(prefix agent-shim/claude/shim-sidecar)" "$(prefix agent-shim/wire)" "$(prefix proto)" ;;
+        daemon)              printf '%s %s %s %s' "$(prefix daemon)" "$(prefix proto)" "$(prefix agent-shim/wire)" "$(prefix agent-shim/logging)" ;;
+        shim)                printf '%s %s %s' "$(prefix agent-shim/claude/shim)" "$(prefix proto)" "$(prefix agent-shim/logging)" ;;
+        webapp)              printf '%s %s %s' "$(prefix webapp)" "$(prefix proto)" "$(prefix agent-shim/logging)" ;;
+        shim-store)          printf '%s %s %s %s' "$(prefix agent-shim/shim-store)" "$(prefix agent-shim/wire)" "$(prefix agent-shim/logging)" "$(prefix proto)" ;;
+        shim-claude-sidecar) printf '%s %s %s %s' "$(prefix agent-shim/claude/shim-sidecar)" "$(prefix agent-shim/wire)" "$(prefix agent-shim/logging)" "$(prefix proto)" ;;
         *) return 1 ;;
     esac
 }

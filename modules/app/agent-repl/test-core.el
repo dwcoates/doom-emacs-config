@@ -3020,36 +3020,6 @@ survives into the rest of the batch run."
           (should (equal '(:test-heartbeat) (plist-get (cdr outcome) :rearmed)))
           (should (null agent-repl--heartbeat-assert-deferral-timer)))))))
 
-(defconst agent-repl-test--canonical-timestamp-regexp
-  "\\`[0-9]\\{4\\}-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]\\.[0-9]\\{6\\}[-+][0-9][0-9]:[0-9][0-9]\\'"
-  "RFC 3339, 24-hour clock, fixed-width microseconds, explicit numeric offset.
-This is the log timestamp representation shared by every agent-repl runtime.")
-
-(ert-deftest agent-repl-test-log-timestamp-uses-canonical-layout ()
-  "The JSONL timestamp matches the shared cross-runtime layout."
-  ;; Arrange / Act
-  (let ((stamp (agent-repl--log-rfc3339-timestamp)))
-    ;; Assert
-    (should (string-match-p agent-repl-test--canonical-timestamp-regexp stamp))))
-
-(require 'parse-time)
-
-(ert-deftest agent-repl-test-log-timestamp-uses-local-wall-clock ()
-  "The JSONL timestamp renders the local wall clock, not a UTC instant."
-  ;; Arrange: a fixed instant expressed in UTC.
-  (let ((now (encode-time (list 56 34 12 28 7 2026 nil nil 0))))
-    ;; Act
-    (let ((stamp (agent-repl--log-rfc3339-timestamp now)))
-      ;; Assert: the wall clock and its stated offset round-trip to the instant,
-      ;; which only holds when both come from the same local zone.
-      (should (time-equal-p (encode-time (parse-time-string stamp)) now)))))
-
-(ert-deftest agent-repl-test-log-timestamp-carries-numeric-offset ()
-  "The JSONL timestamp ends in a numeric offset rather than a Z suffix."
-  ;; Arrange / Act
-  (let ((stamp (agent-repl--log-rfc3339-timestamp)))
-    ;; Assert
-    (should-not (string-suffix-p "Z" stamp))))
 
 (provide 'test-core)
 
