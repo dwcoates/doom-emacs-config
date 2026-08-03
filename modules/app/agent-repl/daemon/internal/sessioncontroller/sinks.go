@@ -162,8 +162,16 @@ type StateApplier interface {
 // waiting on the user, and how deep the held-prompt queue is. Its Apply takes
 // the workspace explicitly because a progress view is workspace-keyed and this
 // resolver, unlike the SSM, holds no session→workspace binding of its own.
+//
+// Apply takes the CANONICAL DAEMON session id alongside the workspace, and not
+// because the resolver could not read one off the event: it could, and that is
+// exactly the defect. Store events are filed under the vendor conversation
+// uuid, so a view stamped from the event carried an identity the frontend's
+// exact agent-session scope filter drops, and the footer never saw the token
+// ticks. The controller is the authority on which daemon session drives the
+// workspace, so it names it here.
 type ProgressResolver interface {
-	Apply(workspace string, ev *corev1.Event) error
+	Apply(workspace, sessionID string, ev *corev1.Event) error
 	SetCounts(workspace string, pendingPermissions, queueDepth int64)
 	// NoteTurnAccepted returns the exact cleared interrupt view so the prompt
 	// path can offer it synchronously before the active WorkspaceState. Nil is
@@ -238,7 +246,7 @@ type PromptReceiptStore interface {
 // not care about it, without every feed site growing a nil check.
 type noopProgress struct{}
 
-func (noopProgress) Apply(string, *corev1.Event) error                        { return nil }
+func (noopProgress) Apply(string, string, *corev1.Event) error                { return nil }
 func (noopProgress) SetCounts(string, int64, int64)                           {}
 func (noopProgress) NoteTurnAccepted(string, string) *frontendv1.ProgressView { return nil }
 func (noopProgress) NoteTurnRejected(string, string)                          {}
@@ -1027,7 +1035,7 @@ func isTranscriptLine(a *anypb.Any) bool {
 // A fold failure is loud-logged, never swallowed, and never stops the stream:
 // the footer degrading is not a reason to stop delivering conversation.
 func (c *consumer) applyProgress(ev *corev1.Event) {
-	if err := c.prog.Apply(c.workspace, ev); err != nil {
+	if err := c.prog.Apply(c.workspace, c.sessionID, ev); err != nil {
 		c.logf("session-controller: progress apply failed session=%s seq=%d kind=%s: %v",
 			c.sessionID, ev.GetSeq(), stateKind(ev), err)
 	}

@@ -135,6 +135,11 @@ type workspaceProgress struct {
 	// so the ApiErrorLine fallback still works for a plane or a CLI version
 	// that emits no api_retry at all.
 	retryDetailRich bool
+	// canonicalizedFrom is the vendor session id most recently seen on an
+	// applied event's envelope while differing from the canonical daemon id.
+	// It exists only to keep the canonicalization notice to one line per
+	// vendor conversation instead of one per event.
+	canonicalizedFrom string
 }
 
 // New builds a Manager.
@@ -361,8 +366,23 @@ func (m *Manager) SetCounts(workspace string, pendingPermissions, queueDepth int
 // false), so a caller can tell "folded" from "nothing here for me" without this
 // package pretending to have handled something it did not.
 //
-// A nil event or an empty workspace is a programmer error, surfaced loudly.
-func (m *Manager) Apply(workspace string, ev *corev1.Event) error {
+// THE VIEW IS STAMPED WITH THE CALLER'S CANONICAL SESSION ID, NOT THE EVENT'S.
+// The store files every event it streams back under the VENDOR session uuid,
+// while every other input to this resolver — ObserveWorkspaceState off the
+// SSM, NoteTurnAccepted, NoteTurnRejected, NoteInterrupt — names the session by
+// its daemon-minted s_<hex> id. Stamping whichever identity last touched the
+// view gave one session two names on one workspace-keyed view, and the frames
+// carrying the vendor name were then silently dropped by the frontend's exact
+// agent-session scope filter (internal/frontend/scope.go): a workspace-scoped
+// client is scoped to the DAEMON id, so the token ticks folded from store
+// events never reached the footer at all. The feed seam knows the canonical id
+// (internal/sessioncontroller's consumer holds it), so it passes it here and
+// the view carries exactly one identity. This is the same single-identity fix
+// the SSM's write path took for workspace_state.session_id.
+//
+// A nil event, an empty workspace or an empty session id is a programmer error,
+// surfaced loudly.
+func (m *Manager) Apply(workspace, sessionID string, ev *corev1.Event) error {
 	if ev == nil {
 		return fmt.Errorf("progress: Apply got a nil event")
 	}
@@ -370,12 +390,23 @@ func (m *Manager) Apply(workspace string, ev *corev1.Event) error {
 		return fmt.Errorf("progress: Apply got an event with no workspace (session %s seq %d)",
 			ev.GetSessionId(), ev.GetSeq())
 	}
+	if sessionID == "" {
+		return fmt.Errorf("progress: Apply got no canonical session id for workspace %q (event session %s seq %d); a view stamped with the event's own identity is dropped by the frontend's session scope filter",
+			workspace, ev.GetSessionId(), ev.GetSeq())
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	wp := m.forLocked(workspace)
-	if sid := ev.GetSessionId(); sid != "" {
-		wp.view.SessionId = sid
+	// Logged on CHANGE only. Apply runs on every event of both planes, so a
+	// line per event would bury the log; the fact worth reporting is which
+	// vendor conversation this workspace's events are arriving under, and that
+	// moves only when the conversation rotates.
+	if evSID := ev.GetSessionId(); evSID != "" && evSID != sessionID && evSID != wp.canonicalizedFrom {
+		wp.canonicalizedFrom = evSID
+		m.logf("progress: event identity canonicalized ws=%s event_session=%s owner_session=%s seq=%d — the store files this conversation under its vendor uuid; the view is stamped with the daemon session so scoped frontends receive it",
+			workspace, evSID, sessionID, ev.GetSeq())
 	}
+	wp.view.SessionId = sessionID
 
 	at := ev.GetProducedAtMs()
 	if at == 0 {
