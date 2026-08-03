@@ -14,6 +14,30 @@ import (
 // spends its whole deadline proving nothing.
 var ErrShimDiedBeforeConnect = errors.New("shimclient: the daemon-spawned shim exited before it ever connected")
 
+// ErrShimDiedAfterConnect is returned when the daemon-owned process behind a
+// session that has connected is reaped while the session controller remains
+// live. A transport reconnect cannot repair a process that no longer exists,
+// so Run returns this error instead of waiting forever for that process to
+// dial again.
+var ErrShimDiedAfterConnect = errors.New("shimclient: the daemon-spawned shim exited after connecting")
+
+// ShimExit is the process evidence captured at reap time. It crosses the
+// optional process-observer seam separately from transport errors because a
+// closed socket alone cannot distinguish a dead shim from a live shim that is
+// reattaching after a daemon-side link loss.
+type ShimExit struct {
+	Description string
+	ExitCode    int
+	StderrTail  string
+}
+
+// ShimExits reports a daemon-spawned process death after that process has
+// connected. A nil channel means this daemon does not own a process handle,
+// as with a shim that survived a daemon restart.
+type ShimExits interface {
+	DiedAfterConnect(sessionID string) <-chan ShimExit
+}
+
 // ShimSpawnState is what the daemon knows about a session's spawned shim
 // process at one instant. It is the evidence a stalled bring-up attaches to its
 // own error, so the reader learns whether the process is alive, dead, or was
@@ -51,6 +75,19 @@ type ShimDeaths interface {
 	DiedBeforeConnect(sessionID string) <-chan struct{}
 	// SpawnState reports the current process evidence for the session.
 	SpawnState(sessionID string) ShimSpawnState
+}
+
+func (c *Client) afterConnectDeathError(exit ShimExit) error {
+	description := exit.Description
+	if description == "" {
+		description = "process exited"
+	}
+	tail := " (the process wrote nothing to stderr)"
+	if exit.StderrTail != "" {
+		tail = "; shim stderr tail: " + exit.StderrTail
+	}
+	return fmt.Errorf("shimclient: session %s: %w: %s (exit code %d)%s",
+		c.cfg.SessionID, ErrShimDiedAfterConnect, description, exit.ExitCode, tail)
 }
 
 // spawnDeathError builds the fast bring-up failure for a shim that exited

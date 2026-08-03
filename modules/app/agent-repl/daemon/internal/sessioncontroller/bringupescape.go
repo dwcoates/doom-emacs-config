@@ -181,18 +181,13 @@ func (m *Manager) escapeFailedBringUp(ctx context.Context, workspace string, d *
 		return m.ensure(ctx, workspace)
 	}
 	if d.resumedVendorSessionID != "" && retry.resumedVendorSessionID != d.resumedVendorSessionID {
-		if retry.staleResumeDroppedVendorSessionID == d.resumedVendorSessionID {
-			m.logf("session-controller: same-conversation retry found affirmative stale-pointer evidence ws=%q session=%s generation=%s resume=%q resume_decision=drop_transcript_absent",
-				workspace, retry.sessionID, retry.generationID, d.resumedVendorSessionID)
-		} else {
-			err := fmt.Errorf("session-controller: transport retry changed resume identity for session %s from %q to %q without affirmative stale-pointer evidence",
-				d.sessionID, d.resumedVendorSessionID, retry.resumedVendorSessionID)
-			m.logf("session-controller: bring-up retry invariant FAILED ws=%q session=%s first_generation=%s retry_generation=%s resume_decision=abort expected_resume=%q actual_resume=%q cause=%v",
-				workspace, d.sessionID, d.generationID, retry.generationID, d.resumedVendorSessionID, retry.resumedVendorSessionID, err)
-			m.tearDownFailedBringUp(workspace, retry)
-			m.resolveStartFailed(workspace, retry, err)
-			return nil, err
-		}
+		err := fmt.Errorf("session-controller: transport retry changed resume identity for session %s from %q to %q",
+			d.sessionID, d.resumedVendorSessionID, retry.resumedVendorSessionID)
+		m.logf("session-controller: bring-up retry invariant FAILED ws=%q session=%s first_generation=%s retry_generation=%s resume_decision=abort expected_resume=%q actual_resume=%q cause=%v",
+			workspace, d.sessionID, d.generationID, retry.generationID, d.resumedVendorSessionID, retry.resumedVendorSessionID, err)
+		m.tearDownFailedBringUp(workspace, retry)
+		m.resolveStartFailed(workspace, retry, err)
+		return nil, err
 	}
 	if err := m.awaitDriveable(ctx, retry); err != nil {
 		m.tearDownFailedBringUp(workspace, retry)
@@ -281,17 +276,4 @@ func (m *Manager) resolveStartFailed(workspace string, d *sessionController, cau
 		d.consumer.pushFailure(d.consumer.startFailedUUID(), errclass.StartFailed(cause.Error()))
 	}
 	m.noteConnectivity(workspace, d.sessionID, d.generationID, ssm.SessionConnectivityUnavailable, "bring_up_failed")
-}
-
-// pushHistoryMissingNote tells the user, in their own feed, that the
-// conversation they expected to continue is not coming back.
-//
-// It is the whole repair as far as they are concerned: the session comes up
-// green either way, and without the note a silently emptied workspace is
-// indistinguishable from lost data.
-func (m *Manager) pushHistoryMissingNote(d *sessionController, droppedUUID, detail string) {
-	if d.consumer == nil || droppedUUID == "" {
-		return
-	}
-	d.consumer.pushFailure(d.consumer.historyMissingUUID(droppedUUID), errclass.HistoryMissing(droppedUUID, detail))
 }

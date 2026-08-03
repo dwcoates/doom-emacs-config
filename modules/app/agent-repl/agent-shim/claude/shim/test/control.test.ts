@@ -46,7 +46,7 @@ function recorder(
     models,
     throwOnPrompt,
     target: {
-      submitPrompt: (input) => {
+      submitPrompt: async (input) => {
         if (throwOnPrompt) throw new Error(throwOnPrompt);
         prompts.push(input);
       },
@@ -80,44 +80,44 @@ function persistedLogs(): Array<Record<string, unknown>> {
 }
 
 describe("ControlDispatch.handleSubmitPrompt", () => {
-  it("pushes the prompt into the SDK target and Acks", () => {
+  it("pushes the prompt into the SDK target and Acks", async () => {
     // Arrange
     const rec = recorder();
     const d = dispatch(rec, []);
     // Act
-    const receipt = d.handleSubmitPrompt(create(SubmitPromptSchema, { requestId: "r1", text: "hi", origin: "human" }));
+    const receipt = await d.handleSubmitPrompt(create(SubmitPromptSchema, { requestId: "r1", text: "hi", origin: "human" }));
     // Assert
     expect(receipt.$typeName).toBe(AckSchema.typeName);
     expect(rec.prompts).toEqual([{ requestId: "r1", text: "hi", origin: "human" }]);
   });
 
-  it("forwards a permission-mode override when present", () => {
+  it("forwards a permission-mode override when present", async () => {
     // Arrange
     const rec = recorder();
     const d = dispatch(rec, []);
     // Act
-    d.handleSubmitPrompt(create(SubmitPromptSchema, { requestId: "r", text: "x", origin: "human", permissionMode: "acceptEdits" }));
+    await d.handleSubmitPrompt(create(SubmitPromptSchema, { requestId: "r", text: "x", origin: "human", permissionMode: "acceptEdits" }));
     // Assert
     expect(rec.prompts[0]!.permissionMode).toBe("acceptEdits");
   });
 
-  it("Nacks with the error reason when the target throws", () => {
+  it("Nacks with the error reason when the target throws", async () => {
     // Arrange
     const rec = recorder("boom");
     const d = dispatch(rec, []);
     // Act
-    const receipt = d.handleSubmitPrompt(create(SubmitPromptSchema, { requestId: "r2", text: "hi" }));
+    const receipt = await d.handleSubmitPrompt(create(SubmitPromptSchema, { requestId: "r2", text: "hi" }));
     // Assert
     expect(receipt.$typeName).toBe(NackSchema.typeName);
     expect((receipt as { reason: string }).reason).toBe("boom");
   });
 
-  it("records canonical accepted and rejected prompt dispatches with request context", () => {
+  it("records canonical accepted and rejected prompt dispatches with request context", async () => {
     vi.mocked(writeSync).mockClear();
     const accepted = dispatch(recorder(), []);
-    accepted.handleSubmitPrompt(create(SubmitPromptSchema, { requestId: "accepted-1", text: "hello", origin: "human" }));
+    await accepted.handleSubmitPrompt(create(SubmitPromptSchema, { requestId: "accepted-1", text: "hello", origin: "human" }));
     const rejected = dispatch(recorder("target failed"), []);
-    rejected.handleSubmitPrompt(create(SubmitPromptSchema, { requestId: "rejected-1", text: "bye", origin: "human" }));
+    await rejected.handleSubmitPrompt(create(SubmitPromptSchema, { requestId: "rejected-1", text: "bye", origin: "human" }));
 
     expect(persistedLogs()).toEqual(expect.arrayContaining([
       expect.objectContaining({ operation: "shim.control.dispatch", request_id: "accepted-1", message: "SubmitPrompt accepted by SDK session" }),

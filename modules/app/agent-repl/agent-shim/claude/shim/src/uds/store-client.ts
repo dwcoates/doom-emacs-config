@@ -160,6 +160,8 @@ interface PendingWrite {
 
 export class StoreClient {
   private conn: MessageConn | null = null;
+  /** Producer socket while connect() has not yet established MessageConn ownership. */
+  private connectingSocket: net.Socket | null = null;
   private subConn: MessageConn | null = null;
   private connected = false;
   private sink: StoreSink | null = null;
@@ -451,9 +453,29 @@ export class StoreClient {
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
       const socket = net.connect(this.opts.socketPath);
-      socket.once("error", reject);
+      this.connectingSocket = socket;
+      const forgetSocket = (): void => {
+        if (this.connectingSocket === socket) this.connectingSocket = null;
+      };
+      const onError = (err: Error): void => {
+        forgetSocket();
+        reject(err);
+      };
+      const onClose = (): void => {
+        forgetSocket();
+        reject(new Error("store producer connection closed before it was established"));
+      };
+      socket.once("error", onError);
+      socket.once("close", onClose);
       socket.once("connect", () => {
-        socket.removeListener("error", reject);
+        socket.removeListener("error", onError);
+        socket.removeListener("close", onClose);
+        forgetSocket();
+        if (this.closed) {
+          socket.destroy();
+          reject(new Error("store client closed while producer connection was starting"));
+          return;
+        }
         this.conn = new MessageConn(
           socket,
           {
@@ -868,6 +890,10 @@ export class StoreClient {
     if (this.conn) {
       this.conn.close();
       this.conn = null;
+    }
+    if (this.connectingSocket) {
+      this.connectingSocket.destroy();
+      this.connectingSocket = null;
     }
   }
 

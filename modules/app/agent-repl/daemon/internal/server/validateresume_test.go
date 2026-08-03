@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -17,7 +19,7 @@ import (
 
 // spawnerWithRecord builds a spawner over a record naming resumeID, capturing
 // the CreateOpts the spawn was called with.
-func spawnerWithRecord(t *testing.T, cfgDir, resumeID string) (*ShimSpawner, *registry.Registry, *CreateOpts) {
+func spawnerWithRecord(t *testing.T, cfgDir, resumeID string) (*ShimSpawner, *registry.Registry, *CreateOpts, *int) {
 	t.Helper()
 	reg := openTestRegistry(t)
 	if err := reg.Put(registry.Record{
@@ -27,19 +29,20 @@ func spawnerWithRecord(t *testing.T, cfgDir, resumeID string) (*ShimSpawner, *re
 		t.Fatalf("put: %v", err)
 	}
 	got := &CreateOpts{}
+	spawned := 0
 	sp := NewShimSpawner(reg,
 		func(string) (bool, error) { return false, nil },
 		nil,
-		func(_ string, opts CreateOpts) (ShimStopFunc, error) { *got = opts; return nil, nil },
+		func(_ string, opts CreateOpts) (ShimStopFunc, error) { spawned++; *got = opts; return nil, nil },
 		func(string, ...any) {})
-	return sp, reg, got
+	return sp, reg, got, &spawned
 }
 
 func TestSpawnResumesWhenTheTranscriptExists(t *testing.T) {
 	// Arrange.
 	cfg := t.TempDir()
 	writeTranscript(t, cfg, "uuid-live")
-	sp, _, got := spawnerWithRecord(t, cfg, "uuid-live")
+	sp, _, got, _ := spawnerWithRecord(t, cfg, "uuid-live")
 
 	// Act.
 	res, err := sp.EnsureShim(context.Background(), "s1")
@@ -51,49 +54,38 @@ func TestSpawnResumesWhenTheTranscriptExists(t *testing.T) {
 	if got.Resume != "uuid-live" || res.Resumed != "uuid-live" {
 		t.Fatalf("spawn resume = %q, result resumed = %q, want uuid-live", got.Resume, res.Resumed)
 	}
-	if res.StaleResumeDropped != "" {
-		t.Fatalf("dropped %q for a transcript that exists", res.StaleResumeDropped)
-	}
 }
 
-func TestSpawnStartsFreshWhenTheTranscriptIsMissing(t *testing.T) {
+func TestSpawnHardFailsWhenTheRecordedTranscriptIsMissing(t *testing.T) {
 	// Arrange — the record names a conversation the vendor never wrote.
-	sp, _, got := spawnerWithRecord(t, t.TempDir(), "uuid-gone")
+	cfg := t.TempDir()
+	sp, reg, got, spawned := spawnerWithRecord(t, cfg, "uuid-gone")
 
 	// Act.
 	res, err := sp.EnsureShim(context.Background(), "s1")
 
-	// Assert.
-	if err != nil {
-		t.Fatalf("EnsureShim: %v", err)
+	// Assert — no fresh spawn, no mutable repair, and no SpawnResult encoding a
+	// successful downgrade.
+	var missing *ResumeTranscriptMissingError
+	if !errors.As(err, &missing) {
+		t.Fatalf("EnsureShim error = %v, want *ResumeTranscriptMissingError", err)
 	}
 	if got.Resume != "" {
-		t.Fatalf("spawn resume = %q, want empty: the CLI would exit 1 on it", got.Resume)
+		t.Fatalf("spawn resume = %q, want no spawn", got.Resume)
 	}
-	if res.StaleResumeDropped != "uuid-gone" {
-		t.Fatalf("StaleResumeDropped = %q, want uuid-gone so the caller can note it", res.StaleResumeDropped)
+	if *spawned != 0 {
+		t.Fatalf("spawn calls = %d, want zero", *spawned)
 	}
-}
-
-func TestSpawnDropsTheStalePointerFromTheRecord(t *testing.T) {
-	// Arrange — a pointer left standing makes the NEXT bring-up repeat the
-	// same failed resume, which is the loop this ends.
-	sp, reg, _ := spawnerWithRecord(t, t.TempDir(), "uuid-gone")
-
-	// Act.
-	if _, err := sp.EnsureShim(context.Background(), "s1"); err != nil {
-		t.Fatalf("EnsureShim: %v", err)
+	if res.Resumed != "" {
+		t.Fatalf("SpawnResult.Resumed = %q, want empty on hard failure", res.Resumed)
 	}
-
-	// Assert.
-	if rec, _ := reg.Get("s1"); rec.ClaudeSessionID != "" {
-		t.Fatalf("claude_session_id = %q, want dropped", rec.ClaudeSessionID)
+	if rec, ok := reg.Get("s1"); !ok || rec.ClaudeSessionID != "uuid-gone" || rec.CWD != "/w" || rec.ConfigDir != cfg {
+		t.Fatalf("registry record after failed restore = %+v, want unchanged uuid/cwd/config_dir", rec)
 	}
 }
 
-func TestSpawnAnnouncesAStalePointerLoudly(t *testing.T) {
-	// Arrange — a silent downgrade to a fresh conversation is exactly the
-	// invisible data loss the note and this log line exist to prevent.
+func TestSpawnLogsTheCanonicalResumeContinuityFailure(t *testing.T) {
+	// Arrange.
 	reg := openTestRegistry(t)
 	if err := reg.Put(registry.Record{SessionID: "s1", CWD: "/w", ConfigDir: t.TempDir(), ClaudeSessionID: "uuid-gone"}); err != nil {
 		t.Fatalf("put: %v", err)
@@ -103,29 +95,38 @@ func TestSpawnAnnouncesAStalePointerLoudly(t *testing.T) {
 		func(string) (bool, error) { return false, nil },
 		nil,
 		func(string, CreateOpts) (ShimStopFunc, error) { return nil, nil },
-		func(f string, a ...any) { logged = append(logged, f) })
+		func(f string, a ...any) { logged = append(logged, fmt.Sprintf(f, a...)) })
 
 	// Act.
-	if _, err := sp.EnsureShim(context.Background(), "s1"); err != nil {
-		t.Fatalf("EnsureShim: %v", err)
+	if _, err := sp.EnsureShim(context.Background(), "s1"); err == nil {
+		t.Fatal("EnsureShim succeeded for a missing recorded transcript")
 	}
 
-	// Assert.
-	var found bool
-	for _, l := range logged {
-		if strings.Contains(l, "STALE RESUME POINTER") {
-			found = true
-		}
+	// Assert — exactly one owner-point record carries the identity and decision.
+	if len(logged) != 1 {
+		t.Fatalf("resume failure records = %d, want one: %v", len(logged), logged)
 	}
-	if !found {
-		t.Fatalf("the stale pointer was dropped SILENTLY; lines=%v", logged)
+	for _, field := range []string{
+		"event=resume_continuity_failure",
+		"operation=automatic_restore",
+		"decision=hard_fail",
+		"agent_repl_session_id=s1",
+		"claude_session_id=uuid-gone",
+		"cwd=/w",
+		"config_dir=",
+		"resolved_config_dir=",
+		"transcript_path=",
+	} {
+		if !strings.Contains(logged[0], field) {
+			t.Fatalf("resume failure missing %q: %s", field, logged[0])
+		}
 	}
 }
 
 func TestDropResumeReportsWhatItDropped(t *testing.T) {
 	// Arrange. Explicit administrative callers need the removed identity for
 	// durable-state audit logs.
-	sp, _, _ := spawnerWithRecord(t, t.TempDir(), "uuid-gone")
+	sp, _, _, _ := spawnerWithRecord(t, t.TempDir(), "uuid-gone")
 
 	// Act.
 	dropped, err := sp.DropResume("s1")
@@ -141,7 +142,7 @@ func TestDropResumeReportsWhatItDropped(t *testing.T) {
 
 func TestDropResumeOnAFreshSessionReportsNothing(t *testing.T) {
 	// Arrange. A session without durable identity has nothing to remove.
-	sp, _, _ := spawnerWithRecord(t, t.TempDir(), "")
+	sp, _, _, _ := spawnerWithRecord(t, t.TempDir(), "")
 
 	// Act.
 	dropped, err := sp.DropResume("s1")

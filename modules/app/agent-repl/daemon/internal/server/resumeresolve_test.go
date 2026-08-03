@@ -11,26 +11,17 @@ import (
 // ConversationResolver — the daemon answering "which conversation belongs to
 // this workspace?" from its own records, so no frontend has to remember.
 //
-// Each test pins the transcript check rather than touching the real filesystem:
-// the resolver's whole contract is that a conversation is resumable only when
-// the vendor actually wrote it, and that answer must be injectable to test the
-// skip path at all.
+// The resolver selects durable identity only. CreateSession owns transcript
+// viability, so resolver tests remain filesystem-free and the create tests pin
+// the shared hard-fail gate.
 // ---------------------------------------------------------------------------
 
-// resolverOver builds a resolver whose transcript check reports true for
-// exactly the uuids in present.
-func resolverOver(t *testing.T, reg *registry.Registry, present ...string) *ConversationResolver {
+// resolverOver builds a resolver over the supplied durable registry.
+func resolverOver(t *testing.T, reg *registry.Registry) *ConversationResolver {
 	t.Helper()
-	set := make(map[string]bool, len(present))
-	for _, p := range present {
-		set[p] = true
-	}
 	return &ConversationResolver{
 		Reg:  reg,
 		Logf: t.Logf,
-		transcriptExists: func(_, _, csid string) (string, bool) {
-			return "/transcripts/" + csid + ".jsonl", set[csid]
-		},
 	}
 }
 
@@ -45,7 +36,7 @@ func TestResolveResumeFindsTheWorkspacesConversation(t *testing.T) {
 	}
 
 	// Act
-	got, ok := resolverOver(t, reg, "uuid-1").ResolveResume("/cfg", "/w")
+	got, ok := resolverOver(t, reg).ResolveResume("/cfg", "/w")
 
 	// Assert
 	if !ok || got != "uuid-1" {
@@ -79,7 +70,7 @@ func TestResolveResumePrefersTheNewestConversation(t *testing.T) {
 	}
 
 	// Act
-	got, _ := resolverOver(t, reg, "uuid-old", "uuid-new").ResolveResume("/cfg", "/w")
+	got, _ := resolverOver(t, reg).ResolveResume("/cfg", "/w")
 
 	// Assert
 	if got != "uuid-new" {
@@ -87,10 +78,10 @@ func TestResolveResumePrefersTheNewestConversation(t *testing.T) {
 	}
 }
 
-func TestResolveResumeSkipsAConversationTheVendorNeverWrote(t *testing.T) {
-	// Arrange — the newest record names a uuid with no transcript behind it,
-	// which is precisely the case the old adopt-late hold existed to prevent.
-	// Resolving it would make the CLI hard-exit on --resume.
+func TestResolveResumeSelectsTheNewestRecordedConversationBeforeViabilityCheck(t *testing.T) {
+	// Arrange — the newest record names a UUID whose transcript is unavailable.
+	// The resolver must preserve this exact identity for CreateSession's shared
+	// gate instead of silently choosing the older conversation.
 	reg := openTestRegistry(t)
 	for _, rec := range []registry.Record{
 		{SessionID: "s1", CWD: "/w", ConfigDir: "/cfg", ClaudeSessionID: "uuid-real", CreatedAt: "2026-07-01T10:00:00Z"},
@@ -101,16 +92,16 @@ func TestResolveResumeSkipsAConversationTheVendorNeverWrote(t *testing.T) {
 		}
 	}
 
-	// Act — only the older one exists on disk.
-	got, ok := resolverOver(t, reg, "uuid-real").ResolveResume("/cfg", "/w")
+	// Act.
+	got, ok := resolverOver(t, reg).ResolveResume("/cfg", "/w")
 
 	// Assert
-	if !ok || got != "uuid-real" {
-		t.Fatalf("ResolveResume = (%q, %v), want (uuid-real, true)", got, ok)
+	if !ok || got != "uuid-phantom" {
+		t.Fatalf("ResolveResume = (%q, %v), want (uuid-phantom, true)", got, ok)
 	}
 }
 
-func TestResolveResumeStartsFreshWhenNoTranscriptSurvives(t *testing.T) {
+func TestResolveResumeReturnsRecordedConversationForSharedViabilityGate(t *testing.T) {
 	// Arrange — the registry remembers a conversation whose transcript is gone.
 	reg := openTestRegistry(t)
 	if err := reg.Put(registry.Record{
@@ -120,12 +111,13 @@ func TestResolveResumeStartsFreshWhenNoTranscriptSurvives(t *testing.T) {
 		t.Fatalf("put: %v", err)
 	}
 
-	// Act
-	_, ok := resolverOver(t, reg).ResolveResume("/cfg", "/w")
+	// Act.
+	got, ok := resolverOver(t, reg).ResolveResume("/cfg", "/w")
 
-	// Assert
-	if ok {
-		t.Fatal("resolved a conversation with no transcript on disk")
+	// Assert — CreateSession validates the returned UUID and hard-fails when
+	// its transcript is absent. Returning false here would instead start fresh.
+	if !ok || got != "uuid-gone" {
+		t.Fatalf("ResolveResume = (%q, %v), want (uuid-gone, true)", got, ok)
 	}
 }
 
@@ -142,7 +134,7 @@ func TestResolveResumeExcludesADeletedConversation(t *testing.T) {
 	}
 
 	// Act
-	_, ok := resolverOver(t, reg, "uuid-deleted").ResolveResume("/cfg", "/w")
+	_, ok := resolverOver(t, reg).ResolveResume("/cfg", "/w")
 
 	// Assert
 	if ok {
@@ -164,7 +156,7 @@ func TestResolveResumeIncludesASupersededConversation(t *testing.T) {
 	}
 
 	// Act
-	got, ok := resolverOver(t, reg, "uuid-superseded").ResolveResume("/cfg", "/w")
+	got, ok := resolverOver(t, reg).ResolveResume("/cfg", "/w")
 
 	// Assert
 	if !ok || got != "uuid-superseded" {
@@ -184,7 +176,7 @@ func TestResolveResumeIgnoresAnotherWorkspacesConversation(t *testing.T) {
 	}
 
 	// Act
-	_, ok := resolverOver(t, reg, "uuid-other").ResolveResume("/cfg", "/w")
+	_, ok := resolverOver(t, reg).ResolveResume("/cfg", "/w")
 
 	// Assert
 	if ok {
@@ -205,7 +197,7 @@ func TestResolveResumeIgnoresAnotherAccountsConversation(t *testing.T) {
 	}
 
 	// Act
-	_, ok := resolverOver(t, reg, "uuid-other-account").ResolveResume("/cfg", "/w")
+	_, ok := resolverOver(t, reg).ResolveResume("/cfg", "/w")
 
 	// Assert
 	if ok {
@@ -227,7 +219,7 @@ func TestResolveResumeIgnoresARecordWithNoVendorUUID(t *testing.T) {
 	}
 
 	// Act
-	got, _ := resolverOver(t, reg, "uuid-real").ResolveResume("/cfg", "/w")
+	got, _ := resolverOver(t, reg).ResolveResume("/cfg", "/w")
 
 	// Assert
 	if got != "uuid-real" {
@@ -280,7 +272,7 @@ func TestResolveResumeRevivesAConversationDeletedThenRecreated(t *testing.T) {
 	}
 
 	// Act
-	got, ok := resolverOver(t, reg, "uuid-1").ResolveResume("/cfg", "/w")
+	got, ok := resolverOver(t, reg).ResolveResume("/cfg", "/w")
 
 	// Assert
 	if !ok || got != "uuid-1" {
@@ -308,7 +300,7 @@ func TestResolveResumeIgnoresATombstoneThatSortsBeforeItsRevival(t *testing.T) {
 	}
 
 	// Act
-	got, _ := resolverOver(t, reg, "uuid-real", "uuid-decoy").ResolveResume("/cfg", "/w")
+	got, _ := resolverOver(t, reg).ResolveResume("/cfg", "/w")
 
 	// Assert
 	if got != "uuid-real" {
@@ -332,7 +324,7 @@ func TestResolveResumeStaysExcludedWhenTheDeleteIsTheNewestRecord(t *testing.T) 
 	}
 
 	// Act
-	_, ok := resolverOver(t, reg, "uuid-1").ResolveResume("/cfg", "/w")
+	_, ok := resolverOver(t, reg).ResolveResume("/cfg", "/w")
 
 	// Assert
 	if ok {
@@ -359,7 +351,7 @@ func TestResolveResumeRanksAConversationByItsNewestRecord(t *testing.T) {
 	}
 
 	// Act
-	got, _ := resolverOver(t, reg, "uuid-old", "uuid-other").ResolveResume("/cfg", "/w")
+	got, _ := resolverOver(t, reg).ResolveResume("/cfg", "/w")
 
 	// Assert
 	if got != "uuid-old" {

@@ -16,6 +16,7 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import net from "node:net";
+import { once } from "node:events";
 import { create } from "@bufbuild/protobuf";
 import { anyPack } from "@bufbuild/protobuf/wkt";
 import {
@@ -39,6 +40,7 @@ import {
 } from "../../../../proto/gen/ts/agentshim/data/v1/tools_pb.js";
 import { AsyncQueue } from "../src/input-queue.js";
 import { UdsSession } from "../src/uds/uds-session.js";
+import type { UdsQuery } from "../src/uds/uds-session.js";
 import type {
   CanUseToolLike,
   InterruptReceipt,
@@ -48,6 +50,7 @@ import type {
   SdkUserMessageLike,
 } from "../src/session.js";
 import type { ModelInfo, PermissionMode, SlashCommand } from "../src/protocol.js";
+import type { SubscriptionUsageResponse } from "../src/subscription-usage.js";
 import type { Event, ShimReady, Subscribe } from "../src/uds/proto.js";
 import {
   AckSchema,
@@ -82,9 +85,18 @@ class FakeQuery implements QueryLike {
   readonly prompts: SdkUserMessageLike[] = [];
   readonly canUseTool: CanUseToolLike;
   interruptCalls = 0;
+  abortCalls = 0;
   /** The receipt `interrupt()` resolves; undefined models a pre-0.3.205 CLI. */
   interruptReceipt: InterruptReceipt | undefined = undefined;
   private readonly outbox = new AsyncQueue<SdkMessageLike>();
+  subscriptionUsageResponse: SubscriptionUsageResponse = {
+    subscription_type: null,
+    rate_limits_available: false,
+    rate_limits: null,
+  };
+  subscriptionUsageCalls = 0;
+  subscriptionUsageImpl: () => Promise<SubscriptionUsageResponse> = () =>
+    Promise.resolve(this.subscriptionUsageResponse);
 
   constructor(prompt: AsyncIterable<SdkUserMessageLike>, canUseTool: CanUseToolLike) {
     this.canUseTool = canUseTool;
@@ -100,6 +112,17 @@ class FakeQuery implements QueryLike {
 
   /** End the SDK stream (the pump loop exits, session shuts down). */
   endStream(): void {
+    this.outbox.end();
+  }
+
+  /** Fail the SDK iterator without making any session shutdown request. */
+  failStream(cause: Error): void {
+    this.outbox.fail(cause);
+  }
+
+  /** The session-owned query cleanup capability. */
+  abort(): void {
+    this.abortCalls++;
     this.outbox.end();
   }
 
@@ -126,6 +149,10 @@ class FakeQuery implements QueryLike {
   }
   supportedCommands(): Promise<SlashCommand[]> {
     return Promise.resolve([]);
+  }
+  subscriptionUsage(): Promise<SubscriptionUsageResponse> {
+    this.subscriptionUsageCalls++;
+    return this.subscriptionUsageImpl();
   }
 }
 
@@ -169,7 +196,10 @@ function fakeStore(): Promise<FakeStore> {
 
 interface Rig {
   session: UdsSession;
+  /** The owned SDK pump completion. */
+  done: Promise<void>;
   query: FakeQuery;
+  queryFactoryCalls: () => number;
   store: FakeStore;
   daemon: FramedPeer;
   udsSocketPath: string;
@@ -293,10 +323,16 @@ async function rig(
   cleanups.push(() => store.close());
 
   let query!: FakeQuery;
+  let queryFactoryCalls = 0;
   const createQuery = (
     prompt: AsyncIterable<SdkUserMessageLike>,
     canUseTool: CanUseToolLike,
-  ): QueryLike => (query = new FakeQuery(prompt, canUseTool));
+  ): UdsQuery => {
+    queryFactoryCalls++;
+    const live = new FakeQuery(prompt, canUseTool);
+    query = live;
+    return { query: live, subscriptionUsage: () => live.subscriptionUsage(), abort: () => live.abort() };
+  };
 
   // Be the daemon: the shim dials us. Listening BEFORE start() mirrors
   // production, where the daemon is up long before it spawns a shim.
@@ -341,7 +377,19 @@ async function rig(
   const standingSubscribe = await store.latest().next(SubscribeSchema);
   const readiness = await daemon.next(EventSchema);
   const ready = await daemon.next(ShimReadySchema);
-  return { session, query, store, daemon, udsSocketPath, daemonListener, readiness, ready, standingSubscribe };
+  return {
+    session,
+    done,
+    query,
+    queryFactoryCalls: () => queryFactoryCalls,
+    store,
+    daemon,
+    udsSocketPath,
+    daemonListener,
+    readiness,
+    ready,
+    standingSubscribe,
+  };
 }
 
 describe("UdsSession control: prompt in → SDK", () => {
@@ -357,6 +405,136 @@ describe("UdsSession control: prompt in → SDK", () => {
     const content = query.prompts[0]!.message.content;
     expect(content).toEqual([{ type: "text", text: "hello there" }]);
     expect(session.turnCount()).toBe(1);
+  });
+
+  it("captures five-hour utilization before admitting the prompt to the SDK", async () => {
+    // Arrange
+    const { query, daemon } = await rig();
+    let release!: (response: SubscriptionUsageResponse) => void;
+    query.subscriptionUsageImpl = () => new Promise((resolve) => { release = resolve; });
+
+    // Act: leave the start observation pending.
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p-quota", text: "measure me" }));
+    await until(() => query.subscriptionUsageCalls === 1);
+    // Assert: neither admission nor its receipt can overtake the observation.
+    expect(query.prompts).toEqual([]);
+
+    release({
+      subscription_type: "max",
+      rate_limits_available: true,
+      rate_limits: { five_hour: { utilization: 12.5, resets_at: "2026-08-03T22:00:00Z" } },
+    });
+    expect((await daemon.next(AckSchema)).requestId).toBe("p-quota");
+    await until(() => query.prompts.length === 1);
+  });
+
+  it("logs raw turn-boundary utilization and a same-window delta", async () => {
+    // Arrange
+    const { query, daemon } = await rig({ storeSessionId: "vendor-uuid" });
+    const log = captureLog();
+    const responses: SubscriptionUsageResponse[] = [
+      {
+        subscription_type: "max",
+        rate_limits_available: true,
+        rate_limits: { five_hour: { utilization: 20.25, resets_at: "2026-08-03T22:00:00Z" } },
+      },
+      {
+        subscription_type: "max",
+        rate_limits_available: true,
+        rate_limits: { five_hour: { utilization: 21.75, resets_at: "2026-08-03T22:00:00Z" } },
+      },
+    ];
+    query.subscriptionUsageImpl = async () => {
+      const response = responses.shift();
+      if (response === undefined) throw new Error("unexpected usage sample");
+      return response;
+    };
+
+    // Act
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p-delta", text: "go" }));
+    await daemon.next(AckSchema);
+    query.emit({ type: "result", uuid: "r1", session_id: "vendor-uuid", subtype: "success" } as unknown as SdkMessageLike);
+    await until(() => query.subscriptionUsageCalls === 2);
+    await tick();
+
+    // Assert
+    expect(log.record("captured five-hour utilization at turn start").context).toMatchObject({
+      phase: "turn_start",
+      turn_id: "p-delta",
+      measurement_available: true,
+      five_hour_utilization: 20.25,
+      five_hour_resets_at: "2026-08-03T22:00:00Z",
+      subscription_type: "max",
+      rate_limits_available: true,
+    });
+    expect(log.record("captured five-hour utilization at turn end").context).toMatchObject({
+      phase: "turn_end",
+      turn_id: "p-delta",
+      start_five_hour_utilization: 20.25,
+      end_five_hour_utilization: 21.75,
+      start_five_hour_resets_at: "2026-08-03T22:00:00Z",
+      end_five_hour_resets_at: "2026-08-03T22:00:00Z",
+      same_five_hour_window: true,
+      five_hour_utilization_delta_available: true,
+      five_hour_utilization_delta: 1.5,
+    });
+  });
+
+  it("does not compute a utilization delta across five-hour windows", async () => {
+    // Arrange
+    const { query, daemon } = await rig({ storeSessionId: "vendor-uuid" });
+    const log = captureLog();
+    const responses: SubscriptionUsageResponse[] = [
+      {
+        subscription_type: "max",
+        rate_limits_available: true,
+        rate_limits: { five_hour: { utilization: 99, resets_at: "2026-08-03T22:00:00Z" } },
+      },
+      {
+        subscription_type: "max",
+        rate_limits_available: true,
+        rate_limits: { five_hour: { utilization: 1, resets_at: "2026-08-04T03:00:00Z" } },
+      },
+    ];
+    query.subscriptionUsageImpl = async () => responses.shift()!;
+
+    // Act
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p-reset", text: "go" }));
+    await daemon.next(AckSchema);
+    query.emit({ type: "result", uuid: "r1", session_id: "vendor-uuid", subtype: "success" } as unknown as SdkMessageLike);
+    await until(() => query.subscriptionUsageCalls === 2);
+    await tick();
+
+    // Assert
+    expect(log.record("captured five-hour utilization at turn end").context).toMatchObject({
+      same_five_hour_window: false,
+      five_hour_utilization_delta_available: false,
+      five_hour_utilization_delta: null,
+      delta_unavailable_reason: "five_hour_window_changed_or_unknown",
+    });
+  });
+
+  it("logs a failed start sample and admits the prompt without silent telemetry fallback", async () => {
+    // Arrange
+    const { query, daemon } = await rig();
+    const log = captureLog();
+    query.subscriptionUsageImpl = () => Promise.reject(new Error("usage endpoint unavailable"));
+
+    // Act
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p-failed-sample", text: "go" }));
+    expect((await daemon.next(AckSchema)).requestId).toBe("p-failed-sample");
+    await until(() => query.prompts.length === 1);
+
+    // Assert
+    const record = log.record("failed to capture five-hour utilization at turn start");
+    expect(record.context).toMatchObject({
+      phase: "turn_start",
+      measurement_available: false,
+      five_hour_utilization: null,
+      five_hour_resets_at: null,
+      rate_limits_available: false,
+      measurement_unavailable_reason: "sample_failed",
+    });
   });
 });
 
@@ -833,7 +1011,7 @@ describe("UdsSession instrumentation: prompt round-trip receipts", () => {
 describe("UdsSession lifetime: reattach", () => {
   it("a daemon disconnect ends neither the session nor the in-flight turn", async () => {
     // Arrange: a turn is in flight.
-    const { session, query, store, daemon, daemonListener } = await rig();
+    const { session, query, queryFactoryCalls, store, daemon, daemonListener } = await rig();
     daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
     await daemon.next(AckSchema);
     await until(() => query.prompts.length === 1);
@@ -842,6 +1020,8 @@ describe("UdsSession lifetime: reattach", () => {
     await until(() => !session.isConnected());
     // Assert: the turn survives and the store connection is untouched.
     expect(session.turnCount()).toBe(1);
+    expect(queryFactoryCalls()).toBe(1);
+    expect(query.abortCalls).toBe(0);
     expect(store.peer().closed).toBe(false);
     // The shim redials on its own; the replacement daemon accepts and
     // resubscribes on the SAME live session.
@@ -863,6 +1043,102 @@ describe("UdsSession lifetime: reattach", () => {
     store.latest().send(EventSchema, create(EventSchema, { sessionId: "sess-1", seq: 3n }));
     const e3 = await daemon2.next(EventSchema);
     expect(e3.seq).toBe(3n);
+  });
+});
+
+describe("UdsSession lifetime: SDK stream termination", () => {
+  it("settles SIGTERM before daemon readiness without leaving the owned query alive", async () => {
+    // Arrange: the store starts, but no daemon listener exists, so this is the
+    // startup window where SessionServer.connect() retries indefinitely.
+    const store = await fakeStore();
+    cleanups.push(() => store.close());
+    let query!: FakeQuery;
+    const session = new UdsSession({
+      sessionId: "sess-starting",
+      shimVersion: "9.9",
+      protocolVersion: "1",
+      udsSocketPath: tmpSocketPath(),
+      storeSocketPath: store.socketPath,
+      sessionSource: SessionSource.FRESH,
+      createQuery: (prompt, canUseTool): UdsQuery => {
+        const live = new FakeQuery(prompt, canUseTool);
+        query = live;
+        return { query: live, subscriptionUsage: () => live.subscriptionUsage(), abort: () => live.abort() };
+      },
+      heartbeatIntervalMs: 0,
+    });
+    const done = session.start();
+    // Act: no readiness wait or polling may be needed to make SIGTERM win.
+    await session.shutdown("SIGTERM");
+    // Assert
+    await expect(done).resolves.toBeUndefined();
+    expect(query.abortCalls).toBe(1);
+  });
+
+  it("fails the shim when the SDK iterator ends without intentional shutdown", async () => {
+    // Arrange
+    const { daemon, done, query, store } = await rig({ storeSessionId: "vendor-uuid" });
+    const log = captureLog();
+    const storeClosed = once(store.peer().socket, "close");
+    const daemonClosed = once(daemon.socket, "close");
+    // Act
+    query.endStream();
+    // Assert: EOF is not a normal session completion and cannot leave the
+    // process alive with a dead query it might try to replace.
+    await expect(done).rejects.toMatchObject({
+      name: "UnexpectedSdkStreamTerminationError",
+      terminationKind: "iterator_eof",
+    });
+    await Promise.all([storeClosed, daemonClosed]);
+    expect(query.abortCalls).toBe(0);
+    expect(store.peer().closed).toBe(true);
+    expect(log.count("SDK stream terminated outside intentional shim shutdown; exiting nonzero")).toBe(1);
+    expect(log.record("SDK stream terminated outside intentional shim shutdown").context).toMatchObject({
+      termination_kind: "iterator_eof",
+      intentional: false,
+      active_turn_ids: [],
+      input_ended: false,
+      query_aborted: false,
+      resume_requested: false,
+      store_key: "vendor-uuid",
+    });
+  });
+
+  it("fails the shim with the original cause when the SDK iterator throws", async () => {
+    // Arrange
+    const { daemon, done, query, store } = await rig({ storeSessionId: "vendor-uuid" });
+    const log = captureLog();
+    const storeClosed = once(store.peer().socket, "close");
+    const daemonClosed = once(daemon.socket, "close");
+    // Act
+    query.failStream(new Error("sdk transport exploded"));
+    // Assert
+    await expect(done).rejects.toMatchObject({
+      name: "UnexpectedSdkStreamTerminationError",
+      terminationKind: "iterator_throw",
+      cause: expect.objectContaining({ message: "sdk transport exploded" }),
+    });
+    await Promise.all([storeClosed, daemonClosed]);
+    expect(query.abortCalls).toBe(0);
+    expect(store.peer().closed).toBe(true);
+    expect(log.record("SDK stream terminated outside intentional shim shutdown").context).toMatchObject({
+      termination_kind: "iterator_throw",
+      intentional: false,
+      cause: expect.objectContaining({ message: "sdk transport exploded" }),
+    });
+  });
+
+  it("ends the owned query exactly once during intentional shutdown", async () => {
+    // Arrange
+    const { session, done, query } = await rig();
+    const log = captureLog();
+    // Act
+    const stop = session.shutdown("SIGTERM");
+    // Assert
+    await stop;
+    await expect(done).resolves.toBeUndefined();
+    expect(query.abortCalls).toBe(1);
+    expect(log.count("SDK stream terminated outside intentional shim shutdown; exiting nonzero")).toBe(0);
   });
 });
 
@@ -1411,7 +1687,11 @@ describe("UdsSession bring-up gate", () => {
       udsSocketPath,
       storeSocketPath: store.socketPath,
       sessionSource: SessionSource.FRESH,
-      createQuery: (prompt, canUseTool): QueryLike => (query = new FakeQuery(prompt, canUseTool)),
+      createQuery: (prompt, canUseTool): UdsQuery => {
+        const live = new FakeQuery(prompt, canUseTool);
+        query = live;
+        return { query: live, subscriptionUsage: () => live.subscriptionUsage(), abort: () => live.abort() };
+      },
       heartbeatIntervalMs: 0,
     });
     const done = session.start();
@@ -1545,7 +1825,11 @@ describe("UdsSession handshake permission mode", () => {
       storeSocketPath: store.socketPath,
       sessionSource: SessionSource.FRESH,
       permissionMode: "default",
-      createQuery: (prompt, canUseTool): QueryLike => (query = new FakeQuery(prompt, canUseTool)),
+      createQuery: (prompt, canUseTool): UdsQuery => {
+        const live = new FakeQuery(prompt, canUseTool);
+        query = live;
+        return { query: live, subscriptionUsage: () => live.subscriptionUsage(), abort: () => live.abort() };
+      },
       heartbeatIntervalMs: 0,
     });
     const done = session.start();
@@ -1597,7 +1881,11 @@ describe("UdsSession handshake permission mode", () => {
       storeSocketPath: store.socketPath,
       sessionSource: SessionSource.FRESH,
       permissionMode: "default",
-      createQuery: (prompt, canUseTool): QueryLike => (query = new FakeQuery(prompt, canUseTool)),
+      createQuery: (prompt, canUseTool): UdsQuery => {
+        const live = new FakeQuery(prompt, canUseTool);
+        query = live;
+        return { query: live, subscriptionUsage: () => live.subscriptionUsage(), abort: () => live.abort() };
+      },
       heartbeatIntervalMs: 0,
     });
     const done = session.start();

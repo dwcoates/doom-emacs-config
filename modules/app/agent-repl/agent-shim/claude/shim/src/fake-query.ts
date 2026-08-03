@@ -69,6 +69,8 @@ export const FAKE_COMMANDS: SlashCommand[] = [
 export interface FakeQueryOpts {
   sessionId: string;
   newUuid: () => string;
+  /** Ends the fake stream when its owning UDS session shuts down. */
+  abortSignal?: AbortSignal;
   /**
    * Mimic SDK resume: the init message reports this uuid as the
    * session_id (continuation of the resumed CLI session). Mirrors the
@@ -117,6 +119,7 @@ export function createFakeQuery(
 ): QueryLike {
   LOGGER.log({ agent_repl_session_id: opts.sessionId, resumed: opts.resume !== undefined }, "creating offline fake SDK query");
   const out = new AsyncQueue<SdkMessageLike>();
+  opts.abortSignal?.addEventListener("abort", () => out.end(), { once: true });
   let interrupted = false;
   let permissionMode: PermissionMode = "default";
   // Mutable, and reported by init AND by every assistant message, so a

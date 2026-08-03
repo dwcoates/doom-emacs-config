@@ -139,9 +139,6 @@ func TestResumeTransportFailurePreservesThePointerAndRetriesTheSameConversation(
 	if d == nil {
 		t.Fatal("ensure returned no session controller")
 	}
-	if got := h.spawner.dropCalls(); len(got) != 0 {
-		t.Fatalf("DropResume calls = %v, want none for transport failure", got)
-	}
 	if got := h.spawner.resume["s1"]; got != "uuid-gone" {
 		t.Fatalf("resume pointer = %q, want uuid-gone preserved", got)
 	}
@@ -166,9 +163,6 @@ func TestResumeVendorFailurePreservesHistoryAndDoesNotInventStaleEvidence(t *tes
 
 	// Assert — an arbitrary SDK error is not affirmative evidence that the
 	// transcript is invalid. The pointer and history remain untouched.
-	if h.hasCard(errclass.TypeSessionHistoryMissing) {
-		t.Fatalf("a generic SDK failure invented a history-missing claim; cards=%v", h.failureCards())
-	}
 	if got := h.spawner.resume["s1"]; got != "uuid-gone" {
 		t.Fatalf("resume pointer = %q, want uuid-gone preserved", got)
 	}
@@ -189,9 +183,6 @@ func TestTheSameConversationTransportRetryHappensExactlyOnce(t *testing.T) {
 	// Assert.
 	if err == nil {
 		t.Fatal("ensure succeeded with both bring-ups dead")
-	}
-	if got := h.spawner.dropCalls(); len(got) != 0 {
-		t.Fatalf("DropResume calls = %v, want none", got)
 	}
 	if got := h.spawner.calls; len(got) != 2 {
 		t.Fatalf("EnsureShim calls = %v, want exactly two bounded attempts", got)
@@ -218,9 +209,6 @@ func TestTransportRetrySpawnFailurePreservesResumeAndResolvesTheAxis(t *testing.
 	}
 	if got := h.spawner.resume["s1"]; got != "uuid-live" {
 		t.Fatalf("resume pointer = %q, want preserved uuid-live", got)
-	}
-	if got := h.spawner.dropCalls(); len(got) != 0 {
-		t.Fatalf("DropResume calls = %v, want none", got)
 	}
 	if !h.hasCard(errclass.TypeSessionStartFailed) {
 		t.Fatalf("spawn failure did not close starting with a failure card: %v", h.failureCards())
@@ -298,62 +286,63 @@ func TestRetiredGenerationFailureCannotResurrectAHibernatedWorkspace(t *testing.
 	}
 }
 
-func TestTransportRetryRejectsAnUnexplainedResumeIdentityChange(t *testing.T) {
-	// Arrange — the retry spawner reports a different identity without the
-	// transcript-absence proof that alone authorizes clearing the old pointer.
-	h := newEscapeHarness(t, &fakeClient{})
-	failed := &sessionController{
-		sessionID: "s1", workspace: "ws", generationID: "generation-first",
-		resumedVendorSessionID: "uuid-live", client: &fakeClient{}, cancel: func() {}, faulted: make(chan struct{}),
-	}
-	h.m.mu.Lock()
-	h.m.byWS["ws"] = failed
-	h.m.mu.Unlock()
-	h.spawner.resume["s1"] = "uuid-other"
+func TestTransportRetryRejectsEveryChangedResumeIdentity(t *testing.T) {
+	for _, actual := range []string{"", "uuid-other"} {
+		t.Run("actual="+actual, func(t *testing.T) {
+			// Arrange — an already-resumed conversation can only retry against
+			// the exact same UUID. An empty value is a fresh conversation and is
+			// therefore as invalid as a different UUID.
+			h := newEscapeHarness(t, &fakeClient{})
+			failed := &sessionController{
+				sessionID: "s1", workspace: "ws", generationID: "generation-first",
+				resumedVendorSessionID: "uuid-live", client: &fakeClient{}, cancel: func() {}, faulted: make(chan struct{}),
+			}
+			h.m.mu.Lock()
+			h.m.byWS["ws"] = failed
+			h.m.mu.Unlock()
+			h.spawner.resume["s1"] = actual
 
-	// Act.
-	_, err := h.m.escapeFailedBringUp(context.Background(), "ws", failed,
-		&bringUpFailure{kind: bringUpFailureTransport, cause: errBringUpDead})
+			// Act.
+			_, err := h.m.escapeFailedBringUp(context.Background(), "ws", failed,
+				&bringUpFailure{kind: bringUpFailureTransport, cause: errBringUpDead})
 
-	// Assert.
-	if err == nil || !strings.Contains(err.Error(), "changed resume identity") {
-		t.Fatalf("escape error = %v", err)
-	}
-	if !h.log.contains("resume_decision=abort") {
-		t.Fatalf("identity invariant failure was not logged: %v", h.log.lines)
+			// Assert.
+			if err == nil || !strings.Contains(err.Error(), "changed resume identity") {
+				t.Fatalf("escape error = %v", err)
+			}
+			if h.m.Live("ws") {
+				t.Fatal("an identity-changing retry left a live session controller")
+			}
+			if !h.log.contains("resume_decision=abort") {
+				t.Fatalf("identity invariant failure was not logged: %v", h.log.lines)
+			}
+		})
 	}
 }
 
-func TestTransportRetryMayDropResumeOnlyWithTranscriptAbsenceProof(t *testing.T) {
-	// Arrange — the transcript disappears between attempts. EnsureShim reports
-	// that affirmative observation while clearing the durable pointer.
-	h := newEscapeHarness(t, &fakeClient{})
-	failed := &sessionController{
-		sessionID: "s1", workspace: "ws", generationID: "generation-first",
-		resumedVendorSessionID: "uuid-gone", client: &fakeClient{}, cancel: func() {}, faulted: make(chan struct{}),
-	}
-	h.m.mu.Lock()
-	h.m.byWS["ws"] = failed
-	h.m.mu.Unlock()
-	h.spawner.resume["s1"] = ""
-	h.spawner.staleDropped = "uuid-gone"
+func TestEnsureShimHardFailurePropagatesWithoutCreatingALiveController(t *testing.T) {
+	// Arrange — the spawner has rejected restoration before starting a shim.
+	// A session controller must not appear for a conversation that never
+	// acquired its exact resume transport.
+	h := newEscapeHarness(t)
+	h.spawner.resume["s1"] = "uuid-live"
+	h.spawner.err = errors.New("resume target uuid-live has no transcript")
 
 	// Act.
-	retry, err := h.m.escapeFailedBringUp(context.Background(), "ws", failed,
-		&bringUpFailure{kind: bringUpFailureTransport, cause: errBringUpDead})
+	_, err := h.m.ensure(context.Background(), "ws")
 
 	// Assert.
-	if err != nil || retry == nil {
-		t.Fatalf("affirmatively stale retry = controller %v error %v", retry, err)
+	if err == nil || !strings.Contains(err.Error(), "resume target uuid-live has no transcript") {
+		t.Fatalf("ensure error = %v", err)
 	}
-	if retry.resumedVendorSessionID != "" || retry.staleResumeDroppedVendorSessionID != "uuid-gone" {
-		t.Fatalf("retry resume=%q stale_drop=%q", retry.resumedVendorSessionID, retry.staleResumeDroppedVendorSessionID)
+	if h.m.Live("ws") {
+		t.Fatal("a rejected resume created a live session controller")
 	}
-	if !h.log.contains("resume_decision=drop_transcript_absent") {
-		t.Fatalf("affirmative drop was not logged: %v", h.log.lines)
+	if got := h.spawner.calls; len(got) != 1 || got[0] != "s1" {
+		t.Fatalf("EnsureShim calls = %v, want exactly [s1]", got)
 	}
-	if !h.hasCard(errclass.TypeSessionHistoryMissing) {
-		t.Fatalf("affirmative history loss was not surfaced; cards=%v", h.failureCards())
+	if got := h.spawner.resume["s1"]; got != "uuid-live" {
+		t.Fatalf("resume identity = %q, want uuid-live preserved", got)
 	}
 }
 
@@ -438,23 +427,6 @@ func TestABringUpTimeoutResolvesStartFailed(t *testing.T) {
 	}
 	if !h.hasCard(errclass.TypeSessionStartFailed) {
 		t.Fatalf("no start-failed card; cards=%v", h.failureCards())
-	}
-}
-
-func TestAStaleResumeDroppedAtSpawnNotesTheMissingHistory(t *testing.T) {
-	// Arrange — the spawner caught the bad pointer BEFORE handing it to the
-	// CLI, so nothing dies and the note is the only thing the user sees.
-	h := newEscapeHarness(t, &fakeClient{})
-	h.spawner.staleDropped = "uuid-gone"
-
-	// Act.
-	if _, err := h.m.bringUp("ws"); err != nil {
-		t.Fatalf("bringUp: %v", err)
-	}
-
-	// Assert.
-	if !h.hasCard(errclass.TypeSessionHistoryMissing) {
-		t.Fatalf("no history-missing note; cards=%v", h.failureCards())
 	}
 }
 

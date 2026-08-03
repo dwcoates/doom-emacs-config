@@ -117,17 +117,10 @@ type ModelCatalogRegistrar interface {
 	SessionModelCatalogObserved(sessionID string, models []*corev1.ModelOption) error
 }
 
-// SpawnResult reports what a bring-up had to REPAIR to get the session up, and
-// what it started it as. Both facts are the session controller's, not the spawner's: the
-// spawner owns the record and the process, and the session controller owns the feed note
-// and the escape ladder that read this.
+// SpawnResult reports the vendor conversation a successful spawn resumed.
+// The spawner owns durable identity validation before it returns this result:
+// a recorded conversation must resume exactly or the bring-up fails.
 type SpawnResult struct {
-	// StaleResumeDropped is the vendor conversation uuid the spawner refused
-	// to resume — the record named one and no transcript for it exists — and
-	// cleared off the record before spawning FRESH. Empty when nothing was
-	// dropped. A non-empty value owes the user a feed note: their history is
-	// not coming back and saying so is the whole repair.
-	StaleResumeDropped string
 	// Resumed is the vendor conversation uuid this spawn actually resumed, or
 	// "" for a fresh start.
 	Resumed string
@@ -369,12 +362,9 @@ type sessionController struct {
 	// generation asked the spawner to resume. A transport failure may retry
 	// only while preserving this identity.
 	resumedVendorSessionID string
-	// staleResumeDroppedVendorSessionID is nonempty only when the spawner
-	// proved the recorded transcript absent before this generation spawned.
-	staleResumeDroppedVendorSessionID string
-	client                            sessionClient
-	consumer                          *consumer
-	cancel                            context.CancelFunc
+	client                 sessionClient
+	consumer               *consumer
+	cancel                 context.CancelFunc
 
 	// Bring-up gate state (bringupescape.go), guarded by the manager mutex
 	// except for faulted, which is a one-shot broadcast channel.
@@ -1694,7 +1684,7 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 	d := &sessionController{
 		sessionID: sessionID, workspace: workspace,
 		generationID: generationID, resumedVendorSessionID: spawn.Resumed,
-		staleResumeDroppedVendorSessionID: spawn.StaleResumeDropped, faulted: make(chan struct{}),
+		faulted: make(chan struct{}),
 	}
 	cons := newConsumer(workspace, sessionID, m.cfg.Push, m.cfg.SSM, m.cfg.Progress, m.cfg.ClearCompactStore, m.logf, func(ss *corev1.SessionStarted) {
 		m.persistVendorSessionID(sessionID, ss.GetVendorSessionId())
@@ -1813,14 +1803,6 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 	// which is a process exec; the window the user actually waits through is the
 	// handshake, and that is entirely after this point.
 	m.noteConnectivity(workspace, sessionID, generationID, ssm.SessionConnectivityConnecting, "bring_up")
-
-	// The spawner dropped a pointer to a conversation that does not exist, so
-	// this session is starting FRESH where the user expected continuity. Said
-	// in their feed, because a silently emptied workspace is indistinguishable
-	// from lost data. Pushed after registration so a resync can replay it.
-	if spawn.StaleResumeDropped != "" {
-		m.pushHistoryMissingNote(d, spawn.StaleResumeDropped, "no transcript exists for the recorded conversation")
-	}
 
 	// The Add is taken UNDER m.mu with a closed re-check, exactly like
 	// runPendingResync's: Close sets `closed` under this lock and then waits on

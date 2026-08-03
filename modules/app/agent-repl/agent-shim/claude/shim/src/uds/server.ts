@@ -26,8 +26,9 @@
  *
  * Control messages (`SubmitPrompt`, `Interrupt`, `PermissionResponse`,
  * `ReplayRequest`, `HealthCheck`) are dispatched to injected handlers;
- * `SubmitPrompt`/`Interrupt` handlers return the synchronous `Ack`/`Nack`
- * receipt this server writes back.
+ * `SubmitPrompt`/`Interrupt` handlers return the `Ack`/`Nack` receipt this
+ * server writes back. Prompt admission is asynchronous because its turn-start
+ * quota observation must finish before the prompt enters the SDK.
  */
 import net from "node:net";
 import {
@@ -81,8 +82,8 @@ export type Receipt = Ack | Nack;
 export type AsyncReceipt = Receipt | Promise<Receipt>;
 
 export interface SessionServerHandlers {
-  /** Push a prompt into the SDK turn; return the sync receipt. */
-  onSubmitPrompt(msg: SubmitPrompt): Receipt;
+  /** Push a prompt into the SDK turn; return a receipt after admission settles. */
+  onSubmitPrompt(msg: SubmitPrompt): AsyncReceipt;
   /** Interrupt the SDK turn; return the sync receipt. */
   onInterrupt(msg: Interrupt): Receipt;
   /** Set the live SDK model and return a receipt after the SDK settles. */
@@ -431,7 +432,7 @@ export class SessionServer {
   private dispatch(msg: Any): void {
     const submit = unpackAs(msg, SubmitPromptSchema);
     if (submit) {
-      this.sendReceipt(this.handlers.onSubmitPrompt(submit));
+      this.sendAsyncReceipt(this.handlers.onSubmitPrompt(submit));
       return;
     }
     const interrupt = unpackAs(msg, InterruptSchema);
@@ -469,10 +470,9 @@ export class SessionServer {
   }
 
   private sendAsyncReceipt(receipt: AsyncReceipt): void {
-    // Existing synchronous controls retain their same-turn ordering with SDK
-    // events. Only set-model is asynchronous because the SDK's setter itself
-    // is asynchronous; always wrapping every receipt in Promise.resolve would
-    // make an interrupt ack race an immediately-following turn result.
+    // Synchronous controls retain their same-turn ordering with SDK events.
+    // Prompt admission and set-model are asynchronous because their SDK work
+    // must settle before a successful receipt can be truthful.
     if (!(receipt instanceof Promise)) {
       this.sendReceipt(receipt);
       return;
