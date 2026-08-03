@@ -872,6 +872,13 @@ export interface StateSnapshot {
   workspaceAvailable: WorkspaceAvailable[];
   /** Durable host-only UI actions; stripped before a GUI receives a snapshot. */
   hostActions: HostAction[];
+  /**
+   * The daemon-global drain lease as of connect, so a client that joins
+   * mid-drain sees it without waiting for an edge. ABSENT means the daemon
+   * does not carry the lease at all (pre-feature), which is the absence of
+   * INFORMATION — never a claim that the lease is idle.
+   */
+  shutdownSchedule?: ShutdownScheduleView;
 }
 
 /** The daemon's authoritative, shim-ready workspace descriptor for the Emacs host. */
@@ -1011,6 +1018,17 @@ const QUEUE_CLASSIFICATION_BY_NAME: Readonly<Record<string, QueueClassification>
   QUEUE_CLASSIFICATION_ERROR: "error",
 };
 
+/**
+ * Present when this entry is held by a scheduled shutdown's DRAIN LEASE rather
+ * than by a running turn. The classifier never ran on it, so its
+ * `classification` says nothing about why it is waiting, and the webapp renders
+ * a dedicated lease bubble instead of the classifier bubble.
+ */
+export interface QueueEntryShutdownHold {
+  /** The schedule holding this entry, joining it to the live lease view. */
+  scheduleId: string;
+}
+
 /** One prompt the daemon is holding (E4). */
 export interface QueueEntry {
   id: string;
@@ -1019,7 +1037,64 @@ export interface QueueEntry {
   classification: QueueClassification;
   rationale: string;
   accepted: boolean;
+  /**
+   * Absent for an ordinary classifier-held entry. Present ONLY while a drain
+   * lease holds the prompt — absence is therefore the real answer "no lease is
+   * holding this", not a missing field to default away.
+   */
+  shutdownHold?: QueueEntryShutdownHold;
 }
+
+/** The `idle` arm's payload: deliberately empty — the arm IS the state. */
+export type ShutdownScheduleIdle = Record<string, never>;
+
+/** An active turn blocking the drain, named by its turn id. */
+export interface ShutdownHoldTurn {
+  turnId: string;
+}
+
+/** Live background tasks blocking the drain; the count is display-grade. */
+export interface ShutdownHoldTasks {
+  count: number;
+}
+
+/**
+ * One workspace the drain is waiting on, and why. `turn` and `tasks` are
+ * CO-OCCURRING facts, not exclusive states: a session can hold a running turn
+ * and live background tasks at once. At least one is always set.
+ */
+export interface ShutdownHold {
+  /** Absolute workspace CWD — the join key every session-routed command uses. */
+  workspace: string;
+  sessionId: string;
+  turn?: ShutdownHoldTurn;
+  tasks?: ShutdownHoldTasks;
+}
+
+/** The held lease: what the scheduled bounce is waiting on, right now. */
+export interface ShutdownScheduleDraining {
+  scheduleId: string;
+  /** Epoch ms the lease was taken, for elapsed-time display. */
+  scheduledAtMs: number;
+  /** Free display text ("merge of <ws> rebuilt the daemon"); never parsed. */
+  cause: string;
+  /** Whether the executed shutdown will also SIGTERM every session shim. */
+  stopShims: boolean;
+  /** Never empty: a drained lease is executed, not broadcast. */
+  holds: ShutdownHold[];
+}
+
+/**
+ * The daemon-global scheduled-shutdown lease. EXACTLY ONE arm is always set —
+ * `idle` is a real broadcast value (a cancel, or a completed drain), so
+ * clearing the lease is representable and "no lease" can never be confused
+ * with "no information".
+ */
+export type ShutdownScheduleView = {
+  state:
+    | { case: "idle"; value: ShutdownScheduleIdle }
+    | { case: "draining"; value: ShutdownScheduleDraining };
+};
 
 /**
  * The session's whole held-prompt queue (E4). It is a REPLACEMENT, not a
@@ -1049,7 +1124,8 @@ export type FrontendFrame = {
     | { case: "progress"; value: ProgressView }
     | { case: "workspaceAvailable"; value: WorkspaceAvailable }
     | { case: "hostAction"; value: HostAction }
-    | { case: "workspaceRoster"; value: WorkspaceRoster };
+    | { case: "workspaceRoster"; value: WorkspaceRoster }
+    | { case: "shutdownSchedule"; value: ShutdownScheduleView };
 };
 
 /** The frame-variant discriminators FrontendFrame.frame.case may hold. */
@@ -1164,6 +1240,13 @@ const FRAME_DECODERS: ReadonlyMap<string, (v: unknown) => FrontendFrame["frame"]
   [
     "workspaceRoster",
     (v: unknown) => ({ case: "workspaceRoster" as const, value: decodeWorkspaceRoster(v) }),
+  ],
+  [
+    "shutdownSchedule",
+    (v: unknown) => ({
+      case: "shutdownSchedule" as const,
+      value: decodeShutdownScheduleView(v),
+    }),
   ],
 ]);
 
@@ -1643,7 +1726,9 @@ const QUEUE_ENTRY_KEYS = new Set([
   "classification",
   "rationale",
   "accepted",
+  "shutdownHold",
 ]);
+const QUEUE_ENTRY_SHUTDOWN_HOLD_KEYS = new Set(["scheduleId"]);
 
 function decodeQueueView(v: unknown): QueueView {
   const o = ensureObject(v, "QueueView");
@@ -1678,7 +1763,173 @@ function decodeQueueEntry(v: unknown): QueueEntry {
   if (e.id === "") {
     throw new Error("frontend-proto: QueueView entry missing required `id`");
   }
+  // ABSENCE IS THE ABSENCE OF A LEASE HOLD, and that is its only reading: an
+  // ordinary classifier-held entry simply does not carry the field. Decoded
+  // when present rather than defaulted away, so the lease bubble is drawn from
+  // the daemon's own claim and never from an inference about the classifier.
+  if (o.shutdownHold !== undefined && o.shutdownHold !== null) {
+    e.shutdownHold = decodeQueueEntryShutdownHold(o.shutdownHold);
+  }
   return e;
+}
+
+function decodeQueueEntryShutdownHold(v: unknown): QueueEntryShutdownHold {
+  const o = ensureObject(v, "QueueEntryShutdownHold");
+  rejectUnknown(o, QUEUE_ENTRY_SHUTDOWN_HOLD_KEYS, "QueueEntryShutdownHold");
+  const scheduleId = str(o, "scheduleId", "QueueEntryShutdownHold");
+  // The id is the whole content of the message: it joins this bubble to the
+  // lease view that explains it. A hold that names no schedule would render a
+  // bubble claiming a bounce nothing on screen can corroborate.
+  if (scheduleId === "") {
+    throw new Error("frontend-proto: QueueEntryShutdownHold missing required `scheduleId`");
+  }
+  return { scheduleId };
+}
+
+// --- the drain lease --------------------------------------------------------
+
+const SHUTDOWN_SCHEDULE_VIEW_KEYS = new Set(["idle", "draining"]);
+const SHUTDOWN_DRAINING_KEYS = new Set([
+  "scheduleId",
+  "scheduledAtMs",
+  "cause",
+  "stopShims",
+  "holds",
+]);
+const SHUTDOWN_HOLD_KEYS = new Set(["workspace", "sessionId", "turn", "tasks"]);
+
+/**
+ * The `state` oneof, decoded by NAME — the same discipline `MergeStatus` uses.
+ * The map is what makes the arm set closed, and a view naming no arm at all is
+ * refused below: `idle` is a REAL value the daemon broadcasts, so a view with
+ * nothing set is not "idle by omission", it is a frame the webapp cannot read.
+ */
+const SHUTDOWN_SCHEDULE_ARM_DECODERS: ReadonlyMap<
+  string,
+  (v: unknown) => ShutdownScheduleView["state"]
+> = new Map<string, (v: unknown) => ShutdownScheduleView["state"]>([
+  [
+    "idle",
+    (v: unknown) => {
+      // Empty by design, and still validated: an `idle` carrying fields is a
+      // daemon saying something this build cannot read.
+      phaseObject(v, "ShutdownScheduleIdle", []);
+      return { case: "idle" as const, value: {} as ShutdownScheduleIdle };
+    },
+  ],
+  [
+    "draining",
+    (v: unknown) => ({
+      case: "draining" as const,
+      value: decodeShutdownScheduleDraining(v),
+    }),
+  ],
+]);
+
+function decodeShutdownScheduleView(v: unknown): ShutdownScheduleView {
+  const o = ensureObject(v, "ShutdownScheduleView");
+  rejectUnknown(o, SHUTDOWN_SCHEDULE_VIEW_KEYS, "ShutdownScheduleView");
+  const arms = Object.keys(o).filter((k) => SHUTDOWN_SCHEDULE_ARM_DECODERS.has(k));
+  if (arms.length === 0) {
+    throw new Error(
+      "frontend-proto: ShutdownScheduleView sets no state " +
+        "(WHICH member of the oneof is set IS the lease state; `idle` is a real value)",
+    );
+  }
+  if (arms.length > 1) {
+    throw new Error(
+      `frontend-proto: ShutdownScheduleView sets multiple states: ${arms.join(", ")}`,
+    );
+  }
+  return { state: SHUTDOWN_SCHEDULE_ARM_DECODERS.get(arms[0])!(o[arms[0]]) };
+}
+
+function decodeShutdownScheduleDraining(v: unknown): ShutdownScheduleDraining {
+  const o = ensureObject(v, "ShutdownScheduleDraining");
+  rejectUnknown(o, SHUTDOWN_DRAINING_KEYS, "ShutdownScheduleDraining");
+  const draining: ShutdownScheduleDraining = {
+    scheduleId: str(o, "scheduleId", "ShutdownScheduleDraining"),
+    scheduledAtMs: num(o, "scheduledAtMs", "ShutdownScheduleDraining"),
+    cause: str(o, "cause", "ShutdownScheduleDraining"),
+    stopShims: bool(o, "stopShims", "ShutdownScheduleDraining"),
+    holds: (o.holds === undefined || o.holds === null
+      ? []
+      : ensureArray(o.holds, "ShutdownScheduleDraining.holds")
+    ).map(decodeShutdownHold),
+  };
+  // Without the id no cancel can name this schedule and no held prompt can be
+  // joined to it, so every control the banner and the lease bubble draw would
+  // be aimed at nothing.
+  if (draining.scheduleId === "") {
+    throw new Error("frontend-proto: ShutdownScheduleDraining missing required `scheduleId`");
+  }
+  // The banner's elapsed clock counts from this stamp. A zero (proto3's
+  // omitted value) would render the drain as decades old, which is a
+  // fabricated reading, not a missing one.
+  if (draining.scheduledAtMs <= 0) {
+    throw new Error(
+      `frontend-proto: ShutdownScheduleDraining has non-positive scheduledAtMs ` +
+        `(${draining.scheduledAtMs}) for schedule ${draining.scheduleId}`,
+    );
+  }
+  // NEVER EMPTY ON THE WIRE: the daemon executes the shutdown the moment the
+  // last hold clears rather than broadcasting a drained lease. An empty list
+  // would paint a banner saying the bounce is waiting on nothing at all.
+  if (draining.holds.length === 0) {
+    throw new Error(
+      `frontend-proto: ShutdownScheduleDraining for schedule ${draining.scheduleId} ` +
+        "carries an empty holds list (a drained lease is executed, never broadcast)",
+    );
+  }
+  return draining;
+}
+
+function decodeShutdownHold(v: unknown): ShutdownHold {
+  const o = ensureObject(v, "ShutdownHold");
+  rejectUnknown(o, SHUTDOWN_HOLD_KEYS, "ShutdownHold");
+  const hold: ShutdownHold = {
+    workspace: str(o, "workspace", "ShutdownHold"),
+    sessionId: str(o, "sessionId", "ShutdownHold"),
+  };
+  if (o.turn !== undefined && o.turn !== null) {
+    const t = phaseObject(o.turn, "ShutdownHoldTurn", ["turnId"]);
+    const turnId = str(t, "turnId", "ShutdownHoldTurn");
+    // Naming the turn is the message's entire purpose (logs, the webapp and
+    // the turn ledger have to name the same turn), so an unnamed one is
+    // malformed rather than merely terse.
+    if (turnId === "") {
+      throw new Error("frontend-proto: ShutdownHoldTurn missing required `turnId`");
+    }
+    hold.turn = { turnId };
+  }
+  if (o.tasks !== undefined && o.tasks !== null) {
+    const t = phaseObject(o.tasks, "ShutdownHoldTasks", ["count"]);
+    const count = num(t, "count", "ShutdownHoldTasks");
+    // The arm is set when live tasks are RUNNING. A non-positive count denies
+    // the very fact its presence asserts.
+    if (count <= 0) {
+      throw new Error(
+        `frontend-proto: ShutdownHoldTasks has non-positive count (${count}) ` +
+          "on a hold that claims live background tasks",
+      );
+    }
+    hold.tasks = { count };
+  }
+  // The workspace is the join key a client attributes the hold by, and the
+  // session id is what keeps a hold from being pinned on a successor session
+  // of the same workspace.
+  if (hold.workspace === "" || hold.sessionId === "") {
+    throw new Error("frontend-proto: ShutdownHold missing `workspace` or `sessionId`");
+  }
+  // AT LEAST ONE reason is always set. A hold that names neither says the
+  // drain is waiting on this workspace for no expressible reason, which the
+  // banner could only render as an unexplained blocker.
+  if (hold.turn === undefined && hold.tasks === undefined) {
+    throw new Error(
+      `frontend-proto: ShutdownHold for '${hold.workspace}' names neither a turn nor tasks`,
+    );
+  }
+  return hold;
 }
 
 /**
@@ -2075,6 +2326,7 @@ const STATE_SNAPSHOT_KEYS = new Set([
   "progress",
   "workspaceAvailable",
   "hostActions",
+  "shutdownSchedule",
 ]);
 function decodeStateSnapshot(v: unknown): StateSnapshot {
   const o = ensureObject(v, "StateSnapshot");
@@ -2117,6 +2369,12 @@ function decodeStateSnapshot(v: unknown): StateSnapshot {
   // present rather than defaulting it away.
   if (o.daemon !== undefined && o.daemon !== null) {
     snap.daemon = decodeDaemonView(o.daemon);
+  }
+  // Same reading as the daemon block: absent is a daemon that does not carry
+  // the lease, so the snapshot seeds nothing rather than asserting `idle` on
+  // the daemon's behalf.
+  if (o.shutdownSchedule !== undefined && o.shutdownSchedule !== null) {
+    snap.shutdownSchedule = decodeShutdownScheduleView(o.shutdownSchedule);
   }
   return snap;
 }
