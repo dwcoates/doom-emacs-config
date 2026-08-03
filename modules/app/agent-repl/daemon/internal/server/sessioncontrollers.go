@@ -97,6 +97,32 @@ func (l *SessionLocator) Locate(workspace string) (string, bool) {
 type ShimConnSource struct {
 	// Listener is the daemon's shim listener (required).
 	Listener *shimlisten.Server
+	// Deaths is the spawn watch for shims THIS daemon launched. Optional: with
+	// it bound, the client waiting here for a connection also learns when the
+	// process that owed it that connection died, and this adapter marks the
+	// watch the moment a connection is taken. Nil leaves both facts unknown
+	// and the wait bounded only by the caller's deadline, as before.
+	Deaths *ShimSpawnWatch
+}
+
+var _ shimclient.ShimDeaths = (*ShimConnSource)(nil)
+
+// DiedBeforeConnect implements shimclient.ShimDeaths by delegating to the
+// spawn watch, so the client picks the seam up from its ConnSource without
+// every layer between having to carry it.
+func (s *ShimConnSource) DiedBeforeConnect(sessionID string) <-chan struct{} {
+	if s.Deaths == nil {
+		return nil
+	}
+	return s.Deaths.DiedBeforeConnect(sessionID)
+}
+
+// SpawnState implements shimclient.ShimDeaths.
+func (s *ShimConnSource) SpawnState(sessionID string) shimclient.ShimSpawnState {
+	if s.Deaths == nil {
+		return shimclient.ShimSpawnState{}
+	}
+	return s.Deaths.SpawnState(sessionID)
 }
 
 var _ shimclient.ConnSource = (*ShimConnSource)(nil)
@@ -110,6 +136,13 @@ func (s *ShimConnSource) Next(ctx context.Context, sessionID string) (net.Conn, 
 	c, err := s.Listener.Next(ctx, sessionID)
 	if err != nil {
 		return nil, nil, err
+	}
+	// Taking the connection IS the proof the spawned process dialled in, and
+	// the only proof the listener stops giving once the connection is claimed.
+	// Recording it here is what keeps a later exit from being misreported as a
+	// shim that never connected.
+	if s.Deaths != nil {
+		s.Deaths.Connected(sessionID)
 	}
 	return c.Net, c.Hello, nil
 }

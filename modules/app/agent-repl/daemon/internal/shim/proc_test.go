@@ -265,7 +265,7 @@ func TestPumpStderrRoutesNormalAndVerboseRecords(t *testing.T) {
 			canonicalShimRecord("verbose")+"\n"+
 			"{\"runtime\":\"shim\",\"verbosity\":\"normal\",\"message\":\"verbosity=verbose\"}\n"+
 			"malformed verbosity=verbose\n",
-	), logger)
+	), logger, &stderrTail{})
 
 	logger.record(t, 0, "normal", "\"verbosity\":\"normal\"")
 	logger.record(t, 1, "verbose", "\"verbosity\":\"verbose\"")
@@ -279,7 +279,7 @@ func TestPumpStderrMirrorsCanonicalShimRecordsWithoutDaemonPersistence(t *testin
 		canonicalShimRecord("normal")+"\n"+
 			canonicalShimRecord("verbose")+"\n"+
 			"malformed\n",
-	), logger)
+	), logger, &stderrTail{})
 	if len(logger.mirrored) != 2 || !strings.Contains(logger.mirrored[0], `"verbosity":"normal"`) || !strings.Contains(logger.mirrored[1], `"verbosity":"verbose"`) {
 		t.Fatalf("mirrored=%q", logger.mirrored)
 	}
@@ -306,7 +306,7 @@ func TestShimRecordRejectsIncompleteOrIllTypedCanonicalEnvelope(t *testing.T) {
 
 func TestPumpStderrReportsScannerFailureAsDaemonError(t *testing.T) {
 	logger := &recordingLogger{}
-	pumpStderr(failingReader{}, logger)
+	pumpStderr(failingReader{}, logger, &stderrTail{})
 	logger.record(t, 0, "normal", "stderr scan error")
 }
 

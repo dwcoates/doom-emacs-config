@@ -7,6 +7,7 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -22,6 +23,90 @@ import (
 // maxEventLine bounds one shim stdout line (large tool results).
 const maxEventLine = 32 * 1024 * 1024
 
+// maxStderrTail bounds the stderr evidence retained per shim process.
+//
+// A shim that dies during bring-up explains itself in its last few lines — a
+// node stack trace, a missing module, a rejected --resume — and that is the
+// evidence a spawn failure has to carry. Retaining the WHOLE stream instead
+// would make a chatty child an unbounded daemon allocation for the lifetime of
+// a long-lived session, so the tail is capped and the drop is announced rather
+// than hidden.
+const maxStderrTail = 8 * 1024
+
+// stderrTruncationMarker prefixes a tail that dropped older bytes, so a reader
+// never mistakes a truncated tail for the child's complete stderr.
+const stderrTruncationMarker = "[stderr truncated to the last 8192 bytes] "
+
+// stderrTail is a byte-capped ring of the child's most recent stderr. It is an
+// io.Writer so the same buffer serves both stderr paths: the parsed pump and
+// the caller-supplied writer (which it tees).
+type stderrTail struct {
+	mu       sync.Mutex
+	buf      []byte
+	truncate bool
+}
+
+func (t *stderrTail) Write(p []byte) (int, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.buf = append(t.buf, p...)
+	if len(t.buf) > maxStderrTail {
+		t.truncate = true
+		// Copied into a fresh slice rather than re-sliced: re-slicing keeps the
+		// original array alive and lets its capacity creep upward, which is the
+		// unbounded growth this cap exists to prevent.
+		t.buf = append([]byte(nil), t.buf[len(t.buf)-maxStderrTail:]...)
+	}
+	return len(p), nil
+}
+
+// String renders the retained tail, marked when older bytes were dropped.
+func (t *stderrTail) String() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if len(t.buf) == 0 {
+		return ""
+	}
+	if t.truncate {
+		return stderrTruncationMarker + string(t.buf)
+	}
+	return string(t.buf)
+}
+
+// ExitDescription renders a Wait error as the child's exit status: the code it
+// exited with, the signal that killed it, or a clean exit.
+//
+// It never swallows an unexpected Wait failure — one that carries no exit
+// status is reported verbatim, because "the daemon could not reap its own
+// child" is itself the diagnosis.
+func ExitDescription(waitErr error) string {
+	if waitErr == nil {
+		return "exit code 0"
+	}
+	var exitErr *exec.ExitError
+	if errors.As(waitErr, &exitErr) {
+		if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.Signaled() {
+			return fmt.Sprintf("killed by %s", status.Signal())
+		}
+		return fmt.Sprintf("exit code %d", exitErr.ExitCode())
+	}
+	return fmt.Sprintf("wait failed: %v", waitErr)
+}
+
+// ExitCode extracts the child's exit status: 0 for a clean exit, the process's
+// own code for a non-zero one, and -1 when it was signalled or Wait failed
+// with no status to report.
+func ExitCode(waitErr error) int {
+	if waitErr == nil {
+		return 0
+	}
+	var exitErr *exec.ExitError
+	if errors.As(waitErr, &exitErr) {
+		return exitErr.ExitCode()
+	}
+	return -1
+}
+
 // Proc is a running shim subprocess.
 //
 // Events() yields decoded Layer-1 events until the shim's stdout closes,
@@ -31,10 +116,18 @@ type Proc struct {
 	cmd    *exec.Cmd
 	stdin  io.WriteCloser
 	events chan *protocol.L1Event
+	// stderr retains a bounded tail of the child's stderr so a process that
+	// dies without ever speaking the protocol still has evidence to hand the
+	// bring-up that was waiting for it.
+	stderr *stderrTail
 
 	mu      sync.Mutex
 	stdinOK bool
 }
+
+// StderrTail returns the bounded tail of everything the child has written to
+// stderr so far. Safe to call at any time, including after the process exits.
+func (p *Proc) StderrTail() string { return p.stderr.String() }
 
 // Options configures a shim spawn.
 type Options struct {
@@ -92,9 +185,13 @@ func Spawn(opts Options) (*Proc, error) {
 	if err != nil {
 		return nil, fmt.Errorf("shim: stdout pipe: %w", err)
 	}
+	tail := &stderrTail{}
 	var stderr io.ReadCloser
 	if opts.Stderr != nil {
-		cmd.Stderr = opts.Stderr
+		// Teed rather than replaced: the caller's writer keeps receiving the
+		// unparsed stream exactly as before, and the tail gains the same bytes
+		// so this path is no blinder than the parsed one.
+		cmd.Stderr = io.MultiWriter(opts.Stderr, tail)
 	} else {
 		stderr, err = cmd.StderrPipe()
 		if err != nil {
@@ -109,12 +206,13 @@ func Spawn(opts Options) (*Proc, error) {
 		cmd:     cmd,
 		stdin:   stdin,
 		events:  make(chan *protocol.L1Event, 64),
+		stderr:  tail,
 		stdinOK: true,
 	}
 
 	go p.pumpStdout(stdout, logger)
 	if stderr != nil {
-		go pumpStderr(stderr, logger)
+		go pumpStderr(stderr, logger, tail)
 	}
 	return p, nil
 }
@@ -150,11 +248,18 @@ func (p *Proc) pumpStdout(stdout io.Reader, logger Logger) {
 	}
 }
 
-func pumpStderr(stderr io.Reader, logger Logger) {
+func pumpStderr(stderr io.Reader, logger Logger, tail *stderrTail) {
 	scanner := bufio.NewScanner(stderr)
 	scanner.Buffer(make([]byte, 64*1024), maxEventLine)
 	for scanner.Scan() {
 		line := scanner.Text()
+		// Retained BEFORE classification: a line that fails the shim's record
+		// shape — a node stack trace, a loader error — is exactly the evidence
+		// a spawn failure needs, so the tail must not be limited to the lines
+		// the daemon can parse.
+		if _, err := tail.Write([]byte(line + "\n")); err != nil {
+			logger.Log("shim: retaining stderr tail: %v", err)
+		}
 		verbose, valid := shimRecord(line)
 		if valid {
 			if mirror, ok := logger.(stderrMirror); ok {
