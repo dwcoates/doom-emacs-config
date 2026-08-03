@@ -85,7 +85,7 @@ func (m *Manager) closeStaleTurnLocked(workspace, sessionID, reason string, sole
 	}
 	if claimant != sessionID && !(claimant == "" && soleSessionController) {
 		m.logf("ssm: stale turn close ws=%s session=%s reason=%q sole_session_controller=%v DECLINED — the standing `thinking` is held by session=%q, which is not this stop's to spend",
-			workspace, sessionID, reason, claimant, soleSessionController)
+			workspace, sessionID, reason, soleSessionController, claimant)
 		return false, nil
 	}
 	cause := causeShimStopped + ":" + reason
