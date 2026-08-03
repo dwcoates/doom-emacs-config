@@ -3,7 +3,12 @@
  * DAEMON is holding because a turn was already running. One edge per test.
  */
 import { describe, expect, it } from "vitest";
-import { QueuedCard, queuedCardKey } from "../src/render.js";
+import {
+  LEASE_FORCE_TITLE,
+  LEASE_HELD_REASON,
+  QueuedCard,
+  queuedCardKey,
+} from "../src/render.js";
 import { QueuedItem } from "../src/protocol.js";
 
 /** A held prompt, still being classified unless overridden. */
@@ -155,5 +160,98 @@ describe("classification exhaustiveness (3e)", () => {
     const rogue = queued({ classification: "teleported" as QueuedItem["classification"] });
     // Act / Assert
     expect(() => QueuedCard(rogue)).toThrow(/unhandled queue classification/);
+  });
+});
+
+// --- the drain-lease bubble ---------------------------------------------------
+
+/** A prompt parked by a scheduled daemon bounce rather than by a turn. */
+function leased(over: Partial<QueuedItem> = {}): QueuedItem {
+  return queued({ shutdownHold: { scheduleId: "sched-1" }, ...over });
+}
+
+describe("QueuedCard — drain-lease dispatch", () => {
+  it("renders the lease bubble for an entry the drain lease holds", () => {
+    // Arrange / Act / Assert
+    expect(QueuedCard(leased())).toContain("lease-card");
+  });
+
+  it("renders the classifier bubble for an entry with no lease hold", () => {
+    // Arrange / Act / Assert
+    expect(QueuedCard(queued())).not.toContain("lease-card");
+  });
+
+  it("never shows a classifier verdict on a lease-held entry", () => {
+    // Arrange — the classifier NEVER ran, so its badge would claim a
+    // judgment nothing made.
+    const html = QueuedCard(leased({ classification: "hold" }));
+    // Act / Assert
+    expect(html).not.toContain("will run after this turn");
+  });
+
+  it("never shows the classifying badge on a lease-held pending entry", () => {
+    // Arrange — PENDING is what the daemon stamps at enqueue; on a leased
+    // entry it means nothing is judging it, not that judging is underway.
+    const html = QueuedCard(leased({ classification: "pending" }));
+    // Act / Assert
+    expect(html).not.toContain("classifying");
+  });
+
+  it("never shows the classifier's rationale line on a lease-held entry", () => {
+    // Arrange
+    const html = QueuedCard(leased({ rationale: "independent work" }));
+    // Act / Assert
+    expect(html).not.toContain("independent work");
+  });
+
+  it("says the bounce is why the prompt is waiting", () => {
+    expect(QueuedCard(leased())).toContain("daemon bounce scheduled");
+  });
+
+  it("says the prompt survives the bounce rather than being dropped", () => {
+    expect(QueuedCard(leased())).toContain(LEASE_HELD_REASON);
+  });
+
+  it("carries the entry id on the cancel control", () => {
+    expect(QueuedCard(leased())).toContain('data-queue-cancel="q1"');
+  });
+
+  it("carries the entry id on the force control", () => {
+    expect(QueuedCard(leased())).toContain('data-queue-run-now="q1"');
+  });
+
+  it("says out loud that forcing delays the bounce", () => {
+    expect(QueuedCard(leased())).toContain(LEASE_FORCE_TITLE);
+  });
+
+  it("offers no accept control, since there is no verdict to confirm", () => {
+    expect(QueuedCard(leased())).not.toContain("data-queue-accept");
+  });
+
+  it("joins the bubble to the schedule that explains it", () => {
+    expect(QueuedCard(leased())).toContain('data-schedule-id="sched-1"');
+  });
+
+  it("renders the user's prompt text", () => {
+    expect(QueuedCard(leased({ text: "rerun the suite" }))).toContain("rerun the suite");
+  });
+
+  it("escapes markup in the prompt text", () => {
+    expect(QueuedCard(leased({ text: "<script>x</script>" }))).not.toContain("<script>");
+  });
+
+  it("escapes markup in the entry id it puts in a data attribute", () => {
+    const html = QueuedCard(leased({ id: 'q"1' }));
+    expect(html).toContain("q&quot;1");
+  });
+
+  it("escapes markup in the schedule id it puts in a data attribute", () => {
+    const html = QueuedCard(leased({ shutdownHold: { scheduleId: 's"1' } }));
+    expect(html).toContain("s&quot;1");
+  });
+
+  it("keys a lease bubble by its entry id, exactly as a queued card is keyed", () => {
+    // Arrange — the tail queue reconciles both kinds through one key space.
+    expect(queuedCardKey(leased())).toBe("queued:q1");
   });
 });
