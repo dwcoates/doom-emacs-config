@@ -1095,21 +1095,52 @@ a live workspace does not belong in a list of work that has receded."
       (should (eq agent-repl--sidebar-view :task))
       (should (= pushes 1)))))
 
-(ert-deftest agent-repl-test-sidebar-task-create-command-empty-title-noops ()
-  "A task-create command whose prompt returns empty creates nothing."
-  (agent-repl-test--with-clean-state
-    (let ((pushes 0))
-      (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "  "))
-                ((symbol-function 'agent-repl--sidebar-push)
-                 (lambda () (cl-incf pushes))))
-        (agent-repl--handle-task-create-command '((type . "task-create"))))
-      (should (= 0 (hash-table-count agent-repl--tasks)))
-      (should (= pushes 0)))))
+;;;; ---- Deferred minibuffer prompts --------------------------------------
+;;
+;; The handlers run in the unix-socket transport's process filter, where a
+;; synchronous minibuffer read gets no command loop and swallows every
+;; keystroke.  They therefore hand the read to `run-at-time', which these
+;; tests either capture (to prove the handler itself never prompts) or run
+;; immediately (to exercise the prompt body).
 
-(ert-deftest agent-repl-test-sidebar-task-create-command-creates-and-pushes ()
-  "A task-create command creates the prompted task and pushes."
+(defmacro agent-repl-test--with-captured-timer (var &rest body)
+  "Execute BODY with `run-at-time' capturing its thunk into VAR instead of
+scheduling it.  VAR is bound to nil first, so a handler that never
+schedules leaves it nil."
+  (declare (indent 1))
+  `(let ((,var nil))
+     (cl-letf (((symbol-function 'run-at-time)
+                (lambda (_time _repeat fn &rest _) (setq ,var fn) 'fake-timer)))
+       ,@body)))
+
+(defmacro agent-repl-test--with-sync-timer (&rest body)
+  "Execute BODY with `run-at-time' invoking its thunk immediately."
+  (declare (indent 0))
+  `(cl-letf (((symbol-function 'run-at-time)
+              (lambda (_time _repeat fn &rest _) (funcall fn) 'fake-timer)))
+     ,@body))
+
+(ert-deftest agent-repl-test-sidebar-task-create-command-defers-the-prompt ()
+  "A task-create command schedules the title read instead of prompting."
   (agent-repl-test--with-clean-state
-    (let ((pushes 0))
+    ;; Arrange
+    (let ((agent-repl--sidebar-prompt-pending nil)
+          (prompted nil))
+      (cl-letf (((symbol-function 'read-string)
+                 (lambda (&rest _) (setq prompted t) "")))
+        ;; Act
+        (agent-repl-test--with-captured-timer thunk
+          (agent-repl--handle-task-create-command '((type . "task-create")))
+          ;; Assert
+          (should-not prompted)
+          (should (functionp thunk)))))))
+
+(ert-deftest agent-repl-test-sidebar-task-create-deferred-creates-and-pushes ()
+  "The deferred task-create read creates the prompted task and pushes."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((agent-repl--sidebar-prompt-pending nil)
+          (pushes 0))
       (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "New task"))
                 ;; Keep the created task in-memory only — no disk write.
                 ((symbol-function 'agent-repl--tasks-save) (lambda ()))
@@ -1117,9 +1148,86 @@ a live workspace does not belong in a list of work that has receded."
                  (lambda (&rest _) "/tmp/notes.org"))
                 ((symbol-function 'agent-repl--sidebar-push)
                  (lambda () (cl-incf pushes))))
-        (agent-repl--handle-task-create-command '((type . "task-create"))))
+        ;; Act
+        (agent-repl-test--with-sync-timer
+          (agent-repl--handle-task-create-command '((type . "task-create")))))
+      ;; Assert
       (should (= 1 (hash-table-count agent-repl--tasks)))
       (should (= pushes 1)))))
+
+(ert-deftest agent-repl-test-sidebar-task-create-deferred-empty-title-noops ()
+  "A deferred task-create read that returns empty creates nothing."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((agent-repl--sidebar-prompt-pending nil)
+          (pushes 0))
+      (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "  "))
+                ((symbol-function 'agent-repl--sidebar-push)
+                 (lambda () (cl-incf pushes))))
+        ;; Act
+        (agent-repl-test--with-sync-timer
+          (agent-repl--handle-task-create-command '((type . "task-create")))))
+      ;; Assert
+      (should (= 0 (hash-table-count agent-repl--tasks)))
+      (should (= pushes 0)))))
+
+(ert-deftest agent-repl-test-sidebar-task-create-second-click-is-dropped ()
+  "A second + click while a prompt is pending schedules no second read."
+  (agent-repl-test--with-clean-state
+    ;; Arrange: the first click's thunk is captured, never run, so its
+    ;; prompt stays pending exactly as it would while the user types.
+    (let ((agent-repl--sidebar-prompt-pending nil)
+          (scheduled 0))
+      (cl-letf (((symbol-function 'run-at-time)
+                 (lambda (&rest _) (cl-incf scheduled) 'fake-timer)))
+        ;; Act
+        (agent-repl--handle-task-create-command '((type . "task-create")))
+        (agent-repl--handle-task-create-command '((type . "task-create"))))
+      ;; Assert
+      (should (= scheduled 1)))))
+
+(ert-deftest agent-repl-test-sidebar-task-create-second-click-returns-nil ()
+  "The dropped second + click reports the drop to its caller."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((agent-repl--sidebar-prompt-pending nil))
+      (cl-letf (((symbol-function 'run-at-time) (lambda (&rest _) 'fake-timer)))
+        ;; Act
+        (agent-repl--handle-task-create-command '((type . "task-create")))
+        ;; Assert
+        (should-not (agent-repl--handle-task-create-command
+                     '((type . "task-create"))))))))
+
+(ert-deftest agent-repl-test-sidebar-task-create-second-click-logs-the-drop ()
+  "The dropped second + click leaves a log line naming the pending prompt."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((agent-repl--sidebar-prompt-pending nil)
+          (lines nil))
+      (cl-letf (((symbol-function 'run-at-time) (lambda (&rest _) 'fake-timer))
+                ((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) lines))))
+        ;; Act
+        (agent-repl--handle-task-create-command '((type . "task-create")))
+        (agent-repl--handle-task-create-command '((type . "task-create"))))
+      ;; Assert
+      (should (cl-find-if
+               (lambda (l) (string-match-p "already pending=task-create" l))
+               lines)))))
+
+(ert-deftest agent-repl-test-sidebar-prompt-pending-clears-after-an-error ()
+  "A prompt that signals still clears the pending flag, unwedging the button."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((agent-repl--sidebar-prompt-pending nil))
+      (cl-letf (((symbol-function 'read-string)
+                 (lambda (&rest _) (error "quit out of the minibuffer"))))
+        ;; Act
+        (should-error
+         (agent-repl-test--with-sync-timer
+           (agent-repl--handle-task-create-command '((type . "task-create"))))))
+      ;; Assert
+      (should-not agent-repl--sidebar-prompt-pending))))
 
 (ert-deftest agent-repl-test-sidebar-task-toggle-done-command-missing-id-errors ()
   "A task-toggle-done command with no id signals."
@@ -1162,19 +1270,103 @@ a live workspace does not belong in a list of work that has receded."
     (should-error (agent-repl--handle-task-add-workspace-command
                    '((type . "task-add-workspace"))))))
 
-(ert-deftest agent-repl-test-sidebar-task-add-workspace-assigns-choice ()
-  "The interactive add assigns the chosen workspace's `:task-id' and pushes."
+(ert-deftest agent-repl-test-sidebar-task-add-workspace-unknown-id-errors ()
+  "A task-add-workspace command naming no known task signals in-context.
+The check must stay synchronous: an error raised from the deferred timer
+could no longer fail the host action."
   (agent-repl-test--with-clean-state
+    ;; Arrange / Act / Assert
+    (let ((agent-repl--sidebar-prompt-pending nil))
+      (should-error (agent-repl--handle-task-add-workspace-command
+                     '((type . "task-add-workspace") (id . "nope")))))))
+
+(ert-deftest agent-repl-test-sidebar-task-add-workspace-defers-the-chooser ()
+  "A task-add-workspace command schedules the chooser instead of prompting."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let* ((id (agent-repl-test--sidebar-task "t1" "target"))
+           (agent-repl--sidebar-prompt-pending nil)
+           (prompted nil))
+      (agent-repl-test--sidebar-ws "free" "/tmp/free")
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (&rest _) (setq prompted t) "free")))
+        ;; Act
+        (agent-repl-test--with-captured-timer thunk
+          (agent-repl--handle-task-add-workspace-command
+           `((type . "task-add-workspace") (id . ,id)))
+          ;; Assert
+          (should-not prompted)
+          (should (functionp thunk)))))))
+
+(ert-deftest agent-repl-test-sidebar-task-add-workspace-deferred-assigns-choice ()
+  "The deferred chooser assigns the chosen workspace's `:task-id' and pushes."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
     (let ((id (agent-repl-test--sidebar-task "t1" "target"))
+          (agent-repl--sidebar-prompt-pending nil)
           (pushes 0))
       (agent-repl-test--sidebar-ws "free" "/tmp/free")
       (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "free"))
                 ((symbol-function 'agent-repl--sidebar-push)
                  (lambda () (cl-incf pushes))))
-        (agent-repl--handle-task-add-workspace-command
-         `((type . "task-add-workspace") (id . ,id))))
+        ;; Act
+        (agent-repl-test--with-sync-timer
+          (agent-repl--handle-task-add-workspace-command
+           `((type . "task-add-workspace") (id . ,id)))))
+      ;; Assert
       (should (equal (agent-repl--ws-get "free" :task-id) id))
       (should (= pushes 1)))))
+
+(ert-deftest agent-repl-test-sidebar-task-add-workspace-deferred-cancel-noops ()
+  "A cancelled deferred chooser assigns nothing."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((id (agent-repl-test--sidebar-task "t1" "target"))
+          (agent-repl--sidebar-prompt-pending nil)
+          (pushes 0))
+      (agent-repl-test--sidebar-ws "free" "/tmp/free")
+      (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) ""))
+                ((symbol-function 'agent-repl--sidebar-push)
+                 (lambda () (cl-incf pushes))))
+        ;; Act
+        (agent-repl-test--with-sync-timer
+          (agent-repl--handle-task-add-workspace-command
+           `((type . "task-add-workspace") (id . ,id)))))
+      ;; Assert
+      (should-not (agent-repl--ws-get "free" :task-id))
+      (should (= pushes 0)))))
+
+(ert-deftest agent-repl-test-sidebar-task-add-workspace-second-click-is-dropped ()
+  "A second task + click while a prompt is pending schedules no second read."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((id (agent-repl-test--sidebar-task "t1" "target"))
+          (agent-repl--sidebar-prompt-pending nil)
+          (scheduled 0))
+      (agent-repl-test--sidebar-ws "free" "/tmp/free")
+      (cl-letf (((symbol-function 'run-at-time)
+                 (lambda (&rest _) (cl-incf scheduled) 'fake-timer)))
+        ;; Act
+        (agent-repl--handle-task-add-workspace-command
+         `((type . "task-add-workspace") (id . ,id)))
+        (agent-repl--handle-task-add-workspace-command
+         `((type . "task-add-workspace") (id . ,id))))
+      ;; Assert
+      (should (= scheduled 1)))))
+
+(ert-deftest agent-repl-test-sidebar-task-prompts-share-one-pending-slot ()
+  "A task-add-workspace click is dropped while a task-create prompt is open.
+Both read the one minibuffer, so the guard is shared rather than per-action."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((id (agent-repl-test--sidebar-task "t1" "target"))
+          (agent-repl--sidebar-prompt-pending nil))
+      (cl-letf (((symbol-function 'run-at-time) (lambda (&rest _) 'fake-timer)))
+        ;; Act
+        (agent-repl--handle-task-create-command '((type . "task-create")))
+        ;; Assert
+        (should-not (agent-repl--handle-task-add-workspace-command
+                     `((type . "task-add-workspace") (id . ,id))))))))
 
 (ert-deftest agent-repl-test-sidebar-task-add-workspace-none-available ()
   "The interactive add is a no-op when every workspace is already in the task."

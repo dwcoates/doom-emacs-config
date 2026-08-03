@@ -1096,17 +1096,80 @@ CMD carries `view', one of the wire strings in
     (agent-repl--log nil "host-action set-sidebar-view: view=%s" view)
     (agent-repl--sidebar-set-view (if (equal view "task") :task :repository))))
 
-(defun agent-repl--handle-task-create-command (_cmd)
-  "Handle a \"task-create\" command (the Task view's + button).
-Prompts for the title in the minibuffer — Emacs owns the task model, so
-the webapp asks Emacs to create rather than carrying a title itself.  An
-empty title is a cancelled prompt and creates nothing."
+(defvar agent-repl--sidebar-prompt-pending nil
+  "Label of the deferred sidebar minibuffer prompt currently in flight.
+Nil when none is scheduled or running.  Only ONE sidebar prompt may be
+outstanding at a time: a second `read-string' entered from a timer while
+another minibuffer is already active either errors or stacks a recursive
+read the user cannot see the top of, so a second click is dropped with a
+log line rather than queued.  `defvar' keeps the flag across module hot
+reload, which is what stops a reload mid-prompt from re-enabling a second
+concurrent read.")
+
+(defun agent-repl--sidebar-defer-prompt (label thunk)
+  "Schedule THUNK, a zero-arg minibuffer prompt, off the transport context.
+LABEL names the host action for the log lines and for
+`agent-repl--sidebar-prompt-pending'.
+
+WHY IT EXISTS.  Host-action handlers run inside the unix-socket
+transport's process filter.  A synchronous `read-string' /
+`completing-read' there opens a recursive minibuffer with no normal
+command loop behind it: input events route by the pre-prompt selected
+window — the xwidget webview buffer, whose keymap binds almost nothing —
+so every key the user types reports as unbound.  Handing the read to a
+zero-delay timer runs it from the ordinary event loop instead, where the
+minibuffer gets input.
+
+ACK SEMANTICS.  The handler returns as soon as the prompt is SCHEDULED
+and does NOT call `agent-repl--host-action-defer', so the executor
+completes the action `ok=true' immediately.  That is deliberate on both
+sides: holding an action open across a human's typing would pin the
+daemon's action indefinitely, and a cancelled prompt is a normal outcome
+that must never be reported as a failed action.  The ack means the user
+was asked, which is the whole of what the daemon asked Emacs to do.
+
+Returns non-nil when scheduled, nil when dropped as a duplicate."
+  (if agent-repl--sidebar-prompt-pending
+      (progn
+        (agent-repl--log
+         nil
+         "host-action %s: sidebar prompt already pending=%s, dropping this request"
+         label agent-repl--sidebar-prompt-pending)
+        nil)
+    (setq agent-repl--sidebar-prompt-pending label)
+    (agent-repl--log nil "host-action %s: deferring the minibuffer prompt" label)
+    (run-at-time
+     0 nil
+     (lambda ()
+       ;; `unwind-protect' clears the flag on a `keyboard-quit' out of the
+       ;; minibuffer and on a genuine error alike, so one aborted prompt
+       ;; cannot wedge the button.  The error itself is NOT caught — it
+       ;; still propagates to the timer machinery and is reported.
+       (unwind-protect
+           (funcall thunk)
+         (setq agent-repl--sidebar-prompt-pending nil))))
+    t))
+
+(defun agent-repl--task-create-interactive ()
+  "Prompt for a task title in the minibuffer and create the task.
+Emacs owns the task model, so the webapp asks Emacs to create rather than
+carrying a title itself.  An empty title is a cancelled prompt and creates
+nothing.  MUST run from the ordinary command loop, never from a process
+filter — see `agent-repl--sidebar-defer-prompt'."
   (let ((title (read-string "Task title: ")))
     (if (string-empty-p (string-trim title))
         (agent-repl--log nil "host-action task-create: empty title, skipping")
       (agent-repl--task-create title)
       (agent-repl--log nil "host-action task-create: created task from non-empty title")
       (agent-repl--sidebar-push))))
+
+(defun agent-repl--handle-task-create-command (_cmd)
+  "Handle a \"task-create\" command (the Task view's + button).
+Defers the title prompt out of the transport's process-filter context;
+see `agent-repl--sidebar-defer-prompt' for why, and for what this
+handler's ack does and does not promise."
+  (agent-repl--sidebar-defer-prompt
+   "task-create" #'agent-repl--task-create-interactive))
 
 (defun agent-repl--handle-task-toggle-done-command (cmd)
   "Handle a \"task-toggle-done\" command CMD (a task checkbox click).
@@ -1136,7 +1199,10 @@ chosen workspace's `:task-id' is set so it and its future children
 render under the task.  A workspace already inheriting the task through
 its parent is omitted — it needs no assignment.  A brand-new workspace
 for a task is made the ordinary way (or cut as a child of one already in
-the task, which inherits it), then added here."
+the task, which inherits it), then added here.
+
+MUST run from the ordinary command loop, never from a process filter —
+see `agent-repl--sidebar-defer-prompt'."
   (unless (agent-repl--task-get id)
     (agent-repl--log nil "task-add-workspace: rejected unknown task id=%s" id)
     (error "agent-repl--task-add-workspace-interactive: unknown task %s" id))
@@ -1159,13 +1225,25 @@ the task, which inherits it), then added here."
 
 (defun agent-repl--handle-task-add-workspace-command (cmd)
   "Handle a \"task-add-workspace\" command CMD (a task section + button).
-CMD carries the task `id'; the workspace is chosen in the minibuffer."
+CMD carries the task `id'; the workspace is chosen in the minibuffer.
+The chooser is deferred out of the transport's process-filter context
+\(see `agent-repl--sidebar-defer-prompt'), so every check that must be
+able to NACK the action runs HERE, synchronously — an error signalled
+from the deferred timer would be reported to the user but could no
+longer fail the host action.  `agent-repl--task-add-workspace-interactive'
+re-validates the id anyway; the duplication is deliberate, since that
+function is also reachable outside this handler."
   (let ((id (alist-get 'id cmd)))
     (unless (and (stringp id) (not (string-empty-p id)))
       (agent-repl--log nil "host-action task-add-workspace: rejected missing-or-empty id")
       (error "agent-repl task-add-workspace command: missing id in %S" cmd))
+    (unless (agent-repl--task-get id)
+      (agent-repl--log nil "host-action task-add-workspace: rejected unknown task id=%s" id)
+      (error "agent-repl task-add-workspace command: unknown task %s" id))
     (agent-repl--log nil "host-action task-add-workspace: id=%s" id)
-    (agent-repl--task-add-workspace-interactive id)))
+    (agent-repl--sidebar-defer-prompt
+     "task-add-workspace"
+     (lambda () (agent-repl--task-add-workspace-interactive id)))))
 
 (provide 'agent-repl-sidebar)
 ;;; sidebar.el ends here
