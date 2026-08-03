@@ -1101,6 +1101,12 @@ describe("the roster frame", () => {
       status: { case: "ready" },
       current: false,
       children: [],
+      lastViewedAtMs: 0,
+      mergedAtMs: 0,
+      branch: "",
+      parentBranch: "",
+      summary: "",
+      closed: false,
       ...over,
     };
   }
@@ -1109,8 +1115,11 @@ describe("the roster frame", () => {
   function frame(over: Partial<RosterFrame> = {}): RosterFrame {
     return {
       revision: 3,
-      view: { case: "repository", value: { sections: [{ repoKey: "doom", folded: false, rows: [frameRow()] }] } },
-      recentlyMerged: { rows: [] },
+      view: {
+        case: "repository",
+        value: { sections: [{ repoKey: "doom", folded: false, label: "doom", rows: [frameRow()] }] },
+      },
+      recentlyMerged: { rows: [], folded: false, label: "" },
       currentDir: "",
       navDir: "",
       ...over,
@@ -1180,7 +1189,12 @@ describe("the roster frame", () => {
           case: "repository",
           value: {
             sections: [
-              { repoKey: "doom", folded: false, rows: [frameRow({ status: { case: "idleAsync" } })] },
+              {
+                repoKey: "doom",
+                folded: false,
+                label: "doom",
+                rows: [frameRow({ status: { case: "idleAsync" } })],
+              },
             ],
           },
         },
@@ -1204,7 +1218,13 @@ describe("the roster frame", () => {
     const { mount, sidebar } = harness();
     // Act
     sidebar.adoptRosterFrame(
-      frame({ recentlyMerged: { rows: [frameRow({ dir: "/w/m", status: { case: "merged" } })] } }),
+      frame({
+        recentlyMerged: {
+          rows: [frameRow({ dir: "/w/m", status: { case: "merged" } })],
+          folded: false,
+          label: "",
+        },
+      }),
     );
     // Assert — the key must match `agent-repl--sidebar-merged-key`.
     expect(
@@ -1233,12 +1253,27 @@ describe("the roster revision gate", () => {
             {
               repoKey: "doom",
               folded: false,
-              rows: [{ dir, name: "a", status: { case: "ready" }, current: false, children: [] }],
+              label: "doom",
+              rows: [
+                {
+                  dir,
+                  name: "a",
+                  status: { case: "ready" },
+                  current: false,
+                  children: [],
+                  lastViewedAtMs: 0,
+                  mergedAtMs: 0,
+                  branch: "",
+                  parentBranch: "",
+                  summary: "",
+                  closed: false,
+                },
+              ],
             },
           ],
         },
       },
-      recentlyMerged: { rows: [] },
+      recentlyMerged: { rows: [], folded: false, label: "" },
       currentDir: "",
       navDir: "",
     };
