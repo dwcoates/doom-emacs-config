@@ -1188,7 +1188,7 @@ describe("ShimSession SDK message mapping", () => {
     ]);
   });
 
-  it("loudly warns when a materially sized result is below 80% cache reads", async () => {
+  it("loudly warns when a result is below 80% cache reads", async () => {
     // Arrange
     const h = makeHarness();
     vi.mocked(writeSync).mockClear();
@@ -1265,17 +1265,15 @@ describe("ShimSession SDK message mapping", () => {
           context_window: null,
         },
         cache_hit_rate_warning_threshold: 0.8,
-        cache_observation_min_input_tokens: 4096,
       },
     });
     expect(logs[1].context).toEqual({
       ...(logs[0].context as Record<string, unknown>),
       cache_hit_rate_warning_threshold: 0.8,
-      cache_observation_min_input_tokens: 4096,
     });
   });
 
-  it("does not warn for token totals below the cache observation floor", async () => {
+  it("warns below 80% even for a small token total", async () => {
     // Arrange
     const h = makeHarness();
     vi.mocked(writeSync).mockClear();
@@ -1292,7 +1290,22 @@ describe("ShimSession SDK message mapping", () => {
       is_error: false,
     });
     // Assert
-    expect(persistedCacheLogs()).toHaveLength(1);
+    const logs = persistedCacheLogs();
+    expect(logs).toHaveLength(2);
+    expect(logs[1]).toMatchObject({
+      level: "warn",
+      context: {
+        sdk_uuid: "cache-small",
+        input_tokens: 100,
+        output_tokens: 10,
+        cache_creation_input_tokens: 900,
+        cache_read_input_tokens: 0,
+        total_input_tokens: 1000,
+        cache_hit_rate: 0,
+        cache_hit_percent: 0,
+        cache_hit_rate_warning_threshold: 0.8,
+      },
+    });
   });
 
   it("omits model_usage when the SDK reports an empty map", async () => {
