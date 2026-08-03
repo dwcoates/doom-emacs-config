@@ -12,7 +12,6 @@ import (
 	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/shimclient"
@@ -884,7 +883,7 @@ func TestHandlePermissionPushesPendingThenAllowed(t *testing.T) {
 	}
 	<-done
 
-	// Assert: pending then allowed on uuid r1, plus a PERMISSION render-state.
+	// Assert: pending then allowed on uuid r1.
 	got := push.permissionResolutions("r1")
 	want := []corev1.PermissionItem_Resolution{
 		corev1.PermissionItem_RESOLUTION_PENDING,
@@ -893,8 +892,27 @@ func TestHandlePermissionPushesPendingThenAllowed(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("resolutions = %v, want %v", got, want)
 	}
-	if len(push.state) == 0 || push.state[0].GetState() != frontendv1.RenderState_RENDER_STATE_PERMISSION {
-		t.Fatalf("expected a PERMISSION workspace-state push, got %v", push.state)
+}
+
+func TestHandlePermissionPushesNoHandBuiltWorkspaceState(t *testing.T) {
+	// Arrange — a permission prompt used to push a WorkspaceState carrying only
+	// a render state, whose UNSPECIFIED connectivity the frontend contract has
+	// no reading for. The SSM's permission row is the authority.
+	ph, reg, push := newTestPermHandler()
+	req := &corev1.PermissionRequest{RequestId: "r1", ToolName: "Bash"}
+
+	// Act.
+	done := make(chan *corev1.PermissionResponse, 1)
+	go func() { done <- ph.HandlePermission("s1", req) }()
+	waitForPermWaiter(reg, "ws", "r1")
+	if err := reg.answer("r1", true, "", nil); err != nil {
+		t.Fatalf("answer: %v", err)
+	}
+	<-done
+
+	// Assert.
+	if len(push.state) != 0 {
+		t.Fatalf("workspace-state pushes = %v, want none from the permission handler", push.state)
 	}
 }
 

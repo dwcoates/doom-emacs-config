@@ -800,3 +800,54 @@ func TestCompositeConnectingKeepsInitForAClaimOlderThanTheBringUp(t *testing.T) 
 			got.GetState(), got.GetTurnActive())
 	}
 }
+
+// --- every emitted WorkspaceState names a connectivity ----------------------
+
+func TestWorkspaceMessageReportsHibernatedWithoutAControllerLifecycle(t *testing.T) {
+	// Arrange — a workspace with a resolved projection but no controller
+	// generation ever. The enum's own definition of that case is HIBERNATED;
+	// UNSPECIFIED names a malformed frame, which the webapp's validating
+	// decoder refuses whole.
+	m, _, _ := openTest(t, fakeResolver{"session-1": "ws"})
+	if err := m.Apply(evSessionStarted("session-1", 1)); err != nil {
+		t.Fatalf("Apply(SessionStarted): %v", err)
+	}
+
+	// Act.
+	got := mustCurrent(t, m, "ws")
+
+	// Assert.
+	if got.GetConnectivity() != frontendv1.SessionConnectivity_SESSION_CONNECTIVITY_HIBERNATED {
+		t.Fatalf("connectivity = %s, want HIBERNATED for a workspace with no controller generation", got.GetConnectivity())
+	}
+}
+
+func TestConnectivityResolvedRefusesAnUnspecifiedVerdict(t *testing.T) {
+	// Arrange — the funnel's last gate before the wire. The daemon is the sole
+	// authority for this verdict and has no honest guess to substitute.
+	msg := &frontendv1.WorkspaceState{Workspace: "ws"}
+
+	// Act.
+	err := connectivityResolved("ws", msg, CompositeState{}, false)
+
+	// Assert — refused, never published with an unreadable verdict.
+	if err == nil || !strings.Contains(err.Error(), "UNSPECIFIED session connectivity") {
+		t.Fatalf("connectivityResolved err = %v, want a refusal naming the unresolved connectivity", err)
+	}
+}
+
+func TestConnectivityResolvedAcceptsAResolvedVerdict(t *testing.T) {
+	// Arrange.
+	msg := &frontendv1.WorkspaceState{
+		Workspace:    "ws",
+		Connectivity: frontendv1.SessionConnectivity_SESSION_CONNECTIVITY_OPERATIONAL,
+	}
+
+	// Act.
+	err := connectivityResolved("ws", msg, CompositeState{Connectivity: SessionConnectivityOperational}, true)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("connectivityResolved = %v, want nil for a resolved verdict", err)
+	}
+}
