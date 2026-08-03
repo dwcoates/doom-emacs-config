@@ -106,6 +106,7 @@ DAEMON_DIR="$ROOT/daemon"
 STORE_DIR="$ROOT/agent-shim/shim-store"
 SIDECAR_DIR="$ROOT/agent-shim/claude/shim-sidecar"
 WIRE_DIR="$ROOT/agent-shim/wire"
+SHARED_LOGGING_DIR="$ROOT/agent-shim/logging/go"
 PROTO_GO_DIR="$ROOT/proto/gen/go"
 
 # Where ROOT sits inside its checkout, so the same relative paths can be
@@ -504,13 +505,13 @@ build_daemon() {
 }
 
 load_service_sources() {
-    # Both services compile against repo-local proto + wire modules.  Their
-    # generated/source files are real prerequisites even though they live
-    # outside the service module, so a proto or wire edit must stale the
-    # installed launchd binary.
+    # Both services compile against repo-local proto + wire + logging modules.
+    # Their generated/source files are real prerequisites even though they live
+    # outside the service module, so a proto, wire or logging edit must stale
+    # the installed launchd binary.
     local dir="$1" source_dir f
     SOURCES=()
-    for source_dir in "$dir" "$WIRE_DIR" "$PROTO_GO_DIR"; do
+    for source_dir in "$dir" "$WIRE_DIR" "$SHARED_LOGGING_DIR" "$PROTO_GO_DIR"; do
         if [ ! -d "$source_dir" ]; then
             echo "build-frontend.sh: required service source directory missing: $source_dir" >&2
             exit 1
@@ -518,7 +519,7 @@ load_service_sources() {
     done
     while IFS= read -r -d '' f; do
         SOURCES+=("$f")
-    done < <(find "$dir" "$WIRE_DIR" "$PROTO_GO_DIR" -type f \
+    done < <(find "$dir" "$WIRE_DIR" "$SHARED_LOGGING_DIR" "$PROTO_GO_DIR" -type f \
              \( -name '*.go' -o -name 'go.mod' -o -name 'go.sum' \) -print0)
 }
 

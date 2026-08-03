@@ -13,26 +13,7 @@
  * by the local verbose setting.
  */
 import { ClientLogCmd, ClientLogContext } from "./protocol.js";
-
-/**
- * The log timestamp representation shared by every agent-repl runtime:
- * RFC 3339 in the machine's local zone, on a 24-hour clock, with fixed-width
- * microseconds and an explicit numeric offset. Fixed width keeps records from
- * different runtimes lexically comparable. JavaScript instants resolve to
- * milliseconds, so the last three microsecond digits are always zero.
- */
-export function logTimestamp(at: Date = new Date()): string {
-  const pad = (value: number, width: number): string => String(value).padStart(width, "0");
-  const offsetMinutes = -at.getTimezoneOffset();
-  const sign = offsetMinutes < 0 ? "-" : "+";
-  const offset = Math.abs(offsetMinutes);
-  return (
-    `${pad(at.getFullYear(), 4)}-${pad(at.getMonth() + 1, 2)}-${pad(at.getDate(), 2)}` +
-    `T${pad(at.getHours(), 2)}:${pad(at.getMinutes(), 2)}:${pad(at.getSeconds(), 2)}` +
-    `.${pad(at.getMilliseconds(), 3)}000` +
-    `${sign}${pad(Math.floor(offset / 60), 2)}:${pad(offset % 60, 2)}`
-  );
-}
+import { logTimestamp } from "../../agent-shim/logging/ts/timestamp.js";
 
 export type ClientLogLevel = ClientLogCmd["level"];
 export type { ClientLogContext };

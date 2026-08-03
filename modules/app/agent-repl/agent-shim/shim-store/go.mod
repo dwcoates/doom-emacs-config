@@ -3,6 +3,7 @@ module agentrepl/shim-store
 go 1.23
 
 require (
+	agentrepl/logging v0.0.0
 	agentrepl/proto v0.0.0
 	agentrepl/wire v0.0.0
 	google.golang.org/protobuf v1.36.11
@@ -28,3 +29,5 @@ require (
 replace agentrepl/proto => ../../proto/gen/go
 
 replace agentrepl/wire => ../wire
+
+replace agentrepl/logging => ../logging/go

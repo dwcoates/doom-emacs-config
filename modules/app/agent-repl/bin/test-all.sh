@@ -234,7 +234,7 @@ run_timed doctor-harness "$REPO_ROOT/modules/app/agent-repl/scripts/test-agent-s
 run_timed precommit-harness "$REPO_ROOT/.githooks/test-pre-commit.sh"
 run_timed ert "$REPO_ROOT/.claude/safe-test-run.sh"
 
-for component in daemon sidecar store wire webapp shim proto; do
+for component in daemon sidecar store wire logging webapp shim proto; do
     run_timed "$component" \
         "$THIS_DIR/report-nonlisp-coverage.sh" "$component"
 done

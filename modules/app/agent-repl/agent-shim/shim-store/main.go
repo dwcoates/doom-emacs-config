@@ -26,6 +26,8 @@ import (
 	"agentrepl/shim-store/internal/db"
 	"agentrepl/shim-store/internal/logging"
 	"agentrepl/shim-store/internal/server"
+
+	sharedlogging "agentrepl/logging"
 )
 
 func main() {
@@ -46,7 +48,7 @@ func main() {
 func reportFatal(err error, stderr io.Writer) {
 	if isBootstrapError(err) {
 		payload, encodeErr := json.Marshal(map[string]any{
-			"timestamp": time.Now().Local().Format(logging.TimestampLayout),
+			"timestamp": sharedlogging.Timestamp(time.Now()),
 			"runtime":   "store", "pid": os.Getpid(), "level": "error", "verbosity": "normal",
 			"operation": "store.bootstrap", "message": "shim-store bootstrap failed",
 			"context": map[string]any{"error": err.Error()},

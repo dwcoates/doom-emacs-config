@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ClientLogCmd, ClientLogContext } from "../src/protocol.js";
+import timestampFixtureRaw from "../../proto/vocab/log-timestamp.json?raw";
 import {
   ForwardingLogger,
   bindLogContext,
   clearLogDedup,
   log,
-  logTimestamp,
   logVerbose,
   resetLoggingForTests,
   setLogger,
@@ -386,55 +386,20 @@ describe("local-only canonical option", () => {
   });
 });
 
-/** RFC 3339, 24-hour clock, fixed-width microseconds, explicit numeric offset. */
-const CANONICAL_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}[+-]\d{2}:\d{2}$/;
 
-describe("webapp log timestamp", () => {
-  it("renders the canonical fixed-width layout", () => {
-    // Arrange: a whole second, which toISOString would render with milliseconds only.
-    const at = new Date(2026, 6, 28, 12, 34, 56, 0);
-
-    // Act
-    const rendered = logTimestamp(at);
-
-    // Assert
-    expect(rendered).toMatch(CANONICAL_TIMESTAMP);
-  });
-
-  it("renders the local wall clock rather than UTC", () => {
-    // Arrange
-    const at = new Date(2026, 6, 28, 12, 34, 56, 789);
+describe("emitted record timestamps", () => {
+  it("conform to the cross-language timestamp contract", () => {
+    // Arrange: the webapp compiles the shared renderer, whose own suite lives
+    // beside it; this asserts the emitted record actually carries its output.
+    const spy = spyLogger();
+    installCanonicalLogger(spy.logger);
 
     // Act
-    const rendered = logTimestamp(at);
+    log("info", "conformance probe", { operation: "test.timestamp" });
 
     // Assert
-    expect(rendered.slice(0, 23)).toBe("2026-07-28T12:34:56.789");
-  });
-
-  it("carries the local UTC offset instead of a Z suffix", () => {
-    // Arrange
-    const at = new Date(2026, 6, 28, 12, 34, 56, 789);
-    const offsetMinutes = -at.getTimezoneOffset();
-    const sign = offsetMinutes < 0 ? "-" : "+";
-    const absolute = Math.abs(offsetMinutes);
-    const expected = `${sign}${String(Math.floor(absolute / 60)).padStart(2, "0")}:${String(absolute % 60).padStart(2, "0")}`;
-
-    // Act
-    const rendered = logTimestamp(at);
-
-    // Assert
-    expect(rendered.slice(-6)).toBe(expected);
-  });
-
-  it("pads microseconds because JavaScript instants resolve to milliseconds", () => {
-    // Arrange
-    const at = new Date(2026, 6, 28, 12, 34, 56, 7);
-
-    // Act
-    const rendered = logTimestamp(at);
-
-    // Assert
-    expect(rendered.slice(19, 26)).toBe(".007000");
+    const fixture = JSON.parse(timestampFixtureRaw) as { pattern: string };
+    const record = spy.forwarded[0]!.context as unknown as { timestamp: string };
+    expect(record.timestamp).toMatch(new RegExp(fixture.pattern));
   });
 });

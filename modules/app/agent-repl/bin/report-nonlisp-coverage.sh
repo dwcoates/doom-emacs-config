@@ -21,7 +21,7 @@ ROOT="$(cd "$THIS_DIR/.." && pwd)"
 REPORT_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/agent-repl-coverage.XXXXXX")"
 trap 'rm -rf "$REPORT_ROOT"' EXIT
 
-ALL_COMPONENTS=(daemon sidecar store wire webapp shim proto)
+ALL_COMPONENTS=(daemon sidecar store wire logging webapp shim proto)
 COMPONENTS=()
 
 log() {
@@ -134,6 +134,7 @@ for component in "${COMPONENTS[@]}"; do
         sidecar) report_go sidecar agent-shim/claude/shim-sidecar ;;
         store)   report_go store agent-shim/shim-store ;;
         wire)    report_go wire agent-shim/wire ;;
+        logging) report_go logging agent-shim/logging/go ;;
         webapp)  report_typescript webapp webapp ;;
         shim)    report_typescript shim agent-shim/claude/shim ;;
         proto)   report_proto ;;

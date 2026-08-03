@@ -1,0 +1,53 @@
+{
+  "_comment": [
+    "THE cross-language log timestamp contract. Go, TypeScript and elisp each",
+    "assert their own renderer against this file, which is the only mechanism",
+    "that makes a divergence between the three fail loudly instead of quietly.",
+    "",
+    "Within a language the renderer is genuinely shared: Go has one module",
+    "(agent-shim/logging, imported by the daemon, the store and the sidecar),",
+    "TypeScript has one source (agent-shim/logging/ts/timestamp.ts, imported by",
+    "the shim and the webapp), and elisp has one defconst in core.el. Three",
+    "runtimes in three languages cannot compile one source, so this file is the",
+    "seam where the three are held to the same answer.",
+    "",
+    "It pins the REPRESENTATION, not the clock. Every record still stamps the",
+    "instant its own runtime observed; what may never differ is how that",
+    "instant is written down, because a daemon record and a webapp record that",
+    "read as different clocks cannot be interleaved by a human or sorted by a",
+    "tool.",
+    "",
+    "LOCAL TIME IS DELIBERATE. An operator reading these logs is reading them",
+    "on the machine that wrote them, and correlating a log line against what",
+    "they just watched happen in the editor is the dominant use. UTC forced",
+    "that reader to do zone arithmetic on every line to answer 'is this the",
+    "event I just saw?'.",
+    "",
+    "SIX FRACTIONAL DIGITS ARE DELIBERATE, AND FIXED-WIDTH. Go's RFC3339Nano",
+    "drops trailing zeros, so a record landing on a whole second rendered",
+    "shorter than its neighbors and the two no longer sorted lexically against",
+    "each other. JavaScript resolves instants only to milliseconds and pads the",
+    "remaining three digits with zeros rather than emitting a narrower field."
+  ],
+
+  "zone": "local",
+  "fractional_digits": 6,
+  "offset_form": "+HH:MM",
+
+  "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{6}[+-][0-9]{2}:[0-9]{2}$",
+
+  "layouts": {
+    "go": "2006-01-02T15:04:05.000000-07:00",
+    "emacs": "%FT%T.%6N%:z"
+  },
+
+  "example": {
+    "_comment": [
+      "One instant, written the way this contract requires. The rendering is",
+      "the one a machine whose local zone is UTC produces, which is the only",
+      "rendering that is the same on every developer's machine."
+    ],
+    "instant": "2026-07-28T16:34:56.789000Z",
+    "rendered_in_utc": "2026-07-28T16:34:56.789000+00:00"
+  }
+}
