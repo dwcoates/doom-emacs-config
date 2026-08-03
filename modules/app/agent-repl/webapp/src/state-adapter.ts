@@ -1087,6 +1087,7 @@ function assistantMessageItems(frame: ConversationItemFrame): {
           text: pstr(value, "text"),
           done: true,
           ts,
+          ...(frame.tokenUtilization.length === 0 ? {} : { tokenUtilization: frame.tokenUtilization }),
         };
         items.push(item);
         break;
