@@ -10,7 +10,8 @@ import { describe, expect, it } from "vitest";
 import { BREATH_PERIOD_MS } from "../src/breathing.js";
 import { CAPPED_CLASSES, EXPANDED_CLASS } from "../src/expand.js";
 import { NAV_CURRENT_CLASS } from "../src/nav.js";
-import { CURRENT_CLASS, MARK_CLASS, REVEAL_CLASS } from "../src/search.js";
+import { CURRENT_CLASS, MARK_CLASS, REVEAL_CLASS, SEARCHING_CLASS } from "../src/search.js";
+import { PLACEHOLDER_CLASS, PLACEHOLDER_LINE_PX } from "../src/lazy-item.js";
 import css from "../src/styles.css?raw";
 
 /** Body of the first brace-balanced block introduced by `marker`. */
@@ -3405,5 +3406,53 @@ describe("the footer's merge-queue place", () => {
     // Assert — the phase vocabulary is closed and can be sized once; a queue's
     // two figures are unbounded, which is why they are NOT in that cell.
     expect(queue).not.toContain("min-width");
+  });
+});
+
+/**
+ * Browser-level virtualization of the feed. `content-visibility` is the whole
+ * mechanism — there is no script behind it — so the stylesheet source is the
+ * only place the behavior can be asserted: jsdom lays nothing out, and skipping
+ * a box it never laid out is unobservable.
+ */
+describe("stylesheet: feed virtualization", () => {
+  const feedItem = blockAfter(css, "\n.feed-item {");
+  const overlayEscape = blockAfter(css, ".feed-item:has(");
+  const searchEscape = blockAfter(css, `#feed.${SEARCHING_CLASS} .feed-item`);
+  const placeholder = blockAfter(css, `\n.${PLACEHOLDER_CLASS} {`);
+
+  it("lets the browser skip an off-screen feed item's layout and paint", () => {
+    // Arrange / Act / Assert
+    expect(feedItem).toContain("content-visibility: auto");
+  });
+
+  it("remembers each skipped box's real size rather than re-guessing it", () => {
+    // Arrange / Act / Assert — the `auto` keyword is what does the remembering.
+    expect(feedItem).toContain("contain-intrinsic-size: auto");
+  });
+
+  it("takes a deferred item's own height estimate over the blanket guess", () => {
+    // Arrange / Act / Assert — set per item by the renderer (lazy-item.ts).
+    expect(feedItem).toContain("var(--lazy-h,");
+  });
+
+  it("stops skipping an item hosting an open dropdown, which paint containment would clip", () => {
+    // Arrange / Act / Assert — a counter overlay hangs past its card's edge.
+    expect(overlayEscape).toContain("content-visibility: visible");
+  });
+
+  it("stops skipping anything while a search measures item positions", () => {
+    // Arrange / Act / Assert
+    expect(searchEscape).toContain("content-visibility: visible");
+  });
+
+  it("lays a placeholder out at the line height its estimate assumes", () => {
+    // Arrange / Act / Assert — otherwise the box and the estimate disagree.
+    expect(placeholder).toContain(`line-height: ${PLACEHOLDER_LINE_PX}px`);
+  });
+
+  it("wraps a placeholder's raw text rather than letting it collapse", () => {
+    // Arrange / Act / Assert — the text is unrendered markdown, newlines and all.
+    expect(placeholder).toContain("white-space: pre-wrap");
   });
 });
