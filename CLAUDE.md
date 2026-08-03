@@ -2,15 +2,6 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Docker Sandbox
-
-You may be running inside a Docker sandbox (`doom-sandbox`). If so:
-
-- **Never attempt to circumvent or escape the sandbox.** Do not try to access the host system, modify Docker configuration, or work around container restrictions in any way.
-- **If a tool or binary is missing**, stop immediately. Do not try to install it yourself or find workarounds. Instead, propose the exact change needed to `.agents-sandbox/Dockerfile` and ask the user to rebuild the image. Wait for explicit confirmation before proceeding.
-- The sandbox configuration lives in **`.agents-sandbox/`** (not `.claude/`). See that directory for the `Dockerfile`, `mounts.sample`, and other sandbox infrastructure.
-- The sandbox is intentional. Treat missing tools as a signal that the Dockerfile needs updating, not a problem to solve inline.
-
 ## Repository Overview
 
 This is a Doom Emacs configuration directory located at `~/.config/doom`. It contains a comprehensive Emacs setup with custom modules, keybindings, and configuration tailored for development work.

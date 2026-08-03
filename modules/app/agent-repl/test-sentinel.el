@@ -364,78 +364,19 @@ old raw-hash iteration semantics for a sole matching historical entry."
         (should (equal (agent-repl--ws-for-dir-fast (concat canonical "/sub"))
                        "trail-ws"))))))
 
-;;;; ---- Tests: ws-for-dir-container ----
-
-(ert-deftest agent-repl-test-ws-for-dir-container-match ()
-  "ws-for-dir-container should match container path to workspace project dir."
-  (agent-repl-test--with-clean-state
-    (let ((persp-mode t))
-      (cl-letf (((symbol-function '+workspace-list-names)
-                 (lambda () '("proj-ws")))
-                ((symbol-function 'agent-repl--ws-get)
-                 (lambda (ws key)
-                   (when (and (equal ws "proj-ws") (eq key :project-dir))
-                     "/home/user/myproject"))))
-        (should (equal (agent-repl--ws-for-dir-container "/myproject/src")
-                       "proj-ws"))))))
-
-(ert-deftest agent-repl-test-ws-for-dir-container-no-persp-mode ()
-  "ws-for-dir-container should return nil when persp-mode is disabled."
-  (agent-repl-test--with-clean-state
-    (let ((persp-mode nil))
-      (should-not (agent-repl--ws-for-dir-container "/myproject/src")))))
-
-(ert-deftest agent-repl-test-ws-for-dir-container-no-match ()
-  "ws-for-dir-container should return nil when no workspace project dir matches."
-  (agent-repl-test--with-clean-state
-    (let ((persp-mode t))
-      (cl-letf (((symbol-function '+workspace-list-names)
-                 (lambda () '("other-ws")))
-                ((symbol-function 'agent-repl--ws-get)
-                 (lambda (_ws key)
-                   (when (eq key :project-dir) "/home/user/different"))))
-        (should-not (agent-repl--ws-for-dir-container "/myproject/src"))))))
-
-(ert-deftest agent-repl-test-ws-for-dir-container-nil-project-dir ()
-  "ws-for-dir-container should skip workspaces with nil project-dir."
-  (agent-repl-test--with-clean-state
-    (let ((persp-mode t))
-      (cl-letf (((symbol-function '+workspace-list-names)
-                 (lambda () '("ws-no-dir" "ws-with-dir")))
-                ((symbol-function 'agent-repl--ws-get)
-                 (lambda (ws key)
-                   (when (eq key :project-dir)
-                     (cond ((equal ws "ws-no-dir") nil)
-                           ((equal ws "ws-with-dir") "/home/user/myproject"))))))
-        (should (equal (agent-repl--ws-for-dir-container "/myproject/sub")
-                       "ws-with-dir"))))))
-
 ;;;; ---- Tests: ws-for-dir (combined) ----
 
-(ert-deftest agent-repl-test-ws-for-dir-prefers-fast-path ()
-  "ws-for-dir should return fast-path result when available."
+(ert-deftest agent-repl-test-ws-for-dir-returns-fast-path ()
+  "ws-for-dir should return the fast-path result when available."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function 'agent-repl--ws-for-dir-fast)
-               (lambda (_d) "fast-ws"))
-              ((symbol-function 'agent-repl--ws-for-dir-container)
-               (lambda (_d) "container-ws")))
+               (lambda (_d) "fast-ws")))
       (should (equal (agent-repl--ws-for-dir "/some/dir") "fast-ws")))))
 
-(ert-deftest agent-repl-test-ws-for-dir-falls-back-to-container ()
-  "ws-for-dir should try container path when fast path returns nil."
+(ert-deftest agent-repl-test-ws-for-dir-returns-nil-when-fast-path-misses ()
+  "ws-for-dir should return nil when the fast path finds no workspace."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function 'agent-repl--ws-for-dir-fast)
-               (lambda (_d) nil))
-              ((symbol-function 'agent-repl--ws-for-dir-container)
-               (lambda (_d) "container-ws")))
-      (should (equal (agent-repl--ws-for-dir "/some/dir") "container-ws")))))
-
-(ert-deftest agent-repl-test-ws-for-dir-returns-nil-when-both-fail ()
-  "ws-for-dir should return nil when both paths fail."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl--ws-for-dir-fast)
-               (lambda (_d) nil))
-              ((symbol-function 'agent-repl--ws-for-dir-container)
                (lambda (_d) nil)))
       (should-not (agent-repl--ws-for-dir "/some/dir")))))
 
@@ -592,58 +533,6 @@ strips trailing slashes."
                  (lambda (_d) canonical)))
         (should (equal (agent-repl--ws-for-dir-fast "/home/user/real-project/sub")
                        "sym-ws"))))))
-
-;;;; ---- Tests: ws-for-dir-container uncovered edge cases ----
-
-(ert-deftest agent-repl-test-ws-for-dir-container-multiple-match-returns-first ()
-  "ws-for-dir-container should return the first matching workspace when multiple match."
-  (agent-repl-test--with-clean-state
-    (let ((persp-mode t))
-      (cl-letf (((symbol-function '+workspace-list-names)
-                 (lambda () '("ws-first" "ws-second")))
-                ((symbol-function 'agent-repl--ws-get)
-                 (lambda (ws key)
-                   (when (eq key :project-dir)
-                     (cond ((equal ws "ws-first") "/home/user/myproject")
-                           ((equal ws "ws-second") "/other/path/myproject"))))))
-        (should (equal (agent-repl--ws-for-dir-container "/myproject/src")
-                       "ws-first"))))))
-
-(ert-deftest agent-repl-test-ws-for-dir-container-root-slash ()
-  "ws-for-dir-container with DIR=\"/\" should not error (container-root is empty string)."
-  (agent-repl-test--with-clean-state
-    (let ((persp-mode t))
-      (cl-letf (((symbol-function '+workspace-list-names)
-                 (lambda () '("ws1")))
-                ((symbol-function 'agent-repl--ws-get)
-                 (lambda (_ws key)
-                   (when (eq key :project-dir) "/home/user/project"))))
-        ;; DIR is "/", so (substring "/" 1) = "", (split-string "" "/") = (""),
-        ;; container-root = "".  Should not match anything and return nil.
-        (should-not (agent-repl--ws-for-dir-container "/"))))))
-
-(ert-deftest agent-repl-test-ws-for-dir-container-empty-workspace-list ()
-  "ws-for-dir-container should return nil when workspace-list-names returns empty list."
-  (agent-repl-test--with-clean-state
-    (let ((persp-mode t))
-      (cl-letf (((symbol-function '+workspace-list-names)
-                 (lambda () nil)))
-        (should-not (agent-repl--ws-for-dir-container "/myproject/src"))))))
-
-(ert-deftest agent-repl-test-ws-for-dir-container-trailing-slash-normalization ()
-  "ws-for-dir-container should match project dirs with trailing slashes via directory-file-name."
-  (agent-repl-test--with-clean-state
-    (let ((persp-mode t))
-      (cl-letf (((symbol-function '+workspace-list-names)
-                 (lambda () '("trail-ws")))
-                ((symbol-function 'agent-repl--ws-get)
-                 (lambda (ws key)
-                   (when (and (equal ws "trail-ws") (eq key :project-dir))
-                     "/home/user/myproject/"))))
-        ;; directory-file-name strips the trailing slash, so the last component
-        ;; should still be "myproject".
-        (should (equal (agent-repl--ws-for-dir-container "/myproject/src")
-                       "trail-ws"))))))
 
 ;;;; ---- Tests: read-sentinel-file uncovered edge cases ----
 

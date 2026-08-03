@@ -341,8 +341,8 @@ to reattach to.  The default PRESERVES them; see
 
 (defun agent-repl--runtime-startup-prepare (on-success on-failure)
   "Prepare runtime services and daemon readiness before snapshot restoration.
-Batch and sandbox loads intentionally inhibit automatic backend startup;
-outside those explicit no-runtime contexts, a failed readiness check signals
+Batch loads intentionally inhibit automatic backend startup; outside
+that explicit no-runtime context, a failed readiness check signals
 and leaves snapshot restoration entirely untouched."
   (unless (and (functionp on-success) (functionp on-failure))
     (error "agent-repl: runtime startup requires callable continuations"))

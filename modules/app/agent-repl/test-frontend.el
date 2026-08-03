@@ -1226,14 +1226,16 @@ state at all until its agent answered."
       ;; Assert
       (should (eq (agent-repl--ws-get "ws1" :agent-state) :init)))))
 
-(ert-deftest agent-repl-test-frontend-gui-boot-refuses-a-sandbox-workspace ()
-  "The gui boot refuses a :sandbox workspace instead of running it on the host."
+(ert-deftest agent-repl-test-frontend-gui-boot-refuses-an-undeclared-env ()
+  "The gui boot refuses a workspace whose env the gui does not declare.
+`:bare-metal' is the gui's only declared environment, so any other value
+must be rejected before the daemon is ever contacted."
   ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w" :active-env :sandbox)
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w" :active-env :container)
     (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
                (lambda (&rest _) (error "must not reach the daemon"))))
       ;; Act / Assert
-      (should-error (agent-repl--gui-boot "ws1" "/w" :sandbox) :type 'user-error))))
+      (should-error (agent-repl--gui-boot "ws1" "/w" :container) :type 'user-error))))
 
 (ert-deftest agent-repl-test-frontend-gui-declares-bare-metal-only ()
   "The registered gui frontend declares :bare-metal as its only environment."

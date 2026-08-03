@@ -42,8 +42,7 @@
 # Requires: bash 4+.  (--with-agent-shim-services also needs go + launchctl.)
 set -euo pipefail
 
-# --- Shared constants + helpers (needed by both the sandbox repair path
-#     and the full install path below) ---
+# --- Shared constants + helpers ---
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SKILLS_DIR="$HOME/.claude/skills"
 
@@ -153,43 +152,6 @@ link_skill_to_impl() {
   echo "[$tag] Linked $name -> $impl"
   return 0
 }
-
-# --- Sandbox detection ---
-# When executing inside the agent sandbox, the host's ~/.claude/ is
-# bind-mounted but skill symlinks in ~/.claude/skills/ may point to
-# absolute host paths that don't exist in the container.  Repair them by
-# relinking to the SAME canonical impl the host uses.  There is NO cache
-# fallback: if a canonical impl is absent we FAIL HARD so a broken
-# environment surfaces loudly instead of silently serving stale code.
-# Only skill symlinks are repaired on this path.
-if { [ -f /.dockerenv ] || [ "${DOOM_SANDBOX:-}" = "1" ]; } \
-   && [ "${INSTALL_SH_SKIP_SANDBOX_DETECT:-}" != "1" ] \
-   && [ "${INSTALL_SH_LIB:-}" != "1" ]; then
-  echo "[install.sh] Detected sandbox environment — running skill symlink repair only."
-  mkdir -p "$SKILLS_DIR"
-  missing=0
-
-  if [ ! -f "$SKILLS_MANIFEST" ]; then
-    echo "[install.sh/sandbox] ERROR: skills manifest missing at $SKILLS_MANIFEST" >&2
-    exit 1
-  fi
-  # shellcheck source=../modules/app/agent-repl/skills-cache/manifest.sh
-  source "$SKILLS_MANIFEST"
-  for entry in "${CACHED_SKILLS[@]}"; do
-    IFS='|' read -r name impl <<< "$entry"
-    link_skill_to_impl "$name" "$impl" "install.sh/sandbox" || missing=$((missing + 1))
-  done
-  for name in "${LOCAL_SKILLS[@]}"; do
-    link_skill_to_impl "$name" "$LOCAL_SKILLS_SRC/$name" "install.sh/sandbox" || missing=$((missing + 1))
-  done
-
-  if [ "$missing" -gt 0 ]; then
-    echo "[install.sh/sandbox] FAILED: $missing canonical impl path(s) missing — no fallback, refusing to leave stale links." >&2
-    exit 1
-  fi
-  echo "[install.sh] Sandbox skill repair complete."
-  exit 0
-fi
 
 # --- Constants (full install path) ---
 

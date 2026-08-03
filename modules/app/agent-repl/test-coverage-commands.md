@@ -5,7 +5,7 @@
 Test file: `test-commands.el`
 Source file: `commands.el`
 
-Emacs is not available in the current sandbox, so tests could not be executed.
+Emacs was not available when this analysis was written, so tests could not be executed.
 They are structurally valid ERT tests and should be verified once Emacs is available.
 
 ---
@@ -143,7 +143,7 @@ These are data constants tested indirectly through the macro expansion and resol
 
 ## Notes
 
-- Emacs is not available in the sandbox; tests need to be run outside the container.
+- Emacs was not available when this analysis was written; the tests still need a real run.
 - Magit tests use mock objects since magit is a heavy dependency.
 - The `run-at-time` call in `agent-repl-interrupt` is stubbed to avoid timer side effects.
 - The `agent-repl--define-diff-commands` macro is tested through its generated output (35 interactive commands across 7 families x 5 scopes).

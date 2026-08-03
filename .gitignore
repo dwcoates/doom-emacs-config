@@ -1,5 +1,3 @@
-.claude/sandbox/mounts
-.claude/sandbox/sandbox.log
 .claude/emacs/
 .claude-code-emacs-mcp.log
 .agent-repl-history
@@ -7,6 +5,4 @@
 .workspace-snapshot.el
 .projectile
 **/.DS_Store
-.agents-sandbox/mounts
-.agents-sandbox/sandbox.log
 modules/app/agent-repl/skills/**/.last-update.json
