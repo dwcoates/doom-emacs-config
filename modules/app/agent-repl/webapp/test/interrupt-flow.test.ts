@@ -265,42 +265,47 @@ describe("a workspace resolved to INTERRUPTED", () => {
 
 describe("an interrupted workspace on the rail", () => {
   it("wears the st-interrupted disc the stylesheet paints green", () => {
-    // Arrange — the sidebar is fed by Emacs's pushed roster, NOT by the
-    // frontend frame plane, so this is the other half of the same claim:
+    // Arrange — the sidebar is fed by the roster FRAME, the same plane the
+    // feed and footer read, so this is the other half of the same claim:
     // `#ws-sidebar .st-interrupted { background: var(--ok); }` only ever
     // reaches the DOM if the roster path admits the status.
     const mount = document.createElement("div");
     mount.hidden = true;
     const sidebar = new WorkspaceSidebar(mount, { httpBase: "http://localhost:0", now: () => NOW_MS });
     // Act
-    sidebar.update({
-      view: "repository",
-      repos: [
-        {
-          key: "repo",
-          label: "repo",
-          folded: false,
-          done: false,
-          rows: [
+    sidebar.adoptRosterFrame({
+      revision: 1,
+      bootId: "boot-a",
+      view: {
+        case: "repository",
+        value: {
+          sections: [
             {
-              name: "flow",
-              dir: WS,
-              status: "interrupted",
-              closed: false,
-              current: true,
-              lastViewedAt: null,
-              mergedAt: null,
-              branch: null,
-              parentBranch: null,
-              summary: null,
-              children: [],
+              repoKey: "repo",
+              label: "repo",
+              folded: false,
+              rows: [
+                {
+                  name: "flow",
+                  dir: WS,
+                  status: { case: "interrupted" },
+                  current: true,
+                  children: [],
+                  lastViewedAtMs: 0,
+                  mergedAtMs: 0,
+                  branch: "",
+                  parentBranch: "",
+                  summary: "",
+                  closed: false,
+                },
+              ],
             },
           ],
         },
-      ],
-      tasks: [],
-      recentlyMerged: null,
-      navDir: null,
+      },
+      recentlyMerged: { rows: [], folded: false, label: "" },
+      currentDir: WS,
+      navDir: "",
     });
     // Assert
     expect(mount.querySelector(".st.st-interrupted")).not.toBeNull();

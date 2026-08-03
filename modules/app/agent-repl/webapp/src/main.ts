@@ -89,7 +89,6 @@ import { FeedSearch, type SearchHost, installSearchHook } from "./search.js";
 import {
   WorkspaceSidebar,
   installWorkspaceExpandHook,
-  installWorkspaceRosterHook,
   workspaceStatusFromRenderState,
 } from "./sidebar.js";
 import { ConversationStore } from "./store.js";
@@ -296,13 +295,10 @@ async function boot(): Promise<void> {
     isPinned: () => isPinnedToBottom(feedEl),
     parkFeed: () => parkAtTail(feedEl),
   });
-  // The LEGACY publish path, kept installed while the Emacs side migrates to
-  // the roster frame. The two land on one adoption method under one revision
-  // gate (see WorkspaceSidebar.adopt), so whichever publisher this bundle
-  // meets, the rail reveals and repaints identically. FOLLOW-UP: drop this
-  // hook — and the lisp that fires it — once the Emacs publisher emits the
-  // frame, since only the frame path can carry the revision the gate ranks by.
-  installWorkspaceRosterHook(window as unknown as HostGlobal, sidebar);
+  // No roster hook is planted: the rail's only ingress is the roster FRAME off
+  // the websocket (WorkspaceSidebar.adoptRosterFrame), which is the sole path
+  // that can carry the revision the gate ranks by.
+  //
   // C-S-RET in the input window fires the expand hook to unfold the
   // cursor row's detail panel (openDirs is client-owned, off the roster).
   installWorkspaceExpandHook(window as unknown as HostGlobal, sidebar);
