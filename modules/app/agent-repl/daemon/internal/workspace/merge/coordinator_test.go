@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 )
@@ -351,6 +352,40 @@ func (s *syncSink) awaitPhase(t *testing.T, phase Phase) transition {
 			return tr
 		}
 		t.Logf("sink: skipped %s on %s while waiting for %s", tr.phase, tr.ws, phase)
+	}
+}
+
+// awaitQueueDrained waits until repo's durable queue holds nothing.
+//
+// THE LEASE-ACQUIRE FAILURE IS THE ONE TERMINAL PATH WITH NO RENDEZVOUS AFTER
+// IT. Every other drained-to-zero assertion in this file waits on
+// `<-h.lease.releases` first, and that is a real synchronization point:
+// QueueCoordinator.finish drops the durable entry and THEN releases, so a
+// received release proves the drop already happened. A run whose lease was
+// never acquired has no release to wait on.
+//
+// And the terminal STATUS cannot stand in for one. It is published BEFORE the
+// entry is dropped, deliberately (runstatus.go: emitting it after would let a
+// bounce land between the two), so observing merge_failed says nothing about
+// the queue and a test that read the snapshot straight after it was racing the
+// drop it meant to assert.
+//
+// So the property is asserted as what it actually is — the one the test names,
+// "a merge that can never run must not block the queue FOREVER". It is polled
+// against a deadline and FAILS with the observed depth; a timeout is never a
+// pass, so this cannot go green on a queue that stayed blocked.
+func awaitQueueDrained(t *testing.T, h *harness, repo string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		got := len(h.queue.Snapshot()[repo])
+		if got == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("queue depth = %d, want 0", got)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 
@@ -1165,9 +1200,7 @@ func TestLeaseAcquireFailureStillCompletesTheDurableEntry(t *testing.T) {
 	h.sink.awaitPhase(t, PhaseMergeFailed)
 
 	// Assert — a merge that can never run must not block the queue forever.
-	if got := len(h.queue.Snapshot()[testRepoKey]); got != 0 {
-		t.Fatalf("queue depth = %d, want 0", got)
-	}
+	awaitQueueDrained(t, h, testRepoKey)
 }
 
 func TestDriverFailureRecordsMergeFailedAndReleasesTheLease(t *testing.T) {
