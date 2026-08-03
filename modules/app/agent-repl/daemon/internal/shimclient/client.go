@@ -320,6 +320,23 @@ type Client struct {
 	// in memory so the demux can detect regressions cheaply.
 	lastSeen uint64
 
+	// seqGeneration names the shim generation whose event last advanced
+	// lastSeen ("" when no identified generation has: a mark just re-read from
+	// the durable SeqStore, or one advanced over a connection whose hello
+	// carried no pid). A seq is only comparable against a mark from the SAME
+	// generation, so this is what tells a regression apart from a new
+	// generation's fresh seq space. See seqgeneration.go.
+	seqGeneration string
+
+	// connGeneration names the generation of the connection currently being
+	// read, taken from its ShimHello at the top of runOnce.
+	//
+	// Both fields are owned by the Run goroutine exactly as lastSeen is:
+	// runOnce writes them before the read loop starts and the read loop is the
+	// only other writer, and one runOnce's read loop has fully returned
+	// (wg.Wait) before the next begins.
+	connGeneration string
+
 	// lastRecvNanos is the unix-nano time of the most recent inbound frame,
 	// read by the heartbeat monitor.
 	lastRecvNanos atomic.Int64
@@ -558,6 +575,10 @@ func (c *Client) runOnce(ctx context.Context) (retErr error) {
 	// rotation reconciliation above, and before any frame goes out.
 	from := c.cfg.SeqStore.LastSeq(c.cfg.SessionID)
 	c.lastSeen = from
+	// The generation THIS connection speaks for. seqGeneration is deliberately
+	// left alone: it still names the generation that earned the mark, and a
+	// reconnect to the same shim must keep the regression guard fully strict.
+	c.connGeneration = shimGenerationID(hello)
 	// The session's posture travels with the resume position, resolved HERE so
 	// the field is never empty on the wire (core.proto DaemonHello.
 	// permission_mode). Empty is reserved for a daemon too old to speak it.
@@ -571,8 +592,8 @@ func (c *Client) runOnce(ctx context.Context) (retErr error) {
 		conn.Close()
 		return fmt.Errorf("sending DaemonHello: %w", err)
 	}
-	c.logf("bring-up gate: DaemonHello sent from_seq=%d permission_mode=%s turn_in_flight=%v shim_version=%s; awaiting ShimReady",
-		from, mode, hello.GetTurnInFlight(), hello.GetShimVersion())
+	c.logf("bring-up gate: DaemonHello sent from_seq=%d permission_mode=%s turn_in_flight=%v shim_version=%s shim_generation=%q mark_generation=%q; awaiting ShimReady",
+		from, mode, hello.GetTurnInFlight(), hello.GetShimVersion(), c.connGeneration, c.seqGeneration)
 
 	// Publish the live connection so the read loop and control senders can use
 	// it. The READINESS latch is deliberately NOT closed here: it waits for the
