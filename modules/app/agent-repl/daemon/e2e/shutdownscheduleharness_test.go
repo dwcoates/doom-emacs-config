@@ -323,16 +323,16 @@ func (w *shutdownWorld) boot(t *testing.T) *shutdownBoot {
 	}
 
 	agentShim, err := server.WireAgentShim(server.AgentShimConfig{
-		Resumes:           &server.ConversationResolver{Reg: reg, Logf: t.Logf},
-		SSM:               ssmMgr,
-		Progress:          progressMgr,
-		Prompts:           controller,
-		Turns:             controller,
-		Health:            controller,
-		Lifecycle:         &server.WorkspaceOpener{Reg: reg, Ensurer: controller, Logf: t.Logf},
-		SessionDeaths:     server.RegistrySessionDeaths{Reg: reg},
-		Resyncer:          controller,
-		Catalogs:          controller,
+		Resumes:       &server.ConversationResolver{Reg: reg, Logf: t.Logf},
+		SSM:           ssmMgr,
+		Progress:      progressMgr,
+		Prompts:       controller,
+		Turns:         controller,
+		Health:        controller,
+		Lifecycle:     &server.WorkspaceOpener{Reg: reg, Ensurer: controller, Logf: t.Logf},
+		SessionDeaths: server.RegistrySessionDeaths{Reg: reg},
+		Resyncer:      controller,
+		Catalogs:      controller,
 		// The registry-backed SessionView source main.go wires, so a connect
 		// snapshot taken mid-drain lists the registry's sessions rather than
 		// nothing at all.
@@ -356,11 +356,11 @@ func (w *shutdownWorld) boot(t *testing.T) *shutdownBoot {
 			Connected: shimListener.Connected,
 			Held:      sessionlock.Held,
 		},
-		MergeLease:        mergeLease,
-		MergeQueue:        mergeQueue,
-		MergeGeometry:     geometryStore,
-		Logf:              t.Logf,
-		LogVerbosef:       t.Logf,
+		MergeLease:    mergeLease,
+		MergeQueue:    mergeQueue,
+		MergeGeometry: geometryStore,
+		Logf:          t.Logf,
+		LogVerbosef:   t.Logf,
 	})
 	if err != nil {
 		t.Fatalf("WireAgentShim: %v", err)
