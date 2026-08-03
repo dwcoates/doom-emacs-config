@@ -649,12 +649,25 @@ func (m *Manager) ApplySessionRotated(workspace, previous, next string) error {
 			workspace, previous, next)
 	}
 
-	// A COMPACTION DOES NOT SURVIVE THE ROTATION that ends its identity: its
+	// NEITHER CONTEXT-CUT AXIS SURVIVES THE ROTATION, for opposite reasons.
+	//
+	// A COMPACTION does not survive the rotation that ends its identity: its
 	// ContextCompacted belongs to the retired session and will never arrive,
-	// exactly as the in-flight turn's end will not. THE CLEARING AXIS IS LEFT
-	// ALONE for the opposite reason — a `/clear` CAUSES this rotation, and the
-	// ContextCleared it is waiting for is produced under the NEW identity.
+	// exactly as the in-flight turn's end will not.
+	//
+	// A CLEAR does not survive it because the rotation IS the clear completing.
+	// A `/clear` causes this rotation and nothing else the daemon dispatches
+	// does, so an axis standing open when the uuid changes has just been
+	// answered. This axis used to be held open here, waiting for a
+	// ContextCleared "produced under the NEW identity" — a promise no component
+	// keeps on its own: that event has exactly one producer, the shim-sidecar
+	// tailing the vendor transcript, and when the sidecar is not running or has
+	// not yet discovered the new uuid's transcript nothing ever closes the axis
+	// and the clear rides the full ClearingTimeout into its expiry log. A
+	// ContextCleared that DOES arrive afterwards still runs its close, which the
+	// axis reports as unchanged.
 	m.closeCompactingLocked(workspace, causeSessionRotated)
+	m.closeClearingLocked(workspace, causeSessionRotated)
 
 	// A PENDING PERMISSION DOES NOT SURVIVE THE ROTATION EITHER: the shim that
 	// asked the question is bounced, every waiter on it is abandoned, and the
