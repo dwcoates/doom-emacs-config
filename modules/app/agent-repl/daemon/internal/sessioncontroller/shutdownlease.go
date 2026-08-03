@@ -231,6 +231,33 @@ func (d *sessionController) noteActiveTurnID(started bool, turnID string) {
 	}
 }
 
+// newParkedEntry builds the queue entry that a drain lease parks, and is the
+// ONE place the parked entry's classification is decided.
+//
+// Both parking sites — the live submit that lands under a standing lease and
+// the restore that replays a previous daemon's parking ledger — construct the
+// same thing, so they construct it here. A second literal elsewhere would be a
+// second answer to "what is a parked prompt", and the two would drift.
+//
+// The stamp is HOLD, not PENDING. PENDING's frozen meaning is "the classifier
+// is running", and the classifier NEVER runs on a parked entry — there is no
+// turn to interject into and nothing to decide — so PENDING would describe a
+// state this code makes unreachable. HOLD's frozen meaning is "deliver it
+// later, never interrupt for it", which is exactly the promise the lease makes.
+// The rationale stays empty because no classifier produced one; the frontend
+// renders the lease bubble off shutdownHoldScheduleID instead.
+func newParkedEntry(id, requestID, text, permissionMode string, queuedAtMs int64) *queueEntry {
+	return &queueEntry{
+		id:             id,
+		requestID:      requestID,
+		text:           text,
+		permissionMode: permissionMode,
+		queuedAtMs:     queuedAtMs,
+		classification: frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD,
+		rationale:      "",
+	}
+}
+
 // parkForDrain stamps a queue entry as held by the drain lease and records the
 // durable row behind it. Caller holds m.mu; the durable write happens under it
 // deliberately — the parked entry must not be publishable before the record
@@ -438,15 +465,8 @@ func (m *Manager) restoreShutdownHolds(d *sessionController) {
 		if d.queue.get(row.EntryID) != nil {
 			continue
 		}
-		e := &queueEntry{
-			id:              row.EntryID,
-			requestID:       row.RequestID,
-			text:            row.Text,
-			permissionMode:  row.PermissionMode,
-			queuedAtMs:      row.QueuedAtMs,
-			classification:  frontendv1.QueueClassification_QUEUE_CLASSIFICATION_PENDING,
-			drainRowPending: true,
-		}
+		e := newParkedEntry(row.EntryID, row.RequestID, row.Text, row.PermissionMode, row.QueuedAtMs)
+		e.drainRowPending = true
 		if held && row.ScheduleID == liveSchedule {
 			e.shutdownHoldScheduleID = row.ScheduleID
 			stillHeld++
