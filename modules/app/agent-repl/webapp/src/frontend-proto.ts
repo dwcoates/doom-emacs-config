@@ -643,6 +643,17 @@ export interface ConversationItemFrame {
   arm: ConversationItemArm;
   /** The typed data.v1/core.v1 payload, adopted by shape (see file-top §5.1). */
   payload: JsonObject;
+  tokenUtilization: TokenUtilization[];
+}
+
+/** Response-level usage associated with one rendered assistant response. */
+export interface TokenUtilization {
+  apiMessageId: string;
+  model: string;
+  actor: "mainAgent" | "subagent";
+  subagent?: { agentId: string; subagentType: string; taskDescription: string };
+  usage: { inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens: number; cacheCreation5m: number; cacheCreation1h: number; cacheHitRate?: number; cacheWriteRate?: number; uncachedInputRate?: number; serviceTier: string; speed: string; inferenceGeo: string };
+  responseTiming?: { timeToFirstTokenMs?: number; outputGenerationDurationMs?: number };
 }
 
 export interface ConversationDelta {
@@ -1670,7 +1681,7 @@ function decodeConversationDelta(v: unknown): ConversationDelta {
   return cd;
 }
 
-const CONVERSATION_ITEM_ENVELOPE_KEYS = new Set(["uuid", "tsMs", "requestId", "source"]);
+const CONVERSATION_ITEM_ENVELOPE_KEYS = new Set(["uuid", "tsMs", "requestId", "source", "tokenUtilization"]);
 const CONVERSATION_ITEM_ARM_SET: ReadonlySet<string> = new Set(CONVERSATION_ITEM_ARMS);
 function decodeConversationItem(v: unknown, i: number): ConversationItemFrame {
   const ctx = `ConversationItem[${i}]`;
@@ -1698,7 +1709,26 @@ function decodeConversationItem(v: unknown, i: number): ConversationItemFrame {
     arm,
     // Adopt the typed payload by shape (see file-top §5.1 boundary note).
     payload: ensureObject(o[arm], `${ctx}.${arm}`),
+    tokenUtilization: o.tokenUtilization === undefined ? [] : ensureArray(o.tokenUtilization, `${ctx}.tokenUtilization`).map((entry, index) => decodeTokenUtilization(entry, `${ctx}.tokenUtilization[${index}]`)),
   };
+}
+
+function decodeTokenUtilization(v: unknown, where: string): TokenUtilization {
+  const o = ensureObject(v, where);
+  rejectUnknown(o, new Set(["agentReplSessionId", "claudeSessionId", "rootTurnId", "apiRequestId", "apiMessageId", "model", "mainAgent", "subagent", "usage", "responseTiming"]), where);
+  const actorKeys = ["mainAgent", "subagent"].filter((key) => o[key] !== undefined);
+  if (actorKeys.length !== 1) throw new Error(`frontend-proto: ${where} requires exactly one actor`);
+  const usage = ensureObject(o.usage, `${where}.usage`);
+  rejectUnknown(usage, new Set(["inputTokens", "outputTokens", "cacheReadInputTokens", "cacheCreationInputTokens", "cacheCreation", "serverToolUse", "serviceTier", "speed", "inferenceGeo", "outputDetails", "iterations", "cacheDiagnostic", "cacheRates", "fallbackCredit", "unmodeledUsage"]), `${where}.usage`);
+  const cache = usage.cacheCreation === undefined ? {} : ensureObject(usage.cacheCreation, `${where}.usage.cacheCreation`);
+  rejectUnknown(cache, new Set(["ephemeral5mInputTokens", "ephemeral1hInputTokens"]), `${where}.usage.cacheCreation`);
+  const rates = usage.cacheRates === undefined ? undefined : ensureObject(usage.cacheRates, `${where}.usage.cacheRates`);
+  if (rates !== undefined) rejectUnknown(rates, new Set(["totalPromptInputTokens", "cacheHitRate", "cacheWriteRate", "uncachedInputRate"]), `${where}.usage.cacheRates`);
+  const result: TokenUtilization = { apiMessageId: str(o, "apiMessageId", where), model: str(o, "model", where), actor: actorKeys[0] as "mainAgent" | "subagent", usage: { inputTokens: num(usage, "inputTokens", `${where}.usage`), outputTokens: num(usage, "outputTokens", `${where}.usage`), cacheReadInputTokens: num(usage, "cacheReadInputTokens", `${where}.usage`), cacheCreationInputTokens: num(usage, "cacheCreationInputTokens", `${where}.usage`), cacheCreation5m: num(cache, "ephemeral5mInputTokens", `${where}.usage.cacheCreation`), cacheCreation1h: num(cache, "ephemeral1hInputTokens", `${where}.usage.cacheCreation`), serviceTier: str(usage, "serviceTier", `${where}.usage`), speed: str(usage, "speed", `${where}.usage`), inferenceGeo: str(usage, "inferenceGeo", `${where}.usage`) } };
+  if (rates !== undefined) Object.assign(result.usage, { cacheHitRate: num(rates, "cacheHitRate", `${where}.usage.cacheRates`), cacheWriteRate: num(rates, "cacheWriteRate", `${where}.usage.cacheRates`), uncachedInputRate: num(rates, "uncachedInputRate", `${where}.usage.cacheRates`) });
+  if (result.actor === "subagent") { const agent = ensureObject(o.subagent, `${where}.subagent`); rejectUnknown(agent, new Set(["agentId", "parentToolUseId", "parentAgentId", "subagentType", "taskDescription"]), `${where}.subagent`); result.subagent = { agentId: str(agent, "agentId", `${where}.subagent`), subagentType: str(agent, "subagentType", `${where}.subagent`), taskDescription: str(agent, "taskDescription", `${where}.subagent`) }; }
+  if (o.responseTiming !== undefined) { const t = ensureObject(o.responseTiming, `${where}.responseTiming`); rejectUnknown(t, new Set(["timeToFirstTokenMs", "outputGenerationDurationMs"]), `${where}.responseTiming`); result.responseTiming = { ...(t.timeToFirstTokenMs === undefined ? {} : { timeToFirstTokenMs: num(t, "timeToFirstTokenMs", `${where}.responseTiming`) }), ...(t.outputGenerationDurationMs === undefined ? {} : { outputGenerationDurationMs: num(t, "outputGenerationDurationMs", `${where}.responseTiming`) }) }; }
+  return result;
 }
 
 const HEARTBEAT_VIEW_KEYS = new Set(["workspace", "sessionId", "progress"]);

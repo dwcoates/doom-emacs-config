@@ -617,6 +617,7 @@ function TextStream(
   // worth showing and a turn that spent no new input reports no token
   // figure, so either half may be absent and the corner may render empty.
   const meta = chip ? resultMeta(chip) : "";
+  const usage = responseUsageMeta(item.tokenUtilization);
   // Chess-game markers split the body FIRST: they must work inside a
   // TLDR-tree response too, and the tree renderer below never sees
   // markdown handling. Each text segment then picks its own pipeline.
@@ -642,7 +643,21 @@ function TextStream(
       return renderMarkdown(seg.text);
     })
     .join("");
-  return Bubble(cls, `${body}${catalog}${gns}`, item.ts, meta);
+  return Bubble(cls, `${body}${catalog}${gns}`, item.ts, `${meta}${usage}`);
+}
+
+/** Dense response accounting, with unavailable values named instead of hidden. */
+function responseUsageMeta(records: import("./frontend-proto.js").TokenUtilization[] | undefined): string {
+  if (records === undefined || records.length === 0) return "";
+  return records.map((r) => {
+    const u = r.usage;
+    const rate = (value: number | undefined): string => value === undefined ? "unavailable" : `${(value * 100).toFixed(1)}%`;
+    const timing = r.responseTiming;
+    const tps = timing?.outputGenerationDurationMs && timing.outputGenerationDurationMs > 0 ? `${(1000 * u.outputTokens / timing.outputGenerationDurationMs).toFixed(1)} tok/s` : "unavailable";
+    const ttft = timing?.timeToFirstTokenMs === undefined ? "unavailable" : `${timing.timeToFirstTokenMs} ms`;
+    const provenance = r.actor === "subagent" ? `subagent ${r.subagent?.agentId || "unavailable"} ${r.subagent?.subagentType || "unavailable"}` : "main agent";
+    return `<div class="response-usage">${escapeHtml(`${provenance} · ${r.model || "model unavailable"} · uncached ${u.inputTokens} · output ${u.outputTokens} · cache read ${u.cacheReadInputTokens} · cache write ${u.cacheCreationInputTokens} (5m ${u.cacheCreation5m}, 1h ${u.cacheCreation1h}) · hit ${rate(u.cacheHitRate)} · write ${rate(u.cacheWriteRate)} · uncached rate ${rate(u.uncachedInputRate)} · tier ${u.serviceTier || "unavailable"} · speed ${u.speed || "unavailable"} · geo ${u.inferenceGeo || "unavailable"} · generation ${tps} · TTFT ${ttft}`)}</div>`;
+  }).join("");
 }
 
 function Thinking(item: ThinkingItem): string {
