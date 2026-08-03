@@ -624,7 +624,7 @@ func (m *Manager) SessionInits() []*frontendv1.SessionInitView {
 // taskCatalogForSessionController rebuilds one live session controller's complete detached-task roster
 // from its retained event ring.
 func taskCatalogForSessionController(d *sessionController) *frontendv1.TaskCatalog {
-	return frontend.BuildTaskCatalog(d.workspace, d.sessionID, d.consumer.snapshotRing())
+	return frontend.BuildTaskCatalog(d.workspace, d.sessionID, d.consumer.snapshotRing(), d.consumer.logf)
 }
 
 // TaskCatalogs returns the complete detached-task roster for every live
