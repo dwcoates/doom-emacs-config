@@ -1,6 +1,7 @@
 package ssm
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -471,5 +472,160 @@ func TestPromptStateMethodsRejectMissingIdentity(t *testing.T) {
 				t.Fatal("err = nil, want validation failure")
 			}
 		})
+	}
+}
+
+// THE PERMANENT PROMPT WEDGE. A workspace carrying a terminal `merge_failed`
+// axis refused every user prompt it was ever given: the accepted edge appended
+// its `submitting` row, the publish invariant then failed on a composite that
+// ranked the merge axis above it, and the row was left behind as a turn claim no
+// turn end could ever retire — so the NEXT prompt took the idempotent branch and
+// failed identically, forever. These cover both halves: the accept is atomic,
+// and the composite lets a live claim be seen.
+
+func TestMarkPromptAcceptedRetractsItsRowWhenThePublishInvariantFails(t *testing.T) {
+	m, cl, _ := openUnwiredTest(t, fakeResolver{"s1": "ws1"})
+	connectOperational(t, m, "ws1", "s1", "g1")
+	if err := m.ApplyMergeTransition("ws1", sigMergeConflict, "test arrangement"); err != nil {
+		t.Fatalf("ApplyMergeTransition(merge_conflict): %v", err)
+	}
+
+	err := m.MarkPromptAccepted("ws1", "s1", "req-1", func(*frontendv1.WorkspaceState) {})
+
+	if err == nil {
+		t.Fatal("err = nil, want the publish invariant to refuse a conflicted workspace")
+	}
+	active, claimant, claimErr := turnClaim(m.db, "ws1")
+	if claimErr != nil {
+		t.Fatalf("turnClaim: %v", claimErr)
+	}
+	if active {
+		t.Fatalf("turn claim = (%v, %q), want the failed accept to leave NO claim behind", active, claimant)
+	}
+	if !cl.contains(`ssm: prompt accepted RETRACTED ws=ws1 session=s1 request_id="req-1"`) {
+		t.Fatalf("missing retraction log:\n%s", strings.Join(cl.lines, "\n"))
+	}
+}
+
+func TestMarkPromptAcceptedAfterAFailedAcceptIsNotIdempotent(t *testing.T) {
+	// The wedge itself: a claim left by a failed accept made every later prompt
+	// take the idempotent branch, which republished the same doomed premise.
+	m, cl, _ := openUnwiredTest(t, fakeResolver{"s1": "ws1"})
+	connectOperational(t, m, "ws1", "s1", "g1")
+	if err := m.ApplyMergeTransition("ws1", sigMergeConflict, "test arrangement"); err != nil {
+		t.Fatalf("ApplyMergeTransition(merge_conflict): %v", err)
+	}
+	if err := m.MarkPromptAccepted("ws1", "s1", "req-1", func(*frontendv1.WorkspaceState) {}); err == nil {
+		t.Fatal("arranging accept err = nil, want the conflicted workspace to refuse it")
+	}
+	if err := m.ApplyMergeTransition("ws1", sigMergeNone, "conflict resolved"); err != nil {
+		t.Fatalf("ApplyMergeTransition(merge_none): %v", err)
+	}
+
+	err := m.MarkPromptAccepted("ws1", "s1", "req-2", func(*frontendv1.WorkspaceState) {})
+
+	if err != nil {
+		t.Fatalf("MarkPromptAccepted: %v", err)
+	}
+	if cl.contains(`prompt accepted IDEMPOTENT ws=ws1 session=s1 request_id="req-2"`) {
+		t.Fatalf("the retracted accept still claimed the turn:\n%s", strings.Join(cl.lines, "\n"))
+	}
+}
+
+func TestMarkPromptAcceptedSucceedsOnAMergeFailedWorkspace(t *testing.T) {
+	// merge_failed is TERMINAL: nothing is coming to clear it, and driving the
+	// session is the only way out, so it must not refuse the user's prompt.
+	m, _, _ := openUnwiredTest(t, fakeResolver{"s1": "ws1"})
+	connectOperational(t, m, "ws1", "s1", "g1")
+	if err := m.ApplyMergeTransition("ws1", sigMergeFailed, "test arrangement"); err != nil {
+		t.Fatalf("ApplyMergeTransition(merge_failed): %v", err)
+	}
+
+	var published *frontendv1.WorkspaceState
+	err := m.MarkPromptAccepted("ws1", "s1", "req-1", func(state *frontendv1.WorkspaceState) {
+		published = state
+	})
+
+	if err != nil {
+		t.Fatalf("MarkPromptAccepted: %v", err)
+	}
+	if published.GetState() != frontendv1.RenderState_RENDER_STATE_SUBMITTING || !published.GetTurnActive() {
+		t.Fatalf("published = %s turn_active=%v, want SUBMITTING/true", published.GetState(), published.GetTurnActive())
+	}
+}
+
+func TestMarkPromptAcceptedRefusesAMergeConflictWorkspace(t *testing.T) {
+	// INTENTIONAL, and the reason merge_failed had to be separated from it: a
+	// conflicted workspace IS `merge_conflict`, the merge owns its session, and
+	// the submitting premise is not true of it.
+	m, _, _ := openUnwiredTest(t, fakeResolver{"s1": "ws1"})
+	connectOperational(t, m, "ws1", "s1", "g1")
+	if err := m.ApplyMergeTransition("ws1", sigMergeConflict, "test arrangement"); err != nil {
+		t.Fatalf("ApplyMergeTransition(merge_conflict): %v", err)
+	}
+
+	err := m.MarkPromptAccepted("ws1", "s1", "req-1", func(*frontendv1.WorkspaceState) {})
+
+	if err == nil || !strings.Contains(err.Error(), "state=RENDER_STATE_MERGE_CONFLICT") {
+		t.Fatalf("err = %v, want the conflicted workspace to refuse the submitting premise", err)
+	}
+}
+
+func TestRetractUnpublishedAcceptReportsAnAxisWithNoAcceptedRow(t *testing.T) {
+	// Nothing may write the session-status axis inside the accept's own lock
+	// hold, so an axis with no row to retract is an invariant violation, and the
+	// caller must hear about it ALONGSIDE the accept failure it was handling.
+	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	cause := errors.New("accept failed")
+
+	err := m.retractUnpublishedAcceptLocked("ws1", "s1", "req-1", cause)
+
+	if !errors.Is(err, cause) {
+		t.Fatalf("err = %v, want the accept failure preserved", err)
+	}
+	if !cl.contains("prompt accepted RETRACTION FAILED ws=ws1 session=s1 request_id=\"req-1\" stage=read_back") {
+		t.Fatalf("missing read-back failure log:\n%s", strings.Join(cl.lines, "\n"))
+	}
+}
+
+func TestRetractUnpublishedAcceptRefusesAnotherSessionsRow(t *testing.T) {
+	// It retracts only what the accept wrote, exactly as MarkPromptRejected does.
+	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1", "s2": "ws1"})
+	if err := m.Apply(evTurnStarted("s2", 1)); err != nil {
+		t.Fatalf("turn started: %v", err)
+	}
+	cause := errors.New("accept failed")
+
+	err := m.retractUnpublishedAcceptLocked("ws1", "s1", "req-1", cause)
+
+	if !errors.Is(err, cause) {
+		t.Fatalf("err = %v, want the accept failure preserved", err)
+	}
+	if got := mustCurrent(t, m, "ws1").GetState(); got != frontendv1.RenderState_RENDER_STATE_THINKING {
+		t.Fatalf("state = %s, want the other session's THINKING untouched", got)
+	}
+	if !cl.contains("prompt accepted RETRACTION FAILED ws=ws1 session=s1 request_id=\"req-1\" stage=identify") {
+		t.Fatalf("missing identify-failure log:\n%s", strings.Join(cl.lines, "\n"))
+	}
+}
+
+func TestMarkPromptAcceptedSucceedsWhileTheBringUpEdgeIsStillConnecting(t *testing.T) {
+	// The shim's readiness releases the send path before the operational edge is
+	// written, so a prompt genuinely does arrive on a `connecting` lifecycle.
+	m, _, _ := openUnwiredTest(t, fakeResolver{"s1": "ws1"})
+	if err := m.ApplySessionConnectivity("ws1", "s1", "g1", SessionConnectivityConnecting, "bring_up"); err != nil {
+		t.Fatalf("ApplySessionConnectivity(connecting): %v", err)
+	}
+
+	var published *frontendv1.WorkspaceState
+	err := m.MarkPromptAccepted("ws1", "s1", "req-1", func(state *frontendv1.WorkspaceState) {
+		published = state
+	})
+
+	if err != nil {
+		t.Fatalf("MarkPromptAccepted: %v", err)
+	}
+	if published.GetState() != frontendv1.RenderState_RENDER_STATE_SUBMITTING || !published.GetTurnActive() {
+		t.Fatalf("published = %s turn_active=%v, want SUBMITTING/true", published.GetState(), published.GetTurnActive())
 	}
 }

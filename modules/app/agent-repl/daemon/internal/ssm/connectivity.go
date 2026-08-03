@@ -392,20 +392,28 @@ func compositeWorkspaceState(workspace string, projection resolved, composite Co
 	msg.Connectivity = connectivityProto(composite.Connectivity)
 	msg.Status = statusProto(composite.Status)
 	msg.ControllerGenerationId = string(composite.ControllerGenerationID)
-	switch composite.Connectivity {
-	case SessionConnectivityOperational:
-		if isSessionStatusRenderState(state) {
-			msg.CauseKind = composite.StatusCauseKind
-			msg.CauseSeq = composite.StatusCauseSeq
-			msg.AtMs = composite.StatusAtMs
-			// BOTH halves of a turn are active. A composite that only counted
-			// `thinking` would report no turn for the whole `submitting`
-			// window, which is when a second prompt must be queued rather than
-			// forwarded.
-			msg.TurnActive = composite.Status == SessionStatusThinking ||
-				composite.Status == SessionStatusSubmitting
-		}
-	case SessionConnectivityDegraded:
+	switch {
+	// THE STATUS AXIS WON THE RENDER STATE, so the frame's cause, instant and
+	// turn flag come from the row that won it. Keyed on the RESOLVED state
+	// rather than on connectivity, because compositeRenderState can now hand
+	// the win to a live turn claim while the connectivity lifecycle is still
+	// mid-bring-up; a frame that painted SUBMITTING while reporting
+	// turn_active=false would state both halves of the contradiction at once.
+	case isSessionStatusRenderState(state):
+		msg.CauseKind = composite.StatusCauseKind
+		msg.CauseSeq = composite.StatusCauseSeq
+		msg.AtMs = composite.StatusAtMs
+		// BOTH halves of a turn are active. A composite that only counted
+		// `thinking` would report no turn for the whole `submitting`
+		// window, which is when a second prompt must be queued rather than
+		// forwarded.
+		msg.TurnActive = composite.Status == SessionStatusThinking ||
+			composite.Status == SessionStatusSubmitting
+	case composite.Connectivity == SessionConnectivityOperational:
+		// An operational workspace resting on a projection state — a merge
+		// phase, a context cut, a dead shim — keeps the projection's own cause
+		// and instant, which is what named the row that produced it.
+	case composite.Connectivity == SessionConnectivityDegraded:
 		if fault, ok := newestConnectivityFault(composite.ActiveFaults); ok {
 			msg.CauseKind = fault.CauseKind
 			msg.CauseSeq = 0
@@ -468,11 +476,51 @@ func compositeConnectivityAt(composite CompositeState) int64 {
 	return composite.connectivityAtMs
 }
 
+// claimedTurnRenderState reports the render state a turn CLAIM on the
+// session-status axis is entitled to, and whether the axis carries one at all.
+//
+// Both halves of a turn count, for the same reason the composite's TurnActive
+// counts both: `submitting` is the daemon's own commitment to submit and
+// `thinking` is the shim holding the prompt, and a claim is claimed in either.
+func claimedTurnRenderState(composite CompositeState) (frontendv1.RenderState, bool) {
+	switch composite.Status {
+	case SessionStatusSubmitting:
+		return frontendv1.RenderState_RENDER_STATE_SUBMITTING, true
+	case SessionStatusThinking:
+		return frontendv1.RenderState_RENDER_STATE_THINKING, true
+	default:
+		return frontendv1.RenderState_RENDER_STATE_UNSPECIFIED, false
+	}
+}
+
+// turnClaimOutranksBringUp reports whether a turn claim was written by the
+// wiring that is currently coming up, rather than left over from an older one.
+//
+// A `connecting` lifecycle normally outranks everything: it says there is no
+// usable route, which is a stronger statement about what the user can do than
+// anything the agent last said. The one claim it must NOT outrank is one this
+// bring-up itself produced — the shim's readiness releases the send path before
+// the operational edge is written, so a prompt accepted in that window resolved
+// INIT with turn_active=false and its own publish invariant refused it.
+//
+// The discriminator is the claim's instant against the lifecycle edge's: a row
+// appended AFTER the connecting edge was written by the wiring that edge
+// belongs to. A stale `thinking` from a session resumed across a daemon restart
+// is older than the new connecting edge and keeps losing, so a reconnecting
+// workspace still paints as one.
+func turnClaimOutranksBringUp(composite CompositeState) bool {
+	return composite.StatusAtMs > composite.connectivityAtMs
+}
+
 func compositeRenderState(projection resolved, composite CompositeState) (frontendv1.RenderState, error) {
+	claimed, hasClaim := claimedTurnRenderState(composite)
 	switch composite.Connectivity {
 	case SessionConnectivityHibernated:
 		return frontendv1.RenderState_RENDER_STATE_HIBERNATED, nil
 	case SessionConnectivityConnecting:
+		if hasClaim && turnClaimOutranksBringUp(composite) {
+			return claimed, nil
+		}
 		return frontendv1.RenderState_RENDER_STATE_INIT, nil
 	case SessionConnectivityDegraded:
 		return frontendv1.RenderState_RENDER_STATE_DEGRADED, nil
@@ -480,17 +528,35 @@ func compositeRenderState(projection resolved, composite CompositeState) (fronte
 		return frontendv1.RenderState_RENDER_STATE_SEVERED, nil
 	case SessionConnectivityOperational:
 		switch projection.state {
-		case frontendv1.RenderState_RENDER_STATE_INIT,
-			frontendv1.RenderState_RENDER_STATE_DEAD,
+		case frontendv1.RenderState_RENDER_STATE_DEAD,
 			frontendv1.RenderState_RENDER_STATE_CLEARING,
 			frontendv1.RenderState_RENDER_STATE_COMPACTING,
 			frontendv1.RenderState_RENDER_STATE_MERGE_ENQUEUING,
 			frontendv1.RenderState_RENDER_STATE_MERGING,
 			frontendv1.RenderState_RENDER_STATE_MERGE_QUEUED,
 			frontendv1.RenderState_RENDER_STATE_MERGE_CONFLICT,
-			frontendv1.RenderState_RENDER_STATE_MERGE_FAILED,
 			frontendv1.RenderState_RENDER_STATE_MERGED:
+			// THESE OUTRANK A LIVE TURN, AND merge_conflict IS THE REASON THE
+			// LIST IS SPELLED OUT. A workspace parked on a conflict IS
+			// `merge_conflict`: the user's only move is to resolve it, the
+			// merge machinery owns the session until they do, and a prompt
+			// submitted into it is refused on exactly that premise. The cuts,
+			// the dead shim and the in-flight merge phases each own the session
+			// the same way.
 			return projection.state, nil
+		case frontendv1.RenderState_RENDER_STATE_INIT,
+			frontendv1.RenderState_RENDER_STATE_MERGE_FAILED:
+			// NEITHER OWNS THE SESSION, so neither may mask a turn the user
+			// just started. `merge_failed` is TERMINAL — the run is over,
+			// nothing is coming to clear it, and the only way out is to drive
+			// the session — so ranking it above the status axis refused every
+			// prompt on the workspace forever. INIT here is a projection that
+			// has not caught up with a session the daemon is already driving.
+			// Both keep winning while nothing claims a turn, which is what
+			// leaves their badge and their color on an idle workspace.
+			if !hasClaim {
+				return projection.state, nil
+			}
 		}
 		switch composite.Status {
 		case SessionStatusReady:
