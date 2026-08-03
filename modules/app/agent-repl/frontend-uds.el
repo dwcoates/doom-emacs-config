@@ -181,7 +181,7 @@ that the daemon or session is healthy.")
     "typingDelta" "taskCatalog" "commandAck" "daemonView"
     "sessionInit" "heartbeat" "queue" "progress"
     "workspaceAvailable" "hostAction" "daemonHealth" "sessionHealth"
-    "workspaceRoster")
+    "workspaceRoster" "shutdownSchedule")
   "The protojson (lowerCamelCase) names of every `FrontendFrame' oneof arm.
 Mirrors the `frame' oneof in proto/agentshim/frontend/v1/frontend.proto.
 A decoded frame whose sole top-level key is NOT one of these is
@@ -194,6 +194,13 @@ for the deleted GET /commands HTTP slash-menu source.
 `workspaceRoster' is the daemon's broadcast echo of the roster Emacs
 itself publishes; it is registered so the echo decodes instead of
 signalling.
+
+`shutdownSchedule' (drain lease) is the daemon-global scheduled-shutdown
+lease, broadcast on EVERY change.  Emacs does NOT render it — the webapp
+owns the drain banner — but it is not an ignored arm either: Emacs is a
+SENDER of `scheduleShutdown'/`cancelScheduledShutdown' and a cancel needs
+the live `schedule_id', so `frontend-state.el' registers a handler that
+records the lease and logs the edge.
 
 `taskCatalog', `heartbeat' (E4), `queue' (E4), `progress' (F1), and
 `workspaceRoster' are decoded for wire parity and rendered by nothing
@@ -217,7 +224,10 @@ webapp's running-tool chip.  Emacs shows no per-tool elapsed clock.
 `queue' (E4): the prompts the daemon is holding for a session.  The
 queue's controls (force/accept/cancel) live where the prompt was typed —
 the webapp composer — and Emacs does not offer them, so rendering the
-chips here would show state the user could not act on.
+chips here would show state the user could not act on.  This covers the
+drain lease's `QueueEntry.shutdown_hold' too: a held entry rides the same
+ignored arm, so a lease-held queue decodes and is dropped exactly like
+any other queue push, with nothing here to weaken.
 
 `progress' (F1): the consolidated progress footer's whole input.  The
 footer is webapp-only by settled decision (design-progress-footer.md,
@@ -250,7 +260,8 @@ not unfinished wiring.")
     "shutdown" "clientLog" "queueForce" "queueAccept" "queueCancel"
     "workspaceMaterialized" "hostActionCompleted"
     "daemonHealth" "sessionHealth" "restartSession"
-    "publishWorkspaceRoster")
+    "publishWorkspaceRoster"
+    "scheduleShutdown" "cancelScheduledShutdown")
   "The protojson names of every SENDABLE `FrontendCommand' oneof arm.
 Mirrors the `command' oneof in frontend.proto.  Sending an unknown
 command field is a programming error and fails loudly.
@@ -274,6 +285,14 @@ needs it because its console is invisible and unpersisted.
 `queueForce' / `queueAccept' / `queueCancel' (E4) act on a held prompt.
 Listed for the same mirror reason; Emacs does not send them, because it
 does not render the queue they act on.
+
+`scheduleShutdown' / `cancelScheduledShutdown' (drain lease) take and
+release the daemon-global drain lease.  Unlike `shutdown', which demands
+the bounce NOW and loses whatever turn was in flight, the scheduled arm
+hands the daemon the decision of WHEN: it blocks new turns and executes
+the same `ShutdownCmd' semantics once every hold clears.  Emacs sends
+both from `daemon.el' (`agent-repl-frontend-daemon-restart-scheduled' and
+`agent-repl-frontend-daemon-cancel-scheduled-restart').
 
 `publishWorkspaceRoster' carries the sidebar roster (sidebar.el).  Emacs
 is its ONLY publisher: Emacs owns the workspace model, so the roster is

@@ -15,6 +15,9 @@
 ;;                          StateSnapshot on (re)connect.
 ;;   - `sessionView'     -> the session store, plus the FIRST reader
 ;;                          `SessionView.death' ever had (F4).
+;;   - `shutdownSchedule'-> record the daemon-global drain lease.  Rendered by
+;;                          nothing here; kept because the cancel command
+;;                          Emacs sends needs the live schedule id.
 ;;
 ;; The daemon is the SINGLE SOURCE OF TRUTH for render-state (SSM-resolved);
 ;; Emacs never re-derives it.  Per §10 the local precedence `cond' in
@@ -764,12 +767,15 @@ receives every catalog but has no per-task roster."
         (inits (plist-get snapshot :inits))
         (available (plist-get snapshot :workspaceAvailable))
         (host-actions (plist-get snapshot :hostActions))
-        (daemon (plist-get snapshot :daemon)))
+        (daemon (plist-get snapshot :daemon))
+        ;; `plist-member', not `plist-get': an `idle' view is `{}' and
+        ;; decodes to nil, so presence and emptiness are different facts.
+        (shutdown-schedule (plist-member snapshot :shutdownSchedule)))
     (agent-repl--log nil
-                     "frontend-apply-snapshot: resync — %d workspace(s), %d session(s), %d webapp-only catalog(s), %d init(s), %d workspace-available, %d host-action(s), daemon=%S"
+                     "frontend-apply-snapshot: resync — %d workspace(s), %d session(s), %d webapp-only catalog(s), %d init(s), %d workspace-available, %d host-action(s), daemon=%S shutdown-schedule-present=%s"
                      (length workspaces) (length sessions) (length catalogs)
                      (length inits) (length available) (length host-actions)
-                     (and daemon t))
+                     (and daemon t) (if shutdown-schedule "t" "nil"))
     ;; Rebuild the session roster from scratch: the snapshot is authoritative,
     ;; so a session absent from it (a bounced daemon never heard of) must not
     ;; linger in the store where the orphan/live-p reads would still see it.
@@ -796,6 +802,19 @@ receives every catalog but has no per-task roster."
       ;; an init, or a host action having applied cleanly.
       (when daemon
         (agent-repl--frontend-apply-daemon-view daemon))
+      ;; The drain lease, when this daemon carries the field at all.  Routed
+      ;; through the per-item container so a malformed view is loud AND
+      ;; counted without costing the resync every other item — the lease is
+      ;; not rendered here, so it is the last thing that should abort a
+      ;; reconnect.  An absent field is an older daemon, not a failure, and
+      ;; leaves the recorded lease at its honest "unknown".
+      (setq failures
+            (+ failures
+               (agent-repl--frontend-apply-snapshot-items
+                "shutdown-schedule"
+                (when shutdown-schedule (list (plist-get snapshot :shutdownSchedule)))
+                '(:draining)
+                #'agent-repl--frontend-apply-shutdown-schedule)))
       ;; Replayed daemon-owned creation jobs materialize before their ACK.  The
       ;; handlers are defined later in load order by workspace-create-client.el;
       ;; snapshots arrive only after the full module has loaded and connected.
@@ -1094,6 +1113,119 @@ change still resets the reattach give-ups.  Returns the boot id."
     (agent-repl--frontend-note-boot-id boot-id)
     boot-id))
 
+;;;; ---- ShutdownScheduleView: the daemon-global drain lease -------------
+;;
+;; The daemon broadcasts this on EVERY change and carries it in the connect
+;; snapshot, so a client that joins mid-drain sees the lease without waiting
+;; for an edge.  Emacs RENDERS NONE OF IT — the drain banner is the webapp's,
+;; by the same division that keeps the queue and progress arms webapp-only.
+;;
+;; It is still recorded here rather than ignored, because Emacs is a SENDER on
+;; this contract: `CancelScheduledShutdownCmd' needs the live `schedule_id',
+;; and the proto is explicit that a stale id is a loud daemon nack.  The only
+;; place that id exists on this side is the pushed view, so the frame is the
+;; cancel command's sole input, not decoration.
+
+(defvar agent-repl--frontend-shutdown-schedule nil
+  "The daemon's last-pushed `ShutdownScheduleView', normalized, or nil.
+
+nil means NO VIEW HAS EVER BEEN RECEIVED on this connection — genuinely
+unknown, which is NOT the same fact as `idle' and must never be read as
+one.  A daemon too old to carry the arm leaves this nil forever, and
+every reader treats unknown as \"cannot act\", never as \"no lease\".
+
+Otherwise a plist naming exactly one arm of the proto oneof:
+
+  (:state :idle)
+  (:state :draining :schedule-id S :scheduled-at-ms N :cause C
+   :stop-shims BOOL :holds HOLDS)
+
+HOLDS is the decoded `ShutdownHold' list verbatim; Emacs counts it for
+the log and interprets none of it.")
+
+(defun agent-repl-frontend-shutdown-schedule ()
+  "Return the recorded drain-lease state plist, or nil when unknown.
+The single reader of `agent-repl--frontend-shutdown-schedule', so the
+unknown/idle distinction stays in one place."
+  agent-repl--frontend-shutdown-schedule)
+
+(defun agent-repl-frontend-scheduled-shutdown-id ()
+  "Return the live schedule id when a shutdown is scheduled, else nil.
+Nil for BOTH `idle' and never-received: neither can name a schedule, and
+a caller that needs one must fail loudly rather than invent an id."
+  (let ((schedule agent-repl--frontend-shutdown-schedule))
+    (when (eq (plist-get schedule :state) :draining)
+      (plist-get schedule :scheduleId))))
+
+(defun agent-repl--frontend-shutdown-schedule-summary (schedule)
+  "Return a one-line log summary of normalized SCHEDULE."
+  (pcase (plist-get schedule :state)
+    ('nil "unknown")
+    (:idle "idle")
+    (:draining (format "draining id=%s cause=%S stop-shims=%s holds=%d"
+                       (plist-get schedule :scheduleId)
+                       (plist-get schedule :cause)
+                       (if (plist-get schedule :stopShims) "t" "nil")
+                       (length (plist-get schedule :holds))))
+    (state (format "unrecognized:%S" state))))
+
+(defun agent-repl--frontend-apply-shutdown-schedule (view)
+  "Apply a pushed `ShutdownScheduleView' VIEW (a plist) — record the lease.
+Handler for the `shutdownSchedule' oneof arm and for the connect
+snapshot's field of the same name.  Returns the normalized plist now in
+`agent-repl--frontend-shutdown-schedule'.
+
+Exactly one arm is set on the wire by contract, so a view with neither or
+both fails loudly (log + `error') — no defaulting to `idle', which would
+let a malformed frame silently cancel a real drain from Emacs's seat.  A
+`draining' arm with no `schedule_id' fails the same way: an unidentifiable
+schedule cannot be cancelled, and recording it would only defer the
+failure to the cancel.
+
+NOTE the empty-message decode: `ShutdownScheduleIdle' is `{}' on the
+wire, which `json-parse-string' renders as a nil plist value, so arm
+presence is tested with `plist-member' rather than `plist-get'."
+  (unless (listp view)
+    (agent-repl--log nil
+                     "frontend-shutdown-schedule: MALFORMED view type=%s — expected a plist"
+                     (type-of view))
+    (error "agent-repl: malformed ShutdownScheduleView (not a plist)"))
+  (let ((idle (plist-member view :idle))
+        (draining (plist-member view :draining)))
+    (when (and idle draining)
+      (agent-repl--log nil
+                       "frontend-shutdown-schedule: MALFORMED view sets BOTH oneof arms view=%S"
+                       view)
+      (error "agent-repl: ShutdownScheduleView sets both idle and draining"))
+    (unless (or idle draining)
+      (agent-repl--log nil
+                       "frontend-shutdown-schedule: MALFORMED view sets NEITHER oneof arm view=%S"
+                       view)
+      (error "agent-repl: ShutdownScheduleView sets no state arm"))
+    (let* ((body (and draining (plist-get view :draining)))
+           (schedule-id (plist-get body :scheduleId)))
+      (when (and draining (not (and (stringp schedule-id)
+                                    (not (string-empty-p schedule-id)))))
+        (agent-repl--log nil
+                         "frontend-shutdown-schedule: MALFORMED draining arm carries no schedule_id view=%S"
+                         view)
+        (error "agent-repl: ShutdownScheduleDraining carries no schedule_id"))
+      (let ((previous agent-repl--frontend-shutdown-schedule)
+            (next (if idle
+                      (list :state :idle)
+                    (list :state :draining
+                          :scheduleId schedule-id
+                          :scheduledAtMs (plist-get body :scheduledAtMs)
+                          :cause (plist-get body :cause)
+                          :stopShims (and (plist-get body :stopShims) t)
+                          :holds (plist-get body :holds)))))
+        (setq agent-repl--frontend-shutdown-schedule next)
+        (agent-repl--log nil
+                         "frontend-shutdown-schedule: %s -> %s"
+                         (agent-repl--frontend-shutdown-schedule-summary previous)
+                         (agent-repl--frontend-shutdown-schedule-summary next))
+        next))))
+
 ;;;; ---- Handler registration --------------------------------------------
 ;;
 ;; Loaded after `frontend-uds.el' (config.el load order / the test files),
@@ -1109,6 +1241,8 @@ change still resets the reattach give-ups.  Returns the boot id."
                                   #'agent-repl--frontend-apply-daemon-view)
 (agent-repl--uds-register-handler "sessionInit"
                                   #'agent-repl--frontend-apply-session-init)
+(agent-repl--uds-register-handler "shutdownSchedule"
+                                  #'agent-repl--frontend-apply-shutdown-schedule)
 
 ;;;; ---- Module init: registration only ---------------------------------
 ;;

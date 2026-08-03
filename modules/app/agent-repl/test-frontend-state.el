@@ -1552,3 +1552,215 @@ first."
      '(:workspace "ws1" :state "RENDER_STATE_COMPACTING"))
     ;; Assert
     (should (eq (agent-repl--ws-get "ws1" :pushed-render-state) :compacting))))
+
+;;;; ---- ShutdownScheduleView: the recorded drain lease ------------------
+
+(defmacro agent-repl-test--with-clean-lease (&rest body)
+  "Run BODY with the recorded drain lease scratch-bound to unknown."
+  (declare (indent 0))
+  `(let ((agent-repl--frontend-shutdown-schedule nil))
+     ,@body))
+
+(ert-deftest agent-repl-test-shutdown-schedule-unknown-until-a-view-arrives ()
+  "No pushed lease reads as unknown (nil), which is not the same as idle."
+  ;; Arrange / Act / Assert
+  (agent-repl-test--with-clean-lease
+    (should-not (agent-repl-frontend-shutdown-schedule))))
+
+(ert-deftest agent-repl-test-shutdown-schedule-records-idle ()
+  "An `idle' view records the idle state from an EMPTY decoded message."
+  ;; Arrange
+  (agent-repl-test--with-clean-lease
+    ;; Act — `{\"idle\":{}}' decodes to a present key with a nil value.
+    (agent-repl--frontend-apply-shutdown-schedule '(:idle nil))
+    ;; Assert
+    (should (eq (plist-get (agent-repl-frontend-shutdown-schedule) :state)
+                :idle))))
+
+(ert-deftest agent-repl-test-shutdown-schedule-records-draining-id ()
+  "A `draining' view records the schedule id the cancel command needs."
+  ;; Arrange
+  (agent-repl-test--with-clean-lease
+    ;; Act
+    (agent-repl--frontend-apply-shutdown-schedule
+     '(:draining (:scheduleId "sch-1" :scheduledAtMs 5 :cause "merge"
+                  :stopShims t :holds ((:workspace "/w" :sessionId "s1")))))
+    ;; Assert
+    (should (equal (agent-repl-frontend-scheduled-shutdown-id) "sch-1"))))
+
+(ert-deftest agent-repl-test-shutdown-schedule-records-draining-cause ()
+  "The draining arm's display cause is retained verbatim."
+  ;; Arrange
+  (agent-repl-test--with-clean-lease
+    ;; Act
+    (agent-repl--frontend-apply-shutdown-schedule
+     '(:draining (:scheduleId "sch-1" :cause "merge of ws rebuilt the daemon")))
+    ;; Assert
+    (should (equal (plist-get (agent-repl-frontend-shutdown-schedule) :cause)
+                   "merge of ws rebuilt the daemon"))))
+
+(ert-deftest agent-repl-test-shutdown-schedule-records-draining-holds ()
+  "The holds list is retained so the log can count what the drain waits on."
+  ;; Arrange
+  (agent-repl-test--with-clean-lease
+    ;; Act
+    (agent-repl--frontend-apply-shutdown-schedule
+     '(:draining (:scheduleId "sch-1"
+                  :holds ((:workspace "/a" :sessionId "s1"
+                           :turn (:turnId "t1"))
+                          (:workspace "/b" :sessionId "s2"
+                           :tasks (:count 3))))))
+    ;; Assert
+    (should (= (length (plist-get (agent-repl-frontend-shutdown-schedule) :holds))
+               2))))
+
+(ert-deftest agent-repl-test-shutdown-schedule-transitions-idle-to-draining ()
+  "A schedule taken after idle replaces the recorded state."
+  ;; Arrange
+  (agent-repl-test--with-clean-lease
+    (agent-repl--frontend-apply-shutdown-schedule '(:idle nil))
+    ;; Act
+    (agent-repl--frontend-apply-shutdown-schedule
+     '(:draining (:scheduleId "sch-2")))
+    ;; Assert
+    (should (equal (agent-repl-frontend-scheduled-shutdown-id) "sch-2"))))
+
+(ert-deftest agent-repl-test-shutdown-schedule-transitions-draining-to-idle ()
+  "A cancelled schedule clears the recorded id — idle is a real broadcast value."
+  ;; Arrange
+  (agent-repl-test--with-clean-lease
+    (agent-repl--frontend-apply-shutdown-schedule
+     '(:draining (:scheduleId "sch-3")))
+    ;; Act
+    (agent-repl--frontend-apply-shutdown-schedule '(:idle nil))
+    ;; Assert
+    (should-not (agent-repl-frontend-scheduled-shutdown-id))))
+
+(ert-deftest agent-repl-test-shutdown-schedule-logs-the-transition ()
+  "Every lease edge is instrumented, naming both the old and new state."
+  ;; Arrange
+  (agent-repl-test--with-clean-lease
+    (let (logged)
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+        ;; Act
+        (agent-repl--frontend-apply-shutdown-schedule
+         '(:draining (:scheduleId "sch-4" :cause "c")))
+        ;; Assert
+        (should (seq-find
+                 (lambda (m)
+                   (string-match-p
+                    "frontend-shutdown-schedule: unknown -> draining id=sch-4" m))
+                 logged))))))
+
+(ert-deftest agent-repl-test-shutdown-schedule-idle-reports-no-schedule-id ()
+  "An idle lease names no schedule: nothing to cancel, and no invented id."
+  ;; Arrange
+  (agent-repl-test--with-clean-lease
+    (agent-repl--frontend-apply-shutdown-schedule '(:idle nil))
+    ;; Act / Assert
+    (should-not (agent-repl-frontend-scheduled-shutdown-id))))
+
+(ert-deftest agent-repl-test-shutdown-schedule-no-arm-errors ()
+  "A view setting neither oneof arm fails loudly, never defaulting to idle."
+  ;; Arrange
+  (agent-repl-test--with-clean-lease
+    ;; Act / Assert
+    (should-error (agent-repl--frontend-apply-shutdown-schedule nil))))
+
+(ert-deftest agent-repl-test-shutdown-schedule-both-arms-error ()
+  "A view setting BOTH oneof arms fails loudly — the wire allows exactly one."
+  ;; Arrange
+  (agent-repl-test--with-clean-lease
+    ;; Act / Assert
+    (should-error (agent-repl--frontend-apply-shutdown-schedule
+                   '(:idle nil :draining (:scheduleId "sch-5"))))))
+
+(ert-deftest agent-repl-test-shutdown-schedule-draining-without-id-errors ()
+  "A draining arm with no schedule id fails loudly — it could never be cancelled."
+  ;; Arrange
+  (agent-repl-test--with-clean-lease
+    ;; Act / Assert
+    (should-error (agent-repl--frontend-apply-shutdown-schedule
+                   '(:draining (:cause "no id"))))))
+
+(ert-deftest agent-repl-test-shutdown-schedule-malformed-view-leaves-the-record ()
+  "A rejected view must not overwrite the lease it failed to describe."
+  ;; Arrange
+  (agent-repl-test--with-clean-lease
+    (agent-repl--frontend-apply-shutdown-schedule '(:draining (:scheduleId "sch-6")))
+    ;; Act
+    (ignore-errors (agent-repl--frontend-apply-shutdown-schedule nil))
+    ;; Assert
+    (should (equal (agent-repl-frontend-scheduled-shutdown-id) "sch-6"))))
+
+(ert-deftest agent-repl-test-snapshot-applies-the-shutdown-schedule ()
+  "The connect snapshot's lease lands without waiting for an edge frame."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-clean-lease
+      ;; Act
+      (agent-repl-test--apply-snapshot
+       '(:workspaces nil
+         :shutdownSchedule (:draining (:scheduleId "sch-7" :cause "boot mid-drain"))))
+      ;; Assert
+      (should (equal (agent-repl-frontend-scheduled-shutdown-id) "sch-7")))))
+
+(ert-deftest agent-repl-test-snapshot-without-a-shutdown-schedule-is-not-an-error ()
+  "A daemon too old to carry the field leaves the lease honestly unknown."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-clean-lease
+      ;; Act
+      (agent-repl-test--apply-snapshot '(:workspaces nil))
+      ;; Assert
+      (should-not (agent-repl-frontend-shutdown-schedule)))))
+
+(ert-deftest agent-repl-test-snapshot-with-a-malformed-lease-still-resyncs ()
+  "A malformed lease is contained: the rest of the reconnect still lands."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-clean-lease
+      (agent-repl-test--register-ws "ws1")
+      (cl-letf (((symbol-function 'message) (lambda (&rest _) nil)))
+        ;; Act — a present-but-empty view sets no arm.
+        (agent-repl-test--apply-snapshot
+         '(:workspaces ((:workspace "ws1" :state "RENDER_STATE_IDLE"))
+           :shutdownSchedule nil))
+        ;; Assert
+        (should (eq (agent-repl--ws-get "ws1" :pushed-render-state) :idle))))))
+
+(ert-deftest agent-repl-test-snapshot-with-a-malformed-lease-counts-a-failure ()
+  "The contained lease failure is surfaced to the user, never swallowed."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-clean-lease
+      (let (messages)
+        (cl-letf (((symbol-function 'message)
+                   (lambda (fmt &rest args) (push (apply #'format fmt args) messages))))
+          ;; Act
+          (agent-repl-test--apply-snapshot '(:workspaces nil :shutdownSchedule nil))
+          ;; Assert
+          (should (seq-find (lambda (m) (string-match-p "FAILED during snapshot resync" m))
+                            messages)))))))
+
+(ert-deftest agent-repl-test-snapshot-tolerates-a-queue-entry-shutdown-hold ()
+  "A snapshot whose queues carry a lease hold applies without choking."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-clean-lease
+      (agent-repl-test--register-ws "ws1")
+      ;; Act
+      (agent-repl-test--apply-snapshot
+       '(:workspaces ((:workspace "ws1" :state "RENDER_STATE_IDLE"))
+         :queues ((:workspace "ws1" :sessionId "s1"
+                   :entries ((:id "q1" :text "held"
+                              :shutdownHold (:scheduleId "sch-8")))))))
+      ;; Assert
+      (should (eq (agent-repl--ws-get "ws1" :pushed-render-state) :idle)))))
+
+(ert-deftest agent-repl-test-shutdown-schedule-handler-is-registered ()
+  "The lease arm is wired to its handler, not left as unfinished wiring."
+  ;; Act / Assert
+  (should (eq (cdr (assoc "shutdownSchedule" agent-repl--uds-frame-handlers))
+              #'agent-repl--frontend-apply-shutdown-schedule)))
