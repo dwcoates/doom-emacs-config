@@ -64,6 +64,28 @@ export interface ModelUsage {
   context_window: number;
 }
 
+/** Additive timing measurements for exactly the responses covered by a total. */
+export interface TokenTimingTotals {
+  output_tokens_with_generation_duration: number;
+  output_generation_duration_ms: number;
+  responses_with_generation_duration: number;
+  responses_without_generation_duration: number;
+  total_time_to_first_token_ms: number;
+  responses_with_time_to_first_token: number;
+  responses_without_time_to_first_token: number;
+}
+
+/** Cumulative accounting for a defined set of API responses. */
+export interface TokenUsageTotals extends Usage { timing?: TokenTimingTotals; }
+
+/** Session usage split by owner and model. */
+export interface SessionTokenUtilization {
+  all_agents: TokenUsageTotals;
+  main_agent: TokenUsageTotals;
+  subagents: Array<{ agent_id: string; totals: TokenUsageTotals }>;
+  models: Array<{ model: string; totals: TokenUsageTotals }>;
+}
+
 /** One selectable model. */
 export interface ModelInfo {
   value: string;

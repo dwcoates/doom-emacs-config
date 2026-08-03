@@ -3,11 +3,28 @@ import { ModelUsage, Usage } from "../src/protocol.js";
 import {
   TokenMenuData,
   compactTokens,
+  averageTimeToFirstTokenMs,
   formatTokens,
+  generationTokensPerSecond,
+  timingRows,
   tokensMenuHtml,
   tokensOverlayHtml,
   turnInputTokens,
 } from "../src/tokens.js";
+import { TokenTimingTotals } from "../src/protocol.js";
+
+function timing(over: Partial<TokenTimingTotals> = {}): TokenTimingTotals {
+  return {
+    output_tokens_with_generation_duration: 400,
+    output_generation_duration_ms: 200,
+    responses_with_generation_duration: 2,
+    responses_without_generation_duration: 1,
+    total_time_to_first_token_ms: 180,
+    responses_with_time_to_first_token: 2,
+    responses_without_time_to_first_token: 1,
+    ...over,
+  };
+}
 
 /** A top-level usage payload, defaulted small and fully dimensioned. */
 function usage(over: Partial<Usage> = {}): Usage {
@@ -67,6 +84,23 @@ describe("compactTokens", () => {
   it("writes a million-scale count in M", () => {
     // Arrange + Act + Assert
     expect(compactTokens(1_230_000)).toBe("1.2M");
+  });
+});
+
+describe("timing derivations", () => {
+  it("uses only timed output for generation throughput", () => {
+    expect(generationTokensPerSecond(timing())).toBe(2000);
+  });
+
+  it("does not invent rates when timing is absent or has a zero denominator", () => {
+    expect(generationTokensPerSecond(undefined)).toBeNull();
+    expect(generationTokensPerSecond(timing({ output_generation_duration_ms: 0 }))).toBeNull();
+    expect(averageTimeToFirstTokenMs(timing({ responses_with_time_to_first_token: 0 }))).toBeNull();
+    expect(timingRows(undefined)).toEqual([["generation", "unavailable"], ["average TTFT", "unavailable"]]);
+  });
+
+  it("averages TTFT over only responses that reported it", () => {
+    expect(averageTimeToFirstTokenMs(timing())).toBe(90);
   });
 });
 

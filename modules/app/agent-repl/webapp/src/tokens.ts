@@ -17,7 +17,7 @@
  */
 import { dropdownChipHtml } from "./counter-menu.js";
 import { escapeHtml } from "./highlight.js";
-import { ModelUsage, Usage } from "./protocol.js";
+import { ModelUsage, TokenTimingTotals, Usage } from "./protocol.js";
 
 /** Everything the dropdown knows how to break down. */
 export interface TokenMenuData {
@@ -51,6 +51,28 @@ export function compactTokens(n: number): string {
   if (n < 1000) return String(n);
   if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
   return `${(n / 1_000_000).toFixed(1)}M`;
+}
+
+/** Model-generation throughput from timed output only, or unavailable. */
+export function generationTokensPerSecond(timing: TokenTimingTotals | undefined): number | null {
+  if (timing === undefined || timing.output_generation_duration_ms <= 0) return null;
+  return (1000 * timing.output_tokens_with_generation_duration) / timing.output_generation_duration_ms;
+}
+
+/** Mean first-token latency from responses that supplied that measurement. */
+export function averageTimeToFirstTokenMs(timing: TokenTimingTotals | undefined): number | null {
+  if (timing === undefined || timing.responses_with_time_to_first_token <= 0) return null;
+  return timing.total_time_to_first_token_ms / timing.responses_with_time_to_first_token;
+}
+
+/** Human-readable timing rows that never invent a rate for untimed responses. */
+export function timingRows(timing: TokenTimingTotals | undefined): Array<[string, string]> {
+  const tps = generationTokensPerSecond(timing);
+  const ttft = averageTimeToFirstTokenMs(timing);
+  return [
+    ["generation", tps === null ? "unavailable" : `${tps.toFixed(1)} tok/s`],
+    ["average TTFT", ttft === null ? "unavailable" : `${ttft.toFixed(0)} ms`],
+  ];
 }
 
 /**
