@@ -2282,8 +2282,30 @@ type MergeStatusFailed struct {
 	CommitsLanded  int32                  `protobuf:"varint,3,opt,name=commits_landed,json=commitsLanded,proto3" json:"commits_landed,omitempty"`
 	FailingSha     string                 `protobuf:"bytes,4,opt,name=failing_sha,json=failingSha,proto3" json:"failing_sha,omitempty"` // set only for commit-bound failures
 	FailingSubject string                 `protobuf:"bytes,5,opt,name=failing_subject,json=failingSubject,proto3" json:"failing_subject,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// THIS MESSAGE, serialized as JSON, carried verbatim so a frontend can
+	// report the WHOLE failure record as one field of the error it shows.
+	//
+	// A failed merge is the one merge status a human has to DIAGNOSE rather
+	// than watch go by, and the narration frontends echo is a single line:
+	// it quotes `cause` and `failing_subject` and drops everything else. The
+	// counts and the sha never reached the report at all, so a user reading
+	// "merge failed — cherry-pick refused" had to leave the editor and go to
+	// the daemon log for the rest of the record.
+	//
+	// IT IS PRODUCED BY PROTO3's OWN JSON MAPPING (protojson), never by
+	// hand-assembled string building. That is what makes it exhaustive
+	// WITHOUT MAINTENANCE: a field added to this message appears in the
+	// reported error the moment the schema learns it, whereas a formatter
+	// listing the fields it knows would report the schema as it stood when
+	// the formatter was written.
+	//
+	// STAMPED LAST, onto a message whose other fields are already filled and
+	// whose own `failed_json` is still empty, so it is the serialization of
+	// this message WITHOUT this field and can never nest inside itself.
+	// Empty is never valid on a published failed arm.
+	FailedJson    string `protobuf:"bytes,6,opt,name=failed_json,json=failedJson,proto3" json:"failed_json,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *MergeStatusFailed) Reset() {
@@ -2347,6 +2369,13 @@ func (x *MergeStatusFailed) GetFailingSha() string {
 func (x *MergeStatusFailed) GetFailingSubject() string {
 	if x != nil {
 		return x.FailingSubject
+	}
+	return ""
+}
+
+func (x *MergeStatusFailed) GetFailedJson() string {
+	if x != nil {
+		return x.FailedJson
 	}
 	return ""
 }
@@ -6926,14 +6955,16 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\x06prompt\x18\x01 \x01(\tR\x06prompt\"f\n" +
 	"\x11MergeStatusMerged\x12#\n" +
 	"\rcommits_total\x18\x01 \x01(\x05R\fcommitsTotal\x12,\n" +
-	"\x12after_action_error\x18\x02 \x01(\tR\x10afterActionError\"\xbf\x01\n" +
+	"\x12after_action_error\x18\x02 \x01(\tR\x10afterActionError\"\xe0\x01\n" +
 	"\x11MergeStatusFailed\x12\x14\n" +
 	"\x05cause\x18\x01 \x01(\tR\x05cause\x12#\n" +
 	"\rcommits_total\x18\x02 \x01(\x05R\fcommitsTotal\x12%\n" +
 	"\x0ecommits_landed\x18\x03 \x01(\x05R\rcommitsLanded\x12\x1f\n" +
 	"\vfailing_sha\x18\x04 \x01(\tR\n" +
 	"failingSha\x12'\n" +
-	"\x0ffailing_subject\x18\x05 \x01(\tR\x0efailingSubject\"\x95\x06\n" +
+	"\x0ffailing_subject\x18\x05 \x01(\tR\x0efailingSubject\x12\x1f\n" +
+	"\vfailed_json\x18\x06 \x01(\tR\n" +
+	"failedJson\"\x95\x06\n" +
 	"\vSessionView\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x1d\n" +
 	"\n" +

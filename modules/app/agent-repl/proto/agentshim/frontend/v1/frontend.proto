@@ -470,6 +470,29 @@ message MergeStatusFailed {
   int32  commits_landed  = 3;
   string failing_sha     = 4;  // set only for commit-bound failures
   string failing_subject = 5;
+
+  // THIS MESSAGE, serialized as JSON, carried verbatim so a frontend can
+  // report the WHOLE failure record as one field of the error it shows.
+  //
+  // A failed merge is the one merge status a human has to DIAGNOSE rather
+  // than watch go by, and the narration frontends echo is a single line:
+  // it quotes `cause` and `failing_subject` and drops everything else. The
+  // counts and the sha never reached the report at all, so a user reading
+  // "merge failed — cherry-pick refused" had to leave the editor and go to
+  // the daemon log for the rest of the record.
+  //
+  // IT IS PRODUCED BY PROTO3's OWN JSON MAPPING (protojson), never by
+  // hand-assembled string building. That is what makes it exhaustive
+  // WITHOUT MAINTENANCE: a field added to this message appears in the
+  // reported error the moment the schema learns it, whereas a formatter
+  // listing the fields it knows would report the schema as it stood when
+  // the formatter was written.
+  //
+  // STAMPED LAST, onto a message whose other fields are already filled and
+  // whose own `failed_json` is still empty, so it is the serialization of
+  // this message WITHOUT this field and can never nest inside itself.
+  // Empty is never valid on a published failed arm.
+  string failed_json = 6;
 }
 
 message SessionView {

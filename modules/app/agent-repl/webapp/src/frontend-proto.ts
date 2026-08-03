@@ -312,6 +312,12 @@ export interface MergeStatusFailed {
   /** Set only for commit-bound failures. */
   failingSha: string;
   failingSubject: string;
+  /**
+   * This arm, serialized as JSON by the daemon through proto3's own JSON
+   * mapping, so a frontend can report the WHOLE failure record as one field
+   * of the error it shows rather than the two fields its prose quotes.
+   */
+  failedJson: string;
 }
 
 export interface SessionView {
@@ -1119,6 +1125,7 @@ const MERGE_PHASE_DECODERS: ReadonlyMap<string, (v: unknown) => MergeStatus["pha
         "commitsLanded",
         "failingSha",
         "failingSubject",
+        "failedJson",
       ]);
       return {
         case: "failed" as const,
@@ -1128,6 +1135,7 @@ const MERGE_PHASE_DECODERS: ReadonlyMap<string, (v: unknown) => MergeStatus["pha
           commitsLanded: num(o, "commitsLanded", "MergeStatusFailed"),
           failingSha: str(o, "failingSha", "MergeStatusFailed"),
           failingSubject: str(o, "failingSubject", "MergeStatusFailed"),
+          failedJson: str(o, "failedJson", "MergeStatusFailed"),
         },
       };
     },

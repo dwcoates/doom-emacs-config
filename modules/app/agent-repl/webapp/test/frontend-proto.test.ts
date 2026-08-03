@@ -1169,6 +1169,20 @@ describe("WorkspaceState.mergeStatus decoding", () => {
     expect(status.phase.value.cause).toBe("merge enqueue refused");
   });
 
+  it("decodes the failed phase's whole-record JSON", () => {
+    // The daemon serializes the failed arm with proto3's JSON mapping so a
+    // frontend can report the WHOLE record; the decoder carries it verbatim
+    // rather than re-deriving one from the fields beside it.
+    // Arrange / Act
+    const record = '{"cause":"merge enqueue refused","commitsTotal":3}';
+    const status = statusOf(
+      withStatus({ failed: { cause: "merge enqueue refused", failedJson: record } }),
+    );
+    // Assert
+    if (status.phase.case !== "failed") throw new Error("wrong phase");
+    expect(status.phase.value.failedJson).toBe(record);
+  });
+
   it("decodes a failed run that never finished planning as zero commits", () => {
     // Arrange / Act
     const status = statusOf(withStatus({ failed: { cause: "geometry unresolvable" } }));

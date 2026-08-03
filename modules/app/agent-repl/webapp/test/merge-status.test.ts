@@ -229,6 +229,8 @@ describe("mergeFacts — failed", () => {
       commitsLanded: 3,
       failingSha: "fee1234",
       failingSubject: "break the build",
+      failedJson:
+        '{"cause":"tests failed","commitsTotal":4,"commitsLanded":3,"failingSha":"fee1234","failingSubject":"break the build"}',
     },
   });
 
@@ -250,7 +252,14 @@ describe("mergeFacts — failed", () => {
     const facts = mergeFacts(
       status({
         case: "failed",
-        value: { cause: "", commitsTotal: 0, commitsLanded: 0, failingSha: "", failingSubject: "" },
+        value: {
+          cause: "",
+          commitsTotal: 0,
+          commitsLanded: 0,
+          failingSha: "",
+          failingSubject: "",
+          failedJson: "{}",
+        },
       }),
     );
     // Assert
