@@ -695,6 +695,11 @@ re-routes their frontend resolution instead."
          (agent-repl--sidebar-nav-dir nil)
          (agent-repl--sidebar-flat-dirs nil)
          (agent-repl--sidebar-last-signature nil)
+         ;; The roster revision counter is per-Emacs-boot, and a test suite
+         ;; is one boot: without rebinding it, a test asserting the revision
+         ;; a publish carries would depend on how many publishes ran before
+         ;; it, which is suite order.
+         (agent-repl--sidebar-roster-revision 0)
          ;; Active sidebar view (sidebar.el): a test that flips to the
          ;; Task view would otherwise leak that choice into every later
          ;; test's roster build.  Task hash state is rebound alongside so
