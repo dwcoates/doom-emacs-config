@@ -216,6 +216,30 @@ func (m *Manager) DrainHolds(tasks LiveTaskCounter) []DrainHold {
 	return out
 }
 
+// WiredSessions reports the session id of every session this fleet currently
+// holds a controller for, sorted so two reads of an unchanged fleet compare
+// equal.
+//
+// It is the AFFIRMATIVE RESOLUTION half of the restored lease's unresolved set.
+// DrainHolds answers "who is holding the drain open", and a session that has
+// wired and is simply idle is absent from it — which is indistinguishable, from
+// the outside, from a session that has not wired at all. This says which
+// sessions the fleet can actually answer for, so "not in DrainHolds" can be read
+// as "genuinely holding nothing" instead of "not asked yet".
+func (m *Manager) WiredSessions() []string {
+	m.mu.Lock()
+	out := make([]string, 0, len(m.byWS))
+	for _, d := range m.byWS {
+		if d.sessionID == "" {
+			continue
+		}
+		out = append(out, d.sessionID)
+	}
+	m.mu.Unlock()
+	sort.Strings(out)
+	return out
+}
+
 // noteActiveTurnID records the turn now in flight, or clears it at its end. It
 // rides the SAME correlated boundary the merge waiters bind on (onTurnEvent),
 // which is the only place this package is told a turn's own id.

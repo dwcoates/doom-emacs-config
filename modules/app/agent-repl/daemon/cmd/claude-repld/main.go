@@ -791,6 +791,15 @@ func main() {
 		// and the scheduler binds itself to it at construction.
 		ShutdownSchedules: shutdownSchedules,
 		DrainHolds:        controller,
+		// The durable evidence a RESTORED lease seeds itself from. It is the
+		// SAME registry and the SAME two probes the boot sweeper classifies
+		// with, below, so the sweeper's verdict about a surviving shim and the
+		// lease's verdict about it cannot be two different verdicts.
+		DrainEvidence: server.RegistryDrainEvidence{
+			Reg:       sessionRegistry,
+			Connected: shimListener.Connected,
+			Held:      sessionlock.Held,
+		},
 		ClientLogs:        clientLogs,
 		// The daemon resolves a workspace's conversation for itself. Frontends
 		// send an intent (continue / fresh / explicit), never a remembered
