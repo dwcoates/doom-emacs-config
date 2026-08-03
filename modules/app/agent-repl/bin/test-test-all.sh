@@ -142,7 +142,7 @@ test_default_runs_every_suite_without_recording() {
     run_test_all "$tree"
 
     if [ "$RUN_RC" -eq 0 ] &&
-        [ "$(wc -l <"$tree/stub.log" | tr -d ' ')" -eq 17 ] &&
+        [ "$(wc -l <"$tree/stub.log" | tr -d ' ')" -eq 18 ] &&
         [ "$(wc -l <"$tree/modules/app/agent-repl/test_time.csv" | tr -d ' ')" -eq 1 ] &&
         grep -q "timing: proto" "$tree/stdout" &&
         grep -q "timings were not recorded" "$tree/stdout"; then
@@ -158,9 +158,10 @@ test_record_appends_every_suite() {
     run_test_all "$tree" --record
 
     if [ "$RUN_RC" -eq 0 ] &&
-        [ "$(wc -l <"$tree/modules/app/agent-repl/test_time.csv" | tr -d ' ')" -eq 18 ] &&
+        [ "$(wc -l <"$tree/modules/app/agent-repl/test_time.csv" | tr -d ' ')" -eq 19 ] &&
         grep -q ',master,ert,' "$tree/modules/app/agent-repl/test_time.csv" &&
         grep -q ',master,proto,' "$tree/modules/app/agent-repl/test_time.csv" &&
+        grep -q ',master,logging,' "$tree/modules/app/agent-repl/test_time.csv" &&
         grep -Eq ',master,daemon,[0-9]+([.][0-9]+)?$' \
             "$tree/modules/app/agent-repl/test_time.csv"; then
         pass "--record atomically appends one timing per suite"

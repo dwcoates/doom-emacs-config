@@ -20,6 +20,7 @@ mkdir -p \
     "$tree/modules/app/agent-repl/agent-shim/claude/shim-sidecar" \
     "$tree/modules/app/agent-repl/agent-shim/shim-store" \
     "$tree/modules/app/agent-repl/agent-shim/wire" \
+    "$tree/modules/app/agent-repl/agent-shim/logging/go" \
     "$tree/modules/app/agent-repl/agent-shim/claude/shim/src" \
     "$tree/modules/app/agent-repl/webapp/src"
 cp "$SCRIPT_SRC" "$bin/report-logging-density.sh"
@@ -47,6 +48,10 @@ printf '%s\n' \
     'func Read() error { return nil }' \
     >"$tree/modules/app/agent-repl/agent-shim/wire/wire.go"
 printf '%s\n' \
+    'package logging' \
+    'func Timestamp() string { return "" }' \
+    >"$tree/modules/app/agent-repl/agent-shim/logging/go/timestamp.go"
+printf '%s\n' \
     'LOGGER.log({}, "start");' \
     'LOGGER.logVerbose({}, "detail");' \
     >"$tree/modules/app/agent-repl/agent-shim/claude/shim/src/main.ts"
@@ -56,12 +61,14 @@ printf '%s\n' \
     >"$tree/modules/app/agent-repl/webapp/src/main.ts"
 
 out="$("$bin/report-logging-density.sh")"
-[ "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" -eq 7 ] ||
-    fail "default report did not emit one header and six components"
+[ "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" -eq 8 ] ||
+    fail "default report did not emit one header and seven components"
 printf '%s\n' "$out" | grep -q '^daemon,go,1,4,1,250.00$' ||
     fail "daemon count included tests or missed canonical calls"
 printf '%s\n' "$out" | grep -q '^wire,go,1,2,0,0.00$' ||
     fail "wire zero-call case was not reported"
+printf '%s\n' "$out" | grep -q '^logging,go,1,2,0,0.00$' ||
+    fail "shared logging zero-call case was not reported"
 printf '%s\n' "$out" | grep -q '^shim,typescript,1,2,2,1000.00$' ||
     fail "shim canonical calls were not counted"
 printf '%s\n' "$out" | grep -q '^webapp,typescript,1,2,2,1000.00$' ||

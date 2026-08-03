@@ -5,6 +5,7 @@ go 1.23.4
 require github.com/gorilla/websocket v1.5.3
 
 require (
+	agentrepl/logging v0.0.0
 	agentrepl/proto v0.0.0
 	agentrepl/wire v0.0.0
 	golang.org/x/sys v0.22.0
@@ -30,3 +31,5 @@ require (
 replace agentrepl/proto => ../proto/gen/go
 
 replace agentrepl/wire => ../agent-shim/wire
+
+replace agentrepl/logging => ../agent-shim/logging/go

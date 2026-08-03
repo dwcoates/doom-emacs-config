@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"agentrepl/logging"
 )
 
 type failingWriter struct{ err error }
@@ -1057,8 +1059,8 @@ func TestStampMarshalsInLocalZoneRatherThanUTC(t *testing.T) {
 	if err := json.Unmarshal(raw, &text); err != nil {
 		t.Fatal(err)
 	}
-	if text != at.Local().Format(TimestampLayout) || strings.HasSuffix(text, "Z") {
-		t.Fatalf("timestamp = %q, want %q", text, at.Local().Format(TimestampLayout))
+	if text != at.Local().Format(logging.TimestampLayout) || strings.HasSuffix(text, "Z") {
+		t.Fatalf("timestamp = %q, want %q", text, at.Local().Format(logging.TimestampLayout))
 	}
 }
 

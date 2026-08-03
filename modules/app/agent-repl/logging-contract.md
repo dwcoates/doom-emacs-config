@@ -93,10 +93,17 @@ runtimes interleave and compare without per-runtime normalization:
   remaining digits with zeros rather than emitting a shorter field.
 - An explicit numeric offset in `±HH:MM` form.
 
-The layout is expressed as `TimestampLayout` in each Go runtime
-(`dlog`, `shim-store/internal/logging`, `shim-sidecar/internal/logging`),
-`logTimestamp` in the shim and webapp TypeScript loggers, and
-`agent-repl--log-timestamp-format` in Emacs.
+The layout has one owner per language, not one per runtime:
+
+- Go: `agentrepl/logging` at `agent-shim/logging/go`, imported by the daemon,
+  the store and the sidecar.
+- TypeScript: `agent-shim/logging/ts/timestamp.ts`, compiled by the shim and
+  the webapp.
+- Emacs: `agent-repl--log-timestamp-format` in `core.el`.
+
+Three languages cannot compile one source, so `proto/vocab/log-timestamp.json`
+is the seam holding the three to the same answer, and each language asserts
+against it. See `agent-shim/logging/AGENTS.md`.
 
 Timestamps arriving from another runtime are parsed as ordinary RFC 3339, so a
 forwarded record carrying a UTC instant is still readable; the daemon converts
