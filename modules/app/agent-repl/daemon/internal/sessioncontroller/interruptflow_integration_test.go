@@ -47,9 +47,12 @@ const (
 // interruptFlowResolver binds the session id to its workspace for the SSM.
 type interruptFlowResolver map[string]string
 
-func (r interruptFlowResolver) Workspace(sessionID string) (string, bool) {
+func (r interruptFlowResolver) Session(sessionID string) (ssm.Binding, bool) {
 	ws, ok := r[sessionID]
-	return ws, ok
+	if !ok {
+		return ssm.Binding{}, false
+	}
+	return ssm.Binding{Workspace: ws, SessionID: sessionID}, true
 }
 
 // interruptFlowRig is one workspace controlled end to end: a live Manager over a
