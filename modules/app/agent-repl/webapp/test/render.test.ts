@@ -66,6 +66,18 @@ function textAt(hour: number, minute: number, text = "the answer"): Conversation
   };
 }
 
+describe("response token utilization metadata", () => {
+  it("renders cache, service, timing, and subagent provenance with unavailable values", () => {
+    const item = { ...textAt(9, 5), tokenUtilization: [{ apiMessageId: "m", model: "opus", actor: "subagent" as const, subagent: { agentId: "agent-7", subagentType: "research", taskDescription: "inspect" }, usage: { inputTokens: 1, outputTokens: 20, cacheReadInputTokens: 30, cacheCreationInputTokens: 40, cacheCreation5m: 4, cacheCreation1h: 36, cacheHitRate: 0.3, cacheWriteRate: 0.4, serviceTier: "priority", speed: "fast", inferenceGeo: "us" }, responseTiming: { timeToFirstTokenMs: 50, outputGenerationDurationMs: 100 } }] } as TextItem;
+    const html = renderItem(item);
+    expect(html).toContain("subagent agent-7 research");
+    expect(html).toContain("cache write 40 (5m 4, 1h 36)");
+    expect(html).toContain("tier priority");
+    expect(html).toContain("generation 200.0 tok/s");
+    expect(html).toContain("uncached rate unavailable");
+  });
+});
+
 /** A user-turn item whose prompt was sent at the given local wall-clock time. */
 function userTurnAt(
   hour: number,
