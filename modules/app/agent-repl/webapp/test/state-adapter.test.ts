@@ -1039,6 +1039,67 @@ describe("conversation provenance gate", () => {
   });
 });
 
+describe("the workspace roster frame", () => {
+  /** A minimal-but-valid roster frame in the repository grouping. */
+  function rosterFrame(over: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      workspaceRoster: {
+        revision: "4",
+        repository: {
+          sections: [
+            { repoKey: "doom", folded: false, rows: [{ dir: "/w/a", name: "a", ready: {}, current: true }] },
+          ],
+        },
+        currentDir: "/w/a",
+        ...over,
+      },
+    };
+  }
+
+  it("maps the roster frame to a workspace-roster effect", () => {
+    // Arrange + Act
+    const effects = applyOne(rosterFrame());
+
+    // Assert
+    expect(effects.map((e) => e.kind)).toEqual(["workspace-roster"]);
+  });
+
+  it("forwards the decoded roster whole, revision included", () => {
+    // Arrange + Act
+    const [effect] = applyOne(rosterFrame());
+
+    // Assert — the sidebar owns the gate, so the adapter must not strip the
+    // revision it ranks by.
+    if (effect.kind !== "workspace-roster") throw new Error(`wrong effect ${effect.kind}`);
+    expect(effect.value.revision).toBe(4);
+  });
+
+  it("logs the roster's arrival at debug", () => {
+    // Arrange
+    const logs: Array<[AdapterLogLevel, string]> = [];
+    const adapter = new StateAdapter((lvl, msg) => logs.push([lvl, msg]));
+
+    // Act
+    adapter.apply(frame(rosterFrame()));
+
+    // Assert
+    expect(logs.some(([lvl, m]) => lvl === "debug" && m.includes("workspace roster revision=4"))).toBe(
+      true,
+    );
+  });
+
+  it("no longer counts the roster as an ignored shape", () => {
+    // Arrange
+    const adapter = new StateAdapter();
+
+    // Act
+    adapter.apply(frame(rosterFrame()));
+
+    // Assert
+    expect(adapter.ignoredCounts().get("workspaceRoster")).toBeUndefined();
+  });
+});
+
 describe("explicit-ignore path", () => {
   it("ignores a commandAck frame, counting and logging once per name", () => {
     const logs: Array<[AdapterLogLevel, string]> = [];
