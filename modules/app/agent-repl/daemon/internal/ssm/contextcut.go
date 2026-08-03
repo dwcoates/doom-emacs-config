@@ -8,12 +8,15 @@ import (
 
 // defaultClearingTimeout bounds the clearing axis.
 //
-// A `/clear` is dispatched by the daemon and closed by a ContextCleared the
-// SIDECAR produces off the vendor's transcript, several processes away. That
-// round trip is normally sub-second; a minute means it is not coming — the
-// sidecar is not running, the transcript line never landed, or the vendor
-// refused the command outright — and a red workspace that no arriving event
-// can ever release is exactly the wedge this bound exists to prevent.
+// A `/clear` is dispatched by the daemon and closed by whichever of its two
+// completion edges lands first: the vendor session rotation the clear itself
+// causes (ApplySessionRotated, daemon-local and reliable), or a ContextCleared
+// the SIDECAR produces off the vendor's transcript, several processes away.
+//
+// This bound backstops the case where NEITHER arrives: the vendor refused the
+// command outright, so nothing rotated, and no transcript line was ever written
+// for the sidecar to read. A red workspace that no arriving event can ever
+// release is exactly the wedge it exists to prevent.
 const defaultClearingTimeout = 60 * time.Second
 
 // ApplyClearing opens or closes the CLEARING axis: the user asked for the
@@ -31,11 +34,28 @@ const defaultClearingTimeout = 60 * time.Second
 // clear that never completed is a real anomaly, so it is reported rather than
 // absorbed.
 //
-// IT SURVIVES A ROTATION. A `/clear` retires the vendor session uuid and
-// bounces the shim mid-window, and ApplySessionRotated deliberately leaves
-// this axis alone: the ContextCleared belongs to the NEW identity and is
-// precisely the event still expected. Closing on the rotation would drop the
-// phase word in the moment it is most true.
+// THE ROTATION CLOSES IT. A `/clear` retires the vendor session uuid and
+// bounces the shim mid-window, and that rotation is the daemon's only
+// GUARANTEED observation that the dispatched clear took effect. The axis used
+// to be held open across it, on the reasoning that the ContextCleared belongs
+// to the new identity and is precisely the event still expected — but that
+// event has exactly one producer, the shim-sidecar reading the vendor's
+// transcript off disk (shim-claude-sidecar clearcompact.go), and a workspace
+// whose sidecar is not running, whose transcript line never landed, or whose
+// new identity the sidecar has not discovered yet produces none. Held open,
+// every such clear rode the full ClearingTimeout and reported itself as a
+// wedge. The rotation is a narrower and earlier truth, and it is available on
+// every clear the vendor actually performed.
+//
+// It is a CLOSING edge only, and only for an axis this daemon opened. Nothing
+// else opens the axis (the dispatch site is the sole opener), so a rotation
+// with no clear in flight — a resume, a vendor-side re-key — finds it shut and
+// appends nothing.
+//
+// THE WATCHDOG IS NOT WEAKENED. It stays armed for every clear whose rotation
+// has not landed, which is the case it was written for (a vendor that refused
+// the command outright rotates nothing at all), and the ContextCleared still
+// closes the axis when it arrives first.
 //
 // REASON is a short note recorded as the cause detail (the dispatched command,
 // or the edge that closed it).
@@ -126,6 +146,39 @@ func (m *Manager) closeCompactingLocked(workspace, reason string) {
 	m.logf("ssm: compacting window closed by %s ws=%s — a compaction cannot outlive it, and holding the phase word here would wedge the workspace red", reason, workspace)
 	if err := m.applyCutLocked(workspace, sigCompacting, sigCompacted, causeCompacting, false, reason); err != nil {
 		m.logf("ssm: closing the compacting axis FAILED ws=%s reason=%s: %v", workspace, reason, err)
+	}
+}
+
+// closeClearingLocked closes an open clearing axis on the vendor session
+// rotation the dispatched `/clear` itself caused. Caller holds mu.
+//
+// THE ROTATION IS THE PROOF. The vendor mints a fresh transcript identity for a
+// recognized `/clear` and for nothing else this daemon dispatches, so a
+// rotation arriving while the axis stands open is the clear reporting that it
+// happened — earlier and more reliably than the sidecar's ContextCleared, which
+// is produced several processes away off a file the sidecar may not yet be
+// tailing under the new uuid.
+//
+// The deadline is disarmed with the axis, exactly as the ContextCleared path
+// disarms it: a timer left live would later expire an axis some LATER clear had
+// legitimately opened.
+//
+// A failure is loud-logged rather than returned, for the same reason
+// closeCompactingLocked's is: the caller is a rotation whose own reconciliation
+// must still complete. The error is never absorbed silently.
+func (m *Manager) closeClearingLocked(workspace, reason string) {
+	open, err := cutOpen(m.db, workspace, sigClearing, sigCleared)
+	if err != nil {
+		m.logf("ssm: reading the clearing axis FAILED ws=%s reason=%s: %v — the axis may stay open until its watchdog expires it", workspace, reason, err)
+		return
+	}
+	if !open {
+		return
+	}
+	m.disarmClearingWatchdogLocked(workspace)
+	m.logf("ssm: clearing axis closed by %s ws=%s — the vendor retired the transcript identity, which is the dispatched /clear reporting that it took effect; waiting for a ContextCleared that has no guaranteed producer under the new identity is what left this axis to expire", reason, workspace)
+	if err := m.applyCutLocked(workspace, sigClearing, sigCleared, causeClearing, false, reason); err != nil {
+		m.logf("ssm: closing the clearing axis FAILED ws=%s reason=%s: %v", workspace, reason, err)
 	}
 }
 

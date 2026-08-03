@@ -408,11 +408,22 @@ func TestARotationClosesAnOpenCompaction(t *testing.T) {
 
 // ---- The rotation a /clear itself causes ---------------------------------
 
-func TestClearingSurvivesTheRotationItsOwnClearCauses(t *testing.T) {
-	// Arrange — the real sequence: `/clear` dispatched, the vendor retires the
-	// session uuid and the shim re-handshakes mid-window, and only THEN does
-	// the ContextCleared arrive under the new identity.
-	m, _, _, _ := openCutTest(t, fakeResolver{"s1": "ws1", "s2": "ws1"})
+// These four cases replace a pair that pinned the OPPOSITE contract
+// (TestClearingSurvivesTheRotationItsOwnClearCauses and
+// TestTheClearingWatchdogSurvivesTheRotation). Those tests asserted the axis
+// and its deadline were both held across the rotation, on the premise that "the
+// ContextCleared belongs to the new identity and is still expected". Live
+// evidence retired that premise: the ContextCleared has exactly one producer,
+// the shim-sidecar tailing the vendor transcript, and a real `/clear` on two
+// workspaces produced none at all under the new identity — both rode the full
+// 60s bound into `CLEARING EXPIRED`. The rotation is the closing edge that
+// exists on every clear the vendor actually performed, so it is the one
+// asserted here.
+
+func TestARotationClosesTheClearItsOwnDispatchCaused(t *testing.T) {
+	// Arrange — the real sequence: `/clear` dispatched, then the vendor retires
+	// the session uuid.
+	m, cl, _, _ := openCutTest(t, fakeResolver{"s1": "ws1", "s2": "ws1"})
 	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
@@ -420,36 +431,25 @@ func TestClearingSurvivesTheRotationItsOwnClearCauses(t *testing.T) {
 		t.Fatalf("open clearing: %v", err)
 	}
 
-	// Act — the rotation, then the shim's re-handshake readiness under the new
-	// identity, then the clear's own completion.
+	// Act.
 	if err := m.ApplySessionRotated("ws1", "s1", "s2"); err != nil {
 		t.Fatalf("ApplySessionRotated: %v", err)
 	}
-	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_CLEARING {
-		t.Fatalf("state across the rotation = %s, want CLEARING held: the ContextCleared belongs to the new identity and is still expected", renderName(got))
-	}
-	if err := m.Apply(evSessionStarted("s2", 1)); err != nil {
-		t.Fatalf("re-handshake: %v", err)
-	}
-	if err := m.ApplyClearing("ws1", false, "context_cleared"); err != nil {
-		t.Fatalf("close clearing: %v", err)
-	}
 
-	// Assert — the axis closed on the event, not on a timeout, so the
-	// workspace resolves on its other axes again. The re-handshake opened the
-	// blue axes above it.
+	// Assert — the axis released on the rotation rather than on a timeout, so
+	// the workspace resolves on its other axes.
 	if got := mustCurrent(t, m, "ws1").State; got == frontendv1.RenderState_RENDER_STATE_CLEARING {
-		t.Fatal("state is still CLEARING: the ContextCleared did not close the axis across the rotation")
+		t.Fatal("state is still CLEARING: the rotation did not close the axis its own clear caused")
+	}
+	if !cl.contains("clearing axis closed by session_rotated") {
+		t.Fatal("the rotation's close of the clearing axis was not logged")
 	}
 }
 
-func TestTheClearingWatchdogSurvivesTheRotation(t *testing.T) {
-	// Arrange — the rotation must not disarm the deadline either: an axis kept
-	// open with its watchdog cancelled is the wedge with extra steps.
-	m, cl, tf, _ := openCutTest(t, fakeResolver{"s1": "ws1", "s2": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
-		t.Fatalf("turn started: %v", err)
-	}
+func TestARotationDisarmsTheClearingWatchdogItClosed(t *testing.T) {
+	// Arrange — a deadline left live over a closed axis would later expire an
+	// axis some LATER clear had legitimately opened.
+	m, _, tf, _ := openCutTest(t, fakeResolver{"s1": "ws1", "s2": "ws1"})
 	if err := m.ApplyClearing("ws1", true, "clear_dispatched"); err != nil {
 		t.Fatalf("open clearing: %v", err)
 	}
@@ -459,17 +459,53 @@ func TestTheClearingWatchdogSurvivesTheRotation(t *testing.T) {
 	if err := m.ApplySessionRotated("ws1", "s1", "s2"); err != nil {
 		t.Fatalf("ApplySessionRotated: %v", err)
 	}
-	if !watchdog.armed() {
-		t.Fatal("the rotation disarmed the clearing watchdog")
-	}
-	watchdog.fire()
 
 	// Assert.
-	if !cl.contains("CLEARING EXPIRED") {
-		t.Fatal("the watchdog no longer releases the axis after a rotation")
+	if watchdog.armed() {
+		t.Fatal("the clearing watchdog is still armed after the rotation closed its axis")
 	}
-	if got := mustCurrent(t, m, "ws1").State; got == frontendv1.RenderState_RENDER_STATE_CLEARING {
-		t.Fatal("the axis is still open after its deadline fired")
+}
+
+func TestARotationWithNoClearInFlightLeavesTheClearingAxisAlone(t *testing.T) {
+	// Arrange — a rotation the daemon did not dispatch a clear for (a resume, a
+	// vendor-side re-key). The dispatch site is the axis's sole opener, so there
+	// is nothing here to close.
+	m, cl, _, _ := openCutTest(t, fakeResolver{"s1": "ws1", "s2": "ws1"})
+	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+		t.Fatalf("turn started: %v", err)
+	}
+
+	// Act.
+	if err := m.ApplySessionRotated("ws1", "s1", "s2"); err != nil {
+		t.Fatalf("ApplySessionRotated: %v", err)
+	}
+
+	// Assert.
+	if cl.contains("clearing axis closed by session_rotated") {
+		t.Fatal("a rotation with no clear in flight claimed to close the clearing axis")
+	}
+}
+
+func TestAContextClearedAfterTheRotationClosedTheAxisAppendsNothing(t *testing.T) {
+	// Arrange — the happy ordering still happens: the sidecar's ContextCleared
+	// lands under the new identity moments after the rotation already closed the
+	// axis. It must be a no-op, never a second edge.
+	m, cl, _, _ := openCutTest(t, fakeResolver{"s1": "ws1", "s2": "ws1"})
+	if err := m.ApplyClearing("ws1", true, "clear_dispatched"); err != nil {
+		t.Fatalf("open clearing: %v", err)
+	}
+	if err := m.ApplySessionRotated("ws1", "s1", "s2"); err != nil {
+		t.Fatalf("ApplySessionRotated: %v", err)
+	}
+
+	// Act.
+	if err := m.ApplyClearing("ws1", false, "context_cleared"); err != nil {
+		t.Fatalf("close clearing: %v", err)
+	}
+
+	// Assert — reported as an unchanged axis rather than acted on.
+	if !cl.contains("clearing axis unchanged") {
+		t.Fatal("the late ContextCleared was not reported as a no-op over an already-closed axis")
 	}
 }
 
