@@ -27,7 +27,7 @@ func TestApplyRepairsAnOrphanEndOnce(t *testing.T) {
 
 func TestOpenRepairsPersistedOrphanEndsOnce(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.db")
-	db, err := openDB(path)
+	db, err := openDB(path, t.Logf)
 	if err != nil {
 		t.Fatalf("open seed db: %v", err)
 	}

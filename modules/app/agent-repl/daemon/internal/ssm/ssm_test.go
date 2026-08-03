@@ -14,12 +14,17 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// fakeResolver binds session ids to workspaces from a static map.
+// fakeResolver binds session ids to workspaces from a static map. Every key is
+// a session's own daemon id, so the canonical id it reports is the key itself;
+// see vendorAliasResolver for the vendor-uuid case.
 type fakeResolver map[string]string
 
-func (f fakeResolver) Workspace(sessionID string) (string, bool) {
+func (f fakeResolver) Session(sessionID string) (Binding, bool) {
 	ws, ok := f[sessionID]
-	return ws, ok
+	if !ok {
+		return Binding{}, false
+	}
+	return Binding{Workspace: ws, SessionID: sessionID}, true
 }
 
 // capLog captures log lines for assertions, safe for concurrent use.

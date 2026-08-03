@@ -64,9 +64,17 @@ func (m *Manager) ReconcileTasks(sessionID string, liveTaskIDs []string) error {
 	if m.resolver == nil {
 		return fmt.Errorf("ssm: no resolver injected; cannot bind session %s to a workspace", sessionID)
 	}
-	ws, bound := m.resolver.Workspace(sessionID)
+	binding, bound := m.resolver.Session(sessionID)
 	if !bound {
 		return fmt.Errorf("ssm: no workspace bound to session %s (task reconciliation)", sessionID)
+	}
+	ws := binding.Workspace
+	// The reconciled rows are OWNED by the daemon session, exactly as Apply's
+	// are: the caller passes whichever identity its event carried, and the log
+	// records one name per session.
+	owner := binding.SessionID
+	if owner == "" {
+		return fmt.Errorf("ssm: session %s resolved to workspace %q with no daemon session id (task reconciliation)", sessionID, ws)
 	}
 
 	live := make(map[string]struct{}, len(liveTaskIDs))
@@ -133,17 +141,17 @@ func (m *Manager) ReconcileTasks(sessionID string, liveTaskIDs []string) error {
 	}
 
 	for _, id := range orphanEnds {
-		if err := m.appendReconciledLocked(ws, sessionID, sigTaskStarted, id); err != nil {
+		if err := m.appendReconciledLocked(ws, owner, sigTaskStarted, id); err != nil {
 			return err
 		}
 	}
 	for _, id := range unseenLives {
-		if err := m.appendReconciledLocked(ws, sessionID, sigTaskStarted, id); err != nil {
+		if err := m.appendReconciledLocked(ws, owner, sigTaskStarted, id); err != nil {
 			return err
 		}
 	}
 	for _, id := range ghosts {
-		if err := m.appendReconciledLocked(ws, sessionID, sigTaskEnded, id); err != nil {
+		if err := m.appendReconciledLocked(ws, owner, sigTaskEnded, id); err != nil {
 			return err
 		}
 	}

@@ -95,7 +95,12 @@ func (m *Manager) repairPersistedOrphanTaskEndsLocked() error {
 
 // appendTaskEndLocked appends a TaskEnded event and, when its start was never
 // observed, its entailed start in the same transaction. Caller holds m.mu.
-func (m *Manager) appendTaskEndLocked(workspace, sessionID, causeKind string, causeSeq sql.NullInt64, taskID string) error {
+//
+// sessionID OWNS the rows (the daemon-minted id); eventSessionID is the store's
+// own identity for the causing event, carried so the end stays idempotent
+// against a replay. The entailed start is the daemon's inference rather than an
+// event, so it records no store coordinate.
+func (m *Manager) appendTaskEndLocked(workspace, sessionID, eventSessionID, causeKind string, causeSeq sql.NullInt64, taskID string) error {
 	if taskID == "" {
 		return fmt.Errorf("ssm: task_ended session=%s ws=%s has no task_id; refusing an unpairable lifecycle row",
 			sessionID, workspace)
@@ -106,7 +111,7 @@ func (m *Manager) appendTaskEndLocked(workspace, sessionID, causeKind string, ca
 		workspace, sigTaskStarted, taskID).Scan(&started)
 	switch {
 	case err == nil:
-		return appendRow(m.db, workspace, sessionID, sigTaskEnded, causeKind,
+		return appendEventRow(m.db, workspace, sessionID, eventSessionID, sigTaskEnded, causeKind,
 			causeSeq, m.nextAt(), taskID)
 	case err != sql.ErrNoRows:
 		return fmt.Errorf("ssm: inspect task start ws=%s task_id=%s: %w", workspace, taskID, err)
@@ -126,7 +131,7 @@ func (m *Manager) appendTaskEndLocked(workspace, sessionID, causeKind string, ca
 		sql.NullInt64{}, m.nextAt(), taskID); err != nil {
 		return err
 	}
-	if err := appendRow(tx, workspace, sessionID, sigTaskEnded, causeKind,
+	if err := appendEventRow(tx, workspace, sessionID, eventSessionID, sigTaskEnded, causeKind,
 		causeSeq, m.nextAt(), taskID); err != nil {
 		return err
 	}

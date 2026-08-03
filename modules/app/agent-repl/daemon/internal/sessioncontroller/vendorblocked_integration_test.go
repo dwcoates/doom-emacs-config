@@ -31,9 +31,12 @@ const (
 // vendorBlockedResolver binds the session id to its workspace for the SSM.
 type vendorBlockedResolver map[string]string
 
-func (r vendorBlockedResolver) Workspace(sessionID string) (string, bool) {
+func (r vendorBlockedResolver) Session(sessionID string) (ssm.Binding, bool) {
 	ws, ok := r[sessionID]
-	return ws, ok
+	if !ok {
+		return ssm.Binding{}, false
+	}
+	return ssm.Binding{Workspace: ws, SessionID: sessionID}, true
 }
 
 // vendorBlockedRig is a live Manager over a REAL ssm.Manager, so the render

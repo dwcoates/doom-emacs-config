@@ -35,9 +35,12 @@ import (
 // the daemon's session registry.
 type staticResolver map[string]string
 
-func (r staticResolver) Workspace(sessionID string) (string, bool) {
+func (r staticResolver) Session(sessionID string) (ssm.Binding, bool) {
 	ws, ok := r[sessionID]
-	return ws, ok
+	if !ok {
+		return ssm.Binding{}, false
+	}
+	return ssm.Binding{Workspace: ws, SessionID: sessionID}, true
 }
 
 // faultRig wires a real ssm.Manager to a real consumer with a recording
