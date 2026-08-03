@@ -406,7 +406,7 @@ never causes a silent decay.
     ;; here — a daemon that cannot open the workspace must never stall the
     ;; switch, which is why the failure path is an ack callback and not a
     ;; signal.
-    (agent-repl--frontend-notify-workspace-switch ws)
+    (agent-repl--frontend-ensure-workspace ws)
     ;; Flip the emacs-side bit on the fully-loaded latch.  If
     ;; --on-session-start-event has also fired, this fires the
     ;; ws-fully-loaded hook; otherwise we just record the bit and wait

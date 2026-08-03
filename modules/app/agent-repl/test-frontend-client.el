@@ -542,6 +542,100 @@ daemon that may be gone."
         ;; Assert
         (should ensured)))))
 
+;;;; ---- the sweep is the RECOVERY sweep, not only the reattach sweep ------
+;;
+;; A binding the roster still lists says nothing about whether THIS daemon
+;; instance is driving it: `live' and `backfill' are read back off the
+;; durable registry record and survive a bounce.  The sweep used to stop at
+;; "the binding is still listed", so a workspace the new instance had never
+;; brought up recovered only when the user switched to it.
+
+(ert-deftest agent-repl-test-frontend-reattach-check-ensures-a-retained-binding ()
+  "A binding the roster still lists is ENSURED, not merely retained.
+The bounce case: the record is durable and still listed, but no session
+controller is attached, so the workspace needs bringing up."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_1" :project-dir "/w")
+    (agent-repl-test--with-views '((:sessionId "s_1" :workspace "/w"))
+      (let ((ensured nil))
+        (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () t))
+                  ((symbol-function 'agent-repl--frontend-ensure-workspace)
+                   (lambda (ws) (push ws ensured))))
+          ;; Act
+          (agent-repl--frontend-reattach-check)
+          ;; Assert
+          (should (equal ensured '("ws1"))))))))
+
+(ert-deftest agent-repl-test-frontend-reattach-check-ensures-an-unbound-workspace ()
+  "A workspace with NO binding is ensured rather than passed over.
+It has no stale binding to notice, which is exactly why the sweep used to
+leave its bring-up waiting for a switch."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (agent-repl-test--with-views '()
+      (let ((ensured nil))
+        (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () t))
+                  ((symbol-function 'agent-repl--frontend-ensure-workspace)
+                   (lambda (ws) (push ws ensured))))
+          ;; Act
+          (agent-repl--frontend-reattach-check)
+          ;; Assert
+          (should (equal ensured '("ws1"))))))))
+
+(ert-deftest agent-repl-test-frontend-reattach-check-never-ensures-a-vanished-binding ()
+  "A vanished binding reattaches instead of ensuring: one recovery, not two."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_gone" :project-dir "/w")
+    (agent-repl-test--with-views '((:sessionId "s_other" :workspace "/w2"))
+      (let ((ensured nil))
+        (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () t))
+                  ((symbol-function 'agent-repl--frontend-reattach-ws) #'ignore)
+                  ((symbol-function 'agent-repl--frontend-ensure-workspace)
+                   (lambda (ws) (push ws ensured))))
+          ;; Act
+          (agent-repl--frontend-reattach-check)
+          ;; Assert
+          (should (null ensured)))))))
+
+;;;; ---- recovery is driven by the RECONNECT, not by a switch --------------
+
+(ert-deftest agent-repl-test-frontend-recovery-is-subscribed-to-the-snapshot ()
+  "The recovery runs off the snapshot-applied edge, not off socket-open.
+A socket with no state behind it has not finished reconnecting, and the
+roster the sweep reads there is still empty."
+  ;; Act / Assert
+  (should (memq #'agent-repl--frontend-recover-after-reconnect
+                agent-repl-uds-snapshot-applied-functions))
+  (should-not (memq #'agent-repl--frontend-recover-after-reconnect
+                    agent-repl-uds-connected-functions)))
+
+(ert-deftest agent-repl-test-frontend-recovery-sweeps-before-retracting ()
+  "Recovery is driven BEFORE the notices come down.
+Retracting first would take the outage notices down over a recovery this
+end had merely decided to attempt."
+  ;; Arrange
+  (let ((calls nil))
+    (cl-letf (((symbol-function 'agent-repl--frontend-reattach-check)
+               (lambda () (push 'sweep calls)))
+              ((symbol-function 'agent-repl-connection-notices-retract)
+               (lambda (_reason) (push 'retract calls) 0)))
+      ;; Act
+      (agent-repl--frontend-recover-after-reconnect)
+      ;; Assert
+      (should (equal (reverse calls) '(sweep retract))))))
+
+(ert-deftest agent-repl-test-frontend-recovery-names-its-retraction-reason ()
+  "The retraction records WHAT cleared the notices, for the log."
+  ;; Arrange
+  (let ((reason nil))
+    (cl-letf (((symbol-function 'agent-repl--frontend-reattach-check) #'ignore)
+              ((symbol-function 'agent-repl-connection-notices-retract)
+               (lambda (r) (setq reason r) 0)))
+      ;; Act
+      (agent-repl--frontend-recover-after-reconnect)
+      ;; Assert
+      (should (equal reason "daemon-reconnected")))))
+
 (ert-deftest agent-repl-test-frontend-note-boot-id-first-observation-sets ()
   "The first boot id observation records without resetting anything."
   ;; Arrange
@@ -607,6 +701,41 @@ daemon that may be gone."
       (should (equal (agent-repl--ws-get "ws1" :frontend-session-id) "s_gone"))
       (should (= (agent-repl--ws-get "ws1" :reattach-failures) 1))
       (should-not (agent-repl--ws-get "ws1" :reattach-failed)))))
+
+(ert-deftest agent-repl-test-frontend-reattach-give-up-is-a-retractable-notice ()
+  "The reattach give-up goes out as a notice the reconnect can take back.
+It names a workspace that cannot reach THIS instance, and the next
+instance's snapshot already resets the give-up state beside it."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_gone"
+                                    :reattach-failures 2 :project-dir "/w")
+    (let ((notices nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-after-ensure-session)
+                 (lambda (_ws _ok fail) (funcall fail "boom") :failed))
+                ((symbol-function 'agent-repl-connection-notice-warn)
+                 (lambda (text &optional level) (push (list text level) notices)))
+                ((symbol-function 'display-warning)
+                 (lambda (&rest _) (error "the give-up must not bypass the notice"))))
+        ;; Act
+        (agent-repl--frontend-reattach-ws "ws1" "s_gone")
+        ;; Assert
+        (should (= 1 (length notices)))
+        (should (string-match-p "failed to reattach" (caar notices)))))))
+
+(ert-deftest agent-repl-test-frontend-ensure-give-up-is-a-retractable-notice ()
+  "The ensure give-up goes out as a notice the reconnect can take back."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:ensure-failures 2 :project-dir "/w")
+    (let ((notices nil))
+      (cl-letf (((symbol-function 'agent-repl-connection-notice-warn)
+                 (lambda (text &optional level) (push (list text level) notices)))
+                ((symbol-function 'display-warning)
+                 (lambda (&rest _) (error "the give-up must not bypass the notice"))))
+        ;; Act
+        (agent-repl--frontend-note-ensure-failure "ws1" "boom")
+        ;; Assert
+        (should (= 1 (length notices)))
+        (should (string-match-p "could not be opened" (caar notices)))))))
 
 (ert-deftest agent-repl-test-frontend-reattach-timer-inhibited-in-batch ()
   "The sweep timer does not start when init is inhibited."
@@ -768,7 +897,7 @@ guarantees each webview reloads the freshly built bundle."
   (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
     (agent-repl-test--with-switch-ensure
       ;; Act
-      (agent-repl--frontend-notify-workspace-switch "ws1")
+      (agent-repl--frontend-ensure-workspace "ws1")
       ;; Assert — the daemon routes purely by cwd, never the persp name.
       (pcase-let ((`(,field ,payload ,ws) (car uds-commands)))
         (should (equal field "openWorkspace"))
@@ -783,7 +912,7 @@ guarantees each webview reloads the freshly built bundle."
               ((symbol-function 'agent-repl--frontend-session-controller-live-p) (lambda (_id) t)))
       (agent-repl-test--with-switch-ensure
         ;; Act
-        (agent-repl--frontend-notify-workspace-switch "ws1")
+        (agent-repl--frontend-ensure-workspace "ws1")
         ;; Assert — this is THE common case; a send here is pure daemon rescan.
         (should (null uds-commands))))))
 
@@ -820,7 +949,7 @@ daemon has never brought it up.  A missing session controller must ALWAYS ensure
                                    :backfill "BACKFILL_STATE_DONE"))))
       (agent-repl-test--with-uds
         ;; Act
-        (agent-repl--frontend-notify-workspace-switch "ws1")
+        (agent-repl--frontend-ensure-workspace "ws1")
         ;; Assert
         (should (equal (car (car uds-commands)) "openWorkspace"))))))
 
@@ -875,7 +1004,7 @@ It cannot backfill on switch either, so retrying would loop for nothing."
   (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_1")
     (agent-repl-test--with-backfill "BACKFILL_STATE_DONE"
       ;; Act
-      (agent-repl--frontend-notify-workspace-switch "ws1")
+      (agent-repl--frontend-ensure-workspace "ws1")
       ;; Assert
       (should (null uds-commands)))))
 
@@ -885,7 +1014,7 @@ It cannot backfill on switch either, so retrying would loop for nothing."
   (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_1")
     (agent-repl-test--with-backfill "BACKFILL_STATE_PENDING"
       ;; Act
-      (agent-repl--frontend-notify-workspace-switch "ws1")
+      (agent-repl--frontend-ensure-workspace "ws1")
       ;; Assert
       (should (equal (car (car uds-commands)) "openWorkspace")))))
 
@@ -895,7 +1024,7 @@ It cannot backfill on switch either, so retrying would loop for nothing."
   (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_1")
     (agent-repl-test--with-backfill "BACKFILL_STATE_FAILED"
       ;; Act
-      (agent-repl--frontend-notify-workspace-switch "ws1")
+      (agent-repl--frontend-ensure-workspace "ws1")
       ;; Assert
       (should (equal (car (car uds-commands)) "openWorkspace")))))
 
@@ -905,10 +1034,10 @@ The give-up latch is what bounds it: the unsettled backfill would otherwise
 re-send on every single switch forever."
   ;; Arrange — unsettled AND already given up.
   (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_1"
-                                    :switch-ensure-failed t)
+                                    :ensure-failed t)
     (agent-repl-test--with-backfill "BACKFILL_STATE_FAILED"
       ;; Act
-      (agent-repl--frontend-notify-workspace-switch "ws1")
+      (agent-repl--frontend-ensure-workspace "ws1")
       ;; Assert
       (should (null uds-commands)))))
 
@@ -917,9 +1046,9 @@ re-send on every single switch forever."
   ;; Arrange
   (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_1")
     (agent-repl-test--with-backfill "BACKFILL_STATE_PENDING"
-      (agent-repl--frontend-notify-workspace-switch "ws1")
+      (agent-repl--frontend-ensure-workspace "ws1")
       ;; Act — a rapid re-switch.
-      (agent-repl--frontend-notify-workspace-switch "ws1")
+      (agent-repl--frontend-ensure-workspace "ws1")
       ;; Assert
       (should (= 1 (length uds-commands))))))
 
@@ -930,7 +1059,7 @@ re-send on every single switch forever."
     (cl-letf (((symbol-function 'agent-repl--frontend-session-live-p) (lambda (_id) nil)))
       (agent-repl-test--with-switch-ensure
         ;; Act
-        (agent-repl--frontend-notify-workspace-switch "ws1")
+        (agent-repl--frontend-ensure-workspace "ws1")
         ;; Assert
         (should (equal (car (car uds-commands)) "openWorkspace"))))))
 
@@ -942,7 +1071,7 @@ The reattach sweep owns daemon revival; a switch must not race it."
     (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () nil)))
       (agent-repl-test--with-uds
         ;; Act
-        (agent-repl--frontend-notify-workspace-switch "ws1")
+        (agent-repl--frontend-ensure-workspace "ws1")
         ;; Assert
         (should (null uds-commands))))))
 
@@ -952,7 +1081,7 @@ The reattach sweep owns daemon revival; a switch must not race it."
   (agent-repl-test--with-ws "ws1" '(:agent-state :idle)
     (agent-repl-test--with-switch-ensure
       ;; Act — must not signal either; this runs on EVERY switch.
-      (agent-repl--frontend-notify-workspace-switch "ws1")
+      (agent-repl--frontend-ensure-workspace "ws1")
       ;; Assert
       (should (null uds-commands)))))
 
@@ -961,9 +1090,9 @@ The reattach sweep owns daemon revival; a switch must not race it."
   ;; Arrange
   (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
     (agent-repl-test--with-switch-ensure
-      (agent-repl--frontend-notify-workspace-switch "ws1")
+      (agent-repl--frontend-ensure-workspace "ws1")
       ;; Act — rapid re-switch.
-      (agent-repl--frontend-notify-workspace-switch "ws1")
+      (agent-repl--frontend-ensure-workspace "ws1")
       ;; Assert — exactly one command, not two.
       (should (= 1 (length uds-commands))))))
 
@@ -971,21 +1100,21 @@ The reattach sweep owns daemon revival; a switch must not race it."
   "Once the cooldown has elapsed a switch may ensure again."
   ;; Arrange — a stamp older than the cooldown.
   (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
-    (agent-repl--ws-put "ws1" :switch-ensure-at
-                        (- (float-time) agent-repl-frontend-switch-ensure-cooldown 1))
+    (agent-repl--ws-put "ws1" :ensure-at
+                        (- (float-time) agent-repl-frontend-ensure-cooldown 1))
     (agent-repl-test--with-switch-ensure
       ;; Act
-      (agent-repl--frontend-notify-workspace-switch "ws1")
+      (agent-repl--frontend-ensure-workspace "ws1")
       ;; Assert
       (should (= 1 (length uds-commands))))))
 
 (ert-deftest agent-repl-test-frontend-switch-ensure-skips-after-give-up ()
   "A workspace that gave up stops sending entirely."
   ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :switch-ensure-failed t)
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :ensure-failed t)
     (agent-repl-test--with-switch-ensure
       ;; Act
-      (agent-repl--frontend-notify-workspace-switch "ws1")
+      (agent-repl--frontend-ensure-workspace "ws1")
       ;; Assert
       (should (null uds-commands)))))
 
@@ -994,54 +1123,54 @@ The reattach sweep owns daemon revival; a switch must not race it."
   ;; Arrange
   (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
     ;; Act
-    (agent-repl--frontend-note-switch-ensure-failure "ws1" "no live session")
+    (agent-repl--frontend-note-ensure-failure "ws1" "no live session")
     ;; Assert
-    (should (= 1 (agent-repl--ws-get "ws1" :switch-ensure-failures)))))
+    (should (= 1 (agent-repl--ws-get "ws1" :ensure-failures)))))
 
 (ert-deftest agent-repl-test-frontend-switch-ensure-gives-up-at-the-cap ()
-  "At the failure cap the workspace latches `:switch-ensure-failed'."
+  "At the failure cap the workspace latches `:ensure-failed'."
   ;; Arrange
   (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
     (let ((display-warning-minimum-level :emergency))
       ;; Act — one short of the cap, then the one that trips it.
-      (dotimes (_ agent-repl-frontend-switch-ensure-max-failures)
-        (agent-repl--frontend-note-switch-ensure-failure "ws1" "boom"))
+      (dotimes (_ agent-repl-frontend-ensure-max-failures)
+        (agent-repl--frontend-note-ensure-failure "ws1" "boom"))
       ;; Assert — the retry-loop guard the directive asks for.
-      (should (agent-repl--ws-get "ws1" :switch-ensure-failed)))))
+      (should (agent-repl--ws-get "ws1" :ensure-failed)))))
 
 (ert-deftest agent-repl-test-frontend-switch-ensure-does-not-give-up-early ()
   "Below the cap the workspace keeps trying."
   ;; Arrange
   (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
     ;; Act
-    (agent-repl--frontend-note-switch-ensure-failure "ws1" "boom")
+    (agent-repl--frontend-note-ensure-failure "ws1" "boom")
     ;; Assert
-    (should-not (agent-repl--ws-get "ws1" :switch-ensure-failed))))
+    (should-not (agent-repl--ws-get "ws1" :ensure-failed))))
 
 (ert-deftest agent-repl-test-frontend-switch-ensure-boot-change-clears-give-up ()
   "A new daemon instance earns a workspace fresh switch-ensure attempts."
   ;; Arrange — a give-up that belonged to the PREVIOUS instance.
-  (agent-repl-test--with-ws "ws1" '(:switch-ensure-failed t :switch-ensure-failures 3)
+  (agent-repl-test--with-ws "ws1" '(:ensure-failed t :ensure-failures 3)
     (cl-letf (((symbol-function 'agent-repl--live-ws-names) (lambda () '("ws1"))))
       (let ((agent-repl--frontend-last-boot-id "boot-old"))
         ;; Act
         (agent-repl--frontend-note-boot-id "boot-new")
         ;; Assert
-        (should-not (agent-repl--ws-get "ws1" :switch-ensure-failed))
-        (should-not (agent-repl--ws-get "ws1" :switch-ensure-failures))))))
+        (should-not (agent-repl--ws-get "ws1" :ensure-failed))
+        (should-not (agent-repl--ws-get "ws1" :ensure-failures))))))
 
 (ert-deftest agent-repl-test-frontend-switch-ensure-boot-change-clears-cooldown ()
   "A daemon bounce also clears the cooldown stamp.
 Otherwise the first switch after a restart would be swallowed by a timer
 belonging to the instance that is already gone."
   ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:switch-ensure-at 12345.0)
+  (agent-repl-test--with-ws "ws1" '(:ensure-at 12345.0)
     (cl-letf (((symbol-function 'agent-repl--live-ws-names) (lambda () '("ws1"))))
       (let ((agent-repl--frontend-last-boot-id "boot-old"))
         ;; Act
         (agent-repl--frontend-note-boot-id "boot-new")
         ;; Assert
-        (should-not (agent-repl--ws-get "ws1" :switch-ensure-at))))))
+        (should-not (agent-repl--ws-get "ws1" :ensure-at))))))
 
 (ert-deftest agent-repl-test-frontend-switch-ensure-never-signals-on-send-failure ()
   "A send that signals is logged, never raised.
@@ -1055,7 +1184,7 @@ protection."
               ((symbol-function 'agent-repl--uds-send-command)
                (lambda (&rest _) (user-error "not connected"))))
       ;; Act / Assert — must return nil rather than signalling.
-      (should (null (agent-repl--frontend-notify-workspace-switch "ws1"))))))
+      (should (null (agent-repl--frontend-ensure-workspace "ws1"))))))
 
 (ert-deftest agent-repl-test-frontend-switch-ensure-never-signals-without-cwd ()
   "A workspace whose cwd lookup signals is skipped, not raised."
@@ -1063,7 +1192,7 @@ protection."
   (agent-repl-test--with-ws "ws1" '(:agent-state :idle)
     (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () t)))
       ;; Act / Assert
-      (should (null (agent-repl--frontend-notify-workspace-switch "ws1"))))))
+      (should (null (agent-repl--frontend-ensure-workspace "ws1"))))))
 
 (ert-deftest agent-repl-test-frontend-switch-ensure-stamps-before-sending ()
   "The cooldown stamp is written on the send, which is what debounces it."
@@ -1071,9 +1200,9 @@ protection."
   (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
     (agent-repl-test--with-switch-ensure
       ;; Act
-      (agent-repl--frontend-notify-workspace-switch "ws1")
+      (agent-repl--frontend-ensure-workspace "ws1")
       ;; Assert
-      (should (agent-repl--ws-get "ws1" :switch-ensure-at)))))
+      (should (agent-repl--ws-get "ws1" :ensure-at)))))
 
 ;;;; ---- gui-send-turn ------------------------------------------------------------
 

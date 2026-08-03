@@ -429,6 +429,11 @@ type sessionController struct {
 	// this daemon saw it. It is the classifier's "what is already running"
 	// context, and is empty when the turn predates this daemon.
 	runningText string
+	// runningPermissionMode is the mode that turn was submitted under, kept
+	// beside runningText because both describe the SAME turn and a resume that
+	// carried only the text would put the turn back under a different mode
+	// than the one it was cut from (mergelease.go, ResumeDisplacedTurn).
+	runningPermissionMode string
 	// phantomTurnClosed names the durable turn claims the shim handshake just
 	// contradicted and the SSM synthesized an end for (phantomturn.go). It is
 	// carried from the handshake to ShimReady, where the queue is released on
@@ -648,7 +653,7 @@ func (m *Manager) SessionInits() []*frontendv1.SessionInitView {
 // taskCatalogForSessionController rebuilds one live session controller's complete detached-task roster
 // from its retained event ring.
 func taskCatalogForSessionController(d *sessionController) *frontendv1.TaskCatalog {
-	return frontend.BuildTaskCatalog(d.workspace, d.sessionID, d.consumer.snapshotRing())
+	return frontend.BuildTaskCatalog(d.workspace, d.sessionID, d.consumer.snapshotRing(), d.consumer.logf)
 }
 
 // TaskCatalogs returns the complete detached-task roster for every live
@@ -2006,7 +2011,12 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 //     checkpoint at zero rather than the retired one.
 //   - shimclient Client.lastSeen — re-read from the SeqStore on every
 //     runOnce, which is why OnHandshake (this hook) must run BEFORE the
-//     Subscribe reads it.
+//     Subscribe reads it. It is ALSO reset outside this hook: a rotation is not
+//     the only way a seq space is retired, and a shim that restarts under an
+//     unchanged vendor uuid announces nothing here while still renumbering
+//     from 1. The mark carries the shim generation that advanced it and is
+//     rebased on the new generation's first event — shimclient
+//     seqgeneration.go.
 //   - consumer.ring — purged here (purgeRetainedOnRotation). NAMED
 //     CONSEQUENCE: the frontend TaskCatalog is rebuilt from this same ring, so
 //     a detached task whose start was only ever seen in the retired space drops
@@ -2307,14 +2317,18 @@ func (h permHandler) HandlePermission(sessionID string, req *corev1.PermissionRe
 	// earlier WorkspaceState-only decision but does NOT replace the PERMISSION
 	// render-state, which stays alongside.
 	h.cons.pushPermission(permissionItem(req, corev1.PermissionItem_RESOLUTION_PENDING, ""))
-	// Surface a permission render-state so the frontend shows the prompt while
-	// the shim's canUseTool blocks. Eventually-consistent: the SSM re-pushes
-	// the resolved state as events flow, and a frontend resync corrects any lag.
-	h.cons.push.PushWorkspaceState(&frontendv1.WorkspaceState{
-		Workspace: h.cons.workspace,
-		SessionId: h.cons.sessionID,
-		State:     frontendv1.RenderState_RENDER_STATE_PERMISSION,
-	})
+	// THE PERMISSION RENDER-STATE IS NOT PUSHED FROM HERE. A hand-built
+	// WorkspaceState carrying only a render state is a frame that cannot say
+	// its session connectivity, status, controller generation or revision, and
+	// the frontend contract has no reading for an UNSPECIFIED connectivity: the
+	// webapp's validating decoder refuses the whole frame, so this shortcut
+	// bought nothing and cost the frame it was trying to deliver.
+	//
+	// The authority is the SSM's permission row (ssm.ApplyPermission, THE only
+	// producer of RENDER_STATE_PERMISSION), which the count edge below reaches
+	// through onPermsChanged the moment this waiter parks. That push is
+	// resolved, fully stamped and monotonically revisioned like every other
+	// WorkspaceState this daemon emits.
 	ch, release := h.reg.await(req.GetRequestId(), h.cons.workspace)
 	// The waiter is parked, so the workspace's pending count just went up; and
 	// however this returns, releasing it brings the count back down.

@@ -341,6 +341,7 @@ func (m *Manager) queueSubmitLocked(d *sessionController, requestID, text, permi
 	}
 	if !d.turnActive {
 		d.runningText = text
+		d.runningPermissionMode = permissionMode
 		if d.paused {
 			// It runs ALONE: the pause still stands, so the turn-end handler
 			// will deliver nothing behind it until this turn ends cleanly.
@@ -539,6 +540,7 @@ func (m *Manager) deliver(d *sessionController, e *queueEntry) {
 	if err == nil {
 		m.mu.Lock()
 		d.runningText = e.text
+		d.runningPermissionMode = e.permissionMode
 		m.mu.Unlock()
 		// The durable parking row outlived the hold on purpose (see
 		// drainRowPending). The prompt has now reached the shim, so the row has
