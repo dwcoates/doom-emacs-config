@@ -43,6 +43,8 @@ func TestClassifyPromptRecognizesTheBareClear(t *testing.T) {
 			wantClear: false,
 		},
 		{
+			// Recognized as a session command, but NOT as the clear: only
+			// `/clear` owns the clearing axis.
 			name:      "a different slash command",
 			text:      "/compact",
 			wantClear: false,
@@ -54,8 +56,8 @@ func TestClassifyPromptRecognizesTheBareClear(t *testing.T) {
 			got := classifyPrompt(tc.text)
 
 			// Assert.
-			if got.clear != tc.wantClear {
-				t.Fatalf("classifyPrompt(%q).clear = %t, want %t", tc.text, got.clear, tc.wantClear)
+			if got.clear() != tc.wantClear {
+				t.Fatalf("classifyPrompt(%q).clear() = %t, want %t", tc.text, got.clear(), tc.wantClear)
 			}
 		})
 	}
@@ -69,6 +71,33 @@ func TestARecognizedCommandEarnsNoReceipt(t *testing.T) {
 	// Act / Assert.
 	if cmd.echoes() {
 		t.Error("a recognized command echoes; the cut already draws its own divider")
+	}
+}
+
+func TestOnlyTheClearDeclinesTheTurnClaim(t *testing.T) {
+	// Arrange — `/model` occupies the shim exactly as a prompt does (the CLI
+	// runs it and closes a turn), so a workspace that stayed green through it
+	// would be lying about a busy session. `/clear` runs no turn at all.
+	tests := []struct {
+		name          string
+		text          string
+		wantClaimTurn bool
+	}{
+		{name: "the clear runs no turn", text: "/clear", wantClaimTurn: false},
+		{name: "a model change occupies the shim", text: "/model", wantClaimTurn: true},
+		{name: "a compaction occupies the shim", text: "/compact", wantClaimTurn: true},
+		{name: "an ordinary prompt", text: "hello there", wantClaimTurn: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got := classifyPrompt(tc.text)
+
+			// Assert.
+			if got.claimsTurn() != tc.wantClaimTurn {
+				t.Fatalf("classifyPrompt(%q).claimsTurn() = %t, want %t", tc.text, got.claimsTurn(), tc.wantClaimTurn)
+			}
+		})
 	}
 }
 

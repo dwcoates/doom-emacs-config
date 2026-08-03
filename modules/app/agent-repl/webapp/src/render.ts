@@ -78,6 +78,7 @@ import {
   ConversationItem,
   PermissionItem,
   ResultItem,
+  SessionCommandItem,
   SystemFailureCard,
   StoreState,
   SystemItem,
@@ -88,6 +89,7 @@ import {
   liveContextDelta,
   userTurnKey,
 } from "./store.js";
+import type { SessionCommand } from "./frontend-proto.js";
 
 export interface Actions {
   decidePermission(requestId: string, behavior: "allow" | "deny"): void;
@@ -715,8 +717,9 @@ function childLine(item: ConversationItem): string {
       return item.resolution ? "" : `awaiting permission: ${item.toolName}`;
     default:
       // Deliberately partial: every other kind (user-turn, result, system,
-      // failure, context-cleared, context-compacted) legitimately contributes no ticker
-      // line, so the default is the common case, not a drift signal.
+      // failure, context-cleared, context-compacted, session-command)
+      // legitimately contributes no ticker line, so the default is the common
+      // case, not a drift signal.
       return "";
   }
 }
@@ -1844,8 +1847,9 @@ export function rendersEmpty(
     default:
       // Deliberately partial: only the kinds that CAN be empty are cased.
       // Every other kind (permission, result-with-button, failure,
-      // context-cleared, context-compacted) always renders something, so the default is the
-      // common answer, not a drift signal worth logging.
+      // context-cleared, context-compacted, session-command) always renders
+      // something, so the default is the common answer, not a drift signal
+      // worth logging.
       return false;
   }
 }
@@ -2055,6 +2059,72 @@ function SystemNote(item: SystemItem): string {
 }
 
 /**
+ * The slash form a `SessionCommand` is written as.
+ *
+ * DERIVED, NEVER RECEIVED. The wire item carries only the enum, so this table
+ * is where the text a reader sees comes from — which is precisely why the
+ * submitted prompt cannot leak onto this surface: `/model opus` and `/model`
+ * both arrive as MODEL and both draw `/model`. The argument the user typed is
+ * not on the wire and has nowhere to come from.
+ */
+const SESSION_COMMAND_LABELS: Record<SessionCommand, string> = {
+  CLEAR: "/clear",
+  COMPACT: "/compact",
+  MODEL: "/model",
+  COST: "/cost",
+  USAGE: "/usage",
+  STATUS: "/status",
+  CONTEXT: "/context",
+  CONFIG: "/config",
+  HELP: "/help",
+  DOCTOR: "/doctor",
+  LOGIN: "/login",
+  LOGOUT: "/logout",
+  MEMORY: "/memory",
+  PERMISSIONS: "/permissions",
+  AGENTS: "/agents",
+  MCP: "/mcp",
+  HOOKS: "/hooks",
+  OUTPUT_STYLE: "/output-style",
+  RELEASE_NOTES: "/release-notes",
+  TODOS: "/todos",
+  EXPORT: "/export",
+  ADD_DIR: "/add-dir",
+  RESUME: "/resume",
+  EXIT: "/exit",
+  PRIVACY_SETTINGS: "/privacy-settings",
+  STATUSLINE: "/statusline",
+  TERMINAL_SETUP: "/terminal-setup",
+  VIM: "/vim",
+  REWIND: "/rewind",
+  BUG: "/bug",
+};
+
+/** The slash form of one session command, for display. */
+export function sessionCommandLabel(command: SessionCommand): string {
+  return SESSION_COMMAND_LABELS[command];
+}
+
+/**
+ * A SESSION COMMAND the user ran, as a centered chip rather than a bubble.
+ *
+ * It is deliberately NOT bubble-shaped and deliberately NOT purple. A bubble
+ * on the user's side of the feed says "this is what I said to the agent", and
+ * the agent never saw `/model` — the CLI answered it locally. The chip says
+ * what actually happened: the user acted on the session, and the conversation
+ * carries on either side of it.
+ *
+ * The command name is the entire content, because the item's entire content
+ * is the command. There is no argument to show and no prompt text to fall
+ * back on: the wire message has one field, and it is this one.
+ */
+function SessionCommandChip(item: SessionCommandItem): string {
+  return `<div class="session-command" role="note"><span class="session-command-name">${escapeHtml(
+    sessionCommandLabel(item.command),
+  )}</span></div>`;
+}
+
+/**
  * One item's HTML, or nothing at all for the items the feed draws no node
  * for (`rendersEmpty`). FINALS pairs the feed's answers with the chips that
  * close their turns: a text block it names renders as a final response
@@ -2110,6 +2180,8 @@ export function renderItem(
       return ClearDivider(item);
     case "context-compacted":
       return CompactDivider(item);
+    case "session-command":
+      return SessionCommandChip(item);
     case "failure":
       return SystemFailureBubble(item);
     case "system":
@@ -2136,6 +2208,11 @@ export function itemKey(item: ConversationItem, index: number): string {
     case "context-cleared":
     case "context-compacted":
       return `${item.kind}:${item.uuid}`;
+    // Keyed by uuid so a resync's re-push of the SAME invocation (the uuid is
+    // derived from the submit's request id) reuses its node instead of drawing
+    // the command a second time.
+    case "session-command":
+      return `session-command:${item.uuid}`;
     // Keyed by the SAME identity the store reconciles a prompt on, so two
     // prompts can never share a DOM node. The index fallback covers a turn
     // carrying neither a request id nor a uuid (fixtures).
