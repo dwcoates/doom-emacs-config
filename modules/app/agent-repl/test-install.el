@@ -3,9 +3,9 @@
 ;;; Commentary:
 
 ;; Tests for the Emacs wrapper around .claude/install.sh.  Covers the
-;; sandbox-detection predicate, the installed-state predicate against
-;; synthetic settings.json fixtures, and the dispatch of interactive
-;; commands through to the bash script (mocked).
+;; installed-state predicate against synthetic settings.json fixtures,
+;; and the dispatch of interactive commands through to the bash script
+;; (mocked).
 ;;
 ;; Bash-script integration coverage (fresh install, foreign keys, etc.)
 ;; lives in a later commit; here we stick to unit-level behavior of the
@@ -20,35 +20,6 @@
                                             (or load-file-name buffer-file-name)))
       nil t)
 
-;;;; ---- sandbox-p ----
-
-(ert-deftest agent-repl-test-in-sandbox-dockerenv ()
-  "in-sandbox-p returns t when /.dockerenv exists."
-  (cl-letf (((symbol-function 'file-exists-p)
-             (lambda (path) (equal path "/.dockerenv")))
-            ((symbol-function 'getenv) (lambda (_) nil)))
-    (should (agent-repl--in-sandbox-p))))
-
-(ert-deftest agent-repl-test-in-sandbox-env-var ()
-  "in-sandbox-p returns t when DOOM_SANDBOX=1."
-  (cl-letf (((symbol-function 'file-exists-p) (lambda (_) nil))
-            ((symbol-function 'getenv)
-             (lambda (k) (and (equal k "DOOM_SANDBOX") "1"))))
-    (should (agent-repl--in-sandbox-p))))
-
-(ert-deftest agent-repl-test-in-sandbox-neither ()
-  "in-sandbox-p returns nil when neither signal is present."
-  (cl-letf (((symbol-function 'file-exists-p) (lambda (_) nil))
-            ((symbol-function 'getenv) (lambda (_) nil)))
-    (should-not (agent-repl--in-sandbox-p))))
-
-(ert-deftest agent-repl-test-in-sandbox-env-other-value ()
-  "DOOM_SANDBOX set to a non-1 value does NOT trigger sandbox mode."
-  (cl-letf (((symbol-function 'file-exists-p) (lambda (_) nil))
-            ((symbol-function 'getenv)
-             (lambda (k) (and (equal k "DOOM_SANDBOX") "0"))))
-    (should-not (agent-repl--in-sandbox-p))))
-
 ;; Every settings.json hook-writer test is gone with the writer itself (the
 ;; D-phase census): Emacs provisions no agent-harness hooks for ANY backend,
 ;; so there is no managed-hooks alist, no hooks-installed-p predicate, and no
@@ -58,20 +29,10 @@
 
 ;;;; ---- run-install-action dispatch ----
 
-(ert-deftest agent-repl-test-install-action-sandbox-noop ()
-  "install/uninstall/reinstall no-op when sandbox is detected."
-  (let ((called nil))
-    (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () t))
-              ((symbol-function 'agent-repl--run-install-script)
-               (lambda (&rest _) (setq called t) '(0 ""))))
-      (agent-repl--run-install-action "install")
-      (should-not called))))
-
 (ert-deftest agent-repl-test-install-action-passes-through ()
-  "When not in sandbox, the action arg is forwarded to the script."
+  "The action arg is forwarded to the script."
   (let ((received-arg nil))
-    (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil))
-              ((symbol-function 'agent-repl--run-install-script)
+    (cl-letf (((symbol-function 'agent-repl--run-install-script)
                (lambda (action) (setq received-arg action) '(0 "ok\n")))
               ((symbol-function 'agent-repl--surface-install-output)
                (lambda (_) nil)))
@@ -81,8 +42,7 @@
 (ert-deftest agent-repl-test-install-action-nonzero-exit-errors ()
   "Non-zero exit surfaces the output buffer and signals an error."
   (let ((buffer-shown nil))
-    (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil))
-              ((symbol-function 'agent-repl--run-install-script)
+    (cl-letf (((symbol-function 'agent-repl--run-install-script)
                (lambda (_) '(2 "boom\n")))
               ((symbol-function 'agent-repl--surface-install-output)
                (lambda (_) nil))
@@ -94,8 +54,7 @@
 (ert-deftest agent-repl-test-install-action-quiet-nonzero-no-window ()
   "Quiet non-zero exit does NOT pop the output window."
   (let ((buffer-shown nil))
-    (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil))
-              ((symbol-function 'agent-repl--run-install-script)
+    (cl-letf (((symbol-function 'agent-repl--run-install-script)
                (lambda (_) '(2 "boom\n")))
               ((symbol-function 'agent-repl--surface-install-output)
                (lambda (_) nil))
@@ -108,8 +67,7 @@
 (ert-deftest agent-repl-test-install-action-quiet-nonzero-logs ()
   "Quiet non-zero exit routes the script output to `agent-repl--log'."
   (let ((logged nil))
-    (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil))
-              ((symbol-function 'agent-repl--run-install-script)
+    (cl-letf (((symbol-function 'agent-repl--run-install-script)
                (lambda (_) '(2 "boom\n")))
               ((symbol-function 'agent-repl--surface-install-output)
                (lambda (_) nil))
@@ -120,8 +78,7 @@
 
 (ert-deftest agent-repl-test-install-action-quiet-nonzero-still-errors ()
   "Quiet non-zero exit still signals an error so surfacing is preserved."
-  (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil))
-            ((symbol-function 'agent-repl--run-install-script)
+  (cl-letf (((symbol-function 'agent-repl--run-install-script)
              (lambda (_) '(2 "boom\n")))
             ((symbol-function 'agent-repl--surface-install-output)
              (lambda (_) nil))
@@ -130,8 +87,7 @@
 
 (ert-deftest agent-repl-test-install-action-surface-output ()
   "Zero-exit run pipes script output to the output buffer."
-  (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil))
-            ((symbol-function 'agent-repl--run-install-script)
+  (cl-letf (((symbol-function 'agent-repl--run-install-script)
              (lambda (_) '(0 "hello from script\n"))))
     (agent-repl--run-install-action "install")
     (with-current-buffer agent-repl--install-output-buffer
@@ -183,15 +139,9 @@
   "Return the first issue whose message contains SUBSTRING, else nil."
   (cl-find-if (lambda (i) (string-match-p substring (cdr i))) issues))
 
-(ert-deftest agent-repl-test-doctor-sandbox-returns-nil ()
-  "In sandbox, doctor-issues is a no-op."
-  (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () t)))
-    (should-not (agent-repl--doctor-issues))))
-
 (ert-deftest agent-repl-test-doctor-all-skills-present-no-issues ()
   "With every managed skill link healthy and no stale links, doctor is clean."
-  (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil))
-            ((symbol-function 'agent-repl--check-skill-links)
+  (cl-letf (((symbol-function 'agent-repl--check-skill-links)
              (lambda (_issues) nil))
             ((symbol-function 'agent-repl--check-unmanaged-broken-links)
              (lambda (_issues) nil)))
@@ -208,7 +158,7 @@
 ;; Earlier revisions of this file invoked `bash .claude/install.sh' via
 ;; `call-process' under an isolated HOME tmpdir to assert end-to-end
 ;; installer behavior (fresh install, idempotency, foreign-entry
-;; preservation, uninstall, sandbox short-circuit, etc.).
+;; preservation, uninstall, etc.).
 ;;
 ;; Those tests have been removed because per AGENTS.md "No External
 ;; Processes or External State in Tests" the ERT suite covers ELISP
@@ -230,8 +180,7 @@
 (ert-deftest agent-repl-test-maybe-install-runs-when-issues ()
   "maybe-install-hooks invokes install when doctor reports issues."
   (let ((called nil))
-    (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil))
-              ((symbol-function 'agent-repl--doctor-issues)
+    (cl-letf (((symbol-function 'agent-repl--doctor-issues)
                (lambda () '((error . "missing"))))
               ((symbol-function 'agent-repl--run-install-action)
                (lambda (&rest _) (setq called t)))
@@ -245,8 +194,7 @@
 The quiet flag is what routes a failed auto-install to the log instead of
 popping the `*agent-repl-install*' window on every reload."
   (let ((received-args nil))
-    (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil))
-              ((symbol-function 'agent-repl--doctor-issues)
+    (cl-letf (((symbol-function 'agent-repl--doctor-issues)
                (lambda () '((error . "missing"))))
               ((symbol-function 'agent-repl--run-install-action)
                (lambda (&rest args) (setq received-args args)))
@@ -259,21 +207,7 @@ popping the `*agent-repl-install*' window on every reload."
 (ert-deftest agent-repl-test-maybe-install-skips-when-clean ()
   "maybe-install-hooks no-ops when doctor reports no issues."
   (let ((called nil))
-    (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil))
-              ((symbol-function 'agent-repl--doctor-issues) (lambda () nil))
-              ((symbol-function 'agent-repl--run-install-action)
-               (lambda (&rest _) (setq called t)))
-              (noninteractive nil)
-              (agent-repl-auto-install-hooks t))
-      (agent-repl--maybe-install-hooks)
-      (should-not called))))
-
-(ert-deftest agent-repl-test-maybe-install-skips-in-sandbox ()
-  "maybe-install-hooks no-ops in sandbox even when issues would be reported."
-  (let ((called nil))
-    (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () t))
-              ((symbol-function 'agent-repl--doctor-issues)
-               (lambda () '((error . "missing"))))
+    (cl-letf (((symbol-function 'agent-repl--doctor-issues) (lambda () nil))
               ((symbol-function 'agent-repl--run-install-action)
                (lambda (&rest _) (setq called t)))
               (noninteractive nil)
@@ -284,8 +218,7 @@ popping the `*agent-repl-install*' window on every reload."
 (ert-deftest agent-repl-test-maybe-install-skips-when-disabled ()
   "maybe-install-hooks no-ops when the custom flag is nil."
   (let ((called nil))
-    (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil))
-              ((symbol-function 'agent-repl--doctor-issues)
+    (cl-letf (((symbol-function 'agent-repl--doctor-issues)
                (lambda () '((error . "missing"))))
               ((symbol-function 'agent-repl--run-install-action)
                (lambda (&rest _) (setq called t)))
@@ -296,8 +229,7 @@ popping the `*agent-repl-install*' window on every reload."
 
 (ert-deftest agent-repl-test-maybe-install-swallows-error ()
   "Errors from the install action are caught, not propagated to startup."
-  (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil))
-            ((symbol-function 'agent-repl--doctor-issues)
+  (cl-letf (((symbol-function 'agent-repl--doctor-issues)
              (lambda () '((error . "missing"))))
             ((symbol-function 'agent-repl--run-install-action)
              (lambda (&rest _) (error "boom")))
@@ -311,8 +243,7 @@ popping the `*agent-repl-install*' window on every reload."
 (ert-deftest agent-repl-test-maybe-install-logs-caught-error ()
   "A caught install-action error is surfaced via `agent-repl--log'."
   (let ((logged nil))
-    (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil))
-              ((symbol-function 'agent-repl--doctor-issues)
+    (cl-letf (((symbol-function 'agent-repl--doctor-issues)
                (lambda () '((error . "missing"))))
               ((symbol-function 'agent-repl--run-install-action)
                (lambda (&rest _) (error "boom")))
@@ -384,55 +315,55 @@ the defcustoms.  Returns the list of dests created."
 (ert-deftest agent-repl-test-skill-link-ok-correct ()
   "skill-link-ok-p returns t when dest is a symlink to the expected src."
   (test-install--with-skill-dirs ()
-    (let ((name (car agent-repl--managed-skills)))
-      (make-symbolic-link (agent-repl--skill-src-path name)
-                          (agent-repl--skill-dest-path name))
-      (should (agent-repl--skill-link-ok-p name)))))
+                                 (let ((name (car agent-repl--managed-skills)))
+                                   (make-symbolic-link (agent-repl--skill-src-path name)
+                                                       (agent-repl--skill-dest-path name))
+                                   (should (agent-repl--skill-link-ok-p name)))))
 
 (ert-deftest agent-repl-test-skill-link-ok-missing ()
   "skill-link-ok-p returns nil when dest does not exist at all."
   (test-install--with-skill-dirs ()
-    (should-not
-     (agent-repl--skill-link-ok-p (car agent-repl--managed-skills)))))
+                                 (should-not
+                                  (agent-repl--skill-link-ok-p (car agent-repl--managed-skills)))))
 
 (ert-deftest agent-repl-test-skill-link-ok-foreign-target ()
   "skill-link-ok-p returns nil when dest points at something other than our src."
   (test-install--with-skill-dirs ()
-    (let* ((name (car agent-repl--managed-skills))
-           (dest (agent-repl--skill-dest-path name)))
-      (make-symbolic-link "/tmp/elsewhere" dest)
-      (should-not (agent-repl--skill-link-ok-p name)))))
+                                 (let* ((name (car agent-repl--managed-skills))
+                                        (dest (agent-repl--skill-dest-path name)))
+                                   (make-symbolic-link "/tmp/elsewhere" dest)
+                                   (should-not (agent-repl--skill-link-ok-p name)))))
 
 (ert-deftest agent-repl-test-check-skill-links-missing ()
   "Missing symlinks produce one warn per managed skill (external + local)."
   (test-install--with-skill-dirs ()
-    (let ((issues (list nil))
-          (expected (+ (length agent-repl--managed-skills)
-                       (length agent-repl--managed-local-skills))))
-      (agent-repl--check-skill-links issues)
-      (should (= (length (car issues)) expected))
-      (should (cl-every (lambda (i) (eq (car i) 'warn)) (car issues))))))
+                                 (let ((issues (list nil))
+                                       (expected (+ (length agent-repl--managed-skills)
+                                                    (length agent-repl--managed-local-skills))))
+                                   (agent-repl--check-skill-links issues)
+                                   (should (= (length (car issues)) expected))
+                                   (should (cl-every (lambda (i) (eq (car i) 'warn)) (car issues))))))
 
 (ert-deftest agent-repl-test-check-skill-links-all-ok ()
   "All skills linked correctly (external + local) produces no issues."
   (test-install--with-skill-dirs ()
-    (test-install--link-all-skills)
-    (let ((issues (list nil)))
-      (agent-repl--check-skill-links issues)
-      (should (null (car issues))))))
+                                 (test-install--link-all-skills)
+                                 (let ((issues (list nil)))
+                                   (agent-repl--check-skill-links issues)
+                                   (should (null (car issues))))))
 
 (ert-deftest agent-repl-test-check-skill-links-foreign ()
   "A foreign file at one dest path is flagged as `points elsewhere'."
   (test-install--with-skill-dirs ()
-    (let ((name (car agent-repl--managed-skills)))
-      (write-region "" nil (agent-repl--skill-dest-path name))
-      (let ((issues (list nil)))
-        (agent-repl--check-skill-links issues)
-        (should (= 1 (length
-                      (cl-remove-if-not
-                       (lambda (i) (string-match-p "points elsewhere"
-                                                    (cdr i)))
-                       (car issues)))))))))
+                                 (let ((name (car agent-repl--managed-skills)))
+                                   (write-region "" nil (agent-repl--skill-dest-path name))
+                                   (let ((issues (list nil)))
+                                     (agent-repl--check-skill-links issues)
+                                     (should (= 1 (length
+                                                   (cl-remove-if-not
+                                                    (lambda (i) (string-match-p "points elsewhere"
+                                                                                (cdr i)))
+                                                    (car issues)))))))))
 
 ;;;; ---- local-skill specific tests ----
 
@@ -460,30 +391,30 @@ checked-in `skills/' directory when install.el is loaded from a file."
 (ert-deftest agent-repl-test-skill-link-ok-uses-local-src ()
   "skill-link-ok-p honors the SRC-DIR argument for local skills."
   (test-install--with-skill-dirs ()
-    (let ((name (car agent-repl--managed-local-skills)))
-      (make-symbolic-link
-       (agent-repl--skill-src-path name agent-repl-local-skills-src-dir)
-       (agent-repl--skill-dest-path name))
-      ;; Correct when called with the local src-dir.
-      (should (agent-repl--skill-link-ok-p
-               name agent-repl-local-skills-src-dir))
-      ;; Wrong when called with the external src-dir (different target).
-      (should-not (agent-repl--skill-link-ok-p name)))))
+                                 (let ((name (car agent-repl--managed-local-skills)))
+                                   (make-symbolic-link
+                                    (agent-repl--skill-src-path name agent-repl-local-skills-src-dir)
+                                    (agent-repl--skill-dest-path name))
+                                   ;; Correct when called with the local src-dir.
+                                   (should (agent-repl--skill-link-ok-p
+                                            name agent-repl-local-skills-src-dir))
+                                   ;; Wrong when called with the external src-dir (different target).
+                                   (should-not (agent-repl--skill-link-ok-p name)))))
 
 (ert-deftest agent-repl-test-check-skill-links-local-missing ()
   "A missing local-skill symlink contributes its own warn entry."
   (test-install--with-skill-dirs ()
-    ;; Link only the external skills; leave local-skill dests missing.
-    (dolist (name agent-repl--managed-skills)
-      (make-symbolic-link (agent-repl--skill-src-path name)
-                          (agent-repl--skill-dest-path name)))
-    (let ((issues (list nil)))
-      (agent-repl--check-skill-links issues)
-      (should (= (length (car issues))
-                 (length agent-repl--managed-local-skills)))
-      (should (cl-every (lambda (i)
-                          (string-match-p "Skill symlink missing" (cdr i)))
-                        (car issues))))))
+                                 ;; Link only the external skills; leave local-skill dests missing.
+                                 (dolist (name agent-repl--managed-skills)
+                                   (make-symbolic-link (agent-repl--skill-src-path name)
+                                                       (agent-repl--skill-dest-path name)))
+                                 (let ((issues (list nil)))
+                                   (agent-repl--check-skill-links issues)
+                                   (should (= (length (car issues))
+                                              (length agent-repl--managed-local-skills)))
+                                   (should (cl-every (lambda (i)
+                                                       (string-match-p "Skill symlink missing" (cdr i)))
+                                                     (car issues))))))
 
 (ert-deftest agent-repl-test-debug-emacs-agent-repl-skill-file-exists ()
   "The checked-in debug-emacs-agent-repl SKILL.md must exist with frontmatter.
@@ -541,8 +472,8 @@ the JSON contract that the editor's `\"eval\"' handler dispatches against."
 (ert-deftest agent-repl-test-managed-local-skills-includes-emit-workspace-commands ()
   "Repo-local skills list must include `emit-workspace-commands.sh' (regression guard).
 explanation-engine folded the original into `workspace/run.sh --emit-commands'
-(python3-dependent, absent from the doom-sandbox image), so the doom repo
-now owns the trivial uuidgen-only emitter as a repo-local skill."
+(python3-dependent), so the doom repo now owns the trivial uuidgen-only
+emitter as a repo-local skill."
   (should (member "emit-workspace-commands.sh" agent-repl--managed-local-skills)))
 
 (ert-deftest agent-repl-test-managed-skills-excludes-emit-workspace-commands ()
@@ -639,47 +570,47 @@ would make the doctor demand a host symlink whose impl no longer exists."
 (ert-deftest agent-repl-test-check-unmanaged-broken-link-detected ()
   "A broken symlink not in the managed set produces a warn-level issue."
   (test-install--with-skill-dirs ()
-    ;; Create a broken symlink for a name we don't manage.
-    (make-symbolic-link "/nonexistent/workspace-eval"
-                        (expand-file-name "workspace-eval" dest))
-    (let ((issues (list nil)))
-      (agent-repl--check-unmanaged-broken-links issues)
-      (should (= 1 (length (car issues))))
-      (should (eq 'warn (caar (car issues))))
-      (should (string-match-p "Unmanaged broken symlink"
-                              (cdar (car issues)))))))
+                                 ;; Create a broken symlink for a name we don't manage.
+                                 (make-symbolic-link "/nonexistent/workspace-eval"
+                                                     (expand-file-name "workspace-eval" dest))
+                                 (let ((issues (list nil)))
+                                   (agent-repl--check-unmanaged-broken-links issues)
+                                   (should (= 1 (length (car issues))))
+                                   (should (eq 'warn (caar (car issues))))
+                                   (should (string-match-p "Unmanaged broken symlink"
+                                                           (cdar (car issues)))))))
 
 (ert-deftest agent-repl-test-check-unmanaged-broken-link-ignores-managed ()
   "A broken symlink for a managed skill name is NOT flagged by this check.
 That case is already covered by `agent-repl--check-skill-links'."
   (test-install--with-skill-dirs ()
-    ;; Create a broken symlink for a managed name.
-    (make-symbolic-link "/nonexistent/target"
-                        (expand-file-name (car agent-repl--managed-local-skills) dest))
-    (let ((issues (list nil)))
-      (agent-repl--check-unmanaged-broken-links issues)
-      (should (null (car issues))))))
+                                 ;; Create a broken symlink for a managed name.
+                                 (make-symbolic-link "/nonexistent/target"
+                                                     (expand-file-name (car agent-repl--managed-local-skills) dest))
+                                 (let ((issues (list nil)))
+                                   (agent-repl--check-unmanaged-broken-links issues)
+                                   (should (null (car issues))))))
 
 (ert-deftest agent-repl-test-check-unmanaged-broken-link-ignores-valid ()
   "A non-broken unmanaged symlink produces no issue."
   (test-install--with-skill-dirs ()
-    ;; Create a valid symlink to a real directory.
-    (let ((target (make-temp-file "real-target-" t)))
-      (unwind-protect
-          (progn
-            (make-symbolic-link target
-                                (expand-file-name "some-foreign-skill" dest))
-            (let ((issues (list nil)))
-              (agent-repl--check-unmanaged-broken-links issues)
-              (should (null (car issues)))))
-        (delete-directory target t)))))
+                                 ;; Create a valid symlink to a real directory.
+                                 (let ((target (make-temp-file "real-target-" t)))
+                                   (unwind-protect
+                                       (progn
+                                         (make-symbolic-link target
+                                                             (expand-file-name "some-foreign-skill" dest))
+                                         (let ((issues (list nil)))
+                                           (agent-repl--check-unmanaged-broken-links issues)
+                                           (should (null (car issues)))))
+                                     (delete-directory target t)))))
 
 (ert-deftest agent-repl-test-check-unmanaged-broken-link-empty-dir ()
   "No issues when the skills dest dir is empty."
   (test-install--with-skill-dirs ()
-    (let ((issues (list nil)))
-      (agent-repl--check-unmanaged-broken-links issues)
-      (should (null (car issues))))))
+                                 (let ((issues (list nil)))
+                                   (agent-repl--check-unmanaged-broken-links issues)
+                                   (should (null (car issues))))))
 
 (ert-deftest agent-repl-test-check-unmanaged-broken-link-nonexistent-dir ()
   "No issues when the skills dest dir does not exist."
@@ -691,14 +622,13 @@ That case is already covered by `agent-repl--check-skill-links'."
 (ert-deftest agent-repl-test-doctor-includes-unmanaged-broken-links ()
   "doctor-issues surfaces unmanaged broken symlinks alongside managed checks."
   (test-install--with-skill-dirs ()
-    ;; Link all managed skills correctly so those checks pass.
-    (test-install--link-all-skills)
-    ;; Add an unmanaged broken symlink.
-    (make-symbolic-link "/nonexistent/stale-skill"
-                        (expand-file-name "stale-skill" dest))
-    (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil)))
-      (let ((issues (agent-repl--doctor-issues)))
-        (should (test-install--doctor-find issues "Unmanaged broken symlink"))))))
+                                 ;; Link all managed skills correctly so those checks pass.
+                                 (test-install--link-all-skills)
+                                 ;; Add an unmanaged broken symlink.
+                                 (make-symbolic-link "/nonexistent/stale-skill"
+                                                     (expand-file-name "stale-skill" dest))
+                                 (let ((issues (agent-repl--doctor-issues)))
+                                   (should (test-install--doctor-find issues "Unmanaged broken symlink")))))
 
 ;;;; ---- Tests: settings-writer (deleted) ----
 ;;
@@ -741,124 +671,121 @@ exercised for real without ever reading the developer's own config."
   "The default ~/.claude settings file is discovered."
   ;; Arrange
   (agent-repl-test--with-fake-claude-home home
-    (agent-repl-test--write-settings home ".claude" "{}")
-    ;; Act / Assert
-    (should (equal (agent-repl--legacy-hook-settings-files)
-                   (list (expand-file-name ".claude/settings.json" home))))))
+                                          (agent-repl-test--write-settings home ".claude" "{}")
+                                          ;; Act / Assert
+                                          (should (equal (agent-repl--legacy-hook-settings-files)
+                                                         (list (expand-file-name ".claude/settings.json" home))))))
 
 (ert-deftest agent-repl-test-legacy-settings-files-finds-account-dirs ()
   "Sibling ~/.claude-* account dirs are discovered too, unnamed."
   ;; Arrange
   (agent-repl-test--with-fake-claude-home home
-    (agent-repl-test--write-settings home ".claude" "{}")
-    (agent-repl-test--write-settings home ".claude-work" "{}")
-    ;; Act / Assert
-    (should (= 2 (length (agent-repl--legacy-hook-settings-files))))))
+                                          (agent-repl-test--write-settings home ".claude" "{}")
+                                          (agent-repl-test--write-settings home ".claude-work" "{}")
+                                          ;; Act / Assert
+                                          (should (= 2 (length (agent-repl--legacy-hook-settings-files))))))
 
 (ert-deftest agent-repl-test-legacy-settings-files-skips-dirs-without-settings ()
   "A config dir with no settings.json contributes nothing."
   ;; Arrange
   (agent-repl-test--with-fake-claude-home home
-    (make-directory (expand-file-name ".claude-empty" home) t)
-    ;; Act / Assert
-    (should-not (agent-repl--legacy-hook-settings-files))))
+                                          (make-directory (expand-file-name ".claude-empty" home) t)
+                                          ;; Act / Assert
+                                          (should-not (agent-repl--legacy-hook-settings-files))))
 
 (ert-deftest agent-repl-test-legacy-hooks-detected-when-registered ()
   "A settings.json naming one of our hook scripts reports work to do."
   ;; Arrange
   (agent-repl-test--with-fake-claude-home home
-    (agent-repl-test--write-settings
-     home ".claude"
-     "{\"hooks\":{\"Stop\":[{\"hooks\":[{\"command\":\"~/.claude/hooks/stop-notify.sh\"}]}]}}")
-    ;; Act / Assert
-    (should (agent-repl--legacy-hooks-present-p))))
+                                          (agent-repl-test--write-settings
+                                           home ".claude"
+                                           "{\"hooks\":{\"Stop\":[{\"hooks\":[{\"command\":\"~/.claude/hooks/stop-notify.sh\"}]}]}}")
+                                          ;; Act / Assert
+                                          (should (agent-repl--legacy-hooks-present-p))))
 
 (ert-deftest agent-repl-test-legacy-hooks-absent-on-a-clean-config ()
   "A settings.json with no hook of ours reports nothing to do."
   ;; Arrange
   (agent-repl-test--with-fake-claude-home home
-    (agent-repl-test--write-settings home ".claude" "{\"model\":\"opus\"}")
-    ;; Act / Assert
-    (should-not (agent-repl--legacy-hooks-present-p))))
+                                          (agent-repl-test--write-settings home ".claude" "{\"model\":\"opus\"}")
+                                          ;; Act / Assert
+                                          (should-not (agent-repl--legacy-hooks-present-p))))
 
 (ert-deftest agent-repl-test-legacy-hooks-ignores-a-foreign-hook ()
   "Someone else's hook is not ours and must not trigger a purge."
   ;; Arrange
   (agent-repl-test--with-fake-claude-home home
-    (agent-repl-test--write-settings
-     home ".claude"
-     "{\"hooks\":{\"Stop\":[{\"hooks\":[{\"command\":\"/opt/other/notify.sh\"}]}]}}")
-    ;; Act / Assert
-    (should-not (agent-repl--legacy-hooks-present-p))))
+                                          (agent-repl-test--write-settings
+                                           home ".claude"
+                                           "{\"hooks\":{\"Stop\":[{\"hooks\":[{\"command\":\"/opt/other/notify.sh\"}]}]}}")
+                                          ;; Act / Assert
+                                          (should-not (agent-repl--legacy-hooks-present-p))))
 
 (ert-deftest agent-repl-test-legacy-hooks-detected-in-an-account-dir ()
   "A legacy hook registered only in an account dir is still found."
   ;; Arrange
   (agent-repl-test--with-fake-claude-home home
-    (agent-repl-test--write-settings home ".claude" "{}")
-    (agent-repl-test--write-settings
-     home ".claude-work"
-     "{\"hooks\":{\"Stop\":[{\"hooks\":[{\"command\":\"subagent-stop-notify.sh\"}]}]}}")
-    ;; Act / Assert
-    (should (agent-repl--legacy-hooks-present-p))))
+                                          (agent-repl-test--write-settings home ".claude" "{}")
+                                          (agent-repl-test--write-settings
+                                           home ".claude-work"
+                                           "{\"hooks\":{\"Stop\":[{\"hooks\":[{\"command\":\"subagent-stop-notify.sh\"}]}]}}")
+                                          ;; Act / Assert
+                                          (should (agent-repl--legacy-hooks-present-p))))
 
 (ert-deftest agent-repl-test-purge-runs-the-script-when-hooks-are-present ()
   "The purge shells out exactly when there is something to purge."
   ;; Arrange
   (agent-repl-test--with-fake-claude-home home
-    (agent-repl-test--write-settings
-     home ".claude"
-     "{\"hooks\":{\"Stop\":[{\"hooks\":[{\"command\":\"stop-notify.sh\"}]}]}}")
-    (let (actions
-          (agent-repl--legacy-hooks-purged nil)
-          (agent-repl-auto-install-hooks t))
-      (cl-letf (((symbol-function 'noninteractive) (lambda () nil))
-                ((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil))
-                ((symbol-function 'agent-repl--run-install-script)
-                 (lambda (action) (push action actions) (list 0 ""))))
-        (let ((noninteractive nil))
-          ;; Act
-          (agent-repl--maybe-purge-legacy-hooks))
-        ;; Assert
-        (should (equal actions '("purge-legacy-hooks")))))))
+                                          (agent-repl-test--write-settings
+                                           home ".claude"
+                                           "{\"hooks\":{\"Stop\":[{\"hooks\":[{\"command\":\"stop-notify.sh\"}]}]}}")
+                                          (let (actions
+                                                (agent-repl--legacy-hooks-purged nil)
+                                                (agent-repl-auto-install-hooks t))
+                                            (cl-letf (((symbol-function 'noninteractive) (lambda () nil))
+                                                      ((symbol-function 'agent-repl--run-install-script)
+                                                       (lambda (action) (push action actions) (list 0 ""))))
+                                              (let ((noninteractive nil))
+                                                ;; Act
+                                                (agent-repl--maybe-purge-legacy-hooks))
+                                              ;; Assert
+                                              (should (equal actions '("purge-legacy-hooks")))))))
 
 (ert-deftest agent-repl-test-purge-skips-the-script-on-a-clean-config ()
   "A healthy load is file reads only — no bash."
   ;; Arrange
   (agent-repl-test--with-fake-claude-home home
-    (agent-repl-test--write-settings home ".claude" "{}")
-    (let (actions
-          (agent-repl--legacy-hooks-purged nil)
-          (agent-repl-auto-install-hooks t))
-      (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil))
-                ((symbol-function 'agent-repl--run-install-script)
-                 (lambda (action) (push action actions) (list 0 ""))))
-        (let ((noninteractive nil))
-          ;; Act
-          (agent-repl--maybe-purge-legacy-hooks))
-        ;; Assert
-        (should-not actions)))))
+                                          (agent-repl-test--write-settings home ".claude" "{}")
+                                          (let (actions
+                                                (agent-repl--legacy-hooks-purged nil)
+                                                (agent-repl-auto-install-hooks t))
+                                            (cl-letf (((symbol-function 'agent-repl--run-install-script)
+                                                       (lambda (action) (push action actions) (list 0 ""))))
+                                              (let ((noninteractive nil))
+                                                ;; Act
+                                                (agent-repl--maybe-purge-legacy-hooks))
+                                              ;; Assert
+                                              (should-not actions)))))
 
 (ert-deftest agent-repl-test-purge-runs-once-per-session ()
   "Repeat boots do not re-run the purge: the guard is a genuine one-shot."
   ;; Arrange
   (agent-repl-test--with-fake-claude-home home
-    (agent-repl-test--write-settings
-     home ".claude"
-     "{\"hooks\":{\"Stop\":[{\"hooks\":[{\"command\":\"stop-notify.sh\"}]}]}}")
-    (let ((runs 0)
-          (agent-repl--legacy-hooks-purged nil)
-          (agent-repl-auto-install-hooks t))
-      (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil))
-                ((symbol-function 'agent-repl--run-install-script)
-                 (lambda (_a) (setq runs (1+ runs)) (list 0 ""))))
-        (let ((noninteractive nil))
-          ;; Act
-          (agent-repl--maybe-purge-legacy-hooks)
-          (agent-repl--maybe-purge-legacy-hooks)
-          (agent-repl--maybe-purge-legacy-hooks))
-        ;; Assert
-        (should (= runs 1))))))
+                                          (agent-repl-test--write-settings
+                                           home ".claude"
+                                           "{\"hooks\":{\"Stop\":[{\"hooks\":[{\"command\":\"stop-notify.sh\"}]}]}}")
+                                          (let ((runs 0)
+                                                (agent-repl--legacy-hooks-purged nil)
+                                                (agent-repl-auto-install-hooks t))
+                                            (cl-letf (((symbol-function 'agent-repl--run-install-script)
+                                                       (lambda (_a) (setq runs (1+ runs)) (list 0 ""))))
+                                              (let ((noninteractive nil))
+                                                ;; Act
+                                                (agent-repl--maybe-purge-legacy-hooks)
+                                                (agent-repl--maybe-purge-legacy-hooks)
+                                                (agent-repl--maybe-purge-legacy-hooks))
+                                              ;; Assert
+                                              (should (= runs 1))))))
 
 (ert-deftest agent-repl-test-purge-no-ops-in-batch ()
   "The test suite must never touch the developer's real config."
@@ -871,39 +798,21 @@ exercised for real without ever reading the developer's own config."
       ;; Assert
       (should-not actions))))
 
-(ert-deftest agent-repl-test-purge-no-ops-in-sandbox ()
-  "Hooks live on the host; the container has none to purge."
-  ;; Arrange
-  (agent-repl-test--with-fake-claude-home home
-    (agent-repl-test--write-settings
-     home ".claude"
-     "{\"hooks\":{\"Stop\":[{\"hooks\":[{\"command\":\"stop-notify.sh\"}]}]}}")
-    (let (actions (agent-repl--legacy-hooks-purged nil))
-      (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () t))
-                ((symbol-function 'agent-repl--run-install-script)
-                 (lambda (action) (push action actions) (list 0 ""))))
-        (let ((noninteractive nil))
-          ;; Act
-          (agent-repl--maybe-purge-legacy-hooks))
-        ;; Assert
-        (should-not actions)))))
-
 (ert-deftest agent-repl-test-purge-failure-does-not-break-module-load ()
   "A failing purge is logged, never signalled: a leftover hook writing
 sentinel files nobody reads must not be able to break startup."
   ;; Arrange
   (agent-repl-test--with-fake-claude-home home
-    (agent-repl-test--write-settings
-     home ".claude"
-     "{\"hooks\":{\"Stop\":[{\"hooks\":[{\"command\":\"stop-notify.sh\"}]}]}}")
-    (let ((agent-repl--legacy-hooks-purged nil)
-          (agent-repl-auto-install-hooks t))
-      (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil))
-                ((symbol-function 'agent-repl--run-install-script)
-                 (lambda (_a) (error "script exploded"))))
-        (let ((noninteractive nil))
-          ;; Act / Assert
-          (should-not (agent-repl--maybe-purge-legacy-hooks)))))))
+                                          (agent-repl-test--write-settings
+                                           home ".claude"
+                                           "{\"hooks\":{\"Stop\":[{\"hooks\":[{\"command\":\"stop-notify.sh\"}]}]}}")
+                                          (let ((agent-repl--legacy-hooks-purged nil)
+                                                (agent-repl-auto-install-hooks t))
+                                            (cl-letf (((symbol-function 'agent-repl--run-install-script)
+                                                       (lambda (_a) (error "script exploded"))))
+                                              (let ((noninteractive nil))
+                                                ;; Act / Assert
+                                                (should-not (agent-repl--maybe-purge-legacy-hooks)))))))
 
 (ert-deftest agent-repl-test-purge-scripts-mirror-the-installer-list ()
   "The elisp skip-check list must cover every script install.sh purges,

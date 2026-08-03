@@ -4,9 +4,6 @@
 ;; problems.  The actual check logic lives in `install.el', `codex.el',
 ;; and `daemon.el' so it is testable; here we translate the returned
 ;; (LEVEL . MESSAGE) list into `warn!' / `error!' calls.
-;;
-;; Skips everything inside the agent sandbox: hook installation and the
-;; daemon's assets are host-only concerns.
 
 ;; The doctor runs inside Doom, where `warn!' (doom-lib) exists.
 (declare-function warn! "doom-lib")

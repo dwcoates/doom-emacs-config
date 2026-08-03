@@ -1897,15 +1897,6 @@ what gets rejected, so guessing would be strictly worse than saying nothing."
                (lambda (_) nil)))
       (should-not (agent-repl--ws-observed-claude-session-id "ws1")))))
 
-(ert-deftest agent-repl-test-active-inst-sandbox-env ()
-  "active-inst should use :sandbox when :active-env is set to :sandbox."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :active-env :sandbox)
-    (agent-repl--ws-put "ws1" :sandbox (make-agent-repl-instantiation))
-    (let ((inst (agent-repl--active-inst "ws1")))
-      (should (agent-repl-instantiation-p inst))
-      (should (equal (agent-repl--ws-get "ws1" :sandbox) inst)))))
-
 (ert-deftest agent-repl-test-active-inst-returns-same-struct ()
   "active-inst should return the same struct on second call (not create a new one)."
   (agent-repl-test--with-clean-state

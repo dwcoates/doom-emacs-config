@@ -330,7 +330,6 @@ to live in `initialize-claude-output`, `initialize-new-vterm`, and
 | Sends startup cmd + return to vterm | Yes | `initialize-claude-sends-cmd-and-return` |
 | Schedules readiness timer | Yes | `initialize-claude-schedules-ready-timer` |
 | Sets buffer-local `agent-repl--ready` to nil | Yes | `initialize-claude-sets-ready-nil` |
-| Sets sandbox mode-line in vterm buffer | Yes | `initialize-claude-sets-sandbox-mode-line` |
 | Clears `:fork-session-id` after cmd build | Yes | `initialize-claude-clears-fork-session-id` |
 | Calls `initialize-ws-env` when `:active-env` unset | Yes | `initialize-claude-calls-ws-env-init-when-unset` |
 | Skips `initialize-ws-env` when `:active-env` set | Yes | `initialize-claude-skips-ws-env-init-when-set` |
@@ -463,7 +462,6 @@ to live in `initialize-claude-output`, `initialize-new-vterm`, and
 | Not worktree -> error | Yes | `validate-env-switch-no-worktree` |
 | No session ID -> error | Yes | `validate-env-switch-no-session-id` |
 | Claude thinking -> error | Yes | `validate-env-switch-thinking` |
-| Sandbox with no config -> error | Yes | `validate-env-switch-no-sandbox-config` |
 | Bare-metal switch (valid) -> success | Yes | `validate-env-switch-bare-metal-ok` |
 
 ### `agent-repl--seed-new-env-session (ws new-env session-id)`

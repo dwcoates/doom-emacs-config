@@ -11,7 +11,7 @@
 # Exit codes:
 #   0  success
 #   1  usage error / unknown verb
-#   2  missing prerequisite (rebuild the sandbox image)
+#   2  missing prerequisite (a required binary is not on PATH)
 
 set -uo pipefail
 
@@ -26,7 +26,7 @@ case "${1:-}" in
     ;;
   dispatch)
     if ! command -v uuidgen >/dev/null 2>&1; then
-      die "uuidgen is not available. Rebuild the sandbox image by running .claude/install.sh and try again."
+      die "required binary 'uuidgen' is not on PATH; install it and retry."
     fi
     # Resolve the sibling script via string-only `dirname` rather than a
     # literal `..`: this script's install dir (`~/.claude/skills/<skill>`)

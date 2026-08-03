@@ -817,7 +817,7 @@ remaining) gui frontend, that is `agent-repl--gui-send-turn'
       (setq-local mode-line-format (list "BARE METAL: a"))
       (agent-repl--ws-put "ws1" :vterm-buffer (current-buffer))
       (agent-repl-test--with-temp-buffer "*agent-panel-attach-all-2*"
-        (setq-local mode-line-format (list "DOCKER SANDBOX: img"))
+        (setq-local mode-line-format (list "BARE METAL: b"))
         (agent-repl--ws-put "ws2" :vterm-buffer (current-buffer))
         (agent-repl-prompt-summary-attach-all)
         (with-current-buffer "*agent-panel-attach-all-1*"

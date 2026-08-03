@@ -22,6 +22,5 @@ Flags: `--theme light|dark`, `--out FILE`, `--daemon HOST:PORT`,
 URL` to shoot an already-running server instead. Exits non-zero if the
 page logs any console error.
 
-In the sandbox, Chromium lives at
-`$PLAYWRIGHT_BROWSERS_PATH/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell`;
-pass it via `PLAYWRIGHT_CHROMIUM`.
+When Chromium is not where Playwright expects it, point at the binary
+explicitly via `PLAYWRIGHT_CHROMIUM`.

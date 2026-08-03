@@ -417,8 +417,8 @@ the segment lands on one and not the other."
 ;;;; Startup
 
 ;; The poll shells out, so it is started only where a runtime is expected.
-;; Batch runs (the ERT harness) and sandbox loads deliberately inhibit backend
-;; startup, and a timer spawning `bash' underneath a test run would be exactly
+;; Batch runs (the ERT harness) deliberately inhibit backend startup, and a
+;; timer spawning `bash' underneath a test run would be exactly
 ;; the external-process leak the harness exists to prevent.
 (unless (and (fboundp 'agent-repl--frontend-init-inhibited-p)
              (agent-repl--frontend-init-inhibited-p))

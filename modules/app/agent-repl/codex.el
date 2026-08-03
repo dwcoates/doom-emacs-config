@@ -318,12 +318,10 @@ is not loaded."
 (defun agent-repl--codex-doctor-issues ()
   "Return a list of (LEVEL . MESSAGE) describing codex-backend problems.
 Empty when the codex backend is not in use (see
-`agent-repl--codex-in-use-p'), when running inside the sandbox, or when
-everything checks out.  Checks: the `codex' binary on PATH, the
+`agent-repl--codex-in-use-p') or when everything checks out.  Checks: the `codex' binary on PATH, the
 existence of an explicitly configured CODEX_HOME (codex requires it to
 pre-exist)."
   (cond
-   ((agent-repl--in-sandbox-p) nil)
    ((not (agent-repl--codex-in-use-p)) nil)
    (t
     (let ((issues nil))
