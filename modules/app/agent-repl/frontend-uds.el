@@ -179,7 +179,8 @@ that the daemon or session is healthy.")
   '("snapshot" "workspaceState" "sessionView" "conversationDelta"
     "typingDelta" "taskCatalog" "commandAck" "daemonView"
     "sessionInit" "heartbeat" "queue" "progress"
-    "workspaceAvailable" "hostAction" "daemonHealth" "sessionHealth")
+    "workspaceAvailable" "hostAction" "daemonHealth" "sessionHealth"
+    "workspaceRoster")
   "The protojson (lowerCamelCase) names of every `FrontendFrame' oneof arm.
 Mirrors the `frame' oneof in proto/agentshim/frontend/v1/frontend.proto.
 A decoded frame whose sole top-level key is NOT one of these is
@@ -189,12 +190,16 @@ malformed (unknown wire field) and signals loudly.
 commands, tools, skills, model list); it is the pushed-frame replacement
 for the deleted GET /commands HTTP slash-menu source.
 
-`taskCatalog', `heartbeat' (E4), `queue' (E4), and `progress' (F1) are
-decoded for wire parity and rendered by nothing here — see
-`agent-repl--uds-ignored-frame-fields'.")
+`workspaceRoster' is the daemon's broadcast echo of the roster Emacs
+itself publishes; it is registered so the echo decodes instead of
+signalling.
+
+`taskCatalog', `heartbeat' (E4), `queue' (E4), `progress' (F1), and
+`workspaceRoster' are decoded for wire parity and rendered by nothing
+here — see `agent-repl--uds-ignored-frame-fields'.")
 
 (defconst agent-repl--uds-ignored-frame-fields
-  '("taskCatalog" "heartbeat" "queue" "progress")
+  '("taskCatalog" "heartbeat" "queue" "progress" "workspaceRoster")
   "Frame arms Emacs decodes for wire parity but DELIBERATELY renders nothing for.
 These are a subset of `agent-repl--uds-known-frame-fields'.
 
@@ -228,7 +233,15 @@ in the progress footer's task counter; Emacs renders only the daemon's
 resolved aggregate `WorkspaceState.live_task_count' through workspace
 status and has no per-task roster.  Treating this pushed arm as an
 unfinished handler flooded the durable log on every task transition even
-though there is intentionally nothing for Emacs to apply.")
+though there is intentionally nothing for Emacs to apply.
+
+`workspaceRoster': the daemon broadcasts the roster to EVERY connected
+frontend client, including the Emacs host client that authored it.
+Emacs is the roster's single author — it publishes through the
+`publishWorkspaceRoster' command — so applying the echo would be Emacs
+telling itself what it just said.  The arm is decoded for wire parity
+and deliberately renders nothing.  This is a settled design decision,
+not unfinished wiring.")
 
 (defconst agent-repl--uds-known-command-fields
   '("submitPrompt" "interrupt" "permissionAnswer" "mergeWorkspace"
