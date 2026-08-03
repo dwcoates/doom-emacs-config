@@ -320,7 +320,7 @@ func TestDispatchNacksRosterPublishWithoutRetainer(t *testing.T) {
 		{
 			name: "roster present",
 			cmd: &frontendv1.PublishWorkspaceRosterCmd{
-				Roster: &frontendv1.WorkspaceRoster{Revision: 3},
+				Roster: validRoster(3),
 			},
 		},
 		{

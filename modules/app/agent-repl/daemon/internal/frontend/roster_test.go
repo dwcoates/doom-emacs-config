@@ -12,43 +12,29 @@ import (
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"google.golang.org/protobuf/encoding/protojson"
-)
 
-// readyRow builds a minimal valid roster row: a dir and a set status arm.
-func readyRow(dir string) *frontendv1.RosterRow {
-	return &frontendv1.RosterRow{
-		Dir:    dir,
-		Name:   dir,
-		Status: &frontendv1.RosterRow_Ready{Ready: &frontendv1.RosterRowStatusReady{}},
-	}
-}
+	"claude-repld/internal/frontend/rostertest"
+)
 
 // testBootID is the publisher epoch every single-epoch test publishes under.
 // Tests that care about the epoch boundary name their own ids instead.
 const testBootID = "boot-a"
 
-// validRoster builds the smallest roster the daemon accepts at the given
-// revision, under the default publisher epoch.
-func validRoster(revision int64, rows ...*frontendv1.RosterRow) *frontendv1.WorkspaceRoster {
-	return validRosterInEpoch(testBootID, revision, rows...)
+// validRoster builds the shared contract-legal fixture at the given revision,
+// under the default publisher epoch.
+//
+// It is a one-line binding of the default epoch onto rostertest.ValidRoster,
+// NOT a second fixture: this suite owns no roster shape of its own, so a
+// contract change lands in rostertest and reaches every suite at once. The
+// illegal shapes come from rostertest's named options, so every deliberate
+// contract breach is visible as a helper name at the call site.
+func validRoster(revision int64, opts ...rostertest.Option) *frontendv1.WorkspaceRoster {
+	return rostertest.ValidRoster(testBootID, revision, opts...)
 }
 
-// validRosterInEpoch builds the smallest roster the daemon accepts: a positive
-// revision, a non-empty boot_id, a set view arm, and one fully-formed row.
-func validRosterInEpoch(bootID string, revision int64, rows ...*frontendv1.RosterRow) *frontendv1.WorkspaceRoster {
-	if len(rows) == 0 {
-		rows = []*frontendv1.RosterRow{readyRow("/w1")}
-	}
-	return &frontendv1.WorkspaceRoster{
-		Revision: revision,
-		BootId:   bootID,
-		View: &frontendv1.WorkspaceRoster_Repository{
-			Repository: &frontendv1.RosterRepositoryView{
-				Sections: []*frontendv1.RosterRepoSection{{RepoKey: "repo", Rows: rows}},
-			},
-		},
-		CurrentDir: "/w1",
-	}
+// validRosterInEpoch builds the same fixture under a named publisher epoch.
+func validRosterInEpoch(bootID string, revision int64, opts ...rostertest.Option) *frontendv1.WorkspaceRoster {
+	return rostertest.ValidRoster(bootID, revision, opts...)
 }
 
 // publishRosterCmd wraps a roster in the frozen command arm.
@@ -58,6 +44,47 @@ func publishRosterCmd(requestID string, roster *frontendv1.WorkspaceRoster) *fro
 		Command: &frontendv1.FrontendCommand_PublishWorkspaceRoster{
 			PublishWorkspaceRoster: &frontendv1.PublishWorkspaceRosterCmd{Roster: roster},
 		},
+	}
+}
+
+// --- the drift guard --------------------------------------------------------
+
+// TestTheSharedRosterFixtureSatisfiesTheValidator is the guard that makes
+// fixture-vs-contract drift impossible rather than merely unlikely.
+//
+// Every suite in the daemon — this one and the e2e roster suite — publishes
+// rosters built by rostertest.ValidRoster. This test checks that fixture
+// against validateRoster itself, in the package where validateRoster lives. So
+// a future commit that tightens the validator (as the boot_id requirement did)
+// fails HERE, in the daemon's own unit suite, at the amendment commit — instead
+// of surfacing later as a wave of red e2e tests whose fixtures were left behind.
+//
+// The bootID cases are both epochs the suites use, because bootID is a
+// parameter of the fixture and a fixture legal in one epoch must be legal in
+// any.
+func TestTheSharedRosterFixtureSatisfiesTheValidator(t *testing.T) {
+	tests := []struct {
+		name     string
+		bootID   string
+		revision int64
+	}{
+		{name: "the default epoch at the first revision", bootID: testBootID, revision: 1},
+		{name: "a named epoch at a later revision", bootID: "boot-new", revision: 500},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			roster := rostertest.ValidRoster(tt.bootID, tt.revision)
+
+			// Act.
+			err := validateRoster(roster)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("the shared roster fixture no longer satisfies validateRoster: %v\n"+
+					"the validator was tightened without amending rostertest.ValidRoster; amend the fixture in one place and every suite follows", err)
+			}
+		})
 	}
 }
 
@@ -323,7 +350,7 @@ func TestDispatchNacksARosterWithNoBootId(t *testing.T) {
 func TestPublishWorkspaceRosterRefusesARowWithNoStatus(t *testing.T) {
 	// Arrange.
 	s, _ := newTestServer(t, 0)
-	roster := validRoster(1, &frontendv1.RosterRow{Dir: "/naked", Name: "naked"})
+	roster := validRoster(1, rostertest.WithStatuslessRow())
 
 	// Act.
 	err := s.PublishWorkspaceRoster(roster)
@@ -332,7 +359,7 @@ func TestPublishWorkspaceRosterRefusesARowWithNoStatus(t *testing.T) {
 	if err == nil {
 		t.Fatal("PublishWorkspaceRoster = nil, want a refusal for a statusless row")
 	}
-	if !strings.Contains(err.Error(), "/naked") || !strings.Contains(err.Error(), "no status set") {
+	if !strings.Contains(err.Error(), rostertest.MergingRowDir) || !strings.Contains(err.Error(), "no status set") {
 		t.Errorf("refusal %q does not name the statusless row", err)
 	}
 }
@@ -342,17 +369,15 @@ func TestPublishWorkspaceRosterRefusesARowWithNoStatus(t *testing.T) {
 func TestPublishWorkspaceRosterRefusesAChildRowWithNoStatus(t *testing.T) {
 	// Arrange.
 	s, _ := newTestServer(t, 0)
-	parent := readyRow("/parent")
-	parent.Children = []*frontendv1.RosterRow{{Dir: "/child", Name: "child"}}
 
 	// Act.
-	err := s.PublishWorkspaceRoster(validRoster(1, parent))
+	err := s.PublishWorkspaceRoster(validRoster(1, rostertest.WithStatuslessChildRow()))
 
 	// Assert.
 	if err == nil {
 		t.Fatal("PublishWorkspaceRoster = nil, want a refusal for a statusless child row")
 	}
-	if !strings.Contains(err.Error(), "/child") {
+	if !strings.Contains(err.Error(), rostertest.ChildRowDir) {
 		t.Errorf("refusal %q does not name the statusless child", err)
 	}
 }
@@ -363,10 +388,7 @@ func TestPublishWorkspaceRosterRefusesAChildRowWithNoStatus(t *testing.T) {
 func TestPublishWorkspaceRosterRefusesARecentlyMergedRowWithNoStatus(t *testing.T) {
 	// Arrange.
 	s, _ := newTestServer(t, 0)
-	roster := validRoster(1)
-	roster.RecentlyMerged = &frontendv1.RosterSection{
-		Rows: []*frontendv1.RosterRow{{Dir: "/merged", Name: "merged"}},
-	}
+	roster := validRoster(1, rostertest.WithStatuslessRecentlyMergedRow())
 
 	// Act.
 	err := s.PublishWorkspaceRoster(roster)
@@ -387,7 +409,7 @@ func TestPublishWorkspaceRosterRefusesAnUnsetView(t *testing.T) {
 	s, _ := newTestServer(t, 0)
 
 	// Act.
-	err := s.PublishWorkspaceRoster(&frontendv1.WorkspaceRoster{Revision: 1, BootId: testBootID})
+	err := s.PublishWorkspaceRoster(validRoster(1, rostertest.WithoutView()))
 
 	// Assert.
 	if err == nil {
@@ -610,13 +632,23 @@ func TestWorkspaceRosterFrameRoundTripsTheStatusOneof(t *testing.T) {
 
 	// Assert.
 	rows := decoded.GetWorkspaceRoster().GetRepository().GetSections()[0].GetRows()
-	if len(rows) != 1 {
-		t.Fatalf("decoded rows = %d, want 1", len(rows))
+	if len(rows) != 2 {
+		t.Fatalf("decoded rows = %d, want the fixture's 2", len(rows))
 	}
 	if rows[0].GetStatus() == nil {
 		t.Fatalf("decoded row status oneof is unset after a round trip: %s", data)
 	}
 	if rows[0].GetReady() == nil {
 		t.Errorf("decoded row status = %T, want the ready arm", rows[0].GetStatus())
+	}
+	// The NESTED row travels the same wire and is checked to the same standard:
+	// a child whose empty status message decoded back to an unset oneof would
+	// be just as unrenderable as a top-level one.
+	child := rows[0].GetChildren()[0]
+	if child.GetStatus() == nil {
+		t.Fatalf("decoded child row status oneof is unset after a round trip: %s", data)
+	}
+	if child.GetThinking() == nil {
+		t.Errorf("decoded child row status = %T, want the thinking arm", child.GetStatus())
 	}
 }

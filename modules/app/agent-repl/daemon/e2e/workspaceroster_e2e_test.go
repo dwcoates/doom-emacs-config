@@ -82,6 +82,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/frontend"
+	"claude-repld/internal/frontend/rostertest"
 	"claude-repld/internal/progress"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/server"
@@ -456,81 +457,36 @@ func awaitBroadcastRoster(t *testing.T, conn *websocket.Conn) *frontendv1.Worksp
 // Fixtures
 // ---------------------------------------------------------------------------
 
-// validRoster is a complete, contract-legal roster: the repository grouping
-// (the SET ARM IS the grouping), a folded section that still carries its rows,
-// a nested child row, a hoisted recently_merged section, and a current_dir /
-// nav_dir pair that differ — because the cursor moves through the roster
-// without switching workspaces.
-//
-// Every row sets exactly one status arm, which is the only legal shape.
-func validRoster(revision int64) *frontendv1.WorkspaceRoster {
-	return &frontendv1.WorkspaceRoster{
-		Revision: revision,
-		View: &frontendv1.WorkspaceRoster_Repository{
-			Repository: &frontendv1.RosterRepositoryView{
-				Sections: []*frontendv1.RosterRepoSection{
-					{
-						RepoKey: "github.com/example/doom",
-						Folded:  false,
-						Rows: []*frontendv1.RosterRow{
-							{
-								Dir:     "/tmp/roster/doom-main",
-								Name:    "doom-main",
-								Current: true,
-								Status:  &frontendv1.RosterRow_Ready{Ready: &frontendv1.RosterRowStatusReady{}},
-								Children: []*frontendv1.RosterRow{{
-									Dir:    "/tmp/roster/doom-main-spawn",
-									Name:   "doom-main-spawn",
-									Status: &frontendv1.RosterRow_Thinking{Thinking: &frontendv1.RosterRowStatusThinking{}},
-								}},
-							},
-							{
-								Dir:    "/tmp/roster/doom-merging",
-								Name:   "doom-merging",
-								Status: &frontendv1.RosterRow_Merging{Merging: &frontendv1.RosterRowStatusMerging{}},
-							},
-						},
-					},
-					{
-						// A FOLDED section still carries its rows: folding is a
-						// display state, so unfolding needs no republish.
-						RepoKey: "github.com/example/other",
-						Folded:  true,
-						Rows: []*frontendv1.RosterRow{{
-							Dir:    "/tmp/roster/other-parked",
-							Name:   "other-parked",
-							Status: &frontendv1.RosterRow_Hibernated{Hibernated: &frontendv1.RosterRowStatusHibernated{}},
-						}},
-					},
-				},
-			},
-		},
-		RecentlyMerged: &frontendv1.RosterSection{
-			Rows: []*frontendv1.RosterRow{{
-				Dir:    "/tmp/roster/doom-settled",
-				Name:   "doom-settled",
-				Status: &frontendv1.RosterRow_Merged{Merged: &frontendv1.RosterRowStatusMerged{}},
-			}},
-		},
-		CurrentDir: "/tmp/roster/doom-main",
-		NavDir:     "/tmp/roster/doom-merging",
-	}
+// This suite owns NO roster shape of its own. Every roster it publishes is
+// built by rostertest, which is the single source the daemon's own unit suite
+// builds from and checks against validateRoster directly. That is deliberate:
+// this file used to carry a second, hand-built copy of the roster contract, and
+// when boot_id became required the copy was left behind — every test here
+// failed against a validator that was behaving exactly as specified. A fixture
+// that cannot drift from the contract cannot produce that failure again.
+
+// rosterBootID is the publisher epoch this suite publishes under. Tests whose
+// subject IS the epoch boundary name their own ids instead.
+const rosterBootID = "boot-e2e-a"
+
+// validRoster binds the default epoch onto the shared fixture.
+func validRoster(revision int64, opts ...rostertest.Option) *frontendv1.WorkspaceRoster {
+	return rostertest.ValidRoster(rosterBootID, revision, opts...)
 }
 
 // statuslessRowRoster is valid in every respect EXCEPT that one row leaves the
 // status oneof unset. That is a contract breach, not a default dot: the user
 // ruled state enums out entirely, so there is no zero value for a row to fall
 // back to and no "the author looked and there is none" assertion being made
-// (that one has its own arm — RosterRowStatusNone).
+// (that one has its own arm — RosterRowStatusNone). The breach is produced by a
+// NAMED helper so it is visible as an illegality rather than as an edit.
 func statuslessRowRoster(revision int64) *frontendv1.WorkspaceRoster {
-	roster := validRoster(revision)
-	roster.GetRepository().GetSections()[0].GetRows()[1].Status = nil
-	return roster
+	return validRoster(revision, rostertest.WithStatuslessRow())
 }
 
 // statuslessRowDir is the dir of the row statuslessRowRoster strips, so an
 // assertion can ask whether the refusal names the offending row.
-const statuslessRowDir = "/tmp/roster/doom-merging"
+const statuslessRowDir = rostertest.MergingRowDir
 
 // ---------------------------------------------------------------------------
 // 1. Publish → ack
@@ -648,6 +604,100 @@ func TestARejectedWorkspaceRosterIsNotRetained(t *testing.T) {
 	if roster != nil {
 		t.Fatalf("a client's connect burst carried revision %d after the ONLY publish was refused: the daemon retained a roster it rejected",
 			roster.GetRevision())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 3b. A roster with no boot_id → loud nack, and nothing retained
+// ---------------------------------------------------------------------------
+
+// TestARosterWithNoBootIdIsNackedNamingTheEpoch covers the epoch-identity half
+// of the publish contract, end to end on the transport Emacs actually holds.
+//
+// boot_id is the key the monotonicity floor is scoped by. A publisher that will
+// not name its epoch cannot be told apart from one whose epoch has ended, so
+// its revision is comparable to nothing: folding it into whatever epoch happens
+// to be retained would either bounce a live publisher forever or let a dead
+// one's counter gate a live one. The daemon refuses it instead — and the
+// refusal has to NAME boot_id, because a publisher told only "rejected" cannot
+// tell a missing epoch from a stale revision.
+func TestARosterWithNoBootIdIsNackedNamingTheEpoch(t *testing.T) {
+	// Arrange
+	daemon := bootRosterDaemon(t, rosterStateDir(t))
+	host := daemon.dialHost(t)
+
+	// Act
+	ack := host.publish(t, "roster-no-boot-id", rostertest.ValidRoster("", 1))
+
+	// Assert — the refusal reaches the publisher, and it names the field.
+	if ack.GetOk() {
+		t.Fatalf("the daemon accepted a roster with no boot_id: its revision is comparable to no epoch, so the monotonicity floor now means nothing")
+	}
+	if !strings.Contains(ack.GetError(), "boot_id") {
+		t.Errorf("the refusal of an epoch-less roster never names boot_id, so the publisher cannot tell a missing epoch from a stale revision: %q", ack.GetError())
+	}
+}
+
+// TestARosterWithNoBootIdIsNotRetained is the structural half of the refusal
+// above: a nack that still left the roster in the retainer would hand every
+// later connect a roster the daemon had just declared illegal.
+func TestARosterWithNoBootIdIsNotRetained(t *testing.T) {
+	// Arrange
+	daemon := bootRosterDaemon(t, rosterStateDir(t))
+	if ack := daemon.dialHost(t).publish(t, "roster-no-boot-id", rostertest.ValidRoster("", 1)); ack.GetOk() {
+		t.Fatalf("the daemon accepted a roster with no boot_id")
+	}
+
+	// Act — a client connecting after the refusal.
+	roster := connectRoster(t, daemon.dialGUI(t))
+
+	// Assert
+	if roster != nil {
+		t.Fatalf("a client's connect burst carried revision %d after the ONLY publish was refused for a missing boot_id: the daemon retained a roster it rejected",
+			roster.GetRevision())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 3c. A new publisher epoch resets the revision floor
+// ---------------------------------------------------------------------------
+
+// TestANewPublisherEpochResetsTheRevisionFloor covers the whole reason the
+// revision floor is keyed by boot_id rather than held globally.
+//
+// A revision counter is minted by ONE Emacs boot. When Emacs restarts against a
+// surviving daemon, its counter restarts at 1 while the daemon still retains
+// revision 41 from the previous boot. Compared as bare numbers the fresh boot's
+// every publish is "stale" — forever, with no honest resync available to it,
+// because a nack carries no retained revision to resync against. The sidebar
+// would sit frozen on a dead editor's picture.
+//
+// Keying the floor by epoch makes that unrepresentable: a publish under a
+// DIFFERENT boot_id is not comparable to the retained one at all, so it is
+// accepted whatever its revision and becomes the new floor. This asserts both
+// halves — the acceptance, and that a client connecting afterwards is handed
+// the new epoch's roster rather than the higher-numbered dead one.
+func TestANewPublisherEpochResetsTheRevisionFloor(t *testing.T) {
+	// Arrange — the daemon retains revision 41 from the previous Emacs boot.
+	daemon := bootRosterDaemon(t, rosterStateDir(t))
+	host := daemon.dialHost(t)
+	host.publishOrFail(t, "roster-old-epoch", rostertest.ValidRoster("boot-a", 41))
+
+	// Act — a fresh boot publishes its FIRST roster, revision 1.
+	ack := host.publish(t, "roster-new-epoch", rostertest.ValidRoster("boot-b", 1))
+
+	// Assert — accepted, and it is what a later connect is handed.
+	if !ack.GetOk() {
+		t.Fatalf("the daemon refused revision 1 from a new publisher epoch while holding revision 41 from the old one: a restarted Emacs can never publish again, and no resync exists for it: %s",
+			ack.GetError())
+	}
+	received := connectRoster(t, daemon.dialGUI(t))
+	if received == nil {
+		t.Fatal("a client connecting after the epoch change received no roster at all")
+	}
+	if received.GetBootId() != "boot-b" || received.GetRevision() != 1 {
+		t.Errorf("the connect burst carried boot_id=%q revision=%d, want the new epoch's boot-b/1: the dead boot's roster is still on screen",
+			received.GetBootId(), received.GetRevision())
 	}
 }
 
