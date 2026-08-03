@@ -75,8 +75,12 @@ func TestE2EAScheduledShutdownSurvivesADaemonBounceMidDrain(t *testing.T) {
 	// Assert — the replacement daemon still holds the lease...
 	snap := connectSnapshot(t, second)
 	view := snap.GetShutdownSchedule()
+	// Reported rather than fatal: the lease and what the lease was holding are
+	// independent facts about the SAME post-bounce snapshot, and a bounce that
+	// lost both should say so once rather than one failure at a time. The
+	// getters below are nil-safe, so a missing arm reads as its zero value.
 	if view.GetDraining() == nil {
-		t.Fatalf("after the bounce the shutdown_schedule is %T, want the draining arm: a schedule that existed must not be silently dropped by the crash it was scheduling", view.GetState())
+		t.Errorf("after the bounce the shutdown_schedule is %T, want the draining arm: a schedule that existed must not be silently dropped by the crash it was scheduling", view.GetState())
 	}
 	if got, want := view.GetDraining().GetScheduleId(), draining.GetScheduleId(); got != want {
 		t.Errorf("after the bounce schedule_id = %q, want the schedule the previous daemon minted, %q", got, want)
@@ -91,19 +95,24 @@ func TestE2EAScheduledShutdownSurvivesADaemonBounceMidDrain(t *testing.T) {
 	// ... and still holds what the lease was holding.
 	queue := snapshotQueue(snap, cwdB)
 	if queue == nil {
-		t.Fatalf("after the bounce the snapshot carries no QueueView for %s at all: the held prompt is unaccounted for", cwdB)
+		t.Errorf("after the bounce the snapshot carries no QueueView for %s at all: the held prompt is unaccounted for", cwdB)
 	}
+	// GetEntries is nil-safe, so the lookup below runs either way; the entry
+	// assertions are then guarded so a missing view is reported once instead of
+	// cascading into every fact that depends on it.
 	var restored *frontendv1.QueueEntry
 	for _, entry := range queue.GetEntries() {
 		if entry.GetId() == held.GetId() {
 			restored = entry
 		}
 	}
-	if restored == nil {
-		t.Fatalf("after the bounce the queue for %s no longer carries the held entry %q: a held prompt is delayed, never lost", cwdB, held.GetId())
+	if queue != nil && restored == nil {
+		t.Errorf("after the bounce the queue for %s no longer carries the held entry %q: a held prompt is delayed, never lost", cwdB, held.GetId())
 	}
-	if got, want := restored.GetShutdownHold().GetScheduleId(), draining.GetScheduleId(); got != want {
-		t.Errorf("the restored entry names schedule_id %q, want %q: it must still be joined to the lease still holding it", got, want)
+	if restored != nil {
+		if got, want := restored.GetShutdownHold().GetScheduleId(), draining.GetScheduleId(); got != want {
+			t.Errorf("the restored entry names schedule_id %q, want %q: it must still be joined to the lease still holding it", got, want)
+		}
 	}
 }
 
