@@ -15,13 +15,25 @@
 ;; the one perspective-less exception; they outlive their tab inside the
 ;; Recently Merged section and keep receding there.
 ;;
-;; Data flows one way, Emacs -> webview: Emacs owns the workspace model
-;; (workspace.el), so it builds the roster — repos, family-nested rows,
-;; per-row lifecycle status — serializes it to JSON, and pushes it into
-;; every live webview through the `agentReplWorkspaceRoster' host hook
-;; over the execute-script channel frontend.el owns.  The push is gated
-;; by a cheap in-memory signature computed on the 1Hz state tick
-;; (status.el), so the rebuild runs only when something visible changed.
+;; Data flows one way, Emacs -> daemon -> every client: Emacs owns the
+;; workspace model (workspace.el), so it builds the roster — repos,
+;; family-nested rows, per-row lifecycle status — shapes it as the frozen
+;; `WorkspaceRoster' contract and PUBLISHES it to the daemon as a
+;; `publishWorkspaceRoster' frontend command.  The daemon retains it and
+;; rebroadcasts it; the roster is ordinary daemon surface, snapshotted on
+;; connect like every other frame.
+;;
+;; It used to be injected into each live webview by execute-script, which
+;; made it per-view state a second view could not share and a reconnect
+;; could not recover.  Two consequences of the move are worth stating:
+;;
+;;   * The 1Hz signature (status.el's state tick) is now ONLY a change
+;;     detector.  A skipped tick cannot lose delivery, because the daemon
+;;     still holds the last roster published and hands it to whoever
+;;     connects — where a missed injection used to leave a webview blank.
+;;   * A (re)connect publishes unconditionally, because the one thing the
+;;     daemon cannot survive is its own restart: it comes back retaining
+;;     no roster, and Emacs is the only author of one.
 ;;
 ;; Actions flow the long way around, webview -> daemon -> Emacs: the
 ;; webapp cannot call into Emacs, so the daemon persists each UI-only effect
@@ -55,6 +67,11 @@
 (declare-function agent-repl--ws-effective-task-id "tasks" (name))
 (declare-function agent-repl--tasks-sorted "tasks" ())
 (declare-function agent-repl--tasks-signature "tasks" ())
+(declare-function agent-repl--uds-connected-p "frontend-uds" ())
+(declare-function agent-repl--uds-send-command "frontend-uds"
+                  (field payload &optional workspace process))
+(declare-function agent-repl--uds-track-command "frontend-uds"
+                  (request-id field workspace &optional on-failure on-success on-challenge))
 
 ;;;; ---- The view selector -----------------------------------------------
 
@@ -86,14 +103,6 @@ the same group path; workspaces belonging to no task collect here.")
                agent-repl--sidebar-view))))
 
 ;;;; ---- The host-hook contract ------------------------------------------
-
-(defconst agent-repl--sidebar-roster-hook "agentReplWorkspaceRoster"
-  "Name of the webapp global that receives the workspace roster.
-The webapp plants it on `window' at boot (`ROSTER_HOOK' in
-webapp/src/host.ts) — the two names are one contract and MUST match.
-The hook receives the roster as an already-parsed object: the push
-script interpolates the JSON text directly into the call, and JSON is
-a valid JS expression.")
 
 (defconst agent-repl--sidebar-expand-hook "agentReplWorkspaceExpand"
   "Name of the webapp global that toggles a row's detail panel.
@@ -182,6 +191,61 @@ default dot."
             (agent-repl--log name "sidebar-wire-status: ws=%s unmapped render-status=%S" name kw)
             (error "agent-repl--sidebar-wire-status: unmapped render state %S for ws=%s"
                    kw name)))))))
+
+(defconst agent-repl--sidebar-status-arm
+  '(("submitting"      . :submitting)
+    ("thinking"        . :thinking)
+    ("clearing"        . :clearing)
+    ("compacting"      . :compacting)
+    ("permission"      . :permission)
+    ("done"            . :done)
+    ("interrupted"     . :interrupted)
+    ("ready"           . :ready)
+    ("idle-async"      . :idleAsync)
+    ("vendor-blocked"  . :vendorBlocked)
+    ("init"            . :init)
+    ("severed"         . :severed)
+    ("hibernated"      . :hibernated)
+    ("start-failed"    . :startFailed)
+    ("degraded"        . :degraded)
+    ("dead"            . :dead)
+    ("merge-enqueuing" . :mergeEnqueuing)
+    ("merging"         . :merging)
+    ("merge-queued"    . :mergeQueued)
+    ("merge-conflict"  . :mergeConflict)
+    ("merge-failed"    . :mergeFailed)
+    ("merged"          . :merged)
+    ("none"            . :none)
+    ("inactive"        . :inactive))
+  "Maps a sidebar wire status string onto its protojson `status' ARM KEY.
+
+THE SET ARM IS THE STATUS.  `RosterRow.status' is a oneof of 24 empty
+messages, so the row carries no `status' field at all: it carries ONE of
+these keys, whose value is the empty object `{}'.  Which key is present
+is the entire lifecycle assertion — there is no value to disagree with
+it, and an unset oneof is a contract breach the consumers reject rather
+than draw as a default dot.
+
+Keys are protojson field names, hence lowerCamel (`idleAsync',
+`mergeConflict', `startFailed'), while the wire strings this maps FROM
+stay kebab-case.  The pairing is the exact inverse of the webapp's
+`ROSTER_ROW_STATUS_KEYWORD' table (webapp/src/frontend-proto.ts): that
+table names each arm's keyword, this one recovers each keyword's arm.
+The two sides and the proto's oneof are one contract and MUST match.
+
+TOTAL over `agent-repl--sidebar-wire-status's output, deliberately: a
+wire status with no arm here signals rather than publishing a row with
+no lifecycle.")
+
+(defun agent-repl--sidebar-status-arm (wire)
+  "Return the protojson `RosterRow.status' arm keyword for WIRE.
+Signals on an unmapped status: a row published with no arm set is
+rejected by every consumer as a contract breach, so failing here — where
+the offending status is still named — beats emitting one."
+  (or (cdr (assoc wire agent-repl--sidebar-status-arm))
+      (progn
+        (agent-repl--log nil "sidebar-status-arm: unmapped wire status=%S" wire)
+        (error "agent-repl--sidebar-status-arm: unmapped wire status %S" wire))))
 
 (defun agent-repl--sidebar-closed-p (name)
   "Return non-nil when roster workspace NAME renders greyed (closed).
@@ -733,25 +797,127 @@ invariant compares two exact counts.  They render instead in the
                 :navDir (or agent-repl--sidebar-nav-dir :null))
           (append flat recent-dirs))))
 
-;;;; ---- Pushing into the webviews ----------------------------------------
+;;;; ---- Shaping the roster as a protojson WorkspaceRoster ----------------
+;;
+;; `agent-repl--sidebar-build' keeps authoring the roster in Emacs's own
+;; shape; these functions translate that one value into the frozen
+;; `WorkspaceRoster' contract.  Translating rather than re-authoring keeps
+;; the grouping, family-nesting and ordering rules in exactly one place.
+;;
+;; Two proto3 encoding rules govern what comes out:
+;;
+;;   * A oneof is FLATTENED into its parent, so a row carries one status
+;;     arm key directly (`"mergeConflict": {}'), never a `status' field.
+;;     Same for the view: `WorkspaceRoster' carries `repository' or `task',
+;;     never a mode string beside them.
+;;   * Zero values are OMITTED.  A false bool and an empty string are
+;;     absent rather than present-and-falsy, which is what protojson emits
+;;     and what both consumers read back as false/"".  This also keeps
+;;     `json-encode' away from the `:false' sentinel, which is the JSON
+;;     library's spelling, not this wire's.
 
-(defun agent-repl--sidebar-push-script (json)
-  "Return the JavaScript that hands JSON (the roster text) to the webapp.
-Calls the hook only when the webapp has already planted it: a webview
-mid-navigation has no hook yet, and that is an expected state rather
-than a violated invariant — the next pushed change (or the signature
-tick noticing the webview) re-delivers the roster."
-  (format "window.%s && window.%s(%s);"
-          agent-repl--sidebar-roster-hook
-          agent-repl--sidebar-roster-hook
-          json))
+(defun agent-repl--sidebar-proto-row (row)
+  "Translate one built ROW plist into a protojson `RosterRow' plist.
+Recurses through `:children', which is the family nesting the build
+already resolved.  ROW's wire status selects the oneof ARM; the arm's
+value is the empty object every status message is by contract."
+  (append
+   (list :dir (plist-get row :dir)
+         :name (plist-get row :name))
+   (list (agent-repl--sidebar-status-arm (plist-get row :status))
+         ;; `{}', not `null': the arm must be a present empty MESSAGE, and
+         ;; only a hash table encodes as an empty JSON object.
+         (make-hash-table :test 'equal))
+   (when (eq (plist-get row :current) t) (list :current t))
+   (list :children (agent-repl--sidebar-proto-rows (plist-get row :children)))))
+
+(defun agent-repl--sidebar-proto-rows (rows)
+  "Translate the vector ROWS into a vector of protojson `RosterRow's."
+  (vconcat (mapcar #'agent-repl--sidebar-proto-row (append rows nil))))
+
+(defun agent-repl--sidebar-proto-repo-section (group)
+  "Translate a built GROUP plist into a protojson `RosterRepoSection'.
+The group's key IS the `repoKey' — identity, and the fold state's key.
+The label is dropped: the frozen section carries no label field, and the
+webapp derives the display name from the key."
+  (append
+   (list :repoKey (plist-get group :key))
+   (when (eq (plist-get group :folded) t) (list :folded t))
+   ;; A FOLDED SECTION STILL CARRIES ITS ROWS: folding is display state,
+   ;; so unfolding must need no republish.
+   (list :rows (agent-repl--sidebar-proto-rows (plist-get group :rows)))))
+
+(defun agent-repl--sidebar-proto-task-section (group)
+  "Translate a built GROUP plist into a protojson `RosterTaskSection'.
+The group's key is the `taskId' (identity) and its label the `title'
+\(display only) — a task can be renamed without becoming another task.
+Task sections carry `done'; repo sections have no such axis."
+  (append
+   (list :taskId (plist-get group :key)
+         :title (plist-get group :label))
+   (when (eq (plist-get group :done) t) (list :done t))
+   (list :rows (agent-repl--sidebar-proto-rows (plist-get group :rows)))))
+
+(defun agent-repl--sidebar-proto-current-dir (rows)
+  "Return the dir of the row marked current within ROWS, or nil.
+Searches children too, since the current workspace can be a nested one.
+
+Resolved FROM the rows rather than recomputed beside them: the contract
+carries `current_dir' and a per-row `current' flag deliberately, so the
+author settles the question once and no consumer can answer it two ways."
+  (cl-loop for row across (or rows [])
+           thereis (if (eq (plist-get row :current) t)
+                       (plist-get row :dir)
+                     (agent-repl--sidebar-proto-current-dir
+                      (plist-get row :children)))))
+
+(defun agent-repl--sidebar-proto-roster (roster revision)
+  "Translate built ROSTER into a protojson `WorkspaceRoster' at REVISION.
+
+The built roster always carries both groupings with the inactive one
+empty; the contract carries only the ACTIVE one, because the set arm is
+the grouping.  An unrecognized view signals rather than defaulting to
+repository — silently publishing the wrong grouping would misdraw every
+row instead of failing where the bad value is still named."
+  (let* ((view (plist-get roster :view))
+         (task-view (cond ((equal view "task") t)
+                          ((equal view "repository") nil)
+                          (t (agent-repl--log nil "sidebar-proto-roster: unknown view=%S" view)
+                             (error "agent-repl--sidebar-proto-roster: unknown view %S" view))))
+         (sections (vconcat
+                    (mapcar (if task-view
+                                #'agent-repl--sidebar-proto-task-section
+                              #'agent-repl--sidebar-proto-repo-section)
+                            (append (plist-get roster (if task-view :tasks :repos))
+                                    nil))))
+         (merged (plist-get roster :recentlyMerged))
+         (merged-rows (if (eq merged :null)
+                          []
+                        (agent-repl--sidebar-proto-rows (plist-get merged :rows))))
+         (nav (plist-get roster :navDir))
+         ;; Every row the roster carries is a candidate, recently-merged
+         ;; included: a merged workspace can still be the current one.
+         (current-dir (or (cl-loop for section across sections
+                                   thereis (agent-repl--sidebar-proto-current-dir
+                                            (plist-get section :rows)))
+                          (agent-repl--sidebar-proto-current-dir merged-rows))))
+    (append
+     (list :revision revision)
+     (list (if task-view :task :repository) (list :sections sections))
+     (when (> (length merged-rows) 0)
+       (list :recentlyMerged (list :rows merged-rows)))
+     (when (and (stringp current-dir) (not (string-empty-p current-dir)))
+       (list :currentDir current-dir))
+     (when (and (stringp nav) (not (string-empty-p nav)))
+       (list :navDir nav)))))
 
 (defun agent-repl--sidebar-expand-script (dir)
   "Return the JavaScript that toggles DIR's detail panel in the webapp.
-Guards on the hook exactly as `agent-repl--sidebar-push-script' does —
-a webview mid-navigation has not planted it yet.  DIR rides in as a
-JSON string literal (`json-serialize'), so any character in a path
-survives interpolation intact."
+Calls the hook only when the webapp has already planted it: a webview
+mid-navigation has no hook yet, and that is an expected state rather
+than a violated invariant.  DIR rides in as a JSON string literal
+\(`json-serialize'), so any character in a path survives interpolation
+intact."
   (format "window.%s && window.%s(%s);"
           agent-repl--sidebar-expand-hook
           agent-repl--sidebar-expand-hook
@@ -767,23 +933,102 @@ survives interpolation intact."
                                     name (buffer-name buf))
           (push buf bufs))))))
 
+;;;; ---- Publishing the roster to the daemon ------------------------------
+;;
+;; The roster used to be injected into each live webview by execute-script.
+;; That made it PER-VIEW state: a second webview could not share it, and a
+;; webview that remounted had nothing until the next push.  It is now a
+;; frontend command, so the daemon retains one roster and rebroadcasts it —
+;; ordinary daemon surface, snapshotted on connect like everything else.
+;;
+;; The delivery guarantee moved with it.  The 1Hz signature compare is now
+;; ONLY a change detector: a tick that skips cannot lose a roster, because
+;; the daemon still holds the last one published and hands it to every
+;; client that connects.  What the daemon cannot survive is its own
+;; restart, which is what `agent-repl--sidebar-publish-on-connect' covers.
+
+(defconst agent-repl--sidebar-publish-field "publishWorkspaceRoster"
+  "protojson name of the `FrontendCommand' arm carrying the roster.
+Mirrors `publish_workspace_roster' in frontend.proto — one contract.")
+
+(defvar agent-repl--sidebar-roster-revision 0
+  "Revision of the last roster published; 0 before the first publish.
+
+Monotonic PER EMACS BOOT, as the contract specifies: the daemon refuses
+a publish whose revision is not newer than the one it holds, so an
+out-of-order delivery cannot resurrect a superseded roster.  A restarted
+Emacs restarts this counter, which is sound only because the daemon's
+retained roster does not outlive the publisher that authored it.")
+
+(defun agent-repl--sidebar-publish-nacked (revision err)
+  "Surface a REVISION publish rejected by the daemon, with reason ERR.
+
+Loud by construction and never absorbed: the ack path already logs and
+echoes the rejection, and this adds the roster-specific fact — WHICH
+revision the daemon refused — that the generic surfacing cannot know.
+
+The revision counter is deliberately NOT rewound here.  Rewinding would
+need the revision the daemon actually retains, and the frozen `CommandAck'
+carries no such field, so any figure recovered from the error text would
+be a guess dressed as a recovery.  The counter therefore keeps climbing:
+a monotonic counter that outruns the daemon is harmless, where one that
+silently reverses could publish a stale roster over a newer one."
+  (agent-repl--log nil "sidebar-publish: NACKED revision=%d reason=%s"
+                   revision (or err "unspecified")))
+
+(defun agent-repl--sidebar-publish (roster)
+  "Publish built ROSTER to the daemon as the next revision.
+
+Returns the command's `request_id', or nil when the link is down.
+
+A DOWN LINK IS NOT A LOST ROSTER, and is logged rather than raised: the
+daemon that would receive it does not exist to receive anything, and the
+reconnect publish delivers the state of the world as of reconnection —
+which is fresher than the frame that could not be sent.  Raising here
+would instead fire on every 1Hz tick for the whole of an outage."
+  (if (not (agent-repl--uds-connected-p))
+      (progn
+        (agent-repl--log nil "sidebar-publish: link down — deferring to the reconnect publish")
+        nil)
+    (let* ((revision (cl-incf agent-repl--sidebar-roster-revision))
+           (proto (agent-repl--sidebar-proto-roster roster revision))
+           (request-id (agent-repl--uds-send-command
+                        agent-repl--sidebar-publish-field
+                        (list :roster proto))))
+      ;; TRACKED, not fire-and-forget: a rejected roster means the sidebar
+      ;; every client draws is not the one Emacs authored, which is exactly
+      ;; the kind of divergence that must never pass silently.
+      (agent-repl--uds-track-command
+       request-id agent-repl--sidebar-publish-field nil
+       (lambda (err) (agent-repl--sidebar-publish-nacked revision err)))
+      (agent-repl--log nil "sidebar-publish: revision=%d request-id=%s view=%s"
+                       revision request-id (plist-get roster :view))
+      request-id)))
+
 (defun agent-repl--sidebar-push ()
-  "Rebuild the roster and push it into every live webview.
+  "Rebuild the roster and publish it to the daemon.
 Unconditional: change-gating lives in `agent-repl--sidebar-tick's
 signature compare, and the event-driven callers (fold / switch / nav)
 push precisely because they just changed what the sidebar shows.
 Also refreshes `agent-repl--sidebar-flat-dirs' as the build's side
 product, so navigation always walks the order last shown."
-  (let* ((built (agent-repl--sidebar-build))
-         (json (json-serialize (car built)))
-         (bufs (agent-repl--sidebar-live-webview-buffers))
-         (script (agent-repl--sidebar-push-script json)))
+  (let ((built (agent-repl--sidebar-build)))
     (setq agent-repl--sidebar-flat-dirs (cdr built))
-    (dolist (buf bufs)
-      (agent-repl--frontend-webview-execute-script buf script))
-    (agent-repl--log nil "sidebar-push: rows=%d webviews=%d nav=%s json-bytes=%d"
-                      (length (cdr built)) (length bufs)
-                      agent-repl--sidebar-nav-dir (length json))))
+    (agent-repl--sidebar-publish (car built))))
+
+(defun agent-repl--sidebar-publish-on-connect ()
+  "Republish the roster onto a freshly opened frontend UDS connection.
+
+Subscriber for `agent-repl-uds-connected-functions'.  A daemon that just
+restarted retains no roster, and Emacs is the only author of one, so
+without this the sidebar would stay empty until something happened to
+move the signature.  Rebuilding rather than resending the last frame is
+the point: the roster published is the state of the world NOW."
+  (agent-repl--log nil "sidebar-publish-on-connect: republishing the roster")
+  (agent-repl--sidebar-push))
+
+(add-hook 'agent-repl-uds-connected-functions
+          #'agent-repl--sidebar-publish-on-connect)
 
 (defun agent-repl--sidebar-expand-push (dir)
   "Toggle DIR's detail panel across every live webview.
@@ -805,12 +1050,16 @@ flips the panel and re-renders on its own.  No roster round-trip means
 (defun agent-repl--sidebar-signature ()
   "Return a cheap value that changes whenever the roster would.
 Pure in-memory reads plus the persp membership probe:
-per-live-workspace render state (status keyword,
-repl-state, open-p — the greyed flag's other input, last-viewed), the
-current workspace, the fold set, the nav cursor, and the set of live
-webview buffers.  The webview set matters because a freshly
-\(re)mounted webview needs the roster even when nothing in the roster
-itself changed."
+per-live-workspace render state (status keyword, repl-state, open-p —
+the greyed flag's other input, last-viewed), the current workspace, the
+fold set, and the nav cursor.
+
+The set of live webview buffers is deliberately NOT an input any more.
+It was one while the roster was injected per webview, because a freshly
+mounted view held nothing until a push reached it.  The roster now lives
+in the daemon, which hands its retained copy to every client that
+connects, so a new view is served without Emacs noticing it exists —
+and this signature is purely a change detector over roster CONTENT."
   (list (mapcar (lambda (name)
                   (list name
                         (agent-repl--ws-render-status name)
@@ -833,8 +1082,7 @@ itself changed."
         ;; The epoch is its own axis: wiping the Recently Merged section
         ;; drops rows without changing any per-workspace render state, so
         ;; without this the gate would skip the push that clears them.
-        agent-repl--sidebar-merged-epoch
-        (mapcar #'buffer-name (agent-repl--sidebar-live-webview-buffers))))
+        agent-repl--sidebar-merged-epoch))
 
 (defun agent-repl--sidebar-tick ()
   "1Hz entry point (status.el's state tick): push when the signature moved.
