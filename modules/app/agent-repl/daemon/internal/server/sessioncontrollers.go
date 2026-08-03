@@ -28,6 +28,7 @@ import (
 	"claude-repld/internal/session"
 	"claude-repld/internal/sessioncontroller"
 	"claude-repld/internal/sessionlock"
+	"claude-repld/internal/shim"
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/shimlisten"
 )
@@ -162,7 +163,17 @@ type EvictParkedFunc func(sessionID, reason string) bool
 // returns a stop func that terminates the launched shim cleanly (SIGTERM) —
 // the daemon uses it to hibernate the child — or nil when there is nothing to
 // stop (a shim that outlived a prior daemon and dialled back in).
-type ShimSpawnFunc func(sessionID string, opts CreateOpts) (stop func() error, err error)
+type ShimSpawnFunc func(sessionID string, opts CreateOpts) (stop ShimStopFunc, err error)
+
+// ShimStopFunc stops one spawned shim, told WHO commanded the stop and WHY.
+// The attribution is a required argument rather than a convenience: it is what
+// makes a commanded shim death distinguishable, from the daemon log alone,
+// from a shim that died on its own.
+type ShimStopFunc func(by ShimStop) error
+
+// ShimStop is the shim package's stop attribution, re-exported so a caller
+// wiring a ShimStopFunc names one package rather than two.
+type ShimStop = shim.Stop
 
 // ShimSpawner keeps exactly one shim alive per session: it leaves an existing
 // one alone (whether it is connected or merely holding its session lock, §4.4)
@@ -184,7 +195,7 @@ type ShimSpawner struct {
 	awaitStopped func(sessionID string) error
 
 	mu    sync.Mutex
-	stops map[string]func() error // session id -> stop the shim WE spawned
+	stops map[string]ShimStopFunc // session id -> stop the shim WE spawned
 }
 
 // NewShimSpawner builds a ShimSpawner. reg and spawn are required; a nil
@@ -197,7 +208,7 @@ func NewShimSpawner(reg *registry.Registry, connected ConnectedFunc, evict Evict
 		reg: reg, connected: connected, evict: evict, spawn: spawn, logf: logf,
 		signal:       signalPID,
 		awaitStopped: awaitShimStopped,
-		stops:        map[string]func() error{},
+		stops:        map[string]ShimStopFunc{},
 	}
 }
 
@@ -344,6 +355,18 @@ func (s *ShimSpawner) DropResume(sessionID string) (string, error) {
 //
 // No handle and no pid is a genuine no-op — nothing is running that we know of
 // — and it is logged rather than treated as a failure.
+// commandedStop attributes every stop that reaches a shim through StopShim.
+//
+// It is deliberately coarse — StopShim's signature is fixed by
+// sessioncontroller.Spawner and carries no reason — but it is exact about the
+// one distinction the log has to be able to make: this death was ORDERED. The
+// specific caller (hibernate, merged teardown, hard restart) is named in that
+// caller's own adjacent record.
+var commandedStop = shim.Stop{
+	Initiator: "server.ShimSpawner.StopShim",
+	Reason:    "commanded session stop (hibernation or restart)",
+}
+
 func (s *ShimSpawner) StopShim(sessionID string, hintPID int32) error {
 	s.mu.Lock()
 	stop, ok := s.stops[sessionID]
@@ -357,8 +380,8 @@ func (s *ShimSpawner) StopShim(sessionID string, hintPID int32) error {
 	s.mu.Unlock()
 	switch {
 	case ok:
-		s.logf("server: session %s: stopping shim (SIGTERM via our own process handle)", sessionID)
-		if err := stop(); err != nil {
+		s.logf("server: session %s: stopping shim (SIGTERM via our own process handle) initiator=%s reason=%s", sessionID, commandedStop.Initiator, commandedStop.Reason)
+		if err := stop(commandedStop); err != nil {
 			return err
 		}
 	case hintPID > 0:
