@@ -1,14 +1,14 @@
 /**
  * The `workspaceRoster` frame contract: decode + loud validation of
  * agentshim.frontend.v1.WorkspaceRoster, and the completeness of the
- * RosterRowStatus vocabulary against the sidebar's existing status set.
+ * status oneof's arm vocabulary against the sidebar's existing status set.
  *
  * Shape only — this wave carries no rendering. One edge per test (AAA).
  */
 import { describe, expect, it } from "vitest";
 import {
+  ROSTER_ROW_STATUS_CASES,
   ROSTER_ROW_STATUS_KEYWORD,
-  RosterRowStatus,
   decodeFrontendFrame,
 } from "../src/frontend-proto.js";
 import { WORKSPACE_STATUSES } from "../src/sidebar.js";
@@ -18,12 +18,22 @@ function decode(obj: unknown): ReturnType<typeof decodeFrontendFrame> {
   return decodeFrontendFrame(JSON.stringify(obj));
 }
 
-const ROW = {
+/** A row's fields WITHOUT a status: no arm set, which is invalid on its own. */
+const ARMLESS_ROW = {
   dir: "/worktrees/alpha",
   name: "alpha",
-  status: "ROSTER_ROW_STATUS_READY",
   current: true,
 };
+
+/**
+ * A row carrying exactly the named status arm. Arms are payload-free, so the
+ * arm's value is the empty message protojson spells `{}`.
+ */
+function row(status: string, overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return { ...ARMLESS_ROW, [status]: {}, ...overrides };
+}
+
+const ROW = row("ready");
 
 /** A minimal-but-valid roster in the repository grouping. */
 function roster(overrides: Record<string, unknown> = {}): unknown {
@@ -112,13 +122,13 @@ describe("decodeFrontendFrame — workspaceRoster arm", () => {
     const value = rosterOf(
       roster({
         recentlyMerged: {
-          rows: [{ ...ROW, dir: "/worktrees/old", status: "ROSTER_ROW_STATUS_MERGED" }],
+          rows: [row("merged", { dir: "/worktrees/old" })],
         },
       }),
     );
 
     // Assert.
-    expect(value.recentlyMerged.rows[0]?.status).toBe(RosterRowStatus.MERGED);
+    expect(value.recentlyMerged.rows[0]?.status.case).toBe("merged");
   });
 
   it("defaults an absent nav dir to the empty string", () => {
@@ -163,7 +173,7 @@ describe("decodeFrontendFrame — workspaceRoster arm", () => {
             {
               repoKey: "repo",
               folded: false,
-              rows: [{ ...ROW, children: [{ ...ROW, dir: "/worktrees/child", current: false }] }],
+              rows: [{ ...ROW, children: [row("ready", { dir: "/worktrees/child", current: false })] }],
             },
           ],
         },
@@ -183,53 +193,50 @@ describe("decodeFrontendFrame — workspaceRoster arm", () => {
   });
 });
 
-describe("RosterRowStatus — no silent fallback", () => {
-  it("rejects an explicit UNSPECIFIED row status", () => {
-    // Arrange + Act + Assert.
-    expect(() =>
-      decode(
-        roster({
-          repository: {
-            sections: [
-              { repoKey: "r", rows: [{ ...ROW, status: "ROSTER_ROW_STATUS_UNSPECIFIED" }] },
-            ],
-          },
-        }),
-      ),
-    ).toThrow(/not a lifecycle/);
+describe("RosterRow.status — the set arm is the status", () => {
+  /** Wrap rows in a roster that sets the repository grouping. */
+  function withRows(rows: unknown[]): unknown {
+    return roster({ repository: { sections: [{ repoKey: "r", rows }] } });
+  }
+
+  it("decodes the set arm as the row's status", () => {
+    // Arrange + Act.
+    const value = rosterOf(withRows([row("vendorBlocked")]));
+
+    // Assert.
+    if (value.view.case !== "repository") throw new Error("wrong view arm");
+    expect(value.view.value.sections[0]?.rows[0]?.status.case).toBe("vendorBlocked");
   });
 
-  it("rejects an absent row status, which protojson cannot tell from UNSPECIFIED", () => {
-    // Arrange.
-    const { status: _status, ...noStatus } = ROW;
-
-    // Act + Assert.
-    expect(() =>
-      decode(roster({ repository: { sections: [{ repoKey: "r", rows: [noStatus] }] } })),
-    ).toThrow(/not a lifecycle/);
+  it("rejects a row that sets no status arm", () => {
+    // Arrange + Act + Assert.
+    expect(() => decode(withRows([ARMLESS_ROW]))).toThrow(/sets no status arm/);
   });
 
-  it("rejects a row status outside the closed vocabulary", () => {
+  it("rejects a row that sets more than one status arm", () => {
     // Arrange + Act + Assert.
-    expect(() =>
-      decode(
-        roster({
-          repository: { sections: [{ repoKey: "r", rows: [{ ...ROW, status: "ROSTER_ROW_STATUS_NAPPING" }] }] },
-        }),
-      ),
-    ).toThrow(/unknown enum value/);
+    expect(() => decode(withRows([row("ready", { thinking: {} })]))).toThrow(
+      /sets multiple status arms/,
+    );
+  });
+
+  it("rejects a status arm outside the closed vocabulary", () => {
+    // Arrange + Act + Assert.
+    expect(() => decode(withRows([row("napping")]))).toThrow(/unrecognized field/);
+  });
+
+  it("rejects a status arm carrying a payload, since every arm is empty", () => {
+    // Arrange + Act + Assert.
+    expect(() => decode(withRows([row("ready", { ready: { since: 1 } })]))).toThrow(
+      /unrecognized field/,
+    );
   });
 });
 
-describe("RosterRowStatus — vocabulary completeness", () => {
-  /** Every enum member except the invalid zero value. */
-  const members = Object.values(RosterRowStatus).filter(
-    (v): v is RosterRowStatus => typeof v === "number" && v !== RosterRowStatus.UNSPECIFIED,
-  );
-
+describe("RosterRow.status — vocabulary completeness", () => {
   it("covers every status in the sidebar's closed set", () => {
     // Arrange.
-    const covered = new Set(members.map((m) => ROSTER_ROW_STATUS_KEYWORD[m]));
+    const covered = new Set(ROSTER_ROW_STATUS_CASES.map((c) => ROSTER_ROW_STATUS_KEYWORD[c]));
 
     // Act.
     const missing = [...WORKSPACE_STATUSES].filter((s) => !covered.has(s));
@@ -240,19 +247,24 @@ describe("RosterRowStatus — vocabulary completeness", () => {
 
   it("adds no status the sidebar's closed set does not have", () => {
     // Arrange + Act.
-    const extra = members
-      .map((m) => ROSTER_ROW_STATUS_KEYWORD[m])
-      .filter((s) => !WORKSPACE_STATUSES.has(s));
+    const extra = ROSTER_ROW_STATUS_CASES.map((c) => ROSTER_ROW_STATUS_KEYWORD[c]).filter(
+      (s) => !WORKSPACE_STATUSES.has(s),
+    );
 
     // Assert.
     expect(extra).toEqual([]);
   });
 
-  it("maps every member to a distinct keyword", () => {
+  it("maps every arm to a distinct keyword", () => {
     // Arrange + Act.
-    const keywords = members.map((m) => ROSTER_ROW_STATUS_KEYWORD[m]);
+    const keywords = ROSTER_ROW_STATUS_CASES.map((c) => ROSTER_ROW_STATUS_KEYWORD[c]);
 
     // Assert.
     expect(new Set(keywords).size).toBe(keywords.length);
+  });
+
+  it("declares one arm per status the sidebar can carry", () => {
+    // Arrange + Act + Assert.
+    expect(ROSTER_ROW_STATUS_CASES).toHaveLength(WORKSPACE_STATUSES.size);
   });
 });

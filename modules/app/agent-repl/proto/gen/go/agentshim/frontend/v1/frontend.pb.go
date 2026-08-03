@@ -874,164 +874,6 @@ func (ResumeMode) EnumDescriptor() ([]byte, []int) {
 	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{8}
 }
 
-// The closed lifecycle vocabulary a roster row may carry.
-//
-// It mirrors the sidebar's existing status set exactly — the webapp's
-// WorkspaceRow.status union and sidebar.el's wire table are one contract, and
-// this enum is now the third face of it. It is deliberately NOT RenderState:
-// the roster carries statuses no render state produces (INACTIVE, NONE), and
-// coarsens two render states (idle and ready) onto one dot.
-type RosterRowStatus int32
-
-const (
-	// Never emitted and INVALID on the wire. Proto3 reserves 0 for "not
-	// populated", and a row whose lifecycle is unset is a contract breach, not a
-	// default dot — consumers reject it loudly, matching RenderState's
-	// no-silent-fallback convention.
-	RosterRowStatus_ROSTER_ROW_STATUS_UNSPECIFIED RosterRowStatus = 0
-	// A prompt is committed and not yet acked by the shim.
-	RosterRowStatus_ROSTER_ROW_STATUS_SUBMITTING RosterRowStatus = 1
-	// A turn is in flight.
-	RosterRowStatus_ROSTER_ROW_STATUS_THINKING RosterRowStatus = 2
-	// The conversation is being cleared.
-	RosterRowStatus_ROSTER_ROW_STATUS_CLEARING RosterRowStatus = 3
-	// The context is being compacted.
-	RosterRowStatus_ROSTER_ROW_STATUS_COMPACTING RosterRowStatus = 4
-	// A tool-permission request is waiting on the user.
-	RosterRowStatus_ROSTER_ROW_STATUS_PERMISSION RosterRowStatus = 5
-	// The turn finished and its response is unread.
-	RosterRowStatus_ROSTER_ROW_STATUS_DONE RosterRowStatus = 6
-	// The turn was interrupted by the user.
-	RosterRowStatus_ROSTER_ROW_STATUS_INTERRUPTED RosterRowStatus = 7
-	// Live, proven usable, and idle. Emacs maps BOTH its idle and ready render
-	// states here — the sidebar draws them identically.
-	RosterRowStatus_ROSTER_ROW_STATUS_READY RosterRowStatus = 8
-	// No foreground turn, but detached work is still running.
-	RosterRowStatus_ROSTER_ROW_STATUS_IDLE_ASYNC RosterRowStatus = 9
-	// Blocked on the vendor or the account, not on agent-repl.
-	RosterRowStatus_ROSTER_ROW_STATUS_VENDOR_BLOCKED RosterRowStatus = 10
-	// Starting up; the route is not yet proven.
-	RosterRowStatus_ROSTER_ROW_STATUS_INIT RosterRowStatus = 11
-	// The session's backing process is gone but the workspace is recoverable.
-	RosterRowStatus_ROSTER_ROW_STATUS_SEVERED RosterRowStatus = 12
-	// Deliberately parked, resumable on demand.
-	RosterRowStatus_ROSTER_ROW_STATUS_HIBERNATED RosterRowStatus = 13
-	// Startup failed outright.
-	RosterRowStatus_ROSTER_ROW_STATUS_START_FAILED RosterRowStatus = 14
-	// Running, but with a compromised route.
-	RosterRowStatus_ROSTER_ROW_STATUS_DEGRADED RosterRowStatus = 15
-	// Terminal: no live session backs the workspace.
-	RosterRowStatus_ROSTER_ROW_STATUS_DEAD RosterRowStatus = 16
-	// The merge pipeline. These render a recycle glyph rather than a lifecycle
-	// dot, except MERGED, which is settled and files under recently_merged.
-	// The first instant of a merge, before anything durable exists for it.
-	RosterRowStatus_ROSTER_ROW_STATUS_MERGE_ENQUEUING RosterRowStatus = 17
-	// A merge is actively running.
-	RosterRowStatus_ROSTER_ROW_STATUS_MERGING RosterRowStatus = 18
-	// Enqueued behind another workspace's merge.
-	RosterRowStatus_ROSTER_ROW_STATUS_MERGE_QUEUED RosterRowStatus = 19
-	// The merge stopped on a conflict awaiting resolution.
-	RosterRowStatus_ROSTER_ROW_STATUS_MERGE_CONFLICT RosterRowStatus = 20
-	// The merge failed outright.
-	RosterRowStatus_ROSTER_ROW_STATUS_MERGE_FAILED RosterRowStatus = 21
-	// The merge settled successfully.
-	RosterRowStatus_ROSTER_ROW_STATUS_MERGED RosterRowStatus = 22
-	// Registered and open, but Emacs holds no render status for it (tombstoned
-	// or not yet born). Distinct from UNSPECIFIED: "the author looked and there
-	// is none" is an assertion, where UNSPECIFIED is the absence of one.
-	RosterRowStatus_ROSTER_ROW_STATUS_NONE RosterRowStatus = 23
-	// Registered in the roster but with no open perspective, so no live session
-	// whose lifecycle a dot could report. Drawn as a question mark. Dominates
-	// every render state: a perspective-less workspace is INACTIVE whatever its
-	// session once was.
-	RosterRowStatus_ROSTER_ROW_STATUS_INACTIVE RosterRowStatus = 24
-)
-
-// Enum value maps for RosterRowStatus.
-var (
-	RosterRowStatus_name = map[int32]string{
-		0:  "ROSTER_ROW_STATUS_UNSPECIFIED",
-		1:  "ROSTER_ROW_STATUS_SUBMITTING",
-		2:  "ROSTER_ROW_STATUS_THINKING",
-		3:  "ROSTER_ROW_STATUS_CLEARING",
-		4:  "ROSTER_ROW_STATUS_COMPACTING",
-		5:  "ROSTER_ROW_STATUS_PERMISSION",
-		6:  "ROSTER_ROW_STATUS_DONE",
-		7:  "ROSTER_ROW_STATUS_INTERRUPTED",
-		8:  "ROSTER_ROW_STATUS_READY",
-		9:  "ROSTER_ROW_STATUS_IDLE_ASYNC",
-		10: "ROSTER_ROW_STATUS_VENDOR_BLOCKED",
-		11: "ROSTER_ROW_STATUS_INIT",
-		12: "ROSTER_ROW_STATUS_SEVERED",
-		13: "ROSTER_ROW_STATUS_HIBERNATED",
-		14: "ROSTER_ROW_STATUS_START_FAILED",
-		15: "ROSTER_ROW_STATUS_DEGRADED",
-		16: "ROSTER_ROW_STATUS_DEAD",
-		17: "ROSTER_ROW_STATUS_MERGE_ENQUEUING",
-		18: "ROSTER_ROW_STATUS_MERGING",
-		19: "ROSTER_ROW_STATUS_MERGE_QUEUED",
-		20: "ROSTER_ROW_STATUS_MERGE_CONFLICT",
-		21: "ROSTER_ROW_STATUS_MERGE_FAILED",
-		22: "ROSTER_ROW_STATUS_MERGED",
-		23: "ROSTER_ROW_STATUS_NONE",
-		24: "ROSTER_ROW_STATUS_INACTIVE",
-	}
-	RosterRowStatus_value = map[string]int32{
-		"ROSTER_ROW_STATUS_UNSPECIFIED":     0,
-		"ROSTER_ROW_STATUS_SUBMITTING":      1,
-		"ROSTER_ROW_STATUS_THINKING":        2,
-		"ROSTER_ROW_STATUS_CLEARING":        3,
-		"ROSTER_ROW_STATUS_COMPACTING":      4,
-		"ROSTER_ROW_STATUS_PERMISSION":      5,
-		"ROSTER_ROW_STATUS_DONE":            6,
-		"ROSTER_ROW_STATUS_INTERRUPTED":     7,
-		"ROSTER_ROW_STATUS_READY":           8,
-		"ROSTER_ROW_STATUS_IDLE_ASYNC":      9,
-		"ROSTER_ROW_STATUS_VENDOR_BLOCKED":  10,
-		"ROSTER_ROW_STATUS_INIT":            11,
-		"ROSTER_ROW_STATUS_SEVERED":         12,
-		"ROSTER_ROW_STATUS_HIBERNATED":      13,
-		"ROSTER_ROW_STATUS_START_FAILED":    14,
-		"ROSTER_ROW_STATUS_DEGRADED":        15,
-		"ROSTER_ROW_STATUS_DEAD":            16,
-		"ROSTER_ROW_STATUS_MERGE_ENQUEUING": 17,
-		"ROSTER_ROW_STATUS_MERGING":         18,
-		"ROSTER_ROW_STATUS_MERGE_QUEUED":    19,
-		"ROSTER_ROW_STATUS_MERGE_CONFLICT":  20,
-		"ROSTER_ROW_STATUS_MERGE_FAILED":    21,
-		"ROSTER_ROW_STATUS_MERGED":          22,
-		"ROSTER_ROW_STATUS_NONE":            23,
-		"ROSTER_ROW_STATUS_INACTIVE":        24,
-	}
-)
-
-func (x RosterRowStatus) Enum() *RosterRowStatus {
-	p := new(RosterRowStatus)
-	*p = x
-	return p
-}
-
-func (x RosterRowStatus) String() string {
-	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
-}
-
-func (RosterRowStatus) Descriptor() protoreflect.EnumDescriptor {
-	return file_agentshim_frontend_v1_frontend_proto_enumTypes[9].Descriptor()
-}
-
-func (RosterRowStatus) Type() protoreflect.EnumType {
-	return &file_agentshim_frontend_v1_frontend_proto_enumTypes[9]
-}
-
-func (x RosterRowStatus) Number() protoreflect.EnumNumber {
-	return protoreflect.EnumNumber(x)
-}
-
-// Deprecated: Use RosterRowStatus.Descriptor instead.
-func (RosterRowStatus) EnumDescriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{9}
-}
-
 // A runtime fault is explanatory evidence scoped to exactly one
 // session-controller generation. A close edge can close only its matching
 // (component, fault_type) window, and a retired generation's faults can never
@@ -7522,7 +7364,56 @@ type RosterRow struct {
 	// Display name, for rendering only. Never an identity or a join key.
 	Name string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	// The workspace's lifecycle, as Emacs classifies it.
-	Status RosterRowStatus `protobuf:"varint,3,opt,name=status,proto3,enum=agentshim.frontend.v1.RosterRowStatus" json:"status,omitempty"`
+	//
+	// THE SET ARM IS THE STATUS. Every arm is a dedicated message rather than a
+	// member of an enum, so the lifecycle is named by which field is populated
+	// and nothing else — there is no numeric value to widen, and no "unset but
+	// still a legal value" state the way a proto3 enum's zero is.
+	//
+	// AN UNSET ONEOF IS INVALID and is rejected LOUDLY. A row with no lifecycle
+	// is a contract breach, not a default dot, and consumers throw rather than
+	// draw one — the same no-silent-fallback stance RenderState takes. (This is
+	// where the retired RosterRowStatus enum's UNSPECIFIED-rejection semantics
+	// now live: absence is refused at the oneof instead of at a zero value.)
+	//
+	// Setting more than one arm is the same breach from the other side, and is
+	// rejected just as loudly.
+	//
+	// The vocabulary mirrors the sidebar's existing status set exactly — the
+	// webapp's WorkspaceStatus union and sidebar.el's wire table are one
+	// contract, and this oneof is the third face of it. It is deliberately NOT
+	// RenderState: the roster carries statuses no render state produces
+	// (inactive, none), and coarsens two render states (idle and ready) onto one
+	// dot. Every arm message is deliberately EMPTY: the status is the whole
+	// assertion, and a payload would be a second place for it to disagree.
+	//
+	// Types that are valid to be assigned to Status:
+	//
+	//	*RosterRow_Submitting
+	//	*RosterRow_Thinking
+	//	*RosterRow_Clearing
+	//	*RosterRow_Compacting
+	//	*RosterRow_Permission
+	//	*RosterRow_Done
+	//	*RosterRow_Interrupted
+	//	*RosterRow_Ready
+	//	*RosterRow_IdleAsync
+	//	*RosterRow_VendorBlocked
+	//	*RosterRow_Init
+	//	*RosterRow_Severed
+	//	*RosterRow_Hibernated
+	//	*RosterRow_StartFailed
+	//	*RosterRow_Degraded
+	//	*RosterRow_Dead
+	//	*RosterRow_MergeEnqueuing
+	//	*RosterRow_Merging
+	//	*RosterRow_MergeQueued
+	//	*RosterRow_MergeConflict
+	//	*RosterRow_MergeFailed
+	//	*RosterRow_Merged
+	//	*RosterRow_None
+	//	*RosterRow_Inactive
+	Status isRosterRow_Status `protobuf_oneof:"status"`
 	// Whether this row is the current workspace. Redundant with a dir comparison
 	// against WorkspaceRoster.current_dir and deliberately so: the author
 	// resolves it once, so no client can compute it differently.
@@ -7577,11 +7468,227 @@ func (x *RosterRow) GetName() string {
 	return ""
 }
 
-func (x *RosterRow) GetStatus() RosterRowStatus {
+func (x *RosterRow) GetStatus() isRosterRow_Status {
 	if x != nil {
 		return x.Status
 	}
-	return RosterRowStatus_ROSTER_ROW_STATUS_UNSPECIFIED
+	return nil
+}
+
+func (x *RosterRow) GetSubmitting() *RosterRowStatusSubmitting {
+	if x != nil {
+		if x, ok := x.Status.(*RosterRow_Submitting); ok {
+			return x.Submitting
+		}
+	}
+	return nil
+}
+
+func (x *RosterRow) GetThinking() *RosterRowStatusThinking {
+	if x != nil {
+		if x, ok := x.Status.(*RosterRow_Thinking); ok {
+			return x.Thinking
+		}
+	}
+	return nil
+}
+
+func (x *RosterRow) GetClearing() *RosterRowStatusClearing {
+	if x != nil {
+		if x, ok := x.Status.(*RosterRow_Clearing); ok {
+			return x.Clearing
+		}
+	}
+	return nil
+}
+
+func (x *RosterRow) GetCompacting() *RosterRowStatusCompacting {
+	if x != nil {
+		if x, ok := x.Status.(*RosterRow_Compacting); ok {
+			return x.Compacting
+		}
+	}
+	return nil
+}
+
+func (x *RosterRow) GetPermission() *RosterRowStatusPermission {
+	if x != nil {
+		if x, ok := x.Status.(*RosterRow_Permission); ok {
+			return x.Permission
+		}
+	}
+	return nil
+}
+
+func (x *RosterRow) GetDone() *RosterRowStatusDone {
+	if x != nil {
+		if x, ok := x.Status.(*RosterRow_Done); ok {
+			return x.Done
+		}
+	}
+	return nil
+}
+
+func (x *RosterRow) GetInterrupted() *RosterRowStatusInterrupted {
+	if x != nil {
+		if x, ok := x.Status.(*RosterRow_Interrupted); ok {
+			return x.Interrupted
+		}
+	}
+	return nil
+}
+
+func (x *RosterRow) GetReady() *RosterRowStatusReady {
+	if x != nil {
+		if x, ok := x.Status.(*RosterRow_Ready); ok {
+			return x.Ready
+		}
+	}
+	return nil
+}
+
+func (x *RosterRow) GetIdleAsync() *RosterRowStatusIdleAsync {
+	if x != nil {
+		if x, ok := x.Status.(*RosterRow_IdleAsync); ok {
+			return x.IdleAsync
+		}
+	}
+	return nil
+}
+
+func (x *RosterRow) GetVendorBlocked() *RosterRowStatusVendorBlocked {
+	if x != nil {
+		if x, ok := x.Status.(*RosterRow_VendorBlocked); ok {
+			return x.VendorBlocked
+		}
+	}
+	return nil
+}
+
+func (x *RosterRow) GetInit() *RosterRowStatusInit {
+	if x != nil {
+		if x, ok := x.Status.(*RosterRow_Init); ok {
+			return x.Init
+		}
+	}
+	return nil
+}
+
+func (x *RosterRow) GetSevered() *RosterRowStatusSevered {
+	if x != nil {
+		if x, ok := x.Status.(*RosterRow_Severed); ok {
+			return x.Severed
+		}
+	}
+	return nil
+}
+
+func (x *RosterRow) GetHibernated() *RosterRowStatusHibernated {
+	if x != nil {
+		if x, ok := x.Status.(*RosterRow_Hibernated); ok {
+			return x.Hibernated
+		}
+	}
+	return nil
+}
+
+func (x *RosterRow) GetStartFailed() *RosterRowStatusStartFailed {
+	if x != nil {
+		if x, ok := x.Status.(*RosterRow_StartFailed); ok {
+			return x.StartFailed
+		}
+	}
+	return nil
+}
+
+func (x *RosterRow) GetDegraded() *RosterRowStatusDegraded {
+	if x != nil {
+		if x, ok := x.Status.(*RosterRow_Degraded); ok {
+			return x.Degraded
+		}
+	}
+	return nil
+}
+
+func (x *RosterRow) GetDead() *RosterRowStatusDead {
+	if x != nil {
+		if x, ok := x.Status.(*RosterRow_Dead); ok {
+			return x.Dead
+		}
+	}
+	return nil
+}
+
+func (x *RosterRow) GetMergeEnqueuing() *RosterRowStatusMergeEnqueuing {
+	if x != nil {
+		if x, ok := x.Status.(*RosterRow_MergeEnqueuing); ok {
+			return x.MergeEnqueuing
+		}
+	}
+	return nil
+}
+
+func (x *RosterRow) GetMerging() *RosterRowStatusMerging {
+	if x != nil {
+		if x, ok := x.Status.(*RosterRow_Merging); ok {
+			return x.Merging
+		}
+	}
+	return nil
+}
+
+func (x *RosterRow) GetMergeQueued() *RosterRowStatusMergeQueued {
+	if x != nil {
+		if x, ok := x.Status.(*RosterRow_MergeQueued); ok {
+			return x.MergeQueued
+		}
+	}
+	return nil
+}
+
+func (x *RosterRow) GetMergeConflict() *RosterRowStatusMergeConflict {
+	if x != nil {
+		if x, ok := x.Status.(*RosterRow_MergeConflict); ok {
+			return x.MergeConflict
+		}
+	}
+	return nil
+}
+
+func (x *RosterRow) GetMergeFailed() *RosterRowStatusMergeFailed {
+	if x != nil {
+		if x, ok := x.Status.(*RosterRow_MergeFailed); ok {
+			return x.MergeFailed
+		}
+	}
+	return nil
+}
+
+func (x *RosterRow) GetMerged() *RosterRowStatusMerged {
+	if x != nil {
+		if x, ok := x.Status.(*RosterRow_Merged); ok {
+			return x.Merged
+		}
+	}
+	return nil
+}
+
+func (x *RosterRow) GetNone() *RosterRowStatusNone {
+	if x != nil {
+		if x, ok := x.Status.(*RosterRow_None); ok {
+			return x.None
+		}
+	}
+	return nil
+}
+
+func (x *RosterRow) GetInactive() *RosterRowStatusInactive {
+	if x != nil {
+		if x, ok := x.Status.(*RosterRow_Inactive); ok {
+			return x.Inactive
+		}
+	}
+	return nil
 }
 
 func (x *RosterRow) GetCurrent() bool {
@@ -7596,6 +7703,1051 @@ func (x *RosterRow) GetChildren() []*RosterRow {
 		return x.Children
 	}
 	return nil
+}
+
+type isRosterRow_Status interface {
+	isRosterRow_Status()
+}
+
+type RosterRow_Submitting struct {
+	// A prompt is committed and not yet acked by the shim.
+	Submitting *RosterRowStatusSubmitting `protobuf:"bytes,3,opt,name=submitting,proto3,oneof"`
+}
+
+type RosterRow_Thinking struct {
+	// A turn is in flight.
+	Thinking *RosterRowStatusThinking `protobuf:"bytes,6,opt,name=thinking,proto3,oneof"`
+}
+
+type RosterRow_Clearing struct {
+	// The conversation is being cleared.
+	Clearing *RosterRowStatusClearing `protobuf:"bytes,7,opt,name=clearing,proto3,oneof"`
+}
+
+type RosterRow_Compacting struct {
+	// The context is being compacted.
+	Compacting *RosterRowStatusCompacting `protobuf:"bytes,8,opt,name=compacting,proto3,oneof"`
+}
+
+type RosterRow_Permission struct {
+	// A tool-permission request is waiting on the user.
+	Permission *RosterRowStatusPermission `protobuf:"bytes,9,opt,name=permission,proto3,oneof"`
+}
+
+type RosterRow_Done struct {
+	// The turn finished and its response is unread.
+	Done *RosterRowStatusDone `protobuf:"bytes,10,opt,name=done,proto3,oneof"`
+}
+
+type RosterRow_Interrupted struct {
+	// The turn was interrupted by the user.
+	Interrupted *RosterRowStatusInterrupted `protobuf:"bytes,11,opt,name=interrupted,proto3,oneof"`
+}
+
+type RosterRow_Ready struct {
+	// Live, proven usable, and idle. Emacs maps BOTH its idle and ready render
+	// states here — the sidebar draws them identically.
+	Ready *RosterRowStatusReady `protobuf:"bytes,12,opt,name=ready,proto3,oneof"`
+}
+
+type RosterRow_IdleAsync struct {
+	// No foreground turn, but detached work is still running.
+	IdleAsync *RosterRowStatusIdleAsync `protobuf:"bytes,13,opt,name=idle_async,json=idleAsync,proto3,oneof"`
+}
+
+type RosterRow_VendorBlocked struct {
+	// Blocked on the vendor or the account, not on agent-repl.
+	VendorBlocked *RosterRowStatusVendorBlocked `protobuf:"bytes,14,opt,name=vendor_blocked,json=vendorBlocked,proto3,oneof"`
+}
+
+type RosterRow_Init struct {
+	// Starting up; the route is not yet proven.
+	Init *RosterRowStatusInit `protobuf:"bytes,15,opt,name=init,proto3,oneof"`
+}
+
+type RosterRow_Severed struct {
+	// The session's backing process is gone but the workspace is recoverable.
+	Severed *RosterRowStatusSevered `protobuf:"bytes,16,opt,name=severed,proto3,oneof"`
+}
+
+type RosterRow_Hibernated struct {
+	// Deliberately parked, resumable on demand.
+	Hibernated *RosterRowStatusHibernated `protobuf:"bytes,17,opt,name=hibernated,proto3,oneof"`
+}
+
+type RosterRow_StartFailed struct {
+	// Startup failed outright.
+	StartFailed *RosterRowStatusStartFailed `protobuf:"bytes,18,opt,name=start_failed,json=startFailed,proto3,oneof"`
+}
+
+type RosterRow_Degraded struct {
+	// Running, but with a compromised route.
+	Degraded *RosterRowStatusDegraded `protobuf:"bytes,19,opt,name=degraded,proto3,oneof"`
+}
+
+type RosterRow_Dead struct {
+	// Terminal: no live session backs the workspace.
+	Dead *RosterRowStatusDead `protobuf:"bytes,20,opt,name=dead,proto3,oneof"`
+}
+
+type RosterRow_MergeEnqueuing struct {
+	// The merge pipeline. These render a recycle glyph rather than a lifecycle
+	// dot, except merged, which is settled and files under recently_merged.
+	// The first instant of a merge, before anything durable exists for it.
+	MergeEnqueuing *RosterRowStatusMergeEnqueuing `protobuf:"bytes,21,opt,name=merge_enqueuing,json=mergeEnqueuing,proto3,oneof"`
+}
+
+type RosterRow_Merging struct {
+	// A merge is actively running.
+	Merging *RosterRowStatusMerging `protobuf:"bytes,22,opt,name=merging,proto3,oneof"`
+}
+
+type RosterRow_MergeQueued struct {
+	// Enqueued behind another workspace's merge.
+	MergeQueued *RosterRowStatusMergeQueued `protobuf:"bytes,23,opt,name=merge_queued,json=mergeQueued,proto3,oneof"`
+}
+
+type RosterRow_MergeConflict struct {
+	// The merge stopped on a conflict awaiting resolution.
+	MergeConflict *RosterRowStatusMergeConflict `protobuf:"bytes,24,opt,name=merge_conflict,json=mergeConflict,proto3,oneof"`
+}
+
+type RosterRow_MergeFailed struct {
+	// The merge failed outright.
+	MergeFailed *RosterRowStatusMergeFailed `protobuf:"bytes,25,opt,name=merge_failed,json=mergeFailed,proto3,oneof"`
+}
+
+type RosterRow_Merged struct {
+	// The merge settled successfully.
+	Merged *RosterRowStatusMerged `protobuf:"bytes,26,opt,name=merged,proto3,oneof"`
+}
+
+type RosterRow_None struct {
+	// Registered and open, but Emacs holds no render status for it (tombstoned
+	// or not yet born). Distinct from an unset oneof: "the author looked and
+	// there is none" is an assertion, where an unset oneof is the absence of
+	// one.
+	None *RosterRowStatusNone `protobuf:"bytes,27,opt,name=none,proto3,oneof"`
+}
+
+type RosterRow_Inactive struct {
+	// Registered in the roster but with no open perspective, so no live session
+	// whose lifecycle a dot could report. Drawn as a question mark. Dominates
+	// every render state: a perspective-less workspace is inactive whatever its
+	// session once was.
+	Inactive *RosterRowStatusInactive `protobuf:"bytes,28,opt,name=inactive,proto3,oneof"`
+}
+
+func (*RosterRow_Submitting) isRosterRow_Status() {}
+
+func (*RosterRow_Thinking) isRosterRow_Status() {}
+
+func (*RosterRow_Clearing) isRosterRow_Status() {}
+
+func (*RosterRow_Compacting) isRosterRow_Status() {}
+
+func (*RosterRow_Permission) isRosterRow_Status() {}
+
+func (*RosterRow_Done) isRosterRow_Status() {}
+
+func (*RosterRow_Interrupted) isRosterRow_Status() {}
+
+func (*RosterRow_Ready) isRosterRow_Status() {}
+
+func (*RosterRow_IdleAsync) isRosterRow_Status() {}
+
+func (*RosterRow_VendorBlocked) isRosterRow_Status() {}
+
+func (*RosterRow_Init) isRosterRow_Status() {}
+
+func (*RosterRow_Severed) isRosterRow_Status() {}
+
+func (*RosterRow_Hibernated) isRosterRow_Status() {}
+
+func (*RosterRow_StartFailed) isRosterRow_Status() {}
+
+func (*RosterRow_Degraded) isRosterRow_Status() {}
+
+func (*RosterRow_Dead) isRosterRow_Status() {}
+
+func (*RosterRow_MergeEnqueuing) isRosterRow_Status() {}
+
+func (*RosterRow_Merging) isRosterRow_Status() {}
+
+func (*RosterRow_MergeQueued) isRosterRow_Status() {}
+
+func (*RosterRow_MergeConflict) isRosterRow_Status() {}
+
+func (*RosterRow_MergeFailed) isRosterRow_Status() {}
+
+func (*RosterRow_Merged) isRosterRow_Status() {}
+
+func (*RosterRow_None) isRosterRow_Status() {}
+
+func (*RosterRow_Inactive) isRosterRow_Status() {}
+
+type RosterRowStatusSubmitting struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RosterRowStatusSubmitting) Reset() {
+	*x = RosterRowStatusSubmitting{}
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[74]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RosterRowStatusSubmitting) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RosterRowStatusSubmitting) ProtoMessage() {}
+
+func (x *RosterRowStatusSubmitting) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[74]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RosterRowStatusSubmitting.ProtoReflect.Descriptor instead.
+func (*RosterRowStatusSubmitting) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{74}
+}
+
+type RosterRowStatusThinking struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RosterRowStatusThinking) Reset() {
+	*x = RosterRowStatusThinking{}
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[75]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RosterRowStatusThinking) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RosterRowStatusThinking) ProtoMessage() {}
+
+func (x *RosterRowStatusThinking) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[75]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RosterRowStatusThinking.ProtoReflect.Descriptor instead.
+func (*RosterRowStatusThinking) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{75}
+}
+
+type RosterRowStatusClearing struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RosterRowStatusClearing) Reset() {
+	*x = RosterRowStatusClearing{}
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[76]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RosterRowStatusClearing) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RosterRowStatusClearing) ProtoMessage() {}
+
+func (x *RosterRowStatusClearing) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[76]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RosterRowStatusClearing.ProtoReflect.Descriptor instead.
+func (*RosterRowStatusClearing) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{76}
+}
+
+type RosterRowStatusCompacting struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RosterRowStatusCompacting) Reset() {
+	*x = RosterRowStatusCompacting{}
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[77]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RosterRowStatusCompacting) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RosterRowStatusCompacting) ProtoMessage() {}
+
+func (x *RosterRowStatusCompacting) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[77]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RosterRowStatusCompacting.ProtoReflect.Descriptor instead.
+func (*RosterRowStatusCompacting) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{77}
+}
+
+type RosterRowStatusPermission struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RosterRowStatusPermission) Reset() {
+	*x = RosterRowStatusPermission{}
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[78]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RosterRowStatusPermission) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RosterRowStatusPermission) ProtoMessage() {}
+
+func (x *RosterRowStatusPermission) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[78]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RosterRowStatusPermission.ProtoReflect.Descriptor instead.
+func (*RosterRowStatusPermission) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{78}
+}
+
+type RosterRowStatusDone struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RosterRowStatusDone) Reset() {
+	*x = RosterRowStatusDone{}
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[79]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RosterRowStatusDone) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RosterRowStatusDone) ProtoMessage() {}
+
+func (x *RosterRowStatusDone) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[79]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RosterRowStatusDone.ProtoReflect.Descriptor instead.
+func (*RosterRowStatusDone) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{79}
+}
+
+type RosterRowStatusInterrupted struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RosterRowStatusInterrupted) Reset() {
+	*x = RosterRowStatusInterrupted{}
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[80]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RosterRowStatusInterrupted) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RosterRowStatusInterrupted) ProtoMessage() {}
+
+func (x *RosterRowStatusInterrupted) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[80]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RosterRowStatusInterrupted.ProtoReflect.Descriptor instead.
+func (*RosterRowStatusInterrupted) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{80}
+}
+
+type RosterRowStatusReady struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RosterRowStatusReady) Reset() {
+	*x = RosterRowStatusReady{}
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[81]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RosterRowStatusReady) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RosterRowStatusReady) ProtoMessage() {}
+
+func (x *RosterRowStatusReady) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[81]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RosterRowStatusReady.ProtoReflect.Descriptor instead.
+func (*RosterRowStatusReady) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{81}
+}
+
+type RosterRowStatusIdleAsync struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RosterRowStatusIdleAsync) Reset() {
+	*x = RosterRowStatusIdleAsync{}
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[82]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RosterRowStatusIdleAsync) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RosterRowStatusIdleAsync) ProtoMessage() {}
+
+func (x *RosterRowStatusIdleAsync) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[82]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RosterRowStatusIdleAsync.ProtoReflect.Descriptor instead.
+func (*RosterRowStatusIdleAsync) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{82}
+}
+
+type RosterRowStatusVendorBlocked struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RosterRowStatusVendorBlocked) Reset() {
+	*x = RosterRowStatusVendorBlocked{}
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[83]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RosterRowStatusVendorBlocked) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RosterRowStatusVendorBlocked) ProtoMessage() {}
+
+func (x *RosterRowStatusVendorBlocked) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[83]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RosterRowStatusVendorBlocked.ProtoReflect.Descriptor instead.
+func (*RosterRowStatusVendorBlocked) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{83}
+}
+
+type RosterRowStatusInit struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RosterRowStatusInit) Reset() {
+	*x = RosterRowStatusInit{}
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[84]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RosterRowStatusInit) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RosterRowStatusInit) ProtoMessage() {}
+
+func (x *RosterRowStatusInit) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[84]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RosterRowStatusInit.ProtoReflect.Descriptor instead.
+func (*RosterRowStatusInit) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{84}
+}
+
+type RosterRowStatusSevered struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RosterRowStatusSevered) Reset() {
+	*x = RosterRowStatusSevered{}
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[85]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RosterRowStatusSevered) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RosterRowStatusSevered) ProtoMessage() {}
+
+func (x *RosterRowStatusSevered) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[85]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RosterRowStatusSevered.ProtoReflect.Descriptor instead.
+func (*RosterRowStatusSevered) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{85}
+}
+
+type RosterRowStatusHibernated struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RosterRowStatusHibernated) Reset() {
+	*x = RosterRowStatusHibernated{}
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[86]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RosterRowStatusHibernated) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RosterRowStatusHibernated) ProtoMessage() {}
+
+func (x *RosterRowStatusHibernated) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[86]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RosterRowStatusHibernated.ProtoReflect.Descriptor instead.
+func (*RosterRowStatusHibernated) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{86}
+}
+
+type RosterRowStatusStartFailed struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RosterRowStatusStartFailed) Reset() {
+	*x = RosterRowStatusStartFailed{}
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[87]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RosterRowStatusStartFailed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RosterRowStatusStartFailed) ProtoMessage() {}
+
+func (x *RosterRowStatusStartFailed) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[87]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RosterRowStatusStartFailed.ProtoReflect.Descriptor instead.
+func (*RosterRowStatusStartFailed) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{87}
+}
+
+type RosterRowStatusDegraded struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RosterRowStatusDegraded) Reset() {
+	*x = RosterRowStatusDegraded{}
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[88]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RosterRowStatusDegraded) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RosterRowStatusDegraded) ProtoMessage() {}
+
+func (x *RosterRowStatusDegraded) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[88]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RosterRowStatusDegraded.ProtoReflect.Descriptor instead.
+func (*RosterRowStatusDegraded) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{88}
+}
+
+type RosterRowStatusDead struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RosterRowStatusDead) Reset() {
+	*x = RosterRowStatusDead{}
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[89]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RosterRowStatusDead) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RosterRowStatusDead) ProtoMessage() {}
+
+func (x *RosterRowStatusDead) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[89]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RosterRowStatusDead.ProtoReflect.Descriptor instead.
+func (*RosterRowStatusDead) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{89}
+}
+
+type RosterRowStatusMergeEnqueuing struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RosterRowStatusMergeEnqueuing) Reset() {
+	*x = RosterRowStatusMergeEnqueuing{}
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[90]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RosterRowStatusMergeEnqueuing) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RosterRowStatusMergeEnqueuing) ProtoMessage() {}
+
+func (x *RosterRowStatusMergeEnqueuing) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[90]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RosterRowStatusMergeEnqueuing.ProtoReflect.Descriptor instead.
+func (*RosterRowStatusMergeEnqueuing) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{90}
+}
+
+type RosterRowStatusMerging struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RosterRowStatusMerging) Reset() {
+	*x = RosterRowStatusMerging{}
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[91]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RosterRowStatusMerging) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RosterRowStatusMerging) ProtoMessage() {}
+
+func (x *RosterRowStatusMerging) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[91]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RosterRowStatusMerging.ProtoReflect.Descriptor instead.
+func (*RosterRowStatusMerging) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{91}
+}
+
+type RosterRowStatusMergeQueued struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RosterRowStatusMergeQueued) Reset() {
+	*x = RosterRowStatusMergeQueued{}
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[92]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RosterRowStatusMergeQueued) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RosterRowStatusMergeQueued) ProtoMessage() {}
+
+func (x *RosterRowStatusMergeQueued) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[92]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RosterRowStatusMergeQueued.ProtoReflect.Descriptor instead.
+func (*RosterRowStatusMergeQueued) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{92}
+}
+
+type RosterRowStatusMergeConflict struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RosterRowStatusMergeConflict) Reset() {
+	*x = RosterRowStatusMergeConflict{}
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[93]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RosterRowStatusMergeConflict) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RosterRowStatusMergeConflict) ProtoMessage() {}
+
+func (x *RosterRowStatusMergeConflict) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[93]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RosterRowStatusMergeConflict.ProtoReflect.Descriptor instead.
+func (*RosterRowStatusMergeConflict) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{93}
+}
+
+type RosterRowStatusMergeFailed struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RosterRowStatusMergeFailed) Reset() {
+	*x = RosterRowStatusMergeFailed{}
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[94]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RosterRowStatusMergeFailed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RosterRowStatusMergeFailed) ProtoMessage() {}
+
+func (x *RosterRowStatusMergeFailed) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[94]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RosterRowStatusMergeFailed.ProtoReflect.Descriptor instead.
+func (*RosterRowStatusMergeFailed) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{94}
+}
+
+type RosterRowStatusMerged struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RosterRowStatusMerged) Reset() {
+	*x = RosterRowStatusMerged{}
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[95]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RosterRowStatusMerged) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RosterRowStatusMerged) ProtoMessage() {}
+
+func (x *RosterRowStatusMerged) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[95]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RosterRowStatusMerged.ProtoReflect.Descriptor instead.
+func (*RosterRowStatusMerged) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{95}
+}
+
+type RosterRowStatusNone struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RosterRowStatusNone) Reset() {
+	*x = RosterRowStatusNone{}
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[96]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RosterRowStatusNone) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RosterRowStatusNone) ProtoMessage() {}
+
+func (x *RosterRowStatusNone) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[96]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RosterRowStatusNone.ProtoReflect.Descriptor instead.
+func (*RosterRowStatusNone) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{96}
+}
+
+type RosterRowStatusInactive struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RosterRowStatusInactive) Reset() {
+	*x = RosterRowStatusInactive{}
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[97]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RosterRowStatusInactive) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RosterRowStatusInactive) ProtoMessage() {}
+
+func (x *RosterRowStatusInactive) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[97]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RosterRowStatusInactive.ProtoReflect.Descriptor instead.
+func (*RosterRowStatusInactive) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{97}
 }
 
 var File_agentshim_frontend_v1_frontend_proto protoreflect.FileDescriptor
@@ -8098,13 +9250,71 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\x04done\x18\x03 \x01(\bR\x04done\x124\n" +
 	"\x04rows\x18\x04 \x03(\v2 .agentshim.frontend.v1.RosterRowR\x04rows\"E\n" +
 	"\rRosterSection\x124\n" +
-	"\x04rows\x18\x01 \x03(\v2 .agentshim.frontend.v1.RosterRowR\x04rows\"\xc9\x01\n" +
+	"\x04rows\x18\x01 \x03(\v2 .agentshim.frontend.v1.RosterRowR\x04rows\"\x94\x10\n" +
 	"\tRosterRow\x12\x10\n" +
 	"\x03dir\x18\x01 \x01(\tR\x03dir\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\x12>\n" +
-	"\x06status\x18\x03 \x01(\x0e2&.agentshim.frontend.v1.RosterRowStatusR\x06status\x12\x18\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12R\n" +
+	"\n" +
+	"submitting\x18\x03 \x01(\v20.agentshim.frontend.v1.RosterRowStatusSubmittingH\x00R\n" +
+	"submitting\x12L\n" +
+	"\bthinking\x18\x06 \x01(\v2..agentshim.frontend.v1.RosterRowStatusThinkingH\x00R\bthinking\x12L\n" +
+	"\bclearing\x18\a \x01(\v2..agentshim.frontend.v1.RosterRowStatusClearingH\x00R\bclearing\x12R\n" +
+	"\n" +
+	"compacting\x18\b \x01(\v20.agentshim.frontend.v1.RosterRowStatusCompactingH\x00R\n" +
+	"compacting\x12R\n" +
+	"\n" +
+	"permission\x18\t \x01(\v20.agentshim.frontend.v1.RosterRowStatusPermissionH\x00R\n" +
+	"permission\x12@\n" +
+	"\x04done\x18\n" +
+	" \x01(\v2*.agentshim.frontend.v1.RosterRowStatusDoneH\x00R\x04done\x12U\n" +
+	"\vinterrupted\x18\v \x01(\v21.agentshim.frontend.v1.RosterRowStatusInterruptedH\x00R\vinterrupted\x12C\n" +
+	"\x05ready\x18\f \x01(\v2+.agentshim.frontend.v1.RosterRowStatusReadyH\x00R\x05ready\x12P\n" +
+	"\n" +
+	"idle_async\x18\r \x01(\v2/.agentshim.frontend.v1.RosterRowStatusIdleAsyncH\x00R\tidleAsync\x12\\\n" +
+	"\x0evendor_blocked\x18\x0e \x01(\v23.agentshim.frontend.v1.RosterRowStatusVendorBlockedH\x00R\rvendorBlocked\x12@\n" +
+	"\x04init\x18\x0f \x01(\v2*.agentshim.frontend.v1.RosterRowStatusInitH\x00R\x04init\x12I\n" +
+	"\asevered\x18\x10 \x01(\v2-.agentshim.frontend.v1.RosterRowStatusSeveredH\x00R\asevered\x12R\n" +
+	"\n" +
+	"hibernated\x18\x11 \x01(\v20.agentshim.frontend.v1.RosterRowStatusHibernatedH\x00R\n" +
+	"hibernated\x12V\n" +
+	"\fstart_failed\x18\x12 \x01(\v21.agentshim.frontend.v1.RosterRowStatusStartFailedH\x00R\vstartFailed\x12L\n" +
+	"\bdegraded\x18\x13 \x01(\v2..agentshim.frontend.v1.RosterRowStatusDegradedH\x00R\bdegraded\x12@\n" +
+	"\x04dead\x18\x14 \x01(\v2*.agentshim.frontend.v1.RosterRowStatusDeadH\x00R\x04dead\x12_\n" +
+	"\x0fmerge_enqueuing\x18\x15 \x01(\v24.agentshim.frontend.v1.RosterRowStatusMergeEnqueuingH\x00R\x0emergeEnqueuing\x12I\n" +
+	"\amerging\x18\x16 \x01(\v2-.agentshim.frontend.v1.RosterRowStatusMergingH\x00R\amerging\x12V\n" +
+	"\fmerge_queued\x18\x17 \x01(\v21.agentshim.frontend.v1.RosterRowStatusMergeQueuedH\x00R\vmergeQueued\x12\\\n" +
+	"\x0emerge_conflict\x18\x18 \x01(\v23.agentshim.frontend.v1.RosterRowStatusMergeConflictH\x00R\rmergeConflict\x12V\n" +
+	"\fmerge_failed\x18\x19 \x01(\v21.agentshim.frontend.v1.RosterRowStatusMergeFailedH\x00R\vmergeFailed\x12F\n" +
+	"\x06merged\x18\x1a \x01(\v2,.agentshim.frontend.v1.RosterRowStatusMergedH\x00R\x06merged\x12@\n" +
+	"\x04none\x18\x1b \x01(\v2*.agentshim.frontend.v1.RosterRowStatusNoneH\x00R\x04none\x12L\n" +
+	"\binactive\x18\x1c \x01(\v2..agentshim.frontend.v1.RosterRowStatusInactiveH\x00R\binactive\x12\x18\n" +
 	"\acurrent\x18\x04 \x01(\bR\acurrent\x12<\n" +
-	"\bchildren\x18\x05 \x03(\v2 .agentshim.frontend.v1.RosterRowR\bchildren*\xb0\x05\n" +
+	"\bchildren\x18\x05 \x03(\v2 .agentshim.frontend.v1.RosterRowR\bchildrenB\b\n" +
+	"\x06status\"\x1b\n" +
+	"\x19RosterRowStatusSubmitting\"\x19\n" +
+	"\x17RosterRowStatusThinking\"\x19\n" +
+	"\x17RosterRowStatusClearing\"\x1b\n" +
+	"\x19RosterRowStatusCompacting\"\x1b\n" +
+	"\x19RosterRowStatusPermission\"\x15\n" +
+	"\x13RosterRowStatusDone\"\x1c\n" +
+	"\x1aRosterRowStatusInterrupted\"\x16\n" +
+	"\x14RosterRowStatusReady\"\x1a\n" +
+	"\x18RosterRowStatusIdleAsync\"\x1e\n" +
+	"\x1cRosterRowStatusVendorBlocked\"\x15\n" +
+	"\x13RosterRowStatusInit\"\x18\n" +
+	"\x16RosterRowStatusSevered\"\x1b\n" +
+	"\x19RosterRowStatusHibernated\"\x1c\n" +
+	"\x1aRosterRowStatusStartFailed\"\x19\n" +
+	"\x17RosterRowStatusDegraded\"\x15\n" +
+	"\x13RosterRowStatusDead\"\x1f\n" +
+	"\x1dRosterRowStatusMergeEnqueuing\"\x18\n" +
+	"\x16RosterRowStatusMerging\"\x1c\n" +
+	"\x1aRosterRowStatusMergeQueued\"\x1e\n" +
+	"\x1cRosterRowStatusMergeConflict\"\x1c\n" +
+	"\x1aRosterRowStatusMergeFailed\"\x17\n" +
+	"\x15RosterRowStatusMerged\"\x15\n" +
+	"\x13RosterRowStatusNone\"\x19\n" +
+	"\x17RosterRowStatusInactive*\xb0\x05\n" +
 	"\vRenderState\x12\x1c\n" +
 	"\x18RENDER_STATE_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11RENDER_STATE_INIT\x10\x01\x12\x15\n" +
@@ -8178,34 +9388,7 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\x17RESUME_MODE_UNSPECIFIED\x10\x00\x12\x18\n" +
 	"\x14RESUME_MODE_CONTINUE\x10\x01\x12\x15\n" +
 	"\x11RESUME_MODE_FRESH\x10\x02\x12\x18\n" +
-	"\x14RESUME_MODE_EXPLICIT\x10\x03*\xc9\x06\n" +
-	"\x0fRosterRowStatus\x12!\n" +
-	"\x1dROSTER_ROW_STATUS_UNSPECIFIED\x10\x00\x12 \n" +
-	"\x1cROSTER_ROW_STATUS_SUBMITTING\x10\x01\x12\x1e\n" +
-	"\x1aROSTER_ROW_STATUS_THINKING\x10\x02\x12\x1e\n" +
-	"\x1aROSTER_ROW_STATUS_CLEARING\x10\x03\x12 \n" +
-	"\x1cROSTER_ROW_STATUS_COMPACTING\x10\x04\x12 \n" +
-	"\x1cROSTER_ROW_STATUS_PERMISSION\x10\x05\x12\x1a\n" +
-	"\x16ROSTER_ROW_STATUS_DONE\x10\x06\x12!\n" +
-	"\x1dROSTER_ROW_STATUS_INTERRUPTED\x10\a\x12\x1b\n" +
-	"\x17ROSTER_ROW_STATUS_READY\x10\b\x12 \n" +
-	"\x1cROSTER_ROW_STATUS_IDLE_ASYNC\x10\t\x12$\n" +
-	" ROSTER_ROW_STATUS_VENDOR_BLOCKED\x10\n" +
-	"\x12\x1a\n" +
-	"\x16ROSTER_ROW_STATUS_INIT\x10\v\x12\x1d\n" +
-	"\x19ROSTER_ROW_STATUS_SEVERED\x10\f\x12 \n" +
-	"\x1cROSTER_ROW_STATUS_HIBERNATED\x10\r\x12\"\n" +
-	"\x1eROSTER_ROW_STATUS_START_FAILED\x10\x0e\x12\x1e\n" +
-	"\x1aROSTER_ROW_STATUS_DEGRADED\x10\x0f\x12\x1a\n" +
-	"\x16ROSTER_ROW_STATUS_DEAD\x10\x10\x12%\n" +
-	"!ROSTER_ROW_STATUS_MERGE_ENQUEUING\x10\x11\x12\x1d\n" +
-	"\x19ROSTER_ROW_STATUS_MERGING\x10\x12\x12\"\n" +
-	"\x1eROSTER_ROW_STATUS_MERGE_QUEUED\x10\x13\x12$\n" +
-	" ROSTER_ROW_STATUS_MERGE_CONFLICT\x10\x14\x12\"\n" +
-	"\x1eROSTER_ROW_STATUS_MERGE_FAILED\x10\x15\x12\x1c\n" +
-	"\x18ROSTER_ROW_STATUS_MERGED\x10\x16\x12\x1a\n" +
-	"\x16ROSTER_ROW_STATUS_NONE\x10\x17\x12\x1e\n" +
-	"\x1aROSTER_ROW_STATUS_INACTIVE\x10\x18B2Z0agentrepl/proto/agentshim/frontend/v1;frontendv1b\x06proto3"
+	"\x14RESUME_MODE_EXPLICIT\x10\x03B2Z0agentrepl/proto/agentshim/frontend/v1;frontendv1b\x06proto3"
 
 var (
 	file_agentshim_frontend_v1_frontend_proto_rawDescOnce sync.Once
@@ -8219,236 +9402,282 @@ func file_agentshim_frontend_v1_frontend_proto_rawDescGZIP() []byte {
 	return file_agentshim_frontend_v1_frontend_proto_rawDescData
 }
 
-var file_agentshim_frontend_v1_frontend_proto_enumTypes = make([]protoimpl.EnumInfo, 10)
-var file_agentshim_frontend_v1_frontend_proto_msgTypes = make([]protoimpl.MessageInfo, 74)
+var file_agentshim_frontend_v1_frontend_proto_enumTypes = make([]protoimpl.EnumInfo, 9)
+var file_agentshim_frontend_v1_frontend_proto_msgTypes = make([]protoimpl.MessageInfo, 98)
 var file_agentshim_frontend_v1_frontend_proto_goTypes = []any{
-	(RenderState)(0),                  // 0: agentshim.frontend.v1.RenderState
-	(SessionConnectivity)(0),          // 1: agentshim.frontend.v1.SessionConnectivity
-	(SessionStatus)(0),                // 2: agentshim.frontend.v1.SessionStatus
-	(BackfillState)(0),                // 3: agentshim.frontend.v1.BackfillState
-	(ConversationSource)(0),           // 4: agentshim.frontend.v1.ConversationSource
-	(ErrorClass)(0),                   // 5: agentshim.frontend.v1.ErrorClass
-	(QueueClassification)(0),          // 6: agentshim.frontend.v1.QueueClassification
-	(ClientLogLevel)(0),               // 7: agentshim.frontend.v1.ClientLogLevel
-	(ResumeMode)(0),                   // 8: agentshim.frontend.v1.ResumeMode
-	(RosterRowStatus)(0),              // 9: agentshim.frontend.v1.RosterRowStatus
-	(*RuntimeFault)(nil),              // 10: agentshim.frontend.v1.RuntimeFault
-	(*FrontendFrame)(nil),             // 11: agentshim.frontend.v1.FrontendFrame
-	(*DaemonView)(nil),                // 12: agentshim.frontend.v1.DaemonView
-	(*DaemonHealthView)(nil),          // 13: agentshim.frontend.v1.DaemonHealthView
-	(*SessionHealthView)(nil),         // 14: agentshim.frontend.v1.SessionHealthView
-	(*WorkspaceState)(nil),            // 15: agentshim.frontend.v1.WorkspaceState
-	(*MergeStatus)(nil),               // 16: agentshim.frontend.v1.MergeStatus
-	(*MergeStatusEnqueued)(nil),       // 17: agentshim.frontend.v1.MergeStatusEnqueued
-	(*MergeStatusBeforeAction)(nil),   // 18: agentshim.frontend.v1.MergeStatusBeforeAction
-	(*MergeStatusCherryPicking)(nil),  // 19: agentshim.frontend.v1.MergeStatusCherryPicking
-	(*MergeStatusTesting)(nil),        // 20: agentshim.frontend.v1.MergeStatusTesting
-	(*MergeStatusConflict)(nil),       // 21: agentshim.frontend.v1.MergeStatusConflict
-	(*MergeStatusAfterAction)(nil),    // 22: agentshim.frontend.v1.MergeStatusAfterAction
-	(*MergeStatusMerged)(nil),         // 23: agentshim.frontend.v1.MergeStatusMerged
-	(*MergeStatusFailed)(nil),         // 24: agentshim.frontend.v1.MergeStatusFailed
-	(*SessionView)(nil),               // 25: agentshim.frontend.v1.SessionView
-	(*ModelOption)(nil),               // 26: agentshim.frontend.v1.ModelOption
-	(*ConversationDelta)(nil),         // 27: agentshim.frontend.v1.ConversationDelta
-	(*ConversationItem)(nil),          // 28: agentshim.frontend.v1.ConversationItem
-	(*SkillBodyItem)(nil),             // 29: agentshim.frontend.v1.SkillBodyItem
-	(*SystemFailureItem)(nil),         // 30: agentshim.frontend.v1.SystemFailureItem
-	(*TypingDelta)(nil),               // 31: agentshim.frontend.v1.TypingDelta
-	(*HeartbeatView)(nil),             // 32: agentshim.frontend.v1.HeartbeatView
-	(*SessionInitView)(nil),           // 33: agentshim.frontend.v1.SessionInitView
-	(*TaskEntry)(nil),                 // 34: agentshim.frontend.v1.TaskEntry
-	(*TaskCatalog)(nil),               // 35: agentshim.frontend.v1.TaskCatalog
-	(*FrontendCommand)(nil),           // 36: agentshim.frontend.v1.FrontendCommand
-	(*PublishWorkspaceRosterCmd)(nil), // 37: agentshim.frontend.v1.PublishWorkspaceRosterCmd
-	(*QueueEntry)(nil),                // 38: agentshim.frontend.v1.QueueEntry
-	(*QueueView)(nil),                 // 39: agentshim.frontend.v1.QueueView
-	(*QueueForceCmd)(nil),             // 40: agentshim.frontend.v1.QueueForceCmd
-	(*QueueAcceptCmd)(nil),            // 41: agentshim.frontend.v1.QueueAcceptCmd
-	(*QueueCancelCmd)(nil),            // 42: agentshim.frontend.v1.QueueCancelCmd
-	(*ClientLogCmd)(nil),              // 43: agentshim.frontend.v1.ClientLogCmd
-	(*ShutdownCmd)(nil),               // 44: agentshim.frontend.v1.ShutdownCmd
-	(*RestartSessionCmd)(nil),         // 45: agentshim.frontend.v1.RestartSessionCmd
-	(*DaemonHealthCmd)(nil),           // 46: agentshim.frontend.v1.DaemonHealthCmd
-	(*SessionHealthCmd)(nil),          // 47: agentshim.frontend.v1.SessionHealthCmd
-	(*CreateSessionCmd)(nil),          // 48: agentshim.frontend.v1.CreateSessionCmd
-	(*SetModelCmd)(nil),               // 49: agentshim.frontend.v1.SetModelCmd
-	(*DeleteSessionCmd)(nil),          // 50: agentshim.frontend.v1.DeleteSessionCmd
-	(*SubmitPromptCmd)(nil),           // 51: agentshim.frontend.v1.SubmitPromptCmd
-	(*InterruptCmd)(nil),              // 52: agentshim.frontend.v1.InterruptCmd
-	(*PermissionAnswerCmd)(nil),       // 53: agentshim.frontend.v1.PermissionAnswerCmd
-	(*MergeWorkspaceCmd)(nil),         // 54: agentshim.frontend.v1.MergeWorkspaceCmd
-	(*CloseWorkspaceCmd)(nil),         // 55: agentshim.frontend.v1.CloseWorkspaceCmd
-	(*OpenWorkspaceCmd)(nil),          // 56: agentshim.frontend.v1.OpenWorkspaceCmd
-	(*ResyncCmd)(nil),                 // 57: agentshim.frontend.v1.ResyncCmd
-	(*CreateWorkspaceCmd)(nil),        // 58: agentshim.frontend.v1.CreateWorkspaceCmd
-	(*WorkspaceAvailable)(nil),        // 59: agentshim.frontend.v1.WorkspaceAvailable
-	(*WorkspaceMaterializedCmd)(nil),  // 60: agentshim.frontend.v1.WorkspaceMaterializedCmd
-	(*HostAction)(nil),                // 61: agentshim.frontend.v1.HostAction
-	(*HostWorkspaceCreateFailed)(nil), // 62: agentshim.frontend.v1.HostWorkspaceCreateFailed
-	(*HostSwitchWorkspace)(nil),       // 63: agentshim.frontend.v1.HostSwitchWorkspace
-	(*HostSetRepositoryFold)(nil),     // 64: agentshim.frontend.v1.HostSetRepositoryFold
-	(*HostSetSidebarView)(nil),        // 65: agentshim.frontend.v1.HostSetSidebarView
-	(*HostTaskCreate)(nil),            // 66: agentshim.frontend.v1.HostTaskCreate
-	(*HostTaskById)(nil),              // 67: agentshim.frontend.v1.HostTaskById
-	(*HostLegacyCommand)(nil),         // 68: agentshim.frontend.v1.HostLegacyCommand
-	(*HostActionCompletedCmd)(nil),    // 69: agentshim.frontend.v1.HostActionCompletedCmd
-	(*CommandAck)(nil),                // 70: agentshim.frontend.v1.CommandAck
-	(*InterruptConfirmRequired)(nil),  // 71: agentshim.frontend.v1.InterruptConfirmRequired
-	(*ProgressWindow)(nil),            // 72: agentshim.frontend.v1.ProgressWindow
-	(*RateLimitWindow)(nil),           // 73: agentshim.frontend.v1.RateLimitWindow
-	(*InterruptWindow)(nil),           // 74: agentshim.frontend.v1.InterruptWindow
-	(*ProgressView)(nil),              // 75: agentshim.frontend.v1.ProgressView
-	(*StateSnapshot)(nil),             // 76: agentshim.frontend.v1.StateSnapshot
-	(*WorkspaceRoster)(nil),           // 77: agentshim.frontend.v1.WorkspaceRoster
-	(*RosterRepositoryView)(nil),      // 78: agentshim.frontend.v1.RosterRepositoryView
-	(*RosterTaskView)(nil),            // 79: agentshim.frontend.v1.RosterTaskView
-	(*RosterRepoSection)(nil),         // 80: agentshim.frontend.v1.RosterRepoSection
-	(*RosterTaskSection)(nil),         // 81: agentshim.frontend.v1.RosterTaskSection
-	(*RosterSection)(nil),             // 82: agentshim.frontend.v1.RosterSection
-	(*RosterRow)(nil),                 // 83: agentshim.frontend.v1.RosterRow
-	(*v1.ApiAssistantMessage)(nil),    // 84: agentshim.data.v1.ApiAssistantMessage
-	(*v1.ApiUserMessage)(nil),         // 85: agentshim.data.v1.ApiUserMessage
-	(*v1.ToolUseBlock)(nil),           // 86: agentshim.data.v1.ToolUseBlock
-	(*v1.ToolResultBlock)(nil),        // 87: agentshim.data.v1.ToolResultBlock
-	(*v1.ToolUseResult)(nil),          // 88: agentshim.data.v1.ToolUseResult
-	(*v1.ResultMessage)(nil),          // 89: agentshim.data.v1.ResultMessage
-	(*v11.PermissionItem)(nil),        // 90: agentshim.core.v1.PermissionItem
-	(*v11.ContextCleared)(nil),        // 91: agentshim.core.v1.ContextCleared
-	(*v11.ContextCompacted)(nil),      // 92: agentshim.core.v1.ContextCompacted
-	(*v11.ContentDelta)(nil),          // 93: agentshim.core.v1.ContentDelta
-	(*v11.HeartbeatProgress)(nil),     // 94: agentshim.core.v1.HeartbeatProgress
-	(*v1.SystemInit)(nil),             // 95: agentshim.data.v1.SystemInit
-	(*structpb.Struct)(nil),           // 96: google.protobuf.Struct
-	(v11.InterruptOutcome)(0),         // 97: agentshim.core.v1.InterruptOutcome
+	(RenderState)(0),                      // 0: agentshim.frontend.v1.RenderState
+	(SessionConnectivity)(0),              // 1: agentshim.frontend.v1.SessionConnectivity
+	(SessionStatus)(0),                    // 2: agentshim.frontend.v1.SessionStatus
+	(BackfillState)(0),                    // 3: agentshim.frontend.v1.BackfillState
+	(ConversationSource)(0),               // 4: agentshim.frontend.v1.ConversationSource
+	(ErrorClass)(0),                       // 5: agentshim.frontend.v1.ErrorClass
+	(QueueClassification)(0),              // 6: agentshim.frontend.v1.QueueClassification
+	(ClientLogLevel)(0),                   // 7: agentshim.frontend.v1.ClientLogLevel
+	(ResumeMode)(0),                       // 8: agentshim.frontend.v1.ResumeMode
+	(*RuntimeFault)(nil),                  // 9: agentshim.frontend.v1.RuntimeFault
+	(*FrontendFrame)(nil),                 // 10: agentshim.frontend.v1.FrontendFrame
+	(*DaemonView)(nil),                    // 11: agentshim.frontend.v1.DaemonView
+	(*DaemonHealthView)(nil),              // 12: agentshim.frontend.v1.DaemonHealthView
+	(*SessionHealthView)(nil),             // 13: agentshim.frontend.v1.SessionHealthView
+	(*WorkspaceState)(nil),                // 14: agentshim.frontend.v1.WorkspaceState
+	(*MergeStatus)(nil),                   // 15: agentshim.frontend.v1.MergeStatus
+	(*MergeStatusEnqueued)(nil),           // 16: agentshim.frontend.v1.MergeStatusEnqueued
+	(*MergeStatusBeforeAction)(nil),       // 17: agentshim.frontend.v1.MergeStatusBeforeAction
+	(*MergeStatusCherryPicking)(nil),      // 18: agentshim.frontend.v1.MergeStatusCherryPicking
+	(*MergeStatusTesting)(nil),            // 19: agentshim.frontend.v1.MergeStatusTesting
+	(*MergeStatusConflict)(nil),           // 20: agentshim.frontend.v1.MergeStatusConflict
+	(*MergeStatusAfterAction)(nil),        // 21: agentshim.frontend.v1.MergeStatusAfterAction
+	(*MergeStatusMerged)(nil),             // 22: agentshim.frontend.v1.MergeStatusMerged
+	(*MergeStatusFailed)(nil),             // 23: agentshim.frontend.v1.MergeStatusFailed
+	(*SessionView)(nil),                   // 24: agentshim.frontend.v1.SessionView
+	(*ModelOption)(nil),                   // 25: agentshim.frontend.v1.ModelOption
+	(*ConversationDelta)(nil),             // 26: agentshim.frontend.v1.ConversationDelta
+	(*ConversationItem)(nil),              // 27: agentshim.frontend.v1.ConversationItem
+	(*SkillBodyItem)(nil),                 // 28: agentshim.frontend.v1.SkillBodyItem
+	(*SystemFailureItem)(nil),             // 29: agentshim.frontend.v1.SystemFailureItem
+	(*TypingDelta)(nil),                   // 30: agentshim.frontend.v1.TypingDelta
+	(*HeartbeatView)(nil),                 // 31: agentshim.frontend.v1.HeartbeatView
+	(*SessionInitView)(nil),               // 32: agentshim.frontend.v1.SessionInitView
+	(*TaskEntry)(nil),                     // 33: agentshim.frontend.v1.TaskEntry
+	(*TaskCatalog)(nil),                   // 34: agentshim.frontend.v1.TaskCatalog
+	(*FrontendCommand)(nil),               // 35: agentshim.frontend.v1.FrontendCommand
+	(*PublishWorkspaceRosterCmd)(nil),     // 36: agentshim.frontend.v1.PublishWorkspaceRosterCmd
+	(*QueueEntry)(nil),                    // 37: agentshim.frontend.v1.QueueEntry
+	(*QueueView)(nil),                     // 38: agentshim.frontend.v1.QueueView
+	(*QueueForceCmd)(nil),                 // 39: agentshim.frontend.v1.QueueForceCmd
+	(*QueueAcceptCmd)(nil),                // 40: agentshim.frontend.v1.QueueAcceptCmd
+	(*QueueCancelCmd)(nil),                // 41: agentshim.frontend.v1.QueueCancelCmd
+	(*ClientLogCmd)(nil),                  // 42: agentshim.frontend.v1.ClientLogCmd
+	(*ShutdownCmd)(nil),                   // 43: agentshim.frontend.v1.ShutdownCmd
+	(*RestartSessionCmd)(nil),             // 44: agentshim.frontend.v1.RestartSessionCmd
+	(*DaemonHealthCmd)(nil),               // 45: agentshim.frontend.v1.DaemonHealthCmd
+	(*SessionHealthCmd)(nil),              // 46: agentshim.frontend.v1.SessionHealthCmd
+	(*CreateSessionCmd)(nil),              // 47: agentshim.frontend.v1.CreateSessionCmd
+	(*SetModelCmd)(nil),                   // 48: agentshim.frontend.v1.SetModelCmd
+	(*DeleteSessionCmd)(nil),              // 49: agentshim.frontend.v1.DeleteSessionCmd
+	(*SubmitPromptCmd)(nil),               // 50: agentshim.frontend.v1.SubmitPromptCmd
+	(*InterruptCmd)(nil),                  // 51: agentshim.frontend.v1.InterruptCmd
+	(*PermissionAnswerCmd)(nil),           // 52: agentshim.frontend.v1.PermissionAnswerCmd
+	(*MergeWorkspaceCmd)(nil),             // 53: agentshim.frontend.v1.MergeWorkspaceCmd
+	(*CloseWorkspaceCmd)(nil),             // 54: agentshim.frontend.v1.CloseWorkspaceCmd
+	(*OpenWorkspaceCmd)(nil),              // 55: agentshim.frontend.v1.OpenWorkspaceCmd
+	(*ResyncCmd)(nil),                     // 56: agentshim.frontend.v1.ResyncCmd
+	(*CreateWorkspaceCmd)(nil),            // 57: agentshim.frontend.v1.CreateWorkspaceCmd
+	(*WorkspaceAvailable)(nil),            // 58: agentshim.frontend.v1.WorkspaceAvailable
+	(*WorkspaceMaterializedCmd)(nil),      // 59: agentshim.frontend.v1.WorkspaceMaterializedCmd
+	(*HostAction)(nil),                    // 60: agentshim.frontend.v1.HostAction
+	(*HostWorkspaceCreateFailed)(nil),     // 61: agentshim.frontend.v1.HostWorkspaceCreateFailed
+	(*HostSwitchWorkspace)(nil),           // 62: agentshim.frontend.v1.HostSwitchWorkspace
+	(*HostSetRepositoryFold)(nil),         // 63: agentshim.frontend.v1.HostSetRepositoryFold
+	(*HostSetSidebarView)(nil),            // 64: agentshim.frontend.v1.HostSetSidebarView
+	(*HostTaskCreate)(nil),                // 65: agentshim.frontend.v1.HostTaskCreate
+	(*HostTaskById)(nil),                  // 66: agentshim.frontend.v1.HostTaskById
+	(*HostLegacyCommand)(nil),             // 67: agentshim.frontend.v1.HostLegacyCommand
+	(*HostActionCompletedCmd)(nil),        // 68: agentshim.frontend.v1.HostActionCompletedCmd
+	(*CommandAck)(nil),                    // 69: agentshim.frontend.v1.CommandAck
+	(*InterruptConfirmRequired)(nil),      // 70: agentshim.frontend.v1.InterruptConfirmRequired
+	(*ProgressWindow)(nil),                // 71: agentshim.frontend.v1.ProgressWindow
+	(*RateLimitWindow)(nil),               // 72: agentshim.frontend.v1.RateLimitWindow
+	(*InterruptWindow)(nil),               // 73: agentshim.frontend.v1.InterruptWindow
+	(*ProgressView)(nil),                  // 74: agentshim.frontend.v1.ProgressView
+	(*StateSnapshot)(nil),                 // 75: agentshim.frontend.v1.StateSnapshot
+	(*WorkspaceRoster)(nil),               // 76: agentshim.frontend.v1.WorkspaceRoster
+	(*RosterRepositoryView)(nil),          // 77: agentshim.frontend.v1.RosterRepositoryView
+	(*RosterTaskView)(nil),                // 78: agentshim.frontend.v1.RosterTaskView
+	(*RosterRepoSection)(nil),             // 79: agentshim.frontend.v1.RosterRepoSection
+	(*RosterTaskSection)(nil),             // 80: agentshim.frontend.v1.RosterTaskSection
+	(*RosterSection)(nil),                 // 81: agentshim.frontend.v1.RosterSection
+	(*RosterRow)(nil),                     // 82: agentshim.frontend.v1.RosterRow
+	(*RosterRowStatusSubmitting)(nil),     // 83: agentshim.frontend.v1.RosterRowStatusSubmitting
+	(*RosterRowStatusThinking)(nil),       // 84: agentshim.frontend.v1.RosterRowStatusThinking
+	(*RosterRowStatusClearing)(nil),       // 85: agentshim.frontend.v1.RosterRowStatusClearing
+	(*RosterRowStatusCompacting)(nil),     // 86: agentshim.frontend.v1.RosterRowStatusCompacting
+	(*RosterRowStatusPermission)(nil),     // 87: agentshim.frontend.v1.RosterRowStatusPermission
+	(*RosterRowStatusDone)(nil),           // 88: agentshim.frontend.v1.RosterRowStatusDone
+	(*RosterRowStatusInterrupted)(nil),    // 89: agentshim.frontend.v1.RosterRowStatusInterrupted
+	(*RosterRowStatusReady)(nil),          // 90: agentshim.frontend.v1.RosterRowStatusReady
+	(*RosterRowStatusIdleAsync)(nil),      // 91: agentshim.frontend.v1.RosterRowStatusIdleAsync
+	(*RosterRowStatusVendorBlocked)(nil),  // 92: agentshim.frontend.v1.RosterRowStatusVendorBlocked
+	(*RosterRowStatusInit)(nil),           // 93: agentshim.frontend.v1.RosterRowStatusInit
+	(*RosterRowStatusSevered)(nil),        // 94: agentshim.frontend.v1.RosterRowStatusSevered
+	(*RosterRowStatusHibernated)(nil),     // 95: agentshim.frontend.v1.RosterRowStatusHibernated
+	(*RosterRowStatusStartFailed)(nil),    // 96: agentshim.frontend.v1.RosterRowStatusStartFailed
+	(*RosterRowStatusDegraded)(nil),       // 97: agentshim.frontend.v1.RosterRowStatusDegraded
+	(*RosterRowStatusDead)(nil),           // 98: agentshim.frontend.v1.RosterRowStatusDead
+	(*RosterRowStatusMergeEnqueuing)(nil), // 99: agentshim.frontend.v1.RosterRowStatusMergeEnqueuing
+	(*RosterRowStatusMerging)(nil),        // 100: agentshim.frontend.v1.RosterRowStatusMerging
+	(*RosterRowStatusMergeQueued)(nil),    // 101: agentshim.frontend.v1.RosterRowStatusMergeQueued
+	(*RosterRowStatusMergeConflict)(nil),  // 102: agentshim.frontend.v1.RosterRowStatusMergeConflict
+	(*RosterRowStatusMergeFailed)(nil),    // 103: agentshim.frontend.v1.RosterRowStatusMergeFailed
+	(*RosterRowStatusMerged)(nil),         // 104: agentshim.frontend.v1.RosterRowStatusMerged
+	(*RosterRowStatusNone)(nil),           // 105: agentshim.frontend.v1.RosterRowStatusNone
+	(*RosterRowStatusInactive)(nil),       // 106: agentshim.frontend.v1.RosterRowStatusInactive
+	(*v1.ApiAssistantMessage)(nil),        // 107: agentshim.data.v1.ApiAssistantMessage
+	(*v1.ApiUserMessage)(nil),             // 108: agentshim.data.v1.ApiUserMessage
+	(*v1.ToolUseBlock)(nil),               // 109: agentshim.data.v1.ToolUseBlock
+	(*v1.ToolResultBlock)(nil),            // 110: agentshim.data.v1.ToolResultBlock
+	(*v1.ToolUseResult)(nil),              // 111: agentshim.data.v1.ToolUseResult
+	(*v1.ResultMessage)(nil),              // 112: agentshim.data.v1.ResultMessage
+	(*v11.PermissionItem)(nil),            // 113: agentshim.core.v1.PermissionItem
+	(*v11.ContextCleared)(nil),            // 114: agentshim.core.v1.ContextCleared
+	(*v11.ContextCompacted)(nil),          // 115: agentshim.core.v1.ContextCompacted
+	(*v11.ContentDelta)(nil),              // 116: agentshim.core.v1.ContentDelta
+	(*v11.HeartbeatProgress)(nil),         // 117: agentshim.core.v1.HeartbeatProgress
+	(*v1.SystemInit)(nil),                 // 118: agentshim.data.v1.SystemInit
+	(*structpb.Struct)(nil),               // 119: google.protobuf.Struct
+	(v11.InterruptOutcome)(0),             // 120: agentshim.core.v1.InterruptOutcome
 }
 var file_agentshim_frontend_v1_frontend_proto_depIdxs = []int32{
-	76,  // 0: agentshim.frontend.v1.FrontendFrame.snapshot:type_name -> agentshim.frontend.v1.StateSnapshot
-	15,  // 1: agentshim.frontend.v1.FrontendFrame.workspace_state:type_name -> agentshim.frontend.v1.WorkspaceState
-	25,  // 2: agentshim.frontend.v1.FrontendFrame.session_view:type_name -> agentshim.frontend.v1.SessionView
-	27,  // 3: agentshim.frontend.v1.FrontendFrame.conversation_delta:type_name -> agentshim.frontend.v1.ConversationDelta
-	31,  // 4: agentshim.frontend.v1.FrontendFrame.typing_delta:type_name -> agentshim.frontend.v1.TypingDelta
-	35,  // 5: agentshim.frontend.v1.FrontendFrame.task_catalog:type_name -> agentshim.frontend.v1.TaskCatalog
-	70,  // 6: agentshim.frontend.v1.FrontendFrame.command_ack:type_name -> agentshim.frontend.v1.CommandAck
-	12,  // 7: agentshim.frontend.v1.FrontendFrame.daemon_view:type_name -> agentshim.frontend.v1.DaemonView
-	33,  // 8: agentshim.frontend.v1.FrontendFrame.session_init:type_name -> agentshim.frontend.v1.SessionInitView
-	32,  // 9: agentshim.frontend.v1.FrontendFrame.heartbeat:type_name -> agentshim.frontend.v1.HeartbeatView
-	39,  // 10: agentshim.frontend.v1.FrontendFrame.queue:type_name -> agentshim.frontend.v1.QueueView
-	75,  // 11: agentshim.frontend.v1.FrontendFrame.progress:type_name -> agentshim.frontend.v1.ProgressView
-	59,  // 12: agentshim.frontend.v1.FrontendFrame.workspace_available:type_name -> agentshim.frontend.v1.WorkspaceAvailable
-	61,  // 13: agentshim.frontend.v1.FrontendFrame.host_action:type_name -> agentshim.frontend.v1.HostAction
-	13,  // 14: agentshim.frontend.v1.FrontendFrame.daemon_health:type_name -> agentshim.frontend.v1.DaemonHealthView
-	14,  // 15: agentshim.frontend.v1.FrontendFrame.session_health:type_name -> agentshim.frontend.v1.SessionHealthView
-	77,  // 16: agentshim.frontend.v1.FrontendFrame.workspace_roster:type_name -> agentshim.frontend.v1.WorkspaceRoster
+	75,  // 0: agentshim.frontend.v1.FrontendFrame.snapshot:type_name -> agentshim.frontend.v1.StateSnapshot
+	14,  // 1: agentshim.frontend.v1.FrontendFrame.workspace_state:type_name -> agentshim.frontend.v1.WorkspaceState
+	24,  // 2: agentshim.frontend.v1.FrontendFrame.session_view:type_name -> agentshim.frontend.v1.SessionView
+	26,  // 3: agentshim.frontend.v1.FrontendFrame.conversation_delta:type_name -> agentshim.frontend.v1.ConversationDelta
+	30,  // 4: agentshim.frontend.v1.FrontendFrame.typing_delta:type_name -> agentshim.frontend.v1.TypingDelta
+	34,  // 5: agentshim.frontend.v1.FrontendFrame.task_catalog:type_name -> agentshim.frontend.v1.TaskCatalog
+	69,  // 6: agentshim.frontend.v1.FrontendFrame.command_ack:type_name -> agentshim.frontend.v1.CommandAck
+	11,  // 7: agentshim.frontend.v1.FrontendFrame.daemon_view:type_name -> agentshim.frontend.v1.DaemonView
+	32,  // 8: agentshim.frontend.v1.FrontendFrame.session_init:type_name -> agentshim.frontend.v1.SessionInitView
+	31,  // 9: agentshim.frontend.v1.FrontendFrame.heartbeat:type_name -> agentshim.frontend.v1.HeartbeatView
+	38,  // 10: agentshim.frontend.v1.FrontendFrame.queue:type_name -> agentshim.frontend.v1.QueueView
+	74,  // 11: agentshim.frontend.v1.FrontendFrame.progress:type_name -> agentshim.frontend.v1.ProgressView
+	58,  // 12: agentshim.frontend.v1.FrontendFrame.workspace_available:type_name -> agentshim.frontend.v1.WorkspaceAvailable
+	60,  // 13: agentshim.frontend.v1.FrontendFrame.host_action:type_name -> agentshim.frontend.v1.HostAction
+	12,  // 14: agentshim.frontend.v1.FrontendFrame.daemon_health:type_name -> agentshim.frontend.v1.DaemonHealthView
+	13,  // 15: agentshim.frontend.v1.FrontendFrame.session_health:type_name -> agentshim.frontend.v1.SessionHealthView
+	76,  // 16: agentshim.frontend.v1.FrontendFrame.workspace_roster:type_name -> agentshim.frontend.v1.WorkspaceRoster
 	0,   // 17: agentshim.frontend.v1.WorkspaceState.state:type_name -> agentshim.frontend.v1.RenderState
 	1,   // 18: agentshim.frontend.v1.WorkspaceState.connectivity:type_name -> agentshim.frontend.v1.SessionConnectivity
 	2,   // 19: agentshim.frontend.v1.WorkspaceState.status:type_name -> agentshim.frontend.v1.SessionStatus
-	10,  // 20: agentshim.frontend.v1.WorkspaceState.active_faults:type_name -> agentshim.frontend.v1.RuntimeFault
-	16,  // 21: agentshim.frontend.v1.WorkspaceState.merge_status:type_name -> agentshim.frontend.v1.MergeStatus
-	17,  // 22: agentshim.frontend.v1.MergeStatus.enqueued:type_name -> agentshim.frontend.v1.MergeStatusEnqueued
-	18,  // 23: agentshim.frontend.v1.MergeStatus.before_action:type_name -> agentshim.frontend.v1.MergeStatusBeforeAction
-	19,  // 24: agentshim.frontend.v1.MergeStatus.cherry_picking:type_name -> agentshim.frontend.v1.MergeStatusCherryPicking
-	20,  // 25: agentshim.frontend.v1.MergeStatus.testing:type_name -> agentshim.frontend.v1.MergeStatusTesting
-	21,  // 26: agentshim.frontend.v1.MergeStatus.conflict:type_name -> agentshim.frontend.v1.MergeStatusConflict
-	22,  // 27: agentshim.frontend.v1.MergeStatus.after_action:type_name -> agentshim.frontend.v1.MergeStatusAfterAction
-	23,  // 28: agentshim.frontend.v1.MergeStatus.merged:type_name -> agentshim.frontend.v1.MergeStatusMerged
-	24,  // 29: agentshim.frontend.v1.MergeStatus.failed:type_name -> agentshim.frontend.v1.MergeStatusFailed
+	9,   // 20: agentshim.frontend.v1.WorkspaceState.active_faults:type_name -> agentshim.frontend.v1.RuntimeFault
+	15,  // 21: agentshim.frontend.v1.WorkspaceState.merge_status:type_name -> agentshim.frontend.v1.MergeStatus
+	16,  // 22: agentshim.frontend.v1.MergeStatus.enqueued:type_name -> agentshim.frontend.v1.MergeStatusEnqueued
+	17,  // 23: agentshim.frontend.v1.MergeStatus.before_action:type_name -> agentshim.frontend.v1.MergeStatusBeforeAction
+	18,  // 24: agentshim.frontend.v1.MergeStatus.cherry_picking:type_name -> agentshim.frontend.v1.MergeStatusCherryPicking
+	19,  // 25: agentshim.frontend.v1.MergeStatus.testing:type_name -> agentshim.frontend.v1.MergeStatusTesting
+	20,  // 26: agentshim.frontend.v1.MergeStatus.conflict:type_name -> agentshim.frontend.v1.MergeStatusConflict
+	21,  // 27: agentshim.frontend.v1.MergeStatus.after_action:type_name -> agentshim.frontend.v1.MergeStatusAfterAction
+	22,  // 28: agentshim.frontend.v1.MergeStatus.merged:type_name -> agentshim.frontend.v1.MergeStatusMerged
+	23,  // 29: agentshim.frontend.v1.MergeStatus.failed:type_name -> agentshim.frontend.v1.MergeStatusFailed
 	3,   // 30: agentshim.frontend.v1.SessionView.backfill:type_name -> agentshim.frontend.v1.BackfillState
-	30,  // 31: agentshim.frontend.v1.SessionView.death:type_name -> agentshim.frontend.v1.SystemFailureItem
-	26,  // 32: agentshim.frontend.v1.SessionView.model_options:type_name -> agentshim.frontend.v1.ModelOption
-	28,  // 33: agentshim.frontend.v1.ConversationDelta.items:type_name -> agentshim.frontend.v1.ConversationItem
+	29,  // 31: agentshim.frontend.v1.SessionView.death:type_name -> agentshim.frontend.v1.SystemFailureItem
+	25,  // 32: agentshim.frontend.v1.SessionView.model_options:type_name -> agentshim.frontend.v1.ModelOption
+	27,  // 33: agentshim.frontend.v1.ConversationDelta.items:type_name -> agentshim.frontend.v1.ConversationItem
 	4,   // 34: agentshim.frontend.v1.ConversationItem.source:type_name -> agentshim.frontend.v1.ConversationSource
-	84,  // 35: agentshim.frontend.v1.ConversationItem.assistant_message:type_name -> agentshim.data.v1.ApiAssistantMessage
-	85,  // 36: agentshim.frontend.v1.ConversationItem.user_message:type_name -> agentshim.data.v1.ApiUserMessage
-	86,  // 37: agentshim.frontend.v1.ConversationItem.tool_use:type_name -> agentshim.data.v1.ToolUseBlock
-	87,  // 38: agentshim.frontend.v1.ConversationItem.tool_result:type_name -> agentshim.data.v1.ToolResultBlock
-	88,  // 39: agentshim.frontend.v1.ConversationItem.tool_use_result:type_name -> agentshim.data.v1.ToolUseResult
-	89,  // 40: agentshim.frontend.v1.ConversationItem.result:type_name -> agentshim.data.v1.ResultMessage
-	90,  // 41: agentshim.frontend.v1.ConversationItem.permission:type_name -> agentshim.core.v1.PermissionItem
-	30,  // 42: agentshim.frontend.v1.ConversationItem.system_failure:type_name -> agentshim.frontend.v1.SystemFailureItem
-	91,  // 43: agentshim.frontend.v1.ConversationItem.context_cleared:type_name -> agentshim.core.v1.ContextCleared
-	92,  // 44: agentshim.frontend.v1.ConversationItem.context_compacted:type_name -> agentshim.core.v1.ContextCompacted
-	29,  // 45: agentshim.frontend.v1.ConversationItem.skill_body:type_name -> agentshim.frontend.v1.SkillBodyItem
+	107, // 35: agentshim.frontend.v1.ConversationItem.assistant_message:type_name -> agentshim.data.v1.ApiAssistantMessage
+	108, // 36: agentshim.frontend.v1.ConversationItem.user_message:type_name -> agentshim.data.v1.ApiUserMessage
+	109, // 37: agentshim.frontend.v1.ConversationItem.tool_use:type_name -> agentshim.data.v1.ToolUseBlock
+	110, // 38: agentshim.frontend.v1.ConversationItem.tool_result:type_name -> agentshim.data.v1.ToolResultBlock
+	111, // 39: agentshim.frontend.v1.ConversationItem.tool_use_result:type_name -> agentshim.data.v1.ToolUseResult
+	112, // 40: agentshim.frontend.v1.ConversationItem.result:type_name -> agentshim.data.v1.ResultMessage
+	113, // 41: agentshim.frontend.v1.ConversationItem.permission:type_name -> agentshim.core.v1.PermissionItem
+	29,  // 42: agentshim.frontend.v1.ConversationItem.system_failure:type_name -> agentshim.frontend.v1.SystemFailureItem
+	114, // 43: agentshim.frontend.v1.ConversationItem.context_cleared:type_name -> agentshim.core.v1.ContextCleared
+	115, // 44: agentshim.frontend.v1.ConversationItem.context_compacted:type_name -> agentshim.core.v1.ContextCompacted
+	28,  // 45: agentshim.frontend.v1.ConversationItem.skill_body:type_name -> agentshim.frontend.v1.SkillBodyItem
 	5,   // 46: agentshim.frontend.v1.SystemFailureItem.error_class:type_name -> agentshim.frontend.v1.ErrorClass
-	93,  // 47: agentshim.frontend.v1.TypingDelta.delta:type_name -> agentshim.core.v1.ContentDelta
-	94,  // 48: agentshim.frontend.v1.HeartbeatView.progress:type_name -> agentshim.core.v1.HeartbeatProgress
-	95,  // 49: agentshim.frontend.v1.SessionInitView.init:type_name -> agentshim.data.v1.SystemInit
-	34,  // 50: agentshim.frontend.v1.TaskCatalog.tasks:type_name -> agentshim.frontend.v1.TaskEntry
-	51,  // 51: agentshim.frontend.v1.FrontendCommand.submit_prompt:type_name -> agentshim.frontend.v1.SubmitPromptCmd
-	52,  // 52: agentshim.frontend.v1.FrontendCommand.interrupt:type_name -> agentshim.frontend.v1.InterruptCmd
-	53,  // 53: agentshim.frontend.v1.FrontendCommand.permission_answer:type_name -> agentshim.frontend.v1.PermissionAnswerCmd
-	54,  // 54: agentshim.frontend.v1.FrontendCommand.merge_workspace:type_name -> agentshim.frontend.v1.MergeWorkspaceCmd
-	55,  // 55: agentshim.frontend.v1.FrontendCommand.close_workspace:type_name -> agentshim.frontend.v1.CloseWorkspaceCmd
-	56,  // 56: agentshim.frontend.v1.FrontendCommand.open_workspace:type_name -> agentshim.frontend.v1.OpenWorkspaceCmd
-	57,  // 57: agentshim.frontend.v1.FrontendCommand.resync:type_name -> agentshim.frontend.v1.ResyncCmd
-	48,  // 58: agentshim.frontend.v1.FrontendCommand.create_session:type_name -> agentshim.frontend.v1.CreateSessionCmd
-	50,  // 59: agentshim.frontend.v1.FrontendCommand.delete_session:type_name -> agentshim.frontend.v1.DeleteSessionCmd
-	44,  // 60: agentshim.frontend.v1.FrontendCommand.shutdown:type_name -> agentshim.frontend.v1.ShutdownCmd
-	43,  // 61: agentshim.frontend.v1.FrontendCommand.client_log:type_name -> agentshim.frontend.v1.ClientLogCmd
-	40,  // 62: agentshim.frontend.v1.FrontendCommand.queue_force:type_name -> agentshim.frontend.v1.QueueForceCmd
-	41,  // 63: agentshim.frontend.v1.FrontendCommand.queue_accept:type_name -> agentshim.frontend.v1.QueueAcceptCmd
-	42,  // 64: agentshim.frontend.v1.FrontendCommand.queue_cancel:type_name -> agentshim.frontend.v1.QueueCancelCmd
-	58,  // 65: agentshim.frontend.v1.FrontendCommand.create_workspace:type_name -> agentshim.frontend.v1.CreateWorkspaceCmd
-	60,  // 66: agentshim.frontend.v1.FrontendCommand.workspace_materialized:type_name -> agentshim.frontend.v1.WorkspaceMaterializedCmd
-	69,  // 67: agentshim.frontend.v1.FrontendCommand.host_action_completed:type_name -> agentshim.frontend.v1.HostActionCompletedCmd
-	46,  // 68: agentshim.frontend.v1.FrontendCommand.daemon_health:type_name -> agentshim.frontend.v1.DaemonHealthCmd
-	47,  // 69: agentshim.frontend.v1.FrontendCommand.session_health:type_name -> agentshim.frontend.v1.SessionHealthCmd
-	45,  // 70: agentshim.frontend.v1.FrontendCommand.restart_session:type_name -> agentshim.frontend.v1.RestartSessionCmd
-	49,  // 71: agentshim.frontend.v1.FrontendCommand.set_model:type_name -> agentshim.frontend.v1.SetModelCmd
-	37,  // 72: agentshim.frontend.v1.FrontendCommand.publish_workspace_roster:type_name -> agentshim.frontend.v1.PublishWorkspaceRosterCmd
-	77,  // 73: agentshim.frontend.v1.PublishWorkspaceRosterCmd.roster:type_name -> agentshim.frontend.v1.WorkspaceRoster
+	116, // 47: agentshim.frontend.v1.TypingDelta.delta:type_name -> agentshim.core.v1.ContentDelta
+	117, // 48: agentshim.frontend.v1.HeartbeatView.progress:type_name -> agentshim.core.v1.HeartbeatProgress
+	118, // 49: agentshim.frontend.v1.SessionInitView.init:type_name -> agentshim.data.v1.SystemInit
+	33,  // 50: agentshim.frontend.v1.TaskCatalog.tasks:type_name -> agentshim.frontend.v1.TaskEntry
+	50,  // 51: agentshim.frontend.v1.FrontendCommand.submit_prompt:type_name -> agentshim.frontend.v1.SubmitPromptCmd
+	51,  // 52: agentshim.frontend.v1.FrontendCommand.interrupt:type_name -> agentshim.frontend.v1.InterruptCmd
+	52,  // 53: agentshim.frontend.v1.FrontendCommand.permission_answer:type_name -> agentshim.frontend.v1.PermissionAnswerCmd
+	53,  // 54: agentshim.frontend.v1.FrontendCommand.merge_workspace:type_name -> agentshim.frontend.v1.MergeWorkspaceCmd
+	54,  // 55: agentshim.frontend.v1.FrontendCommand.close_workspace:type_name -> agentshim.frontend.v1.CloseWorkspaceCmd
+	55,  // 56: agentshim.frontend.v1.FrontendCommand.open_workspace:type_name -> agentshim.frontend.v1.OpenWorkspaceCmd
+	56,  // 57: agentshim.frontend.v1.FrontendCommand.resync:type_name -> agentshim.frontend.v1.ResyncCmd
+	47,  // 58: agentshim.frontend.v1.FrontendCommand.create_session:type_name -> agentshim.frontend.v1.CreateSessionCmd
+	49,  // 59: agentshim.frontend.v1.FrontendCommand.delete_session:type_name -> agentshim.frontend.v1.DeleteSessionCmd
+	43,  // 60: agentshim.frontend.v1.FrontendCommand.shutdown:type_name -> agentshim.frontend.v1.ShutdownCmd
+	42,  // 61: agentshim.frontend.v1.FrontendCommand.client_log:type_name -> agentshim.frontend.v1.ClientLogCmd
+	39,  // 62: agentshim.frontend.v1.FrontendCommand.queue_force:type_name -> agentshim.frontend.v1.QueueForceCmd
+	40,  // 63: agentshim.frontend.v1.FrontendCommand.queue_accept:type_name -> agentshim.frontend.v1.QueueAcceptCmd
+	41,  // 64: agentshim.frontend.v1.FrontendCommand.queue_cancel:type_name -> agentshim.frontend.v1.QueueCancelCmd
+	57,  // 65: agentshim.frontend.v1.FrontendCommand.create_workspace:type_name -> agentshim.frontend.v1.CreateWorkspaceCmd
+	59,  // 66: agentshim.frontend.v1.FrontendCommand.workspace_materialized:type_name -> agentshim.frontend.v1.WorkspaceMaterializedCmd
+	68,  // 67: agentshim.frontend.v1.FrontendCommand.host_action_completed:type_name -> agentshim.frontend.v1.HostActionCompletedCmd
+	45,  // 68: agentshim.frontend.v1.FrontendCommand.daemon_health:type_name -> agentshim.frontend.v1.DaemonHealthCmd
+	46,  // 69: agentshim.frontend.v1.FrontendCommand.session_health:type_name -> agentshim.frontend.v1.SessionHealthCmd
+	44,  // 70: agentshim.frontend.v1.FrontendCommand.restart_session:type_name -> agentshim.frontend.v1.RestartSessionCmd
+	48,  // 71: agentshim.frontend.v1.FrontendCommand.set_model:type_name -> agentshim.frontend.v1.SetModelCmd
+	36,  // 72: agentshim.frontend.v1.FrontendCommand.publish_workspace_roster:type_name -> agentshim.frontend.v1.PublishWorkspaceRosterCmd
+	76,  // 73: agentshim.frontend.v1.PublishWorkspaceRosterCmd.roster:type_name -> agentshim.frontend.v1.WorkspaceRoster
 	6,   // 74: agentshim.frontend.v1.QueueEntry.classification:type_name -> agentshim.frontend.v1.QueueClassification
-	38,  // 75: agentshim.frontend.v1.QueueView.entries:type_name -> agentshim.frontend.v1.QueueEntry
+	37,  // 75: agentshim.frontend.v1.QueueView.entries:type_name -> agentshim.frontend.v1.QueueEntry
 	7,   // 76: agentshim.frontend.v1.ClientLogCmd.level:type_name -> agentshim.frontend.v1.ClientLogLevel
-	96,  // 77: agentshim.frontend.v1.ClientLogCmd.context:type_name -> google.protobuf.Struct
+	119, // 77: agentshim.frontend.v1.ClientLogCmd.context:type_name -> google.protobuf.Struct
 	8,   // 78: agentshim.frontend.v1.CreateSessionCmd.resume_mode:type_name -> agentshim.frontend.v1.ResumeMode
-	96,  // 79: agentshim.frontend.v1.PermissionAnswerCmd.updated_input:type_name -> google.protobuf.Struct
-	63,  // 80: agentshim.frontend.v1.HostAction.switch_workspace:type_name -> agentshim.frontend.v1.HostSwitchWorkspace
-	64,  // 81: agentshim.frontend.v1.HostAction.set_repository_fold:type_name -> agentshim.frontend.v1.HostSetRepositoryFold
-	65,  // 82: agentshim.frontend.v1.HostAction.set_sidebar_view:type_name -> agentshim.frontend.v1.HostSetSidebarView
-	66,  // 83: agentshim.frontend.v1.HostAction.task_create:type_name -> agentshim.frontend.v1.HostTaskCreate
-	67,  // 84: agentshim.frontend.v1.HostAction.task_toggle_done:type_name -> agentshim.frontend.v1.HostTaskById
-	67,  // 85: agentshim.frontend.v1.HostAction.task_open:type_name -> agentshim.frontend.v1.HostTaskById
-	67,  // 86: agentshim.frontend.v1.HostAction.task_add_workspace:type_name -> agentshim.frontend.v1.HostTaskById
-	68,  // 87: agentshim.frontend.v1.HostAction.legacy_command:type_name -> agentshim.frontend.v1.HostLegacyCommand
-	62,  // 88: agentshim.frontend.v1.HostAction.workspace_create_failed:type_name -> agentshim.frontend.v1.HostWorkspaceCreateFailed
-	96,  // 89: agentshim.frontend.v1.HostLegacyCommand.payload:type_name -> google.protobuf.Struct
-	30,  // 90: agentshim.frontend.v1.CommandAck.failure:type_name -> agentshim.frontend.v1.SystemFailureItem
-	71,  // 91: agentshim.frontend.v1.CommandAck.interrupt_confirm_required:type_name -> agentshim.frontend.v1.InterruptConfirmRequired
-	97,  // 92: agentshim.frontend.v1.InterruptWindow.outcome:type_name -> agentshim.core.v1.InterruptOutcome
+	119, // 79: agentshim.frontend.v1.PermissionAnswerCmd.updated_input:type_name -> google.protobuf.Struct
+	62,  // 80: agentshim.frontend.v1.HostAction.switch_workspace:type_name -> agentshim.frontend.v1.HostSwitchWorkspace
+	63,  // 81: agentshim.frontend.v1.HostAction.set_repository_fold:type_name -> agentshim.frontend.v1.HostSetRepositoryFold
+	64,  // 82: agentshim.frontend.v1.HostAction.set_sidebar_view:type_name -> agentshim.frontend.v1.HostSetSidebarView
+	65,  // 83: agentshim.frontend.v1.HostAction.task_create:type_name -> agentshim.frontend.v1.HostTaskCreate
+	66,  // 84: agentshim.frontend.v1.HostAction.task_toggle_done:type_name -> agentshim.frontend.v1.HostTaskById
+	66,  // 85: agentshim.frontend.v1.HostAction.task_open:type_name -> agentshim.frontend.v1.HostTaskById
+	66,  // 86: agentshim.frontend.v1.HostAction.task_add_workspace:type_name -> agentshim.frontend.v1.HostTaskById
+	67,  // 87: agentshim.frontend.v1.HostAction.legacy_command:type_name -> agentshim.frontend.v1.HostLegacyCommand
+	61,  // 88: agentshim.frontend.v1.HostAction.workspace_create_failed:type_name -> agentshim.frontend.v1.HostWorkspaceCreateFailed
+	119, // 89: agentshim.frontend.v1.HostLegacyCommand.payload:type_name -> google.protobuf.Struct
+	29,  // 90: agentshim.frontend.v1.CommandAck.failure:type_name -> agentshim.frontend.v1.SystemFailureItem
+	70,  // 91: agentshim.frontend.v1.CommandAck.interrupt_confirm_required:type_name -> agentshim.frontend.v1.InterruptConfirmRequired
+	120, // 92: agentshim.frontend.v1.InterruptWindow.outcome:type_name -> agentshim.core.v1.InterruptOutcome
 	0,   // 93: agentshim.frontend.v1.ProgressView.state:type_name -> agentshim.frontend.v1.RenderState
-	72,  // 94: agentshim.frontend.v1.ProgressView.compacting:type_name -> agentshim.frontend.v1.ProgressWindow
-	72,  // 95: agentshim.frontend.v1.ProgressView.retrying:type_name -> agentshim.frontend.v1.ProgressWindow
-	72,  // 96: agentshim.frontend.v1.ProgressView.authenticating:type_name -> agentshim.frontend.v1.ProgressWindow
-	72,  // 97: agentshim.frontend.v1.ProgressView.hook:type_name -> agentshim.frontend.v1.ProgressWindow
-	73,  // 98: agentshim.frontend.v1.ProgressView.rate_limited:type_name -> agentshim.frontend.v1.RateLimitWindow
-	73,  // 99: agentshim.frontend.v1.ProgressView.rate_limited_weekly:type_name -> agentshim.frontend.v1.RateLimitWindow
-	72,  // 100: agentshim.frontend.v1.ProgressView.blocked:type_name -> agentshim.frontend.v1.ProgressWindow
-	74,  // 101: agentshim.frontend.v1.ProgressView.interrupt:type_name -> agentshim.frontend.v1.InterruptWindow
-	30,  // 102: agentshim.frontend.v1.ProgressView.failure:type_name -> agentshim.frontend.v1.SystemFailureItem
-	15,  // 103: agentshim.frontend.v1.StateSnapshot.workspaces:type_name -> agentshim.frontend.v1.WorkspaceState
-	25,  // 104: agentshim.frontend.v1.StateSnapshot.sessions:type_name -> agentshim.frontend.v1.SessionView
-	35,  // 105: agentshim.frontend.v1.StateSnapshot.catalogs:type_name -> agentshim.frontend.v1.TaskCatalog
-	12,  // 106: agentshim.frontend.v1.StateSnapshot.daemon:type_name -> agentshim.frontend.v1.DaemonView
-	33,  // 107: agentshim.frontend.v1.StateSnapshot.inits:type_name -> agentshim.frontend.v1.SessionInitView
-	39,  // 108: agentshim.frontend.v1.StateSnapshot.queues:type_name -> agentshim.frontend.v1.QueueView
-	75,  // 109: agentshim.frontend.v1.StateSnapshot.progress:type_name -> agentshim.frontend.v1.ProgressView
-	59,  // 110: agentshim.frontend.v1.StateSnapshot.workspace_available:type_name -> agentshim.frontend.v1.WorkspaceAvailable
-	61,  // 111: agentshim.frontend.v1.StateSnapshot.host_actions:type_name -> agentshim.frontend.v1.HostAction
-	78,  // 112: agentshim.frontend.v1.WorkspaceRoster.repository:type_name -> agentshim.frontend.v1.RosterRepositoryView
-	79,  // 113: agentshim.frontend.v1.WorkspaceRoster.task:type_name -> agentshim.frontend.v1.RosterTaskView
-	82,  // 114: agentshim.frontend.v1.WorkspaceRoster.recently_merged:type_name -> agentshim.frontend.v1.RosterSection
-	80,  // 115: agentshim.frontend.v1.RosterRepositoryView.sections:type_name -> agentshim.frontend.v1.RosterRepoSection
-	81,  // 116: agentshim.frontend.v1.RosterTaskView.sections:type_name -> agentshim.frontend.v1.RosterTaskSection
-	83,  // 117: agentshim.frontend.v1.RosterRepoSection.rows:type_name -> agentshim.frontend.v1.RosterRow
-	83,  // 118: agentshim.frontend.v1.RosterTaskSection.rows:type_name -> agentshim.frontend.v1.RosterRow
-	83,  // 119: agentshim.frontend.v1.RosterSection.rows:type_name -> agentshim.frontend.v1.RosterRow
-	9,   // 120: agentshim.frontend.v1.RosterRow.status:type_name -> agentshim.frontend.v1.RosterRowStatus
-	83,  // 121: agentshim.frontend.v1.RosterRow.children:type_name -> agentshim.frontend.v1.RosterRow
-	122, // [122:122] is the sub-list for method output_type
-	122, // [122:122] is the sub-list for method input_type
-	122, // [122:122] is the sub-list for extension type_name
-	122, // [122:122] is the sub-list for extension extendee
-	0,   // [0:122] is the sub-list for field type_name
+	71,  // 94: agentshim.frontend.v1.ProgressView.compacting:type_name -> agentshim.frontend.v1.ProgressWindow
+	71,  // 95: agentshim.frontend.v1.ProgressView.retrying:type_name -> agentshim.frontend.v1.ProgressWindow
+	71,  // 96: agentshim.frontend.v1.ProgressView.authenticating:type_name -> agentshim.frontend.v1.ProgressWindow
+	71,  // 97: agentshim.frontend.v1.ProgressView.hook:type_name -> agentshim.frontend.v1.ProgressWindow
+	72,  // 98: agentshim.frontend.v1.ProgressView.rate_limited:type_name -> agentshim.frontend.v1.RateLimitWindow
+	72,  // 99: agentshim.frontend.v1.ProgressView.rate_limited_weekly:type_name -> agentshim.frontend.v1.RateLimitWindow
+	71,  // 100: agentshim.frontend.v1.ProgressView.blocked:type_name -> agentshim.frontend.v1.ProgressWindow
+	73,  // 101: agentshim.frontend.v1.ProgressView.interrupt:type_name -> agentshim.frontend.v1.InterruptWindow
+	29,  // 102: agentshim.frontend.v1.ProgressView.failure:type_name -> agentshim.frontend.v1.SystemFailureItem
+	14,  // 103: agentshim.frontend.v1.StateSnapshot.workspaces:type_name -> agentshim.frontend.v1.WorkspaceState
+	24,  // 104: agentshim.frontend.v1.StateSnapshot.sessions:type_name -> agentshim.frontend.v1.SessionView
+	34,  // 105: agentshim.frontend.v1.StateSnapshot.catalogs:type_name -> agentshim.frontend.v1.TaskCatalog
+	11,  // 106: agentshim.frontend.v1.StateSnapshot.daemon:type_name -> agentshim.frontend.v1.DaemonView
+	32,  // 107: agentshim.frontend.v1.StateSnapshot.inits:type_name -> agentshim.frontend.v1.SessionInitView
+	38,  // 108: agentshim.frontend.v1.StateSnapshot.queues:type_name -> agentshim.frontend.v1.QueueView
+	74,  // 109: agentshim.frontend.v1.StateSnapshot.progress:type_name -> agentshim.frontend.v1.ProgressView
+	58,  // 110: agentshim.frontend.v1.StateSnapshot.workspace_available:type_name -> agentshim.frontend.v1.WorkspaceAvailable
+	60,  // 111: agentshim.frontend.v1.StateSnapshot.host_actions:type_name -> agentshim.frontend.v1.HostAction
+	77,  // 112: agentshim.frontend.v1.WorkspaceRoster.repository:type_name -> agentshim.frontend.v1.RosterRepositoryView
+	78,  // 113: agentshim.frontend.v1.WorkspaceRoster.task:type_name -> agentshim.frontend.v1.RosterTaskView
+	81,  // 114: agentshim.frontend.v1.WorkspaceRoster.recently_merged:type_name -> agentshim.frontend.v1.RosterSection
+	79,  // 115: agentshim.frontend.v1.RosterRepositoryView.sections:type_name -> agentshim.frontend.v1.RosterRepoSection
+	80,  // 116: agentshim.frontend.v1.RosterTaskView.sections:type_name -> agentshim.frontend.v1.RosterTaskSection
+	82,  // 117: agentshim.frontend.v1.RosterRepoSection.rows:type_name -> agentshim.frontend.v1.RosterRow
+	82,  // 118: agentshim.frontend.v1.RosterTaskSection.rows:type_name -> agentshim.frontend.v1.RosterRow
+	82,  // 119: agentshim.frontend.v1.RosterSection.rows:type_name -> agentshim.frontend.v1.RosterRow
+	83,  // 120: agentshim.frontend.v1.RosterRow.submitting:type_name -> agentshim.frontend.v1.RosterRowStatusSubmitting
+	84,  // 121: agentshim.frontend.v1.RosterRow.thinking:type_name -> agentshim.frontend.v1.RosterRowStatusThinking
+	85,  // 122: agentshim.frontend.v1.RosterRow.clearing:type_name -> agentshim.frontend.v1.RosterRowStatusClearing
+	86,  // 123: agentshim.frontend.v1.RosterRow.compacting:type_name -> agentshim.frontend.v1.RosterRowStatusCompacting
+	87,  // 124: agentshim.frontend.v1.RosterRow.permission:type_name -> agentshim.frontend.v1.RosterRowStatusPermission
+	88,  // 125: agentshim.frontend.v1.RosterRow.done:type_name -> agentshim.frontend.v1.RosterRowStatusDone
+	89,  // 126: agentshim.frontend.v1.RosterRow.interrupted:type_name -> agentshim.frontend.v1.RosterRowStatusInterrupted
+	90,  // 127: agentshim.frontend.v1.RosterRow.ready:type_name -> agentshim.frontend.v1.RosterRowStatusReady
+	91,  // 128: agentshim.frontend.v1.RosterRow.idle_async:type_name -> agentshim.frontend.v1.RosterRowStatusIdleAsync
+	92,  // 129: agentshim.frontend.v1.RosterRow.vendor_blocked:type_name -> agentshim.frontend.v1.RosterRowStatusVendorBlocked
+	93,  // 130: agentshim.frontend.v1.RosterRow.init:type_name -> agentshim.frontend.v1.RosterRowStatusInit
+	94,  // 131: agentshim.frontend.v1.RosterRow.severed:type_name -> agentshim.frontend.v1.RosterRowStatusSevered
+	95,  // 132: agentshim.frontend.v1.RosterRow.hibernated:type_name -> agentshim.frontend.v1.RosterRowStatusHibernated
+	96,  // 133: agentshim.frontend.v1.RosterRow.start_failed:type_name -> agentshim.frontend.v1.RosterRowStatusStartFailed
+	97,  // 134: agentshim.frontend.v1.RosterRow.degraded:type_name -> agentshim.frontend.v1.RosterRowStatusDegraded
+	98,  // 135: agentshim.frontend.v1.RosterRow.dead:type_name -> agentshim.frontend.v1.RosterRowStatusDead
+	99,  // 136: agentshim.frontend.v1.RosterRow.merge_enqueuing:type_name -> agentshim.frontend.v1.RosterRowStatusMergeEnqueuing
+	100, // 137: agentshim.frontend.v1.RosterRow.merging:type_name -> agentshim.frontend.v1.RosterRowStatusMerging
+	101, // 138: agentshim.frontend.v1.RosterRow.merge_queued:type_name -> agentshim.frontend.v1.RosterRowStatusMergeQueued
+	102, // 139: agentshim.frontend.v1.RosterRow.merge_conflict:type_name -> agentshim.frontend.v1.RosterRowStatusMergeConflict
+	103, // 140: agentshim.frontend.v1.RosterRow.merge_failed:type_name -> agentshim.frontend.v1.RosterRowStatusMergeFailed
+	104, // 141: agentshim.frontend.v1.RosterRow.merged:type_name -> agentshim.frontend.v1.RosterRowStatusMerged
+	105, // 142: agentshim.frontend.v1.RosterRow.none:type_name -> agentshim.frontend.v1.RosterRowStatusNone
+	106, // 143: agentshim.frontend.v1.RosterRow.inactive:type_name -> agentshim.frontend.v1.RosterRowStatusInactive
+	82,  // 144: agentshim.frontend.v1.RosterRow.children:type_name -> agentshim.frontend.v1.RosterRow
+	145, // [145:145] is the sub-list for method output_type
+	145, // [145:145] is the sub-list for method input_type
+	145, // [145:145] is the sub-list for extension type_name
+	145, // [145:145] is the sub-list for extension extendee
+	0,   // [0:145] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_frontend_v1_frontend_proto_init() }
@@ -8538,13 +9767,39 @@ func file_agentshim_frontend_v1_frontend_proto_init() {
 		(*WorkspaceRoster_Repository)(nil),
 		(*WorkspaceRoster_Task)(nil),
 	}
+	file_agentshim_frontend_v1_frontend_proto_msgTypes[73].OneofWrappers = []any{
+		(*RosterRow_Submitting)(nil),
+		(*RosterRow_Thinking)(nil),
+		(*RosterRow_Clearing)(nil),
+		(*RosterRow_Compacting)(nil),
+		(*RosterRow_Permission)(nil),
+		(*RosterRow_Done)(nil),
+		(*RosterRow_Interrupted)(nil),
+		(*RosterRow_Ready)(nil),
+		(*RosterRow_IdleAsync)(nil),
+		(*RosterRow_VendorBlocked)(nil),
+		(*RosterRow_Init)(nil),
+		(*RosterRow_Severed)(nil),
+		(*RosterRow_Hibernated)(nil),
+		(*RosterRow_StartFailed)(nil),
+		(*RosterRow_Degraded)(nil),
+		(*RosterRow_Dead)(nil),
+		(*RosterRow_MergeEnqueuing)(nil),
+		(*RosterRow_Merging)(nil),
+		(*RosterRow_MergeQueued)(nil),
+		(*RosterRow_MergeConflict)(nil),
+		(*RosterRow_MergeFailed)(nil),
+		(*RosterRow_Merged)(nil),
+		(*RosterRow_None)(nil),
+		(*RosterRow_Inactive)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_frontend_v1_frontend_proto_rawDesc), len(file_agentshim_frontend_v1_frontend_proto_rawDesc)),
-			NumEnums:      10,
-			NumMessages:   74,
+			NumEnums:      9,
+			NumMessages:   98,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

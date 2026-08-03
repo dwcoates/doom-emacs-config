@@ -1392,13 +1392,13 @@ Both read the one minibuffer, so the guard is shared rather than per-action."
   ;; Act / Assert
   (should (equal (alist-get :compacting agent-repl--sidebar-status-wire) "compacting")))
 
-;;;; ---- The RosterRowStatus proto vocabulary ----------------------------
+;;;; ---- The RosterRow.status proto vocabulary ---------------------------
 
-;; `frontend.v1.RosterRowStatus' is the third face of the sidebar's status
-;; contract, beside this file's wire table and the webapp's WorkspaceRow
-;; union.  These tests pin the enum against the elisp list so a status added
-;; on one side and forgotten on the other fails here rather than drawing a
-;; wrong dot.  The proto text is READ, not duplicated: a copy of the
+;; `frontend.v1.RosterRow.status' is the third face of the sidebar's status
+;; contract, beside this file's wire table and the webapp's WorkspaceStatus
+;; union.  These tests pin the oneof's ARM NAMES against the elisp list so a
+;; status added on one side and forgotten on the other fails here rather than
+;; drawing a wrong dot.  The proto text is READ, not duplicated: a copy of the
 ;; vocabulary in the test would be a fourth list to drift.
 
 (defconst agent-repl-test--frontend-proto-file
@@ -1409,19 +1409,25 @@ Both read the one minibuffer, so the guard is shared rather than per-action."
 when CALLED would resolve nothing under `emacs -batch -l'.")
 
 (defun agent-repl-test--roster-status-keywords ()
-  "Return the RosterRowStatus wire strings declared in frontend.proto.
-Each ROSTER_ROW_STATUS_FOO member maps to \"foo\" with underscores as
-hyphens, which is the sidebar's wire spelling.  UNSPECIFIED is excluded:
-it is invalid on the wire and has no wire string."
+  "Return the wire strings the RosterRow.status oneof declares as arms.
+Each arm name maps to the sidebar's wire spelling by replacing
+underscores with hyphens, so `idle_async' reads as \"idle-async\".  Only
+arms INSIDE the oneof block count; the empty per-status messages declared
+beside it are declarations, not vocabulary."
   (let ((proto agent-repl-test--frontend-proto-file)
         (names nil))
     (with-temp-buffer
       (insert-file-contents proto)
       (goto-char (point-min))
-      (while (re-search-forward "^ *ROSTER_ROW_STATUS_\\([A-Z_]+\\) *=" nil t)
-        (let ((name (match-string 1)))
-          (unless (equal name "UNSPECIFIED")
-            (push (downcase (replace-regexp-in-string "_" "-" name)) names)))))
+      (unless (re-search-forward "^ *oneof status *{" nil t)
+        (error "frontend.proto declares no RosterRow.status oneof"))
+      (let ((end (save-excursion
+                   (goto-char (match-beginning 0))
+                   (forward-list)
+                   (point))))
+        (while (re-search-forward
+                "^ *RosterRowStatus[A-Za-z]+ +\\([a-z_]+\\) *=" end t)
+          (push (replace-regexp-in-string "_" "-" (match-string 1)) names))))
     (nreverse names)))
 
 (defun agent-repl-test--sidebar-wire-vocabulary ()
@@ -1432,18 +1438,18 @@ derives structurally rather than from the table."
    (append (mapcar #'cdr agent-repl--sidebar-status-wire)
            '("inactive" "none"))))
 
-(ert-deftest agent-repl-test-sidebar-roster-enum-covers-every-wire-status ()
-  "Every status the sidebar emits has a RosterRowStatus member."
+(ert-deftest agent-repl-test-sidebar-roster-oneof-covers-every-wire-status ()
+  "Every status the sidebar emits has a RosterRow.status arm."
   ;; Arrange
-  (let ((enum (agent-repl-test--roster-status-keywords)))
+  (let ((arms (agent-repl-test--roster-status-keywords)))
     ;; Act
-    (let ((missing (cl-remove-if (lambda (s) (member s enum))
+    (let ((missing (cl-remove-if (lambda (s) (member s arms))
                                  (agent-repl-test--sidebar-wire-vocabulary))))
       ;; Assert
       (should (null missing)))))
 
-(ert-deftest agent-repl-test-sidebar-roster-enum-adds-no-unknown-status ()
-  "RosterRowStatus declares no member the sidebar cannot emit."
+(ert-deftest agent-repl-test-sidebar-roster-oneof-adds-no-unknown-status ()
+  "RosterRow.status declares no arm the sidebar cannot emit."
   ;; Arrange
   (let ((vocab (agent-repl-test--sidebar-wire-vocabulary)))
     ;; Act
@@ -1452,10 +1458,22 @@ derives structurally rather than from the table."
       ;; Assert
       (should (null extra)))))
 
-(ert-deftest agent-repl-test-sidebar-roster-enum-excludes-unspecified ()
-  "UNSPECIFIED carries no wire string: it is invalid, not a status."
+(ert-deftest agent-repl-test-sidebar-roster-oneof-declares-no-unspecified-arm ()
+  "Absence of a status is an unset oneof, never an arm that names absence."
   ;; Act / Assert
   (should-not (member "unspecified" (agent-repl-test--roster-status-keywords))))
+
+(ert-deftest agent-repl-test-sidebar-roster-status-is-not-an-enum ()
+  "The status vocabulary is a oneof of messages, never an enum.
+State-specifying enums are not used: a proto3 enum's zero value is both
+\"unset\" and a legal member, which is exactly the ambiguity the oneof
+removes."
+  ;; Arrange
+  (with-temp-buffer
+    (insert-file-contents agent-repl-test--frontend-proto-file)
+    ;; Act / Assert
+    (goto-char (point-min))
+    (should-not (re-search-forward "^ *enum RosterRowStatus" nil t))))
 
 (provide 'test-sidebar)
 ;;; test-sidebar.el ends here
