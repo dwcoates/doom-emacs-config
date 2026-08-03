@@ -85,9 +85,9 @@ type Server struct {
 	latestWorkspaceAt map[string]int64
 }
 
-// client is one connected frontend's outbound state. send is never closed
-// (avoids send-on-closed races with concurrent broadcasts); done signals the
-// writer to stop and is closed exactly once by disconnect.
+// client is one connected frontend's outbound state. out is never closed
+// (avoids publish-after-close races with concurrent broadcasts); done signals
+// the writer to stop and is closed exactly once by disconnect.
 //
 // scope, when non-nil, restricts this connection to one session/workspace (the
 // per-session GET /sessions/{id}/stream view); nil is the unfiltered /frontend
@@ -97,11 +97,21 @@ type Server struct {
 // and never reassigned — see ClientKind.
 type client struct {
 	id        uint64
-	send      chan []byte
+	out       *outbox
 	done      chan struct{}
 	closeOnce sync.Once
 	scope     *Scope
 	kind      ClientKind
+}
+
+// newClient builds a client with a bounded outbox of the given size.
+func newClient(bufSize int, scope *Scope, kind ClientKind) *client {
+	return &client{
+		out:   newOutbox(bufSize),
+		done:  make(chan struct{}),
+		scope: scope,
+		kind:  kind,
+	}
 }
 
 // New builds a Server. It panics on a missing required dependency: a frontend
@@ -320,6 +330,7 @@ func (s *Server) Broadcast(frame *frontendv1.FrontendFrame) {
 		var (
 			data []byte
 			err  error
+			sent = frame
 		)
 		if cl.scope == nil {
 			data, err = marshalUnscoped()
@@ -328,13 +339,14 @@ func (s *Server) Broadcast(frame *frontendv1.FrontendFrame) {
 			if !keep {
 				continue
 			}
+			sent = out
 			data, err = marshalFrame(out)
 		}
 		if err != nil {
 			s.logf("frontend: marshal frame for broadcast: %v", err)
 			continue
 		}
-		s.enqueue(cl, data)
+		s.enqueue(cl, outFrame{key: coalesceKey(sent), data: data})
 	}
 }
 
@@ -383,6 +395,7 @@ func (s *Server) deliverLocked(frame *frontendv1.FrontendFrame, want func(*clien
 		var (
 			data []byte
 			err  error
+			sent = frame
 		)
 		if cl.scope == nil {
 			if !unscopedDone {
@@ -395,36 +408,36 @@ func (s *Server) deliverLocked(frame *frontendv1.FrontendFrame, want func(*clien
 			if !keep {
 				continue
 			}
+			sent = out
 			data, err = marshalFrame(out)
 		}
 		if err != nil {
 			s.logf("frontend: marshal frame for delivery: %v", err)
 			continue
 		}
-		if !enqueueLocked(cl, data) {
-			s.logf("frontend: slow consumer (%s), outbound buffer full (%d frames), hard-disconnecting; reconnect replays snapshot",
-				cl.kind, cap(cl.send))
+		queued, compacted := enqueueLocked(cl, outFrame{key: coalesceKey(sent), data: data})
+		if !queued {
+			s.logf("frontend: slow consumer (%s), outbound buffer full (%d frames) after compacting %d superseded frames, hard-disconnecting; reconnect replays snapshot",
+				cl.kind, cl.out.capacity(), compacted)
 			slow = append(slow, cl)
 		}
 	}
 	return slow
 }
 
-// enqueueLocked offers data to a client's bounded buffer without blocking. It
-// reports false ONLY for a live client whose buffer is full; an already
-// disconnected client is not a slow one and needs no second teardown.
-func enqueueLocked(cl *client, data []byte) bool {
+// enqueueLocked offers a frame to a client's bounded outbox without blocking,
+// compacting superseded frames first if the queue is already full. It reports
+// queued=false ONLY for a live client whose queue is still full of frames
+// nothing may replace; an already disconnected client is not a slow one and
+// needs no second teardown. compacted is how many frames compaction removed,
+// so a refusal can say what was tried.
+func enqueueLocked(cl *client, f outFrame) (queued bool, compacted int) {
 	select {
 	case <-cl.done:
-		return true
+		return true, 0
 	default:
 	}
-	select {
-	case cl.send <- data:
-		return true
-	default:
-		return false
-	}
+	return cl.out.push(f)
 }
 
 // disconnectAll tears down every client in the list. Called after mu is
@@ -512,12 +525,7 @@ func (s *Server) dispatchClientCommand(cl *client, cmd *frontendv1.FrontendComma
 // ---------------------------------------------------------------------------
 
 func (s *Server) serveClient(c conn, scope *Scope, kind ClientKind) {
-	cl := &client{
-		send:  make(chan []byte, s.bufSize),
-		done:  make(chan struct{}),
-		scope: scope,
-		kind:  kind,
-	}
+	cl := newClient(s.bufSize, scope, kind)
 
 	// THE SNAPSHOT CARRIES EVERY WORKSPACE the provider knows about. It used to
 	// be filtered down to the states a painter had settled, which could omit a
@@ -554,7 +562,15 @@ func (s *Server) serveClient(c conn, scope *Scope, kind ClientKind) {
 		// delta can slip ahead of this first FIFO frame after validation.
 		s.nextClientID++
 		cl.id = s.nextClientID
-		cl.send <- snap
+		// A fresh outbox is empty, so this first FIFO frame always fits; a
+		// refusal here would be a programmer error, not a slow consumer.
+		if queued, _ := enqueueLocked(cl, outFrame{data: snap}); !queued {
+			s.mu.Unlock()
+			s.logf("frontend: connect snapshot rejected by an empty outbox kind=%s scope_workspace=%q scope_session=%q",
+				kind, scopeWorkspace(scope), scopeSession(scope))
+			_ = c.close()
+			return
+		}
 		s.clients[cl] = struct{}{}
 		s.mu.Unlock()
 		break
@@ -620,11 +636,14 @@ func (s *Server) renewSnapshotLease(cl *client) bool {
 				cl.id, cl.kind, scopeWorkspace(cl.scope), scopeSession(cl.scope), workspace, snapshotAt, deliveredAt)
 			continue
 		}
-		queued := enqueueLocked(cl, data)
+		// A snapshot supersedes nothing on the wire: the lease is the browser's
+		// bounded freshness proof, and a full lease queue stays a hard
+		// disconnect rather than a silent skip (AGENTS.md).
+		queued, compacted := enqueueLocked(cl, outFrame{data: data})
 		s.mu.Unlock()
 		if !queued {
-			s.logf("frontend: snapshot lease queue full client_id=%d kind=%s scope_workspace=%q scope_session=%q buffer=%d; hard-disconnecting",
-				cl.id, cl.kind, scopeWorkspace(cl.scope), scopeSession(cl.scope), cap(cl.send))
+			s.logf("frontend: snapshot lease queue full client_id=%d kind=%s scope_workspace=%q scope_session=%q buffer=%d compacted=%d; hard-disconnecting",
+				cl.id, cl.kind, scopeWorkspace(cl.scope), scopeSession(cl.scope), cl.out.capacity(), compacted)
 			s.disconnect(cl)
 			return false
 		}
@@ -705,11 +724,19 @@ func (s *Server) writeLoop(c conn, cl *client) {
 		select {
 		case <-cl.done:
 			return
-		case data := <-cl.send:
-			if err := c.writeFrame(data); err != nil {
-				s.logf("frontend: write failed, disconnecting: %v", err)
-				s.disconnect(cl)
-				return
+		case <-cl.out.ready:
+			// ready is a wakeup, not the queue: drain everything each wake, so
+			// a signal coalesced with an earlier one strands no frame.
+			for {
+				data, ok := cl.out.pop()
+				if !ok {
+					break
+				}
+				if err := c.writeFrame(data); err != nil {
+					s.logf("frontend: write failed, disconnecting: %v", err)
+					s.disconnect(cl)
+					return
+				}
 			}
 		}
 	}
@@ -733,7 +760,7 @@ func (s *Server) readLoop(c conn, cl *client) {
 			if snap, err := marshalFrame(SnapshotFrame(snapshot)); err != nil {
 				s.logf("frontend: marshal resync snapshot: %v", err)
 			} else {
-				s.enqueue(cl, snap)
+				s.enqueue(cl, outFrame{data: snap})
 			}
 		}
 		ack, response := s.dispatchClientCommand(cl, cmd)
@@ -744,33 +771,32 @@ func (s *Server) readLoop(c conn, cl *client) {
 			if data, err := marshalFrame(response); err != nil {
 				s.logf("frontend: marshal command response request_id=%s: %v", ack.GetRequestId(), err)
 			} else {
-				s.enqueue(cl, data)
+				s.enqueue(cl, outFrame{key: coalesceKey(response), data: data})
 			}
 		}
 		if data, err := marshalFrame(CommandAckFrame(ack)); err != nil {
 			s.logf("frontend: marshal command ack: %v", err)
 		} else {
-			s.enqueue(cl, data)
+			s.enqueue(cl, outFrame{key: coalesceKey(response), data: data})
 		}
 	}
 }
 
-// enqueue delivers data to a client's bounded buffer. A full buffer means the
-// consumer is too slow: hard-disconnect it loudly (reconnect replays a fresh
-// snapshot — no data loss by construction).
-func (s *Server) enqueue(cl *client, data []byte) {
-	select {
-	case <-cl.done:
-		return // already disconnected
-	default:
+// enqueue delivers a frame to a client's bounded outbox. A full queue is first
+// COMPACTED — every queued frame a later queued frame supersedes is replaced by
+// that newer version — so a hidden webview that consumes slowly costs its own
+// stale state rather than its connection. Only a queue still full after that,
+// of frames nothing may replace, means the consumer is genuinely too slow:
+// hard-disconnect it loudly (reconnect replays a fresh snapshot — no data loss
+// by construction).
+func (s *Server) enqueue(cl *client, f outFrame) {
+	queued, compacted := enqueueLocked(cl, f)
+	if queued {
+		return
 	}
-	select {
-	case cl.send <- data:
-	case <-cl.done:
-	default:
-		s.logf("frontend: slow consumer, outbound buffer full (%d frames), hard-disconnecting; reconnect replays snapshot", cap(cl.send))
-		s.disconnect(cl)
-	}
+	s.logf("frontend: slow consumer, outbound buffer full (%d frames) after compacting %d superseded frames, hard-disconnecting; reconnect replays snapshot",
+		cl.out.capacity(), compacted)
+	s.disconnect(cl)
 }
 
 // disconnect removes a client from the fan-out set and signals its writer to
