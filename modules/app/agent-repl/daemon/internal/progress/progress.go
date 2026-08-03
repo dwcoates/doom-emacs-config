@@ -758,6 +758,29 @@ func (m *Manager) openTurnLocked(wp *workspaceProgress, atMs int64) bool {
 	// stopped, and a new turn beginning is the moment that report stops being
 	// the news. Nothing else clears it — never a timer.
 	wp.view.Interrupt = nil
+	// THE PREVIOUS TURN'S ACTIVITY WINDOWS, retired on the same edge and for the
+	// same reason. Each of these reports something that was happening inside the
+	// turn that just stopped, and the footer's activity cell — its one big middle
+	// section — is where they are read. A new turn opening is the moment they
+	// stop being true, so they clear HERE, at the accepted edge, which the
+	// session controller publishes synchronously before the prompt even reaches
+	// the shim. That is what makes the cell blank the instant a prompt is sent
+	// rather than whenever the next unrelated observation happens to close them.
+	//
+	// `blocked` is the sharpest case: it says the session is parked on the USER,
+	// and the user sending a prompt IS the unparking. It used to survive until
+	// the shim got around to reporting a new session state, so a fresh turn ran
+	// under a footer still reading "waiting on you".
+	//
+	// The slot IS the window's whole state (see setWindowLocked), so a later
+	// close for a window cleared here is an ordinary no-op rather than a desync.
+	wp.view.Blocked = nil
+	wp.view.Hook = nil
+	wp.view.Compacting = nil
+	// NOT `authenticating`, and NOT the rate limits. Neither is turn-scoped: an
+	// auth prompt and a spent allowance are standing session conditions that
+	// outlive any turn, and blanking them on a submit would hide the very thing
+	// stopping the turn the user just asked for.
 	return true
 }
 

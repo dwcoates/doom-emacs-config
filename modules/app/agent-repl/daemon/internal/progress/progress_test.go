@@ -293,6 +293,82 @@ func TestNoteTurnAcceptedIsIdempotentMidTurn(t *testing.T) {
 	}
 }
 
+func TestNoteTurnAcceptedClearsTheBlockedWindow(t *testing.T) {
+	// Arrange — the previous turn ended parked on the user.
+	h := newHarness(t)
+	h.apply(streamEvent(t, sessionState("requires_action")))
+	h.drain()
+	// Act — the user answering it IS the unparking, and the accept is the
+	// earliest edge that knows so.
+	h.m.NoteTurnAccepted(testWS, testSID)
+	// Assert
+	if w := h.last().GetBlocked(); w != nil {
+		t.Fatalf("blocked window = %+v, want it retired with the turn it described", w)
+	}
+}
+
+func TestNoteTurnAcceptedClearsTheHookWindow(t *testing.T) {
+	// Arrange — the previous turn's hook never reported its response.
+	h := newHarness(t)
+	h.apply(streamEvent(t, streamHookStarted("Stop:notify")))
+	h.drain()
+	// Act
+	h.m.NoteTurnAccepted(testWS, testSID)
+	// Assert
+	if w := h.last().GetHook(); w != nil {
+		t.Fatalf("hook window = %+v, want it retired with the turn it described", w)
+	}
+}
+
+func TestNoteTurnAcceptedClearsTheCompactingWindow(t *testing.T) {
+	// Arrange — a compaction window left standing by the previous turn.
+	h := newHarness(t)
+	h.apply(streamEvent(t, &datav1.ClaudeStreamMessage{
+		Msg: &datav1.ClaudeStreamMessage_Status{Status: &datav1.StatusMessage{Status: "compacting"}},
+	}))
+	h.drain()
+	// Act
+	h.m.NoteTurnAccepted(testWS, testSID)
+	// Assert
+	if w := h.last().GetCompacting(); w != nil {
+		t.Fatalf("compacting window = %+v, want it retired with the turn it described", w)
+	}
+}
+
+func TestNoteTurnAcceptedKeepsTheAuthWindow(t *testing.T) {
+	// Arrange — an auth prompt is a standing SESSION condition, not a turn-scoped
+	// observation, so a submit must not blank the very thing stopping it.
+	h := newHarness(t)
+	h.apply(streamEvent(t, &datav1.ClaudeStreamMessage{
+		Msg: &datav1.ClaudeStreamMessage_AuthStatus{AuthStatus: &datav1.AuthStatus{
+			IsAuthenticating: true, Output: []string{"paste your code"},
+		}},
+	}))
+	h.drain()
+	// Act
+	h.m.NoteTurnAccepted(testWS, testSID)
+	// Assert
+	cur, _ := h.m.Current(testWS)
+	if w := cur.GetAuthenticating(); !w.GetActive() {
+		t.Fatalf("auth window = %+v, want it still standing across the accept", w)
+	}
+}
+
+func TestNoteTurnAcceptedMidTurnLeavesTheHookWindowStanding(t *testing.T) {
+	// Arrange — a hook running inside the turn already in flight.
+	h := newHarness(t)
+	h.openTurn()
+	h.apply(streamEvent(t, streamHookStarted("PreToolUse:Bash")))
+	h.drain()
+	// Act — a queued prompt's redundant accept opens no new turn.
+	h.m.NoteTurnAccepted(testWS, testSID)
+	// Assert — the window describes live work, not the previous turn's.
+	cur, _ := h.m.Current(testWS)
+	if w := cur.GetHook(); !w.GetActive() {
+		t.Fatalf("hook window = %+v, want the running turn's own hook left alone", w)
+	}
+}
+
 func TestNoteTurnRejectedStopsTheTurnClock(t *testing.T) {
 	// Arrange — the clock the optimistic accept started, for a prompt the shim
 	// then refused.
@@ -681,15 +757,18 @@ func TestWindowSinceMsSurvivesADetailRefresh(t *testing.T) {
 	}
 }
 
+// streamHookStarted is the vendor's "a hook is running" message, named.
+func streamHookStarted(name string) *datav1.ClaudeStreamMessage {
+	return &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_HookStarted{
+		HookStarted: &datav1.HookStarted{HookName: name},
+	}}
+}
+
 func TestHookStartedOpensTheHookWindow(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	// Act
-	h.apply(streamEvent(t, &datav1.ClaudeStreamMessage{
-		Msg: &datav1.ClaudeStreamMessage_HookStarted{
-			HookStarted: &datav1.HookStarted{HookName: "SessionStart:startup"},
-		},
-	}))
+	h.apply(streamEvent(t, streamHookStarted("SessionStart:startup")))
 	// Assert
 	w := h.last().GetHook()
 	if !w.GetActive() || w.GetDetail() != "SessionStart:startup" {
@@ -700,9 +779,7 @@ func TestHookStartedOpensTheHookWindow(t *testing.T) {
 func TestHookResponseClosesTheHookWindow(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	h.apply(streamEvent(t, &datav1.ClaudeStreamMessage{
-		Msg: &datav1.ClaudeStreamMessage_HookStarted{HookStarted: &datav1.HookStarted{HookName: "h"}},
-	}))
+	h.apply(streamEvent(t, streamHookStarted("h")))
 	h.drain()
 	// Act
 	h.apply(streamEvent(t, &datav1.ClaudeStreamMessage{
