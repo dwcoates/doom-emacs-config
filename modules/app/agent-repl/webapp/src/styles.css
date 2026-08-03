@@ -2267,6 +2267,58 @@ pre {
    card) render as empty nodes: hide them so #feed's gap does not show. */
 .feed-item:empty { display: none; }
 
+/* ---- Browser-level virtualization of the feed -------------------------------
+
+   A long session's feed is a few thousand boxes, nearly all of them off
+   screen, and every one of them was being laid out and painted on every
+   reflow. `content-visibility: auto` lets the browser skip the layout and
+   paint of a box that is not near the viewport, which is the cheapest
+   virtualization there is: no windowing bookkeeping, no nodes removed from the
+   DOM, so nothing above (the search's TreeWalker, the nav cycle, the
+   reconcile's node map) has to learn about it.
+
+   `contain-intrinsic-size: auto <fallback>` is what keeps the scrollbar
+   honest while a box is skipped. The `auto` keyword makes the browser REMEMBER
+   each box's last rendered size and re-use it, so an item scrolled past twice
+   is only ever estimated once; the length is the first-time guess, and a
+   deferred item overrides it with its own estimate through `--lazy-h`
+   (lazy-item.ts), which is measured from the item's actual text. */
+.feed-item {
+  content-visibility: auto;
+  contain-intrinsic-size: auto var(--lazy-h, 320px);
+}
+
+/* `content-visibility: auto` also applies PAINT containment, which clips a
+   descendant to its item's box — and a bubble's counter overlay (the agent and
+   task rosters an agent-topbar chip drops, `.agents-overlay` and friends) is
+   absolutely positioned to hang BELOW the strip it opens from, well past the
+   card's own bottom edge. An overlay only exists in the DOM while it is open,
+   so exempting the item that holds one costs nothing feed-wide and keeps the
+   dropdown from being sliced off at the card boundary. */
+.feed-item:has(.agents-overlay, .tasks-overlay, .tokens-overlay) {
+  content-visibility: visible;
+}
+
+/* A running search measures item positions to seat itself and scrolls matches
+   into view, and both are quoted against boxes the skipping has not laid out.
+   For as long as one runs, nothing in the feed is skipped (see
+   `SEARCHING_CLASS`, search.ts). */
+#feed.searching .feed-item {
+  content-visibility: visible;
+}
+
+/* The stand-in for an item whose real render has not been paid for yet
+   (lazy-item.ts): the item's own text, wrapped and monospaced-free, at the
+   line height the height estimate assumes. Deliberately unstyled beyond
+   that — it exists to occupy the right amount of space and to keep the item's
+   text in the DOM for the search, not to be mistaken for the real bubble. */
+.feed-placeholder {
+  line-height: 20px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+}
+
 /* The bubble the keyboard cycle (nav.ts) currently sits on.
 
    Focus never leaves the input box while cycling, so the feed has no

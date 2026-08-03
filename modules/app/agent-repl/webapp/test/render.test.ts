@@ -10,6 +10,7 @@ import {
   anyLiveAsync,
   anyLiveThinking,
   backfillChunks,
+  BACKFILL_CHUNK,
   compactionBannerHtml,
   diffHtml,
   finalResponses,
@@ -33,6 +34,8 @@ import {
   navTokensForEntry,
 } from "../src/render.js";
 import { ForwardingLogger, resetLoggingForTests, setLogger } from "../src/wslog.js";
+import { DEFERRED_CLASS, HEIGHT_VAR, PLACEHOLDER_CLASS } from "../src/lazy-item.js";
+import { StubIntersectionObserver, withIntersectionObserver } from "./intersection-stub.js";
 import { META_CLOSE, META_OPEN } from "../src/meta.js";
 import { AsyncSource } from "../src/protocol.js";
 import {
@@ -5822,5 +5825,171 @@ describe("FeedRenderer: a clear or a compaction truncates the feed", () => {
   it("keys the compaction's node by uuid too", () => {
     // Arrange + Act + Assert
     expect(itemKey(compaction("k7"), 3)).toBe("context-compacted:k7");
+  });
+});
+
+/**
+ * Lazy heavy rendering (lazy-item.ts): a replayed history's items above the
+ * tail chunk are drawn as cheap placeholders and upgrade to their real render
+ * when the reader scrolls near, so the cost of OPENING a workspace stops
+ * growing with the length of its history. The tail — the region the feed is
+ * about to park on — and everything a live turn appends are exempt.
+ */
+describe("FeedRenderer: defers the heavy render of off-tail replay", () => {
+  const NOOP_ACTIONS: Actions = {
+    decidePermission() {},
+    answerQuestions() {},
+    cancelQueued() {},
+    runQueuedNow() {},
+    acceptQueued() {},
+  };
+
+  /** More items than one backfill chunk, so some of them sit above the tail. */
+  const REPLAY = BACKFILL_CHUNK + 5;
+
+  /** The n-th replayed answer, whose body names its own index. */
+  function replayText(n: number): ConversationItem {
+    return {
+      kind: "text",
+      blockId: `b${n}`,
+      messageId: `m${n}`,
+      text: `answer number ${n}`,
+      done: true,
+      ts: TEXT_TS,
+    };
+  }
+
+  function replayItems(): ConversationItem[] {
+    return Array.from({ length: REPLAY }, (_, n) => replayText(n));
+  }
+
+  function stateOf(items: ConversationItem[]): StoreState {
+    const state = new ConversationStore().state;
+    state.items = items;
+    return state;
+  }
+
+  function mount(): { container: HTMLElement; feed: FeedRenderer } {
+    const container = document.createElement("div");
+    return {
+      container,
+      feed: withIntersectionObserver(() => new FeedRenderer(container, NOOP_ACTIONS)),
+    };
+  }
+
+  const nodeFor = (container: HTMLElement, key: string): HTMLElement => {
+    const el = container.querySelector<HTMLElement>(`.feed-item[data-key="${key}"]`);
+    if (!el) throw new Error(`no feed node for ${key}`);
+    return el;
+  };
+
+  /** The key of an item the tail chunk does NOT reach: the very first one. */
+  const OLDEST = "text:b0";
+  /** The key of the newest item, which the boot render parks on. */
+  const NEWEST = `text:b${REPLAY - 1}`;
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    StubIntersectionObserver.instances.length = 0;
+  });
+
+  it("renders the tail chunk in full at boot, with no placeholder to flash", () => {
+    // Arrange
+    const { container, feed } = mount();
+    // Act — the boot replay, which fills the newest chunk synchronously.
+    feed.renderRestored(stateOf(replayItems()));
+    // Assert — the newest item is a real bubble, not a stand-in.
+    const newest = nodeFor(container, NEWEST);
+    expect(newest.querySelector(`.${PLACEHOLDER_CLASS}`)).toBeNull();
+    expect(newest.querySelector(".bubble")).not.toBeNull();
+  });
+
+  it("draws an item above the tail chunk as a placeholder instead", () => {
+    // Arrange
+    const { container, feed } = mount();
+    const state = stateOf(replayItems());
+    feed.renderRestored(state);
+    // Act — the reconcile flushes the pending backfill, materializing the
+    // older shells the boot render only outlined.
+    feed.render(state);
+    // Assert
+    expect(nodeFor(container, OLDEST).querySelector(`.${PLACEHOLDER_CLASS}`)).not.toBeNull();
+  });
+
+  it("keeps a deferred item's own text in the DOM, so the search still sees it", () => {
+    // Arrange
+    const { container, feed } = mount();
+    const state = stateOf(replayItems());
+    feed.renderRestored(state);
+    // Act
+    feed.render(state);
+    // Assert
+    expect(nodeFor(container, OLDEST).textContent).toContain("answer number 0");
+  });
+
+  it("upgrades a deferred item to its real render once it comes near", () => {
+    // Arrange
+    const { container, feed } = mount();
+    const state = stateOf(replayItems());
+    feed.renderRestored(state);
+    feed.render(state);
+    const oldest = nodeFor(container, OLDEST);
+    // Act — the observer reports that the item has scrolled within the margin.
+    StubIntersectionObserver.instances[0].fire([oldest]);
+    // Assert — the placeholder is gone and the real bubble stands in its place.
+    const upgraded = nodeFor(container, OLDEST);
+    expect(upgraded.querySelector(`.${PLACEHOLDER_CLASS}`)).toBeNull();
+    expect(upgraded.querySelector(".bubble")).not.toBeNull();
+  });
+
+  it("drops the deferred marking from an item it upgraded", () => {
+    // Arrange
+    const { container, feed } = mount();
+    const state = stateOf(replayItems());
+    feed.renderRestored(state);
+    feed.render(state);
+    // Act
+    StubIntersectionObserver.instances[0].fire([nodeFor(container, OLDEST)]);
+    // Assert — the stylesheet stops sizing the box from a superseded estimate.
+    const upgraded = nodeFor(container, OLDEST);
+    expect(upgraded.classList.contains(DEFERRED_CLASS)).toBe(false);
+    expect(upgraded.style.getPropertyValue(HEIGHT_VAR)).toBe("");
+  });
+
+  it("renders an item appended during a live turn in full, never deferred", () => {
+    // Arrange — a boot replay long enough that older items ARE deferred.
+    const { container, feed } = mount();
+    const items = replayItems();
+    feed.renderRestored(stateOf(items));
+    // Act — the running turn streams one more answer onto the tail.
+    feed.render(stateOf([...items, replayText(REPLAY)]));
+    // Assert — the fresh item is a real bubble the moment it lands.
+    const fresh = nodeFor(container, `text:b${REPLAY}`);
+    expect(fresh.querySelector(`.${PLACEHOLDER_CLASS}`)).toBeNull();
+    expect(fresh.querySelector(".bubble")).not.toBeNull();
+  });
+
+  it("upgrades everything on demand, which is how a search reaches it all", () => {
+    // Arrange
+    const { container, feed } = mount();
+    const state = stateOf(replayItems());
+    feed.renderRestored(state);
+    feed.render(state);
+    // Act
+    feed.upgradeAll();
+    // Assert — no item anywhere in the feed is still standing in for itself.
+    expect(container.querySelectorAll(`.${PLACEHOLDER_CLASS}`).length).toBe(0);
+  });
+
+  it("defers nothing at all where no IntersectionObserver can report a near item", () => {
+    // Arrange — the bare jsdom environment, with no stub installed.
+    const container = document.createElement("div");
+    const feed = new FeedRenderer(container, NOOP_ACTIONS);
+    const state = stateOf(replayItems());
+    // Act
+    feed.renderRestored(state);
+    feed.render(state);
+    // Assert — a permanent placeholder would be worse than the cost it saves.
+    expect(container.querySelectorAll(`.${PLACEHOLDER_CLASS}`).length).toBe(0);
   });
 });

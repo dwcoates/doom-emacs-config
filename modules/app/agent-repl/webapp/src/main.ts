@@ -380,6 +380,12 @@ async function boot(): Promise<void> {
         account,
       })),
   });
+  // The feed defers the heavy render of replayed history it has not scrolled
+  // to (lazy-item.ts), and a placeholder carries less than the item it stands
+  // for. A starting search therefore drains that first, so its walk covers the
+  // same DOM it would have before deferral existed rather than only whatever
+  // the reader happens to have scrolled past.
+  search.setPrepare(() => feed.upgradeAll());
 
   // THE consolidated progress footer (F1): the raised dock between the feed
   // and the composer that replaced every scattered in-flight indicator. Its

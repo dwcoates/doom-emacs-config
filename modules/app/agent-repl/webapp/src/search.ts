@@ -93,6 +93,20 @@ export const CLOSED_FOLD_SELECTOR = "[data-panel-toggle]:not(.open)";
 /** A tab whose card was never rendered, so its text is not in the DOM. */
 export const INACTIVE_TAB_SELECTOR = ".tab-chip:not(.active)";
 
+/**
+ * Class on the feed while a search runs.
+ *
+ * Feed items carry `content-visibility: auto` so the browser skips the layout
+ * and paint of the ones off screen (styles.css). That is a rendering
+ * optimization the search must not inherit: a skipped subtree still holds its
+ * text nodes, but its boxes are not laid out, so `itemTops` would seat the
+ * search against sizes the browser has not resolved and `scrollIntoView` would
+ * be quoted against them too. The class lifts the skipping feed-wide for as
+ * long as a search is running, and the abort's scroll restore is measured in
+ * the same layout the search was seated in.
+ */
+export const SEARCHING_CLASS = "searching";
+
 /** The parts of a KeyboardEvent a search chord is decided from. */
 export interface KeyChord {
   key: string;
@@ -389,10 +403,29 @@ export class FeedSearch {
   private currentKey: string | null = null;
   /** The last line handed to `status`, which `statusLine` answers with. */
   private lastStatus = "";
+  /**
+   * Run once as a search begins, to put the feed's DOM in the state the walk
+   * assumes. The renderer sets it (`FeedRenderer.upgradeAll`), because the
+   * feed defers the heavy render of replayed history it has not scrolled to
+   * (lazy-item.ts) and a placeholder is a REDUCTION of the item it stands
+   * for. Draining that first is what keeps the search's reach exactly what it
+   * was before the deferral existed, rather than "whatever happens to be
+   * upgraded" — an under-report is the one failure this feature must not have.
+   */
+  private prepare: (() => void) | null = null;
 
   constructor(feed: HTMLElement, status: (text: string) => void) {
     this.feed = feed;
     this.status = status;
+  }
+
+  /**
+   * Install the hook run as a search begins (see `prepare`). Set after
+   * construction because the renderer that owns the work is built AFTER the
+   * search — it has to be, since it announces every render to it.
+   */
+  setPrepare(prepare: () => void): void {
+    this.prepare = prepare;
   }
 
   /** The one write to the status line, so the echoed copy cannot drift. */
@@ -469,8 +502,18 @@ export class FeedSearch {
     this.rerun(false);
   }
 
-  /** Begin a search from the feed's current position. */
+  /**
+   * Begin a search from the feed's current position.
+   *
+   * The two preparations both run BEFORE the origin is banked, because both
+   * change the layout `originScrollTop` is quoted in — and that number is what
+   * an abort puts the reader back on. `prepare` is run while `searching` is
+   * still false so the render it drives cannot re-enter `refresh` on a query
+   * that has not been typed yet.
+   */
   private start(): void {
+    this.prepare?.();
+    this.feed.classList.add(SEARCHING_CLASS);
     this.searching = true;
     this.query = "";
     this.currentKey = null;
@@ -481,6 +524,7 @@ export class FeedSearch {
   /** End the search keeping the current match on screen. */
   private accept(): void {
     this.searching = false;
+    this.feed.classList.remove(SEARCHING_CLASS);
     this.clearMarks();
     // The reveals stay, handed over as the user's own: they accepted a match
     // inside one, and re-closing it would hide the very thing they searched
@@ -504,8 +548,11 @@ export class FeedSearch {
     this.query = "";
     this.currentKey = null;
     // Last, after both mutations above have finished changing the layout the
-    // restored position is quoted against.
+    // restored position is quoted against. The skipping the class suppressed
+    // is only re-armed AFTER the restore, for the same reason: it is the
+    // layout the origin was measured in.
     this.feed.scrollTop = this.originScrollTop;
+    this.feed.classList.remove(SEARCHING_CLASS);
     this.report("");
   }
 
