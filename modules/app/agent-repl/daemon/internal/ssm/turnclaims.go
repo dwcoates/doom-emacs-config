@@ -3,8 +3,31 @@ package ssm
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
+)
+
+// The two SYNTHESIZED terminal causes: the reasons a turn claim is ended by the
+// daemon rather than by a `TurnEnded` off the stream.
+//
+// Both exist because the durable claim and the live shim are two authorities on
+// "is a turn in flight", and only one of them can still observe the process the
+// turn was running in. When the shim states, from that vantage point, that
+// nothing is running, a claim standing against that statement names a turn
+// whose end can never arrive — so the daemon writes the end itself and says
+// which observation made it do so.
+const (
+	// TurnCloseRestartInterrupted closes a claim that survived a restart or a
+	// shim bounce: the returning shim's hello reports no turn in flight and no
+	// turn ids at all. The turn was cut when the process behind it went away,
+	// and the cause is named so the user can see that rather than a turn that
+	// merely disappeared.
+	TurnCloseRestartInterrupted = "interrupted_by_restart"
+	// TurnCloseAlreadyComplete closes a claim contradicted by an interrupt
+	// Ack of INTERRUPT_OUTCOME_ALREADY_COMPLETE — the shim answering, live,
+	// that there is no foreground turn to stop.
+	TurnCloseAlreadyComplete = "interrupt_already_complete"
 )
 
 // ResolveTurnLifecycle durably validates and records one STREAM turn boundary.
@@ -164,12 +187,17 @@ func (m *Manager) ResolveTurnClaimBridge(workspace, claimantSessionID string, ev
 // snapshot into the ledger. A mismatch is returned before DaemonHello is sent,
 // so the store subscription and ShimReady gate never open on contradictory
 // identities.
-func (m *Manager) ReconcileTurnHandshake(workspace, claimantSessionID string, ids []string, legacyActive bool) (before, after []string, err error) {
+//
+// closed names the claims this handshake SYNTHESIZED an end for: the phantom
+// turns a returning shim has just contradicted. It is what the caller releases
+// its queue on, because a prompt held behind one of those claims is waiting for
+// a `TurnEnded` that no process will ever send.
+func (m *Manager) ReconcileTurnHandshake(workspace, claimantSessionID string, ids []string, legacyActive bool) (before, after, closed []string, err error) {
 	if workspace == "" || claimantSessionID == "" {
 		err := fmt.Errorf("ssm: turn handshake requires workspace and claimant session id")
 		m.logf("ssm: turn handshake decision=reject_validation workspace=%q claimant_session=%q hello_ids=%v legacy_active=%v error=%v",
 			workspace, claimantSessionID, ids, legacyActive, err)
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	seen := make(map[string]struct{}, len(ids))
 	for _, id := range ids {
@@ -177,13 +205,13 @@ func (m *Manager) ReconcileTurnHandshake(workspace, claimantSessionID string, id
 			err := fmt.Errorf("ssm: turn handshake active_turn_ids contains an empty identity")
 			m.logf("ssm: turn handshake decision=reject_validation workspace=%q claimant_session=%q hello_ids=%v legacy_active=%v error=%v",
 				workspace, claimantSessionID, ids, legacyActive, err)
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		if _, duplicate := seen[id]; duplicate {
 			err := fmt.Errorf("ssm: turn handshake active_turn_ids contains duplicate identity %q", id)
 			m.logf("ssm: turn handshake decision=reject_validation workspace=%q claimant_session=%q hello_ids=%v legacy_active=%v error=%v",
 				workspace, claimantSessionID, ids, legacyActive, err)
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		seen[id] = struct{}{}
 	}
@@ -192,12 +220,12 @@ func (m *Manager) ReconcileTurnHandshake(workspace, claimantSessionID string, id
 	defer m.mu.Unlock()
 	tx, err := m.db.Begin()
 	if err != nil {
-		return nil, nil, fmt.Errorf("ssm: begin turn handshake transaction: %w", err)
+		return nil, nil, nil, fmt.Errorf("ssm: begin turn handshake transaction: %w", err)
 	}
 	defer tx.Rollback()
 	before, err = activeTurnIDs(tx, workspace, claimantSessionID)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	switch {
 	case len(ids) > 0 && len(before) == 0:
@@ -205,7 +233,7 @@ func (m *Manager) ReconcileTurnHandshake(workspace, claimantSessionID string, id
 			if _, err := tx.Exec(`INSERT INTO turn_lifecycle_claim(
 				workspace, claimant_session_id, turn_id, start_seq
 			) VALUES (?,?,?,0)`, workspace, claimantSessionID, id); err != nil {
-				return before, before, fmt.Errorf("ssm: persist handshake turn %q: %w", id, err)
+				return before, before, nil, fmt.Errorf("ssm: persist handshake turn %q: %w", id, err)
 			}
 		}
 	case len(ids) > 0 && !equalStrings(before, ids):
@@ -214,20 +242,40 @@ func (m *Manager) ReconcileTurnHandshake(workspace, claimantSessionID string, id
 		if _, insertErr := tx.Exec(`INSERT INTO turn_lifecycle_claim(
 			workspace, claimant_session_id, turn_id, start_seq
 		) VALUES (?,?,?,0)`, workspace, claimantSessionID, ""); insertErr != nil {
-			return before, before, fmt.Errorf("ssm: persist legacy handshake turn: %w", insertErr)
+			return before, before, nil, fmt.Errorf("ssm: persist legacy handshake turn: %w", insertErr)
 		}
+	case len(ids) == 0 && !legacyActive && len(before) > 0:
+		// THE PHANTOM CLAIM, AND THE EDGE THAT CLOSES IT. The hello says
+		// turn_in_flight=false with no turn ids at all, and the ledger still
+		// holds claims for this very claimant. The shim is the only party that
+		// can see the process a turn would be running in, so its statement wins
+		// — and the claims it contradicts are ENDED here, durably, rather than
+		// left to a `TurnEnded` that the process which owed it no longer exists
+		// to send. Leaving them standing is what latched the whole workspace in
+		// `thinking` and made every later prompt queue behind a boundary that
+		// was never coming.
+		//
+		// This is the UNAMBIGUOUS case and the only one that gets it. A hello
+		// naming ids the ledger disagrees with, or a legacy shim positively
+		// asserting a turn under a protocol too old to name it, both stay on
+		// their existing loud paths above.
+		closed, err = synthesizeTurnEnds(tx, workspace, claimantSessionID, TurnCloseRestartInterrupted)
 	}
 	if err != nil {
 		m.logf("ssm: turn handshake decision=reject workspace=%s claimant_session=%s hello_ids=%v legacy_active=%v durable_before=%v error=%v",
 			workspace, claimantSessionID, ids, legacyActive, before, err)
-		return before, before, err
+		return before, before, nil, err
 	}
 	after, err = activeTurnIDs(tx, workspace, claimantSessionID)
 	if err != nil {
-		return before, nil, err
+		return before, nil, nil, err
 	}
 	if err := tx.Commit(); err != nil {
-		return before, nil, fmt.Errorf("ssm: commit turn handshake transaction: %w", err)
+		return before, nil, nil, fmt.Errorf("ssm: commit turn handshake transaction: %w", err)
+	}
+	if len(closed) > 0 {
+		m.logf("ssm: turn claims INTERRUPTED BY RESTART workspace=%s claimant_session=%s closed=%v cause=%s — the returning shim reports no turn in flight, so these claims name turns that were cut when the process behind them went away and no `TurnEnded` can ever arrive for them",
+			workspace, claimantSessionID, formatClosedTurnIDs(closed), TurnCloseRestartInterrupted)
 	}
 	m.logf("ssm: turn handshake decision=accept workspace=%s claimant_session=%s hello_ids=%v legacy_active=%v durable_before=%v durable_after=%v",
 		workspace, claimantSessionID, ids, legacyActive, before, after)
@@ -254,7 +302,16 @@ func (m *Manager) ReconcileTurnHandshake(workspace, claimantSessionID string, id
 	// name it, so the empty id list says nothing there and the axis is left
 	// exactly as it stands.
 	if len(ids) == 0 && !legacyActive {
-		if _, err := m.closeStaleTurnLocked(workspace, claimantSessionID, causeShimHandshake, true); err != nil {
+		// The reason NAMES the observation. A handshake that found no durable
+		// claim to close is tidying a latch whose turn is merely unaccounted
+		// for; one that just synthesized an end for a phantom claim is
+		// reporting a turn CUT BY A RESTART, and the row is the only place a
+		// user can see that it was.
+		reason := causeShimHandshake
+		if len(closed) > 0 {
+			reason = TurnCloseRestartInterrupted
+		}
+		if _, err := m.closeStaleTurnLocked(workspace, claimantSessionID, reason, true); err != nil {
 			// Never swallowed, and never allowed to fail the handshake: the
 			// reconciliation above has already committed and DaemonHello is
 			// gated on this call's error, so returning here would refuse a
@@ -263,7 +320,107 @@ func (m *Manager) ReconcileTurnHandshake(workspace, claimantSessionID string, id
 				workspace, claimantSessionID, ids, err)
 		}
 	}
-	return before, after, nil
+	return before, after, closed, nil
+}
+
+// SynthesizeTurnClose ends every active durable turn claim held by
+// claimantSessionID WITHOUT a `TurnEnded`, recording cause as the terminal
+// reason, and reports the identities it closed.
+//
+// IT IS THE OTHER HALF OF ReconcileAlreadyComplete. That method reconciles the
+// STATUS axis to the shim's live "there is no foreground turn"; this reconciles
+// the durable CLAIM ledger to the same statement. Without it the two disagree,
+// and the disagreement is not cosmetic: the claim is what the session
+// controller's queue holds prompts behind, so a prompt submitted after an
+// ALREADY_COMPLETE Ack waits on a boundary the ledger says is still coming and
+// the shim says already happened.
+//
+// A workspace with no active claim closes nothing and returns nil, nil. That is
+// the ordinary outcome — the turn's own end got there first — and it is not an
+// error.
+func (m *Manager) SynthesizeTurnClose(workspace, claimantSessionID, cause string) (closed []string, err error) {
+	if workspace == "" {
+		return nil, fmt.Errorf("ssm: SynthesizeTurnClose got an empty workspace")
+	}
+	if claimantSessionID == "" {
+		return nil, fmt.Errorf("ssm: SynthesizeTurnClose for workspace %q got an empty claimant session id; a turn claim can only be ended on behalf of the session that holds it", workspace)
+	}
+	if cause != TurnCloseRestartInterrupted && cause != TurnCloseAlreadyComplete {
+		return nil, fmt.Errorf("ssm: SynthesizeTurnClose for workspace %q session %q got cause %q; a synthesized end must name one of the observations that authorize it (%q, %q)",
+			workspace, claimantSessionID, cause, TurnCloseRestartInterrupted, TurnCloseAlreadyComplete)
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	tx, err := m.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("ssm: begin synthesized turn close transaction: %w", err)
+	}
+	defer tx.Rollback()
+	closed, err = synthesizeTurnEnds(tx, workspace, claimantSessionID, cause)
+	if err != nil {
+		m.logf("ssm: synthesized turn close decision=reject workspace=%s claimant_session=%s cause=%s error=%v",
+			workspace, claimantSessionID, cause, err)
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("ssm: commit synthesized turn close transaction: %w", err)
+	}
+	if len(closed) == 0 {
+		m.logf("ssm: synthesized turn close workspace=%s claimant_session=%s cause=%s decision=no_active_claim — the turn's own end already retired every claim, so nothing is synthesized",
+			workspace, claimantSessionID, cause)
+		return nil, nil
+	}
+	m.logf("ssm: turn claims CLOSED WITHOUT A TurnEnded workspace=%s claimant_session=%s closed=%s cause=%s — the shim states there is no turn behind these claims, so the daemon writes the end the vanished turn cannot",
+		workspace, claimantSessionID, formatClosedTurnIDs(closed), cause)
+	return closed, nil
+}
+
+// synthesizeTurnEnds ends every active claim held by claimantSessionID inside
+// tx, stamping cause so a later genuine `TurnEnded` for the same identity can be
+// recognized as already accounted for rather than read as a contradiction.
+//
+// end_seq is 0 rather than a real store seq because no event produced this
+// close. That is exactly what distinguishes it in the ledger, and it is why
+// end_cause is written alongside: `end_seq IS NULL` remains the ONE definition
+// of an active claim, so nothing downstream has to learn a second one.
+func synthesizeTurnEnds(tx *sql.Tx, workspace, claimantSessionID, cause string) ([]string, error) {
+	active, err := activeTurnIDs(tx, workspace, claimantSessionID)
+	if err != nil {
+		return nil, err
+	}
+	if len(active) == 0 {
+		return nil, nil
+	}
+	result, err := tx.Exec(`UPDATE turn_lifecycle_claim
+			SET end_seq=0, end_cause=?
+			WHERE workspace=? AND claimant_session_id=? AND end_seq IS NULL`,
+		cause, workspace, claimantSessionID)
+	if err != nil {
+		return nil, fmt.Errorf("ssm: synthesize turn end for workspace %q session %q: %w", workspace, claimantSessionID, err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("ssm: inspect synthesized turn end for workspace %q session %q: %w", workspace, claimantSessionID, err)
+	}
+	if int(changed) != len(active) {
+		return nil, fmt.Errorf("ssm: synthesized turn end for workspace %q session %q closed %d claims, want exactly the %d active ones",
+			workspace, claimantSessionID, changed, len(active))
+	}
+	return active, nil
+}
+
+// formatClosedTurnIDs renders closed identities for the log, naming the legacy
+// (identity-less) claim rather than printing an empty string nobody can read.
+func formatClosedTurnIDs(ids []string) string {
+	printable := make([]string, len(ids))
+	for i, id := range ids {
+		printable[i] = id
+		if id == "" {
+			printable[i] = "<legacy>"
+		}
+	}
+	return "[" + strings.Join(printable, ",") + "]"
 }
 
 func recordTurnStart(tx *sql.Tx, workspace, claimantSessionID, eventSessionID, id string, seq uint64) (bool, error) {
@@ -408,7 +565,7 @@ func recordTurnEnd(
 	seq uint64,
 ) (bool, error) {
 	query := `SELECT claim_id, start_event_session_id, bridge_event_session_id,
-			end_seq, end_event_session_id
+			end_seq, end_event_session_id, end_cause
 		FROM turn_lifecycle_claim
 		WHERE workspace=? AND claimant_session_id=? AND turn_id=?`
 	if id == "" {
@@ -421,21 +578,33 @@ func recordTurnEnd(
 	defer rows.Close()
 	var activeClaim int64
 	var sessionConflict string
+	var synthesizedCause string
 	for rows.Next() {
 		var claimID int64
 		var startEventSessionID string
 		var bridgeEventSessionID string
 		var endSeq sql.NullInt64
 		var endEventSessionID string
+		var endCause string
 		if err := rows.Scan(
 			&claimID, &startEventSessionID, &bridgeEventSessionID,
-			&endSeq, &endEventSessionID,
+			&endSeq, &endEventSessionID, &endCause,
 		); err != nil {
 			return false, fmt.Errorf("ssm: scan turn end claim %q: %w", id, err)
 		}
 		if endSeq.Valid && uint64(endSeq.Int64) == seq &&
 			endEventSessionID == eventSessionID {
 			return true, nil
+		}
+		if endSeq.Valid && endCause != "" && activeClaim == 0 && synthesizedCause == "" {
+			// The claim was ended by a SYNTHESIZED close, and this is the real
+			// boundary arriving afterwards — the pre-restart turn's own
+			// `TurnEnded`, replayed off the store once the subscription
+			// reopened. It reports the very thing the synthesized close already
+			// recorded, so it is admitted as an already-accounted boundary
+			// rather than rejected as a contradiction.
+			synthesizedCause = endCause
+			continue
 		}
 		if !endSeq.Valid && activeClaim == 0 {
 			expectedSessionID := startEventSessionID
@@ -459,6 +628,12 @@ func recordTurnEnd(
 		if sessionConflict != "" {
 			return false, fmt.Errorf("turn end id %q seq=%d belongs to event_session=%q, durable claim expects %q",
 				id, seq, eventSessionID, sessionConflict)
+		}
+		if synthesizedCause != "" {
+			// Idempotent, and deliberately reported as a REPLAY: the boundary is
+			// real, the daemon already accounted for it, and nothing about the
+			// state it produces is left to write a second time.
+			return true, nil
 		}
 		return false, fmt.Errorf("turn end id %q seq=%d has no durable active claim", id, seq)
 	}
