@@ -336,10 +336,10 @@ func (m *Manager) queueSubmitLocked(d *sessionController, requestID, text, permi
 		// about when it runs.
 		d.queue.add(e)
 		m.logf("session-controller: prompt PARKED by the drain lease entry=%s ws=%q session=%s schedule=%s turn_active=%v — a scheduled shutdown holds the lease, so this prompt is delayed until the bounce completes; it is not classified and not refused",
-			e.id, d.workspace, d.sessionID, scheduleID, d.turnActive)
+			e.id, d.workspace, d.sessionID, scheduleID, d.turn.active())
 		return e, true, nil
 	}
-	if !d.turnActive {
+	if !d.turn.active() {
 		d.runningText = text
 		d.runningPermissionMode = permissionMode
 		if d.paused {
@@ -410,8 +410,8 @@ func (m *Manager) persistQueue(sessionID string, recs []registry.QueuedPrompt) {
 	m.cfg.Registrar.QueuedPromptsChanged(sessionID, recs)
 }
 
-// onTurnBoundary records an observed turn boundary and, on a turn END, delivers
-// the next held prompt if there is one.
+// onTurnBoundary acts on an observed turn boundary's EDGE and, on a turn END,
+// delivers the next held prompt if there is one.
 //
 // This is the whole reason the interject sequence is evented. An interject
 // sends an Interrupt and then must NOT submit until the turn has actually
@@ -419,18 +419,46 @@ func (m *Manager) persistQueue(sessionID string, recs []registry.QueuedPrompt) {
 // So the interrupt and the submit are separated by exactly this callback: the
 // TurnEnded the shim really reported.
 //
+// THE RECORD IS NOT WRITTEN ON THE START EDGE HERE. A start binds the turn
+// record earlier, off the durable claim set the SSM's turn ledger just accepted
+// (noteTurnClaims), so nothing user-visible — not the SSM apply, not the
+// WorkspaceState it publishes — can move between "a turn is active" and "this is
+// which turn". A start reaching this function therefore finds the record already
+// bound, and the only thing left for it is the drain notification.
+//
+// The END is the other direction and stays HERE, after the SSM has applied the
+// boundary: releasing the record early would let a scheduled bounce stop
+// holding for a turn the SSM has not finished accounting for, and a bounce that
+// cuts live work is the one failure this lease exists to prevent.
+//
 // Called on the shim read-loop goroutine, so delivery is dispatched to its own
 // goroutine: SubmitPrompt awaits an Ack that only the read loop can deliver, and
 // calling it from inside the read loop would deadlock the session.
 func (m *Manager) onTurnBoundary(d *sessionController, active bool) {
-	m.mu.Lock()
-	d.turnActive = active
 	if active {
+		// The record is normally already bound by the claim projection, and this
+		// adopt is then a NO-OP: an active record keeps the name it has. It is
+		// applied all the same so that an active edge reaching the queue with
+		// nothing bound behind it still leaves a record that says a turn is
+		// running — as `adopted`, the one phase honest about not being able to
+		// name it, never as an active flag with an empty id beside it.
+		m.mu.Lock()
+		before, changed := d.noteTurnAdoptedLocked(true)
 		m.mu.Unlock()
-		// A turn STARTING is a new drain hold. Told after the mutex is released
-		// (the engine re-reads DrainHolds, which takes it).
+		if changed {
+			m.logf("session-controller: turn record ADOPTED at an active edge ws=%q session=%s before=%s after=adopted edge=turn_start — the boundary reached the queue with no durable claim bound, so the turn holds the drain and names nothing",
+				d.workspace, d.sessionID, before)
+		}
+		// A turn STARTING is a new drain hold. Told with the mutex RELEASED (the
+		// engine re-reads DrainHolds, which takes it).
 		m.noteDrainActivity()
 		return
+	}
+	m.mu.Lock()
+	before, changed := d.noteTurnIdleLocked()
+	if changed {
+		m.logf("session-controller: turn record RELEASED ws=%q session=%s before=%s after=idle edge=turn_end — the durable ledger holds no further claim for this session",
+			d.workspace, d.sessionID, before)
 	}
 	// The turn that just ended: was it one a user-commanded stop was delivered
 	// to, and was it the lone prompt running against a paused queue? Both are
@@ -644,7 +672,7 @@ func (m *Manager) beginInterject(d *sessionController, entryID, source string) {
 		m.mu.Unlock()
 		return
 	}
-	if !d.turnActive {
+	if !d.turn.active() {
 		m.logf("session-controller: queue interject entry=%s (%s) is moot — the turn already ended; delivering normally",
 			entryID, source)
 		e.interjecting = true
@@ -656,13 +684,13 @@ func (m *Manager) beginInterject(d *sessionController, entryID, source string) {
 		m.mu.Lock()
 		taken := d.queue.takeInterjecting()
 		// The lock was RELEASED across the publish above, so a TurnStarted can
-		// have landed in that window and d.turnActive can be true again. The
+		// have landed in that window and d.turn.active() can be true again. The
 		// "moot" reasoning that got us here — there is no turn, so delivering
 		// now is safe — no longer holds, and submitting would put the prompt
 		// into a turn that IS running, which is precisely what the queue
 		// exists to prevent. So the turn state is re-verified under the
 		// RE-TAKEN lock before the entry is committed to delivery.
-		if taken != nil && d.paused && !d.turnActive {
+		if taken != nil && d.paused && !d.turn.active() {
 			// The queue is PAUSED, so this delivery is the one prompt running
 			// alone against it and its clean end is what resumes the drain.
 			// Marked as a head jump too, so a boundary arriving before it
@@ -670,7 +698,7 @@ func (m *Manager) beginInterject(d *sessionController, entryID, source string) {
 			taken.headJump = true
 			d.pausedRunner = true
 		}
-		if taken != nil && d.turnActive {
+		if taken != nil && d.turn.active() {
 			// Back to the head, keeping its classification and its interjecting
 			// flag: the entry still wants to go first, and the turn that just
 			// started will deliver it at its TurnEnded via the ordinary

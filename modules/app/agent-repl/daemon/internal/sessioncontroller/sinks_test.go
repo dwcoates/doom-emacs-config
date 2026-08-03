@@ -163,6 +163,9 @@ type fakeApplier struct {
 	alreadyCompletes   []alreadyCompleteCall
 	alreadyCompleteDid bool
 	alreadyCompleteErr error
+	// activeTurnIDsErr fails the durable turn-claim READ, which is what a drain
+	// hold falls back from when it cannot name the turn it is waiting on.
+	activeTurnIDsErr error
 	// synthesizedCauses records one entry per SynthesizeTurnClose call — the
 	// terminal causes the daemon ended a turn claim with when no TurnEnded
 	// could ever arrive for it.
@@ -689,6 +692,16 @@ func (a *fakeApplier) ReconcileTurnHandshake(_ string, _ string, ids []string, l
 		a.turns = nil
 	}
 	return before, append([]string(nil), a.turns...), closed, nil
+}
+
+// ActiveTurnIDs reads the durable claim set, exactly as the SSM's does.
+func (a *fakeApplier) ActiveTurnIDs(_ string, _ string) ([]string, error) {
+	a.reconcMutex.Lock()
+	defer a.reconcMutex.Unlock()
+	if a.activeTurnIDsErr != nil {
+		return nil, a.activeTurnIDsErr
+	}
+	return append([]string(nil), a.turns...), nil
 }
 
 // SynthesizeTurnClose ends every active claim, exactly as the SSM's does, and

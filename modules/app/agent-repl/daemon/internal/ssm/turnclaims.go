@@ -674,6 +674,29 @@ func recordTurnEnd(
 	return false, nil
 }
 
+// ActiveTurnIDs reports every turn claim the session holds OPEN, in claim order.
+//
+// It is the READ half of the ledger the boundary resolvers write, and it exists
+// for one caller: the scheduled shutdown's drain hold, which must name the turn
+// it is waiting on even when the daemon committed to the prompt before it
+// observed the turn's start (sessioncontroller, nameAcceptedHold). Reading the
+// ledger rather than process memory is what lets that hold be named from the
+// same authority the log and the webapp name it from.
+//
+// A workspace or session that holds nothing answers with an empty slice and no
+// error: holding nothing is an answer, not a failure.
+func (m *Manager) ActiveTurnIDs(workspace, claimantSessionID string) ([]string, error) {
+	if workspace == "" || claimantSessionID == "" {
+		err := fmt.Errorf("ssm: reading active turn claims requires workspace and claimant session id")
+		m.logf("ssm: turn ledger decision=reject_validation operation=active_turn_ids workspace=%q claimant_session=%q error=%v",
+			workspace, claimantSessionID, err)
+		return nil, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return activeTurnIDs(m.db, workspace, claimantSessionID)
+}
+
 func activeTurnIDs(q interface {
 	Query(query string, args ...any) (*sql.Rows, error)
 }, workspace, claimantSessionID string) ([]string, error) {

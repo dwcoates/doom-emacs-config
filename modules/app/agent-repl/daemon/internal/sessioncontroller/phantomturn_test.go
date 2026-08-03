@@ -35,7 +35,7 @@ func (h *queueHarness) turnActive() bool {
 	d := h.controller()
 	h.m.mu.Lock()
 	defer h.m.mu.Unlock()
-	return d.turnActive
+	return d.turn.active()
 }
 
 // capturedLog is a concurrency-safe daemon log sink for the tests that assert
