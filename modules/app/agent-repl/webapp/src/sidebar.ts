@@ -655,7 +655,12 @@ export class WorkspaceSidebar {
   constructor(mount: HTMLElement, opts: WorkspaceSidebarOptions) {
     this.mount = mount;
     this.httpBase = opts.httpBase;
-    this.fetchFn = opts.fetchFn ?? fetch;
+    // Bound to the window, NOT stored bare: post() calls this through
+    // `this.fetchFn(...)`, which would hand fetch the sidebar as its `this`,
+    // and WKWebView rejects that outright ("Can only call Window.fetch on
+    // instances of Window") — every POSTing gesture dies in the real webview
+    // while a this-insensitive test fetch keeps passing.
+    this.fetchFn = opts.fetchFn ?? fetch.bind(globalThis);
     this.now = opts.now ?? Date.now;
     // Default to a no-op park: a bare-builder test (or a bare-browser
     // session with no feed handle wired) reveals the rail without a feed

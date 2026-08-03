@@ -835,6 +835,32 @@ describe("WorkspaceSidebar", () => {
     ]);
   });
 
+  it("never hands the sidebar itself to the default fetch as its `this`", () => {
+    // Arrange — no injected fetchFn, so the constructor takes its default off
+    // the global. WKWebView's fetch is a real Window method and rejects any
+    // `this` that is not the window, so the one thing the default must never
+    // do is arrive carrying the sidebar (which `this.fetchFn(...)` would).
+    const seen: unknown[] = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = function (this: unknown): Promise<Response> {
+      seen.push(this);
+      return Promise.resolve({ ok: true, status: 200 } as Response);
+    };
+    cleanups.push(() => {
+      globalThis.fetch = original;
+    });
+    const mount = document.createElement("nav");
+    const sidebar = new WorkspaceSidebar(mount, { httpBase: "http://daemon" });
+    sidebar.update(roster());
+
+    // Act
+    click(mount.querySelector(".repo-head")!);
+
+    // Assert
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).not.toBe(sidebar);
+  });
+
   it("POSTs a fold asking to unfold an already-folded repo", () => {
     // Arrange
     const { mount, sidebar, calls } = harness();
