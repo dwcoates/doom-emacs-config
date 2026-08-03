@@ -1328,15 +1328,6 @@ func (c *consumer) startFailedUUID() string {
 	return "start_failed:" + c.sessionID
 }
 
-// historyMissingUUID is the stable card identity for the note about ONE
-// dropped vendor conversation. Keyed by the dropped uuid rather than by the
-// session, because that is what the note is about — and because the same
-// session re-reporting the same loss must reconcile in place rather than
-// accumulate.
-func (c *consumer) historyMissingUUID(droppedUUID string) string {
-	return "history_missing:" + droppedUUID
-}
-
 // resync replays the retained conversation deltas from fromSeq (0 = from the
 // start of the retained window) via the normal PushConversationDelta path. It
 // is idempotent by construction: the frontends reconcile by through_seq/uuid,

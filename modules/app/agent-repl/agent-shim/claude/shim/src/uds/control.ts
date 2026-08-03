@@ -44,7 +44,7 @@ export interface SdkControlTarget {
     text: string;
     origin: string;
     permissionMode?: string;
-  }): void;
+  }): Promise<void>;
   /**
    * Interrupt the current turn via the SDK `interrupt()`.
    *
@@ -102,11 +102,11 @@ export class ControlDispatch {
     this.newRequestId = opts.newRequestId ?? randomUUID;
   }
 
-  /** Handle a SubmitPrompt; push into the SDK turn and Ack (Nack on throw). */
-  handleSubmitPrompt(msg: SubmitPrompt): Ack | Nack {
+  /** Handle a SubmitPrompt; push into the SDK turn and Ack (Nack on rejection). */
+  async handleSubmitPrompt(msg: SubmitPrompt): Promise<Ack | Nack> {
     LOGGER.log({ request_id: msg.requestId, origin: msg.origin, text_length: msg.text.length, permission_mode: msg.permissionMode || undefined }, "dispatching SubmitPrompt to SDK session");
     try {
-      this.target.submitPrompt({
+      await this.target.submitPrompt({
         requestId: msg.requestId,
         text: msg.text,
         origin: msg.origin,

@@ -57,6 +57,12 @@ import { TranscriptLineSchema } from "../../../../../proto/gen/ts/agentshim/data
 import type { ApiUserMessage } from "../../../../../proto/gen/ts/agentshim/data/v1/tools_pb.js";
 import { bindLog, setClaudeSessionId } from "./log.js";
 import { normalizeModel } from "../model.js";
+import { logAssistantApiResponseUsage } from "../usage-log.js";
+import {
+  fiveHourUsageSample,
+  type FiveHourUsageSample,
+  type SubscriptionUsageResponse,
+} from "../subscription-usage.js";
 import {
   DaemonHello,
   DegradedState,
@@ -82,6 +88,14 @@ import {
 
 const COMPONENT = "uds-session";
 const LOGGER = bindLog({ component: COMPONENT, operation: "shim.uds-session.lifecycle" });
+
+function completionLatch(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
 
 export interface UdsSessionDeps {
   sessionId: string;
@@ -115,11 +129,11 @@ export interface UdsSessionDeps {
    * Defaults to "default", which is what the argv parser itself defaults to.
    */
   permissionMode?: PermissionMode;
-  /** Construct the SDK query over the streaming input iterable. */
+  /** Construct the one SDK query that this UDS session owns. */
   createQuery: (
     prompt: AsyncIterable<SdkUserMessageLike>,
     canUseTool: CanUseToolLike,
-  ) => QueryLike;
+  ) => UdsQuery;
   /** Request-id minter for permission round-trips; defaults to randomUUID. */
   newRequestId?: () => string;
   /** Heartbeat cadence on both UDS connections; 0 disables. Test injects 0. */
@@ -134,12 +148,44 @@ export interface UdsSessionDeps {
   replayIdleMs?: number;
 }
 
+/**
+ * The query and its sole process-cleanup capability belong to one UDS session.
+ *
+ * The Agent SDK exposes cancellation through an AbortController rather than a
+ * Query.close() method. Keeping that controller behind this handle prevents a
+ * daemon reconnect, a turn result, or any individual control request from
+ * acquiring a second way to end or replace the streaming query.
+ */
+export interface UdsQuery {
+  query: QueryLike;
+  /** Read Claude subscription rate-limit state through the live query. */
+  subscriptionUsage(): Promise<SubscriptionUsageResponse>;
+  abort(): void;
+}
+
+/** A live SDK stream ended even though this shim did not begin shutdown. */
+export class UnexpectedSdkStreamTerminationError extends Error {
+  constructor(
+    readonly terminationKind: "iterator_eof" | "iterator_throw",
+    cause?: unknown,
+  ) {
+    super(`SDK stream ${terminationKind === "iterator_eof" ? "ended" : "failed"} outside intentional shim shutdown`,
+      cause === undefined ? undefined : { cause });
+    this.name = "UnexpectedSdkStreamTerminationError";
+  }
+}
+
+/** Errors logged by their owning lifecycle layer must not be logged again at process exit. */
+export function isUnexpectedSdkStreamTerminationError(err: unknown): err is UnexpectedSdkStreamTerminationError {
+  return err instanceof UnexpectedSdkStreamTerminationError;
+}
+
 export class UdsSession {
   private readonly input = new AsyncQueue<SdkUserMessageLike>();
   private readonly control: ControlDispatch;
   private readonly store: StoreClient;
   private readonly server: SessionServer;
-  private query: QueryLike | null = null;
+  private query: UdsQuery | null = null;
   /**
    * Ordered identities of accepted prompts awaiting SDK results.
    *
@@ -160,6 +206,10 @@ export class UdsSession {
    * tail never sees an unproved completion.
    */
   private readonly activeTurnStarts = new Map<string, Event>();
+  /** Five-hour quota observations captured before each prompt reached the SDK. */
+  private readonly turnStartUsage = new Map<string, FiveHourUsageSample>();
+  /** Serialize quota reads so adjacent turn boundaries cannot be observed out of order. */
+  private usageSampleTail: Promise<void> = Promise.resolve();
   /**
    * Result-correlated turns whose TurnEnded batch has not received its durable
    * StoreWriteAck yet. They remain handshake claims across a rotation bounce:
@@ -167,7 +217,12 @@ export class UdsSession {
    * ShimHello says idle while the daemon has not observed any end.
    */
   private readonly pendingTurnEndIds: string[] = [];
-  private closed = false;
+  private intentionalShutdownReason: string | null = null;
+  private readonly intentionalShutdownStarted = completionLatch();
+  private shutdownPromise: Promise<void> | null = null;
+  private resourcesClosePromise: Promise<void> | null = null;
+  private readonly runFinished = completionLatch();
+  private pumpStarted = false;
   /** Idle bound for a bounded replay's store subscription (see deps). */
   private readonly replayIdleMs: number;
   /**
@@ -217,7 +272,9 @@ export class UdsSession {
     this.effectivePermissionMode = deps.permissionMode ?? "default";
     LOGGER.log({ agent_repl_session_id: deps.sessionId, uds_socket: deps.udsSocketPath, store_socket: deps.storeSocketPath, session_source: deps.sessionSource, store_key_known: this.storeKeyKnown, permission_mode: this.effectivePermissionMode }, "constructed UDS shim session");
     const target: SdkControlTarget = {
-      submitPrompt: ({ requestId, text, permissionMode }): void => {
+      submitPrompt: async ({ requestId, text, permissionMode }): Promise<void> => {
+        const usage = await this.captureFiveHourUsage("turn_start", requestId);
+        this.turnStartUsage.set(requestId, usage);
         this.activeTurnIds.push(requestId);
         const content: ContentBlock[] = [{ type: "text", text }];
         this.input.push({
@@ -246,8 +303,8 @@ export class UdsSession {
         // submit. Accepting the prompt IS the turn starting, so say so here.
         this.emitTurnStarted(requestId, text);
         // A prompt-scoped permission-mode override rides on SubmitPrompt. Apply
-        // it to the live query (fire-and-forget: the sync Ack does not wait on
-        // the SDK).
+        // it to the live query. The receipt waits for quota sampling and prompt
+        // admission, but not for this independent mode mutation.
         //
         // BOTH failure paths report DegradedState, not just a log line. The
         // user picked a mode; if it did not take, the session is running under
@@ -258,7 +315,7 @@ export class UdsSession {
         // it here.
         if (permissionMode !== undefined && permissionMode !== "") {
           if (isSwitchablePermissionMode(permissionMode)) {
-            void this.query?.setPermissionMode(permissionMode as PermissionMode).catch((err: unknown) => {
+            void this.query?.query.setPermissionMode(permissionMode as PermissionMode).catch((err: unknown) => {
               this.reportDegraded(
                 "claude-shim-permission-mode",
                 `permission mode "${permissionMode}" was rejected, session still in the previous mode: ${errMsg(err)}`,
@@ -305,7 +362,7 @@ export class UdsSession {
             "interrupt could not be delivered: no SDK query is constructed for this session");
           return InterruptOutcome.FAILED;
         }
-        void this.query.interrupt()
+        void this.query.query.interrupt()
           .then((receipt) => {
             // SDK >= 0.3.205 answers with an interrupt receipt. The anomaly
             // wording is shared with the stdio path (describeInterruptSurvivors)
@@ -333,7 +390,7 @@ export class UdsSession {
           throw new Error("set-model cannot run before the SDK query exists");
         }
         try {
-          await this.query.setModel(normalized);
+          await this.query.query.setModel(normalized);
         } catch (err) {
           // The SDK rejected the mutation.  Return the selection this shim
           // actually knows, so the daemon can reset the UI from authority.
@@ -486,24 +543,45 @@ export class UdsSession {
    * stream. Returns the pump promise (resolves when the SDK stream ends).
    */
   async start(): Promise<void> {
-    LOGGER.log({ agent_repl_session_id: this.deps.sessionId, store_socket: this.deps.storeSocketPath, daemon_socket: this.deps.udsSocketPath }, "starting UDS shim session dependencies");
-    this.query = this.deps.createQuery(this.input, this.canUseTool);
-    // The store round-trip feed: merged, seq-stamped events go to the daemon.
-    this.store.onMerged((evt) => {
-      this.logUserPromptForward(evt);
-      this.server.sendEvent(evt);
-    });
-    // Honest sad path: a store outage becomes an Event(DegradedState) forwarded
-    // to the daemon (StoreClient has already loud-logged each dropped event).
-    this.store.onDegraded((report) => this.server.sendEvent(this.degradedEvent(report)));
-    await this.store.connect();
-    LOGGER.log({ agent_repl_session_id: this.deps.sessionId, store_socket: this.deps.storeSocketPath }, "store producer connection established");
-    // Readiness is asserted from the handshake hook wired in the
-    // constructor, not here: connect() resolves on the DIAL, and an event
-    // sent before the DaemonHello would be dropped.
-    await this.server.connect();
-    LOGGER.log({ agent_repl_session_id: this.deps.sessionId, daemon_socket: this.deps.udsSocketPath }, "daemon connection established; awaiting bring-up gate");
-    return this.pump();
+    try {
+      LOGGER.log({ agent_repl_session_id: this.deps.sessionId, store_socket: this.deps.storeSocketPath, daemon_socket: this.deps.udsSocketPath }, "starting UDS shim session dependencies");
+      if (this.query !== null) {
+        throw new Error("UDS session cannot construct a second SDK query");
+      }
+      this.query = this.deps.createQuery(this.input, this.canUseTool);
+      // The store round-trip feed: merged, seq-stamped events go to the daemon.
+      this.store.onMerged((evt) => {
+        this.logUserPromptForward(evt);
+        this.server.sendEvent(evt);
+      });
+      // Honest sad path: a store outage becomes an Event(DegradedState) forwarded
+      // to the daemon (StoreClient has already loud-logged each dropped event).
+      this.store.onDegraded((report) => this.server.sendEvent(this.degradedEvent(report)));
+      await this.store.connect();
+      LOGGER.log({ agent_repl_session_id: this.deps.sessionId, store_socket: this.deps.storeSocketPath }, "store producer connection established");
+      // Readiness is asserted from the handshake hook wired in the
+      // constructor, not here: connect() resolves on the DIAL, and an event
+      // sent before the DaemonHello would be dropped.
+      if (this.intentionalShutdownReason !== null) return;
+      await Promise.race([
+        this.server.connect(),
+        this.intentionalShutdownStarted.promise,
+      ]);
+      LOGGER.log({ agent_repl_session_id: this.deps.sessionId, daemon_socket: this.deps.udsSocketPath }, "daemon connection established; awaiting bring-up gate");
+      if (this.intentionalShutdownReason !== null) return;
+      this.pumpStarted = true;
+      await this.pump();
+    } catch (err) {
+      if (this.intentionalShutdownReason !== null) return;
+      if (this.pumpStarted) throw err;
+      this.control.cancelAll("startup_failure");
+      this.input.end();
+      this.query?.abort();
+      await this.closeResources();
+      throw err;
+    } finally {
+      this.runFinished.resolve();
+    }
   }
 
   /**
@@ -587,7 +665,7 @@ export class UdsSession {
     // query, for one, ignores argv entirely — so the gate STATES the posture on
     // the live query rather than inferring it from the command line.
     try {
-      await this.query.setPermissionMode(mode);
+      await this.query.query.setPermissionMode(mode);
     } catch (err) {
       this.refuseBringUp(`the handshake's permission_mode "${mode}" was rejected by the CLI: ${errMsg(err)}`);
       return false;
@@ -641,7 +719,7 @@ export class UdsSession {
     if (this.query === null) {
       throw new Error("model catalog cannot publish before the SDK query exists");
     }
-    void this.query.supportedModels()
+    void this.query.query.supportedModels()
       .then((models) => {
         const options = models.map((option) => ({ ...option, value: normalizeModel(option.value) }));
         const malformed = options.find((option) => option.value === "");
@@ -729,36 +807,192 @@ export class UdsSession {
    * ends the pump), and closes both UDS connections. Idempotent.
    */
   async shutdown(reason = "shutdown"): Promise<void> {
-    if (this.closed) return;
-    this.closed = true;
-    LOGGER.log({ agent_repl_session_id: this.deps.sessionId }, `shutdown (${reason})`);
-    this.control.cancelAll(reason);
-    this.input.end();
-    await this.server.close();
-    this.store.close();
+    if (this.shutdownPromise !== null) return this.shutdownPromise;
+    this.intentionalShutdownReason = reason;
+    this.intentionalShutdownStarted.resolve();
+    this.shutdownPromise = this.finishIntentionalShutdown(reason);
+    return this.shutdownPromise;
   }
 
   private async pump(): Promise<void> {
     LOGGER.log({ agent_repl_session_id: this.deps.sessionId }, "starting SDK stream pump");
     try {
-      for await (const msg of this.query!) {
+      for await (const msg of this.query!.query) {
         this.routeSdkMessage(msg);
       }
     } catch (err) {
-      LOGGER.log({ level: "error", agent_repl_session_id: this.deps.sessionId, cause: err }, `SDK stream failed: ${errMsg(err)}`);
-      // A dead SDK turn is honest downtime: report it to the daemon, then tear
-      // the session down (unlike a daemon disconnect, the turn itself is gone).
-      this.server.sendEvent(this.degradedEvent(create(DegradedStateSchema, {
-        component: "claude-shim-sdk",
-        reason: `SDK stream failed: ${errMsg(err)}`,
-        droppedCount: 0n,
-        recovered: false,
-      })));
-      await this.shutdown("sdk_error");
+      if (this.intentionalShutdownReason !== null) {
+        LOGGER.log({ agent_repl_session_id: this.deps.sessionId, shutdown_reason: this.intentionalShutdownReason }, "SDK stream stopped during intentional shim shutdown");
+        return;
+      }
+      await this.failUnexpectedSdkTermination("iterator_throw", err);
+    }
+    if (this.intentionalShutdownReason !== null) {
+      LOGGER.log({ agent_repl_session_id: this.deps.sessionId, shutdown_reason: this.intentionalShutdownReason }, "SDK stream completed during intentional shim shutdown");
       return;
     }
-    LOGGER.log({ agent_repl_session_id: this.deps.sessionId }, `SDK stream ended`);
-    await this.shutdown("sdk_end");
+    await this.failUnexpectedSdkTermination("iterator_eof");
+  }
+
+  /** End the one owned SDK query, then wait until its pump has stopped. */
+  private async finishIntentionalShutdown(reason: string): Promise<void> {
+    LOGGER.log({ agent_repl_session_id: this.deps.sessionId, shutdown_reason: reason, query_constructed: this.query !== null }, "beginning intentional shim shutdown");
+    this.control.cancelAll(reason);
+    this.input.end();
+    this.query?.abort();
+    await this.closeResources();
+    await this.runFinished.promise;
+    LOGGER.log({ agent_repl_session_id: this.deps.sessionId, shutdown_reason: reason }, "intentional shim shutdown complete");
+  }
+
+  /** Close non-SDK resources once regardless of which terminal path won. */
+  private closeResources(): Promise<void> {
+    if (this.resourcesClosePromise === null) {
+      this.resourcesClosePromise = (async (): Promise<void> => {
+        try {
+          await this.server.close();
+        } finally {
+          this.store.close();
+        }
+      })();
+    }
+    return this.resourcesClosePromise;
+  }
+
+  /**
+   * The SDK ended while this shim remained live. The query cannot be replaced:
+   * continuing would sever the vendor conversation and destroy cache reuse.
+   */
+  private async failUnexpectedSdkTermination(
+    terminationKind: UnexpectedSdkStreamTerminationError["terminationKind"],
+    cause?: unknown,
+  ): Promise<never> {
+    const error = new UnexpectedSdkStreamTerminationError(terminationKind, cause);
+    const claudeSessionId = this.store.vendorSessionId();
+    LOGGER.log({
+      level: "error",
+      agent_repl_session_id: this.deps.sessionId,
+      ...(claudeSessionId !== "" ? { claude_session_id: claudeSessionId } : {}),
+      store_key: this.store.storeSessionId(),
+      termination_kind: terminationKind,
+      intentional: false,
+      active_turn_ids: this.activeTurnIds,
+      input_ended: this.input.isEnded,
+      query_aborted: false,
+      resume_requested: this.deps.sessionSource === SessionSource.RESUME,
+      cause,
+    }, "SDK stream terminated outside intentional shim shutdown; exiting nonzero");
+    this.server.sendEvent(this.degradedEvent(create(DegradedStateSchema, {
+      component: "claude-shim-sdk",
+      reason: error.message,
+      droppedCount: 0n,
+      recovered: false,
+    })));
+    await this.closeResources();
+    throw error;
+  }
+
+  /**
+   * Read and log the account's five-hour quota at one turn boundary.
+   *
+   * Reads are serialized because the metric belongs to the account rather
+   * than the request. A turn-end read queued before the next turn-start read
+   * must execute first or the experiment would attribute the later state to
+   * the wrong boundary.
+   */
+  private captureFiveHourUsage(
+    phase: "turn_start" | "turn_end",
+    turnId: string,
+    startUsage?: FiveHourUsageSample,
+  ): Promise<FiveHourUsageSample> {
+    const capture = this.usageSampleTail.then(async (): Promise<FiveHourUsageSample> => {
+      const startedAt = performance.now();
+      try {
+        if (this.query === null) throw new Error("five-hour usage cannot be sampled before the SDK query exists");
+        const response = await this.query.subscriptionUsage();
+        const sample = fiveHourUsageSample(response, performance.now() - startedAt);
+        this.logFiveHourUsage(phase, turnId, sample, startUsage);
+        return sample;
+      } catch (cause) {
+        const sample: FiveHourUsageSample = {
+          measurementAvailable: false,
+          utilization: null,
+          resetsAt: null,
+          subscriptionType: null,
+          rateLimitsAvailable: false,
+          sampleLatencyMs: performance.now() - startedAt,
+          unavailableReason: "sample_failed",
+        };
+        this.logFiveHourUsage(phase, turnId, sample, startUsage, cause);
+        return sample;
+      }
+    });
+    // capture handles and logs every failure, so this tail cannot reject and
+    // poison later boundary reads.
+    this.usageSampleTail = capture.then(() => undefined);
+    return capture;
+  }
+
+  /** Emit one information-dense, machine-queryable turn-boundary record. */
+  private logFiveHourUsage(
+    phase: "turn_start" | "turn_end",
+    turnId: string,
+    sample: FiveHourUsageSample,
+    startUsage?: FiveHourUsageSample,
+    cause?: unknown,
+  ): void {
+    const claudeSessionId = this.store.vendorSessionId();
+    const common = {
+      agent_repl_session_id: this.deps.sessionId,
+      ...(claudeSessionId === "" ? {} : { claude_session_id: claudeSessionId }),
+      request_id: turnId,
+      turn_id: turnId,
+      phase,
+      measurement_available: sample.measurementAvailable,
+      five_hour_utilization: sample.utilization,
+      five_hour_resets_at: sample.resetsAt,
+      subscription_type: sample.subscriptionType,
+      rate_limits_available: sample.rateLimitsAvailable,
+      sample_latency_ms: sample.sampleLatencyMs,
+      measurement_unavailable_reason: sample.unavailableReason,
+    };
+    if (phase === "turn_start") {
+      LOGGER.log({
+        ...common,
+        ...(cause === undefined ? {} : { level: "error", cause }),
+      }, cause === undefined ? "captured five-hour utilization at turn start" : "failed to capture five-hour utilization at turn start");
+      return;
+    }
+
+    const sameWindow = startUsage?.resetsAt !== null
+      && startUsage?.resetsAt !== undefined
+      && sample.resetsAt !== null
+      && startUsage.resetsAt === sample.resetsAt;
+    const deltaAvailable = startUsage?.measurementAvailable === true
+      && sample.measurementAvailable
+      && sameWindow;
+    let deltaUnavailableReason: string | undefined;
+    if (!deltaAvailable) {
+      if (startUsage === undefined) deltaUnavailableReason = "turn_start_sample_missing";
+      else if (!startUsage.measurementAvailable) deltaUnavailableReason = "turn_start_measurement_unavailable";
+      else if (!sample.measurementAvailable) deltaUnavailableReason = "turn_end_measurement_unavailable";
+      else deltaUnavailableReason = "five_hour_window_changed_or_unknown";
+    }
+    LOGGER.log({
+      ...common,
+      ...(cause === undefined ? {} : { level: "error", cause }),
+      start_measurement_available: startUsage?.measurementAvailable ?? false,
+      start_five_hour_utilization: startUsage?.utilization ?? null,
+      end_five_hour_utilization: sample.utilization,
+      start_five_hour_resets_at: startUsage?.resetsAt ?? null,
+      end_five_hour_resets_at: sample.resetsAt,
+      same_five_hour_window: sameWindow,
+      five_hour_utilization_delta_available: deltaAvailable,
+      five_hour_utilization_delta: deltaAvailable
+        ? sample.utilization! - startUsage!.utilization!
+        : null,
+      delta_unavailable_reason: deltaUnavailableReason,
+    }, cause === undefined ? "captured five-hour utilization at turn end" : "failed to capture five-hour utilization at turn end");
   }
 
   /**
@@ -778,6 +1012,9 @@ export class UdsSession {
       }
       return;
     }
+    if (msg.type === "assistant") {
+      logAssistantApiResponseUsage(msg, this.deps.sessionId);
+    }
     // A result closes the oldest accepted input turn. Claim its id BEFORE
     // conversion so the TurnEnded payload and envelope carry one correlation.
     // A result without a claim is an invariant violation: persist the vendor
@@ -795,6 +1032,9 @@ export class UdsSession {
         turnStart = this.activeTurnStarts.get(turnId);
         this.activeTurnStarts.delete(turnId);
         this.pendingTurnEndIds.push(turnId);
+        const startUsage = this.turnStartUsage.get(turnId);
+        this.turnStartUsage.delete(turnId);
+        void this.captureFiveHourUsage("turn_end", turnId, startUsage);
       }
     }
     // The direct readiness SessionStarted closes the lifecycle gate before the

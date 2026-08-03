@@ -90,6 +90,14 @@ func TestShimSpawnWatchTreatsAnExitAfterConnectingAsNoSpawnFailure(t *testing.T)
 		t.Fatal("DiedBeforeConnect fired for a shim that had already connected")
 	default:
 	}
+	select {
+	case exit := <-w.DiedAfterConnect("s1"):
+		if exit.ExitCode != 1 || !strings.Contains(exit.Description, "exit") {
+			t.Fatalf("post-connect exit = %#v, want exit code and description", exit)
+		}
+	default:
+		t.Fatal("DiedAfterConnect did not publish the connected shim's exit")
+	}
 }
 
 func TestShimSpawnWatchAcceptsTheListenerProbeAsProofOfConnection(t *testing.T) {
@@ -172,7 +180,7 @@ func TestShimSpawnWatchReportsNothingForASessionItNeverSpawned(t *testing.T) {
 	state := w.SpawnState("survivor")
 
 	// Assert
-	if state.Spawned || w.DiedBeforeConnect("survivor") != nil {
+	if state.Spawned || w.DiedBeforeConnect("survivor") != nil || w.DiedAfterConnect("survivor") != nil {
 		t.Fatalf("SpawnState = %#v / died channel non-nil for an unspawned session", state)
 	}
 }
@@ -275,7 +283,7 @@ func TestShimConnSourceStaysInertWithNoSpawnWatchBound(t *testing.T) {
 	state := src.SpawnState("s1")
 
 	// Assert
-	if state != (shimclient.ShimSpawnState{}) || src.DiedBeforeConnect("s1") != nil {
+	if state != (shimclient.ShimSpawnState{}) || src.DiedBeforeConnect("s1") != nil || src.DiedAfterConnect("s1") != nil {
 		t.Fatalf("unbound ShimConnSource reported %#v", state)
 	}
 }

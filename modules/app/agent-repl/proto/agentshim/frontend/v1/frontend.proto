@@ -556,6 +556,9 @@ message SessionView {
   // The SDK-published set this session can deliberately select.  A frontend
   // only renders these choices; it never invents or owns a model selection.
   repeated ModelOption model_options = 21;
+  // Cumulative token usage across the session's main agent and every
+  // dispatched descendant subagent.
+  SessionTokenUtilization token_utilization = 22;
 }
 
 message ModelOption {
@@ -679,6 +682,382 @@ message ConversationItem {
     SkillBodyItem skill_body = 34;  // Additive (skill card)
     SessionCommandItem session_command = 35;  // Additive (session command)
   }
+  // Complete API-response usage records associated with this conversation
+  // item. A record may be absent when the item carries no API response.
+  repeated TokenUtilization token_utilization = 36;
+}
+
+// Complete token accounting for one Claude SDK API response.
+//
+// Each instance is one response-level measurement rather than a session
+// aggregate, which preserves request correlation, response ownership, and
+// the vendor's complete usage vocabulary.
+message TokenUtilization {
+  // The durable agent-repl session that owns this API activity.
+  string agent_repl_session_id = 1;
+  // The authoritative Claude conversation UUID that produced this API
+  // activity.
+  string claude_session_id = 2;
+  // The accepted user-prompt turn enclosing this API activity. Empty only
+  // when historical source data cannot identify the enclosing turn.
+  string root_turn_id = 3;
+  // The vendor request identifier used to correlate this record with a
+  // request-level diagnostic.
+  string api_request_id = 4;
+  // The Messages API response identifier used as the stable deduplication
+  // key for this measurement.
+  string api_message_id = 5;
+  // The model that actually produced this response.
+  string model = 6;
+  // Identifies the only agent loop that owns this API response.
+  oneof actor {
+    // Attributes the response to the session's main agent loop.
+    TokenUtilizationMainAgent main_agent = 10;
+    // Attributes the response to one dispatched subagent invocation.
+    TokenUtilizationSubagent subagent = 11;
+  }
+  // The complete usage object reported by the Claude SDK for this response.
+  TokenUsage usage = 20;
+  // Timing measured for this specific Messages API response. Absent when the
+  // source is a historical transcript without corresponding stream events.
+  TokenResponseTiming response_timing = 21;
+}
+
+// Identifies usage produced by the session's main agent loop.
+message TokenUtilizationMainAgent {}
+
+// Identifies usage produced by one dispatched subagent invocation and its
+// ownership lineage.
+message TokenUtilizationSubagent {
+  // The vendor agent identifier supplied by the live stream or transcript.
+  string agent_id = 1;
+  // The Agent tool call that owns this subagent when the vendor does not
+  // supply an agent identifier.
+  string parent_tool_use_id = 2;
+  // The owning agent identifier when nested-agent provenance supplies it.
+  string parent_agent_id = 3;
+  // The configured subagent designation, such as a research-agent type.
+  string subagent_type = 4;
+  // The task description associated with the dispatched subagent.
+  string task_description = 5;
+}
+
+// Latency and generation timing for one Messages API response, correlated by
+// TokenUtilization.api_message_id.
+message TokenResponseTiming {
+  // Elapsed time from API request dispatch until the message_start event.
+  // This is the SDK's ttft_ms measurement.
+  optional int64 time_to_first_token_ms = 1;
+
+  // Elapsed time from message_start until the completed assistant response
+  // carrying the usage record. This measures model output generation and
+  // excludes request latency, tool execution, hooks, and subagent waiting.
+  optional int64 output_generation_duration_ms = 2;
+}
+
+// Complete token and billing usage reported by the Claude SDK for one API
+// response.
+message TokenUsage {
+  // Tokens charged as uncached input at the base input rate.
+  int64 input_tokens = 1;
+  // Generated tokens, including extended thinking where the API includes it.
+  int64 output_tokens = 2;
+  // Prompt-prefix tokens served from the prompt cache.
+  int64 cache_read_input_tokens = 3;
+  // Prompt-prefix tokens written into the prompt cache.
+  int64 cache_creation_input_tokens = 4;
+  // Cache writes split by billing TTL when the API supplies the breakdown.
+  TokenCacheCreation cache_creation = 5;
+  // Billable server-side tool requests reported by the API.
+  TokenServerToolUse server_tool_use = 6;
+  // The serving tier reported by the API, such as standard or priority.
+  string service_tier = 7;
+  // The inference speed mode reported by the API.
+  string speed = 8;
+  // The geographic inference region reported by the API.
+  string inference_geo = 9;
+  // Output-token categories reported by the API.
+  TokenOutputDetails output_details = 10;
+  // Server-side sampling, compaction, advisor, and fallback iterations that
+  // contributed to this response.
+  repeated TokenUsageIteration iterations = 11;
+  // Diagnosed prompt-cache miss information when diagnostics were requested.
+  TokenCacheDiagnostic cache_diagnostic = 12;
+  // Cache ratios derived from the authoritative token counters. Absent when
+  // the total prompt input is zero.
+  TokenCacheRates cache_rates = 13;
+  // The API's fallback-credit billing outcome.
+  google.protobuf.Struct fallback_credit = 14;
+  // Usage fields introduced by the API before this typed contract learns
+  // them. Every populated key must also be logged loudly.
+  google.protobuf.Struct unmodeled_usage = 15;
+}
+
+// Cache-creation tokens split by the prompt-cache TTL used for billing.
+message TokenCacheCreation {
+  // Tokens written with the five-minute prompt-cache TTL.
+  int64 ephemeral_5m_input_tokens = 1;
+  // Tokens written with the one-hour prompt-cache TTL.
+  int64 ephemeral_1h_input_tokens = 2;
+}
+
+// Billable server-side tool request counters reported by the API.
+message TokenServerToolUse {
+  // Web-search requests performed by the server.
+  int64 web_search_requests = 1;
+  // Web-fetch requests performed by the server.
+  int64 web_fetch_requests = 2;
+}
+
+// Output-token categories reported by the API.
+message TokenOutputDetails {
+  // Output tokens consumed by internal reasoning, including thinking
+  // delimiters.
+  int64 thinking_tokens = 1;
+}
+
+// Derived prompt-cache rates calculated from the authoritative token
+// counters on one usage record or a cumulative usage total.
+message TokenCacheRates {
+  // Total prompt input calculated as uncached input plus cache creation plus
+  // cache reads.
+  int64 total_prompt_input_tokens = 1;
+  // Cache-read tokens divided by total prompt input.
+  double cache_hit_rate = 2;
+  // Cache-creation tokens divided by total prompt input.
+  double cache_write_rate = 3;
+  // Uncached input tokens divided by total prompt input.
+  double uncached_input_rate = 4;
+}
+
+// One server-side iteration that contributed to a complete API response.
+message TokenUsageIteration {
+  // Identifies the iteration kind without flattening fields that have
+  // different model-identity semantics.
+  oneof iteration {
+    // An ordinary model sampling iteration.
+    TokenUsageIterationSampling sampling = 1;
+    // A context-compaction iteration that has no SDK model identity.
+    TokenUsageIterationCompaction compaction = 2;
+    // An advisor-model sampling iteration.
+    TokenUsageIterationAdvisor advisor = 3;
+    // A fallback-model sampling iteration.
+    TokenUsageIterationFallback fallback = 4;
+  }
+}
+
+// Token counters produced by an ordinary model sampling iteration.
+message TokenUsageIterationSampling {
+  // Tokens charged as uncached input for this iteration.
+  int64 input_tokens = 1;
+  // Tokens generated by this iteration.
+  int64 output_tokens = 2;
+  // Prompt-prefix tokens served from cache for this iteration.
+  int64 cache_read_input_tokens = 3;
+  // Prompt-prefix tokens written into cache for this iteration.
+  int64 cache_creation_input_tokens = 4;
+  // Cache writes split by TTL for this iteration.
+  TokenCacheCreation cache_creation = 5;
+  // The model identity reported for this sampling iteration.
+  string model = 6;
+}
+
+// Token counters produced by a context-compaction iteration.
+message TokenUsageIterationCompaction {
+  // Tokens charged as uncached input for this iteration.
+  int64 input_tokens = 1;
+  // Tokens generated by this iteration.
+  int64 output_tokens = 2;
+  // Prompt-prefix tokens served from cache for this iteration.
+  int64 cache_read_input_tokens = 3;
+  // Prompt-prefix tokens written into cache for this iteration.
+  int64 cache_creation_input_tokens = 4;
+  // Cache writes split by TTL for this iteration.
+  TokenCacheCreation cache_creation = 5;
+}
+
+// Token counters produced by an advisor-model sampling iteration.
+message TokenUsageIterationAdvisor {
+  // Tokens charged as uncached input for this iteration.
+  int64 input_tokens = 1;
+  // Tokens generated by this iteration.
+  int64 output_tokens = 2;
+  // Prompt-prefix tokens served from cache for this iteration.
+  int64 cache_read_input_tokens = 3;
+  // Prompt-prefix tokens written into cache for this iteration.
+  int64 cache_creation_input_tokens = 4;
+  // Cache writes split by TTL for this iteration.
+  TokenCacheCreation cache_creation = 5;
+  // The model identity reported for this advisor iteration.
+  string model = 6;
+}
+
+// Token counters produced by a fallback-model sampling iteration.
+message TokenUsageIterationFallback {
+  // Tokens charged as uncached input for this iteration.
+  int64 input_tokens = 1;
+  // Tokens generated by this iteration.
+  int64 output_tokens = 2;
+  // Prompt-prefix tokens served from cache for this iteration.
+  int64 cache_read_input_tokens = 3;
+  // Prompt-prefix tokens written into cache for this iteration.
+  int64 cache_creation_input_tokens = 4;
+  // Cache writes split by TTL for this iteration.
+  TokenCacheCreation cache_creation = 5;
+  // The model identity reported for this fallback iteration.
+  string model = 6;
+}
+
+// Diagnosed explanation for a prompt-cache miss associated with one usage
+// record.
+message TokenCacheDiagnostic {
+  // Identifies the mutually exclusive cache-diagnostic outcome.
+  oneof reason {
+    // Diagnostics were present but the API reported a null miss reason.
+    TokenCacheDiagnosticPending pending = 1;
+    // The cacheable prefix changed because the model changed.
+    TokenCacheDiagnosticModelChanged model_changed = 2;
+    // The cacheable prefix changed because the system prompt changed.
+    TokenCacheDiagnosticSystemChanged system_changed = 3;
+    // The cacheable prefix changed because the tool definitions changed.
+    TokenCacheDiagnosticToolsChanged tools_changed = 4;
+    // The cacheable prefix changed because the messages changed.
+    TokenCacheDiagnosticMessagesChanged messages_changed = 5;
+    // The cacheable prefix could not be assembled because a prior message was
+    // unavailable.
+    TokenCacheDiagnosticPreviousMessageUnavailable previous_message_unavailable = 6;
+    // Cache diagnostics were not available from the API.
+    TokenCacheDiagnosticDiagnosticsUnavailable diagnostics_unavailable = 7;
+  }
+}
+
+// Marks diagnostics explicitly present with a null cache-miss reason.
+message TokenCacheDiagnosticPending {}
+
+// Records a cache miss caused by a changed model in the cacheable prefix.
+message TokenCacheDiagnosticModelChanged {
+  // Input tokens that missed cache because the model changed.
+  int64 cache_missed_input_tokens = 1;
+}
+
+// Records a cache miss caused by a changed system prompt in the cacheable
+// prefix.
+message TokenCacheDiagnosticSystemChanged {
+  // Input tokens that missed cache because the system prompt changed.
+  int64 cache_missed_input_tokens = 1;
+}
+
+// Records a cache miss caused by changed tool definitions in the cacheable
+// prefix.
+message TokenCacheDiagnosticToolsChanged {
+  // Input tokens that missed cache because the tool definitions changed.
+  int64 cache_missed_input_tokens = 1;
+}
+
+// Records a cache miss caused by changed messages in the cacheable prefix.
+message TokenCacheDiagnosticMessagesChanged {
+  // Input tokens that missed cache because the messages changed.
+  int64 cache_missed_input_tokens = 1;
+}
+
+// Records a cache miss whose required prior message was unavailable.
+message TokenCacheDiagnosticPreviousMessageUnavailable {}
+
+// Records that the API did not provide cache diagnostics for this usage
+// record.
+message TokenCacheDiagnosticDiagnosticsUnavailable {}
+
+// Complete cumulative token account for one agent-repl session.
+message SessionTokenUtilization {
+  // Usage across the main agent and every descendant subagent.
+  TokenUsageTotals all_agents = 1;
+  // Usage attributed only to the session's main agent loop.
+  TokenUsageTotals main_agent = 2;
+  // Usage attributed to each dispatched subagent invocation.
+  repeated AgentTokenUtilization subagents = 3;
+  // Whole-tree usage grouped by the model that served each response.
+  repeated ModelTokenUtilization models = 4;
+}
+
+// Cumulative usage attributed to one dispatched subagent invocation.
+message AgentTokenUtilization {
+  // The subagent invocation identity and parentage.
+  TokenUtilizationSubagent agent = 1;
+  // Usage summed from the subagent's individual API responses.
+  TokenUsageTotals totals = 2;
+  // Usage grouped by model when the subagent used more than one model.
+  repeated ModelTokenUtilization models = 3;
+}
+
+// Cumulative usage served by one model.
+message ModelTokenUtilization {
+  // The model name used as the SDK model-usage key.
+  string model = 1;
+  // The canonical model identifier used for pricing.
+  string canonical_model = 2;
+  // The API provider that served this model.
+  string provider = 3;
+  // Usage summed across responses served by this model.
+  TokenUsageTotals totals = 4;
+  // The model context capacity, which is not additive.
+  int64 context_window = 5;
+  // The model maximum response capacity, which is not additive.
+  int64 max_output_tokens = 6;
+  // The SDK-reported cumulative cost for this model.
+  double cost_usd = 7;
+}
+
+// Additive token counters summed across a defined set of API responses.
+message TokenUsageTotals {
+  // Sum of tokens charged as uncached input at the base input rate.
+  int64 input_tokens = 1;
+  // Sum of generated tokens, including extended thinking where applicable.
+  int64 output_tokens = 2;
+  // Sum of prompt-prefix tokens served from cache.
+  int64 cache_read_input_tokens = 3;
+  // Sum of prompt-prefix tokens written into cache.
+  int64 cache_creation_input_tokens = 4;
+  // Sum of cache writes split by billing TTL.
+  TokenCacheCreation cache_creation = 5;
+  // Sum of billable server-side tool requests.
+  TokenServerToolUse server_tool_use = 6;
+  // Sum of output-token categories reported by the API.
+  TokenOutputDetails output_details = 7;
+  // Cache ratios derived from the cumulative authoritative counters. Absent
+  // when total prompt input is zero.
+  TokenCacheRates cache_rates = 8;
+  // Additive timing measurements across the API responses represented by
+  // this total. Absent when none of those responses has timing data.
+  TokenTimingTotals timing = 9;
+}
+
+// Additive timing information that permits rate calculation without combining
+// timed tokens with responses whose timing is unavailable.
+message TokenTimingTotals {
+  // Output tokens belonging only to responses with a measured output
+  // generation duration.
+  int64 output_tokens_with_generation_duration = 1;
+
+  // Sum of measured output-generation intervals. This is model-generation
+  // time, not session wall-clock time; concurrent subagent intervals remain
+  // additive.
+  int64 output_generation_duration_ms = 2;
+
+  // Number of responses contributing tokens and duration to the generation
+  // throughput calculation.
+  int64 responses_with_generation_duration = 3;
+
+  // Number of responses excluded because generation duration was unavailable.
+  int64 responses_without_generation_duration = 4;
+
+  // Sum of SDK-reported first-token latencies.
+  int64 total_time_to_first_token_ms = 5;
+
+  // Number of responses contributing to the average first-token latency.
+  int64 responses_with_time_to_first_token = 6;
+
+  // Number of responses excluded because first-token latency was unavailable.
+  int64 responses_without_time_to_first_token = 7;
 }
 
 // A slash command the CLI answers ITSELF, rather than a prompt for the agent.
@@ -857,6 +1236,66 @@ message SystemFailureItem {
   // and this is the only addressing there is. Empty means the failure has no
   // addressable card (a turn-end error carries no item of its own).
   string item_uuid = 6;
+  // Machine-readable evidence for failures that prevent restoration of the
+  // authoritative Claude conversation. Generic failure fields remain
+  // populated for clients that render only the common failure vocabulary.
+  oneof structured_detail {
+    // Resume-continuity evidence for a session restoration failure.
+    SessionResumeFailure session_resume = 7;
+  }
+}
+
+// Machine-readable evidence that a requested Claude conversation could not
+// be resumed without violating conversation continuity.
+message SessionResumeFailure {
+  // The agent-repl session whose shim was being restored. Empty when create
+  // validation rejects a request before a session is allocated.
+  string agent_repl_session_id = 1;
+  // The exact Claude conversation UUID that must remain authoritative.
+  string claude_session_id = 2;
+  // The working directory used to locate the Claude transcript.
+  string cwd = 3;
+  // The configured Claude account root. Empty means the daemon's inherited
+  // Claude configuration root supplies the value.
+  string config_dir = 4;
+  // The absolute Claude configuration root used for transcript lookup.
+  string resolved_config_dir = 5;
+  // Identifies the operation whose continuity requirement could not be met.
+  oneof attempt {
+    // A frontend requested a session that continues a durable conversation.
+    SessionResumeFailureCreate create = 10;
+    // A durable agent-repl session required shim reconstruction.
+    SessionResumeFailureAutomaticRestore automatic_restore = 11;
+  }
+  // Identifies the concrete continuity invariant that prevented restoration.
+  oneof cause {
+    // No readable transcript exists for the authoritative Claude UUID.
+    SessionResumeFailureTranscriptUnavailable transcript_unavailable = 20;
+    // A recovery attempt proposed a different Claude UUID or a fresh session.
+    SessionResumeFailureIdentityMismatch identity_mismatch = 21;
+  }
+}
+
+// Marks a resume failure encountered while creating an agent-repl session.
+message SessionResumeFailureCreate {}
+
+// Marks a resume failure encountered while restoring an allocated agent-repl
+// session.
+message SessionResumeFailureAutomaticRestore {}
+
+// Records every transcript location examined for the authoritative Claude
+// conversation UUID.
+message SessionResumeFailureTranscriptUnavailable {
+  // Absolute transcript paths that were checked and found unavailable.
+  repeated string searched_paths = 1;
+}
+
+// Records a rejected recovery attempt that would have resumed another Claude
+// conversation.
+message SessionResumeFailureIdentityMismatch {
+  // The replacement Claude UUID proposed by recovery. Empty means recovery
+  // would have started a fresh conversation.
+  string replacement_claude_session_id = 1;
 }
 
 // Ephemeral live-typing relay (never persisted, never in snapshots).

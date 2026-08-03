@@ -5,10 +5,12 @@ import (
 	"errors"
 	"net"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
+	"agentrepl/wire"
 )
 
 // fakeDeaths is a hand-driven ShimDeaths: the test decides when the process
@@ -28,6 +30,37 @@ type deathSource struct{ *fakeDeaths }
 func (deathSource) Next(ctx context.Context, _ string) (net.Conn, *corev1.ShimHello, error) {
 	<-ctx.Done()
 	return nil, nil, ctx.Err()
+}
+
+type observedExitSource struct {
+	exits chan ShimExit
+	serve func(net.Conn)
+	calls atomic.Int64
+}
+
+func (s *observedExitSource) DiedAfterConnect(string) <-chan ShimExit { return s.exits }
+
+func (s *observedExitSource) Next(ctx context.Context, _ string) (net.Conn, *corev1.ShimHello, error) {
+	if s.calls.Add(1) > 1 {
+		<-ctx.Done()
+		return nil, nil, ctx.Err()
+	}
+	client, peer := net.Pipe()
+	go s.serve(peer)
+	return client, &corev1.ShimHello{
+		SessionId: "s1", Vendor: "claude", ShimVersion: "test-shim", ProtocolVersion: "1",
+	}, nil
+}
+
+func serveReadyUntilClosed(t *testing.T, conn net.Conn) {
+	t.Helper()
+	defer conn.Close()
+	if _, err := wire.ReadAny(conn); err != nil {
+		t.Errorf("read DaemonHello: %v", err)
+		return
+	}
+	mustWriteMsg(t, conn, &corev1.ShimReady{SessionId: "s1"})
+	_, _ = wire.ReadAny(conn)
 }
 
 func TestAwaitReadyFailsFastWhenTheSpawnedShimExitsBeforeConnecting(t *testing.T) {
@@ -161,5 +194,74 @@ func TestNewTakesTheSpawnWatchFromASourceThatCarriesOne(t *testing.T) {
 	// Assert: the client picked the seam up without it being bound explicitly.
 	if c.cfg.ShimDeaths == nil {
 		t.Fatal("New did not adopt the ConnSource's spawn watch")
+	}
+}
+
+func TestRunReturnsTheConnectedShimProcessDeathWithoutReconnect(t *testing.T) {
+	// Arrange: one shim reaches readiness. Its process observer is independent
+	// of the socket so the test can publish the exact reap evidence first.
+	h := newHarness()
+	source := &observedExitSource{exits: make(chan ShimExit, 1)}
+	source.serve = func(conn net.Conn) { serveReadyUntilClosed(t, conn) }
+	cfg := h.config(t, "s1", "")
+	cfg.Source = source
+	c := New(cfg)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- c.Run(ctx) }()
+	readyCtx, readyCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer readyCancel()
+	if err := c.AwaitReady(readyCtx); err != nil {
+		t.Fatalf("AwaitReady: %v", err)
+	}
+
+	// Act: process reap closes the transport in production. Publishing the
+	// evidence before cancelling the peer makes the causal ownership explicit.
+	source.exits <- ShimExit{Description: "exit status 17", ExitCode: 17, StderrTail: "SDK stream ended unexpectedly\n"}
+	c.mu.Lock()
+	c.active.conn.Close()
+	c.mu.Unlock()
+	err := <-done
+
+	// Assert: a dead process is terminal, not another ConnSource.Next call.
+	if !errors.Is(err, ErrShimDiedAfterConnect) {
+		t.Fatalf("Run error = %v, want %v", err, ErrShimDiedAfterConnect)
+	}
+	if !strings.Contains(err.Error(), "exit status 17") || !strings.Contains(err.Error(), "SDK stream ended unexpectedly") {
+		t.Fatalf("Run error %v omitted process evidence", err)
+	}
+	if calls := source.calls.Load(); calls != 1 {
+		t.Fatalf("ConnSource.Next calls = %d, want 1 after terminal process death", calls)
+	}
+}
+
+func TestIntentionalControllerCancellationWinsOverTheProcessExit(t *testing.T) {
+	// Arrange: a connected shim whose controller owns the shutdown.
+	h := newHarness()
+	source := &observedExitSource{exits: make(chan ShimExit, 1)}
+	source.serve = func(conn net.Conn) { serveReadyUntilClosed(t, conn) }
+	cfg := h.config(t, "s1", "")
+	cfg.Source = source
+	c := New(cfg)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- c.Run(ctx) }()
+	readyCtx, readyCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer readyCancel()
+	if err := c.AwaitReady(readyCtx); err != nil {
+		t.Fatalf("AwaitReady: %v", err)
+	}
+
+	// Act: hibernation cancels the controller before SIGTERM reaps the shim.
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("Run after intentional cancellation = %v, want clean completion", err)
+	}
+	source.exits <- ShimExit{Description: "terminated", ExitCode: 0}
+
+	// Assert: the planned stop did not become a reconnect or a fatal death.
+	if calls := source.calls.Load(); calls != 1 {
+		t.Fatalf("ConnSource.Next calls = %d, want 1 after intentional shutdown", calls)
 	}
 }
