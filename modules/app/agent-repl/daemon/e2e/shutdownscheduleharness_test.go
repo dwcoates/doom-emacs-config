@@ -36,6 +36,7 @@
 package e2e
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -130,15 +131,23 @@ type shutdownBoot struct {
 	shimsMu sync.Mutex
 	shims   []*trackedShim
 
+	// recheck fires the boot sweeper's one re-check pass. It is INJECTED for
+	// the same reason bootsweep.go injects it: the pass must be an event the
+	// test drives, never a timer the test waits out.
+	recheck chan time.Time
+
 	stop     func()
 	stopOnce sync.Once
 }
+
+// sweep fires this boot's boot-sweeper re-check pass.
+func (b *shutdownBoot) sweepRecheck() { b.recheck <- time.Now() }
 
 // boot stands a complete daemon up over the world's durable state. Calling it
 // twice (with a bounce in between) is the durability scenario.
 func (w *shutdownWorld) boot(t *testing.T) *shutdownBoot {
 	t.Helper()
-	b := &shutdownBoot{world: w, executed: make(chan bool, 4)}
+	b := &shutdownBoot{world: w, executed: make(chan bool, 4), recheck: make(chan time.Time, 1)}
 
 	stateStore, err := statedb.Open(filepath.Join(w.stateDir, "state.db"))
 	if err != nil {
@@ -215,6 +224,18 @@ func (w *shutdownWorld) boot(t *testing.T) *shutdownBoot {
 	modelCatalogs := server.NewSessionModelCatalogs()
 	registrar := &server.RegistryRegistrar{Reg: reg, Logf: t.Logf, ModelCatalogs: modelCatalogs}
 	progressMgr := progress.New(progress.Options{Logf: t.Logf})
+	// The drain lease's durable record, opened over the SAME state store the
+	// world owns — so a bounce reads back the schedule its predecessor wrote
+	// rather than starting idle.
+	//
+	// It is opened BEFORE the controller because the controller needs it too:
+	// the parking ledger behind a drain-held prompt is what makes the THIRD
+	// exit — delivery after the bounce — durable, and main.go wires it in the
+	// same place for the same reason.
+	shutdownSchedules, err := statedb.NewShutdownSchedules(stateStore)
+	if err != nil {
+		t.Fatalf("open shutdown schedule store: %v", err)
+	}
 	controller, err := sessioncontroller.New(sessioncontroller.Config{
 		Push:              forwarder,
 		SSM:               ssmMgr,
@@ -225,6 +246,7 @@ func (w *shutdownWorld) boot(t *testing.T) *shutdownBoot {
 		FileDiagnostics:   fileDiagnostics,
 		SeqStore:          seqStore,
 		ClearCompactStore: seqStore,
+		ShutdownHolds:     shutdownSchedules,
 		PermissionModes:   server.NewRegistryModeStore(reg),
 		Registrar:         registrar,
 		ModelCatalogs:     registrar,
@@ -254,20 +276,16 @@ func (w *shutdownWorld) boot(t *testing.T) *shutdownBoot {
 	if err != nil {
 		t.Fatalf("open geometry: %v", err)
 	}
-	// The drain lease's durable record, opened over the SAME state store the
-	// world owns — so a bounce reads back the schedule its predecessor wrote
-	// rather than starting idle.
-	shutdownSchedules, err := statedb.NewShutdownSchedules(stateStore)
-	if err != nil {
-		t.Fatalf("open shutdown schedule store: %v", err)
-	}
-
-	// srv is assigned below and read only from inside the hook, which cannot
-	// fire before a frontend connection exists — i.e. long after the assignment.
-	var srv *server.Server
+	// THE SHUTDOWN REQUEST IS A CHANNEL, exactly as main.go's is, and for the
+	// reason main.go's is: the hook is called from wherever a drain completes —
+	// including from INSIDE Restore, before `srv` has been assigned — so a
+	// closure that dereferences srv races its own assignment. A buffered(1)
+	// channel plus a sync.Once sender carries the one stop_shims decision, and
+	// the consumer that acts on it does not exist until srv does.
+	shutdownReq := make(chan bool, 1)
+	var shutdownOnce sync.Once
 	requestShutdown := func(stopShims bool) {
-		srv.ShutdownAll(stopShims)
-		b.executed <- stopShims
+		shutdownOnce.Do(func() { shutdownReq <- stopShims; close(shutdownReq) })
 	}
 
 	agentShim, err := server.WireAgentShim(server.AgentShimConfig{
@@ -281,15 +299,29 @@ func (w *shutdownWorld) boot(t *testing.T) *shutdownBoot {
 		SessionDeaths:     server.RegistrySessionDeaths{Reg: reg},
 		Resyncer:          controller,
 		Catalogs:          controller,
+		// The registry-backed SessionView source main.go wires, so a connect
+		// snapshot taken mid-drain lists the registry's sessions rather than
+		// nothing at all.
+		Sessions: server.RegistrySessions{Reg: reg, Controller: controller, ModelCatalogs: modelCatalogs, Logf: t.Logf},
+		// The queue backend, and therefore the force and cancel EXITS a parked
+		// prompt has. Without it the daemon refuses to construct at all: a lease
+		// that can park prompts it cannot release is not shippable.
+		Queues:            controller,
 		SessionCommands:   binding,
 		WorkspaceCreation: newEmptyWorkspaceCreation(),
 		RequestShutdown:   requestShutdown,
-		// The scheduled-shutdown drain lease: its durable record and the fleet
-		// it derives its holds from (the controller satisfies DrainHoldSource),
+		// The scheduled-shutdown drain lease: its durable record, the fleet it
+		// derives its holds from (the controller satisfies DrainHoldSource), and
+		// the boot evidence a RESTORED lease seeds its unresolved set from —
 		// exactly as main.go wires them. Without these the daemon nacks every
 		// ScheduleShutdownCmd as unsupported.
 		ShutdownSchedules: shutdownSchedules,
 		DrainHolds:        controller,
+		DrainEvidence: server.RegistryDrainEvidence{
+			Reg:       reg,
+			Connected: shimListener.Connected,
+			Held:      sessionlock.Held,
+		},
 		MergeLease:        mergeLease,
 		MergeQueue:        mergeQueue,
 		MergeGeometry:     geometryStore,
@@ -309,7 +341,7 @@ func (w *shutdownWorld) boot(t *testing.T) *shutdownBoot {
 		}
 	}
 
-	srv = server.New(server.Config{
+	srv := server.New(server.Config{
 		DaemonVersion: "0.1.0-e2e-drain",
 		Registry:      reg,
 		ModelCatalogs: modelCatalogs,
@@ -325,9 +357,43 @@ func (w *shutdownWorld) boot(t *testing.T) *shutdownBoot {
 	mux.HandleFunc("/frontend", agentShim.Server.ServeWS)
 	b.ts = httptest.NewServer(mux)
 
+	// THE SHUTDOWN CONSUMER, started only now that srv exists. A drain that
+	// completed inside Restore has already parked its decision on the buffered
+	// channel; this picks it up and runs the real teardown, and records
+	// stop_shims only AFTER ShutdownAll returns, so a test that has read from
+	// `executed` may assert on shim liveness without racing the teardown.
+	teardown := make(chan struct{})
+	go func() {
+		select {
+		case stopShims, ok := <-shutdownReq:
+			if !ok {
+				return
+			}
+			srv.ShutdownAll(stopShims)
+			b.executed <- stopShims
+		case <-teardown:
+		}
+	}()
+
+	// BOOT RECONCILIATION, as main.go runs it: the shims that outlived the
+	// previous daemon are redialling this one's listener, and without this pass
+	// nothing ever claims them. The re-check is an INJECTED channel, so a test
+	// fires the second pass as an event instead of waiting out a timer.
+	sweepCtx, cancelSweep := context.WithCancel(context.Background())
+	go (&server.BootSweeper{
+		Reg:       reg,
+		Connected: shimListener.Connected,
+		Held:      sessionlock.Held,
+		Ensurer:   controller,
+		Logf:      t.Logf,
+		Recheck:   b.recheck,
+	}).Run(sweepCtx)
+
 	// Teardown in reverse construction order, so nothing writes to a closed
 	// database on its way down.
 	b.stop = func() {
+		cancelSweep()
+		close(teardown)
 		b.ts.Close()
 		_ = agentShim.Close()
 		controller.Close()
@@ -366,16 +432,27 @@ func (b *shutdownBoot) dialFrontend(t *testing.T) *websocket.Conn {
 }
 
 // shimFor returns the tracked shim process this boot spawned for workspace.
+//
+// THE LOOKUP GOES THROUGH THE SAME CANONICALIZER THE SPAWN DID. The spawn path
+// records dlog.WorkspaceFromDirectory(...).Directory, and a test passes the raw
+// t.TempDir() path it created the session with — which on macOS is /var/... while
+// the canonical form is /private/var/.... Comparing those two derivations is a
+// silent no-match dressed up as "this daemon spawned no shim", so the argument is
+// put through the one canonicalizer rather than compared against it.
 func (b *shutdownBoot) shimFor(t *testing.T, workspace string) *trackedShim {
 	t.Helper()
+	canonical, err := dlog.WorkspaceFromDirectory(workspace)
+	if err != nil {
+		t.Fatalf("canonicalize workspace %s: %v", workspace, err)
+	}
 	b.shimsMu.Lock()
 	defer b.shimsMu.Unlock()
 	for _, s := range b.shims {
-		if s.workspace == workspace {
+		if s.workspace == canonical.Directory {
 			return s
 		}
 	}
-	t.Fatalf("this daemon spawned no shim for workspace %s", workspace)
+	t.Fatalf("this daemon spawned no shim for workspace %s (canonical %s)", workspace, canonical.Directory)
 	return nil
 }
 
