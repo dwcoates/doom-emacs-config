@@ -4013,9 +4013,12 @@ func (*FrontendCommand_PublishWorkspaceRoster) isFrontendCommand_Command() {}
 // the daemon. The daemon retains the published roster, folds it into every
 // connect snapshot, and rebroadcasts it — it never synthesizes or amends one.
 // The ack semantics are every other frontend command's: a refused publish (a
-// stale, out-of-order revision) is a loud nack on the correlated CommandAck,
-// never a silent drop, so a publisher whose revision counter has fallen
-// behind learns it instead of believing it published.
+// stale, out-of-order revision WITHIN the publisher's own epoch, or a roster
+// carrying no epoch at all) is a loud nack on the correlated CommandAck, never
+// a silent drop, so a publisher whose revision counter has fallen behind learns
+// it instead of believing it published. A publish from a NEW epoch is never
+// stale — see WorkspaceRoster.boot_id — so no publisher ever needs to resync a
+// counter it did not author.
 type PublishWorkspaceRosterCmd struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The complete roster as of this publication. Always whole, never a delta:
@@ -6937,13 +6940,38 @@ func (x *StateSnapshot) GetHostActions() []*HostAction {
 // so a full replace makes a partially-applied roster unrepresentable.
 type WorkspaceRoster struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Monotonic per-Emacs-boot revision, incremented on every publication. The
-	// daemon refuses a publish whose revision is not newer than the one it
-	// holds, so an out-of-order delivery cannot resurrect a superseded roster;
-	// clients apply the same rule and drop any frame older than what they hold.
-	// Per-BOOT, not global: a restarted Emacs restarts the counter, and the
-	// daemon's retained roster does not outlive the publisher that authored it.
+	// Monotonic revision WITHIN one publisher epoch (see boot_id), incremented on
+	// every publication. The daemon refuses a same-epoch publish whose revision is
+	// not newer than the one it holds, so an out-of-order delivery cannot
+	// resurrect a superseded roster; clients apply the same rule and drop any
+	// same-epoch frame older than what they hold.
+	//
+	// The monotonicity floor is keyed by boot_id, NOT global: a publish carrying a
+	// different boot_id opens a new epoch and resets the floor, so a restarted
+	// publisher's revision=1 is accepted even against a retained revision=500.
+	// That is what makes a resync path unnecessary — there is no state a fresh
+	// publisher must first learn in order to publish successfully.
 	Revision int64 `protobuf:"varint,1,opt,name=revision,proto3" json:"revision,omitempty"`
+	// The publishing editor's per-boot identity: an opaque string minted once per
+	// Emacs boot and carried unchanged on every publication of that boot.
+	//
+	// It is the EPOCH KEY for revision monotonicity:
+	//
+	//   - A publish whose boot_id EQUALS the retained roster's is same-epoch. Its
+	//     revision must exceed the retained revision, or it is a loud nack — the
+	//     stale-publish guarantee, unchanged.
+	//   - A publish whose boot_id DIFFERS from the retained roster's is a new
+	//     epoch and is ALWAYS accepted, whatever its revision, resetting the
+	//     floor to it. A fresh Emacs booting against a surviving daemon that
+	//     retains a high revision therefore publishes successfully on its first
+	//     try, instead of being refused until its counter caught up.
+	//   - An EMPTY boot_id is INVALID and is nacked. A publisher that will not
+	//     identify its epoch cannot be told apart from one whose epoch ended, so
+	//     it is refused rather than silently folded into whatever epoch is held.
+	//
+	// Opaque to every reader: nothing compares boot_ids for order, derives a time
+	// from one, or parses one. Equality is the only question ever asked of it.
+	BootId string `protobuf:"bytes,7,opt,name=boot_id,json=bootId,proto3" json:"boot_id,omitempty"`
 	// The active grouping. The SET ARM IS THE GROUPING — there is no separate
 	// mode enum to disagree with the payload, and the rows of the inactive
 	// grouping are simply absent rather than carried and ignored.
@@ -7004,6 +7032,13 @@ func (x *WorkspaceRoster) GetRevision() int64 {
 		return x.Revision
 	}
 	return 0
+}
+
+func (x *WorkspaceRoster) GetBootId() string {
+	if x != nil {
+		return x.BootId
+	}
+	return ""
 }
 
 func (x *WorkspaceRoster) GetView() isWorkspaceRoster_View {
@@ -9337,9 +9372,10 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\x06queues\x18\x06 \x03(\v2 .agentshim.frontend.v1.QueueViewR\x06queues\x12?\n" +
 	"\bprogress\x18\a \x03(\v2#.agentshim.frontend.v1.ProgressViewR\bprogress\x12Z\n" +
 	"\x13workspace_available\x18\b \x03(\v2).agentshim.frontend.v1.WorkspaceAvailableR\x12workspaceAvailable\x12D\n" +
-	"\fhost_actions\x18\t \x03(\v2!.agentshim.frontend.v1.HostActionR\vhostActions\"\xca\x02\n" +
+	"\fhost_actions\x18\t \x03(\v2!.agentshim.frontend.v1.HostActionR\vhostActions\"\xe3\x02\n" +
 	"\x0fWorkspaceRoster\x12\x1a\n" +
-	"\brevision\x18\x01 \x01(\x03R\brevision\x12M\n" +
+	"\brevision\x18\x01 \x01(\x03R\brevision\x12\x17\n" +
+	"\aboot_id\x18\a \x01(\tR\x06bootId\x12M\n" +
 	"\n" +
 	"repository\x18\x02 \x01(\v2+.agentshim.frontend.v1.RosterRepositoryViewH\x00R\n" +
 	"repository\x12;\n" +

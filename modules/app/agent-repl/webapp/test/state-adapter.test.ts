@@ -1045,6 +1045,7 @@ describe("the workspace roster frame", () => {
     return {
       workspaceRoster: {
         revision: "4",
+        bootId: "boot-a",
         repository: {
           sections: [
             { repoKey: "doom", folded: false, rows: [{ dir: "/w/a", name: "a", ready: {}, current: true }] },

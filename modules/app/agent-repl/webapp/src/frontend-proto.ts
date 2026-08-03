@@ -833,8 +833,14 @@ export interface WorkspaceAvailable {
  * never a delta, so a partially-applied roster is unrepresentable.
  */
 export interface WorkspaceRoster {
-  /** Monotonic per-Emacs-boot revision; a frame older than the held one is dropped. */
+  /** Monotonic WITHIN one bootId; a same-epoch frame older than the held one is dropped. */
   revision: number;
+  /**
+   * The publishing editor's per-boot identity, and the epoch key `revision` is
+   * scoped by. Opaque and never empty: a frame whose bootId differs from the
+   * held one opens a new epoch and supersedes it whatever its revision.
+   */
+  bootId: string;
   /** The active grouping — the set arm IS the grouping, with no separate mode flag. */
   view:
     | { case: "repository"; value: RosterRepositoryView }
@@ -2150,6 +2156,7 @@ function decodeHostAction(v: unknown): HostAction {
 
 const WORKSPACE_ROSTER_KEYS = new Set([
   "revision",
+  "bootId",
   "repository",
   "task",
   "recentlyMerged",
@@ -2163,10 +2170,22 @@ const WORKSPACE_ROSTER_KEYS = new Set([
  * The grouping oneof is REQUIRED: a roster with no view arm names no grouping,
  * and there is no defensible default to pick between repository and task, so
  * it throws rather than guessing. Setting both is equally a breach.
+ *
+ * `bootId` is REQUIRED and non-empty: it is the epoch key `revision` is scoped
+ * by, so a roster without one cannot be compared against a held roster at all.
+ * Defaulting it to "" would silently merge two publishers' counters, so it
+ * throws instead.
  */
 function decodeWorkspaceRoster(v: unknown): WorkspaceRoster {
   const o = ensureObject(v, "WorkspaceRoster");
   rejectUnknown(o, WORKSPACE_ROSTER_KEYS, "WorkspaceRoster");
+
+  const bootId = str(o, "bootId", "WorkspaceRoster");
+  if (bootId === "") {
+    throw new Error(
+      "frontend-proto: WorkspaceRoster.bootId is empty; a publisher must identify its epoch",
+    );
+  }
 
   const hasRepository = o.repository !== undefined && o.repository !== null;
   const hasTask = o.task !== undefined && o.task !== null;
@@ -2185,6 +2204,7 @@ function decodeWorkspaceRoster(v: unknown): WorkspaceRoster {
 
   return {
     revision: num(o, "revision", "WorkspaceRoster"),
+    bootId,
     view,
     // Absent recently-merged is an EMPTY section, not a missing one: proto3
     // omits an unset message, and "nothing merged lately" is the normal case.
