@@ -35,6 +35,8 @@ export interface TokenMenuData {
    * a result carries one — the whole-tree rows dash until then.
    */
   models: Record<string, ModelUsage> | null;
+  /** Authoritative aggregate timing from the daemon, when it has observations. */
+  timing?: TokenTimingTotals;
 }
 
 /** Token counts as the topbar and the result chip both write them: `300,000`. */
@@ -188,16 +190,17 @@ export function tokensOverlayHtml(data: TokenMenuData): string {
     ),
   );
   const modelMap = data.models ?? {};
+  const timing = timingRows(data.timing).map(([label, value]) => row(label, value));
   const models = Object.entries(modelMap);
   if (models.length === 0) {
-    sections.push(section("all agents", unknownRows()));
+    sections.push(section("all agents", [...unknownRows(), ...timing]));
   } else {
     const totals = totalDims(modelMap);
     const totalCost = models.reduce((sum, [, u]) => sum + u.cost_usd, 0);
     const totalSearches = models.reduce((sum, [, u]) => sum + u.web_search_requests, 0);
     sections.push(
       section("all agents", [
-        ...usageRows(totals),
+        ...usageRows(totals), ...timing,
         row("web searches", formatTokens(totalSearches)),
         row("cost", formatCost(totalCost)),
       ]),
