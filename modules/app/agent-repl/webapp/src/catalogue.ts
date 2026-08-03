@@ -35,6 +35,10 @@ import {
   ToolItem,
   UserTurnItem,
 } from "./store.js";
+import { QueuedCard } from "./render.js";
+import { QueuedItem } from "./protocol.js";
+import { drainBannerHtml } from "./drain.js";
+import type { ShutdownScheduleDraining } from "./frontend-proto.js";
 import { agentTopbarHtml } from "./topbar.js";
 import { TaskTail } from "./watcher-poll.js";
 
@@ -47,6 +51,18 @@ export interface Scenario {
   /** What the example demonstrates, rendered as the section's caption. */
   blurb: string;
   items: ConversationItem[];
+  /**
+   * Chrome the scenario demonstrates ABOVE the feed — the surfaces that are
+   * not conversation items (the drain banner). A thunk, not a string, so a
+   * scenario whose rendering depends on the clock is evaluated at draw time.
+   */
+  chrome?: () => string;
+  /**
+   * Parked prompts rendered BELOW the feed, exactly where the live renderer
+   * puts them (the tail queue section). The queue is not a conversation item
+   * list, so it rides its own field rather than being faked as one.
+   */
+  queued?: QueuedItem[];
   /** Poller tails by source id, standing in for the daemon. */
   tails?: Record<string, TaskTail>;
   /** Fold ids pre-opened in the expanded variant; empty = one variant only. */
@@ -56,6 +72,30 @@ export interface Scenario {
 // --- mock item constructors ---------------------------------------------------
 
 const TS = "2026-07-19T12:00:00.000Z";
+
+/**
+ * The drain scenarios' FROZEN clock. The banner's elapsed reading is a
+ * function of (now - scheduled_at), and a gallery whose caption changes every
+ * second is a gallery nobody can diff against a screenshot, so both the stamp
+ * and the reader's "now" are fixed here.
+ */
+const DRAIN_NOW_MS = Date.parse(TS);
+const DRAIN_LEASE: ShutdownScheduleDraining = {
+  scheduleId: "sched-7",
+  scheduledAtMs: DRAIN_NOW_MS - 95_000,
+  cause: "merge of feat-drain-lease rebuilt the daemon",
+  stopShims: false,
+  holds: [
+    { workspace: "/Users/dev/src/app", sessionId: "s-1", turn: { turnId: "t-88" } },
+    { workspace: "/Users/dev/src/app-docs", sessionId: "s-2", tasks: { count: 3 } },
+    {
+      workspace: "/Users/dev/src/app-infra",
+      sessionId: "s-3",
+      turn: { turnId: "t-91" },
+      tasks: { count: 1 },
+    },
+  ],
+};
 
 function userTurn(requestId: string, text: string): UserTurnItem {
   return { kind: "user-turn", requestId, content: [{ type: "text", text }], ts: TS };
@@ -554,6 +594,47 @@ export const scenarios: Scenario[] = [
     ],
     openIds: [],
   },
+  {
+    taxonomy: "4.1",
+    slug: "drain-banner",
+    title: "scheduled-shutdown drain banner (global chrome)",
+    blurb:
+      "A daemon bounce is scheduled and its drain lease is held, so no new turn may start in ANY workspace. The banner is global chrome above the central column — not a per-workspace chip — and enumerates the complete holds list the daemon broadcast: one workspace on a running turn, one on live background tasks, one on both. It has no dismiss control and disappears the moment the lease goes idle.",
+    items: [],
+    chrome: () => drainBannerHtml(DRAIN_LEASE, DRAIN_NOW_MS),
+    openIds: [],
+  },
+  {
+    taxonomy: "4.2",
+    slug: "lease-bubble",
+    title: "drain-lease bubble beside the classifier bubble",
+    blurb:
+      "Two parked prompts, side by side, in the two ways a prompt can be parked. The first is classifier-held: dashed user-blue, a verdict badge, an Accept control. The second is held by the scheduled bounce: solid amber, no verdict at all (the classifier never ran), and only the two exits the lease admits — Cancel, and a Force that says out loud it delays the bounce.",
+    items: [],
+    queued: [
+      {
+        id: "q-classified",
+        text: "Also add the regression test for the seq gap",
+        queuedAtMs: DRAIN_NOW_MS - 20_000,
+        classification: "hold",
+        rationale: "follow-up work; safe to run after the current turn",
+        accepted: false,
+      },
+      {
+        id: "q-leased",
+        text: "Rebase onto master and rerun the suite",
+        queuedAtMs: DRAIN_NOW_MS - 5_000,
+        // The daemon stamps PENDING at enqueue and the classifier never runs
+        // on a lease-held entry, so this is exactly what the wire carries —
+        // and the bubble deliberately shows none of it.
+        classification: "pending",
+        rationale: "",
+        accepted: false,
+        shutdownHold: { scheduleId: "sched-7" },
+      },
+    ],
+    openIds: [],
+  },
 ];
 
 // --- rendering ----------------------------------------------------------------
@@ -584,9 +665,17 @@ export function renderScenarioHtml(sc: Scenario, isOpen: (id: string) => boolean
         Date.now(),
       ),
   };
-  return top
-    .map((item) => `<div class="feed-item">${renderItem(item, undefined, finals, panels)}</div>`)
+  const chrome = sc.chrome === undefined ? "" : `<div class="cat-chrome">${sc.chrome()}</div>`;
+  const queued = (sc.queued ?? [])
+    .map((q) => `<div class="feed-item">${QueuedCard(q)}</div>`)
     .join("");
+  return (
+    chrome +
+    top
+      .map((item) => `<div class="feed-item">${renderItem(item, undefined, finals, panels)}</div>`)
+      .join("") +
+    queued
+  );
 }
 
 // --- interactive mounting -----------------------------------------------------
