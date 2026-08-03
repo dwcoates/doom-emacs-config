@@ -207,10 +207,10 @@ func TestRegistryAndStateLogInterleaveOnOneSharedStore(t *testing.T) {
 // without a cycle).
 type registryResolver struct{ reg *Registry }
 
-func (r registryResolver) Workspace(sessionID string) (string, bool) {
+func (r registryResolver) Session(sessionID string) (ssm.Binding, bool) {
 	rec, ok := r.reg.Get(sessionID)
 	if !ok || rec.CWD == "" {
-		return "", false
+		return ssm.Binding{}, false
 	}
-	return rec.CWD, true
+	return ssm.Binding{Workspace: rec.CWD, SessionID: rec.SessionID}, true
 }
