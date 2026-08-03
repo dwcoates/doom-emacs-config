@@ -44,6 +44,7 @@
 ;; `agent-repl--frontend-note-boot-id' lives in frontend-client.el (it owns the
 ;; reattach give-up state the boot-id change resets); resolved at call time.
 (declare-function agent-repl--frontend-note-boot-id "frontend-client" (boot-id))
+(declare-function agent-repl--uds-run-snapshot-applied-hook "frontend-uds" ())
 ;; The merge-failed resurrection (below) reuses snapshot-load's promotion
 ;; primitives; both live outside this module and resolve at call time.
 (declare-function agent-repl--establish-workspace "commands" (ws dir))
@@ -831,6 +832,16 @@ receives every catalog but has no per-task roster."
                          failures)
         (message "agent-repl: %d item(s) FAILED during snapshot resync (see the agent-repl log)"
                  failures)))
+    ;; THE RECONNECT IS DONE HERE, and nowhere earlier.  Every subscriber that
+    ;; needs the state of the world as of reconnection — the recovery sweep
+    ;; that re-ensures each workspace, the retraction that takes the outage
+    ;; notices down — runs off this edge rather than off the socket's open
+    ;; transition, where the roster it would read is still empty.
+    ;;
+    ;; It runs even when items failed: a partial resync is still a live link,
+    ;; and leaving the outage notices standing over it would report an outage
+    ;; that is over.  The per-item failures were surfaced above on their own.
+    (agent-repl--uds-run-snapshot-applied-hook)
     (length workspaces)))
 
 ;;;; ---- DegradedNotice: RETIRED (F4, wire removed in step 11) -----------
