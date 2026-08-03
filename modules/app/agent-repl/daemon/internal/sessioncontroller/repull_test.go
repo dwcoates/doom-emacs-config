@@ -3,6 +3,7 @@ package sessioncontroller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -38,6 +39,45 @@ type replayClient struct {
 	// block, when non-nil, holds Replay open until it is closed — the
 	// in-flight shape the concurrency guard is about.
 	block chan struct{}
+	// entered, when non-nil, is closed the first time Replay is ENTERED, so a
+	// concurrency test hands off on a channel instead of polling for a call
+	// count. Closed before the block is waited on, which is the instant the
+	// workspace's re-pull slot is provably held.
+	entered     chan struct{}
+	enteredOnce sync.Once
+}
+
+// newRepullWaitWatcher is a log capture that also SIGNALS the moment a request
+// announces it is waiting behind an in-flight re-pull, which is the handoff a
+// serialization test needs and the loud line the operator needs.
+type repullWaitWatcher struct {
+	logCapture
+	waiting chan struct{}
+	once    sync.Once
+}
+
+func newRepullWaitWatcher() *repullWaitWatcher {
+	return &repullWaitWatcher{waiting: make(chan struct{})}
+}
+
+func (w *repullWaitWatcher) logf(format string, args ...any) {
+	w.logCapture.logf(format, args...)
+	if strings.Contains(fmt.Sprintf(format, args...), "WAITING for the in-flight re-pull") {
+		w.once.Do(func() { close(w.waiting) })
+	}
+}
+
+// inFlightRepull returns the workspace's in-flight re-pull state, read under the
+// lock that guards it.
+func (h *repullHarness) inFlightRepull(t *testing.T) *repullState {
+	t.Helper()
+	d := h.controller(t)
+	h.m.mu.Lock()
+	defer h.m.mu.Unlock()
+	if d.repull == nil {
+		t.Fatal("no re-pull is in flight")
+	}
+	return d.repull
 }
 
 type manualRepullTimer struct {
@@ -87,6 +127,9 @@ func (c *replayClient) Replay(_ context.Context, from, to uint64, maxEvents uint
 		c.queuedErrs = c.queuedErrs[1:]
 	}
 	c.mu.Unlock()
+	if c.entered != nil {
+		c.enteredOnce.Do(func() { close(c.entered) })
+	}
 	if block != nil {
 		<-block
 	}
@@ -453,25 +496,122 @@ func TestConcurrentCoveredRePullCoalesces(t *testing.T) {
 	}
 }
 
-func TestConcurrentUncoveredRePullIsRefusedLoudly(t *testing.T) {
+func TestConcurrentUncoveredRePullWaitsThenServesItsOwnRange(t *testing.T) {
 	// Arrange — a replay from 50 is running when a second asks from 5, which it
-	// does NOT cover.
-	client := &replayClient{block: make(chan struct{})}
-	h := newRepullHarness(t, client)
+	// does NOT cover. The second must be SERVED, not nacked: no caller retries a
+	// refusal, so a refusal is a permanently missing stretch of history.
+	client := &replayClient{block: make(chan struct{}), entered: make(chan struct{})}
+	w := newRepullWaitWatcher()
+	h := newRepullHarnessWithLog(t, client, w.logf)
 	h.seq.SetLastSeq("s1", 100)
-	started := make(chan struct{})
-	go func() {
-		close(started)
-		_ = h.m.Resync("ws", 50)
-	}()
-	<-started
-	waitFor(t, "the first replay to start", func() bool { return client.callCount() == 1 })
+	go func() { _ = h.m.Resync("ws", 50) }()
+	<-client.entered
+	// Act — the second request blocks in the wait, and the first is released
+	// only once it is provably waiting.
+	second := make(chan error, 1)
+	go func() { second <- h.m.Resync("ws", 5) }()
+	<-w.waiting
+	close(client.block)
+	err := <-second
+	// Assert
+	if err != nil {
+		t.Fatalf("an uncovered concurrent resync must wait and then run, got %v", err)
+	}
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	if len(client.calls) != 2 || client.calls[1] != [2]uint64{4, 101} {
+		t.Fatalf("replay calls = %v, want the waiter's own FULL range [4 101] as the second call", client.calls)
+	}
+}
+
+func TestConcurrentUncoveredRePullSaysItIsWaiting(t *testing.T) {
+	// Arrange — the serialization must be readable in the log, since from the
+	// outside a waiting request is indistinguishable from a slow one.
+	client := &replayClient{block: make(chan struct{}), entered: make(chan struct{})}
+	w := newRepullWaitWatcher()
+	h := newRepullHarnessWithLog(t, client, w.logf)
+	h.seq.SetLastSeq("s1", 100)
+	go func() { _ = h.m.Resync("ws", 50) }()
+	<-client.entered
 	// Act
-	err := h.m.Resync("ws", 5)
+	second := make(chan error, 1)
+	go func() { second <- h.m.Resync("ws", 5) }()
+	<-w.waiting
+	close(client.block)
+	<-second
+	// Assert
+	// The announced mark is the pull's own exclusive lower bound (the client's
+	// from_seq=5 minus one), which is the number the served range is expressed in.
+	if !w.contains(`WAITING for the in-flight re-pull, then serving from_seq=4`) {
+		t.Fatal("the wait is not announced in the log")
+	}
+}
+
+func TestUncoveredRePullWaitFailsLoudlyWhenTheDaemonShutsDown(t *testing.T) {
+	// Arrange — a waiter must not outlive the daemon that would serve it.
+	client := &replayClient{block: make(chan struct{}), entered: make(chan struct{})}
+	w := newRepullWaitWatcher()
+	h := newRepullHarnessWithLog(t, client, w.logf)
+	h.seq.SetLastSeq("s1", 100)
+	go func() { _ = h.m.Resync("ws", 50) }()
+	<-client.entered
+	second := make(chan error, 1)
+	go func() { second <- h.m.Resync("ws", 5) }()
+	<-w.waiting
+	// Act
+	h.m.rootStop()
+	err := <-second
 	close(client.block)
 	// Assert
 	if !errors.Is(err, ErrRepullInFlight) {
-		t.Fatalf("err = %v, want ErrRepullInFlight", err)
+		t.Fatalf("err = %v, want ErrRepullInFlight naming the abandoned wait", err)
+	}
+}
+
+func TestUncoveredRePullWaitFailsLoudlyWhenTheInFlightPullOverrunsItsGrace(t *testing.T) {
+	// Arrange — the in-flight pull's own deadline trips while it is wedged in
+	// the shim, so it never releases the workspace. The waiter owes the client
+	// an answer rather than an unbounded wait.
+	client := &replayClient{block: make(chan struct{}), entered: make(chan struct{})}
+	w := newRepullWaitWatcher()
+	h := newRepullHarnessWithLog(t, client, w.logf)
+	h.m.repullWaitGraceOverride = time.Millisecond
+	h.seq.SetLastSeq("s1", 100)
+	go func() { _ = h.m.Resync("ws", 50) }()
+	<-client.entered
+	second := make(chan error, 1)
+	go func() { second <- h.m.Resync("ws", 5) }()
+	<-w.waiting
+	// Act — trip the in-flight pull's deadline without letting it return.
+	h.inFlightRepull(t).activity.cancel(errors.New("test: the in-flight pull's own deadline"))
+	err := <-second
+	close(client.block)
+	// Assert
+	if !errors.Is(err, ErrRepullInFlight) {
+		t.Fatalf("err = %v, want ErrRepullInFlight for a wedged in-flight re-pull", err)
+	}
+}
+
+func TestUncoveredRePullReEvaluatesTheEpochAfterTheWait(t *testing.T) {
+	// Arrange — the waiter's bounds were computed before the wait, so a rotation
+	// during the wait retires the seq space they count in. Serving them against
+	// the new space is the ceiling-from-a-retired-space defect.
+	client := &replayClient{block: make(chan struct{}), entered: make(chan struct{})}
+	w := newRepullWaitWatcher()
+	h := newRepullHarnessWithLog(t, client, w.logf)
+	h.seq.SetLastSeq("s1", 100)
+	go func() { _ = h.m.Resync("ws", 50) }()
+	<-client.entered
+	second := make(chan error, 1)
+	go func() { second <- h.m.Resync("ws", 5) }()
+	<-w.waiting
+	// Act
+	h.rotate("uuid-old", "uuid-new")
+	close(client.block)
+	err := <-second
+	// Assert
+	if !errors.Is(err, ErrRepullInFlight) {
+		t.Fatalf("err = %v, want ErrRepullInFlight for bounds retired by a rotation during the wait", err)
 	}
 }
 
