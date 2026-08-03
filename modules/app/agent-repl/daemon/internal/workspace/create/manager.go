@@ -564,9 +564,10 @@ func (m *Manager) DrainHostActions(ctx context.Context) error {
 	return nil
 }
 
-// CompleteHostAction records the host's terminal verdict. A failure remains
-// pending with its diagnostic text and is reset for active redelivery; a
-// success is terminal and idempotent.
+// CompleteHostAction records the host's terminal verdict. ANY verdict — ok or
+// failure — releases the action from redelivery and from the reconnect
+// snapshot; a failure keeps its diagnostic text durably and is logged loudly.
+// Completion is idempotent.
 func (m *Manager) CompleteHostAction(id string, ok bool, failure string) error {
 	if err := m.cfg.Store.CompleteHostAction(id, ok, failure); err != nil {
 		return err
