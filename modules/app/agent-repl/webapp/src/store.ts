@@ -808,6 +808,12 @@ export class ConversationStore {
         case "session-init":
           changed = this.applySessionInit(effect.value) || changed;
           break;
+        case "workspace-roster":
+          // The rail is not store state: it holds its own roster under its own
+          // revision lease, and main.ts hands this effect straight to it. The
+          // case is spelled out rather than folded into `ignored` so the
+          // roster's absence from the store is a decision on record.
+          break;
         case "ignored":
           break;
       }

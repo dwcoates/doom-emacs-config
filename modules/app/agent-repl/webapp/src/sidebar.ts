@@ -3,13 +3,23 @@
  * knows about, grouped by repo, with lifecycle dots, family nesting, and
  * per-row detail panels (ported from design-workspace-sidebar-mock.html).
  *
- * Emacs is the single state authority. It pushes the WHOLE roster through
- * the window hook installed below whenever workspace state changes, and
- * every user gesture here (switch, fold) is a command POSTed back to the
- * daemon — never an optimistic local mutation, so the rail can only ever
- * show what Emacs last asserted. Until the first push arrives the mount
- * stays hidden, so a bare-browser session keeps the single-column layout.
+ * Emacs is the single state authority. It publishes the WHOLE roster —
+ * never a delta — whenever workspace state changes, and every user gesture
+ * here (switch, fold) is a command POSTed back to the daemon, never an
+ * optimistic local mutation, so the rail can only ever show what Emacs last
+ * asserted. Until the first roster arrives the mount stays hidden, so a
+ * bare-browser session keeps the single-column layout.
+ *
+ * TWO PUBLISH PATHS, ONE ADOPTION. The roster reaches the rail either as a
+ * `frontend.v1.WorkspaceRoster` frame off the same websocket the feed and
+ * the footer read (the destination), or through the legacy
+ * `window.agentReplWorkspaceRoster` script injection the host evaluates (the
+ * origin). Both converge on `adopt`, so the reveal, the revision gate, and
+ * the diagnostics can never differ by path — see `adopt` for how a hook push,
+ * which carries no revision, is ranked against a frame that does.
  */
+import type { RosterRow as FrameRosterRow, WorkspaceRoster as RosterFrame } from "./frontend-proto.js";
+import { ROSTER_ROW_STATUS_KEYWORD } from "./frontend-proto.js";
 import { HostGlobal } from "./host.js";
 import { escapeHtml } from "./highlight.js";
 import { mergeFacts, mergeStatusLogValue } from "./merge-status.js";
@@ -167,6 +177,10 @@ export interface RepoGroup {
   done: boolean;
   rows: WorkspaceRow[];
 }
+
+/** Which publisher an adoption came from, for the diagnostics that must be
+ * able to say which path painted the rail while both are live. */
+export type RosterPath = "frame" | "hook";
 
 /** Which grouping the rail shows: repositories (default) or user tasks. */
 export type SidebarView = "repository" | "task";
@@ -341,6 +355,157 @@ export function validateWorkspaceRoster(value: unknown): WorkspaceRoster {
         ? null
         : validateGroup(value.recentlyMerged, "roster.recentlyMerged"),
     navDir: asNullableString(value.navDir, "roster.navDir"),
+  };
+}
+
+// --- the roster frame -------------------------------------------------------
+
+/**
+ * Roster key and label of the Recently Merged section.
+ *
+ * The FRAME does not carry them: `frontend.v1.RosterSection` is a bare row
+ * list, deliberately, since the section is a fixed singleton rather than one
+ * of an open set of groups. The key still has to match
+ * `agent-repl--sidebar-merged-key` exactly, because the fold gesture POSTs it
+ * back as `repo_key` and Emacs looks the section up by it.
+ */
+export const RECENTLY_MERGED_KEY = "__recently_merged__";
+const RECENTLY_MERGED_LABEL = "Recently Merged";
+
+/**
+ * The revision a hook push is ranked at.
+ *
+ * The script-injection path predates the revision and cannot carry one, so it
+ * enters the gate at the floor. That makes the ordering between the paths
+ * explicit rather than accidental: hook pushes stay adoptable among
+ * themselves (the gate admits an equal revision), and a frame that has
+ * asserted any revision above the floor outranks every later hook push —
+ * which is the precedence we want while both publishers are live, since only
+ * the frame path can prove its age.
+ */
+export const HOOK_ROSTER_REVISION = 0;
+
+/**
+ * A frame row's status arm mapped onto the rail's status vocabulary.
+ *
+ * `ROSTER_ROW_STATUS_KEYWORD` is total over the arm union, so this cannot
+ * miss an arm. The membership check guards the OTHER direction — the two
+ * tables are separately maintained spellings of one closed set, and a drift
+ * between them must surface here rather than paint a row as a status the
+ * stylesheet has no rule for.
+ */
+function statusFromFrameRow(row: FrameRosterRow, path: string): WorkspaceStatus {
+  const keyword = ROSTER_ROW_STATUS_KEYWORD[row.status.case];
+  if (!WORKSPACE_STATUSES.has(keyword)) {
+    log(
+      "error",
+      `workspace roster: frame status arm ${JSON.stringify(row.status.case)} maps to unknown status ` +
+        `${JSON.stringify(keyword)} at ${path} — row: ${describeBreach(row)}`,
+      {
+        operation: "sidebar.roster-frame-status-invalid",
+        context: { path, arm: row.status.case, status: keyword, row },
+      },
+    );
+    throw new Error(
+      `workspace roster: frame status arm ${JSON.stringify(row.status.case)} maps to unknown status ` +
+        `${JSON.stringify(keyword)} at ${path}`,
+    );
+  }
+  return keyword as WorkspaceStatus;
+}
+
+/**
+ * One frame row as a rail row.
+ *
+ * The frame carries `dir`, `name`, the status arm, `current`, and the family.
+ * It carries NOTHING ELSE the rail knows how to draw — no `closed`, no viewed
+ * or merged stamp, no branch, parent branch, or summary — because the frozen
+ * `frontend.v1.RosterRow` has no fields for them. They are defaulted here to
+ * the same values the hook path sends for a row that genuinely has none, so
+ * the render path stays single; what a frame-fed rail LOSES against a
+ * hook-fed one (the when-column, the detail panel's branch lines, the grey of
+ * a closed-but-unmerged row) is a gap in the wire contract, recorded here so
+ * it is not mistaken for a rendering bug.
+ */
+function rowFromFrame(row: FrameRosterRow, path: string): WorkspaceRow {
+  return {
+    name: row.name,
+    dir: row.dir,
+    status: statusFromFrameRow(row, path),
+    closed: false,
+    current: row.current,
+    lastViewedAt: null,
+    mergedAt: null,
+    branch: null,
+    parentBranch: null,
+    summary: null,
+    children: row.children.map((child, i) => rowFromFrame(child, `${path}.children[${i}]`)),
+  };
+}
+
+/**
+ * A decoded `frontend.v1.WorkspaceRoster` as the rail's internal roster.
+ *
+ * The view ONEOF's set arm is the grouping — there is no separate mode flag
+ * to disagree with it — so the inactive grouping's section list is empty by
+ * construction rather than by convention. Repo sections carry only their key,
+ * so the key doubles as the header label (the frame has no display label to
+ * carry); task sections carry `title` as the label and `taskId` as the key,
+ * which is what every task command addresses.
+ *
+ * The frame's `currentDir` is not read: the rail marks the current row from
+ * the row's own `current` flag, exactly as it always has, and consuming both
+ * would create two authorities on one fact.
+ */
+export function rosterFromFrame(frame: RosterFrame): WorkspaceRoster {
+  const repos: RepoGroup[] =
+    frame.view.case === "repository"
+      ? frame.view.value.sections.map((section, i) => ({
+          key: section.repoKey,
+          label: section.repoKey,
+          folded: section.folded,
+          // Repo sections have no done axis; the shared group shape carries
+          // the field, and Emacs sends `false` on every repo group today.
+          done: false,
+          rows: section.rows.map((r, j) => rowFromFrame(r, `roster.repos[${i}].rows[${j}]`)),
+        }))
+      : [];
+  const tasks: RepoGroup[] =
+    frame.view.case === "task"
+      ? frame.view.value.sections.map((section, i) => ({
+          key: section.taskId,
+          label: section.title,
+          // Tasks do not fold: `taskSectionHtml` renders a `.task-head`, not
+          // the fold-toggling `.repo-head`, so no fold state can apply.
+          folded: false,
+          done: section.done,
+          rows: section.rows.map((r, j) => rowFromFrame(r, `roster.tasks[${i}].rows[${j}]`)),
+        }))
+      : [];
+  // An empty section is the frame's "no recent merges": proto3 has no absent
+  // repeated field, so emptiness is the only signal available, and the rail
+  // renders no section at all rather than an empty header. The frame carries
+  // no fold state for it either, so it renders unfolded.
+  const mergedRows = frame.recentlyMerged.rows.map((r, i) =>
+    rowFromFrame(r, `roster.recentlyMerged.rows[${i}]`),
+  );
+  return {
+    view: frame.view.case,
+    repos,
+    tasks,
+    recentlyMerged:
+      mergedRows.length === 0
+        ? null
+        : {
+            key: RECENTLY_MERGED_KEY,
+            label: RECENTLY_MERGED_LABEL,
+            folded: false,
+            done: false,
+            rows: mergedRows,
+          },
+    // An empty dir is the frame's "no cursor" (proto3 strings have no null),
+    // which the rail's nullable navDir spells as null.
+    navDir: frame.navDir === "" ? null : frame.navDir,
   };
 }
 
@@ -639,6 +804,12 @@ export class WorkspaceSidebar {
   private readonly parkFeed: () => void;
   private roster: WorkspaceRoster | null = null;
   /**
+   * Revision of the held roster, or null before the first adoption. Null is
+   * distinct from revision 0: nothing has been asserted yet, so the very
+   * first roster is adopted whatever it claims.
+   */
+  private rosterRevision: number | null = null;
+  /**
    * Dirs whose detail panel is open. Sidebar-owned (like the feed's open
    * panels), NOT derived from the roster, so a push mid-read cannot slam
    * a panel shut; keyed by dir because rows have no other stable key.
@@ -683,37 +854,86 @@ export class WorkspaceSidebar {
     });
   }
 
-  /** Adopt a pushed roster (validated — a malformed push throws) and
-   * paint. The first push is what reveals the rail.
+  /**
+   * Adopt a roster pushed through the legacy host hook (validated — a
+   * malformed push throws) and paint.
    *
-   * The reveal is the gui's other half arriving: while the rail is hidden
-   * it sits out of the flex row and the feed fills the frame, so flipping
-   * it visible narrows the feed and reflows it. The boot render already
-   * parked the feed at its tail, and that reflow strands the park a
-   * rail-width above the bottom — the "sidebar pops in and the output is
-   * no longer at the newest message" symptom. So on the reveal (and only
-   * then, since later pushes leave the layout untouched) the feed's pin is
-   * read BEFORE the reflow and re-parked AFTER, forcing the intended
-   * sequencing: output + sidebar rendered, then scroll to the bottom. */
+   * The injection carries no revision, so it enters the shared gate at
+   * `HOOK_ROSTER_REVISION`; everything else about the adoption — the reveal,
+   * the re-park, the diagnostics — is the frame path's, by construction.
+   */
   update(roster: unknown): void {
+    this.adopt(validateWorkspaceRoster(roster), HOOK_ROSTER_REVISION, "hook");
+  }
+
+  /**
+   * Adopt a decoded `frontend.v1.WorkspaceRoster` frame and paint.
+   *
+   * This is the destination path: the roster arrives on the SAME websocket
+   * the feed and the footer read, so a connect snapshot paints all three
+   * surfaces from one burst instead of leaving the rail waiting on a separate
+   * script injection.
+   */
+  adoptRosterFrame(frame: RosterFrame): void {
+    this.adopt(rosterFromFrame(frame), frame.revision, "frame");
+  }
+
+  /**
+   * THE adoption point, shared by both publish paths.
+   *
+   * REVISION GATE. The daemon retains the roster and rebroadcasts it, so a
+   * reconnect replays a snapshot that may reorder against what this page
+   * already holds; a roster older than the held one is stale by definition
+   * and is dropped. An EQUAL revision is adopted, not dropped: a redelivery
+   * of the held revision asserts the same picture, and the hook path — which
+   * has no revision to advance — would otherwise adopt exactly once and then
+   * freeze. A drop is always logged with both revisions, never silent.
+   *
+   * THE REVEAL is the gui's other half arriving: while the rail is hidden it
+   * sits out of the flex row and the feed fills the frame, so flipping it
+   * visible narrows the feed and reflows it. The boot render already parked
+   * the feed at its tail, and that reflow strands the park a rail-width above
+   * the bottom — the "sidebar pops in and the output is no longer at the
+   * newest message" symptom. So on the reveal (and only then, since later
+   * adoptions leave the layout untouched) the feed's pin is read BEFORE the
+   * reflow and re-parked AFTER, forcing the intended sequencing: output +
+   * sidebar rendered, then scroll to the bottom.
+   */
+  private adopt(roster: WorkspaceRoster, revision: number, path: RosterPath): void {
+    const held = this.rosterRevision;
+    if (held !== null && revision < held) {
+      log(
+        "warn",
+        `workspace roster dropped: revision ${revision} is older than the held revision ${held} ` +
+          `(path=${path})`,
+        {
+          operation: "sidebar.roster-stale-dropped",
+          context: { revision, held_revision: held, path },
+        },
+      );
+      return;
+    }
     const revealing = this.mount.hidden;
     const wasPinned = revealing && this.isPinned();
-    this.roster = validateWorkspaceRoster(roster);
-    const rows = rosterRows(this.roster);
+    this.roster = roster;
+    this.rosterRevision = revision;
+    const rows = rosterRows(roster);
     const current = rows.find((row) => row.current);
     log(
       "info",
-      `workspace roster adopted rows=${rows.length} current_dir=${current?.dir ?? "none"} ` +
-        `current_status=${current?.status ?? "none"} view=${this.roster.view} ` +
-        `nav_dir=${this.roster.navDir ?? "none"} revealing=${revealing}`,
+      `workspace roster adopted path=${path} revision=${revision} rows=${rows.length} ` +
+        `current_dir=${current?.dir ?? "none"} current_status=${current?.status ?? "none"} ` +
+        `view=${roster.view} nav_dir=${roster.navDir ?? "none"} revealing=${revealing}`,
       {
         operation: "sidebar.roster-adopted",
         context: {
+          path,
+          revision,
           rows: rows.length,
           current_dir: current?.dir ?? "",
           current_status: current?.status ?? "",
-          view: this.roster.view,
-          nav_dir: this.roster.navDir ?? "",
+          view: roster.view,
+          nav_dir: roster.navDir ?? "",
           revealing,
         },
       },

@@ -296,6 +296,12 @@ async function boot(): Promise<void> {
     isPinned: () => isPinnedToBottom(feedEl),
     parkFeed: () => parkAtTail(feedEl),
   });
+  // The LEGACY publish path, kept installed while the Emacs side migrates to
+  // the roster frame. The two land on one adoption method under one revision
+  // gate (see WorkspaceSidebar.adopt), so whichever publisher this bundle
+  // meets, the rail reveals and repaints identically. FOLLOW-UP: drop this
+  // hook — and the lisp that fires it — once the Emacs publisher emits the
+  // frame, since only the frame path can carry the revision the gate ranks by.
   installWorkspaceRosterHook(window as unknown as HostGlobal, sidebar);
   // C-S-RET in the input window fires the expand hook to unfold the
   // cursor row's detail panel (openDirs is client-owned, off the roster).
@@ -971,6 +977,15 @@ async function boot(): Promise<void> {
           // redeployed) under a page that cannot be redeployed in place, so the
           // page fetches itself again.
           versionSkew.observeSnapshotAdoption(daemonBootId);
+        }
+        // The rail, painted from the SAME burst the feed and the footer are
+        // ingesting: on a connect snapshot the roster frame rides in with the
+        // rest, so the gui's three surfaces finish appearing together instead
+        // of the rail waiting on a separate script injection. Adopted
+        // synchronously (like the current-status lease below) — the sidebar's
+        // own revision gate decides whether a replayed roster is stale.
+        for (const effect of effects) {
+          if (effect.kind === "workspace-roster") sidebar.adoptRosterFrame(effect.value);
         }
         if (effects.some((effect) => effect.kind === "workspace-state")) {
           if (store.state.renderState === null) {
