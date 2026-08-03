@@ -188,26 +188,32 @@ func TestPostRotationRePullIsBoundedInTheNewSeqSpace(t *testing.T) {
 
 func TestRePullFromARetiredSpaceIsNeverCoalescedOnto(t *testing.T) {
 	// Arrange — a re-pull whose bounds were computed before the rotation covers
-	// nothing in the space that replaced it, however the numbers compare.
-	client := &replayClient{block: make(chan struct{})}
-	h := newRepullHarness(t, client)
+	// nothing in the space that replaced it, however the numbers compare. The
+	// new-space request must therefore run its OWN pull rather than be told the
+	// retired one already serves it.
+	client := &replayClient{block: make(chan struct{}), entered: make(chan struct{})}
+	w := newRepullWaitWatcher()
+	h := newRepullHarnessWithLog(t, client, w.logf)
 	h.seq.SetLastSeq("s1", 100)
-	started := make(chan struct{})
-	go func() {
-		close(started)
-		_ = h.m.Resync("ws", 0)
-	}()
-	<-started
-	waitFor(t, "the first replay to start", func() bool { return client.callCount() == 1 })
+	go func() { _ = h.m.Resync("ws", 0) }()
+	<-client.entered
 	h.rotate("uuid-old", "uuid-new")
 
 	// Act
-	err := h.m.Resync("ws", 5)
+	second := make(chan error, 1)
+	go func() { second <- h.m.Resync("ws", 5) }()
+	<-w.waiting
 	close(client.block)
+	err := <-second
 
 	// Assert
-	if !errors.Is(err, ErrRepullInFlight) {
-		t.Fatalf("err = %v, want ErrRepullInFlight for a re-pull bounded in a retired seq space", err)
+	if err != nil {
+		t.Fatalf("Resync after a rotation: %v — it must wait the retired pull out and serve its own range", err)
+	}
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	if len(client.calls) != 2 {
+		t.Fatalf("replay calls = %v, want a SECOND pull rather than a coalesce onto the retired one", client.calls)
 	}
 }
 

@@ -38,6 +38,21 @@ var ErrRepullInFlight = errclass.ErrRepullInFlight
 // history it asked for. Surfaced, never presented as a complete answer.
 var ErrRepullTruncated = errclass.ErrRepullTruncated
 
+// repullWaitGrace bounds how long a WAITING request keeps waiting after the
+// in-flight re-pull's own activity deadline has already fired.
+//
+// The wait itself is NOT bounded by a fixed wall-clock budget, and deliberately
+// so: a healthy re-pull of a large history legitimately runs far longer than
+// any single idle window, and cutting a waiter off while the pull it waits on
+// is actively streaming would recreate the under-serve this whole path exists
+// to remove. What bounds the wait is the in-flight pull's OWN discipline — its
+// repullActivity cancels on one idle window without progress, which is finite
+// by construction — plus this grace for the pull to unwind and release the
+// workspace once that deadline has tripped. A pull that ignores its own
+// cancellation past the grace is a wedge, and the waiter says so loudly rather
+// than waiting on it forever.
+const repullWaitGrace = repullIdleTimeout
+
 // repullState is one workspace's in-flight re-pull, guarded by m.mu.
 type repullState struct {
 	fromSeq uint64
@@ -47,6 +62,15 @@ type repullState struct {
 	// across generations is comparing numbers from different spaces, so the
 	// coalescing rule refuses rather than pretends.
 	epoch uint64
+	// done is closed once this re-pull has finished AND released the workspace,
+	// so a serialized request can start the moment the slot is free. Closed
+	// exactly once, by releaseRepull.
+	done chan struct{}
+	// activity is this re-pull's progress-rearmed deadline. A waiter watches its
+	// context so that "the pull I am queued behind is still making progress" and
+	// "the pull I am queued behind has given up" are distinguishable without
+	// polling anything.
+	activity *repullActivity
 }
 
 type repullTimer interface {
@@ -273,48 +297,47 @@ func (a *repullActivity) snapshotLocked() repullSnapshot {
 // from the store with no shim in the loop, and only the remainder above it is
 // asked of the shim (see the section above).
 //
-// Concurrency: at most one re-pull per workspace. A second request whose range
-// is already COVERED by the in-flight one is coalesced onto it — the pull's
-// output is broadcast to every subscriber of the workspace, so the second
-// caller is genuinely served by the first pull rather than being told "yes"
-// while nothing happens. A request reaching FURTHER BACK than the in-flight one
-// is not covered, so it is refused loudly (ErrRepullInFlight) instead of being
-// silently under-served.
+// Concurrency: at most one re-pull per workspace AT A TIME, and every request
+// is served.
+//
+//   - A request whose range is already COVERED by the in-flight one is coalesced
+//     onto it — the pull's output is broadcast to every subscriber of the
+//     workspace, so the second caller is genuinely served by the first pull
+//     rather than being told "yes" while nothing happens.
+//   - A request reaching FURTHER BACK than the in-flight one is not covered, so
+//     it WAITS for that pull to finish and then runs itself, over its own full
+//     requested range.
+//
+// WHY THE WAIT REPLACED A REFUSAL. This used to answer an uncovered concurrent
+// request with ErrRepullInFlight, on the implicit contract that the caller would
+// retry. No caller ever implemented that retry, so the refusal was a silent
+// under-serve with extra steps, and it was observed costing a freshly-loaded
+// client its entire history: an incremental resync (from_seq=4905) was in flight
+// when a fresh page asked from the floor, the fresh page was nacked, never
+// re-asked, and its feed stayed permanently missing seqs 4586-4904.
+//
+// WHY THE FULL RANGE, NOT THE UNCOVERED REMAINDER. The suffix the in-flight pull
+// already delivered is re-delivered by this one. That is the SAME double
+// delivery the coalescing rule above has always produced (a caller asking from
+// 5 while a pull from 0 runs receives 0..5 too), and the frontend keys every
+// conversation item on its record uuid, which is stable across a replay, so a
+// re-delivery replaces the item rather than duplicating it. Serving the whole
+// requested range keeps this path a single fact — "the range you asked for was
+// pulled" — instead of a fact that depends on what another client happened to be
+// doing at the time.
 //
 // Runs synchronously: it is the tail of a ResyncCmd, and the CommandAck should
 // report what actually happened rather than acknowledging an intent.
 func (m *Manager) startRepull(d *sessionController, fromSeq, stopAt uint64) error {
-	m.mu.Lock()
-	epoch := d.rotEpoch
-	if cur := d.repull; cur != nil {
-		// A re-pull from a RETIRED seq space covers nothing in this one, however
-		// the numbers happen to compare. Coalescing across a rotation would hand
-		// this caller an in-flight pull of a conversation the vendor has retired
-		// and call it served.
-		sameSpace := cur.epoch == epoch
-		covered := sameSpace && cur.fromSeq <= fromSeq
-		m.mu.Unlock()
-		if covered {
-			m.logf("session-controller: coalescing re-pull ws=%q from_seq=%d onto the in-flight one (from_seq=%d stop_at=%d)",
-				d.workspace, fromSeq, cur.fromSeq, cur.stopAt)
-			return nil
-		}
-		if !sameSpace {
-			return fmt.Errorf("%w: ws=%q the in-flight re-pull (from_seq=%d stop_at=%d) counts in a RETIRED vendor seq space (epoch %d, now %d), so it cannot cover the requested from_seq=%d",
-				ErrRepullInFlight, d.workspace, cur.fromSeq, cur.stopAt, cur.epoch, epoch, fromSeq)
-		}
-		return fmt.Errorf("%w: ws=%q in-flight from_seq=%d does not cover the requested from_seq=%d",
-			ErrRepullInFlight, d.workspace, cur.fromSeq, fromSeq)
+	state, err := m.claimRepull(d, fromSeq, stopAt)
+	if err != nil {
+		return err
 	}
-	d.repull = &repullState{fromSeq: fromSeq, stopAt: stopAt, epoch: epoch}
-	m.mu.Unlock()
-	defer func() {
-		m.mu.Lock()
-		d.repull = nil
-		m.mu.Unlock()
-	}()
-
-	activity := newRepullActivity(m.rootCtx, repullIdleTimeout)
+	if state == nil {
+		return nil // coalesced onto an in-flight pull that covers this range
+	}
+	activity := state.activity
+	defer m.releaseRepull(d, state)
 	defer activity.stop()
 
 	storeFrom, storeStop, shimFrom, shimStop := m.splitRepullRange(d, fromSeq, stopAt)
@@ -327,6 +350,144 @@ func (m *Manager) startRepull(d *sessionController, fromSeq, stopAt uint64) erro
 		return nil
 	}
 	return m.repullFromShim(d, activity, shimFrom, shimStop)
+}
+
+// claimRepull acquires the workspace's single re-pull slot for (fromSeq,
+// stopAt), waiting out any in-flight pull that does not cover the request.
+//
+// It returns exactly one of three answers, and the caller distinguishes them by
+// shape: a non-nil state means the slot is HELD and the pull must run (and must
+// be released); (nil, nil) means the request is COALESCED onto an in-flight pull
+// that covers it and nothing further is owed; a non-nil error means the request
+// could not be served and the ack must say so.
+//
+// The epoch read on ENTRY is the generation the caller's bounds were computed
+// in (Resync derived them from the ring/high-water immediately before calling).
+// It is re-checked after every wait, because a rotation retires the seq space
+// those bounds count in — serving them afterwards is exactly the ceiling-from-a-
+// retired-space defect purgeRetainedOnRotation exists to close.
+func (m *Manager) claimRepull(d *sessionController, fromSeq, stopAt uint64) (*repullState, error) {
+	m.mu.Lock()
+	reqEpoch := d.rotEpoch
+	waited := false
+	for {
+		cur := d.repull
+		if cur == nil {
+			state := &repullState{
+				fromSeq:  fromSeq,
+				stopAt:   stopAt,
+				epoch:    reqEpoch,
+				done:     make(chan struct{}),
+				activity: newRepullActivity(m.rootCtx, repullIdleTimeout),
+			}
+			d.repull = state
+			m.mu.Unlock()
+			if waited {
+				m.logf("session-controller: the in-flight re-pull ws=%q finished; now serving the request that waited for it from_seq=%d stop_at=%d epoch=%d",
+					d.workspace, fromSeq, stopAt, reqEpoch)
+			}
+			return state, nil
+		}
+		// A re-pull from a RETIRED seq space covers nothing in this one, however
+		// the numbers happen to compare. Coalescing across a rotation would hand
+		// this caller an in-flight pull of a conversation the vendor has retired
+		// and call it served, so it is treated as uncovered and waited out.
+		sameSpace := cur.epoch == reqEpoch
+		covered := sameSpace && cur.fromSeq <= fromSeq
+		curFrom, curStop, curEpoch := cur.fromSeq, cur.stopAt, cur.epoch
+		done, activity := cur.done, cur.activity
+		m.mu.Unlock()
+		if covered {
+			m.logf("session-controller: coalescing re-pull ws=%q from_seq=%d onto the in-flight one (from_seq=%d stop_at=%d)",
+				d.workspace, fromSeq, curFrom, curStop)
+			return nil, nil
+		}
+		m.logf("session-controller: the in-flight re-pull ws=%q (from_seq=%d stop_at=%d epoch=%d) does NOT cover the requested from_seq=%d (epoch %d, same_seq_space=%v) — WAITING for the in-flight re-pull, then serving from_seq=%d itself rather than refusing the request",
+			d.workspace, curFrom, curStop, curEpoch, fromSeq, reqEpoch, sameSpace, fromSeq)
+		if err := m.awaitRepull(d, curFrom, curStop, fromSeq, done, activity); err != nil {
+			return nil, err
+		}
+		waited = true
+		m.mu.Lock()
+		if d.rotEpoch != reqEpoch {
+			nowEpoch := d.rotEpoch
+			m.mu.Unlock()
+			m.logf("session-controller: re-pull request ws=%q from_seq=%d stop_at=%d was computed in a seq space the vendor RETIRED while it waited (epoch %d -> %d); it is refused rather than served against the new space, and the rotation itself re-drives the frontend's resync",
+				d.workspace, fromSeq, stopAt, reqEpoch, nowEpoch)
+			return nil, fmt.Errorf("%w: ws=%q the request (from_seq=%d stop_at=%d) waited for an in-flight re-pull and the vendor session ROTATED meanwhile (epoch %d, now %d), so its bounds count in a RETIRED seq space and must not be served",
+				ErrRepullInFlight, d.workspace, fromSeq, stopAt, reqEpoch, nowEpoch)
+		}
+	}
+}
+
+// awaitRepull blocks until the in-flight re-pull releases the workspace, or
+// fails loudly if waiting any longer would be waiting on a wedge.
+//
+// There is no polling and no sleep: the three things that can end the wait are
+// all channels — the in-flight pull's release, the daemon's own shutdown, and
+// the in-flight pull's progress-rearmed deadline. Only once that deadline has
+// tripped does a fixed grace apply, because only then is the pull known to owe
+// an unwind rather than to be doing work (see repullWaitGrace).
+func (m *Manager) awaitRepull(d *sessionController, curFrom, curStop, fromSeq uint64, done <-chan struct{}, activity *repullActivity) error {
+	select {
+	case <-done:
+		return nil
+	case <-m.rootCtx.Done():
+		return m.repullWaitAbandoned(d, curFrom, curStop, fromSeq)
+	case <-activity.ctx.Done():
+	}
+	grace := m.repullGrace()
+	m.logf("session-controller: the in-flight re-pull ws=%q (from_seq=%d stop_at=%d) hit its OWN deadline (cause=%v) while a request from_seq=%d waited behind it; allowing %s for it to unwind and release the workspace",
+		d.workspace, curFrom, curStop, context.Cause(activity.ctx), fromSeq, grace)
+	timer := time.NewTimer(grace)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return nil
+	case <-m.rootCtx.Done():
+		return m.repullWaitAbandoned(d, curFrom, curStop, fromSeq)
+	case <-timer.C:
+		m.logf("session-controller: re-pull WAIT TIMED OUT ws=%q: the in-flight re-pull (from_seq=%d stop_at=%d) did not release the workspace within %s of its own deadline, so the request from_seq=%d is NOT served",
+			d.workspace, curFrom, curStop, grace, fromSeq)
+		return fmt.Errorf("%w: ws=%q waited for the in-flight re-pull (from_seq=%d stop_at=%d), whose own deadline had already tripped, and it did not release the workspace within %s; the requested from_seq=%d went unserved",
+			ErrRepullInFlight, d.workspace, curFrom, curStop, grace, fromSeq)
+	}
+}
+
+// repullWaitAbandoned is the shutdown outcome of a wait, reported as the failure
+// it is: the daemon is going away, so nobody is going to serve this range.
+func (m *Manager) repullWaitAbandoned(d *sessionController, curFrom, curStop, fromSeq uint64) error {
+	m.logf("session-controller: re-pull wait ABANDONED ws=%q: the daemon is shutting down while a request from_seq=%d waited for the in-flight re-pull (from_seq=%d stop_at=%d)",
+		d.workspace, fromSeq, curFrom, curStop)
+	return fmt.Errorf("%w: ws=%q the daemon shut down while the request from_seq=%d waited for the in-flight re-pull (from_seq=%d stop_at=%d)",
+		ErrRepullInFlight, d.workspace, fromSeq, curFrom, curStop)
+}
+
+// repullGrace is repullWaitGrace unless a test shortened it, mirroring
+// interruptDrain: the timeout branch is reachable without a minute-long wait.
+func (m *Manager) repullGrace() time.Duration {
+	if m.repullWaitGraceOverride > 0 {
+		return m.repullWaitGraceOverride
+	}
+	return repullWaitGrace
+}
+
+// releaseRepull frees the workspace's re-pull slot and wakes everything queued
+// behind it. Closing done is what makes the wait a handoff rather than a poll.
+func (m *Manager) releaseRepull(d *sessionController, state *repullState) {
+	m.mu.Lock()
+	holder := d.repull
+	if holder == state {
+		d.repull = nil
+	}
+	m.mu.Unlock()
+	if holder != state {
+		// Unreachable by the single-owner discipline above; reported rather than
+		// silently corrected, because clearing another pull's slot would strand it.
+		m.logf("session-controller: INVARIANT VIOLATION ws=%q: the finishing re-pull (from_seq=%d stop_at=%d) does not hold the workspace's re-pull slot; the slot is left alone",
+			d.workspace, state.fromSeq, state.stopAt)
+	}
+	close(state.done)
 }
 
 // splitRepullRange partitions the requested exclusive range (fromSeq, stopAt)
