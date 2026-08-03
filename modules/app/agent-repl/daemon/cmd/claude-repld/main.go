@@ -321,6 +321,16 @@ func main() {
 		daemonFatal(daemonLog, "claude-repld: open prompt receipt store: %v", err)
 	}
 
+	// The scheduled-shutdown drain lease and the prompts it parks. A daemon
+	// that cannot install these cannot promise that a bounce it scheduled
+	// survives a crash, nor that a prompt it parked behind that bounce is
+	// delivered afterwards — and starting anyway would make both promises
+	// silently false, which is exactly the shape of loss they exist to end.
+	shutdownSchedules, err := statedb.NewShutdownSchedules(stateStore)
+	if err != nil {
+		daemonFatal(daemonLog, "claude-repld: open shutdown schedule store: %v", err)
+	}
+
 	// Persistent session registry: the in-memory session map dies with
 	// the process, so this write-through record store is what lets a
 	// restarted daemon keep resolving the s_<hex> ids its frontends
@@ -604,6 +614,7 @@ func main() {
 		ClearCompactStore: seqStore,
 		DurableHistory:    durableHistory,
 		PromptReceipts:    promptReceipts,
+		ShutdownHolds:     shutdownSchedules,
 		PermissionModes:   server.NewRegistryModeStore(sessionRegistry),
 		Registrar:         registrar,
 		ModelCatalogs:     registrar,
@@ -775,6 +786,11 @@ func main() {
 		Resyncer:          controller,
 		WorkspaceCreation: workspaceBridge,
 		RequestShutdown:   requestShutdown,
+		// The scheduled-shutdown drain lease: its durable record and the fleet
+		// it derives its holds from. The controller satisfies DrainHoldSource,
+		// and the scheduler binds itself to it at construction.
+		ShutdownSchedules: shutdownSchedules,
+		DrainHolds:        controller,
 		ClientLogs:        clientLogs,
 		// The daemon resolves a workspace's conversation for itself. Frontends
 		// send an intent (continue / fresh / explicit), never a remembered
@@ -791,6 +807,16 @@ func main() {
 	}
 	// Bind the session controller's push target now that the frontend server exists.
 	forwarder.SetTarget(agentShim.Server)
+	// A schedule this daemon's PREDECESSOR took and did not finish draining is
+	// re-taken here, before any client connects: the deploy that asked for the
+	// bounce is still waiting for it, and coming back idle would strand it
+	// while the next prompt started a turn under a lease it still believes
+	// stands. Restoring is done exactly once, at boot.
+	if agentShim.ShutdownScheduler != nil {
+		if rerr := agentShim.ShutdownScheduler.Restore(); rerr != nil {
+			daemonFatal(daemonLog, "claude-repld: restore the scheduled-shutdown drain lease: %v", rerr)
+		}
+	}
 	defer func() {
 		if cerr := agentShim.Close(); cerr != nil {
 			daemonLog.With("operation", "close-frontend-surface").Log("claude-repld: frontend surface close: %v", cerr)

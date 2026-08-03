@@ -477,6 +477,9 @@ func (s *Server) PushWorkspaceAvailable(v *frontendv1.WorkspaceAvailable) {
 	s.Broadcast(WorkspaceAvailableFrame(v))
 }
 func (s *Server) PushHostAction(v *frontendv1.HostAction) { s.Broadcast(HostActionFrame(v)) }
+func (s *Server) PushShutdownSchedule(v *frontendv1.ShutdownScheduleView) {
+	s.Broadcast(ShutdownScheduleFrame(v))
+}
 
 // isHostOnlyFrame marks daemon-to-host work that must never cross into either
 // GUI transport.  ClientKind is the authority: every GUI connection is barred,

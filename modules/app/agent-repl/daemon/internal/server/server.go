@@ -1580,15 +1580,15 @@ func (s *Server) sweepable(sessionID, workspace string, nowMs int64) bool {
 func (s *Server) ShutdownAll(stopShims bool) {
 	s.stopOnce.Do(func() { close(s.stopped) })
 	if !stopShims {
-		s.logf("server: shutdown PRESERVING session shims; survivors redial %s and park until the next daemon claims them",
-			"the daemon shim socket")
+		s.logf("server: SHIM STOP DECLINED initiator=daemon_shutdown scope=all_sessions reason=stop_shims_false — every session shim is PRESERVED; survivors redial the daemon shim socket and park until the next daemon claims them")
 		return
 	}
+	s.logf("server: SHIM STOP DECIDED initiator=daemon_shutdown scope=all_sessions reason=stop_shims_true — the caller asked for the shim bundle to be replaced, so every non-terminal session's shim is stopped on the way out")
 	for _, rec := range s.registry.All() {
 		if rec.Terminal || rec.CWD == "" {
 			continue
 		}
-		s.logf("server: shutdown stop-shims mode: stopping the shim for session %s (ws %s)", rec.SessionID, rec.CWD)
+		s.logf("server: SHIM STOP ISSUED initiator=daemon_shutdown session=%s ws=%q reason=stop_shims_true", rec.SessionID, rec.CWD)
 		if err := s.controller.Hibernate(rec.CWD); err != nil {
 			// A MID-TURN WORKSPACE IS NOW REFUSED here too, because the settled
 			// check lives inside the shared teardown rather than in each caller.

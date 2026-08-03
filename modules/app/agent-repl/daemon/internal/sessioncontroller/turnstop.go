@@ -156,9 +156,16 @@ func (m *Manager) drainLiveTurnForStop(workspace, sessionID, path string, cl tur
 // successful hibernation into a failed one, so it is logged loudly at the layer
 // that owns it — the same treatment closeCompactingLocked and the rotation
 // reconciliation get — and never silently absorbed.
+// THE STOP'S PROVENANCE IS STATED IN FULL, on every path. This is the ONE
+// funnel from this package to Spawner.StopShim, so the line it writes is the
+// complete answer to "why did this shim stop" — who asked (path), what the
+// session was doing at the time, and whether a scheduled shutdown's drain lease
+// was standing over it, named by schedule and cause. A stop that leaves that
+// question to be reconstructed from surrounding lines is the failure mode this
+// exists to end.
 func (m *Manager) stopShimSettlingTurn(workspace, sessionID, path string, soleSessionController bool) error {
-	m.logf("session-controller: teardown shim stop ENTRY ws=%q session=%s path=%s sole_session_controller=%v",
-		workspace, sessionID, path, soleSessionController)
+	m.logf("session-controller: SHIM STOP ENTRY ws=%q session=%s initiator=%s sole_session_controller=%v %s",
+		workspace, sessionID, path, soleSessionController, m.shimStopProvenance())
 	stopErr := m.cfg.Spawner.StopShim(sessionID, m.shimPIDFor(sessionID))
 	if stopErr != nil {
 		m.logf("session-controller: teardown shim stop FAILED ws=%q session=%s path=%s: %v — the session-status lifecycle is still closed below, because a stop that failed leaves the turn no more reportable than one that succeeded",
