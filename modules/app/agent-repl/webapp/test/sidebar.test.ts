@@ -5,9 +5,14 @@
 // real `closest` walks over the rendered mount.
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type {
+  RosterRow as FrameRosterRow,
+  WorkspaceRoster as RosterFrame,
+} from "../src/frontend-proto.js";
 import { HostGlobal } from "../src/host.js";
 import {
   COMMAND_FAILED_NOTICE,
+  RECENTLY_MERGED_KEY,
   COMMAND_FAILED_NOTICE_MS,
   EXPAND_HOOK,
   NO_TASK_KEY,
@@ -1080,6 +1085,260 @@ describe("WorkspaceSidebar", () => {
     await vi.advanceTimersByTimeAsync(COMMAND_FAILED_NOTICE_MS);
     // Assert
     expect(mount.querySelector(".sb-err")).toBeNull();
+  });
+});
+
+/**
+ * The roster FRAME path: the decoded `frontend.v1.WorkspaceRoster` the rail
+ * now renders from, and the revision gate both publish paths share.
+ */
+describe("the roster frame", () => {
+  /** A frame row carrying exactly one status arm (arms are payload-free). */
+  function frameRow(over: Partial<FrameRosterRow> = {}): FrameRosterRow {
+    return {
+      dir: "/w/a",
+      name: "a",
+      status: { case: "ready" },
+      current: false,
+      children: [],
+      ...over,
+    };
+  }
+
+  /** A decoded roster frame in the repository grouping. */
+  function frame(over: Partial<RosterFrame> = {}): RosterFrame {
+    return {
+      revision: 3,
+      view: { case: "repository", value: { sections: [{ repoKey: "doom", folded: false, rows: [frameRow()] }] } },
+      recentlyMerged: { rows: [] },
+      currentDir: "",
+      navDir: "",
+      ...over,
+    };
+  }
+
+  it("renders the rail from an adopted frame", () => {
+    // Arrange
+    const { mount, sidebar } = harness();
+    // Act
+    sidebar.adoptRosterFrame(frame());
+    // Assert — the frame's row is on screen, addressed by its dir.
+    expect(mount.querySelector('[data-row-dir="/w/a"]')).not.toBeNull();
+  });
+
+  it("reveals the rail on the first frame, as the boot snapshot delivers it", () => {
+    // Arrange — a rail still hidden, exactly as it sits before the connect burst.
+    const { mount, sidebar } = harness();
+    // Act — the snapshot's roster frame arrives with the feed's own frames.
+    sidebar.adoptRosterFrame(frame());
+    // Assert
+    expect(mount.hidden).toBe(false);
+  });
+
+  it("re-parks the feed on the frame reveal when it was pinned to its tail", () => {
+    // Arrange — a feed sitting at its tail when the boot roster frame lands.
+    const { sidebar, parkCalls } = harness({ isPinned: () => true });
+    // Act
+    sidebar.adoptRosterFrame(frame());
+    // Assert — the reveal snapped the reflowed feed back to its tail.
+    expect(parkCalls()).toBe(1);
+  });
+
+  it("maps the repository view arm onto repo sections", () => {
+    // Arrange
+    const { mount, sidebar } = harness();
+    // Act
+    sidebar.adoptRosterFrame(frame());
+    // Assert — a fold-toggling repo header keyed by the section's repo key.
+    expect(mount.querySelector('[data-repo-key="doom"]')).not.toBeNull();
+  });
+
+  it("maps the task view arm onto task sections", () => {
+    // Arrange
+    const { mount, sidebar } = harness();
+    // Act
+    sidebar.adoptRosterFrame(
+      frame({
+        view: {
+          case: "task",
+          value: { sections: [{ taskId: "t1", title: "Ship it", done: false, rows: [frameRow()] }] },
+        },
+      }),
+    );
+    // Assert — the task header carries the task's id and its display title.
+    const head = mount.querySelector('[data-task-open][data-task-id="t1"]');
+    expect(head?.textContent).toBe("Ship it");
+  });
+
+  it("maps a row's status arm onto the rail's status vocabulary", () => {
+    // Arrange — an arm whose keyword spelling differs from the arm name.
+    const { mount, sidebar } = harness();
+    // Act
+    sidebar.adoptRosterFrame(
+      frame({
+        view: {
+          case: "repository",
+          value: {
+            sections: [
+              { repoKey: "doom", folded: false, rows: [frameRow({ status: { case: "idleAsync" } })] },
+            ],
+          },
+        },
+      }),
+    );
+    // Assert
+    expect(mount.querySelector(".st-idle-async")).not.toBeNull();
+  });
+
+  it("renders no Recently Merged section when the frame's section is empty", () => {
+    // Arrange
+    const { mount, sidebar } = harness();
+    // Act
+    sidebar.adoptRosterFrame(frame());
+    // Assert — proto3 spells "no recent merges" as an empty row list.
+    expect(mount.querySelector(".merged-section")).toBeNull();
+  });
+
+  it("keys the Recently Merged section the way the fold command addresses it", () => {
+    // Arrange
+    const { mount, sidebar } = harness();
+    // Act
+    sidebar.adoptRosterFrame(
+      frame({ recentlyMerged: { rows: [frameRow({ dir: "/w/m", status: { case: "merged" } })] } }),
+    );
+    // Assert — the key must match `agent-repl--sidebar-merged-key`.
+    expect(
+      mount.querySelector(`.merged-section [data-repo-key="${RECENTLY_MERGED_KEY}"]`),
+    ).not.toBeNull();
+  });
+
+  it("reads an empty navDir as no keyboard cursor", () => {
+    // Arrange
+    const { mount, sidebar } = harness();
+    // Act
+    sidebar.adoptRosterFrame(frame({ navDir: "" }));
+    // Assert — no row wears the cursor's dashed ring.
+    expect(mount.querySelector(".navsel")).toBeNull();
+  });
+});
+
+describe("the roster revision gate", () => {
+  function frameAt(revision: number, dir: string): RosterFrame {
+    return {
+      revision,
+      view: {
+        case: "repository",
+        value: {
+          sections: [
+            {
+              repoKey: "doom",
+              folded: false,
+              rows: [{ dir, name: "a", status: { case: "ready" }, current: false, children: [] }],
+            },
+          ],
+        },
+      },
+      recentlyMerged: { rows: [] },
+      currentDir: "",
+      navDir: "",
+    };
+  }
+
+  it("drops a frame older than the held revision", () => {
+    // Arrange — a reconnect replay reordering behind what the page holds.
+    const { mount, sidebar } = harness();
+    sidebar.adoptRosterFrame(frameAt(5, "/w/new"));
+    // Act
+    sidebar.adoptRosterFrame(frameAt(4, "/w/old"));
+    // Assert — the newer picture still stands.
+    expect(mount.querySelector('[data-row-dir="/w/old"]')).toBeNull();
+  });
+
+  it("logs the drop with both revisions rather than swallowing it", () => {
+    // Arrange
+    const lines: string[] = [];
+    const { sidebar } = harness();
+    sidebar.adoptRosterFrame(frameAt(5, "/w/new"));
+    setLogger(new ForwardingLogger(() => true, (level, line) => lines.push(`${level}: ${line}`)));
+    // Act
+    sidebar.adoptRosterFrame(frameAt(4, "/w/old"));
+    // Assert
+    expect(
+      lines.some((l) => l.includes("revision 4 is older than the held revision 5")),
+    ).toBe(true);
+  });
+
+  it("adopts a frame at the held revision, since it asserts the same picture", () => {
+    // Arrange
+    const { mount, sidebar } = harness();
+    sidebar.adoptRosterFrame(frameAt(5, "/w/first"));
+    // Act
+    sidebar.adoptRosterFrame(frameAt(5, "/w/second"));
+    // Assert
+    expect(mount.querySelector('[data-row-dir="/w/second"]')).not.toBeNull();
+  });
+
+  it("adopts the first frame whatever revision it claims", () => {
+    // Arrange — nothing held yet, so there is no revision to be older than.
+    const { mount, sidebar } = harness();
+    // Act
+    sidebar.adoptRosterFrame(frameAt(0, "/w/a"));
+    // Assert
+    expect(mount.hidden).toBe(false);
+  });
+
+  it("still adopts a hook push, ranked at the hook revision", () => {
+    // Arrange — the legacy path, live until the Emacs publisher migrates.
+    const { mount, sidebar } = harness();
+    // Act
+    sidebar.update(roster({ repos: [group({ rows: [row({ dir: "/w/hooked" })] })] }));
+    // Assert
+    expect(mount.querySelector('[data-row-dir="/w/hooked"]')).not.toBeNull();
+  });
+
+  it("adopts a second hook push, which carries no advancing revision", () => {
+    // Arrange
+    const { mount, sidebar } = harness();
+    sidebar.update(roster({ repos: [group({ rows: [row({ dir: "/w/first" })] })] }));
+    // Act
+    sidebar.update(roster({ repos: [group({ rows: [row({ dir: "/w/second" })] })] }));
+    // Assert — an equal revision must not freeze the hook path.
+    expect(mount.querySelector('[data-row-dir="/w/second"]')).not.toBeNull();
+  });
+
+  it("names the hook as the adopting path in the log", () => {
+    // Arrange
+    const lines: string[] = [];
+    setLogger(new ForwardingLogger(() => true, (level, line) => lines.push(`${level}: ${line}`)));
+    const { sidebar } = harness();
+    // Act
+    sidebar.update(roster());
+    // Assert
+    expect(lines.some((l) => l.includes("workspace roster adopted path=hook"))).toBe(true);
+  });
+
+  it("names the frame as the adopting path in the log", () => {
+    // Arrange
+    const lines: string[] = [];
+    setLogger(new ForwardingLogger(() => true, (level, line) => lines.push(`${level}: ${line}`)));
+    const { sidebar } = harness();
+    // Act
+    sidebar.adoptRosterFrame(frameAt(7, "/w/a"));
+    // Assert
+    expect(lines.some((l) => l.includes("workspace roster adopted path=frame revision=7"))).toBe(
+      true,
+    );
+  });
+
+  it("drops a hook push once a frame has asserted a higher revision", () => {
+    // Arrange — during the transition only the frame path can prove its age,
+    // so it outranks a later injection.
+    const { mount, sidebar } = harness();
+    sidebar.adoptRosterFrame(frameAt(9, "/w/framed"));
+    // Act
+    sidebar.update(roster({ repos: [group({ rows: [row({ dir: "/w/hooked" })] })] }));
+    // Assert
+    expect(mount.querySelector('[data-row-dir="/w/hooked"]')).toBeNull();
   });
 });
 
