@@ -2,11 +2,33 @@ package ssm
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 )
+
+// ErrTurnBridgeDeadClaim marks the ONE turn-bridge refusal that says nothing
+// about protocol health: the bridge names a turn whose durable claim is already
+// CLOSED.
+//
+// A closed claim is a turn that can no longer be running. Its end was either
+// observed on the stream or synthesized by the daemon (TurnCloseRestartInterrupted,
+// TurnCloseAlreadyComplete). Either way the epoch that owned the turn is retired,
+// and a bridge arriving for it is evidence about the past, not a claim on the
+// present. There is nothing to correlate and nothing to corrupt: the ledger row
+// is final and this refusal leaves it exactly as it was.
+//
+// It is separated from the other bridge refusals because those DO say the shim
+// and the daemon disagree about a LIVE turn — two event sessions claiming one
+// in-flight turn, or a bridge naming a previous session the durable start does
+// not belong to. Those stay terminal. This one does not, because escalating it
+// cost a live session: a /clear whose claim had been closed by restart
+// reconciliation replayed its bridge on every reattach, and each replay tore the
+// session down before last_seen_seq could advance past it — an unbounded
+// teardown loop driven by a turn that had been dead for minutes.
+var ErrTurnBridgeDeadClaim = errors.New("ssm: turn claim bridge names an already-completed claim")
 
 // The two SYNTHESIZED terminal causes: the reasons a turn claim is ended by the
 // daemon rather than by a `TurnEnded` off the stream.
@@ -169,8 +191,12 @@ func (m *Manager) ResolveTurnClaimBridge(workspace, claimantSessionID string, ev
 		ev.GetSessionId(), id, ev.GetSeq(),
 	)
 	if err != nil {
-		m.logf("ssm: turn bridge decision=reject workspace=%s claimant_session=%s event_session=%s seq=%d turn_id=%q previous_session=%q request_id=%q error=%v",
-			workspace, claimantSessionID, ev.GetSessionId(), ev.GetSeq(), id,
+		decision := "reject"
+		if errors.Is(err, ErrTurnBridgeDeadClaim) {
+			decision = "refuse_dead_claim"
+		}
+		m.logf("ssm: turn bridge decision=%s workspace=%s claimant_session=%s event_session=%s seq=%d turn_id=%q previous_session=%q request_id=%q error=%v",
+			decision, workspace, claimantSessionID, ev.GetSessionId(), ev.GetSeq(), id,
 			previousSessionID, ev.GetRequestId(), err)
 		return false, err
 	}
@@ -527,8 +553,10 @@ func recordTurnBridge(
 		startEventSessionID == previousSessionID:
 		return true, nil
 	case endSeq.Valid:
-		return false, fmt.Errorf("turn bridge id %q seq=%d conflicts with completed claim end_seq=%d",
-			id, seq, endSeq.Int64)
+		// Refused, not accepted: the claim keeps its recorded end and this bridge
+		// is written nowhere. Only the ESCALATION differs — see ErrTurnBridgeDeadClaim.
+		return false, fmt.Errorf("%w: turn bridge id %q seq=%d conflicts with completed claim end_seq=%d",
+			ErrTurnBridgeDeadClaim, id, seq, endSeq.Int64)
 	case bridgeSeq.Valid:
 		return false, fmt.Errorf("turn bridge id %q at event_session=%q seq=%d conflicts with durable event_session=%q seq=%d",
 			id, eventSessionID, seq, bridgeEventSessionID, bridgeSeq.Int64)

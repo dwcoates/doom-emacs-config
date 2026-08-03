@@ -1,6 +1,7 @@
 package ssm
 
 import (
+	"errors"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -635,5 +636,108 @@ func TestUnknownTurnEndWithoutAnyClaimIsStillRejected(t *testing.T) {
 	// Assert.
 	if err == nil || !strings.Contains(err.Error(), "no durable active claim") {
 		t.Fatalf("ResolveTurnLifecycle err = %v, want the unclaimed end rejected", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The DEAD-CLAIM bridge: rotation proof that arrives for a turn already closed.
+//
+// The live incident: a dispatched /clear held turn daemon-prompt-2-…, restart
+// reconciliation closed that claim (end_seq=0), and the /clear's own vendor-session
+// rotation then produced a bridge for it. The bridge was refused — correctly —
+// but the refusal was escalated as a protocol violation, which severed the shim
+// link, ended the session controller, and left last_seen_seq parked BEFORE the
+// bridge, so the shim replayed it into the next session and killed that one too.
+//
+// These tests pin the split: a refusal against a CLOSED claim is recoverable,
+// a refusal against a LIVE one stays a protocol violation.
+// ---------------------------------------------------------------------------
+
+func TestTurnClaimBridgeClassifiesRefusalByWhetherTheClaimIsStillLive(t *testing.T) {
+	tests := []struct {
+		name     string
+		seed     func(t *testing.T, m *Manager)
+		bridge   *corev1.Event
+		wantDead bool
+		wantMsg  string
+	}{
+		{
+			name: "closed claim is a dead-epoch refusal the session can survive",
+			seed: func(t *testing.T, m *Manager) {
+				t.Helper()
+				claimTurn(t, m, "ws", "daemon-session", "vendor-old", "daemon-prompt-2", 5)
+				// The restart reconciliation that closed the claim with end_seq=0.
+				if _, _, closed, err := m.ReconcileTurnHandshake("ws", "daemon-session", nil, false); err != nil {
+					t.Fatalf("close the phantom claim: %v", err)
+				} else if !reflect.DeepEqual(closed, []string{"daemon-prompt-2"}) {
+					t.Fatalf("closed = %v, want the seeded claim", closed)
+				}
+			},
+			bridge:   turnClaimBridgeEvent(6, "daemon-prompt-2", "vendor-old", "vendor-new"),
+			wantDead: true,
+			wantMsg:  "conflicts with completed claim end_seq=0",
+		},
+		{
+			name: "live claim already bridged elsewhere stays a protocol violation",
+			seed: func(t *testing.T, m *Manager) {
+				t.Helper()
+				claimTurn(t, m, "ws", "daemon-session", "vendor-old", "daemon-prompt-2", 5)
+				first := turnClaimBridgeEvent(6, "daemon-prompt-2", "vendor-old", "vendor-new")
+				if replayed, err := m.ResolveTurnClaimBridge("ws", "daemon-session", first); err != nil || replayed {
+					t.Fatalf("seed accepted bridge = replayed:%v err:%v", replayed, err)
+				}
+			},
+			bridge:   turnClaimBridgeEvent(7, "daemon-prompt-2", "vendor-old", "vendor-other"),
+			wantDead: false,
+			wantMsg:  "conflicts with durable event_session",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			m := openTurnClaimManager(t, filepath.Join(t.TempDir(), "state.db"))
+			tc.seed(t, m)
+
+			// Act.
+			replayed, err := m.ResolveTurnClaimBridge("ws", "daemon-session", tc.bridge)
+
+			// Assert.
+			if err == nil || replayed {
+				t.Fatalf("ResolveTurnClaimBridge = replayed:%v err:%v, want a refusal", replayed, err)
+			}
+			if !strings.Contains(err.Error(), tc.wantMsg) {
+				t.Fatalf("refusal = %v, want it to name %q", err, tc.wantMsg)
+			}
+			if got := errors.Is(err, ErrTurnBridgeDeadClaim); got != tc.wantDead {
+				t.Fatalf("errors.Is(ErrTurnBridgeDeadClaim) = %v, want %v (err=%v)", got, tc.wantDead, err)
+			}
+		})
+	}
+}
+
+func TestDeadClaimBridgeRefusalLeavesTheClosedClaimUntouched(t *testing.T) {
+	// Arrange — a closed claim, then the bridge that arrives too late for it.
+	m := openTurnClaimManager(t, filepath.Join(t.TempDir(), "state.db"))
+	claimTurn(t, m, "ws", "daemon-session", "vendor-old", "daemon-prompt-2", 5)
+	if _, _, _, err := m.ReconcileTurnHandshake("ws", "daemon-session", nil, false); err != nil {
+		t.Fatalf("close the phantom claim: %v", err)
+	}
+
+	// Act.
+	if _, err := m.ResolveTurnClaimBridge(
+		"ws", "daemon-session", turnClaimBridgeEvent(6, "daemon-prompt-2", "vendor-old", "vendor-new"),
+	); !errors.Is(err, ErrTurnBridgeDeadClaim) {
+		t.Fatalf("bridge err = %v, want the dead-claim refusal", err)
+	}
+
+	// Assert — the refusal recorded nothing: the claim stays closed, not active.
+	before, after, closed, err := m.ReconcileTurnHandshake("ws", "daemon-session", nil, false)
+	if err != nil {
+		t.Fatalf("ReconcileTurnHandshake: %v", err)
+	}
+	if len(before) != 0 || len(after) != 0 || len(closed) != 0 {
+		t.Fatalf("ledger after refusal = before:%v after:%v closed:%v, want no active claim — a refused bridge must not revive a closed one",
+			before, after, closed)
 	}
 }

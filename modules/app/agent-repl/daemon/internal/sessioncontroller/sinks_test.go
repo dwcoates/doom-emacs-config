@@ -2021,3 +2021,110 @@ func TestUserTurnReceiptIgnoresNonUserItems(t *testing.T) {
 		t.Fatalf("textLen = %d, want 0 for a non-user delta", textLen)
 	}
 }
+
+// TestTurnClaimBridgeEscalatesOnlyConflictsWithLiveClaims pins the split that
+// kept a /clear from killing its own session: a bridge refused because its claim
+// is ALREADY CLOSED is survivable (the transport must consume the event so
+// last_seen_seq advances past it and the shim stops replaying it), while every
+// other refusal still severs the link as a protocol violation.
+func TestTurnClaimBridgeEscalatesOnlyConflictsWithLiveClaims(t *testing.T) {
+	deadClaim := fmt.Errorf("%w: turn bridge id %q seq=6 conflicts with completed claim end_seq=0",
+		ssm.ErrTurnBridgeDeadClaim, "daemon-prompt-2-d41297f08566")
+	liveConflict := fmt.Errorf("turn bridge id %q at event_session=%q seq=7 conflicts with durable event_session=%q seq=6",
+		"daemon-prompt-2-d41297f08566", "vendor-other", "vendor-new")
+
+	tests := []struct {
+		name         string
+		bridgeErr    error
+		wantErr      bool
+		wantDecision string
+	}{
+		{
+			name:         "refusal against a completed claim keeps the session",
+			bridgeErr:    deadClaim,
+			wantErr:      false,
+			wantDecision: "refuse_dead_claim_bridge_session_survives",
+		},
+		{
+			name:         "refusal against a live claim stays terminal",
+			bridgeErr:    liveConflict,
+			wantErr:      true,
+			wantDecision: "reject_durable_bridge",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			applier := &fakeApplier{bridgeErr: tc.bridgeErr}
+			var logged []string
+			c := newConsumer(
+				"ws", "s1", &fakePusher{}, applier, &fakeProgress{}, newFakeClearCompactStore(),
+				func(format string, args ...any) { logged = append(logged, fmt.Sprintf(format, args...)) },
+				nil, nil, nil, nil, nil,
+			)
+			bridge := &corev1.Event{
+				SessionId: "vendor-new",
+				Seq:       6,
+				Plane:     corev1.Plane_PLANE_STREAM,
+				Class:     corev1.EventClass_EVENT_CLASS_PERSISTENT,
+				RequestId: "daemon-prompt-2-d41297f08566",
+				Payload: &corev1.Event_TurnClaimBridge{TurnClaimBridge: &corev1.TurnClaimBridge{
+					TurnId: "daemon-prompt-2-d41297f08566", PreviousSessionId: "vendor-old",
+				}},
+			}
+
+			// Act.
+			err := c.ApplyTurnClaimBridge(bridge)
+
+			// Assert.
+			if gotErr := err != nil; gotErr != tc.wantErr {
+				t.Fatalf("ApplyTurnClaimBridge err = %v, want error:%v", err, tc.wantErr)
+			}
+			if len(applier.bridges) != 1 {
+				t.Fatalf("durable bridge calls = %d, want exactly one — the refusal is the ledger's to make", len(applier.bridges))
+			}
+			if !strings.Contains(strings.Join(logged, "\n"), tc.wantDecision) {
+				t.Fatalf("missing decision %q in log:\n%s", tc.wantDecision, strings.Join(logged, "\n"))
+			}
+		})
+	}
+}
+
+// TestDeadClaimBridgeRefusalIsStillRecordedLoudly pins that surviving the
+// refusal never means hiding it: a bridge the daemon declines to honor is
+// reported with its turn id and its cause even though no error is returned.
+func TestDeadClaimBridgeRefusalIsStillRecordedLoudly(t *testing.T) {
+	// Arrange.
+	applier := &fakeApplier{bridgeErr: fmt.Errorf("%w: turn bridge id %q seq=6 conflicts with completed claim end_seq=0",
+		ssm.ErrTurnBridgeDeadClaim, "daemon-prompt-2-d41297f08566")}
+	var logged []string
+	c := newConsumer(
+		"ws", "s1", &fakePusher{}, applier, &fakeProgress{}, newFakeClearCompactStore(),
+		func(format string, args ...any) { logged = append(logged, fmt.Sprintf(format, args...)) },
+		nil, nil, nil, nil, nil,
+	)
+	bridge := &corev1.Event{
+		SessionId: "vendor-new",
+		Seq:       6,
+		Plane:     corev1.Plane_PLANE_STREAM,
+		Class:     corev1.EventClass_EVENT_CLASS_PERSISTENT,
+		RequestId: "daemon-prompt-2-d41297f08566",
+		Payload: &corev1.Event_TurnClaimBridge{TurnClaimBridge: &corev1.TurnClaimBridge{
+			TurnId: "daemon-prompt-2-d41297f08566", PreviousSessionId: "vendor-old",
+		}},
+	}
+
+	// Act.
+	if err := c.ApplyTurnClaimBridge(bridge); err != nil {
+		t.Fatalf("ApplyTurnClaimBridge = %v, want the session spared", err)
+	}
+
+	// Assert.
+	all := strings.Join(logged, "\n")
+	if !strings.Contains(all, "turn bridge REFUSED") ||
+		!strings.Contains(all, "daemon-prompt-2-d41297f08566") ||
+		!strings.Contains(all, "conflicts with completed claim end_seq=0") {
+		t.Fatalf("dead-claim refusal was not recorded loudly; log:\n%s", all)
+	}
+}
