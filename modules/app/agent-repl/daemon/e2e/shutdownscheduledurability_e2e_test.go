@@ -164,12 +164,23 @@ func TestE2EAPromptHeldByAnExecutedDrainIsDeliveredAfterTheSwap(t *testing.T) {
 	second := world.boot(t)
 
 	// Assert — the successor delivers what the drain held.
+	//
+	// THE SCOPED CONNECTION IS DIALLED BEFORE THE SWEEP IS DRIVEN, and the
+	// order is load-bearing rather than incidental. B's session is what has to
+	// wire for the held prompt to be delivered, and wiring it is the boot
+	// sweeper's re-check pass — so a subscriber dialled AFTER that pass can miss
+	// the delivery it triggered. Subscribe first, then drive the event, then
+	// wait for its consequence.
 	snap := connectSnapshot(t, second)
 	sessionB := snapshotSessionID(t, snap, cwdB)
 	afterConn := second.harness().dial(t, sessionB)
 	if firstFrame := readFrame(t, afterConn); firstFrame.GetSnapshot() == nil {
 		t.Fatalf("first scoped frame = %T, want a StateSnapshot", firstFrame.GetFrame())
 	}
+	// B's shim outlived the bounce and is redialling; the re-check is the pass
+	// that claims it. Fired on the OBSERVED redial rather than on test phase
+	// order, so it cannot land before there is anything to claim.
+	second.sweepRecheckWhenParked(t, sessionB)
 	awaitAll(t, afterConn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
 		"the held prompt's own reply, from the daemon on the other side of the bounce": func(frame *frontendv1.FrontendFrame) bool {
 			for _, item := range deltaItems(frame, cwdB) {
