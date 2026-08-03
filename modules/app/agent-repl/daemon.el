@@ -40,6 +40,8 @@
 (declare-function agent-repl--uds-send-command "frontend-uds" (field payload &optional workspace process))
 (declare-function agent-repl--uds-track-command "frontend-uds" (request-id field workspace &optional on-failure on-success))
 (declare-function agent-repl--frontend-daemon-view-binary-mtime-seconds "frontend-state" ())
+(declare-function agent-repl-frontend-shutdown-schedule "frontend-state" ())
+(declare-function agent-repl-frontend-scheduled-shutdown-id "frontend-state" ())
 
 ;; Forward declaration: this defcustom lives in session.el, which loads
 ;; AFTER this file.  Declared here so byte-compilation doesn't warn about a
@@ -710,6 +712,94 @@ asynchronous socket probe determine the exit outcome."
                        req (if stop-shims "t" "nil"))
       req)))
 
+;;;; ---- Scheduled shutdown (the drain lease) ----------------------------
+;;
+;; `ShutdownCmd' demands the bounce NOW: whatever turn was in flight when the
+;; user typed it dies with the daemon.  `ScheduleShutdownCmd' hands the daemon
+;; the decision of WHEN instead — it takes a daemon-global drain lease, blocks
+;; NEW turns at the prompt queue, and runs the same shutdown the moment every
+;; workspace goes quiet.  The immediate path stays exactly as it was; this is
+;; a second door, not a replacement.
+;;
+;; Emacs builds NO reconnection machinery for it.  The executed shutdown is
+;; indistinguishable from any other daemon exit, so the existing reattach
+;; sweep (`agent-repl--frontend-reattach-check', frontend-client.el) brings the
+;; link back on the replacement exactly as it does after a manual bounce.
+
+(defun agent-repl--frontend-request-scheduled-shutdown (cause &optional stop-shims)
+  "Ask the daemon to SCHEDULE a shutdown (`ScheduleShutdownCmd').
+CAUSE is free display text carried on the broadcast lease and the daemon's
+durable log; STOP-SHIMS sets `stop_shims' with the same meaning it has on
+`ShutdownCmd' (nil, the default, PRESERVES shims for reattach).  Dials
+first when the link is down, for the same reason the immediate shutdown
+does: the daemon that owns the socket may be one this Emacs never spawned.
+
+Refuses loudly, before any send, when a schedule is ALREADY live in the
+recorded lease.  The proto makes a second schedule a nack rather than a
+silent replace so two deploy flows cannot merge their intents, and
+refusing here names the live schedule instead of making the user read a
+daemon ack to find out.  An empty CAUSE is refused the same way: the
+lease's only human-readable field must not be blank.
+
+Tracks the command so a rejected ack surfaces loudly.  Returns the
+`request_id'."
+  (unless (and (stringp cause) (not (string-empty-p (string-trim cause))))
+    (agent-repl--log nil "scheduled shutdown: REFUSING blank cause=%S" cause)
+    (user-error "agent-repl: a scheduled shutdown needs a cause"))
+  (let ((live (agent-repl-frontend-scheduled-shutdown-id)))
+    (when live
+      (agent-repl--log nil
+                       "scheduled shutdown: REFUSING — schedule-id=%s already holds the lease; cancel it first"
+                       live)
+      (user-error "agent-repl: shutdown %s is already scheduled; cancel it first"
+                  live)))
+  (let ((connected (agent-repl--uds-connected-p)))
+    (agent-repl--log nil
+                     "scheduled shutdown: uds-connected=%s addr=%s stop-shims=%s cause=%S"
+                     connected agent-repl-frontend-daemon-addr
+                     (if stop-shims "t" "nil") cause)
+    (unless connected
+      (agent-repl-uds-connect))
+    (let ((req (agent-repl--uds-send-command
+                "scheduleShutdown"
+                (append (list :cause cause)
+                        (when stop-shims (list :stopShims t))))))
+      (agent-repl--uds-track-command req "scheduleShutdown" nil)
+      (agent-repl--log nil
+                       "scheduled shutdown: command accepted request-id=%S"
+                       req)
+      req)))
+
+(defun agent-repl--frontend-request-cancel-scheduled-shutdown ()
+  "Cancel the live scheduled shutdown (`CancelScheduledShutdownCmd').
+The schedule id comes from the last decoded `ShutdownScheduleView'; the
+proto requires it to match the live schedule so a cancel aimed at an old
+schedule can never kill a newer one.
+
+With NO recorded schedule this is a loud `user-error', never a no-op: the
+nil case covers both `idle' and a lease never received, and sending a
+guessed or empty id would earn a daemon nack the user would have to go
+read the log to find.  Returns the `request_id'."
+  (let ((schedule-id (agent-repl-frontend-scheduled-shutdown-id)))
+    (unless schedule-id
+      (agent-repl--log nil
+                       "cancel scheduled shutdown: REFUSING — no live schedule recorded lease=%S"
+                       (agent-repl-frontend-shutdown-schedule))
+      (user-error "agent-repl: no scheduled shutdown to cancel"))
+    (let ((connected (agent-repl--uds-connected-p)))
+      (agent-repl--log nil
+                       "cancel scheduled shutdown: uds-connected=%s addr=%s schedule-id=%s"
+                       connected agent-repl-frontend-daemon-addr schedule-id)
+      (unless connected
+        (agent-repl-uds-connect))
+      (let ((req (agent-repl--uds-send-command
+                  "cancelScheduledShutdown" (list :scheduleId schedule-id))))
+        (agent-repl--uds-track-command req "cancelScheduledShutdown" nil)
+        (agent-repl--log nil
+                         "cancel scheduled shutdown: command accepted request-id=%S schedule-id=%s"
+                         req schedule-id)
+        req))))
+
 (defun agent-repl--frontend-bounce-foreign-daemon (&optional stop-shims on-complete)
   "Bounce an ADOPTED daemon this Emacs does not track, via `ShutdownCmd'.
 STOP-SHIMS rides the command; see
@@ -1137,6 +1227,53 @@ the one caller that needs it: a deploy that changed the shim BUNDLE, whose
 survivors would otherwise keep running the previous build\=' code."
   (interactive "P")
   (agent-repl-runtime-restart (and stop-shims t)))
+
+;;;###autoload
+(defun agent-repl-frontend-daemon-restart-scheduled (reason &optional stop-shims)
+  "SCHEDULE the daemon restart instead of demanding it now.
+Takes the daemon-global drain lease: no new turn starts anywhere, and the
+daemon executes the bounce itself the moment every workspace is quiet.
+REASON is folded into the lease's broadcast cause, which is what the
+webapp's drain banner shows every other client while they wait.
+
+This is the restart to reach for when work is in flight.  The immediate
+`agent-repl-frontend-daemon-restart' is unchanged and still the right call
+when nothing is running or the daemon must go NOW.
+
+STOP-SHIMS (the interactive prefix argument) rides the schedule with the
+same meaning it has on the immediate path, and is fixed HERE rather than
+at drain time because it is a property of what was rebuilt.
+
+Refuses loudly when a schedule already exists or REASON is blank; cancel
+with `agent-repl-frontend-daemon-cancel-scheduled-restart'."
+  (interactive (list (read-string "Scheduled restart reason: ")
+                     current-prefix-arg))
+  (unless (and (stringp reason) (not (string-empty-p (string-trim reason))))
+    (agent-repl--log nil "scheduled restart command: REFUSING blank reason=%S" reason)
+    (user-error "agent-repl: a scheduled restart needs a reason"))
+  (let ((cause (format "scheduled restart from Emacs (%s)" (string-trim reason))))
+    (agent-repl--log nil
+                     "scheduled restart command: invoked interactive=%s stop-shims=%s cause=%S"
+                     (if (called-interactively-p 'interactive) "t" "nil")
+                     (if stop-shims "t" "nil") cause)
+    (let ((req (agent-repl--frontend-request-scheduled-shutdown
+                cause (and stop-shims t))))
+      (message "agent-repl: restart scheduled; the daemon bounces when every workspace drains")
+      req)))
+
+;;;###autoload
+(defun agent-repl-frontend-daemon-cancel-scheduled-restart ()
+  "Cancel the scheduled daemon restart and release the drain lease.
+Uses the schedule id from the last pushed lease view.  With no schedule
+recorded this fails loudly rather than reporting a cancel that never
+happened."
+  (interactive)
+  (agent-repl--log nil
+                   "cancel scheduled restart command: invoked interactive=%s"
+                   (if (called-interactively-p 'interactive) "t" "nil"))
+  (let ((req (agent-repl--frontend-request-cancel-scheduled-shutdown)))
+    (message "agent-repl: scheduled restart cancelled")
+    req))
 
 (provide 'daemon)
 
