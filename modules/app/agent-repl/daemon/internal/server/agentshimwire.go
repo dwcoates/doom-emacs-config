@@ -433,11 +433,13 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 	if err != nil {
 		return nil, fmt.Errorf("server: build merge repo keyer: %w", err)
 	}
-	// The post-merge handoff: when a child workspace merges into a PARENT
-	// worktree, the parent's session is told, and any postprocessing prompt
-	// the child was created with runs there. See postmergehook.go for why both
-	// dependencies are derived from cfg rather than injected separately.
-	postMerge, err := buildPostMergeHook(cfg, logf)
+	// Process-level merge aftermath is independent of the workspace's own
+	// after-action, which still runs under the merge lease.
+	postMerge, err := buildPostMergeHook(logf)
+	if err != nil {
+		return nil, err
+	}
+	afterActions, err := buildAfterActionSource(cfg, logf)
 	if err != nil {
 		return nil, err
 	}
@@ -471,6 +473,7 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 		// records the create commands wrote — the same ones the after-action's
 		// prompt comes out of.
 		BeforeActions:      mergeBeforeActions{creation: beforeActions},
+		AfterActions:       afterActions,
 		BeforeActionRunner: mergeBeforeActionRunner{prompts: cfg.Prompts},
 		AfterActionRunner:  mergeAfterActionRunner{prompts: cfg.Prompts},
 	})

@@ -234,18 +234,13 @@ func newFakePostMergeHook(capacity int) *fakePostMergeHook {
 	}
 }
 
-// testAfterActionPrompt is the prompt both post-merge doubles report.
+// testAfterActionPrompt is the default creation-time postprocessing action.
 //
 // IT IS NON-EMPTY DELIBERATELY. The coordinator publishes the after_action
 // phase IFF the workspace has one configured, so a double answering "" would
 // describe a workspace with no after-action and silence the very phase these
 // tests are about.
-const testAfterActionPrompt = "tell the parent what landed"
-
-// AfterAction reports the prompt the hook would deliver.
-func (h *fakePostMergeHook) AfterAction(Request) (string, error) {
-	return testAfterActionPrompt, nil
-}
+const testAfterActionPrompt = "finish the merged workspace's postprocessing"
 
 func (h *fakePostMergeHook) AfterMerged(_ context.Context, req Request) error {
 	h.calls <- req
@@ -265,10 +260,6 @@ type autoPostMergeHook struct {
 
 func newAutoPostMergeHook(capacity int) *autoPostMergeHook {
 	return &autoPostMergeHook{calls: make(chan Request, capacity)}
-}
-
-func (h *autoPostMergeHook) AfterAction(Request) (string, error) {
-	return testAfterActionPrompt, nil
 }
 
 func (h *autoPostMergeHook) AfterMerged(_ context.Context, req Request) error {
@@ -492,6 +483,8 @@ type harnessOpts struct {
 	deaths SessionDeaths
 	// beforeActions replaces the no-action-recorded source.
 	beforeActions BeforeActionSource
+	// afterActions replaces the default postprocessing-action source.
+	afterActions AfterActionSource
 	// beforeRunner replaces the always-succeeding action runner.
 	beforeRunner BeforeActionRunner
 	// afterRunner replaces the always-succeeding after-action runner.
@@ -545,6 +538,13 @@ type fakeBeforeActions struct {
 }
 
 func (s fakeBeforeActions) BeforeAction(string) (string, error) { return s.prompt, s.err }
+
+type fakeAfterActions struct {
+	prompt string
+	err    error
+}
+
+func (s fakeAfterActions) AfterAction(Request) (string, error) { return s.prompt, s.err }
 
 // fakeBeforeActionRunner is the merge.BeforeActionRunner double: it records the
 // deliveries and can be told to fail the turn.
@@ -638,6 +638,10 @@ func newHarnessWith(t *testing.T, opts harnessOpts) *harness {
 	if beforeRunner == nil {
 		beforeRunner = &fakeBeforeActionRunner{}
 	}
+	afterActions := opts.afterActions
+	if afterActions == nil {
+		afterActions = fakeAfterActions{prompt: testAfterActionPrompt}
+	}
 	afterRunner := opts.afterRunner
 	if afterRunner == nil {
 		afterRunner = &fakeAfterActionRunner{}
@@ -659,6 +663,7 @@ func newHarnessWith(t *testing.T, opts harnessOpts) *harness {
 		// The default harness workspace carries NO before-action, which is the
 		// common case; a test that wants one overrides the source.
 		BeforeActions:      beforeActions,
+		AfterActions:       afterActions,
 		BeforeActionRunner: beforeRunner,
 		AfterActionRunner:  afterRunner,
 		Now:                opts.now,
@@ -707,6 +712,7 @@ func TestNewCoordinatorRequiresEveryDependency(t *testing.T) {
 			Sessions:           &fakeSessionBringUp{},
 			Deaths:             fakeSessionDeaths{},
 			BeforeActions:      fakeBeforeActions{},
+			AfterActions:       fakeAfterActions{prompt: testAfterActionPrompt},
 			BeforeActionRunner: &fakeBeforeActionRunner{},
 			AfterActionRunner:  &fakeAfterActionRunner{},
 		}
@@ -730,6 +736,7 @@ func TestNewCoordinatorRequiresEveryDependency(t *testing.T) {
 		{name: "no session bring-up", mutate: func(c *CoordinatorConfig) { c.Sessions = nil }, wantErr: true},
 		{name: "no session-deaths source", mutate: func(c *CoordinatorConfig) { c.Deaths = nil }, wantErr: true},
 		{name: "no before-action source", mutate: func(c *CoordinatorConfig) { c.BeforeActions = nil }, wantErr: true},
+		{name: "no after-action source", mutate: func(c *CoordinatorConfig) { c.AfterActions = nil }, wantErr: true},
 		{name: "no before-action runner", mutate: func(c *CoordinatorConfig) { c.BeforeActionRunner = nil }, wantErr: true},
 		{name: "no after-action runner", mutate: func(c *CoordinatorConfig) { c.AfterActionRunner = nil }, wantErr: true},
 	}
@@ -804,7 +811,7 @@ func TestEnqueueSurfacesAPublishFailure(t *testing.T) {
 		Logf: t.Logf, Sink: newSyncSink(1), Queue: failingQueue{err: sentinelError("disk full")},
 		Phases: fakePhases{}, Keyer: fakeKeyer{}, Picker: picker, Lease: newFakeLease(1), Resolver: newFakeResolver(1),
 		TestResolver: newFakeTestFailureResolver(1), PostMerge: newAutoPostMergeHook(1),
-		Status: newSyncSink(1), Sessions: &fakeSessionBringUp{}, Deaths: fakeSessionDeaths{}, AfterActionRunner: &fakeAfterActionRunner{},
+		Status: newSyncSink(1), Sessions: &fakeSessionBringUp{}, Deaths: fakeSessionDeaths{}, AfterActions: fakeAfterActions{}, AfterActionRunner: &fakeAfterActionRunner{},
 		BeforeActions: fakeBeforeActions{}, BeforeActionRunner: &fakeBeforeActionRunner{},
 	})
 	if err != nil {
@@ -1697,7 +1704,7 @@ func TestCloseRetainsAParkedConflictForTheNextBoot(t *testing.T) {
 		Logf: t.Logf, Sink: newSyncSink(4), Queue: q,
 		Phases: fakePhases{}, Keyer: fakeKeyer{}, Picker: picker, Lease: lease, Resolver: resolver,
 		TestResolver: newFakeTestFailureResolver(4), PostMerge: newAutoPostMergeHook(4),
-		Status: newSyncSink(4), Sessions: &fakeSessionBringUp{}, Deaths: fakeSessionDeaths{}, AfterActionRunner: &fakeAfterActionRunner{},
+		Status: newSyncSink(4), Sessions: &fakeSessionBringUp{}, Deaths: fakeSessionDeaths{}, AfterActions: fakeAfterActions{}, AfterActionRunner: &fakeAfterActionRunner{},
 		BeforeActions: fakeBeforeActions{}, BeforeActionRunner: &fakeBeforeActionRunner{},
 	})
 	if err != nil {

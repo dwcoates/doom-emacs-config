@@ -158,7 +158,7 @@ func newHarness(t *testing.T) *harness {
 }
 
 // newHarnessWith builds a harness, letting a test override selected Config
-// fields (Remediator, RequestShutdown, Accounts, Logins, WidgetAssetsDir,
+// fields (RequestShutdown, Accounts, Logins, WidgetAssetsDir,
 // BinaryMTime, IdleSweepTicks). Registry, Controller, SSM, and Frontend are always
 // wired.
 func newHarnessWith(t *testing.T, extra Config) *harness {
@@ -1228,64 +1228,6 @@ func TestCapabilitiesReportsBundleMissingWhenDistLacksIt(t *testing.T) {
 	out := getCapabilities(t, h)
 	if out["widget_assets"] != true || out["widget_bundle_present"] != false {
 		t.Errorf("capabilities = %v, want assets on but bundle missing", out)
-	}
-}
-
-// --- Remediation ----------------------------------------------------------
-
-type fakeRemediator struct {
-	started bool
-	err     error
-}
-
-func (f *fakeRemediator) Start(string) (bool, error) { return f.started, f.err }
-
-func postRemediation(t *testing.T, h *harness, body string) *http.Response {
-	t.Helper()
-	resp, err := http.Post(h.ts.URL+"/remediation", "application/json", bytes.NewBufferString(body))
-	if err != nil {
-		t.Fatalf("POST /remediation: %v", err)
-	}
-	t.Cleanup(func() { resp.Body.Close() })
-	return resp
-}
-
-func TestRemediationRefusesALiveSession(t *testing.T) {
-	// Arrange
-	h := newHarnessWith(t, Config{Remediator: &fakeRemediator{started: true}})
-	id := createSession(t, h, `{"cwd":"/w"}`)
-	// Act
-	resp := postRemediation(t, h, fmt.Sprintf(`{"session_id":%q}`, id))
-	// Assert — a session with a non-terminal record is alive; nothing to do.
-	if resp.StatusCode != http.StatusConflict {
-		t.Errorf("status = %d, want 409", resp.StatusCode)
-	}
-}
-
-func TestRemediationDispatchesForAVanishedSession(t *testing.T) {
-	// Arrange — no record for the id, so it is genuinely gone.
-	h := newHarnessWith(t, Config{Remediator: &fakeRemediator{started: true}})
-	// Act
-	resp := postRemediation(t, h, `{"session_id":"s_gone"}`)
-	// Assert
-	if resp.StatusCode != http.StatusAccepted {
-		t.Errorf("status = %d, want 202", resp.StatusCode)
-	}
-}
-
-func TestRemediationRejectsAnEmptySessionId(t *testing.T) {
-	h := newHarnessWith(t, Config{Remediator: &fakeRemediator{}})
-	resp := postRemediation(t, h, `{"session_id":""}`)
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400", resp.StatusCode)
-	}
-}
-
-func TestRemediationReportsAnUnconfiguredRunner(t *testing.T) {
-	h := newHarness(t) // no Remediator
-	resp := postRemediation(t, h, `{"session_id":"s_gone"}`)
-	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Errorf("status = %d, want 503", resp.StatusCode)
 	}
 }
 

@@ -433,13 +433,11 @@ export interface StoreState {
    */
   models: ModelInfo[];
   /**
-   * The session's working directory, from `SessionView.cwd` (the additive S6
-   * field that gave the resume/rebind path its input back).
+   * The session's working directory, from `SessionView.cwd`.
    */
   cwd: string;
   /**
-   * Durable CLI session uuid, from `SessionView.claude_session_id` (additive
-   * S6) — the client-side rebind key.
+   * Durable CLI session uuid, from `SessionView.claude_session_id`.
    */
   claudeSessionId: string;
   permissionMode: PermissionMode;
@@ -788,8 +786,7 @@ export class ConversationStore {
   ) {}
 
   /**
-   * Discard all state, as if freshly constructed. Used when the live view is
-   * rebound onto a DIFFERENT daemon session (the "session gone" rebind).
+   * Discard all state, as if freshly constructed.
    */
   reset(): void {
     this.state = initialState();
@@ -1089,8 +1086,7 @@ export class ConversationStore {
     s.contextTokens = sv.totalTokens > 0 ? sv.totalTokens : null;
     if (sv.tokenUtilization !== undefined) s.tokenUtilization = sv.tokenUtilization;
     if (sv.title !== "") s.taskSummary = sv.title;
-    // The durable resume keys feed the client-side rebind (main.ts); an
-    // empty value never clobbers a filled record.
+    // Empty identity values never clobber a filled record.
     if (sv.claudeSessionId !== "") s.claudeSessionId = sv.claudeSessionId;
     if (sv.cwd !== "") s.cwd = sv.cwd;
     return true;

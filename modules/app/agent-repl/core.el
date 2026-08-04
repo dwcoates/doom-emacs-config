@@ -479,13 +479,12 @@ structs) are represented compactly (live/dead, running/nil, present/nil)."
                (fork     (plist-get plist :fork-session-id))
                (rtimer   (plist-get plist :ready-timer))
                (pri      (plist-get plist :priority))
-               (pprompts (plist-get plist :pending-prompts))
                (pshow    (plist-get plist :pending-show-panels))
                (dprompts (plist-get plist :deferred-prompts)))
           (format (concat " {ws=%s id=%s dir=%s cst=%s rst=%s env=%s"
                           " fe=%s in=%s"
                           " wt=%s fork=%s"
-                          " rtmr=%s pri=%s pend=%s pshow=%s defq=%s}")
+                          " rtmr=%s pri=%s pshow=%s defq=%s}")
                   ws
                   (or id "-")
                   (or dir "-")
@@ -498,7 +497,6 @@ structs) are represented compactly (live/dead, running/nil, present/nil)."
                   (or fork "-")
                   (if rtimer "t" "-")
                   (or pri "-")
-                  (if pprompts (length pprompts) "-")
                   (if pshow "t" "-")
                   (if dprompts (length dprompts) "-")))))))
 
