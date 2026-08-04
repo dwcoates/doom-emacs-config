@@ -5,7 +5,7 @@
   "description": "Layer-2 WebSocket SPA client for claude-repld",
   "type": "module",
   "scripts": {
-    "ensure-deps": "[ -x node_modules/.bin/vitest ] && [ -f node_modules/@vitest/coverage-v8/package.json ] || npm ci",
+    "ensure-deps": "npm ls --depth=0 >/dev/null 2>&1 || npm ci",
     "dev": "vite",
     "prebuild": "npm run ensure-deps",
     "build": "tsc -p tsconfig.json --noEmit && vite build",
