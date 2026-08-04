@@ -26,13 +26,24 @@
  * daemon-lifecycle command the webapp never sends; none are encodable here so
  * a stray call is a compile error, not a silently malformed frame.
  */
+import {
+  COMMAND_ARM,
+  PROMPT_ORIGIN_WEBAPP_CARD_ACTION,
+  PROMPT_ORIGIN_WEBAPP_USER_SENT,
+  REVIVE_MODE,
+} from "./proto-names.js";
+
 // The webapp hand-types protojson for the same module-resolution reason as
 // `frontend-proto.ts`. Values are the canonical core.v1 enum names, so the Go
 // protojson decoder validates them against the generated descriptor.
-export enum PromptOrigin {
-  WEBAPP_USER_SENT = "PROMPT_ORIGIN_WEBAPP_USER_SENT",
-  WEBAPP_CARD_ACTION = "PROMPT_ORIGIN_WEBAPP_CARD_ACTION",
-}
+// The origin NAMES come from the build-checked spelling table (proto-names.ts)
+// rather than being typed out here: the Go protojson decoder validates them
+// against the generated descriptor, so a drifted name is a refused command.
+export const PromptOrigin = {
+  WEBAPP_USER_SENT: PROMPT_ORIGIN_WEBAPP_USER_SENT,
+  WEBAPP_CARD_ACTION: PROMPT_ORIGIN_WEBAPP_CARD_ACTION,
+} as const;
+export type PromptOrigin = (typeof PromptOrigin)[keyof typeof PromptOrigin];
 
 /** A protojson `google.protobuf.Struct` value (a free-form JSON object). */
 export type CommandStruct = Record<string, unknown>;
@@ -181,8 +192,15 @@ export interface ReviveSessionBody {
    * -context cost once. `direct`: resume as-is, the deliberate "I know it's
    * big" path.
    */
-  mode: "compactFirst" | "direct";
+  mode: ReviveMode;
 }
+
+/**
+ * The revival modes, as the arm keys the wire's oneof spells them with. Taken
+ * from the build-checked spelling table so the key this end sends and the arm
+ * the daemon reads cannot become two different strings.
+ */
+export type ReviveMode = (typeof REVIVE_MODE)[keyof typeof REVIVE_MODE];
 
 export type FrontendCommandBody =
   | SubmitPromptBody
@@ -214,21 +232,7 @@ export interface FrontendCommand {
  * no paint acknowledgment can be sent. Viewer-based attestation is gone: a
  * workspace's color is connection truth, so nothing this end draws is a
  * statement the daemon wants back. */
-export const ARM_KEY: Record<FrontendCommandBody["case"], string> = {
-  submitPrompt: "submitPrompt",
-  interrupt: "interrupt",
-  permissionAnswer: "permissionAnswer",
-  createSession: "createSession",
-  setModel: "setModel",
-  deleteSession: "deleteSession",
-  resync: "resync",
-  clientLog: "clientLog",
-  queueForce: "queueForce",
-  queueAccept: "queueAccept",
-  queueCancel: "queueCancel",
-  hibernateWorkspace: "hibernateWorkspace",
-  reviveSession: "reviveSession",
-};
+export const ARM_KEY: Record<FrontendCommandBody["case"], string> = COMMAND_ARM;
 
 /** Build the nested protojson command message for one body arm. */
 function encodeBody(b: FrontendCommandBody): Record<string, unknown> {
