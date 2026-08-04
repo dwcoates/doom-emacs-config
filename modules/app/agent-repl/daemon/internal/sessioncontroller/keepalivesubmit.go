@@ -111,6 +111,32 @@ func (m *Manager) SubmitKeepAlivePing(ctx context.Context, workspace string) (tu
 	sessionID := d.sessionID
 	m.mu.Unlock()
 
+	// THE WINDOW OPENS BEFORE THE PROMPT REACHES THE SHIM, which is the prompt
+	// receipt's ordering inverted and for the mirror-image reason. A receipt is
+	// written first so a prompt the user saw can never be unrecoverable; a
+	// keep-alive window is written first so a ping the vendor ran can never be
+	// UNATTRIBUTED — an unwindowed ping renders as though the user typed it,
+	// and that is the one outcome the exclusion exists to prevent.
+	//
+	// A window for a ping whose submit then fails costs nothing: it excludes an
+	// interval in which nothing was written.
+	if m.cfg.KeepAliveWindows != nil {
+		if err := m.cfg.KeepAliveWindows.Open(KeepAliveWindowRecord{
+			TurnID: turnID, Workspace: workspace, StartedAtMs: m.now(),
+		}); err != nil {
+			m.mu.Lock()
+			if d.keepAliveTurnID == turnID {
+				d.keepAliveTurnID = ""
+			}
+			m.mu.Unlock()
+			m.logf("session-controller: keep-alive ping ABANDONED ws=%q session=%s turn_id=%s error=%v — the window could not be recorded, so the ping is NOT submitted; running it unwindowed would render the ping as the user's own prompt",
+				workspace, sessionID, turnID, err)
+			return "", err
+		}
+	} else {
+		m.logf("session-controller: keep-alive ping ws=%q session=%s turn_id=%s has NO WINDOW LEDGER — the ping's conversation items will not be excluded from rendering",
+			workspace, sessionID, turnID)
+	}
 	m.logf("session-controller: keep-alive ping SUBMITTING ws=%q session=%s turn_id=%s — refreshing the vendor prompt cache before its TTL expires",
 		workspace, sessionID, turnID)
 	err = m.forwardPrompt(ctx, d, turnID, keepalive.PingText, "keep-alive:"+turnID, "",

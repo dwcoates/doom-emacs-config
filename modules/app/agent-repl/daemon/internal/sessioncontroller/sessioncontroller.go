@@ -290,6 +290,12 @@ type Config struct {
 	// keepalive.DefaultConfig, because a zero TTL would read every session as
 	// already cache-expired.
 	KeepAlive keepalive.Config
+	// KeepAliveWindows is the durable ledger of when the daemon was pinging,
+	// and the sole evidence the conversation exclusion decides on
+	// (keepaliveexclude.go). Nil is the exclusion OFF: keep-alive turns would
+	// render as ordinary conversation, which is why every site that would have
+	// used it says so rather than failing quietly.
+	KeepAliveWindows KeepAliveWindowLedger
 	// RewindLineages arms the one-shot rewind argv for the spawn that follows a
 	// transcript rewind (rewind.go). Nil disables rewinding, loudly at the site
 	// that would have used it: without it the shim could not be told what was
@@ -1928,6 +1934,10 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 	// The durable receipt ledger. Bound before Run, so no durable user line can
 	// reach attributeUserTurn — the retirement point — with this unset.
 	cons.receipts = m.cfg.PromptReceipts
+	// The keep-alive exclusion's evidence. Bound before Run, so no conversation
+	// item can reach the curation block with the ledger unset and be rendered
+	// as though the user had typed it.
+	cons.keepAliveWindows = m.cfg.KeepAliveWindows
 	// The per-turn wait (mergeresolve.go) rides the SAME stream the queue's
 	// edges do, but correlated by turn id rather than by edge. Bound before Run,
 	// so no boundary can reach the consumer with this unset.
