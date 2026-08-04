@@ -53,7 +53,7 @@ type failingClient struct {
 	err error
 }
 
-func (c *failingClient) SubmitPrompt(_ context.Context, _, _, _ string, _ corev1.PromptOrigin) error {
+func (c *failingClient) SubmitPrompt(_ context.Context, _, _, _, _ string, _ corev1.PromptOrigin) error {
 	return c.err
 }
 func (c *failingClient) SetModel(_ context.Context, _ string) (string, error) { return "", c.err }
