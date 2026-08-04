@@ -22,7 +22,14 @@
 #                       wait on store.sock in between — the recorded safe order
 #                       (a simultaneous bounce once cost a silent full re-read
 #                       via cold cursor recovery)
-#   5. daemon bounce    `(agent-repl-frontend-daemon-restart)` via emacsclient;
+#   5. daemon bounce    first loads daemon.el from THIS checkout so its
+#                       artifact-root constants name the binaries built above,
+#                       then calls `(agent-repl-frontend-daemon-restart)` via
+#                       emacsclient. This ordering is load-bearing for linked
+#                       worktrees: the running Emacs may have loaded the module
+#                       from the main worktree, and restarting before rebinding
+#                       those paths launches the main worktree's stale build.
+#
 #                       when no Emacs server is reachable the bounce is
 #                       explicitly deferred until Emacs startup. Once a server
 #                       is reachable, any restart failure still fails this
@@ -287,6 +294,39 @@ if ! EMACS_PROBE_OUT="$("$EMACSCLIENT" --eval t 2>&1)"; then
 else
     EMACS_AVAILABLE=1
     log "daemon: Emacs server probe succeeded: $EMACS_PROBE_OUT"
+
+    # The daemon, shim, and webapp paths are derived by daemon.el from the
+    # checkout that loaded it. A deploy invoked from a linked worktree must
+    # therefore load this checkout's daemon.el BEFORE asking the running Emacs
+    # to restart the daemon. Loading it after the restart would successfully
+    # build one checkout and then silently launch another checkout's artifacts.
+    #
+    # Encode ROOT rather than interpolating it into an elisp string literal:
+    # valid filesystem paths may contain quotes or backslashes. The returned
+    # sentinel also reports whether the runtime artifact root moved; a moved
+    # root necessarily means surviving shims execute a different bundle and
+    # must be stopped even when this checkout's own before/after fingerprint is
+    # unchanged.
+    ROOT_B64="$(printf '%s' "$ROOT" | base64 | tr -d '\n')"
+    PRELOAD_FORM="(let* ((root (file-name-as-directory (decode-coding-string (base64-decode-string \"$ROOT_B64\") 'utf-8))) (before (and (boundp 'agent-repl--frontend-root) agent-repl--frontend-root))) (load (expand-file-name \"daemon.el\" root) nil t) (unless (equal agent-repl--frontend-root root) (error \"agent-repl deploy root mismatch: expected %S got %S\" root agent-repl--frontend-root)) (if (equal before root) \"artifact-root-same\" \"artifact-root-changed\"))"
+    PRELOAD_OUT="$("$EMACSCLIENT" --eval "$PRELOAD_FORM" 2>&1)" || {
+        echo "[deploy-all] daemon control-plane preload failed: $PRELOAD_OUT" >&2
+        exit 3
+    }
+    case "$PRELOAD_OUT" in
+        *artifact-root-same*)
+            log "daemon: control plane loaded from $ROOT (artifact root unchanged)"
+            ;;
+        *artifact-root-changed*)
+            SHIM_CHANGED=1
+            log "daemon: control plane loaded from $ROOT (artifact root changed — surviving shims will stop)"
+            ;;
+        *)
+            echo "[deploy-all] daemon control-plane preload returned an unrecognized result: $PRELOAD_OUT" >&2
+            exit 3
+            ;;
+    esac
+
     if [ "$SHIM_CHANGED" -eq 1 ]; then
         RESTART_FORM='(agent-repl-frontend-daemon-restart t)'
         log "daemon: restarting via emacsclient (stop-shims: the bundle changed)..."
