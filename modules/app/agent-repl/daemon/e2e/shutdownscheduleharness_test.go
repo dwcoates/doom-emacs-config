@@ -211,47 +211,43 @@ func (w *shutdownWorld) boot(t *testing.T) *shutdownBoot {
 		t.Fatalf("build file diagnostic persister: %v", err)
 	}
 
-	udsSpawn := func(sessionID string, opts server.CreateOpts) (server.ShimStopFunc, error) {
-		workspace, err := dlog.WorkspaceFromDirectory(opts.CWD)
-		if err != nil {
-			return nil, err
-		}
-		shimTarget, err := targets.OpenWorkspaceRuntime(workspace, dlog.RuntimeShim)
-		if err != nil {
-			return nil, err
-		}
-		canonicalOpts := opts
-		canonicalOpts.CWD = workspace.Directory
-		argv := server.ShimUDSArgv(w.node, w.script, sessionID, true /*forceFake*/, canonicalOpts, w.shimSock)
-		argv = append(argv, "--log-fd", "3", "--store-socket", w.storeSock)
-		proc, spawnErr := shim.Spawn(shim.Options{
-			Argv:       argv,
-			Dir:        workspace.Directory,
-			ExtraFiles: []*os.File{shimTarget},
-			Logger:     testShimLogger{t: t},
-		})
-		if spawnErr != nil {
-			return nil, spawnErr
-		}
-		tracked := &trackedShim{workspace: workspace.Directory, proc: proc, exited: make(chan struct{})}
-		b.shimsMu.Lock()
-		b.shims = append(b.shims, tracked)
-		b.shimsMu.Unlock()
-		// ONE reaper per process: it drains the event stream, reaps the child
-		// exactly once (cmd.Wait is not re-entrant), and publishes the exit as
-		// a closed channel every waiter can observe. The harness's cleanup
-		// waits on that channel rather than calling Wait a second time.
-		go func() {
-			for range proc.Events() { //nolint:revive
+	// THE SAME SPAWN PROCEDURE THE DAEMON RUNS (server.NewUDSSpawner), including
+	// its one-reaper-per-process rule: the exit it publishes through Reaped is
+	// what this harness's cleanup waits on, rather than a second cmd.Wait.
+	spawnLog := &e2eSpawnLog{t: t}
+	t.Cleanup(spawnLog.finish)
+	udsSpawn, err := server.NewUDSSpawner(server.UDSSpawnConfig{
+		Targets:    targets,
+		Node:       w.node,
+		Script:     w.script,
+		ShimSocket: w.shimSock,
+		ForceFake:  true,
+		ExtraArgv:  []string{"--store-socket", w.storeSock},
+		Logger:     func(dlog.Workspace, string) shim.Logger { return testShimLogger{t: t} },
+		Event:      spawnLog.event,
+		Spawned: func(s server.SpawnedShim) {
+			tracked := &trackedShim{workspace: s.Workspace.Directory, proc: s.Proc, exited: make(chan struct{})}
+			b.shimsMu.Lock()
+			b.shims = append(b.shims, tracked)
+			b.shimsMu.Unlock()
+			t.Cleanup(func() {
+				_ = s.Proc.Terminate(shim.Stop{Initiator: "e2e_harness_cleanup", Reason: "test teardown"})
+				<-tracked.exited
+			})
+		},
+		Reaped: func(s server.SpawnedShim, _ error) {
+			b.shimsMu.Lock()
+			defer b.shimsMu.Unlock()
+			for _, tracked := range b.shims {
+				if tracked.proc == s.Proc {
+					close(tracked.exited)
+					return
+				}
 			}
-			_ = proc.Wait()
-			close(tracked.exited)
-		}()
-		t.Cleanup(func() {
-			_ = proc.Terminate(shim.Stop{Initiator: "e2e_harness_cleanup", Reason: "test teardown"})
-			<-tracked.exited
-		})
-		return func(by server.ShimStop) error { return proc.Terminate(by) }, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("build the UDS spawner: %v", err)
 	}
 
 	seqStore := server.NewRegistrySeqStore(reg, t.Logf)

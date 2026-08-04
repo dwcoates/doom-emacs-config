@@ -63,7 +63,7 @@ type fakeSpawner struct {
 	// running on its own goroutine instead of polling for it. Buffered by its
 	// creator; a nil channel (the default) announces nothing.
 	stops chan shim.Stop
-	err      error
+	err   error
 	// stopErr, when set, makes every stop fail.
 	stopErr error
 	// resume is the vendor conversation pointer each session would be spawned

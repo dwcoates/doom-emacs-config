@@ -188,18 +188,6 @@ func daemonFatal(logger *dlog.Logger, format string, args ...any) {
 	os.Exit(1)
 }
 
-// canonicalShimCreateOpts makes the child process and shim protocol use the
-// exact canonical path whose MD5 identifies the workspace log targets.
-func canonicalShimCreateOpts(opts server.CreateOpts) (dlog.Workspace, server.CreateOpts, error) {
-	workspace, err := dlog.WorkspaceFromDirectory(opts.CWD)
-	if err != nil {
-		return dlog.Workspace{}, server.CreateOpts{}, err
-	}
-	canonical := opts
-	canonical.CWD = workspace.Directory
-	return workspace, canonical, nil
-}
-
 // udsShimLogger keeps daemon-owned errors in daemon.log while direct shim JSON
 // records remain single-writer records in the inherited shim.log descriptor.
 type udsShimLogger struct {
@@ -263,7 +251,7 @@ func main() {
 		}
 	}()
 	stopWorkspaceLogMaintenance := startWorkspaceLogMaintenance(
-		targets, os.Stderr, os.Getenv("AGENT_REPL_LOG_VERBOSE") != "",
+		targets, daemonLog, os.Stderr, os.Getenv("AGENT_REPL_LOG_VERBOSE") != "",
 	)
 	defer stopWorkspaceLogMaintenance()
 	legacyLog := dlog.Legacy(daemonLog)
@@ -478,109 +466,63 @@ func main() {
 	// hands them to the bring-up that is waiting for the connection, which
 	// would otherwise sit out its whole deadline with nothing to report.
 	shimSpawnWatch := server.NewShimSpawnWatch(shimListener.Connected, legacyLog)
-	udsSpawn := func(sessionID string, opts server.CreateOpts) (server.ShimStopFunc, error) {
-		workspace, canonicalOpts, workspaceErr := canonicalShimCreateOpts(opts)
-		if workspaceErr != nil {
-			return nil, fmt.Errorf("resolve UDS shim workspace for %q: %w", opts.CWD, workspaceErr)
+	// ONE SPAWN PROCEDURE, shared with the e2e harnesses (server/udsspawn.go).
+	// What remains here is only what is genuinely this deployment's: the extra
+	// argv a configured CLI binary adds, the workspace-scoped loggers, and the
+	// spawn watch a bring-up waits on.
+	var extraShimArgv []string
+	if *claudeBin != "" {
+		extraShimArgv = append(extraShimArgv, "--claude-bin", *claudeBin)
+	}
+	// spawnEvent persists one spawn-lifecycle fact in the workspace's own
+	// daemon log. EmitWorkspaceNormal owns its JSON emergency path when durable
+	// persistence fails; a second plaintext stderr line would duplicate the
+	// error and violate the all-JSON logging contract.
+	spawnEvent := func(level dlog.Level, workspace dlog.Workspace, sessionID, message string, context map[string]any) {
+		workspaceLog, err := targets.OpenWorkspaceLogger(workspace, os.Stderr, os.Getenv("AGENT_REPL_LOG_VERBOSE") != "")
+		if err != nil {
+			panic(fmt.Sprintf("claude-repld: open daemon workspace logger for %q: %v", workspace.Directory, err))
 		}
-		workspaceLog, targetErr := targets.OpenWorkspaceLogger(workspace, os.Stderr, os.Getenv("AGENT_REPL_LOG_VERBOSE") != "")
-		if targetErr != nil {
-			return nil, fmt.Errorf("open daemon workspace logger for %q: %w", workspace.Directory, targetErr)
+		if err := workspaceLog.EmitWorkspaceNormal(workspace, dlog.Event{
+			Runtime: dlog.RuntimeDaemon, Level: level, Operation: "shim.spawn",
+			Message: message, Context: context, AgentReplSessionID: sessionID,
+		}); err != nil {
+			panic(err)
 		}
-		shimTarget, targetErr := targets.OpenWorkspaceRuntime(workspace, dlog.RuntimeShim)
-		if targetErr != nil {
-			return nil, fmt.Errorf("open shim log target for workspace %q: %w", workspace.Directory, targetErr)
-		}
-		argv := append(server.ShimUDSArgv(*nodeBin, *shimScript, sessionID, *fake, canonicalOpts, shimSocketPath), "--log-fd", "3")
-		if *claudeBin != "" {
-			argv = append(argv, "--claude-bin", *claudeBin)
-		}
-		spawnEvent := func(level dlog.Level, message string, context map[string]any) {
-			// EmitWorkspaceNormal owns its JSON emergency path when durable
-			// persistence fails. A second plaintext stderr line would duplicate
-			// the error and violate the all-JSON logging contract.
-			if err := workspaceLog.EmitWorkspaceNormal(workspace, dlog.Event{Runtime: dlog.RuntimeDaemon, Level: level, Operation: "shim.spawn", Message: message, Context: context, AgentReplSessionID: sessionID}); err != nil {
-				panic(err)
+	}
+	udsSpawn, err := server.NewUDSSpawner(server.UDSSpawnConfig{
+		Targets:    targets,
+		Node:       *nodeBin,
+		Script:     *shimScript,
+		ShimSocket: shimSocketPath,
+		ForceFake:  *fake,
+		ExtraArgv:  extraShimArgv,
+		ExtraEnv:   func(opts server.CreateOpts) []string { return server.ShimEnv(opts, *addr) },
+		Logger: func(workspace dlog.Workspace, sessionID string) shim.Logger {
+			workspaceLog, logErr := targets.OpenWorkspaceLogger(workspace, os.Stderr, os.Getenv("AGENT_REPL_LOG_VERBOSE") != "")
+			if logErr != nil {
+				panic(fmt.Sprintf("claude-repld: open daemon workspace logger for %q: %v", workspace.Directory, logErr))
 			}
-		}
-		spawnEvent(dlog.LevelInfo, "spawning UDS shim", map[string]any{"cwd": workspace.Directory, "model": opts.Model, "config_dir": opts.ConfigDir, "daemon_socket": shimSocketPath})
-		proc, spawnErr := shim.Spawn(shim.Options{
-			Argv:       argv,
-			Dir:        workspace.Directory,
-			ExtraEnv:   server.ShimEnv(opts, *addr),
-			ExtraFiles: []*os.File{shimTarget},
-			Logger:     &udsShimLogger{workspace: workspace, daemon: workspaceLog, terminal: os.Stderr, sessionID: sessionID},
-		})
-		if spawnErr != nil {
-			spawnEvent(dlog.LevelError, "UDS shim spawn failed", map[string]any{"error": spawnErr.Error(), "cwd": workspace.Directory})
-			return nil, spawnErr
-		}
-		shimSpawnWatch.Spawned(sessionID, proc.StderrTail)
-		// pid AND pgid, always. The shim is spawned into its OWN process group
-		// precisely so a signal aimed at the daemon's group cannot reach it, and
-		// a claim like that is only worth anything if the log lets you check it:
-		// pgid == pid means detached, anything else means still coupled.
-		spawnEvent(dlog.LevelInfo, "UDS shim spawned", map[string]any{
-			"argv":     strings.Join(argv, " "),
-			"cwd":      workspace.Directory,
-			"pid":      proc.Pid(),
-			"pgid":     proc.Pgid(),
-			"detached": proc.Pgid() == proc.Pid(),
-		})
-		// In UDS mode the shim streams over its socket, not stdout, so its
-		// stdout event channel stays empty — drain it so the stdout pump never
-		// blocks, and reap the process when it exits.
-		go func() {
-			for range proc.Events() { //nolint:revive
+			return &udsShimLogger{workspace: workspace, daemon: workspaceLog, terminal: os.Stderr, sessionID: sessionID}
+		},
+		Event: spawnEvent,
+		Spawned: func(s server.SpawnedShim) {
+			shimSpawnWatch.Spawned(s.SessionID, s.Proc.StderrTail)
+		},
+		Exited: func(s server.SpawnedShim, werr error) (string, map[string]any) {
+			// The watch is what unblocks a bring-up still waiting for this
+			// shim's connection, so it is notified before the record is
+			// written; a shim that died before it ever connected is named as
+			// such rather than reported as an ordinary exit.
+			failure := shimSpawnWatch.Exited(s.SessionID, werr)
+			if failure == nil {
+				return "", nil
 			}
-		}()
-		go func() {
-			werr := proc.Wait()
-			// The exit is recorded FIRST: the watch is what unblocks a
-			// bring-up still waiting for this shim's connection, and it must
-			// not wait behind the log write.
-			failure := shimSpawnWatch.Exited(sessionID, werr)
-			context := map[string]any{
-				"cwd":         workspace.Directory,
-				"exit":        shim.ExitDescription(werr),
-				"exit_code":   shim.ExitCode(werr),
-				"stderr_tail": proc.StderrTail(),
-			}
-			switch {
-			case failure != nil:
-				context["error"] = failure.Error()
-				spawnEvent(dlog.LevelError, "UDS shim exited BEFORE it ever connected to the daemon", context)
-			case werr != nil:
-				context["error"] = werr.Error()
-				spawnEvent(dlog.LevelError, "UDS shim exited", context)
-			default:
-				spawnEvent(dlog.LevelInfo, "UDS shim exited", context)
-			}
-		}()
-		// The DELIBERATE-STOP record, and the counterpart to the spawn record
-		// above: a shim death with one of these next to it was ordered, and a
-		// shim death without one was not. That distinction is the whole reason
-		// the attribution is a required argument.
-		return func(by shim.Stop) error {
-			spawnEvent(dlog.LevelInfo, "stopping UDS shim (SIGTERM)", map[string]any{
-				"cwd":       workspace.Directory,
-				"pid":       proc.Pid(),
-				"pgid":      proc.Pgid(),
-				"initiator": by.Initiator,
-				"reason":    by.Reason,
-			})
-			if err := proc.Terminate(by); err != nil {
-				spawnEvent(dlog.LevelError, "stopping UDS shim FAILED", map[string]any{
-					"cwd":       workspace.Directory,
-					"pid":       proc.Pid(),
-					"initiator": by.Initiator,
-					"reason":    by.Reason,
-					"error":     err.Error(),
-				})
-				return err
-			}
-			return nil
-		}, nil
+			return "UDS shim exited BEFORE it ever connected to the daemon", map[string]any{"error": failure.Error()}
+		},
+	})
+	if err != nil {
+		daemonFatal(daemonLog, "claude-repld: build the UDS shim spawner: %v", err)
 	}
 	// Held by pointer so its SessionView re-push can be late-bound below: the
 	// Server it pushes through does not exist yet (same shape as forwarder).
@@ -817,6 +759,10 @@ func main() {
 			Held:      sessionlock.Held,
 		},
 		ClientLogs: clientLogs,
+		// A closed workspace gives its log descriptors back (dlog.EvictWorkspace),
+		// so a long-lived daemon does not accumulate one set per workspace it has
+		// ever touched.
+		LogTargets: targets,
 		// The daemon resolves a workspace's conversation for itself. Frontends
 		// send an intent (continue / fresh / explicit), never a remembered
 		// vendor uuid — see server.ConversationResolver.
@@ -1024,15 +970,22 @@ func main() {
 	}
 }
 
-func startWorkspaceLogMaintenance(targets *dlog.TargetManager, terminal io.Writer, verbose bool) func() {
+func startWorkspaceLogMaintenance(targets *dlog.TargetManager, logger *dlog.Logger, terminal io.Writer, verbose bool) func() {
 	return startWorkspaceLogMaintenanceAtInterval(
-		targets, terminal, verbose, dlog.WorkspaceRuntimeCapInterval,
+		targets, logger, terminal, verbose, dlog.WorkspaceRuntimeCapInterval, nil,
 	)
 }
 
-func startWorkspaceLogMaintenanceAtInterval(targets *dlog.TargetManager, terminal io.Writer, verbose bool, interval time.Duration) func() {
+// onTick, when non-nil, is invoked after EVERY completed maintenance pass. It
+// is the injectable completion boundary a test synchronizes on: the pass runs
+// on its own goroutine, and a test that waited by sampling the target's size
+// was measuring the clock rather than rendezvousing with the work.
+func startWorkspaceLogMaintenanceAtInterval(targets *dlog.TargetManager, logger *dlog.Logger, terminal io.Writer, verbose bool, interval time.Duration, onTick func()) func() {
 	if interval <= 0 {
 		panic("claude-repld: workspace log maintenance interval must be positive")
+	}
+	if logger == nil {
+		panic("claude-repld: workspace log maintenance needs a daemon logger for its active-target gauge")
 	}
 	stop := make(chan struct{})
 	done := make(chan struct{})
@@ -1043,7 +996,10 @@ func startWorkspaceLogMaintenanceAtInterval(targets *dlog.TargetManager, termina
 		for {
 			select {
 			case <-ticker.C:
-				maintainWorkspaceLogTargets(targets, terminal, verbose)
+				maintainWorkspaceLogTargets(targets, logger, terminal, verbose)
+				if onTick != nil {
+					onTick()
+				}
 			case <-stop:
 				return
 			}
@@ -1058,7 +1014,7 @@ func startWorkspaceLogMaintenanceAtInterval(targets *dlog.TargetManager, termina
 	}
 }
 
-func maintainWorkspaceLogTargets(targets *dlog.TargetManager, terminal io.Writer, verbose bool) {
+func maintainWorkspaceLogTargets(targets *dlog.TargetManager, logger *dlog.Logger, terminal io.Writer, verbose bool) {
 	for _, failure := range targets.MaintainSizeCaps() {
 		// Reporting first tries the affected workspace daemon logger, then
 		// canonical JSON emergency output. An error means durable workspace
@@ -1068,6 +1024,14 @@ func maintainWorkspaceLogTargets(targets *dlog.TargetManager, terminal io.Writer
 			panic(fmt.Sprintf("claude-repld: workspace log maintenance reporting failed: %v", err))
 		}
 	}
+	// THE GAUGE. Targets are opened per workspace runtime and released when the
+	// workspace closes, so this number is the observable form of that binding:
+	// a count that only ever climbs across a long-lived daemon is the leak the
+	// eviction path exists to prevent, and it is unfalsifiable without a
+	// periodic reading.
+	logger.With("operation", "daemon.logging.workspace-target-gauge",
+		"active_targets", targets.ActiveTargets()).
+		LogVerbose("claude-repld: workspace log targets held")
 }
 
 // startAnalyst launches the headless remediation analyst and returns as
