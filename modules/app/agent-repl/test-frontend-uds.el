@@ -783,31 +783,33 @@ workspace open."
   ;; Act / Assert
   (should (member "progress" agent-repl--uds-known-frame-fields)))
 
-(ert-deftest agent-repl-test-uds-progress-is-a-deliberately-ignored-frame ()
-  "`progress' is declared ignored: the footer is webapp-only by design."
+(ert-deftest agent-repl-test-uds-progress-is-no-longer-an-ignored-frame ()
+  "`progress' left the ignored list when it acquired a handler.
+The consolidated footer is still webapp-only, but the proto assigns ONE
+of the message's fields — `expensive_turn' — to Emacs, and
+`context-cost.el' registers a reader for it.  An arm on the ignored list
+AND carrying a handler would state two incompatible things about the same
+frame."
   ;; Act / Assert
-  (should (member "progress" agent-repl--uds-ignored-frame-fields)))
+  (should-not (member "progress" agent-repl--uds-ignored-frame-fields)))
 
 (ert-deftest agent-repl-test-uds-dispatch-progress-frame-returns-nil ()
-  "Dispatching a progress frame is a no-op, not a signal."
+  "Dispatching a progress frame is quiet, not a signal.
+Nothing is registered inside this fixture's cleared handler registry, and
+a known arm with no handler is a logged gap rather than an error."
   ;; Arrange
   (agent-repl-test--with-uds
     ;; Act / Assert
     (should-not (agent-repl--uds-dispatch-frame
                  '(:progress (:workspace "ws1" :sessionId "s1" :liveTaskCount 0))))))
 
-(ert-deftest agent-repl-test-uds-dispatch-progress-frame-skips-unwired-warning ()
-  "A progress frame must NOT log the unfinished-wiring message a real gap logs."
-  ;; Arrange
-  (agent-repl-test--with-uds
-    (let (logged)
-      (cl-letf (((symbol-function 'agent-repl--log)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
-        ;; Act
-        (agent-repl--uds-dispatch-frame '(:progress (:workspace "ws1")))
-        ;; Assert
-        (should-not (seq-find (lambda (m) (string-match-p "no handler registered" m))
-                              logged))))))
+(ert-deftest agent-repl-test-uds-progress-has-a-registered-handler ()
+  "A progress frame reaches a handler, so it never logs unfinished wiring.
+This is the same guarantee the old ignored-list membership gave, now held
+the other way round: the arm is dispatched because `context-cost.el'
+registered a reader at load, not skipped because nothing wanted it."
+  ;; Act / Assert
+  (should (assoc "progress" agent-repl--uds-frame-handlers)))
 
 (ert-deftest agent-repl-test-uds-workspace-roster-is-a-known-frame ()
   "The `workspaceRoster' broadcast echo is a recognized frame field.

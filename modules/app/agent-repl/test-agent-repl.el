@@ -42,6 +42,7 @@
   (load (expand-file-name "test-commands.el" dir) nil t)
   (load (expand-file-name "test-config.el" dir) nil t)
   (load (expand-file-name "test-context.el" dir) nil t)
+  (load (expand-file-name "test-context-cost.el" dir) nil t)
   (load (expand-file-name "test-core.el" dir) nil t)
   (load (expand-file-name "test-daemon.el" dir) nil t)
   (load (expand-file-name "test-emoji.el" dir) nil t)
