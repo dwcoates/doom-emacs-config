@@ -267,10 +267,14 @@ func (w *shutdownWorld) bootRecordingStops(t *testing.T) *stopCauseBoot {
 	// The shutdown request is a channel for the reason boot's is: the hook is
 	// called from wherever a drain completes, including from inside Restore,
 	// before srv exists.
-	shutdownReq := make(chan bool, 1)
+	type shutdownRequest struct {
+		stopShims bool
+		cause     sessioncontroller.StopCause
+	}
+	shutdownReq := make(chan shutdownRequest, 1)
 	var shutdownOnce sync.Once
-	requestShutdown := func(stopShims bool) {
-		shutdownOnce.Do(func() { shutdownReq <- stopShims; close(shutdownReq) })
+	requestShutdown := func(stopShims bool, cause sessioncontroller.StopCause) {
+		shutdownOnce.Do(func() { shutdownReq <- shutdownRequest{stopShims: stopShims, cause: cause}; close(shutdownReq) })
 	}
 
 	agentShim, err := server.WireAgentShim(server.AgentShimConfig{
@@ -338,12 +342,12 @@ func (w *shutdownWorld) bootRecordingStops(t *testing.T) *stopCauseBoot {
 	teardown := make(chan struct{})
 	go func() {
 		select {
-		case stopShims, ok := <-shutdownReq:
+		case req, ok := <-shutdownReq:
 			if !ok {
 				return
 			}
-			srv.ShutdownAll(stopShims)
-			b.executed <- stopShims
+			srv.ShutdownAll(req.stopShims, req.cause)
+			b.executed <- req.stopShims
 		case <-teardown:
 		}
 	}()
