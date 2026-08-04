@@ -1729,6 +1729,12 @@ func (s *Server) applyKeepAlivePolicy(rec registry.Record, nowMs int64) (owned b
 			case errors.Is(err, sessioncontroller.ErrNotSettled):
 				s.logf("session %s: keep-alive hibernation HELD (ws %s cause %s): the workspace started working between the check and the teardown: %v",
 					rec.SessionID, rec.CWD, decision.Cause, err)
+			case errors.Is(err, sessioncontroller.ErrHibernationNoLongerIdle):
+				// The session worked between this sweep's snapshot and the
+				// claim's fresh read. Expected, and the refusal is the point:
+				// the decision was taken on a reading that has since moved.
+				s.logf("session %s: keep-alive hibernation REFUSED as stale (ws %s cause %s): %v",
+					rec.SessionID, rec.CWD, decision.Cause, err)
 			case errors.Is(err, sessioncontroller.ErrAlreadyHibernated),
 				errors.Is(err, sessioncontroller.ErrHibernationInFlight):
 				// Another cause won the single-transition claim. Expected.
