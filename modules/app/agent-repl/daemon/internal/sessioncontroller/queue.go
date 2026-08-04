@@ -280,6 +280,20 @@ func (q *promptQueue) drainAll() []*queueEntry {
 	return out
 }
 
+// pushFrontAll puts entries back at the head of the queue, keeping their order
+// among themselves and ahead of whatever arrived while they were away.
+//
+// AHEAD, not behind: these are the prompts the rewind carried across the
+// bounce, and anything now sitting in this queue was typed after them. Putting
+// them at the back would reorder the user's own prompts as the price of tidying
+// the transcript.
+func (q *promptQueue) pushFrontAll(entries []*queueEntry) {
+	if len(entries) == 0 {
+		return
+	}
+	q.entries = append(append(make([]*queueEntry, 0, len(entries)+len(q.entries)), entries...), q.entries...)
+}
+
 // view renders the queue as the pushed frontend frame, front to back. An empty
 // queue renders as a QueueView with no entries rather than as no frame at all:
 // "the queue is now empty" is exactly the state a frontend needs told.

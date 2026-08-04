@@ -8,8 +8,6 @@ import (
 
 	"github.com/google/uuid"
 
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
-
 	"claude-repld/internal/keepalive"
 	"claude-repld/internal/session"
 )
@@ -217,6 +215,12 @@ func (m *Manager) releaseKeepAliveHolds(d *sessionController, pingTurnID string,
 	m.logf("session-controller: keep-alive aftermath BEGIN ws=%q session=%s turn_id=%s held=%d — rewinding the ping out of the transcript before the held prompt is submitted",
 		workspace, sessionID, pingTurnID, len(heldIDs))
 
+	// THE QUEUE IS TAKEN FIRST, before anything can stop the shim this queue
+	// belongs to. From here to the re-park below, these entries have exactly
+	// one owner, so the exit tail the rewind's stop provokes has nothing to
+	// drop and nothing to persist nil over.
+	owned := m.takeQueueForRewind(d)
+
 	rewound := false
 	if _, err := m.rewindKeepAliveTurns(m.rootCtx, workspace, sessionID, []string{pingTurnID}); err != nil {
 		if errors.Is(err, session.ErrNoRewindNeeded) {
@@ -244,26 +248,34 @@ func (m *Manager) releaseKeepAliveHolds(d *sessionController, pingTurnID string,
 	m.releaseKeepAliveRewindLocked(workspace, pingTurnID)
 	live, ok := m.byWS[workspace]
 	if !ok {
+		// NOTHING IS DISCARDED HERE EITHER. The workspace has no controller to
+		// deliver onto, so the entries go back to the retired one — which keeps
+		// them renderable and, crucially, persists them, so the record still
+		// names prompts the user typed and the daemon has not delivered.
+		m.returnQueueFromRewindLocked(d, owned)
+		view, recs := m.publishQueueLocked(d)
 		m.mu.Unlock()
-		m.logf("session-controller: keep-alive aftermath ABANDONED ws=%q session=%s turn_id=%s rewound=%v — the workspace has no live session controller after the bounce; the held prompts stay queued and are delivered by the next boundary",
-			workspace, sessionID, pingTurnID, rewound)
+		m.logf("session-controller: keep-alive aftermath ABANDONED ws=%q session=%s turn_id=%s rewound=%v held=%d — the workspace has no live session controller after the bounce; the held prompts stay queued and are delivered by the next boundary",
+			workspace, sessionID, pingTurnID, rewound, len(owned))
+		m.publish(sessionID, view, recs)
 		return
 	}
-	released := live.queue.releaseKeepAliveHold(pingTurnID)
-	if released == 0 && live != d {
-		// The rewind bounced the controller, so the queue that held the prompts
-		// is the RETIRED one. Carry them across rather than losing them: they
-		// are prompts the user typed and the daemon promised to deliver.
-		moved := d.queue.drainAll()
-		for _, e := range moved {
-			e.keepAliveHoldTurnID = ""
-			e.classification = frontendv1.QueueClassification_QUEUE_CLASSIFICATION_PENDING
-			live.queue.add(e)
-		}
-		released = len(moved)
+	// RE-PARK, THEN RELEASE, THEN DELIVER. The entries rejoin a real queue
+	// first, so the hold release and the PENDING re-stamp are applied where the
+	// view and the durable records are read from — one queue holding one truth
+	// about each prompt, rather than a slice and a queue disagreeing.
+	migrated := live != d
+	m.returnQueueFromRewindLocked(live, owned)
+	if migrated {
+		// THE RETIRED CONTROLLER KEEPS ITS MIGRATING MARK FOREVER, and that is
+		// deliberate rather than an oversight. Its exit tail may still be
+		// pending, and the rewind keeps the SAME session id — so a tail that
+		// published its own empty view would persist nil over the durable
+		// record of the prompts the replacement is now holding.
 		m.logf("session-controller: keep-alive aftermath MIGRATED %d held prompt(s) ws=%q from the retired controller's queue to the rewound one",
-			released, workspace)
+			len(owned), workspace)
 	}
+	released := live.queue.releaseKeepAliveHold(pingTurnID)
 	next := live.queue.popFrontDeliverable()
 	view, recs := m.publishQueueLocked(live)
 	m.mu.Unlock()
@@ -275,6 +287,57 @@ func (m *Manager) releaseKeepAliveHolds(d *sessionController, pingTurnID string,
 	if next != nil {
 		go m.deliver(live, next)
 	}
+}
+
+// takeQueueForRewind moves a controller's whole queue into the rewind
+// orchestrator's ownership and marks the controller migrating.
+//
+// THIS IS THE ARBITRATION. Three actors reach for the same queue during a
+// rewind bounce: the dying client.Run's exit tail, which drains it
+// unconditionally and persists nil; the orchestrator, which carries the held
+// prompts across to the replacement; and any prompt still arriving at the old
+// controller. Whoever ran first won, and in the common schedule the exit tail
+// won and the user's prompts were gone with their durable record.
+//
+// Ownership moves ONCE, under the manager mutex, BEFORE the stop that starts
+// the tail. The tail then structurally finds an empty queue it has been told is
+// not its own — there is no ordering left to lose, because there is no longer
+// anything for the loser to take.
+func (m *Manager) takeQueueForRewind(d *sessionController) []*queueEntry {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.takeQueueForRewindLocked(d)
+}
+
+// takeQueueForRewindLocked is takeQueueForRewind with the mutex already held.
+func (m *Manager) takeQueueForRewindLocked(d *sessionController) []*queueEntry {
+	d.queueMigrating = true
+	return d.queue.drainAll()
+}
+
+// returnQueueFromRewind re-parks owned entries at the head of dst's queue and
+// ends the migration. Caller holds m.mu.
+//
+// dst is the RETIRED controller when the rewind refused or the bounce failed,
+// and the rewound one when it succeeded. Either way the entries land in a queue
+// before any of them is released, classified or delivered: the release →
+// classify → deliver ordering the held prompts were promised is applied to the
+// queue they are in, not to a slice in flight between two of them.
+func (m *Manager) returnQueueFromRewindLocked(dst *sessionController, owned []*queueEntry) {
+	dst.queue.pushFrontAll(owned)
+	dst.queueMigrating = false
+}
+
+// drainQueueForExitLocked empties a dying controller's queue for its exit tail,
+// or reports nothing when the queue has been taken by a rewind. Caller holds
+// m.mu.
+func (m *Manager) drainQueueForExitLocked(d *sessionController) []*queueEntry {
+	if d.queueMigrating {
+		m.logf("session-controller: exit tail DECLINED the queue ws=%q session=%s — a transcript rewind owns these prompts and will re-park them onto the replacement; draining here would drop them and persist nil over the record of what is still owed",
+			d.workspace, d.sessionID)
+		return nil
+	}
+	return d.queue.drainAll()
 }
 
 // rewindIdentity resolves the config root and vendor uuid the rewind operates

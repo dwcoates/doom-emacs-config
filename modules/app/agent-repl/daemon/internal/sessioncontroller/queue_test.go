@@ -1261,7 +1261,9 @@ func TestPingTurnEndTransfersItsClaimToTheRewind(t *testing.T) {
 	m.cfg.SessionConfigDir = func(string) string {
 		close(entered)
 		<-release
-		return t.TempDir()
+		// A root with no transcript, so the released aftermath degrades
+		// immediately instead of touching anything this test owns.
+		return "/nonexistent-rewind-gate"
 	}
 	pingTurn, err := m.SubmitKeepAlivePing(context.Background(), "ws")
 	if err != nil {
