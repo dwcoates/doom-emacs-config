@@ -408,6 +408,11 @@ type consumer struct {
 	// Called on the shim read-loop goroutine, with the same non-blocking
 	// obligation onTurn carries.
 	onTurnEnded func(atMs int64)
+	// onContextCompacted reports that a compaction COMPLETED — the compacting
+	// axis closing, which is the only first-class report the vendor gives.
+	// A compact-first revival waits on it before it will accept prompts.
+	// Assigned after construction, like onVendorSessionID.
+	onContextCompacted func()
 	// onBackfill reports a never-blue backfill transition (F2), once per
 	// distinct state. The controller persists it and re-pushes the SessionView.
 	onBackfill func(state string)
@@ -1148,6 +1153,14 @@ func (c *consumer) noteCutCompleted(ev *corev1.Event) {
 		err = c.ssm.ApplyClearing(c.workspace, false, "context_cleared")
 	case *corev1.Event_ContextCompacted:
 		err = c.ssm.ApplyCompacting(c.workspace, false, "context_compacted")
+		// A compact-first revival is waiting on exactly this event. The
+		// compacting axis closing IS the completion signal — there is no other
+		// first-class report that a compaction finished — so the revival's gate
+		// is released from here rather than from a turn end, which would also
+		// fire for a compaction that failed.
+		if c.onContextCompacted != nil {
+			c.onContextCompacted()
+		}
 	}
 	if err != nil {
 		c.logf("session-controller: closing the context-cut axis FAILED session=%s ws=%s seq=%d kind=%s: %v (the workspace may hold its phase word until the next bounding edge)",
