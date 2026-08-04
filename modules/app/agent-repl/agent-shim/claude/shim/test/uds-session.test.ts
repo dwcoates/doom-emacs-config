@@ -896,6 +896,23 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
     }));
 
     query.emit({
+      type: "result",
+      uuid: "first-task-notification-result",
+      session_id: "vendor-uuid",
+      subtype: "success",
+      duration_ms: 120,
+      origin: { kind: "task_notification" },
+    } as unknown as SdkMessageLike);
+    const firstTaskNotificationResult = await store.peer().next(StoreWriteSchema);
+    expect(firstTaskNotificationResult.batch!.events.map((event) => event.payload.case)).toEqual(["vendor"]);
+    expect(firstTaskNotificationResult.batch!.events[0]!.requestId).toBe("p1");
+    expect(session.turnCount()).toBe(1);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: 1n,
+      lastSeq: 18n,
+    }));
+
+    query.emit({
       type: "system",
       subtype: "task_notification",
       uuid: "task-end-2",
@@ -925,6 +942,7 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
       session_id: "vendor-uuid",
       subtype: "success",
       duration_ms: 140,
+      origin: { kind: "task_notification" },
     } as unknown as SdkMessageLike);
     const terminal = await store.peer().next(StoreWriteSchema);
     expect(terminal.batch!.events.map((event) => event.payload.case)).toEqual([
@@ -941,12 +959,14 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
     await until(() => session.turnCount() === 0);
     expect(queryFactoryCalls()).toBe(1);
     expect(query.abortCalls).toBe(0);
-    expect(log.record("SDK result retained as terminal evidence while background tasks remain live")).toMatchObject({
+    expect(log.record("SDK result retained while background-task result cycles remain outstanding")).toMatchObject({
       request_id: "p1",
       context: {
         live_sdk_task_count: 2,
         live_sdk_task_ids: ["agent-go", "agent-python"],
-        decision: "retain_turn_for_live_sdk_tasks",
+        sdk_task_count: 2,
+        task_notification_result_count_after_write: 0,
+        decision: "retain_turn_for_sdk_task_cycles",
       },
     });
     expect(log.record("SDK result correlated to accepted turn")).toMatchObject({

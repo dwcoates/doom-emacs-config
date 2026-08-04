@@ -311,6 +311,10 @@ export class UdsSession {
   private readonly liveSdkTaskIds = new Set<string>();
   /** SDK task ids whose first terminal lifecycle fact has been stored. */
   private readonly completedSdkTaskIds = new Set<string>();
+  /** SDK task ids launched by each accepted root turn. */
+  private readonly turnSdkTaskIds = new Map<string, Set<string>>();
+  /** Task-notification result cycles durably observed for each root turn. */
+  private readonly turnTaskNotificationResultCounts = new Map<string, number>();
   private intentionalShutdownReason: string | null = null;
   private readonly intentionalShutdownStarted = completionLatch();
   private shutdownPromise: Promise<void> | null = null;
@@ -1653,6 +1657,7 @@ export class UdsSession {
     let terminalBoundaryAtMs: number | undefined;
     let turnStart: Event | undefined;
     let retainResultTurn = false;
+    let taskNotificationResultCountAfterWrite: number | undefined;
     if (msg.type === "result") {
       const claimedTurnId = this.activeTurnIds[0];
       if (claimedTurnId === undefined) {
@@ -1660,19 +1665,34 @@ export class UdsSession {
           "claude-shim-turn-lifecycle",
           "SDK result has no accepted prompt turn to close",
         );
-      } else if (this.liveSdkTaskIds.size > 0) {
+      } else {
+        const origin = typeof msg.origin === "object" && msg.origin !== null
+          ? msg.origin as Record<string, unknown>
+          : undefined;
+        const taskNotificationResult = origin?.kind === "task_notification" || origin?.kind === "task-notification";
+        const taskCount = this.turnSdkTaskIds.get(claimedTurnId)?.size ?? 0;
+        const priorNotificationResults = this.turnTaskNotificationResultCounts.get(claimedTurnId) ?? 0;
+        taskNotificationResultCountAfterWrite = priorNotificationResults + (taskNotificationResult ? 1 : 0);
+        retainResultTurn = this.liveSdkTaskIds.size > 0
+          || (taskCount > 0 && !taskNotificationResult)
+          || taskNotificationResultCountAfterWrite < taskCount;
+      }
+      if (claimedTurnId !== undefined && retainResultTurn) {
         retainResultTurn = true;
         turnStart = this.activeTurnStarts.get(claimedTurnId);
+        const taskCount = this.turnSdkTaskIds.get(claimedTurnId)?.size ?? 0;
         LOGGER.log({
           agent_repl_session_id: this.deps.sessionId,
           request_id: claimedTurnId,
           turn_id: claimedTurnId,
           live_sdk_task_count: this.liveSdkTaskIds.size,
           live_sdk_task_ids: [...this.liveSdkTaskIds].sort(),
+          sdk_task_count: taskCount,
+          task_notification_result_count_after_write: taskNotificationResultCountAfterWrite,
           turns_in_flight: this.activeTurnIds.length,
-          decision: "retain_turn_for_live_sdk_tasks",
-        }, "SDK result retained as terminal evidence while background tasks remain live");
-      } else {
+          decision: "retain_turn_for_sdk_task_cycles",
+        }, "SDK result retained while background-task result cycles remain outstanding");
+      } else if (claimedTurnId !== undefined) {
         terminalTurnId = this.activeTurnIds.shift();
         if (terminalTurnId !== claimedTurnId) {
           throw new Error(`accepted turn FIFO changed while closing ${JSON.stringify(claimedTurnId)}`);
@@ -1853,7 +1873,14 @@ export class UdsSession {
     if (terminalTurnId !== undefined) this.activeTurnStarts.delete(terminalTurnId);
     try {
       const ack = await this.store.write(persistentBatch);
-      for (const taskId of startedTaskIds) this.liveSdkTaskIds.add(taskId);
+      for (const taskId of startedTaskIds) {
+        this.liveSdkTaskIds.add(taskId);
+        if (rootTurnId !== undefined) {
+          const turnTaskIds = this.turnSdkTaskIds.get(rootTurnId) ?? new Set<string>();
+          turnTaskIds.add(taskId);
+          this.turnSdkTaskIds.set(rootTurnId, turnTaskIds);
+        }
+      }
       for (const taskId of endedTaskIds) {
         this.liveSdkTaskIds.delete(taskId);
         this.completedSdkTaskIds.add(taskId);
@@ -1871,7 +1898,12 @@ export class UdsSession {
           decision: "commit_sdk_task_lifecycle",
         }, "SDK task lifecycle is durably reflected in root-turn liveness");
       }
+      if (msg.type === "result" && rootTurnId !== undefined && taskNotificationResultCountAfterWrite !== undefined) {
+        this.turnTaskNotificationResultCounts.set(rootTurnId, taskNotificationResultCountAfterWrite);
+      }
       if (terminalTurnId !== undefined) {
+        this.turnSdkTaskIds.delete(terminalTurnId);
+        this.turnTaskNotificationResultCounts.delete(terminalTurnId);
         const index = this.pendingTurnEndIds.indexOf(terminalTurnId);
         if (index < 0) {
           LOGGER.log({
