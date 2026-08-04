@@ -45,7 +45,10 @@ func migrate(db *sql.DB) error {
 			hibernated_since_ms         INTEGER NOT NULL DEFAULT 0,
 			hibernation_cutoff_ms       INTEGER NOT NULL DEFAULT 0,
 			hibernation_elapsed_ms      INTEGER NOT NULL DEFAULT 0,
-			hibernation_ttl_ms          INTEGER NOT NULL DEFAULT 0
+			hibernation_ttl_ms          INTEGER NOT NULL DEFAULT 0,
+			rewind_previous_vendor_session_id TEXT NOT NULL DEFAULT '',
+			rewind_retained_leaf_uuid         TEXT NOT NULL DEFAULT '',
+			rewind_dropped_turn_ids           TEXT NOT NULL DEFAULT ''
 		);
 		CREATE INDEX IF NOT EXISTS session_record_conversation
 			ON session_record(config_dir, cwd, claude_session_id);
@@ -104,6 +107,9 @@ var sessionRecordAddedColumns = []struct{ name, ddl string }{
 	{"hibernation_cutoff_ms", "INTEGER NOT NULL DEFAULT 0"},
 	{"hibernation_elapsed_ms", "INTEGER NOT NULL DEFAULT 0"},
 	{"hibernation_ttl_ms", "INTEGER NOT NULL DEFAULT 0"},
+	{"rewind_previous_vendor_session_id", "TEXT NOT NULL DEFAULT ''"},
+	{"rewind_retained_leaf_uuid", "TEXT NOT NULL DEFAULT ''"},
+	{"rewind_dropped_turn_ids", "TEXT NOT NULL DEFAULT ''"},
 }
 
 // addSessionRecordColumns brings an existing session_record table up to the
@@ -170,7 +176,8 @@ func loadState(q querier, logf func(string, ...any)) (map[string]Record, map[Con
 		created_at, terminal, death_reason, terminal_at, last_seq, newest_clear_or_compact_seq,
 		backfill_state, queued_prompts, last_turn_end_ms, hibernated, hibernation_cause,
 		hibernated_since_ms, hibernation_cutoff_ms, hibernation_elapsed_ms,
-		hibernation_ttl_ms FROM session_record`)
+		hibernation_ttl_ms, rewind_previous_vendor_session_id, rewind_retained_leaf_uuid,
+		rewind_dropped_turn_ids FROM session_record`)
 	if err != nil {
 		logf("registry: READ FAILED for session_record — refusing to serve: %v", err)
 		return records, checkpoints, fmt.Errorf("registry: read session records: %w", err)
@@ -185,7 +192,9 @@ func loadState(q querier, logf func(string, ...any)) (map[string]Record, map[Con
 			&rec.ClaudeSessionID, &rec.CreatedAt, &rec.Terminal, &rec.DeathReason, &rec.TerminalAt,
 			&rec.LastSeq, &rec.NewestClearOrCompactSeq, &rec.BackfillState, &queued,
 			&rec.LastTurnEndMs, &rec.Hibernated, &rec.Hibernation.Cause, &rec.Hibernation.SinceMs,
-			&rec.Hibernation.CutoffMs, &rec.Hibernation.ElapsedMs, &rec.Hibernation.TTLMs); err != nil {
+			&rec.Hibernation.CutoffMs, &rec.Hibernation.ElapsedMs, &rec.Hibernation.TTLMs,
+			&rec.Rewind.PreviousVendorSessionID, &rec.Rewind.RetainedLeafUUID,
+			&rec.Rewind.DroppedTurnIDs); err != nil {
 			logf("registry: CORRUPT session_record row — refusing to serve: %v", err)
 			return records, checkpoints, fmt.Errorf("registry: scan session record: %w", err)
 		}
@@ -202,6 +211,15 @@ func loadState(q querier, logf func(string, ...any)) (map[string]Record, map[Con
 				rec.Hibernation.Cause, rec.SessionID)
 			return records, checkpoints, fmt.Errorf("registry: session %s has invalid hibernation cause %q",
 				rec.SessionID, rec.Hibernation.Cause)
+		}
+		// A PARTIAL LINEAGE IS REFUSED rather than carried. The shim rejects an
+		// empty dropped-turn list, so spawning on one would leave the session
+		// with no shim at all — and the three fields are written by one Update,
+		// so a partial row is corruption rather than an older shape.
+		if rec.Rewind.Partial() {
+			logf("registry: INVALID partial rewind lineage on session %s (rewound_from=%q retained_leaf=%q dropped_turns=%q) — refusing to serve",
+				rec.SessionID, rec.Rewind.PreviousVendorSessionID, rec.Rewind.RetainedLeafUUID, rec.Rewind.DroppedTurnIDs)
+			return records, checkpoints, fmt.Errorf("registry: session %s has a partial rewind lineage", rec.SessionID)
 		}
 		prompts, err := decodeQueuedPrompts(rec.SessionID, queued)
 		if err != nil {
@@ -285,13 +303,15 @@ func saveState(tx execer, state *registryState) error {
 			config_dir, claude_session_id, created_at, terminal, death_reason, terminal_at,
 			last_seq, newest_clear_or_compact_seq, backfill_state, queued_prompts,
 			last_turn_end_ms, hibernated, hibernation_cause, hibernated_since_ms,
-			hibernation_cutoff_ms, hibernation_elapsed_ms, hibernation_ttl_ms)
-			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			hibernation_cutoff_ms, hibernation_elapsed_ms, hibernation_ttl_ms,
+			rewind_previous_vendor_session_id, rewind_retained_leaf_uuid, rewind_dropped_turn_ids)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			rec.SessionID, rec.CWD, rec.Model, rec.PermissionMode, rec.ConfigDir,
 			rec.ClaudeSessionID, rec.CreatedAt, rec.Terminal, rec.DeathReason, rec.TerminalAt,
 			int64(rec.LastSeq), int64(rec.NewestClearOrCompactSeq), rec.BackfillState, queued,
 			rec.LastTurnEndMs, rec.Hibernated, rec.Hibernation.Cause, rec.Hibernation.SinceMs,
 			rec.Hibernation.CutoffMs, rec.Hibernation.ElapsedMs, rec.Hibernation.TTLMs,
+			rec.Rewind.PreviousVendorSessionID, rec.Rewind.RetainedLeafUUID, rec.Rewind.DroppedTurnIDs,
 		); err != nil {
 			return fmt.Errorf("registry: write session record %s: %w", rec.SessionID, err)
 		}
