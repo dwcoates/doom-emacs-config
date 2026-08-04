@@ -95,7 +95,7 @@ describe("daemon reattach with from_seq continuation", () => {
     const daemonListener = acceptShim(socketPath);
     cleanups.push(() => daemonListener.close());
     const server = new SessionServer(
-      { socketPath, sessionId: "sess-1", queryInstanceId: "query-1", shimVersion: "1", protocolVersion: "1", heartbeatIntervalMs: 0 },
+      { socketPath, sessionId: "sess-1", queryInstanceId: "query-1", queryCreatedSeq: () => 7n, shimVersion: "1", protocolVersion: "1", heartbeatIntervalMs: 0 },
       {
         onSubmitPrompt: (m): Receipt => create(AckSchema, { requestId: m.requestId }),
         onInterrupt: (m): Receipt => create(AckSchema, { requestId: m.requestId }),

@@ -58,7 +58,7 @@ import type {
 } from "../src/session.js";
 import type { ModelInfo, PermissionMode, SlashCommand } from "../src/protocol.js";
 import type { SubscriptionUsageResponse } from "../src/subscription-usage.js";
-import type { Event, ShimReady, Subscribe } from "../src/uds/proto.js";
+import type { Event, ShimHello, ShimReady, Subscribe } from "../src/uds/proto.js";
 import {
   AckSchema,
   DaemonHelloSchema,
@@ -221,6 +221,7 @@ interface Rig {
   queryFactoryCalls: () => number;
   store: FakeStore;
   daemon: FramedPeer;
+  hello: ShimHello;
   udsSocketPath: string;
   /** Accepts the shim's RECONNECT after a daemon drop. */
   daemonListener: { next: () => Promise<FramedPeer>; close: () => void };
@@ -459,7 +460,7 @@ async function rig(
     return true;
   });
   const daemon = await daemonListener.next();
-  await daemon.next(ShimHelloSchema);
+  const hello = await daemon.next(ShimHelloSchema);
   daemon.send(DaemonHelloSchema, create(DaemonHelloSchema, {
     daemonVersion: "d1", protocolVersion: "1", fromSeq: opts.fromSeq ?? 0n,
     ...(opts.handshakeMode !== undefined ? { permissionMode: opts.handshakeMode } : {}),
@@ -477,6 +478,7 @@ async function rig(
     queryFactoryCalls: () => queryFactoryCalls,
     store,
     daemon,
+    hello,
     udsSocketPath,
     daemonListener,
     readiness,
@@ -495,6 +497,13 @@ async function acknowledgeInitialQueryLifecycle(store: FakeStore): Promise<void>
 }
 
 describe("UdsSession control: prompt in → SDK", () => {
+  it("announces QueryCreated's exact durable sequence in the handshake", async () => {
+    const { hello } = await rig({ storeSessionId: "vendor-session", sessionSource: SessionSource.RESUME });
+
+    expect(hello.vendorSessionId).toBe("vendor-session");
+    expect(hello.queryCreatedSeq).toBe(1n);
+  });
+
   it("pushes a SubmitPrompt into the SDK input queue and Acks", async () => {
     // Arrange
     const { query, daemon, session } = await rig();
@@ -2735,6 +2744,7 @@ describe("UdsSession bring-up gate", () => {
     cleanups.push(() => daemon2.destroy());
     const hello2 = await daemon2.next(ShimHelloSchema);
     expect(hello2.vendorSessionId).toBe("uuid-new");
+    expect(hello2.queryCreatedSeq).toBe(0n);
     daemon2.send(DaemonHelloSchema, create(DaemonHelloSchema, { daemonVersion: "d2", protocolVersion: "1", fromSeq: 0n }));
     await until(() => store.count() >= 3, "the new seq space was subscribed");
     const resub = await store.latest().next(SubscribeSchema);

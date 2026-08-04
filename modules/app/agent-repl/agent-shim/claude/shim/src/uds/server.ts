@@ -121,6 +121,8 @@ export interface SessionServerOptions {
   queryInstanceId: string;
   /** Exact SDK runtime identity observed for queryInstanceId, when available. */
   queryRuntimeIdentity?: () => QueryRuntimeIdentity | undefined;
+  /** QueryCreated's exact position in the announced vendor session stream. */
+  queryCreatedSeq: () => bigint;
   shimVersion: string;
   protocolVersion: string;
   vendor?: string;
@@ -414,9 +416,11 @@ export class SessionServer {
     // STAGE 1. The DIALER speaks first, and this frame is also what identifies
     // the session to the daemon's listener, which routes the connection by it.
     const runtimeIdentity = this.opts.queryRuntimeIdentity?.();
+    const queryCreatedSeq = this.opts.queryCreatedSeq();
     conn.send(ShimHelloSchema, create(ShimHelloSchema, {
       sessionId: this.opts.sessionId,
       queryInstanceId: this.opts.queryInstanceId,
+      queryCreatedSeq,
       ...(runtimeIdentity === undefined ? {} : { queryRuntimeIdentity: runtimeIdentity }),
       vendor: this.opts.vendor ?? "claude",
       shimVersion: this.opts.shimVersion,

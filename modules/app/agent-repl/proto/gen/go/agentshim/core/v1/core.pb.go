@@ -3977,8 +3977,16 @@ type ShimHello struct {
 	// a reconnect carries the cached observation so a restored daemon can
 	// complete terminal accounting without replaying historical lifecycle rows.
 	QueryRuntimeIdentity *QueryRuntimeIdentity `protobuf:"bytes,11,opt,name=query_runtime_identity,json=queryRuntimeIdentity,proto3" json:"query_runtime_identity,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	// Gives the QueryCreated record's sequence in vendor_session_id's durable
+	// stream. The daemon uses this exact boundary to distinguish catch-up rows
+	// from lifecycle contradictions after binding query_instance_id from this
+	// handshake. Zero means QueryCreated belongs to a stream key that the SDK
+	// replaced when it revealed or rotated the vendor session identity, so the
+	// announced stream contains no pre-boundary lifecycle history for this
+	// query.
+	QueryCreatedSeq uint64 `protobuf:"varint,12,opt,name=query_created_seq,json=queryCreatedSeq,proto3" json:"query_created_seq,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *ShimHello) Reset() {
@@ -4086,6 +4094,13 @@ func (x *ShimHello) GetQueryRuntimeIdentity() *QueryRuntimeIdentity {
 		return x.QueryRuntimeIdentity
 	}
 	return nil
+}
+
+func (x *ShimHello) GetQueryCreatedSeq() uint64 {
+	if x != nil {
+		return x.QueryCreatedSeq
+	}
+	return 0
 }
 
 type DaemonHello struct {
@@ -6057,7 +6072,7 @@ const file_agentshim_core_v1_core_proto_rawDesc = "" +
 	"\rdropped_count\x18\x03 \x01(\x04R\fdroppedCount\x12\x1c\n" +
 	"\trecovered\x18\x04 \x01(\bR\trecovered\x12/\n" +
 	"\x11query_instance_id\x18\x05 \x01(\tH\x00R\x0fqueryInstanceId\x88\x01\x01B\x14\n" +
-	"\x12_query_instance_id\"\xc4\x03\n" +
+	"\x12_query_instance_id\"\xf0\x03\n" +
 	"\tShimHello\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x16\n" +
@@ -6071,7 +6086,8 @@ const file_agentshim_core_v1_core_proto_rawDesc = "" +
 	"\x0factive_turn_ids\x18\t \x03(\tR\ractiveTurnIds\x12*\n" +
 	"\x11query_instance_id\x18\n" +
 	" \x01(\tR\x0fqueryInstanceId\x12]\n" +
-	"\x16query_runtime_identity\x18\v \x01(\v2'.agentshim.core.v1.QueryRuntimeIdentityR\x14queryRuntimeIdentity\"\xa3\x01\n" +
+	"\x16query_runtime_identity\x18\v \x01(\v2'.agentshim.core.v1.QueryRuntimeIdentityR\x14queryRuntimeIdentity\x12*\n" +
+	"\x11query_created_seq\x18\f \x01(\x04R\x0fqueryCreatedSeq\"\xa3\x01\n" +
 	"\vDaemonHello\x12%\n" +
 	"\x0edaemon_version\x18\x01 \x01(\tR\rdaemonVersion\x12)\n" +
 	"\x10protocol_version\x18\x02 \x01(\tR\x0fprotocolVersion\x12\x19\n" +

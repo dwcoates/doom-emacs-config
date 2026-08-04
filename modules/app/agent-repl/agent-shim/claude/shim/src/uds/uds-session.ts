@@ -356,6 +356,8 @@ export class UdsSession {
   private effectiveModel = "";
   /** One identifier for the only query() invocation the shim is permitted to own. */
   private readonly queryInstanceId: string;
+  /** Durable position of QueryCreated and the stream key that owns it. */
+  private queryCreatedPosition: { storeKey: string; seq: bigint } | null = null;
   /** Closed identity state for the one query invocation owned by this shim. */
   private queryIdentity: QueryIdentityState;
   /** The latest SDK-observed runtime identity for the query this shim owns. */
@@ -567,6 +569,12 @@ export class UdsSession {
         socketPath: this.deps.udsSocketPath,
         sessionId: this.deps.sessionId,
         queryInstanceId: this.queryInstanceId,
+        queryCreatedSeq: () => {
+          const position = this.queryCreatedPosition;
+          return position !== null && position.storeKey === this.store.storeSessionId()
+            ? position.seq
+            : 0n;
+        },
         queryRuntimeIdentity: () => {
           const identity = this.queryRuntimeIdentity;
           return identity !== null && identity.vendorSessionId === this.store.vendorSessionId()
@@ -1341,13 +1349,18 @@ export class UdsSession {
 
   /** Persist the construction of the only query() the shim owns. */
   private async persistQueryCreated(): Promise<void> {
+    const storeKey = this.store.storeSessionId();
     const invocation = this.deps.sessionSource === SessionSource.RESUME
       ? { case: "resumed" as const, value: create(ResumedQuerySchema, { requestedVendorSessionId: this.deps.storeSessionId ?? "" }) }
       : { case: "fresh" as const, value: create(FreshQuerySchema) };
-    await this.persistQueryLifecycle({
+    const ack = await this.persistQueryLifecycle({
       case: "created",
       value: create(QueryCreatedSchema, { requestedModel: this.deps.requestedModel ?? "", invocation }),
-    });
+    }, storeKey);
+    if (ack.accepted !== 1n || ack.deduped !== 0n || ack.lastSeq === 0n) {
+      throw new Error(`QueryCreated persistence returned an invalid receipt: accepted=${ack.accepted} deduped=${ack.deduped} last_seq=${ack.lastSeq}`);
+    }
+    this.queryCreatedPosition = { storeKey, seq: ack.lastSeq };
   }
 
   /** Persist effective query configuration after the SDK reports system initialization. */
@@ -1493,10 +1506,10 @@ export class UdsSession {
   private async persistQueryLifecycle(
     event: QueryLifecycle["event"],
     sessionId = this.store.storeSessionId(),
-  ): Promise<void> {
+  ): ReturnType<StoreClient["write"]> {
     const envelope = this.queryLifecycleEnvelope(event, sessionId);
     LOGGER.log({ agent_repl_session_id: this.deps.sessionId, query_instance_id: this.queryInstanceId, lifecycle_event: event.case, store_key: sessionId }, "persisting query lifecycle event");
-    await this.store.write([envelope]);
+    return this.store.write([envelope]);
   }
 
   private queryLifecycleEnvelope(
