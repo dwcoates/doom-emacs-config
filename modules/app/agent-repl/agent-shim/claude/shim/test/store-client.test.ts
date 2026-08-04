@@ -7,6 +7,7 @@ import {
   DegradedState,
   Event,
   EventSchema,
+  HeartbeatSchema,
   HealthCheckSchema,
   HealthStatusSchema,
   StoreWriteAckSchema,
@@ -14,6 +15,7 @@ import {
   SubscribeSchema,
 } from "../src/uds/proto.js";
 import { FramedPeer, tmpSocketPath, until } from "./uds-harness.js";
+import { unpackAs } from "../src/uds/framing.js";
 
 /** A controllable fake shim-store: framed, one accepted connection per role. */
 interface FakeStore {
@@ -33,8 +35,8 @@ interface FakeStore {
   close: () => void;
 }
 
-function fakeStore(): Promise<FakeStore> {
-  return fakeStoreAt(tmpSocketPath());
+function fakeStore(acknowledgeSubscriptions = true): Promise<FakeStore> {
+  return fakeStoreAt(tmpSocketPath(), acknowledgeSubscriptions);
 }
 
 /**
@@ -43,7 +45,7 @@ function fakeStore(): Promise<FakeStore> {
  * survive. Any stale socket file is removed first (a closed server may leave
  * one behind, which would fail the rebind with EADDRINUSE).
  */
-function fakeStoreAt(socketPath: string): Promise<FakeStore> {
+function fakeStoreAt(socketPath: string, acknowledgeSubscriptions = true): Promise<FakeStore> {
   try {
     fs.unlinkSync(socketPath);
   } catch {
@@ -55,6 +57,13 @@ function fakeStoreAt(socketPath: string): Promise<FakeStore> {
   return new Promise((resolve, reject) => {
     const server = net.createServer((socket) => {
       const peer = new FramedPeer(socket);
+      if (acknowledgeSubscriptions) {
+        peer.onReceive((frame) => {
+          if (unpackAs(frame, SubscribeSchema) === undefined) return false;
+          peer.send(HeartbeatSchema, create(HeartbeatSchema, { sentAtMs: 1n }));
+          return false;
+        });
+      }
       accepted.push(peer);
       const claim = waiting.shift();
       if (claim) claim(peer);
@@ -113,6 +122,11 @@ async function connectedClient(store: FakeStore, sink?: (e: Event) => void, degr
   return client;
 }
 
+/** The store's post-replay Heartbeat is the standing-tail readiness barrier. */
+async function awaitSubscriptionReady(client: StoreClient): Promise<void> {
+  await until(() => client.isSubscribed(), "standing subscription readiness");
+}
+
 describe("StoreClient subscribe/write happy path", () => {
   it("requires a live standing subscription before asserting store health", async () => {
     // Arrange: a producer socket by itself cannot render merged state.
@@ -135,6 +149,7 @@ describe("StoreClient subscribe/write happy path", () => {
     client.subscribe(0n);
     await until(() => store.count() === 2);
     await store.latest().next(SubscribeSchema);
+    await awaitSubscriptionReady(client);
 
     // Act: health opens one throwaway probe and requires its matching reply.
     const health = client.health("store-health-1");
@@ -161,6 +176,7 @@ describe("StoreClient subscribe/write happy path", () => {
     client.subscribe(0n);
     await until(() => store.count() === 2);
     await store.latest().next(SubscribeSchema);
+    await awaitSubscriptionReady(client);
 
     // Act
     const health = client.health("store-health-expected");
@@ -188,9 +204,28 @@ describe("StoreClient subscribe/write happy path", () => {
     client.subscribe(5n);
     await until(() => store.count() === 2);
     const sub = await store.latest().next(SubscribeSchema);
+    await awaitSubscriptionReady(client);
     // Assert
     expect(sub.sessionId).toBe("sess-1");
     expect(sub.fromSeq).toBe(5n);
+  });
+
+  it("asserts a standing subscription only after the store readiness heartbeat", async () => {
+    // Arrange: this fake intentionally withholds the post-replay barrier.
+    const store = await fakeStore(false);
+    stores.push(store);
+    const client = await connectedClient(store);
+
+    // Act: Subscribe reaches the wire, but the tail is not live yet.
+    const subscribed = client.subscribe(5n);
+    await until(() => store.count() === 2);
+    await store.latest().next(SubscribeSchema);
+    expect(client.isSubscribed()).toBe(false);
+
+    // Assert: the readiness heartbeat is the structural state transition.
+    store.latest().send(HeartbeatSchema, create(HeartbeatSchema, { sentAtMs: 1n }));
+    await expect(subscribed).resolves.toBeUndefined();
+    expect(client.isSubscribed()).toBe(true);
   });
 
   it("resolves write() on the StoreWriteAck", async () => {
@@ -252,6 +287,7 @@ describe("StoreClient subscribe/write happy path", () => {
     client.subscribe(0n);
     await until(() => store.count() === 2);
     await store.latest().next(SubscribeSchema);
+    await awaitSubscriptionReady(client);
     // Act
     store.latest().send(EventSchema, create(EventSchema, { sessionId: "sess-1", seq: 1n }));
     store.latest().send(EventSchema, create(EventSchema, { sessionId: "sess-1", seq: 2n }));
@@ -270,6 +306,7 @@ describe("StoreClient subscription connection (single-role store)", () => {
     client.subscribe(0n);
     await until(() => store.count() === 2);
     await store.latest().next(SubscribeSchema);
+    await awaitSubscriptionReady(client);
     // Act
     const ackP = client.write([create(EventSchema, { sessionId: "sess-1" })]);
     const write = await store.peer().next(StoreWriteSchema);
@@ -288,6 +325,7 @@ describe("StoreClient subscription connection (single-role store)", () => {
     client.subscribe(0n);
     await until(() => store.count() === 2);
     await store.latest().next(SubscribeSchema);
+    await awaitSubscriptionReady(client);
     // Act
     store.latest().destroy();
     await until(() => degradations.length >= 1);
@@ -305,10 +343,12 @@ describe("StoreClient subscription connection (single-role store)", () => {
     client.subscribe(0n);
     await until(() => store.count() === 2);
     await store.latest().next(SubscribeSchema);
+    await awaitSubscriptionReady(client);
     // Act
     client.subscribe(7n);
     await until(() => store.count() === 3);
     const sub2 = await store.latest().next(SubscribeSchema);
+    await awaitSubscriptionReady(client);
     // Assert
     expect(sub2.fromSeq).toBe(7n);
     expect(degradations).toHaveLength(0);
@@ -770,6 +810,7 @@ describe("StoreClient store session key", () => {
     // Act
     client.subscribe(0n);
     await until(() => store.count() === 2, "subscription connection accepted");
+    await awaitSubscriptionReady(client);
 
     // Assert
     const sub = await store.latest().next(SubscribeSchema);
@@ -784,6 +825,7 @@ describe("StoreClient store session key", () => {
     client.subscribe(7n);
     await until(() => store.count() === 2, "first subscription accepted");
     expect((await store.latest().next(SubscribeSchema)).sessionId).toBe("sess-1");
+    await awaitSubscriptionReady(client);
 
     // Act: the first converted event reveals the real uuid.
     client.adoptStoreKey("96a0baaf-uuid");
@@ -804,6 +846,7 @@ describe("StoreClient store session key", () => {
     const client = await clientWith(store, "96a0baaf-uuid");
     client.subscribe(0n);
     await until(() => store.count() === 2, "subscription accepted");
+    await awaitSubscriptionReady(client);
 
     // Act
     client.adoptStoreKey("96a0baaf-uuid");
@@ -811,6 +854,24 @@ describe("StoreClient store session key", () => {
 
     // Assert
     expect(store.count()).toBe(2);
+  });
+
+  it("marks an SDK-reported key as vendor identity when it equals the placeholder", async () => {
+    // Arrange: a fresh session begins with the daemon id as an explicitly
+    // untrusted storage placeholder.
+    const store = await fakeStore();
+    stores.push(store);
+    const client = await clientWith(store);
+    expect(client.storeSessionId()).toBe("sess-1");
+    expect(client.vendorSessionId()).toBe("");
+
+    // Act: the SDK reports that exact string as its vendor session id.
+    client.adoptStoreKey("sess-1");
+
+    // Assert: the value is authoritative without inventing a re-key or a
+    // subscription the daemon did not request.
+    expect(client.vendorSessionId()).toBe("sess-1");
+    expect(store.count()).toBe(1);
   });
 
   it("records the key without subscribing when the daemon has not subscribed", async () => {
@@ -870,6 +931,7 @@ describe("StoreClient vendor session rotation", () => {
     client.subscribe(0n);
     await until(() => store.count() === 2, "subscription accepted");
     await store.latest().next(SubscribeSchema);
+    await awaitSubscriptionReady(client);
     store.latest().send(EventSchema, create(EventSchema, { sessionId: "uuid-old", seq: 5990n }));
     await until(() => received.length === 1, "event forwarded under the old key");
     return client;
@@ -1002,6 +1064,7 @@ describe("StoreClient vendor session rotation", () => {
     client.subscribe(9n);
     await until(() => store.count() === 2, "subscription accepted");
     await store.latest().next(SubscribeSchema);
+    await awaitSubscriptionReady(client);
 
     // Act
     client.adoptStoreKey("uuid-new");

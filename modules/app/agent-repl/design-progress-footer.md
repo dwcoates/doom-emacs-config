@@ -434,9 +434,9 @@ already running.
 
 ## The ttft relay (executed)
 
-`ttft_ms` is fed by a new EPHEMERAL core payload, `core.MessageLatency`
-(`{uuid, ttft_ms}`, `Event.payload` field 21), carried on the same delta bypass
-as `ContentDelta` and `HeartbeatProgress`.
+`ttft_ms` is fed by a PERSISTENT core payload, `core.MessageLatency`
+(`{uuid, ttft_ms}`, `Event.payload` field 21). It is stored and replayed so a
+restarted daemon can derive response timing from the original measurement.
 
 ### Where the number comes from
 
@@ -450,13 +450,12 @@ late for a live footer.
 ### The path
 
 1. `streamEventToMessageLatency` (`shim/src/proto/delta.ts`) maps a stamped
-   `message_start` to an EPHEMERAL `MessageLatency` Event. `toEphemeralEvent`
-   tries the ContentDelta mapper first and falls through to this one — the two
-   are mutually exclusive by frame type, so neither shadows the other. Its
-   `uuid` is the streamed message's id (`StreamMessageTracker.current()`),
-   exactly the key `ContentDelta` uses, so both describe one message.
-2. `shimclient.dispatchEvent` routes it to the `FrameSink` alongside the other
-   two ephemerals.
+   `message_start` to a PERSISTENT `MessageLatency` Event. Its `uuid` is the
+   streamed message's id (`StreamMessageTracker.current()`), exactly the key
+   `ContentDelta` uses, so both describe one message.
+2. `UdsSession.routeSdkMessage` writes it through the shim store. The store
+   sequence makes the observation replayable and preserves its order relative
+   to the assistant response it describes.
 3. `sessioncontroller.consumer.Consume` folds it into the progress resolver and pushes
    NOTHING to the frontend conversation surface — it is footer input only.
 4. `progress.applyLatencyLocked` sets `ProgressView.ttft_ms` and pushes.
@@ -468,11 +467,9 @@ late for a live footer.
   each with its own stamp, and the footer reports the newest.
 - **STRUCTURAL, not coalesced.** It moves at most once per message, so holding
   it for the ticker window would only add latency to a latency display.
-- **Absence-tolerant, per the EPHEMERAL contract.** The shim declines to emit a
-  relay for an absent, zero, or non-numeric stamp, and the resolver refuses a
-  zero rather than blanking a figure already standing. Nothing is persisted and
-  nothing is replayed: a reconnecting frontend simply has no latency until the
-  next message starts.
+- **Absence-tolerant.** The shim declines to emit a relay for an absent, zero,
+  or non-numeric stamp, and the resolver refuses a zero rather than blanking a
+  figure already standing. A valid measurement is persisted and replayed.
 - Reset at turn start with the other turn-scoped figures (§Turn-start reset
   signal above).
 

@@ -39,7 +39,14 @@ import {
   type ApiUserMessage,
 } from "../../../../proto/gen/ts/agentshim/data/v1/tools_pb.js";
 import { AsyncQueue } from "../src/input-queue.js";
-import { UdsSession } from "../src/uds/uds-session.js";
+import {
+  QueryTerminationCleanupError,
+  QueryTerminationPersistenceError,
+  ResumeIdentityMismatchError,
+  UdsSession,
+  isQueryTerminationCleanupError,
+  isQueryTerminationPersistenceError,
+} from "../src/uds/uds-session.js";
 import type { UdsQuery } from "../src/uds/uds-session.js";
 import type {
   CanUseToolLike,
@@ -55,12 +62,15 @@ import type { Event, ShimReady, Subscribe } from "../src/uds/proto.js";
 import {
   AckSchema,
   DaemonHelloSchema,
+  EventClass,
   DiagnosticSourceRuntime,
   EventSchema,
+  HeartbeatSchema,
   HealthCheckSchema,
   HealthStatusSchema,
   FilePlaneDiagnosticSchema,
   InterruptSchema,
+  NackSchema,
   PermissionDecision,
   InterruptOutcome,
   PermissionRequestSchema,
@@ -77,6 +87,7 @@ import {
   SubscribeSchema,
 } from "../src/uds/proto.js";
 import { FramedPeer, acceptShim, tmpSocketPath, until } from "./uds-harness.js";
+import { unpackAs } from "../src/uds/framing.js";
 
 const tick = (): Promise<void> => new Promise<void>((r) => setImmediate(r));
 
@@ -170,7 +181,15 @@ function fakeStore(): Promise<FakeStore> {
   const socketPath = tmpSocketPath();
   const accepted: FramedPeer[] = [];
   return new Promise((resolve, reject) => {
-    const server = net.createServer((s) => accepted.push(new FramedPeer(s)));
+    const server = net.createServer((socket) => {
+      const peer = new FramedPeer(socket);
+      peer.onReceive((frame) => {
+        if (unpackAs(frame, SubscribeSchema) === undefined) return false;
+        peer.send(HeartbeatSchema, create(HeartbeatSchema, { sentAtMs: 1n }));
+        return false;
+      });
+      accepted.push(peer);
+    });
     server.once("error", reject);
     server.listen(socketPath, () =>
       resolve({
@@ -225,10 +244,24 @@ afterEach(async () => {
   for (const c of cleanups.splice(0)) await c();
 });
 
+async function shutdownFixture(session: UdsSession, query: FakeQuery, done: Promise<void>): Promise<void> {
+  try {
+    await session.shutdown("test-cleanup");
+  } catch (cause) {
+    // Tests that deliberately sever the store cannot obtain a cleanup-only
+    // termination receipt. Production surfaces this exact error fatally; the
+    // dedicated violation test asserts that contract.
+    if (!(cause instanceof QueryTerminationPersistenceError)) throw cause;
+  }
+  query.endStream();
+  await done.catch(() => {});
+}
+
 type CapturedLogRecord = {
   operation?: string;
   message?: string;
   context?: Record<string, unknown>;
+  agent_repl_session_id?: string;
   claude_session_id?: string;
   request_id?: string;
 };
@@ -313,10 +346,13 @@ async function rig(
     sessionSource?: SessionSource;
     storeSessionId?: string;
     replayIdleMs?: number;
+    queryInstanceId?: string;
     /** The `--permission-mode` argv the session is constructed with. */
     permissionMode?: PermissionMode;
     /** DaemonHello.permission_mode; omitted models a daemon predating it. */
     handshakeMode?: string;
+    /** Keep the ordered start batch unacked so a test can assert its barrier. */
+    holdTurnStartAck?: boolean;
   } = {},
 ): Promise<Rig> {
   const store = await fakeStore();
@@ -347,6 +383,7 @@ async function rig(
     udsSocketPath,
     storeSocketPath: store.socketPath,
     sessionSource: opts.sessionSource ?? SessionSource.FRESH,
+    ...(opts.queryInstanceId !== undefined ? { queryInstanceId: opts.queryInstanceId } : {}),
     ...(opts.permissionMode !== undefined ? { permissionMode: opts.permissionMode } : {}),
     ...(opts.storeSessionId !== undefined ? { storeSessionId: opts.storeSessionId } : {}),
     createQuery,
@@ -357,14 +394,70 @@ async function rig(
       return () => `req-${++n}`;
     })(),
   });
+  let outstandingFixtureWrites = 0;
+  let fixtureTearingDown = false;
   // start() resolves only when the SDK stream ends; kick it off and clean up.
   const done = session.start();
-  cleanups.push(async () => {
-    await session.shutdown("test-cleanup");
-    query.endStream();
-    await done.catch(() => {});
+  let runSettled = false;
+  void done.then(
+    () => { runSettled = true; },
+    () => { runSettled = true; },
+  );
+  cleanups.unshift(async () => {
+    fixtureTearingDown = true;
+    while (outstandingFixtureWrites > 0) {
+      outstandingFixtureWrites--;
+      store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+        accepted: 1n,
+        lastSeq: 1n,
+      }));
+    }
+    await tick();
+    if (!runSettled) {
+      await shutdownFixture(session, query, done);
+    }
   });
 
+  await until(() => store.count() >= 1);
+  const created = await store.peer().next(StoreWriteSchema);
+  expect(created.batch!.events).toHaveLength(1);
+  expect(created.batch!.events[0]!.payload.case).toBe("queryLifecycle");
+  store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { accepted: 1n, lastSeq: 1n }));
+  store.peer().onReceive((frame) => {
+    const write = unpackAs(frame, StoreWriteSchema);
+    if (write === undefined) return false;
+    const internalTelemetry = write.batch?.events.every((event) =>
+      event.payload.case === "accountUsageObservation" || event.payload.case === "queryLifecycle",
+    ) ?? false;
+    const orderedTurnStartBoundary = write.batch?.events.length === 2
+      && write.batch.events[0]?.payload.case === "turnStarted"
+      && write.batch.events[1]?.payload.case === "accountUsageObservation";
+    if (orderedTurnStartBoundary) {
+      if (opts.holdTurnStartAck !== true) {
+        queueMicrotask(() => store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+          accepted: 2n,
+          lastSeq: 1n,
+        })));
+      }
+      return false;
+    }
+    if (!internalTelemetry) {
+      if (fixtureTearingDown) {
+        queueMicrotask(() => store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+          accepted: BigInt(write.batch?.events.length ?? 0),
+          lastSeq: 1n,
+        })));
+        return true;
+      }
+      outstandingFixtureWrites++;
+      return false;
+    }
+    queueMicrotask(() => store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(write.batch?.events.length ?? 0),
+      lastSeq: 1n,
+    })));
+    return true;
+  });
   const daemon = await daemonListener.next();
   await daemon.next(ShimHelloSchema);
   daemon.send(DaemonHelloSchema, create(DaemonHelloSchema, {
@@ -392,6 +485,15 @@ async function rig(
   };
 }
 
+/** Acknowledge the mandatory initial QueryCreated receipt in custom session rigs. */
+async function acknowledgeInitialQueryLifecycle(store: FakeStore): Promise<void> {
+  await until(() => store.count() >= 1);
+  const write = await store.peer().next(StoreWriteSchema);
+  expect(write.batch!.events).toHaveLength(1);
+  expect(write.batch!.events[0]!.payload.case).toBe("queryLifecycle");
+  store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { accepted: 1n, lastSeq: 1n }));
+}
+
 describe("UdsSession control: prompt in → SDK", () => {
   it("pushes a SubmitPrompt into the SDK input queue and Acks", async () => {
     // Arrange
@@ -405,6 +507,21 @@ describe("UdsSession control: prompt in → SDK", () => {
     const content = query.prompts[0]!.message.content;
     expect(content).toEqual([{ type: "text", text: "hello there" }]);
     expect(session.turnCount()).toBe(1);
+  });
+
+  it("rejects a whitespace-only request id before creating any durable or SDK turn state", async () => {
+    // Arrange
+    const { query, daemon, session, store } = await rig();
+    // Act
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: " \t", text: "must not run" }));
+    const nack = await daemon.next(NackSchema);
+    await tick();
+    // Assert
+    expect(nack.reason).toBe("SubmitPrompt requires a non-empty request_id");
+    expect(query.subscriptionUsageCalls).toBe(0);
+    expect(query.prompts).toEqual([]);
+    expect(session.turnCount()).toBe(0);
+    expect(store.peer().count(StoreWriteSchema)).toBe(0);
   });
 
   it("captures five-hour utilization before admitting the prompt to the SDK", async () => {
@@ -578,7 +695,12 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
     // Arrange: consume the start write for p1.
     const { query, store, daemon } = await rig({ storeSessionId: "vendor-uuid" });
     daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
-    await store.peer().next(StoreWriteSchema);
+    const startBatch = await store.peer().next(StoreWriteSchema);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(startBatch.batch!.events.length),
+      lastSeq: 8n,
+    }));
+    await daemon.next(AckSchema);
     // Act.
     query.emit({
       type: "result",
@@ -587,11 +709,49 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
       subtype: "success",
     } as unknown as SdkMessageLike);
     const sw = await store.peer().next(StoreWriteSchema);
-    // Assert: vendor evidence plus exactly one identity-bearing lifecycle end.
+    // Assert: all response and usage evidence precedes the terminal lifecycle
+    // fact, so reducer resolution cannot overtake accounting.
+    expect(sw.batch!.events.map((event) => event.payload.case)).toEqual([
+      "vendor",
+      "accountUsageObservation",
+      "turnEnded",
+    ]);
     const ended = sw.batch!.events.find((event) => event.payload.case === "turnEnded");
     expect(ended?.requestId).toBe("p1");
     if (ended?.payload.case !== "turnEnded") throw new Error("case");
     expect(ended.payload.value.turnId).toBe("p1");
+  });
+
+  it("correlates an assistant response to the active accepted root turn", async () => {
+    const { query, store, daemon, session } = await rig({ storeSessionId: "vendor-uuid" });
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
+    await store.peer().next(StoreWriteSchema);
+    await daemon.next(AckSchema);
+    expect(session.turnCount()).toBe(1);
+
+    query.emit({
+      type: "assistant",
+      uuid: "u1",
+      session_id: "vendor-uuid",
+      request_id: "api-request-9",
+      message: {
+        id: "m1",
+        model: "claude",
+        content: [{ type: "text", text: "hi" }],
+        stop_reason: "end_turn",
+        usage: {
+          input_tokens: 10,
+          output_tokens: 2,
+          cache_read_input_tokens: 0,
+          cache_creation_input_tokens: 0,
+        },
+      },
+    } as unknown as SdkMessageLike);
+    const write = await store.peer().next(StoreWriteSchema);
+
+    expect(write.batch!.events).toHaveLength(1);
+    expect(write.batch!.events[0]!.requestId).toBe("p1");
+    expect(session.turnCount()).toBe(1);
   });
 
   it("writes a non-lifecycle turn claim bridge into a rotated vendor seq space before its end", async () => {
@@ -602,6 +762,7 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
     await daemon.next(EventSchema);
     daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
     const oldStart = await store.peer().next(StoreWriteSchema);
+    await daemon.next(AckSchema);
     expect(oldStart.batch!.events[0]!.sessionId).toBe("uuid-old");
 
     // Act: the matching result belongs to the newly minted vendor UUID.
@@ -620,10 +781,13 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
     // handshake keeps the identity until this batch is durably acked.
     const kinds = rotatedBatch.batch!.events.map((event) => event.payload.case);
     const bridgeIndex = kinds.indexOf("turnClaimBridge");
+    const usageIndex = kinds.indexOf("accountUsageObservation");
     const endIndex = kinds.indexOf("turnEnded");
     expect(kinds).not.toContain("turnStarted");
     expect(bridgeIndex).toBeGreaterThanOrEqual(0);
-    expect(endIndex).toBeGreaterThan(bridgeIndex);
+    expect(usageIndex).toBeGreaterThan(bridgeIndex);
+    expect(endIndex).toBeGreaterThan(usageIndex);
+    expect(endIndex).toBe(kinds.length - 1);
     expect(rotatedBatch.batch!.events[bridgeIndex]!.sessionId).toBe("uuid-new");
     expect(rotatedBatch.batch!.events[endIndex]!.sessionId).toBe("uuid-new");
     const bridged = rotatedBatch.batch!.events[bridgeIndex]!.payload;
@@ -634,6 +798,79 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
     });
     expect(hello2.activeTurnIds).toEqual(["p1"]);
     expect(hello2.turnInFlight).toBe(true);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(rotatedBatch.batch!.events.length),
+      lastSeq: 8n,
+    }));
+  });
+
+  it("writes a rotated turn claim bridge before the first assistant usage", async () => {
+    const { query, store, daemon } = await rig({ storeSessionId: "uuid-old" });
+    store.latest().send(EventSchema, create(EventSchema, { sessionId: "uuid-old", seq: 7n }));
+    await daemon.next(EventSchema);
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
+    await store.peer().next(StoreWriteSchema);
+    await daemon.next(AckSchema);
+
+    query.emit({
+      type: "system",
+      subtype: "init",
+      session_id: "uuid-new",
+      uuid: "i1",
+      model: "claude",
+      cwd: "/tmp",
+    } as unknown as SdkMessageLike);
+    const rotatedInitBatch = await store.peer().next(StoreWriteSchema);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(rotatedInitBatch.batch!.events.length),
+      lastSeq: 8n,
+    }));
+
+    query.emit({
+      type: "assistant",
+      uuid: "u1",
+      session_id: "uuid-new",
+      request_id: "api-request-9",
+      parent_tool_use_id: null,
+      message: {
+        id: "m1",
+        role: "assistant",
+        model: "claude",
+        content: [{ type: "text", text: "hi" }],
+        stop_reason: "end_turn",
+        usage: {
+          input_tokens: 10,
+          output_tokens: 2,
+          cache_read_input_tokens: 0,
+          cache_creation_input_tokens: 0,
+        },
+      },
+    } as unknown as SdkMessageLike);
+    const assistantBatch = await store.peer().next(StoreWriteSchema);
+
+    if (assistantBatch.batch!.events[1]!.payload.case === "unparsed") {
+      throw new Error(assistantBatch.batch!.events[1]!.payload.value.error);
+    }
+
+    expect(assistantBatch.batch!.events.map((event) => event.payload.case)).toEqual([
+      "turnClaimBridge",
+      "vendor",
+    ]);
+    expect(assistantBatch.batch!.events[0]!.requestId).toBe("p1");
+    expect(assistantBatch.batch!.events[1]!.requestId).toBe("p1");
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(assistantBatch.batch!.events.length),
+      lastSeq: 10n,
+    }));
+
+    query.emit({
+      type: "result",
+      uuid: "r1",
+      session_id: "uuid-new",
+      subtype: "success",
+    } as unknown as SdkMessageLike);
+    const terminalBatch = await store.peer().next(StoreWriteSchema);
+    expect(terminalBatch.batch!.events.map((event) => event.payload.case)).not.toContain("turnClaimBridge");
   });
 
   it("files the TurnStarted under the vendor session id, not the shim's own id", async () => {
@@ -647,34 +884,67 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
     expect(sw.batch!.events[0]!.sessionId).toBe("vendor-uuid");
   });
 
-  it("holds a TurnStarted accepted before the vendor session id is known", async () => {
-    // Arrange: a FRESH session has no --resume id, so the store key is still
-    // the placeholder when the first prompt arrives.
-    const { store, daemon } = await rig();
-    // Act
+  it("durably orders TurnStarted before start usage before admitting a fresh prompt", async () => {
+    // Arrange: a fresh session has no vendor id, so both facts use the
+    // placeholder seq space and any later rotation receives a claim bridge.
+    const { query, store, daemon } = await rig({ holdTurnStartAck: true });
+
+    // Act: hold the store acknowledgement at the boundary.
     daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
-    await daemon.next(AckSchema);
-    await tick();
-    // Assert: nothing written yet — it is held, not filed under `sess-1`.
-    expect(store.peer().count(StoreWriteSchema)).toBe(0);
+    const start = await store.peer().next(StoreWriteSchema);
+
+    // Assert: reducer-safe order is structural, and SDK admission cannot
+    // overtake durability of either boundary fact.
+    expect(start.batch!.events.map((event) => event.payload.case)).toEqual([
+      "turnStarted",
+      "accountUsageObservation",
+    ]);
+    expect(start.batch!.events.every((event) => event.sessionId === "sess-1")).toBe(true);
+    expect(query.prompts).toEqual([]);
+
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: 2n,
+      lastSeq: 2n,
+    }));
+    expect((await daemon.next(AckSchema)).requestId).toBe("p1");
+    await until(() => query.prompts.length === 1);
   });
 
-  it("flushes a held TurnStarted under the adopted key once the SDK reveals it", async () => {
-    // Arrange: a held turn from a fresh session.
+  it("does not duplicate a durable start when the SDK later reveals the vendor key", async () => {
+    // Arrange: the start boundary is already durable in the initial seq space.
     const { query, store, daemon } = await rig();
     daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
     await daemon.next(AckSchema);
+    const start = await store.peer().next(StoreWriteSchema);
+    expect(start.batch!.events.map((event) => event.payload.case)).toEqual([
+      "turnStarted",
+      "accountUsageObservation",
+    ]);
+
     // Act: the SDK reveals the vendor session id.
     query.emit({
       type: "assistant",
       uuid: "u1",
       session_id: "vendor-uuid",
-      message: { id: "m1", model: "claude", content: [{ type: "text", text: "hi" }], stop_reason: "end_turn", usage: {} },
+      message: {
+        id: "m1",
+        model: "claude",
+        content: [{ type: "text", text: "hi" }],
+        stop_reason: "end_turn",
+        usage: {
+          input_tokens: 10,
+          output_tokens: 2,
+          cache_read_input_tokens: 80,
+          cache_creation_input_tokens: 10,
+        },
+      },
     } as unknown as SdkMessageLike);
-    const first = await store.peer().next(StoreWriteSchema);
-    // Assert: the held turn is flushed, restamped with the adopted key.
-    expect(first.batch!.events[0]!.payload.case).toBe("turnStarted");
-    expect(first.batch!.events[0]!.sessionId).toBe("vendor-uuid");
+    const vendor = await store.peer().next(StoreWriteSchema);
+
+    // Assert: vendor evidence is written once under the adopted key; start
+    // correlation crosses spaces only through the terminal claim bridge.
+    expect(vendor.batch!.events.map((event) => event.payload.case)).not.toContain("turnStarted");
+    expect(vendor.batch!.events[0]!.sessionId).toBe("vendor-uuid");
   });
 
   it("no system:init emits a SessionStarted twin, first or otherwise", async () => {
@@ -798,7 +1068,7 @@ describe("UdsSession lifecycle: shim-asserted readiness", () => {
 
   it("carries the session source on the readiness assertion", async () => {
     // Arrange + Act
-    const { readiness } = await rig({ sessionSource: SessionSource.RESUME });
+    const { readiness } = await rig({ sessionSource: SessionSource.RESUME, storeSessionId: "vendor-uuid" });
     // Assert
     expect(readiness.payload.case).toBe("sessionStarted");
     if (readiness.payload.case === "sessionStarted") {
@@ -808,7 +1078,7 @@ describe("UdsSession lifecycle: shim-asserted readiness", () => {
 
   it("announces readiness exactly once per handshake", async () => {
     // Arrange: rig() already drained the one readiness event.
-    const { daemon, query } = await rig();
+    const { daemon, query } = await rig({ storeSessionId: "vendor-uuid" });
     // Act: an init afterwards must not re-announce.
     query.emit({
       type: "system",
@@ -833,12 +1103,26 @@ describe("UdsSession events: store-write vs ephemeral routing", () => {
       type: "assistant",
       uuid: "u1",
       session_id: "sess-1",
-      message: { id: "m1", model: "claude", content: [{ type: "text", text: "hi" }], stop_reason: "end_turn", usage: {} },
+      message: {
+        id: "m1",
+        model: "claude",
+        content: [{ type: "text", text: "hi" }],
+        stop_reason: "end_turn",
+        usage: {
+          input_tokens: 10,
+          output_tokens: 2,
+          cache_read_input_tokens: 80,
+          cache_creation_input_tokens: 10,
+        },
+      },
     } as unknown as SdkMessageLike);
     const sw = await store.peer().next(StoreWriteSchema);
     await tick();
     // Assert: it went to the store as a vendor event, and NOT to the daemon.
     expect(sw.batch!.events).toHaveLength(1);
+    if (sw.batch!.events[0]!.payload.case === "unparsed") {
+      throw new Error(sw.batch!.events[0]!.payload.value.error);
+    }
     expect(sw.batch!.events[0]!.payload.case).toBe("vendor");
     expect(daemon.count(EventSchema)).toBe(0);
   });
@@ -859,9 +1143,133 @@ describe("UdsSession events: store-write vs ephemeral routing", () => {
     expect(evt.payload.case).toBe("contentDelta");
     expect(store.peer().count(StoreWriteSchema)).toBe(0);
   });
+
+  it("writes stamped message-start latency through the store for replay", async () => {
+    // Arrange
+    const { query, store, daemon } = await rig();
+    // Act: first-token timing is durable analysis evidence, not live-only UI
+    // state. The stream tracker must stamp the MessageLatency with m1.
+    query.emit({
+      type: "stream_event",
+      uuid: "u3",
+      session_id: "sess-1",
+      ttft_ms: 865,
+      event: { type: "message_start", message: { id: "m1", type: "message", role: "assistant" } },
+    } as unknown as SdkMessageLike);
+    const sw = await store.peer().next(StoreWriteSchema);
+    await tick();
+    // Assert: direct delivery is forbidden because a detached daemon must be
+    // able to replay this response-timing evidence from the store.
+    expect(sw.batch!.events).toHaveLength(1);
+    const persisted = sw.batch!.events[0]!;
+    expect([persisted.class, persisted.payload.case]).toEqual([
+      EventClass.PERSISTENT,
+      "messageLatency",
+    ]);
+    if (persisted.payload.case !== "messageLatency") throw new Error("case");
+    expect(persisted.payload.value).toMatchObject({ uuid: "m1", ttftMs: 865n });
+    expect(daemon.count(EventSchema)).toBe(0);
+  });
 });
 
 describe("UdsSession events: store round-trip and sad path", () => {
+  it("fails the SDK pump when durable message latency is rejected", async () => {
+    const { daemon, done, query, store } = await rig({
+      storeSessionId: "sess-1",
+      queryInstanceId: "query-latency-write-failure",
+    });
+    const log = captureLog();
+
+    query.emit({
+      type: "stream_event",
+      uuid: "stream-latency-failure",
+      session_id: "sess-1",
+      ttft_ms: 321,
+      event: { type: "message_start", message: { id: "message-latency-failure", type: "message", role: "assistant" } },
+    } as unknown as SdkMessageLike);
+    const latencyWrite = await store.peer().next(StoreWriteSchema);
+    expect(latencyWrite.batch!.events.map((event) => event.payload.case)).toEqual(["messageLatency"]);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { error: "latency disk full" }));
+    expect((await daemon.next(EventSchema)).payload.case).toBe("degradedState");
+
+    const terminalWrite = await store.peer().next(StoreWriteSchema);
+    expect(terminalWrite.batch!.events.map((event) => event.payload.case)).toEqual(["queryLifecycle", "degradedState"]);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { accepted: 2n, lastSeq: 3n }));
+    const lifecycle = create(EventSchema, { ...terminalWrite.batch!.events[0]!, seq: 3n });
+    store.latest().send(EventSchema, lifecycle);
+    let delivered = await daemon.next(EventSchema);
+    if (delivered.payload.case === "degradedState") delivered = await daemon.next(EventSchema);
+    expect(delivered).toEqual(lifecycle);
+
+    await expect(done).rejects.toMatchObject({
+      name: "UnexpectedSdkStreamTerminationError",
+      terminationKind: "iterator_throw",
+      cause: expect.objectContaining({ message: expect.stringContaining("latency disk full") }),
+    });
+    expect(log.record("persistent SDK message latency did not receive a durable store receipt")).toMatchObject({
+      operation: "shim.uds-session.persistent-evidence",
+      agent_repl_session_id: "test-agent-session",
+      claude_session_id: "sess-1",
+      context: expect.objectContaining({
+        query_instance_id: "query-latency-write-failure",
+        api_message_id: "message-latency-failure",
+        evidence_kind: "message_latency",
+        failed_operation: "store.write.message_latency",
+        outcome: "fatal_missing_persistent_evidence_receipt",
+      }),
+    });
+  });
+
+  it("fails the SDK pump when a terminal turn batch is rejected", async () => {
+    const { daemon, done, query, store } = await rig({
+      storeSessionId: "sess-1",
+      queryInstanceId: "query-terminal-write-failure",
+    });
+    const log = captureLog();
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "turn-terminal-failure", text: "go" }));
+    await store.peer().next(StoreWriteSchema);
+    await daemon.next(AckSchema);
+
+    query.emit({
+      type: "result",
+      uuid: "result-terminal-failure",
+      session_id: "sess-1",
+      subtype: "success",
+    } as unknown as SdkMessageLike);
+    const resultWrite = await store.peer().next(StoreWriteSchema);
+    expect(resultWrite.batch!.events.map((event) => event.payload.case)).toContain("turnEnded");
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { error: "terminal disk full" }));
+    expect((await daemon.next(EventSchema)).payload.case).toBe("degradedState");
+
+    const terminalWrite = await store.peer().next(StoreWriteSchema);
+    expect(terminalWrite.batch!.events.map((event) => event.payload.case)).toEqual(["queryLifecycle", "degradedState"]);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { accepted: 2n, lastSeq: 4n }));
+    const lifecycle = create(EventSchema, { ...terminalWrite.batch!.events[0]!, seq: 4n });
+    store.latest().send(EventSchema, lifecycle);
+    let delivered = await daemon.next(EventSchema);
+    if (delivered.payload.case === "degradedState") delivered = await daemon.next(EventSchema);
+    expect(delivered).toEqual(lifecycle);
+
+    await expect(done).rejects.toMatchObject({
+      name: "UnexpectedSdkStreamTerminationError",
+      terminationKind: "iterator_throw",
+      cause: expect.objectContaining({ message: expect.stringContaining("terminal disk full") }),
+    });
+    expect(log.record("persistent SDK event batch did not receive a durable store receipt")).toMatchObject({
+      operation: "shim.uds-session.persistent-evidence",
+      agent_repl_session_id: "test-agent-session",
+      claude_session_id: "sess-1",
+      request_id: "turn-terminal-failure",
+      context: expect.objectContaining({
+        query_instance_id: "query-terminal-write-failure",
+        turn_id: "turn-terminal-failure",
+        evidence_kind: "terminal_turn_batch",
+        failed_operation: "store.write.terminal_turn_batch",
+        outcome: "fatal_missing_persistent_evidence_receipt",
+      }),
+    });
+  });
+
   it("forwards a merged store Event to the daemon (onMerged)", async () => {
     // Arrange
     const { store, daemon } = await rig();
@@ -1047,6 +1455,61 @@ describe("UdsSession lifetime: reattach", () => {
 });
 
 describe("UdsSession lifetime: SDK stream termination", () => {
+  it("persists startup failure and its cursor-releasing degradation in one batch", async () => {
+    // Arrange: the query exists, but its initial lifecycle receipt is rejected
+    // before a daemon can finish the bring-up handshake.
+    const store = await fakeStore();
+    cleanups.push(() => store.close());
+    let query!: FakeQuery;
+    const session = new UdsSession({
+      sessionId: "sess-startup-failure",
+      shimVersion: "9.9",
+      protocolVersion: "1",
+      udsSocketPath: tmpSocketPath(),
+      storeSocketPath: store.socketPath,
+      sessionSource: SessionSource.FRESH,
+      queryInstanceId: "startup-query",
+      createQuery: (prompt, canUseTool): UdsQuery => {
+        const live = new FakeQuery(prompt, canUseTool);
+        query = live;
+        return { query: live, subscriptionUsage: () => live.subscriptionUsage(), abort: () => live.abort() };
+      },
+      heartbeatIntervalMs: 0,
+    });
+
+    // Act: reject QueryCreated, which moves start() through its startup-failure
+    // terminal path after the SDK query has been constructed.
+    const done = session.start();
+    await until(() => store.count() >= 1);
+    const created = await store.peer().next(StoreWriteSchema);
+    expect(created.batch!.events).toHaveLength(1);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { error: "created lifecycle refused" }));
+    const terminal = await store.peer().next(StoreWriteSchema);
+
+    // Assert: the lifecycle and companion are one durable, ordered unit.  A
+    // restored daemon therefore sees both sides of its replay-cursor contract.
+    expect(terminal.batch!.events.map((event) => event.payload.case)).toEqual(["queryLifecycle", "degradedState"]);
+    const lifecycle = terminal.batch!.events[0]!;
+    const companion = terminal.batch!.events[1]!;
+    if (lifecycle.payload.case !== "queryLifecycle" || lifecycle.payload.value.event.case !== "terminated") throw new Error("case");
+    expect(lifecycle.payload.value.event.value.reason).toEqual({
+      case: "startupFailure",
+      value: expect.objectContaining({ cause: expect.stringContaining("created lifecycle refused") }),
+    });
+    expect(lifecycle.payload.value.event.value.vendorIdentity.case).toBe("vendorSessionIdentityUnavailable");
+    expect(companion.payload).toEqual(expect.objectContaining({
+      case: "degradedState",
+      value: expect.objectContaining({
+        component: "claude-shim-sdk",
+        reason: "unexpected_query_termination",
+        queryInstanceId: "startup-query",
+      }),
+    }));
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { accepted: 2n, lastSeq: 2n }));
+    await expect(done).rejects.toThrow("created lifecycle refused");
+    expect(query.abortCalls).toBe(1);
+  });
+
   it("settles SIGTERM before daemon readiness without leaving the owned query alive", async () => {
     // Arrange: the store starts, but no daemon listener exists, so this is the
     // startup window where SessionServer.connect() retries indefinitely.
@@ -1068,23 +1531,117 @@ describe("UdsSession lifetime: SDK stream termination", () => {
       heartbeatIntervalMs: 0,
     });
     const done = session.start();
+    await acknowledgeInitialQueryLifecycle(store);
     // Act: no readiness wait or polling may be needed to make SIGTERM win.
-    await session.shutdown("SIGTERM");
+    const shuttingDown = session.shutdown("SIGTERM");
+    const terminated = await store.peer().next(StoreWriteSchema);
+    expect(terminated.batch!.events).toHaveLength(1);
+    expect(terminated.batch!.events[0]!.payload.case).toBe("queryLifecycle");
+    if (terminated.batch!.events[0]!.payload.case !== "queryLifecycle") throw new Error("case");
+    expect(terminated.batch!.events[0]!.payload.value.event.case).toBe("terminated");
+    let settled = false;
+    void shuttingDown.then(() => { settled = true; });
+    await tick();
+    expect(settled).toBe(false);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { accepted: 1n, lastSeq: 2n }));
+    await shuttingDown;
     // Assert
     await expect(done).resolves.toBeUndefined();
     expect(query.abortCalls).toBe(1);
   });
 
+  it("fails intentional shutdown after cleanup when its termination receipt is rejected", async () => {
+    const store = await fakeStore();
+    cleanups.push(() => store.close());
+    const log = captureLog();
+    let query!: FakeQuery;
+    const session = new UdsSession({
+      sessionId: "sess-rejected-stop",
+      shimVersion: "9.9",
+      protocolVersion: "1",
+      udsSocketPath: tmpSocketPath(),
+      storeSocketPath: store.socketPath,
+      sessionSource: SessionSource.FRESH,
+      queryInstanceId: "query-rejected-stop",
+      createQuery: (prompt, canUseTool): UdsQuery => {
+        const live = new FakeQuery(prompt, canUseTool);
+        query = live;
+        return { query: live, subscriptionUsage: () => live.subscriptionUsage(), abort: () => live.abort() };
+      },
+      heartbeatIntervalMs: 0,
+    });
+    const done = session.start();
+    await acknowledgeInitialQueryLifecycle(store);
+    const storeClosed = once(store.peer().socket, "close");
+
+    const shuttingDown = session.shutdown("SIGTERM");
+    const terminated = await store.peer().next(StoreWriteSchema);
+    expect(terminated.batch!.events).toHaveLength(1);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { error: "disk full" }));
+
+    const failure = await shuttingDown.catch((cause: unknown) => cause);
+    expect(failure).toBeInstanceOf(QueryTerminationPersistenceError);
+    expect(isQueryTerminationPersistenceError(failure)).toBe(true);
+    expect(isQueryTerminationPersistenceError(new Error("different failure"))).toBe(false);
+    expect(failure).toEqual(expect.objectContaining({
+      name: "QueryTerminationPersistenceError",
+      terminationKind: "intentional",
+      queryInstanceId: "query-rejected-stop",
+      cause: expect.objectContaining({ message: expect.stringContaining("disk full") }),
+    }));
+    await expect(done).resolves.toBeUndefined();
+    await storeClosed;
+    expect(query.abortCalls).toBe(1);
+    expect(store.peer().closed).toBe(true);
+    expect(log.record("query termination could not receive a durable store receipt").context).toMatchObject({
+      query_instance_id: "query-rejected-stop",
+      store_key: "sess-rejected-stop",
+      termination_kind: "intentional",
+      termination_cause: "SIGTERM",
+      outcome: "fatal_missing_termination_receipt",
+      cause: expect.objectContaining({ message: expect.stringContaining("disk full") }),
+    });
+    expect(log.count("intentional shim shutdown complete")).toBe(0);
+  });
+
   it("fails the shim when the SDK iterator ends without intentional shutdown", async () => {
     // Arrange
-    const { daemon, done, query, store } = await rig({ storeSessionId: "vendor-uuid" });
+    const { daemon, done, query, store } = await rig({
+      storeSessionId: "vendor-uuid",
+      queryInstanceId: "query-eof",
+    });
     const log = captureLog();
     const storeClosed = once(store.peer().socket, "close");
     const daemonClosed = once(daemon.socket, "close");
     // Act
     query.endStream();
+    const persisted = await store.peer().next(StoreWriteSchema);
+    expect(persisted.batch!.events.map((event) => event.payload.case)).toEqual(["queryLifecycle", "degradedState"]);
+    const report = persisted.batch!.events[1]!;
+    expect([report.class, report.payload.case]).toEqual([
+      EventClass.PERSISTENT,
+      "degradedState",
+    ]);
+    if (report.payload.case !== "degradedState") throw new Error("case");
+    expect(report.payload.value).toMatchObject({
+      component: "claude-shim-sdk",
+      reason: "unexpected_query_termination",
+      queryInstanceId: "query-eof",
+    });
+    const lifecycleEvent = persisted.batch!.events[0]!.payload;
+    if (lifecycleEvent.case !== "queryLifecycle" || lifecycleEvent.value.event.case !== "terminated") throw new Error("case");
+    expect(lifecycleEvent.value.event.value.vendorIdentity).toEqual({ case: "vendorSessionId", value: "vendor-uuid" });
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { accepted: 2n, lastSeq: 3n }));
+    const lifecycle = create(EventSchema, {
+      ...persisted.batch!.events[0]!,
+      seq: 3n,
+    });
+    store.latest().send(EventSchema, lifecycle);
+    const delivered = await daemon.next(EventSchema);
+    expect(delivered).toEqual(lifecycle);
     // Assert: EOF is not a normal session completion and cannot leave the
-    // process alive with a dead query it might try to replace.
+    // process alive with a dead query it might try to replace. Shutdown waits
+    // for the durable lifecycle fact to reach the connected daemon.
     await expect(done).rejects.toMatchObject({
       name: "UnexpectedSdkStreamTerminationError",
       terminationKind: "iterator_eof",
@@ -1094,13 +1651,216 @@ describe("UdsSession lifetime: SDK stream termination", () => {
     expect(store.peer().closed).toBe(true);
     expect(log.count("SDK stream terminated outside intentional shim shutdown; exiting nonzero")).toBe(1);
     expect(log.record("SDK stream terminated outside intentional shim shutdown").context).toMatchObject({
+      query_instance_id: "query-eof",
+      vendor_session_id: "vendor-uuid",
       termination_kind: "iterator_eof",
+      termination_arm: "unexpectedEof",
+      termination_cause: null,
       intentional: false,
       active_turn_ids: [],
       input_ended: false,
       query_aborted: false,
       resume_requested: false,
       store_key: "vendor-uuid",
+    });
+  });
+
+  it("persists the exact unexpected-termination report while the daemon is detached", async () => {
+    // Arrange: no live daemon socket can carry a direct ephemeral report.
+    const { daemon, daemonListener, done, query, session, store } = await rig({ queryInstanceId: "query-before-vendor" });
+    daemon.destroy();
+    await until(() => !session.isConnected());
+
+    // Act
+    query.endStream();
+    const persisted = await store.peer().next(StoreWriteSchema);
+
+    // Assert: this StoreWrite is the replayable notification a restored daemon
+    // receives after it reconnects; it is not contingent on the dead socket.
+    expect(persisted.batch!.events.map((event) => event.payload.case)).toEqual(["queryLifecycle", "degradedState"]);
+    const report = persisted.batch!.events[1]!;
+    expect([report.class, report.payload.case]).toEqual([
+      EventClass.PERSISTENT,
+      "degradedState",
+    ]);
+    if (report.payload.case !== "degradedState") throw new Error("case");
+    expect(report.payload.value).toMatchObject({
+      component: "claude-shim-sdk",
+      reason: "unexpected_query_termination",
+      queryInstanceId: "query-before-vendor",
+    });
+    const preVendorLifecycle = persisted.batch!.events[0]!.payload;
+    if (preVendorLifecycle.case !== "queryLifecycle" || preVendorLifecycle.value.event.case !== "terminated") throw new Error("case");
+    expect(preVendorLifecycle.value.event.value.vendorIdentity.case).toBe("vendorSessionIdentityUnavailable");
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { accepted: 2n, lastSeq: 3n }));
+
+    let settled = false;
+    void done.finally(() => { settled = true; }).catch(() => undefined);
+    await tick();
+    expect(settled).toBe(false);
+
+    // The shim remains available until a replacement daemon subscribes and
+    // receives the exact persisted termination lifecycle through store replay.
+    const daemon2 = await daemonListener.next();
+    cleanups.push(() => daemon2.destroy());
+    await daemon2.next(ShimHelloSchema);
+    daemon2.send(DaemonHelloSchema, create(DaemonHelloSchema, {
+      daemonVersion: "d2",
+      protocolVersion: "1",
+      fromSeq: 2n,
+    }));
+    await until(() => store.count() >= 3);
+    expect((await store.latest().next(SubscribeSchema)).fromSeq).toBe(2n);
+    expect((await daemon2.next(EventSchema)).payload.case).toBe("sessionStarted");
+    expect((await daemon2.next(ShimReadySchema)).fromSeq).toBe(2n);
+
+    const lifecycle = create(EventSchema, {
+      ...persisted.batch!.events[0]!,
+      seq: 3n,
+    });
+    store.latest().send(EventSchema, lifecycle);
+    expect(await daemon2.next(EventSchema)).toEqual(lifecycle);
+    await expect(done).rejects.toMatchObject({
+      name: "UnexpectedSdkStreamTerminationError",
+      terminationKind: "iterator_eof",
+    });
+  });
+
+  it("closes resources before surfacing a rejected unexpected-termination receipt", async () => {
+    // Arrange
+    const { daemon, done, query, session, store } = await rig({
+      storeSessionId: "vendor-uuid",
+      queryInstanceId: "query-rejected-eof",
+    });
+    const log = captureLog();
+    const storeClosed = once(store.peer().socket, "close");
+    const daemonClosed = once(daemon.socket, "close");
+
+    // Act: the query is dead, but the store refuses the failure record that a
+    // restored daemon would need in order to explain that death.
+    query.endStream();
+    const persisted = await store.peer().next(StoreWriteSchema);
+    expect(persisted.batch!.events.map((event) => event.payload.case)).toEqual(["queryLifecycle", "degradedState"]);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { error: "disk full" }));
+
+    // Assert: cleanup is scope-bound to the fatal path, while the exact store
+    // rejection remains attached to the typed propagated failure.
+    const failure = await done.catch((cause: unknown) => cause);
+    expect(failure).toEqual(expect.objectContaining({
+      name: "QueryTerminationPersistenceError",
+      terminationKind: "iterator_eof",
+      queryInstanceId: "query-rejected-eof",
+      cause: expect.objectContaining({ message: expect.stringContaining("disk full") }),
+    }));
+    await Promise.all([storeClosed, daemonClosed]);
+    expect(store.peer().closed).toBe(true);
+    expect(session.isConnected()).toBe(false);
+    expect(query.abortCalls).toBe(0);
+
+    const record = log.record("unexpected SDK termination degradation could not receive a durable store receipt");
+    expect(record).toMatchObject({
+      operation: "shim.uds-session.unexpected-termination-delivery",
+      agent_repl_session_id: "test-agent-session",
+      claude_session_id: "vendor-uuid",
+    });
+    expect(record.context).toMatchObject({
+      query_instance_id: "query-rejected-eof",
+      vendor_session_id: "vendor-uuid",
+      store_key: "vendor-uuid",
+      termination_kind: "iterator_eof",
+      termination_arm: "unexpectedEof",
+      termination_cause: null,
+      failed_operation: "store.write.unexpected_query_termination",
+      outcome: "fatal_missing_termination_receipt",
+      cause: expect.objectContaining({ message: expect.stringContaining("disk full") }),
+    });
+  });
+
+  it("aggregates a rejected unexpected-termination receipt with cleanup failure", async () => {
+    const { daemon, done, query, session, store } = await rig({
+      storeSessionId: "vendor-uuid",
+      queryInstanceId: "query-double-failure",
+    });
+    const log = captureLog();
+    const cleanupFailure = new Error("resource close exploded");
+    const closeSpy = vi.spyOn(
+      session as unknown as { closeResources(): Promise<void> },
+      "closeResources",
+    ).mockRejectedValue(cleanupFailure);
+    cleanups.push(() => {
+      closeSpy.mockRestore();
+      daemon.destroy();
+    });
+
+    query.endStream();
+    const persisted = await store.peer().next(StoreWriteSchema);
+    expect(persisted.batch!.events.map((event) => event.payload.case)).toEqual(["queryLifecycle", "degradedState"]);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { error: "disk full" }));
+
+    const failure = await done.catch((cause: unknown) => cause);
+    expect(failure).toBeInstanceOf(QueryTerminationCleanupError);
+    expect(isQueryTerminationCleanupError(failure)).toBe(true);
+    expect(isQueryTerminationCleanupError(new Error("different failure"))).toBe(false);
+    expect((failure as QueryTerminationCleanupError).errors).toEqual([
+      expect.objectContaining({
+        name: "QueryTerminationPersistenceError",
+        cause: expect.objectContaining({ message: expect.stringContaining("disk full") }),
+      }),
+      cleanupFailure,
+    ]);
+    expect(log.record("unexpected SDK termination persistence and resource cleanup both failed")).toMatchObject({
+      operation: "shim.uds-session.unexpected-termination-cleanup",
+      context: expect.objectContaining({
+        query_instance_id: "query-double-failure",
+        termination_arm: "unexpectedEof",
+        outcome: "fatal_persistence_and_cleanup_failure",
+        cleanup_failure: expect.objectContaining({ message: "resource close exploded" }),
+      }),
+    });
+  });
+
+  it("preserves the typed unexpected termination when cleanup alone fails", async () => {
+    const { daemon, done, query, session, store } = await rig({
+      storeSessionId: "vendor-uuid",
+      queryInstanceId: "query-cleanup-failure",
+    });
+    const log = captureLog();
+    const cleanupFailure = new Error("resource close exploded");
+    const closeSpy = vi.spyOn(
+      session as unknown as { closeResources(): Promise<void> },
+      "closeResources",
+    ).mockRejectedValue(cleanupFailure);
+    cleanups.push(() => {
+      closeSpy.mockRestore();
+      daemon.destroy();
+    });
+
+    query.endStream();
+    const persisted = await store.peer().next(StoreWriteSchema);
+    expect(persisted.batch!.events.map((event) => event.payload.case)).toEqual(["queryLifecycle", "degradedState"]);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { accepted: 2n, lastSeq: 3n }));
+    const lifecycle = create(EventSchema, { ...persisted.batch!.events[0]!, seq: 3n });
+    store.latest().send(EventSchema, lifecycle);
+    expect(await daemon.next(EventSchema)).toEqual(lifecycle);
+
+    const failure = await done.catch((cause: unknown) => cause);
+    expect(failure).toBeInstanceOf(QueryTerminationCleanupError);
+    expect(isQueryTerminationCleanupError(failure)).toBe(true);
+    expect((failure as QueryTerminationCleanupError).errors).toEqual([
+      expect.objectContaining({
+        name: "UnexpectedSdkStreamTerminationError",
+        terminationKind: "iterator_eof",
+      }),
+      cleanupFailure,
+    ]);
+    expect(log.record("unexpected SDK termination resource cleanup failed")).toMatchObject({
+      operation: "shim.uds-session.unexpected-termination-cleanup",
+      context: expect.objectContaining({
+        query_instance_id: "query-cleanup-failure",
+        termination_arm: "unexpectedEof",
+        outcome: "fatal_cleanup_failure",
+        cleanup_failure: expect.objectContaining({ message: "resource close exploded" }),
+      }),
     });
   });
 
@@ -1112,6 +1872,19 @@ describe("UdsSession lifetime: SDK stream termination", () => {
     const daemonClosed = once(daemon.socket, "close");
     // Act
     query.failStream(new Error("sdk transport exploded"));
+    const persisted = await store.peer().next(StoreWriteSchema);
+    expect(persisted.batch!.events.map((event) => event.payload.case)).toEqual(["queryLifecycle", "degradedState"]);
+    if (persisted.batch!.events[0]!.payload.case !== "queryLifecycle") throw new Error("case");
+    const lifecycle = persisted.batch!.events[0]!.payload.value.event;
+    if (lifecycle.case !== "terminated") throw new Error("case");
+    expect(lifecycle.value.reason.case).toBe("iteratorFailure");
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { accepted: 2n, lastSeq: 3n }));
+    const deliveredLifecycle = create(EventSchema, {
+      ...persisted.batch!.events[0]!,
+      seq: 3n,
+    });
+    store.latest().send(EventSchema, deliveredLifecycle);
+    expect(await daemon.next(EventSchema)).toEqual(deliveredLifecycle);
     // Assert
     await expect(done).rejects.toMatchObject({
       name: "UnexpectedSdkStreamTerminationError",
@@ -1542,6 +2315,57 @@ describe("UdsSession interrupt outcome", () => {
 });
 
 describe("UdsSession store subscription key", () => {
+  it("rejects a resumed query's first replacement identity before rekeying the store", async () => {
+    // Arrange: the exact resume requested uuid-old and no SDK message has yet
+    // confirmed that the backend continued that conversation.
+    const { daemon, done, query, store } = await rig({
+      sessionSource: SessionSource.RESUME,
+      storeSessionId: "uuid-old",
+      queryInstanceId: "query-resume-mismatch",
+    });
+    const log = captureLog();
+
+    // Act: the first authoritative SDK identity contradicts the resume target.
+    query.emit({
+      type: "system",
+      subtype: "init",
+      session_id: "uuid-replacement",
+      uuid: "i1",
+      model: "claude-opus-4-1",
+      cwd: "/tmp",
+    } as unknown as SdkMessageLike);
+    const persisted = await store.peer().next(StoreWriteSchema);
+
+    // Assert: the mismatch terminates under the requested key. No connection
+    // or write adopts the replacement conversation.
+    expect(persisted.batch!.events.map((event) => event.payload.case)).toEqual(["queryLifecycle", "degradedState"]);
+    expect(persisted.batch!.events.every((event) => event.sessionId === "uuid-old")).toBe(true);
+    expect(store.count()).toBe(2);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { accepted: 2n, lastSeq: 4n }));
+    const deliveredLifecycle = create(EventSchema, { ...persisted.batch!.events[0]!, seq: 4n });
+    store.latest().send(EventSchema, deliveredLifecycle);
+    expect(await daemon.next(EventSchema)).toEqual(deliveredLifecycle);
+    await expect(done).rejects.toMatchObject({
+      name: "UnexpectedSdkStreamTerminationError",
+      terminationKind: "iterator_throw",
+      cause: expect.objectContaining({
+        name: "ResumeIdentityMismatchError",
+        requestedVendorSessionId: "uuid-old",
+        observedVendorSessionId: "uuid-replacement",
+      }),
+    });
+    expect(new ResumeIdentityMismatchError("old", "new").message).toContain("instead of requested session");
+    expect(log.record("refusing replacement conversation")).toMatchObject({
+      operation: "shim.uds-session.resume-identity-confirmation",
+      context: {
+        outcome: "fatal_identity_mismatch",
+        query_instance_id: "query-resume-mismatch",
+        requested_vendor_session_id: "uuid-old",
+        observed_vendor_session_id: "uuid-replacement",
+      },
+    });
+  });
+
   it("re-subscribes under the vendor session id the SDK reports", async () => {
     // Arrange: the shim is `sess-1`, but the SDK reports the conversation's
     // own uuid — which is the id the store files these events under (and the
@@ -1696,10 +2520,9 @@ describe("UdsSession bring-up gate", () => {
     });
     const done = session.start();
     cleanups.push(async () => {
-      await session.shutdown("test-cleanup");
-      query.endStream();
-      await done.catch(() => {});
+      await shutdownFixture(session, query, done);
     });
+    await acknowledgeInitialQueryLifecycle(store);
     const daemon = await daemonListener.next();
     await daemon.next(ShimHelloSchema);
     const log = captureLog();
@@ -1717,9 +2540,25 @@ describe("UdsSession bring-up gate", () => {
   it("re-runs the whole gate on the rotation bounce", async () => {
     // Arrange: a resumed session with one merged event forwarded, so the next
     // vendor uuid is a ROTATION rather than a first adoption.
-    const { query, store, daemon, daemonListener } = await rig({ storeSessionId: "uuid-old" });
+    const { query, store, daemon, daemonListener } = await rig({
+      sessionSource: SessionSource.RESUME,
+      storeSessionId: "uuid-old",
+    });
     store.latest().send(EventSchema, create(EventSchema, { sessionId: "uuid-old", seq: 7n }));
     await daemon.next(EventSchema);
+    query.emit({
+      type: "system",
+      subtype: "init",
+      session_id: "uuid-old",
+      uuid: "i1",
+      model: "claude",
+      cwd: "/tmp",
+    } as unknown as SdkMessageLike);
+    const initialIdentityBatch = await store.peer().next(StoreWriteSchema);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(initialIdentityBatch.batch!.events.length),
+      lastSeq: 8n,
+    }));
 
     // Act: the vendor mints a new transcript identity mid-stream.
     query.emit({
@@ -1834,10 +2673,9 @@ describe("UdsSession handshake permission mode", () => {
     });
     const done = session.start();
     cleanups.push(async () => {
-      await session.shutdown("test-cleanup");
-      query.endStream();
-      await done.catch(() => {});
+      await shutdownFixture(session, query, done);
     });
+    await acknowledgeInitialQueryLifecycle(store);
     const daemon = await daemonListener.next();
     await daemon.next(ShimHelloSchema);
 
@@ -1890,10 +2728,9 @@ describe("UdsSession handshake permission mode", () => {
     });
     const done = session.start();
     cleanups.push(async () => {
-      await session.shutdown("test-cleanup");
-      query.endStream();
-      await done.catch(() => {});
+      await shutdownFixture(session, query, done);
     });
+    await acknowledgeInitialQueryLifecycle(store);
     const daemon = await daemonListener.next();
     await daemon.next(ShimHelloSchema);
     const log = captureLog();

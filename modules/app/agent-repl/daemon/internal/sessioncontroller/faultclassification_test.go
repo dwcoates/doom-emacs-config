@@ -41,7 +41,7 @@ func TestUnknownDegradedProducerFailsLoudlyWithoutStateMutation(t *testing.T) {
 	applier := &fakeApplier{}
 	var logs []string
 	c := newConsumer(
-		"ws", "s1", &fakePusher{}, applier, nil, newFakeClearCompactStore(),
+		"ws", "s1", &fakePusher{}, applier, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{},
 		func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) },
 		nil, nil, nil, nil, nil,
 	)

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ModelUsage, Usage } from "../src/protocol.js";
+import { create } from "@bufbuild/protobuf";
+import { ModelUsage, TokenTimingTotals, Usage } from "../src/protocol.js";
 import {
   TokenMenuData,
   compactTokens,
@@ -11,7 +12,19 @@ import {
   tokensOverlayHtml,
   turnInputTokens,
 } from "../src/tokens.js";
-import { TokenTimingTotals } from "../src/protocol.js";
+import { generatedSessionUtilization, generatedUngroupedResponse, ungroupedResponse } from "./token-utilization-fixture.js";
+import {
+  AgentTokenUtilizationSchema,
+  ModelTokenUtilizationSchema,
+  SessionTokenUtilizationSchema,
+  TokenCacheCreationSchema,
+  TokenCacheRatesSchema,
+  TokenOutputDetailsSchema,
+  TokenServerToolUseSchema,
+  TokenTimingTotalsSchema,
+  TokenUsageTotalsSchema,
+  TokenUtilizationSubagentSchema,
+} from "../../proto/gen/ts/agentshim/frontend/v1/frontend_pb";
 
 function timing(over: Partial<TokenTimingTotals> = {}): TokenTimingTotals {
   return {
@@ -271,6 +284,125 @@ describe("tokensOverlayHtml per-model sections", () => {
     const d = data({ models: { a: modelUsage({ cost_usd: 1.2345 }) } });
     // Act + Assert
     expect(rows(tokensOverlayHtml(d))).toContain("cost|$1.23");
+  });
+});
+
+describe("tokensOverlayHtml ungrouped subagent responses", () => {
+  it("renders each response independently by API message ID and lineage", () => {
+    const first = ungroupedResponse({
+      apiMessageId: "message-one",
+      usage: { ...ungroupedResponse().usage, inputTokens: 11 },
+    });
+    const second = ungroupedResponse({
+      apiMessageId: "message-two",
+      usage: { ...ungroupedResponse().usage, inputTokens: 22 },
+    });
+
+    const html = tokensOverlayHtml(data({ ungroupedSubagentResponses: [first, second] }));
+    const firstStart = html.indexOf("ungrouped subagent response message-one");
+    const secondStart = html.indexOf("ungrouped subagent response message-two");
+    const firstSection = html.slice(firstStart, secondStart);
+    const secondSection = html.slice(secondStart);
+
+    expect(firstStart).toBeGreaterThanOrEqual(0);
+    expect(secondStart).toBeGreaterThan(firstStart);
+    expect(rows(firstSection)).toEqual(expect.arrayContaining([
+      "API message ID|message-one",
+      "parent agent|parent-agent",
+      "subagent type|research",
+      "task|inspect evidence",
+      "uncached|11",
+    ]));
+    expect(rows(firstSection)).not.toContain("uncached|22");
+    expect(rows(secondSection)).toEqual(expect.arrayContaining([
+      "API message ID|message-two",
+      "parent agent|parent-agent",
+      "uncached|22",
+    ]));
+    expect(rows(secondSection)).not.toContain("uncached|11");
+  });
+
+  it("fails loudly if an ungrouped response lacks subagent lineage", () => {
+    expect(() => tokensOverlayHtml(data({
+      ungroupedSubagentResponses: [ungroupedResponse({ actor: "mainAgent", subagent: undefined })],
+    }))).toThrow("lacks subagent lineage");
+  });
+});
+
+describe("tokensOverlayHtml generated session accounting", () => {
+  it("renders main, all-agent, grouped-subagent, model, timing, and ungrouped evidence", () => {
+    const totals = create(TokenUsageTotalsSchema, {
+      inputTokens: 10n,
+      outputTokens: 20n,
+      cacheReadInputTokens: 30n,
+      cacheCreationInputTokens: 40n,
+      cacheCreation: create(TokenCacheCreationSchema, { ephemeral5mInputTokens: 4n, ephemeral1hInputTokens: 36n }),
+      serverToolUse: create(TokenServerToolUseSchema, { webSearchRequests: 2n, webFetchRequests: 3n }),
+      outputDetails: create(TokenOutputDetailsSchema, { thinkingTokens: 5n }),
+      cacheRates: create(TokenCacheRatesSchema, { totalPromptInputTokens: 80n, cacheHitRate: 0.375, cacheWriteRate: 0.5, uncachedInputRate: 0.125 }),
+      timing: create(TokenTimingTotalsSchema, { outputTokensWithGenerationDuration: 20n, outputGenerationDurationMs: 100n, responsesWithGenerationDuration: 1n, responsesWithoutGenerationDuration: 2n, totalTimeToFirstTokenMs: 50n, responsesWithTimeToFirstToken: 1n, responsesWithoutTimeToFirstToken: 3n }),
+    });
+    const model = create(ModelTokenUtilizationSchema, { model: "opus", canonicalModel: "claude-opus", provider: "anthropic", totals, contextWindow: 200000n, maxOutputTokens: 32000n, costUsd: 1.25 });
+    const subagent = create(AgentTokenUtilizationSchema, {
+      agent: create(TokenUtilizationSubagentSchema, { agentId: "agent-7", parentToolUseId: "tool-parent", parentAgentId: "agent-parent", subagentType: "research", taskDescription: "inspect evidence" }),
+      totals,
+      models: [model],
+    });
+    const ungrouped = generatedUngroupedResponse({ apiMessageId: "message-ungrouped" });
+    const session = create(SessionTokenUtilizationSchema, { allAgents: totals, mainAgent: totals, subagents: [subagent], models: [model], ungroupedSubagentResponses: [ungrouped] });
+
+    const html = tokensOverlayHtml(data({ sessionUtilization: session }));
+    expect(html).toContain("main agent");
+    expect(html).toContain("all agents");
+    expect(html).toContain("subagent agent-7");
+    expect(html).toContain("all agents model opus");
+    expect(html).toContain("ungrouped subagent response message-ungrouped");
+    expect(rows(html)).toEqual(expect.arrayContaining([
+      "cache write 5m|4",
+      "cache write 1h|36",
+      "total prompt input|80",
+      "web searches|2",
+      "web fetches|3",
+      "thinking tokens|5",
+      "generation|200.0 tok/s",
+      "average TTFT|50 ms",
+      "timed output tokens|20",
+      "output generation duration|100 ms",
+      "responses with generation duration|1",
+      "responses without generation duration|2",
+      "total TTFT|50 ms",
+      "responses with TTFT|1",
+      "responses without TTFT|3",
+      "canonical model|claude-opus",
+      "parent tool use ID|tool-parent",
+    ]));
+  });
+
+  it("fails loudly when generated totals are structurally absent", () => {
+    expect(() => tokensOverlayHtml(data({ sessionUtilization: create(SessionTokenUtilizationSchema) }))).toThrow(/lacks mainAgent or allAgents/);
+  });
+
+  it("renders unavailable model metadata without fabricating scalar defaults", () => {
+    const totals = create(TokenUsageTotalsSchema);
+    const model = create(ModelTokenUtilizationSchema, { model: "opus", totals });
+    const session = create(SessionTokenUtilizationSchema, { allAgents: totals, mainAgent: totals, models: [model] });
+    const html = tokensOverlayHtml(data({ sessionUtilization: session }));
+    const start = html.indexOf("all agents model opus");
+    const modelRows = rows(html.slice(start));
+
+    expect(modelRows).toEqual(expect.arrayContaining([
+      "canonical model|unavailable",
+      "provider|unavailable",
+      "cost|unavailable",
+      "context window|unavailable",
+      "max output|unavailable",
+    ]));
+  });
+
+  it("renders generated ungrouped records from the shared fixture", () => {
+    const response = generatedUngroupedResponse({ apiMessageId: "generated-message" });
+    const session = generatedSessionUtilization([response]);
+    expect(tokensOverlayHtml(data({ sessionUtilization: session }))).toContain("complete response JSON");
   });
 });
 

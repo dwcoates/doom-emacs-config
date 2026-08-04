@@ -116,6 +116,10 @@ func (c *Client) dispatchEvent(ev *corev1.Event) error {
 			}
 		}
 	}
+	if err := c.validateDurableCursorTransition(ev); err != nil {
+		c.logf("replay cursor invariant REJECTED before sink mutation session=%s seq=%d kind=%T active_turns=%d pending_termination_query=%q error=%v", c.cfg.SessionID, ev.GetSeq(), ev.GetPayload(), len(c.pinnedAccountingTurns), c.pendingTerminationQuery, err)
+		return fmt.Errorf("%w: %v", ErrReplayCursorInvariant, err)
+	}
 
 	switch p := ev.GetPayload().(type) {
 	case *corev1.Event_FilePlaneDiagnostic:
@@ -142,6 +146,10 @@ func (c *Client) dispatchEvent(ev *corev1.Event) error {
 		*corev1.Event_SessionEnded,
 		*corev1.Event_TurnStarted,
 		*corev1.Event_TurnEnded,
+		// Account-window observations participate in terminal accounting and
+		// can be rejected when they name no admitted turn. They must use the
+		// error-returning state sink so a rejection cannot advance lastSeen.
+		*corev1.Event_AccountUsageObservation,
 		*corev1.Event_TaskStarted,
 		*corev1.Event_TaskProgress,
 		*corev1.Event_TaskEnded:
@@ -158,7 +166,9 @@ func (c *Client) dispatchEvent(ev *corev1.Event) error {
 		c.logf("received UnparsedEvent producer=%s path=%s offset=%d error=%q",
 			p.Unparsed.GetProducer(), p.Unparsed.GetSourcePath(),
 			p.Unparsed.GetByteOffset(), p.Unparsed.GetError())
-		c.cfg.FrameSink.Consume(ev)
+		if err := c.consumeFrame(ev, fmt.Sprintf("%T", p)); err != nil {
+			return err
+		}
 	case *corev1.Event_ContentDelta,
 		*corev1.Event_HeartbeatProgress,
 		*corev1.Event_MessageLatency,
@@ -170,13 +180,19 @@ func (c *Client) dispatchEvent(ev *corev1.Event) error {
 		*corev1.Event_ContextCleared,
 		*corev1.Event_ContextCompacted,
 		*corev1.Event_Vendor:
-		c.cfg.FrameSink.Consume(ev)
+		if err := c.consumeFrame(ev, fmt.Sprintf("%T", p)); err != nil {
+			return err
+		}
 	case nil:
 		c.logf("received Event with empty payload seq=%d; forwarding to frame sink", ev.GetSeq())
-		c.cfg.FrameSink.Consume(ev)
+		if err := c.consumeFrame(ev, "empty"); err != nil {
+			return err
+		}
 	default:
 		c.logf("received Event with unhandled payload %T; forwarding to frame sink", p)
-		c.cfg.FrameSink.Consume(ev)
+		if err := c.consumeFrame(ev, fmt.Sprintf("%T", p)); err != nil {
+			return err
+		}
 	}
 	if seq := ev.GetSeq(); seq > 0 {
 		c.lastSeen = seq
@@ -185,7 +201,121 @@ func (c *Client) dispatchEvent(ev *corev1.Event) error {
 		// unidentifiable generation ("") is recorded honestly as such — see
 		// reconcileSeqGeneration, which never grants it an amnesty.
 		c.seqGeneration = c.connGeneration
-		c.cfg.SeqStore.SetLastSeq(c.cfg.SessionID, seq)
+		c.advanceDurableCursor(ev)
+	}
+	return nil
+}
+
+func (c *Client) validateDurableCursorTransition(ev *corev1.Event) error {
+	if ev.GetSeq() == 0 {
+		return nil
+	}
+	switch payload := ev.GetPayload().(type) {
+	case *corev1.Event_TurnEnded:
+		turnID := payload.TurnEnded.GetTurnId()
+		if turnID != "" {
+			if _, ok := c.pinnedAccountingTurns[turnID]; !ok {
+				return fmt.Errorf("turn end names unpinned accounting turn %q", turnID)
+			}
+		}
+	case *corev1.Event_QueryLifecycle:
+		lifecycle := payload.QueryLifecycle
+		if runtime := lifecycle.GetRuntimeObserved(); runtime != nil && c.pendingResumeQuery != "" && lifecycle.GetQueryInstanceId() != c.pendingResumeQuery {
+			return fmt.Errorf("runtime identity for query %q arrived while resumed query %q awaits identity proof", lifecycle.GetQueryInstanceId(), c.pendingResumeQuery)
+		}
+		if queryTerminationNeedsCompanion(lifecycle) {
+			queryID := lifecycle.GetQueryInstanceId()
+			if queryID == "" {
+				return errors.New("typed query termination has no query instance id")
+			}
+			if c.pendingTerminationQuery != "" && c.pendingTerminationQuery != queryID {
+				return fmt.Errorf("query termination %q arrived while %q awaits its companion", queryID, c.pendingTerminationQuery)
+			}
+		}
+	case *corev1.Event_DegradedState:
+		degraded := payload.DegradedState
+		if degraded.GetComponent() == "claude-shim-sdk" && degraded.GetReason() == "unexpected_query_termination" && !degraded.GetRecovered() {
+			if degraded.QueryInstanceId == nil || degraded.GetQueryInstanceId() == "" {
+				return errors.New("unexpected query termination degradation has no query instance id")
+			}
+			if c.pendingTerminationQuery == "" || degraded.GetQueryInstanceId() != c.pendingTerminationQuery {
+				return fmt.Errorf("unexpected query termination degradation query %q does not match pending termination %q", degraded.GetQueryInstanceId(), c.pendingTerminationQuery)
+			}
+		}
+	}
+	return nil
+}
+
+// advanceDurableCursor keeps crash recovery behind every logical record that
+// needs multiple store events or an external transaction to become complete.
+// Transport reconnects use lastSeen in memory, while a new daemon has only the
+// pinned SeqStore cursor and must replay the complete turn or termination pair.
+func (c *Client) advanceDurableCursor(ev *corev1.Event) {
+	if c.pinnedAccountingTurns == nil {
+		c.pinnedAccountingTurns = map[string]struct{}{}
+	}
+	switch payload := ev.GetPayload().(type) {
+	case *corev1.Event_TurnStarted:
+		turnID := payload.TurnStarted.GetTurnId()
+		if turnID != "" {
+			c.pinnedAccountingTurns[turnID] = struct{}{}
+		}
+	case *corev1.Event_TurnClaimBridge:
+		// A rotated sequence deliberately contains no duplicate TurnStarted.
+		// Its durable bridge is the proof that pins the same logical accounting
+		// transaction before assistant usage and the terminal boundary arrive.
+		turnID := payload.TurnClaimBridge.GetTurnId()
+		if turnID != "" {
+			c.pinnedAccountingTurns[turnID] = struct{}{}
+		}
+	case *corev1.Event_TurnEnded:
+		turnID := payload.TurnEnded.GetTurnId()
+		if turnID == "" {
+			break
+		}
+		delete(c.pinnedAccountingTurns, turnID)
+	case *corev1.Event_QueryLifecycle:
+		lifecycle := payload.QueryLifecycle
+		if created := lifecycle.GetCreated(); created != nil && created.GetResumed() != nil {
+			c.pendingResumeQuery = lifecycle.GetQueryInstanceId()
+		}
+		if lifecycle.GetRuntimeObserved() != nil && lifecycle.GetQueryInstanceId() == c.pendingResumeQuery {
+			c.pendingResumeQuery = ""
+		}
+		if lifecycle.GetTerminated() != nil && lifecycle.GetQueryInstanceId() == c.pendingResumeQuery {
+			c.pendingResumeQuery = ""
+		}
+		if queryTerminationNeedsCompanion(lifecycle) {
+			queryID := lifecycle.GetQueryInstanceId()
+			c.pendingTerminationQuery = queryID
+		}
+	case *corev1.Event_DegradedState:
+		degraded := payload.DegradedState
+		if degraded.GetComponent() == "claude-shim-sdk" && degraded.GetReason() == "unexpected_query_termination" && !degraded.GetRecovered() {
+			if c.pendingTerminationQuery != "" {
+				c.pendingTerminationQuery = ""
+			}
+		}
+	}
+	if len(c.pinnedAccountingTurns) == 0 && c.pendingTerminationQuery == "" && c.pendingResumeQuery == "" {
+		c.cfg.SeqStore.SetLastSeq(c.cfg.SessionID, ev.GetSeq())
+	}
+}
+
+// queryTerminationNeedsCompanion names the termination records whose durable
+// meaning is completed by the following unexpected-query DegradedState. An
+// intentional shutdown has no such companion: pinning it would leave the
+// cursor behind a completed hibernation and reject the next query instance.
+func queryTerminationNeedsCompanion(lifecycle *corev1.QueryLifecycle) bool {
+	terminated := lifecycle.GetTerminated()
+	return terminated != nil && (terminated.GetUnexpectedEof() != nil ||
+		terminated.GetIteratorFailure() != nil || terminated.GetStartupFailure() != nil)
+}
+
+func (c *Client) consumeFrame(ev *corev1.Event, kind string) error {
+	if err := c.cfg.FrameSink.Consume(ev); err != nil {
+		return fmt.Errorf("%w: frame sink rejected session=%s seq=%d kind=%s: %w",
+			ErrLifecycleRejected, ev.GetSessionId(), ev.GetSeq(), kind, err)
 	}
 	return nil
 }

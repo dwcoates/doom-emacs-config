@@ -41,6 +41,7 @@ import { ConversationItem, ToolItem } from "./store.js";
 import { TASKS_SPEC, tasksMenuHtml } from "./tasks.js";
 import { IDLE_LABEL, TIMER_SLOT } from "./timer.js";
 import { compactTokens } from "./tokens.js";
+import { accountingSummary, latestTurnAccounting } from "./turn-accounting.js";
 
 /** Which of the footer's counter overlays is open, and whether it is expanded. */
 export interface FooterDisclosure {
@@ -889,6 +890,11 @@ export function footerHtml(
   if (tokens !== "") cells.push(`<div class="pfooter-cell pfooter-tokens">${tokens}</div>`);
   const counters = countersHtml(input, open);
   if (counters !== "") cells.push(`<div class="pfooter-cell pfooter-counters">${counters}</div>`);
+  const accounting = latestTurnAccounting(input.items);
+  if (accounting !== null) {
+    const summary = accountingSummary(accounting);
+    cells.push(`<div class="pfooter-cell ${accounting.verdict.kind === "invalid" ? "pfooter-accounting-invalid" : "pfooter-accounting"}" title="${escapeHtml(summary)}">${escapeHtml(summary)}</div>`);
+  }
 
   return (
     `<div class="pfooter" role="status" aria-live="polite">` +

@@ -26,6 +26,7 @@ type RegistrySessions struct {
 	Reg           *registry.Registry
 	Controller    *sessioncontroller.Manager
 	ModelCatalogs *SessionModelCatalogs
+	TokenUsage    SessionTokenUsageSource
 	// Logf carries the death-reason classifier's loud default for a record
 	// written by a build that predates the failure vocabulary. Nil is
 	// tolerated (the classifier checks) so a unit harness need not supply one.
@@ -57,7 +58,7 @@ func (r RegistrySessions) SessionViews() []*frontendv1.SessionView {
 		if r.ModelCatalogs != nil {
 			modelOptions = r.ModelCatalogs.Get(rec.SessionID)
 		}
-		out = append(out, SessionViewFromRecordWithModels(r.Logf, rec, pending, live, modelOptions))
+		out = append(out, SessionViewFromRecordWithModelsAndUsage(r.Logf, rec, pending, live, modelOptions, sessionTokenUtilization(r.Logf, r.TokenUsage, rec.SessionID)))
 	}
 	return out
 }

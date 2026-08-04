@@ -357,6 +357,46 @@ func failureOf(cd *frontendv1.ConversationDelta) *frontendv1.SystemFailureItem {
 	return nil
 }
 
+func TestQueryTerminationFailurePreservesTypedLifecycleEvidence(t *testing.T) {
+	tests := []struct {
+		name       string
+		terminated *corev1.QueryTerminated
+		check      func(*frontendv1.QueryTerminationFailure) bool
+	}{
+		{name: "unexpected eof", terminated: &corev1.QueryTerminated{VendorIdentity: &corev1.QueryTerminated_VendorSessionId{VendorSessionId: "vendor"}, Reason: &corev1.QueryTerminated_UnexpectedEof{UnexpectedEof: &corev1.UnexpectedQueryEof{}}}, check: func(got *frontendv1.QueryTerminationFailure) bool { return got.GetUnexpectedEof() != nil }},
+		{name: "iterator failure", terminated: &corev1.QueryTerminated{VendorIdentity: &corev1.QueryTerminated_VendorSessionId{VendorSessionId: "vendor"}, Reason: &corev1.QueryTerminated_IteratorFailure{IteratorFailure: &corev1.QueryIteratorFailure{Cause: "child exited 137"}}}, check: func(got *frontendv1.QueryTerminationFailure) bool {
+			return got.GetIteratorFailure().GetCause() == "child exited 137"
+		}},
+		{name: "startup failure", terminated: &corev1.QueryTerminated{VendorIdentity: &corev1.QueryTerminated_VendorSessionId{VendorSessionId: "vendor"}, Reason: &corev1.QueryTerminated_StartupFailure{StartupFailure: &corev1.QueryStartupFailure{Cause: "resume rejected"}}}, check: func(got *frontendv1.QueryTerminationFailure) bool {
+			return got.GetStartupFailure().GetCause() == "resume rejected"
+		}},
+		{name: "vendor unavailable", terminated: &corev1.QueryTerminated{VendorIdentity: &corev1.QueryTerminated_VendorSessionIdentityUnavailable{VendorSessionIdentityUnavailable: &corev1.VendorSessionIdentityUnavailable{}}, Reason: &corev1.QueryTerminated_UnexpectedEof{UnexpectedEof: &corev1.UnexpectedQueryEof{}}}, check: func(got *frontendv1.QueryTerminationFailure) bool {
+			return got.GetVendorSessionIdentityUnavailable() != nil
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			lifecycle := &corev1.QueryLifecycle{QueryInstanceId: "query", Event: &corev1.QueryLifecycle_Terminated{Terminated: tc.terminated}}
+			item, err := SystemFailureItemFromQueryTermination("session", lifecycle, 1234)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := item.GetQueryTermination()
+			if got.GetAgentReplSessionId() != "session" || got.GetQueryInstanceId() != "query" || got.GetObservedAtMs() != 1234 || !tc.check(got) {
+				t.Fatalf("query termination = %+v", got)
+			}
+		})
+	}
+}
+
+func TestQueryTerminationFailureRejectsMissingIdentity(t *testing.T) {
+	lifecycle := &corev1.QueryLifecycle{QueryInstanceId: "query", Event: &corev1.QueryLifecycle_Terminated{Terminated: &corev1.QueryTerminated{Reason: &corev1.QueryTerminated_UnexpectedEof{UnexpectedEof: &corev1.UnexpectedQueryEof{}}}}}
+	item, err := SystemFailureItemFromQueryTermination("session", lifecycle, 1234)
+	if err == nil || item != nil || !strings.Contains(err.Error(), "no vendor identity") {
+		t.Fatalf("item=%+v err=%v, want missing-vendor-identity rejection", item, err)
+	}
+}
+
 func TestATerminalApiErrorGetsAFailureCard(t *testing.T) {
 	// Arrange: retries exhausted.
 	// Act.

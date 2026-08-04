@@ -3,6 +3,7 @@ package sessioncontroller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -59,13 +60,14 @@ func (r interruptFlowResolver) Session(sessionID string) (ssm.Binding, bool) {
 // real SSM and a real progress resolver, with the frames both fan out recorded
 // off their own subscriptions.
 type interruptFlowRig struct {
-	t      *testing.T
-	m      *Manager
-	ssm    *ssm.Manager
-	prog   *progress.Manager
-	push   *fakePusher
-	client *fakeClient
-	seq    uint64
+	t          *testing.T
+	m          *Manager
+	ssm        *ssm.Manager
+	prog       *progress.Manager
+	push       *fakePusher
+	client     *fakeClient
+	seq        uint64
+	requestSeq uint64
 
 	mu     sync.Mutex
 	states []*frontendv1.WorkspaceState
@@ -141,6 +143,7 @@ func newInterruptFlowRig(t *testing.T) *interruptFlowRig {
 		Locator:           fakeLocator{m: map[string]string{interruptFlowWorkspace: interruptFlowSessionID}},
 		SeqStore:          &fakeSeqStore{seq: map[string]uint64{}},
 		ClearCompactStore: newFakeClearCompactStore(),
+		TurnAccountings:   emptyTurnAccountingStore{},
 		Registrar:         &fakeRegistrar{},
 		ProtocolVersion:   "1",
 		Logf:              t.Logf,
@@ -229,7 +232,8 @@ func (r *interruptFlowRig) interrupt() error {
 // submit submits a prompt for the workspace.
 func (r *interruptFlowRig) submit(text string) error {
 	r.t.Helper()
-	return r.m.SubmitPrompt(context.Background(), interruptFlowWorkspace, "", text, "")
+	r.requestSeq++
+	return r.m.SubmitPrompt(context.Background(), interruptFlowWorkspace, fmt.Sprintf("test-request-%d", r.requestSeq), text, "")
 }
 
 // lastView returns the newest ProgressView a subscriber was sent, or nil.

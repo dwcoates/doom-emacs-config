@@ -339,6 +339,9 @@ func (m *Manager) startRepull(d *sessionController, fromSeq, stopAt uint64) erro
 	activity := state.activity
 	defer m.releaseRepull(d, state)
 	defer activity.stop()
+	if err := m.hydratePersistedAccounting(d.consumer, d.sessionID); err != nil {
+		return err
+	}
 
 	storeFrom, storeStop, shimFrom, shimStop := m.splitRepullRange(d, fromSeq, stopAt)
 	if storeStop > storeFrom {

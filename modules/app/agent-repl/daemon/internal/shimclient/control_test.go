@@ -17,7 +17,7 @@ import (
 func runConnectedClient(t *testing.T, cfg Config) (*Client, <-chan *corev1.ShimHello, func()) {
 	t.Helper()
 	connected := make(chan *corev1.ShimHello, 8)
-	cfg.OnConnected = func(h *corev1.ShimHello) { connected <- h }
+	cfg.OnConnected = func(h *corev1.ShimHello) bool { connected <- h; return false }
 	c := New(cfg)
 	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)

@@ -16,12 +16,14 @@ import {
   AckSchema,
   DaemonHelloSchema,
   EventSchema,
+  HeartbeatSchema,
   HealthStatusSchema,
   ShimHelloSchema,
   ShimReadySchema,
   SubscribeSchema,
 } from "../src/uds/proto.js";
 import { FramedPeer, acceptShim, tmpSocketPath, until } from "./uds-harness.js";
+import { unpackAs } from "../src/uds/framing.js";
 
 interface FakeStore {
   socketPath: string;
@@ -37,7 +39,15 @@ function fakeStore(): Promise<FakeStore> {
   const socketPath = tmpSocketPath();
   const accepted: FramedPeer[] = [];
   return new Promise((resolve, reject) => {
-    const server = net.createServer((s) => accepted.push(new FramedPeer(s)));
+    const server = net.createServer((socket) => {
+      const peer = new FramedPeer(socket);
+      peer.onReceive((frame) => {
+        if (unpackAs(frame, SubscribeSchema) === undefined) return false;
+        peer.send(HeartbeatSchema, create(HeartbeatSchema, { sentAtMs: 1n }));
+        return false;
+      });
+      accepted.push(peer);
+    });
     server.once("error", reject);
     server.listen(socketPath, () =>
       resolve({
@@ -85,7 +95,7 @@ describe("daemon reattach with from_seq continuation", () => {
     const daemonListener = acceptShim(socketPath);
     cleanups.push(() => daemonListener.close());
     const server = new SessionServer(
-      { socketPath, sessionId: "sess-1", shimVersion: "1", protocolVersion: "1", heartbeatIntervalMs: 0 },
+      { socketPath, sessionId: "sess-1", queryInstanceId: "query-1", shimVersion: "1", protocolVersion: "1", heartbeatIntervalMs: 0 },
       {
         onSubmitPrompt: (m): Receipt => create(AckSchema, { requestId: m.requestId }),
         onInterrupt: (m): Receipt => create(AckSchema, { requestId: m.requestId }),

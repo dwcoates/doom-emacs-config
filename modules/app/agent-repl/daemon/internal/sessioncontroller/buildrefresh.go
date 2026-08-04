@@ -39,6 +39,12 @@ import (
 	"claude-repld/internal/ssm"
 )
 
+type buildRefreshState struct {
+	source *sessionController
+	done   chan struct{}
+	err    error
+}
+
 // noteShimPID records the pid a session's shim announced. Zero is recorded as
 // "unknown" (the entry is dropped) rather than as pid 0.
 func (m *Manager) noteShimPID(sessionID string, pid int32) {
@@ -90,9 +96,29 @@ func (m *Manager) refreshStaleShim(workspace, sessionID, reported string) bool {
 	}
 	m.mu.Lock()
 	bounced := m.buildBounced[sessionID]
-	bouncing := m.buildBouncing[sessionID]
-	if !bounced && !bouncing {
-		m.buildBouncing[sessionID] = true
+	inFlight := false
+	if refresh := m.buildRefresh[sessionID]; refresh != nil {
+		select {
+		case <-refresh.done:
+		default:
+			inFlight = true
+		}
+	}
+	source := m.byWS[workspace]
+	if !bounced && !inFlight && (source == nil || source.sessionID != sessionID) {
+		m.mu.Unlock()
+		m.logf("session-controller: stale-shim refresh refused because its source controller is no longer live session=%s ws=%q", sessionID, workspace)
+		return false
+	}
+	var refresh *buildRefreshState
+	if !bounced && !inFlight {
+		refresh = &buildRefreshState{source: source, done: make(chan struct{})}
+		m.buildRefresh[sessionID] = refresh
+		select {
+		case <-source.buildRefreshStarted:
+		default:
+			close(source.buildRefreshStarted)
+		}
 	}
 	m.mu.Unlock()
 	switch {
@@ -100,7 +126,7 @@ func (m *Manager) refreshStaleShim(workspace, sessionID, reported string) bool {
 		m.logf("session-controller: session %s (ws %q) STILL reports shim build %s against current %s after a refresh; NOT bouncing again — the bundle or the stamp is wrong, and a second bounce would loop",
 			sessionID, workspace, reported, want)
 		return false
-	case bouncing:
+	case inFlight:
 		m.logf("session-controller: session %s (ws %q) reports shim build %s against current %s while a refresh is already IN FLIGHT; NOT starting a second bounce",
 			sessionID, workspace, reported, want)
 		return false
@@ -123,10 +149,11 @@ func (m *Manager) refreshStaleShim(workspace, sessionID, reported string) bool {
 		// hello may try again — and reports the failure as a real state edge.
 		err := m.RestartSession(m.rootCtx, workspace)
 		m.mu.Lock()
-		delete(m.buildBouncing, sessionID)
+		refresh.err = err
 		if err == nil {
 			m.buildBounced[sessionID] = true
 		}
+		close(refresh.done)
 		m.mu.Unlock()
 		if err != nil {
 			m.resolveStaleRefreshFailed(workspace, sessionID, generationID, reported, want, err)
@@ -170,6 +197,34 @@ func (m *Manager) resolveStaleRefreshFailed(workspace, sessionID, generationID, 
 // vocabulary the connectivity axis records.
 const staleShimRefreshFailedCause = "stale_shim_refresh_failed"
 
+// followBuildRefresh returns the replacement for exactly one controller that
+// an intentional stale-build restart retired. A transport error without this
+// source-generation record is returned to the caller unchanged.
+func (m *Manager) followBuildRefresh(ctx context.Context, workspace, sessionID string, source *sessionController) (*sessionController, error) {
+	m.mu.Lock()
+	refresh := m.buildRefresh[sessionID]
+	m.mu.Unlock()
+	if refresh == nil || refresh.source != source {
+		return nil, nil
+	}
+	select {
+	case <-refresh.done:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	m.mu.Lock()
+	err := refresh.err
+	replacement := m.byWS[workspace]
+	m.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	if replacement == nil || replacement == source || replacement.sessionID != sessionID {
+		return nil, fmt.Errorf("session-controller: stale-build refresh completed without a replacement for session %s (ws %q)", sessionID, workspace)
+	}
+	return replacement, nil
+}
+
 // noteUnknownBuild logs an unresolvable comparison ONCE per session. It reuses
 // the bounce latch deliberately: both are "this session's build question has
 // been answered", and one line per session is the point.
@@ -210,10 +265,10 @@ func (m *Manager) RestartSession(ctx context.Context, workspace string) error {
 	_, live := m.byWS[workspace]
 	m.mu.Unlock()
 	if live {
-		// The full teardown: it cancels the session controller, reports the workspace
-		// unwired, and stops the shim (by handle, or by announced pid for a
-		// survivor).
-		if err := m.hibernate(workspace, "", StopCauseHardRestartLive()); err != nil {
+		// A hard restart is an intentional process replacement, not hibernation:
+		// it may stop a generation that has not reached operational and never
+		// publishes the benign HIBERNATED state.
+		if err := m.stopSessionController(workspace, sessionID, StopCauseHardRestartLive()); err != nil {
 			return fmt.Errorf("session-controller: restarting session %s (ws %q): stopping the live shim: %w", sessionID, workspace, err)
 		}
 		m.logf("session-controller: hard restart ws=%q session=%s: live shim stopped", workspace, sessionID)

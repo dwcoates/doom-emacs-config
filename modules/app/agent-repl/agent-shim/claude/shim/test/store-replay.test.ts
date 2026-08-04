@@ -12,8 +12,9 @@ import fs from "node:fs";
 import net from "node:net";
 import { create } from "@bufbuild/protobuf";
 import { StoreClient } from "../src/uds/store-client.js";
-import { Event, EventSchema, SubscribeSchema } from "../src/uds/proto.js";
+import { Event, EventSchema, HeartbeatSchema, SubscribeSchema } from "../src/uds/proto.js";
 import { FramedPeer, tmpSocketPath, until } from "./uds-harness.js";
+import { unpackAs } from "../src/uds/framing.js";
 
 interface FakeStore {
   socketPath: string;
@@ -31,7 +32,15 @@ function fakeStore(): Promise<FakeStore> {
   }
   const conns: FramedPeer[] = [];
   return new Promise((resolve, reject) => {
-    const server = net.createServer((socket) => conns.push(new FramedPeer(socket)));
+    const server = net.createServer((socket) => {
+      const peer = new FramedPeer(socket);
+      peer.onReceive((frame) => {
+        if (unpackAs(frame, SubscribeSchema) === undefined) return false;
+        peer.send(HeartbeatSchema, create(HeartbeatSchema, { sentAtMs: 1n }));
+        return false;
+      });
+      conns.push(peer);
+    });
     server.once("error", reject);
     server.listen(socketPath, () =>
       resolve({

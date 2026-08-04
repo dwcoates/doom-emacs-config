@@ -188,6 +188,7 @@ func newRegistrarManager(t *testing.T, reg SessionRegistrar) *Manager {
 		Locator:           fakeLocator{m: map[string]string{}},
 		SeqStore:          &fakeSeqStore{seq: map[string]uint64{}},
 		ClearCompactStore: newFakeClearCompactStore(),
+		TurnAccountings:   emptyTurnAccountingStore{},
 		Source:            stubSource{},
 		ProtocolVersion:   "1",
 		Registrar:         reg,

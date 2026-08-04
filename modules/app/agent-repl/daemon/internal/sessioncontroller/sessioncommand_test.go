@@ -262,19 +262,15 @@ func TestAnOrdinaryPromptPushesNoInvocationItem(t *testing.T) {
 	}
 }
 
-func TestASubmitWithNoRequestIdPushesNoInvocationItem(t *testing.T) {
-	// Arrange — the item's uuid is derived from the frontend request id, so a
-	// submit with none behind it would name an item nothing could reconcile.
+func TestASubmitWithNoRequestIdIsRejectedBeforeInvocationItem(t *testing.T) {
 	h := newQueueHarness(t, nil)
 
-	// Act.
-	if err := h.submitAs("", "/model"); err != nil {
-		t.Fatalf("submit: %v", err)
+	if err := h.submitAs("", "/model"); err == nil {
+		t.Fatal("submit accepted an empty request id")
 	}
 
-	// Assert.
 	if items := h.commandItems(); len(items) != 0 {
-		t.Fatalf("pushed %d session-command item(s) with no request id, want none", len(items))
+		t.Fatalf("pushed %d session-command item(s) for rejected submit, want none", len(items))
 	}
 }
 

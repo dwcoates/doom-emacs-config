@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync, readdirSync, writeSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { toJson } from "@bufbuild/protobuf";
+import { fromBinary, toBinary, toJson } from "@bufbuild/protobuf";
 import type { JsonObject, JsonValue } from "@bufbuild/protobuf";
 import { anyUnpack, ListValueSchema, type ListValue } from "@bufbuild/protobuf/wkt";
 import { SessionStartGate, convert, convertToolUseResult, promptPreview } from "../src/proto/convert.js";
@@ -35,6 +35,29 @@ function loadStream(name: string): Record<string, unknown> {
 function loadToolResult(name: string): unknown {
   const line = readFileSync(new URL(`../../../../testdata/corpus/tool-results/${name}.jsonl`, import.meta.url), "utf8").split("\n")[0]!;
   return (JSON.parse(line) as Record<string, unknown>)["toolUseResult"];
+}
+
+function assistantRecord(
+  envelope: Record<string, unknown> = {},
+  message: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    type: "assistant",
+    session_id: "s",
+    ...envelope,
+    message: {
+      id: "m",
+      model: "x",
+      content: [],
+      usage: {
+        input_tokens: 0,
+        output_tokens: 0,
+        cache_read_input_tokens: 0,
+        cache_creation_input_tokens: 0,
+      },
+      ...message,
+    },
+  };
 }
 
 function persistedLogs(): Array<Record<string, unknown>> {
@@ -160,6 +183,30 @@ describe("assistant", () => {
     expect(m.msg.value.message!.usage!.inputTokens).toBe(10n);
   });
 
+  it("carries the canonical normalized cache rates on the assistant envelope", () => {
+    const m = vendor(convert(assistantRecord({}, {
+      usage: {
+        input_tokens: 10,
+        output_tokens: 3,
+        cache_read_input_tokens: 80,
+        cache_creation_input_tokens: 10,
+      },
+    })));
+    if (m.msg.case !== "assistant") throw new Error("case");
+    expect(m.msg.value.cacheRates).toMatchObject({
+      totalPromptInputTokens: 100n,
+      cacheHitRate: 0.8,
+      cacheWriteRate: 0.1,
+      uncachedInputRate: 0.1,
+    });
+  });
+
+  it("leaves cache rates absent when total prompt input is zero", () => {
+    const m = vendor(convert(assistantRecord()));
+    if (m.msg.case !== "assistant") throw new Error("case");
+    expect(m.msg.value.cacheRates).toBeUndefined();
+  });
+
   it("normalizes a synthetic assistant model to empty", () => {
     const raw = loadStream("assistant");
     raw.message = { ...(raw.message as Record<string, unknown>), model: "<synthetic>" };
@@ -170,6 +217,22 @@ describe("assistant", () => {
 
   it("carries the top-level request_id onto the Event envelope", () => {
     expect(convert(loadStream("assistant")).vendor.requestId).toBe("req_011CdKQJZD99Dyyq53xXHGai");
+  });
+
+  it("preserves request_id absence and value through the vendor protobuf and rejects present blank", () => {
+    const absent = vendor(convert(assistantRecord()));
+    if (absent.msg.case !== "assistant") throw new Error("case");
+    expect(absent.msg.value.requestId).toBeUndefined();
+
+    const supplied = vendor(convert(assistantRecord({ request_id: "api-request" })));
+    const decoded = fromBinary(ClaudeStreamMessageSchema, toBinary(ClaudeStreamMessageSchema, supplied));
+    if (decoded.msg.case !== "assistant") throw new Error("case");
+    expect(decoded.msg.value.requestId).toBe("api-request");
+
+    const blank = convert(assistantRecord({ request_id: "" }));
+    expect(blank.vendor.payload.case).toBe("unparsed");
+    if (blank.vendor.payload.case !== "unparsed") throw new Error("case");
+    expect(blank.vendor.payload.value.error).toContain("must be a non-empty string");
   });
 
   it("parses the top-level timestamp into produced_at_ms", () => {
@@ -188,7 +251,14 @@ describe("assistant", () => {
 describe("ApiUsage iterations / speed / inference_geo", () => {
   /** Convert an assistant message carrying `usage` and return the typed usage. */
   const usageOf = (usage: Record<string, unknown>) => {
-    const csm = vendor(convert({ type: "assistant", session_id: "s", message: { id: "m", model: "x", content: [], usage } }));
+    const completeUsage = {
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_read_input_tokens: 0,
+      cache_creation_input_tokens: 0,
+      ...usage,
+    };
+    const csm = vendor(convert({ type: "assistant", session_id: "s", message: { id: "m", model: "x", content: [], usage: completeUsage } }));
     if (csm.msg.case !== "assistant") throw new Error("case");
     return csm.msg.value.message!.usage!;
   };
@@ -206,6 +276,61 @@ describe("ApiUsage iterations / speed / inference_geo", () => {
   it("keeps the per-model iterations breakdown as a list", () => {
     const it0 = { input_tokens: 2, output_tokens: 3200, type: "message" };
     expect(listJson(usageOf({ iterations: [it0] }).iterations)).toEqual([it0]);
+  });
+
+  it("preserves every evolving typed usage object and unknown key", () => {
+    const usage = usageOf({
+      fallback_credit: { status: "redeemed" },
+      output_tokens_details: { reasoning_tokens: 9 },
+      cache_diagnostic: { status: "miss", reason: "prefix_changed" },
+      unmodeled_usage: { vendor_declared: 4 },
+      future_counter: 17,
+    });
+    expect(usage.fallbackCredit).toEqual({ status: "redeemed" });
+    expect(usage.outputTokensDetails).toEqual({ reasoning_tokens: 9 });
+    expect(usage.cacheDiagnostic).toEqual({ status: "miss", reason: "prefix_changed" });
+    expect(usage.unmodeledUsage).toEqual({ vendor_declared: 4, future_counter: 17 });
+  });
+
+  it("preserves null and zero as distinct raw SDK usage values", () => {
+    const nullUsage = usageOf({ cache_read_input_tokens: null });
+    const zeroUsage = usageOf({ cache_read_input_tokens: 0 });
+
+    expect(nullUsage.cacheReadInputTokens).toBe(0n);
+    expect(zeroUsage.cacheReadInputTokens).toBe(0n);
+    expect(nullUsage.rawSdkUsage?.cache_read_input_tokens).toBeNull();
+    expect(zeroUsage.rawSdkUsage?.cache_read_input_tokens).toBe(0);
+  });
+
+  it("preserves absent keys, empty containers, and unknown nested SDK data across protobuf binary encoding", () => {
+    const raw = assistantRecord({}, {
+      usage: {
+        input_tokens: 3,
+        output_tokens: 5,
+        cache_read_input_tokens: 7,
+        cache_creation_input_tokens: 11,
+        future_payload: {
+          null_value: null,
+          zero_value: 0,
+          empty_object: {},
+          empty_list: [],
+          nested: [{ future_counter: 13 }],
+        },
+      },
+    });
+    const message = vendor(convert(raw));
+    const decoded = fromBinary(ClaudeStreamMessageSchema, toBinary(ClaudeStreamMessageSchema, message));
+    if (decoded.msg.case !== "assistant") throw new Error("case");
+    const rawSdkUsage = decoded.msg.value.message!.usage!.rawSdkUsage!;
+
+    expect(Object.hasOwn(rawSdkUsage, "service_tier")).toBe(false);
+    expect(rawSdkUsage.future_payload).toEqual({
+      null_value: null,
+      zero_value: 0,
+      empty_object: {},
+      empty_list: [],
+      nested: [{ future_counter: 13 }],
+    });
   });
 });
 
@@ -401,7 +526,7 @@ describe("lifecycle twins", () => {
   });
 
   it("result emits TurnEnded with stop_reason/duration/is_error", () => {
-    const { lifecycle } = convert(loadStream("result_success"), { turnId: "turn-p1" });
+    const { vendor: resultVendor, lifecycle } = convert(loadStream("result_success"), { rootTurnId: "turn-p1" });
     expect(lifecycle).toHaveLength(1);
     if (lifecycle[0]!.payload.case !== "turnEnded") throw new Error("case");
     expect(lifecycle[0]!.payload.value.stopReason).toBe("end_turn");
@@ -409,6 +534,7 @@ describe("lifecycle twins", () => {
     expect(lifecycle[0]!.payload.value.isError).toBe(false);
     expect(lifecycle[0]!.payload.value.turnId).toBe("turn-p1");
     expect(lifecycle[0]!.requestId).toBe("turn-p1");
+    expect(resultVendor.requestId).toBe("turn-p1");
   });
 
   it("a plain user message emits NO TurnStarted (turn start is shim-authoritative)", () => {
@@ -682,7 +808,7 @@ describe("corrected tool-result shapes", () => {
 describe("Anthropic API content blocks", () => {
   /** Convert one assistant content block and return its ContentBlock arm. */
   const blockOf = (block: Record<string, unknown>) => {
-    const csm = vendor(convert({ type: "assistant", session_id: "s", message: { id: "m", model: "x", content: [block] } }));
+    const csm = vendor(convert(assistantRecord({}, { content: [block] })));
     if (csm.msg.case !== "assistant") throw new Error("case");
     return csm.msg.value.message!.content[0]!.block;
   };
@@ -924,6 +1050,77 @@ describe("SDK 0.3.220 stream families", () => {
  * UnknownRecord passthrough is for an unrecognized DISCRIMINATOR.
  */
 describe("UnparsedEvent hard-error path (known shape, failed conversion)", () => {
+  it("preserves malformed modeled usage as raw evidence instead of fabricating zero", () => {
+    vi.mocked(writeSync).mockClear();
+    const raw = {
+      type: "assistant",
+      session_id: "s-usage",
+      request_id: "r-usage",
+      message: {
+        id: "msg-usage",
+        model: "claude-test",
+        content: [],
+        usage: {
+          input_tokens: "9000",
+          output_tokens: 12,
+          cache_read_input_tokens: 7000,
+          cache_creation_input_tokens: 10,
+        },
+      },
+    };
+
+    const result = convert(raw);
+
+    expect(result.vendor.payload.case).toBe("unparsed");
+    if (result.vendor.payload.case !== "unparsed") throw new Error("case");
+    expect(JSON.parse(new TextDecoder().decode(result.vendor.payload.value.raw))).toEqual(raw);
+    expect(result).not.toHaveProperty("assistantApiUsage");
+    expect(converterErrors()).toHaveLength(1);
+    expect(converterErrors()[0]).toMatchObject({
+      claude_session_id: "s-usage",
+      request_id: "r-usage",
+      message: "SDK message emitted as UnparsedEvent",
+      context: expect.objectContaining({
+        usage_field: "input_tokens",
+        usage_field_path: "usage.input_tokens",
+        raw_value: "9000",
+        raw_usage: expect.objectContaining({ input_tokens: "9000" }),
+      }),
+    });
+  });
+
+  it.each([
+    ["a non-finite number", (): unknown => Number.POSITIVE_INFINITY, "usage.future_value"],
+    ["an undefined value", (): unknown => undefined, "usage.future_value"],
+    ["a bigint", (): unknown => 9n, "usage.future_value"],
+    ["an array hole", (): unknown => { const value: unknown[] = []; value.length = 1; return value; }, "usage.future_value[0]"],
+    ["a symbol-keyed object", (): unknown => { const value: Record<PropertyKey, unknown> = {}; value[Symbol("future")] = 1; return value; }, "usage.future_value"],
+    ["a circular object", (): unknown => { const value: Record<string, unknown> = {}; value.self = value; return value; }, "usage.future_value.self"],
+  ])("fails loudly with the exact raw path for %s", (_label, invalidValue, fieldPath) => {
+    vi.mocked(writeSync).mockClear();
+    const raw = assistantRecord({}, {
+      usage: {
+        input_tokens: 1,
+        output_tokens: 2,
+        cache_read_input_tokens: 3,
+        cache_creation_input_tokens: 4,
+        future_value: invalidValue(),
+      },
+    });
+
+    const result = convert(raw);
+
+    expect(result.vendor.payload.case).toBe("unparsed");
+    expect(converterErrors()).toHaveLength(1);
+    expect(converterErrors()[0]).toMatchObject({
+      message: "SDK message emitted as UnparsedEvent",
+      context: expect.objectContaining({
+        usage_field_path: fieldPath,
+      }),
+    });
+    expect(converterErrors()[0]!.context).toHaveProperty("raw_value_kind");
+  });
+
   it("a non-object is unparsed with one safe canonical error", () => {
     vi.mocked(writeSync).mockClear();
     const result = convert("sensitive raw payload");
@@ -1037,11 +1234,7 @@ describe("UnknownRecord passthrough (unrecognized discriminator)", () => {
   });
 
   it("an unknown content block is preserved instead of dropped", () => {
-    const csm = vendor(convert({
-      type: "assistant",
-      session_id: "s",
-      message: { id: "m", model: "x", content: [{ type: "no_such_block", data: "keep me" }] },
-    }));
+    const csm = vendor(convert(assistantRecord({}, { content: [{ type: "no_such_block", data: "keep me" }] })));
     if (csm.msg.case !== "assistant") throw new Error("case");
     const [block] = csm.msg.value.message!.content;
     if (block?.block.case !== "unknown") throw new Error(`expected unknown block, got ${block?.block.case}`);
@@ -1090,19 +1283,40 @@ describe("SDK 0.3.220 stream field gaps", () => {
   });
 
   it("AssistantMessage carries the request id", () => {
-    const csm = vendor(convert({ type: "assistant", session_id: "s", uuid: "u", request_id: "req_9", message: { id: "m", model: "x", content: [] } }));
+    const csm = vendor(convert(assistantRecord({ uuid: "u", request_id: "req_9" })));
     if (csm.msg.case !== "assistant") throw new Error("case");
     expect(csm.msg.value.requestId).toBe("req_9");
   });
 
+  it("AssistantMessage preserves snake_case agent lineage", () => {
+    const csm = vendor(convert(assistantRecord({ uuid: "u", agent_id: "agent_1", parent_agent_id: "agent_parent" })));
+    if (csm.msg.case !== "assistant") throw new Error("case");
+    expect(csm.msg.value.agentId).toBe("agent_1");
+    expect(csm.msg.value.parentAgentId).toBe("agent_parent");
+  });
+
+  it("AssistantMessage preserves camelCase agent lineage", () => {
+    const csm = vendor(convert(assistantRecord({ uuid: "u", agentId: "agent_1", parentAgentId: "agent_parent" })));
+    if (csm.msg.case !== "assistant") throw new Error("case");
+    expect(csm.msg.value.agentId).toBe("agent_1");
+    expect(csm.msg.value.parentAgentId).toBe("agent_parent");
+  });
+
+  it("AssistantMessage leaves absent agent lineage empty", () => {
+    const csm = vendor(convert(assistantRecord({ uuid: "u" })));
+    if (csm.msg.case !== "assistant") throw new Error("case");
+    expect(csm.msg.value.agentId).toBe("");
+    expect(csm.msg.value.parentAgentId).toBe("");
+  });
+
   it("AssistantMessage carries the uuids it supersedes", () => {
-    const csm = vendor(convert({ type: "assistant", session_id: "s", uuid: "u", supersedes: ["a", "b"], message: { id: "m", model: "x", content: [] } }));
+    const csm = vendor(convert(assistantRecord({ uuid: "u", supersedes: ["a", "b"] })));
     if (csm.msg.case !== "assistant") throw new Error("case");
     expect(csm.msg.value.supersedes).toEqual(["a", "b"]);
   });
 
   it("an overloaded assistant error is no longer collapsed into UNKNOWN", () => {
-    const csm = vendor(convert({ type: "assistant", session_id: "s", uuid: "u", error: "overloaded", message: { id: "m", model: "x", content: [] } }));
+    const csm = vendor(convert(assistantRecord({ uuid: "u", error: "overloaded" })));
     if (csm.msg.case !== "assistant") throw new Error("case");
     expect(csm.msg.value.error).toBe(AssistantMessageError.OVERLOADED);
   });
@@ -1119,10 +1333,33 @@ describe("SDK 0.3.220 stream field gaps", () => {
     expect(csm.msg.value.deferredToolUse?.name).toBe("Bash");
   });
 
-  it("ModelUsage carries the canonical model", () => {
-    const csm = vendor(convert({ type: "result", subtype: "success", session_id: "s", uuid: "u", modelUsage: { alias: { canonicalModel: "claude-opus-5-20260101" } } }));
+  it("ModelUsage preserves supplied metadata and absence through protobuf binary encoding", () => {
+    const csm = vendor(convert({ type: "result", subtype: "success", session_id: "s", uuid: "u", modelUsage: {
+      alias: { canonicalModel: "claude-opus-5-20260101", provider: "anthropic", contextWindow: 200000, maxOutputTokens: 32000, costUSD: 0 },
+      unknown: {},
+    } }));
     if (csm.msg.case !== "result") throw new Error("case");
-    expect(csm.msg.value.modelUsage["alias"]?.canonicalModel).toBe("claude-opus-5-20260101");
+    const decoded = fromBinary(ClaudeStreamMessageSchema, toBinary(ClaudeStreamMessageSchema, csm));
+    if (decoded.msg.case !== "result") throw new Error("case");
+    expect(decoded.msg.value.modelUsage["alias"]).toMatchObject({ canonicalModel: "claude-opus-5-20260101", provider: "anthropic", contextWindow: 200000n, maxOutputTokens: 32000n, costUsd: 0 });
+    expect(decoded.msg.value.modelUsage["unknown"]?.canonicalModel).toBeUndefined();
+    expect(decoded.msg.value.modelUsage["unknown"]?.provider).toBeUndefined();
+    expect(decoded.msg.value.modelUsage["unknown"]?.contextWindow).toBeUndefined();
+    expect(decoded.msg.value.modelUsage["unknown"]?.maxOutputTokens).toBeUndefined();
+    expect(decoded.msg.value.modelUsage["unknown"]?.costUsd).toBeUndefined();
+  });
+
+  it.each([
+    ["canonical model", { canonicalModel: "" }, "non-empty string"],
+    ["provider", { provider: "" }, "non-empty string"],
+    ["context window", { contextWindow: null }, "finite number"],
+    ["max output", { maxOutputTokens: null }, "finite number"],
+    ["cost", { costUSD: null }, "finite number"],
+  ])("rejects present invalid ModelUsage %s metadata", (_label, metadata, reason) => {
+    const result = convert({ type: "result", subtype: "success", session_id: "s", uuid: "u", modelUsage: { alias: metadata } });
+    expect(result.vendor.payload.case).toBe("unparsed");
+    if (result.vendor.payload.case !== "unparsed") throw new Error("case");
+    expect(result.vendor.payload.value.error).toContain(reason);
   });
 
   it("a needs-auth MCP server converts to NEEDS_AUTH", () => {

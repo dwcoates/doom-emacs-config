@@ -30,6 +30,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -116,6 +117,17 @@ type SessionRegistrar interface {
 // from SessionRegistrar because query capability is not transcript identity.
 type ModelCatalogRegistrar interface {
 	SessionModelCatalogObserved(sessionID string, models []*corev1.ModelOption) error
+}
+
+// TerminalAccountingObserver receives the durable terminal-accounting edge.
+// It is separate from SessionRegistrar because token aggregates are derived
+// from the accounting store rather than registry state.
+type TerminalAccountingObserver interface {
+	TerminalAccountingPersisted(sessionID string)
+}
+
+type HistoricalTokenUtilizationObserver interface {
+	HistoricalTokenUtilizationPersisted(sessionID string)
 }
 
 // SpawnResult reports the vendor conversation a successful spawn resumed.
@@ -236,6 +248,12 @@ type Config struct {
 	// still serves prompts correctly, it merely cannot testify to a prompt
 	// across its own death.
 	PromptReceipts PromptReceiptStore
+	// TurnAccountings durably records resolved terminal accounting before the
+	// terminal ResultMessage reaches any frontend. Production always supplies it.
+	TurnAccountings TurnAccountingStore
+	// HistoricalUsage normalizes rootless, untimed file-plane usage
+	// into the session aggregate ledger before its conversation item is visible.
+	HistoricalUsage HistoricalTokenUtilizationStore
 	// DaemonVersion / ProtocolVersion travel in DaemonHello; ProtocolVersion
 	// must equal the shim's ("1").
 	DaemonVersion   string
@@ -350,11 +368,11 @@ type Manager struct {
 	// SUCCEEDED: the latch means "this session has been refreshed", never "a
 	// refresh was attempted for it".
 	buildBounced map[string]bool
-	// buildBouncing is the in-flight half of that latch: the sessions whose
-	// bounce goroutine is still running. It is what keeps a second hello
-	// arriving mid-bounce from starting a second one, a job the success latch
-	// used to do by being set too early (buildrefresh.go).
-	buildBouncing map[string]bool
+	// buildRefresh records the one stale-build restart for a session. Health
+	// probes that were already bound to the retiring controller use this
+	// generation-specific rendezvous to follow the intentional replacement;
+	// arbitrary transport failures never acquire retry semantics.
+	buildRefresh map[string]*buildRefreshState
 	// interruptDrain overrides the teardown drain's interrupt bound. Zero means
 	// the production constant; only a test assigns one, so the timeout branch
 	// can be driven without a ten-second wait (see turnstop.go).
@@ -391,6 +409,10 @@ type sessionController struct {
 	client                 sessionClient
 	consumer               *consumer
 	cancel                 context.CancelFunc
+	// controllerRegistrationRelease relinquishes the SSM-owned reservation
+	// that excludes hibernation until this generation reaches operational or
+	// exits. The closure is idempotent.
+	controllerRegistrationRelease func()
 
 	// Bring-up gate state (bringupescape.go), guarded by the manager mutex
 	// except for faulted, which is a one-shot broadcast channel.
@@ -405,8 +427,17 @@ type sessionController struct {
 	// the shim's exit carries nothing on the wire, and this DegradedState is
 	// sent immediately before it.
 	faultReason string
+	// faultTermination preserves the typed lifecycle record that preceded the
+	// degraded wake-up for an unexpected query termination. It is empty when
+	// the shim could only report a generic pre-readiness SDK failure.
+	faultTermination *frontendv1.QueryTerminationFailure
 	// faulted is closed once, by the first bring-up fault, to wake the wait.
 	faulted chan struct{}
+	// buildRefreshStarted closes when this generation's ShimReady proves that
+	// its bundle is stale and transfers bring-up ownership to a replacement.
+	// Health probes select on this edge beside AwaitReady, so the readiness that
+	// is deliberately withheld from the retired generation cannot strand them.
+	buildRefreshStarted chan struct{}
 
 	// Prompt-queue state (E4), guarded by the manager mutex.
 	//
@@ -490,6 +521,12 @@ type sessionController struct {
 	resyncRetried bool
 }
 
+func (d *sessionController) releaseControllerRegistration() {
+	if d != nil && d.controllerRegistrationRelease != nil {
+		d.controllerRegistrationRelease()
+	}
+}
+
 func controllerSessionID(d *sessionController) string {
 	if d == nil {
 		return ""
@@ -542,6 +579,8 @@ func New(cfg Config) (*Manager, error) {
 		return nil, fmt.Errorf("session-controller: New needs a SeqStore")
 	case cfg.ClearCompactStore == nil:
 		return nil, fmt.Errorf("session-controller: New needs a ClearCompactStore (without it an observed clear or compaction cannot floor a later resync)")
+	case cfg.TurnAccountings == nil:
+		return nil, fmt.Errorf("session-controller: New needs a TurnAccountingStore (without it terminal accounting cannot precede frontend delivery)")
 	case cfg.Source == nil:
 		return nil, fmt.Errorf("session-controller: New needs a ConnSource (shims dial the daemon; without it no session controller can connect)")
 	case cfg.FileDiagnostics == nil:
@@ -583,7 +622,7 @@ func New(cfg Config) (*Manager, error) {
 		lastCSID:                  make(map[string]string),
 		shimPID:                   make(map[string]int32),
 		buildBounced:              make(map[string]bool),
-		buildBouncing:             make(map[string]bool),
+		buildRefresh:              make(map[string]*buildRefreshState),
 		rootCtx:                   rootCtx,
 		rootStop:                  rootStop,
 	}, nil
@@ -754,10 +793,13 @@ func (m *Manager) persistVendorSessionID(sessionID, csid string) {
 // the command was accepted — it was accepted into the queue. The queue's own
 // pushed QueueView is what tells the frontend where the prompt went.
 // requestID is the frontend command's own id. It is what the daemon's prompt
-// RECEIPT is keyed on (promptecho.go) and what the durable transcript line is
-// later stamped with, so the two reconcile onto one bubble. An empty one (a
-// caller with no frontend request behind it) simply pushes no receipt.
+// RECEIPT is keyed on (promptecho.go), what the durable transcript line is
+// later stamped with, and the authoritative turn id used for terminal
+// accounting. It must therefore be nonempty before any session state changes.
 func (m *Manager) SubmitPrompt(ctx context.Context, workspace, requestID, text, permissionMode string) error {
+	if strings.TrimSpace(requestID) == "" {
+		return fmt.Errorf("session-controller: submit prompt for workspace %q needs a non-empty request id", workspace)
+	}
 	return m.submitPrompt(ctx, workspace, requestID, text, permissionMode, "frontend")
 }
 
@@ -1213,6 +1255,46 @@ func (m *Manager) Health(ctx context.Context, workspace, sessionID, requestID st
 		return nil, fmt.Errorf("session-controller: health ws=%q names session=%s but live session controller owns session=%s", workspace, sessionID, d.sessionID)
 	}
 	m.logf("session-controller: health probe ws=%q session=%s request_id=%s", workspace, sessionID, requestID)
+	// A stale-build verdict deliberately withholds the source generation's
+	// readiness. Race that wait against the verdict's own transition edge so a
+	// probe transfers to the replacement at the instant ownership moves,
+	// independent of the source transport's later teardown.
+	type healthAnswer struct {
+		status *corev1.HealthStatus
+		err    error
+	}
+	sourceCtx, cancelSource := context.WithCancel(ctx)
+	defer cancelSource()
+	sourceAnswer := make(chan healthAnswer, 1)
+	go func() {
+		status, err := m.healthController(sourceCtx, d, requestID)
+		sourceAnswer <- healthAnswer{status: status, err: err}
+	}()
+
+	var status *corev1.HealthStatus
+	var sourceErr error
+	select {
+	case answer := <-sourceAnswer:
+		status, sourceErr = answer.status, answer.err
+	case <-d.buildRefreshStarted:
+		cancelSource()
+		sourceErr = fmt.Errorf("source generation retired before readiness")
+	}
+	replacement, followErr := m.followBuildRefresh(ctx, workspace, sessionID, d)
+	if followErr != nil {
+		return nil, fmt.Errorf("session-controller: health ws=%q session=%s request_id=%s: stale-build replacement failed after the source generation retired: %w (source probe: %v)",
+			workspace, sessionID, requestID, followErr, sourceErr)
+	}
+	if replacement == nil {
+		return status, sourceErr
+	}
+	m.logf("session-controller: health probe ws=%q session=%s request_id=%s following intentional stale-build replacement generation=%s->%s",
+		workspace, sessionID, requestID, d.generationID, replacement.generationID)
+	return m.healthController(ctx, replacement, requestID)
+}
+
+func (m *Manager) healthController(ctx context.Context, d *sessionController, requestID string) (*corev1.HealthStatus, error) {
+	workspace, sessionID := d.workspace, d.sessionID
 	if err := d.client.AwaitReady(ctx); err != nil {
 		// BOTH causes stay in the chain: the link (which hop is pending) and the
 		// transport error (why the wait ended). Dropping either would cost a
@@ -1500,9 +1582,9 @@ var (
 // to be "NEVER call this while a turn is active", left to each caller, and it is
 // now mechanical inside hibernate().
 //
-// Use this ONLY when the intent really is workspace-scoped (the idle sweep,
-// daemon shutdown). A caller standing down one SPECIFIC record must use
-// HibernateSession — see the warning there.
+// Use this only when the intent is workspace-scoped (the idle sweep or daemon
+// shutdown). A terminal lifecycle operation standing down one specific record
+// uses StopSession instead.
 // cause NAMES THE CALLER, and every caller names a different one: the idle
 // sweep, a merged teardown, an account switch, a drain execution and an
 // ordinary shutdown are five different reasons a workspace's shim died, and the
@@ -1511,11 +1593,16 @@ func (m *Manager) Hibernate(workspace string, cause StopCause) error {
 	return m.hibernate(workspace, "", cause)
 }
 
-// HibernateSession suspends sessionID's shim without disturbing any different
-// session currently driving workspace. If the matching controller is already
-// evicted after a terminal client error, or a replacement now owns workspace,
-// the session-scoped stop still reaches the spawner directly: process handles
-// are keyed by session id and must not become unreachable through byWS churn.
+// StopSession terminates sessionID's shim without disturbing any different
+// session driving workspace. It serves terminal lifecycle operations such as
+// deletion and supersession, not hibernation: it may stop an active turn, and
+// it never publishes the benign HIBERNATED state. The caller must make the
+// session terminal before invoking it.
+//
+// If the matching controller is already evicted after a terminal client error,
+// or a replacement owns workspace, the session-scoped stop reaches the spawner
+// directly. Process handles are keyed by session id and must not become
+// unreachable through byWS churn.
 //
 // Several registry records can share one cwd — a stale duplicate, a superseded
 // resume, an orphan awaiting reap — so "stop THIS record's shim" is not the same
@@ -1523,7 +1610,28 @@ func (m *Manager) Hibernate(workspace string, cause StopCause) error {
 // Hibernate SIGTERMs whichever shim happens to be live, which on 2026-07-25
 // meant reaping an orphan killed the healthy session created 175ms earlier for
 // the same workspace, leaving the user with nothing to drive.
+// HibernateSession is the compatibility name for an exact terminal stop. It
+// intentionally does not publish HIBERNATED: the durable record is terminal,
+// not a resumable sleeping session.
 func (m *Manager) HibernateSession(workspace, sessionID string, cause StopCause) error {
+	return m.stopSessionController(workspace, sessionID, cause)
+}
+
+func (m *Manager) StopSession(workspace, sessionID string) error {
+	return m.stopSessionController(workspace, sessionID, StopCauseSessionDeleted())
+}
+
+// StopSessionForReplacement stops one exact session process so the same
+// durable record can be relaunched under different process configuration. It
+// is not hibernation and never publishes HIBERNATED.
+func (m *Manager) StopSessionForReplacement(workspace, sessionID string) error {
+	return m.stopSessionController(workspace, sessionID, StopCauseAccountSwitch())
+}
+
+// stopSessionController is the exact-session teardown shared by terminal
+// lifecycle operations and intentional process replacement. It never reports
+// HIBERNATED: the caller owns the terminal or replacement state.
+func (m *Manager) stopSessionController(workspace, sessionID string, cause StopCause) error {
 	m.mu.Lock()
 	d, ok := m.byWS[workspace]
 	if ok && d.sessionID != sessionID {
@@ -1547,29 +1655,22 @@ func (m *Manager) HibernateSession(workspace, sessionID string, cause StopCause)
 		delete(m.byWS, workspace)
 	}
 	m.mu.Unlock()
-	// THE DRAIN COMES BEFORE THE CANCEL, and this teardown is the one that most
-	// needs it: unlike hibernate() it carries no settled guard, because a delete
-	// or a supersede stands a record down whether or not it is mid-turn. That is
-	// precisely the stop that used to strand a `thinking` nothing could retire.
+	// THE DRAIN COMES BEFORE THE CANCEL. A terminal delete or supersession stands
+	// a record down even when it is mid-turn, so the terminal stop must retire
+	// the turn that can no longer emit its own completion.
 	if ok {
 		m.drainLiveTurnForStop(workspace, sessionID, cause.path(), d.client)
 		d.cancel()
 	}
-	m.logf("session-controller: hibernating session-scoped ws=%q session=%s session_controller_present=%v (SIGTERM child shim)",
-		workspace, sessionID, ok)
-	// The wiring goes with the shim. Reported HERE rather than left to the
-	// session-controller-exit tail, because the teardown is the earlier instant and the
-	// answer is already known at it. A stop that reached a record no longer
-	// driving this workspace leaves the axis alone: a replacement session may
-	// already own it, and closing then would blue out a live one.
-	//
-	// HIBERNATED, never severed. This is a stop WE issued, so nothing broke —
-	// and it is the earlier instant precisely so the benign answer is the one
-	// recorded, before the session-controller-exit tail can only guess.
-	if ok {
-		m.noteConnectivity(workspace, d.sessionID, d.generationID, ssm.SessionConnectivityHibernated, "hibernate_session")
+	m.logf("session-controller: exact session stop ws=%q session=%s path=%s session_controller_present=%v (SIGTERM child shim)",
+		workspace, sessionID, cause.path(), ok)
+	if err := m.stopShimSettlingTurn(workspace, sessionID, cause, true); err != nil {
+		return err
 	}
-	return m.stopShimSettlingTurn(workspace, sessionID, cause, true)
+	if ok {
+		d.releaseControllerRegistration()
+	}
+	return nil
 }
 
 // hibernate is the shared teardown. An empty wantSession means "whichever
@@ -1591,9 +1692,11 @@ func (m *Manager) hibernate(workspace, wantSession string, cause StopCause) erro
 	// settled one — the user would see "asleep" while the agent worked, with no
 	// color anywhere to correct it. Refusing here is what makes that combination
 	// unreachable by construction rather than merely unlikely.
-	if err := m.refuseUnsettledHibernation(workspace); err != nil {
+	releaseHibernationLease, err := m.acquireSettledHibernationLease(workspace)
+	if err != nil {
 		return err
 	}
+	defer releaseHibernationLease()
 	m.mu.Lock()
 	d, ok := m.byWS[workspace]
 	if !ok {
@@ -1609,22 +1712,22 @@ func (m *Manager) hibernate(workspace, wantSession string, cause StopCause) erro
 	delete(m.byWS, workspace)
 	m.mu.Unlock()
 	// THE DRAIN COMES BEFORE THE CANCEL, which ends client.Run and takes the
-	// connection an interrupt would travel over with it. It is reached at all
-	// only when refuseUnsettledHibernation let a live turn through — its state
-	// read failing is an explicit allow — and that escape is exactly the case
-	// where the shim's own turn end is still worth asking for.
+	// connection an interrupt would travel over with it. The hibernation lease
+	// proves no turn is active and prevents a new one from beginning throughout
+	// this stop sequence; the drain therefore reconciles only already-settled
+	// transport bookkeeping.
 	m.drainLiveTurnForStop(workspace, d.sessionID, cause.path(), d.client)
 	d.cancel() // stop consuming; the shimclient Run ends
 	m.logf("session-controller: hibernating ws=%q session=%s (SIGTERM child shim)", workspace, d.sessionID)
-	// HIBERNATED, and this ORDERING is what makes the answer stick. The cancel
-	// above ends client.Run, so the session-controller-exit tail fires on this same workspace
-	// milliseconds from now; writing the benign answer FIRST is what leaves it
-	// standing, and the tail's silence on a clean exit (see bringUp) is what
-	// keeps it from being overwritten. Reversing the two would repaint every
-	// hibernation blue immediately after it went teal, which is the whole split
-	// undone.
+	if err := m.stopShimSettlingTurn(workspace, d.sessionID, cause, true); err != nil {
+		return err
+	}
+	// HIBERNATED means StopShim has completed, including release of the
+	// session lock that gates a following restoration. The controller exit tail
+	// is silent for this retired generation, so no later connectivity edge can
+	// overwrite this completed teardown.
 	m.noteConnectivity(workspace, d.sessionID, d.generationID, ssm.SessionConnectivityHibernated, "hibernated")
-	return m.stopShimSettlingTurn(workspace, d.sessionID, cause, true)
+	return nil
 }
 
 // bringUpTimeout bounds how long ensure waits for a spawned shim to connect
@@ -1720,6 +1823,18 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 	}
 	m.logf("session-controller: controller generation minted ws=%q session=%s generation=%s decision=begin_bring_up",
 		workspace, sessionID, generationID)
+	rawReleaseRegistration, err := m.cfg.SSM.AcquireControllerRegistration(workspace, sessionID, generationID)
+	if err != nil {
+		return nil, false, fmt.Errorf("session-controller: reserve controller registration for workspace %q: %w", workspace, err)
+	}
+	var releaseRegistrationOnce sync.Once
+	releaseRegistration := func() { releaseRegistrationOnce.Do(rawReleaseRegistration) }
+	registrationTransferred := false
+	defer func() {
+		if !registrationTransferred {
+			releaseRegistration()
+		}
+	}()
 	spawn, err := m.cfg.Spawner.EnsureShim(m.rootCtx, sessionID)
 	if err != nil {
 		return nil, false, fmt.Errorf("session-controller: ensure shim for session %s (ws %q): %w", sessionID, workspace, err)
@@ -1728,9 +1843,11 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 	d := &sessionController{
 		sessionID: sessionID, workspace: workspace,
 		generationID: generationID, resumedVendorSessionID: spawn.Resumed,
-		faulted: make(chan struct{}),
+		faulted:                       make(chan struct{}),
+		buildRefreshStarted:           make(chan struct{}),
+		controllerRegistrationRelease: releaseRegistration,
 	}
-	cons := newConsumer(workspace, sessionID, m.cfg.Push, m.cfg.SSM, m.cfg.Progress, m.cfg.ClearCompactStore, m.logf, func(ss *corev1.SessionStarted) {
+	cons := newConsumer(workspace, sessionID, m.cfg.Push, m.cfg.SSM, m.cfg.Progress, m.cfg.ClearCompactStore, m.cfg.TurnAccountings, m.logf, func(ss *corev1.SessionStarted) {
 		m.persistVendorSessionID(sessionID, ss.GetVendorSessionId())
 	}, func(active bool) {
 		m.onTurnBoundary(d, active)
@@ -1746,6 +1863,7 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 	}, func() {
 		m.persistSessionDeath(sessionID, errclass.DeathReasonShimDied)
 	})
+	cons.historicalUsageStore = m.cfg.HistoricalUsage
 	cons.generationID = generationID
 	// The durable receipt ledger. Bound before Run, so no durable user line can
 	// reach attributeUserTurn — the retirement point — with this unset.
@@ -1773,6 +1891,15 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 	// reach the consumer with this unset.
 	cons.onVendorSessionID = func(vendorSessionID string) {
 		m.persistVendorSessionID(sessionID, vendorSessionID)
+	}
+	if observer, ok := m.cfg.Registrar.(TerminalAccountingObserver); ok {
+		cons.onTerminalAccountingPersisted = func() { observer.TerminalAccountingPersisted(sessionID) }
+	}
+	if observer, ok := m.cfg.Registrar.(HistoricalTokenUtilizationObserver); ok {
+		cons.onHistoricalUsagePersisted = func() { observer.HistoricalTokenUtilizationPersisted(sessionID) }
+	}
+	cons.onQueryTermination = func(detail *frontendv1.QueryTerminationFailure) {
+		m.noteBringUpTermination(d, detail)
 	}
 	cons.onDegraded = func(ds *corev1.DegradedState) { m.noteBringUpFault(d, ds) }
 	d.consumer = cons
@@ -1817,9 +1944,11 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 		OnHandshake: func(hello *corev1.ShimHello) error {
 			return m.onHandshakeForGeneration(workspace, sessionID, generationID, hello)
 		},
-		OnConnected: func(hello *corev1.ShimHello) { m.onConnectedForGeneration(workspace, sessionID, generationID, hello) },
-		OnLinkLost:  func(cause error) { m.onLinkLostForGeneration(workspace, sessionID, generationID, cause) },
-		Logf:        m.logf,
+		OnConnected: func(hello *corev1.ShimHello) bool {
+			return m.onConnectedForGeneration(workspace, sessionID, generationID, hello)
+		},
+		OnLinkLost: func(cause error) { m.onLinkLostForGeneration(workspace, sessionID, generationID, cause) },
+		Logf:       m.logf,
 	})
 	d.client = client
 
@@ -1846,7 +1975,19 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 	// winner has already earned. What is left uncovered is the spawn itself,
 	// which is a process exec; the window the user actually waits through is the
 	// handshake, and that is entirely after this point.
-	m.noteConnectivity(workspace, sessionID, generationID, ssm.SessionConnectivityConnecting, "bring_up")
+	if err := m.noteConnectivity(workspace, sessionID, generationID, ssm.SessionConnectivityConnecting, "bring_up"); err != nil {
+		m.mu.Lock()
+		if current, exists := m.byWS[workspace]; exists && current == d {
+			delete(m.byWS, workspace)
+		}
+		m.mu.Unlock()
+		cancel()
+		stopErr := m.stopShimSettlingTurn(workspace, sessionID, StopCauseBringUpFailed(), true)
+		if stopErr != nil {
+			return nil, false, fmt.Errorf("%w; stopping rejected generation: %v", err, stopErr)
+		}
+		return nil, false, err
+	}
 
 	// The Add is taken UNDER m.mu with a closed re-check, exactly like
 	// runPendingResync's: Close sets `closed` under this lock and then waits on
@@ -1878,9 +2019,11 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 		return nil, false, fmt.Errorf("session-controller: manager closed during bring-up of workspace %q", workspace)
 	}
 	m.exits.Add(1)
+	registrationTransferred = true
 	m.mu.Unlock()
 	go func() {
 		defer m.exits.Done()
+		defer d.releaseControllerRegistration()
 		runErr := client.Run(runCtx)
 		if runErr != nil {
 			m.logf("session-controller: session %s session controller ended: %v", sessionID, runErr)
@@ -1926,9 +2069,10 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 		// whole split undone. Every clean cancel of a session controller ctx has already
 		// recorded a truer answer than this tail could:
 		//
-		//   - HIBERNATION (Manager.hibernate) and its session-scoped twin
-		//     (HibernateSession) each write `hibernated` BEFORE issuing the
-		//     cancel, at the earlier instant where the reason is still known.
+		//   - HIBERNATION (Manager.hibernate) writes `hibernated` at the instant
+		//     where the benign reason is known. StopSession belongs only to a
+		//     registry record already marked terminal, whose terminal SessionView
+		//     is the authoritative state.
 		//   - A FAILED BRING-UP's escape (bringupescape.go) tears the session controller down
 		//     and writes `severed` itself, naming the bring-up that failed.
 		//   - A MANAGER CLOSE cancels the root ctx. The axis it leaves behind is
@@ -2090,6 +2234,11 @@ func (m *Manager) onHandshakeForGeneration(workspace, sessionID, generationID st
 			workspace, sessionID, generationID, controllerSessionID(d), controllerGenerationID(d), hello.GetActiveTurnIds(), err)
 		return err
 	}
+	if err := d.consumer.accounting.bindHandshakeIdentity(hello); err != nil {
+		m.logf("session-controller: query handshake decision=reject_identity ws=%q session=%q generation=%q query_instance_id=%q vendor_session_id=%q runtime_snapshot=%t error=%v",
+			workspace, sessionID, generationID, hello.GetQueryInstanceId(), hello.GetVendorSessionId(), hello.GetQueryRuntimeIdentity() != nil, err)
+		return fmt.Errorf("query handshake identity failed: %w", err)
+	}
 	active, phantomClosed, err := d.consumer.reconcileTurnHandshake(hello)
 	if err != nil {
 		reason := fmt.Sprintf("turn handshake correlation failed: %v", err)
@@ -2245,7 +2394,7 @@ func (m *Manager) clearTurnOnRotation(workspace, sessionID, previous, next strin
 // replays events from last_seen_seq on Subscribe, so the SSM re-derives turn
 // state from the replayed TurnStarted; this hook loud-logs the observation so a
 // reconciliation gap is visible rather than silent.
-func (m *Manager) onConnectedForGeneration(workspace, sessionID, generationID string, hello *corev1.ShimHello) {
+func (m *Manager) onConnectedForGeneration(workspace, sessionID, generationID string, hello *corev1.ShimHello) bool {
 	m.mu.Lock()
 	d, ok := m.byWS[workspace]
 	current := ok && d.sessionID == sessionID && d.generationID == generationID
@@ -2253,14 +2402,27 @@ func (m *Manager) onConnectedForGeneration(workspace, sessionID, generationID st
 	if !current {
 		m.logf("session-controller: stale ShimReady ignored ws=%q session=%q generation=%q current_session=%q current_generation=%q branch=retired_controller",
 			workspace, sessionID, generationID, controllerSessionID(d), controllerGenerationID(d))
-		return
+		return true
+	}
+	// Build identity is a PRE-READINESS transition. A mismatched source is
+	// registered for exact-generation replacement before the shim client may
+	// release AwaitReady, and it never paints operational or releases queued
+	// work on the generation being retired.
+	m.noteShimPID(sessionID, hello.GetPid())
+	if m.refreshStaleShim(workspace, sessionID, hello.GetBuildSha()) {
+		return true
 	}
 	// THE BRING-UP GATE CLOSED. This hook fires from the shim's ShimReady, the
 	// same frame AwaitReady resolves on, so "wired" here means exactly what
 	// "driveable" means everywhere else: session lock held, SDK query built,
 	// store producer link up, standing subscription open. It is the ONE opening
 	// edge of the axis, and nothing weaker may write it.
-	m.noteConnectivity(workspace, sessionID, generationID, ssm.SessionConnectivityOperational, "shim_ready")
+	if err := m.noteConnectivity(workspace, sessionID, generationID, ssm.SessionConnectivityOperational, "shim_ready"); err != nil {
+		m.logf("session-controller: operational connectivity edge rejected ws=%q session=%s generation=%s decision=cancel_generation error=%v",
+			workspace, sessionID, generationID, err)
+		d.cancel()
+		return true
+	}
 	// THE BRING-UP GATE IS CLOSED. Anything that fails from here is a
 	// mid-session fault, never an escapable bring-up failure.
 	m.noteWired(workspace, sessionID)
@@ -2269,8 +2431,6 @@ func (m *Manager) onConnectedForGeneration(workspace, sessionID, generationID st
 	// shim running a superseded bundle is bounced from here onto the current
 	// one (buildrefresh.go); everything below still runs, because the bounce is
 	// asynchronous and this connection remains the live one until it lands.
-	m.noteShimPID(sessionID, hello.GetPid())
-	m.refreshStaleShim(workspace, sessionID, hello.GetBuildSha())
 	if hello.GetTurnInFlight() {
 		m.logf("session-controller: reattached mid-turn ws=%s session=%s turn_in_flight=true active_turn_ids=%v; SSM state is durable and replay closes any unseen boundary", workspace, sessionID, hello.GetActiveTurnIds())
 	}
@@ -2292,10 +2452,12 @@ func (m *Manager) onConnectedForGeneration(workspace, sessionID, generationID st
 	// This session is live, so it may be holding the drain open — a reattach
 	// mid-turn does exactly that.
 	m.noteDrainActivity()
+	d.releaseControllerRegistration()
+	return false
 }
 
 func (m *Manager) onConnected(workspace, sessionID string, hello *corev1.ShimHello) {
-	m.onConnectedForGeneration(
+	_ = m.onConnectedForGeneration(
 		workspace, sessionID, m.currentControllerGeneration(workspace, sessionID), hello,
 	)
 }

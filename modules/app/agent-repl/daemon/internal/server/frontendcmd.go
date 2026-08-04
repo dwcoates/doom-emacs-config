@@ -197,6 +197,9 @@ type Resyncer interface {
 // DELETE /sessions/{id} use). *Server satisfies it, but it is constructed AFTER
 // WireAgentShim, so main injects the late-bound *SessionCommandBinding.
 type SessionCreateDeleter interface {
+	// CreateSession returns the durable session id alongside an error when
+	// registration succeeded but bring-up failed. The command boundary uses
+	// that id in exact-resume continuity evidence.
 	CreateSession(ctx context.Context, opts CreateOpts) (string, error)
 	DeleteSession(sessionID string) error
 }

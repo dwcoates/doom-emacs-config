@@ -104,6 +104,11 @@ export class ControlDispatch {
 
   /** Handle a SubmitPrompt; push into the SDK turn and Ack (Nack on rejection). */
   async handleSubmitPrompt(msg: SubmitPrompt): Promise<Ack | Nack> {
+    if (msg.requestId.trim() === "") {
+      const reason = "SubmitPrompt requires a non-empty request_id";
+      LOGGER.log({ level: "error" }, reason);
+      return create(NackSchema, { requestId: msg.requestId, reason });
+    }
     LOGGER.log({ request_id: msg.requestId, origin: msg.origin, text_length: msg.text.length, permission_mode: msg.permissionMode || undefined }, "dispatching SubmitPrompt to SDK session");
     try {
       await this.target.submitPrompt({

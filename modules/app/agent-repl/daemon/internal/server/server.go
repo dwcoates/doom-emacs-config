@@ -124,6 +124,14 @@ type Remediator interface {
 	Start(sessionID string) (bool, error)
 }
 
+// SessionTokenUsageSource reads normalized live responses whose terminal turn
+// accounting committed and historical file-plane responses that cannot prove
+// a root turn or stream timing. The server aggregates that durable ledger into
+// every SessionView rather than retaining a second cumulative counter.
+type SessionTokenUsageSource interface {
+	List(sessionID string) ([]*frontendv1.TokenUtilization, error)
+}
+
 // Server routes daemon HTTP traffic.
 type Server struct {
 	daemonVersion string
@@ -156,6 +164,7 @@ type Server struct {
 	remediator    Remediator
 	registry      *registry.Registry
 	modelCatalogs *SessionModelCatalogs
+	tokenUsage    SessionTokenUsageSource
 	// logins owns the interactive Claude login terminals, at most one per
 	// account; nil makes the login routes report the capability unconfigured.
 	logins *login.Manager
@@ -207,6 +216,7 @@ type Config struct {
 	// is the source of truth for which sessions exist.
 	Registry      *registry.Registry
 	ModelCatalogs *SessionModelCatalogs
+	TokenUsage    SessionTokenUsageSource
 	// Logins owns the interactive Claude login terminals; nil disables the
 	// login routes.
 	Logins *login.Manager
@@ -269,6 +279,7 @@ func New(cfg Config) *Server {
 		remediator:      cfg.Remediator,
 		registry:        cfg.Registry,
 		modelCatalogs:   cfg.ModelCatalogs,
+		tokenUsage:      cfg.TokenUsage,
 		idleTimeout:     cfg.IdleTimeout,
 		idleSweepTicks:  cfg.IdleSweepTicks,
 		stopped:         make(chan struct{}),
@@ -974,10 +985,12 @@ func (s *Server) handleAccountSwitch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Stop the old shim before the root changes. A workspace with no live
-	// shim is an expected no-op, not a failure.
-	if err := s.controller.Hibernate(rec.CWD, sessioncontroller.StopCauseAccountSwitch()); err != nil {
-		s.logf("session %s: account-switch shim stop (ws %s): %v (expected when no live shim)", id, rec.CWD, err)
+	// Stop the exact process before the root changes. Account switching is an
+	// intentional replacement, not hibernation: it may land while the original
+	// generation is entering service, and it never publishes HIBERNATED.
+	if err := s.controller.StopSessionForReplacement(rec.CWD, id); err != nil {
+		s.httpFail(w, r, http.StatusConflict, "session %s (cwd %s): account-switch shim stop: %v", id, rec.CWD, err)
+		return
 	}
 
 	// Persist the new root (and freshest claude_session_id) BEFORE the
@@ -1152,7 +1165,9 @@ var errSessionNotFound = errors.New("no such session")
 // so every connected frontend learns the workspace->session binding without
 // polling GET /sessions. Typed errors (*InvalidCreateError,
 // *ResumeTranscriptMissingError) let callers map to their transport; any other
-// error is an internal bring-up failure surfaced loudly.
+// error is an internal bring-up failure surfaced loudly. A failure after the
+// registry write returns the durable session id with the error so the caller
+// can identify the failed operation precisely.
 func (s *Server) CreateSession(_ context.Context, opts CreateOpts) (string, error) {
 	requestedModel := opts.Model
 	opts.Model = registry.NormalizeModel(opts.Model)
@@ -1230,7 +1245,11 @@ func (s *Server) CreateSession(_ context.Context, opts CreateOpts) (string, erro
 	// workspace to drive, so it is registered but not brought up.
 	if opts.CWD != "" {
 		if err := s.controller.Ensure(opts.CWD); err != nil {
-			return "", fmt.Errorf("session %s (cwd %s): bring up shim: %w", id, opts.CWD, err)
+			// The registry record already owns id. Returning it with the failure
+			// lets the command boundary attach the exact failed resume identity;
+			// discarding it would make a durable session anonymous in its own
+			// continuity diagnostic.
+			return id, fmt.Errorf("session %s (cwd %s): bring up shim: %w", id, opts.CWD, err)
 		}
 	}
 	dlog.Tag(s.logf, "cwd", opts.CWD)("session %s: created", id)
@@ -1262,7 +1281,7 @@ func (s *Server) DeleteSession(id string) error {
 	// controller eviction while the spawner still owns its process handle; the
 	// session-id-scoped stop guarantees a replacement on the same cwd is untouched.
 	if rec.CWD != "" {
-		if err := s.controller.HibernateSession(rec.CWD, id, sessioncontroller.StopCauseSessionDeleted()); err != nil {
+		if err := s.controller.StopSession(rec.CWD, id); err != nil {
 			s.logf("session %s: delete exact shim stop FAILED (ws %s terminal_before=%v): %v",
 				id, rec.CWD, wasTerminal, err)
 		} else {
@@ -1322,6 +1341,12 @@ func SessionViewFromRecord(logf dlog.Logf, rec registry.Record, pendingPermissio
 // query-published model menu. The menu does not select a model; rec.Model is
 // still the one authoritative current selection.
 func SessionViewFromRecordWithModels(logf dlog.Logf, rec registry.Record, pendingPermissions []string, shimAttached bool, modelOptions []*frontendv1.ModelOption) *frontendv1.SessionView {
+	return SessionViewFromRecordWithModelsAndUsage(logf, rec, pendingPermissions, shimAttached, modelOptions, nil)
+}
+
+// SessionViewFromRecordWithModelsAndUsage is the complete canonical SessionView
+// shaper, including the durable completed-response aggregate.
+func SessionViewFromRecordWithModelsAndUsage(logf dlog.Logf, rec registry.Record, pendingPermissions []string, shimAttached bool, modelOptions []*frontendv1.ModelOption, usage *frontendv1.SessionTokenUtilization) *frontendv1.SessionView {
 	return &frontendv1.SessionView{
 		Workspace:       rec.CWD,
 		SessionId:       rec.SessionID,
@@ -1350,9 +1375,24 @@ func SessionViewFromRecordWithModels(logf dlog.Logf, rec registry.Record, pendin
 		// webapp-initiated, daemon-executed, and reflected in pushed state.
 		ConfigDir: rec.ConfigDir,
 		// The never-blue backfill signal (F2), mapped off the durable record.
-		Backfill:     backfillState(rec.BackfillState),
-		ModelOptions: modelOptions,
+		Backfill:         backfillState(rec.BackfillState),
+		ModelOptions:     modelOptions,
+		TokenUtilization: usage,
 	}
+}
+
+func sessionTokenUtilization(logf dlog.Logf, source SessionTokenUsageSource, sessionID string) *frontendv1.SessionTokenUtilization {
+	if source == nil {
+		return nil
+	}
+	records, err := source.List(sessionID)
+	if err != nil {
+		if logf != nil {
+			logf("server: session token utilization read FAILED session=%q operation=list-completed-responses error=%v", sessionID, err)
+		}
+		panic(fmt.Sprintf("server: list completed token utilization for session %q: %v", sessionID, err))
+	}
+	return frontend.AggregateTokenUtilization(records)
 }
 
 // backfillState maps the registry record's stored token onto the wire enum. An
@@ -1400,7 +1440,7 @@ func (s *Server) pushSessionView(id string) {
 		panic(fmt.Sprintf("server: session %s: pushSessionView requires ModelCatalogs", id))
 	}
 	modelOptions := s.modelCatalogs.Get(id)
-	s.frontend.PushSessionView(SessionViewFromRecordWithModels(s.logf, rec, pending, live, modelOptions))
+	s.frontend.PushSessionView(SessionViewFromRecordWithModelsAndUsage(s.logf, rec, pending, live, modelOptions, sessionTokenUtilization(s.logf, s.tokenUsage, id)))
 }
 
 func (s *Server) handleListSessions(w http.ResponseWriter, _ *http.Request) {

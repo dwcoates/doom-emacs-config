@@ -35,6 +35,7 @@ import { ConversationItem, StoreState, ToolItem, topLevelUsage } from "./store.j
 import { agentTasks, tasksMenuHtml } from "./tasks.js";
 import { TIMER_SLOT } from "./timer.js";
 import { TokenMenuData, formatTokens, tokensMenuHtml } from "./tokens.js";
+import { accountingSummary, latestTurnAccounting } from "./turn-accounting.js";
 
 /**
  * One scope's values for every datapoint the strip renders. Both builders
@@ -163,11 +164,19 @@ export function sessionTopbarDatapoints(
       contextSize: state.contextTokens,
       topLevel: topLevelUsage(state),
       models: state.modelUsage,
-      timing: state.tokenUtilization?.all_agents.timing,
+      ...(state.tokenUtilization === null || state.tokenUtilization === undefined
+        ? {}
+        : { sessionUtilization: state.tokenUtilization }),
     },
     agents: [],
     tasks: [],
   };
+}
+
+/** Latest terminal-turn accounting projection for the session chrome. */
+export function sessionAccountingLabel(state: StoreState): string | null {
+  const accounting = latestTurnAccounting(state.items);
+  return accounting === null ? null : accountingSummary(accounting);
 }
 
 /**

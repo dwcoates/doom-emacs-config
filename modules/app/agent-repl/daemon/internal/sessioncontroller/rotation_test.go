@@ -25,6 +25,7 @@ func rotationHello(vendorSessionID string) *corev1.ShimHello {
 	return &corev1.ShimHello{
 		SessionId: "s1", Vendor: "claude", ShimVersion: "test", ProtocolVersion: "1",
 		VendorSessionId: vendorSessionID,
+		QueryInstanceId: "query-rotation",
 	}
 }
 
@@ -223,7 +224,7 @@ func TestPersistentEventReportsItsVendorSessionID(t *testing.T) {
 	// Arrange — a seq-stamped store event: the store keys by the vendor uuid,
 	// so that is what the envelope carries.
 	var seen []string
-	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), nil, nil, nil, nil, nil, nil)
+	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, nil, nil, nil, nil, nil, nil)
 	c.onVendorSessionID = func(id string) { seen = append(seen, id) }
 
 	// Act.
@@ -243,7 +244,7 @@ func TestEphemeralEventReportsNoVendorSessionID(t *testing.T) {
 	// the DAEMON's own s_ id. Adopting that as the vendor uuid would file the
 	// conversation under an identity no store event will ever use.
 	var seen []string
-	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), nil, nil, nil, nil, nil, nil)
+	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, nil, nil, nil, nil, nil, nil)
 	c.onVendorSessionID = func(id string) { seen = append(seen, id) }
 
 	// Act.
