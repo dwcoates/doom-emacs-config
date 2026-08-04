@@ -108,23 +108,23 @@ func NewUDSSpawner(cfg UDSSpawnConfig) (ShimSpawnFunc, error) {
 	if spawn == nil {
 		spawn = shim.Spawn
 	}
-	return func(sessionID string, opts CreateOpts) (ShimStopFunc, error) {
+	return func(sessionID string, opts CreateOpts) (ShimHandle, error) {
 		return spawnUDSShim(cfg, spawn, sessionID, opts)
 	}, nil
 }
 
 // spawnUDSShim is the procedure itself.
-func spawnUDSShim(cfg UDSSpawnConfig, spawn func(shim.Options) (*shim.Proc, error), sessionID string, opts CreateOpts) (ShimStopFunc, error) {
+func spawnUDSShim(cfg UDSSpawnConfig, spawn func(shim.Options) (*shim.Proc, error), sessionID string, opts CreateOpts) (ShimHandle, error) {
 	workspace, err := dlog.WorkspaceFromDirectory(opts.CWD)
 	if err != nil {
-		return nil, fmt.Errorf("server: resolve UDS shim workspace for %q: %w", opts.CWD, err)
+		return ShimHandle{}, fmt.Errorf("server: resolve UDS shim workspace for %q: %w", opts.CWD, err)
 	}
 	canonicalOpts := opts
 	canonicalOpts.CWD = workspace.Directory
 
 	target, err := cfg.Targets.BorrowWorkspaceRuntime(workspace, dlog.RuntimeShim)
 	if err != nil {
-		return nil, fmt.Errorf("server: open shim log target for workspace %q: %w", workspace.Directory, err)
+		return ShimHandle{}, fmt.Errorf("server: open shim log target for workspace %q: %w", workspace.Directory, err)
 	}
 	// THE FD CONTRACT IS DERIVED, not repeated: the ExtraFiles slice and the
 	// --log-fd value come from the same computation, so they cannot disagree,
@@ -132,7 +132,7 @@ func spawnUDSShim(cfg UDSSpawnConfig, spawn func(shim.Options) (*shim.Proc, erro
 	// a child holding a dead descriptor.
 	extraFiles, fdArgv, err := dlog.ChildLogBinding(target)
 	if err != nil {
-		return nil, fmt.Errorf("server: bind the shim log descriptor for workspace %q: %w", workspace.Directory, err)
+		return ShimHandle{}, fmt.Errorf("server: bind the shim log descriptor for workspace %q: %w", workspace.Directory, err)
 	}
 
 	argv := ShimUDSArgv(cfg.Node, cfg.Script, sessionID, cfg.ForceFake, canonicalOpts, cfg.ShimSocket)
@@ -161,7 +161,7 @@ func spawnUDSShim(cfg UDSSpawnConfig, spawn func(shim.Options) (*shim.Proc, erro
 		cfg.Event(dlog.LevelError, workspace, sessionID, "UDS shim spawn failed", map[string]any{
 			"error": spawnErr.Error(), "cwd": workspace.Directory,
 		})
-		return nil, spawnErr
+		return ShimHandle{}, spawnErr
 	}
 	spawned := SpawnedShim{SessionID: sessionID, Workspace: workspace, Proc: proc, LogTarget: target, Argv: argv}
 	if cfg.Spawned != nil {
@@ -180,7 +180,14 @@ func spawnUDSShim(cfg UDSSpawnConfig, spawn func(shim.Options) (*shim.Proc, erro
 	// pump unblocked, and it closes when the child's stdout does. cmd.Wait is
 	// not re-entrant, so this is the ONLY caller of it and every other waiter
 	// observes the exit through the Exited hook.
+	// The rendezvous a STOP completes on. It closes as the reaper's very last
+	// act, so "the shim was stopped" can mean "its exit has been accounted for"
+	// rather than "the kernel released its lock and the bookkeeping is
+	// somewhere behind us" — which is how one shim's exit came to be reported
+	// against the shim that replaced it.
+	reaped := make(chan struct{})
 	go func() {
+		defer close(reaped)
 		for range proc.Events() { //nolint:revive
 		}
 		werr := proc.Wait()
@@ -217,7 +224,7 @@ func spawnUDSShim(cfg UDSSpawnConfig, spawn func(shim.Options) (*shim.Proc, erro
 	// The DELIBERATE-STOP record, and the counterpart to the spawn record
 	// above: a shim death with one of these next to it was ordered, and a shim
 	// death without one was not.
-	return func(by ShimStop) error {
+	return ShimHandle{Reaped: reaped, Stop: func(by ShimStop) error {
 		cfg.Event(dlog.LevelInfo, workspace, sessionID, "stopping UDS shim (SIGTERM)", map[string]any{
 			"cwd": workspace.Directory, "pid": proc.Pid(), "pgid": proc.Pgid(),
 			"initiator": by.Initiator, "reason": by.Reason,
@@ -230,5 +237,5 @@ func spawnUDSShim(cfg UDSSpawnConfig, spawn func(shim.Options) (*shim.Proc, erro
 			return err
 		}
 		return nil
-	}, nil
+	}}, nil
 }
