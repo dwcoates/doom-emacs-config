@@ -188,9 +188,14 @@ func newHarnessWith(t *testing.T, extra Config) *harness {
 		SeqStore:          seqStore,
 		ClearCompactStore: seqStore,
 		TurnAccountings:   newTestTurnAccountingStore(),
-		DaemonVersion:     "test",
-		ProtocolVersion:   "1",
-		Logf:              logf,
+		// The idle sweep hibernates through the ONE transition, which refuses
+		// to sleep a session it cannot record. Wired here for the same reason
+		// main wires it: an unrecorded stop is a session the next daemon
+		// revives implicitly.
+		Hibernations:    &RegistryRegistrar{Reg: reg, Logf: logf},
+		DaemonVersion:   "test",
+		ProtocolVersion: "1",
+		Logf:            logf,
 	})
 	if err != nil {
 		t.Fatalf("sessioncontroller new: %v", err)
