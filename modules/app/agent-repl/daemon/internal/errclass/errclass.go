@@ -135,6 +135,26 @@ const (
 	// session that is not here, and a client that is shown a named failure can
 	// say so instead of rendering the raw sentence as an internal fault.
 	TypeQueueEntrySessionUnwired Type = "queue.entry_session_unwired"
+	// TypeQueueEntryKeepAliveHeld — a force aimed at a prompt held behind an
+	// in-flight cache keep-alive turn. Unlike a drain hold there is no
+	// force-through: the ping must finish so the daemon can rewind it out of
+	// the transcript before this prompt is submitted, and forcing would make
+	// the ping permanent context. The prompt is still cancellable, and it is
+	// delivered on its own the moment the ping ends.
+	TypeQueueEntryKeepAliveHeld Type = "queue.entry_keep_alive_held"
+	// TypeSessionHibernated — a prompt refused because the session is asleep
+	// and the user has not chosen a revival mode. It is the revival gate's
+	// name, and it is a NAMED refusal rather than an internal fault precisely
+	// because it is the expected answer for a hibernated workspace: the client
+	// renders the gate from it instead of an error card.
+	TypeSessionHibernated Type = "session.hibernated"
+	// TypeKeepAliveWindowUnclosed — the durable keep-alive window ledger
+	// refused to stamp a ping's end. It is a NAMED failure rather than a log
+	// line because an open window has no upper bound: every later item on the
+	// workspace is withheld from every rendering until the row is repaired, so
+	// the conversation silently stops advancing. Naming it is what turns a
+	// permanent blackout into something a human is told about.
+	TypeKeepAliveWindowUnclosed Type = "keep_alive.window_unclosed"
 	// TypeInternalUnclassified — the loud fallthrough. It carries the raw
 	// error text and is always logged; a silent fallthrough would let the
 	// vocabulary rot without anyone noticing.
@@ -244,6 +264,9 @@ var prose = map[Type]string{
 	TypeHistoryReplayTruncated:     "the history re-pull ended before it reached the live window",
 	TypeInterruptUndelivered:       "the stop could not be delivered",
 	TypeQueueEntrySessionUnwired:   "the queued prompt's session is not attached to this daemon, so it cannot be run yet",
+	TypeQueueEntryKeepAliveHeld:    "the queued prompt is waiting for a cache keep-alive response and cannot be forced ahead of it",
+	TypeSessionHibernated:          "the session is hibernated; choose how to revive it before sending prompts",
+	TypeKeepAliveWindowUnclosed:    "a cache keep-alive window could not be closed, so new conversation is being withheld until it is repaired",
 	TypeInternalUnclassified:       "the command failed",
 
 	// API — the SDK or the vendor refusing or concluding the work.
@@ -323,6 +346,14 @@ var (
 	// instead of falling through to internal.unclassified, which would log the
 	// same refusal a second time under a name that says nothing.
 	ErrQueueEntrySessionUnwired = errors.New("session-controller: the queued prompt's session is not wired to this daemon")
+	// ErrQueueEntryKeepAliveHeld anchors the keep-alive hold's force refusal.
+	// It is a sentinel for the same reason the one above is: an expected,
+	// ordinary refusal that reached a human as internal.unclassified would be
+	// logged twice under a name that says nothing about it.
+	ErrQueueEntryKeepAliveHeld = errors.New("session-controller: the queued prompt is held behind an in-flight cache keep-alive turn")
+	// ErrSessionHibernated anchors the revival gate's refusal, so a client can
+	// render the revival choice from a NAMED failure rather than parsing text.
+	ErrSessionHibernated = errors.New("session-controller: the session is hibernated")
 )
 
 // sentinelTypes is the ladder, as data rather than as a switch, so the
@@ -346,6 +377,8 @@ var sentinelTypes = []struct {
 	{ErrRepullTruncated, TypeHistoryReplayTruncated},
 	{ErrInterruptUndelivered, TypeInterruptUndelivered},
 	{ErrQueueEntrySessionUnwired, TypeQueueEntrySessionUnwired},
+	{ErrQueueEntryKeepAliveHeld, TypeQueueEntryKeepAliveHeld},
+	{ErrSessionHibernated, TypeSessionHibernated},
 }
 
 // Sentinel is the errors.Is ladder over the daemon's sentinel errors. It
@@ -613,6 +646,22 @@ func StartFailed(reason string) *frontendv1.SystemFailureItem {
 	}
 }
 
+// KeepAliveWindowUnclosed classifies a failure to stamp a keep-alive window's
+// end in the durable ledger.
+//
+// It is a system-failure CARD rather than a log line because of what an open
+// window means: it excludes every later conversation item on the workspace,
+// forever, from every rendering. The user's next prompt would appear to vanish.
+// The card is the only thing that tells them why.
+func KeepAliveWindowUnclosed(reason string) *frontendv1.SystemFailureItem {
+	return &frontendv1.SystemFailureItem{
+		ErrorClass:   frontendv1.ErrorClass_ERROR_CLASS_INTERNAL,
+		ErrorType:    string(TypeKeepAliveWindowUnclosed),
+		Message:      prose[TypeKeepAliveWindowUnclosed],
+		SourceDetail: reason,
+	}
+}
+
 // Degraded classifies a shim-reported DegradedState — the store-write
 // rejection path, whose reason is a StoreWriteAck error the shim wrapped.
 //
@@ -699,6 +748,9 @@ func AllTypes() []Type {
 		TypeHistoryReplayTruncated,
 		TypeInterruptUndelivered,
 		TypeQueueEntrySessionUnwired,
+		TypeQueueEntryKeepAliveHeld,
+		TypeSessionHibernated,
+		TypeKeepAliveWindowUnclosed,
 		TypeInternalUnclassified,
 		TypeAPIAuthenticationFailed,
 		TypeAPIBillingError,

@@ -46,6 +46,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/frontend"
+	"claude-repld/internal/keepalive"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -90,6 +91,11 @@ type Options struct {
 	// DefaultCoalesceWindow; negative disables coalescing entirely (every
 	// ticker update pushes at once), which is what most tests want.
 	CoalesceWindow time.Duration
+	// UncachedAlertTokens is the ContextCostAlert threshold: a turn whose
+	// uncached input exceeds it is reported as expensive. Zero takes
+	// keepalive.DefaultUncachedCostAlertTokens — a zero threshold would alert
+	// on literally every turn, which is the same as alerting on none.
+	UncachedAlertTokens int64
 }
 
 // Manager resolves and fans out per-workspace ProgressViews.
@@ -98,6 +104,10 @@ type Manager struct {
 	clock  func() int64
 	sched  Scheduler
 	window time.Duration
+
+	// uncachedAlertTokens is the ContextCostAlert threshold. Zero takes the
+	// shipped default rather than alerting on every turn.
+	uncachedAlertTokens int64
 
 	mu      sync.Mutex
 	views   map[string]*workspaceProgress
@@ -140,6 +150,13 @@ type workspaceProgress struct {
 	// It exists only to keep the canonicalization notice to one line per
 	// vendor conversation instead of one per event.
 	canonicalizedFrom string
+	// turnID and turnOrigin are the in-flight turn's attribution, carried from
+	// its TurnStarted so the cost alert can name the turn and say WHO asked for
+	// it. A CACHE_KEEP_ALIVE origin on an alert is the "keep-alive came back
+	// cold" alarm — the ping paid full freight, meaning the cache it was sent
+	// to refresh had already expired.
+	turnID     string
+	turnOrigin corev1.PromptOrigin
 }
 
 // New builds a Manager.
@@ -160,14 +177,19 @@ func New(opts Options) *Manager {
 	if window == 0 {
 		window = DefaultCoalesceWindow
 	}
+	alert := opts.UncachedAlertTokens
+	if alert <= 0 {
+		alert = keepalive.DefaultUncachedCostAlertTokens
+	}
 	return &Manager{
-		logf:   logf,
-		clock:  clock,
-		sched:  sched,
-		window: window,
-		views:  map[string]*workspaceProgress{},
-		subs:   map[int]chan *frontendv1.ProgressView{},
-		dirty:  map[string]struct{}{},
+		logf:                logf,
+		clock:               clock,
+		sched:               sched,
+		window:              window,
+		uncachedAlertTokens: alert,
+		views:               map[string]*workspaceProgress{},
+		subs:                map[int]chan *frontendv1.ProgressView{},
+		dirty:               map[string]struct{}{},
 	}
 }
 
@@ -418,6 +440,16 @@ func (m *Manager) Apply(workspace, sessionID string, ev *corev1.Event) error {
 		if m.openTurnLocked(wp, at) {
 			m.pushLocked(workspace, wp)
 		}
+		// THE ATTRIBUTION IS BOUND AFTER the open, which clears the previous
+		// turn's alert: binding first would have the new turn's identity sitting
+		// beside the old turn's cost for the width of one statement.
+		//
+		// It is bound on EVERY start, edge or not. A start that produced no edge
+		// (a turn beginning while another is still ending) is still the turn the
+		// next result belongs to, and leaving the previous turn's id here would
+		// misattribute that result's cost.
+		wp.turnID = p.TurnStarted.GetTurnId()
+		wp.turnOrigin = p.TurnStarted.GetPromptOrigin()
 	case *corev1.Event_TurnEnded:
 		m.closeTurnLocked(wp, p.TurnEnded)
 		m.pushLocked(workspace, wp)
@@ -514,6 +546,11 @@ func (m *Manager) applyStreamLocked(workspace string, wp *workspaceProgress, csm
 			inner.Status.GetStatus() == "compacting", atMs, inner.Status.GetStatus())
 	case *datav1.ClaudeStreamMessage_Assistant:
 		m.applyAssistantLocked(workspace, wp, inner.Assistant.GetUuid(), inner.Assistant.GetMessage())
+	case *datav1.ClaudeStreamMessage_Result:
+		// STRUCTURAL: the turn's own terminal accounting, and the one place the
+		// cost alert can be decided from a single authoritative figure rather
+		// than from a running sum.
+		m.applyResultCostLocked(workspace, wp, inner.Result, atMs)
 	case *datav1.ClaudeStreamMessage_HookStarted:
 		// STRUCTURAL: a hook is running. Its response closes the window.
 		m.setWindowLocked(workspace, wp, &wp.view.Hook, true, atMs, hookDetail(inner.HookStarted))
@@ -731,6 +768,51 @@ func (m *Manager) applyAssistantLocked(workspace string, wp *workspaceProgress, 
 	m.markDirtyLocked(workspace)
 }
 
+// applyResultCostLocked decides one turn's UNCACHED input cost and raises the
+// expensive-turn alert when it crosses the threshold.
+//
+// THE MEASURE IS input_tokens PLUS cache_creation_input_tokens, and the second
+// term is the whole point. The CLI marks nearly all input cacheable, so a
+// COLD prompt — a full context re-ingest, the most expensive thing that can
+// happen — surfaces as cache CREATION while raw input_tokens stays near zero.
+// Alerting on input_tokens alone would therefore fire on almost nothing and
+// stay silent for exactly the case it exists to catch.
+//
+// A CACHE_KEEP_ALIVE ORIGIN HERE IS THE SHARPEST SIGNAL THE FEATURE PRODUCES.
+// The ping is a dozen tokens of prompt; if it came back having paid for the
+// whole conversation, the cache it was sent to refresh had already expired and
+// the keep-alive is buying nothing. That is a fact about the policy's own
+// premise, so it is logged loudly rather than only rendered.
+func (m *Manager) applyResultCostLocked(workspace string, wp *workspaceProgress, result *datav1.ResultMessage, atMs int64) {
+	usage := result.GetUsage()
+	if usage == nil {
+		return
+	}
+	uncached := usage.GetInputTokens() + usage.GetCacheCreationInputTokens()
+	if uncached <= m.uncachedAlertTokens {
+		return
+	}
+	alert := &frontendv1.ContextCostAlert{
+		TurnId:              wp.turnID,
+		UncachedInputTokens: uncached,
+		ThresholdTokens:     m.uncachedAlertTokens,
+		AtMs:                atMs,
+		PromptOrigin:        wp.turnOrigin,
+	}
+	if proto.Equal(wp.view.ExpensiveTurn, alert) {
+		return
+	}
+	wp.view.ExpensiveTurn = alert
+	if wp.turnOrigin == corev1.PromptOrigin_PROMPT_ORIGIN_CACHE_KEEP_ALIVE {
+		m.logf("progress: CACHE KEEP-ALIVE CAME BACK COLD ws=%s turn_id=%s uncached_input_tokens=%d threshold=%d — the ping is a dozen tokens of prompt and it paid for the whole conversation, so the cache it was sent to refresh had already expired; the keep-alive bought nothing for this turn",
+			workspace, wp.turnID, uncached, m.uncachedAlertTokens)
+	} else {
+		m.logf("progress: EXPENSIVE TURN ws=%s turn_id=%s prompt_origin=%s uncached_input_tokens=%d threshold=%d — this turn re-ingested context rather than reading it from the prompt cache",
+			workspace, wp.turnID, wp.turnOrigin, uncached, m.uncachedAlertTokens)
+	}
+	m.pushLocked(workspace, wp)
+}
+
 // ---------------------------------------------------------------------------
 // Turn lifecycle
 // ---------------------------------------------------------------------------
@@ -751,6 +833,11 @@ func (m *Manager) openTurnLocked(wp *workspaceProgress, atMs int64) bool {
 	// The failure persists until the NEXT turn starts (design decision), so
 	// this is exactly where it clears.
 	wp.view.Failure = nil
+	// The expensive-turn alert persists on the same terms and for the same
+	// reason: it reports what the turn that just finished cost, and a new turn
+	// beginning is the moment that report stops being the news. Nothing else
+	// clears it — never a timer.
+	wp.view.ExpensiveTurn = nil
 	wp.view.Retrying = nil
 	wp.retryDetailRich = false
 	// The interrupt window persists until the NEXT turn starts, for the same

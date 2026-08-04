@@ -128,6 +128,15 @@ type TurnClaimSink interface {
 	ApplyTurnClaimBridge(ev *corev1.Event) error
 }
 
+// SessionRewoundSink consumes SessionRewound lineage evidence. It is separate
+// from TurnClaimSink for the reason that one is separate from StateSink: a
+// rewind's record must be able to close the claims of the turns it discarded,
+// and a sink that could also paint or render would be able to do more than
+// record.
+type SessionRewoundSink interface {
+	ApplySessionRewound(ev *corev1.Event, rewound *corev1.SessionRewound) error
+}
+
 // FrameSink consumes every non-lifecycle, non-degraded event: the data.v1
 // vendor payloads (via the Any), the ContentDelta / HeartbeatProgress /
 // MessageLatency ephemerals, and UnparsedEvent evidence. The stitch phase binds
@@ -219,9 +228,13 @@ type Config struct {
 	PermissionModes ModeStore
 
 	// Sinks and callbacks (all bound at stitch).
-	SeqStore        SeqStore
-	StateSink       StateSink
-	TurnClaims      TurnClaimSink
+	SeqStore   SeqStore
+	StateSink  StateSink
+	TurnClaims TurnClaimSink
+	// Rewinds consumes SessionRewound lineage. Nil makes the event a LOUD
+	// rejection rather than a silent fallthrough to the frame sink, where it
+	// would be indistinguishable from an unhandled payload.
+	Rewinds         SessionRewoundSink
 	FrameSink       FrameSink
 	Models          ModelCatalogSink
 	FileDiagnostics FileDiagnosticSink

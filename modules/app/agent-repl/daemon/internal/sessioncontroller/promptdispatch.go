@@ -117,6 +117,14 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 	if err := m.guardMergeLease(d.workspace, who, requestID, origin); err != nil {
 		return err
 	}
+	// THE REVIVAL GATE'S BACKSTOP, at the funnel every one of the prompt paths
+	// reaches — the immediate submit, the queue's drain, an interject's head
+	// jump, a merge's own submit, and anything added later. submitPromptAs asks
+	// first so a refused prompt never pays a bring-up; this is the one a new
+	// caller cannot forget to ask for (hibernation.go).
+	if err := m.guardHibernation(d.workspace, requestID, origin, who); err != nil {
+		return err
+	}
 	cmd := classifyPrompt(text)
 
 	// THE ACCEPTED EDGE AND ITS SYNCHRONOUS PUBLICATION, BEFORE THE SUBMIT.
@@ -158,8 +166,17 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 	// command and a purple bubble for a prompt nobody wrote. `echoes` implies
 	// `claimsTurn` by construction — an ordinary prompt is both — so the receipt
 	// below always sits inside a claimed turn.
+	// THE KEEP-ALIVE PING EARNS NO BUBBLE AND MINTS NO RECEIPT, for the reason
+	// `/model` does not: the user did not say it. It is conversation PLUMBING —
+	// the daemon refreshing a cache — and a purple bubble reading "respond with
+	// only a '.'" would claim a question the user never asked and would replay
+	// as one across every reconnect, since the receipt is durable.
+	//
+	// It DOES claim the turn. The shim really is occupied for the length of the
+	// ping, and a workspace that stayed green through it would be lying about a
+	// session that is busy — the same split `/model` makes.
 	claimsTurn := cmd.claimsTurn() && who != submitterMergeLeaseHolder
-	echoes := cmd.echoes() && who != submitterMergeLeaseHolder
+	echoes := cmd.echoes() && who != submitterMergeLeaseHolder && who != submitterKeepAlive
 
 	accepted := false
 	var turnBefore turnRecord

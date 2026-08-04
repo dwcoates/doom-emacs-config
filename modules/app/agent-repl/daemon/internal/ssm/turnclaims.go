@@ -411,6 +411,64 @@ func (m *Manager) SynthesizeTurnClose(workspace, claimantSessionID, cause string
 	return closed, nil
 }
 
+// TurnCloseCauseSupersededByRewind is the end_cause a claim carries when a
+// transcript rewind discarded the turn behind it. The turn ran and its history
+// is kept; what changed is that the conversation no longer contains it, so the
+// claim must not stay open waiting for an end that the retired seq space will
+// never deliver.
+const TurnCloseCauseSupersededByRewind = "superseded_by_rewind"
+
+// SupersedeTurnClaims closes the named turns' claims, attributing the close to
+// cause.
+//
+// IT REUSES THE LEDGER'S EXISTING VOCABULARY rather than adding a column. A
+// superseded turn is exactly what end_cause already describes: a claim the
+// daemon ended without a TurnEnded, because the turn behind it can no longer
+// produce one. `end_seq IS NULL` stays the ONE definition of an active claim,
+// so nothing downstream has to learn a second one — which is the same reason
+// synthesizeTurnEnds writes end_seq=0 rather than inventing a sentinel.
+//
+// An unknown or already-closed turn id is a NO-OP, not an error: a rewind can
+// legitimately name a ping whose claim the turn's own end already retired.
+func (m *Manager) SupersedeTurnClaims(workspace, claimantSessionID string, turnIDs []string, cause string) (superseded []string, err error) {
+	if len(turnIDs) == 0 {
+		return nil, nil
+	}
+	if cause == "" {
+		return nil, fmt.Errorf("ssm: refusing to supersede turn claims for workspace %q without a cause; an unattributed close is indistinguishable from a lost one", workspace)
+	}
+	tx, err := m.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("ssm: begin supersede turn claims for workspace %q: %w", workspace, err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, turnID := range turnIDs {
+		if turnID == "" {
+			continue
+		}
+		result, execErr := tx.Exec(`UPDATE turn_lifecycle_claim
+				SET end_seq=0, end_cause=?
+				WHERE workspace=? AND claimant_session_id=? AND turn_id=? AND end_seq IS NULL`,
+			cause, workspace, claimantSessionID, turnID)
+		if execErr != nil {
+			return nil, fmt.Errorf("ssm: supersede turn claim %q for workspace %q: %w", turnID, workspace, execErr)
+		}
+		changed, rowsErr := result.RowsAffected()
+		if rowsErr != nil {
+			return nil, fmt.Errorf("ssm: inspect superseded turn claim %q for workspace %q: %w", turnID, workspace, rowsErr)
+		}
+		if changed > 0 {
+			superseded = append(superseded, turnID)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("ssm: commit supersede turn claims for workspace %q: %w", workspace, err)
+	}
+	m.logf("ssm: turn claims SUPERSEDED workspace=%s claimant_session=%s requested=%d closed=%s cause=%s — the rewind discarded these turns from the conversation, so their claims are closed with the cause naming why rather than left waiting on a retired seq space",
+		workspace, claimantSessionID, len(turnIDs), formatClosedTurnIDs(superseded), cause)
+	return superseded, nil
+}
+
 // synthesizeTurnEnds ends every active claim held by claimantSessionID inside
 // tx, stamping cause so a later genuine `TurnEnded` for the same identity can be
 // recognized as already accounted for rather than read as a contradiction.
