@@ -170,14 +170,14 @@ func (w *shutdownWorld) bootRecordingStops(t *testing.T) *stopCauseBoot {
 		t.Fatalf("build file diagnostic persister: %v", err)
 	}
 
-	udsSpawn := func(sessionID string, opts server.CreateOpts) (server.ShimStopFunc, error) {
+	udsSpawn := func(sessionID string, opts server.CreateOpts) (server.ShimHandle, error) {
 		workspace, err := dlog.WorkspaceFromDirectory(opts.CWD)
 		if err != nil {
-			return nil, err
+			return server.ShimHandle{}, err
 		}
 		shimTarget, err := targets.OpenWorkspaceRuntime(workspace, dlog.RuntimeShim)
 		if err != nil {
-			return nil, err
+			return server.ShimHandle{}, err
 		}
 		canonicalOpts := opts
 		canonicalOpts.CWD = workspace.Directory
@@ -190,7 +190,7 @@ func (w *shutdownWorld) bootRecordingStops(t *testing.T) *stopCauseBoot {
 			Logger:     testShimLogger{t: t},
 		})
 		if spawnErr != nil {
-			return nil, spawnErr
+			return server.ShimHandle{}, spawnErr
 		}
 		tracked := &trackedShim{workspace: workspace.Directory, proc: proc, exited: make(chan struct{})}
 		b.shimsMu.Lock()
@@ -212,9 +212,12 @@ func (w *shutdownWorld) bootRecordingStops(t *testing.T) *stopCauseBoot {
 		// the attribution is recorded against the workspace before it is passed
 		// on, so the assertion reads the record the daemon composed rather than a
 		// rendering of it.
-		return func(by server.ShimStop) error {
-			sc.record(workspace.Directory, by)
-			return proc.Terminate(by)
+		return server.ShimHandle{
+			Reaped: tracked.exited,
+			Stop: func(by server.ShimStop) error {
+				sc.record(workspace.Directory, by)
+				return proc.Terminate(by)
+			},
 		}, nil
 	}
 

@@ -69,7 +69,7 @@ func TestShimSpawnerDoesNotSpawnWhenTheShimIsConnected(t *testing.T) {
 	sp := NewShimSpawner(reg,
 		func(string) (bool, error) { return true, nil },
 		nil,
-		func(string, CreateOpts) (ShimStopFunc, error) { spawned++; return nil, nil },
+		func(string, CreateOpts) (ShimHandle, error) { spawned++; return ShimHandle{}, nil },
 		nil)
 
 	// Act
@@ -91,7 +91,7 @@ func TestShimSpawnerRefusesToGuessWhenConnectionProbeFails(t *testing.T) {
 	sp := NewShimSpawner(reg,
 		func(string) (bool, error) { return false, errors.New("probe unavailable") },
 		nil,
-		func(string, CreateOpts) (ShimStopFunc, error) { spawned++; return nil, nil },
+		func(string, CreateOpts) (ShimHandle, error) { spawned++; return ShimHandle{}, nil },
 		nil)
 
 	// Act.
@@ -122,9 +122,9 @@ func TestShimSpawnerSpawnsFromRegistryRecordWhenNothingIsAlive(t *testing.T) {
 	sp := NewShimSpawner(reg,
 		func(string) (bool, error) { return false, nil },
 		nil,
-		func(_ string, opts CreateOpts) (ShimStopFunc, error) {
+		func(_ string, opts CreateOpts) (ShimHandle, error) {
 			gotOpts = opts
-			return nil, nil
+			return ShimHandle{}, nil
 		},
 		nil)
 
@@ -153,9 +153,9 @@ func TestShimSpawnerTreatsALegacyPlaceholderRecordLikeAnEmptyModel(t *testing.T)
 	sp := NewShimSpawner(reg,
 		func(string) (bool, error) { return false, nil },
 		nil,
-		func(_ string, opts CreateOpts) (ShimStopFunc, error) {
+		func(_ string, opts CreateOpts) (ShimHandle, error) {
 			gotOpts = opts
-			return nil, nil
+			return ShimHandle{}, nil
 		},
 		nil)
 
@@ -178,7 +178,7 @@ func TestShimSpawnerErrorsWhenNoRecordToSpawnFrom(t *testing.T) {
 	sp := NewShimSpawner(reg,
 		func(string) (bool, error) { return false, nil },
 		nil,
-		func(string, CreateOpts) (ShimStopFunc, error) { return nil, nil },
+		func(string, CreateOpts) (ShimHandle, error) { return ShimHandle{}, nil },
 		nil)
 
 	// Act
@@ -433,7 +433,7 @@ func TestStopShimPrefersItsOwnProcessHandle(t *testing.T) {
 	// No processes and no lock files here: the exit wait has nothing real to
 	// observe, so it is stubbed out rather than made to time out.
 	s.awaitStopped = func(string) error { return nil }
-	s.stops["s1"] = func(ShimStop) error { stopped = true; return nil }
+	s.handles["s1"] = ShimHandle{Stop: func(ShimStop) error { stopped = true; return nil }}
 	s.signal = func(pid int, _ syscall.Signal) error { signalled = append(signalled, pid); return nil }
 
 	// Act.
@@ -460,7 +460,7 @@ func TestStopShimAttributesTheStopItCommands(t *testing.T) {
 	var got ShimStop
 	s := NewShimSpawner(nil, nil, nil, nil, nil)
 	s.awaitStopped = func(string) error { return nil }
-	s.stops["s1"] = func(by ShimStop) error { got = by; return nil }
+	s.handles["s1"] = ShimHandle{Stop: func(by ShimStop) error { got = by; return nil }}
 
 	// Act
 	if err := s.StopShim("s1", 0, unitTestStop); err != nil {
@@ -483,7 +483,7 @@ func TestStopShimRefusesAnUnattributedStop(t *testing.T) {
 	var signalled []int
 	s := NewShimSpawner(nil, nil, nil, nil, nil)
 	s.awaitStopped = func(string) error { return nil }
-	s.stops["s1"] = func(ShimStop) error { stopped = true; return nil }
+	s.handles["s1"] = ShimHandle{Stop: func(ShimStop) error { stopped = true; return nil }}
 	s.signal = func(pid int, _ syscall.Signal) error { signalled = append(signalled, pid); return nil }
 
 	// Act
@@ -496,7 +496,7 @@ func TestStopShimRefusesAnUnattributedStop(t *testing.T) {
 	if stopped || len(signalled) != 0 {
 		t.Fatalf("a refused stop still acted: stopped=%v signalled=%v", stopped, signalled)
 	}
-	if _, retained := s.stops["s1"]; !retained {
+	if _, retained := s.handles["s1"]; !retained {
 		t.Fatal("a refused stop consumed the process handle, so the session can never be stopped again")
 	}
 }
@@ -572,7 +572,7 @@ func TestStopShimWaitsForTheShimToActuallyExit(t *testing.T) {
 	waited := ""
 	s := NewShimSpawner(nil, nil, nil, nil, nil)
 	s.awaitStopped = func(sessionID string) error { waited = sessionID; return nil }
-	s.stops["s1"] = func(ShimStop) error { return nil }
+	s.handles["s1"] = ShimHandle{Stop: func(ShimStop) error { return nil }}
 
 	// Act.
 	if err := s.StopShim("s1", 0, unitTestStop); err != nil {
@@ -591,7 +591,7 @@ func TestStopShimFailsBeforeMutationWithoutAnExitObserver(t *testing.T) {
 	stopped := false
 	s := NewShimSpawner(nil, nil, nil, nil, nil)
 	s.awaitStopped = nil
-	s.stops["s1"] = func(ShimStop) error { stopped = true; return nil }
+	s.handles["s1"] = ShimHandle{Stop: func(ShimStop) error { stopped = true; return nil }}
 
 	// Act.
 	err := s.StopShim("s1", 0, unitTestStop)
@@ -603,7 +603,7 @@ func TestStopShimFailsBeforeMutationWithoutAnExitObserver(t *testing.T) {
 	if stopped {
 		t.Fatal("stop handle ran before the exit-observer precondition failed")
 	}
-	if _, retained := s.stops["s1"]; !retained {
+	if _, retained := s.handles["s1"]; !retained {
 		t.Fatal("stop handle was consumed before the exit-observer precondition failed")
 	}
 }
@@ -618,7 +618,7 @@ func TestStopShimEvictsAParkedReconnectAfterProcessExit(t *testing.T) {
 			return true
 		}, nil, nil)
 	s.awaitStopped = func(string) error { return nil }
-	s.stops["s1"] = func(ShimStop) error { return nil }
+	s.handles["s1"] = ShimHandle{Stop: func(ShimStop) error { return nil }}
 
 	// Act.
 	if err := s.StopShim("s1", 0, unitTestStop); err != nil {
@@ -637,7 +637,7 @@ func TestStopShimDoesNotEvictParkedStateBeforeProcessExitIsProven(t *testing.T) 
 	s := NewShimSpawner(nil, nil,
 		func(string, string) bool { evicted = true; return true }, nil, nil)
 	s.awaitStopped = func(string) error { return errors.New("still alive") }
-	s.stops["s1"] = func(ShimStop) error { return nil }
+	s.handles["s1"] = ShimHandle{Stop: func(ShimStop) error { return nil }}
 
 	// Act.
 	err := s.StopShim("s1", 0, unitTestStop)
@@ -658,11 +658,41 @@ func TestStopShimFailsWhenTheShimNeverExits(t *testing.T) {
 	// Arrange.
 	s := NewShimSpawner(nil, nil, nil, nil, nil)
 	s.awaitStopped = func(string) error { return errors.New("still holds the session lock") }
-	s.stops["s1"] = func(ShimStop) error { return nil }
+	s.handles["s1"] = ShimHandle{Stop: func(ShimStop) error { return nil }}
 
 	// Act / Assert.
 	if err := s.StopShim("s1", 0, unitTestStop); err == nil {
 		t.Fatal("a shim that ignored SIGTERM reported a successful stop")
+	}
+}
+
+// THE STOP IS NOT OVER UNTIL THE REAPER IS. The lock wait ends in the kernel,
+// at the dying process's last breath; the reaper's hooks run afterwards, here.
+// A stop that returned on the first of those let a respawn start while shim 1's
+// exit was still being reported, which is how one shim's death gets recorded
+// against the shim that replaced it.
+func TestStopShimReturnsOnlyAfterTheReaperCompletes(t *testing.T) {
+	// Arrange — a deliberately slow reaper: this channel is never closed, so
+	// the ONLY way the send below can complete is StopShim actually waiting on
+	// it. A rendezvous, not a timing assumption.
+	reaped := make(chan struct{})
+	stopped := make(chan struct{})
+	s := NewShimSpawner(nil, nil, nil, nil, nil)
+	s.awaitStopped = func(string) error { return nil }
+	s.handles["s1"] = ShimHandle{
+		Stop:   func(ShimStop) error { close(stopped); return nil },
+		Reaped: reaped,
+	}
+
+	// Act.
+	done := make(chan error, 1)
+	go func() { done <- s.StopShim("s1", 0, unitTestStop) }()
+	<-stopped            // The SIGTERM has been delivered.
+	reaped <- struct{}{} // The reaper finishes — and completes only because StopShim is waiting for it.
+
+	// Assert.
+	if err := <-done; err != nil {
+		t.Fatalf("StopShim: %v", err)
 	}
 }
 
@@ -672,7 +702,7 @@ func TestStopShimDoesNotEvictWhenItsOwnStopHandleFails(t *testing.T) {
 	evicted := false
 	s := NewShimSpawner(nil, nil, func(string, string) bool { evicted = true; return true }, nil, nil)
 	s.awaitStopped = func(string) error { t.Fatal("exit wait ran after stop failure"); return nil }
-	s.stops["s1"] = func(ShimStop) error { return errors.New("SIGTERM delivery failed") }
+	s.handles["s1"] = ShimHandle{Stop: func(ShimStop) error { return errors.New("SIGTERM delivery failed") }}
 
 	err := s.StopShim("s1", 0, unitTestStop)
 
