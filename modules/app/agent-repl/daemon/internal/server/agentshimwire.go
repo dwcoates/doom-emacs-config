@@ -107,6 +107,10 @@ type AgentShimConfig struct {
 	// ClientLogs persists canonical browser records to the webapp workspace
 	// target. A missing writer makes that command fail loudly.
 	ClientLogs ClientLogWriter
+	// LogTargets releases a closed workspace's log descriptors, binding their
+	// lifetime to the workspace's rather than to the daemon's. Nil retains
+	// them, which only a harness with no target manager should do.
+	LogTargets WorkspaceLogTargetEvictor
 	// MergeLease is the shim exclusivity claim merge.Coordinator holds across
 	// every merge it drives. Required: without it a cherry-pick would run into
 	// a session the user is still prompting, so an unbound lease is a broken
@@ -500,6 +504,7 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 			Interrupt:        InterruptGateConfig{Turns: cfg.Turns, LiveTasks: cfg.Progress},
 			EstablishTimeout: cfg.EstablishTimeout,
 			Resumes:          cfg.Resumes,
+			LogTargets:       cfg.LogTargets,
 		},
 	)
 	if err != nil {
