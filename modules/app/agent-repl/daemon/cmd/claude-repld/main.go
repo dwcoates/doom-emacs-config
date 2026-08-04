@@ -582,9 +582,9 @@ func main() {
 			}
 			return rec.ClaudeSessionID, true
 		},
-		DaemonVersion: daemonVersion,
-		ProtocolVersion:   shimProtocolVersion,
-		Logf:              legacyLog,
+		DaemonVersion:   daemonVersion,
+		ProtocolVersion: shimProtocolVersion,
+		Logf:            legacyLog,
 		// The prompt queue's classifier (E4). A queued prompt is judged by a
 		// cheap headless run under the SESSION's own account, so the
 		// classification cannot land on a different account's quota or config.

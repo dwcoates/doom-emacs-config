@@ -321,7 +321,7 @@ func New(cfg Config) *Server {
 		idleTimeout:     cfg.IdleTimeout,
 		idleSweepTicks:  cfg.IdleSweepTicks,
 		keepAlive:       cfg.KeepAlive,
-		stopped: make(chan struct{}),
+		stopped:         make(chan struct{}),
 		upgrader: websocket.Upgrader{
 			// The daemon is a local-loopback developer tool; the Emacs
 			// xwidget origin is file-/app-scoped, so origin checks are
