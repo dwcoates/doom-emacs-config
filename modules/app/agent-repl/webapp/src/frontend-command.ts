@@ -155,6 +155,35 @@ export interface QueueCancelBody {
   entryId: string;
 }
 
+/**
+ * HibernateWorkspaceCmd — put this workspace's settled session to sleep now.
+ *
+ * Deliberately empty: the workspace is the envelope's, and there is nothing
+ * else to say. The daemon REFUSES it while a turn is live or the merge lease
+ * is held, and that refusal arrives as an ordinary rejected `CommandAck` —
+ * the webapp never pre-judges settledness, which it cannot resolve.
+ */
+export interface HibernateWorkspaceBody {
+  case: "hibernateWorkspace";
+}
+
+/**
+ * ReviveSessionCmd — the user's revival decision for a hibernated workspace.
+ *
+ * The mode is a ONEOF of empty messages on the wire, so "no decision" is
+ * unrepresentable; it is modeled here as a closed union for the same reason,
+ * and a caller cannot send a revive without choosing.
+ */
+export interface ReviveSessionBody {
+  case: "reviveSession";
+  /**
+   * `compactFirst`: compact before accepting any prompt, paying the full
+   * -context cost once. `direct`: resume as-is, the deliberate "I know it's
+   * big" path.
+   */
+  mode: "compactFirst" | "direct";
+}
+
 export type FrontendCommandBody =
   | SubmitPromptBody
   | InterruptBody
@@ -166,7 +195,9 @@ export type FrontendCommandBody =
   | ClientLogBody
   | QueueForceBody
   | QueueAcceptBody
-  | QueueCancelBody;
+  | QueueCancelBody
+  | HibernateWorkspaceBody
+  | ReviveSessionBody;
 
 /** The command envelope: correlation id + workspace + exactly one command arm. */
 export interface FrontendCommand {
@@ -195,6 +226,8 @@ export const ARM_KEY: Record<FrontendCommandBody["case"], string> = {
   queueForce: "queueForce",
   queueAccept: "queueAccept",
   queueCancel: "queueCancel",
+  hibernateWorkspace: "hibernateWorkspace",
+  reviveSession: "reviveSession",
 };
 
 /** Build the nested protojson command message for one body arm. */
@@ -245,6 +278,15 @@ function encodeBody(b: FrontendCommandBody): Record<string, unknown> {
     case "queueAccept":
     case "queueCancel":
       return { entryId: b.entryId };
+    case "hibernateWorkspace":
+      // Empty message: the workspace rides the envelope, and there is no
+      // second thing to say. `{}` is the canonical protojson for it.
+      return {};
+    case "reviveSession":
+      // The oneof arm's own value is an empty message, so the arm KEY is the
+      // whole decision — which is exactly why the contract made it a oneof
+      // rather than a bool.
+      return { [b.mode]: {} };
   }
 }
 

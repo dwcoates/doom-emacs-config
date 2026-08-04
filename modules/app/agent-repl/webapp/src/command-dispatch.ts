@@ -289,6 +289,27 @@ export class CommandDispatcher {
     return this.dispatch(workspace, { case: "queueCancel", entryId });
   }
 
+  /**
+   * Put this workspace's session to sleep now.
+   *
+   * Ack-correlated like every other operation, and the rejection matters more
+   * here than most: the daemon refuses a hibernate while a turn is live or the
+   * merge lease is held, and that refusal is the ONLY thing that tells the user
+   * why the workspace they asked to sleep is still awake. It rides the ordinary
+   * `onFailure` path, so it lands as a classified card rather than a silence.
+   */
+  hibernateWorkspace(workspace: string): Promise<void> {
+    return this.dispatch(workspace, { case: "hibernateWorkspace" });
+  }
+
+  /**
+   * Answer the revival gate. Exactly one mode, because the wire's oneof leaves
+   * "no decision" unrepresentable and this signature does too.
+   */
+  reviveSession(workspace: string, mode: "compactFirst" | "direct"): Promise<void> {
+    return this.dispatch(workspace, { case: "reviveSession", mode });
+  }
+
   private dispatch(workspace: string, body: FrontendCommandBody): Promise<void> {
     const requestId = this.newId();
     log("info", "command dispatcher dispatching acknowledgement-correlated command", {
