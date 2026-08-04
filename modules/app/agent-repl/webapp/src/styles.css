@@ -2833,6 +2833,27 @@ pre {
 .pfooter-merge-note.ok { color: var(--muted); }
 .pfooter-merge-note.error { color: var(--err); }
 
+/* The expensive-turn alert (progress-footer.ts `expensiveTurnRowHtml`): a
+   turn whose UNCACHED input crossed the daemon's threshold. It sits beside
+   the classified-failure row, shares its shape and its next-turn lifetime,
+   and is RED because it reports money already spent that the user would have
+   wanted to prevent. */
+.pfooter-expensive-turn {
+  color: var(--err);
+  font-size: 0.74rem;
+  border-top: 1px dashed var(--border);
+  padding: 4px 10px 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+/* A keep-alive that came back cold is the LOUDER of the two readings: the
+   ping existed solely to keep the cache warm, so it bought nothing at all.
+   Bolded rather than given a hue of its own — it is the same alarm, one step
+   worse, and a sixth color would say it is a different kind of thing. */
+.pfooter-expensive-turn.cold-keep-alive { font-weight: 700; }
+
 .pfooter-error.failure-internal { color: var(--init); }
 .pfooter-error.failure-api { color: var(--blocked); }
 .pfooter-error.addressable { cursor: pointer; }
