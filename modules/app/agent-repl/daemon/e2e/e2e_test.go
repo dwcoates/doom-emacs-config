@@ -870,7 +870,20 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 	if err != nil {
 		t.Fatalf("build file diagnostic persister: %v", err)
 	}
+	// THE HARNESS'S ONE CLOCK, hoisted above the controller because the gate
+	// that re-validates an idle sweep's decision lives in the session
+	// controller and the sweep itself reads server.Config.Now. Mirrors the
+	// daemon's own single-authority wiring (cmd/claude-repld/main.go).
+	var clock *testClock
+	var nowFn func() time.Time
+	var nowMsFn func() int64
+	if tuning.clock {
+		clock = newTestClock()
+		nowFn = clock.now
+		nowMsFn = func() int64 { return clock.now().UnixMilli() }
+	}
 	controller, err := sessioncontroller.New(sessioncontroller.Config{
+		Now:               nowMsFn,
 		Push:              forwarder,
 		SSM:               ssmMgr,
 		Progress:          progressMgr,
@@ -972,12 +985,6 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 	var sweepTicks chan time.Time
 	if tuning.idleSweeper {
 		sweepTicks = make(chan time.Time)
-	}
-	var clock *testClock
-	var nowFn func() time.Time
-	if tuning.clock {
-		clock = newTestClock()
-		nowFn = clock.now
 	}
 	srv := server.New(server.Config{
 		DaemonVersion:  "0.1.0-e2e",
