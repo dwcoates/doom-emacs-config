@@ -2911,6 +2911,85 @@ pre {
 /* An idle lease pays no layout at all. */
 #drain-banner:empty { display: none; }
 
+/* --- The revival gate (hibernation.ts) -----------------------------------
+   The blocking card a hibernated session shows instead of a live composer.
+   TEAL, per the module color contract: a hibernated session is the canonical
+   "nothing is wired, and nothing is wrong" — we SIGTERMed it on purpose. Red
+   would say the session died and blue would say the local substrate broke;
+   both are the conflation teal exists to correct.
+
+   It is a filled card rather than an outlined banner because, unlike the two
+   banners above it, it is not an announcement to read past — it is the only
+   interaction available until it is answered. */
+#revival-gate {
+  background: color-mix(in srgb, var(--hibernated) 12%, var(--bg));
+  border: 1px solid var(--hibernated);
+  border-radius: 8px;
+  padding: 0.6rem 0.85rem;
+  margin: 0.35rem 0.75rem;
+  font-size: 0.85rem;
+  color: var(--fg);
+}
+/* An awake session pays no layout for a gate it does not carry. */
+#revival-gate:empty { display: none; }
+.hibernation-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+.hibernation-heading { font-weight: 700; color: var(--hibernated); }
+.hibernation-since {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+/* WHY it is asleep, in the daemon's own terms. It leads because it is the
+   fact that decides which of the two buttons below is the right one. */
+.hibernation-cause { margin-top: 0.25rem; }
+.hibernation-choice {
+  margin-top: 0.45rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.hibernation-option { color: var(--muted); font-size: 0.8rem; }
+/* The direct-resume line carries a COST, so it is not muted into the same
+   grey as the compact line beside it — the two options must not read as
+   equally weighted when one of them is paid for on every later turn. */
+.hibernation-option.warn { color: var(--info-tokens); }
+.hibernation-actions {
+  margin-top: 0.55rem;
+  display: flex;
+  gap: 0.5rem;
+}
+.hibernation-actions button {
+  font: inherit;
+  padding: 0.25rem 0.7rem;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid var(--hibernated);
+  background: var(--bg);
+  color: var(--fg);
+}
+/* The cheaper path is the filled one. The costlier path stays outlined
+   rather than being disabled or hidden: it is a legitimate deliberate
+   choice, and the UI's job is to make it deliberate, not unavailable. */
+.hibernation-actions button.hibernation-compact {
+  background: var(--hibernated);
+  color: var(--bg);
+  font-weight: 700;
+}
+.hibernation-actions button.hibernation-direct { border-color: var(--info-tokens); }
+/* A decision in flight REPLACES the buttons rather than greying them, so a
+   second click on the other mode is not on offer while the first is pending. */
+.hibernation-pending {
+  margin-top: 0.55rem;
+  color: var(--muted);
+  font-style: italic;
+}
+/* The composer's own one-line reason, sharing the merge gate's slot and its
+   muted, non-alarming tone: a hibernated session is deliberate and benign. */
+#merge-gate-notice .hibernation-gate-text { display: block; }
 .drain-mark {
   flex: 0 0 auto;
   color: var(--merge-border);
