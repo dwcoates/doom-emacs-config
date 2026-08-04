@@ -413,6 +413,11 @@ type consumer struct {
 	// A compact-first revival waits on it before it will accept prompts.
 	// Assigned after construction, like onVendorSessionID.
 	onContextCompacted func()
+	// contextCompactedToken identifies WHICH revival installed the waiter
+	// above. Funcs are not comparable, so a disarm has no other way to tell
+	// its own waiter from a later one, and clearing whatever it happens to
+	// find would retire a revival that is still waiting.
+	contextCompactedToken *struct{}
 	// keepAliveWindows is the durable ledger the keep-alive exclusion reads
 	// (keepaliveexclude.go). Nil is the exclusion OFF.
 	keepAliveWindows KeepAliveWindowLedger

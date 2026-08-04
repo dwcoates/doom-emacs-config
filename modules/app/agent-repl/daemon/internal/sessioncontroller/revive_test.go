@@ -176,6 +176,119 @@ func TestHibernateWorkspaceRecordsTheForcedCause(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// The revival claim
+// ---------------------------------------------------------------------------
+
+// THE EXCLUSIVITY CLAIM. Revival used to be a check-then-act with no claim at
+// all: two ReviveSessionCmds both read a hibernated session, both brought it up
+// and both submitted `/compact` under the SAME request id.
+func TestReviveSessionRefusesAConcurrentRevival(t *testing.T) {
+	// Arrange — the claim a revival already in flight would be holding.
+	m, _, _ := reviveRig(t, registry.HibernationCauseIdleCutoff)
+	release, _, err := m.claimRevival("ws", "s1")
+	if err != nil {
+		t.Fatalf("claimRevival: %v", err)
+	}
+	defer release()
+
+	// Act.
+	err = m.ReviveSession(context.Background(), "ws", ReviveModeDirect)
+
+	// Assert.
+	if !errors.Is(err, ErrRevivalInFlight) {
+		t.Fatalf("ReviveSession while another is in flight = %v, want ErrRevivalInFlight", err)
+	}
+}
+
+// THE REFUSED REVIVAL CHANGES NOTHING. The gate the second command was
+// answering must still be standing, or the user would be left with an ungated
+// session that no revival actually completed.
+func TestReviveSessionRefusedByTheClaimLeavesTheGateStanding(t *testing.T) {
+	// Arrange.
+	m, _, hib := reviveRig(t, registry.HibernationCauseIdleCutoff)
+	release, _, err := m.claimRevival("ws", "s1")
+	if err != nil {
+		t.Fatalf("claimRevival: %v", err)
+	}
+	defer release()
+
+	// Act.
+	_ = m.ReviveSession(context.Background(), "ws", ReviveModeDirect)
+
+	// Assert.
+	detail, _ := hib.HibernationOf("s1")
+	if detail.Cause == "" {
+		t.Fatal("a revival refused by the claim cleared the hibernation; the gate must still stand")
+	}
+}
+
+// THE CLAIM IS RELEASED. An exclusivity claim that outlived its operation would
+// make the workspace permanently un-revivable, which is a worse failure than
+// the double-submit it prevents.
+func TestReviveSessionReleasesTheClaim(t *testing.T) {
+	// Arrange.
+	m, _, _ := reviveRig(t, registry.HibernationCauseIdleCutoff)
+	if err := m.ReviveSession(context.Background(), "ws", ReviveModeDirect); err != nil {
+		t.Fatalf("ReviveSession: %v", err)
+	}
+
+	// Act.
+	release, _, err := m.claimRevival("ws", "s1")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("claimRevival after a completed revival = %v, want the claim free", err)
+	}
+	release()
+}
+
+// A SECOND ARM IS A LOUD REFUSAL, not an overwrite. The claim above makes this
+// unreachable; it is kept as the fail-hard detection, because overwriting would
+// strand the first revival on a channel nothing will ever close.
+func TestArmCompactionWaitRefusesToOverwriteAnExistingWaiter(t *testing.T) {
+	// Arrange.
+	m, _, _ := reviveRig(t, registry.HibernationCauseIdleCutoff)
+	m.mu.Lock()
+	d := m.byWS["ws"]
+	m.mu.Unlock()
+	if _, _, err := m.armCompactionWait(d); err != nil {
+		t.Fatalf("first armCompactionWait: %v", err)
+	}
+
+	// Act.
+	_, _, err := m.armCompactionWait(d)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("a second armCompactionWait = nil, want a refusal; overwriting strands the revival that owns the first waiter")
+	}
+}
+
+// THE DISARM RETIRES THE WAITER, so a later revival of the same session can arm
+// its own. A refusal that never cleared would make the first compact-first
+// revival the only one this controller could ever serve.
+func TestArmCompactionWaitDisarmFreesTheSlot(t *testing.T) {
+	// Arrange.
+	m, _, _ := reviveRig(t, registry.HibernationCauseIdleCutoff)
+	m.mu.Lock()
+	d := m.byWS["ws"]
+	m.mu.Unlock()
+	_, disarm, err := m.armCompactionWait(d)
+	if err != nil {
+		t.Fatalf("first armCompactionWait: %v", err)
+	}
+	disarm()
+
+	// Act.
+	_, _, err = m.armCompactionWait(d)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("armCompactionWait after a disarm = %v, want the slot free", err)
+	}
+}
+
 // awaitCompactionWaiter blocks until the revival has armed its compaction wait
 // and returns the func that fires the completion signal.
 //

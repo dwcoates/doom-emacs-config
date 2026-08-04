@@ -389,7 +389,12 @@ type Manager struct {
 	// transition holds (hibernation.go). It is what makes two racing causes
 	// produce one transition and one durable account instead of two.
 	hibernating map[string]bool
-	lastCSID    map[string]string // session id -> last-persisted claude session uuid
+	// reviving is the exclusive per-workspace claim one revival holds
+	// (revive.go). It is hibernation's claim mirrored: without it two
+	// concurrent ReviveSessionCmds both submit `/compact` under one request id
+	// and the second overwrites the first's completion waiter.
+	reviving map[string]bool
+	lastCSID map[string]string // session id -> last-persisted claude session uuid
 	// shimPID is the pid each session's shim announced on its ShimHello. It is
 	// the ONLY way to stop a shim this daemon did not spawn, and it is kept in
 	// memory rather than persisted deliberately: it is trustworthy exactly

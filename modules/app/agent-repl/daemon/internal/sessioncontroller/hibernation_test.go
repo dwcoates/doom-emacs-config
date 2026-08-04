@@ -59,6 +59,13 @@ func (f *fakeHibernations) TurnEndObserved(sessionID string, atMs int64) {
 	}
 }
 
+func (f *fakeHibernations) LastTurnEndOf(sessionID string) (int64, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	atMs, ok := f.turnEnd[sessionID]
+	return atMs, ok
+}
+
 func (f *fakeHibernations) setAsleep(sessionID string, detail registry.HibernationDetail) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -139,6 +146,128 @@ func TestHibernateWithCausePersistsEachCausesEvidence(t *testing.T) {
 				t.Fatalf("persisted detail = %+v, want the cause's own evidence %+v", got, tc.account)
 			}
 		})
+	}
+}
+
+// THE STALE-SNAPSHOT REFUSAL. The sweeper decides on a registry snapshot; a
+// session that finished a turn between that snapshot and the claim is active,
+// and the claim's own fresh read is what refuses the sleep.
+func TestHibernateWithCauseRefusesAStaleAutomaticDecision(t *testing.T) {
+	// Arrange — the decision was taken against a one-hour TTL, but the durable
+	// record now says a turn ended one minute ago.
+	m, _, hib := newHibernationRig(t)
+	const nowMs = int64(10_000_000_000)
+	m.now = func() int64 { return nowMs }
+	hib.TurnEndObserved("s1", nowMs-60_000)
+
+	// Act.
+	err := m.HibernateWithCause("ws", registry.HibernationDetail{
+		Cause: registry.HibernationCauseCacheExpired, TTLMs: 3_600_000, ElapsedMs: 3_700_000,
+	})
+
+	// Assert.
+	if !errors.Is(err, ErrHibernationNoLongerIdle) {
+		t.Fatalf("HibernateWithCause on a session that has since worked = %v, want ErrHibernationNoLongerIdle", err)
+	}
+}
+
+// NOTHING IS PERSISTED BY THE REFUSAL. A durable sleep written for a session
+// that had just worked is the exact outcome the re-read exists to prevent, so
+// the record must be untouched.
+func TestHibernateWithCauseWritesNothingOnAStaleDecision(t *testing.T) {
+	// Arrange.
+	m, _, hib := newHibernationRig(t)
+	const nowMs = int64(10_000_000_000)
+	m.now = func() int64 { return nowMs }
+	hib.TurnEndObserved("s1", nowMs-60_000)
+
+	// Act.
+	_ = m.HibernateWithCause("ws", registry.HibernationDetail{
+		Cause: registry.HibernationCauseIdleCutoff, CutoffMs: 21_600_000,
+	})
+
+	// Assert.
+	if got := hib.writeCount(); got != 0 {
+		t.Fatalf("hibernation writes = %d, want 0; a refused transition must leave the record exactly as it found it", got)
+	}
+}
+
+// THE ACCOUNT COMES FROM THE FRESH READ. A sleep that really is due still
+// records the elapsed measured at claim time, not the sweep's older figure,
+// so the revival gate reports what was true when the session was stopped.
+func TestHibernateWithCauseRecordsTheFreshElapsed(t *testing.T) {
+	// Arrange — the sweep measured two hours; the durable instant says three.
+	m, _, hib := newHibernationRig(t)
+	const nowMs = int64(10_000_000_000)
+	m.now = func() int64 { return nowMs }
+	hib.TurnEndObserved("s1", nowMs-10_800_000)
+
+	// Act.
+	if err := m.HibernateWithCause("ws", registry.HibernationDetail{
+		Cause: registry.HibernationCauseCacheExpired, TTLMs: 3_600_000, ElapsedMs: 7_200_000,
+	}); err != nil {
+		t.Fatalf("HibernateWithCause: %v", err)
+	}
+
+	// Assert.
+	got, _ := hib.HibernationOf("s1")
+	if got.ElapsedMs != 10_800_000 {
+		t.Fatalf("persisted elapsed_ms = %d, want the claim-time measurement 10800000", got.ElapsedMs)
+	}
+}
+
+// A FORCED HIBERNATION IS NOT RE-VALIDATED. Idleness was never its premise:
+// the user asked for the sleep over a session they are looking at.
+func TestHibernateWithCauseDoesNotReValidateAForcedCause(t *testing.T) {
+	// Arrange — a turn that ended one second ago.
+	m, _, hib := newHibernationRig(t)
+	const nowMs = int64(10_000_000_000)
+	m.now = func() int64 { return nowMs }
+	hib.TurnEndObserved("s1", nowMs-1_000)
+
+	// Act.
+	err := m.HibernateWithCause("ws", registry.HibernationDetail{Cause: registry.HibernationCauseForced})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("forced HibernateWithCause over a freshly ended turn = %v, want the sleep the user asked for", err)
+	}
+}
+
+// THE MERGE LEASE OUTRANKS AN AUTOMATIC CAUSE TOO. The forced path checked the
+// lease; the sweeper's causes did not, so an idle-cutoff sleep could stop a
+// shim merge.Coordinator was actively driving.
+func TestHibernateWithCauseRefusesAnAutomaticCauseWhileTheMergeLeaseIsHeld(t *testing.T) {
+	// Arrange.
+	m, applier, _ := newHibernationRig(t)
+	applier.mergeLeases = map[string]bool{"ws": true}
+
+	// Act.
+	err := m.HibernateWithCause("ws", registry.HibernationDetail{
+		Cause: registry.HibernationCauseIdleCutoff, CutoffMs: 21_600_000,
+	})
+
+	// Assert.
+	if !errors.Is(err, ErrHibernationMergeLeaseHeld) {
+		t.Fatalf("HibernateWithCause under a merge lease = %v, want ErrHibernationMergeLeaseHeld", err)
+	}
+}
+
+// THE REFUSAL STOPS NOTHING. A merge lease is refused before the teardown, so
+// the shim the merge is driving is still there afterwards.
+func TestHibernateWithCauseUnderAMergeLeaseStopsNothing(t *testing.T) {
+	// Arrange.
+	m, applier, hib := newHibernationRig(t)
+	applier.mergeLeases = map[string]bool{"ws": true}
+
+	// Act.
+	_ = m.HibernateWithCause("ws", registry.HibernationDetail{
+		Cause: registry.HibernationCauseCacheExpired, TTLMs: 3_600_000,
+	})
+
+	// Assert.
+	if got := hib.writeCount(); got != 0 {
+		t.Fatalf("hibernation writes = %d, want 0 under a held merge lease", got)
 	}
 }
 

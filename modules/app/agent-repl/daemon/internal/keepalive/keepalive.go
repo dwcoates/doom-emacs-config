@@ -46,10 +46,17 @@ const (
 	DefaultUncachedCostAlertTokens int64 = 20000
 )
 
-// RetryFloor is how much of the pre-expiry window is reserved as UNUSABLE for
-// retries. A ping submit that fails may be retried while the remaining margin
-// exceeds this; inside it the cache is close enough to cold that another
-// attempt would more likely pay full freight than save anything.
+// RetryFloor is how much of the pre-expiry window is reserved as UNUSABLE. A
+// ping may be submitted while the remaining margin exceeds this; inside it the
+// cache is close enough to cold that an attempt would more likely pay full
+// freight than save anything.
+//
+// IT IS ENFORCED BY THE DECISION, not by a caller remembering to consult it.
+// Evaluate returns ActionAwaitExpiry inside the floor — an arm that carries no
+// submit — so a sweeper cannot ping there however it is written. It used to be
+// a boolean on an ActionPing decision, which gated nothing: every tick in the
+// floor still submitted, and the only trace was a log line saying it would not
+// be retried while it was being tried.
 const RetryFloor = time.Minute
 
 // Config is the resolved keep-alive policy configuration.
@@ -116,6 +123,10 @@ func (c Config) Validate() error {
 		return fmt.Errorf("keepalive: leeway %s must be shorter than the cache TTL %s; otherwise a ping is never both due and useful",
 			c.Leeway, c.CacheTTL)
 	}
+	if c.Leeway <= RetryFloor {
+		return fmt.Errorf("keepalive: leeway %s must be longer than the retry floor %s; otherwise the whole ping window lies inside the floor and no ping could ever be submitted",
+			c.Leeway, RetryFloor)
+	}
 	if c.IdleCutoff <= 0 {
 		return fmt.Errorf("keepalive: idle cutoff must be positive, got %s", c.IdleCutoff)
 	}
@@ -159,6 +170,15 @@ const (
 	// ActionHibernate takes the hibernation transition, with Decision.Cause
 	// saying why.
 	ActionHibernate
+	// ActionAwaitExpiry is the RETRY FLOOR as an action: the session is inside
+	// the ping window but too close to expiry for a ping to be worth
+	// submitting, so nothing is submitted and the cache is left to go cold —
+	// which the policy's own cache-expired branch will then report.
+	//
+	// It is a DISTINCT ARM rather than a flag on ActionPing because the floor
+	// has to be unforgettable. A caller switching on Action cannot submit here
+	// without writing a case that says it is doing so.
+	ActionAwaitExpiry
 )
 
 func (a Action) String() string {
@@ -167,6 +187,8 @@ func (a Action) String() string {
 		return "ping"
 	case ActionHibernate:
 		return "hibernate"
+	case ActionAwaitExpiry:
+		return "await_expiry"
 	default:
 		return "none"
 	}
@@ -189,9 +211,15 @@ type Decision struct {
 	// HibernationDetail report the measured figure rather than re-deriving one
 	// from a clock that has since moved.
 	ElapsedMs int64
-	// Retryable reports whether a FAILED ping submit may be attempted again at
-	// the next tick. Meaningful only for ActionPing.
-	Retryable bool
+	// RemainingMs is how much margin was left before the cache's expected
+	// expiry at evaluation time. Meaningful for ActionPing and
+	// ActionAwaitExpiry, and it is what the floor's log line reports rather
+	// than re-deriving a figure from a clock that has since moved.
+	RemainingMs int64
+	// FloorMs is the retry floor the decision was taken against, carried on
+	// ActionAwaitExpiry so the record of a refusal names the threshold that
+	// caused it.
+	FloorMs int64
 }
 
 // Evaluate takes the policy decision for one session from its durable
@@ -230,10 +258,24 @@ func (c Config) Evaluate(nowMs, lastTurnEndMs int64) Decision {
 		return Decision{Action: ActionHibernate, Cause: CauseCacheExpired, ElapsedMs: elapsedMs}
 	}
 	if elapsed >= c.CacheTTL-c.Leeway {
+		remainingMs := int64((c.CacheTTL - elapsed) / time.Millisecond)
+		// THE FLOOR IS TESTED INSIDE THE PING WINDOW, not beside it. Asking
+		// about the floor first would report await_expiry for a session that
+		// has not reached the window at all under a leeway shorter than the
+		// floor — a configuration Validate refuses, but the ordering states
+		// the containment rather than relying on that refusal.
+		if elapsed >= c.CacheTTL-RetryFloor {
+			return Decision{
+				Action:      ActionAwaitExpiry,
+				ElapsedMs:   elapsedMs,
+				RemainingMs: remainingMs,
+				FloorMs:     int64(RetryFloor / time.Millisecond),
+			}
+		}
 		return Decision{
-			Action:    ActionPing,
-			ElapsedMs: elapsedMs,
-			Retryable: elapsed < c.CacheTTL-RetryFloor,
+			Action:      ActionPing,
+			ElapsedMs:   elapsedMs,
+			RemainingMs: remainingMs,
 		}
 	}
 	return Decision{Action: ActionNone, ElapsedMs: elapsedMs}
