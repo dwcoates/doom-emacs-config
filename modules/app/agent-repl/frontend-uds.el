@@ -673,10 +673,32 @@ and reconnects (design §4.4)."
 
 ;;;; ---- Inbound framing + decode ----------------------------------------
 
+(defvar agent-repl--uds-drain-active nil
+  "Non-nil only while `agent-repl--uds-filter' is draining a batch of frames.
+Handler containment is scoped to the drain and nowhere else: a dispatch
+outside one has no drain to re-signal for it, so its errors must keep
+propagating straight to the caller.")
+
+(defvar agent-repl--uds-drain-error nil
+  "The FIRST handler failure of the current drain, as (SYMBOL . DATA).
+Recorded rather than raised so the frames BEHIND the failing one still
+reach their handlers in this batch; `agent-repl--uds-filter' re-signals
+it once the drain is done.  Nothing is swallowed — the failure is
+loud-logged at the moment it is recorded, and raised after.")
+
 (defun agent-repl--uds-filter (_proc chunk)
   "Process filter: accumulate CHUNK and dispatch every complete frame.
 Frames are newline-delimited; a partial trailing frame is retained in
-`agent-repl--uds-read-accumulator' until its newline arrives."
+`agent-repl--uds-read-accumulator' until its newline arrives.
+
+A handler that signals no longer takes the rest of the batch down with
+it.  One chunk routinely carries frames for several workspaces, and a
+handler error used to abandon the loop mid-batch: the complete frames
+already sitting in the accumulator behind it — an unrelated workspace's
+`sessionView', a `commandAck' someone is blocking on — waited for the
+next chunk to arrive, which may be seconds away or never.  The batch now
+always drains, and the first failure is re-signalled at the end, so the
+error still reaches the caller exactly once and exactly as loudly."
   ;; A filter may receive a high rate of small chunks; retain only framing
   ;; metrics, never wire contents, in the verbose trace.
   (agent-repl--log-verbose
@@ -684,12 +706,17 @@ Frames are newline-delimited; a partial trailing frame is retained in
    (length chunk) (length agent-repl--uds-read-accumulator))
   (setq agent-repl--uds-read-accumulator
         (concat agent-repl--uds-read-accumulator chunk))
-  (let (line)
+  (let ((agent-repl--uds-drain-active t)
+        (agent-repl--uds-drain-error nil)
+        line)
     (while (setq line (agent-repl--uds-next-line))
       (agent-repl--uds-handle-line line))
     (agent-repl--log-verbose
      nil "uds-filter: buffered-after=%d"
-     (length agent-repl--uds-read-accumulator))))
+     (length agent-repl--uds-read-accumulator))
+    (when agent-repl--uds-drain-error
+      (signal (car agent-repl--uds-drain-error)
+              (cdr agent-repl--uds-drain-error)))))
 
 (defun agent-repl--uds-next-line ()
   "Pop and return the next complete (newline-terminated) frame line.
@@ -735,13 +762,47 @@ is never silently skipped (AGENTS.md No-Silent-Fallbacks)."
      (signal 'agent-repl-uds-malformed-frame
              (list (error-message-string err) line)))))
 
+(defun agent-repl--uds-call-frame-handler (field ws workspace handler payload)
+  "Call HANDLER on PAYLOAD for frame arm FIELD, returning its value.
+
+Outside a drain the handler's error propagates to the caller untouched.
+INSIDE one (`agent-repl--uds-drain-active') the failure is contained for
+the length of the batch and no longer: it is loud-logged here with the
+arm and the workspace that produced it, the FIRST such failure is
+recorded in `agent-repl--uds-drain-error', and `agent-repl--uds-filter'
+re-signals that error once every remaining complete frame has been
+dispatched.
+
+This is containment, not suppression.  The alternative — letting the
+signal unwind the drain loop — silently makes one workspace's malformed
+frame into another workspace's stalled UI, because the frames behind it
+are already whole in the accumulator and simply never get read.  WS is
+the resolved workspace name for the log ladder; WORKSPACE is the raw wire
+value, kept in the message text so an unowned path stays correlatable."
+  (if (not agent-repl--uds-drain-active)
+      (funcall handler payload)
+    (condition-case err
+        (funcall handler payload)
+      (error
+       (agent-repl--log
+        ws
+        "uds-dispatch: HANDLER FAILED field=%s workspace=%S handler=%s error=%s — remaining frames still dispatched, error re-signalled after the drain"
+        field workspace handler (error-message-string err))
+       (unless agent-repl--uds-drain-error
+         (setq agent-repl--uds-drain-error err))
+       nil))))
+
 (defun agent-repl--uds-dispatch-frame (frame)
   "Dispatch decoded FRAME (a one-key plist) to its registered handler.
 The single top-level key names the `FrontendFrame' oneof arm.  A frame
 with no oneof field, or an unknown one, is loud-logged and SIGNALS
 `agent-repl-uds-malformed-frame'.  A KNOWN field with no registered
 handler is loud-logged (a not-yet-wired condition surfaced honestly),
-not silently dropped.  Returns the handler's value, or nil."
+not silently dropped.  Returns the handler's value, or nil.
+
+A handler that itself signals is routed through
+`agent-repl--uds-call-frame-handler', which contains the failure for the
+length of a drain batch and re-signals it afterwards."
   (unless (and (listp frame) (keywordp (car frame)) (null (cddr frame)))
     (agent-repl--log nil
                      "uds-dispatch: MALFORMED frame shape=%s element-count=%s — expected one oneof arm"
@@ -774,7 +835,8 @@ not silently dropped.  Returns the handler's value, or nil."
           (agent-repl--log log-workspace
                            "uds-dispatch: field=%s workspace=%S session-id=%S revision=%S state=%S -> handler=%s"
                            field workspace session-id revision state handler)
-          (funcall handler payload))
+          (agent-repl--uds-call-frame-handler
+           field log-workspace workspace handler payload))
          ((member field agent-repl--uds-ignored-frame-fields)
           (let ((task-count (and (equal field "taskCatalog")
                                  (length (plist-get payload :tasks)))))
