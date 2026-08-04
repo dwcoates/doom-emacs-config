@@ -74,6 +74,7 @@ function progress(over: Partial<ProgressInput> = {}): ProgressInput {
     rateLimited: null,
     rateLimitedWeekly: null,
     failure: null,
+    expensiveTurn: null,
     pendingPermissions: 0,
     queueDepth: 0,
     liveTaskCount: 0,
