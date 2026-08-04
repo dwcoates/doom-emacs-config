@@ -501,6 +501,43 @@ export const LEASE_HELD_REASON =
 /** The Force control's promise, and its cost. */
 export const LEASE_FORCE_TITLE = "deliver now, delays the bounce";
 
+/**
+ * The KEEP-ALIVE bubble: a prompt parked behind an in-flight cache keep-alive
+ * ping.
+ *
+ * Modeled on the drain-lease bubble above, NOT on the classifier bubble, and
+ * for the same reason: the classifier never ran on this entry, so its
+ * `classification` carries no verdict and a badge claiming one would be a
+ * judgment nothing made.
+ *
+ * WHERE IT DIFFERS FROM THE LEASE BUBBLE is the one control it does not draw.
+ * A lease-held prompt can be forced through at the cost of delaying the bounce;
+ * this one CANNOT, because the keep-alive turn has to finish before the daemon
+ * can rewind and submit it — there is no ordering in which forcing works. Its
+ * only exits are delivery when the ping's turn ends and Cancel, so those are
+ * the only things on screen.
+ */
+export function KeepAliveHeldCard(item: QueuedItem, turnId: string): string {
+  const qid = escapeHtml(item.id);
+  return `
+    <div class="queued-card keep-alive-card" data-keep-alive-turn-id="${escapeHtml(turnId)}">
+      <div class="queued-head">
+        <span class="queued-badge keep-alive">held — waiting on a keep-alive response</span>
+      </div>
+      <pre class="queued-content">${escapeHtml(item.text)}</pre>
+      <div class="lease-reason">${escapeHtml(KEEP_ALIVE_HELD_REASON)}</div>
+      <div class="queued-actions">
+        <button data-queue-cancel="${qid}">Cancel</button>
+      </div>
+    </div>`;
+}
+
+/** Why the prompt is parked, said plainly — assertable without parsing markup. */
+export const KEEP_ALIVE_HELD_REASON =
+  "A cache keep-alive turn is in flight, so this prompt waits for its response. It is " +
+  "delivered as soon as that turn ends — it is not lost, it has not been judged by the " +
+  "classifier, and it cannot be forced through ahead of the keep-alive.";
+
 export function QueuedCard(item: QueuedItem): string {
   // THE LEASE HOLD OUTRANKS THE CLASSIFICATION, and there is nothing to weigh:
   // the classifier never ran on a lease-held entry, so its classification
@@ -508,6 +545,12 @@ export function QueuedCard(item: QueuedItem): string {
   // put a badge on screen claiming a judgment nothing made.
   if (item.shutdownHold !== undefined) {
     return LeaseHeldCard(item, item.shutdownHold.scheduleId);
+  }
+  // THE KEEP-ALIVE HOLD OUTRANKS THE CLASSIFICATION for exactly the reason the
+  // lease hold above does, and the two holds cannot co-occur: a keep-alive turn
+  // is a turn, and the drain lease is what stops turns from starting.
+  if (item.keepAliveHold !== undefined) {
+    return KeepAliveHeldCard(item, item.keepAliveHold.turnId);
   }
   const badge = queuedBadge(item);
   const qid = escapeHtml(item.id);
