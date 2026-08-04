@@ -197,6 +197,10 @@ type fakeClient struct {
 	// returns. It is how a test observes the world as the shim round-trip
 	// begins, which is the only way to prove what was published BEFORE it.
 	onSubmit func()
+	// submitErrOnce, when non-nil, fails the NEXT SubmitPrompt and then clears
+	// itself. One-shot rather than sticky so a test can fail one submit and
+	// still observe what the failure released reaching the shim afterwards.
+	submitErrOnce error
 }
 
 type fakeFileDiagnosticPersister struct{}
@@ -225,6 +229,12 @@ func (c *fakeClient) SubmitPrompt(_ context.Context, text, origin, mode string, 
 		hook()
 	}
 	c.mu.Lock()
+	if err := c.submitErrOnce; err != nil {
+		c.submitErrOnce = nil
+		c.mu.Unlock()
+		notifyTestActivity()
+		return err
+	}
 	c.prompts = append(c.prompts, text)
 	c.origins = append(c.origins, origin)
 	c.promptOrigins = append(c.promptOrigins, promptOrigin)
@@ -748,7 +758,7 @@ func TestResumedSessionPromptsAreForwardedVerbatim(t *testing.T) {
 	if err != nil {
 		t.Fatalf("existing: %v", err)
 	}
-	m.onTurnBoundary(d, false)
+	m.onTurnBoundary(d, false, m.now())
 	d.consumer.Apply(&corev1.Event{
 		SessionId: "s1",
 		Payload: &corev1.Event_SessionStarted{SessionStarted: &corev1.SessionStarted{
@@ -759,7 +769,7 @@ func TestResumedSessionPromptsAreForwardedVerbatim(t *testing.T) {
 
 	// Act: the next two prompts.
 	_ = m.SubmitPrompt(context.Background(), "ws", "test-request-second", "second", "", testPromptOrigin)
-	m.onTurnBoundary(d, false)
+	m.onTurnBoundary(d, false, m.now())
 	_ = m.SubmitPrompt(context.Background(), "ws", "test-request-third", "third", "", testPromptOrigin)
 
 	// Assert: every prompt reaches the shim exactly as the user typed it.

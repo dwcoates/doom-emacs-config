@@ -131,7 +131,7 @@ func TestTurnLifecycleHandshakeRestoresCorrelationForAnUnseenEnd(t *testing.T) {
 	consumer := &consumer{
 		workspace: "ws", sessionID: "s1", ssm: store,
 		logf:   func(string, ...any) {},
-		onTurn: func(active bool) { snapshots = append(snapshots, active) },
+		onTurn: func(active bool, _ int64) { snapshots = append(snapshots, active) },
 	}
 	active, closed, err := consumer.reconcileTurnHandshake(&corev1.ShimHello{
 		ActiveTurnIds: []string{"turn-live"}, TurnInFlight: true,

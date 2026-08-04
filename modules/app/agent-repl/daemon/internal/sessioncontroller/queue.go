@@ -535,7 +535,12 @@ func (m *Manager) persistQueue(sessionID string, recs []registry.QueuedPrompt) {
 // Called on the shim read-loop goroutine, so delivery is dispatched to its own
 // goroutine: SubmitPrompt awaits an Ack that only the read loop can deliver, and
 // calling it from inside the read loop would deadlock the session.
-func (m *Manager) onTurnBoundary(d *sessionController, active bool) {
+// endedAtMs is the BOUNDARY'S OWN INSTANT, carried from the event rather than
+// re-read here. The keep-alive window's closing edge is stamped from it, and
+// that edge is compared against vendor-authored record timestamps: a clock read
+// taken at handling time would put the window's end wherever the daemon's clock
+// happened to be, not where the turn actually ended.
+func (m *Manager) onTurnBoundary(d *sessionController, active bool, endedAtMs int64) {
 	if active {
 		// The record is normally already bound by the claim projection, and this
 		// adopt is then a NO-OP: an active record keeps the name it has. It is
@@ -588,12 +593,16 @@ func (m *Manager) onTurnBoundary(d *sessionController, active bool) {
 		// THE WINDOW CLOSES HERE. An open window has no upper bound, so leaving
 		// it open would exclude every later item on this workspace forever —
 		// the whole conversation, silently.
-		if m.cfg.KeepAliveWindows != nil {
-			if err := m.cfg.KeepAliveWindows.Close(pingTurn, m.now()); err != nil {
-				m.logf("session-controller: keep-alive window CLOSE FAILED ws=%q session=%s turn_id=%s error=%v — the window stays open, and an open window excludes every later item on this workspace; this must be repaired before the conversation renders again",
-					d.workspace, d.sessionID, pingTurn, err)
-			}
-		}
+		//
+		// IT CLOSES AT THE TURN'S OWN END INSTANT, not at a fresh clock read.
+		// The verdict this bound decides is against the timestamps the VENDOR
+		// wrote on its transcript records, so a daemon clock running ahead of
+		// the CLI's would keep excluding after the ping was over and swallow
+		// the leading edge of the user's next real turn. The boundary's
+		// produced_at_ms is the same instant the rest of the daemon agrees the
+		// turn ended at, and it is durable evidence rather than an observation
+		// made at the moment of writing.
+		m.closeKeepAliveWindow(d, pingTurn, endedAtMs)
 		m.noteDrainActivity()
 		if len(heldIDs) > 0 {
 			go m.releaseKeepAliveHolds(d, pingTurn, heldIDs)
