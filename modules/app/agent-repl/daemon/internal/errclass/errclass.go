@@ -121,6 +121,13 @@ const (
 	// all. The ONLY interrupt outcome that is a failure: a stop that landed
 	// on an already-finished turn is success, not an error.
 	TypeInterruptUndelivered Type = "interrupt.undelivered"
+	// TypeQueueEntrySessionUnwired — a queue command aimed at a prompt this
+	// daemon holds only in the MATERIALIZED parking ledger, whose session has
+	// no shim attached to this daemon. It is the force refusal's name: the
+	// prompt exists and is reachable by cancel, but delivering it needs a
+	// session that is not here, and a client that is shown a named failure can
+	// say so instead of rendering the raw sentence as an internal fault.
+	TypeQueueEntrySessionUnwired Type = "queue.entry_session_unwired"
 	// TypeInternalUnclassified — the loud fallthrough. It carries the raw
 	// error text and is always logged; a silent fallthrough would let the
 	// vocabulary rot without anyone noticing.
@@ -227,6 +234,8 @@ var prose = map[Type]string{
 	TypeHistoryRepullInFlight:    "a history re-pull is already running",
 	TypeHistoryReplayTruncated:   "the history re-pull ended before it reached the live window",
 	TypeInterruptUndelivered:     "the stop could not be delivered",
+
+	TypeQueueEntrySessionUnwired: "the queued prompt's session is not attached to this daemon, so it cannot be run yet",
 	TypeInternalUnclassified:     "the command failed",
 
 	// API — the SDK or the vendor refusing or concluding the work.
@@ -297,6 +306,15 @@ var (
 	// command failure — outcome to error to Command to card — instead of
 	// getting a second classification path of its own.
 	ErrInterruptUndelivered = errors.New("session-controller: the interrupt could not be delivered")
+	// ErrQueueEntrySessionUnwired anchors the queue surface's one REFUSAL: a
+	// force aimed at a prompt that lives in the materialized parking ledger,
+	// whose session has not wired to this daemon (or has wired and not yet
+	// adopted the ledger's entries). A force is a delivery and a delivery needs
+	// a shim, so the command cannot be honored — and it is a sentinel rather
+	// than a bare fmt.Errorf so the refusal reaches a human as a NAMED failure
+	// instead of falling through to internal.unclassified, which would log the
+	// same refusal a second time under a name that says nothing.
+	ErrQueueEntrySessionUnwired = errors.New("session-controller: the queued prompt's session is not wired to this daemon")
 )
 
 // sentinelTypes is the ladder, as data rather than as a switch, so the
@@ -319,6 +337,7 @@ var sentinelTypes = []struct {
 	{ErrRepullInFlight, TypeHistoryRepullInFlight},
 	{ErrRepullTruncated, TypeHistoryReplayTruncated},
 	{ErrInterruptUndelivered, TypeInterruptUndelivered},
+	{ErrQueueEntrySessionUnwired, TypeQueueEntrySessionUnwired},
 }
 
 // Sentinel is the errors.Is ladder over the daemon's sentinel errors. It
@@ -638,6 +657,7 @@ func AllTypes() []Type {
 		TypeHistoryRepullInFlight,
 		TypeHistoryReplayTruncated,
 		TypeInterruptUndelivered,
+		TypeQueueEntrySessionUnwired,
 		TypeInternalUnclassified,
 		TypeAPIAuthenticationFailed,
 		TypeAPIBillingError,
