@@ -777,16 +777,22 @@ vocabulary assertions would silently assert nothing."
       (insert-file-contents path)
       (buffer-string))))
 
-(defun agent-repl-test--generated-protojson-fields (relative)
-  "Return every protojson field name declared in generated Go file RELATIVE.
-Collects both halves of each protobuf struct tag: `name=' (the proto
-field name, which IS the protojson name for single-word fields) and
-`json=' (the lowerCamelCase name emitted for multi-word fields)."
+(defun agent-repl-test--generated-oneof-arms (relative message)
+  "Return the protojson names of MESSAGE's oneof arms in generated Go RELATIVE.
+protoc-gen-go emits one wrapper struct per arm, named MESSAGE_Arm, whose
+single field carries the protobuf tag.  The tag's `json=' half is the
+lowerCamelCase name the wire uses; a single-word arm has no `json=' half,
+and its `name=' half IS the protojson name.  The field may sit behind the
+proto comment protoc-gen-go carries over, so the scan runs to the first
+tag inside the struct body rather than to the next line."
   (let ((text (agent-repl-test--generated-go-text relative))
+        (re (concat "^type " (regexp-quote message)
+                    "_[A-Za-z0-9]+ struct {[^}]*?,name=\\([a-z0-9_]+\\)"
+                    "\\(?:,json=\\([A-Za-z0-9]+\\)\\)?"))
         (start 0)
         names)
-    (while (string-match ",\\(?:json\\|name\\)=\\([A-Za-z0-9_]+\\)" text start)
-      (push (match-string 1 text) names)
+    (while (string-match re text start)
+      (push (or (match-string 2 text) (match-string 1 text)) names)
       (setq start (match-end 0)))
     (delete-dups names)))
 
