@@ -6,7 +6,7 @@
   "type": "module",
   "main": "dist/main.js",
   "scripts": {
-    "ensure-deps": "[ -x node_modules/.bin/vitest ] && [ -f node_modules/@vitest/coverage-v8/package.json ] || npm ci",
+    "ensure-deps": "npm ls --depth=0 >/dev/null 2>&1 || npm ci",
     "prebuild": "npm run ensure-deps",
     "build": "node build.mjs",
     "pretest": "npm run ensure-deps",
