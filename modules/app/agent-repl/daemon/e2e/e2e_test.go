@@ -46,6 +46,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/keepalive"
 	"claude-repld/internal/progress"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/server"
@@ -760,6 +761,10 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 		t.Fatalf("open state store: %v", err)
 	}
 	t.Cleanup(func() { _ = stateStore.Close() })
+	keepAliveWindows, err := statedb.NewKeepAliveWindows(stateStore)
+	if err != nil {
+		t.Fatalf("open keep-alive window store: %v", err)
+	}
 	turnAccountings, err := statedb.NewTurnAccountings(stateStore)
 	if err != nil {
 		t.Fatalf("open turn accounting store: %v", err)
@@ -856,7 +861,11 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 	// to frontends) — the same single-instance wiring main.go does. Two
 	// instances split the brain: the session controller's notes push to nobody while the
 	// wired instance never hears them.
-	progressMgr := progress.New(progress.Options{Logf: t.Logf})
+	kaCfg, err := keepalive.FromEnv()
+	if err != nil {
+		t.Fatalf("keep-alive config: %v", err)
+	}
+	progressMgr := progress.New(progress.Options{Logf: t.Logf, UncachedAlertTokens: kaCfg.UncachedCostAlertTokens})
 	fileDiagnostics, err := server.NewTargetFileDiagnosticPersister(targets, os.Stderr, false)
 	if err != nil {
 		t.Fatalf("build file diagnostic persister: %v", err)
@@ -876,10 +885,21 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 		PermissionModes:   server.NewRegistryModeStore(reg),
 		Registrar:         vendors,
 		ModelCatalogs:     registrar,
-		DaemonVersion:     "0.1.0-e2e",
-		ProtocolVersion:   "1",
-		ShimBuildSHA:      func() string { return tuning.currentBuildSHA },
-		Logf:              t.Logf,
+		Hibernations:      registrar,
+		VendorSessions:    vendors,
+		KeepAliveWindows:  server.KeepAliveWindowStore{Windows: keepAliveWindows},
+		KeepAlive:         kaCfg,
+		VendorSessionOf: func(sessionID string) (string, bool) {
+			rec, ok := reg.Get(sessionID)
+			if !ok || rec.ClaudeSessionID == "" {
+				return "", false
+			}
+			return rec.ClaudeSessionID, true
+		},
+		DaemonVersion:   "0.1.0-e2e",
+		ProtocolVersion: "1",
+		ShimBuildSHA:    func() string { return tuning.currentBuildSHA },
+		Logf:            t.Logf,
 	})
 	if err != nil {
 		t.Fatalf("build controller: %v", err)
@@ -907,12 +927,14 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 	agentShim, err := server.WireAgentShim(server.AgentShimConfig{
 		// The real resolver over the real registry: an e2e that faked this
 		// would not exercise the daemon actually deciding what to resume.
-		Resumes:  &server.ConversationResolver{Reg: reg, Logf: t.Logf},
-		SSM:      ssmMgr,
-		Progress: progressMgr,
-		Prompts:  controller,
-		Turns:    controller,
-		Health:   controller,
+		Resumes:      &server.ConversationResolver{Reg: reg, Logf: t.Logf},
+		SSM:          ssmMgr,
+		Progress:     progressMgr,
+		Prompts:      controller,
+		Turns:        controller,
+		Health:       controller,
+		Hibernations: controller,
+		Restarts:     controller,
 		// THE PRODUCTION LIFECYCLE, not a stub. A merge brings its workspace's
 		// session up through this seam, and a no-op Open would report a
 		// hibernated workspace live without ever rehydrating it — so the merge
@@ -967,6 +989,7 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 		Frontend:       agentShim.Server,
 		IdleSweepTicks: sweepTicks,
 		IdleTimeout:    tuning.idleTimeout,
+		KeepAlive:      kaCfg,
 		Now:            nowFn,
 		Logf:           t.Logf,
 	})
