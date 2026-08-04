@@ -413,6 +413,9 @@ type consumer struct {
 	// A compact-first revival waits on it before it will accept prompts.
 	// Assigned after construction, like onVendorSessionID.
 	onContextCompacted func()
+	// keepAliveWindows is the durable ledger the keep-alive exclusion reads
+	// (keepaliveexclude.go). Nil is the exclusion OFF.
+	keepAliveWindows KeepAliveWindowLedger
 	// onBackfill reports a never-blue backfill transition (F2), once per
 	// distinct state. The controller persists it and re-pushes the SessionView.
 	onBackfill func(state string)
@@ -1457,6 +1460,17 @@ func (c *consumer) pushConversation(ev *corev1.Event, live bool) {
 	// line closing a turn nothing was asked of — goes no further either
 	// (noresponse.go).
 	c.withholdNoResponsePlaceholders(cd)
+	// The daemon's own cache keep-alive turns, withheld from every rendering
+	// off the durable window ledger (keepaliveexclude.go). Same "withheld, not
+	// deleted" discipline as the two above, and placed with them so all three
+	// exclusions run at the one chokepoint every replay route funnels through.
+	//
+	// A delta emptied by this exclusion is still PUSHED, exactly as one emptied
+	// by the two above is. The frame carries through_seq, which is the
+	// frontend's replay cursor: swallowing it would leave every client's cursor
+	// stuck behind the ping forever, and the next resync would re-deliver the
+	// whole conversation from before it.
+	c.withholdKeepAlive(cd)
 	// PROVENANCE, AFTER EVERY CURATION AND BEFORE THE PUSH. The curators above
 	// rebuild items (skillbody.go mints a fresh SkillBodyItem from the record it
 	// consumed), so stamping earlier would leave a rebuilt item carrying the

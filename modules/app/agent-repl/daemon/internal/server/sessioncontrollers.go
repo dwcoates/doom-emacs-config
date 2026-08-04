@@ -30,6 +30,7 @@ import (
 	"claude-repld/internal/shim"
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/shimlisten"
+	"claude-repld/internal/statedb"
 )
 
 // SessionLocator resolves a workspace to the newest non-terminal session bound
@@ -989,6 +990,28 @@ func (r *RegistryRegistrar) LastTurnEndOf(sessionID string) (int64, bool) {
 		return 0, false
 	}
 	return rec.LastTurnEndMs, true
+}
+
+// KeepAliveWindowStore adapts *statedb.KeepAliveWindows to the session
+// controller's ledger interface.
+//
+// The adapter exists so the controller does not depend on the store's row
+// shape: the exclusion needs three facts and one question, and stating exactly
+// that keeps a harness able to supply them without a database.
+type KeepAliveWindowStore struct{ Windows *statedb.KeepAliveWindows }
+
+func (s KeepAliveWindowStore) Open(w sessioncontroller.KeepAliveWindowRecord) error {
+	return s.Windows.Open(statedb.KeepAliveWindow{
+		TurnID: w.TurnID, Workspace: w.Workspace, StartedAtMs: w.StartedAtMs,
+	})
+}
+
+func (s KeepAliveWindowStore) Close(turnID string, endedAtMs int64) error {
+	return s.Windows.Close(turnID, endedAtMs)
+}
+
+func (s KeepAliveWindowStore) Covers(workspace string, tsMs int64) (bool, error) {
+	return s.Windows.Covers(workspace, tsMs)
 }
 
 // PushForwarder is the late-bound bridge from the session controller's per-session sinks to
