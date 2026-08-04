@@ -270,7 +270,7 @@ func (w *shutdownWorld) boot(t *testing.T) *shutdownBoot {
 		Push:              forwarder,
 		SSM:               ssmMgr,
 		Progress:          progressMgr,
-		Spawner:           server.NewShimSpawner(reg, shimListener.Connected, shimListener.Evict, udsSpawn, t.Logf),
+		Spawner:           fakeShimSpawner(reg, shimListener, udsSpawn, t.Logf),
 		Locator:           &server.SessionLocator{Reg: reg},
 		Source:            &server.ShimConnSource{Listener: shimListener},
 		FileDiagnostics:   fileDiagnostics,
