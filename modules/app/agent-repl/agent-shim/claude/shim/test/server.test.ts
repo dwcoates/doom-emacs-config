@@ -75,7 +75,7 @@ function harness(
     ...overrides,
   };
   const server = new SessionServer(
-    { socketPath, sessionId: "sess-1", queryInstanceId: "query-1", shimVersion: "9.9", protocolVersion: "1", heartbeatIntervalMs: 0, ...options },
+    { socketPath, sessionId: "sess-1", queryInstanceId: "query-1", queryCreatedSeq: () => 41n, shimVersion: "9.9", protocolVersion: "1", heartbeatIntervalMs: 0, ...options },
     handlers,
   );
   return { server, socketPath, calls };
@@ -122,6 +122,7 @@ describe("SessionServer handshake", () => {
     expect(hello.sessionId).toBe("sess-1");
     expect(hello.vendor).toBe("claude");
     expect(hello.shimVersion).toBe("9.9");
+    expect(hello.queryCreatedSeq).toBe(41n);
   });
 
   it("reannounces the stable query identity and runtime snapshot after a reconnect", async () => {
@@ -389,6 +390,7 @@ describe("SessionServer vendor session rotation bounce", () => {
       {
         socketPath: built.socketPath, sessionId: "sess-1", queryInstanceId: "query-1", shimVersion: "9.9",
         protocolVersion: "1", heartbeatIntervalMs: 0, reconnectMinMs: 1,
+        queryCreatedSeq: () => 41n,
         vendorSessionId: () => vendor.id,
       },
       {

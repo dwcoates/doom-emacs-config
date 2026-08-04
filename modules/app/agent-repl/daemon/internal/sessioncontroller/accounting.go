@@ -22,12 +22,13 @@ import (
 // record. It has one owner: the session consumer goroutine, so no mutex can
 // permit a terminal result to race its end-of-turn evidence.
 type turnAccountingReducer struct {
-	queryID                string
-	queryLifecycleObserved bool
-	runtime                *corev1.QueryRuntimeIdentity
-	activeTurnID           string
-	turns                  map[string]*accountingTurn
-	latencies              map[string]responseLatency
+	queryID             string
+	queryCreatedSeq     uint64
+	queryStoreSessionID string
+	runtime             *corev1.QueryRuntimeIdentity
+	activeTurnID        string
+	turns               map[string]*accountingTurn
+	latencies           map[string]responseLatency
 }
 
 type responseLatency struct {
@@ -99,9 +100,12 @@ func (r *turnAccountingReducer) bindHandshakeIdentity(hello *corev1.ShimHello) e
 	if r.queryID != "" && r.queryID != queryID {
 		return fmt.Errorf("shim hello query_instance_id %q does not match bound query_instance_id %q", queryID, r.queryID)
 	}
+	vendorSessionID := hello.GetVendorSessionId()
+	if r.queryID == queryID && r.queryStoreSessionID == vendorSessionID && r.queryCreatedSeq != hello.GetQueryCreatedSeq() {
+		return fmt.Errorf("shim hello query_created_seq %d does not match bound query_created_seq %d for vendor_session_id %q", hello.GetQueryCreatedSeq(), r.queryCreatedSeq, vendorSessionID)
+	}
 	runtime := hello.GetQueryRuntimeIdentity()
 	if runtime != nil {
-		vendorSessionID := hello.GetVendorSessionId()
 		if vendorSessionID == "" {
 			return fmt.Errorf("shim hello supplied query_runtime_identity without vendor_session_id")
 		}
@@ -118,30 +122,34 @@ func (r *turnAccountingReducer) bindHandshakeIdentity(hello *corev1.ShimHello) e
 	// Mutation is deliberately last: every rejected hello leaves the reducer
 	// as it was before the gate opened.
 	r.queryID = queryID
+	r.queryCreatedSeq = hello.GetQueryCreatedSeq()
+	r.queryStoreSessionID = vendorSessionID
 	if runtime != nil {
 		r.runtime = runtime
 	}
 	return nil
 }
 
-// historicalQueryLifecycle reports the terminal lifecycle record that can
-// precede the live query's first unread lifecycle row. A shim restart keeps the
-// vendor session and its ordered store sequence but creates a new query()
-// invocation. The first unread row can therefore be the termination of the
-// retired query, followed by the replacement query's creation and runtime rows.
+// historicalQueryLifecycle reports a lifecycle record whose durable sequence
+// proves that it predates the live query's QueryCreated record. A shim restart
+// keeps the vendor session and its ordered store sequence but creates a new
+// query() invocation, so a daemon cursor can resume inside the retired query's
+// lifecycle before reaching the replacement query's creation boundary.
 //
 // Those rows remain authoritative lifecycle history, but they cannot rebind
 // the accounting reducer away from the query carried by the live handshake.
 // Query-specific resume validation is owned by resumeIdentityTracker, which
 // independently follows every query_instance_id in the durable sequence.
-// Once any lifecycle row for the live query arrives, a different query id is a
-// protocol contradiction rather than history and remains a hard failure.
+// A different query id at or beyond the handshake's exact creation boundary is
+// a protocol contradiction and remains a hard failure. A zero boundary means
+// the announced vendor stream does not contain this query's creation record,
+// so no conflicting query identity is admitted as historical.
 func (r *turnAccountingReducer) historicalQueryLifecycle(ev *corev1.Event) (string, bool) {
 	lifecycle := ev.GetQueryLifecycle()
-	if lifecycle == nil || lifecycle.GetTerminated() == nil || r.queryID == "" || lifecycle.GetQueryInstanceId() == "" || r.queryLifecycleObserved {
+	if lifecycle == nil || r.queryID == "" || lifecycle.GetQueryInstanceId() == "" || r.queryCreatedSeq == 0 {
 		return "", false
 	}
-	return lifecycle.GetQueryInstanceId(), lifecycle.GetQueryInstanceId() != r.queryID
+	return lifecycle.GetQueryInstanceId(), lifecycle.GetQueryInstanceId() != r.queryID && ev.GetSeq() < r.queryCreatedSeq
 }
 
 // observeTurnClaimBridge admits the durable cross-session proof into the
@@ -166,10 +174,9 @@ func (r *turnAccountingReducer) observe(ev *corev1.Event, daemonSessionID string
 			return nil
 		}
 		if r.queryID != "" && r.queryID != q.GetQueryInstanceId() {
-			return fmt.Errorf("query lifecycle query_instance_id %q does not match bound query_instance_id %q after the live query lifecycle was observed", q.GetQueryInstanceId(), r.queryID)
+			return fmt.Errorf("query lifecycle query_instance_id %q does not match bound query_instance_id %q at seq %d with live query_created_seq %d", q.GetQueryInstanceId(), r.queryID, ev.GetSeq(), r.queryCreatedSeq)
 		}
 		r.queryID = q.GetQueryInstanceId()
-		r.queryLifecycleObserved = true
 		if observed := q.GetRuntimeObserved(); observed != nil {
 			r.runtime = observed.GetIdentity()
 		}

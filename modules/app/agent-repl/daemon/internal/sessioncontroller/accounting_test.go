@@ -133,7 +133,7 @@ func completeRuntimeIdentity() *corev1.QueryRuntimeIdentity {
 func TestTurnAccountingHandshakeBindsQueryAndRuntimeIdentityWithoutMutationOnRejection(t *testing.T) {
 	r := newTurnAccountingReducer()
 	runtime := completeRuntimeIdentity()
-	hello := &corev1.ShimHello{QueryInstanceId: "query-1", VendorSessionId: "vendor", QueryRuntimeIdentity: runtime}
+	hello := &corev1.ShimHello{QueryInstanceId: "query-1", QueryCreatedSeq: 17, VendorSessionId: "vendor", QueryRuntimeIdentity: runtime}
 	if err := r.bindHandshakeIdentity(hello); err != nil {
 		t.Fatalf("bind first hello: %v", err)
 	}
@@ -151,19 +151,20 @@ func TestTurnAccountingHandshakeBindsQueryAndRuntimeIdentityWithoutMutationOnRej
 	}{
 		{name: "blank query", hello: &corev1.ShimHello{VendorSessionId: "vendor"}, want: "omitted query_instance_id"},
 		{name: "different query", hello: &corev1.ShimHello{QueryInstanceId: "query-2", VendorSessionId: "vendor"}, want: "does not match bound"},
+		{name: "different creation sequence", hello: &corev1.ShimHello{QueryInstanceId: "query-1", QueryCreatedSeq: 18, VendorSessionId: "vendor"}, want: "does not match bound query_created_seq"},
 		{name: "runtime lacks hello vendor", hello: &corev1.ShimHello{QueryInstanceId: "query-1", QueryRuntimeIdentity: runtime}, want: "without vendor_session_id"},
-		{name: "runtime lacks vendor", hello: &corev1.ShimHello{QueryInstanceId: "query-1", VendorSessionId: "vendor", QueryRuntimeIdentity: &corev1.QueryRuntimeIdentity{}}, want: "omitted vendor_session_id"},
+		{name: "runtime lacks vendor", hello: &corev1.ShimHello{QueryInstanceId: "query-1", QueryCreatedSeq: 17, VendorSessionId: "vendor", QueryRuntimeIdentity: &corev1.QueryRuntimeIdentity{}}, want: "omitted vendor_session_id"},
 		{name: "runtime vendor mismatch", hello: &corev1.ShimHello{QueryInstanceId: "query-1", VendorSessionId: "vendor-other", QueryRuntimeIdentity: runtime}, want: "does not match vendor_session_id"},
-		{name: "runtime differs within one vendor session", hello: &corev1.ShimHello{QueryInstanceId: "query-1", VendorSessionId: "vendor", QueryRuntimeIdentity: &corev1.QueryRuntimeIdentity{VendorSessionId: "vendor", EffectiveModel: "different"}}, want: "does not match the bound runtime identity"},
+		{name: "runtime differs within one vendor session", hello: &corev1.ShimHello{QueryInstanceId: "query-1", QueryCreatedSeq: 17, VendorSessionId: "vendor", QueryRuntimeIdentity: &corev1.QueryRuntimeIdentity{VendorSessionId: "vendor", EffectiveModel: "different"}}, want: "does not match the bound runtime identity"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			beforeQuery, beforeRuntime := r.queryID, r.runtime
+			beforeQuery, beforeCreatedSeq, beforeStoreSession, beforeRuntime := r.queryID, r.queryCreatedSeq, r.queryStoreSessionID, r.runtime
 			err := r.bindHandshakeIdentity(test.hello)
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("bind error = %v, want %q", err, test.want)
 			}
-			if r.queryID != beforeQuery || !proto.Equal(r.runtime, beforeRuntime) {
+			if r.queryID != beforeQuery || r.queryCreatedSeq != beforeCreatedSeq || r.queryStoreSessionID != beforeStoreSession || !proto.Equal(r.runtime, beforeRuntime) {
 				t.Fatalf("rejected hello mutated reducer: query=%q runtime=%+v", r.queryID, r.runtime)
 			}
 		})
@@ -186,13 +187,24 @@ func TestTurnAccountingAcceptsRetiredQueryLifecycleWithoutReplacingLiveHandshake
 	liveRuntime := completeRuntimeIdentity()
 	if err := c.accounting.bindHandshakeIdentity(&corev1.ShimHello{
 		QueryInstanceId:      "live-query",
+		QueryCreatedSeq:      8,
 		VendorSessionId:      "vendor",
 		QueryRuntimeIdentity: liveRuntime,
 	}); err != nil {
 		t.Fatalf("bind live handshake: %v", err)
 	}
 
-	historical := &corev1.Event{Seq: 5, Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+	historicalCreated := &corev1.Event{Seq: 5, Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+		QueryInstanceId: "retired-query",
+		Event: &corev1.QueryLifecycle_Created{Created: &corev1.QueryCreated{
+			Invocation: &corev1.QueryCreated_Resumed{Resumed: &corev1.ResumedQuery{RequestedVendorSessionId: "vendor"}},
+		}},
+	}}}
+	historicalRuntime := &corev1.Event{Seq: 6, Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+		QueryInstanceId: "retired-query",
+		Event:           &corev1.QueryLifecycle_RuntimeObserved{RuntimeObserved: &corev1.QueryRuntimeObserved{Identity: liveRuntime}},
+	}}}
+	historicalTerminated := &corev1.Event{Seq: 7, Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
 		QueryInstanceId: "retired-query",
 		ObservedAtMs:    1234,
 		Event: &corev1.QueryLifecycle_Terminated{Terminated: &corev1.QueryTerminated{
@@ -202,13 +214,15 @@ func TestTurnAccountingAcceptsRetiredQueryLifecycleWithoutReplacingLiveHandshake
 			}},
 		}},
 	}}}
-	if err := c.Consume(historical); err != nil {
-		t.Fatalf("consume retired lifecycle: %v", err)
+	for _, historical := range []*corev1.Event{historicalCreated, historicalRuntime, historicalTerminated} {
+		if err := c.Consume(historical); err != nil {
+			t.Fatalf("consume retired lifecycle seq=%d: %v", historical.GetSeq(), err)
+		}
 	}
 	if c.accounting.queryID != "live-query" || !proto.Equal(c.accounting.runtime, liveRuntime) {
 		t.Fatalf("retired lifecycle rebound accounting identity: query=%q runtime=%+v", c.accounting.queryID, c.accounting.runtime)
 	}
-	created := &corev1.Event{Seq: 6, Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+	created := &corev1.Event{Seq: 8, Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
 		QueryInstanceId: "live-query",
 		Event: &corev1.QueryLifecycle_Created{Created: &corev1.QueryCreated{
 			Invocation: &corev1.QueryCreated_Resumed{Resumed: &corev1.ResumedQuery{RequestedVendorSessionId: "vendor"}},
@@ -219,7 +233,7 @@ func TestTurnAccountingAcceptsRetiredQueryLifecycleWithoutReplacingLiveHandshake
 	}
 	observedRuntime := proto.Clone(liveRuntime).(*corev1.QueryRuntimeIdentity)
 	observedRuntime.FastModeReason = "runtime event"
-	runtimeObserved := &corev1.Event{Seq: 7, Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+	runtimeObserved := &corev1.Event{Seq: 9, Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
 		QueryInstanceId: "live-query",
 		Event: &corev1.QueryLifecycle_RuntimeObserved{RuntimeObserved: &corev1.QueryRuntimeObserved{
 			Identity: observedRuntime,
@@ -231,9 +245,9 @@ func TestTurnAccountingAcceptsRetiredQueryLifecycleWithoutReplacingLiveHandshake
 	if c.accounting.queryID != "live-query" || !proto.Equal(c.accounting.runtime, observedRuntime) {
 		t.Fatalf("live lifecycle was not authoritative: query=%q runtime=%+v", c.accounting.queryID, c.accounting.runtime)
 	}
-	contradiction := proto.Clone(historical).(*corev1.Event)
-	contradiction.Seq = 8
-	if err := c.Consume(contradiction); err == nil || !strings.Contains(err.Error(), "after the live query lifecycle was observed") {
+	contradiction := proto.Clone(historicalTerminated).(*corev1.Event)
+	contradiction.Seq = 10
+	if err := c.Consume(contradiction); err == nil || !strings.Contains(err.Error(), "with live query_created_seq 8") {
 		t.Fatalf("post-boundary retired lifecycle error = %v, want hard identity failure", err)
 	}
 	log := strings.Join(logs, "\n")
@@ -248,6 +262,31 @@ func TestTurnAccountingAcceptsRetiredQueryLifecycleWithoutReplacingLiveHandshake
 		if !strings.Contains(log, field) {
 			t.Fatalf("acceptance log = %q, want field %q", log, field)
 		}
+	}
+}
+
+func TestHistoricalResumeIdentityMismatchRemainsFatalBeforeLiveQueryBoundary(t *testing.T) {
+	c := newConsumer("ws", "s", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, func(string, ...any) {}, nil, nil, nil, nil, nil)
+	if err := c.accounting.bindHandshakeIdentity(&corev1.ShimHello{QueryInstanceId: "live-query", QueryCreatedSeq: 10, VendorSessionId: "vendor"}); err != nil {
+		t.Fatalf("bind live handshake: %v", err)
+	}
+	created := &corev1.Event{Seq: 5, Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+		QueryInstanceId: "retired-query",
+		Event:           &corev1.QueryLifecycle_Created{Created: &corev1.QueryCreated{Invocation: &corev1.QueryCreated_Resumed{Resumed: &corev1.ResumedQuery{RequestedVendorSessionId: "requested-vendor"}}}},
+	}}}
+	if err := c.Consume(created); err != nil {
+		t.Fatalf("consume historical QueryCreated: %v", err)
+	}
+	runtime := &corev1.Event{Seq: 6, Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+		QueryInstanceId: "retired-query",
+		Event:           &corev1.QueryLifecycle_RuntimeObserved{RuntimeObserved: &corev1.QueryRuntimeObserved{Identity: &corev1.QueryRuntimeIdentity{VendorSessionId: "replacement-vendor"}}},
+	}}}
+	err := c.Consume(runtime)
+	if err == nil || !strings.Contains(err.Error(), `resumed query reported vendor session "replacement-vendor" instead of requested session "requested-vendor"`) {
+		t.Fatalf("historical identity mismatch error = %v", err)
+	}
+	if c.accounting.queryID != "live-query" || c.accounting.queryCreatedSeq != 10 {
+		t.Fatalf("rejected historical mismatch mutated accounting boundary: query=%q seq=%d", c.accounting.queryID, c.accounting.queryCreatedSeq)
 	}
 }
 
