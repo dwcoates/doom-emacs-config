@@ -181,8 +181,18 @@ func kindOf(ev *corev1.Event) string {
 		return "DegradedState"
 	case *corev1.Event_Unparsed:
 		return "UnparsedEvent"
+	case *corev1.Event_MessageLatency:
+		return "MessageLatency"
+	case *corev1.Event_ContextCleared:
+		return "ContextCleared"
+	case *corev1.Event_ContextCompacted:
+		return "ContextCompacted"
 	case *corev1.Event_FilePlaneDiagnostic:
 		return "FilePlaneDiagnostic"
+	case *corev1.Event_QueryLifecycle:
+		return "QueryLifecycle"
+	case *corev1.Event_AccountUsageObservation:
+		return "AccountUsageObservation"
 	default:
 		return "Unknown"
 	}
