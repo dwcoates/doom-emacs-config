@@ -248,12 +248,12 @@ func (m *Manager) resolveQueueEntryLocked(workspace, entryID string) (queueEntry
 // holds it NOW and returns the shrunken view to publish. ok is false when
 // neither holds it any more.
 //
-// It re-resolves deliberately. The durable row is dropped with the mutex
-// RELEASED (a store write must not be taken under it), and in that window the
-// session can wire and its controller can ADOPT the very entry being cancelled
-// — so the ledger that held it when the command arrived is not necessarily the
-// one that holds it when the removal commits. Re-resolving through the shared
-// resolver is what makes the cancel land on the entry rather than on a ledger.
+// It re-resolves deliberately, and re-resolving is what makes the cancel land on
+// the ENTRY rather than on a ledger. Its caller now holds m.mu across the whole
+// command, so the wire-and-adopt window it was originally written to survive is
+// closed; the re-resolve is kept because the guarantee it provides is free and
+// because nothing in this function's contract should depend on how long its
+// caller happens to hold the mutex.
 //
 // Caller holds m.mu.
 func (m *Manager) removeCancelledEntryLocked(workspace, entryID string) (sessionID string, view *frontendv1.QueueView, recs []registry.QueuedPrompt, materialized, ok bool) {

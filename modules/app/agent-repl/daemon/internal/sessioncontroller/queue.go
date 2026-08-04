@@ -793,6 +793,15 @@ func (m *Manager) ForceQueueEntry(workspace, entryID string) error {
 	// queue command shares, because a client can see and aim at a prompt whose
 	// session has not wired. A force can only refuse it, and it refuses with the
 	// session named and the failure TYPED (parkedledger.go).
+	//
+	// ONE ACQUISITION SPANS RESOLVE, DROP AND COMMIT. The drain lease's own
+	// parking write (parkForDrain) creates the durable row under m.mu; taking the
+	// drop under the SAME mutex is what makes one lock arbitrate both the row's
+	// creation and its destruction. Snapshotting drainRowPending, releasing, and
+	// then skipping the drop left a window in which AcquireShutdownHolds wrote a
+	// row for this very entry — so the force committed, delivered the prompt, and
+	// left a row standing that the next boot replays as a SECOND run of a prompt
+	// the user forced exactly once.
 	m.mu.Lock()
 	owner, err := m.resolveQueueEntryLocked(workspace, entryID)
 	if err != nil {
@@ -807,7 +816,6 @@ func (m *Manager) ForceQueueEntry(workspace, entryID string) error {
 	d := owner.live
 	e := owner.entryLocked(entryID)
 	forcedSchedule, hadRow := e.shutdownHoldScheduleID, e.drainRowPending
-	m.mu.Unlock()
 
 	// THE DURABLE ROW GOES FIRST, before the entry becomes deliverable. A force
 	// ends in a submitted prompt, and an entry whose row outlives that submit is
@@ -818,6 +826,7 @@ func (m *Manager) ForceQueueEntry(workspace, entryID string) error {
 	// answering again.
 	if hadRow {
 		if err := m.dropDrainRow(entryID, "forced_by_user"); err != nil {
+			m.mu.Unlock()
 			m.logf("session-controller: force REFUSED entry=%s ws=%q session=%s schedule=%s error=%v — the durable parking row could not be dropped, so the entry is left parked rather than delivered; delivering it with its row standing would let the daemon that comes back run the same prompt again",
 				entryID, workspace, d.sessionID, forcedSchedule, err)
 			return fmt.Errorf("session-controller: cannot force queued prompt %q on workspace %q: %w", entryID, workspace, err)
@@ -830,11 +839,13 @@ func (m *Manager) ForceQueueEntry(workspace, entryID string) error {
 	// starts then becomes a drain hold of its own and delays the bounce further
 	// — which is exactly what they asked for, so it is honored rather than
 	// second-guessed, and loud-logged so the delay has a stated author.
-	m.mu.Lock()
-	e = d.queue.get(entryID)
-	if e == nil {
+	//
+	// The re-fetch is kept as an assertion rather than as a recovery: nothing can
+	// take the entry out from under a mutex this path never released, so a miss
+	// here is a broken invariant and is reported as the loud failure it is.
+	if e = d.queue.get(entryID); e == nil {
 		m.mu.Unlock()
-		m.logf("session-controller: force found NOTHING to deliver entry=%s ws=%q session=%s — the entry left the queue while its durable parking row was being dropped; the row is gone, so nothing will re-materialize it",
+		m.logf("session-controller: force found NOTHING to deliver entry=%s ws=%q session=%s — the entry left the queue while this force held m.mu, which nothing is supposed to be able to do; its durable row is already gone, so nothing will re-materialize it",
 			entryID, workspace, d.sessionID)
 		return fmt.Errorf("session-controller: no queued prompt %q on workspace %q", entryID, workspace)
 	}
@@ -902,6 +913,13 @@ func ledgerName(o queueEntryOwner) string {
 // REFUSES the cancel (dropCancelledRow). The other order tells the user their
 // prompt is gone while the ledger still says it is parked, and the daemon that
 // comes back from the bounce then re-materializes and delivers it.
+//
+// ONE ACQUISITION SPANS RESOLVE, DROP AND COMMIT, for the same reason it does in
+// ForceQueueEntry. The drain lease creates the durable row under m.mu
+// (parkForDrain), so the drop must be taken under m.mu too or the two are not
+// arbitrated by anything: a cancel that decided "no row" and then released could
+// have AcquireShutdownHolds write one for that entry before the removal
+// committed, and the next boot resurrects a prompt the user took back.
 func (m *Manager) CancelQueueEntry(workspace, entryID string) error {
 	m.mu.Lock()
 	owner, err := m.resolveQueueEntryLocked(workspace, entryID)
@@ -911,17 +929,20 @@ func (m *Manager) CancelQueueEntry(workspace, entryID string) error {
 	}
 	e := owner.entryLocked(entryID)
 	heldBy, hadRow, sessionID := e.shutdownHoldScheduleID, e.drainRowPending, owner.sessionID()
-	m.mu.Unlock()
 
 	if err := m.dropCancelledRow(workspace, entryID, sessionID, hadRow); err != nil {
+		m.mu.Unlock()
 		return err
 	}
 
-	m.mu.Lock()
+	// The re-resolve is kept as an assertion rather than as a recovery: nothing
+	// can move the entry between ledgers under a mutex this path never released,
+	// so a miss here is a broken invariant and is reported as the loud failure it
+	// is.
 	sessionID, view, recs, materialized, ok := m.removeCancelledEntryLocked(workspace, entryID)
 	if !ok {
 		m.mu.Unlock()
-		m.logf("session-controller: queue cancel found NOTHING to remove entry=%s ws=%q — the entry left both ledgers while its durable parking row was being dropped; the row is gone, so nothing can re-materialize it",
+		m.logf("session-controller: queue cancel found NOTHING to remove entry=%s ws=%q — the entry left both ledgers while this cancel held m.mu, which nothing is supposed to be able to do; its durable row is already gone, so nothing can re-materialize it",
 			entryID, workspace)
 		return fmt.Errorf("session-controller: no queued prompt %q on workspace %q", entryID, workspace)
 	}

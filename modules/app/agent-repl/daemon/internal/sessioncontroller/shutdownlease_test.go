@@ -74,6 +74,10 @@ type fakeHoldStore struct {
 	// enterable: a test acts there and the restore then applies rows read
 	// before that act.
 	onHeldPrompts func()
+	// onDrop runs inside DropHeldPrompt, with the store's own lock RELEASED. It
+	// is the moment a command's durable row removal lands, which is where a test
+	// observes WHICH LOCKS the command is holding while it removes it.
+	onDrop func(entryID string)
 }
 
 func newFakeHoldStore() *fakeHoldStore {
@@ -93,13 +97,22 @@ func (f *fakeHoldStore) RecordHeldPrompt(p statedb.HeldPrompt) error {
 
 func (f *fakeHoldStore) DropHeldPrompt(entryID string) (bool, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
-	defer notifyTestActivity()
-	if f.dropErr != nil {
-		return false, f.dropErr
+	hook, dropErr := f.onDrop, f.dropErr
+	var ok bool
+	if dropErr == nil {
+		_, ok = f.rows[entryID]
+		delete(f.rows, entryID)
 	}
-	_, ok := f.rows[entryID]
-	delete(f.rows, entryID)
+	f.mu.Unlock()
+	notifyTestActivity()
+	// The hook runs with the store lock RELEASED, exactly as the HeldPrompts one
+	// does, so a hook that reaches back into this store cannot deadlock on it.
+	if hook != nil {
+		hook(entryID)
+	}
+	if dropErr != nil {
+		return false, dropErr
+	}
 	return ok, nil
 }
 
@@ -179,6 +192,14 @@ func (f *fakeHoldStore) duringHeldPromptsRead(fn func()) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.onHeldPrompts = fn
+}
+
+// duringDrop installs the hook that runs where a command's durable row removal
+// lands.
+func (f *fakeHoldStore) duringDrop(fn func(entryID string)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.onDrop = fn
 }
 
 // has reports whether the ledger still carries a row for entryID.
@@ -740,6 +761,91 @@ func TestARefusedLiveCancelKeepsTheEntryQueued(t *testing.T) {
 	// Assert.
 	if es := h.entries(); len(es) != 1 || es[0].id != id {
 		t.Fatalf("queue = %+v after a refused cancel, want the entry retained", es)
+	}
+}
+
+// --- the row creation/destruction window -------------------------------------
+
+func TestAQueueCommandTakesItsDurableRowDropUnderTheManagerMutex(t *testing.T) {
+	// THE WINDOW THIS CLOSES. cancel and force used to snapshot
+	// e.drainRowPending under m.mu, RELEASE it, and skip the drop entirely when
+	// the snapshot said there was no row — while AcquireShutdownHolds, whose
+	// parkForDrain writes the durable row UNDER m.mu, could write one for that
+	// same entry in the gap. The command then committed without dropping a row
+	// that now existed, and the next boot resurrected a prompt the user withdrew
+	// or re-delivered one they had already forced.
+	//
+	// One mutex has to arbitrate the row's CREATION and its DESTRUCTION, and this
+	// is what says so: the manager mutex is HELD at the moment the store's drop
+	// lands, so no park can interleave with the command at all.
+	tests := []struct {
+		name string
+		act  func(*leaseHarness, string) error
+	}{
+		{"cancel", func(h *leaseHarness, id string) error { return h.m.CancelQueueEntry("ws", id) }},
+		{"force", func(h *leaseHarness, id string) error { return h.m.ForceQueueEntry("ws", id) }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange — one parked entry with a durable row behind it, over a store
+			// that reports whether the manager mutex was free when its drop landed.
+			h := newLeaseHarness(t)
+			h.lease.hold("sd_1")
+			if err := h.submit("parked"); err != nil {
+				t.Fatalf("submit: %v", err)
+			}
+			id := h.entries()[0].id
+			// The hook runs on the command's OWN goroutine, so this is an ordinary
+			// read of an ordinary local rather than shared state.
+			mutexWasFree := false
+			h.store.duringDrop(func(string) {
+				if h.m.mu.TryLock() {
+					mutexWasFree = true
+					h.m.mu.Unlock()
+				}
+			})
+
+			// Act.
+			if err := tt.act(h, id); err != nil {
+				t.Fatalf("%s: %v", tt.name, err)
+			}
+
+			// Assert.
+			if mutexWasFree {
+				t.Fatalf("the %s dropped its durable row with the manager mutex RELEASED — AcquireShutdownHolds can write a row for this entry in that gap, and the command then commits without dropping it", tt.name)
+			}
+		})
+	}
+}
+
+func TestACancelLeavesNoDurableRowWhenADrainAcquisitionRacesIt(t *testing.T) {
+	// The END STATE the window above threatened. With one mutex arbitrating both
+	// halves only two orders exist, and neither leaves a row behind: the
+	// acquisition parks first and the cancel drops exactly what it wrote, or the
+	// cancel removes the entry first and the acquisition finds nothing to park.
+	// Arrange — an UNPARKED queued entry, the only kind an acquisition writes a
+	// new row for, and an acquisition running against the cancel.
+	h := newLeaseHarness(t)
+	h.turn(true)
+	if err := h.submit("later"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	id := h.entries()[0].id
+	acquired := make(chan struct{})
+	go func() {
+		defer close(acquired)
+		h.m.AcquireShutdownHolds("sd_1")
+	}()
+
+	// Act.
+	if err := h.m.CancelQueueEntry("ws", id); err != nil {
+		t.Fatalf("CancelQueueEntry: %v", err)
+	}
+	<-acquired
+
+	// Assert.
+	if h.store.has(id) {
+		t.Fatalf("a durable hold row for %s outlived the cancel that took its prompt back — the daemon that comes back from the bounce would re-materialize a withdrawn prompt", id)
 	}
 }
 
