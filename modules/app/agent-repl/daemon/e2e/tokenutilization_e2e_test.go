@@ -47,11 +47,27 @@ func TestE2ETokenUtilizationPairsResponseUsageWithTiming(t *testing.T) {
 	id, conn, _, _ := liveSession(t, h, cwd)
 
 	writeCmd(t, conn, `{"requestId":"e2e-token-main","submitPrompt":{"text":"measure response timing"}}`)
-	item, _ := awaitItem(t, conn, cwd, "the completed assistant response carrying token utilization", func(item *frontendv1.ConversationItem) bool {
+	awaitItem(t, conn, cwd, "the completed assistant response", func(item *frontendv1.ConversationItem) bool {
 		return item.GetAssistantMessage().GetId() == "msg_fake_1"
 	})
+	// A file-plane assistant item can be pushed before its stream-plane
+	// message_start timing reaches the correlator. The terminal result is the
+	// turn's last conversation item, so wait for it before asserting against
+	// the durable replay that this test promises to cover.
+	awaitItem(t, conn, cwd, "the turn's terminal result", isResult)
 
-	usage := requireSingleTokenUtilization(t, item, "live assistant response")
+	replay := replayItems(t, h.dial(t, id), cwd, "e2e-token-replay")
+	var replayed *frontendv1.ConversationItem
+	for _, candidate := range replay {
+		if candidate.GetAssistantMessage().GetId() == "msg_fake_1" {
+			replayed = candidate
+			break
+		}
+	}
+	if replayed == nil {
+		t.Fatal("replay omitted the assistant response carrying token utilization")
+	}
+	usage := requireSingleTokenUtilization(t, replayed, "replayed assistant response")
 	if got, want := usage.GetAgentReplSessionId(), id; got != want {
 		t.Errorf("token utilization agent_repl_session_id = %q, want session %q", got, want)
 	}
@@ -72,25 +88,6 @@ func TestE2ETokenUtilizationPairsResponseUsageWithTiming(t *testing.T) {
 	}
 	if usage.GetResponseTiming() == nil || usage.GetResponseTiming().TimeToFirstTokenMs == nil || usage.GetResponseTiming().OutputGenerationDurationMs == nil {
 		t.Fatal("token utilization omitted TTFT or output-generation duration: generation throughput must use paired response timing, never whole-turn duration")
-	}
-
-	replay := replayItems(t, h.dial(t, id), cwd, "e2e-token-replay")
-	var replayed *frontendv1.ConversationItem
-	for _, candidate := range replay {
-		if candidate.GetAssistantMessage().GetId() == "msg_fake_1" {
-			replayed = candidate
-			break
-		}
-	}
-	if replayed == nil {
-		t.Fatal("replay omitted the assistant response carrying token utilization")
-	}
-	replayedUsage := requireSingleTokenUtilization(t, replayed, "replayed assistant response")
-	if got, want := replayedUsage.GetApiMessageId(), usage.GetApiMessageId(); got != want {
-		t.Errorf("replayed token utilization api_message_id = %q, want durable identity %q", got, want)
-	}
-	if replayedUsage.GetResponseTiming() == nil || replayedUsage.GetResponseTiming().OutputGenerationDurationMs == nil {
-		t.Error("replayed token utilization lost output-generation duration")
 	}
 }
 
