@@ -48,6 +48,7 @@ import {
   UdsSession,
   isQueryTerminationCleanupError,
   isQueryTerminationPersistenceError,
+  sessionRewoundDedupKey,
 } from "../src/uds/uds-session.js";
 import type { UdsQuery } from "../src/uds/uds-session.js";
 import type {
@@ -77,6 +78,7 @@ import {
   InterruptOutcome,
   PermissionRequestSchema,
   PermissionResponseSchema,
+  Plane,
   PromptOrigin,
   SessionSource,
   ReplayDoneSchema,
@@ -3034,5 +3036,241 @@ describe("UdsSession handshake permission mode", () => {
     // Assert: no ack, and no silent fallback to "default" either.
     expect(daemon.count(ShimReadySchema)).toBe(0);
     expect(query.permissionModes).toEqual([]);
+  });
+});
+
+describe("UdsSession rewind lineage: SessionRewound", () => {
+  const LINEAGE = {
+    previousVendorSessionId: "old-vendor",
+    retainedLeafUuid: "leaf-uuid",
+    droppedTurnIds: ["ka-1", "ka-2"],
+  };
+
+  /**
+   * Stand up a session resumed onto a truncated transcript, drain and ack the
+   * mandatory QueryCreated, and hand back the store so a test can read what the
+   * session writes NEXT. Deliberately stops short of the daemon handshake: the
+   * rewind lands before the daemon connection exists.
+   */
+  async function rewindRig(
+    opts: { rewindLineage?: typeof LINEAGE; storeSessionId?: string } = {},
+  ): Promise<{ store: FakeStore; session: UdsSession; done: Promise<void> }> {
+    const store = await fakeStore();
+    cleanups.push(() => store.close());
+    const session = new UdsSession({
+      sessionId: "sess-rewound",
+      shimVersion: "9.9",
+      protocolVersion: "1",
+      // No listener on this path: start() parks on the daemon dial, which keeps
+      // the test focused on the store writes that precede it.
+      udsSocketPath: tmpSocketPath(),
+      storeSocketPath: store.socketPath,
+      sessionSource: SessionSource.RESUME,
+      storeSessionId: opts.storeSessionId ?? "new-vendor",
+      queryInstanceId: "rewound-query",
+      ...(opts.rewindLineage !== undefined ? { rewindLineage: opts.rewindLineage } : {}),
+      createQuery: (prompt, canUseTool): UdsQuery => {
+        const live = new FakeQuery(prompt, canUseTool);
+        return { query: live, subscriptionUsage: () => live.subscriptionUsage(), abort: () => live.abort() };
+      },
+      heartbeatIntervalMs: 0,
+    });
+    const done = session.start();
+    void done.catch(() => {});
+    await acknowledgeInitialQueryLifecycle(store);
+    return { store, session, done };
+  }
+
+  it("emits SessionRewound as the first event after QueryCreated", async () => {
+    // Arrange
+    const { store } = await rewindRig({ rewindLineage: LINEAGE });
+    // Act — acknowledgeInitialQueryLifecycle already consumed QueryCreated.
+    const write = await store.peer().next(StoreWriteSchema);
+    // Assert
+    expect(write.batch!.events.map((e) => e.payload.case)).toEqual(["sessionRewound"]);
+  });
+
+  it("names both sides of the rewind and the retained leaf", async () => {
+    // Arrange
+    const { store } = await rewindRig({ rewindLineage: LINEAGE });
+    // Act
+    const write = await store.peer().next(StoreWriteSchema);
+    const event = write.batch!.events[0]!;
+    if (event.payload.case !== "sessionRewound") throw new Error("case");
+    // Assert
+    expect(event.payload.value.previousVendorSessionId).toBe("old-vendor");
+    expect(event.payload.value.newVendorSessionId).toBe("new-vendor");
+    expect(event.payload.value.retainedLeafUuid).toBe("leaf-uuid");
+  });
+
+  it("carries the dropped keep-alive turn ids in submission order", async () => {
+    // Arrange
+    const { store } = await rewindRig({ rewindLineage: LINEAGE });
+    // Act
+    const write = await store.peer().next(StoreWriteSchema);
+    const event = write.batch!.events[0]!;
+    if (event.payload.case !== "sessionRewound") throw new Error("case");
+    if (event.payload.value.reason.case !== "keepAliveDiscard") throw new Error("reason");
+    // Assert
+    expect(event.payload.value.reason.value.droppedTurnIds).toEqual(["ka-1", "ka-2"]);
+  });
+
+  it("files the rewind into the NEW vendor session's seq space", async () => {
+    // Arrange
+    const { store } = await rewindRig({ rewindLineage: LINEAGE });
+    // Act
+    const write = await store.peer().next(StoreWriteSchema);
+    // Assert — the retired seq space must never receive it.
+    expect(write.batch!.events[0]!.sessionId).toBe("new-vendor");
+  });
+
+  it("writes the rewind as a PERSISTENT stream-plane event", async () => {
+    // Arrange
+    const { store } = await rewindRig({ rewindLineage: LINEAGE });
+    // Act
+    const event = (await store.peer().next(StoreWriteSchema)).batch!.events[0]!;
+    // Assert
+    expect(event.plane).toBe(Plane.STREAM);
+    expect(event.class).toBe(EventClass.PERSISTENT);
+  });
+
+  it("stamps a dedup key keyed on the retired vendor session id", async () => {
+    // Arrange
+    const { store } = await rewindRig({ rewindLineage: LINEAGE });
+    // Act
+    const event = (await store.peer().next(StoreWriteSchema)).batch!.events[0]!;
+    // Assert — a shim restart re-emits this exact key and the store collapses it.
+    expect(event.dedupKey).toBe(sessionRewoundDedupKey("old-vendor"));
+    expect(event.dedupKey).toBe("rewind:old-vendor");
+  });
+
+  it("treats a single-dedup receipt as success on a shim restart", async () => {
+    // Arrange: the store has already persisted this exact lineage.
+    const { store, done } = await rewindRig({ rewindLineage: LINEAGE });
+    await store.peer().next(StoreWriteSchema);
+    let failed = false;
+    void done.catch(() => { failed = true; });
+    // Act: a duplicate consumes no seq, so last_seq is 0.
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { accepted: 0n, deduped: 1n, lastSeq: 0n }));
+    await tick();
+    await tick();
+    // Assert: bring-up continued — no terminal write, no rejection.
+    expect(failed).toBe(false);
+    expect(store.peer().count(StoreWriteSchema)).toBe(0);
+  });
+
+  it("fails bring-up when the rewind receipt accepts nothing at all", async () => {
+    // Arrange
+    const { store, done } = await rewindRig({ rewindLineage: LINEAGE });
+    await store.peer().next(StoreWriteSchema);
+    // Act: neither an acceptance nor a dedup.
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { accepted: 0n, deduped: 0n, lastSeq: 0n }));
+    // Assert
+    const terminal = await store.peer().next(StoreWriteSchema);
+    expect(terminal.batch!.events[0]!.payload.case).toBe("queryLifecycle");
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { accepted: 2n, lastSeq: 3n }));
+    await expect(done).rejects.toThrow(/SessionRewound persistence returned an invalid receipt/);
+  });
+
+  it("fails bring-up when the rewind is accepted without an assigned seq", async () => {
+    // Arrange
+    const { store, done } = await rewindRig({ rewindLineage: LINEAGE });
+    await store.peer().next(StoreWriteSchema);
+    // Act: an acceptance always assigns a seq, so seq 0 is a broken receipt.
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { accepted: 1n, deduped: 0n, lastSeq: 0n }));
+    // Assert
+    const terminal = await store.peer().next(StoreWriteSchema);
+    expect(terminal.batch!.events[0]!.payload.case).toBe("queryLifecycle");
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { accepted: 2n, lastSeq: 3n }));
+    await expect(done).rejects.toThrow(/SessionRewound persistence returned an invalid receipt/);
+  });
+
+  it("logs the invalid rewind receipt once with its causal context", async () => {
+    // Arrange
+    const log = captureLog();
+    const { store, done } = await rewindRig({ rewindLineage: LINEAGE });
+    await store.peer().next(StoreWriteSchema);
+    // Act: a batch of one cannot have accepted two.
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { accepted: 2n, deduped: 0n, lastSeq: 4n }));
+    await store.peer().next(StoreWriteSchema);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { accepted: 2n, lastSeq: 5n }));
+    await expect(done).rejects.toThrow(/invalid receipt/);
+    // Assert
+    const record = log.record("fatal_invalid_session_rewound_receipt");
+    expect(record.operation).toBe("shim.uds-session.session-rewound");
+    expect(record.context).toMatchObject({
+      outcome: "fatal_invalid_session_rewound_receipt",
+      previous_vendor_session_id: "old-vendor",
+      store_key: "new-vendor",
+      query_instance_id: "rewound-query",
+      accepted: "2",
+      deduped: "0",
+      last_seq: "4",
+    });
+    expect(log.count("fatal_invalid_session_rewound_receipt")).toBe(1);
+  });
+
+  it("refuses a lineage naming the resumed session as its own predecessor", async () => {
+    // Arrange + Act: argv validation catches this first in production; the
+    // session refuses it too so no caller can write a self-referential rewind.
+    const { store, done } = await rewindRig({
+      rewindLineage: { ...LINEAGE, previousVendorSessionId: "new-vendor" },
+      storeSessionId: "new-vendor",
+    });
+    const terminal = await store.peer().next(StoreWriteSchema);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { accepted: 2n, lastSeq: 3n }));
+    // Assert
+    expect(terminal.batch!.events[0]!.payload.case).toBe("queryLifecycle");
+    await expect(done).rejects.toThrow(/both sides of the rewind/);
+  });
+
+  it("writes no SessionRewound for an ordinary resume with no lineage", async () => {
+    // Arrange: the same resumed session, without rewind flags.
+    const { store } = await rewindRig();
+    // Act
+    await tick();
+    await tick();
+    // Assert: the store saw QueryCreated and nothing after it.
+    expect(store.peer().count(StoreWriteSchema)).toBe(0);
+  });
+});
+
+describe("UdsSession keep-alive turns: prompt_origin passthrough", () => {
+  it("carries PROMPT_ORIGIN_CACHE_KEEP_ALIVE onto TurnStarted unchanged", async () => {
+    // Arrange
+    const { daemon, store } = await rig({ holdTurnStartAck: true });
+    // Act: a keep-alive ping is an ORDINARY SubmitPrompt.
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, {
+      requestId: "ka-1",
+      text: "respond with only '.', no tool calls or changes",
+      promptOrigin: PromptOrigin.CACHE_KEEP_ALIVE,
+    }));
+    const write = await store.peer().next(StoreWriteSchema);
+    const started = write.batch!.events[0]!;
+    if (started.payload.case !== "turnStarted") throw new Error("case");
+    // Assert: the durable copy is the submitted origin, with no remapping.
+    expect(started.payload.value.promptOrigin).toBe(PromptOrigin.CACHE_KEEP_ALIVE);
+    expect(started.payload.value.turnId).toBe("ka-1");
+    // Release the held boundary so the fixture can tear the session down.
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { accepted: 2n, lastSeq: 2n }));
+    expect((await daemon.next(AckSchema)).requestId).toBe("ka-1");
+  });
+
+  it("accepts a keep-alive prompt into the SDK like any other turn", async () => {
+    // Arrange
+    const { daemon, query } = await rig();
+    // Act
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, {
+      requestId: "ka-2",
+      text: "respond with only '.'",
+      promptOrigin: PromptOrigin.CACHE_KEEP_ALIVE,
+    }));
+    const ack = await daemon.next(AckSchema);
+    await until(() => query.prompts.length === 1);
+    // Assert: no special-casing — the ping reaches the vendor as a real prompt.
+    expect(ack.requestId).toBe("ka-2");
+    expect(query.prompts[0]!.message.content).toEqual([
+      { type: "text", text: "respond with only '.'" },
+    ]);
   });
 });
