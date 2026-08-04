@@ -184,6 +184,7 @@ func (c *fakeClient) SubmitPrompt(_ context.Context, text, origin, mode string) 
 	c.origins = append(c.origins, origin)
 	c.modes = append(c.modes, mode)
 	c.mu.Unlock()
+	notifyTestActivity()
 	return nil
 }
 func (c *fakeClient) AwaitReady(ctx context.Context) error {
@@ -192,6 +193,7 @@ func (c *fakeClient) AwaitReady(ctx context.Context) error {
 	awaitErr := c.awaitErr
 	c.awaitReadyCalls++
 	c.mu.Unlock()
+	notifyTestActivity()
 	if awaitErr != nil {
 		return awaitErr
 	}
@@ -210,6 +212,7 @@ func (c *fakeClient) Health(_ context.Context, requestID string) (*corev1.Health
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.healthRequestIDs = append(c.healthRequestIDs, requestID)
+	defer notifyTestActivity()
 	if c.healthErr != nil {
 		return nil, c.healthErr
 	}
@@ -224,6 +227,7 @@ func (c *fakeClient) Interrupt(_ context.Context) (corev1.InterruptOutcome, erro
 	c.interrupts++
 	outcome := c.interruptOutcome
 	c.mu.Unlock()
+	notifyTestActivity()
 	if outcome == corev1.InterruptOutcome_INTERRUPT_OUTCOME_UNSPECIFIED {
 		outcome = corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED
 	}

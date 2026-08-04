@@ -83,6 +83,7 @@ func newFakeHoldStore() *fakeHoldStore {
 func (f *fakeHoldStore) RecordHeldPrompt(p statedb.HeldPrompt) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	defer notifyTestActivity()
 	if f.err != nil {
 		return f.err
 	}
@@ -93,6 +94,7 @@ func (f *fakeHoldStore) RecordHeldPrompt(p statedb.HeldPrompt) error {
 func (f *fakeHoldStore) DropHeldPrompt(entryID string) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	defer notifyTestActivity()
 	if f.dropErr != nil {
 		return false, f.dropErr
 	}
@@ -104,6 +106,7 @@ func (f *fakeHoldStore) DropHeldPrompt(entryID string) (bool, error) {
 func (f *fakeHoldStore) DropHeldPromptsForSchedule(scheduleID string) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	defer notifyTestActivity()
 	n := 0
 	for id, p := range f.rows {
 		if p.ScheduleID == scheduleID {
