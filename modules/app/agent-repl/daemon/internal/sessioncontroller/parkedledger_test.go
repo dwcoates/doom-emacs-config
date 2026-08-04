@@ -1,9 +1,11 @@
 package sessioncontroller
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
+	"claude-repld/internal/errclass"
 	"claude-repld/internal/statedb"
 )
 
@@ -19,7 +21,15 @@ type parkedHarness struct {
 
 func newParkedHarness(t *testing.T) *parkedHarness {
 	t.Helper()
-	store := newFakeHoldStore()
+	return newParkedHarnessOn(t, newFakeHoldStore())
+}
+
+// newParkedHarnessOn is newParkedHarness over an EXISTING ledger, which is how
+// a successor daemon is expressed: the store outlives the process that wrote
+// it, so a second harness over the same store is the daemon that came back from
+// the crash reading what the first one left.
+func newParkedHarnessOn(t *testing.T, store *fakeHoldStore) *parkedHarness {
+	t.Helper()
 	cl := &logCapture{}
 	qh := newQueueHarnessUnwired(t, store, cl.logf)
 	lease := &fakeLease{}
@@ -278,6 +288,169 @@ func TestCancellingAMaterializedEntryDropsItsDurableRow(t *testing.T) {
 	}
 }
 
+// --- cancel: the durable drop is what licenses forgetting the entry ----------
+
+func TestCancellingAMaterializedEntryIsRefusedWhenItsDurableRowCannotBeDropped(t *testing.T) {
+	// The ack is the only place the user learns their prompt is NOT gone. A
+	// cancel that reports success over a row that still stands is the daemon
+	// promising a withdrawal it has not made.
+	// Arrange.
+	h := newParkedHarness(t)
+	h.lease.hold("sd_live")
+	h.record("q_parked", "sd_live", "delayed")
+	h.materialize()
+	h.store.failDropsWith(errors.New("ledger is down"))
+
+	// Act.
+	err := h.m.CancelQueueEntry("ws", "q_parked")
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "ledger is down") {
+		t.Fatalf("CancelQueueEntry over a failing drop = %v, want a refusal carrying the store failure", err)
+	}
+}
+
+func TestARefusedCancelLeavesTheDurableRowIntact(t *testing.T) {
+	// Arrange.
+	h := newParkedHarness(t)
+	h.lease.hold("sd_live")
+	h.record("q_parked", "sd_live", "delayed")
+	h.materialize()
+	h.store.failDropsWith(errors.New("ledger is down"))
+
+	// Act.
+	if err := h.m.CancelQueueEntry("ws", "q_parked"); err == nil {
+		t.Fatal("CancelQueueEntry over a failing drop succeeded, want a refusal")
+	}
+
+	// Assert.
+	if !h.store.has("q_parked") {
+		t.Fatal("the durable row is gone after a refused cancel; the refusal must leave the ledger exactly as it found it")
+	}
+}
+
+func TestARefusedCancelLeavesTheEntryInTheQueue(t *testing.T) {
+	// Arrange.
+	h := newParkedHarness(t)
+	h.lease.hold("sd_live")
+	h.record("q_parked", "sd_live", "delayed")
+	h.materialize()
+	h.store.failDropsWith(errors.New("ledger is down"))
+
+	// Act.
+	if err := h.m.CancelQueueEntry("ws", "q_parked"); err == nil {
+		t.Fatal("CancelQueueEntry over a failing drop succeeded, want a refusal")
+	}
+
+	// Assert — the prompt is still there to cancel again once the store answers.
+	views := h.m.QueueViews()
+	if len(views) != 1 || len(views[0].GetEntries()) != 1 {
+		t.Fatalf("QueueViews = %+v after a refused cancel, want the entry still parked", views)
+	}
+}
+
+func TestARefusedCancelIsRecordedInTheCanonicalLog(t *testing.T) {
+	// Arrange.
+	h := newParkedHarness(t)
+	h.lease.hold("sd_live")
+	h.record("q_parked", "sd_live", "delayed")
+	h.materialize()
+	h.store.failDropsWith(errors.New("ledger is down"))
+
+	// Act.
+	if err := h.m.CancelQueueEntry("ws", "q_parked"); err == nil {
+		t.Fatal("CancelQueueEntry over a failing drop succeeded, want a refusal")
+	}
+
+	// Assert.
+	if !h.log.contains("queue cancel REFUSED entry=q_parked") {
+		t.Fatalf("the refused cancel left no canonical log line naming it")
+	}
+}
+
+func TestACancelledPromptIsNotResurrectedByTheDaemonThatComesBack(t *testing.T) {
+	// THE POINT OF DROPPING THE ROW FIRST. The row is the only thing a successor
+	// daemon reads, so a cancel that forgets the entry before the row is gone
+	// can be undone by a crash in that window.
+	// Arrange — a daemon materializes the parked prompt and the user cancels it.
+	store := newFakeHoldStore()
+	first := newParkedHarnessOn(t, store)
+	first.lease.hold("sd_live")
+	first.record("q_parked", "sd_live", "delayed")
+	first.materialize()
+	if err := first.m.CancelQueueEntry("ws", "q_parked"); err != nil {
+		t.Fatalf("CancelQueueEntry: %v", err)
+	}
+
+	// Act — the daemon dies and the successor materializes the same ledger.
+	successor := newParkedHarnessOn(t, store)
+	successor.lease.hold("sd_live")
+	successor.materialize()
+
+	// Assert.
+	if views := successor.m.QueueViews(); len(views) != 0 {
+		t.Fatalf("the successor daemon materialized %+v, want nothing — the prompt was cancelled before it died", views)
+	}
+}
+
+// --- accept ------------------------------------------------------------------
+
+func TestAcceptingAMaterializedEntryIsHonored(t *testing.T) {
+	// Accept is VIEW STATE and needs no shim — the same argument cancel makes.
+	// It used to report "no queued prompt" for a prompt the client was looking
+	// at, because it alone did not consult the materialized ledger.
+	// Arrange.
+	h := newParkedHarness(t)
+	h.lease.hold("sd_live")
+	h.record("q_parked", "sd_live", "delayed")
+	h.materialize()
+
+	// Act.
+	err := h.m.AcceptQueueEntry("ws", "q_parked")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("AcceptQueueEntry on a materialized entry = %v, want it honored with no live session", err)
+	}
+}
+
+func TestAcceptingAMaterializedEntryPublishesItAsAccepted(t *testing.T) {
+	// Arrange.
+	h := newParkedHarness(t)
+	h.lease.hold("sd_live")
+	h.record("q_parked", "sd_live", "delayed")
+	h.materialize()
+
+	// Act.
+	if err := h.m.AcceptQueueEntry("ws", "q_parked"); err != nil {
+		t.Fatalf("AcceptQueueEntry: %v", err)
+	}
+
+	// Assert.
+	view := h.push.lastQueue()
+	if view == nil || len(view.GetEntries()) != 1 || !view.GetEntries()[0].GetAccepted() {
+		t.Fatalf("last pushed queue view = %+v, want the materialized entry marked accepted", view)
+	}
+}
+
+func TestAcceptingAMaterializedEntryIsRecordedInTheCanonicalLog(t *testing.T) {
+	// Arrange.
+	h := newParkedHarness(t)
+	h.lease.hold("sd_live")
+	h.record("q_parked", "sd_live", "delayed")
+	h.materialize()
+
+	// Act.
+	if err := h.m.AcceptQueueEntry("ws", "q_parked"); err != nil {
+		t.Fatalf("AcceptQueueEntry: %v", err)
+	}
+
+	// Assert.
+	if !h.log.contains("queue entry=q_parked accepted") {
+		t.Fatalf("the honored accept left no canonical log line naming it")
+	}
+}
+
 // --- force -------------------------------------------------------------------
 
 func TestForcingAMaterializedEntryIsRefusedNamingTheUnwiredSession(t *testing.T) {
@@ -333,6 +506,146 @@ func TestForcingAMaterializedEntryIsRecordedInTheCanonicalLog(t *testing.T) {
 	// Assert.
 	if !h.log.contains("force REFUSED for materialized queue entry") {
 		t.Fatal("the refused force left no canonical log line naming it")
+	}
+}
+
+func TestAForcedMaterializedEntryClassifiesAsAnUnwiredSession(t *testing.T) {
+	// TYPED, not raw. Without the sentinel this ordinary refusal reached a human
+	// as internal.unclassified — the loud fallthrough for failures NOBODY
+	// classified — and was logged a second time on the way.
+	// Arrange.
+	h := newParkedHarness(t)
+	h.lease.hold("sd_live")
+	h.record("q_parked", "sd_live", "delayed")
+	h.materialize()
+
+	// Act.
+	err := h.m.ForceQueueEntry("ws", "q_parked")
+
+	// Assert.
+	if !errors.Is(err, errclass.ErrQueueEntrySessionUnwired) {
+		t.Fatalf("ForceQueueEntry on a materialized entry = %v, want it to carry ErrQueueEntrySessionUnwired", err)
+	}
+}
+
+func TestForcingAnUnadoptedEntryOfAWiredSessionIsRefusedSayingSo(t *testing.T) {
+	// The wired-but-unadopted window: a controller exists, and the boot ledger
+	// still holds the prompt, so the controller's queue cannot deliver it yet.
+	// Arrange.
+	h := newParkedHarness(t)
+	h.lease.hold("sd_live")
+	h.record("q_parked", "sd_live", "delayed")
+	h.materialize()
+	h.wire()
+
+	// Act.
+	err := h.m.ForceQueueEntry("ws", "q_parked")
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "has not yet adopted") {
+		t.Fatalf("ForceQueueEntry in the wired-but-unadopted window = %v, want a refusal naming the unfinished adoption", err)
+	}
+}
+
+// --- the cancel/restore interleaving -----------------------------------------
+
+func TestACancelDuringARestoreIsNotResurrectedByItsStaleRowSnapshot(t *testing.T) {
+	// THE RACE. The restore adopts the materialized entries under the manager
+	// mutex, reads the durable rows with it RELEASED, and applies them under it
+	// again. A cancel landing in that window removes the entry and drops its
+	// row, and the apply loop — holding a snapshot taken before either — used to
+	// add the prompt straight back.
+	// Arrange — the session wires, and the row read is where the cancel lands.
+	h := newParkedHarness(t)
+	h.lease.hold("sd_live")
+	h.record("q_parked", "sd_live", "delayed")
+	h.materialize()
+	h.wire()
+	h.store.duringHeldPromptsRead(func() {
+		if err := h.m.CancelQueueEntry("ws", "q_parked"); err != nil {
+			t.Errorf("the mid-restore cancel failed: %v", err)
+		}
+	})
+
+	// Act.
+	h.m.restoreShutdownHolds(h.controller())
+
+	// Assert — the prompt the user took back is not queued.
+	if es := h.entries(); len(es) != 0 {
+		t.Fatalf("queue = %+v after a cancel mid-restore, want empty — the restore re-added a prompt the user cancelled", es)
+	}
+}
+
+func TestARestoreThatSkipsACancelledRowSaysSoInTheCanonicalLog(t *testing.T) {
+	// Arrange.
+	h := newParkedHarness(t)
+	h.lease.hold("sd_live")
+	h.record("q_parked", "sd_live", "delayed")
+	h.materialize()
+	h.wire()
+	h.store.duringHeldPromptsRead(func() {
+		if err := h.m.CancelQueueEntry("ws", "q_parked"); err != nil {
+			t.Errorf("the mid-restore cancel failed: %v", err)
+		}
+	})
+
+	// Act.
+	h.m.restoreShutdownHolds(h.controller())
+
+	// Assert.
+	if !h.log.contains("restore SKIPPED cancelled entries") {
+		t.Fatalf("the skipped resurrection left no canonical log line naming it")
+	}
+}
+
+func TestACancelLandingDuringARestoreIsTombstoned(t *testing.T) {
+	// The tombstone is what the apply loop consults, so it must be RECORDED at
+	// the moment the entry leaves memory rather than inferred afterwards.
+	// Arrange.
+	h := newParkedHarness(t)
+	h.lease.hold("sd_live")
+	h.record("q_parked", "sd_live", "delayed")
+	h.materialize()
+	h.wire()
+	h.store.duringHeldPromptsRead(func() {
+		if err := h.m.CancelQueueEntry("ws", "q_parked"); err != nil {
+			t.Errorf("the mid-restore cancel failed: %v", err)
+		}
+	})
+
+	// Act.
+	h.m.restoreShutdownHolds(h.controller())
+
+	// Assert.
+	if !h.log.contains("queue cancel TOMBSTONED entry=q_parked") {
+		t.Fatalf("the mid-restore cancel left no tombstone record")
+	}
+}
+
+func TestARestoreClearsItsTombstonesWhenItEnds(t *testing.T) {
+	// A set that is never cleared is a leak, and worse: a later restore of a
+	// re-submitted prompt with the same id would refuse to seed it.
+	// Arrange.
+	h := newParkedHarness(t)
+	h.lease.hold("sd_live")
+	h.record("q_parked", "sd_live", "delayed")
+	h.materialize()
+	h.wire()
+	h.store.duringHeldPromptsRead(func() {
+		if err := h.m.CancelQueueEntry("ws", "q_parked"); err != nil {
+			t.Errorf("the mid-restore cancel failed: %v", err)
+		}
+	})
+	h.m.restoreShutdownHolds(h.controller())
+
+	// Act.
+	h.m.mu.Lock()
+	cancelled := h.m.restoreTombstones.cancelled("ws", "q_parked")
+	h.m.mu.Unlock()
+
+	// Assert.
+	if cancelled {
+		t.Fatal("the workspace's tombstones outlived the restore that took them")
 	}
 }
 

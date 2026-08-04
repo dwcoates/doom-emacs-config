@@ -459,23 +459,143 @@ func (m *Manager) AcquireShutdownHolds(scheduleID string) int {
 	return total
 }
 
-// releaseDrainRow drops one entry's durable parking row, for an entry that has
-// stopped being drain-held for any reason. A failure is loud-logged and not
-// returned: the entry has already left the hold in memory, and a stale row is
-// re-reconciled at restore (an entry whose schedule no longer exists is
-// un-held on the way in).
+// releaseDrainRow drops one entry's durable parking row AFTER the entry has
+// already stopped being drain-held in memory. A failure is loud-logged and not
+// returned, and that is safe ONLY here: the entry it names has been delivered,
+// so a row that outlives it is stale rather than resurrectable, and the restore
+// reconciles it (an entry whose schedule no longer exists is un-held on the way
+// in).
+//
+// It is NOT the call for a path that is about to make the entry disappear. A
+// cancel and a force both commit the durable removal FIRST and refuse when it
+// fails (dropDrainRow), because a row that survives an entry the user took back
+// — or one that was forced and then RUN — is a prompt the daemon that comes
+// back re-materializes and delivers a second time.
 func (m *Manager) releaseDrainRow(entryID, reason string) {
+	if err := m.dropDrainRow(entryID, reason); err != nil {
+		m.logf("session-controller: drain-held prompt durable drop FAILED entry=%s reason=%s error=%v — the row is stale and will be reconciled at the next restore",
+			entryID, reason, err)
+	}
+}
+
+// dropDrainRow drops one entry's durable parking row and HANDS THE FAILURE
+// BACK. It is the same store call releaseDrainRow makes; the difference is who
+// answers for a failure, which is why the two exist rather than one.
+//
+// A nil store is not a failure: a daemon with no durable ledger has no row to
+// drop, which is exactly what a successful drop leaves behind.
+func (m *Manager) dropDrainRow(entryID, reason string) error {
 	if m.cfg.ShutdownHolds == nil {
-		return
+		return nil
 	}
 	dropped, err := m.cfg.ShutdownHolds.DropHeldPrompt(entryID)
 	if err != nil {
-		m.logf("session-controller: drain-held prompt durable drop FAILED entry=%s reason=%s error=%v — the row is stale and will be reconciled at the next restore",
-			entryID, reason, err)
-		return
+		return fmt.Errorf("session-controller: dropping the durable parking row for prompt %s (%s): %w", entryID, reason, err)
 	}
 	m.logf("session-controller: drain-held prompt durable row released entry=%s reason=%s row_existed=%v",
 		entryID, reason, dropped)
+	return nil
+}
+
+// dropCancelledRow commits a cancel's durable half BEFORE the entry leaves
+// memory, and REFUSES the cancel when it cannot.
+//
+// THE ORDER IS THE GUARANTEE. Removing the entry first and dropping the row
+// after leaves a window — and, when the drop fails, a permanent state — in
+// which the user has been told their prompt is gone while the ledger still
+// says it is parked. The daemon that comes back from the bounce reads the
+// ledger, materializes the prompt, and delivers something the user withdrew.
+// So the row goes first; only a ledger that no longer names the prompt licenses
+// forgetting it.
+func (m *Manager) dropCancelledRow(workspace, entryID, sessionID string, hadRow bool) error {
+	if !hadRow {
+		return nil
+	}
+	if err := m.dropDrainRow(entryID, "cancelled_by_user"); err != nil {
+		m.logf("session-controller: queue cancel REFUSED entry=%s ws=%q session=%s error=%v — the durable parking row could not be dropped, so the entry is KEPT and the cancel is reported as failed; forgetting it here would let the daemon that comes back from the bounce re-materialize a prompt the user has already taken back",
+			entryID, workspace, sessionID, err)
+		return fmt.Errorf("session-controller: cannot cancel queued prompt %q on workspace %q: %w", entryID, workspace, err)
+	}
+	return nil
+}
+
+// restoreTombstones is the per-workspace set of entry ids CANCELLED while a
+// drain-hold restore is mid-flight (restoreShutdownHolds).
+//
+// THE RACE IT CLOSES. The restore adopts the boot ledger's entries under the
+// manager mutex, then reads the durable rows with the mutex RELEASED (a store
+// read must not be taken under it), then applies them under it again. A cancel
+// landing in that window removes the entry and drops its row — and the apply
+// loop, holding a snapshot taken before either, adds the entry straight back
+// from a row that no longer exists. The prompt the user withdrew is queued
+// again, and nothing in the queue's own state says it ever was withdrawn.
+//
+// So a cancel that lands while a restore is in flight leaves a tombstone, the
+// apply loop consults it under the SAME mutex acquisition it adds rows in, and
+// the restore clears the set when it ends. Nothing is recorded when no restore
+// is in flight, so the set cannot grow without bound.
+//
+// The zero value is usable and every method is called with m.mu HELD.
+type restoreTombstones struct {
+	// inFlight counts the restores running per workspace. A count rather than a
+	// flag because a second wiring can overlap the first, and clearing on the
+	// first one to finish would drop tombstones the other still needs.
+	inFlight map[string]int
+	ids      map[string]map[string]bool
+}
+
+// begin marks a restore in flight for workspace. Caller holds m.mu.
+func (r *restoreTombstones) begin(workspace string) {
+	if r.inFlight == nil {
+		r.inFlight = map[string]int{}
+	}
+	r.inFlight[workspace]++
+}
+
+// note records a cancelled entry id, and only while a restore is in flight for
+// the workspace. Caller holds m.mu.
+func (r *restoreTombstones) note(workspace, entryID string) bool {
+	if r.inFlight[workspace] == 0 {
+		return false
+	}
+	if r.ids == nil {
+		r.ids = map[string]map[string]bool{}
+	}
+	if r.ids[workspace] == nil {
+		r.ids[workspace] = map[string]bool{}
+	}
+	r.ids[workspace][entryID] = true
+	return true
+}
+
+// cancelled reports whether entryID was cancelled during the in-flight restore.
+// Caller holds m.mu.
+func (r *restoreTombstones) cancelled(workspace, entryID string) bool {
+	return r.ids[workspace][entryID]
+}
+
+// end ends one in-flight restore and, when it was the last one, clears the
+// workspace's tombstones. Caller holds m.mu.
+func (r *restoreTombstones) end(workspace string) {
+	if r.inFlight[workspace] > 0 {
+		r.inFlight[workspace]--
+	}
+	if r.inFlight[workspace] == 0 {
+		delete(r.inFlight, workspace)
+		delete(r.ids, workspace)
+	}
+}
+
+// noteCancelTombstoneLocked records a cancelled entry against any restore in
+// flight for its workspace, and says so when one is. Both cancel legs call it
+// at the moment the entry leaves memory, under the same m.mu acquisition that
+// removes it — which is what makes the removal and the tombstone one step
+// rather than two. Caller holds m.mu.
+func (m *Manager) noteCancelTombstoneLocked(workspace, entryID string) {
+	if m.restoreTombstones.note(workspace, entryID) {
+		m.logf("session-controller: queue cancel TOMBSTONED entry=%s ws=%q — a drain-hold restore is mid-flight and its row snapshot predates this cancel, so the entry id is recorded and the restore's apply loop will not re-add it",
+			entryID, workspace)
+	}
 }
 
 // ReleaseShutdownHolds sheds the drain hold from every parked entry of the
@@ -553,6 +673,18 @@ func (m *Manager) ReleaseShutdownHolds(scheduleID string) {
 	}
 }
 
+// logRestoreTombstones states the rows a restore refused to re-add because the
+// user cancelled them while it was in flight. Stated rather than silent: a row
+// skipped without a record is indistinguishable from a row the read never
+// returned, and this one is the resurrection the tombstone set exists to stop.
+func (m *Manager) logRestoreTombstones(d *sessionController, tombstoned []string) {
+	if len(tombstoned) == 0 {
+		return
+	}
+	m.logf("session-controller: drain-held prompt restore SKIPPED cancelled entries ws=%q session=%s entries=%v — these rows were read before the user cancelled the prompts behind them; their durable rows are already gone, so the restore adds nothing for them",
+		d.workspace, d.sessionID, tombstoned)
+}
+
 // restoreShutdownHolds seeds one bringing-up session's queue from the durable
 // parking ledger.
 //
@@ -575,9 +707,19 @@ func (m *Manager) restoreShutdownHolds(d *sessionController) {
 	// for them: its `d.queue.get(row.EntryID)` dedupe finds each one already
 	// present, so the replay cannot produce a second copy of a prompt the user
 	// submitted once.
+	// THE TOMBSTONE WINDOW OPENS HERE, in the SAME acquisition as the adoption
+	// and before the rows are read: a cancel that lands from now until the apply
+	// loop ends is racing a snapshot that predates it, and must be able to say
+	// so (restoreTombstones). It is closed on every return path below.
 	m.mu.Lock()
+	m.restoreTombstones.begin(d.workspace)
 	adopted := m.adoptParkedLocked(d)
 	m.mu.Unlock()
+	defer func() {
+		m.mu.Lock()
+		m.restoreTombstones.end(d.workspace)
+		m.mu.Unlock()
+	}()
 	if len(adopted) > 0 {
 		m.logf("session-controller: materialized drain-held prompts ADOPTED ws=%q session=%s entries=%v — the session has wired, so the boot ledger hands its parked entries to the controller that now owns the queue",
 			d.workspace, d.sessionID, adopted)
@@ -606,11 +748,21 @@ func (m *Manager) restoreShutdownHolds(d *sessionController) {
 	m.mu.Lock()
 	restored := make([]string, 0, len(rows))
 	stillHeld := 0
+	var tombstoned []string
 	for _, row := range rows {
 		// THE DEDUPE. It covers a second restore and, since the boot ledger
 		// exists, the ordinary case: every adopted entry is already here under
 		// the id its durable row names, so this loop adds nothing for it.
 		if d.queue.get(row.EntryID) != nil {
+			continue
+		}
+		// THE TOMBSTONE. The rows were read with the mutex released, so this row
+		// can name a prompt the user cancelled since — a prompt whose durable row
+		// is already gone and whose entry has already left the queue. Adding it
+		// back would resurrect it, and nothing downstream could tell it apart
+		// from a prompt still owed.
+		if m.restoreTombstones.cancelled(d.workspace, row.EntryID) {
+			tombstoned = append(tombstoned, row.EntryID)
 			continue
 		}
 		e := newParkedEntry(row.EntryID, row.RequestID, row.Text, row.PermissionMode, row.QueuedAtMs)
@@ -628,6 +780,7 @@ func (m *Manager) restoreShutdownHolds(d *sessionController) {
 		// this path would silently eat a deliverable entry that was already
 		// queued.
 		m.mu.Unlock()
+		m.logRestoreTombstones(d, tombstoned)
 		return
 	}
 	var kick *queueEntry
@@ -639,6 +792,7 @@ func (m *Manager) restoreShutdownHolds(d *sessionController) {
 
 	m.logf("session-controller: drain-held prompts RESTORED ws=%q session=%s restored=%d adopted=%d still_held=%d live_schedule=%q entries=%v — these prompts were parked by a scheduled bounce and are being honored by the daemon that came back",
 		d.workspace, d.sessionID, len(restored), len(adopted), stillHeld, liveSchedule, restored)
+	m.logRestoreTombstones(d, tombstoned)
 	m.publish(d.sessionID, view, recs)
 	if kick != nil {
 		m.logf("session-controller: restored prompt delivering entry=%s ws=%q session=%s — the bounce that delayed it is over and no turn is running",

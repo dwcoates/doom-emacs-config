@@ -66,6 +66,14 @@ type fakeHoldStore struct {
 	mu   sync.Mutex
 	rows map[string]statedb.HeldPrompt
 	err  error
+	// dropErr fails every DropHeldPrompt, for the paths that must REFUSE a
+	// command rather than forget an entry whose durable row still stands.
+	dropErr error
+	// onHeldPrompts runs inside HeldPrompts, AFTER the rows are gathered and
+	// before they are returned. It is the restore's stale-snapshot window made
+	// enterable: a test acts there and the restore then applies rows read
+	// before that act.
+	onHeldPrompts func()
 }
 
 func newFakeHoldStore() *fakeHoldStore {
@@ -85,6 +93,9 @@ func (f *fakeHoldStore) RecordHeldPrompt(p statedb.HeldPrompt) error {
 func (f *fakeHoldStore) DropHeldPrompt(entryID string) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.dropErr != nil {
+		return false, f.dropErr
+	}
 	_, ok := f.rows[entryID]
 	delete(f.rows, entryID)
 	return ok, nil
@@ -105,12 +116,19 @@ func (f *fakeHoldStore) DropHeldPromptsForSchedule(scheduleID string) (int, erro
 
 func (f *fakeHoldStore) HeldPrompts(workspace string) ([]statedb.HeldPrompt, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	var out []statedb.HeldPrompt
 	for _, p := range f.rows {
 		if p.Workspace == workspace {
 			out = append(out, p)
 		}
+	}
+	hook := f.onHeldPrompts
+	f.mu.Unlock()
+	// The hook runs with the snapshot already taken and the store lock RELEASED,
+	// because what it stands in for — a user cancel landing mid-restore — reaches
+	// this same store to drop the cancelled prompt's row.
+	if hook != nil {
+		hook()
 	}
 	return out, nil
 }
@@ -143,6 +161,29 @@ func (f *fakeHoldStore) failWith(err error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.err = err
+}
+
+// failDropsWith makes every subsequent DropHeldPrompt fail, for the paths that
+// commit the durable removal BEFORE they forget the entry.
+func (f *fakeHoldStore) failDropsWith(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.dropErr = err
+}
+
+// duringHeldPromptsRead installs the restore's stale-snapshot hook.
+func (f *fakeHoldStore) duringHeldPromptsRead(fn func()) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.onHeldPrompts = fn
+}
+
+// has reports whether the ledger still carries a row for entryID.
+func (f *fakeHoldStore) has(entryID string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	_, ok := f.rows[entryID]
+	return ok
 }
 
 func (f *fakeHoldStore) count() int {
@@ -607,6 +648,95 @@ func TestCancellingAParkedEntryDropsItsDurableRow(t *testing.T) {
 	// Assert.
 	if h.store.count() != 0 {
 		t.Fatalf("durable hold rows = %d after a cancel, want 0", h.store.count())
+	}
+}
+
+func TestForcingAParkedEntryIsRefusedWhenItsDurableRowCannotBeDropped(t *testing.T) {
+	// A force ends in a SUBMITTED prompt. Delivering it with its parking row
+	// still standing would let the daemon that comes back from the bounce
+	// re-materialize the same prompt and run it a second time, so the row goes
+	// first and its failure refuses the force.
+	// Arrange.
+	h := newLeaseHarness(t)
+	h.lease.hold("sd_1")
+	if err := h.submit("parked"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	id := h.entries()[0].id
+	h.store.failDropsWith(errors.New("ledger is down"))
+
+	// Act.
+	err := h.m.ForceQueueEntry("ws", id)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "ledger is down") {
+		t.Fatalf("ForceQueueEntry over a failing drop = %v, want a refusal carrying the store failure", err)
+	}
+}
+
+func TestARefusedForceDeliversNothing(t *testing.T) {
+	// Arrange.
+	h := newLeaseHarness(t)
+	h.lease.hold("sd_1")
+	if err := h.submit("parked"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	id := h.entries()[0].id
+	h.store.failDropsWith(errors.New("ledger is down"))
+
+	// Act.
+	if err := h.m.ForceQueueEntry("ws", id); err == nil {
+		t.Fatal("ForceQueueEntry over a failing drop succeeded, want a refusal")
+	}
+
+	// Assert — nothing reached the shim, and the entry is still parked.
+	if got := h.client.promptTexts(); len(got) != 0 {
+		t.Fatalf("shim received %v after a refused force, want nothing", got)
+	}
+	if es := h.entries(); len(es) != 1 || !es[0].drainHeld() {
+		t.Fatalf("queue = %+v after a refused force, want the entry still parked", es)
+	}
+}
+
+func TestCancellingAParkedEntryIsRefusedWhenItsDurableRowCannotBeDropped(t *testing.T) {
+	// The live half of the same ordering: the ledger is what a successor daemon
+	// reads, so a prompt is only safely forgotten once its row is gone.
+	// Arrange.
+	h := newLeaseHarness(t)
+	h.lease.hold("sd_1")
+	if err := h.submit("parked"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	id := h.entries()[0].id
+	h.store.failDropsWith(errors.New("ledger is down"))
+
+	// Act.
+	err := h.m.CancelQueueEntry("ws", id)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "ledger is down") {
+		t.Fatalf("CancelQueueEntry over a failing drop = %v, want a refusal carrying the store failure", err)
+	}
+}
+
+func TestARefusedLiveCancelKeepsTheEntryQueued(t *testing.T) {
+	// Arrange.
+	h := newLeaseHarness(t)
+	h.lease.hold("sd_1")
+	if err := h.submit("parked"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	id := h.entries()[0].id
+	h.store.failDropsWith(errors.New("ledger is down"))
+
+	// Act.
+	if err := h.m.CancelQueueEntry("ws", id); err == nil {
+		t.Fatal("CancelQueueEntry over a failing drop succeeded, want a refusal")
+	}
+
+	// Assert.
+	if es := h.entries(); len(es) != 1 || es[0].id != id {
+		t.Fatalf("queue = %+v after a refused cancel, want the entry retained", es)
 	}
 }
 

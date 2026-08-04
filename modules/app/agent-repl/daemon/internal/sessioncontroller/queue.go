@@ -789,18 +789,41 @@ func (m *Manager) beginInterject(d *sessionController, entryID, source string) {
 // INTERJECT verdict runs, user-initiated. An unknown id is a loud error — the
 // user asked for something specific and it is not there.
 func (m *Manager) ForceQueueEntry(workspace, entryID string) error {
-	// THE MATERIALIZED LEDGER IS CONSULTED FIRST, because a client can now see
-	// and aim at a prompt whose session has not wired. It can only refuse, and
-	// it refuses with the session named rather than with the generic
-	// no-live-session error, so the user is told what to do about it
-	// (parkedledger.go).
-	if owned, err := m.forceParkedEntry(workspace, entryID); owned {
-		return err
-	}
-	d, err := m.existing(workspace)
+	// THE MATERIALIZED LEDGER IS CONSULTED FIRST, through the resolver every
+	// queue command shares, because a client can see and aim at a prompt whose
+	// session has not wired. A force can only refuse it, and it refuses with the
+	// session named and the failure TYPED (parkedledger.go).
+	m.mu.Lock()
+	owner, err := m.resolveQueueEntryLocked(workspace, entryID)
 	if err != nil {
+		m.mu.Unlock()
 		return err
 	}
+	if owner.parked != nil {
+		sessionID, wired := owner.sessionID(), owner.wired
+		m.mu.Unlock()
+		return m.refuseParkedForce(workspace, entryID, sessionID, wired)
+	}
+	d := owner.live
+	e := owner.entryLocked(entryID)
+	forcedSchedule, hadRow := e.shutdownHoldScheduleID, e.drainRowPending
+	m.mu.Unlock()
+
+	// THE DURABLE ROW GOES FIRST, before the entry becomes deliverable. A force
+	// ends in a submitted prompt, and an entry whose row outlives that submit is
+	// a prompt the daemon that comes back from the bounce re-materializes and
+	// delivers a SECOND time — the user forced one prompt and got two. So the
+	// drop's failure refuses the force instead of being swallowed: the entry is
+	// left exactly as it was, still parked, still forceable once the store is
+	// answering again.
+	if hadRow {
+		if err := m.dropDrainRow(entryID, "forced_by_user"); err != nil {
+			m.logf("session-controller: force REFUSED entry=%s ws=%q session=%s schedule=%s error=%v — the durable parking row could not be dropped, so the entry is left parked rather than delivered; delivering it with its row standing would let the daemon that comes back run the same prompt again",
+				entryID, workspace, d.sessionID, forcedSchedule, err)
+			return fmt.Errorf("session-controller: cannot force queued prompt %q on workspace %q: %w", entryID, workspace, err)
+		}
+	}
+
 	// A FORCE OVERRIDES THE DRAIN LEASE, and that is the point of the control.
 	// The user is looking at a bubble that says their prompt is waiting for a
 	// scheduled bounce and is telling the daemon to run it anyway. The turn it
@@ -808,22 +831,19 @@ func (m *Manager) ForceQueueEntry(workspace, entryID string) error {
 	// — which is exactly what they asked for, so it is honored rather than
 	// second-guessed, and loud-logged so the delay has a stated author.
 	m.mu.Lock()
-	e := d.queue.get(entryID)
+	e = d.queue.get(entryID)
 	if e == nil {
 		m.mu.Unlock()
+		m.logf("session-controller: force found NOTHING to deliver entry=%s ws=%q session=%s — the entry left the queue while its durable parking row was being dropped; the row is gone, so nothing will re-materialize it",
+			entryID, workspace, d.sessionID)
 		return fmt.Errorf("session-controller: no queued prompt %q on workspace %q", entryID, workspace)
 	}
-	forcedSchedule := e.shutdownHoldScheduleID
 	e.shutdownHoldScheduleID = ""
-	hadRow := e.drainRowPending
 	e.drainRowPending = false
 	m.mu.Unlock()
 	if forcedSchedule != "" {
 		m.logf("session-controller: drain hold FORCED entry=%s ws=%q session=%s schedule=%s initiator=user — the user asked for a prompt parked by a scheduled shutdown to run now; the turn it starts will hold the drain open until it ends",
 			entryID, workspace, d.sessionID, forcedSchedule)
-	}
-	if hadRow {
-		m.releaseDrainRow(entryID, "forced_by_user")
 	}
 	m.beginInterject(d, entryID, "user")
 	return nil
@@ -832,50 +852,93 @@ func (m *Manager) ForceQueueEntry(workspace, entryID string) error {
 // AcceptQueueEntry confirms a held prompt's classification. VIEW STATE ONLY: it
 // records that the user saw it and changes nothing about when the prompt is
 // delivered, so the control cannot imply a power it does not have.
+//
+// IT IS HONORED ON A MATERIALIZED PROMPT TOO, through the shared resolver. That
+// is the same argument cancel already makes: accept changes view state and
+// needs no shim, so refusing it because the session has not wired would be the
+// daemon withholding a control that costs nothing to honor — and it used to
+// refuse it with "no queued prompt", a sentence about a prompt the client was
+// looking at.
 func (m *Manager) AcceptQueueEntry(workspace, entryID string) error {
-	d, err := m.existing(workspace)
+	m.mu.Lock()
+	owner, err := m.resolveQueueEntryLocked(workspace, entryID)
 	if err != nil {
+		m.mu.Unlock()
 		return err
 	}
-	m.mu.Lock()
-	e := d.queue.get(entryID)
-	if e == nil {
-		m.mu.Unlock()
-		return fmt.Errorf("session-controller: no queued prompt %q on workspace %q", entryID, workspace)
+	owner.entryLocked(entryID).accepted = true
+	sessionID := owner.sessionID()
+	var view *frontendv1.QueueView
+	var recs []registry.QueuedPrompt
+	if pk := owner.parked; pk != nil {
+		view, recs = pk.queue.view(pk.workspace, pk.sessionID), pk.queue.records()
+	} else {
+		view, recs = m.publishQueueLocked(owner.live)
 	}
-	e.accepted = true
-	view, recs := m.publishQueueLocked(d)
 	m.mu.Unlock()
-	m.logf("session-controller: queue entry=%s accepted session=%s", entryID, d.sessionID)
-	m.publish(d.sessionID, view, recs)
+	m.logf("session-controller: queue entry=%s accepted session=%s ws=%q ledger=%s — accept is view state, so it is honored wherever the prompt lives",
+		entryID, sessionID, workspace, ledgerName(owner))
+	m.publish(sessionID, view, recs)
 	return nil
 }
 
-// CancelQueueEntry drops a held prompt. It is never delivered.
-func (m *Manager) CancelQueueEntry(workspace, entryID string) error {
-	// A materialized prompt is cancellable with no session at all: nothing has
-	// to run to take a prompt back (parkedledger.go).
-	if m.cancelParkedEntry(workspace, entryID) {
-		return nil
+// ledgerName renders which ledger a resolved queue command landed on, for the
+// log lines that state it.
+func ledgerName(o queueEntryOwner) string {
+	if o.parked != nil {
+		return "materialized"
 	}
-	d, err := m.existing(workspace)
+	return "live"
+}
+
+// CancelQueueEntry drops a held prompt. It is never delivered.
+//
+// A materialized prompt is cancellable with NO SESSION at all: nothing has to
+// run to take a prompt back, and making the user wait for a shim to come back
+// would be the daemon holding a prompt hostage to the very bounce that delayed
+// it (parkedledger.go).
+//
+// THE DURABLE ROW IS DROPPED BEFORE THE ENTRY IS REMOVED, and a drop that fails
+// REFUSES the cancel (dropCancelledRow). The other order tells the user their
+// prompt is gone while the ledger still says it is parked, and the daemon that
+// comes back from the bounce then re-materializes and delivers it.
+func (m *Manager) CancelQueueEntry(workspace, entryID string) error {
+	m.mu.Lock()
+	owner, err := m.resolveQueueEntryLocked(workspace, entryID)
 	if err != nil {
+		m.mu.Unlock()
 		return err
 	}
+	e := owner.entryLocked(entryID)
+	heldBy, hadRow, sessionID := e.shutdownHoldScheduleID, e.drainRowPending, owner.sessionID()
+	m.mu.Unlock()
+
+	if err := m.dropCancelledRow(workspace, entryID, sessionID, hadRow); err != nil {
+		return err
+	}
+
 	m.mu.Lock()
-	e := d.queue.remove(entryID)
-	if e == nil {
+	sessionID, view, recs, materialized, ok := m.removeCancelledEntryLocked(workspace, entryID)
+	if !ok {
 		m.mu.Unlock()
+		m.logf("session-controller: queue cancel found NOTHING to remove entry=%s ws=%q — the entry left both ledgers while its durable parking row was being dropped; the row is gone, so nothing can re-materialize it",
+			entryID, workspace)
 		return fmt.Errorf("session-controller: no queued prompt %q on workspace %q", entryID, workspace)
 	}
-	heldBy, hadRow := e.shutdownHoldScheduleID, e.drainRowPending
-	view, recs := m.publishQueueLocked(d)
+	// The removal and the tombstone are ONE step, under one acquisition: a
+	// restore mid-flight is holding a row snapshot that predates this cancel,
+	// and its apply loop consults exactly this set before it re-adds anything
+	// (shutdownlease.go).
+	m.noteCancelTombstoneLocked(workspace, entryID)
 	m.mu.Unlock()
-	m.logf("session-controller: queue entry=%s cancelled session=%s drain_schedule=%q initiator=user", entryID, d.sessionID, heldBy)
-	if hadRow {
-		m.releaseDrainRow(entryID, "cancelled_by_user")
+
+	ledger := "live"
+	if materialized {
+		ledger = "materialized"
 	}
-	m.publish(d.sessionID, view, recs)
+	m.logf("session-controller: queue entry=%s cancelled session=%s ws=%q ledger=%s drain_schedule=%q initiator=user — its durable parking row was dropped first, so nothing can bring it back",
+		entryID, sessionID, workspace, ledger, heldBy)
+	m.publish(sessionID, view, recs)
 	return nil
 }
 
