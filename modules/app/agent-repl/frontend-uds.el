@@ -264,7 +264,8 @@ not unfinished wiring.")
     "workspaceMaterialized" "hostActionCompleted"
     "daemonHealth" "sessionHealth" "restartSession"
     "publishWorkspaceRoster"
-    "scheduleShutdown" "cancelScheduledShutdown")
+    "scheduleShutdown" "cancelScheduledShutdown"
+    "hibernateWorkspace")
   "The protojson names of every SENDABLE `FrontendCommand' oneof arm.
 Mirrors the `command' oneof in frontend.proto.  Sending an unknown
 command field is a programming error and fails loudly.
@@ -296,6 +297,15 @@ hands the daemon the decision of WHEN: it blocks new turns and executes
 the same `ShutdownCmd' semantics once every hold clears.  Emacs sends
 both from `daemon.el' (`agent-repl-frontend-daemon-restart-scheduled' and
 `agent-repl-frontend-daemon-cancel-scheduled-restart').
+
+`hibernateWorkspace' asks the daemon to stop one workspace's shim NOW
+and mark the session hibernated, reclaiming its ~500MB without waiting
+for the idle sweeper.  Emacs sends it from `frontend.el'
+\(`agent-repl-hibernate-workspace').  The daemon refuses it while a turn
+is live or the merge lease is held, and that refusal arrives as an
+ordinary nacked `CommandAck' — which is why the send is TRACKED: a
+refused hibernate that read as a successful one would leave the user
+believing they had freed memory they still hold.
 
 `publishWorkspaceRoster' carries the sidebar roster (sidebar.el).  Emacs
 is its ONLY publisher: Emacs owns the workspace model, so the roster is
