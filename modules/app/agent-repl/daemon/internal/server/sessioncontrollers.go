@@ -221,6 +221,9 @@ type ShimSpawner struct {
 	// unit harness, which has no processes and no locks, is not made to wait
 	// for a condition it can never observe.
 	awaitStopped func(sessionID string) error
+	// forceFake mirrors the daemon-wide -fake decision, which the create path
+	// already consults. See ForceFake and EnsureShim's resume gate.
+	forceFake bool
 
 	mu      sync.Mutex
 	handles map[string]ShimHandle // session id -> the shim WE spawned
@@ -238,6 +241,27 @@ func NewShimSpawner(reg *registry.Registry, connected ConnectedFunc, evict Evict
 		awaitStopped: awaitShimStopped,
 		handles:      map[string]ShimHandle{},
 	}
+}
+
+// ForceFake tells the spawner that every session it brings up runs the
+// scripted offline SDK, mirroring the daemon-wide -fake flag.
+//
+// It exists so the resume-viability gate reaches the SAME verdict on a respawn
+// as the create reached on the same session. The scripted SDK writes no vendor
+// transcript, so without this a hibernated or bounced fake session hard-failed
+// its way back up on a file only the real CLI ever creates — with the create
+// that started it having waived exactly that check.
+func (s *ShimSpawner) ForceFake(on bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.forceFake = on
+}
+
+// fakeForced reports the daemon-wide fake decision under the lock.
+func (s *ShimSpawner) fakeForced() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.forceFake
 }
 
 // EnsureShim makes sure exactly one shim is alive for sessionID, spawning one
@@ -308,9 +332,20 @@ func (s *ShimSpawner) EnsureShim(ctx context.Context, sessionID string) (session
 		ConfigDir:      rec.ConfigDir,
 		Resume:         rec.ClaudeSessionID,
 	}
-	if missing := validateResumeTarget(opts, false); missing != nil {
+	// ONE VERDICT FOR ONE QUESTION. The create path waives the resume-viability
+	// gate for a fake session because the scripted SDK writes no transcripts;
+	// this path used to run the same gate with the waiver hard-coded off, so
+	// the two disagreed about the identical session. A fake session that was
+	// hibernated, stopped or bounced could therefore never be brought back:
+	// every respawn hard-failed on a file only a real CLI ever creates.
+	fake := s.fakeForced()
+	if missing := validateResumeTarget(opts, fake); missing != nil {
 		logResumeContinuityFailure(s.logf, "automatic_restore", sessionID, opts, missing)
 		return res, missing
+	}
+	if fake && opts.Resume != "" {
+		s.logf("server: session %s: resume viability gate WAIVED for respawn (this daemon forces the scripted offline SDK, which writes no transcript) resume=%q",
+			sessionID, opts.Resume)
 	}
 	res.Resumed = opts.Resume
 	s.logf("server: session %s: no live shim — spawning UDS shim (resume=%q)", sessionID, opts.Resume)

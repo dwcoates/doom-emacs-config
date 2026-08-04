@@ -560,11 +560,15 @@ func main() {
 		},
 		Logf: legacyLog,
 	}
+	shimSpawner := server.NewShimSpawner(sessionRegistry, shimListener.Connected, shimListener.Evict, udsSpawn, legacyLog)
+	// The respawn path must reach the create path's verdict on the resume gate
+	// for the very same session, and -fake is what that verdict turns on.
+	shimSpawner.ForceFake(*fake)
 	controller, err := sessioncontroller.New(sessioncontroller.Config{
 		Push:              forwarder,
 		SSM:               ssmMgr,
 		Progress:          progressMgr,
-		Spawner:           server.NewShimSpawner(sessionRegistry, shimListener.Connected, shimListener.Evict, udsSpawn, legacyLog),
+		Spawner:           shimSpawner,
 		Source:            &server.ShimConnSource{Listener: shimListener, Deaths: shimSpawnWatch},
 		FileDiagnostics:   fileDiagnostics,
 		Locator:           &server.SessionLocator{Reg: sessionRegistry},
