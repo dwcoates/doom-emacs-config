@@ -39,6 +39,19 @@ func lastPromptOrigin(t *testing.T, m *Manager, workspace string) corev1.PromptO
 	return c.promptOrigins[len(c.promptOrigins)-1]
 }
 
+// lastPromptRequestID reports the id the last prompt was submitted UNDER — the
+// id the shim adopts as that turn's turn_id.
+func lastPromptRequestID(t *testing.T, m *Manager, workspace string) string {
+	t.Helper()
+	c := fakeClientFor(t, m, workspace)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.requestIDs) == 0 {
+		t.Fatal("no prompt reached the shim")
+	}
+	return c.requestIDs[len(c.requestIDs)-1]
+}
+
 // fakeClientFor reaches the workspace's live fake shim client.
 func fakeClientFor(t *testing.T, m *Manager, workspace string) *fakeClient {
 	t.Helper()
@@ -114,6 +127,28 @@ func TestKeepAlivePingSubmitsWithTheKeepAliveOrigin(t *testing.T) {
 	}
 	if turnID == "" {
 		t.Fatal("SubmitKeepAlivePing returned no turn id; the queue hold has nothing to name")
+	}
+}
+
+// THE PING IS SUBMITTED UNDER THE VERY ID ITS CLAIM, ITS HOLDS AND ITS WINDOW
+// ROW ARE KEYED BY. The shim adopts the accepted SubmitPrompt's request_id as
+// the turn_id of the boundaries it produces, so any other id on the wire would
+// give the turn a second name — and every match the daemon makes at the ping's
+// end (the claim release, the window close, the rewind's dropped-turn list)
+// would then be against a name the turn does not carry.
+func TestKeepAlivePingSubmitsUnderItsOwnTurnID(t *testing.T) {
+	// Arrange.
+	m, _, _ := keepAliveRig(t)
+
+	// Act.
+	turnID, err := m.SubmitKeepAlivePing(context.Background(), "ws")
+	if err != nil {
+		t.Fatalf("SubmitKeepAlivePing: %v", err)
+	}
+
+	// Assert.
+	if got := lastPromptRequestID(t, m, "ws"); got != turnID {
+		t.Fatalf("submitted request_id = %q, want the ping's own turn id %q — the shim stamps this id on the turn the daemon must recognize at its end", got, turnID)
 	}
 }
 
