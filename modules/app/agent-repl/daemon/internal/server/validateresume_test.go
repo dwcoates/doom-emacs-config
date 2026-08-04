@@ -33,7 +33,7 @@ func spawnerWithRecord(t *testing.T, cfgDir, resumeID string) (*ShimSpawner, *re
 	sp := NewShimSpawner(reg,
 		func(string) (bool, error) { return false, nil },
 		nil,
-		func(_ string, opts CreateOpts) (ShimStopFunc, error) { spawned++; *got = opts; return nil, nil },
+		func(_ string, opts CreateOpts) (ShimHandle, error) { spawned++; *got = opts; return ShimHandle{}, nil },
 		func(string, ...any) {})
 	return sp, reg, got, &spawned
 }
@@ -94,7 +94,7 @@ func TestSpawnLogsTheCanonicalResumeContinuityFailure(t *testing.T) {
 	sp := NewShimSpawner(reg,
 		func(string) (bool, error) { return false, nil },
 		nil,
-		func(string, CreateOpts) (ShimStopFunc, error) { return nil, nil },
+		func(string, CreateOpts) (ShimHandle, error) { return ShimHandle{}, nil },
 		func(f string, a ...any) { logged = append(logged, fmt.Sprintf(f, a...)) })
 
 	// Act.
@@ -159,7 +159,7 @@ func TestDropResumeOnAFreshSessionReportsNothing(t *testing.T) {
 func TestDropResumeOnAnUnknownSessionIsLoud(t *testing.T) {
 	// Arrange.
 	reg := openTestRegistry(t)
-	sp := NewShimSpawner(reg, nil, nil, func(string, CreateOpts) (ShimStopFunc, error) { return nil, nil }, nil)
+	sp := NewShimSpawner(reg, nil, nil, func(string, CreateOpts) (ShimHandle, error) { return ShimHandle{}, nil }, nil)
 
 	// Act.
 	_, err := sp.DropResume("ghost")

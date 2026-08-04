@@ -103,12 +103,15 @@ func TestUDSSpawnRunsTheChildInTheCanonicalWorkspace(t *testing.T) {
 	}
 
 	// Act.
-	stop, err := spawner("s1", CreateOpts{CWD: alias, Model: "haiku"})
+	handle, err := spawner("s1", CreateOpts{CWD: alias, Model: "haiku"})
 	if err != nil {
 		t.Fatalf("spawn: %v", err)
 	}
-	if stop == nil {
+	if handle.Stop == nil {
 		t.Fatal("spawn returned no stop func")
+	}
+	if handle.Reaped == nil {
+		t.Fatal("spawn returned no reaper rendezvous; a stop could not tell when the exit had been accounted for")
 	}
 
 	// Assert.
@@ -187,7 +190,7 @@ func TestUDSSpawnFailsHardOnAClosedLogTarget(t *testing.T) {
 	spawnedBefore := spawnedRecords()
 
 	// Act.
-	stop, err := spawner("s2", CreateOpts{CWD: workspace})
+	handle, err := spawner("s2", CreateOpts{CWD: workspace})
 
 	// Assert — the refusal names the closed target, and nothing was launched.
 	if err == nil {
@@ -196,7 +199,7 @@ func TestUDSSpawnFailsHardOnAClosedLogTarget(t *testing.T) {
 	if !strings.Contains(err.Error(), "CLOSED") || !strings.Contains(err.Error(), "shim log target") {
 		t.Fatalf("error = %v, want the canonical closed-target diagnostic", err)
 	}
-	if stop != nil {
+	if handle.Stop != nil {
 		t.Fatal("a failed spawn handed back a stop func")
 	}
 	if got := len(recorder.captured()); got != before {

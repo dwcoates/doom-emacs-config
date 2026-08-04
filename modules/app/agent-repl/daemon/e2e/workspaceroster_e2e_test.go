@@ -166,8 +166,8 @@ func bootRosterDaemon(t *testing.T, stateDir string) *rosterDaemon {
 	if err != nil {
 		t.Fatalf("build file diagnostic persister: %v", err)
 	}
-	noSpawn := func(string, server.CreateOpts) (server.ShimStopFunc, error) {
-		return nil, errNoSpawnInRosterHarness
+	noSpawn := func(string, server.CreateOpts) (server.ShimHandle, error) {
+		return server.ShimHandle{}, errNoSpawnInRosterHarness
 	}
 	seqStore := server.NewRegistrySeqStore(reg, t.Logf)
 	modelCatalogs := server.NewSessionModelCatalogs()

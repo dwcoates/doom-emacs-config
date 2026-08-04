@@ -92,8 +92,8 @@ func bootGeometryDaemon(t *testing.T) *geometryBoot {
 	if err != nil {
 		t.Fatalf("build file diagnostic persister: %v", err)
 	}
-	noSpawn := func(string, server.CreateOpts) (server.ShimStopFunc, error) {
-		return nil, errNoSpawnInGeometryHarness
+	noSpawn := func(string, server.CreateOpts) (server.ShimHandle, error) {
+		return server.ShimHandle{}, errNoSpawnInGeometryHarness
 	}
 	seqStore := server.NewRegistrySeqStore(reg, t.Logf)
 	modelCatalogs := server.NewSessionModelCatalogs()

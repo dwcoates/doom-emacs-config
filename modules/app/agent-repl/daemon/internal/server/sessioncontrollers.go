@@ -173,7 +173,25 @@ type EvictParkedFunc func(sessionID, reason string) bool
 // returns a stop func that terminates the launched shim cleanly (SIGTERM) —
 // the daemon uses it to hibernate the child — or nil when there is nothing to
 // stop (a shim that outlived a prior daemon and dialled back in).
-type ShimSpawnFunc func(sessionID string, opts CreateOpts) (stop ShimStopFunc, err error)
+type ShimSpawnFunc func(sessionID string, opts CreateOpts) (handle ShimHandle, err error)
+
+// ShimHandle is everything one spawn hands back about the process it started.
+//
+// Both fields are optional in exactly one direction: a spawner that started
+// nothing (a shim that outlived a prior daemon and dialled back in) has neither
+// a stop nor a reaper, and a spawner that does not reap its children has a stop
+// but no rendezvous. A spawner that DOES reap must publish Reaped, because that
+// channel is the only way a stop can know the exit it asked for has been
+// accounted for rather than merely delivered.
+type ShimHandle struct {
+	// Stop terminates the launched shim cleanly (SIGTERM). Nil when there is
+	// nothing to stop.
+	Stop ShimStopFunc
+	// Reaped closes when the spawner's reaper has finished with the process:
+	// waited on, its exit recorded, and its hooks run. Nil when this spawn has
+	// no reaper of its own.
+	Reaped <-chan struct{}
+}
 
 // ShimStopFunc stops one spawned shim, told WHO commanded the stop and WHY.
 // The attribution is a required argument rather than a convenience: it is what
@@ -204,8 +222,8 @@ type ShimSpawner struct {
 	// for a condition it can never observe.
 	awaitStopped func(sessionID string) error
 
-	mu    sync.Mutex
-	stops map[string]ShimStopFunc // session id -> stop the shim WE spawned
+	mu      sync.Mutex
+	handles map[string]ShimHandle // session id -> the shim WE spawned
 }
 
 // NewShimSpawner builds a ShimSpawner. reg and spawn are required; a nil
@@ -218,7 +236,7 @@ func NewShimSpawner(reg *registry.Registry, connected ConnectedFunc, evict Evict
 		reg: reg, connected: connected, evict: evict, spawn: spawn, logf: logf,
 		signal:       signalPID,
 		awaitStopped: awaitShimStopped,
-		stops:        map[string]ShimStopFunc{},
+		handles:      map[string]ShimHandle{},
 	}
 }
 
@@ -296,13 +314,13 @@ func (s *ShimSpawner) EnsureShim(ctx context.Context, sessionID string) (session
 	}
 	res.Resumed = opts.Resume
 	s.logf("server: session %s: no live shim — spawning UDS shim (resume=%q)", sessionID, opts.Resume)
-	stop, err := s.spawn(sessionID, opts)
+	handle, err := s.spawn(sessionID, opts)
 	if err != nil {
 		return res, err
 	}
-	if stop != nil {
+	if handle.Stop != nil {
 		s.mu.Lock()
-		s.stops[sessionID] = stop
+		s.handles[sessionID] = handle
 		s.mu.Unlock()
 	}
 	return res, nil
@@ -373,19 +391,19 @@ func (s *ShimSpawner) StopShim(sessionID string, hintPID int32, by shim.Stop) er
 		return fmt.Errorf("server: session %s: refusing an unattributed shim stop: %w", sessionID, err)
 	}
 	s.mu.Lock()
-	stop, ok := s.stops[sessionID]
+	handle, ok := s.handles[sessionID]
 	if (ok || hintPID > 0) && s.awaitStopped == nil {
 		s.mu.Unlock()
 		return fmt.Errorf("server: session %s: cannot stop shim because the exit observer is nil", sessionID)
 	}
 	if ok {
-		delete(s.stops, sessionID)
+		delete(s.handles, sessionID)
 	}
 	s.mu.Unlock()
 	switch {
 	case ok:
 		s.logf("server: session %s: stopping shim (SIGTERM via our own process handle) initiator=%s reason=%s", sessionID, by.Initiator, by.Reason)
-		if err := stop(by); err != nil {
+		if err := handle.Stop(by); err != nil {
 			return err
 		}
 	case hintPID > 0:
@@ -424,8 +442,34 @@ func (s *ShimSpawner) StopShim(sessionID string, hintPID int32, by shim.Stop) er
 	if err := s.awaitStopped(sessionID); err != nil {
 		return err
 	}
+	s.awaitReaped(sessionID, handle)
 	s.evictStoppedParked(sessionID)
 	return nil
+}
+
+// awaitReaped completes the stop of a shim THIS daemon spawned: it waits for
+// the reaper to finish with the process, after the lock wait has already proved
+// the process gone.
+//
+// TWO OBSERVERS OF ONE DEATH, and they do not land together. The lock wait ends
+// in the KERNEL, at the instant the dying process's lock is released; the
+// reaper's Exited and Reaped hooks run afterwards, in this daemon, on the
+// reaper goroutine. Returning on the first of those made "stopped" true before
+// the exit had been accounted for, so a respawn issued immediately afterwards
+// could be running — a second process, a second spawn record — while shim 1's
+// exit was still being reported. The exit then read as the NEW shim's, which is
+// exactly how a bounce ends up with a live shim that everything believes died.
+//
+// It is a RENDEZVOUS, not a bound: the reaper always runs, and the process is
+// already known to be gone before the wait begins. A spawner with no reaper
+// (a survivor stopped by pid, a harness that starts no process) has no channel
+// and nothing to wait for.
+func (s *ShimSpawner) awaitReaped(sessionID string, handle ShimHandle) {
+	if handle.Reaped == nil {
+		return
+	}
+	<-handle.Reaped
+	s.logf("server: session %s: shim reaper completed; the stop is finished", sessionID)
 }
 
 func (s *ShimSpawner) evictStoppedParked(sessionID string) {
