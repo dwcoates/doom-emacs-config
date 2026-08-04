@@ -154,6 +154,7 @@ func newBouncedHarness(t *testing.T) *bouncedHarness {
 		Locator:           &server.SessionLocator{Reg: reg},
 		SeqStore:          seqStore,
 		ClearCompactStore: seqStore,
+		TurnAccountings:   newTestTurnAccountingStore(),
 		// THE WHOLE POINT: the durable route to the conversation, keyed by the
 		// vendor uuid the store files it under.
 		DurableHistory: &storehistory.Reader{

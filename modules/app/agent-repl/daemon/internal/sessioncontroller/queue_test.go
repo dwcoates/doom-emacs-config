@@ -58,14 +58,15 @@ func (c *failingClient) SetModel(_ context.Context, _ string) (string, error) { 
 
 // queueHarness is one workspace's controller plus the doubles around it.
 type queueHarness struct {
-	t       *testing.T
-	m       *Manager
-	push    *fakePusher
-	client  *fakeClient
-	cls     *fakeClassifier
-	reg     *fakeRegistrar
-	applier *fakeApplier
-	prog    *fakeProgress
+	t           *testing.T
+	m           *Manager
+	push        *fakePusher
+	client      *fakeClient
+	cls         *fakeClassifier
+	reg         *fakeRegistrar
+	applier     *fakeApplier
+	prog        *fakeProgress
+	nextRequest int
 	// newestClient reports the most recently constructed fake shim client, so a
 	// harness wired after construction can bind to the one its bring-up made.
 	newestClient func() *fakeClient
@@ -139,6 +140,7 @@ func buildQueueHarness(t *testing.T, cls *fakeClassifier, wrap func(*fakePusher)
 		Locator:           fakeLocator{m: map[string]string{"ws": "s1"}},
 		SeqStore:          &fakeSeqStore{seq: map[string]uint64{}},
 		ClearCompactStore: newFakeClearCompactStore(),
+		TurnAccountings:   emptyTurnAccountingStore{},
 		Registrar:         reg,
 		ProtocolVersion:   "1",
 		ShutdownHolds:     holds,
@@ -201,7 +203,8 @@ func (h *queueHarness) turn(active bool) {
 
 // submit submits a prompt for "ws".
 func (h *queueHarness) submit(text string) error {
-	return h.m.SubmitPrompt(context.Background(), "ws", "", text, "")
+	h.nextRequest++
+	return h.m.SubmitPrompt(context.Background(), "ws", fmt.Sprintf("test-request-%d", h.nextRequest), text, "")
 }
 
 // entries returns VALUE copies of the current queue entries.

@@ -3,6 +3,7 @@ package shimclient
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"strings"
 	"testing"
@@ -100,6 +101,284 @@ func TestRejectedLifecycleEventDoesNotAdvanceHighWater(t *testing.T) {
 	}
 	if c.lastSeen != 0 {
 		t.Fatalf("client lastSeen = %d, want 0 after rejected lifecycle event", c.lastSeen)
+	}
+}
+
+func TestRejectedAccountUsageObservationDoesNotAdvanceHighWater(t *testing.T) {
+	h := newHarness()
+	sinkErr := errors.New("account usage observation names unknown turn")
+	h.state.err = sinkErr
+	c := New(h.config(t, "sess-1", "/unused.sock"))
+	ev := &corev1.Event{
+		SessionId: "sess-1", Seq: 7, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT,
+		Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: &corev1.AccountUsageObservation{
+			TurnId: "missing", Boundary: &corev1.AccountUsageObservation_TurnStart{TurnStart: &corev1.TurnStartUsageBoundary{}},
+		}},
+	}
+
+	err := c.dispatchEvent(ev)
+	if !errors.Is(err, ErrLifecycleRejected) || !strings.Contains(err.Error(), sinkErr.Error()) {
+		t.Fatalf("dispatch err = %v, want ErrLifecycleRejected carrying sink cause", err)
+	}
+	<-h.state.ch
+	if got := h.seq.LastSeq("sess-1"); got != 0 || c.lastSeen != 0 {
+		t.Fatalf("rejected observation advanced sequence: store=%d client=%d", got, c.lastSeen)
+	}
+}
+
+func TestRejectedFrameDoesNotAdvanceHighWater(t *testing.T) {
+	h := newHarness()
+	sinkErr := errors.New("response usage has no validated root-turn claim")
+	h.frame.err = sinkErr
+	c := New(h.config(t, "sess-1", "/unused.sock"))
+	ev := &corev1.Event{SessionId: "sess-1", Seq: 7, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &corev1.Event_Vendor{Vendor: &anypb.Any{}}}
+
+	err := c.dispatchEvent(ev)
+	if !errors.Is(err, ErrLifecycleRejected) || !errors.Is(err, sinkErr) || !strings.Contains(err.Error(), "frame sink rejected") {
+		t.Fatalf("dispatch err = %v, want terminal lifecycle rejection carrying frame sink cause", err)
+	}
+	assertRecv(t, h.frame.ch)
+	if got := h.seq.LastSeq("sess-1"); got != 0 || c.lastSeen != 0 {
+		t.Fatalf("rejected frame advanced sequence: store=%d client=%d", got, c.lastSeen)
+	}
+}
+
+func TestResumedQueryPinsDurableCursorUntilRuntimeIdentityIsAccepted(t *testing.T) {
+	h := newHarness()
+	c := New(h.config(t, "agent-session", "/unused.sock"))
+	created := &corev1.Event{SessionId: "vendor-session", Seq: 7, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+		QueryInstanceId: "query", Event: &corev1.QueryLifecycle_Created{Created: &corev1.QueryCreated{Invocation: &corev1.QueryCreated_Resumed{Resumed: &corev1.ResumedQuery{RequestedVendorSessionId: "vendor-session"}}}},
+	}}}
+	if err := c.dispatchEvent(created); err != nil {
+		t.Fatalf("QueryCreated: %v", err)
+	}
+	assertRecv(t, h.frame.ch)
+	if got := h.seq.LastSeq("agent-session"); got != 0 {
+		t.Fatalf("durable cursor after resumed QueryCreated = %d, want pinned before commitment", got)
+	}
+
+	runtime := &corev1.Event{SessionId: "vendor-session", Seq: 8, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+		QueryInstanceId: "query", Event: &corev1.QueryLifecycle_RuntimeObserved{RuntimeObserved: &corev1.QueryRuntimeObserved{Identity: &corev1.QueryRuntimeIdentity{VendorSessionId: "vendor-session"}}},
+	}}}
+	if err := c.dispatchEvent(runtime); err != nil {
+		t.Fatalf("QueryRuntimeObserved: %v", err)
+	}
+	assertRecv(t, h.frame.ch)
+	if got := h.seq.LastSeq("agent-session"); got != 8 {
+		t.Fatalf("durable cursor after accepted runtime identity = %d, want 8", got)
+	}
+}
+
+func TestRejectedRuntimeIdentityKeepsResumeCommitmentPinnedForReplacementController(t *testing.T) {
+	h := newHarness()
+	c := New(h.config(t, "agent-session", "/unused.sock"))
+	created := &corev1.Event{SessionId: "requested", Seq: 7, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+		QueryInstanceId: "query", Event: &corev1.QueryLifecycle_Created{Created: &corev1.QueryCreated{Invocation: &corev1.QueryCreated_Resumed{Resumed: &corev1.ResumedQuery{RequestedVendorSessionId: "requested"}}}},
+	}}}
+	if err := c.dispatchEvent(created); err != nil {
+		t.Fatalf("QueryCreated: %v", err)
+	}
+	assertRecv(t, h.frame.ch)
+	h.frame.err = errors.New("resumed runtime identity mismatch")
+	runtime := &corev1.Event{SessionId: "requested", Seq: 8, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+		QueryInstanceId: "query", Event: &corev1.QueryLifecycle_RuntimeObserved{RuntimeObserved: &corev1.QueryRuntimeObserved{Identity: &corev1.QueryRuntimeIdentity{VendorSessionId: "replacement"}}},
+	}}}
+	if err := c.dispatchEvent(runtime); !errors.Is(err, ErrLifecycleRejected) {
+		t.Fatalf("rejected runtime identity = %v, want terminal lifecycle rejection", err)
+	}
+	assertRecv(t, h.frame.ch)
+	if got := h.seq.LastSeq("agent-session"); got != 0 || c.pendingResumeQuery != "query" {
+		t.Fatalf("rejected runtime advanced resume commitment: durable=%d pending=%q", got, c.pendingResumeQuery)
+	}
+}
+
+func TestDurableCursorPinsWholeTurnUntilTerminalSinkCommits(t *testing.T) {
+	h := newHarness()
+	c := New(h.config(t, "agent-session", "/unused.sock"))
+	startSession := &corev1.Event{SessionId: "vendor-session", Seq: 1, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &corev1.Event_SessionStarted{SessionStarted: &corev1.SessionStarted{VendorSessionId: "vendor-session"}}}
+	startTurn := &corev1.Event{SessionId: "vendor-session", Seq: 2, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "turn", Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "turn"}}}
+	response := &corev1.Event{SessionId: "vendor-session", Seq: 3, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "turn", Payload: &corev1.Event_Vendor{Vendor: &anypb.Any{}}}
+	endTurn := &corev1.Event{SessionId: "vendor-session", Seq: 4, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "turn", Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "turn"}}}
+	if err := c.dispatchEvent(startSession); err != nil {
+		t.Fatal(err)
+	}
+	assertRecv(t, h.state.ch)
+	if err := c.dispatchEvent(startTurn); err != nil {
+		t.Fatal(err)
+	}
+	assertRecv(t, h.state.ch)
+	if err := c.dispatchEvent(response); err != nil {
+		t.Fatal(err)
+	}
+	assertRecv(t, h.frame.ch)
+	if got := h.seq.LastSeq("agent-session"); got != 1 {
+		t.Fatalf("durable cursor during turn = %d, want 1 before TurnStarted", got)
+	}
+	if c.lastSeen != 3 {
+		t.Fatalf("volatile cursor during turn = %d, want 3", c.lastSeen)
+	}
+	h.state.err = errors.New("terminal accounting transaction rejected")
+	if err := c.dispatchEvent(endTurn); !errors.Is(err, ErrLifecycleRejected) {
+		t.Fatalf("terminal rejection = %v, want ErrLifecycleRejected", err)
+	}
+	assertRecv(t, h.state.ch)
+	if got := h.seq.LastSeq("agent-session"); got != 1 {
+		t.Fatalf("failed terminal transaction advanced durable cursor to %d", got)
+	}
+	h.state.err = nil
+	if err := c.dispatchEvent(endTurn); err != nil {
+		t.Fatalf("terminal replay: %v", err)
+	}
+	assertRecv(t, h.state.ch)
+	if got := h.seq.LastSeq("agent-session"); got != 4 {
+		t.Fatalf("committed terminal cursor = %d, want 4", got)
+	}
+}
+
+func TestDurableCursorPinsRotatedTurnFromClaimBridgeUntilTerminalSinkCommits(t *testing.T) {
+	h := newHarness()
+	c := New(h.config(t, "agent-session", "/unused.sock"))
+	baseline := &corev1.Event{SessionId: "vendor-new", Seq: 1, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &corev1.Event_SessionStarted{SessionStarted: &corev1.SessionStarted{VendorSessionId: "vendor-new"}}}
+	bridge := &corev1.Event{SessionId: "vendor-new", Seq: 2, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "turn", Payload: &corev1.Event_TurnClaimBridge{TurnClaimBridge: &corev1.TurnClaimBridge{TurnId: "turn", PreviousSessionId: "vendor-old"}}}
+	response := &corev1.Event{SessionId: "vendor-new", Seq: 3, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "turn", Payload: &corev1.Event_Vendor{Vendor: &anypb.Any{}}}
+	endTurn := &corev1.Event{SessionId: "vendor-new", Seq: 4, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "turn", Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "turn"}}}
+
+	if err := c.dispatchEvent(baseline); err != nil {
+		t.Fatal(err)
+	}
+	assertRecv(t, h.state.ch)
+	if err := c.dispatchEvent(bridge); err != nil {
+		t.Fatal(err)
+	}
+	assertRecv(t, h.claims.ch)
+	if err := c.dispatchEvent(response); err != nil {
+		t.Fatal(err)
+	}
+	assertRecv(t, h.frame.ch)
+	if got := h.seq.LastSeq("agent-session"); got != 1 {
+		t.Fatalf("durable cursor during bridged turn = %d, want 1 before bridge", got)
+	}
+	if err := c.dispatchEvent(endTurn); err != nil {
+		t.Fatalf("terminal boundary after bridge: %v", err)
+	}
+	assertRecv(t, h.state.ch)
+	if got := h.seq.LastSeq("agent-session"); got != 4 {
+		t.Fatalf("committed bridged terminal cursor = %d, want 4", got)
+	}
+}
+
+func TestDurableCursorPinsTypedTerminationUntilGenericCompanion(t *testing.T) {
+	h := newHarness()
+	c := New(h.config(t, "agent-session", "/unused.sock"))
+	baseline := &corev1.Event{SessionId: "vendor-session", Seq: 1, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &corev1.Event_SessionStarted{SessionStarted: &corev1.SessionStarted{VendorSessionId: "vendor-session"}}}
+	lifecycle := &corev1.Event{SessionId: "vendor-session", Seq: 2, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{QueryInstanceId: "query", ObservedAtMs: 1234, Event: &corev1.QueryLifecycle_Terminated{Terminated: &corev1.QueryTerminated{VendorIdentity: &corev1.QueryTerminated_VendorSessionId{VendorSessionId: "vendor-session"}, Reason: &corev1.QueryTerminated_UnexpectedEof{UnexpectedEof: &corev1.UnexpectedQueryEof{}}}}}}}
+	queryID := "query"
+	companion := &corev1.Event{SessionId: "vendor-session", Seq: 3, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &corev1.Event_DegradedState{DegradedState: &corev1.DegradedState{Component: "claude-shim-sdk", Reason: "unexpected_query_termination", QueryInstanceId: &queryID}}}
+	if err := c.dispatchEvent(baseline); err != nil {
+		t.Fatal(err)
+	}
+	assertRecv(t, h.state.ch)
+	if err := c.dispatchEvent(lifecycle); err != nil {
+		t.Fatal(err)
+	}
+	assertRecv(t, h.frame.ch)
+	if got := h.seq.LastSeq("agent-session"); got != 1 {
+		t.Fatalf("typed termination advanced durable cursor to %d", got)
+	}
+	if err := c.dispatchEvent(companion); err != nil {
+		t.Fatal(err)
+	}
+	<-h.deg.ds
+	if got := h.seq.LastSeq("agent-session"); got != 3 {
+		t.Fatalf("complete termination pair cursor = %d, want 3", got)
+	}
+}
+
+func TestDurableCursorPinsStartupFailureUntilItsExactGenericCompanion(t *testing.T) {
+	h := newHarness()
+	c := New(h.config(t, "agent-session", "/unused.sock"))
+	baseline := &corev1.Event{SessionId: "vendor-session", Seq: 1, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &corev1.Event_SessionStarted{SessionStarted: &corev1.SessionStarted{VendorSessionId: "vendor-session"}}}
+	lifecycle := &corev1.Event{SessionId: "vendor-session", Seq: 2, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{QueryInstanceId: "startup-query", ObservedAtMs: 1234, Event: &corev1.QueryLifecycle_Terminated{Terminated: &corev1.QueryTerminated{VendorIdentity: &corev1.QueryTerminated_VendorSessionIdentityUnavailable{VendorSessionIdentityUnavailable: &corev1.VendorSessionIdentityUnavailable{}}, Reason: &corev1.QueryTerminated_StartupFailure{StartupFailure: &corev1.QueryStartupFailure{Cause: "daemon connection refused"}}}}}}}
+	queryID := "startup-query"
+	companion := &corev1.Event{SessionId: "vendor-session", Seq: 3, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &corev1.Event_DegradedState{DegradedState: &corev1.DegradedState{Component: "claude-shim-sdk", Reason: "unexpected_query_termination", QueryInstanceId: &queryID}}}
+	if err := c.dispatchEvent(baseline); err != nil {
+		t.Fatal(err)
+	}
+	assertRecv(t, h.state.ch)
+	if err := c.dispatchEvent(lifecycle); err != nil {
+		t.Fatal(err)
+	}
+	assertRecv(t, h.frame.ch)
+	if got := h.seq.LastSeq("agent-session"); got != 1 {
+		t.Fatalf("startup failure advanced durable cursor to %d before its companion", got)
+	}
+	if err := c.dispatchEvent(companion); err != nil {
+		t.Fatal(err)
+	}
+	<-h.deg.ds
+	if got := h.seq.LastSeq("agent-session"); got != 3 {
+		t.Fatalf("startup failure companion cursor = %d, want 3", got)
+	}
+}
+
+func TestDurableCursorAdvancesPastIntentionalTerminationBeforeNextUnexpectedQuery(t *testing.T) {
+	h := newHarness()
+	c := New(h.config(t, "agent-session", "/unused.sock"))
+	baseline := &corev1.Event{SessionId: "vendor-session", Seq: 1, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &corev1.Event_SessionStarted{SessionStarted: &corev1.SessionStarted{VendorSessionId: "vendor-session"}}}
+	intentional := &corev1.Event{SessionId: "vendor-session", Seq: 2, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{QueryInstanceId: "retired-query", ObservedAtMs: 1234, Event: &corev1.QueryLifecycle_Terminated{Terminated: &corev1.QueryTerminated{VendorIdentity: &corev1.QueryTerminated_VendorSessionId{VendorSessionId: "vendor-session"}, Reason: &corev1.QueryTerminated_Intentional{Intentional: &corev1.IntentionalQueryTermination{Reason: "SIGTERM"}}}}}}}
+	unexpected := &corev1.Event{SessionId: "vendor-session", Seq: 3, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{QueryInstanceId: "resumed-query", ObservedAtMs: 2345, Event: &corev1.QueryLifecycle_Terminated{Terminated: &corev1.QueryTerminated{VendorIdentity: &corev1.QueryTerminated_VendorSessionId{VendorSessionId: "vendor-session"}, Reason: &corev1.QueryTerminated_UnexpectedEof{UnexpectedEof: &corev1.UnexpectedQueryEof{}}}}}}}
+	queryID := "resumed-query"
+	companion := &corev1.Event{SessionId: "vendor-session", Seq: 4, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &corev1.Event_DegradedState{DegradedState: &corev1.DegradedState{Component: "claude-shim-sdk", Reason: "unexpected_query_termination", QueryInstanceId: &queryID}}}
+
+	if err := c.dispatchEvent(baseline); err != nil {
+		t.Fatal(err)
+	}
+	assertRecv(t, h.state.ch)
+	if err := c.dispatchEvent(intentional); err != nil {
+		t.Fatalf("intentional termination: %v", err)
+	}
+	assertRecv(t, h.frame.ch)
+	if got := h.seq.LastSeq("agent-session"); got != 2 {
+		t.Fatalf("intentional termination cursor = %d, want 2", got)
+	}
+	if err := c.dispatchEvent(unexpected); err != nil {
+		t.Fatalf("unexpected termination after intentional shutdown: %v", err)
+	}
+	assertRecv(t, h.frame.ch)
+	if got := h.seq.LastSeq("agent-session"); got != 2 {
+		t.Fatalf("unexpected termination cursor = %d, want pin at 2 pending companion", got)
+	}
+	if err := c.dispatchEvent(companion); err != nil {
+		t.Fatalf("unexpected termination companion: %v", err)
+	}
+	<-h.deg.ds
+	if got := h.seq.LastSeq("agent-session"); got != 4 {
+		t.Fatalf("completed resumed termination cursor = %d, want 4", got)
+	}
+}
+
+func TestReplayCursorViolationFailsBeforeSinkMutationAndLogsIdentity(t *testing.T) {
+	h := newHarness()
+	var logs []string
+	cfg := h.config(t, "agent-session", "/unused.sock")
+	cfg.Logf = func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }
+	c := New(cfg)
+	event := &corev1.Event{SessionId: "vendor-session", Seq: 4, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "turn", Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "turn"}}}
+	err := c.dispatchEvent(event)
+	if !errors.Is(err, ErrReplayCursorInvariant) {
+		t.Fatalf("error = %v, want ErrReplayCursorInvariant", err)
+	}
+	select {
+	case got := <-h.state.ch:
+		t.Fatalf("cursor violation reached state sink: %+v", got)
+	default:
+	}
+	if c.lastSeen != 0 || h.seq.LastSeq("agent-session") != 0 {
+		t.Fatalf("cursor violation mutated cursors: volatile=%d durable=%d", c.lastSeen, h.seq.LastSeq("agent-session"))
+	}
+	joined := strings.Join(logs, "\n")
+	if !strings.Contains(joined, "replay cursor invariant REJECTED") || !strings.Contains(joined, "session=agent-session") || !strings.Contains(joined, "seq=4") || !strings.Contains(joined, `turn "turn"`) {
+		t.Fatalf("logs = %v", logs)
 	}
 }
 
@@ -292,6 +571,13 @@ func TestEventRouting(t *testing.T) {
 		{
 			name: "task started to state sink",
 			ev:   &corev1.Event{SessionId: "s", Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{TaskId: "a1"}}},
+			want: "state",
+		},
+		{
+			name: "account usage observation to error-returning state sink",
+			ev: &corev1.Event{SessionId: "s", Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: &corev1.AccountUsageObservation{
+				TurnId: "turn-1", Boundary: &corev1.AccountUsageObservation_TurnStart{TurnStart: &corev1.TurnStartUsageBoundary{}},
+			}}},
 			want: "state",
 		},
 		{

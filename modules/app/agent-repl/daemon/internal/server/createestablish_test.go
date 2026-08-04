@@ -288,6 +288,112 @@ func TestCreateSessionNackNamesTheDeepestLink(t *testing.T) {
 	}
 }
 
+func TestExplicitResumeCreateClassifiesPostCreateEstablishmentFailures(t *testing.T) {
+	queryFailure := &queryTerminationTestError{
+		err: errors.New("resumed query terminated during readiness"),
+		detail: &frontendv1.QueryTerminationFailure{
+			AgentReplSessionId: "s_test",
+			QueryInstanceId:    "query-resume",
+			VendorIdentity: &frontendv1.QueryTerminationFailure_VendorSessionId{
+				VendorSessionId: "claude-resume",
+			},
+		},
+	}
+	genericFailure := errors.New("health route failed during resumed readiness")
+	tests := []struct {
+		name  string
+		cause error
+		check func(*testing.T, *frontendv1.SessionResumeFailure)
+	}{
+		{
+			name:  "typed query termination",
+			cause: queryFailure,
+			check: func(t *testing.T, detail *frontendv1.SessionResumeFailure) {
+				t.Helper()
+				got := detail.GetQueryTermination()
+				if got == nil || got.GetQueryInstanceId() != "query-resume" || got.GetVendorSessionId() != "claude-resume" {
+					t.Fatalf("query termination = %v", got)
+				}
+			},
+		},
+		{
+			name:  "generic readiness failure",
+			cause: genericFailure,
+			check: func(t *testing.T, detail *frontendv1.SessionResumeFailure) {
+				t.Helper()
+				got := detail.GetBringUpFailure()
+				if got == nil || !strings.Contains(got.GetCause(), genericFailure.Error()) {
+					t.Fatalf("bring-up failure = %v, want cause containing %q", got, genericFailure)
+				}
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange — the create core returns a durable daemon session id, then
+			// the correlated health/readiness gate reports the scripted failure.
+			h := establishHandler(t, &fakeSessionCmds{}, &probeHealthRouter{err: tc.cause})
+
+			// Act.
+			_, err := h.CreateSession(context.Background(), "/w", "request-1", &frontendv1.CreateSessionCmd{
+				Cwd:                     "/w",
+				ConfigDir:               "/cfg",
+				ResumeMode:              frontendv1.ResumeMode_RESUME_MODE_EXPLICIT,
+				ExplicitClaudeSessionId: "claude-resume",
+			})
+			failure := errclass.Command(nil, err)
+			detail := failure.GetSessionResume()
+
+			// Assert.
+			if !errors.Is(err, tc.cause) {
+				t.Fatalf("CreateSession error = %v, want original chain to contain %v", err, tc.cause)
+			}
+			if failure.GetErrorType() != string(errclass.TypeSessionResumeFailed) || detail == nil || detail.GetCreate() == nil {
+				t.Fatalf("failure = %v, want typed create resume failure", failure)
+			}
+			if detail.GetAgentReplSessionId() != "s_test" || detail.GetClaudeSessionId() != "claude-resume" || detail.GetCwd() != "/w" || detail.GetConfigDir() != "/cfg" || detail.GetResolvedConfigDir() != "/cfg" {
+				t.Fatalf("failure evidence = %v", detail)
+			}
+			tc.check(t, detail)
+		})
+	}
+}
+
+func TestExplicitResumeCreateClassifiesCreateCoreBringUpFailure(t *testing.T) {
+	// Arrange — the core has already assigned the durable daemon session id
+	// when its eager shim bring-up fails.
+	cause := errors.New("create core could not spawn resumed shim")
+	router := &probeHealthRouter{healthy: true}
+	h := establishHandler(t, &fakeSessionCmds{err: cause}, router)
+
+	// Act.
+	_, err := h.CreateSession(context.Background(), "/w", "request-1", &frontendv1.CreateSessionCmd{
+		Cwd:                     "/w",
+		ConfigDir:               "/cfg",
+		ResumeMode:              frontendv1.ResumeMode_RESUME_MODE_EXPLICIT,
+		ExplicitClaudeSessionId: "claude-resume",
+	})
+	failure := errclass.Command(nil, err)
+	detail := failure.GetSessionResume()
+
+	// Assert.
+	if !errors.Is(err, cause) {
+		t.Fatalf("CreateSession error = %v, want original core failure", err)
+	}
+	if failure.GetErrorType() != string(errclass.TypeSessionResumeFailed) || detail == nil || detail.GetCreate() == nil || detail.GetBringUpFailure() == nil {
+		t.Fatalf("failure = %v, want typed create bring-up failure", failure)
+	}
+	if detail.GetAgentReplSessionId() != "s_test" || detail.GetClaudeSessionId() != "claude-resume" || detail.GetCwd() != "/w" || detail.GetConfigDir() != "/cfg" || detail.GetResolvedConfigDir() != "/cfg" {
+		t.Fatalf("failure evidence = %v", detail)
+	}
+	if !strings.Contains(detail.GetBringUpFailure().GetCause(), cause.Error()) {
+		t.Fatalf("bring-up failure = %v, want cause containing %q", detail.GetBringUpFailure(), cause)
+	}
+	if got := router.probeCount(); got != 0 {
+		t.Fatalf("health probes = %d, want none after create-core failure", got)
+	}
+}
+
 // TestCreateSessionNackCarriesTheShimsOwnReason keeps the shim's verdict verbatim
 // in the nack: the component and reason are the only part a human can act on, and
 // the daemon never re-words them.
@@ -329,6 +435,79 @@ func TestCreateSessionNackOnTheCallersDeadline(t *testing.T) {
 	}
 	if got, ok := errclass.Sentinel(err); !ok || got != errclass.TypeSessionNotEstablished {
 		t.Fatalf("classified as (%q, %v), want %q", got, ok, errclass.TypeSessionNotEstablished)
+	}
+}
+
+func TestExplicitResumeCallerDeadlineCarriesTypedContinuityEvidence(t *testing.T) {
+	// Arrange: the shared round remains alive after this caller's bound ends.
+	release := make(chan struct{})
+	router := &probeHealthRouter{healthy: true, gate: release, entered: make(chan struct{}, 1)}
+	h := establishHandler(t, &fakeSessionCmds{}, router)
+	cmd := &frontendv1.CreateSessionCmd{
+		Cwd:                     "/w",
+		ConfigDir:               "/cfg",
+		ResumeMode:              frontendv1.ResumeMode_RESUME_MODE_EXPLICIT,
+		ExplicitClaudeSessionId: "claude-resume",
+	}
+	leader := make(chan error, 1)
+	go func() { _, err := h.CreateSession(context.Background(), "/w", "leader", cmd); leader <- err }()
+	awaitProbe(t, router)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act.
+	_, err := h.CreateSession(ctx, "/w", "follower", cmd)
+	close(release)
+	if leaderErr := <-leader; leaderErr != nil {
+		t.Fatalf("leader: %v", leaderErr)
+	}
+
+	// Assert.
+	failure := errclass.Command(nil, err)
+	detail := failure.GetSessionResume()
+	if !errors.Is(err, errclass.ErrSessionNotEstablished) || failure.GetErrorType() != string(errclass.TypeSessionResumeFailed) || detail == nil || detail.GetCreate() == nil || detail.GetBringUpFailure() == nil {
+		t.Fatalf("failure = %v err=%v, want typed explicit-resume caller cancellation", failure, err)
+	}
+	if detail.GetClaudeSessionId() != "claude-resume" || detail.GetCwd() != "/w" || detail.GetConfigDir() != "/cfg" {
+		t.Fatalf("continuity evidence = %v", detail)
+	}
+}
+
+func TestExplicitResumeEnrollmentCancellationCarriesTypedContinuityEvidence(t *testing.T) {
+	// Arrange: a different create owns the workspace slot, so the explicit
+	// resume can fail before it joins or creates any agent session.
+	release := make(chan struct{})
+	router := &probeHealthRouter{healthy: true, gate: release, entered: make(chan struct{}, 1)}
+	h := establishHandler(t, &fakeSessionCmds{}, router)
+	leader := make(chan error, 1)
+	go func() {
+		_, err := h.CreateSession(context.Background(), "/w", "leader", &frontendv1.CreateSessionCmd{Cwd: "/w", ConfigDir: "/other"})
+		leader <- err
+	}()
+	awaitProbe(t, router)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act.
+	_, err := h.CreateSession(ctx, "/w", "explicit", &frontendv1.CreateSessionCmd{
+		Cwd:                     "/w",
+		ConfigDir:               "/cfg",
+		ResumeMode:              frontendv1.ResumeMode_RESUME_MODE_EXPLICIT,
+		ExplicitClaudeSessionId: "claude-resume",
+	})
+	close(release)
+	if leaderErr := <-leader; leaderErr != nil {
+		t.Fatalf("leader: %v", leaderErr)
+	}
+
+	// Assert.
+	failure := errclass.Command(nil, err)
+	detail := failure.GetSessionResume()
+	if !errors.Is(err, errclass.ErrSessionNotEstablished) || failure.GetErrorType() != string(errclass.TypeSessionResumeFailed) || detail == nil || detail.GetCreate() == nil || detail.GetBringUpFailure() == nil {
+		t.Fatalf("failure = %v err=%v, want typed explicit-resume enrollment cancellation", failure, err)
+	}
+	if detail.GetClaudeSessionId() != "claude-resume" || detail.GetCwd() != "/w" || detail.GetConfigDir() != "/cfg" {
+		t.Fatalf("continuity evidence = %v", detail)
 	}
 }
 

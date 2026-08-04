@@ -30,6 +30,7 @@ import {
 import { CounterEntry } from "../src/counter-menu.js";
 import { StoreState, ToolItem } from "../src/store.js";
 import { IDLE_LABEL, TIMER_SLOT } from "../src/timer.js";
+import { generatedSessionUtilization, generatedUngroupedResponse, ungroupedResponse } from "./token-utilization-fixture.js";
 
 /** A counter entry, defaulted to an active (still-running) one. */
 function counterEntry(over: Partial<CounterEntry> = {}): CounterEntry {
@@ -485,6 +486,20 @@ describe("sessionTopbarDatapoints", () => {
     const d = sessionTopbarDatapoints(storeState({ modelUsage }), null);
     // Assert
     expect(d.tokenMenu?.models).toEqual(modelUsage);
+  });
+
+  it("hands ungrouped subagent responses to the dropdown without combining them", () => {
+    const responses = [
+      generatedUngroupedResponse({ apiMessageId: "message-one", usage: { ...ungroupedResponse().usage, inputTokens: 11 } }),
+      generatedUngroupedResponse({ apiMessageId: "message-two", usage: { ...ungroupedResponse().usage, inputTokens: 22 } }),
+    ];
+    const tokenUtilization = generatedSessionUtilization(responses);
+
+    const d = sessionTopbarDatapoints(storeState({ tokenUtilization }), null);
+
+    expect(d.tokenMenu?.sessionUtilization).toBe(tokenUtilization);
+    expect(d.tokenMenu?.sessionUtilization?.ungroupedSubagentResponses.map((response) => response.apiMessageId))
+      .toEqual(["message-one", "message-two"]);
   });
 
   it("projects no plain standing, which stays in the store for the result chips", () => {

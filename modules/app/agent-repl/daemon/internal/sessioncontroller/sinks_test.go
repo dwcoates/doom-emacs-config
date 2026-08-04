@@ -209,8 +209,11 @@ type fakeApplier struct {
 	// current is what Current resolves per workspace — the hibernation settled
 	// guard's only input. Absent means "nothing resolved", which is what every
 	// test that does not care about the guard wants.
-	current    map[string]*frontendv1.WorkspaceState
-	currentErr error
+	current                 map[string]*frontendv1.WorkspaceState
+	currentErr              error
+	hibernationLeases       map[string]bool
+	controllerRegistrations map[string]map[string]struct{}
+	beforeConnectivity      func(ssm.SessionConnectivity)
 	// staleTurnCloses records one entry per CloseStaleTurn call — the
 	// teardown's guaranteed session-status lifecycle close, which is what makes a
 	// daemon-initiated shim stop unable to strand a live turn.
@@ -483,6 +486,9 @@ func (f *fakeApplier) ApplySessionConnectivity(
 	state ssm.SessionConnectivity,
 	causeKind string,
 ) error {
+	if f.beforeConnectivity != nil {
+		f.beforeConnectivity(state)
+	}
 	f.reconcMutex.Lock()
 	defer f.reconcMutex.Unlock()
 	f.connectivityEdges = append(f.connectivityEdges, connectivityCall{
@@ -498,7 +504,60 @@ func (f *fakeApplier) ApplySessionConnectivity(
 	if wiring, ok := legacy[state]; ok {
 		f.wirings = append(f.wirings, wiringCall{workspace: workspace, wiring: wiring, reason: causeKind})
 	}
+	if f.connectivityErr == nil {
+		if f.current == nil {
+			f.current = make(map[string]*frontendv1.WorkspaceState)
+		}
+		renderState := map[ssm.SessionConnectivity]frontendv1.RenderState{
+			ssm.SessionConnectivityConnecting:  frontendv1.RenderState_RENDER_STATE_INIT,
+			ssm.SessionConnectivityOperational: frontendv1.RenderState_RENDER_STATE_READY,
+			ssm.SessionConnectivityHibernated:  frontendv1.RenderState_RENDER_STATE_HIBERNATED,
+			ssm.SessionConnectivityUnavailable: frontendv1.RenderState_RENDER_STATE_DEAD,
+		}[state]
+		f.current[workspace] = &frontendv1.WorkspaceState{
+			Workspace: workspace,
+			SessionId: sessionID,
+			State:     renderState,
+		}
+		if state == ssm.SessionConnectivityOperational {
+			delete(f.controllerRegistrations[workspace], generationID)
+			if len(f.controllerRegistrations[workspace]) == 0 {
+				delete(f.controllerRegistrations, workspace)
+			}
+		}
+	}
 	return f.connectivityErr
+}
+
+func (f *fakeApplier) AcquireControllerRegistration(workspace, sessionID, generationID string) (func(), error) {
+	f.reconcMutex.Lock()
+	defer f.reconcMutex.Unlock()
+	if f.hibernationLeases[workspace] {
+		return nil, fmt.Errorf("%w for workspace %q", ssm.ErrHibernationInProgress, workspace)
+	}
+	if f.controllerRegistrations == nil {
+		f.controllerRegistrations = make(map[string]map[string]struct{})
+	}
+	registrations := f.controllerRegistrations[workspace]
+	if registrations == nil {
+		registrations = make(map[string]struct{})
+		f.controllerRegistrations[workspace] = registrations
+	}
+	registrations[generationID] = struct{}{}
+	released := false
+	return func() {
+		f.reconcMutex.Lock()
+		defer f.reconcMutex.Unlock()
+		if released {
+			panic("fake SSM: controller registration released twice")
+		}
+		released = true
+		registrations := f.controllerRegistrations[workspace]
+		delete(registrations, generationID)
+		if len(registrations) == 0 {
+			delete(f.controllerRegistrations, workspace)
+		}
+	}, nil
 }
 
 func (f *fakeApplier) ApplyRuntimeFault(
@@ -539,6 +598,36 @@ func (f *fakeApplier) Current(workspace string) (*frontendv1.WorkspaceState, boo
 	return st, true, nil
 }
 
+func (f *fakeApplier) AcquireHibernationLease(workspace string) (*frontendv1.WorkspaceState, bool, func(), error) {
+	f.reconcMutex.Lock()
+	if f.currentErr != nil {
+		f.reconcMutex.Unlock()
+		return nil, false, nil, f.currentErr
+	}
+	if f.hibernationLeases == nil {
+		f.hibernationLeases = make(map[string]bool)
+	}
+	if f.hibernationLeases[workspace] {
+		f.reconcMutex.Unlock()
+		return nil, false, nil, fmt.Errorf("fake SSM: workspace %q already leased", workspace)
+	}
+	if len(f.controllerRegistrations[workspace]) != 0 {
+		f.reconcMutex.Unlock()
+		return nil, false, nil, fmt.Errorf("%w for workspace %q", ssm.ErrControllerRegistrationInProgress, workspace)
+	}
+	f.hibernationLeases[workspace] = true
+	st, found := f.current[workspace]
+	f.reconcMutex.Unlock()
+	return st, found, func() {
+		f.reconcMutex.Lock()
+		defer f.reconcMutex.Unlock()
+		if !f.hibernationLeases[workspace] {
+			panic("fake SSM: hibernation lease released twice")
+		}
+		delete(f.hibernationLeases, workspace)
+	}, nil
+}
+
 // staleTurnCloseCall is one teardown axis close the session controller asked the SSM for.
 type staleTurnCloseCall struct {
 	workspace             string
@@ -576,6 +665,12 @@ func (f *fakeApplier) setCurrent(workspace string, st *frontendv1.WorkspaceState
 		f.current = map[string]*frontendv1.WorkspaceState{}
 	}
 	f.current[workspace] = st
+}
+
+func (f *fakeApplier) clearCurrent(workspace string) {
+	f.reconcMutex.Lock()
+	defer f.reconcMutex.Unlock()
+	delete(f.current, workspace)
 }
 
 // wiringsApplied returns the recorded WIRED-axis edges, taken under the lock so
@@ -793,18 +888,18 @@ func (a *fakeApplier) reconcileCalls() []reconcileCall {
 }
 
 func newTestConsumer(push Pusher, applier StateApplier) *consumer {
-	c := newConsumer("ws", "s1", push, applier, nil, newFakeClearCompactStore(), nil, nil, nil, nil, nil, nil)
+	c := newConsumer("ws", "s1", push, applier, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, nil, nil, nil, nil, nil, nil)
 	c.now = func() int64 { return 1000 }
 	return c
 }
 
-func TestTurnClaimBridgeTouchesOnlyDurableLedger(t *testing.T) {
+func TestTurnClaimBridgeTouchesOnlyDurableLedgerAndAccountingCorrelation(t *testing.T) {
 	push := &fakePusher{}
 	applier := &fakeApplier{}
 	progress := &fakeProgress{}
 	turnNotifications := 0
 	c := newConsumer(
-		"ws", "s1", push, applier, progress, newFakeClearCompactStore(),
+		"ws", "s1", push, applier, progress, newFakeClearCompactStore(), emptyTurnAccountingStore{},
 		func(string, ...any) {}, nil,
 		func(bool) { turnNotifications++ }, nil, nil, nil,
 	)
@@ -836,6 +931,9 @@ func TestTurnClaimBridgeTouchesOnlyDurableLedger(t *testing.T) {
 	}
 	if len(c.ring) != 0 {
 		t.Fatalf("retained ring length = %d, want 0", len(c.ring))
+	}
+	if c.accounting.activeTurnID != "turn-1" || c.accounting.turns["turn-1"] == nil {
+		t.Fatalf("accounting correlation = active:%q turns:%v, want bridged live turn", c.accounting.activeTurnID, c.accounting.turns)
 	}
 	if len(push.convo)+len(push.typing)+len(push.catalog)+len(push.state)+
 		len(push.inits)+len(push.heartbeats)+len(push.queues) != 0 {
@@ -918,7 +1016,7 @@ func (p *fakeProgress) interruptNotes() []interruptNote {
 }
 
 func newProgressConsumer(prog ProgressResolver) *consumer {
-	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, prog, newFakeClearCompactStore(), nil, nil, nil, nil, nil, nil)
+	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, prog, newFakeClearCompactStore(), emptyTurnAccountingStore{}, nil, nil, nil, nil, nil, nil)
 	c.now = func() int64 { return 1000 }
 	return c
 }
@@ -1014,7 +1112,7 @@ func TestMessageLatencyPushesNoConversationFrame(t *testing.T) {
 
 // backfillConsumer builds a consumer recording its backfill transitions.
 func backfillConsumer(states *[]string) *consumer {
-	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), nil, nil, nil, func(state string) { *states = append(*states, state) }, nil, nil)
+	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, nil, nil, nil, func(state string) { *states = append(*states, state) }, nil, nil)
 	c.now = func() int64 { return 1000 }
 	return c
 }
@@ -1136,7 +1234,7 @@ func TestProgressFoldFailureDoesNotStopTheStream(t *testing.T) {
 	// Arrange — the resolver rejects everything.
 	prog := &fakeProgress{err: errors.New("boom")}
 	push := &fakePusher{}
-	c := newConsumer("ws", "s1", push, &fakeApplier{}, prog, newFakeClearCompactStore(), nil, nil, nil, nil, nil, nil)
+	c := newConsumer("ws", "s1", push, &fakeApplier{}, prog, newFakeClearCompactStore(), emptyTurnAccountingStore{}, nil, nil, nil, nil, nil, nil)
 	c.now = func() int64 { return 1000 }
 	// Act
 	c.Consume(&corev1.Event{
@@ -1366,7 +1464,7 @@ func TestApplyRejectsFileTurnEndBeforeQueueAndStateConsumers(t *testing.T) {
 	var boundaries []bool
 	var logs []string
 	c := newConsumer(
-		"ws", "s1", &fakePusher{}, applier, nil, newFakeClearCompactStore(),
+		"ws", "s1", &fakePusher{}, applier, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{},
 		func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) },
 		nil,
 		func(active bool) { boundaries = append(boundaries, active) },
@@ -1392,7 +1490,7 @@ func TestApplyRejectsFileTurnEndBeforeQueueAndStateConsumers(t *testing.T) {
 func TestApplyFiresOnSessionStarted(t *testing.T) {
 	// Arrange.
 	var seen *corev1.SessionStarted
-	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), nil, func(ss *corev1.SessionStarted) { seen = ss }, nil, nil, nil, nil)
+	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, nil, func(ss *corev1.SessionStarted) { seen = ss }, nil, nil, nil, nil)
 
 	// Act.
 	c.Apply(&corev1.Event{SessionId: "s1", Payload: &corev1.Event_SessionStarted{SessionStarted: &corev1.SessionStarted{Source: corev1.SessionSource_SESSION_SOURCE_RESUME}}})
@@ -1506,7 +1604,7 @@ func TestConnectionDegradedFailureIsLoudNotSwallowed(t *testing.T) {
 	// misreport this axis exists to prevent.
 	var logged []string
 	applier := &fakeApplier{degradedErr: errors.New("db gone")}
-	c := newConsumer("ws", "s1", &fakePusher{}, applier, nil, newFakeClearCompactStore(), func(f string, a ...any) { logged = append(logged, f) }, nil, nil, nil, nil, nil)
+	c := newConsumer("ws", "s1", &fakePusher{}, applier, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, func(f string, a ...any) { logged = append(logged, f) }, nil, nil, nil, nil, nil)
 
 	// Act.
 	c.ConnectionDegraded("s1", "no traffic")
@@ -1988,7 +2086,7 @@ func TestStoreSettleIsIdempotent(t *testing.T) {
 func TestSessionEndedReportsTheDeath(t *testing.T) {
 	// Arrange.
 	var ended int
-	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), nil, nil, nil, nil, nil, func() { ended++ })
+	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, nil, nil, nil, nil, nil, func() { ended++ })
 
 	// Act.
 	c.Apply(&corev1.Event{Payload: &corev1.Event_SessionEnded{SessionEnded: &corev1.SessionEnded{}}})
@@ -2002,7 +2100,7 @@ func TestSessionEndedReportsTheDeath(t *testing.T) {
 func TestATurnEndDoesNotReportADeath(t *testing.T) {
 	// Arrange: a turn ending is not a session ending.
 	var ended int
-	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), nil, nil, nil, nil, nil, func() { ended++ })
+	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, nil, nil, nil, nil, nil, func() { ended++ })
 
 	// Act.
 	c.Apply(&corev1.Event{Plane: corev1.Plane_PLANE_STREAM, Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{}}})
@@ -2125,7 +2223,7 @@ func TestTurnClaimBridgeEscalatesOnlyConflictsWithLiveClaims(t *testing.T) {
 			applier := &fakeApplier{bridgeErr: tc.bridgeErr}
 			var logged []string
 			c := newConsumer(
-				"ws", "s1", &fakePusher{}, applier, &fakeProgress{}, newFakeClearCompactStore(),
+				"ws", "s1", &fakePusher{}, applier, &fakeProgress{}, newFakeClearCompactStore(), emptyTurnAccountingStore{},
 				func(format string, args ...any) { logged = append(logged, fmt.Sprintf(format, args...)) },
 				nil, nil, nil, nil, nil,
 			)
@@ -2166,7 +2264,7 @@ func TestDeadClaimBridgeRefusalIsStillRecordedLoudly(t *testing.T) {
 		ssm.ErrTurnBridgeDeadClaim, "daemon-prompt-2-d41297f08566")}
 	var logged []string
 	c := newConsumer(
-		"ws", "s1", &fakePusher{}, applier, &fakeProgress{}, newFakeClearCompactStore(),
+		"ws", "s1", &fakePusher{}, applier, &fakeProgress{}, newFakeClearCompactStore(), emptyTurnAccountingStore{},
 		func(format string, args ...any) { logged = append(logged, fmt.Sprintf(format, args...)) },
 		nil, nil, nil, nil, nil,
 	)

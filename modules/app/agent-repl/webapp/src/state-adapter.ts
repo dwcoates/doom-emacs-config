@@ -70,6 +70,7 @@ import type {
 import {
   ConversationSource,
   ERROR_CLASSES,
+  decodeSystemFailure,
   RenderState,
   sessionCommandOf,
   SessionConnectivity,
@@ -220,7 +221,7 @@ export interface SessionViewInput {
   configDir: string;
   /** SDK-published menu; the browser renders it but never owns selection. */
   models: ModelInfo[];
-  tokenUtilization?: import("./protocol.js").SessionTokenUtilization;
+  tokenUtilization?: import("./frontend-proto.js").SessionTokenUtilization;
 }
 
 /**
@@ -1015,7 +1016,7 @@ function itemsFromFrame(frame: ConversationItemFrame): { items: ConversationItem
       // No correlation key on the arm + unbuilt curator counterpart; ignored.
       return { items: [], ignores: ["conversation-item:toolUseResult"] };
     case "result":
-      return { items: [resultItemFrom(frame.payload)], ignores: [] };
+      return { items: [resultItemFrom(frame.payload, frame.turnAccounting)], ignores: [] };
     case "contextCleared":
       // An EMPTY message: its existence and position are the whole fact, so
       // there is nothing to read off the payload but the envelope's uuid.
@@ -1273,7 +1274,7 @@ function usageFrom(u: Obj | undefined): Usage {
   };
 }
 
-function resultItemFrom(r: Obj): ResultItem {
+function resultItemFrom(r: Obj, turnAccounting?: import("./frontend-proto.js").TurnAccounting): ResultItem {
   const item: ResultItem = {
     kind: "result",
     subtype: resultSubtype(pstr(r, "subtype")),
@@ -1288,6 +1289,7 @@ function resultItemFrom(r: Obj): ResultItem {
   if (models !== undefined) item.modelUsage = models;
   const resultText = pstr(r, "result");
   if (resultText !== "") item.resultText = resultText;
+  if (turnAccounting !== undefined) item.turnAccounting = turnAccounting;
   return item;
 }
 
@@ -1371,14 +1373,20 @@ function contextCompactedItem(c: Obj, uuid: string): ContextCompactedItem {
  * error row can scroll the feed to it.
  */
 function systemFailureCard(e: Obj, uuid: string): SystemFailureCard {
+  return systemFailureCardFromDecoded(decodeSystemFailure(e, `ConversationItem.systemFailure`), uuid);
+}
+
+/** Preserve every decoded field while assigning the conversation envelope identity. */
+function systemFailureCardFromDecoded(f: SystemFailure, uuid: string): SystemFailureCard {
   return {
     kind: "failure",
-    errorClass: errorClassOf(pstr(e, "errorClass")),
-    errorType: pstr(e, "errorType"),
-    message: pstr(e, "message"),
-    sourceDetail: pstr(e, "sourceDetail"),
-    resolvedAtMs: pnum(e, "resolvedAtMs"),
+    errorClass: f.errorClass,
+    errorType: f.errorType,
+    message: f.message,
+    sourceDetail: f.sourceDetail,
+    resolvedAtMs: f.resolvedAtMs,
     uuid,
+    detail: f.detail,
   };
 }
 
@@ -1392,16 +1400,7 @@ function systemFailureCard(e: Obj, uuid: string): SystemFailureCard {
  * doors, and neither may re-interpret what the daemon decided.
  */
 export function systemFailureFrom(f: SystemFailure): SystemFailureCard {
-  return {
-    kind: "failure",
-    errorClass: f.errorClass,
-    errorType: f.errorType,
-    message: f.message,
-    sourceDetail: f.sourceDetail,
-    resolvedAtMs: f.resolvedAtMs,
-    uuid: f.itemUuid,
-    resumeFailure: f.sessionResume,
-  };
+  return systemFailureCardFromDecoded(f, f.itemUuid);
 }
 
 /**

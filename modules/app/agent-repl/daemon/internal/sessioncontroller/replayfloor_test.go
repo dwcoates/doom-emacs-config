@@ -117,7 +117,7 @@ func TestASeqlessClearIsLoudRatherThanSilentlyForgotten(t *testing.T) {
 	// Arrange — a clear the daemon saw but cannot position is a real anomaly,
 	// never "nothing happened".
 	var logged []string
-	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(),
+	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{},
 		func(f string, a ...any) { logged = append(logged, fmt.Sprintf(f, a...)) }, nil, nil, nil, nil, nil)
 
 	// Act.
@@ -453,7 +453,7 @@ func newRestartHarness(t *testing.T, floors *fakeClearCompactStore, client *repl
 	m, err := New(Config{
 		Push: h.push, SSM: h.applier, Progress: h.progress, Spawner: &fakeSpawner{},
 		Locator: fakeLocator{m: map[string]string{"ws": "s1"}}, SeqStore: h.seq,
-		ClearCompactStore: floors, ProtocolVersion: "1", Source: stubSource{},
+		ClearCompactStore: floors, TurnAccountings: emptyTurnAccountingStore{}, ProtocolVersion: "1", Source: stubSource{},
 		FileDiagnostics: fakeFileDiagnosticPersister{},
 		newClient:       func(shimclient.Config) sessionClient { return client },
 	})

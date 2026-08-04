@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -7,6 +7,7 @@ import {
   parseArgs,
   probeQueryOptions,
   realQueryOptions,
+  udsShutdownSignalHandlers,
   validateUdsLoggingArgs,
 } from "../src/main.js";
 import { METAPROMPT_REL_PATH } from "../src/metaprompt.js";
@@ -186,6 +187,46 @@ describe("makeUdsQueryFactory", () => {
     owned.abort();
     // Assert
     await expect(next).resolves.toMatchObject({ done: true });
+  });
+});
+
+describe("UDS query signal ownership", () => {
+  it("allows SIGTERM to end the query exactly once", async () => {
+    const shutdown = vi.fn(async () => undefined);
+    const signals = udsShutdownSignalHandlers("sess-1", shutdown);
+
+    signals.onSigterm();
+    signals.onSigterm();
+
+    await expect(signals.stopping()).resolves.toBeUndefined();
+    expect(shutdown).toHaveBeenCalledTimes(1);
+    expect(shutdown).toHaveBeenCalledWith("SIGTERM");
+  });
+
+  it("refuses SIGINT without ending the query and logs the preserved owner", () => {
+    const records: Array<Record<string, unknown>> = [];
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(((chunk: unknown): boolean => {
+      records.push(JSON.parse(String(chunk)) as Record<string, unknown>);
+      return true;
+    }) as typeof process.stderr.write);
+    const shutdown = vi.fn(async () => undefined);
+    const signals = udsShutdownSignalHandlers("sess-1", shutdown);
+
+    signals.onSigint();
+
+    expect(signals.stopping()).toBeNull();
+    expect(shutdown).not.toHaveBeenCalled();
+    expect(records).toContainEqual(expect.objectContaining({
+      level: "error",
+      agent_repl_session_id: "test-agent-session",
+      message: "refused unauthorized signal as an SDK query shutdown condition",
+      context: expect.objectContaining({
+        signal: "SIGINT",
+        outcome: "refused_query_termination",
+        query_preserved: true,
+      }),
+    }));
+    stderr.mockRestore();
   });
 });
 

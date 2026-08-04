@@ -31,6 +31,8 @@ import (
 
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/ssm"
+
+	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 )
 
 // shimSDKComponent is the component a claude-shim names when its SDK stream
@@ -50,12 +52,37 @@ const (
 )
 
 type bringUpFailure struct {
-	kind  bringUpFailureKind
-	cause error
+	kind             bringUpFailureKind
+	cause            error
+	queryTermination *frontendv1.QueryTerminationFailure
 }
 
 func (e *bringUpFailure) Error() string { return e.cause.Error() }
 func (e *bringUpFailure) Unwrap() error { return e.cause }
+
+// QueryTerminationFailureDetail returns the typed SDK termination that caused
+// a pre-readiness bring-up failure. A nil result means the failure did not
+// arrive through the typed query-lifecycle path.
+func (e *bringUpFailure) QueryTerminationFailureDetail() *frontendv1.QueryTerminationFailure {
+	return e.queryTermination
+}
+
+// noteBringUpTermination retains the typed lifecycle record that must precede
+// the paired degraded wake-up. The pair is delivered on one consumer read loop,
+// so the gate cannot wake before the exact termination is retained.
+func (m *Manager) noteBringUpTermination(d *sessionController, detail *frontendv1.QueryTerminationFailure) {
+	if detail == nil {
+		panic("session-controller: nil typed query termination reached bring-up gate")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if d.wired || d.faultTermination != nil {
+		return
+	}
+	d.faultTermination = detail
+	m.logf("session-controller: BRING-UP QUERY TERMINATION retained ws=%q session=%s query_instance_id=%q vendor_session_id=%q vendor_identity_unavailable=%t observed_at_ms=%d",
+		d.workspace, d.sessionID, detail.GetQueryInstanceId(), detail.GetVendorSessionId(), detail.GetVendorSessionIdentityUnavailable() != nil, detail.GetObservedAtMs())
+}
 
 // noteBringUpFault records a shim-reported SDK failure observed while a
 // bring-up is still waiting, and WAKES the wait.
@@ -120,8 +147,9 @@ func (m *Manager) awaitDriveable(ctx context.Context, d *sessionController) erro
 	case <-d.faulted:
 		m.mu.Lock()
 		reason := d.faultReason
+		termination := d.faultTermination
 		m.mu.Unlock()
-		return &bringUpFailure{kind: bringUpFailureVendor, cause: fmt.Errorf("session-controller: session %s for workspace %q died during bring-up: %s", d.sessionID, d.workspace, reason)}
+		return &bringUpFailure{kind: bringUpFailureVendor, cause: fmt.Errorf("session-controller: session %s for workspace %q died during bring-up: %s", d.sessionID, d.workspace, reason), queryTermination: termination}
 	}
 }
 

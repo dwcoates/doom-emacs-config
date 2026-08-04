@@ -6,6 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	corev1 "agentrepl/proto/agentshim/core/v1"
+	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+
 	"claude-repld/internal/shimclient"
 )
 
@@ -25,6 +28,7 @@ func newClosingRig(t *testing.T) (*Manager, *fakeSpawner, *fakeApplier, *logCapt
 		Locator:           fakeLocator{m: map[string]string{"ws": "s1"}},
 		SeqStore:          &fakeSeqStore{seq: map[string]uint64{}},
 		ClearCompactStore: newFakeClearCompactStore(),
+		TurnAccountings:   emptyTurnAccountingStore{},
 		Registrar:         &fakeRegistrar{},
 		ProtocolVersion:   "1",
 		now:               func() int64 { return 1000 },
@@ -39,6 +43,8 @@ func newClosingRig(t *testing.T) (*Manager, *fakeSpawner, *fakeApplier, *logCapt
 	if err := m.Ensure("ws"); err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
+	m.onConnected("ws", "s1", &corev1.ShimHello{})
+	applier.setCurrent("ws", &frontendv1.WorkspaceState{State: frontendv1.RenderState_RENDER_STATE_READY})
 	return m, spawner, applier, cl
 }
 
@@ -65,6 +71,7 @@ func TestCloseDuringBringUpAbortsTheBringUp(t *testing.T) {
 		Locator:           fakeLocator{m: map[string]string{"ws": "s1"}},
 		SeqStore:          &fakeSeqStore{seq: map[string]uint64{}},
 		ClearCompactStore: newFakeClearCompactStore(),
+		TurnAccountings:   emptyTurnAccountingStore{},
 		Registrar:         &fakeRegistrar{},
 		ProtocolVersion:   "1",
 		now:               func() int64 { return 1000 },
@@ -185,6 +192,7 @@ func TestAnUnexpectedSessionControllerExitStillStopsTheShim(t *testing.T) {
 		Locator:           fakeLocator{m: map[string]string{"ws": "s1"}},
 		SeqStore:          &fakeSeqStore{seq: map[string]uint64{}},
 		ClearCompactStore: newFakeClearCompactStore(),
+		TurnAccountings:   emptyTurnAccountingStore{},
 		Registrar:         &fakeRegistrar{},
 		ProtocolVersion:   "1",
 		now:               func() int64 { return 1000 },

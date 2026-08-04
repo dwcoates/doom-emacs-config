@@ -126,6 +126,7 @@ func bootMergeDaemon(t *testing.T, stateFile string) *mergeBoot {
 		FileDiagnostics:   fileDiagnostics,
 		SeqStore:          seqStore,
 		ClearCompactStore: seqStore,
+		TurnAccountings:   newTestTurnAccountingStore(),
 		PermissionModes:   server.NewRegistryModeStore(reg),
 		Registrar:         registrar,
 		ModelCatalogs:     registrar,

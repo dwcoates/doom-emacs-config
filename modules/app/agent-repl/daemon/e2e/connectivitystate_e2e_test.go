@@ -27,9 +27,18 @@ import (
 //
 // It waits on the FRAME, never on a duration: the daemon pushes a state the
 // instant the resolver produces one, so the arrival is the event.
-func observedStates(t *testing.T, conn *websocket.Conn, workspace string, want frontendv1.RenderState) []frontendv1.RenderState {
+func observedStates(t *testing.T, snapshot *frontendv1.StateSnapshot, conn *websocket.Conn, workspace string, want frontendv1.RenderState) []frontendv1.RenderState {
 	t.Helper()
 	var seen []frontendv1.RenderState
+	for _, state := range snapshot.GetWorkspaces() {
+		if state.GetWorkspace() != workspace {
+			continue
+		}
+		seen = append(seen, state.GetState())
+		if state.GetState() == want {
+			return seen
+		}
+	}
 	deadline := time.Now().Add(frameTimeout)
 	for time.Now().Before(deadline) {
 		st := workspaceStateFor(readFrame(t, conn), workspace)
@@ -58,12 +67,13 @@ func TestE2EAFreshSessionGoesStartingThenWiredThenItsRealState(t *testing.T) {
 	cwd := t.TempDir()
 	id := h.createSession(t, cwd)
 	conn := h.dial(t, id)
-	if first := readFrame(t, conn); first.GetSnapshot() == nil {
+	first := readFrame(t, conn)
+	if first.GetSnapshot() == nil {
 		t.Fatalf("first frame = %T, want a StateSnapshot", first.GetFrame())
 	}
 
 	// Act — read until the session reports a state only a WIRED workspace can.
-	seen := observedStates(t, conn, cwd, frontendv1.RenderState_RENDER_STATE_READY)
+	seen := observedStates(t, first.GetSnapshot(), conn, cwd, frontendv1.RenderState_RENDER_STATE_READY)
 
 	// Assert — the green is the guarantee, and neither closed half of the axis
 	// preceded it: a bring-up actually in flight reports INIT, never a resting
@@ -95,14 +105,15 @@ func TestE2EHibernationDropsTheWorkspaceToHibernated(t *testing.T) {
 	cwd := t.TempDir()
 	id := h.createSession(t, cwd)
 	conn := h.dial(t, id)
-	if first := readFrame(t, conn); first.GetSnapshot() == nil {
+	first := readFrame(t, conn)
+	if first.GetSnapshot() == nil {
 		t.Fatalf("first frame = %T, want a StateSnapshot", first.GetFrame())
 	}
 	// Read up to the green, which is itself the proof that the substrate is
 	// wired: nothing else can report it. Deliberately NOT waitAttachedSession —
 	// that helper returns on the first workspace state and would swallow the
 	// very frame this needs to see.
-	observedStates(t, conn, cwd, frontendv1.RenderState_RENDER_STATE_READY)
+	observedStates(t, first.GetSnapshot(), conn, cwd, frontendv1.RenderState_RENDER_STATE_READY)
 
 	// Act — the idle sweeper hibernates it.
 	h.sweepIdle <- time.Now()
@@ -110,7 +121,7 @@ func TestE2EHibernationDropsTheWorkspaceToHibernated(t *testing.T) {
 	// Assert — the workspace reports the absence of its session, not the last
 	// thing the agent happened to say before it went away, and it reports the
 	// BENIGN absence: nothing broke here, we reclaimed the memory on purpose.
-	observedStates(t, conn, cwd, frontendv1.RenderState_RENDER_STATE_HIBERNATED)
+	observedStates(t, first.GetSnapshot(), conn, cwd, frontendv1.RenderState_RENDER_STATE_HIBERNATED)
 }
 
 // AND THE TEAL STAYS TEAL. The frame above is only half the guarantee: the
@@ -127,15 +138,16 @@ func TestE2EAHibernationIsNotRepaintedByItsOwnSessionControllerExit(t *testing.T
 	cwd := t.TempDir()
 	id := h.createSession(t, cwd)
 	conn := h.dial(t, id)
-	if first := readFrame(t, conn); first.GetSnapshot() == nil {
+	first := readFrame(t, conn)
+	if first.GetSnapshot() == nil {
 		t.Fatalf("first frame = %T, want a StateSnapshot", first.GetFrame())
 	}
-	observedStates(t, conn, cwd, frontendv1.RenderState_RENDER_STATE_READY)
+	observedStates(t, first.GetSnapshot(), conn, cwd, frontendv1.RenderState_RENDER_STATE_READY)
 
 	// Act — hibernate, then keep reading for the whole window the exit tail
 	// could land in.
 	h.sweepIdle <- time.Now()
-	observedStates(t, conn, cwd, frontendv1.RenderState_RENDER_STATE_HIBERNATED)
+	observedStates(t, first.GetSnapshot(), conn, cwd, frontendv1.RenderState_RENDER_STATE_HIBERNATED)
 
 	// Assert — no severance follows. The wait is INVERTED: silence is the pass,
 	// so the read must not be the fatal helper every other assertion here uses.

@@ -199,6 +199,23 @@ export class MessageConn {
     this.socket.write(encoded);
   }
 
+  /** Resolve only after Node has flushed the complete frame to the socket. */
+  sendFlushed<Desc extends DescMessage>(schema: Desc, message: MessageShape<Desc>): Promise<void> {
+    if (this.closed || this.socket.destroyed || !this.socket.writable) {
+      const error = new Error("connection not writable");
+      this.logger.log({ level: "error", cause: error }, "dropping flushed outbound message");
+      return Promise.reject(error);
+    }
+    const encoded = encodeMessage(schema, message);
+    this.logger.logVerbose({ message_type: schema.typeName, frame_bytes: encoded.length }, "writing flushed framed outbound message");
+    return new Promise<void>((resolve, reject) => {
+      this.socket.write(encoded, (error?: Error | null) => {
+        if (error) reject(error);
+        else resolve();
+      });
+    });
+  }
+
   /** Tear down the connection (a deliberate local close, not an error). */
   close(): void {
     this.logger.logVerbose({}, "closing framed message connection");

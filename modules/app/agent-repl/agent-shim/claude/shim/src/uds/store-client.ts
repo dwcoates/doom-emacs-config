@@ -158,10 +158,21 @@ interface PendingWrite {
   events: Event[];
 }
 
+/** A subscription socket that has sent Subscribe but has not crossed readiness. */
+interface OpeningSubscription {
+  socket: net.Socket;
+  conn: MessageConn | null;
+  settled: boolean;
+  reject: (err: Error) => void;
+}
+
 export class StoreClient {
   private conn: MessageConn | null = null;
   /** Producer socket while connect() has not yet established MessageConn ownership. */
   private connectingSocket: net.Socket | null = null;
+  /** Subscription transport before the store confirms registration and replay. */
+  private openingSub: OpeningSubscription | null = null;
+  /** A standing tail only after the store's readiness barrier has arrived. */
   private subConn: MessageConn | null = null;
   private connected = false;
   private sink: StoreSink | null = null;
@@ -327,7 +338,19 @@ export class StoreClient {
    * itself, so nothing here can make one uuid's seqs run backwards.
    */
   adoptStoreKey(sessionId: string): void {
-    if (!sessionId || sessionId === this.storeKey || sessionId === this.rotatingTo) return;
+    if (!sessionId || sessionId === this.rotatingTo) return;
+    if (sessionId === this.storeKey) {
+      // Equality does not prove this is the constructor's placeholder. The
+      // SDK may authoritatively report the same string as the daemon session
+      // id (the offline SDK does), which makes it a genuine vendor identity.
+      // Record that observation without reopening an unchanged subscription.
+      if (!this.vendorKnown) {
+        this.vendorKnown = true;
+        LOGGER.log({ agent_repl_session_id: this.opts.sessionId, claude_session_id: sessionId, store_key: sessionId },
+          "confirmed the placeholder key as the SDK-reported vendor session id");
+      }
+      return;
+    }
     if (this.forwardedAny) {
       this.rotatingTo = sessionId;
       LOGGER.log({
@@ -570,13 +593,11 @@ export class StoreClient {
    * Subscribe: the store's single-role protocol rejects a Subscribe sent down
    * the producer connection.
    *
-   * IT RESOLVES ONLY WHEN THE SUBSCRIPTION HAS SETTLED — the connection is up
-   * and its Subscribe frame is on the wire — and REJECTS when it cannot be
-   * opened. That is what lets the bring-up gate (uds-session.ts) hold its
-   * readiness ack until the standing tail genuinely exists, instead of acking
-   * on an intent to subscribe. The dial failure is still degraded here, so a
-   * caller that only wants the fire-and-forget behaviour may drop the
-   * rejection without losing the report.
+   * IT RESOLVES ONLY WHEN THE STORE'S READINESS HEARTBEAT ARRIVES after
+   * registration and replay — and REJECTS when that barrier cannot be crossed.
+   * That is what lets the bring-up gate (uds-session.ts) hold its readiness ack
+   * until the standing tail genuinely exists, instead of acking on a frame
+   * merely written to a socket the store has not classified yet.
    */
   subscribe(fromSeq: bigint): Promise<void> {
     // Retained so adoptStoreKey can reopen here once the vendor uuid is
@@ -601,8 +622,8 @@ export class StoreClient {
   }
 
   /**
-   * Open the standing subscription connection at `fromSeq` and settle once its
-   * Subscribe frame is on the wire.
+   * Open the standing subscription connection at `fromSeq` and settle once the
+   * store confirms registration and replay completion with a Heartbeat.
    *
    * It REPORTS NOTHING on failure — it is the shared mechanism under both the
    * daemon's explicit {@link subscribe} (which degrades) and a relink attempt
@@ -612,19 +633,46 @@ export class StoreClient {
   private openSubscription(fromSeq: bigint): Promise<void> {
     return new Promise((resolve, reject) => {
       const socket = net.connect(this.opts.socketPath);
-      const onDialError = (err: Error) => reject(new Error(`cannot subscribe: ${err.message}`));
+      const opening: OpeningSubscription = { socket, conn: null, settled: false, reject };
+      this.openingSub = opening;
+      const fail = (err: Error): void => {
+        if (opening.settled) return;
+        opening.settled = true;
+        if (this.openingSub === opening) this.openingSub = null;
+        reject(err);
+      };
+      const onDialError = (err: Error): void => fail(new Error(`cannot subscribe: ${err.message}`));
       socket.once("error", onDialError);
       socket.once("connect", () => {
         socket.removeListener("error", onDialError);
+        if (this.openingSub !== opening) {
+          socket.destroy();
+          return;
+        }
         const conn: MessageConn = new MessageConn(
           socket,
           {
-            onMessage: (msg) => this.onSubMessage(msg),
-            onClose: (err) => this.onSubClose(conn, err),
+            onMessage: (msg) => {
+              if (this.openingSub === opening && unpackAs(msg, HeartbeatSchema)) {
+                opening.settled = true;
+                this.openingSub = null;
+                this.subConn = conn;
+                resolve();
+                return;
+              }
+              this.onSubMessage(msg);
+            },
+            onClose: (err) => {
+              if (this.openingSub === opening) {
+                fail(new Error(`cannot subscribe: connection closed before the store readiness barrier${err === null ? "" : `: ${err.message}`}`));
+                return;
+              }
+              this.onSubClose(conn, err);
+            },
           },
           COMPONENT,
         );
-        this.subConn = conn;
+        opening.conn = conn;
         // storeKey, NOT opts.sessionId: the store keys events by the vendor
         // uuid on the Event envelope, so subscribing under this shim's
         // `--session-id` registers on a channel nothing publishes to.
@@ -634,7 +682,8 @@ export class StoreClient {
             fromSeq,
           }));
         } catch (err) {
-          reject(new Error(`cannot subscribe: ${errText(err)}`));
+          fail(new Error(`cannot subscribe: ${errText(err)}`));
+          conn.close();
           return;
         }
         LOGGER.log({
@@ -643,7 +692,6 @@ export class StoreClient {
           store_key: this.storeKey,
           from_seq: fromSeq,
         }, "subscribed to store");
-        resolve();
       });
     });
   }
@@ -703,7 +751,7 @@ export class StoreClient {
       if (!this.connected || this.conn === null) {
         await this.ensureProducerConn();
       }
-      if (this.lastFromSeq !== null && this.subConn === null) {
+      if (this.lastFromSeq !== null && this.subConn === null && this.openingSub === null) {
         await this.openSubscription(this.resumeSeq());
       }
     } catch (err) {
@@ -769,10 +817,21 @@ export class StoreClient {
    * longer exists and leaves the next handshake gate to open the new one.
    */
   private dropStandingSubscription(): void {
-    if (!this.subConn) return;
-    const old = this.subConn;
-    this.subConn = null;
-    old.close();
+    if (this.openingSub !== null) {
+      const opening = this.openingSub;
+      this.openingSub = null;
+      if (!opening.settled) {
+        opening.settled = true;
+        opening.reject(new Error("cannot subscribe: subscription superseded before the store readiness barrier"));
+      }
+      if (opening.conn !== null) opening.conn.close();
+      else opening.socket.destroy();
+    }
+    if (this.subConn !== null) {
+      const old = this.subConn;
+      this.subConn = null;
+      old.close();
+    }
   }
 
   /**
@@ -882,11 +941,7 @@ export class StoreClient {
     }
     this.stopHeartbeat();
     this.connected = false;
-    if (this.subConn) {
-      const sub = this.subConn;
-      this.subConn = null;
-      sub.close();
-    }
+    this.dropStandingSubscription();
     if (this.conn) {
       this.conn.close();
       this.conn = null;

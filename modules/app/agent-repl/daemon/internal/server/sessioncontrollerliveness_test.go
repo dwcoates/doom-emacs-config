@@ -91,10 +91,10 @@ func TestSessionControllerLivenessIsTrueAfterEnsure(t *testing.T) {
 	}
 }
 
-// TestOpenEnsuresDespiteASettledRecord — the open path itself must never
+// TestOpenWaitsForDriveabilityDespiteASettledRecord — the open path itself must never
 // second-guess the switch. A record that durably claims to be fully backfilled
 // says nothing about whether THIS daemon is driving it.
-func TestOpenEnsuresDespiteASettledRecord(t *testing.T) {
+func TestOpenWaitsForDriveabilityDespiteASettledRecord(t *testing.T) {
 	// Arrange.
 	o, reg, ens, _ := openerRig(t)
 	if err := reg.Put(settledRecord()); err != nil {
@@ -107,7 +107,7 @@ func TestOpenEnsuresDespiteASettledRecord(t *testing.T) {
 	}
 
 	// Assert.
-	if len(ens.calls) != 1 || ens.calls[0] != "/w" {
-		t.Fatalf("Ensure calls = %v, want exactly one for /w — a settled record must not skip the bring-up", ens.calls)
+	if len(ens.driveable) != 1 || ens.driveable[0] != "/w" || len(ens.calls) != 0 {
+		t.Fatalf("driveable=%v ensure=%v, want exactly one driveable bring-up for /w — a settled record must not skip it", ens.driveable, ens.calls)
 	}
 }

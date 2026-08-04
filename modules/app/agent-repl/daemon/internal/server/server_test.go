@@ -57,13 +57,14 @@ type fakeSpawner struct {
 	stopped []string
 	stopBy  []shim.Stop
 	dropped []string
+	err     error
 }
 
 func (f *fakeSpawner) EnsureShim(_ context.Context, sessionID string) (sessioncontroller.SpawnResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.ensured = append(f.ensured, sessionID)
-	return sessioncontroller.SpawnResult{}, nil
+	return sessioncontroller.SpawnResult{}, f.err
 }
 
 func (f *fakeSpawner) DropResume(sessionID string) (string, error) {
@@ -186,6 +187,7 @@ func newHarnessWith(t *testing.T, extra Config) *harness {
 		FileDiagnostics:   discardFileDiagnosticPersister{},
 		SeqStore:          seqStore,
 		ClearCompactStore: seqStore,
+		TurnAccountings:   newTestTurnAccountingStore(),
 		DaemonVersion:     "test",
 		ProtocolVersion:   "1",
 		Logf:              logf,
@@ -594,6 +596,32 @@ func TestCreateSessionKeepsResumableResume(t *testing.T) {
 	rec, _ := h.reg.Get(id)
 	if rec.ClaudeSessionID != "uuid-1" {
 		t.Errorf("claude_session_id = %q, want uuid-1", rec.ClaudeSessionID)
+	}
+}
+
+func TestCreateSessionReturnsTheDurableIDWithAResumeBringUpFailure(t *testing.T) {
+	// Arrange — resume validation succeeds and registration completes, but the
+	// shim spawn fails after the durable identity exists.
+	h := newHarness(t)
+	cfg := t.TempDir()
+	writeTranscript(t, cfg, "uuid-1")
+	spawnFailure := errors.New("spawn refused the resumed query")
+	h.spawner.err = spawnFailure
+
+	// Act.
+	id, err := createSessionErr(t, h, fmt.Sprintf(`{"cwd":"/w","config_dir":%q,"resume":"uuid-1"}`, cfg))
+
+	// Assert — the command boundary needs this id to identify the failed exact
+	// resume; an error cannot erase a record that was already registered.
+	if !errors.Is(err, spawnFailure) {
+		t.Fatalf("CreateSession error = %v, want original spawn failure", err)
+	}
+	if id == "" {
+		t.Fatal("CreateSession id is empty after durable registration")
+	}
+	rec, ok := h.reg.Get(id)
+	if !ok || rec.SessionID != id || rec.ClaudeSessionID != "uuid-1" || rec.CWD != "/w" || rec.ConfigDir != cfg {
+		t.Fatalf("registered record = %+v (ok=%t), want failed resume identity for %q", rec, ok, id)
 	}
 }
 

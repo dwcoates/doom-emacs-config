@@ -685,6 +685,199 @@ message ConversationItem {
   // Complete API-response usage records associated with this conversation
   // item. A record may be absent when the item carries no API response.
   repeated TokenUtilization token_utilization = 36;
+  // Contains complete accounting for a terminal turn result.
+  //
+  // This field is absent from nonterminal conversation items.
+  TurnAccounting turn_accounting = 37;
+}
+
+// Provides a self-contained, auditable accounting record for one completed turn.
+message TurnAccounting {
+  // Identifies the accounted turn.
+  string turn_id = 1;
+
+  // Identifies the SDK query that served the turn.
+  string query_instance_id = 2;
+
+  // Identifies the runtime configuration that served the turn.
+  agentshim.core.v1.QueryRuntimeIdentity runtime = 3;
+
+  // Contains exact wall-clock and elapsed timing measurements.
+  TurnAccountingTiming timing = 4;
+
+  // Contains the account-usage sample taken before prompt submission.
+  agentshim.core.v1.AccountUsageObservation usage_at_start = 5;
+
+  // Contains the account-usage sample taken after the terminal result.
+  agentshim.core.v1.AccountUsageObservation usage_at_end = 6;
+
+  // Contains every response-level token record, including subagents.
+  repeated TokenUtilization responses = 7;
+
+  // Compares response-level records with terminal result totals.
+  TokenUsageReconciliation reconciliation = 8;
+
+  // States whether the record satisfies all requirements for comparison.
+  oneof verdict {
+    // Marks a complete and internally consistent record.
+    TurnAccountingComplete complete = 20;
+
+    // Describes every condition invalidating the record.
+    TurnAccountingInvalid invalid = 21;
+  }
+}
+
+// Contains wall-clock boundaries and monotonic elapsed durations.
+message TurnAccountingTiming {
+  // Gives the Unix epoch time at which the prompt was admitted.
+  int64 prompt_admitted_at_ms = 1;
+
+  // Gives the Unix epoch time at which the terminal result arrived.
+  int64 result_received_at_ms = 2;
+
+  // Gives the Unix epoch time at which accounting persistence completed.
+  int64 accounting_settled_at_ms = 3;
+
+  // Gives monotonic elapsed time from prompt admission through terminal result.
+  int64 prompt_to_result_ms = 4;
+
+  // Gives elapsed time from terminal result through accounting persistence.
+  int64 result_to_settlement_ms = 5;
+}
+
+// Reconciles response-level usage with the SDK terminal result.
+message TokenUsageReconciliation {
+  // Gives the number of response-level usage records.
+  int64 response_record_count = 1;
+
+  // Gives totals derived from all response records, including subagents.
+  TokenUsageTotals response_all_agents = 2;
+
+  // Gives totals derived from main-agent response records.
+  TokenUsageTotals response_main_agent = 3;
+
+  // Gives the main-agent totals reported by ResultMessage.usage.
+  TokenUsageTotals result_main_agent = 4;
+
+  // Gives per-model totals derived from response records.
+  repeated ModelTokenUtilization response_models = 5;
+
+  // Gives per-model totals reported by ResultMessage.model_usage.
+  repeated ModelTokenUtilization result_models = 6;
+
+  // Gives every API message identifier included in the response ledger.
+  repeated string api_message_ids = 7;
+}
+
+// Marks a complete turn accounting record.
+message TurnAccountingComplete {}
+
+// Describes conditions that make a turn unsuitable for definitive comparison.
+message TurnAccountingInvalid {
+  // Contains every independently detected invalidating condition.
+  repeated TurnAccountingProblem problems = 1;
+}
+
+// Identifies one accounting failure without relying on a status enum.
+message TurnAccountingProblem {
+  // Describes the detected problem.
+  oneof problem {
+    // Indicates that a boundary usage sample is unavailable.
+    MissingUsageBoundary missing_usage_boundary = 1;
+
+    // Indicates that the usage window reset between samples.
+    UsageWindowReset window_reset = 2;
+
+    // Indicates disagreement between response and terminal-result totals.
+    TokenLedgerMismatch token_ledger_mismatch = 3;
+
+    // Indicates that runtime identity evidence is incomplete.
+    RuntimeIdentityIncomplete runtime_identity_incomplete = 4;
+
+    // Indicates that an SDK usage field could not be represented.
+    UnmodeledUsageFields unmodeled_usage_fields = 5;
+
+    // Indicates loss of a required durable telemetry record.
+    TelemetryRecordMissing telemetry_record_missing = 6;
+  }
+}
+
+// Identifies which required account-usage boundary has no usable observation.
+message MissingUsageBoundary {
+  // Selects the missing boundary without permitting both boundaries.
+  oneof boundary {
+    // Indicates that no usable observation exists before prompt submission.
+    MissingUsageBoundaryTurnStart turn_start = 1;
+
+    // Indicates that no usable observation exists after the terminal result.
+    MissingUsageBoundaryTurnEnd turn_end = 2;
+  }
+}
+
+// Marks the absence of a usable turn-start usage observation.
+message MissingUsageBoundaryTurnStart {}
+
+// Marks the absence of a usable turn-end usage observation.
+message MissingUsageBoundaryTurnEnd {}
+
+// Records a reset-boundary change that prevents subtraction of two utilization samples.
+message UsageWindowReset {
+  // Gives the reset time reported by the turn-start observation.
+  int64 start_resets_at_ms = 1;
+
+  // Gives the reset time reported by the turn-end observation.
+  int64 end_resets_at_ms = 2;
+}
+
+// Identifies disagreements between response-level and terminal-result usage.
+message TokenLedgerMismatch {
+  // Lists canonical protobuf field paths whose reconciled values disagree.
+  repeated string differing_field_paths = 1;
+}
+
+// Identifies runtime identity evidence required for causal comparison but unavailable to the producer.
+message RuntimeIdentityIncomplete {
+  // Lists canonical protobuf field paths whose evidence is unavailable.
+  repeated string missing_field_paths = 1;
+}
+
+// Identifies SDK usage fields preserved as unmodeled data.
+message UnmodeledUsageFields {
+  // Lists canonical source field paths lacking typed protobuf representation.
+  repeated string source_field_paths = 1;
+}
+
+// Identifies a required durable telemetry record that could not be reconciled.
+message TelemetryRecordMissing {
+  // Selects the missing record category without using a stringly typed status.
+  oneof record {
+    // Identifies a missing query-lifecycle record.
+    TelemetryRecordMissingQueryLifecycle query_lifecycle = 1;
+
+    // Identifies a missing response-level usage record.
+    TelemetryRecordMissingResponseUsage response_usage = 2;
+
+    // Identifies a missing durable-persistence receipt.
+    TelemetryRecordMissingPersistenceReceipt persistence_receipt = 3;
+  }
+}
+
+// Identifies the missing lifecycle event for a query instance.
+message TelemetryRecordMissingQueryLifecycle {
+  // Gives the query instance lacking a required lifecycle event.
+  string query_instance_id = 1;
+}
+
+// Identifies the API response lacking a durable usage record.
+message TelemetryRecordMissingResponseUsage {
+  // Gives the API message identifier expected in the response ledger.
+  string api_message_id = 1;
+}
+
+// Identifies the turn whose accounting record lacks durable-persistence confirmation.
+message TelemetryRecordMissingPersistenceReceipt {
+  // Gives the turn identifier awaiting durable-persistence confirmation.
+  string turn_id = 1;
 }
 
 // Complete token accounting for one Claude SDK API response.
@@ -702,8 +895,9 @@ message TokenUtilization {
   // when historical source data cannot identify the enclosing turn.
   string root_turn_id = 3;
   // The vendor request identifier used to correlate this record with a
-  // request-level diagnostic.
-  string api_request_id = 4;
+  // request-level diagnostic. Absence means the SDK response did not expose
+  // a request identifier; an empty present value is invalid.
+  optional string api_request_id = 4;
   // The Messages API response identifier used as the stable deduplication
   // key for this measurement.
   string api_message_id = 5;
@@ -791,6 +985,8 @@ message TokenUsage {
   // Usage fields introduced by the API before this typed contract learns
   // them. Every populated key must also be logged loudly.
   google.protobuf.Struct unmodeled_usage = 15;
+  // Complete API usage payload preserved without frontend normalization.
+  agentshim.data.v1.ApiUsage raw_usage = 16;
 }
 
 // Cache-creation tokens split by the prompt-cache TTL used for billing.
@@ -977,6 +1173,10 @@ message SessionTokenUtilization {
   repeated AgentTokenUtilization subagents = 3;
   // Whole-tree usage grouped by the model that served each response.
   repeated ModelTokenUtilization models = 4;
+  // Subagent response records whose provenance lacks both stable invocation
+  // identifiers. Each record retains its unique api_message_id and complete
+  // usage without inventing an aggregate identity from descriptive metadata.
+  repeated TokenUtilization ungrouped_subagent_responses = 5;
 }
 
 // Cumulative usage attributed to one dispatched subagent invocation.
@@ -993,18 +1193,20 @@ message AgentTokenUtilization {
 message ModelTokenUtilization {
   // The model name used as the SDK model-usage key.
   string model = 1;
-  // The canonical model identifier used for pricing.
-  string canonical_model = 2;
-  // The API provider that served this model.
-  string provider = 3;
+  // The canonical model identifier used for pricing. Absent when response
+  // records do not carry result-level model metadata.
+  optional string canonical_model = 2;
+  // The API provider that served this model. Absent when unavailable.
+  optional string provider = 3;
   // Usage summed across responses served by this model.
   TokenUsageTotals totals = 4;
-  // The model context capacity, which is not additive.
-  int64 context_window = 5;
-  // The model maximum response capacity, which is not additive.
-  int64 max_output_tokens = 6;
-  // The SDK-reported cumulative cost for this model.
-  double cost_usd = 7;
+  // The model context capacity, which is not additive. Absent when unavailable.
+  optional int64 context_window = 5;
+  // The model maximum response capacity, which is not additive. Absent when unavailable.
+  optional int64 max_output_tokens = 6;
+  // The SDK-reported cumulative cost for this model. Presence distinguishes a
+  // reported zero from unavailable pricing evidence.
+  optional double cost_usd = 7;
 }
 
 // Additive token counters summed across a defined set of API responses.
@@ -1242,6 +1444,47 @@ message SystemFailureItem {
   oneof structured_detail {
     // Resume-continuity evidence for a session restoration failure.
     SessionResumeFailure session_resume = 7;
+
+    // Exact SDK-query evidence for an unexpected query termination.
+    QueryTerminationFailure query_termination = 8;
+  }
+}
+
+// Machine-readable evidence that an SDK query terminated unexpectedly.
+//
+// This message repeats the durable lifecycle record's identity and uses the
+// same typed reason messages, allowing a frontend to diagnose the termination
+// without reconstructing evidence from generic failure prose.
+message QueryTerminationFailure {
+  // The agent-repl session whose live SDK query terminated.
+  string agent_repl_session_id = 1;
+
+  // The unique query() invocation that terminated.
+  string query_instance_id = 2;
+
+  // Identifies the vendor conversation when query initialization exposed it,
+  // or states explicitly that termination preceded vendor identity discovery.
+  oneof vendor_identity {
+    // The non-empty authoritative Claude conversation UUID for the query.
+    string vendor_session_id = 3;
+
+    // Records that the query ended before the SDK exposed a vendor session.
+    agentshim.core.v1.VendorSessionIdentityUnavailable vendor_session_identity_unavailable = 5;
+  }
+
+  // The Unix epoch time at which the termination was observed.
+  int64 observed_at_ms = 4;
+
+  // Identifies the unexpected termination condition without a status enum.
+  oneof reason {
+    // The SDK iterator ended without an intentional shim shutdown.
+    agentshim.core.v1.UnexpectedQueryEof unexpected_eof = 10;
+
+    // The SDK iterator threw an error, including its complete cause.
+    agentshim.core.v1.QueryIteratorFailure iterator_failure = 11;
+
+    // Query initialization failed, including its complete cause.
+    agentshim.core.v1.QueryStartupFailure startup_failure = 12;
   }
 }
 
@@ -1273,6 +1516,10 @@ message SessionResumeFailure {
     SessionResumeFailureTranscriptUnavailable transcript_unavailable = 20;
     // A recovery attempt proposed a different Claude UUID or a fresh session.
     SessionResumeFailureIdentityMismatch identity_mismatch = 21;
+    // The exact resumed SDK query terminated before becoming driveable.
+    QueryTerminationFailure query_termination = 22;
+    // Bring-up failed before exact query-termination evidence was available.
+    SessionResumeFailureBringUpFailure bring_up_failure = 23;
   }
 }
 
@@ -1296,6 +1543,14 @@ message SessionResumeFailureIdentityMismatch {
   // The replacement Claude UUID proposed by recovery. Empty means recovery
   // would have started a fresh conversation.
   string replacement_claude_session_id = 1;
+}
+
+// Records an exact-resume bring-up failure that has no typed query lifecycle
+// record. The original nonblank cause is retained without classifying the
+// command as an unrelated internal failure.
+message SessionResumeFailureBringUpFailure {
+  // The complete cause returned by the driveability gate.
+  string cause = 1;
 }
 
 // Ephemeral live-typing relay (never persisted, never in snapshots).

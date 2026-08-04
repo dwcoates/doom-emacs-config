@@ -13,12 +13,12 @@
  *     SDK query (the {@link SdkControlTarget} below). A daemon disconnect tears
  *     nothing down — the turn keeps running and a restarted daemon reattaches
  *     (§4.4).
- *   - EVENTS: every SDK message is classified. `stream_event`/`tool_progress`
+ *   - EVENTS: every SDK message is classified. Live typing and tool heartbeats
  *     are EPHEMERAL — mapped by {@link toEphemeralEvent} and sent STRAIGHT to
- *     the daemon, NEVER written to the store (the §4.3 delta bypass). Every
- *     other message is {@link convert}ed to `{ vendor, lifecycle }` and written
- *     to the store; the store merges/seq-stamps and feeds the merged stream
- *     back via `onMerged`, which forwards it to the daemon (the §4.2 round-trip).
+ *     the daemon. A stamped `stream_event.message_start` yields persistent
+ *     MessageLatency through the store, as do all messages {@link convert}ed
+ *     to `{ vendor, lifecycle }`; the store merges/seq-stamps and feeds the
+ *     merged stream back via `onMerged`, which forwards it to the daemon.
  *   - SAD PATH: a store outage surfaces as an `Event(DegradedState)` forwarded
  *     to the daemon (StoreClient already loud-logs each dropped event).
  *
@@ -28,6 +28,7 @@
  * (wired to SIGTERM by main.ts). `ShimHello.turnInFlight` is wired to the live
  * turn count so a reattaching daemon learns whether a turn is running.
  */
+import { randomUUID } from "node:crypto";
 import { AsyncQueue } from "../input-queue.js";
 import { create } from "@bufbuild/protobuf";
 import type { JsonObject } from "@bufbuild/protobuf";
@@ -47,7 +48,7 @@ import type {
   SdkUserMessageLike,
 } from "../session.js";
 import { SessionStartGate, convert, promptPreview } from "../proto/convert.js";
-import { isEphemeral, toEphemeralEvent, StreamMessageTracker } from "../proto/delta.js";
+import { isEphemeral, toEphemeralEvent, toPersistentEvent, StreamMessageTracker } from "../proto/delta.js";
 import { ControlDispatch, ModelSelectionError, type SdkControlTarget, type ToolPermissionResult } from "./control.js";
 import { SessionServer, type SessionServerHandlers } from "./server.js";
 import { StoreClient, type ReplayOutcome } from "./store-client.js";
@@ -84,9 +85,36 @@ import {
   ShimReadySchema,
   TurnClaimBridgeSchema,
   TurnStartedSchema,
+  AccountUsageObservationSchema,
+  AccountUsageAvailableSchema,
+  AccountUsageUnavailableSchema,
+  FiveHourWindowUnavailableSchema,
+  QueryCreatedSchema,
+  QueryIteratorFailureSchema,
+  QueryLifecycleSchema,
+  QueryRuntimeIdentitySchema,
+  QueryRuntimeObservedSchema,
+  QueryStartupFailureSchema,
+  QueryTerminatedSchema,
+  ResumedQuerySchema,
+  TurnEndUsageBoundarySchema,
+  TurnStartUsageBoundarySchema,
+  UnexpectedQueryEofSchema,
+  UsageSamplingFailureSchema,
+  UsageServiceUnavailableSchema,
+  UsageWindowSchema,
+  UtilizationUnavailableSchema,
+  FreshQuerySchema,
+  IntentionalQueryTerminationSchema,
+  EvidenceFingerprintSchema,
+  FingerprintUnavailableSchema,
+  VendorSessionIdentityUnavailableSchema,
 } from "./proto.js";
+import type { QueryLifecycle, QueryRuntimeIdentity } from "./proto.js";
 
 const COMPONENT = "uds-session";
+const CLAUDE_SHIM_SDK_COMPONENT = "claude-shim-sdk";
+const UNEXPECTED_QUERY_TERMINATION_REASON = "unexpected_query_termination";
 const LOGGER = bindLog({ component: COMPONENT, operation: "shim.uds-session.lifecycle" });
 
 function completionLatch(): { promise: Promise<void>; resolve: () => void } {
@@ -140,6 +168,14 @@ export interface UdsSessionDeps {
   heartbeatIntervalMs?: number;
   /** Wall-clock injection for deterministic tests. */
   nowMs?: () => number;
+  /** Stable identity assigned once to the long-lived SDK query. */
+  queryInstanceId?: string;
+  /** Requested model captured before constructing the SDK query. */
+  requestedModel?: string;
+  /** Claude Agent SDK version loaded by this shim process. */
+  sdkVersion?: string;
+  /** Shim build identity embedded in the running bundle. */
+  shimBuildSha?: string;
   /**
    * How long a bounded replay waits for the next store frame before deciding
    * its subscription drained. A FAILURE bound, not a pace: a store mid-replay
@@ -161,6 +197,11 @@ export interface UdsQuery {
   /** Read Claude subscription rate-limit state through the live query. */
   subscriptionUsage(): Promise<SubscriptionUsageResponse>;
   abort(): void;
+  /**
+   * Ends a fake SDK stream after the daemon handshake but before readiness.
+   * Production SDK queries never expose this test seam.
+   */
+  failDuringBringUp?: () => void;
 }
 
 /** A live SDK stream ended even though this shim did not begin shutdown. */
@@ -178,6 +219,55 @@ export class UnexpectedSdkStreamTerminationError extends Error {
 /** Errors logged by their owning lifecycle layer must not be logged again at process exit. */
 export function isUnexpectedSdkStreamTerminationError(err: unknown): err is UnexpectedSdkStreamTerminationError {
   return err instanceof UnexpectedSdkStreamTerminationError;
+}
+
+/** A query termination lost its required durable lifecycle receipt. */
+export class QueryTerminationPersistenceError extends Error {
+  constructor(
+    readonly terminationKind:
+      | "intentional"
+      | "startup_failure"
+      | UnexpectedSdkStreamTerminationError["terminationKind"],
+    readonly queryInstanceId: string,
+    cause: unknown,
+  ) {
+    super(`query ${terminationKind} termination did not receive a durable store receipt`, { cause });
+    this.name = "QueryTerminationPersistenceError";
+  }
+}
+
+/** A termination-receipt failure is logged where the receipt is owned. */
+export function isQueryTerminationPersistenceError(err: unknown): err is QueryTerminationPersistenceError {
+  return err instanceof QueryTerminationPersistenceError;
+}
+
+/** Query termination and resource cleanup both failed after one owned diagnostic. */
+export class QueryTerminationCleanupError extends AggregateError {
+  constructor(errors: readonly unknown[], message: string) {
+    super(errors, message);
+    this.name = "QueryTerminationCleanupError";
+  }
+}
+
+/** A cleanup aggregate is logged where the termination lifetime is owned. */
+export function isQueryTerminationCleanupError(err: unknown): err is QueryTerminationCleanupError {
+  return err instanceof QueryTerminationCleanupError;
+}
+
+type QueryIdentityState =
+  | { case: "fresh-unconfirmed" }
+  | { case: "resume-unconfirmed"; requestedVendorSessionId: string }
+  | { case: "confirmed"; vendorSessionId: string };
+
+/** A resumed query reported a conversation other than the one it was asked to resume. */
+export class ResumeIdentityMismatchError extends Error {
+  constructor(
+    readonly requestedVendorSessionId: string,
+    readonly observedVendorSessionId: string,
+  ) {
+    super(`resumed SDK query reported vendor session ${JSON.stringify(observedVendorSessionId)} instead of requested session ${JSON.stringify(requestedVendorSessionId)}`);
+    this.name = "ResumeIdentityMismatchError";
+  }
 }
 
 export class UdsSession {
@@ -222,6 +312,8 @@ export class UdsSession {
   private shutdownPromise: Promise<void> | null = null;
   private resourcesClosePromise: Promise<void> | null = null;
   private readonly runFinished = completionLatch();
+  /** Keeps the dead-query shim alive until its durable typed failure reaches a daemon. */
+  private unexpectedTerminationForwarded: ReturnType<typeof completionLatch> | null = null;
   private pumpStarted = false;
   /** Idle bound for a bounded replay's store subscription (see deps). */
   private readonly replayIdleMs: number;
@@ -240,19 +332,6 @@ export class UdsSession {
    */
   private readonly sessionGate = new SessionStartGate();
   /**
-   * Whether the VENDOR session id — the key the store files this session's
-   * events under — is known yet. Known up front on `--resume`; otherwise only
-   * the SDK can reveal it, on the first converted message.
-   */
-  private storeKeyKnown: boolean;
-  /**
-   * TurnStarted events accepted before the vendor session id was known. See
-   * emitTurnStarted: writing them under the placeholder key would file them in
-   * a seq space nothing subscribes to, so they wait for the real key instead
-   * of being lost.
-   */
-  private readonly deferredTurnStarts: Event[] = [];
-  /**
    * The mode this session is ACTUALLY running under: argv until the bring-up
    * gate applies the daemon's, then the daemon's. Reported on the readiness
    * announcement so "what posture is this session in?" is answerable from the
@@ -265,15 +344,51 @@ export class UdsSession {
   private effectivePermissionMode: PermissionMode;
   /** The only model this shim has observed or confirmed as selected. */
   private effectiveModel = "";
+  /** One identifier for the only query() invocation the shim is permitted to own. */
+  private readonly queryInstanceId: string;
+  /** Closed identity state for the one query invocation owned by this shim. */
+  private queryIdentity: QueryIdentityState;
+  /** The latest SDK-observed runtime identity for the query this shim owns. */
+  private queryRuntimeIdentity: QueryRuntimeIdentity | null = null;
 
   constructor(private readonly deps: UdsSessionDeps) {
-    this.storeKeyKnown = deps.storeSessionId !== undefined && deps.storeSessionId !== "";
+    this.queryInstanceId = deps.queryInstanceId ?? randomUUID();
+    if (deps.sessionSource === SessionSource.RESUME) {
+      if (deps.storeSessionId === undefined || deps.storeSessionId.trim() === "") {
+        throw new Error("resumed UDS shim session requires a non-empty vendor session id");
+      }
+      this.queryIdentity = { case: "resume-unconfirmed", requestedVendorSessionId: deps.storeSessionId };
+    } else {
+      this.queryIdentity = { case: "fresh-unconfirmed" };
+    }
     this.replayIdleMs = deps.replayIdleMs ?? 5000;
     this.effectivePermissionMode = deps.permissionMode ?? "default";
-    LOGGER.log({ agent_repl_session_id: deps.sessionId, uds_socket: deps.udsSocketPath, store_socket: deps.storeSocketPath, session_source: deps.sessionSource, store_key_known: this.storeKeyKnown, permission_mode: this.effectivePermissionMode }, "constructed UDS shim session");
+    LOGGER.log({ agent_repl_session_id: deps.sessionId, uds_socket: deps.udsSocketPath, store_socket: deps.storeSocketPath, session_source: deps.sessionSource, store_key_known: deps.storeSessionId !== undefined && deps.storeSessionId !== "", permission_mode: this.effectivePermissionMode }, "constructed UDS shim session");
     const target: SdkControlTarget = {
       submitPrompt: async ({ requestId, text, permissionMode }): Promise<void> => {
+        const boundaryAtMs = this.now();
         const usage = await this.captureFiveHourUsage("turn_start", requestId);
+        const turnStart = this.turnStartedEvent(requestId, text, boundaryAtMs);
+        const usageObservation = this.accountUsageObservationEvent(
+          "turn_start",
+          requestId,
+          boundaryAtMs,
+          usage,
+          turnStart.sessionId,
+        );
+        LOGGER.log({
+          agent_repl_session_id: this.deps.sessionId,
+          query_instance_id: this.queryInstanceId,
+          turn_id: requestId,
+          boundary_at_ms: boundaryAtMs,
+          observed_at_ms: usage.observedAtMs,
+          measurement_available: usage.measurementAvailable,
+          subscription_type: usage.subscriptionType,
+          store_key: turnStart.sessionId,
+          event_order: ["turnStarted", "accountUsageObservation"],
+        }, "persisting ordered turn-start boundary before SDK prompt admission");
+        await this.store.write([turnStart, usageObservation]);
+        this.activeTurnStarts.set(requestId, turnStart);
         this.turnStartUsage.set(requestId, usage);
         this.activeTurnIds.push(requestId);
         const content: ContentBlock[] = [{ type: "text", text }];
@@ -297,11 +412,6 @@ export class UdsSession {
           turns_in_flight: this.activeTurnIds.length,
           decision: "turn_started",
         }, `prompt accepted -> SDK input`);
-        // Turn start is SHIM-AUTHORITATIVE (see convert.ts's header): the
-        // vendor stream has no "a turn began" message, and the user-message
-        // echo the converter used to derive one from never arrives for a live
-        // submit. Accepting the prompt IS the turn starting, so say so here.
-        this.emitTurnStarted(requestId, text);
         // A prompt-scoped permission-mode override rides on SubmitPrompt. Apply
         // it to the live query. The receipt waits for quota sampling and prompt
         // admission, but not for this independent mode mutation.
@@ -446,6 +556,13 @@ export class UdsSession {
       {
         socketPath: this.deps.udsSocketPath,
         sessionId: this.deps.sessionId,
+        queryInstanceId: this.queryInstanceId,
+        queryRuntimeIdentity: () => {
+          const identity = this.queryRuntimeIdentity;
+          return identity !== null && identity.vendorSessionId === this.store.vendorSessionId()
+            ? identity
+            : undefined;
+        },
         shimVersion: this.deps.shimVersion,
         protocolVersion: this.deps.protocolVersion,
         turnInFlight: () => this.handshakeTurnIds().length > 0,
@@ -552,6 +669,12 @@ export class UdsSession {
       // The store round-trip feed: merged, seq-stamped events go to the daemon.
       this.store.onMerged((evt) => {
         this.logUserPromptForward(evt);
+        if (this.unexpectedTerminationForwarded !== null && this.isUnexpectedTerminationLifecycle(evt)) {
+          void this.server.sendEventFlushed(evt).then((forwarded) => {
+            if (forwarded) this.unexpectedTerminationForwarded?.resolve();
+          });
+          return;
+        }
         this.server.sendEvent(evt);
       });
       // Honest sad path: a store outage becomes an Event(DegradedState) forwarded
@@ -559,6 +682,7 @@ export class UdsSession {
       this.store.onDegraded((report) => this.server.sendEvent(this.degradedEvent(report)));
       await this.store.connect();
       LOGGER.log({ agent_repl_session_id: this.deps.sessionId, store_socket: this.deps.storeSocketPath }, "store producer connection established");
+      await this.persistQueryCreated();
       // Readiness is asserted from the handshake hook wired in the
       // constructor, not here: connect() resolves on the DIAL, and an event
       // sent before the DaemonHello would be dropped.
@@ -574,10 +698,38 @@ export class UdsSession {
     } catch (err) {
       if (this.intentionalShutdownReason !== null) return;
       if (this.pumpStarted) throw err;
+      let persistenceFailure: unknown;
+      if (this.query !== null) {
+        try {
+          // Startup failure has the same durable terminal contract as an SDK
+          // iterator failure.  The daemon pins its replay cursor at either
+          // lifecycle until the immediately following degradation confirms the
+          // stable failure class, so emitting only the lifecycle would strand
+          // every restored daemon before this terminal fact.
+          await this.persistUnexpectedSdkTermination(
+            "startup_failure",
+            this.queryTerminationEvent("startup_failure", err),
+            false,
+          );
+        } catch (cause) {
+          persistenceFailure = cause;
+        }
+      }
       this.control.cancelAll("startup_failure");
       this.input.end();
       this.query?.abort();
-      await this.closeResources();
+      let cleanupFailure: unknown;
+      try {
+        await this.closeResources();
+      } catch (cause) {
+        cleanupFailure = cause;
+      }
+      if (persistenceFailure !== undefined || cleanupFailure !== undefined) {
+        throw new AggregateError(
+          [err, persistenceFailure, cleanupFailure].filter((cause) => cause !== undefined),
+          "SDK query startup failed with lifecycle evidence or cleanup failure",
+        );
+      }
       throw err;
     } finally {
       this.runFinished.resolve();
@@ -702,6 +854,10 @@ export class UdsSession {
       this.reportDegraded("claude-shim-bringup", reason);
       return;
     }
+    if (this.query?.failDuringBringUp !== undefined) {
+      this.query.failDuringBringUp();
+      return;
+    }
     // Readiness first, ack second, in frame order on one connection: the
     // daemon has this session's SessionStarted in hand before the gate that
     // releases its callers closes.
@@ -760,10 +916,8 @@ export class UdsSession {
    * the store round-trip so it lands seq-ordered against the conversation.
    * Readiness cannot: the store keys events by the VENDOR session id, which
    * on a fresh session is unknown until the SDK reveals it on the first
-   * converted message — the first prompt again. A store write here would be
-   * deferred exactly as `emitTurnStarted` defers its held turns, walking
-   * straight back into the trap. Readiness is a fact about the SHIM rather
-   * than about the vendor conversation, so it takes the same
+   * converted message — the first prompt again. Readiness is a fact about the
+   * SHIM rather than about the vendor conversation, so it takes the same
    * SYNTHETIC/EPHEMERAL direct path DegradedState does.
    *
    * The gate is CLOSED afterwards so the vendor init's twin does not
@@ -818,7 +972,7 @@ export class UdsSession {
     LOGGER.log({ agent_repl_session_id: this.deps.sessionId }, "starting SDK stream pump");
     try {
       for await (const msg of this.query!.query) {
-        this.routeSdkMessage(msg);
+        await this.routeSdkMessage(msg);
       }
     } catch (err) {
       if (this.intentionalShutdownReason !== null) {
@@ -840,8 +994,27 @@ export class UdsSession {
     this.control.cancelAll(reason);
     this.input.end();
     this.query?.abort();
-    await this.closeResources();
+    let persistenceFailure: unknown;
+    try {
+      await this.persistQueryTerminationOrThrow("intentional", reason);
+    } catch (err) {
+      persistenceFailure = err;
+    }
+    let cleanupFailure: unknown;
+    try {
+      await this.closeResources();
+    } catch (err) {
+      cleanupFailure = err;
+    }
     await this.runFinished.promise;
+    if (persistenceFailure !== undefined && cleanupFailure !== undefined) {
+      throw new AggregateError(
+        [persistenceFailure, cleanupFailure],
+        "intentional query termination lost its store receipt and resource cleanup failed",
+      );
+    }
+    if (persistenceFailure !== undefined) throw persistenceFailure;
+    if (cleanupFailure !== undefined) throw cleanupFailure;
     LOGGER.log({ agent_repl_session_id: this.deps.sessionId, shutdown_reason: reason }, "intentional shim shutdown complete");
   }
 
@@ -868,13 +1041,11 @@ export class UdsSession {
     cause?: unknown,
   ): Promise<never> {
     const error = new UnexpectedSdkStreamTerminationError(terminationKind, cause);
-    const claudeSessionId = this.store.vendorSessionId();
+    const termination = this.queryTerminationEvent(terminationKind, cause);
+    const diagnostic = this.unexpectedTerminationDiagnostic(terminationKind, termination);
     LOGGER.log({
       level: "error",
-      agent_repl_session_id: this.deps.sessionId,
-      ...(claudeSessionId !== "" ? { claude_session_id: claudeSessionId } : {}),
-      store_key: this.store.storeSessionId(),
-      termination_kind: terminationKind,
+      ...diagnostic.logFields,
       intentional: false,
       active_turn_ids: this.activeTurnIds,
       input_ended: this.input.isEnded,
@@ -882,14 +1053,159 @@ export class UdsSession {
       resume_requested: this.deps.sessionSource === SessionSource.RESUME,
       cause,
     }, "SDK stream terminated outside intentional shim shutdown; exiting nonzero");
-    this.server.sendEvent(this.degradedEvent(create(DegradedStateSchema, {
-      component: "claude-shim-sdk",
-      reason: error.message,
+    let persistenceFailure: unknown;
+    let cleanupFailure: unknown;
+    try {
+      await this.persistUnexpectedSdkTermination(terminationKind, termination);
+    } catch (err) {
+      persistenceFailure = err;
+    } finally {
+      try {
+        await this.closeResources();
+      } catch (err) {
+        cleanupFailure = err;
+      }
+    }
+    if (persistenceFailure !== undefined && cleanupFailure !== undefined) {
+      LOGGER.log({
+        level: "error",
+        operation: "shim.uds-session.unexpected-termination-cleanup",
+        ...diagnostic.logFields,
+        outcome: "fatal_persistence_and_cleanup_failure",
+        persistence_failure: persistenceFailure,
+        cleanup_failure: cleanupFailure,
+      }, "unexpected SDK termination persistence and resource cleanup both failed");
+      throw new QueryTerminationCleanupError(
+        [persistenceFailure, cleanupFailure],
+        "unexpected SDK termination persistence and resource cleanup both failed",
+      );
+    }
+    if (persistenceFailure !== undefined) throw persistenceFailure;
+    if (cleanupFailure !== undefined) {
+      LOGGER.log({
+        level: "error",
+        operation: "shim.uds-session.unexpected-termination-cleanup",
+        ...diagnostic.logFields,
+        outcome: "fatal_cleanup_failure",
+        cleanup_failure: cleanupFailure,
+      }, "unexpected SDK termination resource cleanup failed");
+      throw new QueryTerminationCleanupError(
+        [error, cleanupFailure],
+        "unexpected SDK termination and resource cleanup both failed",
+      );
+    }
+    throw error;
+  }
+
+  /**
+   * Persist the daemon's typed unexpected-query failure before the shim closes.
+   *
+   * The daemon may be detached when the SDK dies, so a direct SessionServer
+   * send would be discarded and no reconnect could learn why the session
+   * stopped. Store replay is the authoritative delivery path for this report.
+   */
+  private async persistUnexpectedSdkTermination(
+    terminationKind: "startup_failure" | UnexpectedSdkStreamTerminationError["terminationKind"],
+    termination: QueryLifecycle["event"],
+    awaitLiveDelivery = true,
+  ): Promise<void> {
+    if (awaitLiveDelivery && this.unexpectedTerminationForwarded !== null) {
+      throw new Error("unexpected SDK termination delivery latch already exists");
+    }
+    const forwarded = awaitLiveDelivery ? completionLatch() : null;
+    if (forwarded !== null) this.unexpectedTerminationForwarded = forwarded;
+    const report = create(DegradedStateSchema, {
+      component: CLAUDE_SHIM_SDK_COMPONENT,
+      // This discriminator is part of the daemon's stable failure contract.
+      // The detailed cause remains durable in QueryLifecycle and in the
+      // structured fatal log record because DegradedState has no detail field.
+      reason: UNEXPECTED_QUERY_TERMINATION_REASON,
       droppedCount: 0n,
       recovered: false,
-    })));
-    await this.closeResources();
-    throw error;
+      queryInstanceId: this.queryInstanceId,
+    });
+    const degraded = create(EventSchema, {
+      sessionId: this.store.storeSessionId(),
+      seq: 0n,
+      plane: Plane.STREAM,
+      class: EventClass.PERSISTENT,
+      producedAtMs: BigInt(this.now()),
+      payload: { case: "degradedState", value: report },
+    });
+    const diagnostic = this.unexpectedTerminationDiagnostic(terminationKind, termination);
+    const lifecycle = this.queryLifecycleEnvelope(termination);
+    try {
+      // One acknowledged batch makes the causal detail and the stable replay
+      // discriminator atomic and ordered. A live daemon surfaces the lifecycle
+      // immediately and deduplicates the following confirmation; a restored
+      // daemon can surface either record from its replay floor.
+      await this.store.write([lifecycle, degraded]);
+      // A store receipt proves durability, not frontend delivery. A runtime
+      // iterator failure keeps the shim alive until the merged lifecycle frame
+      // flushes to a live daemon; startup failure cannot require that because
+      // it can be the daemon connection that failed. Its replayable pair is
+      // nevertheless complete and ordered in this same acknowledged batch.
+      if (forwarded !== null) await forwarded.promise;
+    } catch (cause) {
+      LOGGER.log({
+        level: "error",
+        operation: "shim.uds-session.unexpected-termination-delivery",
+        ...diagnostic.logFields,
+        component: report.component,
+        reason: report.reason,
+        failed_operation: "store.write.unexpected_query_termination",
+        outcome: "fatal_missing_termination_receipt",
+        cause,
+      }, "unexpected SDK termination degradation could not receive a durable store receipt");
+      throw new QueryTerminationPersistenceError(
+        terminationKind,
+        this.queryInstanceId,
+        cause,
+      );
+    }
+  }
+
+  /** Build the one diagnostic identity shared by every unexpected-terminal outcome. */
+  private unexpectedTerminationDiagnostic(
+    terminationKind: "startup_failure" | UnexpectedSdkStreamTerminationError["terminationKind"],
+    termination: QueryLifecycle["event"],
+  ): { logFields: Record<string, unknown> } {
+    if (termination.case !== "terminated") {
+      throw new Error("unexpected SDK termination requires a terminated lifecycle arm");
+    }
+    const terminationArm = termination.value.reason.case;
+    if (terminationArm !== "unexpectedEof" && terminationArm !== "iteratorFailure" && terminationArm !== "startupFailure") {
+      throw new Error(`unexpected SDK termination received invalid reason arm ${String(terminationArm)}`);
+    }
+    const vendorIdentity = termination.value.vendorIdentity;
+    if (vendorIdentity.case === undefined) {
+      throw new Error("unexpected SDK termination lacks vendor identity evidence");
+    }
+    const claudeSessionId = vendorIdentity.case === "vendorSessionId" ? vendorIdentity.value : "";
+    const terminationCause = terminationArm === "iteratorFailure" || terminationArm === "startupFailure"
+      ? termination.value.reason.value.cause
+      : null;
+    if (terminationArm === "startupFailure" && (terminationCause === null || terminationCause.trim() === "")) {
+      throw new Error("startup failure termination lacks a nonblank cause");
+    }
+    return { logFields: {
+      agent_repl_session_id: this.deps.sessionId,
+      query_instance_id: this.queryInstanceId,
+      ...(claudeSessionId !== "" ? { claude_session_id: claudeSessionId } : {}),
+      vendor_session_id: claudeSessionId,
+      store_key: this.store.storeSessionId(),
+      termination_kind: terminationKind,
+      termination_arm: terminationArm,
+      termination_cause: terminationCause,
+    } };
+  }
+
+  private isUnexpectedTerminationLifecycle(evt: Event): boolean {
+    if (evt.payload.case !== "queryLifecycle") return false;
+    const lifecycle = evt.payload.value;
+    if (lifecycle.queryInstanceId !== this.queryInstanceId || lifecycle.event.case !== "terminated") return false;
+    const reason = lifecycle.event.value.reason.case;
+    return reason === "unexpectedEof" || reason === "iteratorFailure" || reason === "startupFailure";
   }
 
   /**
@@ -910,11 +1226,12 @@ export class UdsSession {
       try {
         if (this.query === null) throw new Error("five-hour usage cannot be sampled before the SDK query exists");
         const response = await this.query.subscriptionUsage();
-        const sample = fiveHourUsageSample(response, performance.now() - startedAt);
+        const sample = fiveHourUsageSample(response, performance.now() - startedAt, this.now());
         this.logFiveHourUsage(phase, turnId, sample, startUsage);
         return sample;
       } catch (cause) {
         const sample: FiveHourUsageSample = {
+          observedAtMs: this.now(),
           measurementAvailable: false,
           utilization: null,
           resetsAt: null,
@@ -922,6 +1239,7 @@ export class UdsSession {
           rateLimitsAvailable: false,
           sampleLatencyMs: performance.now() - startedAt,
           unavailableReason: "sample_failed",
+          unavailableCause: errMsg(cause),
         };
         this.logFiveHourUsage(phase, turnId, sample, startUsage, cause);
         return sample;
@@ -932,6 +1250,263 @@ export class UdsSession {
     this.usageSampleTail = capture.then(() => undefined);
     return capture;
   }
+
+  /** Build the durable wire event for one account-usage observation. */
+  private accountUsageObservationEvent(
+    phase: "turn_start" | "turn_end",
+    turnId: string,
+    boundaryAtMs: number,
+    sample: FiveHourUsageSample,
+    sessionId: string,
+  ): Event {
+    const resetsAtMs = (): bigint => {
+      if (sample.resetsAt === null) {
+        throw new Error("available five-hour usage observation omitted its reset timestamp");
+      }
+      const parsed = Date.parse(sample.resetsAt);
+      if (!Number.isFinite(parsed)) {
+        throw new Error(`available five-hour usage observation has an invalid reset timestamp ${JSON.stringify(sample.resetsAt)}`);
+      }
+      return BigInt(parsed);
+    };
+    const outcome = sample.measurementAvailable
+      ? {
+        case: "available" as const,
+        value: create(AccountUsageAvailableSchema, {
+          fiveHour: create(UsageWindowSchema, {
+            utilizationPercent: sample.utilization!,
+            resetsAtMs: resetsAtMs(),
+          }),
+        }),
+      }
+      : {
+        case: "unavailable" as const,
+        value: create(AccountUsageUnavailableSchema, {
+          reason: this.usageUnavailableReason(sample),
+        }),
+      };
+    return create(EventSchema, {
+      sessionId,
+      seq: 0n,
+      plane: Plane.STREAM,
+      class: EventClass.PERSISTENT,
+      requestId: turnId,
+      producedAtMs: BigInt(this.now()),
+      payload: {
+        case: "accountUsageObservation",
+        value: create(AccountUsageObservationSchema, {
+          queryInstanceId: this.queryInstanceId,
+          turnId,
+          boundaryAtMs: BigInt(boundaryAtMs),
+          observedAtMs: BigInt(sample.observedAtMs),
+          sampleLatencyMs: BigInt(Math.round(sample.sampleLatencyMs)),
+          subscriptionType: sample.subscriptionType ?? "",
+          boundary: phase === "turn_start"
+            ? { case: "turnStart", value: create(TurnStartUsageBoundarySchema) }
+            : { case: "turnEnd", value: create(TurnEndUsageBoundarySchema) },
+          outcome,
+        }),
+      },
+    });
+  }
+
+  /** Convert the SDK's explicitly validated unavailable outcome to the typed contract. */
+  private usageUnavailableReason(sample: FiveHourUsageSample) {
+    switch (sample.unavailableReason) {
+      case "rate_limits_unavailable":
+        return { case: "serviceUnavailable" as const, value: create(UsageServiceUnavailableSchema) };
+      case "five_hour_window_unavailable":
+        return { case: "windowUnavailable" as const, value: create(FiveHourWindowUnavailableSchema) };
+      case "five_hour_utilization_unavailable":
+        return { case: "utilizationUnavailable" as const, value: create(UtilizationUnavailableSchema) };
+      case "sample_failed":
+        if (sample.unavailableCause === undefined || sample.unavailableCause === "") {
+          throw new Error("failed usage sample omitted its causal diagnostic");
+        }
+        return { case: "samplingFailure" as const, value: create(UsageSamplingFailureSchema, { cause: sample.unavailableCause }) };
+      default:
+        throw new Error(`unrecognized unavailable usage reason ${String(sample.unavailableReason)}`);
+    }
+  }
+
+  /** Persist the construction of the only query() the shim owns. */
+  private async persistQueryCreated(): Promise<void> {
+    const invocation = this.deps.sessionSource === SessionSource.RESUME
+      ? { case: "resumed" as const, value: create(ResumedQuerySchema, { requestedVendorSessionId: this.deps.storeSessionId ?? "" }) }
+      : { case: "fresh" as const, value: create(FreshQuerySchema) };
+    await this.persistQueryLifecycle({
+      case: "created",
+      value: create(QueryCreatedSchema, { requestedModel: this.deps.requestedModel ?? "", invocation }),
+    });
+  }
+
+  /** Persist effective query configuration after the SDK reports system initialization. */
+  private async persistRuntimeObserved(
+    message: SdkMessageLike,
+    vendorSessionId: string,
+    eventSessionId = vendorSessionId,
+  ): Promise<void> {
+    const raw = message as unknown as Record<string, unknown>;
+    const text = (field: string): string => typeof raw[field] === "string" ? raw[field] : "";
+    const unavailable = (cause: string) => create(EvidenceFingerprintSchema, {
+      evidence: { case: "unavailable", value: create(FingerprintUnavailableSchema, { cause }) },
+    });
+    const identity = create(QueryRuntimeIdentitySchema, {
+      vendorSessionId,
+      effectiveModel: this.effectiveModel,
+      sdkVersion: this.deps.sdkVersion ?? "",
+      claudeCodeVersion: text("claude_code_version"),
+      shimBuildSha: this.deps.shimBuildSha ?? "",
+      authSource: text("api_key_source"),
+      subscriptionType: "",
+      fastModeState: text("fast_mode_state"),
+      fastModeReason: text("fast_mode_reason"),
+      effectiveOptions: unavailable("effective SDK options are not exposed by the Agent SDK initialization message"),
+      settings: unavailable("effective settings are not exposed by the Agent SDK initialization message"),
+      tools: unavailable("ordered tool definitions are not exposed by the Agent SDK initialization message"),
+      mcp: unavailable("ordered MCP configuration is not exposed by the Agent SDK initialization message"),
+      contextPrefix: unavailable("cacheable context prefix is not exposed by the Agent SDK initialization message"),
+    });
+    // This cache is assigned before the store receipt so a daemon reconnect
+    // cannot observe a query whose durable lifecycle event has arrived while
+    // its next ShimHello omits the same authoritative runtime identity.
+    this.queryRuntimeIdentity = identity;
+    await this.persistQueryLifecycle({
+      case: "runtimeObserved",
+      value: create(QueryRuntimeObservedSchema, {
+        identity,
+      }),
+    }, eventSessionId);
+  }
+
+  /**
+   * Confirm the first SDK-reported identity before any store rekey, registry
+   * observation, or process-global identity mutation can occur.
+   *
+   * A later identity is an SDK rotation and is legal only after this query's
+   * first identity has been confirmed. The dangerous state is specifically a
+   * resumed query's first report: accepting a different id there silently
+   * turns an exact resume into a fresh conversation.
+   */
+  private async confirmVendorIdentity(message: SdkMessageLike, observedVendorSessionId: string): Promise<void> {
+    if (observedVendorSessionId.trim() === "") {
+      throw new Error("SDK message omitted its vendor session identity");
+    }
+    switch (this.queryIdentity.case) {
+      case "fresh-unconfirmed":
+        this.queryIdentity = { case: "confirmed", vendorSessionId: observedVendorSessionId };
+        return;
+      case "confirmed":
+        this.queryIdentity = { case: "confirmed", vendorSessionId: observedVendorSessionId };
+        return;
+      case "resume-unconfirmed": {
+        const requestedVendorSessionId = this.queryIdentity.requestedVendorSessionId;
+        if (observedVendorSessionId === requestedVendorSessionId) {
+          this.queryIdentity = { case: "confirmed", vendorSessionId: observedVendorSessionId };
+          return;
+        }
+        // Preserve both sides as structured lifecycle evidence under the
+        // requested store key. Filing it under the replacement would mutate
+        // identity before the mismatch reached the daemon.
+        await this.persistRuntimeObserved(message, observedVendorSessionId, requestedVendorSessionId);
+        LOGGER.log({
+          level: "error",
+          operation: "shim.uds-session.resume-identity-confirmation",
+          outcome: "fatal_identity_mismatch",
+          agent_repl_session_id: this.deps.sessionId,
+          query_instance_id: this.queryInstanceId,
+          requested_vendor_session_id: requestedVendorSessionId,
+          observed_vendor_session_id: observedVendorSessionId,
+          session_source: this.deps.sessionSource,
+          shim_version: this.deps.shimVersion,
+          sdk_version: this.deps.sdkVersion ?? "",
+        }, "resumed SDK query reported a different vendor session identity; refusing replacement conversation");
+        throw new ResumeIdentityMismatchError(requestedVendorSessionId, observedVendorSessionId);
+      }
+    }
+  }
+
+  /** Persist a query termination before resources are released. */
+  private async persistQueryTermination(
+    kind: "intentional" | "startup_failure" | UnexpectedSdkStreamTerminationError["terminationKind"],
+    cause?: unknown,
+  ): Promise<void> {
+    await this.persistQueryLifecycle(this.queryTerminationEvent(kind, cause));
+  }
+
+  private queryTerminationEvent(
+    kind: "intentional" | "startup_failure" | UnexpectedSdkStreamTerminationError["terminationKind"],
+    cause?: unknown,
+  ): QueryLifecycle["event"] {
+    const reason = kind === "intentional"
+      ? { case: "intentional" as const, value: create(IntentionalQueryTerminationSchema, { reason: String(cause ?? "shutdown") }) }
+      : kind === "startup_failure"
+        ? { case: "startupFailure" as const, value: create(QueryStartupFailureSchema, { cause: terminationCause(cause, "startup failure") }) }
+      : kind === "iterator_eof"
+        ? { case: "unexpectedEof" as const, value: create(UnexpectedQueryEofSchema) }
+        : { case: "iteratorFailure" as const, value: create(QueryIteratorFailureSchema, { cause: terminationCause(cause, "iterator failure") }) };
+    const vendorSessionId = this.store.vendorSessionId();
+    return {
+      case: "terminated",
+      value: create(QueryTerminatedSchema, {
+        vendorIdentity: vendorSessionId === ""
+          ? { case: "vendorSessionIdentityUnavailable", value: create(VendorSessionIdentityUnavailableSchema) }
+          : { case: "vendorSessionId", value: vendorSessionId },
+        reason,
+      }),
+    };
+  }
+
+  /** Persist termination with one lifecycle-owned diagnostic and a fatal typed error. */
+  private async persistQueryTerminationOrThrow(
+    kind: "intentional" | "startup_failure",
+    cause?: unknown,
+  ): Promise<void> {
+    try {
+      await this.persistQueryTermination(kind, cause);
+    } catch (err) {
+      LOGGER.log({
+        level: "error",
+        agent_repl_session_id: this.deps.sessionId,
+        query_instance_id: this.queryInstanceId,
+        store_key: this.store.storeSessionId(),
+        termination_kind: kind,
+        termination_cause: cause,
+        outcome: "fatal_missing_termination_receipt",
+        cause: err,
+      }, "query termination could not receive a durable store receipt");
+      throw new QueryTerminationPersistenceError(kind, this.queryInstanceId, err);
+    }
+  }
+
+  /** Write a query lifecycle event and await its store receipt. */
+  private async persistQueryLifecycle(
+    event: QueryLifecycle["event"],
+    sessionId = this.store.storeSessionId(),
+  ): Promise<void> {
+    const envelope = this.queryLifecycleEnvelope(event, sessionId);
+    LOGGER.log({ agent_repl_session_id: this.deps.sessionId, query_instance_id: this.queryInstanceId, lifecycle_event: event.case, store_key: sessionId }, "persisting query lifecycle event");
+    await this.store.write([envelope]);
+  }
+
+  private queryLifecycleEnvelope(
+    event: QueryLifecycle["event"],
+    sessionId = this.store.storeSessionId(),
+  ): Event {
+    return create(EventSchema, {
+      sessionId,
+      seq: 0n,
+      plane: Plane.STREAM,
+      class: EventClass.PERSISTENT,
+      producedAtMs: BigInt(this.now()),
+      payload: { case: "queryLifecycle", value: create(QueryLifecycleSchema, {
+        queryInstanceId: this.queryInstanceId,
+        observedAtMs: BigInt(this.now()),
+        event,
+      }) },
+    });
+  }
+
 
   /** Emit one information-dense, machine-queryable turn-boundary record. */
   private logFiveHourUsage(
@@ -996,15 +1571,55 @@ export class UdsSession {
   }
 
   /**
-   * Route one SDK message per the G4 wiring: EPHEMERAL deltas straight to the
-   * daemon (never the store); everything else converted and written to the
-   * store (whose merged echo returns via onMerged → the daemon).
+   * Route one SDK message per the G4 wiring: live typing and heartbeats go
+   * straight to the daemon, durable MessageLatency and all other durable
+   * events go through the store (whose merged echo returns via onMerged → the
+   * daemon).
    */
-  private routeSdkMessage(msg: SdkMessageLike): void {
-    if (isEphemeral(msg)) {
+  private async routeSdkMessage(msg: SdkMessageLike): Promise<void> {
+    if (msg.type === "stream_event") {
       // Observe BEFORE converting: a message_start must make its own id
       // current for the deltas that follow it.
       this.streamMessages.observe(msg);
+      const opts = { ...this.convertOpts(), messageId: this.streamMessages.current() };
+      const persistent = toPersistentEvent(msg, opts);
+      if (persistent !== null) {
+        await this.confirmVendorIdentity(msg, persistent.sessionId);
+        this.store.adoptStoreKey(persistent.sessionId);
+        setClaudeSessionId(persistent.sessionId);
+        LOGGER.logVerbose({ agent_repl_session_id: this.deps.sessionId, sdk_type: msg.type, payload_case: persistent.payload.case, claude_session_id: persistent.sessionId }, "writing persistent SDK structural event to store");
+        // The SDK pump owns this durability boundary.  It may not consume the
+        // next SDK message until the latency stamp has a store receipt: doing
+        // so would allow the response and its usage to succeed without the
+        // timing evidence needed to compute TTFT and generation throughput.
+        try {
+          await this.store.write([persistent]);
+        } catch (cause) {
+          const latency = persistent.payload.case === "messageLatency"
+            ? persistent.payload.value
+            : undefined;
+          LOGGER.log({
+            level: "error",
+            operation: "shim.uds-session.persistent-evidence",
+            agent_repl_session_id: this.deps.sessionId,
+            claude_session_id: persistent.sessionId,
+            query_instance_id: this.queryInstanceId,
+            ...(this.activeTurnIds[0] === undefined ? {} : {
+              request_id: this.activeTurnIds[0],
+              turn_id: this.activeTurnIds[0],
+            }),
+            api_message_id: latency?.uuid ?? null,
+            evidence_kind: "message_latency",
+            failed_operation: "store.write.message_latency",
+            outcome: "fatal_missing_persistent_evidence_receipt",
+            cause,
+          }, "persistent SDK message latency did not receive a durable store receipt");
+          throw cause;
+        }
+        return;
+      }
+    }
+    if (isEphemeral(msg)) {
       const evt = toEphemeralEvent(msg, { ...this.convertOpts(), messageId: this.streamMessages.current() });
       if (evt) {
         LOGGER.logVerbose({ agent_repl_session_id: this.deps.sessionId, sdk_type: msg.type, payload_case: evt.payload.case, claude_session_id: evt.sessionId }, "forwarding ephemeral SDK event directly to daemon");
@@ -1012,60 +1627,76 @@ export class UdsSession {
       }
       return;
     }
-    if (msg.type === "assistant") {
-      logAssistantApiResponseUsage(msg, this.deps.sessionId);
-    }
     // A result closes the oldest accepted input turn. Claim its id BEFORE
     // conversion so the TurnEnded payload and envelope carry one correlation.
     // A result without a claim is an invariant violation: persist the vendor
     // evidence, report degraded state, and emit no fabricated lifecycle end.
-    let turnId: string | undefined;
+    let terminalTurnId: string | undefined;
+    let terminalBoundaryAtMs: number | undefined;
     let turnStart: Event | undefined;
     if (msg.type === "result") {
-      turnId = this.activeTurnIds.shift();
-      if (turnId === undefined) {
+      terminalTurnId = this.activeTurnIds.shift();
+      if (terminalTurnId === undefined) {
         this.reportDegraded(
           "claude-shim-turn-lifecycle",
           "SDK result has no accepted prompt turn to close",
         );
       } else {
-        turnStart = this.activeTurnStarts.get(turnId);
-        this.activeTurnStarts.delete(turnId);
-        this.pendingTurnEndIds.push(turnId);
-        const startUsage = this.turnStartUsage.get(turnId);
-        this.turnStartUsage.delete(turnId);
-        void this.captureFiveHourUsage("turn_end", turnId, startUsage);
+        turnStart = this.activeTurnStarts.get(terminalTurnId);
+        this.pendingTurnEndIds.push(terminalTurnId);
+        terminalBoundaryAtMs = this.now();
+        // The terminal vendor result cannot reach the daemon until this end
+        // boundary is durably recorded in the same store batch below.
       }
+    }
+    // Assistant responses belong to the oldest accepted turn without closing
+    // it. This is the same shim-owned FIFO authority used by result handling;
+    // the SDK's request_id remains untouched inside AssistantMessage as raw
+    // API evidence and is never repurposed as daemon turn correlation.
+    const rootTurnId = msg.type === "assistant"
+      ? this.activeTurnIds[0]
+      : terminalTurnId;
+    if (msg.type === "assistant" && rootTurnId !== undefined) {
+      turnStart = this.activeTurnStarts.get(rootTurnId);
     }
     // The direct readiness SessionStarted closes the lifecycle gate before the
     // SDK emits its first system:init. Observe that raw SDK authority here so a
     // later rejected SetModel can name the currently selected model even though
     // the duplicate lifecycle twin is deliberately suppressed.
-    if (msg.type === "system" && msg.subtype === "init" && typeof msg.model === "string") {
+    const systemInit = msg.type === "system" && msg.subtype === "init";
+    if (systemInit && typeof msg.model === "string") {
       const model = normalizeModel(msg.model);
       this.effectiveModel = model;
       LOGGER.log({ agent_repl_session_id: this.deps.sessionId, model, raw_model: msg.model },
         model === "" ? "system-init model normalized to empty" : "model observed from SDK system-init");
     }
-    const { vendor, lifecycle } = convert(msg, {
+    const { vendor, lifecycle, assistantApiUsage } = convert(msg, {
       sessionSource: this.deps.sessionSource,
       sessionGate: this.sessionGate,
-      ...(turnId !== undefined ? { turnId } : {}),
+      ...(rootTurnId !== undefined ? { rootTurnId } : {}),
       ...this.convertOpts(),
     });
+    // Root-turn correlation belongs to this routing owner, not the raw SDK
+    // converter. The Event envelope carries the daemon request identity while
+    // AssistantMessage continues to preserve the SDK's API request_id.
+    if (rootTurnId !== undefined) vendor.requestId = rootTurnId;
+    if (msg.type === "assistant" && assistantApiUsage !== undefined) {
+      logAssistantApiResponseUsage(msg, assistantApiUsage, this.deps.sessionId);
+    }
     // The converted envelope carries the VENDOR session id (read off the SDK
     // message), which is the id the store files these events under. Adopt it
     // as the subscription key: a fresh session has no other way to learn it,
     // and subscribing under this shim's `--session-id` listens on a channel
     // nothing publishes to.
+    await this.confirmVendorIdentity(msg, vendor.sessionId);
     this.store.adoptStoreKey(vendor.sessionId);
     setClaudeSessionId(vendor.sessionId);
-    this.settleStoreKey(vendor.sessionId);
+    if (systemInit) await this.persistRuntimeObserved(msg, vendor.sessionId);
     let turnClaimBridge: Event | undefined;
-    if (turnId !== undefined && turnStart !== undefined && turnStart.sessionId !== vendor.sessionId) {
+    if (rootTurnId !== undefined && turnStart !== undefined && turnStart.sessionId !== vendor.sessionId) {
       if (turnStart.payload.case !== "turnStarted") {
         throw new Error(
-          `active turn ${JSON.stringify(turnId)} retained ${turnStart.payload.case || "empty"} instead of TurnStarted`,
+          `active turn ${JSON.stringify(rootTurnId)} retained ${turnStart.payload.case || "empty"} instead of TurnStarted`,
         );
       }
       turnClaimBridge = create(EventSchema, {
@@ -1073,36 +1704,46 @@ export class UdsSession {
         seq: 0n,
         plane: turnStart.plane,
         class: turnStart.class,
-        requestId: turnId,
+        requestId: rootTurnId,
         producedAtMs: turnStart.producedAtMs,
         payload: {
           case: "turnClaimBridge",
           value: create(TurnClaimBridgeSchema, {
-            turnId,
+            turnId: rootTurnId,
             previousSessionId: turnStart.sessionId,
           }),
         },
       });
     }
     if (turnClaimBridge !== undefined) {
+      if (turnStart === undefined) {
+        throw new Error(`turn-claim bridge ${JSON.stringify(rootTurnId)} lacks its retained TurnStarted carrier`);
+      }
       LOGGER.log({
         agent_repl_session_id: this.deps.sessionId,
-        request_id: turnId,
-        turn_id: turnId,
-        previous_session_id: turnStart!.sessionId,
+        request_id: rootTurnId,
+        turn_id: rootTurnId,
+        previous_session_id: turnStart.sessionId,
         claude_session_id: vendor.sessionId,
         decision: "emit_turn_claim_bridge",
       }, "writing non-lifecycle turn correlation proof in rotated vendor seq space");
+      // This class owns the accepted turn's store-key history. Advancing the
+      // retained carrier synchronously makes every later SDK message compare
+      // against the key whose bridge is already ahead of it in StoreClient's
+      // serialized write queue. A second rotation therefore emits a new
+      // bridge, while the result following an assistant cannot duplicate the
+      // first one.
+      turnStart.sessionId = vendor.sessionId;
     }
-    const authoritativeLifecycle = msg.type === "result" && turnId === undefined
+    const authoritativeLifecycle = msg.type === "result" && terminalTurnId === undefined
       ? lifecycle.filter((event) => event.payload.case !== "turnEnded")
       : lifecycle;
-    if (msg.type === "result" && turnId !== undefined) {
+    if (msg.type === "result" && terminalTurnId !== undefined) {
       LOGGER.log({
         agent_repl_session_id: this.deps.sessionId,
-        request_id: turnId,
+        request_id: terminalTurnId,
         plane: "stream",
-        turn_id: turnId,
+        turn_id: terminalTurnId,
         turns_in_flight: this.activeTurnIds.length,
         decision: "turn_ended",
       }, `SDK result correlated to accepted turn`);
@@ -1113,60 +1754,84 @@ export class UdsSession {
       claude_session_id: vendor.sessionId,
       lifecycle_count: authoritativeLifecycle.length,
       store_key: this.store.storeSessionId(),
-      turn_id: turnId,
+      turn_id: rootTurnId,
     }, "writing persistent SDK event batch to store");
-    const write = this.store.write([
-      vendor,
+    const terminalUsage = terminalTurnId === undefined
+      ? undefined
+      : await this.captureFiveHourUsage("turn_end", terminalTurnId, this.turnStartUsage.get(terminalTurnId));
+    if (terminalTurnId !== undefined) this.turnStartUsage.delete(terminalTurnId);
+    const terminalUsageEvent = terminalTurnId === undefined || terminalUsage === undefined
+      ? undefined
+      : this.accountUsageObservationEvent("turn_end", terminalTurnId, terminalBoundaryAtMs!, terminalUsage, vendor.sessionId);
+    const nonTerminalLifecycle = authoritativeLifecycle.filter((event) => event.payload.case !== "turnEnded");
+    const terminalLifecycle = authoritativeLifecycle.filter((event) => event.payload.case === "turnEnded");
+    const persistentBatch = [
       ...(turnClaimBridge !== undefined ? [turnClaimBridge] : []),
-      ...authoritativeLifecycle,
-    ]);
-    void write.then((ack) => {
-      if (turnId === undefined) return;
-      const index = this.pendingTurnEndIds.indexOf(turnId);
-      if (index < 0) {
+      vendor,
+      ...nonTerminalLifecycle,
+      ...(terminalUsageEvent === undefined ? [] : [terminalUsageEvent]),
+      ...terminalLifecycle,
+    ];
+    if (terminalTurnId !== undefined) this.activeTurnStarts.delete(terminalTurnId);
+    try {
+      const ack = await this.store.write(persistentBatch);
+      if (terminalTurnId !== undefined) {
+        const index = this.pendingTurnEndIds.indexOf(terminalTurnId);
+        if (index < 0) {
+          LOGGER.log({
+            level: "error",
+            agent_repl_session_id: this.deps.sessionId,
+            request_id: terminalTurnId,
+            turn_id: terminalTurnId,
+            store_last_seq: ack.lastSeq,
+            pending_turn_end_ids: this.pendingTurnEndIds,
+            decision: "reject_missing_pending_end_claim",
+          }, "StoreWriteAck for TurnEnded had no pending handshake claim");
+          return;
+        }
+        this.pendingTurnEndIds.splice(index, 1);
         LOGGER.log({
-          level: "error",
           agent_repl_session_id: this.deps.sessionId,
-          request_id: turnId,
-          turn_id: turnId,
+          request_id: terminalTurnId,
+          turn_id: terminalTurnId,
           store_last_seq: ack.lastSeq,
           pending_turn_end_ids: this.pendingTurnEndIds,
-          decision: "reject_missing_pending_end_claim",
-        }, "StoreWriteAck for TurnEnded had no pending handshake claim");
-        return;
+          decision: "retire_durable_turn_end_claim",
+        }, "TurnEnded is durably observable; retired its handshake claim");
       }
-      this.pendingTurnEndIds.splice(index, 1);
+    } catch (cause) {
       LOGGER.log({
+        level: "error",
+        operation: "shim.uds-session.persistent-evidence",
         agent_repl_session_id: this.deps.sessionId,
-        request_id: turnId,
-        turn_id: turnId,
-        store_last_seq: ack.lastSeq,
-        pending_turn_end_ids: this.pendingTurnEndIds,
-        decision: "retire_durable_turn_end_claim",
-      }, "TurnEnded is durably observable; retired its handshake claim");
-    }).catch(() => {
-      // The honest sad path lives INSIDE StoreClient (loud-log per dropped
-      // event + DegradedState to onDegraded). Nothing to add here; we only
-      // keep the rejected promise from going unhandled. Its pending handshake
-      // claim deliberately remains: no durable TurnEnded exists to retire it.
-    });
+        claude_session_id: vendor.sessionId,
+        query_instance_id: this.queryInstanceId,
+        ...(rootTurnId === undefined ? {} : {
+          request_id: rootTurnId,
+          turn_id: rootTurnId,
+        }),
+        sdk_type: msg.type,
+        evidence_kind: terminalTurnId === undefined ? "vendor_response" : "terminal_turn_batch",
+        persistent_event_count: persistentBatch.length,
+        failed_operation: terminalTurnId === undefined
+          ? "store.write.vendor_response"
+          : "store.write.terminal_turn_batch",
+        outcome: "fatal_missing_persistent_evidence_receipt",
+        cause,
+      }, "persistent SDK event batch did not receive a durable store receipt");
+      throw cause;
+    }
   }
 
-  /**
-   * Write the shim-authoritative TurnStarted for a just-accepted prompt.
-   *
-   * PERSISTENT and store-bound like every other lifecycle twin, so it takes
-   * the same seq-stamped round-trip back to the daemon and lands in the SSM in
-   * order with the TurnEnded that closes it.
-   */
-  private emitTurnStarted(requestId: string, text: string): void {
-    const evt = create(EventSchema, {
+  /** Build the lifecycle fact placed first in an acknowledged turn-start batch. */
+  private turnStartedEvent(requestId: string, text: string, boundaryAtMs: number): Event {
+    return create(EventSchema, {
       sessionId: this.store.storeSessionId(),
       seq: 0n,
       plane: Plane.STREAM,
       class: EventClass.PERSISTENT,
       requestId,
-      producedAtMs: BigInt(this.now()),
+      producedAtMs: BigInt(boundaryAtMs),
       payload: {
         case: "turnStarted",
         value: create(TurnStartedSchema, {
@@ -1174,40 +1839,6 @@ export class UdsSession {
           turnId: requestId,
         }),
       },
-    });
-    this.activeTurnStarts.set(requestId, evt);
-    if (!this.storeKeyKnown) {
-      // The vendor session id is genuinely unknown until the SDK reveals it
-      // (a fresh session carries no `--resume` id), and the store keys its seq
-      // space by it. Writing now would file this turn under the placeholder
-      // `--session-id`, which nothing subscribes to, so the daemon would never
-      // see the turn it just asked for. It waits for the real key instead.
-      this.deferredTurnStarts.push(evt);
-      LOGGER.log({ level: "warn", agent_repl_session_id: this.deps.sessionId, request_id: requestId },
-        `turn accepted before the vendor session id was known; TurnStarted held until the store key settles`);
-      return;
-    }
-    void this.store.write([evt]).catch(() => {
-      // StoreClient owns the honest sad path (loud per-event drop log +
-      // DegradedState). Only keeping the rejection handled here.
-    });
-  }
-
-  /**
-   * Record that the vendor session id is now known and flush any TurnStarted
-   * held for it, restamped with the settled key.
-   */
-  private settleStoreKey(vendorSessionId: string): void {
-    if (vendorSessionId === "") return;
-    this.storeKeyKnown = true;
-    if (this.deferredTurnStarts.length === 0) return;
-    const key = this.store.storeSessionId();
-    const held = this.deferredTurnStarts.splice(0);
-    for (const evt of held) evt.sessionId = key;
-    LOGGER.log({ agent_repl_session_id: this.deps.sessionId, claude_session_id: key, store_key: key },
-      `store key settled; flushing ${held.length} held TurnStarted event(s)`);
-    void this.store.write(held).catch(() => {
-      // See emitTurnStarted: StoreClient reports the drop.
     });
   }
 
@@ -1336,4 +1967,10 @@ function toPermissionResult(r: ToolPermissionResult): PermissionResultLike {
 
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/** Preserve an SDK termination diagnostic, explicitly naming an empty one. */
+function terminationCause(cause: unknown, kind: string): string {
+  const message = errMsg(cause);
+  return message.trim() === "" ? `SDK reported ${kind} with an empty diagnostic` : message;
 }

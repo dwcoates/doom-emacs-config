@@ -247,7 +247,7 @@ Envelope & stream:
 | `TaskStarted` / `TaskProgress` / `TaskEnded` | detached-work lifecycle; `task_id`, `kind` (AGENT/SHELL/WORKFLOW), `terminal_status` (DONE/ERROR/KILLED/STOPPED/LOST), `output_path` |
 | `ContentDelta` | EPHEMERAL live-typing delta: `uuid`, `block_index`, `text`/`thinking`/`input_json` oneof |
 | `HeartbeatProgress` | EPHEMERAL `tool_progress` relay: `tool_use_id`, `elapsed_seconds` |
-| `MessageLatency` | EPHEMERAL first-token-latency relay: `uuid`, `ttft_ms` (off the `message_start` stamp) |
+| `MessageLatency` | PERSISTENT first-token-latency relay: `uuid`, `ttft_ms` (off the `message_start` stamp) |
 | `DegradedState` | shim→daemon sad-path report: `component`, `reason`, `dropped_count` |
 
 Control plane (daemon↔shim, both directions):

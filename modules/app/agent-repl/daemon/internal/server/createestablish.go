@@ -137,9 +137,16 @@ func (h *commandHandler) CreateSession(ctx context.Context, workspace, requestID
 	if workspace == "" {
 		workspace = opts.CWD
 	}
+	// Construct the one exact-resume classifier before enrollment. Failures can
+	// occur while waiting for a conflicting round or while this caller waits on
+	// a joined round, before any durable agent session id exists; those paths
+	// are still failures of the caller's named Claude resume and must carry its
+	// continuity evidence.
+	resumeEstablishment := createResumeEstablishment(opts, "")
 	est, leader, err := h.beginEstablishment(ctx, opts)
 	if err != nil {
-		return "", fmt.Errorf("frontend cmd: create_session ws=%s request_id=%s: %w", workspace, requestID, err)
+		return "", fmt.Errorf("frontend cmd: create_session ws=%s request_id=%s: %w", workspace, requestID,
+			resumeEstablishment.classify(err))
 	}
 	if leader {
 		go h.runEstablishment(est, workspace, requestID)
@@ -150,8 +157,10 @@ func (h *commandHandler) CreateSession(ctx context.Context, workspace, requestID
 	select {
 	case <-est.done:
 	case <-ctx.Done():
-		return "", fmt.Errorf("frontend cmd: create_session ws=%s request_id=%s: %w: the caller's context ended first (%v); bring-up continues in the background",
-			workspace, requestID, errclass.ErrSessionNotEstablished, ctx.Err())
+		waitErr := fmt.Errorf("%w: the caller's context ended first (%v); bring-up continues in the background",
+			errclass.ErrSessionNotEstablished, ctx.Err())
+		return "", fmt.Errorf("frontend cmd: create_session ws=%s request_id=%s: %w",
+			workspace, requestID, resumeEstablishment.classify(waitErr))
 	}
 	if est.err != nil {
 		return "", est.err
@@ -265,17 +274,19 @@ func (h *commandHandler) runEstablishment(est *sessionEstablishment, workspace, 
 	defer cancel()
 
 	id, err := h.sessions.CreateSession(ctx, est.opts)
+	resumeEstablishment := createResumeEstablishment(est.opts, id)
 	if err != nil {
-		// The create core failed before any session existed. Typed create
-		// rejections (invalid mode, missing resume transcript) travel through
-		// unchanged — the client keys real behavior on their text — and only a
-		// bring-up failure gains the link name.
-		est.err = fmt.Errorf("frontend cmd: create_session ws=%s request_id=%s: %w", workspace, requestID, err)
+		// The create core may reject the request before assigning an id, or it
+		// may return the id of a durable record whose bring-up failed. The resume
+		// authority preserves that distinction and attaches every identity the
+		// core returned.
+		est.err = fmt.Errorf("frontend cmd: create_session ws=%s request_id=%s: %w", workspace, requestID,
+			resumeEstablishment.classify(err))
 		h.logf("frontend cmd: create_session ws=%s request_id=%s FAILED in the create core: %v", workspace, requestID, err)
 		return
 	}
 	est.sessionID = id
-	est.err = h.awaitEstablished(ctx, est.opts.CWD, workspace, id, requestID)
+	est.err = resumeEstablishment.classify(h.awaitEstablished(ctx, est.opts.CWD, workspace, id, requestID))
 }
 
 // awaitEstablished drives the session-health path ONCE and returns nil only on a

@@ -18,9 +18,10 @@ import (
 func (h *queueHarness) handshake(inFlight bool, ids ...string) error {
 	h.t.Helper()
 	return h.m.onHandshake("ws", "s1", &corev1.ShimHello{
-		Pid:           4242,
-		TurnInFlight:  inFlight,
-		ActiveTurnIds: ids,
+		Pid:             4242,
+		QueryInstanceId: "query-phantom-turn",
+		TurnInFlight:    inFlight,
+		ActiveTurnIds:   ids,
 	})
 }
 

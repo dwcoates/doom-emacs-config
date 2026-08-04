@@ -147,6 +147,17 @@ export class Reader {
     return typeof v === "string" ? v : "";
   }
 
+  /** Preserve optional-string presence while rejecting an unusable supplied id. */
+  optionalNonBlankStr(...keys: string[]): string | undefined {
+    const present = this.has(...keys);
+    const v = this.val(...keys);
+    if (!present) return undefined;
+    if (typeof v !== "string" || v === "") {
+      throw new MissingFieldError(`present ${keys.map((key) => `\`${key}\``).join("/")} must be a non-empty string`);
+    }
+    return v;
+  }
+
   num(...keys: string[]): number {
     const v = this.val(...keys);
     return typeof v === "number" && Number.isFinite(v) ? v : 0;

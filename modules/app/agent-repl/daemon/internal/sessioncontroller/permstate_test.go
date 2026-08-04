@@ -29,7 +29,7 @@ func newProducerHandler(t *testing.T) (permHandler, *fakeApplier) {
 	t.Helper()
 	m, _ := newTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, &fakeSpawner{})
 	applier := m.cfg.SSM.(*fakeApplier)
-	cons := newConsumer("ws", "s1", &fakePusher{}, applier, nil, newFakeClearCompactStore(), nil, nil, nil, nil, nil, nil)
+	cons := newConsumer("ws", "s1", &fakePusher{}, applier, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, nil, nil, nil, nil, nil, nil)
 	ph := permHandler{reg: m.reg, cons: cons, logf: func(string, ...any) {}, onPermsChanged: func() {
 		m.notePermissionState("ws")
 	}}

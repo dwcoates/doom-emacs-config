@@ -20,15 +20,16 @@
  * Additive S9: the `sessionInit` frame + `StateSnapshot.inits` carry the
  * retained `data.v1.SystemInit`; `SessionView.configDir`.
  *
- * STUB vs HAND-TYPED — the choice (per the G11 charter):
- * We HAND-TYPE the protojson shapes rather than importing the committed
- * `proto/gen/ts` protobuf-es stubs. The stubs work at runtime (Vite/Vitest
- * resolve them), but `tsc` cannot: the stub's own bare imports
- * (`@bufbuild/protobuf/codegenv2`, `/wkt`) are resolved relative to the stub's
- * directory (`proto/gen/ts/…`), which has no reachable `node_modules`, so
- * `npm run typecheck` fails with TS2307. `frontend.v1` is small, so hand-typing
- * is cheap, self-contained, and lets us implement the §5.1 loud validation
- * contract directly and visibly.
+ * GENERATED CONTRACT + STRICT ADAPTER:
+ * The committed `proto/gen/ts` protobuf-es stubs provide compile-time field
+ * manifests. The webapp-local protobuf runtime dependency and scoped TypeScript
+ * aliases make those stubs resolvable even though their source directory has no
+ * adjacent `node_modules`. Response token accounting is parsed by the generated
+ * protobuf decoder before its generated typed values are projected into render
+ * DTOs. The projection is exhaustively typed against every generated field, so
+ * scalar, presence, oneof, and additive-field changes fail at the shared schema
+ * boundary. Other frontend messages use exact generated field manifests around
+ * their stricter render-specific validation.
  *
  * VALIDATION CONTRACT (§5.1) — the decoder hard-errors (never returns a
  * degraded value) on:
@@ -49,6 +50,78 @@
  * Field names are canonical protojson (lowerCamelCase); int64/uint64 scalars
  * arrive as JSON strings and are parsed to `number`.
  */
+
+import {
+  MissingUsageBoundarySchema,
+  ModelTokenUtilizationSchema,
+  RuntimeIdentityIncompleteSchema,
+  QueryTerminationFailureSchema,
+  SessionResumeFailureAutomaticRestoreSchema,
+  SessionResumeFailureBringUpFailureSchema,
+  SessionResumeFailureCreateSchema,
+  SessionResumeFailureIdentityMismatchSchema,
+  SessionResumeFailureSchema,
+  SessionResumeFailureTranscriptUnavailableSchema,
+  SystemFailureItemSchema,
+  TelemetryRecordMissingPersistenceReceiptSchema,
+  TelemetryRecordMissingQueryLifecycleSchema,
+  TelemetryRecordMissingResponseUsageSchema,
+  TelemetryRecordMissingSchema,
+  TokenCacheCreationSchema,
+  TokenCacheRatesSchema,
+  TokenLedgerMismatchSchema,
+  TokenOutputDetailsSchema,
+  TokenServerToolUseSchema,
+  TokenTimingTotalsSchema,
+  TokenUsageReconciliationSchema,
+  TokenUsageTotalsSchema,
+  TokenUtilizationSchema,
+  SessionTokenUtilizationSchema,
+  TurnAccountingProblemSchema,
+  TurnAccountingSchema,
+  TurnAccountingTimingSchema,
+  TurnAccountingInvalidSchema,
+  UnmodeledUsageFieldsSchema,
+  UsageWindowResetSchema,
+  type TokenCacheCreation as GeneratedTokenCacheCreation,
+  type TokenCacheDiagnostic as GeneratedTokenCacheDiagnostic,
+  type TokenCacheRates as GeneratedTokenCacheRates,
+  type TokenOutputDetails as GeneratedTokenOutputDetails,
+  type TokenServerToolUse as GeneratedTokenServerToolUse,
+  type TokenUsage as GeneratedTokenUsage,
+  type TokenUsageIteration as GeneratedTokenUsageIteration,
+  type TokenUtilization as GeneratedTokenUtilization,
+  type TurnAccounting as GeneratedTurnAccounting,
+  type TurnAccountingProblem as GeneratedTurnAccountingProblem,
+  type TurnAccountingTiming as GeneratedTurnAccountingTiming,
+  type TokenUsageReconciliation as GeneratedTokenUsageReconciliation,
+  type TokenUsageTotals as GeneratedTokenUsageTotals,
+  type ModelTokenUtilization as GeneratedModelTokenUtilization,
+  type QueryTerminationFailure as GeneratedQueryTerminationFailure,
+  type SessionTokenUtilization as GeneratedSessionTokenUtilization,
+} from "../../proto/gen/ts/agentshim/frontend/v1/frontend_pb";
+import { fromJson, toJson, type JsonValue } from "@bufbuild/protobuf";
+import { ApiUsageSchema } from "../../proto/gen/ts/agentshim/data/v1/tools_pb";
+import {
+  AccountUsageAvailableSchema,
+  AccountUsageObservationSchema,
+  AccountUsageUnavailableSchema,
+  EvidenceFingerprintSchema,
+  FingerprintUnavailableSchema,
+  QueryRuntimeIdentitySchema,
+  UsageSamplingFailureSchema,
+  UsageWindowSchema,
+  type AccountUsageObservation as GeneratedAccountUsageObservation,
+  type EvidenceFingerprint as GeneratedEvidenceFingerprint,
+  type QueryRuntimeIdentity as GeneratedQueryRuntimeIdentity,
+} from "../../proto/gen/ts/agentshim/core/v1/core_pb";
+
+/** Exact generated field lists: omission and invention are both type errors. */
+function generatedFieldSet<Fields extends string>() {
+  return <const Keys extends readonly Fields[]>(
+    ...keys: Keys & (Exclude<Fields, Keys[number]> extends never ? unknown : ["missing generated field", Exclude<Fields, Keys[number]>])
+  ): ReadonlySet<string> => new Set<string>(keys);
+}
 
 // --- enums ------------------------------------------------------------------
 
@@ -456,7 +529,7 @@ export interface SessionView {
    * SystemFailureItem.
    */
   death?: SystemFailure;
-  tokenUtilization?: import("./protocol.js").SessionTokenUtilization;
+  tokenUtilization?: SessionTokenUtilization;
 }
 
 export interface ModelOption {
@@ -611,8 +684,14 @@ export interface SystemFailure {
    * reached OUTSIDE the feed (a footer row, an ack) addresses its card.
    */
   itemUuid: string;
-  sessionResume?: SessionResumeFailure;
+  detail: SystemFailureDetail;
 }
+
+/** The only structured evidence a system failure can carry. */
+export type SystemFailureDetail =
+  | { kind: "none" }
+  | { kind: "sessionResume"; value: SessionResumeFailure }
+  | { kind: "queryTermination"; value: QueryTerminationFailure };
 
 /** Typed evidence for a failed authoritative-conversation resume. */
 export interface SessionResumeFailure {
@@ -622,8 +701,18 @@ export interface SessionResumeFailure {
   configDir: string;
   resolvedConfigDir: string;
   attempt: "create" | "automaticRestore";
-  cause: { case: "transcriptUnavailable"; searchedPaths: string[] } | { case: "identityMismatch"; replacementClaudeSessionId: string };
+  cause:
+    | { case: "transcriptUnavailable"; searchedPaths: string[] }
+    | { case: "identityMismatch"; replacementClaudeSessionId: string }
+    | { case: "queryTermination"; value: QueryTerminationFailure }
+    | { case: "bringUpFailure"; cause: string };
 }
+
+/** Exact generated evidence for an SDK query that ended unexpectedly. */
+export type QueryTerminationFailure = GeneratedQueryTerminationFailure;
+
+/** Exact generated cumulative usage for an agent-repl session. */
+export type SessionTokenUtilization = GeneratedSessionTokenUtilization;
 
 /**
  * One decoded conversation addition: the {uuid, tsMs, requestId} envelope plus
@@ -644,16 +733,101 @@ export interface ConversationItemFrame {
   /** The typed data.v1/core.v1 payload, adopted by shape (see file-top §5.1). */
   payload: JsonObject;
   tokenUtilization: TokenUtilization[];
+  /** Complete terminal-turn evidence, present only on result items. */
+  turnAccounting?: TurnAccounting;
 }
+
+/** Durable evidence used to compare one completed turn with another client. */
+interface TurnAccountingEvidence {
+  turnId: string;
+  queryInstanceId: string;
+}
+/** Evidence required before a turn can be compared definitively. */
+export interface CompleteTurnAccounting extends TurnAccountingEvidence {
+  verdict: { kind: "complete" };
+  runtime?: QueryRuntimeIdentity;
+  timing?: TurnAccountingTiming;
+  usageAtStart?: AccountUsageObservation;
+  usageAtEnd?: AccountUsageObservation;
+  responses: TokenUtilization[];
+  reconciliation?: TokenUsageReconciliation;
+}
+/** Invalid turns retain every available evidence fragment without inventing absent evidence. */
+export interface InvalidTurnAccounting extends TurnAccountingEvidence {
+  verdict: { kind: "invalid"; problems: TurnAccountingProblem[] };
+  runtime?: QueryRuntimeIdentity;
+  timing?: TurnAccountingTiming;
+  usageAtStart?: AccountUsageObservation;
+  usageAtEnd?: AccountUsageObservation;
+  responses?: TokenUtilization[];
+  reconciliation?: TokenUsageReconciliation;
+}
+export type TurnAccounting = CompleteTurnAccounting | InvalidTurnAccounting;
+export interface TurnAccountingTiming { promptAdmittedAtMs: number; resultReceivedAtMs: number; accountingSettledAtMs: number; promptToResultMs: number; resultToSettlementMs: number; }
+export interface QueryRuntimeIdentity { vendorSessionId: string; effectiveModel: string; sdkVersion: string; claudeCodeVersion: string; shimBuildSha: string; authSource: string; subscriptionType: string; fastModeState: string; fastModeReason: string; effectiveOptions?: EvidenceFingerprint; settings?: EvidenceFingerprint; tools?: EvidenceFingerprint; mcp?: EvidenceFingerprint; contextPrefix?: EvidenceFingerprint; }
+export type EvidenceFingerprint = { kind: "sha256"; value: string } | { kind: "unavailable"; cause: string };
+export interface AccountUsageObservation { queryInstanceId: string; turnId: string; boundaryAtMs: number; observedAtMs: number; sampleLatencyMs: number; subscriptionType: string; boundary?: "turnStart" | "turnEnd"; outcome?: { kind: "available"; utilizationPercent: number; resetsAtMs: number } | { kind: "unavailable"; reason: string }; }
+export interface TokenUsageReconciliation { responseRecordCount: number; responseAllAgents?: UsageTotals; responseMainAgent?: UsageTotals; resultMainAgent?: UsageTotals; responseModels: ModelUsageTotals[]; resultModels: ModelUsageTotals[]; apiMessageIds: string[]; }
+export interface UsageTotals { inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens: number; cacheCreation5m?: number; cacheCreation1h?: number; webSearchRequests?: number; webFetchRequests?: number; thinkingTokens?: number; cacheRates?: { totalPromptInputTokens: number; cacheHitRate: number; cacheWriteRate: number; uncachedInputRate: number }; timing?: { outputTokensWithGenerationDuration: number; outputGenerationDurationMs: number; responsesWithGenerationDuration: number; responsesWithoutGenerationDuration: number; totalTimeToFirstTokenMs: number; responsesWithTimeToFirstToken: number; responsesWithoutTimeToFirstToken: number }; }
+export interface ModelUsageTotals { model: string; canonicalModel?: string; provider?: string; totals?: UsageTotals; contextWindow?: number; maxOutputTokens?: number; costUsd?: number; }
+export type TurnAccountingProblem =
+  | { kind: "missingUsageBoundary"; boundary: "turnStart" | "turnEnd" }
+  | { kind: "windowReset"; startResetsAtMs: number; endResetsAtMs: number }
+  | { kind: "tokenLedgerMismatch"; differingFieldPaths: string[] }
+  | { kind: "runtimeIdentityIncomplete"; missingFieldPaths: string[] }
+  | { kind: "unmodeledUsageFields"; sourceFieldPaths: string[] }
+  | { kind: "telemetryRecordMissing"; record: { kind: "queryLifecycle"; queryInstanceId: string } | { kind: "responseUsage"; apiMessageId: string } | { kind: "persistenceReceipt"; turnId: string } };
 
 /** Response-level usage associated with one rendered assistant response. */
 export interface TokenUtilization {
+  agentReplSessionId: string;
+  claudeSessionId: string;
+  rootTurnId: string;
+  apiRequestId?: string;
   apiMessageId: string;
   model: string;
   actor: "mainAgent" | "subagent";
-  subagent?: { agentId: string; subagentType: string; taskDescription: string };
-  usage: { inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens: number; cacheCreation5m: number; cacheCreation1h: number; cacheHitRate?: number; cacheWriteRate?: number; uncachedInputRate?: number; serviceTier: string; speed: string; inferenceGeo: string };
+  subagent?: { agentId: string; parentToolUseId: string; parentAgentId: string; subagentType: string; taskDescription: string };
+  usage: ResponseTokenUsage;
   responseTiming?: { timeToFirstTokenMs?: number; outputGenerationDurationMs?: number };
+}
+
+export interface TokenCacheCreation { ephemeral5mInputTokens: number; ephemeral1hInputTokens: number; }
+export interface TokenServerToolUse { webSearchRequests: number; webFetchRequests: number; }
+export interface TokenOutputDetails { thinkingTokens: number; }
+export interface TokenCacheRates { totalPromptInputTokens: number; cacheHitRate: number; cacheWriteRate: number; uncachedInputRate: number; }
+export interface TokenUsageIterationCounters { inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens: number; cacheCreation?: TokenCacheCreation; }
+export type TokenUsageIteration =
+  | ({ kind: "sampling"; model: string } & TokenUsageIterationCounters)
+  | ({ kind: "compaction" } & TokenUsageIterationCounters)
+  | ({ kind: "advisor"; model: string } & TokenUsageIterationCounters)
+  | ({ kind: "fallback"; model: string } & TokenUsageIterationCounters);
+export type TokenCacheDiagnostic =
+  | { kind: "pending" }
+  | { kind: "modelChanged"; cacheMissedInputTokens: number }
+  | { kind: "systemChanged"; cacheMissedInputTokens: number }
+  | { kind: "toolsChanged"; cacheMissedInputTokens: number }
+  | { kind: "messagesChanged"; cacheMissedInputTokens: number }
+  | { kind: "previousMessageUnavailable" }
+  | { kind: "diagnosticsUnavailable" };
+/** Every field modeled by `frontend.v1.TokenUsage`, preserving intentional absence. */
+export interface ResponseTokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadInputTokens: number;
+  cacheCreationInputTokens: number;
+  cacheCreation?: TokenCacheCreation;
+  serverToolUse?: TokenServerToolUse;
+  serviceTier: string;
+  speed: string;
+  inferenceGeo: string;
+  outputDetails?: TokenOutputDetails;
+  iterations: TokenUsageIteration[];
+  cacheDiagnostic?: TokenCacheDiagnostic;
+  cacheRates?: TokenCacheRates;
+  fallbackCredit?: JsonObject;
+  unmodeledUsage?: JsonObject;
+  rawUsage: JsonObject;
 }
 
 export interface ConversationDelta {
@@ -1681,7 +1855,7 @@ function decodeConversationDelta(v: unknown): ConversationDelta {
   return cd;
 }
 
-const CONVERSATION_ITEM_ENVELOPE_KEYS = new Set(["uuid", "tsMs", "requestId", "source", "tokenUtilization"]);
+const CONVERSATION_ITEM_ENVELOPE_KEYS = new Set(["uuid", "tsMs", "requestId", "source", "tokenUtilization", "turnAccounting"]);
 const CONVERSATION_ITEM_ARM_SET: ReadonlySet<string> = new Set(CONVERSATION_ITEM_ARMS);
 function decodeConversationItem(v: unknown, i: number): ConversationItemFrame {
   const ctx = `ConversationItem[${i}]`;
@@ -1701,7 +1875,7 @@ function decodeConversationItem(v: unknown, i: number): ConversationItemFrame {
     throw new Error(`frontend-proto: ${ctx} sets multiple item variants: ${armKeys.join(", ")}`);
   }
   const arm = armKeys[0] as ConversationItemArm;
-  return {
+  const frame: ConversationItemFrame = {
     uuid: str(o, "uuid", ctx),
     tsMs: num(o, "tsMs", ctx),
     requestId: str(o, "requestId", ctx),
@@ -1711,23 +1885,360 @@ function decodeConversationItem(v: unknown, i: number): ConversationItemFrame {
     payload: ensureObject(o[arm], `${ctx}.${arm}`),
     tokenUtilization: o.tokenUtilization === undefined ? [] : ensureArray(o.tokenUtilization, `${ctx}.tokenUtilization`).map((entry, index) => decodeTokenUtilization(entry, `${ctx}.tokenUtilization[${index}]`)),
   };
+  if (o.turnAccounting !== undefined) {
+    if (arm !== "result") throw new Error(`frontend-proto: ${ctx}.turnAccounting is valid only on result`);
+    frame.turnAccounting = decodeTurnAccounting(o.turnAccounting, `${ctx}.turnAccounting`);
+  }
+  return frame;
 }
 
+function int64(o: JsonObject, key: string, where: string): number {
+  const value = o[key];
+  if (typeof value !== "string" && typeof value !== "number") throw new Error(`frontend-proto: ${where}.${key} must be an int64 string`);
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) throw new Error(`frontend-proto: ${where}.${key} must be a safe integer`);
+  return parsed;
+}
+
+function oneof(o: JsonObject, keys: readonly string[], where: string): string {
+  const found = keys.filter((key) => o[key] !== undefined);
+  if (found.length !== 1) throw new Error(`frontend-proto: ${where} requires exactly one of ${keys.join(", ")}`);
+  return found[0];
+}
+
+const FINGERPRINT_KEYS = generatedFieldSet<keyof typeof EvidenceFingerprintSchema.field>()("sha256", "unavailable");
+const FINGERPRINT_UNAVAILABLE_KEYS = generatedFieldSet<keyof typeof FingerprintUnavailableSchema.field>()("cause");
+const RUNTIME_IDENTITY_KEYS = generatedFieldSet<keyof typeof QueryRuntimeIdentitySchema.field>()("vendorSessionId", "effectiveModel", "sdkVersion", "claudeCodeVersion", "shimBuildSha", "authSource", "subscriptionType", "fastModeState", "fastModeReason", "effectiveOptions", "settings", "tools", "mcp", "contextPrefix");
+const USAGE_OBSERVATION_KEYS = generatedFieldSet<keyof typeof AccountUsageObservationSchema.field>()("queryInstanceId", "turnId", "boundaryAtMs", "observedAtMs", "sampleLatencyMs", "subscriptionType", "turnStart", "turnEnd", "available", "unavailable");
+const USAGE_AVAILABLE_KEYS = generatedFieldSet<keyof typeof AccountUsageAvailableSchema.field>()("fiveHour");
+const USAGE_WINDOW_KEYS = generatedFieldSet<keyof typeof UsageWindowSchema.field>()("utilizationPercent", "resetsAtMs");
+const USAGE_UNAVAILABLE_KEYS = generatedFieldSet<keyof typeof AccountUsageUnavailableSchema.field>()("serviceUnavailable", "windowUnavailable", "utilizationUnavailable", "samplingFailure");
+const USAGE_SAMPLING_FAILURE_KEYS = generatedFieldSet<keyof typeof UsageSamplingFailureSchema.field>()("cause");
+
+function fingerprint(v: unknown, where: string): EvidenceFingerprint {
+  const o = ensureObject(v, where); rejectUnknown(o, FINGERPRINT_KEYS, where);
+  const arm = oneof(o, [...FINGERPRINT_KEYS], where);
+  return arm === "sha256" ? { kind: "sha256", value: str(o, "sha256", where) } : (() => { const unavailable = ensureObject(o.unavailable, `${where}.unavailable`); rejectUnknown(unavailable, FINGERPRINT_UNAVAILABLE_KEYS, `${where}.unavailable`); return { kind: "unavailable" as const, cause: str(unavailable, "cause", `${where}.unavailable`) }; })();
+}
+
+function decodeRuntime(v: unknown, where: string): QueryRuntimeIdentity {
+  const o = ensureObject(v, where); rejectUnknown(o, RUNTIME_IDENTITY_KEYS, where);
+  return { vendorSessionId: str(o, "vendorSessionId", where), effectiveModel: str(o, "effectiveModel", where), sdkVersion: str(o, "sdkVersion", where), claudeCodeVersion: str(o, "claudeCodeVersion", where), shimBuildSha: str(o, "shimBuildSha", where), authSource: str(o, "authSource", where), subscriptionType: str(o, "subscriptionType", where), fastModeState: str(o, "fastModeState", where), fastModeReason: str(o, "fastModeReason", where), effectiveOptions: fingerprint(o.effectiveOptions, `${where}.effectiveOptions`), settings: fingerprint(o.settings, `${where}.settings`), tools: fingerprint(o.tools, `${where}.tools`), mcp: fingerprint(o.mcp, `${where}.mcp`), contextPrefix: fingerprint(o.contextPrefix, `${where}.contextPrefix`) };
+}
+
+function decodeUsageObservation(v: unknown, where: string): AccountUsageObservation {
+  const o = ensureObject(v, where); rejectUnknown(o, USAGE_OBSERVATION_KEYS, where);
+  const boundary = oneof(o, ["turnStart", "turnEnd"], where); const outcome = oneof(o, ["available", "unavailable"], where);
+  const common = { queryInstanceId: str(o, "queryInstanceId", where), turnId: str(o, "turnId", where), boundaryAtMs: int64(o, "boundaryAtMs", where), observedAtMs: int64(o, "observedAtMs", where), sampleLatencyMs: int64(o, "sampleLatencyMs", where), subscriptionType: str(o, "subscriptionType", where), boundary: boundary as "turnStart" | "turnEnd" };
+  if (outcome === "available") { const available = ensureObject(o.available, `${where}.available`); rejectUnknown(available, USAGE_AVAILABLE_KEYS, `${where}.available`); const five = ensureObject(available.fiveHour, `${where}.available.fiveHour`); rejectUnknown(five, USAGE_WINDOW_KEYS, `${where}.available.fiveHour`); return { ...common, outcome: { kind: "available", utilizationPercent: num(five, "utilizationPercent", `${where}.available.fiveHour`), resetsAtMs: int64(five, "resetsAtMs", `${where}.available.fiveHour`) } }; }
+  const unavailable = ensureObject(o.unavailable, `${where}.unavailable`); rejectUnknown(unavailable, USAGE_UNAVAILABLE_KEYS, `${where}.unavailable`); const reason = oneof(unavailable, [...USAGE_UNAVAILABLE_KEYS], `${where}.unavailable`); if (reason === "samplingFailure") { const failure = ensureObject(unavailable.samplingFailure, `${where}.unavailable.samplingFailure`); rejectUnknown(failure, USAGE_SAMPLING_FAILURE_KEYS, `${where}.unavailable.samplingFailure`); return { ...common, outcome: { kind: "unavailable", reason: `${reason}:${str(failure, "cause", `${where}.unavailable.samplingFailure`)}` } }; } return { ...common, outcome: { kind: "unavailable", reason } };
+}
+
+const USAGE_TOTALS_KEYS = generatedFieldSet<keyof typeof TokenUsageTotalsSchema.field>()("inputTokens", "outputTokens", "cacheReadInputTokens", "cacheCreationInputTokens", "cacheCreation", "serverToolUse", "outputDetails", "cacheRates", "timing");
+const RECONCILIATION_KEYS = generatedFieldSet<keyof typeof TokenUsageReconciliationSchema.field>()("responseRecordCount", "responseAllAgents", "responseMainAgent", "resultMainAgent", "responseModels", "resultModels", "apiMessageIds");
+const CACHE_CREATION_KEYS = generatedFieldSet<keyof typeof TokenCacheCreationSchema.field>()("ephemeral5mInputTokens", "ephemeral1hInputTokens");
+const SERVER_TOOL_USE_KEYS = generatedFieldSet<keyof typeof TokenServerToolUseSchema.field>()("webSearchRequests", "webFetchRequests");
+const OUTPUT_DETAILS_KEYS = generatedFieldSet<keyof typeof TokenOutputDetailsSchema.field>()("thinkingTokens");
+const CACHE_RATES_KEYS = generatedFieldSet<keyof typeof TokenCacheRatesSchema.field>()("totalPromptInputTokens", "cacheHitRate", "cacheWriteRate", "uncachedInputRate");
+const TOKEN_TIMING_TOTALS_KEYS = generatedFieldSet<keyof typeof TokenTimingTotalsSchema.field>()("outputTokensWithGenerationDuration", "outputGenerationDurationMs", "responsesWithGenerationDuration", "responsesWithoutGenerationDuration", "totalTimeToFirstTokenMs", "responsesWithTimeToFirstToken", "responsesWithoutTimeToFirstToken");
+const MODEL_UTILIZATION_KEYS = generatedFieldSet<keyof typeof ModelTokenUtilizationSchema.field>()("model", "canonicalModel", "provider", "totals", "contextWindow", "maxOutputTokens", "costUsd");
+
+function projectAccountingFingerprint(value: GeneratedEvidenceFingerprint, where: string): EvidenceFingerprint {
+  switch (value.evidence.case) {
+    case "sha256": return { kind: "sha256", value: value.evidence.value };
+    case "unavailable": return { kind: "unavailable", cause: value.evidence.value.cause };
+    case undefined: throw new Error(`frontend-proto: ${where} requires a generated evidence oneof`);
+  }
+  return unreachableGeneratedCase(value.evidence, where);
+}
+
+function projectAccountingRuntime(value: GeneratedQueryRuntimeIdentity, where: string): QueryRuntimeIdentity {
+  return {
+    vendorSessionId: value.vendorSessionId, effectiveModel: value.effectiveModel, sdkVersion: value.sdkVersion,
+    claudeCodeVersion: value.claudeCodeVersion, shimBuildSha: value.shimBuildSha, authSource: value.authSource,
+    subscriptionType: value.subscriptionType, fastModeState: value.fastModeState, fastModeReason: value.fastModeReason,
+    ...(value.effectiveOptions === undefined ? {} : { effectiveOptions: projectAccountingFingerprint(value.effectiveOptions, `${where}.effectiveOptions`) }),
+    ...(value.settings === undefined ? {} : { settings: projectAccountingFingerprint(value.settings, `${where}.settings`) }),
+    ...(value.tools === undefined ? {} : { tools: projectAccountingFingerprint(value.tools, `${where}.tools`) }),
+    ...(value.mcp === undefined ? {} : { mcp: projectAccountingFingerprint(value.mcp, `${where}.mcp`) }),
+    ...(value.contextPrefix === undefined ? {} : { contextPrefix: projectAccountingFingerprint(value.contextPrefix, `${where}.contextPrefix`) }),
+  };
+}
+
+function projectAccountingUsageObservation(value: GeneratedAccountUsageObservation, where: string): AccountUsageObservation {
+  const boundary = value.boundary.case === undefined ? undefined : value.boundary.case;
+  let outcome: AccountUsageObservation["outcome"];
+  switch (value.outcome.case) {
+    case "available":
+      if (value.outcome.value.fiveHour === undefined) throw new Error(`frontend-proto: ${where}.outcome.available requires fiveHour`);
+      outcome = { kind: "available", utilizationPercent: value.outcome.value.fiveHour.utilizationPercent, resetsAtMs: safeGeneratedInt64(value.outcome.value.fiveHour.resetsAtMs, `${where}.outcome.available.fiveHour.resetsAtMs`) };
+      break;
+    case "unavailable":
+      outcome = value.outcome.value.reason.case === "samplingFailure"
+        ? { kind: "unavailable", reason: `samplingFailure:${value.outcome.value.reason.value.cause}` }
+        : value.outcome.value.reason.case === undefined
+          ? (() => { throw new Error(`frontend-proto: ${where}.outcome.unavailable requires a reason`); })()
+          : { kind: "unavailable", reason: value.outcome.value.reason.case };
+      break;
+    case undefined: outcome = undefined; break;
+  }
+  return {
+    queryInstanceId: value.queryInstanceId, turnId: value.turnId,
+    boundaryAtMs: safeGeneratedInt64(value.boundaryAtMs, `${where}.boundaryAtMs`),
+    observedAtMs: safeGeneratedInt64(value.observedAtMs, `${where}.observedAtMs`),
+    sampleLatencyMs: safeGeneratedInt64(value.sampleLatencyMs, `${where}.sampleLatencyMs`),
+    subscriptionType: value.subscriptionType,
+    ...(boundary === undefined ? {} : { boundary }), ...(outcome === undefined ? {} : { outcome }),
+  };
+}
+
+function projectAccountingUsageTotals(value: GeneratedTokenUsageTotals, where: string): UsageTotals {
+  return {
+    inputTokens: safeGeneratedInt64(value.inputTokens, `${where}.inputTokens`), outputTokens: safeGeneratedInt64(value.outputTokens, `${where}.outputTokens`),
+    cacheReadInputTokens: safeGeneratedInt64(value.cacheReadInputTokens, `${where}.cacheReadInputTokens`), cacheCreationInputTokens: safeGeneratedInt64(value.cacheCreationInputTokens, `${where}.cacheCreationInputTokens`),
+    ...(value.cacheCreation === undefined ? {} : { cacheCreation5m: safeGeneratedInt64(value.cacheCreation.ephemeral5mInputTokens, `${where}.cacheCreation.ephemeral5mInputTokens`), cacheCreation1h: safeGeneratedInt64(value.cacheCreation.ephemeral1hInputTokens, `${where}.cacheCreation.ephemeral1hInputTokens`) }),
+    ...(value.serverToolUse === undefined ? {} : { webSearchRequests: safeGeneratedInt64(value.serverToolUse.webSearchRequests, `${where}.serverToolUse.webSearchRequests`), webFetchRequests: safeGeneratedInt64(value.serverToolUse.webFetchRequests, `${where}.serverToolUse.webFetchRequests`) }),
+    ...(value.outputDetails === undefined ? {} : { thinkingTokens: safeGeneratedInt64(value.outputDetails.thinkingTokens, `${where}.outputDetails.thinkingTokens`) }),
+    ...(value.cacheRates === undefined ? {} : { cacheRates: { totalPromptInputTokens: safeGeneratedInt64(value.cacheRates.totalPromptInputTokens, `${where}.cacheRates.totalPromptInputTokens`), cacheHitRate: value.cacheRates.cacheHitRate, cacheWriteRate: value.cacheRates.cacheWriteRate, uncachedInputRate: value.cacheRates.uncachedInputRate } }),
+    ...(value.timing === undefined ? {} : { timing: { outputTokensWithGenerationDuration: safeGeneratedInt64(value.timing.outputTokensWithGenerationDuration, `${where}.timing.outputTokensWithGenerationDuration`), outputGenerationDurationMs: safeGeneratedInt64(value.timing.outputGenerationDurationMs, `${where}.timing.outputGenerationDurationMs`), responsesWithGenerationDuration: safeGeneratedInt64(value.timing.responsesWithGenerationDuration, `${where}.timing.responsesWithGenerationDuration`), responsesWithoutGenerationDuration: safeGeneratedInt64(value.timing.responsesWithoutGenerationDuration, `${where}.timing.responsesWithoutGenerationDuration`), totalTimeToFirstTokenMs: safeGeneratedInt64(value.timing.totalTimeToFirstTokenMs, `${where}.timing.totalTimeToFirstTokenMs`), responsesWithTimeToFirstToken: safeGeneratedInt64(value.timing.responsesWithTimeToFirstToken, `${where}.timing.responsesWithTimeToFirstToken`), responsesWithoutTimeToFirstToken: safeGeneratedInt64(value.timing.responsesWithoutTimeToFirstToken, `${where}.timing.responsesWithoutTimeToFirstToken`) } }),
+  };
+}
+
+function projectAccountingModel(value: GeneratedModelTokenUtilization, where: string): ModelUsageTotals {
+  return { model: value.model, ...(value.canonicalModel === undefined ? {} : { canonicalModel: value.canonicalModel }), ...(value.provider === undefined ? {} : { provider: value.provider }), ...(value.totals === undefined ? {} : { totals: projectAccountingUsageTotals(value.totals, `${where}.totals`) }), ...(value.contextWindow === undefined ? {} : { contextWindow: safeGeneratedInt64(value.contextWindow, `${where}.contextWindow`) }), ...(value.maxOutputTokens === undefined ? {} : { maxOutputTokens: safeGeneratedInt64(value.maxOutputTokens, `${where}.maxOutputTokens`) }), ...(value.costUsd === undefined ? {} : { costUsd: value.costUsd }) };
+}
+
+function projectAccountingReconciliation(value: GeneratedTokenUsageReconciliation, where: string): TokenUsageReconciliation {
+  return { responseRecordCount: safeGeneratedInt64(value.responseRecordCount, `${where}.responseRecordCount`), ...(value.responseAllAgents === undefined ? {} : { responseAllAgents: projectAccountingUsageTotals(value.responseAllAgents, `${where}.responseAllAgents`) }), ...(value.responseMainAgent === undefined ? {} : { responseMainAgent: projectAccountingUsageTotals(value.responseMainAgent, `${where}.responseMainAgent`) }), ...(value.resultMainAgent === undefined ? {} : { resultMainAgent: projectAccountingUsageTotals(value.resultMainAgent, `${where}.resultMainAgent`) }), responseModels: value.responseModels.map((model, index) => projectAccountingModel(model, `${where}.responseModels[${index}]`)), resultModels: value.resultModels.map((model, index) => projectAccountingModel(model, `${where}.resultModels[${index}]`)), apiMessageIds: [...value.apiMessageIds] };
+}
+
+function projectAccountingProblem(value: GeneratedTurnAccountingProblem, where: string): TurnAccountingProblem {
+  switch (value.problem.case) {
+    case "missingUsageBoundary": {
+      const boundary = value.problem.value.boundary.case;
+      if (boundary === undefined) throw new Error(`frontend-proto: ${where}.missingUsageBoundary requires a generated boundary oneof`);
+      return { kind: "missingUsageBoundary", boundary };
+    }
+    case "windowReset": return { kind: "windowReset", startResetsAtMs: safeGeneratedInt64(value.problem.value.startResetsAtMs, `${where}.windowReset.startResetsAtMs`), endResetsAtMs: safeGeneratedInt64(value.problem.value.endResetsAtMs, `${where}.windowReset.endResetsAtMs`) };
+    case "tokenLedgerMismatch": return { kind: "tokenLedgerMismatch", differingFieldPaths: [...value.problem.value.differingFieldPaths] };
+    case "runtimeIdentityIncomplete": return { kind: "runtimeIdentityIncomplete", missingFieldPaths: [...value.problem.value.missingFieldPaths] };
+    case "unmodeledUsageFields": return { kind: "unmodeledUsageFields", sourceFieldPaths: [...value.problem.value.sourceFieldPaths] };
+    case "telemetryRecordMissing": {
+      switch (value.problem.value.record.case) {
+        case "queryLifecycle": return { kind: "telemetryRecordMissing", record: { kind: "queryLifecycle", queryInstanceId: value.problem.value.record.value.queryInstanceId } };
+        case "responseUsage": return { kind: "telemetryRecordMissing", record: { kind: "responseUsage", apiMessageId: value.problem.value.record.value.apiMessageId } };
+        case "persistenceReceipt": return { kind: "telemetryRecordMissing", record: { kind: "persistenceReceipt", turnId: value.problem.value.record.value.turnId } };
+        case undefined: throw new Error(`frontend-proto: ${where}.telemetryRecordMissing requires a generated record oneof`);
+      }
+      return unreachableGeneratedCase(value.problem.value.record, `${where}.telemetryRecordMissing`);
+    }
+    case undefined: throw new Error(`frontend-proto: ${where} requires a generated accounting-problem oneof`);
+  }
+  return unreachableGeneratedCase(value.problem, where);
+}
+
+function projectAccountingTiming(value: GeneratedTurnAccountingTiming, where: string): TurnAccountingTiming {
+  return { promptAdmittedAtMs: safeGeneratedInt64(value.promptAdmittedAtMs, `${where}.promptAdmittedAtMs`), resultReceivedAtMs: safeGeneratedInt64(value.resultReceivedAtMs, `${where}.resultReceivedAtMs`), accountingSettledAtMs: safeGeneratedInt64(value.accountingSettledAtMs, `${where}.accountingSettledAtMs`), promptToResultMs: safeGeneratedInt64(value.promptToResultMs, `${where}.promptToResultMs`), resultToSettlementMs: safeGeneratedInt64(value.resultToSettlementMs, `${where}.resultToSettlementMs`) };
+}
+
+function decodeTurnAccounting(v: unknown, where: string): TurnAccounting {
+  let value: GeneratedTurnAccounting;
+  try { value = fromJson(TurnAccountingSchema, ensureObject(v, where) as JsonValue); }
+  catch (error) { throw new Error(`frontend-proto: ${where} violates the generated TurnAccounting contract: ${error instanceof Error ? error.message : String(error)}`); }
+  const consumed = { turnId: value.turnId, queryInstanceId: value.queryInstanceId, runtime: value.runtime, timing: value.timing, usageAtStart: value.usageAtStart, usageAtEnd: value.usageAtEnd, responses: value.responses, reconciliation: value.reconciliation, verdict: value.verdict } satisfies { [K in Exclude<keyof GeneratedTurnAccounting, "$typeName" | "$unknown">]: GeneratedTurnAccounting[K] };
+  const evidence = { ...(consumed.runtime === undefined ? {} : { runtime: projectAccountingRuntime(consumed.runtime, `${where}.runtime`) }), ...(consumed.timing === undefined ? {} : { timing: projectAccountingTiming(consumed.timing, `${where}.timing`) }), ...(consumed.usageAtStart === undefined ? {} : { usageAtStart: projectAccountingUsageObservation(consumed.usageAtStart, `${where}.usageAtStart`) }), ...(consumed.usageAtEnd === undefined ? {} : { usageAtEnd: projectAccountingUsageObservation(consumed.usageAtEnd, `${where}.usageAtEnd`) }), responses: consumed.responses.map((response, index) => decodeTokenUtilization(toJson(TokenUtilizationSchema, response), `${where}.responses[${index}]`)), ...(consumed.reconciliation === undefined ? {} : { reconciliation: projectAccountingReconciliation(consumed.reconciliation, `${where}.reconciliation`) }) };
+  switch (consumed.verdict.case) {
+    case "complete": return { turnId: consumed.turnId, queryInstanceId: consumed.queryInstanceId, ...evidence, verdict: { kind: "complete" } };
+    case "invalid": return { turnId: consumed.turnId, queryInstanceId: consumed.queryInstanceId, ...evidence, verdict: { kind: "invalid", problems: consumed.verdict.value.problems.map((problem, index) => projectAccountingProblem(problem, `${where}.invalid.problems[${index}]`)) } };
+    case undefined: throw new Error(`frontend-proto: ${where} requires a generated verdict oneof`);
+  }
+  return unreachableGeneratedCase(consumed.verdict, where);
+}
+
+function safeGeneratedInt64(value: bigint, where: string): number {
+  const projected = Number(value);
+  if (!Number.isSafeInteger(projected)) throw new Error(`frontend-proto: ${where} exceeds the webapp's safe integer range`);
+  return projected;
+}
+
+function unreachableGeneratedCase(value: never, where: string): never {
+  throw new Error(`frontend-proto: ${where} has an unsupported generated oneof case ${JSON.stringify(value)}`);
+}
+
+function projectCacheCreation(value: GeneratedTokenCacheCreation, where: string): TokenCacheCreation {
+  return {
+    ephemeral5mInputTokens: safeGeneratedInt64(value.ephemeral5mInputTokens, `${where}.ephemeral5mInputTokens`),
+    ephemeral1hInputTokens: safeGeneratedInt64(value.ephemeral1hInputTokens, `${where}.ephemeral1hInputTokens`),
+  };
+}
+
+function projectServerToolUse(value: GeneratedTokenServerToolUse, where: string): TokenServerToolUse {
+  return {
+    webSearchRequests: safeGeneratedInt64(value.webSearchRequests, `${where}.webSearchRequests`),
+    webFetchRequests: safeGeneratedInt64(value.webFetchRequests, `${where}.webFetchRequests`),
+  };
+}
+
+function projectOutputDetails(value: GeneratedTokenOutputDetails, where: string): TokenOutputDetails {
+  return { thinkingTokens: safeGeneratedInt64(value.thinkingTokens, `${where}.thinkingTokens`) };
+}
+
+function projectCacheRates(value: GeneratedTokenCacheRates, where: string): TokenCacheRates {
+  return {
+    totalPromptInputTokens: safeGeneratedInt64(value.totalPromptInputTokens, `${where}.totalPromptInputTokens`),
+    cacheHitRate: value.cacheHitRate,
+    cacheWriteRate: value.cacheWriteRate,
+    uncachedInputRate: value.uncachedInputRate,
+  };
+}
+
+type GeneratedIterationValue = Exclude<GeneratedTokenUsageIteration["iteration"], { case: undefined }>["value"];
+
+function projectIterationCounters(value: GeneratedIterationValue, where: string): TokenUsageIterationCounters {
+  return {
+    inputTokens: safeGeneratedInt64(value.inputTokens, `${where}.inputTokens`),
+    outputTokens: safeGeneratedInt64(value.outputTokens, `${where}.outputTokens`),
+    cacheReadInputTokens: safeGeneratedInt64(value.cacheReadInputTokens, `${where}.cacheReadInputTokens`),
+    cacheCreationInputTokens: safeGeneratedInt64(value.cacheCreationInputTokens, `${where}.cacheCreationInputTokens`),
+    ...(value.cacheCreation === undefined ? {} : { cacheCreation: projectCacheCreation(value.cacheCreation, `${where}.cacheCreation`) }),
+  };
+}
+
+function projectUsageIteration(value: GeneratedTokenUsageIteration, where: string): TokenUsageIteration {
+  const arm = value.iteration;
+  switch (arm.case) {
+    case "sampling":
+      return { kind: "sampling", ...projectIterationCounters(arm.value, `${where}.sampling`), model: arm.value.model };
+    case "compaction":
+      return { kind: "compaction", ...projectIterationCounters(arm.value, `${where}.compaction`) };
+    case "advisor":
+      return { kind: "advisor", ...projectIterationCounters(arm.value, `${where}.advisor`), model: arm.value.model };
+    case "fallback":
+      return { kind: "fallback", ...projectIterationCounters(arm.value, `${where}.fallback`), model: arm.value.model };
+    case undefined:
+      throw new Error(`frontend-proto: ${where} requires a generated iteration oneof`);
+  }
+  return unreachableGeneratedCase(arm, where);
+}
+
+function projectCacheDiagnostic(value: GeneratedTokenCacheDiagnostic, where: string): TokenCacheDiagnostic {
+  const arm = value.reason;
+  switch (arm.case) {
+    case "pending":
+    case "previousMessageUnavailable":
+    case "diagnosticsUnavailable":
+      return { kind: arm.case };
+    case "modelChanged":
+    case "systemChanged":
+    case "toolsChanged":
+    case "messagesChanged":
+      return { kind: arm.case, cacheMissedInputTokens: safeGeneratedInt64(arm.value.cacheMissedInputTokens, `${where}.${arm.case}.cacheMissedInputTokens`) };
+    case undefined:
+      throw new Error(`frontend-proto: ${where} requires a generated cache-diagnostic oneof`);
+  }
+  return unreachableGeneratedCase(arm, where);
+}
+
+function projectResponseTokenUsage(value: GeneratedTokenUsage, where: string): ResponseTokenUsage {
+  if (value.rawUsage === undefined) throw new Error(`frontend-proto: ${where}.rawUsage is required`);
+  const rawUsage = ensureObject(toJson(ApiUsageSchema, value.rawUsage), `${where}.rawUsage`);
+  const projected = {
+    inputTokens: safeGeneratedInt64(value.inputTokens, `${where}.inputTokens`),
+    outputTokens: safeGeneratedInt64(value.outputTokens, `${where}.outputTokens`),
+    cacheReadInputTokens: safeGeneratedInt64(value.cacheReadInputTokens, `${where}.cacheReadInputTokens`),
+    cacheCreationInputTokens: safeGeneratedInt64(value.cacheCreationInputTokens, `${where}.cacheCreationInputTokens`),
+    cacheCreation: value.cacheCreation === undefined ? undefined : projectCacheCreation(value.cacheCreation, `${where}.cacheCreation`),
+    serverToolUse: value.serverToolUse === undefined ? undefined : projectServerToolUse(value.serverToolUse, `${where}.serverToolUse`),
+    serviceTier: value.serviceTier,
+    speed: value.speed,
+    inferenceGeo: value.inferenceGeo,
+    outputDetails: value.outputDetails === undefined ? undefined : projectOutputDetails(value.outputDetails, `${where}.outputDetails`),
+    iterations: value.iterations.map((entry, index) => projectUsageIteration(entry, `${where}.iterations[${index}]`)),
+    cacheDiagnostic: value.cacheDiagnostic === undefined ? undefined : projectCacheDiagnostic(value.cacheDiagnostic, `${where}.cacheDiagnostic`),
+    cacheRates: value.cacheRates === undefined ? undefined : projectCacheRates(value.cacheRates, `${where}.cacheRates`),
+    fallbackCredit: value.fallbackCredit,
+    unmodeledUsage: value.unmodeledUsage,
+    rawUsage,
+  } satisfies { [K in Exclude<keyof GeneratedTokenUsage, "$typeName" | "$unknown">]-?: K extends keyof ResponseTokenUsage ? ResponseTokenUsage[K] : never };
+  return {
+    inputTokens: projected.inputTokens,
+    outputTokens: projected.outputTokens,
+    cacheReadInputTokens: projected.cacheReadInputTokens,
+    cacheCreationInputTokens: projected.cacheCreationInputTokens,
+    ...(projected.cacheCreation === undefined ? {} : { cacheCreation: projected.cacheCreation }),
+    ...(projected.serverToolUse === undefined ? {} : { serverToolUse: projected.serverToolUse }),
+    serviceTier: projected.serviceTier,
+    speed: projected.speed,
+    inferenceGeo: projected.inferenceGeo,
+    ...(projected.outputDetails === undefined ? {} : { outputDetails: projected.outputDetails }),
+    iterations: projected.iterations,
+    ...(projected.cacheDiagnostic === undefined ? {} : { cacheDiagnostic: projected.cacheDiagnostic }),
+    ...(projected.cacheRates === undefined ? {} : { cacheRates: projected.cacheRates }),
+    ...(projected.fallbackCredit === undefined ? {} : { fallbackCredit: projected.fallbackCredit }),
+    ...(projected.unmodeledUsage === undefined ? {} : { unmodeledUsage: projected.unmodeledUsage }),
+    rawUsage: projected.rawUsage,
+  };
+}
+
+/** Parse the schema-owned contract through generated protobuf types before projecting a web DTO. */
 function decodeTokenUtilization(v: unknown, where: string): TokenUtilization {
   const o = ensureObject(v, where);
-  rejectUnknown(o, new Set(["agentReplSessionId", "claudeSessionId", "rootTurnId", "apiRequestId", "apiMessageId", "model", "mainAgent", "subagent", "usage", "responseTiming"]), where);
-  const actorKeys = ["mainAgent", "subagent"].filter((key) => o[key] !== undefined);
-  if (actorKeys.length !== 1) throw new Error(`frontend-proto: ${where} requires exactly one actor`);
-  const usage = ensureObject(o.usage, `${where}.usage`);
-  rejectUnknown(usage, new Set(["inputTokens", "outputTokens", "cacheReadInputTokens", "cacheCreationInputTokens", "cacheCreation", "serverToolUse", "serviceTier", "speed", "inferenceGeo", "outputDetails", "iterations", "cacheDiagnostic", "cacheRates", "fallbackCredit", "unmodeledUsage"]), `${where}.usage`);
-  const cache = usage.cacheCreation === undefined ? {} : ensureObject(usage.cacheCreation, `${where}.usage.cacheCreation`);
-  rejectUnknown(cache, new Set(["ephemeral5mInputTokens", "ephemeral1hInputTokens"]), `${where}.usage.cacheCreation`);
-  const rates = usage.cacheRates === undefined ? undefined : ensureObject(usage.cacheRates, `${where}.usage.cacheRates`);
-  if (rates !== undefined) rejectUnknown(rates, new Set(["totalPromptInputTokens", "cacheHitRate", "cacheWriteRate", "uncachedInputRate"]), `${where}.usage.cacheRates`);
-  const result: TokenUtilization = { apiMessageId: str(o, "apiMessageId", where), model: str(o, "model", where), actor: actorKeys[0] as "mainAgent" | "subagent", usage: { inputTokens: num(usage, "inputTokens", `${where}.usage`), outputTokens: num(usage, "outputTokens", `${where}.usage`), cacheReadInputTokens: num(usage, "cacheReadInputTokens", `${where}.usage`), cacheCreationInputTokens: num(usage, "cacheCreationInputTokens", `${where}.usage`), cacheCreation5m: num(cache, "ephemeral5mInputTokens", `${where}.usage.cacheCreation`), cacheCreation1h: num(cache, "ephemeral1hInputTokens", `${where}.usage.cacheCreation`), serviceTier: str(usage, "serviceTier", `${where}.usage`), speed: str(usage, "speed", `${where}.usage`), inferenceGeo: str(usage, "inferenceGeo", `${where}.usage`) } };
-  if (rates !== undefined) Object.assign(result.usage, { cacheHitRate: num(rates, "cacheHitRate", `${where}.usage.cacheRates`), cacheWriteRate: num(rates, "cacheWriteRate", `${where}.usage.cacheRates`), uncachedInputRate: num(rates, "uncachedInputRate", `${where}.usage.cacheRates`) });
-  if (result.actor === "subagent") { const agent = ensureObject(o.subagent, `${where}.subagent`); rejectUnknown(agent, new Set(["agentId", "parentToolUseId", "parentAgentId", "subagentType", "taskDescription"]), `${where}.subagent`); result.subagent = { agentId: str(agent, "agentId", `${where}.subagent`), subagentType: str(agent, "subagentType", `${where}.subagent`), taskDescription: str(agent, "taskDescription", `${where}.subagent`) }; }
-  if (o.responseTiming !== undefined) { const t = ensureObject(o.responseTiming, `${where}.responseTiming`); rejectUnknown(t, new Set(["timeToFirstTokenMs", "outputGenerationDurationMs"]), `${where}.responseTiming`); result.responseTiming = { ...(t.timeToFirstTokenMs === undefined ? {} : { timeToFirstTokenMs: num(t, "timeToFirstTokenMs", `${where}.responseTiming`) }), ...(t.outputGenerationDurationMs === undefined ? {} : { outputGenerationDurationMs: num(t, "outputGenerationDurationMs", `${where}.responseTiming`) }) }; }
+  let generated: GeneratedTokenUtilization;
+  try {
+    generated = fromJson(TokenUtilizationSchema, o as JsonValue);
+  } catch (error) {
+    throw new Error(`frontend-proto: ${where} violates the generated TokenUtilization contract: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const consumed = {
+    agentReplSessionId: generated.agentReplSessionId,
+    claudeSessionId: generated.claudeSessionId,
+    rootTurnId: generated.rootTurnId,
+    apiRequestId: generated.apiRequestId,
+    apiMessageId: generated.apiMessageId,
+    model: generated.model,
+    actor: generated.actor,
+    usage: generated.usage,
+    responseTiming: generated.responseTiming,
+  } satisfies { [K in Exclude<keyof GeneratedTokenUtilization, "$typeName" | "$unknown">]: GeneratedTokenUtilization[K] };
+  if (consumed.usage === undefined) throw new Error(`frontend-proto: ${where}.usage is required`);
+  const actor = consumed.actor;
+  const result: TokenUtilization = {
+    agentReplSessionId: consumed.agentReplSessionId,
+    claudeSessionId: consumed.claudeSessionId,
+    rootTurnId: consumed.rootTurnId,
+    ...(consumed.apiRequestId === undefined ? {} : { apiRequestId: consumed.apiRequestId }),
+    apiMessageId: consumed.apiMessageId,
+    model: consumed.model,
+    actor: actor.case === "subagent" ? "subagent" : "mainAgent",
+    usage: projectResponseTokenUsage(consumed.usage, `${where}.usage`),
+  };
+  for (const [field, value] of [
+    ["agentReplSessionId", result.agentReplSessionId],
+    ["claudeSessionId", result.claudeSessionId],
+    ["rootTurnId", result.rootTurnId],
+    ["apiMessageId", result.apiMessageId],
+  ] as const) {
+    if (value === "") throw new Error(`frontend-proto: ${where}.${field} must be nonblank`);
+  }
+  if (result.apiRequestId === "") throw new Error(`frontend-proto: ${where}.apiRequestId must be absent or nonblank`);
+  switch (actor.case) {
+    case "mainAgent":
+      break;
+    case "subagent":
+      result.subagent = { agentId: actor.value.agentId, parentToolUseId: actor.value.parentToolUseId, parentAgentId: actor.value.parentAgentId, subagentType: actor.value.subagentType, taskDescription: actor.value.taskDescription };
+      break;
+    case undefined:
+      throw new Error(`frontend-proto: ${where} requires a generated actor oneof`);
+    default:
+      unreachableGeneratedCase(actor, where);
+  }
+  if (consumed.responseTiming !== undefined) {
+    const timing = consumed.responseTiming;
+    result.responseTiming = {
+      ...(timing.timeToFirstTokenMs === undefined ? {} : { timeToFirstTokenMs: safeGeneratedInt64(timing.timeToFirstTokenMs, `${where}.responseTiming.timeToFirstTokenMs`) }),
+      ...(timing.outputGenerationDurationMs === undefined ? {} : { outputGenerationDurationMs: safeGeneratedInt64(timing.outputGenerationDurationMs, `${where}.responseTiming.outputGenerationDurationMs`) }),
+    };
+  }
   return result;
 }
 
@@ -2134,60 +2645,97 @@ function decodeTaskCatalog(v: unknown): TaskCatalog {
   return tc;
 }
 
-const SYSTEM_FAILURE_KEYS = new Set([
-  "errorClass",
-  "errorType",
-  "message",
-  "sourceDetail",
-  "resolvedAtMs",
-  "itemUuid",
-  "sessionResume",
-]);
+const SYSTEM_FAILURE_KEYS = generatedFieldSet<keyof typeof SystemFailureItemSchema.field>()("errorClass", "errorType", "message", "sourceDetail", "resolvedAtMs", "itemUuid", "sessionResume", "queryTermination");
+const SESSION_RESUME_KEYS = generatedFieldSet<keyof typeof SessionResumeFailureSchema.field>()("agentReplSessionId", "claudeSessionId", "cwd", "configDir", "resolvedConfigDir", "create", "automaticRestore", "transcriptUnavailable", "identityMismatch", "queryTermination", "bringUpFailure");
+const SESSION_RESUME_CREATE_KEYS = generatedFieldSet<keyof typeof SessionResumeFailureCreateSchema.field>()();
+const SESSION_RESUME_AUTOMATIC_KEYS = generatedFieldSet<keyof typeof SessionResumeFailureAutomaticRestoreSchema.field>()();
+const SESSION_RESUME_TRANSCRIPT_KEYS = generatedFieldSet<keyof typeof SessionResumeFailureTranscriptUnavailableSchema.field>()("searchedPaths");
+const SESSION_RESUME_IDENTITY_KEYS = generatedFieldSet<keyof typeof SessionResumeFailureIdentityMismatchSchema.field>()("replacementClaudeSessionId");
+const SESSION_RESUME_BRING_UP_KEYS = generatedFieldSet<keyof typeof SessionResumeFailureBringUpFailureSchema.field>()("cause");
 
-function decodeUsageTotals(v: unknown, where: string): import("./protocol.js").TokenUsageTotals {
-  const o = ensureObject(v, where);
-  const keys = ["inputTokens", "outputTokens", "cacheReadInputTokens", "cacheCreationInputTokens", "timing"];
-  rejectUnknown(o, new Set(keys), where);
-  const totals = { input_tokens: num(o, "inputTokens", where), output_tokens: num(o, "outputTokens", where), cache_read_input_tokens: num(o, "cacheReadInputTokens", where), cache_creation_input_tokens: num(o, "cacheCreationInputTokens", where) };
-  if (o.timing === undefined) return totals;
-  const timing = ensureObject(o.timing, `${where}.timing`);
-  const timingKeys = ["outputTokensWithGenerationDuration", "outputGenerationDurationMs", "responsesWithGenerationDuration", "responsesWithoutGenerationDuration", "totalTimeToFirstTokenMs", "responsesWithTimeToFirstToken", "responsesWithoutTimeToFirstToken"];
-  rejectUnknown(timing, new Set(timingKeys), `${where}.timing`);
-  return { ...totals, timing: { output_tokens_with_generation_duration: num(timing, timingKeys[0], `${where}.timing`), output_generation_duration_ms: num(timing, timingKeys[1], `${where}.timing`), responses_with_generation_duration: num(timing, timingKeys[2], `${where}.timing`), responses_without_generation_duration: num(timing, timingKeys[3], `${where}.timing`), total_time_to_first_token_ms: num(timing, timingKeys[4], `${where}.timing`), responses_with_time_to_first_token: num(timing, timingKeys[5], `${where}.timing`), responses_without_time_to_first_token: num(timing, timingKeys[6], `${where}.timing`) } };
-}
-
-function decodeSessionTokenUtilization(v: unknown): import("./protocol.js").SessionTokenUtilization {
-  const o = ensureObject(v, "SessionTokenUtilization");
-  rejectUnknown(o, new Set(["allAgents", "mainAgent", "subagents", "models"]), "SessionTokenUtilization");
-  const subagents = ensureArray(o.subagents, "SessionTokenUtilization.subagents").map((raw, i) => {
-    const entry = ensureObject(raw, `SessionTokenUtilization.subagents[${i}]`);
-    rejectUnknown(entry, new Set(["agent", "totals", "models"]), `SessionTokenUtilization.subagents[${i}]`);
-    const agent = ensureObject(entry.agent, `SessionTokenUtilization.subagents[${i}].agent`);
-    return { agent_id: str(agent, "agentId", `SessionTokenUtilization.subagents[${i}].agent`), totals: decodeUsageTotals(entry.totals, `SessionTokenUtilization.subagents[${i}].totals`) };
-  });
-  const models = ensureArray(o.models, "SessionTokenUtilization.models").map((raw, i) => {
-    const entry = ensureObject(raw, `SessionTokenUtilization.models[${i}]`);
-    return { model: str(entry, "model", `SessionTokenUtilization.models[${i}]`), totals: decodeUsageTotals(entry.totals, `SessionTokenUtilization.models[${i}].totals`) };
-  });
-  return { all_agents: decodeUsageTotals(o.allAgents, "SessionTokenUtilization.allAgents"), main_agent: decodeUsageTotals(o.mainAgent, "SessionTokenUtilization.mainAgent"), subagents, models };
+function decodeSessionTokenUtilization(v: unknown): SessionTokenUtilization {
+  let generated: SessionTokenUtilization;
+  try {
+    generated = fromJson(SessionTokenUtilizationSchema, ensureObject(v, "SessionTokenUtilization") as JsonValue);
+  } catch (error) {
+    throw new Error(`frontend-proto: SessionTokenUtilization violates its generated contract: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (generated.allAgents === undefined || generated.mainAgent === undefined) {
+    throw new Error("frontend-proto: SessionTokenUtilization requires allAgents and mainAgent totals");
+  }
+  for (const [index, entry] of generated.subagents.entries()) {
+    if (entry.agent === undefined || entry.totals === undefined) {
+      throw new Error(`frontend-proto: SessionTokenUtilization.subagents[${index}] requires agent and totals`);
+    }
+    if (entry.agent.agentId === "" && entry.agent.parentToolUseId === "") {
+      throw new Error(`frontend-proto: SessionTokenUtilization.subagents[${index}] lacks a stable invocation identity`);
+    }
+  }
+  for (const [index, model] of generated.models.entries()) {
+    if (model.model === "" || model.totals === undefined) {
+      throw new Error(`frontend-proto: SessionTokenUtilization.models[${index}] requires model identity and totals`);
+    }
+  }
+  const seenApiMessageIds = new Set<string>();
+  for (const [index, response] of generated.ungroupedSubagentResponses.entries()) {
+    if (response.actor.case !== "subagent") throw new Error(`frontend-proto: SessionTokenUtilization.ungroupedSubagentResponses[${index}] must be a subagent response`);
+    if (response.actor.value.agentId !== "" || response.actor.value.parentToolUseId !== "") throw new Error(`frontend-proto: SessionTokenUtilization.ungroupedSubagentResponses[${index}] has a stable invocation identity`);
+    if (response.apiMessageId === "" || seenApiMessageIds.has(response.apiMessageId)) throw new Error(`frontend-proto: SessionTokenUtilization.ungroupedSubagentResponses has missing or repeated apiMessageId ${response.apiMessageId}`);
+    seenApiMessageIds.add(response.apiMessageId);
+  }
+  return generated;
 }
 
 function decodeSessionResumeFailure(v: unknown, where: string): SessionResumeFailure {
   const o = ensureObject(v, where);
-  const keys = ["agentReplSessionId", "claudeSessionId", "cwd", "configDir", "resolvedConfigDir", "create", "automaticRestore", "transcriptUnavailable", "identityMismatch"];
-  rejectUnknown(o, new Set(keys), where);
+  rejectUnknown(o, SESSION_RESUME_KEYS, where);
   const attempts = ["create", "automaticRestore"].filter((key) => o[key] !== undefined);
-  const causes = ["transcriptUnavailable", "identityMismatch"].filter((key) => o[key] !== undefined);
+  const causes = ["transcriptUnavailable", "identityMismatch", "queryTermination", "bringUpFailure"].filter((key) => o[key] !== undefined);
   if (attempts.length !== 1 || causes.length !== 1) throw new Error(`frontend-proto: ${where} requires exactly one attempt and cause`);
+  const attemptValue = ensureObject(o[attempts[0]], `${where}.${attempts[0]}`);
+  rejectUnknown(attemptValue, attempts[0] === "create" ? SESSION_RESUME_CREATE_KEYS : SESSION_RESUME_AUTOMATIC_KEYS, `${where}.${attempts[0]}`);
   const base = { agentReplSessionId: str(o, "agentReplSessionId", where), claudeSessionId: str(o, "claudeSessionId", where), cwd: str(o, "cwd", where), configDir: str(o, "configDir", where), resolvedConfigDir: str(o, "resolvedConfigDir", where), attempt: attempts[0] as "create" | "automaticRestore" };
   if (causes[0] === "identityMismatch") {
     const cause = ensureObject(o.identityMismatch, `${where}.identityMismatch`);
-    rejectUnknown(cause, new Set(["replacementClaudeSessionId"]), `${where}.identityMismatch`);
+    rejectUnknown(cause, SESSION_RESUME_IDENTITY_KEYS, `${where}.identityMismatch`);
     return { ...base, cause: { case: "identityMismatch", replacementClaudeSessionId: str(cause, "replacementClaudeSessionId", `${where}.identityMismatch`) } };
   }
+  if (causes[0] === "queryTermination") {
+    return { ...base, cause: { case: "queryTermination", value: decodeQueryTerminationFailure(o.queryTermination, `${where}.queryTermination`) } };
+  }
+  if (causes[0] === "bringUpFailure") {
+    const cause = ensureObject(o.bringUpFailure, `${where}.bringUpFailure`);
+    rejectUnknown(cause, SESSION_RESUME_BRING_UP_KEYS, `${where}.bringUpFailure`);
+    const message = str(cause, "cause", `${where}.bringUpFailure`);
+    if (message.trim() === "") throw new Error(`frontend-proto: ${where}.bringUpFailure.cause must be nonblank`);
+    return { ...base, cause: { case: "bringUpFailure", cause: message } };
+  }
   const cause = ensureObject(o.transcriptUnavailable, `${where}.transcriptUnavailable`);
-  rejectUnknown(cause, new Set(["searchedPaths"]), `${where}.transcriptUnavailable`);
+  rejectUnknown(cause, SESSION_RESUME_TRANSCRIPT_KEYS, `${where}.transcriptUnavailable`);
   return { ...base, cause: { case: "transcriptUnavailable", searchedPaths: ensureArray(cause.searchedPaths, `${where}.transcriptUnavailable.searchedPaths`).map((path, i) => { if (typeof path !== "string") throw new Error(`frontend-proto: ${where}.transcriptUnavailable.searchedPaths[${i}] must be a string`); return path; }) } };
+}
+
+function decodeQueryTerminationFailure(v: unknown, where: string): QueryTerminationFailure {
+  let generated: QueryTerminationFailure;
+  try {
+    generated = fromJson(QueryTerminationFailureSchema, ensureObject(v, where) as JsonValue);
+  } catch (error) {
+    throw new Error(`frontend-proto: ${where} violates the generated QueryTerminationFailure contract: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (generated.agentReplSessionId === "" || generated.queryInstanceId === "" || generated.observedAtMs <= 0n) {
+    throw new Error(`frontend-proto: ${where} requires session, query, and observed-time identity`);
+  }
+  if (generated.vendorIdentity.case === undefined) throw new Error(`frontend-proto: ${where} requires explicit vendor identity evidence`);
+  if (generated.vendorIdentity.case === "vendorSessionId" && generated.vendorIdentity.value === "") {
+    throw new Error(`frontend-proto: ${where}.vendorSessionId must be nonblank`);
+  }
+  if (generated.reason.case === undefined) {
+    throw new Error(`frontend-proto: ${where} requires an unexpected termination reason`);
+  }
+  if ((generated.reason.case === "iteratorFailure" || generated.reason.case === "startupFailure") && generated.reason.value.cause.trim() === "") {
+    throw new Error(`frontend-proto: ${where}.${generated.reason.case}.cause must be nonblank`);
+  }
+  return generated;
 }
 
 /**
@@ -2213,8 +2761,12 @@ export function decodeSystemFailure(v: unknown, where: string): SystemFailure {
     sourceDetail: str(o, "sourceDetail", where),
     resolvedAtMs: num(o, "resolvedAtMs", where),
     itemUuid: str(o, "itemUuid", where),
+    detail: { kind: "none" },
   };
-  if (o.sessionResume !== undefined) failure.sessionResume = decodeSessionResumeFailure(o.sessionResume, `${where}.sessionResume`);
+  const structured = ["sessionResume", "queryTermination"].filter((key) => o[key] !== undefined);
+  if (structured.length > 1) throw new Error(`frontend-proto: ${where} requires at most one structured detail`);
+  if (o.sessionResume !== undefined) failure.detail = { kind: "sessionResume", value: decodeSessionResumeFailure(o.sessionResume, `${where}.sessionResume`) };
+  if (o.queryTermination !== undefined) failure.detail = { kind: "queryTermination", value: decodeQueryTerminationFailure(o.queryTermination, `${where}.queryTermination`) };
   return failure;
 }
 

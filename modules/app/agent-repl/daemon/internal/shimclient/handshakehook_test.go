@@ -184,7 +184,7 @@ func TestRejectedHandshakeIsTerminalBeforeDaemonHelloAndReady(t *testing.T) {
 	reconcileErr := errors.New("active turn identities disagree")
 	cfg.OnHandshake = func(*corev1.ShimHello) error { return reconcileErr }
 	connected := make(chan struct{}, 1)
-	cfg.OnConnected = func(*corev1.ShimHello) { connected <- struct{}{} }
+	cfg.OnConnected = func(*corev1.ShimHello) bool { connected <- struct{}{}; return false }
 	c := New(cfg)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -205,9 +205,7 @@ func TestRejectedHandshakeIsTerminalBeforeDaemonHelloAndReady(t *testing.T) {
 		t.Fatal("OnConnected ran for a rejected handshake")
 	default:
 	}
-	readyCtx, readyCancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
-	defer readyCancel()
-	if err := c.AwaitReady(readyCtx); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("AwaitReady err = %v, want deadline: rejected handshake must not close ready gate", err)
+	if err := c.AwaitReady(context.Background()); !errors.Is(err, ErrHandshakeRejected) || !errors.Is(err, reconcileErr) {
+		t.Fatalf("AwaitReady err = %v, want exact terminal handshake rejection", err)
 	}
 }

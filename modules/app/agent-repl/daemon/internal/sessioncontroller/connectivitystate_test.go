@@ -3,6 +3,7 @@ package sessioncontroller
 import (
 	"errors"
 	"runtime"
+	"strings"
 	"testing"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
@@ -153,6 +154,7 @@ func TestHibernateReportsHibernated(t *testing.T) {
 	}
 	waitForWirings(applier, 1)
 	m.onConnected("ws", "s1", &corev1.ShimHello{})
+	applier.setCurrent("ws", &frontendv1.WorkspaceState{State: frontendv1.RenderState_RENDER_STATE_READY})
 
 	// Act.
 	if err := m.Hibernate("ws", StopCauseHibernateIdleSweep()); err != nil {
@@ -169,9 +171,9 @@ func TestHibernateReportsHibernated(t *testing.T) {
 	}
 }
 
-// The SESSION-SCOPED stop is hibernation's twin and closes for the same reason,
-// benign for the same reason, and therefore teal for the same reason.
-func TestHibernateSessionReportsHibernated(t *testing.T) {
+// A terminal session stop does not claim benign hibernation. The terminal
+// registry state is authoritative for a deleted or superseded record.
+func TestStopSessionDoesNotReportHibernated(t *testing.T) {
 	// Arrange.
 	m, applier, _ := newWiredRig(t)
 	if err := m.Ensure("ws"); err != nil {
@@ -181,13 +183,14 @@ func TestHibernateSessionReportsHibernated(t *testing.T) {
 	m.onConnected("ws", "s1", &corev1.ShimHello{})
 
 	// Act.
-	if err := m.HibernateSession("ws", "s1", StopCauseSessionDeleted()); err != nil {
-		t.Fatalf("HibernateSession: %v", err)
+	before := len(wiringsFor(applier, "ws"))
+	if err := m.StopSession("ws", "s1"); err != nil {
+		t.Fatalf("StopSession: %v", err)
 	}
 
 	// Assert.
-	if got := lastWiring(t, applier, "ws"); got.wiring != ssm.WiringHibernated {
-		t.Fatalf("wiring = %s, want hibernated", got.wiring)
+	if after := len(wiringsFor(applier, "ws")); after != before {
+		t.Fatalf("terminal stop added %d connectivity edges, want none", after-before)
 	}
 }
 
@@ -206,8 +209,8 @@ func TestASessionScopedStopOfAnotherRecordLeavesTheAxisAlone(t *testing.T) {
 	before := len(wiringsFor(applier, "ws"))
 
 	// Act — reap some OTHER record for the same workspace.
-	if err := m.HibernateSession("ws", "s_orphan", StopCauseSessionDeleted()); err != nil {
-		t.Fatalf("HibernateSession: %v", err)
+	if err := m.StopSession("ws", "s_orphan"); err != nil {
+		t.Fatalf("StopSession: %v", err)
 	}
 
 	// Assert.
@@ -230,6 +233,7 @@ func TestSessionControllerExitOnATerminalErrorReportsSevered(t *testing.T) {
 		Locator:           fakeLocator{m: map[string]string{"ws": "s1"}},
 		SeqStore:          &fakeSeqStore{seq: map[string]uint64{}},
 		ClearCompactStore: newFakeClearCompactStore(),
+		TurnAccountings:   emptyTurnAccountingStore{},
 		ProtocolVersion:   "1",
 		Source:            stubSource{},
 		FileDiagnostics:   fakeFileDiagnosticPersister{},
@@ -276,7 +280,7 @@ func TestARotationReportsTheBounce(t *testing.T) {
 	m.onConnected("ws", "s1", &corev1.ShimHello{})
 
 	// Act.
-	m.onHandshake("ws", "s1", &corev1.ShimHello{VendorSessionId: "new-uuid"})
+	m.onHandshake("ws", "s1", &corev1.ShimHello{QueryInstanceId: "query-connectivity", VendorSessionId: "new-uuid"})
 
 	// Assert.
 	got := lastWiring(t, applier, "ws")
@@ -298,7 +302,7 @@ func TestTheReHandshakeRewiresAfterARotation(t *testing.T) {
 	}
 	waitForWirings(applier, 1)
 	m.onConnected("ws", "s1", &corev1.ShimHello{})
-	m.onHandshake("ws", "s1", &corev1.ShimHello{VendorSessionId: "new-uuid"})
+	m.onHandshake("ws", "s1", &corev1.ShimHello{QueryInstanceId: "query-connectivity", VendorSessionId: "new-uuid"})
 
 	// Act — the new gate closes.
 	m.onConnected("ws", "s1", &corev1.ShimHello{})
@@ -323,7 +327,7 @@ func TestAnUnrotatedHandshakeLeavesTheAxisAlone(t *testing.T) {
 	before := len(wiringsFor(applier, "ws"))
 
 	// Act.
-	m.onHandshake("ws", "s1", &corev1.ShimHello{VendorSessionId: "same-uuid"})
+	m.onHandshake("ws", "s1", &corev1.ShimHello{QueryInstanceId: "query-connectivity", VendorSessionId: "same-uuid"})
 
 	// Assert.
 	if after := len(wiringsFor(applier, "ws")); after != before {
@@ -419,21 +423,22 @@ func TestBringUpBindsTheLinkLossCallback(t *testing.T) {
 // Failure surfacing
 // ---------------------------------------------------------------------------
 
-// A rejected edge is LOUD and does not abort the bring-up it rides: the color
-// stops tracking the session, which is bad, and a bring-up that never completes
-// because of a logging failure is worse.
-func TestARejectedWiringEdgeIsLoggedNotFatal(t *testing.T) {
+// A rejected opening edge aborts before the registration reservation can be
+// released. Otherwise an older settled projection could authorize hibernation
+// of a generation the SSM never observed entering service.
+func TestARejectedOpeningConnectivityEdgeFailsBeforeRegistration(t *testing.T) {
 	// Arrange.
-	m, applier, _ := newWiredRig(t)
+	spawner := &fakeSpawner{}
+	m, _ := newTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, spawner)
+	applier := m.cfg.SSM.(*fakeApplier)
 	applier.connectivityErr = errApplyWired
 	var lines []string
 	m.logf = func(format string, args ...any) { lines = append(lines, format) }
 
 	// Act.
-	if err := m.Ensure("ws"); err != nil {
-		t.Fatalf("Ensure must not fail because the SSM refused a wiring row: %v", err)
+	if err := m.Ensure("ws"); err == nil {
+		t.Fatal("Ensure succeeded after the SSM refused the opening connectivity edge")
 	}
-	waitForWirings(applier, 1)
 
 	// Assert.
 	var found bool
@@ -444,6 +449,9 @@ func TestARejectedWiringEdgeIsLoggedNotFatal(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("a refused wiring edge was not surfaced; logged: %v", lines)
+	}
+	if got := spawner.stopped; len(got) != 1 || got[0] != "s1" {
+		t.Fatalf("stopped = %v, want [s1]", got)
 	}
 }
 
@@ -475,6 +483,7 @@ func TestAHibernationSurvivesItsOwnSessionControllerExit(t *testing.T) {
 	}
 	waitForWirings(applier, 1)
 	m.onConnected("ws", "s1", &corev1.ShimHello{})
+	applier.setCurrent("ws", &frontendv1.WorkspaceState{State: frontendv1.RenderState_RENDER_STATE_READY})
 
 	// Act — hibernate, then join the exit goroutine the cancel released.
 	if err := m.Hibernate("ws", StopCauseHibernateIdleSweep()); err != nil {
@@ -503,6 +512,7 @@ func hibernateGuardRig(t *testing.T) (*Manager, *fakeApplier) {
 	}
 	waitForWirings(applier, 1)
 	m.onConnected("ws", "s1", &corev1.ShimHello{})
+	applier.setCurrent("ws", &frontendv1.WorkspaceState{State: frontendv1.RenderState_RENDER_STATE_READY})
 	return m, applier
 }
 
@@ -604,13 +614,35 @@ func TestHibernateAllowsASettledWorkspace(t *testing.T) {
 	}
 }
 
-// A STATE READ FAILURE ALLOWS THE TEARDOWN, and this is the one place in the
-// hibernation path where an unknown answers YES. This guard only VETOES a
-// teardown somebody already decided on, so turning a read outage into a refusal
-// would silently disable hibernation daemon-wide — and memory exhaustion is a
-// worse failure than one shim reaped a moment early. The failure is logged
-// loudly either way.
-func TestHibernateProceedsWhenTheStateReadFails(t *testing.T) {
+func TestHibernateWithholdsHibernatedUntilSpawnerProvesTheStop(t *testing.T) {
+	// Arrange: StopShim represents the only authoritative lock-release proof.
+	// A spawner that cannot produce it must prevent the teal state from making
+	// the false claim that no shim owns this session.
+	spawner := &fakeSpawner{stopErr: errors.New("session lock release unproven")}
+	m, _ := newTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, spawner)
+	applier := m.cfg.SSM.(*fakeApplier)
+	if err := m.Ensure("ws"); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	waitForWirings(applier, 1)
+	m.onConnected("ws", "s1", &corev1.ShimHello{})
+	applier.setCurrent("ws", &frontendv1.WorkspaceState{State: frontendv1.RenderState_RENDER_STATE_READY})
+	before := len(wiringsFor(applier, "ws"))
+
+	// Act.
+	err := m.Hibernate("ws", StopCauseHibernateIdleSweep())
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "session lock release unproven") {
+		t.Fatalf("Hibernate with no stop proof = %v", err)
+	}
+	if after := len(wiringsFor(applier, "ws")); after != before {
+		t.Fatalf("hibernation published a wiring edge without stop proof: before=%d after=%d", before, after)
+	}
+}
+
+// An unreadable state cannot prove that stopping the shim is safe.
+func TestHibernateRefusesWhenTheStateReadFails(t *testing.T) {
 	// Arrange.
 	m, applier := hibernateGuardRig(t)
 	applier.reconcMutex.Lock()
@@ -621,17 +653,14 @@ func TestHibernateProceedsWhenTheStateReadFails(t *testing.T) {
 	err := m.Hibernate("ws", StopCauseHibernateIdleSweep())
 
 	// Assert.
-	if err != nil {
-		t.Fatalf("Hibernate with an unreadable state = %v, want it allowed", err)
+	if err == nil || !strings.Contains(err.Error(), "state log is unreadable") {
+		t.Fatalf("Hibernate with an unreadable state = %v, want a loud refusal", err)
 	}
 }
 
-// THE SESSION-SCOPED STOP IS NOT GUARDED, and the asymmetry is deliberate.
-// Hibernate is a memory optimization nobody asked for, so it must never cost a
-// live turn; HibernateSession serves DeleteSession and the supersede sweep, where
-// the caller has decided this exact record must go and a mid-turn refusal would
-// leave an orphan shim running forever.
-func TestHibernateSessionIsNotGatedOnSettledness(t *testing.T) {
+// A terminal stop is distinct from hibernation and may end a live turn after
+// the owning registry record has been made terminal.
+func TestStopSessionTerminatesALiveTurn(t *testing.T) {
 	// Arrange — a workspace mid-turn.
 	m, applier := hibernateGuardRig(t)
 	applier.setCurrent("ws", &frontendv1.WorkspaceState{
@@ -640,10 +669,118 @@ func TestHibernateSessionIsNotGatedOnSettledness(t *testing.T) {
 	})
 
 	// Act.
-	err := m.HibernateSession("ws", "s1", StopCauseSessionDeleted())
+	err := m.StopSession("ws", "s1")
 
 	// Assert.
 	if err != nil {
-		t.Fatalf("HibernateSession over a live turn = %v, want it delivered", err)
+		t.Fatalf("StopSession over a live turn = %v, want it delivered", err)
+	}
+}
+
+// Missing state is not evidence of settledness. This covers the registration
+// interval before a controller's connecting row is visible to the SSM.
+func TestHibernateRefusesAWorkspaceWithoutResolvedState(t *testing.T) {
+	// Arrange.
+	m, applier := hibernateGuardRig(t)
+	applier.clearCurrent("ws")
+
+	// Act.
+	err := m.Hibernate("ws", StopCauseHibernateIdleSweep())
+
+	// Assert.
+	if !errors.Is(err, ErrNotSettled) {
+		t.Fatalf("Hibernate without resolved state = %v, want ErrNotSettled", err)
+	}
+}
+
+// A controller registration outranks every settled projection left by an
+// older generation. The reservation is acquired before the controller enters
+// byWS and remains held through its operational edge, so hibernation cannot
+// stop the generation in the registration-to-connecting interval.
+func TestHibernateRefusesARegisteringControllerOverAStaleSettledProjection(t *testing.T) {
+	for _, staleState := range []frontendv1.RenderState{
+		frontendv1.RenderState_RENDER_STATE_READY,
+		frontendv1.RenderState_RENDER_STATE_HIBERNATED,
+	} {
+		t.Run(staleState.String(), func(t *testing.T) {
+			spawner := &fakeSpawner{}
+			m, _ := newTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, spawner)
+			applier := m.cfg.SSM.(*fakeApplier)
+			applier.setCurrent("ws", &frontendv1.WorkspaceState{State: staleState})
+			connectingEntered := make(chan struct{})
+			allowConnecting := make(chan struct{})
+			applier.beforeConnectivity = func(state ssm.SessionConnectivity) {
+				if state == ssm.SessionConnectivityConnecting {
+					close(connectingEntered)
+					<-allowConnecting
+				}
+			}
+			logs := &logCapture{}
+			m.logf = logs.logf
+
+			bringUpDone := make(chan error, 1)
+			go func() {
+				_, err := m.bringUp("ws")
+				bringUpDone <- err
+			}()
+			<-connectingEntered
+
+			err := m.Hibernate("ws", StopCauseHibernateIdleSweep())
+			if !errors.Is(err, ErrNotSettled) {
+				t.Fatalf("Hibernate over registering controller with stale %s = %v, want ErrNotSettled", staleState, err)
+			}
+			if len(spawner.stopped) != 0 {
+				t.Fatalf("stopped during controller registration = %v, want none", spawner.stopped)
+			}
+			if _, err := m.existing("ws"); err != nil {
+				t.Fatalf("registering controller was evicted: %v", err)
+			}
+			if !logs.contains("controller generation owns bring-up admission") {
+				t.Fatalf("missing controller-registration refusal diagnostic")
+			}
+
+			close(allowConnecting)
+			if err := <-bringUpDone; err != nil {
+				t.Fatalf("bringUp after releasing connecting edge: %v", err)
+			}
+		})
+	}
+}
+
+func TestControllerRegistrationExcludesHibernationUntilOperationalIsDurable(t *testing.T) {
+	spawner := &fakeSpawner{}
+	m, _ := newTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, spawner)
+	d, err := m.bringUp("ws")
+	if err != nil {
+		t.Fatalf("bringUp: %v", err)
+	}
+	applier := m.cfg.SSM.(*fakeApplier)
+	operationalEntered := make(chan struct{})
+	allowOperational := make(chan struct{})
+	applier.beforeConnectivity = func(state ssm.SessionConnectivity) {
+		if state == ssm.SessionConnectivityOperational {
+			close(operationalEntered)
+			<-allowOperational
+		}
+	}
+	connectedDone := make(chan bool, 1)
+	go func() {
+		connectedDone <- m.onConnectedForGeneration("ws", "s1", d.generationID, &corev1.ShimHello{})
+	}()
+	<-operationalEntered
+
+	if err := m.Hibernate("ws", StopCauseHibernateIdleSweep()); !errors.Is(err, ErrNotSettled) {
+		t.Fatalf("Hibernate before operational edge committed = %v, want ErrNotSettled", err)
+	}
+	if len(spawner.stopped) != 0 {
+		t.Fatalf("stopped before operational edge committed = %v, want none", spawner.stopped)
+	}
+
+	close(allowOperational)
+	if retiring := <-connectedDone; retiring {
+		t.Fatal("ordinary operational connection reported retiring")
+	}
+	if err := m.Hibernate("ws", StopCauseHibernateIdleSweep()); err != nil {
+		t.Fatalf("Hibernate after operational edge committed: %v", err)
 	}
 }

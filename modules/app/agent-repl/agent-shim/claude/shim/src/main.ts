@@ -27,6 +27,8 @@ import path from "node:path";
 import { bindLog, configureLog, emergencyStderr } from "./uds/log.js";
 import {
   UdsSession,
+  isQueryTerminationCleanupError,
+  isQueryTerminationPersistenceError,
   isUnexpectedSdkStreamTerminationError,
   type UdsQuery,
 } from "./uds/uds-session.js";
@@ -322,23 +324,37 @@ export function makeUdsQueryFactory(args: CliArgs): (
   prompt: AsyncIterable<SdkUserMessageLike>,
   canUseTool: CanUseToolLike,
 ) => UdsQuery {
+  let fakeUsageSamples = 0;
   return (prompt, canUseTool): UdsQuery => {
     const abortController = new AbortController();
     if (args.fake) {
+      let failDuringBringUp: (() => void) | undefined;
       const query = createFakeQuery(prompt, canUseTool, {
         sessionId: args.sessionId,
         newUuid: randomUUID,
         ...(args.resume !== undefined ? { resume: args.resume } : {}),
         abortSignal: abortController.signal,
+        ...(args.resume !== undefined && process.env.AGENT_REPL_E2E_FAIL_RESUMED_FAKE_QUERY === "1"
+          ? { onBringUpFailureInjector: (fail: () => void) => { failDuringBringUp = fail; } }
+          : {}),
       });
       return {
         query,
-        subscriptionUsage: async (): Promise<SubscriptionUsageResponse> => ({
-          subscription_type: null,
-          rate_limits_available: false,
-          rate_limits: null,
-        }),
+        subscriptionUsage: async (): Promise<SubscriptionUsageResponse> => {
+          fakeUsageSamples++;
+          return {
+            subscription_type: "fake-max",
+            rate_limits_available: true,
+            rate_limits: {
+              five_hour: {
+                utilization: 10 + fakeUsageSamples / 4,
+                resets_at: "2030-01-01T05:00:00.000Z",
+              },
+            },
+          };
+        },
         abort: () => abortController.abort(),
+        ...(failDuringBringUp !== undefined ? { failDuringBringUp } : {}),
       };
     }
     const queryPromise = realQueryFactory(args, prompt, canUseTool, abortController);
@@ -404,7 +420,8 @@ export async function main(): Promise<void> {
  * Drive one UDS-mode session (design §8). The UDS server owns lifetime: a
  * daemon disconnect does NOT stop the session or the in-flight turn (reattach,
  * §4.4), and there is no stdin, so stdin-EOF is not a stop path. The explicit
- * stop path is SIGTERM/SIGINT, which cleanly shuts the session down.
+ * stop path is SIGTERM, which cleanly shuts the session down. SIGINT is
+ * refused because it is not an authorized reason to end the owned SDK query.
  */
 export async function runUdsMode(
   args: CliArgs,
@@ -437,6 +454,10 @@ export async function runUdsMode(
     // DaemonHello.permission_mode overrides it inside the bring-up gate; this
     // is passed so the override is a comparison rather than a guess.
     permissionMode: args.permissionMode,
+    queryInstanceId: randomUUID(),
+    requestedModel: args.model,
+    sdkVersion: packageVersion("@anthropic-ai/claude-agent-sdk/package.json"),
+    shimBuildSha: process.env.SHIM_BUILD_SHA ?? "",
     // `--resume <uuid>` IS the vendor session id the store keys events by, so
     // a resumed session can subscribe correctly from its very first Subscribe
     // instead of waiting for the SDK to reveal the uuid.
@@ -444,25 +465,20 @@ export async function runUdsMode(
     createQuery,
     newRequestId: randomUUID,
   });
-  let stopping: Promise<void> | null = null;
-  const stop = (sig: string): void => {
-    if (stopping !== null) return;
-    LOGGER.log({ agent_repl_session_id: args.sessionId, signal: sig }, "received shutdown signal");
-    stopping = session.shutdown(sig);
-  };
-  const onSigterm = (): void => stop("SIGTERM");
-  const onSigint = (): void => stop("SIGINT");
+  const signals = udsShutdownSignalHandlers(args.sessionId, (reason) => session.shutdown(reason));
+  const onSigterm = signals.onSigterm;
+  const onSigint = signals.onSigint;
   process.on("SIGTERM", onSigterm);
   process.on("SIGINT", onSigint);
   try {
     await session.start();
-    if (stopping === null) {
+    if (signals.stopping() === null) {
       throw new Error("UDS session completed without an intentional shutdown signal");
     }
-    await stopping;
+    await signals.stopping();
   } catch (err) {
-    if (stopping !== null) {
-      await stopping;
+    if (signals.stopping() !== null) {
+      await signals.stopping();
       return;
     }
     throw err;
@@ -471,6 +487,41 @@ export async function runUdsMode(
     process.off("SIGINT", onSigint);
     releaseLock();
   }
+}
+
+/**
+ * Own the process-signal boundary for the one live SDK query.
+ *
+ * SIGTERM is the process-level lifecycle capability used by deliberate shim
+ * teardown and hibernation. SIGINT is explicitly refused so an attached
+ * terminal cannot turn an interrupt into a second query-ending capability.
+ */
+export function udsShutdownSignalHandlers(
+  sessionId: string,
+  shutdown: (reason: "SIGTERM") => Promise<void>,
+): {
+  onSigterm(): void;
+  onSigint(): void;
+  stopping(): Promise<void> | null;
+} {
+  let stopping: Promise<void> | null = null;
+  return {
+    onSigterm(): void {
+      if (stopping !== null) return;
+      LOGGER.log({ agent_repl_session_id: sessionId, signal: "SIGTERM", outcome: "intentional_query_shutdown" }, "received authorized shim shutdown signal");
+      stopping = shutdown("SIGTERM");
+    },
+    onSigint(): void {
+      LOGGER.log({
+        level: "error",
+        agent_repl_session_id: sessionId,
+        signal: "SIGINT",
+        outcome: "refused_query_termination",
+        query_preserved: true,
+      }, "refused unauthorized signal as an SDK query shutdown condition");
+    },
+    stopping: () => stopping,
+  };
 }
 
 /** Adapt a Promise<QueryLike> to the synchronous QueryLike surface. */
@@ -523,7 +574,11 @@ const isDirectRun =
   process.argv[1] !== undefined && import.meta.url === invokedAs(process.argv[1]);
 if (isDirectRun) {
   main().catch((err: unknown) => {
-    if (!isUnexpectedSdkStreamTerminationError(err)) reportFatal(err);
+    if (
+      !isUnexpectedSdkStreamTerminationError(err) &&
+      !isQueryTerminationPersistenceError(err) &&
+      !isQueryTerminationCleanupError(err)
+    ) reportFatal(err);
     process.exit(1);
   });
 }

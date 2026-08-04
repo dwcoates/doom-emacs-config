@@ -109,6 +109,15 @@ func (m *Manager) ResolveTurnLifecycle(workspace, claimantSessionID string, ev *
 	if err != nil {
 		return nil, nil, false, err
 	}
+	if _, started := ev.GetPayload().(*corev1.Event_TurnStarted); started && m.hibernationLeases[workspace] != 0 {
+		isReplay, probeErr := recordTurnStart(tx, workspace, claimantSessionID, ev.GetSessionId(), id, ev.GetSeq())
+		if probeErr != nil {
+			return before, before, false, probeErr
+		}
+		if !isReplay {
+			return before, before, false, m.rejectStartDuringHibernationLocked(workspace, "TurnStarted claim")
+		}
+	}
 	switch ev.GetPayload().(type) {
 	case *corev1.Event_TurnStarted:
 		replayed, err = recordTurnStart(

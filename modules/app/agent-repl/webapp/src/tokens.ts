@@ -18,6 +18,14 @@
 import { dropdownChipHtml } from "./counter-menu.js";
 import { escapeHtml } from "./highlight.js";
 import { ModelUsage, TokenTimingTotals, Usage } from "./protocol.js";
+import type { ResponseTokenUsage, TokenUtilization } from "./frontend-proto.js";
+import { toJson } from "@bufbuild/protobuf";
+import {
+  TokenUtilizationSchema,
+  type SessionTokenUtilization,
+  type TokenUsageTotals,
+  type TokenUtilization as GeneratedTokenUtilization,
+} from "../../proto/gen/ts/agentshim/frontend/v1/frontend_pb";
 
 /** Everything the dropdown knows how to break down. */
 export interface TokenMenuData {
@@ -37,6 +45,10 @@ export interface TokenMenuData {
   models: Record<string, ModelUsage> | null;
   /** Authoritative aggregate timing from the daemon, when it has observations. */
   timing?: TokenTimingTotals;
+  /** Exact subagent responses that lack a stable invocation aggregate. */
+  ungroupedSubagentResponses?: readonly TokenUtilization[];
+  /** Generated cumulative accounting, including grouped subagent ownership. */
+  sessionUtilization?: SessionTokenUtilization;
 }
 
 /** Token counts as the topbar and the result chip both write them: `300,000`. */
@@ -129,6 +141,15 @@ function dimsOfModelUsage(u: ModelUsage): UsageDims {
   };
 }
 
+function dimsOfResponseUsage(u: ResponseTokenUsage): UsageDims {
+  return {
+    input: u.inputTokens,
+    cacheCreation: u.cacheCreationInputTokens,
+    cacheRead: u.cacheReadInputTokens,
+    output: u.outputTokens,
+  };
+}
+
 /**
  * The whole-tree totals: the per-model map summed. Context windows are
  * deliberately not summed — a capacity is per-model, not additive — so
@@ -175,6 +196,92 @@ function unknownRows(): string[] {
   return [row("input", "—"), row("output", "—")];
 }
 
+function percentage(value: number | undefined): string {
+  return value === undefined ? "unavailable" : `${(100 * value).toFixed(1)}%`;
+}
+
+/** One ungrouped response's identity, lineage, and unaggregated token dimensions. */
+function ungroupedResponseRows(response: TokenUtilization): string[] {
+  if (response.actor !== "subagent" || response.subagent === undefined) {
+    throw new Error(`ungrouped response ${response.apiMessageId} lacks subagent lineage`);
+  }
+  const usage = response.usage;
+  return [
+    row("API message ID", response.apiMessageId),
+    row("API request ID", response.apiRequestId ?? "unavailable"),
+    row("root turn", response.rootTurnId),
+    row("model", response.model),
+    row("agent ID", response.subagent.agentId || "unavailable"),
+    row("parent tool use ID", response.subagent.parentToolUseId || "unavailable"),
+    row("parent agent", response.subagent.parentAgentId),
+    row("subagent type", response.subagent.subagentType),
+    row("task", response.subagent.taskDescription),
+    ...usageRows(dimsOfResponseUsage(usage)),
+    row("cache hit rate", percentage(usage.cacheRates?.cacheHitRate)),
+    row("cache write rate", percentage(usage.cacheRates?.cacheWriteRate)),
+    row("uncached rate", percentage(usage.cacheRates?.uncachedInputRate)),
+    row("service tier", usage.serviceTier || "unavailable"),
+    row("speed", usage.speed || "unavailable"),
+    row("inference geo", usage.inferenceGeo || "unavailable"),
+  ];
+}
+
+function generatedInt(value: bigint, where: string): number {
+  const number = Number(value);
+  if (!Number.isSafeInteger(number)) throw new Error(`${where} exceeds the webapp's safe integer range`);
+  return number;
+}
+
+/** Every additive field carried by generated cumulative usage. */
+function generatedUsageRows(totals: TokenUsageTotals, where: string): string[] {
+  const input = generatedInt(totals.inputTokens, `${where}.inputTokens`);
+  const output = generatedInt(totals.outputTokens, `${where}.outputTokens`);
+  const cacheRead = generatedInt(totals.cacheReadInputTokens, `${where}.cacheReadInputTokens`);
+  const cacheWrite = generatedInt(totals.cacheCreationInputTokens, `${where}.cacheCreationInputTokens`);
+  const timing = totals.timing;
+  const tps = timing !== undefined && timing.outputGenerationDurationMs > 0n
+    ? 1000 * generatedInt(timing.outputTokensWithGenerationDuration, `${where}.timing.outputTokensWithGenerationDuration`) /
+      generatedInt(timing.outputGenerationDurationMs, `${where}.timing.outputGenerationDurationMs`)
+    : null;
+  const ttft = timing !== undefined && timing.responsesWithTimeToFirstToken > 0n
+    ? generatedInt(timing.totalTimeToFirstTokenMs, `${where}.timing.totalTimeToFirstTokenMs`) /
+      generatedInt(timing.responsesWithTimeToFirstToken, `${where}.timing.responsesWithTimeToFirstToken`)
+    : null;
+  return [
+    ...usageRows({ input, output, cacheRead, cacheCreation: cacheWrite }),
+    row("cache write 5m", totals.cacheCreation === undefined ? "unavailable" : formatTokens(generatedInt(totals.cacheCreation.ephemeral5mInputTokens, `${where}.cacheCreation.ephemeral5mInputTokens`))),
+    row("cache write 1h", totals.cacheCreation === undefined ? "unavailable" : formatTokens(generatedInt(totals.cacheCreation.ephemeral1hInputTokens, `${where}.cacheCreation.ephemeral1hInputTokens`))),
+    row("total prompt input", totals.cacheRates === undefined ? "unavailable" : formatTokens(generatedInt(totals.cacheRates.totalPromptInputTokens, `${where}.cacheRates.totalPromptInputTokens`))),
+    row("cache hit rate", totals.cacheRates === undefined ? "unavailable" : percentage(totals.cacheRates.cacheHitRate)),
+    row("cache write rate", totals.cacheRates === undefined ? "unavailable" : percentage(totals.cacheRates.cacheWriteRate)),
+    row("uncached rate", totals.cacheRates === undefined ? "unavailable" : percentage(totals.cacheRates.uncachedInputRate)),
+    row("web searches", totals.serverToolUse === undefined ? "unavailable" : formatTokens(generatedInt(totals.serverToolUse.webSearchRequests, `${where}.serverToolUse.webSearchRequests`))),
+    row("web fetches", totals.serverToolUse === undefined ? "unavailable" : formatTokens(generatedInt(totals.serverToolUse.webFetchRequests, `${where}.serverToolUse.webFetchRequests`))),
+    row("thinking tokens", totals.outputDetails === undefined ? "unavailable" : formatTokens(generatedInt(totals.outputDetails.thinkingTokens, `${where}.outputDetails.thinkingTokens`))),
+    row("generation", tps === null ? "unavailable" : `${tps.toFixed(1)} tok/s`),
+    row("average TTFT", ttft === null ? "unavailable" : `${ttft.toFixed(0)} ms`),
+    row("timed output tokens", timing === undefined ? "unavailable" : formatTokens(generatedInt(timing.outputTokensWithGenerationDuration, `${where}.timing.outputTokensWithGenerationDuration`))),
+    row("output generation duration", timing === undefined ? "unavailable" : `${formatTokens(generatedInt(timing.outputGenerationDurationMs, `${where}.timing.outputGenerationDurationMs`))} ms`),
+    row("responses with generation duration", timing === undefined ? "unavailable" : formatTokens(generatedInt(timing.responsesWithGenerationDuration, `${where}.timing.responsesWithGenerationDuration`))),
+    row("responses without generation duration", timing === undefined ? "unavailable" : formatTokens(generatedInt(timing.responsesWithoutGenerationDuration, `${where}.timing.responsesWithoutGenerationDuration`))),
+    row("total TTFT", timing === undefined ? "unavailable" : `${formatTokens(generatedInt(timing.totalTimeToFirstTokenMs, `${where}.timing.totalTimeToFirstTokenMs`))} ms`),
+    row("responses with TTFT", timing === undefined ? "unavailable" : formatTokens(generatedInt(timing.responsesWithTimeToFirstToken, `${where}.timing.responsesWithTimeToFirstToken`))),
+    row("responses without TTFT", timing === undefined ? "unavailable" : formatTokens(generatedInt(timing.responsesWithoutTimeToFirstToken, `${where}.timing.responsesWithoutTimeToFirstToken`))),
+  ];
+}
+
+/** Generated ungrouped response rendered without losing any wire field. */
+function generatedUngroupedRows(response: GeneratedTokenUtilization): string[] {
+  const raw = toJson(TokenUtilizationSchema, response);
+  return [
+    row("API message ID", response.apiMessageId),
+    row("API request ID", response.apiRequestId ?? "unavailable"),
+    row("root turn", response.rootTurnId),
+    row("model", response.model),
+    row("complete response JSON", JSON.stringify(raw)),
+  ];
+}
+
 /**
  * The dropped breakdown: the top-level agent's dimensions, the recursive
  * whole-tree totals, then one section per model (most expensive first).
@@ -183,6 +290,53 @@ function unknownRows(): string[] {
  */
 export function tokensOverlayHtml(data: TokenMenuData): string {
   const sections: string[] = [];
+  const generated = data.sessionUtilization;
+  if (generated !== undefined) {
+    if (generated.mainAgent === undefined || generated.allAgents === undefined) {
+      throw new Error("session token utilization lacks mainAgent or allAgents totals");
+    }
+    sections.push(section("main agent", generatedUsageRows(generated.mainAgent, "session.mainAgent")));
+    sections.push(section("all agents", generatedUsageRows(generated.allAgents, "session.allAgents")));
+    for (const [index, subagent] of generated.subagents.entries()) {
+      if (subagent.agent === undefined || subagent.totals === undefined) throw new Error(`session subagent ${index} lacks identity or totals`);
+      const identity = subagent.agent;
+      const title = `subagent ${identity.agentId || identity.parentToolUseId}`;
+      sections.push(section(title, [
+        row("agent ID", identity.agentId || "unavailable"),
+        row("parent tool use ID", identity.parentToolUseId || "unavailable"),
+        row("parent agent ID", identity.parentAgentId || "unavailable"),
+        row("subagent type", identity.subagentType || "unavailable"),
+        row("task", identity.taskDescription || "unavailable"),
+        ...generatedUsageRows(subagent.totals, `session.subagents[${index}].totals`),
+      ]));
+      for (const [modelIndex, model] of subagent.models.entries()) {
+        if (model.totals === undefined) throw new Error(`session subagent ${index} model ${modelIndex} lacks totals`);
+        sections.push(section(`${title} model ${model.model}`, [
+          row("canonical model", model.canonicalModel ?? "unavailable"),
+          row("provider", model.provider ?? "unavailable"),
+          row("cost", model.costUsd === undefined ? "unavailable" : formatCost(model.costUsd)),
+          row("context window", model.contextWindow === undefined ? "unavailable" : formatTokens(generatedInt(model.contextWindow, `session.subagents[${index}].models[${modelIndex}].contextWindow`))),
+          row("max output", model.maxOutputTokens === undefined ? "unavailable" : formatTokens(generatedInt(model.maxOutputTokens, `session.subagents[${index}].models[${modelIndex}].maxOutputTokens`))),
+          ...generatedUsageRows(model.totals, `session.subagents[${index}].models[${modelIndex}].totals`),
+        ]));
+      }
+    }
+    for (const [index, model] of generated.models.entries()) {
+      if (model.totals === undefined) throw new Error(`session model ${index} lacks totals`);
+      sections.push(section(`all agents model ${model.model}`, [
+        row("canonical model", model.canonicalModel ?? "unavailable"),
+        row("provider", model.provider ?? "unavailable"),
+        row("cost", model.costUsd === undefined ? "unavailable" : formatCost(model.costUsd)),
+        row("context window", model.contextWindow === undefined ? "unavailable" : formatTokens(generatedInt(model.contextWindow, `session.models[${index}].contextWindow`))),
+        row("max output", model.maxOutputTokens === undefined ? "unavailable" : formatTokens(generatedInt(model.maxOutputTokens, `session.models[${index}].maxOutputTokens`))),
+        ...generatedUsageRows(model.totals, `session.models[${index}].totals`),
+      ]));
+    }
+    for (const [index, response] of generated.ungroupedSubagentResponses.entries()) {
+      sections.push(section(`ungrouped subagent response ${response.apiMessageId}`, generatedUngroupedRows(response)));
+    }
+    return `<ul class="tokens-overlay" role="menu">${sections.join("")}</ul>`;
+  }
   sections.push(
     section(
       "top-level agent",
@@ -216,6 +370,11 @@ export function tokensOverlayHtml(data: TokenMenuData): string {
         ]),
       );
     }
+  }
+  for (const response of data.ungroupedSubagentResponses ?? []) {
+    sections.push(
+      section(`ungrouped subagent response ${response.apiMessageId}`, ungroupedResponseRows(response)),
+    );
   }
   return `<ul class="tokens-overlay" role="menu">${sections.join("")}</ul>`;
 }

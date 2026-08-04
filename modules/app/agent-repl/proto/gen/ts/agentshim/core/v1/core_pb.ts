@@ -10,11 +10,11 @@
 //   Event.dedup_key, persists, and fans out to subscribers. The daemon only
 //   ever consumes the store-merged stream forwarded by the shim — everything
 //   the daemon sees (except EPHEMERAL class) is already durable.
-// - EPHEMERAL class (ContentDelta, HeartbeatProgress, MessageLatency) bypasses the store:
-//   shim → daemon directly. Consumers reconcile per claude uuid, REPLACING a
-//   streamed preview with the store-delivered final message. Cross-path
-//   ordering is therefore irrelevant. Ephemeral events are never persisted
-//   and never replayed.
+// - EPHEMERAL class (ContentDelta, HeartbeatProgress) bypasses the store:
+//   shim → daemon directly. Consumers reconcile per Claude message id,
+//   REPLACING a streamed preview with the store-delivered final message.
+//   MessageLatency is PERSISTENT because timing analysis needs it on replay.
+//   Ephemeral events are never persisted and never replayed.
 // - Replay handshake: the shim sends the store Subscribe{session_id,
 //   from_seq}; the store replays persisted events with seq > from_seq, then
 //   live-tails. The daemon does NOT send this: its resume position rides
@@ -57,7 +57,7 @@ import type { JsonObject, Message } from "@bufbuild/protobuf";
  * Describes the file agentshim/core/v1/core.proto.
  */
 export const file_agentshim_core_v1_core: GenFile = /*@__PURE__*/
-  fileDesc("ChxhZ2VudHNoaW0vY29yZS92MS9jb3JlLnByb3RvEhFhZ2VudHNoaW0uY29yZS52MSLcCQoFRXZlbnQSEgoKc2Vzc2lvbl9pZBgBIAEoCRILCgNzZXEYAiABKAQSJwoFcGxhbmUYAyABKA4yGC5hZ2VudHNoaW0uY29yZS52MS5QbGFuZRIsCgVjbGFzcxgEIAEoDjIdLmFnZW50c2hpbS5jb3JlLnYxLkV2ZW50Q2xhc3MSEgoKcmVxdWVzdF9pZBgFIAEoCRIWCg5wcm9kdWNlZF9hdF9tcxgGIAEoAxIRCglkZWR1cF9rZXkYByABKAkSPAoPc2Vzc2lvbl9zdGFydGVkGAogASgLMiEuYWdlbnRzaGltLmNvcmUudjEuU2Vzc2lvblN0YXJ0ZWRIABI4Cg1zZXNzaW9uX2VuZGVkGAsgASgLMh8uYWdlbnRzaGltLmNvcmUudjEuU2Vzc2lvbkVuZGVkSAASNgoMdHVybl9zdGFydGVkGAwgASgLMh4uYWdlbnRzaGltLmNvcmUudjEuVHVyblN0YXJ0ZWRIABIyCgp0dXJuX2VuZGVkGA0gASgLMhwuYWdlbnRzaGltLmNvcmUudjEuVHVybkVuZGVkSAASNgoMdGFza19zdGFydGVkGA4gASgLMh4uYWdlbnRzaGltLmNvcmUudjEuVGFza1N0YXJ0ZWRIABI4Cg10YXNrX3Byb2dyZXNzGA8gASgLMh8uYWdlbnRzaGltLmNvcmUudjEuVGFza1Byb2dyZXNzSAASMgoKdGFza19lbmRlZBgQIAEoCzIcLmFnZW50c2hpbS5jb3JlLnYxLlRhc2tFbmRlZEgAEjgKDWNvbnRlbnRfZGVsdGEYESABKAsyHy5hZ2VudHNoaW0uY29yZS52MS5Db250ZW50RGVsdGFIABJCChJoZWFydGJlYXRfcHJvZ3Jlc3MYEiABKAsyJC5hZ2VudHNoaW0uY29yZS52MS5IZWFydGJlYXRQcm9ncmVzc0gAEjoKDmRlZ3JhZGVkX3N0YXRlGBMgASgLMiAuYWdlbnRzaGltLmNvcmUudjEuRGVncmFkZWRTdGF0ZUgAEjQKCHVucGFyc2VkGBQgASgLMiAuYWdlbnRzaGltLmNvcmUudjEuVW5wYXJzZWRFdmVudEgAEjwKD21lc3NhZ2VfbGF0ZW5jeRgVIAEoCzIhLmFnZW50c2hpbS5jb3JlLnYxLk1lc3NhZ2VMYXRlbmN5SAASPAoPY29udGV4dF9jbGVhcmVkGBYgASgLMiEuYWdlbnRzaGltLmNvcmUudjEuQ29udGV4dENsZWFyZWRIABJAChFjb250ZXh0X2NvbXBhY3RlZBgXIAEoCzIjLmFnZW50c2hpbS5jb3JlLnYxLkNvbnRleHRDb21wYWN0ZWRIABJHChVmaWxlX3BsYW5lX2RpYWdub3N0aWMYGCABKAsyJi5hZ2VudHNoaW0uY29yZS52MS5GaWxlUGxhbmVEaWFnbm9zdGljSAASPwoRdHVybl9jbGFpbV9icmlkZ2UYGSABKAsyIi5hZ2VudHNoaW0uY29yZS52MS5UdXJuQ2xhaW1CcmlkZ2VIABImCgZ2ZW5kb3IYHiABKAsyFC5nb29nbGUucHJvdG9idWYuQW55SAASJwoGZXh0cmFzGCggASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdEIJCgdwYXlsb2FkIm4KCkV2ZW50QmF0Y2gSKAoGZXZlbnRzGAEgAygLMhguYWdlbnRzaGltLmNvcmUudjEuRXZlbnQSNgoOY3Vyc29yX2FkdmFuY2UYAiABKAsyHi5hZ2VudHNoaW0uY29yZS52MS5DdXJzb3JTdGF0ZSJnCg1VbnBhcnNlZEV2ZW50EhMKC3NvdXJjZV9wYXRoGAEgASgJEhMKC2J5dGVfb2Zmc2V0GAIgASgDEgsKA3JhdxgDIAEoDBINCgVlcnJvchgEIAEoCRIQCghwcm9kdWNlchgFIAEoCSJ5Cg5TZXNzaW9uU3RhcnRlZBIwCgZzb3VyY2UYASABKA4yIC5hZ2VudHNoaW0uY29yZS52MS5TZXNzaW9uU291cmNlEg0KBW1vZGVsGAIgASgJEgsKA2N3ZBgDIAEoCRIZChF2ZW5kb3Jfc2Vzc2lvbl9pZBgEIAEoCSIeCgxTZXNzaW9uRW5kZWQSDgoGcmVhc29uGAEgASgJIjYKC1R1cm5TdGFydGVkEhYKDnByb21wdF9wcmV2aWV3GAEgASgJEg8KB3R1cm5faWQYAiABKAkiPwoPVHVybkNsYWltQnJpZGdlEg8KB3R1cm5faWQYASABKAkSGwoTcHJldmlvdXNfc2Vzc2lvbl9pZBgCIAEoCSJYCglUdXJuRW5kZWQSEwoLc3RvcF9yZWFzb24YASABKAkSEwoLZHVyYXRpb25fbXMYAiABKAMSEAoIaXNfZXJyb3IYAyABKAgSDwoHdHVybl9pZBgEIAEoCSIQCg5Db250ZXh0Q2xlYXJlZCKcAQoQQ29udGV4dENvbXBhY3RlZBI5Cgd0cmlnZ2VyGAEgASgOMiguYWdlbnRzaGltLmNvcmUudjEuQ29udGV4dENvbXBhY3RUcmlnZ2VyEhIKCnByZV90b2tlbnMYAiABKAMSEwoLcG9zdF90b2tlbnMYAyABKAMSEwoLZHVyYXRpb25fbXMYBCABKAMSDwoHc3VtbWFyeRgFIAEoCSKIAQoLVGFza1N0YXJ0ZWQSDwoHdGFza19pZBgBIAEoCRIpCgRraW5kGAIgASgOMhsuYWdlbnRzaGltLmNvcmUudjEuVGFza0tpbmQSEwoLdG9vbF91c2VfaWQYAyABKAkSEwoLZGVzY3JpcHRpb24YBCABKAkSEwoLb3V0cHV0X3BhdGgYBSABKAkifAoMVGFza1Byb2dyZXNzEg8KB3Rhc2tfaWQYASABKAkSKQoEa2luZBgCIAEoDjIbLmFnZW50c2hpbS5jb3JlLnYxLlRhc2tLaW5kEhYKDmJ5dGVzX29ic2VydmVkGAMgASgDEhgKEHJlY29yZHNfb2JzZXJ2ZWQYBCABKAMiswEKCVRhc2tFbmRlZBIPCgd0YXNrX2lkGAEgASgJEikKBGtpbmQYAiABKA4yGy5hZ2VudHNoaW0uY29yZS52MS5UYXNrS2luZBIxCgZzdGF0dXMYAyABKA4yIS5hZ2VudHNoaW0uY29yZS52MS5UZXJtaW5hbFN0YXR1cxIPCgdzdW1tYXJ5GAQgASgJEhMKC291dHB1dF9wYXRoGAUgASgJEhEKCWluZmVyZW5jZRgGIAEoCSKjAQoMQ29udGVudERlbHRhEgwKBHV1aWQYASABKAkSEwoLYmxvY2tfaW5kZXgYAiABKA0SDgoEdGV4dBgDIAEoCUgAEhIKCHRoaW5raW5nGAQgASgJSAASFAoKaW5wdXRfanNvbhgFIAEoCUgAEhMKCXNpZ25hdHVyZRgGIAEoCUgAEhgKEGVzdGltYXRlZF90b2tlbnMYByABKANCBwoFZGVsdGEicAoRSGVhcnRiZWF0UHJvZ3Jlc3MSEwoLdG9vbF91c2VfaWQYASABKAkSEQoJdG9vbF9uYW1lGAIgASgJEhoKEnBhcmVudF90b29sX3VzZV9pZBgDIAEoCRIXCg9lbGFwc2VkX3NlY29uZHMYBCABKAEiLwoOTWVzc2FnZUxhdGVuY3kSDAoEdXVpZBgBIAEoCRIPCgd0dGZ0X21zGAIgASgDIlwKDURlZ3JhZGVkU3RhdGUSEQoJY29tcG9uZW50GAEgASgJEg4KBnJlYXNvbhgCIAEoCRIVCg1kcm9wcGVkX2NvdW50GAMgASgEEhEKCXJlY292ZXJlZBgEIAEoCCLLAQoJU2hpbUhlbGxvEhIKCnNlc3Npb25faWQYASABKAkSDgoGdmVuZG9yGAIgASgJEhQKDHNoaW1fdmVyc2lvbhgDIAEoCRIYChBwcm90b2NvbF92ZXJzaW9uGAQgASgJEhYKDnR1cm5faW5fZmxpZ2h0GAUgASgIEhkKEXZlbmRvcl9zZXNzaW9uX2lkGAYgASgJEgsKA3BpZBgHIAEoBRIRCglidWlsZF9zaGEYCCABKAkSFwoPYWN0aXZlX3R1cm5faWRzGAkgAygJImoKC0RhZW1vbkhlbGxvEhYKDmRhZW1vbl92ZXJzaW9uGAEgASgJEhgKEHByb3RvY29sX3ZlcnNpb24YAiABKAkSEAoIZnJvbV9zZXEYAyABKAQSFwoPcGVybWlzc2lvbl9tb2RlGAQgASgJIkwKCVNoaW1SZWFkeRISCgpzZXNzaW9uX2lkGAEgASgJEhAKCGZyb21fc2VxGAIgASgEEhkKEXZlbmRvcl9zZXNzaW9uX2lkGAMgASgJIlkKDFN1Ym1pdFByb21wdBISCgpyZXF1ZXN0X2lkGAEgASgJEgwKBHRleHQYAiABKAkSDgoGb3JpZ2luGAMgASgJEhcKD3Blcm1pc3Npb25fbW9kZRgEIAEoCSItCghTZXRNb2RlbBISCgpyZXF1ZXN0X2lkGAEgASgJEg0KBW1vZGVsGAIgASgJIkcKC01vZGVsT3B0aW9uEg0KBXZhbHVlGAEgASgJEhQKDGRpc3BsYXlfbmFtZRgCIAEoCRITCgtkZXNjcmlwdGlvbhgDIAEoCSJSCgxNb2RlbENhdGFsb2cSEgoKc2Vzc2lvbl9pZBgBIAEoCRIuCgZtb2RlbHMYAiADKAsyHi5hZ2VudHNoaW0uY29yZS52MS5Nb2RlbE9wdGlvbiIfCglJbnRlcnJ1cHQSEgoKcmVxdWVzdF9pZBgBIAEoCSJxCgNBY2sSEgoKcmVxdWVzdF9pZBgBIAEoCRI+ChFpbnRlcnJ1cHRfb3V0Y29tZRgCIAEoDjIjLmFnZW50c2hpbS5jb3JlLnYxLkludGVycnVwdE91dGNvbWUSFgoOc2VsZWN0ZWRfbW9kZWwYAyABKAkiQgoETmFjaxISCgpyZXF1ZXN0X2lkGAEgASgJEg4KBnJlYXNvbhgCIAEoCRIWCg5zZWxlY3RlZF9tb2RlbBgDIAEoCSIxCglTdWJzY3JpYmUSEgoKc2Vzc2lvbl9pZBgBIAEoCRIQCghmcm9tX3NlcRgCIAEoBCJZCg1SZXBsYXlSZXF1ZXN0EhIKCnJlcXVlc3RfaWQYASABKAkSEAoIZnJvbV9zZXEYAiABKAQSDgoGdG9fc2VxGAMgASgEEhIKCm1heF9ldmVudHMYBCABKA0iSgoLUmVwbGF5RXZlbnQSEgoKcmVxdWVzdF9pZBgBIAEoCRInCgVldmVudBgCIAEoCzIYLmFnZW50c2hpbS5jb3JlLnYxLkV2ZW50IlYKClJlcGxheURvbmUSEgoKcmVxdWVzdF9pZBgBIAEoCRIRCgl0cnVuY2F0ZWQYAiABKAgSDgoGcmVhc29uGAMgASgJEhEKCWRlbGl2ZXJlZBgEIAEoBCJiChFQZXJtaXNzaW9uUmVxdWVzdBISCgpyZXF1ZXN0X2lkGAEgASgJEhEKCXRvb2xfbmFtZRgCIAEoCRImCgVpbnB1dBgDIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3QipwEKElBlcm1pc3Npb25SZXNwb25zZRISCgpyZXF1ZXN0X2lkGAEgASgJEjcKCGRlY2lzaW9uGAIgASgOMiUuYWdlbnRzaGltLmNvcmUudjEuUGVybWlzc2lvbkRlY2lzaW9uEi4KDXVwZGF0ZWRfaW5wdXQYAyABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0EhQKDGRlbnlfbWVzc2FnZRgEIAEoCSKrAgoOUGVybWlzc2lvbkl0ZW0SNQoHcmVxdWVzdBgBIAEoCzIkLmFnZW50c2hpbS5jb3JlLnYxLlBlcm1pc3Npb25SZXF1ZXN0EkAKCnJlc29sdXRpb24YAiABKA4yLC5hZ2VudHNoaW0uY29yZS52MS5QZXJtaXNzaW9uSXRlbS5SZXNvbHV0aW9uEhQKDGRlbnlfbWVzc2FnZRgDIAEoCSKJAQoKUmVzb2x1dGlvbhIaChZSRVNPTFVUSU9OX1VOU1BFQ0lGSUVEEAASFgoSUkVTT0xVVElPTl9QRU5ESU5HEAESFgoSUkVTT0xVVElPTl9BTExPV0VEEAISFQoRUkVTT0xVVElPTl9ERU5JRUQQAxIYChRSRVNPTFVUSU9OX0FCQU5ET05FRBAEIh8KCUhlYXJ0YmVhdBISCgpzZW50X2F0X21zGAEgASgDIiEKC0hlYWx0aENoZWNrEhIKCnJlcXVlc3RfaWQYASABKAkiVgoMSGVhbHRoU3RhdHVzEhIKCnJlcXVlc3RfaWQYASABKAkSDwoHaGVhbHRoeRgCIAEoCBIRCgljb21wb25lbnQYAyABKAkSDgoGcmVhc29uGAQgASgJIkwKClN0b3JlV3JpdGUSEAoIcHJvZHVjZXIYASABKAkSLAoFYmF0Y2gYAiABKAsyHS5hZ2VudHNoaW0uY29yZS52MS5FdmVudEJhdGNoIlMKDVN0b3JlV3JpdGVBY2sSEAoIYWNjZXB0ZWQYASABKAQSDwoHZGVkdXBlZBgCIAEoBBIQCghsYXN0X3NlcRgDIAEoBBINCgVlcnJvchgEIAEoCSJLCgtDdXJzb3JTdGF0ZRIPCgdmaWxlX2lkGAEgASgJEgwKBHBhdGgYAiABKAkSDgoGb2Zmc2V0GAMgASgDEg0KBWNhcnJ5GAQgASgMIh4KC0N1cnNvclF1ZXJ5Eg8KB2ZpbGVfaWQYASABKAkiVwoNT3BlblRhc2tTdGF0ZRIpCgdzdGFydGVkGAEgASgLMhguYWdlbnRzaGltLmNvcmUudjEuRXZlbnQSGwoTbGFzdF9hY3Rpdml0eV9hdF9tcxgCIAEoAyKVAQoKQ3Vyc29yTGlzdBIvCgdjdXJzb3JzGAEgAygLMh4uYWdlbnRzaGltLmNvcmUudjEuQ3Vyc29yU3RhdGUSNAoKb3Blbl90YXNrcxgCIAMoCzIgLmFnZW50c2hpbS5jb3JlLnYxLk9wZW5UYXNrU3RhdGUSIAoYb3Blbl90YXNrc19hdXRob3JpdGF0aXZlGAMgASgIIvIBChNGaWxlUGxhbmVEaWFnbm9zdGljEkIKDnNvdXJjZV9ydW50aW1lGAEgASgOMiouYWdlbnRzaGltLmNvcmUudjEuRGlhZ25vc3RpY1NvdXJjZVJ1bnRpbWUSDQoFbGV2ZWwYAiABKAkSEQoJdmVyYm9zaXR5GAMgASgJEhEKCW9wZXJhdGlvbhgEIAEoCRIPCgdtZXNzYWdlGAUgASgJEigKB2NvbnRleHQYBiABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0EhIKCnNvdXJjZV9waWQYByABKAMSEwoLc291cmNlX3BhdGgYCCABKAkqVQoFUGxhbmUSFQoRUExBTkVfVU5TUEVDSUZJRUQQABIQCgxQTEFORV9TVFJFQU0QARIOCgpQTEFORV9GSUxFEAISEwoPUExBTkVfU1lOVEhFVElDEAMqYAoKRXZlbnRDbGFzcxIbChdFVkVOVF9DTEFTU19VTlNQRUNJRklFRBAAEhoKFkVWRU5UX0NMQVNTX1BFUlNJU1RFTlQQARIZChVFVkVOVF9DTEFTU19FUEhFTUVSQUwQAipnCghUYXNrS2luZBIZChVUQVNLX0tJTkRfVU5TUEVDSUZJRUQQABITCg9UQVNLX0tJTkRfQUdFTlQQARITCg9UQVNLX0tJTkRfU0hFTEwQAhIWChJUQVNLX0tJTkRfV09SS0ZMT1cQAyq5AQoOVGVybWluYWxTdGF0dXMSHwobVEVSTUlOQUxfU1RBVFVTX1VOU1BFQ0lGSUVEEAASGAoUVEVSTUlOQUxfU1RBVFVTX0RPTkUQARIZChVURVJNSU5BTF9TVEFUVVNfRVJST1IQAhIaChZURVJNSU5BTF9TVEFUVVNfS0lMTEVEEAMSGwoXVEVSTUlOQUxfU1RBVFVTX1NUT1BQRUQQBBIYChRURVJNSU5BTF9TVEFUVVNfTE9TVBAFKokBCg1TZXNzaW9uU291cmNlEh4KGlNFU1NJT05fU09VUkNFX1VOU1BFQ0lGSUVEEAASGAoUU0VTU0lPTl9TT1VSQ0VfRlJFU0gQARIZChVTRVNTSU9OX1NPVVJDRV9SRVNVTUUQAhIjCh9TRVNTSU9OX1NPVVJDRV9DT01QQUNUX0NPTlRJTlVFEAMqdgoSUGVybWlzc2lvbkRlY2lzaW9uEiMKH1BFUk1JU1NJT05fREVDSVNJT05fVU5TUEVDSUZJRUQQABIdChlQRVJNSVNTSU9OX0RFQ0lTSU9OX0FMTE9XEAESHAoYUEVSTUlTU0lPTl9ERUNJU0lPTl9ERU5ZEAIqhgEKFUNvbnRleHRDb21wYWN0VHJpZ2dlchInCiNDT05URVhUX0NPTVBBQ1RfVFJJR0dFUl9VTlNQRUNJRklFRBAAEiIKHkNPTlRFWFRfQ09NUEFDVF9UUklHR0VSX01BTlVBTBABEiAKHENPTlRFWFRfQ09NUEFDVF9UUklHR0VSX0FVVE8QAiqeAQoQSW50ZXJydXB0T3V0Y29tZRIhCh1JTlRFUlJVUFRfT1VUQ09NRV9VTlNQRUNJRklFRBAAEiEKHUlOVEVSUlVQVF9PVVRDT01FX0lOVEVSUlVQVEVEEAESJgoiSU5URVJSVVBUX09VVENPTUVfQUxSRUFEWV9DT01QTEVURRACEhwKGElOVEVSUlVQVF9PVVRDT01FX0ZBSUxFRBADKmsKF0RpYWdub3N0aWNTb3VyY2VSdW50aW1lEikKJURJQUdOT1NUSUNfU09VUkNFX1JVTlRJTUVfVU5TUEVDSUZJRUQQABIlCiFESUFHTk9TVElDX1NPVVJDRV9SVU5USU1FX1NJREVDQVIQAUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRzaGltL2NvcmUvdjE7Y29yZXYxYgZwcm90bzM", [file_google_protobuf_any, file_google_protobuf_struct]);
+  fileDesc("ChxhZ2VudHNoaW0vY29yZS92MS9jb3JlLnByb3RvEhFhZ2VudHNoaW0uY29yZS52MSLrCgoFRXZlbnQSEgoKc2Vzc2lvbl9pZBgBIAEoCRILCgNzZXEYAiABKAQSJwoFcGxhbmUYAyABKA4yGC5hZ2VudHNoaW0uY29yZS52MS5QbGFuZRIsCgVjbGFzcxgEIAEoDjIdLmFnZW50c2hpbS5jb3JlLnYxLkV2ZW50Q2xhc3MSEgoKcmVxdWVzdF9pZBgFIAEoCRIWCg5wcm9kdWNlZF9hdF9tcxgGIAEoAxIRCglkZWR1cF9rZXkYByABKAkSPAoPc2Vzc2lvbl9zdGFydGVkGAogASgLMiEuYWdlbnRzaGltLmNvcmUudjEuU2Vzc2lvblN0YXJ0ZWRIABI4Cg1zZXNzaW9uX2VuZGVkGAsgASgLMh8uYWdlbnRzaGltLmNvcmUudjEuU2Vzc2lvbkVuZGVkSAASNgoMdHVybl9zdGFydGVkGAwgASgLMh4uYWdlbnRzaGltLmNvcmUudjEuVHVyblN0YXJ0ZWRIABIyCgp0dXJuX2VuZGVkGA0gASgLMhwuYWdlbnRzaGltLmNvcmUudjEuVHVybkVuZGVkSAASNgoMdGFza19zdGFydGVkGA4gASgLMh4uYWdlbnRzaGltLmNvcmUudjEuVGFza1N0YXJ0ZWRIABI4Cg10YXNrX3Byb2dyZXNzGA8gASgLMh8uYWdlbnRzaGltLmNvcmUudjEuVGFza1Byb2dyZXNzSAASMgoKdGFza19lbmRlZBgQIAEoCzIcLmFnZW50c2hpbS5jb3JlLnYxLlRhc2tFbmRlZEgAEjgKDWNvbnRlbnRfZGVsdGEYESABKAsyHy5hZ2VudHNoaW0uY29yZS52MS5Db250ZW50RGVsdGFIABJCChJoZWFydGJlYXRfcHJvZ3Jlc3MYEiABKAsyJC5hZ2VudHNoaW0uY29yZS52MS5IZWFydGJlYXRQcm9ncmVzc0gAEjoKDmRlZ3JhZGVkX3N0YXRlGBMgASgLMiAuYWdlbnRzaGltLmNvcmUudjEuRGVncmFkZWRTdGF0ZUgAEjQKCHVucGFyc2VkGBQgASgLMiAuYWdlbnRzaGltLmNvcmUudjEuVW5wYXJzZWRFdmVudEgAEjwKD21lc3NhZ2VfbGF0ZW5jeRgVIAEoCzIhLmFnZW50c2hpbS5jb3JlLnYxLk1lc3NhZ2VMYXRlbmN5SAASPAoPY29udGV4dF9jbGVhcmVkGBYgASgLMiEuYWdlbnRzaGltLmNvcmUudjEuQ29udGV4dENsZWFyZWRIABJAChFjb250ZXh0X2NvbXBhY3RlZBgXIAEoCzIjLmFnZW50c2hpbS5jb3JlLnYxLkNvbnRleHRDb21wYWN0ZWRIABJHChVmaWxlX3BsYW5lX2RpYWdub3N0aWMYGCABKAsyJi5hZ2VudHNoaW0uY29yZS52MS5GaWxlUGxhbmVEaWFnbm9zdGljSAASPwoRdHVybl9jbGFpbV9icmlkZ2UYGSABKAsyIi5hZ2VudHNoaW0uY29yZS52MS5UdXJuQ2xhaW1CcmlkZ2VIABI8Cg9xdWVyeV9saWZlY3ljbGUYGiABKAsyIS5hZ2VudHNoaW0uY29yZS52MS5RdWVyeUxpZmVjeWNsZUgAEk8KGWFjY291bnRfdXNhZ2Vfb2JzZXJ2YXRpb24YGyABKAsyKi5hZ2VudHNoaW0uY29yZS52MS5BY2NvdW50VXNhZ2VPYnNlcnZhdGlvbkgAEiYKBnZlbmRvchgeIAEoCzIULmdvb2dsZS5wcm90b2J1Zi5BbnlIABInCgZleHRyYXMYKCABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0QgkKB3BheWxvYWQibgoKRXZlbnRCYXRjaBIoCgZldmVudHMYASADKAsyGC5hZ2VudHNoaW0uY29yZS52MS5FdmVudBI2Cg5jdXJzb3JfYWR2YW5jZRgCIAEoCzIeLmFnZW50c2hpbS5jb3JlLnYxLkN1cnNvclN0YXRlImcKDVVucGFyc2VkRXZlbnQSEwoLc291cmNlX3BhdGgYASABKAkSEwoLYnl0ZV9vZmZzZXQYAiABKAMSCwoDcmF3GAMgASgMEg0KBWVycm9yGAQgASgJEhAKCHByb2R1Y2VyGAUgASgJInkKDlNlc3Npb25TdGFydGVkEjAKBnNvdXJjZRgBIAEoDjIgLmFnZW50c2hpbS5jb3JlLnYxLlNlc3Npb25Tb3VyY2USDQoFbW9kZWwYAiABKAkSCwoDY3dkGAMgASgJEhkKEXZlbmRvcl9zZXNzaW9uX2lkGAQgASgJIh4KDFNlc3Npb25FbmRlZBIOCgZyZWFzb24YASABKAkiNgoLVHVyblN0YXJ0ZWQSFgoOcHJvbXB0X3ByZXZpZXcYASABKAkSDwoHdHVybl9pZBgCIAEoCSI/Cg9UdXJuQ2xhaW1CcmlkZ2USDwoHdHVybl9pZBgBIAEoCRIbChNwcmV2aW91c19zZXNzaW9uX2lkGAIgASgJIlgKCVR1cm5FbmRlZBITCgtzdG9wX3JlYXNvbhgBIAEoCRITCgtkdXJhdGlvbl9tcxgCIAEoAxIQCghpc19lcnJvchgDIAEoCBIPCgd0dXJuX2lkGAQgASgJIv8BCg5RdWVyeUxpZmVjeWNsZRIZChFxdWVyeV9pbnN0YW5jZV9pZBgBIAEoCRIWCg5vYnNlcnZlZF9hdF9tcxgCIAEoAxIyCgdjcmVhdGVkGAogASgLMh8uYWdlbnRzaGltLmNvcmUudjEuUXVlcnlDcmVhdGVkSAASQwoQcnVudGltZV9vYnNlcnZlZBgLIAEoCzInLmFnZW50c2hpbS5jb3JlLnYxLlF1ZXJ5UnVudGltZU9ic2VydmVkSAASOAoKdGVybWluYXRlZBgMIAEoCzIiLmFnZW50c2hpbS5jb3JlLnYxLlF1ZXJ5VGVybWluYXRlZEgAQgcKBWV2ZW50IpkBCgxRdWVyeUNyZWF0ZWQSFwoPcmVxdWVzdGVkX21vZGVsGAEgASgJEi4KBWZyZXNoGAogASgLMh0uYWdlbnRzaGltLmNvcmUudjEuRnJlc2hRdWVyeUgAEjIKB3Jlc3VtZWQYCyABKAsyHy5hZ2VudHNoaW0uY29yZS52MS5SZXN1bWVkUXVlcnlIAEIMCgppbnZvY2F0aW9uIgwKCkZyZXNoUXVlcnkiMwoMUmVzdW1lZFF1ZXJ5EiMKG3JlcXVlc3RlZF92ZW5kb3Jfc2Vzc2lvbl9pZBgBIAEoCSJRChRRdWVyeVJ1bnRpbWVPYnNlcnZlZBI5CghpZGVudGl0eRgBIAEoCzInLmFnZW50c2hpbS5jb3JlLnYxLlF1ZXJ5UnVudGltZUlkZW50aXR5IqAEChRRdWVyeVJ1bnRpbWVJZGVudGl0eRIZChF2ZW5kb3Jfc2Vzc2lvbl9pZBgBIAEoCRIXCg9lZmZlY3RpdmVfbW9kZWwYAiABKAkSEwoLc2RrX3ZlcnNpb24YAyABKAkSGwoTY2xhdWRlX2NvZGVfdmVyc2lvbhgEIAEoCRIWCg5zaGltX2J1aWxkX3NoYRgFIAEoCRITCgthdXRoX3NvdXJjZRgGIAEoCRIZChFzdWJzY3JpcHRpb25fdHlwZRgHIAEoCRIXCg9mYXN0X21vZGVfc3RhdGUYCCABKAkSGAoQZmFzdF9tb2RlX3JlYXNvbhgJIAEoCRJBChFlZmZlY3RpdmVfb3B0aW9ucxgKIAEoCzImLmFnZW50c2hpbS5jb3JlLnYxLkV2aWRlbmNlRmluZ2VycHJpbnQSOAoIc2V0dGluZ3MYCyABKAsyJi5hZ2VudHNoaW0uY29yZS52MS5FdmlkZW5jZUZpbmdlcnByaW50EjUKBXRvb2xzGAwgASgLMiYuYWdlbnRzaGltLmNvcmUudjEuRXZpZGVuY2VGaW5nZXJwcmludBIzCgNtY3AYDSABKAsyJi5hZ2VudHNoaW0uY29yZS52MS5FdmlkZW5jZUZpbmdlcnByaW50Ej4KDmNvbnRleHRfcHJlZml4GA4gASgLMiYuYWdlbnRzaGltLmNvcmUudjEuRXZpZGVuY2VGaW5nZXJwcmludCJ1ChNFdmlkZW5jZUZpbmdlcnByaW50EhAKBnNoYTI1NhgBIAEoCUgAEkAKC3VuYXZhaWxhYmxlGAIgASgLMikuYWdlbnRzaGltLmNvcmUudjEuRmluZ2VycHJpbnRVbmF2YWlsYWJsZUgAQgoKCGV2aWRlbmNlIicKFkZpbmdlcnByaW50VW5hdmFpbGFibGUSDQoFY2F1c2UYASABKAkivwMKD1F1ZXJ5VGVybWluYXRlZBIbChF2ZW5kb3Jfc2Vzc2lvbl9pZBgBIAEoCUgAEmIKI3ZlbmRvcl9zZXNzaW9uX2lkZW50aXR5X3VuYXZhaWxhYmxlGAIgASgLMjMuYWdlbnRzaGltLmNvcmUudjEuVmVuZG9yU2Vzc2lvbklkZW50aXR5VW5hdmFpbGFibGVIABJFCgtpbnRlbnRpb25hbBgKIAEoCzIuLmFnZW50c2hpbS5jb3JlLnYxLkludGVudGlvbmFsUXVlcnlUZXJtaW5hdGlvbkgBEj8KDnVuZXhwZWN0ZWRfZW9mGAsgASgLMiUuYWdlbnRzaGltLmNvcmUudjEuVW5leHBlY3RlZFF1ZXJ5RW9mSAESQwoQaXRlcmF0b3JfZmFpbHVyZRgMIAEoCzInLmFnZW50c2hpbS5jb3JlLnYxLlF1ZXJ5SXRlcmF0b3JGYWlsdXJlSAESQQoPc3RhcnR1cF9mYWlsdXJlGA0gASgLMiYuYWdlbnRzaGltLmNvcmUudjEuUXVlcnlTdGFydHVwRmFpbHVyZUgBQhEKD3ZlbmRvcl9pZGVudGl0eUIICgZyZWFzb24iIgogVmVuZG9yU2Vzc2lvbklkZW50aXR5VW5hdmFpbGFibGUiLQobSW50ZW50aW9uYWxRdWVyeVRlcm1pbmF0aW9uEg4KBnJlYXNvbhgBIAEoCSIUChJVbmV4cGVjdGVkUXVlcnlFb2YiJQoUUXVlcnlJdGVyYXRvckZhaWx1cmUSDQoFY2F1c2UYASABKAkiJAoTUXVlcnlTdGFydHVwRmFpbHVyZRINCgVjYXVzZRgBIAEoCSLCAwoXQWNjb3VudFVzYWdlT2JzZXJ2YXRpb24SGQoRcXVlcnlfaW5zdGFuY2VfaWQYASABKAkSDwoHdHVybl9pZBgCIAEoCRIWCg5ib3VuZGFyeV9hdF9tcxgDIAEoAxIWCg5vYnNlcnZlZF9hdF9tcxgEIAEoAxIZChFzYW1wbGVfbGF0ZW5jeV9tcxgFIAEoAxIZChFzdWJzY3JpcHRpb25fdHlwZRgGIAEoCRI/Cgp0dXJuX3N0YXJ0GAogASgLMikuYWdlbnRzaGltLmNvcmUudjEuVHVyblN0YXJ0VXNhZ2VCb3VuZGFyeUgAEjsKCHR1cm5fZW5kGAsgASgLMicuYWdlbnRzaGltLmNvcmUudjEuVHVybkVuZFVzYWdlQm91bmRhcnlIABI9CglhdmFpbGFibGUYFCABKAsyKC5hZ2VudHNoaW0uY29yZS52MS5BY2NvdW50VXNhZ2VBdmFpbGFibGVIARJBCgt1bmF2YWlsYWJsZRgVIAEoCzIqLmFnZW50c2hpbS5jb3JlLnYxLkFjY291bnRVc2FnZVVuYXZhaWxhYmxlSAFCCgoIYm91bmRhcnlCCQoHb3V0Y29tZSIYChZUdXJuU3RhcnRVc2FnZUJvdW5kYXJ5IhYKFFR1cm5FbmRVc2FnZUJvdW5kYXJ5IkoKFUFjY291bnRVc2FnZUF2YWlsYWJsZRIxCglmaXZlX2hvdXIYASABKAsyHi5hZ2VudHNoaW0uY29yZS52MS5Vc2FnZVdpbmRvdyJACgtVc2FnZVdpbmRvdxIbChN1dGlsaXphdGlvbl9wZXJjZW50GAEgASgBEhQKDHJlc2V0c19hdF9tcxgCIAEoAyLNAgoXQWNjb3VudFVzYWdlVW5hdmFpbGFibGUSSQoTc2VydmljZV91bmF2YWlsYWJsZRgBIAEoCzIqLmFnZW50c2hpbS5jb3JlLnYxLlVzYWdlU2VydmljZVVuYXZhaWxhYmxlSAASSgoSd2luZG93X3VuYXZhaWxhYmxlGAIgASgLMiwuYWdlbnRzaGltLmNvcmUudjEuRml2ZUhvdXJXaW5kb3dVbmF2YWlsYWJsZUgAEkwKF3V0aWxpemF0aW9uX3VuYXZhaWxhYmxlGAMgASgLMikuYWdlbnRzaGltLmNvcmUudjEuVXRpbGl6YXRpb25VbmF2YWlsYWJsZUgAEkMKEHNhbXBsaW5nX2ZhaWx1cmUYBCABKAsyJy5hZ2VudHNoaW0uY29yZS52MS5Vc2FnZVNhbXBsaW5nRmFpbHVyZUgAQggKBnJlYXNvbiIZChdVc2FnZVNlcnZpY2VVbmF2YWlsYWJsZSIbChlGaXZlSG91cldpbmRvd1VuYXZhaWxhYmxlIhgKFlV0aWxpemF0aW9uVW5hdmFpbGFibGUiJQoUVXNhZ2VTYW1wbGluZ0ZhaWx1cmUSDQoFY2F1c2UYASABKAkiEAoOQ29udGV4dENsZWFyZWQinAEKEENvbnRleHRDb21wYWN0ZWQSOQoHdHJpZ2dlchgBIAEoDjIoLmFnZW50c2hpbS5jb3JlLnYxLkNvbnRleHRDb21wYWN0VHJpZ2dlchISCgpwcmVfdG9rZW5zGAIgASgDEhMKC3Bvc3RfdG9rZW5zGAMgASgDEhMKC2R1cmF0aW9uX21zGAQgASgDEg8KB3N1bW1hcnkYBSABKAkiiAEKC1Rhc2tTdGFydGVkEg8KB3Rhc2tfaWQYASABKAkSKQoEa2luZBgCIAEoDjIbLmFnZW50c2hpbS5jb3JlLnYxLlRhc2tLaW5kEhMKC3Rvb2xfdXNlX2lkGAMgASgJEhMKC2Rlc2NyaXB0aW9uGAQgASgJEhMKC291dHB1dF9wYXRoGAUgASgJInwKDFRhc2tQcm9ncmVzcxIPCgd0YXNrX2lkGAEgASgJEikKBGtpbmQYAiABKA4yGy5hZ2VudHNoaW0uY29yZS52MS5UYXNrS2luZBIWCg5ieXRlc19vYnNlcnZlZBgDIAEoAxIYChByZWNvcmRzX29ic2VydmVkGAQgASgDIrMBCglUYXNrRW5kZWQSDwoHdGFza19pZBgBIAEoCRIpCgRraW5kGAIgASgOMhsuYWdlbnRzaGltLmNvcmUudjEuVGFza0tpbmQSMQoGc3RhdHVzGAMgASgOMiEuYWdlbnRzaGltLmNvcmUudjEuVGVybWluYWxTdGF0dXMSDwoHc3VtbWFyeRgEIAEoCRITCgtvdXRwdXRfcGF0aBgFIAEoCRIRCglpbmZlcmVuY2UYBiABKAkiowEKDENvbnRlbnREZWx0YRIMCgR1dWlkGAEgASgJEhMKC2Jsb2NrX2luZGV4GAIgASgNEg4KBHRleHQYAyABKAlIABISCgh0aGlua2luZxgEIAEoCUgAEhQKCmlucHV0X2pzb24YBSABKAlIABITCglzaWduYXR1cmUYBiABKAlIABIYChBlc3RpbWF0ZWRfdG9rZW5zGAcgASgDQgcKBWRlbHRhInAKEUhlYXJ0YmVhdFByb2dyZXNzEhMKC3Rvb2xfdXNlX2lkGAEgASgJEhEKCXRvb2xfbmFtZRgCIAEoCRIaChJwYXJlbnRfdG9vbF91c2VfaWQYAyABKAkSFwoPZWxhcHNlZF9zZWNvbmRzGAQgASgBIi8KDk1lc3NhZ2VMYXRlbmN5EgwKBHV1aWQYASABKAkSDwoHdHRmdF9tcxgCIAEoAyKSAQoNRGVncmFkZWRTdGF0ZRIRCgljb21wb25lbnQYASABKAkSDgoGcmVhc29uGAIgASgJEhUKDWRyb3BwZWRfY291bnQYAyABKAQSEQoJcmVjb3ZlcmVkGAQgASgIEh4KEXF1ZXJ5X2luc3RhbmNlX2lkGAUgASgJSACIAQFCFAoSX3F1ZXJ5X2luc3RhbmNlX2lkIq8CCglTaGltSGVsbG8SEgoKc2Vzc2lvbl9pZBgBIAEoCRIOCgZ2ZW5kb3IYAiABKAkSFAoMc2hpbV92ZXJzaW9uGAMgASgJEhgKEHByb3RvY29sX3ZlcnNpb24YBCABKAkSFgoOdHVybl9pbl9mbGlnaHQYBSABKAgSGQoRdmVuZG9yX3Nlc3Npb25faWQYBiABKAkSCwoDcGlkGAcgASgFEhEKCWJ1aWxkX3NoYRgIIAEoCRIXCg9hY3RpdmVfdHVybl9pZHMYCSADKAkSGQoRcXVlcnlfaW5zdGFuY2VfaWQYCiABKAkSRwoWcXVlcnlfcnVudGltZV9pZGVudGl0eRgLIAEoCzInLmFnZW50c2hpbS5jb3JlLnYxLlF1ZXJ5UnVudGltZUlkZW50aXR5ImoKC0RhZW1vbkhlbGxvEhYKDmRhZW1vbl92ZXJzaW9uGAEgASgJEhgKEHByb3RvY29sX3ZlcnNpb24YAiABKAkSEAoIZnJvbV9zZXEYAyABKAQSFwoPcGVybWlzc2lvbl9tb2RlGAQgASgJIkwKCVNoaW1SZWFkeRISCgpzZXNzaW9uX2lkGAEgASgJEhAKCGZyb21fc2VxGAIgASgEEhkKEXZlbmRvcl9zZXNzaW9uX2lkGAMgASgJIlkKDFN1Ym1pdFByb21wdBISCgpyZXF1ZXN0X2lkGAEgASgJEgwKBHRleHQYAiABKAkSDgoGb3JpZ2luGAMgASgJEhcKD3Blcm1pc3Npb25fbW9kZRgEIAEoCSItCghTZXRNb2RlbBISCgpyZXF1ZXN0X2lkGAEgASgJEg0KBW1vZGVsGAIgASgJIkcKC01vZGVsT3B0aW9uEg0KBXZhbHVlGAEgASgJEhQKDGRpc3BsYXlfbmFtZRgCIAEoCRITCgtkZXNjcmlwdGlvbhgDIAEoCSJSCgxNb2RlbENhdGFsb2cSEgoKc2Vzc2lvbl9pZBgBIAEoCRIuCgZtb2RlbHMYAiADKAsyHi5hZ2VudHNoaW0uY29yZS52MS5Nb2RlbE9wdGlvbiIfCglJbnRlcnJ1cHQSEgoKcmVxdWVzdF9pZBgBIAEoCSJxCgNBY2sSEgoKcmVxdWVzdF9pZBgBIAEoCRI+ChFpbnRlcnJ1cHRfb3V0Y29tZRgCIAEoDjIjLmFnZW50c2hpbS5jb3JlLnYxLkludGVycnVwdE91dGNvbWUSFgoOc2VsZWN0ZWRfbW9kZWwYAyABKAkiQgoETmFjaxISCgpyZXF1ZXN0X2lkGAEgASgJEg4KBnJlYXNvbhgCIAEoCRIWCg5zZWxlY3RlZF9tb2RlbBgDIAEoCSIxCglTdWJzY3JpYmUSEgoKc2Vzc2lvbl9pZBgBIAEoCRIQCghmcm9tX3NlcRgCIAEoBCJZCg1SZXBsYXlSZXF1ZXN0EhIKCnJlcXVlc3RfaWQYASABKAkSEAoIZnJvbV9zZXEYAiABKAQSDgoGdG9fc2VxGAMgASgEEhIKCm1heF9ldmVudHMYBCABKA0iSgoLUmVwbGF5RXZlbnQSEgoKcmVxdWVzdF9pZBgBIAEoCRInCgVldmVudBgCIAEoCzIYLmFnZW50c2hpbS5jb3JlLnYxLkV2ZW50IlYKClJlcGxheURvbmUSEgoKcmVxdWVzdF9pZBgBIAEoCRIRCgl0cnVuY2F0ZWQYAiABKAgSDgoGcmVhc29uGAMgASgJEhEKCWRlbGl2ZXJlZBgEIAEoBCJiChFQZXJtaXNzaW9uUmVxdWVzdBISCgpyZXF1ZXN0X2lkGAEgASgJEhEKCXRvb2xfbmFtZRgCIAEoCRImCgVpbnB1dBgDIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3QipwEKElBlcm1pc3Npb25SZXNwb25zZRISCgpyZXF1ZXN0X2lkGAEgASgJEjcKCGRlY2lzaW9uGAIgASgOMiUuYWdlbnRzaGltLmNvcmUudjEuUGVybWlzc2lvbkRlY2lzaW9uEi4KDXVwZGF0ZWRfaW5wdXQYAyABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0EhQKDGRlbnlfbWVzc2FnZRgEIAEoCSKrAgoOUGVybWlzc2lvbkl0ZW0SNQoHcmVxdWVzdBgBIAEoCzIkLmFnZW50c2hpbS5jb3JlLnYxLlBlcm1pc3Npb25SZXF1ZXN0EkAKCnJlc29sdXRpb24YAiABKA4yLC5hZ2VudHNoaW0uY29yZS52MS5QZXJtaXNzaW9uSXRlbS5SZXNvbHV0aW9uEhQKDGRlbnlfbWVzc2FnZRgDIAEoCSKJAQoKUmVzb2x1dGlvbhIaChZSRVNPTFVUSU9OX1VOU1BFQ0lGSUVEEAASFgoSUkVTT0xVVElPTl9QRU5ESU5HEAESFgoSUkVTT0xVVElPTl9BTExPV0VEEAISFQoRUkVTT0xVVElPTl9ERU5JRUQQAxIYChRSRVNPTFVUSU9OX0FCQU5ET05FRBAEIh8KCUhlYXJ0YmVhdBISCgpzZW50X2F0X21zGAEgASgDIiEKC0hlYWx0aENoZWNrEhIKCnJlcXVlc3RfaWQYASABKAkiVgoMSGVhbHRoU3RhdHVzEhIKCnJlcXVlc3RfaWQYASABKAkSDwoHaGVhbHRoeRgCIAEoCBIRCgljb21wb25lbnQYAyABKAkSDgoGcmVhc29uGAQgASgJIkwKClN0b3JlV3JpdGUSEAoIcHJvZHVjZXIYASABKAkSLAoFYmF0Y2gYAiABKAsyHS5hZ2VudHNoaW0uY29yZS52MS5FdmVudEJhdGNoIlMKDVN0b3JlV3JpdGVBY2sSEAoIYWNjZXB0ZWQYASABKAQSDwoHZGVkdXBlZBgCIAEoBBIQCghsYXN0X3NlcRgDIAEoBBINCgVlcnJvchgEIAEoCSJLCgtDdXJzb3JTdGF0ZRIPCgdmaWxlX2lkGAEgASgJEgwKBHBhdGgYAiABKAkSDgoGb2Zmc2V0GAMgASgDEg0KBWNhcnJ5GAQgASgMIh4KC0N1cnNvclF1ZXJ5Eg8KB2ZpbGVfaWQYASABKAkiVwoNT3BlblRhc2tTdGF0ZRIpCgdzdGFydGVkGAEgASgLMhguYWdlbnRzaGltLmNvcmUudjEuRXZlbnQSGwoTbGFzdF9hY3Rpdml0eV9hdF9tcxgCIAEoAyKVAQoKQ3Vyc29yTGlzdBIvCgdjdXJzb3JzGAEgAygLMh4uYWdlbnRzaGltLmNvcmUudjEuQ3Vyc29yU3RhdGUSNAoKb3Blbl90YXNrcxgCIAMoCzIgLmFnZW50c2hpbS5jb3JlLnYxLk9wZW5UYXNrU3RhdGUSIAoYb3Blbl90YXNrc19hdXRob3JpdGF0aXZlGAMgASgIIvIBChNGaWxlUGxhbmVEaWFnbm9zdGljEkIKDnNvdXJjZV9ydW50aW1lGAEgASgOMiouYWdlbnRzaGltLmNvcmUudjEuRGlhZ25vc3RpY1NvdXJjZVJ1bnRpbWUSDQoFbGV2ZWwYAiABKAkSEQoJdmVyYm9zaXR5GAMgASgJEhEKCW9wZXJhdGlvbhgEIAEoCRIPCgdtZXNzYWdlGAUgASgJEigKB2NvbnRleHQYBiABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0EhIKCnNvdXJjZV9waWQYByABKAMSEwoLc291cmNlX3BhdGgYCCABKAkqVQoFUGxhbmUSFQoRUExBTkVfVU5TUEVDSUZJRUQQABIQCgxQTEFORV9TVFJFQU0QARIOCgpQTEFORV9GSUxFEAISEwoPUExBTkVfU1lOVEhFVElDEAMqYAoKRXZlbnRDbGFzcxIbChdFVkVOVF9DTEFTU19VTlNQRUNJRklFRBAAEhoKFkVWRU5UX0NMQVNTX1BFUlNJU1RFTlQQARIZChVFVkVOVF9DTEFTU19FUEhFTUVSQUwQAipnCghUYXNrS2luZBIZChVUQVNLX0tJTkRfVU5TUEVDSUZJRUQQABITCg9UQVNLX0tJTkRfQUdFTlQQARITCg9UQVNLX0tJTkRfU0hFTEwQAhIWChJUQVNLX0tJTkRfV09SS0ZMT1cQAyq5AQoOVGVybWluYWxTdGF0dXMSHwobVEVSTUlOQUxfU1RBVFVTX1VOU1BFQ0lGSUVEEAASGAoUVEVSTUlOQUxfU1RBVFVTX0RPTkUQARIZChVURVJNSU5BTF9TVEFUVVNfRVJST1IQAhIaChZURVJNSU5BTF9TVEFUVVNfS0lMTEVEEAMSGwoXVEVSTUlOQUxfU1RBVFVTX1NUT1BQRUQQBBIYChRURVJNSU5BTF9TVEFUVVNfTE9TVBAFKokBCg1TZXNzaW9uU291cmNlEh4KGlNFU1NJT05fU09VUkNFX1VOU1BFQ0lGSUVEEAASGAoUU0VTU0lPTl9TT1VSQ0VfRlJFU0gQARIZChVTRVNTSU9OX1NPVVJDRV9SRVNVTUUQAhIjCh9TRVNTSU9OX1NPVVJDRV9DT01QQUNUX0NPTlRJTlVFEAMqdgoSUGVybWlzc2lvbkRlY2lzaW9uEiMKH1BFUk1JU1NJT05fREVDSVNJT05fVU5TUEVDSUZJRUQQABIdChlQRVJNSVNTSU9OX0RFQ0lTSU9OX0FMTE9XEAESHAoYUEVSTUlTU0lPTl9ERUNJU0lPTl9ERU5ZEAIqhgEKFUNvbnRleHRDb21wYWN0VHJpZ2dlchInCiNDT05URVhUX0NPTVBBQ1RfVFJJR0dFUl9VTlNQRUNJRklFRBAAEiIKHkNPTlRFWFRfQ09NUEFDVF9UUklHR0VSX01BTlVBTBABEiAKHENPTlRFWFRfQ09NUEFDVF9UUklHR0VSX0FVVE8QAiqeAQoQSW50ZXJydXB0T3V0Y29tZRIhCh1JTlRFUlJVUFRfT1VUQ09NRV9VTlNQRUNJRklFRBAAEiEKHUlOVEVSUlVQVF9PVVRDT01FX0lOVEVSUlVQVEVEEAESJgoiSU5URVJSVVBUX09VVENPTUVfQUxSRUFEWV9DT01QTEVURRACEhwKGElOVEVSUlVQVF9PVVRDT01FX0ZBSUxFRBADKmsKF0RpYWdub3N0aWNTb3VyY2VSdW50aW1lEikKJURJQUdOT1NUSUNfU09VUkNFX1JVTlRJTUVfVU5TUEVDSUZJRUQQABIlCiFESUFHTk9TVElDX1NPVVJDRV9SVU5USU1FX1NJREVDQVIQAUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRzaGltL2NvcmUvdjE7Y29yZXYxYgZwcm90bzM", [file_google_protobuf_any, file_google_protobuf_struct]);
 
 /**
  * Event is THE envelope every observation travels in.
@@ -225,6 +225,22 @@ export type Event = Message<"agentshim.core.v1.Event"> & {
      */
     value: TurnClaimBridge;
     case: "turnClaimBridge";
+  } | {
+    /**
+     * Records lifecycle facts for one SDK query invocation.
+     *
+     * @generated from field: agentshim.core.v1.QueryLifecycle query_lifecycle = 26;
+     */
+    value: QueryLifecycle;
+    case: "queryLifecycle";
+  } | {
+    /**
+     * Records a subscription-usage measurement at a turn boundary.
+     *
+     * @generated from field: agentshim.core.v1.AccountUsageObservation account_usage_observation = 27;
+     */
+    value: AccountUsageObservation;
+    case: "accountUsageObservation";
   } | {
     /**
      * Vendor extension payload (e.g. agentshim.data.v1.* messages). The
@@ -477,6 +493,807 @@ export const TurnEndedSchema: GenMessage<TurnEnded> = /*@__PURE__*/
   messageDesc(file_agentshim_core_v1_core, 7);
 
 /**
+ * Identifies one invocation of the SDK query API and every lifecycle event it
+ * emits.
+ *
+ * @generated from message agentshim.core.v1.QueryLifecycle
+ */
+export type QueryLifecycle = Message<"agentshim.core.v1.QueryLifecycle"> & {
+  /**
+   * Uniquely identifies one query() invocation within a shim session.
+   *
+   * @generated from field: string query_instance_id = 1;
+   */
+  queryInstanceId: string;
+
+  /**
+   * Gives the Unix epoch time at which the lifecycle event was observed.
+   *
+   * @generated from field: int64 observed_at_ms = 2;
+   */
+  observedAtMs: bigint;
+
+  /**
+   * Describes exactly one lifecycle event without relying on a state enum.
+   *
+   * @generated from oneof agentshim.core.v1.QueryLifecycle.event
+   */
+  event: {
+    /**
+     * Records creation of the query.
+     *
+     * @generated from field: agentshim.core.v1.QueryCreated created = 10;
+     */
+    value: QueryCreated;
+    case: "created";
+  } | {
+    /**
+     * Records the effective runtime identity reported after initialization.
+     *
+     * @generated from field: agentshim.core.v1.QueryRuntimeObserved runtime_observed = 11;
+     */
+    value: QueryRuntimeObserved;
+    case: "runtimeObserved";
+  } | {
+    /**
+     * Records termination of the query.
+     *
+     * @generated from field: agentshim.core.v1.QueryTerminated terminated = 12;
+     */
+    value: QueryTerminated;
+    case: "terminated";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message agentshim.core.v1.QueryLifecycle.
+ * Use `create(QueryLifecycleSchema)` to create a new message.
+ */
+export const QueryLifecycleSchema: GenMessage<QueryLifecycle> = /*@__PURE__*/
+  messageDesc(file_agentshim_core_v1_core, 8);
+
+/**
+ * Records the options used to construct one SDK query.
+ *
+ * @generated from message agentshim.core.v1.QueryCreated
+ */
+export type QueryCreated = Message<"agentshim.core.v1.QueryCreated"> & {
+  /**
+   * Gives the requested model string passed to the SDK.
+   *
+   * @generated from field: string requested_model = 1;
+   */
+  requestedModel: string;
+
+  /**
+   * Identifies whether the query starts a vendor session or resumes one.
+   *
+   * @generated from oneof agentshim.core.v1.QueryCreated.invocation
+   */
+  invocation: {
+    /**
+     * Indicates that no vendor session was supplied for resumption.
+     *
+     * @generated from field: agentshim.core.v1.FreshQuery fresh = 10;
+     */
+    value: FreshQuery;
+    case: "fresh";
+  } | {
+    /**
+     * Identifies the vendor session supplied for resumption.
+     *
+     * @generated from field: agentshim.core.v1.ResumedQuery resumed = 11;
+     */
+    value: ResumedQuery;
+    case: "resumed";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message agentshim.core.v1.QueryCreated.
+ * Use `create(QueryCreatedSchema)` to create a new message.
+ */
+export const QueryCreatedSchema: GenMessage<QueryCreated> = /*@__PURE__*/
+  messageDesc(file_agentshim_core_v1_core, 9);
+
+/**
+ * Marks construction of a query without a vendor session to resume.
+ *
+ * @generated from message agentshim.core.v1.FreshQuery
+ */
+export type FreshQuery = Message<"agentshim.core.v1.FreshQuery"> & {
+};
+
+/**
+ * Describes the message agentshim.core.v1.FreshQuery.
+ * Use `create(FreshQuerySchema)` to create a new message.
+ */
+export const FreshQuerySchema: GenMessage<FreshQuery> = /*@__PURE__*/
+  messageDesc(file_agentshim_core_v1_core, 10);
+
+/**
+ * Records construction of a query that resumes a vendor session.
+ *
+ * @generated from message agentshim.core.v1.ResumedQuery
+ */
+export type ResumedQuery = Message<"agentshim.core.v1.ResumedQuery"> & {
+  /**
+   * Gives the exact vendor session identifier supplied to the SDK.
+   *
+   * @generated from field: string requested_vendor_session_id = 1;
+   */
+  requestedVendorSessionId: string;
+};
+
+/**
+ * Describes the message agentshim.core.v1.ResumedQuery.
+ * Use `create(ResumedQuerySchema)` to create a new message.
+ */
+export const ResumedQuerySchema: GenMessage<ResumedQuery> = /*@__PURE__*/
+  messageDesc(file_agentshim_core_v1_core, 11);
+
+/**
+ * Records the effective runtime identity reported by the initialized query.
+ *
+ * @generated from message agentshim.core.v1.QueryRuntimeObserved
+ */
+export type QueryRuntimeObserved = Message<"agentshim.core.v1.QueryRuntimeObserved"> & {
+  /**
+   * Contains the effective runtime identity used by the query.
+   *
+   * @generated from field: agentshim.core.v1.QueryRuntimeIdentity identity = 1;
+   */
+  identity?: QueryRuntimeIdentity | undefined;
+};
+
+/**
+ * Describes the message agentshim.core.v1.QueryRuntimeObserved.
+ * Use `create(QueryRuntimeObservedSchema)` to create a new message.
+ */
+export const QueryRuntimeObservedSchema: GenMessage<QueryRuntimeObserved> = /*@__PURE__*/
+  messageDesc(file_agentshim_core_v1_core, 12);
+
+/**
+ * Identifies configuration capable of affecting usage, caching, or latency.
+ *
+ * @generated from message agentshim.core.v1.QueryRuntimeIdentity
+ */
+export type QueryRuntimeIdentity = Message<"agentshim.core.v1.QueryRuntimeIdentity"> & {
+  /**
+   * Gives the vendor session identifier reported after initialization.
+   *
+   * @generated from field: string vendor_session_id = 1;
+   */
+  vendorSessionId: string;
+
+  /**
+   * Gives the effective model reported after initialization.
+   *
+   * @generated from field: string effective_model = 2;
+   */
+  effectiveModel: string;
+
+  /**
+   * Gives the Claude Agent SDK package version.
+   *
+   * @generated from field: string sdk_version = 3;
+   */
+  sdkVersion: string;
+
+  /**
+   * Gives the Claude Code version used by the SDK.
+   *
+   * @generated from field: string claude_code_version = 4;
+   */
+  claudeCodeVersion: string;
+
+  /**
+   * Gives the shim build commit.
+   *
+   * @generated from field: string shim_build_sha = 5;
+   */
+  shimBuildSha: string;
+
+  /**
+   * Gives the non-secret authentication-source description.
+   *
+   * @generated from field: string auth_source = 6;
+   */
+  authSource: string;
+
+  /**
+   * Gives the subscription type reported by the usage service.
+   *
+   * @generated from field: string subscription_type = 7;
+   */
+  subscriptionType: string;
+
+  /**
+   * Gives the reported fast-mode state.
+   *
+   * @generated from field: string fast_mode_state = 8;
+   */
+  fastModeState: string;
+
+  /**
+   * Gives the explanation associated with the fast-mode state.
+   *
+   * @generated from field: string fast_mode_reason = 9;
+   */
+  fastModeReason: string;
+
+  /**
+   * Hashes the effective SDK options using a canonical encoding.
+   *
+   * @generated from field: agentshim.core.v1.EvidenceFingerprint effective_options = 10;
+   */
+  effectiveOptions?: EvidenceFingerprint | undefined;
+
+  /**
+   * Hashes the effective settings using a canonical encoding.
+   *
+   * @generated from field: agentshim.core.v1.EvidenceFingerprint settings = 11;
+   */
+  settings?: EvidenceFingerprint | undefined;
+
+  /**
+   * Hashes the ordered tool definitions using a canonical encoding.
+   *
+   * @generated from field: agentshim.core.v1.EvidenceFingerprint tools = 12;
+   */
+  tools?: EvidenceFingerprint | undefined;
+
+  /**
+   * Hashes the ordered MCP configuration using a canonical encoding.
+   *
+   * @generated from field: agentshim.core.v1.EvidenceFingerprint mcp = 13;
+   */
+  mcp?: EvidenceFingerprint | undefined;
+
+  /**
+   * Hashes the cacheable system and instruction prefix using a canonical encoding.
+   *
+   * @generated from field: agentshim.core.v1.EvidenceFingerprint context_prefix = 14;
+   */
+  contextPrefix?: EvidenceFingerprint | undefined;
+};
+
+/**
+ * Describes the message agentshim.core.v1.QueryRuntimeIdentity.
+ * Use `create(QueryRuntimeIdentitySchema)` to create a new message.
+ */
+export const QueryRuntimeIdentitySchema: GenMessage<QueryRuntimeIdentity> = /*@__PURE__*/
+  messageDesc(file_agentshim_core_v1_core, 13);
+
+/**
+ * Represents either a known SHA-256 fingerprint or explicit unavailability.
+ *
+ * @generated from message agentshim.core.v1.EvidenceFingerprint
+ */
+export type EvidenceFingerprint = Message<"agentshim.core.v1.EvidenceFingerprint"> & {
+  /**
+   * Describes whether the fingerprint could be produced.
+   *
+   * @generated from oneof agentshim.core.v1.EvidenceFingerprint.evidence
+   */
+  evidence: {
+    /**
+     * Gives a lowercase hexadecimal SHA-256 digest.
+     *
+     * @generated from field: string sha256 = 1;
+     */
+    value: string;
+    case: "sha256";
+  } | {
+    /**
+     * Explains why the producer could not obtain the fingerprint.
+     *
+     * @generated from field: agentshim.core.v1.FingerprintUnavailable unavailable = 2;
+     */
+    value: FingerprintUnavailable;
+    case: "unavailable";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message agentshim.core.v1.EvidenceFingerprint.
+ * Use `create(EvidenceFingerprintSchema)` to create a new message.
+ */
+export const EvidenceFingerprintSchema: GenMessage<EvidenceFingerprint> = /*@__PURE__*/
+  messageDesc(file_agentshim_core_v1_core, 14);
+
+/**
+ * Explains why an evidence fingerprint could not be produced.
+ *
+ * @generated from message agentshim.core.v1.FingerprintUnavailable
+ */
+export type FingerprintUnavailable = Message<"agentshim.core.v1.FingerprintUnavailable"> & {
+  /**
+   * Gives a diagnostic suitable for logs and experiment validation.
+   *
+   * @generated from field: string cause = 1;
+   */
+  cause: string;
+};
+
+/**
+ * Describes the message agentshim.core.v1.FingerprintUnavailable.
+ * Use `create(FingerprintUnavailableSchema)` to create a new message.
+ */
+export const FingerprintUnavailableSchema: GenMessage<FingerprintUnavailable> = /*@__PURE__*/
+  messageDesc(file_agentshim_core_v1_core, 15);
+
+/**
+ * Records termination of one SDK query.
+ *
+ * @generated from message agentshim.core.v1.QueryTerminated
+ */
+export type QueryTerminated = Message<"agentshim.core.v1.QueryTerminated"> & {
+  /**
+   * Identifies the vendor conversation when query initialization exposed it,
+   * or states explicitly that termination preceded vendor identity discovery.
+   *
+   * @generated from oneof agentshim.core.v1.QueryTerminated.vendor_identity
+   */
+  vendorIdentity: {
+    /**
+     * Gives the non-empty vendor session identifier associated with the query.
+     *
+     * @generated from field: string vendor_session_id = 1;
+     */
+    value: string;
+    case: "vendorSessionId";
+  } | {
+    /**
+     * Records that the query ended before the SDK exposed a vendor session.
+     *
+     * @generated from field: agentshim.core.v1.VendorSessionIdentityUnavailable vendor_session_identity_unavailable = 2;
+     */
+    value: VendorSessionIdentityUnavailable;
+    case: "vendorSessionIdentityUnavailable";
+  } | { case: undefined; value?: undefined };
+
+  /**
+   * Identifies the termination condition without relying on a state enum.
+   *
+   * @generated from oneof agentshim.core.v1.QueryTerminated.reason
+   */
+  reason: {
+    /**
+     * Records termination initiated by shim shutdown or hibernation.
+     *
+     * @generated from field: agentshim.core.v1.IntentionalQueryTermination intentional = 10;
+     */
+    value: IntentionalQueryTermination;
+    case: "intentional";
+  } | {
+    /**
+     * Records unexpected completion of the SDK iterator.
+     *
+     * @generated from field: agentshim.core.v1.UnexpectedQueryEof unexpected_eof = 11;
+     */
+    value: UnexpectedQueryEof;
+    case: "unexpectedEof";
+  } | {
+    /**
+     * Records an error thrown by the SDK iterator.
+     *
+     * @generated from field: agentshim.core.v1.QueryIteratorFailure iterator_failure = 12;
+     */
+    value: QueryIteratorFailure;
+    case: "iteratorFailure";
+  } | {
+    /**
+     * Records failure before the query completed initialization.
+     *
+     * @generated from field: agentshim.core.v1.QueryStartupFailure startup_failure = 13;
+     */
+    value: QueryStartupFailure;
+    case: "startupFailure";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message agentshim.core.v1.QueryTerminated.
+ * Use `create(QueryTerminatedSchema)` to create a new message.
+ */
+export const QueryTerminatedSchema: GenMessage<QueryTerminated> = /*@__PURE__*/
+  messageDesc(file_agentshim_core_v1_core, 16);
+
+/**
+ * Marks a query lifecycle boundary observed before vendor session discovery.
+ *
+ * @generated from message agentshim.core.v1.VendorSessionIdentityUnavailable
+ */
+export type VendorSessionIdentityUnavailable = Message<"agentshim.core.v1.VendorSessionIdentityUnavailable"> & {
+};
+
+/**
+ * Describes the message agentshim.core.v1.VendorSessionIdentityUnavailable.
+ * Use `create(VendorSessionIdentityUnavailableSchema)` to create a new message.
+ */
+export const VendorSessionIdentityUnavailableSchema: GenMessage<VendorSessionIdentityUnavailable> = /*@__PURE__*/
+  messageDesc(file_agentshim_core_v1_core, 17);
+
+/**
+ * Records an intentional query termination.
+ *
+ * @generated from message agentshim.core.v1.IntentionalQueryTermination
+ */
+export type IntentionalQueryTermination = Message<"agentshim.core.v1.IntentionalQueryTermination"> & {
+  /**
+   * Gives the shim lifecycle reason that required termination.
+   *
+   * @generated from field: string reason = 1;
+   */
+  reason: string;
+};
+
+/**
+ * Describes the message agentshim.core.v1.IntentionalQueryTermination.
+ * Use `create(IntentionalQueryTerminationSchema)` to create a new message.
+ */
+export const IntentionalQueryTerminationSchema: GenMessage<IntentionalQueryTermination> = /*@__PURE__*/
+  messageDesc(file_agentshim_core_v1_core, 18);
+
+/**
+ * Marks unexpected completion of the SDK iterator.
+ *
+ * @generated from message agentshim.core.v1.UnexpectedQueryEof
+ */
+export type UnexpectedQueryEof = Message<"agentshim.core.v1.UnexpectedQueryEof"> & {
+};
+
+/**
+ * Describes the message agentshim.core.v1.UnexpectedQueryEof.
+ * Use `create(UnexpectedQueryEofSchema)` to create a new message.
+ */
+export const UnexpectedQueryEofSchema: GenMessage<UnexpectedQueryEof> = /*@__PURE__*/
+  messageDesc(file_agentshim_core_v1_core, 19);
+
+/**
+ * Records an error thrown by the SDK iterator.
+ *
+ * @generated from message agentshim.core.v1.QueryIteratorFailure
+ */
+export type QueryIteratorFailure = Message<"agentshim.core.v1.QueryIteratorFailure"> & {
+  /**
+   * Gives the complete error diagnostic.
+   *
+   * @generated from field: string cause = 1;
+   */
+  cause: string;
+};
+
+/**
+ * Describes the message agentshim.core.v1.QueryIteratorFailure.
+ * Use `create(QueryIteratorFailureSchema)` to create a new message.
+ */
+export const QueryIteratorFailureSchema: GenMessage<QueryIteratorFailure> = /*@__PURE__*/
+  messageDesc(file_agentshim_core_v1_core, 20);
+
+/**
+ * Records failure before query initialization completed.
+ *
+ * @generated from message agentshim.core.v1.QueryStartupFailure
+ */
+export type QueryStartupFailure = Message<"agentshim.core.v1.QueryStartupFailure"> & {
+  /**
+   * Gives the complete error diagnostic.
+   *
+   * @generated from field: string cause = 1;
+   */
+  cause: string;
+};
+
+/**
+ * Describes the message agentshim.core.v1.QueryStartupFailure.
+ * Use `create(QueryStartupFailureSchema)` to create a new message.
+ */
+export const QueryStartupFailureSchema: GenMessage<QueryStartupFailure> = /*@__PURE__*/
+  messageDesc(file_agentshim_core_v1_core, 21);
+
+/**
+ * Records one attempt to measure subscription usage at a turn boundary.
+ *
+ * @generated from message agentshim.core.v1.AccountUsageObservation
+ */
+export type AccountUsageObservation = Message<"agentshim.core.v1.AccountUsageObservation"> & {
+  /**
+   * Identifies the query serving the turn.
+   *
+   * @generated from field: string query_instance_id = 1;
+   */
+  queryInstanceId: string;
+
+  /**
+   * Identifies the turn whose boundary was measured.
+   *
+   * @generated from field: string turn_id = 2;
+   */
+  turnId: string;
+
+  /**
+   * Gives the exact turn-boundary time independently of sampling latency.
+   *
+   * @generated from field: int64 boundary_at_ms = 3;
+   */
+  boundaryAtMs: bigint;
+
+  /**
+   * Gives the time at which the usage response was received.
+   *
+   * @generated from field: int64 observed_at_ms = 4;
+   */
+  observedAtMs: bigint;
+
+  /**
+   * Gives the elapsed time required to obtain the usage response.
+   *
+   * @generated from field: int64 sample_latency_ms = 5;
+   */
+  sampleLatencyMs: bigint;
+
+  /**
+   * Gives the subscription type reported by the usage service.
+   *
+   * @generated from field: string subscription_type = 6;
+   */
+  subscriptionType: string;
+
+  /**
+   * Identifies the measured turn boundary.
+   *
+   * @generated from oneof agentshim.core.v1.AccountUsageObservation.boundary
+   */
+  boundary: {
+    /**
+     * Marks the boundary immediately before prompt submission.
+     *
+     * @generated from field: agentshim.core.v1.TurnStartUsageBoundary turn_start = 10;
+     */
+    value: TurnStartUsageBoundary;
+    case: "turnStart";
+  } | {
+    /**
+     * Marks the boundary after the terminal result is received.
+     *
+     * @generated from field: agentshim.core.v1.TurnEndUsageBoundary turn_end = 11;
+     */
+    value: TurnEndUsageBoundary;
+    case: "turnEnd";
+  } | { case: undefined; value?: undefined };
+
+  /**
+   * Contains either the measurement or its explicit failure.
+   *
+   * @generated from oneof agentshim.core.v1.AccountUsageObservation.outcome
+   */
+  outcome: {
+    /**
+     * Contains the account-usage measurement.
+     *
+     * @generated from field: agentshim.core.v1.AccountUsageAvailable available = 20;
+     */
+    value: AccountUsageAvailable;
+    case: "available";
+  } | {
+    /**
+     * Explains why the measurement could not be obtained.
+     *
+     * @generated from field: agentshim.core.v1.AccountUsageUnavailable unavailable = 21;
+     */
+    value: AccountUsageUnavailable;
+    case: "unavailable";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message agentshim.core.v1.AccountUsageObservation.
+ * Use `create(AccountUsageObservationSchema)` to create a new message.
+ */
+export const AccountUsageObservationSchema: GenMessage<AccountUsageObservation> = /*@__PURE__*/
+  messageDesc(file_agentshim_core_v1_core, 22);
+
+/**
+ * Marks an observation taken immediately before prompt submission.
+ *
+ * @generated from message agentshim.core.v1.TurnStartUsageBoundary
+ */
+export type TurnStartUsageBoundary = Message<"agentshim.core.v1.TurnStartUsageBoundary"> & {
+};
+
+/**
+ * Describes the message agentshim.core.v1.TurnStartUsageBoundary.
+ * Use `create(TurnStartUsageBoundarySchema)` to create a new message.
+ */
+export const TurnStartUsageBoundarySchema: GenMessage<TurnStartUsageBoundary> = /*@__PURE__*/
+  messageDesc(file_agentshim_core_v1_core, 23);
+
+/**
+ * Marks an observation taken after the terminal result is received.
+ *
+ * @generated from message agentshim.core.v1.TurnEndUsageBoundary
+ */
+export type TurnEndUsageBoundary = Message<"agentshim.core.v1.TurnEndUsageBoundary"> & {
+};
+
+/**
+ * Describes the message agentshim.core.v1.TurnEndUsageBoundary.
+ * Use `create(TurnEndUsageBoundarySchema)` to create a new message.
+ */
+export const TurnEndUsageBoundarySchema: GenMessage<TurnEndUsageBoundary> = /*@__PURE__*/
+  messageDesc(file_agentshim_core_v1_core, 24);
+
+/**
+ * Contains subscription-usage windows returned by the usage service.
+ *
+ * @generated from message agentshim.core.v1.AccountUsageAvailable
+ */
+export type AccountUsageAvailable = Message<"agentshim.core.v1.AccountUsageAvailable"> & {
+  /**
+   * Contains utilization of the rolling five-hour window.
+   *
+   * @generated from field: agentshim.core.v1.UsageWindow five_hour = 1;
+   */
+  fiveHour?: UsageWindow | undefined;
+};
+
+/**
+ * Describes the message agentshim.core.v1.AccountUsageAvailable.
+ * Use `create(AccountUsageAvailableSchema)` to create a new message.
+ */
+export const AccountUsageAvailableSchema: GenMessage<AccountUsageAvailable> = /*@__PURE__*/
+  messageDesc(file_agentshim_core_v1_core, 25);
+
+/**
+ * Describes utilization and reset time for one account-usage window.
+ *
+ * @generated from message agentshim.core.v1.UsageWindow
+ */
+export type UsageWindow = Message<"agentshim.core.v1.UsageWindow"> & {
+  /**
+   * Gives utilization as a percentage from zero through one hundred.
+   *
+   * @generated from field: double utilization_percent = 1;
+   */
+  utilizationPercent: number;
+
+  /**
+   * Gives the Unix epoch time at which the window resets.
+   *
+   * @generated from field: int64 resets_at_ms = 2;
+   */
+  resetsAtMs: bigint;
+};
+
+/**
+ * Describes the message agentshim.core.v1.UsageWindow.
+ * Use `create(UsageWindowSchema)` to create a new message.
+ */
+export const UsageWindowSchema: GenMessage<UsageWindow> = /*@__PURE__*/
+  messageDesc(file_agentshim_core_v1_core, 26);
+
+/**
+ * Explains why an account-usage measurement could not be obtained.
+ *
+ * @generated from message agentshim.core.v1.AccountUsageUnavailable
+ */
+export type AccountUsageUnavailable = Message<"agentshim.core.v1.AccountUsageUnavailable"> & {
+  /**
+   * Identifies the failure without collapsing distinct conditions.
+   *
+   * @generated from oneof agentshim.core.v1.AccountUsageUnavailable.reason
+   */
+  reason: {
+    /**
+     * Indicates that the account-usage API was unavailable.
+     *
+     * @generated from field: agentshim.core.v1.UsageServiceUnavailable service_unavailable = 1;
+     */
+    value: UsageServiceUnavailable;
+    case: "serviceUnavailable";
+  } | {
+    /**
+     * Indicates that the response omitted the five-hour window.
+     *
+     * @generated from field: agentshim.core.v1.FiveHourWindowUnavailable window_unavailable = 2;
+     */
+    value: FiveHourWindowUnavailable;
+    case: "windowUnavailable";
+  } | {
+    /**
+     * Indicates that the response omitted utilization.
+     *
+     * @generated from field: agentshim.core.v1.UtilizationUnavailable utilization_unavailable = 3;
+     */
+    value: UtilizationUnavailable;
+    case: "utilizationUnavailable";
+  } | {
+    /**
+     * Records a transport, parsing, or SDK error.
+     *
+     * @generated from field: agentshim.core.v1.UsageSamplingFailure sampling_failure = 4;
+     */
+    value: UsageSamplingFailure;
+    case: "samplingFailure";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message agentshim.core.v1.AccountUsageUnavailable.
+ * Use `create(AccountUsageUnavailableSchema)` to create a new message.
+ */
+export const AccountUsageUnavailableSchema: GenMessage<AccountUsageUnavailable> = /*@__PURE__*/
+  messageDesc(file_agentshim_core_v1_core, 27);
+
+/**
+ * Marks unavailability of the account-usage API.
+ *
+ * @generated from message agentshim.core.v1.UsageServiceUnavailable
+ */
+export type UsageServiceUnavailable = Message<"agentshim.core.v1.UsageServiceUnavailable"> & {
+};
+
+/**
+ * Describes the message agentshim.core.v1.UsageServiceUnavailable.
+ * Use `create(UsageServiceUnavailableSchema)` to create a new message.
+ */
+export const UsageServiceUnavailableSchema: GenMessage<UsageServiceUnavailable> = /*@__PURE__*/
+  messageDesc(file_agentshim_core_v1_core, 28);
+
+/**
+ * Marks absence of the five-hour window.
+ *
+ * @generated from message agentshim.core.v1.FiveHourWindowUnavailable
+ */
+export type FiveHourWindowUnavailable = Message<"agentshim.core.v1.FiveHourWindowUnavailable"> & {
+};
+
+/**
+ * Describes the message agentshim.core.v1.FiveHourWindowUnavailable.
+ * Use `create(FiveHourWindowUnavailableSchema)` to create a new message.
+ */
+export const FiveHourWindowUnavailableSchema: GenMessage<FiveHourWindowUnavailable> = /*@__PURE__*/
+  messageDesc(file_agentshim_core_v1_core, 29);
+
+/**
+ * Marks absence of utilization within the five-hour window.
+ *
+ * @generated from message agentshim.core.v1.UtilizationUnavailable
+ */
+export type UtilizationUnavailable = Message<"agentshim.core.v1.UtilizationUnavailable"> & {
+};
+
+/**
+ * Describes the message agentshim.core.v1.UtilizationUnavailable.
+ * Use `create(UtilizationUnavailableSchema)` to create a new message.
+ */
+export const UtilizationUnavailableSchema: GenMessage<UtilizationUnavailable> = /*@__PURE__*/
+  messageDesc(file_agentshim_core_v1_core, 30);
+
+/**
+ * Records an error encountered while sampling account usage.
+ *
+ * @generated from message agentshim.core.v1.UsageSamplingFailure
+ */
+export type UsageSamplingFailure = Message<"agentshim.core.v1.UsageSamplingFailure"> & {
+  /**
+   * Gives the complete error diagnostic.
+   *
+   * @generated from field: string cause = 1;
+   */
+  cause: string;
+};
+
+/**
+ * Describes the message agentshim.core.v1.UsageSamplingFailure.
+ * Use `create(UsageSamplingFailureSchema)` to create a new message.
+ */
+export const UsageSamplingFailureSchema: GenMessage<UsageSamplingFailure> = /*@__PURE__*/
+  messageDesc(file_agentshim_core_v1_core, 31);
+
+/**
  * The context was CLEARED: discarded outright. Nothing survives it, so there
  * is no summary to carry and no trigger to record — a clear is always the
  * user asking for one, and an automatic clear is not a thing any vendor does.
@@ -492,7 +1309,7 @@ export type ContextCleared = Message<"agentshim.core.v1.ContextCleared"> & {
  * Use `create(ContextClearedSchema)` to create a new message.
  */
 export const ContextClearedSchema: GenMessage<ContextCleared> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 8);
+  messageDesc(file_agentshim_core_v1_core, 32);
 
 /**
  * The context was COMPACTED: replaced by a summary that stands in for it.
@@ -542,7 +1359,7 @@ export type ContextCompacted = Message<"agentshim.core.v1.ContextCompacted"> & {
  * Use `create(ContextCompactedSchema)` to create a new message.
  */
 export const ContextCompactedSchema: GenMessage<ContextCompacted> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 9);
+  messageDesc(file_agentshim_core_v1_core, 33);
 
 /**
  * @generated from message agentshim.core.v1.TaskStarted
@@ -581,7 +1398,7 @@ export type TaskStarted = Message<"agentshim.core.v1.TaskStarted"> & {
  * Use `create(TaskStartedSchema)` to create a new message.
  */
 export const TaskStartedSchema: GenMessage<TaskStarted> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 10);
+  messageDesc(file_agentshim_core_v1_core, 34);
 
 /**
  * @generated from message agentshim.core.v1.TaskProgress
@@ -617,7 +1434,7 @@ export type TaskProgress = Message<"agentshim.core.v1.TaskProgress"> & {
  * Use `create(TaskProgressSchema)` to create a new message.
  */
 export const TaskProgressSchema: GenMessage<TaskProgress> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 11);
+  messageDesc(file_agentshim_core_v1_core, 35);
 
 /**
  * @generated from message agentshim.core.v1.TaskEnded
@@ -666,7 +1483,7 @@ export type TaskEnded = Message<"agentshim.core.v1.TaskEnded"> & {
  * Use `create(TaskEndedSchema)` to create a new message.
  */
 export const TaskEndedSchema: GenMessage<TaskEnded> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 12);
+  messageDesc(file_agentshim_core_v1_core, 36);
 
 /**
  * EPHEMERAL live-typing delta (delta bypass; see file-top semantics).
@@ -730,7 +1547,7 @@ export type ContentDelta = Message<"agentshim.core.v1.ContentDelta"> & {
  * Use `create(ContentDeltaSchema)` to create a new message.
  */
 export const ContentDeltaSchema: GenMessage<ContentDelta> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 13);
+  messageDesc(file_agentshim_core_v1_core, 37);
 
 /**
  * EPHEMERAL tool_progress relay.
@@ -764,10 +1581,10 @@ export type HeartbeatProgress = Message<"agentshim.core.v1.HeartbeatProgress"> &
  * Use `create(HeartbeatProgressSchema)` to create a new message.
  */
 export const HeartbeatProgressSchema: GenMessage<HeartbeatProgress> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 14);
+  messageDesc(file_agentshim_core_v1_core, 38);
 
 /**
- * EPHEMERAL first-token-latency relay.
+ * Durable first-token-latency relay.
  *
  * The vendor stamps time-to-first-token on the frame that OPENS a streamed
  * assistant message — a structural frame the delta bypass otherwise drops,
@@ -776,9 +1593,9 @@ export const HeartbeatProgressSchema: GenMessage<HeartbeatProgress> = /*@__PURE_
  * the turn instead of waiting for the turn's terminal result, which carries
  * the same number far too late to be useful.
  *
- * EPHEMERAL like its neighbours above: never persisted, never replayed, and a
- * consumer that never receives one simply has no latency to show. It is a
- * statement about the message in flight, not a durable fact about the turn.
+ * It is persisted and replayed because response-time analysis requires the
+ * first-token measurement after a daemon restart. The store sequence assigns
+ * its order relative to the assistant response it describes.
  *
  * @generated from message agentshim.core.v1.MessageLatency
  */
@@ -803,7 +1620,7 @@ export type MessageLatency = Message<"agentshim.core.v1.MessageLatency"> & {
  * Use `create(MessageLatencySchema)` to create a new message.
  */
 export const MessageLatencySchema: GenMessage<MessageLatency> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 15);
+  messageDesc(file_agentshim_core_v1_core, 39);
 
 /**
  * Honest sad-path report (store unreachable, converter storm, …).
@@ -834,6 +1651,14 @@ export type DegradedState = Message<"agentshim.core.v1.DegradedState"> & {
    * @generated from field: bool recovered = 4;
    */
   recovered: boolean;
+
+  /**
+   * Correlates a query-owned degradation with its exact query() invocation.
+   * Absent for failures that do not belong to a query lifecycle.
+   *
+   * @generated from field: optional string query_instance_id = 5;
+   */
+  queryInstanceId?: string | undefined;
 };
 
 /**
@@ -841,7 +1666,7 @@ export type DegradedState = Message<"agentshim.core.v1.DegradedState"> & {
  * Use `create(DegradedStateSchema)` to create a new message.
  */
 export const DegradedStateSchema: GenMessage<DegradedState> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 16);
+  messageDesc(file_agentshim_core_v1_core, 40);
 
 /**
  * Connection handshakes on the daemon↔shim hop. The DIALER (the shim) speaks
@@ -976,6 +1801,31 @@ export type ShimHello = Message<"agentshim.core.v1.ShimHello"> & {
    * @generated from field: repeated string active_turn_ids = 9;
    */
   activeTurnIds: string[];
+
+  /**
+   * The stable identity of the one SDK query() invocation this shim owns.
+   * Every daemon attachment binds its accounting reducer to this value before
+   * subscribing to the durable event stream, so a daemon restored after its
+   * cursor has passed QueryLifecycle records can validate later usage evidence
+   * against the same query without reconstructing or duplicating lifecycle
+   * events. Empty is a protocol violation: a shim without a query identity is
+   * not a session the daemon can safely drive.
+   *
+   * @generated from field: string query_instance_id = 10;
+   */
+  queryInstanceId: string;
+
+  /**
+   * The runtime identity the SDK reported for query_instance_id. Presence
+   * means the query reached SDK initialization, and the identity must name
+   * this hello's vendor_session_id when that session identity is known. A
+   * fresh query may omit this snapshot until its first SDK initialization;
+   * a reconnect carries the cached observation so a restored daemon can
+   * complete terminal accounting without replaying historical lifecycle rows.
+   *
+   * @generated from field: agentshim.core.v1.QueryRuntimeIdentity query_runtime_identity = 11;
+   */
+  queryRuntimeIdentity?: QueryRuntimeIdentity | undefined;
 };
 
 /**
@@ -983,7 +1833,7 @@ export type ShimHello = Message<"agentshim.core.v1.ShimHello"> & {
  * Use `create(ShimHelloSchema)` to create a new message.
  */
 export const ShimHelloSchema: GenMessage<ShimHello> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 17);
+  messageDesc(file_agentshim_core_v1_core, 41);
 
 /**
  * @generated from message agentshim.core.v1.DaemonHello
@@ -1063,7 +1913,7 @@ export type DaemonHello = Message<"agentshim.core.v1.DaemonHello"> & {
  * Use `create(DaemonHelloSchema)` to create a new message.
  */
 export const DaemonHelloSchema: GenMessage<DaemonHello> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 18);
+  messageDesc(file_agentshim_core_v1_core, 42);
 
 /**
  * The shim's FINAL ACK of the gated handshake: this session is fully wired.
@@ -1118,7 +1968,7 @@ export type ShimReady = Message<"agentshim.core.v1.ShimReady"> & {
  * Use `create(ShimReadySchema)` to create a new message.
  */
 export const ShimReadySchema: GenMessage<ShimReady> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 19);
+  messageDesc(file_agentshim_core_v1_core, 43);
 
 /**
  * @generated from message agentshim.core.v1.SubmitPrompt
@@ -1154,7 +2004,7 @@ export type SubmitPrompt = Message<"agentshim.core.v1.SubmitPrompt"> & {
  * Use `create(SubmitPromptSchema)` to create a new message.
  */
 export const SubmitPromptSchema: GenMessage<SubmitPrompt> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 20);
+  messageDesc(file_agentshim_core_v1_core, 44);
 
 /**
  * Request a deliberate mid-session model change.  Model selection is a shim
@@ -1181,7 +2031,7 @@ export type SetModel = Message<"agentshim.core.v1.SetModel"> & {
  * Use `create(SetModelSchema)` to create a new message.
  */
 export const SetModelSchema: GenMessage<SetModel> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 21);
+  messageDesc(file_agentshim_core_v1_core, 45);
 
 /**
  * The shim's SDK-provided model menu.  This is published rather than inferred
@@ -1212,7 +2062,7 @@ export type ModelOption = Message<"agentshim.core.v1.ModelOption"> & {
  * Use `create(ModelOptionSchema)` to create a new message.
  */
 export const ModelOptionSchema: GenMessage<ModelOption> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 22);
+  messageDesc(file_agentshim_core_v1_core, 46);
 
 /**
  * @generated from message agentshim.core.v1.ModelCatalog
@@ -1234,7 +2084,7 @@ export type ModelCatalog = Message<"agentshim.core.v1.ModelCatalog"> & {
  * Use `create(ModelCatalogSchema)` to create a new message.
  */
 export const ModelCatalogSchema: GenMessage<ModelCatalog> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 23);
+  messageDesc(file_agentshim_core_v1_core, 47);
 
 /**
  * Stop the current turn via the SDK's interrupt(). There is exactly one kind
@@ -1256,7 +2106,7 @@ export type Interrupt = Message<"agentshim.core.v1.Interrupt"> & {
  * Use `create(InterruptSchema)` to create a new message.
  */
 export const InterruptSchema: GenMessage<Interrupt> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 24);
+  messageDesc(file_agentshim_core_v1_core, 48);
 
 /**
  * @generated from message agentshim.core.v1.Ack
@@ -1289,7 +2139,7 @@ export type Ack = Message<"agentshim.core.v1.Ack"> & {
  * Use `create(AckSchema)` to create a new message.
  */
 export const AckSchema: GenMessage<Ack> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 25);
+  messageDesc(file_agentshim_core_v1_core, 49);
 
 /**
  * @generated from message agentshim.core.v1.Nack
@@ -1319,7 +2169,7 @@ export type Nack = Message<"agentshim.core.v1.Nack"> & {
  * Use `create(NackSchema)` to create a new message.
  */
 export const NackSchema: GenMessage<Nack> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 26);
+  messageDesc(file_agentshim_core_v1_core, 50);
 
 /**
  * Replay handshake (see file-top semantics). from_seq is EXCLUSIVE.
@@ -1347,7 +2197,7 @@ export type Subscribe = Message<"agentshim.core.v1.Subscribe"> & {
  * Use `create(SubscribeSchema)` to create a new message.
  */
 export const SubscribeSchema: GenMessage<Subscribe> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 27);
+  messageDesc(file_agentshim_core_v1_core, 51);
 
 /**
  * ---------------------------------------------------------------------------
@@ -1412,7 +2262,7 @@ export type ReplayRequest = Message<"agentshim.core.v1.ReplayRequest"> & {
  * Use `create(ReplayRequestSchema)` to create a new message.
  */
 export const ReplayRequestSchema: GenMessage<ReplayRequest> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 28);
+  messageDesc(file_agentshim_core_v1_core, 52);
 
 /**
  * One replayed historical event.
@@ -1450,7 +2300,7 @@ export type ReplayEvent = Message<"agentshim.core.v1.ReplayEvent"> & {
  * Use `create(ReplayEventSchema)` to create a new message.
  */
 export const ReplayEventSchema: GenMessage<ReplayEvent> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 29);
+  messageDesc(file_agentshim_core_v1_core, 53);
 
 /**
  * Closes a replay. Exactly one per ReplayRequest, whatever the outcome: a
@@ -1495,7 +2345,7 @@ export type ReplayDone = Message<"agentshim.core.v1.ReplayDone"> & {
  * Use `create(ReplayDoneSchema)` to create a new message.
  */
 export const ReplayDoneSchema: GenMessage<ReplayDone> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 30);
+  messageDesc(file_agentshim_core_v1_core, 54);
 
 /**
  * canUseTool round-trip. The shim BLOCKS the SDK callback on the response.
@@ -1524,7 +2374,7 @@ export type PermissionRequest = Message<"agentshim.core.v1.PermissionRequest"> &
  * Use `create(PermissionRequestSchema)` to create a new message.
  */
 export const PermissionRequestSchema: GenMessage<PermissionRequest> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 31);
+  messageDesc(file_agentshim_core_v1_core, 55);
 
 /**
  * @generated from message agentshim.core.v1.PermissionResponse
@@ -1558,7 +2408,7 @@ export type PermissionResponse = Message<"agentshim.core.v1.PermissionResponse">
  * Use `create(PermissionResponseSchema)` to create a new message.
  */
 export const PermissionResponseSchema: GenMessage<PermissionResponse> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 32);
+  messageDesc(file_agentshim_core_v1_core, 56);
 
 /**
  * Daemon-composed permission state (the request plus its resolution
@@ -1591,7 +2441,7 @@ export type PermissionItem = Message<"agentshim.core.v1.PermissionItem"> & {
  * Use `create(PermissionItemSchema)` to create a new message.
  */
 export const PermissionItemSchema: GenMessage<PermissionItem> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 33);
+  messageDesc(file_agentshim_core_v1_core, 57);
 
 /**
  * @generated from enum agentshim.core.v1.PermissionItem.Resolution
@@ -1627,7 +2477,7 @@ export enum PermissionItem_Resolution {
  * Describes the enum agentshim.core.v1.PermissionItem.Resolution.
  */
 export const PermissionItem_ResolutionSchema: GenEnum<PermissionItem_Resolution> = /*@__PURE__*/
-  enumDesc(file_agentshim_core_v1_core, 33, 0);
+  enumDesc(file_agentshim_core_v1_core, 57, 0);
 
 /**
  * @generated from message agentshim.core.v1.Heartbeat
@@ -1644,7 +2494,7 @@ export type Heartbeat = Message<"agentshim.core.v1.Heartbeat"> & {
  * Use `create(HeartbeatSchema)` to create a new message.
  */
 export const HeartbeatSchema: GenMessage<Heartbeat> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 34);
+  messageDesc(file_agentshim_core_v1_core, 58);
 
 /**
  * Correlated dependency health probe for every agent-shim UDS hop.
@@ -1672,7 +2522,7 @@ export type HealthCheck = Message<"agentshim.core.v1.HealthCheck"> & {
  * Use `create(HealthCheckSchema)` to create a new message.
  */
 export const HealthCheckSchema: GenMessage<HealthCheck> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 35);
+  messageDesc(file_agentshim_core_v1_core, 59);
 
 /**
  * Reply to HealthCheck.  A responder MUST set healthy=true only after every
@@ -1709,7 +2559,7 @@ export type HealthStatus = Message<"agentshim.core.v1.HealthStatus"> & {
  * Use `create(HealthStatusSchema)` to create a new message.
  */
 export const HealthStatusSchema: GenMessage<HealthStatus> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 36);
+  messageDesc(file_agentshim_core_v1_core, 60);
 
 /**
  * Producer→store append. The store commits events + cursor_advance in one
@@ -1736,7 +2586,7 @@ export type StoreWrite = Message<"agentshim.core.v1.StoreWrite"> & {
  * Use `create(StoreWriteSchema)` to create a new message.
  */
 export const StoreWriteSchema: GenMessage<StoreWrite> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 37);
+  messageDesc(file_agentshim_core_v1_core, 61);
 
 /**
  * @generated from message agentshim.core.v1.StoreWriteAck
@@ -1772,7 +2622,7 @@ export type StoreWriteAck = Message<"agentshim.core.v1.StoreWriteAck"> & {
  * Use `create(StoreWriteAckSchema)` to create a new message.
  */
 export const StoreWriteAckSchema: GenMessage<StoreWriteAck> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 38);
+  messageDesc(file_agentshim_core_v1_core, 62);
 
 /**
  * shim-claude-sidecar file-cursor state, persisted by the store (§6.2 cursor table).
@@ -1810,7 +2660,7 @@ export type CursorState = Message<"agentshim.core.v1.CursorState"> & {
  * Use `create(CursorStateSchema)` to create a new message.
  */
 export const CursorStateSchema: GenMessage<CursorState> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 39);
+  messageDesc(file_agentshim_core_v1_core, 63);
 
 /**
  * Cursor recovery over the socket (§7.3): the sidecar asks the store for its
@@ -1830,7 +2680,7 @@ export type CursorQuery = Message<"agentshim.core.v1.CursorQuery"> & {
  * Use `create(CursorQuerySchema)` to create a new message.
  */
 export const CursorQuerySchema: GenMessage<CursorQuery> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 40);
+  messageDesc(file_agentshim_core_v1_core, 64);
 
 /**
  * @generated from message agentshim.core.v1.OpenTaskState
@@ -1852,7 +2702,7 @@ export type OpenTaskState = Message<"agentshim.core.v1.OpenTaskState"> & {
  * Use `create(OpenTaskStateSchema)` to create a new message.
  */
 export const OpenTaskStateSchema: GenMessage<OpenTaskState> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 41);
+  messageDesc(file_agentshim_core_v1_core, 65);
 
 /**
  * @generated from message agentshim.core.v1.CursorList
@@ -1887,7 +2737,7 @@ export type CursorList = Message<"agentshim.core.v1.CursorList"> & {
  * Use `create(CursorListSchema)` to create a new message.
  */
 export const CursorListSchema: GenMessage<CursorList> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 42);
+  messageDesc(file_agentshim_core_v1_core, 66);
 
 /**
  * Canonical diagnostic record emitted by the file-plane sidecar. It is valid
@@ -1962,7 +2812,7 @@ export type FilePlaneDiagnostic = Message<"agentshim.core.v1.FilePlaneDiagnostic
  * Use `create(FilePlaneDiagnosticSchema)` to create a new message.
  */
 export const FilePlaneDiagnosticSchema: GenMessage<FilePlaneDiagnostic> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 43);
+  messageDesc(file_agentshim_core_v1_core, 67);
 
 /**
  * Which observation plane produced an event.

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { SessionServer, SessionServerHandlers, Receipt } from "../src/uds/server.js";
+import type { SessionServerOptions } from "../src/uds/server.js";
 import {
   AckSchema,
   DaemonHelloSchema,
@@ -14,6 +15,7 @@ import {
   ReplayDoneSchema,
   ReplayEventSchema,
   ReplayRequestSchema,
+  QueryRuntimeIdentitySchema,
   ShimHelloSchema,
   ShimReadySchema,
   SubmitPromptSchema,
@@ -38,7 +40,10 @@ interface Calls {
   disconnected: number;
 }
 
-function harness(overrides: Partial<SessionServerHandlers> = {}): {
+function harness(
+  overrides: Partial<SessionServerHandlers> = {},
+  options: Partial<SessionServerOptions> = {},
+): {
   server: SessionServer;
   socketPath: string;
   calls: Calls;
@@ -70,7 +75,7 @@ function harness(overrides: Partial<SessionServerHandlers> = {}): {
     ...overrides,
   };
   const server = new SessionServer(
-    { socketPath, sessionId: "sess-1", shimVersion: "9.9", protocolVersion: "1", heartbeatIntervalMs: 0 },
+    { socketPath, sessionId: "sess-1", queryInstanceId: "query-1", shimVersion: "9.9", protocolVersion: "1", heartbeatIntervalMs: 0, ...options },
     handlers,
   );
   return { server, socketPath, calls };
@@ -117,6 +122,31 @@ describe("SessionServer handshake", () => {
     expect(hello.sessionId).toBe("sess-1");
     expect(hello.vendor).toBe("claude");
     expect(hello.shimVersion).toBe("9.9");
+  });
+
+  it("reannounces the stable query identity and runtime snapshot after a reconnect", async () => {
+    const runtime = create(QueryRuntimeIdentitySchema, { vendorSessionId: "vendor-1", effectiveModel: "opus" });
+    const { server, socketPath } = harness({}, {
+      queryInstanceId: "query-running",
+      queryRuntimeIdentity: () => runtime,
+      reconnectMinMs: 1,
+    });
+    track(server);
+    const daemon = acceptShim(socketPath);
+    listeners.push(daemon.close);
+
+    await server.connect();
+    const first = await daemon.next();
+    const firstHello = await first.next(ShimHelloSchema);
+    first.send(DaemonHelloSchema, create(DaemonHelloSchema, { daemonVersion: "d1", protocolVersion: "1" }));
+    first.destroy();
+
+    const second = await daemon.next();
+    const secondHello = await second.next(ShimHelloSchema);
+    expect(firstHello.queryInstanceId).toBe("query-running");
+    expect(secondHello.queryInstanceId).toBe("query-running");
+    expect(firstHello.queryRuntimeIdentity).toEqual(runtime);
+    expect(secondHello.queryRuntimeIdentity).toEqual(runtime);
   });
 
   it("marks connected after the DaemonHello reply", async () => {
@@ -357,7 +387,7 @@ describe("SessionServer vendor session rotation bounce", () => {
     const built = harness();
     const server = new SessionServer(
       {
-        socketPath: built.socketPath, sessionId: "sess-1", shimVersion: "9.9",
+        socketPath: built.socketPath, sessionId: "sess-1", queryInstanceId: "query-1", shimVersion: "9.9",
         protocolVersion: "1", heartbeatIntervalMs: 0, reconnectMinMs: 1,
         vendorSessionId: () => vendor.id,
       },

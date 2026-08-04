@@ -84,6 +84,13 @@ export interface FakeQueryOpts {
    * the durable CLI uuid the spec describes.
    */
   resume?: string;
+  /**
+   * Receives the fake query's deliberately test-only failure seam.  The UDS
+   * bring-up gate invokes it after the daemon has handshaked and before it
+   * asserts readiness, so E2E can exercise a resumed query dying during
+   * restoration without changing fake resume semantics.
+   */
+  onBringUpFailureInjector?: (fail: () => void) => void;
 }
 
 /** Canned reply for the "!md" turn — exercises every markdown construct. */
@@ -119,6 +126,9 @@ export function createFakeQuery(
 ): QueryLike {
   LOGGER.log({ agent_repl_session_id: opts.sessionId, resumed: opts.resume !== undefined }, "creating offline fake SDK query");
   const out = new AsyncQueue<SdkMessageLike>();
+  opts.onBringUpFailureInjector?.(() => {
+    out.fail(new Error("injected resumed fake query failure during bring-up"));
+  });
   opts.abortSignal?.addEventListener("abort", () => out.end(), { once: true });
   let interrupted = false;
   let permissionMode: PermissionMode = "default";
@@ -147,10 +157,83 @@ export function createFakeQuery(
   };
 
   const emitStream = (event: unknown): void => {
-    emit({ type: "stream_event", event, parent_tool_use_id: null });
+    const eventType = typeof event === "object" && event !== null && "type" in event
+      ? (event as { type?: unknown }).type
+      : undefined;
+    emit({
+      type: "stream_event",
+      event,
+      parent_tool_use_id: null,
+      // A fake message_start models the same SDK timing contract as a live
+      // one, so the real ephemeral correlation path remains exercised.
+      ...(eventType === "message_start" ? { ttft_ms: 1 } : {}),
+    });
   };
 
-  const usage = { input_tokens: 7, output_tokens: 11 };
+  const usage = {
+    input_tokens: 7,
+    output_tokens: 11,
+    cache_read_input_tokens: 80,
+    cache_creation_input_tokens: 4,
+    cache_creation: { ephemeral_5m_input_tokens: 4 },
+    server_tool_use: { web_search_requests: 0 },
+    service_tier: "standard",
+    speed: "standard",
+    inference_geo: "us",
+    fallback_credit: { status: "not_used" },
+    output_tokens_details: { reasoning_tokens: 3 },
+    unmodeled_usage: { fake_extension_tokens: 2 },
+    cache_diagnostic: { status: "hit", reason: "stable_prefix" },
+  };
+
+  /** Lossless actor-distinct payload consumed by the usage-accounting E2E. */
+  const accountingUsage = (actor: "main-agent" | "subagent", offset: number) => ({
+    input_tokens: 11 + offset,
+    output_tokens: 12 + offset,
+    cache_read_input_tokens: 13 + offset,
+    cache_creation_input_tokens: 14 + offset,
+    cache_creation: {
+      ephemeral_5m_input_tokens: 41 + offset,
+      ephemeral_1h_input_tokens: 42 + offset,
+    },
+    server_tool_use: {
+      web_search_requests: 51 + offset,
+      web_fetch_requests: 52 + offset,
+    },
+    service_tier: "priority",
+    speed: "fast",
+    inference_geo: "us-east-1",
+    iterations: [{
+      type: "sampling",
+      model: `${actor}-reasoning-model`,
+      input_tokens: 61 + offset,
+      output_tokens: 62 + offset,
+      cache_read_input_tokens: 63 + offset,
+      cache_creation_input_tokens: 64 + offset,
+      cache_creation: {
+        ephemeral_5m_input_tokens: 65 + offset,
+        ephemeral_1h_input_tokens: 66 + offset,
+      },
+    }],
+    output_tokens_details: {
+      reasoning_tokens: 71 + offset,
+      reasoning_model: `${actor}-reasoning-model`,
+    },
+    cache_diagnostic: {
+      reason: "model_changed",
+      cache_missed_input_tokens: 72 + offset,
+    },
+    fallback_credit: {
+      status: { type: "redeemed", actor },
+      credits: 73 + offset,
+    },
+    unmodeled_usage: {
+      future_counter: 74 + offset,
+      nested: { actor },
+    },
+  });
+  const mainAccountingUsage = accountingUsage("main-agent", 0);
+  const subagentAccountingUsage = accountingUsage("subagent", 100);
 
   const emitTextBlock = (_messageId: string, index: number, text: string): void => {
     emitStream({ type: "content_block_start", index, content_block: { type: "text", text: "" } });
@@ -163,7 +246,12 @@ export function createFakeQuery(
     emitStream({ type: "content_block_stop", index });
   };
 
-  const emitResult = (subtype: string, resultText?: string): void => {
+  const emitResult = (
+    subtype: string,
+    resultText?: string,
+    modelUsage?: Record<string, unknown>,
+    resultUsage: Record<string, unknown> = usage,
+  ): void => {
     emit({
       type: "result",
       subtype,
@@ -171,7 +259,8 @@ export function createFakeQuery(
       duration_api_ms: 3,
       num_turns: turn,
       total_cost_usd: 0.0001,
-      usage,
+      usage: resultUsage,
+      ...(modelUsage === undefined ? {} : { model_usage: modelUsage }),
       is_error: subtype !== "success",
       ...(subtype === "success" ? { result: resultText ?? "" } : {}),
       permission_denials: [],
@@ -179,6 +268,8 @@ export function createFakeQuery(
   };
 
   const runTextTurn = (messageId: string, text: string): void => {
+    const usageSubagent = text.trim() === "!usage-subagent";
+    const responseUsage = usageSubagent ? mainAccountingUsage : usage;
     const reply =
       text.trim() === "!md"
         ? MARKDOWN_SHOWCASE
@@ -186,10 +277,10 @@ export function createFakeQuery(
     LOGGER.log({ agent_repl_session_id: opts.sessionId, message_id: messageId, prompt_length: text.length, permission_mode: permissionMode, branch: text.trim() === "!md" ? "markdown-showcase" : "echo" }, "running fake text turn");
     emitStream({
       type: "message_start",
-      message: { id: messageId, role: "assistant", model, usage },
+      message: { id: messageId, role: "assistant", model, usage: responseUsage },
     });
     emitTextBlock(messageId, 0, reply);
-    emitStream({ type: "message_delta", delta: { stop_reason: "end_turn" }, usage });
+    emitStream({ type: "message_delta", delta: { stop_reason: "end_turn" }, usage: responseUsage });
     emitStream({ type: "message_stop" });
     emit({
       type: "assistant",
@@ -200,10 +291,68 @@ export function createFakeQuery(
         model,
         stop_reason: "end_turn",
         content: [{ type: "text", text: reply }],
-        usage,
+        usage: responseUsage,
       },
     });
-    emitResult("success", reply);
+    if (usageSubagent) {
+      emit({
+        type: "assistant",
+        agent_id: "fake-subagent-agent-id",
+        parent_tool_use_id: "toolu_fake_subagent",
+        parent_agent_id: "fake-parent-agent-id",
+        subagent_type: "general-purpose",
+        task_description: "deterministic usage-accounting subagent",
+        message: {
+          id: `${messageId}_subagent`,
+          role: "assistant",
+          model: "fake-subagent-model",
+          stop_reason: "end_turn",
+          content: [{ type: "text", text: "subagent completed" }],
+          usage: subagentAccountingUsage,
+        },
+      });
+      emitResult("success", reply, {
+        [model]: {
+          input_tokens: mainAccountingUsage.input_tokens,
+          output_tokens: mainAccountingUsage.output_tokens,
+          cache_read_input_tokens: mainAccountingUsage.cache_read_input_tokens,
+          cache_creation_input_tokens: mainAccountingUsage.cache_creation_input_tokens,
+          web_search_requests: mainAccountingUsage.server_tool_use.web_search_requests,
+          cost_usd: 0.001,
+          context_window: 200000,
+          max_output_tokens: 32000,
+          canonical_model: model,
+          provider: "anthropic",
+        },
+        "fake-subagent-model": {
+          input_tokens: subagentAccountingUsage.input_tokens,
+          output_tokens: subagentAccountingUsage.output_tokens,
+          cache_read_input_tokens: subagentAccountingUsage.cache_read_input_tokens,
+          cache_creation_input_tokens: subagentAccountingUsage.cache_creation_input_tokens,
+          web_search_requests: subagentAccountingUsage.server_tool_use.web_search_requests,
+          cost_usd: 0.002,
+          context_window: 200000,
+          max_output_tokens: 16000,
+          canonical_model: "fake-subagent-model",
+          provider: "anthropic",
+        },
+      }, mainAccountingUsage);
+      return;
+    }
+    emitResult("success", reply, {
+      [model]: {
+        input_tokens: usage.input_tokens,
+        output_tokens: usage.output_tokens,
+        cache_read_input_tokens: usage.cache_read_input_tokens,
+        cache_creation_input_tokens: usage.cache_creation_input_tokens,
+        web_search_requests: 0,
+        cost_usd: 0.0001,
+        context_window: 200000,
+        max_output_tokens: 32000,
+        canonical_model: model,
+        provider: "anthropic",
+      },
+    }, usage);
   };
 
   /**
@@ -424,6 +573,10 @@ export function createFakeQuery(
       } else if (text.trim() === "!rotate") {
         LOGGER.log({ agent_repl_session_id: opts.sessionId, message_id: messageId, branch: "rotate" }, "selected fake turn branch");
         runRotateTurn(messageId, text);
+      } else if (text.trim() === "!query-eof") {
+        LOGGER.log({ agent_repl_session_id: opts.sessionId, message_id: messageId, branch: "query-eof" }, "selected fake turn branch");
+        out.end();
+        return;
       } else if (text.startsWith("!bg ")) {
         LOGGER.log({ agent_repl_session_id: opts.sessionId, message_id: messageId, branch: "background" }, "selected fake turn branch");
         runBackgroundTurn(messageId, text.slice("!bg ".length));

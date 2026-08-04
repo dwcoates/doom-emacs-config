@@ -59,10 +59,12 @@ func (h *repullHarness) rotate(previous, next string) {
 	h.m.onHandshake("ws", "s1", &corev1.ShimHello{
 		SessionId: "s1", Vendor: "claude", ShimVersion: "test", ProtocolVersion: "1",
 		VendorSessionId: previous,
+		QueryInstanceId: "query-repull",
 	})
 	h.m.onHandshake("ws", "s1", &corev1.ShimHello{
 		SessionId: "s1", Vendor: "claude", ShimVersion: "test", ProtocolVersion: "1",
 		VendorSessionId: next,
+		QueryInstanceId: "query-repull",
 	})
 }
 

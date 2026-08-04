@@ -91,6 +91,16 @@ describe("ControlDispatch.handleSubmitPrompt", () => {
     expect(rec.prompts).toEqual([{ requestId: "r1", text: "hi", origin: "human" }]);
   });
 
+  it("Nacks blank request ids before calling the SDK target", async () => {
+    for (const requestId of ["", " \t"]) {
+      const rec = recorder();
+      const receipt = await dispatch(rec, []).handleSubmitPrompt(create(SubmitPromptSchema, { requestId, text: "hi" }));
+      expect(receipt.$typeName).toBe(NackSchema.typeName);
+      expect((receipt as { reason: string }).reason).toBe("SubmitPrompt requires a non-empty request_id");
+      expect(rec.prompts).toEqual([]);
+    }
+  });
+
   it("forwards a permission-mode override when present", async () => {
     // Arrange
     const rec = recorder();

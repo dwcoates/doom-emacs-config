@@ -2225,7 +2225,8 @@ func (x *ApiAssistantMessage) GetContainer() *structpb.Struct {
 }
 
 // The per-message API usage object (distinct from stream.proto Usage in that
-// disk lines carry the raw API shape; kept Struct-free and explicit).
+// disk lines carry the raw API shape). Stable fields are typed explicitly;
+// evolving nested vendor data stays losslessly preserved as Struct values.
 type ApiUsage struct {
 	state                    protoimpl.MessageState `protogen:"open.v1"`
 	InputTokens              int64                  `protobuf:"varint,1,opt,name=input_tokens,json=inputTokens,proto3" json:"input_tokens,omitempty"`
@@ -2245,9 +2246,21 @@ type ApiUsage struct {
 	// SHAPE (census, 103,504 lines): per element {input_tokens, output_tokens,
 	// cache_read_input_tokens, cache_creation_input_tokens, cache_creation,
 	// type, model?}.
-	Iterations    *structpb.ListValue `protobuf:"bytes,8,opt,name=iterations,proto3" json:"iterations,omitempty"`                          // per-model iteration breakdown
-	Speed         string              `protobuf:"bytes,9,opt,name=speed,proto3" json:"speed,omitempty"`                                    // e.g. "standard"
-	InferenceGeo  string              `protobuf:"bytes,10,opt,name=inference_geo,json=inferenceGeo,proto3" json:"inference_geo,omitempty"` // e.g. "global"
+	Iterations   *structpb.ListValue `protobuf:"bytes,8,opt,name=iterations,proto3" json:"iterations,omitempty"`                          // per-model iteration breakdown
+	Speed        string              `protobuf:"bytes,9,opt,name=speed,proto3" json:"speed,omitempty"`                                    // e.g. "standard"
+	InferenceGeo string              `protobuf:"bytes,10,opt,name=inference_geo,json=inferenceGeo,proto3" json:"inference_geo,omitempty"` // e.g. "global"
+	// Preserves the API fallback-credit billing outcome.
+	FallbackCredit *structpb.Struct `protobuf:"bytes,11,opt,name=fallback_credit,json=fallbackCredit,proto3" json:"fallback_credit,omitempty"`
+	// Preserves output-token categories.
+	OutputTokensDetails *structpb.Struct `protobuf:"bytes,12,opt,name=output_tokens_details,json=outputTokensDetails,proto3" json:"output_tokens_details,omitempty"`
+	// Preserves unknown usage keys before typed support exists.
+	UnmodeledUsage *structpb.Struct `protobuf:"bytes,13,opt,name=unmodeled_usage,json=unmodeledUsage,proto3" json:"unmodeled_usage,omitempty"`
+	// Preserves cache-miss diagnostics supplied by the agent harness.
+	CacheDiagnostic *structpb.Struct `protobuf:"bytes,14,opt,name=cache_diagnostic,json=cacheDiagnostic,proto3" json:"cache_diagnostic,omitempty"`
+	// Preserves the complete SDK usage object before typed validation or
+	// normalization. Object keys, nested values, nulls, zeroes, empty
+	// containers, and absent keys retain their distinct source representations.
+	RawSdkUsage   *structpb.Struct `protobuf:"bytes,15,opt,name=raw_sdk_usage,json=rawSdkUsage,proto3" json:"raw_sdk_usage,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2350,6 +2363,41 @@ func (x *ApiUsage) GetInferenceGeo() string {
 		return x.InferenceGeo
 	}
 	return ""
+}
+
+func (x *ApiUsage) GetFallbackCredit() *structpb.Struct {
+	if x != nil {
+		return x.FallbackCredit
+	}
+	return nil
+}
+
+func (x *ApiUsage) GetOutputTokensDetails() *structpb.Struct {
+	if x != nil {
+		return x.OutputTokensDetails
+	}
+	return nil
+}
+
+func (x *ApiUsage) GetUnmodeledUsage() *structpb.Struct {
+	if x != nil {
+		return x.UnmodeledUsage
+	}
+	return nil
+}
+
+func (x *ApiUsage) GetCacheDiagnostic() *structpb.Struct {
+	if x != nil {
+		return x.CacheDiagnostic
+	}
+	return nil
+}
+
+func (x *ApiUsage) GetRawSdkUsage() *structpb.Struct {
+	if x != nil {
+		return x.RawSdkUsage
+	}
+	return nil
 }
 
 type ToolUseResult struct {
@@ -8783,7 +8831,7 @@ const file_agentshim_data_v1_tools_proto_rawDesc = "" +
 	"\vdiagnostics\x18\b \x01(\v2\x17.google.protobuf.StructR\vdiagnostics\x12F\n" +
 	"\x12context_management\x18\t \x01(\v2\x17.google.protobuf.StructR\x11contextManagement\x125\n" +
 	"\tcontainer\x18\n" +
-	" \x01(\v2\x17.google.protobuf.StructR\tcontainer\"\xe3\x03\n" +
+	" \x01(\v2\x17.google.protobuf.StructR\tcontainer\"\xb5\x06\n" +
 	"\bApiUsage\x12!\n" +
 	"\finput_tokens\x18\x01 \x01(\x03R\vinputTokens\x12#\n" +
 	"\routput_tokens\x18\x02 \x01(\x03R\foutputTokens\x125\n" +
@@ -8797,7 +8845,12 @@ const file_agentshim_data_v1_tools_proto_rawDesc = "" +
 	"iterations\x12\x14\n" +
 	"\x05speed\x18\t \x01(\tR\x05speed\x12#\n" +
 	"\rinference_geo\x18\n" +
-	" \x01(\tR\finferenceGeo\"\x8d\x0e\n" +
+	" \x01(\tR\finferenceGeo\x12@\n" +
+	"\x0ffallback_credit\x18\v \x01(\v2\x17.google.protobuf.StructR\x0efallbackCredit\x12K\n" +
+	"\x15output_tokens_details\x18\f \x01(\v2\x17.google.protobuf.StructR\x13outputTokensDetails\x12@\n" +
+	"\x0funmodeled_usage\x18\r \x01(\v2\x17.google.protobuf.StructR\x0eunmodeledUsage\x12B\n" +
+	"\x10cache_diagnostic\x18\x0e \x01(\v2\x17.google.protobuf.StructR\x0fcacheDiagnostic\x12;\n" +
+	"\rraw_sdk_usage\x18\x0f \x01(\v2\x17.google.protobuf.StructR\vrawSdkUsage\"\x8d\x0e\n" +
 	"\rToolUseResult\x12\x1f\n" +
 	"\n" +
 	"raw_string\x18\x01 \x01(\tH\x00R\trawString\x123\n" +
@@ -9520,115 +9573,120 @@ var file_agentshim_data_v1_tools_proto_depIdxs = []int32{
 	107, // 44: agentshim.data.v1.ApiUsage.cache_creation:type_name -> google.protobuf.Struct
 	107, // 45: agentshim.data.v1.ApiUsage.server_tool_use:type_name -> google.protobuf.Struct
 	108, // 46: agentshim.data.v1.ApiUsage.iterations:type_name -> google.protobuf.ListValue
-	32,  // 47: agentshim.data.v1.ToolUseResult.bash:type_name -> agentshim.data.v1.BashResult
-	39,  // 48: agentshim.data.v1.ToolUseResult.agent:type_name -> agentshim.data.v1.AgentResult
-	40,  // 49: agentshim.data.v1.ToolUseResult.agent_async_launch:type_name -> agentshim.data.v1.AgentAsyncLaunch
-	43,  // 50: agentshim.data.v1.ToolUseResult.task_output:type_name -> agentshim.data.v1.TaskOutputResult
-	44,  // 51: agentshim.data.v1.ToolUseResult.task_stop:type_name -> agentshim.data.v1.TaskStopResult
-	45,  // 52: agentshim.data.v1.ToolUseResult.workflow_launch:type_name -> agentshim.data.v1.WorkflowLaunchResult
-	46,  // 53: agentshim.data.v1.ToolUseResult.monitor:type_name -> agentshim.data.v1.MonitorResult
-	47,  // 54: agentshim.data.v1.ToolUseResult.read:type_name -> agentshim.data.v1.ReadResult
-	48,  // 55: agentshim.data.v1.ToolUseResult.edit:type_name -> agentshim.data.v1.EditResult
-	49,  // 56: agentshim.data.v1.ToolUseResult.write:type_name -> agentshim.data.v1.WriteResult
-	50,  // 57: agentshim.data.v1.ToolUseResult.skill:type_name -> agentshim.data.v1.SkillResult
-	51,  // 58: agentshim.data.v1.ToolUseResult.tool_search:type_name -> agentshim.data.v1.ToolSearchResult
-	52,  // 59: agentshim.data.v1.ToolUseResult.task_create:type_name -> agentshim.data.v1.TaskCreateResult
-	54,  // 60: agentshim.data.v1.ToolUseResult.task_update:type_name -> agentshim.data.v1.TaskUpdateResult
-	55,  // 61: agentshim.data.v1.ToolUseResult.task_list:type_name -> agentshim.data.v1.TaskListResult
-	57,  // 62: agentshim.data.v1.ToolUseResult.send_message:type_name -> agentshim.data.v1.SendMessageResult
-	59,  // 63: agentshim.data.v1.ToolUseResult.web_fetch:type_name -> agentshim.data.v1.WebFetchResult
-	60,  // 64: agentshim.data.v1.ToolUseResult.web_search:type_name -> agentshim.data.v1.WebSearchResult
-	61,  // 65: agentshim.data.v1.ToolUseResult.ask_user_question:type_name -> agentshim.data.v1.AskUserQuestionResult
-	62,  // 66: agentshim.data.v1.ToolUseResult.schedule_wakeup:type_name -> agentshim.data.v1.ScheduleWakeupResult
-	63,  // 67: agentshim.data.v1.ToolUseResult.structured_output:type_name -> agentshim.data.v1.StructuredOutputResult
-	64,  // 68: agentshim.data.v1.ToolUseResult.glob:type_name -> agentshim.data.v1.GlobResult
-	65,  // 69: agentshim.data.v1.ToolUseResult.grep:type_name -> agentshim.data.v1.GrepResult
-	66,  // 70: agentshim.data.v1.ToolUseResult.artifact:type_name -> agentshim.data.v1.ArtifactResult
-	67,  // 71: agentshim.data.v1.ToolUseResult.task_get:type_name -> agentshim.data.v1.TaskGetResult
-	107, // 72: agentshim.data.v1.ToolUseResult.unclassified:type_name -> google.protobuf.Struct
-	33,  // 73: agentshim.data.v1.BashResult.git_operation:type_name -> agentshim.data.v1.GitOperation
-	34,  // 74: agentshim.data.v1.GitOperation.commit:type_name -> agentshim.data.v1.GitCommit
-	35,  // 75: agentshim.data.v1.GitOperation.push:type_name -> agentshim.data.v1.GitPush
-	36,  // 76: agentshim.data.v1.GitOperation.branch:type_name -> agentshim.data.v1.GitBranch
-	37,  // 77: agentshim.data.v1.GitOperation.pr:type_name -> agentshim.data.v1.GitPullRequest
-	2,   // 78: agentshim.data.v1.GitCommit.kind:type_name -> agentshim.data.v1.GitCommitKind
-	3,   // 79: agentshim.data.v1.GitBranch.action:type_name -> agentshim.data.v1.GitBranchAction
-	4,   // 80: agentshim.data.v1.GitPullRequest.action:type_name -> agentshim.data.v1.GitPullRequestAction
-	0,   // 81: agentshim.data.v1.AgentResult.status:type_name -> agentshim.data.v1.RawTaskStatus
-	5,   // 82: agentshim.data.v1.AgentResult.content:type_name -> agentshim.data.v1.ContentBlock
-	30,  // 83: agentshim.data.v1.AgentResult.usage:type_name -> agentshim.data.v1.ApiUsage
-	38,  // 84: agentshim.data.v1.AgentResult.tool_stats:type_name -> agentshim.data.v1.AgentToolStats
-	0,   // 85: agentshim.data.v1.AgentAsyncLaunch.status:type_name -> agentshim.data.v1.RawTaskStatus
-	0,   // 86: agentshim.data.v1.LocalBashTask.status:type_name -> agentshim.data.v1.RawTaskStatus
-	0,   // 87: agentshim.data.v1.LocalAgentTask.status:type_name -> agentshim.data.v1.RawTaskStatus
-	1,   // 88: agentshim.data.v1.TaskOutputResult.retrieval_status:type_name -> agentshim.data.v1.RetrievalStatus
-	41,  // 89: agentshim.data.v1.TaskOutputResult.local_bash:type_name -> agentshim.data.v1.LocalBashTask
-	42,  // 90: agentshim.data.v1.TaskOutputResult.local_agent:type_name -> agentshim.data.v1.LocalAgentTask
-	0,   // 91: agentshim.data.v1.WorkflowLaunchResult.status:type_name -> agentshim.data.v1.RawTaskStatus
-	107, // 92: agentshim.data.v1.ReadResult.file:type_name -> google.protobuf.Struct
-	108, // 93: agentshim.data.v1.EditResult.structured_patch:type_name -> google.protobuf.ListValue
-	108, // 94: agentshim.data.v1.WriteResult.structured_patch:type_name -> google.protobuf.ListValue
-	107, // 95: agentshim.data.v1.TaskCreateResult.task:type_name -> google.protobuf.Struct
-	53,  // 96: agentshim.data.v1.TaskUpdateResult.status_change:type_name -> agentshim.data.v1.TaskStatusChange
-	108, // 97: agentshim.data.v1.TaskListResult.tasks:type_name -> google.protobuf.ListValue
-	56,  // 98: agentshim.data.v1.SendMessageResult.pin:type_name -> agentshim.data.v1.MessagePin
-	58,  // 99: agentshim.data.v1.WebFetchResult.artifact_read:type_name -> agentshim.data.v1.ArtifactRead
-	108, // 100: agentshim.data.v1.WebSearchResult.results:type_name -> google.protobuf.ListValue
-	99,  // 101: agentshim.data.v1.AskUserQuestionResult.questions:type_name -> agentshim.data.v1.Question
-	107, // 102: agentshim.data.v1.AskUserQuestionResult.answers:type_name -> google.protobuf.Struct
-	107, // 103: agentshim.data.v1.AskUserQuestionResult.annotations:type_name -> google.protobuf.Struct
-	107, // 104: agentshim.data.v1.StructuredOutputResult.data:type_name -> google.protobuf.Struct
-	68,  // 105: agentshim.data.v1.TaskGetResult.task:type_name -> agentshim.data.v1.TaskRecord
-	70,  // 106: agentshim.data.v1.ToolInput.agent:type_name -> agentshim.data.v1.AgentInput
-	85,  // 107: agentshim.data.v1.ToolInput.bash:type_name -> agentshim.data.v1.BashInput
-	86,  // 108: agentshim.data.v1.ToolInput.task_output:type_name -> agentshim.data.v1.TaskOutputInput
-	87,  // 109: agentshim.data.v1.ToolInput.kill_shell:type_name -> agentshim.data.v1.KillShellInput
-	88,  // 110: agentshim.data.v1.ToolInput.file_edit:type_name -> agentshim.data.v1.FileEditInput
-	89,  // 111: agentshim.data.v1.ToolInput.file_read:type_name -> agentshim.data.v1.FileReadInput
-	90,  // 112: agentshim.data.v1.ToolInput.file_write:type_name -> agentshim.data.v1.FileWriteInput
-	91,  // 113: agentshim.data.v1.ToolInput.glob:type_name -> agentshim.data.v1.GlobInput
-	92,  // 114: agentshim.data.v1.ToolInput.grep:type_name -> agentshim.data.v1.GrepInput
-	93,  // 115: agentshim.data.v1.ToolInput.notebook_edit:type_name -> agentshim.data.v1.NotebookEditInput
-	95,  // 116: agentshim.data.v1.ToolInput.todo_write:type_name -> agentshim.data.v1.TodoWriteInput
-	96,  // 117: agentshim.data.v1.ToolInput.web_fetch:type_name -> agentshim.data.v1.WebFetchInput
-	97,  // 118: agentshim.data.v1.ToolInput.web_search:type_name -> agentshim.data.v1.WebSearchInput
-	100, // 119: agentshim.data.v1.ToolInput.ask_user_question:type_name -> agentshim.data.v1.AskUserQuestionInput
-	101, // 120: agentshim.data.v1.ToolInput.config:type_name -> agentshim.data.v1.ConfigInput
-	102, // 121: agentshim.data.v1.ToolInput.exit_plan_mode:type_name -> agentshim.data.v1.ExitPlanModeInput
-	103, // 122: agentshim.data.v1.ToolInput.mcp:type_name -> agentshim.data.v1.McpInput
-	104, // 123: agentshim.data.v1.ToolInput.list_mcp_resources:type_name -> agentshim.data.v1.ListMcpResourcesInput
-	105, // 124: agentshim.data.v1.ToolInput.read_mcp_resource:type_name -> agentshim.data.v1.ReadMcpResourceInput
-	71,  // 125: agentshim.data.v1.ToolInput.skill:type_name -> agentshim.data.v1.SkillInput
-	72,  // 126: agentshim.data.v1.ToolInput.task_update:type_name -> agentshim.data.v1.TaskUpdateInput
-	73,  // 127: agentshim.data.v1.ToolInput.structured_output:type_name -> agentshim.data.v1.StructuredOutputInput
-	74,  // 128: agentshim.data.v1.ToolInput.task_create:type_name -> agentshim.data.v1.TaskCreateInput
-	75,  // 129: agentshim.data.v1.ToolInput.tool_search:type_name -> agentshim.data.v1.ToolSearchInput
-	76,  // 130: agentshim.data.v1.ToolInput.send_message:type_name -> agentshim.data.v1.SendMessageInput
-	77,  // 131: agentshim.data.v1.ToolInput.monitor:type_name -> agentshim.data.v1.MonitorInput
-	79,  // 132: agentshim.data.v1.ToolInput.task_stop:type_name -> agentshim.data.v1.TaskStopInput
-	80,  // 133: agentshim.data.v1.ToolInput.schedule_wakeup:type_name -> agentshim.data.v1.ScheduleWakeupInput
-	81,  // 134: agentshim.data.v1.ToolInput.workflow:type_name -> agentshim.data.v1.WorkflowInput
-	82,  // 135: agentshim.data.v1.ToolInput.task_list:type_name -> agentshim.data.v1.TaskListInput
-	83,  // 136: agentshim.data.v1.ToolInput.task_get:type_name -> agentshim.data.v1.TaskGetInput
-	84,  // 137: agentshim.data.v1.ToolInput.artifact:type_name -> agentshim.data.v1.ArtifactInput
-	107, // 138: agentshim.data.v1.ToolInput.unclassified:type_name -> google.protobuf.Struct
-	107, // 139: agentshim.data.v1.TaskUpdateInput.metadata:type_name -> google.protobuf.Struct
-	107, // 140: agentshim.data.v1.StructuredOutputInput.data:type_name -> google.protobuf.Struct
-	107, // 141: agentshim.data.v1.TaskCreateInput.metadata:type_name -> google.protobuf.Struct
-	78,  // 142: agentshim.data.v1.MonitorInput.ws:type_name -> agentshim.data.v1.MonitorWebsocket
-	107, // 143: agentshim.data.v1.WorkflowInput.args:type_name -> google.protobuf.Struct
-	94,  // 144: agentshim.data.v1.TodoWriteInput.todos:type_name -> agentshim.data.v1.TodoItem
-	98,  // 145: agentshim.data.v1.Question.options:type_name -> agentshim.data.v1.QuestionOption
-	99,  // 146: agentshim.data.v1.AskUserQuestionInput.questions:type_name -> agentshim.data.v1.Question
-	107, // 147: agentshim.data.v1.AskUserQuestionInput.answers:type_name -> google.protobuf.Struct
-	107, // 148: agentshim.data.v1.AskUserQuestionInput.metadata:type_name -> google.protobuf.Struct
-	107, // 149: agentshim.data.v1.AskUserQuestionInput.annotations:type_name -> google.protobuf.Struct
-	107, // 150: agentshim.data.v1.McpInput.input:type_name -> google.protobuf.Struct
-	151, // [151:151] is the sub-list for method output_type
-	151, // [151:151] is the sub-list for method input_type
-	151, // [151:151] is the sub-list for extension type_name
-	151, // [151:151] is the sub-list for extension extendee
-	0,   // [0:151] is the sub-list for field type_name
+	107, // 47: agentshim.data.v1.ApiUsage.fallback_credit:type_name -> google.protobuf.Struct
+	107, // 48: agentshim.data.v1.ApiUsage.output_tokens_details:type_name -> google.protobuf.Struct
+	107, // 49: agentshim.data.v1.ApiUsage.unmodeled_usage:type_name -> google.protobuf.Struct
+	107, // 50: agentshim.data.v1.ApiUsage.cache_diagnostic:type_name -> google.protobuf.Struct
+	107, // 51: agentshim.data.v1.ApiUsage.raw_sdk_usage:type_name -> google.protobuf.Struct
+	32,  // 52: agentshim.data.v1.ToolUseResult.bash:type_name -> agentshim.data.v1.BashResult
+	39,  // 53: agentshim.data.v1.ToolUseResult.agent:type_name -> agentshim.data.v1.AgentResult
+	40,  // 54: agentshim.data.v1.ToolUseResult.agent_async_launch:type_name -> agentshim.data.v1.AgentAsyncLaunch
+	43,  // 55: agentshim.data.v1.ToolUseResult.task_output:type_name -> agentshim.data.v1.TaskOutputResult
+	44,  // 56: agentshim.data.v1.ToolUseResult.task_stop:type_name -> agentshim.data.v1.TaskStopResult
+	45,  // 57: agentshim.data.v1.ToolUseResult.workflow_launch:type_name -> agentshim.data.v1.WorkflowLaunchResult
+	46,  // 58: agentshim.data.v1.ToolUseResult.monitor:type_name -> agentshim.data.v1.MonitorResult
+	47,  // 59: agentshim.data.v1.ToolUseResult.read:type_name -> agentshim.data.v1.ReadResult
+	48,  // 60: agentshim.data.v1.ToolUseResult.edit:type_name -> agentshim.data.v1.EditResult
+	49,  // 61: agentshim.data.v1.ToolUseResult.write:type_name -> agentshim.data.v1.WriteResult
+	50,  // 62: agentshim.data.v1.ToolUseResult.skill:type_name -> agentshim.data.v1.SkillResult
+	51,  // 63: agentshim.data.v1.ToolUseResult.tool_search:type_name -> agentshim.data.v1.ToolSearchResult
+	52,  // 64: agentshim.data.v1.ToolUseResult.task_create:type_name -> agentshim.data.v1.TaskCreateResult
+	54,  // 65: agentshim.data.v1.ToolUseResult.task_update:type_name -> agentshim.data.v1.TaskUpdateResult
+	55,  // 66: agentshim.data.v1.ToolUseResult.task_list:type_name -> agentshim.data.v1.TaskListResult
+	57,  // 67: agentshim.data.v1.ToolUseResult.send_message:type_name -> agentshim.data.v1.SendMessageResult
+	59,  // 68: agentshim.data.v1.ToolUseResult.web_fetch:type_name -> agentshim.data.v1.WebFetchResult
+	60,  // 69: agentshim.data.v1.ToolUseResult.web_search:type_name -> agentshim.data.v1.WebSearchResult
+	61,  // 70: agentshim.data.v1.ToolUseResult.ask_user_question:type_name -> agentshim.data.v1.AskUserQuestionResult
+	62,  // 71: agentshim.data.v1.ToolUseResult.schedule_wakeup:type_name -> agentshim.data.v1.ScheduleWakeupResult
+	63,  // 72: agentshim.data.v1.ToolUseResult.structured_output:type_name -> agentshim.data.v1.StructuredOutputResult
+	64,  // 73: agentshim.data.v1.ToolUseResult.glob:type_name -> agentshim.data.v1.GlobResult
+	65,  // 74: agentshim.data.v1.ToolUseResult.grep:type_name -> agentshim.data.v1.GrepResult
+	66,  // 75: agentshim.data.v1.ToolUseResult.artifact:type_name -> agentshim.data.v1.ArtifactResult
+	67,  // 76: agentshim.data.v1.ToolUseResult.task_get:type_name -> agentshim.data.v1.TaskGetResult
+	107, // 77: agentshim.data.v1.ToolUseResult.unclassified:type_name -> google.protobuf.Struct
+	33,  // 78: agentshim.data.v1.BashResult.git_operation:type_name -> agentshim.data.v1.GitOperation
+	34,  // 79: agentshim.data.v1.GitOperation.commit:type_name -> agentshim.data.v1.GitCommit
+	35,  // 80: agentshim.data.v1.GitOperation.push:type_name -> agentshim.data.v1.GitPush
+	36,  // 81: agentshim.data.v1.GitOperation.branch:type_name -> agentshim.data.v1.GitBranch
+	37,  // 82: agentshim.data.v1.GitOperation.pr:type_name -> agentshim.data.v1.GitPullRequest
+	2,   // 83: agentshim.data.v1.GitCommit.kind:type_name -> agentshim.data.v1.GitCommitKind
+	3,   // 84: agentshim.data.v1.GitBranch.action:type_name -> agentshim.data.v1.GitBranchAction
+	4,   // 85: agentshim.data.v1.GitPullRequest.action:type_name -> agentshim.data.v1.GitPullRequestAction
+	0,   // 86: agentshim.data.v1.AgentResult.status:type_name -> agentshim.data.v1.RawTaskStatus
+	5,   // 87: agentshim.data.v1.AgentResult.content:type_name -> agentshim.data.v1.ContentBlock
+	30,  // 88: agentshim.data.v1.AgentResult.usage:type_name -> agentshim.data.v1.ApiUsage
+	38,  // 89: agentshim.data.v1.AgentResult.tool_stats:type_name -> agentshim.data.v1.AgentToolStats
+	0,   // 90: agentshim.data.v1.AgentAsyncLaunch.status:type_name -> agentshim.data.v1.RawTaskStatus
+	0,   // 91: agentshim.data.v1.LocalBashTask.status:type_name -> agentshim.data.v1.RawTaskStatus
+	0,   // 92: agentshim.data.v1.LocalAgentTask.status:type_name -> agentshim.data.v1.RawTaskStatus
+	1,   // 93: agentshim.data.v1.TaskOutputResult.retrieval_status:type_name -> agentshim.data.v1.RetrievalStatus
+	41,  // 94: agentshim.data.v1.TaskOutputResult.local_bash:type_name -> agentshim.data.v1.LocalBashTask
+	42,  // 95: agentshim.data.v1.TaskOutputResult.local_agent:type_name -> agentshim.data.v1.LocalAgentTask
+	0,   // 96: agentshim.data.v1.WorkflowLaunchResult.status:type_name -> agentshim.data.v1.RawTaskStatus
+	107, // 97: agentshim.data.v1.ReadResult.file:type_name -> google.protobuf.Struct
+	108, // 98: agentshim.data.v1.EditResult.structured_patch:type_name -> google.protobuf.ListValue
+	108, // 99: agentshim.data.v1.WriteResult.structured_patch:type_name -> google.protobuf.ListValue
+	107, // 100: agentshim.data.v1.TaskCreateResult.task:type_name -> google.protobuf.Struct
+	53,  // 101: agentshim.data.v1.TaskUpdateResult.status_change:type_name -> agentshim.data.v1.TaskStatusChange
+	108, // 102: agentshim.data.v1.TaskListResult.tasks:type_name -> google.protobuf.ListValue
+	56,  // 103: agentshim.data.v1.SendMessageResult.pin:type_name -> agentshim.data.v1.MessagePin
+	58,  // 104: agentshim.data.v1.WebFetchResult.artifact_read:type_name -> agentshim.data.v1.ArtifactRead
+	108, // 105: agentshim.data.v1.WebSearchResult.results:type_name -> google.protobuf.ListValue
+	99,  // 106: agentshim.data.v1.AskUserQuestionResult.questions:type_name -> agentshim.data.v1.Question
+	107, // 107: agentshim.data.v1.AskUserQuestionResult.answers:type_name -> google.protobuf.Struct
+	107, // 108: agentshim.data.v1.AskUserQuestionResult.annotations:type_name -> google.protobuf.Struct
+	107, // 109: agentshim.data.v1.StructuredOutputResult.data:type_name -> google.protobuf.Struct
+	68,  // 110: agentshim.data.v1.TaskGetResult.task:type_name -> agentshim.data.v1.TaskRecord
+	70,  // 111: agentshim.data.v1.ToolInput.agent:type_name -> agentshim.data.v1.AgentInput
+	85,  // 112: agentshim.data.v1.ToolInput.bash:type_name -> agentshim.data.v1.BashInput
+	86,  // 113: agentshim.data.v1.ToolInput.task_output:type_name -> agentshim.data.v1.TaskOutputInput
+	87,  // 114: agentshim.data.v1.ToolInput.kill_shell:type_name -> agentshim.data.v1.KillShellInput
+	88,  // 115: agentshim.data.v1.ToolInput.file_edit:type_name -> agentshim.data.v1.FileEditInput
+	89,  // 116: agentshim.data.v1.ToolInput.file_read:type_name -> agentshim.data.v1.FileReadInput
+	90,  // 117: agentshim.data.v1.ToolInput.file_write:type_name -> agentshim.data.v1.FileWriteInput
+	91,  // 118: agentshim.data.v1.ToolInput.glob:type_name -> agentshim.data.v1.GlobInput
+	92,  // 119: agentshim.data.v1.ToolInput.grep:type_name -> agentshim.data.v1.GrepInput
+	93,  // 120: agentshim.data.v1.ToolInput.notebook_edit:type_name -> agentshim.data.v1.NotebookEditInput
+	95,  // 121: agentshim.data.v1.ToolInput.todo_write:type_name -> agentshim.data.v1.TodoWriteInput
+	96,  // 122: agentshim.data.v1.ToolInput.web_fetch:type_name -> agentshim.data.v1.WebFetchInput
+	97,  // 123: agentshim.data.v1.ToolInput.web_search:type_name -> agentshim.data.v1.WebSearchInput
+	100, // 124: agentshim.data.v1.ToolInput.ask_user_question:type_name -> agentshim.data.v1.AskUserQuestionInput
+	101, // 125: agentshim.data.v1.ToolInput.config:type_name -> agentshim.data.v1.ConfigInput
+	102, // 126: agentshim.data.v1.ToolInput.exit_plan_mode:type_name -> agentshim.data.v1.ExitPlanModeInput
+	103, // 127: agentshim.data.v1.ToolInput.mcp:type_name -> agentshim.data.v1.McpInput
+	104, // 128: agentshim.data.v1.ToolInput.list_mcp_resources:type_name -> agentshim.data.v1.ListMcpResourcesInput
+	105, // 129: agentshim.data.v1.ToolInput.read_mcp_resource:type_name -> agentshim.data.v1.ReadMcpResourceInput
+	71,  // 130: agentshim.data.v1.ToolInput.skill:type_name -> agentshim.data.v1.SkillInput
+	72,  // 131: agentshim.data.v1.ToolInput.task_update:type_name -> agentshim.data.v1.TaskUpdateInput
+	73,  // 132: agentshim.data.v1.ToolInput.structured_output:type_name -> agentshim.data.v1.StructuredOutputInput
+	74,  // 133: agentshim.data.v1.ToolInput.task_create:type_name -> agentshim.data.v1.TaskCreateInput
+	75,  // 134: agentshim.data.v1.ToolInput.tool_search:type_name -> agentshim.data.v1.ToolSearchInput
+	76,  // 135: agentshim.data.v1.ToolInput.send_message:type_name -> agentshim.data.v1.SendMessageInput
+	77,  // 136: agentshim.data.v1.ToolInput.monitor:type_name -> agentshim.data.v1.MonitorInput
+	79,  // 137: agentshim.data.v1.ToolInput.task_stop:type_name -> agentshim.data.v1.TaskStopInput
+	80,  // 138: agentshim.data.v1.ToolInput.schedule_wakeup:type_name -> agentshim.data.v1.ScheduleWakeupInput
+	81,  // 139: agentshim.data.v1.ToolInput.workflow:type_name -> agentshim.data.v1.WorkflowInput
+	82,  // 140: agentshim.data.v1.ToolInput.task_list:type_name -> agentshim.data.v1.TaskListInput
+	83,  // 141: agentshim.data.v1.ToolInput.task_get:type_name -> agentshim.data.v1.TaskGetInput
+	84,  // 142: agentshim.data.v1.ToolInput.artifact:type_name -> agentshim.data.v1.ArtifactInput
+	107, // 143: agentshim.data.v1.ToolInput.unclassified:type_name -> google.protobuf.Struct
+	107, // 144: agentshim.data.v1.TaskUpdateInput.metadata:type_name -> google.protobuf.Struct
+	107, // 145: agentshim.data.v1.StructuredOutputInput.data:type_name -> google.protobuf.Struct
+	107, // 146: agentshim.data.v1.TaskCreateInput.metadata:type_name -> google.protobuf.Struct
+	78,  // 147: agentshim.data.v1.MonitorInput.ws:type_name -> agentshim.data.v1.MonitorWebsocket
+	107, // 148: agentshim.data.v1.WorkflowInput.args:type_name -> google.protobuf.Struct
+	94,  // 149: agentshim.data.v1.TodoWriteInput.todos:type_name -> agentshim.data.v1.TodoItem
+	98,  // 150: agentshim.data.v1.Question.options:type_name -> agentshim.data.v1.QuestionOption
+	99,  // 151: agentshim.data.v1.AskUserQuestionInput.questions:type_name -> agentshim.data.v1.Question
+	107, // 152: agentshim.data.v1.AskUserQuestionInput.answers:type_name -> google.protobuf.Struct
+	107, // 153: agentshim.data.v1.AskUserQuestionInput.metadata:type_name -> google.protobuf.Struct
+	107, // 154: agentshim.data.v1.AskUserQuestionInput.annotations:type_name -> google.protobuf.Struct
+	107, // 155: agentshim.data.v1.McpInput.input:type_name -> google.protobuf.Struct
+	156, // [156:156] is the sub-list for method output_type
+	156, // [156:156] is the sub-list for method input_type
+	156, // [156:156] is the sub-list for extension type_name
+	156, // [156:156] is the sub-list for extension extendee
+	0,   // [0:156] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_data_v1_tools_proto_init() }

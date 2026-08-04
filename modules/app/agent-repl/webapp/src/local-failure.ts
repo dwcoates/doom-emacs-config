@@ -107,6 +107,7 @@ export function clientFailure(
     sourceDetail,
     resolvedAtMs,
     uuid: `local:${type}`,
+    detail: { kind: "none" },
   };
 }
 

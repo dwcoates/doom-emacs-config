@@ -6,6 +6,7 @@ import (
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
@@ -136,7 +137,7 @@ func TestReplayPreservesResultCacheUsage(t *testing.T) {
 					OutputTokens:             29,
 					CacheCreationInputTokens: 31,
 					CacheReadInputTokens:     37,
-					CostUsd:                  0.42,
+					CostUsd:                  proto.Float64(0.42),
 				},
 			},
 		}},

@@ -185,9 +185,19 @@ type Manager struct {
 	// merge_queue_position / merge_queue_depth pair is retired, and MergeStatus's
 	// enqueued arm reports the place the run was ADMITTED at instead.
 	mergeQueue merge.Queue
-	subs       map[int]chan *frontendv1.WorkspaceState
-	nextSub    int
-	closed     bool
+	// hibernationLeases makes settledness and turn admission one SSM-owned
+	// decision. A workspace entry excludes prompt acceptance and TurnStarted.
+	hibernationLeases    map[string]uint64
+	nextHibernationLease uint64
+	// controllerRegistrations counts controller generations whose bring-up has
+	// begun but has not reached its operational edge. Hibernation and controller
+	// registration are mutually exclusive under mu, so no settled projection
+	// from an older generation can authorize stopping the generation being
+	// published.
+	controllerRegistrations map[string]map[string]struct{}
+	subs                    map[int]chan *frontendv1.WorkspaceState
+	nextSub                 int
+	closed                  bool
 }
 
 // Open opens the SSM database and warms the last-resolved cache from the
@@ -229,23 +239,25 @@ func Open(opts Options) (*Manager, error) {
 		afterFunc = func(d time.Duration, f func()) Timer { return time.AfterFunc(d, f) }
 	}
 	m := &Manager{
-		db:                db,
-		ownsDB:            ownsDB,
-		logf:              logf,
-		resolver:          opts.Resolver,
-		clock:             clock,
-		last:              make(map[string]frontendv1.RenderState),
-		lastTasks:         make(map[string]int64),
-		lastMergeStatus:   make(map[string]*frontendv1.MergeStatus),
-		pushedAtMs:        make(map[string]int64),
-		interruptedTurn:   make(map[string]*interruptMark),
-		mergeLeases:       make(map[string][]leaseWindow),
-		mergeLeaseHolders: make(map[string]bool),
-		mergedAt:          make(map[string]int64),
-		clearingTimers:    make(map[string]Timer),
-		clearingTimeout:   clearingTimeout,
-		afterFunc:         afterFunc,
-		subs:              make(map[int]chan *frontendv1.WorkspaceState),
+		db:                      db,
+		ownsDB:                  ownsDB,
+		logf:                    logf,
+		resolver:                opts.Resolver,
+		clock:                   clock,
+		last:                    make(map[string]frontendv1.RenderState),
+		lastTasks:               make(map[string]int64),
+		lastMergeStatus:         make(map[string]*frontendv1.MergeStatus),
+		pushedAtMs:              make(map[string]int64),
+		interruptedTurn:         make(map[string]*interruptMark),
+		mergeLeases:             make(map[string][]leaseWindow),
+		mergeLeaseHolders:       make(map[string]bool),
+		mergedAt:                make(map[string]int64),
+		hibernationLeases:       make(map[string]uint64),
+		controllerRegistrations: make(map[string]map[string]struct{}),
+		clearingTimers:          make(map[string]Timer),
+		clearingTimeout:         clearingTimeout,
+		afterFunc:               afterFunc,
+		subs:                    make(map[int]chan *frontendv1.WorkspaceState),
 	}
 	if err := m.warm(); err != nil {
 		if ownsDB {
@@ -434,6 +446,11 @@ func (m *Manager) Apply(ev *corev1.Event) error {
 	if applied {
 		m.logf("ssm: duplicate event skipped kind=%s session=%s seq=%d ws=%s", causeKind, sid, ev.GetSeq(), ws)
 		return nil
+	}
+	if _, started := ev.GetPayload().(*corev1.Event_TurnStarted); started {
+		if err := m.rejectStartDuringHibernationLocked(ws, "TurnStarted apply"); err != nil {
+			return err
+		}
 	}
 
 	// THE INTERRUPTED TURN OUTCOME (I1). A user-commanded stop the shim

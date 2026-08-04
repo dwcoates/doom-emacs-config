@@ -4,9 +4,13 @@
  * explicit-ignore path for unsupported shapes. One edge per test (AAA).
  */
 import { describe, expect, it } from "vitest";
+import { create } from "@bufbuild/protobuf";
+import { QueryTerminationFailureSchema } from "../../proto/gen/ts/agentshim/frontend/v1/frontend_pb";
+import { QueryStartupFailureSchema } from "../../proto/gen/ts/agentshim/core/v1/core_pb";
 import { decodeFrontendFrame } from "../src/frontend-proto.js";
 import {
   StateAdapter,
+  systemFailureFrom,
   userTurnReceipt,
   type AdapterEffect,
   type AdapterLogLevel,
@@ -803,6 +807,7 @@ describe("systemFailure arm", () => {
       sourceDetail: "status=529",
       resolvedAtMs: 0,
       uuid: "failure:e9",
+      detail: { kind: "none" },
     };
     expect(items).toEqual([expected]);
   });
@@ -819,6 +824,39 @@ describe("systemFailure arm", () => {
     });
     // Assert
     expect((items[0] as SystemFailureCard).errorClass).toBe("INTERNAL");
+  });
+
+  it("preserves query-termination evidence through the conversation-item path", () => {
+    const items = itemsFrom({
+      uuid: "failure:termination",
+      systemFailure: {
+        errorClass: "ERROR_CLASS_INTERNAL",
+        errorType: "unexpected_query_termination",
+        message: "query ended",
+        queryTermination: { agentReplSessionId: "session-1", queryInstanceId: "query-1", vendorSessionId: "claude-1", observedAtMs: "1700000000000", unexpectedEof: {} },
+      },
+    });
+    const detail = (items[0] as SystemFailureCard).detail;
+    expect(detail.kind).toBe("queryTermination");
+    if (detail.kind !== "queryTermination") throw new Error("wrong detail");
+    expect(detail.value.agentReplSessionId).toBe("session-1");
+    expect(detail.value.queryInstanceId).toBe("query-1");
+    expect(detail.value.vendorIdentity).toEqual({ case: "vendorSessionId", value: "claude-1" });
+    expect(detail.value.observedAtMs).toBe(1700000000000n);
+    expect(detail.value.reason.case).toBe("unexpectedEof");
+  });
+
+  it("preserves query-termination evidence through the decoded failure path", () => {
+    const card = systemFailureFrom({
+      errorClass: "INTERNAL",
+      errorType: "unexpected_query_termination",
+      message: "query ended",
+      sourceDetail: "iterator stopped",
+      resolvedAtMs: 0,
+      itemUuid: "failure:termination",
+      detail: { kind: "queryTermination", value: create(QueryTerminationFailureSchema, { agentReplSessionId: "session-1", queryInstanceId: "query-1", vendorIdentity: { case: "vendorSessionId", value: "claude-1" }, observedAtMs: 1700000000000n, reason: { case: "startupFailure", value: create(QueryStartupFailureSchema, { cause: "spawn refused" }) } }) },
+    });
+    expect(card.detail).toEqual({ kind: "queryTermination", value: create(QueryTerminationFailureSchema, { agentReplSessionId: "session-1", queryInstanceId: "query-1", vendorIdentity: { case: "vendorSessionId", value: "claude-1" }, observedAtMs: 1700000000000n, reason: { case: "startupFailure", value: create(QueryStartupFailureSchema, { cause: "spawn refused" }) } }) });
   });
 
   it("carries the resolution stamp that settles a window", () => {
@@ -862,7 +900,7 @@ describe("systemFailure arm", () => {
           message: "y",
         },
       }),
-    ).toThrow(/unrecognized error_class/);
+    ).toThrow(/error_class has unrecognized value/);
   });
 });
 

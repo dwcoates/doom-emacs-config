@@ -91,6 +91,9 @@ func TestAMismatchedShimBuildIsBounced(t *testing.T) {
 		t.Fatalf("Ensure: %v", err)
 	}
 	waitForWirings(applier, 1)
+	m.mu.Lock()
+	source := m.byWS["ws"]
+	m.mu.Unlock()
 
 	// Act.
 	if bounced := m.refreshStaleShim("ws", "s1", "sha-1"); !bounced {
@@ -106,6 +109,11 @@ func TestAMismatchedShimBuildIsBounced(t *testing.T) {
 	}
 	if by.Initiator != "hard_restart" {
 		t.Fatalf("stop initiator = %q, want hard_restart", by.Initiator)
+	}
+	select {
+	case <-source.buildRefreshStarted:
+	default:
+		t.Fatal("the stale-build verdict did not publish its source-retirement edge")
 	}
 }
 
@@ -185,7 +193,15 @@ func TestAFailedStaleRefreshLeavesTheLatchUnsetAndSurfacesTheFault(t *testing.T)
 	}
 	m.mu.Lock()
 	latched := m.buildBounced["s1"]
-	inFlight := m.buildBouncing["s1"]
+	refresh := m.buildRefresh["s1"]
+	inFlight := false
+	if refresh != nil {
+		select {
+		case <-refresh.done:
+		default:
+			inFlight = true
+		}
+	}
 	m.mu.Unlock()
 	if latched {
 		t.Fatal("a FAILED refresh latched the session as already-bounced; the workspace would never be bounced again")
@@ -220,6 +236,68 @@ func waitForConnectivityCause(applier *fakeApplier, causeKind string) connectivi
 			}
 		}
 		runtime.Gosched()
+	}
+}
+
+// A health probe can be bound to the stale generation at the instant its
+// ShimReady starts the intentional refresh. That one transport loss follows
+// the recorded replacement generation; unrelated losses never do.
+func TestHealthFollowsTheIntentionalStaleBuildReplacement(t *testing.T) {
+	// Arrange.
+	m, _ := newTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, &fakeSpawner{})
+	if err := m.Ensure("ws"); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	m.mu.Lock()
+	source := m.byWS["ws"]
+	m.mu.Unlock()
+	sourceReady := make(chan struct{})
+	probeStarted := make(chan struct{}, 1)
+	sourceClient := source.client.(*fakeClient)
+	sourceClient.notReady = sourceReady
+	sourceClient.awaitReadyStarted = probeStarted
+	replacementClient := &fakeClient{}
+	replacement := &sessionController{
+		sessionID: "s1", workspace: "ws", generationID: "replacement",
+		client: replacementClient,
+	}
+	refresh := &buildRefreshState{source: source, done: make(chan struct{})}
+	m.mu.Lock()
+	m.buildRefresh["s1"] = refresh
+	m.mu.Unlock()
+
+	// Act.
+	type answer struct {
+		status *corev1.HealthStatus
+		err    error
+	}
+	done := make(chan answer, 1)
+	go func() {
+		status, err := m.Health(context.Background(), "ws", "s1", "health-refresh")
+		done <- answer{status: status, err: err}
+	}()
+	<-probeStarted
+	m.mu.Lock()
+	m.byWS["ws"] = replacement
+	close(source.buildRefreshStarted)
+	close(refresh.done)
+	m.mu.Unlock()
+
+	// Assert.
+	got := <-done
+	if got.err != nil || !got.status.GetHealthy() || got.status.GetRequestId() != "health-refresh" {
+		t.Fatalf("Health = (%+v, %v), want the replacement's correlated healthy response", got.status, got.err)
+	}
+	if ids := replacementClient.healthRequestIDs; len(ids) != 1 || ids[0] != "health-refresh" {
+		t.Fatalf("replacement health request IDs = %v", ids)
+	}
+	if ids := sourceClient.healthRequestIDs; len(ids) != 0 {
+		t.Fatalf("source health request IDs = %v, want none: its readiness is permanently withheld", ids)
+	}
+	select {
+	case <-sourceReady:
+		t.Fatal("the test accidentally released source readiness")
+	default:
 	}
 }
 
@@ -359,7 +437,7 @@ func TestRestartSessionCarriesTheAnnouncedPidToTheStop(t *testing.T) {
 	if err := m.Ensure("ws"); err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
-	m.onHandshake("ws", "s1", &corev1.ShimHello{Pid: 4242})
+	m.onHandshake("ws", "s1", &corev1.ShimHello{Pid: 4242, QueryInstanceId: "query-build-refresh"})
 
 	// Act.
 	if err := m.RestartSession(context.Background(), "ws"); err != nil {
@@ -381,10 +459,10 @@ func TestAHelloWithoutAPidRecordsNone(t *testing.T) {
 	if err := m.Ensure("ws"); err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
-	m.onHandshake("ws", "s1", &corev1.ShimHello{Pid: 7})
+	m.onHandshake("ws", "s1", &corev1.ShimHello{Pid: 7, QueryInstanceId: "query-build-refresh"})
 
 	// Act — a later hello (a reconnect from a build that does not report one).
-	m.onHandshake("ws", "s1", &corev1.ShimHello{})
+	m.onHandshake("ws", "s1", &corev1.ShimHello{QueryInstanceId: "query-build-refresh"})
 
 	// Assert.
 	if got := m.shimPIDFor("s1"); got != 0 {

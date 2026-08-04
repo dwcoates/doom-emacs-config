@@ -105,10 +105,11 @@ func TestE2ERotationResubscribesAndKeepsTheConversationFlowing(t *testing.T) {
 	cwd := t.TempDir()
 	id := h.createSession(t, cwd)
 	conn := h.dial(t, id)
-	if first := readFrame(t, conn); first.GetSnapshot() == nil {
+	first := readFrame(t, conn)
+	if first.GetSnapshot() == nil {
 		t.Fatalf("first frame = %T, want a StateSnapshot", first.GetFrame())
 	}
-	waitAttachedSession(t, conn, id, cwd)
+	waitAttachedSession(t, first.GetSnapshot(), conn, id, cwd)
 
 	// Act — rotate mid-session, then prompt across the bounce.
 	rot := rotateSession(t, h, conn, id, cwd)
@@ -137,10 +138,11 @@ func TestE2EHealthProbeAfterRotationIsHealthy(t *testing.T) {
 	cwd := t.TempDir()
 	id := h.createSession(t, cwd)
 	conn := h.dial(t, id)
-	if first := readFrame(t, conn); first.GetSnapshot() == nil {
+	first := readFrame(t, conn)
+	if first.GetSnapshot() == nil {
 		t.Fatalf("first frame = %T, want a StateSnapshot", first.GetFrame())
 	}
-	waitAttachedSession(t, conn, id, cwd)
+	waitAttachedSession(t, first.GetSnapshot(), conn, id, cwd)
 	rot := rotateSession(t, h, conn, id, cwd)
 
 	// Act

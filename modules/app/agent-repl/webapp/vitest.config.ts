@@ -1,4 +1,5 @@
 import { defineConfig } from "vitest/config";
+import { protobufRuntimeAliases } from "./protobuf-runtime-aliases";
 
 /**
  * Vitest stubs CSS imports out to an empty module by default, which would
@@ -8,6 +9,7 @@ import { defineConfig } from "vitest/config";
  * Vite's own build reads vite.config.ts, so this file is test-only.
  */
 export default defineConfig({
+  resolve: { alias: protobufRuntimeAliases },
   test: {
     css: true,
     setupFiles: ["./test/setup.ts"],

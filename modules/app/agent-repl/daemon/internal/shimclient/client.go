@@ -77,6 +77,10 @@ var (
 	// but remains a distinct type so no caller can mistake proof for an SSM
 	// lifecycle transition.
 	ErrTurnClaimRejected = errors.New("shimclient: turn claim bridge rejected")
+	// ErrReplayCursorInvariant means an event would make the durable replay
+	// cursor cross an incomplete logical accounting record. Reconnecting cannot
+	// change that event ordering, so Run terminates instead of skipping it.
+	ErrReplayCursorInvariant = errors.New("shimclient: replay cursor invariant violated")
 )
 
 // SeqStore supplies and consumes the daemon-tracked last_seen_seq per session.
@@ -130,8 +134,10 @@ type TurnClaimSink interface {
 // this to the frontend translation layer.
 type FrameSink interface {
 	// Consume feeds one event to the frontend translator. Called on the demux
-	// goroutine in strict arrival order.
-	Consume(ev *corev1.Event)
+	// goroutine in strict arrival order. A rejection prevents the persistent
+	// high-water mark from advancing past an event the frontend/accounting path
+	// did not accept.
+	Consume(ev *corev1.Event) error
 }
 
 // ModelCatalogSink receives the live query's selectable models.  A catalogue
@@ -238,7 +244,9 @@ type Config struct {
 	// OnConnected fires when the bring-up gate CLOSES — the shim's ShimReady,
 	// not merely a completed handshake — carrying the ShimHello that opened it
 	// (so stitch sees turn_in_flight for mid-turn reattach). Optional.
-	OnConnected func(hello *corev1.ShimHello)
+	// The return value reports that the source generation is being retired by
+	// an intentional transition. Readiness stays withheld in that case.
+	OnConnected func(hello *corev1.ShimHello) (retiring bool)
 
 	// OnLinkLost fires when a connection this client was DRIVING drops while
 	// the client itself lives on — the reconnect loop is about to re-run the
@@ -308,6 +316,12 @@ type Client struct {
 	// a timeout tuned to "probably long enough" is a guess that is wrong on
 	// both sides (too short under load, needless latency otherwise).
 	ready chan struct{}
+	// terminal closes when Run encounters a protocol failure that reconnecting
+	// cannot repair. AwaitReady selects on the same cause so a pre-readiness
+	// rejection returns exact typed evidence instead of expiring generically.
+	terminal     chan struct{}
+	terminalErr  error
+	terminalOnce sync.Once
 
 	// wired is the shim's ShimReady ack: the session is fully wired, standing
 	// store subscription included (core.proto ShimReady). Guarded by mu.
@@ -323,6 +337,19 @@ type Client struct {
 	// lastSeen mirrors the SeqStore high-water mark for this session, tracked
 	// in memory so the demux can detect regressions cheaply.
 	lastSeen uint64
+	// durable cursor advancement remains pinned behind every active turn and
+	// logical query-termination pair. The in-memory cursor can continue across a
+	// transport reconnect; a daemon restart reads the pinned durable cursor and
+	// therefore replays the complete uncommitted logical record.
+	pinnedAccountingTurns   map[string]struct{}
+	pendingTerminationQuery string
+	// pendingResumeQuery pins the durable cursor before a resumed QueryCreated
+	// until runtime identity is accepted or a typed termination proves that the
+	// query never established. A replacement controller must replay the resume
+	// commitment before it can interpret the runtime identity that follows.
+	pendingResumeQuery string
+	haveVolatileCursor bool
+	vendorSessionID    string
 
 	// seqGeneration names the shim generation whose event last advanced
 	// lastSeen ("" when no identified generation has: a mark just re-read from
@@ -415,7 +442,7 @@ func New(cfg Config) *Client {
 	}
 	logf := dlog.Tag(cfg.Logf, "component", "shimclient", "session", cfg.SessionID)
 	// An OPEN latch: a freshly built client has no connection yet.
-	return &Client{cfg: cfg, logf: logf, ready: make(chan struct{}), replays: newReplayRegistry()}
+	return &Client{cfg: cfg, logf: logf, ready: make(chan struct{}), terminal: make(chan struct{}), replays: newReplayRegistry()}
 }
 
 // permissionMode resolves the posture this connection's DaemonHello announces:
@@ -496,6 +523,14 @@ func (c *Client) AwaitReady(ctx context.Context) error {
 		select {
 		case <-ch:
 			// Latch closed; loop to confirm `active` under the lock.
+		case <-c.terminal:
+			c.mu.Lock()
+			err := c.terminalErr
+			c.mu.Unlock()
+			if err == nil {
+				panic("shimclient: terminal readiness latch closed without an error")
+			}
+			return err
 		case <-died:
 			err := c.spawnDeathError()
 			c.logf("bring-up ABORTED: %v", err)
@@ -514,7 +549,12 @@ func (c *Client) AwaitReady(ctx context.Context) error {
 // It returns nil on clean ctx cancellation and a terminal protocol error
 // (ErrVersionMismatch, ErrSeqRegression, ErrHandshakeRejected,
 // ErrLifecycleRejected, ErrTurnClaimRejected) that reconnecting cannot fix.
-func (c *Client) Run(ctx context.Context) error {
+func (c *Client) Run(ctx context.Context) (retErr error) {
+	defer func() {
+		if retErr != nil {
+			c.finishTerminal(retErr)
+		}
+	}()
 	backoff := c.cfg.BackoffMin
 	for {
 		if ctx.Err() != nil {
@@ -528,7 +568,8 @@ func (c *Client) Run(ctx context.Context) error {
 			}
 		case errors.Is(err, ErrVersionMismatch), errors.Is(err, ErrSeqRegression),
 			errors.Is(err, ErrHandshakeRejected), errors.Is(err, ErrLifecycleRejected),
-			errors.Is(err, ErrTurnClaimRejected), errors.Is(err, ErrShimDiedAfterConnect):
+			errors.Is(err, ErrTurnClaimRejected), errors.Is(err, ErrReplayCursorInvariant),
+			errors.Is(err, ErrShimDiedAfterConnect):
 			c.logf("terminal protocol error, not reconnecting: %v", err)
 			return err
 		default:
@@ -559,6 +600,18 @@ func (c *Client) Run(ctx context.Context) error {
 			backoff = c.cfg.BackoffMax
 		}
 	}
+}
+
+func (c *Client) finishTerminal(err error) {
+	if err == nil {
+		panic("shimclient: cannot finish terminally without an error")
+	}
+	c.terminalOnce.Do(func() {
+		c.mu.Lock()
+		c.terminalErr = err
+		c.mu.Unlock()
+		close(c.terminal)
+	})
 }
 
 // runOnce dials, handshakes, subscribes, then runs the read loop plus the
@@ -592,19 +645,30 @@ func (c *Client) runOnce(ctx context.Context) (retErr error) {
 	if c.cfg.OnHandshake != nil {
 		if err := c.cfg.OnHandshake(hello); err != nil {
 			conn.Close()
-			return fmt.Errorf("%w before DaemonHello: %v", ErrHandshakeRejected, err)
+			return fmt.Errorf("%w before DaemonHello: %w", ErrHandshakeRejected, err)
 		}
 	}
 
 	// GATE STAGE 2: answer with the resume position. This is what the shim
 	// opens its standing store subscription at, so it is read here — after the
 	// rotation reconciliation above, and before any frame goes out.
-	from := c.cfg.SeqStore.LastSeq(c.cfg.SessionID)
+	durableFrom := c.cfg.SeqStore.LastSeq(c.cfg.SessionID)
+	nextGeneration := shimGenerationID(hello)
+	from := durableFrom
+	if c.haveVolatileCursor && c.connGeneration == nextGeneration && c.vendorSessionID == hello.GetVendorSessionId() {
+		from = c.lastSeen
+	} else {
+		c.pinnedAccountingTurns = nil
+		c.pendingTerminationQuery = ""
+		c.pendingResumeQuery = ""
+	}
 	c.lastSeen = from
 	// The generation THIS connection speaks for. seqGeneration is deliberately
 	// left alone: it still names the generation that earned the mark, and a
 	// reconnect to the same shim must keep the regression guard fully strict.
-	c.connGeneration = shimGenerationID(hello)
+	c.connGeneration = nextGeneration
+	c.vendorSessionID = hello.GetVendorSessionId()
+	c.haveVolatileCursor = true
 	// The session's posture travels with the resume position, resolved HERE so
 	// the field is never empty on the wire (core.proto DaemonHello.
 	// permission_mode). Empty is reserved for a daemon too old to speak it.
@@ -746,20 +810,32 @@ func (c *Client) dispatchShimReady(ac *activeConn, ready *corev1.ShimReady) {
 	}
 	c.mu.Lock()
 	current := c.active == ac
+	c.mu.Unlock()
+	if !current {
+		c.logf("ShimReady arrived on a superseded connection; ignoring")
+		return
+	}
+	// OnConnected owns every generation transition implied by this ShimReady,
+	// including stale-build replacement. It must run before readiness is
+	// published so AwaitReady cannot release a source generation before its
+	// intentional replacement rendezvous exists.
+	if c.cfg.OnConnected != nil && c.cfg.OnConnected(ac.hello) {
+		c.logf("ShimReady source generation entered an intentional transition; readiness remains withheld")
+		return
+	}
+	c.mu.Lock()
+	current = c.active == ac
 	if current {
 		c.wired = true
 		c.markReadyLocked()
 	}
 	c.mu.Unlock()
 	if !current {
-		c.logf("ShimReady arrived on a superseded connection; ignoring")
+		c.logf("ShimReady source generation was retired during OnConnected; readiness remains withheld")
 		return
 	}
 	c.logf("bring-up gate CLOSED: shim fully wired from_seq=%d store_key=%s; this session is now driveable",
 		ready.GetFromSeq(), ready.GetVendorSessionId())
-	if c.cfg.OnConnected != nil {
-		c.cfg.OnConnected(ac.hello)
-	}
 }
 
 // heartbeatSender emits a Heartbeat on every interval until the connection

@@ -10,6 +10,7 @@
 import {
   TOPBAR_AGENT_ATTR,
   runningAgentClocks,
+  sessionAccountingLabel,
   sessionTopbarDatapoints,
   topbarClickAction,
   topbarInfoHtml,
@@ -475,6 +476,10 @@ async function boot(): Promise<void> {
       tasksOpen: false,
       tokensOpen: tokensMenuOpen,
     });
+    const accounting = sessionAccountingLabel(s);
+    if (accounting !== null) {
+      infoEl.innerHTML += `<span class="session-accounting">${escapeHtml(accounting)}</span>`;
+    }
     // The idle-with-live-async signal breathes as the sidebar's amber dot on
     // this session's own row rather than as strip text. The flag is the feed
     // renderer's own gate reading (idle + live async), read back here so the

@@ -277,7 +277,8 @@ message ApiAssistantMessage {
 }
 
 // The per-message API usage object (distinct from stream.proto Usage in that
-// disk lines carry the raw API shape; kept Struct-free and explicit).
+// disk lines carry the raw API shape). Stable fields are typed explicitly;
+// evolving nested vendor data stays losslessly preserved as Struct values.
 message ApiUsage {
   int64 input_tokens = 1;
   int64 output_tokens = 2;
@@ -299,6 +300,18 @@ message ApiUsage {
   google.protobuf.ListValue iterations = 8;  // per-model iteration breakdown
   string speed = 9;                          // e.g. "standard"
   string inference_geo = 10;                 // e.g. "global"
+  // Preserves the API fallback-credit billing outcome.
+  google.protobuf.Struct fallback_credit = 11;
+  // Preserves output-token categories.
+  google.protobuf.Struct output_tokens_details = 12;
+  // Preserves unknown usage keys before typed support exists.
+  google.protobuf.Struct unmodeled_usage = 13;
+  // Preserves cache-miss diagnostics supplied by the agent harness.
+  google.protobuf.Struct cache_diagnostic = 14;
+  // Preserves the complete SDK usage object before typed validation or
+  // normalization. Object keys, nested values, nulls, zeroes, empty
+  // containers, and absent keys retain their distinct source representations.
+  google.protobuf.Struct raw_sdk_usage = 15;
 }
 
 // ---------------------------------------------------------------------------

@@ -11,9 +11,11 @@ import (
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
+	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"claude-repld/internal/shimclient"
 
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
@@ -275,6 +277,7 @@ func newRepullHarnessWithStore(t *testing.T, client *replayClient, history Durab
 		Locator:           fakeLocator{m: map[string]string{"ws": "s1"}},
 		SeqStore:          h.seq,
 		ClearCompactStore: h.floors,
+		TurnAccountings:   emptyTurnAccountingStore{},
 		DurableHistory:    history,
 		Registrar:         h.reg,
 		ProtocolVersion:   "1",
@@ -404,6 +407,35 @@ func TestReplayedEventsReachConversation(t *testing.T) {
 	defer h.push.mu.Unlock()
 	if len(h.push.convo) != 1 || h.push.convo[0].GetItems()[0].GetUuid() != "old" {
 		t.Fatalf("conversation pushes = %v, want one item uuid=old", h.push.convo)
+	}
+}
+
+func TestConnectedRepullAttachesHistoricalAccountingByPersistedTurnIdentityWhileIdle(t *testing.T) {
+	// Arrange: the connected consumer is idle, so no live reducer turn can
+	// accidentally provide the identity for historical turn T1.
+	result := accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Result{Result: &datav1.ResultMessage{}}})
+	result.Seq = 3
+	result.RequestId = "T1"
+	client := &replayClient{events: []*corev1.Event{result}}
+	h := newRepullHarness(t, client)
+	want := &frontendv1.TurnAccounting{TurnId: "T1", QueryInstanceId: "query-1", Verdict: &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}}}
+	h.m.cfg.TurnAccountings = replayTurnAccountingStore{accountings: []*frontendv1.TurnAccounting{want}}
+	h.seq.SetLastSeq("s1", 9)
+	if active := h.controller(t).consumer.accounting.activeTurnID; active != "" {
+		t.Fatalf("active turn = %q, want idle", active)
+	}
+
+	// Act.
+	if err := h.m.Resync("ws", 0); err != nil {
+		t.Fatalf("Resync: %v", err)
+	}
+
+	// Assert: the result's durable request/turn identity, not mutable reducer
+	// state, selects the exact persisted record.
+	h.push.mu.Lock()
+	defer h.push.mu.Unlock()
+	if len(h.push.convo) != 1 || len(h.push.convo[0].GetItems()) != 1 || !proto.Equal(h.push.convo[0].GetItems()[0].GetTurnAccounting(), want) {
+		t.Fatalf("conversation pushes = %+v", h.push.convo)
 	}
 }
 

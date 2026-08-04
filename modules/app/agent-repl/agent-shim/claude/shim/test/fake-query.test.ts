@@ -90,8 +90,90 @@ describe("createFakeQuery", () => {
     const types = msgs.map((m) => m.type);
     expect(types).toContain("stream_event");
     expect(types).toContain("assistant");
+    expect(msgs.find((m) => m.type === "stream_event" && (m["event"] as { type?: string } | undefined)?.type === "message_start"))
+      .toMatchObject({ ttft_ms: 1 });
     const result = msgs.find((m) => m.type === "result")!;
     expect(result).toMatchObject({ subtype: "success", result: expect.stringContaining("hello") });
+  });
+
+  it("provides deterministic full cache usage on ordinary fake turns", async () => {
+    const h = makeFake();
+    h.input.push(userMsg("hello"));
+    h.input.end();
+    const messages = await h.collect();
+    const assistant = messages.find((message) => message.type === "assistant") as Record<string, unknown>;
+    expect(assistant).toMatchObject({ message: { usage: {
+      input_tokens: 7,
+      output_tokens: 11,
+      cache_read_input_tokens: 80,
+      cache_creation_input_tokens: 4,
+      service_tier: "standard",
+      cache_creation: { ephemeral_5m_input_tokens: 4 },
+      server_tool_use: { web_search_requests: 0 },
+      fallback_credit: { status: "not_used" },
+      output_tokens_details: { reasoning_tokens: 3 },
+      unmodeled_usage: { fake_extension_tokens: 2 },
+      cache_diagnostic: { status: "hit", reason: "stable_prefix" },
+    } } });
+  });
+
+  it("emits main and subagent usage records plus whole-turn model usage", async () => {
+    const h = makeFake();
+    h.input.push(userMsg("!usage-subagent"));
+    h.input.end();
+    const messages = await h.collect();
+    const assistants = messages.filter((message) => message.type === "assistant") as Array<Record<string, unknown>>;
+    expect(assistants).toHaveLength(2);
+    expect(assistants[0]).toMatchObject({ message: { usage: {
+      input_tokens: 11,
+      cache_creation: { ephemeral_5m_input_tokens: 41, ephemeral_1h_input_tokens: 42 },
+      server_tool_use: { web_search_requests: 51, web_fetch_requests: 52 },
+      iterations: [{ type: "sampling", model: "main-agent-reasoning-model", input_tokens: 61, cache_creation: { ephemeral_1h_input_tokens: 66 } }],
+      output_tokens_details: { reasoning_tokens: 71, reasoning_model: "main-agent-reasoning-model" },
+      cache_diagnostic: { reason: "model_changed", cache_missed_input_tokens: 72 },
+      fallback_credit: { status: { type: "redeemed", actor: "main-agent" }, credits: 73 },
+      unmodeled_usage: { future_counter: 74, nested: { actor: "main-agent" } },
+    } } });
+    expect(assistants[1]).toMatchObject({ subagent_type: "general-purpose", message: { model: "fake-subagent-model", usage: {
+      input_tokens: 111,
+      cache_creation: { ephemeral_5m_input_tokens: 141, ephemeral_1h_input_tokens: 142 },
+      server_tool_use: { web_search_requests: 151, web_fetch_requests: 152 },
+      iterations: [{ type: "sampling", model: "subagent-reasoning-model", input_tokens: 161, cache_creation: { ephemeral_1h_input_tokens: 166 } }],
+      output_tokens_details: { reasoning_tokens: 171, reasoning_model: "subagent-reasoning-model" },
+      cache_diagnostic: { reason: "model_changed", cache_missed_input_tokens: 172 },
+      fallback_credit: { status: { type: "redeemed", actor: "subagent" }, credits: 173 },
+      unmodeled_usage: { future_counter: 174, nested: { actor: "subagent" } },
+    } } });
+    expect(messages.find((message) => message.type === "result")).toMatchObject({
+      usage: { input_tokens: 11, iterations: [{ model: "main-agent-reasoning-model" }] },
+      model_usage: expect.objectContaining({
+        "fake-model": expect.objectContaining({ input_tokens: 11, web_search_requests: 51, cost_usd: 0.001, context_window: 200000, max_output_tokens: 32000, canonical_model: "fake-model", provider: "anthropic" }),
+        "fake-subagent-model": expect.objectContaining({ input_tokens: 111, web_search_requests: 151, cost_usd: 0.002, context_window: 200000, max_output_tokens: 16000, canonical_model: "fake-subagent-model", provider: "anthropic" }),
+      }),
+    });
+  });
+
+  it("emits complete raw subagent lineage in the usage-accounting fixture", async () => {
+    const h = makeFake();
+    h.input.push(userMsg("!usage-subagent"));
+    h.input.end();
+
+    const messages = await h.collect();
+    const subagent = messages.filter((message) => message.type === "assistant")[1];
+    expect(subagent).toMatchObject({
+      agent_id: "fake-subagent-agent-id",
+      parent_tool_use_id: "toolu_fake_subagent",
+      parent_agent_id: "fake-parent-agent-id",
+      subagent_type: "general-purpose",
+      task_description: "deterministic usage-accounting subagent",
+    });
+  });
+
+  it("ends the iterator without a terminal result for the query EOF fixture", async () => {
+    const h = makeFake();
+    h.input.push(userMsg("!query-eof"));
+    const messages = await h.collect();
+    expect(messages.some((message) => message.type === "result")).toBe(false);
   });
 
   // A TURN FAILURE IS OTHERWISE UNPROVOKABLE OFFLINE, and the daemon's merge

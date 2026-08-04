@@ -24,7 +24,9 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -182,21 +184,60 @@ func startShimStore(t *testing.T, bin, sock string) {
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start shim-store: %v", err)
 	}
-	// cmd.Wait (not Process.Wait) is what drains the stderr copier, so the
-	// cleanup below cannot let a pending testLogWriter write race the end of
-	// the test. Only this goroutine ever waits; cleanup reads its result.
-	exited := make(chan error, 1)
-	go func() { exited <- cmd.Wait() }()
+	// cmd.Wait (not Process.Wait) is what drains the stderr copier. childExit
+	// retains one immutable outcome behind a closed-channel latch, so readiness
+	// and cleanup can both observe an early exit without consuming each other's
+	// only copy and deadlocking the test teardown.
+	exited := observeChildExit(cmd.Wait)
 	t.Cleanup(func() {
 		_ = cmd.Process.Kill()
-		<-exited
+		_ = exited.wait()
 	})
 	select {
 	case <-ready:
-	case err := <-exited:
-		t.Fatalf("shim-store exited before it began listening on %s: %v", sock, err)
+	case <-exited.done:
+		t.Fatalf("shim-store exited before it began listening on %s: %v", sock, exited.err)
 	case <-time.After(10 * time.Second):
 		t.Fatalf("shim-store never reported listening on %s", sock)
+	}
+}
+
+// childExit is a replayable process-exit outcome. Closing done publishes err
+// to every observer; unlike receiving an error value from a one-shot channel,
+// one observer cannot consume the fact needed by another observer.
+type childExit struct {
+	done chan struct{}
+	err  error
+}
+
+func observeChildExit(wait func() error) *childExit {
+	exit := &childExit{done: make(chan struct{})}
+	go func() {
+		exit.err = wait()
+		close(exit.done)
+	}()
+	return exit
+}
+
+func (e *childExit) wait() error {
+	<-e.done
+	return e.err
+}
+
+func TestChildExitOutcomeIsReplayableAcrossReadinessAndCleanup(t *testing.T) {
+	want := errors.New("child exited before readiness")
+	release := make(chan struct{})
+	exited := observeChildExit(func() error {
+		<-release
+		return want
+	})
+	close(release)
+
+	// The readiness observer sees the closure first. Cleanup must receive the
+	// same immutable outcome instead of blocking on an already-consumed value.
+	<-exited.done
+	if got := exited.wait(); !errors.Is(got, want) {
+		t.Fatalf("cleanup exit outcome = %v, want %v", got, want)
 	}
 }
 
@@ -423,6 +464,9 @@ func (e *emptyWorkspaceCreation) close() {
 
 type e2eHarness struct {
 	ts *httptest.Server
+	// stateDB is the daemon's durable state database. Acceptance tests inspect
+	// records through their production statedb owners after daemon persistence.
+	stateDB *sql.DB
 	// geometry is THE daemon's workspace -> merge-geometry map, exposed so a
 	// merge test can record what the daemon would have recorded when it created
 	// the worktree. MergeWorkspaceCmd no longer carries geometry (the fields are
@@ -669,6 +713,14 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 		t.Fatalf("open state store: %v", err)
 	}
 	t.Cleanup(func() { _ = stateStore.Close() })
+	turnAccountings, err := statedb.NewTurnAccountings(stateStore)
+	if err != nil {
+		t.Fatalf("open turn accounting store: %v", err)
+	}
+	tokenUtilizations, err := statedb.NewTokenUtilizations(stateStore)
+	if err != nil {
+		t.Fatalf("open token utilization store: %v", err)
+	}
 	reg := registry.OpenWith(registry.Options{DB: stateStore, Logf: t.Logf})
 	ssmMgr, err := ssm.Open(ssm.Options{
 		DB:       stateStore,
@@ -772,6 +824,8 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 		FileDiagnostics:   fileDiagnostics,
 		SeqStore:          e2eSeqStore,
 		ClearCompactStore: e2eSeqStore,
+		TurnAccountings:   turnAccountings,
+		HistoricalUsage:   tokenUtilizations,
 		PermissionModes:   server.NewRegistryModeStore(reg),
 		Registrar:         vendors,
 		ModelCatalogs:     registrar,
@@ -820,7 +874,10 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 		// performs, which is exactly what WorkspaceOpener is.
 		Lifecycle:         &server.WorkspaceOpener{Reg: reg, Ensurer: controller, Logf: t.Logf},
 		SessionDeaths:     server.RegistrySessionDeaths{Reg: reg},
+		Sessions:          server.RegistrySessions{Reg: reg, Controller: controller, ModelCatalogs: modelCatalogs, TokenUsage: tokenUtilizations, Logf: t.Logf},
+		Inits:             controller,
 		Resyncer:          controller,
+		Queues:            controller,
 		Catalogs:          controller,
 		SessionCommands:   binding,
 		WorkspaceCreation: workspaceCreation,
@@ -851,6 +908,7 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 		DaemonVersion:  "0.1.0-e2e",
 		Registry:       reg,
 		ModelCatalogs:  modelCatalogs,
+		TokenUsage:     tokenUtilizations,
 		Controller:     controller,
 		SSM:            ssmMgr,
 		Frontend:       agentShim.Server,
@@ -867,7 +925,7 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 	mux.HandleFunc("/frontend", agentShim.Server.ServeWS)
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
-	h := &e2eHarness{ts: ts, geometry: geometryStore, merges: mergeBinding, shimSpawns: spawnCount.Load, vendors: vendors}
+	h := &e2eHarness{ts: ts, stateDB: stateStore, geometry: geometryStore, merges: mergeBinding, shimSpawns: spawnCount.Load, vendors: vendors}
 	if sweepTicks != nil {
 		h.sweepIdle = sweepTicks
 	}
@@ -880,7 +938,9 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 // socket, waits for the connect StateSnapshot so the known-session set is
 // populated FIRST (a pre-existing session on the same cwd must not be able to
 // masquerade as the new one), sends CreateSessionCmd, and correlates the new
-// id off the pushed SessionView whose cwd matches.
+// id off the pushed SessionView whose cwd matches, then waits for the
+// successful correlated CommandAck. That acknowledgement is the create
+// establishment boundary for any subsequent StateSnapshot.
 //
 // A failing CommandAck for the create request is a hard failure, never a
 // silent retry: the session genuinely did not come up.
@@ -916,21 +976,32 @@ func (h *e2eHarness) createSessionWithMode(t *testing.T, cwd, permissionMode str
 	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"createSession":{"cwd":%q,"fake":true%s}}`, requestID, cwd, modeField))
 
 	deadline := time.Now().Add(frameTimeout)
+	var sessionID string
+	acknowledged := false
 	for time.Now().Before(deadline) {
 		frame := readFrame(t, conn)
 		switch f := frame.GetFrame().(type) {
 		case *frontendv1.FrontendFrame_CommandAck:
-			if f.CommandAck.GetRequestId() == requestID && !f.CommandAck.GetOk() {
-				t.Fatalf("createSession nacked: %s", f.CommandAck.GetError())
+			if f.CommandAck.GetRequestId() == requestID {
+				if !f.CommandAck.GetOk() {
+					t.Fatalf("createSession nacked: %s", f.CommandAck.GetError())
+				}
+				acknowledged = true
+				if sessionID != "" {
+					return sessionID
+				}
 			}
 		case *frontendv1.FrontendFrame_SessionView:
 			sv := f.SessionView
 			if sv.GetCwd() == cwd && !known[sv.GetSessionId()] && sv.GetSessionId() != "" {
-				return sv.GetSessionId()
+				sessionID = sv.GetSessionId()
+				if acknowledged {
+					return sessionID
+				}
 			}
 		}
 	}
-	t.Fatalf("no SessionView for a new session at cwd %s arrived before the deadline", cwd)
+	t.Fatalf("createSession did not deliver both SessionView and successful CommandAck for cwd %s before the deadline", cwd)
 	return ""
 }
 
@@ -1001,15 +1072,23 @@ func TestE2EUDSTextTurnRendersFrontendFrames(t *testing.T) {
 
 	// The scoped connection opens with a StateSnapshot.
 	first := readFrame(t, conn)
-	if first.GetSnapshot() == nil {
+	snapshot := first.GetSnapshot()
+	if snapshot == nil {
 		t.Fatalf("first frame = %T, want a StateSnapshot", first.GetFrame())
 	}
 
-	// A submit during shim bring-up is honestly nacked (no queue by design),
-	// so wait for attach evidence first: the first session-scoped push, which
-	// rides the same shim connection the submit needs.
+	// A submit during shim bring-up is honestly nacked (no queue by design).
+	// Establishment can finish before this scoped client connects, in which
+	// case the authoritative snapshot already proves attachment; otherwise the
+	// first session-scoped push carries the same proof.
 	attachDeadline := time.Now().Add(frameTimeout)
 	attached := false
+	for _, view := range snapshot.GetSessions() {
+		if view.GetSessionId() == id && view.GetShimAttached() {
+			attached = true
+			break
+		}
+	}
 	for !attached && time.Now().Before(attachDeadline) {
 		frame := readFrame(t, conn)
 		switch f := frame.GetFrame().(type) {

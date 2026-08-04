@@ -71,10 +71,16 @@ func (s *chanTurnClaims) ApplyTurnClaimBridge(ev *corev1.Event) error {
 	return s.err
 }
 
-type chanFrame struct{ ch chan *corev1.Event }
+type chanFrame struct {
+	ch  chan *corev1.Event
+	err error
+}
 
-func newChanFrame() *chanFrame                { return &chanFrame{ch: make(chan *corev1.Event, 256)} }
-func (f *chanFrame) Consume(ev *corev1.Event) { f.ch <- ev }
+func newChanFrame() *chanFrame { return &chanFrame{ch: make(chan *corev1.Event, 256)} }
+func (f *chanFrame) Consume(ev *corev1.Event) error {
+	f.ch <- ev
+	return f.err
+}
 
 type chanDegraded struct {
 	ds        chan *corev1.DegradedState
@@ -312,7 +318,7 @@ func TestHandshakeHappyPath(t *testing.T) {
 
 	cfg := h.config(t, "sess-1", path)
 	connected := make(chan *corev1.ShimHello, 1)
-	cfg.OnConnected = func(hello *corev1.ShimHello) { connected <- hello }
+	cfg.OnConnected = func(hello *corev1.ShimHello) bool { connected <- hello; return false }
 	c := New(cfg)
 	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
@@ -432,6 +438,64 @@ func TestReconnectAndResumeMidStream(t *testing.T) {
 	}
 }
 
+func TestReconnectUsesVolatileCursorWhileDurableTurnCursorIsPinned(t *testing.T) {
+	h := newHarness()
+	var attempt int
+	var mu sync.Mutex
+	secondFrom := make(chan uint64, 1)
+	path := startFakeShim(t, func(conn net.Conn) {
+		mu.Lock()
+		attempt++
+		n := attempt
+		mu.Unlock()
+		dh := fakeServerHandshake(t, conn, "agent-session", "1", n == 2)
+		if n == 1 {
+			mustWriteMsg(t, conn, &corev1.Event{SessionId: "vendor-session", Seq: 1, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &corev1.Event_SessionStarted{SessionStarted: &corev1.SessionStarted{VendorSessionId: "vendor-session"}}})
+			mustWriteMsg(t, conn, &corev1.Event{SessionId: "vendor-session", Seq: 2, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "turn", Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "turn"}}})
+			mustWriteMsg(t, conn, &corev1.Event{SessionId: "vendor-session", Seq: 3, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "turn", Payload: &corev1.Event_Vendor{Vendor: &anypb.Any{}}})
+			conn.Close()
+			return
+		}
+		secondFrom <- dh.GetFromSeq()
+		mustWriteMsg(t, conn, &corev1.Event{SessionId: "vendor-session", Seq: 4, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "turn", Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "turn"}}})
+		_, _ = wire.ReadAny(conn)
+	})
+	c := New(h.config(t, "agent-session", path))
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() { errCh <- c.Run(ctx) }()
+	if got := recvEvent(t, h.state.ch).GetSeq(); got != 1 {
+		t.Fatalf("session start seq = %d", got)
+	}
+	if got := recvEvent(t, h.state.ch).GetSeq(); got != 2 {
+		t.Fatalf("turn start seq = %d", got)
+	}
+	if got := recvEvent(t, h.frame.ch).GetSeq(); got != 3 {
+		t.Fatalf("response seq = %d", got)
+	}
+	if got := h.seq.LastSeq("agent-session"); got != 1 {
+		t.Fatalf("durable cursor before reconnect = %d, want 1", got)
+	}
+	select {
+	case got := <-secondFrom:
+		if got != 3 {
+			t.Fatalf("transport reconnect from_seq = %d, want volatile cursor 3", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("transport reconnect did not occur")
+	}
+	if got := recvEvent(t, h.state.ch).GetSeq(); got != 4 {
+		t.Fatalf("turn end seq = %d", got)
+	}
+	if got := h.seq.LastSeq("agent-session"); got != 4 {
+		t.Fatalf("durable cursor after terminal commit = %d, want 4", got)
+	}
+	cancel()
+	if err := <-errCh; err != nil {
+		t.Fatalf("Run returned non-nil: %v", err)
+	}
+}
+
 func TestHeartbeatMissSurfacesDegraded(t *testing.T) {
 	// Arrange: shim completes the handshake then goes silent (no heartbeats).
 	h := newHarness()
@@ -510,6 +574,38 @@ func TestAwaitReadyBlocksUntilConnected(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("AwaitReady did not return after the connection was published")
+	}
+}
+
+func TestShimReadyRetirementNeverPublishesReadiness(t *testing.T) {
+	// A stale-build transition is decided synchronously at the ShimReady
+	// boundary. The source generation must remain unusable even though the shim
+	// sent the frame that ordinarily closes the bring-up gate.
+	retirementObserved := make(chan struct{}, 1)
+	c := New(Config{
+		SessionID: "s1",
+		Logf:      shimclientTestLogf(t),
+		OnConnected: func(*corev1.ShimHello) bool {
+			retirementObserved <- struct{}{}
+			return true
+		},
+	})
+	ac := &activeConn{hello: &corev1.ShimHello{SessionId: "s1"}}
+	c.mu.Lock()
+	c.active = ac
+	c.mu.Unlock()
+
+	c.dispatchShimReady(ac, &corev1.ShimReady{SessionId: "s1"})
+	select {
+	case <-retirementObserved:
+	default:
+		t.Fatal("the pre-readiness transition did not run")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if err := c.AwaitReady(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("AwaitReady after retirement = %v, want deadline while source readiness remains withheld", err)
 	}
 }
 

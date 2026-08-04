@@ -74,11 +74,13 @@ export class FramedPeer {
   readonly inbox: Any[] = [];
   closed = false;
   closeErr: Error | null = null;
+  private readonly receiveHandlers: Array<(message: Any) => boolean> = [];
 
   constructor(readonly socket: net.Socket) {
     socket.on("data", (chunk: Buffer) => {
       for (const frame of this.decoder.push(chunk)) {
-        this.inbox.push(decodeEnvelope(frame));
+        const message = decodeEnvelope(frame);
+        if (!this.receiveHandlers.some((handler) => handler(message))) this.inbox.push(message);
       }
     });
     socket.on("error", (err: Error) => {
@@ -87,6 +89,11 @@ export class FramedPeer {
     socket.on("close", () => {
       this.closed = true;
     });
+  }
+
+  /** Consume selected inbound frames before test assertions inspect the inbox. */
+  onReceive(handler: (message: Any) => boolean): void {
+    this.receiveHandlers.push(handler);
   }
 
   send<Desc extends DescMessage>(schema: Desc, message: MessageShape<Desc>): void {

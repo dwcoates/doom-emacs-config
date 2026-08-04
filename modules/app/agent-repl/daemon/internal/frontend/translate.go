@@ -89,6 +89,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/errclass"
 
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
@@ -254,11 +255,74 @@ func SystemFailureItemFromDegradedState(ds *corev1.DegradedState, atMs int64) *f
 	if ds == nil {
 		return nil
 	}
-	item := errclass.Degraded(ds.GetComponent(), ds.GetReason(), int64(ds.GetDroppedCount()))
+	var item *frontendv1.SystemFailureItem
+	if ds.GetComponent() == "claude-shim-sdk" && ds.GetReason() == "unexpected_query_termination" {
+		item = errclass.UnexpectedQueryTermination(ds.GetComponent(), ds.GetReason())
+	} else {
+		item = errclass.Degraded(ds.GetComponent(), ds.GetReason(), int64(ds.GetDroppedCount()))
+	}
 	if ds.GetRecovered() {
 		item.ResolvedAtMs = atMs
 	}
 	return item
+}
+
+// SystemFailureItemFromQueryTermination translates the durable typed query
+// lifecycle record directly into the dedicated frontend failure detail. The
+// generic failure vocabulary remains populated, while every diagnostic field
+// retains the lifecycle record's exact identity and typed cause.
+func SystemFailureItemFromQueryTermination(sessionID string, lifecycle *corev1.QueryLifecycle, observedAtMs int64) (*frontendv1.SystemFailureItem, error) {
+	if lifecycle == nil || lifecycle.GetTerminated() == nil {
+		return nil, nil
+	}
+	terminated := lifecycle.GetTerminated()
+	if terminated.GetIntentional() != nil {
+		return nil, nil
+	}
+	if sessionID == "" || lifecycle.GetQueryInstanceId() == "" || observedAtMs <= 0 {
+		return nil, fmt.Errorf("typed query termination missing identity session=%q query_instance_id=%q observed_at_ms=%d", sessionID, lifecycle.GetQueryInstanceId(), observedAtMs)
+	}
+	detail := &frontendv1.QueryTerminationFailure{
+		AgentReplSessionId: sessionID,
+		QueryInstanceId:    lifecycle.GetQueryInstanceId(),
+		ObservedAtMs:       observedAtMs,
+	}
+	switch identity := terminated.GetVendorIdentity().(type) {
+	case *corev1.QueryTerminated_VendorSessionId:
+		if identity.VendorSessionId == "" {
+			return nil, fmt.Errorf("typed query termination has blank vendor_session_id session=%q query_instance_id=%q", sessionID, lifecycle.GetQueryInstanceId())
+		}
+		detail.VendorIdentity = &frontendv1.QueryTerminationFailure_VendorSessionId{VendorSessionId: identity.VendorSessionId}
+	case *corev1.QueryTerminated_VendorSessionIdentityUnavailable:
+		if identity.VendorSessionIdentityUnavailable == nil {
+			return nil, fmt.Errorf("typed query termination has nil vendor_session_identity_unavailable session=%q query_instance_id=%q", sessionID, lifecycle.GetQueryInstanceId())
+		}
+		detail.VendorIdentity = &frontendv1.QueryTerminationFailure_VendorSessionIdentityUnavailable{VendorSessionIdentityUnavailable: proto.Clone(identity.VendorSessionIdentityUnavailable).(*corev1.VendorSessionIdentityUnavailable)}
+	default:
+		return nil, fmt.Errorf("typed query termination has no vendor identity session=%q query_instance_id=%q", sessionID, lifecycle.GetQueryInstanceId())
+	}
+	switch reason := terminated.GetReason().(type) {
+	case *corev1.QueryTerminated_UnexpectedEof:
+		if reason.UnexpectedEof == nil {
+			return nil, fmt.Errorf("typed query termination unexpected_eof reason is nil session=%q query_instance_id=%q", sessionID, lifecycle.GetQueryInstanceId())
+		}
+		detail.Reason = &frontendv1.QueryTerminationFailure_UnexpectedEof{UnexpectedEof: proto.Clone(reason.UnexpectedEof).(*corev1.UnexpectedQueryEof)}
+	case *corev1.QueryTerminated_IteratorFailure:
+		if reason.IteratorFailure == nil {
+			return nil, fmt.Errorf("typed query termination iterator_failure reason is nil session=%q query_instance_id=%q", sessionID, lifecycle.GetQueryInstanceId())
+		}
+		detail.Reason = &frontendv1.QueryTerminationFailure_IteratorFailure{IteratorFailure: proto.Clone(reason.IteratorFailure).(*corev1.QueryIteratorFailure)}
+	case *corev1.QueryTerminated_StartupFailure:
+		if reason.StartupFailure == nil {
+			return nil, fmt.Errorf("typed query termination startup_failure reason is nil session=%q query_instance_id=%q", sessionID, lifecycle.GetQueryInstanceId())
+		}
+		detail.Reason = &frontendv1.QueryTerminationFailure_StartupFailure{StartupFailure: proto.Clone(reason.StartupFailure).(*corev1.QueryStartupFailure)}
+	default:
+		return nil, fmt.Errorf("typed query termination has no unexpected reason session=%q query_instance_id=%q", sessionID, lifecycle.GetQueryInstanceId())
+	}
+	item := errclass.UnexpectedQueryTermination("claude-shim-sdk", "unexpected_query_termination")
+	item.StructuredDetail = &frontendv1.SystemFailureItem_QueryTermination{QueryTermination: detail}
+	return item, nil
 }
 
 // ---------------------------------------------------------------------------

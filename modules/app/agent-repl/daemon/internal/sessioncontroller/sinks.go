@@ -137,17 +137,17 @@ type StateApplier interface {
 	// so the opening edge is the first pending request and the closing edge is
 	// the count returning to zero — grant, deny and abandonment alike.
 	ApplyPermission(workspace string, pending bool, reason string) error
-	// Current resolves the workspace's state, which this package needs for
-	// exactly one purpose: REFUSING a hibernation of a workspace that has not
-	// settled (see refuseUnsettledHibernation).
-	//
-	// It is the only READ on this otherwise write-only interface, and it is here
-	// rather than in the sweeper because the guard has to be mechanical. "Never
-	// hibernate mid-turn" was a rule each caller remembered separately, so it
-	// held only for the callers that did; moving the check into the shared
-	// teardown means there is no ungated path left to find. found=false is a
-	// workspace the log knows nothing about, which has no turn to interrupt.
+	// Current resolves state for teardown reconciliation paths that need the
+	// SSM's authoritative verdict without acquiring turn-admission ownership.
 	Current(workspace string) (*frontendv1.WorkspaceState, bool, error)
+	// AcquireHibernationLease atomically snapshots the workspace and excludes
+	// every new prompt/turn start until release. The returned snapshot includes
+	// durable turn claims, so a lifecycle boundary accepted immediately before
+	// lease acquisition cannot be mistaken for a settled workspace.
+	AcquireHibernationLease(workspace string) (state *frontendv1.WorkspaceState, found bool, release func(), err error)
+	// AcquireControllerRegistration excludes hibernation from the beginning of
+	// a controller generation's bring-up through its operational edge.
+	AcquireControllerRegistration(workspace, sessionID, generationID string) (release func(), err error)
 	// CloseStaleTurn closes a workspace's standing `thinking` when the daemon
 	// has just STOPPED the shim that promised to report that turn's end. The
 	// session-status lifecycle retires `thinking` on a `TurnEnded` and on nothing else, so a
@@ -247,6 +247,21 @@ type PromptReceiptStore interface {
 	Outstanding(workspace string) ([]statedb.PromptReceipt, error)
 }
 
+// TurnAccountingStore durably records the evidence required to compare a
+// completed turn with another client. Every consumer receives one at
+// construction, before it can accept any event.
+type TurnAccountingStore interface {
+	Record(sessionID string, accounting *frontendv1.TurnAccounting) (*frontendv1.TurnAccounting, error)
+	List(sessionID string) ([]*frontendv1.TurnAccounting, error)
+}
+
+// HistoricalTokenUtilizationStore durably normalizes file-plane response
+// usage that cannot prove an enclosing turn or stream timing. Its identity is
+// the stable API message id within the agent-repl session.
+type HistoricalTokenUtilizationStore interface {
+	RecordHistorical(*frontendv1.TokenUtilization) (bool, error)
+}
+
 // noopProgress is the ProgressResolver a session controller built without one falls back
 // to. It exists so the progress feed is OPTIONAL for a test harness that does
 // not care about it, without every feed site growing a nil check.
@@ -328,6 +343,18 @@ type consumer struct {
 	// what lets a bring-up still waiting on the handshake learn that the shim
 	// has already given up. Assigned after construction, like the hook above.
 	onDegraded func(*corev1.DegradedState)
+	// onQueryTermination reports the typed lifecycle evidence before its paired
+	// degraded wake-up. The bring-up gate retains it so an exact resume failure
+	// can retain the SDK's reason and identity through the command boundary.
+	onQueryTermination func(*frontendv1.QueryTerminationFailure)
+	// resumeIdentity proves a resumed query's first observed vendor id before
+	// any envelope identity can update the registry.
+	resumeIdentity *resumeIdentityTracker
+	// unexpectedQueryTerminationSurfaced deduplicates the ordered live pair:
+	// QueryLifecycle.Terminated provides the immediate fault while the following
+	// persistent DegradedState is the replay authority. A fresh replay consumer
+	// starts false and therefore surfaces the persistent record exactly once.
+	unexpectedQueryTerminationSurfaced bool
 	// onTurn reports an observed turn boundary (true = TurnStarted, false =
 	// TurnEnded). It drives the prompt queue's interception and drain (E4).
 	// Called on the shim read-loop goroutine, so the handler must not block on
@@ -429,9 +456,28 @@ type consumer struct {
 	// In-memory latch: it is what keeps a long transcript from writing the
 	// registry record once per line.
 	backfill string
+	// accounting owns the ordered query, usage, response, and turn evidence.
+	accounting             *turnAccountingReducer
+	accountingStore        TurnAccountingStore
+	historicalUsageStore   HistoricalTokenUtilizationStore
+	pendingTerminal        map[string]*corev1.Event
+	terminalAccounting     map[uint64]*frontendv1.TurnAccounting
+	replayedAccounting     map[string]*frontendv1.TurnAccounting
+	replayedResponses      map[string]*frontendv1.TokenUtilization
+	completedTerminalBySeq map[uint64]*frontendv1.TurnAccounting
+	completedResponses     map[string]*frontendv1.TokenUtilization
+	// onTerminalAccountingPersisted republishes the SessionView from the
+	// durable aggregate only after the terminal conversation delta is visible.
+	onTerminalAccountingPersisted func()
+	// onHistoricalUsagePersisted republishes the SessionView only when a
+	// file-plane record inserted a normalized response row.
+	onHistoricalUsagePersisted func()
 }
 
-func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier, prog ProgressResolver, floors ClearCompactStore, logf func(string, ...any), onSessionStarted func(*corev1.SessionStarted), onTurn func(active bool), onBackfill func(state string), onSystemInit func(*datav1.SystemInit), onSessionEnded func()) *consumer {
+func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier, prog ProgressResolver, floors ClearCompactStore, accountingStore TurnAccountingStore, logf func(string, ...any), onSessionStarted func(*corev1.SessionStarted), onTurn func(active bool), onBackfill func(state string), onSystemInit func(*datav1.SystemInit), onSessionEnded func()) *consumer {
+	if accountingStore == nil {
+		panic("session-controller: newConsumer needs a TurnAccountingStore")
+	}
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
@@ -439,21 +485,30 @@ func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier,
 		prog = noopProgress{}
 	}
 	return &consumer{
-		workspace:        workspace,
-		sessionID:        sessionID,
-		push:             push,
-		ssm:              applier,
-		prog:             prog,
-		floors:           floors,
-		logf:             logf,
-		now:              func() int64 { return time.Now().UnixMilli() },
-		onSessionStarted: onSessionStarted,
-		onTurn:           onTurn,
-		onBackfill:       onBackfill,
-		onSystemInit:     onSystemInit,
-		onSessionEnded:   onSessionEnded,
-		skills:           newSkillCorrelator(),
-		turns:            newTurnLifecycle(applier, workspace, sessionID),
+		workspace:              workspace,
+		sessionID:              sessionID,
+		push:                   push,
+		ssm:                    applier,
+		prog:                   prog,
+		floors:                 floors,
+		accountingStore:        accountingStore,
+		logf:                   logf,
+		now:                    func() int64 { return time.Now().UnixMilli() },
+		onSessionStarted:       onSessionStarted,
+		onTurn:                 onTurn,
+		onBackfill:             onBackfill,
+		onSystemInit:           onSystemInit,
+		onSessionEnded:         onSessionEnded,
+		skills:                 newSkillCorrelator(),
+		turns:                  newTurnLifecycle(applier, workspace, sessionID),
+		accounting:             newTurnAccountingReducer(),
+		resumeIdentity:         newResumeIdentityTracker(),
+		pendingTerminal:        map[string]*corev1.Event{},
+		terminalAccounting:     map[uint64]*frontendv1.TurnAccounting{},
+		replayedAccounting:     map[string]*frontendv1.TurnAccounting{},
+		replayedResponses:      map[string]*frontendv1.TokenUtilization{},
+		completedTerminalBySeq: map[uint64]*frontendv1.TurnAccounting{},
+		completedResponses:     map[string]*frontendv1.TokenUtilization{},
 	}
 }
 
@@ -664,6 +719,12 @@ func (c *consumer) applyCommandsChanged(cc *datav1.CommandsChanged) *datav1.Syst
 // apply error is loud-logged and aborts this delivery, so shimclient cannot
 // advance last_seen_seq past state the daemon did not accept.
 func (c *consumer) Apply(ev *corev1.Event) error {
+	// The reducer consumes every durable lifecycle and observation fact before
+	// derived state can publish a terminal result.
+	if err := c.accounting.observe(ev, c.sessionID); err != nil {
+		c.logRejectedAccountingObservation(ev, err)
+		return fmt.Errorf("session-controller: observe turn accounting: %w", err)
+	}
 	applyState := true
 	var turnResult *turnResolution
 	switch ev.GetPayload().(type) {
@@ -741,12 +802,37 @@ func (c *consumer) Apply(ev *corev1.Event) error {
 			c.onSessionEnded()
 		}
 	}
+	if ended := ev.GetTurnEnded(); ended != nil && ended.GetTurnId() != "" {
+		accounting := c.accounting.resolve(ev, c.now())
+		accounting, err := c.accountingStore.Record(c.sessionID, accounting)
+		if err != nil {
+			c.logf("session-controller: terminal accounting persistence FAILED session=%s turn_id=%s: %v", c.sessionID, ended.GetTurnId(), err)
+			return fmt.Errorf("session-controller: persist terminal accounting: %w", err)
+		}
+		c.accounting.commitResolved(ended.GetTurnId())
+		if terminal := c.pendingTerminal[ended.GetTurnId()]; terminal != nil {
+			c.terminalAccounting[terminal.GetSeq()] = accounting
+			c.mu.Lock()
+			c.completedTerminalBySeq[terminal.GetSeq()] = accounting
+			for _, response := range accounting.GetResponses() {
+				c.completedResponses[response.GetApiMessageId()] = response
+			}
+			c.mu.Unlock()
+			delete(c.pendingTerminal, ended.GetTurnId())
+			c.pushConversation(terminal, true)
+		}
+		if c.onTerminalAccountingPersisted != nil {
+			c.onTerminalAccountingPersisted()
+			c.logf("session-controller: terminal accounting SessionView republished session=%s turn_id=%s", c.sessionID, ended.GetTurnId())
+		}
+	}
 	return nil
 }
 
 // ApplyTurnClaimBridge is the sole consumer route for non-lifecycle rotation
-// proof. It touches only the durable claim ledger: no retain, SSM Apply,
-// onTurn, progress, task catalog, or frontend push occurs on this path.
+// proof. It touches the durable claim ledger and the private accounting
+// correlation reducer: no retain, SSM Apply, lifecycle edge, onTurn, progress,
+// task catalog, or frontend push occurs on this path.
 func (c *consumer) ApplyTurnClaimBridge(ev *corev1.Event) error {
 	replayed, err := c.ssm.ResolveTurnClaimBridge(c.workspace, c.sessionID, ev)
 	c.logf("session-controller: turn bridge plane=%s session=%s seq=%d turn_id=%q previous_session=%q request_id=%q decision=%s replayed=%v error=%v",
@@ -776,6 +862,7 @@ func (c *consumer) ApplyTurnClaimBridge(ev *corev1.Event) error {
 		}
 		return fmt.Errorf("session-controller: turn bridge rejected: %w", err)
 	}
+	c.accounting.observeTurnClaimBridge(ev)
 	return nil
 }
 
@@ -795,9 +882,62 @@ func turnBridgeDecision(err error) string {
 // through_seq; ContentDelta and HeartbeatProgress become ephemeral TypingDelta
 // relays. A vendor payload that cannot be translated is a loud error, never a
 // silent drop.
-func (c *consumer) Consume(ev *corev1.Event) {
+func (c *consumer) Consume(ev *corev1.Event) error {
+	identityMismatch, identityErr := c.resumeIdentity.observe(ev)
+	if identityErr != nil {
+		c.logf("session-controller: query identity observation REJECTED before mutation session=%s seq=%d error=%v", c.sessionID, ev.GetSeq(), identityErr)
+		return fmt.Errorf("session-controller: observe query identity before frame mutation: %w", identityErr)
+	}
+	if identityMismatch != nil {
+		mismatchErr := newResumeIdentityMismatchError(c.sessionID, identityMismatch)
+		c.logf("session-controller: RESUME IDENTITY MISMATCH session=%s query_instance_id=%s requested_vendor_session_id=%s observed_vendor_session_id=%s seq=%d outcome=fatal_invalid_controller",
+			c.sessionID, identityMismatch.queryInstanceID, identityMismatch.requestedVendorSessionID, identityMismatch.observedVendorSessionID, ev.GetSeq())
+		c.pushFailure("resume-identity-"+identityMismatch.queryInstanceID, errclass.Command(nil, mismatchErr))
+		return fmt.Errorf("session-controller: resumed query identity mismatch before frame mutation: %w", mismatchErr)
+	}
+	historicalQueryID, historicalQueryLifecycle := c.accounting.historicalQueryLifecycle(ev)
+	if err := c.accounting.observe(ev, c.sessionID); err != nil {
+		c.logRejectedAccountingObservation(ev, err)
+		return fmt.Errorf("session-controller: observe turn accounting before frame mutation: %w", err)
+	}
+	if historicalQueryLifecycle {
+		c.logf("session-controller: historical query lifecycle ACCEPTED without accounting rebind session=%s seq=%d historical_query_instance_id=%q live_query_instance_id=%q lifecycle=%T decision=retain_history_keep_live_handshake_authority",
+			c.sessionID, ev.GetSeq(), historicalQueryID, c.accounting.queryID, ev.GetQueryLifecycle().GetEvent())
+	}
+	terminationFailure, err := frontend.SystemFailureItemFromQueryTermination(c.sessionID, ev.GetQueryLifecycle(), ev.GetQueryLifecycle().GetObservedAtMs())
+	if err != nil {
+		c.logf("session-controller: typed query termination REJECTED before mutation session=%s seq=%d query_instance_id=%q vendor_session_id=%q vendor_identity_unavailable=%v observed_at_ms=%d error=%v", c.sessionID, ev.GetSeq(), ev.GetQueryLifecycle().GetQueryInstanceId(), ev.GetQueryLifecycle().GetTerminated().GetVendorSessionId(), ev.GetQueryLifecycle().GetTerminated().GetVendorSessionIdentityUnavailable() != nil, ev.GetQueryLifecycle().GetObservedAtMs(), err)
+		return fmt.Errorf("session-controller: translate typed query termination before frame mutation: %w", err)
+	}
+	observation, utilizationErr := tokenUtilizationObservationFromEvent(ev, c.sessionID)
+	if utilizationErr != nil {
+		return fmt.Errorf("session-controller: translate token utilization before frame mutation: %w", utilizationErr)
+	}
+	var utilization *frontendv1.TokenUtilization
+	historicalInserted := false
+	if observation != nil {
+		utilization = observation.record
+	}
+	if observation != nil && observation.historical {
+		if c.historicalUsageStore == nil {
+			return fmt.Errorf("session-controller: historical token utilization store is not wired (session=%s seq=%d api_message_id=%s)", c.sessionID, ev.GetSeq(), utilization.GetApiMessageId())
+		}
+		inserted, err := c.historicalUsageStore.RecordHistorical(utilization)
+		if err != nil {
+			return fmt.Errorf("session-controller: persist historical token utilization before frame mutation (session=%s seq=%d api_message_id=%s): %w", c.sessionID, ev.GetSeq(), utilization.GetApiMessageId(), err)
+		}
+		historicalInserted = inserted
+		usage := utilization.GetUsage()
+		c.logf("session-controller: historical token utilization persisted session=%s seq=%d api_message_id=%s inserted=%t input_tokens=%d output_tokens=%d cache_read_input_tokens=%d cache_creation_input_tokens=%d root_turn_id=absent response_timing=absent", c.sessionID, ev.GetSeq(), utilization.GetApiMessageId(), inserted, usage.GetInputTokens(), usage.GetOutputTokens(), usage.GetCacheReadInputTokens(), usage.GetCacheCreationInputTokens())
+	}
 	c.retain(ev)
 	c.observeVendorSessionID(ev)
+	if terminationFailure != nil {
+		c.surfaceUnexpectedQueryTermination(ev, terminationFailure)
+	}
+	if utilization != nil && utilization.GetUsage().GetUnmodeledUsage() != nil && len(utilization.GetUsage().GetUnmodeledUsage().GetFields()) > 0 {
+		c.logf("session-controller: API usage contains unmodeled fields session=%s api_message_id=%s fields=%v", c.sessionID, utilization.GetApiMessageId(), utilization.GetUsage().GetUnmodeledUsage().GetFields())
+	}
 	c.applyProgress(ev)
 	c.observeBackfill(ev)
 	switch p := ev.GetPayload().(type) {
@@ -860,6 +1000,14 @@ func (c *consumer) Consume(ev *corev1.Event) {
 		// window and nothing else, so the SSM had no way to know the agent was
 		// folding the context rather than answering.
 		c.noteCompactingStatus(ev, p.Vendor)
+		// A terminal result is retained until TurnEnded has supplied the end
+		// boundary and its accounting record has committed. The same path is
+		// used for replay because replay also drives this consumer.
+		if resultFromVendor(p.Vendor) != nil && c.accounting.activeTurnID != "" {
+			c.pendingTerminal[c.accounting.activeTurnID] = ev
+			c.logf("session-controller: terminal result held for accounting session=%s turn_id=%s seq=%d", c.sessionID, c.accounting.activeTurnID, ev.GetSeq())
+			return nil
+		}
 		c.pushConversation(ev, true)
 	case *corev1.Event_ContextCleared, *corev1.Event_ContextCompacted:
 		// A clear and a compaction each do two things at once: they render as
@@ -874,6 +1022,51 @@ func (c *consumer) Consume(ev *corev1.Event) {
 		// UnparsedEvent / empty payloads carry no conversation content of their
 		// own; the demux already loud-logged them. Nothing to push.
 	}
+	if historicalInserted && c.onHistoricalUsagePersisted != nil {
+		c.onHistoricalUsagePersisted()
+		c.logf("session-controller: historical token utilization SessionView republished session=%s api_message_id=%s", c.sessionID, utilization.GetApiMessageId())
+	}
+	return nil
+}
+
+func (c *consumer) logRejectedAccountingObservation(ev *corev1.Event, cause error) {
+	observation := ev.GetAccountUsageObservation()
+	queryID, turnID, boundary := "", "", "unspecified"
+	if observation != nil {
+		queryID, turnID = observation.GetQueryInstanceId(), observation.GetTurnId()
+		switch observation.GetBoundary().(type) {
+		case *corev1.AccountUsageObservation_TurnStart:
+			boundary = "turn_start"
+		case *corev1.AccountUsageObservation_TurnEnd:
+			boundary = "turn_end"
+		}
+	}
+	c.logf("session-controller: turn accounting observation REJECTED before mutation session=%s authoritative_query_instance_id=%q query_instance_id=%q seq=%d request_id=%q turn_id=%q boundary=%s cause=%q kind=%s", c.sessionID, c.accounting.queryID, queryID, ev.GetSeq(), ev.GetRequestId(), turnID, boundary, cause.Error(), stateKind(ev))
+}
+
+func (c *consumer) surfaceUnexpectedQueryTermination(ev *corev1.Event, item *frontendv1.SystemFailureItem) {
+	lifecycle := ev.GetQueryLifecycle()
+	terminated := lifecycle.GetTerminated()
+	detail := item.GetQueryTermination()
+	reason, cause := "unexpected_eof", ""
+	if failure := terminated.GetIteratorFailure(); failure != nil {
+		reason, cause = "iterator_failure", failure.GetCause()
+	} else if failure := terminated.GetStartupFailure(); failure != nil {
+		reason, cause = "startup_failure", failure.GetCause()
+	}
+	c.unexpectedQueryTerminationSurfaced = true
+	c.logf("session-controller: typed query termination surfaced directly session=%s query_instance_id=%s vendor_session_id=%s vendor_identity_unavailable=%v observed_at_ms=%d termination_kind=%s cause=%q seq=%d replay_authority=query_lifecycle", c.sessionID, detail.GetQueryInstanceId(), detail.GetVendorSessionId(), detail.GetVendorSessionIdentityUnavailable() != nil, detail.GetObservedAtMs(), reason, cause, ev.GetSeq())
+	if c.onQueryTermination != nil {
+		c.onQueryTermination(proto.Clone(detail).(*frontendv1.QueryTerminationFailure))
+	}
+	queryID := detail.GetQueryInstanceId()
+	ds := &corev1.DegradedState{Component: "claude-shim-sdk", Reason: "unexpected_query_termination", QueryInstanceId: &queryID}
+	if c.onDegraded != nil {
+		c.onDegraded(ds)
+	}
+	classification := faultClassifications["claude-shim-sdk"]
+	c.applyRuntimeFault("claude-shim-sdk", classification, true, "unexpected_query_termination")
+	c.pushFailure(c.degradedUUID("claude-shim-sdk"), item)
 }
 
 // noteClearOrCompact records a clear or a compaction as the conversation's
@@ -1135,6 +1328,15 @@ func userTurnReceipt(cd *frontendv1.ConversationDelta) (requestID string, textLe
 // pushConversation converts a vendor event to a ConversationDelta and pushes it,
 // loud-logging (never swallowing) a translation failure.
 func (c *consumer) pushConversation(ev *corev1.Event, live bool) {
+	observation, err := tokenUtilizationObservationFromEvent(ev, c.sessionID)
+	if err != nil {
+		c.logf("session-controller: historical token utilization translate REJECTED session=%s seq=%d: %v", c.sessionID, ev.GetSeq(), err)
+		return
+	}
+	var historicalUsage *frontendv1.TokenUtilization
+	if observation != nil && observation.historical {
+		historicalUsage = observation.record
+	}
 	cd, envs, err := frontend.ConversationDeltaFromEvent(c.workspace, ev)
 	if err != nil {
 		c.logf("session-controller: conversation translate failed session=%s seq=%d: %v", c.sessionID, ev.GetSeq(), err)
@@ -1142,6 +1344,65 @@ func (c *consumer) pushConversation(ev *corev1.Event, live bool) {
 	}
 	if cd == nil {
 		return // known-but-non-conversational vendor payload
+	}
+	for _, item := range cd.GetItems() {
+		assistant := item.GetAssistantMessage()
+		if assistant == nil {
+			continue
+		}
+		var utilization *frontendv1.TokenUtilization
+		c.mu.Lock()
+		completed := c.completedResponses[assistant.GetId()]
+		c.mu.Unlock()
+		if completed != nil {
+			utilization = completed
+		} else if replayed := c.replayedResponses[assistant.GetId()]; replayed != nil {
+			utilization = replayed
+		} else if historicalUsage != nil && historicalUsage.GetApiMessageId() == assistant.GetId() {
+			utilization = historicalUsage
+		} else if live {
+			// Replayed history may use only stable completed/persisted indexes.
+			// It must never infer identity from the reducer's mutable live turn.
+			utilization = c.accounting.response(assistant.GetId())
+		}
+		if utilization != nil {
+			item.TokenUtilization = append(item.TokenUtilization, proto.Clone(utilization).(*frontendv1.TokenUtilization))
+			if utilization == historicalUsage {
+				c.logf("session-controller: historical token utilization attached session=%s seq=%d api_message_id=%s root_turn_id=absent response_timing=absent", c.sessionID, ev.GetSeq(), utilization.GetApiMessageId())
+			}
+		}
+	}
+	if accounting := c.terminalAccounting[ev.GetSeq()]; accounting != nil {
+		attached := false
+		for _, item := range cd.GetItems() {
+			if item.GetResult() != nil {
+				item.TurnAccounting = accounting
+				attached = true
+			}
+		}
+		if !attached {
+			panic(fmt.Sprintf("session-controller: accounting terminal seq=%d had no result item", ev.GetSeq()))
+		}
+		delete(c.terminalAccounting, ev.GetSeq())
+	}
+	c.mu.Lock()
+	completedTerminal := c.completedTerminalBySeq[ev.GetSeq()]
+	c.mu.Unlock()
+	if accounting := completedTerminal; accounting != nil {
+		for _, item := range cd.GetItems() {
+			if item.GetResult() != nil {
+				item.TurnAccounting = accounting
+			}
+		}
+	}
+	if resultFromVendor(ev.GetVendor()) != nil && ev.GetRequestId() != "" {
+		if accounting := c.replayedAccounting[ev.GetRequestId()]; accounting != nil {
+			for _, item := range cd.GetItems() {
+				if item.GetResult() != nil {
+					item.TurnAccounting = accounting
+				}
+			}
+		}
 	}
 	// The harness's isMeta records — a launched skill's body and the notices
 	// around it — become the skill card they belong to, or nothing at all
@@ -1229,6 +1490,16 @@ var faultClassifications = map[string]faultClassification{
 // workspace changed color needs to find out why from the conversation itself,
 // so the account lives there now.
 func (c *consumer) Degraded(_ string, ds *corev1.DegradedState) {
+	if !ds.GetRecovered() && ds.GetComponent() == "claude-shim-sdk" && ds.GetReason() == "unexpected_query_termination" {
+		if ds.QueryInstanceId == nil || ds.GetQueryInstanceId() == "" {
+			panic(fmt.Sprintf("session-controller: unexpected query termination degradation has no query_instance_id session=%s", c.sessionID))
+		}
+		if c.unexpectedQueryTerminationSurfaced {
+			c.logf("session-controller: duplicate unexpected query termination suppressed session=%s component=%s reason=%s", c.sessionID, ds.GetComponent(), ds.GetReason())
+			return
+		}
+		c.unexpectedQueryTerminationSurfaced = true
+	}
 	// A shim reporting its SDK dead BEFORE the bring-up gate closed is the one
 	// account the daemon ever gets of why a resume died (bringupescape.go).
 	if c.onDegraded != nil {

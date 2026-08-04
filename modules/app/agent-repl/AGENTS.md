@@ -114,11 +114,17 @@ turn would look exactly like a teal tab over a settled one — the user sees
 is what makes that combination unreachable by construction, and the resolver logs
 it as an INVARIANT VIOLATION wherever it can still detect it.
 
-One asymmetry is deliberate: `HibernateSession` is NOT gated. Hibernation is a
-memory optimization nobody asked for, so it must never cost a live turn, whereas
-the session-scoped stop serves `DeleteSession` and the supersede sweep, where the
-caller has decided this exact record must go and a refusal would leave an orphan
-shim running forever.
+Terminal lifecycle operations use `StopSession`, not hibernation. A delete or
+supersession may terminate an active turn because the exact registry record is
+already terminal and must not retain a process or turn claim. `StopSession`
+never publishes `HIBERNATED`; that benign state is reserved for a settled
+workspace admitted through the hibernation lease.
+
+Intentional process replacement uses `StopSessionForReplacement`. A controller
+generation holds an SSM-owned registration reservation from before shim
+startup through its durable operational edge, and hibernation cannot begin
+while that reservation exists. Replacement releases the reservation only after
+the exact process stop completes, then brings the same durable session back up.
 
 Both gates in `Server.sweepable` are load-bearing, and neither is redundant:
 

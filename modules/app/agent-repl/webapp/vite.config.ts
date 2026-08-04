@@ -1,4 +1,5 @@
 import { defineConfig } from "vite";
+import { protobufRuntimeAliases } from "./protobuf-runtime-aliases";
 
 /**
  * Production build config. Tests read vitest.config.ts (which wins when both
@@ -9,6 +10,7 @@ import { defineConfig } from "vite";
  * the browser can cache each independently of the app code.
  */
 export default defineConfig({
+  resolve: { alias: protobufRuntimeAliases },
   build: {
     rollupOptions: {
       output: {

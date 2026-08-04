@@ -220,6 +220,7 @@ func TestContradictoryTurnHandshakeAbortsBeforeHandshakeSideEffects(t *testing.T
 
 	err := h.m.onHandshake("ws", "s1", &corev1.ShimHello{
 		Pid:             4242,
+		QueryInstanceId: "query-1",
 		VendorSessionId: "uuid-other",
 		TurnInFlight:    true,
 		ActiveTurnIds:   []string{"turn-other"},

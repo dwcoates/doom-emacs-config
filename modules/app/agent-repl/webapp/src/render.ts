@@ -652,11 +652,41 @@ function responseUsageMeta(records: import("./frontend-proto.js").TokenUtilizati
   return records.map((r) => {
     const u = r.usage;
     const rate = (value: number | undefined): string => value === undefined ? "unavailable" : `${(value * 100).toFixed(1)}%`;
+    const cache = u.cacheCreation;
+    const rates = u.cacheRates;
     const timing = r.responseTiming;
     const tps = timing?.outputGenerationDurationMs && timing.outputGenerationDurationMs > 0 ? `${(1000 * u.outputTokens / timing.outputGenerationDurationMs).toFixed(1)} tok/s` : "unavailable";
     const ttft = timing?.timeToFirstTokenMs === undefined ? "unavailable" : `${timing.timeToFirstTokenMs} ms`;
     const provenance = r.actor === "subagent" ? `subagent ${r.subagent?.agentId || "unavailable"} ${r.subagent?.subagentType || "unavailable"}` : "main agent";
-    return `<div class="response-usage">${escapeHtml(`${provenance} · ${r.model || "model unavailable"} · uncached ${u.inputTokens} · output ${u.outputTokens} · cache read ${u.cacheReadInputTokens} · cache write ${u.cacheCreationInputTokens} (5m ${u.cacheCreation5m}, 1h ${u.cacheCreation1h}) · hit ${rate(u.cacheHitRate)} · write ${rate(u.cacheWriteRate)} · uncached rate ${rate(u.uncachedInputRate)} · tier ${u.serviceTier || "unavailable"} · speed ${u.speed || "unavailable"} · geo ${u.inferenceGeo || "unavailable"} · generation ${tps} · TTFT ${ttft}`)}</div>`;
+    const summary = `${provenance} · ${r.model || "model unavailable"} · uncached ${u.inputTokens} · output ${u.outputTokens} · cache read ${u.cacheReadInputTokens} · cache write ${u.cacheCreationInputTokens} (5m ${cache?.ephemeral5mInputTokens ?? "unavailable"}, 1h ${cache?.ephemeral1hInputTokens ?? "unavailable"}) · hit ${rate(rates?.cacheHitRate)} · write ${rate(rates?.cacheWriteRate)} · uncached rate ${rate(rates?.uncachedInputRate)} · tier ${u.serviceTier || "unavailable"} · speed ${u.speed || "unavailable"} · geo ${u.inferenceGeo || "unavailable"} · generation ${tps} · TTFT ${ttft}`;
+    const complete = {
+      agent_repl_session_id: r.agentReplSessionId,
+      claude_session_id: r.claudeSessionId,
+      root_turn_id: r.rootTurnId,
+      api_request_id: r.apiRequestId ?? null,
+      api_message_id: r.apiMessageId,
+      model: r.model,
+      actor: r.actor,
+      subagent: r.subagent ?? null,
+      input_tokens: u.inputTokens,
+      output_tokens: u.outputTokens,
+      cache_read_input_tokens: u.cacheReadInputTokens,
+      cache_creation_input_tokens: u.cacheCreationInputTokens,
+      cache_creation: u.cacheCreation ?? null,
+      server_tool_use: u.serverToolUse ?? null,
+      service_tier: u.serviceTier || null,
+      speed: u.speed || null,
+      inference_geo: u.inferenceGeo || null,
+      output_details: u.outputDetails ?? null,
+      iterations: u.iterations,
+      cache_diagnostic: u.cacheDiagnostic ?? null,
+      cache_rates: u.cacheRates ?? null,
+      fallback_credit: u.fallbackCredit ?? null,
+      unmodeled_usage: u.unmodeledUsage ?? null,
+      raw_sdk_usage: u.rawUsage,
+      response_timing: r.responseTiming ?? null,
+    };
+    return `<details class="response-usage"><summary>${escapeHtml(summary)}</summary><pre>${escapeHtml(JSON.stringify(complete, null, 2))}</pre></details>`;
   }).join("");
 }
 
@@ -2096,24 +2126,59 @@ function SystemFailureBubble(item: SystemFailureCard): string {
   const stamp = resolved
     ? `<div class="failure-resolved">resolved ${escapeHtml(formatClockTime(item.resolvedAtMs))}</div>`
     : "";
-  const resume = item.resumeFailure === undefined ? "" : resumeFailureHtml(item.resumeFailure);
+  const structured = failureDetailHtml(item.detail);
   return (
     `<div class="${cls}" data-error-type="${escapeHtml(item.errorType)}">` +
     `<div class="failure-head"><span class="failure-mark">${mark}</span>` +
     `<span class="failure-message">${escapeHtml(item.message)}</span></div>` +
     detail +
-    resume +
+    structured +
     stamp +
     `</div>`
   );
 }
 
+/** Render the structurally complete detail union carried by every failure card. */
+function failureDetailHtml(detail: SystemFailureCard["detail"]): string {
+  switch (detail.kind) {
+    case "none":
+      return "";
+    case "sessionResume":
+      return resumeFailureHtml(detail.value);
+    case "queryTermination":
+      return queryTerminationFailureHtml(detail.value);
+  }
+}
+
+/** Render every query identity and the exact typed termination cause. */
+function queryTerminationFailureHtml(failure: import("./frontend-proto.js").QueryTerminationFailure): string {
+  const reason = failure.reason.case === "unexpectedEof"
+    ? "unexpected EOF"
+    : failure.reason.case === "iteratorFailure"
+      ? `iterator failure: ${failure.reason.value.cause}`
+      : failure.reason.case === "startupFailure"
+        ? `startup failure: ${failure.reason.value.cause}`
+        : "missing termination reason";
+  const vendor = failure.vendorIdentity.case === "vendorSessionId"
+    ? failure.vendorIdentity.value
+    : failure.vendorIdentity.case === "vendorSessionIdentityUnavailable"
+      ? "unavailable before SDK initialization"
+      : "missing vendor identity evidence";
+  return `<div class="failure-detail">query termination: ${escapeHtml(reason)}<br>agent-repl session: ${escapeHtml(failure.agentReplSessionId)}<br>query instance: ${escapeHtml(failure.queryInstanceId)}<br>vendor session: ${escapeHtml(vendor)}<br>observed_at_ms: ${String(failure.observedAtMs)}</div>`;
+}
+
 /** Render resume-continuity evidence without reducing it to a generic death. */
 function resumeFailureHtml(failure: import("./frontend-proto.js").SessionResumeFailure): string {
   const attempt = failure.attempt === "create" ? "session creation" : "automatic restoration";
+  const header = `<div class="failure-detail">resume blocked during ${escapeHtml(attempt)}<br>conversation: ${escapeHtml(failure.claudeSessionId)}</div>`;
+  if (failure.cause.case === "queryTermination") {
+    return `${header}${queryTerminationFailureHtml(failure.cause.value)}`;
+  }
   const cause = failure.cause.case === "transcriptUnavailable"
     ? `transcript unavailable: ${failure.cause.searchedPaths.join(" | ") || "no readable transcript path"}`
-    : `identity mismatch: ${failure.cause.replacementClaudeSessionId || "recovery would start a fresh conversation"}`;
+    : failure.cause.case === "identityMismatch"
+      ? `identity mismatch: ${failure.cause.replacementClaudeSessionId || "recovery would start a fresh conversation"}`
+      : `bring-up failure: ${failure.cause.cause}`;
   return `<div class="failure-detail">resume blocked during ${escapeHtml(attempt)}<br>${escapeHtml(cause)}<br>conversation: ${escapeHtml(failure.claudeSessionId)}</div>`;
 }
 

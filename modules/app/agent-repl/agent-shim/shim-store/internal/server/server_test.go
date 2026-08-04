@@ -143,6 +143,13 @@ func recvEvent(t *testing.T, conn net.Conn) *corev1.Event {
 	return ev
 }
 
+func recvSubscriptionReady(t *testing.T, conn net.Conn) {
+	t.Helper()
+	if _, ok := recv(t, conn).(*corev1.Heartbeat); !ok {
+		t.Fatal("subscription readiness frame is not a Heartbeat")
+	}
+}
+
 func recvAck(t *testing.T, conn net.Conn) *corev1.StoreWriteAck {
 	t.Helper()
 	m := recv(t, conn)
@@ -209,9 +216,31 @@ func TestRoundTripWriteAckSubscribeReplay(t *testing.T) {
 	send(t, sub, &corev1.Subscribe{SessionId: "s1", FromSeq: 0})
 	e1 := recvEvent(t, sub)
 	e2 := recvEvent(t, sub)
+	recvSubscriptionReady(t, sub)
 	// Assert replay.
 	if e1.GetSeq() != 1 || e2.GetSeq() != 2 {
 		t.Fatalf("replayed seqs = [%d %d], want [1 2]", e1.GetSeq(), e2.GetSeq())
+	}
+}
+
+func TestSubscribeReadyProvesRegistrationBeforeAnImmediateProducerWrite(t *testing.T) {
+	// Arrange: an empty store makes readiness the first subscriber frame.
+	h := start(t, 0, testLogger())
+	sub := h.dial(t)
+	send(t, sub, &corev1.Subscribe{SessionId: "s1", FromSeq: 0})
+
+	// Act: the readiness frame is the registration barrier, then another socket
+	// writes without any delay.
+	recvSubscriptionReady(t, sub)
+	prod := h.dial(t)
+	send(t, prod, write(vAssistantStream(t, "s1", "after-ready")))
+	if ack := recvAck(t, prod); ack.GetAccepted() != 1 {
+		t.Fatalf("write ack accepted = %d, want 1", ack.GetAccepted())
+	}
+
+	// Assert: the event cannot have overtaken subscriber registration.
+	if ev := recvEvent(t, sub); ev.GetSeq() != 1 {
+		t.Fatalf("live event seq = %d, want 1", ev.GetSeq())
 	}
 }
 
@@ -330,6 +359,7 @@ func TestReplayFromMidSeq(t *testing.T) {
 	send(t, sub, &corev1.Subscribe{SessionId: "s1", FromSeq: 1})
 	e1 := recvEvent(t, sub)
 	e2 := recvEvent(t, sub)
+	recvSubscriptionReady(t, sub)
 	// Assert
 	if e1.GetSeq() != 2 || e2.GetSeq() != 3 {
 		t.Fatalf("replay from_seq=1 gave [%d %d], want [2 3]", e1.GetSeq(), e2.GetSeq())
@@ -359,6 +389,7 @@ func TestLargeReplayStreamsInOrderWithBoundedProgressLogs(t *testing.T) {
 			t.Fatalf("streamed seq=%d, want=%d", got, want)
 		}
 	}
+	recvSubscriptionReady(t, sub)
 	// A live event proves serveSubscriber finished the replay and entered its
 	// tail loop, so the completion record is present without a timing sleep.
 	send(t, prod, write(vAssistantStream(t, "s1", "tail-proof")))
@@ -440,6 +471,7 @@ func TestEphemeralPassThroughNotPersisted(t *testing.T) {
 	prod := h.dial(t)
 	sub := h.dial(t)
 	send(t, sub, &corev1.Subscribe{SessionId: "s1", FromSeq: 0})
+	recvSubscriptionReady(t, sub)
 
 	// Handshake: a persistent event proves the subscriber is registered and
 	// live-tailing (received via replay or live either way) before we send the
@@ -562,6 +594,7 @@ func registerSubscriber(t *testing.T, h *harness, session string) (net.Conn, uin
 	t.Helper()
 	sub := h.dial(t)
 	send(t, sub, &corev1.Subscribe{SessionId: session, FromSeq: 0})
+	recvSubscriptionReady(t, sub)
 	prod := h.dial(t)
 	send(t, prod, write(vAssistantStream(t, session, "handshake")))
 	if ack := recvAck(t, prod); ack.GetAccepted() != 1 {
@@ -827,6 +860,7 @@ func TestSlowConsumerHardDisconnect(t *testing.T) {
 	prod := h.dial(t)
 	sub := h.dial(t)
 	send(t, sub, &corev1.Subscribe{SessionId: "s1", FromSeq: 0})
+	recvSubscriptionReady(t, sub)
 
 	// Handshake so the subscriber is registered and live.
 	send(t, prod, write(vAssistantStream(t, "s1", "P1")))
@@ -967,6 +1001,7 @@ func TestCloseDisconnectsLiveConnections(t *testing.T) {
 	h := start(t, 0, testLogger())
 	sub := h.dial(t)
 	send(t, sub, &corev1.Subscribe{SessionId: "s1", FromSeq: 0})
+	recvSubscriptionReady(t, sub)
 	// Give the handler a moment to register by round-tripping a write so we
 	// know the server is actively serving this session.
 	prod := h.dial(t)

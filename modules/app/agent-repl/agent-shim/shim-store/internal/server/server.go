@@ -554,6 +554,15 @@ func (s *Server) serveSubscriber(conn net.Conn, sub *corev1.Subscribe) {
 	s.log.Log(logging.Fields{Operation: "subscribe-replay", Session: sessionID, Subscriber: peer},
 		"streaming replay completed from_seq=%d delivered=%d first_seq=%d last_seq=%d query_ms=%d elapsed_ms=%d",
 		sub.GetFromSeq(), delivered, firstReplaySeq, lastReplaySeq, replayStats.Elapsed.Milliseconds(), time.Since(started).Milliseconds())
+	// The readiness heartbeat is written only after registration and replay
+	// complete. A subscribing shim waits for this frame before asserting its
+	// bring-up gate, so a producer write issued immediately after readiness
+	// cannot overtake registration on another accepted socket.
+	if err := wire.WriteAny(conn, &corev1.Heartbeat{SentAtMs: time.Now().UnixMilli()}); err != nil {
+		s.log.Log(logging.Fields{Operation: "subscribe-ready", Session: sessionID, Subscriber: peer, Level: "error"}, "protocol subscription readiness write failed: %v", err)
+		return
+	}
+	s.log.LogVerbose(logging.Fields{Operation: "subscribe-ready", Session: sessionID, Subscriber: peer}, "standing subscription registered and replay complete")
 
 	for {
 		select {

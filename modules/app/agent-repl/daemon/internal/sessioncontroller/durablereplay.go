@@ -11,6 +11,8 @@ import (
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/statedb"
 	"claude-repld/internal/storehistory"
+
+	"google.golang.org/protobuf/proto"
 )
 
 // This file serves a frontend resync for a workspace that has NO live session
@@ -99,6 +101,9 @@ func (m *Manager) resyncFromDurableHistory(workspace string, fromSeq uint64) err
 	lastSeen := m.cfg.SeqStore.LastSeq(sessionID)
 	replayFrom := m.replayFloorAt(workspace, sessionID, lastSeen, fromSeq)
 	cons := m.durableConsumer(workspace, sessionID)
+	if err := m.hydratePersistedAccounting(cons, sessionID); err != nil {
+		return err
+	}
 	// What the store's OWN events serve, watched as they are pushed, so a
 	// receipt for a prompt the conversation already carries is suppressed
 	// rather than drawn beside it (serveDurableReceipts).
@@ -126,6 +131,37 @@ func (m *Manager) resyncFromDurableHistory(workspace string, fromSeq uint64) err
 	// bottom of the conversation, because the prompt it stands for is the most
 	// recent thing that happened to this workspace.
 	return m.serveDurableReceipts(workspace, sessionID, cons, served)
+}
+
+// hydratePersistedAccounting loads the completed terminal records that replay
+// translation attaches to historical assistant and result items.
+func (m *Manager) hydratePersistedAccounting(cons *consumer, sessionID string) error {
+	accountings, err := m.cfg.TurnAccountings.List(sessionID)
+	if err != nil {
+		m.logf("session-controller: persisted accounting hydrate FAILED session=%s: %v", sessionID, err)
+		return fmt.Errorf("session-controller: list durable turn accounting for %q: %w", sessionID, err)
+	}
+	for _, accounting := range accountings {
+		if accounting == nil || accounting.GetTurnId() == "" {
+			m.logf("session-controller: persisted accounting hydrate REFUSED session=%s: accounting record has no turn id", sessionID)
+			return fmt.Errorf("session-controller: durable turn accounting for %q contains a record without turn id", sessionID)
+		}
+		cons.replayedAccounting[accounting.GetTurnId()] = accounting
+		for _, response := range accounting.GetResponses() {
+			messageID := response.GetApiMessageId()
+			if messageID == "" {
+				m.logf("session-controller: persisted accounting hydrate REFUSED session=%s turn_id=%s: response has no API message id", sessionID, accounting.GetTurnId())
+				return fmt.Errorf("session-controller: durable turn accounting for %q turn %q contains a response without API message id", sessionID, accounting.GetTurnId())
+			}
+			if prior := cons.replayedResponses[messageID]; prior != nil && !proto.Equal(prior, response) {
+				m.logf("session-controller: persisted accounting hydrate REFUSED session=%s turn_id=%s api_message_id=%s: conflicting response identity", sessionID, accounting.GetTurnId(), messageID)
+				return fmt.Errorf("session-controller: durable turn accounting for %q contains conflicting responses for API message %q", sessionID, messageID)
+			}
+			cons.replayedResponses[messageID] = response
+		}
+	}
+	m.logf("session-controller: persisted accounting hydrated session=%s records=%d", sessionID, len(accountings))
+	return nil
 }
 
 // serveDurableReceipts pushes every un-retired prompt receipt the store's own
@@ -260,7 +296,7 @@ func (s *servedPrompts) claim(r statedb.PromptReceipt) (string, bool) {
 // re-pull. The curation state (the skill correlator in particular) starts empty
 // per replay, which is what a replay read in store order from the floor wants.
 func (m *Manager) durableConsumer(workspace, sessionID string) *consumer {
-	cons := newConsumer(workspace, sessionID, m.cfg.Push, m.cfg.SSM, nil, m.cfg.ClearCompactStore, m.logf, nil, nil, nil, nil, nil)
+	cons := newConsumer(workspace, sessionID, m.cfg.Push, m.cfg.SSM, nil, m.cfg.ClearCompactStore, m.cfg.TurnAccountings, m.logf, nil, nil, nil, nil, nil)
 	// The one durable store it DOES hold, and it holds it to RETIRE rows: a
 	// replay that finds a receipt's prompt already in the store has established
 	// the fact the live retirement point would have established, for a daemon

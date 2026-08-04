@@ -348,15 +348,23 @@ func TestE2ELateInterruptReportsAlreadyComplete(t *testing.T) {
 	_, conn, _, _ := liveSession(t, h, cwd)
 	writeCmd(t, conn, `{"requestId":"r-first","submitPrompt":{"text":"a turn that finishes"}}`)
 	settled := frontendv1.RenderState_RENDER_STATE_UNSPECIFIED
+	sawTurnClockOpen := false
 	awaitAll(t, conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
 		"the first turn's clock closing (its end)": func(frame *frontendv1.FrontendFrame) bool {
 			if state := workspaceStateFor(frame, cwd); state != nil {
 				settled = state.GetState()
 			}
 			view := progressFor(frame, cwd)
-			// closeTurnLocked zeroes the turn clock, and a view that has one at
-			// all has seen this turn: 0 here means the turn is over.
-			return view != nil && view.GetTurnStartedAtMs() == 0 && view.GetInterrupt() == nil
+			if view == nil {
+				return false
+			}
+			if view.GetTurnStartedAtMs() != 0 {
+				sawTurnClockOpen = true
+				return false
+			}
+			// An initial snapshot also carries a zero clock. Requiring the opening
+			// edge first proves this zero is closeTurnLocked's terminal edge.
+			return sawTurnClockOpen && view.GetInterrupt() == nil
 		},
 	})
 

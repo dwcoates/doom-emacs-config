@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   UNSUPPORTED_SHAPES,
   decodeFrontendFrame,
+  decodeSystemFailure,
   isVisuallySupportedFrame,
 } from "../src/frontend-proto.js";
 
@@ -81,23 +82,209 @@ const WORKSPACE_AVAILABLE = {
 };
 
 const TOKEN_UTILIZATION = {
-  apiMessageId: "msg-1", model: "claude-opus", mainAgent: {},
-  usage: { inputTokens: "10", outputTokens: "20", cacheReadInputTokens: "30", cacheCreationInputTokens: "40", cacheCreation: { ephemeral5mInputTokens: "4", ephemeral1hInputTokens: "36" }, serviceTier: "priority", speed: "fast", inferenceGeo: "us", cacheRates: { totalPromptInputTokens: "80", cacheHitRate: 0.375, cacheWriteRate: 0.5, uncachedInputRate: 0.125 } },
+  agentReplSessionId: "session-1", claudeSessionId: "claude-1", rootTurnId: "turn-1", apiRequestId: "request-1", apiMessageId: "msg-1", model: "claude-opus", mainAgent: {},
+  usage: { inputTokens: "10", outputTokens: "20", cacheReadInputTokens: "30", cacheCreationInputTokens: "40", cacheCreation: { ephemeral5mInputTokens: "4", ephemeral1hInputTokens: "36" }, serverToolUse: { webSearchRequests: "2", webFetchRequests: "3" }, serviceTier: "priority", speed: "fast", inferenceGeo: "us", outputDetails: { thinkingTokens: "5" }, iterations: [{ sampling: { inputTokens: "1", outputTokens: "2", cacheReadInputTokens: "3", cacheCreationInputTokens: "4", cacheCreation: { ephemeral5mInputTokens: "1", ephemeral1hInputTokens: "3" }, model: "claude-opus" } }, { compaction: { inputTokens: "5", outputTokens: "6", cacheReadInputTokens: "7", cacheCreationInputTokens: "8", cacheCreation: { ephemeral5mInputTokens: "2", ephemeral1hInputTokens: "6" } } }, { advisor: { inputTokens: "9", outputTokens: "10", cacheReadInputTokens: "11", cacheCreationInputTokens: "12", cacheCreation: { ephemeral5mInputTokens: "3", ephemeral1hInputTokens: "9" }, model: "claude-haiku" } }, { fallback: { inputTokens: "13", outputTokens: "14", cacheReadInputTokens: "15", cacheCreationInputTokens: "16", cacheCreation: { ephemeral5mInputTokens: "4", ephemeral1hInputTokens: "12" }, model: "claude-sonnet" } }], cacheDiagnostic: { modelChanged: { cacheMissedInputTokens: "17" } }, cacheRates: { totalPromptInputTokens: "80", cacheHitRate: 0.375, cacheWriteRate: 0.5, uncachedInputRate: 0.125 }, fallbackCredit: { applied: true }, unmodeledUsage: { vendorField: { preserved: "exactly" } }, rawUsage: { inputTokens: "10", outputTokens: "20", cacheReadInputTokens: "30", cacheCreationInputTokens: "40", cacheCreation: { ephemeral_5m_input_tokens: 4, retainedNestedField: { exact: ["value"] } }, serverToolUse: { web_search_requests: 2 }, iterations: [{ model: "claude-opus", output_tokens: 20, details: { exact: true } }], fallbackCredit: { applied: true }, outputTokensDetails: { thinking_tokens: 5 }, unmodeledUsage: { vendor_field: { preserved: "exactly" } }, cacheDiagnostic: { cache_miss_reason: "cold" } } },
   responseTiming: { timeToFirstTokenMs: "50", outputGenerationDurationMs: "100" },
 };
 
+describe("SystemFailure typed query termination", () => {
+  const base = { errorClass: "ERROR_CLASS_INTERNAL", errorType: "unexpected_query_termination", message: "query ended", sourceDetail: "sdk iterator ended", resolvedAtMs: "0", itemUuid: "failure-1" };
+
+  it("preserves every identity field and typed iterator cause", () => {
+    const got = decodeSystemFailure({ ...base, queryTermination: { agentReplSessionId: "session-1", queryInstanceId: "query-1", vendorSessionId: "claude-1", observedAtMs: "1700000000000", iteratorFailure: { cause: "child exited 137" } } }, "failure");
+    expect(got.detail.kind).toBe("queryTermination");
+    if (got.detail.kind !== "queryTermination") throw new Error("wrong detail");
+    expect(got.detail.value.agentReplSessionId).toBe("session-1");
+    expect(got.detail.value.queryInstanceId).toBe("query-1");
+    expect(got.detail.value.vendorIdentity).toEqual({ case: "vendorSessionId", value: "claude-1" });
+    expect(got.detail.value.observedAtMs).toBe(1700000000000n);
+    expect(got.detail.value.reason.case).toBe("iteratorFailure");
+    if (got.detail.value.reason.case !== "iteratorFailure") throw new Error("wrong reason");
+    expect(got.detail.value.reason.value.cause).toBe("child exited 137");
+  });
+
+  it("rejects missing termination identity", () => {
+    expect(() => decodeSystemFailure({ ...base, queryTermination: { agentReplSessionId: "session-1", queryInstanceId: "", vendorSessionId: "claude-1", observedAtMs: "1700000000000", unexpectedEof: {} } }, "failure")).toThrow(/requires session, query, and observed-time identity/);
+  });
+
+  it("rejects competing structured failure details", () => {
+    const sessionResume = { agentReplSessionId: "session-1", claudeSessionId: "claude-1", cwd: "/repo", configDir: "", resolvedConfigDir: "/config", create: {}, transcriptUnavailable: { searchedPaths: [] } };
+    const queryTermination = { agentReplSessionId: "session-1", queryInstanceId: "query-1", vendorSessionId: "claude-1", observedAtMs: "1700000000000", unexpectedEof: {} };
+    expect(() => decodeSystemFailure({ ...base, sessionResume, queryTermination }, "failure")).toThrow(/at most one structured detail/);
+  });
+
+  it("preserves exact query termination inside session-resume evidence", () => {
+    const sessionResume = { agentReplSessionId: "session-1", claudeSessionId: "claude-1", cwd: "/repo", configDir: "", resolvedConfigDir: "/config", automaticRestore: {}, queryTermination: { agentReplSessionId: "session-1", queryInstanceId: "query-1", vendorSessionId: "claude-1", observedAtMs: "1700000000000", startupFailure: { cause: "resume rejected" } } };
+    const got = decodeSystemFailure({ ...base, sessionResume }, "failure");
+    expect(got.detail.kind).toBe("sessionResume");
+    if (got.detail.kind !== "sessionResume" || got.detail.value.cause.case !== "queryTermination") throw new Error("wrong detail");
+    expect(got.detail.value.cause.value.reason.case).toBe("startupFailure");
+  });
+
+  it("preserves a non-query bring-up cause and rejects present blank", () => {
+    const sessionResume = { agentReplSessionId: "session-1", claudeSessionId: "claude-1", cwd: "/repo", configDir: "", resolvedConfigDir: "/config", automaticRestore: {}, bringUpFailure: { cause: "shim readiness timed out" } };
+    const got = decodeSystemFailure({ ...base, sessionResume }, "failure");
+    expect(got.detail.kind).toBe("sessionResume");
+    if (got.detail.kind !== "sessionResume") throw new Error("wrong detail");
+    expect(got.detail.value.cause).toEqual({ case: "bringUpFailure", cause: "shim readiness timed out" });
+    expect(() => decodeSystemFailure({ ...base, sessionResume: { ...sessionResume, bringUpFailure: { cause: "" } } }, "failure")).toThrow(/must be nonblank/);
+  });
+});
+
 describe("ConversationItem token utilization", () => {
-  it("strictly decodes response timing and complete cache accounting", () => {
+  it("preserves every modeled response usage field and raw payload", () => {
     const frame = decode({ conversationDelta: { ...CONV_DELTA, items: [{ ...CONV_DELTA.items[0], tokenUtilization: [TOKEN_UTILIZATION] }] } });
     if (frame.frame.case !== "conversationDelta") throw new Error("wrong frame");
-    expect(frame.frame.value.items[0].tokenUtilization[0]).toMatchObject({ model: "claude-opus", usage: { cacheCreation5m: 4, cacheCreation1h: 36, cacheHitRate: 0.375 }, responseTiming: { timeToFirstTokenMs: 50, outputGenerationDurationMs: 100 } });
+    expect(frame.frame.value.items[0].tokenUtilization[0]).toEqual({ agentReplSessionId: "session-1", claudeSessionId: "claude-1", rootTurnId: "turn-1", apiRequestId: "request-1", apiMessageId: "msg-1", model: "claude-opus", actor: "mainAgent", usage: { inputTokens: 10, outputTokens: 20, cacheReadInputTokens: 30, cacheCreationInputTokens: 40, cacheCreation: { ephemeral5mInputTokens: 4, ephemeral1hInputTokens: 36 }, serverToolUse: { webSearchRequests: 2, webFetchRequests: 3 }, serviceTier: "priority", speed: "fast", inferenceGeo: "us", outputDetails: { thinkingTokens: 5 }, iterations: [{ kind: "sampling", inputTokens: 1, outputTokens: 2, cacheReadInputTokens: 3, cacheCreationInputTokens: 4, cacheCreation: { ephemeral5mInputTokens: 1, ephemeral1hInputTokens: 3 }, model: "claude-opus" }, { kind: "compaction", inputTokens: 5, outputTokens: 6, cacheReadInputTokens: 7, cacheCreationInputTokens: 8, cacheCreation: { ephemeral5mInputTokens: 2, ephemeral1hInputTokens: 6 } }, { kind: "advisor", inputTokens: 9, outputTokens: 10, cacheReadInputTokens: 11, cacheCreationInputTokens: 12, cacheCreation: { ephemeral5mInputTokens: 3, ephemeral1hInputTokens: 9 }, model: "claude-haiku" }, { kind: "fallback", inputTokens: 13, outputTokens: 14, cacheReadInputTokens: 15, cacheCreationInputTokens: 16, cacheCreation: { ephemeral5mInputTokens: 4, ephemeral1hInputTokens: 12 }, model: "claude-sonnet" }], cacheDiagnostic: { kind: "modelChanged", cacheMissedInputTokens: 17 }, cacheRates: { totalPromptInputTokens: 80, cacheHitRate: 0.375, cacheWriteRate: 0.5, uncachedInputRate: 0.125 }, fallbackCredit: { applied: true }, unmodeledUsage: { vendorField: { preserved: "exactly" } }, rawUsage: TOKEN_UTILIZATION.usage.rawUsage }, responseTiming: { timeToFirstTokenMs: 50, outputGenerationDurationMs: 100 } });
+  });
+
+  it.each(["agentReplSessionId", "claudeSessionId", "rootTurnId", "apiMessageId"] as const)("rejects blank required correlation field %s", (field) => {
+    const utilization = { ...TOKEN_UTILIZATION, [field]: "" };
+    expect(() => decode({ conversationDelta: { ...CONV_DELTA, items: [{ ...CONV_DELTA.items[0], tokenUtilization: [utilization] }] } })).toThrow(new RegExp(`${field} must be nonblank`));
+  });
+
+  it("distinguishes an absent API request identifier from an invalid empty present value", () => {
+    const utilization = { ...TOKEN_UTILIZATION, apiRequestId: "" };
+    expect(() => decode({ conversationDelta: { ...CONV_DELTA, items: [{ ...CONV_DELTA.items[0], tokenUtilization: [utilization] }] } })).toThrow(/apiRequestId must be absent or nonblank/);
+    const decoded = decode({ conversationDelta: { ...CONV_DELTA, items: [{ ...CONV_DELTA.items[0], tokenUtilization: [{ ...TOKEN_UTILIZATION, apiRequestId: undefined }] }] } });
+    if (decoded.frame.case !== "conversationDelta") throw new Error("wrong frame");
+    expect(decoded.frame.value.items[0].tokenUtilization[0].apiRequestId).toBeUndefined();
+  });
+
+  it("preserves every nested subagent lineage field", () => {
+    const subagent = { agentId: "agent-child", parentToolUseId: "tool-parent", parentAgentId: "agent-parent", subagentType: "research", taskDescription: "inspect cache evidence" };
+    const utilization = { ...TOKEN_UTILIZATION, mainAgent: undefined, subagent };
+    const frame = decode({ conversationDelta: { ...CONV_DELTA, items: [{ ...CONV_DELTA.items[0], tokenUtilization: [utilization] }] } });
+    if (frame.frame.case !== "conversationDelta") throw new Error("wrong frame");
+    expect(frame.frame.value.items[0].tokenUtilization[0].subagent).toEqual(subagent);
+  });
+
+  it("preserves every cache diagnostic oneof arm", () => {
+    const cases = [
+      [{ pending: {} }, { kind: "pending" }],
+      [{ modelChanged: { cacheMissedInputTokens: "1" } }, { kind: "modelChanged", cacheMissedInputTokens: 1 }],
+      [{ systemChanged: { cacheMissedInputTokens: "2" } }, { kind: "systemChanged", cacheMissedInputTokens: 2 }],
+      [{ toolsChanged: { cacheMissedInputTokens: "3" } }, { kind: "toolsChanged", cacheMissedInputTokens: 3 }],
+      [{ messagesChanged: { cacheMissedInputTokens: "4" } }, { kind: "messagesChanged", cacheMissedInputTokens: 4 }],
+      [{ previousMessageUnavailable: {} }, { kind: "previousMessageUnavailable" }],
+      [{ diagnosticsUnavailable: {} }, { kind: "diagnosticsUnavailable" }],
+    ] as const;
+    for (const [cacheDiagnostic, expected] of cases) {
+      const utilization = { ...TOKEN_UTILIZATION, usage: { ...TOKEN_UTILIZATION.usage, cacheDiagnostic } };
+      const frame = decode({ conversationDelta: { ...CONV_DELTA, items: [{ ...CONV_DELTA.items[0], tokenUtilization: [utilization] }] } });
+      if (frame.frame.case !== "conversationDelta") throw new Error("wrong frame");
+      expect(frame.frame.value.items[0].tokenUtilization[0].usage.cacheDiagnostic).toEqual(expected);
+    }
   });
 
   it("rejects malformed response actor and unknown usage fields", () => {
     const item = { ...CONV_DELTA.items[0], tokenUtilization: [{ ...TOKEN_UTILIZATION, subagent: {} }] };
-    expect(() => decode({ conversationDelta: { ...CONV_DELTA, items: [item] } })).toThrow(/exactly one actor/);
+    expect(() => decode({ conversationDelta: { ...CONV_DELTA, items: [item] } })).toThrow(/oneof .*actor.*set multiple times/);
     const usage = { ...TOKEN_UTILIZATION.usage, unrecognized: 1 };
-    expect(() => decode({ conversationDelta: { ...CONV_DELTA, items: [{ ...CONV_DELTA.items[0], tokenUtilization: [{ ...TOKEN_UTILIZATION, usage }] }] } })).toThrow(/unrecognized field/);
+    expect(() => decode({ conversationDelta: { ...CONV_DELTA, items: [{ ...CONV_DELTA.items[0], tokenUtilization: [{ ...TOKEN_UTILIZATION, usage }] }] } })).toThrow(/key "unrecognized" is unknown/);
+    expect(() => decode({ conversationDelta: { ...CONV_DELTA, items: [{ ...CONV_DELTA.items[0], tokenUtilization: [{ ...TOKEN_UTILIZATION, rawUsage: TOKEN_UTILIZATION.usage.rawUsage }] }] } })).toThrow(/key "rawUsage" is unknown/);
+    expect(() => decode({ conversationDelta: { ...CONV_DELTA, items: [{ ...CONV_DELTA.items[0], tokenUtilization: [{ ...TOKEN_UTILIZATION, usage: { ...TOKEN_UTILIZATION.usage, rawUsage: undefined } }] }] } })).toThrow(/usage\.rawUsage is required/);
+    const malformedDiagnostic = { ...TOKEN_UTILIZATION.usage, cacheDiagnostic: { pending: { unrecognized: true } } };
+    expect(() => decode({ conversationDelta: { ...CONV_DELTA, items: [{ ...CONV_DELTA.items[0], tokenUtilization: [{ ...TOKEN_UTILIZATION, usage: malformedDiagnostic }] }] } })).toThrow(/key "unrecognized" is unknown/);
+    const subagent = { agentId: "a", parentToolUseId: "t", parentAgentId: "p", subagentType: "research", taskDescription: "inspect", unrecognized: true };
+    expect(() => decode({ conversationDelta: { ...CONV_DELTA, items: [{ ...CONV_DELTA.items[0], tokenUtilization: [{ ...TOKEN_UTILIZATION, mainAgent: undefined, subagent }] }] } })).toThrow(/key "unrecognized" is unknown/);
+  });
+
+  it("rejects scalar and nested oneof violations through the generated contract", () => {
+    const wrongScalar = { ...TOKEN_UTILIZATION.usage, inputTokens: true };
+    expect(() => decode({ conversationDelta: { ...CONV_DELTA, items: [{ ...CONV_DELTA.items[0], tokenUtilization: [{ ...TOKEN_UTILIZATION, usage: wrongScalar }] }] } })).toThrow(/generated TokenUtilization contract/);
+    const competingDiagnostic = { ...TOKEN_UTILIZATION.usage, cacheDiagnostic: { pending: {}, modelChanged: { cacheMissedInputTokens: "1" } } };
+    expect(() => decode({ conversationDelta: { ...CONV_DELTA, items: [{ ...CONV_DELTA.items[0], tokenUtilization: [{ ...TOKEN_UTILIZATION, usage: competingDiagnostic }] }] } })).toThrow(/oneof .*reason.*set multiple times/);
+  });
+
+  it("preserves raw SDK nulls, zeroes, absence, and unknown nested values through generated decode", () => {
+    const rawSdkUsage = { cache_read_input_tokens: null, cache_creation_input_tokens: 0, nested_vendor_evidence: { unknown: [null, 0, { exact: "value" }] } };
+    const rawUsage = { ...TOKEN_UTILIZATION.usage.rawUsage, rawSdkUsage };
+    const utilization = { ...TOKEN_UTILIZATION, usage: { ...TOKEN_UTILIZATION.usage, rawUsage } };
+    const frame = decode({ conversationDelta: { ...CONV_DELTA, items: [{ ...CONV_DELTA.items[0], tokenUtilization: [utilization] }] } });
+    if (frame.frame.case !== "conversationDelta") throw new Error("wrong frame");
+    const preserved = frame.frame.value.items[0].tokenUtilization[0].usage.rawUsage.rawSdkUsage as Record<string, unknown>;
+    expect(preserved).toEqual(rawSdkUsage);
+    expect(preserved.cache_read_input_tokens).toBeNull();
+    expect(preserved.cache_creation_input_tokens).toBe(0);
+    expect(Object.hasOwn(preserved, "absent_vendor_field")).toBe(false);
+  });
+});
+
+describe("Session token utilization", () => {
+  it("preserves subagent lineage and complete per-agent and session model usage", () => {
+    const totals = { inputTokens: "10", outputTokens: "20", cacheReadInputTokens: "30", cacheCreationInputTokens: "40", cacheCreation: { ephemeral5mInputTokens: "4", ephemeral1hInputTokens: "36" }, serverToolUse: { webSearchRequests: "2", webFetchRequests: "3" }, outputDetails: { thinkingTokens: "5" }, cacheRates: { totalPromptInputTokens: "80", cacheHitRate: 0.375, cacheWriteRate: 0.5, uncachedInputRate: 0.125 }, timing: { outputTokensWithGenerationDuration: "20", outputGenerationDurationMs: "100", responsesWithGenerationDuration: "1", responsesWithoutGenerationDuration: "0", totalTimeToFirstTokenMs: "50", responsesWithTimeToFirstToken: "1", responsesWithoutTimeToFirstToken: "0" } };
+    const model = { model: "opus", canonicalModel: "claude-opus-4", provider: "anthropic", totals, contextWindow: "200000", maxOutputTokens: "32000", costUsd: 1.25 };
+    const tokenUtilization = { allAgents: totals, mainAgent: totals, subagents: [{ agent: { agentId: "agent-child", parentToolUseId: "tool-parent", parentAgentId: "agent-parent", subagentType: "research", taskDescription: "inspect cache evidence" }, totals, models: [model] }], models: [model] };
+    const frame = decode({ sessionView: { ...SESSION_VIEW, tokenUtilization } });
+    if (frame.frame.case !== "sessionView") throw new Error("wrong frame");
+    const aggregate = frame.frame.value.tokenUtilization;
+    expect(aggregate?.allAgents?.inputTokens).toBe(10n);
+    expect(aggregate?.allAgents?.cacheCreation?.ephemeral1hInputTokens).toBe(36n);
+    expect(aggregate?.allAgents?.serverToolUse?.webFetchRequests).toBe(3n);
+    expect(aggregate?.allAgents?.outputDetails?.thinkingTokens).toBe(5n);
+    expect(aggregate?.allAgents?.timing?.outputGenerationDurationMs).toBe(100n);
+    expect(aggregate?.subagents[0].agent).toMatchObject({ agentId: "agent-child", parentToolUseId: "tool-parent", parentAgentId: "agent-parent", subagentType: "research", taskDescription: "inspect cache evidence" });
+    expect(aggregate?.subagents[0].models[0]).toMatchObject({ model: "opus", canonicalModel: "claude-opus-4", provider: "anthropic", contextWindow: 200000n, maxOutputTokens: 32000n, costUsd: 1.25 });
+    expect(aggregate?.models[0].totals?.cacheRates).toMatchObject({ totalPromptInputTokens: 80n, cacheHitRate: 0.375, cacheWriteRate: 0.5, uncachedInputRate: 0.125 });
+  });
+
+  it("preserves every ungrouped response separately by API message identity and lineage", () => {
+    const totals = { inputTokens: "0", outputTokens: "0", cacheReadInputTokens: "0", cacheCreationInputTokens: "0" };
+    const lineage = { agentId: "", parentToolUseId: "", parentAgentId: "parent-agent", subagentType: "research", taskDescription: "inspect evidence" };
+    const first = { ...TOKEN_UTILIZATION, apiMessageId: "msg-ungrouped-1", mainAgent: undefined, subagent: lineage, usage: { ...TOKEN_UTILIZATION.usage, inputTokens: "11" } };
+    const second = { ...TOKEN_UTILIZATION, apiMessageId: "msg-ungrouped-2", mainAgent: undefined, subagent: lineage, usage: { ...TOKEN_UTILIZATION.usage, inputTokens: "22" } };
+    const sessionFrame = decode({ sessionView: { ...SESSION_VIEW, tokenUtilization: { allAgents: totals, mainAgent: totals, subagents: [], models: [], ungroupedSubagentResponses: [first, second] } } });
+    const responseFrame = decode({ conversationDelta: { ...CONV_DELTA, items: [{ ...CONV_DELTA.items[0], tokenUtilization: [first, second] }] } });
+    if (sessionFrame.frame.case !== "sessionView" || responseFrame.frame.case !== "conversationDelta") throw new Error("wrong frame");
+    const preserved = sessionFrame.frame.value.tokenUtilization?.ungroupedSubagentResponses;
+    expect(preserved?.map((response) => response.apiMessageId)).toEqual(responseFrame.frame.value.items[0].tokenUtilization.map((response) => response.apiMessageId));
+    expect(preserved?.map((response) => [response.apiMessageId, response.usage?.inputTokens, response.actor.case === "subagent" ? { agentId: response.actor.value.agentId, parentToolUseId: response.actor.value.parentToolUseId, parentAgentId: response.actor.value.parentAgentId, subagentType: response.actor.value.subagentType, taskDescription: response.actor.value.taskDescription } : undefined])).toEqual([["msg-ungrouped-1", 11n, lineage], ["msg-ungrouped-2", 22n, lineage]]);
+  });
+
+  it("rejects grouped, main-agent, and duplicate-message records in the ungrouped set", () => {
+    const totals = { inputTokens: "0", outputTokens: "0", cacheReadInputTokens: "0", cacheCreationInputTokens: "0" };
+    const base = { allAgents: totals, mainAgent: totals, subagents: [], models: [] };
+    const ungrouped = { ...TOKEN_UTILIZATION, apiMessageId: "msg-ungrouped", mainAgent: undefined, subagent: { agentId: "", parentToolUseId: "", parentAgentId: "parent", subagentType: "research", taskDescription: "inspect" } };
+    expect(() => decode({ sessionView: { ...SESSION_VIEW, tokenUtilization: { ...base, ungroupedSubagentResponses: [{ ...ungrouped, subagent: { ...ungrouped.subagent, agentId: "stable-agent" } }] } } })).toThrow(/stable invocation identity/);
+    expect(() => decode({ sessionView: { ...SESSION_VIEW, tokenUtilization: { ...base, ungroupedSubagentResponses: [TOKEN_UTILIZATION] } } })).toThrow(/must be a subagent response/);
+    expect(() => decode({ sessionView: { ...SESSION_VIEW, tokenUtilization: { ...base, ungroupedSubagentResponses: [ungrouped, ungrouped] } } })).toThrow(/repeated apiMessageId msg-ungrouped/);
+  });
+});
+
+describe("ConversationItem turn accounting", () => {
+  it("decodes invalid problems before accepting explicitly absent partial evidence", () => {
+    const frame = decode({ conversationDelta: { ...CONV_DELTA, items: [{ uuid: "result-1", tsMs: "1700000000000", result: {}, turnAccounting: { turnId: "turn-1", queryInstanceId: "query-1", timing: { promptAdmittedAtMs: "1", resultReceivedAtMs: "2", accountingSettledAtMs: "3", promptToResultMs: "1", resultToSettlementMs: "1" }, responses: [TOKEN_UTILIZATION], invalid: { problems: [{ missingUsageBoundary: { turnStart: {} } }] } } }] } });
+    if (frame.frame.case !== "conversationDelta") throw new Error("wrong frame");
+    expect(frame.frame.value.items[0].turnAccounting).toMatchObject({ turnId: "turn-1", queryInstanceId: "query-1", timing: { promptAdmittedAtMs: 1, resultReceivedAtMs: 2, accountingSettledAtMs: 3, promptToResultMs: 1, resultToSettlementMs: 1 }, responses: [{ usage: { rawUsage: TOKEN_UTILIZATION.usage.rawUsage } }], verdict: { kind: "invalid", problems: [{ kind: "missingUsageBoundary", boundary: "turnStart" }] } });
+  });
+
+  it("uses generated proto presence for complete accounting evidence", () => {
+    const frame = decode({ conversationDelta: { ...CONV_DELTA, items: [{ uuid: "result-1", tsMs: "1700000000000", result: {}, turnAccounting: { turnId: "turn-1", queryInstanceId: "query-1", reconciliation: { responseRecordCount: "0", responseModels: [{ model: "metadata-absent" }, { model: "explicit-zero", canonicalModel: "", provider: "", contextWindow: "0", maxOutputTokens: "0", costUsd: 0 }], resultModels: [], apiMessageIds: [] }, complete: {} } }] } });
+    if (frame.frame.case !== "conversationDelta") throw new Error("wrong frame");
+    const accounting = frame.frame.value.items[0].turnAccounting;
+    expect(accounting).toMatchObject({ turnId: "turn-1", queryInstanceId: "query-1", responses: [], verdict: { kind: "complete" } });
+    if (accounting?.reconciliation === undefined) throw new Error("missing reconciliation");
+    expect(accounting.reconciliation.responseAllAgents).toBeUndefined();
+    expect(accounting.reconciliation.responseModels).toEqual([
+      { model: "metadata-absent" },
+      { model: "explicit-zero", canonicalModel: "", provider: "", contextWindow: 0, maxOutputTokens: 0, costUsd: 0 },
+    ]);
+  });
+
+  it("rejects malformed account-usage outcomes instead of inventing unavailable reasons", () => {
+    const accounting = (usageAtStart: unknown) => ({ conversationDelta: { ...CONV_DELTA, items: [{ uuid: "result-1", tsMs: "1700000000000", result: {}, turnAccounting: { turnId: "turn-1", queryInstanceId: "query-1", usageAtStart, responses: [], complete: {} } }] } });
+    expect(() => decode(accounting({ turnId: "turn-1", turnStart: {}, available: {} }))).toThrow(/available requires fiveHour/);
+    expect(() => decode(accounting({ turnId: "turn-1", turnStart: {}, unavailable: {} }))).toThrow(/unavailable requires a reason/);
+  });
+
+  it("preserves explicit zero utilization and legal unavailable reasons", () => {
+    const accounting = (usageAtStart: unknown) => decode({ conversationDelta: { ...CONV_DELTA, items: [{ uuid: "result-1", tsMs: "1700000000000", result: {}, turnAccounting: { turnId: "turn-1", queryInstanceId: "query-1", usageAtStart, responses: [], complete: {} } }] } });
+    const available = accounting({ turnId: "turn-1", turnStart: {}, available: { fiveHour: { utilizationPercent: 0, resetsAtMs: "100" } } });
+    const unavailable = accounting({ turnId: "turn-1", turnStart: {}, unavailable: { windowUnavailable: {} } });
+    if (available.frame.case !== "conversationDelta" || unavailable.frame.case !== "conversationDelta") throw new Error("wrong frame");
+    expect(available.frame.value.items[0].turnAccounting?.usageAtStart?.outcome).toEqual({ kind: "available", utilizationPercent: 0, resetsAtMs: 100 });
+    expect(unavailable.frame.value.items[0].turnAccounting?.usageAtStart?.outcome).toEqual({ kind: "unavailable", reason: "windowUnavailable" });
   });
 });
 const HOST_ACTION = { actionId: "action-1", setRepositoryFold: { repoKey: "repo", folded: false } };

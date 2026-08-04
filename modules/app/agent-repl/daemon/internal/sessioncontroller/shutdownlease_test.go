@@ -313,7 +313,7 @@ func TestAParkedPromptIsNeverClassified(t *testing.T) {
 	qh.turn(true)
 
 	// Act.
-	if err := qh.m.SubmitPrompt(context.Background(), "ws", "", "hello", ""); err != nil {
+	if err := qh.m.SubmitPrompt(context.Background(), "ws", "shutdown-lease-request", "hello", ""); err != nil {
 		t.Fatalf("submit: %v", err)
 	}
 

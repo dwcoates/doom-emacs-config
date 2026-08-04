@@ -58,6 +58,7 @@ func newTurnStopRig(t *testing.T) (*Manager, *fakeSpawner, *fakeApplier, *logCap
 		Locator:           fakeLocator{m: map[string]string{"ws": "s1"}},
 		SeqStore:          &fakeSeqStore{seq: map[string]uint64{}},
 		ClearCompactStore: newFakeClearCompactStore(),
+		TurnAccountings:   emptyTurnAccountingStore{},
 		Registrar:         &fakeRegistrar{},
 		ProtocolVersion:   "1",
 		Source:            stubSource{},
@@ -319,13 +320,13 @@ func TestHibernateClosesTheAxisThroughTheFunnel(t *testing.T) {
 
 // The session-scoped stand-down — the delete and supersede path, which carries
 // NO settled guard and is therefore the one that stranded turns.
-func TestHibernateSessionClosesTheAxisThroughTheFunnel(t *testing.T) {
+func TestStopSessionClosesTheAxisThroughTheFunnel(t *testing.T) {
 	// Arrange.
 	m, _, applier, _ := newClosingRig(t)
 	applier.staleTurnClosed = true
 	// Act.
-	if err := m.HibernateSession("ws", "s1", StopCauseSessionDeleted()); err != nil {
-		t.Fatalf("HibernateSession: %v", err)
+	if err := m.StopSession("ws", "s1"); err != nil {
+		t.Fatalf("StopSession: %v", err)
 	}
 	// Assert.
 	closes := applier.staleTurnClosesApplied()
@@ -342,8 +343,8 @@ func TestSupersededSessionStopNeverClaimsSoleSessionController(t *testing.T) {
 	// Arrange — s1 drives the workspace; the stop names an older record.
 	m, _, applier, _ := newClosingRig(t)
 	// Act.
-	if err := m.HibernateSession("ws", "s-old", StopCauseSessionDeleted()); err != nil {
-		t.Fatalf("HibernateSession: %v", err)
+	if err := m.StopSession("ws", "s-old"); err != nil {
+		t.Fatalf("StopSession: %v", err)
 	}
 	// Assert.
 	closes := applier.staleTurnClosesApplied()

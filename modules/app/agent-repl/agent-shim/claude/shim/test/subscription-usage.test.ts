@@ -13,7 +13,8 @@ describe("fiveHourUsageSample", () => {
           resets_at: "2026-08-03T22:00:00Z",
         },
       },
-    }, 12.25)).toEqual({
+    }, 12.25, 42)).toEqual({
+      observedAtMs: 42,
       measurementAvailable: true,
       utilization: 37.5,
       resetsAt: "2026-08-03T22:00:00Z",
@@ -29,7 +30,7 @@ describe("fiveHourUsageSample", () => {
       subscription_type: null,
       rate_limits_available: false,
       rate_limits: null,
-    }, 4)).toMatchObject({
+    }, 4, 42)).toMatchObject({
       measurementAvailable: false,
       utilization: null,
       resetsAt: null,
@@ -44,7 +45,7 @@ describe("fiveHourUsageSample", () => {
       subscription_type: "team",
       rate_limits_available: true,
       rate_limits: {},
-    }, 2)).toMatchObject({
+    }, 2, 42)).toMatchObject({
       measurementAvailable: false,
       unavailableReason: "five_hour_window_unavailable",
     });
@@ -56,7 +57,7 @@ describe("fiveHourUsageSample", () => {
       subscription_type: "team",
       rate_limits_available: true,
       rate_limits: { five_hour: { utilization: null, resets_at: null } },
-    }, 3)).toMatchObject({
+    }, 3, 42)).toMatchObject({
       measurementAvailable: false,
       unavailableReason: "five_hour_utilization_unavailable",
     });
@@ -85,6 +86,6 @@ describe("fiveHourUsageSample", () => {
     ],
   ] as const)("fails loudly for %s", (_case, response, expected) => {
     // Act / Assert
-    expect(() => fiveHourUsageSample(response as never, 1)).toThrow(expected);
+    expect(() => fiveHourUsageSample(response as never, 1, 42)).toThrow(expected);
   });
 });

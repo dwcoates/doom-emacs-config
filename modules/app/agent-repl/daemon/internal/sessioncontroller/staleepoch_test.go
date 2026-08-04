@@ -57,6 +57,7 @@ func newStaleEpochHarness(t *testing.T, client *replayClient) *staleEpochHarness
 		Locator:           fakeLocator{m: map[string]string{"ws": "s1"}},
 		SeqStore:          h.seq,
 		ClearCompactStore: h.floors,
+		TurnAccountings:   emptyTurnAccountingStore{},
 		ProtocolVersion:   "1",
 		Source:            stubSource{},
 		FileDiagnostics:   fakeFileDiagnosticPersister{},

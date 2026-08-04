@@ -317,6 +317,14 @@ func main() {
 	if err != nil {
 		daemonFatal(daemonLog, "claude-repld: open prompt receipt store: %v", err)
 	}
+	turnAccountings, err := statedb.NewTurnAccountings(stateStore)
+	if err != nil {
+		daemonFatal(daemonLog, "claude-repld: open turn accounting store: %v", err)
+	}
+	tokenUtilizations, err := statedb.NewTokenUtilizations(stateStore)
+	if err != nil {
+		daemonFatal(daemonLog, "claude-repld: open token utilization store: %v", err)
+	}
 
 	// The scheduled-shutdown drain lease and the prompts it parks. A daemon
 	// that cannot install these cannot promise that a bounce it scheduled
@@ -576,6 +584,8 @@ func main() {
 		ClearCompactStore: seqStore,
 		DurableHistory:    durableHistory,
 		PromptReceipts:    promptReceipts,
+		TurnAccountings:   turnAccountings,
+		HistoricalUsage:   tokenUtilizations,
 		ShutdownHolds:     shutdownSchedules,
 		PermissionModes:   server.NewRegistryModeStore(sessionRegistry),
 		Registrar:         registrar,
@@ -740,7 +750,7 @@ func main() {
 		// The registry's own record of a deliberate deletion, exposed so a merge
 		// can tell a hibernated session (rehydrate) from a deleted one (refuse).
 		SessionDeaths:     server.RegistrySessionDeaths{Reg: sessionRegistry},
-		Sessions:          server.RegistrySessions{Reg: sessionRegistry, Controller: controller, ModelCatalogs: modelCatalogs, Logf: legacyLog},
+		Sessions:          server.RegistrySessions{Reg: sessionRegistry, Controller: controller, ModelCatalogs: modelCatalogs, TokenUsage: tokenUtilizations, Logf: legacyLog},
 		Inits:             controller,
 		Catalogs:          controller,
 		Queues:            controller,
@@ -818,6 +828,7 @@ func main() {
 		Remediator:      remediator,
 		Registry:        sessionRegistry,
 		ModelCatalogs:   modelCatalogs,
+		TokenUsage:      tokenUtilizations,
 		Logins:          logins,
 		Accounts:        accounts,
 		IdleTimeout:     *idleTimeout,

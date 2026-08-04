@@ -276,6 +276,7 @@ func (w *shutdownWorld) boot(t *testing.T) *shutdownBoot {
 		FileDiagnostics:   fileDiagnostics,
 		SeqStore:          seqStore,
 		ClearCompactStore: seqStore,
+		TurnAccountings:   newTestTurnAccountingStore(),
 		ShutdownHolds:     shutdownSchedules,
 		PermissionModes:   server.NewRegistryModeStore(reg),
 		Registrar:         registrar,

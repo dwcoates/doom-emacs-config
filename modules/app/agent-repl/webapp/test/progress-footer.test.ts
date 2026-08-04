@@ -51,6 +51,7 @@ function failureCard(over: Partial<SystemFailureCard> = {}): SystemFailureCard {
     sourceDetail: "status=529",
     resolvedAtMs: 0,
     uuid: "failure:e9",
+    detail: { kind: "none" },
     ...over,
   };
 }

@@ -17,6 +17,7 @@ export interface SubscriptionUsageQuery {
 
 /** One observed five-hour quota window at a turn boundary. */
 export interface FiveHourUsageSample {
+  observedAtMs: number;
   measurementAvailable: boolean;
   utilization: number | null;
   resetsAt: string | null;
@@ -24,12 +25,15 @@ export interface FiveHourUsageSample {
   rateLimitsAvailable: boolean;
   sampleLatencyMs: number;
   unavailableReason?: string;
+  /** Complete diagnostic when sampling failed before a valid response existed. */
+  unavailableCause?: string;
 }
 
 /** Validate the experimental response instead of silently coercing a changed SDK shape. */
 export function fiveHourUsageSample(
   response: SubscriptionUsageResponse,
   sampleLatencyMs: number,
+  observedAtMs: number,
 ): FiveHourUsageSample {
   if (typeof response.rate_limits_available !== "boolean") {
     throw new Error("Claude usage response rate_limits_available is not boolean");
@@ -42,6 +46,7 @@ export function fiveHourUsageSample(
       throw new Error("Claude usage response has rate limits while rate_limits_available is false");
     }
     return {
+      observedAtMs,
       measurementAvailable: false,
       utilization: null,
       resetsAt: null,
@@ -54,6 +59,7 @@ export function fiveHourUsageSample(
   const window = response.rate_limits?.five_hour;
   if (window === undefined || window === null) {
     return {
+      observedAtMs,
       measurementAvailable: false,
       utilization: null,
       resetsAt: null,
@@ -71,6 +77,7 @@ export function fiveHourUsageSample(
     throw new Error("Claude five-hour resets_at is neither string nor null");
   }
   return {
+    observedAtMs,
     measurementAvailable: utilization !== null,
     utilization,
     resetsAt: window.resets_at,

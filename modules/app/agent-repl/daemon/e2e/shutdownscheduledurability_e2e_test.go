@@ -190,6 +190,7 @@ func TestE2EAPromptHeldByAnExecutedDrainIsDeliveredAfterTheSwap(t *testing.T) {
 	// that claims it. Fired on the OBSERVED redial rather than on test phase
 	// order, so it cannot land before there is anything to claim.
 	second.sweepRecheckWhenParked(t, sessionB)
+	var terminal *frontendv1.TurnAccounting
 	awaitAll(t, afterConn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
 		"the held prompt's own reply, from the daemon on the other side of the bounce": func(frame *frontendv1.FrontendFrame) bool {
 			for _, item := range deltaItems(frame, cwdB) {
@@ -199,5 +200,26 @@ func TestE2EAPromptHeldByAnExecutedDrainIsDeliveredAfterTheSwap(t *testing.T) {
 			}
 			return false
 		},
+		"the successor daemon's complete terminal accounting evidence": func(frame *frontendv1.FrontendFrame) bool {
+			for _, item := range deltaItems(frame, cwdB) {
+				if item.GetTurnAccounting() != nil {
+					terminal = item.GetTurnAccounting()
+					return true
+				}
+			}
+			return false
+		},
 	})
+	if terminal == nil || terminal.GetQueryInstanceId() == "" || terminal.GetRuntime() == nil || terminal.GetRuntime().GetVendorSessionId() == "" || terminal.GetUsageAtStart() == nil || terminal.GetUsageAtEnd() == nil || len(terminal.GetResponses()) == 0 {
+		t.Fatalf("post-restart turn accounting omitted reconstructed query/runtime/usage evidence: %+v", terminal)
+	}
+	for _, problem := range terminal.GetInvalid().GetProblems() {
+		if incomplete := problem.GetRuntimeIdentityIncomplete(); incomplete != nil {
+			for _, path := range incomplete.GetMissingFieldPaths() {
+				if path == "query_lifecycle["+terminal.GetQueryInstanceId()+"].runtime_observed" {
+					t.Fatalf("post-restart terminal accounting lost its runtime snapshot: %+v", terminal)
+				}
+			}
+		}
+	}
 }

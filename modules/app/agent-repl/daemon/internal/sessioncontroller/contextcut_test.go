@@ -33,7 +33,7 @@ func statusEvent(t *testing.T, seq uint64, status string) *corev1.Event {
 func newCutConsumer(t *testing.T) (*consumer, *fakeApplier) {
 	t.Helper()
 	applier := &fakeApplier{}
-	return newConsumer("ws", "s1", &fakePusher{}, applier, nil, newFakeClearCompactStore(),
+	return newConsumer("ws", "s1", &fakePusher{}, applier, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{},
 		func(string, ...any) {}, nil, nil, nil, nil, nil), applier
 }
 
@@ -139,6 +139,7 @@ func newClearTestManager(t *testing.T) (*Manager, *fakeApplier) {
 		Locator:           fakeLocator{m: map[string]string{"ws": "s1"}},
 		SeqStore:          &fakeSeqStore{seq: map[string]uint64{}},
 		ClearCompactStore: newFakeClearCompactStore(),
+		TurnAccountings:   emptyTurnAccountingStore{},
 		ProtocolVersion:   "1",
 		Source:            stubSource{},
 		FileDiagnostics:   fakeFileDiagnosticPersister{},
@@ -187,7 +188,7 @@ func TestDispatchingAClearOpensTheClearingAxis(t *testing.T) {
 			m, applier := newClearTestManager(t)
 
 			// Act.
-			if err := m.SubmitPrompt(context.Background(), "ws", "", tc.text, "default"); err != nil {
+			if err := m.SubmitPrompt(context.Background(), "ws", "context-cut-request", tc.text, "default"); err != nil {
 				t.Fatalf("SubmitPrompt: %v", err)
 			}
 
