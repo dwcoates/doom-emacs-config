@@ -251,8 +251,16 @@ func (m *Manager) clearHibernation(workspace, sessionID string) error {
 // initial prompt all belong to somebody who is not looking at the revival gate,
 // and silently waking a session on their behalf would spend the user's context
 // budget on a decision they were never offered.
-func (m *Manager) guardHibernation(workspace, requestID, origin string) error {
+func (m *Manager) guardHibernation(workspace, requestID, origin string, who submitter) error {
 	if m.cfg.Hibernations == nil {
+		return nil
+	}
+	// THE ONE ADMISSION. A compact-first revival brings the session up while
+	// the record still says hibernated — deliberately, so this gate keeps
+	// refusing the user's prompts — and drives its `/compact` through here. It
+	// is admitted by SUBMITTER rather than by a flag or a text match, so a
+	// prompt that merely looks like a compaction cannot borrow the exemption.
+	if who == submitterRevival {
 		return nil
 	}
 	sessionID, ok := m.cfg.Locator.Locate(workspace)
