@@ -976,7 +976,7 @@ func (s *Server) handleAccountSwitch(w http.ResponseWriter, r *http.Request) {
 
 	// Stop the old shim before the root changes. A workspace with no live
 	// shim is an expected no-op, not a failure.
-	if err := s.controller.Hibernate(rec.CWD); err != nil {
+	if err := s.controller.Hibernate(rec.CWD, sessioncontroller.StopCauseAccountSwitch()); err != nil {
 		s.logf("session %s: account-switch shim stop (ws %s): %v (expected when no live shim)", id, rec.CWD, err)
 	}
 
@@ -1262,7 +1262,7 @@ func (s *Server) DeleteSession(id string) error {
 	// controller eviction while the spawner still owns its process handle; the
 	// session-id-scoped stop guarantees a replacement on the same cwd is untouched.
 	if rec.CWD != "" {
-		if err := s.controller.HibernateSession(rec.CWD, id); err != nil {
+		if err := s.controller.HibernateSession(rec.CWD, id, sessioncontroller.StopCauseSessionDeleted()); err != nil {
 			s.logf("session %s: delete exact shim stop FAILED (ws %s terminal_before=%v): %v",
 				id, rec.CWD, wasTerminal, err)
 		} else {
@@ -1535,7 +1535,7 @@ func (s *Server) sweepIdle() {
 		if !s.sweepable(rec.SessionID, rec.CWD, nowMs) {
 			continue
 		}
-		if err := s.controller.Hibernate(rec.CWD); err != nil {
+		if err := s.controller.Hibernate(rec.CWD, sessioncontroller.StopCauseHibernateIdleSweep()); err != nil {
 			// Expected for an already-hibernated / never-brought-up workspace, and
 			// now also for one that started working between sweepable's read and
 			// this call. That race is exactly why the settled check is inside
@@ -1621,19 +1621,25 @@ func (s *Server) sweepable(sessionID, workspace string, nowMs int64) bool {
 //
 // Nothing here marks a record terminal in either mode: a stopped shim's
 // session is merely unwired, not dead.
-func (s *Server) ShutdownAll(stopShims bool) {
+// THE CAUSE IS THE CALLER'S, because two different callers reach this: an
+// ordinary daemon shutdown, and the execution phase of a scheduled drain. They
+// are the same teardown and NOT the same event — one is somebody stopping the
+// daemon, the other is a bounce a deploy scheduled and waited on — so the
+// decision lines and the stop records both name which, from the same table the
+// stop itself is rendered from.
+func (s *Server) ShutdownAll(stopShims bool, cause sessioncontroller.StopCause) {
 	s.stopOnce.Do(func() { close(s.stopped) })
 	if !stopShims {
-		s.logf("server: SHIM STOP DECLINED initiator=daemon_shutdown scope=all_sessions reason=stop_shims_false — every session shim is PRESERVED; survivors redial the daemon shim socket and park until the next daemon claims them")
+		s.logf("server: SHIM STOP DECLINED initiator=%s scope=all_sessions reason=stop_shims_false — every session shim is PRESERVED; survivors redial the daemon shim socket and park until the next daemon claims them", cause)
 		return
 	}
-	s.logf("server: SHIM STOP DECIDED initiator=daemon_shutdown scope=all_sessions reason=stop_shims_true — the caller asked for the shim bundle to be replaced, so every non-terminal session's shim is stopped on the way out")
+	s.logf("server: SHIM STOP DECIDED initiator=%s scope=all_sessions reason=stop_shims_true — the caller asked for the shim bundle to be replaced, so every non-terminal session's shim is stopped on the way out", cause)
 	for _, rec := range s.registry.All() {
 		if rec.Terminal || rec.CWD == "" {
 			continue
 		}
-		s.logf("server: SHIM STOP ISSUED initiator=daemon_shutdown session=%s ws=%q reason=stop_shims_true", rec.SessionID, rec.CWD)
-		if err := s.controller.Hibernate(rec.CWD); err != nil {
+		s.logf("server: SHIM STOP ISSUED initiator=%s session=%s ws=%q reason=stop_shims_true", cause, rec.SessionID, rec.CWD)
+		if err := s.controller.Hibernate(rec.CWD, cause); err != nil {
 			// A MID-TURN WORKSPACE IS NOW REFUSED here too, because the settled
 			// check lives inside the shared teardown rather than in each caller.
 			// That is the right trade for this caller as well: a shim left running

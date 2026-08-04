@@ -20,6 +20,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/progress"
 	"claude-repld/internal/registry"
+	"claude-repld/internal/sessioncontroller"
 	"claude-repld/internal/ssm"
 	"claude-repld/internal/workspace/geometry"
 	"claude-repld/internal/workspace/merge"
@@ -214,6 +215,8 @@ type fakeLifecycle struct {
 	closed          []string
 	opened          []string
 	openedDriveable []string
+	// closeErr, when set, refuses every close.
+	closeErr error
 }
 
 type fakeHealthRouter struct {
@@ -237,6 +240,9 @@ type fakeDaemonHealth struct {
 func (f fakeDaemonHealth) DaemonHealth() (bool, string) { return f.healthy, f.reason }
 
 func (f *fakeLifecycle) Close(_ context.Context, ws string) error {
+	if f.closeErr != nil {
+		return f.closeErr
+	}
 	f.closed = append(f.closed, ws)
 	return nil
 }
@@ -738,6 +744,95 @@ func TestCommandHandlerCloseRefusesWhenAbandonFails(t *testing.T) {
 	}
 }
 
+// fakeLogTargets records the workspaces whose log targets were released.
+type fakeLogTargets struct {
+	evicted []dlog.Workspace
+	err     error
+}
+
+func (f *fakeLogTargets) EvictWorkspace(workspace dlog.Workspace) (int, error) {
+	if f.err != nil {
+		return 0, f.err
+	}
+	f.evicted = append(f.evicted, workspace)
+	return 1, nil
+}
+
+// newCloseHandler builds a handler over a lifecycle and a log-target evictor,
+// which is the pairing the close path binds together.
+func newCloseHandler(t *testing.T, lifecycle *fakeLifecycle, targets *fakeLogTargets) *commandHandler {
+	t.Helper()
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, lifecycle, nil, &fakeSessionCmds{}, nil, nil, func(string, ...any) {},
+		CommandHandlerConfig{LogTargets: targets})
+	if err != nil {
+		t.Fatalf("newCommandHandler: %v", err)
+	}
+	return h
+}
+
+// THE LOG TARGETS GO WITH THE WORKSPACE. A closed workspace's descriptors are
+// released rather than held for the daemon's lifetime.
+func TestCommandHandlerCloseReleasesTheWorkspacesLogTargets(t *testing.T) {
+	// Arrange.
+	workspace := t.TempDir()
+	targets := &fakeLogTargets{}
+	h := newCloseHandler(t, &fakeLifecycle{}, targets)
+	resolved, err := dlog.WorkspaceFromDirectory(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act.
+	if err := h.CloseWorkspace(context.Background(), workspace, "r1", &frontendv1.CloseWorkspaceCmd{}); err != nil {
+		t.Fatalf("CloseWorkspace: %v", err)
+	}
+
+	// Assert.
+	if len(targets.evicted) != 1 || targets.evicted[0].Directory != resolved.Directory {
+		t.Fatalf("evicted = %v, want the closed workspace %q", targets.evicted, resolved.Directory)
+	}
+}
+
+// A REFUSED CLOSE KEEPS ITS TARGETS. The workspace is still live, and taking
+// its descriptors away would break the writers still using them.
+func TestCommandHandlerARefusedCloseRetainsTheLogTargets(t *testing.T) {
+	// Arrange.
+	workspace := t.TempDir()
+	targets := &fakeLogTargets{}
+	h := newCloseHandler(t, &fakeLifecycle{closeErr: errors.New("the workspace is still merging")}, targets)
+
+	// Act.
+	err := h.CloseWorkspace(context.Background(), workspace, "r1", &frontendv1.CloseWorkspaceCmd{})
+
+	// Assert.
+	if err == nil {
+		t.Fatal("a refused close reported success")
+	}
+	if len(targets.evicted) != 0 {
+		t.Fatalf("evicted = %v on a refused close; the workspace is still live", targets.evicted)
+	}
+}
+
+// AN EVICTION FAILURE IS REPORTED AND DOES NOT UNDO THE CLOSE, which has
+// already happened.
+func TestCommandHandlerCloseSurvivesALogTargetEvictionFailure(t *testing.T) {
+	// Arrange.
+	workspace := t.TempDir()
+	lifecycle := &fakeLifecycle{}
+	h := newCloseHandler(t, lifecycle, &fakeLogTargets{err: errors.New("descriptor already closed")})
+
+	// Act.
+	err := h.CloseWorkspace(context.Background(), workspace, "r1", &frontendv1.CloseWorkspaceCmd{})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("CloseWorkspace: %v — an eviction failure must not undo a close that already happened", err)
+	}
+	if len(lifecycle.closed) != 1 {
+		t.Fatalf("closed = %v, want the one workspace", lifecycle.closed)
+	}
+}
+
 func TestCommandHandlerPromptErrorSurfaces(t *testing.T) {
 	// Arrange — the prompt router fails.
 	p := &fakePrompts{err: errors.New("no live shim")}
@@ -847,7 +942,7 @@ func TestCommandHandlerDeleteSessionRoutesToSessions(t *testing.T) {
 func newHandlerWithShutdown(t *testing.T, fired chan bool) *commandHandler {
 	t.Helper()
 	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{},
-		func(stopShims bool) { fired <- stopShims }, nil, nil)
+		func(stopShims bool, _ sessioncontroller.StopCause) { fired <- stopShims }, nil, nil)
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
 	}
@@ -1238,7 +1333,7 @@ func TestWireAgentShimRejectsAScheduleStoreWithNoQueueBackend(t *testing.T) {
 		ShutdownSchedules: &fakeScheduleStore{},
 		DrainHolds:        &fakeHoldSource{},
 		DrainEvidence:     newFakeEvidence(),
-		RequestShutdown:   func(bool) {},
+		RequestShutdown:   func(bool, sessioncontroller.StopCause) {},
 		// Queues is deliberately nil.
 	})
 

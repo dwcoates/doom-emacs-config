@@ -683,8 +683,14 @@ func (m *TargetManager) OpenWorkspaceRuntime(workspace Workspace, runtime Runtim
 		if active.workspace.ID != workspace.ID || active.runtime != runtime {
 			return nil, fmt.Errorf("dlog: active target workspace ID mismatch: active=%q requested=%q", active.workspace.ID, workspace.ID)
 		}
+		// A retained target that cannot be stat-ed is a target somebody CLOSED
+		// out from under the manager — the double-use the borrow type exists to
+		// prevent. It is refused with a diagnostic that names it rather than
+		// reissued, because handing it back would put a dead descriptor into
+		// the next child's fd 3.
 		if _, err := active.file.Stat(); err != nil {
-			return nil, fmt.Errorf("dlog: inspect active target: %w", err)
+			return nil, fmt.Errorf("dlog: the active %s target for workspace %q is CLOSED (%s): %w",
+				runtime, workspace.Directory, active.file.Name(), err)
 		}
 		return active.file, nil
 	}
@@ -889,6 +895,60 @@ func (m *TargetManager) ReportTargetCapError(failure TargetCapError, terminal io
 		return errors.Join(err, terminalErr)
 	}
 	return err
+}
+
+// ActiveTargets is how many targets the manager currently holds open. It is the
+// GAUGE behind the borrow's lifetime: targets are opened per workspace runtime
+// and released when the workspace closes, so a count that only ever climbs is
+// the leak this number exists to make visible.
+func (m *TargetManager) ActiveTargets() int {
+	if m == nil {
+		return 0
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.targets)
+}
+
+// EvictWorkspace closes and forgets EVERY runtime target of one workspace.
+//
+// THE TARGET'S LIFETIME IS THE WORKSPACE'S. Before this, a target lived from
+// its first write until the daemon exited: a workspace closed in the morning
+// still held its descriptors at midnight, and a long-lived daemon accumulated
+// one set per workspace it had ever touched. The workspace-close path calls
+// this, which binds the two lifetimes rather than trusting a caller to remember.
+//
+// It closes the descriptors and forgets the entries; the canonical symlinks and
+// the external files they name are LEFT IN PLACE, exactly as Close leaves them,
+// because a closed workspace's log is still the record of what happened there.
+// A later reopen of the same workspace opens a fresh target through the
+// ordinary path.
+//
+// Close failures are collected and returned together rather than aborting on
+// the first: every target of the workspace is released either way, and the
+// caller learns about all of them.
+func (m *TargetManager) EvictWorkspace(workspace Workspace) (int, error) {
+	if m == nil {
+		return 0, errors.New("dlog: target manager is required")
+	}
+	if err := workspace.validate(); err != nil {
+		return 0, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var errs []error
+	evicted := 0
+	for key, active := range m.targets {
+		if active.workspace.Directory != workspace.Directory {
+			continue
+		}
+		if err := active.file.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("dlog: close target %q: %w", key, err))
+		}
+		delete(m.targets, key)
+		evicted++
+	}
+	return evicted, errors.Join(errs...)
 }
 
 // Close forgets all manager-owned targets without unlinking their canonical

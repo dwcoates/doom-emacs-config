@@ -155,7 +155,7 @@ func TestHibernateReportsHibernated(t *testing.T) {
 	m.onConnected("ws", "s1", &corev1.ShimHello{})
 
 	// Act.
-	if err := m.Hibernate("ws"); err != nil {
+	if err := m.Hibernate("ws", StopCauseHibernateIdleSweep()); err != nil {
 		t.Fatalf("Hibernate: %v", err)
 	}
 
@@ -181,7 +181,7 @@ func TestHibernateSessionReportsHibernated(t *testing.T) {
 	m.onConnected("ws", "s1", &corev1.ShimHello{})
 
 	// Act.
-	if err := m.HibernateSession("ws", "s1"); err != nil {
+	if err := m.HibernateSession("ws", "s1", StopCauseSessionDeleted()); err != nil {
 		t.Fatalf("HibernateSession: %v", err)
 	}
 
@@ -206,7 +206,7 @@ func TestASessionScopedStopOfAnotherRecordLeavesTheAxisAlone(t *testing.T) {
 	before := len(wiringsFor(applier, "ws"))
 
 	// Act — reap some OTHER record for the same workspace.
-	if err := m.HibernateSession("ws", "s_orphan"); err != nil {
+	if err := m.HibernateSession("ws", "s_orphan", StopCauseSessionDeleted()); err != nil {
 		t.Fatalf("HibernateSession: %v", err)
 	}
 
@@ -477,7 +477,7 @@ func TestAHibernationSurvivesItsOwnSessionControllerExit(t *testing.T) {
 	m.onConnected("ws", "s1", &corev1.ShimHello{})
 
 	// Act — hibernate, then join the exit goroutine the cancel released.
-	if err := m.Hibernate("ws"); err != nil {
+	if err := m.Hibernate("ws", StopCauseHibernateIdleSweep()); err != nil {
 		t.Fatalf("Hibernate: %v", err)
 	}
 	m.Close()
@@ -519,7 +519,7 @@ func TestHibernateRefusesALiveTurn(t *testing.T) {
 	})
 
 	// Act.
-	err := m.Hibernate("ws")
+	err := m.Hibernate("ws", StopCauseHibernateIdleSweep())
 
 	// Assert.
 	if !errors.Is(err, ErrNotSettled) {
@@ -540,7 +540,7 @@ func TestARefusedHibernationLeavesTheSessionRunning(t *testing.T) {
 	before := len(wiringsFor(applier, "ws"))
 
 	// Act.
-	if err := m.Hibernate("ws"); !errors.Is(err, ErrNotSettled) {
+	if err := m.Hibernate("ws", StopCauseHibernateIdleSweep()); !errors.Is(err, ErrNotSettled) {
 		t.Fatalf("Hibernate = %v, want ErrNotSettled", err)
 	}
 
@@ -559,7 +559,7 @@ func TestHibernateRefusesAContextCut(t *testing.T) {
 	applier.setCurrent("ws", &frontendv1.WorkspaceState{State: frontendv1.RenderState_RENDER_STATE_CLEARING})
 
 	// Act.
-	err := m.Hibernate("ws")
+	err := m.Hibernate("ws", StopCauseHibernateIdleSweep())
 
 	// Assert.
 	if !errors.Is(err, ErrNotSettled) {
@@ -577,7 +577,7 @@ func TestHibernateRefusesAVendorBlockedWorkspace(t *testing.T) {
 	applier.setCurrent("ws", &frontendv1.WorkspaceState{State: frontendv1.RenderState_RENDER_STATE_VENDOR_BLOCKED})
 
 	// Act.
-	err := m.Hibernate("ws")
+	err := m.Hibernate("ws", StopCauseHibernateIdleSweep())
 
 	// Assert.
 	if !errors.Is(err, ErrNotSettled) {
@@ -593,7 +593,7 @@ func TestHibernateAllowsASettledWorkspace(t *testing.T) {
 	applier.setCurrent("ws", &frontendv1.WorkspaceState{State: frontendv1.RenderState_RENDER_STATE_READY})
 
 	// Act.
-	err := m.Hibernate("ws")
+	err := m.Hibernate("ws", StopCauseHibernateIdleSweep())
 
 	// Assert.
 	if err != nil {
@@ -618,7 +618,7 @@ func TestHibernateProceedsWhenTheStateReadFails(t *testing.T) {
 	applier.reconcMutex.Unlock()
 
 	// Act.
-	err := m.Hibernate("ws")
+	err := m.Hibernate("ws", StopCauseHibernateIdleSweep())
 
 	// Assert.
 	if err != nil {
@@ -640,7 +640,7 @@ func TestHibernateSessionIsNotGatedOnSettledness(t *testing.T) {
 	})
 
 	// Act.
-	err := m.HibernateSession("ws", "s1")
+	err := m.HibernateSession("ws", "s1", StopCauseSessionDeleted())
 
 	// Assert.
 	if err != nil {
