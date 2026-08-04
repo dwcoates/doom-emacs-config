@@ -492,7 +492,37 @@ type e2eHarness struct {
 	// waiting on an asynchronous conversation rotation waits on the WRITE
 	// rather than re-reading /sessions on an interval.
 	vendors *vendorIdentities
+	// clock is the daemon's own wall clock, movable by the test. Non-nil only
+	// for a harness built with withTestClock.
+	//
+	// It exists because every TIME-SINCE policy in the daemon — the idle
+	// sweeper's elapsed-idle gate, and the cache keep-alive window measured
+	// from the durable last turn end — is a comparison against server.Config's
+	// injected Now. A test that wanted to observe one of those edges without
+	// this would have to wait out the real interval, which for a one-hour cache
+	// TTL is not a test at all. Moving the clock and then firing sweepIdle
+	// makes the edge an EVENT the test causes.
+	clock *testClock
 }
+
+// testClock is the daemon's wall clock under test control: real time, plus an
+// offset the test moves forward.
+//
+// It is an OFFSET rather than a frozen instant deliberately. Everything else
+// in the stack (the shim, the store, the SSM's own timestamps) keeps running on
+// the real clock, so a frozen daemon clock would put the daemon permanently
+// behind facts the rest of the world is still stamping. An offset keeps the two
+// in step and adds exactly the elapsed time the test wants to claim.
+type testClock struct{ offset atomic.Int64 }
+
+func newTestClock() *testClock { return &testClock{} }
+
+// now is the func handed to server.Config.Now.
+func (c *testClock) now() time.Time { return time.Now().Add(time.Duration(c.offset.Load())) }
+
+// advance moves the daemon's clock forward by d. Every subsequent time-since
+// measurement the daemon makes reads d longer.
+func (c *testClock) advance(d time.Duration) { c.offset.Add(int64(d)) }
 
 // vendorIdentities publishes the daemon's vendor-uuid writes as events.
 //
@@ -576,6 +606,14 @@ type harnessTuning struct {
 	// production trigger — sweepIdle calls controller.Hibernate — so what it
 	// exercises is the real edge and not a stand-in for one.
 	idleSweeper bool
+	// clock gives the daemon a test-movable wall clock (server.Config.Now).
+	clock bool
+	// idleTimeout is the sweeper's elapsed-idle gate (server.Config.IdleTimeout).
+	// Zero is the harness default and means "every sweep hibernates", which is
+	// what the connectivity-state tests want; a test of a policy that must run
+	// BEFORE hibernation sets a real cutoff so the sweep has room to do
+	// something else first.
+	idleTimeout time.Duration
 }
 
 type harnessOption func(*harnessTuning)
@@ -590,6 +628,15 @@ func withStaleShimBuild(baked, current string) harnessOption {
 
 // withIdleSweeper gives the harness a test-driven idle-sweep clock.
 func withIdleSweeper() harnessOption { return func(o *harnessTuning) { o.idleSweeper = true } }
+
+// withTestClock hands the daemon a wall clock the test moves (h.clock).
+func withTestClock() harnessOption { return func(o *harnessTuning) { o.clock = true } }
+
+// withIdleCutoff sets the idle sweeper's elapsed-idle gate, so a sweep fired
+// before the workspace has been quiet that long does NOT hibernate it.
+func withIdleCutoff(d time.Duration) harnessOption {
+	return func(o *harnessTuning) { o.idleTimeout = d }
+}
 
 // withMergeActions configures the creation-time merge actions every workspace
 // of this harness reports: the before_ws_merge prompt that runs before any
@@ -904,6 +951,12 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 	if tuning.idleSweeper {
 		sweepTicks = make(chan time.Time)
 	}
+	var clock *testClock
+	var nowFn func() time.Time
+	if tuning.clock {
+		clock = newTestClock()
+		nowFn = clock.now
+	}
 	srv := server.New(server.Config{
 		DaemonVersion:  "0.1.0-e2e",
 		Registry:       reg,
@@ -913,6 +966,8 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 		SSM:            ssmMgr,
 		Frontend:       agentShim.Server,
 		IdleSweepTicks: sweepTicks,
+		IdleTimeout:    tuning.idleTimeout,
+		Now:            nowFn,
 		Logf:           t.Logf,
 	})
 	binding.SetTarget(srv)
@@ -925,7 +980,7 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 	mux.HandleFunc("/frontend", agentShim.Server.ServeWS)
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
-	h := &e2eHarness{ts: ts, stateDB: stateStore, geometry: geometryStore, merges: mergeBinding, shimSpawns: spawnCount.Load, vendors: vendors}
+	h := &e2eHarness{ts: ts, stateDB: stateStore, geometry: geometryStore, merges: mergeBinding, shimSpawns: spawnCount.Load, vendors: vendors, clock: clock}
 	if sweepTicks != nil {
 		h.sweepIdle = sweepTicks
 	}
