@@ -34,12 +34,21 @@ const (
 	// prompt without a lease behind it means the exclusivity claim this path
 	// relies on was never taken, and the user could be prompting the same shim.
 	submitterMergeLeaseHolder
+	// submitterKeepAlive is the daemon's own cache keep-alive ping. It is a
+	// submitter of its own rather than a user prompt with a distinctive origin
+	// because three separate decisions turn on it — no prompt receipt, no
+	// queue classifier, and refused outright while the merge lease is held —
+	// and each of those would otherwise be a string comparison against a
+	// free-form origin, which is a naming convention rather than a check.
+	submitterKeepAlive
 )
 
 func (s submitter) String() string {
 	switch s {
 	case submitterMergeLeaseHolder:
 		return "merge-lease-holder"
+	case submitterKeepAlive:
+		return "keep-alive"
 	default:
 		return "user"
 	}
@@ -61,6 +70,18 @@ func (s submitter) String() string {
 func (m *Manager) guardMergeLease(workspace string, who submitter, requestID, origin string) error {
 	held := m.cfg.SSM.MergeLeaseHeld(workspace)
 	switch {
+	case held && who == submitterKeepAlive:
+		// A KEEP-ALIVE NEVER INTERRUPTS A MERGE. The lease's whole claim is
+		// that merge.Coordinator is the only party driving this shim, and a
+		// ping is still a turn — it would land in the middle of conflict
+		// resolution and cost exactly the context the merge is working
+		// through. The cache is allowed to go cold instead; that is the
+		// cheaper mistake, and the policy's own cache-expired branch reports
+		// it rather than hiding it.
+		err := fmt.Errorf("session-controller: cache keep-alive for workspace %q refused: merge.Coordinator holds the exclusivity lease on its session", workspace)
+		m.logf("session-controller: keep-alive ping REFUSED ws=%q request_id=%s origin=%q — the merge lease is held, so the cache is allowed to expire rather than a ping landing inside conflict resolution",
+			workspace, requestID, origin)
+		return err
 	case held && who == submitterUser:
 		err := fmt.Errorf("workspace %q is being merged: merge.Coordinator holds the exclusivity lease on its session, so prompts are refused until the merge reaches a terminal phase (merged, merge_failed, or an abandoned merge_conflict). Nothing was submitted and nothing was queued — resubmit once the merge finishes", workspace)
 		m.logf("session-controller: prompt REFUSED ws=%q request_id=%s origin=%q submitter=%s — the merge lease is held; the prompt was neither submitted nor queued",

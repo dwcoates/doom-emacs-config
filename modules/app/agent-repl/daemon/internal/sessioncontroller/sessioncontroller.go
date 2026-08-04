@@ -486,6 +486,12 @@ type sessionController struct {
 	// paused queue and is running ALONE. Its clean end resumes the drain; its
 	// interrupted end leaves the queue paused.
 	pausedRunner bool
+	// keepAliveTurnID is the in-flight cache keep-alive ping's turn id, empty
+	// when none is running. It is the claim taken under the manager mutex by
+	// the same acquisition that decided to ping, and it is what a real prompt
+	// arriving mid-ping is held behind (the queue's keep-alive hold). Read and
+	// written only under Manager.mu.
+	keepAliveTurnID string
 	// runningText is the prompt that started the turn now in flight, as far as
 	// this daemon saw it. It is the classifier's "what is already running"
 	// context, and is empty when the turn predates this daemon.
@@ -945,6 +951,20 @@ func (m *Manager) submitPromptAs(ctx context.Context, workspace, requestID, text
 	if entry.drainHeld() {
 		m.logf("session-controller: queued prompt entry=%s session=%s ws=%q origin=%q schedule=%s classifier=SKIPPED (parked by the drain lease)",
 			entry.id, d.sessionID, workspace, origin, entry.shutdownHoldScheduleID)
+		m.publish(d.sessionID, view, recs)
+		return nil
+	}
+	// THE CLASSIFIER NEVER RUNS ON A KEEP-ALIVE-HELD ENTRY EITHER, and the
+	// reason is sharper than the drain lease's. The classifier answers exactly
+	// one question — should this prompt interrupt the turn in front of it —
+	// and the turn in front of this one is a machine-generated ping. Spending a
+	// model call to judge whether the user's prompt should interrupt the
+	// daemon's own cache refresh would produce a verdict that could only be
+	// wrong: INTERJECT would demand an interrupt whose whole effect is to leave
+	// a half-finished ping in the transcript the rewind is about to clean up.
+	if entry.keepAliveHeld() {
+		m.logf("session-controller: queued prompt entry=%s session=%s ws=%q origin=%q keep_alive_turn=%s classifier=SKIPPED (held behind a cache keep-alive turn)",
+			entry.id, d.sessionID, workspace, origin, entry.keepAliveHoldTurnID)
 		m.publish(d.sessionID, view, recs)
 		return nil
 	}
