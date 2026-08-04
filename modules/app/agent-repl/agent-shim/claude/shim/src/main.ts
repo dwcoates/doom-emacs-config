@@ -541,6 +541,17 @@ export async function runUdsMode(
     // a resumed session can subscribe correctly from its very first Subscribe
     // instead of waiting for the SDK to reveal the uuid.
     ...(args.resume !== undefined ? { storeSessionId: args.resume } : {}),
+    // The lineage is validated as a complete trio by parseArgs, so presence of
+    // the first field is presence of all three.
+    ...(args.rewoundFrom !== undefined
+      ? {
+        rewindLineage: {
+          previousVendorSessionId: args.rewoundFrom,
+          retainedLeafUuid: args.rewindRetainedLeaf!,
+          droppedTurnIds: args.rewindDroppedTurns!,
+        },
+      }
+      : {}),
     createQuery,
     newRequestId: randomUUID,
   });
