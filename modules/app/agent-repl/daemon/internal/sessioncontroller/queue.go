@@ -280,6 +280,20 @@ func (q *promptQueue) drainAll() []*queueEntry {
 	return out
 }
 
+// pushFrontAll puts entries back at the head of the queue, keeping their order
+// among themselves and ahead of whatever arrived while they were away.
+//
+// AHEAD, not behind: these are the prompts the rewind carried across the
+// bounce, and anything now sitting in this queue was typed after them. Putting
+// them at the back would reorder the user's own prompts as the price of tidying
+// the transcript.
+func (q *promptQueue) pushFrontAll(entries []*queueEntry) {
+	if len(entries) == 0 {
+		return
+	}
+	q.entries = append(append(make([]*queueEntry, 0, len(entries)+len(q.entries)), entries...), q.entries...)
+}
+
 // view renders the queue as the pushed frontend frame, front to back. An empty
 // queue renders as a QueueView with no entries rather than as no frame at all:
 // "the queue is now empty" is exactly the state a frontend needs told.
@@ -419,7 +433,12 @@ func (m *Manager) queueSubmitLocked(d *sessionController, requestID, text, permi
 	// it, asking a model whether the user's prompt should interrupt a
 	// machine-generated ping. Checking first is what makes the hold, not the
 	// classification, the thing that describes this entry.
-	if d.keepAliveTurnID != "" {
+	//
+	// THE HOLD SPANS THE AFTERMATH TOO. keepAliveHoldTurnLocked answers with the
+	// ping's own claim while its turn runs and with the workspace's rewind claim
+	// afterwards, so there is no instant between "the ping ended" and "the
+	// rewound session is back up" in which this test says no.
+	if holdTurnID := m.keepAliveHoldTurnLocked(d); holdTurnID != "" {
 		e := &queueEntry{
 			id:                  newQueueEntryID(),
 			requestID:           requestID,
@@ -428,7 +447,7 @@ func (m *Manager) queueSubmitLocked(d *sessionController, requestID, text, permi
 			promptOrigin:        promptOrigin,
 			queuedAtMs:          m.now(),
 			classification:      frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD,
-			keepAliveHoldTurnID: d.keepAliveTurnID,
+			keepAliveHoldTurnID: holdTurnID,
 		}
 		// Appended at the BACK even against a paused queue, exactly as a
 		// drain-parked entry is: a head jump is the paused queue's one
@@ -436,7 +455,7 @@ func (m *Manager) queueSubmitLocked(d *sessionController, requestID, text, permi
 		// claiming that position would be a lie about when it runs.
 		d.queue.add(e)
 		m.logf("session-controller: prompt HELD behind a cache keep-alive entry=%s ws=%q session=%s keep_alive_turn=%s turn_active=%v — the ping must finish so the daemon can rewind it out of the transcript before this prompt is submitted; it is not classified and not refused",
-			e.id, d.workspace, d.sessionID, d.keepAliveTurnID, d.turn.active())
+			e.id, d.workspace, d.sessionID, holdTurnID, d.turn.active())
 		return e, true, nil
 	}
 	if !d.turn.active() {
@@ -587,6 +606,16 @@ func (m *Manager) onTurnBoundary(d *sessionController, active bool, endedAtMs in
 	// anything into a session that is about to be bounced.
 	if pingTurn := d.keepAliveTurnID; pingTurn != "" && d.noteKeepAliveTurnEndedLocked(endingTurnID) {
 		heldIDs := d.queue.keepAliveHeldIDs(pingTurn)
+		// THE CLAIM IS TRANSFERRED, NOT DROPPED, whenever an aftermath is going
+		// to run. noteKeepAliveTurnEndedLocked has just cleared the ping's own
+		// claim; taking the rewind's claim in the SAME acquisition is what
+		// leaves no instant in which a fresh prompt is admitted, starts a real
+		// turn, and is then SIGTERMed and truncated out by the rewind that was
+		// already on its way.
+		rewinding := len(heldIDs) > 0
+		if rewinding {
+			m.claimKeepAliveRewindLocked(d.workspace, pingTurn)
+		}
 		m.mu.Unlock()
 		m.logf("session-controller: keep-alive turn ENDED ws=%q session=%s turn_id=%s held_prompts=%d",
 			d.workspace, d.sessionID, pingTurn, len(heldIDs))
@@ -604,7 +633,7 @@ func (m *Manager) onTurnBoundary(d *sessionController, active bool, endedAtMs in
 		// made at the moment of writing.
 		m.closeKeepAliveWindow(d, pingTurn, endedAtMs)
 		m.noteDrainActivity()
-		if len(heldIDs) > 0 {
+		if rewinding {
 			go m.releaseKeepAliveHolds(d, pingTurn, heldIDs)
 			return
 		}
