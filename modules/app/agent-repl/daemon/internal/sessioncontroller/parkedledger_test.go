@@ -580,6 +580,46 @@ func TestAForceDuringARestoreIsNotResurrectedByItsStaleRowSnapshot(t *testing.T)
 	}
 }
 
+func TestAScheduleReleaseDuringARestoreIsNotResurrectedByItsStaleRowSnapshot(t *testing.T) {
+	// THE THIRD ROW-DROPPING LEG. Cancelling the schedule drops every one of its
+	// durable rows and returns the entries to ordinary delivery — and with no
+	// turn running the release's own kick submits one immediately, so the entry
+	// leaves the queue and the apply loop's `d.queue.get` dedupe stops covering
+	// it. The restore's snapshot predates all of it.
+	// Arrange — the session wires, and the row read is where the release lands.
+	h := newParkedHarness(t)
+	h.lease.hold("sd_live")
+	h.record("q_parked", "sd_live", "delayed")
+	h.materialize()
+	h.wire()
+	h.store.duringHeldPromptsRead(func() {
+		h.lease.release()
+		h.m.ReleaseShutdownHolds("sd_live")
+		// The release's own kick has already submitted the entry and taken it out
+		// of the queue. PAUSING NOW suppresses the RESTORE's kick, which fires on
+		// the same condition — without it a row the apply loop wrongly re-adds is
+		// popped and delivered a second time in the same breath, leaving the
+		// queue empty again and the re-add invisible. The defect is the re-add
+		// either way; this is what makes it observable in the queue.
+		d := h.controller()
+		h.m.mu.Lock()
+		d.paused = true
+		h.m.mu.Unlock()
+	})
+
+	// Act.
+	h.m.restoreShutdownHolds(h.controller())
+
+	// Assert — the restore added nothing back for a row whose prompt has already
+	// been delivered.
+	waitFor(t, "the released prompt to reach the shim", func() bool {
+		return len(h.client.promptTexts()) == 1
+	})
+	if es := h.entries(); len(es) != 0 {
+		t.Fatalf("queue = %+v after a schedule release mid-restore, want empty — the restore re-added a prompt that has already been delivered", es)
+	}
+}
+
 func TestACancelDuringARestoreIsNotResurrectedByItsStaleRowSnapshot(t *testing.T) {
 	// THE RACE. The restore adopts the materialized entries under the manager
 	// mutex, reads the durable rows with it RELEASED, and applies them under it
