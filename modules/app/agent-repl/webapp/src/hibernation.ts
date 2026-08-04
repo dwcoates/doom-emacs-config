@@ -153,6 +153,41 @@ export function hibernationBlockedLog(
   );
 }
 
+/**
+ * The record written when the daemon refuses a revival decision.
+ *
+ * Returned rather than logged, for the same reason as
+ * {@link hibernationBlockedLog}: the caller writes it through the webapp's one
+ * canonical logging API, and the wording stays assertable without a double.
+ *
+ * The refusal leaves the session exactly as asleep as it was, so the line says
+ * that — the gate is coming back up, and the user has a decision to make again.
+ */
+export function reviveRefusedLog(mode: Exclude<RevivePending, null>, cause: unknown): string {
+  return (
+    `revival refused: the daemon rejected the ${mode} decision, so the session is still ` +
+    `asleep and the gate stands — cause=${causeText(cause)}`
+  );
+}
+
+/**
+ * The topbar status line for a refused hibernate.
+ *
+ * The sleep verb has no gate of its own to fall back to: the button simply
+ * stops being offered when the session sleeps, so a refusal that rendered
+ * nowhere near the click would read as the button doing nothing. The classified
+ * card in the feed carries the daemon's full account; this is the one line at
+ * the place the user is looking.
+ */
+export function hibernateRefusedNotice(cause: unknown): string {
+  return `could not put this session to sleep: ${causeText(cause)}`;
+}
+
+/** A rejection's own words, whatever shape the rejection arrived in. */
+function causeText(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
+}
+
 /** Whether a revive has been sent and no cleared `SessionView` has landed yet. */
 export type RevivePending = "compactFirst" | "direct" | null;
 
