@@ -3,6 +3,8 @@ package server
 import (
 	"slices"
 	"testing"
+
+	"claude-repld/internal/sessioncontroller"
 )
 
 // SHIMS SURVIVE AN ORDERLY SHUTDOWN.
@@ -25,7 +27,7 @@ func TestShutdownPreservesShimsByDefault(t *testing.T) {
 	}
 
 	// Act.
-	h.srv.ShutdownAll(false)
+	h.srv.ShutdownAll(false, sessioncontroller.StopCauseDaemonShutdown())
 
 	// Assert.
 	if stopped := h.spawner.stoppedIDs(); len(stopped) != 0 {
@@ -44,7 +46,7 @@ func TestShutdownStopShimsModeStopsThem(t *testing.T) {
 	}
 
 	// Act.
-	h.srv.ShutdownAll(true)
+	h.srv.ShutdownAll(true, sessioncontroller.StopCauseDaemonShutdown())
 
 	// Assert.
 	if stopped := h.spawner.stoppedIDs(); !slices.Contains(stopped, id) {
@@ -63,7 +65,7 @@ func TestShutdownLeavesRecordsNonTerminal(t *testing.T) {
 	}
 
 	// Act.
-	h.srv.ShutdownAll(true)
+	h.srv.ShutdownAll(true, sessioncontroller.StopCauseDaemonShutdown())
 
 	// Assert.
 	rec, ok := h.reg.Get(id)

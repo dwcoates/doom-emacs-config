@@ -41,6 +41,7 @@ import (
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/session"
+	"claude-repld/internal/sessioncontroller"
 )
 
 // supersedeReason is the death reason a superseded record carries. It
@@ -106,7 +107,7 @@ func (s *Server) supersedeCreateConflicts(opts CreateOpts) {
 		// Stop the OLD session's shim if the session controller had brought one up —
 		// session-scoped, so superseding a stale record can never SIGTERM a
 		// newer session that already owns the same cwd.
-		if err := s.controller.HibernateSession(rec.CWD, rec.SessionID); err != nil {
+		if err := s.controller.HibernateSession(rec.CWD, rec.SessionID, sessioncontroller.StopCauseSessionSuperseded()); err != nil {
 			s.logf("session %s: supersede exact shim stop FAILED (ws %s): %v", rec.SessionID, rec.CWD, err)
 		}
 		// Deliver the stand-down to every connected frontend so their rosters

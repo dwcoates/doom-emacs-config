@@ -355,19 +355,23 @@ func (s *ShimSpawner) DropResume(sessionID string) (string, error) {
 //
 // No handle and no pid is a genuine no-op — nothing is running that we know of
 // — and it is logged rather than treated as a failure.
-// commandedStop attributes every stop that reaches a shim through StopShim.
+// THE ATTRIBUTION IS THE CALLER'S, and it is required.
 //
-// It is deliberately coarse — StopShim's signature is fixed by
-// sessioncontroller.Spawner and carries no reason — but it is exact about the
-// one distinction the log has to be able to make: this death was ORDERED. The
-// specific caller (hibernate, merged teardown, hard restart) is named in that
-// caller's own adjacent record.
-var commandedStop = shim.Stop{
-	Initiator: "server.ShimSpawner.StopShim",
-	Reason:    "commanded session stop (hibernation or restart)",
-}
-
-func (s *ShimSpawner) StopShim(sessionID string, hintPID int32) error {
+// This used to substitute one coarse package-level constant for every stop the
+// daemon issued, because the Spawner signature carried no reason: an idle sweep,
+// a merged teardown and a hard restart all reached the shim as "commanded
+// session stop (hibernation or restart)", and the log could not tell them
+// apart at the record. `by` now travels from the closed cause vocabulary at the
+// session controller's one stop funnel, and it is VALIDATED HERE at the
+// boundary: an unattributed stop is refused outright rather than defaulted,
+// because a default is exactly what made the previous log unable to answer the
+// question these records exist for.
+func (s *ShimSpawner) StopShim(sessionID string, hintPID int32, by shim.Stop) error {
+	if err := by.Validate(); err != nil {
+		s.logf("server: session %s: SHIM STOP REFUSED hint_pid=%d initiator=%q reason=%q: %v — nothing was signalled, because a stop this daemon cannot attribute is a stop its log cannot explain",
+			sessionID, hintPID, by.Initiator, by.Reason, err)
+		return fmt.Errorf("server: session %s: refusing an unattributed shim stop: %w", sessionID, err)
+	}
 	s.mu.Lock()
 	stop, ok := s.stops[sessionID]
 	if (ok || hintPID > 0) && s.awaitStopped == nil {
@@ -380,12 +384,18 @@ func (s *ShimSpawner) StopShim(sessionID string, hintPID int32) error {
 	s.mu.Unlock()
 	switch {
 	case ok:
-		s.logf("server: session %s: stopping shim (SIGTERM via our own process handle) initiator=%s reason=%s", sessionID, commandedStop.Initiator, commandedStop.Reason)
-		if err := stop(commandedStop); err != nil {
+		s.logf("server: session %s: stopping shim (SIGTERM via our own process handle) initiator=%s reason=%s", sessionID, by.Initiator, by.Reason)
+		if err := stop(by); err != nil {
 			return err
 		}
 	case hintPID > 0:
-		s.logf("server: session %s: no daemon-spawned shim; stopping the SURVIVING shim by its announced pid %d (SIGTERM)", sessionID, hintPID)
+		// THE SURVIVOR'S STOP IS ATTRIBUTED TOO. A signal sent by pid leaves no
+		// stop record of its own — the process handle that would have written
+		// one belongs to a daemon that is gone — so this line is the only place
+		// the survivor's death is explained, and it used to carry no
+		// attribution at all.
+		s.logf("server: session %s: no daemon-spawned shim; stopping the SURVIVING shim by its announced pid %d (SIGTERM) initiator=%s reason=%s",
+			sessionID, hintPID, by.Initiator, by.Reason)
 		if err := s.signal(int(hintPID), syscall.SIGTERM); err != nil {
 			if errors.Is(err, os.ErrProcessDone) {
 				s.logf("server: session %s: shim pid %d had already exited", sessionID, hintPID)
@@ -394,7 +404,8 @@ func (s *ShimSpawner) StopShim(sessionID string, hintPID int32) error {
 			return fmt.Errorf("server: session %s: stopping surviving shim pid %d: %w", sessionID, hintPID, err)
 		}
 	default:
-		s.logf("server: session %s: StopShim no-op (no daemon-spawned shim and no announced pid; already stopped, or never seen)", sessionID)
+		s.logf("server: session %s: StopShim no-op (no daemon-spawned shim and no announced pid; already stopped, or never seen) initiator=%s reason=%s",
+			sessionID, by.Initiator, by.Reason)
 		return nil
 	}
 	// STOPPED MEANS GONE, which is what every caller already assumed and the

@@ -20,6 +20,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/progress"
 	"claude-repld/internal/registry"
+	"claude-repld/internal/sessioncontroller"
 	"claude-repld/internal/ssm"
 	"claude-repld/internal/workspace/geometry"
 	"claude-repld/internal/workspace/merge"
@@ -847,7 +848,7 @@ func TestCommandHandlerDeleteSessionRoutesToSessions(t *testing.T) {
 func newHandlerWithShutdown(t *testing.T, fired chan bool) *commandHandler {
 	t.Helper()
 	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{},
-		func(stopShims bool) { fired <- stopShims }, nil, nil)
+		func(stopShims bool, _ sessioncontroller.StopCause) { fired <- stopShims }, nil, nil)
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
 	}
@@ -1238,7 +1239,7 @@ func TestWireAgentShimRejectsAScheduleStoreWithNoQueueBackend(t *testing.T) {
 		ShutdownSchedules: &fakeScheduleStore{},
 		DrainHolds:        &fakeHoldSource{},
 		DrainEvidence:     newFakeEvidence(),
-		RequestShutdown:   func(bool) {},
+		RequestShutdown:   func(bool, sessioncontroller.StopCause) {},
 		// Queues is deliberately nil.
 	})
 

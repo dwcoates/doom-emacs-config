@@ -29,6 +29,7 @@ import (
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/frontend"
 	"claude-repld/internal/registry"
+	"claude-repld/internal/sessioncontroller"
 	"claude-repld/internal/ssm"
 	"claude-repld/internal/workspace/geometry"
 	"claude-repld/internal/workspace/merge"
@@ -298,7 +299,7 @@ type commandHandler struct {
 	// session shims on the way out (false PRESERVES them, which is the
 	// default; see server.ShutdownAll). Nil makes the shutdown command a loud
 	// failing ack (the capability is unconfigured), never a silent no-op.
-	shutdown func(stopShims bool)
+	shutdown func(stopShims bool, cause sessioncontroller.StopCause)
 	// queues backs the queue force/accept/cancel commands (E4). Nil makes each
 	// of them a loud failing ack rather than a silent no-op, same as shutdown.
 	queues QueueController
@@ -449,7 +450,7 @@ func (h *commandHandler) HostActionCompleted(ctx context.Context, _ string, requ
 // resyncer is optional (nil-safe) and shutdown is optional (an unconfigured
 // shutdown fails the command loudly); the three routers and the
 // session-lifecycle binding are required.
-func newCommandHandler(prompts PromptRouter, merges MergeRunner, lifecycle WorkspaceLifecycle, resyncer Resyncer, sessions SessionCreateDeleter, shutdown func(stopShims bool), queues QueueController, logf func(string, ...any), configs ...CommandHandlerConfig) (*commandHandler, error) {
+func newCommandHandler(prompts PromptRouter, merges MergeRunner, lifecycle WorkspaceLifecycle, resyncer Resyncer, sessions SessionCreateDeleter, shutdown func(stopShims bool, cause sessioncontroller.StopCause), queues QueueController, logf func(string, ...any), configs ...CommandHandlerConfig) (*commandHandler, error) {
 	switch {
 	case prompts == nil:
 		return nil, fmt.Errorf("server: frontend command handler needs a PromptRouter")
@@ -940,7 +941,7 @@ func (h *commandHandler) Shutdown(_ context.Context, workspace, requestID string
 	if h.shutdown == nil {
 		return fmt.Errorf("server: shutdown not supported by this daemon")
 	}
-	go h.shutdown(stopShims)
+	go h.shutdown(stopShims, sessioncontroller.StopCauseDaemonShutdown())
 	return nil
 }
 

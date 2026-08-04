@@ -152,11 +152,11 @@ func (m *Manager) RestartSession(ctx context.Context, workspace string) error {
 		// The full teardown: it cancels the session controller, reports the workspace
 		// unwired, and stops the shim (by handle, or by announced pid for a
 		// survivor).
-		if err := m.hibernate(workspace, ""); err != nil {
+		if err := m.hibernate(workspace, "", StopCauseHardRestartLive()); err != nil {
 			return fmt.Errorf("session-controller: restarting session %s (ws %q): stopping the live shim: %w", sessionID, workspace, err)
 		}
 		m.logf("session-controller: hard restart ws=%q session=%s: live shim stopped", workspace, sessionID)
-	} else if err := m.stopShimSettlingTurn(workspace, sessionID, "restart_session_orphan", true); err != nil {
+	} else if err := m.stopShimSettlingTurn(workspace, sessionID, StopCauseHardRestartOrphan(), true); err != nil {
 		// NO DRAIN ON THIS BRANCH: there is no session controller, so there is no connection
 		// an interrupt could travel over. The funnel still closes the axis, so a
 		// parked orphan that died holding a `thinking` cannot survive the

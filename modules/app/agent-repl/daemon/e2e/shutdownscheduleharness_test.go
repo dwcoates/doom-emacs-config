@@ -316,10 +316,20 @@ func (w *shutdownWorld) boot(t *testing.T) *shutdownBoot {
 	// closure that dereferences srv races its own assignment. A buffered(1)
 	// channel plus a sync.Once sender carries the one stop_shims decision, and
 	// the consumer that acts on it does not exist until srv does.
-	shutdownReq := make(chan bool, 1)
+	// The request carries the CAUSE with the decision, as main.go's does: the
+	// drain execution and an ordinary shutdown command are different events
+	// reaching the same teardown.
+	type harnessShutdownRequest struct {
+		stopShims bool
+		cause     sessioncontroller.StopCause
+	}
+	shutdownReq := make(chan harnessShutdownRequest, 1)
 	var shutdownOnce sync.Once
-	requestShutdown := func(stopShims bool) {
-		shutdownOnce.Do(func() { shutdownReq <- stopShims; close(shutdownReq) })
+	requestShutdown := func(stopShims bool, cause sessioncontroller.StopCause) {
+		shutdownOnce.Do(func() {
+			shutdownReq <- harnessShutdownRequest{stopShims: stopShims, cause: cause}
+			close(shutdownReq)
+		})
 	}
 
 	agentShim, err := server.WireAgentShim(server.AgentShimConfig{
@@ -409,12 +419,12 @@ func (w *shutdownWorld) boot(t *testing.T) *shutdownBoot {
 	teardown := make(chan struct{})
 	go func() {
 		select {
-		case stopShims, ok := <-shutdownReq:
+		case req, ok := <-shutdownReq:
 			if !ok {
 				return
 			}
-			srv.ShutdownAll(stopShims)
-			b.executed <- stopShims
+			srv.ShutdownAll(req.stopShims, req.cause)
+			b.executed <- req.stopShims
 		case <-teardown:
 		}
 	}()

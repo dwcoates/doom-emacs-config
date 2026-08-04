@@ -3,10 +3,12 @@ package sessioncontroller
 import (
 	"context"
 	"errors"
-	"runtime"
 	"testing"
+	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
+
+	"claude-repld/internal/shim"
 )
 
 // ---------------------------------------------------------------------------
@@ -19,29 +21,41 @@ import (
 // ---------------------------------------------------------------------------
 
 // newRefreshRig builds a manager whose current bundle identity is `current`.
+// The spawner ANNOUNCES its stops, so a test rendezvous with the bounce
+// goroutine instead of spinning on its bookkeeping. The buffer keeps a stop
+// from blocking a teardown no test is waiting on.
 func newRefreshRig(t *testing.T, current string) (*Manager, *fakeSpawner, *fakeApplier) {
 	t.Helper()
-	spawner := &fakeSpawner{}
+	spawner := &fakeSpawner{stops: make(chan shim.Stop, 4)}
 	m, last := newTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, spawner)
 	_ = last
 	m.cfg.ShimBuildSHA = func() string { return current }
 	return m, spawner, m.cfg.SSM.(*fakeApplier)
 }
 
-// waitForStops blocks until the spawner has recorded at least n stops. The
-// refresh bounce runs on its own goroutine (its caller is the shimclient read
-// loop), so a test rendezvous with it rather than with a clock.
-func waitForStops(spawner *fakeSpawner) {
-	for {
-		spawner.mu.Lock()
-		n := len(spawner.stopped)
-		spawner.mu.Unlock()
-		if n > 0 {
-			return
-		}
-		runtime.Gosched()
+// waitForStop blocks until the spawner records a stop and returns the
+// attribution it carried.
+//
+// The refresh bounce runs on its own goroutine (its caller is the shimclient
+// read loop), and this is a RENDEZVOUS with that goroutine — a channel the
+// spawner sends on — rather than a poll of its side effects. The bound is a
+// failure bound: it exists so a bounce that never happens fails the test
+// instead of hanging it.
+func waitForStop(t *testing.T, spawner *fakeSpawner) shim.Stop {
+	t.Helper()
+	select {
+	case by := <-spawner.stops:
+		return by
+	case <-time.After(refreshStopWait):
+		t.Fatalf("no shim stop was announced within %s; the stale-build bounce never reached the spawner", refreshStopWait)
+		return shim.Stop{}
 	}
 }
+
+// refreshStopWait bounds the rendezvous above. It is generous because it is
+// never waited out on a passing run: the receive completes the instant the
+// bounce goroutine records its stop.
+const refreshStopWait = 10 * time.Second
 
 // A MATCHING build is the steady state: the shim is already on current code and
 // nothing happens to it.
@@ -80,15 +94,16 @@ func TestAMismatchedShimBuildIsBounced(t *testing.T) {
 	if bounced := m.refreshStaleShim("ws", "s1", "sha-1"); !bounced {
 		t.Fatal("a shim running a superseded bundle was not bounced")
 	}
-	waitForStops(spawner)
+	by := waitForStop(t, spawner)
 
 	// Assert — stopped, then brought back up on the SAME session record, which
-	// is what makes the conversation survive the bounce.
-	spawner.mu.Lock()
-	stopped := append([]string(nil), spawner.stopped...)
-	spawner.mu.Unlock()
-	if len(stopped) == 0 || stopped[0] != "s1" {
+	// is what makes the conversation survive the bounce. The stop is attributed
+	// to the hard restart the refresh performs, not to a generic teardown.
+	if stopped := spawner.stoppedSessions(); len(stopped) == 0 || stopped[0] != "s1" {
 		t.Fatalf("stopped = %v, want the stale session s1", stopped)
+	}
+	if by.Initiator != "hard_restart" {
+		t.Fatalf("stop initiator = %q, want hard_restart", by.Initiator)
 	}
 }
 

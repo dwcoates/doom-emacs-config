@@ -419,6 +419,12 @@ func TestSessionDiedOnAnUnknownSessionIsLoud(t *testing.T) {
 // ShimHello closes that, and it is safe here (rather than a pid-reuse hazard)
 // because the caller only holds one while the connection that carried it lives.
 
+// unitTestStop is the attribution these unit stops travel under. It stands in
+// for the cause the session controller's stop funnel renders in production;
+// what matters here is that it is a COMPLETE attribution, because an incomplete
+// one is refused before anything is signalled.
+var unitTestStop = ShimStop{Initiator: "unit_test", Reason: "a unit test commanded this stop"}
+
 func TestStopShimPrefersItsOwnProcessHandle(t *testing.T) {
 	// Arrange — a shim THIS spawner launched, plus an announced pid.
 	stopped := false
@@ -431,7 +437,7 @@ func TestStopShimPrefersItsOwnProcessHandle(t *testing.T) {
 	s.signal = func(pid int, _ syscall.Signal) error { signalled = append(signalled, pid); return nil }
 
 	// Act.
-	if err := s.StopShim("s1", 4242); err != nil {
+	if err := s.StopShim("s1", 4242, unitTestStop); err != nil {
 		t.Fatalf("StopShim: %v", err)
 	}
 
@@ -457,13 +463,41 @@ func TestStopShimAttributesTheStopItCommands(t *testing.T) {
 	s.stops["s1"] = func(by ShimStop) error { got = by; return nil }
 
 	// Act
-	if err := s.StopShim("s1", 0); err != nil {
+	if err := s.StopShim("s1", 0, unitTestStop); err != nil {
 		t.Fatalf("StopShim: %v", err)
 	}
 
-	// Assert — the shim package refuses a stop missing either half.
-	if err := got.Validate(); err != nil {
-		t.Fatalf("StopShim handed over an unattributed stop %+v: %v", got, err)
+	// Assert — the CALLER's attribution reached the shim verbatim. It used to be
+	// replaced here by one coarse package constant, which made an idle sweep and
+	// a merged teardown identical at the record.
+	if got != unitTestStop {
+		t.Fatalf("stop func received %+v, want the caller's attribution %+v", got, unitTestStop)
+	}
+}
+
+// AN UNATTRIBUTED STOP IS REFUSED, and the refusal reaches the caller: nothing
+// is signalled, no handle is consumed, and the error names the missing half.
+func TestStopShimRefusesAnUnattributedStop(t *testing.T) {
+	// Arrange
+	stopped := false
+	var signalled []int
+	s := NewShimSpawner(nil, nil, nil, nil, nil)
+	s.awaitStopped = func(string) error { return nil }
+	s.stops["s1"] = func(ShimStop) error { stopped = true; return nil }
+	s.signal = func(pid int, _ syscall.Signal) error { signalled = append(signalled, pid); return nil }
+
+	// Act
+	err := s.StopShim("s1", 4242, ShimStop{})
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "unattributed shim stop") {
+		t.Fatalf("StopShim error = %v, want the unattributed-stop refusal", err)
+	}
+	if stopped || len(signalled) != 0 {
+		t.Fatalf("a refused stop still acted: stopped=%v signalled=%v", stopped, signalled)
+	}
+	if _, retained := s.stops["s1"]; !retained {
+		t.Fatal("a refused stop consumed the process handle, so the session can never be stopped again")
 	}
 }
 
@@ -481,7 +515,7 @@ func TestStopShimSignalsASurvivingShimByItsAnnouncedPid(t *testing.T) {
 	}
 
 	// Act.
-	if err := s.StopShim("s1", 4242); err != nil {
+	if err := s.StopShim("s1", 4242, unitTestStop); err != nil {
 		t.Fatalf("StopShim: %v", err)
 	}
 
@@ -499,7 +533,7 @@ func TestStopShimWithNeitherHandleNorPidIsALoggedNoOp(t *testing.T) {
 	s.signal = func(int, syscall.Signal) error { t.Fatal("nothing should be signalled"); return nil }
 
 	// Act.
-	if err := s.StopShim("s1", 0); err != nil {
+	if err := s.StopShim("s1", 0, unitTestStop); err != nil {
 		t.Fatalf("StopShim with nothing to stop must not fail: %v", err)
 	}
 
@@ -524,7 +558,7 @@ func TestStopShimTreatsAnAlreadyExitedPidAsStopped(t *testing.T) {
 	s.signal = func(int, syscall.Signal) error { return os.ErrProcessDone }
 
 	// Act / Assert.
-	if err := s.StopShim("s1", 4242); err != nil {
+	if err := s.StopShim("s1", 4242, unitTestStop); err != nil {
 		t.Fatalf("an already-exited shim reported a stop failure: %v", err)
 	}
 }
@@ -541,7 +575,7 @@ func TestStopShimWaitsForTheShimToActuallyExit(t *testing.T) {
 	s.stops["s1"] = func(ShimStop) error { return nil }
 
 	// Act.
-	if err := s.StopShim("s1", 0); err != nil {
+	if err := s.StopShim("s1", 0, unitTestStop); err != nil {
 		t.Fatalf("StopShim: %v", err)
 	}
 
@@ -560,7 +594,7 @@ func TestStopShimFailsBeforeMutationWithoutAnExitObserver(t *testing.T) {
 	s.stops["s1"] = func(ShimStop) error { stopped = true; return nil }
 
 	// Act.
-	err := s.StopShim("s1", 0)
+	err := s.StopShim("s1", 0, unitTestStop)
 
 	// Assert.
 	if err == nil || !strings.Contains(err.Error(), "exit observer is nil") {
@@ -587,7 +621,7 @@ func TestStopShimEvictsAParkedReconnectAfterProcessExit(t *testing.T) {
 	s.stops["s1"] = func(ShimStop) error { return nil }
 
 	// Act.
-	if err := s.StopShim("s1", 0); err != nil {
+	if err := s.StopShim("s1", 0, unitTestStop); err != nil {
 		t.Fatalf("StopShim: %v", err)
 	}
 
@@ -606,7 +640,7 @@ func TestStopShimDoesNotEvictParkedStateBeforeProcessExitIsProven(t *testing.T) 
 	s.stops["s1"] = func(ShimStop) error { return nil }
 
 	// Act.
-	err := s.StopShim("s1", 0)
+	err := s.StopShim("s1", 0, unitTestStop)
 
 	// Assert — closing a still-live shim's parked transport would only provoke
 	// reconnect churn while claiming the stop had completed.
@@ -627,7 +661,7 @@ func TestStopShimFailsWhenTheShimNeverExits(t *testing.T) {
 	s.stops["s1"] = func(ShimStop) error { return nil }
 
 	// Act / Assert.
-	if err := s.StopShim("s1", 0); err == nil {
+	if err := s.StopShim("s1", 0, unitTestStop); err == nil {
 		t.Fatal("a shim that ignored SIGTERM reported a successful stop")
 	}
 }
@@ -640,7 +674,7 @@ func TestStopShimDoesNotEvictWhenItsOwnStopHandleFails(t *testing.T) {
 	s.awaitStopped = func(string) error { t.Fatal("exit wait ran after stop failure"); return nil }
 	s.stops["s1"] = func(ShimStop) error { return errors.New("SIGTERM delivery failed") }
 
-	err := s.StopShim("s1", 0)
+	err := s.StopShim("s1", 0, unitTestStop)
 
 	if err == nil || !strings.Contains(err.Error(), "SIGTERM delivery failed") {
 		t.Fatalf("StopShim error = %v", err)
@@ -659,7 +693,7 @@ func TestStopShimDoesNotEvictWhenSurvivingShimSignalFails(t *testing.T) {
 	s.awaitStopped = func(string) error { t.Fatal("exit wait ran after signal failure"); return nil }
 	s.signal = func(int, syscall.Signal) error { return errors.New("permission denied") }
 
-	err := s.StopShim("s1", 4242)
+	err := s.StopShim("s1", 4242, unitTestStop)
 
 	if err == nil || !strings.Contains(err.Error(), "permission denied") {
 		t.Fatalf("StopShim error = %v", err)

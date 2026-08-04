@@ -49,6 +49,15 @@ const shimProtocolVersion = "1"
 
 const daemonVersion = "0.1.0"
 
+// shutdownRequest is one commanded teardown: the stop-shims decision the
+// requester made, and the cause it made it for. They ride together so the
+// single shutdown goroutine cannot pair one requester's decision with another's
+// attribution.
+type shutdownRequest struct {
+	stopShims bool
+	cause     sessioncontroller.StopCause
+}
+
 // daemonReadiness is the single daemon-global readiness truth used by both
 // GET /healthz and the frontend DaemonHealth command.  It becomes true only
 // after all boot dependencies and the frontend UDS listener are live.
@@ -404,10 +413,17 @@ func main() {
 	// SIGTERM cannot express a mode at all, and it takes the default: PRESERVE.
 	// That is the honest reading of an unqualified "stop this daemon", and it
 	// is what makes an OS-level bounce as cheap as a commanded one.
-	shutdownReq := make(chan bool, 1)
+	// The request carries the CAUSE alongside the decision, because the two
+	// requesters are different events: an ordinary shutdown command, and the
+	// execution phase of a scheduled drain a deploy is waiting on. Both stop
+	// the same shims; only the cause says on whose behalf.
+	shutdownReq := make(chan shutdownRequest, 1)
 	var shutdownOnce sync.Once
-	requestShutdown := func(stopShims bool) {
-		shutdownOnce.Do(func() { shutdownReq <- stopShims; close(shutdownReq) })
+	requestShutdown := func(stopShims bool, cause sessioncontroller.StopCause) {
+		shutdownOnce.Do(func() {
+			shutdownReq <- shutdownRequest{stopShims: stopShims, cause: cause}
+			close(shutdownReq)
+		})
 	}
 
 	// The SSM (resolved per-workspace state) is opened here and shared by BOTH
@@ -954,16 +970,16 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	go func() {
-		stopShims := false
+		req := shutdownRequest{cause: sessioncontroller.StopCauseDaemonShutdown()}
 		select {
 		case sig := <-sigCh:
 			daemonLog.With("operation", "shutdown", "signal", sig).Log("claude-repld: signal received, shutting down with shims preserved")
-		case stopShims = <-shutdownReq:
-			daemonLog.With("operation", "shutdown", "source", "frontend", "stop_shims", stopShims).Log("claude-repld: shutdown command received")
+		case req = <-shutdownReq:
+			daemonLog.With("operation", "shutdown", "source", "frontend", "stop_shims", req.stopShims, "cause", req.cause.String()).Log("claude-repld: shutdown command received")
 		}
 		ready.ready.Store(false)
 		cancelWorkspaceCreate()
-		srv.ShutdownAll(stopShims)
+		srv.ShutdownAll(req.stopShims, req.cause)
 		// Login terminals are children of THIS process, so a daemon that
 		// exits without killing them strands an orphaned claude TUI on a pty
 		// nobody is reading.
