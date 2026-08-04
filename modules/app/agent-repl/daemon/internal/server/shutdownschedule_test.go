@@ -219,6 +219,10 @@ type schedulerHarness struct {
 	mu       sync.Mutex
 	views    []*frontendv1.ShutdownScheduleView
 	stops    []bool
+	// stopCauses records the cause each executed shutdown was attributed to, so
+	// a test can prove a drain execution is distinguishable from an ordinary
+	// daemon shutdown at the record rather than only in prose.
+	stopCauses []sessioncontroller.StopCause
 	stopped  chan struct{}
 	stopOnce sync.Once
 	logLines []string
@@ -238,9 +242,10 @@ func newSchedulerHarness(t *testing.T) *schedulerHarness {
 			h.views = append(h.views, v)
 			h.mu.Unlock()
 		},
-		Shutdown: func(stopShims bool) {
+		Shutdown: func(stopShims bool, cause sessioncontroller.StopCause) {
 			h.mu.Lock()
 			h.stops = append(h.stops, stopShims)
+			h.stopCauses = append(h.stopCauses, cause)
 			h.mu.Unlock()
 			h.stopOnce.Do(func() { close(h.stopped) })
 		},
@@ -280,6 +285,13 @@ func (h *schedulerHarness) shutdowns() []bool {
 	return append([]bool(nil), h.stops...)
 }
 
+// shutdownCauses returns the cause each executed shutdown carried.
+func (h *schedulerHarness) shutdownCauses() []sessioncontroller.StopCause {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]sessioncontroller.StopCause(nil), h.stopCauses...)
+}
+
 func (h *schedulerHarness) log() string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -299,7 +311,7 @@ func TestNewShutdownSchedulerRequiresEachDependency(t *testing.T) {
 		return ShutdownSchedulerConfig{
 			Store: &fakeScheduleStore{}, Holds: &fakeHoldSource{}, Evidence: newFakeEvidence(),
 			LiveTasks: fakeTaskCounter{},
-			Broadcast: func(*frontendv1.ShutdownScheduleView) {}, Shutdown: func(bool) {},
+			Broadcast: func(*frontendv1.ShutdownScheduleView) {}, Shutdown: func(bool, sessioncontroller.StopCause) {},
 		}
 	}
 	tests := []struct {
@@ -353,7 +365,7 @@ func TestConstructionFailsWhenTheFleetRefusesTheBinding(t *testing.T) {
 	_, err := NewShutdownScheduler(ShutdownSchedulerConfig{
 		Store: &fakeScheduleStore{}, Holds: holds, Evidence: newFakeEvidence(),
 		LiveTasks: fakeTaskCounter{},
-		Broadcast: func(*frontendv1.ShutdownScheduleView) {}, Shutdown: func(bool) {},
+		Broadcast: func(*frontendv1.ShutdownScheduleView) {}, Shutdown: func(bool, sessioncontroller.StopCause) {},
 	})
 
 	// Assert.

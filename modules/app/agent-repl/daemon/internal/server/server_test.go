@@ -28,6 +28,7 @@ import (
 	"claude-repld/internal/registry"
 	"claude-repld/internal/session"
 	"claude-repld/internal/sessioncontroller"
+	"claude-repld/internal/shim"
 	"claude-repld/internal/ssm"
 	"claude-repld/internal/workspace/merge"
 )
@@ -54,6 +55,7 @@ type fakeSpawner struct {
 	mu      sync.Mutex
 	ensured []string
 	stopped []string
+	stopBy  []shim.Stop
 	dropped []string
 }
 
@@ -71,11 +73,20 @@ func (f *fakeSpawner) DropResume(sessionID string) (string, error) {
 	return "", nil
 }
 
-func (f *fakeSpawner) StopShim(sessionID string, _ int32) error {
+func (f *fakeSpawner) StopShim(sessionID string, _ int32, by shim.Stop) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.stopped = append(f.stopped, sessionID)
+	f.stopBy = append(f.stopBy, by)
 	return nil
+}
+
+// stopAttributions returns the attribution each stop carried, so a server-level
+// test can prove WHICH teardown reached the shim.
+func (f *fakeSpawner) stopAttributions() []shim.Stop {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.stopBy)
 }
 
 func (f *fakeSpawner) ensuredIDs() []string {

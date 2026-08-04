@@ -36,7 +36,7 @@ func (m *Manager) TeardownMerged(workspace string) error {
 	}
 	m.logf("session-controller: merged teardown ws=%q session=%s decision=stand_down — the merge landed, so the daemon hibernates the session and SIGTERMs its shim",
 		workspace, d.sessionID)
-	if err := m.Hibernate(workspace); err != nil {
+	if err := m.Hibernate(workspace, StopCauseMergedTeardown()); err != nil {
 		m.logf("session-controller: merged teardown FAILED ws=%q session=%s: %v — the merge STILL LANDED and the workspace stays merged; its shim is running and holding its memory",
 			workspace, d.sessionID, err)
 		return fmt.Errorf("session-controller: merged teardown for workspace %q: %w", workspace, err)

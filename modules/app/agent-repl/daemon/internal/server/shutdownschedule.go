@@ -52,7 +52,7 @@ type ShutdownScheduler struct {
 	evidence  DrainEvidenceSource
 	tasks     sessioncontroller.LiveTaskCounter
 	broadcast func(*frontendv1.ShutdownScheduleView)
-	shutdown  func(stopShims bool)
+	shutdown  func(stopShims bool, cause sessioncontroller.StopCause)
 	logf      dlog.Logf
 	now       func() int64
 	newID     func() string
@@ -136,7 +136,7 @@ type ShutdownSchedulerConfig struct {
 	Evidence  DrainEvidenceSource
 	LiveTasks sessioncontroller.LiveTaskCounter
 	Broadcast func(*frontendv1.ShutdownScheduleView)
-	Shutdown  func(stopShims bool)
+	Shutdown  func(stopShims bool, cause sessioncontroller.StopCause)
 	Logf      dlog.Logf
 	// Now and NewScheduleID are injected by tests. Zero values take the real
 	// wall clock and a crypto/rand id.
@@ -458,7 +458,7 @@ func (s *ShutdownScheduler) reevaluate(trigger string) {
 	// Asynchronous, exactly as the ordinary shutdown command is: this call can
 	// be reached from a shim read-loop goroutine, and the teardown it starts
 	// waits on those goroutines.
-	go s.shutdown(sched.stopShims)
+	go s.shutdown(sched.stopShims, sessioncontroller.StopCauseDrainExecution())
 }
 
 // Restore reads the durable lease back at boot and re-takes it.
