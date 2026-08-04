@@ -80,9 +80,10 @@ world; the Stop signal's intent is simply \"the agent finished\"."
     (agent-repl--ws-put "ws1" :deferred-prompts '("alpha" "beta" "gamma"))
     (let ((sent nil))
       (cl-letf (((symbol-function 'agent-repl--send)
-                 (lambda (prompt ws &rest _) (setq sent (list prompt ws)))))
+                 (lambda (origin prompt ws &rest _)
+                   (setq sent (list origin prompt ws)))))
         (agent-repl--drain-deferred-prompts "ws1")
-        (should (equal sent '("alpha" "ws1")))
+        (should (equal sent '("PROMPT_ORIGIN_DEFERRED_PROMPT" "alpha" "ws1")))
         (should (equal (agent-repl--ws-get "ws1" :deferred-prompts)
                        '("beta" "gamma")))))))
 
@@ -93,9 +94,10 @@ world; the Stop signal's intent is simply \"the agent finished\"."
     (agent-repl--ws-put "ws1" :deferred-prompts '("only-one"))
     (let ((sent nil))
       (cl-letf (((symbol-function 'agent-repl--send)
-                 (lambda (prompt ws &rest _) (setq sent (list prompt ws)))))
+                 (lambda (origin prompt ws &rest _)
+                   (setq sent (list origin prompt ws)))))
         (agent-repl--drain-deferred-prompts "ws1")
-        (should (equal sent '("only-one" "ws1")))
+        (should (equal sent '("PROMPT_ORIGIN_DEFERRED_PROMPT" "only-one" "ws1")))
         (should (null (agent-repl--ws-get "ws1" :deferred-prompts)))))))
 
 (ert-deftest agent-repl-test-drain-deferred-skipped-when-thinking ()
@@ -145,10 +147,12 @@ world; the Stop signal's intent is simply \"the agent finished\"."
                 ((symbol-function 'agent-repl--refresh-magit-status) #'ignore)
                 ((symbol-function '+workspace-current-name) (lambda () "ws1"))
                 ((symbol-function 'agent-repl--send)
-                 (lambda (prompt ws &rest _) (setq sent (list prompt ws)))))
+                 (lambda (origin prompt ws &rest _)
+                   (setq sent (list origin prompt ws)))))
         ;; handle-agent-finished marks state :done first, then drains.
         (agent-repl--handle-agent-finished "ws1")
-        (should (equal sent '("first-deferred" "ws1")))
+        (should (equal sent '("PROMPT_ORIGIN_DEFERRED_PROMPT"
+                              "first-deferred" "ws1")))
         ;; One drained, one remains for the next turn.
         (should (equal (agent-repl--ws-get "ws1" :deferred-prompts)
                        '("second")))))))

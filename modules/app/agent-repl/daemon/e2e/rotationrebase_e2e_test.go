@@ -131,7 +131,7 @@ func TestE2ERebasedResyncPushesNoFailureCard(t *testing.T) {
 	// Act — the from-zero resync, and a turn after it so the connection is
 	// still being watched for frames once the replay has settled.
 	replayItemsFrom(t, conn, cwd, "r-rebased-nocard", rebasedMark)
-	writeCmd(t, conn, `{"requestId":"r-after-rebase","submitPrompt":{"text":"after-the-rebase"}}`)
+	writeCmd(t, conn, `{"requestId":"r-after-rebase","submitPrompt":{"text":"after-the-rebase","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
 
 	// Assert
 	awaitAll(t, conn,

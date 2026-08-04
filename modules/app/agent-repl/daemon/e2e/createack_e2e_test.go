@@ -89,7 +89,7 @@ func TestE2ECreateAckMeansThePromptPathIsOpen(t *testing.T) {
 		t.Fatal("createSession acked ok but pushed no SessionView for the new session")
 	}
 	writeCmd(t, conn, fmt.Sprintf(
-		`{"requestId":"e2e-createack-prompt","workspace":%q,"submitPrompt":{"text":"straight after the ack"}}`, cwd))
+		`{"requestId":"e2e-createack-prompt","workspace":%q,"submitPrompt":{"text":"straight after the ack","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`, cwd))
 
 	// Assert — the turn flows on the first attempt.
 	deadline := time.Now().Add(frameTimeout)

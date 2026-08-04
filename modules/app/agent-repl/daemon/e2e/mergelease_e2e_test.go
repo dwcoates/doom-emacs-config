@@ -136,7 +136,7 @@ func TestE2EAUserPromptUnderTheMergeLeaseIsRefusedLoudly(t *testing.T) {
 
 	// Act — the user tries to prompt the session the merge is holding.
 	const promptRequest = "r-prompt-under-lease"
-	writeCmd(t, w.conn, fmt.Sprintf(`{"requestId":%q,"submitPrompt":{"text":"can you also do this while you are in there"}}`, promptRequest))
+	writeCmd(t, w.conn, fmt.Sprintf(`{"requestId":%q,"submitPrompt":{"text":"can you also do this while you are in there","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`, promptRequest))
 
 	// Assert — a loud, explanatory nack.
 	ack := w.awaitAck(promptRequest)
@@ -171,7 +171,7 @@ func TestE2EConversationItemsCarryWhoDroveTheirTurn(t *testing.T) {
 			name: "an ordinary prompt's turn is the user's",
 			drive: func(t *testing.T, w *mergeWatch, _ mergeGeometryRecorder, _ *mergeRepo, _, _ string) {
 				t.Helper()
-				writeCmd(t, w.conn, `{"requestId":"r-user-turn","submitPrompt":{"text":"an ordinary prompt"}}`)
+				writeCmd(t, w.conn, `{"requestId":"r-user-turn","submitPrompt":{"text":"an ordinary prompt","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
 				w.awaitOKAck("r-user-turn")
 			},
 			want: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,

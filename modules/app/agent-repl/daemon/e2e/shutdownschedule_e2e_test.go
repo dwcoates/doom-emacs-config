@@ -330,7 +330,7 @@ func TestE2EAPromptUnderTheLeaseIsHeldWithTheScheduleIdAndStartsNoTurn(t *testin
 	const prompt = "!tool sleep e2e-held-under-lease"
 
 	// Act
-	writeCmd(t, fx.connB, fmt.Sprintf(`{"requestId":"r-b-prompt","submitPrompt":{"text":%q}}`, prompt))
+	writeCmd(t, fx.connB, fmt.Sprintf(`{"requestId":"r-b-prompt","submitPrompt":{"text":%q,"promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`, prompt))
 
 	// Assert
 	var held *frontendv1.QueueEntry
@@ -379,7 +379,7 @@ func TestE2EAPromptUnderTheLeaseIsHeldWithTheScheduleIdAndStartsNoTurn(t *testin
 func TestE2EForcingAHeldEntryDeliversItAndBecomesANewDrainHold(t *testing.T) {
 	// Arrange — a lease-held prompt in the idle workspace.
 	fx := newLeaseFixture(t, "force-through")
-	writeCmd(t, fx.connB, `{"requestId":"r-b-prompt","submitPrompt":{"text":"!tool sleep e2e-forced-through"}}`)
+	writeCmd(t, fx.connB, `{"requestId":"r-b-prompt","submitPrompt":{"text":"!tool sleep e2e-forced-through","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
 	held := awaitHeldEntry(t, fx.connB, fx.cwdB, "a QueueEntry bearing shutdown_hold")
 
 	// Act
@@ -434,7 +434,7 @@ func TestE2ECancelingAHeldEntryDropsItForever(t *testing.T) {
 	// Arrange
 	fx := newLeaseFixture(t, "cancel-held-entry")
 	const dropped = "dropped-under-the-lease"
-	writeCmd(t, fx.connB, fmt.Sprintf(`{"requestId":"r-b-prompt","submitPrompt":{"text":%q}}`, dropped))
+	writeCmd(t, fx.connB, fmt.Sprintf(`{"requestId":"r-b-prompt","submitPrompt":{"text":%q,"promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`, dropped))
 	held := awaitHeldEntry(t, fx.connB, fx.cwdB, "a QueueEntry bearing shutdown_hold")
 
 	// Act — drop it, then release the lease so ordinary delivery resumes.
@@ -469,7 +469,7 @@ func TestE2ECancelingAHeldEntryDropsItForever(t *testing.T) {
 
 	// Assert — the sentinel runs; the dropped prompt never does.
 	const sentinel = "sentinel-after-the-drop"
-	writeCmd(t, fx.connB, fmt.Sprintf(`{"requestId":"r-b-sentinel","submitPrompt":{"text":%q}}`, sentinel))
+	writeCmd(t, fx.connB, fmt.Sprintf(`{"requestId":"r-b-sentinel","submitPrompt":{"text":%q,"promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`, sentinel))
 	reject := func(frame *frontendv1.FrontendFrame) string {
 		for _, item := range deltaItems(frame, fx.cwdB) {
 			if strings.Contains(assistantText(item), echoOf(dropped)) {
@@ -561,7 +561,7 @@ func TestE2ECancelingTheScheduleReleasesHeldEntriesIntoOrdinaryDelivery(t *testi
 	// Arrange
 	fx := newLeaseFixture(t, "cancel-the-schedule")
 	const prompt = "held-then-released"
-	writeCmd(t, fx.connB, fmt.Sprintf(`{"requestId":"r-b-prompt","submitPrompt":{"text":%q}}`, prompt))
+	writeCmd(t, fx.connB, fmt.Sprintf(`{"requestId":"r-b-prompt","submitPrompt":{"text":%q,"promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`, prompt))
 	held := awaitHeldEntry(t, fx.connB, fx.cwdB, "a QueueEntry bearing shutdown_hold")
 
 	// Act

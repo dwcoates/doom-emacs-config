@@ -865,7 +865,7 @@ over the agent's native paste-while-thinking buffering."
       (agent-repl--log ws "drain-deferred-prompts: ws=%s sending head len=%d remaining=%d"
                         ws (length prompt)
                         (length (agent-repl--ws-get ws :deferred-prompts)))
-      (agent-repl--send prompt ws)))))
+      (agent-repl--send "PROMPT_ORIGIN_DEFERRED_PROMPT" prompt ws)))))
 
 ;;;; Session ID management
 

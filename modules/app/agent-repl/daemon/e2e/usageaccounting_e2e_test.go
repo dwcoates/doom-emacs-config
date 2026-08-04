@@ -150,7 +150,7 @@ func TestE2EUnexpectedQueryTerminationReachesTypedFailure(t *testing.T) {
 	cwd := t.TempDir()
 	_, conn, _, _ := liveSession(t, h, cwd)
 
-	writeCmd(t, conn, `{"requestId":"e2e-query-eof","submitPrompt":{"text":"!query-eof"}}`)
+	writeCmd(t, conn, `{"requestId":"e2e-query-eof","submitPrompt":{"text":"!query-eof","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
 	item, _ := awaitItem(t, conn, cwd, "the typed unexpected-query-termination failure", func(item *frontendv1.ConversationItem) bool {
 		failure := item.GetSystemFailure()
 		return failure != nil && failure.GetErrorClass() == frontendv1.ErrorClass_ERROR_CLASS_INTERNAL && failure.GetErrorType() == "unexpected_query_termination"
@@ -167,7 +167,7 @@ func TestE2EUnexpectedQueryTerminationReachesTypedFailure(t *testing.T) {
 
 func submitAndAwaitAccounting(t *testing.T, conn *websocket.Conn, workspace, requestID, text string) *frontendv1.TurnAccounting {
 	t.Helper()
-	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"submitPrompt":{"text":%q}}`, requestID, text))
+	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"submitPrompt":{"text":%q,"promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`, requestID, text))
 	item, _ := awaitItem(t, conn, workspace, "the terminal result carrying turn accounting", isResult)
 	if item.GetTurnAccounting() == nil {
 		t.Fatalf("terminal result %q arrived before durable turn accounting", item.GetUuid())

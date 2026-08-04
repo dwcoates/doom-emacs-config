@@ -408,7 +408,7 @@ func TestE2EReplayFloorsAtTheClear(t *testing.T) {
 	h := newUDSHarness(t)
 	cwd := t.TempDir()
 	id, live, vendorID, store := liveSession(t, h, cwd)
-	writeCmd(t, live, `{"requestId":"r-before","submitPrompt":{"text":"before the clear"}}`)
+	writeCmd(t, live, `{"requestId":"r-before","submitPrompt":{"text":"before the clear","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
 	const lineUUID = "e2e-clear-line-floor"
 	clearUUID := clearDedupKey(lineUUID)
 	// The turn's items must sit in the store BELOW the clear for the floor to
@@ -454,7 +454,7 @@ func TestE2ELiveAndReplayAgreeFromTheFloor(t *testing.T) {
 	h := newUDSHarness(t)
 	cwd := t.TempDir()
 	id, live, vendorID, store := liveSession(t, h, cwd)
-	writeCmd(t, live, `{"requestId":"r-before","submitPrompt":{"text":"before the clear"}}`)
+	writeCmd(t, live, `{"requestId":"r-before","submitPrompt":{"text":"before the clear","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
 	// Quiesce the first turn before the floor goes in, so the ONLY result item
 	// left to arrive below is the after-turn's (every fake turn ends in exactly
 	// one result message, fake-query.ts).
@@ -463,7 +463,7 @@ func TestE2ELiveAndReplayAgreeFromTheFloor(t *testing.T) {
 	// Act — clear (the floor), then more real traffic above it, observed live.
 	store.write(sidecarClearEvent(vendorID, "e2e-clear-line-equiv"))
 	clearItem, _ := awaitItem(t, live, cwd, "ContextCleared item", isClear)
-	writeCmd(t, live, `{"requestId":"r-after","submitPrompt":{"text":"after the clear"}}`)
+	writeCmd(t, live, `{"requestId":"r-after","submitPrompt":{"text":"after the clear","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
 	// The after-turn must be FULLY drained before the fresh connection is dialed
 	// below. The daemon pushes every newly-arriving event live to all
 	// subscribers, so a still-streaming turn would land items on the fresh conn
