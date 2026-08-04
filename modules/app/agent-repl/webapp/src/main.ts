@@ -43,7 +43,10 @@ import {
   hibernationBlockedLog,
   hibernationNoticeHtml,
   hibernationSendTitle,
+  REVIVE_FAILED_TEXT,
+  ReviveWatch,
   revivalGateHtml,
+  reviveFailedLog,
   reviveRefusedLog,
   type RevivePending,
 } from "./hibernation.js";
@@ -431,10 +434,28 @@ async function boot(): Promise<void> {
    * It is browser-local view state and nothing else: the authority on whether
    * the session is awake is the pushed `SessionView`, and this only keeps the
    * gate from re-offering two buttons while one of them is in flight. It clears
-   * on the ack's rejection (the decision did not happen) and on the pushed view
-   * that drops the hibernation field (it did).
+   * on the ack's rejection (the decision did not happen), on the pushed view
+   * that drops the hibernation field (it did), and on a pushed view that STILL
+   * carries hibernation after an accepted decision (the bring-up failed) — the
+   * exit `reviveWatch` below exists to give it.
    */
   let revivePending: RevivePending = null;
+  /**
+   * The one-shot expectation an ACCEPTED revival ack arms (hibernation.ts).
+   *
+   * The ack only means the daemon took the decision; the bring-up follows. Its
+   * failure used to have no signal at all — the gate sat on "Waking the
+   * session…" with both buttons gone, forever. The next pushed `SessionView`
+   * for this workspace now settles it either way.
+   */
+  const reviveWatch = new ReviveWatch();
+  /**
+   * The gate's failure line, or "" — set when an accepted decision left the
+   * session asleep, and cleared the moment another decision is sent, because a
+   * stale complaint beside a fresh "waking…" line would describe the wrong
+   * attempt.
+   */
+  let reviveFailure = "";
   // The composer's own elements, resolved HERE rather than in the wiring block
   // below because `renderChrome` repaints the merge gate on them every frame.
   // Null when the host owns input (Emacs's `composer=0`), which is also the one
@@ -636,8 +657,18 @@ async function boot(): Promise<void> {
     // is no local lifetime to unwind. The in-flight decision clears itself here
     // the moment the daemon reports the session awake — the ONE authority on
     // that — so a revive that landed can never leave a stale "waking…" line.
-    if (s.hibernation === null) revivePending = null;
-    revivalGateEl.innerHTML = revivalGateHtml(s.hibernation, revivePending);
+    if (s.hibernation === null) {
+      revivePending = null;
+      // An awake session has no failed revival to complain about, and the gate
+      // it would have been drawn in is gone.
+      reviveFailure = "";
+    }
+    revivalGateEl.innerHTML = revivalGateHtml(
+      s.hibernation,
+      revivePending,
+      Date.now(),
+      reviveFailure,
+    );
     document.body.classList.toggle(HIBERNATED_BODY_CLASS, s.hibernation !== null);
     // The sleep verb is offered only on an awake session: there is nothing to
     // hibernate on one already asleep, and the gate above is what that session
@@ -699,15 +730,28 @@ async function boot(): Promise<void> {
   // up — the bring-up follows, and taking the gate down on the ack would put a
   // live composer in front of a session that has no shim yet.
   const sendRevive = (mode: "compactFirst" | "direct"): void => {
+    const workspace = cmdWorkspace();
     revivePending = mode;
+    // A previous attempt's complaint is not this attempt's news.
+    reviveFailure = "";
     renderChrome();
-    void dispatcher.reviveSession(cmdWorkspace(), mode).catch((err: unknown) => {
+    void dispatcher.reviveSession(workspace, mode).then(() => {
+      // ACCEPTED, which means the decision was taken and NOT that the session
+      // is up. Arm the one-shot expectation: the next pushed SessionView for
+      // this workspace either drops the hibernation field (the bring-up
+      // landed) or still carries it (the bring-up failed, and the gate must
+      // come back). Bounded by a wire fact, with no timer anywhere.
+      reviveWatch.arm(workspace, mode);
+    }).catch((err: unknown) => {
       // The dispatcher owns the canonical rejection record and the failure
       // card; this unwinds the view state, because a refused decision leaves
       // the session exactly as asleep as it was and the user has to be able to
       // choose again — and says so on the workspace's own log, which is where
       // a gate that came back up is explained.
       revivePending = null;
+      // A REJECTED decision never reached the revival path, so no view is
+      // owed a verdict on it.
+      reviveWatch.disarm();
       renderChrome();
       clog("error", reviveRefusedLog(mode, err));
     });
@@ -997,6 +1041,20 @@ async function boot(): Promise<void> {
           else log("info", line, { operation: "webapp.main.user-turn-receipt", localOnly: true });
         }
         const result = store.ingest(effects);
+        // THE REVIVAL VERDICT, ruled on against the batch the store just took.
+        // `revived` needs nothing here — renderChrome clears the pending line
+        // off the cleared hibernation field, which is the same authority. What
+        // only this can do is close the other case: a decision the daemon
+        // ACCEPTED whose next pushed view still reports the session asleep. The
+        // gate's buttons come back (the user has a choice to make again), the
+        // card says why, and the workspace log carries the one record of it.
+        const reviveVerdict = reviveWatch.observe(effects);
+        if (reviveVerdict.kind === "failed") {
+          revivePending = null;
+          reviveFailure = REVIVE_FAILED_TEXT;
+          clog("error", reviveFailedLog(reviveVerdict.mode, reviveVerdict.hibernation));
+          renderChrome();
+        }
         if (isSnapshot) {
           if (store.state.renderState === null || store.state.workspaceStateAtMs <= 0) {
             const err = new Error(
