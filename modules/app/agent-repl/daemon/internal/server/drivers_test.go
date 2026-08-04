@@ -297,6 +297,12 @@ func (nopHandler) CancelScheduledShutdown(context.Context, string, string, *fron
 func (nopHandler) RestartSession(context.Context, string, string, *frontendv1.RestartSessionCmd) error {
 	return nil
 }
+func (nopHandler) HibernateWorkspace(context.Context, string, string, *frontendv1.HibernateWorkspaceCmd) error {
+	return nil
+}
+func (nopHandler) ReviveSession(context.Context, string, string, *frontendv1.ReviveSessionCmd) error {
+	return nil
+}
 func (nopHandler) ClientLog(context.Context, string, string, *frontendv1.ClientLogCmd) error {
 	return nil
 }

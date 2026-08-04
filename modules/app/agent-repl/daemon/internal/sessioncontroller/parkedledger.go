@@ -315,6 +315,25 @@ func (m *Manager) refuseParkedForce(workspace, entryID, sessionID string, wired 
 		entryID, workspace, reason, sessionID, errclass.ErrQueueEntrySessionUnwired)
 }
 
+// refuseKeepAliveForce refuses a force aimed at a prompt held behind an
+// in-flight cache keep-alive turn, and is shaped exactly like the refusal
+// above: named, explanatory, and logged once by the layer that owns it.
+//
+// THE HOLD HAS NO FORCE-THROUGH AT ALL, which is what makes this different
+// from the drain lease's refusal rather than a copy of it. A drain-held prompt
+// CAN be forced — the user is choosing to delay a bounce, and that is theirs to
+// choose. A keep-alive-held prompt cannot, because forcing it would submit the
+// user's prompt on top of the keep-alive turns the daemon is about to rewind
+// out of the transcript, turning temporary plumbing into permanent context. The
+// wait is bounded by a turn that is already running, so the cost of refusing is
+// seconds and the cost of allowing it is a polluted conversation.
+func (m *Manager) refuseKeepAliveForce(workspace, entryID, sessionID, keepAliveTurnID string) error {
+	m.logf("session-controller: force REFUSED for keep-alive-held queue entry=%s ws=%q session=%s keep_alive_turn=%s — the ping must finish so the daemon can rewind it out of the transcript before this prompt is submitted; the prompt is delivered on its own the moment the ping ends, and is still cancellable",
+		entryID, workspace, sessionID, keepAliveTurnID)
+	return fmt.Errorf("session-controller: cannot force queued prompt %q on workspace %q: it is waiting for cache keep-alive turn %s to finish, after which it is delivered automatically; cancel it if you no longer want it: %w",
+		entryID, workspace, keepAliveTurnID, errclass.ErrQueueEntryKeepAliveHeld)
+}
+
 // releaseParkedHolds sheds a cancelled schedule's hold from every materialized
 // entry, so a workspace whose session never wired does not keep rendering a
 // lease bubble for a schedule that no longer exists. The durable rows are

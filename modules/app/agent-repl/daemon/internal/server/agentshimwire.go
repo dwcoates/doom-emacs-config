@@ -50,6 +50,9 @@ type AgentShimConfig struct {
 	// Restarts hard-restarts one workspace's session (the restartSession
 	// command). Nil makes that command a loud failing ack.
 	Restarts SessionRestarter
+	// Hibernations backs hibernateWorkspace and reviveSession — the user-forced
+	// sleep and the two revival modes. Nil is a loud unsupported capability.
+	Hibernations SessionHibernator
 	// EstablishTimeout bounds one createSession establishment round. Zero takes
 	// the package default; only a harness sets it.
 	EstablishTimeout time.Duration
@@ -498,9 +501,10 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 			// The SAME sink the coordinator and merge.Driver write through, so
 			// the handler's merge_enqueuing lands on one merge axis with every
 			// later phase rather than on a parallel record.
-			MergeStates: mergeSink{mgr},
-			Restarts:    cfg.Restarts,
-			Health:      HealthConfig{Router: cfg.Health, Daemon: cfg.DaemonHealth},
+			MergeStates:  mergeSink{mgr},
+			Restarts:     cfg.Restarts,
+			Hibernations: cfg.Hibernations,
+			Health:       HealthConfig{Router: cfg.Health, Daemon: cfg.DaemonHealth},
 			// The gate reads each fact from the authority that owns it: the
 			// controller observes the turn boundary, and the progress resolver
 			// already carries the live-task count to the footer.

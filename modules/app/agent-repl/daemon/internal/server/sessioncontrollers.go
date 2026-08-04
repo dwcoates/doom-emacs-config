@@ -30,6 +30,7 @@ import (
 	"claude-repld/internal/shim"
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/shimlisten"
+	"claude-repld/internal/statedb"
 )
 
 // SessionLocator resolves a workspace to the newest non-terminal session bound
@@ -229,6 +230,32 @@ type ShimSpawner struct {
 	handles map[string]ShimHandle // session id -> the shim WE spawned
 }
 
+// consumeRewindLineage clears sessionID's rewind lineage, in the Update that
+// records the spawn that just announced it.
+//
+// THE CLEAR IS THE CONSUMPTION, and it is durable for the same reason the arm
+// is. A lineage left standing would ride the NEXT unrelated respawn too,
+// telling the shim it had just been rewound when it had not, and the shim would
+// emit a second SessionRewound for a rewind that never happened.
+//
+// A FAILED CLEAR IS LOUD AND NOT SWALLOWED: the record still carries a lineage
+// that has already been announced, which the next spawn would announce again.
+func (s *ShimSpawner) consumeRewindLineage(sessionID string) error {
+	if s.reg == nil {
+		return fmt.Errorf("server: session %s: no registry; the announced rewind lineage cannot be consumed", sessionID)
+	}
+	found, err := s.reg.Update(sessionID, func(rec *registry.Record) {
+		rec.Rewind = registry.RewindLineage{}
+	})
+	if err != nil {
+		return fmt.Errorf("server: session %s: clearing the consumed rewind lineage: %w", sessionID, err)
+	}
+	if !found {
+		return fmt.Errorf("server: session %s: clearing the consumed rewind lineage found no record", sessionID)
+	}
+	return nil
+}
+
 // NewShimSpawner builds a ShimSpawner. reg and spawn are required; a nil
 // connected reports nothing connected, a nil logf discards.
 func NewShimSpawner(reg *registry.Registry, connected ConnectedFunc, evict EvictParkedFunc, spawn ShimSpawnFunc, logf func(string, ...any)) *ShimSpawner {
@@ -332,6 +359,22 @@ func (s *ShimSpawner) EnsureShim(ctx context.Context, sessionID string) (session
 		ConfigDir:      rec.ConfigDir,
 		Resume:         rec.ClaudeSessionID,
 	}
+	// THE REWIND LINEAGE COMES OFF THE RECORD, and this read IS the promised
+	// recovery. The lineage was written by the same Update that flipped the
+	// uuid, so a daemon that died anywhere after that flip — before the
+	// respawn, mid-respawn, or between daemons entirely — finds it here on the
+	// very next bring-up of the session and announces the rewind it owes.
+	//
+	// It is CONSUMED, not merely read: the clear below is what stops it riding
+	// the next unrelated respawn and announcing a rewind that never happened.
+	lineage := rec.Rewind
+	if lineage.Armed() {
+		opts.RewoundFrom = lineage.PreviousVendorSessionID
+		opts.RewindRetainedLeaf = lineage.RetainedLeafUUID
+		opts.RewindDroppedTurns = lineage.DroppedTurnIDs
+		s.logf("server: session %s: spawning with REWIND LINEAGE rewound_from=%s retained_leaf=%s dropped_turns=%s resume=%s",
+			sessionID, lineage.PreviousVendorSessionID, lineage.RetainedLeafUUID, lineage.DroppedTurnIDs, opts.Resume)
+	}
 	// ONE VERDICT FOR ONE QUESTION. The create path waives the resume-viability
 	// gate for a fake session because the scripted SDK writes no transcripts;
 	// this path used to run the same gate with the waiver hard-coded off, so
@@ -352,12 +395,22 @@ func (s *ShimSpawner) EnsureShim(ctx context.Context, sessionID string) (session
 	s.logf("server: session %s: no live shim — spawning UDS shim (resume=%q fake=%t)", sessionID, opts.Resume, opts.Fake)
 	handle, err := s.spawn(sessionID, opts)
 	if err != nil {
+		// The lineage stays on the record: this spawn never announced it, so
+		// the next bring-up still owes it.
 		return res, err
 	}
 	if handle.Stop != nil {
 		s.mu.Lock()
 		s.handles[sessionID] = handle
 		s.mu.Unlock()
+	}
+	if lineage.Armed() {
+		if err := s.consumeRewindLineage(sessionID); err != nil {
+			s.logf("server: session %s: rewind lineage CONSUMPTION FAILED after the spawn announced it: %v — the record still carries an announced lineage, and the next spawn would announce a rewind that never happened", sessionID, err)
+			return res, err
+		}
+		s.logf("server: session %s: rewind lineage CONSUMED by the spawn that announced it rewound_from=%s dropped_turns=%s",
+			sessionID, lineage.PreviousVendorSessionID, lineage.DroppedTurnIDs)
 	}
 	return res, nil
 }
@@ -777,6 +830,45 @@ func (r *RegistryRegistrar) ClaudeSessionIDChanged(sessionID, claudeSessionID st
 // non-empty by definition, so the vendor demonstrably wrote the conversation
 // being rotated away from and the reset that accompanies it must still land.
 func (r *RegistryRegistrar) AdoptVendorSessionID(sessionID, claudeSessionID string) (bool, string, bool) {
+	return r.adoptVendorSessionID(sessionID, claudeSessionID, registry.RewindLineage{})
+}
+
+// AdoptRewoundVendorSessionID is AdoptVendorSessionID with the rewind's lineage
+// written by the SAME Update. It implements
+// sessioncontroller.VendorSessionAdopter.
+//
+// THE FLIP AND THE LINEAGE ARE ONE DURABLE FACT. The flip is the rewind's only
+// destructive act and the lineage is the only account of what it dropped;
+// written separately, a daemon dying in between left a record naming a
+// truncated conversation with nothing left to say it had been truncated, and
+// the SessionRewound the frontends replay from was emitted by nobody. Written
+// together, a crash in any window leaves either both or neither — and the next
+// spawn of a record that carries one replays the argv.
+//
+// An INCOMPLETE lineage is refused and NOTHING is written, flip included. The
+// shim rejects an empty dropped-turn list, so adopting the new uuid while
+// arming a partial lineage would leave the session pointing at the truncated
+// transcript AND unable to spawn on it.
+func (r *RegistryRegistrar) AdoptRewoundVendorSessionID(sessionID, claudeSessionID string, lineage sessioncontroller.RewindLineage) (bool, string, bool) {
+	durable := registry.RewindLineage{
+		PreviousVendorSessionID: lineage.PreviousVendorSessionID,
+		RetainedLeafUUID:        lineage.RetainedLeafUUID,
+		DroppedTurnIDs:          lineage.DroppedTurnIDs,
+	}
+	if !durable.Armed() {
+		if r.Logf != nil {
+			r.Logf("server: session %s: REFUSING the rewind flip to %s — the lineage is incomplete (rewound_from=%q retained_leaf=%q dropped_turns=%q); the shim rejects an empty dropped-turn list, so adopting it would leave the session naming a transcript it cannot spawn on",
+				sessionID, claudeSessionID, durable.PreviousVendorSessionID, durable.RetainedLeafUUID, durable.DroppedTurnIDs)
+		}
+		return false, "", false
+	}
+	return r.adoptVendorSessionID(sessionID, claudeSessionID, durable)
+}
+
+// adoptVendorSessionID is the one Update both adoption entry points take. An
+// armed lineage is stored beside the uuid it belongs to; the zero value leaves
+// whatever the record carries alone.
+func (r *RegistryRegistrar) adoptVendorSessionID(sessionID, claudeSessionID string, lineage registry.RewindLineage) (bool, string, bool) {
 	if r.Reg == nil || claudeSessionID == "" {
 		return false, "", false
 	}
@@ -788,6 +880,9 @@ func (r *RegistryRegistrar) AdoptVendorSessionID(sessionID, claudeSessionID stri
 		previous = rec.ClaudeSessionID
 		rotated = previous != "" && previous != claudeSessionID
 		rec.ClaudeSessionID = claudeSessionID
+		if lineage.Armed() {
+			rec.Rewind = lineage
+		}
 		if rotated {
 			rec.LastSeq = 0
 			rec.NewestClearOrCompactSeq = 0
@@ -835,6 +930,128 @@ func (r *RegistryRegistrar) QueuedPromptsChanged(sessionID string, queued []regi
 	if !found && r.Logf != nil {
 		r.Logf("server: session %s: queued_prompts write found no record (never registered)", sessionID)
 	}
+}
+
+// TurnEndObserved persists when sessionID's most recent turn ended. It is the
+// ONE input to the cache keep-alive policy, and persisting it is what makes
+// every decision a time-since check against a durable instant rather than a
+// timer's guess (see registry.Record.LastTurnEndMs).
+//
+// The write is loud on failure and CHANGES NOTHING ELSE. A lost timestamp does
+// not corrupt anything — the policy's own "every unknown answers none" rule
+// leaves an undated session alone — but it does silently switch the keep-alive
+// off for that session, which is exactly the kind of quiet degradation the log
+// line exists to make findable.
+func (r *RegistryRegistrar) TurnEndObserved(sessionID string, atMs int64) {
+	if r.Reg == nil || atMs <= 0 {
+		return
+	}
+	found, err := r.Reg.Update(sessionID, func(rec *registry.Record) {
+		// NEVER BACKWARDS. A late-arriving end for an older turn must not
+		// rewind the clock the policy reads, or a session would be pinged
+		// against a turn boundary it has already moved past.
+		if atMs > rec.LastTurnEndMs {
+			rec.LastTurnEndMs = atMs
+		}
+	})
+	if err != nil && r.Logf != nil {
+		r.Logf("server: session %s: registry last_turn_end_ms write FAILED at_ms=%d — the cache keep-alive has no durable instant to measure this session from and will leave it alone: %v",
+			sessionID, atMs, err)
+		return
+	}
+	if !found && r.Logf != nil {
+		r.Logf("server: session %s: last_turn_end_ms write found no record (never registered) at_ms=%d", sessionID, atMs)
+	}
+}
+
+// HibernationChanged persists a session's hibernation state and its typed
+// account in ONE write, then re-pushes the SessionView so the revival gate
+// appears without waiting for an unrelated event.
+//
+// THE FLAG AND ITS ACCOUNT ARE ONE ARGUMENT, not two calls. A zero detail
+// clears hibernation; a detail with a cause sets it. There is deliberately no
+// way to write one without the other, which is the same guarantee
+// registry.maintain enforces on the way to disk — expressed here so a caller
+// cannot even construct the illegal pair.
+func (r *RegistryRegistrar) HibernationChanged(sessionID string, detail registry.HibernationDetail) error {
+	if r.Reg == nil {
+		return nil
+	}
+	if !registry.ValidHibernationCause(detail.Cause) {
+		return fmt.Errorf("server: session %s: refusing hibernation write with unknown cause %q", sessionID, detail.Cause)
+	}
+	found, err := r.Reg.Update(sessionID, func(rec *registry.Record) {
+		rec.Hibernated = detail.Cause != ""
+		rec.Hibernation = detail
+	})
+	if err != nil {
+		if r.Logf != nil {
+			r.Logf("server: session %s: registry hibernation write FAILED cause=%q since_ms=%d — the sleep will not survive a restart and the session could be revived implicitly: %v",
+				sessionID, detail.Cause, detail.SinceMs, err)
+		}
+		return fmt.Errorf("server: session %s: persist hibernation: %w", sessionID, err)
+	}
+	if !found {
+		if r.Logf != nil {
+			r.Logf("server: session %s: hibernation write found no record (never registered) cause=%q", sessionID, detail.Cause)
+		}
+		return fmt.Errorf("server: session %s: persist hibernation: no such record", sessionID)
+	}
+	if r.Logf != nil {
+		r.Logf("server: session %s: hibernation state persisted cause=%q since_ms=%d cutoff_ms=%d elapsed_ms=%d ttl_ms=%d hibernated=%v",
+			sessionID, detail.Cause, detail.SinceMs, detail.CutoffMs, detail.ElapsedMs, detail.TTLMs, detail.Cause != "")
+	}
+	r.repush(sessionID)
+	return nil
+}
+
+// HibernationOf reports sessionID's persisted hibernation detail and whether a
+// record was found. It is the rehydration read: a daemon that just booted has
+// no live controller to ask, and the durable record is the only thing that
+// knows the session was deliberately put to sleep.
+func (r *RegistryRegistrar) HibernationOf(sessionID string) (registry.HibernationDetail, bool) {
+	if r.Reg == nil {
+		return registry.HibernationDetail{}, false
+	}
+	rec, ok := r.Reg.Get(sessionID)
+	if !ok {
+		return registry.HibernationDetail{}, false
+	}
+	return rec.Hibernation, true
+}
+
+// LastTurnEndOf reports sessionID's persisted last-turn-end instant.
+func (r *RegistryRegistrar) LastTurnEndOf(sessionID string) (int64, bool) {
+	if r.Reg == nil {
+		return 0, false
+	}
+	rec, ok := r.Reg.Get(sessionID)
+	if !ok {
+		return 0, false
+	}
+	return rec.LastTurnEndMs, true
+}
+
+// KeepAliveWindowStore adapts *statedb.KeepAliveWindows to the session
+// controller's ledger interface.
+//
+// The adapter exists so the controller does not depend on the store's row
+// shape: the exclusion needs three facts and one question, and stating exactly
+// that keeps a harness able to supply them without a database.
+type KeepAliveWindowStore struct{ Windows *statedb.KeepAliveWindows }
+
+func (s KeepAliveWindowStore) Open(w sessioncontroller.KeepAliveWindowRecord) error {
+	return s.Windows.Open(statedb.KeepAliveWindow{
+		TurnID: w.TurnID, Workspace: w.Workspace, StartedAtMs: w.StartedAtMs,
+	})
+}
+
+func (s KeepAliveWindowStore) Close(turnID string, endedAtMs int64) error {
+	return s.Windows.Close(turnID, endedAtMs)
+}
+
+func (s KeepAliveWindowStore) Covers(workspace string, tsMs int64) (bool, error) {
+	return s.Windows.Covers(workspace, tsMs)
 }
 
 // PushForwarder is the late-bound bridge from the session controller's per-session sinks to

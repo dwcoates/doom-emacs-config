@@ -94,6 +94,16 @@ type CommandHandler interface {
 	// conversation resumes under a fresh process. Synchronous, because the ack
 	// is the user's only report of whether their session came back.
 	RestartSession(ctx context.Context, workspace, requestID string, cmd *frontendv1.RestartSessionCmd) error
+	// HibernateWorkspace stops the workspace's shim and marks the session
+	// hibernated, gating it behind a revival choice. A loud nack while a turn
+	// is live or the merge lease is held: the user interrupts first, and the
+	// daemon never discards in-flight work to satisfy a hibernate.
+	HibernateWorkspace(ctx context.Context, workspace, requestID string, cmd *frontendv1.HibernateWorkspaceCmd) error
+	// ReviveSession brings a hibernated session back under the user's chosen
+	// mode. Synchronous, because the ack is the user's only report of whether
+	// their session came back — and under compact_first the call does not
+	// return until the compaction has actually landed.
+	ReviveSession(ctx context.Context, workspace, requestID string, cmd *frontendv1.ReviveSessionCmd) error
 }
 
 // Dispatch routes a FrontendCommand to the handler and returns the CommandAck to
@@ -164,6 +174,10 @@ func DispatchWithResponse(ctx context.Context, logf dlog.Logf, h CommandHandler,
 		err = h.CancelScheduledShutdown(ctx, ws, reqID, c.CancelScheduledShutdown)
 	case *frontendv1.FrontendCommand_RestartSession:
 		err = h.RestartSession(ctx, ws, reqID, c.RestartSession)
+	case *frontendv1.FrontendCommand_HibernateWorkspace:
+		err = h.HibernateWorkspace(ctx, ws, reqID, c.HibernateWorkspace)
+	case *frontendv1.FrontendCommand_ReviveSession:
+		err = h.ReviveSession(ctx, ws, reqID, c.ReviveSession)
 	case *frontendv1.FrontendCommand_SetModel:
 		selectedModel, err = h.SetModel(ctx, ws, reqID, c.SetModel)
 	case *frontendv1.FrontendCommand_PublishWorkspaceRoster:

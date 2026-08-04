@@ -105,3 +105,87 @@ func TestTurnAccountingsReplayReturnsCanonicalSettlementAndRejectsOtherDrift(t *
 		t.Fatal("divergent replay was accepted")
 	}
 }
+
+// newTurnAccountings is a turn accounting store on a fresh state database.
+func newTurnAccountings(t *testing.T) *TurnAccountings {
+	t.Helper()
+	store, _ := openReceipts(t)
+	accountings, err := NewTurnAccountings(store.db)
+	if err != nil {
+		t.Fatalf("NewTurnAccountings: %v", err)
+	}
+	return accountings
+}
+
+// THE RECORDED RESULT INSTANT IS THE DURABLE ANSWER to "when did this turn
+// end" — the only one that survives the daemon that observed the boundary.
+func TestTurnAccountingsEndedAtMsReportsTheRecordedResultInstant(t *testing.T) {
+	// Arrange.
+	accountings := newTurnAccountings(t)
+	if _, err := accountings.Record("s", &frontendv1.TurnAccounting{
+		TurnId:  "ka_1",
+		Timing:  &frontendv1.TurnAccountingTiming{ResultReceivedAtMs: 2_000},
+		Verdict: &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}},
+	}); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+
+	// Act.
+	got, ok, err := accountings.EndedAtMs("ka_1")
+
+	// Assert.
+	if err != nil || !ok || got != 2_000 {
+		t.Fatalf("EndedAtMs = (%d, %v, %v), want (2000, true, nil)", got, ok, err)
+	}
+}
+
+// A TURN THE STORE NEVER SAW reports NOT FOUND rather than a zero that a caller
+// could mistake for an instant.
+func TestTurnAccountingsEndedAtMsReportsNotFoundForAnUnknownTurn(t *testing.T) {
+	// Arrange.
+	accountings := newTurnAccountings(t)
+
+	// Act.
+	_, ok, err := accountings.EndedAtMs("ka_never_recorded")
+
+	// Assert.
+	if err != nil || ok {
+		t.Fatalf("EndedAtMs for an unknown turn = (ok=%v, err=%v), want (false, nil)", ok, err)
+	}
+}
+
+// A RECORD WITH NO RESULT INSTANT is NOT an answer. The row exists but says
+// nothing about when the turn ended, and reporting its zero as an instant would
+// close a window at the epoch.
+func TestTurnAccountingsEndedAtMsReportsNotFoundWithoutAResultInstant(t *testing.T) {
+	// Arrange.
+	accountings := newTurnAccountings(t)
+	if _, err := accountings.Record("s", &frontendv1.TurnAccounting{
+		TurnId:  "ka_1",
+		Verdict: &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}},
+	}); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+
+	// Act.
+	_, ok, err := accountings.EndedAtMs("ka_1")
+
+	// Assert.
+	if err != nil || ok {
+		t.Fatalf("EndedAtMs for a turn with no result instant = (ok=%v, err=%v), want (false, nil)", ok, err)
+	}
+}
+
+// AN EMPTY TURN ID IS REFUSED rather than scanning the whole table.
+func TestTurnAccountingsEndedAtMsRefusesAnEmptyTurnID(t *testing.T) {
+	// Arrange.
+	accountings := newTurnAccountings(t)
+
+	// Act.
+	_, _, err := accountings.EndedAtMs("")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("EndedAtMs(\"\") = nil, want a refusal")
+	}
+}

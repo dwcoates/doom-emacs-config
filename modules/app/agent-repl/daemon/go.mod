@@ -8,6 +8,7 @@ require (
 	agentrepl/logging v0.0.0
 	agentrepl/proto v0.0.0
 	agentrepl/wire v0.0.0
+	github.com/google/uuid v1.6.0
 	golang.org/x/sys v0.22.0
 	google.golang.org/protobuf v1.36.11
 	modernc.org/sqlite v1.34.4
@@ -15,7 +16,6 @@ require (
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/ncruces/go-strftime v0.1.9 // indirect
