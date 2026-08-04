@@ -46,7 +46,7 @@ func TestE2ETokenUtilizationPairsResponseUsageWithTiming(t *testing.T) {
 	cwd := t.TempDir()
 	id, conn, _, _ := liveSession(t, h, cwd)
 
-	writeCmd(t, conn, `{"requestId":"e2e-token-main","submitPrompt":{"text":"measure response timing"}}`)
+	writeCmd(t, conn, `{"requestId":"e2e-token-main","submitPrompt":{"text":"measure response timing","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
 	awaitItem(t, conn, cwd, "the completed assistant response", func(item *frontendv1.ConversationItem) bool {
 		return item.GetAssistantMessage().GetId() == "msg_fake_1"
 	})
@@ -187,7 +187,7 @@ func TestE2ESessionViewAggregatesTimedAndUntimedActors(t *testing.T) {
 	h := newUDSHarness(t)
 	cwd := t.TempDir()
 	id, conn, vendorID, store := liveSession(t, h, cwd)
-	writeCmd(t, conn, `{"requestId":"e2e-token-aggregate","submitPrompt":{"text":"timed main response"}}`)
+	writeCmd(t, conn, `{"requestId":"e2e-token-aggregate","submitPrompt":{"text":"timed main response","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
 	awaitItem(t, conn, cwd, "the timed main-agent response", func(item *frontendv1.ConversationItem) bool {
 		return item.GetAssistantMessage().GetId() == "msg_fake_1"
 	})

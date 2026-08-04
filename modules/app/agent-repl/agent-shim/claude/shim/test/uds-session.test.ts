@@ -771,7 +771,11 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
     // Arrange: one accepted prompt launches one SDK task.
     const { query, store, daemon, session, queryFactoryCalls } = await rig({ storeSessionId: "vendor-uuid" });
     const log = captureLog();
-    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "fan out" }));
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, {
+      requestId: "p1",
+      text: "fan out",
+      promptOrigin: PromptOrigin.USER_SENT,
+    }));
     const start = await store.peer().next(StoreWriteSchema);
     store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
       accepted: BigInt(start.batch!.events.length),

@@ -55,7 +55,7 @@ func TestE2EThePromptReceiptPrecedesTheTurnsFirstStoreFrame(t *testing.T) {
 	_, live, _, _ := liveSession(t, h, cwd)
 
 	// Act
-	writeCmd(t, live, `{"requestId":"r-echo","submitPrompt":{"text":"the prompt itself"}}`)
+	writeCmd(t, live, `{"requestId":"r-echo","submitPrompt":{"text":"the prompt itself","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
 
 	// Assert — the receipt is among the seq-less deltas that precede the
 	// turn's first store-planed one, keyed on the submit's own request id.

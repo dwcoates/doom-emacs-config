@@ -178,7 +178,7 @@ func awaitAll(t *testing.T, conn *websocket.Conn, reject func(*frontendv1.Fronte
 // ordinary text turn cannot be caught mid-flight.
 func holdTurnOpen(t *testing.T, conn *websocket.Conn, workspace, requestID, command string) {
 	t.Helper()
-	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"submitPrompt":{"text":"!tool %s"}}`, requestID, command))
+	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"submitPrompt":{"text":"!tool %s","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`, requestID, command))
 	awaitAll(t, conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
 		"a PENDING permission item (the held turn)": func(frame *frontendv1.FrontendFrame) bool {
 			for _, item := range deltaItems(frame, workspace) {
@@ -314,7 +314,7 @@ func TestE2ENextPromptClosesTheInterruptWindow(t *testing.T) {
 	// Act — the prompt the user typed after stopping the agent. The queue is
 	// PAUSED by the stop, but with no turn running this one goes straight
 	// through as the lone runner (sessioncontroller queueSubmitLocked).
-	writeCmd(t, conn, `{"requestId":"r-next","submitPrompt":{"text":"after the stop"}}`)
+	writeCmd(t, conn, `{"requestId":"r-next","submitPrompt":{"text":"after the stop","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
 
 	// Assert
 	awaitAll(t, conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
@@ -346,7 +346,7 @@ func TestE2ELateInterruptReportsAlreadyComplete(t *testing.T) {
 	cwd := t.TempDir()
 	h := newUDSHarness(t)
 	_, conn, _, _ := liveSession(t, h, cwd)
-	writeCmd(t, conn, `{"requestId":"r-first","submitPrompt":{"text":"a turn that finishes"}}`)
+	writeCmd(t, conn, `{"requestId":"r-first","submitPrompt":{"text":"a turn that finishes","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
 	settled := frontendv1.RenderState_RENDER_STATE_UNSPECIFIED
 	sawTurnClockOpen := false
 	awaitAll(t, conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
@@ -495,8 +495,8 @@ func TestE2EInterruptedQueueRunsTheNextPromptAlone(t *testing.T) {
 	h := newUDSHarness(t)
 	_, conn, _, _ := liveSession(t, h, cwd)
 	holdTurnOpen(t, conn, cwd, "r-hold", "sleep e2e-queue")
-	writeCmd(t, conn, `{"requestId":"r-q1","submitPrompt":{"text":"queued-one"}}`)
-	writeCmd(t, conn, `{"requestId":"r-q2","submitPrompt":{"text":"queued-two"}}`)
+	writeCmd(t, conn, `{"requestId":"r-q1","submitPrompt":{"text":"queued-one","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
+	writeCmd(t, conn, `{"requestId":"r-q2","submitPrompt":{"text":"queued-two","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
 	// Both prompts must be HELD before the stop lands, or the stop can outrun
 	// a submit and the late prompt would be head-jump promoted instead of
 	// retained — a different (legitimate) scenario than the one this test
@@ -515,7 +515,7 @@ func TestE2EInterruptedQueueRunsTheNextPromptAlone(t *testing.T) {
 			return progressFor(frame, cwd).GetInterrupt().GetActive()
 		},
 	})
-	writeCmd(t, conn, `{"requestId":"r-jump","submitPrompt":{"text":"after-the-stop"}}`)
+	writeCmd(t, conn, `{"requestId":"r-jump","submitPrompt":{"text":"after-the-stop","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
 
 	// Assert — the jumper ran first and the retained pair drained behind it in
 	// the order they were submitted.
@@ -560,7 +560,7 @@ func TestE2EInterruptDoesNotCrossWorkspaces(t *testing.T) {
 	// Act — stop A's live turn (observed on A's own connection), then give B a
 	// turn of its own whose reply is the terminator for B's read below.
 	stopLiveTurn(t, connA, cwdA)
-	writeCmd(t, connB, `{"requestId":"r-b","submitPrompt":{"text":"b-sentinel"}}`)
+	writeCmd(t, connB, `{"requestId":"r-b","submitPrompt":{"text":"b-sentinel","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
 
 	// Assert — nothing about A's stop reached B.
 	reject := func(frame *frontendv1.FrontendFrame) string {

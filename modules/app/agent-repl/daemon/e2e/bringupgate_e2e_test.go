@@ -116,7 +116,7 @@ func TestE2ERotationResubscribesAndKeepsTheConversationFlowing(t *testing.T) {
 
 	// Assert — the re-handshaked session still carries a turn, which is the
 	// part of the gate this harness can prove end to end today.
-	writeCmd(t, conn, `{"requestId":"r-after-rotation","submitPrompt":{"text":"after the rotation"}}`)
+	writeCmd(t, conn, `{"requestId":"r-after-rotation","submitPrompt":{"text":"after the rotation","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
 	deadline := time.Now().Add(frameTimeout)
 	for time.Now().Before(deadline) {
 		frame := readFrame(t, conn)

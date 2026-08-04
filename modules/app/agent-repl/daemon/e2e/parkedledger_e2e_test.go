@@ -122,7 +122,7 @@ func newParkedUnderLease(t *testing.T, stopShims bool, cause, prompt string) *pa
 	if holdFor(draining, cwdA) == nil {
 		t.Fatalf("the drain is not holding on workspace %s, whose turn is in flight; holds=%s", cwdA, describeHolds(draining))
 	}
-	writeCmd(t, connB, fmt.Sprintf(`{"requestId":"r-b-prompt","submitPrompt":{"text":%q}}`, prompt))
+	writeCmd(t, connB, fmt.Sprintf(`{"requestId":"r-b-prompt","submitPrompt":{"text":%q,"promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`, prompt))
 	held := awaitHeldEntry(t, connB, cwdB, "a QueueEntry bearing shutdown_hold")
 	return &parkedUnderLease{
 		world: world, boot: boot,
@@ -267,7 +267,7 @@ func TestE2EACancelledParkedPromptNeverResurrectsOnALaterBoot(t *testing.T) {
 	}
 	third.sweepRecheckWhenParked(t, sessionB)
 	const sentinel = "sentinel-after-the-resurrection-window"
-	writeCmd(t, thirdConn, fmt.Sprintf(`{"requestId":"r-b-sentinel","submitPrompt":{"text":%q}}`, sentinel))
+	writeCmd(t, thirdConn, fmt.Sprintf(`{"requestId":"r-b-sentinel","submitPrompt":{"text":%q,"promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`, sentinel))
 	reject := func(frame *frontendv1.FrontendFrame) string {
 		for _, item := range deltaItems(frame, parked.cwdB) {
 			if strings.Contains(assistantText(item), echoOf(cancelled)) {

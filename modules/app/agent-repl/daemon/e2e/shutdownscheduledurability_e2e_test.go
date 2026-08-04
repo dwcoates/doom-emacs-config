@@ -64,7 +64,7 @@ func TestE2EAScheduledShutdownSurvivesADaemonBounceMidDrain(t *testing.T) {
 	holdTurnOpen(t, connA, cwdA, "r-hold-a", "sleep e2e-durable-drain")
 	frontend := first.dialFrontend(t)
 	draining := scheduleAndAwaitDraining(t, frontend, "r-sched", true, "deploy that changed the shim bundle")
-	writeCmd(t, connB, `{"requestId":"r-b-prompt","submitPrompt":{"text":"held across the bounce"}}`)
+	writeCmd(t, connB, `{"requestId":"r-b-prompt","submitPrompt":{"text":"held across the bounce","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
 	held := awaitHeldEntry(t, connB, cwdB, "a QueueEntry bearing shutdown_hold")
 
 	// Act — the daemon dies with the drain outstanding, and a new one opens the
@@ -163,7 +163,7 @@ func TestE2EAPromptHeldByAnExecutedDrainIsDeliveredAfterTheSwap(t *testing.T) {
 	frontend := first.dialFrontend(t)
 	scheduleAndAwaitDraining(t, frontend, "r-sched", false, "ordinary bounce")
 	const prompt = "delivered on the other side of the bounce"
-	writeCmd(t, connB, `{"requestId":"r-b-prompt","submitPrompt":{"text":"`+prompt+`"}}`)
+	writeCmd(t, connB, `{"requestId":"r-b-prompt","submitPrompt":{"text":"`+prompt+`","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
 	awaitHeldEntry(t, connB, cwdB, "a QueueEntry bearing shutdown_hold")
 
 	// Act — clear A's hold so the bounce runs, then bring the successor up.

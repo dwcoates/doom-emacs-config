@@ -37,7 +37,7 @@ import (
 // fake query reported in its reply.
 func echoedMode(t *testing.T, conn *websocket.Conn, cwd, prompt string) string {
 	t.Helper()
-	writeCmd(t, conn, `{"requestId":"r-mode","submitPrompt":{"text":"`+prompt+`"}}`)
+	writeCmd(t, conn, `{"requestId":"r-mode","submitPrompt":{"text":"`+prompt+`","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
 	marker := echoOf(prompt)
 	item, _ := awaitItem(t, conn, cwd, "the fake's echoed reply", func(item *frontendv1.ConversationItem) bool {
 		return strings.Contains(assistantText(item), marker)

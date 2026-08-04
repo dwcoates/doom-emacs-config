@@ -1106,7 +1106,7 @@ func TestE2EUDSTextTurnRendersFrontendFrames(t *testing.T) {
 
 	// Act — submit the prompt as a FrontendCommand frame (the /stream socket
 	// is command-strict since S9; the scoped translator stamps the workspace).
-	writeCmd(t, conn, `{"requestId":"r1","submitPrompt":{"text":"hello uds e2e"}}`)
+	writeCmd(t, conn, `{"requestId":"r1","submitPrompt":{"text":"hello uds e2e","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
 
 	// Assert — a conversation delta or a workspace-state for this session
 	// arrives within the timeout (the fake SDK echoes the prompt back).
