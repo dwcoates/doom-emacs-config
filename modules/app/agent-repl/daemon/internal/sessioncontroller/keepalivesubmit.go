@@ -9,6 +9,7 @@ import (
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 
+	"claude-repld/internal/errclass"
 	"claude-repld/internal/keepalive"
 )
 
@@ -120,17 +121,23 @@ func (m *Manager) SubmitKeepAlivePing(ctx context.Context, workspace string) (tu
 	//
 	// A window for a ping whose submit then fails costs nothing: it excludes an
 	// interval in which nothing was written.
+	// The window's start is REMEMBERED, not re-read. It is the ledger's own
+	// durable lower bound, and it is what an abandoned ping's window closes at:
+	// a ping that never ran occupies an empty interval, and stamping that end
+	// from a fresh clock read would invent an exclusion interval instead.
+	var windowStartedAtMs int64
 	if m.cfg.KeepAliveWindows != nil {
+		windowStartedAtMs = m.now()
 		if err := m.cfg.KeepAliveWindows.Open(KeepAliveWindowRecord{
-			TurnID: turnID, Workspace: workspace, StartedAtMs: m.now(),
+			TurnID: turnID, Workspace: workspace, StartedAtMs: windowStartedAtMs,
 		}); err != nil {
-			m.mu.Lock()
-			if d.keepAliveTurnID == turnID {
-				d.keepAliveTurnID = ""
-			}
-			m.mu.Unlock()
-			m.logf("session-controller: keep-alive ping ABANDONED ws=%q session=%s turn_id=%s error=%v — the window could not be recorded, so the ping is NOT submitted; running it unwindowed would render the ping as the user's own prompt",
-				workspace, sessionID, turnID, err)
+			// NO WINDOW EXISTS TO CLOSE — Open is the write that would have
+			// created the row — so this abandonment releases the claim and the
+			// holds only. Calling Close here would report a second failure for
+			// a row that was never written.
+			released := m.abandonKeepAlivePing(d, turnID)
+			m.logf("session-controller: keep-alive ping ABANDONED ws=%q session=%s turn_id=%s held_released=%d error=%v — the window could not be recorded, so the ping is NOT submitted; running it unwindowed would render the ping as the user's own prompt",
+				workspace, sessionID, turnID, released, err)
 			return "", err
 		}
 	} else {
@@ -142,20 +149,88 @@ func (m *Manager) SubmitKeepAlivePing(ctx context.Context, workspace string) (tu
 	err = m.forwardPrompt(ctx, d, turnID, keepalive.PingText, "keep-alive:"+turnID, "",
 		corev1.PromptOrigin_PROMPT_ORIGIN_CACHE_KEEP_ALIVE, submitterKeepAlive)
 	if err != nil {
-		// THE CLAIM IS RELEASED ON FAILURE, or the session would hold a queue
-		// entry behind a ping turn that never started and nothing would ever
-		// release it.
-		m.mu.Lock()
-		if d.keepAliveTurnID == turnID {
-			d.keepAliveTurnID = ""
-		}
-		m.mu.Unlock()
-		m.logf("session-controller: keep-alive ping FAILED ws=%q session=%s turn_id=%s error=%v — the claim is released; the cache is left to expire unless a later tick still finds the window open",
-			workspace, sessionID, turnID, err)
+		// THE CLAIM, THE HOLDS AND THE WINDOW ARE RELEASED TOGETHER. Each one
+		// alone is a leak the others cannot repair: a surviving claim parks
+		// every later prompt behind a turn that never started, a surviving hold
+		// names a turn id nothing will ever end, and a surviving window has no
+		// upper bound and withholds the whole conversation from here on. The
+		// acquire that took all three is this one release.
+		released := m.abandonKeepAlivePing(d, turnID)
+		m.logf("session-controller: keep-alive ping FAILED ws=%q session=%s turn_id=%s held_released=%d error=%v — the claim, the holds and the window are all released; the cache is left to expire until the next tick",
+			workspace, sessionID, turnID, released, err)
+		m.closeKeepAliveWindow(d, turnID, windowStartedAtMs)
 		return "", err
 	}
 	m.logf("session-controller: keep-alive ping SUBMITTED ws=%q session=%s turn_id=%s", workspace, sessionID, turnID)
 	return turnID, nil
+}
+
+// abandonKeepAlivePing releases everything a claimed ping owns in the session's
+// memory — the claim itself and every prompt held behind its turn id — under
+// ONE acquisition of m.mu, and reports how many holds it released.
+//
+// THE CLAIM AND THE HOLDS ARE ONE RELEASE because they were one acquire. The
+// hold's whole meaning is "waiting for turn X to end"; if turn X is abandoned,
+// nothing will ever end it, and the sole ordinary release (the ping's turn-end
+// boundary, queue.go) requires a real end that is never coming. Clearing the
+// claim alone therefore does not free the prompts — it strands them, invisibly,
+// until the user cancels them by hand.
+//
+// The released prompts are ordinary PENDING entries afterwards, so the queue is
+// republished and the front one delivered exactly as a turn-end drain would:
+// the ping never ran, so there is nothing to rewind before they go.
+func (m *Manager) abandonKeepAlivePing(d *sessionController, turnID string) int {
+	m.mu.Lock()
+	if d.keepAliveTurnID == turnID {
+		d.keepAliveTurnID = ""
+	}
+	released := d.queue.releaseKeepAliveHold(turnID)
+	if released == 0 {
+		m.mu.Unlock()
+		return 0
+	}
+	var next *queueEntry
+	if !d.turn.active() {
+		next = d.queue.popFrontDeliverable()
+	}
+	view, recs := m.publishQueueLocked(d)
+	sessionID := d.sessionID
+	m.mu.Unlock()
+
+	m.publish(sessionID, view, recs)
+	m.noteDrainActivity()
+	if next != nil {
+		go m.deliver(d, next)
+	}
+	return released
+}
+
+// closeKeepAliveWindow stamps a ping's end in the durable ledger and FAILS HARD
+// when it cannot.
+//
+// AN UNCLOSED WINDOW IS NOT A BOOKKEEPING NUISANCE. It has no upper bound, so
+// from its start onward every conversation item on the workspace is withheld
+// from every rendering — the live push, the resync, the replay — for as long as
+// the row stands. Continuing past the failure with a log line leaves the user
+// watching a conversation that has silently stopped existing.
+//
+// The log line stays as the single canonical record of the violation; the card
+// is the same fact reaching a human, on the established system-failure channel
+// every other unrecoverable session fault uses.
+func (m *Manager) closeKeepAliveWindow(d *sessionController, turnID string, endedAtMs int64) {
+	if m.cfg.KeepAliveWindows == nil {
+		return
+	}
+	err := m.cfg.KeepAliveWindows.Close(turnID, endedAtMs)
+	if err == nil {
+		return
+	}
+	m.logf("session-controller: keep-alive window CLOSE FAILED ws=%q session=%s turn_id=%s ended_at_ms=%d error=%v — the window stays open, and an open window excludes every later item on this workspace; this must be repaired before the conversation renders again",
+		d.workspace, d.sessionID, turnID, endedAtMs, err)
+	if d.consumer != nil {
+		d.consumer.pushFailure(d.consumer.keepAliveWindowUnclosedUUID(turnID),
+			errclass.KeepAliveWindowUnclosed(fmt.Sprintf("turn_id=%s ended_at_ms=%d: %v", turnID, endedAtMs, err)))
+	}
 }
 
 // KeepAliveTurnID reports the in-flight keep-alive turn for a workspace, if
