@@ -66,10 +66,9 @@ func UngatedPermissionMode(s string) bool {
 // honest accounting available, and it names the consent that admitted it
 // rather than only the mode.
 //
-// Shared by every ungated launch path (a created session, a dispatched
-// remediation analyst) so the wording of "there is no permission gate here"
-// cannot drift between them. SUBJECT is the thing running ungated, phrased to
-// read after "UNGATED: " (e.g. "this session", "the remediation analyst").
+// Shared by ungated launch paths so the wording of "there is no permission
+// gate here" cannot drift between them. SUBJECT is the thing running ungated,
+// phrased to read after "UNGATED: " (for example "this session").
 func UngatedNote(subject, mode string, consented bool) string {
 	if !UngatedPermissionMode(mode) {
 		return ""

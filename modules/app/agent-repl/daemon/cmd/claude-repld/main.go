@@ -5,7 +5,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"flag"
@@ -14,7 +13,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -28,7 +26,6 @@ import (
 	"claude-repld/internal/login"
 	"claude-repld/internal/progress"
 	"claude-repld/internal/registry"
-	"claude-repld/internal/remediation"
 	"claude-repld/internal/replog"
 	"claude-repld/internal/server"
 	"claude-repld/internal/sessioncontroller"
@@ -218,8 +215,6 @@ func (l *udsShimLogger) LogVerbose(format string, args ...any) {
 }
 func (l *udsShimLogger) MirrorShimRecord(line string) { fmt.Fprintln(l.terminal, line) }
 func main() {
-	bootedAt := time.Now()
-
 	ready := &daemonReadiness{}
 
 	// Disk log, wired before daemon logging begins: every dlog record
@@ -263,19 +258,15 @@ func main() {
 	binaryMTime := launchedBinaryMTime(daemonLog)
 
 	var (
-		addr           = flag.String("addr", "127.0.0.1:8787", "listen address")
-		nodeBin        = flag.String("node", "node", "node binary used to run the shim")
-		claudeBin      = flag.String("claude-bin", "", "path to the claude CLI the SDK drives (empty = the SDK's bundled native Claude Code binary)")
-		shimScript     = flag.String("shim", "", "path to the shim entrypoint (agent-shim/claude/shim/dist/main.js)")
-		fake           = flag.Bool("fake", false, "force --fake (offline scripted SDK) on every session")
-		idleTimeout    = flag.Duration("idle-timeout", time.Hour, "hibernate a session (SIGTERM its UDS shim; keep the record rehydratable) after this long with nothing happening to its workspace; 0 disables. Measured from the newest row on the workspace's state log, so a finished turn starts the clock rather than arming an immediate sweep. A hibernated session costs a full shim bring-up on the next act, so the window is generous rather than tight")
-		webappDir      = flag.String("webapp", "", "optional directory of webapp static files to serve at /")
-		widgetAssets   = flag.String("widget-assets", envStr("AGENT_REPL_WIDGET_ASSETS", ""), "optional directory of embeddable-widget assets (e.g. a chess-widget dist) to serve at /widget-assets/; empty = capability off")
-		remediationDir = flag.String("remediation-dir", "", "checkout the \"session gone\" analyst diagnoses and opens a resilience workspace against (empty = remediation disabled)")
-		remediationPM  = flag.String("remediation-permission-mode", "", "--permission-mode for the \"session gone\" analyst (empty = the CLI default, under which every headless tool call is auto-denied)")
-		//nolint:lll // the consent's whole job is to state what it consents to.
-		remediationUngated = flag.Bool("allow-ungated-remediation", false, "consent to running the \"session gone\" analyst with NO permission gate; required when -remediation-permission-mode is ungated (bypassPermissions), because that analyst then approves its own tool calls against -remediation-dir unattended. Without it such a config REFUSES to boot rather than running ungated by default")
-		accountsFlag       = flag.String("accounts", "", "canonical account roster as comma-separated label=config-dir pairs (empty dir = the CLI's default root), e.g. \"personal=,work=/home/u/.claude-chesscom\"; empty = account routes disabled")
+		addr         = flag.String("addr", "127.0.0.1:8787", "listen address")
+		nodeBin      = flag.String("node", "node", "node binary used to run the shim")
+		claudeBin    = flag.String("claude-bin", "", "path to the claude CLI the SDK drives (empty = the SDK's bundled native Claude Code binary)")
+		shimScript   = flag.String("shim", "", "path to the shim entrypoint (agent-shim/claude/shim/dist/main.js)")
+		fake         = flag.Bool("fake", false, "force --fake (offline scripted SDK) on every session")
+		idleTimeout  = flag.Duration("idle-timeout", time.Hour, "hibernate a session (SIGTERM its UDS shim; keep the record rehydratable) after this long with nothing happening to its workspace; 0 disables. Measured from the newest row on the workspace's state log, so a finished turn starts the clock rather than arming an immediate sweep. A hibernated session costs a full shim bring-up on the next act, so the window is generous rather than tight")
+		webappDir    = flag.String("webapp", "", "optional directory of webapp static files to serve at /")
+		widgetAssets = flag.String("widget-assets", envStr("AGENT_REPL_WIDGET_ASSETS", ""), "optional directory of embeddable-widget assets (e.g. a chess-widget dist) to serve at /widget-assets/; empty = capability off")
+		accountsFlag = flag.String("accounts", "", "canonical account roster as comma-separated label=config-dir pairs (empty dir = the CLI's default root), e.g. \"personal=,work=/home/u/.claude-chesscom\"; empty = account routes disabled")
 	)
 	flag.Parse()
 
@@ -359,27 +350,6 @@ func main() {
 	})
 	if err := sessionRegistry.Prepare(); err != nil {
 		daemonFatal(daemonLog, "claude-repld: registry prepare: %v", err)
-	}
-
-	// "session gone" remediation: the frontend can only report the loss,
-	// so the daemon owns the analyst that diagnoses it and opens the
-	// resilience workspace. Disabled when no checkout is nominated.
-	var remediator server.Remediator
-	if *remediationDir != "" {
-		runner, err := remediation.New(remediation.Config{
-			Bin:            *claudeBin,
-			Dir:            *remediationDir,
-			PermissionMode: *remediationPM,
-			AllowUngated:   *remediationUngated,
-			Start: func(argv []string, dir string) error {
-				return startAnalyst(daemonLog.With("operation", "remediation-analyst", "cwd", dir), argv, dir)
-			},
-			Logf: legacyLog,
-		}, bootedAt)
-		if err != nil {
-			daemonFatal(daemonLog, "claude-repld: %v", err)
-		}
-		remediator = runner
 	}
 
 	// Interactive Claude login, on a pty the daemon owns and the webapp
@@ -825,7 +795,6 @@ func main() {
 		DaemonVersion:   daemonVersion,
 		BinaryMTime:     binaryMTime,
 		ForceFake:       *fake,
-		Remediator:      remediator,
 		Registry:        sessionRegistry,
 		ModelCatalogs:   modelCatalogs,
 		TokenUsage:      tokenUtilizations,
@@ -1049,11 +1018,6 @@ func maintainWorkspaceLogTargets(targets *dlog.TargetManager, logger *dlog.Logge
 		LogVerbose("claude-repld: workspace log targets held")
 }
 
-// startAnalyst launches the headless remediation analyst and returns as
-// soon as it is running: the caller is an HTTP handler, and the analyst
-// itself runs for as long as diagnosing a lost session takes. Its output
-// is pumped into the daemon log so the plan it devises is visible in the
-// same place the failure was.
 // parseAccounts decodes the -accounts flag: comma-separated label=dir
 // pairs, where an empty dir names the CLI's own default root. An empty
 // flag is the capability being unconfigured (nil roster), not an error;
@@ -1079,37 +1043,6 @@ func parseAccounts(raw string) ([]server.Account, error) {
 	return accounts, nil
 }
 
-func startAnalyst(logger *dlog.Logger, argv []string, dir string) error {
-	// An os.Pipe (rather than Cmd.StdoutPipe) hands the child a raw fd
-	// for both streams, so the reader below is independent of Wait's
-	// pipe bookkeeping and the two cannot race.
-	pr, pw, err := os.Pipe()
-	if err != nil {
-		return fmt.Errorf("analyst pipe: %w", err)
-	}
-	cmd := exec.Command(argv[0], argv[1:]...)
-	cmd.Dir = dir
-	cmd.Stdout = pw
-	cmd.Stderr = pw
-	if err := cmd.Start(); err != nil {
-		closeOrLog(logger, pr, "analyst pipe read end")
-		closeOrLog(logger, pw, "analyst pipe write end")
-		return fmt.Errorf("start %s: %w", argv[0], err)
-	}
-	// The child owns its dup of the write end now; dropping ours is what
-	// lets the reader see EOF when the analyst exits.
-	closeOrLog(logger, pw, "analyst pipe write end")
-	go pumpAnalystOutput(logger, pr)
-	go func() {
-		if err := cmd.Wait(); err != nil {
-			logger.Log("claude-repld: remediation analyst exited: %v", err)
-			return
-		}
-		logger.Log("claude-repld: remediation analyst finished")
-	}()
-	return nil
-}
-
 func closeOrLog(logger *dlog.Logger, c io.Closer, what string) {
 	if err := c.Close(); err != nil {
 		logger.With("operation", "close", "resource", what).Log("claude-repld: close failed: %v", err)
@@ -1123,20 +1056,6 @@ func envStr(name, def string) string {
 		return v
 	}
 	return def
-}
-
-// pumpAnalystOutput mirrors the analyst's output into the daemon log.
-func pumpAnalystOutput(logger *dlog.Logger, out io.Reader) {
-	scanner := bufio.NewScanner(out)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for scanner.Scan() {
-		if line := strings.TrimSpace(scanner.Text()); line != "" {
-			logger.LogVerbose("claude-repld: remediation: %s", line)
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		logger.Log("claude-repld: remediation output: %v", err)
-	}
 }
 
 // shimBuildSHA returns a reader for the build identity of the shim bundle at

@@ -12,7 +12,6 @@
 | `agent-repl--git-exit-code` | 2 tests | success (0), failure (non-zero) |
 | `agent-repl--git-branch-exists-p` | 2 tests | existing branch, non-existent branch |
 | `agent-repl--apply-workspace-properties` | 3 tests | nil values skipped, all non-nil stored, empty plist no-op |
-| `agent-repl--enqueue-preemptive-prompt` | 3 tests | non-empty prompt stored, nil prompt ignored, empty string ignored |
 | `agent-repl--dispatch-prompt-command` | 4 tests | no vterm buffer (enqueue), buffer not ready (enqueue), appends multiple, normalizes branch name |
 | `agent-repl--cherry-pick-base` (alias `+dwc/workspace-merge--fork`) | 6 tests | no-annotations fallback, clean chain, already fully merged, growing workspace, deep chain, annotation survives conflict resolution |
 | `agent-repl--validate-worktree-creation` | 4 tests | empty name, existing projectile project, existing branch, valid inputs pass |

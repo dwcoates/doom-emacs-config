@@ -95,44 +95,33 @@ conflicting commits, and the one whose shim the coordinator already holds the
 
 ## What happens after a merge lands: `merge.PostMergeHook`
 
-A merged workspace is not the end of the story, and the two things that follow
-it were Emacs's job until the editor strip deleted them. `merge.PostMergeHook`
-(`posthook.go`) is the package's second outbound port, and it re-homes both
-daemon-side:
-
-- CHILD TO PARENT. A workspace spawned from another workspace merges into its
-  PARENT's worktree, not into the repository's main checkout. The parent's
-  agent session is told its child merged.
-- THE AFTER-ACTION. A workspace created with a `postprocessing_prompt` has that
+A merged workspace can require process-level aftermath. `merge.PostMergeHook`
+(`posthook.go`) owns that boundary, including rebuilding and restarting the
+running stack after a self-merge. Separately, a workspace created with a
+`postprocessing_prompt` has that
   prompt run as a TURN IN ITS OWN SESSION, under the merge lease, once every
   commit has landed and before the queue entry is retired
-  (`merge.AfterActionRunner`). `merge.PostMergeHook.AfterAction` only RESOLVES
-  the text; the parent handoff does not deliver it, because delivering it in both
-  places ran one user-requested task twice per merge into a parent worktree.
+  (`merge.AfterActionSource` and `merge.AfterActionRunner`).
 
 The port's contract:
 
 - It fires on the `merged` terminal outcome ONLY — never on `merge_failed`,
   never on a conflict, and never on a conflict a user abandoned. A merge that
   landed only after a resolution is merged all the same and fires it too.
-- It fires AFTER the queue entry is dropped and the lease released. That
-  ordering is load-bearing: the hook prompts another workspace's session, and
-  doing it under a lease the merge still held would have the submit refused by
-  the very exclusivity the merge took.
+- It fires AFTER the queue entry is dropped and the lease released.
 - It runs OFF the drain goroutine, on its own `c.wg`-tracked goroutine bounded
-  by the coordinator's context. A slow, hung, or unreachable parent must never
-  stall the repository's queue — the next merge starts immediately.
+  by the coordinator's context. A slow rebuild must never stall the
+  repository's queue — the next merge starts immediately.
 - A hook error CANNOT un-merge the merge. It is loud-logged and retained as a
   `merge.PostMergeFailure` (readable via `PostMergeFailures`), never turned into
   a `merge_failed` transition: the commits are on the target either way, and
   saying otherwise would make the pushed state lie about the tree.
 - A merge whose durable entry could NOT be dropped does not fire the hook at
-  all, because the next boot's `Drain` replays it and the parent must not be
-  handed the same child twice.
+  all, because the next boot's `Drain` replays it and aftermath must run once.
 
-The implementation is `internal/workspace/postmerge` (`postmerge.Notifier`),
-reached — like `merge.ConflictResolver` — through the server's wiring, so this
-package still never imports the session controller.
+The after-action source is `internal/workspace/postmerge` (`postmerge.Source`),
+reached through the server's wiring, so this package never imports creation
+storage.
 
 THE TERMINAL `merged` STATUS IS `merge.Coordinator`'s, NOT `merge.Driver`'s.
 The driver finishes the replay and returns `OutcomeMerged`; the coordinator then

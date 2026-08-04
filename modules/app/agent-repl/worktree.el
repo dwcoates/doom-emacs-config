@@ -3,7 +3,7 @@
 ;;; Commentary:
 
 ;; Workspace CREATION lives here only as intent.  Every flavor — `SPC TAB n',
-;; `SPC TAB N', `SPC TAB f', the one-shots, the resume investigation — ends in
+;; `SPC TAB N', `SPC TAB f', and the one-shots — ends in
 ;; one `workspace_commands_<uuid>.json' file in the daemon's inbox, written
 ;; either directly (`agent-repl--workspace-create-request') or by the headless
 ;; generation skill this file spawns.  Emacs runs no `git worktree add', names
@@ -618,9 +618,8 @@ workspace (when a real dirname is present) or onto
   "Plist mapping oneshot flavor (`:doom', `:explanation-engine') to a
 FIFO list of amended-oneshot prompts that arrived via `SPC j M-o' /
 `SPC j M-O' BEFORE the corresponding workspace materialized.  Each
-flavor's list is drained by `agent-repl--oneshot-track-workspace' into
-the new workspace's `:pending-prompts' so they are delivered in the
-same burst as the original preemptive prompt.")
+flavor's list is drained by `agent-repl--oneshot-track-workspace'
+through the ordinary prompt dispatch once the workspace exists.")
 
 (defun agent-repl--oneshot-flavor-for-git-root (git-root)
   "Return the oneshot flavor keyword for GIT-ROOT, or nil if not a pinned dir.
@@ -702,10 +701,9 @@ firing does not leave the flavor wedged forever."
 
 (defun agent-repl--oneshot-track-workspace (path dirname)
   "When PATH matches a pinned-oneshot dir AND that flavor's last-ws is
-`:generating', record DIRNAME as the flavor's last workspace and drain
-any prompts queued on `agent-repl--oneshot-amended-prompts' for the
-flavor onto WS's `:pending-prompts' so they ride the same delivery
-burst as the original preemptive prompt.
+`:generating', record DIRNAME as the flavor's last workspace and dispatch
+any prompts queued on `agent-repl--oneshot-amended-prompts' to the new
+workspace through the ordinary prompt path.
 
 Idempotent and safe to call for any workspace, oneshot or not,
 regardless of whether the workspace is a oneshot — it no-ops when PATH
@@ -720,11 +718,10 @@ inside one of the pinned repos)."
       (let ((amended (plist-get agent-repl--oneshot-amended-prompts flavor)))
         (when amended
           (agent-repl--log dirname
-                            "oneshot-track-workspace: draining %d amended prompt(s) for flavor=%s onto ws=%s"
+                            "oneshot-track-workspace: dispatching %d amended prompt(s) for flavor=%s to ws=%s"
                             (length amended) flavor dirname)
-          (agent-repl--ws-put
-           dirname :pending-prompts
-           (append (agent-repl--ws-get dirname :pending-prompts) amended))
+          (dolist (prompt amended)
+            (agent-repl--dispatch-prompt-command dirname prompt))
           (setq agent-repl--oneshot-amended-prompts
                 (plist-put agent-repl--oneshot-amended-prompts flavor nil))))
       (agent-repl--log dirname
@@ -738,10 +735,7 @@ in-flight.
 
 PROMPT must be a non-empty string.  Calls into
 `agent-repl--dispatch-prompt-command' when a real workspace dirname is
-recorded so the prompt either sends immediately (when the agent is ready)
-or rides on the workspace's `:pending-prompts' (when it isn't), matching
-the user-visible expectation that an `already-created' workspace
-receives the prompt directly rather than via the global queue.
+recorded so the prompt uses the daemon-backed ordinary send path.
 
 Signals `user-error' when no oneshot has been created for FLAVOR yet, or
 when the recorded workspace dirname no longer exists (e.g. user killed
@@ -1056,23 +1050,6 @@ would misfire here."
       (agent-repl--drain-pending-magit ws)
       (agent-repl--drain-pending-initial-buffers ws)
       (agent-repl--drain-pending-show-panels ws))))
-
-(defun agent-repl--enqueue-preemptive-prompt (ws prompt &optional origin)
-  "Enqueue PROMPT on workspace WS for delivery once the agent is ready.
-Sets :pending-show-panels so panels open after switching to WS.  The
-panels always open filling the frame (fullscreen is the sole display
-format), so no separate maximize flag is needed.
-
-ORIGIN, when non-nil, rides WITH the parked prompt (see
-`agent-repl--make-pending-prompt') so the delivery stamps the send even
-after a dead-workspace recreation, and every verify retry re-stamps it."
-  (if (and prompt (not (string-empty-p prompt)))
-      (progn
-        (agent-repl--log ws "enqueue-preemptive-prompt: ws=%s enqueuing prompt origin=%s" ws origin)
-        (agent-repl--ws-put ws :pending-prompts
-                            (list (agent-repl--make-pending-prompt prompt origin)))
-        (agent-repl--ws-put ws :pending-show-panels t))
-    (agent-repl--log ws "enqueue-preemptive-prompt: ws=%s prompt empty, skipping" ws)))
 
 (defun agent-repl--remove-doom-dashboard ()
   "Remove the Doom dashboard buffer from the current workspace.
@@ -1522,25 +1499,16 @@ SOURCE-WS from the persp workspace list."
 ;;; Prompt dispatch
 
 (defun agent-repl--dispatch-prompt-command (ws prompt)
-  "Send PROMPT to WS immediately if ready, otherwise enqueue on :pending-prompts.
+  "Send PROMPT to WS through the ordinary daemon-backed prompt path.
 WS may be a full branch name (e.g. DWC/foo) or a bare workspace name (e.g. foo);
 it is normalized to the dirname before lookup.
 
-Readiness is `agent-repl--agent-running-p', which dispatches through
-the frontend registry rather than reading a vterm-specific buffer-local
-— this predicate used to test the vterm buffer-local `agent-repl--ready',
-which is always nil for a gui workspace, so every dispatch silently fell
-through to the enqueue branch instead of ever sending directly."
+The send path establishes the session and lets the daemon serialize a prompt
+against any active turn.  Emacs retains no startup prompt queue."
   (let ((ws (agent-repl--bare-workspace-name ws)))
-    (cond
-     ((agent-repl--agent-running-p ws)
-      (agent-repl--log ws "dispatch-prompt-command: ws=%s ready, sending prompt" ws)
-      (agent-repl--send prompt ws))
-     (t
-      (agent-repl--log ws "dispatch-prompt-command: ws=%s not ready, enqueuing" ws)
-      (agent-repl--ws-put ws :pending-prompts
-                           (append (agent-repl--ws-get ws :pending-prompts)
-                                   (list prompt)))))))
+    (agent-repl--log ws "dispatch-prompt-command: ws=%s prompt-chars=%d branch=direct-send"
+                      ws (length prompt))
+    (agent-repl--send prompt ws)))
 
 ;;; Worktree cleanup
 
@@ -1724,87 +1692,6 @@ no dispatch bookkeeping.  Failures surface through the command\='s own
 ;; on-disk worktree, a git branch, or a
 ;; name already reserved earlier in the current dispatch batch.  When
 ;; a name is clean, it passes through verbatim.
-
-;;; Resume-transcript-missing investigation
-;;
-;; When claude-repld HARD-FAILS a --resume because the target session has
-;; no transcript in its config dir (the daemon's resume viability gate /
-;; `resume_transcript_missing'), the client does NOT fall back to a fresh
-;; conversation.  It opens a dedicated investigation workspace whose agent
-;; hunts for the lost session across both config dirs and diagnoses why
-;; the transcript is gone, and the failing create re-raises a loud,
-;; non-recoverable error naming that workspace.
-
-(defvar agent-repl--resume-investigation-workspaces (make-hash-table :test 'equal)
-  "Hash of resume-id -> investigation workspace name already dispatched.
-Guards `agent-repl--dispatch-resume-investigation' so a repeated create
-attempt for the same lost session (the frontend reattach loop retries)
-references the existing investigation workspace instead of spawning a
-duplicate for every retry.")
-
-(defun agent-repl--resume-investigation-prompt (resume-id searched-paths)
-  "Compose the investigation directive for lost resume target RESUME-ID.
-SEARCHED-PATHS is the list of transcript paths the daemon already
-stat'd (from its `resume_transcript_missing' body).  The agent is tasked
-to locate the session across BOTH config dirs and diagnose why its
-transcript is missing."
-  (format
-   (concat
-    "A claude-repld `--resume` was HARD-FAILED: session %s has no transcript in its config "
-    "dir, so the daemon refused to start it (it will not silently fall back to a fresh "
-    "conversation). The daemon already stat'd: %s.\n\n"
-    "Investigate and report — do not start unrelated work:\n"
-    "1. Search for %s across BOTH config dirs, `~/.claude` and `~/.claude-chesscom`, under each "
-    "of `projects/`, `session-env/`, and `tasks/`. Report every hit (transcript, env stub, task "
-    "record) with its full path, or confirm its absence in each location.\n"
-    "2. Determine WHY the transcript is missing: never written, cleaned up/rotated, or minted "
-    "under a different id. Cross-reference the live session's "
-    "transcript in the same project dir to see which id actually persisted.\n"
-    "3. Summarize the most likely cause and the fastest way to recover the lost conversation, if "
-    "any.")
-   resume-id
-   (if searched-paths (mapconcat #'identity searched-paths ", ") "(none reported)")
-   resume-id))
-
-(defun agent-repl--dispatch-resume-investigation (resume-id searched-paths cwd)
-  "Open (exactly once per RESUME-ID) an investigation workspace for a lost session.
-RESUME-ID is the durable claude session uuid whose transcript the daemon
-could not find; SEARCHED-PATHS is the daemon-reported list of paths it
-stat'd; CWD is the failed workspace's project dir, used to resolve the
-repository the investigation worktree branches from (off master).
-
-Returns the REQUESTED investigation workspace name; the daemon owns the
-final name and resolves any collision itself, so no name reservation or
-disambiguation happens here.  Idempotent: a repeat call for the same
-RESUME-ID returns the previously-requested name without emitting another
-command, so the frontend reattach loop's retries do not spawn a fleet of
-duplicates.  Signals when the repository cannot be resolved from CWD —
-the investigation must land in a real worktree.
-
-No source workspace is nominated: the workspace whose resume just failed
-is precisely the one the daemon cannot be asked to inherit a live
-session's posture from."
-  (or (gethash resume-id agent-repl--resume-investigation-workspaces)
-      (let* ((raw-root (agent-repl--git-string-quiet
-                        "-C" (expand-file-name cwd) "rev-parse" "--show-toplevel"))
-             (git-root (and (stringp raw-root) (not (string-empty-p raw-root))
-                            (file-name-as-directory raw-root))))
-        (unless git-root
-          (error "agent-repl: cannot resolve git root from %s for a resume investigation" cwd))
-        (let* ((name (format "resume-investigate-%s"
-                             (substring resume-id 0 (min 8 (length resume-id)))))
-               (prompt (agent-repl--resume-investigation-prompt resume-id searched-paths))
-               (command-id
-                (agent-repl--workspace-create-request
-                 :name name
-                 :git-root git-root
-                 :base-commit agent-repl-master-branch-name
-                 :prompt prompt)))
-          (agent-repl--log name
-                            "dispatch-resume-investigation: resume-id=%s git-root=%s requested=%s command-id=%s"
-                            resume-id git-root name command-id)
-          (puthash resume-id name agent-repl--resume-investigation-workspaces)
-          name))))
 
 (defun agent-repl--handle-prompt-command (cmd)
   "Handle a \"prompt\" workspace command CMD."
@@ -2577,8 +2464,6 @@ AppKit code on macOS)."
 ;; two extraction policies in use (whole-buffer vs. header-stripped).
 
 (declare-function agent-repl--establish-workspace "commands")
-(declare-function agent-repl--deliver-pending-prompts "session")
-(declare-function agent-repl--make-pending-prompt "session")
 (declare-function agent-repl--agent-running-p "session")
 
 (defun agent-repl--ws-merge-parent-dir (ws)

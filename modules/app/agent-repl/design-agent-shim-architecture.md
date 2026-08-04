@@ -833,7 +833,6 @@ M = modification, D = deletion; ✓ = already landed on `master`.
     │       ├── protocol/layer1.go                            M ✓ (D-phase: the legacy inbound client-command union deleted; shim-stdio direction kept)
     │       ├── session/asyncsource.go                       D ✓ (deleted entirely with the async plane, not just its prose parsing)
     │       ├── registry/registry.go                         M ✓ (shim-socket reattach fields; moved out of session/)
-    │       ├── remediation/remediation.go                   M ✓ (prose path)
     │       └── workspacecmd/workspacecmd.go                 M ✓ (route via SSM + frontend push)
     ├── codex.el                                             M ✓ (D-phase: managed hooks + installer + hooks.json doctor deleted)
     ├── hooks/*-notify.sh                                    D ✓ (D-phase: six orphaned sentinel scripts; prepare-commit-msg-emoji.sh kept)

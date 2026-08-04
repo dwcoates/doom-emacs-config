@@ -934,10 +934,8 @@ windows).  The view arrives later, when the user switches to WS and the
 `:pending-show-panels' drain shows it through the frontend.
 
 Booting the session eagerly (rather than lazily at first open) means a
-generated gui workspace starts its agent immediately: its
-`session_start' hook fires, and the `:pending-prompts' queued by the
-workspace-generation dispatch drain into it
-(`agent-repl--on-session-start-event').
+generated gui workspace starts its agent immediately and receives its
+daemon-owned creation prompt without an Emacs startup queue.
 
 Writes `:agent-state :init' before the session exists — there is a
 brief window between \"the session is being created\" and the daemon's

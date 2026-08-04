@@ -1405,6 +1405,7 @@ func newTestMergeCoordinator(t *testing.T) *merge.QueueCoordinator {
 		// No workspace in these harnesses was created with a before-merge action,
 		// which is the common case; the run goes straight to the plan.
 		BeforeActions:      stubBeforeActions{},
+		AfterActions:       stubAfterActions{},
 		BeforeActionRunner: stubBeforeActionRunner{},
 		AfterActionRunner:  stubAfterActionRunner{},
 	})
@@ -1452,6 +1453,10 @@ func (stubBeforeActionRunner) Run(context.Context, merge.BeforeAction) error { r
 type stubAfterActionRunner struct{}
 
 func (stubAfterActionRunner) Run(context.Context, merge.AfterAction) error { return nil }
+
+type stubAfterActions struct{}
+
+func (stubAfterActions) AfterAction(merge.Request) (string, error) { return "", nil }
 
 // noopPhases is the merge.PhaseSource a unit harness binds: no workspace is
 // pinned on any phase, so the boot sweep has nothing to sweep.

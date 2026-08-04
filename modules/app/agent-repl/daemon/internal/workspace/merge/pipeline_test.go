@@ -439,23 +439,16 @@ func TestAMergedRunPublishesTheAfterActionThenMerged(t *testing.T) {
 	}
 }
 
-// unconfiguredPostMergeHook is a hook for a workspace created with NO
-// postprocessing prompt. Its AfterMerged still completes: the hook also carries
-// the child-to-parent phone-home, which does not depend on the prompt.
-type unconfiguredPostMergeHook struct{ inner *autoPostMergeHook }
+type unconfiguredAfterActions struct{}
 
-func (h unconfiguredPostMergeHook) AfterAction(Request) (string, error) { return "", nil }
-
-func (h unconfiguredPostMergeHook) AfterMerged(ctx context.Context, req Request) error {
-	return h.inner.AfterMerged(ctx, req)
-}
+func (unconfiguredAfterActions) AfterAction(Request) (string, error) { return "", nil }
 
 // THE OTHER HALF OF "IFF CONFIGURED": a workspace with no after-action has no
 // after_action phase to be in. Publishing an empty one would tell every
 // frontend the run was running a turn that does not exist.
 func TestARunWithNoAfterActionConfiguredPublishesNoAfterActionPhase(t *testing.T) {
 	// Arrange.
-	h := newHarnessWith(t, harnessOpts{postMerge: unconfiguredPostMergeHook{inner: newAutoPostMergeHook(4)}})
+	h := newHarnessWith(t, harnessOpts{afterActions: unconfiguredAfterActions{}})
 	if _, err := h.coord.Enqueue(context.Background(), testRequest("a")); err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}
@@ -502,7 +495,7 @@ func TestAConfiguredAfterActionIsDeliveredToTheWorkspacesSession(t *testing.T) {
 // would take the user's session for a turn that says nothing.
 func TestARunWithNoAfterActionConfiguredDeliversNothing(t *testing.T) {
 	// Arrange.
-	h := newHarnessWith(t, harnessOpts{postMerge: unconfiguredPostMergeHook{inner: newAutoPostMergeHook(4)}})
+	h := newHarnessWith(t, harnessOpts{afterActions: unconfiguredAfterActions{}})
 	if _, err := h.coord.Enqueue(context.Background(), testRequest("a")); err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}
@@ -568,7 +561,7 @@ func TestAFailedAfterActionsErrorRidesOnTheMergedStatus(t *testing.T) {
 // the merged status rather than being swallowed.
 func TestAnUnreadableAfterActionRecordReachesTheMergedStatus(t *testing.T) {
 	// Arrange.
-	h := newHarnessWith(t, harnessOpts{postMerge: unreadableAfterActionHook{inner: newAutoPostMergeHook(4)}})
+	h := newHarnessWith(t, harnessOpts{afterActions: unreadableAfterActions{}})
 	if _, err := h.coord.Enqueue(context.Background(), testRequest("a")); err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}
@@ -585,22 +578,18 @@ func TestAnUnreadableAfterActionRecordReachesTheMergedStatus(t *testing.T) {
 	}
 }
 
-// unreadableAfterActionHook models creation records that cannot be read at all.
-type unreadableAfterActionHook struct{ inner *autoPostMergeHook }
+// unreadableAfterActions models creation records that cannot be read at all.
+type unreadableAfterActions struct{}
 
-func (h unreadableAfterActionHook) AfterAction(Request) (string, error) {
+func (unreadableAfterActions) AfterAction(Request) (string, error) {
 	return "", sentinelError("records unreadable")
 }
 
-func (h unreadableAfterActionHook) AfterMerged(ctx context.Context, req Request) error {
-	return h.inner.AfterMerged(ctx, req)
-}
-
-// THE PARENT HANDOFF'S OWN FAILURE republishes the terminal status BESIDE the
+// PROCESS-LEVEL POST-MERGE FAILURE republishes the terminal status BESIDE the
 // after-action's error rather than instead of it: the merged fact is set-once,
 // but a frontend must not lose one failure to gain the other.
-func TestAFailedPostMergeHandoffJoinsTheAfterActionErrorOnTheMergedStatus(t *testing.T) {
-	// Arrange -- both the action's turn and the parent handoff fail.
+func TestAFailedPostMergeHookJoinsTheAfterActionErrorOnTheMergedStatus(t *testing.T) {
+	// Arrange -- both the action's turn and the process aftermath fail.
 	hook := newFakePostMergeHook(4)
 	h := newHarnessWith(t, harnessOpts{
 		postMerge:   hook,
@@ -614,16 +603,16 @@ func TestAFailedPostMergeHandoffJoinsTheAfterActionErrorOnTheMergedStatus(t *tes
 	waitForPhase(t, h, PhaseMerged)
 	<-hook.calls
 
-	// Act -- the handoff refuses.
+	// Act -- process-level aftermath refuses.
 	hook.results <- sentinelError("the parent refused the prompt")
 
 	// Assert -- the republished merged carries both.
 	if tr := <-h.sink.ch; tr.phase != PhaseMerged {
-		t.Fatalf("phase after the failed handoff = %s, want a republished merged", tr.phase)
+		t.Fatalf("phase after failed aftermath = %s, want a republished merged", tr.phase)
 	}
 	status := lastStatusOfPhase(t, h, func(s *frontendv1.MergeStatus) bool { return s.GetMerged() != nil })
 	got := status.GetMerged().GetAfterActionError()
 	if !strings.Contains(got, "ENDED IN ERROR") || !strings.Contains(got, "refused the prompt") {
-		t.Fatalf("after_action_error = %q, want BOTH the action's and the handoff's failure", got)
+		t.Fatalf("after_action_error = %q, want BOTH the action's and aftermath's failure", got)
 	}
 }

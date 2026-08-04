@@ -80,9 +80,7 @@ import type { CommandStruct } from "./frontend-command.js";
 import { PendingPermissionMode } from "./pending-mode.js";
 import { ungatedBannerHtml, ungatedModeOf, unswitchableModeOptionHtml } from "./ungated.js";
 import { DRAINING_BODY_CLASS, drainBannerHtml } from "./drain.js";
-import { rebindSession, rememberResumeKeys } from "./rebind.js";
 import { SessionRebase, claudeSessionIdOf } from "./session-rebase.js";
-import { remediationNotice, requestRemediation } from "./remediation.js";
 import { requestSupportWorkspace } from "./unsupported.js";
 import { statusSnapshotFromInit } from "./status.js";
 import { compactionBannerHtml, FeedRenderer, lastUserTurnId, modelOptionsHtml } from "./render.js";
@@ -123,9 +121,7 @@ async function boot(): Promise<void> {
   // The session id to join. When ?session is unset it is created over the WS
   // (CreateSessionCmd) once the command dispatcher exists — see below.
   const joinParam = params.get("session");
-  // Mutable on purpose: the "session gone" rebind swaps the live view
-  // onto a successor session id; every closure below reads the current
-  // binding.
+  // Mutable until an omitted ?session is created through the command plane.
   let activeSessionId: string = joinParam ?? "";
   let ws: WsClient;
 
@@ -134,7 +130,6 @@ async function boot(): Promise<void> {
   // announced vendor session uuid: the first is ADOPTED (persist the resume
   // keys), a changed one is a ROTATION — the conversation retired its store seq
   // space, and this end rebases onto the new one (see session-rebase.ts).
-  // Forgotten on a rebind so a successor session starts fresh.
   const sessionRebase = new SessionRebase({ log: (level, message) => clog(level, message) });
 
   // Delivery-path diagnostics (§2.15). The webapp→daemon log forward rode the
@@ -183,8 +178,8 @@ async function boot(): Promise<void> {
     adapterLog(level === "debug" ? "info" : level, message),
   );
   // The frontend→daemon command plane (§task 4): every outbound command is a
-  // FrontendCommand protojson frame over the CURRENT socket (read lazily, like
-  // wslog, so a rebind's successor socket carries subsequent commands). The
+  // FrontendCommand protojson frame over the current socket (read lazily, like
+  // wslog, so startup construction order does not capture an unset client). The
   // dispatcher is fed every inbound decoded frame (`observe`) so it can
   // correlate CommandAcks by requestId and a createSession's pushed SessionView.
   const dispatcher = new CommandDispatcher({
@@ -257,7 +252,7 @@ async function boot(): Promise<void> {
   // a search runs, and the query shows up here instead.
   const searchStatusEl = must("search-status");
   // Chess-game bubbles fetch their payload through the daemon and mount
-  // the in-place-served widget; the session getter tracks rebinds, and
+  // the in-place-served widget; the session getter observes startup creation, and
   // the pinning pair lets an async board mount restore the feed's tail.
   configureChessGames({
     base: httpBase,
@@ -365,10 +360,10 @@ async function boot(): Promise<void> {
       submitPrompt(text);
     },
     // Watcher folds poll this while open (§ watcher-bubble expansion),
-    // targeting the CURRENT session so a rebind moves the polls with it.
+    // targeting the current session.
     fetchTaskTail: (taskId, offset) => fetchTaskTail(httpBase, activeSessionId, taskId, offset),
     // The unsupported-command card's button. Targets the CURRENT session
-    // so a rebind opens the workspace against the checkout in view, and
+    // so the workspace opens against the checkout in view, and
     // resolves to the workspace name Emacs was asked for — Emacs, not the
     // daemon, decides what actually happens next.
     addSupport: (command) => requestSupportWorkspace(httpBase, activeSessionId, command),
@@ -377,7 +372,7 @@ async function boot(): Promise<void> {
     // daemon's own view, which is why the old GET /status and its
     // /status/refresh re-probe are both gone). Only the account half is
     // fetched, on the sanctioned account endpoint, targeting the CURRENT
-    // session so a rebind reads the account of the checkout in view.
+    // session so the account belongs to the checkout in view.
     getStatus: () =>
       fetchAccount(httpBase, activeSessionId).then((account) => ({
         snapshot: statusSnapshotFromInit(store.state.systemInit),
@@ -834,65 +829,6 @@ async function boot(): Promise<void> {
     if (!frames.flush()) frames.schedule();
   });
 
-  // swapTo rebinds the live view onto a successor session id (the
-  // client-side twin of the Emacs sync-webview rebind): fresh store,
-  // fresh socket, URL param updated so a reload lands on the successor.
-  const swapTo = (next: string): void => {
-    // Forwarded on the OLD socket in the instant before it closes; when
-    // that loses the race the line still reaches the console.
-    clog("warn", `session rebind: ${activeSessionId} -> ${next}`, {
-      fromSessionId: activeSessionId,
-      toSessionId: next,
-    });
-    ws.close();
-    activeSessionId = next;
-    // The successor is a fresh conversation view, with its own claude session
-    // id: its first announcement is an adoption, never a rotation.
-    sessionRebase.forget();
-    // A paint scheduled against the dead session would render the
-    // just-reset (empty) store; the successor's hello drives the next one.
-    frames.cancel();
-    // The successor's blocks are not this session's: drop every reveal cursor
-    // so a reused block id cannot inherit a dead session's shown length.
-    smooth.reset();
-    store.reset();
-    // The successor's turn is not this one's: stop the clock now rather than
-    // letting it run on the dead session until the successor's hello lands.
-    // The dead session's agents are not the successor's either.
-    timer.stop();
-    agentClock.stop();
-    const url = new URL(location.href);
-    url.searchParams.set("session", next);
-    history.replaceState(null, "", url.toString());
-    spinnerEl.classList.remove("alarm");
-    remediationEl.textContent = "";
-    ws = makeClient(next);
-    ws.connect();
-  };
-
-  // remediate dispatches the headless analyst — the LAST resort, reached
-  // only once daemon-side rehydration (the probe already failed) and the
-  // client-side rebind above have both come up empty.
-  const remediate = (sessionId: string): void => {
-    remediationEl.textContent = remediationNotice("devising");
-    void requestRemediation(httpBase, sessionId)
-      .then((phase) => {
-        remediationEl.textContent = remediationNotice(phase);
-      })
-      .catch((err: unknown) => {
-        // A remediation that never launched must say so: silently
-        // leaving "devising remediation plan" up would claim a recovery
-        // effort that does not exist.
-        remediationEl.textContent = remediationNotice("failed");
-        clog("error", `remediation dispatch failed: ${String(err)}`);
-        // The notice line is transient — the next status overwrites it. The
-        // card is the durable record, and it carries the raw cause the
-        // notice has no room for.
-        if (store.addFailure(controlPlaneFailure("the remediation request", err)))
-          frames.schedule();
-      });
-  };
-
   let logConnectionGeneration = 0;
   const makeClient = (sessionId: string): WsClient => {
     logConnectionGeneration++;
@@ -1011,20 +947,8 @@ async function boot(): Promise<void> {
         // and a rotation both re-bind it: the attribution on every log record
         // must name the conversation that is live RIGHT NOW, which is exactly
         // why the uuid is read from the pushed plane and never stored.
-        //
-        // The rebind record beside it holds only the cwd. It used to hold the
-        // uuid too, which made the browser a second authority on which
-        // conversation this workspace owns; the daemon resolves that now.
         if (verdict !== "unchanged") {
           bindLogContext({ claude_session_id: sessionRebase.claudeSessionId });
-          try {
-            rememberResumeKeys(localStorage, activeSessionId, {
-              cwd: store.state.cwd,
-            });
-          } catch (err) {
-            clog("error", `rememberResumeKeys failed: ${String(err)}`);
-            throw err;
-          }
         }
         // The rebased view holds no history at all, and the new space's items
         // may have been pushed before this end learned the rotation. Asking from
@@ -1092,29 +1016,17 @@ async function boot(): Promise<void> {
         if (store.addFailure(sessionGoneFailure(sessionId))) frames.schedule();
         statusEl.textContent = "session gone";
         statusEl.classList.remove("ok");
-        // The turn-in-flight tick becomes a red/orange alarm: a lost session
-        // is not a quiet state, and the dot is what the eye lands on.
+        // A vanished session is terminal for this page. Keep the failure
+        // visible and stop here rather than synthesizing a successor session
+        // or submitting any agent-authored recovery prompt.
         spinnerEl.classList.add("alarm");
-        remediationEl.textContent = "rebinding session";
-        void rebindSession(sessionId, localStorage, createSessionViaWs)
-          .then((next) => {
-            if (next !== null) {
-              swapTo(next);
-              return;
-            }
-            // Nothing durable was ever stored for this id: remediate.
-            remediate(sessionId);
-          })
-          .catch((err: unknown) => {
-            clog("error", `session rebind failed: ${String(err)}`);
-            remediate(sessionId);
-          });
+        remediationEl.textContent = "session unavailable";
+        clog("error", `session ${sessionId} is gone; automatic recovery is disabled`);
       },
     });
     return client;
   };
-  // Session creation (replaces POST /sessions), used both to open the first
-  // session and to rebind a gone one: a short-lived connection to the unscoped
+  // Session creation (replaces POST /sessions) uses a short-lived connection to the unscoped
   // /frontend WS — the daemon has no session-scoped socket to offer before the
   // session exists. It feeds ONLY its own dispatcher's correlation (never the
   // render store), sends CreateSessionCmd once the initial snapshot lands (so
@@ -1186,10 +1098,8 @@ async function boot(): Promise<void> {
           }
         },
       });
-      // Its OWN dispatcher, bound to this socket: the live session's
-      // dispatcher must not be re-pointed at a socket that is about to close
-      // (a rebind runs this while the session socket is still the one every
-      // other command rides).
+      // Its OWN dispatcher is bound to this bootstrap socket so the live
+      // session's dispatcher is never repointed at a socket about to close.
       const bootDispatcher = new CommandDispatcher({
         send: (raw) => bootWs.send(raw),
         logLocal: (message) => log("error", message, { operation: "webapp.bootstrap-client-log-rejected", localOnly: true }),

@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-// This file holds the merge pipeline's THREE outbound ports beyond the ones the
+// This file holds the merge pipeline's outbound ports beyond the ones the
 // package already had (merge.ConflictResolver, merge.TestFailureResolver,
 // merge.PostMergeHook). Each needs the session controller or the workspace
 // creation records, which this package must not import, so each is an interface
@@ -92,6 +92,13 @@ type SessionDeaths interface {
 // and collapsing them would silently skip an action the user asked for.
 type BeforeActionSource interface {
 	BeforeAction(ws string) (string, error)
+}
+
+// AfterActionSource resolves the postprocessing action a workspace was created
+// with. A workspace with no action reports "", nil. An unreadable record is an
+// error: absence and a failed lookup must never be conflated.
+type AfterActionSource interface {
+	AfterAction(req Request) (string, error)
 }
 
 // BeforeAction is one before_ws_merge delivery: the recorded prompt, run against

@@ -51,8 +51,6 @@ at; re-derive them before relying on a headline number.
 
 | Function | Covered | Tests |
 |----------|---------|-------|
-| `agent-repl--deliver-pending-prompts` | Yes | live buf, dead buf |
-| `agent-repl--drain-pending-prompts` | Yes | empty, sends |
 | `agent-repl--finalize-ready-state` | Yes | cancels timer + captures session |
 | `agent-repl--handle-first-ready` | Yes | idempotent, with owning ws, without owning ws |
 | `agent-repl--on-vterm-title-set` | Yes | non-claude buffer, claude buffer |

@@ -2472,8 +2472,8 @@ function decodeShutdownHold(v: unknown): ShutdownHold {
     hold.tasks = { count };
   }
   // The workspace is the join key a client attributes the hold by, and the
-  // session id is what keeps a hold from being pinned on a successor session
-  // of the same workspace.
+  // session id is what keeps a hold from being pinned on a later independent
+  // session of the same workspace.
   if (hold.workspace === "" || hold.sessionId === "") {
     throw new Error("frontend-proto: ShutdownHold missing `workspace` or `sessionId`");
   }
