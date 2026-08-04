@@ -38,11 +38,13 @@ import {
   HIBERNATED_BODY_CLASS,
   REVIVE_COMPACT_ATTR,
   REVIVE_DIRECT_ATTR,
+  hibernateRefusedNotice,
   hibernationBlocked,
   hibernationBlockedLog,
   hibernationNoticeHtml,
   hibernationSendTitle,
   revivalGateHtml,
+  reviveRefusedLog,
   type RevivePending,
 } from "./hibernation.js";
 import { mergeStatusLogValue } from "./merge-status.js";
@@ -233,8 +235,14 @@ async function boot(): Promise<void> {
   clientLogSink = (level, message, context) =>
     dispatcher.clientLog(cmdWorkspace(), level, message, context as CommandStruct | undefined);
   // CommandDispatcher owns and canonically logs every command rejection before
-  // rejecting its Promise. UI call sites consume that already-owned rejection
-  // without writing a duplicate record.
+  // rejecting its Promise, AND surfaces every rejection shape through
+  // `onFailure` above — a classified failure, a bare error string, or a send
+  // the socket refused all land as a card in the feed. UI call sites consume
+  // that already-owned rejection without writing a duplicate record.
+  //
+  // NOT used by hibernate and revive: those two have UI state of their own to
+  // unwind (the gate) and a place the user is already looking (the gate card,
+  // the topbar status line), so they carry real handlers.
   const consumeOwnedDispatchFailure = (_err: unknown): void => {};
 
   // The permission mode the user picked that no prompt has carried yet:
@@ -695,12 +703,13 @@ async function boot(): Promise<void> {
     renderChrome();
     void dispatcher.reviveSession(cmdWorkspace(), mode).catch((err: unknown) => {
       // The dispatcher owns the canonical rejection record and the failure
-      // card; this only unwinds the view state, because a refused decision
-      // leaves the session exactly as asleep as it was and the user has to be
-      // able to choose again.
+      // card; this unwinds the view state, because a refused decision leaves
+      // the session exactly as asleep as it was and the user has to be able to
+      // choose again — and says so on the workspace's own log, which is where
+      // a gate that came back up is explained.
       revivePending = null;
       renderChrome();
-      consumeOwnedDispatchFailure(err);
+      clog("error", reviveRefusedLog(mode, err));
     });
   };
   revivalGateEl.addEventListener("click", (e) => {
@@ -709,14 +718,6 @@ async function boot(): Promise<void> {
     );
     if (el === null) return;
     sendRevive(el.hasAttribute(REVIVE_COMPACT_ATTR) ? "compactFirst" : "direct");
-  });
-
-  // The session-level sleep verb. It ASKS; the daemon refuses while a turn is
-  // live or the merge lease is held, and that nack rides the ordinary
-  // CommandAck failure path into a classified card — so nothing here pre-judges
-  // settledness, which this end cannot resolve.
-  hibernateEl.addEventListener("click", () => {
-    void dispatcher.hibernateWorkspace(cmdWorkspace()).catch(consumeOwnedDispatchFailure);
   });
 
   // The reveal half of a roster-row click: dismiss the roster either way so
@@ -731,6 +732,21 @@ async function boot(): Promise<void> {
       if (remediationEl.textContent === notice) remediationEl.textContent = "";
     }, MISSING_BUBBLE_NOTICE_MS);
   };
+
+  // The session-level sleep verb. It ASKS; the daemon refuses while a turn is
+  // live or the merge lease is held, and that nack rides the ordinary
+  // CommandAck failure path into a classified card — so nothing here pre-judges
+  // settledness, which this end cannot resolve.
+  //
+  // The refusal is ALSO said in the topbar's status line: the button hides
+  // itself the moment the session sleeps, so a refusal rendered only in the
+  // feed would leave the click looking like it did nothing at all. Bound below
+  // `notify` because that is the slot it writes to.
+  hibernateEl.addEventListener("click", () => {
+    void dispatcher.hibernateWorkspace(cmdWorkspace()).catch((err: unknown) => {
+      notify(hibernateRefusedNotice(err));
+    });
+  });
 
   // The footer's own delegation. Its dock is rewritten by every renderChrome,
   // so the verbs are delegated off the slot rather than bound to nodes that

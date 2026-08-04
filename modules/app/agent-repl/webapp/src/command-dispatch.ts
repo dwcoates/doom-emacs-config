@@ -31,6 +31,7 @@ import {
   type FrontendCommandBody,
   PromptOrigin,
 } from "./frontend-command.js";
+import type { ClientFailureType } from "./local-failure.js";
 import { log, logVerbose } from "./wslog.js";
 
 /**
@@ -60,6 +61,62 @@ const MAX_CONSECUTIVE_CLIENT_LOG_REJECTIONS = 20;
 
 function asError(value: unknown): Error {
   return value instanceof Error ? value : new Error(String(value));
+}
+
+/**
+ * Mint the wire-shaped failure the ack sink takes.
+ *
+ * The sink's parameter is a decoded `SystemFailure` because its usual source
+ * IS one (`CommandAck.failure`), so a locally-classified refusal is minted in
+ * that shape rather than teaching the sink a second one. `itemUuid` follows
+ * `local-failure.ts`'s convention — derived from the type and the command, so
+ * a repeated refusal of the same command reconciles onto one card instead of
+ * stacking, while two different commands stay two cards.
+ *
+ * INTERNAL class always, for the same reason `clientFailure` is: nothing this
+ * end can classify implicates the account.
+ */
+function localCommandFailure(
+  type: ClientFailureType,
+  command: string,
+  message: string,
+  sourceDetail: string,
+): SystemFailure {
+  return {
+    errorClass: "INTERNAL",
+    errorType: type,
+    message,
+    sourceDetail,
+    resolvedAtMs: 0,
+    itemUuid: `local:${type}:${command}`,
+    detail: { kind: "none" },
+  };
+}
+
+/**
+ * The daemon refused a command and classified nothing.
+ *
+ * Its prose is carried VERBATIM: the daemon decided this refusal, and the only
+ * thing this end adds is a name for it, because an unnamed refusal reached the
+ * user through nothing at all.
+ */
+export function unclassifiedRejectionFailure(command: string, error: string): SystemFailure {
+  return localCommandFailure(
+    "client.command_rejection_unclassified",
+    command,
+    error === "" ? `${command} was refused` : error,
+    `command=${command}`,
+  );
+}
+
+/** The command never left this page: the socket was not open. */
+export function commandUnsentFailure(command: string): SystemFailure {
+  return localCommandFailure(
+    "client.command_unsent",
+    command,
+    `${command} was not sent: the connection to the daemon is down`,
+    `command=${command} cause=socket not open`,
+  );
 }
 
 function requiredSelectedModel(ack: CommandAck, disposition: "ack" | "nack"): string {
@@ -324,6 +381,11 @@ export class CommandDispatcher {
           operation: "command-dispatch.dispatch-rejected",
           context: { request_id: requestId, workspace, command: body.case, pending_count: this.pending.size, cause: "socket not open" },
         });
+        // A REFUSED SEND is a rejection shape too, and the one no ack will ever
+        // arrive for. Surfaced through the same sink so a command that never
+        // left the page is as visible as one the daemon turned down — log once
+        // (above), render once (here).
+        this.opts.onFailure?.(commandUnsentFailure(body.case));
         reject(new Error(`${body.case}: socket not open`));
       }
     });
@@ -445,7 +507,16 @@ export class CommandDispatcher {
     }
     // Surface BEFORE rejecting: every caller of these promises swallows the
     // rejection into a log line, so the reject alone reaches no one.
-    if (ack.failure !== undefined) this.opts.onFailure?.(ack.failure);
+    //
+    // EVERY rejection shape, not only the classified one. A nack carrying just
+    // an error string used to be log-only, which is exactly the disposition
+    // hibernate and revive cannot afford: their refusal ("a turn is live", "the
+    // merge lease is held") is the ONLY thing that tells the user why the
+    // workspace they asked to sleep is still awake. The daemon's prose is
+    // carried verbatim; naming it is all this end adds.
+    this.opts.onFailure?.(
+      ack.failure ?? unclassifiedRejectionFailure(p.command, ack.error),
+    );
     // CreateSession has its own two-phase waiter. Its rejection flows through
     // failCreate, which owns the one canonical failure record.
     if (p.command !== "createSession") {
