@@ -290,6 +290,20 @@ type Config struct {
 	// keepalive.DefaultConfig, because a zero TTL would read every session as
 	// already cache-expired.
 	KeepAlive keepalive.Config
+	// RewindLineages arms the one-shot rewind argv for the spawn that follows a
+	// transcript rewind (rewind.go). Nil disables rewinding, loudly at the site
+	// that would have used it: without it the shim could not be told what was
+	// dropped, and the rewind would leave no durable trace.
+	RewindLineages RewindLineageArmer
+	// VendorSessions performs the rewind's ATOMIC registry flip. It is the same
+	// object as Registrar in production; it is a separate field because the
+	// rewind needs exactly one method and a harness should be able to supply
+	// just that one.
+	VendorSessions VendorSessionAdopter
+	// VendorSessionOf reads the vendor conversation uuid a session currently
+	// resumes, which is the transcript the rewind truncates. Nil makes a rewind
+	// impossible rather than guessed at.
+	VendorSessionOf func(sessionID string) (string, bool)
 	// Logf is the daemon logger. Nil discards.
 	Logf func(string, ...any)
 	// Classifier judges prompts queued during a running turn (E4). Nil leaves
