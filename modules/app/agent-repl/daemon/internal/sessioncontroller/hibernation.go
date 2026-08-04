@@ -55,6 +55,17 @@ var ErrHibernationInFlight = errors.New("session-controller: a hibernation trans
 // had just happened.
 var ErrHibernationNoLongerIdle = errors.New("session-controller: the session is no longer idle enough for the automatic hibernation that was decided for it")
 
+// ErrHibernationMergeLeaseHeld reports a hibernation transition refused because
+// merge.Coordinator owns the workspace's shim.
+//
+// IT IS CHECKED IN THE TRANSITION, not only in the forced path that used to be
+// the sole place it was asked. A merge holds the lease precisely because it is
+// driving the session, and an automatic cause stopping that shim would kill
+// conflict resolution mid-flight and leave a durable sleep the merge's own
+// prompts would then be nacked by. The forced path keeps its earlier, friendlier
+// nack; this is the one no route goes around.
+var ErrHibernationMergeLeaseHeld = errors.New("session-controller: the workspace's session is held by a merge exclusivity lease and cannot be hibernated")
+
 // ErrHibernated reports an operation refused because the session is
 // hibernated and the user has not made a revival choice. Every prompt path
 // funnels into the gate that returns it (promptdispatch.go).
@@ -106,6 +117,14 @@ func (m *Manager) HibernateWithCause(workspace string, account registry.Hibernat
 	if m.cfg.Hibernations == nil {
 		return fmt.Errorf("session-controller: refusing to hibernate workspace %q cause=%q: no hibernation registrar is wired, so the sleep could not be made durable and the next daemon would revive the session implicitly",
 			workspace, account.Cause)
+	}
+	// THE MERGE LEASE OUTRANKS EVERY CAUSE. Asked here rather than in each
+	// caller, so the automatic causes cannot reach the teardown by a route the
+	// forced path's own check does not cover.
+	if m.cfg.SSM.MergeLeaseHeld(workspace) {
+		m.logf("session-controller: hibernation transition REFUSED ws=%q cause=%s — merge.Coordinator holds the exclusivity lease on this workspace's session; nothing was stopped and nothing was persisted",
+			workspace, account.Cause)
+		return fmt.Errorf("%w: workspace %q, cause %s", ErrHibernationMergeLeaseHeld, workspace, account.Cause)
 	}
 	sessionID, ok := m.cfg.Locator.Locate(workspace)
 	if !ok {
