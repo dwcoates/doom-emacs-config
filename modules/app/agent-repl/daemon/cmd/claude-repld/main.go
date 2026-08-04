@@ -321,6 +321,28 @@ func main() {
 	if err != nil {
 		daemonFatal(daemonLog, "claude-repld: open turn accounting store: %v", err)
 	}
+	// EVERY KEEP-ALIVE WINDOW STILL OPEN HERE IS AN ORPHAN. No session
+	// controller exists yet, so no ping can be in flight, so an unclosed row can
+	// only be one a previous daemon died in the middle of — and an open window
+	// has no upper bound, meaning that row is withholding its workspace's entire
+	// conversation from every rendering until somebody closes it.
+	//
+	// It runs after the turn accounting store because the repair is stamped from
+	// that store's durable turn ends, never from now: now is when the daemon
+	// restarted, and closing there would extend the exclusion over every real
+	// turn the outage spanned.
+	//
+	// FATAL on failure, for the ledger's own reason: a daemon that cannot
+	// reconcile the ledger cannot tell its pings from the user's conversation,
+	// and starting anyway would silently blackout whatever it failed to repair.
+	reconciled, err := keepAliveWindows.ReconcileOpenWindows(turnAccountings)
+	if err != nil {
+		daemonFatal(daemonLog, "claude-repld: reconcile open keep-alive windows: %v", err)
+	}
+	if reconciled > 0 {
+		daemonLog.With("operation", "reconcile-keep-alive-windows").Log(
+			"claude-repld: closed %d keep-alive window(s) left open by a previous daemon; each was withholding every later conversation item on its workspace", reconciled)
+	}
 	tokenUtilizations, err := statedb.NewTokenUtilizations(stateStore)
 	if err != nil {
 		daemonFatal(daemonLog, "claude-repld: open token utilization store: %v", err)

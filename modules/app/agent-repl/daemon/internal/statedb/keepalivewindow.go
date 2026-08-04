@@ -129,6 +129,86 @@ func (k *KeepAliveWindows) Covers(workspace string, tsMs int64) (bool, error) {
 	return n > 0, nil
 }
 
+// TurnEndLookup answers, from durable evidence, when a turn ended. Satisfied by
+// *TurnAccountings.
+//
+// It is an interface rather than a concrete dependency so the reconciliation
+// states exactly what it needs — one durable instant per turn id — and a test
+// can supply that without a second table.
+type TurnEndLookup interface {
+	// EndedAtMs reports a turn's durable end instant, and whether one exists.
+	EndedAtMs(turnID string) (int64, bool, error)
+}
+
+// ReconcileOpenWindows closes every window a previous daemon left open, and
+// reports how many it closed.
+//
+// WHY THIS EXISTS. A window is opened before the ping is submitted and closed
+// at the ping's turn end. Everything between those two writes is a hole: a
+// crash, a SIGTERM, an account switch, a session delete — anything that stops
+// the daemon mid-ping — leaves ended_at_ms=0 with nobody alive who knows the
+// turn id. An open window has NO UPPER BOUND, so that row goes on excluding
+// every conversation item on its workspace from every rendering, forever. The
+// in-memory claim was the only thing bound to close it, and in-memory state
+// does not survive the deaths this repairs.
+//
+// AT BOOT, EVERY OPEN ROW IS AN ORPHAN. No ping can be in flight before any
+// session controller exists, so "open" and "abandoned" are the same set — which
+// is what makes this a reconciliation rather than a guess, and why it must run
+// during store bring-up and not later.
+//
+// THE END IS STAMPED FROM DURABLE DATA, NEVER FROM NOW. Now is when the repair
+// happened to run, which may be days after the ping; stamping it would extend
+// the exclusion across every real turn in between and delete them from the
+// rendering — the same blackout, merely bounded. The honest end is the turn's
+// own recorded end when the store holds one, and otherwise the window's own
+// start: an interval containing only the instant the daemon committed to a ping
+// it never finished.
+func (k *KeepAliveWindows) ReconcileOpenWindows(turns TurnEndLookup) (int, error) {
+	if turns == nil {
+		return 0, fmt.Errorf("statedb: keep-alive window reconciliation needs a turn end lookup")
+	}
+	rows, err := k.db.Query(
+		`SELECT turn_id, started_at_ms FROM keep_alive_window WHERE ended_at_ms = 0`)
+	if err != nil {
+		return 0, fmt.Errorf("statedb: list open keep-alive windows: %w", err)
+	}
+	type openWindow struct {
+		turnID      string
+		startedAtMs int64
+	}
+	var open []openWindow
+	for rows.Next() {
+		var w openWindow
+		if err := rows.Scan(&w.turnID, &w.startedAtMs); err != nil {
+			rows.Close()
+			return 0, fmt.Errorf("statedb: scan open keep-alive window: %w", err)
+		}
+		open = append(open, w)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, fmt.Errorf("statedb: iterate open keep-alive windows: %w", err)
+	}
+	rows.Close()
+	closed := 0
+	for _, w := range open {
+		endedAtMs := w.startedAtMs
+		endedAt, ok, err := turns.EndedAtMs(w.turnID)
+		if err != nil {
+			return closed, fmt.Errorf("statedb: reconcile keep-alive window %s: %w", w.turnID, err)
+		}
+		if ok && endedAt > endedAtMs {
+			endedAtMs = endedAt
+		}
+		if err := k.Close(w.turnID, endedAtMs); err != nil {
+			return closed, err
+		}
+		closed++
+	}
+	return closed, nil
+}
+
 // List returns workspace's windows, oldest first. It backs the rewind's
 // dropped-turn accounting and the tests.
 func (k *KeepAliveWindows) List(workspace string) ([]KeepAliveWindow, error) {
