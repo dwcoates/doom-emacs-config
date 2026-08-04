@@ -1,9 +1,13 @@
 package server
 
 import (
+	"context"
+	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"claude-repld/internal/registry"
 	"claude-repld/internal/sessioncontroller"
 )
 
@@ -96,33 +100,63 @@ func TestShimArgvOmitsTheLineageWhenThereWasNoRewind(t *testing.T) {
 	}
 }
 
-// THE LINEAGE IS CONSUMED, NOT READ. A lineage left armed would ride the next
-// unrelated respawn, telling the shim it had just been rewound when it had not
-// — and the shim would emit a second SessionRewound for a rewind that never
-// happened.
-func TestArmRewindLineageIsConsumedExactlyOnce(t *testing.T) {
-	// Arrange.
-	s := &ShimSpawner{logf: func(string, ...any) {}}
-	if err := s.ArmRewindLineage("s1", completeLineage()); err != nil {
-		t.Fatalf("ArmRewindLineage: %v", err)
+// ---------------------------------------------------------------------------
+// The lineage is durable, and it rides the flip
+// ---------------------------------------------------------------------------
+
+// lineageRig is a registry holding one session that already named a
+// conversation, plus the registrar and a spawner over the same store.
+func lineageRig(t *testing.T) (*registry.Registry, *RegistryRegistrar, *ShimSpawner, *[]CreateOpts) {
+	t.Helper()
+	reg := registry.Open(filepath.Join(t.TempDir(), "registry.db"), func(string, ...any) {})
+	if err := reg.Put(registry.Record{
+		SessionID: "s1", CWD: t.TempDir(), ClaudeSessionID: "old-uuid",
+	}); err != nil {
+		t.Fatalf("registry Put: %v", err)
 	}
+	var spawned []CreateOpts
+	s := &ShimSpawner{
+		reg:       reg,
+		logf:      func(string, ...any) {},
+		handles:   map[string]ShimHandle{},
+		forceFake: true,
+		spawn: func(_ string, opts CreateOpts) (ShimHandle, error) {
+			spawned = append(spawned, opts)
+			return ShimHandle{}, nil
+		},
+	}
+	return reg, &RegistryRegistrar{Reg: reg, Logf: func(string, ...any) {}}, s, &spawned
+}
+
+// ONE WRITE. The flip is the rewind's only destructive act and the lineage is
+// the only account of what it dropped, so a record that names the new uuid must
+// name the lineage too.
+func TestAdoptRewoundVendorSessionIDPersistsTheLineageWithTheFlip(t *testing.T) {
+	// Arrange.
+	reg, registrar, _, _ := lineageRig(t)
 
 	// Act.
-	first, firstOK := s.takeRewindLineage("s1")
-	_, secondOK := s.takeRewindLineage("s1")
+	if _, _, adopted := registrar.AdoptRewoundVendorSessionID("s1", "new-uuid", completeLineage()); !adopted {
+		t.Fatal("AdoptRewoundVendorSessionID refused a complete lineage")
+	}
 
 	// Assert.
-	if !firstOK || first.PreviousVendorSessionID != "old-uuid" {
-		t.Fatalf("first take = %+v ok=%v, want the armed lineage", first, firstOK)
+	rec, ok := reg.Get("s1")
+	if !ok {
+		t.Fatal("the session record vanished")
 	}
-	if secondOK {
-		t.Fatal("the lineage survived its spawn; a second spawn would announce a rewind that never happened")
+	if rec.ClaudeSessionID != "new-uuid" {
+		t.Fatalf("claude_session_id = %q, want the rewound uuid", rec.ClaudeSessionID)
+	}
+	if rec.Rewind.PreviousVendorSessionID != "old-uuid" || rec.Rewind.DroppedTurnIDs != "ka_1,ka_2" {
+		t.Fatalf("record lineage = %+v, want the one the flip accounted for", rec.Rewind)
 	}
 }
 
-// An INCOMPLETE lineage is refused at the arming site rather than stored and
-// discovered at spawn time.
-func TestArmRewindLineageRefusesAnIncompleteLineage(t *testing.T) {
+// AN INCOMPLETE LINEAGE REFUSES THE WHOLE WRITE, flip included. Adopting the
+// truncated uuid while arming a partial lineage would leave the session naming
+// a transcript the shim then refuses to spawn on.
+func TestAdoptRewoundVendorSessionIDRefusesAnIncompleteLineage(t *testing.T) {
 	tests := []struct {
 		name    string
 		lineage sessioncontroller.RewindLineage
@@ -144,18 +178,110 @@ func TestArmRewindLineageRefusesAnIncompleteLineage(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange.
-			s := &ShimSpawner{logf: func(string, ...any) {}}
+			reg, registrar, _, _ := lineageRig(t)
 
 			// Act.
-			err := s.ArmRewindLineage("s1", tc.lineage)
+			_, _, adopted := registrar.AdoptRewoundVendorSessionID("s1", "new-uuid", tc.lineage)
 
 			// Assert.
-			if err == nil {
-				t.Fatal("ArmRewindLineage accepted an incomplete lineage; the shim would reject it at startup and the session would come back with no shim")
+			if adopted {
+				t.Fatal("an incomplete lineage was adopted; the shim would reject it at startup and the session would come back with no shim")
 			}
-			if _, armed := s.takeRewindLineage("s1"); armed {
-				t.Fatal("a refused lineage was stored anyway")
+			if rec, _ := reg.Get("s1"); rec.ClaudeSessionID != "old-uuid" {
+				t.Fatalf("claude_session_id = %q after a refused rewind flip, want the original", rec.ClaudeSessionID)
 			}
 		})
+	}
+}
+
+// AN ORDINARY ADOPTION LEAVES THE LINEAGE ALONE. It is not a rewind and has
+// nothing to announce, so it must neither arm nor clear one.
+func TestAdoptVendorSessionIDLeavesAnUnconsumedLineageStanding(t *testing.T) {
+	// Arrange.
+	reg, registrar, _, _ := lineageRig(t)
+	if _, _, adopted := registrar.AdoptRewoundVendorSessionID("s1", "new-uuid", completeLineage()); !adopted {
+		t.Fatal("AdoptRewoundVendorSessionID refused a complete lineage")
+	}
+
+	// Act.
+	registrar.AdoptVendorSessionID("s1", "newer-uuid")
+
+	// Assert.
+	if rec, _ := reg.Get("s1"); !rec.Rewind.Armed() {
+		t.Fatal("an ordinary adoption cleared a rewind lineage nobody had announced yet")
+	}
+}
+
+// THE RECOVERY, FOR REAL. A daemon that died after the flip left the lineage on
+// the record; the next bring-up of that session spawns with the rewind argv, so
+// the SessionRewound is emitted late rather than never.
+func TestEnsureShimSpawnsAnUnconsumedLineageFromTheRecord(t *testing.T) {
+	// Arrange.
+	_, registrar, spawner, spawned := lineageRig(t)
+	if _, _, adopted := registrar.AdoptRewoundVendorSessionID("s1", "new-uuid", completeLineage()); !adopted {
+		t.Fatal("AdoptRewoundVendorSessionID refused a complete lineage")
+	}
+
+	// Act.
+	if _, err := spawner.EnsureShim(context.Background(), "s1"); err != nil {
+		t.Fatalf("EnsureShim: %v", err)
+	}
+
+	// Assert.
+	if len(*spawned) != 1 {
+		t.Fatalf("%d spawns, want 1", len(*spawned))
+	}
+	got := (*spawned)[0]
+	if got.RewoundFrom != "old-uuid" || got.RewindRetainedLeaf != "leaf-uuid" || got.RewindDroppedTurns != "ka_1,ka_2" {
+		t.Fatalf("spawn opts = %+v, want the record's lineage replayed onto the argv", got)
+	}
+}
+
+// ONE-SHOT. A lineage left standing would ride the next unrelated respawn and
+// make the shim emit a second SessionRewound for a rewind that never happened.
+func TestEnsureShimConsumesTheLineageExactlyOnce(t *testing.T) {
+	// Arrange.
+	_, registrar, spawner, spawned := lineageRig(t)
+	if _, _, adopted := registrar.AdoptRewoundVendorSessionID("s1", "new-uuid", completeLineage()); !adopted {
+		t.Fatal("AdoptRewoundVendorSessionID refused a complete lineage")
+	}
+	if _, err := spawner.EnsureShim(context.Background(), "s1"); err != nil {
+		t.Fatalf("first EnsureShim: %v", err)
+	}
+
+	// Act.
+	if _, err := spawner.EnsureShim(context.Background(), "s1"); err != nil {
+		t.Fatalf("second EnsureShim: %v", err)
+	}
+
+	// Assert.
+	if len(*spawned) != 2 {
+		t.Fatalf("%d spawns, want 2", len(*spawned))
+	}
+	if second := (*spawned)[1]; second.RewoundFrom != "" {
+		t.Fatalf("the second spawn announced rewound_from=%q; the lineage survived the spawn that consumed it", second.RewoundFrom)
+	}
+}
+
+// A SPAWN THAT FAILED ANNOUNCED NOTHING, so the lineage is still owed and stays
+// on the record for the next attempt.
+func TestEnsureShimKeepsTheLineageWhenTheSpawnFails(t *testing.T) {
+	// Arrange.
+	reg, registrar, spawner, _ := lineageRig(t)
+	if _, _, adopted := registrar.AdoptRewoundVendorSessionID("s1", "new-uuid", completeLineage()); !adopted {
+		t.Fatal("AdoptRewoundVendorSessionID refused a complete lineage")
+	}
+	spawner.spawn = func(string, CreateOpts) (ShimHandle, error) {
+		return ShimHandle{}, errors.New("the shim binary is missing")
+	}
+
+	// Act.
+	if _, err := spawner.EnsureShim(context.Background(), "s1"); err == nil {
+		t.Fatal("EnsureShim = nil against a spawn that failed")
+	}
+
+	// Assert.
+	if rec, _ := reg.Get("s1"); !rec.Rewind.Armed() {
+		t.Fatal("a failed spawn consumed the lineage; the rewind it accounts for would never be announced")
 	}
 }
