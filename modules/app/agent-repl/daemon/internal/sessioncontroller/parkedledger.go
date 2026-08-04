@@ -312,7 +312,11 @@ func (m *Manager) refuseParkedForce(workspace, entryID, sessionID string, wired 
 // releaseParkedHolds sheds a cancelled schedule's hold from every materialized
 // entry, so a workspace whose session never wired does not keep rendering a
 // lease bubble for a schedule that no longer exists. The durable rows are
-// dropped by the caller, per schedule, exactly as they are for live sessions.
+// dropped by the caller, per schedule, exactly as they are for live sessions —
+// and because they are, this leg TOMBSTONES exactly as the live one does
+// (restoreTombstones): the one DropHeldPromptsForSchedule statement removes both
+// ledgers' rows, so both ledgers' entries have had a row dropped out from under
+// a restore that may be mid-flight.
 func (m *Manager) releaseParkedHolds(scheduleID string) {
 	type freed struct {
 		view *frontendv1.QueueView
@@ -331,6 +335,9 @@ func (m *Manager) releaseParkedHolds(scheduleID string) {
 				continue
 			}
 			e.shutdownHoldScheduleID = ""
+			if e.drainRowPending {
+				m.noteRowDroppedTombstoneLocked(pk.workspace, e.id, "schedule_released")
+			}
 			e.drainRowPending = false
 			ids = append(ids, e.id)
 		}
