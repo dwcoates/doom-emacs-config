@@ -125,6 +125,31 @@ func TestKeepAlivePolicyLeavesAFreshSessionToTheIdleSweep(t *testing.T) {
 	}
 }
 
+// THE RETRY FLOOR CLAIMS THE SESSION WITHOUT SUBMITTING. The floor arm carries
+// no submit at all, so the sweeper structurally cannot ping inside it; what the
+// sweeper still must do is OWN the tick, or the session would fall through to
+// the legacy idle sweep and be torn down for a reason the policy already
+// answered.
+func TestKeepAlivePolicyOwnsTheRetryFloorWithoutPinging(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	cfg := keepalive.DefaultConfig()
+	now := h.srv.now().UnixMilli()
+	rec := registry.Record{
+		SessionID:     "s1",
+		CWD:           "/ws",
+		LastTurnEndMs: msAgo(now, cfg.CacheTTL-keepalive.RetryFloor),
+	}
+
+	// Act.
+	owned := h.srv.applyKeepAlivePolicy(rec, now)
+
+	// Assert.
+	if !owned {
+		t.Fatal("a session inside the retry floor was not claimed by the policy; it would fall through to the legacy idle sweep")
+	}
+}
+
 // THE SWEEP INTERVAL MUST FIT INSIDE THE PING WINDOW. That window is one leeway
 // wide, so a sweep slower than it steps straight over the only moment a ping is
 // both due and useful — and every session falls through to cache_expired.
