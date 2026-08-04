@@ -83,29 +83,49 @@ workspace, which is the only reading of absence: the daemon sends the
 whole current answer on every ProgressView, so an entry lives exactly as
 long as the wire field does.")
 
+(defconst agent-repl--context-cost-origin-prefix "PROMPT_ORIGIN_"
+  "The common prefix of every `agentshim.core.v1.PromptOrigin' value name.
+An origin that does not carry it is not a PromptOrigin at all — not a
+different one, not an older one — so it is refused rather than read.")
+
 (defconst agent-repl--context-cost-keep-alive-origin "PROMPT_ORIGIN_CACHE_KEEP_ALIVE"
   "The protojson name of the cache keep-alive prompt origin.
-Mirrors `agentshim.core.v1.PromptOrigin' value 29.")
+Mirrors the `agentshim.core.v1.PromptOrigin' value of the same name.
 
-(defconst agent-repl--context-cost-keep-alive-origin-number 29
-  "The numeric wire value of `PROMPT_ORIGIN_CACHE_KEEP_ALIVE'.
-protojson emits enums by NAME, but a hand-built frame (and a client
-configured to emit numbers) may carry the number, and reading only one
-of the two encodings would silently downgrade the loudest alarm here to
-the generic message.")
+The NAME is the whole vocabulary here: protojson emits enums by name,
+the daemon speaks protojson, and the webapp decodes the identical field
+by name only.  A numeric encoding used to be accepted alongside it,
+which forced this file to restate the enum's integer value — a second,
+drifting declaration of a contract the proto already owns.")
 
-(defun agent-repl--context-cost-keep-alive-p (alert)
-  "Return non-nil when ALERT's `promptOrigin' is the cache keep-alive origin."
+(defun agent-repl--context-cost-keep-alive-p (ws alert)
+  "Return non-nil when ALERT's `promptOrigin' is the cache keep-alive origin.
+
+Signals when the origin is missing, nil, or not a canonical
+`PROMPT_ORIGIN_' name — exactly the discipline
+`agent-repl--context-cost-normalize' applies to the token counts, and
+exactly what the webapp's `decodeContextCostAlert' does with the same
+input.  The origin is the ONLY thing that separates the two alarms this
+module renders, so an unreadable one cannot be answered with nil: that
+answer is the generic message, i.e. a silent downgrade of the louder
+fact (AGENTS.md No-Silent-Fallbacks).  WS names the workspace for the
+refusal log."
   (let ((origin (plist-get alert :promptOrigin)))
-    (cond ((stringp origin)
-           (equal origin agent-repl--context-cost-keep-alive-origin))
-          ((numberp origin)
-           (= origin agent-repl--context-cost-keep-alive-origin-number)))))
+    (unless (and (stringp origin)
+                 (string-prefix-p agent-repl--context-cost-origin-prefix origin))
+      (agent-repl--log ws
+                       "context-cost-normalize: REJECTED ws=%s turn=%s promptOrigin=%S — expected a canonical %s name"
+                       ws (plist-get alert :turnId) origin
+                       agent-repl--context-cost-origin-prefix)
+      (error "agent-repl context-cost: ContextCostAlert carries an unreadable promptOrigin for %s" ws))
+    (equal origin agent-repl--context-cost-keep-alive-origin)))
 
 (defun agent-repl--context-cost-normalize (ws alert)
   "Decode wire ALERT for workspace WS into the normalized alarm plist.
 
-Signals when either token count is missing or unreadable.  Both are
+Signals when either token count is missing or unreadable, and (via
+`agent-repl--context-cost-keep-alive-p') when the prompt origin is not a
+canonical `PROMPT_ORIGIN_' name.  Both counts are
 REQUIRED by the contract — the count is meaningless without the threshold
 it crossed, and the threshold is daemon config the frontend must not
 supply for itself — so a placeholder would be a fabricated reading of a
@@ -125,7 +145,7 @@ count (AGENTS.md No-Silent-Fallbacks)."
     (list :turn-id (plist-get alert :turnId)
           :uncached uncached
           :threshold threshold
-          :keep-alive (and (agent-repl--context-cost-keep-alive-p alert) t))))
+          :keep-alive (and (agent-repl--context-cost-keep-alive-p ws alert) t))))
 
 ;;;; Frame application
 
