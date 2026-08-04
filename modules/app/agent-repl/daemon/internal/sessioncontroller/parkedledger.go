@@ -6,6 +6,7 @@ import (
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
+	"claude-repld/internal/errclass"
 	"claude-repld/internal/registry"
 )
 
@@ -183,41 +184,98 @@ func (m *Manager) parkedEntryOwner(workspace, entryID string) *parkedSession {
 	return pk
 }
 
-// cancelParkedEntry drops a materialized prompt: the durable row goes, the
-// entry goes, and the shrunken view is pushed.
-//
-// A cancel needs NO session. The user is discarding a prompt that has not run
-// and cannot run yet, and making them wait for a shim to come back before they
-// may take it back would be the daemon holding a prompt hostage to the very
-// bounce that delayed it. Reports false when this workspace holds no such
-// materialized entry, which is the caller's signal to look at the live fleet.
-func (m *Manager) cancelParkedEntry(workspace, entryID string) bool {
-	m.mu.Lock()
-	pk := m.parkedEntryOwner(workspace, entryID)
-	if pk == nil {
-		m.mu.Unlock()
-		return false
-	}
-	e := pk.queue.remove(entryID)
-	heldBy, hadRow := e.shutdownHoldScheduleID, e.drainRowPending
-	sessionID := pk.sessionID
-	if len(pk.queue.entries) == 0 {
-		delete(m.parked, workspace)
-	}
-	view, recs := pk.queue.view(workspace, sessionID), pk.queue.records()
-	m.mu.Unlock()
-
-	m.logf("session-controller: materialized queue entry=%s cancelled ws=%q session=%s drain_schedule=%q initiator=user — the prompt was parked by a previous daemon and its session has not wired; cancelling needs no shim",
-		entryID, workspace, sessionID, heldBy)
-	if hadRow {
-		m.releaseDrainRow(entryID, "cancelled_by_user")
-	}
-	m.publish(sessionID, view, recs)
-	return true
+// queueEntryOwner is the ledger holding the entry a queue command names.
+// Exactly one of parked and live is non-nil.
+type queueEntryOwner struct {
+	// parked is the materialized ledger holding the entry, for a workspace
+	// whose prompts a previous daemon parked.
+	parked *parkedSession
+	// live is the controller holding the entry in its own queue.
+	live *sessionController
+	// wired reports whether a live controller exists for the workspace AT ALL,
+	// which is a different question from which ledger holds the entry. It is
+	// what tells the two shapes of a PARKED resolution apart: a session that has
+	// not come back from the bounce yet, and one that has wired but whose
+	// adoption has not run yet (restoreShutdownHolds). Both refuse a force, and
+	// they refuse it saying different things.
+	wired bool
 }
 
-// forceParkedEntry answers a force aimed at a materialized prompt, which it can
-// only ever REFUSE, loudly and with the unwired session named.
+// entryLocked returns the resolved entry itself. Caller holds m.mu.
+func (o queueEntryOwner) entryLocked(entryID string) *queueEntry {
+	if o.parked != nil {
+		return o.parked.queue.get(entryID)
+	}
+	return o.live.queue.get(entryID)
+}
+
+// sessionID is the session the resolved ledger answers for.
+func (o queueEntryOwner) sessionID() string {
+	if o.parked != nil {
+		return o.parked.sessionID
+	}
+	return o.live.sessionID
+}
+
+// resolveQueueEntryLocked is THE ONE ORDER every queue command asks in:
+// MATERIALIZED FIRST, THEN LIVE. Caller holds m.mu.
+//
+// It exists because that order used to be restated per command, and the
+// restatement is what let one of them forget: force and cancel each consulted
+// the materialized ledger themselves and accept did not, so accepting a
+// materialized prompt reported "no queued prompt" for a prompt the client was
+// looking at. A shared resolver makes a command that forgets unrepresentable
+// rather than merely reviewable.
+//
+// The errors are the SAME two the commands returned before: a workspace with
+// neither a materialized ledger nor a controller is no live session, and a
+// resolved workspace that does not hold the id is no such queued prompt.
+func (m *Manager) resolveQueueEntryLocked(workspace, entryID string) (queueEntryOwner, error) {
+	d, wired := m.byWS[workspace]
+	if pk := m.parkedEntryOwner(workspace, entryID); pk != nil {
+		return queueEntryOwner{parked: pk, wired: wired}, nil
+	}
+	if !wired {
+		return queueEntryOwner{}, fmt.Errorf("session-controller: no live session for workspace %q: %w", workspace, ErrNoLiveSessionController)
+	}
+	if d.queue.get(entryID) == nil {
+		return queueEntryOwner{}, fmt.Errorf("session-controller: no queued prompt %q on workspace %q", entryID, workspace)
+	}
+	return queueEntryOwner{live: d, wired: true}, nil
+}
+
+// removeCancelledEntryLocked removes a cancelled entry from whichever ledger
+// holds it NOW and returns the shrunken view to publish. ok is false when
+// neither holds it any more.
+//
+// It re-resolves deliberately, and re-resolving is what makes the cancel land on
+// the ENTRY rather than on a ledger. Its caller now holds m.mu across the whole
+// command, so the wire-and-adopt window it was originally written to survive is
+// closed; the re-resolve is kept because the guarantee it provides is free and
+// because nothing in this function's contract should depend on how long its
+// caller happens to hold the mutex.
+//
+// Caller holds m.mu.
+func (m *Manager) removeCancelledEntryLocked(workspace, entryID string) (sessionID string, view *frontendv1.QueueView, recs []registry.QueuedPrompt, materialized, ok bool) {
+	owner, err := m.resolveQueueEntryLocked(workspace, entryID)
+	if err != nil {
+		return "", nil, nil, false, false
+	}
+	if pk := owner.parked; pk != nil {
+		pk.queue.remove(entryID)
+		if len(pk.queue.entries) == 0 {
+			delete(m.parked, workspace)
+		}
+		return pk.sessionID, pk.queue.view(pk.workspace, pk.sessionID), pk.queue.records(), true, true
+	}
+	d := owner.live
+	d.queue.remove(entryID)
+	v, r := m.publishQueueLocked(d)
+	return d.sessionID, v, r, false, true
+}
+
+// refuseParkedForce answers a force aimed at a materialized prompt, which it can
+// only ever REFUSE, loudly, with the session named and the refusal TYPED.
 //
 // A FORCE IS A DELIVERY, AND A DELIVERY NEEDS A SESSION. The control's whole
 // meaning is "run this prompt now", and running it means submitting it to a
@@ -227,33 +285,38 @@ func (m *Manager) cancelParkedEntry(workspace, entryID string) bool {
 //     exists to end — a control that acknowledges and achieves nothing.
 //   - Bringing the session up from here would have a queue control spawn a
 //     shim, which is a power the queue surface has never had (ForceQueueEntry
-//     resolves through `existing`, the deliberately no-lazy-bring-up path, for
-//     the same reason interrupt and resync do), and it would do it while a
-//     drain lease may still stand — starting the very turn the lease exists to
-//     prevent, on a session the lease has not yet resolved.
+//     resolves through the deliberately no-lazy-bring-up path, for the same
+//     reason interrupt and resync do), and it would do it while a drain lease
+//     may still stand — starting the very turn the lease exists to prevent, on
+//     a session the lease has not yet resolved.
 //
-// So the refusal is the answer, and it names the session so the user is told
-// what to do about it rather than merely told no. Reports false when this
-// workspace holds no such materialized entry.
-func (m *Manager) forceParkedEntry(workspace, entryID string) (bool, error) {
-	m.mu.Lock()
-	pk := m.parkedEntryOwner(workspace, entryID)
-	if pk == nil {
-		m.mu.Unlock()
-		return false, nil
+// It wraps errclass.ErrQueueEntrySessionUnwired, so the client renders a NAMED
+// failure. Without it this refusal — an ordinary, expected one — reached a
+// human as internal.unclassified and was logged a second time by the loud
+// fallthrough that exists to catch failures nobody classified.
+func (m *Manager) refuseParkedForce(workspace, entryID, sessionID string, wired bool) error {
+	reason := "its session has not wired to this daemon, so there is no shim to deliver it to"
+	if wired {
+		// The wired-but-unadopted window: the controller is up and the boot
+		// ledger still holds this prompt, so there is a shim but no queue entry
+		// to force. Refused rather than forced, because forcing what the
+		// controller cannot see would deliver nothing.
+		reason = "its session has wired but has not yet adopted the prompts a previous daemon parked, so its queue does not hold this prompt yet"
 	}
-	sessionID := pk.sessionID
-	m.mu.Unlock()
-
-	m.logf("session-controller: force REFUSED for materialized queue entry=%s ws=%q session=%s — the prompt was parked by a previous daemon and its session has not wired to this one, so there is no shim to deliver it to; open the workspace to bring the session up, or cancel the prompt",
-		entryID, workspace, sessionID)
-	return true, fmt.Errorf("session-controller: cannot force queued prompt %q on workspace %q: session %s has not wired to this daemon, so there is no shim to deliver it to; open the workspace to bring the session up, or cancel the prompt", entryID, workspace, sessionID)
+	m.logf("session-controller: force REFUSED for materialized queue entry=%s ws=%q session=%s wired=%v — %s; open the workspace to bring the session up, or cancel the prompt",
+		entryID, workspace, sessionID, wired, reason)
+	return fmt.Errorf("session-controller: cannot force queued prompt %q on workspace %q: %s (session %s); open the workspace to bring the session up, or cancel the prompt: %w",
+		entryID, workspace, reason, sessionID, errclass.ErrQueueEntrySessionUnwired)
 }
 
 // releaseParkedHolds sheds a cancelled schedule's hold from every materialized
 // entry, so a workspace whose session never wired does not keep rendering a
 // lease bubble for a schedule that no longer exists. The durable rows are
-// dropped by the caller, per schedule, exactly as they are for live sessions.
+// dropped by the caller, per schedule, exactly as they are for live sessions —
+// and because they are, this leg TOMBSTONES exactly as the live one does
+// (restoreTombstones): the one DropHeldPromptsForSchedule statement removes both
+// ledgers' rows, so both ledgers' entries have had a row dropped out from under
+// a restore that may be mid-flight.
 func (m *Manager) releaseParkedHolds(scheduleID string) {
 	type freed struct {
 		view *frontendv1.QueueView
@@ -272,6 +335,9 @@ func (m *Manager) releaseParkedHolds(scheduleID string) {
 				continue
 			}
 			e.shutdownHoldScheduleID = ""
+			if e.drainRowPending {
+				m.noteRowDroppedTombstoneLocked(pk.workspace, e.id, "schedule_released")
+			}
 			e.drainRowPending = false
 			ids = append(ids, e.id)
 		}

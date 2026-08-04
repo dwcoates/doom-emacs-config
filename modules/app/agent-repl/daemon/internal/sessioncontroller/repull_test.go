@@ -127,6 +127,7 @@ func (c *replayClient) Replay(_ context.Context, from, to uint64, maxEvents uint
 		c.queuedErrs = c.queuedErrs[1:]
 	}
 	c.mu.Unlock()
+	notifyTestActivity()
 	if c.entered != nil {
 		c.enteredOnce.Do(func() { close(c.entered) })
 	}
