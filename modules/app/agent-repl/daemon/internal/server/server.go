@@ -67,6 +67,33 @@ type CreateOpts struct {
 	// refuses such a create without it; see the CreateSessionCmd.allow_ungated
 	// field comment for why the consent is create-time only.
 	AllowUngated bool `json:"allow_ungated,omitempty"`
+	// The REWIND LINEAGE, carried only on the one spawn that follows a
+	// transcript rewind and never persisted. It tells the shim that the
+	// conversation it is resuming is a truncated copy, which vendor session it
+	// was truncated from, and which turns went — facts the shim cannot derive,
+	// because it never sees a transcript path and cannot rebuild its own query.
+	//
+	// The three travel together or not at all: a lineage naming a predecessor
+	// with no dropped turns describes a rewind that discarded nothing, which is
+	// not a rewind. The shim rejects an empty dropped list outright, so the
+	// argv renderer refuses to emit a partial set rather than producing one the
+	// shim will reject on startup.
+	// RewindDroppedTurns is the comma-separated turn_id list, in submission
+	// order. It is a STRING rather than a slice deliberately: CreateOpts is
+	// compared with == on the create-establish path, so a slice field would
+	// make the whole struct incomparable — and the comma-separated form is
+	// exactly what the argv carries, so nothing is lost by holding it that way.
+	RewoundFrom        string `json:"rewound_from,omitempty"`
+	RewindRetainedLeaf string `json:"rewind_retained_leaf,omitempty"`
+	RewindDroppedTurns string `json:"rewind_dropped_turns,omitempty"`
+}
+
+// RewindLineageComplete reports whether the three rewind fields describe a real
+// rewind. It is the ONE definition of completeness, shared by the argv renderer
+// and by the arming path, so the two cannot disagree about what a usable
+// lineage is.
+func (o CreateOpts) RewindLineageComplete() bool {
+	return o.RewoundFrom != "" && o.RewindRetainedLeaf != "" && o.RewindDroppedTurns != ""
 }
 
 // ShimArgv assembles the node argv that launches the shim for one
@@ -89,6 +116,17 @@ func ShimArgv(node, script, sessionID string, forceFake bool, opts CreateOpts) [
 	}
 	if opts.Resume != "" {
 		argv = append(argv, "--resume", opts.Resume)
+	}
+	// THE REWIND LINEAGE ARGV IS A FROZEN CONTRACT with the shim, which reads
+	// these three flags and emits the durable SessionRewound from them. It is
+	// emitted ALL OR NOTHING: the shim rejects an empty dropped-turn list, so a
+	// partial set rendered here would be a spawn that fails at startup instead
+	// of a rewind that merely went unrecorded.
+	if opts.RewindLineageComplete() {
+		argv = append(argv,
+			"--rewound-from", opts.RewoundFrom,
+			"--rewind-retained-leaf", opts.RewindRetainedLeaf,
+			"--rewind-dropped-turns", opts.RewindDroppedTurns)
 	}
 	return argv
 }
