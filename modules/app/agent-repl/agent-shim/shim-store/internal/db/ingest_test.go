@@ -224,6 +224,27 @@ func TestKindOfNamesTurnClaimBridge(t *testing.T) {
 	}
 }
 
+func TestKindOfNamesEveryObservabilityPayload(t *testing.T) {
+	tests := []struct {
+		name  string
+		event *corev1.Event
+	}{
+		{"MessageLatency", &corev1.Event{Payload: &corev1.Event_MessageLatency{MessageLatency: &corev1.MessageLatency{}}}},
+		{"ContextCleared", &corev1.Event{Payload: &corev1.Event_ContextCleared{ContextCleared: &corev1.ContextCleared{}}}},
+		{"ContextCompacted", &corev1.Event{Payload: &corev1.Event_ContextCompacted{ContextCompacted: &corev1.ContextCompacted{}}}},
+		{"QueryLifecycle", &corev1.Event{Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{}}}},
+		{"AccountUsageObservation", &corev1.Event{Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: &corev1.AccountUsageObservation{}}}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := kindOf(test.event); got != test.name {
+				t.Fatalf("kindOf(%s) = %q, want %q", test.name, got, test.name)
+			}
+		})
+	}
+}
+
 func TestIngestExtractsColumns(t *testing.T) {
 	// Arrange
 	d := openTemp(t)
