@@ -64,6 +64,121 @@ describe("parseArgs", () => {
   });
 });
 
+describe("parseArgs rewind lineage", () => {
+  /** The daemon's complete rewind spawn contract, minus the flag under test. */
+  const LINEAGE = [
+    "--resume", "new-vendor",
+    "--rewound-from", "old-vendor",
+    "--rewind-retained-leaf", "leaf-uuid",
+    "--rewind-dropped-turns", "t1,t2,t3",
+  ];
+
+  it("accepts the complete trio alongside --resume", () => {
+    // Arrange + Act
+    const args = parseArgs(["--session-id", "s1", ...LINEAGE]);
+    // Assert
+    expect(args.rewoundFrom).toBe("old-vendor");
+    expect(args.rewindRetainedLeaf).toBe("leaf-uuid");
+    expect(args.rewindDroppedTurns).toEqual(["t1", "t2", "t3"]);
+  });
+
+  it("preserves dropped-turn submission order rather than sorting", () => {
+    // Arrange + Act
+    const args = parseArgs([
+      "--resume", "new-vendor",
+      "--rewound-from", "old-vendor",
+      "--rewind-retained-leaf", "leaf-uuid",
+      "--rewind-dropped-turns", "t9,t1,t5",
+    ]);
+    // Assert — KeepAliveDiscard.dropped_turn_ids is "in submission order".
+    expect(args.rewindDroppedTurns).toEqual(["t9", "t1", "t5"]);
+  });
+
+  it("parses a single dropped turn id with no separator", () => {
+    // Arrange + Act
+    const args = parseArgs([
+      "--resume", "new-vendor",
+      "--rewound-from", "old-vendor",
+      "--rewind-retained-leaf", "leaf-uuid",
+      "--rewind-dropped-turns", "only-turn",
+    ]);
+    // Assert
+    expect(args.rewindDroppedTurns).toEqual(["only-turn"]);
+  });
+
+  it("leaves the lineage absent when no rewind flag is supplied", () => {
+    // Arrange + Act
+    const args = parseArgs(["--session-id", "s1", "--resume", "new-vendor"]);
+    // Assert
+    expect(args.rewoundFrom).toBeUndefined();
+    expect(args.rewindRetainedLeaf).toBeUndefined();
+    expect(args.rewindDroppedTurns).toBeUndefined();
+  });
+
+  it("fails loudly when --rewound-from arrives without its two companions", () => {
+    // Arrange + Act + Assert
+    expect(() => parseArgs(["--resume", "new-vendor", "--rewound-from", "old-vendor"]))
+      .toThrow(/incomplete rewind lineage/);
+  });
+
+  it("fails loudly when only --rewind-retained-leaf is missing", () => {
+    // Arrange + Act + Assert
+    expect(() => parseArgs([
+      "--resume", "new-vendor",
+      "--rewound-from", "old-vendor",
+      "--rewind-dropped-turns", "t1",
+    ])).toThrow(/--rewind-retained-leaf/);
+  });
+
+  it("fails loudly when only --rewind-dropped-turns is missing", () => {
+    // Arrange + Act + Assert
+    expect(() => parseArgs([
+      "--resume", "new-vendor",
+      "--rewound-from", "old-vendor",
+      "--rewind-retained-leaf", "leaf-uuid",
+    ])).toThrow(/--rewind-dropped-turns/);
+  });
+
+  it("fails loudly when the complete lineage arrives without --resume", () => {
+    // Arrange + Act + Assert
+    expect(() => parseArgs([
+      "--rewound-from", "old-vendor",
+      "--rewind-retained-leaf", "leaf-uuid",
+      "--rewind-dropped-turns", "t1",
+    ])).toThrow(/rewind lineage requires --resume/);
+  });
+
+  it("fails loudly when the rewind names one vendor session on both sides", () => {
+    // Arrange + Act + Assert
+    expect(() => parseArgs([
+      "--resume", "same-vendor",
+      "--rewound-from", "same-vendor",
+      "--rewind-retained-leaf", "leaf-uuid",
+      "--rewind-dropped-turns", "t1",
+    ])).toThrow(/--rewound-from equals --resume/);
+  });
+
+  it("rejects an empty dropped-turn id rather than dropping it silently", () => {
+    // Arrange + Act + Assert
+    expect(() => parseArgs([
+      "--resume", "new-vendor",
+      "--rewound-from", "old-vendor",
+      "--rewind-retained-leaf", "leaf-uuid",
+      "--rewind-dropped-turns", "t1,,t2",
+    ])).toThrow(/every comma-separated turn id must be non-empty/);
+  });
+
+  it("rejects an entirely empty dropped-turn list", () => {
+    // Arrange + Act + Assert — a rewind that dropped nothing is not a rewind.
+    expect(() => parseArgs([
+      "--resume", "new-vendor",
+      "--rewound-from", "old-vendor",
+      "--rewind-retained-leaf", "leaf-uuid",
+      "--rewind-dropped-turns", "",
+    ])).toThrow(/every comma-separated turn id must be non-empty/);
+  });
+});
+
 describe("realQueryOptions", () => {
   const noopCanUse = (async () => ({ behavior: "allow" as const, updatedInput: {} })) as never;
 
