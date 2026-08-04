@@ -1246,3 +1246,71 @@ func TestInterjectMootPathDoesNotSubmitIntoATurnThatStartedMeanwhile(t *testing.
 		return len(got) == 2 && got[1] == "second"
 	})
 }
+
+// THE CLAIM IS TRANSFERRED IN THE SAME ACQUISITION THAT CLEARS THE PING'S OWN.
+// A boundary that cleared one without taking the other would leave an instant
+// in which a fresh prompt is admitted, starts a real turn, and is then killed
+// and truncated away by the rewind already on its way.
+func TestPingTurnEndTransfersItsClaimToTheRewind(t *testing.T) {
+	// Arrange.
+	m, _, _ := rewindRig(t)
+	// The aftermath goroutine is gated inside rewindIdentity so the claim can
+	// be observed while the rewind is genuinely in flight, with no sleep and no
+	// dependence on scheduling.
+	entered, release := make(chan struct{}), make(chan struct{})
+	m.cfg.SessionConfigDir = func(string) string {
+		close(entered)
+		<-release
+		return t.TempDir()
+	}
+	pingTurn, err := m.SubmitKeepAlivePing(context.Background(), "ws")
+	if err != nil {
+		t.Fatalf("SubmitKeepAlivePing: %v", err)
+	}
+	if err := m.SubmitPrompt(context.Background(), "ws", "req-1", "real work", "",
+		corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+		t.Fatalf("SubmitPrompt: %v", err)
+	}
+	m.mu.Lock()
+	d := m.byWS["ws"]
+	m.mu.Unlock()
+
+	// Act.
+	m.onTurnBoundary(d, false)
+	<-entered
+	defer close(release)
+
+	// Assert.
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if got := m.keepAliveRewinds["ws"]; got != pingTurn {
+		t.Fatalf("rewind claim = %q while the aftermath runs, want the ended ping %q", got, pingTurn)
+	}
+	if d.keepAliveTurnID != "" {
+		t.Fatalf("the ping's own claim survived its turn end: %q", d.keepAliveTurnID)
+	}
+}
+
+// A PING THAT HELD NOTHING RUNS NO REWIND, so it takes no rewind claim: the
+// pings stay in the transcript until a real prompt needs them gone, and a claim
+// with no aftermath to release it would hold every later prompt forever.
+func TestPingTurnEndWithNothingHeldTakesNoRewindClaim(t *testing.T) {
+	// Arrange.
+	m, _, _ := rewindRig(t)
+	if _, err := m.SubmitKeepAlivePing(context.Background(), "ws"); err != nil {
+		t.Fatalf("SubmitKeepAlivePing: %v", err)
+	}
+	m.mu.Lock()
+	d := m.byWS["ws"]
+	m.mu.Unlock()
+
+	// Act.
+	m.onTurnBoundary(d, false)
+
+	// Assert.
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if got, claimed := m.keepAliveRewinds["ws"]; claimed {
+		t.Fatalf("rewind claim = %q for a ping nothing was waiting on, want none", got)
+	}
+}
