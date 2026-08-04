@@ -131,6 +131,52 @@ func (s *TurnAccountings) Record(sessionID string, accounting *frontendv1.TurnAc
 	return accounting, nil
 }
 
+// EndedAtMs reports the durable instant a turn's result was received, and
+// whether the store holds one at all.
+//
+// IT IS THE ONLY DURABLE ANSWER TO "WHEN DID THIS TURN END" that survives the
+// daemon that observed it. The turn ledger and the queue's latch are both
+// in-memory, so after a restart this row is what remains — which is exactly the
+// situation the keep-alive window reconciliation has to stamp from.
+//
+// The lookup is by turn id ALONE, across sessions: a turn id is minted unique
+// by the daemon that submitted it, and the caller repairing a window row knows
+// the turn id it opened without knowing which session generation ran it.
+func (s *TurnAccountings) EndedAtMs(turnID string) (int64, bool, error) {
+	if turnID == "" {
+		return 0, false, fmt.Errorf("statedb: turn end lookup needs a turn id")
+	}
+	rows, err := s.db.Query(`SELECT record FROM turn_accounting WHERE turn_id=?`, turnID)
+	if err != nil {
+		return 0, false, fmt.Errorf("statedb: read turn accounting %q: %w", turnID, err)
+	}
+	defer rows.Close()
+	var latest int64
+	found := false
+	for rows.Next() {
+		var raw []byte
+		if err := rows.Scan(&raw); err != nil {
+			return 0, false, fmt.Errorf("statedb: scan turn accounting %q: %w", turnID, err)
+		}
+		var accounting frontendv1.TurnAccounting
+		if err := proto.Unmarshal(raw, &accounting); err != nil {
+			return 0, false, fmt.Errorf("statedb: decode turn accounting %q: %w", turnID, err)
+		}
+		at := accounting.GetTiming().GetResultReceivedAtMs()
+		if at <= 0 {
+			continue
+		}
+		found = true
+		if at > latest {
+			latest = at
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return 0, false, fmt.Errorf("statedb: iterate turn accounting %q: %w", turnID, err)
+	}
+	return latest, found, nil
+}
+
 func validateTurnAccountingResponses(sessionID string, accounting *frontendv1.TurnAccounting) error {
 	seenMessages := make(map[string]struct{}, len(accounting.GetResponses()))
 	claudeSessionID := ""
