@@ -223,9 +223,9 @@ type schedulerHarness struct {
 	// a test can prove a drain execution is distinguishable from an ordinary
 	// daemon shutdown at the record rather than only in prose.
 	stopCauses []sessioncontroller.StopCause
-	stopped  chan struct{}
-	stopOnce sync.Once
-	logLines []string
+	stopped    chan struct{}
+	stopOnce   sync.Once
+	logLines   []string
 }
 
 func newSchedulerHarness(t *testing.T) *schedulerHarness {
@@ -724,6 +724,35 @@ func TestTheShutdownRunsWhenTheLastHoldClears(t *testing.T) {
 	<-h.stopped
 	if got := h.shutdowns(); len(got) != 1 {
 		t.Fatalf("shutdown ran %v, want exactly once", got)
+	}
+}
+
+// A DRAIN EXECUTION IS ITS OWN EVENT, not an ordinary shutdown: a deploy is
+// waiting on this one, and the shims it stops are attributed to the schedule
+// rather than to whoever happens to be stopping the daemon.
+func TestTheExecutedShutdownIsAttributedToTheDrainExecution(t *testing.T) {
+	// Arrange.
+	h := newSchedulerHarness(t)
+	h.holds.set(oneHold())
+	if _, err := h.s.Schedule(true, "cause"); err != nil {
+		t.Fatalf("Schedule: %v", err)
+	}
+
+	// Act.
+	h.holds.set()
+	h.s.NoteDrainActivity()
+
+	// Assert.
+	<-h.stopped
+	causes := h.shutdownCauses()
+	if len(causes) != 1 {
+		t.Fatalf("shutdown causes = %v, want exactly one", causes)
+	}
+	if causes[0] != sessioncontroller.StopCauseDrainExecution() {
+		t.Fatalf("shutdown cause = %v, want the drain execution", causes[0])
+	}
+	if causes[0] == sessioncontroller.StopCauseDaemonShutdown() {
+		t.Fatal("a scheduled bounce is indistinguishable from a plain daemon shutdown")
 	}
 }
 

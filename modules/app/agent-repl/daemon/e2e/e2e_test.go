@@ -293,6 +293,30 @@ func (w *testLogWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// e2eSpawnLog forwards the shared spawn procedure's records to the test log,
+// and STOPS doing so once the test is finished: the reaper goroutine can record
+// an exit after the test function has returned, and t.Logf then panics.
+type e2eSpawnLog struct {
+	mu   sync.Mutex
+	t    *testing.T
+	done bool
+}
+
+func (l *e2eSpawnLog) event(_ dlog.Level, workspace dlog.Workspace, sessionID, message string, context map[string]any) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.done {
+		return
+	}
+	l.t.Logf("e2e shim spawn: %s ws=%s session=%s %v", message, workspace.Directory, sessionID, context)
+}
+
+func (l *e2eSpawnLog) finish() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.done = true
+}
+
 type testShimLogger struct{ t *testing.T }
 
 func (l testShimLogger) Log(format string, args ...any) { l.t.Logf(format, args...) }
@@ -585,18 +609,21 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 	// Waiting out every spawned process here closes that race.
 	var (
 		procMu sync.Mutex
-		procs  []*shim.Proc
+		procs  []*trackedShim
 		// spawnCount counts shim EXECS. A stale-shim refresh is visible as a
 		// second exec for one session, and its once-only latch as the absence
 		// of a third.
 		spawnCount atomic.Int64
 	)
+	// ONE REAPER PER PROCESS lives in the shared spawn procedure
+	// (server.NewUDSSpawner), so this waits on the exit it publishes rather
+	// than calling Wait a second time — cmd.Wait is not re-entrant.
 	t.Cleanup(func() {
 		procMu.Lock()
 		defer procMu.Unlock()
 		for _, p := range procs {
-			_ = p.Terminate(shim.Stop{Initiator: "e2e_harness_cleanup", Reason: "test teardown reaps every spawned shim"})
-			_ = p.Wait()
+			_ = p.proc.Terminate(shim.Stop{Initiator: "e2e_harness_cleanup", Reason: "test teardown reaps every spawned shim"})
+			<-p.exited
 		}
 	})
 	node := nodePath(t)
@@ -649,45 +676,57 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 	}
 	targets := dlog.NewTargetManager()
 	t.Cleanup(func() { _ = targets.Close() })
-	udsSpawn := func(sessionID string, opts server.CreateOpts) (server.ShimStopFunc, error) {
-		workspace, err := dlog.WorkspaceFromDirectory(opts.CWD)
-		if err != nil {
-			return nil, err
-		}
-		shimTarget, err := targets.OpenWorkspaceRuntime(workspace, dlog.RuntimeShim)
-		if err != nil {
-			return nil, err
-		}
-		canonicalOpts := opts
-		canonicalOpts.CWD = workspace.Directory
-		argv := server.ShimUDSArgv(node, script, sessionID, true /*forceFake*/, canonicalOpts, shimSock)
-		argv = append(argv, "--log-fd", "3")
-		argv = append(argv, "--store-socket", storeSock)
-		if tuning.wedgeShim {
+	// THE SAME SPAWN PROCEDURE THE DAEMON RUNS (server.NewUDSSpawner): a harness
+	// that spawned shims its own way would prove things about the harness. Only
+	// the genuinely per-caller parts are supplied here.
+	spawnLog := &e2eSpawnLog{t: t}
+	t.Cleanup(spawnLog.finish)
+	udsSpawn, err := server.NewUDSSpawner(server.UDSSpawnConfig{
+		Targets:    targets,
+		Node:       node,
+		Script:     script,
+		ShimSocket: shimSock,
+		ForceFake:  true,
+		ExtraArgv:  []string{"--store-socket", storeSock},
+		ArgvOverride: func(_ string, argv []string) []string {
+			if !tuning.wedgeShim {
+				return argv
+			}
 			// Spawns cleanly, holds no session lock, and never dials the daemon:
 			// the process exists, so nothing upstream of the handshake fails.
-			argv = []string{node, "-e", "setInterval(() => {}, 1000)"}
-		}
-		proc, spawnErr := shim.Spawn(shim.Options{Argv: argv, Dir: workspace.Directory, ExtraFiles: []*os.File{shimTarget}, Logger: testShimLogger{t: t}})
-		if spawnErr != nil {
-			return nil, spawnErr
-		}
-		spawnCount.Add(1)
-		procMu.Lock()
-		procs = append(procs, proc)
-		procMu.Unlock()
-		go func() {
-			for range proc.Events() { //nolint:revive
+			return []string{node, "-e", "setInterval(() => {}, 1000)"}
+		},
+		Logger: func(dlog.Workspace, string) shim.Logger { return testShimLogger{t: t} },
+		Event:  spawnLog.event,
+		Spawned: func(s server.SpawnedShim) {
+			spawnCount.Add(1)
+			tracked := &trackedShim{workspace: s.Workspace.Directory, proc: s.Proc, exited: make(chan struct{})}
+			procMu.Lock()
+			procs = append(procs, tracked)
+			procMu.Unlock()
+			t.Cleanup(func() {
+				_ = s.Proc.Terminate(shim.Stop{Initiator: "e2e_per_session_cleanup", Reason: "test teardown stops the session shim"})
+				<-tracked.exited
+				if !tuning.wedgeShim {
+					assertCanonicalShimLog(t, s.LogTarget.Name(), s.Workspace, s.SessionID)
+				}
+			})
+		},
+		// Published AFTER the exit is recorded, so a waiter this releases cannot
+		// outrun the record.
+		Reaped: func(s server.SpawnedShim, _ error) {
+			procMu.Lock()
+			defer procMu.Unlock()
+			for _, tracked := range procs {
+				if tracked.proc == s.Proc {
+					close(tracked.exited)
+					return
+				}
 			}
-		}()
-		t.Cleanup(func() {
-			_ = proc.Terminate(shim.Stop{Initiator: "e2e_per_session_cleanup", Reason: "test teardown stops the session shim"})
-			_ = proc.Wait()
-			if !tuning.wedgeShim {
-				assertCanonicalShimLog(t, shimTarget.Name(), workspace, sessionID)
-			}
-		})
-		return func(by server.ShimStop) error { return proc.Terminate(by) }, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("build the UDS spawner: %v", err)
 	}
 	e2eSeqStore := server.NewRegistrySeqStore(reg, t.Logf)
 	modelCatalogs := server.NewSessionModelCatalogs()

@@ -21,7 +21,9 @@ import (
 // stated where it CAN be enforced: the capability itself is held in an
 // unexported field of an unexported type, handed to nothing else, and the
 // obvious bypass fails loudly rather than quietly stopping a shim off-funnel.
-type shimStopGate struct{ stop func(sessionID string, hintPID int32, by shim.Stop) error }
+type shimStopGate struct {
+	stop func(sessionID string, hintPID int32, by shim.Stop) error
+}
 
 // newShimStopGate takes the stop half off the wired spawner. It is called once,
 // in New, and the spawner the Manager keeps afterwards is sealed.
