@@ -925,7 +925,7 @@ the count of open workspaces that carried a session binding to rebind."
 ;; perpetually-empty `:queued-messages' accessors were deleted in the S9
 ;; endgame — the webapp owns the queued-message UI end to end.
 
-(defun agent-repl--gui-send-turn (ws input raw &optional on-settle)
+(defun agent-repl--gui-send-turn (ws input raw prompt-origin &optional on-settle)
   "The gui frontend's send capability (registry `:send-fn').
 INPUT (the prepared text, which may carry an on-demand read-directive —
 genuine message content) goes to the daemon session.  There is no
@@ -952,9 +952,9 @@ and render it.  The webapp's own repin-on-render (repinsToTail in
 webapp/src/render.ts) still lands the answer at the tail, but only
 once the turn arrives — this snap closes the round-trip gap so the
 sender watches the bottom from the instant the prompt leaves."
-  (agent-repl--log ws "do-send[gui] ws=%s len=%d" ws (length input))
+  (agent-repl--log ws "do-send[gui] ws=%s len=%d prompt-origin=%s" ws (length input) prompt-origin)
   (agent-repl--frontend-send-user-message
-   ws input
+   ws input prompt-origin
    (lambda (request-id)
      (agent-repl--frontend-snap-webview-to-tail ws)
      (agent-repl--mark-ws-thinking ws)
@@ -1133,7 +1133,7 @@ discarded one."
   :pending)
 
 (defun agent-repl--frontend-send-user-message
-    (ws text on-success on-failure)
+    (ws text prompt-origin on-success on-failure)
   "Send TEXT as WS's user turn over the UDS `submitPrompt' command.
 Ensures the session first (recreating a stale binding), so a send into a
 dead session heals instead of failing, then sends `submitPrompt' keyed by
@@ -1154,6 +1154,11 @@ is gone — matching the already-dead server behavior (the retired HTTP
 /message route never read `origin' into the session controller either)."
   (unless (and (functionp on-success) (functionp on-failure))
     (error "agent-repl: frontend send requires callable continuations"))
+  (unless (and (stringp prompt-origin)
+               (string-prefix-p "PROMPT_ORIGIN_" prompt-origin)
+               (not (equal prompt-origin "PROMPT_ORIGIN_UNSPECIFIED")))
+    (agent-repl--log ws "frontend send: invalid prompt-origin=%S" prompt-origin)
+    (error "agent-repl: frontend send requires an explicit prompt origin"))
   (agent-repl--frontend-after-ensure-session
    ws
    (lambda (id)
@@ -1161,10 +1166,10 @@ is gone — matching the already-dead server behavior (the retired HTTP
        ;; The ensure may have HEALED a dead binding into a fresh session.
        (agent-repl--frontend-sync-webview ws id)
        (when origin (agent-repl--ws-put ws :next-send-origin nil))
-       (agent-repl--log ws "frontend send: session=%s len=%d origin=%s (uds submitPrompt)"
-                        id (length text) origin)
+       (agent-repl--log ws "frontend send: session=%s len=%d origin=%s prompt-origin=%s (uds submitPrompt)"
+                        id (length text) origin prompt-origin)
        (let ((req (agent-repl--uds-send-command
-                   "submitPrompt" (list :text text)
+                   "submitPrompt" (list :text text :promptOrigin prompt-origin)
                    (agent-repl--frontend-ws-command-key ws))))
          (agent-repl--uds-track-command req "submitPrompt" ws)
          (agent-repl--log ws "frontend send: dispatched session=%s request-id=%s" id req)

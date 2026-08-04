@@ -189,7 +189,7 @@ type sessionClient interface {
 	// It MUST NOT cause a lazy bring-up; session readiness is false until the
 	// existing live session controller can answer this probe.
 	Health(ctx context.Context, requestID string) (*corev1.HealthStatus, error)
-	SubmitPrompt(ctx context.Context, text, origin, permissionMode string) error
+	SubmitPrompt(ctx context.Context, text, origin, permissionMode string, promptOrigin corev1.PromptOrigin) error
 	// Interrupt returns the shim's own verdict on what the stop did, which is
 	// the only place that verdict is observable.
 	Interrupt(ctx context.Context) (corev1.InterruptOutcome, error)
@@ -796,11 +796,11 @@ func (m *Manager) persistVendorSessionID(sessionID, csid string) {
 // RECEIPT is keyed on (promptecho.go), what the durable transcript line is
 // later stamped with, and the authoritative turn id used for terminal
 // accounting. It must therefore be nonempty before any session state changes.
-func (m *Manager) SubmitPrompt(ctx context.Context, workspace, requestID, text, permissionMode string) error {
+func (m *Manager) SubmitPrompt(ctx context.Context, workspace, requestID, text, permissionMode string, promptOrigin corev1.PromptOrigin) error {
 	if strings.TrimSpace(requestID) == "" {
 		return fmt.Errorf("session-controller: submit prompt for workspace %q needs a non-empty request id", workspace)
 	}
-	return m.submitPrompt(ctx, workspace, requestID, text, permissionMode, "frontend")
+	return m.submitPrompt(ctx, workspace, requestID, text, permissionMode, "frontend", promptOrigin)
 }
 
 // SetModel forwards a deliberate model request to the live shim, then persists
@@ -843,11 +843,12 @@ func (m *Manager) SubmitWorkspaceInitialPrompt(ctx context.Context, workspace, j
 	if jobID == "" {
 		return fmt.Errorf("session-controller: workspace initial prompt needs a job id")
 	}
-	return m.submitPrompt(ctx, workspace, "workspace-create:"+jobID, text, permissionMode, "workspace-create:"+jobID)
+	return m.submitPrompt(ctx, workspace, "workspace-create:"+jobID, text, permissionMode, "workspace-create:"+jobID,
+		corev1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATED)
 }
 
-func (m *Manager) submitPrompt(ctx context.Context, workspace, requestID, text, permissionMode, origin string) error {
-	return m.submitPromptAs(ctx, workspace, requestID, text, permissionMode, origin, submitterUser)
+func (m *Manager) submitPrompt(ctx context.Context, workspace, requestID, text, permissionMode, origin string, promptOrigin corev1.PromptOrigin) error {
+	return m.submitPromptAs(ctx, workspace, requestID, text, permissionMode, origin, promptOrigin, submitterUser)
 }
 
 // submitPromptAs is submitPrompt with the SUBMITTER named, which is what the
@@ -858,7 +859,11 @@ func (m *Manager) submitPrompt(ctx context.Context, workspace, requestID, text, 
 // parked on the queue of a leased session would be delivered into the middle of
 // merge.Coordinator's conflict resolution the moment its turn ended, which is
 // the silent drop-shaped failure the loud refusal replaces.
-func (m *Manager) submitPromptAs(ctx context.Context, workspace, requestID, text, permissionMode, origin string, who submitter) error {
+func (m *Manager) submitPromptAs(ctx context.Context, workspace, requestID, text, permissionMode, origin string, promptOrigin corev1.PromptOrigin, who submitter) error {
+	if err := validatePromptOrigin(promptOrigin); err != nil {
+		m.logf("session-controller: prompt REFUSED ws=%q request_id=%s origin=%q prompt_origin=%d error=%v — no session or queue state was touched", workspace, requestID, origin, promptOrigin, err)
+		return err
+	}
 	if err := m.guardMergeLease(workspace, who, requestID, origin); err != nil {
 		return err
 	}
@@ -873,7 +878,7 @@ func (m *Manager) submitPromptAs(ctx context.Context, workspace, requestID, text
 	leaseScheduleID, _ := m.heldSchedule()
 
 	m.mu.Lock()
-	entry, queued, err := m.queueSubmitLocked(d, requestID, text, permissionMode, leaseScheduleID)
+	entry, queued, err := m.queueSubmitLocked(d, requestID, text, permissionMode, promptOrigin, leaseScheduleID)
 	if err != nil {
 		// A REFUSED submit is refused whole: nothing was queued, nothing is
 		// forwarded, and the caller's ack carries the reason. The only refusal
@@ -894,7 +899,7 @@ func (m *Manager) submitPromptAs(ctx context.Context, workspace, requestID, text
 		// queue chip until it is DELIVERED, and a bubble drawn now would claim
 		// an execution order the session is not going to follow. Its receipt is
 		// pushed at the delivery site instead (queue.go, deliver).
-		if err := m.forwardPrompt(ctx, d, requestID, text, origin, permissionMode, who); err != nil {
+		if err := m.forwardPrompt(ctx, d, requestID, text, origin, permissionMode, promptOrigin, who); err != nil {
 			// The prompt never reached the shim, so no turn is beginning — and
 			// with a paused queue that matters: the lone-runner flag set on the
 			// way in would otherwise leave the pause waiting for a turn end

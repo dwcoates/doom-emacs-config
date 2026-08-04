@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	corev1 "agentrepl/proto/agentshim/core/v1"
+
 	"claude-repld/internal/workspace/merge"
 )
 
@@ -140,7 +142,7 @@ func (m *Manager) onTurnEvent(d *sessionController, started bool, turnID string,
 // It deliberately uses existing rather than ensure: a merge prompt is only ever
 // admissible against a session the lease was taken over, and a workspace with no
 // live session controller is a loud failure rather than a reason to spawn one.
-func (m *Manager) SubmitMergePromptAwaitingTurn(ctx context.Context, workspace, requestID, text, permissionMode string) error {
+func (m *Manager) SubmitMergePromptAwaitingTurn(ctx context.Context, workspace, requestID, text, permissionMode string, promptOrigin corev1.PromptOrigin) error {
 	d, err := m.existing(workspace)
 	if err != nil {
 		m.logf("session-controller: merge resolution prompt ws=%q request_id=%s has NO live session controller: %v", workspace, requestID, err)
@@ -149,7 +151,7 @@ func (m *Manager) SubmitMergePromptAwaitingTurn(ctx context.Context, workspace, 
 	w := m.armTurnWaiter(d)
 	defer m.dropTurnWaiter(d, w)
 
-	if err := m.SubmitMergePrompt(ctx, workspace, requestID, text, permissionMode); err != nil {
+	if err := m.SubmitMergePrompt(ctx, workspace, requestID, text, permissionMode, promptOrigin); err != nil {
 		return err
 	}
 	select {
@@ -225,7 +227,7 @@ func (m *Manager) ResolveMergeConflict(ctx context.Context, res merge.ConflictRe
 
 	ctx, cancel := context.WithTimeout(ctx, m.mergeResolutionBound())
 	defer cancel()
-	if err := m.SubmitMergePromptAwaitingTurn(ctx, res.Workspace, res.RequestID, res.Prompt(), mergeResolutionPermissionMode); err != nil {
+	if err := m.SubmitMergePromptAwaitingTurn(ctx, res.Workspace, res.RequestID, res.Prompt(), mergeResolutionPermissionMode, corev1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR); err != nil {
 		m.logf("session-controller: merge conflict resolution FAILED ws=%q request_id=%s commit=%s: %v",
 			res.Workspace, res.RequestID, res.ConflictCommit, err)
 		return err
@@ -256,7 +258,7 @@ func (m *Manager) ResolveMergeTestFailure(ctx context.Context, res merge.TestFai
 
 	ctx, cancel := context.WithTimeout(ctx, m.mergeResolutionBound())
 	defer cancel()
-	if err := m.SubmitMergePromptAwaitingTurn(ctx, res.Workspace, res.RequestID, res.Prompt(), mergeResolutionPermissionMode); err != nil {
+	if err := m.SubmitMergePromptAwaitingTurn(ctx, res.Workspace, res.RequestID, res.Prompt(), mergeResolutionPermissionMode, corev1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR); err != nil {
 		m.logf("session-controller: merge test-failure resolution FAILED ws=%q request_id=%s commit=%s: %v",
 			res.Workspace, res.RequestID, res.FailingCommit, err)
 		return err
@@ -290,7 +292,7 @@ func (m *Manager) RunMergeBeforeAction(ctx context.Context, act merge.BeforeActi
 
 	ctx, cancel := context.WithTimeout(ctx, m.mergeResolutionBound())
 	defer cancel()
-	if err := m.SubmitMergePromptAwaitingTurn(ctx, act.Workspace, act.RequestID, act.Prompt, mergeResolutionPermissionMode); err != nil {
+	if err := m.SubmitMergePromptAwaitingTurn(ctx, act.Workspace, act.RequestID, act.Prompt, mergeResolutionPermissionMode, corev1.PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION); err != nil {
 		m.logf("session-controller: merge before-action FAILED ws=%q request_id=%s: %v", act.Workspace, act.RequestID, err)
 		return err
 	}
@@ -324,7 +326,7 @@ func (m *Manager) RunMergeAfterAction(ctx context.Context, act merge.AfterAction
 
 	ctx, cancel := context.WithTimeout(ctx, m.mergeResolutionBound())
 	defer cancel()
-	if err := m.SubmitMergePromptAwaitingTurn(ctx, act.Workspace, act.RequestID, act.Prompt, mergeResolutionPermissionMode); err != nil {
+	if err := m.SubmitMergePromptAwaitingTurn(ctx, act.Workspace, act.RequestID, act.Prompt, mergeResolutionPermissionMode, corev1.PromptOrigin_PROMPT_ORIGIN_MERGE_AFTER_ACTION); err != nil {
 		m.logf("session-controller: merge after-action FAILED ws=%q request_id=%s: %v — the merge STANDS; merge.Coordinator carries this onto the terminal merged status",
 			act.Workspace, act.RequestID, err)
 		return err

@@ -46,7 +46,7 @@ type PromptRouter interface {
 	// it is what the daemon's immediate prompt receipt is keyed on, and what
 	// the durable transcript line is later stamped with, so a frontend
 	// reconciles the two onto one bubble.
-	SubmitPrompt(ctx context.Context, workspace, requestID, text, permissionMode string) error
+	SubmitPrompt(ctx context.Context, workspace, requestID, text, permissionMode string, promptOrigin corev1.PromptOrigin) error
 	Interrupt(ctx context.Context, workspace string) error
 	AnswerPermission(ctx context.Context, workspace, permissionRequestID string, allow bool, denyMessage string, updatedInput *structpb.Struct) error
 	SetModel(ctx context.Context, workspace, model string) (string, error)
@@ -590,11 +590,25 @@ func checkWorkspaceKey(command, workspace string) error {
 }
 
 func (h *commandHandler) SubmitPrompt(ctx context.Context, workspace, requestID string, cmd *frontendv1.SubmitPromptCmd) error {
-	h.logf("frontend cmd: submit_prompt ws=%s request_id=%s", workspace, requestID)
+	h.logf("frontend cmd: submit_prompt ws=%s request_id=%s prompt_origin=%s", workspace, requestID, cmd.GetPromptOrigin())
 	if err := checkWorkspaceKey("submit_prompt", workspace); err != nil {
 		return err
 	}
-	return h.prompts.SubmitPrompt(ctx, workspace, requestID, cmd.GetText(), cmd.GetPermissionMode())
+	if err := validatePromptOrigin(cmd.GetPromptOrigin()); err != nil {
+		h.logf("frontend cmd: submit_prompt REFUSED ws=%s request_id=%s prompt_origin=%d error=%v", workspace, requestID, cmd.GetPromptOrigin(), err)
+		return err
+	}
+	return h.prompts.SubmitPrompt(ctx, workspace, requestID, cmd.GetText(), cmd.GetPermissionMode(), cmd.GetPromptOrigin())
+}
+
+func validatePromptOrigin(origin corev1.PromptOrigin) error {
+	if origin == corev1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED {
+		return fmt.Errorf("frontend submit_prompt requires a non-UNSPECIFIED prompt_origin")
+	}
+	if _, ok := corev1.PromptOrigin_name[int32(origin)]; !ok {
+		return fmt.Errorf("frontend submit_prompt received unknown prompt_origin %d", origin)
+	}
+	return nil
 }
 
 // Interrupt stops the workspace's turn, subject to THE CONFIRM GATE.

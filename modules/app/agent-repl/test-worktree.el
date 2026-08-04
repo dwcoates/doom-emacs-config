@@ -420,7 +420,9 @@ the rev-parse comparison and the checkout invocation."
   (agent-repl-test--with-clean-state
     (let (sent)
       (cl-letf (((symbol-function 'agent-repl--send)
-                 (lambda (prompt ws) (setq sent (cons ws prompt)))))
+                 (lambda (origin prompt ws)
+                   (should (equal origin "PROMPT_ORIGIN_LEGACY_HOST_PROMPT"))
+                   (setq sent (cons ws prompt)))))
         (agent-repl--dispatch-prompt-command "ws1" "hello")
         (should (equal sent '("ws1" . "hello")))))))
 
@@ -429,7 +431,9 @@ the rev-parse comparison and the checkout invocation."
   (agent-repl-test--with-clean-state
     (let (sent)
       (cl-letf (((symbol-function 'agent-repl--send)
-                 (lambda (prompt ws) (setq sent (cons ws prompt)))))
+                 (lambda (origin prompt ws)
+                   (should (equal origin "PROMPT_ORIGIN_LEGACY_HOST_PROMPT"))
+                   (setq sent (cons ws prompt)))))
         (agent-repl--dispatch-prompt-command "DWC/foo" "hello")
         (should (equal sent '("foo" . "hello")))))))
 
@@ -1158,7 +1162,8 @@ workspace close.  This test's workspace has a genuinely live session
           (sent-ws :unset)
           (teardown-called nil))
       (cl-letf (((symbol-function 'agent-repl--send)
-                 (lambda (prompt ws &optional _force _on-settle)
+                 (lambda (origin prompt ws &optional _force _on-settle)
+                   (should (equal origin "PROMPT_ORIGIN_GNS_SOCKETS_CLOSE"))
                    (setq sent-prompt prompt
                          sent-ws ws)))
                 ((symbol-function 'run-at-time)
@@ -1180,7 +1185,8 @@ has time to fire before state is polled."
           (scheduled-delay :unset)
           (captured-on-settle nil))
       (cl-letf (((symbol-function 'agent-repl--send)
-                 (lambda (_prompt _ws &optional _force on-settle)
+                 (lambda (origin _prompt _ws &optional _force on-settle)
+                   (should (equal origin "PROMPT_ORIGIN_GNS_SOCKETS_CLOSE"))
                    (setq captured-on-settle on-settle)))
                 ((symbol-function 'run-at-time)
                  (lambda (delay _repeat fn &rest _args)
@@ -4063,7 +4069,9 @@ minibuffer keymap so `C-RET' still appends the no-action suffix."
   "`workspace' field routes the formatted result back via `agent-repl--send'."
   (let ((sent nil))
     (cl-letf (((symbol-function 'agent-repl--send)
-               (lambda (prompt ws &rest _) (push (cons ws prompt) sent))))
+               (lambda (origin prompt ws &rest _)
+                 (should (equal origin "PROMPT_ORIGIN_LEGACY_HOST_EVAL_RESULT"))
+                 (push (cons ws prompt) sent))))
       (agent-repl--handle-eval-command
        '((type . "eval") (code . "(+ 1 2)") (workspace . "ws1"))))
     (should (= 1 (length sent)))
@@ -4111,7 +4119,9 @@ minibuffer keymap so `C-RET' still appends the no-action suffix."
   "An error inside the evaluated code is reported back as the `;; error:' section."
   (let ((sent nil))
     (cl-letf (((symbol-function 'agent-repl--send)
-               (lambda (prompt ws &rest _) (push (cons ws prompt) sent))))
+               (lambda (origin prompt ws &rest _)
+                 (should (equal origin "PROMPT_ORIGIN_LEGACY_HOST_EVAL_RESULT"))
+                 (push (cons ws prompt) sent))))
       (agent-repl--handle-eval-command
        '((type . "eval") (code . "(error \"boom\")") (workspace . "ws1"))))
     (should (= 1 (length sent)))
@@ -4122,7 +4132,9 @@ minibuffer keymap so `C-RET' still appends the no-action suffix."
   "Optional `note' field is echoed back in the response header."
   (let ((sent nil))
     (cl-letf (((symbol-function 'agent-repl--send)
-               (lambda (prompt ws &rest _) (push (cons ws prompt) sent))))
+               (lambda (origin prompt ws &rest _)
+                 (should (equal origin "PROMPT_ORIGIN_LEGACY_HOST_EVAL_RESULT"))
+                 (push (cons ws prompt) sent))))
       (agent-repl--handle-eval-command
        '((type . "eval") (code . "(+ 1 2)") (workspace . "ws1") (note . "tick"))))
     (should (string-match-p "note: tick" (cdr (car sent))))))

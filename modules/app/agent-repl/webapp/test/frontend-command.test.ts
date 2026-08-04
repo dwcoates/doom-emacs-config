@@ -3,7 +3,7 @@
  * canonical protojson. One edge per test (AAA).
  */
 import { describe, expect, it } from "vitest";
-import { ARM_KEY, encodeFrontendCommand, type FrontendCommand } from "../src/frontend-command.js";
+import { ARM_KEY, PromptOrigin, encodeFrontendCommand, type FrontendCommand } from "../src/frontend-command.js";
 
 /** Encode and parse back, so assertions read the wire object, not a string. */
 function wire(cmd: FrontendCommand): Record<string, unknown> {
@@ -42,7 +42,7 @@ describe("encodeFrontendCommand — envelope", () => {
     const w = wire({
       requestId: "r1",
       workspace: "ws",
-      body: { case: "submitPrompt", text: "hi", permissionMode: "" },
+      body: { case: "submitPrompt", text: "hi", permissionMode: "", promptOrigin: PromptOrigin.WEBAPP_USER_SENT },
     });
     expect(Object.keys(w).sort()).toEqual(["requestId", "submitPrompt", "workspace"]);
   });
@@ -53,9 +53,9 @@ describe("encodeFrontendCommand — submitPrompt", () => {
     const w = wire({
       requestId: "r1",
       workspace: "ws",
-      body: { case: "submitPrompt", text: "run the tests", permissionMode: "plan" },
+      body: { case: "submitPrompt", text: "run the tests", permissionMode: "plan", promptOrigin: PromptOrigin.WEBAPP_USER_SENT },
     });
-    expect(w.submitPrompt).toEqual({ text: "run the tests", permissionMode: "plan" });
+    expect(w.submitPrompt).toEqual({ text: "run the tests", permissionMode: "plan", promptOrigin: "PROMPT_ORIGIN_WEBAPP_USER_SENT" });
   });
 });
 

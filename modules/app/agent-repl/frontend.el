@@ -71,7 +71,7 @@
 (declare-function agent-repl--ws-set-agent-state "agent-repl-status" (ws state))
 (declare-function agent-repl-register-frontend "agent-repl-frontends" (frontend))
 (declare-function agent-repl-frontend-create "agent-repl-frontends")
-(declare-function agent-repl--gui-send-turn "agent-repl-frontend-client" (ws input raw &optional on-settle))
+(declare-function agent-repl--gui-send-turn "agent-repl-frontend-client" (ws input raw prompt-origin &optional on-settle))
 (declare-function agent-repl--gui-interrupt "agent-repl-frontend-client" (ws kind))
 (declare-function agent-repl--gui-running-p "agent-repl-frontend-client" (ws))
 (declare-function agent-repl--gui-durable-session-id "agent-repl-frontend-client" (ws))

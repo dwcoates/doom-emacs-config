@@ -68,7 +68,7 @@ paths know the worktree path and environment before any state file
 exists).  The view follows later, when the user actually switches to
 WS (`:pending-show-panels').
 KILL-FN (WS): destroy WS's session AND its view.
-SEND-FN (WS INPUT RAW ON-SETTLE): deliver one prepared user turn.
+SEND-FN (WS INPUT RAW PROMPT-ORIGIN ON-SETTLE): deliver one prepared user turn.
 INPUT is the decorated text actually sent; RAW the undecorated
 original (history/posthooks currency).  ON-SETTLE, when non-nil, runs
 once the send is committed.
@@ -316,14 +316,14 @@ both capability axes (WS's backend and its `:active-env')."
 
 ;;;; ---- Dispatch helpers ----------------------------------------------------------
 
-(defun agent-repl--frontend-dispatch-send (ws input raw &optional on-settle)
+(defun agent-repl--frontend-dispatch-send (ws input raw prompt-origin &optional on-settle)
   "Send one prepared turn through WS's frontend."
   (let* ((fe (agent-repl--ws-frontend ws))
          (frontend (agent-repl-frontend-name fe))
-         (result (funcall (agent-repl-frontend-send-fn fe) ws input raw on-settle)))
-    (agent-repl--log ws "frontend-dispatch-send: frontend=%s input-length=%d raw-length=%d input-equals-raw=%s on-settle-p=%s result=%S"
+         (result (funcall (agent-repl-frontend-send-fn fe) ws input raw prompt-origin on-settle)))
+    (agent-repl--log ws "frontend-dispatch-send: frontend=%s input-length=%d raw-length=%d input-equals-raw=%s prompt-origin=%s on-settle-p=%s result=%S"
                      frontend (length input) (length raw) (equal input raw)
-                     (not (null on-settle)) result)
+                     prompt-origin (not (null on-settle)) result)
     result))
 
 (defun agent-repl--frontend-dispatch-interrupt (ws kind)

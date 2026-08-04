@@ -35,6 +35,7 @@ import {
   submitBlocked,
 } from "./merge-gate.js";
 import { mergeStatusLogValue } from "./merge-status.js";
+import { PromptOrigin } from "./frontend-command.js";
 import { configureChessGames, installChessNavHook } from "./chess-game.js";
 import { RenderCoalescer, windowEagerHost, windowFrameHost } from "./coalesce.js";
 import { SmoothReveal } from "./smooth.js";
@@ -236,9 +237,9 @@ async function boot(): Promise<void> {
    * SessionView reports it in force, so a failed submit does not silently
    * drop the user's choice.
    */
-  const submitPrompt = (text: string): void => {
+  const submitPrompt = (text: string, promptOrigin: PromptOrigin): void => {
     void dispatcher
-      .submitPrompt(cmdWorkspace(), text, pendingMode.outbound)
+      .submitPrompt(cmdWorkspace(), text, promptOrigin, pendingMode.outbound)
       .catch(consumeOwnedDispatchFailure);
   };
   const feedEl = must("feed");
@@ -357,7 +358,7 @@ async function boot(): Promise<void> {
     sendPrompt: (text) => {
       // Card controls (stop task) are prompt-mediated: the button sends an
       // ordinary user message through the same command the composer uses.
-      submitPrompt(text);
+      submitPrompt(text, PromptOrigin.WEBAPP_CARD_ACTION);
     },
     // Watcher folds poll this while open (§ watcher-bubble expansion),
     // targeting the current session.
@@ -1144,7 +1145,7 @@ async function boot(): Promise<void> {
         composerEls.notice.innerHTML = mergeGateNoticeHtml(true, store.state.mergeStatus);
         return;
       }
-      submitPrompt(text);
+      submitPrompt(text, PromptOrigin.WEBAPP_USER_SENT);
       input.value = "";
     };
     composerEls.send.addEventListener("click", submit);

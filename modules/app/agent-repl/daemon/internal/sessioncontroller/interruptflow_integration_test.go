@@ -233,7 +233,7 @@ func (r *interruptFlowRig) interrupt() error {
 func (r *interruptFlowRig) submit(text string) error {
 	r.t.Helper()
 	r.requestSeq++
-	return r.m.SubmitPrompt(context.Background(), interruptFlowWorkspace, fmt.Sprintf("test-request-%d", r.requestSeq), text, "")
+	return r.m.SubmitPrompt(context.Background(), interruptFlowWorkspace, fmt.Sprintf("test-request-%d", r.requestSeq), text, "", testPromptOrigin)
 }
 
 // lastView returns the newest ProgressView a subscriber was sent, or nil.

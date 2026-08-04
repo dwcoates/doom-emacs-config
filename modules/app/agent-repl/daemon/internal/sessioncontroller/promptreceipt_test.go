@@ -228,7 +228,7 @@ func TestAnAcceptedPromptIsRecordedBeforeItsReceiptIsPushed(t *testing.T) {
 	h := newSubmitHarness(t)
 
 	// Act.
-	if err := h.m.SubmitPrompt(context.Background(), "ws", "r-1", "the prompt", "default"); err != nil {
+	if err := h.m.SubmitPrompt(context.Background(), "ws", "r-1", "the prompt", "default", testPromptOrigin); err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
 
@@ -244,7 +244,7 @@ func TestAnAcceptedPromptIsRecordedWithTheTextTheUserTyped(t *testing.T) {
 	h := newSubmitHarness(t)
 
 	// Act.
-	if err := h.m.SubmitPrompt(context.Background(), "ws", "r-1", "the prompt", "default"); err != nil {
+	if err := h.m.SubmitPrompt(context.Background(), "ws", "r-1", "the prompt", "default", testPromptOrigin); err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
 
@@ -265,7 +265,7 @@ func TestTheRecordedInstantIsTheOneTheReceiptBubbleCarries(t *testing.T) {
 	h := newSubmitHarness(t)
 
 	// Act.
-	if err := h.m.SubmitPrompt(context.Background(), "ws", "r-1", "the prompt", "default"); err != nil {
+	if err := h.m.SubmitPrompt(context.Background(), "ws", "r-1", "the prompt", "default", testPromptOrigin); err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
 
@@ -292,7 +292,7 @@ func TestAnUnwritableReceiptLedgerFailsTheSubmit(t *testing.T) {
 	h.receipts.recordErr = errors.New("disk I/O error")
 
 	// Act.
-	err := h.m.SubmitPrompt(context.Background(), "ws", "r-1", "the prompt", "default")
+	err := h.m.SubmitPrompt(context.Background(), "ws", "r-1", "the prompt", "default", testPromptOrigin)
 
 	// Assert.
 	if err == nil {
@@ -310,7 +310,7 @@ func TestAnUnwritableReceiptLedgerWithholdsThePromptFromTheShim(t *testing.T) {
 	h.receipts.recordErr = errors.New("disk I/O error")
 
 	// Act.
-	_ = h.m.SubmitPrompt(context.Background(), "ws", "r-1", "the prompt", "default")
+	_ = h.m.SubmitPrompt(context.Background(), "ws", "r-1", "the prompt", "default", testPromptOrigin)
 
 	// Assert.
 	fc := h.lastClient()
@@ -322,7 +322,7 @@ func TestAnUnwritableReceiptLedgerWithholdsThePromptFromTheShim(t *testing.T) {
 func TestASubmitWithNoRequestIdIsRejectedBeforeReceiptMutation(t *testing.T) {
 	h := newSubmitHarness(t)
 
-	if err := h.m.SubmitPrompt(context.Background(), "ws", "", "the prompt", "default"); err == nil {
+	if err := h.m.SubmitPrompt(context.Background(), "ws", "", "the prompt", "default", testPromptOrigin); err == nil {
 		t.Fatal("SubmitPrompt accepted an empty request id")
 	}
 

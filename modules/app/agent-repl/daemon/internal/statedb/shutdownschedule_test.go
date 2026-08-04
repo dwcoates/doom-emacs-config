@@ -32,6 +32,33 @@ func TestNewShutdownSchedulesRejectsANilStore(t *testing.T) {
 	}
 }
 
+func TestLegacyHeldPromptOriginMigrationRefusesUnattributedRows(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "legacy-state.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if _, err := db.Exec(`
+		CREATE TABLE shutdown_hold_prompt (
+			entry_id TEXT PRIMARY KEY, schedule_id TEXT NOT NULL, workspace TEXT NOT NULL,
+			session_id TEXT NOT NULL, request_id TEXT NOT NULL, text TEXT NOT NULL,
+			permission_mode TEXT NOT NULL, queued_at_ms INTEGER NOT NULL
+		);
+		INSERT INTO shutdown_hold_prompt VALUES ('q_old','sd_1','/ws/a','s1','r1','hello','',7);
+	`); err != nil {
+		t.Fatalf("create legacy row: %v", err)
+	}
+	s, err := NewShutdownSchedules(db)
+	if err != nil {
+		t.Fatalf("NewShutdownSchedules migration: %v", err)
+	}
+
+	_, err = s.HeldPrompts("/ws/a")
+	if err == nil || !strings.Contains(err.Error(), "prompt_origin") {
+		t.Fatalf("HeldPrompts legacy row error = %v, want loud missing prompt_origin refusal", err)
+	}
+}
+
 func TestAFreshStoreHoldsNoSchedule(t *testing.T) {
 	// Arrange.
 	s := openSchedules(t)
@@ -143,7 +170,7 @@ func TestARecordedHeldPromptReadsBackForItsWorkspace(t *testing.T) {
 	s := openSchedules(t)
 	want := HeldPrompt{
 		EntryID: "q_1", ScheduleID: "sd_1", Workspace: "/ws/a", SessionID: "s1",
-		RequestID: "r1", Text: "hello", PermissionMode: "default", QueuedAtMs: 7,
+		RequestID: "r1", Text: "hello", PermissionMode: "default", PromptOrigin: 1, QueuedAtMs: 7,
 	}
 
 	// Act.
@@ -164,7 +191,7 @@ func TestARecordedHeldPromptReadsBackForItsWorkspace(t *testing.T) {
 func TestHeldPromptsOfAnotherWorkspaceAreNotReturned(t *testing.T) {
 	// Arrange.
 	s := openSchedules(t)
-	if err := s.RecordHeldPrompt(HeldPrompt{EntryID: "q_1", ScheduleID: "sd_1", Workspace: "/ws/a"}); err != nil {
+	if err := s.RecordHeldPrompt(HeldPrompt{EntryID: "q_1", ScheduleID: "sd_1", Workspace: "/ws/a", PromptOrigin: 1}); err != nil {
 		t.Fatalf("RecordHeldPrompt: %v", err)
 	}
 
@@ -184,8 +211,8 @@ func TestHeldPromptsComeBackInSubmitOrder(t *testing.T) {
 	// Arrange.
 	s := openSchedules(t)
 	for _, p := range []HeldPrompt{
-		{EntryID: "q_late", ScheduleID: "sd_1", Workspace: "/ws/a", QueuedAtMs: 20},
-		{EntryID: "q_early", ScheduleID: "sd_1", Workspace: "/ws/a", QueuedAtMs: 10},
+		{EntryID: "q_late", ScheduleID: "sd_1", Workspace: "/ws/a", PromptOrigin: 1, QueuedAtMs: 20},
+		{EntryID: "q_early", ScheduleID: "sd_1", Workspace: "/ws/a", PromptOrigin: 1, QueuedAtMs: 10},
 	} {
 		if err := s.RecordHeldPrompt(p); err != nil {
 			t.Fatalf("RecordHeldPrompt: %v", err)
@@ -208,8 +235,8 @@ func TestAllHeldPromptsSpansEveryWorkspace(t *testing.T) {
 	// Arrange.
 	s := openSchedules(t)
 	for _, p := range []HeldPrompt{
-		{EntryID: "q_b", ScheduleID: "sd_1", Workspace: "/ws/b", QueuedAtMs: 10},
-		{EntryID: "q_a", ScheduleID: "sd_1", Workspace: "/ws/a", QueuedAtMs: 20},
+		{EntryID: "q_b", ScheduleID: "sd_1", Workspace: "/ws/b", PromptOrigin: 1, QueuedAtMs: 10},
+		{EntryID: "q_a", ScheduleID: "sd_1", Workspace: "/ws/a", PromptOrigin: 1, QueuedAtMs: 20},
 	} {
 		if err := s.RecordHeldPrompt(p); err != nil {
 			t.Fatalf("RecordHeldPrompt: %v", err)
@@ -232,8 +259,8 @@ func TestAllHeldPromptsOrdersWithinAWorkspaceBySubmitOrder(t *testing.T) {
 	// Arrange.
 	s := openSchedules(t)
 	for _, p := range []HeldPrompt{
-		{EntryID: "q_late", ScheduleID: "sd_1", Workspace: "/ws/a", QueuedAtMs: 20},
-		{EntryID: "q_early", ScheduleID: "sd_1", Workspace: "/ws/a", QueuedAtMs: 10},
+		{EntryID: "q_late", ScheduleID: "sd_1", Workspace: "/ws/a", PromptOrigin: 1, QueuedAtMs: 20},
+		{EntryID: "q_early", ScheduleID: "sd_1", Workspace: "/ws/a", PromptOrigin: 1, QueuedAtMs: 10},
 	} {
 		if err := s.RecordHeldPrompt(p); err != nil {
 			t.Fatalf("RecordHeldPrompt: %v", err)
@@ -291,10 +318,18 @@ func TestRecordHeldPromptRefusesAPromptWithNoWorkspace(t *testing.T) {
 	}
 }
 
+func TestRecordHeldPromptRefusesAPromptWithNoOrigin(t *testing.T) {
+	s := openSchedules(t)
+	err := s.RecordHeldPrompt(HeldPrompt{EntryID: "q_1", ScheduleID: "sd_1", Workspace: "/ws/a"})
+	if err == nil || !strings.Contains(err.Error(), "prompt origin") {
+		t.Fatalf("RecordHeldPrompt with no prompt origin = %v, want a refusal naming it", err)
+	}
+}
+
 func TestDropHeldPromptReportsThatARowWasThere(t *testing.T) {
 	// Arrange.
 	s := openSchedules(t)
-	if err := s.RecordHeldPrompt(HeldPrompt{EntryID: "q_1", ScheduleID: "sd_1", Workspace: "/ws/a"}); err != nil {
+	if err := s.RecordHeldPrompt(HeldPrompt{EntryID: "q_1", ScheduleID: "sd_1", Workspace: "/ws/a", PromptOrigin: 1}); err != nil {
 		t.Fatalf("RecordHeldPrompt: %v", err)
 	}
 
@@ -330,8 +365,8 @@ func TestDropHeldPromptsForScheduleLeavesAnotherSchedulesPrompts(t *testing.T) {
 	// Arrange.
 	s := openSchedules(t)
 	for _, p := range []HeldPrompt{
-		{EntryID: "q_1", ScheduleID: "sd_1", Workspace: "/ws/a"},
-		{EntryID: "q_2", ScheduleID: "sd_2", Workspace: "/ws/a"},
+		{EntryID: "q_1", ScheduleID: "sd_1", Workspace: "/ws/a", PromptOrigin: 1},
+		{EntryID: "q_2", ScheduleID: "sd_2", Workspace: "/ws/a", PromptOrigin: 1},
 	} {
 		if err := s.RecordHeldPrompt(p); err != nil {
 			t.Fatalf("RecordHeldPrompt: %v", err)
@@ -365,7 +400,7 @@ func TestTheHeldPromptsOutliveTheScheduleRow(t *testing.T) {
 	if err := s.PutSchedule(ShutdownSchedule{ScheduleID: "sd_1"}); err != nil {
 		t.Fatalf("PutSchedule: %v", err)
 	}
-	if err := s.RecordHeldPrompt(HeldPrompt{EntryID: "q_1", ScheduleID: "sd_1", Workspace: "/ws/a"}); err != nil {
+	if err := s.RecordHeldPrompt(HeldPrompt{EntryID: "q_1", ScheduleID: "sd_1", Workspace: "/ws/a", PromptOrigin: 1}); err != nil {
 		t.Fatalf("RecordHeldPrompt: %v", err)
 	}
 

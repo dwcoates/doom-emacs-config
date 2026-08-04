@@ -188,7 +188,7 @@ func TestDispatchingAClearOpensTheClearingAxis(t *testing.T) {
 			m, applier := newClearTestManager(t)
 
 			// Act.
-			if err := m.SubmitPrompt(context.Background(), "ws", "context-cut-request", tc.text, "default"); err != nil {
+			if err := m.SubmitPrompt(context.Background(), "ws", "context-cut-request", tc.text, "default", testPromptOrigin); err != nil {
 				t.Fatalf("SubmitPrompt: %v", err)
 			}
 

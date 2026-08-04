@@ -38,7 +38,13 @@ type protoControl interface {
 // SubmitPrompt sends a prompt to the shim and blocks until the shim Acks or
 // Nacks it (or ctx / the AckTimeout elapses). A Nack or timeout is a loud
 // error — this layer never retries (the caller decides).
-func (c *Client) SubmitPrompt(ctx context.Context, text, origin, permissionMode string) error {
+func (c *Client) SubmitPrompt(ctx context.Context, text, origin, permissionMode string, promptOrigin corev1.PromptOrigin) error {
+	if promptOrigin == corev1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED {
+		return fmt.Errorf("shimclient: submit prompt requires a non-UNSPECIFIED prompt origin")
+	}
+	if _, ok := corev1.PromptOrigin_name[int32(promptOrigin)]; !ok {
+		return fmt.Errorf("shimclient: submit prompt received unknown prompt origin %d", promptOrigin)
+	}
 	reqID, err := c.newRequestID("prompt")
 	if err != nil {
 		return err
@@ -48,6 +54,7 @@ func (c *Client) SubmitPrompt(ctx context.Context, text, origin, permissionMode 
 		Text:           text,
 		Origin:         origin,
 		PermissionMode: permissionMode,
+		PromptOrigin:   promptOrigin,
 	})
 	return err
 }

@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	corev1 "agentrepl/proto/agentshim/core/v1"
+
 	"claude-repld/internal/ssm"
 )
 
@@ -107,7 +109,7 @@ func TestSubmitMergePromptRequiresARequestID(t *testing.T) {
 	m := newLeaseGateManager(&fakeApplier{}, func(string, ...any) {})
 
 	// Act.
-	err := m.SubmitMergePrompt(context.Background(), "ws", "", "resolve it", "")
+	err := m.SubmitMergePrompt(context.Background(), "ws", "", "resolve it", "", corev1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR)
 
 	// Assert.
 	if err == nil {
@@ -125,7 +127,7 @@ func TestSubmitMergePromptRefusesWithoutTheLease(t *testing.T) {
 	m := newLeaseGateManager(&fakeApplier{}, func(string, ...any) {})
 
 	// Act.
-	err := m.SubmitMergePrompt(context.Background(), "ws", "req-1", "resolve it", "")
+	err := m.SubmitMergePrompt(context.Background(), "ws", "req-1", "resolve it", "", corev1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR)
 
 	// Assert.
 	if err == nil {
@@ -144,7 +146,7 @@ func TestSubmitPromptRefusedWhileTheLeaseIsHeld(t *testing.T) {
 	)
 
 	// Act.
-	err := m.SubmitPrompt(context.Background(), "ws", "req-1", "hello", "")
+	err := m.SubmitPrompt(context.Background(), "ws", "req-1", "hello", "", testPromptOrigin)
 
 	// Assert.
 	if err == nil {

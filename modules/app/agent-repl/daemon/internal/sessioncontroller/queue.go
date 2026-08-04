@@ -30,6 +30,7 @@ type queueEntry struct {
 	requestID      string
 	text           string
 	permissionMode string
+	promptOrigin   corev1.PromptOrigin
 	queuedAtMs     int64
 
 	classification frontendv1.QueueClassification
@@ -314,9 +315,9 @@ type ClassifyResult struct {
 // manager mutex. It is passed in rather than read here on purpose: the lease
 // engine calls back into this package to recompute its holds, so a read of the
 // engine underneath the manager mutex would invert the two locks.
-func (m *Manager) queueSubmitLocked(d *sessionController, requestID, text, permissionMode, leaseScheduleID string) (*queueEntry, bool, error) {
+func (m *Manager) queueSubmitLocked(d *sessionController, requestID, text, permissionMode string, promptOrigin corev1.PromptOrigin, leaseScheduleID string) (*queueEntry, bool, error) {
 	if scheduleID := leaseScheduleID; scheduleID != "" {
-		e := newParkedEntry(newQueueEntryID(), requestID, text, permissionMode, m.now())
+		e := newParkedEntry(newQueueEntryID(), requestID, text, permissionMode, promptOrigin, m.now())
 		if err := m.parkForDrain(d, e, scheduleID); err != nil {
 			// THE SUBMIT IS REFUSED, NOT SILENTLY DEGRADED. The lease's whole
 			// promise to this prompt is that it is delayed rather than dropped,
@@ -354,6 +355,7 @@ func (m *Manager) queueSubmitLocked(d *sessionController, requestID, text, permi
 		requestID:      requestID,
 		text:           text,
 		permissionMode: permissionMode,
+		promptOrigin:   promptOrigin,
 		queuedAtMs:     m.now(),
 		classification: frontendv1.QueueClassification_QUEUE_CLASSIFICATION_PENDING,
 	}
@@ -564,7 +566,7 @@ func (m *Manager) deliver(d *sessionController, e *queueEntry) {
 		m.publish(d.sessionID, view, recs)
 		return
 	}
-	err := m.forwardPrompt(m.rootCtx, d, e.requestID, e.text, "frontend", e.permissionMode, submitterUser)
+	err := m.forwardPrompt(m.rootCtx, d, e.requestID, e.text, e.promptOrigin.String(), e.permissionMode, e.promptOrigin, submitterUser)
 	if err == nil {
 		m.mu.Lock()
 		d.runningText = e.text

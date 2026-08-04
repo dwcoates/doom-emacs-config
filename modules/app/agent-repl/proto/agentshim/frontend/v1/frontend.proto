@@ -2035,6 +2035,9 @@ message DeleteSessionCmd {
 message SubmitPromptCmd {
   string text = 1;
   string permission_mode = 2;
+  // Required origin selected by the concrete frontend send site. The daemon
+  // rejects UNSPECIFIED rather than guessing which UI or automation acted.
+  agentshim.core.v1.PromptOrigin prompt_origin = 3;
 }
 
 // Stop the running turn. Interrupting a LIVE TURN never asks for
