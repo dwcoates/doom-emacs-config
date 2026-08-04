@@ -41,6 +41,7 @@ import (
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/frontend"
 	"claude-repld/internal/registry"
+	"claude-repld/internal/shim"
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/ssm"
 
@@ -145,7 +146,13 @@ type Spawner interface {
 	// there is no handle, and only while the connection that carried it is
 	// live — which is what makes killing by pid safe here rather than a
 	// pid-reuse hazard.
-	StopShim(sessionID string, hintPID int32) error
+	//
+	// by NAMES THE STOP, and it is a required argument rather than a
+	// convention: the implementation refuses an unattributed one outright. It
+	// is rendered from the closed cause vocabulary (stopcause.go) at the one
+	// funnel that reaches this method, so the shim's own death record and the
+	// daemon's log line come from a single table.
+	StopShim(sessionID string, hintPID int32, by shim.Stop) error
 }
 
 // SessionLocator maps a workspace to the live session id bound to it. The
@@ -297,6 +304,12 @@ type Manager struct {
 	cfg  Config
 	logf func(string, ...any)
 	reg  *permRegistry
+
+	// shimStops is the SOLE holder of the wired spawner's stop half, taken off
+	// it in New. cfg.Spawner keeps the bring-up half and refuses stops, so the
+	// only way to kill a shim from this package is the teardown funnel that
+	// reaches this gate (turnstop.go).
+	shimStops *shimStopGate
 
 	newClient func(cfg shimclient.Config) sessionClient
 	// newControllerGenerationID mints the identity persisted on every
@@ -544,8 +557,15 @@ func New(cfg Config) (*Manager, error) {
 	if now == nil {
 		now = func() int64 { return time.Now().UnixMilli() }
 	}
+	// THE STOP HALF IS TAKEN OFF THE SPAWNER HERE and never put back: the gate
+	// below is its only holder, and the spawner the Manager retains REFUSES
+	// stops (turnstop.go). That is what keeps stopShimSettlingTurn the sole
+	// route from this package to a shim's death.
+	stops := newShimStopGate(cfg.Spawner)
+	cfg.Spawner = sealedSpawner{ensure: cfg.Spawner, logf: logf}
 	return &Manager{
 		cfg:                       cfg,
+		shimStops:                 stops,
 		logf:                      logf,
 		reg:                       newPermRegistry(logf),
 		newClient:                 newClient,
@@ -1475,8 +1495,12 @@ var (
 // Use this ONLY when the intent really is workspace-scoped (the idle sweep,
 // daemon shutdown). A caller standing down one SPECIFIC record must use
 // HibernateSession — see the warning there.
-func (m *Manager) Hibernate(workspace string) error {
-	return m.hibernate(workspace, "")
+// cause NAMES THE CALLER, and every caller names a different one: the idle
+// sweep, a merged teardown, an account switch, a drain execution and an
+// ordinary shutdown are five different reasons a workspace's shim died, and the
+// stop record has to be able to tell them apart (stopcause.go).
+func (m *Manager) Hibernate(workspace string, cause StopCause) error {
+	return m.hibernate(workspace, "", cause)
 }
 
 // HibernateSession suspends sessionID's shim without disturbing any different
@@ -1491,7 +1515,7 @@ func (m *Manager) Hibernate(workspace string) error {
 // Hibernate SIGTERMs whichever shim happens to be live, which on 2026-07-25
 // meant reaping an orphan killed the healthy session created 175ms earlier for
 // the same workspace, leaving the user with nothing to drive.
-func (m *Manager) HibernateSession(workspace, sessionID string) error {
+func (m *Manager) HibernateSession(workspace, sessionID string, cause StopCause) error {
 	m.mu.Lock()
 	d, ok := m.byWS[workspace]
 	if ok && d.sessionID != sessionID {
@@ -1505,7 +1529,11 @@ func (m *Manager) HibernateSession(workspace, sessionID string) error {
 		// unattributed `thinking` may belong to the replacement rather than to
 		// the shim being stopped. A claim naming the requested session is still
 		// closed; anything else is left for the live session controller to report.
-		return m.stopShimSettlingTurn(workspace, sessionID, "hibernate_session_superseded", false)
+		//
+		// The caller's cause is REFINED rather than replaced: the record names
+		// both what was asked for (a delete, a supersede) and what the daemon
+		// found when it got here (a record a replacement had already taken).
+		return m.stopShimSettlingTurn(workspace, sessionID, cause.supersededRecord(), false)
 	}
 	if ok {
 		delete(m.byWS, workspace)
@@ -1516,7 +1544,7 @@ func (m *Manager) HibernateSession(workspace, sessionID string) error {
 	// or a supersede stands a record down whether or not it is mid-turn. That is
 	// precisely the stop that used to strand a `thinking` nothing could retire.
 	if ok {
-		m.drainLiveTurnForStop(workspace, sessionID, "hibernate_session", d.client)
+		m.drainLiveTurnForStop(workspace, sessionID, cause.path(), d.client)
 		d.cancel()
 	}
 	m.logf("session-controller: hibernating session-scoped ws=%q session=%s session_controller_present=%v (SIGTERM child shim)",
@@ -1533,12 +1561,14 @@ func (m *Manager) HibernateSession(workspace, sessionID string) error {
 	if ok {
 		m.noteConnectivity(workspace, d.sessionID, d.generationID, ssm.SessionConnectivityHibernated, "hibernate_session")
 	}
-	return m.stopShimSettlingTurn(workspace, sessionID, "hibernate_session", true)
+	return m.stopShimSettlingTurn(workspace, sessionID, cause, true)
 }
 
 // hibernate is the shared teardown. An empty wantSession means "whichever
-// session is live"; a non-empty one gates the teardown on identity.
-func (m *Manager) hibernate(workspace, wantSession string) error {
+// session is live"; a non-empty one gates the teardown on identity. cause
+// travels from the caller to both the funnel's log line and the shim's own stop
+// record.
+func (m *Manager) hibernate(workspace, wantSession string, cause StopCause) error {
 	// THE SETTLED GUARD LIVES HERE, not in the idle sweeper, and the placement is
 	// the point. "Never hibernate a workspace mid-turn" was a rule each caller
 	// had to remember, which means it held only for the callers that did — the
@@ -1575,7 +1605,7 @@ func (m *Manager) hibernate(workspace, wantSession string) error {
 	// only when refuseUnsettledHibernation let a live turn through — its state
 	// read failing is an explicit allow — and that escape is exactly the case
 	// where the shim's own turn end is still worth asking for.
-	m.drainLiveTurnForStop(workspace, d.sessionID, "hibernate", d.client)
+	m.drainLiveTurnForStop(workspace, d.sessionID, cause.path(), d.client)
 	d.cancel() // stop consuming; the shimclient Run ends
 	m.logf("session-controller: hibernating ws=%q session=%s (SIGTERM child shim)", workspace, d.sessionID)
 	// HIBERNATED, and this ORDERING is what makes the answer stick. The cancel
@@ -1586,7 +1616,7 @@ func (m *Manager) hibernate(workspace, wantSession string) error {
 	// hibernation blue immediately after it went teal, which is the whole split
 	// undone.
 	m.noteConnectivity(workspace, d.sessionID, d.generationID, ssm.SessionConnectivityHibernated, "hibernated")
-	return m.stopShimSettlingTurn(workspace, d.sessionID, "hibernate", true)
+	return m.stopShimSettlingTurn(workspace, d.sessionID, cause, true)
 }
 
 // bringUpTimeout bounds how long ensure waits for a spawned shim to connect
@@ -1934,7 +1964,7 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 		// way — which is what makes a shim that DIED mid-turn, rather than one
 		// this daemon stopped, unable to latch the workspace in `thinking`.
 		if wasCurrent && !managerClosing {
-			if stopErr := m.stopShimSettlingTurn(workspace, sessionID, "session_controller_exit", true); stopErr != nil {
+			if stopErr := m.stopShimSettlingTurn(workspace, sessionID, StopCauseControllerExit(), true); stopErr != nil {
 				m.logf("session-controller: session %s unexpected session-controller-exit shim stop FAILED ws=%q run_err=%v: %v",
 					sessionID, workspace, runErr, stopErr)
 			} else {

@@ -207,7 +207,7 @@ func TestStopShimSettlingTurnSynthesizesTheCloseWhenNothingElseDid(t *testing.T)
 	m, spawner, applier, cl := newTurnStopRig(t)
 	applier.staleTurnClosed = true
 	// Act.
-	if err := m.stopShimSettlingTurn("ws", "s1", "hibernate_session", true); err != nil {
+	if err := m.stopShimSettlingTurn("ws", "s1", StopCauseSessionDeleted(), true); err != nil {
 		t.Fatalf("stopShimSettlingTurn: %v", err)
 	}
 	// Assert.
@@ -231,7 +231,7 @@ func TestStopShimSettlingTurnReportsAnHonestCloseDistinguishably(t *testing.T) {
 	m, _, applier, cl := newTurnStopRig(t)
 	applier.staleTurnClosed = false
 	// Act.
-	if err := m.stopShimSettlingTurn("ws", "s1", "hibernate", true); err != nil {
+	if err := m.stopShimSettlingTurn("ws", "s1", StopCauseHibernateIdleSweep(), true); err != nil {
 		t.Fatalf("stopShimSettlingTurn: %v", err)
 	}
 	// Assert.
@@ -252,7 +252,7 @@ func TestStopShimSettlingTurnClosesTheAxisEvenWhenTheStopFails(t *testing.T) {
 	spawner.stopErr = errors.New("no such process")
 	applier.staleTurnClosed = true
 	// Act.
-	err := m.stopShimSettlingTurn("ws", "s1", "hibernate_session", true)
+	err := m.stopShimSettlingTurn("ws", "s1", StopCauseSessionDeleted(), true)
 	// Assert.
 	if err == nil || !strings.Contains(err.Error(), "no such process") {
 		t.Fatalf("err = %v, want the stop failure returned unchanged", err)
@@ -272,7 +272,7 @@ func TestStopShimSettlingTurnLogsAFailedCloseWithoutFailingTheStop(t *testing.T)
 	m, _, applier, cl := newTurnStopRig(t)
 	applier.staleTurnErr = errors.New("state db is gone")
 	// Act.
-	err := m.stopShimSettlingTurn("ws", "s1", "hibernate", true)
+	err := m.stopShimSettlingTurn("ws", "s1", StopCauseHibernateIdleSweep(), true)
 	// Assert.
 	if err != nil {
 		t.Fatalf("err = %v, want nil — the shim did stop", err)
@@ -288,7 +288,7 @@ func TestStopShimSettlingTurnSkipsTheCloseWithNoWorkspace(t *testing.T) {
 	// Arrange.
 	m, _, applier, cl := newTurnStopRig(t)
 	// Act.
-	if err := m.stopShimSettlingTurn("", "s1", "hibernate_session", true); err != nil {
+	if err := m.stopShimSettlingTurn("", "s1", StopCauseSessionDeleted(), true); err != nil {
 		t.Fatalf("stopShimSettlingTurn: %v", err)
 	}
 	// Assert.
@@ -306,7 +306,7 @@ func TestHibernateClosesTheAxisThroughTheFunnel(t *testing.T) {
 	m, _, applier, _ := newClosingRig(t)
 	applier.staleTurnClosed = true
 	// Act.
-	if err := m.Hibernate("ws"); err != nil {
+	if err := m.Hibernate("ws", StopCauseHibernateIdleSweep()); err != nil {
 		t.Fatalf("Hibernate: %v", err)
 	}
 	// Assert.
@@ -324,7 +324,7 @@ func TestHibernateSessionClosesTheAxisThroughTheFunnel(t *testing.T) {
 	m, _, applier, _ := newClosingRig(t)
 	applier.staleTurnClosed = true
 	// Act.
-	if err := m.HibernateSession("ws", "s1"); err != nil {
+	if err := m.HibernateSession("ws", "s1", StopCauseSessionDeleted()); err != nil {
 		t.Fatalf("HibernateSession: %v", err)
 	}
 	// Assert.
@@ -342,7 +342,7 @@ func TestSupersededSessionStopNeverClaimsSoleSessionController(t *testing.T) {
 	// Arrange — s1 drives the workspace; the stop names an older record.
 	m, _, applier, _ := newClosingRig(t)
 	// Act.
-	if err := m.HibernateSession("ws", "s-old"); err != nil {
+	if err := m.HibernateSession("ws", "s-old", StopCauseSessionDeleted()); err != nil {
 		t.Fatalf("HibernateSession: %v", err)
 	}
 	// Assert.

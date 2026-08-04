@@ -2,10 +2,58 @@ package sessioncontroller
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
+
+	"claude-repld/internal/shim"
 )
+
+// shimStopGate HOLDS THE STOP HALF OF THE SPAWNER, and it is the only thing
+// that does. The Manager retains a spawner whose StopShim cannot stop anything
+// (sealedSpawner, below), so `m.cfg.Spawner.StopShim` — the shape a new
+// teardown would reach for by habit — can never reach a shim, and the live stop
+// func is unreachable except through this gate's unexported method, which
+// stopShimSettlingTurn is the sole caller of.
+//
+// Go cannot make an intra-package method literally uncallable, so the seal is
+// stated where it CAN be enforced: the capability itself is held in an
+// unexported field of an unexported type, handed to nothing else, and the
+// obvious bypass fails loudly rather than quietly stopping a shim off-funnel.
+type shimStopGate struct {
+	stop func(sessionID string, hintPID int32, by shim.Stop) error
+}
+
+// newShimStopGate takes the stop half off the wired spawner. It is called once,
+// in New, and the spawner the Manager keeps afterwards is sealed.
+func newShimStopGate(spawner Spawner) *shimStopGate {
+	return &shimStopGate{stop: spawner.StopShim}
+}
+
+// sealedSpawner is what the Manager retains: the spawner's bring-up half
+// verbatim, and a stop half that REFUSES.
+//
+// A stop that arrives here bypassed stopShimSettlingTurn, which means it also
+// bypassed the session-status close that funnel guarantees. Refusing loudly is
+// the only answer that keeps the guarantee true: quietly forwarding would
+// restore the very hole the funnel closes, and quietly dropping it would leave
+// a shim running while its caller believed it stopped.
+type sealedSpawner struct {
+	ensure Spawner
+	logf   func(string, ...any)
+}
+
+func (s sealedSpawner) EnsureShim(ctx context.Context, sessionID string) (SpawnResult, error) {
+	return s.ensure.EnsureShim(ctx, sessionID)
+}
+
+func (s sealedSpawner) StopShim(sessionID string, hintPID int32, by shim.Stop) error {
+	err := fmt.Errorf("session-controller: session %s: refusing an off-funnel shim stop (hint_pid=%d initiator=%q reason=%q); every stop in this package must go through stopShimSettlingTurn, which is what closes the session-status turn the stop would otherwise strand",
+		sessionID, hintPID, by.Initiator, by.Reason)
+	s.logf("session-controller: SHIM STOP REFUSED session=%s hint_pid=%d initiator=%q reason=%q — the stop did not come through the teardown funnel", sessionID, hintPID, by.Initiator, by.Reason)
+	return err
+}
 
 // turnstop.go — THE INVARIANT: a session whose shim THIS DAEMON stops cannot
 // leave a live turn standing on the SSM's session-status lifecycle.
@@ -163,10 +211,26 @@ func (m *Manager) drainLiveTurnForStop(workspace, sessionID, path string, cl tur
 // was standing over it, named by schedule and cause. A stop that leaves that
 // question to be reconstructed from surrounding lines is the failure mode this
 // exists to end.
-func (m *Manager) stopShimSettlingTurn(workspace, sessionID, path string, soleSessionController bool) error {
-	m.logf("session-controller: SHIM STOP ENTRY ws=%q session=%s initiator=%s sole_session_controller=%v %s",
-		workspace, sessionID, path, soleSessionController, m.shimStopProvenance())
-	stopErr := m.cfg.Spawner.StopShim(sessionID, m.shimPIDFor(sessionID))
+// THE CAUSE IS THE ONLY VOCABULARY. `path` used to be a free string each
+// teardown chose; it is now rendered from the cause (stopcause.go) together
+// with the shim.Stop the process itself is handed, so the daemon log and the
+// stop record cannot tell two different stories about one death. An unminted
+// cause is refused before the spawner is touched — and the axis is still closed
+// below, because a refused stop leaves the turn exactly as unreportable as a
+// failed one.
+func (m *Manager) stopShimSettlingTurn(workspace, sessionID string, cause StopCause, soleSessionController bool) error {
+	path := cause.path()
+	by := cause.stop()
+	m.logf("session-controller: SHIM STOP ENTRY ws=%q session=%s initiator=%s cause=%s stop_initiator=%q stop_reason=%q sole_session_controller=%v %s",
+		workspace, sessionID, path, cause, by.Initiator, by.Reason, soleSessionController, m.shimStopProvenance())
+	if err := by.Validate(); err != nil {
+		stopErr := fmt.Errorf("session-controller: session %s (ws %q): refusing an unattributed shim stop: %w", sessionID, workspace, err)
+		m.logf("session-controller: SHIM STOP REFUSED ws=%q session=%s cause=%s: %v — a stop with no attribution would leave the daemon log unable to say who ordered this shim's death, so nothing is signalled",
+			workspace, sessionID, cause, err)
+		m.settleTurnAfterStop(workspace, sessionID, path, soleSessionController)
+		return stopErr
+	}
+	stopErr := m.shimStops.stop(sessionID, m.shimPIDFor(sessionID), by)
 	if stopErr != nil {
 		m.logf("session-controller: teardown shim stop FAILED ws=%q session=%s path=%s: %v — the session-status lifecycle is still closed below, because a stop that failed leaves the turn no more reportable than one that succeeded",
 			workspace, sessionID, path, stopErr)

@@ -219,7 +219,7 @@ func (m *Manager) tearDownFailedBringUp(workspace string, d *sessionController) 
 	// a bring-up that never wired has almost never started a turn: a RETRY
 	// after a partially handshaked shim is the exception, and the interrupt
 	// costs nothing when the connection was never established.
-	m.drainLiveTurnForStop(workspace, d.sessionID, "bringup_failed", d.client)
+	m.drainLiveTurnForStop(workspace, d.sessionID, StopCauseBringUpFailed().path(), d.client)
 	if d.cancel != nil {
 		d.cancel()
 	}
@@ -227,7 +227,7 @@ func (m *Manager) tearDownFailedBringUp(workspace string, d *sessionController) 
 	// lost the concurrent-first-prompt race is being torn down while the winner
 	// drives the workspace, and closing an unattributed claim there would blue
 	// out the winner's live turn.
-	if err := m.stopShimSettlingTurn(workspace, d.sessionID, "bringup_failed", wasCurrent); err != nil {
+	if err := m.stopShimSettlingTurn(workspace, d.sessionID, StopCauseBringUpFailed(), wasCurrent); err != nil {
 		m.logf("session-controller: stopping the shim of a failed bring-up FAILED ws=%q session=%s: %v", workspace, d.sessionID, err)
 	}
 	return true
