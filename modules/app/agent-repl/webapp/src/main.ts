@@ -34,6 +34,18 @@ import {
   mergeGateSendTitle,
   submitBlocked,
 } from "./merge-gate.js";
+import {
+  HIBERNATED_BODY_CLASS,
+  HIBERNATE_ATTR,
+  REVIVE_COMPACT_ATTR,
+  REVIVE_DIRECT_ATTR,
+  hibernationBlocked,
+  hibernationBlockedLog,
+  hibernationNoticeHtml,
+  hibernationSendTitle,
+  revivalGateHtml,
+  type RevivePending,
+} from "./hibernation.js";
 import { mergeStatusLogValue } from "./merge-status.js";
 import { PromptOrigin } from "./frontend-command.js";
 import { configureChessGames, installChessNavHook } from "./chess-game.js";
@@ -403,6 +415,19 @@ async function boot(): Promise<void> {
   const compactBarEl = must("compact-progress-slot");
   const ungatedBannerEl = must("ungated-banner");
   const drainBannerEl = must("drain-banner");
+  const revivalGateEl = must("revival-gate");
+  const hibernateEl = must<HTMLButtonElement>("hibernate-btn");
+  /**
+   * The revival decision this page has SENT and the daemon has not yet
+   * answered, or null.
+   *
+   * It is browser-local view state and nothing else: the authority on whether
+   * the session is awake is the pushed `SessionView`, and this only keeps the
+   * gate from re-offering two buttons while one of them is in flight. It clears
+   * on the ack's rejection (the decision did not happen) and on the pushed view
+   * that drops the hibernation field (it did).
+   */
+  let revivePending: RevivePending = null;
   // The composer's own elements, resolved HERE rather than in the wiring block
   // below because `renderChrome` repaints the merge gate on them every frame.
   // Null when the host owns input (Emacs's `composer=0`), which is also the one
@@ -598,11 +623,34 @@ async function boot(): Promise<void> {
     // the composer un-gates the moment the merge releases without any local
     // state to unwind. Skipped entirely when the host owns input (Emacs runs
     // the webview with composer=0 and there are no controls to gate).
+    // THE REVIVAL GATE (hibernation.ts). Same discipline as the two banners
+    // above: a pure function of the daemon's live state, repainted every chrome
+    // frame, so it goes up and comes down with the pushed SessionView and there
+    // is no local lifetime to unwind. The in-flight decision clears itself here
+    // the moment the daemon reports the session awake — the ONE authority on
+    // that — so a revive that landed can never leave a stale "waking…" line.
+    if (s.hibernation === null) revivePending = null;
+    revivalGateEl.innerHTML = revivalGateHtml(s.hibernation, revivePending);
+    document.body.classList.toggle(HIBERNATED_BODY_CLASS, s.hibernation !== null);
+    // The sleep verb is offered only on an awake session: there is nothing to
+    // hibernate on one already asleep, and the gate above is what that session
+    // is asking for instead.
+    hibernateEl.hidden = s.hibernation !== null;
     if (composerEls !== null) {
-      const blocked = submitBlocked(s.mergeLeaseHeld);
-      composerEls.notice.innerHTML = mergeGateNoticeHtml(s.mergeLeaseHeld, s.mergeStatus);
-      composerEls.send.disabled = blocked;
-      composerEls.send.title = mergeGateSendTitle(s.mergeLeaseHeld, s.mergeStatus);
+      // TWO INDEPENDENT GATES, and the composer is blocked by EITHER. They are
+      // separate facts with separate causes (a merge owns the shim; the session
+      // has no shim at all), so neither is folded into the other — but the
+      // hibernation notice wins the shared slot when both stand, because a
+      // sleeping session cannot be prompted even once the merge releases.
+      const mergeHeld = submitBlocked(s.mergeLeaseHeld);
+      const asleep = hibernationBlocked(s.hibernation);
+      composerEls.notice.innerHTML = asleep
+        ? hibernationNoticeHtml(s.hibernation)
+        : mergeGateNoticeHtml(s.mergeLeaseHeld, s.mergeStatus);
+      composerEls.send.disabled = mergeHeld || asleep;
+      composerEls.send.title = asleep
+        ? hibernationSendTitle(s.hibernation)
+        : mergeGateSendTitle(s.mergeLeaseHeld, s.mergeStatus);
     }
     spinnerEl.classList.toggle("on", s.turnInFlight);
     // The centered "current objective" label (§2.14): textContent (not
@@ -631,6 +679,46 @@ async function boot(): Promise<void> {
     if (action?.kind !== "toggle" || action.menu !== "tokens") return;
     tokensMenuOpen = !tokensMenuOpen;
     renderChrome();
+  });
+
+  // THE REVIVAL GATE's two verbs. Delegated off the slot rather than bound to
+  // the buttons, which every renderChrome rewrites.
+  //
+  // The pending mark is set BEFORE the send and cleared on a rejection, so the
+  // gate reports "waking…" only while a decision is genuinely outstanding. It
+  // is NOT cleared on success: success is the daemon dropping the hibernation
+  // field on a pushed SessionView, and renderChrome clears it there. Resolving
+  // the promise means the daemon ACCEPTED the decision, not that the session is
+  // up — the bring-up follows, and taking the gate down on the ack would put a
+  // live composer in front of a session that has no shim yet.
+  const sendRevive = (mode: "compactFirst" | "direct"): void => {
+    revivePending = mode;
+    renderChrome();
+    void dispatcher.reviveSession(cmdWorkspace(), mode).catch((err: unknown) => {
+      // The dispatcher owns the canonical rejection record and the failure
+      // card; this only unwinds the view state, because a refused decision
+      // leaves the session exactly as asleep as it was and the user has to be
+      // able to choose again.
+      revivePending = null;
+      renderChrome();
+      consumeOwnedDispatchFailure(err);
+    });
+  };
+  revivalGateEl.addEventListener("click", (e) => {
+    const el = (e.target as HTMLElement).closest(
+      `[${REVIVE_COMPACT_ATTR}], [${REVIVE_DIRECT_ATTR}]`,
+    );
+    if (el === null) return;
+    sendRevive(el.hasAttribute(REVIVE_COMPACT_ATTR) ? "compactFirst" : "direct");
+  });
+
+  // The session-level sleep verb. It ASKS; the daemon refuses while a turn is
+  // live or the merge lease is held, and that nack rides the ordinary
+  // CommandAck failure path into a classified card — so nothing here pre-judges
+  // settledness, which this end cannot resolve.
+  hibernateEl.setAttribute(HIBERNATE_ATTR, "1");
+  hibernateEl.addEventListener("click", () => {
+    void dispatcher.hibernateWorkspace(cmdWorkspace()).catch(consumeOwnedDispatchFailure);
   });
 
   // The reveal half of a roster-row click: dismiss the roster either way so
@@ -1137,6 +1225,18 @@ async function boot(): Promise<void> {
       // is what turns a vanished draft and a delayed failure card into an
       // immediate explanation. The draft is deliberately KEPT — the user
       // will want to send it once the merge finishes.
+      // THE REVIVAL GATE, on the same one path. Checked FIRST: the daemon nacks
+      // a prompt on a hibernated session regardless of any lease, and the gate
+      // card is what the user has to answer before a prompt can go anywhere. As
+      // with the merge gate, the draft is deliberately KEPT.
+      const asleep = store.state.hibernation;
+      if (asleep !== null) {
+        clog("warn", hibernationBlockedLog(text.length, asleep));
+        // Re-assert the notice in case this attempt raced a frame that had not
+        // painted it, so an attempted send NEVER reads as nothing happening.
+        composerEls.notice.innerHTML = hibernationNoticeHtml(asleep);
+        return;
+      }
       if (submitBlocked(store.state.mergeLeaseHeld)) {
         clog("warn", mergeGateBlockedLog(text.length, store.state.mergeStatus));
         // The standing notice is already the explanation; re-assert it in case
