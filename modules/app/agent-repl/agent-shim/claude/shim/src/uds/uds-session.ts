@@ -311,14 +311,6 @@ export class UdsSession {
   private readonly liveSdkTaskIds = new Set<string>();
   /** SDK task ids whose first terminal lifecycle fact has been stored. */
   private readonly completedSdkTaskIds = new Set<string>();
-  /**
-   * A vendor result observed while SDK background tasks were live.
-   *
-   * The result is durable immediately, but its TurnEnded twin is retained
-   * until the final live task terminates. This keeps the accepted root turn
-   * authoritative for every late subagent response and usage record.
-   */
-  private deferredTurnEnd: { turnId: string; event: Event } | null = null;
   private intentionalShutdownReason: string | null = null;
   private readonly intentionalShutdownStarted = completionLatch();
   private shutdownPromise: Promise<void> | null = null;
@@ -1653,13 +1645,14 @@ export class UdsSession {
       return;
     }
     // A result closes the oldest accepted input turn only when it has no live
-    // SDK tasks. A result with live tasks is durable terminal evidence, but
-    // the turn remains authoritative until the final task termination is
-    // stored. This is what keeps late subagent usage attached to its root.
+    // SDK tasks. A result with live tasks is durable intermediate evidence,
+    // but the turn remains authoritative until the SDK emits a result after
+    // every task has terminated. Claude may emit multiple result messages as
+    // background-task notifications drive additional internal agent cycles.
     let terminalTurnId: string | undefined;
     let terminalBoundaryAtMs: number | undefined;
     let turnStart: Event | undefined;
-    let deferResultTurnEnd = false;
+    let retainResultTurn = false;
     if (msg.type === "result") {
       const claimedTurnId = this.activeTurnIds[0];
       if (claimedTurnId === undefined) {
@@ -1668,12 +1661,7 @@ export class UdsSession {
           "SDK result has no accepted prompt turn to close",
         );
       } else if (this.liveSdkTaskIds.size > 0) {
-        if (this.deferredTurnEnd !== null) {
-          throw new Error(
-            `SDK emitted a second result for turn ${JSON.stringify(claimedTurnId)} while its first result awaits ${this.liveSdkTaskIds.size} live task(s)`,
-          );
-        }
-        deferResultTurnEnd = true;
+        retainResultTurn = true;
         turnStart = this.activeTurnStarts.get(claimedTurnId);
         LOGGER.log({
           agent_repl_session_id: this.deps.sessionId,
@@ -1702,10 +1690,10 @@ export class UdsSession {
     // API evidence and is never repurposed as daemon turn correlation.
     const taskLifecycleMessage = msg.type === "system"
       && (msg.subtype === "task_started" || msg.subtype === "task_notification" || msg.subtype === "task_updated");
-    const rootTurnId = msg.type === "assistant" || taskLifecycleMessage || deferResultTurnEnd
+    const rootTurnId = msg.type === "assistant" || taskLifecycleMessage || retainResultTurn
       ? this.activeTurnIds[0]
       : terminalTurnId;
-    if ((msg.type === "assistant" || taskLifecycleMessage || deferResultTurnEnd) && rootTurnId !== undefined) {
+    if ((msg.type === "assistant" || taskLifecycleMessage || retainResultTurn) && rootTurnId !== undefined) {
       turnStart = this.activeTurnStarts.get(rootTurnId);
     }
     // The direct readiness SessionStarted closes the lifecycle gate before the
@@ -1828,34 +1816,6 @@ export class UdsSession {
         throw new Error(`SDK emitted TaskEnded for unknown task ${JSON.stringify(taskId)}`);
       }
     }
-    const completesDeferredTurn = this.deferredTurnEnd !== null
-      && endedTaskIds.length > 0
-      && liveAfterThisEvent.size === 0;
-    if (completesDeferredTurn) {
-      const deferred = this.deferredTurnEnd!;
-      terminalTurnId = this.activeTurnIds.shift();
-      if (terminalTurnId !== deferred.turnId) {
-        throw new Error(
-          `final SDK task closed ${JSON.stringify(terminalTurnId)} instead of deferred turn ${JSON.stringify(deferred.turnId)}`,
-        );
-      }
-      this.pendingTurnEndIds.push(terminalTurnId);
-      terminalBoundaryAtMs = this.now();
-      deferred.event.sessionId = vendor.sessionId;
-      deferred.event.requestId = terminalTurnId;
-      deferred.event.producedAtMs = BigInt(terminalBoundaryAtMs);
-      authoritativeLifecycle = [...authoritativeLifecycle, deferred.event];
-      LOGGER.log({
-        agent_repl_session_id: this.deps.sessionId,
-        request_id: terminalTurnId,
-        turn_id: terminalTurnId,
-        completed_sdk_task_ids: endedTaskIds,
-        live_sdk_task_count_before: this.liveSdkTaskIds.size,
-        live_sdk_task_count_after: 0,
-        turns_in_flight: this.activeTurnIds.length,
-        decision: "turn_ended_after_final_sdk_task",
-      }, "final SDK background task durably closes the retained root turn");
-    }
     if (msg.type === "result" && terminalTurnId !== undefined) {
       LOGGER.log({
         agent_repl_session_id: this.deps.sessionId,
@@ -1911,14 +1871,6 @@ export class UdsSession {
           decision: "commit_sdk_task_lifecycle",
         }, "SDK task lifecycle is durably reflected in root-turn liveness");
       }
-      if (deferResultTurnEnd) {
-        const deferredEnd = lifecycle.find((event) => event.payload.case === "turnEnded");
-        if (deferredEnd === undefined || rootTurnId === undefined) {
-          throw new Error("deferred SDK result lacks its root turn or TurnEnded lifecycle twin");
-        }
-        this.deferredTurnEnd = { turnId: rootTurnId, event: deferredEnd };
-      }
-      if (completesDeferredTurn) this.deferredTurnEnd = null;
       if (terminalTurnId !== undefined) {
         const index = this.pendingTurnEndIds.indexOf(terminalTurnId);
         if (index < 0) {

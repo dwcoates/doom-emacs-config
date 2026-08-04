@@ -906,13 +906,29 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
       output_file: "/tmp/agent-go.output",
       summary: "done",
     } as unknown as SdkMessageLike);
-    const terminal = await store.peer().next(StoreWriteSchema);
+    const finalTaskEnd = await store.peer().next(StoreWriteSchema);
 
-    // Assert: the final task fact, end quota sample, and the sole TurnEnded
-    // form one ordered durability boundary. The query itself remains alive.
+    // The last task fact does not end the root turn. Claude emits another
+    // result after the task notification has driven its final internal cycle.
+    expect(finalTaskEnd.batch!.events.map((event) => event.payload.case)).toEqual(["vendor", "taskEnded"]);
+    expect(finalTaskEnd.batch!.events.every((event) => event.requestId === "p1")).toBe(true);
+    expect(session.turnCount()).toBe(1);
+    expect(query.subscriptionUsageCalls).toBe(1);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(finalTaskEnd.batch!.events.length),
+      lastSeq: 20n,
+    }));
+
+    query.emit({
+      type: "result",
+      uuid: "final-parent-result",
+      session_id: "vendor-uuid",
+      subtype: "success",
+      duration_ms: 140,
+    } as unknown as SdkMessageLike);
+    const terminal = await store.peer().next(StoreWriteSchema);
     expect(terminal.batch!.events.map((event) => event.payload.case)).toEqual([
       "vendor",
-      "taskEnded",
       "accountUsageObservation",
       "turnEnded",
     ]);
@@ -920,7 +936,7 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
     expect(query.subscriptionUsageCalls).toBe(2);
     store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
       accepted: BigInt(terminal.batch!.events.length),
-      lastSeq: 20n,
+      lastSeq: 23n,
     }));
     await until(() => session.turnCount() === 0);
     expect(queryFactoryCalls()).toBe(1);
@@ -933,12 +949,11 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
         decision: "retain_turn_for_live_sdk_tasks",
       },
     });
-    expect(log.record("final SDK background task durably closes the retained root turn")).toMatchObject({
+    expect(log.record("SDK result correlated to accepted turn")).toMatchObject({
       request_id: "p1",
       context: {
-        completed_sdk_task_ids: ["agent-go"],
-        live_sdk_task_count_after: 0,
-        decision: "turn_ended_after_final_sdk_task",
+        turn_id: "p1",
+        decision: "turn_ended",
       },
     });
     expect(log.record("SDK repeated a stored terminal task fact; retaining vendor evidence without duplicating lifecycle")).toMatchObject({
