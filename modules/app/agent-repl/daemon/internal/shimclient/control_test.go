@@ -81,11 +81,68 @@ func TestSubmitPromptAckSuccess(t *testing.T) {
 	waitConnected(t, connected)
 
 	// Act
-	err := c.SubmitPrompt(context.Background(), "hello", "human", "", corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+	err := c.SubmitPrompt(context.Background(), "", "hello", "human", "", corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
 
 	// Assert
 	if err != nil {
 		t.Fatalf("SubmitPrompt: want nil, got %v", err)
+	}
+}
+
+// submitPromptRequestID runs one SubmitPrompt against a fake shim and reports
+// the request_id that reached the wire — the id the shim adopts as the turn's
+// own identity (core.proto §"Turn lifecycle authority").
+func submitPromptRequestID(t *testing.T, requestID string) string {
+	t.Helper()
+	observed := make(chan string, 1)
+	h := newHarness()
+	path := startFakeShim(t, func(conn net.Conn) {
+		_ = fakeServerHandshake(t, conn, "sess-1", "1", false)
+		m, err := wire.ReadAny(conn)
+		if err != nil {
+			t.Errorf("read SubmitPrompt: %v", err)
+			return
+		}
+		sp, ok := m.(*corev1.SubmitPrompt)
+		if !ok {
+			t.Errorf("expected SubmitPrompt, got %T", m)
+			return
+		}
+		observed <- sp.GetRequestId()
+		mustWriteMsg(t, conn, &corev1.Ack{RequestId: sp.GetRequestId()})
+		_, _ = wire.ReadAny(conn)
+	})
+	c, connected, stop := runConnectedClient(t, h.config(t, "sess-1", path))
+	defer stop()
+	waitConnected(t, connected)
+
+	if err := c.SubmitPrompt(context.Background(), requestID, "hello", "human", "",
+		corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+		t.Fatalf("SubmitPrompt: %v", err)
+	}
+	select {
+	case got := <-observed:
+		return got
+	case <-time.After(2 * time.Second):
+		t.Fatal("the shim never received a SubmitPrompt")
+		return ""
+	}
+}
+
+// A caller that already published an identity for this turn — the keep-alive
+// ping, whose claim, holds and window row are keyed by it before the submit —
+// gets THAT id on the wire, so the turn comes back under the one name.
+func TestSubmitPromptSendsTheCallersOwnRequestID(t *testing.T) {
+	if got := submitPromptRequestID(t, "ka_deadbeef"); got != "ka_deadbeef" {
+		t.Fatalf("wire request_id = %q, want the caller's own id %q", got, "ka_deadbeef")
+	}
+}
+
+// A caller with no identity of its own says so with an empty id, and the client
+// mints one: nothing daemon-side is keyed by this turn's name.
+func TestSubmitPromptMintsARequestIDWhenTheCallerOwnsNone(t *testing.T) {
+	if got := submitPromptRequestID(t, ""); !strings.HasPrefix(got, "daemon-prompt-") {
+		t.Fatalf("wire request_id = %q, want a minted daemon-prompt-* id", got)
 	}
 }
 
@@ -96,7 +153,7 @@ func TestSubmitPromptRejectsInvalidOriginBeforeControlSend(t *testing.T) {
 	} {
 		t.Run(origin.String(), func(t *testing.T) {
 			c := &Client{}
-			err := c.SubmitPrompt(context.Background(), "hello", "human", "", origin)
+			err := c.SubmitPrompt(context.Background(), "", "hello", "human", "", origin)
 			if err == nil || !strings.Contains(err.Error(), "prompt origin") {
 				t.Fatalf("SubmitPrompt origin=%v error = %v, want prompt-origin refusal", origin, err)
 			}
@@ -172,7 +229,7 @@ func TestSubmitPromptNackIsLoudError(t *testing.T) {
 	waitConnected(t, connected)
 
 	// Act
-	err := c.SubmitPrompt(context.Background(), "hello", "human", "", corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+	err := c.SubmitPrompt(context.Background(), "", "hello", "human", "", corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
 
 	// Assert
 	if !errors.Is(err, ErrNack) {
@@ -195,7 +252,7 @@ func TestControlAckTimeout(t *testing.T) {
 	waitConnected(t, connected)
 
 	// Act
-	err := c.SubmitPrompt(context.Background(), "hello", "human", "", corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+	err := c.SubmitPrompt(context.Background(), "", "hello", "human", "", corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
 
 	// Assert
 	if !errors.Is(err, ErrAckTimeout) {
@@ -252,7 +309,7 @@ func TestSubmitPromptNotConnected(t *testing.T) {
 	c := New(h.config(t, "sess-1", "/nonexistent/agent-shim/session.sock"))
 
 	// Act: no Run goroutine, so there is no live connection.
-	err := c.SubmitPrompt(context.Background(), "hi", "human", "", corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+	err := c.SubmitPrompt(context.Background(), "", "hi", "human", "", corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
 
 	// Assert
 	if !errors.Is(err, ErrNotConnected) {

@@ -631,3 +631,25 @@ func TestTheMergeLeaseHoldersPromptTakesNoAcceptedEdge(t *testing.T) {
 		t.Fatalf("prompt-accept edges for a merge-driven prompt = %d, want 0", accepts)
 	}
 }
+
+// THE USER'S PROMPT IS SUBMITTED UNDER THE FRONTEND'S OWN REQUEST ID, which the
+// shim adopts as the turn_id it stamps on TurnStarted, TurnEnded and every
+// event attributed to the turn. That is what lets a frontend correlate a turn's
+// consequences — a cost alert, a token report — with the command it sent. A
+// client-minted id here would name the turn something no caller ever saw.
+func TestTheSubmittedPromptCarriesTheCallersRequestID(t *testing.T) {
+	// Arrange.
+	h := newQueueHarness(t, nil)
+
+	// Act.
+	if err := h.m.SubmitPrompt(context.Background(), "ws", "r-expensive", "hello", "", testPromptOrigin); err != nil {
+		t.Fatalf("SubmitPrompt: %v", err)
+	}
+
+	// Assert.
+	h.client.mu.Lock()
+	defer h.client.mu.Unlock()
+	if want := []string{"r-expensive"}; !reflect.DeepEqual(h.client.requestIDs, want) {
+		t.Fatalf("submitted request ids = %v, want %v", h.client.requestIDs, want)
+	}
+}
