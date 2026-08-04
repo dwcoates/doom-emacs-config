@@ -93,6 +93,20 @@ func (m *Manager) guardMergeLease(workspace string, who submitter, requestID, or
 		m.logf("session-controller: keep-alive ping REFUSED ws=%q request_id=%s origin=%q — the merge lease is held, so the cache is allowed to expire rather than a ping landing inside conflict resolution",
 			workspace, requestID, origin)
 		return err
+	case held && who == submitterRevival:
+		// A REVIVAL'S `/compact` IS STILL A TURN, and the lease's claim is that
+		// merge.Coordinator is the only party driving this shim. The revival
+		// gate admits this submitter past HIBERNATION — that admission is what
+		// lets the record stay asleep while the compaction runs — and it was
+		// silently borrowing the merge lease's admission along with it, so a
+		// compact-first revival could inject a full-context compaction into a
+		// session in the middle of conflict resolution. The revival waits for
+		// the lease like every other producer; the session stays gated, which
+		// is the same safe direction every other revival failure lands in.
+		err := fmt.Errorf("session-controller: revival of workspace %q refused: merge.Coordinator holds the exclusivity lease on its session, so the compaction cannot be submitted until the merge reaches a terminal phase. The session remains hibernated and can be revived again", workspace)
+		m.logf("session-controller: revival compaction REFUSED ws=%q request_id=%s origin=%q — the merge lease is held; nothing was submitted and the session stays gated",
+			workspace, requestID, origin)
+		return err
 	case held && who == submitterUser:
 		err := fmt.Errorf("workspace %q is being merged: merge.Coordinator holds the exclusivity lease on its session, so prompts are refused until the merge reaches a terminal phase (merged, merge_failed, or an abandoned merge_conflict). Nothing was submitted and nothing was queued — resubmit once the merge finishes", workspace)
 		m.logf("session-controller: prompt REFUSED ws=%q request_id=%s origin=%q submitter=%s — the merge lease is held; the prompt was neither submitted nor queued",

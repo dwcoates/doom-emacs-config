@@ -234,6 +234,43 @@ func TestHibernateWithCauseDoesNotReValidateAForcedCause(t *testing.T) {
 	}
 }
 
+// THE MERGE LEASE OUTRANKS AN AUTOMATIC CAUSE TOO. The forced path checked the
+// lease; the sweeper's causes did not, so an idle-cutoff sleep could stop a
+// shim merge.Coordinator was actively driving.
+func TestHibernateWithCauseRefusesAnAutomaticCauseWhileTheMergeLeaseIsHeld(t *testing.T) {
+	// Arrange.
+	m, applier, _ := newHibernationRig(t)
+	applier.mergeLeases = map[string]bool{"ws": true}
+
+	// Act.
+	err := m.HibernateWithCause("ws", registry.HibernationDetail{
+		Cause: registry.HibernationCauseIdleCutoff, CutoffMs: 21_600_000,
+	})
+
+	// Assert.
+	if !errors.Is(err, ErrHibernationMergeLeaseHeld) {
+		t.Fatalf("HibernateWithCause under a merge lease = %v, want ErrHibernationMergeLeaseHeld", err)
+	}
+}
+
+// THE REFUSAL STOPS NOTHING. A merge lease is refused before the teardown, so
+// the shim the merge is driving is still there afterwards.
+func TestHibernateWithCauseUnderAMergeLeaseStopsNothing(t *testing.T) {
+	// Arrange.
+	m, applier, hib := newHibernationRig(t)
+	applier.mergeLeases = map[string]bool{"ws": true}
+
+	// Act.
+	_ = m.HibernateWithCause("ws", registry.HibernationDetail{
+		Cause: registry.HibernationCauseCacheExpired, TTLMs: 3_600_000,
+	})
+
+	// Assert.
+	if got := hib.writeCount(); got != 0 {
+		t.Fatalf("hibernation writes = %d, want 0 under a held merge lease", got)
+	}
+}
+
 // The transition STAMPS the instant when the caller did not, so the revival
 // gate can always say how long the session has been asleep.
 func TestHibernateWithCauseStampsSinceMs(t *testing.T) {
