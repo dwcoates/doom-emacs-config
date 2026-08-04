@@ -74,7 +74,12 @@ func (m *Manager) releasePhantomTurn(d *sessionController) {
 	}
 	m.logf("session-controller: phantom turn close RELEASING the queue ws=%q session=%s closed=%s held=%d — the turn these prompts were held behind was interrupted by a restart, so the boundary they are waiting for is delivered here",
 		d.workspace, d.sessionID, formatTurnIDs(closed), held)
-	m.onTurnBoundary(d, false)
+	// A SYNTHESIZED boundary has no event behind it and therefore no instant of
+	// its own: the turn it closes was interrupted by a restart and never
+	// reported an end. Now is the only instant the daemon can honestly claim
+	// the boundary happened at, and it is stated here rather than defaulted
+	// silently inside the boundary handler.
+	m.onTurnBoundary(d, false, m.now())
 }
 
 // settleInterjectAlreadyComplete reconciles BOTH axes to an interject's
@@ -113,7 +118,10 @@ func (m *Manager) settleInterjectAlreadyComplete(d *sessionController, entryID s
 	}
 	m.logf("session-controller: interject already-complete SETTLED ws=%s session=%s entry=%s status_closed=%v claims_closed=%s — the shim reports no foreground turn, so the boundary this interject is waiting for is delivered here rather than awaited forever",
 		d.workspace, d.sessionID, entryID, closedState, formatTurnIDs(closedClaims))
-	m.onTurnBoundary(d, false)
+	// Synthesized, exactly as releasePhantomTurn's is: the shim's
+	// ALREADY_COMPLETE Ack says the turn is over but names no instant, so now
+	// is the only one the daemon can honestly claim.
+	m.onTurnBoundary(d, false, m.now())
 }
 
 // closeTurnClaimsOnAlreadyComplete ends the durable claim behind a USER-commanded

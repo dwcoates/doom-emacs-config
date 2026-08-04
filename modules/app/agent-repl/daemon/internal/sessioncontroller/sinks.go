@@ -360,7 +360,13 @@ type consumer struct {
 	// Called on the shim read-loop goroutine, so the handler must not block on
 	// anything that needs that loop to make progress — notably an Ack-awaiting
 	// send back to the same shim.
-	onTurn func(active bool)
+	//
+	// atMs is the BOUNDARY'S OWN INSTANT — the event's produced_at_ms — not the
+	// moment the handler runs. Anything the queue stamps from a boundary (the
+	// keep-alive window's closing edge) has to agree with the timestamps the
+	// vendor wrote on the transcript records that boundary bounds, and a clock
+	// read taken at handling time is a different, later, unrelated instant.
+	onTurn func(active bool, atMs int64)
 	// onTurnEvent reports EVERY accepted turn boundary WITH THE TURN'S OWN ID,
 	// where onTurn above reports only the active/idle EDGES the queue drains on.
 	// Assigned after construction, like onVendorSessionID.
@@ -497,7 +503,7 @@ type consumer struct {
 	onHistoricalUsagePersisted func()
 }
 
-func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier, prog ProgressResolver, floors ClearCompactStore, accountingStore TurnAccountingStore, logf func(string, ...any), onSessionStarted func(*corev1.SessionStarted), onTurn func(active bool), onBackfill func(state string), onSystemInit func(*datav1.SystemInit), onSessionEnded func()) *consumer {
+func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier, prog ProgressResolver, floors ClearCompactStore, accountingStore TurnAccountingStore, logf func(string, ...any), onSessionStarted func(*corev1.SessionStarted), onTurn func(active bool, atMs int64), onBackfill func(state string), onSystemInit func(*datav1.SystemInit), onSessionEnded func()) *consumer {
 	if accountingStore == nil {
 		panic("session-controller: newConsumer needs a TurnAccountingStore")
 	}
@@ -789,7 +795,7 @@ func (c *consumer) Apply(ev *corev1.Event) error {
 		c.onSessionStarted(ss)
 	}
 	if turnResult != nil && turnResult.notify && c.onTurn != nil {
-		c.onTurn(turnResult.active)
+		c.onTurn(turnResult.active, c.boundaryInstant(ev))
 	}
 	// THE KEEP-ALIVE POLICY'S ONE INPUT, persisted on the accepted turn END and
 	// nowhere else. It is written HERE, after the durable ledger and the SSM
@@ -800,11 +806,7 @@ func (c *consumer) Apply(ev *corev1.Event) error {
 	// registry.Record.LastTurnEndMs for why the timestamp rather than a timer
 	// is what survives a laptop sleep and a daemon bounce.
 	if te := ev.GetTurnEnded(); te != nil && c.onTurnEnded != nil {
-		at := ev.GetProducedAtMs()
-		if at == 0 {
-			at = c.now()
-		}
-		c.onTurnEnded(at)
+		c.onTurnEnded(c.boundaryInstant(ev))
 	}
 	// EVERY accepted boundary, edge or not: a turn that starts while another is
 	// still ending produces no edge, and a wait correlated on that turn's id
@@ -1654,6 +1656,30 @@ func (c *consumer) degradedUUID(component string) string {
 // same card instead of stacking a second account of one failure.
 func (c *consumer) startFailedUUID() string {
 	return "start_failed:" + c.sessionID
+}
+
+// boundaryInstant is the instant a lifecycle event says it happened at, which
+// is the ONE instant every consumer of that boundary must agree on: the
+// keep-alive policy's clock, the keep-alive window's closing edge, and the
+// durable last-turn-end stamp all measure from the same fact.
+//
+// The fallback to now() is the honest reading of an event that carried no
+// instant — the boundary really was observed, and dropping it because a field
+// was unset would lose the fact entirely — and it is the same fallback the
+// last-turn-end stamp has always used.
+func (c *consumer) boundaryInstant(ev *corev1.Event) int64 {
+	if at := ev.GetProducedAtMs(); at != 0 {
+		return at
+	}
+	return c.now()
+}
+
+// keepAliveWindowUnclosedUUID is the stable card identity for ONE ping's
+// unclosed window. Keyed by turn id rather than by session so two different
+// stranded windows are two different cards: each names a distinct row that has
+// to be repaired, and collapsing them would hide the second one.
+func (c *consumer) keepAliveWindowUnclosedUUID(turnID string) string {
+	return "keep_alive_window_unclosed:" + c.sessionID + ":" + turnID
 }
 
 // resync replays the retained conversation deltas from fromSeq (0 = from the
