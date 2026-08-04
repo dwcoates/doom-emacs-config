@@ -54,7 +54,7 @@ import { SessionServer, type SessionServerHandlers } from "./server.js";
 import { StoreClient, type ReplayOutcome } from "./store-client.js";
 import { envelopeIs, unpackAs, type Any } from "./framing.js";
 import { ClaudeStreamMessageSchema } from "../../../../../proto/gen/ts/agentshim/data/v1/stream_pb.js";
-import { TranscriptLineSchema } from "../../../../../proto/gen/ts/agentshim/data/v1/transcript_pb.js";
+import { QueueOp, TranscriptLineSchema } from "../../../../../proto/gen/ts/agentshim/data/v1/transcript_pb.js";
 import type { ApiUserMessage } from "../../../../../proto/gen/ts/agentshim/data/v1/tools_pb.js";
 import { bindLog, setClaudeSessionId } from "./log.js";
 import { normalizeModel } from "../model.js";
@@ -314,8 +314,8 @@ export class UdsSession {
   private readonly completedSdkTaskIds = new Set<string>();
   /** SDK task ids launched by each accepted root turn. */
   private readonly turnSdkTaskIds = new Map<string, Set<string>>();
-  /** Task-notification result cycles durably observed for each root turn. */
-  private readonly turnTaskNotificationResultCounts = new Map<string, number>();
+  /** File-plane task notifications queued for an internal SDK result cycle. */
+  private readonly pendingTaskNotificationQueue = new Set<string>();
   private intentionalShutdownReason: string | null = null;
   private readonly intentionalShutdownStarted = completionLatch();
   private shutdownPromise: Promise<void> | null = null;
@@ -686,6 +686,7 @@ export class UdsSession {
       this.query = this.deps.createQuery(this.input, this.canUseTool);
       // The store round-trip feed: merged, seq-stamped events go to the daemon.
       this.store.onMerged((evt) => {
+        this.observeTaskNotificationQueue(evt);
         this.logUserPromptForward(evt);
         if (this.unexpectedTerminationForwarded !== null && this.isUnexpectedTerminationLifecycle(evt)) {
           void this.server.sendEventFlushed(evt).then((forwarded) => {
@@ -1659,7 +1660,7 @@ export class UdsSession {
     let terminalBoundaryAtMs: number | undefined;
     let turnStart: Event | undefined;
     let retainResultTurn = false;
-    let taskNotificationResultCountAfterWrite: number | undefined;
+    let taskNotificationResult = false;
     if (msg.type === "result") {
       const claimedTurnId = this.activeTurnIds[0];
       if (claimedTurnId === undefined) {
@@ -1671,13 +1672,11 @@ export class UdsSession {
         const origin = typeof msg.origin === "object" && msg.origin !== null
           ? msg.origin as Record<string, unknown>
           : undefined;
-        const taskNotificationResult = origin?.kind === "task_notification" || origin?.kind === "task-notification";
+        taskNotificationResult = origin?.kind === "task_notification" || origin?.kind === "task-notification";
         const taskCount = this.turnSdkTaskIds.get(claimedTurnId)?.size ?? 0;
-        const priorNotificationResults = this.turnTaskNotificationResultCounts.get(claimedTurnId) ?? 0;
-        taskNotificationResultCountAfterWrite = priorNotificationResults + (taskNotificationResult ? 1 : 0);
         retainResultTurn = this.liveSdkTaskIds.size > 0
           || (taskCount > 0 && !taskNotificationResult)
-          || taskNotificationResultCountAfterWrite < taskCount;
+          || this.pendingTaskNotificationQueue.size > 0;
       }
       if (claimedTurnId !== undefined && retainResultTurn) {
         retainResultTurn = true;
@@ -1690,7 +1689,8 @@ export class UdsSession {
           live_sdk_task_count: this.liveSdkTaskIds.size,
           live_sdk_task_ids: [...this.liveSdkTaskIds].sort(),
           sdk_task_count: taskCount,
-          task_notification_result_count_after_write: taskNotificationResultCountAfterWrite,
+          task_notification_result: taskNotificationResult,
+          pending_task_notification_count: this.pendingTaskNotificationQueue.size,
           turns_in_flight: this.activeTurnIds.length,
           decision: "retain_turn_for_sdk_task_cycles",
         }, "SDK result retained while background-task result cycles remain outstanding");
@@ -1900,12 +1900,8 @@ export class UdsSession {
           decision: "commit_sdk_task_lifecycle",
         }, "SDK task lifecycle is durably reflected in root-turn liveness");
       }
-      if (msg.type === "result" && rootTurnId !== undefined && taskNotificationResultCountAfterWrite !== undefined) {
-        this.turnTaskNotificationResultCounts.set(rootTurnId, taskNotificationResultCountAfterWrite);
-      }
       if (terminalTurnId !== undefined) {
         this.turnSdkTaskIds.delete(terminalTurnId);
-        this.turnTaskNotificationResultCounts.delete(terminalTurnId);
         const index = this.pendingTurnEndIds.indexOf(terminalTurnId);
         if (index < 0) {
           LOGGER.log({
@@ -2027,6 +2023,28 @@ export class UdsSession {
     LOGGER.log(
       { agent_repl_session_id: this.deps.sessionId, seq: evt.seq, len: prompt.len, arm: prompt.arm },
       `user prompt event forwarded to daemon`);
+  }
+
+  /** Track the durable file-plane queue that feeds task-notification cycles. */
+  private observeTaskNotificationQueue(evt: Event): void {
+    if (evt.payload.case !== "vendor" || !envelopeIs(evt.payload.value, TranscriptLineSchema)) return;
+    const line = unpackAs(evt.payload.value, TranscriptLineSchema);
+    if (line?.line.case !== "queueOperation") return;
+    const queue = line.line.value;
+    if (!queue.content.startsWith("<task-notification>")) return;
+    if (queue.operation === QueueOp.ENQUEUE) {
+      this.pendingTaskNotificationQueue.add(queue.content);
+    } else if (queue.operation === QueueOp.DEQUEUE || queue.operation === QueueOp.REMOVE) {
+      this.pendingTaskNotificationQueue.delete(queue.content);
+    } else {
+      return;
+    }
+    LOGGER.logVerbose({
+      agent_repl_session_id: this.deps.sessionId,
+      queue_operation: QueueOp[queue.operation],
+      pending_task_notification_count: this.pendingTaskNotificationQueue.size,
+      decision: "update_task_notification_queue",
+    }, "observed durable task-notification queue transition");
   }
 
   /** Wrap a DegradedState as a SYNTHETIC/EPHEMERAL Event for the daemon. */
