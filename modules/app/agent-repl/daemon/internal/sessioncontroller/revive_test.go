@@ -96,6 +96,39 @@ func TestReviveSessionCompactFirstStaysGatedUntilCompactionLands(t *testing.T) {
 	}
 }
 
+// EACH REVIVAL'S COMPACTION SUBMITS UNDER A NAME OF ITS OWN. A request id is
+// the submitted turn's identity on the wire, and the durable turn ledger
+// refuses a second start under a name it already holds — so a session
+// hibernated and compact-revived twice would otherwise submit its second
+// compaction under the first one's name and be refused.
+func TestReviveSessionCompactFirstSubmitsUnderAFreshRequestIDEachTime(t *testing.T) {
+	// Arrange.
+	m, _, hib := reviveRig(t, registry.HibernationCauseIdleCutoff)
+
+	// Act: two full compact-first revivals of the SAME session.
+	for range 2 {
+		hib.setAsleep("s1", registry.HibernationDetail{Cause: registry.HibernationCauseIdleCutoff, SinceMs: 42})
+		done := make(chan error, 1)
+		go func() { done <- m.ReviveSession(context.Background(), "ws", ReviveModeCompactFirst) }()
+		signal := awaitCompactionWaiter(t, m, "ws")
+		signal()
+		if err := <-done; err != nil {
+			t.Fatalf("ReviveSession compact_first: %v", err)
+		}
+	}
+
+	// Assert.
+	c := fakeClientFor(t, m, "ws")
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.requestIDs) != 2 {
+		t.Fatalf("submitted request ids = %v, want one per revival", c.requestIDs)
+	}
+	if c.requestIDs[0] == c.requestIDs[1] {
+		t.Fatalf("both revivals submitted under %q; the second turn would claim the first's identity", c.requestIDs[0])
+	}
+}
+
 // A COMPACTION THAT NEVER COMPLETES LEAVES THE SESSION GATED. The clear is the
 // last step and is reached only on the completion signal, so there is no path
 // in which a failed compaction ends with an ungated session.
