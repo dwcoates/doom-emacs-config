@@ -101,6 +101,14 @@ import {
   type SessionTokenUtilization as GeneratedSessionTokenUtilization,
 } from "../../proto/gen/ts/agentshim/frontend/v1/frontend_pb";
 import { fromJson, toJson, type JsonValue } from "@bufbuild/protobuf";
+import {
+  HIBERNATION_CAUSE,
+  KEEP_ALIVE_HOLD_TURN_ID,
+  PROMPT_ORIGIN_CACHE_KEEP_ALIVE,
+  PROMPT_ORIGIN_PREFIX,
+  PROMPT_ORIGIN_UNSPECIFIED,
+  QUEUE_ENTRY_KEEP_ALIVE_HOLD,
+} from "./proto-names.js";
 import { ApiUsageSchema } from "../../proto/gen/ts/agentshim/data/v1/tools_pb";
 import {
   AccountUsageAvailableSchema,
@@ -551,10 +559,12 @@ export interface SessionView {
 export interface HibernationDetail {
   /** When the session entered hibernation, unix millis. */
   sinceMs: number;
+  // The arm keys are the spelling table's (proto-names.ts), which is checked
+  // against the generated oneof — so this union cannot drift from the wire.
   cause:
-    | { case: "idleCutoff"; value: HibernationIdleCutoff }
-    | { case: "forced"; value: HibernationForced }
-    | { case: "cacheExpired"; value: HibernationCacheExpired };
+    | { case: typeof HIBERNATION_CAUSE.idleCutoff; value: HibernationIdleCutoff }
+    | { case: typeof HIBERNATION_CAUSE.forced; value: HibernationForced }
+    | { case: typeof HIBERNATION_CAUSE.cacheExpired; value: HibernationCacheExpired };
 }
 
 /** Automatic hibernation at the idle cutoff. */
@@ -1140,8 +1150,13 @@ export interface ContextCostAlert {
  * The one `PromptOrigin` this surface distinguishes: the daemon's cache
  * keep-alive ping. See `ContextCostAlert.promptOrigin` for why the rest of the
  * enum is carried as an opaque name.
+ *
+ * Re-exported from the build-checked spelling table rather than spelled again:
+ * this name is the whole difference between "that turn was expensive" and "the
+ * ping came back cold", and a stale copy of it would silently pick the wrong
+ * alarm.
  */
-export const PROMPT_ORIGIN_CACHE_KEEP_ALIVE = "PROMPT_ORIGIN_CACHE_KEEP_ALIVE";
+export { PROMPT_ORIGIN_CACHE_KEEP_ALIVE };
 
 export interface StateSnapshot {
   workspaces: WorkspaceState[];
@@ -1883,18 +1898,24 @@ const SESSION_VIEW_KEYS = new Set([
 const HIBERNATION_DETAIL_ENVELOPE_KEYS = new Set(["sinceMs"]);
 const HIBERNATION_IDLE_CUTOFF_KEYS = new Set(["cutoffMs"]);
 const HIBERNATION_CACHE_EXPIRED_KEYS = new Set(["elapsedMs", "ttlMs"]);
+// Arm keys come from the build-checked spelling table (proto-names.ts), not
+// from literals typed out here: the decoder recognizes an arm by NAME, so a
+// name that drifted from the proto would make it refuse a well-formed frame.
 const HIBERNATION_CAUSE_ARM_DECODERS = new Map<
   string,
   (v: unknown) => HibernationDetail["cause"]
 >([
   [
-    "idleCutoff",
-    (v) => ({ case: "idleCutoff" as const, value: decodeHibernationIdleCutoff(v) }),
+    HIBERNATION_CAUSE.idleCutoff,
+    (v) => ({ case: HIBERNATION_CAUSE.idleCutoff, value: decodeHibernationIdleCutoff(v) }),
   ],
-  ["forced", (v) => ({ case: "forced" as const, value: decodeHibernationForced(v) })],
   [
-    "cacheExpired",
-    (v) => ({ case: "cacheExpired" as const, value: decodeHibernationCacheExpired(v) }),
+    HIBERNATION_CAUSE.forced,
+    (v) => ({ case: HIBERNATION_CAUSE.forced, value: decodeHibernationForced(v) }),
+  ],
+  [
+    HIBERNATION_CAUSE.cacheExpired,
+    (v) => ({ case: HIBERNATION_CAUSE.cacheExpired, value: decodeHibernationCacheExpired(v) }),
   ],
 ]);
 
@@ -2472,10 +2493,10 @@ const QUEUE_ENTRY_KEYS = new Set([
   "rationale",
   "accepted",
   "shutdownHold",
-  "keepAliveHold",
+  QUEUE_ENTRY_KEEP_ALIVE_HOLD,
 ]);
 const QUEUE_ENTRY_SHUTDOWN_HOLD_KEYS = new Set(["scheduleId"]);
-const QUEUE_ENTRY_KEEP_ALIVE_HOLD_KEYS = new Set(["turnId"]);
+const QUEUE_ENTRY_KEEP_ALIVE_HOLD_KEYS = new Set([KEEP_ALIVE_HOLD_TURN_ID]);
 
 function decodeQueueView(v: unknown): QueueView {
   const o = ensureObject(v, "QueueView");
@@ -2520,8 +2541,11 @@ function decodeQueueEntry(v: unknown): QueueEntry {
   // Same reading as the lease hold above: absence is the absence of a
   // keep-alive hold. Decoded from the daemon's own claim, never inferred from
   // the classification the classifier deliberately never produced.
-  if (o.keepAliveHold !== undefined && o.keepAliveHold !== null) {
-    e.keepAliveHold = decodeQueueEntryKeepAliveHold(o.keepAliveHold);
+  if (
+    o[QUEUE_ENTRY_KEEP_ALIVE_HOLD] !== undefined &&
+    o[QUEUE_ENTRY_KEEP_ALIVE_HOLD] !== null
+  ) {
+    e.keepAliveHold = decodeQueueEntryKeepAliveHold(o[QUEUE_ENTRY_KEEP_ALIVE_HOLD]);
   }
   return e;
 }
@@ -2529,7 +2553,7 @@ function decodeQueueEntry(v: unknown): QueueEntry {
 function decodeQueueEntryKeepAliveHold(v: unknown): QueueEntryKeepAliveHold {
   const o = ensureObject(v, "QueueEntryKeepAliveHold");
   rejectUnknown(o, QUEUE_ENTRY_KEEP_ALIVE_HOLD_KEYS, "QueueEntryKeepAliveHold");
-  const turnId = str(o, "turnId", "QueueEntryKeepAliveHold");
+  const turnId = str(o, KEEP_ALIVE_HOLD_TURN_ID, "QueueEntryKeepAliveHold");
   // The turn id is the whole content of the message: it names the ping whose
   // completion releases this entry. A hold naming no turn would claim the
   // prompt is waiting on something nothing else on screen can corroborate.
@@ -3141,13 +3165,13 @@ function decodeContextCostAlert(v: unknown): ContextCostAlert {
   const o = ensureObject(v, ctx);
   rejectUnknown(o, CONTEXT_COST_ALERT_KEYS, ctx);
   const promptOrigin = str(o, "promptOrigin", ctx);
-  if (!promptOrigin.startsWith("PROMPT_ORIGIN_")) {
+  if (!promptOrigin.startsWith(PROMPT_ORIGIN_PREFIX)) {
     throw new Error(
       `frontend-proto: ${ctx}.promptOrigin has unrecognized value '${promptOrigin}' ` +
         "(expected a canonical core.v1.PromptOrigin name)",
     );
   }
-  if (promptOrigin === "PROMPT_ORIGIN_UNSPECIFIED") {
+  if (promptOrigin === PROMPT_ORIGIN_UNSPECIFIED) {
     throw new Error(
       `frontend-proto: ${ctx}.promptOrigin is UNSPECIFIED — the daemon refuses a turn ` +
         "without an attribution, so an alert cannot carry one",
