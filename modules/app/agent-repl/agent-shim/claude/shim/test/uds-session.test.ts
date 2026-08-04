@@ -26,6 +26,8 @@ import {
 } from "../../../../proto/gen/ts/agentshim/data/v1/stream_pb.js";
 import {
   AssistantLineSchema,
+  QueueOperationLineSchema,
+  QueueOp,
   TranscriptLineSchema,
   UserLineSchema,
   type TranscriptLine,
@@ -903,6 +905,18 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
       lastSeq: 17n,
     }));
 
+    const queuedNotification = "<task-notification>agent-go</task-notification>";
+    store.latest().send(EventSchema, transcriptEvent(18n, create(TranscriptLineSchema, {
+      line: {
+        case: "queueOperation",
+        value: create(QueueOperationLineSchema, {
+          operation: QueueOp.ENQUEUE,
+          content: queuedNotification,
+        }),
+      },
+    })));
+    await daemon.next(EventSchema);
+
     query.emit({
       type: "result",
       uuid: "first-task-notification-result",
@@ -917,7 +931,7 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
     expect(session.turnCount()).toBe(1);
     store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
       accepted: 1n,
-      lastSeq: 18n,
+      lastSeq: 19n,
     }));
 
     query.emit({
@@ -946,6 +960,33 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
 
     query.emit({
       type: "result",
+      uuid: "queued-task-notification-result",
+      session_id: "vendor-uuid",
+      subtype: "success",
+      duration_ms: 130,
+      origin: { kind: "task_notification" },
+    } as unknown as SdkMessageLike);
+    const queuedTaskNotificationResult = await store.peer().next(StoreWriteSchema);
+    expect(queuedTaskNotificationResult.batch!.events.map((event) => event.payload.case)).toEqual(["vendor"]);
+    expect(session.turnCount()).toBe(1);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: 1n,
+      lastSeq: 21n,
+    }));
+
+    store.latest().send(EventSchema, transcriptEvent(22n, create(TranscriptLineSchema, {
+      line: {
+        case: "queueOperation",
+        value: create(QueueOperationLineSchema, {
+          operation: QueueOp.REMOVE,
+          content: queuedNotification,
+        }),
+      },
+    })));
+    await daemon.next(EventSchema);
+
+    query.emit({
+      type: "result",
       uuid: "final-parent-result",
       session_id: "vendor-uuid",
       subtype: "success",
@@ -962,7 +1003,7 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
     expect(query.subscriptionUsageCalls).toBe(2);
     store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
       accepted: BigInt(terminal.batch!.events.length),
-      lastSeq: 23n,
+      lastSeq: 25n,
     }));
     await until(() => session.turnCount() === 0);
     expect(queryFactoryCalls()).toBe(1);
@@ -973,7 +1014,8 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
         live_sdk_task_count: 2,
         live_sdk_task_ids: ["agent-go", "agent-python"],
         sdk_task_count: 2,
-        task_notification_result_count_after_write: 0,
+        task_notification_result: false,
+        pending_task_notification_count: 0,
         decision: "retain_turn_for_sdk_task_cycles",
       },
     });
