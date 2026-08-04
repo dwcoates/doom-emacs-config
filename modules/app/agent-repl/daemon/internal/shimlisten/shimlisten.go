@@ -36,6 +36,7 @@ import (
 	"path/filepath"
 	"sync"
 	"syscall"
+	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	"agentrepl/wire"
@@ -83,6 +84,10 @@ func DefaultSocketPath() (string, error) {
 type Conn struct {
 	Net   net.Conn
 	Hello *corev1.ShimHello
+	// watchDone closes when this connection's parked-socket watch has exited,
+	// so a claim can take sole ownership of the read side by rendezvous rather
+	// than by hoping the watch has noticed. Nil when nothing watches it.
+	watchDone chan struct{}
 }
 
 // Server accepts shim connections and routes them to whoever claims them.
@@ -188,9 +193,128 @@ func (s *Server) deliver(sessionID string, c *Conn) {
 		old.Net.Close()
 		s.logf("shimlisten: session %s reconnected, dropping the previous parked connection", sessionID)
 	}
+	c.watchDone = make(chan struct{})
 	s.parked[sessionID] = c
 	s.mu.Unlock()
 	s.logf("shimlisten: session %s connected (parked)", sessionID)
+	go s.watchParked(sessionID, c)
+}
+
+// watchParked makes a DEAD PARKED TRANSPORT UNREPRESENTABLE by binding the
+// parked entry's lifetime to its socket's.
+//
+// # The state this removes
+//
+// A hibernation drops its claimed connection and then SIGTERMs the shim. The
+// still-alive shim notices the drop and redials, and that new connection can be
+// parked AFTER the stop's one-shot eviction has already run. Nothing else ever
+// looked at it again until the next EnsureShim, which then probed a transport
+// whose process was gone — or, worse, probed it in the instant between the
+// redial and the process's death and got "open" for a corpse-to-be. "The parked
+// connection is still open" and "the shim is still alive" had drifted apart,
+// and every consumer of the first was answering with the second.
+//
+// # Why the listener owns it
+//
+// The KERNEL closes a process's sockets when the process dies. That is not a
+// policy anything here can miss, race, or forget to call: it happens at death,
+// exactly once, for every way a process can die. Watching the socket is
+// therefore watching the process, and eviction on socket death is the same
+// fact arriving from the only authority that always has it.
+//
+// The point probes at claim and at Connected stay: they answer the question
+// SYNCHRONOUSLY for a caller that has one, and this asynchronous watch answers
+// it for the long stretches when nobody is asking. Neither replaces the other.
+//
+// # What it does not consume
+//
+// MSG_PEEK, always. A parked connection's frames belong to the shimclient that
+// eventually claims it, so this proves liveness without taking a byte. When a
+// frame DOES arrive while parked the socket stays permanently readable, so
+// there is nothing left to wait on: the watch ends, loudly, and the point
+// probes carry the session from there.
+func (s *Server) watchParked(sessionID string, c *Conn) {
+	defer close(c.watchDone)
+	sc, ok := c.Net.(syscall.Conn)
+	if !ok {
+		s.logf("shimlisten: parked lifecycle session=%s decision=unwatched reason=connection_type_%T_exposes_no_syscall_state connection_state=parked", sessionID, c.Net)
+		return
+	}
+	raw, err := sc.SyscallConn()
+	if err != nil {
+		s.logf("shimlisten: parked lifecycle session=%s decision=unwatched reason=syscall_conn_failed connection_state=parked error=%v", sessionID, err)
+		return
+	}
+	var (
+		dead   bool
+		detail string
+	)
+	readErr := raw.Read(func(fd uintptr) bool {
+		var one [1]byte
+		n, _, recvErr := unix.Recvfrom(int(fd), one[:], unix.MSG_PEEK|unix.MSG_DONTWAIT)
+		switch {
+		case recvErr == nil && n > 0:
+			detail = "frame_pending"
+			return true
+		case recvErr == nil:
+			// Zero bytes readable is the orderly EOF: the peer is gone.
+			dead, detail = true, "eof"
+			return true
+		case errors.Is(recvErr, unix.EAGAIN), errors.Is(recvErr, unix.EWOULDBLOCK), errors.Is(recvErr, unix.EINTR):
+			return false // Nothing to see yet; wait for the socket to say something.
+		default:
+			dead, detail = true, recvErr.Error()
+			return true
+		}
+	})
+	switch {
+	case dead:
+		s.evictIfCurrent(sessionID, c, "socket_closed_while_parked")
+		s.logf("shimlisten: parked lifecycle session=%s decision=watch_ended reason=socket closed while parked detail=%s", sessionID, detail)
+	case errors.Is(readErr, os.ErrDeadlineExceeded):
+		// The claim woke us on purpose: the shimclient owns this socket's read
+		// side from here on, and a second reader would fight it for the lock.
+		s.logf("shimlisten: parked lifecycle session=%s decision=watch_ended reason=claimed connection_state=open", sessionID)
+	case readErr != nil:
+		// The descriptor went away underneath the watch — which is what our own
+		// Close, Evict and supersede paths do, after removing the entry. The
+		// entry is checked rather than assumed: an error here that left a parked
+		// connection behind would be exactly the dead transport this watch
+		// exists to make impossible.
+		s.evictIfCurrent(sessionID, c, "socket_closed_while_parked")
+		s.logf("shimlisten: parked lifecycle session=%s decision=watch_ended reason=socket closed while parked detail=%v", sessionID, readErr)
+	default:
+		s.logf("shimlisten: parked lifecycle session=%s decision=watch_ended reason=peer_sent_while_parked detail=%s connection_state=open", sessionID, detail)
+	}
+}
+
+// awaitWatchExit hands the read side of a just-claimed connection over from the
+// parked-socket watch to its claimer.
+//
+// The watch sits in the poller holding the connection's read lock, so the
+// handover is a RENDEZVOUS rather than a hope: a read deadline in the past
+// wakes it, its exit is waited for, and the deadline is then cleared for the
+// owner. Both deadline calls are reported as errors, never absorbed — a claim
+// that cannot wake the watch, or cannot clear the deadline it set, would hand
+// back a connection whose reads are broken in a way the claimer could only
+// discover as an unexplained failure later.
+func (s *Server) awaitWatchExit(sessionID string, c *Conn) error {
+	if c.watchDone == nil {
+		return nil
+	}
+	select {
+	case <-c.watchDone:
+		return nil // Already gone; nothing to wake and no deadline to clear.
+	default:
+	}
+	if err := c.Net.SetReadDeadline(time.Now()); err != nil {
+		return fmt.Errorf("shimlisten: waking the parked watch of session %s to claim it: %w", sessionID, err)
+	}
+	<-c.watchDone
+	if err := c.Net.SetReadDeadline(time.Time{}); err != nil {
+		return fmt.Errorf("shimlisten: restoring session %s's read deadline after claiming it: %w", sessionID, err)
+	}
+	return nil
 }
 
 // Next yields sessionID's connection, waiting for it to dial in if it has not
@@ -242,6 +366,9 @@ func (s *Server) takeParked(sessionID string) (*Conn, error) {
 		if s.parked[sessionID] == c {
 			delete(s.parked, sessionID)
 			s.mu.Unlock()
+			if err := s.awaitWatchExit(sessionID, c); err != nil {
+				return nil, err
+			}
 			s.logf("shimlisten: parked lifecycle session=%s decision=claim connection_state=open", sessionID)
 			return c, nil
 		}

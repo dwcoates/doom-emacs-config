@@ -259,6 +259,42 @@ func TestDisconnectedParkedShimIsEvictedBeforeItIsAdvertised(t *testing.T) {
 	}
 }
 
+// THE LISTENER ITSELF evicts a parked connection whose socket dies, with
+// nobody probing it. That is what makes a dead parked transport
+// unrepresentable rather than merely unlikely: the kernel closes the socket at
+// process death, so the eviction happens at the death, not at the next question
+// somebody thinks to ask about it.
+func TestAParkedConnectionIsEvictedWhenItsSocketDies(t *testing.T) {
+	// Arrange — parked and watched.
+	s, path := serve(t)
+	peer := dialAsShim(t, path, "s_watched")
+	waitConnected(t, s, "s_watched")
+	s.mu.Lock()
+	watched := s.parked["s_watched"]
+	s.mu.Unlock()
+	if watched == nil || watched.watchDone == nil {
+		t.Fatal("the parked connection is not watched")
+	}
+
+	// Act — the peer dies. Nothing probes; the rendezvous is the watch's own
+	// exit.
+	if err := peer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	<-watched.watchDone
+
+	// Assert — evicted by the listener, and no longer advertised.
+	s.mu.Lock()
+	_, retained := s.parked["s_watched"]
+	s.mu.Unlock()
+	if retained {
+		t.Fatal("a parked connection whose socket died was left in the registry")
+	}
+	if connected(t, s, "s_watched") {
+		t.Fatal("a parked connection whose socket died was still advertised as connected")
+	}
+}
+
 func TestExplicitStopEvictsOnlyTheNamedParkedSession(t *testing.T) {
 	// Arrange.
 	s, path := serve(t)
