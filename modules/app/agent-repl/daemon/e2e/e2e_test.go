@@ -1001,6 +1001,10 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 		Logf:           t.Logf,
 	})
 	binding.SetTarget(srv)
+	// Mirror main.go's late bind: without it the registrar's post-change
+	// SessionView repush (hibernation, vendor rotation) is a silent no-op —
+	// the hook is deliberately nil-safe, so nothing else would say so.
+	registrar.PushView = srv.RepushSessionView
 	// Mirror main.go's mux: the session routes plus the UNFILTERED /frontend
 	// socket, which is where session-creation commands ride now that
 	// POST /sessions is gone.

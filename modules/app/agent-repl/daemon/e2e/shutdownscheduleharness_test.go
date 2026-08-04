@@ -52,6 +52,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/keepalive"
 	"claude-repld/internal/progress"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/server"
@@ -297,6 +298,14 @@ func (w *shutdownWorld) boot(t *testing.T, options ...bootOption) *shutdownBoot 
 	if err != nil {
 		t.Fatalf("open shutdown schedule store: %v", err)
 	}
+	keepAliveWindows, err := statedb.NewKeepAliveWindows(stateStore)
+	if err != nil {
+		t.Fatalf("open keep-alive window store: %v", err)
+	}
+	kaCfg, err := keepalive.FromEnv()
+	if err != nil {
+		t.Fatalf("keep-alive config: %v", err)
+	}
 	controller, err := sessioncontroller.New(sessioncontroller.Config{
 		Push:              forwarder,
 		SSM:               ssmMgr,
@@ -308,14 +317,25 @@ func (w *shutdownWorld) boot(t *testing.T, options ...bootOption) *shutdownBoot 
 		SeqStore:          seqStore,
 		ClearCompactStore: seqStore,
 		TurnAccountings:   newTestTurnAccountingStore(),
-		ShutdownHolds:     shutdownSchedules,
-		PermissionModes:   server.NewRegistryModeStore(reg),
-		Registrar:         registrar,
-		ModelCatalogs:     registrar,
-		DaemonVersion:     "0.1.0-e2e-drain",
-		ProtocolVersion:   "1",
-		ShimBuildSHA:      func() string { return "" },
-		Logf:              t.Logf,
+		Hibernations:      registrar,
+		VendorSessions:    registrar,
+		KeepAliveWindows:  server.KeepAliveWindowStore{Windows: keepAliveWindows},
+		KeepAlive:         kaCfg,
+		VendorSessionOf: func(sessionID string) (string, bool) {
+			rec, ok := reg.Get(sessionID)
+			if !ok || rec.ClaudeSessionID == "" {
+				return "", false
+			}
+			return rec.ClaudeSessionID, true
+		},
+		ShutdownHolds:   shutdownSchedules,
+		PermissionModes: server.NewRegistryModeStore(reg),
+		Registrar:       registrar,
+		ModelCatalogs:   registrar,
+		DaemonVersion:   "0.1.0-e2e-drain",
+		ProtocolVersion: "1",
+		ShimBuildSHA:    func() string { return "" },
+		Logf:            t.Logf,
 	})
 	if err != nil {
 		t.Fatalf("build controller: %v", err)
@@ -367,6 +387,8 @@ func (w *shutdownWorld) boot(t *testing.T, options ...bootOption) *shutdownBoot 
 		Prompts:       controller,
 		Turns:         controller,
 		Health:        controller,
+		Hibernations:  controller,
+		Restarts:      controller,
 		Lifecycle:     &server.WorkspaceOpener{Reg: reg, Ensurer: controller, Logf: t.Logf},
 		SessionDeaths: server.RegistrySessionDeaths{Reg: reg},
 		Resyncer:      controller,

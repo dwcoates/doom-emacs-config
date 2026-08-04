@@ -126,8 +126,16 @@ func testKeepAlivePolicy() keepAlivePolicy {
 // pingAt is the elapsed idleness at which a ping becomes due.
 func (p keepAlivePolicy) pingAt() time.Duration { return p.ttl - p.leeway }
 
-// retryUntil is the last elapsed idleness at which a ping may still be tried.
-func (p keepAlivePolicy) retryUntil() time.Duration { return p.ttl - keepAliveRetryFloor }
+// retryUntil is an elapsed idleness at which a ping is still permitted, near
+// the window's far end. The floor boundary itself (ttl - retry floor) is
+// EXCLUSIVE — the daemon's predicate is elapsed >= ttl-floor — and the
+// harness clock is an offset over live time that keeps flowing between the
+// advance and the sweep, so a boundary-exact target inevitably lands a few
+// milliseconds past the floor and is correctly declined. Aiming one second
+// inside keeps the assertion about the window, not about scheduler latency.
+func (p keepAlivePolicy) retryUntil() time.Duration {
+	return p.ttl - keepAliveRetryFloor - time.Second
+}
 
 // apply installs the policy in the daemon's environment for one test.
 //
