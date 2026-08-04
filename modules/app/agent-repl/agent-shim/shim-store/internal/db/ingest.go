@@ -193,6 +193,8 @@ func kindOf(ev *corev1.Event) string {
 		return "QueryLifecycle"
 	case *corev1.Event_AccountUsageObservation:
 		return "AccountUsageObservation"
+	case *corev1.Event_SessionRewound:
+		return "SessionRewound"
 	default:
 		return "Unknown"
 	}
