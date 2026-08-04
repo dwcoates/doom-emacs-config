@@ -147,7 +147,7 @@ func newInterruptFlowRig(t *testing.T) *interruptFlowRig {
 		Registrar:         &fakeRegistrar{},
 		ProtocolVersion:   "1",
 		Logf:              t.Logf,
-		now:               func() int64 { return interruptFlowNowMs },
+		Now:               func() int64 { return interruptFlowNowMs },
 		Source:            stubSource{},
 		FileDiagnostics:   fakeFileDiagnosticPersister{},
 		newClient: func(c shimclient.Config) sessionClient {

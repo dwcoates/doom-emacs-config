@@ -587,6 +587,14 @@ func main() {
 		},
 		Logf: legacyLog,
 	}
+	// THE DAEMON'S ONE CLOCK. The idle sweeper decides a hibernation against
+	// the server's clock and the session controller's transition re-validates
+	// that decision's idleness against its own; if those are two clocks they
+	// are two authorities for one policy, and the gate refuses decisions the
+	// sweeper legitimately took. Both fields below are fed from this variable
+	// so the decision and its gate are the same authority by construction.
+	nowFn := time.Now
+	nowMsFn := func() int64 { return nowFn().UnixMilli() }
 	shimSpawner := server.NewShimSpawner(sessionRegistry, shimListener.Connected, shimListener.Evict, udsSpawn, legacyLog)
 	// The respawn path must reach the create path's verdict on the resume gate
 	// for the very same session, and -fake is what that verdict turns on.
@@ -623,6 +631,8 @@ func main() {
 		DaemonVersion:   daemonVersion,
 		ProtocolVersion: shimProtocolVersion,
 		Logf:            legacyLog,
+		// One authority with the server's idle sweeper (see nowFn above).
+		Now: nowMsFn,
 		// The prompt queue's classifier (E4). A queued prompt is judged by a
 		// cheap headless run under the SESSION's own account, so the
 		// classification cannot land on a different account's quota or config.
@@ -852,7 +862,9 @@ func main() {
 	}()
 
 	srv := server.New(server.Config{
-		Logf:            legacyLog,
+		Logf: legacyLog,
+		// One authority with the session controller's hibernation gate.
+		Now:             nowFn,
 		DaemonVersion:   daemonVersion,
 		BinaryMTime:     binaryMTime,
 		ForceFake:       *fake,
