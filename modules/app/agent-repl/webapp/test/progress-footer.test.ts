@@ -17,6 +17,7 @@ import {
   activityDetail,
   countersHtml,
   errorRowHtml,
+  expensiveTurnRowHtml,
   footerClickAction,
   footerHtml,
   hasLiveCounters,
@@ -31,6 +32,7 @@ import {
   tokenCellHtml,
   toolElapsed,
 } from "../src/progress-footer.js";
+import type { ContextCostAlert } from "../src/frontend-proto.js";
 import type { MergeStatus, ProgressInput } from "../src/state-adapter.js";
 import { ConversationItem, SystemFailureCard, ToolItem } from "../src/store.js";
 
@@ -1971,5 +1973,97 @@ describe("the footer's structured merge status", () => {
     const got = sheetHtml(built, NOW);
     // Assert
     expect(got).toContain("merging · 1/4 · picking · abc1234 fix it");
+  });
+});
+
+describe("expensiveTurnRowHtml: the uncached-input alert", () => {
+  /** The daemon's alert for a turn that crossed the threshold. */
+  function alert(over: Partial<ContextCostAlert> = {}): ContextCostAlert {
+    return {
+      turnId: "turn-3",
+      uncachedInputTokens: 48000,
+      thresholdTokens: 20000,
+      atMs: 1700000000000,
+      promptOrigin: "PROMPT_ORIGIN_WEBAPP_USER_SENT",
+      ...over,
+    };
+  }
+
+  it("renders nothing after a cache-efficient turn", () => {
+    // Arrange / Act
+    const got = expensiveTurnRowHtml(progress());
+    // Assert — absence of the field is the only reading: nothing to report.
+    expect(got).toBe("");
+  });
+
+  it("names the cost a user-sent turn paid", () => {
+    // Arrange / Act
+    const got = expensiveTurnRowHtml(progress({ expensiveTurn: alert() }));
+    // Assert
+    expect(got).toContain("expensive turn");
+  });
+
+  it("quotes the observed figure against the threshold that tripped", () => {
+    // Arrange — the daemon carries both so the row can say 'N over M'
+    // without the webapp knowing daemon config.
+    const got = expensiveTurnRowHtml(progress({ expensiveTurn: alert() }));
+    // Act / Assert
+    expect(got).toContain("48k uncached input tokens (threshold 20k)");
+  });
+
+  it("words a cold keep-alive as the ping failing at its one job", () => {
+    // Arrange — the ping existed solely to keep the cache warm, so it bought
+    // nothing at all; wording it as a generic expensive turn would bury the
+    // only reading that says the cache machinery is not working.
+    const got = expensiveTurnRowHtml(
+      progress({ expensiveTurn: alert({ promptOrigin: "PROMPT_ORIGIN_CACHE_KEEP_ALIVE" }) }),
+    );
+    // Act / Assert
+    expect(got).toContain("keep-alive came back COLD");
+  });
+
+  it("does not call a cold keep-alive a generic expensive turn", () => {
+    // Arrange / Act
+    const got = expensiveTurnRowHtml(
+      progress({ expensiveTurn: alert({ promptOrigin: "PROMPT_ORIGIN_CACHE_KEEP_ALIVE" }) }),
+    );
+    // Assert
+    expect(got).not.toContain("expensive turn:");
+  });
+
+  it("marks the cold keep-alive as its own louder variant", () => {
+    // Arrange / Act
+    const got = expensiveTurnRowHtml(
+      progress({ expensiveTurn: alert({ promptOrigin: "PROMPT_ORIGIN_CACHE_KEEP_ALIVE" }) }),
+    );
+    // Assert
+    expect(got).toContain("cold-keep-alive");
+  });
+
+  it("does not mark a user-sent turn as the cold-keep-alive variant", () => {
+    // Arrange / Act
+    const got = expensiveTurnRowHtml(progress({ expensiveTurn: alert() }));
+    // Assert
+    expect(got).not.toContain("cold-keep-alive");
+  });
+
+  it("joins the row to the turn that paid the cost", () => {
+    // Arrange / Act
+    const got = expensiveTurnRowHtml(progress({ expensiveTurn: alert({ turnId: "turn-77" }) }));
+    // Assert
+    expect(got).toContain('data-expensive-turn-id="turn-77"');
+  });
+
+  it("stands beside the classified-failure row rather than replacing it", () => {
+    // Arrange — the two are different facts with the same lifetime, and a
+    // failed expensive turn must show both.
+    const got = footerHtml(
+      input({ progress: progress({ failure: failureCard(), expensiveTurn: alert() }) }),
+      CLOSED,
+      NOW,
+    );
+    // Act / Assert
+    expect(got).toContain("pfooter-error");
+    expect(got).toContain("pfooter-expensive-turn");
   });
 });

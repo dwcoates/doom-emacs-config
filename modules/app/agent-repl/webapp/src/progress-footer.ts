@@ -29,6 +29,7 @@ import { AGENTS_SPEC, agentsMenuHtml } from "./agents.js";
 import { BreathState, BreathingTicker, breathColor } from "./breathing.js";
 import { CounterEntry, CounterSpec, isActive } from "./counter-menu.js";
 import { formatCountdown, formatElapsed } from "./duration.js";
+import { PROMPT_ORIGIN_CACHE_KEEP_ALIVE } from "./frontend-proto.js";
 import { escapeHtml } from "./highlight.js";
 import { mergeFacts } from "./merge-status.js";
 import type {
@@ -772,6 +773,47 @@ export function errorRowHtml(p: ProgressInput): string {
 }
 
 /**
+ * The EXPENSIVE-TURN row: the daemon's uncached-input alert for the turn that
+ * just ended, standing until the next turn starts.
+ *
+ * It renders RED, beside the classified-failure row and with the same lifetime,
+ * because it is the same kind of news: something already happened that the user
+ * would want to have known about. Nothing here is derived — the daemon computed
+ * the figure, the threshold it crossed, and the turn's attribution.
+ *
+ * THE TWO READINGS ARE DIFFERENT ALARMS, and the origin is what separates them:
+ *
+ * - A `CACHE_KEEP_ALIVE` origin means the ping whose ENTIRE PURPOSE was keeping
+ *   the cache warm came back cold. Nobody asked for that turn, it bought
+ *   nothing, and it paid full freight — so it is worded as the keep-alive
+ *   failing at its one job, not as "a turn was expensive".
+ * - Any other origin is a turn the user (or a card action, or the coordinator)
+ *   actually asked for, which re-ingested context. Expensive, but it bought
+ *   something.
+ *
+ * Wording them identically would bury the only one that indicates the
+ * cache-warming machinery is not working.
+ */
+export function expensiveTurnRowHtml(p: ProgressInput): string {
+  const alert = p.expensiveTurn;
+  if (alert === null) return "";
+  const cold = alert.promptOrigin === PROMPT_ORIGIN_CACHE_KEEP_ALIVE;
+  const cost =
+    `${compactTokens(alert.uncachedInputTokens)} uncached input tokens ` +
+    `(threshold ${compactTokens(alert.thresholdTokens)})`;
+  const text = cold
+    ? `keep-alive came back COLD: the cache-warming ping re-ingested the whole ` +
+      `conversation for nothing — ${cost}`
+    : `expensive turn: this prompt re-ingested context — ${cost}`;
+  const classes = ["pfooter-expensive-turn"];
+  if (cold) classes.push("cold-keep-alive");
+  return (
+    `<div class="${classes.join(" ")}" data-expensive-turn-id="${escapeHtml(alert.turnId)}">` +
+    `${escapeHtml(text)}</div>`
+  );
+}
+
+/**
  * The merge note as a standing row under the strip, or "" when the run has
  * nothing to add.
  *
@@ -902,6 +944,7 @@ export function footerHtml(
     `aria-expanded="${open.expanded}" title="click for detail">${cells.join("")}</div>` +
     mergeNoteRowHtml(input.mergeStatus) +
     errorRowHtml(p) +
+    expensiveTurnRowHtml(p) +
     (open.expanded ? sheetHtml(input, nowMs) : "") +
     `</div>`
   );
