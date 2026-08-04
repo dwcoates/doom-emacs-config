@@ -32,6 +32,7 @@ import type {
 } from "../src/frontend-proto.js";
 import type { CounterEntry } from "../src/counter-menu.js";
 import type { ModelUsage, Usage } from "../src/protocol.js";
+import { generatedSessionUtilization, generatedUngroupedResponse, ungroupedResponse } from "./token-utilization-fixture.js";
 
 // The store's ONLY ingestion path after the agent-shim cutover: it folds
 // typed adapter effects (decoded `agentshim.frontend.v1` frames) onto its
@@ -126,6 +127,7 @@ function failureCard(over: Partial<SystemFailureCard> = {}): SystemFailureCard {
     sourceDetail: "close=1005",
     resolvedAtMs: 0,
     uuid: "local:client.daemon_unreachable",
+    detail: { kind: "none" },
     ...over,
   };
 }
@@ -556,6 +558,24 @@ describe("ingest session-view", () => {
     // Assert
     expect(store.state.claudeSessionId).toBe("cli-uuid");
     expect(store.state.cwd).toBe("/work/ws");
+  });
+
+  it("retains each ungrouped subagent response without aggregating it", () => {
+    const responses = [
+      generatedUngroupedResponse({ apiMessageId: "message-one", usage: { ...ungroupedResponse().usage, inputTokens: 11 } }),
+      generatedUngroupedResponse({ apiMessageId: "message-two", usage: { ...ungroupedResponse().usage, inputTokens: 22 } }),
+    ];
+    const tokenUtilization = generatedSessionUtilization(responses);
+    const store = new ConversationStore();
+
+    store.ingest([sessionEffect({ tokenUtilization })]);
+
+    expect(store.state.tokenUtilization).toBe(tokenUtilization);
+    expect(store.state.tokenUtilization?.ungroupedSubagentResponses).toEqual(responses);
+    expect(store.state.tokenUtilization?.ungroupedSubagentResponses.map((response) => [
+      response.apiMessageId,
+      response.usage?.inputTokens,
+    ])).toEqual([["message-one", 11n], ["message-two", 22n]]);
   });
 
   it("keeps the last resume keys when the view carries none", () => {

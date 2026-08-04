@@ -25,7 +25,6 @@ func TestShutdownPreservesShimsByDefault(t *testing.T) {
 	if err := h.controller.Ensure("/w"); err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
-
 	// Act.
 	h.srv.ShutdownAll(false, sessioncontroller.StopCauseDaemonShutdown())
 
@@ -44,6 +43,7 @@ func TestShutdownStopShimsModeStopsThem(t *testing.T) {
 	if err := h.controller.Ensure("/w"); err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
+	markControllerOperational(t, h, "/w")
 
 	// Act.
 	h.srv.ShutdownAll(true, sessioncontroller.StopCauseDaemonShutdown())
@@ -63,6 +63,7 @@ func TestShutdownLeavesRecordsNonTerminal(t *testing.T) {
 	if err := h.controller.Ensure("/w"); err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
+	markControllerOperational(t, h, "/w")
 
 	// Act.
 	h.srv.ShutdownAll(true, sessioncontroller.StopCauseDaemonShutdown())

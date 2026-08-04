@@ -50,6 +50,9 @@ func (m *Manager) MarkPromptAccepted(
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if err := m.rejectStartDuringHibernationLocked(workspace, "prompt acceptance"); err != nil {
+		return err
+	}
 
 	active, claimant, err := turnClaim(m.db, workspace)
 	if err != nil {

@@ -114,6 +114,7 @@ func newDurableHarness(t *testing.T, history DurableHistorySource) *durableHarne
 		Locator:           fakeLocator{m: map[string]string{"ws": "s1"}},
 		SeqStore:          h.seq,
 		ClearCompactStore: h.floors,
+		TurnAccountings:   emptyTurnAccountingStore{},
 		DurableHistory:    history,
 		PromptReceipts:    h.receipts,
 		ProtocolVersion:   "1",

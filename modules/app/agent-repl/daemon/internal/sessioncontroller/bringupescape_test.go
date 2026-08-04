@@ -53,6 +53,7 @@ func newEscapeHarness(t *testing.T, clients ...*fakeClient) *escapeHarness {
 		Locator:           fakeLocator{m: map[string]string{"ws": "s1"}},
 		SeqStore:          &fakeSeqStore{seq: map[string]uint64{}},
 		ClearCompactStore: newFakeClearCompactStore(),
+		TurnAccountings:   emptyTurnAccountingStore{},
 		Registrar:         &fakeRegistrar{},
 		ProtocolVersion:   "1",
 		Source:            stubSource{},
@@ -168,6 +169,55 @@ func TestResumeVendorFailurePreservesHistoryAndDoesNotInventStaleEvidence(t *tes
 	}
 	if !h.log.contains("resume_decision=preserve") || !h.log.contains("failure_kind=vendor") {
 		t.Fatalf("vendor failure preservation was not logged: %v", h.log.lines)
+	}
+}
+
+func TestResumedQueryStartupFailureRetainsTypedTerminationThroughDriveabilityFailure(t *testing.T) {
+	// Arrange — a resumed query dies before its handshake can make the session
+	// driveable. The lifecycle record is the authoritative reason and identity.
+	h := newEscapeHarness(t, blocked())
+	h.spawner.resume["s1"] = "vendor-resume"
+	if _, err := h.m.bringUp("ws"); err != nil {
+		t.Fatalf("bringUp: %v", err)
+	}
+	d, err := h.m.existing("ws")
+	if err != nil {
+		t.Fatalf("existing: %v", err)
+	}
+	if err := d.consumer.Consume(&corev1.Event{
+		Seq: 17,
+		Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+			QueryInstanceId: "resumed-query",
+			ObservedAtMs:    1234,
+			Event: &corev1.QueryLifecycle_Terminated{Terminated: &corev1.QueryTerminated{
+				VendorIdentity: &corev1.QueryTerminated_VendorSessionId{VendorSessionId: "vendor-resume"},
+				Reason:         &corev1.QueryTerminated_StartupFailure{StartupFailure: &corev1.QueryStartupFailure{Cause: "resume rejected"}},
+			}},
+		}},
+	}); err != nil {
+		t.Fatalf("consume termination: %v", err)
+	}
+
+	// Act.
+	_, err = h.m.ensure(context.Background(), "ws")
+
+	// Assert — callers retain the original error chain and can obtain the exact
+	// typed lifecycle evidence without re-parsing an error string.
+	if err == nil {
+		t.Fatal("ensure succeeded after a pre-readiness startup failure")
+	}
+	var detailer interface {
+		QueryTerminationFailureDetail() *frontendv1.QueryTerminationFailure
+	}
+	if !errors.As(err, &detailer) {
+		t.Fatalf("ensure error %v carries no typed query-termination detail", err)
+	}
+	detail := detailer.QueryTerminationFailureDetail()
+	if detail == nil || detail.GetAgentReplSessionId() != "s1" || detail.GetQueryInstanceId() != "resumed-query" || detail.GetVendorSessionId() != "vendor-resume" || detail.GetStartupFailure() == nil || detail.GetStartupFailure().GetCause() != "resume rejected" {
+		t.Fatalf("typed bring-up termination = %v", detail)
+	}
+	if !h.log.contains("BRING-UP QUERY TERMINATION retained") {
+		t.Fatalf("typed bring-up retention was not loud-logged: %v", h.log.lines)
 	}
 }
 

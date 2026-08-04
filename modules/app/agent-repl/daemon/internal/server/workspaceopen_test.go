@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"claude-repld/internal/errclass"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/session"
 	"claude-repld/internal/sessioncontroller"
@@ -155,8 +156,8 @@ func TestBindWorkspaceLoudLogsAWorkspaceWithNoRegistryRecord(t *testing.T) {
 	}
 }
 
-func TestOpenEnsuresTheSessionEagerly(t *testing.T) {
-	// Arrange — eager bring-up is what stops a known workspace rendering blue.
+func TestOpenWaitsForTheSessionToBecomeDriveable(t *testing.T) {
+	// Arrange — an open acknowledgement promises an established restoration.
 	cfg := t.TempDir()
 	o, reg, ens, _ := openerRig(t, cfg)
 	if err := reg.Put(registry.Record{SessionID: "s_1", CWD: "/w", ConfigDir: cfg, ClaudeSessionID: "uuid-live", CreatedAt: "2026-07-25T10:00:00Z"}); err != nil {
@@ -169,8 +170,8 @@ func TestOpenEnsuresTheSessionEagerly(t *testing.T) {
 	}
 
 	// Assert
-	if len(ens.calls) != 1 || ens.calls[0] != "/w" {
-		t.Fatalf("Ensure calls = %v; want [/w]", ens.calls)
+	if !slices.Equal(ens.driveable, []string{"/w"}) || len(ens.calls) != 0 {
+		t.Fatalf("driveable=%v non-waiting=%v; want [/w] and none", ens.driveable, ens.calls)
 	}
 }
 
@@ -195,14 +196,14 @@ func TestRepeatedOpensAreIdempotent(t *testing.T) {
 
 	// Assert — the bind happened exactly once (the first open discovered the
 	// transcript; the rest found the record already bound and left it alone),
-	// and each open forwarded one Ensure, which bringUp collapses to a map
-	// lookup once a session controller exists.
+	// and each open waited on the authoritative bring-up gate, which collapses
+	// to the established controller once the session is live.
 	rec, _ := reg.Get("s_1")
 	if rec.ClaudeSessionID != "uuid-disk" {
 		t.Fatalf("ClaudeSessionID = %q; want the once-bound uuid-disk", rec.ClaudeSessionID)
 	}
-	if len(ens.calls) != 3 {
-		t.Fatalf("Ensure calls = %v; want one per open", ens.calls)
+	if len(ens.driveable) != 3 || len(ens.calls) != 0 {
+		t.Fatalf("driveable=%v non-waiting=%v; want three authoritative opens and no racing calls", ens.driveable, ens.calls)
 	}
 }
 
@@ -309,6 +310,68 @@ func TestOpenSurfacesAnEnsureFailure(t *testing.T) {
 	// Assert
 	if err == nil {
 		t.Fatalf("Open swallowed the bring-up failure")
+	}
+}
+
+func TestOpenPreservesTypedAutomaticRestoreEvidence(t *testing.T) {
+	// Arrange — a durable record names a Claude conversation whose transcript
+	// disappeared before the workspace was reopened.
+	cfg := t.TempDir()
+	o, reg, ens, _ := openerRig(t, cfg)
+	missing := &ResumeTranscriptMissingError{
+		ResumeID: "claude-lost", CWD: "/w", ConfigDir: cfg,
+		ResolvedConfigDir: cfg, SearchedPaths: []string{cfg + "/projects/w/claude-lost.jsonl"},
+	}
+	ens.err = missing
+	if err := reg.Put(registry.Record{SessionID: "s_1", CWD: "/w", ConfigDir: cfg, ClaudeSessionID: "claude-lost"}); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+
+	// Act.
+	err := o.Open(context.Background(), "/w")
+	failure := errclass.Command(nil, err).GetSessionResume()
+
+	// Assert.
+	if !errors.Is(err, missing) {
+		t.Fatalf("Open error = %v, want original continuity error preserved", err)
+	}
+	if failure == nil || failure.GetAutomaticRestore() == nil || failure.GetTranscriptUnavailable() == nil {
+		t.Fatalf("failure = %v, want automatic_restore + transcript_unavailable", errclass.Command(nil, err))
+	}
+	if failure.GetAgentReplSessionId() != "s_1" || failure.GetClaudeSessionId() != "claude-lost" || failure.GetCwd() != "/w" {
+		t.Fatalf("failure evidence = %v", failure)
+	}
+}
+
+func TestOpenDriveablePreservesAutomaticRestoreEvidence(t *testing.T) {
+	// Arrange — merge bring-up drives the same exact resume as workspace open
+	// and must report the same structured continuity failure.
+	cfg := t.TempDir()
+	o, reg, ens, _ := openerRig(t, cfg)
+	ens.err = errBringUp
+	if err := reg.Put(registry.Record{
+		SessionID: "s_1", CWD: "/w", ConfigDir: cfg, ClaudeSessionID: "claude-resume",
+	}); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+
+	// Act.
+	err := o.OpenDriveable(context.Background(), "/w")
+	failure := errclass.Command(nil, err)
+	detail := failure.GetSessionResume()
+
+	// Assert.
+	if !errors.Is(err, errBringUp) {
+		t.Fatalf("OpenDriveable error = %v, want original bring-up chain preserved", err)
+	}
+	if failure.GetErrorType() != string(errclass.TypeSessionResumeFailed) || detail == nil || detail.GetAutomaticRestore() == nil {
+		t.Fatalf("failure = %v, want typed automatic restore", failure)
+	}
+	if detail.GetAgentReplSessionId() != "s_1" || detail.GetClaudeSessionId() != "claude-resume" || detail.GetCwd() != "/w" || detail.GetConfigDir() != cfg || detail.GetResolvedConfigDir() != cfg {
+		t.Fatalf("failure evidence = %v", detail)
+	}
+	if got := detail.GetBringUpFailure(); got == nil || got.GetCause() != errBringUp.Error() {
+		t.Fatalf("bring-up failure = %v, want cause %q", got, errBringUp)
 	}
 }
 

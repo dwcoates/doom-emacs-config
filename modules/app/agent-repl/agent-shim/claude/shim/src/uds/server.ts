@@ -75,6 +75,7 @@ import {
   SetModel,
   SetModelSchema,
 } from "./proto.js";
+import type { QueryRuntimeIdentity } from "./proto.js";
 import { create } from "@bufbuild/protobuf";
 
 /** A synchronous control receipt: either an Ack or a Nack. */
@@ -116,6 +117,10 @@ export interface SessionServerOptions {
   /** The DAEMON socket this shim dials (every session shares one). */
   socketPath: string;
   sessionId: string;
+  /** Stable identity of the only SDK query() this shim owns. */
+  queryInstanceId: string;
+  /** Exact SDK runtime identity observed for queryInstanceId, when available. */
+  queryRuntimeIdentity?: () => QueryRuntimeIdentity | undefined;
   shimVersion: string;
   protocolVersion: string;
   vendor?: string;
@@ -158,6 +163,9 @@ export class SessionServer {
     private readonly opts: SessionServerOptions,
     private readonly handlers: SessionServerHandlers,
   ) {
+    if (opts.queryInstanceId.trim() === "") {
+      throw new Error("SessionServer requires a non-empty queryInstanceId");
+    }
     this.heartbeatIntervalMs = opts.heartbeatIntervalMs ?? 5000;
     this.reconnectMinMs = opts.reconnectMinMs ?? 100;
     this.reconnectMaxMs = opts.reconnectMaxMs ?? 5000;
@@ -237,6 +245,28 @@ export class SessionServer {
       return;
     }
     this.conn!.send(EventSchema, evt);
+  }
+
+  /**
+   * Forward a terminal durable event and report whether a handshaked daemon
+   * accepted the complete frame into its socket. False leaves the caller's
+   * durable-delivery latch armed for the next reconnect/replay.
+   */
+  async sendEventFlushed(evt: Event): Promise<boolean> {
+    if (!this.isConnected()) {
+      LOGGER.log({ agent_repl_session_id: this.opts.sessionId, seq: evt.seq },
+        "no daemon attached; terminal event remains pending in durable replay");
+      return false;
+    }
+    const conn = this.conn!;
+    try {
+      await conn.sendFlushed(EventSchema, evt);
+      return true;
+    } catch (cause) {
+      LOGGER.log({ level: "error", agent_repl_session_id: this.opts.sessionId, seq: evt.seq, cause },
+        "terminal event frame did not flush; durable replay remains authoritative");
+      return false;
+    }
   }
 
   /** Publish the SDK's selectable-model menu to the attached daemon. */
@@ -383,8 +413,11 @@ export class SessionServer {
     this.handshaked = false;
     // STAGE 1. The DIALER speaks first, and this frame is also what identifies
     // the session to the daemon's listener, which routes the connection by it.
+    const runtimeIdentity = this.opts.queryRuntimeIdentity?.();
     conn.send(ShimHelloSchema, create(ShimHelloSchema, {
       sessionId: this.opts.sessionId,
+      queryInstanceId: this.opts.queryInstanceId,
+      ...(runtimeIdentity === undefined ? {} : { queryRuntimeIdentity: runtimeIdentity }),
       vendor: this.opts.vendor ?? "claude",
       shimVersion: this.opts.shimVersion,
       protocolVersion: this.opts.protocolVersion,

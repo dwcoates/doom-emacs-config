@@ -84,27 +84,29 @@ func TestSpawnHardFailsWhenTheRecordedTranscriptIsMissing(t *testing.T) {
 	}
 }
 
-// A FAKE daemon's respawn must reach the same verdict its create did. The
-// scripted offline SDK writes no vendor transcript, so gating the respawn on
-// one made every fake session unrecoverable after a hibernation or a bounce.
-func TestSpawnWaivesTheResumeGateForAFakeDaemon(t *testing.T) {
-	// Arrange — a recorded conversation with no transcript, under -fake.
+func TestSpawnInForceFakeModeRestoresTheRecordedResumeWithoutATranscript(t *testing.T) {
+	// Arrange — the scripted SDK has no vendor transcript, but the durable
+	// conversation pointer must remain exactly intact across hibernation.
 	cfg := t.TempDir()
-	sp, _, got, spawned := spawnerWithRecord(t, cfg, "uuid-fake")
+	sp, reg, got, spawned := spawnerWithRecord(t, cfg, "fake-session-id")
 	sp.ForceFake(true)
 
 	// Act.
 	res, err := sp.EnsureShim(context.Background(), "s1")
 
-	// Assert — the same conversation is resumed rather than refused.
+	// Assert — fake mode bypasses only the transcript check; it never turns a
+	// restore into a fresh conversation.
 	if err != nil {
-		t.Fatalf("EnsureShim under -fake: %v", err)
+		t.Fatalf("EnsureShim: %v", err)
 	}
 	if *spawned != 1 {
-		t.Fatalf("spawn calls = %d, want 1", *spawned)
+		t.Fatalf("spawn calls = %d, want one", *spawned)
 	}
-	if got.Resume != "uuid-fake" || res.Resumed != "uuid-fake" {
-		t.Fatalf("spawn resume = %q, result resumed = %q, want uuid-fake", got.Resume, res.Resumed)
+	if !got.Fake || got.Resume != "fake-session-id" || res.Resumed != "fake-session-id" {
+		t.Fatalf("spawn opts = %+v, result = %+v, want fake resume fake-session-id", *got, res)
+	}
+	if rec, ok := reg.Get("s1"); !ok || rec.ClaudeSessionID != "fake-session-id" {
+		t.Fatalf("registry record after fake restore = %+v, want intact resume", rec)
 	}
 }
 

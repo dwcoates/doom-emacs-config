@@ -198,6 +198,9 @@ func (m *Manager) ApplySessionConnectivity(
 	if err := m.publishCompositeLocked(workspace, causeKind); err != nil {
 		return err
 	}
+	if state == SessionConnectivityOperational {
+		m.releaseControllerRegistrationLocked(workspace, generationID)
+	}
 	return nil
 }
 

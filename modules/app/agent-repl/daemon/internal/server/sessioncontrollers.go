@@ -339,16 +339,17 @@ func (s *ShimSpawner) EnsureShim(ctx context.Context, sessionID string) (session
 	// hibernated, stopped or bounced could therefore never be brought back:
 	// every respawn hard-failed on a file only a real CLI ever creates.
 	fake := s.fakeForced()
+	opts.Fake = fake
 	if missing := validateResumeTarget(opts, fake); missing != nil {
 		logResumeContinuityFailure(s.logf, "automatic_restore", sessionID, opts, missing)
 		return res, missing
 	}
-	if fake && opts.Resume != "" {
+	if opts.Fake && opts.Resume != "" {
 		s.logf("server: session %s: resume viability gate WAIVED for respawn (this daemon forces the scripted offline SDK, which writes no transcript) resume=%q",
 			sessionID, opts.Resume)
 	}
 	res.Resumed = opts.Resume
-	s.logf("server: session %s: no live shim — spawning UDS shim (resume=%q)", sessionID, opts.Resume)
+	s.logf("server: session %s: no live shim — spawning UDS shim (resume=%q fake=%t)", sessionID, opts.Resume, opts.Fake)
 	handle, err := s.spawn(sessionID, opts)
 	if err != nil {
 		return res, err
@@ -406,8 +407,8 @@ func (s *ShimSpawner) DropResume(sessionID string) (string, error) {
 // while the connection that carried it is live, and a live connection is proof
 // the process on the other end is the process that opened it.
 //
-// No handle and no pid is a genuine no-op — nothing is running that we know of
-// — and it is logged rather than treated as a failure.
+// No handle and no pid has no process to signal, but it is not a successful
+// stop until the session lock proves that no unreaped shim owns the session.
 // THE ATTRIBUTION IS THE CALLER'S, and it is required.
 //
 // This used to substitute one coarse package-level constant for every stop the
@@ -427,9 +428,9 @@ func (s *ShimSpawner) StopShim(sessionID string, hintPID int32, by shim.Stop) er
 	}
 	s.mu.Lock()
 	handle, ok := s.handles[sessionID]
-	if (ok || hintPID > 0) && s.awaitStopped == nil {
+	if s.awaitStopped == nil {
 		s.mu.Unlock()
-		return fmt.Errorf("server: session %s: cannot stop shim because the exit observer is nil", sessionID)
+		return fmt.Errorf("server: session %s: cannot prove shim lock release because the exit observer is nil", sessionID)
 	}
 	if ok {
 		delete(s.handles, sessionID)
@@ -457,9 +458,7 @@ func (s *ShimSpawner) StopShim(sessionID string, hintPID int32, by shim.Stop) er
 			return fmt.Errorf("server: session %s: stopping surviving shim pid %d: %w", sessionID, hintPID, err)
 		}
 	default:
-		s.logf("server: session %s: StopShim no-op (no daemon-spawned shim and no announced pid; already stopped, or never seen) initiator=%s reason=%s",
-			sessionID, by.Initiator, by.Reason)
-		return nil
+		s.logf("server: session %s: StopShim has no process handle or announced pid; proving the session lock is absent before reporting success", sessionID)
 	}
 	// STOPPED MEANS GONE, which is what every caller already assumed and the
 	// signal alone does not deliver.
@@ -597,6 +596,25 @@ func (r *RegistryRegistrar) repush(sessionID string) {
 	if r.PushView != nil {
 		r.PushView(sessionID)
 	}
+}
+
+// TerminalAccountingPersisted republishes the session aggregate immediately
+// after terminal accounting is durable and its terminal conversation item has
+// been delivered.
+func (r *RegistryRegistrar) TerminalAccountingPersisted(sessionID string) {
+	if r.Logf != nil {
+		r.Logf("server: terminal accounting persisted session=%s; republishing SessionView", sessionID)
+	}
+	r.repush(sessionID)
+}
+
+// HistoricalTokenUtilizationPersisted republishes the session aggregate after
+// a normalized file-plane response becomes durable.
+func (r *RegistryRegistrar) HistoricalTokenUtilizationPersisted(sessionID string) {
+	if r.Logf != nil {
+		r.Logf("server: historical token utilization persisted session=%s; republishing SessionView", sessionID)
+	}
+	r.repush(sessionID)
 }
 
 // BackfillStateChanged persists the never-blue backfill signal (F2) on

@@ -189,8 +189,11 @@ func compactDedupKey(boundaryUUID string) string { return "compact:" + boundaryU
 // "the daemon's captured claude_session_id equals the ephemeral daemon session
 // id"), and the shim's --session-id IS the daemon id (server.ShimUDSArgv), so
 // the fallback names the same string rather than a different one.
-func waitAttachedSession(t *testing.T, conn *websocket.Conn, sessionID, cwd string) string {
+func waitAttachedSession(t *testing.T, snapshot *frontendv1.StateSnapshot, conn *websocket.Conn, sessionID, cwd string) string {
 	t.Helper()
+	if vendorID, attached := attachedSessionSnapshot(snapshot, sessionID); attached {
+		return attachedSessionVendorID(t, vendorID, sessionID)
+	}
 	vendorID := ""
 	deadline := time.Now().Add(frameTimeout)
 	for time.Now().Before(deadline) {
@@ -211,15 +214,32 @@ func waitAttachedSession(t *testing.T, conn *websocket.Conn, sessionID, cwd stri
 			}
 		}
 		if attached {
-			if vendorID == "" {
-				t.Logf("no claude_session_id captured yet; writing store events under the daemon session id %s (fake mode: the vendor uuid IS the shim session id)", sessionID)
-				return sessionID
-			}
-			return vendorID
+			return attachedSessionVendorID(t, vendorID, sessionID)
 		}
 	}
-	t.Fatal("shim never attached (no session-scoped push arrived)")
+	t.Fatal("shim never attached (the scoped snapshot and later session-scoped pushes contained no attached session)")
 	return ""
+}
+
+func attachedSessionSnapshot(snapshot *frontendv1.StateSnapshot, sessionID string) (string, bool) {
+	if snapshot == nil {
+		return "", false
+	}
+	for _, view := range snapshot.GetSessions() {
+		if view.GetSessionId() == sessionID && view.GetShimAttached() {
+			return view.GetClaudeSessionId(), true
+		}
+	}
+	return "", false
+}
+
+func attachedSessionVendorID(t *testing.T, vendorID, sessionID string) string {
+	t.Helper()
+	if vendorID != "" {
+		return vendorID
+	}
+	t.Logf("no claude_session_id captured yet; writing store events under the daemon session id %s (fake mode: the vendor uuid IS the shim session id)", sessionID)
+	return sessionID
 }
 
 // deltaItems returns the conversation items a frame carries for workspace, or
@@ -328,10 +348,11 @@ func liveSession(t *testing.T, h *e2eHarness, cwd string) (string, *websocket.Co
 	t.Helper()
 	id := h.createSession(t, cwd)
 	conn := h.dial(t, id)
-	if first := readFrame(t, conn); first.GetSnapshot() == nil {
+	first := readFrame(t, conn)
+	if first.GetSnapshot() == nil {
 		t.Fatalf("first frame = %T, want a StateSnapshot", first.GetFrame())
 	}
-	vendorID := waitAttachedSession(t, conn, id, cwd)
+	vendorID := waitAttachedSession(t, first.GetSnapshot(), conn, id, cwd)
 	return id, conn, vendorID, dialStoreProducer(t)
 }
 

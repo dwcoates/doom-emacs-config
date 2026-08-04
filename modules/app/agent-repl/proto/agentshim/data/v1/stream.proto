@@ -150,8 +150,9 @@ message AssistantMessage {
   bool has_error = 4;               // disambiguates unset vs UNKNOWN
   string uuid = 5;
   string session_id = 6;
-  // [sdk 0.3.220]:
-  string request_id = 7;
+  // Vendor API request correlation when supplied by the SDK. Presence is
+  // evidence: omission and a supplied identifier are distinct wire facts.
+  optional string request_id = 7;
   string timestamp = 8;
   bool resumed_from_incomplete_thinking = 9;
   // The uuids this message REPLACES (a re-issued assistant turn). Consumers
@@ -161,6 +162,29 @@ message AssistantMessage {
   // Subagent context, matching UserMessage's pair.
   string subagent_type = 12;
   string task_description = 13;
+  // The vendor agent identifier attached to this assistant response when supplied by the SDK.
+  string agent_id = 14;
+  // The owning agent identifier attached to a nested subagent response when supplied by the SDK.
+  string parent_agent_id = 15;
+  // Cache rates derived once by the shim from this response's authoritative
+  // input, cache-creation, and cache-read token counters. Absent when total
+  // prompt input is zero.
+  PromptCacheRates cache_rates = 16;
+}
+
+// Canonical prompt-cache rates for one assistant API response.
+message PromptCacheRates {
+  // Uncached input plus cache creation plus cache reads.
+  int64 total_prompt_input_tokens = 1;
+
+  // Cache-read tokens divided by total prompt input.
+  double cache_hit_rate = 2;
+
+  // Cache-creation tokens divided by total prompt input.
+  double cache_write_rate = 3;
+
+  // Uncached input tokens divided by total prompt input.
+  double uncached_input_rate = 4;
 }
 
 // [sdk coreTypes.d.ts:441-474] SDKResultMessage, both variants, plus
@@ -242,13 +266,17 @@ message ModelUsage {
   int64 cache_read_input_tokens = 3;
   int64 cache_creation_input_tokens = 4;
   int64 web_search_requests = 5;
-  double cost_usd = 6;
-  int64 context_window = 7;
-  int64 max_output_tokens = 8;  // [observed] in 0.1.77; TYPED in 0.3.220
+  // Model cost when supplied by the SDK. Presence distinguishes a reported
+  // zero from unavailable pricing evidence.
+  optional double cost_usd = 6;
+  // Context capacity when supplied by the SDK.
+  optional int64 context_window = 7;
+  // Maximum response capacity when supplied by the SDK.
+  optional int64 max_output_tokens = 8;
   // [sdk 0.3.220] which model actually served the request, and through whom —
   // an alias resolves to a canonical id, and the provider may not be Anthropic.
-  string canonical_model = 9;
-  string provider = 10;
+  optional string canonical_model = 9;
+  optional string provider = 10;
 }
 
 // [sdk coreTypes.d.ts:436-440].

@@ -162,18 +162,15 @@ func TestTheReceiptCarriesNoStoreSeq(t *testing.T) {
 	}
 }
 
-func TestASubmitWithNoRequestIDPushesNoReceipt(t *testing.T) {
-	// Arrange: a caller with no frontend request behind it.
+func TestASubmitWithNoRequestIDIsRejectedBeforeReceiptPush(t *testing.T) {
 	h := newQueueHarness(t, nil)
 
-	// Act.
-	if err := h.submitAs("", "hello there"); err != nil {
-		t.Fatalf("submit: %v", err)
+	if err := h.submitAs("", "hello there"); err == nil {
+		t.Fatal("submit accepted an empty request id")
 	}
 
-	// Assert: nothing to key a bubble on, so nothing is claimed.
 	if turns := h.userTurns(); len(turns) != 0 {
-		t.Fatalf("pushed %d user turn(s) for an id-less submit, want none", len(turns))
+		t.Fatalf("pushed %d user turn(s) for a rejected submit, want none", len(turns))
 	}
 }
 

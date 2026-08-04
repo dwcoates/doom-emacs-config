@@ -19,8 +19,10 @@ import type {
   MergeStatus,
   RuntimeFault,
   SessionCommand,
+  SessionTokenUtilization,
   ShutdownScheduleDraining,
   ShutdownScheduleView,
+  SystemFailureDetail,
 } from "./frontend-proto.js";
 import type {
   AdapterEffect,
@@ -42,7 +44,6 @@ import {
   ContentBlock,
   ModelInfo,
   ModelUsage,
-  SessionTokenUtilization,
   PermissionMode,
   PermissionPreview,
   QueuedItem,
@@ -240,6 +241,8 @@ export interface ResultItem extends FeedOrderedItem {
    * API request declares it.
    */
   context: ResultContext | null;
+  /** Complete accounting evidence attached to the terminal result. */
+  turnAccounting?: import("./frontend-proto.js").TurnAccounting;
 }
 /**
  * The context was CLEARED (`core.v1.ContextCleared`): discarded outright.
@@ -308,7 +311,7 @@ export interface SystemFailureCard extends FeedOrderedItem {
    * already scrolled off.
    */
   uuid: string;
-  resumeFailure?: import("./frontend-proto.js").SessionResumeFailure;
+  detail: SystemFailureDetail;
 }
 export interface SystemItem extends FeedOrderedItem {
   kind: "system";

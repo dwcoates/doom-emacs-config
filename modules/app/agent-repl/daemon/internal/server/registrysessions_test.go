@@ -1,12 +1,40 @@
 package server
 
 import (
+	"errors"
+	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/registry"
 )
+
+type fixedSessionTokenUsageSource struct {
+	records []*frontendv1.TokenUtilization
+	err     error
+}
+
+func (s fixedSessionTokenUsageSource) List(string) ([]*frontendv1.TokenUtilization, error) {
+	return s.records, s.err
+}
+
+func TestSessionTokenUtilizationReadFailureLogsAndFailsHard(t *testing.T) {
+	var logs []string
+	defer func() {
+		if recover() == nil {
+			t.Fatal("durable usage read failure did not panic")
+		}
+		joined := strings.Join(logs, "\n")
+		if !strings.Contains(joined, "session token utilization read FAILED") || !strings.Contains(joined, `session="s_usage"`) || !strings.Contains(joined, "disk unavailable") {
+			t.Fatalf("logs = %v", logs)
+		}
+	}()
+	sessionTokenUtilization(func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }, fixedSessionTokenUsageSource{err: errors.New("disk unavailable")}, "s_usage")
+}
 
 // TestRegistrySessionViewsPopulatesRegistryFields verifies the SessionView
 // carries the model, permission mode, claude_session_id, and cwd fields from
@@ -56,6 +84,22 @@ func TestRegistrySessionViewsPopulatesRegistryFields(t *testing.T) {
 	}
 	if got := v.GetTitle(); got != "" {
 		t.Errorf("title: got %q, want blank (registry does not retain it)", got)
+	}
+}
+
+func TestRegistrySessionViewsCarriesDurableCompletedUsage(t *testing.T) {
+	reg := registry.Open(filepath.Join(t.TempDir(), "registry.db"), func(string, ...any) {})
+	if err := reg.Put(registry.Record{SessionID: "s_usage", CWD: "/work/ws"}); err != nil {
+		t.Fatal(err)
+	}
+	records := []*frontendv1.TokenUtilization{
+		{ApiMessageId: "m1", Model: "fable", Actor: &frontendv1.TokenUtilization_MainAgent{MainAgent: &frontendv1.TokenUtilizationMainAgent{}}, Usage: &frontendv1.TokenUsage{InputTokens: 3}},
+		{ApiMessageId: "m2", Model: "opus", Actor: &frontendv1.TokenUtilization_Subagent{Subagent: &frontendv1.TokenUtilizationSubagent{AgentId: "agent"}}, Usage: &frontendv1.TokenUsage{CacheReadInputTokens: 7}},
+	}
+	views := RegistrySessions{Reg: reg, TokenUsage: fixedSessionTokenUsageSource{records: records}}.SessionViews()
+	usage := views[0].GetTokenUtilization()
+	if usage.GetAllAgents().GetInputTokens() != 3 || usage.GetAllAgents().GetCacheReadInputTokens() != 7 || len(usage.GetSubagents()) != 1 || len(usage.GetSubagents()[0].GetModels()) != 1 {
+		t.Fatalf("token utilization = %+v", usage)
 	}
 }
 

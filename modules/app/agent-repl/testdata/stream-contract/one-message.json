@@ -84,7 +84,13 @@
       "message": {
         "id": "msg_01ABC",
         "role": "assistant",
-        "content": [{ "type": "thinking", "thinking": "weighing it", "signature": "sig" }]
+        "content": [{ "type": "thinking", "thinking": "weighing it", "signature": "sig" }],
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0
+        }
       }
     },
     {
@@ -94,7 +100,13 @@
       "message": {
         "id": "msg_01ABC",
         "role": "assistant",
-        "content": [{ "type": "text", "text": "Hello" }]
+        "content": [{ "type": "text", "text": "Hello" }],
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0
+        }
       }
     }
   ],

@@ -79,19 +79,21 @@ import (
 // requested transition, cause, and SSM verdict.
 //
 // Must be called with m.mu RELEASED: it takes the SSM's lock.
-func (m *Manager) noteConnectivity(workspace, sessionID, generationID string, state ssm.SessionConnectivity, causeKind string) {
+func (m *Manager) noteConnectivity(workspace, sessionID, generationID string, state ssm.SessionConnectivity, causeKind string) error {
 	if workspace == "" || sessionID == "" || generationID == "" {
+		err := fmt.Errorf("session-controller: incomplete connectivity identity")
 		m.logf("session-controller: connectivity edge REJECTED ws=%q session=%q generation=%q next=%q cause=%q branch=incomplete_identity",
 			workspace, sessionID, generationID, state, causeKind)
-		return
+		return err
 	}
 	if err := m.cfg.SSM.ApplySessionConnectivity(workspace, sessionID, generationID, state, causeKind); err != nil {
 		m.logf("session-controller: connectivity edge FAILED ws=%q session=%q generation=%q next=%q cause=%q branch=ssm_rejected error=%v",
 			workspace, sessionID, generationID, state, causeKind, err)
-		return
+		return fmt.Errorf("session-controller: apply connectivity edge for workspace %q session %s generation %s: %w", workspace, sessionID, generationID, err)
 	}
 	m.logf("session-controller: connectivity edge APPLIED ws=%q session=%q generation=%q next=%q cause=%q branch=accepted",
 		workspace, sessionID, generationID, state, causeKind)
+	return nil
 }
 
 // onLinkLost reports the FIFTH closing edge: the shim link dropped while this
@@ -189,38 +191,31 @@ var unsettledStates = func() map[frontendv1.RenderState]bool {
 	return m
 }()
 
-// refuseUnsettledHibernation returns ErrNotSettled when the workspace's resolved
-// state says it is still working, loud-logging the refusal.
-//
-// A READ FAILURE ALLOWS THE HIBERNATION, and this is the one place in the
-// hibernation path where an unknown answers YES rather than NO. It is the
-// opposite of the idle sweeper's elapsed-quiet gate, deliberately, because the
-// two guard different things: the sweeper decides whether to hibernate a
-// workspace nobody asked about, so absent evidence must not license a teardown,
-// while this only VETOES a teardown somebody already decided on. Turning a state
-// read failure into a refusal here would make an SSM outage silently disable
-// hibernation across the whole daemon, and memory exhaustion is a worse failure
-// than one shim reaped a moment early. The failure is surfaced loudly either
-// way, never swallowed.
-//
-// A workspace with NO resolved state is likewise allowed through: it has no turn
-// to interrupt, and hibernate's own no-live-controller error is the honest refusal
-// for a workspace nothing is driving.
-func (m *Manager) refuseUnsettledHibernation(workspace string) error {
-	st, found, err := m.cfg.SSM.Current(workspace)
+// acquireSettledHibernationLease returns ErrNotSettled when the workspace is
+// working and otherwise excludes every new prompt/turn start until its release
+// function runs. The SSM owns the snapshot and exclusion under one lock, so no
+// turn can begin between the settled verdict and StopShim.
+func (m *Manager) acquireSettledHibernationLease(workspace string) (func(), error) {
+	st, found, release, err := m.cfg.SSM.AcquireHibernationLease(workspace)
 	if err != nil {
-		m.logf("session-controller: hibernation settled-check FAILED ws=%q: %v — ALLOWING the teardown, because a state read outage must not disable hibernation daemon-wide",
-			workspace, err)
-		return nil
+		if errors.Is(err, ssm.ErrControllerRegistrationInProgress) {
+			m.logf("session-controller: REFUSING to hibernate ws=%q — a controller generation owns bring-up admission", workspace)
+			return nil, fmt.Errorf("%w: workspace %q has a controller generation entering service", ErrNotSettled, workspace)
+		}
+		m.logf("session-controller: hibernation lease acquisition FAILED ws=%q outcome=refuse_unknown_state error=%v", workspace, err)
+		return nil, fmt.Errorf("session-controller: acquire hibernation lease for workspace %q: %w", workspace, err)
 	}
 	if !found {
-		return nil
+		release()
+		m.logf("session-controller: REFUSING to hibernate ws=%q — the SSM has no resolved state, so settledness is unproved", workspace)
+		return nil, fmt.Errorf("%w: workspace %q has no resolved state", ErrNotSettled, workspace)
 	}
 	state := st.GetState()
 	if !st.GetTurnActive() && !unsettledStates[state] {
-		return nil
+		return release, nil
 	}
+	release()
 	m.logf("session-controller: REFUSING to hibernate ws=%q — it has not settled (state=%s turn_active=%v). Hibernating it would SIGTERM a shim that is still working and paint the workspace asleep over a live turn",
 		workspace, state, st.GetTurnActive())
-	return fmt.Errorf("%w: workspace %q reads %s (turn_active=%v)", ErrNotSettled, workspace, state, st.GetTurnActive())
+	return nil, fmt.Errorf("%w: workspace %q reads %s (turn_active=%v)", ErrNotSettled, workspace, state, st.GetTurnActive())
 }

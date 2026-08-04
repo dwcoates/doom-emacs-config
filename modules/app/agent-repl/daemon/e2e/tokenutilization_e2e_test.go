@@ -12,6 +12,8 @@ import (
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
+	"claude-repld/internal/errclass"
+
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -169,7 +171,7 @@ func sidecarAssistantUsageEvent(t *testing.T, vendorSessionID, lineUUID, message
 	}
 	line := &datav1.TranscriptLine{Line: &datav1.TranscriptLine_Assistant{Assistant: &datav1.AssistantLine{
 		Envelope: &datav1.LineEnvelope{Uuid: lineUUID, SessionId: vendorSessionID, AgentId: agentID},
-		Message: &datav1.ApiAssistantMessage{Id: messageID, Model: "claude-opus-test", Usage: &datav1.ApiUsage{
+		Message: &datav1.ApiAssistantMessage{Id: messageID, Model: "claude-opus-test", Content: []*datav1.ContentBlock{{Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: "historical response"}}}}, Usage: &datav1.ApiUsage{
 			InputTokens: 100, OutputTokens: 200, CacheReadInputTokens: 800, CacheCreationInputTokens: 75,
 			CacheCreation: cacheCreation, ServerToolUse: serverToolUse, ServiceTier: "priority", Speed: "fast", InferenceGeo: "us-east-1",
 		}},
@@ -202,16 +204,16 @@ func TestE2ESessionViewAggregatesTimedAndUntimedActors(t *testing.T) {
 		t.Fatal("SessionView omitted token_utilization after completed main-agent and subagent responses")
 	}
 	all := aggregate.GetAllAgents()
-	if got, want := []int64{all.GetInputTokens(), all.GetOutputTokens(), all.GetCacheReadInputTokens(), all.GetCacheCreationInputTokens()}, []int64{107, 211, 800, 75}; fmt.Sprint(got) != fmt.Sprint(want) {
+	if got, want := []int64{all.GetInputTokens(), all.GetOutputTokens(), all.GetCacheReadInputTokens(), all.GetCacheCreationInputTokens()}, []int64{107, 211, 880, 79}; fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Errorf("all-agent token totals = %v, want %v", got, want)
 	}
-	if all.GetCacheCreation().GetEphemeral_5MInputTokens() != 25 || all.GetCacheCreation().GetEphemeral_1HInputTokens() != 50 {
-		t.Errorf("all-agent cache TTL totals = %v, want 5m=25 and 1h=50", all.GetCacheCreation())
+	if all.GetCacheCreation().GetEphemeral_5MInputTokens() != 29 || all.GetCacheCreation().GetEphemeral_1HInputTokens() != 50 {
+		t.Errorf("all-agent cache TTL totals = %v, want 5m=29 and 1h=50", all.GetCacheCreation())
 	}
 	if all.GetServerToolUse().GetWebSearchRequests() != 2 || all.GetServerToolUse().GetWebFetchRequests() != 3 {
 		t.Errorf("all-agent server-tool totals = %v, want search=2 and fetch=3", all.GetServerToolUse())
 	}
-	if got, want := all.GetCacheRates().GetCacheHitRate(), float64(800)/982; math.Abs(got-want) > 1e-12 {
+	if got, want := all.GetCacheRates().GetCacheHitRate(), float64(880)/1066; math.Abs(got-want) > 1e-12 {
 		t.Errorf("all-agent cache_hit_rate = %.12f, want %.12f from authoritative counters", got, want)
 	}
 	timing := all.GetTiming()
@@ -231,7 +233,9 @@ func TestE2ESessionViewAggregatesTimedAndUntimedActors(t *testing.T) {
 
 // TestE2ECreateResumeFailureIsTypedAndVisible verifies an explicit resume that
 // cannot find its transcript is nacked with structured continuity evidence.
-// Validation happens before shim spawn, so the fixture cannot contact a vendor.
+// The harness forces only the spawned process onto the fake SDK. The command
+// deliberately omits fake so the production resume gate cannot be bypassed;
+// validation happens before shim spawn, so no vendor process can run.
 func TestE2ECreateResumeFailureIsTypedAndVisible(t *testing.T) {
 	h := newUDSHarness(t)
 	conn := h.dialFrontend(t)
@@ -243,7 +247,7 @@ func TestE2ECreateResumeFailureIsTypedAndVisible(t *testing.T) {
 	configDir := t.TempDir()
 	const requestID = "e2e-missing-explicit-resume"
 	const claudeID = "11111111-2222-4333-8444-555555555555"
-	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"createSession":{"cwd":%q,"configDir":%q,"fake":true,"resumeMode":"RESUME_MODE_EXPLICIT","explicitClaudeSessionId":%q}}`, requestID, cwd, configDir, claudeID))
+	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"createSession":{"cwd":%q,"configDir":%q,"resumeMode":"RESUME_MODE_EXPLICIT","explicitClaudeSessionId":%q}}`, requestID, cwd, configDir, claudeID))
 	for {
 		ack := readFrame(t, conn).GetCommandAck()
 		if ack == nil || ack.GetRequestId() != requestID {
@@ -252,6 +256,9 @@ func TestE2ECreateResumeFailureIsTypedAndVisible(t *testing.T) {
 		if ack.GetOk() {
 			t.Fatal("explicit resume with no transcript succeeded: continuity failure must not fall back to a fresh conversation")
 		}
+		if got := ack.GetFailure().GetErrorType(); got != string(errclass.TypeSessionResumeFailed) {
+			t.Errorf("create resume nack error_type = %q, want %q", got, errclass.TypeSessionResumeFailed)
+		}
 		failure := ack.GetFailure().GetSessionResume()
 		if failure == nil || failure.GetCreate() == nil || failure.GetTranscriptUnavailable() == nil {
 			t.Fatalf("create resume nack structured detail = %v, want create + transcript_unavailable", ack.GetFailure())
@@ -259,47 +266,87 @@ func TestE2ECreateResumeFailureIsTypedAndVisible(t *testing.T) {
 		if failure.GetClaudeSessionId() != claudeID || failure.GetCwd() != cwd || failure.GetResolvedConfigDir() == "" || len(failure.GetTranscriptUnavailable().GetSearchedPaths()) == 0 {
 			t.Errorf("create resume failure evidence = %v, want exact Claude id cwd resolved config root and searched paths", failure)
 		}
+		if got := h.shimSpawns(); got != 0 {
+			t.Errorf("shim spawn count after rejected resume = %d, want zero", got)
+		}
+		audit := h.dialFrontend(t)
+		snapshot := readFrame(t, audit).GetSnapshot()
+		audit.Close()
+		if snapshot == nil {
+			t.Fatal("post-rejection frontend frame is not a StateSnapshot")
+		}
+		for _, view := range snapshot.GetSessions() {
+			if view.GetCwd() == cwd {
+				t.Fatalf("rejected resume registered session %q for cwd %q", view.GetSessionId(), cwd)
+			}
+		}
 		return
 	}
 }
 
 // TestE2EAutomaticRestoreFailureIsTypedAndVisible hibernates an offline fake
-// session whose vendor UUID has no transcript, then reopens the workspace.
-// Rehydration must preserve that exact UUID and surface a typed automatic
-// restore failure rather than reconstructing history into a fresh prompt.
+// session, then makes its resumed fake SDK query die after the daemon
+// handshake and before readiness. OpenWorkspace must wait for that exact
+// restoration failure rather than acknowledging an unusable session.
 func TestE2EAutomaticRestoreFailureIsTypedAndVisible(t *testing.T) {
+	t.Setenv("AGENT_REPL_E2E_FAIL_RESUMED_FAKE_QUERY", "1")
 	h := newUDSHarness(t, withIdleSweeper())
 	cwd := t.TempDir()
 	id := h.createSession(t, cwd)
 	conn := h.dial(t, id)
-	if readFrame(t, conn).GetSnapshot() == nil {
+	snapshot := readFrame(t, conn).GetSnapshot()
+	if snapshot == nil {
 		t.Fatal("first session frame is not a StateSnapshot")
 	}
-	observedStates(t, conn, cwd, frontendv1.RenderState_RENDER_STATE_READY)
+	ready := false
+	for _, state := range snapshot.GetWorkspaces() {
+		if state.GetWorkspace() == cwd && state.GetState() == frontendv1.RenderState_RENDER_STATE_READY {
+			ready = true
+			break
+		}
+	}
+	if !ready {
+		t.Fatalf("create acknowledgement snapshot workspaces = %v, want READY state for %q", snapshot.GetWorkspaces(), cwd)
+	}
+	// createSession returns only after the correlated successful CreateSession
+	// ACK. This fresh global snapshot therefore proves that command completion
+	// publishes the authoritative session/vendor identity it promises.
 	view := sessionViewFromSnapshot(t, h, id)
 	if view.GetClaudeSessionId() == "" {
 		t.Fatal("created session has no authoritative Claude session id to resume")
 	}
 	h.sweepIdle <- time.Now()
-	observedStates(t, conn, cwd, frontendv1.RenderState_RENDER_STATE_HIBERNATED)
+	observedStates(t, snapshot, conn, cwd, frontendv1.RenderState_RENDER_STATE_HIBERNATED)
 
-	const requestID = "e2e-automatic-restore-missing-transcript"
+	const requestID = "e2e-automatic-restore-query-failure"
 	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"openWorkspace":{}}`, requestID))
-	for {
-		ack := readFrame(t, conn).GetCommandAck()
-		if ack == nil || ack.GetRequestId() != requestID {
-			continue
+	var acknowledged bool
+	var resumeFailure *frontendv1.SessionResumeFailure
+	var termination *frontendv1.QueryTerminationFailure
+	deadline := time.Now().Add(frameTimeout)
+	for time.Now().Before(deadline) && (!acknowledged || termination == nil) {
+		frame := readFrame(t, conn)
+		if ack := frame.GetCommandAck(); ack != nil && ack.GetRequestId() == requestID {
+			if ack.GetOk() {
+				t.Fatal("OpenWorkspace acknowledged a session whose resumed query died before readiness")
+			}
+			acknowledged = true
+			resumeFailure = ack.GetFailure().GetSessionResume()
 		}
-		if ack.GetOk() {
-			t.Fatal("automatic restore without the authoritative transcript succeeded by reconstructing or starting fresh")
+		for _, item := range deltaItems(frame, cwd) {
+			failure := item.GetSystemFailure()
+			if failure != nil && failure.GetErrorType() == "unexpected_query_termination" {
+				termination = failure.GetQueryTermination()
+			}
 		}
-		failure := ack.GetFailure().GetSessionResume()
-		if failure == nil || failure.GetAutomaticRestore() == nil || failure.GetTranscriptUnavailable() == nil {
-			t.Fatalf("automatic restore nack structured detail = %v, want automatic_restore + transcript_unavailable", ack.GetFailure())
-		}
-		if failure.GetAgentReplSessionId() != id || failure.GetClaudeSessionId() != view.GetClaudeSessionId() || failure.GetCwd() != cwd {
-			t.Errorf("automatic restore failure evidence = %v, want session=%q Claude=%q cwd=%q", failure, id, view.GetClaudeSessionId(), cwd)
-		}
-		return
+	}
+	if !acknowledged {
+		t.Fatal("OpenWorkspace did not return a failure acknowledgement after the resumed query died")
+	}
+	if resumeFailure == nil || resumeFailure.GetAutomaticRestore() == nil || resumeFailure.GetAgentReplSessionId() != id || resumeFailure.GetClaudeSessionId() != view.GetClaudeSessionId() || resumeFailure.GetCwd() != cwd || resumeFailure.GetResolvedConfigDir() == "" || resumeFailure.GetQueryTermination() == nil || resumeFailure.GetQueryTermination().GetAgentReplSessionId() != id || resumeFailure.GetQueryTermination().GetVendorSessionId() != view.GetClaudeSessionId() || resumeFailure.GetQueryTermination().GetIteratorFailure() == nil {
+		t.Fatalf("automatic restore command nack = %v, want typed session.resume iterator failure with session=%q vendor=%q", resumeFailure, id, view.GetClaudeSessionId())
+	}
+	if termination == nil || termination.GetAgentReplSessionId() != id || termination.GetVendorSessionId() != view.GetClaudeSessionId() || termination.GetIteratorFailure() == nil {
+		t.Fatalf("automatic restore query-termination evidence = %v, want session=%q vendor=%q iterator_failure", termination, id, view.GetClaudeSessionId())
 	}
 }

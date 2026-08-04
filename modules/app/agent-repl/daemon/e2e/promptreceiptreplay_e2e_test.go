@@ -181,6 +181,7 @@ func (s *acceptOnceShim) run(t *testing.T, shimSock string) error {
 			ShimVersion:     "fake-accept-once",
 			ProtocolVersion: "1",
 			VendorSessionId: s.vendorSessionID,
+			QueryInstanceId: "query-accept-once-" + s.sessionID,
 		}); err != nil {
 			t.Errorf("fake shim: write ShimHello: %v", err)
 			return
@@ -291,6 +292,7 @@ func (w *receiptWorld) submitThenDie(t *testing.T, requestID, text string) {
 		Locator:           &server.SessionLocator{Reg: reg},
 		SeqStore:          seqStore,
 		ClearCompactStore: seqStore,
+		TurnAccountings:   newTestTurnAccountingStore(),
 		// THE WHOLE POINT: the durable half of the receipt, written at
 		// acceptance into the state store this half is about to stop owning.
 		PromptReceipts:  promptReceipts,
@@ -419,6 +421,7 @@ func (w *receiptWorld) restart(t *testing.T) *bouncedFrontend {
 		Locator:           &server.SessionLocator{Reg: reg},
 		SeqStore:          seqStore,
 		ClearCompactStore: seqStore,
+		TurnAccountings:   newTestTurnAccountingStore(),
 		PromptReceipts:    promptReceipts,
 		DurableHistory: &storehistory.Reader{
 			Socket: w.storeSock,

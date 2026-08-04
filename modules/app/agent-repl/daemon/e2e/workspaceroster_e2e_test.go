@@ -183,6 +183,7 @@ func bootRosterDaemon(t *testing.T, stateDir string) *rosterDaemon {
 		FileDiagnostics:   fileDiagnostics,
 		SeqStore:          seqStore,
 		ClearCompactStore: seqStore,
+		TurnAccountings:   newTestTurnAccountingStore(),
 		PermissionModes:   server.NewRegistryModeStore(reg),
 		Registrar:         registrar,
 		ModelCatalogs:     registrar,

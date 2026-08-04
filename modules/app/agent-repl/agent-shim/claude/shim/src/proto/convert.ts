@@ -54,6 +54,11 @@ import { create, fromJson } from "@bufbuild/protobuf";
 import type { JsonObject, JsonValue } from "@bufbuild/protobuf";
 import { anyPack, ListValueSchema, type ListValue } from "@bufbuild/protobuf/wkt";
 import { normalizeModel } from "../model.js";
+import {
+  InvalidModeledUsageError,
+  normalizeApiUsage,
+  type NormalizedApiUsage,
+} from "../api-usage.js";
 import { bindLog } from "../uds/log.js";
 import {
   EventClass,
@@ -112,6 +117,7 @@ import {
   ModelUsageSchema,
   PermissionDenialSchema,
   PluginRefSchema,
+  PromptCacheRatesSchema,
   RateLimitEventSchema,
   RateLimitInfoSchema,
   RawMessageStreamEventSchema,
@@ -319,10 +325,10 @@ export class SessionStartGate {
 export interface ConvertOptions {
   nowMs?: number;
   /**
-   * Identity of the accepted input turn an SDK result closes. UdsSession owns
-   * the FIFO of accepted request ids and supplies this only for `result`.
+   * Identity of the accepted root turn that a terminal result closes.
+   * UdsSession also stamps this identity onto the returned Event envelope.
    */
-  turnId?: string;
+  rootTurnId?: string;
   /**
    * The `SessionStarted.source` a `system:init` should carry. The stitch
    * phase (main.ts) passes SESSION_SOURCE_RESUME when the shim was spawned
@@ -352,6 +358,8 @@ export interface ConvertResult {
   lifecycle: Event[];
   /** Newly loud-logged `<type>.<field>` extras paths (for tests/wiring). */
   loggedExtras: string[];
+  /** Canonically validated assistant usage for the structured accounting log. */
+  assistantApiUsage?: NormalizedApiUsage;
 }
 
 /**
@@ -389,13 +397,33 @@ export function convert(message: unknown, opts?: ConvertOptions): ConvertResult 
   try {
     const built = build(type, message, envelope.reader, opts);
     const extras = envelope.reader.finish(built.typeLabel);
-    const vendor = vendorEvent(built.csm, envelope, extras, built.ephemeral);
+    // SDK result envelopes omit request_id. UdsSession owns the accepted-turn
+    // FIFO and supplies its authoritative id, which must stamp BOTH durable
+    // twins so a daemon restart can join the historical result to accounting.
+    const vendorEnvelope = type === "result" && opts?.rootTurnId !== undefined && opts.rootTurnId !== ""
+      ? { ...envelope, requestId: opts.rootTurnId }
+      : envelope;
+    const vendor = vendorEvent(built.csm, vendorEnvelope, extras, built.ephemeral);
     const lifecycle = built.lifecyclePayloads.map((p) => lifecycleEvent(envelope, p));
     LOGGER.logVerbose({ ...(envelope.sessionId === "" ? {} : { claude_session_id: envelope.sessionId }), ...(envelope.requestId === "" ? {} : { request_id: envelope.requestId }), sdk_type: type, lifecycle_count: lifecycle.length, extra_count: extras.logged.length, event_class: built.ephemeral ? "ephemeral" : "persistent" }, "converted SDK message into vendor and lifecycle events");
-    return { vendor, lifecycle, loggedExtras: extras.logged };
+    return {
+      vendor,
+      lifecycle,
+      loggedExtras: extras.logged,
+      ...(built.assistantApiUsage === undefined ? {} : { assistantApiUsage: built.assistantApiUsage }),
+    };
   } catch (err) {
-    if (err instanceof MissingFieldError) {
-      logUnparsed(type, envelope.sessionId, envelope.requestId, err.message);
+    if (err instanceof MissingFieldError || err instanceof InvalidModeledUsageError) {
+      logUnparsed(type, envelope.sessionId, envelope.requestId, err.message,
+        err instanceof InvalidModeledUsageError
+          ? {
+              usage_field: err.field,
+              usage_field_path: err.fieldPath,
+              raw_value: err.rawValue,
+              raw_value_kind: err.rawValue === null ? "null" : typeof err.rawValue,
+              raw_usage: err.rawUsage,
+            }
+          : {});
       return {
         vendor: unparsedEvent(safeStringify(message), err.message, {
           sessionId: envelope.sessionId,
@@ -500,6 +528,7 @@ interface Built {
   lifecyclePayloads: Event["payload"][];
   typeLabel: string; // for extras logging (`<type>.<field>`)
   ephemeral: boolean;
+  assistantApiUsage?: NormalizedApiUsage;
 }
 
 /** Build a Built with no lifecycle twin (the common case). */
@@ -764,23 +793,35 @@ function buildAssistant(message: Record<string, unknown>, r: Reader): Built {
   }
   const errorStr = r.str("error");
   const hasError = r.has("error") && errorStr !== "";
+  const apiRequestId = r.optionalNonBlankStr("request_id", "requestId");
+  const assistantApiUsage = normalizeApiUsage(rawMessage["usage"]);
   const assistantMsg = create(AssistantMessageSchema, {
-    message: convertApiAssistantMessage(rawMessage),
+    message: convertApiAssistantMessage(rawMessage, assistantApiUsage),
     parentToolUseId: r.str("parent_tool_use_id", "parentToolUseId"),
     error: hasError ? assistantErrorEnum(errorStr) : AssistantMessageError.UNSPECIFIED,
     hasError,
     uuid: uuidOf(message),
     sessionId: r.str("session_id", "sessionId"),
     // [sdk 0.3.220]:
-    requestId: r.str("request_id", "requestId"),
+    ...(apiRequestId === undefined ? {} : { requestId: apiRequestId }),
     timestamp: r.str("timestamp"),
     resumedFromIncompleteThinking: r.bool("resumed_from_incomplete_thinking", "resumedFromIncompleteThinking"),
     supersedes: r.strList("supersedes"),
     aborted: r.bool("aborted"),
     subagentType: r.str("subagent_type", "subagentType"),
     taskDescription: r.str("task_description", "taskDescription"),
+    agentId: r.str("agent_id", "agentId"),
+    parentAgentId: r.str("parent_agent_id", "parentAgentId"),
+    cacheRates: assistantApiUsage.promptCache.case === "empty"
+      ? undefined
+      : create(PromptCacheRatesSchema, {
+          totalPromptInputTokens: BigInt(assistantApiUsage.promptCache.totalPromptInputTokens),
+          cacheHitRate: assistantApiUsage.promptCache.cacheHitRate,
+          cacheWriteRate: assistantApiUsage.promptCache.cacheWriteRate,
+          uncachedInputRate: assistantApiUsage.promptCache.uncachedInputRate,
+        }),
   });
-  return { csm: csm({ case: "assistant", value: assistantMsg }), lifecyclePayloads: [], typeLabel: "assistant", ephemeral: false };
+  return { csm: csm({ case: "assistant", value: assistantMsg }), lifecyclePayloads: [], typeLabel: "assistant", ephemeral: false, assistantApiUsage };
 }
 
 function buildResult(message: Record<string, unknown>, r: Reader, opts?: ConvertOptions): Built {
@@ -822,7 +863,7 @@ function buildResult(message: Record<string, unknown>, r: Reader, opts?: Convert
     stopReason: result.stopReason,
     durationMs: result.durationMs,
     isError: result.isError,
-    turnId: opts?.turnId ?? "",
+    turnId: opts?.rootTurnId ?? "",
   });
   return {
     csm: csm({ case: "result", value: result }),
@@ -1480,7 +1521,7 @@ function convertApiUserMessage(raw: Record<string, unknown>) {
   return create(ApiUserMessageSchema, { content: { case: undefined } });
 }
 
-function convertApiAssistantMessage(raw: Record<string, unknown>) {
+function convertApiAssistantMessage(raw: Record<string, unknown>, usage: NormalizedApiUsage) {
   const content = Array.isArray(raw["content"]) ? convertBlocks(raw["content"]) : [];
   const rawModel = strOf(raw["model"]);
   const model = normalizeModel(rawModel);
@@ -1497,7 +1538,7 @@ function convertApiAssistantMessage(raw: Record<string, unknown>) {
     stopReason: strOf(raw["stop_reason"]),
     stopSequence: strOf(raw["stop_sequence"]),
     stopDetails: asStructOpt(raw["stop_details"]),
-    usage: isObject(raw["usage"]) ? convertApiUsage(raw["usage"]) : undefined,
+    usage: convertApiUsage(usage),
     diagnostics: asStructOpt(raw["diagnostics"]),
     contextManagement: asStructOpt(raw["context_management"]),
     container: asStructOpt(raw["container"]),
@@ -1723,7 +1764,7 @@ function classifyToolResult(o: Record<string, unknown>): ToolUseResult["result"]
       totalDurationMs: bigOf(pick(o, "total_duration_ms", "totalDurationMs")),
       totalTokens: bigOf(pick(o, "total_tokens", "totalTokens")),
       totalToolUseCount: bigOf(pick(o, "total_tool_use_count", "totalToolUseCount")),
-      usage: isObject(usage) ? convertApiUsage(usage) : undefined,
+      usage: usage === undefined ? undefined : convertApiUsage(normalizeApiUsage(usage)),
       toolStats: isObject(stats) ? create(AgentToolStatsSchema, {
         readCount: bigOf(pick(stats, "read_count", "readCount")),
         searchCount: bigOf(pick(stats, "search_count", "searchCount")),
@@ -2026,22 +2067,23 @@ function convertUsage(raw: Record<string, unknown> | undefined) {
   });
 }
 
-function convertApiUsage(raw: Record<string, unknown>) {
+function convertApiUsage(raw: NormalizedApiUsage) {
   return create(ApiUsageSchema, {
-    inputTokens: bigOf(pick(raw, "input_tokens", "inputTokens")),
-    outputTokens: bigOf(pick(raw, "output_tokens", "outputTokens")),
-    cacheReadInputTokens: bigOf(pick(raw, "cache_read_input_tokens", "cacheReadInputTokens")),
-    cacheCreationInputTokens: bigOf(pick(raw, "cache_creation_input_tokens", "cacheCreationInputTokens")),
-    cacheCreation: asStructOpt(pick(raw, "cache_creation", "cacheCreation")),
-    serverToolUse: asStructOpt(pick(raw, "server_tool_use", "serverToolUse")),
-    serviceTier: strOf(pick(raw, "service_tier", "serviceTier")),
-    // ApiUsage models these three (fields 8-10) and newer harness versions send
-    // all three on every assistant/agent usage block, but nothing read them, so
-    // the per-model iteration breakdown and the speed/geo routing were dropped
-    // on the floor at conversion time.
-    iterations: asListValueOpt(pick(raw, "iterations")),
-    speed: strOf(pick(raw, "speed")),
-    inferenceGeo: strOf(pick(raw, "inference_geo", "inferenceGeo")),
+    rawSdkUsage: raw.rawSdkUsage,
+    inputTokens: BigInt(raw.inputTokens),
+    outputTokens: BigInt(raw.outputTokens),
+    cacheReadInputTokens: BigInt(raw.cacheReadInputTokens),
+    cacheCreationInputTokens: BigInt(raw.cacheCreationInputTokens),
+    cacheCreation: raw.cacheCreation,
+    serverToolUse: raw.serverToolUse,
+    serviceTier: raw.serviceTier,
+    iterations: raw.iterations === undefined ? undefined : asListValueOpt(raw.iterations),
+    speed: raw.speed,
+    inferenceGeo: raw.inferenceGeo,
+    fallbackCredit: raw.fallbackCredit,
+    outputTokensDetails: raw.outputTokensDetails,
+    unmodeledUsage: raw.unmodeledUsage,
+    cacheDiagnostic: raw.cacheDiagnostic,
   });
 }
 
@@ -2056,11 +2098,11 @@ function convertModelUsage(raw: Record<string, unknown> | undefined): Record<str
       cacheReadInputTokens: bigOf(pick(v, "cache_read_input_tokens", "cacheReadInputTokens")),
       cacheCreationInputTokens: bigOf(pick(v, "cache_creation_input_tokens", "cacheCreationInputTokens")),
       webSearchRequests: bigOf(pick(v, "web_search_requests", "webSearchRequests")),
-      costUsd: numOf(pick(v, "cost_usd", "costUSD", "costUsd")),
-      contextWindow: bigOf(pick(v, "context_window", "contextWindow")),
-      maxOutputTokens: bigOf(pick(v, "max_output_tokens", "maxOutputTokens")),
-      canonicalModel: strOf(pick(v, "canonical_model", "canonicalModel")),
-      provider: strOf(pick(v, "provider")),
+      costUsd: optionalNumberOf(v, "cost_usd", "costUSD", "costUsd"),
+      contextWindow: optionalBigIntOf(v, "context_window", "contextWindow"),
+      maxOutputTokens: optionalBigIntOf(v, "max_output_tokens", "maxOutputTokens"),
+      canonicalModel: optionalNonBlankStringOf(v, "canonical_model", "canonicalModel"),
+      provider: optionalNonBlankStringOf(v, "provider"),
     });
   }
   return out;
@@ -2302,6 +2344,29 @@ function numOf(v: unknown): number {
 
 function bigOf(v: unknown): bigint {
   return typeof v === "number" && Number.isFinite(v) ? BigInt(Math.trunc(v)) : 0n;
+}
+
+function optionalNumberOf(o: Record<string, unknown>, ...keys: string[]): number | undefined {
+  const v = pick(o, ...keys);
+  if (v === undefined) return undefined;
+  if (typeof v !== "number" || !Number.isFinite(v)) {
+    throw new MissingFieldError(`present ${keys.map((key) => `\`${key}\``).join("/")} must be a finite number`);
+  }
+  return v;
+}
+
+function optionalBigIntOf(o: Record<string, unknown>, ...keys: string[]): bigint | undefined {
+  const v = optionalNumberOf(o, ...keys);
+  return v === undefined ? undefined : BigInt(Math.trunc(v));
+}
+
+function optionalNonBlankStringOf(o: Record<string, unknown>, ...keys: string[]): string | undefined {
+  const v = pick(o, ...keys);
+  if (v === undefined) return undefined;
+  if (typeof v !== "string" || v === "") {
+    throw new MissingFieldError(`present ${keys.map((key) => `\`${key}\``).join("/")} must be a non-empty string`);
+  }
+  return v;
 }
 
 function strListOf(v: unknown): string[] {

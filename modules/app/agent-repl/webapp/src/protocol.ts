@@ -76,14 +76,12 @@ export interface TokenTimingTotals {
 }
 
 /** Cumulative accounting for a defined set of API responses. */
-export interface TokenUsageTotals extends Usage { timing?: TokenTimingTotals; }
-
-/** Session usage split by owner and model. */
-export interface SessionTokenUtilization {
-  all_agents: TokenUsageTotals;
-  main_agent: TokenUsageTotals;
-  subagents: Array<{ agent_id: string; totals: TokenUsageTotals }>;
-  models: Array<{ model: string; totals: TokenUsageTotals }>;
+export interface TokenUsageTotals extends Usage {
+  cache_creation?: { ephemeral_5m_input_tokens: number; ephemeral_1h_input_tokens: number };
+  server_tool_use?: { web_search_requests: number; web_fetch_requests: number };
+  output_details?: { thinking_tokens: number };
+  cache_rates?: { total_prompt_input_tokens: number; cache_hit_rate: number; cache_write_rate: number; uncached_input_rate: number };
+  timing?: TokenTimingTotals;
 }
 
 /** One selectable model. */

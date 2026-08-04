@@ -10,11 +10,11 @@
 //   Event.dedup_key, persists, and fans out to subscribers. The daemon only
 //   ever consumes the store-merged stream forwarded by the shim — everything
 //   the daemon sees (except EPHEMERAL class) is already durable.
-// - EPHEMERAL class (ContentDelta, HeartbeatProgress, MessageLatency) bypasses the store:
-//   shim → daemon directly. Consumers reconcile per claude uuid, REPLACING a
-//   streamed preview with the store-delivered final message. Cross-path
-//   ordering is therefore irrelevant. Ephemeral events are never persisted
-//   and never replayed.
+// - EPHEMERAL class (ContentDelta, HeartbeatProgress) bypasses the store:
+//   shim → daemon directly. Consumers reconcile per Claude message id,
+//   REPLACING a streamed preview with the store-delivered final message.
+//   MessageLatency is PERSISTENT because timing analysis needs it on replay.
+//   Ephemeral events are never persisted and never replayed.
 // - Replay handshake: the shim sends the store Subscribe{session_id,
 //   from_seq}; the store replays persisted events with seq > from_seq, then
 //   live-tails. The daemon does NOT send this: its resume position rides
@@ -156,6 +156,10 @@ message Event {
     // a TurnStarted: it is consumed only by the daemon's turn-claim ledger and
     // can never create an SSM/progress/frontend lifecycle edge.
     TurnClaimBridge turn_claim_bridge = 25;
+    // Records lifecycle facts for one SDK query invocation.
+    QueryLifecycle query_lifecycle = 26;
+    // Records a subscription-usage measurement at a turn boundary.
+    AccountUsageObservation account_usage_observation = 27;
     // Vendor extension payload (e.g. agentshim.data.v1.* messages). The
     // daemon treats it opaquely except for frontend translation; the store
     // treats it fully opaquely apart from dedup-key extraction.
@@ -227,6 +231,266 @@ message TurnEnded {
   // a non-empty mismatch, so a delayed fact about an older turn cannot settle
   // a newer live turn.
   string turn_id = 4;
+}
+
+// Identifies one invocation of the SDK query API and every lifecycle event it
+// emits.
+message QueryLifecycle {
+  // Uniquely identifies one query() invocation within a shim session.
+  string query_instance_id = 1;
+
+  // Gives the Unix epoch time at which the lifecycle event was observed.
+  int64 observed_at_ms = 2;
+
+  // Describes exactly one lifecycle event without relying on a state enum.
+  oneof event {
+    // Records creation of the query.
+    QueryCreated created = 10;
+
+    // Records the effective runtime identity reported after initialization.
+    QueryRuntimeObserved runtime_observed = 11;
+
+    // Records termination of the query.
+    QueryTerminated terminated = 12;
+  }
+}
+
+// Records the options used to construct one SDK query.
+message QueryCreated {
+  // Gives the requested model string passed to the SDK.
+  string requested_model = 1;
+
+  // Identifies whether the query starts a vendor session or resumes one.
+  oneof invocation {
+    // Indicates that no vendor session was supplied for resumption.
+    FreshQuery fresh = 10;
+
+    // Identifies the vendor session supplied for resumption.
+    ResumedQuery resumed = 11;
+  }
+}
+
+// Marks construction of a query without a vendor session to resume.
+message FreshQuery {}
+
+// Records construction of a query that resumes a vendor session.
+message ResumedQuery {
+  // Gives the exact vendor session identifier supplied to the SDK.
+  string requested_vendor_session_id = 1;
+}
+
+// Records the effective runtime identity reported by the initialized query.
+message QueryRuntimeObserved {
+  // Contains the effective runtime identity used by the query.
+  QueryRuntimeIdentity identity = 1;
+}
+
+// Identifies configuration capable of affecting usage, caching, or latency.
+message QueryRuntimeIdentity {
+  // Gives the vendor session identifier reported after initialization.
+  string vendor_session_id = 1;
+
+  // Gives the effective model reported after initialization.
+  string effective_model = 2;
+
+  // Gives the Claude Agent SDK package version.
+  string sdk_version = 3;
+
+  // Gives the Claude Code version used by the SDK.
+  string claude_code_version = 4;
+
+  // Gives the shim build commit.
+  string shim_build_sha = 5;
+
+  // Gives the non-secret authentication-source description.
+  string auth_source = 6;
+
+  // Gives the subscription type reported by the usage service.
+  string subscription_type = 7;
+
+  // Gives the reported fast-mode state.
+  string fast_mode_state = 8;
+
+  // Gives the explanation associated with the fast-mode state.
+  string fast_mode_reason = 9;
+
+  // Hashes the effective SDK options using a canonical encoding.
+  EvidenceFingerprint effective_options = 10;
+
+  // Hashes the effective settings using a canonical encoding.
+  EvidenceFingerprint settings = 11;
+
+  // Hashes the ordered tool definitions using a canonical encoding.
+  EvidenceFingerprint tools = 12;
+
+  // Hashes the ordered MCP configuration using a canonical encoding.
+  EvidenceFingerprint mcp = 13;
+
+  // Hashes the cacheable system and instruction prefix using a canonical encoding.
+  EvidenceFingerprint context_prefix = 14;
+}
+
+// Represents either a known SHA-256 fingerprint or explicit unavailability.
+message EvidenceFingerprint {
+  // Describes whether the fingerprint could be produced.
+  oneof evidence {
+    // Gives a lowercase hexadecimal SHA-256 digest.
+    string sha256 = 1;
+
+    // Explains why the producer could not obtain the fingerprint.
+    FingerprintUnavailable unavailable = 2;
+  }
+}
+
+// Explains why an evidence fingerprint could not be produced.
+message FingerprintUnavailable {
+  // Gives a diagnostic suitable for logs and experiment validation.
+  string cause = 1;
+}
+
+// Records termination of one SDK query.
+message QueryTerminated {
+  // Identifies the vendor conversation when query initialization exposed it,
+  // or states explicitly that termination preceded vendor identity discovery.
+  oneof vendor_identity {
+    // Gives the non-empty vendor session identifier associated with the query.
+    string vendor_session_id = 1;
+
+    // Records that the query ended before the SDK exposed a vendor session.
+    VendorSessionIdentityUnavailable vendor_session_identity_unavailable = 2;
+  }
+
+  // Identifies the termination condition without relying on a state enum.
+  oneof reason {
+    // Records termination initiated by shim shutdown or hibernation.
+    IntentionalQueryTermination intentional = 10;
+
+    // Records unexpected completion of the SDK iterator.
+    UnexpectedQueryEof unexpected_eof = 11;
+
+    // Records an error thrown by the SDK iterator.
+    QueryIteratorFailure iterator_failure = 12;
+
+    // Records failure before the query completed initialization.
+    QueryStartupFailure startup_failure = 13;
+  }
+}
+
+// Marks a query lifecycle boundary observed before vendor session discovery.
+message VendorSessionIdentityUnavailable {}
+
+// Records an intentional query termination.
+message IntentionalQueryTermination {
+  // Gives the shim lifecycle reason that required termination.
+  string reason = 1;
+}
+
+// Marks unexpected completion of the SDK iterator.
+message UnexpectedQueryEof {}
+
+// Records an error thrown by the SDK iterator.
+message QueryIteratorFailure {
+  // Gives the complete error diagnostic.
+  string cause = 1;
+}
+
+// Records failure before query initialization completed.
+message QueryStartupFailure {
+  // Gives the complete error diagnostic.
+  string cause = 1;
+}
+
+// Records one attempt to measure subscription usage at a turn boundary.
+message AccountUsageObservation {
+  // Identifies the query serving the turn.
+  string query_instance_id = 1;
+
+  // Identifies the turn whose boundary was measured.
+  string turn_id = 2;
+
+  // Gives the exact turn-boundary time independently of sampling latency.
+  int64 boundary_at_ms = 3;
+
+  // Gives the time at which the usage response was received.
+  int64 observed_at_ms = 4;
+
+  // Gives the elapsed time required to obtain the usage response.
+  int64 sample_latency_ms = 5;
+
+  // Gives the subscription type reported by the usage service.
+  string subscription_type = 6;
+
+  // Identifies the measured turn boundary.
+  oneof boundary {
+    // Marks the boundary immediately before prompt submission.
+    TurnStartUsageBoundary turn_start = 10;
+
+    // Marks the boundary after the terminal result is received.
+    TurnEndUsageBoundary turn_end = 11;
+  }
+
+  // Contains either the measurement or its explicit failure.
+  oneof outcome {
+    // Contains the account-usage measurement.
+    AccountUsageAvailable available = 20;
+
+    // Explains why the measurement could not be obtained.
+    AccountUsageUnavailable unavailable = 21;
+  }
+}
+
+// Marks an observation taken immediately before prompt submission.
+message TurnStartUsageBoundary {}
+
+// Marks an observation taken after the terminal result is received.
+message TurnEndUsageBoundary {}
+
+// Contains subscription-usage windows returned by the usage service.
+message AccountUsageAvailable {
+  // Contains utilization of the rolling five-hour window.
+  UsageWindow five_hour = 1;
+}
+
+// Describes utilization and reset time for one account-usage window.
+message UsageWindow {
+  // Gives utilization as a percentage from zero through one hundred.
+  double utilization_percent = 1;
+
+  // Gives the Unix epoch time at which the window resets.
+  int64 resets_at_ms = 2;
+}
+
+// Explains why an account-usage measurement could not be obtained.
+message AccountUsageUnavailable {
+  // Identifies the failure without collapsing distinct conditions.
+  oneof reason {
+    // Indicates that the account-usage API was unavailable.
+    UsageServiceUnavailable service_unavailable = 1;
+
+    // Indicates that the response omitted the five-hour window.
+    FiveHourWindowUnavailable window_unavailable = 2;
+
+    // Indicates that the response omitted utilization.
+    UtilizationUnavailable utilization_unavailable = 3;
+
+    // Records a transport, parsing, or SDK error.
+    UsageSamplingFailure sampling_failure = 4;
+  }
+}
+
+// Marks unavailability of the account-usage API.
+message UsageServiceUnavailable {}
+
+// Marks absence of the five-hour window.
+message FiveHourWindowUnavailable {}
+
+// Marks absence of utilization within the five-hour window.
+message UtilizationUnavailable {}
+
+// Records an error encountered while sampling account usage.
+message UsageSamplingFailure {
+  // Gives the complete error diagnostic.
+  string cause = 1;
 }
 
 // CLEAR and COMPACT are the two ways a conversation's history stops informing
@@ -347,7 +611,7 @@ message HeartbeatProgress {
   double elapsed_seconds = 4;
 }
 
-// EPHEMERAL first-token-latency relay.
+// Durable first-token-latency relay.
 //
 // The vendor stamps time-to-first-token on the frame that OPENS a streamed
 // assistant message — a structural frame the delta bypass otherwise drops,
@@ -356,9 +620,9 @@ message HeartbeatProgress {
 // the turn instead of waiting for the turn's terminal result, which carries
 // the same number far too late to be useful.
 //
-// EPHEMERAL like its neighbours above: never persisted, never replayed, and a
-// consumer that never receives one simply has no latency to show. It is a
-// statement about the message in flight, not a durable fact about the turn.
+// It is persisted and replayed because response-time analysis requires the
+// first-token measurement after a daemon restart. The store sequence assigns
+// its order relative to the assistant response it describes.
 message MessageLatency {
   string uuid = 1;    // the message id the stamp belongs to (ContentDelta.uuid)
   int64 ttft_ms = 2;  // time to first token, as the vendor measured it
@@ -370,6 +634,9 @@ message DegradedState {
   string reason = 2;
   uint64 dropped_count = 3;
   bool recovered = 4;     // true on the closing report of a degraded window
+  // Correlates a query-owned degradation with its exact query() invocation.
+  // Absent for failures that do not belong to a query lifecycle.
+  optional string query_instance_id = 5;
 }
 
 // ---------------------------------------------------------------------------
@@ -463,6 +730,23 @@ message ShimHello {
   // identity-bearing source of truth; turn_in_flight remains its compatibility
   // projection for peers built before this field existed.
   repeated string active_turn_ids = 9;
+
+  // The stable identity of the one SDK query() invocation this shim owns.
+  // Every daemon attachment binds its accounting reducer to this value before
+  // subscribing to the durable event stream, so a daemon restored after its
+  // cursor has passed QueryLifecycle records can validate later usage evidence
+  // against the same query without reconstructing or duplicating lifecycle
+  // events. Empty is a protocol violation: a shim without a query identity is
+  // not a session the daemon can safely drive.
+  string query_instance_id = 10;
+
+  // The runtime identity the SDK reported for query_instance_id. Presence
+  // means the query reached SDK initialization, and the identity must name
+  // this hello's vendor_session_id when that session identity is known. A
+  // fresh query may omit this snapshot until its first SDK initialization;
+  // a reconnect carries the cached observation so a restored daemon can
+  // complete terminal accounting without replaying historical lifecycle rows.
+  QueryRuntimeIdentity query_runtime_identity = 11;
 }
 
 message DaemonHello {

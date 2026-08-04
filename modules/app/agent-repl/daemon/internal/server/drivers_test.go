@@ -525,27 +525,44 @@ func TestStopShimSignalsASurvivingShimByItsAnnouncedPid(t *testing.T) {
 	}
 }
 
-func TestStopShimWithNeitherHandleNorPidIsALoggedNoOp(t *testing.T) {
-	// Arrange.
+func TestStopShimWithNeitherHandleNorPidRequiresSessionLockEvidence(t *testing.T) {
+	// Arrange — an older daemon can lose both its child handle and the current
+	// connection's pid while the shim remains alive.  Success must therefore
+	// come from the lock predicate that gates restoration, not from absence of
+	// bookkeeping.
 	var lines []string
+	var waited string
 	s := NewShimSpawner(nil, nil, nil, nil, func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) })
-	s.awaitStopped = func(string) error { return nil }
-	s.signal = func(int, syscall.Signal) error { t.Fatal("nothing should be signalled"); return nil }
+	s.awaitStopped = func(sessionID string) error { waited = sessionID; return nil }
+	s.signal = func(int, syscall.Signal) error { t.Fatal("nothing should be signalled without a pid"); return nil }
 
 	// Act.
 	if err := s.StopShim("s1", 0, unitTestStop); err != nil {
 		t.Fatalf("StopShim with nothing to stop must not fail: %v", err)
 	}
 
-	// Assert — silence here would hide a shim nobody can reach.
+	// Assert — hibernation may only publish after the same proof a following
+	// restore relies upon.
+	if waited != "s1" {
+		t.Fatalf("StopShim returned without lock evidence; awaited session = %q", waited)
+	}
 	var said bool
 	for _, l := range lines {
-		if strings.Contains(l, "StopShim no-op") {
+		if strings.Contains(l, "proving the session lock is absent") {
 			said = true
 		}
 	}
 	if !said {
-		t.Fatalf("the no-op was not logged; lines: %v", lines)
+		t.Fatalf("the proof requirement was not logged; lines: %v", lines)
+	}
+}
+
+func TestStopShimWithNeitherHandleNorPidFailsWithoutSessionLockEvidence(t *testing.T) {
+	s := NewShimSpawner(nil, nil, nil, nil, nil)
+	s.awaitStopped = func(string) error { return errors.New("session lock is still held") }
+
+	if err := s.StopShim("s1", 0, unitTestStop); err == nil || !strings.Contains(err.Error(), "session lock is still held") {
+		t.Fatalf("StopShim without lock-release proof = %v", err)
 	}
 }
 

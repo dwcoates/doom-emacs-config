@@ -57,10 +57,11 @@ func liveSessionInMode(t *testing.T, h *e2eHarness, permissionMode string) (*web
 	cwd := t.TempDir()
 	id := h.createSessionWithMode(t, cwd, permissionMode)
 	conn := h.dial(t, id)
-	if first := readFrame(t, conn); first.GetSnapshot() == nil {
+	first := readFrame(t, conn)
+	if first.GetSnapshot() == nil {
 		t.Fatalf("first frame = %T, want a StateSnapshot", first.GetFrame())
 	}
-	waitAttachedSession(t, conn, id, cwd)
+	waitAttachedSession(t, first.GetSnapshot(), conn, id, cwd)
 	return conn, cwd
 }
 

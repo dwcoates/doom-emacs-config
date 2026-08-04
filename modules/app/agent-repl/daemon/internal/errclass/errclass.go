@@ -73,6 +73,9 @@ const (
 	// TypeShimStoreWriteRejected — the shim reported it could not write to
 	// the store, so events are being dropped. WINDOW-shaped.
 	TypeShimStoreWriteRejected Type = "shim.store_write_rejected"
+	// TypeUnexpectedQueryTermination — the standing SDK query ended without
+	// an intentional shim shutdown. The session can no longer accept turns.
+	TypeUnexpectedQueryTermination Type = "unexpected_query_termination"
 	// The establishment links, in depth order. A createSession acks only
 	// once the new session's shim answers a health probe healthy over the wired
 	// connection, so a failed create must say WHICH hop of that path it stopped
@@ -107,6 +110,10 @@ const (
 	// FRESH retry ended the same way. It is what makes `starting` non-terminal:
 	// every bring-up now closes on wired or on this.
 	TypeSessionStartFailed Type = "session.start_failed"
+	// TypeSessionResumeFailed — restoration could not resume the authoritative
+	// Claude conversation. The typed SessionResumeFailure detail carries the
+	// exact session, Claude UUID, attempted operation, and continuity cause.
+	TypeSessionResumeFailed Type = "session.resume_failed"
 	// TypeSessionEndedUnclassified — a persisted death reason from an older
 	// build that predates this vocabulary. The raw string rides source_detail
 	// rather than being guessed at.
@@ -214,29 +221,30 @@ func Assistant(e datav1.AssistantMessageError) (Type, bool) {
 // it arrived through.
 var prose = map[Type]string{
 	// INTERNAL — agent-repl's own machinery.
-	TypeShimNotConnected:         "the agent process is not connected",
-	TypeShimRejected:             "the agent process rejected the request",
-	TypeShimAckTimeout:           "the agent process did not respond in time",
-	TypeShimVersionMismatch:      "the agent process speaks a different protocol version",
-	TypeShimSeqRegression:        "the agent process's event stream went backwards",
-	TypeShimDegraded:             "no traffic from the agent process",
-	TypeShimStoreWriteRejected:   "the agent process could not write to the store",
-	TypeShimNotSpawned:           "the agent process was never started for this session",
-	TypeShimHandshakeIncomplete:  "the agent process connected but never finished wiring up",
-	TypeShimUnhealthy:            "the agent process reported itself unhealthy",
-	TypeSessionNotEstablished:    "the session did not finish connecting in time",
-	TypeSessionNotLive:           "this is no longer the workspace's live session",
-	TypeSessionDeleted:           "the session was deleted",
-	TypeSessionSuperseded:        "a newer session took over this workspace",
-	TypeSessionShimDied:          "the agent process exited",
-	TypeSessionStartFailed:       "the session could not be started",
-	TypeSessionEndedUnclassified: "the session ended",
-	TypeHistoryRepullInFlight:    "a history re-pull is already running",
-	TypeHistoryReplayTruncated:   "the history re-pull ended before it reached the live window",
-	TypeInterruptUndelivered:     "the stop could not be delivered",
-
-	TypeQueueEntrySessionUnwired: "the queued prompt's session is not attached to this daemon, so it cannot be run yet",
-	TypeInternalUnclassified:     "the command failed",
+	TypeShimNotConnected:           "the agent process is not connected",
+	TypeShimRejected:               "the agent process rejected the request",
+	TypeShimAckTimeout:             "the agent process did not respond in time",
+	TypeShimVersionMismatch:        "the agent process speaks a different protocol version",
+	TypeShimSeqRegression:          "the agent process's event stream went backwards",
+	TypeShimDegraded:               "no traffic from the agent process",
+	TypeShimStoreWriteRejected:     "the agent process could not write to the store",
+	TypeUnexpectedQueryTermination: "the agent SDK query ended unexpectedly",
+	TypeShimNotSpawned:             "the agent process was never started for this session",
+	TypeShimHandshakeIncomplete:    "the agent process connected but never finished wiring up",
+	TypeShimUnhealthy:              "the agent process reported itself unhealthy",
+	TypeSessionNotEstablished:      "the session did not finish connecting in time",
+	TypeSessionNotLive:             "this is no longer the workspace's live session",
+	TypeSessionDeleted:             "the session was deleted",
+	TypeSessionSuperseded:          "a newer session took over this workspace",
+	TypeSessionShimDied:            "the agent process exited",
+	TypeSessionStartFailed:         "the session could not be started",
+	TypeSessionResumeFailed:        "the Claude conversation could not be resumed",
+	TypeSessionEndedUnclassified:   "the session ended",
+	TypeHistoryRepullInFlight:      "a history re-pull is already running",
+	TypeHistoryReplayTruncated:     "the history re-pull ended before it reached the live window",
+	TypeInterruptUndelivered:       "the stop could not be delivered",
+	TypeQueueEntrySessionUnwired:   "the queued prompt's session is not attached to this daemon, so it cannot be run yet",
+	TypeInternalUnclassified:       "the command failed",
 
 	// API — the SDK or the vendor refusing or concluding the work.
 	TypeAPIAuthenticationFailed: "authentication failed",
@@ -358,6 +366,13 @@ func Sentinel(err error) (Type, bool) {
 	return "", false
 }
 
+// SessionResumeFailureDetailer exposes the evidence held by the owner that
+// refused a create or automatic restore. The command classifier owns the
+// common failure vocabulary; the owner supplies the identity it alone knows.
+type SessionResumeFailureDetailer interface {
+	SessionResumeFailureDetail() *frontendv1.SessionResumeFailure
+}
+
 // Command classifies an error returned by a frontend command handler — the
 // single funnel through which every handler failure used to become raw
 // CommandAck.error text.
@@ -368,6 +383,18 @@ func Sentinel(err error) (Type, bool) {
 func Command(logf dlog.Logf, err error) *frontendv1.SystemFailureItem {
 	if err == nil {
 		return nil
+	}
+	var resume SessionResumeFailureDetailer
+	if errors.As(err, &resume) {
+		return &frontendv1.SystemFailureItem{
+			ErrorClass:   frontendv1.ErrorClass_ERROR_CLASS_INTERNAL,
+			ErrorType:    string(TypeSessionResumeFailed),
+			Message:      prose[TypeSessionResumeFailed],
+			SourceDetail: err.Error(),
+			StructuredDetail: &frontendv1.SystemFailureItem_SessionResume{
+				SessionResume: resume.SessionResumeFailureDetail(),
+			},
+		}
 	}
 	if t, ok := Sentinel(err); ok {
 		return &frontendv1.SystemFailureItem{
@@ -611,6 +638,18 @@ func Degraded(component, reason string, droppedCount int64) *frontendv1.SystemFa
 	}
 }
 
+// UnexpectedQueryTermination classifies the reliable DegradedState emitted
+// after the standing SDK iterator ends without an intentional shim shutdown.
+func UnexpectedQueryTermination(component, reason string) *frontendv1.SystemFailureItem {
+	detail := strings.TrimSpace(strings.Join([]string{"component=" + component, "reason=" + reason}, " "))
+	return &frontendv1.SystemFailureItem{
+		ErrorClass:   frontendv1.ErrorClass_ERROR_CLASS_INTERNAL,
+		ErrorType:    string(TypeUnexpectedQueryTermination),
+		Message:      prose[TypeUnexpectedQueryTermination],
+		SourceDetail: detail,
+	}
+}
+
 // ConnectionDegraded classifies the daemon's OWN observation that the
 // missed-heartbeat window elapsed with no shim traffic. WINDOW-shaped: the
 // caller re-sends it under the same uuid with resolved_at_ms set when traffic
@@ -644,6 +683,7 @@ func AllTypes() []Type {
 		TypeShimSeqRegression,
 		TypeShimDegraded,
 		TypeShimStoreWriteRejected,
+		TypeUnexpectedQueryTermination,
 		TypeShimNotSpawned,
 		TypeShimHandshakeIncomplete,
 		TypeShimUnhealthy,
@@ -653,6 +693,7 @@ func AllTypes() []Type {
 		TypeSessionSuperseded,
 		TypeSessionShimDied,
 		TypeSessionStartFailed,
+		TypeSessionResumeFailed,
 		TypeSessionEndedUnclassified,
 		TypeHistoryRepullInFlight,
 		TypeHistoryReplayTruncated,

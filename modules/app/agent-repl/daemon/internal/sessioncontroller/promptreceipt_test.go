@@ -190,6 +190,7 @@ func newSubmitHarness(t *testing.T) *submitHarness {
 		Locator:           fakeLocator{m: map[string]string{"ws": "s1"}},
 		SeqStore:          &fakeSeqStore{seq: map[string]uint64{}},
 		ClearCompactStore: newFakeClearCompactStore(),
+		TurnAccountings:   emptyTurnAccountingStore{},
 		PromptReceipts:    receipts,
 		ProtocolVersion:   "1",
 		Source:            stubSource{},
@@ -318,19 +319,15 @@ func TestAnUnwritableReceiptLedgerWithholdsThePromptFromTheShim(t *testing.T) {
 	}
 }
 
-func TestASubmitWithNoRequestIdRecordsNoReceipt(t *testing.T) {
-	// Arrange — with no request id there is no identity a bubble could be
-	// keyed on, and no bubble is pushed either.
+func TestASubmitWithNoRequestIdIsRejectedBeforeReceiptMutation(t *testing.T) {
 	h := newSubmitHarness(t)
 
-	// Act.
-	if err := h.m.SubmitPrompt(context.Background(), "ws", "", "the prompt", "default"); err != nil {
-		t.Fatalf("SubmitPrompt: %v", err)
+	if err := h.m.SubmitPrompt(context.Background(), "ws", "", "the prompt", "default"); err == nil {
+		t.Fatal("SubmitPrompt accepted an empty request id")
 	}
 
-	// Assert.
 	if got := h.receipts.callLog(); len(got) != 0 {
-		t.Fatalf("ledger calls = %v, want none for a submit with no request id", got)
+		t.Fatalf("ledger calls = %v, want none for rejected submit", got)
 	}
 }
 
@@ -340,7 +337,7 @@ func TestASubmitWithNoRequestIdRecordsNoReceipt(t *testing.T) {
 // attributeUserTurn runs on.
 func receiptConsumer(t *testing.T, receipts PromptReceiptStore) *consumer {
 	t.Helper()
-	cons := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), t.Logf, nil, nil, nil, nil, nil)
+	cons := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, t.Logf, nil, nil, nil, nil, nil)
 	cons.receipts = receipts
 	return cons
 }
@@ -438,7 +435,7 @@ func TestARetirementFailureIsLoggedRatherThanStoppingTheConversation(t *testing.
 	var mu sync.Mutex
 	var logged []string
 	receipts := &erroringRetireStore{fakeReceiptStore: *newFakeReceiptStore(), err: errors.New("database is locked")}
-	cons := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), func(f string, a ...any) {
+	cons := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, func(f string, a ...any) {
 		mu.Lock()
 		logged = append(logged, fmt.Sprintf(f, a...))
 		mu.Unlock()

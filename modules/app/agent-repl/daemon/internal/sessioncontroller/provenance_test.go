@@ -11,7 +11,7 @@ import (
 // lease ledger the test controls.
 func newProvenanceConsumer(applier *fakeApplier) (*consumer, *fakePusher) {
 	push := &fakePusher{}
-	c := newConsumer("ws", "s1", push, applier, nil, newFakeClearCompactStore(),
+	c := newConsumer("ws", "s1", push, applier, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{},
 		nil, nil, nil, nil, nil, nil)
 	return c, push
 }

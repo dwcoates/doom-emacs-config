@@ -1,5 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { create } from "@bufbuild/protobuf";
+import { QueryTerminationFailureSchema } from "../../proto/gen/ts/agentshim/frontend/v1/frontend_pb";
+import {
+  QueryIteratorFailureSchema,
+  QueryStartupFailureSchema,
+  UnexpectedQueryEofSchema,
+} from "../../proto/gen/ts/agentshim/core/v1/core_pb";
 import {
   Actions,
   FeedRenderer,
@@ -68,13 +75,28 @@ function textAt(hour: number, minute: number, text = "the answer"): Conversation
 
 describe("response token utilization metadata", () => {
   it("renders cache, service, timing, and subagent provenance with unavailable values", () => {
-    const item = { ...textAt(9, 5), tokenUtilization: [{ apiMessageId: "m", model: "opus", actor: "subagent" as const, subagent: { agentId: "agent-7", subagentType: "research", taskDescription: "inspect" }, usage: { inputTokens: 1, outputTokens: 20, cacheReadInputTokens: 30, cacheCreationInputTokens: 40, cacheCreation5m: 4, cacheCreation1h: 36, cacheHitRate: 0.3, cacheWriteRate: 0.4, serviceTier: "priority", speed: "fast", inferenceGeo: "us" }, responseTiming: { timeToFirstTokenMs: 50, outputGenerationDurationMs: 100 } }] } as TextItem;
+    const item = { ...textAt(9, 5), tokenUtilization: [{ agentReplSessionId: "session", claudeSessionId: "claude", rootTurnId: "turn", apiRequestId: "request", apiMessageId: "m", model: "opus", actor: "subagent" as const, subagent: { agentId: "agent-7", parentToolUseId: "tool-parent", parentAgentId: "agent-parent", subagentType: "research", taskDescription: "inspect" }, usage: { inputTokens: 1, outputTokens: 20, cacheReadInputTokens: 30, cacheCreationInputTokens: 40, cacheCreation: { ephemeral5mInputTokens: 4, ephemeral1hInputTokens: 36 }, cacheRates: { totalPromptInputTokens: 75, cacheHitRate: 0.3, cacheWriteRate: 0.4, uncachedInputRate: 0.3 }, serviceTier: "priority", speed: "fast", inferenceGeo: "us", iterations: [], rawUsage: {} }, responseTiming: { timeToFirstTokenMs: 50, outputGenerationDurationMs: 100 } }] } as TextItem;
+    const usage = item.tokenUtilization?.[0].usage;
+    if (usage === undefined) throw new Error("missing usage fixture");
+    usage.serverToolUse = { webSearchRequests: 2, webFetchRequests: 3 };
+    usage.outputDetails = { thinkingTokens: 7 };
+    usage.cacheDiagnostic = { kind: "messagesChanged", cacheMissedInputTokens: 9 };
+    usage.fallbackCredit = { applied: true };
+    usage.unmodeledUsage = { futureField: 11 };
+    usage.rawUsage = { rawSdkUsage: { vendor_exact: "preserved" } };
     const html = renderItem(item);
     expect(html).toContain("subagent agent-7 research");
     expect(html).toContain("cache write 40 (5m 4, 1h 36)");
     expect(html).toContain("tier priority");
     expect(html).toContain("generation 200.0 tok/s");
-    expect(html).toContain("uncached rate unavailable");
+    expect(html).toContain("uncached rate 30.0%");
+    expect(html).toContain("server_tool_use");
+    expect(html).toContain("thinkingTokens");
+    expect(html).toContain("cache_diagnostic");
+    expect(html).toContain("fallback_credit");
+    expect(html).toContain("unmodeled_usage");
+    expect(html).toContain("raw_sdk_usage");
+    expect(html).toContain("vendor_exact");
   });
 });
 
@@ -5469,8 +5491,24 @@ function failure(over: Partial<SystemFailureCard> = {}): SystemFailureCard {
     sourceDetail: "status=529",
     resolvedAtMs: 0,
     uuid: "failure:e9",
+    detail: { kind: "none" },
     ...over,
   };
+}
+
+function queryTerminationFailure(kind: "unexpectedEof" | "iteratorFailure" | "startupFailure") {
+  const reason = kind === "unexpectedEof"
+    ? { case: "unexpectedEof" as const, value: create(UnexpectedQueryEofSchema) }
+    : kind === "iteratorFailure"
+      ? { case: "iteratorFailure" as const, value: create(QueryIteratorFailureSchema, { cause: "child exited 137" }) }
+      : { case: "startupFailure" as const, value: create(QueryStartupFailureSchema, { cause: "spawn refused" }) };
+  return create(QueryTerminationFailureSchema, {
+    agentReplSessionId: "session-1",
+    queryInstanceId: "query-1",
+    vendorIdentity: { case: "vendorSessionId", value: "claude-1" },
+    observedAtMs: 1700000000000n,
+    reason,
+  });
 }
 
 describe("the system-failure card", () => {
@@ -5557,6 +5595,37 @@ describe("the system-failure card", () => {
     const html = renderItem(failure({ sourceDetail: "<script>x</script>" }));
     // Assert
     expect(html).not.toContain("<script>");
+  });
+
+  it.each([
+    ["unexpectedEof" as const, "unexpected EOF"],
+    ["iteratorFailure" as const, "iterator failure: child exited 137"],
+    ["startupFailure" as const, "startup failure: spawn refused"],
+  ])("renders every query-termination identity and the %s cause", (kind, causeText) => {
+    const html = renderItem(failure({ detail: { kind: "queryTermination", value: queryTerminationFailure(kind) } }));
+    expect(html).toContain(causeText);
+    expect(html).toContain("agent-repl session: session-1");
+    expect(html).toContain("query instance: query-1");
+    expect(html).toContain("vendor session: claude-1");
+    expect(html).toContain("observed_at_ms: 1700000000000");
+  });
+
+  it("renders exact query evidence nested inside an automatic-resume failure", () => {
+    const html = renderItem(failure({ detail: { kind: "sessionResume", value: {
+      agentReplSessionId: "session-1", claudeSessionId: "claude-1", cwd: "/repo", configDir: "", resolvedConfigDir: "/config", attempt: "automaticRestore",
+      cause: { case: "queryTermination", value: queryTerminationFailure("startupFailure") },
+    } } }));
+    expect(html).toContain("resume blocked during automatic restoration");
+    expect(html).toContain("startup failure: spawn refused");
+    expect(html).toContain("query instance: query-1");
+  });
+
+  it("renders a non-query exact-resume bring-up cause", () => {
+    const html = renderItem(failure({ detail: { kind: "sessionResume", value: {
+      agentReplSessionId: "session-1", claudeSessionId: "claude-1", cwd: "/repo", configDir: "", resolvedConfigDir: "/config", attempt: "automaticRestore",
+      cause: { case: "bringUpFailure", cause: "readiness timed out" },
+    } } }));
+    expect(html).toContain("bring-up failure: readiness timed out");
   });
 });
 

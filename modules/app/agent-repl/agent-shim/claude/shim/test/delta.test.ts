@@ -6,6 +6,7 @@ import {
   streamEventToContentDelta,
   streamEventToMessageLatency,
   toEphemeralEvent,
+  toPersistentEvent,
   toolProgressToHeartbeat,
 } from "../src/proto/delta.js";
 import { EventClass, Plane } from "../src/uds/proto.js";
@@ -155,12 +156,12 @@ describe("streamEventToMessageLatency", () => {
     expect(streamEventToMessageLatency(start(700))!.sessionId).toBe("s1");
   });
 
-  it("is classified EPHEMERAL, plane STREAM, seq 0", () => {
+  it("is classified PERSISTENT, plane STREAM, seq 0", () => {
     // Arrange / Act
     const evt = streamEventToMessageLatency(start(700), { nowMs: 42 })!;
-    // Assert: the bypass contract — never persisted, never sequenced.
+    // Assert: store sequencing assigns the durable sequence after write.
     expect([evt.class, evt.plane, evt.seq, evt.producedAtMs]).toEqual([
-      EventClass.EPHEMERAL,
+      EventClass.PERSISTENT,
       Plane.STREAM,
       0n,
       42n,
@@ -228,24 +229,25 @@ describe("toolProgressToHeartbeat", () => {
 // Dispatcher + classification.
 // ---------------------------------------------------------------------------
 
-describe("toEphemeralEvent / isEphemeral", () => {
+describe("toEphemeralEvent / toPersistentEvent / isEphemeral", () => {
   it("routes stream_event to a ContentDelta", () => {
     const evt = toEphemeralEvent(loadStream("stream_event-content_block_delta-text"));
     expect(evt?.payload.case).toBe("contentDelta");
   });
 
-  it("routes a stamped message_start to a MessageLatency", () => {
+  it("routes a stamped message_start to a persistent MessageLatency", () => {
     // Arrange / Act: the frame the ContentDelta mapper drops.
-    const evt = toEphemeralEvent(loadStream("stream_event-message_start"));
+    const evt = toPersistentEvent(loadStream("stream_event-message_start"));
     // Assert
     expect(evt?.payload.case).toBe("messageLatency");
+    expect(evt?.class).toBe(EventClass.PERSISTENT);
   });
 
   it("returns null for a message_start with no ttft stamp", () => {
     // Arrange: a structural frame with nothing relayable stays dropped.
     const msg = { type: "stream_event", session_id: "s", event: { type: "message_start", message: { id: "m" } } };
     // Act / Assert
-    expect(toEphemeralEvent(msg)).toBeNull();
+    expect(toPersistentEvent(msg)).toBeNull();
   });
 
   it("routes tool_progress to a HeartbeatProgress", () => {

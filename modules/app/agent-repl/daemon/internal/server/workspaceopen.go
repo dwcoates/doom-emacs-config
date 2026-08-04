@@ -97,14 +97,23 @@ type WorkspaceOpener struct {
 var _ WorkspaceLifecycle = (*WorkspaceOpener)(nil)
 
 // Open binds a discovered transcript to the workspace's session when it has
-// none, then ensures the session so the workspace renders its history instead
-// of sitting blue and empty.
-func (o *WorkspaceOpener) Open(_ context.Context, workspace string) error {
+// none, then waits for the restore's authoritative bring-up outcome. A command
+// acknowledgement therefore means the session is driveable; a failed exact
+// resume returns its typed continuity evidence to that same command.
+func (o *WorkspaceOpener) Open(ctx context.Context, workspace string) error {
 	if o.Ensurer == nil {
 		return fmt.Errorf("server: open-workspace %q has no session ensurer wired", workspace)
 	}
+	id, found := (&SessionLocator{Reg: o.Reg}).Locate(workspace)
+	if !found {
+		return fmt.Errorf("server: open-workspace %q has no session record to restore", workspace)
+	}
 	o.BindWorkspace(workspace)
-	return o.Ensurer.Ensure(workspace)
+	rec, found := o.Reg.Get(id)
+	if !found {
+		return fmt.Errorf("server: open-workspace %q session %q disappeared after transcript binding", workspace, id)
+	}
+	return automaticResumeEstablishment(rec).classify(o.Ensurer.EnsureDriveable(ctx, workspace))
 }
 
 // OpenDriveable is Open for a caller that is about to DRIVE the session rather
@@ -121,7 +130,8 @@ func (o *WorkspaceOpener) OpenDriveable(ctx context.Context, workspace string) e
 	if o.Ensurer == nil {
 		return fmt.Errorf("server: open-workspace %q has no session ensurer wired", workspace)
 	}
-	if _, ok := (&SessionLocator{Reg: o.Reg}).Locate(workspace); !ok {
+	id, ok := (&SessionLocator{Reg: o.Reg}).Locate(workspace)
+	if !ok {
 		// Loud, and NOT an error: the caller decides what a sessionless
 		// workspace means for it, and this is the only place that can tell
 		// "never had one" from "could not start one".
@@ -129,7 +139,11 @@ func (o *WorkspaceOpener) OpenDriveable(ctx context.Context, workspace string) e
 		return fmt.Errorf("server: workspace %q has no session record: %w", workspace, merge.ErrNoSession)
 	}
 	o.BindWorkspace(workspace)
-	return o.Ensurer.EnsureDriveable(ctx, workspace)
+	rec, found := o.Reg.Get(id)
+	if !found {
+		return fmt.Errorf("server: open-workspace %q session %q disappeared after transcript binding", workspace, id)
+	}
+	return automaticResumeEstablishment(rec).classify(o.Ensurer.EnsureDriveable(ctx, workspace))
 }
 
 // Close is still not exposed daemon-side: the workspacecmd channel carries no

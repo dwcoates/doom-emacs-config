@@ -3,6 +3,12 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "baseUrl": ".",
+    "paths": {
+      "@bufbuild/protobuf": ["node_modules/@bufbuild/protobuf/dist/esm/index.d.ts"],
+      "@bufbuild/protobuf/codegenv2": ["node_modules/@bufbuild/protobuf/dist/esm/codegenv2/index.d.ts"],
+      "@bufbuild/protobuf/wkt": ["node_modules/@bufbuild/protobuf/dist/esm/wkt/index.d.ts"]
+    },
     "resolveJsonModule": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "strict": true,
