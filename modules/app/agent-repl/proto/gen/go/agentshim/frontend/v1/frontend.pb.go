@@ -12154,10 +12154,12 @@ type ProgressView struct {
 	// ApiErrorLine (retries exhausted) or an errored turn end.
 	Failure *SystemFailureItem `protobuf:"bytes,19,opt,name=failure,proto3" json:"failure,omitempty"`
 	// Set when a turn's UNCACHED input cost crossed the alert threshold — the
-	// loud "this prompt re-ingested context" signal. Emacs renders it red in
-	// the center footer section; the webapp may surface it too. Persists until
-	// the next turn starts, like `failure`. Unset means the last turn was
-	// cache-efficient, which is the only reading of absence.
+	// loud "this prompt re-ingested context" signal. Rendered red in the center
+	// footer (the webapp progress footer, displayed inside the Emacs webview);
+	// Emacs additionally surfaces it in the webview window's mode line, the
+	// only footer surface native Emacs owns. Persists until the next turn
+	// starts, like `failure`. Unset means the last turn was cache-efficient,
+	// which is the only reading of absence.
 	ExpensiveTurn *ContextCostAlert `protobuf:"bytes,22,opt,name=expensive_turn,json=expensiveTurn,proto3" json:"expensive_turn,omitempty"`
 	// Counts (ephemeral, session-scoped):
 	PendingPermissions int64 `protobuf:"varint,14,opt,name=pending_permissions,json=pendingPermissions,proto3" json:"pending_permissions,omitempty"`

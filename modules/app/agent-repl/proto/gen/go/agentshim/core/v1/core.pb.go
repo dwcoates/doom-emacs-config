@@ -1588,11 +1588,13 @@ func (x *TurnClaimBridge) GetPreviousSessionId() string {
 	return ""
 }
 
-// Records one shim-performed conversation rewind: the shim retired a vendor
-// transcript, produced a truncated copy under a NEW vendor session id, and
-// resumed the SDK query there. The truncated copy is byte-identical to the
-// prefix already sent to the vendor, so the next prompt lands on the prompt
-// cache the dropped turns kept warm.
+// Records one conversation rewind. The rewind is DAEMON-ORCHESTRATED: the
+// daemon stops the shim, produces a truncated copy of the vendor transcript
+// under a NEW vendor session id, flips its registry to that id, and respawns
+// the shim resuming the copy; the respawned shim emits this event (fed the
+// lineage via argv) as its first persistent event in the new seq space. The
+// truncated copy is byte-identical to the prefix already sent to the vendor,
+// so the next prompt lands on the prompt cache the dropped turns kept warm.
 //
 // This is correlation evidence, like TurnClaimBridge — the rotation itself is
 // still ANNOUNCED by the ordinary handshake bounce (ShimHello.vendor_session_id

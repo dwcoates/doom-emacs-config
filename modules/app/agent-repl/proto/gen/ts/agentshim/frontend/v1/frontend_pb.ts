@@ -5950,10 +5950,12 @@ export type ProgressView = Message<"agentshim.frontend.v1.ProgressView"> & {
 
   /**
    * Set when a turn's UNCACHED input cost crossed the alert threshold — the
-   * loud "this prompt re-ingested context" signal. Emacs renders it red in
-   * the center footer section; the webapp may surface it too. Persists until
-   * the next turn starts, like `failure`. Unset means the last turn was
-   * cache-efficient, which is the only reading of absence.
+   * loud "this prompt re-ingested context" signal. Rendered red in the center
+   * footer (the webapp progress footer, displayed inside the Emacs webview);
+   * Emacs additionally surfaces it in the webview window's mode line, the
+   * only footer surface native Emacs owns. Persists until the next turn
+   * starts, like `failure`. Unset means the last turn was cache-efficient,
+   * which is the only reading of absence.
    *
    * @generated from field: agentshim.frontend.v1.ContextCostAlert expensive_turn = 22;
    */
