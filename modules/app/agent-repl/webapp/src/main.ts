@@ -36,7 +36,6 @@ import {
 } from "./merge-gate.js";
 import {
   HIBERNATED_BODY_CLASS,
-  HIBERNATE_ATTR,
   REVIVE_COMPACT_ATTR,
   REVIVE_DIRECT_ATTR,
   hibernationBlocked,
@@ -716,7 +715,6 @@ async function boot(): Promise<void> {
   // live or the merge lease is held, and that nack rides the ordinary
   // CommandAck failure path into a classified card — so nothing here pre-judges
   // settledness, which this end cannot resolve.
-  hibernateEl.setAttribute(HIBERNATE_ATTR, "1");
   hibernateEl.addEventListener("click", () => {
     void dispatcher.hibernateWorkspace(cmdWorkspace()).catch(consumeOwnedDispatchFailure);
   });
