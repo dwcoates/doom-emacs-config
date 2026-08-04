@@ -346,8 +346,15 @@ type Manager struct {
 	// buildBounced remembers the sessions already bounced for a stale bundle,
 	// so a shim that comes back still reporting a mismatched build (a bundle
 	// whose identity cannot move, a stamp that is wrong) is loud ONCE instead
-	// of bouncing forever.
+	// of bouncing forever. A session is entered here only after a bounce
+	// SUCCEEDED: the latch means "this session has been refreshed", never "a
+	// refresh was attempted for it".
 	buildBounced map[string]bool
+	// buildBouncing is the in-flight half of that latch: the sessions whose
+	// bounce goroutine is still running. It is what keeps a second hello
+	// arriving mid-bounce from starting a second one, a job the success latch
+	// used to do by being set too early (buildrefresh.go).
+	buildBouncing map[string]bool
 	// interruptDrain overrides the teardown drain's interrupt bound. Zero means
 	// the production constant; only a test assigns one, so the timeout branch
 	// can be driven without a ten-second wait (see turnstop.go).
@@ -576,6 +583,7 @@ func New(cfg Config) (*Manager, error) {
 		lastCSID:                  make(map[string]string),
 		shimPID:                   make(map[string]int32),
 		buildBounced:              make(map[string]bool),
+		buildBouncing:             make(map[string]bool),
 		rootCtx:                   rootCtx,
 		rootStop:                  rootStop,
 	}, nil
