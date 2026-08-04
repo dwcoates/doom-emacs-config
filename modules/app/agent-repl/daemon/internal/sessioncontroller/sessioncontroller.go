@@ -323,8 +323,18 @@ type Config struct {
 	// classifier runs under the same account as the session it is about. Nil
 	// leaves it empty, which inherits the daemon's own environment.
 	SessionConfigDir func(sessionID string) string
-	// now is the queue's clock, injected only by tests.
-	now func() int64
+	// Now is THE fleet's single clock authority, in unix milliseconds. It
+	// stamps the queue (queued_at_ms), the keep-alive window ledger, and — the
+	// reason it is exported — the hibernation transition's staleness re-check.
+	//
+	// That re-check re-derives idleness for a decision the SWEEPER took against
+	// server.Config.Now. Two clocks for one policy is two authorities: under an
+	// injected clock the sweeper measures hours idle while the gate measures
+	// milliseconds and refuses every automatic hibernation as stale. Production
+	// and every harness must therefore thread ONE clock into both fields.
+	//
+	// Nil defaults to wall clock.
+	Now func() int64
 
 	// Source yields each session's shim connection: shims dial the daemon's
 	// listening socket and the listener routes each connection to the client
@@ -660,7 +670,7 @@ func New(cfg Config) (*Manager, error) {
 		newControllerGenerationID = newSecureControllerGenerationID
 	}
 	rootCtx, rootStop := context.WithCancel(context.Background())
-	now := cfg.now
+	now := cfg.Now
 	if now == nil {
 		now = func() int64 { return time.Now().UnixMilli() }
 	}

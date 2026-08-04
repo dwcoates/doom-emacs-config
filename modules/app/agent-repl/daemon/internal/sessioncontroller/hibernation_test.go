@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
@@ -98,6 +99,77 @@ func newHibernationRig(t *testing.T) (*Manager, *fakeApplier, *fakeHibernations)
 	m.onConnected("ws", "s1", &corev1.ShimHello{})
 	applier.setCurrent("ws", &frontendv1.WorkspaceState{State: frontendv1.RenderState_RENDER_STATE_READY})
 	return m, applier, hib
+}
+
+// newClockedHibernationRig is newHibernationRig over an explicit Config.Now,
+// so a test can put the gate on the SAME injected clock the idle sweeper
+// measures with. A nil now leaves the field unset (wall clock).
+func newClockedHibernationRig(t *testing.T, now func() int64) (*Manager, *fakeHibernations) {
+	t.Helper()
+	m, _ := newClockedTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, &fakeSpawner{}, now)
+	applier := m.cfg.SSM.(*fakeApplier)
+	hib := newFakeHibernations()
+	m.cfg.Hibernations = hib
+	if err := m.Ensure("ws"); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	waitForWirings(applier, 1)
+	m.onConnected("ws", "s1", &corev1.ShimHello{})
+	applier.setCurrent("ws", &frontendv1.WorkspaceState{State: frontendv1.RenderState_RENDER_STATE_READY})
+	return m, hib
+}
+
+// ---------------------------------------------------------------------------
+// ONE CLOCK AUTHORITY. The idle sweeper decides against server.Config.Now and
+// this gate re-validates that decision; a gate reading its own clock refuses
+// every sleep the sweeper legitimately took under an injected one.
+// ---------------------------------------------------------------------------
+
+// THE GATE READS THE INJECTED CLOCK. The turn ended at real wall-clock now, so
+// a gate on its own wall clock measures ~0ms elapsed and refuses; on the
+// sweeper's clock it measures the three hours the sweeper measured and admits.
+func TestHibernateWithCauseReValidatesAgainstTheInjectedClock(t *testing.T) {
+	// Arrange.
+	lastEndMs := time.Now().UnixMilli()
+	const threeHoursMs = int64(3 * 60 * 60 * 1000)
+	m, hib := newClockedHibernationRig(t, func() int64 { return lastEndMs + threeHoursMs })
+	hib.TurnEndObserved("s1", lastEndMs)
+
+	// Act.
+	err := m.HibernateWithCause("ws", registry.HibernationDetail{
+		Cause: registry.HibernationCauseIdleCutoff, CutoffMs: 60 * 60 * 1000, ElapsedMs: threeHoursMs,
+	})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("HibernateWithCause under the sweeper's own clock = %v, want the sleep taken", err)
+	}
+}
+
+// THE WALL CLOCK IS STILL THE DEFAULT. Production leaves nothing unset, but an
+// unset seam must keep measuring real elapsed time rather than degrading to a
+// zero clock that would call every session infinitely idle.
+func TestHibernateWithCauseDefaultsToTheWallClock(t *testing.T) {
+	// Arrange — a turn that ended three hours ago in real time.
+	const threeHoursMs = int64(3 * 60 * 60 * 1000)
+	m, hib := newClockedHibernationRig(t, nil)
+	hib.TurnEndObserved("s1", time.Now().UnixMilli()-threeHoursMs)
+
+	// Act.
+	if err := m.HibernateWithCause("ws", registry.HibernationDetail{
+		Cause: registry.HibernationCauseIdleCutoff, CutoffMs: 60 * 60 * 1000, ElapsedMs: threeHoursMs,
+	}); err != nil {
+		t.Fatalf("HibernateWithCause: %v", err)
+	}
+
+	// Assert.
+	got, ok := hib.HibernationOf("s1")
+	if !ok {
+		t.Fatal("no hibernation detail was persisted")
+	}
+	if got.ElapsedMs < threeHoursMs || got.ElapsedMs > threeHoursMs+time.Minute.Milliseconds() {
+		t.Fatalf("persisted elapsed_ms = %d, want the wall-clock reading ~%d", got.ElapsedMs, threeHoursMs)
+	}
 }
 
 // ---------------------------------------------------------------------------
