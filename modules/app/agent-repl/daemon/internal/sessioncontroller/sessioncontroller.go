@@ -190,7 +190,11 @@ type sessionClient interface {
 	// It MUST NOT cause a lazy bring-up; session readiness is false until the
 	// existing live session controller can answer this probe.
 	Health(ctx context.Context, requestID string) (*corev1.HealthStatus, error)
-	SubmitPrompt(ctx context.Context, text, origin, permissionMode string, promptOrigin corev1.PromptOrigin) error
+	// SubmitPrompt hands one prompt to the shim under requestID, which the
+	// shim adopts as the turn_id of every boundary the prompt produces. A
+	// caller whose own bookkeeping is keyed by that identity — the keep-alive
+	// ping — passes it; an empty id is minted by the client.
+	SubmitPrompt(ctx context.Context, requestID, text, origin, permissionMode string, promptOrigin corev1.PromptOrigin) error
 	// Interrupt returns the shim's own verdict on what the stop did, which is
 	// the only place that verdict is observable.
 	Interrupt(ctx context.Context) (corev1.InterruptOutcome, error)
