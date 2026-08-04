@@ -38,18 +38,41 @@ type protoControl interface {
 // SubmitPrompt sends a prompt to the shim and blocks until the shim Acks or
 // Nacks it (or ctx / the AckTimeout elapses). A Nack or timeout is a loud
 // error — this layer never retries (the caller decides).
-func (c *Client) SubmitPrompt(ctx context.Context, text, origin, permissionMode string, promptOrigin corev1.PromptOrigin) error {
+//
+// requestID IS THE TURN'S IDENTITY, not merely a correlation token for the Ack.
+// The shim adopts the accepted SubmitPrompt's request_id as the turn_id it
+// stamps on TurnStarted, TurnEnded, Event.request_id and every consequence
+// derived from them (core.proto §"Turn lifecycle authority"), so whatever id
+// goes out here is the id the durable turn ledger, the keep-alive window row
+// and SessionRewound.dropped_turn_ids will all name.
+//
+// A caller that already owns that identity — the keep-alive ping, whose claim,
+// queue holds and window row are keyed by the id BEFORE the submit — passes it
+// here, and the id it published is the id the turn comes back under. Minting a
+// fresh one below would hand the same turn two names, and every match against
+// the caller's name would then fail: exactly the defect that left keep-alive
+// windows open forever and pings leaking into the live conversation.
+//
+// An empty requestID means the caller has no identity of its own for this turn
+// and one is minted (newRequestID). That is not a fallback for a failed lookup:
+// it is the honest statement that nothing daemon-side is keyed by this turn's
+// name, so any unique name will do.
+func (c *Client) SubmitPrompt(ctx context.Context, requestID, text, origin, permissionMode string, promptOrigin corev1.PromptOrigin) error {
 	if promptOrigin == corev1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED {
 		return fmt.Errorf("shimclient: submit prompt requires a non-UNSPECIFIED prompt origin")
 	}
 	if _, ok := corev1.PromptOrigin_name[int32(promptOrigin)]; !ok {
 		return fmt.Errorf("shimclient: submit prompt received unknown prompt origin %d", promptOrigin)
 	}
-	reqID, err := c.newRequestID("prompt")
-	if err != nil {
-		return err
+	reqID := requestID
+	if reqID == "" {
+		minted, err := c.newRequestID("prompt")
+		if err != nil {
+			return err
+		}
+		reqID = minted
 	}
-	_, err = c.sendAwait(ctx, &corev1.SubmitPrompt{
+	_, err := c.sendAwait(ctx, &corev1.SubmitPrompt{
 		RequestId:      reqID,
 		Text:           text,
 		Origin:         origin,

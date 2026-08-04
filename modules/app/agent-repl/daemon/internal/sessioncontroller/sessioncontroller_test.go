@@ -162,9 +162,14 @@ const testPromptOrigin = corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT
 func (l fakeLocator) Locate(ws string) (string, bool) { id, ok := l.m[ws]; return id, ok }
 
 type fakeClient struct {
-	cfg           shimclient.Config
-	mu            sync.Mutex
-	prompts       []string
+	cfg     shimclient.Config
+	mu      sync.Mutex
+	prompts []string
+	// requestIDs records the id each prompt was submitted UNDER, which the
+	// shim adopts as that turn's turn_id. It is the only place a test can see
+	// whether the daemon's own name for a prompt is the name the turn will
+	// come back with.
+	requestIDs    []string
 	origins       []string
 	promptOrigins []corev1.PromptOrigin
 	modes         []string
@@ -221,7 +226,7 @@ func (c *fakeClient) Run(ctx context.Context) error {
 	<-ctx.Done()
 	return nil
 }
-func (c *fakeClient) SubmitPrompt(_ context.Context, text, origin, mode string, promptOrigin corev1.PromptOrigin) error {
+func (c *fakeClient) SubmitPrompt(_ context.Context, requestID, text, origin, mode string, promptOrigin corev1.PromptOrigin) error {
 	c.mu.Lock()
 	hook := c.onSubmit
 	c.mu.Unlock()
@@ -236,6 +241,7 @@ func (c *fakeClient) SubmitPrompt(_ context.Context, text, origin, mode string, 
 		return err
 	}
 	c.prompts = append(c.prompts, text)
+	c.requestIDs = append(c.requestIDs, requestID)
 	c.origins = append(c.origins, origin)
 	c.promptOrigins = append(c.promptOrigins, promptOrigin)
 	c.modes = append(c.modes, mode)

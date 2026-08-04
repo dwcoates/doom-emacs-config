@@ -225,7 +225,19 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 		}
 	}
 
-	if err := d.client.SubmitPrompt(ctx, text, origin, permissionMode, promptOrigin); err != nil {
+	// THE SUBMITTED PROMPT CARRIES THE ID THE DAEMON ALREADY KEYED IT BY.
+	// The shim adopts this request id as the turn_id of the TurnStarted and
+	// TurnEnded it produces, so passing the daemon's own id is what makes the
+	// daemon's name for the prompt and the durable ledger's name for its turn
+	// ONE identity rather than two that need translating.
+	//
+	// It matters most where the daemon holds state keyed by that name before
+	// the turn exists — the keep-alive ping's claim, its queue holds, its
+	// window row and the dropped-turn list of the rewind that follows it. The
+	// client used to mint its own id here, so the ping's end boundary named a
+	// turn nothing was keyed by: the match at the boundary never fired, the
+	// window never closed, and the pings rendered as the user's own prompts.
+	if err := d.client.SubmitPrompt(ctx, requestID, text, origin, permissionMode, promptOrigin); err != nil {
 		if accepted {
 			// The `thinking` every frontend was just shown described a turn
 			// that is not going to happen, and nothing else will ever close it:

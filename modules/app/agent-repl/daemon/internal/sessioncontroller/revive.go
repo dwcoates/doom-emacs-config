@@ -2,6 +2,8 @@ package sessioncontroller
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
@@ -93,6 +95,19 @@ func (m ReviveMode) String() string {
 // held.
 var ErrRevivalInFlight = errors.New("session-controller: a revival is already in flight for this workspace")
 
+// newReviveCompactRequestID mints the identity ONE revival compaction submits
+// under. The session id is carried for readability; the random suffix is what
+// makes the id unique across the repeated hibernate/revive cycles a single
+// session goes through, and an entropy failure is surfaced rather than papered
+// over with a weaker id (newSecureControllerGenerationID's discipline).
+func newReviveCompactRequestID(sessionID string) (string, error) {
+	var raw [8]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", fmt.Errorf("session-controller: mint revive compaction request id for session %s: %w", sessionID, err)
+	}
+	return "revive-compact:" + sessionID + ":" + hex.EncodeToString(raw[:]), nil
+}
+
 // ReviveSession brings a hibernated workspace back under the user's chosen
 // mode. Synchronous, because the ack is the user's only report of whether their
 // session came back.
@@ -156,7 +171,20 @@ func (m *Manager) ReviveSession(ctx context.Context, workspace string, mode Revi
 	// is submitted as submitterRevival, which guardHibernation admits precisely
 	// so that the record can stay hibernated — and therefore keep gating the
 	// user's prompts — while the compaction runs.
-	if err := m.forwardPrompt(ctx, d, "revive-compact:"+sessionID, compactCommandText,
+	//
+	// ITS REQUEST ID IS UNIQUE PER ATTEMPT, and must be: a request id is now the
+	// submitted turn's own identity on the wire (promptdispatch.go), and the
+	// durable turn ledger refuses a second start under a name it already holds.
+	// A session hibernated and compact-revived twice would otherwise submit its
+	// second compaction under the first one's name — the same collision the
+	// durable prompt receipt, keyed by request id, would already have taken.
+	// The session id stays in the id so a log line still says which session's
+	// revival it belongs to without a lookup.
+	compactRequestID, err := newReviveCompactRequestID(sessionID)
+	if err != nil {
+		return err
+	}
+	if err := m.forwardPrompt(ctx, d, compactRequestID, compactCommandText,
 		"revive-compact:"+sessionID, "", corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, submitterRevival); err != nil {
 		m.logf("session-controller: revive COMPACTION SUBMIT FAILED ws=%q session=%s error=%v — the session STAYS GATED; it was not left half-revived and accepting prompts",
 			workspace, sessionID, err)
