@@ -23,6 +23,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/frontend"
+	"claude-repld/internal/keepalive"
 	"claude-repld/internal/login"
 	"claude-repld/internal/progress"
 	"claude-repld/internal/registry"
@@ -538,6 +539,16 @@ func main() {
 		},
 		Logf: legacyLog,
 	}
+	// THE KEEP-ALIVE POLICY IS RESOLVED AT BOOT AND FATAL ON A BAD KNOB. An
+	// operator who set AGENT_REPL_KEEPALIVE_CACHE_TTL_MS=0 meant something by
+	// it, and quietly running the shipped hour while they believe the feature
+	// is off is the failure a loud refusal exists to prevent.
+	keepAliveConfig, err := keepalive.FromEnv()
+	if err != nil {
+		daemonFatal(daemonLog, "claude-repld: %v", err)
+	}
+	legacyLog("claude-repld: cache keep-alive policy ttl=%s leeway=%s idle_cutoff=%s uncached_cost_alert=%d tokens",
+		keepAliveConfig.CacheTTL, keepAliveConfig.Leeway, keepAliveConfig.IdleCutoff, keepAliveConfig.UncachedCostAlertTokens)
 	shimSpawner := server.NewShimSpawner(sessionRegistry, shimListener.Connected, shimListener.Evict, udsSpawn, legacyLog)
 	// The respawn path must reach the create path's verdict on the resume gate
 	// for the very same session, and -fake is what that verdict turns on.
@@ -560,7 +571,18 @@ func main() {
 		PermissionModes:   server.NewRegistryModeStore(sessionRegistry),
 		Registrar:         registrar,
 		ModelCatalogs:     registrar,
-		DaemonVersion:     daemonVersion,
+		Hibernations:      registrar,
+		VendorSessions:    registrar,
+		RewindLineages:    shimSpawner,
+		KeepAlive:         keepAliveConfig,
+		VendorSessionOf: func(sessionID string) (string, bool) {
+			rec, ok := sessionRegistry.Get(sessionID)
+			if !ok || rec.ClaudeSessionID == "" {
+				return "", false
+			}
+			return rec.ClaudeSessionID, true
+		},
+		DaemonVersion: daemonVersion,
 		ProtocolVersion:   shimProtocolVersion,
 		Logf:              legacyLog,
 		// The prompt queue's classifier (E4). A queued prompt is judged by a
@@ -801,6 +823,7 @@ func main() {
 		Logins:          logins,
 		Accounts:        accounts,
 		IdleTimeout:     *idleTimeout,
+		KeepAlive:       keepAliveConfig,
 		WidgetAssetsDir: *widgetAssets,
 		DaemonAddr:      *addr,
 		Controller:      controller,

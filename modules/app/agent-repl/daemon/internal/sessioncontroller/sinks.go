@@ -396,6 +396,18 @@ type consumer struct {
 	// Called on the shim read-loop goroutine, with the same non-blocking
 	// obligation onTurn carries.
 	onTurnClaims func(activeIDs []string)
+	// onTurnEnded reports the instant an accepted turn END landed, so the
+	// controller can persist it as the keep-alive policy's measuring point.
+	// Assigned after construction, like onVendorSessionID.
+	//
+	// It is a SEPARATE callback from onTurn's idle edge because it fires on
+	// every accepted end rather than only on the active-to-idle transition: the
+	// policy measures from the newest end, and an end that produced no edge
+	// (one turn ending while another is already running) is still the newest.
+	//
+	// Called on the shim read-loop goroutine, with the same non-blocking
+	// obligation onTurn carries.
+	onTurnEnded func(atMs int64)
 	// onBackfill reports a never-blue backfill transition (F2), once per
 	// distinct state. The controller persists it and re-pushes the SessionView.
 	onBackfill func(state string)
@@ -767,6 +779,21 @@ func (c *consumer) Apply(ev *corev1.Event) error {
 	}
 	if turnResult != nil && turnResult.notify && c.onTurn != nil {
 		c.onTurn(turnResult.active)
+	}
+	// THE KEEP-ALIVE POLICY'S ONE INPUT, persisted on the accepted turn END and
+	// nowhere else. It is written HERE, after the durable ledger and the SSM
+	// have both accepted the boundary, so the instant the policy measures from
+	// is one the rest of the daemon also agrees a turn ended at.
+	//
+	// A turn ending STARTS the clock; nothing arms a timer. See
+	// registry.Record.LastTurnEndMs for why the timestamp rather than a timer
+	// is what survives a laptop sleep and a daemon bounce.
+	if te := ev.GetTurnEnded(); te != nil && c.onTurnEnded != nil {
+		at := ev.GetProducedAtMs()
+		if at == 0 {
+			at = c.now()
+		}
+		c.onTurnEnded(at)
 	}
 	// EVERY accepted boundary, edge or not: a turn that starts while another is
 	// still ending produces no edge, and a wait correlated on that turn's id

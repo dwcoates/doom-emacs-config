@@ -37,6 +37,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/frontend"
+	"claude-repld/internal/keepalive"
 	"claude-repld/internal/login"
 	"claude-repld/internal/protocol"
 	"claude-repld/internal/registry"
@@ -209,6 +210,13 @@ type Server struct {
 	// idleSweepTicks drives the sweeper; tests inject a channel so the sweep
 	// runs on demand rather than on a wall clock.
 	idleSweepTicks <-chan time.Time
+	// keepAlive is the cache keep-alive policy the sweeper evaluates on every
+	// tick, beside its own idle gate. It rides the SWEEPER rather than a timer
+	// of its own because the sweeper is already the daemon's only hibernation
+	// initiator and already computes wall-clock-now minus a durable timestamp;
+	// a second scheduler would be a second answer to "how long has this
+	// workspace been quiet".
+	keepAlive keepalive.Config
 	// stopped is closed by ShutdownAll, ending the sweeper goroutine.
 	stopped  chan struct{}
 	stopOnce sync.Once
@@ -257,6 +265,10 @@ type Config struct {
 	// Accounts is the canonical account roster (the -accounts flag). Empty
 	// disables GET /accounts.
 	Accounts []Account
+	// KeepAlive is the cache keep-alive policy. The zero value takes
+	// keepalive.DefaultConfig: a zero TTL would read every session as already
+	// cache-expired and hibernate the whole fleet on the first tick.
+	KeepAlive keepalive.Config
 	// IdleTimeout is how long a session may go without a turn before the
 	// sweeper hibernates its shim. Zero disables hibernation.
 	IdleTimeout time.Duration
@@ -308,7 +320,8 @@ func New(cfg Config) *Server {
 		tokenUsage:      cfg.TokenUsage,
 		idleTimeout:     cfg.IdleTimeout,
 		idleSweepTicks:  cfg.IdleSweepTicks,
-		stopped:         make(chan struct{}),
+		keepAlive:       cfg.KeepAlive,
+		stopped: make(chan struct{}),
 		upgrader: websocket.Upgrader{
 			// The daemon is a local-loopback developer tool; the Emacs
 			// xwidget origin is file-/app-scoped, so origin checks are
@@ -1579,6 +1592,12 @@ func (s *Server) runIdleSweeper() {
 		if interval <= 0 {
 			interval = s.idleTimeout
 		}
+		// THE TICK MUST FIT INSIDE THE PING WINDOW. That window is exactly one
+		// leeway wide, so a sweep slower than it could step straight over the
+		// only moment a ping is both due and still useful — and the session
+		// would silently fall through to the cache-expired branch every time.
+		// The keep-alive config tightens the interval and never loosens it.
+		interval = s.keepAliveConfig().SweepInterval(interval)
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		ticks = ticker.C
@@ -1607,6 +1626,15 @@ func (s *Server) sweepIdle() {
 		if rec.Terminal || rec.CWD == "" {
 			continue
 		}
+		// THE KEEP-ALIVE POLICY IS EVALUATED FIRST, and it can take the whole
+		// decision for this session. Its hibernate branches are strictly more
+		// specific than the idle sweep's — they carry the cutoff or the TTL
+		// that tripped — so letting the generic sweep reach a session the
+		// policy has already spoken about would replace a stated reason with an
+		// unstated one.
+		if s.applyKeepAlivePolicy(rec, nowMs) {
+			continue
+		}
 		if !s.sweepable(rec.SessionID, rec.CWD, nowMs) {
 			continue
 		}
@@ -1623,6 +1651,92 @@ func (s *Server) sweepIdle() {
 				s.logf("session %s: idle sweep skipped (ws %s): %v", rec.SessionID, rec.CWD, err)
 			}
 		}
+	}
+}
+
+// keepAliveConfig is the resolved policy, defaulting a zero Config rather than
+// running one whose zero TTL reads every session as already cache-expired.
+func (s *Server) keepAliveConfig() keepalive.Config {
+	if s.keepAlive.CacheTTL <= 0 {
+		return keepalive.DefaultConfig()
+	}
+	return s.keepAlive
+}
+
+// applyKeepAlivePolicy takes the cache keep-alive decision for one session and
+// reports whether it OWNS this session's outcome for this tick.
+//
+// IT IS A TIME-SINCE CHECK AND NOTHING ELSE. The only input is the durably
+// persisted last-turn-end instant, compared against wall-clock now. There is no
+// timer to miss, no state to drift, and no difference between "the daemon was
+// running the whole time" and "the laptop slept through the window" — the
+// second case simply produces a larger elapsed and therefore a different, and
+// correct, decision.
+//
+// A HIBERNATED SESSION IS ALREADY OUT. It has no live controller to ping and no
+// second sleep to take, so it is claimed here and left alone: letting it fall
+// through to the idle sweep would mean re-hibernating a sleeping session on
+// every tick forever.
+func (s *Server) applyKeepAlivePolicy(rec registry.Record, nowMs int64) (owned bool) {
+	if s.controller == nil {
+		return false
+	}
+	if rec.Hibernated {
+		return true
+	}
+	cfg := s.keepAliveConfig()
+	decision := cfg.Evaluate(nowMs, rec.LastTurnEndMs)
+	switch decision.Action {
+	case keepalive.ActionPing:
+		// The submit RE-CHECKS eligibility under the manager mutex; this tick's
+		// reading of the registry is already stale by the time it can be acted
+		// on, and only the mutex can make the check and the submit one act.
+		if _, err := s.controller.SubmitKeepAlivePing(context.Background(), rec.CWD); err != nil {
+			if errors.Is(err, sessioncontroller.ErrKeepAliveNotEligible) {
+				// The overwhelmingly common outcome: no live controller, a turn
+				// in flight, prompts queued. Not a failure.
+				return true
+			}
+			s.logf("session %s: cache keep-alive ping FAILED (ws %s) elapsed_ms=%d retryable=%v: %v",
+				rec.SessionID, rec.CWD, decision.ElapsedMs, decision.Retryable, err)
+			if !decision.Retryable {
+				s.logf("session %s: cache keep-alive will NOT be retried (ws %s): the remaining margin before the cache expires is inside the retry floor, so another attempt would more likely pay a full re-ingest than save one",
+					rec.SessionID, rec.CWD)
+			}
+		}
+		return true
+	case keepalive.ActionHibernate:
+		detail := registry.HibernationDetail{
+			Cause:   decision.Cause,
+			SinceMs: nowMs,
+		}
+		switch decision.Cause {
+		case keepalive.CauseIdleCutoff:
+			detail.CutoffMs = int64(cfg.IdleCutoff / time.Millisecond)
+			s.logf("session %s: hibernating on the IDLE CUTOFF (ws %s): quiet for %s, cutoff %s — the keep-alive loop reached its configured maximum, so pinging stops and the session sleeps in the same transition",
+				rec.SessionID, rec.CWD, (time.Duration(decision.ElapsedMs) * time.Millisecond).Round(time.Second), cfg.IdleCutoff)
+		case keepalive.CauseCacheExpired:
+			detail.ElapsedMs = decision.ElapsedMs
+			detail.TTLMs = int64(cfg.CacheTTL / time.Millisecond)
+			s.logf("session %s: hibernating because the PROMPT CACHE EXPIRED before a ping could fire (ws %s): quiet for %s against a %s TTL — a laptop sleep or daemon downtime carried the session past the window, and pinging a cold cache would pay a full context re-ingest for nobody, so the discovery IS the hibernation",
+				rec.SessionID, rec.CWD, (time.Duration(decision.ElapsedMs) * time.Millisecond).Round(time.Second), cfg.CacheTTL)
+		}
+		if err := s.controller.HibernateWithCause(rec.CWD, detail); err != nil {
+			switch {
+			case errors.Is(err, sessioncontroller.ErrNotSettled):
+				s.logf("session %s: keep-alive hibernation HELD (ws %s cause %s): the workspace started working between the check and the teardown: %v",
+					rec.SessionID, rec.CWD, decision.Cause, err)
+			case errors.Is(err, sessioncontroller.ErrAlreadyHibernated),
+				errors.Is(err, sessioncontroller.ErrHibernationInFlight):
+				// Another cause won the single-transition claim. Expected.
+			default:
+				s.logf("session %s: keep-alive hibernation skipped (ws %s cause %s): %v",
+					rec.SessionID, rec.CWD, decision.Cause, err)
+			}
+		}
+		return true
+	default:
+		return false
 	}
 }
 
