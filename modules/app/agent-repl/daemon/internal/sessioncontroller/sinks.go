@@ -360,7 +360,13 @@ type consumer struct {
 	// Called on the shim read-loop goroutine, so the handler must not block on
 	// anything that needs that loop to make progress — notably an Ack-awaiting
 	// send back to the same shim.
-	onTurn func(active bool)
+	//
+	// atMs is the BOUNDARY'S OWN INSTANT — the event's produced_at_ms — not the
+	// moment the handler runs. Anything the queue stamps from a boundary (the
+	// keep-alive window's closing edge) has to agree with the timestamps the
+	// vendor wrote on the transcript records that boundary bounds, and a clock
+	// read taken at handling time is a different, later, unrelated instant.
+	onTurn func(active bool, atMs int64)
 	// onTurnEvent reports EVERY accepted turn boundary WITH THE TURN'S OWN ID,
 	// where onTurn above reports only the active/idle EDGES the queue drains on.
 	// Assigned after construction, like onVendorSessionID.
@@ -396,6 +402,34 @@ type consumer struct {
 	// Called on the shim read-loop goroutine, with the same non-blocking
 	// obligation onTurn carries.
 	onTurnClaims func(activeIDs []string)
+	// onTurnEnded reports the instant an accepted turn END landed, so the
+	// controller can persist it as the keep-alive policy's measuring point.
+	// Assigned after construction, like onVendorSessionID.
+	//
+	// It is a SEPARATE callback from onTurn's idle edge because it fires on
+	// every accepted end rather than only on the active-to-idle transition: the
+	// policy measures from the newest end, and an end that produced no edge
+	// (one turn ending while another is already running) is still the newest.
+	//
+	// Called on the shim read-loop goroutine, with the same non-blocking
+	// obligation onTurn carries.
+	onTurnEnded func(atMs int64)
+	// onContextCompacted reports that a compaction COMPLETED — the compacting
+	// axis closing, which is the only first-class report the vendor gives.
+	// A compact-first revival waits on it before it will accept prompts.
+	// Assigned after construction, like onVendorSessionID.
+	onContextCompacted func()
+	// contextCompactedToken identifies WHICH revival installed the waiter
+	// above. Funcs are not comparable, so a disarm has no other way to tell
+	// its own waiter from a later one, and clearing whatever it happens to
+	// find would retire a revival that is still waiting.
+	contextCompactedToken *struct{}
+	// keepAliveWindows is the durable ledger the keep-alive exclusion reads
+	// (keepaliveexclude.go). Nil is the exclusion OFF.
+	keepAliveWindows KeepAliveWindowLedger
+	// turnSuperseders closes the claims of turns a rewind discarded
+	// (sessionrewound.go).
+	turnSuperseders TurnClaimSuperseder
 	// onBackfill reports a never-blue backfill transition (F2), once per
 	// distinct state. The controller persists it and re-pushes the SessionView.
 	onBackfill func(state string)
@@ -474,7 +508,7 @@ type consumer struct {
 	onHistoricalUsagePersisted func()
 }
 
-func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier, prog ProgressResolver, floors ClearCompactStore, accountingStore TurnAccountingStore, logf func(string, ...any), onSessionStarted func(*corev1.SessionStarted), onTurn func(active bool), onBackfill func(state string), onSystemInit func(*datav1.SystemInit), onSessionEnded func()) *consumer {
+func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier, prog ProgressResolver, floors ClearCompactStore, accountingStore TurnAccountingStore, logf func(string, ...any), onSessionStarted func(*corev1.SessionStarted), onTurn func(active bool, atMs int64), onBackfill func(state string), onSystemInit func(*datav1.SystemInit), onSessionEnded func()) *consumer {
 	if accountingStore == nil {
 		panic("session-controller: newConsumer needs a TurnAccountingStore")
 	}
@@ -766,7 +800,18 @@ func (c *consumer) Apply(ev *corev1.Event) error {
 		c.onSessionStarted(ss)
 	}
 	if turnResult != nil && turnResult.notify && c.onTurn != nil {
-		c.onTurn(turnResult.active)
+		c.onTurn(turnResult.active, c.boundaryInstant(ev))
+	}
+	// THE KEEP-ALIVE POLICY'S ONE INPUT, persisted on the accepted turn END and
+	// nowhere else. It is written HERE, after the durable ledger and the SSM
+	// have both accepted the boundary, so the instant the policy measures from
+	// is one the rest of the daemon also agrees a turn ended at.
+	//
+	// A turn ending STARTS the clock; nothing arms a timer. See
+	// registry.Record.LastTurnEndMs for why the timestamp rather than a timer
+	// is what survives a laptop sleep and a daemon bounce.
+	if te := ev.GetTurnEnded(); te != nil && c.onTurnEnded != nil {
+		c.onTurnEnded(c.boundaryInstant(ev))
 	}
 	// EVERY accepted boundary, edge or not: a turn that starts while another is
 	// still ending produces no edge, and a wait correlated on that turn's id
@@ -1121,6 +1166,14 @@ func (c *consumer) noteCutCompleted(ev *corev1.Event) {
 		err = c.ssm.ApplyClearing(c.workspace, false, "context_cleared")
 	case *corev1.Event_ContextCompacted:
 		err = c.ssm.ApplyCompacting(c.workspace, false, "context_compacted")
+		// A compact-first revival is waiting on exactly this event. The
+		// compacting axis closing IS the completion signal — there is no other
+		// first-class report that a compaction finished — so the revival's gate
+		// is released from here rather than from a turn end, which would also
+		// fire for a compaction that failed.
+		if c.onContextCompacted != nil {
+			c.onContextCompacted()
+		}
 	}
 	if err != nil {
 		c.logf("session-controller: closing the context-cut axis FAILED session=%s ws=%s seq=%d kind=%s: %v (the workspace may hold its phase word until the next bounding edge)",
@@ -1417,6 +1470,17 @@ func (c *consumer) pushConversation(ev *corev1.Event, live bool) {
 	// line closing a turn nothing was asked of — goes no further either
 	// (noresponse.go).
 	c.withholdNoResponsePlaceholders(cd)
+	// The daemon's own cache keep-alive turns, withheld from every rendering
+	// off the durable window ledger (keepaliveexclude.go). Same "withheld, not
+	// deleted" discipline as the two above, and placed with them so all three
+	// exclusions run at the one chokepoint every replay route funnels through.
+	//
+	// A delta emptied by this exclusion is still PUSHED, exactly as one emptied
+	// by the two above is. The frame carries through_seq, which is the
+	// frontend's replay cursor: swallowing it would leave every client's cursor
+	// stuck behind the ping forever, and the next resync would re-deliver the
+	// whole conversation from before it.
+	c.withholdKeepAlive(cd)
 	// PROVENANCE, AFTER EVERY CURATION AND BEFORE THE PUSH. The curators above
 	// rebuild items (skillbody.go mints a fresh SkillBodyItem from the record it
 	// consumed), so stamping earlier would leave a rebuilt item carrying the
@@ -1597,6 +1661,30 @@ func (c *consumer) degradedUUID(component string) string {
 // same card instead of stacking a second account of one failure.
 func (c *consumer) startFailedUUID() string {
 	return "start_failed:" + c.sessionID
+}
+
+// boundaryInstant is the instant a lifecycle event says it happened at, which
+// is the ONE instant every consumer of that boundary must agree on: the
+// keep-alive policy's clock, the keep-alive window's closing edge, and the
+// durable last-turn-end stamp all measure from the same fact.
+//
+// The fallback to now() is the honest reading of an event that carried no
+// instant — the boundary really was observed, and dropping it because a field
+// was unset would lose the fact entirely — and it is the same fallback the
+// last-turn-end stamp has always used.
+func (c *consumer) boundaryInstant(ev *corev1.Event) int64 {
+	if at := ev.GetProducedAtMs(); at != 0 {
+		return at
+	}
+	return c.now()
+}
+
+// keepAliveWindowUnclosedUUID is the stable card identity for ONE ping's
+// unclosed window. Keyed by turn id rather than by session so two different
+// stranded windows are two different cards: each names a distinct row that has
+// to be repaired, and collapsing them would hide the second one.
+func (c *consumer) keepAliveWindowUnclosedUUID(turnID string) string {
+	return "keep_alive_window_unclosed:" + c.sessionID + ":" + turnID
 }
 
 // resync replays the retained conversation deltas from fromSeq (0 = from the
