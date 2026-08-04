@@ -35,12 +35,18 @@
 
 (defun agent-repl-test--cost-alert (&optional origin)
   "Return a `ContextCostAlert' plist, protojson-shaped, with ORIGIN.
-int64 fields are STRINGS, which is how protojson renders them."
+int64 fields are STRINGS, which is how protojson renders them.
+
+ORIGIN defaults to an ordinary user-prompt attribution rather than to
+absence: the origin is REQUIRED by the contract, so a fixture without one
+would be modelling a frame the daemon never sends.  Pass the symbol
+`omit' to build the missing-origin case on purpose."
   (append (list :turnId "t_1"
                 :uncachedInputTokens "45000"
                 :thresholdTokens "20000"
                 :atMs "1750000000000")
-          (when origin (list :promptOrigin origin))))
+          (cond ((eq origin 'omit) nil)
+                (t (list :promptOrigin (or origin "PROMPT_ORIGIN_USER_SENT"))))))
 
 (defun agent-repl-test--cost-progress (workspace &optional alert)
   "Return a `ProgressView' plist for WORKSPACE carrying ALERT, or none."
@@ -188,13 +194,14 @@ daemon config the frontend must not know on its own."
     (should (string-match-p "threshold 20000"
                             (agent-repl--context-cost-text "ws1")))))
 
-(ert-deftest agent-repl-test-context-cost-text-is-generic-without-an-origin ()
-  "An alert with no keep-alive origin does NOT claim the cache went cold."
+(ert-deftest agent-repl-test-context-cost-text-is-generic-for-a-user-origin ()
+  "An alert whose origin is an ordinary user prompt does NOT claim a cold cache."
   ;; Arrange
   (agent-repl-test--with-cost-state
     (agent-repl--ws-put "ws1" :project-dir "/w")
     (agent-repl--context-cost-apply
-     (agent-repl-test--cost-progress "/w" (agent-repl-test--cost-alert)))
+     (agent-repl-test--cost-progress
+      "/w" (agent-repl-test--cost-alert "PROMPT_ORIGIN_USER_SENT")))
     ;; Act / Assert
     (should-not (string-match-p "keep-alive"
                                 (agent-repl--context-cost-text "ws1")))))
@@ -213,18 +220,83 @@ reporting that the cache was ALREADY cold."
     (should (string-match-p "keep-alive hit a cold cache"
                             (agent-repl--context-cost-text "ws1")))))
 
-(ert-deftest agent-repl-test-context-cost-text-reads-a-numeric-origin ()
-  "A numerically-encoded enum reaches the keep-alive wording too.
-Reading only the name would silently downgrade the loudest alarm here to
-the generic message against a client that emits numbers."
+;;;; ---- The origin is decoded, never guessed ------------------------------
+
+(ert-deftest agent-repl-test-context-cost-apply-rejects-a-missing-origin ()
+  "An alert carrying no `promptOrigin' signals rather than rendering generic.
+Falling through to the generic message would silently downgrade the
+louder of the two alarms this module renders."
   ;; Arrange
   (agent-repl-test--with-cost-state
     (agent-repl--ws-put "ws1" :project-dir "/w")
-    (agent-repl--context-cost-apply
-     (agent-repl-test--cost-progress "/w" (agent-repl-test--cost-alert 29)))
     ;; Act / Assert
-    (should (string-match-p "keep-alive hit a cold cache"
-                            (agent-repl--context-cost-text "ws1")))))
+    (should-error
+     (agent-repl--context-cost-apply
+      (agent-repl-test--cost-progress "/w" (agent-repl-test--cost-alert 'omit))))))
+
+(ert-deftest agent-repl-test-context-cost-apply-rejects-a-nil-origin ()
+  "An explicit JSON null origin decodes to nil and is refused, not read as generic."
+  ;; Arrange
+  (agent-repl-test--with-cost-state
+    (agent-repl--ws-put "ws1" :project-dir "/w")
+    (let ((alert (plist-put (copy-sequence (agent-repl-test--cost-alert))
+                            :promptOrigin nil)))
+      ;; Act / Assert
+      (should-error
+       (agent-repl--context-cost-apply
+        (agent-repl-test--cost-progress "/w" alert))))))
+
+(ert-deftest agent-repl-test-context-cost-apply-rejects-a-numeric-origin ()
+  "A numerically-encoded enum is refused: this frontend reads protojson NAMES.
+Accepting the number forced a second, hand-maintained declaration of the
+enum's integer value beside the proto that already owns it."
+  ;; Arrange
+  (agent-repl-test--with-cost-state
+    (agent-repl--ws-put "ws1" :project-dir "/w")
+    ;; Act / Assert
+    (should-error
+     (agent-repl--context-cost-apply
+      (agent-repl-test--cost-progress "/w" (agent-repl-test--cost-alert 29))))))
+
+(ert-deftest agent-repl-test-context-cost-apply-rejects-an-unprefixed-origin ()
+  "An origin that is not a `PROMPT_ORIGIN_' name is refused, not read as generic."
+  ;; Arrange
+  (agent-repl-test--with-cost-state
+    (agent-repl--ws-put "ws1" :project-dir "/w")
+    ;; Act / Assert
+    (should-error
+     (agent-repl--context-cost-apply
+      (agent-repl-test--cost-progress "/w" (agent-repl-test--cost-alert "cache_keep_alive"))))))
+
+(ert-deftest agent-repl-test-context-cost-apply-logs-a-rejected-origin ()
+  "A refused origin reaches the canonical log with its workspace and turn."
+  ;; Arrange
+  (agent-repl-test--with-cost-state
+    (agent-repl--ws-put "ws1" :project-dir "/w")
+    (let (logged)
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+        ;; Act
+        (ignore-errors
+          (agent-repl--context-cost-apply
+           (agent-repl-test--cost-progress
+            "/w" (agent-repl-test--cost-alert 'omit))))
+        ;; Assert
+        (should (cl-some (lambda (l)
+                           (string-match-p "REJECTED ws=ws1 turn=t_1 promptOrigin=" l))
+                         logged))))))
+
+(ert-deftest agent-repl-test-context-cost-apply-records-nothing-for-a-bad-origin ()
+  "A refused origin leaves no partial entry behind."
+  ;; Arrange
+  (agent-repl-test--with-cost-state
+    (agent-repl--ws-put "ws1" :project-dir "/w")
+    ;; Act
+    (ignore-errors
+      (agent-repl--context-cost-apply
+       (agent-repl-test--cost-progress "/w" (agent-repl-test--cost-alert 'omit))))
+    ;; Assert
+    (should (zerop (hash-table-count agent-repl--context-cost-alerts)))))
 
 ;;;; ---- The footer segment ------------------------------------------------
 
@@ -308,6 +380,35 @@ alarm's absence has exactly one reading."
       ;; Assert
       (should (= 1 (cl-count agent-repl--context-cost-mode-line-spec
                              mode-line-format :test #'equal))))))
+
+;;;; ---- The vocabulary matches the generated proto ------------------------
+;;
+;; This file hand-declares one protocol spelling.  Until the frontends
+;; consume a generated constants module, drift is caught HERE: the name is
+;; checked against the checked-in generated bindings, so a proto rename that
+;; this file did not follow fails the suite instead of silently downgrading
+;; the cold-cache alarm at runtime.
+
+(ert-deftest agent-repl-test-context-cost-keep-alive-origin-matches-the-proto ()
+  "The keep-alive origin name is spelled exactly as the generated enum spells it."
+  ;; Arrange
+  (let ((generated (agent-repl-test--generated-enum-names
+                    "agentshim/core/v1/core.pb.go" "PROMPT_ORIGIN_")))
+    ;; Act / Assert
+    (should (member agent-repl--context-cost-keep-alive-origin generated))))
+
+(ert-deftest agent-repl-test-context-cost-origin-prefix-matches-the-proto ()
+  "Every generated `PromptOrigin' name carries the prefix this file gates on.
+A prefix that had drifted would refuse origins the daemon legitimately
+sends."
+  ;; Arrange
+  (let ((generated (agent-repl-test--generated-enum-names
+                    "agentshim/core/v1/core.pb.go" "PROMPT_ORIGIN_")))
+    ;; Act / Assert
+    (should generated)
+    (should (cl-every (lambda (name)
+                        (string-prefix-p agent-repl--context-cost-origin-prefix name))
+                      generated))))
 
 (provide 'test-context-cost)
 ;;; test-context-cost.el ends here
