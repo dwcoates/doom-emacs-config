@@ -239,6 +239,7 @@ func (w *shutdownWorld) bootRecordingStops(t *testing.T) *stopCauseBoot {
 		FileDiagnostics:   fileDiagnostics,
 		SeqStore:          seqStore,
 		ClearCompactStore: seqStore,
+		TurnAccountings:   newTestTurnAccountingStore(),
 		ShutdownHolds:     shutdownSchedules,
 		PermissionModes:   server.NewRegistryModeStore(reg),
 		Registrar:         registrar,
