@@ -3,6 +3,7 @@ package sessioncontroller
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
@@ -59,6 +60,7 @@ type fakeKeepAliveWindows struct {
 	opened   []KeepAliveWindowRecord
 	closed   map[string]int64
 	openErr  error
+	closeErr error
 	coverAll bool
 }
 
@@ -75,6 +77,9 @@ func (f *fakeKeepAliveWindows) Open(w KeepAliveWindowRecord) error {
 }
 
 func (f *fakeKeepAliveWindows) Close(turnID string, endedAtMs int64) error {
+	if f.closeErr != nil {
+		return f.closeErr
+	}
 	f.closed[turnID] = endedAtMs
 	return nil
 }
@@ -451,6 +456,220 @@ func TestReleaseKeepAliveHoldLeavesOtherHoldsAlone(t *testing.T) {
 	if released != 0 || !q.entries[0].keepAliveHeld() {
 		t.Fatalf("released=%d held=%v, want another ping's hold untouched", released, q.entries[0].keepAliveHeld())
 	}
+}
+
+// ---------------------------------------------------------------------------
+// The window's closing edge
+// ---------------------------------------------------------------------------
+
+// errPingSubmitFailed stands in for a shim that refuses the ping's submit.
+var errPingSubmitFailed = errors.New("the shim refused the submit")
+
+// A PING WHOSE SUBMIT FAILS CLOSES ITS OWN WINDOW. The Open that preceded the
+// submit and this Close are one acquire/release pair: leaving the window open
+// would exclude every later item on the workspace forever, over a ping that
+// never even reached the shim.
+func TestFailedKeepAlivePingClosesItsWindow(t *testing.T) {
+	// Arrange.
+	m, _, windows := keepAliveRig(t)
+	fakeClientFor(t, m, "ws").submitErrOnce = errPingSubmitFailed
+
+	// Act.
+	if _, err := m.SubmitKeepAlivePing(context.Background(), "ws"); err == nil {
+		t.Fatal("SubmitKeepAlivePing with a refused submit = nil, want the failure surfaced")
+	}
+
+	// Assert.
+	if len(windows.opened) != 1 {
+		t.Fatalf("opened windows = %+v, want exactly one", windows.opened)
+	}
+	if _, closed := windows.closed[windows.opened[0].TurnID]; !closed {
+		t.Fatal("the window is still open after the ping failed; it would withhold every later item on this workspace forever")
+	}
+}
+
+// AN ABANDONED PING'S WINDOW CLOSES AT ITS OWN START. Nothing ran inside it, so
+// the honest interval is the instant the daemon committed to the ping — a
+// later end would exclude conversation the ping never produced.
+func TestFailedKeepAlivePingClosesItsWindowAtItsStart(t *testing.T) {
+	// Arrange.
+	m, _, windows := keepAliveRig(t)
+	fakeClientFor(t, m, "ws").submitErrOnce = errPingSubmitFailed
+
+	// Act.
+	if _, err := m.SubmitKeepAlivePing(context.Background(), "ws"); err == nil {
+		t.Fatal("SubmitKeepAlivePing with a refused submit = nil, want the failure surfaced")
+	}
+
+	// Assert.
+	opened := windows.opened[0]
+	if got := windows.closed[opened.TurnID]; got != opened.StartedAtMs {
+		t.Fatalf("ended_at_ms = %d, want the window's own start %d", got, opened.StartedAtMs)
+	}
+}
+
+// A PROMPT HELD BEHIND A PING WHOSE SUBMIT FAILS IS RELEASED, not stranded. Its
+// hold names a turn id nothing will ever end — the sole ordinary release is the
+// ping's own turn boundary — so the claim's release and the holds' release have
+// to be the same operation.
+func TestFailedKeepAlivePingReleasesThePromptsHeldBehindIt(t *testing.T) {
+	// Arrange: a real prompt arrives INSIDE the ping's submit, which is the
+	// exact window in which the claim is published and the ping is not yet
+	// known to have failed.
+	m, _, _ := keepAliveRig(t)
+	c := fakeClientFor(t, m, "ws")
+	var once sync.Once
+	c.submitErrOnce = errPingSubmitFailed
+	c.onSubmit = func() {
+		once.Do(func() {
+			if err := m.SubmitPrompt(context.Background(), "ws", "req-1", "real work", "",
+				corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+				t.Errorf("SubmitPrompt during the ping: %v", err)
+			}
+		})
+	}
+
+	// Act.
+	if _, err := m.SubmitKeepAlivePing(context.Background(), "ws"); err == nil {
+		t.Fatal("SubmitKeepAlivePing with a refused submit = nil, want the failure surfaced")
+	}
+
+	// Assert.
+	waitFor(t, "the released prompt to reach the shim", func() bool {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		for _, p := range c.prompts {
+			if p == "real work" {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+// THE CLAIM AND THE HOLDS GO TOGETHER on every abandonment. A claim cleared
+// without its holds leaves prompts naming a turn that will never end, waiting
+// for a boundary that is never coming.
+func TestAbandonKeepAlivePingReleasesTheClaimAndItsHoldsTogether(t *testing.T) {
+	// Arrange: a turn is running, so the released entry stays in the queue
+	// rather than being delivered out from under the assertion.
+	m, _, _ := keepAliveRig(t)
+	m.mu.Lock()
+	d := m.byWS["ws"]
+	d.keepAliveTurnID = "ka_1"
+	d.turn = turnRecord{phase: turnPhaseNamed, turnID: "t1"}
+	d.queue.add(&queueEntry{
+		id: "q1", keepAliveHoldTurnID: "ka_1",
+		classification: frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD,
+	})
+	m.mu.Unlock()
+
+	// Act.
+	released := m.abandonKeepAlivePing(d, "ka_1")
+
+	// Assert.
+	if released != 1 {
+		t.Fatalf("released %d hold(s), want 1", released)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if d.keepAliveTurnID != "" {
+		t.Fatalf("the claim is still %q after the ping was abandoned", d.keepAliveTurnID)
+	}
+	if d.queue.entries[0].keepAliveHeld() {
+		t.Fatal("the prompt is still held behind a ping that will never end")
+	}
+}
+
+// A HOLD NAMING ANOTHER PING SURVIVES an abandonment: one ping's failure must
+// not free a prompt a different, live ping still owns.
+func TestAbandonKeepAlivePingLeavesAnotherPingsHoldAlone(t *testing.T) {
+	// Arrange.
+	m, _, _ := keepAliveRig(t)
+	m.mu.Lock()
+	d := m.byWS["ws"]
+	d.turn = turnRecord{phase: turnPhaseNamed, turnID: "t1"}
+	d.queue.add(&queueEntry{id: "q1", keepAliveHoldTurnID: "ka_other"})
+	m.mu.Unlock()
+
+	// Act.
+	released := m.abandonKeepAlivePing(d, "ka_1")
+
+	// Assert.
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if released != 0 || !d.queue.entries[0].keepAliveHeld() {
+		t.Fatalf("released=%d held=%v, want another ping's hold untouched",
+			released, d.queue.entries[0].keepAliveHeld())
+	}
+}
+
+// THE WINDOW CLOSES AT THE BOUNDARY'S OWN INSTANT, not at a clock read taken
+// while handling it. The bound is compared against vendor-authored record
+// timestamps, so a daemon clock running ahead would keep excluding after the
+// ping was over and swallow the leading edge of the user's next real turn.
+func TestKeepAliveWindowClosesAtTheBoundarysOwnInstant(t *testing.T) {
+	// Arrange.
+	m, _, windows := keepAliveRig(t)
+	turnID, err := m.SubmitKeepAlivePing(context.Background(), "ws")
+	if err != nil {
+		t.Fatalf("SubmitKeepAlivePing: %v", err)
+	}
+	m.mu.Lock()
+	d := m.byWS["ws"]
+	d.turn = turnRecord{phase: turnPhaseNamed, turnID: turnID}
+	m.mu.Unlock()
+
+	// Act.
+	const endedAtMs int64 = 1_700_000_000_123
+	m.onTurnBoundary(d, false, endedAtMs)
+
+	// Assert.
+	if got := windows.closed[turnID]; got != endedAtMs {
+		t.Fatalf("ended_at_ms = %d, want the boundary's own instant %d", got, endedAtMs)
+	}
+}
+
+// A CLOSE THAT FAILS IS A NAMED FAILURE, not a log line. The row stays open and
+// withholds the workspace's whole conversation from here on; a user watching
+// their next prompt vanish has no other way to learn why.
+func TestKeepAliveWindowCloseFailureSurfacesANamedFailure(t *testing.T) {
+	// Arrange.
+	m, _, windows := keepAliveRig(t)
+	turnID, err := m.SubmitKeepAlivePing(context.Background(), "ws")
+	if err != nil {
+		t.Fatalf("SubmitKeepAlivePing: %v", err)
+	}
+	windows.closeErr = errors.New("state store is unavailable")
+	m.mu.Lock()
+	d := m.byWS["ws"]
+	d.turn = turnRecord{phase: turnPhaseNamed, turnID: turnID}
+	m.mu.Unlock()
+
+	// Act.
+	m.onTurnBoundary(d, false, 1_700_000_000_123)
+
+	// Assert.
+	if !pushedFailureType(m, string(errclass.TypeKeepAliveWindowUnclosed)) {
+		t.Fatalf("no %s failure reached the frontend; a permanent rendering blackout was left silent",
+			errclass.TypeKeepAliveWindowUnclosed)
+	}
+}
+
+// pushedFailureType reports whether any pushed conversation item carries a
+// system failure of the given error type.
+func pushedFailureType(m *Manager, errorType string) bool {
+	p := m.cfg.Push.(*fakePusher)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, cd := range p.convo {
+		for _, item := range cd.GetItems() {
+			if item.GetSystemFailure().GetErrorType() == errorType {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // countingReceipts counts durable prompt-receipt writes.
