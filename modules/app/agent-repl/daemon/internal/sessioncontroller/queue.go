@@ -172,6 +172,38 @@ func (q *promptQueue) popFrontDeliverable() *queueEntry {
 	return nil
 }
 
+// keepAliveHeldIDs reports the ids of every entry held behind turnID, front to
+// back. Ids rather than pointers because the caller acts on them after
+// releasing the mutex, and an entry can be cancelled in between — a stale
+// pointer would be a prompt the user took back, delivered anyway.
+func (q *promptQueue) keepAliveHeldIDs(turnID string) []string {
+	var out []string
+	for _, e := range q.entries {
+		if e.keepAliveHoldTurnID == turnID {
+			out = append(out, e.id)
+		}
+	}
+	return out
+}
+
+// releaseKeepAliveHold clears turnID's hold from every entry carrying it and
+// reports how many were released.
+func (q *promptQueue) releaseKeepAliveHold(turnID string) int {
+	n := 0
+	for _, e := range q.entries {
+		if e.keepAliveHoldTurnID == turnID {
+			e.keepAliveHoldTurnID = ""
+			// The HOLD stamp was standing in for a classification that never
+			// ran. With the hold gone the entry is an ordinary queued prompt
+			// about to be delivered, and leaving it stamped HOLD would render a
+			// chip claiming it is still waiting on something.
+			e.classification = frontendv1.QueueClassification_QUEUE_CLASSIFICATION_PENDING
+			n++
+		}
+	}
+	return n
+}
+
 // drainHeldCount reports how many entries the drain lease is parking.
 func (q *promptQueue) drainHeldCount() int {
 	n := 0
@@ -524,6 +556,11 @@ func (m *Manager) onTurnBoundary(d *sessionController, active bool) {
 		return
 	}
 	m.mu.Lock()
+	// THE ENDING TURN'S NAME, read BEFORE the record is released: releasing it
+	// first would leave nothing to match the keep-alive claim against, and an
+	// unconditional release would let a late end for some OTHER turn free a
+	// hold the ping still owns.
+	endingTurnID, _ := d.turn.name()
 	before, changed := d.noteTurnIdleLocked()
 	if changed {
 		m.logf("session-controller: turn record RELEASED ws=%q session=%s before=%s after=idle edge=turn_end — the durable ledger holds no further claim for this session",
@@ -534,6 +571,30 @@ func (m *Manager) onTurnBoundary(d *sessionController, active bool) {
 	// consumed here, whatever the boundary goes on to decide.
 	wasInterrupted, wasLoneRunner := d.interruptedTurn, d.pausedRunner
 	d.interruptedTurn, d.pausedRunner = false, false
+
+	// THE KEEP-ALIVE PING'S END is the event the whole rewind sequence hangs
+	// off. It is taken here, at the same boundary the ordinary drain uses, so
+	// there is one place that decides what a turn ending means.
+	//
+	// The release is dispatched to its own goroutine AND this boundary returns:
+	// the rewind stops and respawns the shim, which cannot happen on the shim
+	// read-loop goroutine this runs on, and the ordinary drain must not deliver
+	// anything into a session that is about to be bounced.
+	if pingTurn := d.keepAliveTurnID; pingTurn != "" && d.noteKeepAliveTurnEndedLocked(endingTurnID) {
+		heldIDs := d.queue.keepAliveHeldIDs(pingTurn)
+		m.mu.Unlock()
+		m.logf("session-controller: keep-alive turn ENDED ws=%q session=%s turn_id=%s held_prompts=%d",
+			d.workspace, d.sessionID, pingTurn, len(heldIDs))
+		m.noteDrainActivity()
+		if len(heldIDs) > 0 {
+			go m.releaseKeepAliveHolds(d, pingTurn, heldIDs)
+			return
+		}
+		// Nothing was waiting on the ping, so nothing is owed a rewind right
+		// now: the pings stay in the transcript until a real prompt needs them
+		// gone, which is exactly when the rewind runs.
+		return
+	}
 
 	// THE PAUSE RESUMES on the clean end of a prompt that ran alone. The user
 	// stopped the agent, ran one thing, and that thing finished — which is the

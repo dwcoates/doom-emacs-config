@@ -227,6 +227,47 @@ type ShimSpawner struct {
 
 	mu      sync.Mutex
 	handles map[string]ShimHandle // session id -> the shim WE spawned
+	// rewindLineages holds the ONE-SHOT rewind lineage armed for a session's
+	// very next spawn. Guarded by mu, and consumed (deleted) by the spawn that
+	// uses it — see the CONSUMED, NOT READ note in EnsureShim.
+	rewindLineages map[string]sessioncontroller.RewindLineage
+}
+
+// ArmRewindLineage arms the lineage argv for sessionID's next spawn. It
+// implements sessioncontroller.RewindLineageArmer.
+//
+// An INCOMPLETE lineage is refused rather than armed. The shim rejects an empty
+// dropped-turn list, so arming a partial one would turn a rewind that merely
+// went unrecorded into a spawn that fails at startup — and the session would
+// come back with no shim at all.
+func (s *ShimSpawner) ArmRewindLineage(sessionID string, lineage sessioncontroller.RewindLineage) error {
+	if sessionID == "" {
+		return fmt.Errorf("server: refusing to arm a rewind lineage with no session id")
+	}
+	if lineage.PreviousVendorSessionID == "" || lineage.RetainedLeafUUID == "" || lineage.DroppedTurnIDs == "" {
+		return fmt.Errorf("server: session %s: refusing to arm an INCOMPLETE rewind lineage (rewound_from=%q retained_leaf=%q dropped_turns=%q); the shim rejects an empty dropped-turn list, so a partial lineage would fail the spawn outright",
+			sessionID, lineage.PreviousVendorSessionID, lineage.RetainedLeafUUID, lineage.DroppedTurnIDs)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.rewindLineages == nil {
+		s.rewindLineages = map[string]sessioncontroller.RewindLineage{}
+	}
+	s.rewindLineages[sessionID] = lineage
+	s.logf("server: session %s: rewind lineage ARMED for the next spawn rewound_from=%s retained_leaf=%s dropped_turns=%s",
+		sessionID, lineage.PreviousVendorSessionID, lineage.RetainedLeafUUID, lineage.DroppedTurnIDs)
+	return nil
+}
+
+// takeRewindLineage consumes sessionID's armed lineage, if any.
+func (s *ShimSpawner) takeRewindLineage(sessionID string) (sessioncontroller.RewindLineage, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	lineage, ok := s.rewindLineages[sessionID]
+	if ok {
+		delete(s.rewindLineages, sessionID)
+	}
+	return lineage, ok
 }
 
 // NewShimSpawner builds a ShimSpawner. reg and spawn are required; a nil
@@ -331,6 +372,19 @@ func (s *ShimSpawner) EnsureShim(ctx context.Context, sessionID string) (session
 		PermissionMode: rec.PermissionMode,
 		ConfigDir:      rec.ConfigDir,
 		Resume:         rec.ClaudeSessionID,
+	}
+	// THE REWIND LINEAGE IS CONSUMED, NOT READ. It describes exactly one spawn
+	// — the bring-up immediately after a transcript rewind — and is not a
+	// durable record fact. A lineage left armed would ride the NEXT unrelated
+	// respawn too, telling the shim it had just been rewound when it had not,
+	// and the shim would emit a second SessionRewound for a rewind that never
+	// happened.
+	if lineage, armed := s.takeRewindLineage(sessionID); armed {
+		opts.RewoundFrom = lineage.PreviousVendorSessionID
+		opts.RewindRetainedLeaf = lineage.RetainedLeafUUID
+		opts.RewindDroppedTurns = lineage.DroppedTurnIDs
+		s.logf("server: session %s: spawning with REWIND LINEAGE rewound_from=%s retained_leaf=%s dropped_turns=%s resume=%s",
+			sessionID, lineage.PreviousVendorSessionID, lineage.RetainedLeafUUID, lineage.DroppedTurnIDs, opts.Resume)
 	}
 	// ONE VERDICT FOR ONE QUESTION. The create path waives the resume-viability
 	// gate for a fake session because the scripted SDK writes no transcripts;
