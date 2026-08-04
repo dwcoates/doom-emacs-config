@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	"claude-repld/internal/errclass"
 	"claude-repld/internal/keepalive"
 	"claude-repld/internal/registry"
 )
@@ -47,7 +48,13 @@ var ErrHibernationInFlight = errors.New("session-controller: a hibernation trans
 // ErrHibernated reports an operation refused because the session is
 // hibernated and the user has not made a revival choice. Every prompt path
 // funnels into the gate that returns it (promptdispatch.go).
-var ErrHibernated = errors.New("session-controller: the session is hibernated; revive it before submitting prompts")
+//
+// It ALIASES the errclass sentinel rather than being a second sentinel beside
+// it. The refusal is expected and ordinary — it is the answer for every
+// hibernated workspace — so it must reach a client as a NAMED failure the
+// revival gate can be rendered from, and two sentinels would mean two chances
+// for one of them to miss the classifier.
+var ErrHibernated = errclass.ErrSessionHibernated
 
 // HibernationRegistrar is the durable half of hibernation. It is separate from
 // SessionRegistrar for the same reason ModelCatalogRegistrar is: a sleep is not
