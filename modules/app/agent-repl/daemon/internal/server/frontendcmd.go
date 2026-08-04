@@ -307,6 +307,9 @@ type commandHandler struct {
 	// loud unsupported capability: a caller told its bounce was scheduled when
 	// nothing took a lease would wait for a shutdown that is never coming.
 	schedules ShutdownScheduleController
+	// logTargets releases a closed workspace's log descriptors, binding their
+	// lifetime to the workspace's. Nil holds them for the daemon's lifetime.
+	logTargets WorkspaceLogTargetEvictor
 	// restarts backs the restartSession command. Nil is a loud unsupported
 	// capability, never a success-shaped no-op.
 	restarts SessionRestarter
@@ -399,6 +402,21 @@ type CommandHandlerConfig struct {
 	// exact failure this resolver was introduced to end, and an unwired
 	// resolver must not be able to reproduce it.
 	Resumes ConversationResumeResolver
+	// LogTargets releases a closed workspace's log descriptors. Nil leaves them
+	// held for the daemon's lifetime, which is what a harness with no target
+	// manager wants and what production must never be.
+	LogTargets WorkspaceLogTargetEvictor
+}
+
+// WorkspaceLogTargetEvictor releases the log targets of a workspace that has
+// been closed, reporting how many it released. Satisfied by
+// *dlog.TargetManager.
+//
+// IT EXISTS TO BIND A RESOURCE TO A SCOPE. A workspace's log descriptors used
+// to live from their first write until the daemon exited, so a long-lived
+// daemon held one set per workspace it had ever touched, closed or not.
+type WorkspaceLogTargetEvictor interface {
+	EvictWorkspace(workspace dlog.Workspace) (int, error)
 }
 
 // ConversationResumeResolver resolves a workspace to the conversation a create
@@ -483,6 +501,7 @@ func newCommandHandler(prompts PromptRouter, merges MergeRunner, lifecycle Works
 		establishTimeout: config.EstablishTimeout,
 		resumes:          config.Resumes,
 		schedules:        config.Schedules,
+		logTargets:       config.LogTargets,
 	}, nil
 }
 
@@ -838,7 +857,43 @@ func (h *commandHandler) CloseWorkspace(ctx context.Context, workspace, requestI
 	if abandoned {
 		h.logf("frontend cmd: close_workspace ABANDONED the workspace's parked merge ws=%s request_id=%s", workspace, requestID)
 	}
-	return h.lifecycle.Close(ctx, workspace)
+	if err := h.lifecycle.Close(ctx, workspace); err != nil {
+		return err
+	}
+	// THE LOG TARGETS GO WITH THE WORKSPACE. They are released only after the
+	// close itself succeeded — a refused close leaves a workspace that is still
+	// live, and taking its descriptors away would break the writers still using
+	// them. A release failure is reported, never swallowed: descriptors that
+	// could not be closed are exactly the leak this eviction exists to end.
+	h.evictWorkspaceLogTargets(workspace, requestID)
+	return nil
+}
+
+// evictWorkspaceLogTargets releases a closed workspace's log descriptors.
+//
+// It is loud in every direction: an unwired evictor says so (the daemon always
+// wires one, so an absent one is a wiring defect a harness may accept and
+// production may not), an unresolvable workspace says so, and a close failure
+// says so. None of them fails the close, which has already happened.
+func (h *commandHandler) evictWorkspaceLogTargets(workspace, requestID string) {
+	if h.logTargets == nil {
+		h.logf("frontend cmd: close_workspace log targets RETAINED ws=%s request_id=%s — no log target evictor is wired, so this workspace's descriptors stay held for the daemon's lifetime",
+			workspace, requestID)
+		return
+	}
+	resolved, err := dlog.WorkspaceFromDirectory(workspace)
+	if err != nil {
+		h.logf("frontend cmd: close_workspace log target eviction SKIPPED ws=%s request_id=%s: %v — the workspace identity the targets are keyed by could not be resolved",
+			workspace, requestID, err)
+		return
+	}
+	evicted, err := h.logTargets.EvictWorkspace(resolved)
+	if err != nil {
+		h.logf("frontend cmd: close_workspace log target eviction FAILED ws=%s request_id=%s evicted=%d: %v — descriptors this workspace held may still be open",
+			workspace, requestID, evicted, err)
+		return
+	}
+	h.logf("frontend cmd: close_workspace log targets RELEASED ws=%s request_id=%s evicted=%d", workspace, requestID, evicted)
 }
 
 func (h *commandHandler) OpenWorkspace(ctx context.Context, workspace, requestID string, _ *frontendv1.OpenWorkspaceCmd) error {
