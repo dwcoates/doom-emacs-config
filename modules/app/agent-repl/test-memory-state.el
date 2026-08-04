@@ -121,13 +121,13 @@ Emacs nulls out `buffer-name' for killed buffers, so the contract is
 (ert-deftest agent-repl-test-memory-state-render-preserves-keys ()
   "Every key in the input plist appears in the rendered plist."
   (let ((out (agent-repl--memory-state-render
-              "ws1" '(:agent-state :thinking :priority "p1" :pending-prompts (a b)))))
+              "ws1" '(:agent-state :thinking :priority "p1" :deferred-prompts (a b)))))
     (should (plist-member out :agent-state))
     (should (plist-member out :priority))
-    (should (plist-member out :pending-prompts))
+    (should (plist-member out :deferred-prompts))
     (should (eq (plist-get out :agent-state) :thinking))
     (should (equal (plist-get out :priority) "p1"))
-    (should (equal (plist-get out :pending-prompts) '(a b)))))
+    (should (equal (plist-get out :deferred-prompts) '(a b)))))
 
 (ert-deftest agent-repl-test-memory-state-render-formats-buffer-value ()
   "Buffer values in the input plist are replaced with readable strings."

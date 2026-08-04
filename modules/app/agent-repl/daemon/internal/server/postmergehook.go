@@ -13,35 +13,9 @@ import (
 	"claude-repld/internal/workspace/postmerge"
 )
 
-// This file binds merge.Coordinator's post-merge hook.
-//
-// BOTH OF ITS DEPENDENCIES ARE DERIVED FROM ALREADY-INJECTED ONES rather than
-// injected separately, for the same reason mergeConflictResolver is (see
-// agentshimwire.go). The hook prompts the PARENT workspace's session, and the
-// parent's session must be on the SAME controller fleet that serves the user's
-// prompts — a separately injected session source could be bound to a different
-// fleet, so the phone-home would land in a session nobody is looking at. The
-// postprocessing prompt comes from the SAME creation records the create
-// commands write, so a second store binding could answer from a file no
-// creation ever wrote to.
-//
-// Each derivation is a CHECKED assertion whose failure is a hard construction
-// error naming exactly what is missing. It is never a silent downgrade to a
-// disabled hook: a daemon whose merges quietly stop notifying parents is the
-// state this whole package exists to end.
-
-// TWO THINGS FOLLOW A MERGE, NOT ONE.
-//
-// Beside the parent handoff above, a merge into the stack's OWN checkout has to
-// redeploy the running stack (internal/reload). The two are wholly independent
-// — one prompts a session, the other spawns a build — so they are composed as a
-// FAN-OUT rather than chained: each runs on every merged outcome regardless of
-// whether the other failed, and each failure is surfaced on its own.
-//
-// Chaining them would make the notifier's failure silently cancel the redeploy,
-// which is the state where a merge lands, the parent is not told, AND the
-// daemon keeps running superseded code with nothing in the record explaining
-// why the deploy never happened.
+// This file binds the two independent facts that follow a landed merge:
+// process-level self-reload and resolution of the merged workspace's own
+// postprocessing action.
 
 // namedHook pairs a hook with the name its failures are logged under.
 type namedHook struct {
@@ -61,7 +35,7 @@ var _ merge.PostMergeHook = (*fanOutPostMergeHook)(nil)
 //
 // The errors are joined rather than reduced to the first: merge.Coordinator
 // retains this return as a merge.PostMergeFailure, and a record naming only one
-// of two failed handoffs would understate what the merge left undone.
+// of two failed hooks would understate what the merge left undone.
 func (f *fanOutPostMergeHook) AfterMerged(ctx context.Context, req merge.Request) error {
 	var errs []error
 	for _, h := range f.hooks {
@@ -74,38 +48,9 @@ func (f *fanOutPostMergeHook) AfterMerged(ctx context.Context, req merge.Request
 	return errors.Join(errs...)
 }
 
-// AfterAction reports the FIRST non-empty prompt any bound hook will deliver.
-//
-// The fan-out's hooks are not peers here: exactly one of them (the parent
-// handoff) delivers a prompt at all, and the rest report "" because they have
-// none. Joining them would be inventing a composite prompt no session receives.
-// A lookup error is returned as-is so the coordinator can log it rather than
-// publish invented text.
-func (f *fanOutPostMergeHook) AfterAction(req merge.Request) (string, error) {
-	var errs []error
-	for _, h := range f.hooks {
-		prompt, err := h.hook.AfterAction(req)
-		if err != nil {
-			f.logf("server: post-merge hook %s after-action lookup FAILED {ws=%s name=%s}: %v",
-				h.name, req.Workspace, req.Name, err)
-			errs = append(errs, fmt.Errorf("%s: %w", h.name, err))
-			continue
-		}
-		if prompt != "" {
-			return prompt, errors.Join(errs...)
-		}
-	}
-	return "", errors.Join(errs...)
-}
-
-// buildPostMergeHook assembles the post-merge fan-out from cfg's existing
-// dependencies.
-func buildPostMergeHook(cfg AgentShimConfig, logf func(string, ...any)) (merge.PostMergeHook, error) {
-	notifier, err := buildPostMergeNotifier(cfg, logf)
-	if err != nil {
-		return nil, err
-	}
-	hooks := []namedHook{{name: "parent-handoff", hook: notifier}}
+// buildPostMergeHook assembles process-level merge aftermath.
+func buildPostMergeHook(logf func(string, ...any)) (merge.PostMergeHook, error) {
+	hooks := []namedHook{}
 	trigger, ok, err := buildSelfReloadTrigger(logf)
 	if err != nil {
 		return nil, err
@@ -159,28 +104,16 @@ func buildSelfReloadTrigger(logf func(string, ...any)) (*reload.Trigger, bool, e
 	return trigger, true, nil
 }
 
-// buildPostMergeNotifier assembles the parent-handoff half of the fan-out.
-func buildPostMergeNotifier(cfg AgentShimConfig, logf func(string, ...any)) (merge.PostMergeHook, error) {
-	parents, ok := cfg.Prompts.(postmerge.ParentSession)
-	if !ok {
-		return nil, fmt.Errorf("server: the PromptRouter (%T) cannot answer whether a workspace has a live session, so the post-merge parent handoff has no way to avoid spawning a session for a workspace nobody has open", cfg.Prompts)
-	}
+// buildAfterActionSource binds the creation records that own the merged
+// workspace's postprocessing action.
+func buildAfterActionSource(cfg AgentShimConfig, logf func(string, ...any)) (merge.AfterActionSource, error) {
 	postprocessing, ok := cfg.WorkspaceCreation.(postmerge.PostprocessingSource)
 	if !ok {
 		return nil, fmt.Errorf("server: the WorkspaceCreation bridge (%T) cannot resolve a workspace's postprocessing prompt, so a workspace created with one would merge and never run it", cfg.WorkspaceCreation)
 	}
-	probe, err := postmerge.NewGitWorktreeProbe(logf)
+	source, err := postmerge.New(postmerge.Config{Logf: logf, Postprocessing: postprocessing})
 	if err != nil {
-		return nil, fmt.Errorf("server: build post-merge worktree probe: %w", err)
+		return nil, fmt.Errorf("server: build post-merge after-action source: %w", err)
 	}
-	notifier, err := postmerge.New(postmerge.Config{
-		Logf:           logf,
-		Parents:        parents,
-		Worktrees:      probe,
-		Postprocessing: postprocessing,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("server: build post-merge notifier: %w", err)
-	}
-	return notifier, nil
+	return source, nil
 }

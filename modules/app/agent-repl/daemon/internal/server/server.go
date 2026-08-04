@@ -117,13 +117,6 @@ func ShimEnv(opts CreateOpts, daemonAddr string) []string {
 	return env
 }
 
-// Remediator dispatches the headless analyst for a session that has
-// vanished from the daemon. Start reports whether this call is the one
-// that launched it (a repeat for an already-dispatched id is a no-op).
-type Remediator interface {
-	Start(sessionID string) (bool, error)
-}
-
 // SessionTokenUsageSource reads normalized live responses whose terminal turn
 // accounting committed and historical file-plane responses that cannot prove
 // a root turn or stream timing. The server aggregates that durable ledger into
@@ -161,7 +154,6 @@ type Server struct {
 	ssm *ssm.Manager
 	// frontend fans frontend.v1 frames to the per-session /stream WebSocket.
 	frontend      *frontend.Server
-	remediator    Remediator
 	registry      *registry.Registry
 	modelCatalogs *SessionModelCatalogs
 	tokenUsage    SessionTokenUsageSource
@@ -209,9 +201,6 @@ type Config struct {
 	// Frontend fans frontend.v1 frames to the per-session /stream WebSocket.
 	// Required in production.
 	Frontend *frontend.Server
-	// Remediator dispatches the "session gone" analyst; nil makes
-	// POST /remediation report the capability unconfigured.
-	Remediator Remediator
 	// Registry persists session records across daemon restarts. Required: it
 	// is the source of truth for which sessions exist.
 	Registry      *registry.Registry
@@ -276,7 +265,6 @@ func New(cfg Config) *Server {
 		frontend:        cfg.Frontend,
 		logins:          cfg.Logins,
 		accounts:        cfg.Accounts,
-		remediator:      cfg.Remediator,
 		registry:        cfg.Registry,
 		modelCatalogs:   cfg.ModelCatalogs,
 		tokenUsage:      cfg.TokenUsage,
@@ -345,7 +333,6 @@ var APIPrefixes = []string{
 	"/sessions/",
 	"/accounts",
 	"/capabilities",
-	"/remediation",
 	"/workspace-command",
 }
 
@@ -380,7 +367,6 @@ func (s *Server) routes() []route {
 		{"DELETE /sessions/{id}/login", s.handleLoginClose},
 		{"GET /sessions/{id}/chess-game", s.handleChessGameFile},
 		{"POST /sessions/{id}/add-support", s.handleAddSupport},
-		{"POST /remediation", s.handleRemediate},
 		{"POST /workspace-command", s.handleWorkspaceCommand},
 	}
 }
@@ -1040,39 +1026,6 @@ func (s *Server) respondSwitched(w http.ResponseWriter, status int, switched boo
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	writeJSON(w, s.logf, map[string]any{"switched": switched, "account": entry})
-}
-
-// handleRemediate dispatches the "session gone" analyst. SUPERSEDED (S7).
-func (s *Server) handleRemediate(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		SessionID string `json:"session_id"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		httpError(w, http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
-		return
-	}
-	if body.SessionID == "" {
-		httpError(w, http.StatusBadRequest, "session_id must be non-empty")
-		return
-	}
-	// A session the daemon still serves (a non-terminal record) is not gone,
-	// so a remediation request naming one is a frontend bug.
-	if s.known(body.SessionID) {
-		httpError(w, http.StatusConflict, "session is alive; nothing to remediate")
-		return
-	}
-	if s.remediator == nil {
-		httpError(w, http.StatusServiceUnavailable, "remediation is not configured")
-		return
-	}
-	started, err := s.remediator.Start(body.SessionID)
-	if err != nil {
-		s.httpFail(w, r, http.StatusInternalServerError, "session %s: remediation start: %v", body.SessionID, err)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusAccepted)
-	writeJSON(w, s.logf, map[string]bool{"started": started})
 }
 
 // handleSendMessage and handleInterrupt were removed in S7: Emacs submits

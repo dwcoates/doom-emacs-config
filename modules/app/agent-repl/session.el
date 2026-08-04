@@ -115,33 +115,6 @@ result — MODEL and `agent-repl-interactive-model' both nil — means no
   :type 'number
   :group 'agent-repl)
 
-(defcustom agent-repl-pending-prompt-deliver-delay 0.3
-  "Seconds to wait before delivering pending prompts after the agent becomes ready."
-  :type 'number
-  :group 'agent-repl)
-
-(defcustom agent-repl-prompt-delivery-verify-seconds 4.0
-  "Seconds to wait after a preemptive prompt before verifying delivery.
-A preemptive prompt is considered acknowledged when `:agent-state'
-transitions away from `:idle' (the `UserPromptSubmit' hook fires and
-`--on-prompt-submit-event' flips state to `:thinking').  When the state
-is still `:idle' after this window, the bracketed paste is assumed to
-have raced the agent's TUI input-area paint and is resent — see
-`agent-repl-prompt-delivery-max-retries'."
-  :type 'number
-  :group 'agent-repl)
-
-(defcustom agent-repl-prompt-delivery-max-retries 2
-  "Maximum resend attempts when a preemptive prompt is not acknowledged.
-A preemptive prompt is considered acknowledged when `:agent-state'
-moves away from `:idle' within `agent-repl-prompt-delivery-verify-seconds'.
-If the state is still `:idle' after the verify window, the prompt is
-resent.  After this many resends have all failed to elicit a state
-transition, the delivery is abandoned with a user-visible warning
-rather than looping forever."
-  :type 'integer
-  :group 'agent-repl)
-
 ;;;; Workspace environment initialization
 
 (defun agent-repl--apply-display-state (ws saved)
@@ -837,8 +810,6 @@ current workspace is different, and drains any deferred-prompt queue
 
 ;;;; Deferred prompt queue
 ;;
-;; Distinct from `:pending-prompts' (the at-startup queue drained when
-;; the session_start hook arrives — see `--drain-pending-prompts').
 ;; `:deferred-prompts' is a runtime FIFO seeded by the leader-key
 ;; command `agent-repl-queue-deferred-prompt' (bound to `SPC j RET'):
 ;; the user keeps typing prompts while the agent is busy, and each one
@@ -919,168 +890,6 @@ not pass `--continue'."
 ;; agent-repl--update-session-id-from-sentinel (in sentinel.el) sets it
 ;; on the workspace's active instantiation.  No file scanning needed.
 
-;;;; Readiness and pending prompt handling
-
-(defun agent-repl--prompt-acknowledged-p (ws)
-  "Return non-nil when WS's `:agent-state' indicates the agent received a prompt.
-Acknowledged states are `:thinking' (the `UserPromptSubmit' hook flipped
-state via `--on-prompt-submit-event'), `:permission' (the agent paused
-to ask for permission), or `:done' (a fast turn already finished).
-Returns nil for `:idle' / `:init' / nil — i.e. when the prompt does
-not appear to have reached the agent."
-  (let* ((state (agent-repl--ws-agent-state ws))
-         (acknowledged (memq state '(:thinking :permission :done))))
-    (agent-repl--log-verbose ws "prompt-acknowledged-p: ws=%s state=%s acknowledged=%s"
-                              ws state acknowledged)
-    acknowledged))
-
-(defun agent-repl--pending-delivery-alive-p (ws vterm-buf)
-  "Return non-nil when WS can still receive queued prompt deliveries.
-Frontend-aware liveness for the pending-prompt pipeline: a gui
-workspace is deliverable while it has a daemon session binding
-\(`agent-repl--gui-running-p' — VTERM-BUF is nil by design there); a
-vterm workspace is deliverable while VTERM-BUF (captured at drain
-time, pinning the delivery to that specific session) is live."
-  (let* ((gui-p (agent-repl--ws-gui-frontend-p ws))
-         (alive (if gui-p
-                    (agent-repl--gui-running-p ws)
-                  (buffer-live-p vterm-buf))))
-    (agent-repl--log-verbose ws "pending-delivery-alive-p: ws=%s gui=%s vterm-buffer-live=%s alive=%s"
-                              ws gui-p (and vterm-buf (buffer-live-p vterm-buf)) alive)
-    alive))
-
-(defun agent-repl--make-pending-prompt (text &optional origin)
-  "Return a pending-prompt entry carrying TEXT and an optional ORIGIN.
-A bare string when ORIGIN is nil (the ordinary entry shape, unchanged),
-else a plist `(:text TEXT :origin ORIGIN)'.  ORIGIN rides WITH the prompt
-so every delivery attempt re-stamps the send (see
-`agent-repl--deliver-pending-prompts'); a one-shot ws flag would instead
-be dropped by a verify retry, leaving the resent turn untagged."
-  (if origin (list :text text :origin origin) text))
-
-(defun agent-repl--pending-prompt-text (entry)
-  "Return the prompt text of a pending-prompt ENTRY (a string or a plist)."
-  (if (stringp entry) entry (plist-get entry :text)))
-
-(defun agent-repl--pending-prompt-origin (entry)
-  "Return the origin of a pending-prompt ENTRY, or nil for a bare string."
-  (if (stringp entry) nil (plist-get entry :origin)))
-
-(defun agent-repl--deliver-pending-prompts (pending ws &optional retries)
-  "Deliver PENDING prompts to WS if its frontend can still receive them.
-Sends the first prompt via `agent-repl--send' with an ON-SETTLE that
-schedules `agent-repl--maybe-retry-or-continue' after
-`agent-repl-prompt-delivery-verify-seconds'.  That verify step
-confirms the agent actually saw the paste (state advanced past `:idle')
-before draining the next prompt, and resends the current prompt up
-to `agent-repl-prompt-delivery-max-retries' times when the verify
-fails — closing the race between `SessionStart' (which flips Emacs
-to ready) and the agent's TUI input-area becoming interactive.
-
-RETRIES is the number of resends already performed for the prompt at
-the head of PENDING; nil/0 on the first attempt.
-
-A workspace born from generation is never switched to (the no-switch
-contract on the sentinel-driven path), so its `:input-buffer' is still
-nil at this point — `agent-repl--send' would then skip
-`agent-repl--history-push' entirely and the preemptive prompt would
-never land in input history.  `agent-repl--ensure-input-buffer' heads
-that off by materializing the (unshown) input buffer first, the same
-buffer the panel-show path later adopts."
-  (agent-repl--log ws "deliver-pending-prompts: ws=%s count=%d retries=%d"
-                    ws (length pending) (or retries 0))
-  (unless (agent-repl--pending-delivery-alive-p ws nil)
-    (agent-repl--log ws "deliver-pending-prompts: rejected ws=%s count=%d reason=frontend-not-live"
-                      ws (length pending))
-    (error "agent-repl--deliver-pending-prompts: frontend session is gone for ws=%s — %d prompt(s) lost"
-           ws (length pending)))
-  (if pending
-      (progn
-        (agent-repl--ensure-input-buffer ws)
-        (let* ((retries (or retries 0))
-               (head (car pending))
-               (origin (agent-repl--pending-prompt-origin head)))
-      ;; Re-stamp the per-prompt origin on EVERY attempt: the initial send and
-      ;; each verify retry both route through here, so a retry re-arms the tag
-      ;; a one-shot consumed flag would have dropped.  A bare-string entry arms
-      ;; nil, clearing any stale tag so an ordinary prompt is never tagged.
-          (agent-repl--ws-put ws :next-send-origin origin)
-          (agent-repl--log ws "deliver-pending-prompts: sending ws=%s prompt-chars=%d origin=%s retry=%d"
-                            ws (length (agent-repl--pending-prompt-text head)) origin retries)
-          (agent-repl--send
-           (agent-repl--pending-prompt-text head) ws nil
-           (lambda ()
-             (agent-repl--log ws "deliver-pending-prompts: settle ws=%s retry=%d verify-delay=%.1f"
-                               ws retries agent-repl-prompt-delivery-verify-seconds)
-             (run-at-time
-              agent-repl-prompt-delivery-verify-seconds nil
-              #'agent-repl--maybe-retry-or-continue
-              pending ws retries)))))
-    (agent-repl--log-verbose ws "deliver-pending-prompts: no-op ws=%s reason=empty-pending" ws)))
-
-(defun agent-repl--maybe-retry-or-continue (pending ws retries)
-  "Verify the current preemptive prompt was acknowledged; retry or continue.
-Called by a timer scheduled in `agent-repl--deliver-pending-prompts'
-after the send's `on-settle' fires.  Inspects `:agent-state' on WS
-via `agent-repl--prompt-acknowledged-p':
-
-- Acknowledged: drain the next pending prompt (if any) with a fresh
-  retry count.
-- Not acknowledged AND RETRIES below the cap: resend the same prompt
-  (head of PENDING) with RETRIES + 1.
-- Not acknowledged AND cap reached: abandon the delivery with a
-  user-visible warning and stop — better than looping forever, and
-  the prompt is still in input history for the user to resend
-  manually.
-
-When the frontend session has died in the meantime (a gui workspace's
-daemon binding released), abandons silently."
-  (cond
-   ((not (agent-repl--pending-delivery-alive-p ws nil))
-    (agent-repl--log ws
-                      "deliver-verify: frontend session gone for ws=%s — abandoning %d prompt(s)"
-                      ws (length pending)))
-   ((agent-repl--prompt-acknowledged-p ws)
-    (agent-repl--log ws
-                      "deliver-verify: ws=%s prompt acknowledged after %d retries — continuing"
-                      ws retries)
-    (if (cdr pending)
-        (agent-repl--deliver-pending-prompts (cdr pending) ws 0)
-      (agent-repl--log ws "deliver-verify: complete ws=%s reason=last-prompt-acknowledged" ws)))
-   ((< retries agent-repl-prompt-delivery-max-retries)
-    (let ((next-retries (1+ retries)))
-      (agent-repl--log ws
-                        "deliver-verify: ws=%s NOT acknowledged after %.1fs — retry %d/%d"
-                        ws agent-repl-prompt-delivery-verify-seconds
-                        next-retries agent-repl-prompt-delivery-max-retries)
-      (agent-repl--deliver-pending-prompts pending ws next-retries)))
-   (t
-    (agent-repl--log ws
-                      "deliver-verify: ws=%s GIVING UP after %d retries — prompt may be lost"
-                      ws retries)
-    (agent-repl--warn ws
-                      "preemptive prompt for ws=%s not acknowledged after %d retries — the agent may not have seen it"
-                      ws retries))))
-
-(defun agent-repl--drain-pending-prompts (ws)
-  "Drain queued prompts for workspace WS after the agent becomes ready.
-Clears :pending-prompts and schedules them for delivery with a 0.3s delay
-so the daemon session has time to settle.  Delivery liveness is judged
-by WS's daemon session binding (see
-`agent-repl--pending-delivery-alive-p')."
-  (let ((pending (agent-repl--ws-get ws :pending-prompts)))
-    (if pending
-        (progn
-          (agent-repl--log ws "first-ready draining %d pending prompt(s) for ws=%s" (length pending) ws)
-          (agent-repl--ws-put ws :pending-prompts nil)
-          (run-at-time agent-repl-pending-prompt-deliver-delay nil
-                       #'agent-repl--deliver-pending-prompts
-                       pending ws)
-          (agent-repl--log ws "drain-pending-prompts: scheduled ws=%s count=%d delay=%.1f"
-                            ws (length pending) agent-repl-pending-prompt-deliver-delay))
-      (agent-repl--log-verbose ws "drain-pending-prompts: no-op ws=%s reason=empty" ws))
-    pending))
-
 (defun agent-repl--loading-placeholder-visible-p ()
   "Return non-nil if the loading placeholder buffer is displayed in a window."
   (let* ((ph (get-buffer " *agent-loading*"))
@@ -1091,8 +900,8 @@ by WS's daemon session binding (see
     window))
 
 ;; Panel opening after readiness is handled entirely by the session_start
-;; hook via sentinel.el, which sets ready state, drains pending prompts, and
-;; opens panels through the workspace-switch `:pending-show-panels' drain.
+;; hook via sentinel.el, which sets ready state and opens panels through the
+;; workspace-switch `:pending-show-panels' drain.
 ;; The two helpers that used to run a second panel-open pass off the old
 ;; readiness POLL (`--show-panels-or-defer', `--open-panels-after-ready')
 ;; had no caller left after that cutover and are gone.

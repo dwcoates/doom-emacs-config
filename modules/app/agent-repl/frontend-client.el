@@ -53,7 +53,6 @@
 (declare-function agent-repl--frontend-init-inhibited-p "agent-repl-daemon" ())
 (declare-function agent-repl--live-ws-names "agent-repl-workspace" ())
 (declare-function agent-repl--mark-ws-thinking "input" (ws))
-(declare-function agent-repl--dispatch-resume-investigation "agent-repl-worktree" (resume-id searched-paths cwd))
 ;; The UDS command channel + pushed-frame SessionView store (the daemon plane
 ;; that replaced the GET /sessions poller); resolved at call time.
 (declare-function agent-repl--uds-send-command "frontend-uds" (field payload &optional workspace process))
@@ -110,30 +109,16 @@ beats a daemon NACK that reads as \"no live session\"."
     (agent-repl--log ws "frontend-wire-key: ws=%s cwd=%s" ws key)
     key))
 
-;; Signalled when the daemon HARD-FAILS a --resume because the target
-;; session has no transcript in its config dir (§2.10 resume viability
-;; gate, `code: "resume_transcript_missing"').  NON-recoverable by
-;; design: rather than degrade to a fresh conversation, the client opens
-;; an investigation workspace for the lost session and re-raises this,
-;; naming that workspace.  Derived from `error' so existing
-;; `condition-case' handlers still catch it.
-(define-error 'agent-repl-resume-transcript-missing
-  "agent-repl: resume target has no transcript" 'error)
-
 ;; When non-nil, a resume whose transcript the daemon cannot find DEGRADES
-;; to a fresh conversation instead of opening a diagnostic investigation
-;; workspace.  The default (nil) behavior on the daemon's
-;; `resume_transcript_missing' hard-fail is to REFUSE a silent fresh start:
-;; the client opens an investigation workspace
-;; (`agent-repl--dispatch-resume-investigation') and re-raises a
-;; non-recoverable error.  Binding this non-nil OVERRIDES that — the create
-;; logs the lost-workspace resume attempt and simply recreates the session
-;; with no resume.  `agent-repl-force-fresh-conversation' (the command)
-;; starts a fresh conversation directly and does not rely on this override.
+;; to a fresh conversation.  The default (nil) behavior on the daemon's
+;; transcript-missing refusal is to surface the refusal unchanged.  Binding
+;; this non-nil explicitly OVERRIDES that and recreates the session with no
+;; resume.  `agent-repl-force-fresh-conversation' starts a fresh conversation
+;; directly and does not rely on this override.
 (defvar agent-repl--force-fresh-conversation nil
   "When non-nil, a lost-transcript resume degrades to a fresh conversation.
-Overrides the default `resume_transcript_missing' investigation dispatch
-in `agent-repl--frontend-after-create-session'.")
+Overrides the default hard refusal in
+`agent-repl--frontend-after-create-session'.")
 
 ;;;; ---- Customization ----------------------------------------------------
 
@@ -407,12 +392,13 @@ timer or UDS callback after either continuation runs."
                                         explicit-id cwd)
                        (agent-repl--frontend-after-create-session
                         cwd model 'fresh nil nil on-success on-failure ws))
-                   (let* ((investigation
-                           (agent-repl--dispatch-resume-investigation explicit-id nil cwd))
-                          (detail
-                           (format (concat "resume target %s has no transcript; refusing a fresh "
-                                           "conversation; opened investigation workspace `%s'")
-                                   explicit-id investigation)))
+                   (let ((detail
+                          (format (concat "resume target %s has no transcript; refusing a fresh "
+                                          "conversation")
+                                  explicit-id)))
+                     (agent-repl--log ws
+                                      "createSession-async: resume refused resume=%s force-fresh=nil cwd=%s detail=%s"
+                                      explicit-id cwd detail)
                      (agent-repl--frontend-async-fail
                       ws "createSession" request-id started on-failure detail)))
                (agent-repl--frontend-async-fail

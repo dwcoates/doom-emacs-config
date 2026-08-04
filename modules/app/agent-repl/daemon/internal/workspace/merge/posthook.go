@@ -8,12 +8,8 @@ import (
 // This file is merge.Coordinator's outbound port onto the work that happens
 // AFTER a merge has fully landed.
 //
-// A merged workspace is not the end of the story. When the target worktree is
-// itself a linked worktree, the PARENT that spawned the merged child has to be
-// told its child landed, and a workspace created with a postprocessing prompt
-// has that prompt run in the parent once the merge finishes. Both used to be
-// Emacs's job (a headless `claude -p` fired from the editor's merge handler),
-// which meant they simply did not happen when no editor was watching.
+// A merge into the stack's own checkout is not the end of the story: the
+// running stack has to rebuild and restart from the newly landed code.
 //
 // The port is an interface for the same reason merge.ConflictResolver is: the
 // implementation needs the session controller and the workspace-creation
@@ -39,15 +35,6 @@ import (
 //     cancelled only when the coordinator closes.
 type PostMergeHook interface {
 	AfterMerged(ctx context.Context, req Request) error
-	// AfterAction reports the prompt AfterMerged will deliver — the workspace's
-	// recorded postprocessing prompt — so the coordinator can PUBLISH the
-	// after_action phase with its text before the delivery starts.
-	//
-	// It is a separate read rather than a return value of AfterMerged because the
-	// phase has to be visible WHILE the action runs, not after it. A workspace
-	// with none reports "", nil; an unreadable record reports the error, which is
-	// logged and leaves the phase published without text rather than inventing any.
-	AfterAction(req Request) (string, error)
 }
 
 // PostMergeFailure is the retained record of one merge.PostMergeHook error.
@@ -55,7 +42,7 @@ type PostMergeHook interface {
 // The loud log is the canonical record, but a log line is not queryable from
 // inside the process, and the hook runs off the drain goroutine where no caller
 // is left to receive its error. Retaining the failure is what keeps "the merge
-// landed but its handoff did not" an observable daemon fact rather than a line
+// landed but its aftermath failed" an observable daemon fact rather than a line
 // somebody has to go grep for.
 type PostMergeFailure struct {
 	// Repo is the queue key the merge drained under.

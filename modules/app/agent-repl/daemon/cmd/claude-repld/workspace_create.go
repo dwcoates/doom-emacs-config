@@ -637,8 +637,8 @@ func (b *WorkspaceCreationBridge) CompleteHostAction(_ context.Context, actionID
 // postprocessing prompt the workspace at worktreePath was created with.
 //
 // It hangs off THIS bridge because the bridge already owns the durable job
-// store, and the post-merge handoff must read the very records the create
-// commands wrote. Giving the handoff its own store binding would let it answer
+// store, and the merge after-action source must read the very records the create
+// commands wrote. Giving the source its own store binding would let it answer
 // from a file no creation ever wrote to.
 func (b *WorkspaceCreationBridge) PostprocessingPrompt(worktreePath string) (string, error) {
 	return workspacecreate.PostprocessingPromptFor(b.store, worktreePath)

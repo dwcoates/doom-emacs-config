@@ -66,9 +66,9 @@ under `:pushed-render-state' and PREVIOUS-KEYWORD is what it replaced
 This is the single subscription point the agent-shim cutover (design §4.6,
 §9.3) re-anchors the merge reactive consequences onto: the daemon now owns
 merge STATE (it publishes `:merging'/`:merge-conflict'/`:merged'/… over the
-frontend surface), so the magit conflict popup, the merged-teardown, the
-close-after-merge, and the parent notification — all previously keyed off
-LOCAL `:merge-*' plist flips in worktree.el — key off THIS hook instead
+frontend surface), so the magit conflict popup, merged-teardown, and
+close-after-merge — all previously keyed off LOCAL `:merge-*' plist flips in
+worktree.el — key off THIS hook instead
 \(see `agent-repl--merge-react-to-pushed-state' in worktree.el).
 
 Handlers run via `run-hook-wrapped' inside `condition-case', so a broken

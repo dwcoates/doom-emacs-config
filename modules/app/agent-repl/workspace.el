@@ -112,7 +112,7 @@ Keys: :frontend-buffer :input-buffer
       :worktree-p :project-dir
       :active-env :bare-metal :fork-session-id
       :ready-timer :priority
-      :pending-prompts :pending-show-panels :deferred-prompts
+      :pending-show-panels :deferred-prompts
 :active-env names the workspace's environment (`:bare-metal'), and
 :bare-metal is an `agent-repl-instantiation' struct holding that
 environment's session state.")

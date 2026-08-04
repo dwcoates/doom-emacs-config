@@ -75,10 +75,8 @@ type CoordinatorConfig struct {
 	// idle under a lease taken expressly to drive it.
 	TestResolver TestFailureResolver
 	// PostMerge receives every `merged` terminal outcome once the queue entry
-	// is dropped and the lease released. Required, on the same footing as the
-	// rest: it carries the child-to-parent handoffs (the merge phone-home and
-	// the workspace's postprocessing prompt), and a coordinator without it
-	// silently drops them exactly the way the deleted Emacs handler did.
+	// is dropped and the lease released. It owns process-level aftermath such
+	// as rebuilding the running stack after a self-merge.
 	PostMerge PostMergeHook
 	// Status receives every phase-level MergeStatus the pipeline publishes.
 	// Required, on the same footing as the rest: a coordinator that cannot
@@ -100,6 +98,10 @@ type CoordinatorConfig struct {
 	// user asked for at creation, which is indistinguishable from the action
 	// having run and done nothing.
 	BeforeActions BeforeActionSource
+	// AfterActions resolves the postprocessing action a workspace was created
+	// with. It is independent of PostMerge because the action runs inside the
+	// merge lease against the merged workspace's own session.
+	AfterActions AfterActionSource
 	// BeforeActionRunner delivers that action to the workspace's own session.
 	// Required for the same reason.
 	BeforeActionRunner BeforeActionRunner
@@ -139,6 +141,7 @@ type QueueCoordinator struct {
 	sessions       SessionBringUp
 	deaths         SessionDeaths
 	beforeActions  BeforeActionSource
+	afterActions   AfterActionSource
 	beforeActionFn BeforeActionRunner
 	afterActionFn  AfterActionRunner
 	now            func() int64
@@ -234,6 +237,8 @@ func NewCoordinator(cfg CoordinatorConfig) (*QueueCoordinator, error) {
 		return nil, fmt.Errorf("merge: Coordinator Deaths source is required")
 	case cfg.BeforeActions == nil:
 		return nil, fmt.Errorf("merge: Coordinator BeforeActions source is required")
+	case cfg.AfterActions == nil:
+		return nil, fmt.Errorf("merge: Coordinator AfterActions source is required")
 	case cfg.BeforeActionRunner == nil:
 		return nil, fmt.Errorf("merge: Coordinator BeforeActionRunner is required")
 	case cfg.AfterActionRunner == nil:
@@ -260,6 +265,7 @@ func NewCoordinator(cfg CoordinatorConfig) (*QueueCoordinator, error) {
 		sessions:       cfg.Sessions,
 		deaths:         cfg.Deaths,
 		beforeActions:  cfg.BeforeActions,
+		afterActions:   cfg.AfterActions,
 		beforeActionFn: cfg.BeforeActionRunner,
 		afterActionFn:  cfg.AfterActionRunner,
 		now:            now,
@@ -682,9 +688,7 @@ func (c *QueueCoordinator) retireFailed(repo string, req Request, release func()
 //
 // IT RUNS UNDER THE LEASE, BEFORE THE QUEUE ENTRY IS RETIRED, and that is the
 // whole ordering: the after-action is a turn in the MERGED WORKSPACE'S OWN
-// session, admissible only on the prompt path the merge lease holds open. The
-// parent handoff that follows is the opposite — it prompts ANOTHER workspace's
-// session and therefore must wait until the lease is gone (finishTerminal).
+// session, admissible only on the prompt path the merge lease holds open.
 //
 // THE AFTER-ACTION CANNOT FAIL THE RUN. Every commit is on the target before the
 // action starts, and reporting `failed` because a courtesy turn did not land
@@ -737,7 +741,7 @@ func mergedCause(res Result) string {
 // none" — and the read failure is carried onto the merged status rather than
 // swallowed.
 func (c *QueueCoordinator) runAfterAction(repo string, req Request) string {
-	prompt, err := c.postMerge.AfterAction(req)
+	prompt, err := c.afterActions.AfterAction(req)
 	if err != nil {
 		c.logf("merge: after-action prompt lookup FAILED {repo=%s ws=%s name=%s run=%s}: %v — the phase is published without its text; the merge STANDS",
 			repo, req.Workspace, req.Name, req.Run.RunID(), err)
@@ -787,20 +791,18 @@ func (c *QueueCoordinator) publishAfterActionPhase(repo string, req Request, pro
 // post-merge hook when that outcome is `merged`.
 //
 // The hook fires strictly after finish, which is what gives merge.PostMergeHook
-// its "queue entry dropped, lease released" precondition: the hook prompts the
-// parent workspace's session, and doing that under a lease the merge still held
-// would have the prompt refused by the very exclusivity the merge took.
+// its "queue entry dropped, lease released" precondition.
 //
 // A merge whose queue entry could NOT be dropped does not fire the hook. That
-// entry is replayed by the next boot's Drain, so notifying now would phone the
-// parent home twice for one child.
+// entry is replayed by the next boot's Drain, so process-level aftermath must
+// wait for that replay to retire it exactly once.
 func (c *QueueCoordinator) finishTerminal(repo string, req, driven Request, release func(), outcome Outcome, afterActionErr string) bool {
 	ok := c.finish(repo, req, release)
 	if outcome != OutcomeMerged {
 		return ok
 	}
 	if !ok {
-		c.logf("merge: post-merge hook NOT RUN, the durable entry could not be dropped {repo=%s ws=%s name=%s} — the next boot's Drain replays this merge, and notifying now would hand the parent the same child twice",
+		c.logf("merge: post-merge hook NOT RUN, the durable entry could not be dropped {repo=%s ws=%s name=%s} — the next boot's Drain replays this merge and runs aftermath after retirement",
 			repo, req.Workspace, req.Name)
 		return ok
 	}
@@ -810,12 +812,10 @@ func (c *QueueCoordinator) finishTerminal(repo string, req, driven Request, rele
 
 // firePostMerge runs the post-merge hook on its OWN goroutine.
 //
-// OFF THE DRAIN PATH IS THE POINT. The hook talks to another workspace's agent
-// session, which can be slow, unreachable, or mid-turn. Running it inline would
-// make every later merge on this repository wait behind a courtesy notification
-// — a queue stalled by a nicety. The goroutine is tracked on c.wg and bounded
-// by c.ctx, so Close still waits for a hook that honors cancellation rather
-// than leaking it.
+// OFF THE DRAIN PATH IS THE POINT. Rebuilding and restarting the running stack
+// can be slow; later merges on the repository must not wait behind it. The
+// goroutine is tracked on c.wg and bounded by c.ctx, so Close still waits for a
+// hook that honors cancellation rather than leaking it.
 func (c *QueueCoordinator) firePostMerge(repo string, req Request, afterActionErr string) {
 	c.wg.Add(1)
 	go func() {
@@ -824,11 +824,11 @@ func (c *QueueCoordinator) firePostMerge(repo string, req Request, afterActionEr
 	}()
 }
 
-// publishPostMerge runs the child-to-parent handoff and republishes the terminal
+// publishPostMerge runs process-level aftermath and republishes the terminal
 // merged status when it fails.
 //
 // THE HOOK CANNOT FAIL THE RUN either: the commits are on the target, and
-// recording a merge as failed because its notification did not land would make
+// recording a merge as failed because its aftermath did not complete would make
 // the pushed state lie about the tree. Its error is retained as a
 // merge.PostMergeFailure and carried onto the merged status BESIDE the
 // after-action's, never instead of it.
@@ -857,11 +857,11 @@ func (c *QueueCoordinator) publishPostMerge(repo string, req Request, afterActio
 // recordPostMergeFailure loud-logs a hook error and retains it.
 //
 // It deliberately does NOT emit merge_failed. The commits are on the target
-// worktree; a failed handoff does not put them back, and recording a merge as
-// failed because its notification did not land would make the pushed state lie
+// worktree; failed process aftermath does not put them back, and recording a
+// merge as failed because it did not complete would make the pushed state lie
 // about the tree.
 func (c *QueueCoordinator) recordPostMergeFailure(repo string, req Request, err error) {
-	c.logf("merge: post-merge hook FAILED {repo=%s ws=%s name=%s target=%s}: %v — the merge STANDS (the commits are on the target); only the post-merge handoff did not land",
+	c.logf("merge: post-merge hook FAILED {repo=%s ws=%s name=%s target=%s}: %v — the merge STANDS (the commits are on the target); only process aftermath failed",
 		repo, req.Workspace, req.Name, req.TargetDir, err)
 	c.postMergeMu.Lock()
 	defer c.postMergeMu.Unlock()
@@ -878,7 +878,7 @@ func (c *QueueCoordinator) recordPostMergeFailure(repo string, req Request, err 
 
 // PostMergeFailures returns a copy of the retained hook-failure record, oldest
 // first. It is the in-process view of merges that landed whose post-merge
-// handoff did not.
+// aftermath failed.
 func (c *QueueCoordinator) PostMergeFailures() []PostMergeFailure {
 	c.postMergeMu.Lock()
 	defer c.postMergeMu.Unlock()
@@ -1050,7 +1050,7 @@ func (c *QueueCoordinator) replayTerminal(repo string, req Request, term Termina
 	// The lease died with the daemon that held it, so there is none to release
 	// here. finishTerminal drops the entry and — for a merged run, whose hook
 	// never fired because the entry was never dropped — runs the post-merge
-	// handoff exactly once.
+	// aftermath exactly once.
 	return c.finishTerminal(repo, req, driven, nil, term.Outcome, term.AfterActionError)
 }
 

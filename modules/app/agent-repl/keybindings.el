@@ -62,7 +62,7 @@
       :bare-metal :agent-ready :ws-loaded :ready-timer))
     ("💬 Prompts"
      (:last-prompt-time :last-prompt-text :last-prompt-summary
-      :last-prompt-summary-pending :deferred-prompts :pending-prompts
+      :last-prompt-summary-pending :deferred-prompts
       :clipboard))
     ("🔔 Notifications"
      (:done :done-acked :done-acked-at :last-notify-time))

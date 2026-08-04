@@ -189,14 +189,14 @@ describe("TaskTimer", () => {
   });
 
   it("goes idle when the view is torn down mid-turn", () => {
-    // Arrange — the session-gone rebind swaps onto a successor session.
+    // Arrange — the view is explicitly torn down while a turn is active.
     const h = harness();
     const timer = h.timer();
     timer.sync(START);
     h.painted.length = 0;
     // Act
     timer.stop();
-    // Assert — the dead session's turn is not the successor's.
+    // Assert — a torn-down view retains no active turn timer.
     expect(h.painted).toEqual([IDLE_LABEL]);
   });
 

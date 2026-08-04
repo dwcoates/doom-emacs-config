@@ -228,7 +228,7 @@ func TestUngatedNoteAnnouncesTheAbsentGate(t *testing.T) {
 func TestUngatedNoteRecordsTheConsentThatAdmittedIt(t *testing.T) {
 	// Arrange + Act — an ungated launch with NO consent is the interesting
 	// record, so the flag rides in the note either way.
-	note := UngatedNote("the remediation analyst", "bypassPermissions", false)
+	note := UngatedNote("this session", "bypassPermissions", false)
 	// Assert
 	if !strings.Contains(note, "consent=false") {
 		t.Fatalf("note %q omits the consent", note)

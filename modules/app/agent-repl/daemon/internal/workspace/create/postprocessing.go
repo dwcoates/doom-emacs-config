@@ -7,7 +7,7 @@ package create
 // consumer runs much later: the prompt is meant to run in the PARENT session
 // once the created workspace's merge has fully landed (see
 // internal/workspace/postmerge). The durable job record is the only place that
-// fact survives from creation to merge, so the post-merge handoff reads it back
+// fact survives from creation to merge, so the merge after-action source reads it back
 // out of the same store the creation wrote it into.
 //
 // THE KEY IS THE WORKTREE PATH, because that is the identity the two ends

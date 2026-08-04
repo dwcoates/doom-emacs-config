@@ -413,88 +413,25 @@ the rev-parse comparison and the checkout invocation."
       (should (equal checkout-args
                      '("/repo/main" "checkout" "trunk"))))))
 
-;;;; ---- Tests: enqueue-preemptive-prompt ----
+;;;; ---- Tests: profile-stop-and-collect ----
 
-(ert-deftest agent-repl-test-enqueue-preemptive-prompt-stores ()
-  "Non-empty prompt is stored as pending-prompts list."
+(ert-deftest agent-repl-test-dispatch-prompt-sends-directly-without-emacs-queue ()
+  "Prompt dispatch always delegates to the daemon-backed send path."
   (agent-repl-test--with-clean-state
-    (agent-repl--enqueue-preemptive-prompt "ws1" "do the thing")
-    (should (equal (agent-repl--ws-get "ws1" :pending-prompts) '("do the thing")))
-    (should (eq (agent-repl--ws-get "ws1" :pending-show-panels) t))))
-
-(ert-deftest agent-repl-test-enqueue-preemptive-prompt-nil ()
-  "Nil prompt does not store anything."
-  (agent-repl-test--with-clean-state
-    (agent-repl--enqueue-preemptive-prompt "ws1" nil)
-    (should (null (agent-repl--ws-get "ws1" :pending-prompts)))))
-
-(ert-deftest agent-repl-test-enqueue-preemptive-prompt-nil-no-show-panels ()
-  "Nil prompt does not set :pending-show-panels."
-  (agent-repl-test--with-clean-state
-    (agent-repl--enqueue-preemptive-prompt "ws1" nil)
-    (should (null (agent-repl--ws-get "ws1" :pending-show-panels)))))
-
-(ert-deftest agent-repl-test-enqueue-preemptive-prompt-empty-string ()
-  "Empty string prompt does not store anything."
-  (agent-repl-test--with-clean-state
-    (agent-repl--enqueue-preemptive-prompt "ws1" "")
-    (should (null (agent-repl--ws-get "ws1" :pending-prompts)))))
-
-(ert-deftest agent-repl-test-enqueue-preemptive-prompt-empty-no-show-panels ()
-  "Empty string prompt does not set :pending-show-panels."
-  (agent-repl-test--with-clean-state
-    (agent-repl--enqueue-preemptive-prompt "ws1" "")
-    (should (null (agent-repl--ws-get "ws1" :pending-show-panels)))))
-
-(ert-deftest agent-repl-test-dispatch-prompt-enqueues-when-no-buffer ()
-  "When the workspace has no state at all (never registered), prompt is
-enqueued on :pending-prompts."
-  (agent-repl-test--with-clean-state
-    (agent-repl--dispatch-prompt-command "ws1" "hello")
-    (should (equal (agent-repl--ws-get "ws1" :pending-prompts) '("hello")))))
-
-(ert-deftest agent-repl-test-dispatch-prompt-enqueues-when-not-ready ()
-  "When the workspace has no live running agent session, the prompt is enqueued."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :frontend 'gui)
-    (agent-repl--dispatch-prompt-command "ws1" "hello")
-    (should (equal (agent-repl--ws-get "ws1" :pending-prompts) '("hello")))))
-
-(ert-deftest agent-repl-test-dispatch-prompt-sends-immediately-when-running ()
-  "When the workspace has a live running agent session, the prompt is sent
-immediately via `agent-repl--send' rather than enqueued.
-
-Regression: the old body gated on the vterm-only buffer-local
-`agent-repl--ready', which is always nil for a gui workspace (no
-`:vterm-buffer' is ever set), so it ALWAYS enqueued -- a gui workspace's
-prompt could never be delivered immediately no matter how long its
-session had been running.  This test's workspace has a genuinely live
-session (`:frontend-session-id' bound) and fails against that old body."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :frontend 'gui)
-    (agent-repl--ws-put "ws1" :frontend-session-id "sid-1")
-    (let (sent-prompt sent-ws)
+    (let (sent)
       (cl-letf (((symbol-function 'agent-repl--send)
-                 (lambda (prompt ws) (setq sent-prompt prompt sent-ws ws))))
+                 (lambda (prompt ws) (setq sent (cons ws prompt)))))
         (agent-repl--dispatch-prompt-command "ws1" "hello")
-        (should (equal sent-prompt "hello"))
-        (should (equal sent-ws "ws1"))
-        (should-not (agent-repl--ws-get "ws1" :pending-prompts))))))
-
-(ert-deftest agent-repl-test-dispatch-prompt-appends-to-existing ()
-  "Multiple prompts are appended to :pending-prompts in order."
-  (agent-repl-test--with-clean-state
-    (agent-repl--dispatch-prompt-command "ws1" "first")
-    (agent-repl--dispatch-prompt-command "ws1" "second")
-    (should (equal (agent-repl--ws-get "ws1" :pending-prompts) '("first" "second")))))
+        (should (equal sent '("ws1" . "hello")))))))
 
 (ert-deftest agent-repl-test-dispatch-prompt-normalizes-branch-name ()
-  "Branch-style name 'DWC/foo' is normalized to 'foo'."
+  "Branch-style workspace names are normalized before direct dispatch."
   (agent-repl-test--with-clean-state
-    (agent-repl--dispatch-prompt-command "DWC/foo" "hello")
-    (should (equal (agent-repl--ws-get "foo" :pending-prompts) '("hello")))))
-
-;;;; ---- Tests: profile-stop-and-collect ----
+    (let (sent)
+      (cl-letf (((symbol-function 'agent-repl--send)
+                 (lambda (prompt ws) (setq sent (cons ws prompt)))))
+        (agent-repl--dispatch-prompt-command "DWC/foo" "hello")
+        (should (equal sent '("foo" . "hello")))))))
 
 (ert-deftest agent-repl-test-profile-stop-and-collect-returns-new-buffer-text ()
   "Only buffers created by the wrapped `profiler-report' call are captured."
@@ -1191,8 +1128,7 @@ disagree."
 
 (ert-deftest agent-repl-test-gns-sockets-close-then-gui-not-running-runs-teardown-directly ()
   "A gui workspace with no live daemon session binding must still fall
-through to immediate teardown — the prompt would otherwise queue on
-`:pending-prompts' and never drain before close."
+through to immediate teardown — there is no agent session to drain."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws" :frontend 'gui)
     (let ((called nil)
@@ -4265,18 +4201,23 @@ the new workspace's dirname when path matches the flavor."
       (should (equal (plist-get agent-repl--oneshot-last-ws :doom) "doom-ws-1")))))
 
 (ert-deftest agent-repl-test-oneshot-track-workspace-drains-amended ()
-  "Track drains queued amended prompts onto the workspace's
-`:pending-prompts' and clears the global queue."
+  "Track dispatches queued amended prompts and clears the global queue."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-oneshot-tracking-state
       (agent-repl--oneshot-reset-flavor :doom)
       (setq agent-repl--oneshot-amended-prompts
             (plist-put agent-repl--oneshot-amended-prompts
                        :doom '("amend-1" "amend-2")))
-      (agent-repl--ws-put "doom-ws-1" :pending-prompts '("preemptive"))
-      (agent-repl--oneshot-track-workspace agent-repl--doom-config-dir "doom-ws-1")
-      (should (equal (agent-repl--ws-get "doom-ws-1" :pending-prompts)
-                     '("preemptive" "amend-1" "amend-2")))
+      (let (dispatched)
+        (cl-letf (((symbol-function 'agent-repl--dispatch-prompt-command)
+                   (lambda (ws prompt)
+                     (setq dispatched
+                           (append dispatched (list (cons ws prompt)))))))
+          (agent-repl--oneshot-track-workspace
+           agent-repl--doom-config-dir "doom-ws-1"))
+        (should (equal dispatched
+                       '(("doom-ws-1" . "amend-1")
+                         ("doom-ws-1" . "amend-2")))))
       (should (null (plist-get agent-repl--oneshot-amended-prompts :doom))))))
 
 (ert-deftest agent-repl-test-oneshot-track-workspace-unrelated-path-noop ()
@@ -4463,9 +4404,9 @@ prompt onto `agent-repl--oneshot-amended-prompts' (FIFO)."
 
 (ert-deftest agent-repl-test-oneshot-amend-errors-when-ws-gone ()
   "When the recorded workspace dirname is not in the perspective list,
-amend surfaces a user-error rather than persisting a ghost
-`:pending-prompts' entry.  Unconditional check -- there is no
-`:vterm-buffer'-present escape hatch that could skip it."
+amend surfaces a user-error rather than retaining a prompt for a ghost
+workspace.  Unconditional check -- there is no `:vterm-buffer'-present
+escape hatch that could skip it."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-oneshot-tracking-state
       (setq agent-repl--oneshot-last-ws
@@ -4638,37 +4579,6 @@ double-schedule."
 ;;;; ---- Tests: cherry-pick progress filter ----
 ;;
 ;; The filter is a pure string -> progress-plist fold, so these need no git.
-
-(ert-deftest agent-repl-test-resume-investigation-prompt-names-lost-session ()
-  "The investigation prompt names the lost resume id."
-  (let ((p (agent-repl--resume-investigation-prompt
-            "3ef2f8f5-uuid" '("/cfg/projects/-w/3ef2f8f5-uuid.jsonl"))))
-    (should (string-match-p "3ef2f8f5-uuid" p))))
-
-(ert-deftest agent-repl-test-resume-investigation-prompt-searches-both-config-dirs ()
-  "The investigation prompt directs the agent at BOTH config dirs."
-  (let ((p (agent-repl--resume-investigation-prompt "u" nil)))
-    (should (string-match-p "\\.claude`" p))
-    (should (string-match-p "\\.claude-chesscom" p))))
-
-(ert-deftest agent-repl-test-resume-investigation-prompt-lists-searched-paths ()
-  "Daemon-reported searched paths appear in the prompt."
-  (let ((p (agent-repl--resume-investigation-prompt "u" '("/a.jsonl" "/b.jsonl"))))
-    (should (string-match-p "/a.jsonl, /b.jsonl" p))))
-
-(ert-deftest agent-repl-test-resume-investigation-prompt-handles-no-paths ()
-  "A nil searched-paths renders a placeholder rather than erroring."
-  (let ((p (agent-repl--resume-investigation-prompt "u" nil)))
-    (should (string-match-p "(none reported)" p))))
-
-(ert-deftest agent-repl-test-dispatch-resume-investigation-signals-without-git-root ()
-  "An unresolvable git root signals rather than creating a rootless worktree."
-  (let ((agent-repl--resume-investigation-workspaces (make-hash-table :test 'equal)))
-    (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
-               (lambda (&rest _) ""))
-              ((symbol-function 'run-at-time)
-               (lambda (&rest _) (error "must not schedule a create without a git root"))))
-      (should-error (agent-repl--dispatch-resume-investigation "uuid-gone" nil "/w")))))
 
 (ert-deftest agent-repl-test-merge-continue-after-resolve-sends-resume ()
   "The interactive continue command sends the resume over UDS for the current ws."

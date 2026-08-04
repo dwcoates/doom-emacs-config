@@ -248,7 +248,7 @@ func TestPostMergeHookFailureIsRetainedNotSwallowed(t *testing.T) {
 	h.picker.results <- pickResult{res: Result{Outcome: OutcomeMerged}}
 	<-hook.calls
 
-	// Act — the handoff fails.
+	// Act — process-level aftermath fails.
 	boom := sentinelError("parent session unreachable")
 	hook.results <- boom
 	// Close waits for the hook goroutine, which is what makes the retained
@@ -271,7 +271,7 @@ func TestPostMergeHookFailureIsRetainedNotSwallowed(t *testing.T) {
 }
 
 func TestPostMergeHookFailureRecordsNoMergeFailedTransition(t *testing.T) {
-	// Arrange — the commits are on the target, so a failed handoff must not
+	// Arrange — the commits are on the target, so failed aftermath must not
 	// make the pushed state claim otherwise.
 	hook := newFakePostMergeHook(4)
 	defer close(hook.stop)
@@ -294,7 +294,7 @@ func TestPostMergeHookFailureRecordsNoMergeFailedTransition(t *testing.T) {
 	defer h.sink.mu.Unlock()
 	for _, tr := range h.sink.got {
 		if tr.phase == PhaseMergeFailed {
-			t.Fatalf("sink recorded %v, want no merge_failed for a failed post-merge handoff", tr)
+			t.Fatalf("sink recorded %v, want no merge_failed for failed post-merge aftermath", tr)
 		}
 	}
 }
@@ -341,7 +341,7 @@ func TestNewCoordinatorRequiresThePostMergeHook(t *testing.T) {
 		Resolver: newFakeResolver(1),
 	})
 
-	// Assert — a coordinator that drops the parent handoff is broken, not
+	// Assert — a coordinator that drops process-level aftermath is broken, not
 	// degraded.
 	if err == nil {
 		t.Fatalf("NewCoordinator() error = nil, want the missing hook refused")
