@@ -148,6 +148,13 @@ const (
 	// because it is the expected answer for a hibernated workspace: the client
 	// renders the gate from it instead of an error card.
 	TypeSessionHibernated Type = "session.hibernated"
+	// TypeKeepAliveWindowUnclosed — the durable keep-alive window ledger
+	// refused to stamp a ping's end. It is a NAMED failure rather than a log
+	// line because an open window has no upper bound: every later item on the
+	// workspace is withheld from every rendering until the row is repaired, so
+	// the conversation silently stops advancing. Naming it is what turns a
+	// permanent blackout into something a human is told about.
+	TypeKeepAliveWindowUnclosed Type = "keep_alive.window_unclosed"
 	// TypeInternalUnclassified — the loud fallthrough. It carries the raw
 	// error text and is always logged; a silent fallthrough would let the
 	// vocabulary rot without anyone noticing.
@@ -259,6 +266,7 @@ var prose = map[Type]string{
 	TypeQueueEntrySessionUnwired:   "the queued prompt's session is not attached to this daemon, so it cannot be run yet",
 	TypeQueueEntryKeepAliveHeld:    "the queued prompt is waiting for a cache keep-alive response and cannot be forced ahead of it",
 	TypeSessionHibernated:          "the session is hibernated; choose how to revive it before sending prompts",
+	TypeKeepAliveWindowUnclosed:    "a cache keep-alive window could not be closed, so new conversation is being withheld until it is repaired",
 	TypeInternalUnclassified:       "the command failed",
 
 	// API — the SDK or the vendor refusing or concluding the work.
@@ -638,6 +646,22 @@ func StartFailed(reason string) *frontendv1.SystemFailureItem {
 	}
 }
 
+// KeepAliveWindowUnclosed classifies a failure to stamp a keep-alive window's
+// end in the durable ledger.
+//
+// It is a system-failure CARD rather than a log line because of what an open
+// window means: it excludes every later conversation item on the workspace,
+// forever, from every rendering. The user's next prompt would appear to vanish.
+// The card is the only thing that tells them why.
+func KeepAliveWindowUnclosed(reason string) *frontendv1.SystemFailureItem {
+	return &frontendv1.SystemFailureItem{
+		ErrorClass:   frontendv1.ErrorClass_ERROR_CLASS_INTERNAL,
+		ErrorType:    string(TypeKeepAliveWindowUnclosed),
+		Message:      prose[TypeKeepAliveWindowUnclosed],
+		SourceDetail: reason,
+	}
+}
+
 // Degraded classifies a shim-reported DegradedState — the store-write
 // rejection path, whose reason is a StoreWriteAck error the shim wrapped.
 //
@@ -726,6 +750,7 @@ func AllTypes() []Type {
 		TypeQueueEntrySessionUnwired,
 		TypeQueueEntryKeepAliveHeld,
 		TypeSessionHibernated,
+		TypeKeepAliveWindowUnclosed,
 		TypeInternalUnclassified,
 		TypeAPIAuthenticationFailed,
 		TypeAPIBillingError,
