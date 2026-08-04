@@ -74,10 +74,38 @@ type queueEntry struct {
 	// prompt is actually delivered or cancelled, or a second crash in the
 	// window would lose the very prompt the row exists to save.
 	drainRowPending bool
+
+	// keepAliveHoldTurnID names the in-flight cache keep-alive turn holding
+	// this entry, and is empty for every ordinary entry.
+	//
+	// It is the drain hold's SHAPE with a different reason and a different exit
+	// set. Like a drain hold it is not a classification — the classifier never
+	// runs on one of these, because the turn in front of the entry is a
+	// machine-generated ping there is nothing to interject into — so the entry
+	// keeps the HOLD stamp for its whole held life rather than claiming a
+	// classifier is running that never will.
+	//
+	// Unlike a drain hold there is NO FORCE-THROUGH. A drain-held prompt can be
+	// forced because delivering it merely delays a bounce; a keep-alive-held
+	// prompt cannot, because the ping must COMPLETE before the daemon can
+	// rewind the transcript that the ping is about to pollute, and delivering
+	// the prompt first would submit it on top of the keep-alive turns the
+	// rewind exists to discard. The two exits are delivery when the ping's turn
+	// ends — the daemon rewinds, then submits — and QueueCancelCmd.
+	keepAliveHoldTurnID string
 }
 
 // drainHeld reports whether a scheduled shutdown's lease is parking this entry.
 func (e *queueEntry) drainHeld() bool { return e.shutdownHoldScheduleID != "" }
+
+// keepAliveHeld reports whether an in-flight cache keep-alive turn is holding
+// this entry.
+func (e *queueEntry) keepAliveHeld() bool { return e.keepAliveHoldTurnID != "" }
+
+// held reports whether ANY hold is parking this entry, whatever its kind. It is
+// the predicate every delivery-selection path asks, so a hold added later is
+// honored by all of them without each having to learn its name.
+func (e *queueEntry) held() bool { return e.drainHeld() || e.keepAliveHeld() }
 
 // promptQueue is one session's ordered FIFO of held prompts. It is not
 // goroutine-safe; the Manager serializes every access under its own mutex.
@@ -135,7 +163,7 @@ func (q *promptQueue) popFront() *queueEntry {
 // order of whatever is deliverable is untouched.
 func (q *promptQueue) popFrontDeliverable() *queueEntry {
 	for i, e := range q.entries {
-		if e.drainHeld() {
+		if e.held() {
 			continue
 		}
 		q.entries = append(q.entries[:i], q.entries[i+1:]...)
@@ -187,7 +215,7 @@ func (q *promptQueue) addHeadJump(e *queueEntry) {
 // pause, and the entry keeps its head-jump claim for whenever the lease ends.
 func (q *promptQueue) takeHeadJump() *queueEntry {
 	for i, e := range q.entries {
-		if e.headJump && !e.drainHeld() {
+		if e.headJump && !e.held() {
 			q.entries = append(q.entries[:i], q.entries[i+1:]...)
 			return e
 		}
@@ -204,7 +232,7 @@ func (q *promptQueue) takeHeadJump() *queueEntry {
 // claim on the next boundary exactly as it found it.
 func (q *promptQueue) takeInterjecting() *queueEntry {
 	for i, e := range q.entries {
-		if e.interjecting && !e.drainHeld() {
+		if e.interjecting && !e.held() {
 			q.entries = append(q.entries[:i], q.entries[i+1:]...)
 			return e
 		}
@@ -236,6 +264,13 @@ func (q *promptQueue) view(workspace, sessionID string) *frontendv1.QueueView {
 		}
 		if e.drainHeld() {
 			entry.ShutdownHold = &frontendv1.QueueEntryShutdownHold{ScheduleId: e.shutdownHoldScheduleID}
+		}
+		// The keep-alive hold is projected beside the drain hold and never
+		// instead of a classification: the webapp renders a dedicated "waiting
+		// on a keep-alive response" bubble from this field, which is the honest
+		// account of a prompt waiting on a turn nobody asked for.
+		if e.keepAliveHeld() {
+			entry.KeepAliveHold = &frontendv1.QueueEntryKeepAliveHold{TurnId: e.keepAliveHoldTurnID}
 		}
 		v.Entries = append(v.Entries, entry)
 	}
@@ -338,6 +373,38 @@ func (m *Manager) queueSubmitLocked(d *sessionController, requestID, text, permi
 		d.queue.add(e)
 		m.logf("session-controller: prompt PARKED by the drain lease entry=%s ws=%q session=%s schedule=%s turn_active=%v — a scheduled shutdown holds the lease, so this prompt is delayed until the bounce completes; it is not classified and not refused",
 			e.id, d.workspace, d.sessionID, scheduleID, d.turn.active())
+		return e, true, nil
+	}
+	// A REAL PROMPT ARRIVING MID-PING IS HELD, not raced against the ping and
+	// not allowed to interrupt it. The ping's turn must COMPLETE before the
+	// daemon can rewind the transcript it is polluting, and only after that
+	// rewind may this prompt be submitted — so the hold is what makes the
+	// ordering "ping ends, rewind, submit" rather than a race.
+	//
+	// It is taken BEFORE the turn-active test on purpose. The ping's turn is
+	// normally active here, so the ordinary queueing path would catch the
+	// prompt anyway — but it would stamp it PENDING and run the classifier on
+	// it, asking a model whether the user's prompt should interrupt a
+	// machine-generated ping. Checking first is what makes the hold, not the
+	// classification, the thing that describes this entry.
+	if d.keepAliveTurnID != "" {
+		e := &queueEntry{
+			id:                  newQueueEntryID(),
+			requestID:           requestID,
+			text:                text,
+			permissionMode:      permissionMode,
+			promptOrigin:        promptOrigin,
+			queuedAtMs:          m.now(),
+			classification:      frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD,
+			keepAliveHoldTurnID: d.keepAliveTurnID,
+		}
+		// Appended at the BACK even against a paused queue, exactly as a
+		// drain-parked entry is: a head jump is the paused queue's one
+		// deliverable, and a held entry is by definition not deliverable, so
+		// claiming that position would be a lie about when it runs.
+		d.queue.add(e)
+		m.logf("session-controller: prompt HELD behind a cache keep-alive entry=%s ws=%q session=%s keep_alive_turn=%s turn_active=%v — the ping must finish so the daemon can rewind it out of the transcript before this prompt is submitted; it is not classified and not refused",
+			e.id, d.workspace, d.sessionID, d.keepAliveTurnID, d.turn.active())
 		return e, true, nil
 	}
 	if !d.turn.active() {
@@ -563,6 +630,20 @@ func (m *Manager) deliver(d *sessionController, e *queueEntry) {
 		m.mu.Unlock()
 		m.logf("session-controller: queue delivery REFUSED entry=%s session=%s ws=%q schedule=%s — the entry is parked by a scheduled shutdown's drain lease and a delivery path selected it anyway; requeued at the head, nothing was submitted",
 			e.id, d.sessionID, d.workspace, e.shutdownHoldScheduleID)
+		m.publish(d.sessionID, view, recs)
+		return
+	}
+	// THE KEEP-ALIVE HOLD'S BACKSTOP, at the same funnel and for the same
+	// reason. Delivering a keep-alive-held prompt would submit it on top of the
+	// very keep-alive turns the rewind exists to discard, which is worse than
+	// delaying it: the ping would become permanent context.
+	if e.keepAliveHeld() {
+		m.mu.Lock()
+		d.queue.pushFront(e)
+		view, recs := m.publishQueueLocked(d)
+		m.mu.Unlock()
+		m.logf("session-controller: queue delivery REFUSED entry=%s session=%s ws=%q keep_alive_turn=%s — the entry is held behind an in-flight cache keep-alive turn and a delivery path selected it anyway; requeued at the head, nothing was submitted",
+			e.id, d.sessionID, d.workspace, e.keepAliveHoldTurnID)
 		m.publish(d.sessionID, view, recs)
 		return
 	}
@@ -817,6 +898,20 @@ func (m *Manager) ForceQueueEntry(workspace, entryID string) error {
 	}
 	d := owner.live
 	e := owner.entryLocked(entryID)
+	// A KEEP-ALIVE HOLD HAS NO FORCE-THROUGH, and this is the one place that
+	// has to say so. A drain-held prompt can be forced because delivering it
+	// only delays a bounce the user is choosing to delay. A keep-alive-held
+	// prompt cannot: the ping's turn has to COMPLETE before the daemon can
+	// rewind it out of the transcript, and forcing the prompt through would
+	// submit it on top of the keep-alive turns the rewind exists to discard —
+	// making the ping permanent context instead of temporary plumbing. The
+	// wait is short and bounded by a turn that is already running, so the
+	// refusal costs the user seconds and preserves the guarantee.
+	if e.keepAliveHeld() {
+		keepAliveTurn := e.keepAliveHoldTurnID
+		m.mu.Unlock()
+		return m.refuseKeepAliveForce(workspace, entryID, d.sessionID, keepAliveTurn)
+	}
 	forcedSchedule, hadRow := e.shutdownHoldScheduleID, e.drainRowPending
 
 	// THE DURABLE ROW GOES FIRST, before the entry becomes deliverable. A force
