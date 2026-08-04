@@ -875,6 +875,26 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
       lastSeq: 16n,
     }));
 
+    // Claude emits both task_updated and task_notification as terminal facts
+    // for one background agent. Preserve both raw vendor messages, but expose
+    // exactly one lifecycle end and keep the root turn live for the other task.
+    query.emit({
+      type: "system",
+      subtype: "task_updated",
+      uuid: "task-end-1-duplicate",
+      session_id: "vendor-uuid",
+      task_id: "agent-python",
+      patch: { status: "completed" },
+    } as unknown as SdkMessageLike);
+    const duplicateTaskEnd = await store.peer().next(StoreWriteSchema);
+    expect(duplicateTaskEnd.batch!.events.map((event) => event.payload.case)).toEqual(["vendor"]);
+    expect(duplicateTaskEnd.batch!.events[0]!.requestId).toBe("p1");
+    expect(session.turnCount()).toBe(1);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: 1n,
+      lastSeq: 17n,
+    }));
+
     query.emit({
       type: "system",
       subtype: "task_notification",
@@ -919,6 +939,14 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
         completed_sdk_task_ids: ["agent-go"],
         live_sdk_task_count_after: 0,
         decision: "turn_ended_after_final_sdk_task",
+      },
+    });
+    expect(log.record("SDK repeated a stored terminal task fact; retaining vendor evidence without duplicating lifecycle")).toMatchObject({
+      request_id: "p1",
+      context: {
+        duplicate_terminal_sdk_task_ids: ["agent-python"],
+        live_sdk_task_ids: ["agent-go"],
+        decision: "retain_vendor_message_without_duplicate_task_end",
       },
     });
   });
