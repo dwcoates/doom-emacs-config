@@ -147,7 +147,7 @@ func buildQueueHarness(t *testing.T, cls *fakeClassifier, wrap func(*fakePusher)
 		ProtocolVersion:   "1",
 		ShutdownHolds:     holds,
 		Logf:              logf,
-		now:               func() int64 { return 1000 },
+		Now:               func() int64 { return 1000 },
 		Source:            stubSource{},
 		FileDiagnostics:   fakeFileDiagnosticPersister{},
 		newClient: func(c shimclient.Config) sessionClient {

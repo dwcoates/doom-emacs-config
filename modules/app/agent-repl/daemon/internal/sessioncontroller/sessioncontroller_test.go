@@ -337,9 +337,19 @@ func (c *fakeClient) interruptCount() int {
 // built fake so a test can inspect what the session controller sent it.
 func newTestManager(t *testing.T, locator SessionLocator, spawner Spawner) (*Manager, func() *fakeClient) {
 	t.Helper()
+	return newClockedTestManager(t, locator, spawner, nil)
+}
+
+// newClockedTestManager is newTestManager over an explicit Config.Now — the
+// exported clock seam production threads its one daemon clock into. A nil now
+// leaves the field unset, which is the wall-clock default every other test
+// runs on.
+func newClockedTestManager(t *testing.T, locator SessionLocator, spawner Spawner, now func() int64) (*Manager, func() *fakeClient) {
+	t.Helper()
 	var mu sync.Mutex
 	var last *fakeClient
 	m, err := New(Config{
+		Now:               now,
 		Push:              &fakePusher{},
 		SSM:               &fakeApplier{},
 		Spawner:           spawner,
