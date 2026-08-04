@@ -45,6 +45,16 @@ var ErrAlreadyHibernated = errors.New("session-controller: the session is alread
 // another is mid-flight on the same workspace.
 var ErrHibernationInFlight = errors.New("session-controller: a hibernation transition is already in flight for this workspace")
 
+// ErrHibernationNoLongerIdle reports an AUTOMATIC hibernation whose elapsed no
+// longer clears the threshold it was decided against, re-read at claim time.
+//
+// It is the sweeper's stale-snapshot refusal. A sweep evaluates a registry
+// snapshot and can only act on it some time later; a session that started and
+// finished a turn in that gap is genuinely active, and hibernating it would
+// write a durable sleep — with the snapshot's account attached — over work that
+// had just happened.
+var ErrHibernationNoLongerIdle = errors.New("session-controller: the session is no longer idle enough for the automatic hibernation that was decided for it")
+
 // ErrHibernated reports an operation refused because the session is
 // hibernated and the user has not made a revival choice. Every prompt path
 // funnels into the gate that returns it (promptdispatch.go).
@@ -75,6 +85,11 @@ type HibernationRegistrar interface {
 	// TurnEndObserved persists when the session's most recent turn ended — the
 	// keep-alive policy's one input.
 	TurnEndObserved(sessionID string, atMs int64)
+	// LastTurnEndOf reads that instant back. It is what the hibernation claim
+	// re-validates an AUTOMATIC cause's elapsed against, under the manager
+	// mutex, so a session that started and finished work between the sweep's
+	// snapshot and the claim cannot be put to sleep on the stale reading.
+	LastTurnEndOf(sessionID string) (int64, bool)
 }
 
 // HibernateWithCause is THE hibernation transition. account.Cause names why,
@@ -96,7 +111,7 @@ func (m *Manager) HibernateWithCause(workspace string, account registry.Hibernat
 	if !ok {
 		return fmt.Errorf("session-controller: workspace %q has no session to hibernate", workspace)
 	}
-	release, err := m.claimHibernation(workspace, sessionID, account.Cause)
+	release, account, err := m.claimHibernation(workspace, sessionID, account)
 	if err != nil {
 		return err
 	}
@@ -171,25 +186,83 @@ var errNoLiveSessionToHibernate = errors.New("session-controller: no live sessio
 // account, leaving the record telling whichever story landed second. The claim
 // is taken under the manager mutex, the same mutex every prompt submission
 // takes, so it also serializes against a prompt racing the sleep.
-func (m *Manager) claimHibernation(workspace, sessionID, cause string) (release func(), err error) {
+// THE ELAPSED IS RE-READ HERE TOO, for the two AUTOMATIC causes. The sweeper
+// decides on a registry snapshot and the claim is taken later; re-reading the
+// durable last-turn-end inside the claim is what makes "hibernated a session
+// that was working" unrepresentable rather than merely improbable, and the
+// account the transition persists is then computed from the FRESH figure rather
+// than from the snapshot's.
+//
+// account is the caller's decision; the returned detail is the one to persist.
+func (m *Manager) claimHibernation(workspace, sessionID string, account registry.HibernationDetail) (release func(), fresh registry.HibernationDetail, err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.hibernating == nil {
 		m.hibernating = map[string]bool{}
 	}
 	if m.hibernating[workspace] {
-		return nil, fmt.Errorf("%w: workspace %q, cause %s", ErrHibernationInFlight, workspace, cause)
+		return nil, account, fmt.Errorf("%w: workspace %q, cause %s", ErrHibernationInFlight, workspace, account.Cause)
 	}
 	if detail, ok := m.cfg.Hibernations.HibernationOf(sessionID); ok && detail.Cause != "" {
-		return nil, fmt.Errorf("%w: workspace %q session %s is asleep since %d for %s; the %s transition changes nothing",
-			ErrAlreadyHibernated, workspace, sessionID, detail.SinceMs, detail.Cause, cause)
+		return nil, account, fmt.Errorf("%w: workspace %q session %s is asleep since %d for %s; the %s transition changes nothing",
+			ErrAlreadyHibernated, workspace, sessionID, detail.SinceMs, detail.Cause, account.Cause)
+	}
+	fresh, err = m.revalidateElapsedLocked(workspace, sessionID, account)
+	if err != nil {
+		return nil, account, err
 	}
 	m.hibernating[workspace] = true
 	return func() {
 		m.mu.Lock()
 		delete(m.hibernating, workspace)
 		m.mu.Unlock()
-	}, nil
+	}, fresh, nil
+}
+
+// revalidateElapsedLocked re-measures an automatic cause's idleness against the
+// durable last-turn-end and returns the account to persist. Caller holds m.mu.
+//
+// A FORCED hibernation is not re-validated and must not be: the user asked for
+// it, and idleness was never its premise.
+//
+// The threshold re-checked is the one the DECISION carried — CutoffMs for the
+// idle cutoff, TTLMs for an expired cache — rather than the manager's own
+// configuration, so the claim re-validates exactly what the caller acted on
+// instead of substituting a second opinion for it. An account carrying no
+// threshold, or a session with no durable instant to measure from, is left
+// alone: this gate refuses a stale reading, and it has no business inventing a
+// refusal where there is nothing to read.
+func (m *Manager) revalidateElapsedLocked(workspace, sessionID string, account registry.HibernationDetail) (registry.HibernationDetail, error) {
+	threshold := automaticHibernationThreshold(account)
+	if threshold <= 0 {
+		return account, nil
+	}
+	lastEndMs, ok := m.cfg.Hibernations.LastTurnEndOf(sessionID)
+	if !ok || lastEndMs <= 0 {
+		return account, nil
+	}
+	elapsedMs := m.now() - lastEndMs
+	if elapsedMs < threshold {
+		m.logf("session-controller: hibernation transition REFUSED ws=%q session=%s cause=%s snapshot_elapsed_ms=%d fresh_elapsed_ms=%d threshold_ms=%d — the session's most recent turn ended after the sweep decided to hibernate it, so the decision was taken on a stale reading; nothing was stopped and nothing was persisted",
+			workspace, sessionID, account.Cause, account.ElapsedMs, elapsedMs, threshold)
+		return account, fmt.Errorf("%w: workspace %q session %s has been quiet for %dms against a %dms threshold (the sweep measured %dms)",
+			ErrHibernationNoLongerIdle, workspace, sessionID, elapsedMs, threshold, account.ElapsedMs)
+	}
+	account.ElapsedMs = elapsedMs
+	return account, nil
+}
+
+// automaticHibernationThreshold reports the elapsed a cause's account was
+// decided against, or 0 for a cause that is not a time-since decision at all.
+func automaticHibernationThreshold(account registry.HibernationDetail) int64 {
+	switch account.Cause {
+	case registry.HibernationCauseIdleCutoff:
+		return account.CutoffMs
+	case registry.HibernationCauseCacheExpired:
+		return account.TTLMs
+	default:
+		return 0
+	}
 }
 
 // hibernatedLocked reports whether the session backing d is durably
