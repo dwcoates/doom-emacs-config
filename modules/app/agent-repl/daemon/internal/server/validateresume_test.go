@@ -84,6 +84,30 @@ func TestSpawnHardFailsWhenTheRecordedTranscriptIsMissing(t *testing.T) {
 	}
 }
 
+// A FAKE daemon's respawn must reach the same verdict its create did. The
+// scripted offline SDK writes no vendor transcript, so gating the respawn on
+// one made every fake session unrecoverable after a hibernation or a bounce.
+func TestSpawnWaivesTheResumeGateForAFakeDaemon(t *testing.T) {
+	// Arrange — a recorded conversation with no transcript, under -fake.
+	cfg := t.TempDir()
+	sp, _, got, spawned := spawnerWithRecord(t, cfg, "uuid-fake")
+	sp.ForceFake(true)
+
+	// Act.
+	res, err := sp.EnsureShim(context.Background(), "s1")
+
+	// Assert — the same conversation is resumed rather than refused.
+	if err != nil {
+		t.Fatalf("EnsureShim under -fake: %v", err)
+	}
+	if *spawned != 1 {
+		t.Fatalf("spawn calls = %d, want 1", *spawned)
+	}
+	if got.Resume != "uuid-fake" || res.Resumed != "uuid-fake" {
+		t.Fatalf("spawn resume = %q, result resumed = %q, want uuid-fake", got.Resume, res.Resumed)
+	}
+}
+
 func TestSpawnLogsTheCanonicalResumeContinuityFailure(t *testing.T) {
 	// Arrange.
 	reg := openTestRegistry(t)

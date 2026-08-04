@@ -233,7 +233,7 @@ func (w *shutdownWorld) bootRecordingStops(t *testing.T) *stopCauseBoot {
 		Push:              forwarder,
 		SSM:               ssmMgr,
 		Progress:          progressMgr,
-		Spawner:           server.NewShimSpawner(reg, shimListener.Connected, shimListener.Evict, udsSpawn, logf),
+		Spawner:           fakeShimSpawner(reg, shimListener, udsSpawn, logf),
 		Locator:           &server.SessionLocator{Reg: reg},
 		Source:            &server.ShimConnSource{Listener: shimListener},
 		FileDiagnostics:   fileDiagnostics,

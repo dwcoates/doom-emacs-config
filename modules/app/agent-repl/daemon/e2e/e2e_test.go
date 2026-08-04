@@ -594,6 +594,22 @@ func assertCanonicalShimLog(t *testing.T, path string, workspace dlog.Workspace,
 	t.Errorf("inherited shim log target %q contained no canonical shim record", path)
 }
 
+// fakeShimSpawner builds the spawner every FAKE harness drives: one that knows
+// its shims run the scripted offline SDK. Without that, a respawn — a bounce, a
+// merge bring-up, anything after a hibernation — is refused by the resume
+// viability gate over a vendor transcript the scripted SDK never writes, while
+// the create that started the session waived exactly that check.
+func fakeShimSpawner(
+	reg *registry.Registry,
+	listener *shimlisten.Server,
+	spawn server.ShimSpawnFunc,
+	logf func(string, ...any),
+) *server.ShimSpawner {
+	sp := server.NewShimSpawner(reg, listener.Connected, listener.Evict, spawn, logf)
+	sp.ForceFake(true)
+	return sp
+}
+
 func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 	t.Helper()
 	var tuning harnessTuning
@@ -750,7 +766,7 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 		Push:              forwarder,
 		SSM:               ssmMgr,
 		Progress:          progressMgr,
-		Spawner:           server.NewShimSpawner(reg, shimListener.Connected, shimListener.Evict, udsSpawn, t.Logf),
+		Spawner:           fakeShimSpawner(reg, shimListener, udsSpawn, t.Logf),
 		Locator:           &server.SessionLocator{Reg: reg},
 		Source:            &server.ShimConnSource{Listener: shimListener},
 		FileDiagnostics:   fileDiagnostics,
