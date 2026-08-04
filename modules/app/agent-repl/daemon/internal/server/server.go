@@ -1697,13 +1697,16 @@ func (s *Server) applyKeepAlivePolicy(rec registry.Record, nowMs int64) (owned b
 				// in flight, prompts queued. Not a failure.
 				return true
 			}
-			s.logf("session %s: cache keep-alive ping FAILED (ws %s) elapsed_ms=%d retryable=%v: %v",
-				rec.SessionID, rec.CWD, decision.ElapsedMs, decision.Retryable, err)
-			if !decision.Retryable {
-				s.logf("session %s: cache keep-alive will NOT be retried (ws %s): the remaining margin before the cache expires is inside the retry floor, so another attempt would more likely pay a full re-ingest than save one",
-					rec.SessionID, rec.CWD)
-			}
+			s.logf("session %s: cache keep-alive ping FAILED (ws %s) elapsed_ms=%d remaining_ms=%d: %v",
+				rec.SessionID, rec.CWD, decision.ElapsedMs, decision.RemainingMs, err)
 		}
+		return true
+	case keepalive.ActionAwaitExpiry:
+		// THE RETRY FLOOR, and there is deliberately no submit in this arm.
+		// The policy decided it, so no reading of this switch can ping inside
+		// the floor; the line is the canonical record of having entered it.
+		s.logf("session %s: cache keep-alive will NOT be submitted (ws %s) elapsed_ms=%d remaining_ms=%d floor_ms=%d: the remaining margin before the cache expires is inside the retry floor, so an attempt would more likely pay a full re-ingest than save one; the cache is left to expire and the policy's cache-expired branch will report it",
+			rec.SessionID, rec.CWD, decision.ElapsedMs, decision.RemainingMs, decision.FloorMs)
 		return true
 	case keepalive.ActionHibernate:
 		detail := registry.HibernationDetail{
