@@ -144,8 +144,35 @@ type shutdownBoot struct {
 	// than on where it happens to sit in the test.
 	shimConnected func(sessionID string) (bool, error)
 
+	// sweepIdle fires this boot's IDLE SWEEPER (server.Config.IdleSweepTicks),
+	// and clock is the wall clock that sweep measures elapsed idleness with.
+	// Both are nil/zero unless the boot was given withBootIdleSweeper: a test
+	// that never asks for one cannot accidentally hibernate its own session.
+	sweepIdle chan<- time.Time
+	clock     *testClock
+
 	stop     func()
 	stopOnce sync.Once
+}
+
+// bootTuning is the small set of knobs one boot of the daemon may bend.
+type bootTuning struct {
+	idleSweeper bool
+	idleTimeout time.Duration
+}
+
+type bootOption func(*bootTuning)
+
+// withBootIdleSweeper gives this boot a test-driven idle sweeper on a
+// test-movable clock, with `cutoff` as the sweeper's elapsed-idle gate.
+//
+// It exists for the durability half of a TIME-SINCE policy: whether a
+// hibernated session stays out of the keep-alive loop, and whether a ping in
+// flight when the daemon died is submitted twice, are questions only a daemon
+// that comes back up can answer — and neither can be asked without driving the
+// sweep and moving the clock on the SUCCESSOR.
+func withBootIdleSweeper(cutoff time.Duration) bootOption {
+	return func(o *bootTuning) { o.idleSweeper, o.idleTimeout = true, cutoff }
 }
 
 // sweep fires this boot's boot-sweeper re-check pass. The channel is
@@ -179,8 +206,12 @@ func (b *shutdownBoot) sweepRecheckWhenParked(t *testing.T, sessionID string) {
 
 // boot stands a complete daemon up over the world's durable state. Calling it
 // twice (with a bounce in between) is the durability scenario.
-func (w *shutdownWorld) boot(t *testing.T) *shutdownBoot {
+func (w *shutdownWorld) boot(t *testing.T, options ...bootOption) *shutdownBoot {
 	t.Helper()
+	var tuning bootTuning
+	for _, opt := range options {
+		opt(&tuning)
+	}
 	b := &shutdownBoot{world: w, executed: make(chan bool, 4), recheck: make(chan time.Time, 1)}
 
 	stateStore, err := statedb.Open(filepath.Join(w.stateDir, "state.db"))
@@ -392,14 +423,25 @@ func (w *shutdownWorld) boot(t *testing.T) *shutdownBoot {
 	// redialled this boot, instead of inferring it from test phase order.
 	b.shimConnected = shimListener.Connected
 
+	var sweepTicks chan time.Time
+	var nowFn func() time.Time
+	if tuning.idleSweeper {
+		sweepTicks = make(chan time.Time)
+		b.sweepIdle = sweepTicks
+		b.clock = newTestClock()
+		nowFn = b.clock.now
+	}
 	srv := server.New(server.Config{
-		DaemonVersion: "0.1.0-e2e-drain",
-		Registry:      reg,
-		ModelCatalogs: modelCatalogs,
-		Controller:    controller,
-		SSM:           ssmMgr,
-		Frontend:      agentShim.Server,
-		Logf:          t.Logf,
+		DaemonVersion:  "0.1.0-e2e-drain",
+		Registry:       reg,
+		ModelCatalogs:  modelCatalogs,
+		Controller:     controller,
+		SSM:            ssmMgr,
+		Frontend:       agentShim.Server,
+		IdleSweepTicks: sweepTicks,
+		IdleTimeout:    tuning.idleTimeout,
+		Now:            nowFn,
+		Logf:           t.Logf,
 	})
 	binding.SetTarget(srv)
 	mux := http.NewServeMux()
