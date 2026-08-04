@@ -70,7 +70,7 @@ func (m *Manager) keepAliveEligibleLocked(d *sessionController) (ok bool, why st
 	if len(d.queue.entries) > 0 {
 		return false, "prompts_queued"
 	}
-	if d.keepAliveTurnID != "" {
+	if m.keepAliveHoldTurnLocked(d) != "" {
 		return false, "keep_alive_in_flight"
 	}
 	if m.cfg.SSM.MergeLeaseHeld(d.workspace) {
@@ -169,6 +169,42 @@ func (m *Manager) KeepAliveTurnID(workspace string) (string, bool) {
 		return "", false
 	}
 	return d.keepAliveTurnID, true
+}
+
+// keepAliveHoldTurnLocked reports the keep-alive turn a real prompt arriving
+// right now must park behind, or "" when none does. Caller holds m.mu.
+//
+// IT IS ONE CONTINUOUS OWNERSHIP EXPRESSED IN TWO FIELDS, and every eligibility
+// read goes through here so no caller can consult half of it. The ping's own
+// claim covers the turn; the workspace's rewind claim covers the aftermath the
+// turn's end starts — the stop, the truncated copy, the registry flip and the
+// respawn. A prompt admitted between them would start a turn the rewind is
+// about to kill and cut out of the transcript, with nothing told to the user.
+func (m *Manager) keepAliveHoldTurnLocked(d *sessionController) string {
+	if d.keepAliveTurnID != "" {
+		return d.keepAliveTurnID
+	}
+	return m.keepAliveRewinds[d.workspace]
+}
+
+// claimKeepAliveRewindLocked transfers the ending ping's claim to the rewind
+// that is about to run. Caller holds m.mu, in the SAME acquisition that cleared
+// the ping's own claim — the transfer is what makes the two fields one hold
+// rather than two states with a gap between them.
+func (m *Manager) claimKeepAliveRewindLocked(workspace, pingTurnID string) {
+	if m.keepAliveRewinds == nil {
+		m.keepAliveRewinds = map[string]string{}
+	}
+	m.keepAliveRewinds[workspace] = pingTurnID
+}
+
+// releaseKeepAliveRewindLocked ends the rewind's hold. Caller holds m.mu. It
+// matches on the turn id for noteKeepAliveTurnEndedLocked's reason: a later
+// ping's rewind must not be released by an earlier one's tail.
+func (m *Manager) releaseKeepAliveRewindLocked(workspace, pingTurnID string) {
+	if m.keepAliveRewinds[workspace] == pingTurnID {
+		delete(m.keepAliveRewinds, workspace)
+	}
 }
 
 // noteKeepAliveTurnEndedLocked clears the ping claim when the ending turn is

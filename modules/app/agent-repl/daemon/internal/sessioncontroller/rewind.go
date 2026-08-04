@@ -128,10 +128,37 @@ func (m *Manager) rewindKeepAliveTurns(ctx context.Context, workspace, sessionID
 	m.logf("session-controller: rewind PLANNED ws=%q session=%s vendor_session=%s transcript=%s keep_through=%d retained_leaf=%s dropping=%d turn(s)",
 		workspace, sessionID, vendorSessionID, transcriptPath, plan.KeepThrough, plan.RetainedLeafUUID, len(plan.DroppedTexts))
 
+	// THE STOP IS GUARDED BY THE SAME SETTLED LEASE HIBERNATION USES, and for
+	// the same reason with one addition. The keep-alive hold is what should
+	// make a live turn impossible here — no prompt is admitted from the ping's
+	// submit until this rewind's tail releases the workspace's rewind claim —
+	// so a turn found running at this point is evidence that the hold has a
+	// hole in it, not an ordinary condition. It therefore REFUSES rather than
+	// stops: the plan above was decided on a snapshot taken before that turn
+	// existed, so proceeding would SIGTERM an acked user turn and truncate it
+	// out of the transcript with nothing told to the user.
+	//
+	// The refusal travels the ErrNotSettled path back to releaseKeepAliveHolds,
+	// which is the established DEGRADED channel: the held prompt is submitted
+	// WITHOUT the rewind, so the ping stays visible and nothing is lost.
+	//
+	// The lease is released as soon as the shim is down rather than deferred to
+	// the end of the sequence: the respawn below takes a controller
+	// registration, which the SSM refuses while a hibernation lease is held,
+	// and there is no shim left to start a turn in the interval anyway.
+	releaseSettled, err := m.acquireSettledHibernationLease(workspace)
+	if err != nil {
+		m.logf("session-controller: rewind REFUSED ws=%q session=%s vendor_session=%s error=%v — a turn is live where the keep-alive hold promised none could be, and stopping the shim now would kill an acked user turn and cut it out of the transcript",
+			workspace, sessionID, vendorSessionID, err)
+		return "", fmt.Errorf("session-controller: rewind ws=%q session=%s: the workspace is not settled: %w", workspace, sessionID, err)
+	}
+
 	// STOP THE SHIM. The CLI holds the transcript open; copying from under a
 	// live writer risks a half-written trailing line.
-	if err := m.stopSessionController(workspace, sessionID, StopCauseHibernateIdleSweep()); err != nil {
-		return "", fmt.Errorf("session-controller: rewind ws=%q session=%s: stopping the shim: %w", workspace, sessionID, err)
+	stopErr := m.stopSessionController(workspace, sessionID, StopCauseHibernateIdleSweep())
+	releaseSettled()
+	if stopErr != nil {
+		return "", fmt.Errorf("session-controller: rewind ws=%q session=%s: stopping the shim: %w", workspace, sessionID, stopErr)
 	}
 
 	newVendorSessionID = uuid.NewString()
@@ -207,6 +234,14 @@ func (m *Manager) releaseKeepAliveHolds(d *sessionController, pingTurnID string,
 	// this function was handed, and delivering onto the retired controller
 	// would submit through a client whose connection is gone.
 	m.mu.Lock()
+	// THE REWIND'S CLAIM IS RELEASED HERE and nowhere else. It was taken at the
+	// ping's turn end (queue.go) as the continuation of the ping's own hold, so
+	// this — the instant the respawned session is up and the held prompts are
+	// about to be delivered — is the first moment a fresh prompt may start a
+	// turn without the rewind cutting it away. It is released on EVERY exit,
+	// including the abandoned one: a claim that outlived its rewind would hold
+	// every later prompt on the workspace forever.
+	m.releaseKeepAliveRewindLocked(workspace, pingTurnID)
 	live, ok := m.byWS[workspace]
 	if !ok {
 		m.mu.Unlock()

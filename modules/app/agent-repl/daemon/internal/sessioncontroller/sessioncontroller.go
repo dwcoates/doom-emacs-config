@@ -389,7 +389,20 @@ type Manager struct {
 	// transition holds (hibernation.go). It is what makes two racing causes
 	// produce one transition and one durable account instead of two.
 	hibernating map[string]bool
-	lastCSID    map[string]string // session id -> last-persisted claude session uuid
+	// keepAliveRewinds names, per WORKSPACE, the keep-alive ping turn whose
+	// aftermath — the transcript rewind and the respawn behind it — is still
+	// running. It is the SECOND half of the ping's continuous hold: the ping's
+	// own claim (sessionController.keepAliveTurnID) is cleared at the turn's
+	// end, and without this a prompt arriving in the gap between that clear and
+	// the rewind's stop would start a real turn the rewind then SIGTERMs and
+	// truncates away.
+	//
+	// It is keyed by workspace rather than held on the sessionController for
+	// the reason the rewind exists at all: the rewind REPLACES the controller,
+	// so a claim living on the retired one would evaporate exactly when the
+	// respawned session starts accepting prompts again.
+	keepAliveRewinds map[string]string
+	lastCSID         map[string]string // session id -> last-persisted claude session uuid
 	// shimPID is the pid each session's shim announced on its ShimHello. It is
 	// the ONLY way to stop a shim this daemon did not spawn, and it is kept in
 	// memory rather than persisted deliberately: it is trustworthy exactly
