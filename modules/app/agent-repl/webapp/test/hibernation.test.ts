@@ -9,6 +9,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { HibernationDetail } from "../src/frontend-proto.js";
+import type { AdapterEffect } from "../src/state-adapter.js";
 import {
   HIBERNATED_BODY_CLASS,
   HIBERNATION_COMPOSER_NOTICE,
@@ -16,6 +17,8 @@ import {
   REVIVE_COMPACT_ATTR,
   REVIVE_COMPACT_EXPLANATION,
   REVIVE_DIRECT_ATTR,
+  REVIVE_FAILED_TEXT,
+  ReviveWatch,
   hibernateRefusedNotice,
   hibernationBlocked,
   hibernationBlockedLog,
@@ -25,6 +28,7 @@ import {
   reviveDirectWarning,
   revivalGateHtml,
   revivePendingText,
+  reviveFailedLog,
   reviveRefusedLog,
 } from "../src/hibernation.js";
 
@@ -44,6 +48,33 @@ function forced(): HibernationDetail {
 /** Asleep because the cache went cold before a ping could fire. */
 function cacheExpired(elapsedMs = 4 * HOUR, ttlMs = HOUR): HibernationDetail {
   return { sinceMs: NOW - HOUR, cause: { case: "cacheExpired", value: { elapsedMs, ttlMs } } };
+}
+
+/** One pushed `SessionView` for a workspace, as an ingest-batch effect. */
+function sessionViewEffect(
+  workspace: string,
+  hibernation: HibernationDetail | null,
+): AdapterEffect {
+  return {
+    kind: "session-view",
+    value: {
+      workspace,
+      sessionId: "s1",
+      model: "",
+      slug: "",
+      title: "",
+      totalTokens: 0,
+      totalCostUsd: 0,
+      contextWindow: 0,
+      permissionMode: "",
+      shimAttached: true,
+      claudeSessionId: "",
+      cwd: workspace,
+      configDir: "",
+      models: [],
+      hibernation,
+    },
+  };
 }
 
 describe("hibernationBlocked: the composer gate", () => {
@@ -290,6 +321,172 @@ describe("hibernateRefusedNotice: the topbar line for a refused sleep", () => {
     expect(hibernateRefusedNotice(new Error("a turn is in flight"))).toContain(
       "a turn is in flight",
     );
+  });
+});
+
+describe("ReviveWatch: the exit an accepted-but-failed revival needs", () => {
+  it("waits while no session view for the workspace has landed", () => {
+    // Arrange — nothing has been said about the session yet, and a verdict now
+    // would be a guess.
+    const watch = new ReviveWatch();
+    watch.arm("/w", "direct");
+    // Act / Assert
+    expect(watch.observe([]).kind).toBe("waiting");
+  });
+
+  it("reads a view that dropped the hibernation field as the revival landing", () => {
+    // Arrange
+    const watch = new ReviveWatch();
+    watch.arm("/w", "compactFirst");
+    // Act
+    const verdict = watch.observe([sessionViewEffect("/w", null)]);
+    // Assert
+    expect(verdict.kind).toBe("revived");
+  });
+
+  it("reads a view that still carries hibernation as the bring-up having failed", () => {
+    // Arrange — the ack meant "decision taken", not "session up"; this is the
+    // state that used to leave the gate on "Waking the session…" forever.
+    const watch = new ReviveWatch();
+    watch.arm("/w", "direct");
+    // Act
+    const verdict = watch.observe([sessionViewEffect("/w", forced())]);
+    // Assert
+    expect(verdict.kind).toBe("failed");
+  });
+
+  it("carries the mode the failed verdict was armed with", () => {
+    // Arrange
+    const watch = new ReviveWatch();
+    watch.arm("/w", "compactFirst");
+    // Act
+    const verdict = watch.observe([sessionViewEffect("/w", forced())]);
+    // Assert — the two modes cost different things, so the report names one.
+    expect(verdict.kind === "failed" && verdict.mode).toBe("compactFirst");
+  });
+
+  it("carries the detail the failing view reported, not the one it was armed on", () => {
+    // Arrange — a bring-up that failed into a different cause is the daemon
+    // saying something new happened.
+    const watch = new ReviveWatch();
+    watch.arm("/w", "direct");
+    // Act
+    const verdict = watch.observe([sessionViewEffect("/w", cacheExpired())]);
+    // Assert
+    expect(verdict.kind === "failed" && verdict.hibernation.cause.case).toBe("cacheExpired");
+  });
+
+  it("rules once: a second batch after a verdict is ordinary state", () => {
+    // Arrange — the question was answered; a later view is not a re-judgement.
+    const watch = new ReviveWatch();
+    watch.arm("/w", "direct");
+    watch.observe([sessionViewEffect("/w", forced())]);
+    // Act / Assert
+    expect(watch.observe([sessionViewEffect("/w", forced())]).kind).toBe("waiting");
+  });
+
+  it("rules on the LAST view in a batch, as the store does", () => {
+    // Arrange — ruling on an earlier one would judge the revival by a state
+    // the store has already superseded.
+    const watch = new ReviveWatch();
+    watch.arm("/w", "direct");
+    // Act
+    const verdict = watch.observe([
+      sessionViewEffect("/w", forced()),
+      sessionViewEffect("/w", null),
+    ]);
+    // Assert
+    expect(verdict.kind).toBe("revived");
+  });
+
+  it("ignores a view belonging to a different workspace", () => {
+    // Arrange
+    const watch = new ReviveWatch();
+    watch.arm("/w", "direct");
+    // Act / Assert
+    expect(watch.observe([sessionViewEffect("/other", null)]).kind).toBe("waiting");
+  });
+
+  it("settles on a pre-init view that names no workspace", () => {
+    // Arrange — an empty workspace is silence about identity, not evidence of
+    // a different session: this socket carries exactly one.
+    const watch = new ReviveWatch();
+    watch.arm("/w", "direct");
+    // Act / Assert
+    expect(watch.observe([sessionViewEffect("", null)]).kind).toBe("revived");
+  });
+
+  it("rules on nothing until a decision is armed", () => {
+    // Arrange — an ordinary view on a session nobody asked to wake.
+    const watch = new ReviveWatch();
+    // Act / Assert
+    expect(watch.observe([sessionViewEffect("/w", forced())]).kind).toBe("waiting");
+  });
+
+  it("drops the expectation on disarm, so a rejected ack is owed no verdict", () => {
+    // Arrange
+    const watch = new ReviveWatch();
+    watch.arm("/w", "direct");
+    // Act
+    watch.disarm();
+    // Assert
+    expect(watch.observe([sessionViewEffect("/w", forced())]).kind).toBe("waiting");
+  });
+
+  it("reports the armed decision while one is outstanding", () => {
+    // Arrange
+    const watch = new ReviveWatch();
+    // Act
+    watch.arm("/w", "compactFirst");
+    // Assert
+    expect(watch.pending).toBe("compactFirst");
+  });
+});
+
+describe("reviveFailedLog: the record of an accepted revival that did not take", () => {
+  it("names the mode that was accepted", () => {
+    // Arrange / Act / Assert
+    expect(reviveFailedLog("compactFirst", forced())).toContain("compactFirst");
+  });
+
+  it("carries the cause the failing view reported", () => {
+    // Arrange / Act / Assert
+    expect(reviveFailedLog("direct", cacheExpired())).toContain("cause=cacheExpired");
+  });
+
+  it("says the gate is restored, since that is the user-visible consequence", () => {
+    // Arrange / Act / Assert
+    expect(reviveFailedLog("direct", forced())).toContain("gate is restored");
+  });
+});
+
+describe("the gate's failed-revival line", () => {
+  it("renders the failure above the cause when one is supplied", () => {
+    // Arrange / Act
+    const got = revivalGateHtml(forced(), null, NOW, REVIVE_FAILED_TEXT);
+    // Assert
+    expect(got).toContain("hibernation-failed");
+  });
+
+  it("keeps the buttons on offer beside the failure, since choosing again is the exit", () => {
+    // Arrange / Act
+    const got = revivalGateHtml(forced(), null, NOW, REVIVE_FAILED_TEXT);
+    // Assert
+    expect(got).toContain(REVIVE_COMPACT_ATTR);
+  });
+
+  it("draws no failure line when there is nothing to report", () => {
+    // Arrange / Act
+    const got = revivalGateHtml(forced(), null, NOW);
+    // Assert
+    expect(got).not.toContain("hibernation-failed");
+  });
+
+  it("escapes the failure line rather than trusting it as markup", () => {
+    // Arrange / Act
+    const got = revivalGateHtml(forced(), null, NOW, "<script>x</script>");
+    // Assert
+    expect(got).not.toContain("<script");
   });
 });
 

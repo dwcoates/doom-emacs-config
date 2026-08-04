@@ -222,7 +222,7 @@ describe("the revival gate's chrome wiring", () => {
   it("repaints the gate from the daemon's live state every frame", () => {
     // Assert — a pure function of state, like the two banners beside it, so
     // there is no local lifetime to unwind when the session wakes.
-    expect(chrome).toContain("revivalGateHtml(s.hibernation, revivePending)");
+    expect(chrome).toContain("revivalGateHtml(");
   });
 
   it("disables the send button while the session is asleep", () => {
@@ -233,7 +233,7 @@ describe("the revival gate's chrome wiring", () => {
   it("clears an in-flight decision only when the daemon reports the session awake", () => {
     // Assert — the pushed SessionView is the one authority on whether the
     // revive landed, so a decision cannot be settled locally.
-    expect(chrome).toContain("if (s.hibernation === null) revivePending = null");
+    expect(chrome).toContain("if (s.hibernation === null) {");
   });
 
   it("hides the sleep verb on a session that is already asleep", () => {
@@ -253,7 +253,7 @@ describe("the revival decision's dispatch", () => {
 
   it("sends exactly one ReviveSessionCmd for the chosen mode", () => {
     // Assert
-    expect(sendRevive).toContain("dispatcher.reviveSession(cmdWorkspace(), mode)");
+    expect(sendRevive).toContain("dispatcher.reviveSession(workspace, mode)");
   });
 
   it("marks the decision pending before the send, so the gate stops offering both", () => {
@@ -272,7 +272,51 @@ describe("the revival decision's dispatch", () => {
   it("does NOT clear the gate on a successful ack", () => {
     // Assert — the ack means the daemon ACCEPTED the decision, not that the
     // session is up. Taking the gate down there would put a live composer in
-    // front of a session that has no shim yet; only the pushed view can.
-    expect(sendRevive).not.toContain(".then(");
+    // front of a session that has no shim yet; only the pushed view can. The
+    // accepted arm ARMS the expectation and clears nothing.
+    const accepted = sendRevive.slice(sendRevive.indexOf(".then("), sendRevive.indexOf(".catch("));
+    expect(accepted).not.toContain("revivePending = null");
+  });
+
+  it("arms the one-shot expectation on an accepted ack", () => {
+    // Assert — an accepted decision whose bring-up fails is the state that
+    // used to leave the gate on "Waking the session…" forever. The next pushed
+    // view for this workspace is what settles it.
+    expect(sendRevive).toContain("reviveWatch.arm(workspace, mode)");
+  });
+
+  it("owes no verdict on a refused decision", () => {
+    // Assert — a rejected ack never reached the daemon's revival path, so no
+    // view is judging it.
+    expect(sendRevive).toContain("reviveWatch.disarm()");
+  });
+
+  it("drops a previous attempt's complaint before sending a new decision", () => {
+    // Assert — a stale failure line beside a fresh "waking…" line would
+    // describe the wrong attempt.
+    const cleared = sendRevive.indexOf('reviveFailure = ""');
+    const sent = sendRevive.indexOf("dispatcher.reviveSession");
+    expect(cleared).toBeLessThan(sent);
+  });
+});
+
+describe("the revival verdict's ingest wiring", () => {
+  /** The session socket's frame handler, where every ingest batch lands. */
+  const onMessage = blocksAfter(main, "      onMessage: (data) => {")[0]!;
+
+  it("rules on the batch the store just ingested", () => {
+    // Assert — the verdict is a wire fact about the daemon's next word on this
+    // session, not a deadline: nothing here counts time.
+    expect(onMessage).toContain("reviveWatch.observe(effects)");
+  });
+
+  it("restores the gate's buttons when an accepted revival did not take", () => {
+    // Assert — choosing again is the only exit left to offer.
+    expect(onMessage).toContain("revivePending = null");
+  });
+
+  it("records the failed revival once, through the workspace log", () => {
+    // Assert
+    expect(onMessage).toContain("reviveFailedLog(");
   });
 });
