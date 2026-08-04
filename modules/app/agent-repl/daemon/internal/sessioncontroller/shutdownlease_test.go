@@ -453,7 +453,7 @@ func TestAParkedEntryCarriesItsScheduleOnTheWire(t *testing.T) {
 	}
 
 	// Assert.
-	view := h.controller().queue.view("ws", "s1")
+	view := h.queueView()
 	if len(view.GetEntries()) != 1 {
 		t.Fatalf("view = %d entries, want 1", len(view.GetEntries()))
 	}
@@ -473,7 +473,7 @@ func TestAnOrdinaryEntryCarriesNoShutdownHoldOnTheWire(t *testing.T) {
 	}
 
 	// Assert.
-	view := h.controller().queue.view("ws", "s1")
+	view := h.queueView()
 	if len(view.GetEntries()) != 1 {
 		t.Fatalf("view = %d entries, want 1", len(view.GetEntries()))
 	}

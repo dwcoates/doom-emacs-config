@@ -222,6 +222,21 @@ func (h *queueHarness) entries() []queueEntry {
 	return out
 }
 
+// queueView renders the live controller's queue as the frontend sees it, under
+// the manager mutex.
+//
+// Under the mutex for the same reason entries() is: promptQueue.view reads the
+// classification and rationale of every entry, and the classify goroutine writes
+// both of them. Rendering the view straight off d.queue from a test goroutine is
+// a real race against a classifier that has not finished, and the race detector
+// rightly says so.
+func (h *queueHarness) queueView() *frontendv1.QueueView {
+	d := h.controller()
+	h.m.mu.Lock()
+	defer h.m.mu.Unlock()
+	return d.queue.view(d.workspace, d.sessionID)
+}
+
 // activitySignal is the package's test-side WAKEUP: a broadcast every fake
 // fires after it records something a test can observe.
 //
