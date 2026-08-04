@@ -747,6 +747,15 @@ message ShimHello {
   // a reconnect carries the cached observation so a restored daemon can
   // complete terminal accounting without replaying historical lifecycle rows.
   QueryRuntimeIdentity query_runtime_identity = 11;
+
+  // Gives the QueryCreated record's sequence in vendor_session_id's durable
+  // stream. The daemon uses this exact boundary to distinguish catch-up rows
+  // from lifecycle contradictions after binding query_instance_id from this
+  // handshake. Zero means QueryCreated belongs to a stream key that the SDK
+  // replaced when it revealed or rotated the vendor session identity, so the
+  // announced stream contains no pre-boundary lifecycle history for this
+  // query.
+  uint64 query_created_seq = 12;
 }
 
 message DaemonHello {
