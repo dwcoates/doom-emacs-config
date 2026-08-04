@@ -39,6 +39,7 @@ func TestSentinelClassifiesEachSentinel(t *testing.T) {
 		{"shim not ready", ErrShimNotReady, TypeShimHandshakeIncomplete},
 		{"shim unhealthy", ErrShimUnhealthy, TypeShimUnhealthy},
 		{"session not established", ErrSessionNotEstablished, TypeSessionNotEstablished},
+		{"queue entry session unwired", ErrQueueEntrySessionUnwired, TypeQueueEntrySessionUnwired},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
