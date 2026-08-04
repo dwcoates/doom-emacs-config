@@ -1279,8 +1279,10 @@ func (s *Server) DaemonView() *frontendv1.DaemonView {
 // SessionViewFromRecord builds a SessionView from a registry record plus the
 // live pending-permission ids. It is the SINGLE shaping shared by the connect
 // snapshot (cmd/claude-repld registrySessions) and the create/delete pushes, so
-// the two cannot drift. Rehydratable/Hibernated are not listed session state
-// post-cutover (controller-internal shim lifecycle) and stay false.
+// the two cannot drift. Rehydratable is not listed session state post-cutover
+// (controller-internal shim lifecycle) and stays false. Hibernated no longer
+// does: hibernation is now a DURABLE record fact with a typed account beside
+// it, so both are shaped from the record here.
 //
 // logf carries the classifier's loud default for a persisted death reason
 // outside the known set. A record written by an earlier build may hold an
@@ -1331,7 +1333,49 @@ func SessionViewFromRecordWithModelsAndUsage(logf dlog.Logf, rec registry.Record
 		Backfill:         backfillState(rec.BackfillState),
 		ModelOptions:     modelOptions,
 		TokenUtilization: usage,
+		// THE HIBERNATION PAIR, from the durable record and from nowhere else.
+		// `hibernated` is the compatibility projection of `hibernation`, so
+		// both are shaped from the SAME field here rather than one being a live
+		// guess beside the other's durable fact — which is how the bool came to
+		// be hard-coded false while a session really was asleep.
+		Hibernated:  rec.Hibernated,
+		Hibernation: hibernationDetail(logf, rec.SessionID, rec.Hibernation),
 	}
+}
+
+// hibernationDetail maps the record's durable hibernation account onto the
+// wire message. Nil for a session that is not hibernated — the field is
+// defined as "present iff hibernated", so an empty-but-present detail would
+// claim a sleep that is not happening.
+//
+// AN UNRECOGNIZED CAUSE IS LOUD AND STILL REPORTED. The registry refuses to
+// WRITE one, so reaching here means a record written by a binary that knows a
+// cause this one does not. Dropping the whole detail would hide the sleep
+// itself and leave the frontend rendering a live session that has no shim;
+// carrying the timestamp with no cause arm reports exactly what is known.
+func hibernationDetail(logf dlog.Logf, sessionID string, h registry.HibernationDetail) *frontendv1.HibernationDetail {
+	if h.Cause == "" {
+		return nil
+	}
+	detail := &frontendv1.HibernationDetail{SinceMs: h.SinceMs}
+	switch h.Cause {
+	case registry.HibernationCauseIdleCutoff:
+		detail.Cause = &frontendv1.HibernationDetail_IdleCutoff{
+			IdleCutoff: &frontendv1.HibernationIdleCutoff{CutoffMs: h.CutoffMs},
+		}
+	case registry.HibernationCauseForced:
+		detail.Cause = &frontendv1.HibernationDetail_Forced{Forced: &frontendv1.HibernationForced{}}
+	case registry.HibernationCauseCacheExpired:
+		detail.Cause = &frontendv1.HibernationDetail_CacheExpired{
+			CacheExpired: &frontendv1.HibernationCacheExpired{ElapsedMs: h.ElapsedMs, TtlMs: h.TTLMs},
+		}
+	default:
+		if logf != nil {
+			logf("server: session %s: hibernation cause %q is not one this binary understands; the sleep is reported with its timestamp and no cause arm rather than hidden",
+				sessionID, h.Cause)
+		}
+	}
+	return detail
 }
 
 func sessionTokenUtilization(logf dlog.Logf, source SessionTokenUsageSource, sessionID string) *frontendv1.SessionTokenUtilization {

@@ -41,6 +41,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/frontend"
+	"claude-repld/internal/keepalive"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/shim"
 	"claude-repld/internal/shimclient"
@@ -279,6 +280,16 @@ type Config struct {
 	// ModelCatalogs records the live query-owned menu for frontend rendering.
 	// Nil is allowed only in focused controller tests.
 	ModelCatalogs ModelCatalogRegistrar
+	// Hibernations is the durable half of hibernation and of the keep-alive
+	// policy's one input (hibernation.go). Nil makes HibernateWithCause a loud
+	// refusal rather than a sleep nothing records — an unrecorded sleep is
+	// revived implicitly by the next daemon, which is precisely the silent
+	// un-sleeping the durable flag exists to prevent.
+	Hibernations HibernationRegistrar
+	// KeepAlive is the resolved cache keep-alive policy. The zero value takes
+	// keepalive.DefaultConfig, because a zero TTL would read every session as
+	// already cache-expired.
+	KeepAlive keepalive.Config
 	// Logf is the daemon logger. Nil discards.
 	Logf func(string, ...any)
 	// Classifier judges prompts queued during a running turn (E4). Nil leaves
@@ -354,7 +365,11 @@ type Manager struct {
 	// (shutdownlease.go). Written and read only under mu; the zero value is
 	// usable, so nothing has to construct it.
 	restoreTombstones restoreTombstones
-	lastCSID          map[string]string // session id -> last-persisted claude session uuid
+	// hibernating is the exclusive per-workspace claim one hibernation
+	// transition holds (hibernation.go). It is what makes two racing causes
+	// produce one transition and one durable account instead of two.
+	hibernating map[string]bool
+	lastCSID    map[string]string // session id -> last-persisted claude session uuid
 	// shimPID is the pid each session's shim announced on its ShimHello. It is
 	// the ONLY way to stop a shim this daemon did not spawn, and it is kept in
 	// memory rather than persisted deliberately: it is trustworthy exactly
@@ -865,6 +880,12 @@ func (m *Manager) submitPromptAs(ctx context.Context, workspace, requestID, text
 		return err
 	}
 	if err := m.guardMergeLease(workspace, who, requestID, origin); err != nil {
+		return err
+	}
+	// THE REVIVAL GATE, ahead of ensure() on purpose: ensure() brings a stopped
+	// shim back up, so asking after it would have already paid the bring-up and
+	// silently un-slept the session the gate exists to hold (hibernation.go).
+	if err := m.guardHibernation(workspace, requestID, origin); err != nil {
 		return err
 	}
 	d, err := m.ensure(ctx, workspace)
@@ -1706,7 +1727,7 @@ func (m *Manager) hibernate(workspace, wantSession string, cause StopCause) erro
 	d, ok := m.byWS[workspace]
 	if !ok {
 		m.mu.Unlock()
-		return fmt.Errorf("session-controller: no live session for workspace %q to hibernate", workspace)
+		return fmt.Errorf("%w: workspace %q", errNoLiveSessionToHibernate, workspace)
 	}
 	if wantSession != "" && d.sessionID != wantSession {
 		live := d.sessionID
