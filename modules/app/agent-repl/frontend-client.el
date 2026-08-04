@@ -361,6 +361,10 @@ timer or UDS callback after either continuation runs."
   (unless (and (stringp cwd) (not (string-empty-p cwd))
                (functionp on-success) (functionp on-failure))
     (error "agent-repl: createSession requires cwd and callable continuations"))
+  ;; Session routing is exact-string keyed. Canonicalize before the command,
+  ;; reservation, pushed-view lookup, and every retry so all four use the same
+  ;; byte string as later workspace-routed commands.
+  (setq cwd (agent-repl--path-canonical cwd))
   (when (gethash cwd agent-repl--frontend-creates-in-flight)
     (agent-repl--log ws "createSession-async: REFUSED cwd=%s already-in-flight" cwd)
     (error "agent-repl: a createSession for %s is already in flight" cwd))
