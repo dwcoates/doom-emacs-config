@@ -274,6 +274,109 @@ FIELD-JSON is the already-serialized `\"field\": {...}' body."
       ;; Assert — only the real frame dispatched
       (should (= calls 1)))))
 
+;;;; ---- filter: a failing handler cannot stall the batch -----------------
+;;
+;; One chunk routinely carries frames for several workspaces.  A handler that
+;; signals must not abandon the drain: the complete frames behind it are
+;; already whole in the accumulator and would otherwise wait for the next
+;; chunk.  The batch drains, then the first failure is re-signalled — the
+;; error is contained for the length of the batch, never swallowed.
+
+(defconst agent-repl-test--uds-failing-chunk
+  (concat "{\"workspaceState\":{\"workspace\":\"bad\"}}\n"
+          "{\"snapshot\":{\"workspace\":\"good\"}}\n")
+  "A two-frame chunk whose FIRST frame's handler is made to signal.")
+
+(ert-deftest agent-repl-test-uds-filter-dispatches-frames-behind-a-failing-handler ()
+  "A signalling handler does not stop the frames behind it from dispatching."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (reached)
+      (agent-repl--uds-register-handler
+       "workspaceState" (lambda (_p) (error "handler blew up")))
+      (agent-repl--uds-register-handler "snapshot" (lambda (_p) (setq reached t)))
+      (cl-letf (((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
+        ;; Act
+        (ignore-errors
+          (agent-repl--uds-filter nil agent-repl-test--uds-failing-chunk))
+        ;; Assert
+        (should reached)))))
+
+(ert-deftest agent-repl-test-uds-filter-re-signals-a-handler-failure ()
+  "The contained failure is raised again once the drain completes."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl--uds-register-handler
+     "workspaceState" (lambda (_p) (error "handler blew up")))
+    (agent-repl--uds-register-handler "snapshot" #'ignore)
+    (cl-letf (((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
+      ;; Act / Assert
+      (should-error
+       (agent-repl--uds-filter nil agent-repl-test--uds-failing-chunk)
+       :type 'error))))
+
+(ert-deftest agent-repl-test-uds-filter-re-signals-the-first-failure ()
+  "When two handlers fail, the FIRST failure is the one raised."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl--uds-register-handler
+     "workspaceState" (lambda (_p) (error "first")))
+    (agent-repl--uds-register-handler
+     "snapshot" (lambda (_p) (error "second")))
+    (cl-letf (((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
+      (let ((err (should-error
+                  (agent-repl--uds-filter nil agent-repl-test--uds-failing-chunk))))
+        ;; Assert
+        (should (equal (cadr err) "first"))))))
+
+(ert-deftest agent-repl-test-uds-filter-drains-the-accumulator-past-a-failure ()
+  "The batch is consumed to the end, so no complete frame is left buffered."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl--uds-register-handler
+     "workspaceState" (lambda (_p) (error "handler blew up")))
+    (agent-repl--uds-register-handler "snapshot" #'ignore)
+    (cl-letf (((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
+      ;; Act
+      (ignore-errors
+        (agent-repl--uds-filter nil agent-repl-test--uds-failing-chunk))
+      ;; Assert
+      (should (string-empty-p agent-repl--uds-read-accumulator)))))
+
+(ert-deftest agent-repl-test-uds-filter-logs-the-failing-frame ()
+  "The contained failure is loud-logged with the arm and workspace that caused it."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (logged)
+      (agent-repl--uds-register-handler
+       "workspaceState" (lambda (_p) (error "handler blew up")))
+      (agent-repl--uds-register-handler "snapshot" #'ignore)
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+        ;; Act
+        (ignore-errors
+          (agent-repl--uds-filter nil agent-repl-test--uds-failing-chunk))
+        ;; Assert
+        (should (cl-some
+                 (lambda (l)
+                   (and (string-match-p "HANDLER FAILED field=workspaceState" l)
+                        (string-match-p "workspace=\"bad\"" l)))
+                 logged))))))
+
+(ert-deftest agent-repl-test-uds-dispatch-outside-a-drain-propagates-the-failure ()
+  "A dispatch with no drain to re-signal for it lets the handler error escape.
+Containment is scoped to the batch; outside one there is nobody to raise
+the recorded error, so containing it there would be swallowing it."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl--uds-register-handler
+     "workspaceState" (lambda (_p) (error "handler blew up")))
+    (cl-letf (((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
+      ;; Act / Assert
+      (should-error
+       (agent-repl--uds-dispatch-frame '(:workspaceState (:workspace "bad")))
+       :type 'error))))
+
 ;;;; ---- connect (external boundary mocked) ------------------------------
 
 (ert-deftest agent-repl-test-uds-connect-invokes-boundary-with-path ()
@@ -1782,3 +1885,4 @@ connection state over an open socket."
         (agent-repl--uds-sentinel 'fake-proc "open\n")
         ;; Assert
         (should (eq agent-repl--uds-connection-state 'open))))))
+
