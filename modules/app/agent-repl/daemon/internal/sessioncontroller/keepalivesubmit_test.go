@@ -465,3 +465,69 @@ func (c *countingReceipts) RetireWorkspace(string, int64) (int, error) { return 
 func (c *countingReceipts) Outstanding(string) ([]statedb.PromptReceipt, error) {
 	return nil, nil
 }
+
+// ---------------------------------------------------------------------------
+// The hold spans the rewind
+// ---------------------------------------------------------------------------
+
+// THE GAP IS CLOSED. Between the ping turn's end and the rewound session coming
+// back up, a fresh prompt must still park: admitted, it would start a real turn
+// the rewind then SIGTERMs and truncates out of the transcript.
+func TestPromptDuringTheRewindIsHeldBehindThePingTurn(t *testing.T) {
+	// Arrange.
+	m, _, _ := keepAliveRig(t)
+	m.mu.Lock()
+	m.claimKeepAliveRewindLocked("ws", "ka_1")
+	m.mu.Unlock()
+
+	// Act.
+	if err := m.SubmitPrompt(context.Background(), "ws", "req-1", "real work", "",
+		corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+		t.Fatalf("SubmitPrompt: %v", err)
+	}
+
+	// Assert.
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	entries := m.byWS["ws"].queue.entries
+	if len(entries) != 1 || entries[0].keepAliveHoldTurnID != "ka_1" {
+		t.Fatalf("queue = %+v, want the prompt held behind the rewinding ping ka_1", entries)
+	}
+}
+
+// NO SECOND PING DURING A REWIND EITHER. The transcript is mid-truncation and
+// the shim is being replaced; a ping submitted now would be a turn against a
+// session that is about to stop existing.
+func TestKeepAlivePingDeclinedWhileARewindIsInFlight(t *testing.T) {
+	// Arrange.
+	m, _, _ := keepAliveRig(t)
+	m.mu.Lock()
+	m.claimKeepAliveRewindLocked("ws", "ka_1")
+	m.mu.Unlock()
+
+	// Act.
+	_, err := m.SubmitKeepAlivePing(context.Background(), "ws")
+
+	// Assert.
+	if !errors.Is(err, ErrKeepAliveNotEligible) {
+		t.Fatalf("SubmitKeepAlivePing during a rewind = %v, want ErrKeepAliveNotEligible", err)
+	}
+}
+
+// The release matches on turn id for noteKeepAliveTurnEndedLocked's reason: a
+// late tail must not free the workspace a LATER ping's rewind now owns.
+func TestReleaseKeepAliveRewindLeavesALaterPingsClaimAlone(t *testing.T) {
+	// Arrange.
+	m, _, _ := keepAliveRig(t)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.claimKeepAliveRewindLocked("ws", "ka_2")
+
+	// Act.
+	m.releaseKeepAliveRewindLocked("ws", "ka_1")
+
+	// Assert.
+	if got := m.keepAliveRewinds["ws"]; got != "ka_2" {
+		t.Fatalf("rewind claim = %q after an earlier ping's release, want ka_2 untouched", got)
+	}
+}
