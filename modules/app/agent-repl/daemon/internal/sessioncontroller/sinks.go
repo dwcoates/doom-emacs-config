@@ -416,6 +416,9 @@ type consumer struct {
 	// keepAliveWindows is the durable ledger the keep-alive exclusion reads
 	// (keepaliveexclude.go). Nil is the exclusion OFF.
 	keepAliveWindows KeepAliveWindowLedger
+	// turnSuperseders closes the claims of turns a rewind discarded
+	// (sessionrewound.go).
+	turnSuperseders TurnClaimSuperseder
 	// onBackfill reports a never-blue backfill transition (F2), once per
 	// distinct state. The controller persists it and re-pushes the SessionView.
 	onBackfill func(state string)
