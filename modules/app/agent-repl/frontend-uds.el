@@ -202,12 +202,16 @@ SENDER of `scheduleShutdown'/`cancelScheduledShutdown' and a cancel needs
 the live `schedule_id', so `frontend-state.el' registers a handler that
 records the lease and logs the edge.
 
-`taskCatalog', `heartbeat' (E4), `queue' (E4), `progress' (F1), and
-`workspaceRoster' are decoded for wire parity and rendered by nothing
-here — see `agent-repl--uds-ignored-frame-fields'.")
+`progress' (F1) is handled for exactly ONE of its fields:
+`context-cost.el' registers a handler that reads `expensive_turn' and
+nothing else.  The consolidated progress footer remains webapp-only.
+
+`taskCatalog', `heartbeat' (E4), and `workspaceRoster' are decoded for
+wire parity and rendered by nothing here — see
+`agent-repl--uds-ignored-frame-fields'.")
 
 (defconst agent-repl--uds-ignored-frame-fields
-  '("taskCatalog" "heartbeat" "queue" "progress" "workspaceRoster")
+  '("taskCatalog" "heartbeat" "queue" "workspaceRoster")
   "Frame arms Emacs decodes for wire parity but DELIBERATELY renders nothing for.
 These are a subset of `agent-repl--uds-known-frame-fields'.
 
@@ -229,15 +233,14 @@ drain lease's `QueueEntry.shutdown_hold' too: a held entry rides the same
 ignored arm, so a lease-held queue decodes and is dropped exactly like
 any other queue push, with nothing here to weaken.
 
-`progress' (F1): the consolidated progress footer's whole input.  The
-footer is webapp-only by settled decision (design-progress-footer.md,
-\"No Emacs component\"), so this arm has no Emacs consumer and never
-will.  It is registered because the daemon PUSHES it: this vocabulary
-predated the frame, so every ProgressView push signalled
-`agent-repl-uds-malformed-frame' and surfaced as a user-visible error on
-workspace open.  Registering this one KNOWN arm is the fix; the
-malformed guard itself is unchanged, so a genuinely unknown future arm
-still fails loudly.
+\(`progress' used to be listed here.  The consolidated progress footer is
+still webapp-only by settled decision — design-progress-footer.md, \"No
+Emacs component\" — and every field on the message except one is still
+rendered by nothing here.  The exception is `expensive_turn', which the
+proto assigns to Emacs explicitly: `context-cost.el' registers a handler
+that reads that field and drops the rest.  An arm with a handler is
+dispatched, so `progress' is no longer ignorable, and the one-field
+narrowness of the reader is what keeps the footer decision intact.)
 
 `taskCatalog': the complete detached-task roster.  The webapp renders it
 in the progress footer's task counter; Emacs renders only the daemon's
