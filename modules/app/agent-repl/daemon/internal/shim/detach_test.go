@@ -106,8 +106,8 @@ func TestReportProcessGroupClassifiesEveryDetachmentOutcome(t *testing.T) {
 			}
 			switch {
 			case tc.wantLog == "":
-				if len(logger.records) != 0 {
-					t.Errorf("a healthy detachment logged %#v, want nothing", logger.records)
+				if len(logger.logged()) != 0 {
+					t.Errorf("a healthy detachment logged %#v, want nothing", logger.logged())
 				}
 			default:
 				logger.record(t, 0, "normal", tc.wantLog)
