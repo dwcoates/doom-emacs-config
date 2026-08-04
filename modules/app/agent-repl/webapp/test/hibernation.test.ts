@@ -16,6 +16,7 @@ import {
   REVIVE_COMPACT_ATTR,
   REVIVE_COMPACT_EXPLANATION,
   REVIVE_DIRECT_ATTR,
+  hibernateRefusedNotice,
   hibernationBlocked,
   hibernationBlockedLog,
   hibernationCauseText,
@@ -24,6 +25,7 @@ import {
   reviveDirectWarning,
   revivalGateHtml,
   revivePendingText,
+  reviveRefusedLog,
 } from "../src/hibernation.js";
 
 const HOUR = 3_600_000;
@@ -243,6 +245,51 @@ describe("hibernationBlockedLog: the record of a refused submit", () => {
   it("says the draft was kept, since a vanished prompt is the failure mode", () => {
     // Arrange / Act / Assert
     expect(hibernationBlockedLog(42, forced())).toContain("draft retained");
+  });
+});
+
+describe("reviveRefusedLog: the record of a refused revival decision", () => {
+  it("names the mode the daemon turned down", () => {
+    // Arrange / Act / Assert — the two modes cost different things, so which
+    // one was refused is part of the fact.
+    expect(reviveRefusedLog("compactFirst", new Error("not hibernated"))).toContain(
+      "compactFirst",
+    );
+  });
+
+  it("says the session is still asleep, since the gate is coming back up", () => {
+    // Arrange / Act / Assert
+    expect(reviveRefusedLog("direct", new Error("not hibernated"))).toContain("still");
+  });
+
+  it("carries the rejection's own words", () => {
+    // Arrange / Act / Assert
+    expect(reviveRefusedLog("direct", new Error("merge lease held"))).toContain(
+      "merge lease held",
+    );
+  });
+
+  it("reads a non-Error rejection rather than dropping it", () => {
+    // Arrange / Act / Assert — a thrown string is still the only account of
+    // what happened.
+    expect(reviveRefusedLog("direct", "socket not open")).toContain("socket not open");
+  });
+});
+
+describe("hibernateRefusedNotice: the topbar line for a refused sleep", () => {
+  it("says the session was not put to sleep", () => {
+    // Arrange / Act / Assert — the button hides itself once a session sleeps,
+    // so its absence must not be read as success.
+    expect(hibernateRefusedNotice(new Error("a turn is in flight"))).toContain(
+      "could not put this session to sleep",
+    );
+  });
+
+  it("carries the daemon's reason beside it", () => {
+    // Arrange / Act / Assert
+    expect(hibernateRefusedNotice(new Error("a turn is in flight"))).toContain(
+      "a turn is in flight",
+    );
   });
 });
 
