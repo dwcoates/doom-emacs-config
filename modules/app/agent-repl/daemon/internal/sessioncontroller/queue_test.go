@@ -33,6 +33,7 @@ func (f *fakeClassifier) Classify(_ context.Context, req ClassifyRequest) (Class
 	f.reqs = append(f.reqs, req)
 	rel := f.release
 	f.mu.Unlock()
+	notifyTestActivity()
 	if rel != nil {
 		<-rel
 	}
@@ -221,20 +222,67 @@ func (h *queueHarness) entries() []queueEntry {
 	return out
 }
 
-// waitFor polls cond until it holds or the deadline passes. The queue's
-// classification and delivery run on their own goroutines by design (they must
-// not block the shim read loop), so a test observes their EFFECT rather than
-// sleeping for a guessed duration.
+// activitySignal is the package's test-side WAKEUP: a broadcast every fake
+// fires after it records something a test can observe.
+//
+// It replaces a sleep-poll. The queue's classification and delivery run on
+// their own goroutines by design (they must not block the shim read loop), so a
+// test has to observe their EFFECT rather than the call — but observing it by
+// re-checking every millisecond made the wait a race against a guessed
+// interval, and every wait cost real wall-clock time it did not need. A
+// broadcast is the same observation with the guess removed: the waiter is woken
+// by the very write it is waiting for.
+//
+// The channel is CLOSED rather than sent on, so one notification wakes every
+// waiter and no fake can block on a waiter that has gone away.
+type activitySignal struct {
+	mu sync.Mutex
+	ch chan struct{}
+}
+
+// testActivity is the one signal the whole package's fakes and waiters share.
+var testActivity = &activitySignal{ch: make(chan struct{})}
+
+// wake returns the channel closed by the NEXT notification. It must be taken
+// BEFORE the condition is evaluated: taken after, a write landing between the
+// check and the wait would be missed and the waiter would sleep through the
+// very thing it is waiting for.
+func (s *activitySignal) wake() <-chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ch
+}
+
+// notify wakes every waiter and arms the next round.
+func (s *activitySignal) notify() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	close(s.ch)
+	s.ch = make(chan struct{})
+}
+
+// notifyTestActivity is what a fake calls, after recording, to say that
+// something a test may be waiting on has moved.
+func notifyTestActivity() { testActivity.notify() }
+
+// waitFor waits until cond holds, woken by the fakes rather than by a timer.
+// The bound that remains is a DEADLINE, not a poll interval: it exists so a
+// condition that never becomes true fails the test instead of hanging it.
 func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
+	deadline := time.NewTimer(2 * time.Second)
+	defer deadline.Stop()
+	for {
+		wake := testActivity.wake()
 		if cond() {
 			return
 		}
-		time.Sleep(time.Millisecond)
+		select {
+		case <-wake:
+		case <-deadline.C:
+			t.Fatalf("timed out waiting for %s", what)
+		}
 	}
-	t.Fatalf("timed out waiting for %s", what)
 }
 
 // waitEntryClass waits until the single queued entry reaches cls.
@@ -1095,14 +1143,40 @@ func TestInterjectMootPathDoesNotSubmitIntoATurnThatStartedMeanwhile(t *testing.
 	if err := h.submit("second"); err != nil {
 		t.Fatalf("submit second: %v", err)
 	}
+	// BOTH VERDICTS MUST BE PUBLISHED BEFORE THE GATE IS ARMED. Classification
+	// runs on its own goroutine and publishes when it lands, so a verdict still
+	// in flight would push a queue view of its own — and the gate below arms on
+	// the NEXT queue push, whichever it is. Stealing the gate that way leaves
+	// the racing TurnStarted landing outside the window this test is about.
+	// Waiting on the PUSH rather than on the entry is what makes it a fact: the
+	// entry is marked under the mutex and published after it is released.
+	waitFor(t, "both queued prompts' verdicts to be published", func() bool {
+		v := h.push.lastQueue()
+		if v == nil || len(v.GetEntries()) != 2 {
+			return false
+		}
+		for _, e := range v.GetEntries() {
+			if e.GetClassification() == frontendv1.QueueClassification_QUEUE_CLASSIFICATION_PENDING {
+				return false
+			}
+		}
+		return true
+	})
 	h.turn(false)
 	waitFor(t, "the first entry to drain", func() bool { return len(h.entries()) == 1 })
 	held := h.entries()[0]
 	if held.text != "second" {
 		t.Fatalf("held entry = %q, want 'second'", held.text)
 	}
-	waitFor(t, "the first prompt to reach the shim", func() bool {
-		return len(h.client.promptTexts()) == 1
+	// The whole delivery has to SETTLE before the premise below is installed,
+	// not merely reach the shim. The delivery goroutine records the running
+	// prompt as its last step, AFTER the accepted and delivered turn edges have
+	// both been applied — and those edges write the very turn record this test
+	// is about to zero, so acting on the submit alone would let one of them land
+	// on top of the premise and quietly turn this into a test of the ordinary
+	// interject path.
+	waitFor(t, "the first delivery's turn edges to settle", func() bool {
+		return len(h.applier.promptDeliverCalls()) == 1
 	})
 	// Prompt acceptance now closes the old accepted-but-not-yet-observed race
 	// by setting the queue latch immediately. Put the fixture back at the

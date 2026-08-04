@@ -37,43 +37,51 @@ func (p *fakePusher) PushConversationDelta(c *frontendv1.ConversationDelta) {
 	p.trace = append(p.trace, "conversation")
 	p.convo = append(p.convo, c)
 	p.mu.Unlock()
+	notifyTestActivity()
 }
 func (p *fakePusher) PushTypingDelta(t *frontendv1.TypingDelta) {
 	p.mu.Lock()
 	p.typing = append(p.typing, t)
 	p.mu.Unlock()
+	notifyTestActivity()
 }
 func (p *fakePusher) PushTaskCatalog(c *frontendv1.TaskCatalog) {
 	p.mu.Lock()
 	p.catalog = append(p.catalog, c)
 	p.mu.Unlock()
+	notifyTestActivity()
 }
 func (p *fakePusher) PushWorkspaceState(w *frontendv1.WorkspaceState) {
 	p.mu.Lock()
 	p.trace = append(p.trace, "workspace:"+w.GetState().String())
 	p.state = append(p.state, w)
 	p.mu.Unlock()
+	notifyTestActivity()
 }
 func (p *fakePusher) PushSessionInitView(v *frontendv1.SessionInitView) {
 	p.mu.Lock()
 	p.inits = append(p.inits, v)
 	p.mu.Unlock()
+	notifyTestActivity()
 }
 func (p *fakePusher) PushHeartbeatView(h *frontendv1.HeartbeatView) {
 	p.mu.Lock()
 	p.heartbeats = append(p.heartbeats, h)
 	p.mu.Unlock()
+	notifyTestActivity()
 }
 func (p *fakePusher) PushQueueView(q *frontendv1.QueueView) {
 	p.mu.Lock()
 	p.queues = append(p.queues, q)
 	p.mu.Unlock()
+	notifyTestActivity()
 }
 func (p *fakePusher) PushProgressView(v *frontendv1.ProgressView) {
 	p.mu.Lock()
 	p.trace = append(p.trace, "progress")
 	p.progress = append(p.progress, v)
 	p.mu.Unlock()
+	notifyTestActivity()
 }
 
 // lastQueue returns the most recent queue push, or nil when none landed.
@@ -371,6 +379,7 @@ func (f *fakeApplier) MarkPromptRejected(
 func (f *fakeApplier) MarkPromptDelivered(workspace, sessionID, requestID string) (bool, error) {
 	f.reconcMutex.Lock()
 	defer f.reconcMutex.Unlock()
+	defer notifyTestActivity()
 	f.promptDelivers = append(f.promptDelivers, promptAcceptCall{
 		workspace: workspace, sessionID: sessionID, requestID: requestID,
 	})
@@ -401,6 +410,7 @@ func (f *fakeApplier) promptRejectCalls() []promptAcceptCall {
 
 func (f *fakeApplier) ReconcileAlreadyComplete(workspace, sessionID string, publish func(*frontendv1.WorkspaceState)) (bool, error) {
 	f.reconcMutex.Lock()
+	defer notifyTestActivity()
 	f.alreadyCompletes = append(f.alreadyCompletes, alreadyCompleteCall{
 		workspace: workspace, sessionID: sessionID,
 	})
@@ -421,6 +431,7 @@ func (f *fakeApplier) ReconcileAlreadyComplete(workspace, sessionID string, publ
 func (f *fakeApplier) MarkTurnInterrupted(workspace string) error {
 	f.reconcMutex.Lock()
 	defer f.reconcMutex.Unlock()
+	defer notifyTestActivity()
 	f.interruptMarks = append(f.interruptMarks, workspace)
 	return f.interruptMarkErr
 }
@@ -438,6 +449,7 @@ func (f *fakeApplier) ApplySessionRotated(workspace, previous, next string) erro
 func (f *fakeApplier) ApplyClearing(workspace string, clearing bool, reason string) error {
 	f.reconcMutex.Lock()
 	defer f.reconcMutex.Unlock()
+	defer notifyTestActivity()
 	f.cuts = append(f.cuts, cutCall{axis: "clearing", workspace: workspace, open: clearing, reason: reason})
 	return f.cutErr
 }
@@ -446,6 +458,7 @@ func (f *fakeApplier) ApplyClearing(workspace string, clearing bool, reason stri
 func (f *fakeApplier) ApplyCompacting(workspace string, compacting bool, reason string) error {
 	f.reconcMutex.Lock()
 	defer f.reconcMutex.Unlock()
+	defer notifyTestActivity()
 	f.cuts = append(f.cuts, cutCall{axis: "compacting", workspace: workspace, open: compacting, reason: reason})
 	return f.cutErr
 }
@@ -630,6 +643,7 @@ func (a *fakeApplier) Apply(ev *corev1.Event) error {
 		a.onApply(ev)
 	}
 	a.applied = append(a.applied, ev)
+	notifyTestActivity()
 	return a.err
 }
 
@@ -736,6 +750,7 @@ func (a *fakeApplier) ActiveTurnIDs(_ string, _ string) ([]string, error) {
 func (a *fakeApplier) SynthesizeTurnClose(_ string, _ string, cause string) (closed []string, err error) {
 	a.reconcMutex.Lock()
 	defer a.reconcMutex.Unlock()
+	defer notifyTestActivity()
 	a.synthesizedCauses = append(a.synthesizedCauses, cause)
 	if a.synthesizeErr != nil {
 		return nil, a.synthesizeErr
@@ -882,6 +897,7 @@ func (p *fakeProgress) NoteInterrupt(workspace, sessionID string, outcome corev1
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.interrupts = append(p.interrupts, interruptNote{workspace: workspace, sessionID: sessionID, outcome: outcome})
+	defer notifyTestActivity()
 }
 
 // interruptNotes returns the recorded windows, taken under the lock.
