@@ -59,8 +59,8 @@ interface Client {
   resyncs: number[];
   /** Fold one `ConversationDelta` carrying ITEMS at THROUGHSEQ. */
   delta(items: readonly WireItem[], throughSeq: number): void;
-  /** Fold one `SessionView` announcing CLAUDESESSIONID. */
-  announce(claudeSessionId: string): void;
+  /** Fold one `SessionView` announcing CLAUDESESSIONID, optionally asleep. */
+  announce(claudeSessionId: string, hibernation?: Record<string, unknown>): void;
 }
 
 function client(): Client {
@@ -99,10 +99,11 @@ function client(): Client {
         }),
       );
     },
-    announce(claudeSessionId) {
+    announce(claudeSessionId, hibernation) {
       fold(
         JSON.stringify({
           sessionView: {
+            ...(hibernation !== undefined ? { hibernation } : {}),
             workspace: "/ws",
             sessionId: "s1",
             model: "claude-opus",
@@ -180,6 +181,31 @@ describe("a vendor session uuid rotating under a drawn conversation", () => {
     c.delta([answerItem("b1", "pushed ahead of the announcement")], 2);
     // Assert
     expect(c.container.textContent).toContain("pushed ahead of the announcement");
+  });
+
+  it("leaves a coherent feed when the rotating view ALSO reports hibernation", () => {
+    // Arrange — a rewind reaches this end as an ordinary rotation, and the
+    // view that announces it can carry a hibernation detail too (the daemon
+    // slept the session in the same breath). The two mechanisms read different
+    // fields off one message and must not interfere: the retired space still
+    // has to go off screen.
+    const c = drawnConversation();
+    // Act
+    c.announce("uuid-b", { sinceMs: String(TS_MS), forced: {} });
+    c.delta([answerItem("b1", "the rebased conversation")], 1);
+    // Assert
+    expect(c.container.textContent).not.toContain("the retired conversation");
+    expect(c.container.textContent).toContain("the rebased conversation");
+  });
+
+  it("adopts the gate from a view that rotates and hibernates at once", () => {
+    // Arrange — same frame, the other field. The wipe must not cost the store
+    // the reason the session is now asleep, which is the whole gate's input.
+    const c = drawnConversation();
+    // Act
+    c.announce("uuid-b", { sinceMs: String(TS_MS), forced: {} });
+    // Assert
+    expect(c.store.state.hibernation?.cause.case).toBe("forced");
   });
 
   it("asks for nothing on the FIRST uuid a fresh view is told", () => {

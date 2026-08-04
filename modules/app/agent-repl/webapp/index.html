@@ -16,6 +16,13 @@
         <span id="conn-status">connecting…</span>
         <span id="spinner" class="spinner">●</span>
         <button id="account" title="the Claude account this session runs as — click for account actions"></button>
+        <!-- The session-level hibernate action, beside the account chip where
+             the other session-scoped verbs live. It asks; the daemon decides,
+             and REFUSES while a turn is live or the merge lease is held. The
+             button is not pre-gated on either, because the webapp cannot
+             resolve settledness — the nack is the answer, and it lands as an
+             ordinary classified failure card. -->
+        <button id="hibernate-btn" title="put this session to sleep and reclaim its memory">sleep</button>
         <span id="remediation"></span>
         <!-- The session's one-line "current objective" (§2.14), absolute-
              centered over the topbar. Out of the flex flow so it never
@@ -62,6 +69,16 @@
            "Compacting conversation…" bar while a /compact runs, empty (and so
            collapsed) otherwise. -->
       <div id="compact-progress-slot"></div>
+      <!-- The REVIVAL GATE (hibernation.ts): filled whenever the daemon
+           reports this session hibernated, empty (and so collapsed via
+           :empty) whenever it is awake. It is a BLOCKING gate, not a notice:
+           the composer below is disabled while it stands, because the two
+           revival modes it offers differ in what every later turn costs and
+           the expensive one must not be reachable by default. It carries no
+           dismiss control — it is a pure function of the daemon's live
+           SessionView, re-rendered on every chrome frame, and it clears when
+           a pushed view drops the hibernation field. -->
+      <div id="revival-gate"></div>
       <!-- RETIRED (F4): the degraded-state banner lived here. Degradation is
            now a self-resolving failure card IN the feed, because a user whose
            workspace changed color needs to find out why from the conversation
