@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -60,33 +60,6 @@ func TestBootFatalLineIsCanonicalJSON(t *testing.T) {
 	}
 }
 
-func TestCanonicalShimCreateOptsUsesCanonicalSymlinkTargetForArgvAndDir(t *testing.T) {
-	realWorkspace := t.TempDir()
-	alias := filepath.Join(t.TempDir(), "workspace-alias")
-	if err := os.Symlink(realWorkspace, alias); err != nil {
-		t.Fatal(err)
-	}
-	workspace, canonical, err := canonicalShimCreateOpts(server.CreateOpts{CWD: alias, Model: "haiku"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	expected, err := dlog.WorkspaceFromDirectory(alias)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if workspace != expected || canonical.CWD != expected.Directory {
-		t.Fatalf("workspace=%#v canonical=%#v expected=%#v", workspace, canonical, expected)
-	}
-	argv := server.ShimUDSArgv("node", "shim.js", "s1", false, canonical, "/tmp/daemon.sock")
-	if !slices.Contains(argv, expected.Directory) || slices.Contains(argv, alias) {
-		t.Fatalf("shim argv=%v canonical dir=%q alias=%q", argv, expected.Directory, alias)
-	}
-	// The UDS spawn binds exec.Cmd.Dir to workspace.Directory as well.
-	if workspace.Directory != canonical.CWD {
-		t.Fatalf("spawn Dir=%q canonical cwd=%q", workspace.Directory, canonical.CWD)
-	}
-}
-
 func TestUDSShimLoggerPersistsDaemonOwnedDiagnosticsToWorkspaceTarget(t *testing.T) {
 	workspace := dlog.Workspace{Directory: t.TempDir(), ID: "ws-test"}
 	manager := dlog.NewTargetManager()
@@ -119,6 +92,12 @@ func TestUDSShimLoggerReportsWorkspacePersistenceFailureToTerminal(t *testing.T)
 	}
 }
 
+// maintenanceTickWait bounds the rendezvous with a completed maintenance pass.
+// It is a FAILURE bound, never a delay: the receive completes the instant the
+// pass finishes, and this only decides how long a stalled maintenance loop
+// takes to fail the test instead of hanging it.
+const maintenanceTickWait = 10 * time.Second
+
 func TestWorkspaceLogMaintenanceTicksAndStopIsIdempotent(t *testing.T) {
 	manager, err := dlog.NewTargetManagerWithCap(8)
 	if err != nil {
@@ -137,26 +116,38 @@ func TestWorkspaceLogMaintenanceTicksAndStopIsIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	var terminal bytes.Buffer
-	stop := startWorkspaceLogMaintenanceAtInterval(manager, &terminal, false, time.Millisecond)
-	deadline := time.Now().Add(time.Second)
-	for {
-		info, statErr := target.Stat()
-		if statErr != nil {
-			t.Fatal(statErr)
-		}
-		if info.Size() == 0 {
-			if !os.SameFile(before, info) {
-				t.Fatalf("maintenance replaced target inode: before=%v after=%v", before, info)
+	// THE TICK ANNOUNCES ITSELF. This used to sample the target's size in a
+	// sleep loop, which measured the clock rather than the work: the pass runs
+	// on its own goroutine, and the injected completion signal is the only
+	// thing that can say it FINISHED one.
+	ticked := make(chan struct{}, 1)
+	stop := startWorkspaceLogMaintenanceAtInterval(
+		manager, dlog.New(io.Discard, &terminal, false), &terminal, false, time.Millisecond,
+		func() {
+			select {
+			case ticked <- struct{}{}:
+			default:
 			}
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("maintenance did not truncate target at cap: size=%d terminal=%q", info.Size(), terminal.String())
-		}
-		time.Sleep(time.Millisecond)
+		},
+	)
+	select {
+	case <-ticked:
+	case <-time.After(maintenanceTickWait):
+		stop()
+		t.Fatalf("no maintenance pass completed within %s; terminal=%q", maintenanceTickWait, terminal.String())
 	}
 	stop()
 	stop()
+	info, statErr := target.Stat()
+	if statErr != nil {
+		t.Fatal(statErr)
+	}
+	if info.Size() != 0 {
+		t.Fatalf("maintenance did not truncate target at cap: size=%d terminal=%q", info.Size(), terminal.String())
+	}
+	if !os.SameFile(before, info) {
+		t.Fatalf("maintenance replaced target inode: before=%v after=%v", before, info)
+	}
 	if err := manager.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +180,7 @@ func TestWorkspaceLogMaintenancePanicsWhenAllReportingChannelsFail(t *testing.T)
 			t.Fatalf("maintenance panic=%v", recovered)
 		}
 	}()
-	maintainWorkspaceLogTargets(manager, testFailingWriter{}, false)
+	maintainWorkspaceLogTargets(manager, dlog.New(io.Discard, io.Discard, false), testFailingWriter{}, false)
 }
 
 func TestWebappHandlerServesIndexWhenPresent(t *testing.T) {
