@@ -20,6 +20,7 @@ function sessionView(claudeSessionId: string): AdapterEffect {
     cwd: "/ws",
     configDir: "",
     models: [],
+    hibernation: null,
   };
   return { kind: "session-view", value };
 }

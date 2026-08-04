@@ -82,6 +82,7 @@ function sessionEffect(over: Partial<SessionViewInput> = {}): AdapterEffect {
       cwd: "",
       configDir: "",
       models: [],
+      hibernation: null,
       ...over,
     },
   };
@@ -1546,6 +1547,7 @@ describe("the progress footer's input (F1)", () => {
       rateLimited: null,
       rateLimitedWeekly: null,
       failure: null,
+      expensiveTurn: null,
       pendingPermissions: 0,
       queueDepth: 0,
       liveTaskCount: 0,
@@ -1989,5 +1991,55 @@ describe("ingest shutdown schedule", () => {
     store.ingest([queueEffect([queueEntry()])]);
     // Assert
     expect(store.state.queued[0].shutdownHold).toBeUndefined();
+  });
+});
+
+describe("hibernation adoption (the revival gate's source of truth)", () => {
+  const ASLEEP = { sinceMs: 1700000000000, cause: { case: "forced" as const, value: {} } };
+
+  it("adopts the pushed hibernation detail so the gate can name the cause", () => {
+    // Arrange
+    const store = new ConversationStore();
+    // Act
+    store.ingest([sessionEffect({ hibernation: ASLEEP })]);
+    // Assert
+    expect(store.state.hibernation).toEqual(ASLEEP);
+  });
+
+  it("clears the detail when a later view reports the session awake", () => {
+    // Arrange — the revive landed, and only the daemon can say so.
+    const store = new ConversationStore();
+    store.ingest([sessionEffect({ hibernation: ASLEEP })]);
+    // Act
+    store.ingest([sessionEffect({ hibernation: null })]);
+    // Assert
+    expect(store.state.hibernation).toBeNull();
+  });
+
+  it("starts null, so a session with no view yet is never gated as asleep", () => {
+    // Arrange / Act
+    const store = new ConversationStore();
+    // Assert
+    expect(store.state.hibernation).toBeNull();
+  });
+});
+
+describe("keep-alive hold adoption (the queue bubble's source of truth)", () => {
+  it("carries a queue entry's keep-alive hold through to the rendered item", () => {
+    // Arrange
+    const store = new ConversationStore();
+    // Act
+    store.ingest([queueEffect([queueEntry({ keepAliveHold: { turnId: "turn-9" } })])]);
+    // Assert
+    expect(store.state.queued[0].keepAliveHold).toEqual({ turnId: "turn-9" });
+  });
+
+  it("leaves the hold absent on an ordinary classifier-held entry", () => {
+    // Arrange
+    const store = new ConversationStore();
+    // Act
+    store.ingest([queueEffect([queueEntry()])]);
+    // Assert
+    expect(store.state.queued[0].keepAliveHold).toBeUndefined();
   });
 });

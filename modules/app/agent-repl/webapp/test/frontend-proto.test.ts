@@ -1668,3 +1668,192 @@ describe("decodeFrontendFrame — QueueEntry.shutdownHold", () => {
     );
   });
 });
+
+describe("decodeFrontendFrame — SessionView.hibernation", () => {
+  /** Decode a SessionView carrying the given hibernation detail. */
+  function svWith(hibernation: unknown): ReturnType<typeof decodeFrontendFrame> {
+    return decode({ sessionView: { ...SESSION_VIEW, hibernation } });
+  }
+
+  /** The decoded SessionView of a sessionView frame. */
+  function viewOf(frame: ReturnType<typeof decodeFrontendFrame>) {
+    if (frame.frame.case !== "sessionView") throw new Error("wrong variant");
+    return frame.frame.value;
+  }
+
+  it("decodes the idle-cutoff cause with the cutoff that tripped", () => {
+    // Arrange / Act
+    const got = viewOf(svWith({ sinceMs: "1700000000000", idleCutoff: { cutoffMs: "3600000" } }));
+    // Assert
+    expect(got.hibernation?.cause).toEqual({ case: "idleCutoff", value: { cutoffMs: 3600000 } });
+  });
+
+  it("decodes the forced cause, whose empty arm IS the whole claim", () => {
+    // Arrange / Act
+    const got = viewOf(svWith({ sinceMs: "1700000000000", forced: {} }));
+    // Assert
+    expect(got.hibernation?.cause).toEqual({ case: "forced", value: {} });
+  });
+
+  it("decodes the cache-expired cause with both the elapsed time and the TTL", () => {
+    // Arrange / Act
+    const got = viewOf(svWith({ sinceMs: "1", cacheExpired: { elapsedMs: "900000", ttlMs: "300000" } }));
+    // Assert
+    expect(got.hibernation?.cause).toEqual({
+      case: "cacheExpired",
+      value: { elapsedMs: 900000, ttlMs: 300000 },
+    });
+  });
+
+  it("carries the since stamp the gate ages from", () => {
+    // Arrange / Act
+    const got = viewOf(svWith({ sinceMs: "1700000000000", forced: {} }));
+    // Assert
+    expect(got.hibernation?.sinceMs).toBe(1700000000000);
+  });
+
+  it("leaves the detail absent on an awake session", () => {
+    // Arrange / Act
+    const got = viewOf(decode({ sessionView: SESSION_VIEW }));
+    // Assert
+    expect(got.hibernation).toBeUndefined();
+  });
+
+  it("rejects a detail that names no cause, since the gate has nothing honest to say", () => {
+    // Arrange / Act / Assert
+    expect(() => svWith({ sinceMs: "1" })).toThrow(/SessionView.hibernation sets no cause/);
+  });
+
+  it("rejects a detail setting two causes at once", () => {
+    // Arrange / Act / Assert
+    expect(() => svWith({ sinceMs: "1", forced: {}, idleCutoff: { cutoffMs: "1" } })).toThrow(
+      /SessionView.hibernation sets multiple causes/,
+    );
+  });
+
+  it("rejects an unrecognized field on the detail", () => {
+    // Arrange / Act / Assert
+    expect(() => svWith({ sinceMs: "1", forced: {}, why: "x" })).toThrow(
+      /SessionView.hibernation has unrecognized field\(s\): why/,
+    );
+  });
+
+  it("rejects an unrecognized field inside the empty forced arm", () => {
+    // Arrange / Act / Assert
+    expect(() => svWith({ sinceMs: "1", forced: { by: "me" } })).toThrow(
+      /SessionView.hibernation.forced has unrecognized field\(s\): by/,
+    );
+  });
+});
+
+describe("decodeFrontendFrame — QueueEntry.keepAliveHold", () => {
+  /** Decode a queue whose single entry carries a keep-alive hold. */
+  function entryWith(hold: unknown): ReturnType<typeof decodeFrontendFrame> {
+    return decode({
+      queue: {
+        sessionId: "s1",
+        entries: [
+          { id: "q1", text: "later", classification: "QUEUE_CLASSIFICATION_PENDING", keepAliveHold: hold },
+        ],
+      },
+    });
+  }
+
+  /** The decoded single entry of a queue frame. */
+  function entryOf(frame: ReturnType<typeof decodeFrontendFrame>) {
+    if (frame.frame.case !== "queue") throw new Error("wrong variant");
+    return frame.frame.value.entries[0];
+  }
+
+  it("decodes the keep-alive turn holding a parked prompt", () => {
+    // Arrange / Act / Assert
+    expect(entryOf(entryWith({ turnId: "turn-9" })).keepAliveHold?.turnId).toBe("turn-9");
+  });
+
+  it("leaves the hold absent on an ordinary classifier-held entry", () => {
+    // Arrange / Act / Assert
+    expect(entryOf(decode({ queue: QUEUE })).keepAliveHold).toBeUndefined();
+  });
+
+  it("rejects a hold that names no turn", () => {
+    // Arrange / Act / Assert
+    expect(() => entryWith({})).toThrow(/QueueEntryKeepAliveHold missing required `turnId`/);
+  });
+
+  it("rejects an unrecognized field on the hold", () => {
+    // Arrange / Act / Assert
+    expect(() => entryWith({ turnId: "t1", scheduleId: "s" })).toThrow(
+      /QueueEntryKeepAliveHold has unrecognized field\(s\): scheduleId/,
+    );
+  });
+});
+
+describe("decodeFrontendFrame — ProgressView.expensiveTurn", () => {
+  const ALERT = {
+    turnId: "turn-3",
+    uncachedInputTokens: "48000",
+    thresholdTokens: "20000",
+    atMs: "1700000000000",
+    promptOrigin: "PROMPT_ORIGIN_WEBAPP_USER_SENT",
+  };
+
+  /** Decode a ProgressView carrying the given context-cost alert. */
+  function pvWith(expensiveTurn: unknown): ReturnType<typeof decodeFrontendFrame> {
+    return decode({ progress: { workspace: "/w", sessionId: "s1", expensiveTurn } });
+  }
+
+  /** The decoded ProgressView of a progress frame. */
+  function progressOf(frame: ReturnType<typeof decodeFrontendFrame>) {
+    if (frame.frame.case !== "progress") throw new Error("wrong variant");
+    return frame.frame.value;
+  }
+
+  it("decodes the alert's int64 token figures from their protojson strings", () => {
+    // Arrange / Act
+    const got = progressOf(pvWith(ALERT));
+    // Assert
+    expect(got.expensiveTurn?.uncachedInputTokens).toBe(48000);
+  });
+
+  it("carries the prompt origin verbatim so the cold-ping reading stays separable", () => {
+    // Arrange / Act
+    const got = progressOf(pvWith({ ...ALERT, promptOrigin: "PROMPT_ORIGIN_CACHE_KEEP_ALIVE" }));
+    // Assert
+    expect(got.expensiveTurn?.promptOrigin).toBe("PROMPT_ORIGIN_CACHE_KEEP_ALIVE");
+  });
+
+  it("leaves the alert absent after a cache-efficient turn", () => {
+    // Arrange / Act
+    const got = progressOf(decode({ progress: { workspace: "/w", sessionId: "s1" } }));
+    // Assert
+    expect(got.expensiveTurn).toBeUndefined();
+  });
+
+  it("rejects an alert naming no turn", () => {
+    // Arrange / Act / Assert
+    expect(() => pvWith({ ...ALERT, turnId: "" })).toThrow(
+      /ProgressView.expensiveTurn missing required `turnId`/,
+    );
+  });
+
+  it("rejects an origin that is not a canonical PromptOrigin name", () => {
+    // Arrange / Act / Assert
+    expect(() => pvWith({ ...ALERT, promptOrigin: "keep-alive" })).toThrow(
+      /promptOrigin has unrecognized value 'keep-alive'/,
+    );
+  });
+
+  it("rejects an UNSPECIFIED origin, which cannot be told from a cold keep-alive", () => {
+    // Arrange / Act / Assert
+    expect(() => pvWith({ ...ALERT, promptOrigin: "PROMPT_ORIGIN_UNSPECIFIED" })).toThrow(
+      /promptOrigin is UNSPECIFIED/,
+    );
+  });
+
+  it("rejects an unrecognized field on the alert", () => {
+    // Arrange / Act / Assert
+    expect(() => pvWith({ ...ALERT, modelName: "opus" })).toThrow(
+      /ProgressView.expensiveTurn has unrecognized field\(s\): modelName/,
+    );
+  });
+});
