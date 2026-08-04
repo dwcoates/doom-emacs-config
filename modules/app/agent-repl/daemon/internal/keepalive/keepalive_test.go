@@ -42,8 +42,8 @@ func TestEvaluateAction(t *testing.T) {
 			wantAction:    ActionPing,
 		},
 		{
-			name:          "inside the window pings",
-			lastTurnEndMs: msAgo(DefaultCacheTTL - time.Minute),
+			name:          "inside the window and above the retry floor pings",
+			lastTurnEndMs: msAgo(DefaultCacheTTL - 90*time.Second),
 			wantAction:    ActionPing,
 		},
 		{
@@ -85,39 +85,72 @@ func TestEvaluateAction(t *testing.T) {
 	}
 }
 
-func TestEvaluatePingRetryable(t *testing.T) {
+// TestEvaluateEntersTheRetryFloorAsItsOwnAction covers the floor's edge: the
+// decision at exactly TTL-RetryFloor carries no submit. It replaces the
+// Retryable flag's test because the flag gated nothing — the sweeper submitted
+// on every ActionPing whatever it said.
+func TestEvaluateEntersTheRetryFloorAsItsOwnAction(t *testing.T) {
 	cfg := testConfig()
 	const now = int64(10_000_000_000)
-	msAgo := func(d time.Duration) int64 { return now - int64(d/time.Millisecond) }
 
-	tests := []struct {
-		name          string
-		lastTurnEndMs int64
-		want          bool
-	}{
-		{
-			name:          "early in the window a failed submit may be retried",
-			lastTurnEndMs: msAgo(DefaultCacheTTL - DefaultLeeway),
-			want:          true,
-		},
-		{
-			name:          "inside the retry floor no further attempt is licensed",
-			lastTurnEndMs: msAgo(DefaultCacheTTL - RetryFloor),
-			want:          false,
-		},
+	got := cfg.Evaluate(now, now-int64((DefaultCacheTTL-RetryFloor)/time.Millisecond))
+
+	if got.Action != ActionAwaitExpiry {
+		t.Fatalf("Evaluate action at the retry floor = %s, want await_expiry; an ActionPing here is a submit inside the floor", got.Action)
 	}
+}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got := cfg.Evaluate(now, tc.lastTurnEndMs)
+// TestEvaluatePingsOneMillisecondBeforeTheRetryFloor covers the other side of
+// the same edge: the floor must not swallow the usable part of the window.
+func TestEvaluatePingsOneMillisecondBeforeTheRetryFloor(t *testing.T) {
+	cfg := testConfig()
+	const now = int64(10_000_000_000)
 
-			if got.Action != ActionPing {
-				t.Fatalf("Evaluate action = %s, want ping (test setup)", got.Action)
-			}
-			if got.Retryable != tc.want {
-				t.Fatalf("Evaluate retryable = %v, want %v", got.Retryable, tc.want)
-			}
-		})
+	got := cfg.Evaluate(now, now-int64((DefaultCacheTTL-RetryFloor-time.Millisecond)/time.Millisecond))
+
+	if got.Action != ActionPing {
+		t.Fatalf("Evaluate action one millisecond before the retry floor = %s, want ping", got.Action)
+	}
+}
+
+// TestEvaluateFloorDecisionCarriesTheFloorAccount asserts the arm reports the
+// threshold it refused against, which is the log line's whole content.
+func TestEvaluateFloorDecisionCarriesTheFloorAccount(t *testing.T) {
+	cfg := testConfig()
+	const now = int64(10_000_000_000)
+
+	got := cfg.Evaluate(now, now-int64((DefaultCacheTTL-RetryFloor)/time.Millisecond))
+
+	if got.FloorMs != int64(RetryFloor/time.Millisecond) {
+		t.Fatalf("Evaluate floor_ms = %d, want %d", got.FloorMs, int64(RetryFloor/time.Millisecond))
+	}
+}
+
+// TestEvaluatePingReportsRemainingMargin asserts the ping arm carries the
+// margin the failure log reports, so no caller re-derives it from a clock that
+// has since moved.
+func TestEvaluatePingReportsRemainingMargin(t *testing.T) {
+	cfg := testConfig()
+	const now = int64(10_000_000_000)
+
+	got := cfg.Evaluate(now, now-int64((DefaultCacheTTL-DefaultLeeway)/time.Millisecond))
+
+	if got.RemainingMs != int64(DefaultLeeway/time.Millisecond) {
+		t.Fatalf("Evaluate remaining_ms = %d, want %d", got.RemainingMs, int64(DefaultLeeway/time.Millisecond))
+	}
+}
+
+// TestValidateRefusesALeewayInsideTheRetryFloor covers the configuration whose
+// entire ping window lies inside the floor: it can never submit a ping, which
+// is a silently inert feature and therefore a startup refusal.
+func TestValidateRefusesALeewayInsideTheRetryFloor(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Leeway = RetryFloor
+
+	err := cfg.Validate()
+
+	if err == nil {
+		t.Fatal("Validate with leeway == the retry floor = nil, want a refusal; every tick in that window would decline to submit")
 	}
 }
 
@@ -201,7 +234,9 @@ func TestFromEnvRefusesZeroRatherThanDefaulting(t *testing.T) {
 
 func TestFromEnvReadsOverrides(t *testing.T) {
 	t.Setenv(EnvCacheTTLMs, "600000")
-	t.Setenv(EnvLeewayMs, "60000")
+	// Three minutes rather than one: a leeway equal to the retry floor is a
+	// window that can never submit a ping, which Validate now refuses.
+	t.Setenv(EnvLeewayMs, "180000")
 	t.Setenv(EnvIdleCutoffMs, "1800000")
 	t.Setenv(EnvUncachedAlertTokens, "1234")
 
@@ -210,7 +245,7 @@ func TestFromEnvReadsOverrides(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FromEnv() = %v, want nil", err)
 	}
-	if cfg.CacheTTL != 10*time.Minute || cfg.Leeway != time.Minute ||
+	if cfg.CacheTTL != 10*time.Minute || cfg.Leeway != 3*time.Minute ||
 		cfg.IdleCutoff != 30*time.Minute || cfg.UncachedCostAlertTokens != 1234 {
 		t.Fatalf("FromEnv() = %+v, want the four overrides applied", cfg)
 	}
