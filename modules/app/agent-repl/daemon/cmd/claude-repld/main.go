@@ -309,6 +309,14 @@ func main() {
 	if err != nil {
 		daemonFatal(daemonLog, "claude-repld: open prompt receipt store: %v", err)
 	}
+	// The keep-alive window ledger. FATAL on failure for the prompt receipts'
+	// reason inverted: without it the daemon cannot tell its own cache pings
+	// from the user's prompts, and would render machine-generated turns as
+	// conversation.
+	keepAliveWindows, err := statedb.NewKeepAliveWindows(stateStore)
+	if err != nil {
+		daemonFatal(daemonLog, "claude-repld: open keep-alive window store: %v", err)
+	}
 	turnAccountings, err := statedb.NewTurnAccountings(stateStore)
 	if err != nil {
 		daemonFatal(daemonLog, "claude-repld: open turn accounting store: %v", err)
@@ -573,6 +581,7 @@ func main() {
 		ModelCatalogs:     registrar,
 		Hibernations:      registrar,
 		VendorSessions:    registrar,
+		KeepAliveWindows:  server.KeepAliveWindowStore{Windows: keepAliveWindows},
 		RewindLineages:    shimSpawner,
 		KeepAlive:         keepAliveConfig,
 		VendorSessionOf: func(sessionID string) (string, bool) {

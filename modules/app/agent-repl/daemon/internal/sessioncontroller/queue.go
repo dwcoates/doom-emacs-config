@@ -585,6 +585,15 @@ func (m *Manager) onTurnBoundary(d *sessionController, active bool) {
 		m.mu.Unlock()
 		m.logf("session-controller: keep-alive turn ENDED ws=%q session=%s turn_id=%s held_prompts=%d",
 			d.workspace, d.sessionID, pingTurn, len(heldIDs))
+		// THE WINDOW CLOSES HERE. An open window has no upper bound, so leaving
+		// it open would exclude every later item on this workspace forever —
+		// the whole conversation, silently.
+		if m.cfg.KeepAliveWindows != nil {
+			if err := m.cfg.KeepAliveWindows.Close(pingTurn, m.now()); err != nil {
+				m.logf("session-controller: keep-alive window CLOSE FAILED ws=%q session=%s turn_id=%s error=%v — the window stays open, and an open window excludes every later item on this workspace; this must be repaired before the conversation renders again",
+					d.workspace, d.sessionID, pingTurn, err)
+			}
+		}
 		m.noteDrainActivity()
 		if len(heldIDs) > 0 {
 			go m.releaseKeepAliveHolds(d, pingTurn, heldIDs)
