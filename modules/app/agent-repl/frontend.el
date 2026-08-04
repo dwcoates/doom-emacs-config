@@ -53,6 +53,7 @@
 (declare-function agent-repl--frontend-after-ensure-session "agent-repl-frontend-client" (ws on-success on-failure))
 (declare-function agent-repl--frontend-force-fresh-session "agent-repl-frontend-client" (ws on-success on-failure))
 (declare-function agent-repl--frontend-restart-session "agent-repl-frontend-client" (ws))
+(declare-function agent-repl--frontend-hibernate-workspace "agent-repl-frontend-client" (ws))
 (declare-function agent-repl--frontend-session-url "agent-repl-frontend-client" (session-id))
 (declare-function agent-repl-window--panel-window "agent-repl-window" (kind &optional ws frame))
 (declare-function agent-repl-window--side-window-p "agent-repl-window" (win))
@@ -1110,6 +1111,32 @@ the shared command-ack handler rather than read as success."
     (agent-repl--log ws "restart-session: begin")
     (agent-repl--frontend-restart-session ws)
     (message "agent-repl: restarting the session for %s..." ws)))
+
+;;;###autoload
+(defun agent-repl-hibernate-workspace ()
+  "Hibernate the current workspace\='s session NOW, reclaiming its memory.
+
+A live session costs a node+CLI process pair of roughly 500MB, and the
+idle sweeper only reaps a workspace after the configured quiet window has
+actually elapsed.  This is the deliberate version of the same act: the
+daemon stops the shim and marks the session hibernated, and the registry
+record stays rehydratable, so the next act pays one bring-up and gets the
+conversation back exactly as it was.
+
+NOTHING IS LOST AND NOTHING IS INTERRUPTED.  The daemon refuses a
+hibernate while a turn is live or the merge lease is held — the user
+interrupts first, and in-flight work is never discarded to satisfy this.
+That refusal arrives as a nacked command ack and is surfaced loudly;
+it must never read as a session that went to sleep.
+
+Signals when there is no current workspace."
+  (interactive)
+  (let ((ws (agent-repl--ws-current-name)))
+    (unless ws
+      (user-error "agent-repl: no current workspace"))
+    (agent-repl--log ws "hibernate-workspace: begin")
+    (agent-repl--frontend-hibernate-workspace ws)
+    (message "agent-repl: hibernating %s..." ws)))
 
 (defun agent-repl--frontend-parent-ws-name (ws)
   "Return the basename of WS's recorded parent worktree, or nil.
