@@ -110,6 +110,7 @@ func newInterruptFlowRig(t *testing.T) *interruptFlowRig {
 			rig.mu.Lock()
 			rig.states = append(rig.states, ws)
 			rig.mu.Unlock()
+			notifyTestActivity()
 			if err := prog.ObserveWorkspaceState(ws); err != nil {
 				t.Errorf("progress observe workspace state: %v", err)
 			}
@@ -121,6 +122,7 @@ func newInterruptFlowRig(t *testing.T) *interruptFlowRig {
 			rig.mu.Lock()
 			rig.views = append(rig.views, v)
 			rig.mu.Unlock()
+			notifyTestActivity()
 		}
 	}()
 	t.Cleanup(func() {
