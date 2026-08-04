@@ -36,6 +36,7 @@ make_tree() {
     cp "$SCRIPT_UNDER_TEST" "$mod/bin/deploy-all.sh"
     cp "$THIS_DIR/lib-deploy-stamp.sh" "$mod/bin/lib-deploy-stamp.sh"
     chmod +x "$mod/bin/deploy-all.sh"
+    printf ';; stub daemon control plane\n' > "$mod/daemon.el"
 
     # BF_STUB_SHIM_CONTENT makes the stub behave like a real shim build: it
     # writes the bundle and its built-sha stamp, which is what deploy-all reads
@@ -135,6 +136,10 @@ fi
 # for BOTH shapes: a current Emacs returns the sweep's count, an older one
 # (EC_STUB_REFRESH_ABSENT=1) returns the absent branch's string.
 case "$*" in
+    *artifact-root-same*|*artifact-root-changed*)
+        echo \"\"${EC_STUB_ARTIFACT_ROOT_RESULT:-artifact-root-same}\"\"
+        exit 0
+        ;;
     *refresh-webviews*)
         if [ "${EC_STUB_REFRESH_ABSENT:-0}" = "1" ]; then
             echo '"absent"'
@@ -227,10 +232,26 @@ if [ "$RC" -eq 0 ] \
    && log_before "build-frontend" "go build -o .*claude-repld" \
    && log_before "go build -o .*claude-repld" "pwd=shim-store" \
    && log_before "kickstart -k gui/.*shim-store" "kickstart -k gui/.*shim-claude-sidecar" \
+   && log_before "load .*daemon.el" "daemon-restart" \
    && log_before "kickstart -k gui/.*shim-claude-sidecar" "daemon-restart"; then
     pass "fresh tree runs the full chain in dependency order"
 else
     fail "fresh tree runs the full chain in dependency order" "rc=$RC log: $(cat "$STUB_LOG")"
+fi
+
+# --- 1b. a linked-worktree deploy binds its artifact root before restart ----
+# The running Emacs may have loaded daemon.el from another checkout. The
+# deploy must move the runtime root before restarting and must stop every shim
+# that could otherwise survive on the other checkout's bundle.
+d="$TMP/t1b"; mkdir -p "$d"
+RUN_ENV="EC_STUB_ARTIFACT_ROOT_RESULT=artifact-root-changed" run_deploy "$d"
+if [ "$RC" -eq 0 ] \
+   && log_before "load .*daemon.el" "daemon-restart t" \
+   && grep -q "artifact root changed — surviving shims will stop" "$d/stdout"; then
+    pass "a moved runtime artifact root is bound before restart and stops surviving shims"
+else
+    fail "a moved runtime artifact root is bound before restart and stops surviving shims" \
+         "rc=$RC stdout: $(cat "$d/stdout") log: $(cat "$STUB_LOG")"
 fi
 
 # Pre-seed an installed binary AND its deployed stamp, i.e. a service already
