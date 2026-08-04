@@ -11,7 +11,6 @@ import { describe, expect, it } from "vitest";
 import type { HibernationDetail } from "../src/frontend-proto.js";
 import {
   HIBERNATED_BODY_CLASS,
-  HIBERNATE_ATTR,
   HIBERNATION_COMPOSER_NOTICE,
   REVIVAL_GATE_HEADING,
   REVIVE_COMPACT_ATTR,
@@ -251,11 +250,6 @@ describe("the click and body markers", () => {
   it("marks the document while the gate stands, so chrome can paint against it", () => {
     // Arrange / Act / Assert
     expect(HIBERNATED_BODY_CLASS).toBe("hibernated");
-  });
-
-  it("gives the hibernate affordance its own click marker", () => {
-    // Arrange / Act / Assert
-    expect(HIBERNATE_ATTR).toBe("data-hibernate");
   });
 });
 
