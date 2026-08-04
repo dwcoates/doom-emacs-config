@@ -245,3 +245,33 @@ describe("encodeFrontendCommand — queue controls (E4)", () => {
     expect(w.queueCancel).toEqual({ entryId: "q1" });
   });
 });
+
+describe("the hibernation command arms", () => {
+  it("encodes HibernateWorkspaceCmd as an empty message under its arm key", () => {
+    // Arrange / Act
+    const w = wire({ requestId: "r1", workspace: "ws", body: { case: "hibernateWorkspace" } });
+    // Assert — the workspace rides the envelope; there is nothing else to say.
+    expect(w.hibernateWorkspace).toEqual({});
+  });
+
+  it("encodes the compact-first revival as its own oneof arm", () => {
+    // Arrange / Act
+    const w = wire({ requestId: "r1", workspace: "ws", body: { case: "reviveSession", mode: "compactFirst" } });
+    // Assert — the ARM is the whole decision, which is why it is not a bool.
+    expect(w.reviveSession).toEqual({ compactFirst: {} });
+  });
+
+  it("encodes the direct revival as its own oneof arm", () => {
+    // Arrange / Act
+    const w = wire({ requestId: "r1", workspace: "ws", body: { case: "reviveSession", mode: "direct" } });
+    // Assert
+    expect(w.reviveSession).toEqual({ direct: {} });
+  });
+
+  it("never lets a revive frame set both modes at once", () => {
+    // Arrange / Act
+    const w = wire({ requestId: "r1", workspace: "ws", body: { case: "reviveSession", mode: "direct" } });
+    // Assert — "no decision" and "both decisions" are equally unrepresentable.
+    expect(Object.keys(w.reviveSession as Record<string, unknown>)).toEqual(["direct"]);
+  });
+});
