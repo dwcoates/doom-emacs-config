@@ -220,6 +220,38 @@ clean; BODY runs after the load with the same bindings still active."
                                  agent-repl-test--external-original-functions)))))
       (fset 'agent-repl--uds-probe guard))))
 
+;;;; ---- Generated protocol vocabulary readers ----
+
+(ert-deftest agent-repl-test-helpers-generated-go-text-signals-when-absent ()
+  "A missing generated binding signals: silently reading nothing would make
+every vocabulary assertion built on it pass vacuously."
+  ;; Act / Assert
+  (should-error (agent-repl-test--generated-go-text "agentshim/nope/v1/nope.pb.go")))
+
+(ert-deftest agent-repl-test-helpers-generated-protojson-fields-reads-a-json-name ()
+  "The reader recovers the lowerCamelCase protojson name from a struct tag."
+  ;; Act
+  (let ((fields (agent-repl-test--generated-protojson-fields
+                 "agentshim/frontend/v1/frontend.pb.go")))
+    ;; Assert
+    (should (member "hibernateWorkspace" fields))))
+
+(ert-deftest agent-repl-test-helpers-generated-protojson-fields-reads-a-bare-name ()
+  "A single-word field has no `json=' half, so the `name=' half must be read."
+  ;; Act
+  (let ((fields (agent-repl-test--generated-protojson-fields
+                 "agentshim/frontend/v1/frontend.pb.go")))
+    ;; Assert
+    (should (member "snapshot" fields))))
+
+(ert-deftest agent-repl-test-helpers-generated-enum-names-reads-a-value-name ()
+  "The enum reader recovers a prefixed value name from the generated bindings."
+  ;; Act
+  (let ((names (agent-repl-test--generated-enum-names
+                "agentshim/core/v1/core.pb.go" "PROMPT_ORIGIN_")))
+    ;; Assert
+    (should (member "PROMPT_ORIGIN_CACHE_KEEP_ALIVE" names))))
+
 (provide 'test-test-helpers)
 
 ;;; test-test-helpers.el ends here
