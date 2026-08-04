@@ -228,47 +228,32 @@ type ShimSpawner struct {
 
 	mu      sync.Mutex
 	handles map[string]ShimHandle // session id -> the shim WE spawned
-	// rewindLineages holds the ONE-SHOT rewind lineage armed for a session's
-	// very next spawn. Guarded by mu, and consumed (deleted) by the spawn that
-	// uses it — see the CONSUMED, NOT READ note in EnsureShim.
-	rewindLineages map[string]sessioncontroller.RewindLineage
 }
 
-// ArmRewindLineage arms the lineage argv for sessionID's next spawn. It
-// implements sessioncontroller.RewindLineageArmer.
+// consumeRewindLineage clears sessionID's rewind lineage, in the Update that
+// records the spawn that just announced it.
 //
-// An INCOMPLETE lineage is refused rather than armed. The shim rejects an empty
-// dropped-turn list, so arming a partial one would turn a rewind that merely
-// went unrecorded into a spawn that fails at startup — and the session would
-// come back with no shim at all.
-func (s *ShimSpawner) ArmRewindLineage(sessionID string, lineage sessioncontroller.RewindLineage) error {
-	if sessionID == "" {
-		return fmt.Errorf("server: refusing to arm a rewind lineage with no session id")
+// THE CLEAR IS THE CONSUMPTION, and it is durable for the same reason the arm
+// is. A lineage left standing would ride the NEXT unrelated respawn too,
+// telling the shim it had just been rewound when it had not, and the shim would
+// emit a second SessionRewound for a rewind that never happened.
+//
+// A FAILED CLEAR IS LOUD AND NOT SWALLOWED: the record still carries a lineage
+// that has already been announced, which the next spawn would announce again.
+func (s *ShimSpawner) consumeRewindLineage(sessionID string) error {
+	if s.reg == nil {
+		return fmt.Errorf("server: session %s: no registry; the announced rewind lineage cannot be consumed", sessionID)
 	}
-	if lineage.PreviousVendorSessionID == "" || lineage.RetainedLeafUUID == "" || lineage.DroppedTurnIDs == "" {
-		return fmt.Errorf("server: session %s: refusing to arm an INCOMPLETE rewind lineage (rewound_from=%q retained_leaf=%q dropped_turns=%q); the shim rejects an empty dropped-turn list, so a partial lineage would fail the spawn outright",
-			sessionID, lineage.PreviousVendorSessionID, lineage.RetainedLeafUUID, lineage.DroppedTurnIDs)
+	found, err := s.reg.Update(sessionID, func(rec *registry.Record) {
+		rec.Rewind = registry.RewindLineage{}
+	})
+	if err != nil {
+		return fmt.Errorf("server: session %s: clearing the consumed rewind lineage: %w", sessionID, err)
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.rewindLineages == nil {
-		s.rewindLineages = map[string]sessioncontroller.RewindLineage{}
+	if !found {
+		return fmt.Errorf("server: session %s: clearing the consumed rewind lineage found no record", sessionID)
 	}
-	s.rewindLineages[sessionID] = lineage
-	s.logf("server: session %s: rewind lineage ARMED for the next spawn rewound_from=%s retained_leaf=%s dropped_turns=%s",
-		sessionID, lineage.PreviousVendorSessionID, lineage.RetainedLeafUUID, lineage.DroppedTurnIDs)
 	return nil
-}
-
-// takeRewindLineage consumes sessionID's armed lineage, if any.
-func (s *ShimSpawner) takeRewindLineage(sessionID string) (sessioncontroller.RewindLineage, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	lineage, ok := s.rewindLineages[sessionID]
-	if ok {
-		delete(s.rewindLineages, sessionID)
-	}
-	return lineage, ok
 }
 
 // NewShimSpawner builds a ShimSpawner. reg and spawn are required; a nil
@@ -374,13 +359,16 @@ func (s *ShimSpawner) EnsureShim(ctx context.Context, sessionID string) (session
 		ConfigDir:      rec.ConfigDir,
 		Resume:         rec.ClaudeSessionID,
 	}
-	// THE REWIND LINEAGE IS CONSUMED, NOT READ. It describes exactly one spawn
-	// — the bring-up immediately after a transcript rewind — and is not a
-	// durable record fact. A lineage left armed would ride the NEXT unrelated
-	// respawn too, telling the shim it had just been rewound when it had not,
-	// and the shim would emit a second SessionRewound for a rewind that never
-	// happened.
-	if lineage, armed := s.takeRewindLineage(sessionID); armed {
+	// THE REWIND LINEAGE COMES OFF THE RECORD, and this read IS the promised
+	// recovery. The lineage was written by the same Update that flipped the
+	// uuid, so a daemon that died anywhere after that flip — before the
+	// respawn, mid-respawn, or between daemons entirely — finds it here on the
+	// very next bring-up of the session and announces the rewind it owes.
+	//
+	// It is CONSUMED, not merely read: the clear below is what stops it riding
+	// the next unrelated respawn and announcing a rewind that never happened.
+	lineage := rec.Rewind
+	if lineage.Armed() {
 		opts.RewoundFrom = lineage.PreviousVendorSessionID
 		opts.RewindRetainedLeaf = lineage.RetainedLeafUUID
 		opts.RewindDroppedTurns = lineage.DroppedTurnIDs
@@ -407,12 +395,22 @@ func (s *ShimSpawner) EnsureShim(ctx context.Context, sessionID string) (session
 	s.logf("server: session %s: no live shim — spawning UDS shim (resume=%q fake=%t)", sessionID, opts.Resume, opts.Fake)
 	handle, err := s.spawn(sessionID, opts)
 	if err != nil {
+		// The lineage stays on the record: this spawn never announced it, so
+		// the next bring-up still owes it.
 		return res, err
 	}
 	if handle.Stop != nil {
 		s.mu.Lock()
 		s.handles[sessionID] = handle
 		s.mu.Unlock()
+	}
+	if lineage.Armed() {
+		if err := s.consumeRewindLineage(sessionID); err != nil {
+			s.logf("server: session %s: rewind lineage CONSUMPTION FAILED after the spawn announced it: %v — the record still carries an announced lineage, and the next spawn would announce a rewind that never happened", sessionID, err)
+			return res, err
+		}
+		s.logf("server: session %s: rewind lineage CONSUMED by the spawn that announced it rewound_from=%s dropped_turns=%s",
+			sessionID, lineage.PreviousVendorSessionID, lineage.DroppedTurnIDs)
 	}
 	return res, nil
 }
@@ -832,6 +830,45 @@ func (r *RegistryRegistrar) ClaudeSessionIDChanged(sessionID, claudeSessionID st
 // non-empty by definition, so the vendor demonstrably wrote the conversation
 // being rotated away from and the reset that accompanies it must still land.
 func (r *RegistryRegistrar) AdoptVendorSessionID(sessionID, claudeSessionID string) (bool, string, bool) {
+	return r.adoptVendorSessionID(sessionID, claudeSessionID, registry.RewindLineage{})
+}
+
+// AdoptRewoundVendorSessionID is AdoptVendorSessionID with the rewind's lineage
+// written by the SAME Update. It implements
+// sessioncontroller.VendorSessionAdopter.
+//
+// THE FLIP AND THE LINEAGE ARE ONE DURABLE FACT. The flip is the rewind's only
+// destructive act and the lineage is the only account of what it dropped;
+// written separately, a daemon dying in between left a record naming a
+// truncated conversation with nothing left to say it had been truncated, and
+// the SessionRewound the frontends replay from was emitted by nobody. Written
+// together, a crash in any window leaves either both or neither — and the next
+// spawn of a record that carries one replays the argv.
+//
+// An INCOMPLETE lineage is refused and NOTHING is written, flip included. The
+// shim rejects an empty dropped-turn list, so adopting the new uuid while
+// arming a partial lineage would leave the session pointing at the truncated
+// transcript AND unable to spawn on it.
+func (r *RegistryRegistrar) AdoptRewoundVendorSessionID(sessionID, claudeSessionID string, lineage sessioncontroller.RewindLineage) (bool, string, bool) {
+	durable := registry.RewindLineage{
+		PreviousVendorSessionID: lineage.PreviousVendorSessionID,
+		RetainedLeafUUID:        lineage.RetainedLeafUUID,
+		DroppedTurnIDs:          lineage.DroppedTurnIDs,
+	}
+	if !durable.Armed() {
+		if r.Logf != nil {
+			r.Logf("server: session %s: REFUSING the rewind flip to %s — the lineage is incomplete (rewound_from=%q retained_leaf=%q dropped_turns=%q); the shim rejects an empty dropped-turn list, so adopting it would leave the session naming a transcript it cannot spawn on",
+				sessionID, claudeSessionID, durable.PreviousVendorSessionID, durable.RetainedLeafUUID, durable.DroppedTurnIDs)
+		}
+		return false, "", false
+	}
+	return r.adoptVendorSessionID(sessionID, claudeSessionID, durable)
+}
+
+// adoptVendorSessionID is the one Update both adoption entry points take. An
+// armed lineage is stored beside the uuid it belongs to; the zero value leaves
+// whatever the record carries alone.
+func (r *RegistryRegistrar) adoptVendorSessionID(sessionID, claudeSessionID string, lineage registry.RewindLineage) (bool, string, bool) {
 	if r.Reg == nil || claudeSessionID == "" {
 		return false, "", false
 	}
@@ -843,6 +880,9 @@ func (r *RegistryRegistrar) AdoptVendorSessionID(sessionID, claudeSessionID stri
 		previous = rec.ClaudeSessionID
 		rotated = previous != "" && previous != claudeSessionID
 		rec.ClaudeSessionID = claudeSessionID
+		if lineage.Armed() {
+			rec.Rewind = lineage
+		}
 		if rotated {
 			rec.LastSeq = 0
 			rec.NewestClearOrCompactSeq = 0

@@ -296,11 +296,6 @@ type Config struct {
 	// render as ordinary conversation, which is why every site that would have
 	// used it says so rather than failing quietly.
 	KeepAliveWindows KeepAliveWindowLedger
-	// RewindLineages arms the one-shot rewind argv for the spawn that follows a
-	// transcript rewind (rewind.go). Nil disables rewinding, loudly at the site
-	// that would have used it: without it the shim could not be told what was
-	// dropped, and the rewind would leave no durable trace.
-	RewindLineages RewindLineageArmer
 	// VendorSessions performs the rewind's ATOMIC registry flip. It is the same
 	// object as Registrar in production; it is a separate field because the
 	// rewind needs exactly one method and a harness should be able to supply
@@ -394,7 +389,20 @@ type Manager struct {
 	// concurrent ReviveSessionCmds both submit `/compact` under one request id
 	// and the second overwrites the first's completion waiter.
 	reviving map[string]bool
-	lastCSID map[string]string // session id -> last-persisted claude session uuid
+	// keepAliveRewinds names, per WORKSPACE, the keep-alive ping turn whose
+	// aftermath — the transcript rewind and the respawn behind it — is still
+	// running. It is the SECOND half of the ping's continuous hold: the ping's
+	// own claim (sessionController.keepAliveTurnID) is cleared at the turn's
+	// end, and without this a prompt arriving in the gap between that clear and
+	// the rewind's stop would start a real turn the rewind then SIGTERMs and
+	// truncates away.
+	//
+	// It is keyed by workspace rather than held on the sessionController for
+	// the reason the rewind exists at all: the rewind REPLACES the controller,
+	// so a claim living on the retired one would evaporate exactly when the
+	// respawned session starts accepting prompts again.
+	keepAliveRewinds map[string]string
+	lastCSID         map[string]string // session id -> last-persisted claude session uuid
 	// shimPID is the pid each session's shim announced on its ShimHello. It is
 	// the ONLY way to stop a shim this daemon did not spawn, and it is kept in
 	// memory rather than persisted deliberately: it is trustworthy exactly
@@ -526,6 +534,13 @@ type sessionController struct {
 	// carried only the text would put the turn back under a different mode
 	// than the one it was cut from (mergelease.go, ResumeDisplacedTurn).
 	runningPermissionMode string
+	// queueMigrating marks this controller's queue as OWNED BY THE REWIND
+	// ORCHESTRATOR rather than by this controller. It is set under the manager
+	// mutex by the same acquisition that empties the queue into the
+	// orchestrator's own slice, BEFORE the rewind stops the shim, so the exit
+	// tail that stop causes cannot drop entries or persist nil over the durable
+	// record of what is still owed. Cleared when the entries are re-parked.
+	queueMigrating bool
 	// phantomTurnClosed names the durable turn claims the shim handshake just
 	// contradicted and the SSM synthesized an end for (phantomturn.go). It is
 	// carried from the handshake to ShimReady, where the queue is released on
@@ -2131,14 +2146,23 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 		// Empty the queue and PUSH the empty view: a frontend that keeps
 		// rendering chips for a dead session is offering the user controls
 		// that do nothing.
-		dropped := d.queue.drainAll()
+		//
+		// UNLESS THE QUEUE IS NOT THIS TAIL'S TO EMPTY. A rewind takes the
+		// entries into its own ownership before it stops the shim, so the exit
+		// this stop causes finds nothing here — and the publish is skipped with
+		// it, because pushing the empty view and persisting nil records is
+		// exactly how the durable evidence of prompts still owed was lost.
+		migrating := d.queueMigrating
+		dropped := m.drainQueueForExitLocked(d)
 		view := d.queue.view(workspace, sessionID)
 		m.mu.Unlock()
 		if len(dropped) > 0 {
 			m.logf("session-controller: session %s ended with %d queued prompt(s) undelivered ws=%q",
 				sessionID, len(dropped), workspace)
 		}
-		m.publish(sessionID, view, nil)
+		if !migrating {
+			m.publish(sessionID, view, nil)
+		}
 		// THE WIRING IS GONE with the session controller, and `runErr` is what says whether
 		// that is a FAULT or a teardown we asked for. Only the CURRENT controller
 		// reports it at all: a superseded one exiting says nothing about the
