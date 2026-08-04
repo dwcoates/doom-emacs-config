@@ -296,11 +296,6 @@ type Config struct {
 	// render as ordinary conversation, which is why every site that would have
 	// used it says so rather than failing quietly.
 	KeepAliveWindows KeepAliveWindowLedger
-	// RewindLineages arms the one-shot rewind argv for the spawn that follows a
-	// transcript rewind (rewind.go). Nil disables rewinding, loudly at the site
-	// that would have used it: without it the shim could not be told what was
-	// dropped, and the rewind would leave no durable trace.
-	RewindLineages RewindLineageArmer
 	// VendorSessions performs the rewind's ATOMIC registry flip. It is the same
 	// object as Registrar in production; it is a separate field because the
 	// rewind needs exactly one method and a harness should be able to supply

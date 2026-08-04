@@ -17,26 +17,21 @@ import (
 	"claude-repld/internal/session"
 )
 
-// fakeVendorSessions records the rewind's atomic registry flip.
+// fakeVendorSessions records the rewind's one atomic write: the uuid flip and
+// the lineage that accounts for it.
 type fakeVendorSessions struct {
-	adopted []string
-	refuse  bool
+	adopted  []string
+	lineages []RewindLineage
+	refuse   bool
 }
 
-func (f *fakeVendorSessions) AdoptVendorSessionID(sessionID, claudeSessionID string) (bool, string, bool) {
+func (f *fakeVendorSessions) AdoptRewoundVendorSessionID(sessionID, claudeSessionID string, lineage RewindLineage) (bool, string, bool) {
 	if f.refuse {
 		return false, "old-session", false
 	}
 	f.adopted = append(f.adopted, claudeSessionID)
+	f.lineages = append(f.lineages, lineage)
 	return true, "old-session", true
-}
-
-// fakeRewindArmer records the one-shot lineage armed for the next spawn.
-type fakeRewindArmer struct{ armed []RewindLineage }
-
-func (f *fakeRewindArmer) ArmRewindLineage(sessionID string, lineage RewindLineage) error {
-	f.armed = append(f.armed, lineage)
-	return nil
 }
 
 // transcriptLine renders one JSONL transcript record.
@@ -93,7 +88,6 @@ func rewindRig(t *testing.T) (*Manager, *fakeApplier, *fakeVendorSessions) {
 	writeRewindableTranscript(t, configDir, "ws", "old-session")
 	vendors := &fakeVendorSessions{}
 	m.cfg.VendorSessions = vendors
-	m.cfg.RewindLineages = &fakeRewindArmer{}
 	m.cfg.SessionConfigDir = func(string) string { return configDir }
 	m.cfg.VendorSessionOf = func(string) (string, bool) { return "old-session", true }
 	return m, applier, vendors
@@ -158,6 +152,47 @@ func TestRewindRefusalTakesNoRegistryFlip(t *testing.T) {
 	// Assert.
 	if len(vendors.adopted) != 0 {
 		t.Fatalf("a refused rewind flipped the registry to %v", vendors.adopted)
+	}
+}
+
+// THE LINEAGE RIDES THE FLIP. It is the only account of what the flip dropped,
+// so the two are one write: a crash between them used to leave a record naming
+// a truncated conversation with nothing left to say it had been truncated.
+func TestRewindWritesTheLineageWithTheFlip(t *testing.T) {
+	// Arrange.
+	m, _, vendors := rewindRig(t)
+
+	// Act.
+	if _, err := m.rewindKeepAliveTurns(context.Background(), "ws", "s1", []string{"ka_1", "ka_2"}); err != nil {
+		t.Fatalf("rewindKeepAliveTurns: %v", err)
+	}
+
+	// Assert.
+	if len(vendors.lineages) != 1 {
+		t.Fatalf("%d lineage writes, want exactly the one that carried the flip", len(vendors.lineages))
+	}
+	got := vendors.lineages[0]
+	if got.PreviousVendorSessionID != "old-session" || got.RetainedLeafUUID == "" || got.DroppedTurnIDs != "ka_1,ka_2" {
+		t.Fatalf("lineage = %+v, want the truncated uuid, a retained leaf and the dropped turns in submission order", got)
+	}
+}
+
+// A REFUSED FLIP ARMS NOTHING, which is what removes the stale-arm defect: the
+// lineage cannot exist without the flip it accounts for.
+func TestRewindRefusedFlipLeavesNoLineageBehind(t *testing.T) {
+	// Arrange.
+	m, _, vendors := rewindRig(t)
+	vendors.refuse = true
+
+	// Act.
+	_, err := m.rewindKeepAliveTurns(context.Background(), "ws", "s1", []string{"ka_1"})
+
+	// Assert.
+	if err == nil {
+		t.Fatal("rewindKeepAliveTurns = nil against a registry that refused the flip")
+	}
+	if len(vendors.lineages) != 0 {
+		t.Fatalf("a refused flip stored lineage %+v", vendors.lineages)
 	}
 }
 

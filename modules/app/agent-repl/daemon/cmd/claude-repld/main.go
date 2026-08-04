@@ -590,7 +590,6 @@ func main() {
 		Hibernations:      registrar,
 		VendorSessions:    registrar,
 		KeepAliveWindows:  server.KeepAliveWindowStore{Windows: keepAliveWindows},
-		RewindLineages:    shimSpawner,
 		KeepAlive:         keepAliveConfig,
 		VendorSessionOf: func(sessionID string) (string, bool) {
 			rec, ok := sessionRegistry.Get(sessionID)

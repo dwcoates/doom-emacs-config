@@ -138,6 +138,55 @@ type Record struct {
 	// Hibernation is the typed account behind Hibernated. Zero value when
 	// Hibernated is false; the two move together in one write.
 	Hibernation HibernationDetail `json:"hibernation"`
+	// Rewind is the UNCONSUMED rewind lineage this session's next spawn must
+	// announce, zero when none is owed.
+	//
+	// DURABLE, AND WRITTEN BY THE SAME Update THAT FLIPS ClaudeSessionID. The
+	// flip is the rewind's one destructive act; the lineage is the only account
+	// of what that flip dropped. Held in memory instead, a daemon dying between
+	// the flip and the respawn left a record naming a truncated conversation
+	// with nothing left to say it had been truncated, and the SessionRewound
+	// the frontends replay from was never emitted by anyone.
+	//
+	// ONE-SHOT: the spawner clears it in the Update that records the spawn that
+	// consumed it. A lineage left standing would ride the next unrelated
+	// respawn and announce a rewind that never happened.
+	Rewind RewindLineage `json:"rewind,omitempty"`
+}
+
+// RewindLineage is the durable form of the frozen shim argv contract
+// (--rewound-from, --rewind-retained-leaf, --rewind-dropped-turns).
+//
+// ALL THREE OR NONE. The shim rejects an empty dropped-turn list outright, so a
+// partial lineage would turn an unrecorded rewind into a spawn that fails at
+// startup and a session that comes back with no shim at all. Every writer and
+// the loader enforce the pair, so a partial one is not representable durably.
+type RewindLineage struct {
+	// PreviousVendorSessionID is the transcript the rewind truncated — the seq
+	// space it retired.
+	PreviousVendorSessionID string `json:"previous_vendor_session_id,omitempty"`
+	// RetainedLeafUUID is the last record kept: the final record of the last
+	// real turn.
+	RetainedLeafUUID string `json:"retained_leaf_uuid,omitempty"`
+	// DroppedTurnIDs is the comma-separated turn_id list, in submission order.
+	DroppedTurnIDs string `json:"dropped_turn_ids,omitempty"`
+}
+
+// Armed reports whether a complete lineage is waiting to be announced.
+func (l RewindLineage) Armed() bool {
+	return l.PreviousVendorSessionID != "" && l.RetainedLeafUUID != "" && l.DroppedTurnIDs != ""
+}
+
+// Partial reports a lineage that carries some of the three and not all of
+// them — the one shape that must never be stored or spawned with.
+func (l RewindLineage) Partial() bool {
+	set := 0
+	for _, f := range []string{l.PreviousVendorSessionID, l.RetainedLeafUUID, l.DroppedTurnIDs} {
+		if f != "" {
+			set++
+		}
+	}
+	return set != 0 && set != 3
 }
 
 // Hibernation cause tokens. They are the durable spelling of

@@ -30,7 +30,11 @@ import (
 //
 // THE COPY IS NON-DESTRUCTIVE. The source transcript is read and left exactly
 // as it was, so a crash anywhere in this file costs nothing: the registry still
-// names the old uuid, and the next real prompt simply re-triggers the rewind.
+// names the old uuid, and the next real prompt that needs the keep-alive turns
+// gone runs the rewind again from the beginning. Nothing in this file is the
+// point of no return — the caller's registry flip is (sessioncontroller/
+// rewind.go), and that flip carries the lineage the respawn replays from, so a
+// crash after it is recovered by the next bring-up rather than by this file.
 
 // nonChainTypes are the record types that carry no conversation node — no
 // uuid/parentUuid participation — and are therefore skipped by the chain

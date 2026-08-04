@@ -29,17 +29,23 @@ import (
 //  3. COPY-AND-TRUNCATE to a new uuid. NON-DESTRUCTIVE: the original is
 //     untouched, so everything up to this point is free to fail.
 //  4. FLIP the registry to the new uuid in ONE Update, which also resets the
-//     store cursors — AdoptVendorSessionID's precedent, and for its reason: the
-//     rotation retires the old seq space, and a split write would let the
-//     hydrate-from-checkpoint step undo the reset before the new uuid landed.
-//  5. SPAWN, resuming the new uuid, carrying the lineage argv.
+//     store cursors AND records the lineage — AdoptVendorSessionID's precedent,
+//     and for its reason: the rotation retires the old seq space, and a split
+//     write would let the hydrate-from-checkpoint step undo the reset before
+//     the new uuid landed.
+//  5. SPAWN, resuming the new uuid, carrying the lineage argv off the record
+//     and clearing it in the write that records the spawn.
 //  6. DELIVER the held prompt.
 //
-// CRASH SAFETY FALLS OUT OF STEP 4 BEING THE ONLY DESTRUCTIVE ONE. A daemon
-// that dies before the flip leaves an orphaned copy nobody reads and a record
-// still naming the original, so the next real prompt simply re-triggers the
-// whole thing. The rewind is idempotent by being re-runnable, not by being
-// transactional.
+// CRASH SAFETY FALLS OUT OF STEP 4 BEING THE ONLY DESTRUCTIVE ONE, AND BEING
+// ONE WRITE. A daemon that dies BEFORE the flip leaves an orphaned copy nobody
+// reads and a record still naming the original, so the next real prompt simply
+// re-triggers the whole thing. A daemon that dies AFTER it leaves a record that
+// names the truncated conversation AND carries the lineage that describes it,
+// so the next ensure() of that session spawns with the rewind argv and the
+// SessionRewound is emitted late rather than never. The rewind is idempotent by
+// being re-runnable, and its one durable step is recoverable by being one
+// write.
 //
 // AND IT IS ALWAYS OPTIONAL. Every failure short of the flip degrades to
 // "submit WITHOUT rewinding": the user's prompt is worth more than a clean
@@ -62,19 +68,17 @@ type RewindLineage struct {
 	DroppedTurnIDs string
 }
 
-// RewindLineageArmer arms the one-shot lineage argv for a session's next spawn.
-// Satisfied by *server.ShimSpawner. Nil disables the rewind entirely, which is
-// loud at the one site that would have used it rather than silently skipped.
-type RewindLineageArmer interface {
-	ArmRewindLineage(sessionID string, lineage RewindLineage) error
-}
-
 // VendorSessionAdopter performs the ATOMIC registry flip: adopt the new vendor
-// uuid and reset the store cursors in one Update. It is
-// SessionRegistrar.AdoptVendorSessionID, named separately here because the
-// rewind needs exactly that one method and nothing else on the registrar.
+// uuid, reset the store cursors, and record the lineage the next spawn must
+// announce — all in ONE Update.
+//
+// THE LINEAGE TRAVELS WITH THE FLIP because the flip is what it accounts for.
+// An in-memory arm beside a durable flip meant a daemon that died in between
+// left a record naming a truncated conversation with nothing left to say it had
+// been truncated: no SessionRewound was ever emitted, and no recovery existed.
+// One write makes both facts land together or neither land at all.
 type VendorSessionAdopter interface {
-	AdoptVendorSessionID(sessionID, claudeSessionID string) (rotated bool, previous string, adopted bool)
+	AdoptRewoundVendorSessionID(sessionID, claudeSessionID string, lineage RewindLineage) (rotated bool, previous string, adopted bool)
 }
 
 // ErrRewindSkipped reports a rewind that did not happen and did not need to.
@@ -94,12 +98,8 @@ func keepAliveDropText() map[string]bool {
 // It must NOT run on the shim read-loop goroutine: it stops and respawns the
 // shim, and the bring-up waits on a handshake only that loop can deliver.
 func (m *Manager) rewindKeepAliveTurns(ctx context.Context, workspace, sessionID string, droppedTurnIDs []string) (newVendorSessionID string, err error) {
-	if m.cfg.RewindLineages == nil {
-		return "", fmt.Errorf("session-controller: refusing to rewind ws=%q session=%s: no rewind lineage armer is wired, so the shim could not be told what was dropped and the rewind would be unrecorded",
-			workspace, sessionID)
-	}
 	if m.cfg.VendorSessions == nil {
-		return "", fmt.Errorf("session-controller: refusing to rewind ws=%q session=%s: no vendor-session adopter is wired, so the registry flip could not be made atomic",
+		return "", fmt.Errorf("session-controller: refusing to rewind ws=%q session=%s: no vendor-session adopter is wired, so the registry flip and the lineage the shim must announce could not be made one write",
 			workspace, sessionID)
 	}
 	if len(droppedTurnIDs) == 0 {
@@ -168,24 +168,24 @@ func (m *Manager) rewindKeepAliveTurns(ctx context.Context, workspace, sessionID
 	m.logf("session-controller: rewind COPY WRITTEN ws=%q session=%s from=%s to=%s path=%s — the original is untouched, so a crash before the registry flip simply re-triggers this rewind",
 		workspace, sessionID, vendorSessionID, newVendorSessionID, dest)
 
-	// THE ARM COMES BEFORE THE FLIP. Arming is in-memory and cannot fail
-	// durably, and doing it first means the spawn that follows the flip cannot
-	// find itself without a lineage to announce.
+	// THE FLIP: ONE Update that adopts the new uuid, resets the store cursors,
+	// AND records the lineage the next spawn must announce. Splitting the
+	// cursors out would let the registry's hydrate-from-checkpoint step undo the
+	// reset before the new uuid was recorded (AdoptVendorSessionID); splitting
+	// the lineage out would let a crash leave a truncated conversation with
+	// nothing left to say it had been truncated.
+	//
+	// A REFUSED FLIP THEREFORE ARMS NOTHING. The original conversation is still
+	// the record's, and there is no lineage left behind to ride some later,
+	// unrelated spawn.
 	lineage := RewindLineage{
 		PreviousVendorSessionID: vendorSessionID,
 		RetainedLeafUUID:        plan.RetainedLeafUUID,
 		DroppedTurnIDs:          strings.Join(droppedTurnIDs, ","),
 	}
-	if err := m.cfg.RewindLineages.ArmRewindLineage(sessionID, lineage); err != nil {
-		return "", fmt.Errorf("session-controller: rewind ws=%q session=%s: arming the lineage argv: %w", workspace, sessionID, err)
-	}
-
-	// THE FLIP: ONE Update that adopts the new uuid AND resets the store
-	// cursors. Splitting them would let the registry's hydrate-from-checkpoint
-	// step undo the reset before the new uuid was recorded (AdoptVendorSessionID).
-	rotated, previous, adopted := m.cfg.VendorSessions.AdoptVendorSessionID(sessionID, newVendorSessionID)
+	rotated, previous, adopted := m.cfg.VendorSessions.AdoptRewoundVendorSessionID(sessionID, newVendorSessionID, lineage)
 	if !adopted {
-		return "", fmt.Errorf("session-controller: rewind ws=%q session=%s: the registry refused to adopt the rewound vendor session %s (previous %s); the original conversation is intact and still the record's",
+		return "", fmt.Errorf("session-controller: rewind ws=%q session=%s: the registry refused to adopt the rewound vendor session %s (previous %s); the original conversation is intact and still the record's, and no lineage was armed",
 			workspace, sessionID, newVendorSessionID, previous)
 	}
 	m.logf("session-controller: rewind REGISTRY FLIPPED ws=%q session=%s %s -> %s rotated=%v — the old seq space is retired and the store cursors reset in the same write",
