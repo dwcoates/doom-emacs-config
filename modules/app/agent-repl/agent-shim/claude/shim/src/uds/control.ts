@@ -29,6 +29,8 @@ import {
   PermissionRequest,
   PermissionRequestSchema,
   PermissionResponse,
+  PromptOrigin,
+  PromptOriginSchema,
   SetModel,
   SubmitPrompt,
 } from "./proto.js";
@@ -43,6 +45,7 @@ export interface SdkControlTarget {
     requestId: string;
     text: string;
     origin: string;
+    promptOrigin: PromptOrigin;
     permissionMode?: string;
   }): Promise<void>;
   /**
@@ -109,12 +112,18 @@ export class ControlDispatch {
       LOGGER.log({ level: "error" }, reason);
       return create(NackSchema, { requestId: msg.requestId, reason });
     }
-    LOGGER.log({ request_id: msg.requestId, origin: msg.origin, text_length: msg.text.length, permission_mode: msg.permissionMode || undefined }, "dispatching SubmitPrompt to SDK session");
+    LOGGER.log({ request_id: msg.requestId, origin: msg.origin, prompt_origin: msg.promptOrigin, text_length: msg.text.length, permission_mode: msg.permissionMode || undefined }, "dispatching SubmitPrompt to SDK session");
+    if (msg.promptOrigin === PromptOrigin.UNSPECIFIED || !PromptOriginSchema.values.some((value) => value.number === msg.promptOrigin)) {
+      const reason = `SubmitPrompt ${JSON.stringify(msg.requestId)} has invalid prompt_origin ${msg.promptOrigin}`;
+      LOGGER.log({ level: "error", request_id: msg.requestId, prompt_origin: msg.promptOrigin }, reason);
+      return create(NackSchema, { requestId: msg.requestId, reason });
+    }
     try {
       await this.target.submitPrompt({
         requestId: msg.requestId,
         text: msg.text,
         origin: msg.origin,
+        promptOrigin: msg.promptOrigin,
         ...(msg.permissionMode !== "" ? { permissionMode: msg.permissionMode } : {}),
       });
       LOGGER.log({ request_id: msg.requestId }, "SubmitPrompt accepted by SDK session");

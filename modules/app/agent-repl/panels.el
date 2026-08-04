@@ -884,7 +884,7 @@ push it to the back, not re-show or launch the agent."
      (selection
       (agent-repl--log ws "toggle: branch=send-selection")
       (deactivate-mark)
-      (agent-repl--send-to-agent selection))
+      (agent-repl--send-to-agent selection "PROMPT_ORIGIN_PANEL_SELECTION"))
      ;; `SPC o C' means "done with this workspace" whether or not its
      ;; view happens to be on screen.
      (always-close

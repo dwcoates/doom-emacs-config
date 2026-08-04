@@ -398,7 +398,7 @@
   "send-diff-analysis formats 'for the SPEC, PROMPT' and sends it."
   (let (sent-text)
     (cl-letf (((symbol-function 'agent-repl--send-to-agent)
-               (lambda (text) (setq sent-text text))))
+               (lambda (text _origin) (setq sent-text text))))
       (agent-repl--send-diff-analysis "unstaged changes (git diff)" "please explain the changes")
       (should (equal sent-text "for the unstaged changes (git diff), please explain the changes")))))
 
@@ -452,10 +452,11 @@ through `agent-repl--frontend-dispatch-send'."
       (cl-letf (((symbol-function '+workspace-current-name)
                  (lambda () "test-ws"))
                 ((symbol-function 'agent-repl--frontend-dispatch-send)
-                 (lambda (ws input raw &optional _on-settle)
-                   (setq dispatched (list ws input raw)))))
-        (agent-repl--send-to-agent "hello claude")
-        (should (equal dispatched '("test-ws" "hello claude" "hello claude")))))))
+                 (lambda (ws input raw origin &optional _on-settle)
+                   (setq dispatched (list ws input raw origin)))))
+        (agent-repl--send-to-agent "hello claude" "PROMPT_ORIGIN_COMMAND_EXPLAIN_PROMPT")
+        (should (equal dispatched '("test-ws" "hello claude" "hello claude"
+                                    "PROMPT_ORIGIN_COMMAND_EXPLAIN_PROMPT")))))))
 
 ;;;; ---- agent-repl--establish-workspace frontend routing ----
 
@@ -538,7 +539,7 @@ rather than staying pinned to the vterm it happened to boot once."
     (cl-letf (((symbol-function 'agent-repl--context-reference)
                (lambda () "src/foo.el:42"))
               ((symbol-function 'agent-repl--send-to-agent)
-               (lambda (text) (setq sent-text text))))
+               (lambda (text _origin) (setq sent-text text))))
       (agent-repl-explain)
       (should (equal sent-text "please explain src/foo.el:42")))))
 
@@ -552,7 +553,7 @@ rather than staying pinned to the vterm it happened to boot once."
               ((symbol-function 'read-string)
                (lambda (_prompt _initial) "review src/foo.el:42 for bugs"))
               ((symbol-function 'agent-repl--send-to-agent)
-               (lambda (text) (setq sent-text text))))
+               (lambda (text _origin) (setq sent-text text))))
       (agent-repl-explain-prompt)
       (should (equal sent-text "review src/foo.el:42 for bugs")))))
 
@@ -564,7 +565,7 @@ rather than staying pinned to the vterm it happened to boot once."
               ((symbol-function 'read-string)
                (lambda (_prompt initial) (setq initial-input initial) "anything"))
               ((symbol-function 'agent-repl--send-to-agent)
-               (lambda (_text))))
+               (lambda (_text _origin))))
       (agent-repl-explain-prompt)
       (should (equal initial-input "src/bar.el:10-20")))))
 
@@ -576,7 +577,7 @@ rather than staying pinned to the vterm it happened to boot once."
               ((symbol-function 'read-string)
                (lambda (_prompt _initial) ""))
               ((symbol-function 'agent-repl--send-to-agent)
-               (lambda (text) (setq sent-text text))))
+               (lambda (text _origin) (setq sent-text text))))
       (agent-repl-explain-prompt)
       (should (null sent-text)))))
 
@@ -934,7 +935,7 @@ is handed back."
   "update-pr sends the configured update-pr prompt to the agent."
   (let (sent-text)
     (cl-letf (((symbol-function 'agent-repl--send-to-agent)
-               (lambda (text) (setq sent-text text))))
+               (lambda (text _origin) (setq sent-text text))))
       (agent-repl-update-pr)
       (should (equal sent-text agent-repl-update-pr-prompt)))))
 
@@ -961,7 +962,7 @@ is handed back."
   "On fetch success, callback sends the rebase prompt to the agent."
   (let (sent-text)
     (cl-letf (((symbol-function 'agent-repl--send-to-agent)
-               (lambda (text) (setq sent-text text))))
+               (lambda (text _origin) (setq sent-text text))))
       (agent-repl--rebase-onto-origin-master-callback "test-ws" t "fetch output")
       (should (equal sent-text agent-repl-rebase-onto-origin-master-prompt)))))
 
@@ -969,7 +970,7 @@ is handed back."
   "On fetch failure, callback does NOT send the rebase prompt."
   (let ((send-called nil))
     (cl-letf (((symbol-function 'agent-repl--send-to-agent)
-               (lambda (_text) (setq send-called t))))
+               (lambda (_text _origin) (setq send-called t))))
       (agent-repl--rebase-onto-origin-master-callback "test-ws" nil "fatal: not a git repository")
       (should-not send-called))))
 
@@ -984,7 +985,7 @@ is handed back."
                (lambda (_label _git-root _args callback)
                  (setq captured-callback callback)))
               ((symbol-function 'agent-repl--send-to-agent)
-               (lambda (text) (setq sent-text text))))
+               (lambda (text _origin) (setq sent-text text))))
       (agent-repl-rebase-onto-origin-master)
       (funcall captured-callback t "ok")
       (should (equal sent-text agent-repl-rebase-onto-origin-master-prompt)))))
@@ -1040,7 +1041,7 @@ is handed back."
   "create-or-update-pr with no args sends the prompt built from base flags."
   (let (sent-text)
     (cl-letf (((symbol-function 'agent-repl--send-to-agent)
-               (lambda (text) (setq sent-text text))))
+               (lambda (text _origin) (setq sent-text text))))
       (agent-repl-create-or-update-pr)
       (should (equal sent-text
                      (agent-repl--build-create-or-update-pr-prompt nil))))))
@@ -1049,7 +1050,7 @@ is handed back."
   "create-or-update-pr called with EXCLUDED list drops those flags."
   (let (sent-text)
     (cl-letf (((symbol-function 'agent-repl--send-to-agent)
-               (lambda (text) (setq sent-text text))))
+               (lambda (text _origin) (setq sent-text text))))
       (agent-repl-create-or-update-pr '(no-self-certified))
       (should-not (string-match-p "--self-certified" sent-text)))))
 
@@ -1062,7 +1063,7 @@ is handed back."
         (agent-repl--ws-put "test-ws" :input-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'agent-repl--send-to-agent)
-                   (lambda (text) (setq sent-text text)))
+                   (lambda (text _origin) (setq sent-text text)))
                   ((symbol-function 'agent-repl--commit-input-buffer)
                    (lambda (&rest _) nil)))
           (agent-repl-create-or-update-pr)
@@ -1078,7 +1079,7 @@ is handed back."
         (agent-repl--ws-put "test-ws" :input-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'agent-repl--send-to-agent)
-                   (lambda (text) (setq sent-text text))))
+                   (lambda (text _origin) (setq sent-text text))))
           (agent-repl-create-or-update-pr)
           (should (equal sent-text
                          (agent-repl--build-create-or-update-pr-prompt nil))))))))
@@ -1092,7 +1093,7 @@ is handed back."
         (agent-repl--ws-put "test-ws" :input-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'agent-repl--send-to-agent)
-                   (lambda (text) (setq sent-text text)))
+                   (lambda (text _origin) (setq sent-text text)))
                   ((symbol-function 'agent-repl--commit-input-buffer)
                    (lambda (&rest _) nil)))
           (agent-repl-create-or-update-pr)
@@ -1109,7 +1110,7 @@ is handed back."
         (agent-repl--ws-put "test-ws" :input-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'agent-repl--send-to-agent)
-                   (lambda (text) (setq sent-text text)))
+                   (lambda (text _origin) (setq sent-text text)))
                   ((symbol-function 'agent-repl--commit-input-buffer)
                    (lambda (&rest _) (setq commit-called t))))
           (agent-repl-create-or-update-pr)
@@ -1125,7 +1126,7 @@ is handed back."
         (insert "ship it")
         (agent-repl--ws-put "test-ws" :input-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                  ((symbol-function 'agent-repl--send-to-agent) (lambda (_) nil))
+                  ((symbol-function 'agent-repl--send-to-agent) (lambda (_text _origin) nil))
                   ((symbol-function 'agent-repl--commit-input-buffer)
                    (lambda (ws buf raw clear-p)
                      (setq commit-args (list ws buf raw clear-p)))))
@@ -1143,7 +1144,7 @@ is handed back."
         (agent-repl--ws-put "test-ws" :input-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                   ((symbol-function 'agent-repl--send-to-agent)
-                   (lambda (text) (setq sent-text text)))
+                   (lambda (text _origin) (setq sent-text text)))
                   ((symbol-function 'agent-repl--commit-input-buffer)
                    (lambda (&rest _) nil)))
           (agent-repl-create-or-update-pr '(no-self-certified))
@@ -1156,7 +1157,7 @@ is handed back."
   "no-self-certified wrapper sends a prompt that omits --self-certified."
   (let (sent-text)
     (cl-letf (((symbol-function 'agent-repl--send-to-agent)
-               (lambda (text) (setq sent-text text))))
+               (lambda (text _origin) (setq sent-text text))))
       (agent-repl-create-or-update-pr-no-self-certified)
       (should-not (string-match-p "--self-certified" sent-text)))))
 

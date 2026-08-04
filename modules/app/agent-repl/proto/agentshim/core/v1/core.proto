@@ -107,6 +107,51 @@ enum PermissionDecision {
   PERMISSION_DECISION_DENY = 2;
 }
 
+// Why a prompt entered the agent-repl submit pipeline.
+//
+// This is a closed, durable attribution vocabulary rather than the free-form
+// SubmitPrompt.origin diagnostic string. Every frontend send site and every
+// daemon-generated submit site MUST choose a non-UNSPECIFIED value, and Emacs
+// send sites intentionally never share a value: a stored TurnStarted can
+// therefore be traced back to the exact editor situation that caused it.
+enum PromptOrigin {
+  PROMPT_ORIGIN_UNSPECIFIED = 0;
+
+  // Emacs-originated sends. Each value has exactly one production send site.
+  PROMPT_ORIGIN_USER_SENT = 1;
+  PROMPT_ORIGIN_USER_SENT_AND_HIDE = 2;
+  PROMPT_ORIGIN_USER_SENT_WITH_METAPROMPT = 3;
+  PROMPT_ORIGIN_USER_SENT_WITH_POSTFIX = 4;
+  PROMPT_ORIGIN_USER_SENT_WITH_PREFIX = 5;
+  PROMPT_ORIGIN_METAPROMPT_READ = 6;
+  PROMPT_ORIGIN_COMMAND_DIFF_ANALYSIS = 7;
+  PROMPT_ORIGIN_COMMAND_EXPLAIN_CONTEXT = 8;
+  PROMPT_ORIGIN_COMMAND_EXPLAIN_PROMPT = 9;
+  PROMPT_ORIGIN_COMMAND_UPDATE_PR = 10;
+  PROMPT_ORIGIN_COMMAND_REBASE = 11;
+  PROMPT_ORIGIN_COMMAND_CREATE_OR_UPDATE_PR = 12;
+  PROMPT_ORIGIN_PANEL_SELECTION = 13;
+  PROMPT_ORIGIN_DEFERRED_PROMPT = 14;
+  reserved 15;
+  reserved "PROMPT_ORIGIN_LEGACY_PENDING_PROMPT";
+  PROMPT_ORIGIN_LEGACY_HOST_PROMPT = 16;
+  PROMPT_ORIGIN_GNS_SOCKETS_CLOSE = 17;
+  PROMPT_ORIGIN_LEGACY_HOST_EVAL_RESULT = 18;
+  PROMPT_ORIGIN_EXPLAIN_CONFIG = 19;
+
+  // Other producers remain explicit without being mislabeled as Emacs.
+  PROMPT_ORIGIN_WEBAPP_USER_SENT = 20;
+  PROMPT_ORIGIN_WEBAPP_CARD_ACTION = 21;
+  PROMPT_ORIGIN_WORKSPACE_CREATED = 22;
+  PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR = 23;
+  PROMPT_ORIGIN_MERGE_TEST_REPAIR = 24;
+  PROMPT_ORIGIN_MERGE_BEFORE_ACTION = 25;
+  PROMPT_ORIGIN_MERGE_AFTER_ACTION = 26;
+  reserved 27;
+  reserved "PROMPT_ORIGIN_MERGE_PARENT_NOTIFICATION";
+  PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME = 28;
+}
+
 // ---------------------------------------------------------------------------
 // The envelope
 // ---------------------------------------------------------------------------
@@ -211,6 +256,9 @@ message TurnStarted {
   // produced event; empty only on historical events persisted before this
   // field existed.
   string turn_id = 2;
+  // Durable copy of the accepted SubmitPrompt.prompt_origin. Newly produced
+  // turns must never use UNSPECIFIED; zero exists only for historical rows.
+  PromptOrigin prompt_origin = 3;
 }
 
 message TurnClaimBridge {
@@ -847,6 +895,9 @@ message SubmitPrompt {
   string text = 2;
   string origin = 3;           // "human" | "coordinator" | ...
   string permission_mode = 4;  // optional override
+  // Required closed attribution. The shim rejects UNSPECIFIED before touching
+  // SDK state and copies this value onto the persistent TurnStarted event.
+  PromptOrigin prompt_origin = 5;
 }
 
 // Request a deliberate mid-session model change.  Model selection is a shim

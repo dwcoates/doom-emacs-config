@@ -262,12 +262,12 @@ Suitable for submitPrompt/interrupt/deleteSession, which do not await."
                    (setq sent (list field payload key)) "req-1"))
                 ((symbol-function 'agent-repl--uds-track-command) #'ignore))
         (agent-repl--frontend-send-user-message
-         "ws1" "hello" (lambda (id) (setq request id)) #'error)
+         "ws1" "hello" "PROMPT_ORIGIN_USER_SENT" (lambda (id) (setq request id)) #'error)
         (should-not sent)
         (should (eq (agent-repl--ws-get "ws1" :next-send-origin) 'merge))
         (funcall ensure-success "s-new")
         (should (equal synced '("ws1" "s-new")))
-        (should (equal sent '("submitPrompt" (:text "hello") "/w")))
+        (should (equal sent '("submitPrompt" (:text "hello" :promptOrigin "PROMPT_ORIGIN_USER_SENT") "/w")))
         (should (equal request "req-1"))
         (should-not (agent-repl--ws-get "ws1" :next-send-origin))))))
 
@@ -276,10 +276,10 @@ Suitable for submitPrompt/interrupt/deleteSession, which do not await."
   (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
     (let (failure settled)
       (cl-letf (((symbol-function 'agent-repl--frontend-send-user-message)
-                 (lambda (_ws _text _ok fail) (setq failure fail) :pending))
+                 (lambda (_ws _text _origin _ok fail) (setq failure fail) :pending))
                 ((symbol-function 'agent-repl--frontend-snap-webview-to-tail)
                  (lambda (&rest _) (error "must not present"))))
-        (agent-repl--gui-send-turn "ws1" "prepared" "raw"
+        (agent-repl--gui-send-turn "ws1" "prepared" "raw" "PROMPT_ORIGIN_USER_SENT"
                                    (lambda () (setq settled t)))
         (funcall failure "no daemon")
         (should settled)
@@ -1250,14 +1250,14 @@ the wire would deprive the agent of the directive it must read."
     (let ((sent nil)
           (input (concat (agent-repl--meta-wrap "READ-DIRECTIVE") "\n\nhello")))
       (cl-letf (((symbol-function 'agent-repl--frontend-send-user-message)
-                 (lambda (_ws text ok _fail)
+                 (lambda (_ws text _origin ok _fail)
                    (setq sent text)
                    (funcall ok "r_1")
                    :pending))
                 ((symbol-function 'agent-repl--run-send-posthooks) #'ignore)
                 ((symbol-function 'agent-repl--kickoff-prompt-summary) #'ignore))
         ;; Act
-        (agent-repl--gui-send-turn "ws1" input "hello")
+        (agent-repl--gui-send-turn "ws1" input "hello" "PROMPT_ORIGIN_USER_SENT")
         ;; Assert
         (should (equal sent input))))))
 
@@ -1403,14 +1403,14 @@ the wire would deprive the agent of the directive it must read."
   ;; Arrange
   (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_1")
     (cl-letf (((symbol-function 'agent-repl--frontend-send-user-message)
-               (lambda (_ws _text ok _fail)
+               (lambda (_ws _text _origin ok _fail)
                  (funcall ok "r_9")
                  :pending))
               ((symbol-function 'agent-repl--mark-ws-thinking) #'ignore)
               ((symbol-function 'agent-repl--run-send-posthooks) #'ignore)
               ((symbol-function 'agent-repl--kickoff-prompt-summary) #'ignore))
       ;; Act — the prepared text carries decoration the user never typed.
-      (agent-repl--gui-send-turn "ws1" "META\n\nwrite a test" "write a test")
+      (agent-repl--gui-send-turn "ws1" "META\n\nwrite a test" "write a test" "PROMPT_ORIGIN_USER_SENT")
       ;; Assert — RAW is recorded, since the decoration is not the user's to revise.
       (should (equal (agent-repl--ws-get "ws1" :sent-turn)
                      '(:request-id "r_9" :raw "write a test"))))))

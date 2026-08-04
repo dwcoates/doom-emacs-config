@@ -5,6 +5,8 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+
+	corev1 "agentrepl/proto/agentshim/core/v1"
 )
 
 // The daemon's single reading of a submitted prompt, and the two consequences
@@ -611,7 +613,7 @@ func TestTheMergeLeaseHoldersPromptTakesNoAcceptedEdge(t *testing.T) {
 	h.applier.mergeLeases = map[string]bool{"ws": true}
 
 	// Act.
-	if err := h.m.SubmitMergePrompt(context.Background(), "ws", "merge_resolve_1", "resolve the conflict", ""); err != nil {
+	if err := h.m.SubmitMergePrompt(context.Background(), "ws", "merge_resolve_1", "resolve the conflict", "", corev1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR); err != nil {
 		t.Fatalf("SubmitMergePrompt: %v", err)
 	}
 

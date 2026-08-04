@@ -14,13 +14,14 @@ import {
   PermissionDecision,
   PermissionRequest,
   PermissionResponseSchema,
+  PromptOrigin,
   SetModelSchema,
   SubmitPromptSchema,
 } from "../src/uds/proto.js";
 
 interface Recorder {
   target: SdkControlTarget;
-  prompts: Array<{ requestId: string; text: string; origin: string; permissionMode?: string }>;
+  prompts: Array<{ requestId: string; text: string; origin: string; promptOrigin: PromptOrigin; permissionMode?: string }>;
   interrupts: Array<{ requestId: string }>;
   models: Array<{ requestId: string; model: string }>;
   throwOnPrompt?: string;
@@ -80,15 +81,38 @@ function persistedLogs(): Array<Record<string, unknown>> {
 }
 
 describe("ControlDispatch.handleSubmitPrompt", () => {
+  it.each([
+    ["unspecified", PromptOrigin.UNSPECIFIED],
+    ["unknown", 999 as PromptOrigin],
+  ])("Nacks a %s prompt origin before calling the SDK target", async (_label, promptOrigin) => {
+    const rec = recorder();
+    const receipt = await dispatch(rec, []).handleSubmitPrompt(
+      create(SubmitPromptSchema, { requestId: "bad-origin", text: "hi", promptOrigin }),
+    );
+
+    expect(receipt.$typeName).toBe(NackSchema.typeName);
+    if (receipt.$typeName !== NackSchema.typeName) throw new Error("expected Nack");
+    expect(receipt.reason).toContain("invalid prompt_origin");
+    expect(rec.prompts).toEqual([]);
+    expect(persistedLogs()).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        level: "error",
+        operation: "shim.control.dispatch",
+        request_id: "bad-origin",
+        context: expect.objectContaining({ prompt_origin: promptOrigin }),
+      }),
+    ]));
+  });
+
   it("pushes the prompt into the SDK target and Acks", async () => {
     // Arrange
     const rec = recorder();
     const d = dispatch(rec, []);
     // Act
-    const receipt = await d.handleSubmitPrompt(create(SubmitPromptSchema, { requestId: "r1", text: "hi", origin: "human" }));
+    const receipt = await d.handleSubmitPrompt(create(SubmitPromptSchema, { requestId: "r1", text: "hi", origin: "human", promptOrigin: PromptOrigin.USER_SENT }));
     // Assert
     expect(receipt.$typeName).toBe(AckSchema.typeName);
-    expect(rec.prompts).toEqual([{ requestId: "r1", text: "hi", origin: "human" }]);
+    expect(rec.prompts).toEqual([{ requestId: "r1", text: "hi", origin: "human", promptOrigin: PromptOrigin.USER_SENT }]);
   });
 
   it("Nacks blank request ids before calling the SDK target", async () => {
@@ -106,7 +130,7 @@ describe("ControlDispatch.handleSubmitPrompt", () => {
     const rec = recorder();
     const d = dispatch(rec, []);
     // Act
-    await d.handleSubmitPrompt(create(SubmitPromptSchema, { requestId: "r", text: "x", origin: "human", permissionMode: "acceptEdits" }));
+    await d.handleSubmitPrompt(create(SubmitPromptSchema, { requestId: "r", text: "x", origin: "human", promptOrigin: PromptOrigin.USER_SENT, permissionMode: "acceptEdits" }));
     // Assert
     expect(rec.prompts[0]!.permissionMode).toBe("acceptEdits");
   });
@@ -116,7 +140,7 @@ describe("ControlDispatch.handleSubmitPrompt", () => {
     const rec = recorder("boom");
     const d = dispatch(rec, []);
     // Act
-    const receipt = await d.handleSubmitPrompt(create(SubmitPromptSchema, { requestId: "r2", text: "hi" }));
+    const receipt = await d.handleSubmitPrompt(create(SubmitPromptSchema, { requestId: "r2", text: "hi", promptOrigin: PromptOrigin.USER_SENT }));
     // Assert
     expect(receipt.$typeName).toBe(NackSchema.typeName);
     expect((receipt as { reason: string }).reason).toBe("boom");
@@ -125,9 +149,9 @@ describe("ControlDispatch.handleSubmitPrompt", () => {
   it("records canonical accepted and rejected prompt dispatches with request context", async () => {
     vi.mocked(writeSync).mockClear();
     const accepted = dispatch(recorder(), []);
-    await accepted.handleSubmitPrompt(create(SubmitPromptSchema, { requestId: "accepted-1", text: "hello", origin: "human" }));
+    await accepted.handleSubmitPrompt(create(SubmitPromptSchema, { requestId: "accepted-1", text: "hello", origin: "human", promptOrigin: PromptOrigin.USER_SENT }));
     const rejected = dispatch(recorder("target failed"), []);
-    await rejected.handleSubmitPrompt(create(SubmitPromptSchema, { requestId: "rejected-1", text: "bye", origin: "human" }));
+    await rejected.handleSubmitPrompt(create(SubmitPromptSchema, { requestId: "rejected-1", text: "bye", origin: "human", promptOrigin: PromptOrigin.USER_SENT }));
 
     expect(persistedLogs()).toEqual(expect.arrayContaining([
       expect.objectContaining({ operation: "shim.control.dispatch", request_id: "accepted-1", message: "SubmitPrompt accepted by SDK session" }),

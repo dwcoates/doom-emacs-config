@@ -26,6 +26,13 @@
  * daemon-lifecycle command the webapp never sends; none are encodable here so
  * a stray call is a compile error, not a silently malformed frame.
  */
+// The webapp hand-types protojson for the same module-resolution reason as
+// `frontend-proto.ts`. Values are the canonical core.v1 enum names, so the Go
+// protojson decoder validates them against the generated descriptor.
+export enum PromptOrigin {
+  WEBAPP_USER_SENT = "PROMPT_ORIGIN_WEBAPP_USER_SENT",
+  WEBAPP_CARD_ACTION = "PROMPT_ORIGIN_WEBAPP_CARD_ACTION",
+}
 
 /** A protojson `google.protobuf.Struct` value (a free-form JSON object). */
 export type CommandStruct = Record<string, unknown>;
@@ -36,6 +43,7 @@ export interface SubmitPromptBody {
   text: string;
   /** Optional per-prompt permission-mode override; "" = no override. */
   permissionMode: string;
+  promptOrigin: PromptOrigin;
 }
 
 /** InterruptCmd — stop the running turn. `confirmAgents` answers the daemon's
@@ -193,7 +201,7 @@ export const ARM_KEY: Record<FrontendCommandBody["case"], string> = {
 function encodeBody(b: FrontendCommandBody): Record<string, unknown> {
   switch (b.case) {
     case "submitPrompt":
-      return { text: b.text, permissionMode: b.permissionMode };
+      return { text: b.text, permissionMode: b.permissionMode, promptOrigin: b.promptOrigin };
     case "interrupt":
       return { confirmAgents: b.confirmAgents };
     case "permissionAnswer": {

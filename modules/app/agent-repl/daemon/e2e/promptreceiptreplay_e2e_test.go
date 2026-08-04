@@ -318,7 +318,7 @@ func (w *receiptWorld) submitThenDie(t *testing.T, requestID, text string) {
 		t.Fatalf("Ensure: %v", err)
 	}
 	awaitOperational(t, states, w.workspace)
-	if err := controller.SubmitPrompt(ctx, w.workspace, requestID, text, "default"); err != nil {
+	if err := controller.SubmitPrompt(ctx, w.workspace, requestID, text, "default", corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
 	if got := shim.awaitAccepted(t); got != text {

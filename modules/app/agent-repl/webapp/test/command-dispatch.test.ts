@@ -11,6 +11,7 @@ import {
 } from "../src/command-dispatch.js";
 import { decodeFrontendFrame, type FrontendFrame } from "../src/frontend-proto.js";
 import { ForwardingLogger, resetLoggingForTests, setLogger } from "../src/wslog.js";
+import { PromptOrigin } from "../src/frontend-command.js";
 
 function installLogging(): {
   records: Array<Record<string, unknown>>;
@@ -74,11 +75,11 @@ const CREATE_ARGS: CreateSessionArgs = {
 describe("ack-correlated commands", () => {
   it("submitPrompt sends a FrontendCommand frame and resolves on an ok ack", async () => {
     const { dispatcher, sent } = newDispatcher();
-    const p = dispatcher.submitPrompt("/w", "hi", "plan");
+    const p = dispatcher.submitPrompt("/w", "hi", PromptOrigin.WEBAPP_USER_SENT, "plan");
     expect(JSON.parse(sent[0])).toEqual({
       requestId: "r1",
       workspace: "/w",
-      submitPrompt: { text: "hi", permissionMode: "plan" },
+      submitPrompt: { text: "hi", permissionMode: "plan", promptOrigin: "PROMPT_ORIGIN_WEBAPP_USER_SENT" },
     });
     dispatcher.observe(ackFrame("r1", true));
     await expect(p).resolves.toBeUndefined();

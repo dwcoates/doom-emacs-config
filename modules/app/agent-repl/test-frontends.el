@@ -345,13 +345,13 @@ that forgot to pass `:active-env' would silently accept it."
      (let ((got nil))
        (agent-repl-register-frontend
         (agent-repl-test--make-frontend
-         'probe :send-fn (lambda (ws input raw settle)
-                           (setq got (list ws input raw settle)))))
+         'probe :send-fn (lambda (ws input raw origin settle)
+                           (setq got (list ws input raw origin settle)))))
        (agent-repl--ws-put "ws1" :frontend 'probe)
        ;; Act
-       (agent-repl--frontend-dispatch-send "ws1" "in" "raw" 'settle)
+       (agent-repl--frontend-dispatch-send "ws1" "in" "raw" "PROMPT_ORIGIN_USER_SENT" 'settle)
        ;; Assert
-       (should (equal got '("ws1" "in" "raw" settle)))))))
+       (should (equal got '("ws1" "in" "raw" "PROMPT_ORIGIN_USER_SENT" settle)))))))
 
 (ert-deftest agent-repl-test-frontends-dispatch-interrupt-carries-kind ()
   "Interrupt dispatch forwards the gesture kind."

@@ -44,7 +44,7 @@ func (h *parkedHarness) record(entryID, scheduleID, text string) {
 	h.t.Helper()
 	if err := h.store.RecordHeldPrompt(statedb.HeldPrompt{
 		EntryID: entryID, ScheduleID: scheduleID, Workspace: "ws", SessionID: "s1",
-		Text: text, QueuedAtMs: 10,
+		Text: text, PromptOrigin: int32(testPromptOrigin), QueuedAtMs: 10,
 	}); err != nil {
 		h.t.Fatalf("RecordHeldPrompt: %v", err)
 	}

@@ -75,6 +75,7 @@ import {
   InterruptOutcome,
   PermissionRequestSchema,
   PermissionResponseSchema,
+  PromptOrigin,
   SessionSource,
   ReplayDoneSchema,
   ReplayEventSchema,
@@ -508,7 +509,7 @@ describe("UdsSession control: prompt in → SDK", () => {
     // Arrange
     const { query, daemon, session } = await rig();
     // Act
-    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "hello there" }));
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "hello there", promptOrigin: PromptOrigin.USER_SENT }));
     const ack = await daemon.next(AckSchema);
     await until(() => query.prompts.length === 1);
     // Assert
@@ -540,7 +541,7 @@ describe("UdsSession control: prompt in → SDK", () => {
     query.subscriptionUsageImpl = () => new Promise((resolve) => { release = resolve; });
 
     // Act: leave the start observation pending.
-    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p-quota", text: "measure me" }));
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p-quota", text: "measure me", promptOrigin: PromptOrigin.USER_SENT }));
     await until(() => query.subscriptionUsageCalls === 1);
     // Assert: neither admission nor its receipt can overtake the observation.
     expect(query.prompts).toEqual([]);
@@ -577,7 +578,7 @@ describe("UdsSession control: prompt in → SDK", () => {
     };
 
     // Act
-    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p-delta", text: "go" }));
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p-delta", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
     await daemon.next(AckSchema);
     query.emit({ type: "result", uuid: "r1", session_id: "vendor-uuid", subtype: "success" } as unknown as SdkMessageLike);
     await until(() => query.subscriptionUsageCalls === 2);
@@ -625,7 +626,7 @@ describe("UdsSession control: prompt in → SDK", () => {
     query.subscriptionUsageImpl = async () => responses.shift()!;
 
     // Act
-    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p-reset", text: "go" }));
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p-reset", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
     await daemon.next(AckSchema);
     query.emit({ type: "result", uuid: "r1", session_id: "vendor-uuid", subtype: "success" } as unknown as SdkMessageLike);
     await until(() => query.subscriptionUsageCalls === 2);
@@ -647,7 +648,7 @@ describe("UdsSession control: prompt in → SDK", () => {
     query.subscriptionUsageImpl = () => Promise.reject(new Error("usage endpoint unavailable"));
 
     // Act
-    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p-failed-sample", text: "go" }));
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p-failed-sample", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
     expect((await daemon.next(AckSchema)).requestId).toBe("p-failed-sample");
     await until(() => query.prompts.length === 1);
 
@@ -669,17 +670,20 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
     // Arrange: a resumed session already knows the vendor session id.
     const { store, daemon } = await rig({ storeSessionId: "vendor-uuid" });
     // Act
-    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
     const sw = await store.peer().next(StoreWriteSchema);
     // Assert
-    expect(sw.batch!.events[0]!.payload.case).toBe("turnStarted");
+    const payload = sw.batch!.events[0]!.payload;
+    expect(payload.case).toBe("turnStarted");
+    if (payload.case !== "turnStarted") throw new Error("case");
+    expect(payload.value.promptOrigin).toBe(PromptOrigin.USER_SENT);
   });
 
   it("bounds the TurnStarted preview to the prompt's first line", async () => {
     // Arrange
     const { store, daemon } = await rig({ storeSessionId: "vendor-uuid" });
     // Act
-    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "line one\nline two" }));
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "line one\nline two", promptOrigin: PromptOrigin.USER_SENT }));
     const sw = await store.peer().next(StoreWriteSchema);
     // Assert
     const payload = sw.batch!.events[0]!.payload;
@@ -691,7 +695,7 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
     // Arrange
     const { store, daemon } = await rig({ storeSessionId: "vendor-uuid" });
     // Act
-    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
     const sw = await store.peer().next(StoreWriteSchema);
     // Assert
     const event = sw.batch!.events[0]!;
@@ -703,7 +707,7 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
   it("correlates the SDK result to the accepted turn it closes", async () => {
     // Arrange: consume the start write for p1.
     const { query, store, daemon } = await rig({ storeSessionId: "vendor-uuid" });
-    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
     const startBatch = await store.peer().next(StoreWriteSchema);
     store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
       accepted: BigInt(startBatch.batch!.events.length),
@@ -733,7 +737,7 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
 
   it("correlates an assistant response to the active accepted root turn", async () => {
     const { query, store, daemon, session } = await rig({ storeSessionId: "vendor-uuid" });
-    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
     await store.peer().next(StoreWriteSchema);
     await daemon.next(AckSchema);
     expect(session.turnCount()).toBe(1);
@@ -992,7 +996,7 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
     const { query, store, daemon, daemonListener } = await rig({ storeSessionId: "uuid-old" });
     store.latest().send(EventSchema, create(EventSchema, { sessionId: "uuid-old", seq: 7n }));
     await daemon.next(EventSchema);
-    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
     const oldStart = await store.peer().next(StoreWriteSchema);
     await daemon.next(AckSchema);
     expect(oldStart.batch!.events[0]!.sessionId).toBe("uuid-old");
@@ -1040,7 +1044,7 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
     const { query, store, daemon } = await rig({ storeSessionId: "uuid-old" });
     store.latest().send(EventSchema, create(EventSchema, { sessionId: "uuid-old", seq: 7n }));
     await daemon.next(EventSchema);
-    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
     await store.peer().next(StoreWriteSchema);
     await daemon.next(AckSchema);
 
@@ -1110,7 +1114,7 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
     // under `sess-1` would land in a space nothing subscribes to.
     const { store, daemon } = await rig({ storeSessionId: "vendor-uuid" });
     // Act
-    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
     const sw = await store.peer().next(StoreWriteSchema);
     // Assert
     expect(sw.batch!.events[0]!.sessionId).toBe("vendor-uuid");
@@ -1122,7 +1126,7 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
     const { query, store, daemon } = await rig({ holdTurnStartAck: true });
 
     // Act: hold the store acknowledgement at the boundary.
-    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
     const start = await store.peer().next(StoreWriteSchema);
 
     // Assert: reducer-safe order is structural, and SDK admission cannot
@@ -1132,6 +1136,9 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
       "accountUsageObservation",
     ]);
     expect(start.batch!.events.every((event) => event.sessionId === "sess-1")).toBe(true);
+    const started = start.batch!.events[0]!.payload;
+    if (started.case !== "turnStarted") throw new Error("case");
+    expect(started.value.promptOrigin).toBe(PromptOrigin.USER_SENT);
     expect(query.prompts).toEqual([]);
 
     store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
@@ -1145,7 +1152,7 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
   it("does not duplicate a durable start when the SDK later reveals the vendor key", async () => {
     // Arrange: the start boundary is already durable in the initial seq space.
     const { query, store, daemon } = await rig();
-    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
     await daemon.next(AckSchema);
     const start = await store.peer().next(StoreWriteSchema);
     expect(start.batch!.events.map((event) => event.payload.case)).toEqual([
@@ -1458,7 +1465,11 @@ describe("UdsSession events: store round-trip and sad path", () => {
       queryInstanceId: "query-terminal-write-failure",
     });
     const log = captureLog();
-    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "turn-terminal-failure", text: "go" }));
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, {
+      requestId: "turn-terminal-failure",
+      text: "go",
+      promptOrigin: PromptOrigin.USER_SENT,
+    }));
     await store.peer().next(StoreWriteSchema);
     await daemon.next(AckSchema);
 
@@ -1564,7 +1575,7 @@ describe("UdsSession instrumentation: prompt round-trip receipts", () => {
     const { daemon } = await rig();
     const log = captureLog();
     // Act
-    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "hello" }));
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "hello", promptOrigin: PromptOrigin.USER_SENT }));
     await daemon.next(AckSchema);
     // Assert
     expect(log.record("prompt accepted -> SDK input")).toMatchObject({
@@ -1652,7 +1663,7 @@ describe("UdsSession lifetime: reattach", () => {
   it("a daemon disconnect ends neither the session nor the in-flight turn", async () => {
     // Arrange: a turn is in flight.
     const { session, query, queryFactoryCalls, store, daemon, daemonListener } = await rig();
-    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
     await daemon.next(AckSchema);
     await until(() => query.prompts.length === 1);
     // Act: the daemon vanishes mid-turn.
@@ -2223,7 +2234,7 @@ describe("UdsSession interrupt outcome", () => {
   it("reports INTERRUPTED when a live turn was signalled", async () => {
     // Arrange: a turn is genuinely in flight.
     const { daemon, session } = await rig();
-    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
     await daemon.next(AckSchema);
     await until(() => session.turnCount() === 1);
     // Act
@@ -2248,7 +2259,7 @@ describe("UdsSession interrupt outcome", () => {
   it("reports ALREADY_COMPLETE once the turn has ended", async () => {
     // Arrange: submit, then let the turn's result close it.
     const { daemon, query, session } = await rig();
-    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
     await daemon.next(AckSchema);
     await until(() => session.turnCount() === 1);
     query.emit({
@@ -2273,7 +2284,7 @@ describe("UdsSession interrupt outcome", () => {
   it("freezes the outcome at the instant the stop landed", async () => {
     // Arrange: a live turn, interrupted while it is genuinely running.
     const { daemon, query, session } = await rig();
-    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
     await daemon.next(AckSchema);
     await until(() => session.turnCount() === 1);
     daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1" }));
@@ -2301,7 +2312,7 @@ describe("UdsSession interrupt outcome", () => {
   it("reports ALREADY_COMPLETE when the turn ended in transit", async () => {
     // Arrange: a live turn.
     const { daemon, query, session } = await rig();
-    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
     await daemon.next(AckSchema);
     await until(() => session.turnCount() === 1);
     // Act: the stop is sent over the socket, but the result — emitted
@@ -2321,7 +2332,7 @@ describe("UdsSession interrupt outcome", () => {
   it("still cancels blocked permission waits while reporting the outcome", async () => {
     // Arrange: a tool blocked on a permission decision.
     const { daemon, query, session } = await rig();
-    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
     await daemon.next(AckSchema);
     await until(() => session.turnCount() === 1);
     const ac = new AbortController();
@@ -2340,7 +2351,7 @@ describe("UdsSession interrupt outcome", () => {
     // Arrange: survivors AND a live turn, so both paths run together.
     const { daemon, query, session } = await rig();
     query.interruptReceipt = { still_queued: ["u-1"] };
-    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
     await daemon.next(AckSchema);
     await until(() => session.turnCount() === 1);
     // Act
@@ -2362,7 +2373,7 @@ describe("UdsSession permission-mode overrides", () => {
     const { daemon } = await rig();
     // Act
     daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, {
-      requestId: "p1", text: "go", permissionMode: "bypassPermissions",
+      requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT, permissionMode: "bypassPermissions",
     }));
     await daemon.next(AckSchema);
     // Assert
@@ -2379,7 +2390,7 @@ describe("UdsSession permission-mode overrides", () => {
     query.setPermissionModeError = new Error("Cannot set permission mode");
     // Act
     daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, {
-      requestId: "p1", text: "go", permissionMode: "plan",
+      requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT, permissionMode: "plan",
     }));
     await daemon.next(AckSchema);
     // Assert
@@ -2393,7 +2404,7 @@ describe("UdsSession permission-mode overrides", () => {
     const { query, store, daemon } = await rig();
     // Act
     daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, {
-      requestId: "p1", text: "go", permissionMode: "plan",
+      requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT, permissionMode: "plan",
     }));
     await daemon.next(AckSchema);
     await until(() => query.permissionModes.length === 1);
@@ -2414,7 +2425,7 @@ describe("UdsSession interrupt outcome", () => {
   it("reports INTERRUPTED when a live turn was signalled", async () => {
     // Arrange: a turn is genuinely in flight.
     const { daemon, session } = await rig();
-    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
     await daemon.next(AckSchema);
     await until(() => session.turnCount() === 1);
     // Act
@@ -2439,7 +2450,7 @@ describe("UdsSession interrupt outcome", () => {
   it("reports ALREADY_COMPLETE once the turn has ended", async () => {
     // Arrange: submit, then let the turn's result close it.
     const { daemon, query, session } = await rig();
-    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
     await daemon.next(AckSchema);
     await until(() => session.turnCount() === 1);
     query.emit({
@@ -2464,7 +2475,7 @@ describe("UdsSession interrupt outcome", () => {
   it("freezes the outcome at the instant the stop landed", async () => {
     // Arrange: a live turn, interrupted while it is genuinely running.
     const { daemon, query, session } = await rig();
-    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
     await daemon.next(AckSchema);
     await until(() => session.turnCount() === 1);
     daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1" }));
@@ -2492,7 +2503,7 @@ describe("UdsSession interrupt outcome", () => {
   it("reports ALREADY_COMPLETE when the turn ended in transit", async () => {
     // Arrange: a live turn.
     const { daemon, query, session } = await rig();
-    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
     await daemon.next(AckSchema);
     await until(() => session.turnCount() === 1);
     // Act: the stop is sent over the socket, but the result — emitted
@@ -2512,7 +2523,7 @@ describe("UdsSession interrupt outcome", () => {
   it("still cancels blocked permission waits while reporting the outcome", async () => {
     // Arrange: a tool blocked on a permission decision.
     const { daemon, query, session } = await rig();
-    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
     await daemon.next(AckSchema);
     await until(() => session.turnCount() === 1);
     const ac = new AbortController();
@@ -2531,7 +2542,7 @@ describe("UdsSession interrupt outcome", () => {
     // Arrange: survivors AND a live turn, so both paths run together.
     const { daemon, query, session } = await rig();
     query.interruptReceipt = { still_queued: ["u-1"] };
-    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
     await daemon.next(AckSchema);
     await until(() => session.turnCount() === 1);
     // Act

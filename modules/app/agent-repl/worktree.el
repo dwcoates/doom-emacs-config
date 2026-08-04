@@ -1508,7 +1508,7 @@ against any active turn.  Emacs retains no startup prompt queue."
   (let ((ws (agent-repl--bare-workspace-name ws)))
     (agent-repl--log ws "dispatch-prompt-command: ws=%s prompt-chars=%d branch=direct-send"
                       ws (length prompt))
-    (agent-repl--send prompt ws)))
+    (agent-repl--send "PROMPT_ORIGIN_LEGACY_HOST_PROMPT" prompt ws)))
 
 ;;; Worktree cleanup
 
@@ -1781,7 +1781,7 @@ the `prompt_submit' hook has time to transition the workspace to
    (t
     (agent-repl--log ws "gns-sockets-close-then: ws=%s sending %S and awaiting :done/:idle"
                       ws agent-repl-gns-sockets-close-prompt)
-    (agent-repl--send agent-repl-gns-sockets-close-prompt ws nil
+    (agent-repl--send "PROMPT_ORIGIN_GNS_SOCKETS_CLOSE" agent-repl-gns-sockets-close-prompt ws nil
                        (lambda ()
                          (run-at-time
                           agent-repl-gns-sockets-close-settle-delay nil
@@ -2310,7 +2310,7 @@ affect another agent's commands in the same JSON array."
                             "host-action legacy-command eval: sending result (len=%d, error=%s) to ws=%s"
                             (length prompt-text)
                             (if error-string "yes" "no") ws)
-          (agent-repl--send prompt-text ws)
+          (agent-repl--send "PROMPT_ORIGIN_LEGACY_HOST_EVAL_RESULT" prompt-text ws)
           (agent-repl--info ws "eval: result sent to %s%s"
                             ws (if error-string " (eval raised)" "")))))))))
 

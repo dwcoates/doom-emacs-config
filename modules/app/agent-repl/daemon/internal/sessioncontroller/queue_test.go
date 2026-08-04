@@ -53,7 +53,9 @@ type failingClient struct {
 	err error
 }
 
-func (c *failingClient) SubmitPrompt(_ context.Context, _, _, _ string) error { return c.err }
+func (c *failingClient) SubmitPrompt(_ context.Context, _, _, _ string, _ corev1.PromptOrigin) error {
+	return c.err
+}
 func (c *failingClient) SetModel(_ context.Context, _ string) (string, error) { return "", c.err }
 
 // queueHarness is one workspace's controller plus the doubles around it.
@@ -204,7 +206,7 @@ func (h *queueHarness) turn(active bool) {
 // submit submits a prompt for "ws".
 func (h *queueHarness) submit(text string) error {
 	h.nextRequest++
-	return h.m.SubmitPrompt(context.Background(), "ws", fmt.Sprintf("test-request-%d", h.nextRequest), text, "")
+	return h.m.SubmitPrompt(context.Background(), "ws", fmt.Sprintf("test-request-%d", h.nextRequest), text, "", testPromptOrigin)
 }
 
 // entries returns VALUE copies of the current queue entries.

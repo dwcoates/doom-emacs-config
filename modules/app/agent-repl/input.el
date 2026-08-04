@@ -570,7 +570,7 @@ typed."
   (agent-repl--log ws "mark-ws-thinking ws=%s" ws)
   (agent-repl--ws-set-agent-state ws :thinking))
 
-(defun agent-repl--do-send (ws input raw &optional on-settle)
+(defun agent-repl--do-send (ws input raw prompt-origin &optional on-settle)
   "Core send: dispatch INPUT to WS's agent through its frontend.
 A pure delegation to `agent-repl--frontend-dispatch-send', which looks
 up WS's registered frontend and calls its `:send-fn'.  RAW (the
@@ -579,9 +579,9 @@ through unchanged so the frontend's send implementation can run
 posthooks and kick off the prompt summary against exactly what the
 user typed.  ON-SETTLE, if non-nil, is forwarded to the frontend's
 send function and called once the send is fully committed."
-  (agent-repl--log ws "do-send input-len=%d raw-len=%d on-settle=%s"
-                    (length input) (length raw) (not (null on-settle)))
-  (agent-repl--frontend-dispatch-send ws input raw on-settle))
+  (agent-repl--log ws "do-send input-len=%d raw-len=%d prompt-origin=%s on-settle=%s"
+                    (length input) (length raw) prompt-origin (not (null on-settle)))
+  (agent-repl--frontend-dispatch-send ws input raw prompt-origin on-settle))
 
 (defun agent-repl--commit-input-buffer (ws input-buf raw &optional clear-p)
   "Record RAW input in history and optionally clear INPUT-BUF.
@@ -613,19 +613,23 @@ When CLEAR-P is non-nil, erase the input buffer after saving history."
                                   (length contents))
         contents)))))
 
-(defun agent-repl--send (&optional prompt ws force-metaprompt on-settle)
+(defun agent-repl--send (prompt-origin &optional prompt ws force-metaprompt on-settle)
   "Send PROMPT (or input buffer contents) to Claude in workspace WS.
 When PROMPT is nil, reads from the input buffer and clears it after sending.
 When WS is nil, uses the current workspace.
 When FORCE-METAPROMPT is non-nil, always prepend the metaprompt prefix.
 ON-SETTLE, if non-nil, is called once the send is fully committed.
 Handles input preparation, sending, history, and persistence."
-  (interactive)
+  (interactive (list "PROMPT_ORIGIN_USER_SENT"))
+  (unless (and (stringp prompt-origin)
+               (string-prefix-p "PROMPT_ORIGIN_" prompt-origin)
+               (not (equal prompt-origin "PROMPT_ORIGIN_UNSPECIFIED")))
+    (agent-repl--error ws "send: invalid prompt-origin=%S" prompt-origin))
   (let ((ws (or ws (agent-repl--ws-current-name))))
     (unless ws
       (agent-repl--error nil "send: no active workspace prompt-supplied=%s force-metaprompt=%s on-settle=%s"
                           (not (null prompt)) force-metaprompt (not (null on-settle))))
-    (agent-repl--log ws "send: ws=%s force-metaprompt=%s from-buf=%s" ws force-metaprompt (null prompt))
+    (agent-repl--log ws "send: ws=%s prompt-origin=%s force-metaprompt=%s from-buf=%s" ws prompt-origin force-metaprompt (null prompt))
     (let* ((from-buf  (null prompt))
            (input-buf (agent-repl--ws-get ws :input-buffer))
            (raw       (or prompt (agent-repl--read-input-buffer ws)))
@@ -636,14 +640,14 @@ Handles input preparation, sending, history, and persistence."
           (agent-repl--log ws "send: empty input raw-present=%s raw-len=%d -- nothing to send"
                             (not (null raw)) (if raw (length raw) 0))
         (let ((input (agent-repl--prepare-input ws raw force-metaprompt)))
-          (agent-repl--do-send ws input raw on-settle)
+          (agent-repl--do-send ws input raw prompt-origin on-settle)
           (agent-repl--commit-input-buffer ws input-buf raw from-buf))))))
 
 (defun agent-repl-send-and-hide ()
   "Send input to Claude and hide both panels."
   (interactive)
   (agent-repl--log (agent-repl--ws-current-log-name) "send-and-hide")
-  (agent-repl--send)
+  (agent-repl--send "PROMPT_ORIGIN_USER_SENT_AND_HIDE")
   (agent-repl--on-close))
 
 (defun agent-repl-send-with-metaprompt ()
@@ -652,7 +656,7 @@ The deliberate on-demand re-read: an ordinary send carries no directive,
 because the metaprompt is already the session's system prompt."
   (interactive)
   (agent-repl--log (agent-repl--ws-current-log-name) "send-with-metaprompt")
-  (agent-repl--send nil nil t))
+  (agent-repl--send "PROMPT_ORIGIN_USER_SENT_WITH_METAPROMPT" nil nil t))
 
 (defun agent-repl--fire-metaprompt-read (ws)
   "Send the metaprompt read-directive to WS as a standalone message.
@@ -676,7 +680,8 @@ no posthook."
   (if (not (and agent-repl-skip-permissions agent-repl-command-prefix))
       (agent-repl--log ws "fire-metaprompt-read: SKIP ws=%s (on-demand re-read disabled)" ws)
     (agent-repl--log ws "fire-metaprompt-read: ws=%s" ws)
-    (agent-repl--do-send ws (agent-repl--meta-wrap (agent-repl--command-prefix-for ws)) "")))
+    (agent-repl--do-send ws (agent-repl--meta-wrap (agent-repl--command-prefix-for ws)) ""
+                         "PROMPT_ORIGIN_METAPROMPT_READ")))
 
 (defun agent-repl--append-to-input-buffer (text)
   "Append TEXT to the end of the current workspace's input buffer."
@@ -695,7 +700,7 @@ no posthook."
   (interactive)
   (agent-repl--log (agent-repl--ws-current-log-name) "send-with-postfix")
   (agent-repl--append-to-input-buffer agent-repl-send-postfix)
-  (agent-repl--send))
+  (agent-repl--send "PROMPT_ORIGIN_USER_SENT_WITH_POSTFIX"))
 
 (defun agent-repl--prepend-to-input-buffer (text)
   "Prepend TEXT to the start of the current workspace's input buffer."
@@ -714,7 +719,7 @@ no posthook."
   (interactive)
   (agent-repl--log (agent-repl--ws-current-log-name) "send-with-prefix")
   (agent-repl--prepend-to-input-buffer agent-repl-send-prefix)
-  (agent-repl--send))
+  (agent-repl--send "PROMPT_ORIGIN_USER_SENT_WITH_PREFIX"))
 
 (defun agent-repl-queue-deferred-prompt ()
   "Queue the current input buffer contents for delivery when Claude is idle.

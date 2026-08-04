@@ -29,6 +29,7 @@ import {
   type ClientLogBodyLevel,
   type CommandStruct,
   type FrontendCommandBody,
+  PromptOrigin,
 } from "./frontend-command.js";
 import { log, logVerbose } from "./wslog.js";
 
@@ -217,8 +218,11 @@ export class CommandDispatcher {
 
   // --- ack-correlated commands ----------------------------------------------
 
-  submitPrompt(workspace: string, text: string, permissionMode = ""): Promise<void> {
-    return this.dispatch(workspace, { case: "submitPrompt", text, permissionMode });
+  submitPrompt(workspace: string, text: string, promptOrigin: PromptOrigin, permissionMode = ""): Promise<void> {
+    if (!Object.values(PromptOrigin).includes(promptOrigin)) {
+      return Promise.reject(new Error("command dispatcher: submitPrompt requires an explicit prompt origin"));
+    }
+    return this.dispatch(workspace, { case: "submitPrompt", text, permissionMode, promptOrigin });
   }
 
   interrupt(workspace: string, confirmAgents = false): Promise<void> {

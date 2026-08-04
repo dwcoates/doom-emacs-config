@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"claude-repld/internal/statedb"
@@ -97,7 +98,17 @@ func (c sessionCommand) claimsTurn() bool { return !c.clear() }
 // frontend request behind it. origin is the vendor-visible provenance.
 //
 // Must be called with m.mu RELEASED: the receipt reaches the frontend server.
-func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, requestID, text, origin, permissionMode string, who submitter) error {
+func validatePromptOrigin(origin corev1.PromptOrigin) error {
+	if origin == corev1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED {
+		return fmt.Errorf("session-controller: prompt origin must not be UNSPECIFIED")
+	}
+	if _, ok := corev1.PromptOrigin_name[int32(origin)]; !ok {
+		return fmt.Errorf("session-controller: unknown prompt origin %d", origin)
+	}
+	return nil
+}
+
+func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, requestID, text, origin, permissionMode string, promptOrigin corev1.PromptOrigin, who submitter) error {
 	// THE MERGE LEASE'S BACKSTOP. submitPromptAs already refused a user prompt
 	// for a leased workspace, and this catches every path that does not pass
 	// through it — the queue's drain, an interject's head jump, anything added
@@ -197,7 +208,7 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 		}
 	}
 
-	if err := d.client.SubmitPrompt(ctx, text, origin, permissionMode); err != nil {
+	if err := d.client.SubmitPrompt(ctx, text, origin, permissionMode, promptOrigin); err != nil {
 		if accepted {
 			// The `thinking` every frontend was just shown described a turn
 			// that is not going to happen, and nothing else will ever close it:

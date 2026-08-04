@@ -19,7 +19,7 @@ import (
 // submitAs submits a prompt for "ws" under an explicit frontend request id —
 // the id the receipt is keyed on.
 func (h *queueHarness) submitAs(requestID, text string) error {
-	return h.m.SubmitPrompt(context.Background(), "ws", requestID, text, "")
+	return h.m.SubmitPrompt(context.Background(), "ws", requestID, text, "", testPromptOrigin)
 }
 
 // userTurnItems returns every pushed conversation item carrying a user message,

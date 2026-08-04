@@ -244,9 +244,9 @@ worktree metaprompt, not the load-time canonical copy."
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                   ((symbol-function 'agent-repl--history-save) #'ignore)
                   ((symbol-function 'agent-repl--send)
-                   (lambda (prompt ws &rest _) (setq sent (list prompt ws)))))
+                   (lambda (origin prompt ws &rest _) (setq sent (list origin prompt ws)))))
           (agent-repl-queue-deferred-prompt)
-          (should (equal sent '("fire now" "ws1")))
+          (should (equal sent '("PROMPT_ORIGIN_DEFERRED_PROMPT" "fire now" "ws1")))
           ;; Drain popped the head, queue should be empty after.
           (should (null (agent-repl--ws-get "ws1" :deferred-prompts))))))))
 
@@ -261,7 +261,7 @@ worktree metaprompt, not the load-time canonical copy."
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                   ((symbol-function 'agent-repl--history-save) #'ignore)
                   ((symbol-function 'agent-repl--send)
-                   (lambda (prompt ws &rest _) (setq sent (list prompt ws)))))
+                   (lambda (origin prompt ws &rest _) (setq sent (list origin prompt ws)))))
           (agent-repl-queue-deferred-prompt)
           (should (null sent))
           (should (equal (agent-repl--ws-get "ws1" :deferred-prompts)
@@ -1453,10 +1453,10 @@ saved to history) stays untagged."
         (agent-repl--ws-put "ws1" :project-dir "/repo/root")
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                   ((symbol-function 'agent-repl--do-send)
-                   (lambda (_ws input raw &optional _settle)
+                   (lambda (_ws input raw _origin &optional _settle)
                      (setq dispatched-input input dispatched-raw raw)))
                   ((symbol-function 'agent-repl--history-save) #'ignore))
-          (agent-repl--send nil "ws1")
+          (agent-repl--send "PROMPT_ORIGIN_USER_SENT" nil "ws1")
           (should (equal dispatched-input
                          "/workspace-generation do the thing [source-ws:ws1 path:/repo/root]"))
           (should (equal dispatched-raw "/workspace-generation do the thing"))
@@ -1620,14 +1620,14 @@ a hybrid-UI or gui-only workspace's send."
     (let ((sent nil)
           (committed nil))
       (cl-letf (((symbol-function 'agent-repl--do-send)
-                 (lambda (_ws input _raw &optional _settle) (setq sent input)))
+                 (lambda (_ws input _raw _origin &optional _settle) (setq sent input)))
                 ((symbol-function 'agent-repl--commit-input-buffer)
                  (lambda (&rest _) (setq committed t)))
                 ;; Decoration (metaprompt prepend) is prepare-input's own
                 ;; concern; this test pins only the ROUTING.
                 ((symbol-function 'agent-repl--prepare-input)
                  (lambda (_ws raw &optional _force) raw)))
-        (agent-repl--send "hello frontend" "ws1"))
+        (agent-repl--send "PROMPT_ORIGIN_USER_SENT" "hello frontend" "ws1"))
       (should (equal sent "hello frontend"))
       (should committed))))
 
@@ -1639,7 +1639,7 @@ a hybrid-UI or gui-only workspace's send."
     (let ((sent nil))
       (cl-letf (((symbol-function 'agent-repl--do-send)
                  (lambda (&rest _) (setq sent t))))
-        (agent-repl--send "   " "ws1"))
+        (agent-repl--send "PROMPT_ORIGIN_USER_SENT" "   " "ws1"))
       (should-not sent))))
 
 ;;;; ---- Tests: do-send / interrupt-agent are pure frontend dispatch ----
@@ -1663,8 +1663,8 @@ a hybrid-UI or gui-only workspace's send."
           (on-settle (lambda () 'settled)))
       (cl-letf (((symbol-function 'agent-repl--frontend-dispatch-send)
                  (lambda (&rest args) (setq dispatch-args args))))
-        (agent-repl--do-send "ws1" "prepared-input" "raw-text" on-settle))
-      (should (equal dispatch-args (list "ws1" "prepared-input" "raw-text" on-settle))))))
+        (agent-repl--do-send "ws1" "prepared-input" "raw-text" "PROMPT_ORIGIN_USER_SENT" on-settle))
+      (should (equal dispatch-args (list "ws1" "prepared-input" "raw-text" "PROMPT_ORIGIN_USER_SENT" on-settle))))))
 
 (ert-deftest agent-repl-test-do-send-on-settle-defaults-to-nil ()
   "`agent-repl--do-send' passes a nil ON-SETTLE through when the caller omits it."
@@ -1672,8 +1672,8 @@ a hybrid-UI or gui-only workspace's send."
     (let ((dispatch-args nil))
       (cl-letf (((symbol-function 'agent-repl--frontend-dispatch-send)
                  (lambda (&rest args) (setq dispatch-args args))))
-        (agent-repl--do-send "ws1" "input" "raw"))
-      (should (equal dispatch-args '("ws1" "input" "raw" nil))))))
+        (agent-repl--do-send "ws1" "input" "raw" "PROMPT_ORIGIN_USER_SENT"))
+      (should (equal dispatch-args '("ws1" "input" "raw" "PROMPT_ORIGIN_USER_SENT" nil))))))
 
 ;;;; ---- Tests: fire-metaprompt-read (explicit on-demand re-read) ----
 
@@ -1690,7 +1690,8 @@ empty so the gui draws no bubble and skips the prompt summary."
                  (lambda (&rest args) (setq send-args args))))
         (agent-repl--fire-metaprompt-read "ws1"))
       (should (equal send-args
-                     (list "ws1" (agent-repl--meta-wrap "READ-DIRECTIVE") ""))))))
+                     (list "ws1" (agent-repl--meta-wrap "READ-DIRECTIVE") ""
+                           "PROMPT_ORIGIN_METAPROMPT_READ"))))))
 
 (ert-deftest agent-repl-test-fire-metaprompt-read-noop-when-skip-permissions-off ()
   "`agent-repl--fire-metaprompt-read' is a no-op when the re-read is disabled.
@@ -1860,7 +1861,7 @@ preserved outside the :thinking-with-a-draft exception."
 (ert-deftest agent-repl-test-send-no-workspace-errors ()
   "`agent-repl--send' should error when no workspace is available."
   (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil)))
-    (should-error (agent-repl--send) :type 'error)))
+    (should-error (agent-repl--send "PROMPT_ORIGIN_USER_SENT") :type 'error)))
 
 (ert-deftest agent-repl-test-send-reads-from-input-buffer ()
   "`agent-repl--send' reads from the input buffer when no prompt is given."
@@ -1874,9 +1875,9 @@ preserved outside the :thinking-with-a-draft exception."
         (agent-repl--ws-put "ws1" :input-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                   ((symbol-function 'agent-repl--do-send)
-                   (lambda (_ws input _raw &optional _settle) (setq sent-input input)))
+                   (lambda (_ws input _raw _origin &optional _settle) (setq sent-input input)))
                   ((symbol-function 'agent-repl--history-save) #'ignore))
-          (agent-repl--send nil "ws1")
+          (agent-repl--send "PROMPT_ORIGIN_USER_SENT" nil "ws1")
           (should (stringp sent-input))
           ;; The input buffer should be cleared
           (should (equal (with-current-buffer (agent-repl--ws-get "ws1" :input-buffer)
@@ -1895,9 +1896,9 @@ preserved outside the :thinking-with-a-draft exception."
         (agent-repl--ws-put "ws1" :input-buffer (current-buffer))
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                   ((symbol-function 'agent-repl--do-send)
-                   (lambda (_ws input _raw &optional _settle) (setq sent-input input)))
+                   (lambda (_ws input _raw _origin &optional _settle) (setq sent-input input)))
                   ((symbol-function 'agent-repl--history-save) #'ignore))
-          (agent-repl--send "explicit prompt" "ws1")
+          (agent-repl--send "PROMPT_ORIGIN_USER_SENT" "explicit prompt" "ws1")
           (should (stringp sent-input))
           ;; Input buffer should NOT be cleared when prompt is given
           (should (equal (with-current-buffer (agent-repl--ws-get "ws1" :input-buffer)
@@ -1914,7 +1915,7 @@ Regression guard: empty input must not dispatch a metaprompt-only send via
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                 ((symbol-function 'agent-repl--do-send)
                  (lambda (&rest _) (setq do-send-called t))))
-        (agent-repl--send nil "ws1")
+        (agent-repl--send "PROMPT_ORIGIN_USER_SENT" nil "ws1")
         (should-not do-send-called)))))
 
 (ert-deftest agent-repl-test-send-skips-do-send-when-input-buffer-empty ()
@@ -1929,7 +1930,7 @@ send whenever the prefix counter aligned with the period."
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                   ((symbol-function 'agent-repl--do-send)
                    (lambda (&rest _) (setq do-send-called t))))
-          (agent-repl--send nil "ws1")
+          (agent-repl--send "PROMPT_ORIGIN_USER_SENT" nil "ws1")
           (should-not do-send-called))))))
 
 (ert-deftest agent-repl-test-send-skips-do-send-when-input-buffer-whitespace-only ()
@@ -1942,7 +1943,7 @@ send whenever the prefix counter aligned with the period."
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                   ((symbol-function 'agent-repl--do-send)
                    (lambda (&rest _) (setq do-send-called t))))
-          (agent-repl--send nil "ws1")
+          (agent-repl--send "PROMPT_ORIGIN_USER_SENT" nil "ws1")
           (should-not do-send-called))))))
 
 (ert-deftest agent-repl-test-send-skips-do-send-when-explicit-prompt-empty ()
@@ -1952,9 +1953,9 @@ send whenever the prefix counter aligned with the period."
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                 ((symbol-function 'agent-repl--do-send)
                  (lambda (&rest _) (setq do-send-called t))))
-        (agent-repl--send "" "ws1")
+        (agent-repl--send "PROMPT_ORIGIN_USER_SENT" "" "ws1")
         (should-not do-send-called)
-        (agent-repl--send "   \n  " "ws1")
+        (agent-repl--send "PROMPT_ORIGIN_USER_SENT" "   \n  " "ws1")
         (should-not do-send-called)))))
 
 ;;; agent-repl-input-mode: mode setup
@@ -2181,7 +2182,7 @@ counterparts) were removed, so the defconst that declared them is gone."
                      raw))
                   ((symbol-function 'agent-repl--do-send) #'ignore)
                   ((symbol-function 'agent-repl--history-save) #'ignore))
-          (agent-repl--send nil "ws1" t)
+          (agent-repl--send "PROMPT_ORIGIN_USER_SENT_WITH_METAPROMPT" nil "ws1" t)
           (should prepare-force))))))
 
 ;;; send-and-hide: calls send then hide-panels
@@ -2214,10 +2215,10 @@ counterparts) were removed, so the defconst that declared them is gone."
   (agent-repl-test--with-clean-state
     (let ((send-args nil))
       (cl-letf (((symbol-function 'agent-repl--send)
-                 (lambda (&optional prompt ws force)
-                   (setq send-args (list prompt ws force)))))
+                 (lambda (origin &optional prompt ws force)
+                   (setq send-args (list origin prompt ws force)))))
         (agent-repl-send-with-metaprompt)
-        (should (equal send-args '(nil nil t)))))))
+        (should (equal send-args '("PROMPT_ORIGIN_USER_SENT_WITH_METAPROMPT" nil nil t)))))))
 
 ;;; send-with-postfix: appends postfix then sends
 
@@ -2260,6 +2261,41 @@ counterparts) were removed, so the defconst that declared them is gone."
 (ert-deftest agent-repl-test-send-prefix-default-value ()
   "`agent-repl-send-prefix' default must be the canonical \"just answer\" string."
   (should (equal agent-repl-send-prefix "just answer, dont take action: ")))
+
+(ert-deftest agent-repl-test-emacs-prompt-origins-are-one-to-one ()
+  "Every Emacs send situation owns one prompt-origin enum value.
+This structural guard makes accidental enum reuse fail even when both send
+paths would otherwise remain functionally valid."
+  (let ((sites
+         '((agent-repl--send . "PROMPT_ORIGIN_USER_SENT")
+           (agent-repl-send-and-hide . "PROMPT_ORIGIN_USER_SENT_AND_HIDE")
+           (agent-repl-send-with-metaprompt . "PROMPT_ORIGIN_USER_SENT_WITH_METAPROMPT")
+           (agent-repl-send-with-postfix . "PROMPT_ORIGIN_USER_SENT_WITH_POSTFIX")
+           (agent-repl-send-with-prefix . "PROMPT_ORIGIN_USER_SENT_WITH_PREFIX")
+           (agent-repl--fire-metaprompt-read . "PROMPT_ORIGIN_METAPROMPT_READ")
+           (agent-repl--send-diff-analysis . "PROMPT_ORIGIN_COMMAND_DIFF_ANALYSIS")
+           (agent-repl-explain . "PROMPT_ORIGIN_COMMAND_EXPLAIN_CONTEXT")
+           (agent-repl-explain-prompt . "PROMPT_ORIGIN_COMMAND_EXPLAIN_PROMPT")
+           (agent-repl-update-pr . "PROMPT_ORIGIN_COMMAND_UPDATE_PR")
+           (agent-repl--rebase-onto-origin-master-callback . "PROMPT_ORIGIN_COMMAND_REBASE")
+           (agent-repl-create-or-update-pr . "PROMPT_ORIGIN_COMMAND_CREATE_OR_UPDATE_PR")
+           (agent-repl--toggle . "PROMPT_ORIGIN_PANEL_SELECTION")
+           (agent-repl--drain-deferred-prompts . "PROMPT_ORIGIN_DEFERRED_PROMPT")
+           (agent-repl--dispatch-prompt-command . "PROMPT_ORIGIN_LEGACY_HOST_PROMPT")
+           (agent-repl--gns-sockets-close-then . "PROMPT_ORIGIN_GNS_SOCKETS_CLOSE")
+           (agent-repl--handle-eval-command . "PROMPT_ORIGIN_LEGACY_HOST_EVAL_RESULT")
+           (agent-repl--explain-config-send . "PROMPT_ORIGIN_EXPLAIN_CONFIG"))))
+    (should (= (length sites) 18))
+    (should (= (length (delete-dups (mapcar #'cdr sites))) (length sites)))
+    (dolist (site sites)
+      (let ((definition (prin1-to-string (symbol-function (car site))))
+            (expected (cdr site)))
+        (should (string-match-p (regexp-quote (format "\"%s\"" expected)) definition))
+        (dolist (other sites)
+          (unless (eq (car site) (car other))
+            (should-not
+             (string-match-p
+              (regexp-quote (format "\"%s\"" (cdr other))) definition))))))))
 
 ;;; append-to-input-buffer: dead buffer for workspace
 

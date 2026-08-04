@@ -125,7 +125,7 @@ subagent work mid-turn."
 
 ;;;; Session helpers
 
-(defun agent-repl--send-to-agent (text)
+(defun agent-repl--send-to-agent (text prompt-origin)
   "Send TEXT to Claude, starting it if needed.
 Dispatches unconditionally through the frontend registry's `:send-fn'
 \(`agent-repl--gui-send-turn', the gui being the only registered
@@ -138,8 +138,8 @@ manual boot is needed at this call site.  Used by every
 predefined-prompt command (e.g. `agent-repl-create-or-update-pr') as
 well as `agent-repl-explain' and friends."
   (let ((ws (agent-repl--ws-current-name)))
-    (agent-repl--log ws "send-to-agent len=%d" (length text))
-    (agent-repl--frontend-dispatch-send ws text text)))
+    (agent-repl--log ws "send-to-agent len=%d prompt-origin=%s" (length text) prompt-origin)
+    (agent-repl--frontend-dispatch-send ws text text prompt-origin)))
 
 ;;;; File reference helpers
 
@@ -295,7 +295,7 @@ CHANGE-SPEC describes which changes (e.g. \"unstaged changes (git diff)\").
 PROMPT is the analysis instruction."
   (let ((msg (format agent-repl-diff-analysis-message-template change-spec prompt)))
     (agent-repl--log (agent-repl--ws-current-log-name) "diff-analysis: %s" change-spec)
-    (agent-repl--send-to-agent msg)))
+    (agent-repl--send-to-agent msg "PROMPT_ORIGIN_COMMAND_DIFF_ANALYSIS")))
 
 ;; The whole cluster below — the scope tables and the two helpers — is
 ;; read by `agent-repl--define-diff-commands' AT MACROEXPANSION TIME
@@ -422,7 +422,7 @@ Without region: sends file path and current line."
   (let* ((ref (agent-repl--context-reference))
          (msg (format agent-repl-explain-prompt-template ref)))
     (agent-repl--log (agent-repl--ws-current-log-name) "explain %s" msg)
-    (agent-repl--send-to-agent msg)))
+    (agent-repl--send-to-agent msg "PROMPT_ORIGIN_COMMAND_EXPLAIN_CONTEXT")))
 
 (defun agent-repl-explain-prompt ()
   "Prompt the user for a message to send to Claude about the current context.
@@ -435,7 +435,7 @@ Without region: pre-fills with file path and current line."
          (msg (read-string "Send to Claude: " ref)))
     (when (and msg (not (string-empty-p msg)))
       (agent-repl--log (agent-repl--ws-current-log-name) "explain-prompt %s" msg)
-      (agent-repl--send-to-agent msg))
+      (agent-repl--send-to-agent msg "PROMPT_ORIGIN_COMMAND_EXPLAIN_PROMPT"))
     (when (or (null msg) (string-empty-p msg))
       (agent-repl--log (agent-repl--ws-current-log-name)
                         "explain-prompt: empty input; no message sent"))))
@@ -607,7 +607,7 @@ the agent-shim cutover; that hook counter no longer exists.)"
   "Ask Claude to update the PR description for the current branch."
   (interactive)
   (agent-repl--log (agent-repl--ws-current-log-name) "update-pr: sending update-pr prompt")
-  (agent-repl--send-to-agent agent-repl-update-pr-prompt))
+  (agent-repl--send-to-agent agent-repl-update-pr-prompt "PROMPT_ORIGIN_COMMAND_UPDATE_PR"))
 
 (defun agent-repl--rebase-onto-origin-master-callback (ws ok output)
   "Process the `git fetch origin' result and ask Claude to rebase.
@@ -620,7 +620,7 @@ rebase would proceed against stale `origin/master' otherwise."
   (if ok
       (progn
         (agent-repl--info ws "[%s] git fetch origin complete; asking Claude to rebase onto origin/master" ws)
-        (agent-repl--send-to-agent agent-repl-rebase-onto-origin-master-prompt))
+        (agent-repl--send-to-agent agent-repl-rebase-onto-origin-master-prompt "PROMPT_ORIGIN_COMMAND_REBASE"))
     (agent-repl--warn ws "[%s] git fetch origin failed: %s" ws output)))
 
 (defun agent-repl-rebase-onto-origin-master ()
@@ -692,7 +692,7 @@ before the prompt is sent."
          (prompt (if has-prefix (concat prefix " " base) base)))
     (agent-repl--log ws "create-or-update-pr: prefix-len=%d prompt=%s"
                       (length (or prefix "")) prompt)
-    (agent-repl--send-to-agent prompt)
+    (agent-repl--send-to-agent prompt "PROMPT_ORIGIN_COMMAND_CREATE_OR_UPDATE_PR")
     (when (and has-prefix input-buf (buffer-live-p input-buf))
       (agent-repl--commit-input-buffer ws input-buf raw-prefix t))
     (unless (and has-prefix input-buf (buffer-live-p input-buf))
