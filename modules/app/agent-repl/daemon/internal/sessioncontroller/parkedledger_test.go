@@ -547,7 +547,38 @@ func TestForcingAnUnadoptedEntryOfAWiredSessionIsRefusedSayingSo(t *testing.T) {
 	}
 }
 
-// --- the cancel/restore interleaving -----------------------------------------
+// --- the row-drop/restore interleaving ---------------------------------------
+
+func TestAForceDuringARestoreIsNotResurrectedByItsStaleRowSnapshot(t *testing.T) {
+	// THE HALF THE CANCEL-ONLY TOMBSTONE MISSED. A force drops the entry's
+	// durable row and then DELIVERS it, so the entry leaves the queue and the
+	// apply loop's `d.queue.get` dedupe stops covering it. Holding a row snapshot
+	// taken before the drop, the restore re-queued a prompt that had already run
+	// — the user forced one prompt and the agent got two.
+	// Arrange — the session wires, and the row read is where the force lands.
+	h := newParkedHarness(t)
+	h.lease.hold("sd_live")
+	h.record("q_parked", "sd_live", "delayed")
+	h.materialize()
+	h.wire()
+	h.store.duringHeldPromptsRead(func() {
+		if err := h.m.ForceQueueEntry("ws", "q_parked"); err != nil {
+			t.Errorf("the mid-restore force failed: %v", err)
+		}
+	})
+
+	// Act.
+	h.m.restoreShutdownHolds(h.controller())
+
+	// Assert — the forced prompt reached the shim exactly once and the restore
+	// did not put a second copy of it back in the queue.
+	waitFor(t, "the forced prompt to reach the shim", func() bool {
+		return len(h.client.promptTexts()) == 1
+	})
+	if es := h.entries(); len(es) != 0 {
+		t.Fatalf("queue = %+v after a force mid-restore, want empty — the restore re-added a prompt that has already been delivered", es)
+	}
+}
 
 func TestACancelDuringARestoreIsNotResurrectedByItsStaleRowSnapshot(t *testing.T) {
 	// THE RACE. The restore adopts the materialized entries under the manager
@@ -576,7 +607,7 @@ func TestACancelDuringARestoreIsNotResurrectedByItsStaleRowSnapshot(t *testing.T
 	}
 }
 
-func TestARestoreThatSkipsACancelledRowSaysSoInTheCanonicalLog(t *testing.T) {
+func TestARestoreThatSkipsARowDroppedByACancelSaysSoInTheCanonicalLog(t *testing.T) {
 	// Arrange.
 	h := newParkedHarness(t)
 	h.lease.hold("sd_live")
@@ -593,12 +624,12 @@ func TestARestoreThatSkipsACancelledRowSaysSoInTheCanonicalLog(t *testing.T) {
 	h.m.restoreShutdownHolds(h.controller())
 
 	// Assert.
-	if !h.log.contains("restore SKIPPED cancelled entries") {
+	if !h.log.contains("restore SKIPPED row-dropped entries") {
 		t.Fatalf("the skipped resurrection left no canonical log line naming it")
 	}
 }
 
-func TestACancelLandingDuringARestoreIsTombstoned(t *testing.T) {
+func TestACancelLandingDuringARestoreIsTombstonedAsARowDrop(t *testing.T) {
 	// The tombstone is what the apply loop consults, so it must be RECORDED at
 	// the moment the entry leaves memory rather than inferred afterwards.
 	// Arrange.
@@ -617,7 +648,7 @@ func TestACancelLandingDuringARestoreIsTombstoned(t *testing.T) {
 	h.m.restoreShutdownHolds(h.controller())
 
 	// Assert.
-	if !h.log.contains("queue cancel TOMBSTONED entry=q_parked") {
+	if !h.log.contains(`queue row-drop TOMBSTONED entry=q_parked ws="ws" reason=cancelled_by_user`) {
 		t.Fatalf("the mid-restore cancel left no tombstone record")
 	}
 }
@@ -640,11 +671,11 @@ func TestARestoreClearsItsTombstonesWhenItEnds(t *testing.T) {
 
 	// Act.
 	h.m.mu.Lock()
-	cancelled := h.m.restoreTombstones.cancelled("ws", "q_parked")
+	tombstoned := h.m.restoreTombstones.rowDropped("ws", "q_parked")
 	h.m.mu.Unlock()
 
 	// Assert.
-	if cancelled {
+	if tombstoned {
 		t.Fatal("the workspace's tombstones outlived the restore that took them")
 	}
 }

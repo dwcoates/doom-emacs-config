@@ -851,6 +851,15 @@ func (m *Manager) ForceQueueEntry(workspace, entryID string) error {
 	}
 	e.shutdownHoldScheduleID = ""
 	e.drainRowPending = false
+	// The row drop and the tombstone are ONE step, exactly as they are for a
+	// cancel. A force that dropped a row is the other half of the resurrection
+	// the tombstone set exists to stop: the interject below takes the entry out
+	// of the queue, so the apply loop's `d.queue.get` dedupe no longer covers it,
+	// and a restore holding a snapshot from before the drop would re-queue a
+	// prompt that has already been delivered (shutdownlease.go).
+	if hadRow {
+		m.noteRowDroppedTombstoneLocked(workspace, entryID, "forced_by_user")
+	}
 	m.mu.Unlock()
 	if forcedSchedule != "" {
 		m.logf("session-controller: drain hold FORCED entry=%s ws=%q session=%s schedule=%s initiator=user — the user asked for a prompt parked by a scheduled shutdown to run now; the turn it starts will hold the drain open until it ends",
@@ -950,7 +959,7 @@ func (m *Manager) CancelQueueEntry(workspace, entryID string) error {
 	// restore mid-flight is holding a row snapshot that predates this cancel,
 	// and its apply loop consults exactly this set before it re-adds anything
 	// (shutdownlease.go).
-	m.noteCancelTombstoneLocked(workspace, entryID)
+	m.noteRowDroppedTombstoneLocked(workspace, entryID, "cancelled_by_user")
 	m.mu.Unlock()
 
 	ledger := "live"

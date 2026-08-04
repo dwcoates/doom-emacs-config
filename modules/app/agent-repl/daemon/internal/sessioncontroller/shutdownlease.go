@@ -519,21 +519,29 @@ func (m *Manager) dropCancelledRow(workspace, entryID, sessionID string, hadRow 
 	return nil
 }
 
-// restoreTombstones is the per-workspace set of entry ids CANCELLED while a
-// drain-hold restore is mid-flight (restoreShutdownHolds).
+// restoreTombstones is the per-workspace set of entry ids whose DURABLE PARKING
+// ROW this daemon dropped while a drain-hold restore was mid-flight
+// (restoreShutdownHolds).
 //
 // THE RACE IT CLOSES. The restore adopts the boot ledger's entries under the
 // manager mutex, then reads the durable rows with the mutex RELEASED (a store
-// read must not be taken under it), then applies them under it again. A cancel
-// landing in that window removes the entry and drops its row — and the apply
-// loop, holding a snapshot taken before either, adds the entry straight back
-// from a row that no longer exists. The prompt the user withdrew is queued
-// again, and nothing in the queue's own state says it ever was withdrawn.
+// read must not be taken under it), then applies them under it again. A command
+// landing in that window drops the entry's row — and the apply loop, holding a
+// snapshot taken before it, adds the entry straight back from a row that no
+// longer exists.
 //
-// So a cancel that lands while a restore is in flight leaves a tombstone, the
-// apply loop consults it under the SAME mutex acquisition it adds rows in, and
-// the restore clears the set when it ends. Nothing is recorded when no restore
-// is in flight, so the set cannot grow without bound.
+// THE SET IS KEYED ON THE ROW, NOT ON THE VERDICT, and that is deliberate. It
+// was originally a cancel-only set, and a FORCE landing in the same window went
+// untombstoned: a force drops the row and then delivers the prompt, so the entry
+// leaves the queue, the apply loop's dedupe misses it, and the stale snapshot
+// re-queues a prompt that has already RUN — the user forced one prompt and the
+// agent got two. Both legs drop a row and both must therefore tombstone, which
+// is what "row dropped" names and what "cancelled" never could.
+//
+// So a command that drops a row while a restore is in flight leaves a tombstone,
+// the apply loop consults it under the SAME mutex acquisition it adds rows in,
+// and the restore clears the set when it ends. Nothing is recorded when no
+// restore is in flight, so the set cannot grow without bound.
 //
 // The zero value is usable and every method is called with m.mu HELD.
 type restoreTombstones struct {
@@ -552,8 +560,8 @@ func (r *restoreTombstones) begin(workspace string) {
 	r.inFlight[workspace]++
 }
 
-// note records a cancelled entry id, and only while a restore is in flight for
-// the workspace. Caller holds m.mu.
+// note records a row-dropped entry id, and only while a restore is in flight
+// for the workspace. Caller holds m.mu.
 func (r *restoreTombstones) note(workspace, entryID string) bool {
 	if r.inFlight[workspace] == 0 {
 		return false
@@ -568,9 +576,9 @@ func (r *restoreTombstones) note(workspace, entryID string) bool {
 	return true
 }
 
-// cancelled reports whether entryID was cancelled during the in-flight restore.
-// Caller holds m.mu.
-func (r *restoreTombstones) cancelled(workspace, entryID string) bool {
+// rowDropped reports whether entryID's durable parking row was dropped during
+// the in-flight restore. Caller holds m.mu.
+func (r *restoreTombstones) rowDropped(workspace, entryID string) bool {
 	return r.ids[workspace][entryID]
 }
 
@@ -586,15 +594,19 @@ func (r *restoreTombstones) end(workspace string) {
 	}
 }
 
-// noteCancelTombstoneLocked records a cancelled entry against any restore in
-// flight for its workspace, and says so when one is. Both cancel legs call it
-// at the moment the entry leaves memory, under the same m.mu acquisition that
-// removes it — which is what makes the removal and the tombstone one step
-// rather than two. Caller holds m.mu.
-func (m *Manager) noteCancelTombstoneLocked(workspace, entryID string) {
+// noteRowDroppedTombstoneLocked records an entry whose durable parking row this
+// daemon has just dropped against any restore in flight for its workspace, and
+// says so when one is.
+//
+// EVERY LEG THAT DROPS A ROW CALLS IT — cancel and force alike — at the moment
+// the command commits its in-memory half, under the same m.mu acquisition that
+// commits it. That co-location is the point: the row drop and the tombstone are
+// one step rather than two, so no restore can read a snapshot between them.
+// Caller holds m.mu.
+func (m *Manager) noteRowDroppedTombstoneLocked(workspace, entryID, reason string) {
 	if m.restoreTombstones.note(workspace, entryID) {
-		m.logf("session-controller: queue cancel TOMBSTONED entry=%s ws=%q — a drain-hold restore is mid-flight and its row snapshot predates this cancel, so the entry id is recorded and the restore's apply loop will not re-add it",
-			entryID, workspace)
+		m.logf("session-controller: queue row-drop TOMBSTONED entry=%s ws=%q reason=%s — a drain-hold restore is mid-flight and its row snapshot predates this command, so the entry id is recorded and the restore's apply loop will not re-add it",
+			entryID, workspace, reason)
 	}
 }
 
@@ -673,15 +685,16 @@ func (m *Manager) ReleaseShutdownHolds(scheduleID string) {
 	}
 }
 
-// logRestoreTombstones states the rows a restore refused to re-add because the
-// user cancelled them while it was in flight. Stated rather than silent: a row
-// skipped without a record is indistinguishable from a row the read never
-// returned, and this one is the resurrection the tombstone set exists to stop.
+// logRestoreTombstones states the rows a restore refused to re-add because a
+// cancel or a force dropped them while it was in flight. Stated rather than
+// silent: a row skipped without a record is indistinguishable from a row the
+// read never returned, and this one is the resurrection the tombstone set exists
+// to stop.
 func (m *Manager) logRestoreTombstones(d *sessionController, tombstoned []string) {
 	if len(tombstoned) == 0 {
 		return
 	}
-	m.logf("session-controller: drain-held prompt restore SKIPPED cancelled entries ws=%q session=%s entries=%v — these rows were read before the user cancelled the prompts behind them; their durable rows are already gone, so the restore adds nothing for them",
+	m.logf("session-controller: drain-held prompt restore SKIPPED row-dropped entries ws=%q session=%s entries=%v — these rows were read before a cancel or a force dropped the rows behind them; those rows are already gone, so the restore adds nothing for them",
 		d.workspace, d.sessionID, tombstoned)
 }
 
@@ -708,9 +721,10 @@ func (m *Manager) restoreShutdownHolds(d *sessionController) {
 	// present, so the replay cannot produce a second copy of a prompt the user
 	// submitted once.
 	// THE TOMBSTONE WINDOW OPENS HERE, in the SAME acquisition as the adoption
-	// and before the rows are read: a cancel that lands from now until the apply
-	// loop ends is racing a snapshot that predates it, and must be able to say
-	// so (restoreTombstones). It is closed on every return path below.
+	// and before the rows are read: a cancel or a force that drops a row from now
+	// until the apply loop ends is racing a snapshot that predates it, and must
+	// be able to say so (restoreTombstones). It is closed on every return path
+	// below.
 	m.mu.Lock()
 	m.restoreTombstones.begin(d.workspace)
 	adopted := m.adoptParkedLocked(d)
@@ -757,11 +771,12 @@ func (m *Manager) restoreShutdownHolds(d *sessionController) {
 			continue
 		}
 		// THE TOMBSTONE. The rows were read with the mutex released, so this row
-		// can name a prompt the user cancelled since — a prompt whose durable row
-		// is already gone and whose entry has already left the queue. Adding it
-		// back would resurrect it, and nothing downstream could tell it apart
-		// from a prompt still owed.
-		if m.restoreTombstones.cancelled(d.workspace, row.EntryID) {
+		// can name a prompt a cancel or a force has dropped the row for since — a
+		// prompt whose durable row is already gone and whose entry has already
+		// left the queue, either withdrawn or already RUN. Adding it back would
+		// resurrect it, and nothing downstream could tell it apart from a prompt
+		// still owed.
+		if m.restoreTombstones.rowDropped(d.workspace, row.EntryID) {
 			tombstoned = append(tombstoned, row.EntryID)
 			continue
 		}
