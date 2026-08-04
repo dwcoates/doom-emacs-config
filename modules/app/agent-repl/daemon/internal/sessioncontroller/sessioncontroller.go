@@ -534,6 +534,13 @@ type sessionController struct {
 	// carried only the text would put the turn back under a different mode
 	// than the one it was cut from (mergelease.go, ResumeDisplacedTurn).
 	runningPermissionMode string
+	// queueMigrating marks this controller's queue as OWNED BY THE REWIND
+	// ORCHESTRATOR rather than by this controller. It is set under the manager
+	// mutex by the same acquisition that empties the queue into the
+	// orchestrator's own slice, BEFORE the rewind stops the shim, so the exit
+	// tail that stop causes cannot drop entries or persist nil over the durable
+	// record of what is still owed. Cleared when the entries are re-parked.
+	queueMigrating bool
 	// phantomTurnClosed names the durable turn claims the shim handshake just
 	// contradicted and the SSM synthesized an end for (phantomturn.go). It is
 	// carried from the handshake to ShimReady, where the queue is released on
@@ -2139,14 +2146,23 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 		// Empty the queue and PUSH the empty view: a frontend that keeps
 		// rendering chips for a dead session is offering the user controls
 		// that do nothing.
-		dropped := d.queue.drainAll()
+		//
+		// UNLESS THE QUEUE IS NOT THIS TAIL'S TO EMPTY. A rewind takes the
+		// entries into its own ownership before it stops the shim, so the exit
+		// this stop causes finds nothing here — and the publish is skipped with
+		// it, because pushing the empty view and persisting nil records is
+		// exactly how the durable evidence of prompts still owed was lost.
+		migrating := d.queueMigrating
+		dropped := m.drainQueueForExitLocked(d)
 		view := d.queue.view(workspace, sessionID)
 		m.mu.Unlock()
 		if len(dropped) > 0 {
 			m.logf("session-controller: session %s ended with %d queued prompt(s) undelivered ws=%q",
 				sessionID, len(dropped), workspace)
 		}
-		m.publish(sessionID, view, nil)
+		if !migrating {
+			m.publish(sessionID, view, nil)
+		}
 		// THE WIRING IS GONE with the session controller, and `runErr` is what says whether
 		// that is a FAULT or a teardown we asked for. Only the CURRENT controller
 		// reports it at all: a superseded one exiting says nothing about the

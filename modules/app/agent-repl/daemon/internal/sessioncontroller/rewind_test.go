@@ -11,6 +11,8 @@ import (
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
+	corev1 "agentrepl/proto/agentshim/core/v1"
+
 	"claude-repld/internal/keepalive"
 	"claude-repld/internal/session"
 )
@@ -157,4 +159,198 @@ func TestRewindRefusalTakesNoRegistryFlip(t *testing.T) {
 	if len(vendors.adopted) != 0 {
 		t.Fatalf("a refused rewind flipped the registry to %v", vendors.adopted)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// The rewind's ownership of the queue
+// ---------------------------------------------------------------------------
+
+// THE ORCHESTRATOR OWNS THE QUEUE ACROSS THE BOUNCE. The entries are taken out
+// from under the dying controller before its exit tail can reach them, so the
+// tail's unconditional drain finds nothing to drop.
+func TestTakeQueueForRewindEmptiesTheControllersQueue(t *testing.T) {
+	// Arrange.
+	m, _, _ := keepAliveRig(t)
+	m.mu.Lock()
+	d := m.byWS["ws"]
+	d.queue.add(&queueEntry{id: "q1", text: "real work", keepAliveHoldTurnID: "ka_1"})
+	m.mu.Unlock()
+
+	// Act.
+	owned := m.takeQueueForRewind(d)
+
+	// Assert.
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(owned) != 1 || owned[0].id != "q1" {
+		t.Fatalf("takeQueueForRewind returned %+v, want the one held entry", owned)
+	}
+	if len(d.queue.entries) != 0 {
+		t.Fatalf("%d entr(ies) left in the retired queue; the exit tail can still drop them", len(d.queue.entries))
+	}
+}
+
+// THE MIGRATION FLAG IS WHAT THE EXIT TAIL READS. Without it the tail would
+// drain a queue it does not own and persist nil over the durable record of
+// prompts the orchestrator is still holding.
+func TestTakeQueueForRewindMarksTheControllerMigrating(t *testing.T) {
+	// Arrange.
+	m, _, _ := keepAliveRig(t)
+	m.mu.Lock()
+	d := m.byWS["ws"]
+	m.mu.Unlock()
+
+	// Act.
+	m.takeQueueForRewind(d)
+
+	// Assert.
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !d.queueMigrating {
+		t.Fatal("the controller was not marked migrating; its exit tail would drain and persist over the orchestrator's entries")
+	}
+}
+
+// A MIGRATING CONTROLLER'S EXIT TAIL DROPS NOTHING. This is the arbitration:
+// the tail structurally finds an empty queue because ownership moved before it
+// ran, rather than losing a race with it.
+func TestExitTailDropsNothingFromAMigratingController(t *testing.T) {
+	// Arrange.
+	m, _, _ := keepAliveRig(t)
+	m.mu.Lock()
+	d := m.byWS["ws"]
+	m.takeQueueForRewindLocked(d)
+	d.queue.add(&queueEntry{id: "q1", text: "arrived during the bounce"})
+	m.mu.Unlock()
+
+	// Act.
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	dropped := m.drainQueueForExitLocked(d)
+
+	// Assert.
+	if len(dropped) != 0 {
+		t.Fatalf("the exit tail dropped %d entr(ies) of a migrating controller, want none", len(dropped))
+	}
+	if len(d.queue.entries) != 1 {
+		t.Fatalf("%d entr(ies) survived the exit tail, want the one the orchestrator will re-park", len(d.queue.entries))
+	}
+}
+
+// A CONTROLLER THAT IS NOT MIGRATING KEEPS THE OLD BEHAVIOR: a dead session's
+// prompts can never be delivered, so the queue is emptied and the empty view
+// pushed.
+func TestExitTailStillDrainsAnOrdinaryController(t *testing.T) {
+	// Arrange.
+	m, _, _ := keepAliveRig(t)
+	m.mu.Lock()
+	d := m.byWS["ws"]
+	d.queue.add(&queueEntry{id: "q1", text: "real work"})
+	m.mu.Unlock()
+
+	// Act.
+	m.mu.Lock()
+	dropped := m.drainQueueForExitLocked(d)
+	m.mu.Unlock()
+
+	// Assert.
+	if len(dropped) != 1 {
+		t.Fatalf("the exit tail dropped %d entr(ies) of an ordinary controller, want 1", len(dropped))
+	}
+}
+
+// THE RE-PARK PRESERVES ORDER. Entries that arrived during the bounce were
+// typed AFTER the ones the orchestrator carried across, so the carried ones go
+// back in front of them.
+func TestRepositionedRewindEntriesKeepTheirPlaceAheadOfLaterArrivals(t *testing.T) {
+	// Arrange.
+	q := &promptQueue{}
+	q.add(&queueEntry{id: "later"})
+
+	// Act.
+	q.pushFrontAll([]*queueEntry{{id: "earlier-1"}, {id: "earlier-2"}})
+
+	// Assert.
+	got := []string{q.entries[0].id, q.entries[1].id, q.entries[2].id}
+	want := []string{"earlier-1", "earlier-2", "later"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("queue order = %v, want %v", got, want)
+		}
+	}
+}
+
+// THE HELD PROMPT SURVIVES THE WHOLE BOUNCE. This is the failure the ownership
+// transfer exists for: the exit tail of the controller the rewind stops used to
+// drain the queue and persist nil before the migration ran, so the prompt the
+// user typed vanished together with the record of it.
+func TestKeepAliveAftermathKeepsTheHeldPromptAcrossTheBounce(t *testing.T) {
+	// Arrange.
+	m, pingTurn, d, heldIDs := aftermathRig(t)
+
+	// Act.
+	m.releaseKeepAliveHolds(d, pingTurn, heldIDs)
+
+	// Assert.
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	live, ok := m.byWS["ws"]
+	if !ok {
+		t.Fatal("the workspace has no controller after the aftermath")
+	}
+	// The FIRST held prompt is handed straight to delivery, so the second is
+	// what proves the queue itself came across rather than being drained.
+	var second *queueEntry
+	for _, e := range live.queue.entries {
+		if e.text == "real work 2" {
+			second = e
+		}
+	}
+	if second == nil {
+		t.Fatalf("the second held prompt was dropped by the bounce; queue=%+v", live.queue.entries)
+	}
+	if second.keepAliveHeld() {
+		t.Fatal("the carried-across prompt is still held behind a ping that has ended")
+	}
+}
+
+// THE REWIND'S CLAIM IS RELEASED BY ITS OWN TAIL. A claim that outlived the
+// aftermath would hold every later prompt on the workspace forever.
+func TestKeepAliveAftermathReleasesTheRewindClaim(t *testing.T) {
+	// Arrange.
+	m, pingTurn, d, heldIDs := aftermathRig(t)
+
+	// Act.
+	m.releaseKeepAliveHolds(d, pingTurn, heldIDs)
+
+	// Assert.
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if got, claimed := m.keepAliveRewinds["ws"]; claimed {
+		t.Fatalf("rewind claim = %q after the aftermath finished, want it released", got)
+	}
+}
+
+// aftermathRig is a rewind rig standing exactly where the ping's turn boundary
+// leaves it: the ping's own claim cleared, the rewind's claim taken, and one
+// real prompt held behind it.
+func aftermathRig(t *testing.T) (m *Manager, pingTurnID string, d *sessionController, heldIDs []string) {
+	t.Helper()
+	m, _, _ = rewindRig(t)
+	pingTurnID, err := m.SubmitKeepAlivePing(context.Background(), "ws")
+	if err != nil {
+		t.Fatalf("SubmitKeepAlivePing: %v", err)
+	}
+	for _, text := range []string{"real work", "real work 2"} {
+		if err := m.SubmitPrompt(context.Background(), "ws", "req-"+text, text, "",
+			corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+			t.Fatalf("SubmitPrompt %q: %v", text, err)
+		}
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	d = m.byWS["ws"]
+	d.noteKeepAliveTurnEndedLocked(pingTurnID)
+	m.claimKeepAliveRewindLocked("ws", pingTurnID)
+	return m, pingTurnID, d, d.queue.keepAliveHeldIDs(pingTurnID)
 }
