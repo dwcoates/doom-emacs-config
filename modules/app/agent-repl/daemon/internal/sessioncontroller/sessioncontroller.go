@@ -1944,6 +1944,14 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 	cons.onTurnClaims = func(activeIDs []string) {
 		m.noteTurnClaims(d, activeIDs)
 	}
+	// The keep-alive policy's measuring point. Persisted per accepted turn end,
+	// which is what makes every later decision a time-since check against a
+	// durable instant rather than a timer nothing can restore (hibernation.go).
+	if m.cfg.Hibernations != nil {
+		cons.onTurnEnded = func(atMs int64) {
+			m.cfg.Hibernations.TurnEndObserved(sessionID, atMs)
+		}
+	}
 	// Every PERSISTENT store event names the conversation it belongs to.
 	// Keeping the record current off the live stream is what gives a later
 	// handshake's announcement something to DIFFER from — a rotation is
