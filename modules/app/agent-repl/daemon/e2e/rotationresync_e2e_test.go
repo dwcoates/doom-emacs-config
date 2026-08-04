@@ -109,7 +109,7 @@ func TestE2ETurnAfterARetiredSpaceResyncStillFlows(t *testing.T) {
 	replayItemsFrom(t, conn, cwd, "r-retired-mark", retiredSpaceMark)
 
 	// Act
-	writeCmd(t, conn, `{"requestId":"r-after-resync","submitPrompt":{"text":"after-the-stale-resync"}}`)
+	writeCmd(t, conn, `{"requestId":"r-after-resync","submitPrompt":{"text":"after-the-stale-resync","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
 
 	// Assert
 	awaitAll(t, conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{

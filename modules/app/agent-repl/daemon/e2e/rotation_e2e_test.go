@@ -125,7 +125,7 @@ func rotateSession(t *testing.T, h *e2eHarness, conn *websocket.Conn, sessionID,
 	t.Helper()
 	// A turn's worth of PERSISTENT store events is what teaches the daemon the
 	// conversation's uuid off the live stream.
-	writeCmd(t, conn, `{"requestId":"r-warmup","submitPrompt":{"text":"warmup"}}`)
+	writeCmd(t, conn, `{"requestId":"r-warmup","submitPrompt":{"text":"warmup","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
 	awaitAll(t, conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
 		"the warmup turn's reply": func(frame *frontendv1.FrontendFrame) bool {
 			for _, item := range deltaItems(frame, cwd) {
@@ -138,7 +138,7 @@ func rotateSession(t *testing.T, h *e2eHarness, conn *websocket.Conn, sessionID,
 	})
 	previous := vendorSessionID(t, h, sessionID, func(id string) bool { return id != "" }, "any conversation identity")
 
-	writeCmd(t, conn, `{"requestId":"r-rotate","submitPrompt":{"text":"!rotate"}}`)
+	writeCmd(t, conn, `{"requestId":"r-rotate","submitPrompt":{"text":"!rotate","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
 	awaitAll(t, conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
 		"the rotated turn's own reply": func(frame *frontendv1.FrontendFrame) bool {
 			for _, item := range deltaItems(frame, cwd) {
@@ -239,7 +239,7 @@ func TestE2EPromptAfterRotationRoundTrips(t *testing.T) {
 	rotateSession(t, h, conn, id, cwd)
 
 	// Act
-	writeCmd(t, conn, `{"requestId":"r-after","submitPrompt":{"text":"after-the-rotation"}}`)
+	writeCmd(t, conn, `{"requestId":"r-after","submitPrompt":{"text":"after-the-rotation","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
 
 	// Assert
 	awaitAll(t, conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{

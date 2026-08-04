@@ -57,7 +57,7 @@ func ssmResolved(frame *frontendv1.FrontendFrame, workspace string, state fronte
 func askQuestion(t *testing.T, conn *websocket.Conn, workspace, requestID, command string) string {
 	t.Helper()
 	var permID string
-	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"submitPrompt":{"text":"!tool %s"}}`, requestID, command))
+	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"submitPrompt":{"text":"!tool %s","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`, requestID, command))
 	awaitAll(t, conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
 		"a PENDING permission item (the parked question)": func(frame *frontendv1.FrontendFrame) bool {
 			for _, item := range deltaItems(frame, workspace) {

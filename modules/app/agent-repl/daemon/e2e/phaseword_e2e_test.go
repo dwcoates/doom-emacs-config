@@ -121,7 +121,7 @@ func TestE2EClearingPhaseWordOpensOnDispatchAndClosesOnTheEvent(t *testing.T) {
 	// Act — the user dispatches the clear over the real command surface. The
 	// daemon is the ONLY place that knows a clear has begun: nothing in the
 	// event stream announces one until it has already finished.
-	writeCmd(t, conn, `{"requestId":"r-clear","submitPrompt":{"text":"/clear"}}`)
+	writeCmd(t, conn, `{"requestId":"r-clear","submitPrompt":{"text":"/clear","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
 
 	// Assert.
 	awaitRenderState(t, conn, cwd, frontendv1.RenderState_RENDER_STATE_CLEARING)
