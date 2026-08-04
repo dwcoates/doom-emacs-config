@@ -9,7 +9,11 @@ import {
   ModelSelectionRejectedError,
   type CreateSessionArgs,
 } from "../src/command-dispatch.js";
-import { decodeFrontendFrame, type FrontendFrame } from "../src/frontend-proto.js";
+import {
+  decodeFrontendFrame,
+  type FrontendFrame,
+  type SystemFailure,
+} from "../src/frontend-proto.js";
 import { ForwardingLogger, resetLoggingForTests, setLogger } from "../src/wslog.js";
 import { PromptOrigin } from "../src/frontend-command.js";
 
@@ -43,6 +47,20 @@ function newDispatcher(sendReturns = true) {
     logLocal: (message) => records.push({ local_only: message }),
   });
   return { dispatcher, sent, records, consoleRecords };
+}
+
+/** A dispatcher whose classified-refusal sink is captured, ids `r1`, `r2`, … */
+function newFailureDispatcher(sendReturns = true) {
+  const failures: SystemFailure[] = [];
+  const { records } = installLogging();
+  let n = 0;
+  const dispatcher = new CommandDispatcher({
+    send: () => sendReturns,
+    newRequestId: () => `r${++n}`,
+    logLocal: (message) => records.push({ local_only: message }),
+    onFailure: (f) => failures.push(f),
+  });
+  return { dispatcher, failures };
 }
 
 function ackFrame(requestId: string, ok: boolean, error = "", selectedModel = ""): FrontendFrame {
@@ -514,5 +532,202 @@ describe("clientLog rejection circuit breaker", () => {
     rejectRun(h, 19, 20);
     // Assert
     expect(h.dispatcher.clientLog("/w", "info", "still forwarding")).toBe(true);
+  });
+});
+
+describe("hibernate and revive dispatch", () => {
+  it("sends HibernateWorkspaceCmd against the named workspace", async () => {
+    // Arrange
+    const { dispatcher, sent } = newDispatcher();
+    // Act
+    const p = dispatcher.hibernateWorkspace("/w");
+    dispatcher.observe(ackFrame("r1", true));
+    await p;
+    // Assert
+    expect(JSON.parse(sent[0])).toMatchObject({ workspace: "/w", hibernateWorkspace: {} });
+  });
+
+  it("surfaces the daemon's hibernate refusal through the classified-failure sink", async () => {
+    // Arrange — the daemon refuses a hibernate while a turn is live or the
+    // merge lease is held, and that nack is the ONLY thing that tells the user
+    // why the workspace they asked to sleep is still awake.
+    const failures: unknown[] = [];
+    const { records } = installLogging();
+    const dispatcher = new CommandDispatcher({
+      send: () => true,
+      newRequestId: () => "r1",
+      logLocal: (message) => records.push({ local_only: message }),
+      onFailure: (f) => failures.push(f),
+    });
+    const p = dispatcher.hibernateWorkspace("/w");
+    // Act
+    dispatcher.observe(
+      decodeFrontendFrame(
+        JSON.stringify({
+          commandAck: {
+            requestId: "r1",
+            ok: false,
+            error: "workspace is not settled",
+            failure: {
+              errorClass: "ERROR_CLASS_INTERNAL",
+              errorType: "hibernate.not_settled",
+              message: "a turn is in flight",
+            },
+          },
+        }),
+      ),
+    );
+    await p.catch(() => {});
+    // Assert
+    expect(failures).toHaveLength(1);
+  });
+
+  it("rejects the hibernate promise on a refusal, so no caller reads it as done", async () => {
+    // Arrange
+    const { dispatcher } = newDispatcher();
+    const p = dispatcher.hibernateWorkspace("/w");
+    // Act
+    dispatcher.observe(ackFrame("r1", false, "merge lease held"));
+    // Assert
+    await expect(p).rejects.toThrow(/hibernateWorkspace rejected: merge lease held/);
+  });
+
+  it("sends the compact-first revival decision", async () => {
+    // Arrange
+    const { dispatcher, sent } = newDispatcher();
+    // Act
+    const p = dispatcher.reviveSession("/w", "compactFirst");
+    dispatcher.observe(ackFrame("r1", true));
+    await p;
+    // Assert
+    expect(JSON.parse(sent[0]).reviveSession).toEqual({ compactFirst: {} });
+  });
+
+  it("sends the direct revival decision", async () => {
+    // Arrange
+    const { dispatcher, sent } = newDispatcher();
+    // Act
+    const p = dispatcher.reviveSession("/w", "direct");
+    dispatcher.observe(ackFrame("r1", true));
+    await p;
+    // Assert
+    expect(JSON.parse(sent[0]).reviveSession).toEqual({ direct: {} });
+  });
+
+  it("surfaces a hibernate nack that carries only an error string", async () => {
+    // Arrange — a legacy-shaped nack (no classified failure) used to be
+    // log-only, which is exactly the disposition the sleep verb cannot afford.
+    const { dispatcher, failures } = newFailureDispatcher();
+    const p = dispatcher.hibernateWorkspace("/w");
+    // Act
+    dispatcher.observe(ackFrame("r1", false, "merge lease held"));
+    await p.catch(() => {});
+    // Assert
+    expect(failures).toHaveLength(1);
+  });
+
+  it("carries the daemon's own words on an unclassified nack", async () => {
+    // Arrange — the daemon decided the refusal; this end only names it.
+    const { dispatcher, failures } = newFailureDispatcher();
+    const p = dispatcher.reviveSession("/w", "direct");
+    // Act
+    dispatcher.observe(ackFrame("r1", false, "session is not hibernated"));
+    await p.catch(() => {});
+    // Assert
+    expect(failures[0]?.message).toBe("session is not hibernated");
+  });
+
+  it("names an unclassified nack in the frontend's reserved namespace", async () => {
+    // Arrange — the classification is this end's, so the type says so.
+    const { dispatcher, failures } = newFailureDispatcher();
+    const p = dispatcher.hibernateWorkspace("/w");
+    // Act
+    dispatcher.observe(ackFrame("r1", false, "merge lease held"));
+    await p.catch(() => {});
+    // Assert
+    expect(failures[0]?.errorType).toBe("client.command_rejection_unclassified");
+  });
+
+  it("reconciles repeated refusals of one command onto a single card", async () => {
+    // Arrange — a per-refusal card would bury the feed under the same fact.
+    const { dispatcher, failures } = newFailureDispatcher();
+    const first = dispatcher.hibernateWorkspace("/w");
+    dispatcher.observe(ackFrame("r1", false, "merge lease held"));
+    await first.catch(() => {});
+    const second = dispatcher.hibernateWorkspace("/w");
+    // Act
+    dispatcher.observe(ackFrame("r2", false, "merge lease held"));
+    await second.catch(() => {});
+    // Assert
+    expect(failures[0]?.itemUuid).toBe(failures[1]?.itemUuid);
+  });
+
+  it("keeps two different refused commands as two cards", async () => {
+    // Arrange — a refused hibernate must not overwrite a refused revive.
+    const { dispatcher, failures } = newFailureDispatcher();
+    const hibernate = dispatcher.hibernateWorkspace("/w");
+    dispatcher.observe(ackFrame("r1", false, "merge lease held"));
+    await hibernate.catch(() => {});
+    const revive = dispatcher.reviveSession("/w", "direct");
+    // Act
+    dispatcher.observe(ackFrame("r2", false, "not hibernated"));
+    await revive.catch(() => {});
+    // Assert
+    expect(failures[0]?.itemUuid).not.toBe(failures[1]?.itemUuid);
+  });
+
+  it("prefers the daemon's classified failure over the locally-named one", async () => {
+    // Arrange — when the daemon DID classify, this end adds nothing.
+    const { dispatcher, failures } = newFailureDispatcher();
+    const p = dispatcher.hibernateWorkspace("/w");
+    // Act
+    dispatcher.observe(
+      decodeFrontendFrame(
+        JSON.stringify({
+          commandAck: {
+            requestId: "r1",
+            ok: false,
+            error: "workspace is not settled",
+            failure: {
+              errorClass: "ERROR_CLASS_INTERNAL",
+              errorType: "hibernate.not_settled",
+              message: "a turn is in flight",
+            },
+          },
+        }),
+      ),
+    );
+    await p.catch(() => {});
+    // Assert
+    expect(failures[0]?.errorType).toBe("hibernate.not_settled");
+  });
+
+  it("surfaces a revive the socket refused to send", async () => {
+    // Arrange — no ack will ever arrive for a frame that never left the page,
+    // so this rejection shape has no other route to a human.
+    const { dispatcher, failures } = newFailureDispatcher(false);
+    // Act
+    await dispatcher.reviveSession("/w", "compactFirst").catch(() => {});
+    // Assert
+    expect(failures[0]?.errorType).toBe("client.command_unsent");
+  });
+
+  it("says the connection is down on a refused send, not that the daemon refused", async () => {
+    // Arrange — nothing was decided; the operation is retryable.
+    const { dispatcher, failures } = newFailureDispatcher(false);
+    // Act
+    await dispatcher.hibernateWorkspace("/w").catch(() => {});
+    // Assert
+    expect(failures[0]?.message).toContain("connection to the daemon is down");
+  });
+
+  it("rejects a revive the daemon refused, so the gate can offer the choice again", async () => {
+    // Arrange
+    const { dispatcher } = newDispatcher();
+    const p = dispatcher.reviveSession("/w", "direct");
+    // Act
+    dispatcher.observe(ackFrame("r1", false, "session is not hibernated"));
+    // Assert
+    await expect(p).rejects.toThrow(/reviveSession rejected: session is not hibernated/);
   });
 });

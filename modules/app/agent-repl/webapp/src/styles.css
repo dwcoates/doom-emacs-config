@@ -1905,6 +1905,28 @@ pre {
    that is the classifier quoting itself, this is the app stating a rule. */
 .lease-reason { margin-top: 0.3rem; font-size: 0.8rem; color: var(--fg); }
 
+/* --- The keep-alive hold bubble (render.ts `KeepAliveHeldCard`) ----------
+   A prompt parked behind an in-flight cache keep-alive ping. It borrows the
+   lease card's SHAPE, since both are "held by something that is not the turn
+   above you and was never classified", but takes the hibernation teal rather
+   than the merge amber: a keep-alive is the machinery that KEEPS a session
+   out of hibernation, so it belongs to that vocabulary, and it is the
+   textbook teal case — nothing is wired to this prompt yet, and nothing is
+   wrong. The amber is spent on coordinated daemon work (merges, bounces),
+   which this is not. */
+.queued-card.keep-alive-card {
+  border: 1px solid var(--hibernated);
+  background: color-mix(in srgb, var(--hibernated) 10%, var(--card));
+  opacity: 1;
+}
+/* The badge takes the same teal so pill and frame agree. Never the
+   classifier's grey: no classification happened, and none will. */
+.queued-badge.keep-alive {
+  color: var(--hibernated);
+  border-color: var(--hibernated);
+  font-weight: 700;
+}
+
 #composer {
   display: flex;
   gap: 0.5rem;
@@ -2811,6 +2833,27 @@ pre {
 .pfooter-merge-note.ok { color: var(--muted); }
 .pfooter-merge-note.error { color: var(--err); }
 
+/* The expensive-turn alert (progress-footer.ts `expensiveTurnRowHtml`): a
+   turn whose UNCACHED input crossed the daemon's threshold. It sits beside
+   the classified-failure row, shares its shape and its next-turn lifetime,
+   and is RED because it reports money already spent that the user would have
+   wanted to prevent. */
+.pfooter-expensive-turn {
+  color: var(--err);
+  font-size: 0.74rem;
+  border-top: 1px dashed var(--border);
+  padding: 4px 10px 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+/* A keep-alive that came back cold is the LOUDER of the two readings: the
+   ping existed solely to keep the cache warm, so it bought nothing at all.
+   Bolded rather than given a hue of its own — it is the same alarm, one step
+   worse, and a sixth color would say it is a different kind of thing. */
+.pfooter-expensive-turn.cold-keep-alive { font-weight: 700; }
+
 .pfooter-error.failure-internal { color: var(--init); }
 .pfooter-error.failure-api { color: var(--blocked); }
 .pfooter-error.addressable { cursor: pointer; }
@@ -2867,6 +2910,95 @@ pre {
 }
 /* An idle lease pays no layout at all. */
 #drain-banner:empty { display: none; }
+
+/* --- The revival gate (hibernation.ts) -----------------------------------
+   The blocking card a hibernated session shows instead of a live composer.
+   TEAL, per the module color contract: a hibernated session is the canonical
+   "nothing is wired, and nothing is wrong" — we SIGTERMed it on purpose. Red
+   would say the session died and blue would say the local substrate broke;
+   both are the conflation teal exists to correct.
+
+   It is a filled card rather than an outlined banner because, unlike the two
+   banners above it, it is not an announcement to read past — it is the only
+   interaction available until it is answered. */
+#revival-gate {
+  background: color-mix(in srgb, var(--hibernated) 12%, var(--bg));
+  border: 1px solid var(--hibernated);
+  border-radius: 8px;
+  padding: 0.6rem 0.85rem;
+  margin: 0.35rem 0.75rem;
+  font-size: 0.85rem;
+  color: var(--fg);
+}
+/* An awake session pays no layout for a gate it does not carry. */
+#revival-gate:empty { display: none; }
+.hibernation-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+.hibernation-heading { font-weight: 700; color: var(--hibernated); }
+.hibernation-since {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+/* WHY it is asleep, in the daemon's own terms. It leads because it is the
+   fact that decides which of the two buttons below is the right one. */
+.hibernation-cause { margin-top: 0.25rem; }
+.hibernation-choice {
+  margin-top: 0.45rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.hibernation-option { color: var(--muted); font-size: 0.8rem; }
+/* The direct-resume line carries a COST, so it is not muted into the same
+   grey as the compact line beside it — the two options must not read as
+   equally weighted when one of them is paid for on every later turn. */
+.hibernation-option.warn { color: var(--info-tokens); }
+.hibernation-actions {
+  margin-top: 0.55rem;
+  display: flex;
+  gap: 0.5rem;
+}
+.hibernation-actions button {
+  font: inherit;
+  padding: 0.25rem 0.7rem;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid var(--hibernated);
+  background: var(--bg);
+  color: var(--fg);
+}
+/* The cheaper path is the filled one. The costlier path stays outlined
+   rather than being disabled or hidden: it is a legitimate deliberate
+   choice, and the UI's job is to make it deliberate, not unavailable. */
+.hibernation-actions button.hibernation-compact {
+  background: var(--hibernated);
+  color: var(--bg);
+  font-weight: 700;
+}
+.hibernation-actions button.hibernation-direct { border-color: var(--info-tokens); }
+/* A decision in flight REPLACES the buttons rather than greying them, so a
+   second click on the other mode is not on offer while the first is pending. */
+.hibernation-pending {
+  margin-top: 0.55rem;
+  color: var(--muted);
+  font-style: italic;
+}
+/* An ACCEPTED decision whose bring-up failed. Red, unlike everything else on
+   this card: a hibernated session is benign and deliberate, but a wake-up that
+   was taken and then did not happen is a fault, and the user has just watched
+   their choice appear to do nothing. */
+.hibernation-failed {
+  margin-top: 0.35rem;
+  color: var(--err);
+  font-weight: 600;
+}
+/* The composer's own one-line reason, sharing the merge gate's slot and its
+   muted, non-alarming tone: a hibernated session is deliberate and benign. */
+#merge-gate-notice .hibernation-gate-text { display: block; }
 .drain-mark {
   flex: 0 0 auto;
   color: var(--merge-border);

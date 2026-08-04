@@ -18,9 +18,13 @@
  *   controls, model/mode pickers and diagnostics talk to the daemon.
  */
 
-import type { QueueClassification, QueueEntryShutdownHold } from "./frontend-proto.js";
+import type {
+  QueueClassification,
+  QueueEntryKeepAliveHold,
+  QueueEntryShutdownHold,
+} from "./frontend-proto.js";
 
-export type { QueueClassification, QueueEntryShutdownHold };
+export type { QueueClassification, QueueEntryKeepAliveHold, QueueEntryShutdownHold };
 
 /**
  * Every mode the CLI accepts at session LAUNCH.
@@ -130,6 +134,13 @@ export interface QueuedItem {
    * nothing about why it is waiting.
    */
   shutdownHold?: QueueEntryShutdownHold;
+  /**
+   * Set ONLY while an in-flight cache keep-alive turn is holding this prompt.
+   * Its presence selects the keep-alive bubble over the classifier bubble, for
+   * the same reason the lease hold above does: the classifier never ran, so
+   * `classification` says nothing about why this entry is waiting.
+   */
+  keepAliveHold?: QueueEntryKeepAliveHold;
 }
 
 export type ResultSubtype =

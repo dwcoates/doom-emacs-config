@@ -26,13 +26,24 @@
  * daemon-lifecycle command the webapp never sends; none are encodable here so
  * a stray call is a compile error, not a silently malformed frame.
  */
+import {
+  COMMAND_ARM,
+  PROMPT_ORIGIN_WEBAPP_CARD_ACTION,
+  PROMPT_ORIGIN_WEBAPP_USER_SENT,
+  REVIVE_MODE,
+} from "./proto-names.js";
+
 // The webapp hand-types protojson for the same module-resolution reason as
 // `frontend-proto.ts`. Values are the canonical core.v1 enum names, so the Go
 // protojson decoder validates them against the generated descriptor.
-export enum PromptOrigin {
-  WEBAPP_USER_SENT = "PROMPT_ORIGIN_WEBAPP_USER_SENT",
-  WEBAPP_CARD_ACTION = "PROMPT_ORIGIN_WEBAPP_CARD_ACTION",
-}
+// The origin NAMES come from the build-checked spelling table (proto-names.ts)
+// rather than being typed out here: the Go protojson decoder validates them
+// against the generated descriptor, so a drifted name is a refused command.
+export const PromptOrigin = {
+  WEBAPP_USER_SENT: PROMPT_ORIGIN_WEBAPP_USER_SENT,
+  WEBAPP_CARD_ACTION: PROMPT_ORIGIN_WEBAPP_CARD_ACTION,
+} as const;
+export type PromptOrigin = (typeof PromptOrigin)[keyof typeof PromptOrigin];
 
 /** A protojson `google.protobuf.Struct` value (a free-form JSON object). */
 export type CommandStruct = Record<string, unknown>;
@@ -155,6 +166,42 @@ export interface QueueCancelBody {
   entryId: string;
 }
 
+/**
+ * HibernateWorkspaceCmd — put this workspace's settled session to sleep now.
+ *
+ * Deliberately empty: the workspace is the envelope's, and there is nothing
+ * else to say. The daemon REFUSES it while a turn is live or the merge lease
+ * is held, and that refusal arrives as an ordinary rejected `CommandAck` —
+ * the webapp never pre-judges settledness, which it cannot resolve.
+ */
+export interface HibernateWorkspaceBody {
+  case: "hibernateWorkspace";
+}
+
+/**
+ * ReviveSessionCmd — the user's revival decision for a hibernated workspace.
+ *
+ * The mode is a ONEOF of empty messages on the wire, so "no decision" is
+ * unrepresentable; it is modeled here as a closed union for the same reason,
+ * and a caller cannot send a revive without choosing.
+ */
+export interface ReviveSessionBody {
+  case: "reviveSession";
+  /**
+   * `compactFirst`: compact before accepting any prompt, paying the full
+   * -context cost once. `direct`: resume as-is, the deliberate "I know it's
+   * big" path.
+   */
+  mode: ReviveMode;
+}
+
+/**
+ * The revival modes, as the arm keys the wire's oneof spells them with. Taken
+ * from the build-checked spelling table so the key this end sends and the arm
+ * the daemon reads cannot become two different strings.
+ */
+export type ReviveMode = (typeof REVIVE_MODE)[keyof typeof REVIVE_MODE];
+
 export type FrontendCommandBody =
   | SubmitPromptBody
   | InterruptBody
@@ -166,7 +213,9 @@ export type FrontendCommandBody =
   | ClientLogBody
   | QueueForceBody
   | QueueAcceptBody
-  | QueueCancelBody;
+  | QueueCancelBody
+  | HibernateWorkspaceBody
+  | ReviveSessionBody;
 
 /** The command envelope: correlation id + workspace + exactly one command arm. */
 export interface FrontendCommand {
@@ -183,19 +232,7 @@ export interface FrontendCommand {
  * no paint acknowledgment can be sent. Viewer-based attestation is gone: a
  * workspace's color is connection truth, so nothing this end draws is a
  * statement the daemon wants back. */
-export const ARM_KEY: Record<FrontendCommandBody["case"], string> = {
-  submitPrompt: "submitPrompt",
-  interrupt: "interrupt",
-  permissionAnswer: "permissionAnswer",
-  createSession: "createSession",
-  setModel: "setModel",
-  deleteSession: "deleteSession",
-  resync: "resync",
-  clientLog: "clientLog",
-  queueForce: "queueForce",
-  queueAccept: "queueAccept",
-  queueCancel: "queueCancel",
-};
+export const ARM_KEY: Record<FrontendCommandBody["case"], string> = COMMAND_ARM;
 
 /** Build the nested protojson command message for one body arm. */
 function encodeBody(b: FrontendCommandBody): Record<string, unknown> {
@@ -245,6 +282,15 @@ function encodeBody(b: FrontendCommandBody): Record<string, unknown> {
     case "queueAccept":
     case "queueCancel":
       return { entryId: b.entryId };
+    case "hibernateWorkspace":
+      // Empty message: the workspace rides the envelope, and there is no
+      // second thing to say. `{}` is the canonical protojson for it.
+      return {};
+    case "reviveSession":
+      // The oneof arm's own value is an empty message, so the arm KEY is the
+      // whole decision — which is exactly why the contract made it a oneof
+      // rather than a bool.
+      return { [b.mode]: {} };
   }
 }
 

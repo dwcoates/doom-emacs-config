@@ -222,6 +222,12 @@ export interface SessionViewInput {
   /** SDK-published menu; the browser renders it but never owns selection. */
   models: ModelInfo[];
   tokenUtilization?: import("./frontend-proto.js").SessionTokenUtilization;
+  /**
+   * The typed account of why this session is asleep, or `null` when it is
+   * awake. Carried as the DECODED DETAIL rather than a flattened boolean: the
+   * revival gate's job is to name the cause, and a bool cannot.
+   */
+  hibernation: import("./frontend-proto.js").HibernationDetail | null;
 }
 
 /**
@@ -363,6 +369,13 @@ export interface ProgressInput {
    * `null` = no error standing.
    */
   failure: SystemFailureCard | null;
+  /**
+   * The daemon's uncached-input alert for the turn just ended (`null` when the
+   * turn was cache-efficient). Carried VERBATIM, origin included, because the
+   * keep-alive-came-back-cold reading is a different alarm from a generic
+   * expensive turn and only the origin separates them.
+   */
+  expensiveTurn: import("./frontend-proto.js").ContextCostAlert | null;
   pendingPermissions: number;
   queueDepth: number;
   liveTaskCount: number;
@@ -624,6 +637,7 @@ export class StateAdapter {
           description: model.description,
         })),
         tokenUtilization: sv.tokenUtilization,
+        hibernation: sv.hibernation ?? null,
       },
     };
   }
@@ -720,6 +734,7 @@ export class StateAdapter {
         rateLimited: openRateLimit(pv.rateLimited),
         rateLimitedWeekly: openRateLimit(pv.rateLimitedWeekly),
         failure: pv.failure === undefined ? null : systemFailureFrom(pv.failure),
+        expensiveTurn: pv.expensiveTurn ?? null,
         pendingPermissions: pv.pendingPermissions,
         queueDepth: pv.queueDepth,
         liveTaskCount: pv.liveTaskCount,
@@ -761,6 +776,16 @@ export class StateAdapter {
    * from a contract-abiding producer. It is logged at error with the item's
    * identity and dropped — defaulting it to USER would draw a turn nothing
    * vouches for, which is exactly what the enum's reserved zero exists to stop.
+   *
+   * CACHE KEEP-ALIVE items are NOT gated here, and the omission is deliberate.
+   * The daemon suppresses the keep-alive ping's conversation items server-side,
+   * and nothing on a received `ConversationItem` carries the origin that would
+   * let this gate check that work: `ConversationSource` has exactly the three
+   * arms above, and `PromptOrigin` rides `TurnStarted`/`SubmitPrompt`, neither
+   * of which is a `ConversationItem` payload arm. A gate here would therefore
+   * have to guess from text or timing, which is a worse claim than no claim.
+   * If the wire ever grows a visible keep-alive provenance, this is where it
+   * belongs — beside the MERGE drop, on the same explicit-ignore path.
    */
   private conversationEffects(cd: ConversationDelta): AdapterEffect[] {
     const items: ConversationItem[] = [];
