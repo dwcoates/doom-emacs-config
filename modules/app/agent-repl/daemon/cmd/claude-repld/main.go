@@ -417,7 +417,25 @@ func main() {
 	// The progress-footer resolver (F1) is the SSM's sibling and is owned here
 	// for the same reason: both the frontend push loop and the per-session
 	// controller feed it, so one owner closes it once.
-	progressMgr := progress.New(progress.Options{Logf: legacyLog})
+	// THE KEEP-ALIVE POLICY IS RESOLVED AT BOOT AND FATAL ON A BAD KNOB. An
+	// operator who set AGENT_REPL_KEEPALIVE_CACHE_TTL_MS=0 meant something by
+	// it, and quietly running the shipped hour while they believe the feature
+	// is off is the failure a loud refusal exists to prevent.
+	//
+	// Resolved HERE, ahead of every consumer, because three of them take a knob
+	// from it — the progress resolver's cost threshold, the session
+	// controller's policy, and the sweeper's — and a config read per consumer
+	// would be three chances to disagree about the same environment.
+	keepAliveConfig, err := keepalive.FromEnv()
+	if err != nil {
+		daemonFatal(daemonLog, "claude-repld: %v", err)
+	}
+	legacyLog("claude-repld: cache keep-alive policy ttl=%s leeway=%s idle_cutoff=%s uncached_cost_alert=%d tokens",
+		keepAliveConfig.CacheTTL, keepAliveConfig.Leeway, keepAliveConfig.IdleCutoff, keepAliveConfig.UncachedCostAlertTokens)
+	progressMgr := progress.New(progress.Options{
+		Logf:                legacyLog,
+		UncachedAlertTokens: keepAliveConfig.UncachedCostAlertTokens,
+	})
 	defer progressMgr.Close()
 
 	// Shims dial US. One listening socket serves every session; each shim
@@ -547,16 +565,6 @@ func main() {
 		},
 		Logf: legacyLog,
 	}
-	// THE KEEP-ALIVE POLICY IS RESOLVED AT BOOT AND FATAL ON A BAD KNOB. An
-	// operator who set AGENT_REPL_KEEPALIVE_CACHE_TTL_MS=0 meant something by
-	// it, and quietly running the shipped hour while they believe the feature
-	// is off is the failure a loud refusal exists to prevent.
-	keepAliveConfig, err := keepalive.FromEnv()
-	if err != nil {
-		daemonFatal(daemonLog, "claude-repld: %v", err)
-	}
-	legacyLog("claude-repld: cache keep-alive policy ttl=%s leeway=%s idle_cutoff=%s uncached_cost_alert=%d tokens",
-		keepAliveConfig.CacheTTL, keepAliveConfig.Leeway, keepAliveConfig.IdleCutoff, keepAliveConfig.UncachedCostAlertTokens)
 	shimSpawner := server.NewShimSpawner(sessionRegistry, shimListener.Connected, shimListener.Evict, udsSpawn, legacyLog)
 	// The respawn path must reach the create path's verdict on the resume gate
 	// for the very same session, and -fake is what that verdict turns on.

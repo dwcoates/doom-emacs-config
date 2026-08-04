@@ -1938,6 +1938,11 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 	// item can reach the curation block with the ledger unset and be rendered
 	// as though the user had typed it.
 	cons.keepAliveWindows = m.cfg.KeepAliveWindows
+	// A rewind's discarded turns hold claims in the seq space it retires, and
+	// nothing in the new space will ever deliver their ends (sessionrewound.go).
+	if superseder, ok := m.cfg.SSM.(TurnClaimSuperseder); ok {
+		cons.turnSuperseders = superseder
+	}
 	// The per-turn wait (mergeresolve.go) rides the SAME stream the queue's
 	// edges do, but correlated by turn id rather than by edge. Bound before Run,
 	// so no boundary can reach the consumer with this unset.
@@ -2014,6 +2019,7 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 		PermissionModes: m.cfg.PermissionModes,
 		StateSink:       cons,
 		TurnClaims:      cons,
+		Rewinds:         cons,
 		FrameSink:       cons,
 		Models:          modelCatalogReporter{m: m},
 		FileDiagnostics: fileDiagnosticSink{persister: m.cfg.FileDiagnostics, workspace: workspace, agentReplSessionID: sessionID},

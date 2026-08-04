@@ -157,6 +157,25 @@ func (c *Client) dispatchEvent(ev *corev1.Event) error {
 			return fmt.Errorf("%w session=%s seq=%d kind=%T: %v",
 				ErrLifecycleRejected, ev.GetSessionId(), ev.GetSeq(), p, err)
 		}
+	case *corev1.Event_SessionRewound:
+		// A REAL ROUTE, not the default FrameSink fallthrough it used to take.
+		// SessionRewound is correlation evidence in TurnClaimBridge's sense: the
+		// rotation itself is announced by the ordinary handshake bounce, and
+		// this is the durable explanation of WHY the vendor identity changed, so
+		// a lineage can be reconstructed from the store alone.
+		//
+		// It is NOT conversation, which is why it must not reach the frame sink:
+		// the curator would find no items on it and the event would be
+		// indistinguishable from an unhandled payload in the log.
+		if c.cfg.Rewinds == nil {
+			return fmt.Errorf("shimclient: session rewind sink is not wired session=%s seq=%d previous_vendor_session=%s",
+				ev.GetSessionId(), ev.GetSeq(), p.SessionRewound.GetPreviousVendorSessionId())
+		}
+		if err := c.cfg.Rewinds.ApplySessionRewound(ev, p.SessionRewound); err != nil {
+			return fmt.Errorf("shimclient: apply session rewound session=%s seq=%d previous_vendor_session=%s new_vendor_session=%s: %w",
+				ev.GetSessionId(), ev.GetSeq(), p.SessionRewound.GetPreviousVendorSessionId(),
+				p.SessionRewound.GetNewVendorSessionId(), err)
+		}
 	case *corev1.Event_DegradedState:
 		c.logf("shim reported DegradedState component=%s reason=%q dropped=%d recovered=%v",
 			p.DegradedState.GetComponent(), p.DegradedState.GetReason(),
