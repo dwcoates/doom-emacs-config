@@ -43,9 +43,6 @@ export const HIBERNATED_BODY_CLASS = "hibernated";
 export const REVIVE_COMPACT_ATTR = "data-revive-compact";
 export const REVIVE_DIRECT_ATTR = "data-revive-direct";
 
-/** The hibernate affordance's own click marker. */
-export const HIBERNATE_ATTR = "data-hibernate";
-
 /**
  * Whether a prompt may be submitted right now.
  *
