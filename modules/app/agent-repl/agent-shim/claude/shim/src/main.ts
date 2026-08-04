@@ -10,6 +10,15 @@
  *   --cwd <dir>               working directory for the SDK session
  *   --model <model>           model override passed to the SDK
  *   --resume <session>        resume an on-disk claude session
+ *   --rewound-from <uuid>     vendor session this resume's transcript was
+ *                             truncated FROM (rewind lineage; requires the
+ *                             two flags below and --resume)
+ *   --rewind-retained-leaf <uuid>
+ *                             vendor uuid of the last transcript record the
+ *                             truncation retained
+ *   --rewind-dropped-turns <ids>
+ *                             comma-separated turn ids the truncation dropped,
+ *                             in submission order
  *   --claude-bin <path>       claude CLI for the SDK to drive (system
  *                             binary for vterm parity; default: bundled)
  *   --daemon-socket <path>    required UDS endpoint to reach the daemon
@@ -76,6 +85,20 @@ interface CliArgs {
   cwd?: string;
   model?: string;
   resume?: string;
+  /**
+   * Rewind lineage: the daemon truncated a transcript under a NEW vendor uuid
+   * and respawned this shim with `--resume <new uuid>` plus these three flags.
+   *
+   * All three arrive together or none do (`validateRewindLineage`), because
+   * each alone is an unusable fragment: a previous id with no retained leaf
+   * cannot say WHERE the cut fell, and dropped turn ids with no lineage cannot
+   * say which seq space they were dropped from. The trio is also meaningless
+   * without `--resume`, which names the truncated copy being continued.
+   */
+  rewoundFrom?: string;
+  rewindRetainedLeaf?: string;
+  /** Dropped keep-alive turn ids in submission order; order is contractual. */
+  rewindDroppedTurns?: string[];
   /** Path to the claude CLI the SDK should drive.
    *
    *  Kept for VERSION PARITY with vterm sessions: the user upgrades their
@@ -138,6 +161,15 @@ export function parseArgs(argv: string[]): CliArgs {
       case "--resume":
         args.resume = next();
         break;
+      case "--rewound-from":
+        args.rewoundFrom = next();
+        break;
+      case "--rewind-retained-leaf":
+        args.rewindRetainedLeaf = next();
+        break;
+      case "--rewind-dropped-turns":
+        args.rewindDroppedTurns = parseDroppedTurns(next());
+        break;
       case "--claude-bin":
         args.claudeBin = next();
         break;
@@ -160,7 +192,54 @@ export function parseArgs(argv: string[]): CliArgs {
         throw new Error(`unknown argument: ${arg}`);
     }
   }
+  validateRewindLineage(args);
   return args;
+}
+
+/**
+ * Split `--rewind-dropped-turns` into its ordered turn ids.
+ *
+ * Order is the CONTRACT (KeepAliveDiscard.dropped_turn_ids is "in submission
+ * order"), so the list is never sorted or deduplicated here. An empty element
+ * or an empty list is rejected rather than silently dropped: a rewind that
+ * dropped no turn is not a rewind, and a blank id would reach the store as an
+ * unresolvable reference.
+ */
+function parseDroppedTurns(value: string): string[] {
+  const ids = value.split(",");
+  if (ids.some((id) => id.trim() === "")) {
+    throw new Error(`invalid --rewind-dropped-turns: ${JSON.stringify(value)}; every comma-separated turn id must be non-empty`);
+  }
+  return ids;
+}
+
+/**
+ * Enforce the daemon's rewind-lineage spawn contract before startup proceeds.
+ *
+ * A PARTIAL set is a loud startup failure, never a silent degrade to "no
+ * rewind": the daemon has already retired the previous vendor session by the
+ * time it spawns us, so a shim that quietly skipped SessionRewound would leave
+ * the lineage unreconstructable from the store forever. Failing here costs one
+ * respawn; swallowing it costs the durable record.
+ */
+export function validateRewindLineage(args: CliArgs): void {
+  const present = [
+    ["--rewound-from", args.rewoundFrom],
+    ["--rewind-retained-leaf", args.rewindRetainedLeaf],
+    ["--rewind-dropped-turns", args.rewindDroppedTurns],
+  ] as const;
+  const supplied = present.filter(([, value]) => value !== undefined);
+  if (supplied.length === 0) return;
+  if (supplied.length !== present.length) {
+    const missing = present.filter(([, value]) => value === undefined).map(([flag]) => flag);
+    throw new Error(`incomplete rewind lineage: ${supplied.map(([flag]) => flag).join(", ")} supplied without ${missing.join(", ")}; all three must be present together or all absent`);
+  }
+  if (args.resume === undefined) {
+    throw new Error("rewind lineage requires --resume: the rewound-to vendor session id names the truncated transcript being continued");
+  }
+  if (args.rewoundFrom === args.resume) {
+    throw new Error(`invalid rewind lineage: --rewound-from equals --resume (${args.resume}); a rewind always produces a NEW vendor session id`);
+  }
 }
 
 /** Validate the daemon's UDS primary-writer spawn contract before startup mutates state. */
@@ -400,7 +479,7 @@ export async function main(): Promise<void> {
       "normalized empty-equivalent launch model before constructing SDK options",
     );
   }
-  LOGGER.log({ agent_repl_session_id: args.sessionId, fake: args.fake, daemon_socket: args.daemonSocket, store_socket: args.storeSocket ?? defaultStoreSocket(), permission_mode: args.permissionMode, model: args.model ?? "", resumed: args.resume !== undefined }, "validated shim startup arguments and configured durable logging");
+  LOGGER.log({ agent_repl_session_id: args.sessionId, fake: args.fake, daemon_socket: args.daemonSocket, store_socket: args.storeSocket ?? defaultStoreSocket(), permission_mode: args.permissionMode, model: args.model ?? "", resumed: args.resume !== undefined, rewound_from: args.rewoundFrom ?? "", rewind_retained_leaf: args.rewindRetainedLeaf ?? "", rewind_dropped_turn_count: args.rewindDroppedTurns?.length ?? 0 }, "validated shim startup arguments and configured durable logging");
 
   // The query factory is synchronous per SessionDeps; pre-resolve the SDK
   // module (dynamic import) before constructing the session. Under
