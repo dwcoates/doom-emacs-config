@@ -23,17 +23,20 @@ import (
 
 // --- (3) the idle cutoff ------------------------------------------------------
 
-// idleCutoffPolicy is a keep-alive policy whose IDLE CUTOFF trips before the
-// ping window ever opens.
+// idleCutoffPolicy is a keep-alive policy whose IDLE CUTOFF equals the cache
+// TTL — the smallest value the daemon's own validation admits, which refuses
+// any cutoff below the TTL as a silently-inert keep-alive configuration.
 //
-// The ordering is deliberate and is the only way this edge can be observed
-// alone. A production cutoff sits far beyond the cache TTL, so an idle session
-// that is being swept reaches the cache-expiry edge first and the two causes
-// could not be told apart. Moving the cutoff below the ping window isolates it:
-// at the check below, the cutoff is the ONLY thing that has been crossed.
+// The isolation this file needs comes from cause PRECEDENCE, not from placing
+// the cutoff below the ping window (the daemon refuses that shape): with
+// cutoff == ttl the cache-expired interval [ttl, cutoff) is empty, and a
+// single clock jump straight to the cutoff (one sweep, no intermediate tick)
+// crosses cutoff and TTL in the same check, where the contract says the
+// cutoff wins. No ping can fire on the way because the ping window is never
+// observed by any sweep.
 func idleCutoffPolicy() keepAlivePolicy {
 	p := testKeepAlivePolicy()
-	p.idleCutoff = 3 * time.Minute
+	p.idleCutoff = p.ttl
 	return p
 }
 
