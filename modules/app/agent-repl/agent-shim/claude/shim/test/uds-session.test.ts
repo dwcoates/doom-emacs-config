@@ -3234,3 +3234,43 @@ describe("UdsSession rewind lineage: SessionRewound", () => {
     expect(store.peer().count(StoreWriteSchema)).toBe(0);
   });
 });
+
+describe("UdsSession keep-alive turns: prompt_origin passthrough", () => {
+  it("carries PROMPT_ORIGIN_CACHE_KEEP_ALIVE onto TurnStarted unchanged", async () => {
+    // Arrange
+    const { daemon, store } = await rig({ holdTurnStartAck: true });
+    // Act: a keep-alive ping is an ORDINARY SubmitPrompt.
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, {
+      requestId: "ka-1",
+      text: "respond with only '.', no tool calls or changes",
+      promptOrigin: PromptOrigin.CACHE_KEEP_ALIVE,
+    }));
+    const write = await store.peer().next(StoreWriteSchema);
+    const started = write.batch!.events[0]!;
+    if (started.payload.case !== "turnStarted") throw new Error("case");
+    // Assert: the durable copy is the submitted origin, with no remapping.
+    expect(started.payload.value.promptOrigin).toBe(PromptOrigin.CACHE_KEEP_ALIVE);
+    expect(started.payload.value.turnId).toBe("ka-1");
+    // Release the held boundary so the fixture can tear the session down.
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { accepted: 2n, lastSeq: 2n }));
+    expect((await daemon.next(AckSchema)).requestId).toBe("ka-1");
+  });
+
+  it("accepts a keep-alive prompt into the SDK like any other turn", async () => {
+    // Arrange
+    const { daemon, query } = await rig();
+    // Act
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, {
+      requestId: "ka-2",
+      text: "respond with only '.'",
+      promptOrigin: PromptOrigin.CACHE_KEEP_ALIVE,
+    }));
+    const ack = await daemon.next(AckSchema);
+    await until(() => query.prompts.length === 1);
+    // Assert: no special-casing — the ping reaches the vendor as a real prompt.
+    expect(ack.requestId).toBe("ka-2");
+    expect(query.prompts[0]!.message.content).toEqual([
+      { type: "text", text: "respond with only '.'" },
+    ]);
+  });
+});
