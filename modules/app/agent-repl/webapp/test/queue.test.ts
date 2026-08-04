@@ -5,6 +5,7 @@
 import { describe, expect, it } from "vitest";
 import {
   LEASE_FORCE_TITLE,
+  KEEP_ALIVE_HELD_REASON,
   LEASE_HELD_REASON,
   QueuedCard,
   queuedCardKey,
@@ -253,5 +254,103 @@ describe("QueuedCard — drain-lease dispatch", () => {
   it("keys a lease bubble by its entry id, exactly as a queued card is keyed", () => {
     // Arrange — the tail queue reconciles both kinds through one key space.
     expect(queuedCardKey(leased())).toBe("queued:q1");
+  });
+});
+
+/** A held prompt parked behind an in-flight cache keep-alive turn. */
+function keepAliveHeld(over: Partial<QueuedItem> = {}): QueuedItem {
+  return queued({ keepAliveHold: { turnId: "turn-9" }, ...over });
+}
+
+describe("QueuedCard — keep-alive dispatch", () => {
+  it("renders the keep-alive bubble for an entry a keep-alive turn holds", () => {
+    // Arrange / Act / Assert
+    expect(QueuedCard(keepAliveHeld())).toContain("keep-alive-card");
+  });
+
+  it("renders the classifier bubble for an entry with no keep-alive hold", () => {
+    // Arrange / Act / Assert
+    expect(QueuedCard(queued())).not.toContain("keep-alive-card");
+  });
+
+  it("is modeled on the lease bubble, not the classifier one", () => {
+    // Arrange — both are "held by something that is not the turn above you";
+    // the classifier card would claim a verdict nothing produced.
+    const html = QueuedCard(keepAliveHeld());
+    // Act / Assert
+    expect(html).toContain("queued-badge keep-alive");
+  });
+
+  it("says it is waiting on a keep-alive response", () => {
+    // Arrange / Act / Assert
+    expect(QueuedCard(keepAliveHeld())).toContain("waiting on a keep-alive response");
+  });
+
+  it("explains that the prompt is delivered when the ping's turn ends", () => {
+    // Arrange / Act / Assert
+    expect(QueuedCard(keepAliveHeld())).toContain(KEEP_ALIVE_HELD_REASON);
+  });
+
+  it("offers NO force control, because no ordering exists in which forcing works", () => {
+    // Arrange — the keep-alive must complete before the daemon can rewind and
+    // submit this entry, so a Deliver-now button would promise the impossible.
+    const html = QueuedCard(keepAliveHeld());
+    // Act / Assert
+    expect(html).not.toContain("data-queue-run-now");
+  });
+
+  it("offers no accept control, since there is no verdict to confirm", () => {
+    // Arrange / Act / Assert
+    expect(QueuedCard(keepAliveHeld())).not.toContain("data-queue-accept");
+  });
+
+  it("keeps cancel available, which is the entry's one user-driven exit", () => {
+    // Arrange / Act / Assert
+    expect(QueuedCard(keepAliveHeld())).toContain('data-queue-cancel="q1"');
+  });
+
+  it("never shows a classifier verdict on a keep-alive-held entry", () => {
+    // Arrange — the classifier NEVER runs on such an entry by contract.
+    const html = QueuedCard(keepAliveHeld({ classification: "hold" }));
+    // Act / Assert
+    expect(html).not.toContain("will run after this turn");
+  });
+
+  it("never shows the classifying badge on a keep-alive-held pending entry", () => {
+    // Arrange / Act
+    const html = QueuedCard(keepAliveHeld({ classification: "pending" }));
+    // Assert
+    expect(html).not.toContain("classifying");
+  });
+
+  it("never shows a rationale line on a keep-alive-held entry", () => {
+    // Arrange / Act
+    const html = QueuedCard(keepAliveHeld({ rationale: "independent work" }));
+    // Assert
+    expect(html).not.toContain("independent work");
+  });
+
+  it("joins the bubble to the turn whose completion releases it", () => {
+    // Arrange / Act / Assert
+    expect(QueuedCard(keepAliveHeld())).toContain('data-keep-alive-turn-id="turn-9"');
+  });
+
+  it("renders the user's prompt text", () => {
+    // Arrange / Act / Assert
+    expect(QueuedCard(keepAliveHeld({ text: "rerun the suite" }))).toContain("rerun the suite");
+  });
+
+  it("escapes markup in the prompt text", () => {
+    // Arrange / Act / Assert
+    expect(QueuedCard(keepAliveHeld({ text: "<script>x</script>" }))).not.toContain("<script>");
+  });
+
+  it("lets the drain lease outrank the keep-alive hold when both are set", () => {
+    // Arrange — the two cannot co-occur in practice (a keep-alive IS a turn,
+    // and the drain lease stops turns starting), but the dispatch must still
+    // be deterministic rather than depending on property order.
+    const html = QueuedCard(keepAliveHeld({ shutdownHold: { scheduleId: "sched-1" } }));
+    // Act / Assert
+    expect(html).toContain("lease-card");
   });
 });
