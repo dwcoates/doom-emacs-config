@@ -34,6 +34,9 @@ package sessioncontroller
 import (
 	"context"
 	"fmt"
+
+	"claude-repld/internal/errclass"
+	"claude-repld/internal/ssm"
 )
 
 // noteShimPID records the pid a session's shim announced. Zero is recorded as
@@ -86,28 +89,86 @@ func (m *Manager) refreshStaleShim(workspace, sessionID, reported string) bool {
 		return false
 	}
 	m.mu.Lock()
-	already := m.buildBounced[sessionID]
-	if !already {
-		m.buildBounced[sessionID] = true
+	bounced := m.buildBounced[sessionID]
+	bouncing := m.buildBouncing[sessionID]
+	if !bounced && !bouncing {
+		m.buildBouncing[sessionID] = true
 	}
 	m.mu.Unlock()
-	if already {
+	switch {
+	case bounced:
 		m.logf("session-controller: session %s (ws %q) STILL reports shim build %s against current %s after a refresh; NOT bouncing again — the bundle or the stamp is wrong, and a second bounce would loop",
 			sessionID, workspace, reported, want)
 		return false
+	case bouncing:
+		m.logf("session-controller: session %s (ws %q) reports shim build %s against current %s while a refresh is already IN FLIGHT; NOT starting a second bounce",
+			sessionID, workspace, reported, want)
+		return false
 	}
+	generationID := m.currentControllerGeneration(workspace, sessionID)
 	m.logf("session-controller: STALE SHIM session=%s ws=%q build=%s current=%s — this shim survived a deploy and is running superseded code; bouncing it onto the current bundle",
 		sessionID, workspace, reported, want)
 	go func() {
-		if err := m.RestartSession(m.rootCtx, workspace); err != nil {
-			m.logf("session-controller: session %s (ws %q) stale-shim refresh FAILED; the workspace keeps running the superseded bundle: %v",
-				sessionID, workspace, err)
+		// THE LATCH FOLLOWS THE OUTCOME, and that order is the whole point.
+		//
+		// It used to be set BEFORE the restart, on a goroutine whose error was
+		// logged and dropped. A stop→respawn that failed therefore latched the
+		// session as "already bounced" and returned to the ordinary path: the
+		// second spawn never happened, no state edge said so, and every later
+		// hello was answered with the "not bouncing again" line. The failure was
+		// invisible to everything except a log nobody reads during a hang.
+		//
+		// Now the at-most-once latch records a refresh that ACTUALLY happened.
+		// A failed one clears the in-flight marker without latching — so a later
+		// hello may try again — and reports the failure as a real state edge.
+		err := m.RestartSession(m.rootCtx, workspace)
+		m.mu.Lock()
+		delete(m.buildBouncing, sessionID)
+		if err == nil {
+			m.buildBounced[sessionID] = true
+		}
+		m.mu.Unlock()
+		if err != nil {
+			m.resolveStaleRefreshFailed(workspace, sessionID, generationID, reported, want, err)
 			return
 		}
 		m.logf("session-controller: session %s (ws %q) refreshed onto shim build %s", sessionID, workspace, want)
 	}()
 	return true
 }
+
+// resolveStaleRefreshFailed is the close edge a dropped refresh error never
+// had.
+//
+// A refresh that could not complete leaves the workspace running superseded
+// code with no shim this daemon can account for — the stop may have landed and
+// the respawn may not have — and that is EVIDENCE THAT SOMETHING BROKE, not a
+// state to keep quiet about. It is reported exactly the way a failed bring-up
+// is (resolveStartFailed): a failure card naming the error, and the
+// connectivity axis closed to `unavailable`, so the workspace goes blue with a
+// card instead of sitting on a color that claims a live session.
+//
+// The generation is the one that was live when the stale build was observed,
+// falling back to whatever controller owns the workspace now; noteConnectivity
+// reports an incomplete identity loudly rather than writing a nameless edge.
+func (m *Manager) resolveStaleRefreshFailed(workspace, sessionID, generationID, reported, want string, cause error) {
+	m.mu.Lock()
+	d := m.byWS[workspace]
+	m.mu.Unlock()
+	if generationID == "" && d != nil && d.sessionID == sessionID {
+		generationID = d.generationID
+	}
+	m.logf("session-controller: STALE SHIM REFRESH FAILED ws=%q session=%s generation=%s build=%s current=%s connectivity=unavailable branch=stale_shim_refresh_failed cause=%v — the workspace keeps running the superseded bundle",
+		workspace, sessionID, generationID, reported, want, cause)
+	if d != nil && d.consumer != nil {
+		d.consumer.pushFailure(d.consumer.startFailedUUID(), errclass.StartFailed(cause.Error()))
+	}
+	m.noteConnectivity(workspace, sessionID, generationID, ssm.SessionConnectivityUnavailable, staleShimRefreshFailedCause)
+}
+
+// staleShimRefreshFailedCause names the closing edge above in the cause
+// vocabulary the connectivity axis records.
+const staleShimRefreshFailedCause = "stale_shim_refresh_failed"
 
 // noteUnknownBuild logs an unresolvable comparison ONCE per session. It reuses
 // the bounce latch deliberately: both are "this session's build question has

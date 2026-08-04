@@ -588,6 +588,16 @@ func (f *fakeApplier) wiringsApplied() []wiringCall {
 	return out
 }
 
+// connectivityEdgesApplied returns the recorded connectivity edges, taken
+// under the lock so a bounce goroutine cannot race the read.
+func (f *fakeApplier) connectivityEdgesApplied() []connectivityCall {
+	f.reconcMutex.Lock()
+	defer f.reconcMutex.Unlock()
+	out := make([]connectivityCall, len(f.connectivityEdges))
+	copy(out, f.connectivityEdges)
+	return out
+}
+
 // permissionsApplied returns the recorded permission-row edges, taken under the
 // lock so a concurrent handler goroutine cannot race the read.
 func (f *fakeApplier) permissionsApplied() []permissionCall {
