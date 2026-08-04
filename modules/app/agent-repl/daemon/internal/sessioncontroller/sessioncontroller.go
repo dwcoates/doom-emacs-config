@@ -336,7 +336,7 @@ type Manager struct {
 	// (shutdownlease.go). Written and read only under mu; the zero value is
 	// usable, so nothing has to construct it.
 	restoreTombstones restoreTombstones
-	lastCSID map[string]string // session id -> last-persisted claude session uuid
+	lastCSID          map[string]string // session id -> last-persisted claude session uuid
 	// shimPID is the pid each session's shim announced on its ShimHello. It is
 	// the ONLY way to stop a shim this daemon did not spawn, and it is kept in
 	// memory rather than persisted deliberately: it is trustworthy exactly
