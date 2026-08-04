@@ -41,6 +41,15 @@ const (
 	// and each of those would otherwise be a string comparison against a
 	// free-form origin, which is a naming convention rather than a check.
 	submitterKeepAlive
+	// submitterRevival is a compact-first revival's own `/compact`, and it is
+	// the ONE thing the revival gate admits on a hibernated session.
+	//
+	// That admission is what lets the durable record STAY hibernated while the
+	// compaction runs, which is in turn what keeps the user's prompts refused
+	// by the very same gate that refused them before the revival began. The
+	// alternative — clearing the record first and inventing a second
+	// "compacting, still gated" state — would be two gates that could disagree.
+	submitterRevival
 )
 
 func (s submitter) String() string {
@@ -49,6 +58,8 @@ func (s submitter) String() string {
 		return "merge-lease-holder"
 	case submitterKeepAlive:
 		return "keep-alive"
+	case submitterRevival:
+		return "revival"
 	default:
 		return "user"
 	}

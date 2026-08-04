@@ -81,6 +81,19 @@ type SessionRestarter interface {
 	RestartSession(ctx context.Context, workspace string) error
 }
 
+// SessionHibernator is the user-facing hibernation surface: the forced sleep
+// and the two revival modes. Satisfied by *sessioncontroller.Manager.
+//
+// It is separate from SessionRestarter because a restart and a hibernation are
+// opposite intents about the same shim — one replaces the process and keeps the
+// session usable, the other stops it and gates the session behind a choice —
+// and a single interface carrying both would let a caller reach for the wrong
+// one by autocomplete.
+type SessionHibernator interface {
+	HibernateWorkspace(workspace string) error
+	ReviveSession(ctx context.Context, workspace string, mode sessioncontroller.ReviveMode) error
+}
+
 // SessionHealthRouter proves a named session's existing daemon-to-shim path.
 // It is intentionally separate from PromptRouter: a health probe must never
 // lazily create or revive a shim just because a frontend asked whether one is
@@ -316,6 +329,9 @@ type commandHandler struct {
 	// restarts backs the restartSession command. Nil is a loud unsupported
 	// capability, never a success-shaped no-op.
 	restarts SessionRestarter
+	// hibernations backs hibernateWorkspace and reviveSession. Nil is a loud
+	// unsupported capability, never a success-shaped no-op.
+	hibernations SessionHibernator
 	// workspaceCreation owns durable create jobs and the file-inbox actions.
 	// Nil is a loud unsupported capability, never a success-shaped no-op.
 	workspaceCreation WorkspaceCreationBridge
@@ -394,6 +410,11 @@ type CommandHandlerConfig struct {
 	// Restarts backs the restartSession command. Nil is a loud unsupported
 	// capability.
 	Restarts SessionRestarter
+	// Hibernations backs the hibernateWorkspace and reviveSession commands.
+	// Nil is a loud unsupported capability, never a success-shaped no-op: a
+	// caller told its workspace was hibernated when nothing stopped would
+	// render a revival gate over a session that is still running.
+	Hibernations SessionHibernator
 	// EstablishTimeout bounds one createSession establishment round. Zero takes
 	// createEstablishTimeout, which is the only value production uses; it is
 	// injectable so a harness can prove the DEADLINE nack without waiting out a
@@ -501,6 +522,7 @@ func newCommandHandler(prompts PromptRouter, merges MergeRunner, lifecycle Works
 		health:            config.Health.Router, daemonHealth: config.Health.Daemon,
 		turns: config.Interrupt.Turns, liveTasks: config.Interrupt.LiveTasks, logf: logf,
 		restarts:         config.Restarts,
+		hibernations:     config.Hibernations,
 		establishTimeout: config.EstablishTimeout,
 		resumes:          config.Resumes,
 		schedules:        config.Schedules,
@@ -1000,6 +1022,54 @@ func (h *commandHandler) RestartSession(ctx context.Context, workspace, requestI
 		return fmt.Errorf("server: restarting the session for workspace %q: %w", workspace, err)
 	}
 	h.logf("frontend cmd: restart-session ws=%s request_id=%s COMPLETE", workspace, requestID)
+	return nil
+}
+
+// HibernateWorkspace stops the workspace's shim and marks its session
+// hibernated, so the next prompt meets the revival gate rather than silently
+// paying a bring-up.
+//
+// Synchronous, and for RestartSession's reason: the ack is the user's only
+// report. A hibernate that was refused — because a turn is live, or the merge
+// lease is held — must NACK rather than return ok and leave the user believing
+// they reclaimed 500MB that is still in use.
+func (h *commandHandler) HibernateWorkspace(_ context.Context, workspace, requestID string, _ *frontendv1.HibernateWorkspaceCmd) error {
+	h.logf("frontend cmd: hibernate-workspace ws=%s request_id=%s", workspace, requestID)
+	if h.hibernations == nil {
+		return fmt.Errorf("server: workspace hibernation not supported by this daemon")
+	}
+	if err := h.hibernations.HibernateWorkspace(workspace); err != nil {
+		return fmt.Errorf("server: hibernating workspace %q: %w", workspace, err)
+	}
+	h.logf("frontend cmd: hibernate-workspace ws=%s request_id=%s COMPLETE", workspace, requestID)
+	return nil
+}
+
+// ReviveSession brings a hibernated session back under the user's chosen mode.
+//
+// THE MODE IS READ FROM THE ONEOF AND AN UNSET ONE IS A NACK. The wire makes
+// "no decision" unrepresentable precisely so the daemon never has to invent a
+// default, and inventing one here would spend the user's context budget on a
+// choice they were being asked to make.
+func (h *commandHandler) ReviveSession(ctx context.Context, workspace, requestID string, cmd *frontendv1.ReviveSessionCmd) error {
+	var mode sessioncontroller.ReviveMode
+	switch cmd.GetMode().(type) {
+	case *frontendv1.ReviveSessionCmd_CompactFirst:
+		mode = sessioncontroller.ReviveModeCompactFirst
+	case *frontendv1.ReviveSessionCmd_Direct:
+		mode = sessioncontroller.ReviveModeDirect
+	}
+	h.logf("frontend cmd: revive-session ws=%s request_id=%s mode=%s", workspace, requestID, mode)
+	if h.hibernations == nil {
+		return fmt.Errorf("server: session revival not supported by this daemon")
+	}
+	if mode == sessioncontroller.ReviveModeUnset {
+		return fmt.Errorf("server: reviving workspace %q: the command carries no revival mode; the choice between compacting first and resuming as-is is the user's and the daemon has no default for it", workspace)
+	}
+	if err := h.hibernations.ReviveSession(ctx, workspace, mode); err != nil {
+		return fmt.Errorf("server: reviving the session for workspace %q: %w", workspace, err)
+	}
+	h.logf("frontend cmd: revive-session ws=%s request_id=%s mode=%s COMPLETE", workspace, requestID, mode)
 	return nil
 }
 

@@ -737,6 +737,7 @@ func main() {
 		Turns:        controller,
 		Health:       controller,
 		Restarts:     controller,
+		Hibernations: controller,
 		DaemonHealth: ready,
 		Lifecycle:    opener,
 		// The registry's own record of a deliberate deletion, exposed so a merge

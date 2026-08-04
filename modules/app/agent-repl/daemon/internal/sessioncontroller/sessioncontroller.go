@@ -905,7 +905,7 @@ func (m *Manager) submitPromptAs(ctx context.Context, workspace, requestID, text
 	// THE REVIVAL GATE, ahead of ensure() on purpose: ensure() brings a stopped
 	// shim back up, so asking after it would have already paid the bring-up and
 	// silently un-slept the session the gate exists to hold (hibernation.go).
-	if err := m.guardHibernation(workspace, requestID, origin); err != nil {
+	if err := m.guardHibernation(workspace, requestID, origin, who); err != nil {
 		return err
 	}
 	d, err := m.ensure(ctx, workspace)

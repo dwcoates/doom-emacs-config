@@ -122,7 +122,7 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 	// jump, a merge's own submit, and anything added later. submitPromptAs asks
 	// first so a refused prompt never pays a bring-up; this is the one a new
 	// caller cannot forget to ask for (hibernation.go).
-	if err := m.guardHibernation(d.workspace, requestID, origin); err != nil {
+	if err := m.guardHibernation(d.workspace, requestID, origin, who); err != nil {
 		return err
 	}
 	cmd := classifyPrompt(text)
