@@ -578,6 +578,13 @@ message HibernationDetail {
     HibernationIdleCutoff idle_cutoff = 10;
     // The user forced it via HibernateWorkspaceCmd.
     HibernationForced forced = 11;
+    // The keep-alive loop discovered, at a time-since check against the
+    // durably recorded last turn end, that the expected cache TTL had
+    // already elapsed before a ping could fire (laptop sleep, daemon
+    // downtime). Pinging a cold cache would pay full re-ingest cost for
+    // nothing, so the discovery IS the hibernate transition — reported
+    // loudly to the user rather than silently absorbed.
+    HibernationCacheExpired cache_expired = 12;
   }
 }
 
@@ -590,6 +597,14 @@ message HibernationIdleCutoff {
 
 // User-forced hibernation. Empty: the cause IS the arm.
 message HibernationForced {}
+
+// Hibernation because the cache went cold before a ping could fire.
+message HibernationCacheExpired {
+  // How long the session had actually been idle when the check ran, millis.
+  int64 elapsed_ms = 1;
+  // The expected cache TTL the elapsed time exceeded, millis.
+  int64 ttl_ms = 2;
+}
 
 message ModelOption {
   string value = 1;
