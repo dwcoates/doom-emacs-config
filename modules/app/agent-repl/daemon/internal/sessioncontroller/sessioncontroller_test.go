@@ -14,6 +14,7 @@ import (
 	corev1 "agentrepl/proto/agentshim/core/v1"
 
 	"claude-repld/internal/errclass"
+	"claude-repld/internal/shim"
 	"claude-repld/internal/shimclient"
 )
 
@@ -54,7 +55,15 @@ type fakeSpawner struct {
 	stopped []string
 	// stopPIDs records the announced pid each StopShim was handed (0 = none).
 	stopPIDs []int32
-	err      error
+	// stopBy records the attribution each StopShim was handed, which is how a
+	// test proves WHICH teardown a stop came from rather than merely that one
+	// happened.
+	stopBy []shim.Stop
+	// stops announces every recorded stop, so a test rendezvous with a teardown
+	// running on its own goroutine instead of polling for it. Buffered by its
+	// creator; a nil channel (the default) announces nothing.
+	stops chan shim.Stop
+	err   error
 	// stopErr, when set, makes every stop fail.
 	stopErr error
 	// resume is the vendor conversation pointer each session would be spawned
@@ -82,12 +91,31 @@ func (s *fakeSpawner) EnsureShim(_ context.Context, sessionID string) (SpawnResu
 	return res, s.err
 }
 
-func (s *fakeSpawner) StopShim(sessionID string, hintPID int32) error {
+func (s *fakeSpawner) StopShim(sessionID string, hintPID int32, by shim.Stop) error {
 	s.mu.Lock()
 	s.stopped = append(s.stopped, sessionID)
 	s.stopPIDs = append(s.stopPIDs, hintPID)
+	s.stopBy = append(s.stopBy, by)
+	announce := s.stops
 	s.mu.Unlock()
+	if announce != nil {
+		// Non-blocking: the buffer carries every stop a waiting test could want,
+		// and a production teardown must never be held up by a channel nobody is
+		// draining. The recorded slice above remains the complete history.
+		select {
+		case announce <- by:
+		default:
+		}
+	}
 	return s.stopErr
+}
+
+// stopAttributions returns the attribution every stop carried, taken under the
+// lock so a teardown goroutine cannot race the read.
+func (s *fakeSpawner) stopAttributions() []shim.Stop {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]shim.Stop(nil), s.stopBy...)
 }
 
 // stoppedSessions returns every session the spawner was asked to stop, taken
@@ -958,7 +986,7 @@ func TestHibernateSessionStopsTheMatchingSession(t *testing.T) {
 	}
 
 	// Act: stand down the session that IS live.
-	if err := m.HibernateSession("ws", "s1"); err != nil {
+	if err := m.HibernateSession("ws", "s1", StopCauseSessionDeleted()); err != nil {
 		t.Fatalf("HibernateSession: %v", err)
 	}
 
@@ -977,7 +1005,7 @@ func TestHibernateSessionStopsOnlyTheRequestedDifferentSession(t *testing.T) {
 	}
 
 	// Act: stand down a STALE record that shares the cwd (the orphan reap).
-	err := m.HibernateSession("ws", "s_orphan")
+	err := m.HibernateSession("ws", "s_orphan", StopCauseSessionDeleted())
 
 	// Assert: the stale process handle is reachable by id; the live shim is
 	// untouched even though both records share the workspace.
@@ -997,7 +1025,7 @@ func TestHibernateSessionKeepsTheSessionControllerLiveOnAMismatch(t *testing.T) 
 	}
 
 	// Act: a mismatched stand-down must not evict the byWS entry either.
-	_ = m.HibernateSession("ws", "s_orphan")
+	_ = m.HibernateSession("ws", "s_orphan", StopCauseSessionDeleted())
 
 	// Assert: ws still resolves to its live session controller.
 	d, err := m.existing("ws")
@@ -1016,7 +1044,7 @@ func TestHibernateSessionStopsAnEvictedSessionsProcess(t *testing.T) {
 	m, _ := newTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, spawner)
 
 	// Act.
-	err := m.HibernateSession("ws", "s1")
+	err := m.HibernateSession("ws", "s1", StopCauseSessionDeleted())
 
 	// Assert: session identity is sufficient; absence from byWS must not make
 	// the child process unreachable.
@@ -1089,7 +1117,7 @@ func TestHibernateStillStopsWhicheverSessionIsLive(t *testing.T) {
 	}
 
 	// Act
-	if err := m.Hibernate("ws"); err != nil {
+	if err := m.Hibernate("ws", StopCauseHibernateIdleSweep()); err != nil {
 		t.Fatalf("Hibernate: %v", err)
 	}
 

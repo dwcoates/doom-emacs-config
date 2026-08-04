@@ -219,9 +219,13 @@ type schedulerHarness struct {
 	mu       sync.Mutex
 	views    []*frontendv1.ShutdownScheduleView
 	stops    []bool
-	stopped  chan struct{}
-	stopOnce sync.Once
-	logLines []string
+	// stopCauses records the cause each executed shutdown was attributed to, so
+	// a test can prove a drain execution is distinguishable from an ordinary
+	// daemon shutdown at the record rather than only in prose.
+	stopCauses []sessioncontroller.StopCause
+	stopped    chan struct{}
+	stopOnce   sync.Once
+	logLines   []string
 }
 
 func newSchedulerHarness(t *testing.T) *schedulerHarness {
@@ -238,9 +242,10 @@ func newSchedulerHarness(t *testing.T) *schedulerHarness {
 			h.views = append(h.views, v)
 			h.mu.Unlock()
 		},
-		Shutdown: func(stopShims bool) {
+		Shutdown: func(stopShims bool, cause sessioncontroller.StopCause) {
 			h.mu.Lock()
 			h.stops = append(h.stops, stopShims)
+			h.stopCauses = append(h.stopCauses, cause)
 			h.mu.Unlock()
 			h.stopOnce.Do(func() { close(h.stopped) })
 		},
@@ -280,6 +285,13 @@ func (h *schedulerHarness) shutdowns() []bool {
 	return append([]bool(nil), h.stops...)
 }
 
+// shutdownCauses returns the cause each executed shutdown carried.
+func (h *schedulerHarness) shutdownCauses() []sessioncontroller.StopCause {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]sessioncontroller.StopCause(nil), h.stopCauses...)
+}
+
 func (h *schedulerHarness) log() string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -299,7 +311,7 @@ func TestNewShutdownSchedulerRequiresEachDependency(t *testing.T) {
 		return ShutdownSchedulerConfig{
 			Store: &fakeScheduleStore{}, Holds: &fakeHoldSource{}, Evidence: newFakeEvidence(),
 			LiveTasks: fakeTaskCounter{},
-			Broadcast: func(*frontendv1.ShutdownScheduleView) {}, Shutdown: func(bool) {},
+			Broadcast: func(*frontendv1.ShutdownScheduleView) {}, Shutdown: func(bool, sessioncontroller.StopCause) {},
 		}
 	}
 	tests := []struct {
@@ -353,7 +365,7 @@ func TestConstructionFailsWhenTheFleetRefusesTheBinding(t *testing.T) {
 	_, err := NewShutdownScheduler(ShutdownSchedulerConfig{
 		Store: &fakeScheduleStore{}, Holds: holds, Evidence: newFakeEvidence(),
 		LiveTasks: fakeTaskCounter{},
-		Broadcast: func(*frontendv1.ShutdownScheduleView) {}, Shutdown: func(bool) {},
+		Broadcast: func(*frontendv1.ShutdownScheduleView) {}, Shutdown: func(bool, sessioncontroller.StopCause) {},
 	})
 
 	// Assert.
@@ -712,6 +724,35 @@ func TestTheShutdownRunsWhenTheLastHoldClears(t *testing.T) {
 	<-h.stopped
 	if got := h.shutdowns(); len(got) != 1 {
 		t.Fatalf("shutdown ran %v, want exactly once", got)
+	}
+}
+
+// A DRAIN EXECUTION IS ITS OWN EVENT, not an ordinary shutdown: a deploy is
+// waiting on this one, and the shims it stops are attributed to the schedule
+// rather than to whoever happens to be stopping the daemon.
+func TestTheExecutedShutdownIsAttributedToTheDrainExecution(t *testing.T) {
+	// Arrange.
+	h := newSchedulerHarness(t)
+	h.holds.set(oneHold())
+	if _, err := h.s.Schedule(true, "cause"); err != nil {
+		t.Fatalf("Schedule: %v", err)
+	}
+
+	// Act.
+	h.holds.set()
+	h.s.NoteDrainActivity()
+
+	// Assert.
+	<-h.stopped
+	causes := h.shutdownCauses()
+	if len(causes) != 1 {
+		t.Fatalf("shutdown causes = %v, want exactly one", causes)
+	}
+	if causes[0] != sessioncontroller.StopCauseDrainExecution() {
+		t.Fatalf("shutdown cause = %v, want the drain execution", causes[0])
+	}
+	if causes[0] == sessioncontroller.StopCauseDaemonShutdown() {
+		t.Fatal("a scheduled bounce is indistinguishable from a plain daemon shutdown")
 	}
 }
 

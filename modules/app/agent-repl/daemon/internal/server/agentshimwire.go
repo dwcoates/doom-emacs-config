@@ -15,6 +15,7 @@ import (
 
 	"claude-repld/internal/frontend"
 	"claude-repld/internal/progress"
+	"claude-repld/internal/sessioncontroller"
 	"claude-repld/internal/ssm"
 	"claude-repld/internal/workspace/merge"
 )
@@ -96,7 +97,7 @@ type AgentShimConfig struct {
 	// (the default) PRESERVES the session shims so the next daemon reattaches
 	// to them. Nil makes the shutdown command a loud failing ack (the
 	// capability is unconfigured).
-	RequestShutdown func(stopShims bool)
+	RequestShutdown func(stopShims bool, cause sessioncontroller.StopCause)
 	// WorkspaceCreation owns durable workspace-create jobs and retained host
 	// actions. Required: it receives create/materialized/completion commands
 	// and supplies/publishes the host-only work that Emacs renders. It is kept
@@ -106,6 +107,10 @@ type AgentShimConfig struct {
 	// ClientLogs persists canonical browser records to the webapp workspace
 	// target. A missing writer makes that command fail loudly.
 	ClientLogs ClientLogWriter
+	// LogTargets releases a closed workspace's log descriptors, binding their
+	// lifetime to the workspace's rather than to the daemon's. Nil retains
+	// them, which only a harness with no target manager should do.
+	LogTargets WorkspaceLogTargetEvictor
 	// MergeLease is the shim exclusivity claim merge.Coordinator holds across
 	// every merge it drives. Required: without it a cherry-pick would run into
 	// a session the user is still prompting, so an unbound lease is a broken
@@ -499,6 +504,7 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 			Interrupt:        InterruptGateConfig{Turns: cfg.Turns, LiveTasks: cfg.Progress},
 			EstablishTimeout: cfg.EstablishTimeout,
 			Resumes:          cfg.Resumes,
+			LogTargets:       cfg.LogTargets,
 		},
 	)
 	if err != nil {
