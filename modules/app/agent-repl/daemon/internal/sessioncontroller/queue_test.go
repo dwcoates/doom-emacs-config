@@ -1278,7 +1278,7 @@ func TestPingTurnEndTransfersItsClaimToTheRewind(t *testing.T) {
 	m.mu.Unlock()
 
 	// Act.
-	m.onTurnBoundary(d, false)
+	m.onTurnBoundary(d, false, m.now())
 	<-entered
 	defer close(release)
 
@@ -1307,7 +1307,7 @@ func TestPingTurnEndWithNothingHeldTakesNoRewindClaim(t *testing.T) {
 	m.mu.Unlock()
 
 	// Act.
-	m.onTurnBoundary(d, false)
+	m.onTurnBoundary(d, false, m.now())
 
 	// Assert.
 	m.mu.Lock()
