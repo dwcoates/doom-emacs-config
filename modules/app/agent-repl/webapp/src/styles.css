@@ -1905,6 +1905,28 @@ pre {
    that is the classifier quoting itself, this is the app stating a rule. */
 .lease-reason { margin-top: 0.3rem; font-size: 0.8rem; color: var(--fg); }
 
+/* --- The keep-alive hold bubble (render.ts `KeepAliveHeldCard`) ----------
+   A prompt parked behind an in-flight cache keep-alive ping. It borrows the
+   lease card's SHAPE, since both are "held by something that is not the turn
+   above you and was never classified", but takes the hibernation teal rather
+   than the merge amber: a keep-alive is the machinery that KEEPS a session
+   out of hibernation, so it belongs to that vocabulary, and it is the
+   textbook teal case — nothing is wired to this prompt yet, and nothing is
+   wrong. The amber is spent on coordinated daemon work (merges, bounces),
+   which this is not. */
+.queued-card.keep-alive-card {
+  border: 1px solid var(--hibernated);
+  background: color-mix(in srgb, var(--hibernated) 10%, var(--card));
+  opacity: 1;
+}
+/* The badge takes the same teal so pill and frame agree. Never the
+   classifier's grey: no classification happened, and none will. */
+.queued-badge.keep-alive {
+  color: var(--hibernated);
+  border-color: var(--hibernated);
+  font-weight: 700;
+}
+
 #composer {
   display: flex;
   gap: 0.5rem;
@@ -2867,6 +2889,7 @@ pre {
 }
 /* An idle lease pays no layout at all. */
 #drain-banner:empty { display: none; }
+
 .drain-mark {
   flex: 0 0 auto;
   color: var(--merge-border);
