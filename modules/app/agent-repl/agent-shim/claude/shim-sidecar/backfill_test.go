@@ -62,22 +62,30 @@ func startStore(t *testing.T) string {
 func writeHistory(t *testing.T, n int) (string, string) {
 	t.Helper()
 	root := t.TempDir()
+	return root, writeSessionHistory(t, root, backfillSession, n)
+}
+
+// writeSessionHistory lays down one session transcript of n assistant lines
+// under an EXISTING config root, so several sessions can share a root the way
+// they do on disk.
+func writeSessionHistory(t *testing.T, root, session string, n int) string {
+	t.Helper()
 	dir := filepath.Join(root, "projects", "-w")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	path := filepath.Join(dir, backfillSession+".jsonl")
+	path := filepath.Join(dir, session+".jsonl")
 	f, err := os.Create(path)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	defer f.Close()
 	for i := 0; i < n; i++ {
-		if _, err := f.Write(historyLine(t, i)); err != nil {
+		if _, err := f.Write(historyLineFor(t, session, i)); err != nil {
 			t.Fatalf("write: %v", err)
 		}
 	}
-	return root, path
+	return path
 }
 
 // appendHistory appends n further assistant lines to an existing transcript,
@@ -91,19 +99,22 @@ func appendHistory(t *testing.T, path string, from, n int) {
 	}
 	defer f.Close()
 	for i := from; i < from+n; i++ {
-		if _, err := f.Write(historyLine(t, i)); err != nil {
+		if _, err := f.Write(historyLineFor(t, backfillSession, i)); err != nil {
 			t.Fatalf("append: %v", err)
 		}
 	}
 }
 
-// historyLine renders one newline-terminated assistant transcript line.
-func historyLine(t *testing.T, i int) []byte {
+// historyLineFor renders one newline-terminated assistant transcript line. The
+// record uuid is deliberately independent of the session: a rewind's truncated
+// copy carries the SAME record uuids under a new sessionId, which is exactly
+// what makes the per-session scope of store dedup observable.
+func historyLineFor(t *testing.T, session string, i int) []byte {
 	t.Helper()
 	raw, err := json.Marshal(map[string]any{
 		"type":      "assistant",
 		"uuid":      fmt.Sprintf("hist-uuid-%d", i),
-		"sessionId": backfillSession,
+		"sessionId": session,
 		"timestamp": "2026-07-25T12:00:00.000Z",
 		"message": map[string]any{
 			"id":      fmt.Sprintf("msg_%d", i),
@@ -140,6 +151,101 @@ func pollTranscript(t *testing.T, sock, root string) (*sidecar, tail.PollResult,
 		t.Fatalf("poll: %v", err)
 	}
 	return s, res, path
+}
+
+// rewoundSession is the uuid a rewind's truncated copy is written under.
+const rewoundSession = "99999999-8888-7777-6666-555555555555"
+
+// pollOnePath brings a sidecar's store link up over root and polls exactly the
+// named watcher, leaving every other discovered target alone. It is the
+// multi-transcript sibling of pollTranscript.
+func pollOnePath(t *testing.T, sock, root, path string) (*sidecar, tail.PollResult) {
+	t.Helper()
+	s := newSidecar(sock, []string{root}, t.TempDir(), quietLog)
+	t.Cleanup(func() { s.store.Close() })
+	if err := s.establish(); err != nil {
+		t.Fatalf("establish: %v", err)
+	}
+	w, ok := s.watchers[path]
+	if !ok {
+		t.Fatalf("no watcher for %s (watchers: %d)", path, len(s.watchers))
+	}
+	res, err := w.tailer.Poll()
+	if err != nil {
+		t.Fatalf("poll: %v", err)
+	}
+	return s, res
+}
+
+// backfilledCopy is the arrangement every rewind test shares: an original
+// session already fully persisted with its cursor committed, plus the truncated
+// COPY a rewind produces beside it — the first `retain` records under a new
+// uuid filename and sessionId — polled and written to the store. It returns the
+// copy's ack and the copy's path.
+func backfilledCopy(t *testing.T, retain int) (*corev1.StoreWriteAck, string) {
+	t.Helper()
+	sock := startStore(t)
+	root, _ := writeHistory(t, 5)
+	original, originalRes, _ := pollTranscript(t, sock, root)
+	if _, err := original.store.Write(handler.Producer, &corev1.EventBatch{Events: originalRes.Events, CursorAdvance: originalRes.Next}); err != nil {
+		t.Fatalf("original write: %v", err)
+	}
+
+	copyPath := writeSessionHistory(t, root, rewoundSession, retain)
+	rewound, rewoundRes := pollOnePath(t, sock, root, copyPath)
+	ack, err := rewound.store.Write(handler.Producer, &corev1.EventBatch{Events: rewoundRes.Events, CursorAdvance: rewoundRes.Next})
+	if err != nil {
+		t.Fatalf("rewound copy write: %v", err)
+	}
+	return ack, copyPath
+}
+
+// The copy is a brand-new file to discovery, so it backfills from 0 and its
+// records land in the new session's OWN seq space — the re-ingest that renders
+// the post-rewind conversation.
+func TestRewoundCopyBackfillsIntoItsOwnSeqSpace(t *testing.T) {
+	// Arrange + Act
+	ack, _ := backfilledCopy(t, 3)
+
+	// Assert
+	if ack.GetLastSeq() != 3 {
+		t.Fatalf("last_seq = %d; want the 3 retained records numbered 1..3 in a fresh seq space", ack.GetLastSeq())
+	}
+}
+
+// Store dedup is scoped to (session_id, dedup_key), so the copy's records —
+// which carry the SAME vendor uuids as the originals — must all be accepted.
+// That cross-session duplication is the design, not a leak: the two seq spaces
+// are two separate conversations as far as the store is concerned.
+func TestRewoundCopyIsNotDedupedAgainstTheRetiredSession(t *testing.T) {
+	// Arrange + Act
+	ack, _ := backfilledCopy(t, 3)
+
+	// Assert
+	if ack.GetAccepted() != 3 || ack.GetDeduped() != 0 {
+		t.Fatalf("copy accepted=%d deduped=%d; want 3 accepted / 0 deduped (dedup is per-session)", ack.GetAccepted(), ack.GetDeduped())
+	}
+}
+
+// The retired transcript keeps its committed cursor across the rewind, so the
+// copy's arrival must not make the sidecar re-read the original.
+func TestRewindLeavesTheRetiredTranscriptCursorIntact(t *testing.T) {
+	// Arrange
+	sock := startStore(t)
+	root, originalPath := writeHistory(t, 5)
+	original, originalRes, _ := pollTranscript(t, sock, root)
+	if _, err := original.store.Write(handler.Producer, &corev1.EventBatch{Events: originalRes.Events, CursorAdvance: originalRes.Next}); err != nil {
+		t.Fatalf("original write: %v", err)
+	}
+	writeSessionHistory(t, root, rewoundSession, 3)
+
+	// Act — a fresh sidecar sees both files and polls the RETIRED one.
+	_, res := pollOnePath(t, sock, root, originalPath)
+
+	// Assert
+	if res.Changed {
+		t.Fatalf("retired transcript re-read %d record(s); want nothing after the rewind", res.Records)
+	}
 }
 
 func TestNewlyDiscoveredTranscriptIsTailedFromOffsetZero(t *testing.T) {
