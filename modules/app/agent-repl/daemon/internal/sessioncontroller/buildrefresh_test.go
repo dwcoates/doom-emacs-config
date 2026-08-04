@@ -3,12 +3,14 @@ package sessioncontroller
 import (
 	"context"
 	"errors"
+	"runtime"
 	"testing"
 	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 
 	"claude-repld/internal/shim"
+	"claude-repld/internal/ssm"
 )
 
 // ---------------------------------------------------------------------------
@@ -125,6 +127,99 @@ func TestAStaleShimIsBouncedOnlyOnce(t *testing.T) {
 	// Assert.
 	if second {
 		t.Fatal("a second bounce was started; that is the loop the latch exists to prevent")
+	}
+}
+
+// A SUCCESSFUL bounce is what the at-most-once latch is FOR: it records a
+// refresh that actually happened, exactly once.
+func TestASuccessfulStaleRefreshLatchesTheSessionOnce(t *testing.T) {
+	// Arrange.
+	m, spawner, applier := newRefreshRig(t, "sha-2")
+	if err := m.Ensure("ws"); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	waitForWirings(applier, 1)
+
+	// Act.
+	if bounced := m.refreshStaleShim("ws", "s1", "sha-1"); !bounced {
+		t.Fatal("a shim running a superseded bundle was not bounced")
+	}
+	waitForBuildLatch(m, "s1", true)
+
+	// Assert — latched once, and a later mismatch is loud rather than a second
+	// bounce.
+	if second := m.refreshStaleShim("ws", "s1", "sha-1"); second {
+		t.Fatal("a second bounce was started against an already-refreshed session")
+	}
+	if stops := len(spawner.stoppedSessions()); stops != 1 {
+		t.Fatalf("stops = %d, want exactly 1 for a session refreshed once", stops)
+	}
+}
+
+// A FAILED bounce must NOT latch, and must not be a log line either. The latch
+// used to be set before the restart was known to have worked, so a stop→respawn
+// that failed left the session marked "already refreshed": no second spawn, no
+// state edge, forever.
+func TestAFailedStaleRefreshLeavesTheLatchUnsetAndSurfacesTheFault(t *testing.T) {
+	// Arrange — a live session controller whose shim cannot be stopped, so the
+	// restart fails at its teardown.
+	m, spawner, applier := newRefreshRig(t, "sha-2")
+	if err := m.Ensure("ws"); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	waitForWirings(applier, 1)
+	spawner.mu.Lock()
+	spawner.stopErr = errors.New("operation not permitted")
+	spawner.mu.Unlock()
+
+	// Act.
+	if bounced := m.refreshStaleShim("ws", "s1", "sha-1"); !bounced {
+		t.Fatal("a shim running a superseded bundle was not bounced")
+	}
+	edge := waitForConnectivityCause(applier, staleShimRefreshFailedCause)
+
+	// Assert — the failure reached the connectivity axis as `unavailable`, and
+	// the session is NOT latched, so the refresh can be attempted again.
+	if edge.state != ssm.SessionConnectivityUnavailable {
+		t.Fatalf("connectivity edge state = %q, want %q", edge.state, ssm.SessionConnectivityUnavailable)
+	}
+	m.mu.Lock()
+	latched := m.buildBounced["s1"]
+	inFlight := m.buildBouncing["s1"]
+	m.mu.Unlock()
+	if latched {
+		t.Fatal("a FAILED refresh latched the session as already-bounced; the workspace would never be bounced again")
+	}
+	if inFlight {
+		t.Fatal("the in-flight marker survived a failed refresh")
+	}
+}
+
+// waitForBuildLatch blocks until sessionID's success latch reaches want. It is
+// a rendezvous with the bounce goroutine's own bookkeeping rather than a poll
+// of a side effect it happens to produce first.
+func waitForBuildLatch(m *Manager, sessionID string, want bool) {
+	for {
+		m.mu.Lock()
+		got := m.buildBounced[sessionID]
+		m.mu.Unlock()
+		if got == want {
+			return
+		}
+		runtime.Gosched()
+	}
+}
+
+// waitForConnectivityCause blocks until a connectivity edge with causeKind has
+// been applied, and returns it.
+func waitForConnectivityCause(applier *fakeApplier, causeKind string) connectivityCall {
+	for {
+		for _, e := range applier.connectivityEdgesApplied() {
+			if e.causeKind == causeKind {
+				return e
+			}
+		}
+		runtime.Gosched()
 	}
 }
 
