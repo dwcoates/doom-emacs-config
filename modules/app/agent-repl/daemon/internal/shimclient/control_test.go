@@ -81,11 +81,26 @@ func TestSubmitPromptAckSuccess(t *testing.T) {
 	waitConnected(t, connected)
 
 	// Act
-	err := c.SubmitPrompt(context.Background(), "hello", "human", "")
+	err := c.SubmitPrompt(context.Background(), "hello", "human", "", corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
 
 	// Assert
 	if err != nil {
 		t.Fatalf("SubmitPrompt: want nil, got %v", err)
+	}
+}
+
+func TestSubmitPromptRejectsInvalidOriginBeforeControlSend(t *testing.T) {
+	for _, origin := range []corev1.PromptOrigin{
+		corev1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED,
+		corev1.PromptOrigin(999),
+	} {
+		t.Run(origin.String(), func(t *testing.T) {
+			c := &Client{}
+			err := c.SubmitPrompt(context.Background(), "hello", "human", "", origin)
+			if err == nil || !strings.Contains(err.Error(), "prompt origin") {
+				t.Fatalf("SubmitPrompt origin=%v error = %v, want prompt-origin refusal", origin, err)
+			}
+		})
 	}
 }
 
@@ -157,7 +172,7 @@ func TestSubmitPromptNackIsLoudError(t *testing.T) {
 	waitConnected(t, connected)
 
 	// Act
-	err := c.SubmitPrompt(context.Background(), "hello", "human", "")
+	err := c.SubmitPrompt(context.Background(), "hello", "human", "", corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
 
 	// Assert
 	if !errors.Is(err, ErrNack) {
@@ -180,7 +195,7 @@ func TestControlAckTimeout(t *testing.T) {
 	waitConnected(t, connected)
 
 	// Act
-	err := c.SubmitPrompt(context.Background(), "hello", "human", "")
+	err := c.SubmitPrompt(context.Background(), "hello", "human", "", corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
 
 	// Assert
 	if !errors.Is(err, ErrAckTimeout) {
@@ -237,7 +252,7 @@ func TestSubmitPromptNotConnected(t *testing.T) {
 	c := New(h.config(t, "sess-1", "/nonexistent/agent-shim/session.sock"))
 
 	// Act: no Run goroutine, so there is no live connection.
-	err := c.SubmitPrompt(context.Background(), "hi", "human", "")
+	err := c.SubmitPrompt(context.Background(), "hi", "human", "", corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
 
 	// Assert
 	if !errors.Is(err, ErrNotConnected) {

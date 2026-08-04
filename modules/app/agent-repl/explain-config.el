@@ -538,7 +538,10 @@ inheriting the contract from the conversation's context."
         (cwd (agent-repl--explain-config-cwd)))
     (agent-repl--log nil "explain-config: send session=%s primed=%s len=%d (uds submitPrompt cwd=%s)"
                      session-id agent-repl--explain-config-primed-p (length text) cwd)
-    (let ((req (agent-repl--uds-send-command "submitPrompt" (list :text text) cwd)))
+    (let ((req (agent-repl--uds-send-command
+                "submitPrompt"
+                (list :text text :promptOrigin "PROMPT_ORIGIN_EXPLAIN_CONFIG")
+                cwd)))
       (agent-repl--uds-track-command req "submitPrompt" cwd)
       (agent-repl--log nil "explain-config: send submitted session=%S request=%S cwd=%S"
                        session-id req cwd))

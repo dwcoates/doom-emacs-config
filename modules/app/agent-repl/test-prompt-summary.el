@@ -772,11 +772,11 @@ remaining) gui frontend, that is `agent-repl--gui-send-turn'
   (agent-repl-test--with-clean-state
     (let ((kickoff-args nil))
       (cl-letf (((symbol-function 'agent-repl--frontend-send-user-message)
-                  (lambda (_ws _text ok _fail) (funcall ok "req") :pending))
+                  (lambda (_ws _text _origin ok _fail) (funcall ok "req") :pending))
                  ((symbol-function 'agent-repl--run-send-posthooks) #'ignore)
                 ((symbol-function 'agent-repl--kickoff-prompt-summary)
                  (lambda (ws raw) (setq kickoff-args (list ws raw)))))
-        (agent-repl--gui-send-turn "ws1" "decorated-input" "raw-input"))
+        (agent-repl--gui-send-turn "ws1" "decorated-input" "raw-input" "PROMPT_ORIGIN_USER_SENT"))
       (should (equal kickoff-args '("ws1" "raw-input"))))))
 
 ;;;; ---- Tests: mode-line migration (attach-to-mode-line) ----

@@ -15,6 +15,7 @@ import {
   ReplayDoneSchema,
   ReplayEventSchema,
   ReplayRequestSchema,
+  PromptOrigin,
   QueryRuntimeIdentitySchema,
   ShimHelloSchema,
   ShimReadySchema,
@@ -171,7 +172,7 @@ describe("SessionServer handshake", () => {
     const peer = await daemon.next();
     await peer.next(ShimHelloSchema);
     // Act: jump the gun with a prompt before saying hello
-    peer.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "early" }));
+    peer.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "early", promptOrigin: PromptOrigin.USER_SENT }));
     await new Promise<void>((r) => setImmediate(r));
     // Assert
     expect(calls.prompts).toHaveLength(0);
@@ -220,7 +221,7 @@ describe("SessionServer control dispatch", () => {
     track(server);
     const peer = await handshake(server, socketPath);
     // Act
-    peer.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "hi" }));
+    peer.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "hi", promptOrigin: PromptOrigin.USER_SENT }));
     const ack = await peer.next(AckSchema);
     // Assert
     expect(ack.requestId).toBe("p1");
@@ -235,7 +236,7 @@ describe("SessionServer control dispatch", () => {
     track(server);
     const peer = await handshake(server, socketPath);
     // Act
-    peer.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p2" }));
+    peer.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p2", promptOrigin: PromptOrigin.USER_SENT }));
     const nack = await peer.next(NackSchema);
     // Assert
     expect(nack.reason).toBe("busy");

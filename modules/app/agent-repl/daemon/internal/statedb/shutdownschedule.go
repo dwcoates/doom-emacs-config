@@ -55,6 +55,7 @@ type HeldPrompt struct {
 	RequestID      string
 	Text           string
 	PermissionMode string
+	PromptOrigin   int32
 	QueuedAtMs     int64
 }
 
@@ -83,14 +84,53 @@ func NewShutdownSchedules(db *sql.DB) (*ShutdownSchedules, error) {
 			request_id      TEXT    NOT NULL,
 			text            TEXT    NOT NULL,
 			permission_mode TEXT    NOT NULL,
-			queued_at_ms    INTEGER NOT NULL
+			queued_at_ms    INTEGER NOT NULL,
+			prompt_origin   INTEGER NOT NULL
 		);
 		CREATE INDEX IF NOT EXISTS shutdown_hold_prompt_workspace
 			ON shutdown_hold_prompt(workspace, queued_at_ms);
 	`); err != nil {
 		return nil, fmt.Errorf("statedb: create shutdown_schedule schema: %w", err)
 	}
+	if err := ensureShutdownPromptOriginColumn(db); err != nil {
+		return nil, err
+	}
 	return &ShutdownSchedules{db: db}, nil
+}
+
+// ensureShutdownPromptOriginColumn adds the exact prompt attribution to older
+// drain-ledger tables. The column is intentionally nullable during migration:
+// a legacy row has no truthful origin to synthesize, so reading one fails
+// loudly instead of relabeling historical input.
+func ensureShutdownPromptOriginColumn(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(shutdown_hold_prompt)`)
+	if err != nil {
+		return fmt.Errorf("statedb: inspect shutdown_hold_prompt schema: %w", err)
+	}
+	defer rows.Close()
+	found := false
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull, pk int
+		var defaultValue sql.NullString
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			return fmt.Errorf("statedb: scan shutdown_hold_prompt schema: %w", err)
+		}
+		if name == "prompt_origin" {
+			found = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("statedb: iterate shutdown_hold_prompt schema: %w", err)
+	}
+	if found {
+		return nil
+	}
+	if _, err := db.Exec(`ALTER TABLE shutdown_hold_prompt ADD COLUMN prompt_origin INTEGER`); err != nil {
+		return fmt.Errorf("statedb: add shutdown_hold_prompt.prompt_origin: %w", err)
+	}
+	return nil
 }
 
 // PutSchedule writes (or replaces) the singleton lease row.
@@ -150,10 +190,12 @@ func (s *ShutdownSchedules) RecordHeldPrompt(p HeldPrompt) error {
 		return fmt.Errorf("statedb: drain-held prompt %q names no schedule", p.EntryID)
 	case p.Workspace == "":
 		return fmt.Errorf("statedb: drain-held prompt %q has no workspace", p.EntryID)
+	case p.PromptOrigin <= 0:
+		return fmt.Errorf("statedb: drain-held prompt %q has invalid prompt origin %d", p.EntryID, p.PromptOrigin)
 	}
 	_, err := s.db.Exec(
-		`INSERT INTO shutdown_hold_prompt(entry_id, schedule_id, workspace, session_id, request_id, text, permission_mode, queued_at_ms)
-		 VALUES (?,?,?,?,?,?,?,?)
+		`INSERT INTO shutdown_hold_prompt(entry_id, schedule_id, workspace, session_id, request_id, text, permission_mode, queued_at_ms, prompt_origin)
+		 VALUES (?,?,?,?,?,?,?,?,?)
 		 ON CONFLICT(entry_id) DO UPDATE SET
 		     schedule_id = excluded.schedule_id,
 		     workspace = excluded.workspace,
@@ -161,8 +203,9 @@ func (s *ShutdownSchedules) RecordHeldPrompt(p HeldPrompt) error {
 		     request_id = excluded.request_id,
 		     text = excluded.text,
 		     permission_mode = excluded.permission_mode,
-		     queued_at_ms = excluded.queued_at_ms`,
-		p.EntryID, p.ScheduleID, p.Workspace, p.SessionID, p.RequestID, p.Text, p.PermissionMode, p.QueuedAtMs)
+		     queued_at_ms = excluded.queued_at_ms,
+		     prompt_origin = excluded.prompt_origin`,
+		p.EntryID, p.ScheduleID, p.Workspace, p.SessionID, p.RequestID, p.Text, p.PermissionMode, p.QueuedAtMs, p.PromptOrigin)
 	if err != nil {
 		return fmt.Errorf("statedb: record drain-held prompt %q for workspace %q: %w", p.EntryID, p.Workspace, err)
 	}
@@ -203,7 +246,7 @@ func (s *ShutdownSchedules) DropHeldPromptsForSchedule(scheduleID string) (int, 
 // HeldPrompts returns one workspace's parked prompts in submit order.
 func (s *ShutdownSchedules) HeldPrompts(workspace string) ([]HeldPrompt, error) {
 	rows, err := s.db.Query(
-		`SELECT entry_id, schedule_id, workspace, session_id, request_id, text, permission_mode, queued_at_ms
+		`SELECT entry_id, schedule_id, workspace, session_id, request_id, text, permission_mode, queued_at_ms, prompt_origin
 		 FROM shutdown_hold_prompt WHERE workspace = ? ORDER BY queued_at_ms, entry_id`, workspace)
 	if err != nil {
 		return nil, fmt.Errorf("statedb: read the drain-held prompts of workspace %q: %w", workspace, err)
@@ -222,7 +265,7 @@ func (s *ShutdownSchedules) HeldPrompts(workspace string) ([]HeldPrompt, error) 
 // would be a parked prompt no client could ever see.
 func (s *ShutdownSchedules) AllHeldPrompts() ([]HeldPrompt, error) {
 	rows, err := s.db.Query(
-		`SELECT entry_id, schedule_id, workspace, session_id, request_id, text, permission_mode, queued_at_ms
+		`SELECT entry_id, schedule_id, workspace, session_id, request_id, text, permission_mode, queued_at_ms, prompt_origin
 		 FROM shutdown_hold_prompt ORDER BY workspace, queued_at_ms, entry_id`)
 	if err != nil {
 		return nil, fmt.Errorf("statedb: read every drain-held prompt: %w", err)
@@ -237,10 +280,15 @@ func scanHeldPrompts(rows *sql.Rows, scope string) ([]HeldPrompt, error) {
 	var out []HeldPrompt
 	for rows.Next() {
 		var p HeldPrompt
+		var promptOrigin sql.NullInt64
 		if err := rows.Scan(&p.EntryID, &p.ScheduleID, &p.Workspace, &p.SessionID,
-			&p.RequestID, &p.Text, &p.PermissionMode, &p.QueuedAtMs); err != nil {
+			&p.RequestID, &p.Text, &p.PermissionMode, &p.QueuedAtMs, &promptOrigin); err != nil {
 			return nil, fmt.Errorf("statedb: scan a drain-held prompt of %s: %w", scope, err)
 		}
+		if !promptOrigin.Valid || promptOrigin.Int64 <= 0 {
+			return nil, fmt.Errorf("statedb: drain-held prompt %q of %s has invalid prompt_origin %v", p.EntryID, scope, promptOrigin)
+		}
+		p.PromptOrigin = int32(promptOrigin.Int64)
 		out = append(out, p)
 	}
 	if err := rows.Err(); err != nil {

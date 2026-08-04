@@ -5,6 +5,7 @@ import (
 	"sort"
 	"sync"
 
+	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"claude-repld/internal/registry"
@@ -339,12 +340,13 @@ func (m *Manager) noteTurnClaims(d *sessionController, activeIDs []string) {
 // later, never interrupt for it", which is exactly the promise the lease makes.
 // The rationale stays empty because no classifier produced one; the frontend
 // renders the lease bubble off shutdownHoldScheduleID instead.
-func newParkedEntry(id, requestID, text, permissionMode string, queuedAtMs int64) *queueEntry {
+func newParkedEntry(id, requestID, text, permissionMode string, promptOrigin corev1.PromptOrigin, queuedAtMs int64) *queueEntry {
 	return &queueEntry{
 		id:             id,
 		requestID:      requestID,
 		text:           text,
 		permissionMode: permissionMode,
+		promptOrigin:   promptOrigin,
 		queuedAtMs:     queuedAtMs,
 		classification: frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD,
 		rationale:      "",
@@ -380,6 +382,7 @@ func (m *Manager) parkForDrain(d *sessionController, e *queueEntry, scheduleID s
 		RequestID:      e.requestID,
 		Text:           e.text,
 		PermissionMode: e.permissionMode,
+		PromptOrigin:   int32(e.promptOrigin),
 		QueuedAtMs:     e.queuedAtMs,
 	}); err != nil {
 		m.logf("session-controller: drain-held prompt durable record FAILED entry=%s ws=%q session=%s schedule=%s error=%v — the park is not recoverable, so it is refused rather than kept in memory behind a successful-looking submit",
@@ -779,6 +782,17 @@ func (m *Manager) restoreShutdownHolds(d *sessionController) {
 	if len(rows) == 0 && len(adopted) == 0 {
 		return
 	}
+	// Validate the whole durable snapshot before adding any of it to the live
+	// queue. A legacy or corrupt row has no trustworthy provenance; replaying
+	// only its valid neighbors would make the restore partially succeed while
+	// silently abandoning the invariant violation.
+	for _, row := range rows {
+		if err := validatePromptOrigin(corev1.PromptOrigin(row.PromptOrigin)); err != nil {
+			m.logf("session-controller: drain-held prompt restore FAILED ws=%q session=%s entry=%s prompt_origin=%d error=%v — no rows from this durable snapshot are being replayed",
+				d.workspace, d.sessionID, row.EntryID, row.PromptOrigin, err)
+			return
+		}
+	}
 	liveSchedule, held := m.heldSchedule()
 
 	m.mu.Lock()
@@ -801,7 +815,7 @@ func (m *Manager) restoreShutdownHolds(d *sessionController) {
 			tombstoned = append(tombstoned, row.EntryID)
 			continue
 		}
-		e := newParkedEntry(row.EntryID, row.RequestID, row.Text, row.PermissionMode, row.QueuedAtMs)
+		e := newParkedEntry(row.EntryID, row.RequestID, row.Text, row.PermissionMode, corev1.PromptOrigin(row.PromptOrigin), row.QueuedAtMs)
 		e.drainRowPending = true
 		if held && row.ScheduleID == liveSchedule {
 			e.shutdownHoldScheduleID = row.ScheduleID

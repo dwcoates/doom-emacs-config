@@ -117,6 +117,30 @@ func TestReplayIsSessionScoped(t *testing.T) {
 	}
 }
 
+func TestReplayPreservesTurnStartedPromptOrigin(t *testing.T) {
+	d := openTemp(t)
+	event := &corev1.Event{
+		SessionId: "origin-session",
+		Plane:     corev1.Plane_PLANE_STREAM,
+		Class:     corev1.EventClass_EVENT_CLASS_PERSISTENT,
+		Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{
+			TurnId:       "turn-1",
+			PromptOrigin: corev1.PromptOrigin_PROMPT_ORIGIN_COMMAND_REBASE,
+		}},
+	}
+	if _, err := d.Ingest("claude-shim", []*corev1.Event{event}, nil); err != nil {
+		t.Fatalf("persisting attributed TurnStarted: %v", err)
+	}
+
+	got := collectReplay(t, d, "origin-session", 0)
+	if len(got) != 1 {
+		t.Fatalf("replayed %d events, want 1", len(got))
+	}
+	if origin := got[0].GetTurnStarted().GetPromptOrigin(); origin != corev1.PromptOrigin_PROMPT_ORIGIN_COMMAND_REBASE {
+		t.Fatalf("replayed prompt origin = %v, want COMMAND_REBASE", origin)
+	}
+}
+
 func TestReplayPreservesResultCacheUsage(t *testing.T) {
 	// Arrange: cache usage lives inside the opaque vendor payload rather than
 	// indexed store columns. Exercise the complete protobuf -> SQLite ->

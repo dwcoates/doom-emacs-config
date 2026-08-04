@@ -313,7 +313,7 @@ func TestAParkedPromptIsNeverClassified(t *testing.T) {
 	qh.turn(true)
 
 	// Act.
-	if err := qh.m.SubmitPrompt(context.Background(), "ws", "shutdown-lease-request", "hello", ""); err != nil {
+	if err := qh.m.SubmitPrompt(context.Background(), "ws", "shutdown-lease-request", "hello", "", testPromptOrigin); err != nil {
 		t.Fatalf("submit: %v", err)
 	}
 
@@ -405,7 +405,7 @@ func TestARestoredParkedPromptIsStampedHoldWithNoRationale(t *testing.T) {
 	h := newLeaseHarness(t)
 	h.lease.hold("sd_live")
 	if err := h.store.RecordHeldPrompt(statedb.HeldPrompt{
-		EntryID: "q_restored", ScheduleID: "sd_live", Workspace: "ws", SessionID: "s1", Text: "delayed",
+		EntryID: "q_restored", ScheduleID: "sd_live", Workspace: "ws", SessionID: "s1", Text: "delayed", PromptOrigin: int32(testPromptOrigin),
 	}); err != nil {
 		t.Fatalf("RecordHeldPrompt: %v", err)
 	}
@@ -1060,7 +1060,7 @@ func TestARestoredPromptComesBackUnheldWhenItsScheduleIsGone(t *testing.T) {
 	// Arrange.
 	h := newLeaseHarness(t)
 	if err := h.store.RecordHeldPrompt(statedb.HeldPrompt{
-		EntryID: "q_restored", ScheduleID: "sd_old", Workspace: "ws", SessionID: "s1", Text: "delayed",
+		EntryID: "q_restored", ScheduleID: "sd_old", Workspace: "ws", SessionID: "s1", Text: "delayed", PromptOrigin: int32(testPromptOrigin),
 	}); err != nil {
 		t.Fatalf("RecordHeldPrompt: %v", err)
 	}
@@ -1085,7 +1085,7 @@ func TestARestoredPromptStaysHeldWhenItsScheduleStillStands(t *testing.T) {
 	h := newLeaseHarness(t)
 	h.lease.hold("sd_live")
 	if err := h.store.RecordHeldPrompt(statedb.HeldPrompt{
-		EntryID: "q_restored", ScheduleID: "sd_live", Workspace: "ws", SessionID: "s1", Text: "delayed",
+		EntryID: "q_restored", ScheduleID: "sd_live", Workspace: "ws", SessionID: "s1", Text: "delayed", PromptOrigin: int32(testPromptOrigin),
 	}); err != nil {
 		t.Fatalf("RecordHeldPrompt: %v", err)
 	}
@@ -1104,7 +1104,7 @@ func TestARestoredPromptIsDeliveredWhenTheSessionIsIdle(t *testing.T) {
 	// Arrange.
 	h := newLeaseHarness(t)
 	if err := h.store.RecordHeldPrompt(statedb.HeldPrompt{
-		EntryID: "q_restored", ScheduleID: "sd_old", Workspace: "ws", SessionID: "s1", Text: "delayed",
+		EntryID: "q_restored", ScheduleID: "sd_old", Workspace: "ws", SessionID: "s1", Text: "delayed", PromptOrigin: int32(testPromptOrigin),
 	}); err != nil {
 		t.Fatalf("RecordHeldPrompt: %v", err)
 	}
@@ -1125,7 +1125,7 @@ func TestADeliveredRestoredPromptDropsItsDurableRow(t *testing.T) {
 	// Arrange.
 	h := newLeaseHarness(t)
 	if err := h.store.RecordHeldPrompt(statedb.HeldPrompt{
-		EntryID: "q_restored", ScheduleID: "sd_old", Workspace: "ws", SessionID: "s1", Text: "delayed",
+		EntryID: "q_restored", ScheduleID: "sd_old", Workspace: "ws", SessionID: "s1", Text: "delayed", PromptOrigin: int32(testPromptOrigin),
 	}); err != nil {
 		t.Fatalf("RecordHeldPrompt: %v", err)
 	}

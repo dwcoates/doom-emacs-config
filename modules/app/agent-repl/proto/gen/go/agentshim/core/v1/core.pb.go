@@ -389,6 +389,136 @@ func (PermissionDecision) EnumDescriptor() ([]byte, []int) {
 	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{5}
 }
 
+// Why a prompt entered the agent-repl submit pipeline.
+//
+// This is a closed, durable attribution vocabulary rather than the free-form
+// SubmitPrompt.origin diagnostic string. Every frontend send site and every
+// daemon-generated submit site MUST choose a non-UNSPECIFIED value, and Emacs
+// send sites intentionally never share a value: a stored TurnStarted can
+// therefore be traced back to the exact editor situation that caused it.
+type PromptOrigin int32
+
+const (
+	PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED PromptOrigin = 0
+	// Emacs-originated sends. Each value has exactly one production send site.
+	PromptOrigin_PROMPT_ORIGIN_USER_SENT                   PromptOrigin = 1
+	PromptOrigin_PROMPT_ORIGIN_USER_SENT_AND_HIDE          PromptOrigin = 2
+	PromptOrigin_PROMPT_ORIGIN_USER_SENT_WITH_METAPROMPT   PromptOrigin = 3
+	PromptOrigin_PROMPT_ORIGIN_USER_SENT_WITH_POSTFIX      PromptOrigin = 4
+	PromptOrigin_PROMPT_ORIGIN_USER_SENT_WITH_PREFIX       PromptOrigin = 5
+	PromptOrigin_PROMPT_ORIGIN_METAPROMPT_READ             PromptOrigin = 6
+	PromptOrigin_PROMPT_ORIGIN_COMMAND_DIFF_ANALYSIS       PromptOrigin = 7
+	PromptOrigin_PROMPT_ORIGIN_COMMAND_EXPLAIN_CONTEXT     PromptOrigin = 8
+	PromptOrigin_PROMPT_ORIGIN_COMMAND_EXPLAIN_PROMPT      PromptOrigin = 9
+	PromptOrigin_PROMPT_ORIGIN_COMMAND_UPDATE_PR           PromptOrigin = 10
+	PromptOrigin_PROMPT_ORIGIN_COMMAND_REBASE              PromptOrigin = 11
+	PromptOrigin_PROMPT_ORIGIN_COMMAND_CREATE_OR_UPDATE_PR PromptOrigin = 12
+	PromptOrigin_PROMPT_ORIGIN_PANEL_SELECTION             PromptOrigin = 13
+	PromptOrigin_PROMPT_ORIGIN_DEFERRED_PROMPT             PromptOrigin = 14
+	PromptOrigin_PROMPT_ORIGIN_LEGACY_HOST_PROMPT          PromptOrigin = 16
+	PromptOrigin_PROMPT_ORIGIN_GNS_SOCKETS_CLOSE           PromptOrigin = 17
+	PromptOrigin_PROMPT_ORIGIN_LEGACY_HOST_EVAL_RESULT     PromptOrigin = 18
+	PromptOrigin_PROMPT_ORIGIN_EXPLAIN_CONFIG              PromptOrigin = 19
+	// Other producers remain explicit without being mislabeled as Emacs.
+	PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT            PromptOrigin = 20
+	PromptOrigin_PROMPT_ORIGIN_WEBAPP_CARD_ACTION          PromptOrigin = 21
+	PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATED           PromptOrigin = 22
+	PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR       PromptOrigin = 23
+	PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR           PromptOrigin = 24
+	PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION         PromptOrigin = 25
+	PromptOrigin_PROMPT_ORIGIN_MERGE_AFTER_ACTION          PromptOrigin = 26
+	PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME PromptOrigin = 28
+)
+
+// Enum value maps for PromptOrigin.
+var (
+	PromptOrigin_name = map[int32]string{
+		0:  "PROMPT_ORIGIN_UNSPECIFIED",
+		1:  "PROMPT_ORIGIN_USER_SENT",
+		2:  "PROMPT_ORIGIN_USER_SENT_AND_HIDE",
+		3:  "PROMPT_ORIGIN_USER_SENT_WITH_METAPROMPT",
+		4:  "PROMPT_ORIGIN_USER_SENT_WITH_POSTFIX",
+		5:  "PROMPT_ORIGIN_USER_SENT_WITH_PREFIX",
+		6:  "PROMPT_ORIGIN_METAPROMPT_READ",
+		7:  "PROMPT_ORIGIN_COMMAND_DIFF_ANALYSIS",
+		8:  "PROMPT_ORIGIN_COMMAND_EXPLAIN_CONTEXT",
+		9:  "PROMPT_ORIGIN_COMMAND_EXPLAIN_PROMPT",
+		10: "PROMPT_ORIGIN_COMMAND_UPDATE_PR",
+		11: "PROMPT_ORIGIN_COMMAND_REBASE",
+		12: "PROMPT_ORIGIN_COMMAND_CREATE_OR_UPDATE_PR",
+		13: "PROMPT_ORIGIN_PANEL_SELECTION",
+		14: "PROMPT_ORIGIN_DEFERRED_PROMPT",
+		16: "PROMPT_ORIGIN_LEGACY_HOST_PROMPT",
+		17: "PROMPT_ORIGIN_GNS_SOCKETS_CLOSE",
+		18: "PROMPT_ORIGIN_LEGACY_HOST_EVAL_RESULT",
+		19: "PROMPT_ORIGIN_EXPLAIN_CONFIG",
+		20: "PROMPT_ORIGIN_WEBAPP_USER_SENT",
+		21: "PROMPT_ORIGIN_WEBAPP_CARD_ACTION",
+		22: "PROMPT_ORIGIN_WORKSPACE_CREATED",
+		23: "PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR",
+		24: "PROMPT_ORIGIN_MERGE_TEST_REPAIR",
+		25: "PROMPT_ORIGIN_MERGE_BEFORE_ACTION",
+		26: "PROMPT_ORIGIN_MERGE_AFTER_ACTION",
+		28: "PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME",
+	}
+	PromptOrigin_value = map[string]int32{
+		"PROMPT_ORIGIN_UNSPECIFIED":                 0,
+		"PROMPT_ORIGIN_USER_SENT":                   1,
+		"PROMPT_ORIGIN_USER_SENT_AND_HIDE":          2,
+		"PROMPT_ORIGIN_USER_SENT_WITH_METAPROMPT":   3,
+		"PROMPT_ORIGIN_USER_SENT_WITH_POSTFIX":      4,
+		"PROMPT_ORIGIN_USER_SENT_WITH_PREFIX":       5,
+		"PROMPT_ORIGIN_METAPROMPT_READ":             6,
+		"PROMPT_ORIGIN_COMMAND_DIFF_ANALYSIS":       7,
+		"PROMPT_ORIGIN_COMMAND_EXPLAIN_CONTEXT":     8,
+		"PROMPT_ORIGIN_COMMAND_EXPLAIN_PROMPT":      9,
+		"PROMPT_ORIGIN_COMMAND_UPDATE_PR":           10,
+		"PROMPT_ORIGIN_COMMAND_REBASE":              11,
+		"PROMPT_ORIGIN_COMMAND_CREATE_OR_UPDATE_PR": 12,
+		"PROMPT_ORIGIN_PANEL_SELECTION":             13,
+		"PROMPT_ORIGIN_DEFERRED_PROMPT":             14,
+		"PROMPT_ORIGIN_LEGACY_HOST_PROMPT":          16,
+		"PROMPT_ORIGIN_GNS_SOCKETS_CLOSE":           17,
+		"PROMPT_ORIGIN_LEGACY_HOST_EVAL_RESULT":     18,
+		"PROMPT_ORIGIN_EXPLAIN_CONFIG":              19,
+		"PROMPT_ORIGIN_WEBAPP_USER_SENT":            20,
+		"PROMPT_ORIGIN_WEBAPP_CARD_ACTION":          21,
+		"PROMPT_ORIGIN_WORKSPACE_CREATED":           22,
+		"PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR":       23,
+		"PROMPT_ORIGIN_MERGE_TEST_REPAIR":           24,
+		"PROMPT_ORIGIN_MERGE_BEFORE_ACTION":         25,
+		"PROMPT_ORIGIN_MERGE_AFTER_ACTION":          26,
+		"PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME": 28,
+	}
+)
+
+func (x PromptOrigin) Enum() *PromptOrigin {
+	p := new(PromptOrigin)
+	*p = x
+	return p
+}
+
+func (x PromptOrigin) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (PromptOrigin) Descriptor() protoreflect.EnumDescriptor {
+	return file_agentshim_core_v1_core_proto_enumTypes[6].Descriptor()
+}
+
+func (PromptOrigin) Type() protoreflect.EnumType {
+	return &file_agentshim_core_v1_core_proto_enumTypes[6]
+}
+
+func (x PromptOrigin) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use PromptOrigin.Descriptor instead.
+func (PromptOrigin) EnumDescriptor() ([]byte, []int) {
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{6}
+}
+
 // Why a compaction happened. Unlike a clear, a compaction can be the system
 // deciding it needs one, so the distinction is real and worth carrying — even
 // though nothing downstream is expected to BRANCH on it. A compaction is a
@@ -426,11 +556,11 @@ func (x ContextCompactTrigger) String() string {
 }
 
 func (ContextCompactTrigger) Descriptor() protoreflect.EnumDescriptor {
-	return file_agentshim_core_v1_core_proto_enumTypes[6].Descriptor()
+	return file_agentshim_core_v1_core_proto_enumTypes[7].Descriptor()
 }
 
 func (ContextCompactTrigger) Type() protoreflect.EnumType {
-	return &file_agentshim_core_v1_core_proto_enumTypes[6]
+	return &file_agentshim_core_v1_core_proto_enumTypes[7]
 }
 
 func (x ContextCompactTrigger) Number() protoreflect.EnumNumber {
@@ -439,7 +569,7 @@ func (x ContextCompactTrigger) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ContextCompactTrigger.Descriptor instead.
 func (ContextCompactTrigger) EnumDescriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{6}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{7}
 }
 
 // The three-valued outcome of an Interrupt, decided by the SHIM.
@@ -498,11 +628,11 @@ func (x InterruptOutcome) String() string {
 }
 
 func (InterruptOutcome) Descriptor() protoreflect.EnumDescriptor {
-	return file_agentshim_core_v1_core_proto_enumTypes[7].Descriptor()
+	return file_agentshim_core_v1_core_proto_enumTypes[8].Descriptor()
 }
 
 func (InterruptOutcome) Type() protoreflect.EnumType {
-	return &file_agentshim_core_v1_core_proto_enumTypes[7]
+	return &file_agentshim_core_v1_core_proto_enumTypes[8]
 }
 
 func (x InterruptOutcome) Number() protoreflect.EnumNumber {
@@ -511,7 +641,7 @@ func (x InterruptOutcome) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use InterruptOutcome.Descriptor instead.
 func (InterruptOutcome) EnumDescriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{7}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{8}
 }
 
 // Runtime that originated a FilePlaneDiagnostic. File-plane diagnostics come
@@ -546,11 +676,11 @@ func (x DiagnosticSourceRuntime) String() string {
 }
 
 func (DiagnosticSourceRuntime) Descriptor() protoreflect.EnumDescriptor {
-	return file_agentshim_core_v1_core_proto_enumTypes[8].Descriptor()
+	return file_agentshim_core_v1_core_proto_enumTypes[9].Descriptor()
 }
 
 func (DiagnosticSourceRuntime) Type() protoreflect.EnumType {
-	return &file_agentshim_core_v1_core_proto_enumTypes[8]
+	return &file_agentshim_core_v1_core_proto_enumTypes[9]
 }
 
 func (x DiagnosticSourceRuntime) Number() protoreflect.EnumNumber {
@@ -559,7 +689,7 @@ func (x DiagnosticSourceRuntime) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use DiagnosticSourceRuntime.Descriptor instead.
 func (DiagnosticSourceRuntime) EnumDescriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{8}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{9}
 }
 
 type PermissionItem_Resolution int32
@@ -601,11 +731,11 @@ func (x PermissionItem_Resolution) String() string {
 }
 
 func (PermissionItem_Resolution) Descriptor() protoreflect.EnumDescriptor {
-	return file_agentshim_core_v1_core_proto_enumTypes[9].Descriptor()
+	return file_agentshim_core_v1_core_proto_enumTypes[10].Descriptor()
 }
 
 func (PermissionItem_Resolution) Type() protoreflect.EnumType {
-	return &file_agentshim_core_v1_core_proto_enumTypes[9]
+	return &file_agentshim_core_v1_core_proto_enumTypes[10]
 }
 
 func (x PermissionItem_Resolution) Number() protoreflect.EnumNumber {
@@ -1313,7 +1443,10 @@ type TurnStarted struct {
 	// SubmitPrompt.request_id and Event.request_id. Non-empty on every newly
 	// produced event; empty only on historical events persisted before this
 	// field existed.
-	TurnId        string `protobuf:"bytes,2,opt,name=turn_id,json=turnId,proto3" json:"turn_id,omitempty"`
+	TurnId string `protobuf:"bytes,2,opt,name=turn_id,json=turnId,proto3" json:"turn_id,omitempty"`
+	// Durable copy of the accepted SubmitPrompt.prompt_origin. Newly produced
+	// turns must never use UNSPECIFIED; zero exists only for historical rows.
+	PromptOrigin  PromptOrigin `protobuf:"varint,3,opt,name=prompt_origin,json=promptOrigin,proto3,enum=agentshim.core.v1.PromptOrigin" json:"prompt_origin,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1360,6 +1493,13 @@ func (x *TurnStarted) GetTurnId() string {
 		return x.TurnId
 	}
 	return ""
+}
+
+func (x *TurnStarted) GetPromptOrigin() PromptOrigin {
+	if x != nil {
+		return x.PromptOrigin
+	}
+	return PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED
 }
 
 type TurnClaimBridge struct {
@@ -4308,8 +4448,11 @@ type SubmitPrompt struct {
 	Text           string                 `protobuf:"bytes,2,opt,name=text,proto3" json:"text,omitempty"`
 	Origin         string                 `protobuf:"bytes,3,opt,name=origin,proto3" json:"origin,omitempty"`                                       // "human" | "coordinator" | ...
 	PermissionMode string                 `protobuf:"bytes,4,opt,name=permission_mode,json=permissionMode,proto3" json:"permission_mode,omitempty"` // optional override
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Required closed attribution. The shim rejects UNSPECIFIED before touching
+	// SDK state and copies this value onto the persistent TurnStarted event.
+	PromptOrigin  PromptOrigin `protobuf:"varint,5,opt,name=prompt_origin,json=promptOrigin,proto3,enum=agentshim.core.v1.PromptOrigin" json:"prompt_origin,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *SubmitPrompt) Reset() {
@@ -4368,6 +4511,13 @@ func (x *SubmitPrompt) GetPermissionMode() string {
 		return x.PermissionMode
 	}
 	return ""
+}
+
+func (x *SubmitPrompt) GetPromptOrigin() PromptOrigin {
+	if x != nil {
+		return x.PromptOrigin
+	}
+	return PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED
 }
 
 // Request a deliberate mid-session model change.  Model selection is a shim
@@ -5902,10 +6052,11 @@ const file_agentshim_core_v1_core_proto_rawDesc = "" +
 	"\x03cwd\x18\x03 \x01(\tR\x03cwd\x12*\n" +
 	"\x11vendor_session_id\x18\x04 \x01(\tR\x0fvendorSessionId\"&\n" +
 	"\fSessionEnded\x12\x16\n" +
-	"\x06reason\x18\x01 \x01(\tR\x06reason\"M\n" +
+	"\x06reason\x18\x01 \x01(\tR\x06reason\"\x93\x01\n" +
 	"\vTurnStarted\x12%\n" +
 	"\x0eprompt_preview\x18\x01 \x01(\tR\rpromptPreview\x12\x17\n" +
-	"\aturn_id\x18\x02 \x01(\tR\x06turnId\"Z\n" +
+	"\aturn_id\x18\x02 \x01(\tR\x06turnId\x12D\n" +
+	"\rprompt_origin\x18\x03 \x01(\x0e2\x1f.agentshim.core.v1.PromptOriginR\fpromptOrigin\"Z\n" +
 	"\x0fTurnClaimBridge\x12\x17\n" +
 	"\aturn_id\x18\x01 \x01(\tR\x06turnId\x12.\n" +
 	"\x13previous_session_id\x18\x02 \x01(\tR\x11previousSessionId\"\x81\x01\n" +
@@ -6097,13 +6248,14 @@ const file_agentshim_core_v1_core_proto_rawDesc = "" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x19\n" +
 	"\bfrom_seq\x18\x02 \x01(\x04R\afromSeq\x12*\n" +
-	"\x11vendor_session_id\x18\x03 \x01(\tR\x0fvendorSessionId\"\x82\x01\n" +
+	"\x11vendor_session_id\x18\x03 \x01(\tR\x0fvendorSessionId\"\xc8\x01\n" +
 	"\fSubmitPrompt\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x12\n" +
 	"\x04text\x18\x02 \x01(\tR\x04text\x12\x16\n" +
 	"\x06origin\x18\x03 \x01(\tR\x06origin\x12'\n" +
-	"\x0fpermission_mode\x18\x04 \x01(\tR\x0epermissionMode\"?\n" +
+	"\x0fpermission_mode\x18\x04 \x01(\tR\x0epermissionMode\x12D\n" +
+	"\rprompt_origin\x18\x05 \x01(\x0e2\x1f.agentshim.core.v1.PromptOriginR\fpromptOrigin\"?\n" +
 	"\bSetModel\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x14\n" +
@@ -6254,7 +6406,36 @@ const file_agentshim_core_v1_core_proto_rawDesc = "" +
 	"\x12PermissionDecision\x12#\n" +
 	"\x1fPERMISSION_DECISION_UNSPECIFIED\x10\x00\x12\x1d\n" +
 	"\x19PERMISSION_DECISION_ALLOW\x10\x01\x12\x1c\n" +
-	"\x18PERMISSION_DECISION_DENY\x10\x02*\x86\x01\n" +
+	"\x18PERMISSION_DECISION_DENY\x10\x02*\xf8\b\n" +
+	"\fPromptOrigin\x12\x1d\n" +
+	"\x19PROMPT_ORIGIN_UNSPECIFIED\x10\x00\x12\x1b\n" +
+	"\x17PROMPT_ORIGIN_USER_SENT\x10\x01\x12$\n" +
+	" PROMPT_ORIGIN_USER_SENT_AND_HIDE\x10\x02\x12+\n" +
+	"'PROMPT_ORIGIN_USER_SENT_WITH_METAPROMPT\x10\x03\x12(\n" +
+	"$PROMPT_ORIGIN_USER_SENT_WITH_POSTFIX\x10\x04\x12'\n" +
+	"#PROMPT_ORIGIN_USER_SENT_WITH_PREFIX\x10\x05\x12!\n" +
+	"\x1dPROMPT_ORIGIN_METAPROMPT_READ\x10\x06\x12'\n" +
+	"#PROMPT_ORIGIN_COMMAND_DIFF_ANALYSIS\x10\a\x12)\n" +
+	"%PROMPT_ORIGIN_COMMAND_EXPLAIN_CONTEXT\x10\b\x12(\n" +
+	"$PROMPT_ORIGIN_COMMAND_EXPLAIN_PROMPT\x10\t\x12#\n" +
+	"\x1fPROMPT_ORIGIN_COMMAND_UPDATE_PR\x10\n" +
+	"\x12 \n" +
+	"\x1cPROMPT_ORIGIN_COMMAND_REBASE\x10\v\x12-\n" +
+	")PROMPT_ORIGIN_COMMAND_CREATE_OR_UPDATE_PR\x10\f\x12!\n" +
+	"\x1dPROMPT_ORIGIN_PANEL_SELECTION\x10\r\x12!\n" +
+	"\x1dPROMPT_ORIGIN_DEFERRED_PROMPT\x10\x0e\x12$\n" +
+	" PROMPT_ORIGIN_LEGACY_HOST_PROMPT\x10\x10\x12#\n" +
+	"\x1fPROMPT_ORIGIN_GNS_SOCKETS_CLOSE\x10\x11\x12)\n" +
+	"%PROMPT_ORIGIN_LEGACY_HOST_EVAL_RESULT\x10\x12\x12 \n" +
+	"\x1cPROMPT_ORIGIN_EXPLAIN_CONFIG\x10\x13\x12\"\n" +
+	"\x1ePROMPT_ORIGIN_WEBAPP_USER_SENT\x10\x14\x12$\n" +
+	" PROMPT_ORIGIN_WEBAPP_CARD_ACTION\x10\x15\x12#\n" +
+	"\x1fPROMPT_ORIGIN_WORKSPACE_CREATED\x10\x16\x12'\n" +
+	"#PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR\x10\x17\x12#\n" +
+	"\x1fPROMPT_ORIGIN_MERGE_TEST_REPAIR\x10\x18\x12%\n" +
+	"!PROMPT_ORIGIN_MERGE_BEFORE_ACTION\x10\x19\x12$\n" +
+	" PROMPT_ORIGIN_MERGE_AFTER_ACTION\x10\x1a\x12-\n" +
+	")PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME\x10\x1c\"\x04\b\x0f\x10\x0f\"\x04\b\x1b\x10\x1b*#PROMPT_ORIGIN_LEGACY_PENDING_PROMPT*'PROMPT_ORIGIN_MERGE_PARENT_NOTIFICATION*\x86\x01\n" +
 	"\x15ContextCompactTrigger\x12'\n" +
 	"#CONTEXT_COMPACT_TRIGGER_UNSPECIFIED\x10\x00\x12\"\n" +
 	"\x1eCONTEXT_COMPACT_TRIGGER_MANUAL\x10\x01\x12 \n" +
@@ -6280,7 +6461,7 @@ func file_agentshim_core_v1_core_proto_rawDescGZIP() []byte {
 	return file_agentshim_core_v1_core_proto_rawDescData
 }
 
-var file_agentshim_core_v1_core_proto_enumTypes = make([]protoimpl.EnumInfo, 10)
+var file_agentshim_core_v1_core_proto_enumTypes = make([]protoimpl.EnumInfo, 11)
 var file_agentshim_core_v1_core_proto_msgTypes = make([]protoimpl.MessageInfo, 68)
 var file_agentshim_core_v1_core_proto_goTypes = []any{
 	(Plane)(0),                               // 0: agentshim.core.v1.Plane
@@ -6289,158 +6470,161 @@ var file_agentshim_core_v1_core_proto_goTypes = []any{
 	(TerminalStatus)(0),                      // 3: agentshim.core.v1.TerminalStatus
 	(SessionSource)(0),                       // 4: agentshim.core.v1.SessionSource
 	(PermissionDecision)(0),                  // 5: agentshim.core.v1.PermissionDecision
-	(ContextCompactTrigger)(0),               // 6: agentshim.core.v1.ContextCompactTrigger
-	(InterruptOutcome)(0),                    // 7: agentshim.core.v1.InterruptOutcome
-	(DiagnosticSourceRuntime)(0),             // 8: agentshim.core.v1.DiagnosticSourceRuntime
-	(PermissionItem_Resolution)(0),           // 9: agentshim.core.v1.PermissionItem.Resolution
-	(*Event)(nil),                            // 10: agentshim.core.v1.Event
-	(*EventBatch)(nil),                       // 11: agentshim.core.v1.EventBatch
-	(*UnparsedEvent)(nil),                    // 12: agentshim.core.v1.UnparsedEvent
-	(*SessionStarted)(nil),                   // 13: agentshim.core.v1.SessionStarted
-	(*SessionEnded)(nil),                     // 14: agentshim.core.v1.SessionEnded
-	(*TurnStarted)(nil),                      // 15: agentshim.core.v1.TurnStarted
-	(*TurnClaimBridge)(nil),                  // 16: agentshim.core.v1.TurnClaimBridge
-	(*TurnEnded)(nil),                        // 17: agentshim.core.v1.TurnEnded
-	(*QueryLifecycle)(nil),                   // 18: agentshim.core.v1.QueryLifecycle
-	(*QueryCreated)(nil),                     // 19: agentshim.core.v1.QueryCreated
-	(*FreshQuery)(nil),                       // 20: agentshim.core.v1.FreshQuery
-	(*ResumedQuery)(nil),                     // 21: agentshim.core.v1.ResumedQuery
-	(*QueryRuntimeObserved)(nil),             // 22: agentshim.core.v1.QueryRuntimeObserved
-	(*QueryRuntimeIdentity)(nil),             // 23: agentshim.core.v1.QueryRuntimeIdentity
-	(*EvidenceFingerprint)(nil),              // 24: agentshim.core.v1.EvidenceFingerprint
-	(*FingerprintUnavailable)(nil),           // 25: agentshim.core.v1.FingerprintUnavailable
-	(*QueryTerminated)(nil),                  // 26: agentshim.core.v1.QueryTerminated
-	(*VendorSessionIdentityUnavailable)(nil), // 27: agentshim.core.v1.VendorSessionIdentityUnavailable
-	(*IntentionalQueryTermination)(nil),      // 28: agentshim.core.v1.IntentionalQueryTermination
-	(*UnexpectedQueryEof)(nil),               // 29: agentshim.core.v1.UnexpectedQueryEof
-	(*QueryIteratorFailure)(nil),             // 30: agentshim.core.v1.QueryIteratorFailure
-	(*QueryStartupFailure)(nil),              // 31: agentshim.core.v1.QueryStartupFailure
-	(*AccountUsageObservation)(nil),          // 32: agentshim.core.v1.AccountUsageObservation
-	(*TurnStartUsageBoundary)(nil),           // 33: agentshim.core.v1.TurnStartUsageBoundary
-	(*TurnEndUsageBoundary)(nil),             // 34: agentshim.core.v1.TurnEndUsageBoundary
-	(*AccountUsageAvailable)(nil),            // 35: agentshim.core.v1.AccountUsageAvailable
-	(*UsageWindow)(nil),                      // 36: agentshim.core.v1.UsageWindow
-	(*AccountUsageUnavailable)(nil),          // 37: agentshim.core.v1.AccountUsageUnavailable
-	(*UsageServiceUnavailable)(nil),          // 38: agentshim.core.v1.UsageServiceUnavailable
-	(*FiveHourWindowUnavailable)(nil),        // 39: agentshim.core.v1.FiveHourWindowUnavailable
-	(*UtilizationUnavailable)(nil),           // 40: agentshim.core.v1.UtilizationUnavailable
-	(*UsageSamplingFailure)(nil),             // 41: agentshim.core.v1.UsageSamplingFailure
-	(*ContextCleared)(nil),                   // 42: agentshim.core.v1.ContextCleared
-	(*ContextCompacted)(nil),                 // 43: agentshim.core.v1.ContextCompacted
-	(*TaskStarted)(nil),                      // 44: agentshim.core.v1.TaskStarted
-	(*TaskProgress)(nil),                     // 45: agentshim.core.v1.TaskProgress
-	(*TaskEnded)(nil),                        // 46: agentshim.core.v1.TaskEnded
-	(*ContentDelta)(nil),                     // 47: agentshim.core.v1.ContentDelta
-	(*HeartbeatProgress)(nil),                // 48: agentshim.core.v1.HeartbeatProgress
-	(*MessageLatency)(nil),                   // 49: agentshim.core.v1.MessageLatency
-	(*DegradedState)(nil),                    // 50: agentshim.core.v1.DegradedState
-	(*ShimHello)(nil),                        // 51: agentshim.core.v1.ShimHello
-	(*DaemonHello)(nil),                      // 52: agentshim.core.v1.DaemonHello
-	(*ShimReady)(nil),                        // 53: agentshim.core.v1.ShimReady
-	(*SubmitPrompt)(nil),                     // 54: agentshim.core.v1.SubmitPrompt
-	(*SetModel)(nil),                         // 55: agentshim.core.v1.SetModel
-	(*ModelOption)(nil),                      // 56: agentshim.core.v1.ModelOption
-	(*ModelCatalog)(nil),                     // 57: agentshim.core.v1.ModelCatalog
-	(*Interrupt)(nil),                        // 58: agentshim.core.v1.Interrupt
-	(*Ack)(nil),                              // 59: agentshim.core.v1.Ack
-	(*Nack)(nil),                             // 60: agentshim.core.v1.Nack
-	(*Subscribe)(nil),                        // 61: agentshim.core.v1.Subscribe
-	(*ReplayRequest)(nil),                    // 62: agentshim.core.v1.ReplayRequest
-	(*ReplayEvent)(nil),                      // 63: agentshim.core.v1.ReplayEvent
-	(*ReplayDone)(nil),                       // 64: agentshim.core.v1.ReplayDone
-	(*PermissionRequest)(nil),                // 65: agentshim.core.v1.PermissionRequest
-	(*PermissionResponse)(nil),               // 66: agentshim.core.v1.PermissionResponse
-	(*PermissionItem)(nil),                   // 67: agentshim.core.v1.PermissionItem
-	(*Heartbeat)(nil),                        // 68: agentshim.core.v1.Heartbeat
-	(*HealthCheck)(nil),                      // 69: agentshim.core.v1.HealthCheck
-	(*HealthStatus)(nil),                     // 70: agentshim.core.v1.HealthStatus
-	(*StoreWrite)(nil),                       // 71: agentshim.core.v1.StoreWrite
-	(*StoreWriteAck)(nil),                    // 72: agentshim.core.v1.StoreWriteAck
-	(*CursorState)(nil),                      // 73: agentshim.core.v1.CursorState
-	(*CursorQuery)(nil),                      // 74: agentshim.core.v1.CursorQuery
-	(*OpenTaskState)(nil),                    // 75: agentshim.core.v1.OpenTaskState
-	(*CursorList)(nil),                       // 76: agentshim.core.v1.CursorList
-	(*FilePlaneDiagnostic)(nil),              // 77: agentshim.core.v1.FilePlaneDiagnostic
-	(*anypb.Any)(nil),                        // 78: google.protobuf.Any
-	(*structpb.Struct)(nil),                  // 79: google.protobuf.Struct
+	(PromptOrigin)(0),                        // 6: agentshim.core.v1.PromptOrigin
+	(ContextCompactTrigger)(0),               // 7: agentshim.core.v1.ContextCompactTrigger
+	(InterruptOutcome)(0),                    // 8: agentshim.core.v1.InterruptOutcome
+	(DiagnosticSourceRuntime)(0),             // 9: agentshim.core.v1.DiagnosticSourceRuntime
+	(PermissionItem_Resolution)(0),           // 10: agentshim.core.v1.PermissionItem.Resolution
+	(*Event)(nil),                            // 11: agentshim.core.v1.Event
+	(*EventBatch)(nil),                       // 12: agentshim.core.v1.EventBatch
+	(*UnparsedEvent)(nil),                    // 13: agentshim.core.v1.UnparsedEvent
+	(*SessionStarted)(nil),                   // 14: agentshim.core.v1.SessionStarted
+	(*SessionEnded)(nil),                     // 15: agentshim.core.v1.SessionEnded
+	(*TurnStarted)(nil),                      // 16: agentshim.core.v1.TurnStarted
+	(*TurnClaimBridge)(nil),                  // 17: agentshim.core.v1.TurnClaimBridge
+	(*TurnEnded)(nil),                        // 18: agentshim.core.v1.TurnEnded
+	(*QueryLifecycle)(nil),                   // 19: agentshim.core.v1.QueryLifecycle
+	(*QueryCreated)(nil),                     // 20: agentshim.core.v1.QueryCreated
+	(*FreshQuery)(nil),                       // 21: agentshim.core.v1.FreshQuery
+	(*ResumedQuery)(nil),                     // 22: agentshim.core.v1.ResumedQuery
+	(*QueryRuntimeObserved)(nil),             // 23: agentshim.core.v1.QueryRuntimeObserved
+	(*QueryRuntimeIdentity)(nil),             // 24: agentshim.core.v1.QueryRuntimeIdentity
+	(*EvidenceFingerprint)(nil),              // 25: agentshim.core.v1.EvidenceFingerprint
+	(*FingerprintUnavailable)(nil),           // 26: agentshim.core.v1.FingerprintUnavailable
+	(*QueryTerminated)(nil),                  // 27: agentshim.core.v1.QueryTerminated
+	(*VendorSessionIdentityUnavailable)(nil), // 28: agentshim.core.v1.VendorSessionIdentityUnavailable
+	(*IntentionalQueryTermination)(nil),      // 29: agentshim.core.v1.IntentionalQueryTermination
+	(*UnexpectedQueryEof)(nil),               // 30: agentshim.core.v1.UnexpectedQueryEof
+	(*QueryIteratorFailure)(nil),             // 31: agentshim.core.v1.QueryIteratorFailure
+	(*QueryStartupFailure)(nil),              // 32: agentshim.core.v1.QueryStartupFailure
+	(*AccountUsageObservation)(nil),          // 33: agentshim.core.v1.AccountUsageObservation
+	(*TurnStartUsageBoundary)(nil),           // 34: agentshim.core.v1.TurnStartUsageBoundary
+	(*TurnEndUsageBoundary)(nil),             // 35: agentshim.core.v1.TurnEndUsageBoundary
+	(*AccountUsageAvailable)(nil),            // 36: agentshim.core.v1.AccountUsageAvailable
+	(*UsageWindow)(nil),                      // 37: agentshim.core.v1.UsageWindow
+	(*AccountUsageUnavailable)(nil),          // 38: agentshim.core.v1.AccountUsageUnavailable
+	(*UsageServiceUnavailable)(nil),          // 39: agentshim.core.v1.UsageServiceUnavailable
+	(*FiveHourWindowUnavailable)(nil),        // 40: agentshim.core.v1.FiveHourWindowUnavailable
+	(*UtilizationUnavailable)(nil),           // 41: agentshim.core.v1.UtilizationUnavailable
+	(*UsageSamplingFailure)(nil),             // 42: agentshim.core.v1.UsageSamplingFailure
+	(*ContextCleared)(nil),                   // 43: agentshim.core.v1.ContextCleared
+	(*ContextCompacted)(nil),                 // 44: agentshim.core.v1.ContextCompacted
+	(*TaskStarted)(nil),                      // 45: agentshim.core.v1.TaskStarted
+	(*TaskProgress)(nil),                     // 46: agentshim.core.v1.TaskProgress
+	(*TaskEnded)(nil),                        // 47: agentshim.core.v1.TaskEnded
+	(*ContentDelta)(nil),                     // 48: agentshim.core.v1.ContentDelta
+	(*HeartbeatProgress)(nil),                // 49: agentshim.core.v1.HeartbeatProgress
+	(*MessageLatency)(nil),                   // 50: agentshim.core.v1.MessageLatency
+	(*DegradedState)(nil),                    // 51: agentshim.core.v1.DegradedState
+	(*ShimHello)(nil),                        // 52: agentshim.core.v1.ShimHello
+	(*DaemonHello)(nil),                      // 53: agentshim.core.v1.DaemonHello
+	(*ShimReady)(nil),                        // 54: agentshim.core.v1.ShimReady
+	(*SubmitPrompt)(nil),                     // 55: agentshim.core.v1.SubmitPrompt
+	(*SetModel)(nil),                         // 56: agentshim.core.v1.SetModel
+	(*ModelOption)(nil),                      // 57: agentshim.core.v1.ModelOption
+	(*ModelCatalog)(nil),                     // 58: agentshim.core.v1.ModelCatalog
+	(*Interrupt)(nil),                        // 59: agentshim.core.v1.Interrupt
+	(*Ack)(nil),                              // 60: agentshim.core.v1.Ack
+	(*Nack)(nil),                             // 61: agentshim.core.v1.Nack
+	(*Subscribe)(nil),                        // 62: agentshim.core.v1.Subscribe
+	(*ReplayRequest)(nil),                    // 63: agentshim.core.v1.ReplayRequest
+	(*ReplayEvent)(nil),                      // 64: agentshim.core.v1.ReplayEvent
+	(*ReplayDone)(nil),                       // 65: agentshim.core.v1.ReplayDone
+	(*PermissionRequest)(nil),                // 66: agentshim.core.v1.PermissionRequest
+	(*PermissionResponse)(nil),               // 67: agentshim.core.v1.PermissionResponse
+	(*PermissionItem)(nil),                   // 68: agentshim.core.v1.PermissionItem
+	(*Heartbeat)(nil),                        // 69: agentshim.core.v1.Heartbeat
+	(*HealthCheck)(nil),                      // 70: agentshim.core.v1.HealthCheck
+	(*HealthStatus)(nil),                     // 71: agentshim.core.v1.HealthStatus
+	(*StoreWrite)(nil),                       // 72: agentshim.core.v1.StoreWrite
+	(*StoreWriteAck)(nil),                    // 73: agentshim.core.v1.StoreWriteAck
+	(*CursorState)(nil),                      // 74: agentshim.core.v1.CursorState
+	(*CursorQuery)(nil),                      // 75: agentshim.core.v1.CursorQuery
+	(*OpenTaskState)(nil),                    // 76: agentshim.core.v1.OpenTaskState
+	(*CursorList)(nil),                       // 77: agentshim.core.v1.CursorList
+	(*FilePlaneDiagnostic)(nil),              // 78: agentshim.core.v1.FilePlaneDiagnostic
+	(*anypb.Any)(nil),                        // 79: google.protobuf.Any
+	(*structpb.Struct)(nil),                  // 80: google.protobuf.Struct
 }
 var file_agentshim_core_v1_core_proto_depIdxs = []int32{
 	0,  // 0: agentshim.core.v1.Event.plane:type_name -> agentshim.core.v1.Plane
 	1,  // 1: agentshim.core.v1.Event.class:type_name -> agentshim.core.v1.EventClass
-	13, // 2: agentshim.core.v1.Event.session_started:type_name -> agentshim.core.v1.SessionStarted
-	14, // 3: agentshim.core.v1.Event.session_ended:type_name -> agentshim.core.v1.SessionEnded
-	15, // 4: agentshim.core.v1.Event.turn_started:type_name -> agentshim.core.v1.TurnStarted
-	17, // 5: agentshim.core.v1.Event.turn_ended:type_name -> agentshim.core.v1.TurnEnded
-	44, // 6: agentshim.core.v1.Event.task_started:type_name -> agentshim.core.v1.TaskStarted
-	45, // 7: agentshim.core.v1.Event.task_progress:type_name -> agentshim.core.v1.TaskProgress
-	46, // 8: agentshim.core.v1.Event.task_ended:type_name -> agentshim.core.v1.TaskEnded
-	47, // 9: agentshim.core.v1.Event.content_delta:type_name -> agentshim.core.v1.ContentDelta
-	48, // 10: agentshim.core.v1.Event.heartbeat_progress:type_name -> agentshim.core.v1.HeartbeatProgress
-	50, // 11: agentshim.core.v1.Event.degraded_state:type_name -> agentshim.core.v1.DegradedState
-	12, // 12: agentshim.core.v1.Event.unparsed:type_name -> agentshim.core.v1.UnparsedEvent
-	49, // 13: agentshim.core.v1.Event.message_latency:type_name -> agentshim.core.v1.MessageLatency
-	42, // 14: agentshim.core.v1.Event.context_cleared:type_name -> agentshim.core.v1.ContextCleared
-	43, // 15: agentshim.core.v1.Event.context_compacted:type_name -> agentshim.core.v1.ContextCompacted
-	77, // 16: agentshim.core.v1.Event.file_plane_diagnostic:type_name -> agentshim.core.v1.FilePlaneDiagnostic
-	16, // 17: agentshim.core.v1.Event.turn_claim_bridge:type_name -> agentshim.core.v1.TurnClaimBridge
-	18, // 18: agentshim.core.v1.Event.query_lifecycle:type_name -> agentshim.core.v1.QueryLifecycle
-	32, // 19: agentshim.core.v1.Event.account_usage_observation:type_name -> agentshim.core.v1.AccountUsageObservation
-	78, // 20: agentshim.core.v1.Event.vendor:type_name -> google.protobuf.Any
-	79, // 21: agentshim.core.v1.Event.extras:type_name -> google.protobuf.Struct
-	10, // 22: agentshim.core.v1.EventBatch.events:type_name -> agentshim.core.v1.Event
-	73, // 23: agentshim.core.v1.EventBatch.cursor_advance:type_name -> agentshim.core.v1.CursorState
+	14, // 2: agentshim.core.v1.Event.session_started:type_name -> agentshim.core.v1.SessionStarted
+	15, // 3: agentshim.core.v1.Event.session_ended:type_name -> agentshim.core.v1.SessionEnded
+	16, // 4: agentshim.core.v1.Event.turn_started:type_name -> agentshim.core.v1.TurnStarted
+	18, // 5: agentshim.core.v1.Event.turn_ended:type_name -> agentshim.core.v1.TurnEnded
+	45, // 6: agentshim.core.v1.Event.task_started:type_name -> agentshim.core.v1.TaskStarted
+	46, // 7: agentshim.core.v1.Event.task_progress:type_name -> agentshim.core.v1.TaskProgress
+	47, // 8: agentshim.core.v1.Event.task_ended:type_name -> agentshim.core.v1.TaskEnded
+	48, // 9: agentshim.core.v1.Event.content_delta:type_name -> agentshim.core.v1.ContentDelta
+	49, // 10: agentshim.core.v1.Event.heartbeat_progress:type_name -> agentshim.core.v1.HeartbeatProgress
+	51, // 11: agentshim.core.v1.Event.degraded_state:type_name -> agentshim.core.v1.DegradedState
+	13, // 12: agentshim.core.v1.Event.unparsed:type_name -> agentshim.core.v1.UnparsedEvent
+	50, // 13: agentshim.core.v1.Event.message_latency:type_name -> agentshim.core.v1.MessageLatency
+	43, // 14: agentshim.core.v1.Event.context_cleared:type_name -> agentshim.core.v1.ContextCleared
+	44, // 15: agentshim.core.v1.Event.context_compacted:type_name -> agentshim.core.v1.ContextCompacted
+	78, // 16: agentshim.core.v1.Event.file_plane_diagnostic:type_name -> agentshim.core.v1.FilePlaneDiagnostic
+	17, // 17: agentshim.core.v1.Event.turn_claim_bridge:type_name -> agentshim.core.v1.TurnClaimBridge
+	19, // 18: agentshim.core.v1.Event.query_lifecycle:type_name -> agentshim.core.v1.QueryLifecycle
+	33, // 19: agentshim.core.v1.Event.account_usage_observation:type_name -> agentshim.core.v1.AccountUsageObservation
+	79, // 20: agentshim.core.v1.Event.vendor:type_name -> google.protobuf.Any
+	80, // 21: agentshim.core.v1.Event.extras:type_name -> google.protobuf.Struct
+	11, // 22: agentshim.core.v1.EventBatch.events:type_name -> agentshim.core.v1.Event
+	74, // 23: agentshim.core.v1.EventBatch.cursor_advance:type_name -> agentshim.core.v1.CursorState
 	4,  // 24: agentshim.core.v1.SessionStarted.source:type_name -> agentshim.core.v1.SessionSource
-	19, // 25: agentshim.core.v1.QueryLifecycle.created:type_name -> agentshim.core.v1.QueryCreated
-	22, // 26: agentshim.core.v1.QueryLifecycle.runtime_observed:type_name -> agentshim.core.v1.QueryRuntimeObserved
-	26, // 27: agentshim.core.v1.QueryLifecycle.terminated:type_name -> agentshim.core.v1.QueryTerminated
-	20, // 28: agentshim.core.v1.QueryCreated.fresh:type_name -> agentshim.core.v1.FreshQuery
-	21, // 29: agentshim.core.v1.QueryCreated.resumed:type_name -> agentshim.core.v1.ResumedQuery
-	23, // 30: agentshim.core.v1.QueryRuntimeObserved.identity:type_name -> agentshim.core.v1.QueryRuntimeIdentity
-	24, // 31: agentshim.core.v1.QueryRuntimeIdentity.effective_options:type_name -> agentshim.core.v1.EvidenceFingerprint
-	24, // 32: agentshim.core.v1.QueryRuntimeIdentity.settings:type_name -> agentshim.core.v1.EvidenceFingerprint
-	24, // 33: agentshim.core.v1.QueryRuntimeIdentity.tools:type_name -> agentshim.core.v1.EvidenceFingerprint
-	24, // 34: agentshim.core.v1.QueryRuntimeIdentity.mcp:type_name -> agentshim.core.v1.EvidenceFingerprint
-	24, // 35: agentshim.core.v1.QueryRuntimeIdentity.context_prefix:type_name -> agentshim.core.v1.EvidenceFingerprint
-	25, // 36: agentshim.core.v1.EvidenceFingerprint.unavailable:type_name -> agentshim.core.v1.FingerprintUnavailable
-	27, // 37: agentshim.core.v1.QueryTerminated.vendor_session_identity_unavailable:type_name -> agentshim.core.v1.VendorSessionIdentityUnavailable
-	28, // 38: agentshim.core.v1.QueryTerminated.intentional:type_name -> agentshim.core.v1.IntentionalQueryTermination
-	29, // 39: agentshim.core.v1.QueryTerminated.unexpected_eof:type_name -> agentshim.core.v1.UnexpectedQueryEof
-	30, // 40: agentshim.core.v1.QueryTerminated.iterator_failure:type_name -> agentshim.core.v1.QueryIteratorFailure
-	31, // 41: agentshim.core.v1.QueryTerminated.startup_failure:type_name -> agentshim.core.v1.QueryStartupFailure
-	33, // 42: agentshim.core.v1.AccountUsageObservation.turn_start:type_name -> agentshim.core.v1.TurnStartUsageBoundary
-	34, // 43: agentshim.core.v1.AccountUsageObservation.turn_end:type_name -> agentshim.core.v1.TurnEndUsageBoundary
-	35, // 44: agentshim.core.v1.AccountUsageObservation.available:type_name -> agentshim.core.v1.AccountUsageAvailable
-	37, // 45: agentshim.core.v1.AccountUsageObservation.unavailable:type_name -> agentshim.core.v1.AccountUsageUnavailable
-	36, // 46: agentshim.core.v1.AccountUsageAvailable.five_hour:type_name -> agentshim.core.v1.UsageWindow
-	38, // 47: agentshim.core.v1.AccountUsageUnavailable.service_unavailable:type_name -> agentshim.core.v1.UsageServiceUnavailable
-	39, // 48: agentshim.core.v1.AccountUsageUnavailable.window_unavailable:type_name -> agentshim.core.v1.FiveHourWindowUnavailable
-	40, // 49: agentshim.core.v1.AccountUsageUnavailable.utilization_unavailable:type_name -> agentshim.core.v1.UtilizationUnavailable
-	41, // 50: agentshim.core.v1.AccountUsageUnavailable.sampling_failure:type_name -> agentshim.core.v1.UsageSamplingFailure
-	6,  // 51: agentshim.core.v1.ContextCompacted.trigger:type_name -> agentshim.core.v1.ContextCompactTrigger
-	2,  // 52: agentshim.core.v1.TaskStarted.kind:type_name -> agentshim.core.v1.TaskKind
-	2,  // 53: agentshim.core.v1.TaskProgress.kind:type_name -> agentshim.core.v1.TaskKind
-	2,  // 54: agentshim.core.v1.TaskEnded.kind:type_name -> agentshim.core.v1.TaskKind
-	3,  // 55: agentshim.core.v1.TaskEnded.status:type_name -> agentshim.core.v1.TerminalStatus
-	23, // 56: agentshim.core.v1.ShimHello.query_runtime_identity:type_name -> agentshim.core.v1.QueryRuntimeIdentity
-	56, // 57: agentshim.core.v1.ModelCatalog.models:type_name -> agentshim.core.v1.ModelOption
-	7,  // 58: agentshim.core.v1.Ack.interrupt_outcome:type_name -> agentshim.core.v1.InterruptOutcome
-	10, // 59: agentshim.core.v1.ReplayEvent.event:type_name -> agentshim.core.v1.Event
-	79, // 60: agentshim.core.v1.PermissionRequest.input:type_name -> google.protobuf.Struct
-	5,  // 61: agentshim.core.v1.PermissionResponse.decision:type_name -> agentshim.core.v1.PermissionDecision
-	79, // 62: agentshim.core.v1.PermissionResponse.updated_input:type_name -> google.protobuf.Struct
-	65, // 63: agentshim.core.v1.PermissionItem.request:type_name -> agentshim.core.v1.PermissionRequest
-	9,  // 64: agentshim.core.v1.PermissionItem.resolution:type_name -> agentshim.core.v1.PermissionItem.Resolution
-	11, // 65: agentshim.core.v1.StoreWrite.batch:type_name -> agentshim.core.v1.EventBatch
-	10, // 66: agentshim.core.v1.OpenTaskState.started:type_name -> agentshim.core.v1.Event
-	73, // 67: agentshim.core.v1.CursorList.cursors:type_name -> agentshim.core.v1.CursorState
-	75, // 68: agentshim.core.v1.CursorList.open_tasks:type_name -> agentshim.core.v1.OpenTaskState
-	8,  // 69: agentshim.core.v1.FilePlaneDiagnostic.source_runtime:type_name -> agentshim.core.v1.DiagnosticSourceRuntime
-	79, // 70: agentshim.core.v1.FilePlaneDiagnostic.context:type_name -> google.protobuf.Struct
-	71, // [71:71] is the sub-list for method output_type
-	71, // [71:71] is the sub-list for method input_type
-	71, // [71:71] is the sub-list for extension type_name
-	71, // [71:71] is the sub-list for extension extendee
-	0,  // [0:71] is the sub-list for field type_name
+	6,  // 25: agentshim.core.v1.TurnStarted.prompt_origin:type_name -> agentshim.core.v1.PromptOrigin
+	20, // 26: agentshim.core.v1.QueryLifecycle.created:type_name -> agentshim.core.v1.QueryCreated
+	23, // 27: agentshim.core.v1.QueryLifecycle.runtime_observed:type_name -> agentshim.core.v1.QueryRuntimeObserved
+	27, // 28: agentshim.core.v1.QueryLifecycle.terminated:type_name -> agentshim.core.v1.QueryTerminated
+	21, // 29: agentshim.core.v1.QueryCreated.fresh:type_name -> agentshim.core.v1.FreshQuery
+	22, // 30: agentshim.core.v1.QueryCreated.resumed:type_name -> agentshim.core.v1.ResumedQuery
+	24, // 31: agentshim.core.v1.QueryRuntimeObserved.identity:type_name -> agentshim.core.v1.QueryRuntimeIdentity
+	25, // 32: agentshim.core.v1.QueryRuntimeIdentity.effective_options:type_name -> agentshim.core.v1.EvidenceFingerprint
+	25, // 33: agentshim.core.v1.QueryRuntimeIdentity.settings:type_name -> agentshim.core.v1.EvidenceFingerprint
+	25, // 34: agentshim.core.v1.QueryRuntimeIdentity.tools:type_name -> agentshim.core.v1.EvidenceFingerprint
+	25, // 35: agentshim.core.v1.QueryRuntimeIdentity.mcp:type_name -> agentshim.core.v1.EvidenceFingerprint
+	25, // 36: agentshim.core.v1.QueryRuntimeIdentity.context_prefix:type_name -> agentshim.core.v1.EvidenceFingerprint
+	26, // 37: agentshim.core.v1.EvidenceFingerprint.unavailable:type_name -> agentshim.core.v1.FingerprintUnavailable
+	28, // 38: agentshim.core.v1.QueryTerminated.vendor_session_identity_unavailable:type_name -> agentshim.core.v1.VendorSessionIdentityUnavailable
+	29, // 39: agentshim.core.v1.QueryTerminated.intentional:type_name -> agentshim.core.v1.IntentionalQueryTermination
+	30, // 40: agentshim.core.v1.QueryTerminated.unexpected_eof:type_name -> agentshim.core.v1.UnexpectedQueryEof
+	31, // 41: agentshim.core.v1.QueryTerminated.iterator_failure:type_name -> agentshim.core.v1.QueryIteratorFailure
+	32, // 42: agentshim.core.v1.QueryTerminated.startup_failure:type_name -> agentshim.core.v1.QueryStartupFailure
+	34, // 43: agentshim.core.v1.AccountUsageObservation.turn_start:type_name -> agentshim.core.v1.TurnStartUsageBoundary
+	35, // 44: agentshim.core.v1.AccountUsageObservation.turn_end:type_name -> agentshim.core.v1.TurnEndUsageBoundary
+	36, // 45: agentshim.core.v1.AccountUsageObservation.available:type_name -> agentshim.core.v1.AccountUsageAvailable
+	38, // 46: agentshim.core.v1.AccountUsageObservation.unavailable:type_name -> agentshim.core.v1.AccountUsageUnavailable
+	37, // 47: agentshim.core.v1.AccountUsageAvailable.five_hour:type_name -> agentshim.core.v1.UsageWindow
+	39, // 48: agentshim.core.v1.AccountUsageUnavailable.service_unavailable:type_name -> agentshim.core.v1.UsageServiceUnavailable
+	40, // 49: agentshim.core.v1.AccountUsageUnavailable.window_unavailable:type_name -> agentshim.core.v1.FiveHourWindowUnavailable
+	41, // 50: agentshim.core.v1.AccountUsageUnavailable.utilization_unavailable:type_name -> agentshim.core.v1.UtilizationUnavailable
+	42, // 51: agentshim.core.v1.AccountUsageUnavailable.sampling_failure:type_name -> agentshim.core.v1.UsageSamplingFailure
+	7,  // 52: agentshim.core.v1.ContextCompacted.trigger:type_name -> agentshim.core.v1.ContextCompactTrigger
+	2,  // 53: agentshim.core.v1.TaskStarted.kind:type_name -> agentshim.core.v1.TaskKind
+	2,  // 54: agentshim.core.v1.TaskProgress.kind:type_name -> agentshim.core.v1.TaskKind
+	2,  // 55: agentshim.core.v1.TaskEnded.kind:type_name -> agentshim.core.v1.TaskKind
+	3,  // 56: agentshim.core.v1.TaskEnded.status:type_name -> agentshim.core.v1.TerminalStatus
+	24, // 57: agentshim.core.v1.ShimHello.query_runtime_identity:type_name -> agentshim.core.v1.QueryRuntimeIdentity
+	6,  // 58: agentshim.core.v1.SubmitPrompt.prompt_origin:type_name -> agentshim.core.v1.PromptOrigin
+	57, // 59: agentshim.core.v1.ModelCatalog.models:type_name -> agentshim.core.v1.ModelOption
+	8,  // 60: agentshim.core.v1.Ack.interrupt_outcome:type_name -> agentshim.core.v1.InterruptOutcome
+	11, // 61: agentshim.core.v1.ReplayEvent.event:type_name -> agentshim.core.v1.Event
+	80, // 62: agentshim.core.v1.PermissionRequest.input:type_name -> google.protobuf.Struct
+	5,  // 63: agentshim.core.v1.PermissionResponse.decision:type_name -> agentshim.core.v1.PermissionDecision
+	80, // 64: agentshim.core.v1.PermissionResponse.updated_input:type_name -> google.protobuf.Struct
+	66, // 65: agentshim.core.v1.PermissionItem.request:type_name -> agentshim.core.v1.PermissionRequest
+	10, // 66: agentshim.core.v1.PermissionItem.resolution:type_name -> agentshim.core.v1.PermissionItem.Resolution
+	12, // 67: agentshim.core.v1.StoreWrite.batch:type_name -> agentshim.core.v1.EventBatch
+	11, // 68: agentshim.core.v1.OpenTaskState.started:type_name -> agentshim.core.v1.Event
+	74, // 69: agentshim.core.v1.CursorList.cursors:type_name -> agentshim.core.v1.CursorState
+	76, // 70: agentshim.core.v1.CursorList.open_tasks:type_name -> agentshim.core.v1.OpenTaskState
+	9,  // 71: agentshim.core.v1.FilePlaneDiagnostic.source_runtime:type_name -> agentshim.core.v1.DiagnosticSourceRuntime
+	80, // 72: agentshim.core.v1.FilePlaneDiagnostic.context:type_name -> google.protobuf.Struct
+	73, // [73:73] is the sub-list for method output_type
+	73, // [73:73] is the sub-list for method input_type
+	73, // [73:73] is the sub-list for extension type_name
+	73, // [73:73] is the sub-list for extension extendee
+	0,  // [0:73] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_core_v1_core_proto_init() }
@@ -6514,7 +6698,7 @@ func file_agentshim_core_v1_core_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_core_v1_core_proto_rawDesc), len(file_agentshim_core_v1_core_proto_rawDesc)),
-			NumEnums:      10,
+			NumEnums:      11,
 			NumMessages:   68,
 			NumExtensions: 0,
 			NumServices:   0,

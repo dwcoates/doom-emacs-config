@@ -77,6 +77,7 @@ import {
   ModelCatalogSchema,
   ModelOptionSchema,
   Plane,
+  PromptOrigin,
   ReplayDoneSchema,
   InterruptOutcome,
   ReplayRequest,
@@ -375,10 +376,10 @@ export class UdsSession {
     this.effectivePermissionMode = deps.permissionMode ?? "default";
     LOGGER.log({ agent_repl_session_id: deps.sessionId, uds_socket: deps.udsSocketPath, store_socket: deps.storeSocketPath, session_source: deps.sessionSource, store_key_known: deps.storeSessionId !== undefined && deps.storeSessionId !== "", permission_mode: this.effectivePermissionMode }, "constructed UDS shim session");
     const target: SdkControlTarget = {
-      submitPrompt: async ({ requestId, text, permissionMode }): Promise<void> => {
+      submitPrompt: async ({ requestId, text, permissionMode, promptOrigin }): Promise<void> => {
         const boundaryAtMs = this.now();
         const usage = await this.captureFiveHourUsage("turn_start", requestId);
-        const turnStart = this.turnStartedEvent(requestId, text, boundaryAtMs);
+        const turnStart = this.turnStartedEvent(requestId, text, boundaryAtMs, promptOrigin);
         const usageObservation = this.accountUsageObservationEvent(
           "turn_start",
           requestId,
@@ -418,6 +419,7 @@ export class UdsSession {
           request_id: requestId,
           plane: "stream",
           turn_id: requestId,
+          prompt_origin: promptOrigin,
           len: text.length,
           turns_in_flight: this.activeTurnIds.length,
           decision: "turn_started",
@@ -1952,7 +1954,12 @@ export class UdsSession {
   }
 
   /** Build the lifecycle fact placed first in an acknowledged turn-start batch. */
-  private turnStartedEvent(requestId: string, text: string, boundaryAtMs: number): Event {
+  private turnStartedEvent(
+    requestId: string,
+    text: string,
+    boundaryAtMs: number,
+    promptOrigin: PromptOrigin,
+  ): Event {
     return create(EventSchema, {
       sessionId: this.store.storeSessionId(),
       seq: 0n,
@@ -1965,6 +1972,7 @@ export class UdsSession {
         value: create(TurnStartedSchema, {
           promptPreview: promptPreview(text),
           turnId: requestId,
+          promptOrigin,
         }),
       },
     });

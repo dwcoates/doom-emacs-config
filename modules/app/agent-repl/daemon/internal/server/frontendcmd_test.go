@@ -53,6 +53,7 @@ type fakePrompts struct {
 	// is what the daemon keys the prompt receipt on, so dropping it would be
 	// invisible to a test that only watched the text.
 	promptRequestIDs []string
+	promptOrigins    []corev1.PromptOrigin
 	interrupts       []string
 	perms            []string
 	models           []string
@@ -131,9 +132,10 @@ func newGatedHandler(t *testing.T, turnActive bool, tasks LiveTaskSource) (*comm
 	return h, p
 }
 
-func (f *fakePrompts) SubmitPrompt(_ context.Context, ws, requestID, text, _ string) error {
+func (f *fakePrompts) SubmitPrompt(_ context.Context, ws, requestID, text, _ string, promptOrigin corev1.PromptOrigin) error {
 	f.prompted = append(f.prompted, ws+":"+text)
 	f.promptRequestIDs = append(f.promptRequestIDs, requestID)
+	f.promptOrigins = append(f.promptOrigins, promptOrigin)
 	return f.err
 }
 func (f *fakePrompts) Interrupt(_ context.Context, ws string) error {
@@ -449,13 +451,34 @@ func TestCommandHandlerSubmitPromptRoutesToPrompts(t *testing.T) {
 	// Arrange
 	h, p, _, _ := newTestHandler(t)
 	// Act
-	err := h.SubmitPrompt(context.Background(), "/ws1", "r1", &frontendv1.SubmitPromptCmd{Text: "hi"})
+	err := h.SubmitPrompt(context.Background(), "/ws1", "r1", &frontendv1.SubmitPromptCmd{Text: "hi", PromptOrigin: corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT})
 	// Assert
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
 	if len(p.prompted) != 1 || p.prompted[0] != "/ws1:hi" {
 		t.Fatalf("prompted = %v", p.prompted)
+	}
+	if len(p.promptOrigins) != 1 || p.promptOrigins[0] != corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT {
+		t.Fatalf("prompt origins = %v, want USER_SENT", p.promptOrigins)
+	}
+}
+
+func TestCommandHandlerSubmitPromptRejectsInvalidOriginBeforeRouting(t *testing.T) {
+	for _, origin := range []corev1.PromptOrigin{
+		corev1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED,
+		corev1.PromptOrigin(999),
+	} {
+		t.Run(fmt.Sprint(origin), func(t *testing.T) {
+			h, p, _, _ := newTestHandler(t)
+			err := h.SubmitPrompt(context.Background(), "/ws1", "r1", &frontendv1.SubmitPromptCmd{Text: "hi", PromptOrigin: origin})
+			if err == nil || !strings.Contains(err.Error(), "prompt_origin") {
+				t.Fatalf("SubmitPrompt origin=%v error = %v, want prompt_origin refusal", origin, err)
+			}
+			if len(p.prompted) != 0 {
+				t.Fatalf("SubmitPrompt origin=%v routed prompts = %v, want none", origin, p.prompted)
+			}
+		})
 	}
 }
 
@@ -466,7 +489,7 @@ func TestCommandHandlerSubmitPromptCarriesTheRequestID(t *testing.T) {
 	// Arrange
 	h, p, _, _ := newTestHandler(t)
 	// Act
-	if err := h.SubmitPrompt(context.Background(), "/ws1", "r1", &frontendv1.SubmitPromptCmd{Text: "hi"}); err != nil {
+	if err := h.SubmitPrompt(context.Background(), "/ws1", "r1", &frontendv1.SubmitPromptCmd{Text: "hi", PromptOrigin: corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT}); err != nil {
 		t.Fatalf("err: %v", err)
 	}
 	// Assert
@@ -1816,7 +1839,7 @@ func TestSubmitPromptAcceptsAnAbsoluteWorkspaceKey(t *testing.T) {
 	// Arrange
 	h, p, _, _ := newTestHandler(t)
 	// Act
-	if err := h.SubmitPrompt(context.Background(), "/Users/x/.config/doom", "r1", &frontendv1.SubmitPromptCmd{Text: "hi"}); err != nil {
+	if err := h.SubmitPrompt(context.Background(), "/Users/x/.config/doom", "r1", &frontendv1.SubmitPromptCmd{Text: "hi", PromptOrigin: corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT}); err != nil {
 		t.Fatalf("err: %v", err)
 	}
 	// Assert
