@@ -754,6 +754,166 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
     expect(session.turnCount()).toBe(1);
   });
 
+  it("keeps one root turn live through a result and late background-task usage", async () => {
+    // Arrange: one accepted prompt launches one SDK task.
+    const { query, store, daemon, session, queryFactoryCalls } = await rig({ storeSessionId: "vendor-uuid" });
+    const log = captureLog();
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "fan out" }));
+    const start = await store.peer().next(StoreWriteSchema);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(start.batch!.events.length),
+      lastSeq: 8n,
+    }));
+    await daemon.next(AckSchema);
+
+    query.emit({
+      type: "system",
+      subtype: "task_started",
+      uuid: "task-start-1",
+      session_id: "vendor-uuid",
+      task_id: "agent-python",
+      task_type: "local_agent",
+      tool_use_id: "tool-agent-python",
+      description: "Python hello world",
+    } as unknown as SdkMessageLike);
+    const taskStart = await store.peer().next(StoreWriteSchema);
+    expect(taskStart.batch!.events.map((event) => event.payload.case)).toEqual(["vendor", "taskStarted"]);
+    expect(taskStart.batch!.events.every((event) => event.requestId === "p1")).toBe(true);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(taskStart.batch!.events.length),
+      lastSeq: 10n,
+    }));
+    query.emit({
+      type: "system",
+      subtype: "task_started",
+      uuid: "task-start-2",
+      session_id: "vendor-uuid",
+      task_id: "agent-go",
+      task_type: "local_agent",
+      tool_use_id: "tool-agent-go",
+      description: "Go hello world",
+    } as unknown as SdkMessageLike);
+    const secondTaskStart = await store.peer().next(StoreWriteSchema);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(secondTaskStart.batch!.events.length),
+      lastSeq: 12n,
+    }));
+
+    // Act: the parent result arrives while the SDK task is live. It is stored,
+    // but it cannot terminate the accepted root turn.
+    query.emit({
+      type: "result",
+      uuid: "parent-result",
+      session_id: "vendor-uuid",
+      subtype: "success",
+      duration_ms: 100,
+    } as unknown as SdkMessageLike);
+    const parentResult = await store.peer().next(StoreWriteSchema);
+    expect(parentResult.batch!.events.map((event) => event.payload.case)).toEqual(["vendor"]);
+    expect(parentResult.batch!.events[0]!.requestId).toBe("p1");
+    expect(session.turnCount()).toBe(1);
+    expect(query.subscriptionUsageCalls).toBe(1);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: 1n,
+      lastSeq: 13n,
+    }));
+
+    query.emit({
+      type: "assistant",
+      uuid: "agent-response",
+      session_id: "vendor-uuid",
+      request_id: "raw-api-request",
+      parent_tool_use_id: "tool-agent-python",
+      message: {
+        id: "agent-message",
+        model: "claude-sonnet",
+        content: [{ type: "text", text: "implemented" }],
+        stop_reason: "end_turn",
+        usage: {
+          input_tokens: 2,
+          output_tokens: 60,
+          cache_read_input_tokens: 26004,
+          cache_creation_input_tokens: 192,
+        },
+      },
+    } as unknown as SdkMessageLike);
+    const lateAssistant = await store.peer().next(StoreWriteSchema);
+    expect(lateAssistant.batch!.events).toHaveLength(1);
+    expect(lateAssistant.batch!.events[0]!.requestId).toBe("p1");
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: 1n,
+      lastSeq: 14n,
+    }));
+
+    query.emit({
+      type: "system",
+      subtype: "task_notification",
+      uuid: "task-end-1",
+      session_id: "vendor-uuid",
+      task_id: "agent-python",
+      tool_use_id: "tool-agent-python",
+      status: "completed",
+      output_file: "/tmp/agent-python.output",
+      summary: "done",
+    } as unknown as SdkMessageLike);
+    const firstTaskEnd = await store.peer().next(StoreWriteSchema);
+    expect(firstTaskEnd.batch!.events.map((event) => event.payload.case)).toEqual(["vendor", "taskEnded"]);
+    expect(firstTaskEnd.batch!.events.every((event) => event.requestId === "p1")).toBe(true);
+    expect(session.turnCount()).toBe(1);
+    expect(query.subscriptionUsageCalls).toBe(1);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(firstTaskEnd.batch!.events.length),
+      lastSeq: 16n,
+    }));
+
+    query.emit({
+      type: "system",
+      subtype: "task_notification",
+      uuid: "task-end-2",
+      session_id: "vendor-uuid",
+      task_id: "agent-go",
+      tool_use_id: "tool-agent-go",
+      status: "completed",
+      output_file: "/tmp/agent-go.output",
+      summary: "done",
+    } as unknown as SdkMessageLike);
+    const terminal = await store.peer().next(StoreWriteSchema);
+
+    // Assert: the final task fact, end quota sample, and the sole TurnEnded
+    // form one ordered durability boundary. The query itself remains alive.
+    expect(terminal.batch!.events.map((event) => event.payload.case)).toEqual([
+      "vendor",
+      "taskEnded",
+      "accountUsageObservation",
+      "turnEnded",
+    ]);
+    expect(terminal.batch!.events.every((event) => event.requestId === "p1")).toBe(true);
+    expect(query.subscriptionUsageCalls).toBe(2);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(terminal.batch!.events.length),
+      lastSeq: 20n,
+    }));
+    await until(() => session.turnCount() === 0);
+    expect(queryFactoryCalls()).toBe(1);
+    expect(query.abortCalls).toBe(0);
+    expect(log.record("SDK result retained as terminal evidence while background tasks remain live")).toMatchObject({
+      request_id: "p1",
+      context: {
+        live_sdk_task_count: 2,
+        live_sdk_task_ids: ["agent-go", "agent-python"],
+        decision: "retain_turn_for_live_sdk_tasks",
+      },
+    });
+    expect(log.record("final SDK background task durably closes the retained root turn")).toMatchObject({
+      request_id: "p1",
+      context: {
+        completed_sdk_task_ids: ["agent-go"],
+        live_sdk_task_count_after: 0,
+        decision: "turn_ended_after_final_sdk_task",
+      },
+    });
+  });
+
   it("writes a non-lifecycle turn claim bridge into a rotated vendor seq space before its end", async () => {
     // Arrange: the old key has delivered data, so a different result UUID is
     // a real rotation. The prompt start is first written under that old key.
