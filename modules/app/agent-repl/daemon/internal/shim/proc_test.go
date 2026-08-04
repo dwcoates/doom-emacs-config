@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -49,8 +50,8 @@ func TestSpawnPassesExtraFileAndDirectsStderrWithoutDaemonPersistence(t *testing
 	if got, err := os.ReadFile(terminal.Name()); err != nil || string(got) != "stderr" {
 		t.Fatalf("terminal=%q err=%v", got, err)
 	}
-	if len(logger.records) != 0 {
-		t.Fatalf("direct stderr was parsed into daemon records: %#v", logger.records)
+	if len(logger.logged()) != 0 {
+		t.Fatalf("direct stderr was parsed into daemon records: %#v", logger.logged())
 	}
 }
 
@@ -61,8 +62,22 @@ type loggedRecord struct {
 	line  string
 }
 
+// recordingLogger collects what the daemon-side logger was told.
+//
+// IT IS WRITTEN FROM TWO GOROUTINES: Spawn starts a stdout pump and a stderr
+// pump and hands both the same Logger, so the recording has to be synchronized
+// like the production loggers it stands in for. Reads go through logged() for
+// the same reason.
 type recordingLogger struct {
+	mu      sync.Mutex
 	records []loggedRecord
+}
+
+// logged returns a snapshot of everything recorded so far.
+func (l *recordingLogger) logged() []loggedRecord {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]loggedRecord(nil), l.records...)
 }
 
 type mirroringLogger struct {
@@ -78,22 +93,38 @@ func canonicalShimRecord(verbosity string) string {
 	return fmt.Sprintf(`{"timestamp":"2026-07-28T12:00:00.123Z","runtime":"shim","level":"info","verbosity":"%s","operation":"shim.event","message":"started","context":{},"pid":42,"workspace_dir":"/tmp/workspace","workspace_id":"9cc7d801","agent_repl_session_id":"s1"}`, verbosity)
 }
 
-func (l *mirroringLogger) MirrorShimRecord(line string) { l.mirrored = append(l.mirrored, line) }
+func (l *mirroringLogger) MirrorShimRecord(line string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.mirrored = append(l.mirrored, line)
+}
+
+// mirroredRecords snapshots the canonical shim lines mirrored to the terminal.
+func (l *mirroringLogger) mirroredRecords() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]string(nil), l.mirrored...)
+}
 
 func (l *recordingLogger) Log(format string, args ...any) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	l.records = append(l.records, loggedRecord{level: "normal", line: fmt.Sprintf(format, args...)})
 }
 
 func (l *recordingLogger) LogVerbose(format string, args ...any) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	l.records = append(l.records, loggedRecord{level: "verbose", line: fmt.Sprintf(format, args...)})
 }
 
 func (l *recordingLogger) record(t *testing.T, index int, level, contains string) {
 	t.Helper()
-	if len(l.records) <= index {
-		t.Fatalf("records = %#v, missing index %d", l.records, index)
+	records := l.logged()
+	if len(records) <= index {
+		t.Fatalf("records = %#v, missing index %d", records, index)
 	}
-	record := l.records[index]
+	record := records[index]
 	if record.level != level || !strings.Contains(record.line, contains) {
 		t.Errorf("record[%d] = %#v, want level=%q containing %q", index, record, level, contains)
 	}
@@ -280,11 +311,11 @@ func TestPumpStderrMirrorsCanonicalShimRecordsWithoutDaemonPersistence(t *testin
 			canonicalShimRecord("verbose")+"\n"+
 			"malformed\n",
 	), logger, &stderrTail{})
-	if len(logger.mirrored) != 2 || !strings.Contains(logger.mirrored[0], `"verbosity":"normal"`) || !strings.Contains(logger.mirrored[1], `"verbosity":"verbose"`) {
-		t.Fatalf("mirrored=%q", logger.mirrored)
+	if len(logger.mirroredRecords()) != 2 || !strings.Contains(logger.mirroredRecords()[0], `"verbosity":"normal"`) || !strings.Contains(logger.mirroredRecords()[1], `"verbosity":"verbose"`) {
+		t.Fatalf("mirrored=%q", logger.mirroredRecords())
 	}
-	if len(logger.records) != 1 || logger.records[0].level != "normal" || !strings.Contains(logger.records[0].line, "malformed") {
-		t.Fatalf("daemon records=%#v", logger.records)
+	if len(logger.logged()) != 1 || logger.logged()[0].level != "normal" || !strings.Contains(logger.logged()[0].line, "malformed") {
+		t.Fatalf("daemon records=%#v", logger.logged())
 	}
 }
 
