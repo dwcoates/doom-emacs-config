@@ -1615,17 +1615,27 @@ func (s *Server) runIdleSweeper() {
 	}
 }
 
-// sweepIdle stops the shim of every session that has actually gone idle,
-// best-effort.
+// sweepIdle hibernates every session that has actually gone idle, best-effort.
 //
 // A workspace whose shim is already stopped returns a "no live session" error
-// from Hibernate, which is expected and skipped, not a failure.
+// from the transition, which is expected and skipped, not a failure.
+//
+// EVERY TEARDOWN THIS SWEEP TAKES GOES THROUGH THE ONE TRANSITION. It used to
+// call Hibernate directly for the sessions the keep-alive policy declined,
+// which stopped the shim WITHOUT writing a hibernation record — a
+// stopped-but-awake durable state whose next prompt silently brought the
+// session back up rather than meeting the revival gate. With an idle timeout
+// shorter than the ping window that was the ordinary case, not a corner.
 func (s *Server) sweepIdle() {
 	nowMs := s.now().UnixMilli()
 	for _, rec := range s.registry.All() {
 		if rec.Terminal || rec.CWD == "" {
 			continue
 		}
+		// STAMPED BEFORE THE POLICY IS ASKED. A record from before the
+		// keep-alive existed carries no last-turn-end, and the policy's "every
+		// unknown answers none" rule would leave it outside the loop forever.
+		rec = s.stampLegacyTurnEnd(rec)
 		// THE KEEP-ALIVE POLICY IS EVALUATED FIRST, and it can take the whole
 		// decision for this session. Its hibernate branches are strictly more
 		// specific than the idle sweep's — they carry the cutoff or the TTL
@@ -1635,23 +1645,87 @@ func (s *Server) sweepIdle() {
 		if s.applyKeepAlivePolicy(rec, nowMs) {
 			continue
 		}
-		if !s.sweepable(rec.SessionID, rec.CWD, nowMs) {
+		idleMs, sweepable := s.sweepable(rec.SessionID, rec.CWD, nowMs)
+		if !sweepable {
 			continue
 		}
-		if err := s.controller.Hibernate(rec.CWD, sessioncontroller.StopCauseHibernateIdleSweep()); err != nil {
+		// THE IDLE TIMEOUT IS AN IDLE CUTOFF. It is the same fact the policy's
+		// own cutoff branch records — "pinging stops and the session sleeps" —
+		// measured against this daemon's own -idle-timeout rather than the
+		// policy's, so the account carries the threshold that actually tripped.
+		detail := registry.HibernationDetail{
+			Cause:     registry.HibernationCauseIdleCutoff,
+			SinceMs:   nowMs,
+			CutoffMs:  int64(s.idleTimeout / time.Millisecond),
+			ElapsedMs: idleMs,
+		}
+		if err := s.controller.HibernateWithCause(rec.CWD, detail); err != nil {
 			// Expected for an already-hibernated / never-brought-up workspace, and
 			// now also for one that started working between sweepable's read and
 			// this call. That race is exactly why the settled check is inside
 			// hibernate() as well as here: this gate can go stale, and the one
 			// inside the teardown cannot.
-			if errors.Is(err, sessioncontroller.ErrNotSettled) {
+			switch {
+			case errors.Is(err, sessioncontroller.ErrNotSettled):
 				s.logf("session %s: idle sweep HELD after the gate (ws %s): the workspace started working between the check and the teardown: %v",
 					rec.SessionID, rec.CWD, err)
-			} else {
+			case errors.Is(err, sessioncontroller.ErrHibernationNoLongerIdle):
+				s.logf("session %s: idle sweep REFUSED as stale (ws %s): %v", rec.SessionID, rec.CWD, err)
+			case errors.Is(err, sessioncontroller.ErrAlreadyHibernated),
+				errors.Is(err, sessioncontroller.ErrHibernationInFlight):
+				// Another cause won the single-transition claim. Expected.
+			default:
 				s.logf("session %s: idle sweep skipped (ws %s): %v", rec.SessionID, rec.CWD, err)
 			}
 		}
 	}
+}
+
+// stampLegacyTurnEnd gives a record with no last-turn-end one, taken from the
+// workspace's own dated state history, and returns the record as it now stands.
+//
+// PRE-BRANCH RECORDS WOULD OTHERWISE LIVE OUTSIDE THE POLICY FOREVER. Every
+// keep-alive decision is a time-since check against LastTurnEndMs, and "every
+// unknown answers none" means a zero one is never pinged and never hibernated
+// by the policy — so a session created before this feature shipped would be
+// governed only by the sweep's own threshold for the rest of its life.
+//
+// THE INSTANT COMES FROM DURABLE STATE, NEVER FROM now(). Stamping the moment
+// of observation would claim the session had just finished a turn, resetting
+// its idleness on every daemon boot and making a long-quiet legacy session look
+// permanently fresh. The SSM's last activity is the truest dated fact the
+// daemon holds about a session whose turn ends it never saw.
+func (s *Server) stampLegacyTurnEnd(rec registry.Record) registry.Record {
+	if rec.LastTurnEndMs > 0 || s.registry == nil {
+		return rec
+	}
+	atMs, dated, err := s.ssm.LastActivityMs(rec.CWD)
+	if err != nil {
+		s.logf("session %s: legacy last_turn_end_ms stamp read FAILED (ws %s): %v — the session stays outside the keep-alive policy this tick",
+			rec.SessionID, rec.CWD, err)
+		return rec
+	}
+	if !dated || atMs <= 0 {
+		return rec
+	}
+	found, err := s.registry.Update(rec.SessionID, func(r *registry.Record) {
+		if r.LastTurnEndMs == 0 {
+			r.LastTurnEndMs = atMs
+		}
+	})
+	if err != nil {
+		s.logf("session %s: legacy last_turn_end_ms stamp write FAILED (ws %s) at_ms=%d: %v — the session stays outside the keep-alive policy",
+			rec.SessionID, rec.CWD, atMs, err)
+		return rec
+	}
+	if !found {
+		s.logf("session %s: legacy last_turn_end_ms stamp found no record (ws %s)", rec.SessionID, rec.CWD)
+		return rec
+	}
+	s.logf("session %s: legacy record STAMPED with last_turn_end_ms=%d from its dated state history (ws %s) — it enters the cache keep-alive policy from here rather than living outside it",
+		rec.SessionID, atMs, rec.CWD)
+	rec.LastTurnEndMs = atMs
+	return rec
 }
 
 // keepAliveConfig is the resolved policy, defaulting a zero Config rather than
@@ -1764,37 +1838,40 @@ func (s *Server) applyKeepAlivePolicy(rec registry.Record, nowMs int64) (owned b
 // absent evidence is precisely how a bring-up in flight got hibernated before
 // its first event landed. Only a positive, dated measurement licenses a
 // teardown.
-func (s *Server) sweepable(sessionID, workspace string, nowMs int64) bool {
+// It reports the MEASURED idleness alongside the verdict, so the hibernation
+// account records the figure this gate acted on rather than one re-derived from
+// a clock that has since moved.
+func (s *Server) sweepable(sessionID, workspace string, nowMs int64) (idleMs int64, ok bool) {
 	st, found, err := s.ssm.Current(workspace)
 	if err != nil {
 		s.logf("session %s: idle sweep state read (ws %s): %v", sessionID, workspace, err)
-		return false
+		return 0, false
 	}
 	if !found {
 		s.logf("session %s: idle sweep HELD (ws %s): no resolved state, and an unknown workspace is not a quiet one",
 			sessionID, workspace)
-		return false
+		return 0, false
 	}
 	if st.GetTurnActive() {
-		return false
+		return 0, false
 	}
 	atMs, dated, err := s.ssm.LastActivityMs(workspace)
 	if err != nil {
 		s.logf("session %s: idle sweep activity read (ws %s): %v", sessionID, workspace, err)
-		return false
+		return 0, false
 	}
 	if !dated {
 		s.logf("session %s: idle sweep HELD (ws %s): no state history to date the workspace by",
 			sessionID, workspace)
-		return false
+		return 0, false
 	}
 	idle := time.Duration(nowMs-atMs) * time.Millisecond
 	if idle < s.idleTimeout {
-		return false
+		return 0, false
 	}
 	s.logf("session %s: idle sweep hibernating (ws %s): quiet for %s, threshold %s",
 		sessionID, workspace, idle.Round(time.Second), s.idleTimeout)
-	return true
+	return int64(idle / time.Millisecond), true
 }
 
 // ShutdownAll ends the daemon's session work (daemon teardown). The registry
