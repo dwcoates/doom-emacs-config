@@ -253,6 +253,30 @@ func (s *keepAliveSession) checkAfterAdvancing(t *testing.T, d time.Duration) {
 	}
 }
 
+// hibernate forces this session asleep and returns the typed cause, failing if
+// the daemon refuses. It is SETUP for the revival tests, so a refusal here is a
+// broken premise rather than a finding.
+func (s *keepAliveSession) hibernate(t *testing.T, requestID string) *frontendv1.HibernationDetail {
+	t.Helper()
+	sendHibernate(t, s.conn, requestID)
+	if ack := awaitAck(t, s.conn, requestID, "the forced hibernate"); !ack.GetOk() {
+		t.Fatalf("hibernateWorkspace nacked while setting up a revival: %s", ack.GetError())
+	}
+	return awaitHibernationDetail(t, s.conn, s.sessionID)
+}
+
+// awaitAwake blocks until the session reports a live, attached shim again —
+// the ordinary bring-up a revival performs.
+func (s *keepAliveSession) awaitAwake(t *testing.T) {
+	t.Helper()
+	awaitAll(t, s.conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
+		"a SessionView reporting the revived session attached and awake": func(frame *frontendv1.FrontendFrame) bool {
+			view := sessionViewFor(frame, s.sessionID)
+			return view != nil && view.GetShimAttached() && !view.GetHibernated()
+		},
+	})
+}
+
 // --- tailing the durable record ----------------------------------------------
 
 // storeTail is a live subscription to one vendor session's seq space in the
