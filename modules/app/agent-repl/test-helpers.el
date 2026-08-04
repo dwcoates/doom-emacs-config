@@ -749,6 +749,64 @@ fail with `file-missing'."
       (make-directory dir t)))
   (with-temp-file path (insert content)))
 
+;;;; ---- Generated protocol vocabulary ----
+;;
+;; The Emacs frontend hand-declares protocol spellings (frame oneof arms,
+;; command oneof arms, `PromptOrigin' value names) that the protos already
+;; own.  The generated bindings under `proto/gen/' are checked in, so a test
+;; can read the REAL vocabulary out of them instead of restating it a third
+;; time: a rename in the proto that a hand-written list did not follow then
+;; fails the suite rather than drifting until a frame is refused at runtime.
+;;
+;; Go is the reader of record because its struct tags carry BOTH the proto
+;; field name and the protojson (lowerCamelCase) name the wire actually uses.
+
+(defconst agent-repl-test--module-dir
+  (file-name-directory (or load-file-name buffer-file-name))
+  "Absolute path of the agent-repl module directory this harness lives in.")
+
+(defun agent-repl-test--generated-go-text (relative)
+  "Return the text of RELATIVE under the checked-in `proto/gen/go/' tree.
+Signals when the file is absent — a missing generated binding means the
+vocabulary assertions would silently assert nothing."
+  (let ((path (expand-file-name (concat "proto/gen/go/" relative)
+                                agent-repl-test--module-dir)))
+    (unless (file-readable-p path)
+      (error "agent-repl test: generated proto binding not readable: %s" path))
+    (with-temp-buffer
+      (insert-file-contents path)
+      (buffer-string))))
+
+(defun agent-repl-test--generated-oneof-arms (relative message)
+  "Return the protojson names of MESSAGE's oneof arms in generated Go RELATIVE.
+protoc-gen-go emits one wrapper struct per arm, named MESSAGE_Arm, whose
+single field carries the protobuf tag.  The tag's `json=' half is the
+lowerCamelCase name the wire uses; a single-word arm has no `json=' half,
+and its `name=' half IS the protojson name.  The field may sit behind the
+proto comment protoc-gen-go carries over, so the scan runs to the first
+tag inside the struct body rather than to the next line."
+  (let ((text (agent-repl-test--generated-go-text relative))
+        (re (concat "^type " (regexp-quote message)
+                    "_[A-Za-z0-9]+ struct {[^}]*?,name=\\([a-z0-9_]+\\)"
+                    "\\(?:,json=\\([A-Za-z0-9]+\\)\\)?"))
+        (start 0)
+        names)
+    (while (string-match re text start)
+      (push (or (match-string 2 text) (match-string 1 text)) names)
+      (setq start (match-end 0)))
+    (delete-dups names)))
+
+(defun agent-repl-test--generated-enum-names (relative prefix)
+  "Return every PREFIX-prefixed enum value name spelled in generated file RELATIVE."
+  (let ((text (agent-repl-test--generated-go-text relative))
+        (re (concat "\\_<" (regexp-quote prefix) "[A-Z0-9_]+\\_>"))
+        (start 0)
+        names)
+    (while (string-match re text start)
+      (push (match-string 0 text) names)
+      (setq start (match-end 0)))
+    (delete-dups names)))
+
 (defmacro agent-repl-test--with-temp-buffer (name &rest body)
   "Create (or reuse) buffer NAME, execute BODY, kill buffer only if we created it.
 If NAME already refers to a live buffer when the macro runs (e.g. `*scratch*',
