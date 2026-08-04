@@ -274,6 +274,109 @@ FIELD-JSON is the already-serialized `\"field\": {...}' body."
       ;; Assert — only the real frame dispatched
       (should (= calls 1)))))
 
+;;;; ---- filter: a failing handler cannot stall the batch -----------------
+;;
+;; One chunk routinely carries frames for several workspaces.  A handler that
+;; signals must not abandon the drain: the complete frames behind it are
+;; already whole in the accumulator and would otherwise wait for the next
+;; chunk.  The batch drains, then the first failure is re-signalled — the
+;; error is contained for the length of the batch, never swallowed.
+
+(defconst agent-repl-test--uds-failing-chunk
+  (concat "{\"workspaceState\":{\"workspace\":\"bad\"}}\n"
+          "{\"snapshot\":{\"workspace\":\"good\"}}\n")
+  "A two-frame chunk whose FIRST frame's handler is made to signal.")
+
+(ert-deftest agent-repl-test-uds-filter-dispatches-frames-behind-a-failing-handler ()
+  "A signalling handler does not stop the frames behind it from dispatching."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (reached)
+      (agent-repl--uds-register-handler
+       "workspaceState" (lambda (_p) (error "handler blew up")))
+      (agent-repl--uds-register-handler "snapshot" (lambda (_p) (setq reached t)))
+      (cl-letf (((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
+        ;; Act
+        (ignore-errors
+          (agent-repl--uds-filter nil agent-repl-test--uds-failing-chunk))
+        ;; Assert
+        (should reached)))))
+
+(ert-deftest agent-repl-test-uds-filter-re-signals-a-handler-failure ()
+  "The contained failure is raised again once the drain completes."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl--uds-register-handler
+     "workspaceState" (lambda (_p) (error "handler blew up")))
+    (agent-repl--uds-register-handler "snapshot" #'ignore)
+    (cl-letf (((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
+      ;; Act / Assert
+      (should-error
+       (agent-repl--uds-filter nil agent-repl-test--uds-failing-chunk)
+       :type 'error))))
+
+(ert-deftest agent-repl-test-uds-filter-re-signals-the-first-failure ()
+  "When two handlers fail, the FIRST failure is the one raised."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl--uds-register-handler
+     "workspaceState" (lambda (_p) (error "first")))
+    (agent-repl--uds-register-handler
+     "snapshot" (lambda (_p) (error "second")))
+    (cl-letf (((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
+      (let ((err (should-error
+                  (agent-repl--uds-filter nil agent-repl-test--uds-failing-chunk))))
+        ;; Assert
+        (should (equal (cadr err) "first"))))))
+
+(ert-deftest agent-repl-test-uds-filter-drains-the-accumulator-past-a-failure ()
+  "The batch is consumed to the end, so no complete frame is left buffered."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl--uds-register-handler
+     "workspaceState" (lambda (_p) (error "handler blew up")))
+    (agent-repl--uds-register-handler "snapshot" #'ignore)
+    (cl-letf (((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
+      ;; Act
+      (ignore-errors
+        (agent-repl--uds-filter nil agent-repl-test--uds-failing-chunk))
+      ;; Assert
+      (should (string-empty-p agent-repl--uds-read-accumulator)))))
+
+(ert-deftest agent-repl-test-uds-filter-logs-the-failing-frame ()
+  "The contained failure is loud-logged with the arm and workspace that caused it."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (logged)
+      (agent-repl--uds-register-handler
+       "workspaceState" (lambda (_p) (error "handler blew up")))
+      (agent-repl--uds-register-handler "snapshot" #'ignore)
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+        ;; Act
+        (ignore-errors
+          (agent-repl--uds-filter nil agent-repl-test--uds-failing-chunk))
+        ;; Assert
+        (should (cl-some
+                 (lambda (l)
+                   (and (string-match-p "HANDLER FAILED field=workspaceState" l)
+                        (string-match-p "workspace=\"bad\"" l)))
+                 logged))))))
+
+(ert-deftest agent-repl-test-uds-dispatch-outside-a-drain-propagates-the-failure ()
+  "A dispatch with no drain to re-signal for it lets the handler error escape.
+Containment is scoped to the batch; outside one there is nobody to raise
+the recorded error, so containing it there would be swallowing it."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl--uds-register-handler
+     "workspaceState" (lambda (_p) (error "handler blew up")))
+    (cl-letf (((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
+      ;; Act / Assert
+      (should-error
+       (agent-repl--uds-dispatch-frame '(:workspaceState (:workspace "bad")))
+       :type 'error))))
+
 ;;;; ---- connect (external boundary mocked) ------------------------------
 
 (ert-deftest agent-repl-test-uds-connect-invokes-boundary-with-path ()
@@ -783,31 +886,33 @@ workspace open."
   ;; Act / Assert
   (should (member "progress" agent-repl--uds-known-frame-fields)))
 
-(ert-deftest agent-repl-test-uds-progress-is-a-deliberately-ignored-frame ()
-  "`progress' is declared ignored: the footer is webapp-only by design."
+(ert-deftest agent-repl-test-uds-progress-is-no-longer-an-ignored-frame ()
+  "`progress' left the ignored list when it acquired a handler.
+The consolidated footer is still webapp-only, but the proto assigns ONE
+of the message's fields — `expensive_turn' — to Emacs, and
+`context-cost.el' registers a reader for it.  An arm on the ignored list
+AND carrying a handler would state two incompatible things about the same
+frame."
   ;; Act / Assert
-  (should (member "progress" agent-repl--uds-ignored-frame-fields)))
+  (should-not (member "progress" agent-repl--uds-ignored-frame-fields)))
 
 (ert-deftest agent-repl-test-uds-dispatch-progress-frame-returns-nil ()
-  "Dispatching a progress frame is a no-op, not a signal."
+  "Dispatching a progress frame is quiet, not a signal.
+Nothing is registered inside this fixture's cleared handler registry, and
+a known arm with no handler is a logged gap rather than an error."
   ;; Arrange
   (agent-repl-test--with-uds
     ;; Act / Assert
     (should-not (agent-repl--uds-dispatch-frame
                  '(:progress (:workspace "ws1" :sessionId "s1" :liveTaskCount 0))))))
 
-(ert-deftest agent-repl-test-uds-dispatch-progress-frame-skips-unwired-warning ()
-  "A progress frame must NOT log the unfinished-wiring message a real gap logs."
-  ;; Arrange
-  (agent-repl-test--with-uds
-    (let (logged)
-      (cl-letf (((symbol-function 'agent-repl--log)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
-        ;; Act
-        (agent-repl--uds-dispatch-frame '(:progress (:workspace "ws1")))
-        ;; Assert
-        (should-not (seq-find (lambda (m) (string-match-p "no handler registered" m))
-                              logged))))))
+(ert-deftest agent-repl-test-uds-progress-has-a-registered-handler ()
+  "A progress frame reaches a handler, so it never logs unfinished wiring.
+This is the same guarantee the old ignored-list membership gave, now held
+the other way round: the arm is dispatched because `context-cost.el'
+registered a reader at load, not skipped because nothing wanted it."
+  ;; Act / Assert
+  (should (assoc "progress" agent-repl--uds-frame-handlers)))
 
 (ert-deftest agent-repl-test-uds-workspace-roster-is-a-known-frame ()
   "The `workspaceRoster' broadcast echo is a recognized frame field.
@@ -1780,3 +1885,45 @@ connection state over an open socket."
         (agent-repl--uds-sentinel 'fake-proc "open\n")
         ;; Assert
         (should (eq agent-repl--uds-connection-state 'open))))))
+
+;;;; ---- The vocabulary matches the generated proto ------------------------
+;;
+;; This file hand-declares the frame and command oneof spellings the protos
+;; already own.  Until the frontends consume a generated constants module,
+;; drift is caught HERE, against the checked-in generated bindings: a
+;; misspelled arm then fails the suite instead of surfacing as a refused
+;; frame or a daemon-side unknown-command NACK at runtime.
+
+(ert-deftest agent-repl-test-uds-known-frame-fields-match-the-proto ()
+  "Every declared frame arm is spelled exactly as a `FrontendFrame' oneof arm."
+  ;; Arrange
+  (let ((generated (agent-repl-test--generated-oneof-arms
+                    "agentshim/frontend/v1/frontend.pb.go" "FrontendFrame")))
+    ;; Act / Assert
+    (should generated)
+    (should-not (cl-remove-if (lambda (field) (member field generated))
+                              agent-repl--uds-known-frame-fields))))
+
+(ert-deftest agent-repl-test-uds-known-command-fields-match-the-proto ()
+  "Every declared command arm is spelled exactly as a `FrontendCommand' oneof arm.
+The reverse containment is deliberately NOT asserted: `createWorkspace'
+exists in the proto and is deliberately absent here."
+  ;; Arrange
+  (let ((generated (agent-repl-test--generated-oneof-arms
+                    "agentshim/frontend/v1/frontend.pb.go" "FrontendCommand")))
+    ;; Act / Assert
+    (should generated)
+    (should-not (cl-remove-if (lambda (field) (member field generated))
+                              agent-repl--uds-known-command-fields))))
+
+(ert-deftest agent-repl-test-uds-ignored-frame-fields-match-the-proto ()
+  "Every deliberately-ignored arm is spelled as a real `FrontendFrame' arm.
+A typo here would silently move an arm from the ignored list into the
+unfinished-wiring log, which is the opposite of what the list means."
+  ;; Arrange
+  (let ((generated (agent-repl-test--generated-oneof-arms
+                    "agentshim/frontend/v1/frontend.pb.go" "FrontendFrame")))
+    ;; Act / Assert
+    (should generated)
+    (should-not (cl-remove-if (lambda (field) (member field generated))
+                              agent-repl--uds-ignored-frame-fields))))

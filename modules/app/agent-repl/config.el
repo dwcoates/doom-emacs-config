@@ -248,6 +248,13 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; color constants status.el defines — both load above.  It also starts a
 ;; timer, so it must come after core.el's `--cancel-all-timers'.
 (agent-repl--load-module "readiness")
+;; WHY: context-cost.el decorates the SAME webview modeline off frontend.el's
+;; `agent-repl-frontend-webview-adopt-hook', registers its `progress' frame
+;; handler on frontend-uds.el's dispatcher, and reads the int64 helper
+;; frontend-state.el defines — all three load above.  It owns exactly one
+;; field of ProgressView (`expensive_turn'); the rest of that message stays
+;; webapp-only.
+(agent-repl--load-module "context-cost")
 (agent-repl--load-module "prompt-summary")
 (agent-repl--load-module "ai-title")
 (agent-repl--load-module "context")

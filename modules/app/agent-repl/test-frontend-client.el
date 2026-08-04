@@ -1479,3 +1479,65 @@ reaching the daemon, so this is the guard that the wiring exists at all."
         (agent-repl--frontend-restart-session "ws1")
         ;; Assert
         (should (cl-some (lambda (l) (string-match-p "REJECTED" l)) logged))))))
+
+;;;; ---- SPC o z: DELIBERATE HIBERNATION -----------------------------------
+;;
+;; The user asking for the ~500MB back now instead of waiting out the idle
+;; sweeper.  The daemon refuses mid-turn, so the nack path carries as much
+;; weight as the send does: a refused hibernate that read as success would
+;; leave the user believing they had reclaimed memory they still hold.
+
+(ert-deftest agent-repl-test-frontend-hibernate-workspace-sends-the-command ()
+  "The hibernate sends `hibernateWorkspace' keyed by the workspace's cwd."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_1")
+    (agent-repl-test--with-uds
+      ;; Act
+      (agent-repl--frontend-hibernate-workspace "ws1")
+      ;; Assert — the daemon routes by cwd, never the persp name.
+      (pcase-let ((`(,field ,payload ,ws) (car uds-commands)))
+        (should (equal field "hibernateWorkspace"))
+        (should (null payload))
+        (should (equal ws "/w"))))))
+
+(ert-deftest agent-repl-test-frontend-hibernate-workspace-is-a-known-command ()
+  "`hibernateWorkspace' is in the sendable command vocabulary.
+An arm missing from the allow-list fails loudly at the send rather than
+reaching the daemon, so this is the guard that the wiring exists at all."
+  (should (member "hibernateWorkspace" agent-repl--uds-known-command-fields)))
+
+(ert-deftest agent-repl-test-frontend-hibernate-workspace-surfaces-a-rejection ()
+  "A REJECTED hibernate is logged, never read as a session that went to sleep."
+  ;; Arrange
+  (let (logged)
+    (cl-letf (((symbol-function 'agent-repl--uds-send-command) (lambda (&rest _) "req-1"))
+              ((symbol-function 'agent-repl--uds-track-command)
+               (lambda (_req _field _ws &optional on-failure &rest _)
+                 (when on-failure (funcall on-failure "turn in flight"))))
+              ((symbol-function 'agent-repl--log)
+               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged)))
+              ((symbol-function 'message) (lambda (&rest _) nil)))
+      (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+        ;; Act
+        (agent-repl--frontend-hibernate-workspace "ws1")
+        ;; Assert
+        (should (cl-some (lambda (l) (string-match-p "REJECTED" l)) logged))))))
+
+(ert-deftest agent-repl-test-frontend-hibernate-workspace-echoes-the-rejection ()
+  "A REJECTED hibernate reaches the USER, not only the log.
+The log is where the reason is diagnosed; the echo area is the only place
+the person who pressed the key learns the memory was never freed."
+  ;; Arrange
+  (let (echoed)
+    (cl-letf (((symbol-function 'agent-repl--uds-send-command) (lambda (&rest _) "req-1"))
+              ((symbol-function 'agent-repl--uds-track-command)
+               (lambda (_req _field _ws &optional on-failure &rest _)
+                 (when on-failure (funcall on-failure "turn in flight"))))
+              ((symbol-function 'agent-repl--log) (lambda (&rest _) nil))
+              ((symbol-function 'message)
+               (lambda (fmt &rest args) (push (apply #'format fmt args) echoed))))
+      (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+        ;; Act
+        (agent-repl--frontend-hibernate-workspace "ws1")
+        ;; Assert
+        (should (cl-some (lambda (l) (string-match-p "refused" l)) echoed))))))

@@ -202,12 +202,16 @@ SENDER of `scheduleShutdown'/`cancelScheduledShutdown' and a cancel needs
 the live `schedule_id', so `frontend-state.el' registers a handler that
 records the lease and logs the edge.
 
-`taskCatalog', `heartbeat' (E4), `queue' (E4), `progress' (F1), and
-`workspaceRoster' are decoded for wire parity and rendered by nothing
-here — see `agent-repl--uds-ignored-frame-fields'.")
+`progress' (F1) is handled for exactly ONE of its fields:
+`context-cost.el' registers a handler that reads `expensive_turn' and
+nothing else.  The consolidated progress footer remains webapp-only.
+
+`taskCatalog', `heartbeat' (E4), and `workspaceRoster' are decoded for
+wire parity and rendered by nothing here — see
+`agent-repl--uds-ignored-frame-fields'.")
 
 (defconst agent-repl--uds-ignored-frame-fields
-  '("taskCatalog" "heartbeat" "queue" "progress" "workspaceRoster")
+  '("taskCatalog" "heartbeat" "queue" "workspaceRoster")
   "Frame arms Emacs decodes for wire parity but DELIBERATELY renders nothing for.
 These are a subset of `agent-repl--uds-known-frame-fields'.
 
@@ -229,15 +233,14 @@ drain lease's `QueueEntry.shutdown_hold' too: a held entry rides the same
 ignored arm, so a lease-held queue decodes and is dropped exactly like
 any other queue push, with nothing here to weaken.
 
-`progress' (F1): the consolidated progress footer's whole input.  The
-footer is webapp-only by settled decision (design-progress-footer.md,
-\"No Emacs component\"), so this arm has no Emacs consumer and never
-will.  It is registered because the daemon PUSHES it: this vocabulary
-predated the frame, so every ProgressView push signalled
-`agent-repl-uds-malformed-frame' and surfaced as a user-visible error on
-workspace open.  Registering this one KNOWN arm is the fix; the
-malformed guard itself is unchanged, so a genuinely unknown future arm
-still fails loudly.
+\(`progress' used to be listed here.  The consolidated progress footer is
+still webapp-only by settled decision — design-progress-footer.md, \"No
+Emacs component\" — and every field on the message except one is still
+rendered by nothing here.  The exception is `expensive_turn', which the
+proto assigns to Emacs explicitly: `context-cost.el' registers a handler
+that reads that field and drops the rest.  An arm with a handler is
+dispatched, so `progress' is no longer ignorable, and the one-field
+narrowness of the reader is what keeps the footer decision intact.)
 
 `taskCatalog': the complete detached-task roster.  The webapp renders it
 in the progress footer's task counter; Emacs renders only the daemon's
@@ -261,7 +264,8 @@ not unfinished wiring.")
     "workspaceMaterialized" "hostActionCompleted"
     "daemonHealth" "sessionHealth" "restartSession"
     "publishWorkspaceRoster"
-    "scheduleShutdown" "cancelScheduledShutdown")
+    "scheduleShutdown" "cancelScheduledShutdown"
+    "hibernateWorkspace")
   "The protojson names of every SENDABLE `FrontendCommand' oneof arm.
 Mirrors the `command' oneof in frontend.proto.  Sending an unknown
 command field is a programming error and fails loudly.
@@ -293,6 +297,15 @@ hands the daemon the decision of WHEN: it blocks new turns and executes
 the same `ShutdownCmd' semantics once every hold clears.  Emacs sends
 both from `daemon.el' (`agent-repl-frontend-daemon-restart-scheduled' and
 `agent-repl-frontend-daemon-cancel-scheduled-restart').
+
+`hibernateWorkspace' asks the daemon to stop one workspace's shim NOW
+and mark the session hibernated, reclaiming its ~500MB without waiting
+for the idle sweeper.  Emacs sends it from `frontend.el'
+\(`agent-repl-hibernate-workspace').  The daemon refuses it while a turn
+is live or the merge lease is held, and that refusal arrives as an
+ordinary nacked `CommandAck' — which is why the send is TRACKED: a
+refused hibernate that read as a successful one would leave the user
+believing they had freed memory they still hold.
 
 `publishWorkspaceRoster' carries the sidebar roster (sidebar.el).  Emacs
 is its ONLY publisher: Emacs owns the workspace model, so the roster is
@@ -660,10 +673,32 @@ and reconnects (design §4.4)."
 
 ;;;; ---- Inbound framing + decode ----------------------------------------
 
+(defvar agent-repl--uds-drain-active nil
+  "Non-nil only while `agent-repl--uds-filter' is draining a batch of frames.
+Handler containment is scoped to the drain and nowhere else: a dispatch
+outside one has no drain to re-signal for it, so its errors must keep
+propagating straight to the caller.")
+
+(defvar agent-repl--uds-drain-error nil
+  "The FIRST handler failure of the current drain, as (SYMBOL . DATA).
+Recorded rather than raised so the frames BEHIND the failing one still
+reach their handlers in this batch; `agent-repl--uds-filter' re-signals
+it once the drain is done.  Nothing is swallowed — the failure is
+loud-logged at the moment it is recorded, and raised after.")
+
 (defun agent-repl--uds-filter (_proc chunk)
   "Process filter: accumulate CHUNK and dispatch every complete frame.
 Frames are newline-delimited; a partial trailing frame is retained in
-`agent-repl--uds-read-accumulator' until its newline arrives."
+`agent-repl--uds-read-accumulator' until its newline arrives.
+
+A handler that signals no longer takes the rest of the batch down with
+it.  One chunk routinely carries frames for several workspaces, and a
+handler error used to abandon the loop mid-batch: the complete frames
+already sitting in the accumulator behind it — an unrelated workspace's
+`sessionView', a `commandAck' someone is blocking on — waited for the
+next chunk to arrive, which may be seconds away or never.  The batch now
+always drains, and the first failure is re-signalled at the end, so the
+error still reaches the caller exactly once and exactly as loudly."
   ;; A filter may receive a high rate of small chunks; retain only framing
   ;; metrics, never wire contents, in the verbose trace.
   (agent-repl--log-verbose
@@ -671,12 +706,17 @@ Frames are newline-delimited; a partial trailing frame is retained in
    (length chunk) (length agent-repl--uds-read-accumulator))
   (setq agent-repl--uds-read-accumulator
         (concat agent-repl--uds-read-accumulator chunk))
-  (let (line)
+  (let ((agent-repl--uds-drain-active t)
+        (agent-repl--uds-drain-error nil)
+        line)
     (while (setq line (agent-repl--uds-next-line))
       (agent-repl--uds-handle-line line))
     (agent-repl--log-verbose
      nil "uds-filter: buffered-after=%d"
-     (length agent-repl--uds-read-accumulator))))
+     (length agent-repl--uds-read-accumulator))
+    (when agent-repl--uds-drain-error
+      (signal (car agent-repl--uds-drain-error)
+              (cdr agent-repl--uds-drain-error)))))
 
 (defun agent-repl--uds-next-line ()
   "Pop and return the next complete (newline-terminated) frame line.
@@ -722,13 +762,47 @@ is never silently skipped (AGENTS.md No-Silent-Fallbacks)."
      (signal 'agent-repl-uds-malformed-frame
              (list (error-message-string err) line)))))
 
+(defun agent-repl--uds-call-frame-handler (field ws workspace handler payload)
+  "Call HANDLER on PAYLOAD for frame arm FIELD, returning its value.
+
+Outside a drain the handler's error propagates to the caller untouched.
+INSIDE one (`agent-repl--uds-drain-active') the failure is contained for
+the length of the batch and no longer: it is loud-logged here with the
+arm and the workspace that produced it, the FIRST such failure is
+recorded in `agent-repl--uds-drain-error', and `agent-repl--uds-filter'
+re-signals that error once every remaining complete frame has been
+dispatched.
+
+This is containment, not suppression.  The alternative — letting the
+signal unwind the drain loop — silently makes one workspace's malformed
+frame into another workspace's stalled UI, because the frames behind it
+are already whole in the accumulator and simply never get read.  WS is
+the resolved workspace name for the log ladder; WORKSPACE is the raw wire
+value, kept in the message text so an unowned path stays correlatable."
+  (if (not agent-repl--uds-drain-active)
+      (funcall handler payload)
+    (condition-case err
+        (funcall handler payload)
+      (error
+       (agent-repl--log
+        ws
+        "uds-dispatch: HANDLER FAILED field=%s workspace=%S handler=%s error=%s — remaining frames still dispatched, error re-signalled after the drain"
+        field workspace handler (error-message-string err))
+       (unless agent-repl--uds-drain-error
+         (setq agent-repl--uds-drain-error err))
+       nil))))
+
 (defun agent-repl--uds-dispatch-frame (frame)
   "Dispatch decoded FRAME (a one-key plist) to its registered handler.
 The single top-level key names the `FrontendFrame' oneof arm.  A frame
 with no oneof field, or an unknown one, is loud-logged and SIGNALS
 `agent-repl-uds-malformed-frame'.  A KNOWN field with no registered
 handler is loud-logged (a not-yet-wired condition surfaced honestly),
-not silently dropped.  Returns the handler's value, or nil."
+not silently dropped.  Returns the handler's value, or nil.
+
+A handler that itself signals is routed through
+`agent-repl--uds-call-frame-handler', which contains the failure for the
+length of a drain batch and re-signals it afterwards."
   (unless (and (listp frame) (keywordp (car frame)) (null (cddr frame)))
     (agent-repl--log nil
                      "uds-dispatch: MALFORMED frame shape=%s element-count=%s — expected one oneof arm"
@@ -761,7 +835,8 @@ not silently dropped.  Returns the handler's value, or nil."
           (agent-repl--log log-workspace
                            "uds-dispatch: field=%s workspace=%S session-id=%S revision=%S state=%S -> handler=%s"
                            field workspace session-id revision state handler)
-          (funcall handler payload))
+          (agent-repl--uds-call-frame-handler
+           field log-workspace workspace handler payload))
          ((member field agent-repl--uds-ignored-frame-fields)
           (let ((task-count (and (equal field "taskCatalog")
                                  (length (plist-get payload :tasks)))))
