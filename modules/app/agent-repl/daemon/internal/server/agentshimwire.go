@@ -15,6 +15,7 @@ import (
 
 	"claude-repld/internal/frontend"
 	"claude-repld/internal/progress"
+	"claude-repld/internal/sessioncontroller"
 	"claude-repld/internal/ssm"
 	"claude-repld/internal/workspace/merge"
 )
@@ -96,7 +97,7 @@ type AgentShimConfig struct {
 	// (the default) PRESERVES the session shims so the next daemon reattaches
 	// to them. Nil makes the shutdown command a loud failing ack (the
 	// capability is unconfigured).
-	RequestShutdown func(stopShims bool)
+	RequestShutdown func(stopShims bool, cause sessioncontroller.StopCause)
 	// WorkspaceCreation owns durable workspace-create jobs and retained host
 	// actions. Required: it receives create/materialized/completion commands
 	// and supplies/publishes the host-only work that Emacs renders. It is kept
