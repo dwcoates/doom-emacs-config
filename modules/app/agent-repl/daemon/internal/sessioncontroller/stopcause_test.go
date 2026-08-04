@@ -81,7 +81,8 @@ func TestEachStopCauseReachesTheShimAsItsOwnAttribution(t *testing.T) {
 func TestEveryStopCauseConstructorIsRendered(t *testing.T) {
 	// Arrange.
 	causes := []StopCause{
-		StopCauseHibernateIdleSweep(), StopCauseMergedTeardown(), StopCauseHardRestartLive(),
+		StopCauseHibernateIdleSweep(), StopCauseHibernateForced(), StopCauseHibernateCacheExpired(),
+		StopCauseMergedTeardown(), StopCauseHardRestartLive(),
 		StopCauseHardRestartOrphan(), StopCauseDrainExecution(), StopCauseDaemonShutdown(),
 		StopCauseSessionDeleted(), StopCauseSessionSuperseded(), StopCauseAccountSwitch(),
 		StopCauseBringUpFailed(), StopCauseControllerExit(),

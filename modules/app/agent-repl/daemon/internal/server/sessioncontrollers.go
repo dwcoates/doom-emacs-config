@@ -837,6 +837,106 @@ func (r *RegistryRegistrar) QueuedPromptsChanged(sessionID string, queued []regi
 	}
 }
 
+// TurnEndObserved persists when sessionID's most recent turn ended. It is the
+// ONE input to the cache keep-alive policy, and persisting it is what makes
+// every decision a time-since check against a durable instant rather than a
+// timer's guess (see registry.Record.LastTurnEndMs).
+//
+// The write is loud on failure and CHANGES NOTHING ELSE. A lost timestamp does
+// not corrupt anything — the policy's own "every unknown answers none" rule
+// leaves an undated session alone — but it does silently switch the keep-alive
+// off for that session, which is exactly the kind of quiet degradation the log
+// line exists to make findable.
+func (r *RegistryRegistrar) TurnEndObserved(sessionID string, atMs int64) {
+	if r.Reg == nil || atMs <= 0 {
+		return
+	}
+	found, err := r.Reg.Update(sessionID, func(rec *registry.Record) {
+		// NEVER BACKWARDS. A late-arriving end for an older turn must not
+		// rewind the clock the policy reads, or a session would be pinged
+		// against a turn boundary it has already moved past.
+		if atMs > rec.LastTurnEndMs {
+			rec.LastTurnEndMs = atMs
+		}
+	})
+	if err != nil && r.Logf != nil {
+		r.Logf("server: session %s: registry last_turn_end_ms write FAILED at_ms=%d — the cache keep-alive has no durable instant to measure this session from and will leave it alone: %v",
+			sessionID, atMs, err)
+		return
+	}
+	if !found && r.Logf != nil {
+		r.Logf("server: session %s: last_turn_end_ms write found no record (never registered) at_ms=%d", sessionID, atMs)
+	}
+}
+
+// HibernationChanged persists a session's hibernation state and its typed
+// account in ONE write, then re-pushes the SessionView so the revival gate
+// appears without waiting for an unrelated event.
+//
+// THE FLAG AND ITS ACCOUNT ARE ONE ARGUMENT, not two calls. A zero detail
+// clears hibernation; a detail with a cause sets it. There is deliberately no
+// way to write one without the other, which is the same guarantee
+// registry.maintain enforces on the way to disk — expressed here so a caller
+// cannot even construct the illegal pair.
+func (r *RegistryRegistrar) HibernationChanged(sessionID string, detail registry.HibernationDetail) error {
+	if r.Reg == nil {
+		return nil
+	}
+	if !registry.ValidHibernationCause(detail.Cause) {
+		return fmt.Errorf("server: session %s: refusing hibernation write with unknown cause %q", sessionID, detail.Cause)
+	}
+	found, err := r.Reg.Update(sessionID, func(rec *registry.Record) {
+		rec.Hibernated = detail.Cause != ""
+		rec.Hibernation = detail
+	})
+	if err != nil {
+		if r.Logf != nil {
+			r.Logf("server: session %s: registry hibernation write FAILED cause=%q since_ms=%d — the sleep will not survive a restart and the session could be revived implicitly: %v",
+				sessionID, detail.Cause, detail.SinceMs, err)
+		}
+		return fmt.Errorf("server: session %s: persist hibernation: %w", sessionID, err)
+	}
+	if !found {
+		if r.Logf != nil {
+			r.Logf("server: session %s: hibernation write found no record (never registered) cause=%q", sessionID, detail.Cause)
+		}
+		return fmt.Errorf("server: session %s: persist hibernation: no such record", sessionID)
+	}
+	if r.Logf != nil {
+		r.Logf("server: session %s: hibernation state persisted cause=%q since_ms=%d cutoff_ms=%d elapsed_ms=%d ttl_ms=%d hibernated=%v",
+			sessionID, detail.Cause, detail.SinceMs, detail.CutoffMs, detail.ElapsedMs, detail.TTLMs, detail.Cause != "")
+	}
+	r.repush(sessionID)
+	return nil
+}
+
+// HibernationOf reports sessionID's persisted hibernation detail and whether a
+// record was found. It is the rehydration read: a daemon that just booted has
+// no live controller to ask, and the durable record is the only thing that
+// knows the session was deliberately put to sleep.
+func (r *RegistryRegistrar) HibernationOf(sessionID string) (registry.HibernationDetail, bool) {
+	if r.Reg == nil {
+		return registry.HibernationDetail{}, false
+	}
+	rec, ok := r.Reg.Get(sessionID)
+	if !ok {
+		return registry.HibernationDetail{}, false
+	}
+	return rec.Hibernation, true
+}
+
+// LastTurnEndOf reports sessionID's persisted last-turn-end instant.
+func (r *RegistryRegistrar) LastTurnEndOf(sessionID string) (int64, bool) {
+	if r.Reg == nil {
+		return 0, false
+	}
+	rec, ok := r.Reg.Get(sessionID)
+	if !ok {
+		return 0, false
+	}
+	return rec.LastTurnEndMs, true
+}
+
 // PushForwarder is the late-bound bridge from the session controller's per-session sinks to
 // the frontend.Server. The controller is constructed BEFORE the Server (the Server
 // is what WireAgentShim returns, and the session controller is one of its command
