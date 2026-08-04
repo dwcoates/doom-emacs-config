@@ -1920,8 +1920,8 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 	}
 	cons := newConsumer(workspace, sessionID, m.cfg.Push, m.cfg.SSM, m.cfg.Progress, m.cfg.ClearCompactStore, m.cfg.TurnAccountings, m.logf, func(ss *corev1.SessionStarted) {
 		m.persistVendorSessionID(sessionID, ss.GetVendorSessionId())
-	}, func(active bool) {
-		m.onTurnBoundary(d, active)
+	}, func(active bool, atMs int64) {
+		m.onTurnBoundary(d, active, atMs)
 	}, func(state string) {
 		m.persistBackfillState(sessionID, state)
 		// The SSM composes green from this: a failed backfill is blue, and

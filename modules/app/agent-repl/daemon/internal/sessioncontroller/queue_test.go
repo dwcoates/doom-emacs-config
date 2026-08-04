@@ -200,7 +200,7 @@ func (h *queueHarness) controller() *sessionController {
 // turn drives an observed turn boundary through the same callback the shim
 // stream drives, so the queue is exercised on its real trigger.
 func (h *queueHarness) turn(active bool) {
-	h.m.onTurnBoundary(h.controller(), active)
+	h.m.onTurnBoundary(h.controller(), active, h.m.now())
 }
 
 // submit submits a prompt for "ws".
