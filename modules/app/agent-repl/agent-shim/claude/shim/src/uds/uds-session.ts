@@ -309,6 +309,8 @@ export class UdsSession {
   private readonly pendingTurnEndIds: string[] = [];
   /** SDK background tasks whose terminal lifecycle fact has not been stored. */
   private readonly liveSdkTaskIds = new Set<string>();
+  /** SDK task ids whose first terminal lifecycle fact has been stored. */
+  private readonly completedSdkTaskIds = new Set<string>();
   /**
    * A vendor result observed while SDK background tasks were live.
    *
@@ -1790,7 +1792,7 @@ export class UdsSession {
     }
     const startedTaskIds = authoritativeLifecycle.flatMap((event) =>
       event.payload.case === "taskStarted" ? [event.payload.value.taskId] : []);
-    const endedTaskIds = authoritativeLifecycle.flatMap((event) =>
+    let endedTaskIds = authoritativeLifecycle.flatMap((event) =>
       event.payload.case === "taskEnded" ? [event.payload.value.taskId] : []);
     for (const taskId of [...startedTaskIds, ...endedTaskIds]) {
       if (taskId.trim() === "") throw new Error(`SDK ${msg.type} emitted a task lifecycle event without task_id`);
@@ -1800,7 +1802,26 @@ export class UdsSession {
       if (liveAfterThisEvent.has(taskId)) {
         throw new Error(`SDK emitted duplicate TaskStarted for live task ${JSON.stringify(taskId)}`);
       }
+      if (this.completedSdkTaskIds.has(taskId)) {
+        throw new Error(`SDK emitted TaskStarted after terminal state for task ${JSON.stringify(taskId)}`);
+      }
       liveAfterThisEvent.add(taskId);
+    }
+    const duplicateEndedTaskIds = endedTaskIds.filter((taskId) => this.completedSdkTaskIds.has(taskId));
+    if (duplicateEndedTaskIds.length > 0) {
+      const duplicates = new Set(duplicateEndedTaskIds);
+      authoritativeLifecycle = authoritativeLifecycle.filter((event) =>
+        event.payload.case !== "taskEnded" || !duplicates.has(event.payload.value.taskId));
+      endedTaskIds = endedTaskIds.filter((taskId) => !duplicates.has(taskId));
+      LOGGER.log({
+        agent_repl_session_id: this.deps.sessionId,
+        request_id: rootTurnId,
+        turn_id: rootTurnId,
+        duplicate_terminal_sdk_task_ids: [...duplicates].sort(),
+        live_sdk_task_count: this.liveSdkTaskIds.size,
+        live_sdk_task_ids: [...this.liveSdkTaskIds].sort(),
+        decision: "retain_vendor_message_without_duplicate_task_end",
+      }, "SDK repeated a stored terminal task fact; retaining vendor evidence without duplicating lifecycle");
     }
     for (const taskId of endedTaskIds) {
       if (!liveAfterThisEvent.delete(taskId)) {
@@ -1873,7 +1894,10 @@ export class UdsSession {
     try {
       const ack = await this.store.write(persistentBatch);
       for (const taskId of startedTaskIds) this.liveSdkTaskIds.add(taskId);
-      for (const taskId of endedTaskIds) this.liveSdkTaskIds.delete(taskId);
+      for (const taskId of endedTaskIds) {
+        this.liveSdkTaskIds.delete(taskId);
+        this.completedSdkTaskIds.add(taskId);
+      }
       if (startedTaskIds.length > 0 || endedTaskIds.length > 0) {
         LOGGER.log({
           agent_repl_session_id: this.deps.sessionId,
