@@ -435,15 +435,11 @@ func (m *Manager) process(ctx context.Context, id string) error {
 				if _, err := m.transition(id, StateSessionCreating, ""); err != nil {
 					return err
 				}
-				job, _, err = m.cfg.Store.Get(id)
-				if err != nil {
-					return err
-				}
-				m.cfg.Logf("workspace-create: preparing session publication id=%s worktree=%q session=%q", job.ID, job.WorktreePath, job.SessionID)
-				if err := m.cfg.Publication.PrepareSessionPublication(ctx, job); err != nil {
-					return m.fail(ctx, id, "prepare session publication", err)
-				}
 				continue
+			}
+			m.cfg.Logf("workspace-create: preparing session publication id=%s worktree=%q session=%q", job.ID, job.WorktreePath, job.SessionID)
+			if err := m.cfg.Publication.PrepareSessionPublication(ctx, job); err != nil {
+				return m.fail(ctx, id, "prepare session publication", err)
 			}
 			sessionID, err := m.cfg.Sessions.EnsureSession(ctx, job)
 			if err != nil {
@@ -452,13 +448,18 @@ func (m *Manager) process(ctx context.Context, id string) error {
 			if sessionID == "" {
 				return m.fail(ctx, id, "ensure session", fmt.Errorf("creator returned an empty session id"))
 			}
-			if _, err := m.cfg.Store.Update(id, func(j *Job) error {
+			updated, err := m.cfg.Store.Update(id, func(j *Job) error {
 				j.SessionID = sessionID
 				j.State = StateSessionReady
 				j.LastError = ""
 				return nil
-			}); err != nil {
+			})
+			if err != nil {
 				return err
+			}
+			m.cfg.Logf("workspace-create: binding session publication id=%s worktree=%q session=%q", updated.ID, updated.WorktreePath, updated.SessionID)
+			if err := m.cfg.Publication.PrepareSessionPublication(ctx, updated); err != nil {
+				return m.fail(ctx, id, "bind session publication", err)
 			}
 		case StateSessionReady:
 			if err := m.cfg.Health.AwaitHealthy(ctx, job); err != nil {

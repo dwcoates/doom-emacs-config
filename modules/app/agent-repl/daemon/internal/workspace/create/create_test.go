@@ -482,6 +482,63 @@ func TestSessionPublicationDecisionHoldsOnlyMatchingUnmaterializedJob(t *testing
 	}
 }
 
+func TestOpenJobStoreMigratesOnlyHistoricalMaterializedJobs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "jobs.json")
+	legacy := `{"version":1,"jobs":{"ready":{"id":"ready","request":{"name":"ready","git_root":"/repo"},"state":"ready"},"awaiting":{"id":"awaiting","request":{"name":"awaiting","git_root":"/repo"},"state":"awaiting_emacs"},"failed":{"id":"failed","request":{"name":"failed","git_root":"/repo"},"state":"failed"}},"host_actions":{}}`
+	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := OpenJobStore(path, func(string, ...any) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ready, ok, err := store.Get("ready")
+	if err != nil || !ok || !ready.Materialized || !ready.PublicationReleased {
+		t.Fatalf("ready=%#v ok=%t err=%v", ready, ok, err)
+	}
+	awaiting, _, _ := store.Get("awaiting")
+	failed, _, _ := store.Get("failed")
+	if awaiting.Materialized || failed.Materialized {
+		t.Fatalf("closed legacy jobs migrated: awaiting=%#v failed=%#v", awaiting, failed)
+	}
+}
+
+func TestOpenJobStoreRejectsMalformedV1WithoutRewritingBytes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "jobs.json")
+	legacy := []byte(`{"version":1,"jobs":{"bad":{"id":"other","request":{"name":"bad","git_root":"/repo"},"state":"ready"}},"host_actions":{}}`)
+	if err := os.WriteFile(path, legacy, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OpenJobStore(path, func(string, ...any) {}); err == nil {
+		t.Fatal("OpenJobStore succeeded for malformed v1")
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(legacy) {
+		t.Fatalf("malformed legacy store was rewritten: got %s", got)
+	}
+}
+
+func TestPublicationPreparationPrecedesSessionCreation(t *testing.T) {
+	root := t.TempDir()
+	f := newFixture(t, filepath.Join(root, "jobs.json"))
+	if _, _, err := f.store.Enqueue(Job{ID: "prepare", Request: Request{Name: "prepare", GitRoot: "/repo"}, State: StateQueued}); err != nil {
+		t.Fatal(err)
+	}
+	f.sessions.err = errors.New("stop after observing preparation")
+	if err := f.manager.Process(context.Background(), "prepare"); err == nil {
+		t.Fatal("Process succeeded")
+	}
+	if f.publication.calls != 1 {
+		t.Fatalf("publication preparation calls=%d", f.publication.calls)
+	}
+	if f.sessions.calls != 1 {
+		t.Fatalf("session creation calls=%d", f.sessions.calls)
+	}
+}
+
 func TestPromptlessCreateReachesReadyWithoutSubmittingAnything(t *testing.T) {
 	// Arrange — a create with no initial prompt. Emacs' SPC TAB n emits no
 	// `prompt' field at all when the user leaves the prompt blank.
