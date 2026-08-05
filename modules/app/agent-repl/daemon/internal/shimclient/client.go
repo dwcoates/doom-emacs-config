@@ -38,6 +38,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -382,7 +383,12 @@ type Client struct {
 	// logical query-termination pair. The in-memory cursor can continue across a
 	// transport reconnect; a daemon restart reads the pinned durable cursor and
 	// therefore replays the complete uncommitted logical record.
-	pinnedAccountingTurns   map[string]struct{}
+	pinnedAccountingTurns map[string]struct{}
+	// claimsOpenAtHandshake is the durable open-claim set this connection
+	// resumed against. It is what separates a REPLAYED end (a turn the daemon
+	// had already completed before we resumed) from a genuine inconsistency (a
+	// turn we knew was open, pinned, and then lost).
+	claimsOpenAtHandshake   map[string]struct{}
 	pendingTerminationQuery string
 	// pendingResumeQuery pins the durable cursor before a resumed QueryCreated
 	// until runtime identity is accepted or a typed termination proves that the
@@ -705,6 +711,7 @@ func (c *Client) runOnce(ctx context.Context) (retErr error) {
 		// replayed alone and was rejected as unpinned. The open claims are the
 		// authority on what is actually in flight across a reconnect.
 		c.pinnedAccountingTurns = c.reconstructPinnedTurns()
+		c.claimsOpenAtHandshake = maps.Clone(c.pinnedAccountingTurns)
 		c.pendingTerminationQuery = ""
 		c.pendingResumeQuery = ""
 	}
@@ -1067,4 +1074,11 @@ func (c *Client) UnpinAccountingTurn(turnIDs ...string) {
 		c.logf("shimclient: accounting pins RELEASED by a synthesized close session=%s turns=%d remaining=%d — no TurnEnded will arrive for these, so the close is what frees the durable cursor",
 			c.cfg.SessionID, released, len(c.pinnedAccountingTurns))
 	}
+}
+
+// hasDurableClaimAuthority reports whether this client can ask the ledger what
+// was in flight. Without it, replayed history is indistinguishable from a
+// protocol violation and the strict check stands.
+func (c *Client) hasDurableClaimAuthority() bool {
+	return c.cfg.OpenTurnClaims != nil && c.cfg.Workspace != ""
 }
