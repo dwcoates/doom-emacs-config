@@ -2,9 +2,6 @@
 
 ;;; Code:
 
-(declare-function agent-repl--frontend-session-token-summary
-                  "frontend-state" (session-id workspace))
-
 ;;; Priority badge images
 ;;
 ;; Each image is a small PNG loaded from the module's images/ directory and
@@ -1065,7 +1062,7 @@ for the cache-buster rationale."
          tab-bar-mode tab-bar-show auto-resize-tab-bars tab-bar-auto-width
          tab-bar-format)))))
 
-(defun agent-repl--render-tab (name spec label name-face img-str &optional usage-summary)
+(defun agent-repl--render-tab (name spec label name-face img-str)
   "Render a tab string for workspace NAME from SPEC.
 SPEC is a plist with keys :bg :fg :bracket-fg :weight (see
 `agent-repl--tab-palette' docstring).  NAME-FACE is applied to the
@@ -1090,24 +1087,8 @@ whenever an entry landed at a wrap (or the final row's) end."
     (concat (propertize " " 'face separator-face)
             (propertize (format agent-repl-tab-bracket-format label) 'face bracket-face)
             (when img-str (concat " " img-str " "))
-            (propertize (format agent-repl-tab-name-padding
-                                (if usage-summary
-                                    (format "%s | %s" name usage-summary)
-                                  name))
-                        'face name-face)
+            (propertize (format agent-repl-tab-name-padding name) 'face name-face)
             " ")))
-
-(defun agent-repl--tab-token-summary (workspace)
-  "Return WORKSPACE's retained session usage summary for tab-bar rendering.
-The `frontend-state.el' wrapper owns SessionView lookup and protojson
-interpretation.  A workspace without a bound daemon session has no summary;
-the nil result is an honest absence of a SessionView, not a timing estimate.
-
-This function runs in redisplay, so the successful read is intentionally
-unlogged.  Malformed wire data fails loudly at the frontend-state boundary."
-  (let ((session-id (agent-repl--ws-get workspace :frontend-session-id)))
-    (and session-id
-         (agent-repl--frontend-session-token-summary session-id workspace))))
 
 (defun agent-repl--tab-face (state selected)
   "Return the face symbol for the NAME portion of a tab.
@@ -1296,9 +1277,8 @@ color without any glyph beside the numeral."
                           (agent-repl--tab-spec display-state selected)))
          (label         (number-to-string index))
          (face          (agent-repl--tab-face display-state selected))
-         (img-str       (agent-repl--tab-priority-image-str name))
-         (usage-summary (agent-repl--tab-token-summary name)))
-    (agent-repl--render-tab name spec label face img-str usage-summary)))
+         (img-str       (agent-repl--tab-priority-image-str name)))
+    (agent-repl--render-tab name spec label face img-str)))
 
 (cl-defun agent-repl--tabline-rendered-entries (&optional (names nil names-supplied-p))
   "Return the list of rendered tab-entry strings for NAMES.
