@@ -1788,6 +1788,48 @@ describe("decodeFrontendFrame — QueueEntry.keepAliveHold", () => {
   });
 });
 
+describe("decodeFrontendFrame — QueueEntry.revivalHold", () => {
+  /** Decode a queue whose single entry carries a revival hold. */
+  function entryWith(hold: unknown): ReturnType<typeof decodeFrontendFrame> {
+    return decode({
+      queue: {
+        sessionId: "s1",
+        entries: [
+          { id: "q1", text: "later", classification: "QUEUE_CLASSIFICATION_PENDING", revivalHold: hold },
+        ],
+      },
+    });
+  }
+
+  /** The decoded single entry of a queue frame. */
+  function entryOf(frame: ReturnType<typeof decodeFrontendFrame>) {
+    if (frame.frame.case !== "queue") throw new Error("wrong variant");
+    return frame.frame.value.entries[0];
+  }
+
+  it("decodes the revived session holding a parked prompt", () => {
+    // Arrange / Act / Assert
+    expect(entryOf(entryWith({ sessionId: "sess-4" })).revivalHold?.sessionId).toBe("sess-4");
+  });
+
+  it("leaves the hold absent on an ordinary classifier-held entry", () => {
+    // Arrange / Act / Assert
+    expect(entryOf(decode({ queue: QUEUE })).revivalHold).toBeUndefined();
+  });
+
+  it("rejects a hold that names no session", () => {
+    // Arrange / Act / Assert
+    expect(() => entryWith({})).toThrow(/QueueEntryRevivalHold missing required `sessionId`/);
+  });
+
+  it("rejects an unrecognized field on the hold", () => {
+    // Arrange / Act / Assert
+    expect(() => entryWith({ sessionId: "s1", turnId: "t" })).toThrow(
+      /QueueEntryRevivalHold has unrecognized field\(s\): turnId/,
+    );
+  });
+});
+
 describe("decodeFrontendFrame — ProgressView.expensiveTurn", () => {
   const ALERT = {
     turnId: "turn-3",

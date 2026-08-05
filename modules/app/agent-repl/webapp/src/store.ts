@@ -1320,6 +1320,9 @@ export class ConversationStore {
       // Same carry-through, same reason: the keep-alive hold is WHY this entry
       // is parked, and the renderer picks its bubble off the daemon's claim.
       keepAliveHold: e.keepAliveHold,
+      // And again: the revival hold is WHY this entry is parked, so it is
+      // carried through untouched and the renderer picks its bubble off it.
+      revivalHold: e.revivalHold,
     }));
     return true;
   }

@@ -538,6 +538,38 @@ export const KEEP_ALIVE_HELD_REASON =
   "delivered as soon as that turn ends — it is not lost, it has not been judged by the " +
   "classifier, and it cannot be forced through ahead of the keep-alive.";
 
+/**
+ * The REVIVAL bubble: a prompt parked behind a compact-first revival whose
+ * compaction has not landed yet.
+ *
+ * Modeled on the keep-alive bubble above, and for the same two reasons: the
+ * classifier never ran on this entry, so no badge may claim a verdict; and
+ * there is NO force-through, because a session still asleep cannot take a
+ * prompt at all — forcing it would have nowhere to deliver to. Its exits are
+ * delivery once the compaction lands and the gate opens, a loud drop if the
+ * revival fails, and Cancel — so Cancel is the only control on screen.
+ */
+export function RevivalHeldCard(item: QueuedItem, sessionId: string): string {
+  const qid = escapeHtml(item.id);
+  return `
+    <div class="queued-card revival-card" data-revival-session-id="${escapeHtml(sessionId)}">
+      <div class="queued-head">
+        <span class="queued-badge revival">held — waiting on the revival's compaction</span>
+      </div>
+      <pre class="queued-content">${escapeHtml(item.text)}</pre>
+      <div class="lease-reason">${escapeHtml(REVIVAL_HELD_REASON)}</div>
+      <div class="queued-actions">
+        <button data-queue-cancel="${qid}">Cancel</button>
+      </div>
+    </div>`;
+}
+
+/** Why the prompt is parked, said plainly — assertable without parsing markup. */
+export const REVIVAL_HELD_REASON =
+  "This session is being revived and its compaction is still pending, so this prompt waits " +
+  "for it. It is delivered as soon as the compaction lands and the session wakes — it has " +
+  "not been judged by the classifier, and it cannot be forced through ahead of the revival.";
+
 export function QueuedCard(item: QueuedItem): string {
   // THE LEASE HOLD OUTRANKS THE CLASSIFICATION, and there is nothing to weigh:
   // the classifier never ran on a lease-held entry, so its classification
@@ -551,6 +583,12 @@ export function QueuedCard(item: QueuedItem): string {
   // is a turn, and the drain lease is what stops turns from starting.
   if (item.keepAliveHold !== undefined) {
     return KeepAliveHeldCard(item, item.keepAliveHold.turnId);
+  }
+  // THE REVIVAL HOLD OUTRANKS THE CLASSIFICATION for the same reason: the
+  // classifier never ran on an entry held by a pending revival, so its
+  // classification field carries no verdict this card could honestly show.
+  if (item.revivalHold !== undefined) {
+    return RevivalHeldCard(item, item.revivalHold.sessionId);
   }
   const badge = queuedBadge(item);
   const qid = escapeHtml(item.id);

@@ -21,10 +21,16 @@
 import type {
   QueueClassification,
   QueueEntryKeepAliveHold,
+  QueueEntryRevivalHold,
   QueueEntryShutdownHold,
 } from "./frontend-proto.js";
 
-export type { QueueClassification, QueueEntryKeepAliveHold, QueueEntryShutdownHold };
+export type {
+  QueueClassification,
+  QueueEntryKeepAliveHold,
+  QueueEntryRevivalHold,
+  QueueEntryShutdownHold,
+};
 
 /**
  * Every mode the CLI accepts at session LAUNCH.
@@ -141,6 +147,13 @@ export interface QueuedItem {
    * `classification` says nothing about why this entry is waiting.
    */
   keepAliveHold?: QueueEntryKeepAliveHold;
+  /**
+   * Set ONLY while a pending compact-first revival is holding this prompt. Its
+   * presence selects the revival bubble over the classifier bubble, for the
+   * same reason the two holds above do: the classifier never ran, so
+   * `classification` says nothing about why this entry is waiting.
+   */
+  revivalHold?: QueueEntryRevivalHold;
 }
 
 export type ResultSubtype =

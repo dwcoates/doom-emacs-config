@@ -2043,3 +2043,23 @@ describe("keep-alive hold adoption (the queue bubble's source of truth)", () => 
     expect(store.state.queued[0].keepAliveHold).toBeUndefined();
   });
 });
+
+describe("revival hold adoption (the queue bubble's source of truth)", () => {
+  it("carries a queue entry's revival hold through to the rendered item", () => {
+    // Arrange
+    const store = new ConversationStore();
+    // Act
+    store.ingest([queueEffect([queueEntry({ revivalHold: { sessionId: "sess-4" } })])]);
+    // Assert
+    expect(store.state.queued[0].revivalHold).toEqual({ sessionId: "sess-4" });
+  });
+
+  it("leaves the hold absent on an ordinary classifier-held entry", () => {
+    // Arrange
+    const store = new ConversationStore();
+    // Act
+    store.ingest([queueEffect([queueEntry()])]);
+    // Assert
+    expect(store.state.queued[0].revivalHold).toBeUndefined();
+  });
+});
