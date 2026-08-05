@@ -78,6 +78,97 @@ wire would mean a frontend's failure was laundered through the daemon."
     (should (string-match-p "recovery proposed Claude session c_other"
                             (agent-repl-failure-text failure "ws1")))))
 
+(ert-deftest agent-repl-test-failure-text-renders-typed-resume-bring-up-restore ()
+  "Typed bring-up-failure evidence renders the cause during a restoration."
+  (let ((failure (agent-repl-failure-from-wire
+                  '(:errorClass "ERROR_CLASS_INTERNAL"
+                    :errorType "session.resume_failed"
+                    :message "resume failed"
+                    :sessionResume
+                    (:claudeSessionId "c_authoritative" :cwd "/repo"
+                     :automaticRestore ()
+                     :bringUpFailure (:cause "sdk query never became driveable"))))))
+    (should (equal (agent-repl-failure-text failure "ws1")
+                   "Resume restoration for Claude session c_authoritative in /repo could not bring the session up: sdk query never became driveable."))))
+
+(ert-deftest agent-repl-test-failure-text-renders-typed-resume-bring-up-create ()
+  "Typed bring-up-failure evidence renders the cause during a creation."
+  (let ((failure (agent-repl-failure-from-wire
+                  '(:errorClass "ERROR_CLASS_INTERNAL"
+                    :errorType "session.resume_failed"
+                    :message "resume failed"
+                    :sessionResume
+                    (:claudeSessionId "c_authoritative" :cwd "/repo"
+                     :create ()
+                     :bringUpFailure (:cause "process exited before init"))))))
+    (should (equal (agent-repl-failure-text failure "ws1")
+                   "Resume creation for Claude session c_authoritative in /repo could not bring the session up: process exited before init."))))
+
+(ert-deftest agent-repl-test-failure-text-renders-typed-resume-query-termination-iterator ()
+  "Typed query-termination evidence renders an iterator failure's cause."
+  (let ((failure (agent-repl-failure-from-wire
+                  '(:errorClass "ERROR_CLASS_INTERNAL"
+                    :errorType "session.resume_failed"
+                    :message "resume failed"
+                    :sessionResume
+                    (:claudeSessionId "c_authoritative" :cwd "/repo"
+                     :automaticRestore ()
+                     :queryTermination
+                     (:iteratorFailure (:cause "stream reset by peer")))))))
+    (should (equal (agent-repl-failure-text failure "ws1")
+                   "Resume restoration for Claude session c_authoritative in /repo could not continue: the resumed query terminated (the SDK iterator threw: stream reset by peer)."))))
+
+(ert-deftest agent-repl-test-failure-text-renders-typed-resume-query-termination-eof ()
+  "Typed query-termination evidence renders an unexpected-EOF termination
+during a creation attempt."
+  (let ((failure (agent-repl-failure-from-wire
+                  '(:errorClass "ERROR_CLASS_INTERNAL"
+                    :errorType "session.resume_failed"
+                    :message "resume failed"
+                    :sessionResume
+                    (:claudeSessionId "c_authoritative" :cwd "/repo"
+                     :create ()
+                     :queryTermination
+                     (:unexpectedEof ()))))))
+    (should (equal (agent-repl-failure-text failure "ws1")
+                   "Resume creation for Claude session c_authoritative in /repo could not continue: the resumed query terminated (the SDK iterator ended without an intentional shutdown)."))))
+
+(ert-deftest agent-repl-test-failure-text-typed-resume-query-termination-zero-reasons-is-malformed ()
+  "A query-termination cause with no recognized reason arm is malformed."
+  (let ((failure (agent-repl-failure-from-wire
+                  '(:errorClass "ERROR_CLASS_INTERNAL"
+                    :errorType "session.resume_failed"
+                    :message "resume failed"
+                    :sessionResume
+                    (:claudeSessionId "c_authoritative" :cwd "/repo"
+                     :automaticRestore ()
+                     :queryTermination (:vendorSessionId "c_vendor"))))))
+    (should-error (agent-repl-failure-text failure "ws1"))))
+
+(ert-deftest agent-repl-test-failure-text-typed-resume-two-causes-is-malformed ()
+  "Two causes present at once is malformed, never a silent pick-one."
+  (let ((failure (agent-repl-failure-from-wire
+                  '(:errorClass "ERROR_CLASS_INTERNAL"
+                    :errorType "session.resume_failed"
+                    :message "resume failed"
+                    :sessionResume
+                    (:claudeSessionId "c_authoritative" :cwd "/repo"
+                     :automaticRestore ()
+                     :transcriptUnavailable (:searchedPaths ("/cfg/a.jsonl"))
+                     :bringUpFailure (:cause "sdk query never became driveable"))))))
+    (should-error (agent-repl-failure-text failure "ws1"))))
+
+(ert-deftest agent-repl-test-failure-text-typed-resume-zero-causes-is-malformed ()
+  "No recognized cause at all is malformed, never flattened to generic text."
+  (let ((failure (agent-repl-failure-from-wire
+                  '(:errorClass "ERROR_CLASS_INTERNAL"
+                    :errorType "session.resume_failed"
+                    :message "resume failed"
+                    :sessionResume
+                    (:claudeSessionId "c_authoritative" :cwd "/repo"
+                     :automaticRestore ())))))
+    (should-error (agent-repl-failure-text failure "ws1"))))
+
 ;;;; ---- Class decoding --------------------------------------------------
 
 (ert-deftest agent-repl-test-failure-class-internal ()
