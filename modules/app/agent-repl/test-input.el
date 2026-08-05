@@ -1254,6 +1254,20 @@ structured diagnostic context passed to that helper."
     (should-not (string-match-p "SECRET-METAPROMPT-BODY" (cadr record)))
     (should-not (string-match-p "explicit" (cadr record)))))
 
+(ert-deftest agent-repl-test-skip-metaprompt-log-normalizes-predicates ()
+  "Skip diagnostics contain booleans rather than match offsets or list tails."
+  (let ((agent-repl-metaprompt-exempt-strings
+         '("/clear" "SECRET-EXEMPT-LIST-TAIL"))
+        record)
+    (cl-letf (((symbol-function 'agent-repl--log-verbose)
+               (lambda (_ws format-string &rest args)
+                 (setq record (apply #'format format-string args)))))
+      (should (eq (agent-repl--skip-metaprompt-p "/clear") t)))
+    (should (equal record
+                   "skip-metaprompt-p raw-len=6 trimmed-len=6 slash-command=t exempt=t numeral=nil result=t"))
+    (should-not (string-match-p "SECRET-EXEMPT-LIST-TAIL" record))
+    (should-not (string-match-p "slash-command=0" record))))
+
 (ert-deftest agent-repl-test-should-prepend-nil-when-skip-permissions-off ()
   "Returns nil when `agent-repl-skip-permissions' is nil, even forced."
   (let ((agent-repl-skip-permissions nil)
