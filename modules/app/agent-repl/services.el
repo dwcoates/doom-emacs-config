@@ -27,6 +27,9 @@
 (declare-function agent-repl--log "core" (ws fmt &rest args))
 (declare-function agent-repl--log-verbose "core" (ws fmt &rest args))
 
+(defvar agent-repl-frontend-health-timeout)
+(defvar agent-repl-uds-command-ack-deadline)
+
 (defcustom agent-repl-shim-services-launchctl-program "launchctl"
   "Program used to inspect and kickstart the launchd-managed shim services."
   :type 'string
@@ -42,6 +45,17 @@
 The ordinary interactive restart remains asynchronous.  This timeout exists
 for deployment callers that must not report success before every restart,
 health, and workspace-rebind continuation has completed."
+  :type 'number
+  :group 'agent-repl)
+
+(defcustom agent-repl-runtime-restart-health-timeout 60.0
+  "Seconds a synchronous restart may await daemon health acknowledgement.
+The replacement daemon can become ready before Emacs finishes applying its
+startup snapshot.  At production roster sizes that snapshot work can delay
+the correlated `daemonHealth' response beyond the ordinary command deadline.
+This deployment-only budget is dynamically bound across the asynchronous
+coordinator and its event pump; ordinary frontend commands retain their
+shorter deadlines."
   :type 'number
   :group 'agent-repl)
 
@@ -366,13 +380,26 @@ initial `:pending' dispatch for a completed deployment."
       (agent-repl--error nil
                          "runtime-restart-await: invalid timeout=%S stop-shims=%s"
                          limit (if stop-shims "t" "nil")))
-    (let* ((started (float-time))
+    (unless (and (numberp agent-repl-runtime-restart-health-timeout)
+                 (> agent-repl-runtime-restart-health-timeout 0))
+      (agent-repl--error
+       nil
+       "runtime-restart-await: invalid health-timeout=%S stop-shims=%s"
+       agent-repl-runtime-restart-health-timeout (if stop-shims "t" "nil")))
+    (let* ((health-limit
+            (min agent-repl-runtime-restart-health-timeout (* limit 0.8)))
+           ;; These variables are special.  Their bindings remain active while
+           ;; the synchronous event pump runs every asynchronous continuation,
+           ;; but disappear when this deployment-only surface returns.
+           (agent-repl-frontend-health-timeout health-limit)
+           (agent-repl-uds-command-ack-deadline health-limit)
+           (started (float-time))
            (deadline (+ started limit))
            (state :pending)
            failure)
       (agent-repl--log nil
-                       "runtime-restart-await: beginning stop-shims=%s timeout=%.3fs"
-                       (if stop-shims "t" "nil") limit)
+                       "runtime-restart-await: beginning stop-shims=%s timeout=%.3fs health-timeout=%.3fs"
+                       (if stop-shims "t" "nil") limit health-limit)
       (agent-repl--runtime-prepare
        t
        (lambda () (setq state :complete))
