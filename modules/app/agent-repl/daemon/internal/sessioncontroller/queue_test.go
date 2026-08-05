@@ -1379,6 +1379,63 @@ func TestDropRevivalHeldTakesOnlyTheRevivalsOwnEntries(t *testing.T) {
 	}
 }
 
+// THE HOLD IS PROJECTED ONTO THE WIRE. Without the field the entry reaches the
+// frontend as a bare HOLD, and the webapp cannot say what the prompt is waiting
+// on — the daemon's own `/compact`, not a classifier that will never run.
+func TestViewProjectsTheRevivalHoldSessionID(t *testing.T) {
+	// Arrange.
+	q := &promptQueue{}
+	q.add(&queueEntry{
+		id: "q1", revivalHoldSessionID: "s1",
+		classification: frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD,
+	})
+
+	// Act.
+	view := q.view("ws", "s1")
+
+	// Assert.
+	if got := view.GetEntries()[0].GetRevivalHold().GetSessionId(); got != "s1" {
+		t.Fatalf("revival_hold.session_id = %q, want the parking session %q", got, "s1")
+	}
+}
+
+// RELEASING THE HOLD CLEARS THE FIELD, so a delivered prompt does not keep
+// rendering a compaction it is no longer waiting on.
+func TestViewOmitsTheRevivalHoldOnceReleased(t *testing.T) {
+	// Arrange.
+	q := &promptQueue{}
+	q.add(&queueEntry{
+		id: "q1", revivalHoldSessionID: "s1",
+		classification: frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD,
+	})
+	q.releaseRevivalHold("s1")
+
+	// Act.
+	view := q.view("ws", "s1")
+
+	// Assert.
+	if hold := view.GetEntries()[0].GetRevivalHold(); hold != nil {
+		t.Fatalf("revival_hold = %v after release, want it gone", hold)
+	}
+}
+
+// THE THREE HOLDS ARE INDEPENDENT ON THE WIRE: a revival hold must not be
+// mistaken for, or projected as, a drain or keep-alive hold.
+func TestViewProjectsARevivalHoldWithoutTheOtherHolds(t *testing.T) {
+	// Arrange.
+	q := &promptQueue{}
+	q.add(&queueEntry{id: "q1", revivalHoldSessionID: "s1"})
+
+	// Act.
+	entry := q.view("ws", "s1").GetEntries()[0]
+
+	// Assert.
+	if entry.GetShutdownHold() != nil || entry.GetKeepAliveHold() != nil {
+		t.Fatalf("shutdown_hold=%v keep_alive_hold=%v, want a revival hold alone",
+			entry.GetShutdownHold(), entry.GetKeepAliveHold())
+	}
+}
+
 // A PING THAT HELD NOTHING RUNS NO REWIND, so it takes no rewind claim: the
 // pings stay in the transcript until a real prompt needs them gone, and a claim
 // with no aftermath to release it would hold every later prompt forever.

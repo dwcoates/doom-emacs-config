@@ -391,6 +391,14 @@ func (q *promptQueue) view(workspace, sessionID string) *frontendv1.QueueView {
 		if e.keepAliveHeld() {
 			entry.KeepAliveHold = &frontendv1.QueueEntryKeepAliveHold{TurnId: e.keepAliveHoldTurnID}
 		}
+		// The revival hold is projected the same way, and for the sharper reason:
+		// without this field a compact-first-parked entry reaches the frontend as
+		// a bare HOLD with no account of what it is waiting on, and the webapp
+		// cannot tell the user that their prompt is queued behind the daemon's own
+		// `/compact` rather than behind a classifier that will never run on it.
+		if e.revivalHeld() {
+			entry.RevivalHold = &frontendv1.QueueEntryRevivalHold{SessionId: e.revivalHoldSessionID}
+		}
 		v.Entries = append(v.Entries, entry)
 	}
 	return v
