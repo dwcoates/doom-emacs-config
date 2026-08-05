@@ -1,6 +1,8 @@
 package progress
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
@@ -185,5 +187,127 @@ func TestExpensiveTurnIgnoresAResultWithNoUsage(t *testing.T) {
 	view, _ := h.m.Current(testWS)
 	if view.GetExpensiveTurn() != nil {
 		t.Fatalf("expensive-turn alert = %+v for a usage-less result, want none", view.GetExpensiveTurn())
+	}
+}
+
+// --- cache-age evidence on the alert's log line ------------------------------
+
+// loggedCostHarness is a cost harness that keeps every daemon log line, so the
+// evidence the alert prints can be asserted rather than merely compiled.
+type loggedCostHarness struct {
+	*costHarness
+	lines *[]string
+}
+
+func newLoggedCostHarness(t *testing.T, threshold int64) *loggedCostHarness {
+	t.Helper()
+	lines := &[]string{}
+	h := newHarnessWithOptions(t, Options{
+		Logf:                func(format string, args ...any) { *lines = append(*lines, fmt.Sprintf(format, args...)) },
+		CoalesceWindow:      -1,
+		UncachedAlertTokens: threshold,
+	})
+	return &loggedCostHarness{costHarness: &costHarness{harness: h, threshold: threshold}, lines: lines}
+}
+
+// alertLine returns the single expensive-turn or cold-keep-alive log line.
+func (h *loggedCostHarness) alertLine() string {
+	h.t.Helper()
+	var found []string
+	for _, line := range *h.lines {
+		if strings.Contains(line, "EXPENSIVE TURN") || strings.Contains(line, "CAME BACK COLD") {
+			found = append(found, line)
+		}
+	}
+	if len(found) != 1 {
+		h.t.Fatalf("expensive-turn log lines = %d, want exactly 1: %v", len(found), found)
+	}
+	return found[0]
+}
+
+// startTurnAt opens a turn stamped at the given producer time.
+func (h *loggedCostHarness) startTurnAt(turnID string, at int64) {
+	h.t.Helper()
+	h.apply(&corev1.Event{
+		SessionId: testSID, ProducedAtMs: at,
+		Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{
+			TurnId: turnID, PromptOrigin: corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT,
+		}},
+	})
+	h.drain()
+}
+
+// endTurnAt closes a turn stamped at the given producer time.
+func (h *loggedCostHarness) endTurnAt(turnID string, at int64) {
+	h.t.Helper()
+	h.apply(&corev1.Event{
+		SessionId: testSID, ProducedAtMs: at,
+		Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: turnID}},
+	})
+	h.drain()
+}
+
+// resultAt folds a terminal result stamped at the given producer time.
+func (h *loggedCostHarness) resultAt(cacheCreation, at int64) {
+	h.t.Helper()
+	ev := streamEvent(h.t, &datav1.ClaudeStreamMessage{
+		Msg: &datav1.ClaudeStreamMessage_Result{Result: &datav1.ResultMessage{
+			Usage: &datav1.Usage{CacheCreationInputTokens: cacheCreation},
+		}},
+	})
+	ev.ProducedAtMs = at
+	h.apply(ev)
+}
+
+// A first alert with no prior turn in this process is the slack-ceac-tech-ptn
+// case: a session revived from hibernation re-ingests everything, and the log
+// used to name the cost without naming that cause.
+func TestExpensiveTurnEvidenceNamesTheAbsentPriorTurn(t *testing.T) {
+	// Arrange: no turn has ever ended in this manager.
+	h := newLoggedCostHarness(t, 20_000)
+	h.startTurnAt("t1", atMs)
+
+	// Act.
+	h.resultAt(144_345, atMs)
+
+	// Assert.
+	if got := h.alertLine(); !strings.Contains(got, "prior_turn=none") {
+		t.Fatalf("alert line = %q, want it to report prior_turn=none", got)
+	}
+}
+
+// A gap past the longest cache lifetime makes the miss arithmetic, and the line
+// says so rather than leaving the reader to compare the figures.
+func TestExpensiveTurnEvidenceCallsAnOverTtlGapCertain(t *testing.T) {
+	// Arrange: a prior turn ended two hours before this one's result.
+	h := newLoggedCostHarness(t, 20_000)
+	h.startTurnAt("t1", atMs)
+	h.endTurnAt("t1", atMs)
+	h.startTurnAt("t2", atMs+2*longestCacheTtlMs)
+
+	// Act.
+	h.resultAt(144_345, atMs+2*longestCacheTtlMs)
+
+	// Assert.
+	if got := h.alertLine(); !strings.Contains(got, "outlived the longest cache lifetime") {
+		t.Fatalf("alert line = %q, want it to call an over-TTL gap certain", got)
+	}
+}
+
+// A gap INSIDE the cache lifetime rules idle time out, which points the reader
+// at a changed prompt prefix instead of at the clock.
+func TestExpensiveTurnEvidenceRulesOutIdleTimeInsideTheTtl(t *testing.T) {
+	// Arrange: a prior turn ended one minute before this one's result.
+	h := newLoggedCostHarness(t, 20_000)
+	h.startTurnAt("t1", atMs)
+	h.endTurnAt("t1", atMs)
+	h.startTurnAt("t2", atMs+60_000)
+
+	// Act.
+	h.resultAt(144_345, atMs+60_000)
+
+	// Assert.
+	if got := h.alertLine(); !strings.Contains(got, "INSIDE the longest cache lifetime") {
+		t.Fatalf("alert line = %q, want it to rule idle time out inside the TTL", got)
 	}
 }
