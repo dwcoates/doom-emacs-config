@@ -145,6 +145,13 @@ func (m *Manager) ReviveSession(ctx context.Context, workspace string, mode Revi
 	detached := false
 	defer func() {
 		if !detached {
+			// EVERY PRE-HANDOFF EXIT DISPOSES OF WHAT IT PARKED. A compact-first
+			// revival brings the session up before it submits, so a prompt can
+			// arrive and be parked in the window between the bring-up and a
+			// failure — and this release is the last thing that knows a revival
+			// was ever in flight. Dropping here is what keeps a refused submit
+			// or a closing manager from leaving an entry no path can deliver.
+			m.dropRevivalHolds(workspace, sessionID, "the revival did not reach its compaction")
 			release()
 		}
 	}()
@@ -266,10 +273,12 @@ func (m *Manager) awaitReviveCompaction(workspace, sessionID string, compacted <
 	case <-m.rootCtx.Done():
 		m.logf("session-controller: revive compaction ABANDONED ws=%q session=%s error=%v — the session STAYS GATED",
 			workspace, sessionID, m.rootCtx.Err())
+		m.dropRevivalHolds(workspace, sessionID, "the daemon shut down before the compaction landed")
 		return
 	case <-time.After(bound):
 		m.logf("session-controller: revive compaction TIMED OUT ws=%q session=%s bound=%s — the session STAYS GATED rather than limping into accepting prompts on a conversation that was never compacted",
 			workspace, sessionID, bound)
+		m.dropRevivalHolds(workspace, sessionID, "the compaction did not land within its bound")
 		return
 	}
 
@@ -280,9 +289,154 @@ func (m *Manager) awaitReviveCompaction(workspace, sessionID string, compacted <
 	if err := m.clearHibernation(workspace, sessionID); err != nil {
 		m.logf("session-controller: revive GATE RELEASE FAILED ws=%q session=%s error=%v — the compaction landed but the record still claims a sleep; the session STAYS GATED and can be revived again",
 			workspace, sessionID, err)
+		m.dropRevivalHolds(workspace, sessionID, "the gate could not be released after the compaction landed")
 		return
 	}
+	// THE PARKED PROMPTS ARE RELEASED AFTER THE CLEAR AND NOWHERE ELSE. This is
+	// the second half of the delayed-never-dropped contract: the gate refused
+	// nothing during the compaction, it DELAYED — and this is the instant the
+	// delay is over (queue.go, revivalHoldSessionID).
+	m.releaseRevivalHolds(workspace, sessionID)
 	m.logf("session-controller: revive COMPLETE ws=%q session=%s mode=compact_first", workspace, sessionID)
+}
+
+// revivalHoldSessionLocked reports the session whose in-flight compact-first
+// revival must park a prompt arriving for d right now, or "" when none does.
+// Caller holds m.mu.
+//
+// IT IS THE TWO FACTS TOGETHER, and neither alone. The revival claim alone
+// would park prompts through a DIRECT revival, which clears the gate first and
+// has nothing to delay them for; the hibernation record alone is the ordinary
+// gate, whose refusal for an UNDECIDED session is the whole feature and stays
+// exactly as it was. Their conjunction names precisely one window — the user has
+// chosen compact-first and its compaction has not landed — which is the only
+// window in which a prompt is owed a delay instead of a refusal.
+func (m *Manager) revivalHoldSessionLocked(d *sessionController) string {
+	if !m.reviving[d.workspace] {
+		return ""
+	}
+	if _, asleep := m.hibernatedLocked(d.sessionID); !asleep {
+		return ""
+	}
+	return d.sessionID
+}
+
+// revivalParkAdmits reports whether a prompt from who must be admitted to
+// workspace's queue as a PARKED entry rather than refused by the revival gate.
+//
+// IT IS ASKED AHEAD OF THE GATE in submitPromptAs, and it answers the same
+// question revivalHoldSessionLocked does — from the workspace rather than from a
+// live controller, because the gate is asked before ensure() and there may not
+// be one yet. The two producers the gate keeps refusing are named here:
+//
+//   - submitterRevival is the revival's OWN `/compact`, which the gate admits
+//     outright and which must never be parked behind itself;
+//   - submitterKeepAlive is a ping, and a hibernated session is outside the
+//     keep-alive loop by construction — a ping reaching here is that
+//     construction having failed, which is said out loud rather than queued.
+func (m *Manager) revivalParkAdmits(workspace string, who submitter) bool {
+	if who == submitterRevival || who == submitterKeepAlive {
+		return false
+	}
+	if m.cfg.Hibernations == nil {
+		return false
+	}
+	sessionID, ok := m.cfg.Locator.Locate(workspace)
+	if !ok {
+		return false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.reviving[workspace] {
+		return false
+	}
+	_, asleep := m.hibernatedLocked(sessionID)
+	return asleep
+}
+
+// releaseRevivalHolds is the compaction's aftermath: the gate is down, so the
+// prompts it parked become ordinary queued prompts and the front one is
+// delivered.
+//
+// CALLED ONLY AFTER clearHibernation HAS SUCCEEDED. The release is what makes a
+// parked prompt deliverable, and delivering one while the record still claimed a
+// sleep would meet forwardPrompt's own gate and mark a perfectly good prompt
+// ERROR. Ordering the clear first is what makes that unreachable rather than
+// merely unlikely.
+func (m *Manager) releaseRevivalHolds(workspace, sessionID string) {
+	m.mu.Lock()
+	d, live := m.byWS[workspace]
+	if !live {
+		m.mu.Unlock()
+		m.logf("session-controller: revival holds NOT RELEASED ws=%q session=%s — the compaction landed but the workspace has no live session controller; any parked prompt went with its queue",
+			workspace, sessionID)
+		return
+	}
+	released := d.queue.releaseRevivalHold(sessionID)
+	if released == 0 {
+		m.mu.Unlock()
+		return
+	}
+	next := d.queue.popFrontDeliverable()
+	view, recs := m.publishQueueLocked(d)
+	m.mu.Unlock()
+	m.logf("session-controller: revival holds RELEASED ws=%q session=%s released=%d — the compaction landed and the gate is down, so the prompts typed during it are delivered in the order they were typed",
+		workspace, sessionID, released)
+	m.publish(d.sessionID, view, recs)
+	m.noteDrainActivity()
+	if next != nil {
+		go m.deliver(d, next)
+	}
+}
+
+// dropRevivalHolds is the parked entry's BOUND, taken on every revival exit
+// that leaves the gate standing: the compaction's bound expiring, the daemon
+// shutting down mid-compaction, a clear that failed, and a revival that never
+// reached its handoff at all.
+//
+// THE ENTRIES ARE DROPPED, NOT KEPT. The session is still asleep and the claim
+// is going away, so nothing will ever release these holds: every delivery path
+// refuses a held entry, so keeping them would leave chips rendering "waiting"
+// against a queue no boundary can ever drain — a leak that outlives the very
+// revival that caused it. Each one is named in the log with the text that was
+// lost, because a prompt the user typed and the daemon discarded is not an
+// event to record as a count.
+//
+// The user is not left guessing: the session is still gated, so the next prompt
+// meets the ordinary refusal and the revival gate is still there to choose from.
+func (m *Manager) dropRevivalHolds(workspace, sessionID, reason string) {
+	m.mu.Lock()
+	d, live := m.byWS[workspace]
+	if !live {
+		m.mu.Unlock()
+		return
+	}
+	dropped := d.queue.dropRevivalHeld(sessionID)
+	if len(dropped) == 0 {
+		m.mu.Unlock()
+		return
+	}
+	view, recs := m.publishQueueLocked(d)
+	m.mu.Unlock()
+	for _, e := range dropped {
+		m.logf("session-controller: revival-parked prompt DROPPED entry=%s ws=%q session=%s request_id=%s reason=%s text=%q — the compact-first revival ended without opening the gate, so the session is still asleep and nothing can ever deliver this prompt; it is discarded rather than left queued forever",
+			e.id, workspace, sessionID, e.requestID, reason, e.text)
+	}
+	m.logf("session-controller: revival holds DROPPED ws=%q session=%s dropped=%d reason=%s — the gate still stands and the user can revive again",
+		workspace, sessionID, len(dropped), reason)
+	m.publish(d.sessionID, view, recs)
+	m.noteDrainActivity()
+}
+
+// refuseRevivalForce is the loud nack for a force aimed at a revival-parked
+// prompt. It carries ErrHibernated because that is exactly what is true: the
+// session is still asleep, and this prompt runs when the compaction opens the
+// gate and not before.
+func (m *Manager) refuseRevivalForce(workspace, entryID, sessionID string) error {
+	m.logf("session-controller: force REFUSED for a revival-parked queue entry=%s ws=%q session=%s — a compact-first revival's compaction is still pending; forcing the prompt would answer it against the whole uncompacted conversation the user chose this mode to avoid paying for. It is delivered on its own when the compaction lands, and is still cancellable",
+		entryID, workspace, sessionID)
+	return fmt.Errorf("session-controller: cannot force queued prompt %q on workspace %q: session %s is being revived and its compaction has not landed; the prompt is delivered automatically once it does, and can be cancelled: %w",
+		entryID, workspace, sessionID, ErrHibernated)
 }
 
 // reviveCompactBound is how long the detached completion wait allows the
