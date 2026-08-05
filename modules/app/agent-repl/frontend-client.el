@@ -1412,22 +1412,31 @@ guards above cannot be the only protection."
          nil)))))
 
 (defun agent-repl--frontend-release-workspace-session (ws)
-  "Best-effort DELETE of WS's daemon session (for `agent-repl-ws-del-hook').
-Reads `:frontend-session-id' (still present pre-tombstone), DELETEs it,
-and clears the key.  Errors are LOGGED, never signalled: the workspace
-nuke must not abort because the daemon is already gone — but nothing is
-silently dropped, the failure lands in the agent-repl log."
+  "Drop WS's in-memory session binding (for `agent-repl-ws-del-hook').
+
+IT NO LONGER SENDS `deleteSession\=', AND MUST NOT.  A delete stamps the
+daemon record with the `delete session\=' death reason, and
+`resume-resolve\=' treats that as the user saying the CONVERSATION should
+stay gone: it excludes that uuid from every future resume, permanently.
+
+Tearing an editor workspace down is not that statement.  The transcript
+survives on disk in full — one observed workspace kept 712 records — and
+the only thing lost was reachability, because a mechanical teardown had
+been recorded as a deliberate discard.  A workspace nuked and re-created
+could never resume its own history again.
+
+Releasing the binding alone is enough: the daemon locates a session by
+CWD, so a reopened workspace re-binds to the same record, and that
+record now ends as `superseded\=' or `shim died\=' — both of which
+`resume-resolve\=' keeps resumable.
+
+Deleting a conversation on purpose remains available, and stays where it
+belongs: an explicit user command, never a teardown side effect."
   (let ((id (agent-repl--ws-get ws :frontend-session-id)))
     (if id
         (progn
-          (condition-case err
-              (progn
-                (agent-repl--frontend-delete-session id ws)
-                (agent-repl--log ws "frontend session released: %s" id))
-            (error
-             (agent-repl--log ws "frontend session release FAILED for %s: %s"
-                              id (error-message-string err))))
-        (agent-repl--ws-put ws :frontend-session-id nil))
+          (agent-repl--ws-put ws :frontend-session-id nil)
+          (agent-repl--log ws "frontend session binding released (NOT deleted): %s" id))
       (agent-repl--log-verbose ws "frontend session release skipped: no binding"))))
 
 (add-hook 'agent-repl-ws-del-hook #'agent-repl--frontend-release-workspace-session)
