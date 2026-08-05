@@ -872,29 +872,39 @@ guarantees each webview reloads the freshly built bundle."
 
 ;;;; ---- release on nuke ------------------------------------------------------------
 
-(ert-deftest agent-repl-test-frontend-release-deletes-and-clears ()
-  "Release sends a `deleteSession' for the recorded session and clears the key."
+(ert-deftest agent-repl-test-frontend-release-never-deletes-the-session ()
+  "THE INVARIANT: a teardown must not invalidate the conversation.
+A `deleteSession' stamps the daemon record `delete session', which
+`resume-resolve' excludes from every future resume — permanently, while
+the transcript sits intact on disk."
   ;; Arrange
   (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_1")
     (agent-repl-test--with-uds
       ;; Act
       (agent-repl--frontend-release-workspace-session "ws1")
       ;; Assert
-      (pcase-let ((`(,field ,payload ,_ws) (car uds-commands)))
-        (should (equal field "deleteSession"))
-        (should (equal (plist-get payload :sessionId) "s_1")))
+      (should (null (seq-filter (lambda (c) (equal (car c) "deleteSession"))
+                                uds-commands))))))
+
+(ert-deftest agent-repl-test-frontend-release-clears-the-binding ()
+  "Release still drops the in-memory binding; the daemon re-binds by CWD."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_1")
+    (agent-repl-test--with-uds
+      ;; Act
+      (agent-repl--frontend-release-workspace-session "ws1")
+      ;; Assert
       (should (null (agent-repl--ws-get "ws1" :frontend-session-id))))))
 
-(ert-deftest agent-repl-test-frontend-release-logs-but-never-signals ()
-  "A down link must not abort the nuke: release logs and proceeds."
-  ;; Arrange — the UDS send signals (not connected); release must catch it.
+(ert-deftest agent-repl-test-frontend-release-sends-no-command-at-all ()
+  "Release is now purely local: it dispatches nothing over the link."
+  ;; Arrange
   (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_1")
-    (cl-letf (((symbol-function 'agent-repl--uds-send-command)
-               (lambda (&rest _) (user-error "not connected"))))
-      ;; Act — must not signal.
+    (agent-repl-test--with-uds
+      ;; Act
       (agent-repl--frontend-release-workspace-session "ws1")
-      ;; Assert — the key is still cleared.
-      (should (null (agent-repl--ws-get "ws1" :frontend-session-id))))))
+      ;; Assert
+      (should (null uds-commands)))))
 
 (ert-deftest agent-repl-test-frontend-release-noop-without-id ()
   "Release without a recorded id sends no command at all."
