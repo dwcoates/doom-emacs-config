@@ -2,7 +2,7 @@
  * command-dispatch — the webapp's FrontendCommand plane: ack-correlated
  * commands and the SessionView-correlated createSession. One edge per test.
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CommandDispatcher,
   InterruptConfirmRequiredError,
@@ -249,6 +249,23 @@ describe("ack-correlated commands", () => {
 });
 
 describe("minted request ids", () => {
+  it("refuses to construct at all when crypto.getRandomValues is unavailable", () => {
+    // The pre-entropy implementation could have fallen back to Math.random;
+    // ids are durable turn-claim ledger keys now, so a weak-id fallback must
+    // be impossible — the loud constructor throw is that guarantee, and this
+    // test is what keeps a refactor from quietly reintroducing the fallback.
+    installLogging();
+    vi.stubGlobal("crypto", undefined);
+    try {
+      expect(() => new CommandDispatcher({ send: () => true, logLocal: () => {} })).toThrowError(
+        /crypto\.getRandomValues is unavailable/,
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+
   /** A dispatcher with the real id minter, plus the ids it puts on the wire. */
   function newMintingDispatcher() {
     installLogging();
