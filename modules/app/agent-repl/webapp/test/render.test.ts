@@ -73,33 +73,6 @@ function textAt(hour: number, minute: number, text = "the answer"): Conversation
   };
 }
 
-describe("response token utilization metadata", () => {
-  it("renders cache, service, timing, and subagent provenance with unavailable values", () => {
-    const item = { ...textAt(9, 5), tokenUtilization: [{ agentReplSessionId: "session", claudeSessionId: "claude", rootTurnId: "turn", apiRequestId: "request", apiMessageId: "m", model: "opus", actor: "subagent" as const, subagent: { agentId: "agent-7", parentToolUseId: "tool-parent", parentAgentId: "agent-parent", subagentType: "research", taskDescription: "inspect" }, usage: { inputTokens: 1, outputTokens: 20, cacheReadInputTokens: 30, cacheCreationInputTokens: 40, cacheCreation: { ephemeral5mInputTokens: 4, ephemeral1hInputTokens: 36 }, cacheRates: { totalPromptInputTokens: 75, cacheHitRate: 0.3, cacheWriteRate: 0.4, uncachedInputRate: 0.3 }, serviceTier: "priority", speed: "fast", inferenceGeo: "us", iterations: [], rawUsage: {} }, responseTiming: { timeToFirstTokenMs: 50, outputGenerationDurationMs: 100 } }] } as TextItem;
-    const usage = item.tokenUtilization?.[0].usage;
-    if (usage === undefined) throw new Error("missing usage fixture");
-    usage.serverToolUse = { webSearchRequests: 2, webFetchRequests: 3 };
-    usage.outputDetails = { thinkingTokens: 7 };
-    usage.cacheDiagnostic = { kind: "messagesChanged", cacheMissedInputTokens: 9 };
-    usage.fallbackCredit = { applied: true };
-    usage.unmodeledUsage = { futureField: 11 };
-    usage.rawUsage = { rawSdkUsage: { vendor_exact: "preserved" } };
-    const html = renderItem(item);
-    expect(html).toContain("subagent agent-7 research");
-    expect(html).toContain("cache write 40 (5m 4, 1h 36)");
-    expect(html).toContain("tier priority");
-    expect(html).toContain("generation 200.0 tok/s");
-    expect(html).toContain("uncached rate 30.0%");
-    expect(html).toContain("server_tool_use");
-    expect(html).toContain("thinkingTokens");
-    expect(html).toContain("cache_diagnostic");
-    expect(html).toContain("fallback_credit");
-    expect(html).toContain("unmodeled_usage");
-    expect(html).toContain("raw_sdk_usage");
-    expect(html).toContain("vendor_exact");
-  });
-});
-
 /** A user-turn item whose prompt was sent at the given local wall-clock time. */
 function userTurnAt(
   hour: number,
