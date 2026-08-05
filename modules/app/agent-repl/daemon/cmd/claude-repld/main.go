@@ -761,7 +761,7 @@ func main() {
 	if err != nil {
 		daemonFatal(daemonLog, "claude-repld: initialize workspace creation bridge: %v", err)
 	}
-	if err := workspaceAssembly.Forwarder.SetTargets(workspaceBridge, workspaceBridge, workspaceBridge); err != nil {
+	if err := workspaceAssembly.Forwarder.SetTargets(workspaceBridge, workspaceBridge, workspaceBridge, workspaceBridge); err != nil {
 		daemonFatal(daemonLog, "claude-repld: bind workspace creation host forwarder: %v", err)
 	}
 	clientLogs, err := server.NewTargetClientLogWriter(

@@ -330,6 +330,12 @@ type SessionPublicationReleaser interface {
 	ReleaseSessionPublication(context.Context, PublicationDecision) error
 }
 
+// SessionPublicationPreparer invalidates any historical in-memory gate verdict
+// before a new session can emit startup state for this durable worktree job.
+type SessionPublicationPreparer interface {
+	PrepareSessionPublication(context.Context, Job) error
+}
+
 // HostActionSink delivers durable UI-only command records to the host.  It
 // must deduplicate by action ID for the same crash boundary as available.
 type HostActionSink interface {

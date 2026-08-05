@@ -546,20 +546,31 @@ func (s daemonInitialPromptSubmitter) SubmitInitialPrompt(ctx context.Context, j
 // the wire bridge exists.  The bridge binds targets once it is constructed;
 // an unbound delivery fails loudly and leaves the job/action durable for retry.
 type WorkspaceCreateHostForwarder struct {
-	mu        sync.RWMutex
-	available workspacecreate.WorkspaceAvailablePublisher
-	releases  workspacecreate.SessionPublicationReleaser
-	actions   workspacecreate.HostActionSink
+	mu          sync.RWMutex
+	available   workspacecreate.WorkspaceAvailablePublisher
+	releases    workspacecreate.SessionPublicationReleaser
+	publication workspacecreate.SessionPublicationPreparer
+	actions     workspacecreate.HostActionSink
 }
 
-func (f *WorkspaceCreateHostForwarder) SetTargets(available workspacecreate.WorkspaceAvailablePublisher, releases workspacecreate.SessionPublicationReleaser, actions workspacecreate.HostActionSink) error {
-	if available == nil || releases == nil || actions == nil {
+func (f *WorkspaceCreateHostForwarder) SetTargets(available workspacecreate.WorkspaceAvailablePublisher, releases workspacecreate.SessionPublicationReleaser, publication workspacecreate.SessionPublicationPreparer, actions workspacecreate.HostActionSink) error {
+	if available == nil || releases == nil || publication == nil || actions == nil {
 		return fmt.Errorf("workspace create: host forwarder requires available, session-publication release, and action targets")
 	}
 	f.mu.Lock()
-	f.available, f.releases, f.actions = available, releases, actions
+	f.available, f.releases, f.publication, f.actions = available, releases, publication, actions
 	f.mu.Unlock()
 	return nil
+}
+
+func (f *WorkspaceCreateHostForwarder) PrepareSessionPublication(ctx context.Context, job workspacecreate.Job) error {
+	f.mu.RLock()
+	target := f.publication
+	f.mu.RUnlock()
+	if target == nil {
+		return fmt.Errorf("workspace create: session-publication preparer is not bound")
+	}
+	return target.PrepareSessionPublication(ctx, job)
 }
 
 func (f *WorkspaceCreateHostForwarder) ReleaseSessionPublication(ctx context.Context, decision workspacecreate.PublicationDecision) error {
@@ -666,6 +677,16 @@ func (b *WorkspaceCreationBridge) SessionPublicationDecision(worktreePath, sessi
 	}
 	b.mu.Unlock()
 	return result, nil
+}
+
+func (b *WorkspaceCreationBridge) PrepareSessionPublication(_ context.Context, job workspacecreate.Job) error {
+	if job.ID == "" || job.WorktreePath == "" {
+		return fmt.Errorf("workspace create: invalid publication preparation job=%q worktree=%q", job.ID, job.WorktreePath)
+	}
+	b.mu.Lock()
+	delete(b.publication, job.WorktreePath)
+	b.mu.Unlock()
+	return nil
 }
 
 func (b *WorkspaceCreationBridge) SubscribeSessionPublicationReleases() (<-chan server.SessionPublicationRelease, func()) {
@@ -879,7 +900,7 @@ func NewWorkspaceCreateAssembly(cfg WorkspaceCreateAssemblyConfig) (*WorkspaceCr
 		Sessions:  daemonSessionCreator{Commands: cfg.Commands, Registry: cfg.Registry, Logf: cfg.Logf},
 		Health:    daemonSessionHealth{Probe: cfg.Health},
 		Prompts:   daemonInitialPromptSubmitter{Router: cfg.InitialPrompts, Registry: cfg.Registry},
-		Available: forwarder, Releases: forwarder, HostActions: forwarder, Logf: cfg.Logf,
+		Available: forwarder, Releases: forwarder, Publication: forwarder, HostActions: forwarder, Logf: cfg.Logf,
 	})
 	if err != nil {
 		return nil, err
