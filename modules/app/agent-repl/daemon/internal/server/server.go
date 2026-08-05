@@ -1477,6 +1477,14 @@ func sessionTokenUtilization(logf dlog.Logf, source SessionTokenUsageSource, ses
 		}
 		panic(fmt.Sprintf("server: list completed token utilization for session %q: %v", sessionID, err))
 	}
+	if err := frontend.ValidateTokenUtilizationAggregation(records); err != nil {
+		// Validate before shaping SessionView so a corrupt durable record cannot
+		// escape inside a partially constructed snapshot or session-view frame.
+		if logf != nil {
+			logf("server: SessionView token utilization aggregation REFUSED source_plane=durable-store requested_session_id=%q error=%v", sessionID, err)
+		}
+		panic(fmt.Sprintf("server: SessionView token utilization aggregation for session %q: %v", sessionID, err))
+	}
 	return frontend.AggregateTokenUtilization(records)
 }
 

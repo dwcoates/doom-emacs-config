@@ -3,10 +3,51 @@ package frontend
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 )
+
+// TokenUtilizationAggregationInvariantError identifies a completed-response
+// record which cannot safely be projected into a frontend model aggregate.
+// The reducer reports original evidence verbatim so the owning frame boundary
+// can diagnose persisted corruption without inventing an identity.
+type TokenUtilizationAggregationInvariantError struct {
+	RecordIndex        int
+	FieldPath          string
+	AgentReplSessionID string
+	ClaudeSessionID    string
+	APIMessageID       string
+	Model              string
+}
+
+func (e *TokenUtilizationAggregationInvariantError) Error() string {
+	return fmt.Sprintf("token utilization aggregation invariant violated field_path=%s record_index=%d agent_repl_session_id=%q claude_session_id=%q api_message_id=%q model=%q", e.FieldPath, e.RecordIndex, e.AgentReplSessionID, e.ClaudeSessionID, e.APIMessageID, e.Model)
+}
+
+// ValidateTokenUtilizationAggregation validates every response which would
+// contribute model totals. It deliberately accepts neither an empty model nor
+// whitespace-only model, because the strict frontend wire decoder requires
+// each ModelTokenUtilization entry to carry an identity.
+func ValidateTokenUtilizationAggregation(records []*frontendv1.TokenUtilization) error {
+	for index, record := range records {
+		if record == nil || record.GetUsage() == nil {
+			continue
+		}
+		if strings.TrimSpace(record.GetModel()) == "" {
+			return &TokenUtilizationAggregationInvariantError{
+				RecordIndex:        index,
+				FieldPath:          "TokenUtilization.model",
+				AgentReplSessionID: record.GetAgentReplSessionId(),
+				ClaudeSessionID:    record.GetClaudeSessionId(),
+				APIMessageID:       record.GetApiMessageId(),
+				Model:              record.GetModel(),
+			}
+		}
+	}
+	return nil
+}
 
 // SetTokenUtilizationActor preserves the SDK's complete agent provenance and
 // classifies a response as main-agent usage only when every subagent field is
@@ -53,6 +94,11 @@ func CacheRatesFromCounters(input, read, creation int64) *frontendv1.TokenCacheR
 // AggregateTokenUtilization folds completed response records into the session
 // and per-actor/model totals consumed by frontend views.
 func AggregateTokenUtilization(records []*frontendv1.TokenUtilization) *frontendv1.SessionTokenUtilization {
+	// Validate before allocating or accumulating so corrupt durable evidence
+	// cannot leave a caller with a partial aggregate that could enter a frame.
+	if err := ValidateTokenUtilizationAggregation(records); err != nil {
+		panic(err)
+	}
 	out := &frontendv1.SessionTokenUtilization{AllAgents: &frontendv1.TokenUsageTotals{}, MainAgent: &frontendv1.TokenUsageTotals{}}
 	agentIDs := map[string]*subagentAggregateGroup{}
 	parentToolUseIDs := map[string]*subagentAggregateGroup{}

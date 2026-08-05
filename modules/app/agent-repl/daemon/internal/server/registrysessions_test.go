@@ -36,6 +36,38 @@ func TestSessionTokenUtilizationReadFailureLogsAndFailsHard(t *testing.T) {
 	sessionTokenUtilization(func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }, fixedSessionTokenUsageSource{err: errors.New("disk unavailable")}, "s_usage")
 }
 
+func TestSessionTokenUtilizationRejectsPoisonedDurableModelBeforeFrameConstruction(t *testing.T) {
+	var logs []string
+	record := &frontendv1.TokenUtilization{
+		AgentReplSessionId: "daemon-session",
+		ClaudeSessionId:    "claude-session",
+		ApiMessageId:       "api-message",
+		Model:              " \n ",
+		Usage:              &frontendv1.TokenUsage{InputTokens: 1},
+	}
+	defer func() {
+		if recover() == nil {
+			t.Fatal("poisoned durable model did not abort SessionView construction")
+		}
+		joined := strings.Join(logs, "\n")
+		for _, want := range []string{
+			"SessionView token utilization aggregation REFUSED",
+			"source_plane=durable-store",
+			`requested_session_id="daemon-session"`,
+			"field_path=TokenUtilization.model",
+			`agent_repl_session_id="daemon-session"`,
+			`claude_session_id="claude-session"`,
+			`api_message_id="api-message"`,
+			`model=" \n "`,
+		} {
+			if !strings.Contains(joined, want) {
+				t.Fatalf("diagnostic logs = %q, missing %q", joined, want)
+			}
+		}
+	}()
+	_ = sessionTokenUtilization(func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }, fixedSessionTokenUsageSource{records: []*frontendv1.TokenUtilization{record}}, "daemon-session")
+}
+
 // TestRegistrySessionViewsPopulatesRegistryFields verifies the SessionView
 // carries the model, permission mode, claude_session_id, and cwd fields from
 // the registry record (design §14.2 step 3), and leaves slug/title blank
