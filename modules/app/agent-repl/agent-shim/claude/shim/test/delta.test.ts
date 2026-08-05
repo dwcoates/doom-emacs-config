@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import {
   StreamMessageTracker,
@@ -34,6 +34,7 @@ describe("streamEventToContentDelta arms", () => {
     if (d.delta.case !== "text") throw new Error("arm");
     expect(d.delta.value).toBe("hi");
     expect(d.blockIndex).toBe(1);
+    expect(d.toolUseId).toBeUndefined();
   });
 
   it("carries the streamed message id, NOT the event's own envelope uuid", () => {
@@ -64,11 +65,32 @@ describe("streamEventToContentDelta arms", () => {
     expect(delta("stream_event-content_block_delta-signature").delta.case).toBe("signature");
   });
 
-  it("input_json arm (synthetic)", () => {
+  it("input_json arm carries the bound tool-use identity (synthetic)", () => {
     const msg = { type: "stream_event", event: { type: "content_block_delta", index: 3, delta: { type: "input_json_delta", partial_json: "{\"k\":1}" } }, session_id: "s", uuid: "u" };
-    const evt = streamEventToContentDelta(msg)!;
+    const evt = streamEventToContentDelta(msg, { messageId: "msg_1", toolUseId: "toolu_3" })!;
     if (evt.payload.case !== "contentDelta" || evt.payload.value.delta.case !== "inputJson") throw new Error("arm");
     expect(evt.payload.value.delta.value).toBe("{\"k\":1}");
+    expect(evt.payload.value.toolUseId).toBe("toolu_3");
+  });
+
+  it("rejects an input_json arm without a tool-use binding before constructing an event", () => {
+    const write = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const msg = { type: "stream_event", event: { type: "content_block_delta", index: 3, delta: { type: "input_json_delta", partial_json: "{\"k\":1}" } }, session_id: "s", uuid: "u" };
+
+    expect(() => streamEventToContentDelta(msg, { messageId: "msg_1", agentReplSessionId: "agent-session" })).toThrow("input_json delta has no bound tool-use identity");
+
+    const records = write.mock.calls.map(([line]) => JSON.parse(String(line)) as { agent_repl_session_id?: string; claude_session_id?: string; context: Record<string, unknown> });
+    expect(records).toContainEqual(expect.objectContaining({
+      agent_repl_session_id: "test-agent-session",
+      claude_session_id: "s",
+      context: expect.objectContaining({
+        api_message_id: "msg_1",
+        block_index: 3,
+        tool_use_id: null,
+        delta_length: 7,
+        outcome: "missing_tool_use_id_binding",
+      }),
+    }));
   });
 
   it("rejects an unsupported content delta arm without fabricating an event", () => {
@@ -294,6 +316,18 @@ describe("StreamMessageTracker", () => {
     uuid: "envelope-of-the-stop-event",
     event: { type: "message_stop" },
   });
+  const toolStart = (index: number, id: string) => ({
+    type: "stream_event",
+    session_id: "s",
+    uuid: `envelope-tool-${index}`,
+    event: { type: "content_block_start", index, content_block: { type: "tool_use", id, name: "Bash", input: {} } },
+  });
+  const inputChunk = (index: number, partialJson: string) => ({
+    type: "stream_event",
+    session_id: "s",
+    uuid: `envelope-input-${index}`,
+    event: { type: "content_block_delta", index, delta: { type: "input_json_delta", partial_json: partialJson } },
+  });
 
   it("adopts the message id from message_start", () => {
     // Arrange
@@ -360,6 +394,137 @@ describe("StreamMessageTracker", () => {
     t.observe({ type: "stream_event", session_id: "s", event: { type: "message_start", message: {} } });
     // Assert
     expect(t.current()).toBe("");
+  });
+
+  it("binds multiple tool blocks by API block index", () => {
+    const t = new StreamMessageTracker();
+    t.observe(start("msg_tools"));
+    t.observe(toolStart(1, "toolu_one"));
+    t.observe(toolStart(4, "toolu_four"));
+
+    const first = inputChunk(1, "{\"first\":true}");
+    const second = inputChunk(4, "{\"second\":true}");
+    expect(t.toolUseIdFor(first)).toBe("toolu_one");
+    expect(t.toolUseIdFor(second)).toBe("toolu_four");
+
+    const firstEvent = streamEventToContentDelta(first, { messageId: t.current(), toolUseId: t.toolUseIdFor(first) });
+    const secondEvent = streamEventToContentDelta(second, { messageId: t.current(), toolUseId: t.toolUseIdFor(second) });
+    if (firstEvent?.payload.case !== "contentDelta" || secondEvent?.payload.case !== "contentDelta") throw new Error("case");
+    expect([firstEvent.payload.value.toolUseId, secondEvent.payload.value.toolUseId]).toEqual(["toolu_one", "toolu_four"]);
+  });
+
+  it("preserves an identical tool block binding on exact redelivery", () => {
+    const t = new StreamMessageTracker();
+    t.observe(start("msg_tools"));
+    t.observe(toolStart(2, "toolu_two"));
+    t.observe(toolStart(2, "toolu_two"));
+
+    expect(t.toolUseIdFor(inputChunk(2, "{}"))).toBe("toolu_two");
+  });
+
+  it("does not bind a non-tool content block", () => {
+    const t = new StreamMessageTracker();
+    t.observe(start("msg_tools"));
+    t.observe({
+      type: "stream_event",
+      session_id: "s",
+      event: { type: "content_block_start", index: 2, content_block: { type: "text", text: "not a tool" } },
+    });
+
+    expect(t.toolUseIdFor(inputChunk(2, "{}"))).toBeUndefined();
+  });
+
+  it("ignores a malformed non-object content block start", () => {
+    const t = new StreamMessageTracker();
+    t.observe(start("msg_tools"));
+    t.observe({
+      type: "stream_event",
+      session_id: "s",
+      event: { type: "content_block_start", index: 2, content_block: null },
+    });
+
+    expect(t.toolUseIdFor(inputChunk(2, "{}"))).toBeUndefined();
+  });
+
+  it("rejects a malformed input delta index without selecting another tool", () => {
+    const t = new StreamMessageTracker();
+    t.observe(start("msg_tools"));
+    t.observe(toolStart(2, "toolu_two"));
+
+    expect(t.toolUseIdFor(inputChunk(-1, "{}"))).toBeUndefined();
+  });
+
+  it("rejects a conflicting tool block redelivery without changing its binding", () => {
+    const write = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const t = new StreamMessageTracker();
+    t.observe(start("msg_tools"));
+    t.observe(toolStart(2, "toolu_two"), "agent-session");
+
+    expect(() => t.observe(toolStart(2, "toolu_conflict"), "agent-session")).toThrow("conflicting_tool_use_id_at_block_index");
+    expect(t.toolUseIdFor(inputChunk(2, "{}"))).toBe("toolu_two");
+    const records = write.mock.calls.map(([line]) => JSON.parse(String(line)) as { agent_repl_session_id?: string; claude_session_id?: string; context: Record<string, unknown> });
+    expect(records).toContainEqual(expect.objectContaining({
+      agent_repl_session_id: "test-agent-session",
+      claude_session_id: "s",
+      context: expect.objectContaining({
+        api_message_id: "msg_tools",
+        block_index: 2,
+        tool_use_id: "toolu_conflict",
+        bound_tool_use_id: "toolu_two",
+        delta_length: null,
+        outcome: "conflicting_tool_use_id_at_block_index",
+      }),
+    }));
+  });
+
+  it("clears tool block bindings at message_stop so a reconnect cannot reuse stale identity", () => {
+    const t = new StreamMessageTracker();
+    t.observe(start("msg_old"));
+    t.observe(toolStart(0, "toolu_old"));
+    t.observe(stop());
+    t.observe(start("msg_new"));
+
+    expect(t.toolUseIdFor(inputChunk(0, "{}"))).toBeUndefined();
+    expect(() => streamEventToContentDelta(inputChunk(0, "{}"), { messageId: t.current(), toolUseId: t.toolUseIdFor(inputChunk(0, "{}")) })).toThrow("input_json delta has no bound tool-use identity");
+  });
+
+  it("rejects a tool block start without an API tool-use identity before binding it", () => {
+    const write = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const t = new StreamMessageTracker();
+    t.observe(start("msg_tools"));
+    const missingId = { ...toolStart(5, ""), event: { type: "content_block_start", index: 5, content_block: { type: "tool_use", name: "Bash", input: {} } } };
+
+    expect(() => t.observe(missingId, "agent-session")).toThrow("missing_tool_use_id_at_tool_block_start");
+    expect(t.toolUseIdFor(inputChunk(5, "{}"))).toBeUndefined();
+    const records = write.mock.calls.map(([line]) => JSON.parse(String(line)) as { agent_repl_session_id?: string; claude_session_id?: string; context: Record<string, unknown> });
+    expect(records).toContainEqual(expect.objectContaining({
+      agent_repl_session_id: "test-agent-session",
+      claude_session_id: "s",
+      context: expect.objectContaining({
+        api_message_id: "msg_tools",
+        block_index: 5,
+        tool_use_id: null,
+        delta_length: null,
+        outcome: "missing_tool_use_id_at_tool_block_start",
+      }),
+    }));
+  });
+
+  it("rejects a tool block start before message_start without changing tracker state", () => {
+    const t = new StreamMessageTracker();
+
+    expect(() => t.observe(toolStart(5, "toolu_five"), "agent-session")).toThrow("missing_api_message_id_at_tool_block_start");
+    expect(t.current()).toBe("");
+    expect(t.toolUseIdFor(inputChunk(5, "{}"))).toBeUndefined();
+  });
+
+  it("rejects a non-integral API tool block index before binding it", () => {
+    const t = new StreamMessageTracker();
+    t.observe(start("msg_tools"));
+    const invalidIndex = { ...toolStart(0, "toolu_zero"), event: { type: "content_block_start", index: 1.5, content_block: { type: "tool_use", id: "toolu_fractional", name: "Bash", input: {} } } };
+
+    expect(() => t.observe(invalidIndex, "agent-session")).toThrow("invalid_tool_block_index");
+    expect(t.toolUseIdFor(inputChunk(0, "{}"))).toBeUndefined();
   });
 });
 

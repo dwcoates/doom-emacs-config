@@ -1737,8 +1737,12 @@ export class UdsSession {
     if (msg.type === "stream_event") {
       // Observe BEFORE converting: a message_start must make its own id
       // current for the deltas that follow it.
-      this.streamMessages.observe(msg);
-      const opts = { ...this.convertOpts(), messageId: this.streamMessages.current() };
+      this.streamMessages.observe(msg, this.deps.sessionId);
+      const opts = {
+        ...this.convertOpts(),
+        messageId: this.streamMessages.current(),
+        agentReplSessionId: this.deps.sessionId,
+      };
       const persistent = toPersistentEvent(msg, opts);
       if (persistent !== null) {
         await this.confirmVendorIdentity(msg, persistent.sessionId);
@@ -1777,7 +1781,12 @@ export class UdsSession {
       }
     }
     if (isEphemeral(msg)) {
-      const evt = toEphemeralEvent(msg, { ...this.convertOpts(), messageId: this.streamMessages.current() });
+      const evt = toEphemeralEvent(msg, {
+        ...this.convertOpts(),
+        messageId: this.streamMessages.current(),
+        toolUseId: this.streamMessages.toolUseIdFor(msg, this.deps.sessionId),
+        agentReplSessionId: this.deps.sessionId,
+      });
       if (evt) {
         LOGGER.logVerbose({ agent_repl_session_id: this.deps.sessionId, sdk_type: msg.type, payload_case: evt.payload.case, claude_session_id: evt.sessionId }, "forwarding ephemeral SDK event directly to daemon");
         this.server.sendEvent(evt);

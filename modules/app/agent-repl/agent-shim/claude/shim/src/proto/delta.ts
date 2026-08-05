@@ -20,7 +20,8 @@
  *
  * This module maps those two SDK stream messages into their core payloads:
  *   - `stream_event` → `core.ContentDelta` (live text/thinking/tool-input/
- *     signature typing), one per `content_block_delta` frame.
+ *     signature typing), one per `content_block_delta` frame. Input-json
+ *     deltas carry a tool-use identity bound from `content_block_start`.
  *   - `stream_event` → `core.MessageLatency`, one per `message_start` frame
  *     that carries a `ttft_ms` stamp (the ONE progress fact a structural frame
  *     carries; see {@link streamEventToMessageLatency}). Unlike deltas, this
@@ -67,26 +68,37 @@ export interface DeltaOptions {
    * from how the event was delivered. See core.proto's contract.
    */
   queryInstanceId?: string;
+  /**
+   * The tool-use identity bound to this API content block by its preceding
+   * `content_block_start`. It is required for `input_json_delta` because a
+   * block ordinal cannot identify a durable tool after cross-plane ordering.
+   */
+  toolUseId?: string;
+  /** Agent-repl session identity supplied by the owning UDS session. */
+  agentReplSessionId?: string;
 }
 
 /**
- * Tracks which assistant message the stream is currently emitting.
+ * Tracks the assistant message and tool identities the stream is emitting.
  *
  * A `content_block_delta` says nothing about which message it belongs to — the
  * identity arrives once, on the `message_start` that opened it. The SDK stream
  * is continuous for the life of a shim, so the shim always sees that frame
- * before the deltas that follow it; only the DAEMON can attach mid-message,
- * and it recovers the finished message from the store instead.
+ * before the deltas that follow it; each tool `content_block_start` similarly
+ * binds its API block index to the durable tool-use id before input chunks.
+ * Only the DAEMON can attach mid-message, and it recovers the finished
+ * message from the store instead.
  */
 export class StreamMessageTracker {
   private messageId = "";
+  private readonly toolUseIdsByBlockIndex = new Map<number, string>();
 
   /**
    * Observe one SDK message, updating the in-flight id. Call BEFORE converting
    * the message, so a `message_start`'s own id is already current for the
    * deltas that follow.
    */
-  observe(msg: unknown): void {
+  observe(msg: unknown, agentReplSessionId?: string): void {
     if (!isObject(msg) || msg["type"] !== "stream_event") return;
     const event = msg["event"];
     if (!isObject(event)) return;
@@ -94,12 +106,17 @@ export class StreamMessageTracker {
       case "message_start": {
         const message = event["message"];
         this.messageId = isObject(message) && typeof message["id"] === "string" ? message["id"] : "";
+        this.toolUseIdsByBlockIndex.clear();
         LOGGER.logVerbose({ message_id: this.messageId }, "stream message tracker opened assistant message");
         break;
       }
+      case "content_block_start":
+        this.observeContentBlockStart(msg, event, agentReplSessionId);
+        break;
       case "message_stop":
         LOGGER.logVerbose({ message_id: this.messageId }, "stream message tracker closed assistant message");
         this.messageId = "";
+        this.toolUseIdsByBlockIndex.clear();
         break;
       default:
         break;
@@ -109,6 +126,104 @@ export class StreamMessageTracker {
   /** The Anthropic id of the message being streamed, or "" between messages. */
   current(): string {
     return this.messageId;
+  }
+
+  /** Return the bound tool-use identity for an input delta's API block. */
+  toolUseIdFor(msg: unknown, agentReplSessionId?: string): string | undefined {
+    if (!isObject(msg) || msg["type"] !== "stream_event") return undefined;
+    const frame = frameOfType(msg, "content_block_delta");
+    if (!frame || !isObject(frame["delta"]) || frame["delta"]["type"] !== "input_json_delta") return undefined;
+    const index = frame["index"];
+    if (typeof index !== "number" || !Number.isInteger(index) || index < 0) {
+      LOGGER.logVerbose({
+        agent_repl_session_id: agentReplSessionId ?? null,
+        claude_session_id: sessionOf(msg),
+        api_message_id: this.messageId || null,
+        block_index: index,
+        tool_use_id: null,
+        outcome: "invalid_input_delta_block_index",
+      }, "input-json delta has an invalid API block index for identity lookup");
+      return undefined;
+    }
+    const toolUseId = this.toolUseIdsByBlockIndex.get(index);
+    LOGGER.logVerbose({
+      agent_repl_session_id: agentReplSessionId ?? null,
+      claude_session_id: sessionOf(msg),
+      api_message_id: this.messageId || null,
+      block_index: index,
+      tool_use_id: toolUseId ?? null,
+      outcome: toolUseId === undefined ? "missing_tool_use_id_binding" : "resolved_tool_use_id_binding",
+    }, "looked up input-json delta tool-use identity");
+    return toolUseId;
+  }
+
+  private observeContentBlockStart(
+    msg: Record<string, unknown>,
+    event: Record<string, unknown>,
+    agentReplSessionId?: string,
+  ): void {
+    const contentBlock = event["content_block"];
+    const blockIndex = event["index"];
+    const blockType = isObject(contentBlock) && typeof contentBlock["type"] === "string"
+      ? contentBlock["type"]
+      : null;
+    const classificationContext = {
+      agent_repl_session_id: agentReplSessionId ?? null,
+      claude_session_id: sessionOf(msg),
+      api_message_id: this.messageId || null,
+      block_index: blockIndex,
+      content_block_type: blockType,
+    };
+    if (!isObject(contentBlock)) {
+      LOGGER.logVerbose({ ...classificationContext, outcome: "ignored_non_object_content_block" }, "ignored non-object content block start");
+      return;
+    }
+    if (contentBlock["type"] !== "tool_use") {
+      LOGGER.logVerbose({ ...classificationContext, outcome: "ignored_non_tool_content_block" }, "ignored non-tool content block start");
+      return;
+    }
+    LOGGER.logVerbose({ ...classificationContext, outcome: "tool_use_content_block" }, "classified tool-use content block start");
+
+    const toolUseId = contentBlock["id"];
+    const baseContext = {
+      agent_repl_session_id: agentReplSessionId ?? null,
+      claude_session_id: sessionOf(msg),
+      api_message_id: this.messageId || null,
+      block_index: blockIndex,
+      tool_use_id: typeof toolUseId === "string" && toolUseId.length > 0 ? toolUseId : null,
+      delta_length: null,
+      delta_arm: "input_json",
+    };
+    if (this.messageId.length === 0) {
+      this.failIdentityInvariant(baseContext, "missing_api_message_id_at_tool_block_start", "tool block start has no active API message identity");
+    }
+    if (typeof blockIndex !== "number" || !Number.isInteger(blockIndex) || blockIndex < 0) {
+      this.failIdentityInvariant(baseContext, "invalid_tool_block_index", "tool block start has an invalid API block index");
+    }
+    if (typeof toolUseId !== "string" || toolUseId.length === 0) {
+      this.failIdentityInvariant(baseContext, "missing_tool_use_id_at_tool_block_start", "tool block start has no tool-use identity");
+    }
+
+    const existing = this.toolUseIdsByBlockIndex.get(blockIndex);
+    if (existing !== undefined && existing !== toolUseId) {
+      this.failIdentityInvariant({ ...baseContext, bound_tool_use_id: existing }, "conflicting_tool_use_id_at_block_index", "tool block redelivery conflicts with the bound tool-use identity");
+    }
+    if (existing === toolUseId) {
+      LOGGER.logVerbose({ ...baseContext, outcome: "redelivery_preserved_binding" }, "tool block redelivery preserved identity binding");
+      return;
+    }
+    this.toolUseIdsByBlockIndex.set(blockIndex, toolUseId);
+    LOGGER.logVerbose({ ...baseContext, outcome: "bound_tool_use_id_to_block_index" }, "bound tool-use identity to API content block");
+  }
+
+  private failIdentityInvariant(context: Record<string, unknown>, outcome: string, message: string): never {
+    LOGGER.log({
+      level: "error",
+      ...context,
+      outcome,
+      failed_operation: "stream_tool_identity_binding",
+    }, message);
+    throw new Error(`${message}: ${outcome}`);
   }
 }
 
@@ -162,8 +277,10 @@ function ephemeralEvent(
 /**
  * Map a raw `stream_event` SDK message to an EPHEMERAL `ContentDelta` Event,
  * or `null` for a frame that is not a `content_block_delta` (structural
- * frames carry no live-typing content). Never throws: a shape it cannot read
- * yields `null` rather than a bogus delta.
+ * frames carry no live-typing content). A shape it cannot read yields `null`
+ * rather than a bogus delta. An `input_json_delta` without the preceding
+ * tool-use binding is an invariant violation and throws before constructing
+ * an event.
  */
 export function streamEventToContentDelta(
   msg: Record<string, unknown>,
@@ -186,16 +303,33 @@ export function streamEventToContentDelta(
       ? BigInt(Math.trunc(delta["estimated_tokens"] as number))
       : 0n;
 
+  if (arm.case === "inputJson" && (typeof opts?.toolUseId !== "string" || opts.toolUseId.length === 0)) {
+    LOGGER.log({
+      level: "error",
+      claude_session_id: sessionOf(msg),
+      agent_repl_session_id: opts?.agentReplSessionId ?? null,
+      api_message_id: uuid || null,
+      block_index: index,
+      tool_use_id: null,
+      delta_length: arm.value.length,
+      delta_arm: arm.case,
+      failed_operation: "stream_input_json_delta_conversion",
+      outcome: "missing_tool_use_id_binding",
+    }, "input_json delta has no bound tool-use identity");
+    throw new Error("input_json delta has no bound tool-use identity");
+  }
+
   const event = ephemeralEvent(sessionOf(msg), producedAt(opts), {
     case: "contentDelta",
     value: create(ContentDeltaSchema, {
       uuid,
       blockIndex: index,
+      ...(arm.case === "inputJson" ? { toolUseId: opts!.toolUseId } : {}),
       delta: arm,
       estimatedTokens,
     }),
   }, opts?.queryInstanceId ?? "");
-  LOGGER.logVerbose({ claude_session_id: sessionOf(msg), message_id: uuid, block_index: index, delta_arm: arm.case, delta_length: arm.value.length }, "converted ephemeral content delta");
+  LOGGER.logVerbose({ claude_session_id: sessionOf(msg), agent_repl_session_id: opts?.agentReplSessionId ?? null, api_message_id: uuid, block_index: index, tool_use_id: arm.case === "inputJson" ? opts!.toolUseId : null, delta_arm: arm.case, delta_length: arm.value.length }, "converted ephemeral content delta");
   return event;
 }
 
