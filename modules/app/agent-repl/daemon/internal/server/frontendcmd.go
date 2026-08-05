@@ -170,6 +170,10 @@ type WorkspaceLifecycle interface {
 	// lifecycle that cannot serve a merge is a COMPILE error instead of a
 	// wiring-time one.
 	OpenDriveable(ctx context.Context, workspace string) error
+	// OpenForMerge is the merge-only direct revival boundary. It makes the
+	// workspace driveable after retiring a durable hibernation gate when one
+	// exists, without treating a user revival mode as implicit.
+	OpenForMerge(ctx context.Context, workspace string) error
 }
 
 // WorkspaceCreationBridge is the server-side seam for daemon-owned workspace

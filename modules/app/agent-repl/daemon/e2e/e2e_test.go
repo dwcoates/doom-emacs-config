@@ -389,6 +389,7 @@ func (stubLifecycle) Open(context.Context, string) error  { return nil }
 // production server.WorkspaceOpener instead, precisely so the bring-up decision
 // is exercised for real rather than stubbed past.
 func (stubLifecycle) OpenDriveable(context.Context, string) error { return nil }
+func (stubLifecycle) OpenForMerge(context.Context, string) error  { return nil }
 
 // stubMergeLease is the merge.Lease for E2E flows that never drive a merge.
 // The real one lives in internal/ssm and interrupts the workspace's turn; a

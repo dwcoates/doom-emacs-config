@@ -80,6 +80,9 @@ type WorkspaceEnsurer interface {
 	// so that a caller which must not race the shim's boot cannot express the
 	// racing call by accident.
 	EnsureDriveable(ctx context.Context, workspace string) error
+	// ReviveForMerge applies the merge command's explicit direct-revival policy
+	// before waiting for a session that the merge will drive.
+	ReviveForMerge(ctx context.Context, workspace string) error
 }
 
 // WorkspaceOpener is the production WorkspaceLifecycle.
@@ -171,6 +174,33 @@ func (o *WorkspaceOpener) OpenDriveable(ctx context.Context, workspace string) e
 		return fmt.Errorf("server: open-workspace %q session %q disappeared after transcript binding", workspace, id)
 	}
 	return o.establish(rec, workspace, o.Ensurer.EnsureDriveable(ctx, workspace))
+}
+
+// OpenForMerge applies the merge-specific revival policy. It intentionally
+// does not route through the user revival command because merge_workspace is
+// itself the explicit operation choosing direct rehydration for its action.
+func (o *WorkspaceOpener) OpenForMerge(ctx context.Context, workspace string) error {
+	if o.Ensurer == nil {
+		return fmt.Errorf("server: merge workspace %q has no session ensurer wired", workspace)
+	}
+	id, ok := (&SessionLocator{Reg: o.Reg}).Locate(workspace)
+	if !ok {
+		return fmt.Errorf("server: merge workspace %q has no session record: %w", workspace, merge.ErrNoSession)
+	}
+	o.BindWorkspace(workspace)
+	if _, found := o.Reg.Get(id); !found {
+		return fmt.Errorf("server: merge workspace %q session %q disappeared after transcript binding", workspace, id)
+	}
+	if err := o.Ensurer.ReviveForMerge(ctx, workspace); err != nil {
+		if o.Logf != nil {
+			o.Logf("server: merge session revival FAILED workspace=%q session=%q error=%v", workspace, id, err)
+		}
+		return err
+	}
+	if o.Logf != nil {
+		o.Logf("server: merge session revival COMPLETE workspace=%q session=%q policy=direct", workspace, id)
+	}
+	return nil
 }
 
 // Close is still not exposed daemon-side: the workspacecmd channel carries no

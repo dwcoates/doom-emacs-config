@@ -217,6 +217,7 @@ type fakeLifecycle struct {
 	closed          []string
 	opened          []string
 	openedDriveable []string
+	openedForMerge  []string
 	// closeErr, when set, refuses every close.
 	closeErr error
 }
@@ -257,6 +258,11 @@ func (f *fakeLifecycle) Open(_ context.Context, ws string) error {
 // and folding the two together would hide which bring-up a future one used.
 func (f *fakeLifecycle) OpenDriveable(_ context.Context, ws string) error {
 	f.openedDriveable = append(f.openedDriveable, ws)
+	return nil
+}
+
+func (f *fakeLifecycle) OpenForMerge(_ context.Context, ws string) error {
+	f.openedForMerge = append(f.openedForMerge, ws)
 	return nil
 }
 
