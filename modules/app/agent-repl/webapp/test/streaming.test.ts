@@ -18,8 +18,20 @@ import type { ConversationItem, TextItem, ThinkingItem, ToolItem } from "../src/
 
 const TS = "2026-07-19T12:00:00.000Z";
 
-function delta(over: Partial<StreamDelta> = {}): StreamDelta {
+type TextDelta = { kind: "text"; messageId: string; blockIndex: number; delta: string };
+type ThinkingDelta = { kind: "thinking"; messageId: string; blockIndex: number; delta: string };
+type InputDelta = { kind: "input_json"; messageId: string; blockIndex: number; delta: string; toolUseId: string };
+
+function delta(over: Partial<Omit<TextDelta, "kind">> = {}): TextDelta {
   return { kind: "text", messageId: "msg_1", blockIndex: 0, delta: "hi", ...over };
+}
+
+function thinkingDelta(over: Partial<Omit<ThinkingDelta, "kind">> = {}): ThinkingDelta {
+  return { kind: "thinking", messageId: "msg_1", blockIndex: 0, delta: "hi", ...over };
+}
+
+function inputDelta(over: Partial<Omit<InputDelta, "kind">> = {}): InputDelta {
+  return { kind: "input_json", messageId: "msg_1", blockIndex: 0, delta: "hi", toolUseId: "tu1", ...over };
 }
 
 function preview(over: Partial<TextItem> = {}): TextItem {
@@ -152,7 +164,7 @@ describe("applyStreamDelta opens a block", () => {
     // Arrange
     const items: ConversationItem[] = [];
     // Act
-    applyStreamDelta(items, delta({ kind: "thinking" }), TS, 0);
+    applyStreamDelta(items, thinkingDelta(), TS, 0);
     // Assert
     expect(items[0]!.kind).toBe("thinking");
   });
@@ -213,36 +225,46 @@ describe("applyStreamDelta grows tool input", () => {
     };
   }
 
-  it("grows the call whose input is still arriving", () => {
+  it("grows the exact call whose input is still arriving", () => {
     // Arrange
     const items: ConversationItem[] = [toolItem()];
     // Act
-    applyStreamDelta(items, delta({ kind: "input_json", delta: '{"a":1}' }), TS, 0);
+    applyStreamDelta(items, inputDelta({ delta: '{"a":1}' }), TS, 0);
     // Assert
     expect((items[0] as ToolItem).inputJson).toBe('{"a":1}');
   });
 
-  it("grows the LATEST open call when an earlier one already closed", () => {
+  it("leaves unrelated open calls untouched", () => {
     // Arrange
     const items: ConversationItem[] = [
-      toolItem({ toolUseId: "tu1", inputDone: true }),
-      toolItem({ toolUseId: "tu2" }),
+      toolItem({ toolUseId: "tu1", inputJson: "left" }),
+      toolItem({ toolUseId: "tu2", inputJson: "right" }),
     ];
     // Act
-    applyStreamDelta(items, delta({ kind: "input_json", delta: "x" }), TS, 0);
+    applyStreamDelta(items, inputDelta({ toolUseId: "tu1", delta: "-grown" }), TS, 0);
     // Assert
-    expect((items[1] as ToolItem).inputJson).toBe("x");
+    expect((items[0] as ToolItem).inputJson).toBe("left-grown");
+    expect((items[1] as ToolItem).inputJson).toBe("right");
   });
 
-  it("reports a tool-input delta with no open call rather than dropping it", () => {
-    // The relay carries no tool_use_id, so an unattachable delta is a real gap
-    // the caller must be able to surface — never a silent no-op.
+  it("creates an exact-id preview when the ephemeral chunk arrives first", () => {
     // Arrange
     const items: ConversationItem[] = [];
     // Act
-    const outcome = applyStreamDelta(items, delta({ kind: "input_json", blockIndex: 4 }), TS, 0);
+    const outcome = applyStreamDelta(items, inputDelta({ toolUseId: "tu3", blockIndex: 4, delta: "{" }), TS, 0);
     // Assert
-    expect(outcome).toEqual({ changed: false, reason: "no-open-tool", blockId: "msg_1:4" });
+    expect(outcome).toEqual({ changed: true, toolInput: { toolUseId: "tu3", phase: "absent", branch: "preview-created" } });
+    expect(items).toMatchObject([{ kind: "tool", toolUseId: "tu3", inputJson: "{", inputDone: false }]);
+  });
+
+  it("classifies a late ephemeral chunk as superseded by an authoritative final", () => {
+    const items: ConversationItem[] = [toolItem({ toolUseId: "tu1", inputDone: true })];
+    expect(applyStreamDelta(items, inputDelta({ delta: "ignored" }), TS, 0)).toEqual({
+      changed: false,
+      reason: "superseded-authoritative-tool",
+      toolInput: { toolUseId: "tu1", phase: "final", branch: "superseded-authoritative-final" },
+    });
+    expect((items[0] as ToolItem).inputJson).toBe("");
   });
 });
 

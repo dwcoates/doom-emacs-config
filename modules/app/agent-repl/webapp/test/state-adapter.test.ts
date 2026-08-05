@@ -306,6 +306,15 @@ describe("TypingDelta mapping", () => {
     ]);
   });
 
+  it("carries an input delta's stable tool-use identity unchanged", () => {
+    const effects = applyOne({
+      typingDelta: { workspace: "ws", sessionId: "s1", delta: { uuid: "msg-7", blockIndex: 2, inputJson: "{", toolUseId: "toolu_1" } },
+    });
+    expect(effects).toEqual([
+      { kind: "typing", value: { workspace: "ws", sessionId: "s1", messageId: "msg-7", blockIndex: 2, kind: "input_json", toolUseId: "toolu_1", delta: "{" } },
+    ]);
+  });
+
   it("ignores a signature content delta (no live preview)", () => {
     const effects = applyOne({ typingDelta: { sessionId: "s1", delta: { uuid: "u1", signature: "sig" } } });
     expect(effects).toEqual([{ kind: "ignored", shape: "content-delta:signature" }]);
