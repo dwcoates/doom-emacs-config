@@ -4,9 +4,11 @@ import os from "node:os";
 import path from "node:path";
 import {
   makeUdsQueryFactory,
+  MAIN_LIFECYCLE_OPERATION,
   parseArgs,
   probeQueryOptions,
   realQueryOptions,
+  logMainLifecycle,
   udsShutdownSignalHandlers,
   validateUdsLoggingArgs,
 } from "../src/main.js";
@@ -340,6 +342,32 @@ describe("UDS query signal ownership", () => {
         outcome: "refused_query_termination",
         query_preserved: true,
       }),
+    }));
+    stderr.mockRestore();
+  });
+});
+
+describe("main entrypoint lifecycle log contract", () => {
+  it.each([
+    ["normalized launch model", { requested_model: "<synthetic>", effective_model: "" }, "normalized empty-equivalent launch model before constructing SDK options", "info"],
+    ["validated startup", { fake: true, daemon_socket: "/tmp/daemon.sock" }, "validated shim startup arguments and configured durable logging", "info"],
+    ["selected query implementation", { query_source: "fake" }, "selecting shim query implementation", "info"],
+    ["acquired session lock", {}, "exclusive session lock acquired", "info"],
+    ["authorized shutdown signal", { signal: "SIGTERM", outcome: "intentional_query_shutdown" }, "received authorized shim shutdown signal", "info"],
+    ["refused unauthorized signal", { level: "error", signal: "SIGINT", outcome: "refused_query_termination", query_preserved: true }, "refused unauthorized signal as an SDK query shutdown condition", "error"],
+  ])("assigns %s a stable lifecycle operation and %s level", (_caseName, fields, message, expectedLevel) => {
+    const records: Array<Record<string, unknown>> = [];
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(((chunk: unknown): boolean => {
+      records.push(JSON.parse(String(chunk)) as Record<string, unknown>);
+      return true;
+    }) as typeof process.stderr.write);
+
+    logMainLifecycle(fields, message);
+
+    expect(records).toContainEqual(expect.objectContaining({
+      operation: MAIN_LIFECYCLE_OPERATION,
+      level: expectedLevel,
+      message,
     }));
     stderr.mockRestore();
   });
