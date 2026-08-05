@@ -37,6 +37,8 @@ import (
 	"net"
 	"os"
 	"sync"
+	"sync/atomic"
+	"syscall"
 	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
@@ -51,11 +53,19 @@ type Server struct {
 	fan *fanout
 	log *logging.Logger
 
-	mu     sync.Mutex
-	ln     net.Listener
-	conns  map[net.Conn]struct{}
-	closed bool
-	wg     sync.WaitGroup
+	mu    sync.Mutex
+	ln    net.Listener
+	conns map[net.Conn]struct{}
+	// subscribers records connection-owned terminal state.  Server.Close uses
+	// this map instead of closing a subscriber socket directly, making a
+	// shutdown terminal cause structurally unavoidable for every registered
+	// subscription.
+	subscribers map[net.Conn]*subscriptionTerminal
+	closed      bool
+	wg          sync.WaitGroup
+
+	subscriberHooks   subscriberHooks
+	subscriberHooksMu sync.RWMutex
 
 	// ingestMu serializes the whole ASSIGN-THEN-ANNOUNCE region of
 	// ingestAndFan, so a session's fan-out order is its seq order.
@@ -95,10 +105,11 @@ func New(database *db.DB, log *logging.Logger, buffer int) *Server {
 		panic("shim-store server: nil database or logger")
 	}
 	return &Server{
-		db:    database,
-		fan:   newFanout(buffer, log),
-		log:   log,
-		conns: make(map[net.Conn]struct{}),
+		db:          database,
+		fan:         newFanout(buffer, log),
+		log:         log,
+		conns:       make(map[net.Conn]struct{}),
+		subscribers: make(map[net.Conn]*subscriptionTerminal),
 	}
 }
 
@@ -149,6 +160,7 @@ func (s *Server) Serve(ln net.Listener) error {
 			}
 			return fmt.Errorf("shim-store server: accept: %w", err)
 		}
+		conn = &onceConn{Conn: conn}
 		s.log.LogVerbose(logging.Fields{Operation: "accept", Subscriber: conn.RemoteAddr().String()}, "accepted UDS connection")
 		s.trackConn(conn)
 		s.wg.Add(1)
@@ -171,8 +183,13 @@ func (s *Server) Close() error {
 	s.closed = true
 	ln := s.ln
 	conns := make([]net.Conn, 0, len(s.conns))
+	subscribers := make([]*subscriptionTerminal, 0, len(s.subscribers))
 	for c := range s.conns {
-		conns = append(conns, c)
+		if terminal := s.subscribers[c]; terminal != nil {
+			subscribers = append(subscribers, terminal)
+		} else {
+			conns = append(conns, c)
+		}
 	}
 	s.mu.Unlock()
 
@@ -188,6 +205,9 @@ func (s *Server) Close() error {
 			s.log.Log(logging.Fields{Operation: "close-connection", Subscriber: c.RemoteAddr().String(), Level: "error"}, "closing UDS connection failed: %v", err)
 			closeErrs = append(closeErrs, fmt.Errorf("closing UDS connection %s: %w", c.RemoteAddr(), err))
 		}
+	}
+	for _, terminal := range subscribers {
+		terminal.terminate("server", subscriptionTerminalServerShutdown, nil)
 	}
 	s.wg.Wait()
 	if err := errors.Join(closeErrs...); err != nil {
@@ -206,6 +226,35 @@ func (s *Server) trackConn(c net.Conn) {
 func (s *Server) untrackConn(c net.Conn) {
 	s.mu.Lock()
 	delete(s.conns, c)
+	delete(s.subscribers, c)
+	s.mu.Unlock()
+}
+
+// registerSubscriberTerminal assigns the only terminal owner before replay
+// begins.  Close either finds the owner in subscribers or sees no registered
+// subscriber yet; it can never directly close a registered subscriber socket.
+func (s *Server) registerSubscriberTerminal(conn net.Conn, terminal *subscriptionTerminal) bool {
+	s.mu.Lock()
+	_, tracked := s.conns[conn]
+	if !tracked {
+		s.mu.Unlock()
+		panic("shim-store server: registering untracked subscriber connection")
+	}
+	if s.closed {
+		s.mu.Unlock()
+		terminal.terminate("server", subscriptionTerminalServerShutdown, nil)
+		return false
+	}
+	s.subscribers[conn] = terminal
+	s.mu.Unlock()
+	return true
+}
+
+func (s *Server) unregisterSubscriberTerminal(conn net.Conn, terminal *subscriptionTerminal) {
+	s.mu.Lock()
+	if current := s.subscribers[conn]; current == terminal {
+		delete(s.subscribers, conn)
+	}
 	s.mu.Unlock()
 }
 
@@ -488,32 +537,172 @@ func (s *Server) ingestAndFan(sw *corev1.StoreWrite) (*corev1.StoreWriteAck, boo
 
 // ---- subscriber side ------------------------------------------------------
 
+// subscriptionTerminalReason is the sole classification of a subscriber
+// connection's ending.  A candidate is accepted exactly once by its
+// subscriptionTerminal, which owns cancellation, deregistration, socket close,
+// and the final canonical lifecycle record.
+type subscriptionTerminalReason string
+
+const (
+	subscriptionTerminalClientEOF        subscriptionTerminalReason = "client-eof"
+	subscriptionTerminalClientReset      subscriptionTerminalReason = "client-reset"
+	subscriptionTerminalSlowConsumer     subscriptionTerminalReason = "slow-consumer"
+	subscriptionTerminalServerShutdown   subscriptionTerminalReason = "server-shutdown"
+	subscriptionTerminalReplayFailure    subscriptionTerminalReason = "replay-failure"
+	subscriptionTerminalReadinessFailure subscriptionTerminalReason = "readiness-failure"
+	subscriptionTerminalTransportFailure subscriptionTerminalReason = "transport-failure"
+)
+
+// subscriberHooks supplies deterministic lifecycle observations for focused
+// tests. Production leaves every hook nil.
+type subscriberHooks struct {
+	beforeReplayRow func()
+	beforeTailWrite func()
+	onTerminal      func(subscriberTerminalRecord)
+}
+
+type subscriberTerminalRecord struct {
+	Owner          string
+	Reason         subscriptionTerminalReason
+	SessionID      string
+	Peer           string
+	FromSeq        uint64
+	Delivered      uint64
+	FirstReplaySeq uint64
+	LastReplaySeq  uint64
+	Cause          error
+}
+
+type subscriptionTerminal struct {
+	once       sync.Once
+	terminated atomic.Bool
+
+	conn       net.Conn
+	fan        *fanout
+	subscriber *subscriber
+	cancel     context.CancelFunc
+	log        *logging.Logger
+	hooks      subscriberHooks
+
+	sessionID string
+	peer      string
+	fromSeq   uint64
+	started   time.Time
+
+	mu             sync.Mutex
+	delivered      uint64
+	firstReplaySeq uint64
+	lastReplaySeq  uint64
+}
+
+func newSubscriptionTerminal(conn net.Conn, fan *fanout, log *logging.Logger, sessionID string, fromSeq uint64, cancel context.CancelFunc, hooks subscriberHooks) *subscriptionTerminal {
+	if conn == nil || fan == nil || log == nil || cancel == nil {
+		panic("shim-store server: invalid subscription terminal dependencies")
+	}
+	return &subscriptionTerminal{
+		conn: conn, fan: fan, cancel: cancel, log: log, hooks: hooks,
+		sessionID: sessionID, peer: conn.RemoteAddr().String(), fromSeq: fromSeq, started: time.Now(),
+	}
+}
+
+func (t *subscriptionTerminal) attach(subscriber *subscriber) {
+	if subscriber == nil {
+		panic("shim-store server: nil terminal subscriber")
+	}
+	if t.subscriber != nil {
+		panic("shim-store server: terminal subscriber attached twice")
+	}
+	t.subscriber = subscriber
+}
+
+func (t *subscriptionTerminal) setReplayProgress(delivered, firstReplaySeq, lastReplaySeq uint64) {
+	t.mu.Lock()
+	t.delivered = delivered
+	t.firstReplaySeq = firstReplaySeq
+	t.lastReplaySeq = lastReplaySeq
+	t.mu.Unlock()
+}
+
+func (t *subscriptionTerminal) isTerminated() bool { return t.terminated.Load() }
+
+func (t *subscriptionTerminal) terminate(owner string, reason subscriptionTerminalReason, cause error) {
+	t.once.Do(func() {
+		t.terminated.Store(true)
+		t.cancel()
+		if t.subscriber == nil {
+			panic("shim-store server: terminal without attached subscriber")
+		}
+		t.fan.remove(t.subscriber)
+		t.subscriber.stop()
+		closeErr := t.conn.Close()
+		t.mu.Lock()
+		delivered, firstReplaySeq, lastReplaySeq := t.delivered, t.firstReplaySeq, t.lastReplaySeq
+		t.mu.Unlock()
+		level := "info"
+		switch reason {
+		case subscriptionTerminalSlowConsumer:
+			level = "warn"
+		case subscriptionTerminalReplayFailure, subscriptionTerminalReadinessFailure, subscriptionTerminalTransportFailure:
+			level = "error"
+		}
+		if closeErr != nil && !errors.Is(closeErr, net.ErrClosed) {
+			if cause == nil {
+				cause = closeErr
+			} else {
+				cause = fmt.Errorf("%w; socket_close=%v", cause, closeErr)
+			}
+		}
+		record := subscriberTerminalRecord{Owner: owner, Reason: reason, SessionID: t.sessionID, Peer: t.peer, FromSeq: t.fromSeq, Delivered: delivered, FirstReplaySeq: firstReplaySeq, LastReplaySeq: lastReplaySeq, Cause: cause}
+		fields := logging.Fields{Operation: "subscribe-terminal", Session: t.sessionID, Subscriber: t.peer, ReplayFromSeq: t.fromSeq, ReplayFirstSeq: firstReplaySeq, ReplayLastSeq: lastReplaySeq, Delivered: delivered, TerminalOwner: owner, TerminalReason: string(reason), Level: level}
+		if cause != nil {
+			fields.ErrorCause = cause.Error()
+		}
+		t.log.Log(fields, "subscription terminal owner=%s reason=%s elapsed_ms=%d", owner, reason, time.Since(t.started).Milliseconds())
+		if t.hooks.onTerminal != nil {
+			t.hooks.onTerminal(record)
+		}
+	})
+}
+
+func (s *Server) subscriberHooksSnapshot() subscriberHooks {
+	s.subscriberHooksMu.RLock()
+	defer s.subscriberHooksMu.RUnlock()
+	return s.subscriberHooks
+}
+
+func terminalReasonForRead(err error) subscriptionTerminalReason {
+	switch {
+	case errors.Is(err, io.EOF):
+		return subscriptionTerminalClientEOF
+	case errors.Is(err, syscall.ECONNRESET), errors.Is(err, syscall.EPIPE):
+		return subscriptionTerminalClientReset
+	default:
+		return subscriptionTerminalTransportFailure
+	}
+}
+
 func (s *Server) serveSubscriber(conn net.Conn, sub *corev1.Subscribe) {
 	sessionID := sub.GetSessionId()
 	peer := conn.RemoteAddr().String()
-	started := time.Now()
 	s.log.LogVerbose(logging.Fields{Operation: "subscribe", Session: sessionID, Subscriber: peer}, "starting streaming replay-then-tail from_seq=%d", sub.GetFromSeq())
 	if sessionID == "" {
 		s.log.Log(logging.Fields{Operation: "subscribe", Subscriber: peer, Level: "error"}, "protocol subscription rejected: empty session_id")
 		return
 	}
 
-	subr := s.fan.subscribe(sessionID)
-	defer s.fan.unsubscribe(subr)
-
-	// When the subscriber is dropped (slow-consumer disconnect via the fanout,
-	// client disconnect detected by subReadLoop, or normal teardown), cancel
-	// the SQLite query and close the conn so a write blocked on a stuck socket
-	// is unblocked. Starting the read loop before replay also means a client
-	// that disconnects before the first row cannot leave a query running.
 	replayCtx, cancelReplay := context.WithCancel(context.Background())
-	defer cancelReplay()
-	go func() {
-		<-subr.done
-		cancelReplay()
-		conn.Close()
-	}()
-	go s.subReadLoop(conn, subr)
+	terminal := newSubscriptionTerminal(conn, s.fan, s.log, sessionID, sub.GetFromSeq(), cancelReplay, s.subscriberHooksSnapshot())
+	subr := s.fan.subscribe(sessionID, func(reason subscriberDropReason) {
+		if reason == subscriberDropSlowConsumer {
+			terminal.terminate("fanout", subscriptionTerminalSlowConsumer, nil)
+		}
+	}, terminal.attach)
+	if !s.registerSubscriberTerminal(conn, terminal) {
+		return
+	}
+	defer s.unregisterSubscriberTerminal(conn, terminal)
+	defer terminal.terminate("handler", subscriptionTerminalTransportFailure, errors.New("subscriber handler returned without a terminal candidate"))
+	go s.subReadLoop(terminal)
 
 	// Register (above) BEFORE replay so live events arriving during replay are
 	// buffered, then de-overlapped by seq afterwards. ReplayFrom yields one
@@ -522,11 +711,11 @@ func (s *Server) serveSubscriber(conn net.Conn, sub *corev1.Subscribe) {
 	// activity deadline alive during large history pulls.
 	var delivered, firstReplaySeq, lastReplaySeq uint64
 	replayStats, err := s.db.ReplayFrom(replayCtx, sessionID, sub.GetFromSeq(), func(ev *corev1.Event) error {
+		if terminal.hooks.beforeReplayRow != nil {
+			terminal.hooks.beforeReplayRow()
+		}
 		nextDelivered := delivered + 1
 		if err := wire.WriteAny(conn, ev); err != nil {
-			s.log.Log(logging.Fields{Operation: "subscribe-replay", Session: sessionID, Subscriber: peer, Level: "error"},
-				"protocol replay write failed from_seq=%d delivered=%d first_seq=%d last_seq=%d failed_seq=%d elapsed_ms=%d cause=%q",
-				sub.GetFromSeq(), delivered, firstReplaySeq, lastReplaySeq, ev.GetSeq(), time.Since(started).Milliseconds(), err)
 			return err
 		}
 		if delivered == 0 {
@@ -534,17 +723,21 @@ func (s *Server) serveSubscriber(conn net.Conn, sub *corev1.Subscribe) {
 		}
 		delivered = nextDelivered
 		lastReplaySeq = ev.GetSeq()
+		terminal.setReplayProgress(delivered, firstReplaySeq, lastReplaySeq)
 		// One bounded record at first progress and then every 512 events keeps
 		// large replays diagnosable without turning this per-event path into a
 		// log-volume multiplier.
 		if delivered == 1 || delivered%512 == 0 {
 			s.log.LogVerbose(logging.Fields{Operation: "subscribe-replay-progress", Session: sessionID, Subscriber: peer},
-				"streaming replay progress from_seq=%d delivered=%d first_seq=%d last_seq=%d elapsed_ms=%d",
-				sub.GetFromSeq(), delivered, firstReplaySeq, lastReplaySeq, time.Since(started).Milliseconds())
+				"streaming replay progress from_seq=%d delivered=%d first_seq=%d last_seq=%d",
+				sub.GetFromSeq(), delivered, firstReplaySeq, lastReplaySeq)
 		}
 		return nil
 	})
 	if err != nil {
+		if !terminal.isTerminated() {
+			terminal.terminate("replay", subscriptionTerminalReplayFailure, err)
+		}
 		return
 	}
 	if replayStats.Events != delivered || replayStats.FirstSeq != firstReplaySeq || replayStats.LastSeq != lastReplaySeq {
@@ -552,14 +745,14 @@ func (s *Server) serveSubscriber(conn net.Conn, sub *corev1.Subscribe) {
 			replayStats, delivered, firstReplaySeq, lastReplaySeq))
 	}
 	s.log.Log(logging.Fields{Operation: "subscribe-replay", Session: sessionID, Subscriber: peer},
-		"streaming replay completed from_seq=%d delivered=%d first_seq=%d last_seq=%d query_ms=%d elapsed_ms=%d",
-		sub.GetFromSeq(), delivered, firstReplaySeq, lastReplaySeq, replayStats.Elapsed.Milliseconds(), time.Since(started).Milliseconds())
+		"streaming replay completed from_seq=%d delivered=%d first_seq=%d last_seq=%d query_ms=%d",
+		sub.GetFromSeq(), delivered, firstReplaySeq, lastReplaySeq, replayStats.Elapsed.Milliseconds())
 	// The readiness heartbeat is written only after registration and replay
 	// complete. A subscribing shim waits for this frame before asserting its
 	// bring-up gate, so a producer write issued immediately after readiness
 	// cannot overtake registration on another accepted socket.
 	if err := wire.WriteAny(conn, &corev1.Heartbeat{SentAtMs: time.Now().UnixMilli()}); err != nil {
-		s.log.Log(logging.Fields{Operation: "subscribe-ready", Session: sessionID, Subscriber: peer, Level: "error"}, "protocol subscription readiness write failed: %v", err)
+		terminal.terminate("readiness", subscriptionTerminalReadinessFailure, err)
 		return
 	}
 	s.log.LogVerbose(logging.Fields{Operation: "subscribe-ready", Session: sessionID, Subscriber: peer}, "standing subscription registered and replay complete")
@@ -567,7 +760,7 @@ func (s *Server) serveSubscriber(conn net.Conn, sub *corev1.Subscribe) {
 	for {
 		select {
 		case <-subr.done:
-			s.log.LogVerbose(logging.Fields{Operation: "subscribe-tail", Session: sessionID, Subscriber: peer}, "live tail stopped")
+			s.log.LogVerbose(logging.Fields{Operation: "subscribe-tail", Session: sessionID, Subscriber: peer}, "live tail stopped after terminal owner")
 			return
 		case ev := <-subr.ch:
 			// Skip persistent events already covered by replay (overlap window).
@@ -576,8 +769,11 @@ func (s *Server) serveSubscriber(conn net.Conn, sub *corev1.Subscribe) {
 				s.log.LogVerbose(logging.Fields{Operation: "subscribe-tail", Session: sessionID, Subscriber: peer}, "skipped replay overlap seq=%d", ev.GetSeq())
 				continue
 			}
+			if terminal.hooks.beforeTailWrite != nil {
+				terminal.hooks.beforeTailWrite()
+			}
 			if err := wire.WriteAny(conn, ev); err != nil {
-				s.log.Log(logging.Fields{Operation: "subscribe-tail", Session: sessionID, Subscriber: peer, Level: "error"}, "protocol live-tail write failed seq=%d class=%s: %v", ev.GetSeq(), ev.GetClass(), err)
+				terminal.terminate("tail", subscriptionTerminalTransportFailure, err)
 				return
 			}
 			// Successful live delivery is a per-event hot path which can fire
@@ -589,18 +785,34 @@ func (s *Server) serveSubscriber(conn net.Conn, sub *corev1.Subscribe) {
 
 // subReadLoop reads (and discards, apart from close detection) frames from a
 // subscriber connection so a client close unblocks the tail loop.
-func (s *Server) subReadLoop(conn net.Conn, subr *subscriber) {
+func (s *Server) subReadLoop(terminal *subscriptionTerminal) {
 	for {
-		if _, err := wire.ReadAny(conn); err != nil {
-			if errors.Is(err, io.EOF) {
-				s.log.LogVerbose(logging.Fields{Operation: "subscriber-read", Session: subr.sessionID, Subscriber: conn.RemoteAddr().String()}, "subscriber closed cleanly")
-			} else {
-				s.log.Log(logging.Fields{Operation: "subscriber-read", Session: subr.sessionID, Subscriber: conn.RemoteAddr().String(), Level: "error"}, "protocol subscriber frame read failed: %v", err)
+		if _, err := wire.ReadAny(terminal.conn); err != nil {
+			if terminal.isTerminated() {
+				return
 			}
-			subr.close()
+			reason := terminalReasonForRead(err)
+			cause := error(nil)
+			if reason == subscriptionTerminalTransportFailure {
+				cause = err
+			}
+			terminal.terminate("reader", reason, cause)
 			return
 		}
 	}
+}
+
+// onceConn makes physical socket closure a one-owner operation even where a
+// generic connection handler and a subscriber terminal both reach teardown.
+type onceConn struct {
+	net.Conn
+	once sync.Once
+	err  error
+}
+
+func (c *onceConn) Close() error {
+	c.once.Do(func() { c.err = c.Conn.Close() })
+	return c.err
 }
 
 func listenerName(ln net.Listener) string {
