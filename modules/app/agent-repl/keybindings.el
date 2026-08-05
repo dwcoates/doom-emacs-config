@@ -815,6 +815,8 @@ aux maps for every state in `agent-repl--scroll-output-intercept-states'
        :desc "Kill workspace"           "d" #'agent-repl-kill-workspace
        :desc "Update GitHub PR description"  "r" #'agent-repl-update-pr
        :desc "Rebase branch onto origin/master" "b" #'agent-repl-rebase-onto-origin-master
+       :desc "Select transcript"        "t" #'agent-repl-select-transcript
+       :desc "Restore latest transcripts" "T" #'agent-repl-restore-latest-transcripts
        :desc "Nuke workspace"           "x" #'agent-repl-nuke-workspace
        :desc "Nuke ALL workspaces"      "X" #'agent-repl-nuke-all-workspaces
        :desc "Paste workspace clipboard" "p" #'agent-repl-paste-clipboard
