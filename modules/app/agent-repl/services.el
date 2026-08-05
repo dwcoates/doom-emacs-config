@@ -28,6 +28,7 @@
 (declare-function agent-repl--log-verbose "core" (ws fmt &rest args))
 
 (defvar agent-repl-frontend-health-timeout)
+(defvar agent-repl-frontend-ready-attempts)
 (defvar agent-repl-uds-command-ack-deadline)
 
 (defcustom agent-repl-shim-services-launchctl-program "launchctl"
@@ -57,6 +58,15 @@ This deployment-only budget is dynamically bound across the asynchronous
 coordinator and its event pump; ordinary frontend commands retain their
 shorter deadlines."
   :type 'number
+  :group 'agent-repl)
+
+(defcustom agent-repl-runtime-restart-ready-attempts 150
+  "Readiness attempts available to a synchronous runtime restart.
+Each attempt uses the frontend readiness poll's fixed 0.2 second interval.
+Large durable registries can make replacement startup exceed the ordinary
+interactive budget; this deployment-only value remains bounded below the
+terminal latch timeout and is restored when the latch returns."
+  :type 'integer
   :group 'agent-repl)
 
 (defconst agent-repl--shim-store-label "com.agentrepl.shim-store"
@@ -386,20 +396,30 @@ initial `:pending' dispatch for a completed deployment."
        nil
        "runtime-restart-await: invalid health-timeout=%S stop-shims=%s"
        agent-repl-runtime-restart-health-timeout (if stop-shims "t" "nil")))
+    (unless (and (integerp agent-repl-runtime-restart-ready-attempts)
+                 (> agent-repl-runtime-restart-ready-attempts 0))
+      (agent-repl--error
+       nil
+       "runtime-restart-await: invalid ready-attempts=%S stop-shims=%s"
+       agent-repl-runtime-restart-ready-attempts (if stop-shims "t" "nil")))
     (let* ((health-limit
             (min agent-repl-runtime-restart-health-timeout (* limit 0.8)))
+           (ready-attempts
+            (min agent-repl-runtime-restart-ready-attempts
+                 (max 1 (floor (/ (* limit 0.8) 0.2)))))
            ;; These variables are special.  Their bindings remain active while
            ;; the synchronous event pump runs every asynchronous continuation,
            ;; but disappear when this deployment-only surface returns.
            (agent-repl-frontend-health-timeout health-limit)
+           (agent-repl-frontend-ready-attempts ready-attempts)
            (agent-repl-uds-command-ack-deadline health-limit)
            (started (float-time))
            (deadline (+ started limit))
            (state :pending)
            failure)
       (agent-repl--log nil
-                       "runtime-restart-await: beginning stop-shims=%s timeout=%.3fs health-timeout=%.3fs"
-                       (if stop-shims "t" "nil") limit health-limit)
+                       "runtime-restart-await: beginning stop-shims=%s timeout=%.3fs health-timeout=%.3fs ready-attempts=%d"
+                       (if stop-shims "t" "nil") limit health-limit ready-attempts)
       (agent-repl--runtime-prepare
        t
        (lambda () (setq state :complete))
