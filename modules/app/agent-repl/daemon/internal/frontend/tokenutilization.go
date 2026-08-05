@@ -1,12 +1,14 @@
 package frontend
 
 import (
+	"errors"
 	"fmt"
 	"sort"
-	"strings"
 
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+
+	"claude-repld/internal/tokenutilization"
 )
 
 // TokenUtilizationAggregationInvariantError identifies a completed-response
@@ -14,16 +16,16 @@ import (
 // The reducer reports original evidence verbatim so the owning frame boundary
 // can diagnose persisted corruption without inventing an identity.
 type TokenUtilizationAggregationInvariantError struct {
-	RecordIndex        int
-	FieldPath          string
-	AgentReplSessionID string
-	ClaudeSessionID    string
-	APIMessageID       string
-	Model              string
+	RecordIndex int
+	ModelError  *tokenutilization.ValidationError
 }
 
 func (e *TokenUtilizationAggregationInvariantError) Error() string {
-	return fmt.Sprintf("token utilization aggregation invariant violated field_path=%s record_index=%d agent_repl_session_id=%q claude_session_id=%q api_message_id=%q model=%q", e.FieldPath, e.RecordIndex, e.AgentReplSessionID, e.ClaudeSessionID, e.APIMessageID, e.Model)
+	return fmt.Sprintf("token utilization aggregation invariant violated field_path=%s record_index=%d agent_repl_session_id=%q claude_session_id=%q api_message_id=%q model=%q", e.ModelError.FieldPath, e.RecordIndex, e.ModelError.AgentReplSessionID, e.ModelError.ClaudeSessionID, e.ModelError.APIMessageID, e.ModelError.Model)
+}
+
+func (e *TokenUtilizationAggregationInvariantError) Unwrap() error {
+	return e.ModelError
 }
 
 // ValidateTokenUtilizationAggregation validates every response which would
@@ -35,15 +37,12 @@ func ValidateTokenUtilizationAggregation(records []*frontendv1.TokenUtilization)
 		if record == nil || record.GetUsage() == nil {
 			continue
 		}
-		if strings.TrimSpace(record.GetModel()) == "" {
-			return &TokenUtilizationAggregationInvariantError{
-				RecordIndex:        index,
-				FieldPath:          "TokenUtilization.model",
-				AgentReplSessionID: record.GetAgentReplSessionId(),
-				ClaudeSessionID:    record.GetClaudeSessionId(),
-				APIMessageID:       record.GetApiMessageId(),
-				Model:              record.GetModel(),
+		if err := tokenutilization.ValidateModelIdentity(record); err != nil {
+			var modelError *tokenutilization.ValidationError
+			if !errors.As(err, &modelError) {
+				panic(fmt.Sprintf("token utilization model validator returned an untyped error: %v", err))
 			}
+			return &TokenUtilizationAggregationInvariantError{RecordIndex: index, ModelError: modelError}
 		}
 	}
 	return nil

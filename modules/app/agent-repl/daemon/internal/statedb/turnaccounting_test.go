@@ -1,11 +1,35 @@
 package statedb
 
 import (
+	"strings"
 	"testing"
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 	"google.golang.org/protobuf/proto"
 )
+
+func TestTurnAccountingsRejectBlankResponseModelBeforeDurableMutation(t *testing.T) {
+	store, _ := openReceipts(t)
+	accountings, err := NewTurnAccountings(store.db)
+	if err != nil {
+		t.Fatalf("NewTurnAccountings: %v", err)
+	}
+	response := completeUtilization("s", "claude", "t", "m")
+	response.Model = " \t"
+	accounting := &frontendv1.TurnAccounting{TurnId: "t", Responses: []*frontendv1.TokenUtilization{response}, Verdict: &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}}}
+	if _, err := accountings.Record("s", accounting); err == nil || !strings.Contains(err.Error(), "blank model") {
+		t.Fatalf("Record error = %v, want blank model rejection", err)
+	}
+	for _, table := range []string{"token_utilization", "turn_accounting"} {
+		var count int
+		if err := store.db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count); err != nil {
+			t.Fatalf("count %s: %v", table, err)
+		}
+		if count != 0 {
+			t.Fatalf("blank response model partially mutated %s: %d rows", table, count)
+		}
+	}
+}
 
 func TestTurnAccountingsRecordPersistsResponsesAndTerminalEvidence(t *testing.T) {
 	store, _ := openReceipts(t)

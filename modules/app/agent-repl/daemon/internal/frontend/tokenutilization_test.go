@@ -6,6 +6,8 @@ import (
 
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+
+	"claude-repld/internal/tokenutilization"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -144,7 +146,11 @@ func TestAggregateTokenUtilizationRejectsBlankModelBeforeAllocatingAggregate(t *
 			if !errors.As(err, &invariant) {
 				t.Fatalf("validation error = %v, want aggregation invariant", err)
 			}
-			if invariant.RecordIndex != 0 || invariant.FieldPath != "TokenUtilization.model" || invariant.AgentReplSessionID != "daemon-session" || invariant.ClaudeSessionID != "claude-session" || invariant.APIMessageID != "api-message" || invariant.Model != model {
+			var modelError *tokenutilization.ValidationError
+			if !errors.As(err, &modelError) {
+				t.Fatalf("validation error = %v, want shared model identity cause", err)
+			}
+			if invariant.RecordIndex != 0 || invariant.ModelError != modelError || modelError.FieldPath != "TokenUtilization.model" || modelError.AgentReplSessionID != "daemon-session" || modelError.ClaudeSessionID != "claude-session" || modelError.APIMessageID != "api-message" || modelError.Model != model {
 				t.Fatalf("invariant = %+v", invariant)
 			}
 			defer func() {

@@ -143,6 +143,11 @@ describe("ConversationItem token utilization", () => {
     expect(() => decode({ conversationDelta: { ...CONV_DELTA, items: [{ ...CONV_DELTA.items[0], tokenUtilization: [utilization] }] } })).toThrow(new RegExp(`${field} must be nonblank`));
   });
 
+  it.each(["", " \t\n"])("rejects blank response model identity %j", (model) => {
+    const utilization = { ...TOKEN_UTILIZATION, model };
+    expect(() => decode({ conversationDelta: { ...CONV_DELTA, items: [{ ...CONV_DELTA.items[0], tokenUtilization: [utilization] }] } })).toThrow(/model must be nonblank/);
+  });
+
   it("distinguishes an absent API request identifier from an invalid empty present value", () => {
     const utilization = { ...TOKEN_UTILIZATION, apiRequestId: "" };
     expect(() => decode({ conversationDelta: { ...CONV_DELTA, items: [{ ...CONV_DELTA.items[0], tokenUtilization: [utilization] }] } })).toThrow(/apiRequestId must be absent or nonblank/);
@@ -240,6 +245,19 @@ describe("Session token utilization", () => {
     const preserved = sessionFrame.frame.value.tokenUtilization?.ungroupedSubagentResponses;
     expect(preserved?.map((response) => response.apiMessageId)).toEqual(responseFrame.frame.value.items[0].tokenUtilization.map((response) => response.apiMessageId));
     expect(preserved?.map((response) => [response.apiMessageId, response.usage?.inputTokens, response.actor.case === "subagent" ? { agentId: response.actor.value.agentId, parentToolUseId: response.actor.value.parentToolUseId, parentAgentId: response.actor.value.parentAgentId, subagentType: response.actor.value.subagentType, taskDescription: response.actor.value.taskDescription } : undefined])).toEqual([["msg-ungrouped-1", 11n, lineage], ["msg-ungrouped-2", 22n, lineage]]);
+  });
+
+  it.each(["", " \t\n"])("rejects blank durable aggregate model identity %j in session and snapshot frames", (model) => {
+    const totals = { inputTokens: "1", outputTokens: "0", cacheReadInputTokens: "0", cacheCreationInputTokens: "0" };
+    const tokenUtilization = { allAgents: totals, mainAgent: totals, models: [{ model, totals }] };
+    expect(() => decode({ sessionView: { ...SESSION_VIEW, tokenUtilization } })).toThrow(/models\[0\] requires model identity and totals/);
+    expect(() => decode({ snapshot: { ...SNAPSHOT, sessions: [{ ...SESSION_VIEW, tokenUtilization }] } })).toThrow(/models\[0\] requires model identity and totals/);
+  });
+
+  it("rejects blank nested subagent model identity", () => {
+    const totals = { inputTokens: "1", outputTokens: "0", cacheReadInputTokens: "0", cacheCreationInputTokens: "0" };
+    const tokenUtilization = { allAgents: totals, mainAgent: totals, subagents: [{ agent: { agentId: "agent" }, totals, models: [{ model: " ", totals }] }], models: [{ model: "valid", totals }] };
+    expect(() => decode({ sessionView: { ...SESSION_VIEW, tokenUtilization } })).toThrow(/subagents\[0\]\.models\[0\] requires model identity and totals/);
   });
 
   it("rejects grouped, main-agent, and duplicate-message records in the ungrouped set", () => {
