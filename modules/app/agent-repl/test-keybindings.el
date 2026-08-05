@@ -1628,3 +1628,39 @@ final bindings, not error and not duplicate state."
       (agent-repl-debug/set-log-file-level 'error)
       ;; Assert — the two knobs are independent, which is the whole point.
       (should (eq agent-repl-debug 'verbose)))))
+
+;;;; ---- Tests: agent-repl-debug/toggle-verbose-to-disk ----
+
+(ert-deftest agent-repl-test-toggle-verbose-to-disk-turns-it-on ()
+  "From the shipped default the toggle opens the verbose rung to the file."
+  ;; Arrange
+  (let ((agent-repl-log-file-level 'debug))
+    (cl-letf (((symbol-function 'message) #'ignore)
+              ((symbol-function 'agent-repl--info) #'ignore))
+      ;; Act
+      (agent-repl-debug/toggle-verbose-to-disk)
+      ;; Assert
+      (should (eq agent-repl-log-file-level 'verbose)))))
+
+(ert-deftest agent-repl-test-toggle-verbose-to-disk-turns-it-off ()
+  "A second flip returns to the default rather than climbing further."
+  ;; Arrange
+  (let ((agent-repl-log-file-level 'verbose))
+    (cl-letf (((symbol-function 'message) #'ignore)
+              ((symbol-function 'agent-repl--info) #'ignore))
+      ;; Act
+      (agent-repl-debug/toggle-verbose-to-disk)
+      ;; Assert
+      (should (eq agent-repl-log-file-level 'debug)))))
+
+(ert-deftest agent-repl-test-toggle-verbose-to-disk-leaves-the-buffer-level-alone ()
+  "The file toggle does not quietly repaint the workspace log buffers."
+  ;; Arrange
+  (let ((agent-repl-log-file-level 'debug)
+        (agent-repl-log-buffer-level 'warn))
+    (cl-letf (((symbol-function 'message) #'ignore)
+              ((symbol-function 'agent-repl--info) #'ignore))
+      ;; Act
+      (agent-repl-debug/toggle-verbose-to-disk)
+      ;; Assert — three sinks, three knobs, no coupling.
+      (should (eq agent-repl-log-buffer-level 'warn)))))
