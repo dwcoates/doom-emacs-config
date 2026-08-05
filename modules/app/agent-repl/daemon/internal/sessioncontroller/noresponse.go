@@ -5,6 +5,8 @@ import (
 
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+
+	"claude-repld/internal/tokenutilization"
 )
 
 // THE DEFECT THIS FILE CURATES AWAY.
@@ -30,7 +32,7 @@ import (
 // its own: every terminal API failure the CLI reports — a rate limit, a
 // server error, a bad model id — is ALSO written as a `<synthetic>` assistant
 // record, and those are exactly the records a user most needs to see.
-const syntheticModel = "<synthetic>"
+const syntheticModel = tokenutilization.SyntheticModelIdentity
 
 // noResponseRequestedText is the placeholder's entire body.
 //
