@@ -343,7 +343,7 @@ func (b mergeSessionBringUp) EnsureLive(ctx context.Context, ws string) error {
 		// discover that one phase later with the lease already taken.
 		return fmt.Errorf("server: no workspace lifecycle is wired, so the session for workspace %q cannot be brought up for its merge", ws)
 	}
-	return b.lifecycle.OpenDriveable(ctx, ws)
+	return b.lifecycle.OpenForMerge(ctx, ws)
 }
 
 var _ merge.SessionBringUp = mergeSessionBringUp{}

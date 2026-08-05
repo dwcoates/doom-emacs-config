@@ -247,6 +247,42 @@ func (m *Manager) ReviveSession(ctx context.Context, workspace string, mode Revi
 	return nil
 }
 
+// ReviveForMerge is the merge coordinator's explicit direct-revival policy.
+// A merge command is an affirmative request to drive this exact workspace, so
+// it is distinct from a user revival command, whose direct-versus-compaction
+// choice must remain explicit. Clearing the durable gate before bring-up uses
+// the same authority as direct revival and prevents the merge's own action
+// from being refused after a successful shim handshake.
+func (m *Manager) ReviveForMerge(ctx context.Context, workspace string) error {
+	if m.cfg.Hibernations == nil {
+		return fmt.Errorf("session-controller: cannot revive workspace %q for merge: no hibernation registrar is wired", workspace)
+	}
+	sessionID, ok := m.cfg.Locator.Locate(workspace)
+	if !ok {
+		return fmt.Errorf("session-controller: workspace %q has no session to revive for merge", workspace)
+	}
+	release, detail, err := m.claimRevival(workspace, sessionID)
+	if err != nil {
+		return fmt.Errorf("session-controller: claim merge revival for workspace %q session=%s: %w", workspace, sessionID, err)
+	}
+	defer release()
+	if detail.Cause != "" {
+		m.logf("session-controller: merge revival BEGIN ws=%q session=%s cause=%s slept_since_ms=%d policy=direct", workspace, sessionID, detail.Cause, detail.SinceMs)
+		if err := m.clearHibernation(workspace, sessionID); err != nil {
+			m.logf("session-controller: merge revival FAILED ws=%q session=%s stage=clear_hibernation error=%v", workspace, sessionID, err)
+			return fmt.Errorf("session-controller: revive workspace %q session=%s for merge: clear hibernation: %w", workspace, sessionID, err)
+		}
+	} else {
+		m.logf("session-controller: merge revival ws=%q session=%s branch=already_awake policy=direct", workspace, sessionID)
+	}
+	if _, err := m.ensure(ctx, workspace); err != nil {
+		m.logf("session-controller: merge revival FAILED ws=%q session=%s stage=ensure_driveable error=%v", workspace, sessionID, err)
+		return fmt.Errorf("session-controller: revive workspace %q session=%s for merge: ensure driveable: %w", workspace, sessionID, err)
+	}
+	m.logf("session-controller: merge revival COMPLETE ws=%q session=%s policy=direct", workspace, sessionID)
+	return nil
+}
+
 // awaitReviveCompaction is the compact-first revival's completion half, run
 // detached from the command context that accepted the revival.
 //

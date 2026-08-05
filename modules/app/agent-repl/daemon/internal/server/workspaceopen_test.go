@@ -21,6 +21,7 @@ import (
 type fakeEnsurer struct {
 	calls     []string
 	driveable []string
+	merge     []string
 	err       error
 }
 
@@ -33,6 +34,11 @@ func (f *fakeEnsurer) Ensure(workspace string) error {
 // apart from calls so a test can tell which of the two an opener used.
 func (f *fakeEnsurer) EnsureDriveable(_ context.Context, workspace string) error {
 	f.driveable = append(f.driveable, workspace)
+	return f.err
+}
+
+func (f *fakeEnsurer) ReviveForMerge(_ context.Context, workspace string) error {
+	f.merge = append(f.merge, workspace)
 	return f.err
 }
 
@@ -463,6 +469,22 @@ func TestOpenDriveableNeverUsesTheNonWaitingEnsure(t *testing.T) {
 	// Assert.
 	if len(ens.calls) != 0 {
 		t.Fatalf("the non-waiting Ensure was called for %v: a merge's bring-up must wait for the handshake", ens.calls)
+	}
+}
+
+func TestOpenForMergeUsesTheExplicitMergeRevivalBoundary(t *testing.T) {
+	o, reg, ens, logs := openerRig(t)
+	if err := reg.Put(registry.Record{SessionID: "s_merge", CWD: "/w", CreatedAt: "2026-07-25T10:00:00Z"}); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	if err := o.OpenForMerge(context.Background(), "/w"); err != nil {
+		t.Fatalf("OpenForMerge: %v", err)
+	}
+	if !slices.Equal(ens.merge, []string{"/w"}) || len(ens.driveable) != 0 || len(ens.calls) != 0 {
+		t.Fatalf("ensurer calls merge=%v driveable=%v ordinary=%v, want only merge revival", ens.merge, ens.driveable, ens.calls)
+	}
+	if !strings.Contains(strings.Join(*logs, "\n"), "merge session revival COMPLETE") {
+		t.Fatalf("logs = %v, want merge-revival completion", *logs)
 	}
 }
 
