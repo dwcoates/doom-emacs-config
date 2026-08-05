@@ -554,6 +554,18 @@ describe("decodeFrontendFrame — TypingDelta embeds ContentDelta", () => {
     expect(frame.frame.value.delta).toBe('{"a":');
   });
 
+  it("carries the optional input_json tool-use identity", () => {
+    const frame = decode({ typingDelta: { sessionId: "s1", delta: { uuid: "u1", blockIndex: 2, inputJson: "{", toolUseId: "toolu_1" } } });
+    if (frame.frame.case !== "typingDelta") throw new Error("wrong variant");
+    expect(frame.frame.value).toMatchObject({ kind: "input_json", toolUseId: "toolu_1" });
+  });
+
+  it("rejects a tool-use identity on a non-input delta", () => {
+    expect(() => decode({ typingDelta: { sessionId: "s1", delta: { uuid: "u1", text: "x", toolUseId: "toolu_1" } } })).toThrow(
+      /toolUseId is only valid for input_json/,
+    );
+  });
+
   it("decodes a thinking delta with its estimatedTokens int64 string", () => {
     const frame = decode({ typingDelta: { sessionId: "s1", delta: { uuid: "u1", thinking: "hmm", estimatedTokens: "12" } } });
     if (frame.frame.case !== "typingDelta") throw new Error("wrong variant");

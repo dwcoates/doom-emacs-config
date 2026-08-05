@@ -40,6 +40,7 @@ import type {
 } from "./state-adapter.js";
 import { mergeStatusLogValue } from "./merge-status.js";
 import { applyStreamDelta, blockKey, insertBySeq, settleStreamedBlock } from "./streaming.js";
+import type { ClientLogContext } from "./protocol.js";
 import {
   AsyncSource,
   ContentBlock,
@@ -662,7 +663,13 @@ function mergeToolItem(existing: ToolItem, incoming: ToolItem): ToolItem {
   if (merged.ts === "" && incoming.ts !== "") merged.ts = incoming.ts;
   if (incoming.inputDone) merged.inputDone = true;
   if (incoming.inputJson !== "") merged.inputJson = incoming.inputJson;
-  if (incoming.input !== undefined) merged.input = incoming.input;
+  if (incoming.toolName !== "" && incoming.inputDone) merged.inputJson = "";
+  if (incoming.input !== undefined) {
+    // A durable tool-use record owns the final input. Its structured payload
+    // supersedes any ephemeral JSON preview that happened to arrive first.
+    merged.input = incoming.input;
+    merged.inputJson = "";
+  }
   if (incoming.parentToolUseId !== undefined) merged.parentToolUseId = incoming.parentToolUseId;
   if (incoming.contextTokens !== undefined) merged.contextTokens = incoming.contextTokens;
   if (incoming.progress !== undefined) merged.progress = incoming.progress;
@@ -796,7 +803,12 @@ export class ConversationStore {
    * agnostic; the no-op/`Date.now` defaults keep call sites unchanged.
    */
   constructor(
-    private readonly log: (level: "info" | "warn" | "error", message: string) => void = () => {},
+    private readonly log: (
+      level: "info" | "warn" | "error",
+      message: string,
+      context?: ClientLogContext,
+      verbose?: boolean,
+    ) => void = () => {},
     private readonly now: () => number = () => Date.now(),
   ) {}
 
@@ -963,6 +975,29 @@ export class ConversationStore {
         nextWorkspace = ws;
       } else if (effect.kind === "progress") {
         nextProgress = effect.value;
+      } else if (
+        effect.kind === "typing" &&
+        effect.value.kind === "input_json" &&
+        (effect.value.toolUseId === undefined || effect.value.toolUseId.length === 0)
+      ) {
+        const reveal = effect.value;
+        this.failIngestInvariant(
+          `input_json delta missing stable tool identity workspace=${reveal.workspace} session=${reveal.sessionId} ` +
+            `message=${reveal.messageId} block_index=${reveal.blockIndex} chunk_length=${reveal.delta.length}`,
+          {
+            operation: "conversation-store.tool-input",
+            workspace: reveal.workspace,
+            agent_repl_session_id: reveal.sessionId,
+            ...(this.state.claudeSessionId === "" ? {} : { claude_session_id: this.state.claudeSessionId }),
+            api_message_id: reveal.messageId,
+            block_index: reveal.blockIndex,
+            tool_use_id: "",
+            chunk_length: reveal.delta.length,
+            item_phase: "unresolved",
+            branch: "missing_identity",
+            cause: "input_json delta requires non-empty toolUseId",
+          },
+        );
       }
     }
 
@@ -993,8 +1028,8 @@ export class ConversationStore {
     });
   }
 
-  private failIngestInvariant(message: string): never {
-    this.log("error", `INVARIANT VIOLATION: ${message}`);
+  private failIngestInvariant(message: string, context?: ClientLogContext): never {
+    this.log("error", `INVARIANT VIOLATION: ${message}`, context);
     throw new Error(`store: ${message}`);
   }
 
@@ -1350,22 +1385,42 @@ export class ConversationStore {
     return true;
   }
 
-  private applyTyping(reveal: TypingReveal): boolean {
+  private applyTyping(reveal: TypingReveal | import("./state-adapter.js").UnidentifiedToolInputReveal): boolean {
+    const delta: Parameters<typeof applyStreamDelta>[1] =
+      reveal.kind === "input_json"
+        ? { ...reveal, toolUseId: reveal.toolUseId! }
+        : reveal;
     const outcome = applyStreamDelta(
       this.state.items,
-      reveal,
+      delta,
       new Date(this.now()).toISOString(),
       // The typing relay is ephemeral and carries no seq; the high-water mark
       // ranks the preview at the live tail while replayed history (lower
       // seqs) still slots above it.
       this.state.lastSeq,
     );
-    if (outcome.changed) return true;
-    // A dropped delta is prose the user never sees, so it is reported loudly
-    // rather than being absorbed by the `false` return.
+    if (reveal.kind !== "input_json") return outcome.changed;
+    const outcomeContext: ClientLogContext = {
+      operation: "conversation-store.tool-input",
+      workspace: reveal.workspace,
+      agent_repl_session_id: reveal.sessionId,
+      ...(this.state.claudeSessionId === "" ? {} : { claude_session_id: this.state.claudeSessionId }),
+      api_message_id: reveal.messageId,
+      block_index: reveal.blockIndex,
+      tool_use_id: reveal.toolUseId,
+      chunk_length: reveal.delta.length,
+      item_phase: "toolInput" in outcome ? outcome.toolInput.phase : "unresolved",
+      branch: "toolInput" in outcome ? outcome.toolInput.branch.replaceAll("-", "_") : "unresolved",
+    };
+    if (outcome.changed) {
+      this.log("info", `tool input delta reconciled branch=${outcomeContext.branch}`, outcomeContext, true);
+      return true;
+    }
     this.log(
-      "warn",
-      `typing input_json delta with no open tool to grow (block ${outcome.blockId})`,
+      "info",
+      `tool input delta superseded by authoritative final tool=${outcome.toolInput.toolUseId}`,
+      outcomeContext,
+      true,
     );
     return false;
   }

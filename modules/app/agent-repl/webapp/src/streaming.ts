@@ -43,7 +43,7 @@
  * learns which one a fact arrived on. It is told "a block grew" or "a block
  * finished" and reconciles the feed accordingly.
  */
-import type { ConversationItem, TextItem, ThinkingItem } from "./store.js";
+import type { ConversationItem, TextItem, ThinkingItem, ToolItem } from "./store.js";
 
 /** The content kinds that stream. */
 export type StreamKind = "text" | "thinking" | "input_json";
@@ -59,8 +59,7 @@ export type StreamPhase = "previewing" | "final";
 export type StreamedBlock = TextItem | ThinkingItem;
 
 /** One live delta, as the ephemeral relay hands it over. */
-export interface StreamDelta {
-  kind: StreamKind;
+interface StreamDeltaBase {
   /**
    * The ANTHROPIC message id every delta of one message shares. It is stamped
    * ONCE, at the source (`agent-shim/.../proto/delta.ts`, from the
@@ -73,13 +72,29 @@ export interface StreamDelta {
   delta: string;
 }
 
+export type StreamDelta =
+  | (StreamDeltaBase & { kind: "text" | "thinking" })
+  | (StreamDeltaBase & { kind: "input_json"; toolUseId: string });
+
 /**
  * What a delta did. A delta that changed nothing says WHY, so the caller can
  * report it — a silently dropped delta is prose the user never sees.
  */
 export type DeltaOutcome =
   | { changed: true }
-  | { changed: false; reason: "no-open-tool"; blockId: string };
+  | {
+      changed: true;
+      toolInput: {
+        toolUseId: string;
+        phase: "absent" | "preview";
+        branch: "preview-created" | "preview-appended";
+      };
+    }
+  | {
+      changed: false;
+      reason: "superseded-authoritative-tool";
+      toolInput: { toolUseId: string; phase: "final"; branch: "superseded-authoritative-final" };
+    };
 
 // --- identity ---------------------------------------------------------------
 
@@ -175,13 +190,10 @@ export function insertBySeq(
  * a block that has already settled still grows it (and reopens it), so a late
  * chunk is never dropped on the floor for arriving after its record.
  *
- * TOOL INPUT resolves differently, and must: `ContentDelta` carries no
- * `tool_use_id`, so a tool-input delta states nothing about WHICH call it
- * belongs to. The only fact available is that it belongs to the call whose
- * input is still open — the SDK streams one tool's input at a time — so that is
- * what it grows. This is a genuine gap in the wire format, not a shortcut; it
- * lives here rather than in the store so there is one place to fix when the
- * relay starts carrying the id.
+ * TOOL INPUT resolves by its required stable `toolUseId`. An early ephemeral
+ * chunk opens a preview ToolItem when its durable call has not arrived; an
+ * authoritative final makes a later chunk superseded. No ambient open state
+ * or feed position participates in tool reconciliation.
  */
 export function applyStreamDelta(
   items: ConversationItem[],
@@ -189,7 +201,7 @@ export function applyStreamDelta(
   nowIso: string,
   orderSeq: number,
 ): DeltaOutcome {
-  if (delta.kind === "input_json") return growToolInput(items, delta);
+  if (delta.kind === "input_json") return growToolInput(items, delta, nowIso, orderSeq);
 
   const blockId = previewBlockId(delta.messageId, delta.blockIndex);
   const open = items.find(
@@ -292,18 +304,35 @@ function adopt<T extends StreamedBlock>(existing: T, incoming: T): T {
   return { ...incoming, blockId: existing.blockId, seq: existing.seq };
 }
 
-/** Grow the one tool call whose input is still arriving; see {@link applyStreamDelta}. */
-function growToolInput(items: ConversationItem[], delta: StreamDelta): DeltaOutcome {
-  for (let i = items.length - 1; i >= 0; i--) {
-    const item = items[i];
-    if (item.kind === "tool" && !item.inputDone) {
-      item.inputJson += delta.delta;
-      return { changed: true };
-    }
+/** Reconcile one input chunk onto its exact tool identity; see {@link applyStreamDelta}. */
+function growToolInput(
+  items: ConversationItem[],
+  delta: Extract<StreamDelta, { kind: "input_json" }>,
+  nowIso: string,
+  orderSeq: number,
+): DeltaOutcome {
+  const item = items.find((candidate): candidate is ToolItem =>
+    candidate.kind === "tool" && candidate.toolUseId === delta.toolUseId,
+  );
+  if (item === undefined) {
+    insertBySeq(items, {
+      kind: "tool",
+      toolUseId: delta.toolUseId,
+      toolName: "",
+      messageId: delta.messageId,
+      ts: nowIso,
+      inputJson: delta.delta,
+      inputDone: false,
+    }, orderSeq);
+    return { changed: true, toolInput: { toolUseId: delta.toolUseId, phase: "absent", branch: "preview-created" } };
   }
-  return {
-    changed: false,
-    reason: "no-open-tool",
-    blockId: previewBlockId(delta.messageId, delta.blockIndex),
-  };
+  if (item.inputDone) {
+    return {
+      changed: false,
+      reason: "superseded-authoritative-tool",
+      toolInput: { toolUseId: delta.toolUseId, phase: "final", branch: "superseded-authoritative-final" },
+    };
+  }
+  item.inputJson += delta.delta;
+  return { changed: true, toolInput: { toolUseId: delta.toolUseId, phase: "preview", branch: "preview-appended" } };
 }
