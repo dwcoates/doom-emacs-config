@@ -96,6 +96,26 @@ type SeqStore interface {
 	SetLastSeq(sessionID string, seq uint64)
 }
 
+// OpenTurnClaims answers which turns are DURABLY in flight for a session.
+//
+// It exists because the pin set that keeps a turn's start and end atomic used
+// to be remembered in process memory and thrown away on reconnect
+// (pinnedAccountingTurns = nil). Discarding it is equivalent to declaring "no
+// turn is in flight", which immediately unlocks the durable cursor to advance
+// PAST a start whose end has not arrived. The next reconnect then replays that
+// end alone and rejects it as naming an unpinned accounting turn — fatal, and
+// observed in the field.
+//
+// Reading the ledger instead makes the reconstruction authoritative: the cursor
+// can never advance past a start whose claim is still open, because the claim
+// is what answers the question.
+type OpenTurnClaims interface {
+	// ActiveTurnIDs returns the turn ids whose durable claims are still open
+	// for this workspace and claimant session. Holding nothing is an answer,
+	// not a failure.
+	ActiveTurnIDs(workspace, claimantSessionID string) ([]string, error)
+}
+
 // ModeStore supplies a session's PERMISSION POSTURE, read straight off the
 // daemon's session record at handshake time and carried to the shim on
 // DaemonHello.permission_mode.
@@ -228,7 +248,15 @@ type Config struct {
 	PermissionModes ModeStore
 
 	// Sinks and callbacks (all bound at stitch).
-	SeqStore   SeqStore
+	SeqStore SeqStore
+	// OpenTurnClaims rebuilds the accounting pin set from durable state at
+	// handshake. Nil keeps the pins that memory happens to hold, which is the
+	// pre-existing behavior and cannot reconstruct anything after a generation
+	// change — see OpenTurnClaims.
+	OpenTurnClaims OpenTurnClaims
+	// Workspace keys the durable claim lookup. Empty disables it for the same
+	// reason a nil OpenTurnClaims does.
+	Workspace  string
 	StateSink  StateSink
 	TurnClaims TurnClaimSink
 	// Rewinds consumes SessionRewound lineage. Nil makes the event a LOUD
@@ -671,7 +699,12 @@ func (c *Client) runOnce(ctx context.Context) (retErr error) {
 	if c.haveVolatileCursor && c.connGeneration == nextGeneration && c.vendorSessionID == hello.GetVendorSessionId() {
 		from = c.lastSeen
 	} else {
-		c.pinnedAccountingTurns = nil
+		// THE PIN SET IS REBUILT FROM DURABLE STATE, NEVER DISCARDED. Clearing it
+		// told advanceDurableCursor that nothing was in flight, which let the
+		// cursor move past a start whose end had not arrived; the end then
+		// replayed alone and was rejected as unpinned. The open claims are the
+		// authority on what is actually in flight across a reconnect.
+		c.pinnedAccountingTurns = c.reconstructPinnedTurns()
 		c.pendingTerminationQuery = ""
 		c.pendingResumeQuery = ""
 	}
@@ -971,5 +1004,67 @@ func (ac *activeConn) failPending(err error) {
 	for id, ch := range ac.health {
 		ch <- healthResult{err: err}
 		delete(ac.health, id)
+	}
+}
+
+// reconstructPinnedTurns rebuilds the accounting pin set from the durable turn
+// ledger.
+//
+// A read failure is LOUD and yields an empty set rather than a guess: an empty
+// set is the pre-existing behavior, and inventing pins from a failed read would
+// hold the durable cursor behind turns that may not exist. The log names the
+// failure so a cursor that then advanced too far is explainable.
+func (c *Client) reconstructPinnedTurns() map[string]struct{} {
+	pinned := map[string]struct{}{}
+	if c.cfg.OpenTurnClaims == nil || c.cfg.Workspace == "" {
+		return pinned
+	}
+	ids, err := c.cfg.OpenTurnClaims.ActiveTurnIDs(c.cfg.Workspace, c.cfg.SessionID)
+	if err != nil {
+		c.logf("shimclient: accounting pin reconstruction FAILED session=%s workspace=%s: %v — the pin set starts empty, so the durable cursor is no longer held behind any turn this session had in flight",
+			c.cfg.SessionID, c.cfg.Workspace, err)
+		return pinned
+	}
+	for _, id := range ids {
+		if id != "" {
+			pinned[id] = struct{}{}
+		}
+	}
+	if len(pinned) > 0 {
+		c.logf("shimclient: accounting pins REBUILT from the durable ledger session=%s workspace=%s turns=%d — the cursor stays held behind every turn whose claim is still open",
+			c.cfg.SessionID, c.cfg.Workspace, len(pinned))
+	}
+	return pinned
+}
+
+// UnpinAccountingTurn releases the cursor hold a turn's start took, for a turn
+// the daemon closed WITHOUT a `TurnEnded`.
+//
+// Only a stream `TurnEnded` used to delete a pin. A synthesized close
+// (SynthesizeTurnClose, which exists precisely because the turn can no longer
+// produce an end) therefore left its pin standing forever, and
+// advanceDurableCursor holds the durable cursor while ANY pin remains — so the
+// cursor froze at that point permanently and every later reconnect replayed
+// from it. That is the mirror of the unpinned-end failure: one leaves a turn
+// unrepresented, the other never lets the mark move again.
+//
+// Unknown ids are a no-op: a close may name turns this client never pinned.
+func (c *Client) UnpinAccountingTurn(turnIDs ...string) {
+	if len(c.pinnedAccountingTurns) == 0 {
+		return
+	}
+	released := 0
+	for _, id := range turnIDs {
+		if id == "" {
+			continue
+		}
+		if _, ok := c.pinnedAccountingTurns[id]; ok {
+			delete(c.pinnedAccountingTurns, id)
+			released++
+		}
+	}
+	if released > 0 {
+		c.logf("shimclient: accounting pins RELEASED by a synthesized close session=%s turns=%d remaining=%d — no TurnEnded will arrive for these, so the close is what frees the durable cursor",
+			c.cfg.SessionID, released, len(c.pinnedAccountingTurns))
 	}
 }
