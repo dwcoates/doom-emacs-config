@@ -31,5 +31,14 @@ func TestMain(m *testing.M) {
 		panic("e2e: resolving the real home dir: " + err.Error())
 	}
 	realHome = home
-	os.Exit(m.Run())
+	// Teardown that outlives t.Cleanup. See childreaper_test.go: a binary killed
+	// by a signal never unwinds its cleanups, and this package spawns processes
+	// that hold sockets and database handles when they are stranded.
+	watchForTerminationSignals()
+	code := m.Run()
+	// The backstop for the paths that reach here with children still
+	// registered: a test that returned without its cleanup, or a panic that
+	// unwound past the framework.
+	reapChildren()
+	os.Exit(code)
 }
