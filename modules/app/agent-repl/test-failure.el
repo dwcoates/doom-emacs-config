@@ -104,6 +104,47 @@ wire would mean a frontend's failure was laundered through the daemon."
     (should (equal (agent-repl-failure-text failure "ws1")
                    "Resume creation for Claude session c_authoritative in /repo could not bring the session up: process exited before init."))))
 
+(ert-deftest agent-repl-test-failure-text-renders-typed-resume-query-termination-iterator ()
+  "Typed query-termination evidence renders an iterator failure's cause."
+  (let ((failure (agent-repl-failure-from-wire
+                  '(:errorClass "ERROR_CLASS_INTERNAL"
+                    :errorType "session.resume_failed"
+                    :message "resume failed"
+                    :sessionResume
+                    (:claudeSessionId "c_authoritative" :cwd "/repo"
+                     :automaticRestore ()
+                     :queryTermination
+                     (:iteratorFailure (:cause "stream reset by peer")))))))
+    (should (equal (agent-repl-failure-text failure "ws1")
+                   "Resume restoration for Claude session c_authoritative in /repo could not continue: the resumed query terminated (the SDK iterator threw: stream reset by peer)."))))
+
+(ert-deftest agent-repl-test-failure-text-renders-typed-resume-query-termination-eof ()
+  "Typed query-termination evidence renders an unexpected-EOF termination
+during a creation attempt."
+  (let ((failure (agent-repl-failure-from-wire
+                  '(:errorClass "ERROR_CLASS_INTERNAL"
+                    :errorType "session.resume_failed"
+                    :message "resume failed"
+                    :sessionResume
+                    (:claudeSessionId "c_authoritative" :cwd "/repo"
+                     :create ()
+                     :queryTermination
+                     (:unexpectedEof ()))))))
+    (should (equal (agent-repl-failure-text failure "ws1")
+                   "Resume creation for Claude session c_authoritative in /repo could not continue: the resumed query terminated (the SDK iterator ended without an intentional shutdown)."))))
+
+(ert-deftest agent-repl-test-failure-text-typed-resume-query-termination-zero-reasons-is-malformed ()
+  "A query-termination cause with no recognized reason arm is malformed."
+  (let ((failure (agent-repl-failure-from-wire
+                  '(:errorClass "ERROR_CLASS_INTERNAL"
+                    :errorType "session.resume_failed"
+                    :message "resume failed"
+                    :sessionResume
+                    (:claudeSessionId "c_authoritative" :cwd "/repo"
+                     :automaticRestore ()
+                     :queryTermination (:vendorSessionId "c_vendor"))))))
+    (should-error (agent-repl-failure-text failure "ws1"))))
+
 (ert-deftest agent-repl-test-failure-text-typed-resume-two-causes-is-malformed ()
   "Two causes present at once is malformed, never a silent pick-one."
   (let ((failure (agent-repl-failure-from-wire

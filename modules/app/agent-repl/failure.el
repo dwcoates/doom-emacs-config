@@ -153,10 +153,12 @@ signals rather than being flattened into generic failure text."
          (transcript (plist-get resume :transcriptUnavailable))
          (mismatch (plist-get resume :identityMismatch))
          (bring-up-failure (plist-get resume :bringUpFailure))
+         (query-termination (plist-get resume :queryTermination))
          (causes (cl-remove-if-not #'identity
                                    (list (and transcript :transcript-unavailable)
                                          (and mismatch :identity-mismatch)
-                                         (and bring-up-failure :bring-up-failure)))))
+                                         (and bring-up-failure :bring-up-failure)
+                                         (and query-termination :query-termination)))))
     (unless (and (stringp claude-id) (not (string-empty-p claude-id))
                  (stringp cwd) (not (string-empty-p cwd))
                  (= (length causes) 1)
@@ -213,7 +215,54 @@ signals rather than being flattened into generic failure text."
            (agent-repl--log workspace
                             "failure-session-resume-text: cause=bring-up-failure claude-id=%S cwd=%S cause=%S text=%S"
                             claude-id cwd cause text)
+           text)))
+      (:query-termination
+       (let ((reason (agent-repl-failure--query-termination-reason-text
+                      query-termination workspace)))
+         (let ((text (format "Resume %s for Claude session %s in %s could not continue: the resumed query terminated (%s)."
+                             (if automatic-restore "restoration" "creation")
+                             claude-id cwd reason)))
+           (agent-repl--log workspace
+                            "failure-session-resume-text: cause=query-termination claude-id=%S cwd=%S reason=%S text=%S"
+                            claude-id cwd reason text)
            text))))))
+
+(defun agent-repl-failure--query-termination-reason-text (termination workspace)
+  "Return the human account of the `reason' oneof in QueryTerminationFailure
+TERMINATION.  WORKSPACE is threaded to canonical logging.  Like the outer
+cause oneof, this nested one is closed: anything other than exactly one
+recognized reason is malformed."
+  (let* ((unexpected-eof (plist-member termination :unexpectedEof))
+         (iterator-failure (plist-get termination :iteratorFailure))
+         (startup-failure (plist-get termination :startupFailure))
+         (reasons (cl-remove-if-not #'identity
+                                    (list (and unexpected-eof :unexpected-eof)
+                                          (and iterator-failure :iterator-failure)
+                                          (and startup-failure :startup-failure)))))
+    (unless (= (length reasons) 1)
+      (agent-repl--log workspace
+                       "failure-query-termination-reason: MALFORMED reasons=%S termination=%S"
+                       reasons termination)
+      (error "agent-repl failure: malformed QueryTerminationFailure reason"))
+    (pcase (car reasons)
+      (:unexpected-eof
+       "the SDK iterator ended without an intentional shutdown")
+      (:iterator-failure
+       (let ((cause (plist-get iterator-failure :cause)))
+         (unless (and (stringp cause) (not (string-empty-p cause)))
+           (agent-repl--log workspace
+                            "failure-query-termination-reason: MALFORMED iterator-failure cause=%S"
+                            cause)
+           (error "agent-repl failure: QueryTerminationFailure iterator cause missing"))
+         (format "the SDK iterator threw: %s" cause)))
+      (:startup-failure
+       (let ((cause (plist-get startup-failure :cause)))
+         (unless (and (stringp cause) (not (string-empty-p cause)))
+           (agent-repl--log workspace
+                            "failure-query-termination-reason: MALFORMED startup-failure cause=%S"
+                            cause)
+           (error "agent-repl failure: QueryTerminationFailure startup cause missing"))
+         (format "query initialization failed: %s" cause))))))
 
 (defun agent-repl-failure-local (type message &optional detail)
   "Build a LOCALLY-classified failure of TYPE with MESSAGE and DETAIL.
