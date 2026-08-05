@@ -11,6 +11,7 @@ import (
 
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/keepalive"
+	"claude-repld/internal/statedb"
 )
 
 // keepalivesubmit.go — SUBMITTING THE PING, and the check-and-act that decides
@@ -205,6 +206,51 @@ func (m *Manager) abandonKeepAlivePing(d *sessionController, turnID string) int 
 	return released
 }
 
+// restampKeepAliveWindowStart moves a ping's window start onto the clock that
+// stamps the conversation items the window is compared against.
+//
+// WHY THE PRE-SUBMIT STAMP IS NOT ENOUGH. SubmitKeepAlivePing writes the window
+// before the prompt reaches the shim, so the only instant available to it is
+// m.now() — the DAEMON's clock. The items the exclusion later judges are stamped
+// by the VENDOR (the shim's own clock, carried through to ConversationItem.ts_ms).
+// Under any skew between the two the interval is not wrong by a little: a daemon
+// running ahead produces started_at_ms greater than every item the ping writes,
+// so the open window covers nothing at all while it is open, and the close —
+// stamped from the boundary's vendor-clocked produced_at_ms — would land BELOW
+// its own start. The bound has to come from the same authority as the values it
+// is compared with, and the ping's own TurnStarted is where that authority first
+// speaks about this turn.
+//
+// IT IS MATCHED ON THE TURN ID, never applied to whatever turn started: a real
+// user turn beginning here would otherwise move the ping's lower bound onto
+// itself and hand the user's own records to the exclusion.
+//
+// A FAILED RE-STAMP LEAVES THE PROVISIONAL BOUND STANDING and says so. The row
+// is already there and already excludes from the daemon-clock instant onward,
+// which is the pre-existing behavior; refusing the ping at this point is not
+// available (it is already running) and dropping the window would un-attribute a
+// ping that is mid-flight.
+func (m *Manager) restampKeepAliveWindowStart(d *sessionController, turnID string, atMs int64) {
+	if m.cfg.KeepAliveWindows == nil || turnID == "" || atMs <= 0 {
+		return
+	}
+	m.mu.Lock()
+	ping := d.keepAliveTurnID
+	m.mu.Unlock()
+	if ping == "" || ping != turnID {
+		return
+	}
+	if err := m.cfg.KeepAliveWindows.Open(KeepAliveWindowRecord{
+		TurnID: turnID, Workspace: d.workspace, StartedAtMs: atMs,
+	}); err != nil {
+		m.logf("session-controller: keep-alive window START RE-STAMP FAILED ws=%q session=%s turn_id=%s started_at_ms=%d error=%v — the window keeps the daemon-clock bound taken before the submit, so its lower edge is only as good as the two clocks agreeing",
+			d.workspace, d.sessionID, turnID, atMs, err)
+		return
+	}
+	m.logf("session-controller: keep-alive window START RE-STAMPED ws=%q session=%s turn_id=%s started_at_ms=%d — the bound now comes from the turn's own boundary, the same clock that stamps the items it is compared against",
+		d.workspace, d.sessionID, turnID, atMs)
+}
+
 // closeKeepAliveWindow stamps a ping's end in the durable ledger and FAILS HARD
 // when it cannot.
 //
@@ -225,11 +271,29 @@ func (m *Manager) closeKeepAliveWindow(d *sessionController, turnID string, ende
 	if err == nil {
 		return
 	}
+	// THE TWO REFUSALS ARE DIFFERENT FAULTS AND ARE NAMED DIFFERENTLY. An
+	// unwritable row leaves the window OPEN and unbounded — every later item on
+	// the workspace withheld, forever. An INVERTED interval is the ledger
+	// refusing an end that precedes its own start: the row IS bounded (clamped
+	// to its start, so it can never cover more than the instant the ping began),
+	// and what is broken is the pair of clocks that produced the two instants.
+	// Reporting the second as the first would send a reader hunting a blackout
+	// that is not there.
+	detail := fmt.Sprintf("turn_id=%s ended_at_ms=%d: %v", turnID, endedAtMs, err)
+	if errors.Is(err, statedb.ErrKeepAliveWindowInverted) {
+		m.logf("session-controller: keep-alive window CLOSE REFUSED ws=%q session=%s turn_id=%s ended_at_ms=%d error=%v — the end precedes the window's own start, so the interval is clamped to the start and covers nothing after it; the ping's own id-less records may render as the user's until the clocks behind these two instants agree",
+			d.workspace, d.sessionID, turnID, endedAtMs, err)
+		if d.consumer != nil {
+			d.consumer.pushFailure(d.consumer.keepAliveWindowInvertedUUID(turnID),
+				errclass.KeepAliveWindowInverted(detail))
+		}
+		return
+	}
 	m.logf("session-controller: keep-alive window CLOSE FAILED ws=%q session=%s turn_id=%s ended_at_ms=%d error=%v — the window stays open, and an open window excludes every later item on this workspace; this must be repaired before the conversation renders again",
 		d.workspace, d.sessionID, turnID, endedAtMs, err)
 	if d.consumer != nil {
 		d.consumer.pushFailure(d.consumer.keepAliveWindowUnclosedUUID(turnID),
-			errclass.KeepAliveWindowUnclosed(fmt.Sprintf("turn_id=%s ended_at_ms=%d: %v", turnID, endedAtMs, err)))
+			errclass.KeepAliveWindowUnclosed(detail))
 	}
 }
 

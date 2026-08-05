@@ -75,6 +75,8 @@ type fakeKeepAliveWindows struct {
 	openErr  error
 	closeErr error
 	coverAll bool
+	// hasTurnErr fails the identity lookup, the exclusion's primary question.
+	hasTurnErr error
 }
 
 func newFakeKeepAliveWindows() *fakeKeepAliveWindows {
@@ -98,6 +100,33 @@ func (f *fakeKeepAliveWindows) Close(turnID string, endedAtMs int64) error {
 }
 
 func (f *fakeKeepAliveWindows) Covers(string, int64) (bool, error) { return f.coverAll, nil }
+
+// HasTurn answers off the rows Open wrote, exactly as the real ledger answers
+// off its primary key — so a test asserting on identity is asserting against
+// the same evidence production uses.
+func (f *fakeKeepAliveWindows) HasTurn(workspace, turnID string) (bool, error) {
+	if f.hasTurnErr != nil {
+		return false, f.hasTurnErr
+	}
+	for _, w := range f.opened {
+		if w.TurnID == turnID && w.Workspace == workspace {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// lastOpened reports the newest window row written for turnID, and whether one
+// exists. The re-stamp rewrites the row rather than adding one, so the newest
+// entry is the bound the ledger currently holds.
+func (f *fakeKeepAliveWindows) lastOpened(turnID string) (KeepAliveWindowRecord, bool) {
+	for i := len(f.opened) - 1; i >= 0; i-- {
+		if f.opened[i].TurnID == turnID {
+			return f.opened[i], true
+		}
+	}
+	return KeepAliveWindowRecord{}, false
+}
 
 // keepAliveRig is a settled, awake, brought-up session with a window ledger.
 func keepAliveRig(t *testing.T) (*Manager, *fakeApplier, *fakeKeepAliveWindows) {
@@ -783,5 +812,129 @@ func TestReleaseKeepAliveRewindLeavesALaterPingsClaimAlone(t *testing.T) {
 	// Assert.
 	if got := m.keepAliveRewinds["ws"]; got != "ka_2" {
 		t.Fatalf("rewind claim = %q after an earlier ping's release, want ka_2 untouched", got)
+	}
+}
+
+// THE WINDOW'S LOWER BOUND MOVES ONTO THE TURN'S OWN CLOCK. The pre-submit
+// stamp is a DAEMON clock read taken before the ping existed; the items the
+// window is compared against are stamped by the vendor. Left as it was, any
+// skew between the two put the ping's own records outside its own window.
+func TestKeepAliveWindowStartRestampsAtTheTurnsOwnBoundary(t *testing.T) {
+	// Arrange.
+	m, _, windows := keepAliveRig(t)
+	turnID, err := m.SubmitKeepAlivePing(context.Background(), "ws")
+	if err != nil {
+		t.Fatalf("SubmitKeepAlivePing: %v", err)
+	}
+
+	m.mu.Lock()
+	d := m.byWS["ws"]
+	m.mu.Unlock()
+
+	// Act — the ping's own TurnStarted, on the vendor's clock.
+	const startedAtMs int64 = 1_700_000_000_000
+	m.restampKeepAliveWindowStart(d, turnID, startedAtMs)
+
+	// Assert.
+	got, ok := windows.lastOpened(turnID)
+	if !ok {
+		t.Fatalf("no window row for %s", turnID)
+	}
+	if got.StartedAtMs != startedAtMs {
+		t.Fatalf("started_at_ms = %d, want the boundary's own instant %d", got.StartedAtMs, startedAtMs)
+	}
+}
+
+// THE PING'S OWN START BOUNDARY IS WHAT DRIVES THE RE-STAMP. The hook has to be
+// bound on the live consumer, because the first boundary a ping produces is the
+// only one carrying that instant and there is no second chance to observe it.
+func TestKeepAliveWindowStartRestampsFromTheConsumersStartBoundary(t *testing.T) {
+	// Arrange.
+	m, _, windows := keepAliveRig(t)
+	turnID, err := m.SubmitKeepAlivePing(context.Background(), "ws")
+	if err != nil {
+		t.Fatalf("SubmitKeepAlivePing: %v", err)
+	}
+	m.mu.Lock()
+	d := m.byWS["ws"]
+	m.mu.Unlock()
+
+	// Act — the ping's TurnStarted, arriving over the authoritative plane.
+	const startedAtMs int64 = 1_700_000_000_000
+	if err := d.consumer.Apply(&corev1.Event{
+		SessionId:    "vendor-uuid",
+		Seq:          11,
+		Plane:        corev1.Plane_PLANE_STREAM,
+		ProducedAtMs: startedAtMs,
+		RequestId:    turnID,
+		Payload:      &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: turnID}},
+	}); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	// Assert.
+	got, ok := windows.lastOpened(turnID)
+	if !ok {
+		t.Fatalf("no window row for %s", turnID)
+	}
+	if got.StartedAtMs != startedAtMs {
+		t.Fatalf("started_at_ms = %d, want the start boundary's own instant %d", got.StartedAtMs, startedAtMs)
+	}
+}
+
+// THE RE-STAMP IS MATCHED ON THE TURN ID. A real user turn starting here would
+// otherwise drag the ping's lower bound onto itself, and the interval fallback
+// would then hand the user's own records to the exclusion.
+func TestKeepAliveWindowStartIgnoresANonPingTurnsBoundary(t *testing.T) {
+	// Arrange.
+	m, _, windows := keepAliveRig(t)
+	turnID, err := m.SubmitKeepAlivePing(context.Background(), "ws")
+	if err != nil {
+		t.Fatalf("SubmitKeepAlivePing: %v", err)
+	}
+	before, ok := windows.lastOpened(turnID)
+	if !ok {
+		t.Fatalf("no window row for %s", turnID)
+	}
+
+	m.mu.Lock()
+	d := m.byWS["ws"]
+	m.mu.Unlock()
+
+	// Act.
+	m.restampKeepAliveWindowStart(d, "req_user", 1_700_000_000_000)
+
+	// Assert.
+	after, _ := windows.lastOpened(turnID)
+	if after.StartedAtMs != before.StartedAtMs {
+		t.Fatalf("started_at_ms = %d after a stranger's boundary, want the ping's own bound %d",
+			after.StartedAtMs, before.StartedAtMs)
+	}
+}
+
+// AN INVERTED CLOSE IS ITS OWN NAMED FAILURE, not the unclosed-window one. The
+// row IS bounded, so nothing is blacked out; what is broken is the pair of
+// clocks behind the two instants, and a reader told "the conversation is being
+// withheld" would hunt a blackout that is not there.
+func TestKeepAliveWindowInvertedCloseSurfacesItsOwnNamedFailure(t *testing.T) {
+	// Arrange.
+	m, _, windows := keepAliveRig(t)
+	turnID, err := m.SubmitKeepAlivePing(context.Background(), "ws")
+	if err != nil {
+		t.Fatalf("SubmitKeepAlivePing: %v", err)
+	}
+	windows.closeErr = statedb.ErrKeepAliveWindowInverted
+	m.mu.Lock()
+	d := m.byWS["ws"]
+	d.turn = turnRecord{phase: turnPhaseNamed, turnID: turnID}
+	m.mu.Unlock()
+
+	// Act.
+	m.onTurnBoundary(d, false, 1_700_000_000_123)
+
+	// Assert.
+	if !pushedFailureType(m, string(errclass.TypeKeepAliveWindowInverted)) {
+		t.Fatalf("no %s failure reached the frontend; a ping that stopped being excluded was left silent",
+			errclass.TypeKeepAliveWindowInverted)
 	}
 }

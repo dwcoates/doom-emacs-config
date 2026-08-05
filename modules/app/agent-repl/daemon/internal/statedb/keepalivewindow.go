@@ -2,6 +2,7 @@ package statedb
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 )
 
@@ -13,16 +14,32 @@ import (
 // belongs to a ping — and that decision must come out the same way on a live
 // push and on a replay three days later.
 //
-// WHY IT IS KEYED ON TIME RATHER THAN ON IDENTITY. File-plane conversation
-// items carry NO prompt origin and NO turn id. The origin lives on the control
-// frame the daemon sent, not on the transcript records the vendor wrote back,
-// so there is nothing on the item itself to match a ping against. What every
-// item does carry is its own instant — and a ping occupies a closed interval of
-// wall-clock time on exactly one workspace. Placing an item in that interval is
-// therefore decidable from the item alone, which is precisely the property the
-// merge lease's provenance ledger relies on for the same reason: a verdict
-// re-derived from live state would answer differently on a resync than it did
-// on the original push.
+// IDENTITY FIRST, TIME ONLY AS THE FALLBACK. A stream-plane conversation item
+// carries the request id the daemon submitted under, and a ping's request id IS
+// its turn id — this table's own primary key. So for every item that carries an
+// id the exclusion is a KEY LOOKUP against the row, and it answers the same way
+// whatever either clock says. That is what HasTurn is for.
+//
+// FILE-PLANE items are the ones with nothing to match: transcript records the
+// vendor wrote back carry no prompt origin and no request id (the sidecar's
+// file-plane events leave request_id empty), so the origin lives only on the
+// control frame the daemon sent. What such an item does carry is its own
+// instant — and a ping occupies a closed interval of wall-clock time on exactly
+// one workspace. Placing an item in that interval is decidable from the item
+// alone, which is what Covers answers.
+//
+// THE INTERVAL'S TWO BOUNDS MUST COME FROM THE CLOCK THAT STAMPED THE ITEMS.
+// Item timestamps are VENDOR-clocked, so a bound taken from the daemon's own
+// clock decides the comparison by clock agreement rather than by evidence. Both
+// bounds are therefore stamped from the ping's own turn-boundary produced_at_ms
+// — the start re-stamped at TurnStarted (Open's ON CONFLICT re-stamp), the end
+// at TurnEnded — with the pre-submit daemon read kept only as a provisional
+// lower bound for a ping that never started.
+//
+// Either way the verdict is re-derivable from the item alone, which is the
+// property the merge lease's provenance ledger relies on for the same reason: a
+// verdict re-derived from live state would answer differently on a resync than
+// it did on the original push.
 //
 // A ROW IS NEVER DELETED. The whole contract is "withheld, not deleted": the
 // turns stay in the store and stay excluded forever, so the evidence that
@@ -78,6 +95,14 @@ func NewKeepAliveWindows(db *sql.DB) (*KeepAliveWindows, error) {
 // is the one outcome the exclusion exists to prevent. A window for a ping whose
 // submit then failed is harmless — it excludes an interval in which nothing was
 // written.
+//
+// THE RE-STAMP IS THE POINT OF THE ON CONFLICT CLAUSE, not defensive
+// idempotence. The first Open carries the daemon's own clock read, the only
+// bound available before the ping has even been submitted; the ping's
+// TurnStarted then supplies that same instant on the VENDOR clock that stamped
+// the items this window is compared against, and re-opening the row replaces
+// the provisional bound with it. A window that never receives a start boundary
+// keeps the provisional bound, which is exactly the ping that never ran.
 func (k *KeepAliveWindows) Open(w KeepAliveWindow) error {
 	if w.TurnID == "" || w.Workspace == "" || w.StartedAtMs <= 0 {
 		return fmt.Errorf("statedb: refusing to open an incomplete keep-alive window %+v", w)
@@ -92,19 +117,83 @@ func (k *KeepAliveWindows) Open(w KeepAliveWindow) error {
 	return nil
 }
 
+// ErrKeepAliveWindowInverted reports a close whose end instant precedes the
+// window's own start.
+//
+// IT IS A DEFECT REPORT, NOT A DEGRADED MODE. An interval with ended < started
+// covers NOTHING — every Covers read against it is false — so a window written
+// that way silently stops excluding the very ping it was opened for, and the
+// ping renders as the user's own prompt. The only way that pair of instants can
+// arise is a disagreement between the clock that stamped the start and the one
+// that stamped the end, which is a fact about the daemon worth surfacing rather
+// than absorbing.
+var ErrKeepAliveWindowInverted = errors.New("statedb: keep-alive window close would invert the interval")
+
 // Close stamps a ping's end. Closing an unknown turn is a no-op rather than an
 // error: a daemon that restarted mid-ping legitimately sees the end of a window
 // it did not open.
+//
+// AN INVERTED INTERVAL IS UNREPRESENTABLE, in the write itself. The UPDATE
+// stamps MAX(?, started_at_ms), so no caller — not this daemon, not a later one
+// — can leave a row whose end precedes its start, whatever the two clocks that
+// produced those instants believe. The clamp lands on the window's own start,
+// which is the same empty interval ReconcileOpenWindows stamps for a ping that
+// never ran, and is the honest reading of "the end is not after the start".
+//
+// THE CLAMP IS REPORTED, ALWAYS. Close returns ErrKeepAliveWindowInverted for
+// the clamped write, so the caller's established fail-hard path (the log line
+// plus the system-failure card in sessioncontroller/keepalivesubmit.go) fires on
+// exactly the occasions the interval was not the one the boundary asked for.
+// Bounding the row and staying silent would trade a permanent rendering blackout
+// for an invisible one.
 func (k *KeepAliveWindows) Close(turnID string, endedAtMs int64) error {
 	if turnID == "" || endedAtMs <= 0 {
 		return fmt.Errorf("statedb: refusing to close keep-alive window %q at %d", turnID, endedAtMs)
 	}
-	if _, err := k.db.Exec(
-		`UPDATE keep_alive_window SET ended_at_ms = ? WHERE turn_id = ? AND ended_at_ms = 0`,
+	// Read for the DIAGNOSIS only; the UPDATE below is what enforces the bound,
+	// so a row that moves between the two cannot produce an inverted write.
+	var startedAtMs int64
+	switch err := k.db.QueryRow(
+		`SELECT started_at_ms FROM keep_alive_window WHERE turn_id = ? AND ended_at_ms = 0`,
+		turnID).Scan(&startedAtMs); {
+	case errors.Is(err, sql.ErrNoRows):
+		// Unknown or already closed — the no-op this method documents.
+		return nil
+	case err != nil:
+		return fmt.Errorf("statedb: read keep-alive window %s before close: %w", turnID, err)
+	}
+	if _, err := k.db.Exec(`
+		UPDATE keep_alive_window SET ended_at_ms = MAX(?, started_at_ms)
+		WHERE turn_id = ? AND ended_at_ms = 0`,
 		endedAtMs, turnID); err != nil {
 		return fmt.Errorf("statedb: close keep-alive window %s: %w", turnID, err)
 	}
+	if endedAtMs < startedAtMs {
+		return fmt.Errorf("%w: turn_id=%s started_at_ms=%d ended_at_ms=%d — the end was clamped to the start, so the window covers only the instant the ping began; the two instants came from clocks that disagree",
+			ErrKeepAliveWindowInverted, turnID, startedAtMs, endedAtMs)
+	}
 	return nil
+}
+
+// HasTurn reports whether turnID names one of workspace's keep-alive windows —
+// the IDENTITY question, and the one the exclusion asks first.
+//
+// It is answered off the table's PRIMARY KEY and is therefore independent of
+// every clock in the system: an item carrying a ping's request id belongs to
+// that ping whether or not any interval agrees. Workspace-scoped for Covers's
+// reason — a ping on one workspace says nothing about items on another — even
+// though a minted turn id is unique on its own.
+func (k *KeepAliveWindows) HasTurn(workspace, turnID string) (bool, error) {
+	if workspace == "" || turnID == "" {
+		return false, nil
+	}
+	var n int
+	if err := k.db.QueryRow(
+		`SELECT COUNT(1) FROM keep_alive_window WHERE workspace = ? AND turn_id = ?`,
+		workspace, turnID).Scan(&n); err != nil {
+		return false, fmt.Errorf("statedb: read keep-alive window %q for %q: %w", turnID, workspace, err)
+	}
+	return n > 0, nil
 }
 
 // Covers reports whether tsMs falls inside any of workspace's keep-alive

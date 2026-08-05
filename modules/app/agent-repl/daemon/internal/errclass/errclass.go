@@ -155,6 +155,15 @@ const (
 	// the conversation silently stops advancing. Naming it is what turns a
 	// permanent blackout into something a human is told about.
 	TypeKeepAliveWindowUnclosed Type = "keep_alive.window_unclosed"
+	// TypeKeepAliveWindowInverted — the durable keep-alive window ledger
+	// refused an end instant that precedes the window's own start. It is a
+	// DIFFERENT fault from the unclosed window above and is named separately
+	// for that reason: the row is bounded (the ledger clamps it to its own
+	// start), so nothing is blacked out, but the interval covers nothing and
+	// the ping's id-less file-plane records may therefore render as the user's.
+	// What it reports is a disagreement between the clock that stamped the
+	// start and the clock that stamped the end.
+	TypeKeepAliveWindowInverted Type = "keep_alive.window_inverted"
 	// TypeInternalUnclassified — the loud fallthrough. It carries the raw
 	// error text and is always logged; a silent fallthrough would let the
 	// vocabulary rot without anyone noticing.
@@ -267,6 +276,7 @@ var prose = map[Type]string{
 	TypeQueueEntryKeepAliveHeld:    "the queued prompt is waiting for a cache keep-alive response and cannot be forced ahead of it",
 	TypeSessionHibernated:          "the session is hibernated; choose how to revive it before sending prompts",
 	TypeKeepAliveWindowUnclosed:    "a cache keep-alive window could not be closed, so new conversation is being withheld until it is repaired",
+	TypeKeepAliveWindowInverted:    "a cache keep-alive window ended before it began, so the daemon's own keep-alive turn may appear in the conversation",
 	TypeInternalUnclassified:       "the command failed",
 
 	// API — the SDK or the vendor refusing or concluding the work.
@@ -662,6 +672,24 @@ func KeepAliveWindowUnclosed(reason string) *frontendv1.SystemFailureItem {
 	}
 }
 
+// KeepAliveWindowInverted classifies a keep-alive window close the ledger
+// refused because the end instant precedes the window's own start.
+//
+// It is a CARD rather than a log line for the reason every other exclusion
+// fault is: what the user sees is the daemon's own keep-alive prompt sitting in
+// their conversation as though they had typed it, with no other account of
+// where it came from. The window itself is bounded — the ledger clamps the end
+// to the start rather than writing an interval that covers nothing — so this
+// reports a clock disagreement, never a rendering blackout.
+func KeepAliveWindowInverted(reason string) *frontendv1.SystemFailureItem {
+	return &frontendv1.SystemFailureItem{
+		ErrorClass:   frontendv1.ErrorClass_ERROR_CLASS_INTERNAL,
+		ErrorType:    string(TypeKeepAliveWindowInverted),
+		Message:      prose[TypeKeepAliveWindowInverted],
+		SourceDetail: reason,
+	}
+}
+
 // Degraded classifies a shim-reported DegradedState — the store-write
 // rejection path, whose reason is a StoreWriteAck error the shim wrapped.
 //
@@ -751,6 +779,7 @@ func AllTypes() []Type {
 		TypeQueueEntryKeepAliveHeld,
 		TypeSessionHibernated,
 		TypeKeepAliveWindowUnclosed,
+		TypeKeepAliveWindowInverted,
 		TypeInternalUnclassified,
 		TypeAPIAuthenticationFailed,
 		TypeAPIBillingError,
