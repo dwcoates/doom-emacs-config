@@ -37,6 +37,14 @@
   :type 'number
   :group 'agent-repl)
 
+(defcustom agent-repl-runtime-restart-await-timeout 300.0
+  "Seconds a synchronous deploy may await a coordinated runtime restart.
+The ordinary interactive restart remains asynchronous.  This timeout exists
+for deployment callers that must not report success before every restart,
+health, and workspace-rebind continuation has completed."
+  :type 'number
+  :group 'agent-repl)
+
 (defconst agent-repl--shim-store-label "com.agentrepl.shim-store"
   "launchd label for shim-store.")
 
@@ -67,6 +75,10 @@
 (defun agent-repl--shim-services-run-timer (seconds callback)
   "Integration boundary: run CALLBACK after SECONDS without blocking Emacs."
   (run-with-timer seconds nil callback))
+
+(defun agent-repl--runtime-pump-events (seconds)
+  "Integration boundary: process Emacs events for at most SECONDS."
+  (accept-process-output nil seconds))
 
 (defun agent-repl--launchctl-call (args)
   "External-boundary wrapper: run launchctl with ARGS and capture its output."
@@ -338,6 +350,54 @@ to reattach to.  The default PRESERVES them; see
    (lambda (detail)
      (agent-repl--log nil "runtime-restart command: FAILED detail=%s" detail))
    (and stop-shims t)))
+
+(defun agent-repl-runtime-restart-await (&optional stop-shims timeout)
+  "Restart the complete runtime and return only after terminal completion.
+STOP-SHIMS has the same meaning as in `agent-repl-runtime-restart'.  TIMEOUT,
+when non-nil, overrides `agent-repl-runtime-restart-await-timeout'.
+
+This synchronous surface is reserved for deployment orchestration.  It pumps
+Emacs process output and timers while the canonical asynchronous coordinator
+runs, then returns the exact string `runtime-restart-complete'.  A coordinator
+failure or timeout is logged and signalled, so a caller cannot mistake the
+initial `:pending' dispatch for a completed deployment."
+  (let ((limit (or timeout agent-repl-runtime-restart-await-timeout)))
+    (unless (and (numberp limit) (> limit 0))
+      (agent-repl--error nil
+                         "runtime-restart-await: invalid timeout=%S stop-shims=%s"
+                         limit (if stop-shims "t" "nil")))
+    (let* ((started (float-time))
+           (deadline (+ started limit))
+           (state :pending)
+           failure)
+      (agent-repl--log nil
+                       "runtime-restart-await: beginning stop-shims=%s timeout=%.3fs"
+                       (if stop-shims "t" "nil") limit)
+      (agent-repl--runtime-prepare
+       t
+       (lambda () (setq state :complete))
+       (lambda (detail)
+         (setq failure detail
+               state :failed))
+       (and stop-shims t))
+      (while (and (eq state :pending) (< (float-time) deadline))
+        (agent-repl--runtime-pump-events 0.05))
+      (pcase state
+        (:complete
+         (agent-repl--log nil
+                          "runtime-restart-await: complete stop-shims=%s elapsed=%.3fs"
+                          (if stop-shims "t" "nil") (- (float-time) started))
+         "runtime-restart-complete")
+        (:failed
+         (agent-repl--error nil
+                            "runtime-restart-await: FAILED stop-shims=%s elapsed=%.3fs detail=%s"
+                            (if stop-shims "t" "nil")
+                            (- (float-time) started) failure))
+        (_
+         (agent-repl--error nil
+                            "runtime-restart-await: TIMEOUT stop-shims=%s timeout=%.3fs elapsed=%.3fs state=%S"
+                            (if stop-shims "t" "nil") limit
+                            (- (float-time) started) state))))))
 
 (defun agent-repl--runtime-startup-prepare (on-success on-failure)
   "Prepare runtime services and daemon readiness before snapshot restoration.

@@ -120,6 +120,41 @@
       (agent-repl--runtime-prepare t #'ignore #'error t)
       (should seen))))
 
+(ert-deftest agent-repl-services-test-runtime-restart-await-requires-terminal-success ()
+  "The deployment surface returns only after its success continuation runs."
+  (let (finish pumps)
+    (cl-letf (((symbol-function 'agent-repl--runtime-prepare)
+               (lambda (_rebind on-success _on-failure &optional _stop-shims)
+                 (setq finish on-success)
+                 :pending))
+              ((symbol-function 'agent-repl--runtime-pump-events)
+               (lambda (_seconds)
+                 (push 'pump pumps)
+                 (funcall finish))))
+      (should (equal "runtime-restart-complete"
+                     (agent-repl-runtime-restart-await nil 1.0)))
+      (should (equal pumps '(pump))))))
+
+(ert-deftest agent-repl-services-test-runtime-restart-await-surfaces-failure ()
+  "A coordinator failure is signalled instead of resembling completion."
+  (cl-letf (((symbol-function 'agent-repl--runtime-prepare)
+             (lambda (_rebind _on-success on-failure &optional _stop-shims)
+               (funcall on-failure "daemon unhealthy")
+               :pending)))
+    (should-error (agent-repl-runtime-restart-await nil 1.0)
+                  :type 'error)))
+
+(ert-deftest agent-repl-services-test-runtime-restart-await-surfaces-timeout ()
+  "A coordinator that never settles makes deployment fail loudly."
+  (let ((times '(10.0 10.1 11.1 11.2)))
+    (cl-letf (((symbol-function 'agent-repl--runtime-prepare)
+               (lambda (&rest _) :pending))
+              ((symbol-function 'float-time)
+               (lambda (&optional _value) (pop times)))
+              ((symbol-function 'agent-repl--runtime-pump-events) #'ignore))
+      (should-error (agent-repl-runtime-restart-await nil 1.0)
+                    :type 'error))))
+
 (provide 'test-services)
 
 ;;; test-services.el ends here

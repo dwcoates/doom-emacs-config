@@ -319,7 +319,7 @@ else
     # must be stopped even when this checkout's own before/after fingerprint is
     # unchanged.
     ROOT_B64="$(printf '%s' "$ROOT" | base64 | tr -d '\n')"
-    PRELOAD_FORM="(let* ((root (file-name-as-directory (decode-coding-string (base64-decode-string \"$ROOT_B64\") 'utf-8))) (before (and (boundp 'agent-repl--frontend-root) agent-repl--frontend-root))) (load (expand-file-name \"daemon.el\" root) nil t) (unless (equal agent-repl--frontend-root root) (error \"agent-repl deploy root mismatch: expected %S got %S\" root agent-repl--frontend-root)) (if (equal before root) \"artifact-root-same\" \"artifact-root-changed\"))"
+    PRELOAD_FORM="(let* ((root (file-name-as-directory (decode-coding-string (base64-decode-string \"$ROOT_B64\") 'utf-8))) (before (and (boundp 'agent-repl--frontend-root) agent-repl--frontend-root))) (load (expand-file-name \"daemon.el\" root) nil t) (load (expand-file-name \"services.el\" root) nil t) (unless (equal agent-repl--frontend-root root) (error \"agent-repl deploy root mismatch: expected %S got %S\" root agent-repl--frontend-root)) (if (equal before root) \"artifact-root-same\" \"artifact-root-changed\"))"
     PRELOAD_OUT="$("$EMACSCLIENT" --eval "$PRELOAD_FORM" 2>&1)" || {
         echo "[deploy-all] daemon control-plane preload failed: $PRELOAD_OUT" >&2
         exit 3
@@ -339,11 +339,11 @@ else
     esac
 
     if [ "$SHIM_CHANGED" -eq 1 ]; then
-        RESTART_FORM='(agent-repl-frontend-daemon-restart t)'
-        log "daemon: restarting via emacsclient (stop-shims: the bundle changed)..."
+        RESTART_FORM='(agent-repl-frontend-daemon-restart-await t)'
+        log "daemon: restarting and awaiting completion via emacsclient (stop-shims: the bundle changed)..."
     else
-        RESTART_FORM='(agent-repl-frontend-daemon-restart)'
-        log "daemon: restarting via emacsclient..."
+        RESTART_FORM='(agent-repl-frontend-daemon-restart-await)'
+        log "daemon: restarting and awaiting completion via emacsclient..."
     fi
     RESTART_OUT="$("$EMACSCLIENT" --eval "$RESTART_FORM" 2>&1)" || {
         echo "[deploy-all] daemon restart failed: $RESTART_OUT" >&2
@@ -356,8 +356,14 @@ else
             echo "[deploy-all] daemon restart refused (turn in flight): $RESTART_OUT" >&2
             exit 3
             ;;
+        *runtime-restart-complete*)
+            ;;
+        *)
+            echo "[deploy-all] daemon restart returned no terminal completion: $RESTART_OUT" >&2
+            exit 3
+            ;;
     esac
-    log "daemon: restarted"
+    log "daemon: restart completed"
 
     # ---- 5b. webview refresh -----------------------------------------------
     # The pages mounted in Emacs outlive the daemon they were loaded against,
