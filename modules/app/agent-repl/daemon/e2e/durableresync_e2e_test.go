@@ -121,6 +121,16 @@ func newBouncedHarness(t *testing.T) *bouncedHarness {
 	}); err != nil {
 		t.Fatalf("seed registry record: %v", err)
 	}
+	const retiredGeneration = "generation-before-bounce"
+	if err := ssmMgr.ApplySessionConnectivity(h.workspace, h.sessionID, retiredGeneration, ssm.SessionConnectivityConnecting, "e2e_bring_up"); err != nil {
+		t.Fatalf("seed connecting workspace state: %v", err)
+	}
+	if err := ssmMgr.ApplySessionConnectivity(h.workspace, h.sessionID, retiredGeneration, ssm.SessionConnectivityOperational, "e2e_shim_ready"); err != nil {
+		t.Fatalf("seed operational workspace state: %v", err)
+	}
+	if err := ssmMgr.ApplySessionConnectivity(h.workspace, h.sessionID, retiredGeneration, ssm.SessionConnectivityHibernated, "e2e_daemon_bounce"); err != nil {
+		t.Fatalf("seed hibernated workspace state: %v", err)
+	}
 
 	forwarder := &server.PushForwarder{Logf: t.Logf}
 	shimListener := shimlisten.New(t.Logf)
@@ -269,9 +279,10 @@ func storedAssistantEvent(t *testing.T, vendorSessionID, uuid, text string) *cor
 // assistant text of every ConversationDelta that arrives before the request's
 // CommandAck, which terminates the read: the frontend server processes one
 // command at a time and pushes the whole replay before acking.
-func (h *bouncedHarness) resyncFrom(t *testing.T, conn *websocket.Conn, requestID string, fromSeq uint64) []string {
+func (h *bouncedHarness) resyncFrom(t *testing.T, conn *websocket.Conn, state *frontendv1.WorkspaceState, requestID string, fromSeq uint64) []string {
 	t.Helper()
-	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"workspace":%q,"resync":{"fromSeq":"%d"}}`, requestID, h.workspace, fromSeq))
+	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"workspace":%q,"resync":{"fromSeq":"%d","sessionId":%q,"controllerGenerationId":%q}}`,
+		requestID, h.workspace, fromSeq, state.GetSessionId(), state.GetControllerGenerationId()))
 	var texts []string
 	deadline := time.Now().Add(frameTimeout)
 	for time.Now().Before(deadline) {
@@ -297,6 +308,21 @@ func (h *bouncedHarness) resyncFrom(t *testing.T, conn *websocket.Conn, requestI
 	return nil
 }
 
+func workspaceStateInSnapshot(t *testing.T, frame *frontendv1.FrontendFrame, workspace string) *frontendv1.WorkspaceState {
+	t.Helper()
+	snapshot := frame.GetSnapshot()
+	if snapshot == nil {
+		t.Fatalf("first /frontend frame = %T, want a StateSnapshot", frame.GetFrame())
+	}
+	for _, state := range snapshot.GetWorkspaces() {
+		if state.GetWorkspace() == workspace {
+			return state
+		}
+	}
+	t.Fatalf("snapshot has no authoritative state for workspace %q", workspace)
+	return nil
+}
+
 // --- tests ------------------------------------------------------------------
 
 func TestAFrontendConnectingAfterADaemonBounceReceivesThePriorConversation(t *testing.T) {
@@ -306,12 +332,10 @@ func TestAFrontendConnectingAfterADaemonBounceReceivesThePriorConversation(t *te
 	producer.write(storedAssistantEvent(t, h.vendorSessionID, "u-1", "the first reply"))
 	producer.write(storedAssistantEvent(t, h.vendorSessionID, "u-2", "the second reply"))
 	conn := h.dialFrontend(t)
-	if snap := readFrame(t, conn); snap.GetSnapshot() == nil {
-		t.Fatalf("first /frontend frame = %T, want a StateSnapshot", snap.GetFrame())
-	}
+	state := workspaceStateInSnapshot(t, readFrame(t, conn), h.workspace)
 
 	// Act — exactly what a reloaded webview sends.
-	texts := h.resyncFrom(t, conn, "e2e-bounced-resync-1", 0)
+	texts := h.resyncFrom(t, conn, state, "e2e-bounced-resync-1", 0)
 
 	// Assert.
 	joined := strings.Join(texts, "|")
@@ -326,12 +350,10 @@ func TestServingADurableResyncNeverSpawnsAShim(t *testing.T) {
 	producer := dialStoreProducer(t)
 	producer.write(storedAssistantEvent(t, h.vendorSessionID, "u-1", "the only reply"))
 	conn := h.dialFrontend(t)
-	if snap := readFrame(t, conn); snap.GetSnapshot() == nil {
-		t.Fatalf("first /frontend frame = %T, want a StateSnapshot", snap.GetFrame())
-	}
+	state := workspaceStateInSnapshot(t, readFrame(t, conn), h.workspace)
 
 	// Act.
-	h.resyncFrom(t, conn, "e2e-bounced-resync-2", 0)
+	h.resyncFrom(t, conn, state, "e2e-bounced-resync-2", 0)
 
 	// Assert.
 	if got := h.spawns.Load(); got != 0 {
@@ -351,12 +373,10 @@ func TestADurableResyncRespectsTheClientsFromSeq(t *testing.T) {
 	// evidence of a retired vendor seq space.
 	h.seq.SetLastSeq(h.sessionID, second.GetLastSeq())
 	conn := h.dialFrontend(t)
-	if snap := readFrame(t, conn); snap.GetSnapshot() == nil {
-		t.Fatalf("first /frontend frame = %T, want a StateSnapshot", snap.GetFrame())
-	}
+	state := workspaceStateInSnapshot(t, readFrame(t, conn), h.workspace)
 
 	// Act — from_seq is the client's INCLUSIVE mark, one past the first reply.
-	texts := h.resyncFrom(t, conn, "e2e-bounced-resync-3", first.GetLastSeq()+1)
+	texts := h.resyncFrom(t, conn, state, "e2e-bounced-resync-3", first.GetLastSeq()+1)
 
 	// Assert.
 	joined := strings.Join(texts, "|")

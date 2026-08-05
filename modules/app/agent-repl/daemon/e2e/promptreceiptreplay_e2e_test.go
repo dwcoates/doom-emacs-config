@@ -489,7 +489,7 @@ func (w *receiptWorld) restart(t *testing.T) *bouncedFrontend {
 }
 
 // dial opens the unfiltered /frontend socket and consumes the connect snapshot.
-func (f *bouncedFrontend) dial(t *testing.T) *websocket.Conn {
+func (f *bouncedFrontend) dial(t *testing.T, workspace string) (*websocket.Conn, *frontendv1.WorkspaceState) {
 	t.Helper()
 	wsURL := "ws" + strings.TrimPrefix(f.ts.URL, "http") + "/frontend"
 	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
@@ -500,17 +500,15 @@ func (f *bouncedFrontend) dial(t *testing.T) *websocket.Conn {
 		defer resp.Body.Close()
 	}
 	t.Cleanup(func() { _ = conn.Close() })
-	if snap := readFrame(t, conn); snap.GetSnapshot() == nil {
-		t.Fatalf("first /frontend frame = %T, want a StateSnapshot", snap.GetFrame())
-	}
-	return conn
+	return conn, workspaceStateInSnapshot(t, readFrame(t, conn), workspace)
 }
 
 // resyncItems sends one resync and returns every conversation item that
 // arrives before its CommandAck, which terminates the read.
-func (f *bouncedFrontend) resyncItems(t *testing.T, conn *websocket.Conn, workspace, requestID string) []*frontendv1.ConversationItem {
+func (f *bouncedFrontend) resyncItems(t *testing.T, conn *websocket.Conn, state *frontendv1.WorkspaceState, workspace, requestID string) []*frontendv1.ConversationItem {
 	t.Helper()
-	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"workspace":%q,"resync":{"fromSeq":"0"}}`, requestID, workspace))
+	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"workspace":%q,"resync":{"fromSeq":"0","sessionId":%q,"controllerGenerationId":%q}}`,
+		requestID, workspace, state.GetSessionId(), state.GetControllerGenerationId()))
 	var items []*frontendv1.ConversationItem
 	deadline := time.Now().Add(frameTimeout)
 	for time.Now().Before(deadline) {
@@ -551,10 +549,10 @@ func TestAPromptWhoseTurnNeverBecameDurableSurvivesTheDaemonThatAcceptedIt(t *te
 	w := newReceiptWorld(t)
 	w.submitThenDie(t, "e2e-receipt-1", "the prompt nobody kept")
 	f := w.restart(t)
-	conn := f.dial(t)
+	conn, state := f.dial(t, w.workspace)
 
 	// Act — exactly what a reloaded webview sends.
-	items := f.resyncItems(t, conn, w.workspace, "e2e-receipt-resync-1")
+	items := f.resyncItems(t, conn, state, w.workspace, "e2e-receipt-resync-1")
 
 	// Assert.
 	bubbles := promptBubbles(items)
@@ -578,10 +576,10 @@ func TestAReplayedReceiptArrivesBesideTheStoredConversation(t *testing.T) {
 	producer.write(storedAssistantEvent(t, w.vendorSessionID, "u-1", "an earlier reply"))
 	w.submitThenDie(t, "e2e-receipt-2", "the prompt nobody kept")
 	f := w.restart(t)
-	conn := f.dial(t)
+	conn, state := f.dial(t, w.workspace)
 
 	// Act.
-	items := f.resyncItems(t, conn, w.workspace, "e2e-receipt-resync-2")
+	items := f.resyncItems(t, conn, state, w.workspace, "e2e-receipt-resync-2")
 
 	// Assert.
 	if len(items) < 2 {
@@ -600,13 +598,13 @@ func TestAReplayedReceiptIsServedOnceAcrossTwoResyncs(t *testing.T) {
 	w := newReceiptWorld(t)
 	w.submitThenDie(t, "e2e-receipt-3", "the prompt nobody kept")
 	f := w.restart(t)
-	conn := f.dial(t)
-	if got := len(promptBubbles(f.resyncItems(t, conn, w.workspace, "e2e-receipt-resync-3a"))); got != 1 {
+	conn, state := f.dial(t, w.workspace)
+	if got := len(promptBubbles(f.resyncItems(t, conn, state, w.workspace, "e2e-receipt-resync-3a"))); got != 1 {
 		t.Fatalf("first resync served %d prompt bubbles, want 1", got)
 	}
 
 	// Act.
-	items := f.resyncItems(t, conn, w.workspace, "e2e-receipt-resync-3b")
+	items := f.resyncItems(t, conn, state, w.workspace, "e2e-receipt-resync-3b")
 
 	// Assert.
 	if got := len(promptBubbles(items)); got != 1 {
