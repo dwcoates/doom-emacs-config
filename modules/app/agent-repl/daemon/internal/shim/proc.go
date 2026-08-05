@@ -219,6 +219,7 @@ func (p *stderrPump) expectClose(owner string) {
 		return
 	}
 	if p.lifecycle.closeOwner != stderrCloseOwnerUnclaimed {
+		p.logger.Log("shim: stderr close ownership invariant violated pid=%d pgid=%d committed_owner=%q requested_owner=%q close_expected=%t", p.lifecycle.pid, p.lifecycle.pgid, p.lifecycle.closeOwner, owner, p.lifecycle.closeExpected)
 		panic(fmt.Sprintf("shim: stderr close owner already committed as %q", p.lifecycle.closeOwner))
 	}
 	p.lifecycle.closeOwner = owner
@@ -615,6 +616,7 @@ func (p *Proc) Terminate(by Stop) error {
 // completion structurally unable to observe a shutdown that never happened.
 func (p *Proc) signal(by Stop, verb string, send func() error) error {
 	if err := by.Validate(); err != nil {
+		p.logger.Log("shim: shutdown attribution invalid verb=%s pid=%d pgid=%d initiator=%q reason=%q error=%v", verb, p.pid, p.pgid, by.Initiator, by.Reason, err)
 		return fmt.Errorf("shim: refusing to %s pid %d: %w", verb, p.pid, err)
 	}
 	var err error
