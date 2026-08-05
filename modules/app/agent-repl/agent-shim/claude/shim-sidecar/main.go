@@ -168,7 +168,12 @@ type sidecar struct {
 	// task. A /tmp spool has no identity of its own (see internal/discover), so
 	// this is what attributes one. Seeded per connection from the store's
 	// authoritative open tasks and extended as transcripts are tailed.
-	owners map[string]string // task id -> session id
+	owners             map[string]string      // task id -> session id
+	ownerSource        map[string]OwnerSource // task id -> authoritative source
+	ownerTaskOutput    map[string]string      // task id -> exact output path when provided
+	ownerByOutput      map[string]ownerRecord // normalized output path -> owner
+	ownerPathConflicts map[string]bool        // normalized output path -> conflicting claims observed
+	ownerConflicts     map[string]bool        // task id -> conflicting session claim observed
 	// held records spools discovered before their owner was known, so an
 	// attribution that never arrives is visible rather than silent. A held
 	// spool is NOT tailed: reading it would mean inventing an owner.
@@ -193,14 +198,19 @@ type sidecar struct {
 
 func newSidecar(storeSocket string, roots []string, spoolRoot string, log *logging.Bound) *sidecar {
 	s := &sidecar{
-		store:    storeclient.New(storeSocket, log.With(logging.Context{Component: "storeclient"})),
-		disc:     discover.New(roots, spoolRoot, log.With(logging.Context{Component: "discover"})),
-		tracker:  stale.New(stale.Options{}, log.With(logging.Context{Component: "stale"})),
-		roots:    roots,
-		log:      log,
-		watchers: map[string]*watched{},
-		owners:   map[string]string{},
-		held:     map[string]int64{},
+		store:              storeclient.New(storeSocket, log.With(logging.Context{Component: "storeclient"})),
+		disc:               discover.New(roots, spoolRoot, log.With(logging.Context{Component: "discover"})),
+		tracker:            stale.New(stale.Options{}, log.With(logging.Context{Component: "stale"})),
+		roots:              roots,
+		log:                log,
+		watchers:           map[string]*watched{},
+		owners:             map[string]string{},
+		ownerSource:        map[string]OwnerSource{},
+		ownerTaskOutput:    map[string]string{},
+		ownerByOutput:      map[string]ownerRecord{},
+		ownerPathConflicts: map[string]bool{},
+		ownerConflicts:     map[string]bool{},
+		held:               map[string]int64{},
 		// A fresh sidecar is simply a sidecar whose link is not up yet, with its
 		// first dial due immediately. That is all "boot" means here.
 		link:      linkDown,
@@ -331,11 +341,8 @@ func (s *sidecar) rescan() {
 // the path's runtime id, and that id being mistaken for an identity is the bug
 // this whole change removes.
 func (s *sidecar) resolveOwner(tgt discover.Target, nowMs int64) (string, bool) {
-	if tgt.SessionID != "" {
-		return tgt.SessionID, true
-	}
-	session := s.owners[tgt.TaskID]
-	if session == "" {
+	resolution := s.resolveOwnerResult(tgt)
+	if !resolution.Resolved() {
 		s.holdUnowned(tgt, nowMs)
 		return "", false
 	}
@@ -343,10 +350,10 @@ func (s *sidecar) resolveOwner(tgt discover.Target, nowMs int64) (string, bool) 
 		delete(s.held, tgt.Path)
 		// Per-spool, because a hold that CLEARS is rare and is the interesting
 		// half: it says attribution arrived, and how long it took.
-		s.log.With(logging.Context{Operation: "resolve-spool-owner", Path: tgt.Path, Session: session, Task: tgt.TaskID}).Log(
+		s.log.With(logging.Context{Operation: "resolve-spool-owner", Path: tgt.Path, Session: resolution.SessionID, Task: tgt.TaskID}).Log(
 			"owner resolved after %dms held", nowMs-firstSeenMs)
 	}
-	return session, true
+	return resolution.SessionID, true
 }
 
 // holdUnowned records a spool whose owning session is not known yet. Silent by
@@ -381,42 +388,6 @@ func (s *sidecar) reportHeld(nowMs int64) {
 	s.log.With(logging.Context{Operation: "report-held-spools", Level: "warn"}).Log(
 		"%d held awaiting attribution (%d past %s) — not tailed rather than filed under a guessed session",
 		report.held, report.stale, UnownedSpoolWindow)
-}
-
-// seedOwners populates the owner index from the store's authoritative open
-// tasks, returning how many mappings it established. This is what makes the
-// index survive a restart: the launch line naming an owner may sit far behind
-// the resumed cursor and never be re-read.
-func (s *sidecar) seedOwners(states []*corev1.OpenTaskState) int {
-	n := 0
-	for _, state := range states {
-		ev := state.GetStarted()
-		if ts := ev.GetTaskStarted(); ts != nil && s.noteOwner(ts.GetTaskId(), ev.GetSessionId()) {
-			n++
-		}
-	}
-	return n
-}
-
-// noteOwner records that TASKID was launched by SESSION, reporting (never
-// silently resolving) a task that claims two different launching sessions.
-// That is precisely the corruption this change eliminates upstream, so if one
-// ever appears again it must be loud rather than absorbed. The first mapping
-// wins, so the attribution cannot flap between rescans.
-func (s *sidecar) noteOwner(taskID, session string) bool {
-	if taskID == "" || session == "" {
-		return false
-	}
-	if prior, ok := s.owners[taskID]; ok {
-		if prior != session {
-			s.log.With(logging.Context{Operation: "record-spool-owner", Session: prior, Task: taskID, Level: "error"}).Log(
-				"spool: CONFLICTING owner for task=%s — already attributed to session %s, now also claimed by %s; KEEPING %s",
-				taskID, prior, session, prior)
-		}
-		return false
-	}
-	s.owners[taskID] = session
-	return true
 }
 
 // pollAll polls every watched file once, writing any batch to the store and
@@ -527,7 +498,7 @@ func (s *sidecar) newHandler(kind tail.Kind, log *logging.Bound) tail.Handler {
 func (s *sidecar) applyLifecycle(events []*corev1.Event, nowMs int64) {
 	for _, e := range events {
 		if ts := e.GetTaskStarted(); ts != nil {
-			s.noteOwner(ts.GetTaskId(), e.GetSessionId())
+			s.noteTaskOwner(ts.GetTaskId(), e.GetSessionId(), ts.GetOutputPath(), OwnerSourceLiveLaunch)
 			s.tracker.Open(ts.GetTaskId(), taskKindToTail(ts.GetKind()), e.GetSessionId(), ts.GetOutputPath(), nowMs, nowMs)
 		}
 		if te := e.GetTaskEnded(); te != nil && te.GetStatus() != corev1.TerminalStatus_TERMINAL_STATUS_LOST {

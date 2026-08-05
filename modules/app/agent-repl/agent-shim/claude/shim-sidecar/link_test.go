@@ -356,7 +356,7 @@ func TestRescanTailsASpoolOnceItsLaunchingSessionIsKnown(t *testing.T) {
 	s := newSidecar(filepath.Join(t.TempDir(), "unused.sock"), nil, spoolRoot, quietLog)
 	s.link = linkUp
 	s.cursors = map[string]*corev1.CursorState{}
-	s.noteOwner("b1pi0nmip", "9b6a4f2d-transcript-id")
+	s.noteTaskOwner("b1pi0nmip", "9b6a4f2d-transcript-id", "", OwnerSourceLiveLaunch)
 
 	// Act
 	s.rescan()

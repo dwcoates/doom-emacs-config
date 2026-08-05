@@ -132,6 +132,7 @@ func (s *sidecar) establish() error {
 	// seed a restart could leave a live task's spool unowned, and therefore
 	// unread, until its transcript happened to be re-read. The persisted
 	// TaskStarted events are exactly that mapping, already fetched.
+	s.resetOwners()
 	seeded := s.seedOwners(recovery.OpenTasks)
 	s.link = linkUp
 	s.backoff = 0
