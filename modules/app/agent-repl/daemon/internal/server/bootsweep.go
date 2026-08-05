@@ -44,9 +44,11 @@ package server
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
+	"claude-repld/internal/errclass"
 	"claude-repld/internal/registry"
 )
 
@@ -176,6 +178,17 @@ func (s *BootSweeper) reconcile(label string, rec registry.Record) (registry.Rec
 	if connected {
 		s.Logf("server: %s sweep: session %s (ws %s) has a PARKED shim connection; reattaching", label, rec.SessionID, rec.CWD)
 		if err := s.Ensurer.Ensure(rec.CWD); err != nil {
+			if errors.Is(err, errclass.ErrSessionHibernated) {
+				// NOT A FAILURE, and saying so matters: the bring-up evaluated
+				// the keep-alive policy and found this record long past its
+				// threshold, so it hibernated the session rather than
+				// reattaching a shim nobody has spoken to in that long. The
+				// session now meets the revival gate, which is the outcome the
+				// sweep would have reached a tick later anyway.
+				s.Logf("server: %s sweep: session %s (ws %s) HIBERNATED instead of reattached — the record was found past the keep-alive policy's threshold at bring-up; the user chooses a revival mode from the gate: %v",
+					label, rec.SessionID, rec.CWD, err)
+				return registry.Record{}, false
+			}
 			s.Logf("server: %s sweep: session %s (ws %s) reattach FAILED — the workspace stays unwired until it is opened: %v",
 				label, rec.SessionID, rec.CWD, err)
 			return registry.Record{}, false

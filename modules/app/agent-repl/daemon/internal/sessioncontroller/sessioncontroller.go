@@ -290,6 +290,16 @@ type Config struct {
 	// revived implicitly by the next daemon, which is precisely the silent
 	// un-sleeping the durable flag exists to prevent.
 	Hibernations HibernationRegistrar
+	// LegacyTurnEnds resolves the durable last-turn-end for a session that
+	// predates the keep-alive branch and therefore has none, by the SAME rule
+	// the idle sweeper applies (server.stampLegacyTurnEnd). It exists so the
+	// staleness check taken at prompt acceptance and at bring-up
+	// (hibernateIfStale) measures such a session exactly as the sweeper does,
+	// rather than carrying a second copy of the stamping policy.
+	//
+	// Nil leaves an undated session outside that check — loudly — and with the
+	// sweeper alone, which is the pre-existing behavior rather than a new one.
+	LegacyTurnEnds LegacyTurnEndStamper
 	// KeepAlive is the resolved cache keep-alive policy. The zero value takes
 	// keepalive.DefaultConfig, because a zero TTL would read every session as
 	// already cache-expired.
@@ -1936,6 +1946,20 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 	sessionID, ok := m.cfg.Locator.Locate(workspace)
 	if !ok {
 		return nil, false, fmt.Errorf("session-controller: workspace %q has no live session to drive", workspace)
+	}
+	// THE STALENESS CHECK, BEFORE ANYTHING IS SPAWNED. A record restored at
+	// boot can be long past the keep-alive thresholds while its flag still says
+	// awake, and bringing it up would put a warm-looking session in front of
+	// the user until the next sweep noticed. Asked here rather than only in the
+	// prompt gate because this is the line that spawns the process: a stale
+	// session sleeps without one ever being started, and the caller gets the
+	// SAME typed refusal the gate produces, so no route can turn the sleep into
+	// a silent skip (hibernation.go).
+	if detail, took := m.hibernateIfStale(workspace, sessionID); took {
+		m.logf("session-controller: bring-up REFUSED by the revival gate ws=%q session=%s cause=%s since_ms=%d — the record was found stale at bring-up and hibernated instead; no shim was spawned",
+			workspace, sessionID, detail.Cause, detail.SinceMs)
+		return nil, false, fmt.Errorf("%w: workspace %q session %s has been asleep since %d (%s)",
+			ErrHibernated, workspace, sessionID, detail.SinceMs, detail.Cause)
 	}
 	generationID, err := m.newControllerGenerationID()
 	if err != nil {

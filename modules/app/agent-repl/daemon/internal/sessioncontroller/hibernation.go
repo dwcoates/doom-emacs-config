@@ -3,6 +3,7 @@ package sessioncontroller
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/keepalive"
@@ -101,6 +102,20 @@ type HibernationRegistrar interface {
 	// mutex, so a session that started and finished work between the sweep's
 	// snapshot and the claim cannot be put to sleep on the stale reading.
 	LastTurnEndOf(sessionID string) (int64, bool)
+}
+
+// LegacyTurnEndStamper resolves — and, for a record that has none, stamps —
+// the durable last-turn-end instant the keep-alive policy measures from.
+//
+// It is ONE method because there is one rule, and it lives outside this package
+// because the instant a legacy record gets comes from the workspace's dated
+// state history, which this package does not read. The idle sweeper and the
+// acceptance/bring-up staleness check call the same implementation.
+type LegacyTurnEndStamper interface {
+	// StampLegacyTurnEnd reports the session's durable last-turn-end,
+	// stamping a missing one from durable state first. A false return is a
+	// session with no dated fact to measure — never a guess, and never now().
+	StampLegacyTurnEnd(sessionID, workspace string) (int64, bool)
 }
 
 // HibernateWithCause is THE hibernation transition. account.Cause names why,
@@ -315,6 +330,19 @@ func (m *Manager) clearHibernation(workspace, sessionID string) error {
 			workspace, sessionID, err)
 		return err
 	}
+	// THE REVIVAL IS THE POLICY'S NEW MEASURING POINT, and stamping it is what
+	// stops the revival from being undone by the very thresholds it answered.
+	// The instant the record kept is the turn end that PRECEDED the sleep —
+	// hours or days old, since that age is why the session slept — so a session
+	// woken and left on that instant reads as stale to every evaluator the
+	// moment it is awake: the idle sweeper's next tick would hibernate it
+	// straight back, and the acceptance and bring-up checks would refuse the
+	// revival's own bring-up outright. The user re-engaging is the freshest
+	// dated fact about this session, and it is written through the same
+	// registrar hook every other turn boundary uses rather than a second field.
+	if nowMs := m.now(); nowMs > 0 {
+		m.cfg.Hibernations.TurnEndObserved(sessionID, nowMs)
+	}
 	m.logf("session-controller: hibernation cleared ws=%q session=%s — the revival gate no longer stands", workspace, sessionID)
 	return nil
 }
@@ -361,12 +389,112 @@ func (m *Manager) guardHibernation(workspace, requestID, origin string, who subm
 	}
 	detail, asleep := m.cfg.Hibernations.HibernationOf(sessionID)
 	if !asleep || detail.Cause == "" {
-		return nil
+		// THE STALE-RECORD CLOSURE. A record that never hibernated can still
+		// be long past the policy's thresholds — a session closed awake days
+		// ago, restored at boot — and until this line the gate read only the
+		// flag, so such a session answered prompts as though it were warm for
+		// however long it took the next sweep to notice. The decision is taken
+		// HERE, at acceptance, so the answer does not depend on the schedule.
+		taken, took := m.hibernateIfStale(workspace, sessionID)
+		if !took {
+			return nil
+		}
+		detail = taken
 	}
 	m.logf("session-controller: prompt REFUSED by the revival gate ws=%q session=%s request_id=%s origin=%q cause=%s since_ms=%d — the session is hibernated and no shim was spawned, no queue entry was made, and nothing was submitted; the user must choose a revival mode first",
 		workspace, sessionID, requestID, origin, detail.Cause, detail.SinceMs)
 	return fmt.Errorf("%w: workspace %q session %s has been asleep since %d (%s)",
 		ErrHibernated, workspace, sessionID, detail.SinceMs, detail.Cause)
+}
+
+// hibernateIfStale takes the hibernation a record has ALREADY EARNED, at the
+// moment the session is asked for, and reports the account it persisted.
+//
+// WHY THE DECISION LIVES AT ACCEPTANCE AND BRING-UP RATHER THAN ON A SCHEDULE.
+// The idle sweeper's first tick is a whole interval after boot, and it is the
+// only thing that used to evaluate the policy. A session that was closed AWAKE
+// days ago therefore came back ungated: its record says hibernated=false, so
+// the gate passed it, and the bring-up spawned a shim for it — and a prompt in
+// that window was forwarded as a cold, full-context turn on the user's budget.
+// The window was a scheduling artifact, so the fix is to stop asking on a
+// schedule: every route into a session now evaluates the same policy against
+// the same durable instant before it can be used. The sweeper still runs, and
+// still hibernates the sessions nobody asks for; it is no longer the only
+// evaluator, and nothing about its arithmetic is duplicated here — this reads
+// the same keepalive.Config and routes through the same one transition.
+//
+// ONLY THE HIBERNATE ARMS ARE ACTED ON. ActionPing belongs to the sweeper: a
+// prompt arriving is the warming, and submitting a ping in front of it would
+// spend a turn to keep alive a cache the very next line is about to use. The
+// cutoff-versus-expiry precedence is keepalive.Evaluate's, untouched.
+//
+// A not-stale session, an already-asleep one, and a session with no durable
+// instant to measure from are all no-ops. The caller holds NO manager mutex:
+// HibernateWithCause takes the per-workspace claim itself and re-reads the
+// elapsed under it, so this function's reading being a moment old is already
+// covered by the transition's own fresh check.
+func (m *Manager) hibernateIfStale(workspace, sessionID string) (registry.HibernationDetail, bool) {
+	if m.cfg.Hibernations == nil {
+		return registry.HibernationDetail{}, false
+	}
+	if detail, asleep := m.cfg.Hibernations.HibernationOf(sessionID); asleep && detail.Cause != "" {
+		return registry.HibernationDetail{}, false
+	}
+	lastEndMs, ok := m.durableLastTurnEnd(sessionID, workspace)
+	if !ok || lastEndMs <= 0 {
+		return registry.HibernationDetail{}, false
+	}
+	cfg := m.keepAliveConfig()
+	nowMs := m.now()
+	decision := cfg.Evaluate(nowMs, lastEndMs)
+	if decision.Action != keepalive.ActionHibernate {
+		return registry.HibernationDetail{}, false
+	}
+	detail := registry.HibernationDetail{
+		Cause:     decision.Cause,
+		SinceMs:   nowMs,
+		ElapsedMs: decision.ElapsedMs,
+	}
+	switch decision.Cause {
+	case keepalive.CauseIdleCutoff:
+		detail.CutoffMs = int64(cfg.IdleCutoff / time.Millisecond)
+	case keepalive.CauseCacheExpired:
+		detail.TTLMs = int64(cfg.CacheTTL / time.Millisecond)
+	}
+	m.logf("session-controller: STALE RECORD hibernating on demand ws=%q session=%s cause=%s elapsed_ms=%d last_turn_end_ms=%d — the session was found past the keep-alive policy's threshold by the route that asked for it rather than by a sweep, so it meets the revival gate now instead of one sweep interval from now",
+		workspace, sessionID, decision.Cause, decision.ElapsedMs, lastEndMs)
+	if err := m.HibernateWithCause(workspace, detail); err != nil {
+		// EVERY refusal here is the transition's own, and each one means the
+		// session stays awake: a live turn (ErrNotSettled), a merge holding the
+		// lease, another cause winning the claim, or the claim's fresh read
+		// finding work that happened since. None is swallowed, and none is
+		// converted into a refusal of the caller — the record still says awake,
+		// so the caller proceeds exactly as it did before this check existed.
+		m.logf("session-controller: stale-record hibernation NOT TAKEN ws=%q session=%s cause=%s error=%v — the session stays awake and the caller proceeds; the sweeper will re-evaluate it on its own schedule",
+			workspace, sessionID, decision.Cause, err)
+		return registry.HibernationDetail{}, false
+	}
+	return detail, true
+}
+
+// durableLastTurnEnd reads the instant every keep-alive decision measures from,
+// stamping a legacy record that has none through the SAME rule the sweeper
+// applies (server.stampLegacyTurnEnd, reached through cfg.LegacyTurnEnds).
+//
+// THE STAMPING POLICY IS NOT RE-EXPRESSED HERE. A second copy would be a second
+// answer to "when was this session last active", and the two would drift into
+// one route hibernating a session the other considers undated. A Manager wired
+// without the seam simply leaves such a session to the sweeper, and says so.
+func (m *Manager) durableLastTurnEnd(sessionID, workspace string) (int64, bool) {
+	if lastEndMs, ok := m.cfg.Hibernations.LastTurnEndOf(sessionID); ok && lastEndMs > 0 {
+		return lastEndMs, true
+	}
+	if m.cfg.LegacyTurnEnds == nil {
+		m.logf("session-controller: session %s (ws %q) has no durable last_turn_end_ms and no legacy stamper is wired — the staleness check at acceptance and bring-up cannot measure it, and it stays with the idle sweeper alone",
+			sessionID, workspace)
+		return 0, false
+	}
+	return m.cfg.LegacyTurnEnds.StampLegacyTurnEnd(sessionID, workspace)
 }
 
 // keepAliveConfig is the resolved policy this manager runs. A Manager built
