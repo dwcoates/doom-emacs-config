@@ -31,17 +31,13 @@ func attributionFixture(t *testing.T, taskID, runtimeID string, modTime time.Tim
 	return HeldTarget{Path: path, Root: root, TaskID: taskID, ModTime: modTime}
 }
 
-func unresolvedOwner(taskID string) OwnerResolution {
-	return OwnerResolution{TaskID: taskID, Outcome: OwnerUnresolvedAwaitingOwner}
-}
-
-func resolvedTaskOwner(taskID, sessionID string) OwnerResolution {
-	return OwnerResolution{TaskID: taskID, SessionID: sessionID, Source: OwnerSourceDurableOpenTask, Outcome: OwnerResolvedTask}
+func attributionUnresolvedOwner(target HeldTarget) OwnerResolution {
+	return OwnerResolution{TaskID: target.TaskID, OutputPath: target.Path, Outcome: OwnerUnresolvedAwaitingOwner}
 }
 
 func discardHeldReport(HeldLogRecord) {}
 
-func ownerTarget(target HeldTarget) discover.Target {
+func attributionOwnerTarget(target HeldTarget) discover.Target {
 	return discover.Target{Path: target.Path, Kind: tail.KindShellSpool, TaskID: target.TaskID}
 }
 
@@ -72,7 +68,7 @@ func TestAttributionBacklogRestartPastLaunchUsesDurableOpenTaskOwner(t *testing.
 	if seeded != 1 {
 		t.Fatalf("seeded durable owner mappings = %d, want 1", seeded)
 	}
-	owner := owners.resolveOwnerResult(ownerTarget(target))
+	owner := owners.resolveOwnerResult(attributionOwnerTarget(target))
 	if owner.Outcome != OwnerResolvedPath || owner.SessionID != "session-durable" {
 		t.Fatalf("durable restarted owner resolution = %#v, want exact-path durable owner", owner)
 	}
@@ -87,7 +83,7 @@ func TestAttributionBacklogRestartPastLaunchUsesDurableOpenTaskOwner(t *testing.
 		ModTime:               target.ModTime,
 	}, now)
 
-	if decision.State != HeldResolved || decision.SessionID != "session-durable" {
+	if decision.State != HeldStateResolved || decision.SessionID != "session-durable" {
 		t.Fatalf("restart decision = %#v, want resolved durable session", decision)
 	}
 	if snapshot := lifecycle.Snapshot(now); snapshot.ActiveCount != 0 || snapshot.TerminalTotal != 0 {
@@ -100,15 +96,15 @@ func TestAttributionBacklogLateOwnerArrivalReleasesActiveHold(t *testing.T) {
 	target := attributionFixture(t, "task-late-owner", "runtime-id-not-an-owner", now)
 	lifecycle := NewHeldLifecycle(4, discardHeldReport)
 
-	first := observeHeld(t, lifecycle, target, unresolvedOwner(target.TaskID), HeldEvidence{ActiveTaskKnown: true, ActiveTask: true, ModTime: target.ModTime}, now)
-	if first.State != HeldActive || first.Reason != HeldMissingLiveLaunchObservation {
+	first := observeHeld(t, lifecycle, target, attributionUnresolvedOwner(target), HeldEvidence{ActiveTaskKnown: true, ActiveTask: true, ModTime: target.ModTime}, now)
+	if first.State != HeldStateActive || first.Reason != HeldReasonAwaitingOwner {
 		t.Fatalf("initial decision = %#v, want active wait for live launch", first)
 	}
 
 	second := observeHeld(t, lifecycle, target, OwnerResolution{
-		TaskID: target.TaskID, SessionID: "session-late", Source: OwnerSourceLiveLaunch, Outcome: OwnerResolvedTask,
+		TaskID: target.TaskID, OutputPath: target.Path, SessionID: "session-late", Source: OwnerSourceLiveLaunch, Outcome: OwnerResolvedTask,
 	}, HeldEvidence{ActiveTaskKnown: true, ActiveTask: true, OpenSessionKnown: true, OpenSession: true, ModTime: target.ModTime}, now.Add(time.Second))
-	if second.State != HeldResolved || second.SessionID != "session-late" {
+	if second.State != HeldStateResolved || second.SessionID != "session-late" {
 		t.Fatalf("late-owner decision = %#v, want resolved live owner", second)
 	}
 	if snapshot := lifecycle.Snapshot(now.Add(time.Second)); snapshot.ActiveCount != 0 {
@@ -121,16 +117,14 @@ func TestAttributionBacklogClosedHistoricalSpoolIsTerminal(t *testing.T) {
 	target := attributionFixture(t, "task-closed", "runtime-id-not-an-owner", now.Add(-48*time.Hour))
 	lifecycle := NewHeldLifecycle(4, discardHeldReport)
 
-	decision := observeHeld(t, lifecycle, target, unresolvedOwner(target.TaskID), HeldEvidence{
+	decision := observeHeld(t, lifecycle, target, attributionUnresolvedOwner(target), HeldEvidence{
 		ActiveTaskKnown:       true,
 		ActiveTask:            false,
-		OpenSessionKnown:      true,
-		OpenSession:           false,
 		CursorPastLaunchKnown: true,
 		CursorPastLaunch:      true,
 		ModTime:               target.ModTime,
 	}, now)
-	if decision.State != HeldTerminal || decision.Reason != HeldReasonHistorical {
+	if decision.State != HeldStateTerminal || decision.Reason != HeldReasonHistorical {
 		t.Fatalf("closed historical decision = %#v, want terminal historical", decision)
 	}
 	snapshot := lifecycle.Snapshot(now)
@@ -143,8 +137,8 @@ func TestAttributionBacklogActiveMissingOwnerFailsReadinessWithReason(t *testing
 	now := time.Date(2026, time.August, 5, 14, 0, 0, 0, time.UTC)
 	target := attributionFixture(t, "task-active", "runtime-id-not-an-owner", now)
 	lifecycle := NewHeldLifecycle(4, discardHeldReport)
-	decision := observeHeld(t, lifecycle, target, unresolvedOwner(target.TaskID), HeldEvidence{ActiveTaskKnown: true, ActiveTask: true, ModTime: target.ModTime}, now)
-	if decision.State != HeldActive || decision.Reason != HeldMissingLiveLaunchObservation {
+	decision := observeHeld(t, lifecycle, target, attributionUnresolvedOwner(target), HeldEvidence{ActiveTaskKnown: true, ActiveTask: true, ModTime: target.ModTime}, now)
+	if decision.State != HeldStateActive || decision.Reason != HeldReasonAwaitingOwner {
 		t.Fatalf("active missing-owner decision = %#v", decision)
 	}
 
@@ -160,14 +154,14 @@ func TestAttributionBacklogDiagnosticsAreBoundedAndExplainable(t *testing.T) {
 	lifecycle := NewHeldLifecycle(4, func(HeldLogRecord) { reports++ })
 	for i := 0; i < 20; i++ {
 		target := attributionFixture(t, "task-diagnostic-"+strconv.Itoa(i), "runtime-id-not-an-owner", now.Add(-time.Duration(i)*time.Minute))
-		observeHeld(t, lifecycle, target, unresolvedOwner(target.TaskID), HeldEvidence{ActiveTaskKnown: true, ActiveTask: true, ModTime: target.ModTime}, now)
+		observeHeld(t, lifecycle, target, attributionUnresolvedOwner(target), HeldEvidence{ActiveTaskKnown: true, ActiveTask: true, ModTime: target.ModTime}, now)
 	}
 
 	snapshot := lifecycle.Snapshot(now)
 	if snapshot.ActiveCount != 20 || len(snapshot.Samples) == 0 || len(snapshot.Samples) >= snapshot.ActiveCount {
 		t.Fatalf("bounded diagnostics = %#v, want a nonempty bounded sample", snapshot)
 	}
-	if snapshot.ByReason[HeldMissingLiveLaunchObservation] != 20 || len(snapshot.ByRoot) != 20 || len(snapshot.ByAgeBucket) == 0 {
+	if snapshot.ByReason[HeldReasonAwaitingOwner] != 20 || len(snapshot.ByRoot) != 5 || snapshot.ByRoot["other_roots"] != 16 || len(snapshot.ByAgeBucket) == 0 {
 		t.Fatalf("diagnostic dimensions = %#v, want reason root and age buckets", snapshot)
 	}
 	for _, sample := range snapshot.Samples {
@@ -185,6 +179,7 @@ func TestAttributionBacklogNeverGuessesAcrossSimilarSpoolFilenames(t *testing.T)
 	lifecycle := NewHeldLifecycle(4, discardHeldReport)
 	first := attributionFixture(t, "task-shared-name", "runtime-session-a", now)
 	second := attributionFixture(t, "task-shared-name", "runtime-session-b", now)
+	third := attributionFixture(t, "task-shared-name", "runtime-session-c", now)
 	owners, _ := ownerSidecar(t)
 	if !owners.noteTaskOwner(first.TaskID, "session-a", first.Path, OwnerSourceLiveLaunch) {
 		t.Fatal("recording first exact-path owner failed")
@@ -192,31 +187,33 @@ func TestAttributionBacklogNeverGuessesAcrossSimilarSpoolFilenames(t *testing.T)
 	if !owners.noteTaskOwner(second.TaskID, "session-b", second.Path, OwnerSourceLiveLaunch) {
 		t.Fatal("recording second exact-path owner failed")
 	}
-	firstOwner := owners.resolveOwnerResult(ownerTarget(first))
-	secondOwner := owners.resolveOwnerResult(ownerTarget(second))
+	firstOwner := owners.resolveOwnerResult(attributionOwnerTarget(first))
+	secondOwner := owners.resolveOwnerResult(attributionOwnerTarget(second))
 	if firstOwner.Outcome != OwnerResolvedPath || firstOwner.SessionID != "session-a" {
 		t.Fatalf("first exact-path owner = %#v, want session-a", firstOwner)
 	}
 	if secondOwner.Outcome != OwnerResolvedPath || secondOwner.SessionID != "session-b" {
 		t.Fatalf("second exact-path owner = %#v, want session-b", secondOwner)
 	}
-	unmatched := ownerTarget(second)
-	unmatched.Path = filepath.Join(filepath.Dir(second.Path), "unmatched.output")
-	conflict := owners.resolveOwnerResult(unmatched)
+	conflict := owners.resolveOwnerResult(attributionOwnerTarget(third))
 	if conflict.Outcome != OwnerUnresolvedConflict {
 		t.Fatalf("task-only conflict resolution = %#v, want explicit conflict", conflict)
 	}
 
 	firstDecision := observeHeld(t, lifecycle, first, firstOwner, HeldEvidence{ActiveTaskKnown: true, ActiveTask: true, OpenSessionKnown: true, OpenSession: true, ModTime: first.ModTime}, now)
-	secondDecision := observeHeld(t, lifecycle, second, conflict, HeldEvidence{ActiveTaskKnown: true, ActiveTask: true, ModTime: second.ModTime}, now)
+	secondDecision := observeHeld(t, lifecycle, second, secondOwner, HeldEvidence{ActiveTaskKnown: true, ActiveTask: true, OpenSessionKnown: true, OpenSession: true, ModTime: second.ModTime}, now)
+	thirdDecision := observeHeld(t, lifecycle, third, conflict, HeldEvidence{ActiveTaskKnown: true, ActiveTask: true, ModTime: third.ModTime}, now)
 
-	if firstDecision.State != HeldResolved || firstDecision.SessionID != "session-a" {
+	if firstDecision.State != HeldStateResolved || firstDecision.SessionID != "session-a" {
 		t.Fatalf("first similar-name decision = %#v, want path-confirmed session-a", firstDecision)
 	}
-	if secondDecision.State != HeldTerminal || secondDecision.Reason != HeldNoAuthoritativeOwner {
-		t.Fatalf("second similar-name decision = %#v, want terminal no-authoritative-owner", secondDecision)
+	if secondDecision.State != HeldStateResolved || secondDecision.SessionID != "session-b" {
+		t.Fatalf("second similar-name decision = %#v, want path-confirmed session-b", secondDecision)
 	}
-	if snapshot := lifecycle.Snapshot(now); snapshot.ActiveCount != 0 || snapshot.TerminalTotal != 1 {
-		t.Fatalf("similar-name snapshot = %#v, want only terminal unresolved second spool", snapshot)
+	if thirdDecision.State != HeldStateActive || thirdDecision.Reason != HeldReasonConflict || thirdDecision.SessionID != "" {
+		t.Fatalf("third similar-name decision = %#v, want active unattributed spool", thirdDecision)
+	}
+	if snapshot := lifecycle.Snapshot(now); snapshot.ActiveCount != 1 || snapshot.TerminalTotal != 0 {
+		t.Fatalf("similar-name snapshot = %#v, want only active unresolved third spool", snapshot)
 	}
 }
