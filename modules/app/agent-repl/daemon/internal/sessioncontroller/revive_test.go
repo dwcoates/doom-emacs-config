@@ -5,6 +5,7 @@ import (
 	"errors"
 	"runtime"
 	"testing"
+	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 
@@ -69,31 +70,94 @@ func TestReviveSessionDirectAdmitsPromptsAfterwards(t *testing.T) {
 	}
 }
 
+// THE ACK IS AT ACCEPTANCE. ReviveSession returns once the session is up and
+// `/compact` is submitted, with the completion wait still pending — acking at
+// completion left the user's ReviveSessionCmd unacked for as long as a
+// whole-conversation compaction takes.
+//
+// AMENDED from a test that ran the revival on its own goroutine because the
+// call could not return until the compaction was signalled; the direct call
+// below IS the contract now.
+func TestReviveSessionCompactFirstAcksOnceTheCompactionIsSubmitted(t *testing.T) {
+	// Arrange.
+	m, _, _ := reviveRig(t, registry.HibernationCauseIdleCutoff)
+
+	// Act: the revival returns without anything ever signalling completion.
+	err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactFirst)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ReviveSession compact_first = %v, want the ack at acceptance", err)
+	}
+	if signal := compactionWaiter(m, "ws"); signal == nil {
+		t.Fatal("the revival returned with no compaction waiter armed; the ack must mean the compaction is pending, not that it is over")
+	}
+}
+
 // COMPACT-FIRST STAYS GATED UNTIL THE COMPACTION LANDS. Keeping the durable
 // record hibernated is what keeps the gate standing, so "prompts are refused
 // until compaction completes" is the same mechanism that refused them before
 // the revival began rather than a second gate that could disagree with it.
+//
+// AMENDED for the acceptance ack: the gate is now inspected after the call has
+// already returned, and the release is observed on the detached wait's own
+// schedule rather than at the return.
 func TestReviveSessionCompactFirstStaysGatedUntilCompactionLands(t *testing.T) {
 	// Arrange.
 	m, _, hib := reviveRig(t, registry.HibernationCauseIdleCutoff)
-	done := make(chan error, 1)
-
-	// Act: run the revival, then prove the gate still stands before the
-	// compaction is reported.
-	go func() { done <- m.ReviveSession(context.Background(), "ws", ReviveModeCompactFirst) }()
+	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactFirst); err != nil {
+		t.Fatalf("ReviveSession compact_first: %v", err)
+	}
 	signal := awaitCompactionWaiter(t, m, "ws")
 
-	// Assert.
+	// Assert the gate before the compaction is reported.
 	if detail, asleep := hib.HibernationOf("s1"); !asleep || detail.Cause == "" {
 		t.Fatalf("hibernation detail = %+v while the compaction is still running, want the session STILL gated", detail)
 	}
+
+	// Act.
 	signal()
-	if err := <-done; err != nil {
+
+	// Assert.
+	awaitGateReleased(t, hib, "s1")
+}
+
+// THE CLAIM IS HELD PAST THE ACK. The compaction is still pending, so a second
+// ReviveSessionCmd must still be nacked: admitting it would arm a second waiter
+// over the first one's, which is the strand armCompactionWait refuses.
+func TestReviveSessionCompactFirstHoldsTheClaimWhileTheCompactionIsPending(t *testing.T) {
+	// Arrange.
+	m, _, _ := reviveRig(t, registry.HibernationCauseIdleCutoff)
+	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactFirst); err != nil {
 		t.Fatalf("ReviveSession compact_first: %v", err)
 	}
-	if detail, asleep := hib.HibernationOf("s1"); asleep && detail.Cause != "" {
-		t.Fatalf("hibernation detail = %+v after the compaction landed, want the gate released", detail)
+	awaitCompactionWaiter(t, m, "ws")
+
+	// Act.
+	err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactFirst)
+
+	// Assert.
+	if !errors.Is(err, ErrRevivalInFlight) {
+		t.Fatalf("a second revival while the compaction is pending = %v, want ErrRevivalInFlight", err)
 	}
+}
+
+// THE CLAIM IS RELEASED WHEN THE COMPACTION LANDS, by the detached wait rather
+// than by the returning call. A claim that outlived its compaction would make
+// the workspace permanently un-revivable.
+func TestReviveSessionCompactFirstReleasesTheClaimWhenTheCompactionLands(t *testing.T) {
+	// Arrange.
+	m, _, _ := reviveRig(t, registry.HibernationCauseIdleCutoff)
+	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactFirst); err != nil {
+		t.Fatalf("ReviveSession compact_first: %v", err)
+	}
+	signal := awaitCompactionWaiter(t, m, "ws")
+
+	// Act.
+	signal()
+
+	// Assert.
+	awaitClaimFree(t, m, "ws")
 }
 
 // EACH REVIVAL'S COMPACTION SUBMITS UNDER A NAME OF ITS OWN. A request id is
@@ -101,6 +165,10 @@ func TestReviveSessionCompactFirstStaysGatedUntilCompactionLands(t *testing.T) {
 // refuses a second start under a name it already holds — so a session
 // hibernated and compact-revived twice would otherwise submit its second
 // compaction under the first one's name and be refused.
+//
+// AMENDED for the acceptance ack: each revival's return no longer means its
+// compaction is over, so the second one waits for the first's detached wait to
+// release the claim rather than for the first call to return.
 func TestReviveSessionCompactFirstSubmitsUnderAFreshRequestIDEachTime(t *testing.T) {
 	// Arrange.
 	m, _, hib := reviveRig(t, registry.HibernationCauseIdleCutoff)
@@ -108,13 +176,11 @@ func TestReviveSessionCompactFirstSubmitsUnderAFreshRequestIDEachTime(t *testing
 	// Act: two full compact-first revivals of the SAME session.
 	for range 2 {
 		hib.setAsleep("s1", registry.HibernationDetail{Cause: registry.HibernationCauseIdleCutoff, SinceMs: 42})
-		done := make(chan error, 1)
-		go func() { done <- m.ReviveSession(context.Background(), "ws", ReviveModeCompactFirst) }()
-		signal := awaitCompactionWaiter(t, m, "ws")
-		signal()
-		if err := <-done; err != nil {
+		if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactFirst); err != nil {
 			t.Fatalf("ReviveSession compact_first: %v", err)
 		}
+		awaitCompactionWaiter(t, m, "ws")()
+		awaitClaimFree(t, m, "ws")
 	}
 
 	// Assert.
@@ -132,24 +198,190 @@ func TestReviveSessionCompactFirstSubmitsUnderAFreshRequestIDEachTime(t *testing
 // A COMPACTION THAT NEVER COMPLETES LEAVES THE SESSION GATED. The clear is the
 // last step and is reached only on the completion signal, so there is no path
 // in which a failed compaction ends with an ungated session.
-func TestReviveSessionCompactFirstStaysGatedWhenCompactionNeverCompletes(t *testing.T) {
+//
+// AMENDED from cancelling the command context, which no longer bounds the wait:
+// the ack is at acceptance, so the caller's context is gone by the time the
+// compaction is running and the daemon's own bound is what ends it.
+func TestReviveSessionCompactFirstStaysGatedWhenTheCompactionTimesOut(t *testing.T) {
 	// Arrange.
 	m, _, hib := reviveRig(t, registry.HibernationCauseIdleCutoff)
-	ctx, cancel := context.WithCancel(context.Background())
+	m.mu.Lock()
+	m.reviveCompactBoundOverride = time.Millisecond
+	m.mu.Unlock()
 
-	// Act: abandon the wait, standing in for a compaction that failed.
-	done := make(chan error, 1)
-	go func() { done <- m.ReviveSession(ctx, "ws", ReviveModeCompactFirst) }()
-	awaitCompactionWaiter(t, m, "ws")
-	cancel()
-	err := <-done
+	// Act: never signal completion, so the bound is what ends the wait.
+	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactFirst); err != nil {
+		t.Fatalf("ReviveSession compact_first: %v", err)
+	}
+	awaitClaimFree(t, m, "ws")
+
+	// Assert.
+	if detail, asleep := hib.HibernationOf("s1"); !asleep || detail.Cause == "" {
+		t.Fatalf("hibernation detail = %+v after a compaction that timed out, want the session STILL gated", detail)
+	}
+}
+
+// THE TIMED-OUT REVIVAL RELEASES ITS CLAIM, so the user can choose again. A
+// claim held past its own bound would make the workspace permanently
+// un-revivable, which is a worse failure than the double-submit it prevents.
+func TestReviveSessionCompactFirstReleasesTheClaimWhenTheCompactionTimesOut(t *testing.T) {
+	// Arrange.
+	m, _, _ := reviveRig(t, registry.HibernationCauseIdleCutoff)
+	m.mu.Lock()
+	m.reviveCompactBoundOverride = time.Millisecond
+	m.mu.Unlock()
+	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactFirst); err != nil {
+		t.Fatalf("ReviveSession compact_first: %v", err)
+	}
+
+	// Act.
+	awaitClaimFree(t, m, "ws")
+
+	// Assert.
+	release, _, err := m.claimRevival("ws", "s1")
+	if err != nil {
+		t.Fatalf("claimRevival after a timed-out compaction = %v, want the claim free", err)
+	}
+	release()
+}
+
+// THE TIMED-OUT REVIVAL RETIRES ITS WAITER, so the revival the user chooses
+// next can arm its own. A waiter that outlived its bound would make the first
+// compact-first revival the only one this controller could ever serve.
+func TestReviveSessionCompactFirstDisarmsTheWaiterWhenTheCompactionTimesOut(t *testing.T) {
+	// Arrange.
+	m, _, _ := reviveRig(t, registry.HibernationCauseIdleCutoff)
+	m.mu.Lock()
+	m.reviveCompactBoundOverride = time.Millisecond
+	m.mu.Unlock()
+	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactFirst); err != nil {
+		t.Fatalf("ReviveSession compact_first: %v", err)
+	}
+	awaitClaimFree(t, m, "ws")
+
+	// Act.
+	m.mu.Lock()
+	d := m.byWS["ws"]
+	m.mu.Unlock()
+	_, disarm, err := m.armCompactionWait(d)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("armCompactionWait after a timed-out compaction = %v, want the slot free", err)
+	}
+	disarm()
+}
+
+// A SUBMIT THAT FAILED NEVER REACHES THE ACK. The ack means the compaction was
+// submitted, so a shim that refused it is an error to the caller and the
+// session stays gated with nothing left running.
+func TestReviveSessionCompactFirstStaysGatedWhenTheSubmitFails(t *testing.T) {
+	// Arrange.
+	m, _, hib := reviveRig(t, registry.HibernationCauseIdleCutoff)
+	c := fakeClientFor(t, m, "ws")
+	c.mu.Lock()
+	c.submitErrOnce = errors.New("shim refused the compaction")
+	c.mu.Unlock()
+
+	// Act.
+	err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactFirst)
 
 	// Assert.
 	if err == nil {
-		t.Fatal("an abandoned compaction reported success; a compact-first revival must never limp into accepting prompts")
+		t.Fatal("a refused compaction submit reported success; a compact-first revival must never ack a compaction that was never submitted")
 	}
 	if detail, asleep := hib.HibernationOf("s1"); !asleep || detail.Cause == "" {
-		t.Fatalf("hibernation detail = %+v after a failed compaction, want the session STILL gated", detail)
+		t.Fatalf("hibernation detail = %+v after a refused submit, want the session STILL gated", detail)
+	}
+}
+
+// A REFUSED SUBMIT UNWINDS THE CLAIM. The handoff never happened, so nothing
+// else will release it and the workspace would be permanently un-revivable.
+func TestReviveSessionCompactFirstReleasesTheClaimWhenTheSubmitFails(t *testing.T) {
+	// Arrange.
+	m, _, _ := reviveRig(t, registry.HibernationCauseIdleCutoff)
+	c := fakeClientFor(t, m, "ws")
+	c.mu.Lock()
+	c.submitErrOnce = errors.New("shim refused the compaction")
+	c.mu.Unlock()
+	_ = m.ReviveSession(context.Background(), "ws", ReviveModeCompactFirst)
+
+	// Act.
+	release, _, err := m.claimRevival("ws", "s1")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("claimRevival after a refused submit = %v, want the claim free", err)
+	}
+	release()
+}
+
+// A MANAGER CLOSING AT THE HANDOFF IS A LOUD REFUSAL. Nothing would be left to
+// observe the compaction, so the revival is reported as failed and the session
+// stays gated rather than acked into a wait that will never run.
+func TestReviveSessionCompactFirstRefusesTheHandoffWhenTheManagerIsClosing(t *testing.T) {
+	// Arrange — the close lands between the submit and the handoff.
+	m, _, _ := reviveRig(t, registry.HibernationCauseIdleCutoff)
+	c := fakeClientFor(t, m, "ws")
+	c.mu.Lock()
+	c.onSubmit = func() {
+		m.mu.Lock()
+		m.closed = true
+		m.mu.Unlock()
+	}
+	c.mu.Unlock()
+
+	// Act.
+	err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactFirst)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("a revival handed off to a closing manager reported success; nothing would be left to observe the compaction")
+	}
+}
+
+// THE DAEMON SHUTTING DOWN MID-COMPACTION LEAVES THE SESSION GATED. The
+// detached wait ends on the root context, and its clear is reached only on the
+// completion signal, so an interrupted compaction is a sleep the user can
+// choose again rather than an ungated session nothing compacted.
+func TestReviveSessionCompactFirstStaysGatedWhenTheDaemonShutsDownMidCompaction(t *testing.T) {
+	// Arrange.
+	m, _, hib := reviveRig(t, registry.HibernationCauseIdleCutoff)
+	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactFirst); err != nil {
+		t.Fatalf("ReviveSession compact_first: %v", err)
+	}
+	awaitCompactionWaiter(t, m, "ws")
+
+	// Act — Close cancels the root context and JOINS the detached wait.
+	m.Close()
+
+	// Assert.
+	if detail, asleep := hib.HibernationOf("s1"); !asleep || detail.Cause == "" {
+		t.Fatalf("hibernation detail = %+v after a shutdown mid-compaction, want the session STILL gated", detail)
+	}
+}
+
+// A CLEAR THAT FAILED LEAVES THE GATE STANDING. The compaction landed, but the
+// record still claims a sleep, and a gate the daemon believes it retired while
+// the durable state disagrees is the one state the revival must never reach.
+func TestReviveSessionCompactFirstStaysGatedWhenTheGateReleaseFails(t *testing.T) {
+	// Arrange.
+	m, _, hib := reviveRig(t, registry.HibernationCauseIdleCutoff)
+	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactFirst); err != nil {
+		t.Fatalf("ReviveSession compact_first: %v", err)
+	}
+	signal := awaitCompactionWaiter(t, m, "ws")
+	hib.mu.Lock()
+	hib.writeErr = errors.New("registry write failed")
+	hib.mu.Unlock()
+
+	// Act.
+	signal()
+	awaitClaimFree(t, m, "ws")
+
+	// Assert.
+	if detail, asleep := hib.HibernationOf("s1"); !asleep || detail.Cause == "" {
+		t.Fatalf("hibernation detail = %+v after a failed gate release, want the session STILL gated", detail)
 	}
 }
 
@@ -332,15 +564,50 @@ func TestArmCompactionWaitDisarmFreesTheSlot(t *testing.T) {
 func awaitCompactionWaiter(t *testing.T, m *Manager, workspace string) func() {
 	t.Helper()
 	for {
-		m.mu.Lock()
-		d, live := m.byWS[workspace]
-		var signal func()
-		if live && d.consumer != nil {
-			signal = d.consumer.onContextCompacted
-		}
-		m.mu.Unlock()
-		if signal != nil {
+		if signal := compactionWaiter(m, workspace); signal != nil {
 			return signal
+		}
+		runtime.Gosched()
+	}
+}
+
+// compactionWaiter reports the armed completion callback, or nil when none is
+// installed. It is the single read awaitCompactionWaiter spins on.
+func compactionWaiter(m *Manager, workspace string) func() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	d, live := m.byWS[workspace]
+	if !live || d.consumer == nil {
+		return nil
+	}
+	return d.consumer.onContextCompacted
+}
+
+// awaitClaimFree blocks until the workspace's revival claim is released.
+//
+// It rendezvouses on the CLAIM ITSELF rather than on a clock: the detached
+// completion wait releases it under the manager mutex as its last act before
+// exiting, so its absence is the exact moment that wait is over.
+func awaitClaimFree(t *testing.T, m *Manager, workspace string) {
+	t.Helper()
+	for {
+		m.mu.Lock()
+		held := m.reviving[workspace]
+		m.mu.Unlock()
+		if !held {
+			return
+		}
+		runtime.Gosched()
+	}
+}
+
+// awaitGateReleased blocks until the session's durable hibernation record stops
+// standing the revival gate up.
+func awaitGateReleased(t *testing.T, hib *fakeHibernations, sessionID string) {
+	t.Helper()
+	for {
+		if detail, asleep := hib.HibernationOf(sessionID); !asleep || detail.Cause == "" {
+			return
 		}
 		runtime.Gosched()
 	}
