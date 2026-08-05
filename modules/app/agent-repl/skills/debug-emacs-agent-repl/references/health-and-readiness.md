@@ -25,7 +25,10 @@ modules/app/agent-repl/scripts/agent-shim-doctor.sh --json
 
 The doctor is read-only. It checks:
 
-- Store socket presence and connectability.
+- Store socket presence as a filesystem fact.
+- Correlated store protocol health through `HealthCheck` and the matching
+  healthy `HealthStatus`, including request ID, latency, component, reason,
+  and exact failure class.
 - Store and sidecar launchd state.
 - Daemon frontend socket presence.
 - Per-session shim sockets.

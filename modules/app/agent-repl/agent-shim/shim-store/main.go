@@ -62,10 +62,10 @@ func runHealthCheck(socketPath, logPath, requestID string, timeout time.Duration
 			LatencyMS:    0,
 			Component:    "",
 			Healthy:      false,
-			FailureClass: healthcheck.FailureConnectFailure,
+			FailureClass: healthcheck.FailureClientFailure,
 			Reason:       fmt.Sprintf("health logger bootstrap failed: %v", err),
 		})
-		return healthcheck.ExitConnectFailure
+		return healthcheck.ExitClientFailure
 	}
 	defer closeLog()
 

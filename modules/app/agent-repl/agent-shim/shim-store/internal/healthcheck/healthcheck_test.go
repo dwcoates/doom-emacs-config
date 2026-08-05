@@ -51,6 +51,21 @@ func TestProbeClassifiesEveryHealthOutcomeAndLogsIt(t *testing.T) {
 			wantExit: ExitConnectFailure, wantClass: FailureConnectFailure,
 		},
 		{
+			name:      "socket inspection failure",
+			config:    validConfig(requestID),
+			deps:      statFailureDeps(errors.New("permission denied")),
+			wantExit:  ExitClientFailure,
+			wantClass: FailureClientFailure,
+		},
+		{
+			name:   "deadline setup failure",
+			config: validConfig(requestID),
+			deps: testDeps(func(context.Context, string) (net.Conn, error) {
+				return &scriptedConn{deadlineErr: errors.New("deadline unsupported")}, nil
+			}),
+			wantExit: ExitClientFailure, wantClass: FailureClientFailure,
+		},
+		{
 			name:   "write failure",
 			config: validConfig(requestID),
 			deps: testDeps(func(context.Context, string) (net.Conn, error) {
@@ -187,6 +202,14 @@ func missingSocketDeps(t *testing.T) deps {
 	return d
 }
 
+func statFailureDeps(statErr error) deps {
+	d := testDeps(func(context.Context, string) (net.Conn, error) {
+		return nil, errors.New("dial must not run after stat failure")
+	})
+	d.stat = func(string) (os.FileInfo, error) { return nil, statErr }
+	return d
+}
+
 func responseConn(t *testing.T, response proto.Message) net.Conn {
 	t.Helper()
 	var read bytes.Buffer
@@ -197,10 +220,11 @@ func responseConn(t *testing.T, response proto.Message) net.Conn {
 }
 
 type scriptedConn struct {
-	read     bytes.Buffer
-	write    bytes.Buffer
-	readErr  error
-	writeErr error
+	read        bytes.Buffer
+	write       bytes.Buffer
+	readErr     error
+	writeErr    error
+	deadlineErr error
 }
 
 func (c *scriptedConn) Read(p []byte) (int, error) {
@@ -218,7 +242,7 @@ func (c *scriptedConn) Write(p []byte) (int, error) {
 func (c *scriptedConn) Close() error                     { return nil }
 func (c *scriptedConn) LocalAddr() net.Addr              { return fakeAddr("local") }
 func (c *scriptedConn) RemoteAddr() net.Addr             { return fakeAddr("remote") }
-func (c *scriptedConn) SetDeadline(time.Time) error      { return nil }
+func (c *scriptedConn) SetDeadline(time.Time) error      { return c.deadlineErr }
 func (c *scriptedConn) SetReadDeadline(time.Time) error  { return nil }
 func (c *scriptedConn) SetWriteDeadline(time.Time) error { return nil }
 

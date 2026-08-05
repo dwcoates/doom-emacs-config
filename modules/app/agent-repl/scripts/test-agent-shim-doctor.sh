@@ -6,8 +6,18 @@ set -euo pipefail
 
 SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 DOCTOR="$SCRIPT_DIR/agent-shim-doctor.sh"
+STORE_MODULE="$SCRIPT_DIR/../agent-shim/shim-store"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/agent-repl-doctor-test.XXXXXX")"
-trap 'rm -rf "$TMP"' EXIT HUP INT TERM
+LIVE_PID=""
+
+cleanup() {
+  if [ -n "$LIVE_PID" ]; then
+    kill "$LIVE_PID" 2>/dev/null || true
+    wait "$LIVE_PID" 2>/dev/null || true
+  fi
+  rm -rf "$TMP"
+}
+trap cleanup EXIT HUP INT TERM
 
 STATE="$TMP/state"
 BIN="$TMP/bin"
@@ -29,8 +39,9 @@ esac
 EOF
 chmod +x "$BIN/sqlite3"
 
-# Protocol-compatible shim-store CLI fixture. It validates the complete
-# one-shot argument contract and emits exactly one HealthStatus JSON object.
+# Deterministic CLI-contract fixture for doctor-side exit classification.
+# The real correlated wire protocol is exercised against a local shim-store
+# process below.
 cat >"$BIN/shim-store" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -38,18 +49,20 @@ set -euo pipefail
 request_id=""
 socket=""
 timeout=""
+log=""
 health_check=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -health-check) health_check=1; shift ;;
     -socket) socket="$2"; shift 2 ;;
+    -log) log="$2"; shift 2 ;;
     -health-request-id) request_id="$2"; shift 2 ;;
     -health-timeout) timeout="$2"; shift 2 ;;
     *) exit 2 ;;
   esac
 done
-[ "$health_check" -eq 1 ] && [ -n "$socket" ] && [ -n "$request_id" ] && [ -n "$timeout" ] || exit 2
-printf '%s|%s|%s|%s\n' "$health_check" "$socket" "$request_id" "$timeout" >>"$DOCTOR_STORE_HEALTH_CALLS"
+[ "$health_check" -eq 1 ] && [ -n "$socket" ] && [ -n "$log" ] && [ -n "$request_id" ] && [ -n "$timeout" ] || exit 2
+printf '%s|%s|%s|%s|%s\n' "$health_check" "$socket" "$log" "$request_id" "$timeout" >>"$DOCTOR_STORE_HEALTH_CALLS"
 
 case "${DOCTOR_HEALTH_FIXTURE:?}" in
   healthy) class=""; healthy=true; reason="ready"; exit_code=0 ;;
@@ -60,7 +73,8 @@ case "${DOCTOR_HEALTH_FIXTURE:?}" in
   decode_failure) class="decode_failure"; healthy=false; reason="invalid response"; exit_code=14 ;;
   mismatched_request_id) class="mismatched_request_id"; healthy=false; reason="response id differs"; exit_code=15 ;;
   unhealthy_response) class="unhealthy_response"; healthy=false; reason="store draining"; exit_code=16 ;;
-  unexpected_exit) class="unexpected_exit"; healthy=false; reason="client invariant failed"; exit_code=17 ;;
+  client_failure) class="client_failure"; healthy=false; reason="client invariant failed"; exit_code=17 ;;
+  unexpected_exit) class="unexpected_exit"; healthy=false; reason="unknown exit"; exit_code=18 ;;
   *) exit 2 ;;
 esac
 printf '{"request_id":"%s","latency_ms":17,"component":"shim-store","healthy":%s,"failure_class":"%s","reason":"%s"}\n' \
@@ -95,6 +109,50 @@ assert_valid_json() {
   }
 }
 
+# Build the actual owned client and run it against an actual shim-store server.
+# The socket is the readiness latch: the server creates it only after bind has
+# succeeded, so the client never races a duration-based startup guess.
+(cd "$STORE_MODULE" && go build -o "$BIN/shim-store-real" .)
+"$BIN/shim-store-real" \
+  -socket "$STATE/sock/store.sock" \
+  -db "$STATE/store/live-events.db" \
+  -log "$STATE/log/shim-store.log" \
+  >"$TMP/live-store.out" 2>"$TMP/live-store.err" &
+LIVE_PID=$!
+READY_DEADLINE=$((SECONDS + 10))
+while [ ! -S "$STATE/sock/store.sock" ]; do
+  if ! kill -0 "$LIVE_PID" 2>/dev/null; then
+    printf 'FAIL: local shim-store exited before readiness\n' >&2
+    exit 1
+  fi
+  if [ "$SECONDS" -ge "$READY_DEADLINE" ]; then
+    printf 'FAIL: local shim-store did not create its readiness socket\n' >&2
+    exit 1
+  fi
+  sleep 0.01
+done
+
+set +e
+OUT_REAL="$(DOCTOR_SQLITE_CALLS="$CALLS" AGENT_REPL_STATE_ROOT="$STATE" AGENT_REPL_DOCTOR_SHIM_STORE_BIN="$BIN/shim-store-real" AGENT_REPL_DOCTOR_INTEGRITY_AUTO_MAX_BYTES=1024 PATH="$BIN:/usr/bin:/bin" "$DOCTOR" --json 2>"$TMP/live-doctor.err")"
+RC=$?
+set -e
+[ "$RC" -eq 1 ] || {
+  printf 'FAIL: real protocol doctor exit=%s, want 1 from unrelated missing-service checks\n' "$RC" >&2
+  exit 1
+}
+assert_valid_json "$OUT_REAL"
+printf '%s\n' "$OUT_REAL" | grep -Eq '"check":"store-socket-connectable","status":"PASS".*"component":"shim-store","healthy":true' || {
+  printf 'FAIL: real correlated HealthCheck did not pass: %s\n' "$OUT_REAL" >&2
+  exit 1
+}
+grep -q 'health PASS' "$STATE/log/shim-store.log" || {
+  printf 'FAIL: real server did not log the correlated health response\n' >&2
+  exit 1
+}
+kill "$LIVE_PID"
+wait "$LIVE_PID" 2>/dev/null || true
+LIVE_PID=""
+
 OUT="$(run_doctor_json healthy)"
 assert_valid_json "$OUT"
 printf '%s\n' "$OUT" | grep -q '"check":"store-socket-connectable","status":"PASS"' || {
@@ -105,7 +163,7 @@ printf '%s\n' "$OUT" | grep -Eq '"metadata":\{"request_id":"doctor-[^"]+","laten
   printf 'FAIL: healthy response metadata was not retained verbatim: %s\n' "$OUT" >&2
   exit 1
 }
-grep -Eq '^1\|.*/sock/store\.sock\|doctor-[^|]+\|2s$' "$HEALTH_CALLS" || {
+grep -Eq '^1\|.*/sock/store\.sock\|.*/log/shim-store\.log\|doctor-[^|]+\|2s$' "$HEALTH_CALLS" || {
   printf 'FAIL: doctor did not use the complete health client contract\n' >&2
   exit 1
 }
@@ -123,6 +181,13 @@ for fixture in missing_socket connect_failure write_failure timeout decode_failu
     exit 1
   }
 done
+
+OUT="$(run_doctor_json client_failure)"
+assert_valid_json "$OUT"
+printf '%s\n' "$OUT" | grep -q '"failure_class":"client_failure"' || {
+  printf 'FAIL: client failure lost its exact classification: %s\n' "$OUT" >&2
+  exit 1
+}
 
 OUT="$(run_doctor_json unexpected_exit)"
 assert_valid_json "$OUT"

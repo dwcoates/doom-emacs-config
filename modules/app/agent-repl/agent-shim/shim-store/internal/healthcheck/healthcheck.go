@@ -28,6 +28,7 @@ const (
 	ExitDecodeFailure       = 14
 	ExitMismatchedRequestID = 15
 	ExitUnhealthyResponse   = 16
+	ExitClientFailure       = 17
 )
 
 const (
@@ -38,6 +39,7 @@ const (
 	FailureDecodeFailure       = "decode_failure"
 	FailureMismatchedRequestID = "mismatched_request_id"
 	FailureUnhealthyResponse   = "unhealthy_response"
+	FailureClientFailure       = "client_failure"
 )
 
 // Config is the complete, explicit health-probe input.  The request ID is a
@@ -116,7 +118,7 @@ func probe(config Config, log *logging.Logger, d deps) (Result, int) {
 		if errors.Is(err, os.ErrNotExist) {
 			return finish(ExitMissingSocket, FailureMissingSocket, err.Error(), "", false)
 		}
-		return finish(ExitConnectFailure, FailureConnectFailure, fmt.Sprintf("stat socket: %v", err), "", false)
+		return finish(ExitClientFailure, FailureClientFailure, fmt.Sprintf("stat socket: %v", err), "", false)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), config.Timeout)
@@ -130,7 +132,7 @@ func probe(config Config, log *logging.Logger, d deps) (Result, int) {
 	}
 	defer conn.Close()
 	if err := conn.SetDeadline(started.Add(config.Timeout)); err != nil {
-		return finish(ExitConnectFailure, FailureConnectFailure, fmt.Sprintf("set probe deadline: %v", err), "", false)
+		return finish(ExitClientFailure, FailureClientFailure, fmt.Sprintf("set probe deadline: %v", err), "", false)
 	}
 	if err := wire.WriteAny(conn, &corev1.HealthCheck{RequestId: config.RequestID}); err != nil {
 		if isTimeout(err) {

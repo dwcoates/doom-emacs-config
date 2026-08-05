@@ -139,7 +139,7 @@ check_store_socket_connectable() {
     return 0
   fi
 
-  if output="$("$STORE_HEALTH_CLIENT" -health-check -socket "$STORE_SOCK" -health-request-id "$request_id" -health-timeout "$STORE_HEALTH_TIMEOUT")"; then
+  if output="$("$STORE_HEALTH_CLIENT" -health-check -socket "$STORE_SOCK" -log "$LOG_DIR/shim-store.log" -health-request-id "$request_id" -health-timeout "$STORE_HEALTH_TIMEOUT")"; then
     exit_code=0
   else
     exit_code=$?
@@ -179,6 +179,10 @@ check_store_socket_connectable() {
     16)
       failure_class="unhealthy_response"
       hint="shim-store reported itself unhealthy; inspect its health reason and service log"
+      ;;
+    17)
+      failure_class="client_failure"
+      hint="the owned shim-store health client failed before completing the protocol probe; inspect its reason and canonical log"
       ;;
     *)
       failure_class="unexpected_exit"
