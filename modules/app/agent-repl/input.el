@@ -303,9 +303,9 @@ harness directive meant for free-form work, and a slash command runs a
 skill or built-in that owns its own behavior, so prepending the directive
 to it is never wanted.  WS, when supplied, scopes the diagnostic entry."
   (let* ((trimmed (string-trim-right raw))
-         (slash-command-p (agent-repl--slash-command-p trimmed))
-         (exempt-p (member trimmed agent-repl-metaprompt-exempt-strings))
-         (numeral-p (string-match-p "^[0-9]+$" trimmed))
+         (slash-command-p (not (null (agent-repl--slash-command-p trimmed))))
+         (exempt-p (not (null (member trimmed agent-repl-metaprompt-exempt-strings))))
+         (numeral-p (not (null (string-match-p "^[0-9]+$" trimmed))))
          (result (or slash-command-p exempt-p numeral-p)))
     (agent-repl--log-verbose ws
                               "skip-metaprompt-p raw-len=%d trimmed-len=%d slash-command=%s exempt=%s numeral=%s result=%s"
