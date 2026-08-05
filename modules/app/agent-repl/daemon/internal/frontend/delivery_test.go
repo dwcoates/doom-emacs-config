@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	"claude-repld/internal/errclass"
 
 	"github.com/gorilla/websocket"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -216,5 +217,50 @@ func TestTheResyncSnapshotOmitsNoWorkspace(t *testing.T) {
 	snap := readWSSnapshot(t, conn)
 	if len(snap.GetWorkspaces()) != 2 {
 		t.Fatalf("resync snapshot carried %d workspace(s), want both", len(snap.GetWorkspaces()))
+	}
+}
+
+func TestSupersededResyncReceivesSnapshotCapturedAfterClassification(t *testing.T) {
+	h := &mockHandler{err: errclass.ErrSessionSuperseded}
+	states := &sequenceState{snaps: []*frontendv1.StateSnapshot{
+		{Workspaces: []*frontendv1.WorkspaceState{{Workspace: "w1", SessionId: "s1", ControllerGenerationId: "g-old"}}},
+		{Workspaces: []*frontendv1.WorkspaceState{{Workspace: "w1", SessionId: "s1", ControllerGenerationId: "g-old"}}},
+		{Workspaces: []*frontendv1.WorkspaceState{{Workspace: "w1", SessionId: "s2", ControllerGenerationId: "g-new"}}},
+	}}
+	s := New(Config{Logf: testLogf(t), LogVerbosef: testLogf(t), Handler: h, State: states})
+	defer s.Close()
+	httpSrv := httptest.NewServer(http.HandlerFunc(s.ServeWS))
+	defer httpSrv.Close()
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+httpSrv.URL[len("http"):], nil)
+	if err != nil {
+		t.Fatalf("ws dial: %v", err)
+	}
+	defer conn.Close()
+	readWSSnapshot(t, conn)
+
+	cmd := &frontendv1.FrontendCommand{
+		RequestId: "r-stale", Workspace: "w1",
+		Command: &frontendv1.FrontendCommand_Resync{Resync: &frontendv1.ResyncCmd{
+			SessionId: "s1", ControllerGenerationId: "g-old",
+		}},
+	}
+	data, err := protojson.Marshal(cmd)
+	if err != nil {
+		t.Fatalf("marshal resync: %v", err)
+	}
+	if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+		t.Fatalf("write resync: %v", err)
+	}
+
+	if got := readWSSnapshot(t, conn).GetWorkspaces()[0].GetControllerGenerationId(); got != "g-old" {
+		t.Fatalf("pre-dispatch generation = %q, want g-old", got)
+	}
+	post := readWSSnapshot(t, conn).GetWorkspaces()[0]
+	if post.GetSessionId() != "s2" || post.GetControllerGenerationId() != "g-new" {
+		t.Fatalf("post-supersession identity = (%q, %q), want (s2, g-new)", post.GetSessionId(), post.GetControllerGenerationId())
+	}
+	ack := readWSFrame(t, conn).GetCommandAck()
+	if ack.GetFailure().GetErrorType() != string(errclass.TypeSessionSuperseded) {
+		t.Fatalf("failure type = %q, want %q", ack.GetFailure().GetErrorType(), errclass.TypeSessionSuperseded)
 	}
 }
