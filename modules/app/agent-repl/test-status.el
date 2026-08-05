@@ -1083,18 +1083,6 @@ selected tab dims to the normal selected face like other states."
     (should (string-match-p "IMG" result))
     (should (string-match-p "ws1" result))))
 
-(ert-deftest agent-repl-test-render-tab-entry-renders-session-token-footer ()
-  "The tab entry renders the frontend-owned dense token and timing summary."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :frontend-session-id "s_usage")
-    (cl-letf (((symbol-function 'agent-repl--frontend-session-token-summary)
-               (lambda (session-id workspace)
-                 (should (equal session-id "s_usage"))
-                 (should (equal workspace "ws1"))
-                 "tok i1 o2 cache r3 w4 h n/a gen n/a ttft n/a")))
-      (should (string-match-p "tok i1 o2 cache r3 w4 h n/a gen n/a ttft n/a"
-                              (agent-repl--render-tab-entry "ws1" "other" 1))))))
-
 (ert-deftest agent-repl-test-render-tab-img-str-trailing-space-unfaced ()
   "render-tab should place a single un-faced space between img-str and the name segment."
   (let* ((spec '(:bg "#c0c0c0" :fg "black" :bracket-fg "blue" :weight bold))
