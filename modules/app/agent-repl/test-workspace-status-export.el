@@ -20,6 +20,25 @@
 
 ;;;; ---- Tests: keyword-to-string helper ----
 
+(ert-deftest agent-repl-test-workspace-status-content-fingerprint-excludes-clock-but-not-state ()
+  "Identical workspace state has one fingerprint despite distinct export times."
+  (let ((first-workspaces (make-hash-table :test 'equal))
+        (same-workspaces (make-hash-table :test 'equal))
+        (second-workspaces (make-hash-table :test 'equal)))
+    (puthash "ws" '(("agent_state" . "idle")) first-workspaces)
+    (puthash "ws" '(("agent_state" . "idle")) same-workspaces)
+    (puthash "ws" '(("agent_state" . "done")) second-workspaces)
+    (let ((first `(("updated_at" . "2026-08-05T10:00:00-0400")
+                   ("workspaces" . ,first-workspaces)))
+          (same-state `(("updated_at" . "2026-08-05T10:00:01-0400")
+                        ("workspaces" . ,same-workspaces)))
+          (second `(("updated_at" . "2026-08-05T10:00:01-0400")
+                    ("workspaces" . ,second-workspaces))))
+      (should (equal (agent-repl--workspace-status-content-fingerprint first)
+                     (agent-repl--workspace-status-content-fingerprint same-state)))
+      (should-not (equal (agent-repl--workspace-status-content-fingerprint first)
+                         (agent-repl--workspace-status-content-fingerprint second))))))
+
 (ert-deftest agent-repl-test-ws-keyword-to-string-nil ()
   "nil maps to nil so empty fields serialize as JSON null."
   (should (null (agent-repl--ws-keyword-to-string nil))))

@@ -1233,6 +1233,85 @@ functionality that are worth flagging in the log but are not fatal."
     ;; preserved so nothing about the offending call is lost.
     (agent-repl--do-log-level ws fmt args "warn")))
 
+(defconst agent-repl--warn-once-capacity 4096
+  "Maximum process-local warning fingerprints retained by `agent-repl--warn-once'.")
+
+(defvar agent-repl--warn-once-fingerprints (make-hash-table :test 'equal)
+  "Process-local set of warning fingerprints already emitted.")
+
+(defvar agent-repl--warn-once-order nil
+  "FIFO order for `agent-repl--warn-once-fingerprints'.")
+
+(defun agent-repl--reset-warn-once-state ()
+  "Clear process-local deduplication state used by `agent-repl--warn-once'."
+  (setq agent-repl--warn-once-fingerprints (make-hash-table :test 'equal)
+        agent-repl--warn-once-order nil))
+
+(defun agent-repl--warn-once (ws fingerprint fmt &rest args)
+  "Log a warning once for stable causal FINGERPRINT and return whether emitted.
+WS, FMT, and ARGS have the same identity-complete logging contract as
+`agent-repl--warn'.  FINGERPRINT must be a nonempty stable string naming the
+causal diagnostic identity.  The process-local FIFO cache is bounded by
+`agent-repl--warn-once-capacity'; eviction makes a later observation eligible
+to emit again rather than allowing unbounded diagnostic state."
+  (unless (and (stringp fingerprint) (not (string-empty-p fingerprint)))
+    (agent-repl--log ws "warn-once: rejected fingerprint=%S reason=empty-or-nonstring" fingerprint)
+    (error "agent-repl--warn-once: fingerprint must be a nonempty string"))
+  (if (gethash fingerprint agent-repl--warn-once-fingerprints)
+      nil
+    (when (= (hash-table-count agent-repl--warn-once-fingerprints)
+             agent-repl--warn-once-capacity)
+      (remhash (car agent-repl--warn-once-order) agent-repl--warn-once-fingerprints)
+      (setq agent-repl--warn-once-order (cdr agent-repl--warn-once-order)))
+    (puthash fingerprint t agent-repl--warn-once-fingerprints)
+    (setq agent-repl--warn-once-order
+          (append agent-repl--warn-once-order (list fingerprint)))
+    (apply #'agent-repl--warn ws fmt args)
+    t))
+
+(defvar agent-repl--log-transition-states (make-hash-table :test 'equal)
+  "Last observed diagnostic state keyed by caller-owned transition key.")
+
+(defvar agent-repl--log-transition-order nil
+  "FIFO order for bounded `agent-repl--log-transition-states'.")
+
+(defconst agent-repl--log-transition-capacity 4096
+  "Maximum process-local transition keys retained for hot diagnostics.")
+
+(defun agent-repl--diagnostic-fingerprint (text)
+  "Return the nonreversible SHA-256 identity for diagnostic TEXT.
+TEXT must be a string because callers use this helper at data-minimizing
+boundaries where a coerced object representation could be unstable."
+  (unless (stringp text)
+    (agent-repl--log nil "diagnostic-fingerprint: rejected text-type=%S" (type-of text))
+    (error "agent-repl--diagnostic-fingerprint: text must be a string"))
+  (secure-hash 'sha256 text))
+
+(defun agent-repl--log-on-transition (ws key state fmt &rest args)
+  "Log FMT once for KEY's initial STATE and each later STATE transition.
+KEY must be a nonempty stable string identifying the observed operation.
+STATE is compared with `equal'; callers supply only minimized diagnostic
+state.  Returns non-nil exactly when a record was emitted."
+  (unless (and (stringp key) (not (string-empty-p key)))
+    (agent-repl--log ws "log-on-transition: rejected key=%S reason=empty-or-nonstring" key)
+    (error "agent-repl--log-on-transition: key must be a nonempty string"))
+  (let ((absent (make-symbol "absent"))
+        prior)
+    (setq prior (gethash key agent-repl--log-transition-states absent))
+    (unless (equal prior state)
+      (when (eq prior absent)
+        (when (= (hash-table-count agent-repl--log-transition-states)
+                 agent-repl--log-transition-capacity)
+          (remhash (car agent-repl--log-transition-order)
+                   agent-repl--log-transition-states)
+          (setq agent-repl--log-transition-order
+                (cdr agent-repl--log-transition-order)))
+        (setq agent-repl--log-transition-order
+              (append agent-repl--log-transition-order (list key))))
+      (puthash key state agent-repl--log-transition-states)
+      (apply #'agent-repl--log-verbose ws fmt args)
+      t)))
+
 (defun agent-repl--error (ws fmt &rest args)
   "Signal an error with a [agent-repl] tag, timestamp, and workspace metadata.
 WS is the workspace name for context (or nil).  FMT and ARGS are formatted

@@ -17,6 +17,75 @@
 
 ;;;; ---- Tests: Workspace ID / root resolution ----
 
+;;;; ---- Tests: bounded warning deduplication ----
+
+(ert-deftest agent-repl-test-warn-once-emits-first-observation-only ()
+  "A repeated causal fingerprint records one identity-complete warning."
+  (let ((agent-repl--warn-once-fingerprints (make-hash-table :test 'equal))
+        (agent-repl--warn-once-order nil)
+        (warnings nil))
+    (cl-letf (((symbol-function 'agent-repl--warn)
+               (lambda (ws fmt &rest args)
+                 (push (list ws (apply #'format fmt args)) warnings))))
+      (should (agent-repl--warn-once "ws" "api-message=m payload=abc"
+                                     "response warning api_message_id=%s" "m"))
+      (should-not (agent-repl--warn-once "ws" "api-message=m payload=abc"
+                                         "response warning api_message_id=%s" "m"))
+      (should (equal warnings '(("ws" "response warning api_message_id=m")))))))
+
+(ert-deftest agent-repl-test-warn-once-fifo-bound-makes-evicted-key-observable ()
+  "A full warning cache evicts FIFO state without retaining unbounded entries."
+  (let ((agent-repl--warn-once-capacity 2)
+        (agent-repl--warn-once-fingerprints (make-hash-table :test 'equal))
+        (agent-repl--warn-once-order nil)
+        (warnings nil))
+    (cl-letf (((symbol-function 'agent-repl--warn)
+               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warnings))))
+      (dolist (fingerprint '("first" "second" "third" "first"))
+        (should (agent-repl--warn-once "ws" fingerprint "warning=%s" fingerprint)))
+      (should (= (hash-table-count agent-repl--warn-once-fingerprints) 2))
+      (should (equal (nreverse warnings)
+                     '("warning=first" "warning=second" "warning=third" "warning=first"))))))
+
+(ert-deftest agent-repl-test-warn-once-rejects-empty-causal-fingerprint ()
+  "A missing causal identity signals before warning-state mutation."
+  (let ((agent-repl--warn-once-fingerprints (make-hash-table :test 'equal))
+        (agent-repl--warn-once-order nil))
+    (cl-letf (((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
+      (should-error (agent-repl--warn-once "ws" "" "impossible")))
+    (should (= (hash-table-count agent-repl--warn-once-fingerprints) 0))))
+
+(ert-deftest agent-repl-test-log-on-transition-emits-only-initial-and-changed-states ()
+  "Hot diagnostics retain initial state and causal state transitions."
+  (let ((agent-repl--log-transition-states (make-hash-table :test 'equal))
+        (logs nil))
+    (cl-letf (((symbol-function 'agent-repl--log-verbose)
+               (lambda (ws fmt &rest args) (push (list ws (apply #'format fmt args)) logs))))
+      (should (agent-repl--log-on-transition "ws" "poll" '(1 2) "state=%S" '(1 2)))
+      (should-not (agent-repl--log-on-transition "ws" "poll" '(1 2) "state=%S" '(1 2)))
+      (should (agent-repl--log-on-transition "ws" "poll" '(2 2) "state=%S" '(2 2)))
+      (should (equal (nreverse logs)
+                     '(("ws" "state=(1 2)") ("ws" "state=(2 2)")))))))
+
+(ert-deftest agent-repl-test-log-on-transition-fifo-bound-evicts-oldest-key ()
+  "Transition state retains a fixed number of caller keys."
+  (let ((agent-repl--log-transition-capacity 2)
+        (agent-repl--log-transition-states (make-hash-table :test 'equal))
+        (agent-repl--log-transition-order nil))
+    (cl-letf (((symbol-function 'agent-repl--log-verbose) (lambda (&rest _) nil)))
+      (dolist (key '("first" "second" "third"))
+        (should (agent-repl--log-on-transition "ws" key :state "key=%s" key)))
+      (should (= (hash-table-count agent-repl--log-transition-states) 2))
+      (should (agent-repl--log-on-transition "ws" "first" :state "key=first")))))
+
+(ert-deftest agent-repl-test-diagnostic-fingerprint-distinguishes-same-byte-content ()
+  "Same-size status payloads with different content get distinct transition keys."
+  (let ((first (agent-repl--diagnostic-fingerprint "state=idle"))
+        (second (agent-repl--diagnostic-fingerprint "state=done")))
+    (should (= (length "state=idle") (length "state=done")))
+    (should (= (length first) 64))
+    (should-not (equal first second))))
+
 (ert-deftest agent-repl-test-workspace-id-from-project-root ()
   "Workspace ID should be first 8 chars of MD5 of the canonical ws-dir path."
   (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
