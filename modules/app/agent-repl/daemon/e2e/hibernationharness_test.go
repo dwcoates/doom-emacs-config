@@ -47,6 +47,7 @@
 package e2e
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -57,9 +58,11 @@ import (
 	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
+	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"github.com/gorilla/websocket"
+	"google.golang.org/protobuf/types/known/anypb"
 
 	"claude-repld/internal/session"
 
@@ -596,6 +599,91 @@ func writeFixtureTranscript(t *testing.T, cwd, vendorSessionID string, lines []s
 		t.Fatalf("write the fixture transcript %s: %v", path, err)
 	}
 	return path
+}
+
+// ingestTranscriptAsSidecar replays the truncated transcript copy the daemon
+// wrote for vendorSessionID into the store as file-plane events — the backfill
+// the production shim-sidecar performs by tailing the new file, which the
+// harness (running no sidecar) must perform itself. Only the fixture shapes
+// this feature writes are understood: a plain-string user line and a
+// text-block assistant line; anything else is a loud failure rather than a
+// silently dropped record.
+func ingestTranscriptAsSidecar(t *testing.T, s *keepAliveSession, vendorSessionID string) {
+	t.Helper()
+	lines, ok := readFixtureTranscript(t, s.cwd, vendorSessionID)
+	if !ok {
+		t.Fatalf("no truncated transcript on disk for %s: the rewind should have written it", vendorSessionID)
+	}
+	store := dialStoreProducer(t)
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var rec struct {
+			Type    string `json:"type"`
+			UUID    string `json:"uuid"`
+			Message struct {
+				Content any `json:"content"`
+			} `json:"message"`
+		}
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("unparseable transcript line in the truncated copy: %v\n%s", err, line)
+		}
+		switch rec.Type {
+		case "user":
+			text, ok := rec.Message.Content.(string)
+			if !ok {
+				t.Fatalf("truncated copy carries a non-string user line the harness backfill does not model: %s", line)
+			}
+			store.write(sidecarUserLineEvent(t, vendorSessionID, rec.UUID, text))
+		case "assistant":
+			store.write(sidecarAssistantLineEvent(t, vendorSessionID, rec.UUID, assistantFixtureText(t, rec.Message.Content, line)))
+		default:
+			t.Fatalf("truncated copy carries a %q line the harness backfill does not model: %s", rec.Type, line)
+		}
+	}
+}
+
+// assistantFixtureText extracts the single text block the fixture assistant
+// lines carry.
+func assistantFixtureText(t *testing.T, content any, line string) string {
+	t.Helper()
+	blocks, ok := content.([]any)
+	if ok && len(blocks) == 1 {
+		if block, ok := blocks[0].(map[string]any); ok {
+			if text, ok := block["text"].(string); ok {
+				return text
+			}
+		}
+	}
+	t.Fatalf("truncated copy carries an assistant line shape the harness backfill does not model: %s", line)
+	return ""
+}
+
+// sidecarAssistantLineEvent is what handler.vendorEvent builds for a
+// transcript `assistant` line, mirroring sidecarUserLineEvent
+// (machinery_e2e_test.go): vendor Any carrying datav1.TranscriptLine, FILE
+// plane, PERSISTENT, dedup key left for the store to derive.
+func sidecarAssistantLineEvent(t *testing.T, vendorSessionID, lineUUID, text string) *corev1.Event {
+	t.Helper()
+	a, err := anypb.New(&datav1.TranscriptLine{
+		Line: &datav1.TranscriptLine_Assistant{Assistant: &datav1.AssistantLine{
+			Envelope: &datav1.LineEnvelope{Uuid: lineUUID},
+			Message: &datav1.ApiAssistantMessage{
+				Content: []*datav1.ContentBlock{{Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: text}}}},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("anypb.New: %v", err)
+	}
+	return &corev1.Event{
+		SessionId:    vendorSessionID,
+		Plane:        corev1.Plane_PLANE_FILE,
+		Class:        corev1.EventClass_EVENT_CLASS_PERSISTENT,
+		ProducedAtMs: time.Now().UnixMilli(),
+		Payload:      &corev1.Event_Vendor{Vendor: a},
+	}
 }
 
 // readFixtureTranscript returns the lines of the transcript for
