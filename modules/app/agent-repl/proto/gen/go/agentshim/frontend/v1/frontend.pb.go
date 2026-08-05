@@ -10728,10 +10728,15 @@ func (*OpenWorkspaceCmd) Descriptor() ([]byte, []int) {
 }
 
 type ResyncCmd struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	FromSeq       uint64                 `protobuf:"varint,1,opt,name=from_seq,json=fromSeq,proto3" json:"from_seq,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	FromSeq uint64                 `protobuf:"varint,1,opt,name=from_seq,json=fromSeq,proto3" json:"from_seq,omitempty"`
+	// Preconditions copied from the authoritative WorkspaceState that triggered
+	// this request. The daemon must reject the command before replay when either
+	// identity no longer matches the live controller.
+	SessionId              string `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	ControllerGenerationId string `protobuf:"bytes,3,opt,name=controller_generation_id,json=controllerGenerationId,proto3" json:"controller_generation_id,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *ResyncCmd) Reset() {
@@ -10769,6 +10774,20 @@ func (x *ResyncCmd) GetFromSeq() uint64 {
 		return x.FromSeq
 	}
 	return 0
+}
+
+func (x *ResyncCmd) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *ResyncCmd) GetControllerGenerationId() string {
+	if x != nil {
+		return x.ControllerGenerationId
+	}
+	return ""
 }
 
 // Request one agent-repl workspace.  This is the sole creation ingress for
@@ -15250,9 +15269,12 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"source_dirR\n" +
 	"target_dir\"\x13\n" +
 	"\x11CloseWorkspaceCmd\"\x12\n" +
-	"\x10OpenWorkspaceCmd\"&\n" +
+	"\x10OpenWorkspaceCmd\"\x7f\n" +
 	"\tResyncCmd\x12\x19\n" +
-	"\bfrom_seq\x18\x01 \x01(\x04R\afromSeq\"\xc1\x04\n" +
+	"\bfrom_seq\x18\x01 \x01(\x04R\afromSeq\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x02 \x01(\tR\tsessionId\x128\n" +
+	"\x18controller_generation_id\x18\x03 \x01(\tR\x16controllerGenerationId\"\xc1\x04\n" +
 	"\x12CreateWorkspaceCmd\x12%\n" +
 	"\x0erequested_name\x18\x01 \x01(\tR\rrequestedName\x12\x19\n" +
 	"\bgit_root\x18\x02 \x01(\tR\agitRoot\x12\x1f\n" +

@@ -2214,6 +2214,11 @@ message OpenWorkspaceCmd {}
 
 message ResyncCmd {
   uint64 from_seq = 1;
+  // Preconditions copied from the authoritative WorkspaceState that triggered
+  // this request. The daemon must reject the command before replay when either
+  // identity no longer matches the live controller.
+  string session_id = 2;
+  string controller_generation_id = 3;
 }
 
 // Request one agent-repl workspace.  This is the sole creation ingress for
