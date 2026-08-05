@@ -45,6 +45,7 @@ import type {
   HibernationDetail as GeneratedHibernationDetail,
   QueueEntry as GeneratedQueueEntry,
   QueueEntryKeepAliveHold as GeneratedQueueEntryKeepAliveHold,
+  QueueEntryRevivalHold as GeneratedQueueEntryRevivalHold,
   ReviveSessionCmd as GeneratedReviveSessionCmd,
 } from "../../proto/gen/ts/agentshim/frontend/v1/frontend_pb";
 import { PromptOrigin as GeneratedPromptOrigin } from "../../proto/gen/ts/agentshim/core/v1/core_pb";
@@ -112,6 +113,12 @@ export const QUEUE_ENTRY_KEEP_ALIVE_HOLD: FieldKeys<GeneratedQueueEntry> = "keep
 
 /** The keep-alive hold's only field: the ping turn whose end releases it. */
 export const KEEP_ALIVE_HOLD_TURN_ID: FieldKeys<GeneratedQueueEntryKeepAliveHold> = "turnId";
+
+/** The `QueueEntry` field naming the pending revival that holds an entry. */
+export const QUEUE_ENTRY_REVIVAL_HOLD: FieldKeys<GeneratedQueueEntry> = "revivalHold";
+
+/** The revival hold's only field: the session whose compaction releases it. */
+export const REVIVAL_HOLD_SESSION_ID: FieldKeys<GeneratedQueueEntryRevivalHold> = "sessionId";
 
 /**
  * The `core.v1.PromptOrigin` prefix protobuf-es strips from its enum members.
