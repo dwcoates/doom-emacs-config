@@ -447,8 +447,9 @@ environments without notification tools (terminal-notifier or osascript)."
           (agent-repl-debug nil)
           (agent-repl-log-to-file nil)
           ;; The ladder's verbose rung is one of the lines this asserts on, so
-          ;; the durable threshold is opened to admit it.
-          (agent-repl-log-file-level 'verbose)
+          ;; the BUFFER threshold is opened to admit it.  Its default excludes
+          ;; verbose; that exclusion is the sibling test's subject.
+          (agent-repl-log-buffer-level 'verbose)
           (agent-repl--workspace-log-buffer-enabled nil))
       (unwind-protect
           (progn
@@ -3129,3 +3130,82 @@ survives into the rest of the batch run."
       (agent-repl--log-verbose nil "chatter %s" "x")
       ;; Assert — visibility is the other knob's business, and it still fired.
       (should messaged))))
+
+;;;; ---- Tests: workspace log BUFFER threshold ----
+;;
+;; The buffers are read live by a human while debugging; the file is a forensic
+;; record nobody reads top to bottom.  They are gated separately so a quiet
+;; buffer never costs a complete file.
+
+(defmacro agent-repl-test--with-log-buffer (ws &rest body)
+  "Run BODY with WS's live log buffer enabled, returning its contents."
+  (declare (indent 1))
+  `(agent-repl-test--with-clean-state
+     (let ((project (make-temp-file "agent-repl-buffer-level-" t))
+           (buf nil))
+       (unwind-protect
+           (let ((agent-repl-log-to-file nil)
+                 (agent-repl-debug nil))
+             (agent-repl--ws-put ,ws :project-dir project)
+             (let ((agent-repl--workspace-log-buffer-enabled t))
+               ,@body)
+             (setq buf (agent-repl--workspace-log-buffer ,ws))
+             (with-current-buffer buf (buffer-string)))
+         (when (buffer-live-p buf) (kill-buffer buf))
+         (delete-directory project t)))))
+
+(ert-deftest agent-repl-test-log-buffer-level-drops-verbose-by-default ()
+  "Hot-path chatter stays out of the buffer a human is reading."
+  ;; Arrange / Act
+  (let ((contents (agent-repl-test--with-log-buffer "buf-level-ws"
+                    (agent-repl--log-verbose "buf-level-ws" "chatter"))))
+    ;; Assert
+    (should (equal contents ""))))
+
+(ert-deftest agent-repl-test-log-buffer-level-drops-ordinary-debug-by-default ()
+  "The buffers are stricter than the file: they are for what went WRONG."
+  ;; Arrange / Act
+  (let ((contents (agent-repl-test--with-log-buffer "buf-level-ws"
+                    (agent-repl--log "buf-level-ws" "ordinary"))))
+    ;; Assert
+    (should (equal contents ""))))
+
+(ert-deftest agent-repl-test-log-buffer-level-keeps-warnings-by-default ()
+  "A warning is exactly what the default threshold exists to surface."
+  ;; Arrange / Act
+  (let ((contents (agent-repl-test--with-log-buffer "buf-level-ws"
+                    (agent-repl--warn "buf-level-ws" "something wrong"))))
+    ;; Assert
+    (should (string-match-p "something wrong" contents))))
+
+(ert-deftest agent-repl-test-log-buffer-level-debug-follows-ordinary-activity ()
+  "Lowering the buffer threshold puts the ordinary lines back."
+  ;; Arrange / Act
+  (let ((contents (let ((agent-repl-log-buffer-level 'debug))
+                    (agent-repl-test--with-log-buffer "buf-level-ws"
+                      (agent-repl--log "buf-level-ws" "ordinary")))))
+    ;; Assert
+    (should (string-match-p "ordinary" contents))))
+
+(ert-deftest agent-repl-test-log-buffer-level-verbose-admits-chatter ()
+  "Opening the buffer threshold puts the chatter back."
+  ;; Arrange / Act
+  (let ((contents (let ((agent-repl-log-buffer-level 'verbose))
+                    (agent-repl-test--with-log-buffer "buf-level-ws"
+                      (agent-repl--log-verbose "buf-level-ws" "chatter")))))
+    ;; Assert
+    (should (string-match-p "chatter" contents))))
+
+(ert-deftest agent-repl-test-log-buffer-level-independent-of-the-file-level ()
+  "A quiet buffer does not cost a complete file."
+  ;; Arrange — the file admits a rung the buffer does not.
+  (let ((writes 0)
+        (agent-repl-log-to-file t)
+        (agent-repl-log-file-level 'debug)
+        (agent-repl-log-buffer-level 'warn))
+    (cl-letf (((symbol-function 'agent-repl--do-log-to-file)
+               (lambda (&rest _args) (setq writes (1+ writes)))))
+      ;; Act
+      (agent-repl--log nil "ordinary")
+      ;; Assert — the file recorded it even though no buffer would show it.
+      (should (= writes 1)))))

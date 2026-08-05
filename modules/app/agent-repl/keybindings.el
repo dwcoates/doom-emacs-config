@@ -519,6 +519,28 @@ and back up when a reproduction is about to be captured."
                     "debug/set-log-file-level: durable log level now %s" level)
   (message "[agent-repl] durable log level: %s" level))
 
+(defun agent-repl-debug/toggle-verbose-to-disk ()
+  "Toggle whether the verbose rung is written to the LOG FILE.
+
+Flips `agent-repl-log-file-level' between `verbose' (write the hot-path
+chatter) and `debug' (write everything else).  This is the knob to reach
+for when a log is growing faster than it is worth: turn it off, and turn
+it back on before provoking the reproduction you need it for.
+
+Affects the file only.  The per-workspace log buffers follow
+`agent-repl-log-buffer-level' and the *Messages* buffer follows
+`agent-repl-debug'."
+  (interactive)
+  (setq agent-repl-log-file-level
+        (if (eq agent-repl-log-file-level 'verbose) 'debug 'verbose))
+  (let ((on (eq agent-repl-log-file-level 'verbose)))
+    (agent-repl--info (agent-repl--ws-current-log-name)
+                      "debug/toggle-verbose-to-disk: verbose->file %s"
+                      (if on "ON" "OFF"))
+    (message "[agent-repl] verbose logging to disk: %s%s"
+             (if on "ON" "OFF")
+             (if on "" " (warnings and errors still recorded)"))))
+
 (defun agent-repl-debug/toggle-log-to-file ()
   "Toggle writing debug log output to `agent-repl-log-file-name'.
 When enabled, all messages that pass through `agent-repl--do-log' are
@@ -798,6 +820,7 @@ aux maps for every state in `agent-repl--scroll-output-intercept-states'
        :desc "Paste workspace clipboard" "p" #'agent-repl-paste-clipboard
        :desc "Toggle debug logging"    "D" #'agent-repl-debug/toggle-logging
        :desc "Set durable log level"   "L" #'agent-repl-debug/set-log-file-level
+       :desc "Toggle verbose to disk"  "V" #'agent-repl-debug/toggle-verbose-to-disk
        (:prefix ("h" . "help/debug")
         :desc "Dump workspace state"     "p" #'agent-repl-debug/dump-workspace
         :desc "Explain config (read-only Q&A)" "c" #'agent-repl-explain-config

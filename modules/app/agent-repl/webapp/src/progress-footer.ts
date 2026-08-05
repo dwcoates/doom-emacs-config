@@ -778,42 +778,37 @@ export function errorRowHtml(p: ProgressInput): string {
 }
 
 /**
- * The EXPENSIVE-TURN row: the daemon's uncached-input alert for the turn that
- * just ended, standing until the next turn starts.
+ * The COLD KEEP-ALIVE row.
  *
- * It renders RED, beside the classified-failure row and with the same lifetime,
- * because it is the same kind of news: something already happened that the user
- * would want to have known about. Nothing here is derived — the daemon computed
- * the figure, the threshold it crossed, and the turn's attribution.
+ * THE ORDINARY EXPENSIVE-TURN READING IS GONE FROM THE FOOTER. A turn that
+ * re-ingested context is not by itself an anomaly — a revived session, a fresh
+ * workspace, and a long gap all produce one legitimately — so announcing it in
+ * the footer's warning strip cried wolf on the common case. The magnitude is
+ * surfaced implicitly instead, by the heat on the token cell and the matching
+ * stamp on the response bubble (see `tokenHeatHue`), which says the same thing
+ * without claiming something went wrong.
  *
- * THE TWO READINGS ARE DIFFERENT ALARMS, and the origin is what separates them:
- *
- * - A `CACHE_KEEP_ALIVE` origin means the ping whose ENTIRE PURPOSE was keeping
- *   the cache warm came back cold. Nobody asked for that turn, it bought
- *   nothing, and it paid full freight — so it is worded as the keep-alive
- *   failing at its one job, not as "a turn was expensive".
- * - Any other origin is a turn the user (or a card action, or the coordinator)
- *   actually asked for, which re-ingested context. Expensive, but it bought
- *   something.
- *
- * Wording them identically would bury the only one that indicates the
- * cache-warming machinery is not working.
+ * WHAT SURVIVES IS THE ONE READING THAT IS ALWAYS A DEFECT. A `CACHE_KEEP_ALIVE`
+ * origin means the ping whose ENTIRE PURPOSE was keeping the cache warm came
+ * back cold: nobody asked for that turn, it bought nothing, and it paid full
+ * freight. That is not a cost report, it is the cache-warming machinery
+ * reporting that it does not work — which no color on a token count can convey,
+ * because the figure it would color belongs to a turn the user never requested.
  */
 export function expensiveTurnRowHtml(p: ProgressInput): string {
   const alert = p.expensiveTurn;
   if (alert === null) return "";
-  const cold = alert.promptOrigin === PROMPT_ORIGIN_CACHE_KEEP_ALIVE;
+  // Every other origin is an ordinary cost the heat ramp already reports.
+  if (alert.promptOrigin !== PROMPT_ORIGIN_CACHE_KEEP_ALIVE) return "";
   const cost =
     `${compactTokens(alert.uncachedInputTokens)} uncached input tokens ` +
     `(threshold ${compactTokens(alert.thresholdTokens)})`;
-  const text = cold
-    ? `keep-alive came back COLD: the cache-warming ping re-ingested the whole ` +
-      `conversation for nothing — ${cost}`
-    : `expensive turn: this prompt re-ingested context — ${cost}`;
-  const classes = ["pfooter-expensive-turn"];
-  if (cold) classes.push("cold-keep-alive");
+  const text =
+    `keep-alive came back COLD: the cache-warming ping re-ingested the whole ` +
+    `conversation for nothing — ${cost}`;
   return (
-    `<div class="${classes.join(" ")}" data-expensive-turn-id="${escapeHtml(alert.turnId)}">` +
+    `<div class="pfooter-expensive-turn cold-keep-alive" ` +
+    `data-expensive-turn-id="${escapeHtml(alert.turnId)}">` +
     `${escapeHtml(text)}</div>`
   );
 }

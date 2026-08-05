@@ -294,28 +294,55 @@ to flip the kill-switch at runtime."
   :group 'agent-repl)
 
 (defcustom agent-repl-log-file-level 'debug
-  "Least severe rung the DURABLE sink records.  See the ladder in core.el.
+  "Least severe rung the LOG FILE records.  See the ladder in core.el.
 
 This is the knob `agent-repl-debug' is repeatedly mistaken for.  That one
 governs *Messages* visibility ONLY and has never had any effect on what
-reaches the log file, so turning debug off left the hot-path chatter
-still being written — on a working day that ran to ~350k verbose records
-and well over a hundred megabytes, and there was no setting that would
-stop it short of `agent-repl-log-to-file', which also discards the
-warnings and errors.  This threshold is the missing middle.
+reaches disk.
 
 Ordered least to most severe: `verbose', `debug', `info', `warn',
-`error'.  A record is written when its own rung is at or above this one,
-so `debug' (the default) keeps every ordinary log line and drops only the
-`agent-repl--log-verbose' chatter, and `verbose' restores the old
-write-everything behavior.
+`error'.  A record is written when its own rung is at or above this one.
 
-Use \\[agent-repl-debug/set-log-file-level] to change it at runtime; it
-takes effect on the very next record, with no restart and no reload."
+THE DEFAULT IS `debug': every ordinary log line is recorded and only the
+`agent-repl--log-verbose' chatter is dropped.  That rung is not cheap — a
+working day of it runs to ~350k records and well over a hundred megabytes
+— so it is opt-IN, turned on for the stretch of an investigation that
+needs it and turned back off after.
+
+Use \\[agent-repl-debug/toggle-verbose-to-disk] for the common
+verbose-on/verbose-off flip, or \\[agent-repl-debug/set-log-file-level]
+to name any rung.  Both take effect on the very next record, with no
+restart and no reload.
+
+This does NOT control the per-workspace log BUFFERS; see
+`agent-repl-log-buffer-level'."
   :type '(choice (const :tag "Verbose (everything)" verbose)
                  (const :tag "Debug (default; drops hot-path chatter)" debug)
                  (const :tag "Info" info)
                  (const :tag "Warnings" warn)
+                 (const :tag "Errors only" error))
+  :group 'agent-repl)
+
+(defcustom agent-repl-log-buffer-level 'warn
+  "Least severe rung the per-workspace log BUFFERS display.
+
+Same ladder as `agent-repl-log-file-level', and independent of it: the
+file is a forensic record nobody reads top to bottom, while these buffers
+are read by a human, live, while debugging.  The verbose rung is
+hot-path chatter — `json-null-if-nil', `ws-keyword-to-string',
+`sidebar-tick' — which drowns out the lines a reader is actually
+following, so the default keeps it out of the buffers while the file goes
+on recording it.
+
+THE DEFAULT IS `warn', which is deliberately stricter than the file's.
+These buffers exist to show a human what went WRONG in a workspace, and a
+running commentary of ordinary debug lines buries that.  Lower it to
+`debug' to follow a workspace's ordinary activity, or to `verbose' when
+the chatter itself is the object of study."
+  :type '(choice (const :tag "Verbose (everything)" verbose)
+                 (const :tag "Debug" debug)
+                 (const :tag "Info" info)
+                 (const :tag "Warnings (default)" warn)
                  (const :tag "Errors only" error))
   :group 'agent-repl)
 
@@ -1031,27 +1058,42 @@ the debug lines a reader actually wants."
       ;; at the top so a threshold can never be what loses it.
       (cdr (assoc "error" agent-repl--log-level-rank))))
 
+(defun agent-repl--log-record-clears-p (level verbosity threshold)
+  "Whether a LEVEL / VERBOSITY record ranks at or above THRESHOLD."
+  (>= (agent-repl--log-record-rank level verbosity)
+      (agent-repl--log-record-rank (symbol-name threshold) nil)))
+
 (defun agent-repl--log-record-persists-p (level verbosity)
   "Whether a LEVEL / VERBOSITY record clears `agent-repl-log-file-level'."
-  (>= (agent-repl--log-record-rank level verbosity)
-      (agent-repl--log-record-rank (symbol-name agent-repl-log-file-level) nil)))
+  (agent-repl--log-record-clears-p level verbosity agent-repl-log-file-level))
+
+(defun agent-repl--log-record-displays-p (level verbosity)
+  "Whether a LEVEL / VERBOSITY record clears `agent-repl-log-buffer-level'."
+  (agent-repl--log-record-clears-p level verbosity agent-repl-log-buffer-level))
 
 (defun agent-repl--persist-log-record (ws level verbosity fmt args)
   "Persist one JSONL record for WS without changing caller-facing signatures."
   ;; Record construction resolves the durable sink identity for WS.  Skip that
   ;; work when both persistence sinks are disabled, as in the generic batch
   ;; harness.  Echo-area formatting and emission remain the caller's concern.
-  (when (and (agent-repl--log-record-persists-p level verbosity)
-             (or agent-repl-log-to-file
-                 (and agent-repl--workspace-log-buffer-enabled ws)))
-    ;; Resolve the routing decision ONCE, before anything consumes WS.  The
-    ;; record's identity fields and the sink path must agree about which
-    ;; workspace owns this line, and both derive from this single answer.
-    (let* ((sink-ws (agent-repl--log-sink-workspace ws))
-           (record (agent-repl--log-record sink-ws level verbosity fmt args)))
-      (when agent-repl-log-to-file
-        (agent-repl--do-log-to-file record sink-ws))
-      (agent-repl--append-workspace-log sink-ws record))))
+  ;; THE TWO SINKS ARE GATED SEPARATELY.  The file is a forensic record and
+  ;; keeps the verbose rung by default; the workspace buffers are read live by
+  ;; a human and drop it.  Deciding both from one threshold would force the
+  ;; reader to choose between a quiet buffer and a complete file.
+  (let ((to-file (and agent-repl-log-to-file
+                      (agent-repl--log-record-persists-p level verbosity)))
+        (to-buffer (and agent-repl--workspace-log-buffer-enabled ws
+                        (agent-repl--log-record-displays-p level verbosity))))
+    (when (or to-file to-buffer)
+      ;; Resolve the routing decision ONCE, before anything consumes WS.  The
+      ;; record's identity fields and the sink path must agree about which
+      ;; workspace owns this line, and both derive from this single answer.
+      (let* ((sink-ws (agent-repl--log-sink-workspace ws))
+             (record (agent-repl--log-record sink-ws level verbosity fmt args)))
+        (when to-file
+          (agent-repl--do-log-to-file record sink-ws))
+        (when to-buffer
+          (agent-repl--append-workspace-log sink-ws record))))))
 
 ;;;; ---- Echo-area (modeline) severity gate ----
 ;;

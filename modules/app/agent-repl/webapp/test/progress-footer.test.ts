@@ -2004,17 +2004,19 @@ describe("expensiveTurnRowHtml: the uncached-input alert", () => {
     expect(got).toBe("");
   });
 
-  it("names the cost a user-sent turn paid", () => {
-    // Arrange / Act
+  it("renders nothing for an ordinary expensive turn", () => {
+    // Arrange / Act — a user-sent turn that re-ingested context is a cost,
+    // not a defect: a revival, a fresh workspace, and a long gap all produce
+    // one legitimately.
     const got = expensiveTurnRowHtml(progress({ expensiveTurn: alert() }));
-    // Assert
-    expect(got).toContain("expensive turn");
+    // Assert — the magnitude is the heat ramp's job now, not a warning row's.
+    expect(got).toBe("");
   });
 
   it("quotes the observed figure against the threshold that tripped", () => {
     // Arrange — the daemon carries both so the row can say 'N over M'
     // without the webapp knowing daemon config.
-    const got = expensiveTurnRowHtml(progress({ expensiveTurn: alert() }));
+    const got = expensiveTurnRowHtml(progress({ expensiveTurn: alert({ promptOrigin: "PROMPT_ORIGIN_CACHE_KEEP_ALIVE" }) }));
     // Act / Assert
     expect(got).toContain("48k uncached input tokens (threshold 20k)");
   });
@@ -2057,7 +2059,14 @@ describe("expensiveTurnRowHtml: the uncached-input alert", () => {
 
   it("joins the row to the turn that paid the cost", () => {
     // Arrange / Act
-    const got = expensiveTurnRowHtml(progress({ expensiveTurn: alert({ turnId: "turn-77" }) }));
+    const got = expensiveTurnRowHtml(
+      progress({
+        expensiveTurn: alert({
+          turnId: "turn-77",
+          promptOrigin: "PROMPT_ORIGIN_CACHE_KEEP_ALIVE",
+        }),
+      }),
+    );
     // Assert
     expect(got).toContain('data-expensive-turn-id="turn-77"');
   });
@@ -2066,7 +2075,7 @@ describe("expensiveTurnRowHtml: the uncached-input alert", () => {
     // Arrange — the two are different facts with the same lifetime, and a
     // failed expensive turn must show both.
     const got = footerHtml(
-      input({ progress: progress({ failure: failureCard(), expensiveTurn: alert() }) }),
+      input({ progress: progress({ failure: failureCard(), expensiveTurn: alert({ promptOrigin: "PROMPT_ORIGIN_CACHE_KEEP_ALIVE" }) }) }),
       CLOSED,
       NOW,
     );
