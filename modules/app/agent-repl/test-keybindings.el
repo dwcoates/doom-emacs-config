@@ -1593,3 +1593,38 @@ final bindings, not error and not duplicate state."
                   (cdr entry))))))
 
 ;;; test-keybindings.el ends here
+
+;;;; ---- Tests: agent-repl-debug/set-log-file-level ----
+
+(ert-deftest agent-repl-test-set-log-file-level-sets-the-threshold ()
+  "The command moves the durable threshold for the rest of the session."
+  ;; Arrange
+  (let ((agent-repl-log-file-level 'debug))
+    (cl-letf (((symbol-function 'message) #'ignore)
+              ((symbol-function 'agent-repl--info) #'ignore))
+      ;; Act
+      (agent-repl-debug/set-log-file-level 'warn)
+      ;; Assert
+      (should (eq agent-repl-log-file-level 'warn)))))
+
+(ert-deftest agent-repl-test-set-log-file-level-rejects-an-unknown-level ()
+  "An unknown level is refused rather than silently installed."
+  ;; Arrange
+  (let ((agent-repl-log-file-level 'debug))
+    (cl-letf (((symbol-function 'message) #'ignore)
+              ((symbol-function 'agent-repl--info) #'ignore))
+      ;; Act / Assert
+      (should-error (agent-repl-debug/set-log-file-level 'chatty) :type 'error)
+      (should (eq agent-repl-log-file-level 'debug)))))
+
+(ert-deftest agent-repl-test-set-log-file-level-leaves-debug-visibility-alone ()
+  "Moving the durable threshold does not touch the *Messages* knob."
+  ;; Arrange
+  (let ((agent-repl-log-file-level 'debug)
+        (agent-repl-debug 'verbose))
+    (cl-letf (((symbol-function 'message) #'ignore)
+              ((symbol-function 'agent-repl--info) #'ignore))
+      ;; Act
+      (agent-repl-debug/set-log-file-level 'error)
+      ;; Assert — the two knobs are independent, which is the whole point.
+      (should (eq agent-repl-debug 'verbose)))))

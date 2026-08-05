@@ -264,9 +264,13 @@ swallowed, and does not abort the remaining migrations."
   "Controls debug visibility without changing durable persistence.
 nil suppresses debug output from *Messages*; t shows standard debug output;
 \\='verbose also shows high-frequency events (window changes, resolve-root,
-process-alive predicates, sentinel re-entry).  Normal and verbose records
-still persist through their canonical JSONL sinks whenever
-`agent-repl-log-to-file' is non-nil.  Use
+process-alive predicates, sentinel re-entry).
+
+THIS SETTING CONTROLS VISIBILITY ONLY.  It does not gate the durable
+sinks and never has: records still persist whenever they clear
+`agent-repl-log-file-level' and `agent-repl-log-to-file' is non-nil.  If
+what you want is a smaller LOG FILE, this is the wrong knob — set
+`agent-repl-log-file-level'.  Use
 \\[agent-repl-debug/toggle-logging] (with `C-u' prefix for verbose) to
 flip at runtime."
   :type '(choice (const :tag "Off" nil)
@@ -281,10 +285,38 @@ When non-nil (the default), every call to `agent-repl--log',
 `agent-repl--error' appends its JSONL record to the workspace's canonical
 sink, or to `agent-repl-log-file-name' when the call is genuinely
 workspace-agnostic, REGARDLESS of `agent-repl-debug'.
-`agent-repl--log-verbose' persists as well; verbose controls only
-*Messages* visibility.  Use `agent-repl-debug/toggle-log-to-file' to
-flip the kill-switch at runtime."
+`agent-repl--log-verbose' persists as well; `agent-repl-debug' controls
+only *Messages* visibility.  This is the ALL-OR-NOTHING switch; for a
+threshold that keeps warnings and errors while dropping chatter, use
+`agent-repl-log-file-level'.  Use `agent-repl-debug/toggle-log-to-file'
+to flip the kill-switch at runtime."
   :type 'boolean
+  :group 'agent-repl)
+
+(defcustom agent-repl-log-file-level 'debug
+  "Least severe rung the DURABLE sink records.  See the ladder in core.el.
+
+This is the knob `agent-repl-debug' is repeatedly mistaken for.  That one
+governs *Messages* visibility ONLY and has never had any effect on what
+reaches the log file, so turning debug off left the hot-path chatter
+still being written — on a working day that ran to ~350k verbose records
+and well over a hundred megabytes, and there was no setting that would
+stop it short of `agent-repl-log-to-file', which also discards the
+warnings and errors.  This threshold is the missing middle.
+
+Ordered least to most severe: `verbose', `debug', `info', `warn',
+`error'.  A record is written when its own rung is at or above this one,
+so `debug' (the default) keeps every ordinary log line and drops only the
+`agent-repl--log-verbose' chatter, and `verbose' restores the old
+write-everything behavior.
+
+Use \\[agent-repl-debug/set-log-file-level] to change it at runtime; it
+takes effect on the very next record, with no restart and no reload."
+  :type '(choice (const :tag "Verbose (everything)" verbose)
+                 (const :tag "Debug (default; drops hot-path chatter)" debug)
+                 (const :tag "Info" info)
+                 (const :tag "Warnings" warn)
+                 (const :tag "Errors only" error))
   :group 'agent-repl)
 
 (defcustom agent-repl-log-size-cap-bytes (* 1024 1024 1024)
@@ -980,13 +1012,38 @@ it calls, which would otherwise reinstate the instrumentation it avoids."
             (goto-char (point-max))
             (insert text "\n")))))))
 
+(defconst agent-repl--log-level-rank
+  '(("verbose" . 0) ("debug" . 1) ("info" . 2) ("warn" . 3) ("error" . 4))
+  "Rank of each rung of the logging ladder, least to most severe.
+`verbose' is a rung here even though it travels as a VERBOSITY rather than
+a level: on the durable sink the two axes collapse into one ordering, and
+a threshold is only useful if every record can be placed on it.")
+
+(defun agent-repl--log-record-rank (level verbosity)
+  "Rank the record described by LEVEL and VERBOSITY on the ladder.
+A verbose record ranks below every ordinary level regardless of the LEVEL
+it carries, because `agent-repl--log-verbose' stamps its records `debug'
+and the verbosity is the only thing distinguishing hot-path chatter from
+the debug lines a reader actually wants."
+  (or (cdr (assoc (if (equal verbosity "verbose") "verbose" level)
+                  agent-repl--log-level-rank))
+      ;; An unknown level is not a reason to silently drop a record: rank it
+      ;; at the top so a threshold can never be what loses it.
+      (cdr (assoc "error" agent-repl--log-level-rank))))
+
+(defun agent-repl--log-record-persists-p (level verbosity)
+  "Whether a LEVEL / VERBOSITY record clears `agent-repl-log-file-level'."
+  (>= (agent-repl--log-record-rank level verbosity)
+      (agent-repl--log-record-rank (symbol-name agent-repl-log-file-level) nil)))
+
 (defun agent-repl--persist-log-record (ws level verbosity fmt args)
   "Persist one JSONL record for WS without changing caller-facing signatures."
   ;; Record construction resolves the durable sink identity for WS.  Skip that
   ;; work when both persistence sinks are disabled, as in the generic batch
   ;; harness.  Echo-area formatting and emission remain the caller's concern.
-  (when (or agent-repl-log-to-file
-            (and agent-repl--workspace-log-buffer-enabled ws))
+  (when (and (agent-repl--log-record-persists-p level verbosity)
+             (or agent-repl-log-to-file
+                 (and agent-repl--workspace-log-buffer-enabled ws)))
     ;; Resolve the routing decision ONCE, before anything consumes WS.  The
     ;; record's identity fields and the sink path must agree about which
     ;; workspace owns this line, and both derive from this single answer.
@@ -1087,8 +1144,11 @@ FMT and ARGS use the same format conventions as `message'."
 
 (defun agent-repl--log-verbose (ws fmt &rest args)
   "Persist a high-frequency message and show it only in verbose mode.
-Verbose affects terminal and *Messages* visibility only.  Its JSONL record is
-always persisted through the same durable sink as normal logging."
+`agent-repl-debug' affects terminal and *Messages* visibility only.  The
+JSONL record reaches the durable sink when it clears
+`agent-repl-log-file-level', which by default it does NOT: this rung is
+the hot-path chatter, and keeping it out of the file is the whole reason
+that threshold exists."
   (let ((text (agent-repl--build-log-text ws fmt args)))
     (agent-repl--persist-log-record ws "debug" "verbose" fmt args)
     (when (eq agent-repl-debug 'verbose)
