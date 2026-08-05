@@ -93,6 +93,34 @@ type queueEntry struct {
 	// rewind exists to discard. The two exits are delivery when the ping's turn
 	// ends — the daemon rewinds, then submits — and QueueCancelCmd.
 	keepAliveHoldTurnID string
+
+	// revivalHoldSessionID names the session whose IN-FLIGHT COMPACT-FIRST
+	// REVIVAL is parking this entry, and is empty for every ordinary entry.
+	//
+	// It is the third hold of the same shape, and it exists because the gate
+	// alone was the wrong answer for this one window. A hibernated session with
+	// no revival decision behind it refuses prompts outright — that is the whole
+	// feature, and it is unchanged. But once the user HAS chosen compact-first,
+	// the record stays hibernated on purpose while the compaction runs
+	// (revive.go), and every prompt typed in that window was being nacked with
+	// no queue entry made at all. The contract for that window is
+	// DELAYED-NEVER-DROPPED: the prompt must not RUN before the compaction
+	// lands, and it must be DELIVERED after it does.
+	//
+	// The classifier NEVER runs on one of these, exactly as it never runs on a
+	// drain- or keep-alive-held entry: the turn in front of it is the daemon's
+	// own `/compact`, and asking a model whether the user's prompt should
+	// interrupt it could only produce a verdict that defeats the mode the user
+	// chose. So the entry carries the HOLD stamp for its whole held life rather
+	// than claiming a classifier is running that never will.
+	//
+	// The exits are delivery when the compaction lands and the gate is cleared,
+	// a QueueCancelCmd, and the revival ending WITHOUT clearing the gate — the
+	// bound expiry, the abandoned wait, a failed clear — which DROPS the entry
+	// loudly (revive.go, dropRevivalHolds). There is no force-through: forcing
+	// a prompt past the compaction would spend the whole uncompacted history on
+	// it, which is the one cost compact-first exists to avoid.
+	revivalHoldSessionID string
 }
 
 // drainHeld reports whether a scheduled shutdown's lease is parking this entry.
@@ -102,10 +130,14 @@ func (e *queueEntry) drainHeld() bool { return e.shutdownHoldScheduleID != "" }
 // this entry.
 func (e *queueEntry) keepAliveHeld() bool { return e.keepAliveHoldTurnID != "" }
 
+// revivalHeld reports whether an in-flight compact-first revival is parking
+// this entry.
+func (e *queueEntry) revivalHeld() bool { return e.revivalHoldSessionID != "" }
+
 // held reports whether ANY hold is parking this entry, whatever its kind. It is
 // the predicate every delivery-selection path asks, so a hold added later is
 // honored by all of them without each having to learn its name.
-func (e *queueEntry) held() bool { return e.drainHeld() || e.keepAliveHeld() }
+func (e *queueEntry) held() bool { return e.drainHeld() || e.keepAliveHeld() || e.revivalHeld() }
 
 // promptQueue is one session's ordered FIFO of held prompts. It is not
 // goroutine-safe; the Manager serializes every access under its own mutex.
@@ -202,6 +234,47 @@ func (q *promptQueue) releaseKeepAliveHold(turnID string) int {
 		}
 	}
 	return n
+}
+
+// releaseRevivalHold clears sessionID's revival hold from every entry carrying
+// it and reports how many were released.
+//
+// It is releaseKeepAliveHold's shape and re-stamps for the same reason: the
+// HOLD stamp was standing in for a classification that never ran, and an entry
+// about to be delivered must not render a chip claiming it is still waiting on
+// a compaction that has landed.
+func (q *promptQueue) releaseRevivalHold(sessionID string) int {
+	n := 0
+	for _, e := range q.entries {
+		if e.revivalHoldSessionID == sessionID {
+			e.revivalHoldSessionID = ""
+			e.classification = frontendv1.QueueClassification_QUEUE_CLASSIFICATION_PENDING
+			n++
+		}
+	}
+	return n
+}
+
+// dropRevivalHeld removes every entry sessionID's revival is parking and
+// returns them, front to back.
+//
+// IT IS THE PARKED ENTRY'S BOUND. A revival that ends without clearing the gate
+// leaves a session that is still asleep, and an entry held behind it can never
+// be selected by any delivery path — so keeping it would be a prompt rendered
+// as pending forever, on a queue nothing will ever drain. The entries are
+// removed here and the caller states the loss out loud (revive.go).
+func (q *promptQueue) dropRevivalHeld(sessionID string) []*queueEntry {
+	var dropped []*queueEntry
+	kept := q.entries[:0]
+	for _, e := range q.entries {
+		if e.revivalHoldSessionID == sessionID {
+			dropped = append(dropped, e)
+			continue
+		}
+		kept = append(kept, e)
+	}
+	q.entries = kept
+	return dropped
 }
 
 // drainHeldCount reports how many entries the drain lease is parking.
@@ -419,6 +492,39 @@ func (m *Manager) queueSubmitLocked(d *sessionController, requestID, text, permi
 		d.queue.add(e)
 		m.logf("session-controller: prompt PARKED by the drain lease entry=%s ws=%q session=%s schedule=%s turn_active=%v — a scheduled shutdown holds the lease, so this prompt is delayed until the bounce completes; it is not classified and not refused",
 			e.id, d.workspace, d.sessionID, scheduleID, d.turn.active())
+		return e, true, nil
+	}
+	// A PROMPT ARRIVING MID-REVIVAL IS PARKED, not nacked. The user has already
+	// made the revival choice, the session is up, and the record is still
+	// hibernated only because that is how compact-first keeps the gate standing
+	// while its `/compact` runs — so the honest answer to a prompt typed in that
+	// window is "delayed", not "refused". The classifier never runs on it, for
+	// the same reason it never runs on a drain- or keep-alive-held entry.
+	//
+	// It is checked BEFORE the turn-active test on purpose, exactly as the
+	// keep-alive hold is: the compaction's turn is normally active here, so the
+	// ordinary queueing path would catch the prompt anyway — but it would stamp
+	// it PENDING and spend a model call asking whether the user's prompt should
+	// interrupt the daemon's own compaction, whose interruption is precisely
+	// what the mode exists to prevent.
+	if revivalSessionID := m.revivalHoldSessionLocked(d); revivalSessionID != "" {
+		e := &queueEntry{
+			id:                   newQueueEntryID(),
+			requestID:            requestID,
+			text:                 text,
+			permissionMode:       permissionMode,
+			promptOrigin:         promptOrigin,
+			queuedAtMs:           m.now(),
+			classification:       frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD,
+			revivalHoldSessionID: revivalSessionID,
+		}
+		// Appended at the BACK even against a paused queue, exactly as the other
+		// two holds are: a head jump is the paused queue's one deliverable, and a
+		// held entry is by definition not deliverable, so claiming that position
+		// would be a lie about when it runs.
+		d.queue.add(e)
+		m.logf("session-controller: prompt PARKED by the revival gate entry=%s ws=%q session=%s turn_active=%v — a compact-first revival's compaction is still pending, so this prompt is DELAYED until it lands; it is not classified and not refused",
+			e.id, d.workspace, d.sessionID, d.turn.active())
 		return e, true, nil
 	}
 	// A REAL PROMPT ARRIVING MID-PING IS HELD, not raced against the ping and
@@ -755,6 +861,21 @@ func (m *Manager) deliver(d *sessionController, e *queueEntry) {
 		m.publish(d.sessionID, view, recs)
 		return
 	}
+	// THE REVIVAL HOLD'S BACKSTOP, at the same funnel and for the same reason.
+	// Delivering a revival-held prompt would submit it against the whole
+	// uncompacted conversation the user chose compact-first precisely to avoid
+	// paying for — and forwardPrompt's own gate would nack it anyway, marking a
+	// prompt ERROR that nothing was wrong with. Requeued at the head, loudly.
+	if e.revivalHeld() {
+		m.mu.Lock()
+		d.queue.pushFront(e)
+		view, recs := m.publishQueueLocked(d)
+		m.mu.Unlock()
+		m.logf("session-controller: queue delivery REFUSED entry=%s session=%s ws=%q revival_session=%s — the entry is parked by an in-flight compact-first revival and a delivery path selected it anyway; requeued at the head, nothing was submitted",
+			e.id, d.sessionID, d.workspace, e.revivalHoldSessionID)
+		m.publish(d.sessionID, view, recs)
+		return
+	}
 	err := m.forwardPrompt(m.rootCtx, d, e.requestID, e.text, e.promptOrigin.String(), e.permissionMode, e.promptOrigin, submitterUser)
 	if err == nil {
 		m.mu.Lock()
@@ -1019,6 +1140,17 @@ func (m *Manager) ForceQueueEntry(workspace, entryID string) error {
 		keepAliveTurn := e.keepAliveHoldTurnID
 		m.mu.Unlock()
 		return m.refuseKeepAliveForce(workspace, entryID, d.sessionID, keepAliveTurn)
+	}
+	// A REVIVAL HOLD HAS NO FORCE-THROUGH EITHER, and its argument is the
+	// strongest of the three. The user chose compact-first to pay the
+	// whole-conversation cost exactly once; forcing a prompt past the pending
+	// compaction would answer it against the uncompacted history and spend that
+	// cost anyway — the one outcome the mode exists to prevent. The wait is
+	// bounded by the compaction, and the prompt stays cancellable throughout.
+	if e.revivalHeld() {
+		revivalSession := e.revivalHoldSessionID
+		m.mu.Unlock()
+		return m.refuseRevivalForce(workspace, entryID, revivalSession)
 	}
 	forcedSchedule, hadRow := e.shutdownHoldScheduleID, e.drainRowPending
 

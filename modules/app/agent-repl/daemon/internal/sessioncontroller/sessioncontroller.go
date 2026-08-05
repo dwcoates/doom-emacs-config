@@ -950,8 +950,20 @@ func (m *Manager) submitPromptAs(ctx context.Context, workspace, requestID, text
 	// THE REVIVAL GATE, ahead of ensure() on purpose: ensure() brings a stopped
 	// shim back up, so asking after it would have already paid the bring-up and
 	// silently un-slept the session the gate exists to hold (hibernation.go).
-	if err := m.guardHibernation(workspace, requestID, origin, who); err != nil {
-		return err
+	//
+	// IT IS ASKED ONLY WHERE A REFUSAL IS THE RIGHT ANSWER. A session that is
+	// hibernated with no revival decision behind it refuses prompts outright and
+	// that is unchanged. A session whose user HAS chosen compact-first is a
+	// different question: its record stays hibernated on purpose while the
+	// compaction runs, and the contract for that window is delayed-never-dropped
+	// — so the prompt is admitted to the queue as a PARKED entry instead
+	// (revive.go, queue.go). Skipping the gate here is safe because the entry is
+	// parked rather than forwarded, and forwardPrompt's own copy of the gate
+	// still stands behind every delivery path.
+	if !m.revivalParkAdmits(workspace, who) {
+		if err := m.guardHibernation(workspace, requestID, origin, who); err != nil {
+			return err
+		}
 	}
 	d, err := m.ensure(ctx, workspace)
 	if err != nil {
@@ -1024,6 +1036,17 @@ func (m *Manager) submitPromptAs(ctx context.Context, workspace, requestID, text
 	if entry.keepAliveHeld() {
 		m.logf("session-controller: queued prompt entry=%s session=%s ws=%q origin=%q keep_alive_turn=%s classifier=SKIPPED (held behind a cache keep-alive turn)",
 			entry.id, d.sessionID, workspace, origin, entry.keepAliveHoldTurnID)
+		m.publish(d.sessionID, view, recs)
+		return nil
+	}
+	// THE CLASSIFIER NEVER RUNS ON A REVIVAL-PARKED ENTRY EITHER. The turn in
+	// front of it is the revival's own `/compact`, and the only verdict the
+	// classifier could return that changes anything — INTERJECT — would demand
+	// an interrupt of the compaction the user chose to pay for. Spending a model
+	// call to ask for that is spending it to be wrong.
+	if entry.revivalHeld() {
+		m.logf("session-controller: queued prompt entry=%s session=%s ws=%q origin=%q revival_session=%s classifier=SKIPPED (parked by an in-flight compact-first revival)",
+			entry.id, d.sessionID, workspace, origin, entry.revivalHoldSessionID)
 		m.publish(d.sessionID, view, recs)
 		return nil
 	}
