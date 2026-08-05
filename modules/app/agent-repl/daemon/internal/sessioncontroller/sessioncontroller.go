@@ -445,9 +445,14 @@ type Manager struct {
 	// the wedged-pull branch can be driven without a minute-long wait (see
 	// repull.go).
 	repullWaitGraceOverride time.Duration
-	closed                  bool
-	rootCtx                 context.Context
-	rootStop                context.CancelFunc
+	// reviveCompactBoundOverride overrides how long a compact-first revival's
+	// detached completion wait allows the compaction. Zero means the production
+	// constant; only a test assigns one, so the timeout branch can be driven
+	// without a ten-minute wait (see revive.go).
+	reviveCompactBoundOverride time.Duration
+	closed                     bool
+	rootCtx                    context.Context
+	rootStop                   context.CancelFunc
 	// exits counts every session-controller-exit goroutine (the tail of bringUp's `go
 	// func`), so Close can JOIN them. Unjoined, that tail — which drains the
 	// queue, publishes the empty view, and persists queued_prompts through the

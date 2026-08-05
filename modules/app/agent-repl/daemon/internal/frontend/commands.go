@@ -100,9 +100,10 @@ type CommandHandler interface {
 	// daemon never discards in-flight work to satisfy a hibernate.
 	HibernateWorkspace(ctx context.Context, workspace, requestID string, cmd *frontendv1.HibernateWorkspaceCmd) error
 	// ReviveSession brings a hibernated session back under the user's chosen
-	// mode. Synchronous, because the ack is the user's only report of whether
-	// their session came back — and under compact_first the call does not
-	// return until the compaction has actually landed.
+	// mode. THE ACK IS AT ACCEPTANCE: it reports that the revival was accepted,
+	// the session is up, and under compact_first that `/compact` was submitted
+	// — never that the compaction has landed. The gate's release travels on its
+	// own channel, the SessionView the cleared hibernation publishes.
 	ReviveSession(ctx context.Context, workspace, requestID string, cmd *frontendv1.ReviveSessionCmd) error
 }
 
