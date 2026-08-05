@@ -128,6 +128,16 @@ run_report() { # ROOT -> stdout on $OUT, exit status in $RC
     OUT="$root/out.json"
 }
 
+run_required_report() { # ROOT SYSTEM -> stdout on $OUT, exit status in $RC
+    local root="$1" system="$2"
+    set +e
+    HOME="$root/home" PATH="$root/stubs:$PATH" \
+        bash "$root/bin/readiness-report.sh" --require-ready "$system" >"$root/out.json" 2>"$root/err.txt"
+    RC=$?
+    set -e
+    OUT="$root/out.json"
+}
+
 # jq_get FILE PYTHON-EXPR — read the report with `d` bound to the parsed
 # document. Also the JSON-validity assertion: a malformed document makes every
 # query in the suite fail loudly rather than silently comparing empty strings.
@@ -432,6 +442,45 @@ t_unknown_argument_exits_two() {
     rm -rf "$root"
 }
 
+# --- 16. the gate passes with source/deployed identities in JSON ------------
+t_required_ready_gate_passes_with_revisions() {
+    local root sha; root="$(new_root)"
+    sha="$(git_c "$root" log -1 --format=%H -- webapp proto)"
+    stamp "$root/webapp/dist/.built-sha" "$sha"
+    run_required_report "$root" webapp
+    if [ "$RC" -eq 0 ] \
+       && [ "$(jq_get "$OUT" 'd["gate"]["ready"]')" = "True" ] \
+       && [ "$(jq_get "$OUT" 'd["gate"]["deployed_sha"]')" = "$sha" ] \
+       && [ "$(jq_get "$OUT" 'd["gate"]["source_sha"]')" = "$sha" ]; then
+        pass "a current required system passes with both revisions in the structured gate"
+    else
+        fail "a current required system passes with both revisions in the structured gate" \
+             "rc=$RC out: $(cat "$OUT") err: $(cat "$root/err.txt")"
+    fi
+    rm -rf "$root"
+}
+
+# --- 17. the gate keeps JSON but fails loudly on revision drift -------------
+t_required_ready_gate_fails_with_revisions_on_drift() {
+    local root deployed source; root="$(new_root)"
+    deployed="$(git_c "$root" log -1 --format=%H -- webapp proto)"
+    stamp "$root/webapp/dist/.built-sha" "$deployed"
+    touch_system "$root" webapp "webapp gate drift"
+    source="$(head_sha "$root")"
+    run_required_report "$root" webapp
+    if [ "$RC" -eq 3 ] \
+       && [ "$(jq_get "$OUT" 'd["gate"]["ready"]')" = "False" ] \
+       && [ "$(jq_get "$OUT" 'd["gate"]["deployed_sha"]')" = "$deployed" ] \
+       && [ "$(jq_get "$OUT" 'd["gate"]["source_sha"]')" = "$source" ] \
+       && [ "$(jq_get "$OUT" 'd["gate"]["error"]')" = "required system is not ready" ]; then
+        pass "a drifting required system exits nonzero with both revisions in valid JSON"
+    else
+        fail "a drifting required system exits nonzero with both revisions in valid JSON" \
+             "rc=$RC out: $(cat "$OUT") err: $(cat "$root/err.txt")"
+    fi
+    rm -rf "$root"
+}
+
 t_missing_stamp_is_unknown
 t_current_stamp_is_ready
 t_commits_behind_counts_only_own_system
@@ -447,6 +496,8 @@ t_processless_systems_report_null_running
 t_elisp_is_not_reported
 t_no_git_checkout_exits_nonzero
 t_unknown_argument_exits_two
+t_required_ready_gate_passes_with_revisions
+t_required_ready_gate_fails_with_revisions_on_drift
 
 echo "-----"
 echo "passed: $PASS  failed: $FAIL"
