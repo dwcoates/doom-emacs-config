@@ -414,6 +414,19 @@ type consumer struct {
 	// Called on the shim read-loop goroutine, with the same non-blocking
 	// obligation onTurn carries.
 	onTurnEnded func(atMs int64)
+	// onTurnStarted reports an accepted turn START with the boundary's OWN
+	// instant, so the controller can re-stamp a keep-alive window's lower bound
+	// onto the clock that stamps conversation items (keepalivesubmit.go).
+	//
+	// IT CARRIES BOTH THE NAME AND THE INSTANT because the re-stamp needs both
+	// and neither existing start-side hook has the pair: onTurn has the instant
+	// but no name and fires only on the idle-to-active edge, and onTurnClaims
+	// has the names but no instant. Assigned after construction, like
+	// onVendorSessionID.
+	//
+	// Called on the shim read-loop goroutine, with the same non-blocking
+	// obligation onTurn carries.
+	onTurnStarted func(turnID string, atMs int64)
 	// onContextCompacted reports that a compaction COMPLETED — the compacting
 	// axis closing, which is the only first-class report the vendor gives.
 	// A compact-first revival waits on it before it will accept prompts.
@@ -812,6 +825,16 @@ func (c *consumer) Apply(ev *corev1.Event) error {
 	// is what survives a laptop sleep and a daemon bounce.
 	if te := ev.GetTurnEnded(); te != nil && c.onTurnEnded != nil {
 		c.onTurnEnded(c.boundaryInstant(ev))
+	}
+	// THE KEEP-ALIVE WINDOW'S LOWER BOUND, taken from the START boundary for the
+	// exact reason its upper bound is taken from the END boundary (queue.go):
+	// both are compared against timestamps the VENDOR wrote, so both must come
+	// from the vendor's clock or the comparison is decided by clock agreement
+	// rather than by evidence. Placed with the end hook, after the durable
+	// ledger and the SSM have accepted the boundary, so the instant re-stamped
+	// is one the rest of the daemon also agrees the turn began at.
+	if ts := ev.GetTurnStarted(); ts != nil && ts.GetTurnId() != "" && c.onTurnStarted != nil {
+		c.onTurnStarted(ts.GetTurnId(), c.boundaryInstant(ev))
 	}
 	// EVERY accepted boundary, edge or not: a turn that starts while another is
 	// still ending produces no edge, and a wait correlated on that turn's id
@@ -1685,6 +1708,14 @@ func (c *consumer) boundaryInstant(ev *corev1.Event) int64 {
 // to be repaired, and collapsing them would hide the second one.
 func (c *consumer) keepAliveWindowUnclosedUUID(turnID string) string {
 	return "keep_alive_window_unclosed:" + c.sessionID + ":" + turnID
+}
+
+// keepAliveWindowInvertedUUID is the stable card identity for ONE ping's
+// refused, clamped close. Keyed like the unclosed card above, and DISTINCT from
+// it: the two report different faults about the same row, and sharing an
+// identity would let one replace the other on screen.
+func (c *consumer) keepAliveWindowInvertedUUID(turnID string) string {
+	return "keep_alive_window_inverted:" + c.sessionID + ":" + turnID
 }
 
 // resync replays the retained conversation deltas from fromSeq (0 = from the
