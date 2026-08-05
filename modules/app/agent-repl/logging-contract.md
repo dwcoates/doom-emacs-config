@@ -77,6 +77,25 @@ Identifiers belong in their dedicated fields, never only inside `message`.
 Dynamic values and error causes belong in `context`, never in an incompatible
 per-call text convention.
 
+## Operation queries
+
+Operators query stable `operation` values rather than matching human-readable
+`message` text. In particular, the shim entrypoint reserves
+`shim.main.fatal` for unrecoverable process termination records only. Each
+such record has `level: "error"` plus a classified cause and an explicit exit
+outcome in `context`. Startup, model normalization, query selection, session
+lock acquisition, signal handling, and authorized shutdown use
+`shim.main.lifecycle` at their individually documented severity.
+
+An operation-only fatal query therefore needs no message filter:
+
+```sh
+modules/app/agent-repl/scripts/agent-repl-log-discovery.sh \
+  --workspace /absolute/workspace \
+  --runtime shim \
+  --tail 2000 | jq -c 'select(.operation == "shim.main.fatal")'
+```
+
 ## Timestamp representation
 
 Every runtime renders `timestamp` identically, so records from different

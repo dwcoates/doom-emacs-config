@@ -170,8 +170,16 @@ describe("shim runtime logging", () => {
     await bootstrapLog.configureLog({ fd: 3, cwd: "/canonical/workspace", agentReplSessionId: "agent-session-1" });
     const configuredTerminal = stderr();
     bootstrapFatal(new Error("configured"));
-    expect(persisted()[0]).toMatchObject({ level: "error", operation: "shim.main.fatal" });
+    expect(persisted()[0]).toMatchObject({
+      level: "error",
+      operation: "shim.main.fatal",
+      context: expect.objectContaining({
+        cause_class: "unrecoverable_entrypoint_failure",
+        cause_type: "Error",
+        exit_outcome: "process_exit_1",
+        cause: expect.objectContaining({ name: "Error", message: "configured" }),
+      }),
+    });
     expect(configuredTerminal).toHaveLength(1);
   });
 });
-
