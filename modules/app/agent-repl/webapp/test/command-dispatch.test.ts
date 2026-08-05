@@ -200,10 +200,24 @@ describe("ack-correlated commands", () => {
     await expect(p).resolves.toBeUndefined();
   });
 
-  it("resync renders the uint64 fromSeq as a string", async () => {
-    const { dispatcher, sent } = newDispatcher();
-    const p = dispatcher.resync("/w", 42);
-    expect(JSON.parse(sent[0]).resync).toEqual({ fromSeq: "42" });
+  it("resync renders the snapshot identity and uint64 fromSeq", async () => {
+    const { dispatcher, sent, records } = newDispatcher();
+    const p = dispatcher.resync("/w", { fromSeq: 42, sessionId: "s1", controllerGenerationId: "g7" });
+    expect(JSON.parse(sent[0]).resync).toEqual({
+      fromSeq: "42",
+      sessionId: "s1",
+      controllerGenerationId: "g7",
+    });
+    expect(records).toContainEqual(expect.objectContaining({
+      operation: "command-dispatch.resync",
+      agent_repl_session_id: "s1",
+      context: expect.objectContaining({
+        workspace: "/w",
+        from_seq: 42,
+        controller_generation_id: "g7",
+        decision: "dispatch",
+      }),
+    }));
     dispatcher.observe(ackFrame("r1", true));
     await expect(p).resolves.toBeUndefined();
   });

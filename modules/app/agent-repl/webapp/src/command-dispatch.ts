@@ -179,6 +179,13 @@ export interface PermissionAnswerArgs {
   denyMessage: string;
 }
 
+/** The revisioned WorkspaceState identity that authorizes a history replay. */
+export interface ResyncArgs {
+  fromSeq: number;
+  sessionId: string;
+  controllerGenerationId: string;
+}
+
 export interface DispatchOptions {
   /** Send one encoded frame; returns false when the socket is not open. */
   send: (raw: string) => boolean;
@@ -314,8 +321,18 @@ export class CommandDispatcher {
     });
   }
 
-  resync(workspace: string, fromSeq: number): Promise<void> {
-    return this.dispatch(workspace, { case: "resync", fromSeq });
+  resync(workspace: string, args: ResyncArgs): Promise<void> {
+    log("info", "command dispatcher selected snapshot-bound resync", {
+      operation: "command-dispatch.resync",
+      context: {
+        workspace,
+        from_seq: args.fromSeq,
+        agent_repl_session_id: args.sessionId,
+        controller_generation_id: args.controllerGenerationId,
+        decision: "dispatch",
+      },
+    });
+    return this.dispatch(workspace, { case: "resync", ...args });
   }
 
   deleteSession(sessionId: string): Promise<void> {
