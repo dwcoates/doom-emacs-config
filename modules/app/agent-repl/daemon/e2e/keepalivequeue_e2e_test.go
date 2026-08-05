@@ -42,6 +42,12 @@ type keepAliveHold struct {
 func heldByKeepAlivePing(t *testing.T, s *keepAliveSession, text string) keepAliveHold {
 	t.Helper()
 	s.idleFor(t, s.policy.pingAt())
+	// Barrier: without it the prompt can win the race into the daemon before
+	// the sweeper's ping submits, and the ping is then declined turn_active —
+	// no hold ever exists. After the barrier the claim is taken (or the ping
+	// already ended and the rewind-in-progress ownership holds instead), so
+	// the prompt is parked in every schedule.
+	s.syncSweep(t)
 	writeCmd(t, s.conn, fmt.Sprintf(
 		`{"requestId":"r-held","submitPrompt":{"text":%q,"promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`, text))
 
