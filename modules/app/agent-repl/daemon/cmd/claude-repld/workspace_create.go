@@ -772,6 +772,10 @@ func (b *WorkspaceCreationBridge) PublishWorkspaceAvailable(_ context.Context, a
 	value := toProtoAvailable(workspacecreate.Job{ID: a.JobID, FinalName: a.Name, Branch: a.Branch, ResolvedBaseCommit: a.BaseCommit, WorktreePath: a.WorktreePath, SessionID: a.SessionID, Request: a.Request})
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	// A newly published create can reuse a historical worktree path.  Discard
+	// the prior managed verdict before any frame can consult it, so the new
+	// job's durable unmaterialized latch is read instead of an old allow.
+	delete(b.publication, a.WorktreePath)
 	for ch := range b.avail {
 		ch <- value
 	}
