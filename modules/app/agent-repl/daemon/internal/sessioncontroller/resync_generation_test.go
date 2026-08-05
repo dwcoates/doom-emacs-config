@@ -56,6 +56,14 @@ func TestResyncForGenerationRejectsOldClientAcrossLifecycleBoundaries(t *testing
 		name   string
 		mutate func(*repullHarness, *sessionController)
 	}{
+		{"detach_in_progress", func(h *repullHarness, _ *sessionController) {
+			h.m.mu.Lock()
+			if h.m.hibernating == nil {
+				h.m.hibernating = map[string]bool{}
+			}
+			h.m.hibernating["ws"] = true
+			h.m.mu.Unlock()
+		}},
 		{"detach", func(h *repullHarness, d *sessionController) {
 			h.m.mu.Lock()
 			delete(h.m.byWS, "ws")
@@ -176,4 +184,35 @@ func TestResyncForGenerationLogsBothIdentitiesAndReplaySource(t *testing.T) {
 		}
 	}
 	t.Fatalf("missing classified stale-resync diagnostic: %v", lines)
+}
+
+func TestResyncForGenerationLogsHibernationRevocationBeforeReplay(t *testing.T) {
+	var lines []string
+	client := &replayClient{}
+	h := newRepullHarnessWithLog(t, client, func(format string, args ...any) {
+		lines = append(lines, fmt.Sprintf(format, args...))
+	})
+	d := h.controller(t)
+	h.m.mu.Lock()
+	if h.m.hibernating == nil {
+		h.m.hibernating = map[string]bool{}
+	}
+	h.m.hibernating["ws"] = true
+	h.m.mu.Unlock()
+
+	err := h.m.ResyncForGeneration("ws", d.sessionID, d.generationID, 9)
+	if !errors.Is(err, errclass.ErrSessionSuperseded) {
+		t.Fatalf("error = %v, want superseded", err)
+	}
+	if client.callCount() != 0 {
+		t.Fatalf("hibernation-revoked resync started shim replay")
+	}
+	for _, line := range lines {
+		if strings.Contains(line, `replay_source="hibernation_transition"`) &&
+			strings.Contains(line, `rejection_cause="eligibility_revoked"`) &&
+			strings.Contains(line, "from_seq=9") {
+			return
+		}
+	}
+	t.Fatalf("missing hibernation revocation diagnostic: %v", lines)
 }

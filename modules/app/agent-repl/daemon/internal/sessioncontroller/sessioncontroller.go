@@ -1517,12 +1517,20 @@ func (m *Manager) AnswerPermission(_ context.Context, workspace, permissionReque
 func (m *Manager) ResyncForGeneration(workspace, expectedSessionID, expectedGenerationID string, fromSeq uint64) error {
 	m.mu.Lock()
 	d, live := m.byWS[workspace]
+	if m.hibernating[workspace] {
+		liveSessionID, liveGenerationID := "", ""
+		if live {
+			liveSessionID, liveGenerationID = d.sessionID, d.generationID
+		}
+		m.mu.Unlock()
+		return m.rejectSupersededResync(workspace, expectedSessionID, expectedGenerationID, liveSessionID, liveGenerationID, fromSeq, "hibernation_transition", "eligibility_revoked")
+	}
 	if live {
 		liveSessionID, liveGenerationID := d.sessionID, d.generationID
 		matches := expectedSessionID == liveSessionID && expectedGenerationID == liveGenerationID
 		m.mu.Unlock()
 		if !matches {
-			return m.rejectSupersededResync(workspace, expectedSessionID, expectedGenerationID, liveSessionID, liveGenerationID, fromSeq, "live_controller")
+			return m.rejectSupersededResync(workspace, expectedSessionID, expectedGenerationID, liveSessionID, liveGenerationID, fromSeq, "live_controller", "identity_mismatch")
 		}
 		m.logf("session-controller: resync eligibility ACCEPTED ws=%q request_session=%q request_generation=%q live_session=%q live_generation=%q from_seq=%d replay_source=%q decision=current_live_controller",
 			workspace, expectedSessionID, expectedGenerationID, liveSessionID, liveGenerationID, fromSeq, "live_controller")
@@ -1554,7 +1562,7 @@ func (m *Manager) ResyncForGeneration(workspace, expectedSessionID, expectedGene
 	liveSessionID, liveGenerationID := state.GetSessionId(), state.GetControllerGenerationId()
 	if expectedSessionID != liveSessionID || expectedGenerationID != liveGenerationID {
 		m.mu.Unlock()
-		return m.rejectSupersededResync(workspace, expectedSessionID, expectedGenerationID, liveSessionID, liveGenerationID, fromSeq, "durable_history")
+		return m.rejectSupersededResync(workspace, expectedSessionID, expectedGenerationID, liveSessionID, liveGenerationID, fromSeq, "durable_history", "identity_mismatch")
 	}
 	m.logf("session-controller: resync eligibility ACCEPTED ws=%q request_session=%q request_generation=%q live_session=%q live_generation=%q from_seq=%d replay_source=%q decision=current_durable_snapshot",
 		workspace, expectedSessionID, expectedGenerationID, liveSessionID, liveGenerationID, fromSeq, "durable_history")
@@ -1568,11 +1576,11 @@ func (m *Manager) ResyncForGeneration(workspace, expectedSessionID, expectedGene
 	return err
 }
 
-func (m *Manager) rejectSupersededResync(workspace, requestSessionID, requestGenerationID, liveSessionID, liveGenerationID string, fromSeq uint64, replaySource string) error {
-	err := fmt.Errorf("%w: resync ws=%q request_session=%q request_generation=%q live_session=%q live_generation=%q from_seq=%d replay_source=%q",
-		errclass.ErrSessionSuperseded, workspace, requestSessionID, requestGenerationID, liveSessionID, liveGenerationID, fromSeq, replaySource)
-	m.logf("session-controller: resync eligibility REJECTED ws=%q request_session=%q request_generation=%q live_session=%q live_generation=%q from_seq=%d replay_source=%q decision=superseded error=%v",
-		workspace, requestSessionID, requestGenerationID, liveSessionID, liveGenerationID, fromSeq, replaySource, err)
+func (m *Manager) rejectSupersededResync(workspace, requestSessionID, requestGenerationID, liveSessionID, liveGenerationID string, fromSeq uint64, replaySource, rejectionCause string) error {
+	err := fmt.Errorf("%w: resync ws=%q request_session=%q request_generation=%q live_session=%q live_generation=%q from_seq=%d replay_source=%q rejection_cause=%q",
+		errclass.ErrSessionSuperseded, workspace, requestSessionID, requestGenerationID, liveSessionID, liveGenerationID, fromSeq, replaySource, rejectionCause)
+	m.logf("session-controller: resync eligibility REJECTED ws=%q request_session=%q request_generation=%q live_session=%q live_generation=%q from_seq=%d replay_source=%q decision=superseded rejection_cause=%q error=%v",
+		workspace, requestSessionID, requestGenerationID, liveSessionID, liveGenerationID, fromSeq, replaySource, rejectionCause, err)
 	return err
 }
 

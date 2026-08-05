@@ -18,6 +18,7 @@ import (
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/errclass"
 
 	"github.com/gorilla/websocket"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -904,14 +905,16 @@ func (s *Server) readLoop(c conn, cl *client) {
 		// scope-filtered for a scoped connection. The handler covers the
 		// conversation-delta replay the snapshot omits.
 		if cmd.GetResync() != nil {
-			snapshot := snapshotForClient(s.state.Snapshot(), cl.scope, cl.kind)
-			if snap, err := marshalFrame(SnapshotFrame(snapshot)); err != nil {
-				s.logf("frontend: marshal resync snapshot: %v", err)
-			} else {
-				s.enqueue(cl, outFrame{data: snap})
-			}
+			s.enqueueResyncSnapshot(cl, cmd, "before_dispatch")
 		}
 		ack, response := s.dispatchClientCommand(cl, cmd)
+		// A stale generation is a request to adopt current authority, not a
+		// history failure. Capture again AFTER the daemon made that decision so
+		// a transition crossing the pre-dispatch capture cannot leave the client
+		// holding the very identity the command just proved was retired.
+		if cmd.GetResync() != nil && ack.GetFailure().GetErrorType() == string(errclass.TypeSessionSuperseded) {
+			s.enqueueResyncSnapshot(cl, cmd, "after_superseded")
+		}
 		if !ack.GetOk() {
 			s.logf("frontend: command nack {request_id=%s ws=%s}: %s", ack.GetRequestId(), cmd.GetWorkspace(), ack.GetError())
 		}
@@ -928,6 +931,19 @@ func (s *Server) readLoop(c conn, cl *client) {
 			s.enqueue(cl, outFrame{key: coalesceKey(response), data: data})
 		}
 	}
+}
+
+func (s *Server) enqueueResyncSnapshot(cl *client, cmd *frontendv1.FrontendCommand, phase string) {
+	snapshot := snapshotForClient(s.state.Snapshot(), cl.scope, cl.kind)
+	snap, err := marshalFrame(SnapshotFrame(snapshot))
+	if err != nil {
+		s.logf("frontend: marshal resync snapshot FAILED client_id=%d request_id=%q ws=%q phase=%q error=%v",
+			cl.id, cmd.GetRequestId(), cmd.GetWorkspace(), phase, err)
+		return
+	}
+	s.enqueue(cl, outFrame{data: snap})
+	s.logVerbosef("frontend: resync snapshot queued client_id=%d request_id=%q ws=%q phase=%q workspaces=%d",
+		cl.id, cmd.GetRequestId(), cmd.GetWorkspace(), phase, len(snapshot.GetWorkspaces()))
 }
 
 // enqueue delivers a frame to a client's bounded outbox. A full queue is first
