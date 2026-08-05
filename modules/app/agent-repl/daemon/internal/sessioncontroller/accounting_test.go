@@ -111,7 +111,7 @@ func TestResponseWithoutMessageStartRemainsExplicitlyUntimed(t *testing.T) {
 	if err := r.observe(&corev1.Event{Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}, "s"); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.observe(accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{Message: &datav1.ApiAssistantMessage{Id: "historical", Usage: &datav1.ApiUsage{OutputTokens: 2}}}}}), "s"); err != nil {
+	if err := r.observe(accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{Message: &datav1.ApiAssistantMessage{Id: "historical", Model: "model", Usage: &datav1.ApiUsage{OutputTokens: 2}}}}}), "s"); err != nil {
 		t.Fatal(err)
 	}
 	if got := r.turns["t"].responses[0].GetResponseTiming(); got != nil {
@@ -614,7 +614,7 @@ func TestResponseUsageRejectsRootTurnMismatchBeforeReducerMutation(t *testing.T)
 	r := newTurnAccountingReducer()
 	r.activeTurnID = "turn"
 	r.turns["turn"] = &accountingTurn{}
-	event := accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{Message: &datav1.ApiAssistantMessage{Id: "message", Usage: &datav1.ApiUsage{InputTokens: 1}}}}})
+	event := accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{Message: &datav1.ApiAssistantMessage{Id: "message", Model: "model", Usage: &datav1.ApiUsage{InputTokens: 1}}}}})
 	event.RequestId = "other-turn"
 	err := r.observe(event, "session")
 	var claim *unattributedResponseUsageError
@@ -628,7 +628,7 @@ func TestResponseUsageRejectsRootTurnMismatchBeforeReducerMutation(t *testing.T)
 
 func TestResponseUsageWithoutValidatedClaimFailsBeforeReducerMutation(t *testing.T) {
 	r := newTurnAccountingReducer()
-	event := accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{Message: &datav1.ApiAssistantMessage{Id: "message", Usage: &datav1.ApiUsage{InputTokens: 1}}}}})
+	event := accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{Message: &datav1.ApiAssistantMessage{Id: "message", Model: "model", Usage: &datav1.ApiUsage{InputTokens: 1}}}}})
 	err := r.observe(event, "session")
 	var claim *unattributedResponseUsageError
 	if !errors.As(err, &claim) || claim.reason != "no_active_turn" || claim.apiMessageID != "message" {
@@ -648,7 +648,7 @@ func TestResponseUsageAcceptsRootTurnAdmittedByRotationBridge(t *testing.T) {
 		}},
 	}
 	r.observeTurnClaimBridge(bridge)
-	event := accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{Message: &datav1.ApiAssistantMessage{Id: "message", Usage: &datav1.ApiUsage{InputTokens: 1}}}}})
+	event := accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{Message: &datav1.ApiAssistantMessage{Id: "message", Model: "model", Usage: &datav1.ApiUsage{InputTokens: 1}}}}})
 	event.RequestId = "turn"
 
 	if err := r.observe(event, "session"); err != nil {
@@ -663,7 +663,7 @@ func TestResponseUsagePreservesIndependentSDKRequestIdentityUnderRootTurnClaim(t
 	r := newTurnAccountingReducer()
 	r.activeTurnID = "turn"
 	r.turns["turn"] = &accountingTurn{}
-	event := accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{RequestId: proto.String("api-request"), Message: &datav1.ApiAssistantMessage{Id: "message", Usage: &datav1.ApiUsage{InputTokens: 1}}}}})
+	event := accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{RequestId: proto.String("api-request"), Message: &datav1.ApiAssistantMessage{Id: "message", Model: "model", Usage: &datav1.ApiUsage{InputTokens: 1}}}}})
 	event.RequestId = "turn"
 	if err := r.observe(event, "session"); err != nil {
 		t.Fatalf("observe independent request identities: %v", err)
@@ -683,7 +683,7 @@ func TestResponseUsagePreservesAbsentSDKRequestIdentityUnderActiveTurnClaim(t *t
 	r := newTurnAccountingReducer()
 	r.activeTurnID = "turn"
 	r.turns["turn"] = &accountingTurn{}
-	stream := &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{SessionId: "vendor-session", Message: &datav1.ApiAssistantMessage{Id: "message", Usage: &datav1.ApiUsage{InputTokens: 1}}}}}
+	stream := &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{SessionId: "vendor-session", Message: &datav1.ApiAssistantMessage{Id: "message", Model: "model", Usage: &datav1.ApiUsage{InputTokens: 1}}}}}
 	vendor, err := anypb.New(stream)
 	if err != nil {
 		t.Fatal(err)
@@ -704,7 +704,7 @@ func TestResponseUsageRejectsPresentBlankSDKRequestIdentityBeforeReducerMutation
 	r := newTurnAccountingReducer()
 	r.activeTurnID = "turn"
 	r.turns["turn"] = &accountingTurn{}
-	event := accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{RequestId: proto.String(""), Message: &datav1.ApiAssistantMessage{Id: "message", Usage: &datav1.ApiUsage{InputTokens: 1}}}}})
+	event := accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{RequestId: proto.String(""), Message: &datav1.ApiAssistantMessage{Id: "message", Model: "model", Usage: &datav1.ApiUsage{InputTokens: 1}}}}})
 	event.RequestId = "turn"
 
 	err := r.observe(event, "session")
@@ -722,7 +722,7 @@ func TestUnmodeledUsageIsPreservedAndLoudLogged(t *testing.T) {
 	c := newConsumer("ws", "s", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }, nil, nil, nil, nil, nil)
 	c.accounting.activeTurnID = "t"
 	c.accounting.turns["t"] = &accountingTurn{}
-	c.Consume(accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{Message: &datav1.ApiAssistantMessage{Id: "m", Usage: &datav1.ApiUsage{UnmodeledUsage: unmodeled}}}}}))
+	c.Consume(accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{Message: &datav1.ApiAssistantMessage{Id: "m", Model: "model", Usage: &datav1.ApiUsage{UnmodeledUsage: unmodeled}}}}}))
 	if len(c.accounting.turns["t"].responses) != 1 || c.accounting.turns["t"].responses[0].GetUsage().GetUnmodeledUsage().GetFields()["future_counter"] == nil {
 		t.Fatal("unmodeled usage not preserved")
 	}
@@ -962,7 +962,7 @@ func TestHistoricalConversationAttachesTranscriptUsageOnLiveAndReplayPaths(t *te
 	c := newConsumer("ws", "s", push, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, t.Logf, nil, nil, nil, nil, nil)
 	line := &datav1.TranscriptLine{Line: &datav1.TranscriptLine_Assistant{Assistant: &datav1.AssistantLine{
 		Envelope: &datav1.LineEnvelope{Uuid: "line", SessionId: "claude", AgentId: "nested"},
-		Message: &datav1.ApiAssistantMessage{Id: "message", Usage: &datav1.ApiUsage{
+		Message: &datav1.ApiAssistantMessage{Id: "message", Model: "model", Usage: &datav1.ApiUsage{
 			InputTokens: 2, OutputTokens: 3, CacheReadInputTokens: 5,
 		}, Content: []*datav1.ContentBlock{{Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: "hello"}}}}},
 	}}}
@@ -1037,11 +1037,87 @@ func TestHistoricalUsagePersistenceFailurePrecedesConsumerMutation(t *testing.T)
 	}
 }
 
+func TestTokenUtilizationModelRejectionLogsCanonicalIngressContextBeforeConsumerMutation(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		plane     corev1.Plane
+		event     func(*testing.T) *corev1.Event
+		prepare   func(*consumer)
+		wantModel string
+		claudeID  string
+	}{
+		{
+			name:  "live whitespace model",
+			plane: corev1.Plane_PLANE_STREAM,
+			event: func(t *testing.T) *corev1.Event {
+				ev := accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{Message: &datav1.ApiAssistantMessage{Id: "live-message", Model: " \t\n", Usage: &datav1.ApiUsage{InputTokens: 1}}}}})
+				ev.Seq, ev.Plane = 11, corev1.Plane_PLANE_STREAM
+				ev.RequestId = "turn"
+				return ev
+			},
+			prepare:   func(c *consumer) { c.accounting.activeTurnID, c.accounting.turns["turn"] = "turn", &accountingTurn{} },
+			wantModel: "\" \\t\\n\"",
+			claudeID:  "vendor-session",
+		},
+		{
+			name:  "historical blank model",
+			plane: corev1.Plane_PLANE_FILE,
+			event: func(t *testing.T) *corev1.Event {
+				ev := historicalUsageEvent(t)
+				ev.Seq = 12
+				line := &datav1.TranscriptLine{}
+				if err := ev.GetVendor().UnmarshalTo(line); err != nil {
+					t.Fatal(err)
+				}
+				line.GetAssistant().GetMessage().Model = ""
+				vendor, err := anypb.New(line)
+				if err != nil {
+					t.Fatal(err)
+				}
+				ev.Payload = &corev1.Event_Vendor{Vendor: vendor}
+				return ev
+			},
+			prepare:   func(c *consumer) { c.historicalUsageStore = &fakeHistoricalUsageStore{} },
+			wantModel: "\"\"",
+			claudeID:  "claude",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var logs []string
+			push := &fakePusher{}
+			c := newConsumer("workspace", "daemon-session", push, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }, nil, nil, nil, nil, nil)
+			tc.prepare(c)
+			err := c.Consume(tc.event(t))
+			if err == nil || !strings.Contains(err.Error(), "blank model") {
+				t.Fatalf("Consume error = %v, want blank model rejection", err)
+			}
+			if len(c.snapshotRing()) != 0 || len(push.convo) != 0 {
+				t.Fatalf("rejected token utilization mutated consumer: retained=%d pushes=%d", len(c.snapshotRing()), len(push.convo))
+			}
+			log := strings.Join(logs, "\n")
+			for _, field := range []string{
+				"token utilization REJECTED before mutation",
+				"field_path=\"TokenUtilization.model\"",
+				"api_message_id=\"" + map[corev1.Plane]string{corev1.Plane_PLANE_STREAM: "live-message", corev1.Plane_PLANE_FILE: "message"}[tc.plane] + "\"",
+				"model=" + tc.wantModel,
+				"source_plane=" + tc.plane.String(),
+				"agent_repl_session_id=\"daemon-session\"",
+				"claude_session_id=\"" + tc.claudeID + "\"",
+				"session=\"daemon-session\"",
+			} {
+				if !strings.Contains(log, field) {
+					t.Fatalf("rejection log = %q, want field %q", log, field)
+				}
+			}
+		})
+	}
+}
+
 func historicalUsageEvent(t *testing.T) *corev1.Event {
 	t.Helper()
 	line := &datav1.TranscriptLine{Line: &datav1.TranscriptLine_Assistant{Assistant: &datav1.AssistantLine{
 		Envelope: &datav1.LineEnvelope{Uuid: "line", SessionId: "claude", AgentId: "nested"},
-		Message: &datav1.ApiAssistantMessage{Id: "message", Usage: &datav1.ApiUsage{
+		Message: &datav1.ApiAssistantMessage{Id: "message", Model: "model", Usage: &datav1.ApiUsage{
 			InputTokens: 2, OutputTokens: 3, CacheReadInputTokens: 5,
 		}, Content: []*datav1.ContentBlock{{Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: "hello"}}}}},
 	}}}
