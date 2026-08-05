@@ -35,6 +35,16 @@ make_tree() {
              "$mod/agent-shim/claude/shim/dist"
     cp "$SCRIPT_UNDER_TEST" "$mod/bin/deploy-all.sh"
     cp "$THIS_DIR/lib-deploy-stamp.sh" "$mod/bin/lib-deploy-stamp.sh"
+    cat > "$mod/bin/readiness-report.sh" <<'EOF'
+#!/usr/bin/env bash
+echo "readiness-report $*" >> "$STUB_LOG"
+if [ "${READINESS_GATE_FAIL:-0}" = "1" ]; then
+    printf '%s\n' '{"gate":{"system":"webapp","ready":false,"deployed_sha":"deployed-revision","source_sha":"source-revision","error":"required system is not ready"}}'
+    exit 3
+fi
+printf '%s\n' '{"gate":{"system":"webapp","ready":true,"deployed_sha":"source-revision","source_sha":"source-revision"}}'
+EOF
+    chmod +x "$mod/bin/readiness-report.sh"
     chmod +x "$mod/bin/deploy-all.sh"
     printf ';; stub daemon control plane\n' > "$mod/daemon.el"
 
@@ -233,10 +243,24 @@ if [ "$RC" -eq 0 ] \
    && log_before "go build -o .*claude-repld" "pwd=shim-store" \
    && log_before "kickstart -k gui/.*shim-store" "kickstart -k gui/.*shim-claude-sidecar" \
    && log_before "load .*daemon.el" "daemon-restart" \
-   && log_before "kickstart -k gui/.*shim-claude-sidecar" "daemon-restart"; then
+   && log_before "kickstart -k gui/.*shim-claude-sidecar" "daemon-restart" \
+   && log_has "readiness-report --require-ready webapp"; then
     pass "fresh tree runs the full chain in dependency order"
 else
     fail "fresh tree runs the full chain in dependency order" "rc=$RC log: $(cat "$STUB_LOG")"
+fi
+
+# --- 1c. a revision mismatch aborts with the structured report -------------
+d="$TMP/t1c"; mkdir -p "$d"
+RUN_ENV="READINESS_GATE_FAIL=1" run_deploy "$d"
+if [ "$RC" -eq 3 ] \
+   && grep -q "webapp revision gate failed" "$d/stderr" \
+   && grep -q '"deployed_sha":"deployed-revision"' "$d/stderr" \
+   && grep -q '"source_sha":"source-revision"' "$d/stderr"; then
+    pass "a webapp revision mismatch aborts deployment with both revisions in structured output"
+else
+    fail "a webapp revision mismatch aborts deployment with both revisions in structured output" \
+         "rc=$RC stderr: $(cat "$d/stderr") log: $(cat "$STUB_LOG")"
 fi
 
 # --- 1b. a linked-worktree deploy binds its artifact root before restart ----
