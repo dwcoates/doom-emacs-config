@@ -4,6 +4,8 @@ import { ConnectResync, type ConnectResyncLogLevel } from "../src/connect-resync
 interface Sent {
   workspace: string;
   fromSeq: number;
+  sessionId: string;
+  controllerGenerationId: string;
 }
 
 interface Harness {
@@ -13,13 +15,22 @@ interface Harness {
 }
 
 /** A trigger whose resync always succeeds, recording what it was asked to send. */
-function harness(resync?: (workspace: string, fromSeq: number) => Promise<void>): Harness {
+function snapshot(
+  workspace: string,
+  fromSeq: number,
+  sessionId = "s-current",
+  controllerGenerationId = "g-current",
+) {
+  return { workspace, fromSeq, sessionId, controllerGenerationId };
+}
+
+function harness(resync?: (sent: Sent) => Promise<void>): Harness {
   const sent: Sent[] = [];
   const logs: Array<[ConnectResyncLogLevel, string]> = [];
   const trigger = new ConnectResync({
-    resync: (workspace, fromSeq) => {
-      sent.push({ workspace, fromSeq });
-      return resync ? resync(workspace, fromSeq) : Promise.resolve();
+    resync: (request) => {
+      sent.push(request);
+      return resync ? resync(request) : Promise.resolve();
     },
     log: (level, message) => logs.push([level, message]),
   });
@@ -32,9 +43,9 @@ describe("ConnectResync", () => {
     const h = harness();
     h.trigger.onConnect();
     // Act
-    h.trigger.observe(true, "/ws", 0);
+    h.trigger.observe(true, snapshot("/ws", 0));
     // Assert
-    expect(h.sent).toEqual([{ workspace: "/ws", fromSeq: 0 }]);
+    expect(h.sent).toEqual([snapshot("/ws", 0)]);
   });
 
   it("carries the store's through-seq watermark as from_seq", () => {
@@ -42,7 +53,7 @@ describe("ConnectResync", () => {
     const h = harness();
     h.trigger.onConnect();
     // Act
-    h.trigger.observe(true, "/ws", 7117);
+    h.trigger.observe(true, snapshot("/ws", 7117));
     // Assert
     expect(h.sent[0]?.fromSeq).toBe(7117);
   });
@@ -51,9 +62,9 @@ describe("ConnectResync", () => {
     // Arrange — the daemon answers a ResyncCmd with a fresh StateSnapshot.
     const h = harness();
     h.trigger.onConnect();
-    h.trigger.observe(true, "/ws", 0);
+    h.trigger.observe(true, snapshot("/ws", 0));
     // Act
-    h.trigger.observe(true, "/ws", 0);
+    h.trigger.observe(true, snapshot("/ws", 0));
     // Assert
     expect(h.sent).toHaveLength(1);
   });
@@ -63,7 +74,7 @@ describe("ConnectResync", () => {
     const h = harness();
     h.trigger.onConnect();
     // Act
-    h.trigger.observe(false, "/ws", 0);
+    h.trigger.observe(false, snapshot("/ws", 0));
     // Assert
     expect(h.sent).toEqual([]);
   });
@@ -73,7 +84,7 @@ describe("ConnectResync", () => {
     const h = harness();
     h.trigger.onConnect();
     // Act
-    h.trigger.observe(true, "", 0);
+    h.trigger.observe(true, snapshot("", 0));
     // Assert
     expect(h.sent).toEqual([]);
   });
@@ -82,18 +93,18 @@ describe("ConnectResync", () => {
     // Arrange
     const h = harness();
     h.trigger.onConnect();
-    h.trigger.observe(true, "", 0);
+    h.trigger.observe(true, snapshot("", 0));
     // Act
-    h.trigger.observe(false, "/ws", 12);
+    h.trigger.observe(false, snapshot("/ws", 12));
     // Assert
-    expect(h.sent).toEqual([{ workspace: "/ws", fromSeq: 12 }]);
+    expect(h.sent).toEqual([snapshot("/ws", 12)]);
   });
 
   it("asks nothing before any socket has connected", () => {
     // Arrange
     const h = harness();
     // Act
-    h.trigger.observe(true, "/ws", 0);
+    h.trigger.observe(true, snapshot("/ws", 0));
     // Assert
     expect(h.sent).toEqual([]);
   });
@@ -102,15 +113,15 @@ describe("ConnectResync", () => {
     // Arrange
     const h = harness();
     h.trigger.onConnect();
-    h.trigger.observe(true, "/ws", 0);
+    h.trigger.observe(true, snapshot("/ws", 0));
     h.trigger.onDisconnect();
     // Act
     h.trigger.onConnect();
-    h.trigger.observe(true, "/ws", 42);
+    h.trigger.observe(true, snapshot("/ws", 42));
     // Assert
     expect(h.sent).toEqual([
-      { workspace: "/ws", fromSeq: 0 },
-      { workspace: "/ws", fromSeq: 42 },
+      snapshot("/ws", 0),
+      snapshot("/ws", 42),
     ]);
   });
 
@@ -120,7 +131,7 @@ describe("ConnectResync", () => {
     h.trigger.onConnect();
     h.trigger.onDisconnect();
     // Act
-    h.trigger.observe(true, "/ws", 0);
+    h.trigger.observe(true, snapshot("/ws", 0));
     // Assert
     expect(h.sent).toEqual([]);
   });
@@ -130,9 +141,23 @@ describe("ConnectResync", () => {
     const h = harness(() => Promise.reject(new Error("no live session")));
     h.trigger.onConnect();
     // Act
-    h.trigger.observe(true, "/ws", 0);
+    h.trigger.observe(true, snapshot("/ws", 0));
     await Promise.resolve();
     // Assert
     expect(h.logs.filter(([level]) => level === "error")).toHaveLength(1);
+  });
+
+  it("keeps a delayed old client's exact controller identity", () => {
+    // Arrange — the client snapshot names the controller that was current when
+    // this webview rendered. A replacement can publish a newer generation
+    // before the old webview's request reaches the daemon.
+    const h = harness();
+    h.trigger.onConnect();
+    // Act
+    h.trigger.observe(true, snapshot("/ws", 13, "s-old", "g-old"));
+    h.trigger.observe(true, snapshot("/ws", 0, "s-new", "g-new"));
+    // Assert — the server can now classify the delayed request as superseded;
+    // it is never silently rebound to the newer controller.
+    expect(h.sent).toEqual([snapshot("/ws", 13, "s-old", "g-old")]);
   });
 });

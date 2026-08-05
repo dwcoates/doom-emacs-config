@@ -93,6 +93,7 @@ import {
 import { StateAdapter, systemFailureFrom, userTurnReceipt } from "./state-adapter.js";
 import { CommandDispatcher, ModelSelectionRejectedError } from "./command-dispatch.js";
 import { ConnectResync } from "./connect-resync.js";
+import { captureResyncSnapshot } from "./resync-snapshot.js";
 import type { CommandStruct } from "./frontend-command.js";
 import { PendingPermissionMode } from "./pending-mode.js";
 import { ungatedBannerHtml, ungatedModeOf, unswitchableModeOptionHtml } from "./ungated.js";
@@ -227,6 +228,11 @@ async function boot(): Promise<void> {
   // so this is advisory on the session socket and is legitimately "" until the
   // first SessionView lands.
   const cmdWorkspace = (): string => store.state.cwd;
+  // Both resync senders MUST capture the same revisioned WorkspaceState facts
+  // at their dispatch edge. A later state push cannot rewrite an already-built
+  // command, so the daemon can classify a delayed old-client request instead
+  // of replaying against whichever controller replaced it.
+  const currentResyncSnapshot = (fromSeq: number) => captureResyncSnapshot(store.state, fromSeq);
 
   // The conversation-history request. `StateSnapshot` carries no conversation,
   // and the deltas that carry it were pushed before this page existed, so a
@@ -234,7 +240,7 @@ async function boot(): Promise<void> {
   // fired once the snapshot has landed and a workspace is known. See
   // connect-resync.ts for why it must be exactly once per socket.
   const connectResync = new ConnectResync({
-    resync: (workspace, fromSeq) => dispatcher.resync(workspace, fromSeq),
+    resync: (snapshot) => dispatcher.resync(snapshot.workspace, snapshot),
     log: (level, message) => clog(level, message),
   });
 
@@ -1108,7 +1114,7 @@ async function boot(): Promise<void> {
         // Ask for the conversation history this connection has not been told.
         // Read AFTER ingest so the snapshot's own SessionView has supplied the
         // workspace key the daemon routes a resync by.
-        connectResync.observe(isSnapshot, cmdWorkspace(), store.state.lastSeq);
+        connectResync.observe(isSnapshot, currentResyncSnapshot(store.state.lastSeq));
         // Logging context, re-fed from the SessionView plane. A first adoption
         // and a rotation both re-bind it: the attribution on every log record
         // must name the conversation that is live RIGHT NOW, which is exactly
@@ -1122,8 +1128,9 @@ async function boot(): Promise<void> {
         // the clear that caused the rotation, and everything since — so the
         // recovery never depends on which frame arrived first.
         if (verdict === "rotated") {
+          const resyncSnapshot = currentResyncSnapshot(0);
           void dispatcher
-            .resync(cmdWorkspace(), 0)
+            .resync(resyncSnapshot.workspace, resyncSnapshot)
             .catch(consumeOwnedDispatchFailure);
         }
         if (result.changed) {

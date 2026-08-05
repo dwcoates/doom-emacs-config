@@ -118,10 +118,19 @@ export interface DeleteSessionBody {
   sessionId: string;
 }
 
-/** ResyncCmd — request a replay from a store seq watermark (uint64). */
+/**
+ * ResyncCmd — request a replay from a store seq watermark (uint64).
+ *
+ * The identity is copied from the revisioned WorkspaceState that authorized
+ * this request.  It binds an old webview to the exact controller generation
+ * it observed, so the daemon can refuse the request before replaying a newer
+ * or retired controller's history.
+ */
 export interface ResyncBody {
   case: "resync";
   fromSeq: number;
+  sessionId: string;
+  controllerGenerationId: string;
 }
 
 /** The `ClientLogLevel` enum values, as their canonical protojson names. */
@@ -266,7 +275,11 @@ function encodeBody(b: FrontendCommandBody): Record<string, unknown> {
       return { sessionId: b.sessionId };
     case "resync":
       // uint64 renders as a JSON string in protojson.
-      return { fromSeq: String(b.fromSeq) };
+      return {
+        fromSeq: String(b.fromSeq),
+        sessionId: b.sessionId,
+        controllerGenerationId: b.controllerGenerationId,
+      };
     case "clientLog": {
       // An enum renders as its proto NAME in canonical protojson.
       const arm: Record<string, unknown> = {
