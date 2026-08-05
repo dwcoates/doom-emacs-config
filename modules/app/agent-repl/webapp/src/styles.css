@@ -1927,6 +1927,22 @@ pre {
   font-weight: 700;
 }
 
+/* --- The revival hold bubble (render.ts `RevivalHeldCard`) ---------------
+   A prompt parked behind a compact-first revival whose compaction has not
+   landed. Same shape and same hibernation teal as the keep-alive card above:
+   both are "held by the hibernation machinery, never classified, cannot be
+   forced", and a revival is that vocabulary's own event. */
+.queued-card.revival-card {
+  border: 1px solid var(--hibernated);
+  background: color-mix(in srgb, var(--hibernated) 10%, var(--card));
+  opacity: 1;
+}
+.queued-badge.revival {
+  color: var(--hibernated);
+  border-color: var(--hibernated);
+  font-weight: 700;
+}
+
 #composer {
   display: flex;
   gap: 0.5rem;

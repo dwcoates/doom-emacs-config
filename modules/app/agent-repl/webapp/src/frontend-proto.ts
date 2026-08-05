@@ -108,6 +108,8 @@ import {
   PROMPT_ORIGIN_PREFIX,
   PROMPT_ORIGIN_UNSPECIFIED,
   QUEUE_ENTRY_KEEP_ALIVE_HOLD,
+  QUEUE_ENTRY_REVIVAL_HOLD,
+  REVIVAL_HOLD_SESSION_ID,
 } from "./proto-names.js";
 import { ApiUsageSchema } from "../../proto/gen/ts/agentshim/data/v1/tools_pb";
 import {
@@ -1344,6 +1346,19 @@ export interface QueueEntryKeepAliveHold {
   turnId: string;
 }
 
+/**
+ * Present when this entry is held because a COMPACT-FIRST REVIVAL's compaction
+ * is still pending. Like the other two holds the classifier never ran on it,
+ * and like the keep-alive hold there is NO force-through: a session still
+ * asleep cannot take a prompt at all. The exits are delivery once the
+ * compaction lands and the gate opens, a loud drop if the revival fails, and
+ * cancel.
+ */
+export interface QueueEntryRevivalHold {
+  /** The session being revived, whose completed compaction releases this. */
+  sessionId: string;
+}
+
 /** One prompt the daemon is holding (E4). */
 export interface QueueEntry {
   id: string;
@@ -1364,6 +1379,12 @@ export interface QueueEntry {
    * field: it selects the keep-alive bubble over the classifier bubble.
    */
   keepAliveHold?: QueueEntryKeepAliveHold;
+  /**
+   * Set ONLY while a pending compact-first revival holds this prompt. Absence
+   * is the real answer "no revival is holding this", not a missing field: it
+   * selects the revival bubble over the classifier bubble.
+   */
+  revivalHold?: QueueEntryRevivalHold;
 }
 
 /** The `idle` arm's payload: deliberately empty — the arm IS the state. */
@@ -2494,9 +2515,11 @@ const QUEUE_ENTRY_KEYS = new Set([
   "accepted",
   "shutdownHold",
   QUEUE_ENTRY_KEEP_ALIVE_HOLD,
+  QUEUE_ENTRY_REVIVAL_HOLD,
 ]);
 const QUEUE_ENTRY_SHUTDOWN_HOLD_KEYS = new Set(["scheduleId"]);
 const QUEUE_ENTRY_KEEP_ALIVE_HOLD_KEYS = new Set([KEEP_ALIVE_HOLD_TURN_ID]);
+const QUEUE_ENTRY_REVIVAL_HOLD_KEYS = new Set([REVIVAL_HOLD_SESSION_ID]);
 
 function decodeQueueView(v: unknown): QueueView {
   const o = ensureObject(v, "QueueView");
@@ -2547,7 +2570,27 @@ function decodeQueueEntry(v: unknown): QueueEntry {
   ) {
     e.keepAliveHold = decodeQueueEntryKeepAliveHold(o[QUEUE_ENTRY_KEEP_ALIVE_HOLD]);
   }
+  // Same reading again: absence is the absence of a revival hold. The daemon's
+  // own claim is what puts the "waiting on the revival's compaction" bubble on
+  // screen — the classifier never ran on this entry either.
+  if (o[QUEUE_ENTRY_REVIVAL_HOLD] !== undefined && o[QUEUE_ENTRY_REVIVAL_HOLD] !== null) {
+    e.revivalHold = decodeQueueEntryRevivalHold(o[QUEUE_ENTRY_REVIVAL_HOLD]);
+  }
   return e;
+}
+
+function decodeQueueEntryRevivalHold(v: unknown): QueueEntryRevivalHold {
+  const o = ensureObject(v, "QueueEntryRevivalHold");
+  rejectUnknown(o, QUEUE_ENTRY_REVIVAL_HOLD_KEYS, "QueueEntryRevivalHold");
+  const sessionId = str(o, REVIVAL_HOLD_SESSION_ID, "QueueEntryRevivalHold");
+  // The session id is the whole content of the message: it names the revival
+  // whose completed compaction releases this entry. A hold naming no session
+  // would claim the prompt waits on something nothing else on screen can
+  // corroborate.
+  if (sessionId === "") {
+    throw new Error("frontend-proto: QueueEntryRevivalHold missing required `sessionId`");
+  }
+  return { sessionId };
 }
 
 function decodeQueueEntryKeepAliveHold(v: unknown): QueueEntryKeepAliveHold {
