@@ -108,7 +108,14 @@ func (o *WorkspaceOpener) Open(ctx context.Context, workspace string) error {
 	}
 	id, found := (&SessionLocator{Reg: o.Reg}).Locate(workspace)
 	if !found {
-		return fmt.Errorf("server: open-workspace %q has no session record to restore", workspace)
+		// Loud, and NOT an error: a workspace that has never had a session is
+		// not a failed open, it is a fresh one. Returning an error here made
+		// the frontend retry and eventually warn the user for a workspace that
+		// was never broken — it simply has nothing to restore. See
+		// OpenDriveable's merge.ErrNoSession for the same distinction made for
+		// a caller that must decide what "no session" means for it.
+		o.Logf("server: open-workspace %q has no session record; nothing to restore — the workspace loads fresh", workspace)
+		return nil
 	}
 	o.BindWorkspace(workspace)
 	rec, found := o.Reg.Get(id)
