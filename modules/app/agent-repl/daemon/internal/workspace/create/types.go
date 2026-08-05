@@ -126,8 +126,72 @@ type Job struct {
 	ResolvedBaseCommit string   `json:"resolved_base_commit,omitempty"`
 	SessionID          string   `json:"session_id,omitempty"`
 	AvailablePublished bool     `json:"available_published,omitempty"`
-	PromptDelivered    bool     `json:"prompt_delivered,omitempty"`
-	LastError          string   `json:"last_error,omitempty"`
+	// Materialized is the durable host acknowledgement that releases every
+	// session-scoped frontend publication for this job.  It is deliberately a
+	// fact separate from State: prompt delivery can advance or fail after the
+	// acknowledgement, but neither outcome may re-close the publication gate.
+	Materialized        bool   `json:"materialized,omitempty"`
+	PublicationReleased bool   `json:"publication_released,omitempty"`
+	PromptDelivered     bool   `json:"prompt_delivered,omitempty"`
+	LastError           string `json:"last_error,omitempty"`
+}
+
+// PublicationDecision is the durable creation job's verdict about whether a
+// session-scoped frontend frame may be emitted.  A matching job is the sole
+// authority for a newly-created workspace, so a session cannot publish before
+// its WorkspaceMaterialized acknowledgement has been checkpointed.
+type PublicationDecision struct {
+	JobID        string
+	WorktreePath string
+	SessionID    string
+	Materialized bool
+}
+
+// SessionPublicationDecision returns the durable publication verdict for one
+// workspace/session pair.  No matching create job means the session was not
+// created through this pending-materialization lifecycle and is publishable.
+// More than one matching job is an invariant violation: one live session must
+// have exactly one creation job identity.
+func SessionPublicationDecision(store JobStore, worktreePath, sessionID string) (PublicationDecision, error) {
+	if store == nil {
+		return PublicationDecision{}, fmt.Errorf("workspace create: session publication gate needs a job store")
+	}
+	if worktreePath == "" {
+		return PublicationDecision{}, fmt.Errorf("workspace create: session publication gate needs a worktree path")
+	}
+	jobs, err := store.List()
+	if err != nil {
+		return PublicationDecision{}, fmt.Errorf("workspace create: read publication gate jobs for worktree=%q session=%q: %w", worktreePath, sessionID, err)
+	}
+	var matches []*Job
+	for i := range jobs {
+		job := &jobs[i]
+		if job.WorktreePath != worktreePath {
+			continue
+		}
+		matches = append(matches, job)
+	}
+	var match *Job
+	for _, candidate := range matches {
+		if candidate.SessionID == sessionID {
+			match = candidate
+			break
+		}
+	}
+	if match == nil && len(matches) == 1 {
+		match = matches[0]
+	}
+	if match == nil && len(matches) > 1 {
+		ids := make([]string, 0, len(matches))
+		for _, candidate := range matches {
+			ids = append(ids, candidate.ID)
+		}
+		return PublicationDecision{}, fmt.Errorf("workspace create: publication gate cannot resolve worktree=%q frame_session=%q across job_ids=%q", worktreePath, sessionID, ids)
+	}
+	if match == nil {
+		return PublicationDecision{WorktreePath: worktreePath, SessionID: sessionID, Materialized: true}, nil
+	}
+	return PublicationDecision{JobID: match.ID, WorktreePath: worktreePath, SessionID: sessionID, Materialized: match.Materialized}, nil
 }
 
 func (j Job) validate() error {
@@ -243,6 +307,14 @@ type InitialPromptSubmitter interface {
 // host channel.  It is intentionally independent of frontend/server.
 type WorkspaceAvailablePublisher interface {
 	PublishWorkspaceAvailable(context.Context, Available) error
+}
+
+// SessionPublicationReleaser is notified after the host materialization
+// acknowledgement is durably checkpointed and before initial-prompt delivery
+// may begin.  Its publication is at-least-once for the same crash boundary as
+// WorkspaceAvailable: an uncheckpointed notification is retried by an ACK.
+type SessionPublicationReleaser interface {
+	ReleaseSessionPublication(context.Context, PublicationDecision) error
 }
 
 // HostActionSink delivers durable UI-only command records to the host.  It

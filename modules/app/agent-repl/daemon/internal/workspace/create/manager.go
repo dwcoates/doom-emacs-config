@@ -20,6 +20,7 @@ type Config struct {
 	Health      SessionHealthChecker
 	Prompts     InitialPromptSubmitter
 	Available   WorkspaceAvailablePublisher
+	Releases    SessionPublicationReleaser
 	HostActions HostActionSink
 	Logf        func(string, ...any)
 }
@@ -85,6 +86,8 @@ func NewManager(cfg Config) (*Manager, error) {
 		return nil, fmt.Errorf("workspace create: manager needs an InitialPromptSubmitter")
 	case cfg.Available == nil:
 		return nil, fmt.Errorf("workspace create: manager needs a WorkspaceAvailablePublisher")
+	case cfg.Releases == nil:
+		return nil, fmt.Errorf("workspace create: manager needs a SessionPublicationReleaser")
 	case cfg.HostActions == nil:
 		return nil, fmt.Errorf("workspace create: manager needs a HostActionSink")
 	case cfg.Logf == nil:
@@ -531,15 +534,44 @@ func (m *Manager) MarkMaterialized(ctx context.Context, id string) error {
 	if !ok {
 		return fmt.Errorf("workspace create: materialization ack for unknown job %q", id)
 	}
-	if job.State == StateReady {
-		return nil
-	}
 	if job.State == StateAwaitingEmacs {
-		if _, err := m.transition(id, StateEmacsMaterialized, ""); err != nil {
+		if _, err := m.cfg.Store.Update(id, func(j *Job) error {
+			j.State = StateEmacsMaterialized
+			j.Materialized = true
+			j.LastError = ""
+			return nil
+		}); err != nil {
 			return err
 		}
-	} else if job.State != StateEmacsMaterialized && job.State != StatePromptSubmitting {
+	} else if job.State != StateEmacsMaterialized && job.State != StatePromptSubmitting && job.State != StateReady && job.State != StateFailed {
 		return fmt.Errorf("workspace create: materialization ack for job %q in state %s", id, job.State)
+	}
+	job, ok, err = m.cfg.Store.Get(id)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("workspace create: materialization ack lost job %q after transition", id)
+	}
+	if !job.Materialized {
+		return fmt.Errorf("workspace create: materialization ack for job %q did not persist the publication latch", id)
+	}
+	if !job.PublicationReleased {
+		decision := PublicationDecision{JobID: job.ID, WorktreePath: job.WorktreePath, SessionID: job.SessionID, Materialized: true}
+		m.cfg.Logf("workspace-create: releasing session publication id=%s worktree=%q session=%q state=%s prompt_len=%d", decision.JobID, decision.WorktreePath, decision.SessionID, job.State, len(job.Request.Prompt))
+		if err := m.cfg.Releases.ReleaseSessionPublication(ctx, decision); err != nil {
+			return fmt.Errorf("workspace create: release session publication id=%s worktree=%q session=%q: %w", decision.JobID, decision.WorktreePath, decision.SessionID, err)
+		}
+		if _, err := m.cfg.Store.Update(id, func(j *Job) error {
+			j.PublicationReleased = true
+			return nil
+		}); err != nil {
+			return err
+		}
+		m.cfg.Logf("workspace-create: checkpointed session publication release id=%s worktree=%q session=%q", decision.JobID, decision.WorktreePath, decision.SessionID)
+	}
+	if job.State == StateReady || job.State == StateFailed {
+		return nil
 	}
 	return m.Process(ctx, id)
 }

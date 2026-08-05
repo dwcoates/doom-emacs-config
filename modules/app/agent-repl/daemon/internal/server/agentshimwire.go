@@ -184,11 +184,12 @@ type AgentShim struct {
 	// capability is unconfigured. main calls Restore on it once, at boot.
 	ShutdownScheduler *ShutdownScheduler
 
-	cancelPush               func()
-	cancelProgress           func()
-	cancelWorkspaceAvailable func()
-	cancelHostActions        func()
-	logf                     func(string, ...any)
+	cancelPush                       func()
+	cancelProgress                   func()
+	cancelWorkspaceAvailable         func()
+	cancelHostActions                func()
+	cancelSessionPublicationReleases func()
+	logf                             func(string, ...any)
 }
 
 // hostWorkPublisher is the narrow frontend surface the durable creation
@@ -216,6 +217,20 @@ func forwardHostActions(logf func(string, ...any), publisher hostWorkPublisher, 
 		}
 		logf("server: host-work push host_action action_id=%s action_type=%T", action.GetActionId(), action.GetAction())
 		publisher.PushHostAction(action)
+	}
+}
+
+func sessionPublicationGate(bridge WorkspaceCreationBridge, logf func(string, ...any)) func(workspace, sessionID string) (bool, error) {
+	return func(workspace, sessionID string) (bool, error) {
+		decision, err := bridge.SessionPublicationDecision(workspace, sessionID)
+		if err != nil {
+			return false, err
+		}
+		if decision.Materialized {
+			return true, nil
+		}
+		logf("server: session publication HELD job_id=%q worktree=%q session=%q frame_session=%q reason=awaiting_workspace_materialization", decision.JobID, decision.WorktreePath, decision.SessionID, sessionID)
+		return false, nil
 	}
 }
 
@@ -529,6 +544,13 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 		cancelWorkspaceAvailable()
 		return nil, fmt.Errorf("server: workspace creation bridge returned an invalid host-action subscription")
 	}
+	publicationReleases, cancelPublicationReleases := cfg.WorkspaceCreation.SubscribeSessionPublicationReleases()
+	if publicationReleases == nil || cancelPublicationReleases == nil {
+		cancelWorkspaceAvailable()
+		cancelHostActions()
+		return nil, fmt.Errorf("server: workspace creation bridge returned an invalid session-publication release subscription")
+	}
+	publicationAllowed := sessionPublicationGate(cfg.WorkspaceCreation, logf)
 	handler.clientLogs = cfg.ClientLogs
 
 	// The daemon-side merge ingress. It shares the handler above so a dispatched
@@ -546,10 +568,11 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 		progress: cfg.Progress, workspaceCreation: cfg.WorkspaceCreation, logf: logf,
 	}
 	srv := frontend.New(frontend.Config{
-		Logf:        logf,
-		LogVerbosef: cfg.LogVerbosef,
-		State:       snapshots,
-		Handler:     handler,
+		Logf:                      logf,
+		LogVerbosef:               cfg.LogVerbosef,
+		State:                     snapshots,
+		Handler:                   handler,
+		SessionPublicationAllowed: publicationAllowed,
 	})
 
 	// THE DRAIN LEASE, constructed last because it needs the frontend server to
@@ -637,6 +660,18 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 		}
 	}()
 
+	go func() {
+		for release := range publicationReleases {
+			logf("server: session publication RELEASED job_id=%q worktree=%q session=%q action=publish_authoritative_snapshot", release.JobID, release.WorktreePath, release.SessionID)
+			srv.PushAuthoritativeSnapshot(snapshots.Snapshot())
+			if release.Completion == nil {
+				logf("server: SESSION PUBLICATION INVARIANT VIOLATION job_id=%q worktree=%q session=%q reason=missing_release_completion", release.JobID, release.WorktreePath, release.SessionID)
+				panic(fmt.Sprintf("server: session publication release job=%q worktree=%q session=%q lacks completion", release.JobID, release.WorktreePath, release.SessionID))
+			}
+			release.Completion <- nil
+		}
+	}()
+
 	// Progress changes -> frontend ProgressView pushes, on their own
 	// subscription so the resolver's coalescing governs the footer's frame rate
 	// independently of the SSM's transition cadence.
@@ -663,6 +698,7 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 		ShutdownScheduler: scheduler,
 		cancelPush:        cancel, cancelProgress: cancelProgress,
 		cancelWorkspaceAvailable: cancelWorkspaceAvailable, cancelHostActions: cancelHostActions, logf: logf,
+		cancelSessionPublicationReleases: cancelPublicationReleases,
 	}, nil
 }
 
@@ -682,6 +718,9 @@ func (a *AgentShim) Close() error {
 	}
 	if a.cancelHostActions != nil {
 		a.cancelHostActions()
+	}
+	if a.cancelSessionPublicationReleases != nil {
+		a.cancelSessionPublicationReleases()
 	}
 	if a.MergeCoordinator != nil {
 		// Stops the drains. A merge in flight keeps its durable queue entry, so

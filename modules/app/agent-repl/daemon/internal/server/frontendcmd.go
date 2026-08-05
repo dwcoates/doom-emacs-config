@@ -186,9 +186,35 @@ type WorkspaceLifecycle interface {
 type WorkspaceCreationBridge interface {
 	MarkWorkspaceMaterialized(ctx context.Context, jobID string) error
 	CompleteHostAction(ctx context.Context, actionID string, ok bool, failure string) error
+	SessionPublicationDecision(worktreePath, sessionID string) (SessionPublicationDecision, error)
+	SubscribeSessionPublicationReleases() (<-chan SessionPublicationRelease, func())
 	SnapshotHostWork() WorkspaceHostWorkSnapshot
 	SubscribeWorkspaceAvailable() (<-chan *frontendv1.WorkspaceAvailable, func())
 	SubscribeHostActions() (<-chan *frontendv1.HostAction, func())
+}
+
+// SessionPublicationDecision is the creation subsystem's durable verdict for
+// one session-scoped frontend frame.  A denied decision names the create job
+// that has not received the host's WorkspaceMaterialized acknowledgement.
+type SessionPublicationDecision struct {
+	JobID        string
+	WorktreePath string
+	SessionID    string
+	Materialized bool
+}
+
+// SessionPublicationRelease is emitted after the durable materialization
+// acknowledgement and before the creation worker may release an initial
+// prompt.  The server uses it to publish fresh authoritative state rather than
+// replaying pre-materialization frames.
+type SessionPublicationRelease struct {
+	JobID        string
+	WorktreePath string
+	SessionID    string
+	// Completion acknowledges that the server has enqueued the authoritative
+	// post-materialization snapshot. The creation worker waits for it before
+	// submitting the initial prompt, making snapshot-before-prompt structural.
+	Completion chan error
 }
 
 // WorkspaceHostWorkSnapshot is the durable host-only subset a reconnecting
@@ -1477,6 +1503,13 @@ func (p *ssmSnapshotProvider) Snapshot() *frontendv1.StateSnapshot {
 	if p.workspaceCreation == nil {
 		panic("server: snapshot provider requires workspace creation bridge")
 	}
+	publicationAllowed := sessionPublicationGate(p.workspaceCreation, p.logf)
+	snap.Workspaces = filterPublishedSessionViews(snap.Workspaces, publicationAllowed, p.logf)
+	snap.Sessions = filterPublishedSessionViews(snap.Sessions, publicationAllowed, p.logf)
+	snap.Inits = filterPublishedSessionViews(snap.Inits, publicationAllowed, p.logf)
+	snap.Catalogs = filterPublishedSessionViews(snap.Catalogs, publicationAllowed, p.logf)
+	snap.Queues = filterPublishedSessionViews(snap.Queues, publicationAllowed, p.logf)
+	snap.Progress = filterPublishedSessionViews(snap.Progress, publicationAllowed, p.logf)
 	hostWork := p.workspaceCreation.SnapshotHostWork()
 	snap.WorkspaceAvailable = hostWork.WorkspaceAvailable
 	snap.HostActions = hostWork.HostActions
@@ -1490,4 +1523,27 @@ func (p *ssmSnapshotProvider) Snapshot() *frontendv1.StateSnapshot {
 			len(snap.GetInits()), len(snap.GetQueues()), len(snap.GetProgress()), len(snap.GetWorkspaceAvailable()), len(snap.GetHostActions()), snap.GetDaemon() != nil)
 	}
 	return snap
+}
+
+type sessionPublicationView interface {
+	GetWorkspace() string
+	GetSessionId() string
+}
+
+func filterPublishedSessionViews[T sessionPublicationView](views []T, allow func(workspace, sessionID string) (bool, error), logf func(string, ...any)) []T {
+	filtered := make([]T, 0, len(views))
+	for _, view := range views {
+		allowed, err := allow(view.GetWorkspace(), view.GetSessionId())
+		if err != nil {
+			if logf != nil {
+				logf("server: SESSION PUBLICATION INVARIANT VIOLATION snapshot workspace=%q session=%q error=%v", view.GetWorkspace(), view.GetSessionId(), err)
+			}
+			panic(fmt.Sprintf("server: session publication snapshot invariant workspace=%q session=%q: %v", view.GetWorkspace(), view.GetSessionId(), err))
+		}
+		if !allowed {
+			continue
+		}
+		filtered = append(filtered, view)
+	}
+	return filtered
 }

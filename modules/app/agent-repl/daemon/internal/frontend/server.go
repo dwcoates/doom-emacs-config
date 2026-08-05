@@ -58,6 +58,10 @@ type Config struct {
 	LogVerbosef dlog.Logf
 	State       StateProvider
 	Handler     CommandHandler
+	// SessionPublicationAllowed is the daemon-owned materialization latch for
+	// session-scoped frames.  The frontend transport invokes it at its single
+	// fan-out boundary so no producer can bypass the host-ready invariant.
+	SessionPublicationAllowed func(workspace, sessionID string) (bool, error)
 	// BufSize is the per-client outbound buffer; <=0 uses defaultClientBuffer.
 	BufSize int
 }
@@ -67,11 +71,12 @@ type Config struct {
 // message). Every connected frontend receives every broadcast frame (workspace
 // entitlement is "all" for now; the fan-out list is the future filter point).
 type Server struct {
-	logf        dlog.Logf
-	logVerbosef dlog.Logf
-	state       StateProvider
-	handler     CommandHandler
-	bufSize     int
+	logf                      dlog.Logf
+	logVerbosef               dlog.Logf
+	state                     StateProvider
+	handler                   CommandHandler
+	sessionPublicationAllowed func(workspace, sessionID string) (bool, error)
+	bufSize                   int
 
 	upgrader websocket.Upgrader
 
@@ -143,11 +148,12 @@ func New(cfg Config) *Server {
 		buf = defaultClientBuffer
 	}
 	return &Server{
-		logf:        cfg.Logf,
-		logVerbosef: cfg.LogVerbosef,
-		state:       cfg.State,
-		handler:     cfg.Handler,
-		bufSize:     buf,
+		logf:                      cfg.Logf,
+		logVerbosef:               cfg.LogVerbosef,
+		state:                     cfg.State,
+		handler:                   cfg.Handler,
+		sessionPublicationAllowed: cfg.SessionPublicationAllowed,
+		bufSize:                   buf,
 		upgrader: websocket.Upgrader{
 			// Local-loopback developer tool; the webview origin is app-scoped,
 			// so origin checks are permissive by design (mirrors the existing
@@ -313,6 +319,9 @@ func (s *Server) Broadcast(frame *frontendv1.FrontendFrame) {
 		s.PushWorkspaceState(ws)
 		return
 	}
+	if !s.requireSessionPublication(frame) {
+		return
+	}
 	var (
 		unscoped     []byte
 		unscopedErr  error
@@ -374,6 +383,9 @@ func (s *Server) Broadcast(frame *frontendv1.FrontendFrame) {
 // serialized against each other and every client's queue carries states in
 // exactly the order the resolver produced them.
 func (s *Server) PushWorkspaceState(w *frontendv1.WorkspaceState) {
+	if !s.requireSessionPublication(WorkspaceStateFrame(w)) {
+		return
+	}
 	s.mu.Lock()
 	if at := w.GetAtMs(); at > s.latestWorkspaceAt[w.GetWorkspace()] {
 		s.latestWorkspaceAt[w.GetWorkspace()] = at
@@ -381,6 +393,51 @@ func (s *Server) PushWorkspaceState(w *frontendv1.WorkspaceState) {
 	slow := s.deliverLocked(WorkspaceStateFrame(w), func(*client) bool { return true })
 	s.mu.Unlock()
 	s.disconnectAll(slow)
+}
+
+// requireSessionPublication enforces the durable creation latch at the one
+// transport boundary shared by every session-scoped producer. A valid held
+// decision suppresses the frame until release publishes an authoritative
+// snapshot; a gate error is the invariant violation.
+func (s *Server) requireSessionPublication(frame *frontendv1.FrontendFrame) bool {
+	if s.sessionPublicationAllowed == nil {
+		return true
+	}
+	workspace, sessionID, scoped := frameSessionIdentity(frame)
+	if !scoped {
+		return true
+	}
+	allowed, err := s.sessionPublicationAllowed(workspace, sessionID)
+	if err != nil {
+		s.logf("frontend: SESSION PUBLICATION INVARIANT VIOLATION workspace=%q session=%q frame=%T error=%v", workspace, sessionID, frame.GetFrame(), err)
+		panic(fmt.Sprintf("frontend: session publication invariant workspace=%q session=%q frame=%T: %v", workspace, sessionID, frame.GetFrame(), err))
+	}
+	return allowed
+}
+
+func frameSessionIdentity(frame *frontendv1.FrontendFrame) (workspace, sessionID string, scoped bool) {
+	switch f := frame.GetFrame().(type) {
+	case *frontendv1.FrontendFrame_WorkspaceState:
+		return f.WorkspaceState.GetWorkspace(), f.WorkspaceState.GetSessionId(), true
+	case *frontendv1.FrontendFrame_SessionView:
+		return f.SessionView.GetWorkspace(), f.SessionView.GetSessionId(), true
+	case *frontendv1.FrontendFrame_ConversationDelta:
+		return f.ConversationDelta.GetWorkspace(), f.ConversationDelta.GetSessionId(), true
+	case *frontendv1.FrontendFrame_TypingDelta:
+		return f.TypingDelta.GetWorkspace(), f.TypingDelta.GetSessionId(), true
+	case *frontendv1.FrontendFrame_TaskCatalog:
+		return f.TaskCatalog.GetWorkspace(), f.TaskCatalog.GetSessionId(), true
+	case *frontendv1.FrontendFrame_SessionInit:
+		return f.SessionInit.GetWorkspace(), f.SessionInit.GetSessionId(), true
+	case *frontendv1.FrontendFrame_Heartbeat:
+		return f.Heartbeat.GetWorkspace(), f.Heartbeat.GetSessionId(), true
+	case *frontendv1.FrontendFrame_Queue:
+		return f.Queue.GetWorkspace(), f.Queue.GetSessionId(), true
+	case *frontendv1.FrontendFrame_Progress:
+		return f.Progress.GetWorkspace(), f.Progress.GetSessionId(), true
+	default:
+		return "", "", false
+	}
 }
 
 // deliverLocked enqueues frame into every client want selects, returning the
@@ -479,6 +536,32 @@ func (s *Server) PushWorkspaceAvailable(v *frontendv1.WorkspaceAvailable) {
 func (s *Server) PushHostAction(v *frontendv1.HostAction) { s.Broadcast(HostActionFrame(v)) }
 func (s *Server) PushShutdownSchedule(v *frontendv1.ShutdownScheduleView) {
 	s.Broadcast(ShutdownScheduleFrame(v))
+}
+
+// PushAuthoritativeSnapshot delivers one freshly resolved snapshot to every
+// client, preserving each client's scope and host-only view.  Materialization
+// release uses this existing reconnect truth to surface every held startup
+// fact through one publication path.
+func (s *Server) PushAuthoritativeSnapshot(snapshot *frontendv1.StateSnapshot) {
+	s.mu.Lock()
+	s.logf("frontend: authoritative snapshot publication clients=%d workspaces=%d sessions=%d progress=%d", len(s.clients), len(snapshot.GetWorkspaces()), len(snapshot.GetSessions()), len(snapshot.GetProgress()))
+	slow := make([]*client, 0)
+	for cl := range s.clients {
+		view := snapshotForClient(snapshot, cl.scope, cl.kind)
+		data, err := marshalFrame(SnapshotFrame(view))
+		if err != nil {
+			s.logf("frontend: marshal authoritative snapshot client_id=%d kind=%s: %v", cl.id, cl.kind, err)
+			continue
+		}
+		if queued, _ := enqueueLocked(cl, outFrame{data: data}); !queued {
+			s.logf("frontend: authoritative snapshot queue saturated client_id=%d kind=%s scope_workspace=%q scope_session=%q outcome=disconnect", cl.id, cl.kind, scopeWorkspace(cl.scope), scopeSession(cl.scope))
+			slow = append(slow, cl)
+		} else {
+			s.logVerbosef("frontend: authoritative snapshot queued client_id=%d kind=%s scope_workspace=%q scope_session=%q", cl.id, cl.kind, scopeWorkspace(cl.scope), scopeSession(cl.scope))
+		}
+	}
+	s.mu.Unlock()
+	s.disconnectAll(slow)
 }
 
 // isHostOnlyFrame marks daemon-to-host work that must never cross into either
