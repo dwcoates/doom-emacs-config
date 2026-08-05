@@ -152,6 +152,32 @@ func (r *turnAccountingReducer) historicalQueryLifecycle(ev *corev1.Event) (stri
 	return lifecycle.GetQueryInstanceId(), lifecycle.GetQueryInstanceId() != r.queryID && ev.GetSeq() < r.queryCreatedSeq
 }
 
+// historicalAccountUsageObservation reports boundary evidence whose durable
+// sequence proves it predates the live query's QueryCreated record.
+//
+// IT IS THE SAME TEST historicalQueryLifecycle APPLIES, AND THAT IS THE POINT.
+// A shim restart keeps the vendor session and its ordered store sequence while
+// creating a new query() invocation, so a resuming daemon replays the retired
+// query's rows before reaching the replacement's creation boundary. The
+// lifecycle rows in that range are already exempted from the live handshake's
+// authority; the observations sitting between them were not, so replay judged
+// them against a query id minted THIS PROCESS and rejected every one.
+//
+// That rejection is terminal, so a single such row made its workspace
+// permanently unopenable: the stored id is frozen, the live id is regenerated
+// on every attempt, and the two can never agree. One observed conversation
+// failed 13 bring-ups against 13 different live ids.
+//
+// Retired evidence is retained as history rather than admitted as live
+// accounting, matching what the lifecycle branch already does — the live
+// handshake stays the authority for the query actually running.
+func (r *turnAccountingReducer) historicalAccountUsageObservation(ev *corev1.Event, observation *corev1.AccountUsageObservation) bool {
+	if r.queryID == "" || observation.GetQueryInstanceId() == "" || r.queryCreatedSeq == 0 {
+		return false
+	}
+	return observation.GetQueryInstanceId() != r.queryID && ev.GetSeq() < r.queryCreatedSeq
+}
+
 // observeTurnClaimBridge admits the durable cross-session proof into the
 // accounting correlation state without fabricating a lifecycle edge. A
 // reconnect may construct a fresh consumer in the rotated vendor sequence,
@@ -186,6 +212,11 @@ func (r *turnAccountingReducer) observe(ev *corev1.Event, daemonSessionID string
 		r.activeTurnID = started.GetTurnId()
 	}
 	if observation := ev.GetAccountUsageObservation(); observation != nil {
+		if r.historicalAccountUsageObservation(ev, observation) {
+			// Retired-query evidence: retained as history, not admitted as live
+			// accounting, on the same terms as the lifecycle rows around it.
+			return nil
+		}
 		if err := validateAccountUsageObservation(r.queryID, ev.GetRequestId(), observation); err != nil {
 			return err
 		}
