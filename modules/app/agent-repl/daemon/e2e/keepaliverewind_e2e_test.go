@@ -251,7 +251,8 @@ func TestE2EAFullReplayCarriesNoKeepAliveTurn(t *testing.T) {
 	rewindByKeepAlivePing(t, s)
 
 	// Act — exactly what a reloaded webview sends.
-	replayed := replayItems(t, s.h.dial(t, s.sessionID), s.cwd, "r-replay")
+	fresh, state := dialForReplay(t, s.h, s.sessionID, s.cwd)
+	replayed := replayItems(t, fresh, state, s.cwd, "r-replay")
 
 	// Assert
 	if len(replayed) == 0 {
@@ -286,7 +287,8 @@ func TestE2EAFullReplayStillCarriesTheRealTurnsFromBeforeTheRewind(t *testing.T)
 	rewindByKeepAlivePing(t, s)
 
 	// Act
-	replayed := replayItems(t, s.h.dial(t, s.sessionID), s.cwd, "r-replay")
+	fresh, state := dialForReplay(t, s.h, s.sessionID, s.cwd)
+	replayed := replayItems(t, fresh, state, s.cwd, "r-replay")
 
 	// Assert
 	for _, item := range replayed {

@@ -444,7 +444,8 @@ func TestE2EFreshConnectCarriesTheInterruptedResolution(t *testing.T) {
 
 	// Act
 	fresh := h.dial(t, id)
-	snap := readFrame(t, fresh).GetSnapshot()
+	snapshotFrame := readFrame(t, fresh)
+	snap := snapshotFrame.GetSnapshot()
 	if snap == nil {
 		t.Fatal("first frame on a fresh connection was not a StateSnapshot")
 	}
@@ -478,7 +479,8 @@ func TestE2EFreshConnectCarriesTheInterruptedResolution(t *testing.T) {
 	// ... and the feed carries nothing about it. "interrupt" is a documented
 	// SystemFailureItem.error_type (frontend.proto SystemFailureItem), so a
 	// stop leaking into the conversation would show up as one of those cards.
-	for _, item := range replayItems(t, fresh, cwd, "r-replay") {
+	state := workspaceStateInSnapshot(t, snapshotFrame, cwd)
+	for _, item := range replayItems(t, fresh, state, cwd, "r-replay") {
 		if got := item.GetSystemFailure().GetErrorType(); got == "interrupt" {
 			t.Errorf("replay carried a system_failure card of error_type %q (uuid=%q): a user-commanded stop is footer state, not feed content",
 				got, item.GetUuid())
