@@ -48,9 +48,10 @@ func firstNonEmpty(values ...string) string {
 }
 
 type fakeSessions struct {
-	calls int
-	id    string
-	err   error
+	calls    int
+	id       string
+	err      error
+	onEnsure func(Job)
 }
 
 type metadataSessions struct {
@@ -62,8 +63,11 @@ func (f *metadataSessions) ResolveSessionMetadata(_ context.Context, _ Job) (Req
 	return f.resolved, nil
 }
 
-func (f *fakeSessions) EnsureSession(_ context.Context, _ Job) (string, error) {
+func (f *fakeSessions) EnsureSession(_ context.Context, job Job) (string, error) {
 	f.calls++
+	if f.onEnsure != nil {
+		f.onEnsure(job)
+	}
 	return f.id, f.err
 }
 
@@ -103,14 +107,18 @@ type fakeReleases struct {
 }
 
 type fakePublication struct {
-	calls int
-	jobs  []Job
-	err   error
+	calls     int
+	jobs      []Job
+	err       error
+	onPrepare func(Job)
 }
 
 func (f *fakePublication) PrepareSessionPublication(_ context.Context, job Job) error {
 	f.calls++
 	f.jobs = append(f.jobs, job)
+	if f.onPrepare != nil {
+		f.onPrepare(job)
+	}
 	return f.err
 }
 
@@ -484,22 +492,63 @@ func TestSessionPublicationDecisionHoldsOnlyMatchingUnmaterializedJob(t *testing
 
 func TestOpenJobStoreMigratesOnlyHistoricalMaterializedJobs(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "jobs.json")
-	legacy := `{"version":1,"jobs":{"ready":{"id":"ready","request":{"name":"ready","git_root":"/repo"},"state":"ready"},"awaiting":{"id":"awaiting","request":{"name":"awaiting","git_root":"/repo"},"state":"awaiting_emacs"},"failed":{"id":"failed","request":{"name":"failed","git_root":"/repo"},"state":"failed"}},"host_actions":{}}`
-	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+	legacy := diskShape{Version: 1, Jobs: map[string]Job{}, HostActions: map[string]HostAction{}}
+	states := map[string]struct {
+		state              JobState
+		availablePublished bool
+		materialized       bool
+	}{
+		"queued":                        {state: StateQueued},
+		"worktree-creating":             {state: StateWorktreeCreating},
+		"worktree-ready":                {state: StateWorktreeReady},
+		"session-creating":              {state: StateSessionCreating},
+		"session-ready":                 {state: StateSessionReady},
+		"session-healthy":               {state: StateSessionHealthy},
+		"awaiting":                      {state: StateAwaitingEmacs},
+		"materialized":                  {state: StateEmacsMaterialized, materialized: true},
+		"prompt-submitting":             {state: StatePromptSubmitting, materialized: true},
+		"ready":                         {state: StateReady, materialized: true},
+		"failed-before-available":       {state: StateFailed},
+		"failed-after-available-pushed": {state: StateFailed, availablePublished: true, materialized: true},
+	}
+	for id, tc := range states {
+		legacy.Jobs[id] = Job{
+			ID:                 id,
+			Request:            Request{Name: id, GitRoot: "/repo"},
+			State:              tc.state,
+			AvailablePublished: tc.availablePublished,
+		}
+	}
+	encoded, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, encoded, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	store, err := OpenJobStore(path, func(string, ...any) {})
 	if err != nil {
 		t.Fatal(err)
 	}
-	ready, ok, err := store.Get("ready")
-	if err != nil || !ok || !ready.Materialized || !ready.PublicationReleased {
-		t.Fatalf("ready=%#v ok=%t err=%v", ready, ok, err)
+	for id, tc := range states {
+		job, ok, err := store.Get(id)
+		if err != nil || !ok {
+			t.Fatalf("job %q missing after migration: ok=%t err=%v", id, ok, err)
+		}
+		if job.Materialized != tc.materialized || job.PublicationReleased != tc.materialized {
+			t.Errorf("job %q migration materialized=%t released=%t, want both %t", id, job.Materialized, job.PublicationReleased, tc.materialized)
+		}
 	}
-	awaiting, _, _ := store.Get("awaiting")
-	failed, _, _ := store.Get("failed")
-	if awaiting.Materialized || failed.Materialized {
-		t.Fatalf("closed legacy jobs migrated: awaiting=%#v failed=%#v", awaiting, failed)
+	var persisted diskShape
+	persistedBytes, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(persistedBytes, &persisted); err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Version != 2 {
+		t.Fatalf("migrated version=%d, want 2", persisted.Version)
 	}
 }
 
@@ -524,18 +573,25 @@ func TestOpenJobStoreRejectsMalformedV1WithoutRewritingBytes(t *testing.T) {
 func TestPublicationPreparationPrecedesSessionCreation(t *testing.T) {
 	root := t.TempDir()
 	f := newFixture(t, filepath.Join(root, "jobs.json"))
-	if _, _, err := f.store.Enqueue(Job{ID: "prepare", Request: Request{Name: "prepare", GitRoot: "/repo"}, State: StateQueued}); err != nil {
+	if _, _, err := f.store.Enqueue(Job{ID: "prepare", Request: Request{Name: "prepare", GitRoot: "/repo"}, State: StateSessionCreating, WorktreePath: "/worktrees/prepare"}); err != nil {
 		t.Fatal(err)
 	}
-	f.sessions.err = errors.New("stop after observing preparation")
-	if err := f.manager.Process(context.Background(), "prepare"); err == nil {
-		t.Fatal("Process succeeded")
+	var order []string
+	f.publication.onPrepare = func(job Job) {
+		order = append(order, "prepare:"+job.SessionID)
 	}
-	if f.publication.calls != 1 {
-		t.Fatalf("publication preparation calls=%d", f.publication.calls)
+	f.sessions.onEnsure = func(job Job) {
+		order = append(order, "ensure:"+job.SessionID)
 	}
-	if f.sessions.calls != 1 {
-		t.Fatalf("session creation calls=%d", f.sessions.calls)
+	if err := f.manager.Process(context.Background(), "prepare"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"prepare:", "ensure:", "prepare:s_new"}
+	if !reflect.DeepEqual(order, want) {
+		t.Fatalf("publication/session order=%v, want %v", order, want)
+	}
+	if got := job(t, f.store, "prepare"); got.State != StateAwaitingEmacs || got.SessionID != "s_new" {
+		t.Fatalf("prepared job=%#v, want awaiting_emacs bound to s_new", got)
 	}
 }
 
