@@ -1070,8 +1070,10 @@ pre {
      while an inset top-edge highlight catches light, so a prompt or response
      reads as a gently raised, top-lit card rather than a flat fill. The token
      stays far subtler than the sidebar's floating-dock lift (see
-     --bubble-shadow). box-shadow is untouched by the .bubble.pulsing breath
-     (it animates background only), so the depth holds while a bubble breathes. */
+     --bubble-shadow). box-shadow is a static token here, not itself animated,
+     so the depth holds steady while the prompt bubble rule below (the user
+     variant's own `transform: scale` breath) grows and shrinks the bubble
+     around it. */
   box-shadow: var(--bubble-shadow);
   display: flex;
   align-items: flex-start;
@@ -1090,6 +1092,32 @@ pre {
      and never widens the bubble, while a bubble too small to hold the stamp
      (a bare `hello`) grows only just enough to contain the stamp. */
   display: grid;
+  /* A resting prompt bubble breathes: a slow, continuous scale oscillation
+     around 1, subtle enough to read as "alive" rather than as motion. The
+     5.2s period sits in a natural resting-breath range (comfortably slower
+     than the footer's 2.6s liveness pulse, `.pfooter-breath`, which encodes
+     a signal rather than an ambience), and `transform` (not width/height)
+     means the animation never triggers layout — box-shadow and everything
+     else in `.bubble` stays untouched by it. */
+  animation: bubble-breath 5.2s ease-in-out infinite;
+  transform-origin: center;
+}
+/* The body's own breath is a shade LESS subtle than the bubble's (a wider
+   scale swing), so the text visibly grows and shrinks relative to the
+   bubble's edge rather than moving in lockstep with it — the bubble
+   breathes, and the text inside it breathes a little harder. Same period
+   and easing as `.bubble.user` so the two stay in phase. */
+.bubble.user > .bubble-body {
+  animation: bubble-breath-text 5.2s ease-in-out infinite;
+  transform-origin: center;
+}
+@keyframes bubble-breath {
+  0%, 100% { transform: scale(0.995); }
+  50% { transform: scale(1.005); }
+}
+@keyframes bubble-breath-text {
+  0%, 100% { transform: scale(0.99); }
+  50% { transform: scale(1.01); }
 }
 /* A markdown fenced code block the user typed into their prompt renders as
    the same card the agent's markdown fences get (.md pre.md-code), but the
@@ -2364,6 +2392,13 @@ pre {
     left: 0;
     width: 100%;
     opacity: 0.5;
+  }
+  /* The prompt bubble's breath is pure ambience, not a progress or liveness
+     signal (unlike the spinner and footer breath above), so it simply stops
+     rather than slowing. */
+  .bubble.user,
+  .bubble.user > .bubble-body {
+    animation: none;
   }
 }
 
