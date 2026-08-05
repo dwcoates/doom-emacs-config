@@ -54,6 +54,34 @@ func TestReviveSessionDirectRetiresTheGate(t *testing.T) {
 	}
 }
 
+func TestReviveForMergeClearsTheGateAndRefreshesTheIdleClock(t *testing.T) {
+	// A merge command is an explicit direct-revival policy, unlike a user
+	// revival command that must state a direct or compact-first choice.
+	m, _, hib := reviveRig(t, registry.HibernationCauseIdleCutoff)
+	if err := m.ReviveForMerge(context.Background(), "ws"); err != nil {
+		t.Fatalf("ReviveForMerge: %v", err)
+	}
+	if detail, asleep := hib.HibernationOf("s1"); asleep && detail.Cause != "" {
+		t.Fatalf("hibernation detail after merge revival = %+v, want cleared", detail)
+	}
+	if got := hib.lastTurnEnd("s1"); got <= 42 {
+		t.Fatalf("last turn end after merge revival = %d, want a refreshed timestamp", got)
+	}
+}
+
+func TestReviveForMergeRefusesAnInFlightUserRevival(t *testing.T) {
+	m, _, _ := reviveRig(t, registry.HibernationCauseIdleCutoff)
+	release, _, err := m.claimRevival("ws", "s1")
+	if err != nil {
+		t.Fatalf("claim user revival: %v", err)
+	}
+	defer release()
+	err = m.ReviveForMerge(context.Background(), "ws")
+	if !errors.Is(err, ErrRevivalInFlight) {
+		t.Fatalf("ReviveForMerge during a user revival = %v, want ErrRevivalInFlight", err)
+	}
+}
+
 // After a direct revival an ordinary prompt is no longer gated.
 func TestReviveSessionDirectAdmitsPromptsAfterwards(t *testing.T) {
 	// Arrange.

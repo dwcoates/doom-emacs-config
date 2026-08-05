@@ -58,6 +58,10 @@ func (e *sweepEnsurer) EnsureDriveable(_ context.Context, workspace string) erro
 	return e.Ensure(workspace)
 }
 
+func (e *sweepEnsurer) ReviveForMerge(_ context.Context, workspace string) error {
+	return e.Ensure(workspace)
+}
+
 func (e *sweepEnsurer) ensured() []string {
 	e.mu.Lock()
 	defer e.mu.Unlock()
