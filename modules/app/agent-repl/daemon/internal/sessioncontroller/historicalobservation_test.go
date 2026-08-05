@@ -125,3 +125,82 @@ func TestNoCreationBoundaryAdmitsNoHistory(t *testing.T) {
 		t.Fatalf("observation with no creation boundary = %v, want the rejection", err)
 	}
 }
+
+// --- R1: one classifier, every event type ------------------------------------
+
+// lifecycleEvent is a QueryLifecycle row at SEQ stamped with QUERY.
+func lifecycleEvent(seq uint64, query string) *corev1.Event {
+	return &corev1.Event{
+		Seq: seq,
+		Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+			QueryInstanceId: query,
+			Event:           &corev1.QueryLifecycle_Created{Created: &corev1.QueryCreated{}},
+		}},
+	}
+}
+
+// THE A4 PROPERTY: the replay/live verdict depends on the epoch, never on which
+// event type happens to be asking. Two event types at the same sequence with
+// the same query id must be classified identically — the divergence that used
+// to exist between them is what bricked a workspace.
+func TestTheEpochClassificationDoesNotDependOnTheEventType(t *testing.T) {
+	// Arrange — one retired-query row beneath the boundary, two shapes of it.
+	r := boundReducer(t)
+
+	// Act.
+	_, lifecycleHistorical := r.liveEvidenceFor(lifecycleEvent(84, "retired-query"), "retired-query")
+	_, observationHistorical := r.liveEvidenceFor(observationEvent(84, "retired-query", "turn-1"), "retired-query")
+
+	// Assert.
+	if lifecycleHistorical != observationHistorical {
+		t.Fatalf("lifecycle historical=%v but observation historical=%v at the same seq and query — this divergence is the defect",
+			lifecycleHistorical, observationHistorical)
+	}
+	if !lifecycleHistorical {
+		t.Fatal("a retired-query row beneath the creation boundary was not classified historical")
+	}
+}
+
+// Historical rows yield NO proof, which is what stops them reaching a
+// live-identity comparison at all.
+func TestHistoricalRowsCarryNoLiveEvidence(t *testing.T) {
+	// Arrange.
+	r := boundReducer(t)
+
+	// Act.
+	live, historical := r.liveEvidenceFor(observationEvent(84, "retired-query", "turn-1"), "retired-query")
+
+	// Assert.
+	if !historical || live.queryID != "" {
+		t.Fatalf("historical=%v live=%+v, want historical with empty proof", historical, live)
+	}
+}
+
+// The zero value fails CLOSED: a hand-built proof matches nothing and is
+// rejected for lacking an authoritative id, rather than passing validation.
+func TestZeroLiveEvidenceFailsClosed(t *testing.T) {
+	// Arrange / Act.
+	err := validateAccountUsageObservation(liveEvidence{}, "t", &corev1.AccountUsageObservation{
+		QueryInstanceId: "anything", TurnId: "t",
+	})
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "authoritative query_instance_id is required") {
+		t.Fatalf("zero-value evidence = %v, want the authoritative-id refusal", err)
+	}
+}
+
+// A live row still yields proof carrying the live id, so genuine contradictions
+// are still caught.
+func TestLiveRowsCarryTheLiveQueryId(t *testing.T) {
+	// Arrange.
+	r := boundReducer(t)
+
+	// Act — at the boundary, so not historical.
+	live, historical := r.liveEvidenceFor(observationEvent(100, "retired-query", "turn-1"), "retired-query")
+
+	// Assert.
+	if historical || live.queryID != "live-query" {
+		t.Fatalf("historical=%v live=%+v, want live proof carrying the live query id", historical, live)
+	}
+}

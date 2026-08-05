@@ -130,52 +130,61 @@ func (r *turnAccountingReducer) bindHandshakeIdentity(hello *corev1.ShimHello) e
 	return nil
 }
 
-// historicalQueryLifecycle reports a lifecycle record whose durable sequence
-// proves that it predates the live query's QueryCreated record. A shim restart
-// keeps the vendor session and its ordered store sequence but creates a new
-// query() invocation, so a daemon cursor can resume inside the retired query's
-// lifecycle before reaching the replacement query's creation boundary.
+// liveEvidence is PROOF that an event belongs to the live query instance.
 //
-// Those rows remain authoritative lifecycle history, but they cannot rebind
-// the accounting reducer away from the query carried by the live handshake.
-// Query-specific resume validation is owned by resumeIdentityTracker, which
-// independently follows every query_instance_id in the durable sequence.
-// A different query id at or beyond the handshake's exact creation boundary is
-// a protocol contradiction and remains a hard failure. A zero boundary means
-// the announced vendor stream does not contain this query's creation record,
-// so no conflicting query identity is admitted as historical.
-func (r *turnAccountingReducer) historicalQueryLifecycle(ev *corev1.Event) (string, bool) {
-	lifecycle := ev.GetQueryLifecycle()
-	if lifecycle == nil || r.queryID == "" || lifecycle.GetQueryInstanceId() == "" || r.queryCreatedSeq == 0 {
-		return "", false
+// IT IS THE ONLY THING THE LIVE-IDENTITY CHECK ACCEPTS, and liveEvidenceFor is
+// its only meaningful constructor. That is the design: a replayed row cannot
+// reach a live-identity comparison because a call site forgot to ask whether it
+// was historical — it has nothing to pass. The zero value carries an empty
+// query id, so even a hand-built one fails closed on "authoritative
+// query_instance_id is required" rather than matching anything.
+//
+// WHY THIS TYPE EXISTS. The replay/live test used to be re-derived per event
+// type: lifecycle rows were exempted from the live handshake's authority and
+// AccountUsageObservations were not, six sequence numbers apart in the same
+// replay. The observation was judged against a query id minted THIS process,
+// and since that id is regenerated on every bring-up while the stored one is
+// frozen, the two could never agree — one row made its workspace permanently
+// unopenable, 13 attempts against 13 distinct live ids. Every event type added
+// afterwards would have inherited the same defect silently.
+type liveEvidence struct{ queryID string }
+
+// liveEvidenceFor classifies one event's epoch ONCE, returning proof only when
+// the event belongs to the live query.
+//
+// historical reports a row whose durable sequence proves it predates the live
+// query's QueryCreated record. A shim restart keeps the vendor session and its
+// ordered store sequence while creating a new query() invocation, so a resuming
+// daemon replays the retired query's rows before reaching the replacement's
+// creation boundary. Those rows stay authoritative history; they simply cannot
+// rebind, or be judged by, the query carried by the live handshake.
+//
+// A different query id AT OR BEYOND the creation boundary is a live protocol
+// contradiction and stays a hard failure. A zero boundary admits no history at
+// all: the announced stream does not carry this query's creation record, so no
+// row can be proven to predate it. Query-specific resume validation is owned by
+// resumeIdentityTracker, which independently follows every query_instance_id in
+// the durable sequence.
+func (r *turnAccountingReducer) liveEvidenceFor(ev *corev1.Event, queryInstanceID string) (live liveEvidence, historical bool) {
+	if r.queryID == "" || queryInstanceID == "" || r.queryCreatedSeq == 0 {
+		return liveEvidence{queryID: r.queryID}, false
 	}
-	return lifecycle.GetQueryInstanceId(), lifecycle.GetQueryInstanceId() != r.queryID && ev.GetSeq() < r.queryCreatedSeq
+	if queryInstanceID != r.queryID && ev.GetSeq() < r.queryCreatedSeq {
+		return liveEvidence{}, true
+	}
+	return liveEvidence{queryID: r.queryID}, false
 }
 
-// historicalAccountUsageObservation reports boundary evidence whose durable
-// sequence proves it predates the live query's QueryCreated record.
-//
-// IT IS THE SAME TEST historicalQueryLifecycle APPLIES, AND THAT IS THE POINT.
-// A shim restart keeps the vendor session and its ordered store sequence while
-// creating a new query() invocation, so a resuming daemon replays the retired
-// query's rows before reaching the replacement's creation boundary. The
-// lifecycle rows in that range are already exempted from the live handshake's
-// authority; the observations sitting between them were not, so replay judged
-// them against a query id minted THIS PROCESS and rejected every one.
-//
-// That rejection is terminal, so a single such row made its workspace
-// permanently unopenable: the stored id is frozen, the live id is regenerated
-// on every attempt, and the two can never agree. One observed conversation
-// failed 13 bring-ups against 13 different live ids.
-//
-// Retired evidence is retained as history rather than admitted as live
-// accounting, matching what the lifecycle branch already does — the live
-// handshake stays the authority for the query actually running.
-func (r *turnAccountingReducer) historicalAccountUsageObservation(ev *corev1.Event, observation *corev1.AccountUsageObservation) bool {
-	if r.queryID == "" || observation.GetQueryInstanceId() == "" || r.queryCreatedSeq == 0 {
-		return false
+// HistoricalQueryLifecycle reports whether a lifecycle row is replayed history,
+// for the consumer's decision log. It is the same classification every other
+// event type now gets, asked by name because the log names it.
+func (r *turnAccountingReducer) HistoricalQueryLifecycle(ev *corev1.Event) (string, bool) {
+	lifecycle := ev.GetQueryLifecycle()
+	if lifecycle == nil {
+		return "", false
 	}
-	return observation.GetQueryInstanceId() != r.queryID && ev.GetSeq() < r.queryCreatedSeq
+	_, historical := r.liveEvidenceFor(ev, lifecycle.GetQueryInstanceId())
+	return lifecycle.GetQueryInstanceId(), historical
 }
 
 // observeTurnClaimBridge admits the durable cross-session proof into the
@@ -193,7 +202,7 @@ func (r *turnAccountingReducer) observeTurnClaimBridge(ev *corev1.Event) {
 
 func (r *turnAccountingReducer) observe(ev *corev1.Event, daemonSessionID string) error {
 	if q := ev.GetQueryLifecycle(); q != nil {
-		if _, historical := r.historicalQueryLifecycle(ev); historical {
+		if _, historical := r.HistoricalQueryLifecycle(ev); historical {
 			// Lifecycle history from a retired query is retained and translated by
 			// the consumer, while the live handshake remains the accounting
 			// authority for subsequent turn evidence.
@@ -212,12 +221,13 @@ func (r *turnAccountingReducer) observe(ev *corev1.Event, daemonSessionID string
 		r.activeTurnID = started.GetTurnId()
 	}
 	if observation := ev.GetAccountUsageObservation(); observation != nil {
-		if r.historicalAccountUsageObservation(ev, observation) {
+		live, historical := r.liveEvidenceFor(ev, observation.GetQueryInstanceId())
+		if historical {
 			// Retired-query evidence: retained as history, not admitted as live
 			// accounting, on the same terms as the lifecycle rows around it.
 			return nil
 		}
-		if err := validateAccountUsageObservation(r.queryID, ev.GetRequestId(), observation); err != nil {
+		if err := validateAccountUsageObservation(live, ev.GetRequestId(), observation); err != nil {
 			return err
 		}
 		turn := r.turns[observation.GetTurnId()]
@@ -325,7 +335,11 @@ func (r *turnAccountingReducer) observe(ev *corev1.Event, daemonSessionID string
 // evidence to one admitted turn. Available means a measured five-hour window
 // exists; unavailable means one exact reason exists. Neither meaning may be
 // invented later by a projector from an absent nested message or oneof.
-func validateAccountUsageObservation(queryID, requestID string, observation *corev1.AccountUsageObservation) error {
+// validateAccountUsageObservation takes liveEvidence rather than a bare id so a
+// replayed row cannot reach it: only liveEvidenceFor produces the proof, and it
+// produces none for history.
+func validateAccountUsageObservation(live liveEvidence, requestID string, observation *corev1.AccountUsageObservation) error {
+	queryID := live.queryID
 	if strings.TrimSpace(queryID) == "" {
 		return &malformedAccountUsageObservationError{turnID: observation.GetTurnId(), reason: "authoritative query_instance_id is required"}
 	}

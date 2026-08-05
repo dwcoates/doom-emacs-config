@@ -948,11 +948,27 @@ func (c *consumer) ReleaseSynthesizedTurnClose(turnIDs []string, cause string) {
 // task catalog, or frontend push occurs on this path.
 func (c *consumer) ApplyTurnClaimBridge(ev *corev1.Event) error {
 	replayed, err := c.ssm.ResolveTurnClaimBridge(c.workspace, c.sessionID, ev)
-	c.logf("session-controller: turn bridge plane=%s session=%s seq=%d turn_id=%q previous_session=%q request_id=%q decision=%s replayed=%v error=%v",
+	// ONE record per bridge, carrying the consumer's own outcome. The SSM owns
+	// the refusal itself and has already logged it with its full context; this
+	// line reports what the CONSUMER did about it, which is a different fact.
+	// It used to be emitted here AND again inside the dead-claim branch, so a
+	// single refusal produced three records across two layers.
+	outcome := "correlation_retained=false session_survives=true"
+	if err == nil {
+		outcome = "correlation_retained=true session_survives=true"
+	} else if errors.Is(err, ssm.ErrTurnBridgeDeadClaim) {
+		// The claim is closed, so no durable row is written — but the accounting
+		// correlation IS kept, or the response usage that follows this bridge
+		// would have no root turn to name and would be fatal.
+		outcome = "correlation_retained=true session_survives=true durable_row=none"
+	} else {
+		outcome = "correlation_retained=false session_survives=false"
+	}
+	c.logf("session-controller: turn bridge plane=%s session=%s seq=%d turn_id=%q previous_session=%q request_id=%q decision=%s replayed=%v %s error=%v",
 		ev.GetPlane().String(), c.sessionID, ev.GetSeq(),
 		ev.GetTurnClaimBridge().GetTurnId(),
 		ev.GetTurnClaimBridge().GetPreviousSessionId(), ev.GetRequestId(),
-		turnBridgeDecision(err), replayed, err)
+		turnBridgeDecision(err), replayed, outcome, err)
 	if err != nil {
 		// The dead-claim refusal is the one bridge failure the transport must
 		// SURVIVE. The ledger already refused it (nothing was written), and the
@@ -984,9 +1000,6 @@ func (c *consumer) ApplyTurnClaimBridge(ev *corev1.Event) error {
 			// Correlating a retired turn is safe: the ids that follow belong to that
 			// turn, and the next live TurnStarted replaces the correlation outright.
 			c.accounting.observeTurnClaimBridge(ev)
-			c.logf("session-controller: turn bridge REFUSED session=%s seq=%d turn_id=%q previous_session=%q — the claim is already closed, so this bridge is recorded in no durable row; the accounting correlation IS retained so the usage that follows can still name its root turn, the session SURVIVES, and last_seen_seq advances past it: %v",
-				c.sessionID, ev.GetSeq(), ev.GetTurnClaimBridge().GetTurnId(),
-				ev.GetTurnClaimBridge().GetPreviousSessionId(), err)
 			return nil
 		}
 		return fmt.Errorf("session-controller: turn bridge rejected: %w", err)
@@ -1024,7 +1037,7 @@ func (c *consumer) Consume(ev *corev1.Event) error {
 		c.pushFailure("resume-identity-"+identityMismatch.queryInstanceID, errclass.Command(nil, mismatchErr))
 		return fmt.Errorf("session-controller: resumed query identity mismatch before frame mutation: %w", mismatchErr)
 	}
-	historicalQueryID, historicalQueryLifecycle := c.accounting.historicalQueryLifecycle(ev)
+	historicalQueryID, historicalQueryLifecycle := c.accounting.HistoricalQueryLifecycle(ev)
 	if err := c.accounting.observe(ev, c.sessionID); err != nil {
 		c.logRejectedAccountingObservation(ev, err)
 		return fmt.Errorf("session-controller: observe turn accounting before frame mutation: %w", err)
@@ -1158,6 +1171,17 @@ func (c *consumer) Consume(ev *corev1.Event) error {
 	return nil
 }
 
+// observationIsHistorical answers the rejection log's "was this replayed
+// history?" question through the same classifier the reducer used, so the log
+// can never disagree with the decision it is reporting.
+func observationIsHistorical(r *turnAccountingReducer, ev *corev1.Event, observation *corev1.AccountUsageObservation) bool {
+	if observation == nil {
+		return false
+	}
+	_, historical := r.liveEvidenceFor(ev, observation.GetQueryInstanceId())
+	return historical
+}
+
 func (c *consumer) logRejectedAccountingObservation(ev *corev1.Event, cause error) {
 	observation := ev.GetAccountUsageObservation()
 	queryID, turnID, boundary := "", "", "unspecified"
@@ -1177,7 +1201,7 @@ func (c *consumer) logRejectedAccountingObservation(ev *corev1.Event, cause erro
 	// sits on.
 	c.logf("session-controller: turn accounting observation REJECTED before mutation session=%s authoritative_query_instance_id=%q query_instance_id=%q seq=%d query_created_seq=%d historical=%v request_id=%q turn_id=%q boundary=%s cause=%q kind=%s",
 		c.sessionID, c.accounting.queryID, queryID, ev.GetSeq(), c.accounting.queryCreatedSeq,
-		observation != nil && c.accounting.historicalAccountUsageObservation(ev, observation),
+		observationIsHistorical(c.accounting, ev, observation),
 		ev.GetRequestId(), turnID, boundary, cause.Error(), stateKind(ev))
 }
 
