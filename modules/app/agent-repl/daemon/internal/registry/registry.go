@@ -118,6 +118,117 @@ type Record struct {
 	// a thing the registry queries BY, so giving it a table would buy joins
 	// nobody performs.
 	QueuedPrompts []QueuedPrompt `json:"queued_prompts,omitempty"`
+	// LastTurnEndMs is when this session's most recent turn ENDED, unix millis.
+	// Zero means no turn has ever ended under this record.
+	//
+	// PERSISTED for the same reason BackfillState is, and for one more: it is
+	// the ONLY input to the cache keep-alive policy, and that policy's whole
+	// premise is that a decision is a time-since check against a durable
+	// timestamp rather than a timer. A timer dies with the daemon and lies
+	// across a laptop sleep; a persisted instant survives both, and the
+	// discovery that too much time has passed is itself a decision the policy
+	// takes (HibernationCacheExpired) rather than a gap it fails to notice.
+	LastTurnEndMs int64 `json:"last_turn_end_ms,omitempty"`
+	// Hibernated marks a session whose shim the daemon deliberately stopped and
+	// which must NOT be revived implicitly. It is durable so a daemon restart
+	// rehydrates the sleep rather than silently un-sleeping it, and so a
+	// rehydrated hibernated session is outside the keep-alive loop by
+	// construction rather than by a live flag nobody re-derives.
+	Hibernated bool `json:"hibernated,omitempty"`
+	// Hibernation is the typed account behind Hibernated. Zero value when
+	// Hibernated is false; the two move together in one write.
+	Hibernation HibernationDetail `json:"hibernation"`
+	// Rewind is the UNCONSUMED rewind lineage this session's next spawn must
+	// announce, zero when none is owed.
+	//
+	// DURABLE, AND WRITTEN BY THE SAME Update THAT FLIPS ClaudeSessionID. The
+	// flip is the rewind's one destructive act; the lineage is the only account
+	// of what that flip dropped. Held in memory instead, a daemon dying between
+	// the flip and the respawn left a record naming a truncated conversation
+	// with nothing left to say it had been truncated, and the SessionRewound
+	// the frontends replay from was never emitted by anyone.
+	//
+	// ONE-SHOT: the spawner clears it in the Update that records the spawn that
+	// consumed it. A lineage left standing would ride the next unrelated
+	// respawn and announce a rewind that never happened.
+	Rewind RewindLineage `json:"rewind,omitempty"`
+}
+
+// RewindLineage is the durable form of the frozen shim argv contract
+// (--rewound-from, --rewind-retained-leaf, --rewind-dropped-turns).
+//
+// ALL THREE OR NONE. The shim rejects an empty dropped-turn list outright, so a
+// partial lineage would turn an unrecorded rewind into a spawn that fails at
+// startup and a session that comes back with no shim at all. Every writer and
+// the loader enforce the pair, so a partial one is not representable durably.
+type RewindLineage struct {
+	// PreviousVendorSessionID is the transcript the rewind truncated — the seq
+	// space it retired.
+	PreviousVendorSessionID string `json:"previous_vendor_session_id,omitempty"`
+	// RetainedLeafUUID is the last record kept: the final record of the last
+	// real turn.
+	RetainedLeafUUID string `json:"retained_leaf_uuid,omitempty"`
+	// DroppedTurnIDs is the comma-separated turn_id list, in submission order.
+	DroppedTurnIDs string `json:"dropped_turn_ids,omitempty"`
+}
+
+// Armed reports whether a complete lineage is waiting to be announced.
+func (l RewindLineage) Armed() bool {
+	return l.PreviousVendorSessionID != "" && l.RetainedLeafUUID != "" && l.DroppedTurnIDs != ""
+}
+
+// Partial reports a lineage that carries some of the three and not all of
+// them — the one shape that must never be stored or spawned with.
+func (l RewindLineage) Partial() bool {
+	set := 0
+	for _, f := range []string{l.PreviousVendorSessionID, l.RetainedLeafUUID, l.DroppedTurnIDs} {
+		if f != "" {
+			set++
+		}
+	}
+	return set != 0 && set != 3
+}
+
+// Hibernation cause tokens. They are the durable spelling of
+// frontendv1.HibernationDetail's cause arms; the registry stores a string
+// rather than the enum-less oneof so a record stays readable by a binary that
+// predates a future arm.
+const (
+	HibernationCauseIdleCutoff   = "idle_cutoff"
+	HibernationCauseForced       = "forced"
+	HibernationCauseCacheExpired = "cache_expired"
+)
+
+// HibernationDetail is the durable evidence of WHY and WHEN a session
+// hibernated. Every field is carried rather than re-derived: the cutoff and TTL
+// that tripped are daemon CONFIG at the moment of the transition, and a record
+// that stored only the cause would report the current config's numbers for a
+// sleep taken under different ones.
+type HibernationDetail struct {
+	// Cause is one of the HibernationCause* tokens. Empty exactly when the
+	// session is not hibernated.
+	Cause string `json:"cause,omitempty"`
+	// SinceMs is when the session entered hibernation, unix millis.
+	SinceMs int64 `json:"since_ms,omitempty"`
+	// CutoffMs is the idle cutoff that tripped (idle_cutoff only).
+	CutoffMs int64 `json:"cutoff_ms,omitempty"`
+	// ElapsedMs is how long the session had actually been idle when the check
+	// ran (cache_expired only).
+	ElapsedMs int64 `json:"elapsed_ms,omitempty"`
+	// TTLMs is the expected cache TTL the elapsed time exceeded
+	// (cache_expired only).
+	TTLMs int64 `json:"ttl_ms,omitempty"`
+}
+
+// ValidHibernationCause reports whether cause is a token this binary
+// understands. The empty string is valid and means "not hibernated".
+func ValidHibernationCause(cause string) bool {
+	switch cause {
+	case "", HibernationCauseIdleCutoff, HibernationCauseForced, HibernationCauseCacheExpired:
+		return true
+	default:
+		return false
+	}
 }
 
 // ConversationIdentity names one transcript/store sequence space. The vendor
@@ -475,6 +586,19 @@ func (r *Registry) maintain(state *registryState) (maintenanceStats, error) {
 	for sessionID, rec := range state.records {
 		if !validBackfill(rec.BackfillState) {
 			return stats, fmt.Errorf("registry: session %s has invalid backfill_state %q", sessionID, rec.BackfillState)
+		}
+		// HIBERNATION AND ITS ACCOUNT ARE ONE FACT, checked where every write
+		// passes. `hibernated` is the compatibility projection of the typed
+		// detail, so a record carrying one without the other would make the
+		// revival gate render a sleep it cannot explain — or, worse, explain a
+		// sleep that is not happening. Refusing the write is what keeps the
+		// pair from coming apart at all.
+		if !ValidHibernationCause(rec.Hibernation.Cause) {
+			return stats, fmt.Errorf("registry: session %s has invalid hibernation cause %q", sessionID, rec.Hibernation.Cause)
+		}
+		if rec.Hibernated != (rec.Hibernation.Cause != "") {
+			return stats, fmt.Errorf("registry: session %s has hibernated=%v with cause %q; the flag and its typed account must move together",
+				sessionID, rec.Hibernated, rec.Hibernation.Cause)
 		}
 		if rec.Terminal && rec.TerminalAt == "" {
 			if _, err := time.Parse(time.RFC3339, rec.CreatedAt); err == nil {

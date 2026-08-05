@@ -98,6 +98,8 @@ import {
   QueryStartupFailureSchema,
   QueryTerminatedSchema,
   ResumedQuerySchema,
+  SessionRewoundSchema,
+  KeepAliveDiscardSchema,
   TurnEndUsageBoundarySchema,
   TurnStartUsageBoundarySchema,
   UnexpectedQueryEofSchema,
@@ -126,6 +128,34 @@ function completionLatch(): { promise: Promise<void>; resolve: () => void } {
   return { promise, resolve };
 }
 
+/**
+ * The daemon-supplied account of one conversation rewind, as spawned on argv.
+ *
+ * `previousVendorSessionId` is the retired seq space; the NEW id is not
+ * carried here because it is already the session's store key — deriving it
+ * rather than accepting a second copy makes the two disagreeing impossible.
+ */
+export interface RewindLineage {
+  previousVendorSessionId: string;
+  retainedLeafUuid: string;
+  /** Dropped keep-alive turn ids, in submission order. Order is contractual. */
+  droppedTurnIds: string[];
+}
+
+/**
+ * Dedup key for a SessionRewound, per the store's §6.4 per-producer identity
+ * convention (`<prefix>:<stable identity>`, cf. `clear:<uuid>`).
+ *
+ * Keyed on the RETIRED vendor session id: dedup is scoped
+ * (session_id, dedup_key), the row lives under the new session id, and exactly
+ * one rewind can ever have produced that pair. So a shim restart re-emitting
+ * the event with the same argv collapses onto the existing row instead of
+ * duplicating the lineage record.
+ */
+export function sessionRewoundDedupKey(previousVendorSessionId: string): string {
+  return `rewind:${previousVendorSessionId}`;
+}
+
 export interface UdsSessionDeps {
   sessionId: string;
   shimVersion: string;
@@ -146,6 +176,17 @@ export interface UdsSessionDeps {
    * then adopted from the first converted event.
    */
   storeSessionId?: string;
+  /**
+   * Rewind lineage from argv, when the daemon respawned this shim onto a
+   * TRUNCATED copy of a previous vendor transcript. Present => the session
+   * emits exactly one SessionRewound into the new seq space at bring-up.
+   *
+   * The shim does not perform the truncation and owns no timers for it: the
+   * daemon did the surgery before spawning us, and the shim still owns exactly
+   * one query for its whole process life. This is durable EXPLANATION of an
+   * identity change that already happened, nothing more.
+   */
+  rewindLineage?: RewindLineage;
   /**
    * The `--permission-mode` argv value the query was CONSTRUCTED with.
    *
@@ -701,6 +742,11 @@ export class UdsSession {
       this.store.onDegraded((report) => this.server.sendEvent(this.degradedEvent(report)));
       await this.store.connect();
       LOGGER.log({ agent_repl_session_id: this.deps.sessionId, store_socket: this.deps.storeSocketPath }, "store producer connection established");
+      // The rewind is the reason this seq space exists, so it is the FIRST
+      // persistent event in it — the explanation precedes what it explains.
+      // A reader replaying the new vendor session must learn the conversation
+      // was truncated before it sees the query that resumed it.
+      await this.persistSessionRewound();
       await this.persistQueryCreated();
       // Readiness is asserted from the handshake hook wired in the
       // constructor, not here: connect() resolves on the DIAL, and an event
@@ -1362,6 +1408,88 @@ export class UdsSession {
       throw new Error(`QueryCreated persistence returned an invalid receipt: accepted=${ack.accepted} deduped=${ack.deduped} last_seq=${ack.lastSeq}`);
     }
     this.queryCreatedPosition = { storeKey, seq: ack.lastSeq };
+  }
+
+  /**
+   * Persist the durable explanation of a rewound vendor-session identity.
+   *
+   * No-op without argv lineage, which is the overwhelmingly common case: an
+   * ordinary resume rewinds nothing.
+   *
+   * The receipt admits TWO shapes, and both are success. A first emission is
+   * accepted with a fresh seq; a shim RESTART on the same truncated transcript
+   * re-emits the identical event and the store's (session_id, dedup_key) index
+   * collapses it, returning deduped=1 and last_seq=0 because a duplicate
+   * consumes no seq. Anything else — a partial batch, a receipt claiming both,
+   * an acceptance with no assigned seq — is a store contract violation and
+   * fails the bring-up loudly rather than proceeding on an unproven record.
+   */
+  private async persistSessionRewound(): Promise<void> {
+    const lineage = this.deps.rewindLineage;
+    if (lineage === undefined) return;
+    const storeKey = this.store.storeSessionId();
+    if (storeKey === lineage.previousVendorSessionId) {
+      throw new Error(`SessionRewound would name one vendor session as both sides of the rewind (${storeKey})`);
+    }
+    const envelope = this.sessionRewoundEnvelope(lineage, storeKey);
+    LOGGER.log({
+      agent_repl_session_id: this.deps.sessionId,
+      query_instance_id: this.queryInstanceId,
+      store_key: storeKey,
+      previous_vendor_session_id: lineage.previousVendorSessionId,
+      retained_leaf_uuid: lineage.retainedLeafUuid,
+      dropped_turn_count: lineage.droppedTurnIds.length,
+      dedup_key: envelope.dedupKey,
+    }, "persisting session rewind lineage into the resumed vendor seq space");
+    const ack = await this.store.write([envelope]);
+    const accepted = ack.accepted === 1n && ack.deduped === 0n && ack.lastSeq !== 0n;
+    const deduped = ack.accepted === 0n && ack.deduped === 1n;
+    if (!accepted && !deduped) {
+      LOGGER.log({
+        level: "error",
+        operation: "shim.uds-session.session-rewound",
+        agent_repl_session_id: this.deps.sessionId,
+        query_instance_id: this.queryInstanceId,
+        store_key: storeKey,
+        previous_vendor_session_id: lineage.previousVendorSessionId,
+        accepted: String(ack.accepted),
+        deduped: String(ack.deduped),
+        last_seq: String(ack.lastSeq),
+        outcome: "fatal_invalid_session_rewound_receipt",
+      }, "session rewind lineage receipt was neither a single acceptance nor a single dedup");
+      throw new Error(`SessionRewound persistence returned an invalid receipt: accepted=${ack.accepted} deduped=${ack.deduped} last_seq=${ack.lastSeq}`);
+    }
+    LOGGER.log({
+      agent_repl_session_id: this.deps.sessionId,
+      query_instance_id: this.queryInstanceId,
+      store_key: storeKey,
+      outcome: deduped ? "deduped_existing_lineage" : "persisted_new_lineage",
+      seq: String(ack.lastSeq),
+    }, "session rewind lineage received its durable store receipt");
+  }
+
+  /** Build the PERSISTENT SessionRewound envelope for the new vendor seq space. */
+  private sessionRewoundEnvelope(lineage: RewindLineage, storeKey: string): Event {
+    return create(EventSchema, {
+      sessionId: storeKey,
+      seq: 0n,
+      plane: Plane.STREAM,
+      class: EventClass.PERSISTENT,
+      producedAtMs: BigInt(this.now()),
+      dedupKey: sessionRewoundDedupKey(lineage.previousVendorSessionId),
+      payload: {
+        case: "sessionRewound",
+        value: create(SessionRewoundSchema, {
+          previousVendorSessionId: lineage.previousVendorSessionId,
+          newVendorSessionId: storeKey,
+          retainedLeafUuid: lineage.retainedLeafUuid,
+          reason: {
+            case: "keepAliveDiscard",
+            value: create(KeepAliveDiscardSchema, { droppedTurnIds: lineage.droppedTurnIds }),
+          },
+        }),
+      },
+    });
   }
 
   /** Persist effective query configuration after the SDK reports system initialization. */

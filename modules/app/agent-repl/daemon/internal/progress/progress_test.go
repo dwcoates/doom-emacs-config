@@ -69,13 +69,25 @@ func newHarness(t *testing.T) *harness {
 
 func newHarnessWindow(t *testing.T, window time.Duration) *harness {
 	t.Helper()
-	sched := &fakeSched{}
-	m := New(Options{
+	return newHarnessWithOptions(t, Options{
 		Logf:           func(string, ...any) {},
-		Clock:          func() int64 { return atMs },
-		Sched:          sched,
 		CoalesceWindow: window,
 	})
+}
+
+// newHarnessWithOptions builds a harness around caller-supplied Options,
+// filling in the injected clock and scheduler every case needs. It is what lets
+// a case vary one knob (the cost threshold, the coalescing window) without
+// restating the rest of the fixture.
+func newHarnessWithOptions(t *testing.T, opts Options) *harness {
+	t.Helper()
+	sched := &fakeSched{}
+	if opts.Logf == nil {
+		opts.Logf = func(string, ...any) {}
+	}
+	opts.Clock = func() int64 { return atMs }
+	opts.Sched = sched
+	m := New(opts)
 	ch, cancel := m.Subscribe()
 	t.Cleanup(func() {
 		cancel()

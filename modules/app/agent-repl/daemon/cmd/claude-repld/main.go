@@ -23,6 +23,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/frontend"
+	"claude-repld/internal/keepalive"
 	"claude-repld/internal/login"
 	"claude-repld/internal/progress"
 	"claude-repld/internal/registry"
@@ -308,9 +309,39 @@ func main() {
 	if err != nil {
 		daemonFatal(daemonLog, "claude-repld: open prompt receipt store: %v", err)
 	}
+	// The keep-alive window ledger. FATAL on failure for the prompt receipts'
+	// reason inverted: without it the daemon cannot tell its own cache pings
+	// from the user's prompts, and would render machine-generated turns as
+	// conversation.
+	keepAliveWindows, err := statedb.NewKeepAliveWindows(stateStore)
+	if err != nil {
+		daemonFatal(daemonLog, "claude-repld: open keep-alive window store: %v", err)
+	}
 	turnAccountings, err := statedb.NewTurnAccountings(stateStore)
 	if err != nil {
 		daemonFatal(daemonLog, "claude-repld: open turn accounting store: %v", err)
+	}
+	// EVERY KEEP-ALIVE WINDOW STILL OPEN HERE IS AN ORPHAN. No session
+	// controller exists yet, so no ping can be in flight, so an unclosed row can
+	// only be one a previous daemon died in the middle of — and an open window
+	// has no upper bound, meaning that row is withholding its workspace's entire
+	// conversation from every rendering until somebody closes it.
+	//
+	// It runs after the turn accounting store because the repair is stamped from
+	// that store's durable turn ends, never from now: now is when the daemon
+	// restarted, and closing there would extend the exclusion over every real
+	// turn the outage spanned.
+	//
+	// FATAL on failure, for the ledger's own reason: a daemon that cannot
+	// reconcile the ledger cannot tell its pings from the user's conversation,
+	// and starting anyway would silently blackout whatever it failed to repair.
+	reconciled, err := keepAliveWindows.ReconcileOpenWindows(turnAccountings)
+	if err != nil {
+		daemonFatal(daemonLog, "claude-repld: reconcile open keep-alive windows: %v", err)
+	}
+	if reconciled > 0 {
+		daemonLog.With("operation", "reconcile-keep-alive-windows").Log(
+			"claude-repld: closed %d keep-alive window(s) left open by a previous daemon; each was withholding every later conversation item on its workspace", reconciled)
 	}
 	tokenUtilizations, err := statedb.NewTokenUtilizations(stateStore)
 	if err != nil {
@@ -408,7 +439,25 @@ func main() {
 	// The progress-footer resolver (F1) is the SSM's sibling and is owned here
 	// for the same reason: both the frontend push loop and the per-session
 	// controller feed it, so one owner closes it once.
-	progressMgr := progress.New(progress.Options{Logf: legacyLog})
+	// THE KEEP-ALIVE POLICY IS RESOLVED AT BOOT AND FATAL ON A BAD KNOB. An
+	// operator who set AGENT_REPL_KEEPALIVE_CACHE_TTL_MS=0 meant something by
+	// it, and quietly running the shipped hour while they believe the feature
+	// is off is the failure a loud refusal exists to prevent.
+	//
+	// Resolved HERE, ahead of every consumer, because three of them take a knob
+	// from it — the progress resolver's cost threshold, the session
+	// controller's policy, and the sweeper's — and a config read per consumer
+	// would be three chances to disagree about the same environment.
+	keepAliveConfig, err := keepalive.FromEnv()
+	if err != nil {
+		daemonFatal(daemonLog, "claude-repld: %v", err)
+	}
+	legacyLog("claude-repld: cache keep-alive policy ttl=%s leeway=%s idle_cutoff=%s uncached_cost_alert=%d tokens",
+		keepAliveConfig.CacheTTL, keepAliveConfig.Leeway, keepAliveConfig.IdleCutoff, keepAliveConfig.UncachedCostAlertTokens)
+	progressMgr := progress.New(progress.Options{
+		Logf:                legacyLog,
+		UncachedAlertTokens: keepAliveConfig.UncachedCostAlertTokens,
+	})
 	defer progressMgr.Close()
 
 	// Shims dial US. One listening socket serves every session; each shim
@@ -538,6 +587,14 @@ func main() {
 		},
 		Logf: legacyLog,
 	}
+	// THE DAEMON'S ONE CLOCK. The idle sweeper decides a hibernation against
+	// the server's clock and the session controller's transition re-validates
+	// that decision's idleness against its own; if those are two clocks they
+	// are two authorities for one policy, and the gate refuses decisions the
+	// sweeper legitimately took. Both fields below are fed from this variable
+	// so the decision and its gate are the same authority by construction.
+	nowFn := time.Now
+	nowMsFn := func() int64 { return nowFn().UnixMilli() }
 	shimSpawner := server.NewShimSpawner(sessionRegistry, shimListener.Connected, shimListener.Evict, udsSpawn, legacyLog)
 	// The respawn path must reach the create path's verdict on the resume gate
 	// for the very same session, and -fake is what that verdict turns on.
@@ -560,9 +617,22 @@ func main() {
 		PermissionModes:   server.NewRegistryModeStore(sessionRegistry),
 		Registrar:         registrar,
 		ModelCatalogs:     registrar,
-		DaemonVersion:     daemonVersion,
-		ProtocolVersion:   shimProtocolVersion,
-		Logf:              legacyLog,
+		Hibernations:      registrar,
+		VendorSessions:    registrar,
+		KeepAliveWindows:  server.KeepAliveWindowStore{Windows: keepAliveWindows},
+		KeepAlive:         keepAliveConfig,
+		VendorSessionOf: func(sessionID string) (string, bool) {
+			rec, ok := sessionRegistry.Get(sessionID)
+			if !ok || rec.ClaudeSessionID == "" {
+				return "", false
+			}
+			return rec.ClaudeSessionID, true
+		},
+		DaemonVersion:   daemonVersion,
+		ProtocolVersion: shimProtocolVersion,
+		Logf:            legacyLog,
+		// One authority with the server's idle sweeper (see nowFn above).
+		Now: nowMsFn,
 		// The prompt queue's classifier (E4). A queued prompt is judged by a
 		// cheap headless run under the SESSION's own account, so the
 		// classification cannot land on a different account's quota or config.
@@ -715,6 +785,7 @@ func main() {
 		Turns:        controller,
 		Health:       controller,
 		Restarts:     controller,
+		Hibernations: controller,
 		DaemonHealth: ready,
 		Lifecycle:    opener,
 		// The registry's own record of a deliberate deletion, exposed so a merge
@@ -791,7 +862,9 @@ func main() {
 	}()
 
 	srv := server.New(server.Config{
-		Logf:            legacyLog,
+		Logf: legacyLog,
+		// One authority with the session controller's hibernation gate.
+		Now:             nowFn,
 		DaemonVersion:   daemonVersion,
 		BinaryMTime:     binaryMTime,
 		ForceFake:       *fake,
@@ -801,6 +874,7 @@ func main() {
 		Logins:          logins,
 		Accounts:        accounts,
 		IdleTimeout:     *idleTimeout,
+		KeepAlive:       keepAliveConfig,
 		WidgetAssetsDir: *widgetAssets,
 		DaemonAddr:      *addr,
 		Controller:      controller,

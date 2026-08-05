@@ -5,6 +5,7 @@ package e2e
 import (
 	"fmt"
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +18,21 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/structpb"
 )
+
+// isFakeTurnMessage reports whether id is the fake shim's api message id for
+// turn n.
+//
+// IT MATCHES THE SHAPE RATHER THAN AN EXACT STRING, because the id gained
+// PER-SPAWN uniqueness: the fake used to mint `msg_fake_<turn>` off a
+// per-instance counter, so a session whose shim respawned — a revival, a
+// rewind — re-minted turn 1's id under the same session, and the daemon's
+// token-utilization store (keyed session plus api_message_id) correctly refused
+// the divergent duplicate and tore the controller down. The id is now
+// `msg_fake_<spawn>_<turn>`, which these assertions still recognize by prefix
+// and turn suffix.
+func isFakeTurnMessage(id string, n int) bool {
+	return strings.HasPrefix(id, "msg_fake_") && strings.HasSuffix(id, fmt.Sprintf("_%d", n))
+}
 
 func sessionViewFromSnapshot(t *testing.T, h *e2eHarness, sessionID string) *frontendv1.SessionView {
 	t.Helper()
@@ -48,7 +64,7 @@ func TestE2ETokenUtilizationPairsResponseUsageWithTiming(t *testing.T) {
 
 	writeCmd(t, conn, `{"requestId":"e2e-token-main","submitPrompt":{"text":"measure response timing","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
 	awaitItem(t, conn, cwd, "the completed assistant response", func(item *frontendv1.ConversationItem) bool {
-		return item.GetAssistantMessage().GetId() == "msg_fake_1"
+		return isFakeTurnMessage(item.GetAssistantMessage().GetId(), 1)
 	})
 	// A file-plane assistant item can be pushed before its stream-plane
 	// message_start timing reaches the correlator. The terminal result is the
@@ -59,7 +75,7 @@ func TestE2ETokenUtilizationPairsResponseUsageWithTiming(t *testing.T) {
 	replay := replayItems(t, h.dial(t, id), cwd, "e2e-token-replay")
 	var replayed *frontendv1.ConversationItem
 	for _, candidate := range replay {
-		if candidate.GetAssistantMessage().GetId() == "msg_fake_1" {
+		if isFakeTurnMessage(candidate.GetAssistantMessage().GetId(), 1) {
 			replayed = candidate
 			break
 		}
@@ -74,8 +90,8 @@ func TestE2ETokenUtilizationPairsResponseUsageWithTiming(t *testing.T) {
 	if usage.GetClaudeSessionId() == "" {
 		t.Error("token utilization claude_session_id is empty: response ownership must survive the shim-to-daemon boundary")
 	}
-	if got, want := usage.GetApiMessageId(), "msg_fake_1"; got != want {
-		t.Errorf("token utilization api_message_id = %q, want message_start id %q", got, want)
+	if got, want := usage.GetApiMessageId(), replayed.GetAssistantMessage().GetId(); got != want {
+		t.Errorf("token utilization api_message_id = %q, want the response's own message id %q", got, want)
 	}
 	if usage.GetMainAgent() == nil || usage.GetSubagent() != nil {
 		t.Errorf("token utilization actor = %T, want main_agent only", usage.GetActor())
@@ -189,7 +205,7 @@ func TestE2ESessionViewAggregatesTimedAndUntimedActors(t *testing.T) {
 	id, conn, vendorID, store := liveSession(t, h, cwd)
 	writeCmd(t, conn, `{"requestId":"e2e-token-aggregate","submitPrompt":{"text":"timed main response","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
 	awaitItem(t, conn, cwd, "the timed main-agent response", func(item *frontendv1.ConversationItem) bool {
-		return item.GetAssistantMessage().GetId() == "msg_fake_1"
+		return isFakeTurnMessage(item.GetAssistantMessage().GetId(), 1)
 	})
 	store.write(sidecarAssistantUsageEvent(t, vendorID, "e2e-aggregate-subagent", "msg-subagent", "agent-child"))
 	awaitItem(t, conn, cwd, "the untimed subagent response", func(item *frontendv1.ConversationItem) bool {
