@@ -742,11 +742,12 @@ export class UdsSession {
       this.store.onDegraded((report) => this.server.sendEvent(this.degradedEvent(report)));
       await this.store.connect();
       LOGGER.log({ agent_repl_session_id: this.deps.sessionId, store_socket: this.deps.storeSocketPath }, "store producer connection established");
-      await this.persistQueryCreated();
-      // Immediately after QueryCreated and before the daemon connection: the
-      // rewind is the reason this seq space exists, so it is the first feature
-      // event in it, ahead of anything the resumed conversation produces.
+      // The rewind is the reason this seq space exists, so it is the FIRST
+      // persistent event in it — the explanation precedes what it explains.
+      // A reader replaying the new vendor session must learn the conversation
+      // was truncated before it sees the query that resumed it.
       await this.persistSessionRewound();
+      await this.persistQueryCreated();
       // Readiness is asserted from the handshake hook wired in the
       // constructor, not here: connect() resolves on the DIAL, and an event
       // sent before the DaemonHello would be dropped.

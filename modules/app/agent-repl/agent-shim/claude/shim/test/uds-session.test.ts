@@ -3047,10 +3047,11 @@ describe("UdsSession rewind lineage: SessionRewound", () => {
   };
 
   /**
-   * Stand up a session resumed onto a truncated transcript, drain and ack the
-   * mandatory QueryCreated, and hand back the store so a test can read what the
-   * session writes NEXT. Deliberately stops short of the daemon handshake: the
-   * rewind lands before the daemon connection exists.
+   * Stand up a session resumed onto a truncated transcript and hand back the
+   * store with NOTHING drained: the rewind is the first persistent event in the
+   * new seq space, ahead of QueryCreated, so the first store write is what each
+   * test is here to inspect. Deliberately stops short of the daemon handshake:
+   * the rewind lands before the daemon connection exists.
    */
   async function rewindRig(
     opts: { rewindLineage?: typeof LINEAGE; storeSessionId?: string } = {},
@@ -3077,17 +3078,30 @@ describe("UdsSession rewind lineage: SessionRewound", () => {
     });
     const done = session.start();
     void done.catch(() => {});
-    await acknowledgeInitialQueryLifecycle(store);
+    // The store connection is only observable once bring-up has produced its
+    // first write; peer() is unavailable before that.
+    await until(() => store.count() >= 1);
     return { store, session, done };
   }
 
-  it("emits SessionRewound as the first event after QueryCreated", async () => {
+  it("emits SessionRewound as the first persistent event, ahead of QueryCreated", async () => {
     // Arrange
     const { store } = await rewindRig({ rewindLineage: LINEAGE });
-    // Act — acknowledgeInitialQueryLifecycle already consumed QueryCreated.
+    // Act
+    const write = await store.peer().next(StoreWriteSchema);
+    // Assert — the explanation must precede the query it explains.
+    expect(write.batch!.events.map((e) => e.payload.case)).toEqual(["sessionRewound"]);
+  });
+
+  it("emits QueryCreated immediately after the rewind that explains it", async () => {
+    // Arrange
+    const { store } = await rewindRig({ rewindLineage: LINEAGE });
+    await store.peer().next(StoreWriteSchema);
+    // Act
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { accepted: 1n, deduped: 0n, lastSeq: 1n }));
     const write = await store.peer().next(StoreWriteSchema);
     // Assert
-    expect(write.batch!.events.map((e) => e.payload.case)).toEqual(["sessionRewound"]);
+    expect(write.batch!.events.map((e) => e.payload.case)).toEqual(["queryLifecycle"]);
   });
 
   it("names both sides of the rewind and the retained leaf", async () => {
@@ -3152,11 +3166,12 @@ describe("UdsSession rewind lineage: SessionRewound", () => {
     void done.catch(() => { failed = true; });
     // Act: a duplicate consumes no seq, so last_seq is 0.
     store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { accepted: 0n, deduped: 1n, lastSeq: 0n }));
-    await tick();
-    await tick();
-    // Assert: bring-up continued — no terminal write, no rejection.
+    // Assert: bring-up continued into QueryCreated — no terminal write, no rejection.
+    const next = await store.peer().next(StoreWriteSchema);
+    expect(next.batch!.events[0]!.payload.case).toBe("queryLifecycle");
+    if (next.batch!.events[0]!.payload.case !== "queryLifecycle") throw new Error("case");
+    expect(next.batch!.events[0]!.payload.value.event.case).toBe("created");
     expect(failed).toBe(false);
-    expect(store.peer().count(StoreWriteSchema)).toBe(0);
   });
 
   it("fails bring-up when the rewind receipt accepts nothing at all", async () => {
@@ -3227,10 +3242,11 @@ describe("UdsSession rewind lineage: SessionRewound", () => {
   it("writes no SessionRewound for an ordinary resume with no lineage", async () => {
     // Arrange: the same resumed session, without rewind flags.
     const { store } = await rewindRig();
-    // Act
+    // Act: the only write is QueryCreated, which no rewind precedes.
+    await acknowledgeInitialQueryLifecycle(store);
     await tick();
     await tick();
-    // Assert: the store saw QueryCreated and nothing after it.
+    // Assert
     expect(store.peer().count(StoreWriteSchema)).toBe(0);
   });
 });
