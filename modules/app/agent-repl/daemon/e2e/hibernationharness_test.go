@@ -251,6 +251,22 @@ func (s *keepAliveSession) idleFor(t *testing.T, d time.Duration) {
 // checkAfterAdvancing moves the daemon's clock forward by d and fires one
 // sweep. The advance HAPPENS BEFORE the send, so the sweep it triggers cannot
 // read the earlier time.
+// syncSweep is a BARRIER on the sweeper, not a check: the tick channel is
+// unbuffered and the sweeper processes ticks serially, so this send completes
+// only after the PREVIOUS tick's whole evaluation — including a ping's claim,
+// window Open, and submit — has finished. It advances nothing; re-evaluating
+// at the same elapsed is idempotent (a claimed ping declines, an ended ping
+// has reset last-turn-end). It is what lets a test order its own prompt
+// strictly AFTER the sweep's ping without a sleep or a poll.
+func (s *keepAliveSession) syncSweep(t *testing.T) {
+	t.Helper()
+	select {
+	case s.h.sweepIdle <- time.Now():
+	case <-time.After(frameTimeout):
+		t.Fatal("the daemon's idle sweeper never accepted the barrier tick")
+	}
+}
+
 func (s *keepAliveSession) checkAfterAdvancing(t *testing.T, d time.Duration) {
 	t.Helper()
 	if s.h.clock == nil {

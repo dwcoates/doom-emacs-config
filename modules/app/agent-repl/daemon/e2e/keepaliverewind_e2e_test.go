@@ -59,6 +59,21 @@ func rewindByKeepAlivePing(t *testing.T, s *keepAliveSession) rewound {
 	// backfill is replayed here — after the flip, exactly when the real one
 	// would begin tailing the new file.
 	ingestTranscriptAsSidecar(t, s, next)
+	// Await the held prompt's own reply before returning: its items flow
+	// through the daemon's pump AFTER the new space's SessionRewound (seq
+	// order), and the pump applies SessionRewound inline — so a visible reply
+	// proves the rewind's ledger attribution has committed, and every
+	// caller's ledger/replay read is ordered behind it.
+	awaitAll(t, s.conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
+		"the held prompt's reply on the rewound conversation": func(frame *frontendv1.FrontendFrame) bool {
+			for _, item := range deltaItems(frame, s.cwd) {
+				if strings.Contains(assistantText(item), echoOf(held.text)) {
+					return true
+				}
+			}
+			return false
+		},
+	})
 	return rewound{session: s, previous: previous, next: next, pingTurnID: held.pingTurnID, heldText: held.text}
 }
 
