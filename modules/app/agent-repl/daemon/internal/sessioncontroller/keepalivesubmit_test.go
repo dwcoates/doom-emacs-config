@@ -101,6 +101,21 @@ func (f *fakeKeepAliveWindows) Close(turnID string, endedAtMs int64) error {
 
 func (f *fakeKeepAliveWindows) Covers(string, int64) (bool, error) { return f.coverAll, nil }
 
+// HasTurn answers off the rows Open wrote, exactly as the real ledger answers
+// off its primary key — so a test asserting on identity is asserting against
+// the same evidence production uses.
+func (f *fakeKeepAliveWindows) HasTurn(workspace, turnID string) (bool, error) {
+	if f.hasTurnErr != nil {
+		return false, f.hasTurnErr
+	}
+	for _, w := range f.opened {
+		if w.TurnID == turnID && w.Workspace == workspace {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // lastOpened reports the newest window row written for turnID, and whether one
 // exists. The re-stamp rewrites the row rather than adding one, so the newest
 // entry is the bound the ledger currently holds.
