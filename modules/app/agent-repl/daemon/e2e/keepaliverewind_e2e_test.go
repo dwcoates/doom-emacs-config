@@ -49,6 +49,19 @@ type rewound struct {
 func rewindByKeepAlivePing(t *testing.T, s *keepAliveSession) rewound {
 	t.Helper()
 	previous := s.vendorID
+	// The fake shim writes no vendor transcript, and the daemon's rewind reads
+	// the transcript from disk (session.TranscriptPath) — without one it
+	// degrades loudly to un-rewound delivery and no identity ever flips. Write
+	// the standard rewindable shape (one real turn, then the ping's lines)
+	// unless the calling test already wrote its own fixture.
+	if _, exists := readFixtureTranscript(t, s.cwd, s.vendorID); !exists {
+		writeFixtureTranscript(t, s.cwd, s.vendorID, []string{
+			userLine("real-prompt", "", s.vendorID, "do the thing"),
+			assistantLine("real-final", "real-prompt", s.vendorID, "done"),
+			userLine("ping-prompt", "real-final", s.vendorID, keepAlivePingText),
+			assistantLine("ping-response", "ping-prompt", s.vendorID, "."),
+		})
+	}
 	held := heldByKeepAlivePing(t, s, "the prompt the rewind is performed for")
 	next := vendorSessionID(t, s.h, s.sessionID,
 		func(id string) bool { return id != "" && id != previous },

@@ -67,11 +67,23 @@ import (
 // FrontendFrame arm 13; scoped by frontend/scope.go scopeFrame on
 // ProgressView.workspace).
 func progressFor(frame *frontendv1.FrontendFrame, workspace string) *frontendv1.ProgressView {
-	p, ok := frame.GetFrame().(*frontendv1.FrontendFrame_Progress)
-	if !ok || p.Progress.GetWorkspace() != workspace {
+	if p, ok := frame.GetFrame().(*frontendv1.FrontendFrame_Progress); ok {
+		if p.Progress.GetWorkspace() == workspace {
+			return p.Progress
+		}
 		return nil
 	}
-	return p.Progress
+	// Snapshot carriage: pushes are edge-triggered and an earlier await loop
+	// on the same conn may have consumed the edge; the periodic snapshot
+	// redelivery keeps every progress await ordering-robust.
+	if snap, ok := frame.GetFrame().(*frontendv1.FrontendFrame_Snapshot); ok {
+		for _, pv := range snap.Snapshot.GetProgress() {
+			if pv.GetWorkspace() == workspace {
+				return pv
+			}
+		}
+	}
+	return nil
 }
 
 // workspaceStateFor returns the WorkspaceState a frame carries for workspace,
