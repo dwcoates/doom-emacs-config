@@ -428,45 +428,106 @@ const TurnCloseCauseSupersededByRewind = "superseded_by_rewind"
 // so nothing downstream has to learn a second one — which is the same reason
 // synthesizeTurnEnds writes end_seq=0 rather than inventing a sentinel.
 //
-// An unknown or already-closed turn id is a NO-OP, not an error: a rewind can
-// legitimately name a ping whose claim the turn's own end already retired.
-func (m *Manager) SupersedeTurnClaims(workspace, claimantSessionID string, turnIDs []string, cause string) (superseded []string, err error) {
+// IT ATTRIBUTES ALREADY-CLOSED CLAIMS TOO, and that is the ORDINARY path, not
+// the exception. A keep-alive ping ends normally before the rewind that
+// discards it ever runs, so by the time this is called the dropped turn's claim
+// is nearly always already closed by its own `TurnEnded` — with an EMPTY
+// end_cause, because nothing had yet explained the close. Leaving it that way
+// would make the ledger unable to answer the one question the rewind exists to
+// record: which closes happened because the daemon dropped the turn. So a
+// second update stamps cause onto those rows.
+//
+//   - end_seq is PRESERVED. It is the real boundary's replay receipt, and
+//     recordTurnEnd matches a replayed `TurnEnded` on (end_seq, end_event_session_id)
+//     before it looks at end_cause at all — overwriting it would turn an
+//     idempotent replay into a contradiction.
+//   - A NON-EMPTY end_cause is NEVER overwritten. An existing attribution (a
+//     restart interruption, an earlier supersession) is the daemon's own record
+//     of why that claim ended; a later rewind does not get to rewrite it.
+//
+// An unknown turn id is a NO-OP, not an error: a rewind can legitimately name a
+// turn this workspace holds no claim for.
+//
+// It reports the two outcomes separately: closed names the claims that were
+// still open and were ended here, attributed names the already-closed claims
+// that gained the cause.
+func (m *Manager) SupersedeTurnClaims(workspace, claimantSessionID string, turnIDs []string, cause string) (closed, attributed []string, err error) {
 	if len(turnIDs) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	if cause == "" {
-		return nil, fmt.Errorf("ssm: refusing to supersede turn claims for workspace %q without a cause; an unattributed close is indistinguishable from a lost one", workspace)
+		return nil, nil, fmt.Errorf("ssm: refusing to supersede turn claims for workspace %q without a cause; an unattributed close is indistinguishable from a lost one", workspace)
 	}
 	tx, err := m.db.Begin()
 	if err != nil {
-		return nil, fmt.Errorf("ssm: begin supersede turn claims for workspace %q: %w", workspace, err)
+		return nil, nil, fmt.Errorf("ssm: begin supersede turn claims for workspace %q: %w", workspace, err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	for _, turnID := range turnIDs {
 		if turnID == "" {
 			continue
 		}
-		result, execErr := tx.Exec(`UPDATE turn_lifecycle_claim
-				SET end_seq=0, end_cause=?
-				WHERE workspace=? AND claimant_session_id=? AND turn_id=? AND end_seq IS NULL`,
-			cause, workspace, claimantSessionID, turnID)
+		openChanged, execErr := supersedeOpenTurnClaim(tx, workspace, claimantSessionID, turnID, cause)
 		if execErr != nil {
-			return nil, fmt.Errorf("ssm: supersede turn claim %q for workspace %q: %w", turnID, workspace, execErr)
+			return nil, nil, execErr
 		}
-		changed, rowsErr := result.RowsAffected()
-		if rowsErr != nil {
-			return nil, fmt.Errorf("ssm: inspect superseded turn claim %q for workspace %q: %w", turnID, workspace, rowsErr)
+		if openChanged > 0 {
+			closed = append(closed, turnID)
 		}
-		if changed > 0 {
-			superseded = append(superseded, turnID)
+		closedChanged, execErr := attributeClosedTurnClaim(tx, workspace, claimantSessionID, turnID, cause)
+		if execErr != nil {
+			return nil, nil, execErr
+		}
+		if closedChanged > 0 {
+			attributed = append(attributed, turnID)
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("ssm: commit supersede turn claims for workspace %q: %w", workspace, err)
+		return nil, nil, fmt.Errorf("ssm: commit supersede turn claims for workspace %q: %w", workspace, err)
 	}
-	m.logf("ssm: turn claims SUPERSEDED workspace=%s claimant_session=%s requested=%d closed=%s cause=%s — the rewind discarded these turns from the conversation, so their claims are closed with the cause naming why rather than left waiting on a retired seq space",
-		workspace, claimantSessionID, len(turnIDs), formatClosedTurnIDs(superseded), cause)
-	return superseded, nil
+	m.logf("ssm: turn claims SUPERSEDED workspace=%s claimant_session=%s requested=%d closed_here=%s attributed=%s cause=%s — the rewind discarded these turns from the conversation, so the claims still open are closed and the claims their own ends already closed are stamped with the cause naming why",
+		workspace, claimantSessionID, len(turnIDs), formatClosedTurnIDs(closed), formatClosedTurnIDs(attributed), cause)
+	return closed, attributed, nil
+}
+
+// supersedeOpenTurnClaim ends a dropped turn's STILL-OPEN claim, writing end_seq=0
+// exactly as synthesizeTurnEnds does: no event produced this close, and that is
+// what distinguishes it in the ledger.
+func supersedeOpenTurnClaim(tx *sql.Tx, workspace, claimantSessionID, turnID, cause string) (int64, error) {
+	result, err := tx.Exec(`UPDATE turn_lifecycle_claim
+			SET end_seq=0, end_cause=?
+			WHERE workspace=? AND claimant_session_id=? AND turn_id=? AND end_seq IS NULL`,
+		cause, workspace, claimantSessionID, turnID)
+	if err != nil {
+		return 0, fmt.Errorf("ssm: supersede turn claim %q for workspace %q: %w", turnID, workspace, err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("ssm: inspect superseded turn claim %q for workspace %q: %w", turnID, workspace, err)
+	}
+	return changed, nil
+}
+
+// attributeClosedTurnClaim stamps cause onto a dropped turn's ALREADY-CLOSED
+// claim, touching only rows whose close is still unexplained.
+//
+// `end_seq IS NOT NULL` keeps the real boundary intact, and matching only an
+// EMPTY end_cause keeps an existing attribution intact; together they make this
+// update the narrowest one that can answer "was this close the daemon's doing?".
+func attributeClosedTurnClaim(tx *sql.Tx, workspace, claimantSessionID, turnID, cause string) (int64, error) {
+	result, err := tx.Exec(`UPDATE turn_lifecycle_claim
+			SET end_cause=?
+			WHERE workspace=? AND claimant_session_id=? AND turn_id=?
+				AND end_seq IS NOT NULL AND end_cause=''`,
+		cause, workspace, claimantSessionID, turnID)
+	if err != nil {
+		return 0, fmt.Errorf("ssm: attribute closed turn claim %q for workspace %q: %w", turnID, workspace, err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("ssm: inspect attributed turn claim %q for workspace %q: %w", turnID, workspace, err)
+	}
+	return changed, nil
 }
 
 // synthesizeTurnEnds ends every active claim held by claimantSessionID inside
