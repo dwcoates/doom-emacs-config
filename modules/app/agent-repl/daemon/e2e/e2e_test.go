@@ -46,6 +46,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/keepalive"
 	"claude-repld/internal/progress"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/server"
@@ -492,7 +493,37 @@ type e2eHarness struct {
 	// waiting on an asynchronous conversation rotation waits on the WRITE
 	// rather than re-reading /sessions on an interval.
 	vendors *vendorIdentities
+	// clock is the daemon's own wall clock, movable by the test. Non-nil only
+	// for a harness built with withTestClock.
+	//
+	// It exists because every TIME-SINCE policy in the daemon — the idle
+	// sweeper's elapsed-idle gate, and the cache keep-alive window measured
+	// from the durable last turn end — is a comparison against server.Config's
+	// injected Now. A test that wanted to observe one of those edges without
+	// this would have to wait out the real interval, which for a one-hour cache
+	// TTL is not a test at all. Moving the clock and then firing sweepIdle
+	// makes the edge an EVENT the test causes.
+	clock *testClock
 }
+
+// testClock is the daemon's wall clock under test control: real time, plus an
+// offset the test moves forward.
+//
+// It is an OFFSET rather than a frozen instant deliberately. Everything else
+// in the stack (the shim, the store, the SSM's own timestamps) keeps running on
+// the real clock, so a frozen daemon clock would put the daemon permanently
+// behind facts the rest of the world is still stamping. An offset keeps the two
+// in step and adds exactly the elapsed time the test wants to claim.
+type testClock struct{ offset atomic.Int64 }
+
+func newTestClock() *testClock { return &testClock{} }
+
+// now is the func handed to server.Config.Now.
+func (c *testClock) now() time.Time { return time.Now().Add(time.Duration(c.offset.Load())) }
+
+// advance moves the daemon's clock forward by d. Every subsequent time-since
+// measurement the daemon makes reads d longer.
+func (c *testClock) advance(d time.Duration) { c.offset.Add(int64(d)) }
 
 // vendorIdentities publishes the daemon's vendor-uuid writes as events.
 //
@@ -576,6 +607,14 @@ type harnessTuning struct {
 	// production trigger — sweepIdle calls controller.Hibernate — so what it
 	// exercises is the real edge and not a stand-in for one.
 	idleSweeper bool
+	// clock gives the daemon a test-movable wall clock (server.Config.Now).
+	clock bool
+	// idleTimeout is the sweeper's elapsed-idle gate (server.Config.IdleTimeout).
+	// Zero is the harness default and means "every sweep hibernates", which is
+	// what the connectivity-state tests want; a test of a policy that must run
+	// BEFORE hibernation sets a real cutoff so the sweep has room to do
+	// something else first.
+	idleTimeout time.Duration
 }
 
 type harnessOption func(*harnessTuning)
@@ -590,6 +629,15 @@ func withStaleShimBuild(baked, current string) harnessOption {
 
 // withIdleSweeper gives the harness a test-driven idle-sweep clock.
 func withIdleSweeper() harnessOption { return func(o *harnessTuning) { o.idleSweeper = true } }
+
+// withTestClock hands the daemon a wall clock the test moves (h.clock).
+func withTestClock() harnessOption { return func(o *harnessTuning) { o.clock = true } }
+
+// withIdleCutoff sets the idle sweeper's elapsed-idle gate, so a sweep fired
+// before the workspace has been quiet that long does NOT hibernate it.
+func withIdleCutoff(d time.Duration) harnessOption {
+	return func(o *harnessTuning) { o.idleTimeout = d }
+}
 
 // withMergeActions configures the creation-time merge actions every workspace
 // of this harness reports: the before_ws_merge prompt that runs before any
@@ -713,6 +761,10 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 		t.Fatalf("open state store: %v", err)
 	}
 	t.Cleanup(func() { _ = stateStore.Close() })
+	keepAliveWindows, err := statedb.NewKeepAliveWindows(stateStore)
+	if err != nil {
+		t.Fatalf("open keep-alive window store: %v", err)
+	}
 	turnAccountings, err := statedb.NewTurnAccountings(stateStore)
 	if err != nil {
 		t.Fatalf("open turn accounting store: %v", err)
@@ -809,12 +861,29 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 	// to frontends) — the same single-instance wiring main.go does. Two
 	// instances split the brain: the session controller's notes push to nobody while the
 	// wired instance never hears them.
-	progressMgr := progress.New(progress.Options{Logf: t.Logf})
+	kaCfg, err := keepalive.FromEnv()
+	if err != nil {
+		t.Fatalf("keep-alive config: %v", err)
+	}
+	progressMgr := progress.New(progress.Options{Logf: t.Logf, UncachedAlertTokens: kaCfg.UncachedCostAlertTokens})
 	fileDiagnostics, err := server.NewTargetFileDiagnosticPersister(targets, os.Stderr, false)
 	if err != nil {
 		t.Fatalf("build file diagnostic persister: %v", err)
 	}
+	// THE HARNESS'S ONE CLOCK, hoisted above the controller because the gate
+	// that re-validates an idle sweep's decision lives in the session
+	// controller and the sweep itself reads server.Config.Now. Mirrors the
+	// daemon's own single-authority wiring (cmd/claude-repld/main.go).
+	var clock *testClock
+	var nowFn func() time.Time
+	var nowMsFn func() int64
+	if tuning.clock {
+		clock = newTestClock()
+		nowFn = clock.now
+		nowMsFn = func() int64 { return clock.now().UnixMilli() }
+	}
 	controller, err := sessioncontroller.New(sessioncontroller.Config{
+		Now:               nowMsFn,
 		Push:              forwarder,
 		SSM:               ssmMgr,
 		Progress:          progressMgr,
@@ -829,10 +898,21 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 		PermissionModes:   server.NewRegistryModeStore(reg),
 		Registrar:         vendors,
 		ModelCatalogs:     registrar,
-		DaemonVersion:     "0.1.0-e2e",
-		ProtocolVersion:   "1",
-		ShimBuildSHA:      func() string { return tuning.currentBuildSHA },
-		Logf:              t.Logf,
+		Hibernations:      registrar,
+		VendorSessions:    vendors,
+		KeepAliveWindows:  server.KeepAliveWindowStore{Windows: keepAliveWindows},
+		KeepAlive:         kaCfg,
+		VendorSessionOf: func(sessionID string) (string, bool) {
+			rec, ok := reg.Get(sessionID)
+			if !ok || rec.ClaudeSessionID == "" {
+				return "", false
+			}
+			return rec.ClaudeSessionID, true
+		},
+		DaemonVersion:   "0.1.0-e2e",
+		ProtocolVersion: "1",
+		ShimBuildSHA:    func() string { return tuning.currentBuildSHA },
+		Logf:            t.Logf,
 	})
 	if err != nil {
 		t.Fatalf("build controller: %v", err)
@@ -860,12 +940,14 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 	agentShim, err := server.WireAgentShim(server.AgentShimConfig{
 		// The real resolver over the real registry: an e2e that faked this
 		// would not exercise the daemon actually deciding what to resume.
-		Resumes:  &server.ConversationResolver{Reg: reg, Logf: t.Logf},
-		SSM:      ssmMgr,
-		Progress: progressMgr,
-		Prompts:  controller,
-		Turns:    controller,
-		Health:   controller,
+		Resumes:      &server.ConversationResolver{Reg: reg, Logf: t.Logf},
+		SSM:          ssmMgr,
+		Progress:     progressMgr,
+		Prompts:      controller,
+		Turns:        controller,
+		Health:       controller,
+		Hibernations: controller,
+		Restarts:     controller,
 		// THE PRODUCTION LIFECYCLE, not a stub. A merge brings its workspace's
 		// session up through this seam, and a no-op Open would report a
 		// hibernated workspace live without ever rehydrating it — so the merge
@@ -913,9 +995,16 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 		SSM:            ssmMgr,
 		Frontend:       agentShim.Server,
 		IdleSweepTicks: sweepTicks,
+		IdleTimeout:    tuning.idleTimeout,
+		KeepAlive:      kaCfg,
+		Now:            nowFn,
 		Logf:           t.Logf,
 	})
 	binding.SetTarget(srv)
+	// Mirror main.go's late bind: without it the registrar's post-change
+	// SessionView repush (hibernation, vendor rotation) is a silent no-op —
+	// the hook is deliberately nil-safe, so nothing else would say so.
+	registrar.PushView = srv.RepushSessionView
 	// Mirror main.go's mux: the session routes plus the UNFILTERED /frontend
 	// socket, which is where session-creation commands ride now that
 	// POST /sessions is gone.
@@ -925,7 +1014,7 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 	mux.HandleFunc("/frontend", agentShim.Server.ServeWS)
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
-	h := &e2eHarness{ts: ts, stateDB: stateStore, geometry: geometryStore, merges: mergeBinding, shimSpawns: spawnCount.Load, vendors: vendors}
+	h := &e2eHarness{ts: ts, stateDB: stateStore, geometry: geometryStore, merges: mergeBinding, shimSpawns: spawnCount.Load, vendors: vendors, clock: clock}
 	if sweepTicks != nil {
 		h.sweepIdle = sweepTicks
 	}

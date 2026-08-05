@@ -52,6 +52,14 @@ function makeFake(decision: PermissionResultLike = { behavior: "allow", updatedI
   return { input, collect, query, permissionRequests };
 }
 
+/** The api message id carried by a collected turn's assistant message. */
+function assistantMessageID(msgs: SdkMessageLike[]): string {
+  const assistant = msgs.find((m) => m.type === "assistant") as { message?: { id?: string } } | undefined;
+  const id = assistant?.message?.id;
+  if (id === undefined) throw new Error("the collected turn carried no assistant message id");
+  return id;
+}
+
 describe("createFakeQuery", () => {
   it("emits a system init message first", async () => {
     // Arrange
@@ -94,6 +102,43 @@ describe("createFakeQuery", () => {
       .toMatchObject({ ttft_ms: 1 });
     const result = msgs.find((m) => m.type === "result")!;
     expect(result).toMatchObject({ subtype: "success", result: expect.stringContaining("hello") });
+  });
+
+  // THE API MESSAGE ID IS UNIQUE PER SPAWN, not merely per turn.
+  //
+  // The daemon keys token utilization by session PLUS api_message_id, and a
+  // session outlives its shim: a revival respawns the fake query, whose first
+  // turn used to re-mint `msg_fake_1` under the same session. The store
+  // correctly refused the divergent duplicate, the shim link was declared lost,
+  // and the controller was torn down — so this is a collision that costs the
+  // whole session, not a cosmetic id clash.
+  it("mints a different api message id for the same turn of a respawned query", async () => {
+    // Arrange — two queries in one process, standing in for a respawn.
+    const first = makeFake();
+    const second = makeFake();
+    // Act
+    first.input.push(userMsg("hello"));
+    first.input.end();
+    second.input.push(userMsg("hello"));
+    second.input.end();
+    const firstID = assistantMessageID(await first.collect());
+    const secondID = assistantMessageID(await second.collect());
+    // Assert
+    expect(secondID).not.toBe(firstID);
+  });
+
+  // The SHAPE stays recognizable: readers that knew a fake id by sight still
+  // can, by its prefix and its turn suffix, rather than by an exact string that
+  // was only ever unique by accident.
+  it("keeps the fake api message id recognizable by prefix and turn", async () => {
+    // Arrange
+    const h = makeFake();
+    // Act
+    h.input.push(userMsg("hello"));
+    h.input.end();
+    const id = assistantMessageID(await h.collect());
+    // Assert
+    expect(id).toMatch(/^msg_fake_[0-9a-f]+_1$/);
   });
 
   it("provides deterministic full cache usage on ordinary fake turns", async () => {

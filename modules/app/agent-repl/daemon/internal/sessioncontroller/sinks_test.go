@@ -901,7 +901,7 @@ func TestTurnClaimBridgeTouchesOnlyDurableLedgerAndAccountingCorrelation(t *test
 	c := newConsumer(
 		"ws", "s1", push, applier, progress, newFakeClearCompactStore(), emptyTurnAccountingStore{},
 		func(string, ...any) {}, nil,
-		func(bool) { turnNotifications++ }, nil, nil, nil,
+		func(bool, int64) { turnNotifications++ }, nil, nil, nil,
 	)
 	bridge := &corev1.Event{
 		SessionId: "vendor-new",
@@ -1467,7 +1467,7 @@ func TestApplyRejectsFileTurnEndBeforeQueueAndStateConsumers(t *testing.T) {
 		"ws", "s1", &fakePusher{}, applier, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{},
 		func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) },
 		nil,
-		func(active bool) { boundaries = append(boundaries, active) },
+		func(active bool, _ int64) { boundaries = append(boundaries, active) },
 		nil, nil, nil,
 	)
 	c.Apply(turnStartEvent(corev1.Plane_PLANE_STREAM, 12885, "turn-new"))

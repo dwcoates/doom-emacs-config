@@ -150,6 +150,16 @@ enum PromptOrigin {
   reserved 27;
   reserved "PROMPT_ORIGIN_MERGE_PARENT_NOTIFICATION";
   PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME = 28;
+
+  // Daemon-generated cache keep-alive ping: a minimal prompt ("respond with
+  // only '.', no tool calls or changes") submitted after turn inactivity to
+  // refresh the vendor prompt cache before its TTL expires. Turns with this
+  // origin are conversation-plumbing, not conversation: every consumer
+  // (frontend rendering, replay floors, transcript projection) excludes them
+  // unconditionally, and the shim discards them from the vendor transcript
+  // via rewind (SessionRewound) before the next real prompt is submitted, so
+  // they can never contaminate the model's context either.
+  PROMPT_ORIGIN_CACHE_KEEP_ALIVE = 29;
 }
 
 // ---------------------------------------------------------------------------
@@ -205,6 +215,9 @@ message Event {
     QueryLifecycle query_lifecycle = 26;
     // Records a subscription-usage measurement at a turn boundary.
     AccountUsageObservation account_usage_observation = 27;
+    // Durable record that the shim rewound the vendor conversation to an
+    // earlier point by transcript truncation. See SessionRewound.
+    SessionRewound session_rewound = 28;
     // Vendor extension payload (e.g. agentshim.data.v1.* messages). The
     // daemon treats it opaquely except for frontend translation; the store
     // treats it fully opaquely apart from dedup-key extraction.
@@ -269,6 +282,50 @@ message TurnClaimBridge {
   // envelope session_id names the new seq space containing this proof and its
   // paired TurnEnded; the two session ids must be non-empty and different.
   string previous_session_id = 2;
+}
+
+// Records one conversation rewind. The rewind is DAEMON-ORCHESTRATED: the
+// daemon stops the shim, produces a truncated copy of the vendor transcript
+// under a NEW vendor session id, flips its registry to that id, and respawns
+// the shim resuming the copy; the respawned shim emits this event (fed the
+// lineage via argv) as its first persistent event in the new seq space. The
+// truncated copy is byte-identical to the prefix already sent to the vendor,
+// so the next prompt lands on the prompt cache the dropped turns kept warm.
+//
+// This is correlation evidence, like TurnClaimBridge — the rotation itself is
+// still ANNOUNCED by the ordinary handshake bounce (ShimHello.vendor_session_id
+// on the reconnect), and the daemon's cursor-reset machinery is unchanged.
+// This event is the durable explanation of WHY the identity changed, so a
+// vendor-session lineage can always be reconstructed from the store alone.
+message SessionRewound {
+  // The vendor session id whose transcript was truncated — the seq space this
+  // rewind retires. Non-empty always.
+  string previous_vendor_session_id = 1;
+  // The vendor session id of the truncated copy the conversation continues
+  // under. Non-empty, and never equal to previous_vendor_session_id.
+  string new_vendor_session_id = 2;
+  // Vendor uuid of the last transcript record RETAINED by the truncation: the
+  // final record of the last real turn. Everything after it was dropped. The
+  // cut is always at a turn boundary, never mid-turn.
+  string retained_leaf_uuid = 3;
+  // Why the shim rewound. A oneof (not an enum) so each cause carries its own
+  // evidence, and so a future user-facing rewind is a new arm rather than a
+  // schema rethink.
+  oneof reason {
+    // The only producer today: discarding trailing keep-alive turns before a
+    // real prompt.
+    KeepAliveDiscard keep_alive_discard = 10;
+  }
+}
+
+// The rewind dropped trailing cache keep-alive turns so the next real prompt
+// continues from the last real turn on a warm cache, with the pings leaving
+// no trace in the model's context.
+message KeepAliveDiscard {
+  // turn_ids (= SubmitPrompt.request_id) of every dropped keep-alive turn, in
+  // submission order. Store consumers use these to mark those turns
+  // superseded; their history is never deleted, only excluded from replay.
+  repeated string dropped_turn_ids = 1;
 }
 
 message TurnEnded {

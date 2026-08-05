@@ -1020,6 +1020,31 @@ failed must never read as a session that came back."
     (agent-repl--log ws "restart-session: dispatched ws=%s key=%s request-id=%s" ws key req)
     req))
 
+(defun agent-repl--frontend-hibernate-workspace (ws)
+  "Send the `hibernateWorkspace\=' command for WS, keyed by its cwd.
+Returns the request-id.  Signals (via `agent-repl--uds-send-command\=') when
+there is no link to send on.
+
+The ack is TRACKED for the same reason the restart\='s is, and the daemon
+nacks more often here: hibernation is refused outright while a turn is
+live or the merge lease is held, because the daemon never discards
+in-flight work to satisfy a hibernate.  A refusal that read as success
+would leave the user believing they had reclaimed memory the machine is
+still holding, so the rejection is surfaced loudly through the shared ack
+handler and echoed here as well."
+  (let* ((key (agent-repl--frontend-ws-command-key ws))
+         (req (agent-repl--uds-send-command "hibernateWorkspace" nil key)))
+    (agent-repl--uds-track-command
+     req "hibernateWorkspace" ws
+     (lambda (err)
+       (agent-repl--log ws "hibernate-workspace: ws=%s REJECTED: %s" ws err)
+       (message "agent-repl: hibernate refused for %s: %s" ws err))
+     (lambda ()
+       (agent-repl--log ws "hibernate-workspace: ws=%s complete request-id=%s" ws req)
+       (message "agent-repl: %s hibernated (session reclaimable, conversation kept)" ws)))
+    (agent-repl--log ws "hibernate-workspace: dispatched ws=%s key=%s request-id=%s" ws key req)
+    req))
+
 (defun agent-repl--gui-interrupt-live-task-count (challenge)
   "Read the live subagent count off an `InterruptConfirmRequired' CHALLENGE.
 protojson renders int64 as a STRING, so `liveTasks' arrives as \"3\" from

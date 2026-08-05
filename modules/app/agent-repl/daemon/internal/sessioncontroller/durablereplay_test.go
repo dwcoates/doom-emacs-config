@@ -405,3 +405,40 @@ func TestALiveWorkspaceStillResyncsFromItsRetainedRing(t *testing.T) {
 		t.Fatalf("a live workspace read the durable store: %v", got)
 	}
 }
+
+// --- the keep-alive exclusion runs on the replay too -------------------------
+
+// THE REPLAY CONSUMER HOLDS THE WINDOW LEDGER. The exclusion is a property of
+// the conversation chokepoint, not of the consumer driving it: a replay without
+// the ledger runs the same curation block with the exclusion silently a no-op,
+// and every ping the live push withheld comes back rendered as the user's own
+// prompt on the next resync.
+func TestADurableReplayWithholdsTheDaemonsOwnKeepAliveTurn(t *testing.T) {
+	// Arrange — the ping's own record sits in the store, carrying the request
+	// id the window row is keyed by.
+	ping := durableAssistantEvent(t, 1, "u1", 1_000)
+	ping.RequestId = "ka_1"
+	history := &durableHistorySpy{events: []*corev1.Event{ping}}
+	h := newDurableHarness(t, history)
+	windows := newFakeKeepAliveWindows()
+	if err := windows.Open(KeepAliveWindowRecord{TurnID: "ka_1", Workspace: "ws", StartedAtMs: 1_000}); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	h.m.cfg.KeepAliveWindows = windows
+
+	// Act.
+	if err := h.m.Resync("ws", 0); err != nil {
+		t.Fatalf("Resync: %v", err)
+	}
+
+	// Assert — the delta is still PUSHED (the frontend's replay cursor rides
+	// through_seq), and it carries nothing.
+	h.push.mu.Lock()
+	defer h.push.mu.Unlock()
+	if len(h.push.convo) != 1 {
+		t.Fatalf("%d conversation pushes, want the emptied delta still pushed so the replay cursor advances", len(h.push.convo))
+	}
+	if got := len(h.push.convo[0].GetItems()); got != 0 {
+		t.Fatalf("%d items survived the replay, want the ping withheld", got)
+	}
+}
