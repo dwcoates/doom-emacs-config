@@ -248,6 +248,48 @@ describe("ack-correlated commands", () => {
   });
 });
 
+describe("minted request ids", () => {
+  /** A dispatcher with the real id minter, plus the ids it puts on the wire. */
+  function newMintingDispatcher() {
+    installLogging();
+    const ids: string[] = [];
+    const dispatcher = new CommandDispatcher({
+      send: (raw) => {
+        ids.push(JSON.parse(raw).requestId as string);
+        return true;
+      },
+      logLocal: () => {},
+    });
+    return { dispatcher, ids };
+  }
+
+  /** Mint `count` ids from a fresh dispatcher, standing in for one page load. */
+  function mintIds(count: number): string[] {
+    const { dispatcher, ids } = newMintingDispatcher();
+    for (let i = 0; i < count; i++) void dispatcher.submitPrompt("/w", "hi", PromptOrigin.WEBAPP_USER_SENT, "");
+    return ids;
+  }
+
+  it("mints fe-<load nonce>-<counter>", () => {
+    // Arrange
+    const { dispatcher, ids } = newMintingDispatcher();
+    // Act
+    void dispatcher.submitPrompt("/w", "hi", PromptOrigin.WEBAPP_USER_SENT, "");
+    // Assert
+    expect(ids[0]).toMatch(/^fe-[0-9a-f]{16}-1$/);
+  });
+
+  it("does not collide across page loads, because ids are durable ledger keys", () => {
+    // Arrange — two dispatcher instances stand in for two page loads, whose
+    // counters both restart at 1.
+    const first = mintIds(50);
+    // Act
+    const second = mintIds(50);
+    // Assert
+    expect(new Set([...first, ...second]).size).toBe(100);
+  });
+});
+
 describe("createSession — SessionView correlation", () => {
   it("logs snapshot selection without mutating a create waiter", () => {
     const { dispatcher, records } = newDispatcher();
