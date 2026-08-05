@@ -218,8 +218,10 @@ type Server struct {
 	// workspace been quiet".
 	keepAlive keepalive.Config
 	// stopped is closed by ShutdownAll, ending the sweeper goroutine.
-	stopped  chan struct{}
-	stopOnce sync.Once
+	stopped     chan struct{}
+	sweeperDone chan struct{}
+	idleSweep   func()
+	stopOnce    sync.Once
 
 	mu sync.Mutex
 }
@@ -322,6 +324,7 @@ func New(cfg Config) *Server {
 		idleSweepTicks:  cfg.IdleSweepTicks,
 		keepAlive:       cfg.KeepAlive,
 		stopped:         make(chan struct{}),
+		sweeperDone:     make(chan struct{}),
 		upgrader: websocket.Upgrader{
 			// The daemon is a local-loopback developer tool; the Emacs
 			// xwidget origin is file-/app-scoped, so origin checks are
@@ -329,8 +332,14 @@ func New(cfg Config) *Server {
 			CheckOrigin: func(*http.Request) bool { return true },
 		},
 	}
+	s.idleSweep = s.sweepIdle
 	if s.idleTimeout > 0 || s.idleSweepTicks != nil {
-		go s.runIdleSweeper()
+		go func() {
+			defer close(s.sweeperDone)
+			s.runIdleSweeper()
+		}()
+	} else {
+		close(s.sweeperDone)
 	}
 	return s
 }
@@ -1653,7 +1662,15 @@ func (s *Server) runIdleSweeper() {
 			if !ok {
 				return
 			}
-			s.sweepIdle()
+			// A tick and shutdown can become ready together. Shutdown wins: a
+			// sweeper that starts after its owner begins teardown could touch the
+			// registry or token ledger after their owners have begun closing.
+			select {
+			case <-s.stopped:
+				return
+			default:
+			}
+			s.idleSweep()
 		}
 	}
 }
@@ -1994,6 +2011,12 @@ func (s *Server) sweepable(sessionID, workspace string, nowMs int64) (idleMs int
 // stop itself is rendered from.
 func (s *Server) ShutdownAll(stopShims bool, cause sessioncontroller.StopCause) {
 	s.stopOnce.Do(func() { close(s.stopped) })
+	// The idle sweeper reads durable registry, SSM, and token-usage state. Its
+	// lifetime therefore ends before any daemon owner may close those stores.
+	// Waiting here makes a post-close read structurally impossible rather than
+	// merely less likely during process or test teardown.
+	<-s.sweeperDone
+	s.logf("server: idle sweeper STOPPED before daemon teardown initiator=%s", cause)
 	if !stopShims {
 		s.logf("server: SHIM STOP DECLINED initiator=%s scope=all_sessions reason=stop_shims_false — every session shim is PRESERVED; survivors redial the daemon shim socket and park until the next daemon claims them", cause)
 		return

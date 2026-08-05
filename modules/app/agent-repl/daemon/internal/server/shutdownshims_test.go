@@ -3,9 +3,48 @@ package server
 import (
 	"slices"
 	"testing"
+	"time"
 
 	"claude-repld/internal/sessioncontroller"
 )
+
+// ShutdownAll owns the idle sweeper's lifetime. Once shutdown has begun, it
+// cannot return while a sweep still has access to daemon-owned durable state.
+// This pins the ordering that prevents a sweep from reading a closed token
+// ledger during teardown.
+func TestShutdownAllJoinsAnInFlightIdleSweep(t *testing.T) {
+	// Arrange.
+	ticks := make(chan time.Time)
+	h := newHarnessWith(t, Config{IdleSweepTicks: ticks})
+	sweepStarted := make(chan struct{})
+	releaseSweep := make(chan struct{})
+	h.srv.idleSweep = func() {
+		close(sweepStarted)
+		<-releaseSweep
+	}
+
+	// Act: make the only sweeper enter its state-owning work, then begin
+	// shutdown while that work is still held.
+	ticks <- time.Now()
+	<-sweepStarted
+	shutdownReturned := make(chan struct{})
+	go func() {
+		h.srv.ShutdownAll(false, sessioncontroller.StopCauseDaemonShutdown())
+		close(shutdownReturned)
+	}()
+	<-h.srv.stopped
+
+	// Assert: closing the stop latch cannot let teardown outrun the in-flight
+	// owner. The default arm is deterministic because releaseSweep is still
+	// unclosed, so the worker cannot reach sweeperDone.
+	select {
+	case <-shutdownReturned:
+		t.Fatal("ShutdownAll returned while the idle sweeper still owned durable-state access")
+	default:
+	}
+	close(releaseSweep)
+	<-shutdownReturned
+}
 
 // SHIMS SURVIVE AN ORDERLY SHUTDOWN.
 //

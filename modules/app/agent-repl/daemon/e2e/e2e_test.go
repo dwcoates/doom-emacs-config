@@ -1011,6 +1011,10 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 		Now:            nowFn,
 		Logf:           t.Logf,
 	})
+	// Server shutdown joins its idle sweeper before the harness tears down the
+	// controller, SSM, and shared state database below. Registering this after
+	// those owners makes it run first under testing.T's LIFO cleanup contract.
+	t.Cleanup(func() { srv.ShutdownAll(false, sessioncontroller.StopCauseDaemonShutdown()) })
 	binding.SetTarget(srv)
 	// Mirror main.go's late bind: without it the registrar's post-change
 	// SessionView repush (hibernation, vendor rotation) is a silent no-op —
