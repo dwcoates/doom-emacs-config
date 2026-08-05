@@ -157,6 +157,18 @@ type workspaceProgress struct {
 	// to refresh had already expired.
 	turnID     string
 	turnOrigin corev1.PromptOrigin
+	// lastTurnEndAtMs is when the previous turn in this workspace ended, as
+	// observed by THIS daemon process. It exists for the expensive-turn alert,
+	// which is otherwise unable to say why the prompt cache missed: the gap
+	// since the last turn is the single most common explanation, and a gap
+	// past the longest cache TTL makes a miss a certainty rather than a
+	// suspicion.
+	//
+	// Zero means no turn has ended here in this process — a revived
+	// hibernated session, a daemon restart, or a genuinely first turn. That is
+	// not a missing datum but a positive finding, and the alert says so: with
+	// no prior turn in-process there is no warm cache to have hit.
+	lastTurnEndAtMs int64
 }
 
 // New builds a Manager.
@@ -451,7 +463,7 @@ func (m *Manager) Apply(workspace, sessionID string, ev *corev1.Event) error {
 		wp.turnID = p.TurnStarted.GetTurnId()
 		wp.turnOrigin = p.TurnStarted.GetPromptOrigin()
 	case *corev1.Event_TurnEnded:
-		m.closeTurnLocked(wp, p.TurnEnded)
+		m.closeTurnLocked(wp, p.TurnEnded, at)
 		m.pushLocked(workspace, wp)
 	case *corev1.Event_MessageLatency:
 		m.applyLatencyLocked(workspace, wp, p.MessageLatency)
@@ -804,13 +816,42 @@ func (m *Manager) applyResultCostLocked(workspace string, wp *workspaceProgress,
 	}
 	wp.view.ExpensiveTurn = alert
 	if wp.turnOrigin == corev1.PromptOrigin_PROMPT_ORIGIN_CACHE_KEEP_ALIVE {
-		m.logf("progress: CACHE KEEP-ALIVE CAME BACK COLD ws=%s turn_id=%s uncached_input_tokens=%d threshold=%d — the ping is a dozen tokens of prompt and it paid for the whole conversation, so the cache it was sent to refresh had already expired; the keep-alive bought nothing for this turn",
-			workspace, wp.turnID, uncached, m.uncachedAlertTokens)
+		m.logf("progress: CACHE KEEP-ALIVE CAME BACK COLD ws=%s turn_id=%s uncached_input_tokens=%d threshold=%d — the ping is a dozen tokens of prompt and it paid for the whole conversation, so the cache it was sent to refresh had already expired; the keep-alive bought nothing for this turn; %s",
+			workspace, wp.turnID, uncached, m.uncachedAlertTokens, cacheAgeEvidence(wp, atMs))
 	} else {
-		m.logf("progress: EXPENSIVE TURN ws=%s turn_id=%s prompt_origin=%s uncached_input_tokens=%d threshold=%d — this turn re-ingested context rather than reading it from the prompt cache",
-			workspace, wp.turnID, wp.turnOrigin, uncached, m.uncachedAlertTokens)
+		m.logf("progress: EXPENSIVE TURN ws=%s turn_id=%s prompt_origin=%s uncached_input_tokens=%d threshold=%d — this turn re-ingested context rather than reading it from the prompt cache; %s",
+			workspace, wp.turnID, wp.turnOrigin, uncached, m.uncachedAlertTokens, cacheAgeEvidence(wp, atMs))
 	}
 	m.pushLocked(workspace, wp)
+}
+
+// longestCacheTtlMs is the longest prompt-cache lifetime the vendor offers.
+// Past it a cache miss is arithmetic, not misfortune, which is the difference
+// the evidence string draws.
+const longestCacheTtlMs int64 = 60 * 60 * 1000
+
+// cacheAgeEvidence says what the gap since the previous turn implies about the
+// miss the alert is reporting.
+//
+// THE ALERT ON ITS OWN NAMES A COST AND NO CAUSE. Reconstructing why a prompt
+// cache missed otherwise means hand-correlating this line against hibernation,
+// revival, and restart lines minutes apart elsewhere in the log — so the one
+// fact that most often settles it is carried here instead.
+//
+// A zero last-turn stamp is the loudest reading, not a gap in the data: this
+// process has ended no turn in this workspace, so the turn ran against a
+// conversation no cache in this process ever warmed. A revived hibernated
+// session, a daemon restart, and a genuinely first turn all land here, and all
+// three are cold BY CONSTRUCTION rather than by accident.
+func cacheAgeEvidence(wp *workspaceProgress, atMs int64) string {
+	if wp.lastTurnEndAtMs == 0 {
+		return "prior_turn=none — no turn has ended in this workspace in this daemon process (a revived hibernated session, a daemon restart, or the session's first turn), so no prompt cache could have been warm and the re-ingest was certain"
+	}
+	gap := atMs - wp.lastTurnEndAtMs
+	if gap >= longestCacheTtlMs {
+		return fmt.Sprintf("since_prior_turn=%s longest_cache_ttl=%s — the gap outlived the longest cache lifetime, so the re-ingest was certain", time.Duration(gap)*time.Millisecond, time.Duration(longestCacheTtlMs)*time.Millisecond)
+	}
+	return fmt.Sprintf("since_prior_turn=%s longest_cache_ttl=%s — the gap is INSIDE the longest cache lifetime, so idle time does not explain this miss; suspect a changed prompt prefix (system prompt, tool set, or rewritten history) instead", time.Duration(gap)*time.Millisecond, time.Duration(longestCacheTtlMs)*time.Millisecond)
 }
 
 // ---------------------------------------------------------------------------
@@ -881,8 +922,9 @@ func (m *Manager) openTurnLocked(wp *workspaceProgress, atMs int64) bool {
 // conversation instead of surviving only until the next turn overwrites them.
 // The footer reads `--` between turns for the same reason the clock does —
 // there is no turn in flight for it to report on.
-func (m *Manager) closeTurnLocked(wp *workspaceProgress, te *corev1.TurnEnded) {
+func (m *Manager) closeTurnLocked(wp *workspaceProgress, te *corev1.TurnEnded, atMs int64) {
 	wp.turnOpen = false
+	wp.lastTurnEndAtMs = atMs
 	wp.view.TurnStartedAtMs = 0
 	wp.view.InputTokens = 0
 	wp.view.ThinkingTokens = 0
