@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -786,6 +787,7 @@ func findLineContaining(lines []string, operation, message string) string {
 type loggedRecord struct {
 	Level     string         `json:"level"`
 	Operation string         `json:"operation"`
+	Message   string         `json:"message"`
 	Session   string         `json:"claude_session_id"`
 	Context   map[string]any `json:"context"`
 }
@@ -851,6 +853,430 @@ func TestIngestSuccessSilentWhenVerboseDisabled(t *testing.T) {
 	if got := findLine(drain(), "ingest"); got != "" {
 		t.Fatalf("non-verbose ingest success logged %q, want silence", got)
 	}
+}
+
+// --- subscriber termination -------------------------------------------------
+//
+// These fixtures hold the exact producer-side transition with a hook owned by
+// the subscriber state machine.  A test only advances a gate after it has
+// observed the preceding transition, so no outcome relies on a scheduler race
+// or a duration being long enough.
+
+type subscriberTerminalCapture struct {
+	records chan subscriberTerminalRecord
+}
+
+func newSubscriberTerminalCapture() *subscriberTerminalCapture {
+	return &subscriberTerminalCapture{records: make(chan subscriberTerminalRecord, 2)}
+}
+
+func (c *subscriberTerminalCapture) hook(record subscriberTerminalRecord) {
+	c.records <- record
+}
+
+func (c *subscriberTerminalCapture) await(t *testing.T) subscriberTerminalRecord {
+	t.Helper()
+	select {
+	case record := <-c.records:
+		return record
+	case <-time.After(time.Second):
+		t.Fatal("subscriber terminal record was not emitted")
+		return subscriberTerminalRecord{}
+	}
+}
+
+func (c *subscriberTerminalCapture) assertExactlyOne(t *testing.T) {
+	t.Helper()
+	select {
+	case extra := <-c.records:
+		t.Fatalf("extra subscriber terminal record = %+v", extra)
+	default:
+	}
+}
+
+type subscriberGate struct {
+	reached chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func newSubscriberGate() *subscriberGate {
+	return &subscriberGate{reached: make(chan struct{}), release: make(chan struct{})}
+}
+
+func (g *subscriberGate) wait() {
+	g.once.Do(func() { close(g.reached) })
+	<-g.release
+}
+
+func (g *subscriberGate) await(t *testing.T) {
+	t.Helper()
+	select {
+	case <-g.reached:
+	case <-time.After(time.Second):
+		t.Fatal("subscriber gate was not reached")
+	}
+}
+
+func (g *subscriberGate) open() { close(g.release) }
+
+// nthSubscriberGate blocks one selected replay row without changing the
+// preceding rows.  The counter runs only in serveSubscriber's replay owner.
+type nthSubscriberGate struct {
+	want    int
+	seen    int
+	mu      sync.Mutex
+	blocked *subscriberGate
+}
+
+func (g *nthSubscriberGate) wait() {
+	g.mu.Lock()
+	g.seen++
+	block := g.seen == g.want
+	g.mu.Unlock()
+	if block {
+		g.blocked.wait()
+	}
+}
+
+// writeFaultConn fails its next socket write after the caller releases the
+// gate.  Reads remain delegated to the pipe, allowing the terminal owner to
+// close the server side and prove the reader suppresses its self-close error.
+type writeFaultConn struct {
+	net.Conn
+	gate      *subscriberGate
+	err       error
+	once      sync.Once
+	readError chan struct{}
+	readOnce  sync.Once
+}
+
+type readFaultConn struct {
+	net.Conn
+	release <-chan struct{}
+	err     error
+	noticed chan<- struct{}
+	once    sync.Once
+}
+
+func (c *readFaultConn) Read([]byte) (int, error) {
+	<-c.release
+	c.once.Do(func() { close(c.noticed) })
+	return 0, c.err
+}
+
+func (c *writeFaultConn) Write(p []byte) (int, error) {
+	c.gate.wait()
+	fail := false
+	c.once.Do(func() { fail = true })
+	if fail {
+		return 0, c.err
+	}
+	return c.Conn.Write(p)
+}
+
+func (c *writeFaultConn) Read(p []byte) (int, error) {
+	n, err := c.Conn.Read(p)
+	if err != nil && c.readError != nil {
+		c.readOnce.Do(func() { close(c.readError) })
+	}
+	return n, err
+}
+
+func seedSubscriberReplay(t *testing.T, h *harness, session string, count int) {
+	t.Helper()
+	events := make([]*corev1.Event, 0, count)
+	for i := range count {
+		events = append(events, vAssistantStream(t, session, fmt.Sprintf("terminal-%d", i)))
+	}
+	if _, err := h.db.Ingest("subscriber-terminal-test", events, nil); err != nil {
+		t.Fatalf("seed replay: %v", err)
+	}
+}
+
+func installSubscriberHooks(s *Server, capture *subscriberTerminalCapture, replayHook, tailHook func()) {
+	s.subscriberHooksMu.Lock()
+	s.subscriberHooks = subscriberHooks{
+		onTerminal:      capture.hook,
+		beforeReplayRow: replayHook,
+		beforeTailWrite: tailHook,
+	}
+	s.subscriberHooksMu.Unlock()
+}
+
+func serveSubscriberAsync(s *Server, conn net.Conn, sub *corev1.Subscribe) <-chan struct{} {
+	conn = &onceConn{Conn: conn}
+	s.trackConn(conn)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer s.untrackConn(conn)
+		s.serveSubscriber(conn, sub)
+	}()
+	return done
+}
+
+func awaitSubscriberDone(t *testing.T, done <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("subscriber did not stop")
+	}
+}
+
+func assertSubscriberTerminalLog(t *testing.T, logs []byte, want subscriberTerminalRecord, wantCause bool) {
+	t.Helper()
+	var terminals []loggedRecord
+	for _, line := range bytes.Split(bytes.TrimSpace(logs), []byte("\n")) {
+		var record loggedRecord
+		if err := json.Unmarshal(line, &record); err != nil {
+			t.Fatalf("server record is not JSON: %v", err)
+		}
+		if record.Operation == "subscribe-terminal" {
+			terminals = append(terminals, record)
+		}
+		if record.Operation == "subscriber-read" && record.Level == "error" {
+			t.Fatalf("self-close was logged as a subscriber-read error: %#v", record)
+		}
+	}
+	if len(terminals) != 1 {
+		t.Fatalf("terminal records = %d, want 1; logs=%s", len(terminals), logs)
+	}
+	record := terminals[0]
+	if record.Session != want.SessionID || record.Context["subscriber"] != want.Peer {
+		t.Fatalf("terminal record identity = session %q peer %#v, want session %q peer %q: %#v", record.Session, record.Context["subscriber"], want.SessionID, want.Peer, record)
+	}
+	for key, wantValue := range map[string]any{
+		"terminal_owner":   want.Owner,
+		"terminal_reason":  string(want.Reason),
+		"replay_from_seq":  float64(want.FromSeq),
+		"replay_first_seq": float64(want.FirstReplaySeq),
+		"replay_last_seq":  float64(want.LastReplaySeq),
+		"delivered":        float64(want.Delivered),
+	} {
+		if got := record.Context[key]; got != wantValue {
+			t.Fatalf("terminal context[%q] = %#v, want %#v; record=%#v", key, got, wantValue, record)
+		}
+	}
+	if wantCause && record.Context["error"] == "" {
+		t.Fatalf("terminal record omitted loud error cause: %#v", record)
+	}
+	if !wantCause {
+		if got, exists := record.Context["error"]; exists {
+			t.Fatalf("expected terminal record included error %#v: %#v", got, record)
+		}
+	}
+}
+
+func TestSubscriberCloseBeforeFirstReplayRowTerminatesOnce(t *testing.T) {
+	var logs bytes.Buffer
+	h := start(t, 0, logging.New(&logs, io.Discard, false))
+	seedSubscriberReplay(t, h, "close-before-replay", 1)
+	capture, gate := newSubscriberTerminalCapture(), newSubscriberGate()
+	installSubscriberHooks(h.srv, capture, gate.wait, nil)
+	serverConn, clientConn := net.Pipe()
+	t.Cleanup(func() { _ = clientConn.Close() })
+	done := serveSubscriberAsync(h.srv, serverConn, &corev1.Subscribe{SessionId: "close-before-replay"})
+
+	gate.await(t)
+	if err := clientConn.Close(); err != nil {
+		t.Fatalf("client close: %v", err)
+	}
+	record := capture.await(t)
+	gate.open()
+	awaitSubscriberDone(t, done)
+	if record.Reason != subscriptionTerminalReason("client-eof") || record.Delivered != 0 {
+		t.Fatalf("terminal record = %+v, want client EOF before replay delivery", record)
+	}
+	capture.assertExactlyOne(t)
+	assertSubscriberTerminalLog(t, logs.Bytes(), record, false)
+}
+
+func TestSubscriberCloseMidReplayTerminatesOnce(t *testing.T) {
+	var logs bytes.Buffer
+	h := start(t, 0, logging.New(&logs, io.Discard, false))
+	seedSubscriberReplay(t, h, "close-mid-replay", 2)
+	capture, gate := newSubscriberTerminalCapture(), newSubscriberGate()
+	secondRow := &nthSubscriberGate{want: 2, blocked: gate}
+	installSubscriberHooks(h.srv, capture, secondRow.wait, nil)
+	serverConn, clientConn := net.Pipe()
+	t.Cleanup(func() { _ = clientConn.Close() })
+	done := serveSubscriberAsync(h.srv, serverConn, &corev1.Subscribe{SessionId: "close-mid-replay"})
+	if ev := recvEvent(t, clientConn); ev.GetSeq() != 1 {
+		t.Fatalf("first replay seq = %d, want 1", ev.GetSeq())
+	}
+	gate.await(t)
+	if err := clientConn.Close(); err != nil {
+		t.Fatalf("client close: %v", err)
+	}
+	record := capture.await(t)
+	gate.open()
+	awaitSubscriberDone(t, done)
+	if record.Reason != subscriptionTerminalReason("client-eof") || record.Delivered != 1 {
+		t.Fatalf("terminal record = %+v, want client EOF after one replay row", record)
+	}
+	capture.assertExactlyOne(t)
+	assertSubscriberTerminalLog(t, logs.Bytes(), record, false)
+}
+
+func TestSubscriberCloseDuringLiveTailTerminatesOnce(t *testing.T) {
+	var logs bytes.Buffer
+	h := start(t, 0, logging.New(&logs, io.Discard, false))
+	capture, gate := newSubscriberTerminalCapture(), newSubscriberGate()
+	installSubscriberHooks(h.srv, capture, nil, gate.wait)
+	serverConn, clientConn := net.Pipe()
+	t.Cleanup(func() { _ = clientConn.Close() })
+	done := serveSubscriberAsync(h.srv, serverConn, &corev1.Subscribe{SessionId: "close-live-tail"})
+	recvSubscriptionReady(t, clientConn)
+	h.srv.fan.publish(vAssistantStream(t, "close-live-tail", "tail"))
+
+	gate.await(t)
+	if err := clientConn.Close(); err != nil {
+		t.Fatalf("client close: %v", err)
+	}
+	record := capture.await(t)
+	gate.open()
+	awaitSubscriberDone(t, done)
+	if record.Reason != subscriptionTerminalReason("client-eof") || record.Delivered != 0 {
+		t.Fatalf("terminal record = %+v, want client EOF in live tail", record)
+	}
+	capture.assertExactlyOne(t)
+	assertSubscriberTerminalLog(t, logs.Bytes(), record, false)
+}
+
+func TestSubscriberReplayWriteFailureIsLoudAndDoesNotSelfReportReaderClose(t *testing.T) {
+	var logs bytes.Buffer
+	h := start(t, 0, logging.New(&logs, io.Discard, false))
+	seedSubscriberReplay(t, h, "replay-write-failure", 1)
+	capture, gate := newSubscriberTerminalCapture(), newSubscriberGate()
+	installSubscriberHooks(h.srv, capture, nil, nil)
+	serverPipe, clientConn := net.Pipe()
+	t.Cleanup(func() { _ = clientConn.Close() })
+	injected := errors.New("injected replay write failure")
+	done := serveSubscriberAsync(h.srv, &writeFaultConn{Conn: serverPipe, gate: gate, err: injected}, &corev1.Subscribe{SessionId: "replay-write-failure"})
+
+	gate.await(t)
+	gate.open()
+	record := capture.await(t)
+	awaitSubscriberDone(t, done)
+	if record.Reason != subscriptionTerminalReason("replay-failure") || !errors.Is(record.Cause, injected) {
+		t.Fatalf("terminal record = %+v, want loud replay write failure", record)
+	}
+	capture.assertExactlyOne(t)
+	assertSubscriberTerminalLog(t, logs.Bytes(), record, true)
+}
+
+func TestSubscriberSimultaneousReadAndReplayWriteFailureTerminatesOnce(t *testing.T) {
+	var logs bytes.Buffer
+	h := start(t, 0, logging.New(&logs, io.Discard, false))
+	seedSubscriberReplay(t, h, "simultaneous-read-write", 1)
+	capture, gate := newSubscriberTerminalCapture(), newSubscriberGate()
+	installSubscriberHooks(h.srv, capture, nil, nil)
+	serverPipe, clientConn := net.Pipe()
+	t.Cleanup(func() { _ = clientConn.Close() })
+	readError := make(chan struct{})
+	done := serveSubscriberAsync(h.srv, &writeFaultConn{
+		Conn: serverPipe, gate: gate, err: errors.New("injected concurrent replay write failure"), readError: readError,
+	}, &corev1.Subscribe{SessionId: "simultaneous-read-write"})
+
+	gate.await(t)
+	if err := clientConn.Close(); err != nil {
+		t.Fatalf("client close: %v", err)
+	}
+	select {
+	case <-readError:
+	case <-time.After(time.Second):
+		t.Fatal("subscriber read failure was not observed before write release")
+	}
+	record := capture.await(t)
+	gate.open()
+	awaitSubscriberDone(t, done)
+	if record.Reason != subscriptionTerminalReason("client-eof") {
+		t.Fatalf("terminal record = %+v, want reader-owned client EOF", record)
+	}
+	capture.assertExactlyOne(t)
+	assertSubscriberTerminalLog(t, logs.Bytes(), record, false)
+}
+
+func TestSubscriberStoreShutdownTerminatesOnce(t *testing.T) {
+	var logs bytes.Buffer
+	h := start(t, 0, logging.New(&logs, io.Discard, false))
+	capture, gate := newSubscriberTerminalCapture(), newSubscriberGate()
+	installSubscriberHooks(h.srv, capture, nil, gate.wait)
+	serverConn, clientConn := net.Pipe()
+	t.Cleanup(func() { _ = clientConn.Close() })
+	done := serveSubscriberAsync(h.srv, serverConn, &corev1.Subscribe{SessionId: "store-shutdown"})
+	recvSubscriptionReady(t, clientConn)
+	h.srv.fan.publish(vAssistantStream(t, "store-shutdown", "tail"))
+	gate.await(t)
+
+	// Server.Close owns this connection because the fixture registered it before
+	// starting the subscriber.  The gated write makes shutdown occur during the
+	// live-tail socket transition rather than at an arbitrary time.
+	if err := h.srv.Close(); err != nil {
+		t.Fatalf("store shutdown: %v", err)
+	}
+	gate.open()
+	record := capture.await(t)
+	awaitSubscriberDone(t, done)
+	if record.Reason != subscriptionTerminalReason("server-shutdown") {
+		t.Fatalf("terminal record = %+v, want server shutdown", record)
+	}
+	capture.assertExactlyOne(t)
+	assertSubscriberTerminalLog(t, logs.Bytes(), record, false)
+}
+
+func TestSubscriberClientResetTerminatesOnce(t *testing.T) {
+	var logs bytes.Buffer
+	h := start(t, 0, logging.New(&logs, io.Discard, false))
+	capture := newSubscriberTerminalCapture()
+	readRelease, readNoticed := make(chan struct{}), make(chan struct{})
+	installSubscriberHooks(h.srv, capture, nil, nil)
+	serverPipe, clientConn := net.Pipe()
+	t.Cleanup(func() { _ = clientConn.Close() })
+	done := serveSubscriberAsync(h.srv, &readFaultConn{
+		Conn: serverPipe, release: readRelease, err: syscall.ECONNRESET, noticed: readNoticed,
+	}, &corev1.Subscribe{SessionId: "client-reset"})
+	recvSubscriptionReady(t, clientConn)
+
+	close(readRelease)
+	select {
+	case <-readNoticed:
+	case <-time.After(time.Second):
+		t.Fatal("injected reset was not read")
+	}
+	record := capture.await(t)
+	awaitSubscriberDone(t, done)
+	if record.Reason != subscriptionTerminalReason("client-reset") || record.Owner != "reader" || record.Cause != nil {
+		t.Fatalf("terminal record = %+v, want client reset", record)
+	}
+	capture.assertExactlyOne(t)
+	assertSubscriberTerminalLog(t, logs.Bytes(), record, false)
+}
+
+func TestSubscriberSlowConsumerTerminatesOnce(t *testing.T) {
+	var logs bytes.Buffer
+	h := start(t, 1, logging.New(&logs, io.Discard, false))
+	capture, gate := newSubscriberTerminalCapture(), newSubscriberGate()
+	installSubscriberHooks(h.srv, capture, nil, gate.wait)
+	serverConn, clientConn := net.Pipe()
+	t.Cleanup(func() { _ = clientConn.Close() })
+	done := serveSubscriberAsync(h.srv, serverConn, &corev1.Subscribe{SessionId: "slow-consumer"})
+	recvSubscriptionReady(t, clientConn)
+
+	h.srv.fan.publish(vAssistantStream(t, "slow-consumer", "one"))
+	gate.await(t)
+	h.srv.fan.publish(vAssistantStream(t, "slow-consumer", "two"))
+	h.srv.fan.publish(vAssistantStream(t, "slow-consumer", "three"))
+	gate.open()
+	record := capture.await(t)
+	awaitSubscriberDone(t, done)
+	if record.Reason != subscriptionTerminalReason("slow-consumer") || record.Owner != "fanout" {
+		t.Fatalf("terminal record = %+v, want slow-consumer", record)
+	}
+	capture.assertExactlyOne(t)
+	assertSubscriberTerminalLog(t, logs.Bytes(), record, false)
 }
 
 func TestSlowConsumerHardDisconnect(t *testing.T) {

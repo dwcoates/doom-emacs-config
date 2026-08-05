@@ -57,6 +57,119 @@ func TestLogFormatsBoundAndRecordContext(t *testing.T) {
 	}
 }
 
+func TestLogMarshalsReplayAndTerminalAttributionExactly(t *testing.T) {
+	var file, stderr bytes.Buffer
+	log := New(&file, &stderr, false).With(Fields{
+		AgentReplSessionID: "agent-1",
+		Session:            "claude-1",
+		RequestID:          "request-1",
+		ReplayFromSeq:      10,
+		ReplayFirstSeq:     11,
+		ReplayLastSeq:      12,
+		Delivered:          2,
+	})
+	at := time.Date(2026, 7, 28, 12, 34, 56, 789000000, time.UTC)
+	log.clock = func() time.Time { return at }
+	log.pid = func() int { return 84 }
+
+	log.Log(Fields{
+		Component:      "replay",
+		TerminalOwner:  "subscriber",
+		TerminalReason: "completed",
+		ErrorCause:     "connection reset",
+		Operation:      "store.replay",
+	}, "replay finished")
+
+	var got map[string]any
+	if err := json.Unmarshal(file.Bytes(), &got); err != nil {
+		t.Fatalf("record is not JSON: %v: %q", err, file.String())
+	}
+	want := map[string]any{
+		"timestamp":             at.Local().Format(sharedlogging.TimestampLayout),
+		"runtime":               "store",
+		"pid":                   float64(84),
+		"level":                 "info",
+		"verbosity":             "normal",
+		"operation":             "store.replay",
+		"message":               "replay finished",
+		"agent_repl_session_id": "agent-1",
+		"claude_session_id":     "claude-1",
+		"request_id":            "request-1",
+		"context": map[string]any{
+			"component":        "replay",
+			"replay_from_seq":  float64(10),
+			"replay_first_seq": float64(11),
+			"replay_last_seq":  float64(12),
+			"delivered":        float64(2),
+			"terminal_owner":   "subscriber",
+			"terminal_reason":  "completed",
+			"error":            "connection reset",
+		},
+	}
+	assertJSONExactly(t, got, want)
+}
+
+func TestLogOmitsEmptyReplayAndTerminalAttribution(t *testing.T) {
+	var file, stderr bytes.Buffer
+	New(&file, &stderr, false).Log(Fields{Operation: "store.replay"}, "replay finished")
+
+	var got map[string]any
+	if err := json.Unmarshal(file.Bytes(), &got); err != nil {
+		t.Fatalf("record is not JSON: %v: %q", err, file.String())
+	}
+	context := got["context"].(map[string]any)
+	for _, key := range []string{"replay_from_seq", "replay_first_seq", "replay_last_seq", "delivered", "terminal_owner", "terminal_reason", "error"} {
+		if _, exists := context[key]; exists {
+			t.Fatalf("context unexpectedly contains %q: %#v", key, context)
+		}
+	}
+}
+
+func TestLogMarshalsZeroReplayCountersForTerminalRecordExactly(t *testing.T) {
+	var file, stderr bytes.Buffer
+	log := New(&file, &stderr, false)
+	at := time.Date(2026, 7, 28, 12, 34, 56, 789000000, time.UTC)
+	log.clock = func() time.Time { return at }
+	log.pid = func() int { return 84 }
+
+	log.Log(Fields{TerminalOwner: "subscriber", TerminalReason: "exhausted", Operation: "store.replay"}, "replay finished")
+
+	var got map[string]any
+	if err := json.Unmarshal(file.Bytes(), &got); err != nil {
+		t.Fatalf("record is not JSON: %v: %q", err, file.String())
+	}
+	want := map[string]any{
+		"timestamp": at.Local().Format(sharedlogging.TimestampLayout),
+		"runtime":   "store",
+		"pid":       float64(84),
+		"level":     "info",
+		"verbosity": "normal",
+		"operation": "store.replay",
+		"message":   "replay finished",
+		"context": map[string]any{
+			"replay_from_seq":  float64(0),
+			"replay_first_seq": float64(0),
+			"replay_last_seq":  float64(0),
+			"delivered":        float64(0),
+			"terminal_owner":   "subscriber",
+			"terminal_reason":  "exhausted",
+		},
+	}
+	assertJSONExactly(t, got, want)
+}
+
+func assertJSONExactly(t *testing.T, got, want map[string]any) {
+	t.Helper()
+	gotJSON, gotErr := json.Marshal(got)
+	wantJSON, wantErr := json.Marshal(want)
+	if gotErr != nil || wantErr != nil {
+		t.Fatalf("marshal record=%v want=%v", gotErr, wantErr)
+	}
+	if string(gotJSON) != string(wantJSON) {
+		t.Fatalf("record = %s\nwant = %s", gotJSON, wantJSON)
+	}
+}
+
 func TestLogVerboseRequiresEnabledModeForBothSinks(t *testing.T) {
 	var file, stderr bytes.Buffer
 	log := New(&file, &stderr, false)

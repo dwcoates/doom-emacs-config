@@ -16,30 +16,39 @@ import (
 // Empty fields are omitted.  The store's runtime owners bind the stable values
 // they know: database and table in db, socket and connection role in server.
 type Fields struct {
-	Component    string
-	DatabasePath string
-	Table        string
-	Socket       string
-	Session      string
-	Producer     string
-	Subscriber   string
-	Transaction  string
-	Operation    string
-	Level        string
-	RequestID    string
+	Component          string
+	DatabasePath       string
+	Table              string
+	Socket             string
+	AgentReplSessionID string
+	Session            string
+	Producer           string
+	Subscriber         string
+	Transaction        string
+	ReplayFromSeq      uint64
+	ReplayFirstSeq     uint64
+	ReplayLastSeq      uint64
+	Delivered          uint64
+	TerminalOwner      string
+	TerminalReason     string
+	ErrorCause         string
+	Operation          string
+	Level              string
+	RequestID          string
 }
 
 type record struct {
-	Timestamp       string         `json:"timestamp"`
-	Runtime         string         `json:"runtime"`
-	PID             int            `json:"pid"`
-	Level           string         `json:"level"`
-	Verbosity       string         `json:"verbosity"`
-	Operation       string         `json:"operation"`
-	Message         string         `json:"message"`
-	ClaudeSessionID string         `json:"claude_session_id,omitempty"`
-	RequestID       string         `json:"request_id,omitempty"`
-	Context         map[string]any `json:"context"`
+	Timestamp          string         `json:"timestamp"`
+	Runtime            string         `json:"runtime"`
+	PID                int            `json:"pid"`
+	Level              string         `json:"level"`
+	Verbosity          string         `json:"verbosity"`
+	Operation          string         `json:"operation"`
+	Message            string         `json:"message"`
+	AgentReplSessionID string         `json:"agent_repl_session_id,omitempty"`
+	ClaudeSessionID    string         `json:"claude_session_id,omitempty"`
+	RequestID          string         `json:"request_id,omitempty"`
+	Context            map[string]any `json:"context"`
 }
 
 // Logger writes normal records to the persistent log and stderr. Verbose
@@ -119,30 +128,45 @@ func (l *Logger) write(verbosity string, fields Fields, format string, args []an
 	}
 	context := map[string]any{}
 	for key, value := range map[string]string{
-		"component":   merged.Component,
-		"db":          merged.DatabasePath,
-		"table":       merged.Table,
-		"socket":      merged.Socket,
-		"producer":    merged.Producer,
-		"subscriber":  merged.Subscriber,
-		"transaction": merged.Transaction,
+		"component":       merged.Component,
+		"db":              merged.DatabasePath,
+		"table":           merged.Table,
+		"socket":          merged.Socket,
+		"producer":        merged.Producer,
+		"subscriber":      merged.Subscriber,
+		"transaction":     merged.Transaction,
+		"terminal_owner":  merged.TerminalOwner,
+		"terminal_reason": merged.TerminalReason,
+		"error":           merged.ErrorCause,
 	} {
 		if value != "" {
 			context[key] = value
 		}
 	}
+	terminal := merged.TerminalOwner != "" || merged.TerminalReason != ""
+	for key, value := range map[string]uint64{
+		"replay_from_seq":  merged.ReplayFromSeq,
+		"replay_first_seq": merged.ReplayFirstSeq,
+		"replay_last_seq":  merged.ReplayLastSeq,
+		"delivered":        merged.Delivered,
+	} {
+		if value != 0 || terminal {
+			context[key] = value
+		}
+	}
 	now := sharedlogging.Timestamp(l.clock())
 	entry := record{
-		Timestamp:       now,
-		Runtime:         "store",
-		PID:             l.pid(),
-		Level:           level,
-		Verbosity:       verbosity,
-		Operation:       merged.Operation,
-		Message:         fmt.Sprintf(format, args...),
-		ClaudeSessionID: merged.Session,
-		RequestID:       merged.RequestID,
-		Context:         context,
+		Timestamp:          now,
+		Runtime:            "store",
+		PID:                l.pid(),
+		Level:              level,
+		Verbosity:          verbosity,
+		Operation:          merged.Operation,
+		Message:            fmt.Sprintf(format, args...),
+		AgentReplSessionID: merged.AgentReplSessionID,
+		ClaudeSessionID:    merged.Session,
+		RequestID:          merged.RequestID,
+		Context:            context,
 	}
 	payload, err := json.Marshal(entry)
 	if err != nil {
@@ -215,6 +239,9 @@ func merge(base, extra Fields) Fields {
 	if extra.Socket != "" {
 		base.Socket = extra.Socket
 	}
+	if extra.AgentReplSessionID != "" {
+		base.AgentReplSessionID = extra.AgentReplSessionID
+	}
 	if extra.Session != "" {
 		base.Session = extra.Session
 	}
@@ -226,6 +253,27 @@ func merge(base, extra Fields) Fields {
 	}
 	if extra.Transaction != "" {
 		base.Transaction = extra.Transaction
+	}
+	if extra.ReplayFromSeq != 0 {
+		base.ReplayFromSeq = extra.ReplayFromSeq
+	}
+	if extra.ReplayFirstSeq != 0 {
+		base.ReplayFirstSeq = extra.ReplayFirstSeq
+	}
+	if extra.ReplayLastSeq != 0 {
+		base.ReplayLastSeq = extra.ReplayLastSeq
+	}
+	if extra.Delivered != 0 {
+		base.Delivered = extra.Delivered
+	}
+	if extra.TerminalOwner != "" {
+		base.TerminalOwner = extra.TerminalOwner
+	}
+	if extra.TerminalReason != "" {
+		base.TerminalReason = extra.TerminalReason
+	}
+	if extra.ErrorCause != "" {
+		base.ErrorCause = extra.ErrorCause
 	}
 	if extra.Operation != "" {
 		base.Operation = extra.Operation
