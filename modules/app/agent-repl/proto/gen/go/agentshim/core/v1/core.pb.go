@@ -3905,8 +3905,11 @@ type ContentDelta struct {
 	//	*ContentDelta_Signature
 	Delta           isContentDelta_Delta `protobuf_oneof:"delta"`
 	EstimatedTokens int64                `protobuf:"varint,7,opt,name=estimated_tokens,json=estimatedTokens,proto3" json:"estimated_tokens,omitempty"` // thinking deltas carry this (may be 0)
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Stable tool identity for input_json deltas.  The API block index is not
+	// sufficient after the durable record has already settled independently.
+	ToolUseId     *string `protobuf:"bytes,8,opt,name=tool_use_id,json=toolUseId,proto3,oneof" json:"tool_use_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ContentDelta) Reset() {
@@ -4001,6 +4004,13 @@ func (x *ContentDelta) GetEstimatedTokens() int64 {
 		return x.EstimatedTokens
 	}
 	return 0
+}
+
+func (x *ContentDelta) GetToolUseId() string {
+	if x != nil && x.ToolUseId != nil {
+		return *x.ToolUseId
+	}
+	return ""
 }
 
 type isContentDelta_Delta interface {
@@ -6436,7 +6446,7 @@ const file_agentshim_core_v1_core_proto_rawDesc = "" +
 	"\asummary\x18\x04 \x01(\tR\asummary\x12\x1f\n" +
 	"\voutput_path\x18\x05 \x01(\tR\n" +
 	"outputPath\x12\x1c\n" +
-	"\tinference\x18\x06 \x01(\tR\tinference\"\xec\x01\n" +
+	"\tinference\x18\x06 \x01(\tR\tinference\"\xa1\x02\n" +
 	"\fContentDelta\x12\x12\n" +
 	"\x04uuid\x18\x01 \x01(\tR\x04uuid\x12\x1f\n" +
 	"\vblock_index\x18\x02 \x01(\rR\n" +
@@ -6446,8 +6456,10 @@ const file_agentshim_core_v1_core_proto_rawDesc = "" +
 	"\n" +
 	"input_json\x18\x05 \x01(\tH\x00R\tinputJson\x12\x1e\n" +
 	"\tsignature\x18\x06 \x01(\tH\x00R\tsignature\x12)\n" +
-	"\x10estimated_tokens\x18\a \x01(\x03R\x0festimatedTokensB\a\n" +
-	"\x05delta\"\xa6\x01\n" +
+	"\x10estimated_tokens\x18\a \x01(\x03R\x0festimatedTokens\x12#\n" +
+	"\vtool_use_id\x18\b \x01(\tH\x01R\ttoolUseId\x88\x01\x01B\a\n" +
+	"\x05deltaB\x0e\n" +
+	"\f_tool_use_id\"\xa6\x01\n" +
 	"\x11HeartbeatProgress\x12\x1e\n" +
 	"\vtool_use_id\x18\x01 \x01(\tR\ttoolUseId\x12\x1b\n" +
 	"\ttool_name\x18\x02 \x01(\tR\btoolName\x12+\n" +
