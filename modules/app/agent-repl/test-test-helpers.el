@@ -80,6 +80,14 @@ clean; BODY runs after the load with the same bindings still active."
       ;; Assert
       (should (equal (getenv "AGENT_REPL_STATE_DIR") "/sentinel-state-dir")))))
 
+(ert-deftest agent-repl-test-helpers-batch-global-log-is-process-isolated ()
+  "Each batch process writes load-time records inside its PID-scoped state dir."
+  (let ((state-dir (file-name-as-directory (getenv "AGENT_REPL_STATE_DIR"))))
+    (should (string-prefix-p state-dir
+                             (expand-file-name agent-repl-log-file-name)))
+    (should (string-match-p (format "agent-repl-test-state-%d" (emacs-pid))
+                            agent-repl-log-file-name))))
+
 (ert-deftest agent-repl-test-helpers-interactive-load-adds-no-merge-advice ()
   "Interactive load must not advise `agent-repl--workspace-merge-async'."
   ;; Arrange: record every advice-add fired during the load.
