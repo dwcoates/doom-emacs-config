@@ -446,6 +446,9 @@ environments without notification tools (terminal-notifier or osascript)."
           (buf nil)
           (agent-repl-debug nil)
           (agent-repl-log-to-file nil)
+          ;; The ladder's verbose rung is one of the lines this asserts on, so
+          ;; the durable threshold is opened to admit it.
+          (agent-repl-log-file-level 'verbose)
           (agent-repl--workspace-log-buffer-enabled nil))
       (unwind-protect
           (progn
@@ -1030,6 +1033,9 @@ quiet `agent-repl--emit-message' gate, so a fatal line always reaches the modeli
          (agent-repl-log-to-file t)
          (agent-repl-log-file-name path)
          (agent-repl-debug nil)
+         ;; Opened so the assertion is about verbosity persisting independently
+         ;; of `agent-repl-debug', not about the durable threshold's gate.
+         (agent-repl-log-file-level 'verbose)
          (message-called nil))
     (unwind-protect
         (cl-letf (((symbol-function 'message) (lambda (&rest _) (setq message-called t))))
@@ -2194,26 +2200,37 @@ record; `agent-repl-debug' now only gates the *Messages* emit."
           (should-not message-called))))))
 
 (ert-deftest agent-repl-test-log-verbose-persists-when-debug-off ()
-  "`agent-repl--log-verbose' persists even when terminal visibility is off."
+  "`agent-repl--log-verbose' persists even when terminal visibility is off.
+The durable THRESHOLD is opened here so the subject under test is the
+decoupling from `agent-repl-debug' alone; `agent-repl-log-file-level' is
+the separate knob that decides whether this rung is written at all."
   (agent-repl-test--with-temp-logfile path
     (cl-letf (((symbol-function 'message) #'ignore))
-      (let ((agent-repl-debug nil))
+      (let ((agent-repl-debug nil)
+            (agent-repl-log-file-level 'verbose))
         (agent-repl--log-verbose nil "verbose-line")
         (should (> (nth 7 (file-attributes path)) 0))))))
 
 (ert-deftest agent-repl-test-log-verbose-persists-when-debug-t ()
-  "`agent-repl--log-verbose' persists when normal debug visibility is on."
+  "`agent-repl--log-verbose' persists when normal debug visibility is on.
+See the sibling test: the durable threshold is opened so this asserts the
+decoupling from `agent-repl-debug' rather than the threshold's own gate."
   (agent-repl-test--with-temp-logfile path
     (cl-letf (((symbol-function 'message) #'ignore))
-      (let ((agent-repl-debug t))
+      (let ((agent-repl-debug t)
+            (agent-repl-log-file-level 'verbose))
         (agent-repl--log-verbose nil "verbose-line")
         (should (> (nth 7 (file-attributes path)) 0))))))
 
 (ert-deftest agent-repl-test-log-verbose-writes-file-when-debug-verbose ()
-  "`agent-repl--log-verbose' writes to file when debug is `verbose'."
+  "`agent-repl--log-verbose' writes to file when debug is `verbose'.
+The durable threshold is opened alongside it: both knobs must be at
+verbose for this rung to reach the file, and this test is about the
+second one not blocking the first."
   (agent-repl-test--with-temp-logfile path
     (cl-letf (((symbol-function 'message) #'ignore))
-      (let ((agent-repl-debug 'verbose))
+      (let ((agent-repl-debug 'verbose)
+            (agent-repl-log-file-level 'verbose))
         (agent-repl--log-verbose nil "verbose-line")
         (should (file-exists-p path))
         (with-temp-buffer
@@ -2813,7 +2830,11 @@ log at 71,425 records."
   "Silencing the sink's own path must not silence genuine callers."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-logfile path
-      (let ((project (make-temp-file "agent-repl-still-logs-" t)))
+      ;; `agent-repl--buffer-name' reports on the verbose rung, so the durable
+      ;; threshold is opened: the subject is the sink's self-silencing, not the
+      ;; level gate.
+      (let ((agent-repl-log-file-level 'verbose)
+            (project (make-temp-file "agent-repl-still-logs-" t)))
         (unwind-protect
             (progn
               (agent-repl--ws-put "named-ws" :project-dir project)
@@ -3024,3 +3045,87 @@ survives into the rest of the batch run."
 (provide 'test-core)
 
 ;;; test-core.el ends here
+
+;;;; ---- Tests: durable log level threshold ----
+;;
+;; The knob exists because `agent-repl-debug' governs *Messages* only: the
+;; verbose rung was reaching the file unconditionally, and nothing short of
+;; the all-or-nothing kill-switch would stop it.  One edge per test.
+
+(defmacro agent-repl-test--with-captured-file-writes (level &rest body)
+  "Run BODY with `agent-repl-log-file-level' at LEVEL, collecting file writes."
+  (declare (indent 2))
+  `(let ((writes 0)
+         (agent-repl-log-to-file t)
+         (agent-repl-log-file-level ,level))
+     (cl-letf (((symbol-function 'agent-repl--do-log-to-file)
+                (lambda (&rest _args) (setq writes (1+ writes)))))
+       ,@body)
+     writes))
+
+(ert-deftest agent-repl-test-log-file-level-drops-verbose-by-default ()
+  "The default threshold keeps hot-path chatter out of the durable sink."
+  ;; Arrange / Act
+  (let ((writes (agent-repl-test--with-captured-file-writes 'debug
+                  (agent-repl--log-verbose nil "chatter %s" "x"))))
+    ;; Assert
+    (should (= writes 0))))
+
+(ert-deftest agent-repl-test-log-file-level-keeps-debug-at-the-default ()
+  "The default threshold still records ordinary debug lines."
+  ;; Arrange / Act
+  (let ((writes (agent-repl-test--with-captured-file-writes 'debug
+                  (agent-repl--log nil "ordinary %s" "x"))))
+    ;; Assert
+    (should (= writes 1))))
+
+(ert-deftest agent-repl-test-log-file-level-verbose-restores-old-behavior ()
+  "Setting the threshold to verbose writes the chatter again."
+  ;; Arrange / Act
+  (let ((writes (agent-repl-test--with-captured-file-writes 'verbose
+                  (agent-repl--log-verbose nil "chatter %s" "x"))))
+    ;; Assert
+    (should (= writes 1))))
+
+(ert-deftest agent-repl-test-log-file-level-warn-drops-info ()
+  "A warn threshold drops the info rung beneath it."
+  ;; Arrange / Act
+  (let ((writes (agent-repl-test--with-captured-file-writes 'warn
+                  (agent-repl--info nil "notice %s" "x"))))
+    ;; Assert
+    (should (= writes 0))))
+
+(ert-deftest agent-repl-test-log-file-level-never-drops-errors ()
+  "The most severe threshold still records errors."
+  ;; Arrange / Act
+  (let ((writes (agent-repl-test--with-captured-file-writes 'error
+                  (ignore-errors (agent-repl--do-log nil "boom" nil t)))))
+    ;; Assert
+    (should (= writes 1))))
+
+(ert-deftest agent-repl-test-log-file-level-ranks-unknown-levels-at-the-top ()
+  "An unrecognized level is never what a threshold silently discards."
+  ;; Arrange / Act / Assert — ranked with `error', so it clears every setting.
+  (should (agent-repl--log-record-persists-p "no-such-level" "normal")))
+
+(ert-deftest agent-repl-test-log-file-level-verbose-outranks-its-carried-level ()
+  "A verbose record ranks by its verbosity, not by the level it carries."
+  ;; Arrange / Act / Assert — `agent-repl--log-verbose' stamps records `debug',
+  ;; so ranking by level alone would let all the chatter through at the default.
+  (let ((agent-repl-log-file-level 'debug))
+    (should-not (agent-repl--log-record-persists-p "debug" "verbose"))))
+
+(ert-deftest agent-repl-test-log-file-level-leaves-messages-visibility-alone ()
+  "The durable threshold does not change what reaches *Messages*."
+  ;; Arrange
+  (let ((messaged nil)
+        (agent-repl-log-to-file t)
+        (agent-repl-log-file-level 'error)
+        (agent-repl-debug 'verbose))
+    (cl-letf (((symbol-function 'agent-repl--do-log-to-file) #'ignore)
+              ((symbol-function 'message)
+               (lambda (&rest _args) (setq messaged t))))
+      ;; Act — the record is far below the durable threshold.
+      (agent-repl--log-verbose nil "chatter %s" "x")
+      ;; Assert — visibility is the other knob's business, and it still fired.
+      (should messaged))))
