@@ -135,6 +135,38 @@
                      (agent-repl-runtime-restart-await nil 1.0)))
       (should (equal pumps '(pump))))))
 
+(ert-deftest agent-repl-services-test-runtime-restart-await-extends-health-budget-locally ()
+  "The deployment latch extends health deadlines only inside its event pump."
+  (let ((agent-repl-frontend-health-timeout 10.0)
+        (agent-repl-uds-command-ack-deadline 10.0)
+        seen-health seen-ack)
+    (cl-letf (((symbol-function 'agent-repl--runtime-prepare)
+               (lambda (_rebind on-success _on-failure &optional _stop-shims)
+                 (setq seen-health agent-repl-frontend-health-timeout
+                       seen-ack agent-repl-uds-command-ack-deadline)
+                 (funcall on-success)
+                 :pending)))
+      (should (equal "runtime-restart-complete"
+                     (agent-repl-runtime-restart-await nil 300.0)))
+      (should (= seen-health 60.0))
+      (should (= seen-ack 60.0))
+      (should (= agent-repl-frontend-health-timeout 10.0))
+      (should (= agent-repl-uds-command-ack-deadline 10.0)))))
+
+(ert-deftest agent-repl-services-test-runtime-restart-await-bounds-health-before-terminal-timeout ()
+  "A short terminal timeout still leaves an earlier health failure boundary."
+  (let (seen-health seen-ack)
+    (cl-letf (((symbol-function 'agent-repl--runtime-prepare)
+               (lambda (_rebind on-success _on-failure &optional _stop-shims)
+                 (setq seen-health agent-repl-frontend-health-timeout
+                       seen-ack agent-repl-uds-command-ack-deadline)
+                 (funcall on-success)
+                 :pending)))
+      (should (equal "runtime-restart-complete"
+                     (agent-repl-runtime-restart-await nil 1.0)))
+      (should (= seen-health 0.8))
+      (should (= seen-ack 0.8)))))
+
 (ert-deftest agent-repl-services-test-runtime-restart-await-surfaces-failure ()
   "A coordinator failure is signalled instead of resembling completion."
   (cl-letf (((symbol-function 'agent-repl--runtime-prepare)
