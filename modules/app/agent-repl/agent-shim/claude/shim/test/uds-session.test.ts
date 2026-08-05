@@ -605,6 +605,8 @@ describe("UdsSession control: prompt in → SDK", () => {
       measurement_available: true,
       five_hour_utilization: 20.25,
       five_hour_resets_at: "2026-08-03T22:00:00Z",
+      five_hour_resets_at_ms: Date.parse("2026-08-03T22:00:00Z"),
+      five_hour_reset_contract_version: "anthropic-five-hour-cadence-v1",
       subscription_type: "max",
       rate_limits_available: true,
     });
@@ -615,6 +617,13 @@ describe("UdsSession control: prompt in → SDK", () => {
       end_five_hour_utilization: 21.75,
       start_five_hour_resets_at: "2026-08-03T22:00:00Z",
       end_five_hour_resets_at: "2026-08-03T22:00:00Z",
+      start_five_hour_resets_at_ms: Date.parse("2026-08-03T22:00:00Z"),
+      end_five_hour_resets_at_ms: Date.parse("2026-08-03T22:00:00Z"),
+      five_hour_reset_raw_delta_ms: 0,
+      five_hour_reset_cycle_displacement: 0,
+      five_hour_reset_residual_jitter_ms: 0,
+      five_hour_reset_comparison_outcome: "same_window",
+      five_hour_reset_contract_version: "anthropic-five-hour-cadence-v1",
       same_five_hour_window: true,
       five_hour_utilization_delta_available: true,
       five_hour_utilization_delta: 1.5,
@@ -629,12 +638,12 @@ describe("UdsSession control: prompt in → SDK", () => {
       {
         subscription_type: "max",
         rate_limits_available: true,
-        rate_limits: { five_hour: { utilization: 99, resets_at: "2026-08-03T22:00:00Z" } },
+        rate_limits: { five_hour: { utilization: 99, resets_at: "2026-08-03T22:00:00.557120Z" } },
       },
       {
         subscription_type: "max",
         rate_limits_available: true,
-        rate_limits: { five_hour: { utilization: 1, resets_at: "2026-08-04T03:00:00Z" } },
+        rate_limits: { five_hour: { utilization: 1, resets_at: "2026-08-04T03:00:00.939811Z" } },
       },
     ];
     query.subscriptionUsageImpl = async () => responses.shift()!;
@@ -651,7 +660,89 @@ describe("UdsSession control: prompt in → SDK", () => {
       same_five_hour_window: false,
       five_hour_utilization_delta_available: false,
       five_hour_utilization_delta: null,
+      five_hour_reset_cycle_displacement: 1,
+      five_hour_reset_residual_jitter_ms: 382,
+      five_hour_reset_comparison_outcome: "different_window",
       delta_unavailable_reason: "five_hour_window_changed_or_unknown",
+    });
+  });
+
+  it.each([
+    ["first observed straddling-minute pair", "2026-08-03T19:19:59.908698Z", "2026-08-03T19:20:00.502647Z"],
+    ["second observed fractional pair", "2026-08-03T19:20:00.557120Z", "2026-08-03T19:20:00.939811Z"],
+  ])("computes a delta for %s", async (_case, startReset, endReset) => {
+    const { query, daemon } = await rig({ storeSessionId: "vendor-uuid" });
+    const log = captureLog();
+    const responses: SubscriptionUsageResponse[] = [
+      { subscription_type: "max", rate_limits_available: true, rate_limits: { five_hour: { utilization: 17, resets_at: startReset } } },
+      { subscription_type: "max", rate_limits_available: true, rate_limits: { five_hour: { utilization: 18, resets_at: endReset } } },
+    ];
+    query.subscriptionUsageImpl = async () => responses.shift()!;
+
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p-jitter", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
+    await daemon.next(AckSchema);
+    query.emit({ type: "result", uuid: "r-jitter", session_id: "vendor-uuid", subtype: "success" } as unknown as SdkMessageLike);
+    await until(() => query.subscriptionUsageCalls === 2);
+    await tick();
+
+    expect(log.record("captured five-hour utilization at turn end").context).toMatchObject({
+      same_five_hour_window: true,
+      five_hour_utilization_delta_available: true,
+      five_hour_utilization_delta: 1,
+      five_hour_reset_cycle_displacement: 0,
+      five_hour_reset_comparison_outcome: "same_window",
+    });
+  });
+
+  it("keeps an unavailable end observation distinct from a window crossing", async () => {
+    const { query, daemon } = await rig({ storeSessionId: "vendor-uuid" });
+    const log = captureLog();
+    const responses: SubscriptionUsageResponse[] = [
+      { subscription_type: "max", rate_limits_available: true, rate_limits: { five_hour: { utilization: 17, resets_at: "2026-08-03T19:20:00Z" } } },
+      { subscription_type: "max", rate_limits_available: true, rate_limits: { five_hour: { utilization: 18, resets_at: null } } },
+    ];
+    query.subscriptionUsageImpl = async () => responses.shift()!;
+
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p-missing-end", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
+    await daemon.next(AckSchema);
+    query.emit({ type: "result", uuid: "r-missing-end", session_id: "vendor-uuid", subtype: "success" } as unknown as SdkMessageLike);
+    await until(() => query.subscriptionUsageCalls === 2);
+    await tick();
+
+    expect(log.record("captured five-hour utilization at turn end").context).toMatchObject({
+      measurement_available: false,
+      measurement_unavailable_reason: "five_hour_window_unavailable",
+      five_hour_reset_comparison_outcome: "unavailable",
+      same_five_hour_window: false,
+      five_hour_utilization_delta_available: false,
+      delta_unavailable_reason: "turn_end_measurement_unavailable",
+    });
+  });
+
+  it("logs a malformed reset timestamp as a failed start observation with its cause", async () => {
+    const { query, daemon } = await rig();
+    const log = captureLog();
+    query.subscriptionUsageImpl = async () => ({
+      subscription_type: "max",
+      rate_limits_available: true,
+      rate_limits: { five_hour: { utilization: 17, resets_at: "not-a-timestamp" } },
+    });
+
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p-malformed-reset", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
+    await daemon.next(AckSchema);
+    await until(() => query.prompts.length === 1);
+
+    const record = log.record("failed to capture five-hour utilization at turn start");
+    expect(record.level).toBe("error");
+    expect(record.context).toMatchObject({
+      phase: "turn_start",
+      turn_id: "p-malformed-reset",
+      measurement_available: false,
+      measurement_unavailable_reason: "sample_failed",
+      five_hour_resets_at: null,
+      five_hour_resets_at_ms: null,
+      five_hour_reset_contract_version: "anthropic-five-hour-cadence-v1",
+      cause: expect.objectContaining({ message: expect.stringContaining("valid ISO 8601") }),
     });
   });
 

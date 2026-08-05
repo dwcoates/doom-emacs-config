@@ -60,6 +60,8 @@ import { bindLog, setClaudeSessionId } from "./log.js";
 import { normalizeModel } from "../model.js";
 import { logAssistantApiResponseUsage } from "../usage-log.js";
 import {
+  compareFiveHourResetWindows,
+  FIVE_HOUR_RESET_WINDOW_CONTRACT_VERSION,
   fiveHourUsageSample,
   type FiveHourUsageSample,
   type SubscriptionUsageResponse,
@@ -1302,6 +1304,7 @@ export class UdsSession {
           measurementAvailable: false,
           utilization: null,
           resetsAt: null,
+          resetsAtMs: null,
           subscriptionType: null,
           rateLimitsAvailable: false,
           sampleLatencyMs: performance.now() - startedAt,
@@ -1330,11 +1333,10 @@ export class UdsSession {
       if (sample.resetsAt === null) {
         throw new Error("available five-hour usage observation omitted its reset timestamp");
       }
-      const parsed = Date.parse(sample.resetsAt);
-      if (!Number.isFinite(parsed)) {
-        throw new Error(`available five-hour usage observation has an invalid reset timestamp ${JSON.stringify(sample.resetsAt)}`);
+      if (sample.resetsAtMs === null) {
+        throw new Error("available five-hour usage observation omitted its parsed reset timestamp");
       }
-      return BigInt(parsed);
+      return BigInt(sample.resetsAtMs);
     };
     const outcome = sample.measurementAvailable
       ? {
@@ -1683,6 +1685,8 @@ export class UdsSession {
       measurement_available: sample.measurementAvailable,
       five_hour_utilization: sample.utilization,
       five_hour_resets_at: sample.resetsAt,
+      five_hour_resets_at_ms: sample.resetsAtMs,
+      five_hour_reset_contract_version: FIVE_HOUR_RESET_WINDOW_CONTRACT_VERSION,
       subscription_type: sample.subscriptionType,
       rate_limits_available: sample.rateLimitsAvailable,
       sample_latency_ms: sample.sampleLatencyMs,
@@ -1696,10 +1700,12 @@ export class UdsSession {
       return;
     }
 
-    const sameWindow = startUsage?.resetsAt !== null
-      && startUsage?.resetsAt !== undefined
-      && sample.resetsAt !== null
-      && startUsage.resetsAt === sample.resetsAt;
+    const comparison = startUsage?.resetsAtMs !== null
+      && startUsage?.resetsAtMs !== undefined
+      && sample.resetsAtMs !== null
+      ? compareFiveHourResetWindows(startUsage.resetsAtMs, sample.resetsAtMs)
+      : null;
+    const sameWindow = comparison?.sameWindow === true;
     const deltaAvailable = startUsage?.measurementAvailable === true
       && sample.measurementAvailable
       && sameWindow;
@@ -1718,6 +1724,14 @@ export class UdsSession {
       end_five_hour_utilization: sample.utilization,
       start_five_hour_resets_at: startUsage?.resetsAt ?? null,
       end_five_hour_resets_at: sample.resetsAt,
+      start_five_hour_resets_at_ms: startUsage?.resetsAtMs ?? null,
+      end_five_hour_resets_at_ms: sample.resetsAtMs,
+      five_hour_reset_raw_delta_ms: comparison?.rawDeltaMs ?? null,
+      five_hour_reset_cycle_displacement: comparison?.canonicalCycleDisplacement ?? null,
+      five_hour_reset_residual_jitter_ms: comparison?.residualJitterMs ?? null,
+      five_hour_reset_comparison_outcome: comparison === null
+        ? "unavailable"
+        : comparison.sameWindow ? "same_window" : "different_window",
       same_five_hour_window: sameWindow,
       five_hour_utilization_delta_available: deltaAvailable,
       five_hour_utilization_delta: deltaAvailable
