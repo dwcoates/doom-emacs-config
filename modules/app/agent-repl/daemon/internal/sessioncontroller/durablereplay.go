@@ -302,5 +302,14 @@ func (m *Manager) durableConsumer(workspace, sessionID string) *consumer {
 	// the fact the live retirement point would have established, for a daemon
 	// that was not alive to establish it.
 	cons.receipts = m.cfg.PromptReceipts
+	// THE KEEP-ALIVE EXCLUSION'S EVIDENCE, bound here for the same reason the
+	// live consumer binds it (sessioncontroller.go): the exclusion is a property
+	// of the CONVERSATION CHOKEPOINT, not of the consumer that happens to be
+	// driving it. A replay consumer without the ledger runs the whole curation
+	// block with withholdKeepAlive silently a no-op, so every ping the live push
+	// withheld comes back rendered as though the user had typed it — precisely
+	// the divergence between a live push and a replay three days later that a
+	// durable ledger exists to prevent.
+	cons.keepAliveWindows = m.cfg.KeepAliveWindows
 	return cons
 }
