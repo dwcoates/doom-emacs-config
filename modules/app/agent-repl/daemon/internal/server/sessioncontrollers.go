@@ -1036,8 +1036,9 @@ func (r *RegistryRegistrar) LastTurnEndOf(sessionID string) (int64, bool) {
 // controller's ledger interface.
 //
 // The adapter exists so the controller does not depend on the store's row
-// shape: the exclusion needs three facts and one question, and stating exactly
-// that keeps a harness able to supply them without a database.
+// shape: the exclusion needs three facts and two questions — one by identity,
+// one by instant — and stating exactly that keeps a harness able to supply them
+// without a database.
 type KeepAliveWindowStore struct{ Windows *statedb.KeepAliveWindows }
 
 func (s KeepAliveWindowStore) Open(w sessioncontroller.KeepAliveWindowRecord) error {
@@ -1052,6 +1053,10 @@ func (s KeepAliveWindowStore) Close(turnID string, endedAtMs int64) error {
 
 func (s KeepAliveWindowStore) Covers(workspace string, tsMs int64) (bool, error) {
 	return s.Windows.Covers(workspace, tsMs)
+}
+
+func (s KeepAliveWindowStore) HasTurn(workspace, turnID string) (bool, error) {
+	return s.Windows.HasTurn(workspace, turnID)
 }
 
 // PushForwarder is the late-bound bridge from the session controller's per-session sinks to

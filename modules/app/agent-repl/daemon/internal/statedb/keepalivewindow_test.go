@@ -392,6 +392,74 @@ func listOneWindow(t *testing.T, k *KeepAliveWindows, workspace string) KeepAliv
 	return got[0]
 }
 
+// IDENTITY IS ANSWERED OFF THE PRIMARY KEY, so it holds under any clock. An
+// item carrying a ping's request id belongs to that ping whether or not the
+// window's interval agrees — which is why the exclusion asks this question
+// first.
+func TestKeepAliveWindowHasTurnFindsAnOpenWindowByItsID(t *testing.T) {
+	// Arrange — an OPEN window whose start is far beyond anything the vendor
+	// would stamp: no interval comparison could place an item inside it.
+	k := newKeepAliveWindows(t)
+	if err := k.Open(KeepAliveWindow{TurnID: "ka_1", Workspace: "/ws", StartedAtMs: 9_000_000_000_000}); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// Act.
+	got, err := k.HasTurn("/ws", "ka_1")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("HasTurn: %v", err)
+	}
+	if !got {
+		t.Fatal("HasTurn = false; the ping's own turn id names its own window row")
+	}
+}
+
+// A PING ON ONE WORKSPACE SAYS NOTHING ABOUT ANOTHER. The scoping is Covers's,
+// applied to the same question by identity, so the two cannot disagree about
+// which workspace a window belongs to.
+func TestKeepAliveWindowHasTurnIsScopedToItsWorkspace(t *testing.T) {
+	// Arrange.
+	k := newKeepAliveWindows(t)
+	if err := k.Open(KeepAliveWindow{TurnID: "ka_1", Workspace: "/ws", StartedAtMs: 1_000}); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// Act.
+	got, err := k.HasTurn("/other", "ka_1")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("HasTurn: %v", err)
+	}
+	if got {
+		t.Fatal("HasTurn = true for a different workspace; a ping's window must not exclude another workspace's items")
+	}
+}
+
+// AN UNKNOWN TURN ID IS A REAL TURN. The exclusion shows what it cannot prove
+// belongs to a ping, so a miss has to be a clean false rather than an error or
+// a guess.
+func TestKeepAliveWindowHasTurnMissesAnUnknownID(t *testing.T) {
+	// Arrange.
+	k := newKeepAliveWindows(t)
+	if err := k.Open(KeepAliveWindow{TurnID: "ka_1", Workspace: "/ws", StartedAtMs: 1_000}); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// Act.
+	got, err := k.HasTurn("/ws", "req_user")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("HasTurn: %v", err)
+	}
+	if got {
+		t.Fatal("HasTurn = true for a turn the ledger never opened")
+	}
+}
+
 // A CLOSE THAT WOULD INVERT THE INTERVAL IS REFUSED BY NAME. An end below its
 // own start can only come from two clocks disagreeing, and the row it would
 // write covers nothing at all — the ping stops being excluded by the very act

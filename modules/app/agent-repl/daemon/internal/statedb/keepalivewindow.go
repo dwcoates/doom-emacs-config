@@ -14,13 +14,19 @@ import (
 // belongs to a ping — and that decision must come out the same way on a live
 // push and on a replay three days later.
 //
-// WHY IT IS KEYED ON TIME RATHER THAN ON IDENTITY. File-plane conversation
-// items carry NO prompt origin and NO turn id. The origin lives on the control
-// frame the daemon sent, not on the transcript records the vendor wrote back,
-// so there is nothing on the item itself to match a ping against. What every
-// item does carry is its own instant — and a ping occupies a closed interval of
-// wall-clock time on exactly one workspace. Placing an item in that interval is
-// therefore decidable from the item alone, which is what Covers answers.
+// IDENTITY FIRST, TIME ONLY AS THE FALLBACK. A stream-plane conversation item
+// carries the request id the daemon submitted under, and a ping's request id IS
+// its turn id — this table's own primary key. So for every item that carries an
+// id the exclusion is a KEY LOOKUP against the row, and it answers the same way
+// whatever either clock says. That is what HasTurn is for.
+//
+// FILE-PLANE items are the ones with nothing to match: transcript records the
+// vendor wrote back carry no prompt origin and no request id (the sidecar's
+// file-plane events leave request_id empty), so the origin lives only on the
+// control frame the daemon sent. What such an item does carry is its own
+// instant — and a ping occupies a closed interval of wall-clock time on exactly
+// one workspace. Placing an item in that interval is decidable from the item
+// alone, which is what Covers answers.
 //
 // THE INTERVAL'S TWO BOUNDS MUST COME FROM THE CLOCK THAT STAMPED THE ITEMS.
 // Item timestamps are VENDOR-clocked, so a bound taken from the daemon's own
@@ -30,7 +36,7 @@ import (
 // at TurnEnded — with the pre-submit daemon read kept only as a provisional
 // lower bound for a ping that never started.
 //
-// The verdict is re-derivable from the item alone, which is the
+// Either way the verdict is re-derivable from the item alone, which is the
 // property the merge lease's provenance ledger relies on for the same reason: a
 // verdict re-derived from live state would answer differently on a resync than
 // it did on the original push.
@@ -167,6 +173,27 @@ func (k *KeepAliveWindows) Close(turnID string, endedAtMs int64) error {
 			ErrKeepAliveWindowInverted, turnID, startedAtMs, endedAtMs)
 	}
 	return nil
+}
+
+// HasTurn reports whether turnID names one of workspace's keep-alive windows —
+// the IDENTITY question, and the one the exclusion asks first.
+//
+// It is answered off the table's PRIMARY KEY and is therefore independent of
+// every clock in the system: an item carrying a ping's request id belongs to
+// that ping whether or not any interval agrees. Workspace-scoped for Covers's
+// reason — a ping on one workspace says nothing about items on another — even
+// though a minted turn id is unique on its own.
+func (k *KeepAliveWindows) HasTurn(workspace, turnID string) (bool, error) {
+	if workspace == "" || turnID == "" {
+		return false, nil
+	}
+	var n int
+	if err := k.db.QueryRow(
+		`SELECT COUNT(1) FROM keep_alive_window WHERE workspace = ? AND turn_id = ?`,
+		workspace, turnID).Scan(&n); err != nil {
+		return false, fmt.Errorf("statedb: read keep-alive window %q for %q: %w", turnID, workspace, err)
+	}
+	return n > 0, nil
 }
 
 // Covers reports whether tsMs falls inside any of workspace's keep-alive
