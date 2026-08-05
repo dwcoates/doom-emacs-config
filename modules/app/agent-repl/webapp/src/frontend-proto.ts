@@ -2451,6 +2451,7 @@ function decodeTokenUtilization(v: unknown, where: string): TokenUtilization {
   ] as const) {
     if (value === "") throw new Error(`frontend-proto: ${where}.${field} must be nonblank`);
   }
+  if (result.model.trim() === "") throw new Error(`frontend-proto: ${where}.model must be nonblank`);
   if (result.apiRequestId === "") throw new Error(`frontend-proto: ${where}.apiRequestId must be absent or nonblank`);
   switch (actor.case) {
     case "mainAgent":
@@ -2947,11 +2948,12 @@ function decodeSessionTokenUtilization(v: unknown): SessionTokenUtilization {
     if (entry.agent.agentId === "" && entry.agent.parentToolUseId === "") {
       throw new Error(`frontend-proto: SessionTokenUtilization.subagents[${index}] lacks a stable invocation identity`);
     }
+    for (const [modelIndex, model] of entry.models.entries()) {
+      requireModelTokenUtilization(model, `SessionTokenUtilization.subagents[${index}].models[${modelIndex}]`);
+    }
   }
   for (const [index, model] of generated.models.entries()) {
-    if (model.model === "" || model.totals === undefined) {
-      throw new Error(`frontend-proto: SessionTokenUtilization.models[${index}] requires model identity and totals`);
-    }
+    requireModelTokenUtilization(model, `SessionTokenUtilization.models[${index}]`);
   }
   const seenApiMessageIds = new Set<string>();
   for (const [index, response] of generated.ungroupedSubagentResponses.entries()) {
@@ -2961,6 +2963,12 @@ function decodeSessionTokenUtilization(v: unknown): SessionTokenUtilization {
     seenApiMessageIds.add(response.apiMessageId);
   }
   return generated;
+}
+
+function requireModelTokenUtilization(model: GeneratedModelTokenUtilization, where: string): void {
+  if (model.model.trim() === "" || model.totals === undefined) {
+    throw new Error(`frontend-proto: ${where} requires model identity and totals`);
+  }
 }
 
 function decodeSessionResumeFailure(v: unknown, where: string): SessionResumeFailure {

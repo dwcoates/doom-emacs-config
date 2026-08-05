@@ -42,6 +42,19 @@ func invalid(record *frontendv1.TokenUtilization, fieldPath, reason string) erro
 	}
 }
 
+// ValidateModelIdentity is the one model-identity invariant shared by durable
+// ingress and frontend aggregation. It snapshots the rejected evidence so
+// callers can add boundary-specific context without reimplementing validation.
+func ValidateModelIdentity(record *frontendv1.TokenUtilization) error {
+	if record == nil {
+		return fmt.Errorf("token utilization is nil")
+	}
+	if strings.TrimSpace(record.GetModel()) == "" {
+		return invalid(record, "TokenUtilization.model", "blank model")
+	}
+	return nil
+}
+
 // Identity binds a completed vendor response to the one daemon session,
 // vendor conversation, and admitted root turn that owns it.
 type Identity struct {
@@ -143,8 +156,8 @@ func validateCommon(record *frontendv1.TokenUtilization, expected Identity) erro
 	if record.GetApiMessageId() == "" {
 		return fmt.Errorf("token utilization has blank api_message_id")
 	}
-	if strings.TrimSpace(record.GetModel()) == "" {
-		return invalid(record, "TokenUtilization.model", "blank model")
+	if err := ValidateModelIdentity(record); err != nil {
+		return err
 	}
 	if record.GetActor() == nil {
 		return fmt.Errorf("token utilization has no actor")

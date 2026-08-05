@@ -60,6 +60,20 @@ func TestTokenUtilizationRejectsBlankModelBeforeDurableMutation(t *testing.T) {
 	}
 }
 
+func TestTokenUtilizationListRejectsPersistedBlankModel(t *testing.T) {
+	store, _ := openReceipts(t)
+	utilizations, err := NewTokenUtilizations(store.db)
+	if err != nil {
+		t.Fatalf("NewTokenUtilizations: %v", err)
+	}
+	record := completeUtilization("s", "claude", "turn", "legacy-blank")
+	record.Model = ""
+	insertAuditUtilization(t, store.db, record)
+	if _, err := utilizations.List("s"); err == nil || !strings.Contains(err.Error(), "blank model") {
+		t.Fatalf("List error = %v, want persisted blank model rejection", err)
+	}
+}
+
 func TestTokenUtilizationAcceptsExactReplayAndRejectsConflictingDuplicate(t *testing.T) {
 	store, _ := openReceipts(t)
 	utilizations, err := NewTokenUtilizations(store.db)

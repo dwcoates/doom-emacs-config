@@ -61,6 +61,33 @@ func TestValidateRequiresNonblankModelForLiveAndHistoricalEvidence(t *testing.T)
 	}
 }
 
+func TestValidateModelIdentityOwnsTheSharedModelInvariant(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		record  *frontendv1.TokenUtilization
+		wantErr bool
+	}{
+		{name: "nil", wantErr: true},
+		{name: "blank", record: &frontendv1.TokenUtilization{Model: ""}, wantErr: true},
+		{name: "whitespace", record: &frontendv1.TokenUtilization{Model: " \t\n"}, wantErr: true},
+		{name: "vendor model", record: &frontendv1.TokenUtilization{Model: "claude-opus"}},
+		{name: "synthetic model", record: &frontendv1.TokenUtilization{Model: SyntheticModelIdentity}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateModelIdentity(tc.record)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("ValidateModelIdentity() error = %v, wantErr=%t", err, tc.wantErr)
+			}
+			if tc.record != nil && tc.wantErr {
+				var modelError *ValidationError
+				if !errors.As(err, &modelError) || modelError.FieldPath != "TokenUtilization.model" || modelError.Model != tc.record.GetModel() {
+					t.Fatalf("ValidateModelIdentity() error = %#v, want structured model rejection", err)
+				}
+			}
+		})
+	}
+}
+
 func TestValidateRequiresLiveRootTurn(t *testing.T) {
 	record := validationRecord("")
 	if err := Validate(record, Identity{AgentReplSessionID: "session", ClaudeSessionID: "claude"}); err == nil || !strings.Contains(err.Error(), "blank root_turn_id") {
