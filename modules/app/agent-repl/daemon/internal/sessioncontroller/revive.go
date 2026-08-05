@@ -109,8 +109,20 @@ func newReviveCompactRequestID(sessionID string) (string, error) {
 }
 
 // ReviveSession brings a hibernated workspace back under the user's chosen
-// mode. Synchronous, because the ack is the user's only report of whether their
-// session came back.
+// mode.
+//
+// THE ACK IS AT ACCEPTANCE, NOT AT COMPLETION. Returning means "the revival was
+// accepted, the session is up, and the compaction has been submitted" — never
+// "the compaction finished". A compact-first revival's compaction is a model
+// call across the whole conversation and is bounded at compactFirstBound, so
+// acking at completion left the user's ReviveSessionCmd unacked for up to ten
+// minutes on the one path that has something to report.
+//
+// THE GATE'S RELEASE HAS ITS OWN CHANNEL and does not need this one: the
+// hibernation record is what stands the gate up, and clearing it publishes a
+// SessionView the webapp already renders from. The completion wait therefore
+// runs on past this return, holding the revival claim so a second revival is
+// still nacked until the compaction lands or its bound expires.
 func (m *Manager) ReviveSession(ctx context.Context, workspace string, mode ReviveMode) error {
 	if mode == ReviveModeUnset {
 		return fmt.Errorf("session-controller: refusing to revive workspace %q with no revival mode; the choice between compacting and resuming as-is is the user's and the daemon does not have a default for it", workspace)
@@ -126,7 +138,16 @@ func (m *Manager) ReviveSession(ctx context.Context, workspace string, mode Revi
 	if err != nil {
 		return err
 	}
-	defer release()
+	// OWNERSHIP OF THE CLAIM MOVES AT HANDOFF. Every exit taken here releases
+	// it; once the compaction completion wait is detached, that goroutine owns
+	// the release instead, because the claim must outlive this return for as
+	// long as the compaction is pending.
+	detached := false
+	defer func() {
+		if !detached {
+			release()
+		}
+	}()
 	if detail.Cause == "" {
 		// NOT AN ERROR TO REPORT AS A FAILURE, but not silently successful
 		// either: the user acted on a gate that is no longer standing, and
@@ -163,7 +184,14 @@ func (m *Manager) ReviveSession(ctx context.Context, workspace string, mode Revi
 	if err != nil {
 		return err
 	}
-	defer disarm()
+	// The waiter travels with the claim: it is this revival's only route to the
+	// completion signal, so it is retired here on every exit taken before the
+	// handoff and by the completion goroutine afterwards.
+	defer func() {
+		if !detached {
+			disarm()
+		}
+	}()
 	m.logf("session-controller: revive ws=%q session=%s mode=compact_first — the session is up and STILL GATED; submitting %s before any prompt is accepted",
 		workspace, sessionID, compactCommandText)
 
@@ -191,29 +219,82 @@ func (m *Manager) ReviveSession(ctx context.Context, workspace string, mode Revi
 		return fmt.Errorf("session-controller: reviving session %s (ws %q): submitting the compaction: %w", sessionID, workspace, err)
 	}
 
+	// THE HANDOFF. The compaction is submitted, which is everything the ack
+	// reports; the wait for it to land runs on without the command context.
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		m.logf("session-controller: revive COMPACTION WAIT REFUSED ws=%q session=%s — the manager is closing, so nothing will observe the compaction; the session STAYS GATED and can be revived again",
+			workspace, sessionID)
+		return fmt.Errorf("session-controller: reviving session %s (ws %q): the manager is closing; the session remains hibernated and can be revived again", sessionID, workspace)
+	}
+	// Registered with the same WaitGroup Close joins, so the wait cannot
+	// outlive the manager and race whatever tears down after it.
+	m.exits.Add(1)
+	detached = true
+	m.mu.Unlock()
+	go m.awaitReviveCompaction(workspace, sessionID, compacted, disarm, release)
+
+	m.logf("session-controller: revive ACCEPTED ws=%q session=%s mode=compact_first — %s is submitted and the session STAYS GATED until it lands",
+		workspace, sessionID, compactCommandText)
+	return nil
+}
+
+// awaitReviveCompaction is the compact-first revival's completion half, run
+// detached from the command context that accepted the revival.
+//
+// IT OWNS THE CLAIM AND THE WAITER for as long as the compaction is pending.
+// Releasing them at the ack instead would let a second ReviveSessionCmd arm a
+// second waiter over this one's, which is precisely the strand
+// armCompactionWait refuses.
+//
+// ITS BOUND IS THE DAEMON'S, NOT A CALLER'S. compactFirstBound and the root
+// context are what end the wait, so a webapp that disconnected the instant it
+// got its ack does not abandon a compaction the session is still gated on.
+//
+// EVERY FAILING EXIT LEAVES THE RECORD UNTOUCHED. The clear is reached only on
+// the completion signal, which is what makes "a failed compaction leaves the
+// session gated" structural rather than a promise each error path has to keep.
+func (m *Manager) awaitReviveCompaction(workspace, sessionID string, compacted <-chan struct{}, disarm, release func()) {
+	defer m.exits.Done()
+	defer release()
+	defer disarm()
+	bound := m.reviveCompactBound()
 	select {
 	case <-compacted:
 		m.logf("session-controller: revive compaction LANDED ws=%q session=%s — releasing the gate", workspace, sessionID)
-	case <-ctx.Done():
+	case <-m.rootCtx.Done():
 		m.logf("session-controller: revive compaction ABANDONED ws=%q session=%s error=%v — the session STAYS GATED",
-			workspace, sessionID, ctx.Err())
-		return fmt.Errorf("session-controller: reviving session %s (ws %q): waiting for the compaction: %w", sessionID, workspace, ctx.Err())
-	case <-time.After(compactFirstBound):
+			workspace, sessionID, m.rootCtx.Err())
+		return
+	case <-time.After(bound):
 		m.logf("session-controller: revive compaction TIMED OUT ws=%q session=%s bound=%s — the session STAYS GATED rather than limping into accepting prompts on a conversation that was never compacted",
-			workspace, sessionID, compactFirstBound)
-		return fmt.Errorf("session-controller: reviving session %s (ws %q): the compaction did not complete within %s; the session remains hibernated and can be revived again",
-			sessionID, workspace, compactFirstBound)
+			workspace, sessionID, bound)
+		return
 	}
 
-	// THE CLEAR IS THE LAST STEP, reached only on the completion signal. Every
-	// other exit above returns with the record untouched, which is what makes
-	// "a failed compaction leaves the session gated" structural rather than a
-	// promise each error path has to keep.
+	// THE CLEAR IS THE LAST STEP, reached only on the completion signal. Its
+	// own failure is logged by clearHibernation and leaves the gate standing:
+	// there is no caller left to return it to, and a gate that could not be
+	// retired is the safe direction.
 	if err := m.clearHibernation(workspace, sessionID); err != nil {
-		return err
+		m.logf("session-controller: revive GATE RELEASE FAILED ws=%q session=%s error=%v — the compaction landed but the record still claims a sleep; the session STAYS GATED and can be revived again",
+			workspace, sessionID, err)
+		return
 	}
 	m.logf("session-controller: revive COMPLETE ws=%q session=%s mode=compact_first", workspace, sessionID)
-	return nil
+}
+
+// reviveCompactBound is how long the detached completion wait allows the
+// compaction. Production always uses compactFirstBound; only a test assigns an
+// override, so the timeout branch can be driven without a ten-minute wait.
+func (m *Manager) reviveCompactBound() time.Duration {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.reviveCompactBoundOverride > 0 {
+		return m.reviveCompactBoundOverride
+	}
+	return compactFirstBound
 }
 
 // claimRevival takes the exclusive per-workspace revival claim and reports the
