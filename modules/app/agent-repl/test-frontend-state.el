@@ -1345,15 +1345,24 @@ first."
     ;; Assert — the path is not a workspace.
     (should-not (agent-repl--ws-get "/Users/x/.config/doom" :pushed-render-state))))
 
-(ert-deftest agent-repl-test-inbound-frame-resolves-a-tombstoned-path ()
-  "A closed workspace path resolves to its registered historical owner."
+(ert-deftest agent-repl-test-tombstoned-path-stays-out-of-the-live-resolver ()
+  "A tombstoned path is invisible to shared live-only resolver callers."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "closed" :project-dir "/Users/x/closed")
     (agent-repl--ws-put "closed" :nuked-at (current-time))
-    (agent-repl-test--apply-workspace-state
-     '(:workspace "/Users/x/closed" :state "RENDER_STATE_HIBERNATED"))
-    (should (eq (agent-repl--ws-get "closed" :pushed-render-state)
-                :hibernated))))
+    (should-not (agent-repl--frontend-ws-name "/Users/x/closed"))))
+
+(ert-deftest agent-repl-test-tombstoned-workspace-state-retains-without-runtime-mutation ()
+  "A tombstoned WorkspaceState is retained without writing runtime keys."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--frontend-workspace-state-views (make-hash-table :test 'equal)))
+      (agent-repl--ws-put "closed" :project-dir "/Users/x/closed")
+      (agent-repl--ws-put "closed" :nuked-at (current-time))
+      (should-not
+       (agent-repl-test--apply-workspace-state
+        '(:workspace "/Users/x/closed" :state "RENDER_STATE_HIBERNATED")))
+      (should (gethash "/Users/x/closed" agent-repl--frontend-workspace-state-views))
+      (should-not (agent-repl--ws-get "closed" :pushed-render-state)))))
 
 (ert-deftest agent-repl-test-live-frame-for-an-unowned-cwd-rejects ()
   "A live frame for an unowned cwd signals and never creates a workspace."

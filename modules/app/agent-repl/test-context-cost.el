@@ -112,6 +112,16 @@ presence IS the alarm's lifetime — there is no local timer to expire it."
           (should (string-match-p "session-id=\\\"s_1\\\"" (cadr entry))))
         (should (zerop (hash-table-count agent-repl--context-cost-alerts)))))))
 
+(ert-deftest agent-repl-test-context-cost-skips-a-tombstoned-workspace ()
+  "A tombstoned ProgressView records no alert and does not reject."
+  (agent-repl-test--with-cost-state
+    (agent-repl--ws-put "closed" :project-dir "/closed")
+    (agent-repl--ws-put "closed" :nuked-at (current-time))
+    (should-not
+     (agent-repl--context-cost-apply
+      (agent-repl-test--cost-progress "/closed" (agent-repl-test--cost-alert))))
+    (should (zerop (hash-table-count agent-repl--context-cost-alerts)))))
+
 (ert-deftest agent-repl-test-context-cost-apply-rejects-a-missing-token-count ()
   "An alert with no uncached count signals rather than rendering a placeholder.
 A guessed count is a fabricated reading of a number the daemon either
