@@ -510,10 +510,11 @@ func TestMarshalConversationDeltaLowerCamelCase(t *testing.T) {
 
 func TestMarshalTypingDeltaLowerCamelCase(t *testing.T) {
 	// Arrange: a TypingDelta embedding a ContentDelta, so the embedded
-	// block_index serializes as delta.blockIndex.
+	// block_index and tool_use_id serialize as delta.blockIndex and
+	// delta.toolUseId.
 	frame := TypingDeltaFrame(&frontendv1.TypingDelta{
 		Workspace: "ws", SessionId: "s1",
-		Delta: &corev1.ContentDelta{Uuid: "u1", BlockIndex: 2, Delta: &corev1.ContentDelta_Text{Text: "abc"}},
+		Delta: &corev1.ContentDelta{Uuid: "u1", BlockIndex: 2, ToolUseId: proto.String("toolu_01"), Delta: &corev1.ContentDelta_InputJson{InputJson: `{"command":"pwd"}`}},
 	})
 
 	// Act.
@@ -523,14 +524,51 @@ func TestMarshalTypingDeltaLowerCamelCase(t *testing.T) {
 	}
 	out := string(b)
 
-	// Assert: the frame arm and the embedded delta's blockIndex are lowerCamelCase.
-	for _, want := range []string{`"typingDelta"`, `"delta"`, `"blockIndex"`} {
+	// Assert: the frame arm and the embedded delta identity are lowerCamelCase.
+	for _, want := range []string{`"typingDelta"`, `"delta"`, `"blockIndex"`, `"toolUseId"`} {
 		if !strings.Contains(out, want) {
 			t.Errorf("serialized frame missing %s\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, `"block_index"`) {
-		t.Errorf("serialized frame has snake_case \"block_index\"\n%s", out)
+	for _, notWant := range []string{`"block_index"`, `"tool_use_id"`} {
+		if strings.Contains(out, notWant) {
+			t.Errorf("serialized frame has snake_case %s\n%s", notWant, out)
+		}
+	}
+}
+
+func TestContentDeltaToolUseIDIsAdditiveAndPresenceAware(t *testing.T) {
+	// Arrange: this byte sequence represents the prior ContentDelta layout
+	// (uuid = 1 and text = 3), before field 8 existed on the wire.
+	legacy := []byte{0x0a, 0x02, 'u', '1', 0x1a, 0x03, 'a', 'b', 'c'}
+	var decoded corev1.ContentDelta
+
+	// Act: the current reader must continue accepting a delta emitted by the
+	// prior schema without manufacturing tool identity.
+	if err := proto.Unmarshal(legacy, &decoded); err != nil {
+		t.Fatalf("unmarshal legacy ContentDelta: %v", err)
+	}
+	field := decoded.ProtoReflect().Descriptor().Fields().ByName("tool_use_id")
+
+	// Assert: the new identity occupies the next additive field number and an
+	// older delta leaves its optional presence unset.
+	if field == nil {
+		t.Fatal("ContentDelta descriptor missing tool_use_id")
+	}
+	if got := field.Number(); got != 8 {
+		t.Errorf("tool_use_id field number = %d, want 8", got)
+	}
+	if decoded.ProtoReflect().Has(field) {
+		t.Error("legacy ContentDelta unexpectedly has tool_use_id presence")
+	}
+	if got := decoded.GetToolUseId(); got != "" {
+		t.Errorf("legacy ContentDelta tool_use_id = %q, want empty", got)
+	}
+	if got := decoded.GetUuid(); got != "u1" {
+		t.Errorf("legacy ContentDelta uuid = %q, want u1", got)
+	}
+	if got := decoded.GetText(); got != "abc" {
+		t.Errorf("legacy ContentDelta text = %q, want abc", got)
 	}
 }
 

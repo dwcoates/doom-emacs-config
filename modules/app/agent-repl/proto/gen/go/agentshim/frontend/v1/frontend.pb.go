@@ -9,13 +9,16 @@
 // - WorkspaceState is THE resolved render-state; frontends map .state to
 //   their display vocabulary and never re-derive from raw facts.
 // - TypingDelta is ephemeral (embeds core.ContentDelta); a preview is replaced
-//   when the ConversationDelta carrying the complete message arrives. The two
-//   sides share NO id and cannot: ContentDelta.uuid is the ANTHROPIC message
-//   id (stamped at the shim, the only identity a message shares with its own
-//   stream), while ConversationItem.uuid is the record ENVELOPE's id, which
-//   does not exist until the message has finished being emitted. Consumers
-//   therefore MATCH a finished block to its preview (same message, same kind)
-//   rather than looking it up, and dedup records on the envelope uuid.
+//   when the ConversationDelta carrying the complete message arrives.
+//   ContentDelta.uuid is the ANTHROPIC message id (stamped at the shim, the
+//   only identity a message shares with its own stream), while
+//   ConversationItem.uuid is the record ENVELOPE's id, which does not exist
+//   until the message has finished being emitted. Text, thinking, and signature
+//   previews therefore MATCH a finished block by message and kind rather than
+//   looking up an envelope record, and consumers dedup records on that envelope
+//   uuid. Tool-input previews additionally carry ContentDelta.tool_use_id and
+//   reconcile with the completed tool block by that exact stable identity,
+//   never by ambient open-tool state or delivery order.
 //   In particular ContentDelta.block_index is the TRUE API block ordinal,
 //   while an assistant record's own `content` array holds exactly one block
 //   (the SDK emits one record per block) — so that array index is always 0 and
