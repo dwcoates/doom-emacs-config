@@ -205,3 +205,13 @@ Only the first two are affirmative evidence about the path's outcome.
 - Never substitute message-text parsing for available structured fields.
 - Never interpret silence before checking readiness, identity, time bounds,
   selected runtime, and the observability audit.
+
+## Shim entrypoint fatal query
+
+`shim.main.fatal` is an operation-only query boundary. It contains only
+unrecoverable shim entrypoint termination records at `error` level. Each
+record carries the classified cause and exit outcome in `context`.
+
+Do not query shim entrypoint failures by matching a `message` prefix such as
+`fatal:`. Normal startup, lock, signal, and shutdown records use
+`shim.main.lifecycle` instead.
