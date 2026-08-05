@@ -643,6 +643,20 @@ type pendingResync struct {
 	// conversation looks like after the reattach, which after a rotation is a
 	// different seq space entirely.
 	fromSeq uint64
+	// sessionID and generationID bind the deferred re-pull to the same
+	// authoritative workspace snapshot that admitted the original command.
+	// A reconnect or replacement changes that snapshot, so it must not replay
+	// the old client's request into the new controller generation.
+	sessionID    string
+	generationID string
+}
+
+// WorkspaceStateReader exposes the authoritative workspace identity carried
+// by frontend snapshots.  The durable-history branch has no in-memory session
+// controller, so this is the only source that can validate a resync before it
+// opens the store-backed replay.
+type WorkspaceStateReader interface {
+	Current(workspace string) (*frontendv1.WorkspaceState, bool, error)
 }
 
 type fileDiagnosticSink struct {
@@ -1495,14 +1509,77 @@ func (m *Manager) AnswerPermission(_ context.Context, workspace, permissionReque
 // is what left a webview reloaded after a daemon bounce showing a correct
 // footer over an empty feed: the conversation was in the store the whole time,
 // and every read path required a shim.
-func (m *Manager) Resync(workspace string, fromSeq uint64) error {
-	d, err := m.existing(workspace)
-	if errors.Is(err, ErrNoLiveSessionController) {
-		return m.resyncFromDurableHistory(workspace, fromSeq)
+// ResyncForGeneration admits a frontend replay only when the identity copied
+// from its authoritative WorkspaceState is still current.  The comparison is
+// linearized under the controller lock before ring replay, replay allocation,
+// store reads, or shim reads can begin.  The durable-history branch compares
+// against the SSM snapshot because it deliberately has no live controller.
+func (m *Manager) ResyncForGeneration(workspace, expectedSessionID, expectedGenerationID string, fromSeq uint64) error {
+	m.mu.Lock()
+	d, live := m.byWS[workspace]
+	if live {
+		liveSessionID, liveGenerationID := d.sessionID, d.generationID
+		matches := expectedSessionID == liveSessionID && expectedGenerationID == liveGenerationID
+		m.mu.Unlock()
+		if !matches {
+			return m.rejectSupersededResync(workspace, expectedSessionID, expectedGenerationID, liveSessionID, liveGenerationID, fromSeq, "live_controller")
+		}
+		m.logf("session-controller: resync eligibility ACCEPTED ws=%q request_session=%q request_generation=%q live_session=%q live_generation=%q from_seq=%d replay_source=%q decision=current_live_controller",
+			workspace, expectedSessionID, expectedGenerationID, liveSessionID, liveGenerationID, fromSeq, "live_controller")
+		return m.resyncFromController(d, fromSeq, expectedSessionID, expectedGenerationID)
 	}
-	if err != nil {
+
+	reader, ok := m.cfg.SSM.(WorkspaceStateReader)
+	if !ok {
+		m.mu.Unlock()
+		err := fmt.Errorf("session-controller: resync ws=%q has no workspace-state reader for durable-history identity validation", workspace)
+		m.logf("session-controller: resync eligibility REJECTED ws=%q request_session=%q request_generation=%q live_session=%q live_generation=%q from_seq=%d replay_source=%q decision=missing_workspace_state_reader error=%v",
+			workspace, expectedSessionID, expectedGenerationID, "", "", fromSeq, "durable_history", err)
 		return err
 	}
+	state, found, err := reader.Current(workspace)
+	if err != nil {
+		m.mu.Unlock()
+		m.logf("session-controller: resync eligibility FAILED ws=%q request_session=%q request_generation=%q from_seq=%d replay_source=%q decision=workspace_state_read_failed error=%v",
+			workspace, expectedSessionID, expectedGenerationID, fromSeq, "durable_history", err)
+		return fmt.Errorf("session-controller: read authoritative workspace state for durable resync ws %q: %w", workspace, err)
+	}
+	if !found || state == nil {
+		m.mu.Unlock()
+		err := fmt.Errorf("session-controller: no authoritative workspace state for durable resync ws %q", workspace)
+		m.logf("session-controller: resync eligibility REJECTED ws=%q request_session=%q request_generation=%q live_session=%q live_generation=%q from_seq=%d replay_source=%q decision=missing_workspace_state error=%v",
+			workspace, expectedSessionID, expectedGenerationID, "", "", fromSeq, "durable_history", err)
+		return err
+	}
+	liveSessionID, liveGenerationID := state.GetSessionId(), state.GetControllerGenerationId()
+	if expectedSessionID != liveSessionID || expectedGenerationID != liveGenerationID {
+		m.mu.Unlock()
+		return m.rejectSupersededResync(workspace, expectedSessionID, expectedGenerationID, liveSessionID, liveGenerationID, fromSeq, "durable_history")
+	}
+	m.logf("session-controller: resync eligibility ACCEPTED ws=%q request_session=%q request_generation=%q live_session=%q live_generation=%q from_seq=%d replay_source=%q decision=current_durable_snapshot",
+		workspace, expectedSessionID, expectedGenerationID, liveSessionID, liveGenerationID, fromSeq, "durable_history")
+	// Keep m.mu through the bounded durable replay.  bringUp installs the next
+	// controller under this same mutex, so no controller generation can appear
+	// after the no-controller snapshot check and before the store replay ends.
+	// resyncFromDurableHistory never re-enters m.mu; preserve that lock-order
+	// invariant whenever its implementation changes.
+	err = m.resyncFromDurableHistory(workspace, fromSeq)
+	m.mu.Unlock()
+	return err
+}
+
+func (m *Manager) rejectSupersededResync(workspace, requestSessionID, requestGenerationID, liveSessionID, liveGenerationID string, fromSeq uint64, replaySource string) error {
+	err := fmt.Errorf("%w: resync ws=%q request_session=%q request_generation=%q live_session=%q live_generation=%q from_seq=%d replay_source=%q",
+		errclass.ErrSessionSuperseded, workspace, requestSessionID, requestGenerationID, liveSessionID, liveGenerationID, fromSeq, replaySource)
+	m.logf("session-controller: resync eligibility REJECTED ws=%q request_session=%q request_generation=%q live_session=%q live_generation=%q from_seq=%d replay_source=%q decision=superseded error=%v",
+		workspace, requestSessionID, requestGenerationID, liveSessionID, liveGenerationID, fromSeq, replaySource, err)
+	return err
+}
+
+// resyncFromController performs the replay only after its caller selected the
+// exact current controller generation.  It deliberately owns no eligibility
+// lookup, which keeps every store or shim read below that admission boundary.
+func (m *Manager) resyncFromController(d *sessionController, fromSeq uint64, expectedSessionID, expectedGenerationID string) error {
 	replayFrom := m.replayFloor(d, fromSeq)
 	ringFloor, haveRingFloor := d.consumer.resync(replayFrom)
 	if !haveRingFloor {
@@ -1513,10 +1590,10 @@ func (m *Manager) Resync(workspace string, fromSeq uint64) error {
 		return nil // the ring covered the whole request
 	}
 	m.logf("session-controller: resync ws=%q replay_from=%d is below the retained floor %d; re-pulling the gap from the store",
-		workspace, replayFrom, ringFloor)
-	err = m.startRepull(d, exclusiveLowerBound(replayFrom), ringFloor)
+		d.workspace, replayFrom, ringFloor)
+	err := m.startRepull(d, exclusiveLowerBound(replayFrom), ringFloor)
 	if errors.Is(err, shimclient.ErrReplayLinkLost) {
-		return m.rearmResyncAfterReattach(d, fromSeq, err)
+		return m.rearmResyncAfterReattach(d, fromSeq, expectedSessionID, expectedGenerationID, err)
 	}
 	if err == nil {
 		m.noteResyncSettled(d)
@@ -1546,7 +1623,7 @@ func (m *Manager) Resync(workspace string, fromSeq uint64) error {
 // retries is what a fallback looks like. The budget refreshes when a resync
 // completes, and when a rotation happens (which is itself a legitimate reason
 // for the second interruption).
-func (m *Manager) rearmResyncAfterReattach(d *sessionController, fromSeq uint64, cause error) error {
+func (m *Manager) rearmResyncAfterReattach(d *sessionController, fromSeq uint64, expectedSessionID, expectedGenerationID string, cause error) error {
 	m.mu.Lock()
 	if closed, retried := m.closed, d.resyncRetried; closed || retried {
 		m.mu.Unlock()
@@ -1555,7 +1632,7 @@ func (m *Manager) rearmResyncAfterReattach(d *sessionController, fromSeq uint64,
 		return cause
 	}
 	d.resyncRetried = true
-	d.pendingResync = &pendingResync{fromSeq: fromSeq}
+	d.pendingResync = &pendingResync{fromSeq: fromSeq, sessionID: expectedSessionID, generationID: expectedGenerationID}
 	m.mu.Unlock()
 	m.logf("session-controller: resync ws=%q session=%s from_seq=%d was INTERRUPTED by a shim-link bounce and is RE-ARMED — it will be served again as soon as the shim reattaches; this is not a truncation and no failure card is pushed: %v",
 		d.workspace, d.sessionID, fromSeq, cause)
@@ -1591,7 +1668,9 @@ func (m *Manager) runPendingResync(workspace, sessionID string) {
 		defer m.exits.Done()
 		m.logf("session-controller: re-serving the resync a shim-link bounce interrupted ws=%q session=%s from_seq=%d (the shim has reattached)",
 			workspace, sessionID, pending.fromSeq)
-		if err := m.Resync(workspace, pending.fromSeq); err != nil {
+		var err error
+		err = m.ResyncForGeneration(workspace, pending.sessionID, pending.generationID, pending.fromSeq)
+		if err != nil {
 			m.logf("session-controller: the re-armed resync ws=%q session=%s from_seq=%d FAILED: %v",
 				workspace, sessionID, pending.fromSeq, err)
 		}

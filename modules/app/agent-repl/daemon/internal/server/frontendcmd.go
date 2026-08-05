@@ -235,7 +235,7 @@ type WorkspaceHostWorkSnapshot struct {
 // frontend is never served history one of those already discarded. Satisfied by
 // *sessioncontroller.Manager.
 type Resyncer interface {
-	Resync(workspace string, fromSeq uint64) error
+	ResyncForGeneration(workspace, expectedSessionID, expectedGenerationID string, fromSeq uint64) error
 }
 
 // SessionCreateDeleter is the daemon-core session-lifecycle surface behind the
@@ -990,14 +990,14 @@ func (h *commandHandler) OpenWorkspace(ctx context.Context, workspace, requestID
 // A nil resyncer is a construction error, not a degraded mode: the command
 // exists, so something must answer it.
 func (h *commandHandler) Resync(_ context.Context, workspace, requestID string, cmd *frontendv1.ResyncCmd) error {
-	h.logf("frontend cmd: resync ws=%s request_id=%s from_seq=%d", workspace, requestID, cmd.GetFromSeq())
+	h.logf("frontend cmd: resync ws=%s request_id=%s session=%s generation=%s from_seq=%d", workspace, requestID, cmd.GetSessionId(), cmd.GetControllerGenerationId(), cmd.GetFromSeq())
 	if h.resyncer == nil {
-		h.logf("frontend cmd: resync ws=%s request_id=%s from_seq=%d FAILED — no resyncer is wired, so the conversation replay cannot be served at all (the snapshot half alone would render an empty feed)",
-			workspace, requestID, cmd.GetFromSeq())
+		h.logf("frontend cmd: resync ws=%s request_id=%s session=%s generation=%s from_seq=%d FAILED — no resyncer is wired, so the conversation replay cannot be served at all (the snapshot half alone would render an empty feed)",
+			workspace, requestID, cmd.GetSessionId(), cmd.GetControllerGenerationId(), cmd.GetFromSeq())
 		return fmt.Errorf("frontend cmd: resync ws=%s request_id=%s: no resyncer wired for the conversation replay", workspace, requestID)
 	}
-	if err := h.resyncer.Resync(workspace, cmd.GetFromSeq()); err != nil {
-		h.logf("frontend cmd: resync ws=%s request_id=%s from_seq=%d FAILED: %v", workspace, requestID, cmd.GetFromSeq(), err)
+	if err := h.resyncer.ResyncForGeneration(workspace, cmd.GetSessionId(), cmd.GetControllerGenerationId(), cmd.GetFromSeq()); err != nil {
+		h.logf("frontend cmd: resync ws=%s request_id=%s session=%s generation=%s from_seq=%d FAILED: %v", workspace, requestID, cmd.GetSessionId(), cmd.GetControllerGenerationId(), cmd.GetFromSeq(), err)
 		return err
 	}
 	return nil
