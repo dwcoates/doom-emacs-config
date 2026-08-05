@@ -151,6 +151,22 @@ type harness struct {
 	spawner    *fakeSpawner
 	ssm        *ssm.Manager
 	fe         *frontend.Server
+	// legacyTurnEnds is the durable instant the keep-alive policy measures a
+	// record with no last-turn-end from. Zero (the default) reports NO dated
+	// fact, which is the same answer an unwired stamper gives, so a test that
+	// does not set it sees the staleness check decline exactly as before.
+	legacyTurnEnds *fakeLegacyTurnEnds
+}
+
+// fakeLegacyTurnEnds is the harness's sessioncontroller.LegacyTurnEndStamper.
+// A zero atMs is "this session has no dated activity to measure", never a
+// guess at now().
+type fakeLegacyTurnEnds struct {
+	atMs int64
+}
+
+func (f *fakeLegacyTurnEnds) StampLegacyTurnEnd(string, string) (int64, bool) {
+	return f.atMs, f.atMs > 0
 }
 
 func newHarness(t *testing.T) *harness {
@@ -177,6 +193,7 @@ func newHarnessWith(t *testing.T, extra Config) *harness {
 	t.Cleanup(func() { _ = mgr.Close() })
 
 	spawner := &fakeSpawner{}
+	legacyTurnEnds := &fakeLegacyTurnEnds{}
 	seqStore := NewRegistrySeqStore(reg, logf)
 	controller, err := sessioncontroller.New(sessioncontroller.Config{
 		Push:              &PushForwarder{Logf: logf},
@@ -192,7 +209,11 @@ func newHarnessWith(t *testing.T, extra Config) *harness {
 		// to sleep a session it cannot record. Wired here for the same reason
 		// main wires it: an unrecorded stop is a session the next daemon
 		// revives implicitly.
-		Hibernations:    &RegistryRegistrar{Reg: reg, Logf: logf},
+		Hibernations: &RegistryRegistrar{Reg: reg, Logf: logf},
+		// The staleness check at acceptance and bring-up measures from this
+		// when a record carries no last-turn-end of its own, exactly as main
+		// wires server.stampLegacyTurnEnd.
+		LegacyTurnEnds:  legacyTurnEnds,
 		DaemonVersion:   "test",
 		ProtocolVersion: "1",
 		Logf:            logf,
@@ -227,7 +248,7 @@ func newHarnessWith(t *testing.T, extra Config) *harness {
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 
-	return &harness{ts: ts, srv: srv, reg: reg, controller: controller, spawner: spawner, ssm: mgr, fe: fe}
+	return &harness{ts: ts, srv: srv, reg: reg, controller: controller, spawner: spawner, ssm: mgr, fe: fe, legacyTurnEnds: legacyTurnEnds}
 }
 
 // createSession brings a session up through the create CORE, the same entry
@@ -409,6 +430,46 @@ func TestCreateSessionEagerlyBringsUpTheShim(t *testing.T) {
 	// Assert — the session controller's spawner was asked to ensure exactly this session.
 	if !slices.Contains(h.spawner.ensuredIDs(), id) {
 		t.Fatalf("spawner ensured %v, want it to include %s", h.spawner.ensuredIDs(), id)
+	}
+}
+
+// TestCreateSessionPushesTheHibernatedSessionViewWhenBringUpMeetsTheRevivalGate
+// is the create half of the revival gate: bring-up finds the workspace's
+// durable activity past the keep-alive policy's idle cutoff and hibernates the
+// record instead of spawning, and the create still delivers the SessionView the
+// gate is rendered from. Without that push the client waits for a SessionView
+// that never comes and times out on a session that was created successfully.
+func TestCreateSessionPushesTheHibernatedSessionViewWhenBringUpMeetsTheRevivalGate(t *testing.T) {
+	// Arrange — a workspace that HAS been used (an earlier session left it a
+	// settled, resolved state, which is what a restore finds) and whose only
+	// dated activity is a day old: well past the six-hour idle cutoff the
+	// default keep-alive policy carries.
+	h := newHarness(t)
+	createSession(t, h, `{"cwd":"/w"}`)
+	markControllerOperational(t, h, "/w")
+	h.legacyTurnEnds.atMs = time.Now().Add(-24 * time.Hour).UnixMilli()
+	r := frontendConn(t, h)
+
+	// Act.
+	id, err := createSessionErr(t, h, `{"cwd":"/w"}`)
+
+	// Assert — the record is durably asleep and its SessionView carries both
+	// the flag and the account the gate names its cause from.
+	if !errors.Is(err, errclass.ErrSessionHibernated) {
+		t.Fatalf("CreateSession error = %v, want the revival gate's sentinel", err)
+	}
+	var view *frontendv1.SessionView
+	for range 8 {
+		if v := nextSessionView(t, r); v.GetSessionId() == id {
+			view = v
+			break
+		}
+	}
+	if view == nil {
+		t.Fatalf("no SessionView pushed for the hibernated session %s", id)
+	}
+	if !view.GetHibernated() || view.GetHibernation().GetIdleCutoff() == nil {
+		t.Fatalf("SessionView = %+v, want hibernated with the idle-cutoff account", view)
 	}
 }
 
