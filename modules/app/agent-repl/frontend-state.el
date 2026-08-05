@@ -40,6 +40,7 @@
 (declare-function agent-repl--latch-and-maybe-fire-loaded "sentinel" (ws key &optional marker))
 (declare-function agent-repl--ws-dir-owner "workspace" (dir &optional except))
 (declare-function agent-repl--ws-registered-dir-owner "workspace" (dir &optional except))
+(declare-function agent-repl--ws-tombstoned-p "workspace" (ws))
 (declare-function agent-repl--ws-known-p "workspace" (ws))
 (declare-function agent-repl--workspace-create-handle-available
                   "workspace-create-client" (available))
@@ -278,9 +279,9 @@ perspective has not been recreated.")
 ;; So every inbound handler resolves the path to the workspace NAME first.  A
 ;; session-scoped live frame whose path resolves to nothing violates the
 ;; creation handshake: WorkspaceAvailable must materialize the host workspace
-;; before the daemon publishes session state.  Snapshot replay retains unknown
-;; records for restart safety, while this resolver also recognizes tombstoned
-;; workspace paths so closed sessions keep their historical identity.
+;; before the daemon publishes session state.  This resolver remains LIVE-only
+;; because permission and UDS callers must never target a tombstoned workspace.
+;; State handlers classify tombstoned owners separately for retain/drop logic.
 
 (defun agent-repl--frontend-ws-name (workspace)
   "Return the Emacs workspace NAME the daemon's WORKSPACE string refers to.
@@ -290,7 +291,7 @@ known workspace name is returned as-is, so a frame that carries a name
 still works.  Returns nil when nothing owns it — the caller must then drop
 or reject the frame rather than key state under an unresolvable id."
   (when (and workspace (not (string-empty-p workspace)))
-    (let* ((owner (agent-repl--ws-registered-dir-owner workspace))
+    (let* ((owner (agent-repl--ws-dir-owner workspace))
            (known (and (not owner)
                        (agent-repl--ws-known-p workspace)))
            (resolved (or owner (and known workspace))))
@@ -325,6 +326,11 @@ workspace or frontend state."
   (user-error
    "agent-repl frontend: %s arrived before WorkspaceAvailable materialized path %s (job %s session %s)"
    frame path job-id session-id))
+
+(defun agent-repl--frontend-tombstoned-dir-owner (path)
+  "Return PATH's tombstoned workspace owner, or nil for live and unknown paths."
+  (let ((owner (agent-repl--ws-registered-dir-owner path)))
+    (and owner (agent-repl--ws-tombstoned-p owner) owner)))
 
 (defun agent-repl--frontend-int64 (raw)
   "Return protojson int64 field RAW as an Emacs number, or nil.
@@ -542,6 +548,9 @@ Fails loudly on a missing/blank `workspace' (invariant violation)."
              "SessionStatus" diagnostic-workspace t))
            (session-id (plist-get ws-state :sessionId))
            (generation-id (plist-get ws-state :controllerGenerationId))
+           (tombstoned-owner
+            (and (not workspace)
+                 (agent-repl--frontend-tombstoned-dir-owner raw-workspace)))
            (faults
             (agent-repl--frontend-validate-runtime-faults
              diagnostic-workspace (plist-get ws-state :activeFaults)))
@@ -569,6 +578,13 @@ Fails loudly on a missing/blank `workspace' (invariant violation)."
           ;; recursively applying this frame.  Every other unowned frame is
           ;; an impossible pre-WorkspaceAvailable publication.
           (cond
+           (tombstoned-owner
+            (puthash raw-workspace ws-state agent-repl--frontend-workspace-state-views)
+            (agent-repl--log-verbose
+             nil
+             "frontend-apply-workspace-state: retained tombstoned workspace=%s path=%S session-id=%S"
+             tombstoned-owner raw-workspace session-id)
+            nil)
            (agent-repl--frontend-applying-snapshot-state
             (puthash raw-workspace ws-state agent-repl--frontend-workspace-state-views)
             (agent-repl--log-verbose
