@@ -1019,7 +1019,12 @@ func (h *commandHandler) RestartSession(ctx context.Context, workspace, requestI
 		return fmt.Errorf("server: session restart not supported by this daemon")
 	}
 	if err := h.restarts.RestartSession(ctx, workspace); err != nil {
-		return fmt.Errorf("server: restarting the session for workspace %q: %w", workspace, err)
+		// CLASSIFIED, like create and open. A restart that cannot find its
+		// conversation's transcript is a continuity failure, and returning it
+		// raw made it `internal.unclassified`: the daemon knew the exact cause
+		// and the user got an unexplained refusal to open their workspace.
+		return restartResumeEstablishment().classify(
+			fmt.Errorf("server: restarting the session for workspace %q: %w", workspace, err))
 	}
 	h.logf("frontend cmd: restart-session ws=%s request_id=%s COMPLETE", workspace, requestID)
 	return nil
