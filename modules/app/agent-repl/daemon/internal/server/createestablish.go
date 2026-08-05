@@ -23,6 +23,16 @@
 // it never tears down. A session that establishes a moment after its create
 // nacked is a session the frontend will find on its next SessionView, which is
 // strictly better than a create that destroyed its own in-flight work.
+//
+// THE ONE OUTCOME THAT IS NEITHER: a create whose bring-up met the revival gate
+// (errclass.ErrSessionHibernated). The record is registered and durably asleep,
+// no shim was spawned, and there is nothing to establish — so the round ends
+// SUCCESSFULLY with the hibernated SessionView the gate is rendered from,
+// rather than being classified as a resume failure and nacked. That is the same
+// reading WorkspaceOpener.establish and the boot sweep already give the
+// sentinel; the create was the last path that still called an ordinary sleep a
+// continuity error, which is what turned every hibernated restore into a hard
+// createSession failure and a client-side SessionView timeout.
 package server
 
 import (
@@ -61,6 +71,13 @@ type sessionEstablishment struct {
 
 	sessionID string
 	err       error
+	// hibernated reports the ONE bring-up outcome that ends this round
+	// successfully WITHOUT a shim: the revival gate. It is a separate field
+	// from err rather than a nil-error-plus-guess because the two facts a
+	// waiter needs — "the create succeeded" and "there is nothing to drive
+	// yet" — are different, and collapsing them is what made the establishment
+	// probe a hibernated session and nack the create it had just completed.
+	hibernated bool
 }
 
 // resolveResume turns the caller's INTENT into the concrete conversation the
@@ -178,14 +195,24 @@ func (h *commandHandler) CreateSession(ctx context.Context, workspace, requestID
 	// ("<synthetic>") normalizes away to "", and it means "unspecified" exactly
 	// as an absent field does. Passing it through would make SetModel refuse an
 	// empty model and fail a create that asked for nothing at all.
+	//
+	// A HIBERNATED create has no shim to carry the change, and SetModel would
+	// fail the create the revival gate just completed. Said out loud rather
+	// than skipped quietly: the caller asked for a model, and it is the
+	// revival — not this create — that will apply one.
 	if requested := registry.NormalizeModel(cmd.GetModel()); requested != "" {
-		selected, modelErr := h.SetModel(ctx, workspace, requestID, &frontendv1.SetModelCmd{Model: requested})
-		if modelErr != nil {
-			return "", fmt.Errorf("frontend cmd: create_session ws=%s request_id=%s session=%s: requested model %q not applied: %w",
-				workspace, requestID, est.sessionID, requested, modelErr)
+		if est.hibernated {
+			h.logf("frontend cmd: create_session ws=%s request_id=%s session=%s model requested=%q NOT applied: the session met the revival gate at bring-up, so no shim exists to apply it to; the record keeps its persisted model until the user revives it",
+				workspace, requestID, est.sessionID, requested)
+		} else {
+			selected, modelErr := h.SetModel(ctx, workspace, requestID, &frontendv1.SetModelCmd{Model: requested})
+			if modelErr != nil {
+				return "", fmt.Errorf("frontend cmd: create_session ws=%s request_id=%s session=%s: requested model %q not applied: %w",
+					workspace, requestID, est.sessionID, requested, modelErr)
+			}
+			h.logf("frontend cmd: create_session ws=%s request_id=%s session=%s model requested=%q selected=%q",
+				workspace, requestID, est.sessionID, requested, selected)
 		}
-		h.logf("frontend cmd: create_session ws=%s request_id=%s session=%s model requested=%q selected=%q",
-			workspace, requestID, est.sessionID, requested, selected)
 	}
 	// OBSERVABILITY ONLY, and read AFTER establishment so it reflects what the
 	// session actually landed on rather than what was asked for. It rides the
@@ -195,8 +222,15 @@ func (h *commandHandler) CreateSession(ctx context.Context, workspace, requestID
 	if h.resumes != nil {
 		observed = h.resumes.ObservedClaudeSessionID(est.sessionID)
 	}
-	h.logf("frontend cmd: create_session ws=%s request_id=%s -> session=%s ESTABLISHED (shim wired and healthy) observed_claude_session_id=%q",
-		workspace, requestID, est.sessionID, observed)
+	// ONE outcome line for the round, and it states which of the two completed
+	// creates this was. A hibernated create that logged ESTABLISHED would claim
+	// a wired, healthy shim for a session that has none.
+	verdict := "ESTABLISHED (shim wired and healthy)"
+	if est.hibernated {
+		verdict = "HIBERNATED (no shim spawned; the revival gate stands)"
+	}
+	h.logf("frontend cmd: create_session ws=%s request_id=%s -> session=%s %s observed_claude_session_id=%q",
+		workspace, requestID, est.sessionID, verdict, observed)
 	return observed, nil
 }
 
@@ -275,6 +309,18 @@ func (h *commandHandler) runEstablishment(est *sessionEstablishment, workspace, 
 
 	id, err := h.sessions.CreateSession(ctx, est.opts)
 	resumeEstablishment := createResumeEstablishment(est.opts, id)
+	if errors.Is(err, errclass.ErrSessionHibernated) {
+		// THE REVIVAL GATE IS NOT A RESUME FAILURE. The bring-up found the
+		// record past the keep-alive policy's threshold and hibernated it
+		// instead of spawning, so the session is registered, durably asleep,
+		// and its SessionView has already been pushed by the create core.
+		// Classifying this would hand the caller a continuity error card for a
+		// session that is simply asleep, and probing its (nonexistent) shim
+		// below would nack a create that completed.
+		est.sessionID = id
+		est.hibernated = true
+		return
+	}
 	if err != nil {
 		// The create core may reject the request before assigning an id, or it
 		// may return the id of a durable record whose bring-up failed. The resume
