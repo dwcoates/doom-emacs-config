@@ -53,8 +53,7 @@ func (b *delayedMaterializationBridge) MarkWorkspaceMaterialized(_ context.Conte
 	if jobID != raceJob {
 		return fmt.Errorf("unexpected materialization job %q", jobID)
 	}
-	b.release()
-	return nil
+	return b.release()
 }
 
 func (*delayedMaterializationBridge) CompleteHostAction(context.Context, string, bool, string) error {
@@ -102,7 +101,7 @@ func (*delayedMaterializationBridge) SubscribeHostActions() (<-chan *frontendv1.
 	return ch, func() { close(ch) }
 }
 
-func (b *delayedMaterializationBridge) release() {
+func (b *delayedMaterializationBridge) release() error {
 	completion := make(chan error, 1)
 	open := func() error {
 		b.mu.Lock()
@@ -115,8 +114,9 @@ func (b *delayedMaterializationBridge) release() {
 	}
 	b.releases <- SessionPublicationRelease{JobID: raceJob, WorktreePath: raceWorkspace, SessionID: raceSession, Open: open, Completion: completion}
 	if err := <-completion; err != nil {
-		panic(fmt.Sprintf("authoritative publication failed: %v", err))
+		return fmt.Errorf("authoritative publication: %w", err)
 	}
+	return nil
 }
 
 func (b *delayedMaterializationBridge) pauseNextLookup() (<-chan struct{}, chan<- struct{}) {
@@ -268,16 +268,26 @@ func TestPreMaterializationPublicationGateDrainsEveryOrdering(t *testing.T) {
 		emitted <- shim.SSM.ApplyMergeTransition(raceWorkspace, "merged", "emission whose decision straddles materialization ack")
 	}()
 	<-entered
-	bridge.release()
+	released := make(chan error, 1)
+	go func() { released <- bridge.release() }()
+	select {
+	case err := <-released:
+		t.Fatalf("materialization release completed while the publication lookup held the reader lock: %v", err)
+	default:
+		// The lookup's confirmed entry proves it holds the frontend reader lock.
+	}
+	close(continueLookup)
+	if err := <-emitted; err != nil {
+		t.Fatalf("apply straddling state: %v", err)
+	}
+	if err := <-released; err != nil {
+		t.Fatalf("release materialization: %v", err)
+	}
 	// A prompt-derived delta submitted by the creation worker immediately after
 	// release must queue after the authoritative snapshot.  The synchronous
 	// completion receipt makes the ordering a property of the handshake rather
 	// than a race between the worker and the frontend goroutine.
 	shim.Server.PushConversationDelta(&frontendv1.ConversationDelta{Workspace: raceWorkspace, SessionId: raceSession})
-	close(continueLookup)
-	if err := <-emitted; err != nil {
-		t.Fatalf("apply straddling state: %v", err)
-	}
 	prog.SetCounts(raceWorkspace, 5, 4)
 
 	raceAssertAuthoritativeRelease(t, conn)
