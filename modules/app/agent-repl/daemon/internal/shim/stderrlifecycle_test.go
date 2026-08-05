@@ -162,6 +162,26 @@ func TestProcSignalFailureLogsCanonicalContextWithoutPartialAttribution(t *testi
 	assertLogContains(t, logger, "shutdown signal failed", "verb=terminate", "pid=731", "pgid=739", `initiator="session_controller_delete"`, `reason="session deletion"`, "signal refused")
 }
 
+func TestProcSignalRejectsAndLogsInvalidStopWithoutSending(t *testing.T) {
+	logger := &recordingLogger{}
+	pump := newLifecycleTestPump(&scriptedStderrReader{terminal: io.EOF}, logger)
+	p := &Proc{logger: logger, stderrPump: pump, pid: 731, pgid: 739}
+	sent := false
+
+	err := p.signal(Stop{Reason: "session deletion"}, "terminate", func() error {
+		sent = true
+		return nil
+	})
+
+	if err == nil || !strings.Contains(err.Error(), "Initiator") {
+		t.Fatalf("signal error = %v, want missing Initiator refusal", err)
+	}
+	if sent {
+		t.Fatal("invalid stop attribution sent a signal")
+	}
+	assertLogContains(t, logger, "shutdown attribution invalid", "verb=terminate", "pid=731", "pgid=739", `initiator=""`, `reason="session deletion"`, "Initiator")
+}
+
 func TestProcSignalSuccessLogsAndCommitsStopAttribution(t *testing.T) {
 	logger := &recordingLogger{}
 	pump := newLifecycleTestPump(&scriptedStderrReader{terminal: io.EOF}, logger)
@@ -180,13 +200,15 @@ func TestProcSignalSuccessLogsAndCommitsStopAttribution(t *testing.T) {
 }
 
 func TestStderrPumpRejectsConflictingCloseOwners(t *testing.T) {
-	pump := newLifecycleTestPump(&scriptedStderrReader{terminal: io.EOF}, &recordingLogger{})
+	logger := &recordingLogger{}
+	pump := newLifecycleTestPump(&scriptedStderrReader{terminal: io.EOF}, logger)
 	pump.expectClose(stderrCloseOwnerCaller)
 
 	defer func() {
 		if recovered := recover(); recovered == nil || !strings.Contains(recovered.(string), "close owner already committed") {
 			t.Fatalf("conflicting close owner panic = %#v", recovered)
 		}
+		assertLogContains(t, logger, "stderr close ownership invariant violated", "pid=731", "pgid=739", `committed_owner="caller"`, `requested_owner="proc_wait"`, "close_expected=true")
 	}()
 	pump.expectClose(stderrCloseOwnerProcWait)
 }
