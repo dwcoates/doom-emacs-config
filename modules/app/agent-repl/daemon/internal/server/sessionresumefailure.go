@@ -63,6 +63,23 @@ func automaticResumeEstablishment(rec registry.Record) resumeEstablishmentAuthor
 	}}
 }
 
+// restartResumeEstablishment classifies a HARD RESTART's failure.
+//
+// A restart re-establishes the SAME conversation under a fresh process, so a
+// transcript that has gone missing underneath it is a continuity failure of
+// exactly the kind the create and open paths already classify — it was simply
+// the one establishment path that never reached the classifier, and so reached
+// the user as `internal.unclassified` carrying raw prose.
+//
+// The agent-repl session id is not available at this boundary: the restart
+// command is keyed by WORKSPACE, and the handler holds no registry. It is left
+// blank rather than guessed, and the identity that matters for this failure —
+// the conversation, its cwd, and the searched config root — is filled in by
+// classify from the ResumeTranscriptMissingError itself.
+func restartResumeEstablishment() resumeEstablishmentAuthority {
+	return resumeEstablishmentAuthority{context: sessionResumeCommandContext{automaticRestore: true}}
+}
+
 func createResumeEstablishment(opts CreateOpts, agentReplSessionID string) resumeEstablishmentAuthority {
 	return resumeEstablishmentAuthority{context: sessionResumeCommandContext{
 		agentReplSessionID: agentReplSessionID,
