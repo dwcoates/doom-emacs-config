@@ -234,7 +234,33 @@ func (c *Client) validateDurableCursorTransition(ev *corev1.Event) error {
 		turnID := payload.TurnEnded.GetTurnId()
 		if turnID != "" {
 			if _, ok := c.pinnedAccountingTurns[turnID]; !ok {
-				return fmt.Errorf("turn end names unpinned accounting turn %q", turnID)
+				// A REPLAYED END IS EXPECTED INPUT, NOT A VIOLATION.
+				//
+				// The pin set is rebuilt at handshake from the durable open
+				// claims, so a turn absent from claimsOpenAtHandshake is one the
+				// daemon had ALREADY COMPLETED before this connection resumed.
+				// Its end replaying from below the cursor is evidence about a
+				// finished turn — there is no start still owed and nothing to
+				// keep atomic. Treating it as a protocol violation made the
+				// rejection terminal and left the workspace unopenable
+				// (slack-ceac-tech-xfq), which is the same mistake the accounting
+				// reducer made when it judged replayed rows by live identity.
+				//
+				// The GENUINE inconsistency is still fatal: a turn whose claim
+				// WAS open at handshake was pinned by that reconstruction, so
+				// finding it unpinned here means the pin was lost underneath us.
+				// WITHOUT DURABLE TRUTH THERE IS NO CLASSIFICATION, so the check
+				// stays strict. A client that never reconstructed from the ledger
+				// cannot prove an end is history, and guessing would weaken the
+				// invariant for a daemon that never wired the authority.
+				if !c.hasDurableClaimAuthority() {
+					return fmt.Errorf("turn end names unpinned accounting turn %q", turnID)
+				}
+				if _, wasOpen := c.claimsOpenAtHandshake[turnID]; wasOpen {
+					return fmt.Errorf("turn end names unpinned accounting turn %q whose claim was open at handshake", turnID)
+				}
+				c.logf("shimclient: replayed turn end for an already-completed turn session=%s seq=%d turn_id=%q — its claim was closed before this connection resumed, so the end is history rather than a protocol violation",
+					c.cfg.SessionID, ev.GetSeq(), turnID)
 			}
 		}
 	case *corev1.Event_QueryLifecycle:
