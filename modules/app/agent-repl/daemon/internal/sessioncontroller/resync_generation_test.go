@@ -1,0 +1,179 @@
+package sessioncontroller
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"sync"
+	"testing"
+
+	corev1 "agentrepl/proto/agentshim/core/v1"
+	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	"claude-repld/internal/errclass"
+	"claude-repld/internal/storehistory"
+)
+
+type gatedDurableHistory struct {
+	mu      sync.Mutex
+	calls   int
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (h *gatedDurableHistory) ReplayHistory(_ context.Context, _, _ string, _, _ uint64, _ uint32, _ func(*corev1.Event)) (storehistory.Result, error) {
+	h.mu.Lock()
+	h.calls++
+	h.mu.Unlock()
+	h.once.Do(func() { close(h.entered) })
+	<-h.release
+	return storehistory.Result{}, nil
+}
+
+func (h *gatedDurableHistory) callCount() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.calls
+}
+
+func TestResyncForGenerationRejectsAnOldClientBeforeReplay(t *testing.T) {
+	client := &replayClient{}
+	h := newRepullHarness(t, client)
+	d := h.controller(t)
+
+	err := h.m.ResyncForGeneration("ws", d.sessionID, d.generationID+"-retired", 0)
+	if !errors.Is(err, errclass.ErrSessionSuperseded) {
+		t.Fatalf("ResyncForGeneration error = %v, want session superseded", err)
+	}
+	if got := client.callCount(); got != 0 {
+		t.Fatalf("stale resync started %d shim replay(s), want none", got)
+	}
+}
+
+func TestResyncForGenerationRejectsOldClientAcrossLifecycleBoundaries(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*repullHarness, *sessionController)
+	}{
+		{"detach", func(h *repullHarness, d *sessionController) {
+			h.m.mu.Lock()
+			delete(h.m.byWS, "ws")
+			h.m.mu.Unlock()
+			h.applier.setCurrent("ws", &frontendv1.WorkspaceState{Workspace: "ws", SessionId: d.sessionID, ControllerGenerationId: ""})
+		}},
+		{"supersession", func(h *repullHarness, d *sessionController) {
+			h.m.mu.Lock()
+			d.sessionID, d.generationID = "s-successor", "generation-successor"
+			h.m.mu.Unlock()
+		}},
+		{"replacement_after_reconnect", func(h *repullHarness, d *sessionController) {
+			h.m.mu.Lock()
+			d.generationID += "-replacement"
+			h.m.mu.Unlock()
+		}},
+		{"delayed_old_client", func(h *repullHarness, d *sessionController) {
+			h.m.mu.Lock()
+			d.sessionID, d.generationID = "s-new", "generation-new"
+			h.m.mu.Unlock()
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &replayClient{}
+			history := &durableHistorySpy{}
+			h := newRepullHarnessWithStore(t, client, history, nil)
+			d := h.controller(t)
+			oldSession, oldGeneration := d.sessionID, d.generationID
+			tc.mutate(h, d)
+			err := h.m.ResyncForGeneration("ws", oldSession, oldGeneration, 0)
+			if !errors.Is(err, errclass.ErrSessionSuperseded) {
+				t.Fatalf("error = %v, want superseded", err)
+			}
+			if got := client.callCount(); got != 0 {
+				t.Fatalf("stale %s started %d shim replay(s), want 0", tc.name, got)
+			}
+			if got := len(history.replays()); got != 0 {
+				t.Fatalf("stale %s started %d durable replay(s), want 0", tc.name, got)
+			}
+		})
+	}
+}
+
+func TestResyncForGenerationAcceptsReconnectWithinTheSameControllerGeneration(t *testing.T) {
+	client := &replayClient{}
+	h := newRepullHarness(t, client)
+	d := h.controller(t)
+	sessionID, generationID := d.sessionID, d.generationID
+
+	h.m.onLinkLostForGeneration("ws", sessionID, generationID, errors.New("test link loss"))
+	if retiring := h.m.onConnectedForGeneration("ws", sessionID, generationID, &corev1.ShimHello{SessionId: sessionID}); retiring {
+		t.Fatal("same-generation reconnect retired the live controller")
+	}
+	if err := h.m.ResyncForGeneration("ws", sessionID, generationID, 0); err != nil {
+		t.Fatalf("same-generation reconnect resync: %v", err)
+	}
+	if got := client.callCount(); got != 1 {
+		t.Fatalf("same-generation reconnect started %d shim replay(s), want 1", got)
+	}
+}
+
+func TestDurableResyncAdmissionExcludesControllerInsertionUntilReplayEnds(t *testing.T) {
+	history := &gatedDurableHistory{entered: make(chan struct{}), release: make(chan struct{})}
+	h := newDurableHarness(t, history)
+	h.applier.setCurrent("ws", &frontendv1.WorkspaceState{
+		Workspace: "ws", SessionId: "s1", ControllerGenerationId: "",
+	})
+	done := make(chan error, 1)
+	go func() { done <- h.m.ResyncForGeneration("ws", "s1", "", 0) }()
+	<-history.entered
+
+	if h.m.mu.TryLock() {
+		h.m.mu.Unlock()
+		t.Fatal("controller insertion lock was available during durable replay")
+	}
+	close(history.release)
+	if err := <-done; err != nil {
+		t.Fatalf("durable resync: %v", err)
+	}
+	if got := history.callCount(); got != 1 {
+		t.Fatalf("durable replay calls = %d, want 1", got)
+	}
+	if !h.m.mu.TryLock() {
+		t.Fatal("controller insertion lock remained held after durable replay")
+	}
+	h.m.mu.Unlock()
+}
+
+func TestResyncForGenerationAcceptsTheCurrentController(t *testing.T) {
+	client := &replayClient{}
+	h := newRepullHarness(t, client)
+	d := h.controller(t)
+
+	if err := h.m.ResyncForGeneration("ws", d.sessionID, d.generationID, 0); err != nil {
+		t.Fatalf("ResyncForGeneration: %v", err)
+	}
+	if got := client.callCount(); got != 1 {
+		t.Fatalf("current resync started %d shim replay(s), want 1", got)
+	}
+}
+
+func TestResyncForGenerationLogsBothIdentitiesAndReplaySource(t *testing.T) {
+	var lines []string
+	client := &replayClient{}
+	h := newRepullHarnessWithLog(t, client, func(format string, args ...any) {
+		lines = append(lines, fmt.Sprintf(format, args...))
+	})
+	d := h.controller(t)
+
+	_ = h.m.ResyncForGeneration("ws", "retired-session", "retired-generation", 0)
+	for _, line := range lines {
+		if strings.Contains(line, "decision=superseded") &&
+			strings.Contains(line, "request_session=\"retired-session\"") &&
+			strings.Contains(line, "live_session=\""+d.sessionID+"\"") &&
+			strings.Contains(line, "replay_source=\"live_controller\"") {
+			return
+		}
+	}
+	t.Fatalf("missing classified stale-resync diagnostic: %v", lines)
+}

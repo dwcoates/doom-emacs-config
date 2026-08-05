@@ -141,7 +141,9 @@ func TestPostRotationResyncReplaysNoRetiredSpaceItem(t *testing.T) {
 	// Arrange — the retired conversation is exactly what the frontend just
 	// discarded; replaying it back is the opposite of serving the rotation.
 	h := newRepullHarness(t, &replayClient{})
-	h.controller(t).consumer.Consume(assistantEvent(t, 1122, "retired"))
+	d := h.controller(t)
+	sessionID, generationID := d.sessionID, d.generationID
+	d.consumer.Consume(assistantEvent(t, 1122, "retired"))
 	h.rotate("uuid-old", "uuid-new")
 	h.controller(t).consumer.Consume(assistantEvent(t, 2, "new-space"))
 	h.push.mu.Lock()
@@ -149,8 +151,8 @@ func TestPostRotationResyncReplaysNoRetiredSpaceItem(t *testing.T) {
 	h.push.mu.Unlock()
 
 	// Act — the rebased client asks from the beginning of the new space.
-	if err := h.m.Resync("ws", 0); err != nil {
-		t.Fatalf("Resync: %v", err)
+	if err := h.m.ResyncForGeneration("ws", sessionID, generationID, 0); err != nil {
+		t.Fatalf("ResyncForGeneration after vendor rotation: %v", err)
 	}
 
 	// Assert
