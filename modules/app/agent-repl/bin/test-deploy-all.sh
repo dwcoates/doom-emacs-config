@@ -47,6 +47,7 @@ EOF
     chmod +x "$mod/bin/readiness-report.sh"
     chmod +x "$mod/bin/deploy-all.sh"
     printf ';; stub daemon control plane\n' > "$mod/daemon.el"
+    printf ';; stub frontend client control plane\n' > "$mod/frontend-client.el"
     printf ';; stub runtime coordinator\n' > "$mod/services.el"
 
     # BF_STUB_SHIM_CONTENT makes the stub behave like a real shim build: it
@@ -244,6 +245,8 @@ if [ "$RC" -eq 0 ] \
    && log_before "go build -o .*claude-repld" "pwd=shim-store" \
    && log_before "kickstart -k gui/.*shim-store" "kickstart -k gui/.*shim-claude-sidecar" \
    && log_before "load .*daemon.el" "daemon-restart" \
+   && log_before "load .*frontend-client.el" "daemon-restart" \
+   && log_before "load .*services.el" "daemon-restart" \
    && log_before "kickstart -k gui/.*shim-claude-sidecar" "daemon-restart" \
    && log_has "readiness-report --require-ready webapp"; then
     pass "fresh tree runs the full chain in dependency order"
