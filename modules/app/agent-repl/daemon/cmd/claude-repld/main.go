@@ -619,8 +619,17 @@ func main() {
 		ModelCatalogs:     registrar,
 		Hibernations:      registrar,
 		VendorSessions:    registrar,
-		KeepAliveWindows:  server.KeepAliveWindowStore{Windows: keepAliveWindows},
-		KeepAlive:         keepAliveConfig,
+		// THE SWEEPER'S OWN STAMPING RULE, handed to the controller so the
+		// staleness check taken at prompt acceptance and at bring-up measures a
+		// pre-keep-alive session exactly as the sweep does rather than through
+		// a second copy of the rule.
+		LegacyTurnEnds: server.LegacyTurnEndStamps{
+			Reg:      sessionRegistry,
+			Activity: ssmMgr,
+			Logf:     legacyLog,
+		},
+		KeepAliveWindows: server.KeepAliveWindowStore{Windows: keepAliveWindows},
+		KeepAlive:        keepAliveConfig,
 		VendorSessionOf: func(sessionID string) (string, bool) {
 			rec, ok := sessionRegistry.Get(sessionID)
 			if !ok || rec.ClaudeSessionID == "" {
