@@ -462,6 +462,7 @@ func (w *shutdownWorld) boot(t *testing.T, options ...bootOption) *shutdownBoot 
 		Frontend:       agentShim.Server,
 		IdleSweepTicks: sweepTicks,
 		IdleTimeout:    tuning.idleTimeout,
+		KeepAlive:      kaCfg,
 		Now:            nowFn,
 		Logf:           t.Logf,
 	})
