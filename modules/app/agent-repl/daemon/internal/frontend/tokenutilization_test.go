@@ -1,6 +1,7 @@
 package frontend
 
 import (
+	"errors"
 	"testing"
 
 	datav1 "agentrepl/proto/agentshim/data/v1"
@@ -34,6 +35,7 @@ func TestAggregateTokenUtilizationKeepsTimedCoverageSeparate(t *testing.T) {
 
 func TestAggregateTokenUtilizationTreatsMeasuredZeroTimingAsPresent(t *testing.T) {
 	record := &frontendv1.TokenUtilization{
+		Model: "fable",
 		Actor: &frontendv1.TokenUtilization_MainAgent{MainAgent: &frontendv1.TokenUtilizationMainAgent{}},
 		Usage: &frontendv1.TokenUsage{OutputTokens: 5},
 		ResponseTiming: &frontendv1.TokenResponseTiming{
@@ -88,9 +90,9 @@ func TestAggregateTokenUtilizationJoinsStableIdentityEnrichmentAndBuildsAgentMod
 
 func TestAggregateTokenUtilizationBridgesPreviouslySeparateStableAliases(t *testing.T) {
 	records := []*frontendv1.TokenUtilization{
-		{ApiMessageId: "m1", Actor: &frontendv1.TokenUtilization_Subagent{Subagent: &frontendv1.TokenUtilizationSubagent{AgentId: "agent"}}, Usage: &frontendv1.TokenUsage{InputTokens: 3}},
-		{ApiMessageId: "m2", Actor: &frontendv1.TokenUtilization_Subagent{Subagent: &frontendv1.TokenUtilizationSubagent{ParentToolUseId: "tool"}}, Usage: &frontendv1.TokenUsage{InputTokens: 5}},
-		{ApiMessageId: "m3", Actor: &frontendv1.TokenUtilization_Subagent{Subagent: &frontendv1.TokenUtilizationSubagent{AgentId: "agent", ParentToolUseId: "tool"}}, Usage: &frontendv1.TokenUsage{InputTokens: 7}},
+		{ApiMessageId: "m1", Model: "fable", Actor: &frontendv1.TokenUtilization_Subagent{Subagent: &frontendv1.TokenUtilizationSubagent{AgentId: "agent"}}, Usage: &frontendv1.TokenUsage{InputTokens: 3}},
+		{ApiMessageId: "m2", Model: "fable", Actor: &frontendv1.TokenUtilization_Subagent{Subagent: &frontendv1.TokenUtilizationSubagent{ParentToolUseId: "tool"}}, Usage: &frontendv1.TokenUsage{InputTokens: 5}},
+		{ApiMessageId: "m3", Model: "fable", Actor: &frontendv1.TokenUtilization_Subagent{Subagent: &frontendv1.TokenUtilizationSubagent{AgentId: "agent", ParentToolUseId: "tool"}}, Usage: &frontendv1.TokenUsage{InputTokens: 7}},
 	}
 	got := AggregateTokenUtilization(records)
 	if len(got.GetSubagents()) != 1 || got.GetSubagents()[0].GetTotals().GetInputTokens() != 15 || got.GetSubagents()[0].GetAgent().GetAgentId() != "agent" || got.GetSubagents()[0].GetAgent().GetParentToolUseId() != "tool" {
@@ -111,9 +113,9 @@ func TestAggregateTokenUtilizationSortsStableSubagentIdentities(t *testing.T) {
 
 func TestAggregateTokenUtilizationDoesNotPanicOnCorruptStableIdentityCollision(t *testing.T) {
 	got := AggregateTokenUtilization([]*frontendv1.TokenUtilization{
-		{Actor: &frontendv1.TokenUtilization_Subagent{Subagent: &frontendv1.TokenUtilizationSubagent{AgentId: "agent-a", ParentToolUseId: "tool-a"}}, Usage: &frontendv1.TokenUsage{InputTokens: 1}},
-		{Actor: &frontendv1.TokenUtilization_Subagent{Subagent: &frontendv1.TokenUtilizationSubagent{AgentId: "agent-b", ParentToolUseId: "tool-b"}}, Usage: &frontendv1.TokenUsage{InputTokens: 1}},
-		{Actor: &frontendv1.TokenUtilization_Subagent{Subagent: &frontendv1.TokenUtilizationSubagent{AgentId: "agent-a", ParentToolUseId: "tool-b"}}, Usage: &frontendv1.TokenUsage{InputTokens: 1}},
+		{Model: "fable", Actor: &frontendv1.TokenUtilization_Subagent{Subagent: &frontendv1.TokenUtilizationSubagent{AgentId: "agent-a", ParentToolUseId: "tool-a"}}, Usage: &frontendv1.TokenUsage{InputTokens: 1}},
+		{Model: "fable", Actor: &frontendv1.TokenUtilization_Subagent{Subagent: &frontendv1.TokenUtilizationSubagent{AgentId: "agent-b", ParentToolUseId: "tool-b"}}, Usage: &frontendv1.TokenUsage{InputTokens: 1}},
+		{Model: "fable", Actor: &frontendv1.TokenUtilization_Subagent{Subagent: &frontendv1.TokenUtilizationSubagent{AgentId: "agent-a", ParentToolUseId: "tool-b"}}, Usage: &frontendv1.TokenUsage{InputTokens: 1}},
 	})
 	if got == nil {
 		t.Fatal("corrupt topology produced nil aggregate")
@@ -121,9 +123,39 @@ func TestAggregateTokenUtilizationDoesNotPanicOnCorruptStableIdentityCollision(t
 }
 
 func TestAggregateTokenUtilizationPreservesEmptySubagentIdentityAsUngrouped(t *testing.T) {
-	got := AggregateTokenUtilization([]*frontendv1.TokenUtilization{{Actor: &frontendv1.TokenUtilization_Subagent{Subagent: &frontendv1.TokenUtilizationSubagent{}}, Usage: &frontendv1.TokenUsage{InputTokens: 1}}})
+	got := AggregateTokenUtilization([]*frontendv1.TokenUtilization{{Model: "fable", Actor: &frontendv1.TokenUtilization_Subagent{Subagent: &frontendv1.TokenUtilizationSubagent{}}, Usage: &frontendv1.TokenUsage{InputTokens: 1}}})
 	if len(got.GetUngroupedSubagentResponses()) != 1 {
 		t.Fatalf("ungrouped responses = %+v", got.GetUngroupedSubagentResponses())
+	}
+}
+
+func TestAggregateTokenUtilizationRejectsBlankModelBeforeAllocatingAggregate(t *testing.T) {
+	for name, model := range map[string]string{"empty": "", "whitespace": " \t "} {
+		t.Run(name, func(t *testing.T) {
+			record := &frontendv1.TokenUtilization{
+				AgentReplSessionId: "daemon-session",
+				ClaudeSessionId:    "claude-session",
+				ApiMessageId:       "api-message",
+				Model:              model,
+				Usage:              &frontendv1.TokenUsage{InputTokens: 1},
+			}
+			err := ValidateTokenUtilizationAggregation([]*frontendv1.TokenUtilization{record})
+			var invariant *TokenUtilizationAggregationInvariantError
+			if !errors.As(err, &invariant) {
+				t.Fatalf("validation error = %v, want aggregation invariant", err)
+			}
+			if invariant.RecordIndex != 0 || invariant.FieldPath != "TokenUtilization.model" || invariant.AgentReplSessionID != "daemon-session" || invariant.ClaudeSessionID != "claude-session" || invariant.APIMessageID != "api-message" || invariant.Model != model {
+				t.Fatalf("invariant = %+v", invariant)
+			}
+			defer func() {
+				if recovered := recover(); recovered == nil {
+					t.Fatal("aggregate accepted blank model")
+				} else if aggregateErr, ok := recovered.(*TokenUtilizationAggregationInvariantError); !ok || aggregateErr.Error() != invariant.Error() {
+					t.Fatalf("aggregate panic = %#v, want the same aggregation invariant", recovered)
+				}
+			}()
+			AggregateTokenUtilization([]*frontendv1.TokenUtilization{record})
+		})
 	}
 }
 
