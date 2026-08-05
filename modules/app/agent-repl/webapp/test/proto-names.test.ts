@@ -14,6 +14,7 @@ import { describe, expect, it } from "vitest";
 import {
   HibernationDetailSchema,
   QueueEntryKeepAliveHoldSchema,
+  QueueEntryRevivalHoldSchema,
   QueueEntrySchema,
   ReviveSessionCmdSchema,
   FrontendCommandSchema,
@@ -28,6 +29,8 @@ import {
   PROMPT_ORIGIN_WEBAPP_CARD_ACTION,
   PROMPT_ORIGIN_WEBAPP_USER_SENT,
   QUEUE_ENTRY_KEEP_ALIVE_HOLD,
+  QUEUE_ENTRY_REVIVAL_HOLD,
+  REVIVAL_HOLD_SESSION_ID,
   REVIVE_MODE,
 } from "../src/proto-names.js";
 
@@ -122,6 +125,19 @@ describe("queue-entry keep-alive keys", () => {
   it("names the hold's turn id as the descriptor does", () => {
     // Arrange / Act / Assert
     expect(fieldJsonNames(QueueEntryKeepAliveHoldSchema)).toEqual([KEEP_ALIVE_HOLD_TURN_ID]);
+  });
+});
+
+describe("queue-entry revival keys", () => {
+  it("names the queue entry's revival hold field as the descriptor does", () => {
+    // Arrange / Act / Assert — the field SELECTS the revival bubble over the
+    // classifier bubble, so a drifted key silently renders the wrong reason.
+    expect(fieldJsonNames(QueueEntrySchema)).toContain(QUEUE_ENTRY_REVIVAL_HOLD);
+  });
+
+  it("names the hold's session id as the descriptor does", () => {
+    // Arrange / Act / Assert
+    expect(fieldJsonNames(QueueEntryRevivalHoldSchema)).toEqual([REVIVAL_HOLD_SESSION_ID]);
   });
 });
 
