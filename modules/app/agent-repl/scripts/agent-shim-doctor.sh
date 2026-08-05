@@ -151,6 +151,7 @@ check_store_socket_connectable() {
       record "store-socket-connectable" "PASS" \
         "store health check passed (request_id=$request_id; response=$output)" \
         "" "$output" "$instrumentation"
+      return 0
       ;;
     10)
       failure_class="missing_socket"
