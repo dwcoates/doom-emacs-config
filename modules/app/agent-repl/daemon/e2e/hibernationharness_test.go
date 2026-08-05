@@ -631,33 +631,36 @@ func ingestTranscriptAsSidecar(t *testing.T, s *keepAliveSession, vendorSessionI
 		}
 		switch rec.Type {
 		case "user":
+			// Tool results are also `user` lines; the backfill's job is only
+			// to make the retained conversation replayable, so their content
+			// is carried as the placeholder text the assertions never match.
 			text, ok := rec.Message.Content.(string)
 			if !ok {
-				t.Fatalf("truncated copy carries a non-string user line the harness backfill does not model: %s", line)
+				text = "[tool result]"
 			}
 			store.write(sidecarUserLineEvent(t, vendorSessionID, rec.UUID, text))
 		case "assistant":
-			store.write(sidecarAssistantLineEvent(t, vendorSessionID, rec.UUID, assistantFixtureText(t, rec.Message.Content, line)))
+			store.write(sidecarAssistantLineEvent(t, vendorSessionID, rec.UUID, assistantFixtureText(rec.Message.Content)))
 		default:
 			t.Fatalf("truncated copy carries a %q line the harness backfill does not model: %s", rec.Type, line)
 		}
 	}
 }
 
-// assistantFixtureText extracts the single text block the fixture assistant
-// lines carry.
-func assistantFixtureText(t *testing.T, content any, line string) string {
-	t.Helper()
-	blocks, ok := content.([]any)
-	if ok && len(blocks) == 1 {
-		if block, ok := blocks[0].(map[string]any); ok {
-			if text, ok := block["text"].(string); ok {
-				return text
+// assistantFixtureText extracts the text of a fixture assistant line's first
+// text block, or a placeholder for tool-use blocks — the backfill only makes
+// the retained conversation replayable, and no assertion matches tool text.
+func assistantFixtureText(content any) string {
+	if blocks, ok := content.([]any); ok {
+		for _, raw := range blocks {
+			if block, ok := raw.(map[string]any); ok {
+				if text, ok := block["text"].(string); ok {
+					return text
+				}
 			}
 		}
 	}
-	t.Fatalf("truncated copy carries an assistant line shape the harness backfill does not model: %s", line)
-	return ""
+	return "[tool use]"
 }
 
 // sidecarAssistantLineEvent is what handler.vendorEvent builds for a
