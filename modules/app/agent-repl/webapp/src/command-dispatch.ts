@@ -217,6 +217,16 @@ interface CreateWaiter {
   settled: boolean;
 }
 
+/** 16 hex chars (64 bits) of cryptographic entropy, one draw per page load. */
+function newLoadNonce(): string {
+  const source = globalThis.crypto;
+  if (!source?.getRandomValues) {
+    throw new Error("command-dispatch: crypto.getRandomValues is unavailable; cannot mint request ids");
+  }
+  const bytes = source.getRandomValues(new Uint8Array(8));
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 export class CommandDispatcher {
   private readonly pending = new Map<string, PendingAck>();
   private readonly knownSessions = new Set<string>();
@@ -227,6 +237,14 @@ export class CommandDispatcher {
   /** Set once forwarding has tripped off, so the reason is reported once. */
   private clientLogForwardingOff = false;
   private counter = 0;
+  /**
+   * Per-page-load random prefix. A request id is the durable turn-claim key
+   * (turn_id == the accepted SubmitPrompt.request_id) and the ledger refuses a
+   * duplicate loudly, so the counter alone — which restarts at zero on every
+   * page load — is not enough to keep ids unique across loads. 64 bits of
+   * per-load entropy makes a cross-load collision structurally negligible.
+   */
+  private readonly loadNonce = newLoadNonce();
 
   constructor(private readonly opts: DispatchOptions) {
     log("info", "command dispatcher initialized", {
@@ -237,7 +255,7 @@ export class CommandDispatcher {
 
   private newId(): string {
     if (this.opts.newRequestId) return this.opts.newRequestId();
-    return `fe-${++this.counter}-${Math.random().toString(16).slice(2, 6)}`;
+    return `fe-${this.loadNonce}-${++this.counter}`;
   }
 
   /** Feed a decoded inbound frame in so acks + SessionViews can correlate. */
