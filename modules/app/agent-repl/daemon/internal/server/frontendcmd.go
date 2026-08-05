@@ -1047,6 +1047,11 @@ func (h *commandHandler) HibernateWorkspace(_ context.Context, workspace, reques
 
 // ReviveSession brings a hibernated session back under the user's chosen mode.
 //
+// THE ACK IT PRODUCES IS AN ACCEPTANCE, not a completion. Under compact_first
+// the session is up and `/compact` is submitted when this returns, and the
+// compaction runs on inside the daemon with the session still gated until it
+// lands (sessioncontroller/revive.go).
+//
 // THE MODE IS READ FROM THE ONEOF AND AN UNSET ONE IS A NACK. The wire makes
 // "no decision" unrepresentable precisely so the daemon never has to invent a
 // default, and inventing one here would spend the user's context budget on a
@@ -1069,7 +1074,7 @@ func (h *commandHandler) ReviveSession(ctx context.Context, workspace, requestID
 	if err := h.hibernations.ReviveSession(ctx, workspace, mode); err != nil {
 		return fmt.Errorf("server: reviving the session for workspace %q: %w", workspace, err)
 	}
-	h.logf("frontend cmd: revive-session ws=%s request_id=%s mode=%s COMPLETE", workspace, requestID, mode)
+	h.logf("frontend cmd: revive-session ws=%s request_id=%s mode=%s ACCEPTED", workspace, requestID, mode)
 	return nil
 }
 
