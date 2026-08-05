@@ -254,8 +254,19 @@ func TestE2EAFullReplayCarriesNoKeepAliveTurn(t *testing.T) {
 // boundary, so everything the user actually did is still there. A rewind that
 // took real history with it would be data loss dressed up as an optimization.
 func TestE2EAFullReplayStillCarriesTheRealTurnsFromBeforeTheRewind(t *testing.T) {
-	// Arrange — a distinctive real turn before the ping.
+	// Arrange — a distinctive real turn before the ping, present in BOTH
+	// records: the stream plane (runRealTurn) and the transcript fixture the
+	// rewind truncates. The fake shim writes no transcript, so what the CLI
+	// would have appended for the turn is written here — without it the
+	// truncated copy could never carry the turn into the new seq space, no
+	// matter how correct the cut is.
 	s := newKeepAliveSession(t, testKeepAlivePolicy())
+	writeFixtureTranscript(t, s.cwd, s.vendorID, []string{
+		userLine("before-user", "", s.vendorID, "before-the-rewind"),
+		assistantLine("before-echo", "before-user", s.vendorID, echoOf("before-the-rewind")+"default]"),
+		userLine("ping-prompt", "before-echo", s.vendorID, keepAlivePingText),
+		assistantLine("ping-response", "ping-prompt", s.vendorID, "."),
+	})
 	s.runRealTurn(t, "r-before", "before-the-rewind")
 	rewindByKeepAlivePing(t, s)
 
