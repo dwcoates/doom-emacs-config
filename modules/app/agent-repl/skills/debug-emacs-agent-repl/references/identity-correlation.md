@@ -102,6 +102,59 @@ Several records can share one workspace. Do not select the first record
 without checking terminal state, timestamps, live socket evidence, and recent
 logs.
 
+## The store is authoritative for session provenance
+
+WHEN ASKING WHETHER A CONVERSATION EXISTED, OR WHAT IT CONTAINED, THE STORE
+ANSWERS — not the shim log, not the Claude transcript, not the Emacs
+memory-state dump. The store is agent-repl's own durable event record, written
+independently of the vendor's transcript file, so it survives the transcript
+being missing, unwritten, or unreadable.
+
+```sh
+DB=~/.cache/agent-repl/store/events.db
+# Did this conversation ever carry content?
+sqlite3 "$DB" "select count(*) from event where session_id='<claude_session_id>';"
+# What, and when?
+sqlite3 "$DB" "select seq, kind, datetime(produced_at/1000,'unixepoch','localtime')
+               from event where session_id='<claude_session_id>' order by seq;"
+```
+
+Read it this way:
+
+- A handful of `ClaudeStreamMessage` records all stamped within the same second
+  as bring-up is a HANDSHAKE, not a conversation. That session ran no turns.
+- Absence of a Claude transcript with substantial store events means the
+  transcript was LOST. Absence of both means the conversation never had content.
+- The store is keyed by `claude_session_id` (the vendor conversation), not by
+  the agent-repl session id.
+
+THE TRAPS, each of which has produced a wrong provenance conclusion:
+
+- **The shim log is not evidence of absence.** It records the shim's own
+  lifecycle and framing traffic, which is voluminous even for an idle session.
+  A quiet shim log does not establish that no conversation existed.
+- **`memory-state.el` fields can belong to a PREVIOUS conversation in the same
+  workspace.** `:last-prompt-time` and `:last-prompt-summary` are workspace
+  scoped and survive across sessions, so a summary there may describe a
+  conversation the current session has nothing to do with. Convert the
+  timestamp and compare it against the session's own creation before using it.
+- **A workspace's transcripts are not all reachable.** `resume-resolve` excludes
+  conversations it will not resume, and logs one `EXCLUDING uuid=… — <reason>`
+  line per candidate. A workspace can hold large, intact transcripts that are
+  all excluded, after which a fresh empty conversation is created. Read those
+  exclusion lines before concluding a workspace had no prior conversation:
+
+```sh
+modules/app/agent-repl/scripts/agent-repl-log-discovery.sh   --workspace /absolute/workspace --runtime daemon |
+  grep 'resume-resolve:'
+```
+
+- **Count the transcript's records** rather than trusting its presence or size:
+
+```sh
+wc -l ~/.claude*/projects/<slug>/<uuid>.jsonl
+```
+
 ## Correlate sockets and processes
 
 Runtime surfaces live under:
