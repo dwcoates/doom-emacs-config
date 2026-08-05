@@ -1246,13 +1246,18 @@ structured diagnostic context passed to that helper."
         (ws "ws-sensitive"))
     (cl-letf (((symbol-function 'agent-repl--log-verbose)
                (lambda (logged-ws format-string &rest args)
-                 (setq record (list logged-ws (apply #'format format-string args))))))
+                 (setq record
+                       (list logged-ws format-string args
+                             (apply #'format format-string args))))))
       (should (eq (agent-repl--should-prepend-metaprompt-p "prompt" "explicit" ws) t)))
     (should (equal (car record) ws))
-    (should (equal (cadr record)
+    (should (equal (nth 3 record)
                    "should-prepend-metaprompt-p enabled=t prompt-len=6 force=t skip=nil result=t"))
-    (should-not (string-match-p "SECRET-METAPROMPT-BODY" (cadr record)))
-    (should-not (string-match-p "explicit" (cadr record)))))
+    (let ((jsonl (agent-repl--log-record
+                  nil "debug" "verbose" (nth 1 record) (nth 2 record))))
+      (should (< (string-bytes jsonl) 1024))
+      (should-not (string-match-p "SECRET-METAPROMPT-BODY" jsonl))
+      (should-not (string-match-p "explicit" jsonl)))))
 
 (ert-deftest agent-repl-test-skip-metaprompt-log-normalizes-predicates ()
   "Skip diagnostics contain booleans rather than match offsets or list tails."
