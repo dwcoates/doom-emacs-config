@@ -116,6 +116,9 @@ func (m *Manager) settleInterjectAlreadyComplete(d *sessionController, entryID s
 		m.logf("session-controller: interject already-complete turn-claim close FAILED ws=%s session=%s entry=%s: %v — the durable claim may outlive the turn it names; releasing the queue regardless so the held prompt is not stranded",
 			d.workspace, d.sessionID, entryID, err)
 	}
+	// A synthesized close is the ONLY end these turns will ever get, so it owns
+	// the release of whatever terminal result they left retained.
+	d.consumer.ReleaseSynthesizedTurnClose(closedClaims, ssm.TurnCloseAlreadyComplete)
 	m.logf("session-controller: interject already-complete SETTLED ws=%s session=%s entry=%s status_closed=%v claims_closed=%s — the shim reports no foreground turn, so the boundary this interject is waiting for is delivered here rather than awaited forever",
 		d.workspace, d.sessionID, entryID, closedState, formatTurnIDs(closedClaims))
 	// Synthesized, exactly as releasePhantomTurn's is: the shim's
@@ -146,6 +149,7 @@ func (m *Manager) closeTurnClaimsOnAlreadyComplete(d *sessionController) {
 	if len(closed) == 0 {
 		return
 	}
+	d.consumer.ReleaseSynthesizedTurnClose(closed, ssm.TurnCloseAlreadyComplete)
 	m.logf("session-controller: user-stop already-complete closed the durable turn claim ws=%s session=%s closed=%s — the shim reports no foreground turn, and the queue stays PAUSED because the user asked the work to stop",
 		d.workspace, d.sessionID, formatTurnIDs(closed))
 }
