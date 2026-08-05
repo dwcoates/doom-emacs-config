@@ -361,16 +361,27 @@ a wire shape; clearing on it would erase a restored merge."
       (should (= (agent-repl--ws-get "ws1" :merge-completed-at) 1700000000.0))
       (should (cl-find-if (lambda (line) (string-match-p "SUPERSEDES" line)) logged)))))
 
-(ert-deftest agent-repl-test-apply-workspace-state-merged-at-ignores-unowned-frame ()
-  "A frame for a workspace Emacs does not own records no merge instant."
-  ;; Arrange
+(ert-deftest agent-repl-test-workspace-state-rejects-pre-materialization-frame ()
+  "An unowned WorkspaceState signals and logs identity before any host mutation."
   (agent-repl-test--with-clean-state
-    ;; Act
-    (should-not (agent-repl-test--apply-workspace-state
-                 '(:workspace "/tmp/nobody" :state "RENDER_STATE_MERGED"
-                   :mergedAtMs "1700000000000")))
-    ;; Assert
-    (should-not (agent-repl--ws-get "/tmp/nobody" :merge-completed-at))))
+    (let ((agent-repl--frontend-workspace-state-views (make-hash-table :test 'equal))
+          logged)
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (ws fmt &rest args)
+                   (push (list ws (apply #'format fmt args)) logged))))
+        (should-error
+         (agent-repl-test--apply-workspace-state
+          '(:workspace "/pending/new" :sessionId "s_pending"
+            :state "RENDER_STATE_MERGED" :mergedAtMs "1700000000000")))
+        (let ((entry (car logged)))
+          (should (null (car entry)))
+          (should (string-match-p "REJECTED pre-materialization" (cadr entry)))
+          (should (string-match-p "frame=WorkspaceState" (cadr entry)))
+          (should (string-match-p "job-id=unannounced" (cadr entry)))
+          (should (string-match-p "path=\\\"/pending/new\\\"" (cadr entry)))
+          (should (string-match-p "session-id=\\\"s_pending\\\"" (cadr entry))))
+        (should (zerop (hash-table-count agent-repl--frontend-workspace-state-views)))
+        (should-not (agent-repl--ws-known-p "/pending/new"))))))
 
 (ert-deftest agent-repl-test-apply-workspace-state-missing-workspace-errors ()
   "A WorkspaceState with no workspace fails loudly (invariant violation)."
@@ -708,20 +719,6 @@ daemon no longer knows."
     ;; Assert — the stale entry is gone, only the snapshot's roster remains.
     (should-not (agent-repl--frontend-session-view "s_stale"))
     (should (agent-repl--frontend-session-view "s_new"))))
-
-(ert-deftest agent-repl-test-unowned-workspace-state-is-retained-for-startup-safety ()
-  "A pre-restore workspace path is not rendered, but its daemon fact is retained."
-  (agent-repl-test--with-clean-state
-    (let ((agent-repl--frontend-workspace-state-views
-           (make-hash-table :test 'equal))
-          (state '(:workspace "/not-restored"
-                   :sessionId "s_busy"
-                   :state "RENDER_STATE_THINKING"
-                   :turnActive t)))
-      (should-not (agent-repl-test--apply-workspace-state state))
-      (should (equal (agent-repl--frontend-workspace-state-views-all)
-                     (list
-                      (agent-repl-test--complete-workspace-state state)))))))
 
 (ert-deftest agent-repl-test-snapshot-replaces-workspace-state-safety-store ()
   "A reconnect snapshot drops raw states the daemon no longer reports."
@@ -1348,13 +1345,24 @@ first."
     ;; Assert — the path is not a workspace.
     (should-not (agent-repl--ws-get "/Users/x/.config/doom" :pushed-render-state))))
 
-(ert-deftest agent-repl-test-inbound-frame-for-an-unowned-cwd-is-dropped ()
-  "A cwd no live workspace owns is dropped, never stub-created."
+(ert-deftest agent-repl-test-inbound-frame-resolves-a-tombstoned-path ()
+  "A closed workspace path resolves to its registered historical owner."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "closed" :project-dir "/Users/x/closed")
+    (agent-repl--ws-put "closed" :nuked-at (current-time))
+    (agent-repl-test--apply-workspace-state
+     '(:workspace "/Users/x/closed" :state "RENDER_STATE_HIBERNATED"))
+    (should (eq (agent-repl--ws-get "closed" :pushed-render-state)
+                :hibernated))))
+
+(ert-deftest agent-repl-test-live-frame-for-an-unowned-cwd-rejects ()
+  "A live frame for an unowned cwd signals and never creates a workspace."
   ;; Arrange
   (agent-repl-test--with-clean-state
     ;; Act — Emacs has nothing open for this path.
-    (agent-repl-test--apply-workspace-state
-     '(:workspace "/Users/x/not-open" :state "RENDER_STATE_THINKING"))
+    (should-error
+     (agent-repl-test--apply-workspace-state
+      '(:workspace "/Users/x/not-open" :state "RENDER_STATE_THINKING")))
     ;; Assert — no entry invented to hold it.
     (should-not (agent-repl--ws-known-p "/Users/x/not-open"))))
 
@@ -1506,15 +1514,16 @@ first."
   (should (memq #'agent-repl--merge-resurrect-on-failure
                 agent-repl-ws-state-transition-functions)))
 
-(ert-deftest agent-repl-test-non-merge-states-for-a-closed-workspace-stay-dropped ()
-  "Only merge_failed resurrects; every other unowned state is still dropped."
+(ert-deftest agent-repl-test-non-merge-live-state-for-an-unowned-workspace-rejects ()
+  "Only merge_failed recovers a closed workspace; other live frames reject."
   (agent-repl-test--with-clean-state
     (let (established)
       (cl-letf (((symbol-function 'agent-repl--establish-workspace)
                  (lambda (&rest args) (setq established args))))
         ;; Act — a benign state for an unowned cwd.
-        (agent-repl-test--apply-workspace-state
-         '(:workspace "/Users/x/not-open" :state "RENDER_STATE_MERGED"))
+        (should-error
+         (agent-repl-test--apply-workspace-state
+          '(:workspace "/Users/x/not-open" :state "RENDER_STATE_MERGED")))
         ;; Assert
         (should-not established)))))
 
