@@ -198,6 +198,11 @@ type sessionClient interface {
 	// Interrupt returns the shim's own verdict on what the stop did, which is
 	// the only place that verdict is observable.
 	Interrupt(ctx context.Context) (corev1.InterruptOutcome, error)
+	// UnpinAccountingTurn releases the durable-cursor hold a turn's start took,
+	// for a turn the daemon closed WITHOUT a TurnEnded. Only a stream TurnEnded
+	// releases a pin otherwise, so a synthesized close would freeze the cursor
+	// at that turn forever.
+	UnpinAccountingTurn(turnIDs ...string)
 	SetModel(ctx context.Context, model string) (string, error)
 	// Replay asks the shim for a bounded slice of persisted history, streaming
 	// it to onEvent. Its events arrive over the wire as ReplayEvent, a
@@ -2109,6 +2114,10 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 		DaemonVersion:   m.cfg.DaemonVersion,
 		ProtocolVersion: m.cfg.ProtocolVersion,
 		SeqStore:        m.cfg.SeqStore,
+		// The durable authority on what is in flight, so a reconnect rebuilds
+		// the accounting pin set instead of discarding it.
+		OpenTurnClaims:  m.cfg.SSM,
+		Workspace:       workspace,
 		PermissionModes: m.cfg.PermissionModes,
 		StateSink:       cons,
 		TurnClaims:      cons,

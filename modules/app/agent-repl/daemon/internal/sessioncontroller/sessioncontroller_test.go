@@ -162,9 +162,10 @@ const testPromptOrigin = corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT
 func (l fakeLocator) Locate(ws string) (string, bool) { id, ok := l.m[ws]; return id, ok }
 
 type fakeClient struct {
-	cfg     shimclient.Config
-	mu      sync.Mutex
-	prompts []string
+	unpinned []string
+	cfg      shimclient.Config
+	mu       sync.Mutex
+	prompts  []string
 	// requestIDs records the id each prompt was submitted UNDER, which the
 	// shim adopts as that turn's turn_id. It is the only place a test can see
 	// whether the daemon's own name for a prompt is the name the turn will
@@ -289,6 +290,14 @@ func (c *fakeClient) Health(_ context.Context, requestID string) (*corev1.Health
 		return &corev1.HealthStatus{RequestId: requestID, Healthy: true, Component: "fake-shim"}, nil
 	}
 	return c.healthStatus, nil
+}
+
+// unpinnedTurns records the synthesized closes that released a cursor hold, so
+// a test can assert the pin was freed rather than left to freeze the mark.
+func (c *fakeClient) UnpinAccountingTurn(turnIDs ...string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.unpinned = append(c.unpinned, turnIDs...)
 }
 
 func (c *fakeClient) Interrupt(_ context.Context) (corev1.InterruptOutcome, error) {
