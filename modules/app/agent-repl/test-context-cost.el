@@ -92,16 +92,25 @@ presence IS the alarm's lifetime — there is no local timer to expire it."
     ;; Assert
     (should-not (gethash "ws1" agent-repl--context-cost-alerts))))
 
-(ert-deftest agent-repl-test-context-cost-apply-drops-an-unresolvable-workspace ()
-  "A cwd no workspace owns is dropped rather than keyed under the raw path.
-A stub entry would hold an alarm no footer ever reads."
-  ;; Arrange
+(ert-deftest agent-repl-test-context-cost-rejects-pre-materialization-progress ()
+  "An unowned ProgressView signals and logs identity without mutating alarms."
   (agent-repl-test--with-cost-state
-    ;; Act
-    (agent-repl--context-cost-apply
-     (agent-repl-test--cost-progress "/nobody" (agent-repl-test--cost-alert)))
-    ;; Assert
-    (should (zerop (hash-table-count agent-repl--context-cost-alerts)))))
+    (let (logged)
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (ws fmt &rest args)
+                   (push (list ws (apply #'format fmt args)) logged))))
+        (should-error
+         (agent-repl--context-cost-apply
+          (agent-repl-test--cost-progress
+           "/pending/new" (agent-repl-test--cost-alert))))
+        (let ((entry (car logged)))
+          (should (null (car entry)))
+          (should (string-match-p "REJECTED pre-materialization" (cadr entry)))
+          (should (string-match-p "frame=ProgressView" (cadr entry)))
+          (should (string-match-p "job-id=unavailable" (cadr entry)))
+          (should (string-match-p "path=\\\"/pending/new\\\"" (cadr entry)))
+          (should (string-match-p "session-id=\\\"s_1\\\"" (cadr entry))))
+        (should (zerop (hash-table-count agent-repl--context-cost-alerts)))))))
 
 (ert-deftest agent-repl-test-context-cost-apply-rejects-a-missing-token-count ()
   "An alert with no uncached count signals rather than rendering a placeholder.

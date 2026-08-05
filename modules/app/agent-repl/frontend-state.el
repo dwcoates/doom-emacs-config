@@ -39,6 +39,7 @@
 ;; as part of the same module, so the symbol is resolved at call time.
 (declare-function agent-repl--latch-and-maybe-fire-loaded "sentinel" (ws key &optional marker))
 (declare-function agent-repl--ws-dir-owner "workspace" (dir &optional except))
+(declare-function agent-repl--ws-registered-dir-owner "workspace" (dir &optional except))
 (declare-function agent-repl--ws-known-p "workspace" (ws))
 (declare-function agent-repl--workspace-create-handle-available
                   "workspace-create-client" (available))
@@ -274,9 +275,12 @@ perspective has not been recreated.")
 ;; visible in the log as `sidebar-entries: skipping live ws=/Users/... with no
 ;; :project-dir'.
 ;;
-;; So every inbound handler resolves the path to the workspace NAME first, and
-;; a path that resolves to nothing is dropped LOUDLY rather than inventing a
-;; workspace to hold it.
+;; So every inbound handler resolves the path to the workspace NAME first.  A
+;; session-scoped live frame whose path resolves to nothing violates the
+;; creation handshake: WorkspaceAvailable must materialize the host workspace
+;; before the daemon publishes session state.  Snapshot replay retains unknown
+;; records for restart safety, while this resolver also recognizes tombstoned
+;; workspace paths so closed sessions keep their historical identity.
 
 (defun agent-repl--frontend-ws-name (workspace)
   "Return the Emacs workspace NAME the daemon's WORKSPACE string refers to.
@@ -284,9 +288,9 @@ WORKSPACE is a session CWD (how the daemon names workspaces).  Resolves it
 against the live workspaces' `:project-dir'.  A WORKSPACE that is already a
 known workspace name is returned as-is, so a frame that carries a name
 still works.  Returns nil when nothing owns it — the caller must then drop
-the frame rather than key state under an unresolvable id."
+or reject the frame rather than key state under an unresolvable id."
   (when (and workspace (not (string-empty-p workspace)))
-    (let* ((owner (agent-repl--ws-dir-owner workspace))
+    (let* ((owner (agent-repl--ws-registered-dir-owner workspace))
            (known (and (not owner)
                        (agent-repl--ws-known-p workspace)))
            (resolved (or owner (and known workspace))))
@@ -299,6 +303,28 @@ the frame rather than key state under an unresolvable id."
        workspace (cond (owner :dir-owner) (known :known-name) (t :unowned))
        resolved)
       resolved)))
+
+(defvar agent-repl--frontend-applying-snapshot-state nil
+  "Non-nil only while snapshot replay applies `WorkspaceState' records.
+An unregistered state in a reconnect snapshot is retained for restart safety.
+An unregistered live push is an impossible pre-WorkspaceAvailable frame and
+must reject loudly.")
+
+(defun agent-repl--frontend-reject-unmaterialized-session-frame
+    (frame job-id path session-id)
+  "Reject a session FRAME that arrived before host materialization.
+JOB-ID is the creation job identity when the frame protocol carries one;
+the current session-state frames do not, so callers must pass the explicit
+wire-contract marker `unavailable'.  PATH and SESSION-ID identify the
+impossible frame in the canonical global log.  This function never mutates
+workspace or frontend state."
+  (agent-repl--log
+   nil
+   "frontend-session-frame: REJECTED pre-materialization frame=%s job-id=%s path=%S session-id=%S"
+   frame job-id path session-id)
+  (user-error
+   "agent-repl frontend: %s arrived before WorkspaceAvailable materialized path %s (job %s session %s)"
+   frame path job-id session-id))
 
 (defun agent-repl--frontend-int64 (raw)
   "Return protojson int64 field RAW as an Emacs number, or nil.
@@ -537,15 +563,28 @@ Fails loudly on a missing/blank `workspace' (invariant violation)."
          "frontend-apply-workspace-state: INCOMPLETE controller identity connectivity=%s session=%S generation=%S"
          connectivity session-id generation-id)
         (error "agent-repl frontend: incomplete session-controller identity"))
-      ;; Preserve the daemon fact even before snapshot restore recreates the
-      ;; corresponding Emacs workspace.  Render application below may honestly
-      ;; drop an unowned path, but startup bounce safety must still see its
-      ;; `turnActive' bit.
-      (puthash raw-workspace ws-state agent-repl--frontend-workspace-state-views)
-      ;; No live workspace owning this cwd means the daemon is reporting state
-      ;; for something Emacs does not have open. Dropping it is honest; keying
-      ;; it under the path would STUB-CREATE an entry the renderer never reads.
-      (if workspace
+      (if (not workspace)
+          ;; A merge failure is the explicit closed-workspace exception: its
+          ;; established recovery path re-materializes the workspace before
+          ;; recursively applying this frame.  Every other unowned frame is
+          ;; an impossible pre-WorkspaceAvailable publication.
+          (cond
+           (agent-repl--frontend-applying-snapshot-state
+            (puthash raw-workspace ws-state agent-repl--frontend-workspace-state-views)
+            (agent-repl--log-verbose
+             nil
+             "frontend-apply-workspace-state: retained unowned snapshot workspace path=%S session-id=%S"
+             raw-workspace session-id)
+            nil)
+           ((eq keyword :merge-failed)
+            (agent-repl--frontend-resurrect-merge-failed raw-workspace ws-state))
+           (t
+            (agent-repl--frontend-reject-unmaterialized-session-frame
+             "WorkspaceState" "unannounced" raw-workspace session-id)))
+        ;; The workspace is materialized, so retaining its daemon view is safe
+        ;; for reconnect processing.
+        (puthash raw-workspace ws-state agent-repl--frontend-workspace-state-views)
+        (progn
     (let* ((previous (agent-repl--ws-get workspace :pushed-render-state))
            ;; live_task_count / cause_seq / at_ms are proto int64/uint64,
            ;; which protojson encodes as JSON strings — stored verbatim.
@@ -595,19 +634,7 @@ Fails loudly on a missing/blank `workspace' (invariant violation)."
       ;; Re-key point for the merge reactive consequences (design §4.6/§9.3):
       ;; run AFTER the pushed state is stored so subscribers observe it.
       (agent-repl--frontend-run-state-transition-hook workspace keyword previous)
-      keyword)
-      (if (eq keyword :merge-failed)
-          ;; A failed merge of a workspace Emacs already tore down (its merge
-          ;; had appeared to land, so the tab was closed) must not vanish
-          ;; into the retained-state hash: the user has to see the failure
-          ;; and act on it.  Resurrect the tab and re-apply this same frame
-          ;; so the ordinary path stores it and runs the transition hook.
-          (agent-repl--frontend-resurrect-merge-failed raw-workspace ws-state)
-        (agent-repl--log nil
-                         "frontend-apply-workspace-state: no live workspace owns %s — retained for restart safety, render skipped (state=%s session=%s turn-active=%S)"
-                         raw-workspace state (plist-get ws-state :sessionId)
-                         (plist-get ws-state :turnActive))
-        nil)))))
+      keyword))))))
 
 (defun agent-repl--merge-resurrect-on-failure (ws new _previous)
   "Re-open WS's tab when a pushed `:merge-failed' finds it closed.
@@ -827,9 +854,10 @@ receives every catalog but has no per-task roster."
       ;; local perspective/bookkeeping owner for a newly-created path.
       (setq failures
             (+ failures
-               (agent-repl--frontend-apply-snapshot-items
-                "workspace-state" workspaces '(:workspace :sessionId :state)
-                #'agent-repl--frontend-apply-workspace-state)))
+               (let ((agent-repl--frontend-applying-snapshot-state t))
+                 (agent-repl--frontend-apply-snapshot-items
+                  "workspace-state" workspaces '(:workspace :sessionId :state)
+                  #'agent-repl--frontend-apply-workspace-state))))
       ;; Last, and deliberately after the DaemonView: the host-action executor
       ;; re-signals handler failures by contract, and a retained action for a
       ;; dir with no live workspace must not cost the resync its readiness.

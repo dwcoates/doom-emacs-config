@@ -446,6 +446,21 @@ collide with the real workspace in `agent-repl--ws-for-dir'."
                 (and p (string= canonical (agent-repl--path-canonical p))))))
        (agent-repl--live-ws-names)))))
 
+(defun agent-repl--ws-registered-dir-owner (dir &optional except)
+  "Return any registered workspace other than EXCEPT owning canonical DIR.
+Unlike `agent-repl--ws-dir-owner', this includes tombstones whose preserved
+`:project-dir' remains the identity of a closed workspace.  Inbound daemon
+state uses this query to recognize a closed workspace without creating a
+path-keyed stub."
+  (when dir
+    (let ((canonical (agent-repl--path-canonical dir)))
+      (cl-find-if
+       (lambda (ws)
+         (and (not (equal ws except))
+              (let ((p (agent-repl--ws-get ws :project-dir)))
+                (and p (string= canonical (agent-repl--path-canonical p))))))
+       (agent-repl--ws-registered-names)))))
+
 (defvar agent-repl-ws-del-hook nil
   "Abnormal hook run with WS just before `agent-repl--ws-del' tombstones it.
 Runs while the runtime keys (`agent-repl--ws-runtime-keys') are still
