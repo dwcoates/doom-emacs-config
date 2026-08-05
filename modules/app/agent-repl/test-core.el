@@ -1161,7 +1161,11 @@ the record must still be persisted rather than silently discarded."
 (ert-deftest agent-repl-test-workspace-log-unsafe-parent-creates-no-target ()
   "Unsafe workspace components fail before creating an external target file."
   (agent-repl-test--with-clean-state
-    (let* ((project (make-temp-file "agent-repl-unsafe-target-" t))
+    (let* ((sandbox (make-temp-file "agent-repl-unsafe-target-sandbox-" t))
+           ;; This assertion inventories every matching target in the temp
+           ;; directory, so isolate it from concurrent test-all processes.
+           (temporary-file-directory (file-name-as-directory sandbox))
+           (project (make-temp-file "agent-repl-unsafe-target-" t))
            (external (make-temp-file "agent-repl-unsafe-external-" t))
            (ws "unsafe-no-target")
            (before (directory-files temporary-file-directory t "\\`agent-repl-emacs-"))
@@ -1176,7 +1180,8 @@ the record must still be persisted rather than silently discarded."
             (should (equal before (directory-files temporary-file-directory t "\\`agent-repl-emacs-")))
             (should-not (file-exists-p (expand-file-name "emacs/emacs.log" external))))
         (delete-directory project t)
-        (delete-directory external t)))))
+        (delete-directory external t)
+        (delete-directory sandbox t)))))
 
 (ert-deftest agent-repl-test-workspace-log-rebinds-to-a-fresh-target ()
   "Rebinding a WS forgets in-memory ownership and creates a fresh target."
