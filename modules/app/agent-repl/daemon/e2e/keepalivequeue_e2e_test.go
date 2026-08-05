@@ -135,11 +135,19 @@ func TestE2EAPromptHeldByAPingCanStillBeCancelled(t *testing.T) {
 	// Act
 	writeCmd(t, s.conn, fmt.Sprintf(`{"requestId":"r-cancel","queueCancel":{"entryId":%q}}`, held.entry.GetId()))
 
-	// Assert
-	if ack := awaitAck(t, s.conn, "r-cancel", "the cancel of a keep-alive-held entry"); !ack.GetOk() {
-		t.Fatalf("queueCancel on a keep-alive-held entry nacked: %s — cancelling is the one exit the user always has", ack.GetError())
-	}
+	// Assert — ONE combined await: the entry-gone QueueView is pushed BEFORE
+	// the CommandAck, so a sequential awaitAck would consume and discard it.
 	awaitAll(t, s.conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
+		"the cancel's ack": func(frame *frontendv1.FrontendFrame) bool {
+			ack := ackFor(frame, "r-cancel")
+			if ack == nil {
+				return false
+			}
+			if !ack.GetOk() {
+				t.Fatalf("queueCancel on a keep-alive-held entry nacked: %s — cancelling is the one exit the user always has", ack.GetError())
+			}
+			return true
+		},
 		"a QueueView with the cancelled entry gone": func(frame *frontendv1.FrontendFrame) bool {
 			view := queueViewFor(frame, s.cwd)
 			if view == nil {
