@@ -345,15 +345,19 @@ FORCE is the caller's explicit request for it — nothing else prepends,
 because the guidelines reach the agent as the session's system prompt
 rather than as anything injected into a prompt.
 WS, when supplied, scopes the diagnostic entry."
-  (let* ((system-active-p (and agent-repl-skip-permissions
-                               agent-repl-command-prefix))
+  (let* ((system-enabled-p (and agent-repl-skip-permissions
+                                agent-repl-command-prefix
+                                t))
+         (force-p (and force t))
          ;; Preserve short-circuiting: a disabled system or an unforced send
          ;; must not evaluate the exemption check.
-         (skip-p (and system-active-p force (agent-repl--skip-metaprompt-p raw ws)))
-         (result (and system-active-p force (not skip-p))))
+         (skip-p (and system-enabled-p force-p
+                      (agent-repl--skip-metaprompt-p raw ws)
+                      t))
+         (result (and system-enabled-p force-p (not skip-p) t)))
     (agent-repl--log-verbose ws
-                              "should-prepend-metaprompt-p raw-len=%d force=%s system-active=%s skip=%s result=%s"
-                              (length raw) force system-active-p skip-p result)
+                              "should-prepend-metaprompt-p enabled=%s prompt-len=%d force=%s skip=%s result=%s"
+                              system-enabled-p (length raw) force-p skip-p result)
     result))
 
 (defcustom agent-repl-workspace-command-prefix "/wor"

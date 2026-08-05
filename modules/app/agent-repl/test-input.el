@@ -1238,6 +1238,22 @@ structured diagnostic context passed to that helper."
         (agent-repl--command-prefix "PREFIX: "))
     (should (agent-repl--should-prepend-metaprompt-p "hello" t))))
 
+(ert-deftest agent-repl-test-should-prepend-log-minimizes-metaprompt-content ()
+  "The gate logs only booleans and prompt length, never prompt configuration."
+  (let ((agent-repl-skip-permissions t)
+        (agent-repl-command-prefix "SECRET-METAPROMPT-BODY")
+        (record nil)
+        (ws "ws-sensitive"))
+    (cl-letf (((symbol-function 'agent-repl--log-verbose)
+               (lambda (logged-ws format-string &rest args)
+                 (setq record (list logged-ws (apply #'format format-string args))))))
+      (should (eq (agent-repl--should-prepend-metaprompt-p "prompt" "explicit" ws) t)))
+    (should (equal (car record) ws))
+    (should (equal (cadr record)
+                   "should-prepend-metaprompt-p enabled=t prompt-len=6 force=t skip=nil result=t"))
+    (should-not (string-match-p "SECRET-METAPROMPT-BODY" (cadr record)))
+    (should-not (string-match-p "explicit" (cadr record)))))
+
 (ert-deftest agent-repl-test-should-prepend-nil-when-skip-permissions-off ()
   "Returns nil when `agent-repl-skip-permissions' is nil, even forced."
   (let ((agent-repl-skip-permissions nil)
