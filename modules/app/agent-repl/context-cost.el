@@ -51,6 +51,7 @@
 (declare-function agent-repl--log-verbose "core" (ws fmt &rest args))
 (declare-function agent-repl--buffer-owner "core" (buf))
 (declare-function agent-repl--frontend-ws-name "frontend-state" (workspace))
+(declare-function agent-repl--frontend-tombstoned-dir-owner "frontend-state" (path))
 (declare-function agent-repl--frontend-int64 "frontend-state" (raw))
 (declare-function agent-repl--uds-register-handler "frontend-uds" (field fn))
 
@@ -163,8 +164,15 @@ state is mutated."
          (alert (plist-get progress :expensiveTurn)))
     (cond
      ((null ws)
-      (agent-repl--frontend-reject-unmaterialized-session-frame
-       "ProgressView" "unavailable" wire (plist-get progress :sessionId)))
+      (if (agent-repl--frontend-tombstoned-dir-owner wire)
+          (progn
+            (agent-repl--log-verbose
+             nil
+             "context-cost-apply: skipped tombstoned workspace path=%S session-id=%S"
+             wire (plist-get progress :sessionId))
+            nil)
+        (agent-repl--frontend-reject-unmaterialized-session-frame
+         "ProgressView" "unavailable" wire (plist-get progress :sessionId))))
      (alert
       (let ((normalized (agent-repl--context-cost-normalize ws alert)))
         (puthash ws normalized agent-repl--context-cost-alerts)
