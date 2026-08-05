@@ -111,7 +111,8 @@ func TestE2EMachineryIsWithheldFromAReplayToo(t *testing.T) {
 	})
 
 	// Act — a fresh frontend asks for the whole conversation.
-	replayed := replayItems(t, h.dial(t, id), cwd, "r-replay-machinery")
+	fresh, state := dialForReplay(t, h, id, cwd)
+	replayed := replayItems(t, fresh, state, cwd, "r-replay-machinery")
 
 	// Assert
 	sawReal := false

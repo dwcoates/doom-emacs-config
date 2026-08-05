@@ -50,7 +50,8 @@ func TestE2ETurnAccountingIsDurableAndUsesOneLongLivedQuery(t *testing.T) {
 	assertStateDBResponseLedger(t, h, id, first, second)
 
 	var replayed *frontendv1.TurnAccounting
-	for _, item := range replayItems(t, h.dial(t, id), cwd, "e2e-accounting-replay") {
+	fresh, state := dialForReplay(t, h, id, cwd)
+	for _, item := range replayItems(t, fresh, state, cwd, "e2e-accounting-replay") {
 		if item.GetTurnAccounting() != nil && item.GetTurnAccounting().GetTurnId() == second.GetTurnId() {
 			replayed = item.GetTurnAccounting()
 			break

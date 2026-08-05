@@ -293,9 +293,10 @@ func collectItems(t *testing.T, conn *websocket.Conn, workspace string, n int) [
 // (frontend/server.go readLoop), and a ring-covered resync pushes its whole
 // replay synchronously inside that dispatch (sessioncontroller.Manager.Resync returns
 // without a store re-pull when the ring covers the request).
-func replayItems(t *testing.T, conn *websocket.Conn, workspace, requestID string) []*frontendv1.ConversationItem {
+func replayItems(t *testing.T, conn *websocket.Conn, state *frontendv1.WorkspaceState, workspace, requestID string) []*frontendv1.ConversationItem {
 	t.Helper()
-	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"resync":{"fromSeq":0}}`, requestID))
+	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"resync":{"fromSeq":0,"sessionId":%q,"controllerGenerationId":%q}}`,
+		requestID, state.GetSessionId(), state.GetControllerGenerationId()))
 	var out []*frontendv1.ConversationItem
 	deadline := time.Now().Add(frameTimeout)
 	for time.Now().Before(deadline) {
@@ -310,6 +311,15 @@ func replayItems(t *testing.T, conn *websocket.Conn, workspace, requestID string
 	}
 	t.Fatalf("no CommandAck for resync %s arrived before the deadline", requestID)
 	return nil
+}
+
+// dialForReplay opens a fresh scoped frontend and returns the immutable
+// authority tuple from the connection's initial snapshot. Resync fixtures use
+// exactly the identity a real frontend captures before dispatching its request.
+func dialForReplay(t *testing.T, h *e2eHarness, sessionID, workspace string) (*websocket.Conn, *frontendv1.WorkspaceState) {
+	t.Helper()
+	conn := h.dial(t, sessionID)
+	return conn, workspaceStateInSnapshot(t, readFrame(t, conn), workspace)
 }
 
 // isClear / isCompact identify the two first-class arms (frontend.proto 32/33).
@@ -419,10 +429,10 @@ func TestE2EReplayFloorsAtTheClear(t *testing.T) {
 	// the daemon has certainly recorded the floor before the replay is asked for.
 	store.write(sidecarClearEvent(vendorID, lineUUID))
 	awaitItem(t, live, cwd, "ContextCleared item", isClear)
-	fresh := h.dial(t, id)
+	fresh, state := dialForReplay(t, h, id, cwd)
 
 	// Assert
-	replayed := seqItems(replayItems(t, fresh, cwd, "r-replay"))
+	replayed := seqItems(replayItems(t, fresh, state, cwd, "r-replay"))
 	if len(replayed) == 0 {
 		t.Fatal("the replay carried no conversation items at all")
 	}
@@ -475,7 +485,8 @@ func TestE2ELiveAndReplayAgreeFromTheFloor(t *testing.T) {
 	fromFloor = seqItems(append(fromFloor, afterResult))
 
 	// Assert
-	replayed := seqItems(replayItems(t, h.dial(t, id), cwd, "r-replay"))
+	fresh, state := dialForReplay(t, h, id, cwd)
+	replayed := seqItems(replayItems(t, fresh, state, cwd, "r-replay"))
 	if len(replayed) < len(fromFloor) {
 		t.Fatalf("replay carried %d items, want at least the %d the live subscriber saw from the floor", len(replayed), len(fromFloor))
 	}

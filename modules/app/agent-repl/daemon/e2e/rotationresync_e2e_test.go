@@ -36,9 +36,10 @@ const retiredSpaceMark = 1060
 
 // replayItemsFrom is clearcompact's replayItems with the client mark under
 // test.
-func replayItemsFrom(t *testing.T, conn *websocket.Conn, workspace, requestID string, fromSeq uint64) []*frontendv1.ConversationItem {
+func replayItemsFrom(t *testing.T, conn *websocket.Conn, state *frontendv1.WorkspaceState, workspace, requestID string, fromSeq uint64) []*frontendv1.ConversationItem {
 	t.Helper()
-	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"resync":{"fromSeq":"%d"}}`, requestID, fromSeq))
+	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"resync":{"fromSeq":"%d","sessionId":%q,"controllerGenerationId":%q}}`,
+		requestID, fromSeq, state.GetSessionId(), state.GetControllerGenerationId()))
 	var out []*frontendv1.ConversationItem
 	deadline := time.Now().Add(frameTimeout)
 	for time.Now().Before(deadline) {
@@ -68,6 +69,7 @@ func TestE2EResyncFromARetiredSpaceMarkStillReplaysTheClear(t *testing.T) {
 	h := newUDSHarness(t)
 	id, conn, _, store := liveSession(t, h, cwd)
 	rot := rotateSession(t, h, conn, id, cwd)
+	_, state := dialForReplay(t, h, id, cwd)
 	const lineUUID = "e2e-retired-mark-clear-1"
 	store.write(sidecarClearEvent(rot.next, lineUUID))
 	awaitAll(t, conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
@@ -82,7 +84,7 @@ func TestE2EResyncFromARetiredSpaceMarkStillReplaysTheClear(t *testing.T) {
 	})
 
 	// Act — the client asks with the mark it carried out of the retired space.
-	items := replayItemsFrom(t, conn, cwd, "r-retired-mark", retiredSpaceMark)
+	items := replayItemsFrom(t, conn, state, cwd, "r-retired-mark", retiredSpaceMark)
 
 	// Assert — arm 32, replayed, on a mark that claimed to be past it.
 	var clears int
@@ -106,7 +108,8 @@ func TestE2ETurnAfterARetiredSpaceResyncStillFlows(t *testing.T) {
 	h := newUDSHarness(t)
 	id, conn, _, _ := liveSession(t, h, cwd)
 	rotateSession(t, h, conn, id, cwd)
-	replayItemsFrom(t, conn, cwd, "r-retired-mark", retiredSpaceMark)
+	_, state := dialForReplay(t, h, id, cwd)
+	replayItemsFrom(t, conn, state, cwd, "r-retired-mark", retiredSpaceMark)
 
 	// Act
 	writeCmd(t, conn, `{"requestId":"r-after-resync","submitPrompt":{"text":"after-the-stale-resync","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)

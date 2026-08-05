@@ -72,7 +72,8 @@ func TestE2ETokenUtilizationPairsResponseUsageWithTiming(t *testing.T) {
 	// the durable replay that this test promises to cover.
 	awaitItem(t, conn, cwd, "the turn's terminal result", isResult)
 
-	replay := replayItems(t, h.dial(t, id), cwd, "e2e-token-replay")
+	fresh, state := dialForReplay(t, h, id, cwd)
+	replay := replayItems(t, fresh, state, cwd, "e2e-token-replay")
 	var replayed *frontendv1.ConversationItem
 	for _, candidate := range replay {
 		if isFakeTurnMessage(candidate.GetAssistantMessage().GetId(), 1) {
@@ -153,7 +154,8 @@ func TestE2EHistoricalUsageIsExplicitlyUntimedAndDeduplicated(t *testing.T) {
 		t.Errorf("historical actor = %T id=%q, want attributed nested subagent", usage.GetActor(), usage.GetSubagent().GetAgentId())
 	}
 
-	replayed := replayItems(t, h.dial(t, id), cwd, "e2e-historical-usage-replay")
+	fresh, state := dialForReplay(t, h, id, cwd)
+	replayed := replayItems(t, fresh, state, cwd, "e2e-historical-usage-replay")
 	seen := 0
 	for _, candidate := range replayed {
 		if candidate.GetAssistantMessage().GetId() == "msg-historical" {

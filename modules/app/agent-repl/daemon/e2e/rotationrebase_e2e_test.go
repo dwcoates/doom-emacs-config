@@ -59,6 +59,7 @@ func TestE2ERebasedResyncAfterARotationRendersTheClear(t *testing.T) {
 	h := newUDSHarness(t)
 	id, conn, _, store := liveSession(t, h, cwd)
 	rot := rotateSession(t, h, conn, id, cwd)
+	_, state := dialForReplay(t, h, id, cwd)
 	const lineUUID = "e2e-rebased-clear-1"
 	store.write(sidecarClearEvent(rot.next, lineUUID))
 	awaitAll(t, conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
@@ -73,7 +74,7 @@ func TestE2ERebasedResyncAfterARotationRendersTheClear(t *testing.T) {
 	})
 
 	// Act — the rebased client asks for the whole new conversation.
-	items := replayItemsFrom(t, conn, cwd, "r-rebased", rebasedMark)
+	items := replayItemsFrom(t, conn, state, cwd, "r-rebased", rebasedMark)
 
 	// Assert — arm 32, replayed, exactly once.
 	var clears int
@@ -102,9 +103,10 @@ func TestE2ERebasedResyncReplaysNoRetiredSpaceItem(t *testing.T) {
 	h := newUDSHarness(t)
 	id, conn, _, _ := liveSession(t, h, cwd)
 	rotateSession(t, h, conn, id, cwd)
+	_, state := dialForReplay(t, h, id, cwd)
 
 	// Act
-	items := replayItemsFrom(t, conn, cwd, "r-rebased-purged", rebasedMark)
+	items := replayItemsFrom(t, conn, state, cwd, "r-rebased-purged", rebasedMark)
 
 	// Assert
 	for _, item := range items {
@@ -125,12 +127,13 @@ func TestE2ERebasedResyncPushesNoFailureCard(t *testing.T) {
 	h := newUDSHarness(t)
 	id, conn, _, store := liveSession(t, h, cwd)
 	rot := rotateSession(t, h, conn, id, cwd)
+	_, state := dialForReplay(t, h, id, cwd)
 	const lineUUID = "e2e-rebased-clear-2"
 	store.write(sidecarClearEvent(rot.next, lineUUID))
 
 	// Act — the from-zero resync, and a turn after it so the connection is
 	// still being watched for frames once the replay has settled.
-	replayItemsFrom(t, conn, cwd, "r-rebased-nocard", rebasedMark)
+	replayItemsFrom(t, conn, state, cwd, "r-rebased-nocard", rebasedMark)
 	writeCmd(t, conn, `{"requestId":"r-after-rebase","submitPrompt":{"text":"after-the-rebase","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
 
 	// Assert
