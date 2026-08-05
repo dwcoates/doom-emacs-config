@@ -185,9 +185,13 @@ describe("encodeFrontendCommand — deleteSession", () => {
 });
 
 describe("encodeFrontendCommand — resync", () => {
-  it("renders the uint64 fromSeq as a JSON string", () => {
-    const w = wire({ requestId: "r1", workspace: "ws", body: { case: "resync", fromSeq: 42 } });
-    expect(w.resync).toEqual({ fromSeq: "42" });
+  it("renders the workspace snapshot identity and uint64 fromSeq", () => {
+    const w = wire({
+      requestId: "r1",
+      workspace: "ws",
+      body: { case: "resync", fromSeq: 42, sessionId: "s1", controllerGenerationId: "g7" },
+    });
+    expect(w.resync).toEqual({ fromSeq: "42", sessionId: "s1", controllerGenerationId: "g7" });
   });
 });
 

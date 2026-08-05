@@ -41,9 +41,17 @@
 /** How this module reports itself; mirrors the app's client-log levels. */
 export type ConnectResyncLogLevel = "info" | "warn" | "error";
 
+/** The complete revisioned WorkspaceState snapshot a replay is conditional on. */
+export interface ResyncSnapshot {
+  workspace: string;
+  fromSeq: number;
+  sessionId: string;
+  controllerGenerationId: string;
+}
+
 export interface ConnectResyncOptions {
   /** Sends one ResyncCmd; rejects when the daemon nacks it. */
-  resync: (workspace: string, fromSeq: number) => Promise<void>;
+  resync: (snapshot: ResyncSnapshot) => Promise<void>;
   log?: (level: ConnectResyncLogLevel, message: string) => void;
 }
 
@@ -72,23 +80,33 @@ export class ConnectResync {
 
   /**
    * Feed one ingested frame. `isSnapshot` says whether it was the connect
-   * `StateSnapshot`; `workspace` and `fromSeq` are read from the store AFTER
-   * ingest, so a snapshot that supplies the cwd fires on its own arrival.
+   * `StateSnapshot`; SNAPSHOT is read from the store AFTER ingest, so one that
+   * supplies the cwd and controller identity fires on its own arrival.
    *
    * Returns whether the resync was dispatched on this call.
    */
-  observe(isSnapshot: boolean, workspace: string, fromSeq: number): boolean {
+  observe(isSnapshot: boolean, snapshot: ResyncSnapshot): boolean {
     if (isSnapshot) this.snapshotSeen = true;
-    if (!this.armed || !this.snapshotSeen || workspace === "") return false;
+    if (!this.armed || !this.snapshotSeen || snapshot.workspace === "") return false;
     // Disarm BEFORE dispatching: the resync's own snapshot reply comes back
     // through this same path, and a trigger still armed when it lands would
     // ask again, forever.
     this.armed = false;
-    this.opts.log?.("info", `resync: requesting conversation history ws=${workspace} from_seq=${fromSeq}`);
-    this.opts.resync(workspace, fromSeq).catch((err: unknown) => {
+    this.opts.log?.(
+      "info",
+      `resync: requesting snapshot-bound conversation history ws=${snapshot.workspace} ` +
+        `session=${snapshot.sessionId || "none"} generation=${snapshot.controllerGenerationId || "none"} ` +
+        `from_seq=${snapshot.fromSeq} decision=dispatch`,
+    );
+    this.opts.resync(snapshot).catch((err: unknown) => {
       // A refused resync means this mount keeps whatever history it already
       // had — say so loudly rather than leaving an empty feed unexplained.
-      this.opts.log?.("error", `resync request failed ws=${workspace} from_seq=${fromSeq}: ${String(err)}`);
+      this.opts.log?.(
+        "error",
+        `resync request failed ws=${snapshot.workspace} session=${snapshot.sessionId || "none"} ` +
+          `generation=${snapshot.controllerGenerationId || "none"} from_seq=${snapshot.fromSeq} ` +
+          `decision=rejected cause=${String(err)}`,
+      );
     });
     return true;
   }
