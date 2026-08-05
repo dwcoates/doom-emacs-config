@@ -45,9 +45,6 @@ a jq consumer would have to know to strip."
           ((symbolp val) (symbol-name val))
           ((stringp val) val)
           (t (format "%s" val)))))
-    (agent-repl--log-verbose
-     nil "ws-keyword-to-string: input-type=%S input=%S output=%S"
-     (type-of val) val result)
     result))
 
 (defun agent-repl--json-null-if-nil (val)
@@ -57,11 +54,7 @@ serializes it to `{}'), which would mis-render absent optional fields
 like `priority' or `last_prompt_summary'.  Substituting the
 `json-null' sentinel routes those through `json-encode-keyword' so
 they emit as `null'."
-  (let ((result (if (null val) json-null val)))
-    (agent-repl--log-verbose
-     nil "json-null-if-nil: input-nil=%s output=%S"
-     (if (null val) "t" "nil") result)
-    result))
+  (if (null val) json-null val))
 
 (defun agent-repl--workspace-status-entry (ws)
   "Return an alist of JSON-serializable status fields for workspace WS.
@@ -79,13 +72,6 @@ serialize as JSON `null' instead of `{}'."
         (repl     (agent-repl--ws-keyword-to-string
                    (agent-repl--ws-repl-state ws)))
         (acked    (if (agent-repl--ws-get ws :done-acked) t json-false)))
-    ;; A snapshot scans every live workspace on each write, so retain
-    ;; field-level evidence only while verbose logging is enabled.
-    (agent-repl--log-verbose
-     ws
-     "workspace-status-entry: ws=%s agent=%S repl=%S project-dir=%S source-ws-dir=%S priority=%S summary-present=%s done-acked=%s"
-     ws claude repl proj src priority (if summary "t" "nil")
-     (if (eq acked t) "t" "nil"))
     `(("agent_state"         . ,(agent-repl--json-null-if-nil claude))
       ;; Legacy duplicate of agent_state from before the claude-repl ->
       ;; agent-repl rename: external consumers (workspace-status skills
@@ -107,12 +93,7 @@ they are filtered out of the JSON snapshot to (a) keep the on-disk
 file focused on live workspaces and (b) scale json-encode cost with
 the live roster rather than the total roster.  Profiling on a
 ~111-workspace registry showed ~95% of entries were merged."
-  (let* ((repl-state (agent-repl--ws-repl-state ws))
-         (merged-p (eq repl-state :merged)))
-    (agent-repl--log-verbose
-     ws "workspace-status-merged-p: ws=%s repl-state=%S merged=%s"
-     ws repl-state (if merged-p "t" "nil"))
-    merged-p))
+  (eq (agent-repl--ws-repl-state ws) :merged))
 
 (defun agent-repl--workspace-status-snapshot ()
   "Return an alist describing every non-merged live workspace's status.
@@ -132,17 +113,18 @@ Tombstoned workspaces are excluded by `agent-repl--live-ws-names';
     (dolist (ws live-ws)
       (if (agent-repl--workspace-status-merged-p ws)
           (progn
-            (cl-incf merged-count)
-            (agent-repl--log-verbose
-             ws "workspace-status-snapshot: ws=%s outcome=skipped-merged" ws))
+            (cl-incf merged-count))
         (push (cons ws (agent-repl--workspace-status-entry ws)) entries)))
     ;; Sort by workspace name so the file is diff-stable across ticks
     ;; — easier to eyeball changes when tailing the file.
     (setq entries (sort entries (lambda (a b) (string< (car a) (car b)))))
-    (agent-repl--log-verbose
-     nil
-     "workspace-status-snapshot: live-count=%d included-count=%d merged-skipped=%d"
-     (length live-ws) (length entries) merged-count)
+    (let ((fingerprint (agent-repl--diagnostic-fingerprint
+                        (prin1-to-string entries))))
+      (agent-repl--log-on-transition
+     nil "workspace-status-snapshot"
+     (list (length live-ws) (length entries) merged-count fingerprint)
+     "workspace-status-snapshot: live-count=%d included-count=%d merged-skipped=%d content-fingerprint=%s"
+     (length live-ws) (length entries) merged-count fingerprint))
     `(("updated_at" . ,(format-time-string "%FT%T%z"))
       ("workspaces" . ,(agent-repl--alist->json-object entries)))))
 
@@ -153,10 +135,19 @@ when ENTRIES is empty — an empty hash table always serializes to `{}'."
   (let ((h (make-hash-table :test 'equal)))
     (dolist (e entries)
       (puthash (car e) (cdr e) h))
-    (agent-repl--log-verbose
-     nil "alist->json-object: entry-count=%d output-count=%d"
-     (length entries) (hash-table-count h))
     h))
+
+(defun agent-repl--workspace-status-content-fingerprint (snapshot)
+  "Return a stable nonreversible fingerprint of SNAPSHOT's workspace content.
+The generated `updated_at' field is intentionally excluded: its clock value
+changes on every export and therefore cannot decide whether a hot diagnostic
+represents a meaningful state transition."
+  (let ((entries nil)
+        (workspaces (cdr (assoc "workspaces" snapshot))))
+    (maphash (lambda (ws status) (push (cons ws status) entries)) workspaces)
+    (agent-repl--diagnostic-fingerprint
+     (prin1-to-string
+      (sort entries (lambda (a b) (string< (car a) (car b))))))))
 
 (defun agent-repl--snapshot->json-serializable (snapshot)
   "Project SNAPSHOT (a string-keyed alist) onto a hash table tree.
@@ -191,9 +182,6 @@ projected into its own hash table too."
                      out))
                   (t v))
                  top)))
-    (agent-repl--log-verbose
-     nil "snapshot->json-serializable: top-field-count=%d workspace-count=%d"
-     (hash-table-count top) workspace-count)
     top))
 
 (defun agent-repl--write-workspace-status ()
@@ -227,9 +215,6 @@ that emits compact JSON with dramatically lower allocation."
          nil "write-workspace-status: outcome=create-parent-directory file=%s dir=%s"
          file dir)
         (make-directory dir t))
-      (when (and dir (file-directory-p dir))
-        (agent-repl--log-verbose
-         nil "write-workspace-status: parent-directory-ready file=%s dir=%s" file dir))
       ;; Force utf-8-unix on the write.  On Emacs 30, `with-temp-file' without an
       ;; explicit coding system can land in `select-safe-coding-system' when the
       ;; serialized JSON contains characters whose default encoding is ambiguous
@@ -245,17 +230,15 @@ that emits compact JSON with dramatically lower allocation."
              (workspace-count
               (hash-table-count (cdr (assoc "workspaces" snapshot))))
              (coding-system-for-write 'utf-8-unix))
-        (agent-repl--log-verbose
-         nil
-         "write-workspace-status: outcome=serialized file=%s workspace-count=%d byte-count=%d coding=%S"
-         file workspace-count (string-bytes json) coding-system-for-write)
         (with-temp-file file
           (insert json)
           (insert "\n"))
-        (agent-repl--log-verbose
-         nil
-         "write-workspace-status: outcome=wrote file=%s workspace-count=%d byte-count=%d"
-         file workspace-count (1+ (string-bytes json)))))))
+        (let ((fingerprint (agent-repl--workspace-status-content-fingerprint snapshot)))
+          (agent-repl--log-on-transition
+         nil "write-workspace-status"
+         (list workspace-count (1+ (string-bytes json)) fingerprint)
+         "write-workspace-status: outcome=wrote file=%s workspace-count=%d byte-count=%d content-fingerprint=%s"
+         file workspace-count (1+ (string-bytes json)) fingerprint))))))
 
 ;;;; Staggered write scheduler --------------------------------------------------
 
