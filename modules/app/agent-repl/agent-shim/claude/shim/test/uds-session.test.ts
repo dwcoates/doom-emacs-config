@@ -273,6 +273,7 @@ async function shutdownFixture(session: UdsSession, query: FakeQuery, done: Prom
 }
 
 type CapturedLogRecord = {
+  level?: string;
   operation?: string;
   message?: string;
   context?: Record<string, unknown>;
@@ -511,6 +512,27 @@ async function acknowledgeInitialQueryLifecycle(store: FakeStore): Promise<void>
   store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { accepted: 1n, lastSeq: 1n }));
 }
 
+/** Drive one fully observed usage turn so assertions only describe the outcome under test. */
+async function completedUsageTurn(
+  requestId: string,
+  responses: SubscriptionUsageResponse[],
+): Promise<ReturnType<typeof captureLog>> {
+  const { query, daemon } = await rig({ storeSessionId: "vendor-uuid" });
+  const log = captureLog();
+  query.subscriptionUsageImpl = async () => {
+    const response = responses.shift();
+    if (response === undefined) throw new Error("usage-turn fixture omitted a boundary response");
+    return response;
+  };
+
+  daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId, text: "go", promptOrigin: PromptOrigin.USER_SENT }));
+  await daemon.next(AckSchema);
+  query.emit({ type: "result", uuid: `r-${requestId}`, session_id: "vendor-uuid", subtype: "success" } as unknown as SdkMessageLike);
+  await until(() => query.subscriptionUsageCalls === 2);
+  await tick();
+  return log;
+}
+
 describe("UdsSession control: prompt in → SDK", () => {
   it("announces QueryCreated's exact durable sequence in the handshake", async () => {
     const { hello } = await rig({ storeSessionId: "vendor-session", sessionSource: SessionSource.RESUME });
@@ -631,10 +653,7 @@ describe("UdsSession control: prompt in → SDK", () => {
   });
 
   it("does not compute a utilization delta across five-hour windows", async () => {
-    // Arrange
-    const { query, daemon } = await rig({ storeSessionId: "vendor-uuid" });
-    const log = captureLog();
-    const responses: SubscriptionUsageResponse[] = [
+    const log = await completedUsageTurn("p-reset", [
       {
         subscription_type: "max",
         rate_limits_available: true,
@@ -645,15 +664,7 @@ describe("UdsSession control: prompt in → SDK", () => {
         rate_limits_available: true,
         rate_limits: { five_hour: { utilization: 1, resets_at: "2026-08-04T03:00:00.939811Z" } },
       },
-    ];
-    query.subscriptionUsageImpl = async () => responses.shift()!;
-
-    // Act
-    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p-reset", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
-    await daemon.next(AckSchema);
-    query.emit({ type: "result", uuid: "r1", session_id: "vendor-uuid", subtype: "success" } as unknown as SdkMessageLike);
-    await until(() => query.subscriptionUsageCalls === 2);
-    await tick();
+    ]);
 
     // Assert
     expect(log.record("captured five-hour utilization at turn end").context).toMatchObject({
@@ -671,19 +682,10 @@ describe("UdsSession control: prompt in → SDK", () => {
     ["first observed straddling-minute pair", "2026-08-03T19:19:59.908698Z", "2026-08-03T19:20:00.502647Z"],
     ["second observed fractional pair", "2026-08-03T19:20:00.557120Z", "2026-08-03T19:20:00.939811Z"],
   ])("computes a delta for %s", async (_case, startReset, endReset) => {
-    const { query, daemon } = await rig({ storeSessionId: "vendor-uuid" });
-    const log = captureLog();
-    const responses: SubscriptionUsageResponse[] = [
+    const log = await completedUsageTurn("p-jitter", [
       { subscription_type: "max", rate_limits_available: true, rate_limits: { five_hour: { utilization: 17, resets_at: startReset } } },
       { subscription_type: "max", rate_limits_available: true, rate_limits: { five_hour: { utilization: 18, resets_at: endReset } } },
-    ];
-    query.subscriptionUsageImpl = async () => responses.shift()!;
-
-    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p-jitter", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
-    await daemon.next(AckSchema);
-    query.emit({ type: "result", uuid: "r-jitter", session_id: "vendor-uuid", subtype: "success" } as unknown as SdkMessageLike);
-    await until(() => query.subscriptionUsageCalls === 2);
-    await tick();
+    ]);
 
     expect(log.record("captured five-hour utilization at turn end").context).toMatchObject({
       same_five_hour_window: true,
@@ -695,19 +697,10 @@ describe("UdsSession control: prompt in → SDK", () => {
   });
 
   it("keeps an unavailable end observation distinct from a window crossing", async () => {
-    const { query, daemon } = await rig({ storeSessionId: "vendor-uuid" });
-    const log = captureLog();
-    const responses: SubscriptionUsageResponse[] = [
+    const log = await completedUsageTurn("p-missing-end", [
       { subscription_type: "max", rate_limits_available: true, rate_limits: { five_hour: { utilization: 17, resets_at: "2026-08-03T19:20:00Z" } } },
       { subscription_type: "max", rate_limits_available: true, rate_limits: { five_hour: { utilization: 18, resets_at: null } } },
-    ];
-    query.subscriptionUsageImpl = async () => responses.shift()!;
-
-    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p-missing-end", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
-    await daemon.next(AckSchema);
-    query.emit({ type: "result", uuid: "r-missing-end", session_id: "vendor-uuid", subtype: "success" } as unknown as SdkMessageLike);
-    await until(() => query.subscriptionUsageCalls === 2);
-    await tick();
+    ]);
 
     expect(log.record("captured five-hour utilization at turn end").context).toMatchObject({
       measurement_available: false,
