@@ -165,7 +165,7 @@ func TestResolveOwnerHoldsSpoolWhoseLaunchWasNeverSeen(t *testing.T) {
 func TestResolveOwnerAttributesSpoolToItsLaunchingSession(t *testing.T) {
 	// Arrange — the transcript's TaskStarted established the mapping.
 	s, _ := ownerSidecar(t)
-	s.noteOwner("b1pi0nmip", "9b6a4f2d-transcript-id")
+	s.noteTaskOwner("b1pi0nmip", "9b6a4f2d-transcript-id", "", OwnerSourceLiveLaunch)
 
 	// Act
 	got, ok := s.resolveOwner(spoolTarget("b1pi0nmip"), 1000)
@@ -180,7 +180,7 @@ func TestResolveOwnerClearsTheHoldOnceTheOwnerArrives(t *testing.T) {
 	// Arrange — held first, attributed after.
 	s, read := ownerSidecar(t)
 	s.resolveOwner(spoolTarget("b1pi0nmip"), 1000)
-	s.noteOwner("b1pi0nmip", "S1")
+	s.noteTaskOwner("b1pi0nmip", "S1", "", OwnerSourceLiveLaunch)
 
 	// Act
 	if _, ok := s.resolveOwner(spoolTarget("b1pi0nmip"), 1500); !ok {
@@ -253,7 +253,7 @@ func TestReportHeldAnnouncesTheBacklogClearing(t *testing.T) {
 	s, read := ownerSidecar(t)
 	s.resolveOwner(spoolTarget("b1"), 1000)
 	s.reportHeld(1000)
-	s.noteOwner("b1", "S1")
+	s.noteTaskOwner("b1", "S1", "", OwnerSourceLiveLaunch)
 	s.resolveOwner(spoolTarget("b1"), 1100)
 
 	// Act
@@ -268,10 +268,10 @@ func TestReportHeldAnnouncesTheBacklogClearing(t *testing.T) {
 func TestNoteOwnerKeepsTheFirstSessionAndReportsAConflict(t *testing.T) {
 	// Arrange — the corruption this change removes upstream, seen again.
 	s, read := ownerSidecar(t)
-	s.noteOwner("b1pi0nmip", "9b6a4f2d")
+	s.noteTaskOwner("b1pi0nmip", "9b6a4f2d", "", OwnerSourceLiveLaunch)
 
 	// Act
-	s.noteOwner("b1pi0nmip", "a4f52dc5")
+	s.noteTaskOwner("b1pi0nmip", "a4f52dc5", "", OwnerSourceLiveLaunch)
 
 	// Assert — first wins (no flapping), and it is loud.
 	if got := s.owners["b1pi0nmip"]; got != "9b6a4f2d" {
