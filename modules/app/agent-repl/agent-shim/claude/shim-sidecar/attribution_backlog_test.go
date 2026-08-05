@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -74,13 +75,9 @@ func TestAttributionBacklogRestartPastLaunchUsesDurableOpenTaskOwner(t *testing.
 	}
 
 	decision := observeHeld(t, lifecycle, target, owner, HeldEvidence{
-		ActiveTaskKnown:       true,
-		ActiveTask:            true,
-		OpenSessionKnown:      true,
-		OpenSession:           true,
-		CursorPastLaunchKnown: true,
-		CursorPastLaunch:      true,
-		ModTime:               target.ModTime,
+		ActiveTaskKnown: true,
+		ActiveTask:      true,
+		ModTime:         target.ModTime,
 	}, now)
 
 	if decision.State != HeldStateResolved || decision.SessionID != "session-durable" {
@@ -103,7 +100,7 @@ func TestAttributionBacklogLateOwnerArrivalReleasesActiveHold(t *testing.T) {
 
 	second := observeHeld(t, lifecycle, target, OwnerResolution{
 		TaskID: target.TaskID, OutputPath: target.Path, SessionID: "session-late", Source: OwnerSourceLiveLaunch, Outcome: OwnerResolvedTask,
-	}, HeldEvidence{ActiveTaskKnown: true, ActiveTask: true, OpenSessionKnown: true, OpenSession: true, ModTime: target.ModTime}, now.Add(time.Second))
+	}, HeldEvidence{ActiveTaskKnown: true, ActiveTask: true, ModTime: target.ModTime}, now.Add(time.Second))
 	if second.State != HeldStateResolved || second.SessionID != "session-late" {
 		t.Fatalf("late-owner decision = %#v, want resolved live owner", second)
 	}
@@ -118,11 +115,9 @@ func TestAttributionBacklogClosedHistoricalSpoolIsTerminal(t *testing.T) {
 	lifecycle := NewHeldLifecycle(4, discardHeldReport)
 
 	decision := observeHeld(t, lifecycle, target, attributionUnresolvedOwner(target), HeldEvidence{
-		ActiveTaskKnown:       true,
-		ActiveTask:            false,
-		CursorPastLaunchKnown: true,
-		CursorPastLaunch:      true,
-		ModTime:               target.ModTime,
+		ActiveTaskKnown: true,
+		ActiveTask:      false,
+		ModTime:         target.ModTime,
 	}, now)
 	if decision.State != HeldStateTerminal || decision.Reason != HeldReasonHistorical {
 		t.Fatalf("closed historical decision = %#v, want terminal historical", decision)
@@ -200,8 +195,8 @@ func TestAttributionBacklogNeverGuessesAcrossSimilarSpoolFilenames(t *testing.T)
 		t.Fatalf("task-only conflict resolution = %#v, want explicit conflict", conflict)
 	}
 
-	firstDecision := observeHeld(t, lifecycle, first, firstOwner, HeldEvidence{ActiveTaskKnown: true, ActiveTask: true, OpenSessionKnown: true, OpenSession: true, ModTime: first.ModTime}, now)
-	secondDecision := observeHeld(t, lifecycle, second, secondOwner, HeldEvidence{ActiveTaskKnown: true, ActiveTask: true, OpenSessionKnown: true, OpenSession: true, ModTime: second.ModTime}, now)
+	firstDecision := observeHeld(t, lifecycle, first, firstOwner, HeldEvidence{ActiveTaskKnown: true, ActiveTask: true, ModTime: first.ModTime}, now)
+	secondDecision := observeHeld(t, lifecycle, second, secondOwner, HeldEvidence{ActiveTaskKnown: true, ActiveTask: true, ModTime: second.ModTime}, now)
 	thirdDecision := observeHeld(t, lifecycle, third, conflict, HeldEvidence{ActiveTaskKnown: true, ActiveTask: true, ModTime: third.ModTime}, now)
 
 	if firstDecision.State != HeldStateResolved || firstDecision.SessionID != "session-a" {
@@ -215,5 +210,107 @@ func TestAttributionBacklogNeverGuessesAcrossSimilarSpoolFilenames(t *testing.T)
 	}
 	if snapshot := lifecycle.Snapshot(now); snapshot.ActiveCount != 1 || snapshot.TerminalTotal != 0 {
 		t.Fatalf("similar-name snapshot = %#v, want only active unresolved third spool", snapshot)
+	}
+}
+
+func TestResolveTargetOwnerWiresRecentMissingOwnerIntoActiveReadiness(t *testing.T) {
+	spoolRoot, path := writeSpool(t, "b-recent")
+	logf, read := capturingLog()
+	s := newSidecar(filepath.Join(t.TempDir(), "unused.sock"), nil, spoolRoot, logf)
+	target := discover.Target{Path: path, Kind: tail.KindShellSpool, TaskID: "b-recent", Raw: true}
+
+	if session, ok := s.resolveTargetOwner(target, time.Now()); ok || session != "" {
+		t.Fatalf("resolveTargetOwner = (%q, %t), want active unresolved", session, ok)
+	}
+	readiness := s.held.Readiness(ActiveUnresolvedSpoolThreshold, time.Now())
+	if readiness.Ready || readiness.ActiveUnresolved != 1 || readiness.HistoricalTerminal != 0 {
+		t.Fatalf("readiness = %#v, want one active unresolved spool", readiness)
+	}
+	if got := linesContaining(read(), "active=1 terminal=0"); len(got) != 1 || !strings.Contains(got[0], `"level":"warn"`) {
+		t.Fatalf("bounded held reports = %v, want one active summary", got)
+	}
+}
+
+func TestResolveTargetOwnerWiresHistoricalSpoolIntoTerminalCount(t *testing.T) {
+	spoolRoot, path := writeSpool(t, "b-historical")
+	now := time.Now()
+	old := now.Add(-2 * UnownedSpoolWindow)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatalf("set historical spool time: %v", err)
+	}
+	logf, _ := capturingLog()
+	s := newSidecar(filepath.Join(t.TempDir(), "unused.sock"), nil, spoolRoot, logf)
+	target := discover.Target{Path: path, Kind: tail.KindShellSpool, TaskID: "b-historical", Raw: true}
+
+	if session, ok := s.resolveTargetOwner(target, now); ok || session != "" {
+		t.Fatalf("resolveTargetOwner = (%q, %t), want terminal without attribution", session, ok)
+	}
+	readiness := s.held.Readiness(ActiveUnresolvedSpoolThreshold, now)
+	if !readiness.Ready || readiness.ActiveUnresolved != 0 || readiness.HistoricalTerminal != 1 {
+		t.Fatalf("readiness = %#v, want terminal history excluded from readiness", readiness)
+	}
+}
+
+func TestResolveTargetOwnerKeepsOldAuthoritativeOpenTaskActive(t *testing.T) {
+	spoolRoot, path := writeSpool(t, "b-open-unowned")
+	now := time.Now()
+	old := now.Add(-2 * UnownedSpoolWindow)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatalf("set open spool time: %v", err)
+	}
+	logf, _ := capturingLog()
+	s := newSidecar(filepath.Join(t.TempDir(), "unused.sock"), nil, spoolRoot, logf)
+	s.markTaskOpen("b-open-unowned", OwnerSourceDurableOpenTask)
+	target := discover.Target{Path: path, Kind: tail.KindShellSpool, TaskID: "b-open-unowned", Raw: true}
+
+	if session, ok := s.resolveTargetOwner(target, now); ok || session != "" {
+		t.Fatalf("resolveTargetOwner = (%q, %t), want active unresolved", session, ok)
+	}
+	readiness := s.held.Readiness(ActiveUnresolvedSpoolThreshold, now)
+	if readiness.Ready || readiness.ActiveUnresolved != 1 || readiness.HistoricalTerminal != 0 {
+		t.Fatalf("readiness = %#v, want old open task to remain active", readiness)
+	}
+}
+
+func TestResolveTargetOwnerReleasesHoldThroughExactLiveOwner(t *testing.T) {
+	spoolRoot, path := writeSpool(t, "b-late-exact")
+	logf, read := capturingLog()
+	s := newSidecar(filepath.Join(t.TempDir(), "unused.sock"), nil, spoolRoot, logf)
+	target := discover.Target{Path: path, Kind: tail.KindShellSpool, TaskID: "b-late-exact", Raw: true}
+	now := time.Now()
+	if _, ok := s.resolveTargetOwner(target, now); ok {
+		t.Fatal("missing owner resolved before authoritative launch observation")
+	}
+	if !s.noteTaskOwner(target.TaskID, "session-live", path, OwnerSourceLiveLaunch) {
+		t.Fatal("exact live owner was not recorded")
+	}
+
+	session, ok := s.resolveTargetOwner(target, now.Add(time.Second))
+	if !ok || session != "session-live" {
+		t.Fatalf("resolveTargetOwner = (%q, %t), want session-live", session, ok)
+	}
+	if snapshot := s.held.Snapshot(now.Add(time.Second)); snapshot.ActiveCount != 0 || snapshot.TerminalTotal != 0 {
+		t.Fatalf("resolved snapshot = %#v, want empty lifecycle", snapshot)
+	}
+	if got := linesContaining(read(), "authoritative owner resolved"); len(got) != 1 {
+		t.Fatalf("resolution logs = %v, want one normal canonical transition", got)
+	}
+}
+
+func TestResolveTargetOwnerLogsStatFailureWithoutLifecycleMutation(t *testing.T) {
+	spoolRoot := t.TempDir()
+	path := filepath.Join(spoolRoot, "claude-501", "project", "runtime", "tasks", "b-vanished.output")
+	logf, read := capturingLog()
+	s := newSidecar(filepath.Join(t.TempDir(), "unused.sock"), nil, spoolRoot, logf)
+	target := discover.Target{Path: path, Kind: tail.KindShellSpool, TaskID: "b-vanished", Raw: true}
+
+	if session, ok := s.resolveTargetOwner(target, time.Now()); ok || session != "" {
+		t.Fatalf("resolveTargetOwner = (%q, %t), want unresolved vanished target", session, ok)
+	}
+	if snapshot := s.held.Snapshot(time.Now()); snapshot.ActiveCount != 0 || snapshot.TerminalTotal != 0 {
+		t.Fatalf("stat failure mutated lifecycle: %#v", snapshot)
+	}
+	if got := linesContaining(read(), "spool stat failed before lifecycle classification"); len(got) != 1 {
+		t.Fatalf("stat failure logs = %v, want one canonical record", got)
 	}
 }
