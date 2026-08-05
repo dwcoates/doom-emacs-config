@@ -391,3 +391,64 @@ func listOneWindow(t *testing.T, k *KeepAliveWindows, workspace string) KeepAliv
 	}
 	return got[0]
 }
+
+// A CLOSE THAT WOULD INVERT THE INTERVAL IS REFUSED BY NAME. An end below its
+// own start can only come from two clocks disagreeing, and the row it would
+// write covers nothing at all — the ping stops being excluded by the very act
+// meant to bound it.
+func TestKeepAliveWindowCloseRefusesAnInvertedInterval(t *testing.T) {
+	// Arrange.
+	k := newKeepAliveWindows(t)
+	if err := k.Open(KeepAliveWindow{TurnID: "ka_1", Workspace: "/ws", StartedAtMs: 5_000}); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// Act.
+	err := k.Close("ka_1", 1_000)
+
+	// Assert.
+	if !errors.Is(err, ErrKeepAliveWindowInverted) {
+		t.Fatalf("Close = %v, want ErrKeepAliveWindowInverted; an end below its own start was written silently", err)
+	}
+}
+
+// THE REFUSED CLOSE STILL BOUNDS THE ROW, clamped to its own start. Leaving it
+// open would trade a covers-nothing interval for an unbounded one that withholds
+// the workspace's whole conversation from here on — worse than the fault being
+// reported.
+func TestKeepAliveWindowCloseClampsAnInvertedIntervalToItsStart(t *testing.T) {
+	// Arrange.
+	k := newKeepAliveWindows(t)
+	if err := k.Open(KeepAliveWindow{TurnID: "ka_1", Workspace: "/ws", StartedAtMs: 5_000}); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// Act.
+	_ = k.Close("ka_1", 1_000)
+
+	// Assert.
+	if got := listOneWindow(t, k, "/ws"); got.EndedAtMs != 5_000 {
+		t.Fatalf("ended_at_ms = %d, want the window's own start 5000", got.EndedAtMs)
+	}
+}
+
+// THE RE-STAMP IS WHAT THE ON CONFLICT CLAUSE IS FOR. The pre-submit bound comes
+// off the daemon's clock; the ping's own start boundary replaces it with the
+// vendor's, the clock that stamps every item the window is compared against.
+func TestKeepAliveWindowOpenRestampsTheStart(t *testing.T) {
+	// Arrange — the provisional bound, taken before the ping was submitted.
+	k := newKeepAliveWindows(t)
+	if err := k.Open(KeepAliveWindow{TurnID: "ka_1", Workspace: "/ws", StartedAtMs: 9_000}); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// Act — the turn's own start boundary, on the vendor's clock.
+	if err := k.Open(KeepAliveWindow{TurnID: "ka_1", Workspace: "/ws", StartedAtMs: 1_000}); err != nil {
+		t.Fatalf("Open re-stamp: %v", err)
+	}
+
+	// Assert.
+	if got := listOneWindow(t, k, "/ws"); got.StartedAtMs != 1_000 {
+		t.Fatalf("started_at_ms = %d, want the boundary's own instant 1000", got.StartedAtMs)
+	}
+}

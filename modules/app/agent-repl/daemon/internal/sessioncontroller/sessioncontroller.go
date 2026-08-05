@@ -1972,6 +1972,13 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 	// item can reach the curation block with the ledger unset and be rendered
 	// as though the user had typed it.
 	cons.keepAliveWindows = m.cfg.KeepAliveWindows
+	// The keep-alive window's LOWER bound, moved onto the vendor's clock by the
+	// ping's own start boundary. Bound before Run for the same reason the ledger
+	// itself is: the very first boundary a ping produces is the one that carries
+	// the instant, and there is no second chance to observe it.
+	cons.onTurnStarted = func(turnID string, atMs int64) {
+		m.restampKeepAliveWindowStart(d, turnID, atMs)
+	}
 	// A rewind's discarded turns hold claims in the seq space it retires, and
 	// nothing in the new space will ever deliver their ends (sessionrewound.go).
 	if superseder, ok := m.cfg.SSM.(TurnClaimSuperseder); ok {
