@@ -418,9 +418,10 @@ func newTestMergeQueue(t *testing.T) merge.DurableQueue {
 // non-nil typed subscriptions preserve WireAgentShim's production invariant
 // without touching disk or another process.
 type emptyWorkspaceCreation struct {
-	available chan *frontendv1.WorkspaceAvailable
-	actions   chan *frontendv1.HostAction
-	closeOnce sync.Once
+	available          chan *frontendv1.WorkspaceAvailable
+	actions            chan *frontendv1.HostAction
+	publicationRelease chan server.SessionPublicationRelease
+	closeOnce          sync.Once
 	// beforeWSMerge / postprocessing are the CREATION-TIME merge actions this
 	// harness reports for every workspace, empty by default.
 	//
@@ -439,8 +440,9 @@ type emptyWorkspaceCreation struct {
 
 func newEmptyWorkspaceCreation() *emptyWorkspaceCreation {
 	return &emptyWorkspaceCreation{
-		available: make(chan *frontendv1.WorkspaceAvailable),
-		actions:   make(chan *frontendv1.HostAction),
+		available:          make(chan *frontendv1.WorkspaceAvailable),
+		actions:            make(chan *frontendv1.HostAction),
+		publicationRelease: make(chan server.SessionPublicationRelease),
 	}
 }
 
@@ -454,6 +456,14 @@ func (e *emptyWorkspaceCreation) MarkWorkspaceMaterialized(context.Context, stri
 
 func (e *emptyWorkspaceCreation) CompleteHostAction(context.Context, string, bool, string) error {
 	return fmt.Errorf("e2e: host actions are not exercised by this harness")
+}
+
+func (*emptyWorkspaceCreation) SessionPublicationDecision(worktreePath, sessionID string) (server.SessionPublicationDecision, error) {
+	return server.SessionPublicationDecision{WorktreePath: worktreePath, SessionID: sessionID, Materialized: true}, nil
+}
+
+func (e *emptyWorkspaceCreation) SubscribeSessionPublicationReleases() (<-chan server.SessionPublicationRelease, func()) {
+	return e.publicationRelease, e.close
 }
 
 func (e *emptyWorkspaceCreation) SnapshotHostWork() server.WorkspaceHostWorkSnapshot {
@@ -472,6 +482,7 @@ func (e *emptyWorkspaceCreation) close() {
 	e.closeOnce.Do(func() {
 		close(e.available)
 		close(e.actions)
+		close(e.publicationRelease)
 	})
 }
 
