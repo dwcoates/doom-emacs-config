@@ -37,6 +37,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -169,6 +170,9 @@ func startShimStore(t *testing.T, bin, sock string) {
 	dbPath := filepath.Join(t.TempDir(), "events.db")
 	logPath := filepath.Join(t.TempDir(), "shim-store.log")
 	cmd := exec.Command(bin, "-socket", sock, "-db", dbPath, "-log", logPath)
+	// Its own process group, so the reaper can kill the store AND anything it
+	// spawns as one unit rather than leaving grandchildren behind.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	// READINESS IS THE STORE'S OWN STATEMENT, NOT AN ELAPSED INTERVAL. The
 	// store logs `listening` to stderr only after server.Listen has bound the
 	// socket AND the accept loop owns it, so that record is strictly stronger
@@ -185,14 +189,21 @@ func startShimStore(t *testing.T, bin, sock string) {
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start shim-store: %v", err)
 	}
+	// Registered BEFORE anything below can call t.Fatalf: a readiness failure
+	// unwinds through t.Cleanup, but a SIGPIPE while waiting for readiness does
+	// not, and that window is long enough to matter (10s).
+	registerChild(cmd.Process.Pid)
 	// cmd.Wait (not Process.Wait) is what drains the stderr copier. childExit
 	// retains one immutable outcome behind a closed-channel latch, so readiness
 	// and cleanup can both observe an early exit without consuming each other's
 	// only copy and deadlocking the test teardown.
 	exited := observeChildExit(cmd.Wait)
 	t.Cleanup(func() {
-		_ = cmd.Process.Kill()
+		// Kill the GROUP, matching what the reaper would have done, then drop
+		// the registration so the end-of-run sweep cannot signal a recycled pid.
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		_ = exited.wait()
+		unregisterChild(cmd.Process.Pid)
 	})
 	select {
 	case <-ready:
