@@ -1621,6 +1621,79 @@ describe("thinking spinner", () => {
   });
 });
 
+const breathUserBubble = blockAfter(css, ".bubble.user {");
+const breathBubbleBody = blockAfter(css, ".bubble.user > .bubble-body {");
+const bubbleBreathKeyframes = blockAfter(css, "@keyframes bubble-breath {");
+const bubbleBreathTextKeyframes = blockAfter(css, "@keyframes bubble-breath-text {");
+const reducedBubbleBreath = blockAfter(
+  blockAfter(css, "@media (prefers-reduced-motion: reduce)"),
+  ".bubble.user,",
+);
+
+/** The two `scale(N)` factors a `0%, 100% { ... } 50% { ... }` keyframes block swings between. */
+function scaleSwing(keyframes: string): [number, number] {
+  const rest = keyframes.match(/0%,\s*100%\s*{\s*transform:\s*scale\(([\d.]+)\)/);
+  const peak = keyframes.match(/50%\s*{\s*transform:\s*scale\(([\d.]+)\)/);
+  if (rest === null || peak === null) throw new Error("keyframes are not a rest/peak scale swing");
+  return [Number(rest[1]), Number(peak[1])];
+}
+
+describe("prompt bubble breath", () => {
+  it("breathes the bubble itself with a continuous scale oscillation", () => {
+    // Arrange / Act — the .bubble.user rule.
+    // Assert
+    expect(breathUserBubble).toMatch(/animation:\s*bubble-breath\s+[\d.]+s\s+ease-in-out\s+infinite/);
+  });
+
+  it("breathes the body text with its own, distinct keyframes", () => {
+    // Arrange / Act — the .bubble.user > .bubble-body rule.
+    // Assert
+    expect(breathBubbleBody).toMatch(
+      /animation:\s*bubble-breath-text\s+[\d.]+s\s+ease-in-out\s+infinite/,
+    );
+  });
+
+  it("keeps the bubble and its text breathing in the same phase", () => {
+    // Arrange — the duration each animation shorthand declares.
+    const bubbleDuration = breathUserBubble.match(/animation:\s*bubble-breath\s+([\d.]+)s/)?.[1];
+    const textDuration = breathBubbleBody.match(/animation:\s*bubble-breath-text\s+([\d.]+)s/)?.[1];
+    // Act / Assert — one shared period, so neither drifts out of sync with the other.
+    expect(textDuration).toBe(bubbleDuration);
+  });
+
+  it("swings the bubble's own scale gently around 1", () => {
+    // Arrange / Act — the bubble-breath keyframes.
+    const [rest, peak] = scaleSwing(bubbleBreathKeyframes);
+    // Assert — a barely-there swing, not a visible pulse.
+    expect(rest).toBeLessThan(1);
+    expect(peak).toBeGreaterThan(1);
+    expect(peak - rest).toBeLessThan(0.02);
+  });
+
+  it("swings the text's scale wider than the bubble's, so the two move relative to each other", () => {
+    // Arrange
+    const [bubbleRest, bubblePeak] = scaleSwing(bubbleBreathKeyframes);
+    const [textRest, textPeak] = scaleSwing(bubbleBreathTextKeyframes);
+    // Act / Assert — the text's own swing is the LESS subtle of the two.
+    expect(textPeak - textRest).toBeGreaterThan(bubblePeak - bubbleRest);
+  });
+
+  it("scales from the bubble's own center, not a corner, so the breath reads as symmetric growth", () => {
+    // Arrange / Act — the .bubble.user rule.
+    // Assert
+    expect(breathUserBubble).toMatch(/transform-origin:\s*center/);
+  });
+
+  it("stops breathing under reduced motion rather than merely slowing", () => {
+    // Arrange / Act — the reduced-motion override, unlike the spinner and
+    // footer breath above, drops the animation outright: this breath is
+    // pure ambience, not a progress or liveness signal reduced motion must
+    // still convey.
+    // Assert
+    expect(reducedBubbleBreath).toMatch(/animation:\s*none/);
+  });
+});
+
 const animatedEllipsis = blockAfter(css, ".animated-ellipsis::after");
 const ellipsisBox = blockAfter(css, "\n.animated-ellipsis {");
 const ellipsisReserve = blockAfter(css, ".animated-ellipsis::before");
