@@ -871,23 +871,8 @@ func (c *consumer) Apply(ev *corev1.Event) error {
 		}
 	}
 	if ended := ev.GetTurnEnded(); ended != nil && ended.GetTurnId() != "" {
-		accounting := c.accounting.resolve(ev, c.now())
-		accounting, err := c.accountingStore.Record(c.sessionID, accounting)
-		if err != nil {
-			c.logf("session-controller: terminal accounting persistence FAILED session=%s turn_id=%s: %v", c.sessionID, ended.GetTurnId(), err)
-			return fmt.Errorf("session-controller: persist terminal accounting: %w", err)
-		}
-		c.accounting.commitResolved(ended.GetTurnId())
-		if terminal := c.pendingTerminal[ended.GetTurnId()]; terminal != nil {
-			c.terminalAccounting[terminal.GetSeq()] = accounting
-			c.mu.Lock()
-			c.completedTerminalBySeq[terminal.GetSeq()] = accounting
-			for _, response := range accounting.GetResponses() {
-				c.completedResponses[response.GetApiMessageId()] = response
-			}
-			c.mu.Unlock()
-			delete(c.pendingTerminal, ended.GetTurnId())
-			c.pushConversation(terminal, true)
+		if err := c.settleTurnAccounting(ended.GetTurnId()); err != nil {
+			return err
 		}
 		if c.onTerminalAccountingPersisted != nil {
 			c.onTerminalAccountingPersisted()
@@ -895,6 +880,66 @@ func (c *consumer) Apply(ev *corev1.Event) error {
 		}
 	}
 	return nil
+}
+
+// settleTurnAccounting resolves, persists, and RELEASES one turn's accounting.
+//
+// IT IS THE SINGLE RELEASE PATH FOR A RETAINED TERMINAL RESULT, and that is the
+// whole point. A terminal result is parked in pendingTerminal until its turn's
+// end is known; before this existed the only thing that could release it was a
+// stream `TurnEnded`. When the daemon closed a claim ITSELF — SynthesizeTurnClose,
+// which writes end_seq=0 because no event produced the close — no `TurnEnded`
+// ever arrived and the result was stranded permanently: the user never saw the
+// turn's answer, hibernation was refused every 30 seconds, and daemon restarts
+// were refused. One daemon lifetime held 16 results and released none.
+//
+// Both authorities on "this turn ended" now settle through here, so a close can
+// never happen without the release that belongs to it.
+func (c *consumer) settleTurnAccounting(turnID string) error {
+	accounting := c.accounting.resolveTurn(turnID, c.now())
+	accounting, err := c.accountingStore.Record(c.sessionID, accounting)
+	if err != nil {
+		c.logf("session-controller: terminal accounting persistence FAILED session=%s turn_id=%s: %v", c.sessionID, turnID, err)
+		return fmt.Errorf("session-controller: persist terminal accounting: %w", err)
+	}
+	c.accounting.commitResolved(turnID)
+	terminal := c.pendingTerminal[turnID]
+	if terminal == nil {
+		return nil
+	}
+	c.terminalAccounting[terminal.GetSeq()] = accounting
+	c.mu.Lock()
+	c.completedTerminalBySeq[terminal.GetSeq()] = accounting
+	for _, response := range accounting.GetResponses() {
+		c.completedResponses[response.GetApiMessageId()] = response
+	}
+	c.mu.Unlock()
+	delete(c.pendingTerminal, turnID)
+	c.pushConversation(terminal, true)
+	return nil
+}
+
+// ReleaseSynthesizedTurnClose settles every turn whose claim the daemon closed
+// without a `TurnEnded`, so a synthesized close carries the same release a real
+// end does. Failures are reported per turn and never abort the others: each
+// retained result is independent, and one unpersistable accounting record must
+// not strand the rest.
+func (c *consumer) ReleaseSynthesizedTurnClose(turnIDs []string, cause string) {
+	for _, turnID := range turnIDs {
+		if turnID == "" {
+			continue
+		}
+		retained := c.pendingTerminal[turnID] != nil
+		if err := c.settleTurnAccounting(turnID); err != nil {
+			c.logf("session-controller: synthesized turn close could NOT settle accounting session=%s turn_id=%s cause=%s retained_terminal=%v: %v — the turn's result stays unpublished and this is the record of why",
+				c.sessionID, turnID, cause, retained, err)
+			continue
+		}
+		if retained {
+			c.logf("session-controller: synthesized turn close RELEASED a retained terminal result session=%s turn_id=%s cause=%s — no TurnEnded will ever arrive for this turn, so the close is what publishes its result",
+				c.sessionID, turnID, cause)
+		}
+	}
 }
 
 // ApplyTurnClaimBridge is the sole consumer route for non-lifecycle rotation
@@ -923,7 +968,23 @@ func (c *consumer) ApplyTurnClaimBridge(ev *corev1.Event) error {
 		// once on the line below — and the bridge is still refused. Only the
 		// session's life is spared.
 		if errors.Is(err, ssm.ErrTurnBridgeDeadClaim) {
-			c.logf("session-controller: turn bridge REFUSED session=%s seq=%d turn_id=%q previous_session=%q — the claim is already closed, so this bridge is proof about a retired epoch and is recorded nowhere; the session SURVIVES and last_seen_seq advances past it: %v",
+			// THE DURABLE REFUSAL AND THE IN-MEMORY CORRELATION ARE TWO DIFFERENT
+			// CONCERNS, and conflating them is what made a survivable refusal fatal
+			// one event later.
+			//
+			// The ledger is right to refuse: its row for a closed claim is final,
+			// and a bridge arriving after the close is proof about a retired epoch.
+			// But the accounting reducer's correlation is not a durable record — it
+			// is the ONLY thing that lets the response usage FOLLOWING this bridge
+			// name its root turn (see observeTurnClaimBridge). Skipping it left
+			// activeTurnID unset, so the very next event raised
+			// unattributedResponseUsageError with reason=no_active_turn, which IS
+			// terminal. The session survived the bridge and died on its successor.
+			//
+			// Correlating a retired turn is safe: the ids that follow belong to that
+			// turn, and the next live TurnStarted replaces the correlation outright.
+			c.accounting.observeTurnClaimBridge(ev)
+			c.logf("session-controller: turn bridge REFUSED session=%s seq=%d turn_id=%q previous_session=%q — the claim is already closed, so this bridge is recorded in no durable row; the accounting correlation IS retained so the usage that follows can still name its root turn, the session SURVIVES, and last_seen_seq advances past it: %v",
 				c.sessionID, ev.GetSeq(), ev.GetTurnClaimBridge().GetTurnId(),
 				ev.GetTurnClaimBridge().GetPreviousSessionId(), err)
 			return nil
@@ -1109,7 +1170,15 @@ func (c *consumer) logRejectedAccountingObservation(ev *corev1.Event, cause erro
 			boundary = "turn_end"
 		}
 	}
-	c.logf("session-controller: turn accounting observation REJECTED before mutation session=%s authoritative_query_instance_id=%q query_instance_id=%q seq=%d request_id=%q turn_id=%q boundary=%s cause=%q kind=%s", c.sessionID, c.accounting.queryID, queryID, ev.GetSeq(), ev.GetRequestId(), turnID, boundary, cause.Error(), stateKind(ev))
+	// query_created_seq is the boundary that decides whether this row is
+	// REPLAYED HISTORY or live evidence, and its absence from this line is why a
+	// rejection could not be told apart from a genuine contradiction: both print
+	// two mismatched ids and nothing about which side of the boundary the row
+	// sits on.
+	c.logf("session-controller: turn accounting observation REJECTED before mutation session=%s authoritative_query_instance_id=%q query_instance_id=%q seq=%d query_created_seq=%d historical=%v request_id=%q turn_id=%q boundary=%s cause=%q kind=%s",
+		c.sessionID, c.accounting.queryID, queryID, ev.GetSeq(), c.accounting.queryCreatedSeq,
+		observation != nil && c.accounting.historicalAccountUsageObservation(ev, observation),
+		ev.GetRequestId(), turnID, boundary, cause.Error(), stateKind(ev))
 }
 
 func (c *consumer) surfaceUnexpectedQueryTermination(ev *corev1.Event, item *frontendv1.SystemFailureItem) {
