@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"agentrepl/shim-store/internal/db"
+	"agentrepl/shim-store/internal/healthcheck"
 	"agentrepl/shim-store/internal/logging"
 	"agentrepl/shim-store/internal/server"
 
@@ -35,12 +36,69 @@ func main() {
 	socketPath := flag.String("socket", filepath.Join(base, "sock", "store.sock"), "UDS path to listen on")
 	dbPath := flag.String("db", filepath.Join(base, "store", "events.db"), "SQLite database path")
 	logPath := flag.String("log", filepath.Join(base, "log", "shim-store.log"), "log file path (also mirrored to stderr)")
+	healthCheck := flag.Bool("health-check", false, "send one correlated HealthCheck and emit its JSON result")
+	healthRequestID := flag.String("health-request-id", "", "required correlation ID for -health-check")
+	healthTimeout := flag.Duration("health-timeout", 0, "required deadline for -health-check")
 	flag.Parse()
+	if *healthCheck {
+		os.Exit(runHealthCheck(*socketPath, *logPath, *healthRequestID, *healthTimeout, os.Stdout, os.Stderr))
+	}
 
 	if err := run(*socketPath, *dbPath, *logPath); err != nil {
 		reportFatal(err, os.Stderr)
 		os.Exit(1)
 	}
+}
+
+// runHealthCheck owns the CLI's one-shot health mode.  Its stdout is exactly
+// one Result JSON object; store diagnostics continue through the canonical log
+// and stderr sink rather than contaminating the machine-readable response.
+func runHealthCheck(socketPath, logPath, requestID string, timeout time.Duration, stdout, stderr io.Writer) int {
+	log, closeLog, err := openHealthLogger(socketPath, logPath, stderr)
+	if err != nil {
+		reportFatal(err, stderr)
+		writeHealthResult(stdout, healthcheck.Result{
+			RequestID:    requestID,
+			LatencyMS:    0,
+			Component:    "",
+			Healthy:      false,
+			FailureClass: healthcheck.FailureConnectFailure,
+			Reason:       fmt.Sprintf("health logger bootstrap failed: %v", err),
+		})
+		return healthcheck.ExitConnectFailure
+	}
+	defer closeLog()
+
+	result, exitCode := healthcheck.Probe(healthcheck.Config{
+		SocketPath: socketPath,
+		RequestID:  requestID,
+		Timeout:    timeout,
+	}, log)
+	if err := writeHealthResult(stdout, result); err != nil {
+		log.Log(logging.Fields{Component: "store", Socket: socketPath, RequestID: requestID, Operation: "health-check-output", Level: "error"}, "health JSON output failed: %v", err)
+		return healthcheck.ExitWriteFailure
+	}
+	return exitCode
+}
+
+func writeHealthResult(stdout io.Writer, result healthcheck.Result) error {
+	return json.NewEncoder(stdout).Encode(result)
+}
+
+// openHealthLogger creates the same durable store diagnostic sink used by the
+// service without touching the event database.  A one-shot probe is a store
+// operation, so failures must be traceable in the canonical store log.
+func openHealthLogger(socketPath, logPath string, stderr io.Writer) (*logging.Logger, func(), error) {
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+		return nil, nil, bootstrapError{fmt.Errorf("creating dir for %q: %w", logPath, err)}
+	}
+	lf, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return nil, nil, bootstrapError{fmt.Errorf("opening log %q: %w", logPath, err)}
+	}
+	log := logging.New(lf, stderr, os.Getenv("AGENT_REPL_LOG_VERBOSE") != "")
+	log = log.With(logging.Fields{Component: "store", Socket: socketPath})
+	return log, func() { _ = lf.Close() }, nil
 }
 
 // reportFatal writes only bootstrap failures because all post-bootstrap errors
