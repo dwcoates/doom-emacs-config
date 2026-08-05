@@ -50,9 +50,8 @@ func TestSpawnPassesExtraFileAndDirectsStderrWithoutDaemonPersistence(t *testing
 	if got, err := os.ReadFile(terminal.Name()); err != nil || string(got) != "stderr" {
 		t.Fatalf("terminal=%q err=%v", got, err)
 	}
-	if len(logger.logged()) != 0 {
-		t.Fatalf("direct stderr was parsed into daemon records: %#v", logger.logged())
-	}
+	assertLogContains(t, logger, "child reaped", `close_owner="caller"`, `shutdown_initiator="child_exit"`)
+	assertNoLogContains(t, logger, "shim stderr")
 }
 
 const recvTimeout = 5 * time.Second
@@ -213,7 +212,7 @@ func TestSpawnSurfacesMalformedLinesAsTransportErrors(t *testing.T) {
 	if evt.Type != "error" || evt.Code != "transport" {
 		t.Errorf("evt = %+v, want synthetic transport error", evt)
 	}
-	logger.record(t, 0, "normal", "undecodable event line")
+	assertLogContains(t, logger, "undecodable event line")
 }
 
 func TestSpawnClosesEventsOnProcessExit(t *testing.T) {
