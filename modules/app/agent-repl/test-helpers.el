@@ -337,11 +337,10 @@ work in the batch process.  Ignores every argument by design."
 
 ;; Isolate agent-repl's canonical state dir to a throwaway temp location
 ;; for the ENTIRE test session, BEFORE the module loads.  `core.el'
-;; resolves `agent-repl--global-state-dir' (and the log path default it
-;; bakes in at load) from the `AGENT_REPL_STATE_DIR' override, falling
-;; back to `~/.claude-emacs'; pointing that env var at a temp dir here
-;; ensures module load-time logging and any state writes never touch the
-;; developer's real `~/.claude-emacs' tree — which, if created by a test
+;; resolves `agent-repl--global-state-dir' from the
+;; `AGENT_REPL_STATE_DIR' override, falling back to `~/.claude-emacs';
+;; pointing that env var at a temp dir here ensures module state writes never
+;; touch the developer's real `~/.claude-emacs' tree — which, if created by a test
 ;; run, would otherwise block the one-time legacy migration on the next
 ;; interactive reload.  Individual tests that assert specific state-dir
 ;; paths rebind `process-environment' locally and are unaffected.
@@ -350,9 +349,15 @@ work in the batch process.  Ignores every argument by design."
 ;; the module reload below would re-bake load-time path constants from
 ;; it — both halves of the observed live-session poisoning.
 (when noninteractive
-  (setenv "AGENT_REPL_STATE_DIR"
-          (expand-file-name (format "agent-repl-test-state-%d" (emacs-pid))
-                            temporary-file-directory))
+  (let ((test-state-dir
+         (expand-file-name (format "agent-repl-test-state-%d" (emacs-pid))
+                           temporary-file-directory)))
+    (setenv "AGENT_REPL_STATE_DIR" test-state-dir)
+    ;; The global Emacs sink now lives in a UID-scoped OS-temp directory rather
+    ;; than the state tree.  Pre-bind its defcustom to this process's state dir
+    ;; so concurrent ERT processes cannot contend for one append-file lock.
+    (setq agent-repl-log-file-name
+          (expand-file-name "global-emacs.log" test-state-dir)))
 
   ;; Suppress timers at load time.  Both the periodic (`run-with-timer')
   ;; and idle (`run-with-idle-timer') registrations that fire at module
