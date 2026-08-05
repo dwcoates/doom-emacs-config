@@ -181,6 +181,18 @@ func (s dispatchStubAvailable) PublishWorkspaceAvailable(context.Context, create
 	return fmt.Errorf("e2e: workspace availability is not part of the merge dispatch route")
 }
 
+type dispatchStubPublication struct{ t *testing.T }
+
+func (s dispatchStubPublication) ReleaseSessionPublication(context.Context, create.PublicationDecision) error {
+	s.t.Error("a merge command file asked the daemon to RELEASE SESSION PUBLICATION: a merge entry creates no session publication gate")
+	return fmt.Errorf("e2e: session publication release is not part of the merge dispatch route")
+}
+
+func (s dispatchStubPublication) PrepareSessionPublication(context.Context, create.Job) error {
+	s.t.Error("a merge command file asked the daemon to PREPARE SESSION PUBLICATION: a merge entry creates no session publication gate")
+	return fmt.Errorf("e2e: session publication preparation is not part of the merge dispatch route")
+}
+
 // dispatchHostActions RECORDS rather than refuses.
 //
 // It is the one collaborator a merge entry may legitimately reach today: the
@@ -257,6 +269,8 @@ func newDispatchInbox(t *testing.T, h *e2eHarness) *dispatchInbox {
 		Health:      dispatchStubHealth{t: t},
 		Prompts:     dispatchStubPrompts{t: t},
 		Available:   dispatchStubAvailable{t: t},
+		Releases:    dispatchStubPublication{t: t},
+		Publication: dispatchStubPublication{t: t},
 		HostActions: d.sink,
 		Logf:        d.log.logf,
 	})
