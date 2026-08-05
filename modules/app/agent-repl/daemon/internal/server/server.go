@@ -1583,8 +1583,23 @@ func (s *Server) frontendCommandTranslator(workspace string) frontend.CommandTra
 }
 
 // runIdleSweeper periodically hibernates the shims of sessions that have gone
-// idle, freeing their CLI process pairs. It is the ONLY thing that initiates
-// hibernation.
+// idle, freeing their CLI process pairs.
+//
+// IT IS ONE OF THREE PLACES THAT INITIATE THE ONE TRANSITION, and the only one
+// that runs on a schedule. The other two ask the same question of the same
+// policy at the moments a session is actually used, because a schedule cannot
+// answer for the window before its first tick:
+//
+//   - the prompt gate (sessioncontroller.guardHibernation) evaluates a
+//     not-yet-hibernated record before accepting a prompt, so a stale session
+//     meets the revival gate instead of forwarding a cold full-context turn;
+//   - the bring-up (sessioncontroller.bringUpTracked) evaluates it before
+//     spawning, so a stale record sleeps without a shim ever being started.
+//
+// All three compute nothing themselves: they read keepalive.Config and route
+// through sessioncontroller.HibernateWithCause, which owns the claim, the fresh
+// elapsed re-check, the durable write and the SessionView push. This one still
+// exists because it is the only route that reaches a session NOBODY asks for.
 func (s *Server) runIdleSweeper() {
 	ticks := s.idleSweepTicks
 	if ticks == nil {
@@ -1699,33 +1714,80 @@ func (s *Server) stampLegacyTurnEnd(rec registry.Record) registry.Record {
 	if rec.LastTurnEndMs > 0 || s.registry == nil {
 		return rec
 	}
-	atMs, dated, err := s.ssm.LastActivityMs(rec.CWD)
-	if err != nil {
-		s.logf("session %s: legacy last_turn_end_ms stamp read FAILED (ws %s): %v — the session stays outside the keep-alive policy this tick",
-			rec.SessionID, rec.CWD, err)
+	atMs, ok := s.legacyTurnEnds().StampLegacyTurnEnd(rec.SessionID, rec.CWD)
+	if !ok {
 		return rec
+	}
+	rec.LastTurnEndMs = atMs
+	return rec
+}
+
+// legacyTurnEnds is the sweeper's view of the shared stamping rule. The session
+// controller is wired with the same object (main.go), so the acceptance-time
+// staleness check and this sweep measure a legacy session identically.
+func (s *Server) legacyTurnEnds() LegacyTurnEndStamps {
+	return LegacyTurnEndStamps{Reg: s.registry, Activity: s.ssm, Logf: s.logf}
+}
+
+// WorkspaceActivity is the one dated fact the legacy stamp is taken from: when
+// the workspace's durable state history last moved. Stated as an interface so
+// the stamping rule does not depend on the whole SSM.
+type WorkspaceActivity interface {
+	LastActivityMs(workspace string) (int64, bool, error)
+}
+
+// LegacyTurnEndStamps is THE legacy last-turn-end stamping rule, held as one
+// object because it has TWO callers now: the idle sweeper, and the session
+// controller's staleness check at prompt acceptance and bring-up. A second
+// expression of the rule would be a second answer to "when was this session
+// last active", and the two routes would then disagree about which sessions are
+// stale — the one thing this whole gate exists to make unambiguous.
+type LegacyTurnEndStamps struct {
+	Reg      *registry.Registry
+	Activity WorkspaceActivity
+	Logf     func(string, ...any)
+}
+
+// StampLegacyTurnEnd stamps sessionID's missing last-turn-end from workspace's
+// dated state history and reports the instant. A false return means there is no
+// dated fact to stamp from, or the stamp could not be made durable — never a
+// guessed instant, and never now().
+func (s LegacyTurnEndStamps) StampLegacyTurnEnd(sessionID, workspace string) (int64, bool) {
+	logf := s.Logf
+	if logf == nil {
+		logf = func(string, ...any) {}
+	}
+	if s.Reg == nil || s.Activity == nil {
+		logf("session %s: legacy last_turn_end_ms stamp SKIPPED (ws %s): no registry or no activity source is wired, so the session stays outside the keep-alive policy",
+			sessionID, workspace)
+		return 0, false
+	}
+	atMs, dated, err := s.Activity.LastActivityMs(workspace)
+	if err != nil {
+		logf("session %s: legacy last_turn_end_ms stamp read FAILED (ws %s): %v — the session stays outside the keep-alive policy this tick",
+			sessionID, workspace, err)
+		return 0, false
 	}
 	if !dated || atMs <= 0 {
-		return rec
+		return 0, false
 	}
-	found, err := s.registry.Update(rec.SessionID, func(r *registry.Record) {
+	found, err := s.Reg.Update(sessionID, func(r *registry.Record) {
 		if r.LastTurnEndMs == 0 {
 			r.LastTurnEndMs = atMs
 		}
 	})
 	if err != nil {
-		s.logf("session %s: legacy last_turn_end_ms stamp write FAILED (ws %s) at_ms=%d: %v — the session stays outside the keep-alive policy",
-			rec.SessionID, rec.CWD, atMs, err)
-		return rec
+		logf("session %s: legacy last_turn_end_ms stamp write FAILED (ws %s) at_ms=%d: %v — the session stays outside the keep-alive policy",
+			sessionID, workspace, atMs, err)
+		return 0, false
 	}
 	if !found {
-		s.logf("session %s: legacy last_turn_end_ms stamp found no record (ws %s)", rec.SessionID, rec.CWD)
-		return rec
+		logf("session %s: legacy last_turn_end_ms stamp found no record (ws %s)", sessionID, workspace)
+		return 0, false
 	}
-	s.logf("session %s: legacy record STAMPED with last_turn_end_ms=%d from its dated state history (ws %s) — it enters the cache keep-alive policy from here rather than living outside it",
-		rec.SessionID, atMs, rec.CWD)
-	rec.LastTurnEndMs = atMs
-	return rec
+	logf("session %s: legacy record STAMPED with last_turn_end_ms=%d from its dated state history (ws %s) — it enters the cache keep-alive policy from here rather than living outside it",
+		sessionID, atMs, workspace)
+	return atMs, true
 }
 
 // keepAliveConfig is the resolved policy, defaulting a zero Config rather than
