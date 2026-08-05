@@ -21,12 +21,54 @@ export interface FiveHourUsageSample {
   measurementAvailable: boolean;
   utilization: number | null;
   resetsAt: string | null;
+  /** Parsed once at the SDK boundary so downstream consumers never reinterpret provider text. */
+  resetsAtMs: number | null;
   subscriptionType: string | null;
   rateLimitsAvailable: boolean;
   sampleLatencyMs: number;
   unavailableReason?: string;
   /** Complete diagnostic when sampling failed before a valid response existed. */
   unavailableCause?: string;
+}
+
+/** Anthropic's documented cadence is the only identity structure the SDK exposes. */
+export const FIVE_HOUR_RESET_WINDOW_MS = 5 * 60 * 60 * 1000;
+export const FIVE_HOUR_RESET_WINDOW_CONTRACT_VERSION = "anthropic-five-hour-cadence-v1";
+
+export interface FiveHourWindowComparison {
+  startResetsAtMs: number;
+  endResetsAtMs: number;
+  rawDeltaMs: number;
+  canonicalCycleDisplacement: number;
+  residualJitterMs: number;
+  sameWindow: boolean;
+}
+
+/** Round to the nearest cycle with ties away from zero for signed symmetry. */
+function roundNearestCycleDisplacement(value: number): number {
+  return value < 0 ? -Math.round(-value) : Math.round(value);
+}
+
+/**
+ * Compare reset instants relative to one another without inventing an epoch-aligned ID.
+ * The provider's documented five-hour cadence makes the midpoint between adjacent
+ * reset events the only contract-derived crossing boundary.
+ */
+export function compareFiveHourResetWindows(startResetsAtMs: number, endResetsAtMs: number): FiveHourWindowComparison {
+  if (!Number.isFinite(startResetsAtMs) || !Number.isFinite(endResetsAtMs)) {
+    throw new Error("five-hour reset comparison requires finite parsed timestamps");
+  }
+  const rawDeltaMs = endResetsAtMs - startResetsAtMs;
+  const roundedDisplacement = roundNearestCycleDisplacement(rawDeltaMs / FIVE_HOUR_RESET_WINDOW_MS);
+  const canonicalCycleDisplacement = Object.is(roundedDisplacement, -0) ? 0 : roundedDisplacement;
+  return {
+    startResetsAtMs,
+    endResetsAtMs,
+    rawDeltaMs,
+    canonicalCycleDisplacement,
+    residualJitterMs: rawDeltaMs - canonicalCycleDisplacement * FIVE_HOUR_RESET_WINDOW_MS,
+    sameWindow: canonicalCycleDisplacement === 0,
+  };
 }
 
 /** Validate the experimental response instead of silently coercing a changed SDK shape. */
@@ -50,6 +92,7 @@ export function fiveHourUsageSample(
       measurementAvailable: false,
       utilization: null,
       resetsAt: null,
+      resetsAtMs: null,
       subscriptionType: response.subscription_type,
       rateLimitsAvailable: false,
       sampleLatencyMs,
@@ -63,6 +106,7 @@ export function fiveHourUsageSample(
       measurementAvailable: false,
       utilization: null,
       resetsAt: null,
+      resetsAtMs: null,
       subscriptionType: response.subscription_type,
       rateLimitsAvailable: true,
       sampleLatencyMs,
@@ -76,14 +120,23 @@ export function fiveHourUsageSample(
   if (window.resets_at !== null && typeof window.resets_at !== "string") {
     throw new Error("Claude five-hour resets_at is neither string nor null");
   }
+  const resetsAtMs = window.resets_at === null ? null : Date.parse(window.resets_at);
+  if (resetsAtMs !== null && !Number.isFinite(resetsAtMs)) {
+    throw new Error(`Claude five-hour resets_at is not a valid ISO 8601 timestamp: ${JSON.stringify(window.resets_at)}`);
+  }
   return {
     observedAtMs,
-    measurementAvailable: utilization !== null,
+    measurementAvailable: utilization !== null && resetsAtMs !== null,
     utilization,
     resetsAt: window.resets_at,
+    resetsAtMs,
     subscriptionType: response.subscription_type,
     rateLimitsAvailable: true,
     sampleLatencyMs,
-    ...(utilization === null ? { unavailableReason: "five_hour_utilization_unavailable" } : {}),
+    ...(resetsAtMs === null
+      ? { unavailableReason: "five_hour_window_unavailable" }
+      : utilization === null
+        ? { unavailableReason: "five_hour_utilization_unavailable" }
+        : {}),
   };
 }
