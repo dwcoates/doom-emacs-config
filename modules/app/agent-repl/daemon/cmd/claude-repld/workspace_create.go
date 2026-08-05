@@ -681,8 +681,21 @@ func (b *WorkspaceCreationBridge) ReleaseSessionPublication(_ context.Context, d
 		return fmt.Errorf("workspace create: invalid session-publication release job=%q worktree=%q session=%q materialized=%t", decision.JobID, decision.WorktreePath, decision.SessionID, decision.Materialized)
 	}
 	value := server.SessionPublicationRelease{JobID: decision.JobID, WorktreePath: decision.WorktreePath, SessionID: decision.SessionID, Completion: make(chan error, 1)}
+	value.Open = func() error {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		current, ok := b.publication[decision.WorktreePath]
+		if !ok || current.JobID != decision.JobID || current.SessionID != decision.SessionID {
+			return fmt.Errorf("workspace create: release open lost publication decision job=%q worktree=%q session=%q", decision.JobID, decision.WorktreePath, decision.SessionID)
+		}
+		current.Materialized = true
+		b.publication[decision.WorktreePath] = current
+		return nil
+	}
 	b.mu.Lock()
-	b.publication[decision.WorktreePath] = server.SessionPublicationDecision{JobID: decision.JobID, WorktreePath: decision.WorktreePath, SessionID: decision.SessionID, Materialized: true}
+	if _, ok := b.publication[decision.WorktreePath]; !ok {
+		b.publication[decision.WorktreePath] = server.SessionPublicationDecision{JobID: decision.JobID, WorktreePath: decision.WorktreePath, SessionID: decision.SessionID, Materialized: false}
+	}
 	subscriberCount := len(b.releases)
 	if subscriberCount != 1 {
 		b.mu.Unlock()

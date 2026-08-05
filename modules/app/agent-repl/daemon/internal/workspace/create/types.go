@@ -181,12 +181,25 @@ func SessionPublicationDecision(store JobStore, worktreePath, sessionID string) 
 	if match == nil && len(matches) == 1 {
 		match = matches[0]
 	}
-	if match == nil && len(matches) > 1 {
-		ids := make([]string, 0, len(matches))
+	if match == nil {
+		unmaterialized := make([]*Job, 0, len(matches))
 		for _, candidate := range matches {
-			ids = append(ids, candidate.ID)
+			if !candidate.Materialized {
+				unmaterialized = append(unmaterialized, candidate)
+			}
 		}
-		return PublicationDecision{}, fmt.Errorf("workspace create: publication gate cannot resolve worktree=%q frame_session=%q across job_ids=%q", worktreePath, sessionID, ids)
+		switch len(unmaterialized) {
+		case 0:
+			return PublicationDecision{WorktreePath: worktreePath, SessionID: sessionID, Materialized: true}, nil
+		case 1:
+			match = unmaterialized[0]
+		default:
+			ids := make([]string, 0, len(unmaterialized))
+			for _, candidate := range unmaterialized {
+				ids = append(ids, candidate.ID)
+			}
+			return PublicationDecision{}, fmt.Errorf("workspace create: publication gate cannot resolve worktree=%q frame_session=%q across unmaterialized_job_ids=%q", worktreePath, sessionID, ids)
+		}
 	}
 	if match == nil {
 		return PublicationDecision{WorktreePath: worktreePath, SessionID: sessionID, Materialized: true}, nil
