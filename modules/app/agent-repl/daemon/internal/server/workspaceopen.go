@@ -58,8 +58,10 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
+	"claude-repld/internal/errclass"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/session"
 	"claude-repld/internal/sessioncontroller"
@@ -113,7 +115,25 @@ func (o *WorkspaceOpener) Open(ctx context.Context, workspace string) error {
 	if !found {
 		return fmt.Errorf("server: open-workspace %q session %q disappeared after transcript binding", workspace, id)
 	}
-	return automaticResumeEstablishment(rec).classify(o.Ensurer.EnsureDriveable(ctx, workspace))
+	return o.establish(rec, workspace, o.Ensurer.EnsureDriveable(ctx, workspace))
+}
+
+// establish classifies a bring-up outcome for the open commands, and keeps ONE
+// outcome out of the resume classifier: a hibernation.
+//
+// The bring-up now evaluates the keep-alive policy before it spawns, so opening
+// a workspace whose record is long past the thresholds puts it to sleep instead
+// of starting a shim for it (sessioncontroller.hibernateIfStale). That is a
+// named, expected refusal the revival gate is rendered from — not a failure to
+// resume a transcript — and wrapping it in resume-failure evidence would show
+// the user a continuity error card for a session that is simply asleep.
+func (o *WorkspaceOpener) establish(rec registry.Record, workspace string, err error) error {
+	if errors.Is(err, errclass.ErrSessionHibernated) {
+		o.Logf("server: open-workspace %q session %s met the revival gate at bring-up: the record was found past the keep-alive policy's threshold and was hibernated instead of spawned; the user chooses a revival mode from the gate: %v",
+			workspace, rec.SessionID, err)
+		return err
+	}
+	return automaticResumeEstablishment(rec).classify(err)
 }
 
 // OpenDriveable is Open for a caller that is about to DRIVE the session rather
@@ -143,7 +163,7 @@ func (o *WorkspaceOpener) OpenDriveable(ctx context.Context, workspace string) e
 	if !found {
 		return fmt.Errorf("server: open-workspace %q session %q disappeared after transcript binding", workspace, id)
 	}
-	return automaticResumeEstablishment(rec).classify(o.Ensurer.EnsureDriveable(ctx, workspace))
+	return o.establish(rec, workspace, o.Ensurer.EnsureDriveable(ctx, workspace))
 }
 
 // Close is still not exposed daemon-side: the workspacecmd channel carries no
