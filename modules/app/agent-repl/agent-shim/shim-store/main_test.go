@@ -74,8 +74,8 @@ func TestRunHealthCheckWritesResultWhenLoggerBootstrapFails(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 	exitCode := runHealthCheck(filepath.Join(root, "missing.sock"), filepath.Join(blocked, "shim-store.log"), "doctor-123", time.Second, &stdout, &stderr)
-	if exitCode != 11 {
-		t.Fatalf("runHealthCheck exit = %d, want 11", exitCode)
+	if exitCode != 17 {
+		t.Fatalf("runHealthCheck exit = %d, want 17", exitCode)
 	}
 	var result struct {
 		RequestID    string `json:"request_id"`
@@ -84,8 +84,8 @@ func TestRunHealthCheckWritesResultWhenLoggerBootstrapFails(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
 		t.Fatalf("logger bootstrap failure omitted Result JSON: %v: %q", err, stdout.String())
 	}
-	if result.RequestID != "doctor-123" || result.FailureClass != "connect_failure" {
-		t.Fatalf("Result = %+v, want correlated connect_failure", result)
+	if result.RequestID != "doctor-123" || result.FailureClass != "client_failure" {
+		t.Fatalf("Result = %+v, want correlated client_failure", result)
 	}
 }
 
