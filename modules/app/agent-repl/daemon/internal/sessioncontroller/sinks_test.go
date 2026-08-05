@@ -2292,3 +2292,157 @@ func TestDeadClaimBridgeRefusalIsStillRecordedLoudly(t *testing.T) {
 		t.Fatalf("dead-claim refusal was not recorded loudly; log:\n%s", all)
 	}
 }
+
+// THE REGRESSION THIS PINS: the dead-claim refusal used to skip the accounting
+// correlation along with the durable row, so the response usage that FOLLOWED
+// the bridge had no root turn to name and died with
+// reason=no_active_turn — terminal. The session survived the bridge and was
+// killed by its successor, which is how `explanation-engine` became unopenable
+// (bridge refused at seq 7, usage fatal at seq 8, 42 refusals in one daemon).
+//
+// The ledger refusal is correct and unchanged; only the in-memory correlation,
+// which is not a durable record, is retained.
+func TestDeadClaimBridgeStillCorrelatesForTheUsageThatFollows(t *testing.T) {
+	// Arrange.
+	const turnID = "daemon-prompt-2-d41297f08566"
+	applier := &fakeApplier{bridgeErr: fmt.Errorf("%w: turn bridge id %q seq=6 conflicts with completed claim end_seq=0",
+		ssm.ErrTurnBridgeDeadClaim, turnID)}
+	c := newConsumer(
+		"ws", "s1", &fakePusher{}, applier, &fakeProgress{}, newFakeClearCompactStore(), emptyTurnAccountingStore{},
+		func(string, ...any) {}, nil, nil, nil, nil, nil,
+	)
+	bridge := &corev1.Event{
+		SessionId: "vendor-new",
+		Seq:       6,
+		Plane:     corev1.Plane_PLANE_STREAM,
+		Class:     corev1.EventClass_EVENT_CLASS_PERSISTENT,
+		RequestId: turnID,
+		Payload: &corev1.Event_TurnClaimBridge{TurnClaimBridge: &corev1.TurnClaimBridge{
+			TurnId: turnID, PreviousSessionId: "vendor-old",
+		}},
+	}
+
+	// Act.
+	if err := c.ApplyTurnClaimBridge(bridge); err != nil {
+		t.Fatalf("ApplyTurnClaimBridge = %v, want the session to survive a dead claim", err)
+	}
+
+	// Assert — the correlation the following usage depends on is present.
+	if c.accounting.activeTurnID != turnID {
+		t.Fatalf("activeTurnID = %q, want %q — without it the next response usage is unattributable and fatal",
+			c.accounting.activeTurnID, turnID)
+	}
+	if c.accounting.turns[turnID] == nil {
+		t.Fatalf("turn %q absent from the response ledger; usage would fail active_turn_missing_from_response_ledger", turnID)
+	}
+}
+
+// The durable half must NOT be softened by the above: a dead-claim bridge still
+// writes no ledger row.
+func TestDeadClaimBridgeWritesNoDurableRow(t *testing.T) {
+	// Arrange.
+	const turnID = "daemon-prompt-2-d41297f08566"
+	applier := &fakeApplier{bridgeErr: fmt.Errorf("%w: dead", ssm.ErrTurnBridgeDeadClaim)}
+	c := newConsumer(
+		"ws", "s1", &fakePusher{}, applier, &fakeProgress{}, newFakeClearCompactStore(), emptyTurnAccountingStore{},
+		func(string, ...any) {}, nil, nil, nil, nil, nil,
+	)
+
+	// Act.
+	_ = c.ApplyTurnClaimBridge(&corev1.Event{
+		SessionId: "vendor-new", Seq: 6,
+		Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT,
+		RequestId: turnID,
+		Payload: &corev1.Event_TurnClaimBridge{TurnClaimBridge: &corev1.TurnClaimBridge{
+			TurnId: turnID, PreviousSessionId: "vendor-old",
+		}},
+	})
+
+	// Assert — the ledger was asked exactly once and it refused; nothing retried
+	// or wrote around it.
+	if len(applier.bridges) != 1 {
+		t.Fatalf("durable bridge calls = %d, want exactly one refused attempt", len(applier.bridges))
+	}
+}
+
+// terminalResultEvent is a vendor result the consumer retains against an open
+// turn, which is what pendingTerminal holds.
+func terminalResultEvent(t *testing.T, seq uint64) *corev1.Event {
+	t.Helper()
+	return vendorEvent(t, &datav1.ClaudeStreamMessage{
+		Msg: &datav1.ClaudeStreamMessage_Result{Result: &datav1.ResultMessage{}},
+	}, seq)
+}
+
+// THE STRANDED-RESULT REGRESSION. A terminal result is retained until its
+// turn's end is known. The daemon can close a claim ITSELF (SynthesizeTurnClose,
+// end_seq=0) when the turn behind it can no longer produce a `TurnEnded` — and
+// before this, nothing released the retained result on that path. One daemon
+// lifetime retained 16 and released 0: the user never saw those turns' answers,
+// hibernation was refused every 30s, and daemon restarts were refused.
+func TestSynthesizedTurnCloseReleasesTheRetainedTerminalResult(t *testing.T) {
+	// Arrange — a turn is open and its terminal result is retained.
+	const turnID = "t-synth-1"
+	push := &fakePusher{}
+	c := newConsumer(
+		"ws", "s1", push, &fakeApplier{}, &fakeProgress{}, newFakeClearCompactStore(), emptyTurnAccountingStore{},
+		func(string, ...any) {}, nil, nil, nil, nil, nil,
+	)
+	c.accounting.turns[turnID] = &accountingTurn{}
+	c.accounting.activeTurnID = turnID
+	c.pendingTerminal[turnID] = terminalResultEvent(t, 42)
+
+	// Act — the daemon closes the claim; no TurnEnded will ever arrive.
+	c.ReleaseSynthesizedTurnClose([]string{turnID}, "already_complete")
+
+	// Assert — the retention is gone, which is what unwedges the turn.
+	if c.pendingTerminal[turnID] != nil {
+		t.Fatal("the terminal result is still retained after its claim closed; nothing else will ever release it")
+	}
+}
+
+// The release must PUBLISH, not merely forget: dropping the retention without
+// pushing would unwedge the turn while silently losing the user's answer.
+func TestSynthesizedTurnClosePublishesTheRetainedResult(t *testing.T) {
+	// Arrange.
+	const turnID = "t-synth-2"
+	push := &fakePusher{}
+	c := newConsumer(
+		"ws", "s1", push, &fakeApplier{}, &fakeProgress{}, newFakeClearCompactStore(), emptyTurnAccountingStore{},
+		func(string, ...any) {}, nil, nil, nil, nil, nil,
+	)
+	c.accounting.turns[turnID] = &accountingTurn{}
+	c.accounting.activeTurnID = turnID
+	c.pendingTerminal[turnID] = terminalResultEvent(t, 43)
+	before := len(push.convo)
+
+	// Act.
+	c.ReleaseSynthesizedTurnClose([]string{turnID}, "already_complete")
+
+	// Assert.
+	if len(push.convo) == before {
+		t.Fatal("the retained result was dropped rather than published; the user loses the turn's answer")
+	}
+}
+
+// A turn with nothing retained is a no-op rather than an error: most closes have
+// no parked result, and treating that as a failure would make the ordinary path
+// noisy.
+func TestSynthesizedTurnCloseWithNothingRetainedIsQuiet(t *testing.T) {
+	// Arrange.
+	push := &fakePusher{}
+	c := newConsumer(
+		"ws", "s1", push, &fakeApplier{}, &fakeProgress{}, newFakeClearCompactStore(), emptyTurnAccountingStore{},
+		func(string, ...any) {}, nil, nil, nil, nil, nil,
+	)
+	c.accounting.turns["t-none"] = &accountingTurn{}
+	before := len(push.convo)
+
+	// Act.
+	c.ReleaseSynthesizedTurnClose([]string{"t-none"}, "already_complete")
+
+	// Assert.
+	if len(push.convo) != before {
+		t.Fatalf("pushes = %d, want none for a close with no retained result", len(push.convo)-before)
+	}
+}

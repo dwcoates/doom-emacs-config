@@ -411,7 +411,18 @@ func validateAccountUsageObservation(queryID, requestID string, observation *cor
 }
 
 func (r *turnAccountingReducer) resolve(ended *corev1.Event, settledAt int64) *frontendv1.TurnAccounting {
-	turnID := ended.GetTurnEnded().GetTurnId()
+	return r.resolveTurn(ended.GetTurnEnded().GetTurnId(), settledAt)
+}
+
+// resolveTurn is resolve's body, reachable WITHOUT a TurnEnded event.
+//
+// A turn's end is written by two authorities: the stream's `TurnEnded`, and the
+// daemon itself when the turn behind a claim can no longer produce one
+// (SynthesizeTurnClose). Only the first used to be able to resolve accounting,
+// so a synthesized close left the turn's retained terminal result stranded
+// forever — 16 held against 0 released in one daemon lifetime. Both authorities
+// resolve through this one function so neither can drift from the other.
+func (r *turnAccountingReducer) resolveTurn(turnID string, settledAt int64) *frontendv1.TurnAccounting {
 	turn := r.turns[turnID]
 	if turn == nil {
 		return invalidTurnAccounting(turnID, r.queryID, nil, settledAt, runtimeIdentityProblem(r.queryID, incompleteRuntimeIdentityPaths(nil)))
