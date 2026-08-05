@@ -223,6 +223,9 @@ func TestE2EAHeldPromptIsDeliveredOnTheRewoundConversation(t *testing.T) {
 	// Arrange
 	s := newKeepAliveSession(t, testKeepAlivePolicy())
 	before := s.vendorID
+	// Without a transcript on disk the rewind degrades to un-rewound delivery
+	// and no new identity ever exists to assert on.
+	writeDefaultRewindFixture(t, s)
 	held := heldByKeepAlivePing(t, s, "delivered-on-the-new-conversation")
 
 	// Act — the identity the daemon files this session under after the rewind.
