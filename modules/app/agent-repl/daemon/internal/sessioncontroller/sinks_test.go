@@ -2284,12 +2284,24 @@ func TestDeadClaimBridgeRefusalIsStillRecordedLoudly(t *testing.T) {
 		t.Fatalf("ApplyTurnClaimBridge = %v, want the session spared", err)
 	}
 
-	// Assert.
+	// Assert — the refusal names itself, its turn, and its cause.
 	all := strings.Join(logged, "\n")
-	if !strings.Contains(all, "turn bridge REFUSED") ||
+	if !strings.Contains(all, "decision=refuse_dead_claim_bridge_session_survives") ||
 		!strings.Contains(all, "daemon-prompt-2-d41297f08566") ||
 		!strings.Contains(all, "conflicts with completed claim end_seq=0") {
 		t.Fatalf("dead-claim refusal was not recorded loudly; log:\n%s", all)
+	}
+	// ...and ONCE. The consumer used to log the refusal on entry and again
+	// inside the dead-claim branch, so one refusal produced two consumer records
+	// on top of the SSM's own.
+	refusals := 0
+	for _, line := range logged {
+		if strings.Contains(line, "turn bridge") && strings.Contains(line, "daemon-prompt-2-d41297f08566") {
+			refusals++
+		}
+	}
+	if refusals != 1 {
+		t.Fatalf("consumer recorded the bridge %d times, want exactly one; log:\n%s", refusals, all)
 	}
 }
 
