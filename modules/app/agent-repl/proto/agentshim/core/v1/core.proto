@@ -733,6 +733,9 @@ message ContentDelta {
     string signature = 6;
   }
   int64 estimated_tokens = 7;  // thinking deltas carry this (may be 0)
+  // Stable tool identity for input_json deltas.  The API block index is not
+  // sufficient after the durable record has already settled independently.
+  optional string tool_use_id = 8;
 }
 
 // EPHEMERAL tool_progress relay.
