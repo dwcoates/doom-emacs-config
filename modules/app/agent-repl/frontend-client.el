@@ -289,10 +289,16 @@ timer or UDS callback after either continuation runs."
                (agent-repl--uds-untrack-command request-id workspace "health-settled")
                (agent-repl--uds-untrack-health-response request-id workspace "health-settled"))
              (if ok
-                 (progn
-                   (agent-repl--log ws "frontend-health-async: HEALTHY what=%s field=%s request-id=%s elapsed=%.3fs"
-                                    what field request-id (- (float-time) started))
-                   (funcall on-success))
+                 (condition-case err
+                     (progn
+                       (agent-repl--log ws "frontend-health-async: HEALTHY what=%s field=%s request-id=%s elapsed=%.3fs"
+                                        what field request-id (- (float-time) started))
+                       (funcall on-success))
+                   (error
+                    (agent-repl--frontend-async-fail
+                     ws what request-id started on-failure
+                     (format "healthy continuation failed: %s"
+                             (error-message-string err)))))
                (agent-repl--frontend-async-fail ws what request-id started on-failure detail))))
          (dispatch ()
            (setq request-id (agent-repl--uds-send-command field payload workspace))
@@ -890,26 +896,29 @@ sweep timer fires (up to `agent-repl-frontend-reattach-interval' away), this
 drives the reattach IMMEDIATELY so every workspace is good to go the moment
 the restart returns.
 
-Waits for the new daemon to answer, then delegates to
-`agent-repl--frontend-reattach-check' — the SAME machinery the sweep timer
-runs.  Against a fresh instance that lists none of the old bindings, the
-sweep notes the new boot id (resetting the give-ups the previous instance
-left behind), re-ensures each bound workspace's session (a fresh shim that
-resumes the durable conversation), and remounts each live webview.  Returns
-the count of open workspaces that carried a session binding to rebind."
+Waits for the new daemon to answer after its reconnect snapshot has already
+run `agent-repl--frontend-recover-after-reconnect'.  That snapshot hook is the
+single owner of session recovery.  Launching the same sweep again here races
+its asynchronous creates and violates their one-create-per-workspace
+invariant.  This completion edge therefore remounts every live webview after
+the snapshot-owned recovery was driven, then reports the count of open
+workspaces that carried a session binding to rebind."
   (let ((n (cl-count-if (lambda (ws) (agent-repl--ws-get ws :frontend-session-id))
                         (agent-repl--live-ws-names))))
     (agent-repl--log nil "reattach: explicit rebind begin bound-workspaces=%d" n)
     (agent-repl--frontend-after-ready
-     (lambda () (agent-repl--frontend-reattach-check)
-    ;; reattach-check rebinds each workspace's daemon session and, via
-    ;; `agent-repl--frontend-sync-webview', remounts only those whose
-    ;; session id CHANGED.  A session that rehydrated under its old id is
-    ;; left untouched, so its webview would keep rendering the pre-bounce
-    ;; bundle.  Force a remount of EVERY open webview so a bounce reliably
-    ;; reloads the served bundle across the board — a bounce is exactly
-    ;; when a fresh build lands, and each remount replays history off the
-    ;; live session, so nothing is lost.
+     (lambda ()
+      (agent-repl--log nil
+                       "reattach: explicit rebind recovery-owner=snapshot-hook bound-workspaces=%d"
+                       n)
+      ;; The snapshot hook drives each workspace's daemon session and, via
+      ;; `agent-repl--frontend-sync-webview', remounts only those whose
+      ;; session id CHANGED.  A session that rehydrated under its old id is
+      ;; left untouched, so its webview would keep rendering the pre-bounce
+      ;; bundle.  Force a remount of EVERY open webview so a bounce reliably
+      ;; reloads the served bundle across the board — a bounce is exactly
+      ;; when a fresh build lands, and each remount replays history off the
+      ;; live session, so nothing is lost.
       (agent-repl--frontend-remount-all-webviews)
       (agent-repl--log nil "reattach: explicit rebind complete remounted-workspaces=%d" n)
       (when on-success (funcall on-success n)))

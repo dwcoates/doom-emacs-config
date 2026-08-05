@@ -215,6 +215,29 @@ Suitable for submitPrompt/interrupt/deleteSession, which do not await."
       (should (equal untracked-command '("health-1" nil "health-settled")))
       (should (equal untracked-health '("health-1" nil "health-settled"))))))
 
+(ert-deftest agent-repl-test-frontend-after-health-success-continuation-failure-is-terminal ()
+  "A healthy response still reports a failing continuation to its owner."
+  (let (failure response-callback)
+    (cl-letf (((symbol-function 'agent-repl--frontend-after-ready)
+               (lambda (ok _fail &optional _ws) (funcall ok) :ready))
+              ((symbol-function 'agent-repl--uds-send-command)
+               (lambda (&rest _) "health-2"))
+              ((symbol-function 'agent-repl--uds-track-health-response)
+               (lambda (_id _field _ws _session-id callback)
+                 (setq response-callback callback)))
+              ((symbol-function 'agent-repl--uds-track-command) #'ignore)
+              ((symbol-function 'agent-repl--uds-run-timer)
+               (lambda (&rest _) 'timer))
+              ((symbol-function 'agent-repl--uds-untrack-command) #'ignore)
+              ((symbol-function 'agent-repl--uds-untrack-health-response) #'ignore))
+      (agent-repl--frontend-after-health-command
+       "daemonHealth" nil nil nil "daemon"
+       (lambda () (error "rebind invariant"))
+       (lambda (detail) (setq failure detail)))
+      (funcall response-callback '(:healthy t))
+      (should (equal failure
+                     "healthy continuation failed: rebind invariant")))))
+
 (ert-deftest agent-repl-test-frontend-after-ensure-session-reuses-a-live-binding ()
   "ensure-session returns immediately and passes an operational live id onward."
   (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s-live")
@@ -803,42 +826,36 @@ instance's snapshot already resets the give-up state beside it."
 
 ;;;; ---- rebind after restart -------------------------------------------------------
 
-(ert-deftest agent-repl-test-frontend-rebind-waits-ready-before-reattach ()
-  "The rebind waits for the daemon to answer BEFORE driving the reattach.
-Order matters: `agent-repl--frontend-reattach-check' treats an unreachable
-daemon as \"nothing to reattach\", so probing before readiness would skip
-every workspace."
+(ert-deftest agent-repl-test-frontend-rebind-waits-ready-before-remount ()
+  "The rebind waits for the daemon snapshot before remounting webviews."
   ;; Arrange
   (let ((calls nil))
     (cl-letf (((symbol-function 'agent-repl--frontend-after-ready)
-               (lambda (ok _fail &optional _ws) (push 'ready calls) (funcall ok) :ready))
+              (lambda (ok _fail &optional _ws) (push 'ready calls) (funcall ok) :ready))
               ((symbol-function 'agent-repl--live-ws-names) (lambda () nil))
-              ((symbol-function 'agent-repl--frontend-reattach-check)
-               (lambda () (push 'reattach calls))))
+              ((symbol-function 'agent-repl--frontend-remount-all-webviews)
+               (lambda () (push 'remount-all calls))))
       ;; Act
       (agent-repl--frontend-rebind-workspaces-after-restart)
       ;; Assert
-      (should (equal (reverse calls) '(ready reattach))))))
+      (should (equal (reverse calls) '(ready remount-all))))))
 
-(ert-deftest agent-repl-test-frontend-rebind-remounts-all-after-reattach ()
-  "The rebind force-remounts every open webview, and only after the reattach.
-The reattach must rebind sessions first; the unconditional remount then
-guarantees each webview reloads the freshly built bundle."
+(ert-deftest agent-repl-test-frontend-rebind-remounts-after-snapshot-recovery ()
+  "The rebind force-remounts after snapshot-owned recovery was driven."
   ;; Arrange
   (let ((calls nil))
-    (cl-letf (((symbol-function 'agent-repl--frontend-after-ready) (lambda (ok _fail &optional _ws) (funcall ok) :ready))
+    (cl-letf (((symbol-function 'agent-repl--frontend-after-ready)
+               (lambda (ok _fail &optional _ws) (funcall ok) :ready))
               ((symbol-function 'agent-repl--live-ws-names) (lambda () nil))
-              ((symbol-function 'agent-repl--frontend-reattach-check)
-               (lambda () (push 'reattach calls)))
               ((symbol-function 'agent-repl--frontend-remount-all-webviews)
                (lambda () (push 'remount-all calls) 0)))
       ;; Act
       (agent-repl--frontend-rebind-workspaces-after-restart)
       ;; Assert
-      (should (equal (reverse calls) '(reattach remount-all))))))
+      (should (equal calls '(remount-all))))))
 
-(ert-deftest agent-repl-test-frontend-rebind-delegates-to-reattach-check ()
-  "The rebind drives the same sweep machinery that bounces and remounts."
+(ert-deftest agent-repl-test-frontend-rebind-does-not-duplicate-snapshot-recovery ()
+  "The rebind does not race the reconnect snapshot's recovery sweep."
   ;; Arrange
   (let ((reattached nil))
     (cl-letf (((symbol-function 'agent-repl--frontend-after-ready) (lambda (ok _fail &optional _ws) (funcall ok) :ready))
@@ -848,7 +865,7 @@ guarantees each webview reloads the freshly built bundle."
       ;; Act
       (agent-repl--frontend-rebind-workspaces-after-restart)
       ;; Assert
-      (should reattached))))
+      (should-not reattached))))
 
 (ert-deftest agent-repl-test-frontend-rebind-returns-bound-workspace-count ()
   "The rebind returns how many open workspaces carried a session binding."
