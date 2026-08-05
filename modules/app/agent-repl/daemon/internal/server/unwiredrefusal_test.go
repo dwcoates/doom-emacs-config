@@ -10,6 +10,7 @@ import (
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"claude-repld/internal/errclass"
+	frontend "claude-repld/internal/frontend"
 )
 
 // ---------------------------------------------------------------------------
@@ -27,12 +28,14 @@ import (
 // sessioncontroller does for a workspace that has not been brought up.
 type unwiredResyncer struct{}
 
-func (unwiredResyncer) Resync(string, uint64) error { return errclass.ErrNoLiveSessionController }
+func (unwiredResyncer) ResyncForGeneration(string, string, string, uint64) error {
+	return errclass.ErrNoLiveSessionController
+}
 
 // brokenResyncer fails for a reason that is nobody's routine expectation.
 type brokenResyncer struct{}
 
-func (brokenResyncer) Resync(string, uint64) error {
+func (brokenResyncer) ResyncForGeneration(string, string, string, uint64) error {
 	return errors.New("the retained ring is corrupt")
 }
 
@@ -89,7 +92,7 @@ func TestAFailedResyncIsLoggedWithItsCause(t *testing.T) {
 
 	// Assert.
 	for _, l := range logged {
-		if strings.Contains(l, "resync ws=/w request_id=r1 from_seq=1 FAILED") && strings.Contains(l, "the retained ring is corrupt") {
+		if strings.Contains(l, "resync ws=/w request_id=r1 session= generation= from_seq=1 FAILED") && strings.Contains(l, "the retained ring is corrupt") {
 			return
 		}
 	}
@@ -107,6 +110,24 @@ func TestAGenuineResyncFailureStaysLoud(t *testing.T) {
 	// Assert.
 	if err == nil {
 		t.Fatal("a genuine resync failure was quieted")
+	}
+}
+
+type supersededResyncer struct{}
+
+func (supersededResyncer) ResyncForGeneration(string, string, string, uint64) error {
+	return errclass.ErrSessionSuperseded
+}
+
+func TestStaleResyncCommandAckIsClassifiedSuperseded(t *testing.T) {
+	var logged []string
+	h := newResyncHandler(t, supersededResyncer{}, &logged)
+	ack := frontend.Dispatch(context.Background(), func(string, ...any) {}, h, nil, &frontendv1.FrontendCommand{
+		RequestId: "r-stale", Workspace: "/w",
+		Command: &frontendv1.FrontendCommand_Resync{Resync: &frontendv1.ResyncCmd{SessionId: "retired", ControllerGenerationId: "old"}},
+	})
+	if ack.GetFailure().GetErrorType() != string(errclass.TypeSessionSuperseded) {
+		t.Fatalf("failure type = %q, want %q", ack.GetFailure().GetErrorType(), errclass.TypeSessionSuperseded)
 	}
 }
 

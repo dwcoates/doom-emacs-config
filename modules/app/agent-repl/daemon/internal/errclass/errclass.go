@@ -331,6 +331,11 @@ var (
 	ErrShimVersionMismatch = errors.New("shimclient: protocol version mismatch")
 	ErrShimSeqRegression   = errors.New("shimclient: sequence regression")
 	ErrNotLiveSession      = errors.New("session-controller: not the live session for this workspace")
+	// ErrSessionSuperseded identifies a command whose authoritative workspace
+	// identity changed after the client rendered its snapshot.  It is distinct
+	// from ErrNotLiveSession: the command did name a once-valid session, but a
+	// newer controller generation now owns the replay eligibility decision.
+	ErrSessionSuperseded = errors.New("session-controller: command superseded by the current workspace generation")
 	// The establishment ladder's anchors. They are DISJOINT by construction:
 	// exactly one may appear in any one error chain, because each names the
 	// deepest hop that hop's failure reached, and a nack that matched two
@@ -379,6 +384,7 @@ var sentinelTypes = []struct {
 	{ErrShimVersionMismatch, TypeShimVersionMismatch},
 	{ErrShimSeqRegression, TypeShimSeqRegression},
 	{ErrNotLiveSession, TypeSessionNotLive},
+	{ErrSessionSuperseded, TypeSessionSuperseded},
 	{ErrNoLiveSessionController, TypeShimNotSpawned},
 	{ErrShimNotReady, TypeShimHandshakeIncomplete},
 	{ErrShimUnhealthy, TypeShimUnhealthy},
