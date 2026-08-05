@@ -1779,6 +1779,15 @@ message QueueEntry {
   // renders a dedicated "waiting on a keep-alive response" bubble from this
   // field instead of the classifier bubble.
   QueueEntryKeepAliveHold keep_alive_hold = 8;
+  // Present when this entry is held because a compact-first revival's
+  // compaction is still pending. Like the other two holds, the classifier
+  // NEVER runs on such an entry and there is NO force-through: the exits are
+  // delivery once the compaction lands and the gate opens, a loud drop when
+  // the revival fails or expires (a session still asleep can never deliver,
+  // so a retained entry would be a leak, not a delay), or QueueCancelCmd.
+  // The webapp renders a dedicated "waiting on the revival's compaction"
+  // bubble from this field instead of the classifier bubble.
+  QueueEntryRevivalHold revival_hold = 9;
 }
 
 // Present when this QueueEntry is held by a scheduled shutdown's drain lease
@@ -1799,6 +1808,13 @@ message QueueEntryKeepAliveHold {
   // turn_id of the in-flight keep-alive turn, joining the bubble to the turn
   // whose completion releases it.
   string turn_id = 1;
+}
+
+// The pending compact-first revival holding a queue entry.
+message QueueEntryRevivalHold {
+  // The session being revived, joining the bubble to the revival whose
+  // completed compaction releases this entry.
+  string session_id = 1;
 }
 
 // The session's queue, pushed on EVERY change and carried in StateSnapshot.
