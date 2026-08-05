@@ -23,6 +23,11 @@
 # with AGENT_REPL_STATE_ROOT (used by the unit dry-run to point at a fabricated
 # temp dir so the real cache is never touched).
 #
+# Store health uses the installed shim-store one-shot client.  Its JSON response
+# is retained verbatim in the doctor result metadata, rather than reimplementing
+# the correlated HealthCheck protocol in shell.  Tests may explicitly override
+# the binary with AGENT_REPL_DOCTOR_SHIM_STORE_BIN.
+#
 # Usage:
 #   agent-shim-doctor.sh [--json] [--deep-integrity]
 #     --json             emit a machine-readable JSON array instead of text lines.
@@ -42,6 +47,8 @@ STORE_DB="$STATE_ROOT/store/events.db"
 
 STORE_SOCK="$SOCK_DIR/store.sock"
 FRONTEND_SOCK="$SOCK_DIR/daemon-frontend.sock"
+STORE_HEALTH_CLIENT="${AGENT_REPL_DOCTOR_SHIM_STORE_BIN:-$STATE_ROOT/bin/shim-store}"
+STORE_HEALTH_TIMEOUT="${AGENT_REPL_DOCTOR_STORE_HEALTH_TIMEOUT:-2s}"
 
 STORE_LABEL="com.agentrepl.shim-store"
 SIDECAR_LABEL="com.agentrepl.shim-claude-sidecar"
@@ -65,14 +72,18 @@ R_NAME=()
 R_STATUS=()
 R_DETAIL=()
 R_HINT=()
+R_METADATA=()
+R_INSTRUMENTATION=()
 FAIL_COUNT=0
 
-# record NAME STATUS DETAIL [HINT]
+# record NAME STATUS DETAIL [HINT [METADATA_JSON [INSTRUMENTATION_JSON]]]
 record() {
   R_NAME+=("$1")
   R_STATUS+=("$2")
   R_DETAIL+=("$3")
   R_HINT+=("${4:-}")
+  R_METADATA+=("${5:-null}")
+  R_INSTRUMENTATION+=("${6:-null}")
   [ "$2" = "FAIL" ] && FAIL_COUNT=$((FAIL_COUNT + 1))
   return 0
 }
@@ -115,22 +126,68 @@ check_store_socket_present() {
 }
 
 check_store_socket_connectable() {
-  if ! command -v nc >/dev/null 2>&1; then
-    record "store-socket-connectable" "SKIP" "nc not installed; cannot probe $STORE_SOCK" \
-      "install netcat (nc) to enable the connectability probe"
+  local request_id output exit_code failure_class hint instrumentation
+  request_id="doctor-$(date +%s)-$$-$RANDOM"
+  instrumentation="{\"client\":\"$(json_escape "$STORE_HEALTH_CLIENT")\",\"socket\":\"$(json_escape "$STORE_SOCK")\",\"request_id\":\"$request_id\",\"timeout\":\"$(json_escape "$STORE_HEALTH_TIMEOUT")\""
+
+  if [ ! -x "$STORE_HEALTH_CLIENT" ]; then
+    record "store-socket-connectable" "FAIL" \
+      "store health client unavailable at $STORE_HEALTH_CLIENT (request_id=$request_id)" \
+      "install shim-store at $STATE_ROOT/bin/shim-store before running doctor" \
+      "{\"request_id\":\"$request_id\",\"latency_ms\":0,\"component\":\"shim-store-client\",\"healthy\":false,\"failure_class\":\"client_unavailable\",\"reason\":\"health client is not executable\"}" \
+      "${instrumentation}}"
     return 0
   fi
-  if [ ! -S "$STORE_SOCK" ]; then
-    record "store-socket-connectable" "FAIL" "no socket to connect to at $STORE_SOCK" \
-      "shim-store not running; start '$STORE_LABEL' (install.sh --with-agent-shim-services)"
-    return 0
-  fi
-  if nc -U -w 2 "$STORE_SOCK" </dev/null >/dev/null 2>&1; then
-    record "store-socket-connectable" "PASS" "connected to $STORE_SOCK"
+
+  if output="$("$STORE_HEALTH_CLIENT" -health-check -socket "$STORE_SOCK" -health-request-id "$request_id" -health-timeout "$STORE_HEALTH_TIMEOUT")"; then
+    exit_code=0
   else
-    record "store-socket-connectable" "FAIL" "socket file present but connection refused at $STORE_SOCK" \
-      "shim-store socket is stale (process gone); check '$STORE_LABEL' liveness via launchctl"
+    exit_code=$?
   fi
+  instrumentation="${instrumentation},\"exit_code\":$exit_code}"
+
+  case "$exit_code" in
+    0)
+      record "store-socket-connectable" "PASS" \
+        "store health check passed (request_id=$request_id; response=$output)" \
+        "" "$output" "$instrumentation"
+      ;;
+    10)
+      failure_class="missing_socket"
+      hint="shim-store socket is absent; start '$STORE_LABEL' and confirm $STORE_SOCK is created"
+      ;;
+    11)
+      failure_class="connect_failure"
+      hint="shim-store could not accept the health connection; inspect '$STORE_LABEL' liveness and its log"
+      ;;
+    12)
+      failure_class="write_failure"
+      hint="the store health request could not be written; inspect '$STORE_LABEL' and socket ownership"
+      ;;
+    13)
+      failure_class="timeout"
+      hint="shim-store did not answer before $STORE_HEALTH_TIMEOUT; inspect '$STORE_LABEL' responsiveness and logs"
+      ;;
+    14)
+      failure_class="decode_failure"
+      hint="shim-store returned an invalid health response; inspect '$STORE_LABEL' protocol logs"
+      ;;
+    15)
+      failure_class="mismatched_request_id"
+      hint="shim-store returned a health response for another request; inspect protocol correlation in '$STORE_LABEL'"
+      ;;
+    16)
+      failure_class="unhealthy_response"
+      hint="shim-store reported itself unhealthy; inspect its health reason and service log"
+      ;;
+    *)
+      failure_class="unexpected_exit"
+      hint="shim-store health client exited unexpectedly; inspect the client and '$STORE_LABEL' logs"
+      ;;
+  esac
+  record "store-socket-connectable" "FAIL" \
+    "store health check failed with $failure_class (request_id=$request_id; exit_code=$exit_code; response=$output)" \
+    "$hint" "$output" "$instrumentation"
 }
 
 check_frontend_socket_present() {
@@ -261,7 +318,7 @@ check_store_db() {
 # --- Rendering ----------------------------------------------------------
 
 render_text() {
-  local i status line
+  local i status line metadata instrumentation
   echo "agent-shim-doctor — state root: $STATE_ROOT"
   echo
   for i in "${!R_NAME[@]}"; do
@@ -269,6 +326,14 @@ render_text() {
     printf '[%s] %-28s %s\n' "$status" "${R_NAME[$i]}" "${R_DETAIL[$i]}"
     if [ "$status" != "PASS" ] && [ -n "${R_HINT[$i]}" ]; then
       printf '        hint: %s\n' "${R_HINT[$i]}"
+    fi
+    metadata="${R_METADATA[$i]}"
+    instrumentation="${R_INSTRUMENTATION[$i]}"
+    if [ "$metadata" != "null" ]; then
+      printf '        metadata: %s\n' "$metadata"
+    fi
+    if [ "$instrumentation" != "null" ]; then
+      printf '        instrumentation: %s\n' "$instrumentation"
     fi
   done
   echo
@@ -285,12 +350,14 @@ render_json() {
   local i sep=""
   printf '['
   for i in "${!R_NAME[@]}"; do
-    printf '%s{"check":"%s","status":"%s","detail":"%s","hint":"%s"}' \
+    printf '%s{"check":"%s","status":"%s","detail":"%s","hint":"%s","metadata":%s,"instrumentation":%s}' \
       "$sep" \
       "$(json_escape "${R_NAME[$i]}")" \
       "$(json_escape "${R_STATUS[$i]}")" \
       "$(json_escape "${R_DETAIL[$i]}")" \
-      "$(json_escape "${R_HINT[$i]}")"
+      "$(json_escape "${R_HINT[$i]}")" \
+      "${R_METADATA[$i]}" \
+      "${R_INSTRUMENTATION[$i]}"
     sep=","
   done
   printf ']\n'
