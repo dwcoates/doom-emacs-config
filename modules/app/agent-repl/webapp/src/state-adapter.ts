@@ -239,7 +239,7 @@ export interface SessionViewInput {
  * from the one the finished record is matched against, which is the bug this
  * shape used to have.
  */
-export interface TypingReveal {
+interface TypingRevealBase {
   workspace: string;
   sessionId: string;
   /**
@@ -253,9 +253,19 @@ export interface TypingReveal {
   messageId: string;
   /** The block's ordinal within that message, as the API numbered it. */
   blockIndex: number;
-  kind: "text" | "thinking" | "input_json";
   delta: string;
 }
+
+/** A valid live prose delta. */
+export type TypingReveal =
+  | (TypingRevealBase & { kind: "text" | "thinking" })
+  | (TypingRevealBase & { kind: "input_json"; toolUseId: string });
+
+/** Wire-invalid input delta retained only until store batch validation aborts. */
+export type UnidentifiedToolInputReveal = TypingRevealBase & {
+  kind: "input_json";
+  toolUseId?: string;
+};
 
 /**
  * One long-running tool's liveness tick (E4), flattened from a `HeartbeatView`.
@@ -407,7 +417,7 @@ export type AdapterEffect =
       throughSeq: number;
       items: ConversationItem[];
     }
-  | { kind: "typing"; value: TypingReveal }
+  | { kind: "typing"; value: TypingReveal | UnidentifiedToolInputReveal }
   | { kind: "tool-progress"; value: ToolProgressInput }
   | { kind: "queue"; value: QueueInput }
   | { kind: "task-catalog"; value: TaskCatalogInput }
@@ -744,17 +754,20 @@ export class StateAdapter {
 
   private typingEffects(td: TypingDelta): AdapterEffect[] {
     if (td.kind === "signature") return [this.ignore("content-delta:signature")];
+    const base = {
+      workspace: td.workspace,
+      sessionId: td.sessionId,
+      messageId: td.uuid,
+      blockIndex: td.blockIndex,
+      delta: td.delta,
+    };
+    const value = td.kind === "input_json"
+      ? { ...base, kind: td.kind, ...(td.toolUseId === undefined ? {} : { toolUseId: td.toolUseId }) }
+      : { ...base, kind: td.kind };
     return [
       {
         kind: "typing",
-        value: {
-          workspace: td.workspace,
-          sessionId: td.sessionId,
-          messageId: td.uuid,
-          blockIndex: td.blockIndex,
-          kind: td.kind,
-          delta: td.delta,
-        },
+        value,
       },
     ];
   }

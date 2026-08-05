@@ -24,6 +24,7 @@ import type {
   SessionViewInput,
   ToolProgressInput,
   TypingReveal,
+  UnidentifiedToolInputReveal,
   WorkspaceStatusInput,
 } from "../src/state-adapter.js";
 import type {
@@ -88,7 +89,11 @@ function sessionEffect(over: Partial<SessionViewInput> = {}): AdapterEffect {
   };
 }
 
-function typingEffect(over: Partial<TypingReveal> = {}): AdapterEffect {
+type TextReveal = { workspace: string; sessionId: string; messageId: string; blockIndex: number; kind: "text"; delta: string };
+type ThinkingReveal = { workspace: string; sessionId: string; messageId: string; blockIndex: number; kind: "thinking"; delta: string };
+type InputReveal = { workspace: string; sessionId: string; messageId: string; blockIndex: number; kind: "input_json"; toolUseId: string; delta: string };
+
+function typingEffect(over: Partial<TextReveal> = {}): AdapterEffect {
   return {
     kind: "typing",
     value: {
@@ -100,6 +105,36 @@ function typingEffect(over: Partial<TypingReveal> = {}): AdapterEffect {
       delta: "hi",
       ...over,
     },
+  };
+}
+
+function inputTypingEffect(over: Partial<InputReveal> = {}): AdapterEffect {
+  return {
+    kind: "typing",
+    value: {
+      workspace: "ws",
+      sessionId: "s1",
+      messageId: "u1",
+      blockIndex: 0,
+      kind: "input_json",
+      toolUseId: "tu1",
+      delta: "{",
+      ...over,
+    },
+  };
+}
+
+function thinkingTypingEffect(over: Partial<ThinkingReveal> = {}): AdapterEffect {
+  return {
+    kind: "typing",
+    value: { workspace: "ws", sessionId: "s1", messageId: "u1", blockIndex: 0, kind: "thinking", delta: "hmm", ...over },
+  };
+}
+
+function unidentifiedInputTypingEffect(over: Partial<UnidentifiedToolInputReveal> = {}): AdapterEffect {
+  return {
+    kind: "typing",
+    value: { workspace: "ws", sessionId: "s1", messageId: "u1", blockIndex: 0, kind: "input_json", delta: "{", ...over },
   };
 }
 
@@ -867,33 +902,121 @@ describe("ingest typing", () => {
     // Arrange
     const store = new ConversationStore();
     // Act
-    store.ingest([typingEffect({ kind: "thinking", messageId: "u2", blockIndex: 0, delta: "weigh" })]);
+    store.ingest([thinkingTypingEffect({ messageId: "u2", blockIndex: 0, delta: "weigh" })]);
     // Assert
     expect(store.state.items[0].kind).toBe("thinking");
   });
 
-  it("grows the most recent open tool's input for an input_json delta", () => {
-    // Arrange — an open tool call awaiting its input.
+  it("grows the exact tool's input for an input_json delta", () => {
     const store = new ConversationStore();
     store.ingest([
       itemsEffect([toolItem({ toolUseId: "tu1", inputJson: '{"cmd":', inputDone: false })]),
     ]);
     // Act
-    store.ingest([typingEffect({ kind: "input_json", delta: '"ls"}' })]);
+    store.ingest([inputTypingEffect({ delta: '"ls"}' })]);
     // Assert
     expect((store.state.items[0] as ToolItem).inputJson).toBe('{"cmd":"ls"}');
   });
 
-  it("loud-logs (never silently drops) an input_json delta with no open tool", () => {
-    // Arrange
-    const logged: Array<[string, string]> = [];
-    const store = new ConversationStore((level, message) => logged.push([level, message]));
-    // Act
-    const result = store.ingest([typingEffect({ kind: "input_json", delta: "x" })]);
-    // Assert — no change, and a warning names the orphaned delta.
-    expect(result.changed).toBe(false);
+  it("emits one verbose exact-ID reconciliation record with the chunk evidence", () => {
+    const logged: Array<[string, string, Record<string, unknown> | undefined, boolean | undefined]> = [];
+    const store = new ConversationStore((level, message, context, verbose) => logged.push([level, message, context, verbose]));
+    store.ingest([sessionEffect({ claudeSessionId: "claude-s1" })]);
+    store.ingest([inputTypingEffect({ toolUseId: "tu-evidence", messageId: "api-msg", blockIndex: 4, delta: "xyz" })]);
+    expect(logged).toEqual([[
+      "info",
+      "tool input delta reconciled branch=preview_created",
+      expect.objectContaining({
+        operation: "conversation-store.tool-input",
+        workspace: "ws",
+        agent_repl_session_id: "s1",
+        claude_session_id: "claude-s1",
+        api_message_id: "api-msg",
+        block_index: 4,
+        tool_use_id: "tu-evidence",
+        chunk_length: 3,
+        item_phase: "absent",
+        branch: "preview_created",
+      }),
+      true,
+    ]]);
+  });
+
+  it("rejects a missing tool identity once before any batch mutation", () => {
+    const logged: Array<[string, string, Record<string, unknown> | undefined]> = [];
+    const store = new ConversationStore((level, message, context) => logged.push([level, message, context]));
+    store.ingest([sessionEffect({ claudeSessionId: "claude-s1" })]);
+    const before = structuredClone(store.state);
+    expect(() => store.ingest([unidentifiedInputTypingEffect(), typingEffect({ delta: "must-not-land" })])).toThrow(/missing stable tool identity/);
+    expect(store.state).toEqual(before);
     expect(logged).toHaveLength(1);
-    expect(logged[0][0]).toBe("warn");
+    expect(logged[0][0]).toBe("error");
+    expect(logged[0][2]).toMatchObject({
+      operation: "conversation-store.tool-input",
+      workspace: "ws",
+      agent_repl_session_id: "s1",
+      claude_session_id: "claude-s1",
+      api_message_id: "u1",
+      block_index: 0,
+      tool_use_id: "",
+      chunk_length: 1,
+      item_phase: "unresolved",
+      branch: "missing_identity",
+    });
+  });
+
+  it("replaces an ephemeral preview with authoritative durable input", () => {
+    const store = new ConversationStore();
+    store.ingest([inputTypingEffect({ toolUseId: "tu-preview", delta: '{"partial":' })]);
+    store.ingest([itemsEffect([toolItem({ toolUseId: "tu-preview", input: { command: "ls" }, inputDone: true })])]);
+    expect(store.state.items).toMatchObject([{ kind: "tool", toolUseId: "tu-preview", input: { command: "ls" }, inputJson: "", inputDone: true }]);
+  });
+
+  it("reconciles multiple tool blocks of one API message by their individual identities", () => {
+    const store = new ConversationStore();
+    store.ingest([
+      inputTypingEffect({ messageId: "api-one", blockIndex: 0, toolUseId: "tu-left", delta: "left" }),
+      inputTypingEffect({ messageId: "api-one", blockIndex: 1, toolUseId: "tu-right", delta: "right" }),
+    ]);
+    expect(store.state.items).toMatchObject([
+      { kind: "tool", toolUseId: "tu-left", inputJson: "left" },
+      { kind: "tool", toolUseId: "tu-right", inputJson: "right" },
+    ]);
+  });
+
+  it("keeps a durable final authoritative when reconnect delivers a late chunk", () => {
+    const store = new ConversationStore();
+    store.ingest([itemsEffect([toolItem({ toolUseId: "tu-final", input: { command: "pwd" }, inputDone: true })])]);
+    expect(store.ingest([inputTypingEffect({ toolUseId: "tu-final", delta: "ignored" })]).changed).toBe(false);
+    expect((store.state.items[0] as ToolItem)).toMatchObject({ input: { command: "pwd" }, inputJson: "", inputDone: true });
+  });
+
+  it("keeps exact durable redelivery idempotent after an input preview", () => {
+    const store = new ConversationStore();
+    const final = toolItem({ toolUseId: "tu-redeliver", input: { path: "/a" }, inputDone: true });
+    store.ingest([inputTypingEffect({ toolUseId: "tu-redeliver", delta: '{"path":' })]);
+    store.ingest([itemsEffect([final]), itemsEffect([final])]);
+    expect(store.state.items).toHaveLength(1);
+    expect((store.state.items[0] as ToolItem).input).toEqual({ path: "/a" });
+  });
+
+  it("preserves exact final input across deterministic cross-plane permutations", () => {
+    const permutations = <T,>(values: readonly T[]): T[][] => values.length === 0
+      ? [[]]
+      : values.flatMap((value, index) => permutations([...values.slice(0, index), ...values.slice(index + 1)]).map((rest) => [value, ...rest]));
+    const events = ["first", "second", "final"] as const;
+    for (const order of permutations(events)) {
+      const store = new ConversationStore();
+      for (const event of order) {
+        if (event === "final") {
+          store.ingest([itemsEffect([toolItem({ toolUseId: "tu-permute", input: { command: "echo final" }, inputDone: true })])]);
+        } else {
+          store.ingest([inputTypingEffect({ toolUseId: "tu-permute", delta: event })]);
+        }
+      }
+      expect(store.state.items).toHaveLength(1);
+      expect(store.state.items[0]).toMatchObject({ kind: "tool", toolUseId: "tu-permute", input: { command: "echo final" }, inputJson: "", inputDone: true });
+    }
   });
 });
 
@@ -1427,7 +1550,7 @@ describe("a finished block settles onto its streamed preview", () => {
     // Arrange: the reported bug's exact shape — a [thinking, text] message,
     // so the text streams at API block index 1.
     const store = new ConversationStore();
-    store.ingest([typingEffect({ kind: "thinking", messageId: "msg_01ABC", blockIndex: 0, delta: "hmm" })]);
+    store.ingest([thinkingTypingEffect({ messageId: "msg_01ABC", blockIndex: 0, delta: "hmm" })]);
     store.ingest([typingEffect({ kind: "text", messageId: "msg_01ABC", blockIndex: 1, delta: "Hel" })]);
 
     // Act: the finished text record, whose own content index is 0.
@@ -1498,7 +1621,7 @@ describe("a finished block settles onto its streamed preview", () => {
   it("does not let a text block settle onto a thinking preview of the same message", () => {
     // Arrange: kind is part of the match, so the two streams cannot cross.
     const store = new ConversationStore();
-    store.ingest([typingEffect({ kind: "thinking", messageId: "msg_01ABC", blockIndex: 0, delta: "hmm" })]);
+    store.ingest([thinkingTypingEffect({ messageId: "msg_01ABC", blockIndex: 0, delta: "hmm" })]);
 
     // Act
     store.ingest([itemsEffect([finishedText({ blockId: "env2:0", uuid: "env2:0", text: "Hello" })])]);
@@ -1512,8 +1635,8 @@ describe("a finished block settles onto its streamed preview", () => {
     // Arrange: two thinking blocks streaming, then both finishing. Claiming the
     // EARLIEST unclaimed preview is what keeps the pairing in block order.
     const store = new ConversationStore();
-    store.ingest([typingEffect({ kind: "thinking", messageId: "msg_01ABC", blockIndex: 0, delta: "first" })]);
-    store.ingest([typingEffect({ kind: "thinking", messageId: "msg_01ABC", blockIndex: 1, delta: "second" })]);
+    store.ingest([thinkingTypingEffect({ messageId: "msg_01ABC", blockIndex: 0, delta: "first" })]);
+    store.ingest([thinkingTypingEffect({ messageId: "msg_01ABC", blockIndex: 1, delta: "second" })]);
 
     // Act
     store.ingest([itemsEffect([finishedThinking({ blockId: "env1:0", uuid: "env1:0", text: "first" })])]);

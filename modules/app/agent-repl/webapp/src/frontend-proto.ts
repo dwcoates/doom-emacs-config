@@ -911,6 +911,8 @@ export interface TypingDelta {
   kind: ContentDeltaKind;
   delta: string;
   estimatedTokens: number;
+  /** Stable owner for an `input_json` chunk, when that oneof arm is set. */
+  toolUseId?: string;
 }
 
 /**
@@ -2810,6 +2812,7 @@ const CONTENT_DELTA_KEYS = new Set([
   "inputJson",
   "signature",
   "estimatedTokens",
+  "toolUseId",
 ]);
 /** ContentDelta oneof arm key → the store's normalized kind. */
 const CONTENT_DELTA_ARM_KIND: Readonly<Record<string, ContentDeltaKind>> = {
@@ -2847,6 +2850,15 @@ function decodeTypingDelta(v: unknown): TypingDelta {
   };
   if (td.uuid === "") {
     throw new Error("frontend-proto: TypingDelta.delta missing required `uuid`");
+  }
+  if (d.toolUseId !== undefined) {
+    if (typeof d.toolUseId !== "string") {
+      throw new Error("frontend-proto: TypingDelta.delta.toolUseId must be a string");
+    }
+    if (td.kind !== "input_json") {
+      throw new Error("frontend-proto: TypingDelta.delta.toolUseId is only valid for input_json");
+    }
+    td.toolUseId = d.toolUseId;
   }
   return td;
 }

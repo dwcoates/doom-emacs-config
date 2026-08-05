@@ -116,6 +116,7 @@ import {
   bindLogContext,
   ForwardingLogger,
   log,
+  logVerbose,
   setLogger,
   type ClientLogContext,
   type ClientLogLevel,
@@ -175,7 +176,11 @@ async function boot(): Promise<void> {
     (level: ClientLogLevel, message: string, context: ClientLogContext = {}): void =>
       log(level, message, { operation, context });
   const clog = loggerFor("webapp.main");
-  const storeLog = loggerFor("conversation-store");
+  const storeLog = (level: ClientLogLevel, message: string, context: ClientLogContext = {}, verbose = false): void => {
+    const { operation = "conversation-store", ...evidence } = context;
+    if (typeof operation !== "string") throw new Error("conversation-store log operation must be a string");
+    (verbose ? logVerbose : log)(level, message, { operation, context: evidence });
+  };
   const adapterLog = loggerFor("state-adapter");
   // Deep modules (render walk, pollers) log through the module-level
   // singleton; install the real forwarder before anything renders.
@@ -185,7 +190,7 @@ async function boot(): Promise<void> {
     ...(activeSessionId !== "" ? { agent_repl_session_id: activeSessionId } : {}),
   });
 
-  const store = new ConversationStore((level, message) => storeLog(level, message));
+  const store = new ConversationStore(storeLog);
   // The one-change cutover seam: the daemon pushes `agentshim.frontend.v1`
   // protojson frames, which decode (frontend-proto.ts) into effects
   // (state-adapter.ts) the store ingests. The adapter's explicit-ignore path
