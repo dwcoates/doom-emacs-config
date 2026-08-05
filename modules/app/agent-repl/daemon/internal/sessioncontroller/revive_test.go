@@ -959,6 +959,32 @@ func TestForceIsRefusedForARevivalParkedPrompt(t *testing.T) {
 	}
 }
 
+// A CANCEL IS HONORED. Nothing has to run to take a prompt back, and the
+// refusal above is only defensible because the user keeps this way out of the
+// wait it imposes.
+func TestCancelIsHonoredForARevivalParkedPrompt(t *testing.T) {
+	// Arrange.
+	m, _ := revivalParkRig(t)
+	if err := m.SubmitPrompt(context.Background(), "ws", "req-1", "typed-during-compaction", "",
+		corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+		t.Fatalf("SubmitPrompt: %v", err)
+	}
+	entries := revivalParkedEntries(m, "ws")
+	if len(entries) != 1 {
+		t.Fatalf("%d queue entries, want the one parked prompt", len(entries))
+	}
+
+	// Act.
+	if err := m.CancelQueueEntry("ws", entries[0].id); err != nil {
+		t.Fatalf("CancelQueueEntry on a revival-parked prompt = %v, want the prompt taken back", err)
+	}
+
+	// Assert.
+	if left := revivalParkedEntries(m, "ws"); len(left) != 0 {
+		t.Fatalf("%d entr(ies) left after the cancel, want the prompt gone", len(left))
+	}
+}
+
 // THE UNDECIDED SESSION'S NACK IS UNCHANGED, and it is the design. With no
 // revival in flight there is nothing for a prompt to WAIT for, so admitting it
 // to a queue would make the revival choice for the user by promising a delivery
