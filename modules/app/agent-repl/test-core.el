@@ -1297,7 +1297,9 @@ the record must still be persisted rather than silently discarded."
 (ert-deftest agent-repl-test-workspace-log-rename-failure-cleans-target-and-staging ()
   "A failed atomic install leaves no target or staging artifact behind."
   (agent-repl-test--with-clean-state
-    (let* ((project (make-temp-file "agent-repl-rename-failure-" t))
+    (let* ((sandbox (make-temp-file "agent-repl-rename-sandbox-" t))
+           (temporary-file-directory (file-name-as-directory sandbox))
+           (project (make-temp-file "agent-repl-rename-failure-" t))
            (ws "rename-failure")
            (before (directory-files temporary-file-directory t "\\`agent-repl-emacs-"))
            (agent-repl-log-to-file nil)
@@ -1313,7 +1315,7 @@ the record must still be persisted rather than silently discarded."
             (should (equal before (directory-files temporary-file-directory t "\\`agent-repl-emacs-")))
             (should-not (directory-files-recursively project "\\.emacs\\.log-link-"))
             (should-not (file-exists-p (expand-file-name ".claude/emacs/emacs.log" project))))
-        (delete-directory project t)))))
+        (delete-directory sandbox t)))))
 
 (ert-deftest agent-repl-test-workspace-truncation-record-includes-identity ()
   "A workspace truncation warning includes the owning workspace identity."
