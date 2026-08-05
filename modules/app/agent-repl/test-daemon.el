@@ -869,6 +869,17 @@ whenever a real session happened to be mid-turn."
       (agent-repl-frontend-daemon-restart '(4))
       (should (equal arg (list t))))))
 
+(ert-deftest agent-repl-test-daemon-restart-await-delegates-terminal-coordinator ()
+  "The deployment restart surface forwards mode and timeout exactly once."
+  (let (args)
+    (cl-letf (((symbol-function 'agent-repl-runtime-restart-await)
+               (lambda (&optional stop-shims timeout)
+                 (setq args (list stop-shims timeout))
+                 "runtime-restart-complete")))
+      (should (equal "runtime-restart-complete"
+                     (agent-repl-frontend-daemon-restart-await '(4) 17.0)))
+      (should (equal args '(t 17.0))))))
+
 (ert-deftest agent-repl-test-foreign-shutdown-omits-stop-shims-by-default ()
   "`ShutdownCmd' carries no payload unless stop-shims was asked for."
   (let (sent)

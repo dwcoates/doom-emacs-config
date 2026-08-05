@@ -32,7 +32,8 @@
 (declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--doctor-log "agent-repl-doctor" (fmt &rest args))
 (declare-function agent-repl--frontend-turn-active-sessions "agent-repl-frontend-client" ())
-(declare-function agent-repl-runtime-restart "services" ())
+(declare-function agent-repl-runtime-restart "services" (&optional stop-shims))
+(declare-function agent-repl-runtime-restart-await "services" (&optional stop-shims timeout))
 (declare-function agent-repl--uds-connected-p "frontend-uds" ())
 (declare-function agent-repl-uds-probe-async "frontend-uds" (path on-open on-failure))
 (declare-function agent-repl--uds-run-timer "frontend-uds" (seconds function &rest args))
@@ -1151,6 +1152,16 @@ the one caller that needs it: a deploy that changed the shim BUNDLE, whose
 survivors would otherwise keep running the previous build\=' code."
   (interactive "P")
   (agent-repl-runtime-restart (and stop-shims t)))
+
+(defun agent-repl-frontend-daemon-restart-await (&optional stop-shims timeout)
+  "Restart the complete runtime and await its terminal deployment result.
+STOP-SHIMS and TIMEOUT are forwarded to
+`agent-repl-runtime-restart-await'.  This is the deployment-only companion to
+the asynchronous interactive command `agent-repl-frontend-daemon-restart'."
+  (agent-repl--log nil
+                   "frontend restart-await: requested stop-shims=%s timeout=%S root=%s"
+                   (if stop-shims "t" "nil") timeout agent-repl--frontend-root)
+  (agent-repl-runtime-restart-await (and stop-shims t) timeout))
 
 ;;;###autoload
 (defun agent-repl-frontend-daemon-restart-scheduled (reason &optional stop-shims)

@@ -47,6 +47,7 @@ EOF
     chmod +x "$mod/bin/readiness-report.sh"
     chmod +x "$mod/bin/deploy-all.sh"
     printf ';; stub daemon control plane\n' > "$mod/daemon.el"
+    printf ';; stub runtime coordinator\n' > "$mod/services.el"
 
     # BF_STUB_SHIM_CONTENT makes the stub behave like a real shim build: it
     # writes the bundle and its built-sha stamp, which is what deploy-all reads
@@ -150,6 +151,14 @@ case "$*" in
         echo \"\"${EC_STUB_ARTIFACT_ROOT_RESULT:-artifact-root-same}\"\"
         exit 0
         ;;
+    *frontend-daemon-restart-await*)
+        if [ "${EC_STUB_REFUSE:-0}" = "1" ]; then
+            echo "*ERROR*: agent-repl: refusing daemon stop — turn in flight"
+            exit 1
+        fi
+        echo \"\"${EC_STUB_RESTART_RESULT:-runtime-restart-complete}\"\"
+        exit 0
+        ;;
     *refresh-webviews*)
         if [ "${EC_STUB_REFRESH_ABSENT:-0}" = "1" ]; then
             echo '"absent"'
@@ -171,14 +180,6 @@ case "$*" in
         exit 0
         ;;
 esac
-if [ "${EC_STUB_REFUSE:-0}" = "1" ]; then
-    case "$*" in
-        *daemon-restart*)
-            echo "*ERROR*: agent-repl: refusing daemon stop — turn in flight"
-            exit 1
-            ;;
-    esac
-fi
 echo t
 EOF
 
@@ -270,7 +271,7 @@ fi
 d="$TMP/t1b"; mkdir -p "$d"
 RUN_ENV="EC_STUB_ARTIFACT_ROOT_RESULT=artifact-root-changed" run_deploy "$d"
 if [ "$RC" -eq 0 ] \
-   && log_before "load .*daemon.el" "daemon-restart t" \
+   && log_before "load .*daemon.el" "daemon-restart-await t" \
    && grep -q "artifact root changed — surviving shims will stop" "$d/stdout"; then
     pass "a moved runtime artifact root is bound before restart and stops surviving shims"
 else
@@ -397,6 +398,18 @@ else
     fail "a refused daemon restart exits 3 with the refusal surfaced" "rc=$RC stderr: $(cat "$d/stderr")"
 fi
 
+# --- 6b. pending dispatch is not terminal restart completion ---------------
+d="$TMP/t6b"; mkdir -p "$d"; RUN_ENV="EC_STUB_RESTART_RESULT=runtime-restart-pending" run_deploy "$d"
+if [ "$RC" -eq 3 ] \
+   && grep -q "no terminal completion" "$d/stderr" \
+   && ! log_has "refresh-webviews" \
+   && ! log_has "readiness-report"; then
+    pass "a non-terminal restart result aborts before refresh and revision readiness"
+else
+    fail "a non-terminal restart result aborts before refresh and revision readiness" \
+         "rc=$RC stderr: $(cat "$d/stderr") log: $(cat "$STUB_LOG")"
+fi
+
 # --- 7. --elisp loads changed non-test files only ---------------------------
 d="$TMP/t7"; mkdir -p "$d"; RUN_ENV="" run_deploy "$d" --elisp "abc..def"
 if [ "$RC" -eq 0 ] \
@@ -485,7 +498,7 @@ fi
 # code, so this is the one case that must not preserve.
 d="$TMP/t13"; mkdir -p "$d"
 RUN_ENV="BF_STUB_SHIM_CONTENT=bundle-v2" run_deploy "$d"
-if [ "$RC" -eq 0 ] && log_has "daemon-restart t"; then
+if [ "$RC" -eq 0 ] && log_has "daemon-restart-await t"; then
     pass "a changed shim bundle bounces the daemon in stop-shims mode"
 else
     fail "a changed shim bundle bounces the daemon in stop-shims mode" \
@@ -498,7 +511,7 @@ fi
 d="$TMP/t14"; mkdir -p "$d"
 RUN_ENV="BF_STUB_SHIM_CONTENT=bundle-v1" run_deploy "$d"
 RUN_ENV="BF_STUB_SHIM_CONTENT=bundle-v1" run_deploy "$d"
-if [ "$RC" -eq 0 ] && log_has "daemon-restart)" && ! log_has "daemon-restart t"; then
+if [ "$RC" -eq 0 ] && log_has "daemon-restart-await)" && ! log_has "daemon-restart-await t"; then
     pass "an unchanged shim bundle leaves the daemon bounce preserving shims"
 else
     fail "an unchanged shim bundle leaves the daemon bounce preserving shims" \
@@ -511,7 +524,7 @@ fi
 d="$TMP/t15"; mkdir -p "$d"
 RUN_ENV="BF_STUB_SHIM_CONTENT=bundle-v1 GIT_STUB_DIRTY=M__x" run_deploy "$d"
 RUN_ENV="BF_STUB_SHIM_CONTENT=bundle-v2 GIT_STUB_DIRTY=M__x" run_deploy "$d"
-if [ "$RC" -eq 0 ] && log_has "daemon-restart t"; then
+if [ "$RC" -eq 0 ] && log_has "daemon-restart-await t"; then
     pass "a bundle that moved within one revision still stops the shims"
 else
     fail "a bundle that moved within one revision still stops the shims" \
