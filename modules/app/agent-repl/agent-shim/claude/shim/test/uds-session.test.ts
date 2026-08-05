@@ -1441,6 +1441,39 @@ describe("UdsSession events: store-write vs ephemeral routing", () => {
     expect(store.peer().count(StoreWriteSchema)).toBe(0);
   });
 
+  it("forwards input_json with its content-block tool identity directly to the daemon", async () => {
+    const { query, store, daemon } = await rig();
+    query.emit({
+      type: "stream_event",
+      uuid: "start-envelope",
+      session_id: "sess-1",
+      event: { type: "message_start", message: { id: "msg_tools" } },
+    } as unknown as SdkMessageLike);
+    query.emit({
+      type: "stream_event",
+      uuid: "tool-start-envelope",
+      session_id: "sess-1",
+      event: { type: "content_block_start", index: 3, content_block: { type: "tool_use", id: "toolu_three", name: "Bash", input: {} } },
+    } as unknown as SdkMessageLike);
+    query.emit({
+      type: "stream_event",
+      uuid: "input-envelope",
+      session_id: "sess-1",
+      event: { type: "content_block_delta", index: 3, delta: { type: "input_json_delta", partial_json: "{\"command\":\"pwd\"}" } },
+    } as unknown as SdkMessageLike);
+
+    const evt = await daemon.next(EventSchema);
+    if (evt.payload.case !== "contentDelta" || evt.payload.value.delta.case !== "inputJson") throw new Error("expected input-json delta");
+    expect(evt.payload.value).toMatchObject({
+      uuid: "msg_tools",
+      blockIndex: 3,
+      toolUseId: "toolu_three",
+    });
+    expect(evt.payload.value.delta.value).toBe("{\"command\":\"pwd\"}");
+    await tick();
+    expect(store.peer().count(StoreWriteSchema)).toBe(0);
+  });
+
   it("writes stamped message-start latency through the store for replay", async () => {
     // Arrange
     const { query, store, daemon } = await rig();
