@@ -394,6 +394,95 @@ func TestExplicitResumeCreateClassifiesCreateCoreBringUpFailure(t *testing.T) {
 	}
 }
 
+// hibernatedBringUp is the create core's answer when the revival gate closed on
+// the record instead of a shim being spawned: the durable id, and the sentinel
+// wrapped exactly as the core wraps it.
+func hibernatedBringUp() error {
+	return fmt.Errorf("session s_test (cwd /w): bring up shim: %w: workspace %q session s_test has been asleep since 1 (idle_cutoff)",
+		errclass.ErrSessionHibernated, "/w")
+}
+
+// TestCreateSessionAcksWhenBringUpMeetsTheRevivalGate is the hibernation
+// OUTCOME: the session exists and is durably asleep, so the create completed.
+// Nacking it handed the user a continuity error card — and a 30s wait for a
+// SessionView the ack was supposed to accompany — for a session that is simply
+// hibernated.
+func TestCreateSessionAcksWhenBringUpMeetsTheRevivalGate(t *testing.T) {
+	// Arrange — an EXPLICIT resume, the shape a workspace restore takes, so the
+	// resume classifier is the one thing standing between this and a nack.
+	router := &probeHealthRouter{healthy: true}
+	h := establishHandler(t, &fakeSessionCmds{err: hibernatedBringUp()}, router)
+
+	// Act.
+	_, err := h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{
+		Cwd:                     "/w",
+		ConfigDir:               "/cfg",
+		ResumeMode:              frontendv1.ResumeMode_RESUME_MODE_EXPLICIT,
+		ExplicitClaudeSessionId: "claude-resume",
+	})
+
+	// Assert — acked, and nothing was probed: a hibernated session has no shim
+	// to answer, and probing it is what turned the outcome into a failure.
+	if err != nil {
+		t.Fatalf("CreateSession = %v, want an ack for a session that met the revival gate", err)
+	}
+	if got := router.probeCount(); got != 0 {
+		t.Fatalf("health probes = %d, want none for a session with no shim", got)
+	}
+}
+
+// TestCreateSessionDoesNotApplyAModelToAHibernatedSession: there is no shim to
+// carry the change, and asking for one would fail the create the revival gate
+// just completed.
+func TestCreateSessionDoesNotApplyAModelToAHibernatedSession(t *testing.T) {
+	// Arrange.
+	prompts := &fakePrompts{}
+	h := establishHandlerWithPrompts(t, prompts, &fakeSessionCmds{err: hibernatedBringUp()}, &probeHealthRouter{healthy: true})
+
+	// Act.
+	_, err := h.CreateSession(context.Background(), "/w", "r1",
+		&frontendv1.CreateSessionCmd{Cwd: "/w", Model: "opus"})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("CreateSession = %v, want an ack for a hibernated session", err)
+	}
+	if len(prompts.models) != 0 {
+		t.Fatalf("create sent models %#v to a session with no shim, want none", prompts.models)
+	}
+}
+
+// TestCreateSessionStillNacksANonHibernationBringUpFailure guards the
+// exemption's NARROWNESS. Only the revival gate's sentinel is an outcome; every
+// other named bring-up failure keeps its SessionResumeFailure{BringUpFailure}
+// nack, which is the whole continuity evidence a failed exact resume carries.
+func TestCreateSessionStillNacksANonHibernationBringUpFailure(t *testing.T) {
+	// Arrange — a DIFFERENT named sentinel from the same wrapping shape.
+	cause := fmt.Errorf("session s_test (cwd /w): bring up shim: %w", errclass.ErrShimNotConnected)
+	router := &probeHealthRouter{healthy: true}
+	h := establishHandler(t, &fakeSessionCmds{err: cause}, router)
+
+	// Act.
+	_, err := h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{
+		Cwd:                     "/w",
+		ConfigDir:               "/cfg",
+		ResumeMode:              frontendv1.ResumeMode_RESUME_MODE_EXPLICIT,
+		ExplicitClaudeSessionId: "claude-resume",
+	})
+	detail := errclass.Command(nil, err).GetSessionResume()
+
+	// Assert.
+	if !errors.Is(err, errclass.ErrShimNotConnected) {
+		t.Fatalf("CreateSession error = %v, want the original bring-up failure", err)
+	}
+	if detail == nil || detail.GetCreate() == nil || detail.GetBringUpFailure() == nil {
+		t.Fatalf("failure evidence = %v, want typed create bring-up failure", detail)
+	}
+	if !strings.Contains(detail.GetBringUpFailure().GetCause(), cause.Error()) {
+		t.Fatalf("bring-up failure = %v, want cause containing %q", detail.GetBringUpFailure(), cause)
+	}
+}
+
 // TestCreateSessionNackCarriesTheShimsOwnReason keeps the shim's verdict verbatim
 // in the nack: the component and reason are the only part a human can act on, and
 // the daemon never re-words them.

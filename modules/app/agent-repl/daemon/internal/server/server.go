@@ -1172,6 +1172,13 @@ var errSessionNotFound = errors.New("no such session")
 // error is an internal bring-up failure surfaced loudly. A failure after the
 // registry write returns the durable session id with the error so the caller
 // can identify the failed operation precisely.
+//
+// errclass.ErrSessionHibernated is the ONE returned error that is not a failed
+// create: the record is registered, durably asleep, and its SessionView has
+// been pushed. It is returned rather than swallowed because the caller must be
+// able to tell a session that is up from one that is asleep — the command
+// boundary acks it (createestablish.go), exactly as WorkspaceOpener.establish
+// and the boot sweep already read the same sentinel.
 func (s *Server) CreateSession(_ context.Context, opts CreateOpts) (string, error) {
 	requestedModel := opts.Model
 	opts.Model = registry.NormalizeModel(opts.Model)
@@ -1249,6 +1256,27 @@ func (s *Server) CreateSession(_ context.Context, opts CreateOpts) (string, erro
 	// workspace to drive, so it is registered but not brought up.
 	if opts.CWD != "" {
 		if err := s.controller.Ensure(opts.CWD); err != nil {
+			// ONE bring-up outcome is not a failure of this create: the revival
+			// gate. The bring-up evaluates the keep-alive policy before it
+			// spawns, so a record already past the thresholds is hibernated
+			// instead of started (sessioncontroller.hibernateIfStale) — the
+			// session EXISTS, it is durably asleep, and the SessionView the
+			// gate is rendered from is exactly what the caller is waiting for.
+			// The same reading as WorkspaceOpener.establish and the boot sweep.
+			//
+			// The SessionView is pushed here rather than left to the
+			// transition's own repush so the create's workspace->session
+			// binding reaches every frontend on the SAME rule as a create that
+			// spawned: this path owns the binding push, and a caller that
+			// waited for it must not depend on which layer happened to write
+			// the record last.
+			if errors.Is(err, errclass.ErrSessionHibernated) {
+				dlog.Tag(s.logf, "cwd", opts.CWD)(
+					"session %s: created HIBERNATED — the record was found past the keep-alive policy's threshold at bring-up, so no shim was spawned and the revival gate stands; the hibernated SessionView is pushed and the create is NOT a resume failure: %v",
+					id, err)
+				s.pushSessionView(id)
+				return id, err
+			}
 			// The registry record already owns id. Returning it with the failure
 			// lets the command boundary attach the exact failed resume identity;
 			// discarding it would make a durable session anonymous in its own
