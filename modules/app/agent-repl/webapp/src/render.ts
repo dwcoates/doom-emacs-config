@@ -698,7 +698,6 @@ function TextStream(
   // worth showing and a turn that spent no new input reports no token
   // figure, so either half may be absent and the corner may render empty.
   const meta = chip ? resultMeta(chip) : "";
-  const usage = responseUsageMeta(item.tokenUtilization);
   // Chess-game markers split the body FIRST: they must work inside a
   // TLDR-tree response too, and the tree renderer below never sees
   // markdown handling. Each text segment then picks its own pipeline.
@@ -724,51 +723,7 @@ function TextStream(
       return renderMarkdown(seg.text);
     })
     .join("");
-  return Bubble(cls, `${body}${catalog}${gns}`, item.ts, `${meta}${usage}`);
-}
-
-/** Dense response accounting, with unavailable values named instead of hidden. */
-function responseUsageMeta(records: import("./frontend-proto.js").TokenUtilization[] | undefined): string {
-  if (records === undefined || records.length === 0) return "";
-  return records.map((r) => {
-    const u = r.usage;
-    const rate = (value: number | undefined): string => value === undefined ? "unavailable" : `${(value * 100).toFixed(1)}%`;
-    const cache = u.cacheCreation;
-    const rates = u.cacheRates;
-    const timing = r.responseTiming;
-    const tps = timing?.outputGenerationDurationMs && timing.outputGenerationDurationMs > 0 ? `${(1000 * u.outputTokens / timing.outputGenerationDurationMs).toFixed(1)} tok/s` : "unavailable";
-    const ttft = timing?.timeToFirstTokenMs === undefined ? "unavailable" : `${timing.timeToFirstTokenMs} ms`;
-    const provenance = r.actor === "subagent" ? `subagent ${r.subagent?.agentId || "unavailable"} ${r.subagent?.subagentType || "unavailable"}` : "main agent";
-    const summary = `${provenance} · ${r.model || "model unavailable"} · uncached ${u.inputTokens} · output ${u.outputTokens} · cache read ${u.cacheReadInputTokens} · cache write ${u.cacheCreationInputTokens} (5m ${cache?.ephemeral5mInputTokens ?? "unavailable"}, 1h ${cache?.ephemeral1hInputTokens ?? "unavailable"}) · hit ${rate(rates?.cacheHitRate)} · write ${rate(rates?.cacheWriteRate)} · uncached rate ${rate(rates?.uncachedInputRate)} · tier ${u.serviceTier || "unavailable"} · speed ${u.speed || "unavailable"} · geo ${u.inferenceGeo || "unavailable"} · generation ${tps} · TTFT ${ttft}`;
-    const complete = {
-      agent_repl_session_id: r.agentReplSessionId,
-      claude_session_id: r.claudeSessionId,
-      root_turn_id: r.rootTurnId,
-      api_request_id: r.apiRequestId ?? null,
-      api_message_id: r.apiMessageId,
-      model: r.model,
-      actor: r.actor,
-      subagent: r.subagent ?? null,
-      input_tokens: u.inputTokens,
-      output_tokens: u.outputTokens,
-      cache_read_input_tokens: u.cacheReadInputTokens,
-      cache_creation_input_tokens: u.cacheCreationInputTokens,
-      cache_creation: u.cacheCreation ?? null,
-      server_tool_use: u.serverToolUse ?? null,
-      service_tier: u.serviceTier || null,
-      speed: u.speed || null,
-      inference_geo: u.inferenceGeo || null,
-      output_details: u.outputDetails ?? null,
-      iterations: u.iterations,
-      cache_diagnostic: u.cacheDiagnostic ?? null,
-      cache_rates: u.cacheRates ?? null,
-      fallback_credit: u.fallbackCredit ?? null,
-      unmodeled_usage: u.unmodeledUsage ?? null,
-      raw_sdk_usage: u.rawUsage,
-      response_timing: r.responseTiming ?? null,
-    };
-    return `<details class="response-usage"><summary>${escapeHtml(summary)}</summary><pre>${escapeHtml(JSON.stringify(complete, null, 2))}</pre></details>`;
-  }).join("");
+  return Bubble(cls, `${body}${catalog}${gns}`, item.ts, meta);
 }
 
 function Thinking(item: ThinkingItem): string {
