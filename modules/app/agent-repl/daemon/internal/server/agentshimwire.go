@@ -663,12 +663,11 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 	go func() {
 		for release := range publicationReleases {
 			logf("server: session publication RELEASED job_id=%q worktree=%q session=%q action=publish_authoritative_snapshot", release.JobID, release.WorktreePath, release.SessionID)
-			srv.PushAuthoritativeSnapshot(snapshots.Snapshot())
-			if release.Completion == nil {
+			if release.Open == nil || release.Completion == nil {
 				logf("server: SESSION PUBLICATION INVARIANT VIOLATION job_id=%q worktree=%q session=%q reason=missing_release_completion", release.JobID, release.WorktreePath, release.SessionID)
-				panic(fmt.Sprintf("server: session publication release job=%q worktree=%q session=%q lacks completion", release.JobID, release.WorktreePath, release.SessionID))
+				panic(fmt.Sprintf("server: session publication release job=%q worktree=%q session=%q lacks open or completion", release.JobID, release.WorktreePath, release.SessionID))
 			}
-			release.Completion <- nil
+			release.Completion <- srv.ReleaseSessionPublication(release.Open, snapshots.Snapshot)
 		}
 	}()
 

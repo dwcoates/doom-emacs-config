@@ -211,6 +211,9 @@ type SessionPublicationRelease struct {
 	JobID        string
 	WorktreePath string
 	SessionID    string
+	// Open flips the bridge's in-memory publication decision while the frontend
+	// holds its writer-side publication lock. It must run before Snapshot.
+	Open func() error
 	// Completion acknowledges that the server has enqueued the authoritative
 	// post-materialization snapshot. The creation worker waits for it before
 	// submitting the initial prompt, making snapshot-before-prompt structural.
