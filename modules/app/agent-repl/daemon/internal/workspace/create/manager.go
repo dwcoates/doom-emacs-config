@@ -21,6 +21,7 @@ type Config struct {
 	Prompts     InitialPromptSubmitter
 	Available   WorkspaceAvailablePublisher
 	Releases    SessionPublicationReleaser
+	Publication SessionPublicationPreparer
 	HostActions HostActionSink
 	Logf        func(string, ...any)
 }
@@ -88,6 +89,8 @@ func NewManager(cfg Config) (*Manager, error) {
 		return nil, fmt.Errorf("workspace create: manager needs a WorkspaceAvailablePublisher")
 	case cfg.Releases == nil:
 		return nil, fmt.Errorf("workspace create: manager needs a SessionPublicationReleaser")
+	case cfg.Publication == nil:
+		return nil, fmt.Errorf("workspace create: manager needs a SessionPublicationPreparer")
 	case cfg.HostActions == nil:
 		return nil, fmt.Errorf("workspace create: manager needs a HostActionSink")
 	case cfg.Logf == nil:
@@ -431,6 +434,14 @@ func (m *Manager) process(ctx context.Context, id string) error {
 				}
 				if _, err := m.transition(id, StateSessionCreating, ""); err != nil {
 					return err
+				}
+				job, _, err = m.cfg.Store.Get(id)
+				if err != nil {
+					return err
+				}
+				m.cfg.Logf("workspace-create: preparing session publication id=%s worktree=%q session=%q", job.ID, job.WorktreePath, job.SessionID)
+				if err := m.cfg.Publication.PrepareSessionPublication(ctx, job); err != nil {
+					return m.fail(ctx, id, "prepare session publication", err)
 				}
 				continue
 			}

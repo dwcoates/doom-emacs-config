@@ -102,6 +102,18 @@ type fakeReleases struct {
 	onRelease func(PublicationDecision)
 }
 
+type fakePublication struct {
+	calls int
+	jobs  []Job
+	err   error
+}
+
+func (f *fakePublication) PrepareSessionPublication(_ context.Context, job Job) error {
+	f.calls++
+	f.jobs = append(f.jobs, job)
+	return f.err
+}
+
 func (f *fakeReleases) ReleaseSessionPublication(_ context.Context, decision PublicationDecision) error {
 	f.calls++
 	f.items = append(f.items, decision)
@@ -155,17 +167,18 @@ func (f *fakeMerges) DispatchMerge(_ context.Context, cmd MergeCommand) error {
 }
 
 type fixture struct {
-	store     *FileJobStore
-	manager   *Manager
-	geometry  *fakeGeometry
-	worktrees *fakeWorktrees
-	sessions  *fakeSessions
-	health    *fakeHealth
-	prompts   *fakePrompts
-	available *fakeAvailable
-	releases  *fakeReleases
-	actions   *fakeActions
-	merges    *fakeMerges
+	store       *FileJobStore
+	manager     *Manager
+	geometry    *fakeGeometry
+	worktrees   *fakeWorktrees
+	sessions    *fakeSessions
+	health      *fakeHealth
+	prompts     *fakePrompts
+	available   *fakeAvailable
+	releases    *fakeReleases
+	publication *fakePublication
+	actions     *fakeActions
+	merges      *fakeMerges
 
 	// logs is written by the router goroutine AND by a worker goroutine in the
 	// tests that run one, so it carries its own lock rather than relying on the
@@ -183,15 +196,16 @@ func (f *fixture) log(format string, _ ...any) {
 func newFixture(t *testing.T, statePath string) *fixture {
 	t.Helper()
 	f := &fixture{
-		geometry:  &fakeGeometry{},
-		worktrees: &fakeWorktrees{path: "/worktrees/new"},
-		sessions:  &fakeSessions{id: "s_new"},
-		health:    &fakeHealth{},
-		prompts:   &fakePrompts{},
-		available: &fakeAvailable{},
-		releases:  &fakeReleases{},
-		actions:   &fakeActions{},
-		merges:    &fakeMerges{},
+		geometry:    &fakeGeometry{},
+		worktrees:   &fakeWorktrees{path: "/worktrees/new"},
+		sessions:    &fakeSessions{id: "s_new"},
+		health:      &fakeHealth{},
+		prompts:     &fakePrompts{},
+		available:   &fakeAvailable{},
+		releases:    &fakeReleases{},
+		publication: &fakePublication{},
+		actions:     &fakeActions{},
+		merges:      &fakeMerges{},
 	}
 	logf := f.log
 	store, err := OpenJobStore(statePath, logf)
@@ -201,7 +215,7 @@ func newFixture(t *testing.T, statePath string) *fixture {
 	f.store = store
 	f.manager, err = NewManager(Config{
 		Store: store, Planner: f.worktrees, Worktrees: f.worktrees, Geometry: f.geometry, Sessions: f.sessions, Health: f.health,
-		Prompts: f.prompts, Available: f.available, Releases: f.releases, HostActions: f.actions, Logf: logf,
+		Prompts: f.prompts, Available: f.available, Releases: f.releases, Publication: f.publication, HostActions: f.actions, Logf: logf,
 	})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
@@ -757,7 +771,7 @@ func TestResolvedSessionMetadataPersistsBeforeCreateAndSurvivesRestart(t *testin
 	statePath := filepath.Join(root, "jobs.json")
 	f := newFixture(t, statePath)
 	sessions := &metadataSessions{fakeSessions: fakeSessions{id: "s_new"}, resolved: Request{Name: "DWC/child", GitRoot: "/repo", SourceWorkspace: "parent", SourceDir: "/parent", ConfigDir: "/cfg", PermissionMode: "plan"}}
-	manager, err := NewManager(Config{Store: f.store, Planner: f.worktrees, Worktrees: f.worktrees, Geometry: f.geometry, Sessions: sessions, Health: f.health, Prompts: f.prompts, Available: f.available, Releases: f.releases, HostActions: f.actions, Logf: func(string, ...any) {}})
+	manager, err := NewManager(Config{Store: f.store, Planner: f.worktrees, Worktrees: f.worktrees, Geometry: f.geometry, Sessions: sessions, Health: f.health, Prompts: f.prompts, Available: f.available, Releases: f.releases, Publication: f.publication, HostActions: f.actions, Logf: func(string, ...any) {}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1235,7 +1249,7 @@ func TestManagerRefusesConstructionWithoutAGeometryRecorder(t *testing.T) {
 	// Act.
 	_, err := NewManager(Config{
 		Store: f.store, Planner: f.worktrees, Worktrees: f.worktrees, Sessions: f.sessions, Health: f.health,
-		Prompts: f.prompts, Available: f.available, Releases: f.releases, HostActions: f.actions, Logf: func(string, ...any) {},
+		Prompts: f.prompts, Available: f.available, Releases: f.releases, Publication: f.publication, HostActions: f.actions, Logf: func(string, ...any) {},
 	})
 
 	// Assert.
