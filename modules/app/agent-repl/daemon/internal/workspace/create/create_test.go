@@ -95,6 +95,22 @@ type fakeAvailable struct {
 	err   error
 }
 
+type fakeReleases struct {
+	calls     int
+	items     []PublicationDecision
+	err       error
+	onRelease func(PublicationDecision)
+}
+
+func (f *fakeReleases) ReleaseSessionPublication(_ context.Context, decision PublicationDecision) error {
+	f.calls++
+	f.items = append(f.items, decision)
+	if f.onRelease != nil {
+		f.onRelease(decision)
+	}
+	return f.err
+}
+
 func (f *fakeAvailable) PublishWorkspaceAvailable(_ context.Context, available Available) error {
 	f.calls++
 	f.items = append(f.items, available)
@@ -147,6 +163,7 @@ type fixture struct {
 	health    *fakeHealth
 	prompts   *fakePrompts
 	available *fakeAvailable
+	releases  *fakeReleases
 	actions   *fakeActions
 	merges    *fakeMerges
 
@@ -172,6 +189,7 @@ func newFixture(t *testing.T, statePath string) *fixture {
 		health:    &fakeHealth{},
 		prompts:   &fakePrompts{},
 		available: &fakeAvailable{},
+		releases:  &fakeReleases{},
 		actions:   &fakeActions{},
 		merges:    &fakeMerges{},
 	}
@@ -183,7 +201,7 @@ func newFixture(t *testing.T, statePath string) *fixture {
 	f.store = store
 	f.manager, err = NewManager(Config{
 		Store: store, Planner: f.worktrees, Worktrees: f.worktrees, Geometry: f.geometry, Sessions: f.sessions, Health: f.health,
-		Prompts: f.prompts, Available: f.available, HostActions: f.actions, Logf: logf,
+		Prompts: f.prompts, Available: f.available, Releases: f.releases, HostActions: f.actions, Logf: logf,
 	})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
@@ -401,6 +419,52 @@ func TestMaterializationAckIsIdempotentAndDeliversPromptOnce(t *testing.T) {
 	}
 	if !reflect.DeepEqual(f.prompts.jobs, []string{"prompt"}) {
 		t.Fatalf("prompt jobs = %#v", f.prompts.jobs)
+	}
+}
+
+func TestMaterializationDurablyReleasesPublicationBeforeInitialPrompt(t *testing.T) {
+	root := t.TempDir()
+	f := newFixture(t, filepath.Join(root, "jobs.json"))
+	if _, _, err := f.store.Enqueue(Job{ID: "publication", Request: Request{Name: "DWC/publication", GitRoot: "/repo", Prompt: "build it"}, State: StateQueued}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.manager.Process(context.Background(), "publication"); err != nil {
+		t.Fatal(err)
+	}
+	f.releases.onRelease = func(decision PublicationDecision) {
+		if f.prompts.calls != 0 {
+			t.Fatalf("initial prompt calls at publication release = %d, want 0", f.prompts.calls)
+		}
+		if !decision.Materialized || decision.JobID != "publication" || decision.WorktreePath != "/worktrees/new" || decision.SessionID != "s_new" {
+			t.Fatalf("publication decision = %#v", decision)
+		}
+		job := job(t, f.store, "publication")
+		if !job.Materialized || job.State != StateEmacsMaterialized {
+			t.Fatalf("durable job at publication release = %#v", job)
+		}
+	}
+	if err := f.manager.MarkMaterialized(context.Background(), "publication"); err != nil {
+		t.Fatal(err)
+	}
+	got := job(t, f.store, "publication")
+	if !got.Materialized || !got.PublicationReleased || f.releases.calls != 1 || f.prompts.calls != 1 {
+		t.Fatalf("materialization result job=%#v releases=%d prompts=%d", got, f.releases.calls, f.prompts.calls)
+	}
+}
+
+func TestSessionPublicationDecisionHoldsOnlyMatchingUnmaterializedJob(t *testing.T) {
+	root := t.TempDir()
+	f := newFixture(t, filepath.Join(root, "jobs.json"))
+	if _, _, err := f.store.Enqueue(Job{ID: "held", Request: Request{Name: "DWC/held", GitRoot: "/repo"}, State: StateAwaitingEmacs, WorktreePath: "/worktrees/held", SessionID: "s_held"}); err != nil {
+		t.Fatal(err)
+	}
+	decision, err := SessionPublicationDecision(f.store, "/worktrees/held", "s_held")
+	if err != nil || decision.Materialized || decision.JobID != "held" {
+		t.Fatalf("held decision=%#v err=%v", decision, err)
+	}
+	decision, err = SessionPublicationDecision(f.store, "/other", "s_other")
+	if err != nil || !decision.Materialized || decision.JobID != "" {
+		t.Fatalf("unmanaged decision=%#v err=%v", decision, err)
 	}
 }
 
@@ -693,7 +757,7 @@ func TestResolvedSessionMetadataPersistsBeforeCreateAndSurvivesRestart(t *testin
 	statePath := filepath.Join(root, "jobs.json")
 	f := newFixture(t, statePath)
 	sessions := &metadataSessions{fakeSessions: fakeSessions{id: "s_new"}, resolved: Request{Name: "DWC/child", GitRoot: "/repo", SourceWorkspace: "parent", SourceDir: "/parent", ConfigDir: "/cfg", PermissionMode: "plan"}}
-	manager, err := NewManager(Config{Store: f.store, Planner: f.worktrees, Worktrees: f.worktrees, Geometry: f.geometry, Sessions: sessions, Health: f.health, Prompts: f.prompts, Available: f.available, HostActions: f.actions, Logf: func(string, ...any) {}})
+	manager, err := NewManager(Config{Store: f.store, Planner: f.worktrees, Worktrees: f.worktrees, Geometry: f.geometry, Sessions: sessions, Health: f.health, Prompts: f.prompts, Available: f.available, Releases: f.releases, HostActions: f.actions, Logf: func(string, ...any) {}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1171,7 +1235,7 @@ func TestManagerRefusesConstructionWithoutAGeometryRecorder(t *testing.T) {
 	// Act.
 	_, err := NewManager(Config{
 		Store: f.store, Planner: f.worktrees, Worktrees: f.worktrees, Sessions: f.sessions, Health: f.health,
-		Prompts: f.prompts, Available: f.available, HostActions: f.actions, Logf: func(string, ...any) {},
+		Prompts: f.prompts, Available: f.available, Releases: f.releases, HostActions: f.actions, Logf: func(string, ...any) {},
 	})
 
 	// Assert.

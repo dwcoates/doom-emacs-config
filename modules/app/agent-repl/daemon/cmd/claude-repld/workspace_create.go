@@ -548,17 +548,28 @@ func (s daemonInitialPromptSubmitter) SubmitInitialPrompt(ctx context.Context, j
 type WorkspaceCreateHostForwarder struct {
 	mu        sync.RWMutex
 	available workspacecreate.WorkspaceAvailablePublisher
+	releases  workspacecreate.SessionPublicationReleaser
 	actions   workspacecreate.HostActionSink
 }
 
-func (f *WorkspaceCreateHostForwarder) SetTargets(available workspacecreate.WorkspaceAvailablePublisher, actions workspacecreate.HostActionSink) error {
-	if available == nil || actions == nil {
-		return fmt.Errorf("workspace create: host forwarder requires available and action targets")
+func (f *WorkspaceCreateHostForwarder) SetTargets(available workspacecreate.WorkspaceAvailablePublisher, releases workspacecreate.SessionPublicationReleaser, actions workspacecreate.HostActionSink) error {
+	if available == nil || releases == nil || actions == nil {
+		return fmt.Errorf("workspace create: host forwarder requires available, session-publication release, and action targets")
 	}
 	f.mu.Lock()
-	f.available, f.actions = available, actions
+	f.available, f.releases, f.actions = available, releases, actions
 	f.mu.Unlock()
 	return nil
+}
+
+func (f *WorkspaceCreateHostForwarder) ReleaseSessionPublication(ctx context.Context, decision workspacecreate.PublicationDecision) error {
+	f.mu.RLock()
+	target := f.releases
+	f.mu.RUnlock()
+	if target == nil {
+		return fmt.Errorf("workspace create: session-publication releaser is not bound")
+	}
+	return target.ReleaseSessionPublication(ctx, decision)
 }
 
 func (f *WorkspaceCreateHostForwarder) PublishWorkspaceAvailable(ctx context.Context, available workspacecreate.Available) error {
@@ -611,19 +622,24 @@ type WorkspaceCreateAssemblyConfig struct {
 // durable create store.  It is deliberately in cmd: server stays transport
 // only while this adapter maps the wire messages to daemon lifecycle facts.
 type WorkspaceCreationBridge struct {
-	manager *workspacecreate.Manager
-	store   workspacecreate.JobStore
-	ctx     context.Context
-	mu      sync.Mutex
-	avail   map[chan *frontendv1.WorkspaceAvailable]struct{}
-	actions map[chan *frontendv1.HostAction]struct{}
+	manager  *workspacecreate.Manager
+	store    workspacecreate.JobStore
+	ctx      context.Context
+	mu       sync.Mutex
+	avail    map[chan *frontendv1.WorkspaceAvailable]struct{}
+	actions  map[chan *frontendv1.HostAction]struct{}
+	releases map[chan server.SessionPublicationRelease]struct{}
+	// publication caches only MANAGED creation jobs. Unmanaged sessions are
+	// deliberately never cached: a later creation job for the same worktree
+	// must be discovered from durable state, never masked by an old allow.
+	publication map[string]server.SessionPublicationDecision
 }
 
 func NewWorkspaceCreationBridge(ctx context.Context, manager *workspacecreate.Manager, store workspacecreate.JobStore) (*WorkspaceCreationBridge, error) {
 	if ctx == nil || manager == nil || store == nil {
 		return nil, fmt.Errorf("workspace create: bridge needs context, manager, and store")
 	}
-	return &WorkspaceCreationBridge{manager: manager, store: store, ctx: ctx, avail: map[chan *frontendv1.WorkspaceAvailable]struct{}{}, actions: map[chan *frontendv1.HostAction]struct{}{}}, nil
+	return &WorkspaceCreationBridge{manager: manager, store: store, ctx: ctx, avail: map[chan *frontendv1.WorkspaceAvailable]struct{}{}, actions: map[chan *frontendv1.HostAction]struct{}{}, releases: map[chan server.SessionPublicationRelease]struct{}{}, publication: map[string]server.SessionPublicationDecision{}}, nil
 }
 
 func (b *WorkspaceCreationBridge) MarkWorkspaceMaterialized(ctx context.Context, jobID string) error {
@@ -631,6 +647,55 @@ func (b *WorkspaceCreationBridge) MarkWorkspaceMaterialized(ctx context.Context,
 }
 func (b *WorkspaceCreationBridge) CompleteHostAction(_ context.Context, actionID string, ok bool, failure string) error {
 	return b.manager.CompleteHostAction(actionID, ok, failure)
+}
+
+func (b *WorkspaceCreationBridge) SessionPublicationDecision(worktreePath, sessionID string) (server.SessionPublicationDecision, error) {
+	b.mu.Lock()
+	if decision, ok := b.publication[worktreePath]; ok {
+		b.mu.Unlock()
+		return decision, nil
+	}
+	decision, err := workspacecreate.SessionPublicationDecision(b.store, worktreePath, sessionID)
+	if err != nil {
+		b.mu.Unlock()
+		return server.SessionPublicationDecision{}, err
+	}
+	result := server.SessionPublicationDecision{JobID: decision.JobID, WorktreePath: decision.WorktreePath, SessionID: decision.SessionID, Materialized: decision.Materialized}
+	if result.JobID != "" {
+		b.publication[worktreePath] = result
+	}
+	b.mu.Unlock()
+	return result, nil
+}
+
+func (b *WorkspaceCreationBridge) SubscribeSessionPublicationReleases() (<-chan server.SessionPublicationRelease, func()) {
+	ch := make(chan server.SessionPublicationRelease, 32)
+	b.mu.Lock()
+	b.releases[ch] = struct{}{}
+	b.mu.Unlock()
+	return ch, func() { b.mu.Lock(); delete(b.releases, ch); close(ch); b.mu.Unlock() }
+}
+
+func (b *WorkspaceCreationBridge) ReleaseSessionPublication(_ context.Context, decision workspacecreate.PublicationDecision) error {
+	if !decision.Materialized || decision.JobID == "" || decision.WorktreePath == "" || decision.SessionID == "" {
+		return fmt.Errorf("workspace create: invalid session-publication release job=%q worktree=%q session=%q materialized=%t", decision.JobID, decision.WorktreePath, decision.SessionID, decision.Materialized)
+	}
+	value := server.SessionPublicationRelease{JobID: decision.JobID, WorktreePath: decision.WorktreePath, SessionID: decision.SessionID, Completion: make(chan error, 1)}
+	b.mu.Lock()
+	b.publication[decision.WorktreePath] = server.SessionPublicationDecision{JobID: decision.JobID, WorktreePath: decision.WorktreePath, SessionID: decision.SessionID, Materialized: true}
+	subscriberCount := len(b.releases)
+	if subscriberCount != 1 {
+		b.mu.Unlock()
+		return fmt.Errorf("workspace create: session-publication release job=%q worktree=%q session=%q needs exactly one server subscriber, got %d", decision.JobID, decision.WorktreePath, decision.SessionID, subscriberCount)
+	}
+	for ch := range b.releases {
+		ch <- value
+	}
+	b.mu.Unlock()
+	if err := <-value.Completion; err != nil {
+		return fmt.Errorf("workspace create: session-publication release job=%q worktree=%q session=%q completion: %w", decision.JobID, decision.WorktreePath, decision.SessionID, err)
+	}
+	return nil
 }
 
 // PostprocessingPrompt satisfies postmerge.PostprocessingSource: it reports the
@@ -797,7 +862,7 @@ func NewWorkspaceCreateAssembly(cfg WorkspaceCreateAssemblyConfig) (*WorkspaceCr
 		Sessions:  daemonSessionCreator{Commands: cfg.Commands, Registry: cfg.Registry, Logf: cfg.Logf},
 		Health:    daemonSessionHealth{Probe: cfg.Health},
 		Prompts:   daemonInitialPromptSubmitter{Router: cfg.InitialPrompts, Registry: cfg.Registry},
-		Available: forwarder, HostActions: forwarder, Logf: cfg.Logf,
+		Available: forwarder, Releases: forwarder, HostActions: forwarder, Logf: cfg.Logf,
 	})
 	if err != nil {
 		return nil, err

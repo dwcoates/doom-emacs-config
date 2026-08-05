@@ -287,6 +287,8 @@ type fakeWorkspaceCreation struct {
 	snapshot     WorkspaceHostWorkSnapshot
 	available    chan *frontendv1.WorkspaceAvailable
 	actions      chan *frontendv1.HostAction
+	releases     chan SessionPublicationRelease
+	decisions    map[string]SessionPublicationDecision
 	materialized []string
 	completions  []hostActionCompletion
 }
@@ -308,6 +310,8 @@ func newFakeWorkspaceCreation() *fakeWorkspaceCreation {
 	return &fakeWorkspaceCreation{
 		available: make(chan *frontendv1.WorkspaceAvailable, 8),
 		actions:   make(chan *frontendv1.HostAction, 8),
+		releases:  make(chan SessionPublicationRelease, 8),
+		decisions: map[string]SessionPublicationDecision{},
 	}
 }
 
@@ -319,6 +323,17 @@ func (f *fakeWorkspaceCreation) MarkWorkspaceMaterialized(_ context.Context, job
 func (f *fakeWorkspaceCreation) CompleteHostAction(_ context.Context, actionID string, ok bool, failure string) error {
 	f.completions = append(f.completions, hostActionCompletion{actionID: actionID, ok: ok, failure: failure})
 	return nil
+}
+
+func (f *fakeWorkspaceCreation) SessionPublicationDecision(worktreePath, sessionID string) (SessionPublicationDecision, error) {
+	if decision, ok := f.decisions[worktreePath+"\x00"+sessionID]; ok {
+		return decision, nil
+	}
+	return SessionPublicationDecision{WorktreePath: worktreePath, SessionID: sessionID, Materialized: true}, nil
+}
+
+func (f *fakeWorkspaceCreation) SubscribeSessionPublicationReleases() (<-chan SessionPublicationRelease, func()) {
+	return f.releases, func() {}
 }
 
 func (f *fakeWorkspaceCreation) SnapshotHostWork() WorkspaceHostWorkSnapshot { return f.snapshot }
