@@ -15,6 +15,7 @@ import (
 	"claude-repld/internal/frontend"
 	"claude-repld/internal/ssm"
 	"claude-repld/internal/statedb"
+	"claude-repld/internal/tokenutilization"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -1103,6 +1104,7 @@ func (c *consumer) Consume(ev *corev1.Event) error {
 	}
 	observation, utilizationErr := tokenUtilizationObservationFromEvent(ev, c.sessionID, c.accounting.isKnownVendorSession)
 	if utilizationErr != nil {
+		c.logRejectedTokenUtilization(ev, utilizationErr)
 		return fmt.Errorf("session-controller: translate token utilization before frame mutation: %w", utilizationErr)
 	}
 	var utilization *frontendv1.TokenUtilization
@@ -1238,6 +1240,7 @@ func observationIsHistorical(r *turnAccountingReducer, ev *corev1.Event, observa
 }
 
 func (c *consumer) logRejectedAccountingObservation(ev *corev1.Event, cause error) {
+	c.logRejectedTokenUtilization(ev, cause)
 	observation := ev.GetAccountUsageObservation()
 	queryID, turnID, boundary := "", "", "unspecified"
 	if observation != nil {
@@ -1259,6 +1262,18 @@ func (c *consumer) logRejectedAccountingObservation(ev *corev1.Event, cause erro
 		c.sessionID, c.accounting.queryID, queryID, ev.GetQueryInstanceId(), ev.GetSeq(),
 		observationIsHistorical(c.accounting, ev, observation),
 		ev.GetRequestId(), turnID, boundary, cause.Error(), stateKind(ev))
+}
+
+// logRejectedTokenUtilization records canonical ingress diagnostics when a
+// token record violates a field-level evidence invariant before frame or
+// durable-state mutation.
+func (c *consumer) logRejectedTokenUtilization(ev *corev1.Event, cause error) {
+	var invalid *tokenutilization.ValidationError
+	if !errors.As(cause, &invalid) {
+		return
+	}
+	c.logf("session-controller: token utilization REJECTED before mutation field_path=%q api_message_id=%q model=%q source_plane=%s agent_repl_session_id=%q claude_session_id=%q session=%q seq=%d error=%v",
+		invalid.FieldPath, invalid.APIMessageID, invalid.Model, ev.GetPlane().String(), invalid.AgentReplSessionID, invalid.ClaudeSessionID, c.sessionID, ev.GetSeq(), cause)
 }
 
 func (c *consumer) surfaceUnexpectedQueryTermination(ev *corev1.Event, item *frontendv1.SystemFailureItem) {
@@ -1555,6 +1570,7 @@ func userTurnReceipt(cd *frontendv1.ConversationDelta) (requestID string, textLe
 func (c *consumer) pushConversation(ev *corev1.Event, live bool) {
 	observation, err := tokenUtilizationObservationFromEvent(ev, c.sessionID, c.accounting.isKnownVendorSession)
 	if err != nil {
+		c.logRejectedTokenUtilization(ev, err)
 		c.logf("session-controller: historical token utilization translate REJECTED session=%s seq=%d: %v", c.sessionID, ev.GetSeq(), err)
 		return
 	}

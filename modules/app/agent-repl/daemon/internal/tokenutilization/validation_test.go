@@ -1,6 +1,7 @@
 package tokenutilization
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -13,8 +14,50 @@ func validationRecord(rootTurnID string) *frontendv1.TokenUtilization {
 		ClaudeSessionId:    "claude",
 		RootTurnId:         rootTurnID,
 		ApiMessageId:       "message",
+		Model:              "model",
 		Actor:              &frontendv1.TokenUtilization_MainAgent{MainAgent: &frontendv1.TokenUtilizationMainAgent{}},
 		Usage:              &frontendv1.TokenUsage{InputTokens: 1},
+	}
+}
+
+func TestValidateRequiresNonblankModelForLiveAndHistoricalEvidence(t *testing.T) {
+	identity := Identity{AgentReplSessionID: "session", ClaudeSessionID: "claude"}
+	for _, tc := range []struct {
+		name     string
+		validate func(*frontendv1.TokenUtilization, Identity) error
+		rootTurn string
+		model    string
+	}{
+		{name: "live blank", validate: Validate, rootTurn: "turn", model: ""},
+		{name: "live whitespace", validate: Validate, rootTurn: "turn", model: " \t\n"},
+		{name: "historical blank", validate: ValidateHistorical, model: ""},
+		{name: "historical whitespace", validate: ValidateHistorical, model: " \t\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			record := validationRecord(tc.rootTurn)
+			record.Model = tc.model
+			err := tc.validate(record, identity)
+			var validationErr *ValidationError
+			if !strings.Contains(err.Error(), "blank model") || !errors.As(err, &validationErr) || validationErr.FieldPath != "TokenUtilization.model" || validationErr.Model != record.GetModel() || validationErr.APIMessageID != record.GetApiMessageId() || validationErr.AgentReplSessionID != record.GetAgentReplSessionId() || validationErr.ClaudeSessionID != record.GetClaudeSessionId() {
+				t.Fatalf("validation error = %#v, want structured model rejection", err)
+			}
+		})
+	}
+	for _, tc := range []struct {
+		name     string
+		validate func(*frontendv1.TokenUtilization, Identity) error
+		rootTurn string
+	}{
+		{name: "live synthetic", validate: Validate, rootTurn: "turn"},
+		{name: "historical synthetic", validate: ValidateHistorical},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			record := validationRecord(tc.rootTurn)
+			record.Model = SyntheticModelIdentity
+			if err := tc.validate(record, identity); err != nil {
+				t.Fatalf("Validate synthetic model: %v", err)
+			}
+		})
 	}
 }
 

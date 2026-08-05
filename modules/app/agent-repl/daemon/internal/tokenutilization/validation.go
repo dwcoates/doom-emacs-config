@@ -4,11 +4,43 @@ package tokenutilization
 
 import (
 	"fmt"
+	"strings"
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"google.golang.org/protobuf/proto"
 )
+
+// SyntheticModelIdentity is the explicit model identity synthetic
+// token-utilization producers must stamp. Vendor-derived records must preserve
+// the vendor-provided model and are rejected when that value is blank.
+const SyntheticModelIdentity = "<synthetic>"
+
+// ValidationError identifies the invalid wire field while retaining the
+// evidence needed by the ingress owner to log the rejected observation.
+type ValidationError struct {
+	FieldPath          string
+	APIMessageID       string
+	Model              string
+	AgentReplSessionID string
+	ClaudeSessionID    string
+	Reason             string
+}
+
+func (e *ValidationError) Error() string {
+	return fmt.Sprintf("token utilization has %s", e.Reason)
+}
+
+func invalid(record *frontendv1.TokenUtilization, fieldPath, reason string) error {
+	return &ValidationError{
+		FieldPath:          fieldPath,
+		APIMessageID:       record.GetApiMessageId(),
+		Model:              record.GetModel(),
+		AgentReplSessionID: record.GetAgentReplSessionId(),
+		ClaudeSessionID:    record.GetClaudeSessionId(),
+		Reason:             reason,
+	}
+}
 
 // Identity binds a completed vendor response to the one daemon session,
 // vendor conversation, and admitted root turn that owns it.
@@ -110,6 +142,9 @@ func validateCommon(record *frontendv1.TokenUtilization, expected Identity) erro
 	}
 	if record.GetApiMessageId() == "" {
 		return fmt.Errorf("token utilization has blank api_message_id")
+	}
+	if strings.TrimSpace(record.GetModel()) == "" {
+		return invalid(record, "TokenUtilization.model", "blank model")
 	}
 	if record.GetActor() == nil {
 		return fmt.Errorf("token utilization has no actor")

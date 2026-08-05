@@ -1,6 +1,7 @@
 package statedb
 
 import (
+	"strings"
 	"testing"
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
@@ -15,8 +16,47 @@ func completeUtilization(sessionID, claudeSessionID, turnID, messageID string) *
 		ClaudeSessionId:    claudeSessionID,
 		RootTurnId:         turnID,
 		ApiMessageId:       messageID,
+		Model:              "model",
 		Actor:              &frontendv1.TokenUtilization_MainAgent{MainAgent: &frontendv1.TokenUtilizationMainAgent{}},
 		Usage:              &frontendv1.TokenUsage{OutputTokens: 4},
+	}
+}
+
+func TestTokenUtilizationRejectsBlankModelBeforeDurableMutation(t *testing.T) {
+	store, _ := openReceipts(t)
+	utilizations, err := NewTokenUtilizations(store.db)
+	if err != nil {
+		t.Fatalf("NewTokenUtilizations: %v", err)
+	}
+	for _, tc := range []struct {
+		name   string
+		record func() *frontendv1.TokenUtilization
+		write  func(*frontendv1.TokenUtilization) (bool, error)
+	}{
+		{name: "live blank", record: func() *frontendv1.TokenUtilization { return completeUtilization("s", "claude", "turn", "live-blank") }, write: utilizations.Record},
+		{name: "live whitespace", record: func() *frontendv1.TokenUtilization {
+			return completeUtilization("s", "claude", "turn", "live-whitespace")
+		}, write: utilizations.Record},
+		{name: "historical blank", record: func() *frontendv1.TokenUtilization { return completeUtilization("s", "claude", "", "historical-blank") }, write: utilizations.RecordHistorical},
+		{name: "historical whitespace", record: func() *frontendv1.TokenUtilization {
+			return completeUtilization("s", "claude", "", "historical-whitespace")
+		}, write: utilizations.RecordHistorical},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			record := tc.record()
+			if strings.Contains(tc.name, "whitespace") {
+				record.Model = " \t\n"
+			} else {
+				record.Model = ""
+			}
+			if inserted, err := tc.write(record); err == nil || inserted || !strings.Contains(err.Error(), "blank model") {
+				t.Fatalf("record = %v, %v, want rejected blank model", inserted, err)
+			}
+		})
+	}
+	rows, err := utilizations.List("s")
+	if err != nil || len(rows) != 0 {
+		t.Fatalf("blank model evidence mutated durable store: rows=%+v err=%v", rows, err)
 	}
 }
 
