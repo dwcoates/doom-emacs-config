@@ -1293,6 +1293,92 @@ func TestPingTurnEndTransfersItsClaimToTheRewind(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// The revival hold
+// ---------------------------------------------------------------------------
+
+// A REVIVAL-HELD ENTRY IS NOT DELIVERABLE. The ordinary turn-end drain must
+// skip it, or the prompt would run against the very conversation the pending
+// compaction has not compacted yet.
+func TestPopFrontDeliverableSkipsARevivalHeldEntry(t *testing.T) {
+	// Arrange.
+	q := &promptQueue{}
+	q.add(&queueEntry{id: "q1", revivalHoldSessionID: "s1"})
+
+	// Act.
+	got := q.popFrontDeliverable()
+
+	// Assert.
+	if got != nil {
+		t.Fatalf("popFrontDeliverable = %q, want nothing deliverable while a revival parks it", got.id)
+	}
+}
+
+// Releasing the hold restores an ordinary queued prompt, exactly as the
+// keep-alive release does: the HOLD stamp stood in for a classification that
+// never ran, and leaving it would render a chip claiming the prompt is still
+// waiting on a compaction that has landed.
+func TestReleaseRevivalHoldRestoresAnOrdinaryEntry(t *testing.T) {
+	// Arrange.
+	q := &promptQueue{}
+	q.add(&queueEntry{
+		id: "q1", revivalHoldSessionID: "s1",
+		classification: frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD,
+	})
+
+	// Act.
+	released := q.releaseRevivalHold("s1")
+
+	// Assert.
+	if released != 1 {
+		t.Fatalf("released %d entries, want 1", released)
+	}
+	if q.entries[0].revivalHeld() {
+		t.Fatal("the entry is still held after its revival's compaction landed")
+	}
+	if q.entries[0].classification != frontendv1.QueueClassification_QUEUE_CLASSIFICATION_PENDING {
+		t.Fatalf("classification = %s after release, want PENDING", q.entries[0].classification)
+	}
+}
+
+// A hold naming a DIFFERENT session is untouched, so one workspace's revival
+// cannot free a prompt another session's revival still owns.
+func TestReleaseRevivalHoldLeavesOtherHoldsAlone(t *testing.T) {
+	// Arrange.
+	q := &promptQueue{}
+	q.add(&queueEntry{id: "q1", revivalHoldSessionID: "s-other"})
+
+	// Act.
+	released := q.releaseRevivalHold("s1")
+
+	// Assert.
+	if released != 0 || !q.entries[0].revivalHeld() {
+		t.Fatalf("released=%d held=%v, want another revival's hold untouched", released, q.entries[0].revivalHeld())
+	}
+}
+
+// THE DROP TAKES ONLY WHAT THE REVIVAL PARKED. A revival that ends without
+// opening the gate disposes of its own entries and of nothing else: the other
+// prompts on the queue are waiting on turns, not on the gate.
+func TestDropRevivalHeldTakesOnlyTheRevivalsOwnEntries(t *testing.T) {
+	// Arrange.
+	q := &promptQueue{}
+	q.add(&queueEntry{id: "q1", revivalHoldSessionID: "s1"})
+	q.add(&queueEntry{id: "q2"})
+	q.add(&queueEntry{id: "q3", revivalHoldSessionID: "s1"})
+
+	// Act.
+	dropped := q.dropRevivalHeld("s1")
+
+	// Assert.
+	if len(dropped) != 2 || dropped[0].id != "q1" || dropped[1].id != "q3" {
+		t.Fatalf("dropped = %+v, want the two revival-parked entries front to back", dropped)
+	}
+	if len(q.entries) != 1 || q.entries[0].id != "q2" {
+		t.Fatalf("queue = %+v after the drop, want the unrelated entry kept", q.entries)
+	}
+}
+
 // A PING THAT HELD NOTHING RUNS NO REWIND, so it takes no rewind claim: the
 // pings stay in the transcript until a real prompt needs them gone, and a claim
 // with no aftermath to release it would hold every later prompt forever.

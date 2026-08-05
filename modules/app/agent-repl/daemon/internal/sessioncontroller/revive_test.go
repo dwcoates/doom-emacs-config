@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
+	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"claude-repld/internal/registry"
 )
@@ -610,5 +612,407 @@ func awaitGateReleased(t *testing.T, hib *fakeHibernations, sessionID string) {
 			return
 		}
 		runtime.Gosched()
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The revival PARK: prompts typed while a compact-first compaction is pending
+// ---------------------------------------------------------------------------
+//
+// GATED MEANS DELAYED, NOT DROPPED. The gate's refusal is the right answer for
+// a hibernated session nobody has made a revival decision about — that is the
+// whole feature. It was the wrong answer for the window AFTER the user chose
+// compact-first: the record stays hibernated on purpose while the compaction
+// runs, so every prompt typed in that window was nacked outright with no queue
+// entry made at all, and the two halves of the contract — do not RUN before the
+// compaction lands, DO run after it — were served by a refusal that honored
+// only the first.
+
+// revivalParkRig is a session mid-compact-first-revival: brought up, still
+// durably hibernated, its compaction armed and pending.
+func revivalParkRig(t *testing.T) (*Manager, *fakeHibernations) {
+	t.Helper()
+	m, _, hib := reviveRig(t, registry.HibernationCauseIdleCutoff)
+	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactFirst); err != nil {
+		t.Fatalf("ReviveSession compact_first: %v", err)
+	}
+	awaitCompactionWaiter(t, m, "ws")
+	return m, hib
+}
+
+// revivalParkedEntries reports the workspace's queue entries.
+func revivalParkedEntries(m *Manager, workspace string) []*queueEntry {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	d, live := m.byWS[workspace]
+	if !live {
+		return nil
+	}
+	return append([]*queueEntry(nil), d.queue.entries...)
+}
+
+// parkDuringCompactionSubmit arranges for one prompt to be submitted from
+// INSIDE the revival's own `/compact` submit, which is the deterministic
+// rendezvous for "a prompt arrived while the compaction was pending": the hook
+// runs on the reviving goroutine, with the claim held and the record still
+// hibernated, before the bounded wait is started and before the submit can
+// fail.
+func parkDuringCompactionSubmit(t *testing.T, m *Manager, requestID, text string) {
+	t.Helper()
+	c := fakeClientFor(t, m, "ws")
+	var once sync.Once
+	c.mu.Lock()
+	c.onSubmit = func() {
+		once.Do(func() {
+			if err := m.SubmitPrompt(context.Background(), "ws", requestID, text, "",
+				corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+				t.Errorf("SubmitPrompt during the compaction submit: %v", err)
+				return
+			}
+			// The park is the PRECONDITION of every disposition test that uses
+			// this hook, so it is verified here rather than assumed: a drop
+			// assertion over a queue nothing was ever parked on would pass for
+			// the wrong reason.
+			if entries := revivalParkedEntries(m, "ws"); len(entries) != 1 {
+				t.Errorf("%d entr(ies) parked during the compaction submit, want the one prompt", len(entries))
+			}
+		})
+	}
+	c.mu.Unlock()
+}
+
+// THE PROMPT IS ADMITTED, not refused. The user has already made the revival
+// choice; refusing what they type while the daemon carries it out asks them to
+// make it twice.
+func TestPromptDuringAPendingCompactionIsAcceptedRatherThanNacked(t *testing.T) {
+	// Arrange.
+	m, _ := revivalParkRig(t)
+
+	// Act.
+	err := m.SubmitPrompt(context.Background(), "ws", "req-1", "typed-during-compaction", "",
+		corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("SubmitPrompt during a pending compaction = %v, want the prompt accepted and parked", err)
+	}
+}
+
+// THE PROMPT BECOMES A PARKED QUEUE ENTRY, named to the session whose revival
+// is holding it — the evidence that it was delayed rather than dropped.
+func TestPromptDuringAPendingCompactionIsParkedOnTheQueue(t *testing.T) {
+	// Arrange.
+	m, _ := revivalParkRig(t)
+
+	// Act.
+	if err := m.SubmitPrompt(context.Background(), "ws", "req-1", "typed-during-compaction", "",
+		corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+		t.Fatalf("SubmitPrompt: %v", err)
+	}
+
+	// Assert.
+	entries := revivalParkedEntries(m, "ws")
+	if len(entries) != 1 {
+		t.Fatalf("%d queue entries, want the one parked prompt", len(entries))
+	}
+	if entries[0].revivalHoldSessionID != "s1" {
+		t.Fatalf("revival hold = %q, want the revived session %q", entries[0].revivalHoldSessionID, "s1")
+	}
+}
+
+// IT CARRIES THE HOLD STAMP for its whole parked life. PENDING would claim a
+// classifier is running on it, and none ever will.
+func TestARevivalParkedPromptIsStampedHold(t *testing.T) {
+	// Arrange.
+	m, _ := revivalParkRig(t)
+
+	// Act.
+	if err := m.SubmitPrompt(context.Background(), "ws", "req-1", "typed-during-compaction", "",
+		corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+		t.Fatalf("SubmitPrompt: %v", err)
+	}
+
+	// Assert.
+	entries := revivalParkedEntries(m, "ws")
+	if len(entries) != 1 {
+		t.Fatalf("%d queue entries, want the one parked prompt", len(entries))
+	}
+	if entries[0].classification != frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD {
+		t.Fatalf("classification = %s, want HOLD", entries[0].classification)
+	}
+}
+
+// THE CLASSIFIER NEVER RUNS ON IT. The turn in front of it is the revival's own
+// `/compact`, and the only verdict that would change anything demands
+// interrupting the very compaction the user chose to pay for.
+func TestARevivalParkedPromptIsNeverClassified(t *testing.T) {
+	// Arrange.
+	m, _, _ := reviveRig(t, registry.HibernationCauseIdleCutoff)
+	cls := &fakeClassifier{}
+	m.cfg.Classifier = cls
+	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactFirst); err != nil {
+		t.Fatalf("ReviveSession compact_first: %v", err)
+	}
+	awaitCompactionWaiter(t, m, "ws")
+
+	// Act.
+	if err := m.SubmitPrompt(context.Background(), "ws", "req-1", "typed-during-compaction", "",
+		corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+		t.Fatalf("SubmitPrompt: %v", err)
+	}
+
+	// Assert.
+	if reqs := cls.requests(); len(reqs) != 0 {
+		t.Fatalf("%d classification(s) for a revival-parked prompt, want none: %+v", len(reqs), reqs)
+	}
+}
+
+// IT DOES NOT RUN. The park is only worth having if the prompt genuinely stays
+// behind the compaction; a parked prompt that still reached the shim would pay
+// exactly the whole-conversation cost compact-first exists to pay once.
+func TestARevivalParkedPromptDoesNotReachTheShim(t *testing.T) {
+	// Arrange.
+	m, _ := revivalParkRig(t)
+
+	// Act.
+	if err := m.SubmitPrompt(context.Background(), "ws", "req-1", "typed-during-compaction", "",
+		corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+		t.Fatalf("SubmitPrompt: %v", err)
+	}
+
+	// Assert.
+	for _, p := range fakeClientFor(t, m, "ws").promptTexts() {
+		if p == "typed-during-compaction" {
+			t.Fatal("a revival-parked prompt reached the shim while the compaction was still pending")
+		}
+	}
+}
+
+// THE RELEASE. The compaction lands, the gate comes down, and the prompt the
+// user typed during it is delivered — the second half of delayed-never-dropped.
+func TestALandedCompactionDeliversTheRevivalParkedPrompt(t *testing.T) {
+	// Arrange.
+	m, _ := revivalParkRig(t)
+	signal := compactionWaiter(m, "ws")
+	if err := m.SubmitPrompt(context.Background(), "ws", "req-1", "released-by-compaction", "",
+		corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+		t.Fatalf("SubmitPrompt: %v", err)
+	}
+
+	// Act.
+	signal()
+
+	// Assert.
+	c := fakeClientFor(t, m, "ws")
+	waitFor(t, "the parked prompt to be delivered once the compaction landed", func() bool {
+		for _, p := range c.promptTexts() {
+			if p == "released-by-compaction" {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+// THE RELEASED ENTRY LEAVES THE QUEUE. A delivered prompt that stayed queued
+// would render a chip for work the agent is already doing.
+func TestALandedCompactionEmptiesTheRevivalParkedQueue(t *testing.T) {
+	// Arrange.
+	m, _ := revivalParkRig(t)
+	signal := compactionWaiter(m, "ws")
+	if err := m.SubmitPrompt(context.Background(), "ws", "req-1", "released-by-compaction", "",
+		corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+		t.Fatalf("SubmitPrompt: %v", err)
+	}
+
+	// Act.
+	signal()
+
+	// Assert.
+	waitFor(t, "the parked entry to leave the queue", func() bool {
+		return len(revivalParkedEntries(m, "ws")) == 0
+	})
+}
+
+// THE BOUND IS THE PARKED ENTRY'S EXPIRY. A compaction that never lands leaves
+// the session asleep, so nothing can ever deliver what it parked — and an entry
+// no path can select is a leak, not a delay. It is dropped, loudly.
+func TestACompactionThatTimesOutDropsTheRevivalParkedPrompt(t *testing.T) {
+	// Arrange.
+	m, _, _ := reviveRig(t, registry.HibernationCauseIdleCutoff)
+	m.mu.Lock()
+	m.reviveCompactBoundOverride = time.Millisecond
+	m.mu.Unlock()
+	parkDuringCompactionSubmit(t, m, "req-1", "typed-during-compaction")
+
+	// Act.
+	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactFirst); err != nil {
+		t.Fatalf("ReviveSession compact_first: %v", err)
+	}
+	awaitClaimFree(t, m, "ws")
+
+	// Assert.
+	waitFor(t, "the parked entry to be dropped when the compaction bound expired", func() bool {
+		return len(revivalParkedEntries(m, "ws")) == 0
+	})
+}
+
+// THE EXPIRED PARK IS NEVER SUBMITTED. Dropping it is the honest outcome;
+// delivering it on the way out would run the prompt against the uncompacted
+// conversation the revival failed to compact.
+func TestACompactionThatTimesOutNeverSubmitsTheParkedPrompt(t *testing.T) {
+	// Arrange.
+	m, _, _ := reviveRig(t, registry.HibernationCauseIdleCutoff)
+	m.mu.Lock()
+	m.reviveCompactBoundOverride = time.Millisecond
+	m.mu.Unlock()
+	parkDuringCompactionSubmit(t, m, "req-1", "typed-during-compaction")
+	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactFirst); err != nil {
+		t.Fatalf("ReviveSession compact_first: %v", err)
+	}
+	awaitClaimFree(t, m, "ws")
+	waitFor(t, "the parked entry to be dropped when the compaction bound expired", func() bool {
+		return len(revivalParkedEntries(m, "ws")) == 0
+	})
+
+	// Act — the drop has happened; nothing further may deliver the prompt.
+	texts := fakeClientFor(t, m, "ws").promptTexts()
+
+	// Assert.
+	for _, p := range texts {
+		if p == "typed-during-compaction" {
+			t.Fatal("a revival-parked prompt was submitted after its compaction timed out")
+		}
+	}
+}
+
+// A REVIVAL THAT NEVER REACHED ITS COMPACTION DISPOSES OF WHAT IT PARKED. The
+// session is up by the time a submit can fail, so a prompt can already be
+// parked behind a revival that is about to unwind — and that unwind is the last
+// thing that knows a revival was ever in flight.
+func TestARefusedCompactionSubmitDropsTheRevivalParkedPrompt(t *testing.T) {
+	// Arrange.
+	m, _, _ := reviveRig(t, registry.HibernationCauseIdleCutoff)
+	parkDuringCompactionSubmit(t, m, "req-1", "typed-during-compaction")
+	c := fakeClientFor(t, m, "ws")
+	c.mu.Lock()
+	c.submitErrOnce = errors.New("shim refused the compaction")
+	c.mu.Unlock()
+
+	// Act.
+	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactFirst); err == nil {
+		t.Fatal("a refused compaction submit reported success")
+	}
+
+	// Assert.
+	if entries := revivalParkedEntries(m, "ws"); len(entries) != 0 {
+		t.Fatalf("%d entr(ies) still parked after the revival unwound, want them dropped rather than left behind a gate nothing will open", len(entries))
+	}
+}
+
+// A CLEAR THAT FAILED LEAVES THE GATE STANDING, so what it parked is dropped
+// too: the compaction landed but the record still claims a sleep, and every
+// delivery path refuses a gated prompt.
+func TestAFailedGateReleaseDropsTheRevivalParkedPrompt(t *testing.T) {
+	// Arrange.
+	m, hib := revivalParkRig(t)
+	signal := compactionWaiter(m, "ws")
+	if err := m.SubmitPrompt(context.Background(), "ws", "req-1", "typed-during-compaction", "",
+		corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+		t.Fatalf("SubmitPrompt: %v", err)
+	}
+	hib.mu.Lock()
+	hib.writeErr = errors.New("registry write failed")
+	hib.mu.Unlock()
+
+	// Act.
+	signal()
+	awaitClaimFree(t, m, "ws")
+
+	// Assert.
+	waitFor(t, "the parked entry to be dropped when the gate could not be released", func() bool {
+		return len(revivalParkedEntries(m, "ws")) == 0
+	})
+}
+
+// A FORCE IS REFUSED. The control's whole meaning is "run it now", and running
+// it now would answer the prompt against the uncompacted conversation the user
+// chose this mode to avoid paying for.
+func TestForceIsRefusedForARevivalParkedPrompt(t *testing.T) {
+	// Arrange.
+	m, _ := revivalParkRig(t)
+	if err := m.SubmitPrompt(context.Background(), "ws", "req-1", "typed-during-compaction", "",
+		corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+		t.Fatalf("SubmitPrompt: %v", err)
+	}
+	entries := revivalParkedEntries(m, "ws")
+	if len(entries) != 1 {
+		t.Fatalf("%d queue entries, want the one parked prompt", len(entries))
+	}
+
+	// Act.
+	err := m.ForceQueueEntry("ws", entries[0].id)
+
+	// Assert.
+	if !errors.Is(err, ErrHibernated) {
+		t.Fatalf("ForceQueueEntry on a revival-parked prompt = %v, want the hibernation refusal", err)
+	}
+}
+
+// THE UNDECIDED SESSION'S NACK IS UNCHANGED, and it is the design. With no
+// revival in flight there is nothing for a prompt to WAIT for, so admitting it
+// to a queue would make the revival choice for the user by promising a delivery
+// only they can authorize.
+func TestPromptOnAHibernatedSessionWithNoRevivalInFlightIsStillNacked(t *testing.T) {
+	// Arrange — hibernated, and no revival claimed.
+	m, _, _ := reviveRig(t, registry.HibernationCauseIdleCutoff)
+
+	// Act.
+	err := m.SubmitPrompt(context.Background(), "ws", "req-1", "hello", "",
+		corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+
+	// Assert.
+	if !errors.Is(err, ErrHibernated) {
+		t.Fatalf("SubmitPrompt on an undecided hibernated session = %v, want ErrHibernated", err)
+	}
+}
+
+// NOTHING IS PARKED FOR THE UNDECIDED SESSION EITHER. A nack that still left a
+// queue entry behind would deliver the prompt at whatever boundary came next.
+func TestPromptOnAHibernatedSessionWithNoRevivalInFlightParksNothing(t *testing.T) {
+	// Arrange.
+	m, _, _ := reviveRig(t, registry.HibernationCauseIdleCutoff)
+
+	// Act.
+	_ = m.SubmitPrompt(context.Background(), "ws", "req-1", "hello", "",
+		corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+
+	// Assert.
+	if entries := revivalParkedEntries(m, "ws"); len(entries) != 0 {
+		t.Fatalf("%d entr(ies) queued for a session whose prompt was nacked, want none", len(entries))
+	}
+}
+
+// THE CLAIM ALONE DOES NOT PARK. A direct revival holds the very same claim and
+// clears the gate FIRST, so a prompt arriving under it has nothing to wait for
+// and must go straight through.
+func TestARevivalClaimOverAnAwakeSessionParksNothing(t *testing.T) {
+	// Arrange — the claim held over a session that is NOT hibernated.
+	m, _, _ := newHibernationRig(t)
+	release, _, err := m.claimRevival("ws", "s1")
+	if err != nil {
+		t.Fatalf("claimRevival: %v", err)
+	}
+	defer release()
+
+	// Act.
+	if err := m.SubmitPrompt(context.Background(), "ws", "req-1", "ordinary", "",
+		corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+		t.Fatalf("SubmitPrompt: %v", err)
+	}
+
+	// Assert.
+	if entries := revivalParkedEntries(m, "ws"); len(entries) != 0 {
+		t.Fatalf("%d entr(ies) parked under a revival claim over an awake session, want the prompt forwarded", len(entries))
 	}
 }
