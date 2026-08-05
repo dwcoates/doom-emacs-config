@@ -2220,7 +2220,7 @@ describe("ResultChip", () => {
     const html = finalResponseHtml(1_000);
     // Assert
     expect(html).toContain(
-      `<span class="turn-stats"><span class="turn-dur">1s</span> · <span class="turn-in">100k in</span></span>`,
+      `<span class="turn-stats"><span class="turn-dur">1s</span> · <span class="turn-in token-heat" style="--token-heat-hue:30">100k in</span></span>`,
     );
   });
 
@@ -2229,7 +2229,7 @@ describe("ResultChip", () => {
     // new input, which is the inflation the footer used to report.
     const html = finalResponseHtml(1_000);
     // Assert
-    expect(html).toContain(`<span class="turn-in">100k in</span>`);
+    expect(html).toContain(`<span class="turn-in token-heat" style="--token-heat-hue:30">100k in</span>`);
     expect(html).not.toContain("1.0M");
   });
 

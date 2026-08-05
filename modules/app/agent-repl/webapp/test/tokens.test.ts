@@ -8,6 +8,7 @@ import {
   formatTokens,
   generationTokensPerSecond,
   timingRows,
+  tokenHeatHue,
   tokensMenuHtml,
   tokensOverlayHtml,
   turnInputTokens,
@@ -433,5 +434,78 @@ describe("turnInputTokens: the NEW input a turn fed the model", () => {
     const u: Usage = { input_tokens: 100, output_tokens: 40 };
     // Act + Assert
     expect(turnInputTokens(u)).toBe(100);
+  });
+});
+
+// --- the uncached-input heat ramp -------------------------------------------
+//
+// One anchor or one property per test: the ramp's whole value is that adjacent
+// counts read as adjacent news, so the continuity cases matter as much as the
+// named colors.
+
+describe("tokenHeatHue", () => {
+  it("paints a turn that spent nothing the green end of the ramp", () => {
+    // Arrange / Act / Assert.
+    expect(tokenHeatHue(0)).toBe(120);
+  });
+
+  it("keeps the whole cheap band green, right up to its top", () => {
+    // Arrange / Act / Assert — 20k is the top of "cheap", not the start of
+    // the climb, so it is still exactly green.
+    expect(tokenHeatHue(20_000)).toBe(120);
+  });
+
+  it("reaches yellow exactly at the 50k anchor", () => {
+    // Arrange / Act / Assert.
+    expect(tokenHeatHue(50_000)).toBe(60);
+  });
+
+  it("reaches orange exactly at the 100k anchor", () => {
+    // Arrange / Act / Assert.
+    expect(tokenHeatHue(100_000)).toBe(30);
+  });
+
+  it("reaches red at the 200k anchor", () => {
+    // Arrange / Act / Assert — 100k opens the red band; 200k is where the hue
+    // actually arrives at red, so the worst turns stay distinguishable.
+    expect(tokenHeatHue(200_000)).toBe(0);
+  });
+
+  it("clamps beyond the red anchor rather than wrapping past it", () => {
+    // Arrange / Act / Assert — a hue that kept falling would wrap into
+    // magenta and read as cooler than the red it passed.
+    expect(tokenHeatHue(10_000_000)).toBe(0);
+  });
+
+  it("clamps below zero tokens to the green end", () => {
+    // Arrange / Act / Assert — a negative figure is not a real count, but it
+    // must not produce a hue outside the ramp.
+    expect(tokenHeatHue(-1)).toBe(120);
+  });
+
+  it("interpolates between anchors instead of stepping", () => {
+    // Arrange / Act — halfway from the 20k green anchor to the 50k yellow one.
+    const mid = tokenHeatHue(35_000);
+    // Assert — the exact midpoint hue, not either endpoint.
+    expect(mid).toBe(90);
+  });
+
+  it("crosses a band boundary without a visible jump", () => {
+    // Arrange / Act — a token either side of the 20k boundary.
+    const below = tokenHeatHue(19_900);
+    const above = tokenHeatHue(20_100);
+    // Assert — the whole point of a continuous ramp: adjacent counts are
+    // adjacent colors, so no single token repaints the figure.
+    expect(Math.abs(above - below)).toBeLessThanOrEqual(1);
+  });
+
+  it("never rises as the count climbs", () => {
+    // Arrange.
+    const counts = [0, 5_000, 20_000, 35_000, 50_000, 75_000, 100_000, 150_000, 200_000];
+    // Act.
+    const hues = counts.map(tokenHeatHue);
+    // Assert — monotonic descent green -> red; a rise anywhere would make a
+    // costlier turn read as cheaper.
+    expect(hues).toEqual([...hues].sort((a, b) => b - a));
   });
 });

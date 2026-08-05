@@ -41,7 +41,7 @@ import type {
 import { ConversationItem, ToolItem } from "./store.js";
 import { TASKS_SPEC, tasksMenuHtml } from "./tasks.js";
 import { IDLE_LABEL, TIMER_SLOT } from "./timer.js";
-import { compactTokens } from "./tokens.js";
+import { compactTokens, TOKEN_HEAT_CLASS, tokenHeatStyle } from "./tokens.js";
 import { accountingSummary, latestTurnAccounting } from "./turn-accounting.js";
 
 /** Which of the footer's counter overlays is open, and whether it is expanded. */
@@ -652,7 +652,12 @@ export function toolElapsed(tool: ToolItem, nowMs: number): string {
 export function tokenCellHtml(p: ProgressInput): string {
   const parts: string[] = [];
   if (p.inputTokens > 0 || p.turnStartedAtMs > 0) {
-    parts.push(`<span class="info-tokens">${escapeHtml(compactTokens(p.inputTokens))} in</span>`);
+    // Heated on the same ramp as the bubble corner, off the same figure, so
+    // the live cell and the stamp it becomes never disagree about a turn's
+    // cost. The idle label below is NOT heated: it reports no figure.
+    parts.push(
+      `<span class="info-tokens ${TOKEN_HEAT_CLASS}" style="${tokenHeatStyle(p.inputTokens)}">${escapeHtml(compactTokens(p.inputTokens))} in</span>`,
+    );
   } else if (p.thinkingTokens === 0) {
     parts.push(`<span class="info-tokens">${escapeHtml(IDLE_LABEL)}</span>`);
   }
