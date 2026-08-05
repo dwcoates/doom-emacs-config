@@ -50,7 +50,7 @@ func OpenJobStore(path string, logf func(string, ...any)) (*FileJobStore, error)
 	if logf == nil {
 		return nil, fmt.Errorf("workspace create: job store logger is required")
 	}
-	s := &FileJobStore{path: path, logf: logf, doc: diskShape{Version: 1, Jobs: map[string]Job{}, HostActions: map[string]HostAction{}}}
+	s := &FileJobStore{path: path, logf: logf, doc: diskShape{Version: 2, Jobs: map[string]Job{}, HostActions: map[string]HostAction{}}}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -61,7 +61,7 @@ func OpenJobStore(path string, logf func(string, ...any)) (*FileJobStore, error)
 	if err := json.Unmarshal(data, &s.doc); err != nil {
 		return nil, fmt.Errorf("workspace create: parse job store %s: %w", path, err)
 	}
-	if s.doc.Version != 1 {
+	if s.doc.Version != 1 && s.doc.Version != 2 {
 		return nil, fmt.Errorf("workspace create: unsupported job store version %d", s.doc.Version)
 	}
 	if s.doc.Jobs == nil || s.doc.HostActions == nil {
@@ -74,6 +74,23 @@ func OpenJobStore(path string, logf func(string, ...any)) (*FileJobStore, error)
 		if err := job.validate(); err != nil {
 			return nil, fmt.Errorf("workspace create: invalid persisted job %q: %w", id, err)
 		}
+	}
+	if s.doc.Version == 1 {
+		migrated := 0
+		for id, job := range s.doc.Jobs {
+			materialized := job.State == StateEmacsMaterialized || job.State == StatePromptSubmitting || job.State == StateReady || (job.State == StateFailed && job.AvailablePublished)
+			if materialized && !job.Materialized {
+				job.Materialized = true
+				job.PublicationReleased = true
+				s.doc.Jobs[id] = job
+				migrated++
+			}
+		}
+		s.doc.Version = 2
+		if err := s.saveLocked(); err != nil {
+			return nil, fmt.Errorf("workspace create: migrate job store %s to v2: %w", path, err)
+		}
+		logf("workspace-create: migrated job store path=%s from_version=1 to_version=2 materialized_jobs=%d", path, migrated)
 	}
 	return s, nil
 }

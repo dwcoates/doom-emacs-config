@@ -80,11 +80,16 @@ type Server struct {
 
 	upgrader websocket.Upgrader
 
-	mu           sync.Mutex
-	clients      map[*client]struct{}
-	listener     net.Listener
-	closed       bool
-	nextClientID uint64
+	mu sync.Mutex
+	// publicationMu serializes the host materialization release against every
+	// session-scoped live enqueue. Readers hold it from durable gate verdict
+	// through enqueue; release owns the writer side while opening the decision
+	// and enqueuing its authoritative snapshot.
+	publicationMu sync.RWMutex
+	clients       map[*client]struct{}
+	listener      net.Listener
+	closed        bool
+	nextClientID  uint64
 	// latestWorkspaceAt is the newest WorkspaceState revision that crossed the
 	// delivery lock. Snapshot paths use it to detect a concurrent publication.
 	latestWorkspaceAt map[string]int64
@@ -319,6 +324,11 @@ func (s *Server) Broadcast(frame *frontendv1.FrontendFrame) {
 		s.PushWorkspaceState(ws)
 		return
 	}
+	_, _, scoped := frameSessionIdentity(frame)
+	if scoped {
+		s.publicationMu.RLock()
+		defer s.publicationMu.RUnlock()
+	}
 	if !s.requireSessionPublication(frame) {
 		return
 	}
@@ -383,6 +393,8 @@ func (s *Server) Broadcast(frame *frontendv1.FrontendFrame) {
 // serialized against each other and every client's queue carries states in
 // exactly the order the resolver produced them.
 func (s *Server) PushWorkspaceState(w *frontendv1.WorkspaceState) {
+	s.publicationMu.RLock()
+	defer s.publicationMu.RUnlock()
 	if !s.requireSessionPublication(WorkspaceStateFrame(w)) {
 		return
 	}
@@ -562,6 +574,22 @@ func (s *Server) PushAuthoritativeSnapshot(snapshot *frontendv1.StateSnapshot) {
 	}
 	s.mu.Unlock()
 	s.disconnectAll(slow)
+}
+
+// ReleaseSessionPublication makes one creation session publishable and queues
+// its full authoritative snapshot before any concurrent session frame can
+// pass the materialization gate.
+func (s *Server) ReleaseSessionPublication(open func() error, snapshot func() *frontendv1.StateSnapshot) error {
+	if open == nil || snapshot == nil {
+		return fmt.Errorf("frontend: materialization release requires open and snapshot functions")
+	}
+	s.publicationMu.Lock()
+	defer s.publicationMu.Unlock()
+	if err := open(); err != nil {
+		return fmt.Errorf("frontend: materialization release open: %w", err)
+	}
+	s.PushAuthoritativeSnapshot(snapshot())
+	return nil
 }
 
 // isHostOnlyFrame marks daemon-to-host work that must never cross into either
