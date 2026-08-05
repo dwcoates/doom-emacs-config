@@ -103,11 +103,17 @@ func (*delayedMaterializationBridge) SubscribeHostActions() (<-chan *frontendv1.
 }
 
 func (b *delayedMaterializationBridge) release() {
-	b.mu.Lock()
-	b.decision.Materialized = true
-	b.mu.Unlock()
 	completion := make(chan error, 1)
-	b.releases <- SessionPublicationRelease{JobID: raceJob, WorktreePath: raceWorkspace, SessionID: raceSession, Completion: completion}
+	open := func() error {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		if b.decision.Materialized {
+			return fmt.Errorf("duplicate materialization release for %q", raceJob)
+		}
+		b.decision.Materialized = true
+		return nil
+	}
+	b.releases <- SessionPublicationRelease{JobID: raceJob, WorktreePath: raceWorkspace, SessionID: raceSession, Open: open, Completion: completion}
 	if err := <-completion; err != nil {
 		panic(fmt.Sprintf("authoritative publication failed: %v", err))
 	}
