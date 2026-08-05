@@ -3,6 +3,7 @@ package main
 import (
 	"testing"
 
+	corev1 "agentrepl/proto/agentshim/core/v1"
 	"agentrepl/shim-claude-sidecar/internal/discover"
 	"agentrepl/shim-claude-sidecar/internal/tail"
 )
@@ -106,6 +107,37 @@ func TestResetOwnersDiscardsPriorConnectionMappings(t *testing.T) {
 	got := s.resolveOwnerResult(ownerTarget("/tmp/claude-501/slug/runtime/tasks/b1.output", "b1"))
 	if got.Outcome != OwnerUnresolvedAwaitingOwner || !got.MayArrive() {
 		t.Fatalf("resolution = %+v, want cleared retryable mapping", got)
+	}
+}
+
+func TestOpenTaskIndexTracksAuthoritativeLifecycle(t *testing.T) {
+	s, _ := ownerSidecar(t)
+	started := &corev1.Event{SessionId: "S1", Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{
+		TaskId: "b1", Kind: corev1.TaskKind_TASK_KIND_SHELL, OutputPath: "/tmp/b1.output",
+	}}}
+	s.applyLifecycle([]*corev1.Event{started}, 1000)
+	if !s.taskOpen("b1") {
+		t.Fatal("live TaskStarted did not mark task open")
+	}
+
+	ended := &corev1.Event{SessionId: "S1", Payload: &corev1.Event_TaskEnded{TaskEnded: &corev1.TaskEnded{
+		TaskId: "b1", Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE,
+	}}}
+	s.applyLifecycle([]*corev1.Event{ended}, 2000)
+	if s.taskOpen("b1") {
+		t.Fatal("terminal TaskEnded did not clear open task")
+	}
+}
+
+func TestOpenTaskIndexRejectsMissingLifecycleIdentity(t *testing.T) {
+	s, read := ownerSidecar(t)
+	s.markTaskOpen("", OwnerSourceLiveLaunch)
+	s.markTaskClosed("")
+	if len(s.openTasks) != 0 {
+		t.Fatalf("invalid lifecycle observation mutated open tasks: %v", s.openTasks)
+	}
+	if got := linesContaining(read(), "observation rejected missing task id"); len(got) != 2 {
+		t.Fatalf("invalid lifecycle logs = %v, want two errors", got)
 	}
 }
 

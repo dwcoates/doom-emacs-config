@@ -141,25 +141,21 @@ type watched struct {
 // that outlives this window means the mapping is genuinely missing.
 const UnownedSpoolWindow = 60 * time.Second
 
-// heldReport is the last hold summary written to the log, so an unchanged
-// backlog stays silent.
-//
-// REPORTED IN AGGREGATE, deliberately. /tmp accumulates spools from every
-// project and every past session — well over a thousand here — and their launch
-// lines sit far behind every cursor, so they are permanently unattributable.
-// A line per spool meant thousands per restart, which buries the one thing
-// worth seeing: that the backlog CHANGED.
-type heldReport struct {
-	held  int
-	stale int
-}
+const (
+	// HeldDiagnosticSampleLimit bounds every spool-level diagnostic dimension.
+	HeldDiagnosticSampleLimit = 8
+	// ActiveUnresolvedSpoolThreshold makes any active attribution gap a
+	// readiness failure while terminal historical spools remain informational.
+	ActiveUnresolvedSpoolThreshold = 0
+)
 
 type sidecar struct {
-	store   *storeclient.Client
-	disc    *discover.Discoverer
-	tracker *stale.Tracker
-	roots   []string
-	log     *logging.Bound
+	store     *storeclient.Client
+	disc      *discover.Discoverer
+	tracker   *stale.Tracker
+	roots     []string
+	spoolRoot string
+	log       *logging.Bound
 
 	watchers map[string]*watched // by path
 
@@ -174,13 +170,10 @@ type sidecar struct {
 	ownerByOutput      map[string]ownerRecord // normalized output path -> owner
 	ownerPathConflicts map[string]bool        // normalized output path -> conflicting claims observed
 	ownerConflicts     map[string]bool        // task id -> conflicting session claim observed
-	// held records spools discovered before their owner was known, so an
-	// attribution that never arrives is visible rather than silent. A held
-	// spool is NOT tailed: reading it would mean inventing an owner.
-	held map[string]int64 // path -> first-seen ms
-	// lastHeldReport is the last summary written, so an unchanged backlog is
-	// not re-reported on every rescan.
-	lastHeldReport heldReport
+	openTasks          map[string]bool        // task id -> present in authoritative open-task state
+	// held owns explicit active and terminal classifications for every spool
+	// without an authoritative owner. A held or terminal spool is never tailed.
+	held *HeldLifecycle
 
 	// Store-link state machine (link.go). `cursors` is CONNECTION-SCOPED: it is
 	// recovered as the first act of every established connection and dropped the
@@ -202,6 +195,7 @@ func newSidecar(storeSocket string, roots []string, spoolRoot string, log *loggi
 		disc:               discover.New(roots, spoolRoot, log.With(logging.Context{Component: "discover"})),
 		tracker:            stale.New(stale.Options{}, log.With(logging.Context{Component: "stale"})),
 		roots:              roots,
+		spoolRoot:          spoolRoot,
 		log:                log,
 		watchers:           map[string]*watched{},
 		owners:             map[string]string{},
@@ -210,7 +204,7 @@ func newSidecar(storeSocket string, roots []string, spoolRoot string, log *loggi
 		ownerByOutput:      map[string]ownerRecord{},
 		ownerPathConflicts: map[string]bool{},
 		ownerConflicts:     map[string]bool{},
-		held:               map[string]int64{},
+		openTasks:          map[string]bool{},
 		// A fresh sidecar is simply a sidecar whose link is not up yet, with its
 		// first dial due immediately. That is all "boot" means here.
 		link:      linkDown,
@@ -221,6 +215,7 @@ func newSidecar(storeSocket string, roots []string, spoolRoot string, log *loggi
 	// store I/O, so a log created while processing a store operation cannot
 	// recursively write to the store.
 	log.SetDiagnosticSink(s.diagnostics.enqueue)
+	s.held = NewHeldLifecycle(HeldDiagnosticSampleLimit, s.reportHeldLifecycle)
 	return s
 }
 
@@ -301,12 +296,12 @@ func (s *sidecar) bootSweep() {
 // that case is honest, and it is the backfill path.
 func (s *sidecar) rescan() {
 	s.requireLinkUp("rescan")
-	now := time.Now().UnixMilli()
+	now := time.Now()
 	for _, tgt := range s.disc.Scan() {
 		if _, ok := s.watchers[tgt.Path]; ok {
 			continue
 		}
-		session, ok := s.resolveOwner(tgt, now)
+		session, ok := s.resolveTargetOwner(tgt, now)
 		if !ok {
 			// Unattributed: held, never guessed. Tailing it would mean either
 			// inventing a session or reviving the /tmp path id this change
@@ -328,10 +323,10 @@ func (s *sidecar) rescan() {
 		}
 		s.watchers[tgt.Path] = &watched{target: tgt, sessionID: session, tailer: tr}
 	}
-	s.reportHeld(now)
+	s.held.Readiness(ActiveUnresolvedSpoolThreshold, now)
 }
 
-// resolveOwner returns the session a target's events belong to.
+// resolveTargetOwner returns the session a target's events belong to.
 //
 // A config-root path names its own session (the transcript IS the session's
 // record), so it answers immediately. A /tmp spool does not: its path states
@@ -340,54 +335,53 @@ func (s *sidecar) rescan() {
 // left untailed — because the alternatives are inventing a session or reading
 // the path's runtime id, and that id being mistaken for an identity is the bug
 // this whole change removes.
-func (s *sidecar) resolveOwner(tgt discover.Target, nowMs int64) (string, bool) {
+func (s *sidecar) resolveTargetOwner(tgt discover.Target, now time.Time) (string, bool) {
 	resolution := s.resolveOwnerResult(tgt)
-	if !resolution.Resolved() {
-		s.holdUnowned(tgt, nowMs)
+	if tgt.SessionID != "" {
+		if !resolution.Resolved() {
+			panic(fmt.Sprintf("sidecar: config target %q did not resolve its path-owned session", tgt.Path))
+		}
+		return resolution.SessionID, true
+	}
+	info, err := os.Stat(tgt.Path)
+	if err != nil {
+		ctx := logging.Context{Operation: "classify-spool-lifecycle", Path: tgt.Path, Task: tgt.TaskID, Level: "error"}
+		if os.IsNotExist(err) {
+			ctx.Level = "debug"
+		}
+		s.log.With(ctx).Log("spool stat failed before lifecycle classification: %v", err)
 		return "", false
 	}
-	if firstSeenMs, ok := s.held[tgt.Path]; ok {
-		delete(s.held, tgt.Path)
-		// Per-spool, because a hold that CLEARS is rare and is the interesting
-		// half: it says attribution arrived, and how long it took.
-		s.log.With(logging.Context{Operation: "resolve-spool-owner", Path: tgt.Path, Session: resolution.SessionID, Task: tgt.TaskID}).Log(
-			"owner resolved after %dms held", nowMs-firstSeenMs)
+	path := normalizeOwnerOutputPath(tgt.Path)
+	decision, err := s.held.Observe(
+		HeldTarget{Path: path, Root: normalizeOwnerOutputPath(s.spoolRoot), TaskID: tgt.TaskID, ModTime: info.ModTime()},
+		resolution,
+		HeldEvidence{ModTime: info.ModTime(), ActiveTaskKnown: true, ActiveTask: s.taskOpen(tgt.TaskID)},
+		now,
+	)
+	if err != nil {
+		// HeldLifecycle owns the canonical error record with the hashed path and
+		// evidence. The scan aborts this target without creating a tailer.
+		return "", false
 	}
-	return resolution.SessionID, true
+	if decision.State != HeldStateResolved {
+		return "", false
+	}
+	return decision.SessionID, true
 }
 
-// holdUnowned records a spool whose owning session is not known yet. Silent by
-// itself — reportHeld does the talking, in aggregate, once the pass is done.
-func (s *sidecar) holdUnowned(tgt discover.Target, nowMs int64) {
-	if _, ok := s.held[tgt.Path]; !ok {
-		s.held[tgt.Path] = nowMs
-	}
-}
-
-// reportHeld summarizes the unattributed backlog after a rescan pass, and only
-// when it CHANGED. /tmp holds spools from every past session and project, whose
-// launch lines sit behind every cursor and will never be re-read, so the steady
-// state is a large permanent backlog: reporting it per spool (or on every pass)
-// drowns the log instead of informing it. What matters is the delta — a NEW
-// spool nothing can attribute — and that moves the counts.
-func (s *sidecar) reportHeld(nowMs int64) {
-	report := heldReport{held: len(s.held)}
-	for _, firstSeenMs := range s.held {
-		if nowMs-firstSeenMs >= UnownedSpoolWindow.Milliseconds() {
-			report.stale++
-		}
-	}
-	if report == s.lastHeldReport {
+// reportHeldLifecycle routes held-state instrumentation through the sidecar's
+// canonical logger. Per-spool observations are verbose; bounded aggregate
+// reports and rare owner resolutions remain normal records.
+func (s *sidecar) reportHeldLifecycle(record HeldLogRecord) {
+	message := fmt.Sprintf("state=%s reason=%s path_hash=%s root=%s age_bucket=%s %s",
+		record.State, record.Reason, record.PathHash, record.Root, record.AgeBucket, record.Message)
+	bound := s.log.With(logging.Context{Operation: record.Operation, Task: record.TaskID, Level: record.Level})
+	if record.Verbose {
+		bound.LogVerbose("%s", message)
 		return
 	}
-	s.lastHeldReport = report
-	if report.held == 0 {
-		s.log.With(logging.Context{Operation: "report-held-spools"}).Log("no unattributed spools remain")
-		return
-	}
-	s.log.With(logging.Context{Operation: "report-held-spools", Level: "warn"}).Log(
-		"%d held awaiting attribution (%d past %s) — not tailed rather than filed under a guessed session",
-		report.held, report.stale, UnownedSpoolWindow)
+	bound.Log("%s", message)
 }
 
 // pollAll polls every watched file once, writing any batch to the store and
@@ -498,10 +492,12 @@ func (s *sidecar) newHandler(kind tail.Kind, log *logging.Bound) tail.Handler {
 func (s *sidecar) applyLifecycle(events []*corev1.Event, nowMs int64) {
 	for _, e := range events {
 		if ts := e.GetTaskStarted(); ts != nil {
+			s.markTaskOpen(ts.GetTaskId(), OwnerSourceLiveLaunch)
 			s.noteTaskOwner(ts.GetTaskId(), e.GetSessionId(), ts.GetOutputPath(), OwnerSourceLiveLaunch)
 			s.tracker.Open(ts.GetTaskId(), taskKindToTail(ts.GetKind()), e.GetSessionId(), ts.GetOutputPath(), nowMs, nowMs)
 		}
 		if te := e.GetTaskEnded(); te != nil && te.GetStatus() != corev1.TerminalStatus_TERMINAL_STATUS_LOST {
+			s.markTaskClosed(te.GetTaskId())
 			s.tracker.Close(e.GetSessionId(), te.GetTaskId())
 		}
 	}
