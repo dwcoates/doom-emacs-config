@@ -65,13 +65,39 @@ import {
   SessionDeps,
 } from "./session.js";
 
-const LOGGER = bindLog({ component: "shim-main", operation: "shim.main.fatal" });
+/** Stable operation labels for shim-entrypoint telemetry queries and tests. */
+export const MAIN_LIFECYCLE_OPERATION = "shim.main.lifecycle";
+export const MAIN_FATAL_OPERATION = "shim.main.fatal";
+
+/** Normal lifecycle telemetry for the shim entrypoint and owned SDK session. */
+const LIFECYCLE_LOGGER = bindLog({ component: "shim-main", operation: MAIN_LIFECYCLE_OPERATION });
+
+/** Unrecoverable process-termination telemetry for the shim entrypoint only. */
+const FATAL_LOGGER = bindLog({ component: "shim-main", operation: MAIN_FATAL_OPERATION });
+
+/** Emit a main lifecycle record at info unless the caller identifies an error. */
+export function logMainLifecycle(fields: Record<string, unknown>, message: string): void {
+  LIFECYCLE_LOGGER.log({ level: "info", ...fields }, message);
+}
+
+function fatalCause(err: unknown): string {
+  if (err instanceof Error) {
+    return err.name.length === 0 ? "Error" : err.name;
+  }
+  return typeof err;
+}
 
 /** Log an unrecoverable entrypoint failure before ending the shim process. */
 export function reportFatal(err: unknown): void {
   const message = `fatal: ${err instanceof Error ? err.stack ?? err.message : String(err)}`;
   try {
-    LOGGER.log({ level: "error", cause: err }, message);
+    FATAL_LOGGER.log({
+      level: "error",
+      cause: err,
+      cause_class: "unrecoverable_entrypoint_failure",
+      cause_type: fatalCause(err),
+      exit_outcome: "process_exit_1",
+    }, message);
   } catch (logErr) {
     // The logger is not configured only during CLI/bootstrap failure, or its sink failed.
     emergencyStderr(`${message}; logger failure: ${logErr instanceof Error ? logErr.message : String(logErr)}`);
@@ -470,16 +496,17 @@ export async function main(): Promise<void> {
     args.model = normalizedModel;
   }
   if (requestedModel !== undefined && normalizedModel !== requestedModel) {
-    LOGGER.log(
+    logMainLifecycle(
       {
         agent_repl_session_id: args.sessionId,
         requested_model: requestedModel,
         effective_model: normalizedModel ?? "",
+        outcome: "launch_model_normalized",
       },
       "normalized empty-equivalent launch model before constructing SDK options",
     );
   }
-  LOGGER.log({ agent_repl_session_id: args.sessionId, fake: args.fake, daemon_socket: args.daemonSocket, store_socket: args.storeSocket ?? defaultStoreSocket(), permission_mode: args.permissionMode, model: args.model ?? "", resumed: args.resume !== undefined, rewound_from: args.rewoundFrom ?? "", rewind_retained_leaf: args.rewindRetainedLeaf ?? "", rewind_dropped_turn_count: args.rewindDroppedTurns?.length ?? 0 }, "validated shim startup arguments and configured durable logging");
+  logMainLifecycle({ agent_repl_session_id: args.sessionId, fake: args.fake, daemon_socket: args.daemonSocket, store_socket: args.storeSocket ?? defaultStoreSocket(), permission_mode: args.permissionMode, model: args.model ?? "", resumed: args.resume !== undefined, rewound_from: args.rewoundFrom ?? "", rewind_retained_leaf: args.rewindRetainedLeaf ?? "", rewind_dropped_turn_count: args.rewindDroppedTurns?.length ?? 0, outcome: "startup_arguments_validated" }, "validated shim startup arguments and configured durable logging");
 
   // The query factory is synchronous per SessionDeps; pre-resolve the SDK
   // module (dynamic import) before constructing the session. Under
@@ -487,7 +514,7 @@ export async function main(): Promise<void> {
   // guard throws, `main()`'s caller prints it and exits nonzero. `--fake`
   // short-circuits before the chokepoint and stays fully offline.
   const sdkModulePromise = args.fake ? null : importRealSDK("main:preresolve");
-  LOGGER.log({ agent_repl_session_id: args.sessionId, query_source: args.fake ? "fake" : "vendor-sdk" }, "selecting shim query implementation");
+  logMainLifecycle({ agent_repl_session_id: args.sessionId, query_source: args.fake ? "fake" : "vendor-sdk", outcome: "query_implementation_selected" }, "selecting shim query implementation");
   if (sdkModulePromise) await sdkModulePromise;
 
   const createQuery = makeUdsQueryFactory(args);
@@ -517,7 +544,7 @@ export async function runUdsMode(
   //
   // Failure to claim is a refusal to start: another shim owns this session.
   const releaseLock = acquireSessionLock(args.sessionId);
-  LOGGER.log({ agent_repl_session_id: args.sessionId }, "exclusive session lock acquired");
+  logMainLifecycle({ agent_repl_session_id: args.sessionId, outcome: "session_lock_acquired" }, "exclusive session lock acquired");
   process.on("exit", releaseLock);
 
   const session = new UdsSession({
@@ -598,11 +625,11 @@ export function udsShutdownSignalHandlers(
   return {
     onSigterm(): void {
       if (stopping !== null) return;
-      LOGGER.log({ agent_repl_session_id: sessionId, signal: "SIGTERM", outcome: "intentional_query_shutdown" }, "received authorized shim shutdown signal");
+      logMainLifecycle({ agent_repl_session_id: sessionId, signal: "SIGTERM", outcome: "intentional_query_shutdown" }, "received authorized shim shutdown signal");
       stopping = shutdown("SIGTERM");
     },
     onSigint(): void {
-      LOGGER.log({
+      logMainLifecycle({
         level: "error",
         agent_repl_session_id: sessionId,
         signal: "SIGINT",
