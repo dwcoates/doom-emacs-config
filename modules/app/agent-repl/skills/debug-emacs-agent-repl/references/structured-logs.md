@@ -107,9 +107,42 @@ Workspace-associated Emacs calls produce JSONL in the workspace's
 `emacs.log`. Calls with no conceptual workspace use the configured global
 Emacs sink under the OS temporary directory.
 
-Verbose controls terminal and `*Messages*` visibility only. Normal and verbose
-records both persist whenever file logging is enabled. Therefore absence of a
-verbose record is not explained by terminal verbosity settings.
+### Emacs log volume: two independent knobs
+
+These are routinely confused, and the confusion runs in both directions —
+turning the wrong one off does not shrink the log, and a missing record gets
+blamed on the wrong setting.
+
+| Variable | Governs | Does NOT govern |
+|---|---|---|
+| `agent-repl-debug` | `*Messages*` / terminal visibility. `nil`, `t`, `verbose`. | Anything written to disk. |
+| `agent-repl-log-file-level` | The durable sink: file and workspace log buffer. `verbose` < `debug` < `info` < `warn` < `error`. Default `debug`. | Echo-area or `*Messages*` visibility. |
+| `agent-repl-log-to-file` | All-or-nothing kill-switch for file writes. | Severity; it discards warnings and errors too. |
+
+Consequences for evidence:
+
+- Absence of a **verbose** record is expected at the default. `agent-repl-log-file-level`
+  is `debug`, which drops the `agent-repl--log-verbose` rung from disk. Raise it
+  to `verbose` before concluding a hot path is not executing.
+- Absence of a record is **never** explained by `agent-repl-debug`. That knob has
+  never gated persistence.
+- A record ranks by its `verbosity` field when that field is `verbose`, regardless
+  of the `level` it carries — verbose records are stamped `debug`, so ranking by
+  `level` alone would misread them.
+
+To change the durable level at runtime, with effect on the very next record and
+no restart or reload:
+
+```
+M-x agent-repl-debug/set-log-file-level      ;; or SPC <agent-repl prefix> L
+```
+
+Raise it to `verbose` to capture a reproduction, then lower it again. Leaving it
+at `verbose` is expensive: an ordinary working day produced ~350k verbose records
+and over 140 MB, against ~14k records at every other rung combined.
+
+`M-x agent-repl-debug/toggle-logging` (`D`) is the *visibility* toggle and will
+not reduce a log file.
 
 `<workspace>/.claude/emacs/memory-state.el` is a point-in-time snapshot of
 Emacs-owned workspace data. Use it for buffer, process, timer, prompt, and

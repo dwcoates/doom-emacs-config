@@ -470,11 +470,15 @@ Kills agent buffers, closes windows, and removes all state."
     (message "Set %s owning workspace to %s" buf-name ws)))
 
 (defun agent-repl-debug/toggle-logging (&optional verbose)
-  "Toggle debug logging.
+  "Toggle debug logging VISIBILITY in *Messages*.
 Without prefix argument: cycle nil → t → nil.
 With prefix argument (\\[universal-argument]): cycle nil → verbose → nil.
-Verbose mode additionally logs high-frequency events (timer ticks,
-window changes, git-diff sentinels, resolve-root, etc.)."
+Verbose mode additionally SHOWS high-frequency events (timer ticks,
+window changes, git-diff sentinels, resolve-root, etc.).
+
+This does not change what is written to the log file, and turning it off
+will not shrink one.  For that, use
+\\[agent-repl-debug/set-log-file-level]."
   (interactive "P")
   (setq agent-repl-debug
         (if verbose
@@ -490,6 +494,30 @@ window changes, git-diff sentinels, resolve-root, etc.)."
     ;; Also emit via the log system so it appears in the log stream.
     (when agent-repl-debug
       (agent-repl--log (agent-repl--ws-current-log-name) "debug logging toggled: %s" label))))
+
+(defun agent-repl-debug/set-log-file-level (level)
+  "Set `agent-repl-log-file-level' to LEVEL for the rest of this session.
+
+This is the control for LOG FILE volume, which `agent-repl-debug' has
+never governed.  It takes effect on the very next record — no restart, no
+reload — so it can be turned down while a log is actively being flooded
+and back up when a reproduction is about to be captured."
+  (interactive
+   (list (intern
+          (completing-read
+           (format "Durable log level (currently %s): " agent-repl-log-file-level)
+           '("verbose" "debug" "info" "warn" "error")
+           nil t nil nil (symbol-name agent-repl-log-file-level)))))
+  (unless (assoc (symbol-name level) agent-repl--log-level-rank)
+    (error "agent-repl: %S is not a log level; expected one of verbose debug info warn error"
+           level))
+  (setq agent-repl-log-file-level level)
+  ;; Announced through the durable sink as well as the echo area: the record
+  ;; that says the threshold moved is itself the boundary a later reader needs
+  ;; to explain why the surrounding volume changed.
+  (agent-repl--info (agent-repl--ws-current-log-name)
+                    "debug/set-log-file-level: durable log level now %s" level)
+  (message "[agent-repl] durable log level: %s" level))
 
 (defun agent-repl-debug/toggle-log-to-file ()
   "Toggle writing debug log output to `agent-repl-log-file-name'.
@@ -769,6 +797,7 @@ aux maps for every state in `agent-repl--scroll-output-intercept-states'
        :desc "Nuke ALL workspaces"      "X" #'agent-repl-nuke-all-workspaces
        :desc "Paste workspace clipboard" "p" #'agent-repl-paste-clipboard
        :desc "Toggle debug logging"    "D" #'agent-repl-debug/toggle-logging
+       :desc "Set durable log level"   "L" #'agent-repl-debug/set-log-file-level
        (:prefix ("h" . "help/debug")
         :desc "Dump workspace state"     "p" #'agent-repl-debug/dump-workspace
         :desc "Explain config (read-only Q&A)" "c" #'agent-repl-explain-config
