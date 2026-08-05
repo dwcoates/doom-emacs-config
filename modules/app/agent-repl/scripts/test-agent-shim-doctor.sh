@@ -159,6 +159,15 @@ printf '%s\n' "$OUT" | grep -q '"check":"store-socket-connectable","status":"PAS
   printf 'FAIL: healthy store health did not pass: %s\n' "$OUT" >&2
   exit 1
 }
+HEALTH_RECORD_COUNT="$(printf '%s\n' "$OUT" | grep -o '"check":"store-socket-connectable"' | wc -l | tr -d ' ')"
+[ "$HEALTH_RECORD_COUNT" -eq 1 ] || {
+  printf 'FAIL: healthy store health emitted %s records, want exactly one: %s\n' "$HEALTH_RECORD_COUNT" "$OUT" >&2
+  exit 1
+}
+if printf '%s\n' "$OUT" | grep -q '"check":"store-socket-connectable","status":"FAIL"'; then
+  printf 'FAIL: healthy store health fell through into a failure record: %s\n' "$OUT" >&2
+  exit 1
+fi
 printf '%s\n' "$OUT" | grep -Eq '"metadata":\{"request_id":"doctor-[^"]+","latency_ms":17,"component":"shim-store","healthy":true,"failure_class":"","reason":"ready"\}' || {
   printf 'FAIL: healthy response metadata was not retained verbatim: %s\n' "$OUT" >&2
   exit 1
