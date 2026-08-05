@@ -37,6 +37,16 @@ const maxStderrTail = 8 * 1024
 // never mistakes a truncated tail for the child's complete stderr.
 const stderrTruncationMarker = "[stderr truncated to the last 8192 bytes] "
 
+const (
+	stderrCloseOwnerUnclaimed = "unclaimed"
+	stderrCloseOwnerProcWait  = "proc_wait"
+	stderrCloseOwnerCaller    = "caller"
+
+	stderrOutcomeCleanEOF            = "clean_eof"
+	stderrOutcomeExpectedReaderClose = "expected_reader_close"
+	stderrOutcomeScannerError        = "scanner_error"
+)
+
 // stderrTail is a byte-capped ring of the child's most recent stderr. It is an
 // io.Writer so the same buffer serves both stderr paths: the parsed pump and
 // the caller-supplied writer (which it tees).
@@ -116,10 +126,15 @@ type Proc struct {
 	cmd    *exec.Cmd
 	stdin  io.WriteCloser
 	events chan *protocol.L1Event
+	logger Logger
 	// stderr retains a bounded tail of the child's stderr so a process that
 	// dies without ever speaking the protocol still has evidence to hand the
 	// bring-up that was waiting for it.
 	stderr *stderrTail
+	// stderrPump tracks parsed stderr scan completion.  Proc.Wait and os/exec
+	// own the reader close, while a caller owns the child's stream when Stderr
+	// is supplied.
+	stderrPump *stderrPump
 	// pid and pgid are captured at spawn so a stop record names the same
 	// process the spawn record did, even after the process has exited.
 	pid  int
@@ -128,6 +143,102 @@ type Proc struct {
 	mu      sync.Mutex
 	stdinOK bool
 }
+
+// stderrLifecycle records the one authoritative account of why a child is
+// stopping and who owns the reader close.  The mutex makes the expected-close
+// classification structural: the scanner cannot observe the marker until the
+// lifecycle owner has committed it.
+type stderrLifecycle struct {
+	mu sync.Mutex
+
+	pid               int
+	pgid              int
+	shutdownInitiator string
+	shutdownReason    string
+	closeOwner        string
+	closeExpected     bool
+}
+
+type stderrLifecycleSnapshot struct {
+	pid               int
+	pgid              int
+	shutdownInitiator string
+	shutdownReason    string
+	closeOwner        string
+	closeExpected     bool
+}
+
+// stderrPump owns daemon-parsed stderr scan completion and publishes it only
+// after the scanner has made its final lifecycle classification.
+type stderrPump struct {
+	reader       io.ReadCloser
+	logger       Logger
+	tail         *stderrTail
+	done         chan struct{}
+	logLifecycle bool
+	lifecycle    stderrLifecycle
+}
+
+func newStderrPump(reader io.ReadCloser, logger Logger, tail *stderrTail, pid, pgid int, logLifecycle bool) *stderrPump {
+	return &stderrPump{
+		reader:       reader,
+		logger:       logger,
+		tail:         tail,
+		done:         make(chan struct{}),
+		logLifecycle: logLifecycle,
+		lifecycle: stderrLifecycle{
+			pid:               pid,
+			pgid:              pgid,
+			shutdownInitiator: "child_exit",
+			shutdownReason:    "no deliberate stop requested",
+			closeOwner:        stderrCloseOwnerUnclaimed,
+		},
+	}
+}
+
+// signal holds lifecycle ownership across the system call so a scanner can
+// never pair a failed signal with a deliberately-attributed shutdown.
+func (p *stderrPump) signal(by Stop, send func() error) error {
+	p.lifecycle.mu.Lock()
+	defer p.lifecycle.mu.Unlock()
+	if err := send(); err != nil {
+		return err
+	}
+	p.lifecycle.shutdownInitiator = by.Initiator
+	p.lifecycle.shutdownReason = by.Reason
+	return nil
+}
+
+// expectClose names Proc.Wait as the logical close owner before os/exec's
+// Wait closes its pipe reader after the child exits.  Closing it here would
+// truncate a still-running child, so Wait is deliberately the only closer.
+func (p *stderrPump) expectClose(owner string) {
+	p.lifecycle.mu.Lock()
+	defer p.lifecycle.mu.Unlock()
+	if p.lifecycle.closeOwner == owner && p.lifecycle.closeExpected {
+		return
+	}
+	if p.lifecycle.closeOwner != stderrCloseOwnerUnclaimed {
+		panic(fmt.Sprintf("shim: stderr close owner already committed as %q", p.lifecycle.closeOwner))
+	}
+	p.lifecycle.closeOwner = owner
+	p.lifecycle.closeExpected = true
+}
+
+func (p *stderrPump) snapshot() stderrLifecycleSnapshot {
+	p.lifecycle.mu.Lock()
+	defer p.lifecycle.mu.Unlock()
+	return stderrLifecycleSnapshot{
+		pid:               p.lifecycle.pid,
+		pgid:              p.lifecycle.pgid,
+		shutdownInitiator: p.lifecycle.shutdownInitiator,
+		shutdownReason:    p.lifecycle.shutdownReason,
+		closeOwner:        p.lifecycle.closeOwner,
+		closeExpected:     p.lifecycle.closeExpected,
+	}
+}
+
+func (p *stderrPump) wait() { <-p.done }
 
 // Pid is the shim process's pid.
 func (p *Proc) Pid() int { return p.pid }
@@ -301,6 +412,7 @@ func Spawn(opts Options) (*Proc, error) {
 		cmd:     cmd,
 		stdin:   stdin,
 		events:  make(chan *protocol.L1Event, 64),
+		logger:  logger,
 		stderr:  tail,
 		pid:     pid,
 		pgid:    pgid,
@@ -309,7 +421,8 @@ func Spawn(opts Options) (*Proc, error) {
 
 	go p.pumpStdout(stdout, logger)
 	if stderr != nil {
-		go pumpStderr(stderr, logger, tail)
+		p.stderrPump = newStderrPump(stderr, logger, tail, pid, pgid, true)
+		go p.stderrPump.run()
 	}
 	return p, nil
 }
@@ -345,8 +458,13 @@ func (p *Proc) pumpStdout(stdout io.Reader, logger Logger) {
 	}
 }
 
-func pumpStderr(stderr io.Reader, logger Logger, tail *stderrTail) {
-	scanner := bufio.NewScanner(stderr)
+func (p *stderrPump) run() {
+	defer close(p.done)
+	if p.logLifecycle {
+		lifecycle := p.snapshot()
+		p.logger.Log("shim: stderr scanner started pid=%d pgid=%d shutdown_initiator=%q shutdown_reason=%q close_owner=%q", lifecycle.pid, lifecycle.pgid, lifecycle.shutdownInitiator, lifecycle.shutdownReason, lifecycle.closeOwner)
+	}
+	scanner := bufio.NewScanner(p.reader)
 	scanner.Buffer(make([]byte, 64*1024), maxEventLine)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -354,25 +472,45 @@ func pumpStderr(stderr io.Reader, logger Logger, tail *stderrTail) {
 		// shape — a node stack trace, a loader error — is exactly the evidence
 		// a spawn failure needs, so the tail must not be limited to the lines
 		// the daemon can parse.
-		if _, err := tail.Write([]byte(line + "\n")); err != nil {
-			logger.Log("shim: retaining stderr tail: %v", err)
+		if _, err := p.tail.Write([]byte(line + "\n")); err != nil {
+			p.logger.Log("shim: retaining stderr tail: %v", err)
 		}
 		verbose, valid := shimRecord(line)
 		if valid {
-			if mirror, ok := logger.(stderrMirror); ok {
+			if mirror, ok := p.logger.(stderrMirror); ok {
 				mirror.MirrorShimRecord(line)
 			} else if verbose {
-				logger.LogVerbose("shim stderr: %s", line)
+				p.logger.LogVerbose("shim stderr: %s", line)
 			} else {
-				logger.Log("shim stderr: %s", line)
+				p.logger.Log("shim stderr: %s", line)
 			}
 			continue
 		}
-		logger.Log("shim stderr malformed: %s", line)
+		p.logger.Log("shim stderr malformed: %s", line)
 	}
-	if err := scanner.Err(); err != nil {
-		logger.Log("shim: stderr scan error: %v", err)
+	readErr := scanner.Err()
+	lifecycle := p.snapshot()
+	expectedClose := readErr != nil && lifecycle.closeExpected && lifecycle.closeOwner == stderrCloseOwnerProcWait && errors.Is(readErr, os.ErrClosed)
+	outcome := stderrOutcomeCleanEOF
+	if expectedClose {
+		outcome = stderrOutcomeExpectedReaderClose
+	} else if readErr != nil {
+		outcome = stderrOutcomeScannerError
 	}
+	if readErr != nil && !expectedClose {
+		p.logger.Log("shim: stderr scan error: %v [pid=%d pgid=%d shutdown_initiator=%q shutdown_reason=%q close_owner=%q close_expected=%t]", readErr, lifecycle.pid, lifecycle.pgid, lifecycle.shutdownInitiator, lifecycle.shutdownReason, lifecycle.closeOwner, lifecycle.closeExpected)
+	}
+	if p.logLifecycle {
+		p.logger.Log("shim: stderr scanner completed pid=%d pgid=%d shutdown_initiator=%q shutdown_reason=%q close_owner=%q close_expected=%t outcome=%s expected_close=%t", lifecycle.pid, lifecycle.pgid, lifecycle.shutdownInitiator, lifecycle.shutdownReason, lifecycle.closeOwner, lifecycle.closeExpected, outcome, expectedClose)
+	}
+}
+
+// pumpStderr is retained for focused scanner tests.  A caller that invokes the
+// pump directly owns no child lifecycle, so every scanner failure is reported
+// as unexpected.
+func pumpStderr(stderr io.Reader, logger Logger, tail *stderrTail) {
+	pump := newStderrPump(io.NopCloser(stderr), logger, tail, 0, 0, false)
+	pump.run()
 }
 
 // shimVerboseRecord recognizes only the shim runtime's stable, field-shaped
@@ -459,13 +597,7 @@ func (p *Proc) CloseStdin() error {
 // reach whatever the shim itself spawned; that is a different, wider act and
 // this is deliberately not it.
 func (p *Proc) Kill(by Stop) error {
-	if err := p.stopAttribution(by, "kill"); err != nil {
-		return err
-	}
-	if err := p.cmd.Process.Kill(); err != nil {
-		return fmt.Errorf("shim: kill pid %d (initiator=%s reason=%s): %w", p.pid, by.Initiator, by.Reason, err)
-	}
-	return nil
+	return p.signal(by, "kill", p.cmd.Process.Kill)
 }
 
 // Terminate sends SIGTERM so the shim can stop cleanly (flush its transcript,
@@ -475,29 +607,49 @@ func (p *Proc) Kill(by Stop) error {
 //
 // SIGNALLED BY PID, NEVER BY GROUP, for the reason given on Kill.
 func (p *Proc) Terminate(by Stop) error {
-	if err := p.stopAttribution(by, "terminate"); err != nil {
-		return err
-	}
-	if err := p.cmd.Process.Signal(syscall.SIGTERM); err != nil {
-		return fmt.Errorf("shim: terminate pid %d (initiator=%s reason=%s): %w", p.pid, by.Initiator, by.Reason, err)
-	}
-	return nil
+	return p.signal(by, "terminate", func() error { return p.cmd.Process.Signal(syscall.SIGTERM) })
 }
 
-// stopAttribution refuses an unattributed stop. Refusing rather than defaulting
-// is the point: a stop nobody is named for produces a shim death the log cannot
-// distinguish from a crash, which is the confusion this attribution exists to
-// end.
-func (p *Proc) stopAttribution(by Stop, verb string) error {
+// signal commits lifecycle attribution only after its system call succeeds.
+// Holding the pump lifecycle mutex through the call makes an early scanner
+// completion structurally unable to observe a shutdown that never happened.
+func (p *Proc) signal(by Stop, verb string, send func() error) error {
 	if err := by.Validate(); err != nil {
 		return fmt.Errorf("shim: refusing to %s pid %d: %w", verb, p.pid, err)
 	}
+	var err error
+	if p.stderrPump != nil {
+		err = p.stderrPump.signal(by, send)
+	} else {
+		err = send()
+	}
+	if err != nil {
+		p.logger.Log("shim: shutdown signal failed verb=%s pid=%d pgid=%d initiator=%q reason=%q error=%v", verb, p.pid, p.pgid, by.Initiator, by.Reason, err)
+		return fmt.Errorf("shim: %s pid %d (initiator=%s reason=%s): %w", verb, p.pid, by.Initiator, by.Reason, err)
+	}
+	p.logger.Log("shim: shutdown requested verb=%s pid=%d pgid=%d initiator=%q reason=%q", verb, p.pid, p.pgid, by.Initiator, by.Reason)
 	return nil
 }
 
-// Wait reaps the subprocess and returns its exit error, if any.
+// Wait makes os/exec the sole stderr reader closer, then waits for the scanner
+// to classify that close before returning the child's exit status.
 func (p *Proc) Wait() error {
-	return p.cmd.Wait()
+	if p.stderrPump != nil {
+		p.stderrPump.expectClose(stderrCloseOwnerProcWait)
+		lifecycle := p.stderrPump.snapshot()
+		p.logger.Log("shim: stderr lifecycle reaping pid=%d pgid=%d shutdown_initiator=%q shutdown_reason=%q close_owner=%q close_expected=%t", lifecycle.pid, lifecycle.pgid, lifecycle.shutdownInitiator, lifecycle.shutdownReason, lifecycle.closeOwner, lifecycle.closeExpected)
+	}
+	waitErr := p.cmd.Wait()
+	closeOwner := stderrCloseOwnerCaller
+	if p.stderrPump != nil {
+		p.stderrPump.wait()
+		lifecycle := p.stderrPump.snapshot()
+		closeOwner = lifecycle.closeOwner
+		p.logger.Log("shim: child reaped pid=%d pgid=%d exit=%q shutdown_initiator=%q shutdown_reason=%q close_owner=%q", lifecycle.pid, lifecycle.pgid, ExitDescription(waitErr), lifecycle.shutdownInitiator, lifecycle.shutdownReason, closeOwner)
+	} else {
+		p.logger.Log("shim: child reaped pid=%d pgid=%d exit=%q shutdown_initiator=%q shutdown_reason=%q close_owner=%q", p.pid, p.pgid, ExitDescription(waitErr), "child_exit", "no deliberate stop requested", closeOwner)
+	}
+	return waitErr
 }
 
 func mustJSONString(s string) []byte {
