@@ -25,10 +25,10 @@ import (
 // workspace would read as THINKING with no turn behind it. The claims are
 // closed here, attributed to the rewind.
 
-// TurnClaimSuperseder closes the claims of turns a rewind discarded. Satisfied
-// by *ssm.Manager.
+// TurnClaimSuperseder closes the claims of turns a rewind discarded, and
+// attributes the ones their own ends already closed. Satisfied by *ssm.Manager.
 type TurnClaimSuperseder interface {
-	SupersedeTurnClaims(workspace, claimantSessionID string, turnIDs []string, cause string) ([]string, error)
+	SupersedeTurnClaims(workspace, claimantSessionID string, turnIDs []string, cause string) (closed, attributed []string, err error)
 }
 
 // ApplySessionRewound records one rewind's lineage and supersedes the claims of
@@ -65,12 +65,12 @@ func (c *consumer) ApplySessionRewound(ev *corev1.Event, rewound *corev1.Session
 		return fmt.Errorf("session-controller: SessionRewound session=%s seq=%d has no turn-claim superseder wired, so %d discarded turn(s) would keep their claims open and the workspace would read as thinking with no turn behind it",
 			c.sessionID, ev.GetSeq(), len(dropped))
 	}
-	superseded, err := c.turnSuperseders.SupersedeTurnClaims(c.workspace, c.sessionID, dropped, ssm.TurnCloseCauseSupersededByRewind)
+	closed, attributed, err := c.turnSuperseders.SupersedeTurnClaims(c.workspace, c.sessionID, dropped, ssm.TurnCloseCauseSupersededByRewind)
 	if err != nil {
 		return fmt.Errorf("session-controller: SessionRewound session=%s seq=%d: superseding %d discarded turn claim(s): %w",
 			c.sessionID, ev.GetSeq(), len(dropped), err)
 	}
-	c.logf("session-controller: rewind SUPERSEDED %d of %d discarded turn claim(s) session=%s ws=%q cause=%s — the rest were already closed by their own turn ends, which is the ordinary case",
-		len(superseded), len(dropped), c.sessionID, c.workspace, ssm.TurnCloseCauseSupersededByRewind)
+	c.logf("session-controller: rewind SUPERSEDED %d of %d discarded turn claim(s) session=%s ws=%q closed_still_open=%d attributed_already_closed=%d cause=%s — attributing already-closed claims is the ORDINARY outcome, because a keep-alive ping ends normally before the rewind that discards it runs; a claim closed here is the exception, a turn the rewind caught still open",
+		len(closed)+len(attributed), len(dropped), c.sessionID, c.workspace, len(closed), len(attributed), ssm.TurnCloseCauseSupersededByRewind)
 	return nil
 }
