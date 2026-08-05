@@ -125,7 +125,7 @@ func spoolTarget(taskID string) discover.Target {
 }
 
 // ownerSidecar is a sidecar with no store, sufficient for the pure attribution
-// logic (resolveOwner/holdUnowned/noteOwner/seedOwners touch no connection).
+// logic (resolveOwner/holdUnowned/noteTaskOwner/seedOwners touch no connection).
 func ownerSidecar(t *testing.T) (*sidecar, func() []string) {
 	t.Helper()
 	logf, read := capturingLog()

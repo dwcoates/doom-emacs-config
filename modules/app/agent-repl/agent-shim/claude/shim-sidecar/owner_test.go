@@ -77,6 +77,17 @@ func TestOwnerResolutionRejectsConflictingExactOutputPath(t *testing.T) {
 	}
 }
 
+func TestOwnerResolutionRejectsExactOutputPathClaimedByDifferentTaskInSameSession(t *testing.T) {
+	s, _ := ownerSidecar(t)
+	path := "/tmp/claude-501/slug/runtime/tasks/shared.output"
+	s.noteTaskOwner("b1", "S1", path, OwnerSourceLiveLaunch)
+	s.noteTaskOwner("b2", "S1", path, OwnerSourceLiveLaunch)
+
+	if got := s.resolveOwnerResult(ownerTarget(path, "b1")); got.Outcome != OwnerUnresolvedConflict {
+		t.Fatalf("resolution = %+v, want poisoned path conflict", got)
+	}
+}
+
 func TestOwnerResolutionRejectsTaskAssociationWithDifferentRecordedOutputPath(t *testing.T) {
 	s, _ := ownerSidecar(t)
 	s.noteTaskOwner("b1", "S1", "/tmp/claude-501/slug/runtime/tasks/b1.output", OwnerSourceLiveLaunch)

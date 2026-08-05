@@ -124,10 +124,10 @@ func (s *sidecar) observeOwner(taskID, sessionID, outputPath string, source Owne
 	}
 	added := false
 	if outputPath != "" {
-		if prior, ok := s.ownerByOutput[outputPath]; ok && prior.sessionID != sessionID {
+		if prior, ok := s.ownerByOutput[outputPath]; ok && (prior.sessionID != sessionID || prior.taskID != taskID) {
 			delete(s.ownerByOutput, outputPath)
 			s.ownerPathConflicts[outputPath] = true
-			s.log.With(logging.Context{Operation: "record-spool-owner", Path: outputPath, Session: prior.sessionID, Task: taskID, Level: "error"}).Log("owner observation conflicts exact output path source=%s existing_session=%s incoming_session=%s", source, prior.sessionID, sessionID)
+			s.log.With(logging.Context{Operation: "record-spool-owner", Path: outputPath, Session: prior.sessionID, Task: taskID, Level: "error"}).Log("owner observation conflicts exact output path source=%s existing_task=%s existing_session=%s incoming_task=%s incoming_session=%s", source, prior.taskID, prior.sessionID, taskID, sessionID)
 			return false
 		}
 		if !s.ownerPathConflicts[outputPath] {
