@@ -737,7 +737,7 @@ func TestUnmodeledUsageDiagnosticDeduplicatesByMessageAndPayload(t *testing.T) {
 	c := newConsumer("ws", "s", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }, nil, nil, nil, nil, nil)
 	c.accounting.activeTurnID = "t"
 	c.accounting.turns["t"] = &accountingTurn{}
-	event := accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{Message: &datav1.ApiAssistantMessage{Id: "m", Usage: &datav1.ApiUsage{UnmodeledUsage: unmodeled}}}}})
+	event := accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{Message: &datav1.ApiAssistantMessage{Id: "m", Model: "model", Usage: &datav1.ApiUsage{UnmodeledUsage: unmodeled}}}}})
 	for range 10 {
 		if err := c.Consume(proto.Clone(event).(*corev1.Event)); err != nil {
 			t.Fatalf("consume duplicated response: %v", err)
@@ -767,7 +767,7 @@ func TestUnmodeledUsageDiagnosticDoesNotLogPayloadValues(t *testing.T) {
 	c := newConsumer("ws", "s", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }, nil, nil, nil, nil, nil)
 	c.accounting.activeTurnID = "t"
 	c.accounting.turns["t"] = &accountingTurn{}
-	event := accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{Message: &datav1.ApiAssistantMessage{Id: "m", Usage: &datav1.ApiUsage{UnmodeledUsage: unmodeled}}}}})
+	event := accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{Message: &datav1.ApiAssistantMessage{Id: "m", Model: "model", Usage: &datav1.ApiUsage{UnmodeledUsage: unmodeled}}}}})
 	if err := c.Consume(event); err != nil {
 		t.Fatalf("consume response: %v", err)
 	}
