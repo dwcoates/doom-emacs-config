@@ -105,6 +105,7 @@ STORE_SOCK="$HOME/.cache/agent-repl/sock/store.sock"
 STORE_LABEL="com.agentrepl.shim-store"
 SIDECAR_LABEL="com.agentrepl.shim-claude-sidecar"
 SOCK_TIMEOUT="${AGENT_REPL_STORE_SOCK_TIMEOUT:-15}"
+READINESS_REPORT="$THIS_DIR/readiness-report.sh"
 
 # Overridable so the hermetic test harness can substitute its PATH stub — the
 # default absolute path would silently bypass any stub and reach the LIVE
@@ -128,6 +129,16 @@ while [ $# -gt 0 ]; do
 done
 
 log() { echo "[deploy-all] $*"; }
+
+verify_webapp_revision() {
+    local report
+    if ! report="$("$READINESS_REPORT" --require-ready webapp)"; then
+        echo "[deploy-all] webapp revision gate failed; structured readiness report follows:" >&2
+        printf '%s\n' "$report" >&2
+        exit 3
+    fi
+    log "webapp: revision gate passed"
+}
 
 # ---- 1. protobufs ----------------------------------------------------------
 log "proto: regenerating (make all)..."
@@ -371,6 +382,11 @@ else
             ;;
     esac
 fi
+
+# The build stamp is the only deployment identity for a webview artifact.
+# Assert it after the daemon bounce and webview refresh, so this command cannot
+# claim a complete deploy while the page artifact lags the source tree.
+verify_webapp_revision
 
 # ---- 6. elisp hot-reload ---------------------------------------------------
 #

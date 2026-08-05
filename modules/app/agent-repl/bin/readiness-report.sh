@@ -71,10 +71,16 @@
 # (Emacs runs it every ~15s), so nothing here may block on the network, take a
 # lock, or touch launchd.
 #
+# `--require-ready SYSTEM` turns the report into a structural deployment gate
+# for one named system.  It still writes the complete JSON document; its
+# top-level `gate` object repeats the selected system's source and deployed
+# revisions, so a failing invocation is actionable from its output alone.
+#
 # Exit codes:
-#   0  a report was produced (possibly with per-system errors)
+#   0  a report was produced; the requested gate, when present, passed
 #   1  no report could be produced (not a git checkout)
 #   2  bad usage
+#   3  a report was produced but the requested gate failed
 
 set -euo pipefail
 
@@ -85,16 +91,29 @@ ROOT="$(cd "$THIS_DIR/.." && pwd)"
 . "$THIS_DIR/lib-deploy-stamp.sh"
 
 usage() {
-    echo "usage: readiness-report.sh" >&2
+    echo "usage: readiness-report.sh [--require-ready SYSTEM]" >&2
     echo "  prints one JSON deploy-readiness document for agent-repl" >&2
 }
 
-if [ $# -gt 0 ]; then
-    case "$1" in
-        -h|--help) usage; exit 0 ;;
-        *) echo "readiness-report.sh: unknown argument: $1" >&2; usage; exit 2 ;;
-    esac
-fi
+REQUIRED_SYSTEM=""
+case "$#" in
+    0) ;;
+    1)
+        case "$1" in
+            -h|--help) usage; exit 0 ;;
+            *) echo "readiness-report.sh: unknown argument: $1" >&2; usage; exit 2 ;;
+        esac
+        ;;
+    2)
+        if [ "$1" != "--require-ready" ]; then
+            echo "readiness-report.sh: unknown argument: $1" >&2
+            usage
+            exit 2
+        fi
+        REQUIRED_SYSTEM="$2"
+        ;;
+    *) echo "readiness-report.sh: expected no arguments or --require-ready SYSTEM" >&2; usage; exit 2 ;;
+esac
 
 command -v git >/dev/null 2>&1 || {
     echo "readiness-report.sh: git is not on PATH; no report can be produced" >&2
@@ -124,6 +143,25 @@ prefix() { if [ -n "$REL_ROOT" ]; then printf '%s/%s' "$REL_ROOT" "$1"; else pri
 CACHE_BIN="$HOME/.cache/agent-repl/bin"
 
 SYSTEMS=(daemon shim webapp shim-store shim-claude-sidecar)
+
+system_known() {
+    local system
+    for system in "${SYSTEMS[@]}"; do
+        [ "$system" = "$1" ] && return 0
+    done
+    return 1
+}
+
+if [ -n "$REQUIRED_SYSTEM" ] && ! system_known "$REQUIRED_SYSTEM"; then
+    echo "readiness-report.sh: unknown system for --require-ready: $REQUIRED_SYSTEM" >&2
+    usage
+    exit 2
+fi
+
+GATE_READY=""
+GATE_DEPLOYED_SHA=""
+GATE_SOURCE_SHA=""
+GATE_ERROR=""
 
 # system_stamp NAME — path of the `.built-sha` stamp for NAME's artifact.
 system_stamp() {
@@ -312,6 +350,13 @@ emit_system() { # NAME
         error="no .built-sha stamp at $stamp; this artifact has not been built by a stamping build"
     fi
 
+    if [ "$name" = "$REQUIRED_SYSTEM" ]; then
+        GATE_READY="$ready"
+        GATE_DEPLOYED_SHA="$deployed_sha"
+        GATE_SOURCE_SHA="$source_sha"
+        GATE_ERROR="$error"
+    fi
+
     printf '    {"name": %s, "deployed_sha": %s, "deployed_dirty": %s, "source_sha": %s, "commits_behind": %s, "minutes_behind": %s, "running": %s, "ready": %s' \
         "$(jstr "$name")" \
         "$(jstr_or_null "$deployed_sha")" \
@@ -339,5 +384,25 @@ for sys in "${SYSTEMS[@]}"; do
     FIRST=0
     emit_system "$sys"
 done
-printf '\n  ]\n'
-printf '}\n'
+printf '\n  ]'
+if [ -n "$REQUIRED_SYSTEM" ]; then
+    if [ "$GATE_READY" -eq 1 ]; then
+        GATE_ERROR=""
+    elif [ -z "$GATE_ERROR" ]; then
+        GATE_ERROR="required system is not ready"
+    fi
+    printf ',\n  "gate": {"system": %s, "ready": %s, "deployed_sha": %s, "source_sha": %s' \
+        "$(jstr "$REQUIRED_SYSTEM")" \
+        "$(jbool "$GATE_READY")" \
+        "$(jstr_or_null "$GATE_DEPLOYED_SHA")" \
+        "$(jstr_or_null "$GATE_SOURCE_SHA")"
+    if [ -n "$GATE_ERROR" ]; then
+        printf ', "error": %s' "$(jstr "$GATE_ERROR")"
+    fi
+    printf '}'
+fi
+printf '\n}\n'
+
+if [ -n "$REQUIRED_SYSTEM" ] && [ "$GATE_READY" -ne 1 ]; then
+    exit 3
+fi
