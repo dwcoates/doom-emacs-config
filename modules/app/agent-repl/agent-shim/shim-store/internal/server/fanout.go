@@ -23,9 +23,33 @@ type subscriber struct {
 	ch        chan *corev1.Event
 	done      chan struct{}
 	closeOnce sync.Once
+	onDrop    func(subscriberDropReason)
 }
 
-func (s *subscriber) close() { s.closeOnce.Do(func() { close(s.done) }) }
+type subscriberDropReason string
+
+const (
+	subscriberDropUnsubscribed subscriberDropReason = "unsubscribed"
+	subscriberDropSlowConsumer subscriberDropReason = "slow-consumer"
+)
+
+// drop reports a candidate terminal cause to the connection-owned terminal
+// state machine.  Fanout owns only registry membership and never closes a
+// subscriber socket itself.
+func (s *subscriber) drop(reason subscriberDropReason) {
+	dropped := false
+	s.closeOnce.Do(func() {
+		close(s.done)
+		dropped = true
+	})
+	if dropped {
+		s.onDrop(reason)
+	}
+}
+
+func (s *subscriber) stop() {
+	s.closeOnce.Do(func() { close(s.done) })
+}
 
 // fanout is the live-tail subscriber registry (§6.5). It broadcasts every
 // published event to the registered subscribers of that event's session in
@@ -56,7 +80,13 @@ func newFanout(buffer int, log *logging.Logger) *fanout {
 }
 
 // subscribe registers a new live-tail subscriber for sessionID.
-func (f *fanout) subscribe(sessionID string) *subscriber {
+func (f *fanout) subscribe(sessionID string, onDrop func(subscriberDropReason), prepare func(*subscriber)) *subscriber {
+	if onDrop == nil {
+		panic("shim-store fanout: nil subscriber drop owner")
+	}
+	if prepare == nil {
+		panic("shim-store fanout: nil subscriber prepare owner")
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.nextID++
@@ -65,7 +95,9 @@ func (f *fanout) subscribe(sessionID string) *subscriber {
 		sessionID: sessionID,
 		ch:        make(chan *corev1.Event, f.buffer),
 		done:      make(chan struct{}),
+		onDrop:    onDrop,
 	}
+	prepare(s)
 	m := f.subs[sessionID]
 	if m == nil {
 		m = make(map[uint64]*subscriber)
@@ -78,22 +110,27 @@ func (f *fanout) subscribe(sessionID string) *subscriber {
 
 // unsubscribe removes a subscriber and closes its done channel.
 func (f *fanout) unsubscribe(s *subscriber) {
-	removed := false
-	f.mu.Lock()
-	if m := f.subs[s.sessionID]; m != nil {
-		if _, ok := m[s.id]; ok {
-			delete(m, s.id)
-			removed = true
-			if len(m) == 0 {
-				delete(f.subs, s.sessionID)
-			}
-		}
-	}
-	f.mu.Unlock()
-	s.close()
+	removed := f.remove(s)
+	s.drop(subscriberDropUnsubscribed)
 	if removed {
 		f.log.LogVerbose(logging.Fields{Operation: "unsubscribe", Session: s.sessionID, Subscriber: subscriberName(s.id)}, "live-tail subscriber removed")
 	}
+}
+
+// remove atomically retires s from the registry.  Terminal ownership lives at
+// the connection, so registry removal deliberately does not report a cause.
+func (f *fanout) remove(s *subscriber) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	m := f.subs[s.sessionID]
+	if _, ok := m[s.id]; !ok {
+		return false
+	}
+	delete(m, s.id)
+	if len(m) == 0 {
+		delete(f.subs, s.sessionID)
+	}
+	return true
 }
 
 // publish broadcasts ev to every subscriber of its session in arrival order.
@@ -115,7 +152,8 @@ func (f *fanout) publish(ev *corev1.Event) {
 
 	for _, s := range slow {
 		f.log.Log(logging.Fields{Operation: "slow-consumer", Session: sid, Subscriber: subscriberName(s.id), Level: "warn"}, "live-tail subscriber disconnected after buffer overflow buffer=%d event_seq=%d event_class=%s", f.buffer, ev.GetSeq(), ev.GetClass())
-		f.unsubscribe(s)
+		f.remove(s)
+		s.drop(subscriberDropSlowConsumer)
 	}
 }
 

@@ -14,6 +14,9 @@ func testFanout(buffer int) *fanout {
 	return newFanout(buffer, logging.New(io.Discard, io.Discard, false))
 }
 
+func ignoreSubscriberDrop(subscriberDropReason) {}
+func prepareSubscriber(*subscriber)             {}
+
 func persistentEvent(session string, seq uint64) *corev1.Event {
 	return &corev1.Event{
 		SessionId: session,
@@ -34,7 +37,7 @@ func ephemeralEvent(session string) *corev1.Event {
 func TestFanoutDeliversToSessionSubscriber(t *testing.T) {
 	// Arrange
 	f := testFanout(4)
-	sub := f.subscribe("s1")
+	sub := f.subscribe("s1", ignoreSubscriberDrop, prepareSubscriber)
 	// Act
 	f.publish(persistentEvent("s1", 1))
 	// Assert
@@ -51,7 +54,7 @@ func TestFanoutDeliversToSessionSubscriber(t *testing.T) {
 func TestFanoutIsSessionScoped(t *testing.T) {
 	// Arrange
 	f := testFanout(4)
-	sub := f.subscribe("s1")
+	sub := f.subscribe("s1", ignoreSubscriberDrop, prepareSubscriber)
 	// Act: publish for a different session.
 	f.publish(persistentEvent("other", 1))
 	// Assert: nothing delivered to s1's subscriber.
@@ -65,7 +68,7 @@ func TestFanoutIsSessionScoped(t *testing.T) {
 func TestFanoutEphemeralPassesThrough(t *testing.T) {
 	// Arrange
 	f := testFanout(4)
-	sub := f.subscribe("s1")
+	sub := f.subscribe("s1", ignoreSubscriberDrop, prepareSubscriber)
 	// Act: the fanout is class-agnostic; ephemeral events reach live subscribers.
 	f.publish(ephemeralEvent("s1"))
 	// Assert
@@ -82,7 +85,7 @@ func TestFanoutEphemeralPassesThrough(t *testing.T) {
 func TestFanoutSlowConsumerDisconnected(t *testing.T) {
 	// Arrange: buffer of 2, a subscriber that never drains.
 	f := testFanout(2)
-	sub := f.subscribe("s1")
+	sub := f.subscribe("s1", ignoreSubscriberDrop, prepareSubscriber)
 	// Act: overflow the bounded buffer.
 	f.publish(persistentEvent("s1", 1))
 	f.publish(persistentEvent("s1", 2))
@@ -102,7 +105,7 @@ func TestFanoutSlowConsumerDisconnected(t *testing.T) {
 func TestFanoutUnsubscribeStopsDelivery(t *testing.T) {
 	// Arrange
 	f := testFanout(4)
-	sub := f.subscribe("s1")
+	sub := f.subscribe("s1", ignoreSubscriberDrop, prepareSubscriber)
 	// Act
 	f.unsubscribe(sub)
 	f.publish(persistentEvent("s1", 1))
@@ -120,7 +123,7 @@ func TestFanoutUnsubscribeStopsDelivery(t *testing.T) {
 func TestFanoutSlowConsumerLogsCanonicalContext(t *testing.T) {
 	var logs bytes.Buffer
 	f := newFanout(1, logging.New(&logs, io.Discard, false).With(logging.Fields{Component: "server", Socket: "store.sock"}))
-	sub := f.subscribe("vendor-session")
+	sub := f.subscribe("vendor-session", ignoreSubscriberDrop, prepareSubscriber)
 	f.publish(persistentEvent("vendor-session", 1))
 	f.publish(persistentEvent("vendor-session", 2))
 
