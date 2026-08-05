@@ -32,6 +32,7 @@ import {
   tokenCellHtml,
   toolElapsed,
 } from "../src/progress-footer.js";
+import { IDLE_LABEL } from "../src/timer.js";
 import type { ContextCostAlert } from "../src/frontend-proto.js";
 import type { MergeStatus, ProgressInput } from "../src/state-adapter.js";
 import { ConversationItem, SystemFailureCard, ToolItem } from "../src/store.js";
@@ -918,8 +919,11 @@ describe("tokenCellHtml: the turn's input tokens, and never its output", () => {
   it("drops the dash the moment a figure exists to show", () => {
     // Arrange / Act — a real figure displaces the placeholder outright.
     const got = tokenCellHtml(progress({ inputTokens: 41_200 }));
-    // Assert
-    expect(got).not.toContain("--");
+    // Assert — the idle LABEL is gone. Probing for the bare substring "--"
+    // would now also match the heat ramp's `--token-heat-hue` custom property,
+    // which is markup rather than the placeholder this test is about.
+    expect(got).toContain("41k in");
+    expect(got).not.toContain(`>${IDLE_LABEL}<`);
   });
 
   it("drops the dash while only the thinking ticker is running", () => {
@@ -936,7 +940,9 @@ describe("tokenCellHtml: the turn's input tokens, and never its output", () => {
     // Act
     const got = tokenCellHtml(p);
     // Assert
-    expect(got).toBe('<span class="info-tokens">0 in</span>');
+    expect(got).toBe(
+      '<span class="info-tokens token-heat" style="--token-heat-hue:120">0 in</span>',
+    );
   });
 
   it("shows the real figure once usage lands on the armed turn", () => {
@@ -945,7 +951,9 @@ describe("tokenCellHtml: the turn's input tokens, and never its output", () => {
     // Act
     const got = tokenCellHtml(p);
     // Assert — the arming zero is displaced, never added to.
-    expect(got).toBe('<span class="info-tokens">41k in</span>');
+    expect(got).toBe(
+      '<span class="info-tokens token-heat" style="--token-heat-hue:78">41k in</span>',
+    );
   });
 
   it("keeps the idle dash when no turn is in flight", () => {
@@ -964,7 +972,7 @@ describe("tokenCellHtml: the turn's input tokens, and never its output", () => {
     const got = tokenCellHtml(p);
     // Assert
     expect(got).toBe(
-      '<span class="info-tokens">0 in</span> ' +
+      '<span class="info-tokens token-heat" style="--token-heat-hue:120">0 in</span> ' +
         '<span class="pfooter-thinking-tokens">1.4k thought</span>',
     );
   });

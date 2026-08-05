@@ -1134,6 +1134,18 @@ pre {
    the same two colors, stamped on the answer they were counting toward. */
 .turn-meta .turn-dur { color: var(--info-time); }
 .turn-meta .turn-in { color: var(--info-tokens); }
+/* THE HEAT RAMP. A turn's uncached input carries its own color, from green at
+   the cheap end through yellow and orange to red, so the magnitude reads
+   before the digits do. The markup supplies only the hue (`--token-heat-hue`,
+   computed by `tokenHeatHue`); the saturation and lightness live here because
+   the two themes need different ones to stay legible, and baking a whole
+   color into the HTML would pick one theme's readability for both.
+
+   These override the flat `--info-tokens` above and the shared `.info-tokens`
+   chip color, which is why each carries the extra class: the heated figure and
+   the unheated chip are the same element wearing one more thing. */
+.turn-meta .turn-in.token-heat,
+.info-tokens.token-heat { color: hsl(var(--token-heat-hue) 82% 30%); }
 /* The duration and the token figure share ONE size on this wrapper — a notch
    below the corner's own 0.65rem — so the two figures always read at the same
    font and size as each other, just slightly smaller than the corner's dating
@@ -3106,4 +3118,11 @@ body.ungated #mode-select {
   color: var(--err);
   border-color: var(--err);
   font-weight: 700;
+}
+
+/* The heat ramp's dark-theme half: the same hues, lifted and slightly desaturated
+   so they read against the dark surface rather than sinking into it. */
+@media (prefers-color-scheme: dark) {
+  .turn-meta .turn-in.token-heat,
+  .info-tokens.token-heat { color: hsl(var(--token-heat-hue) 75% 63%); }
 }

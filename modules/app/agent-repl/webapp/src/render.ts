@@ -16,7 +16,13 @@ import {
 } from "./topbar.js";
 import { taskCreateToolUseId } from "./tasks.js";
 import { IDLE_LABEL, TIMER_SLOT } from "./timer.js";
-import { compactTokens, formatTokens, turnInputTokens } from "./tokens.js";
+import {
+  compactTokens,
+  formatTokens,
+  TOKEN_HEAT_CLASS,
+  tokenHeatStyle,
+  turnInputTokens,
+} from "./tokens.js";
 import { formatAge, formatDuration, formatDurationCeil, formatElapsed } from "./duration.js";
 import {
   CLICK_THROUGH_SELECTOR,
@@ -2020,7 +2026,12 @@ function resultMeta(chip: ResultItem): string {
   }
   const input = turnInputTokens(chip.usage);
   if (input > 0) {
-    parts.push(`<span class="turn-in">${escapeHtml(`${compactTokens(input)} in`)}</span>`);
+    // The figure carries its own heat (see tokenHeatHue): a turn's uncached
+    // input is the number this corner exists to make noticeable, and a bare
+    // count in a fixed color makes 5k and 150k look like the same news.
+    parts.push(
+      `<span class="turn-in ${TOKEN_HEAT_CLASS}" style="${tokenHeatStyle(input)}">${escapeHtml(`${compactTokens(input)} in`)}</span>`,
+    );
   }
   if (parts.length === 0) return "";
   // Group both stats under one flex item so the `·` separator sits inline

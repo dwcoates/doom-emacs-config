@@ -107,6 +107,61 @@ export function turnInputTokens(u: Usage): number {
 }
 
 /**
+ * The heat ramp's anchors: `[tokens, hue]` pairs the ramp passes through
+ * exactly, interpolated linearly between and clamped outside.
+ *
+ * The hues are the named colors of the bands — green, yellow, orange, red —
+ * but the ramp is CONTINUOUS rather than four buckets, so a turn near a
+ * boundary does not change color on a token. 20k is the top of "cheap" and so
+ * is still exactly green; the climb to yellow happens across the band ABOVE
+ * it, which is what makes 19k and 21k read as the same news.
+ *
+ * Red is reached at 200k rather than at 100k because 100k is the start of the
+ * red band, not its floor: a turn has to keep climbing to keep reddening, and
+ * the very worst turns must stay distinguishable from the merely bad ones.
+ */
+const TOKEN_HEAT_STOPS: readonly (readonly [number, number])[] = [
+  [0, 120],
+  [20_000, 120],
+  [50_000, 60],
+  [100_000, 30],
+  [200_000, 0],
+];
+
+/**
+ * The hue for a turn's uncached input figure, for the corner stamp and the
+ * footer's token cell.
+ *
+ * ONLY THE HUE IS COMPUTED HERE. Saturation and lightness belong to the
+ * stylesheet, which has to pick different ones for the light and the dark
+ * theme; emitting a whole color here would hardcode one theme's readability
+ * into the markup. The caller sets this as the `--token-heat-hue` custom
+ * property and CSS builds the color around it.
+ */
+export function tokenHeatHue(tokens: number): number {
+  const first = TOKEN_HEAT_STOPS[0];
+  const last = TOKEN_HEAT_STOPS[TOKEN_HEAT_STOPS.length - 1];
+  if (tokens <= first[0]) return first[1];
+  if (tokens >= last[0]) return last[1];
+  for (let i = 1; i < TOKEN_HEAT_STOPS.length; i += 1) {
+    const [loTokens, loHue] = TOKEN_HEAT_STOPS[i - 1];
+    const [hiTokens, hiHue] = TOKEN_HEAT_STOPS[i];
+    if (tokens > hiTokens) continue;
+    const span = hiTokens - loTokens;
+    return Math.round(loHue + ((tokens - loTokens) * (hiHue - loHue)) / span);
+  }
+  return last[1];
+}
+
+/** The class and custom property that carry the heat ramp to the stylesheet. */
+export const TOKEN_HEAT_CLASS = "token-heat";
+
+/** The inline custom-property declaration a heated figure carries. */
+export function tokenHeatStyle(tokens: number): string {
+  return `--token-heat-hue:${tokenHeatHue(tokens)}`;
+}
+
+/**
  * A cost estimate row's text. Two decimals once the figure is readable
  * at that resolution, four below a dime so small spends do not all
  * collapse into `$0.00`.
