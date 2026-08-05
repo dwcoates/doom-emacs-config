@@ -14,6 +14,7 @@ package statedb
 import (
 	"database/sql"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 
@@ -28,6 +29,51 @@ func DefaultPath() (string, error) {
 		return "", fmt.Errorf("statedb: cannot resolve home dir for default db path: %w", err)
 	}
 	return filepath.Join(home, ".cache", "agent-repl", "ssm", "state.db"), nil
+}
+
+// OpenReadOnly opens an existing state database without creating a database,
+// schema, directory, WAL file, or any other durable residue.  Operator audits
+// use this boundary so their normal mode cannot change the inspected store.
+func OpenReadOnly(path string) (*sql.DB, error) {
+	if path == "" {
+		return nil, fmt.Errorf("statedb: empty db path")
+	}
+	if path == ":memory:" {
+		return nil, fmt.Errorf("statedb: in-memory db path %q is not an auditable durable store", path)
+	}
+	if _, err := os.Stat(path); err != nil {
+		return nil, fmt.Errorf("statedb: inspect read-only db path %q: %w", path, err)
+	}
+	return openSQLite(path, "read-only", (&url.URL{Scheme: "file", Path: path}).String()+"?mode=ro&_pragma=query_only(1)&_pragma=busy_timeout(5000)")
+}
+
+// OpenExisting opens an existing state database for an explicit operator
+// migration.  Unlike Open, it refuses to create a path or directory before the
+// operator's selected action has been validated.
+func OpenExisting(path string) (*sql.DB, error) {
+	if path == "" {
+		return nil, fmt.Errorf("statedb: empty db path")
+	}
+	if path == ":memory:" {
+		return nil, fmt.Errorf("statedb: in-memory db path %q is not an auditable durable store", path)
+	}
+	if _, err := os.Stat(path); err != nil {
+		return nil, fmt.Errorf("statedb: inspect existing db path %q: %w", path, err)
+	}
+	return openSQLite(path, "existing", path+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_txlock=immediate")
+}
+
+func openSQLite(path, mode, dsn string) (*sql.DB, error) {
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("statedb: open %s %q: %w", mode, path, err)
+	}
+	db.SetMaxOpenConns(1)
+	if err := db.Ping(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("statedb: open %s %q: %w", mode, path, err)
+	}
+	return db, nil
 }
 
 // Open opens (creating parent dirs as needed) the state database. A path of
@@ -58,16 +104,7 @@ func Open(path string) (*sql.DB, error) {
 	}
 	// modernc.org/sqlite reads PRAGMAs from _pragma query params.
 	dsn := path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_txlock=immediate"
-	db, err := sql.Open("sqlite", dsn)
-	if err != nil {
-		return nil, fmt.Errorf("statedb: open %q: %w", path, err)
-	}
-	db.SetMaxOpenConns(1)
-	// sql.Open is lazy; force a real handshake so a path that is not a
-	// database fails HERE, loudly, instead of on the first unrelated query.
-	if err := db.Ping(); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("statedb: open %q: %w", path, err)
-	}
-	return db, nil
+	// sql.Open is lazy; openSQLite forces a real handshake so a path that is
+	// not a database fails HERE, loudly, instead of on the first unrelated query.
+	return openSQLite(path, "writable", dsn)
 }
