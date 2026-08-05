@@ -84,6 +84,38 @@
   "save-buffer-if-modified handles nil gracefully (buffer-live-p returns nil)."
   (should (null (agent-repl--save-buffer-if-modified nil))))
 
+(ert-deftest agent-repl-test-autosave-aggregate-suppresses-expected-buffer-records ()
+  "A sweep delegates successful per-buffer evidence to its workspace summary."
+  (with-temp-buffer
+    (setq buffer-file-name "/tmp/agent-repl-autosave-fixture")
+    (insert "modified")
+    (let (records)
+      (cl-letf (((symbol-function 'save-buffer) #'ignore)
+                ((symbol-function 'agent-repl--log-verbose)
+                 (lambda (_ws fmt &rest args)
+                   (push (apply #'format fmt args) records))))
+        (should (agent-repl--save-buffer-if-modified (current-buffer) "ws" t)))
+      (should-not records))))
+
+(ert-deftest agent-repl-test-autosave-aggregate-retains-save-failure ()
+  "A sweep logs an identity-complete save failure before propagating it."
+  (with-temp-buffer
+    (setq buffer-file-name "/tmp/agent-repl-autosave-failure")
+    (insert "modified")
+    (let (record)
+      (cl-letf (((symbol-function 'save-buffer)
+                 (lambda (&rest _) (error "simulated save failure")))
+                ((symbol-function 'agent-repl--log)
+                 (lambda (ws fmt &rest args)
+                   (setq record (list ws (apply #'format fmt args))))))
+        (should-error
+         (agent-repl--save-buffer-if-modified (current-buffer) "ws" t)
+         :type 'error))
+      (should (equal (car record) "ws"))
+      (should (string-match-p "outcome=save-failed" (cadr record)))
+      (should (string-match-p "agent-repl-autosave-failure" (cadr record)))
+      (should (string-match-p "simulated save failure" (cadr record))))))
+
 ;;;; ---- Tests: agent-repl--autosave-workspace-buffers ----
 
 (ert-deftest agent-repl-test-autosave-workspace-noop-when-persp-disabled ()
@@ -119,6 +151,79 @@
       (should-not (cl-some (lambda (w) (string-match-p "non-perspective entry" w))
                            warnings)))))
 
+(ert-deftest agent-repl-test-autosave-workspace-logs-bounded-perspective-summary ()
+  "A sweep records causal counts without serializing perspective contents."
+  (let* ((secret "SECRET-PERSPECTIVE-PAYLOAD")
+         (persp (list :name "ws" :window-state (make-string 10000 ?x) secret))
+         (buffers '(modified-saved modified-unsaved unmodified))
+         verbose-records
+         normal-records
+         aggregate-flags)
+    (cl-letf (((symbol-function 'agent-repl--ws-system-available-p) (lambda () t))
+              ((symbol-function 'agent-repl--ws-all-persps) (lambda () (list persp)))
+              ((symbol-function 'agent-repl--ws-persp-name) (lambda (_persp) "ws"))
+              ((symbol-function 'agent-repl--ws-persp-identity)
+               (lambda (_persp) "persp@abc123"))
+              ((symbol-function 'agent-repl--ws-buffers) (lambda (_persp) buffers))
+              ((symbol-function 'agent-repl--autosave-buffer-modified-p)
+               (lambda (buf) (memq buf '(modified-saved modified-unsaved))))
+              ((symbol-function 'agent-repl--save-buffer-if-modified)
+               (lambda (buf _ws aggregate-p)
+                 (push aggregate-p aggregate-flags)
+                 (eq buf 'modified-saved)))
+              ((symbol-function 'agent-repl--log-verbose)
+               (lambda (ws fmt &rest args)
+                 (push (list ws fmt args (apply #'format fmt args))
+                       verbose-records)))
+              ((symbol-function 'agent-repl--log)
+               (lambda (ws fmt &rest args)
+                 (push (list ws (apply #'format fmt args)) normal-records))))
+      (agent-repl--autosave-workspace-buffers))
+    (let* ((workspace-record
+            (cl-find-if (lambda (record)
+                          (string-match-p "outcome=workspace-complete"
+                                          (nth 3 record)))
+                        verbose-records))
+           (message (nth 3 workspace-record))
+           (jsonl (agent-repl--log-record
+                   nil "debug" "verbose"
+                   (nth 1 workspace-record) (nth 2 workspace-record)))
+           (all-output (prin1-to-string (list verbose-records normal-records))))
+      (should (equal (car workspace-record) "ws"))
+      (should (equal message
+                     "autosave-workspace-buffers: outcome=workspace-complete workspace-name=ws perspective-identity=persp@abc123 buffer-count=3 modified-count=2 saved-count=1"))
+      (should (< (string-bytes message) 512))
+      (should (< (string-bytes jsonl) 1024))
+      (should-not (string-match-p secret all-output))
+      (should-not (string-match-p secret jsonl))
+      (should-not (string-match-p "#s(perspective" all-output))
+      (should-not (string-match-p "#s(perspective" jsonl))
+      (should (equal aggregate-flags '(t t t))))))
+
+(ert-deftest agent-repl-test-autosave-workspace-rejects-missing-name-before-save ()
+  "An unnamed perspective logs and aborts without partial buffer mutation."
+  (let ((persp (list :name nil))
+        (save-count 0)
+        record)
+    (cl-letf (((symbol-function 'agent-repl--ws-system-available-p) (lambda () t))
+              ((symbol-function 'agent-repl--ws-all-persps) (lambda () (list persp)))
+              ((symbol-function 'agent-repl--ws-persp-name) (lambda (_persp) nil))
+              ((symbol-function 'agent-repl--ws-persp-identity)
+               (lambda (_persp) "persp@missing"))
+              ((symbol-function 'agent-repl--ws-buffers) (lambda (_persp) '(buffer)))
+              ((symbol-function 'agent-repl--autosave-buffer-modified-p) (lambda (_) t))
+              ((symbol-function 'agent-repl--save-buffer-if-modified)
+               (lambda (&rest _) (cl-incf save-count)))
+              ((symbol-function 'agent-repl--log-verbose) #'ignore)
+              ((symbol-function 'agent-repl--log)
+               (lambda (ws fmt &rest args)
+                 (setq record (list ws (apply #'format fmt args))))))
+      (should-error (agent-repl--autosave-workspace-buffers) :type 'error))
+    (should (= save-count 0))
+    (should (equal (car record) nil))
+    (should (string-match-p "perspective-identity=persp@missing" (cadr record)))
+    (should (string-match-p "reason=invalid-workspace-name" (cadr record)))))
+
 (ert-deftest agent-repl-test-autosave-workspace-symbol-persp-non-nil ()
   "autosave-workspace-buffers warns for non-nil symbol perspective entries."
   (let ((persp-mode t)
@@ -147,6 +252,8 @@
           (with-current-buffer buf1 (insert "mod1"))
           (with-current-buffer buf2 (insert "mod2"))
           (cl-letf (((symbol-function 'persp-persps) (lambda () (list fake-persp)))
+                    ((symbol-function 'agent-repl--ws-persp-name)
+                     (lambda (persp) (plist-get persp :name)))
                     ((symbol-function 'persp-buffers) (lambda (_p) (list buf1 buf2)))
                     ((symbol-function 'save-buffer)
                      (lambda (&rest _) (cl-incf save-count)))
@@ -177,6 +284,8 @@
           ;; buf is not modified
           (should (not (buffer-modified-p buf)))
           (cl-letf (((symbol-function 'persp-persps) (lambda () (list fake-persp)))
+                    ((symbol-function 'agent-repl--ws-persp-name)
+                     (lambda (persp) (plist-get persp :name)))
                     ((symbol-function 'persp-buffers) (lambda (_p) (list buf)))
                     ((symbol-function 'agent-repl--log)
                      (lambda (_ws fmt &rest args)
@@ -201,6 +310,8 @@
           ;; Only file-buf is modified and file-visiting
           (with-current-buffer file-buf (insert "modified"))
           (cl-letf (((symbol-function 'persp-persps) (lambda () (list fake-persp)))
+                    ((symbol-function 'agent-repl--ws-persp-name)
+                     (lambda (persp) (plist-get persp :name)))
                     ((symbol-function 'persp-buffers)
                      (lambda (_p) (list file-buf non-file-buf)))
                     ((symbol-function 'save-buffer)
@@ -235,6 +346,8 @@
           (with-current-buffer buf2 (insert "mod"))
           (cl-letf (((symbol-function 'persp-persps)
                      (lambda () (list persp-a persp-b)))
+                    ((symbol-function 'agent-repl--ws-persp-name)
+                     (lambda (persp) (plist-get persp :name)))
                     ((symbol-function 'persp-buffers)
                      (lambda (p)
                        (cond ((eq p persp-a) (list buf1))
@@ -265,6 +378,8 @@
     ;; Kill the buffer before autosave runs
     (kill-buffer buf)
     (cl-letf (((symbol-function 'persp-persps) (lambda () (list fake-persp)))
+              ((symbol-function 'agent-repl--ws-persp-name)
+               (lambda (persp) (plist-get persp :name)))
               ((symbol-function 'persp-buffers) (lambda (_p) (list buf)))
               ((symbol-function 'save-buffer)
                (lambda (&rest _) (cl-incf save-count))))
@@ -277,6 +392,8 @@
         (fake-persp (list :name "empty-ws"))
         (log-messages nil))
     (cl-letf (((symbol-function 'persp-persps) (lambda () (list fake-persp)))
+              ((symbol-function 'agent-repl--ws-persp-name)
+               (lambda (persp) (plist-get persp :name)))
               ((symbol-function 'persp-buffers) (lambda (_p) nil))
               ((symbol-function 'agent-repl--log)
                (lambda (_ws fmt &rest args)

@@ -31,7 +31,7 @@
 (declare-function agent-repl--write-sexp-file "history" (file data))
 (declare-function agent-repl--ws-get "workspace" (name key))
 (declare-function agent-repl--ws-put "workspace" (name key value))
-(declare-function agent-repl--save-buffer-if-modified "autosave" (buf &optional ws))
+(declare-function agent-repl--save-buffer-if-modified "autosave" (buf &optional ws aggregate-p))
 (declare-function agent-repl--ws-name-for-dir "worktree" (dir))
 
 (defvar agent-repl-workspace-id-length)

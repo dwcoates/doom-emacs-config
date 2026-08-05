@@ -1844,6 +1844,26 @@ identity-distinct string injected by `agent-repl-set-priority' from
       (fmakunbound 'safe-persp-name)
       (should-not (agent-repl--ws-persp-name 'a-persp)))))
 
+(ert-deftest agent-repl-test-ws-persp-identity-is-bounded-and-opaque ()
+  "Perspective diagnostics never print the recursive perspective payload."
+  (let* ((secret "SECRET-PERSPECTIVE-PAYLOAD")
+         (persp (list :name "ws" :window-state (list secret)))
+         (identity (agent-repl--ws-persp-identity persp)))
+    (should (equal identity (agent-repl--ws-persp-identity persp)))
+    (should (string-match-p "\\`persp@[[:xdigit:]-]+\\'" identity))
+    (should (< (string-bytes identity) 40))
+    (should-not (string-match-p secret identity))))
+
+(ert-deftest agent-repl-test-ws-persp-identity-rejects-nil-with-canonical-log ()
+  "A missing perspective identity logs its cause before signalling."
+  (let (record)
+    (cl-letf (((symbol-function 'agent-repl--log)
+               (lambda (ws fmt &rest args)
+                 (setq record (list ws (apply #'format fmt args))))))
+      (should-error (agent-repl--ws-persp-identity nil) :type 'error))
+    (should (equal record
+                   '(nil "ws-persp-identity: rejected reason=nil-perspective")))))
+
 ;;;; ---- Tests: --ws-run-switch-project-function ----
 
 (ert-deftest agent-repl-test-ws-run-switch-project-function-invokes-when-set ()

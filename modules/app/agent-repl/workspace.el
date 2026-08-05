@@ -1853,6 +1853,18 @@ directly or wrapping it themselves with `fboundp'."
   (when (fboundp 'safe-persp-name)
     (safe-persp-name persp)))
 
+(defun agent-repl--ws-persp-identity (persp)
+  "Return a bounded process-local diagnostic identity for perspective PERSP.
+The identity uses object identity without printing PERSP, whose recursive
+representation may contain buffer names, window state, and other editor
+contents.  It is diagnostic correlation only and is not persisted as product
+state.  The owning high-level operation logs this returned identity as part of
+its aggregate record, so this boundary does not emit a duplicate record."
+  (unless persp
+    (agent-repl--log nil "ws-persp-identity: rejected reason=nil-perspective")
+    (error "agent-repl--ws-persp-identity: perspective must be non-nil"))
+  (format "persp@%x" (sxhash-eq persp)))
+
 (defun agent-repl--ws-nil-name ()
   "Return persp-mode's sentinel \"no perspective\" name, or nil.
 Reads `persp-nil-name'.  Returns nil when that variable is unbound

@@ -2,15 +2,37 @@
 
 ;;; Code:
 
-(defun agent-repl--save-buffer-if-modified (buf &optional ws)
-  "Save BUF silently if it is a live, modified, file-visiting buffer.
-Return non-nil if the buffer was saved.  Optional WS is threaded through
-for diagnostic logging context."
+(defun agent-repl--autosave-buffer-state (buf)
+  "Return minimized autosave predicate state for BUF.
+This helper runs once per buffer during a sweep.  Per-buffer logging would
+recreate the burst this helper exists to aggregate, so the workspace summary
+in `agent-repl--autosave-workspace-buffers' owns its diagnostics."
   (let* ((live (buffer-live-p buf))
-         (buffer-name (and live (buffer-name buf)))
+         (name (and live (buffer-name buf)))
          (file (and live (buffer-file-name buf)))
          (modified (and file (buffer-modified-p buf))))
-    (if (and live file modified)
+    (list :live (and live t)
+          :name name
+          :file file
+          :modified (and modified t)
+          :candidate (and live file modified t))))
+
+(defun agent-repl--autosave-buffer-modified-p (buf)
+  "Return t when BUF is live, file-visiting, and modified."
+  (plist-get (agent-repl--autosave-buffer-state buf) :candidate))
+
+(defun agent-repl--save-buffer-if-modified (buf &optional ws aggregate-p)
+  "Save BUF silently if it is a live, modified, file-visiting buffer.
+Return non-nil if the buffer was saved.  Optional WS is threaded through
+for diagnostic logging context.  When AGGREGATE-P is non-nil, omit expected
+per-buffer saved/skipped records because the owning sweep emits one bounded
+workspace summary; save failures are always recorded before they propagate."
+  (let* ((state (agent-repl--autosave-buffer-state buf))
+         (live (plist-get state :live))
+         (buffer-name (plist-get state :name))
+         (file (plist-get state :file))
+         (modified (plist-get state :modified)))
+    (if (plist-get state :candidate)
         (progn
           ;; WHY: a failed save must be traceable without converting the
           ;; autosave failure into a silently skipped buffer.
@@ -24,15 +46,17 @@ for diagnostic logging context."
               "save-buffer-if-modified: outcome=save-failed buffer=%S name=%S file=%S live=%s modified=%s error=%S"
               buf buffer-name file live modified err)
              (signal (car err) (cdr err))))
-          (agent-repl--log-verbose
-           ws
-           "save-buffer-if-modified: outcome=saved buffer=%S name=%S file=%S live=%s modified=%s"
-           buf buffer-name file live modified)
+          (unless aggregate-p
+            (agent-repl--log-verbose
+             ws
+             "save-buffer-if-modified: outcome=saved buffer=%S name=%S file=%S live=%s modified=%s"
+             buf buffer-name file live modified))
           t)
-      (agent-repl--log-verbose
-       ws
-       "save-buffer-if-modified: outcome=skipped buffer=%S name=%S file=%S live=%s modified=%s"
-       buf buffer-name file live modified)
+      (unless aggregate-p
+        (agent-repl--log-verbose
+         ws
+         "save-buffer-if-modified: outcome=skipped buffer=%S name=%S file=%S live=%s modified=%s"
+         buf buffer-name file live modified))
       nil)))
 
 (defun agent-repl--autosave-workspace-buffers ()
@@ -55,21 +79,27 @@ Runs silently every 5 minutes to prevent data loss."
            nil "autosave-workspace-buffers: outcome=skipped-nil-perspective entry=%S" persp))
          ((not (symbolp persp))
           (let* ((ws (agent-repl--ws-persp-name persp))
-                 (buffers (agent-repl--ws-buffers persp))
-                 (buffer-count (length buffers))
-                 (workspace-saved 0))
-            (agent-repl--log-verbose
-             ws
-             "autosave-workspace-buffers: outcome=scanning-workspace perspective=%S buffer-count=%d"
-             persp buffer-count)
-            (dolist (buf buffers)
-              (when (agent-repl--save-buffer-if-modified buf ws)
-                (cl-incf saved)
-                (cl-incf workspace-saved)))
-            (agent-repl--log-verbose
-             ws
-             "autosave-workspace-buffers: outcome=workspace-complete perspective=%S buffer-count=%d saved-count=%d"
-             persp buffer-count workspace-saved)))
+                 (perspective-identity (agent-repl--ws-persp-identity persp)))
+            (unless (and (stringp ws) (not (string-empty-p ws)))
+              (agent-repl--log
+               nil
+               "autosave-workspace-buffers: rejected perspective-identity=%s workspace-name=%S reason=invalid-workspace-name"
+               perspective-identity ws)
+              (error "agent-repl--autosave-workspace-buffers: perspective has no workspace name"))
+            (let* ((buffers (agent-repl--ws-buffers persp))
+                   (buffer-count (length buffers))
+                   (modified-count (cl-count-if
+                                    #'agent-repl--autosave-buffer-modified-p
+                                    buffers))
+                   (workspace-saved 0))
+              (dolist (buf buffers)
+                (when (agent-repl--save-buffer-if-modified buf ws t)
+                  (cl-incf saved)
+                  (cl-incf workspace-saved)))
+              (agent-repl--log-verbose
+               ws
+               "autosave-workspace-buffers: outcome=workspace-complete workspace-name=%s perspective-identity=%s buffer-count=%d modified-count=%d saved-count=%d"
+               ws perspective-identity buffer-count modified-count workspace-saved))))
          (t
           (agent-repl--log nil "WARN: autosave encountered non-perspective entry: %S" persp))))
       (if (> saved 0)
