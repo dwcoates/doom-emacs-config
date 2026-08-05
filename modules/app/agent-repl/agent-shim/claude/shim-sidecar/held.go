@@ -15,10 +15,8 @@ type HeldReason string
 
 const (
 	HeldReasonAwaitingOwner HeldReason = "missing_live_launch_observation"
-	HeldReasonHistorical    HeldReason = "historical_spool_absent_from_open_task_state"
-	HeldReasonClosed        HeldReason = "closed_task_or_session"
+	HeldReasonHistorical    HeldReason = "historical_or_closed_spool_absent_from_open_task_state"
 	HeldReasonConflict      HeldReason = "conflicting_authoritative_owner"
-	HeldReasonInvalid       HeldReason = "no_authoritative_owner"
 )
 
 // HeldTarget is the file-plane evidence lifecycle classification needs. ModTime
@@ -30,17 +28,13 @@ type HeldTarget struct {
 	ModTime time.Time
 }
 
-// HeldEvidence contains only authoritative lifecycle facts. A false active or
-// open value means the corresponding authoritative source was queried and says
-// the task or session is not open; unknown is not represented as false.
+// HeldEvidence contains only authoritative lifecycle facts. ActiveTask is
+// meaningful only when ActiveTaskKnown confirms that the durable open-task
+// snapshot was queried.
 type HeldEvidence struct {
-	ModTime               time.Time
-	ActiveTaskKnown       bool
-	ActiveTask            bool
-	OpenSessionKnown      bool
-	OpenSession           bool
-	CursorPastLaunchKnown bool
-	CursorPastLaunch      bool
+	ModTime         time.Time
+	ActiveTaskKnown bool
+	ActiveTask      bool
 }
 
 // HeldState determines whether a spool is rechecked or permanently retired.
@@ -95,6 +89,7 @@ type HeldReadiness struct {
 // supplies a reporter backed by internal/logging; tests use an in-memory sink.
 type HeldLogRecord struct {
 	Operation string
+	Level     string
 	State     HeldState
 	Reason    HeldReason
 	PathHash  string
@@ -138,9 +133,9 @@ func NewHeldLifecycle(sampleLimit int, report func(HeldLogRecord)) *HeldLifecycl
 // Owner lookup is intentionally absent: lifecycle consumes its structured
 // outcome and proves terminality only from authoritative evidence.
 func (l *HeldLifecycle) Observe(target HeldTarget, owner OwnerResolution, evidence HeldEvidence, now time.Time) (HeldDecision, error) {
-	l.report(HeldLogRecord{Operation: "held-observe", PathHash: heldPathHash(target.Path), TaskID: target.TaskID, Root: target.Root, Message: fmt.Sprintf("owner_outcome=%s owner_source=%s", owner.Outcome, owner.Source), Verbose: true})
+	l.report(HeldLogRecord{Operation: "held-observe", PathHash: heldPathHash(target.Path), TaskID: target.TaskID, Root: target.Root, Message: fmt.Sprintf("owner_outcome=%s owner_source=%s active_task_known=%t active_task=%t target_modtime=%s evidence_modtime=%s now=%s", owner.Outcome, owner.Source, evidence.ActiveTaskKnown, evidence.ActiveTask, target.ModTime.Format(time.RFC3339Nano), evidence.ModTime.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano)), Verbose: true})
 	if err := validateHeldInput(target, owner, evidence, now); err != nil {
-		l.report(HeldLogRecord{Operation: "held-observe", PathHash: heldPathHash(target.Path), TaskID: target.TaskID, Root: target.Root, Message: "error=" + err.Error()})
+		l.report(HeldLogRecord{Operation: "held-observe", Level: "error", PathHash: heldPathHash(target.Path), TaskID: target.TaskID, Root: target.Root, Message: "error=" + err.Error()})
 		return HeldDecision{}, err
 	}
 	if terminal, ok := l.terminal[target.Path]; ok {
@@ -151,16 +146,16 @@ func (l *HeldLifecycle) Observe(target HeldTarget, owner OwnerResolution, eviden
 
 	if owner.Outcome == OwnerResolvedPath || owner.Outcome == OwnerResolvedTask {
 		if err := validateResolvedOwner(owner); err != nil {
-			l.report(HeldLogRecord{Operation: "held-observe", PathHash: heldPathHash(target.Path), TaskID: target.TaskID, Root: target.Root, Message: "error=" + err.Error()})
+			l.report(HeldLogRecord{Operation: "held-observe", Level: "error", PathHash: heldPathHash(target.Path), TaskID: target.TaskID, Root: target.Root, Message: "error=" + err.Error()})
 			return HeldDecision{}, err
 		}
 		delete(l.active, target.Path)
 		decision := HeldDecision{State: HeldStateResolved, SessionID: owner.SessionID}
-		l.report(HeldLogRecord{Operation: "held-transition", State: decision.State, PathHash: heldPathHash(target.Path), TaskID: target.TaskID, Root: target.Root, AgeBucket: heldAgeBucket(now.Sub(target.ModTime)), Message: "authoritative owner resolved", Verbose: true})
+		l.report(HeldLogRecord{Operation: "held-transition", State: decision.State, PathHash: heldPathHash(target.Path), TaskID: target.TaskID, Root: target.Root, AgeBucket: heldAgeBucket(now.Sub(target.ModTime)), Message: "authoritative owner resolved"})
 		return decision, nil
 	}
 	if err := validateUnresolvedEvidence(evidence); err != nil {
-		l.report(HeldLogRecord{Operation: "held-observe", PathHash: heldPathHash(target.Path), TaskID: target.TaskID, Root: target.Root, Message: "error=" + err.Error()})
+		l.report(HeldLogRecord{Operation: "held-observe", Level: "error", PathHash: heldPathHash(target.Path), TaskID: target.TaskID, Root: target.Root, Message: "error=" + err.Error()})
 		return HeldDecision{}, err
 	}
 
@@ -173,8 +168,8 @@ func (l *HeldLifecycle) Observe(target HeldTarget, owner OwnerResolution, eviden
 		l.report(HeldLogRecord{Operation: "held-transition", State: decision.State, Reason: decision.Reason, PathHash: heldPathHash(target.Path), TaskID: target.TaskID, Root: target.Root, AgeBucket: heldAgeBucket(now.Sub(target.ModTime)), Message: "terminal historical or closed spool without session assignment", Verbose: true})
 		return decision, nil
 	}
-	if owner.Outcome == OwnerUnresolvedConflict || (owner.Outcome == OwnerUnresolvedInvalid && (evidence.ActiveTask || evidence.OpenSession)) {
-		reason := terminalHeldReason(owner, evidence)
+	if owner.Outcome == OwnerUnresolvedConflict {
+		reason := HeldReasonConflict
 		l.active[target.Path] = heldEntry{target: target, reason: reason}
 		decision := HeldDecision{State: HeldStateActive, Reason: reason}
 		l.report(HeldLogRecord{Operation: "held-transition", State: decision.State, Reason: decision.Reason, PathHash: heldPathHash(target.Path), TaskID: target.TaskID, Root: target.Root, AgeBucket: heldAgeBucket(now.Sub(target.ModTime)), Message: "active ownership anomaly remains unassigned", Verbose: true})
@@ -189,13 +184,7 @@ func (l *HeldLifecycle) Observe(target HeldTarget, owner OwnerResolution, eviden
 		return decision, nil
 	}
 
-	reason := terminalHeldReason(owner, evidence)
-	entry := heldEntry{target: target, reason: reason}
-	l.terminal[target.Path] = entry
-	delete(l.active, target.Path)
-	decision := HeldDecision{State: HeldStateTerminal, Reason: reason}
-	l.report(HeldLogRecord{Operation: "held-transition", State: decision.State, Reason: decision.Reason, PathHash: heldPathHash(target.Path), TaskID: target.TaskID, Root: target.Root, AgeBucket: heldAgeBucket(now.Sub(target.ModTime)), Message: "terminal without assigning a session", Verbose: true})
-	return decision, nil
+	panic(fmt.Sprintf("sidecar held lifecycle received non-retryable owner outcome=%s after validation", owner.Outcome))
 }
 
 func validateHeldInput(target HeldTarget, owner OwnerResolution, evidence HeldEvidence, now time.Time) error {
@@ -210,6 +199,9 @@ func validateHeldInput(target HeldTarget, owner OwnerResolution, evidence HeldEv
 	}
 	if owner.TaskID != target.TaskID || owner.OutputPath != target.Path {
 		return fmt.Errorf("owner resolution does not identify observed task and output path")
+	}
+	if owner.Outcome == OwnerUnresolvedInvalid {
+		return fmt.Errorf("owner resolution reports invalid authoritative metadata")
 	}
 	return nil
 }
@@ -226,22 +218,6 @@ func validateUnresolvedEvidence(evidence HeldEvidence) error {
 		return fmt.Errorf("unresolved lifecycle requires authoritative open-task evidence")
 	}
 	return nil
-}
-
-func terminalHeldReason(owner OwnerResolution, evidence HeldEvidence) HeldReason {
-	if evidence.CursorPastLaunchKnown && evidence.CursorPastLaunch {
-		return HeldReasonHistorical
-	}
-	if owner.Outcome == OwnerUnresolvedConflict {
-		return HeldReasonConflict
-	}
-	if owner.Outcome == OwnerUnresolvedInvalid {
-		return HeldReasonInvalid
-	}
-	if !evidence.ActiveTask && !evidence.OpenSession {
-		return HeldReasonClosed
-	}
-	panic(fmt.Sprintf("sidecar held lifecycle received non-retryable unknown owner outcome=%s", owner.Outcome))
 }
 
 // terminallyAbsent retires an old spool only after the authoritative open-task
@@ -276,7 +252,11 @@ func (l *HeldLifecycle) Snapshot(now time.Time) HeldSnapshot {
 	fingerprint := heldSnapshotFingerprint(s)
 	if fingerprint != l.lastReport {
 		l.lastReport = fingerprint
-		l.report(HeldLogRecord{Operation: "held-report", Message: fmt.Sprintf("active=%d terminal=%d reasons=%v roots=%v ages=%v samples=%v", s.ActiveCount, s.TerminalTotal, s.ByReason, s.ByRoot, s.ByAgeBucket, s.Samples)})
+		level := "info"
+		if s.ActiveCount > 0 {
+			level = "warn"
+		}
+		l.report(HeldLogRecord{Operation: "held-report", Level: level, Message: fmt.Sprintf("active=%d terminal=%d reasons=%v roots=%v ages=%v samples=%v", s.ActiveCount, s.TerminalTotal, s.ByReason, s.ByRoot, s.ByAgeBucket, s.Samples)})
 	}
 	return s
 }
@@ -340,6 +320,7 @@ func heldSnapshotFingerprint(s HeldSnapshot) string {
 // Readiness evaluates only active unresolved work against its explicit limit.
 func (l *HeldLifecycle) Readiness(activeThreshold int, now time.Time) HeldReadiness {
 	if activeThreshold < 0 {
+		l.report(HeldLogRecord{Operation: "held-readiness", Level: "error", Message: fmt.Sprintf("invalid active threshold=%d", activeThreshold)})
 		panic("sidecar held lifecycle readiness threshold must not be negative")
 	}
 	s := l.Snapshot(now)

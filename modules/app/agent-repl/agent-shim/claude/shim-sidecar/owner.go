@@ -158,6 +158,33 @@ func (s *sidecar) resetOwners() {
 	s.ownerByOutput = map[string]ownerRecord{}
 	s.ownerConflicts = map[string]bool{}
 	s.ownerPathConflicts = map[string]bool{}
+	s.openTasks = map[string]bool{}
+}
+
+// markTaskOpen records authoritative live/recovered lifecycle state separately
+// from ownership. An open task can still lack a usable owner when its durable
+// launch metadata is malformed, and must remain retryable rather than becoming
+// terminal merely because its spool is old.
+func (s *sidecar) markTaskOpen(taskID string, source OwnerSource) {
+	if taskID == "" {
+		s.log.With(logging.Context{Operation: "record-open-task", Level: "error"}).Log("open-task observation rejected missing task id source=%s", source)
+		return
+	}
+	s.openTasks[taskID] = true
+	s.log.With(logging.Context{Operation: "record-open-task", Task: taskID}).LogVerbose("open-task observation recorded source=%s", source)
+}
+
+func (s *sidecar) markTaskClosed(taskID string) {
+	if taskID == "" {
+		s.log.With(logging.Context{Operation: "record-closed-task", Level: "error"}).Log("closed-task observation rejected missing task id")
+		return
+	}
+	delete(s.openTasks, taskID)
+	s.log.With(logging.Context{Operation: "record-closed-task", Task: taskID}).LogVerbose("closed-task observation recorded")
+}
+
+func (s *sidecar) taskOpen(taskID string) bool {
+	return s.openTasks[taskID]
 }
 
 func (s *sidecar) seedOwners(states []*corev1.OpenTaskState) int {
@@ -165,8 +192,11 @@ func (s *sidecar) seedOwners(states []*corev1.OpenTaskState) int {
 	n := 0
 	for _, state := range states {
 		ev := state.GetStarted()
-		if ts := ev.GetTaskStarted(); ts != nil && s.observeOwner(ts.GetTaskId(), ev.GetSessionId(), ts.GetOutputPath(), OwnerSourceDurableOpenTask) {
-			n++
+		if ts := ev.GetTaskStarted(); ts != nil {
+			s.markTaskOpen(ts.GetTaskId(), OwnerSourceDurableOpenTask)
+			if s.observeOwner(ts.GetTaskId(), ev.GetSessionId(), ts.GetOutputPath(), OwnerSourceDurableOpenTask) {
+				n++
+			}
 		}
 	}
 	s.log.With(logging.Context{Operation: "seed-spool-owners"}).Log("owner seed completed recorded=%d open_tasks=%d", n, len(states))

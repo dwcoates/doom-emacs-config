@@ -125,7 +125,7 @@ func spoolTarget(taskID string) discover.Target {
 }
 
 // ownerSidecar is a sidecar with no store, sufficient for the pure attribution
-// logic (resolveOwner/holdUnowned/noteTaskOwner/seedOwners touch no connection).
+// logic (resolveOwnerResult/noteTaskOwner/seedOwners touch no connection).
 func ownerSidecar(t *testing.T) (*sidecar, func() []string) {
 	t.Helper()
 	logf, read := capturingLog()
@@ -138,27 +138,11 @@ func TestResolveOwnerAnswersConfigTargetFromItsOwnPath(t *testing.T) {
 	tgt := discover.Target{Path: "/x/S1.jsonl", Kind: tail.KindSessionTranscript, SessionID: "S1"}
 
 	// Act
-	got, ok := s.resolveOwner(tgt, 1000)
+	got := s.resolveOwnerResult(tgt)
 
 	// Assert
-	if !ok || got != "S1" {
-		t.Fatalf("resolveOwner = (%q, %v), want (S1, true)", got, ok)
-	}
-}
-
-func TestResolveOwnerHoldsSpoolWhoseLaunchWasNeverSeen(t *testing.T) {
-	// Arrange
-	s, _ := ownerSidecar(t)
-
-	// Act
-	got, ok := s.resolveOwner(spoolTarget("b1pi0nmip"), 1000)
-
-	// Assert — unresolved, and recorded as held rather than tailed.
-	if ok || got != "" {
-		t.Fatalf("resolveOwner = (%q, %v), want (\"\", false)", got, ok)
-	}
-	if _, held := s.held[spoolTarget("b1pi0nmip").Path]; !held {
-		t.Fatal("spool was left unresolved without being recorded as held")
+	if !got.Resolved() || got.SessionID != "S1" {
+		t.Fatalf("resolveOwnerResult = %+v, want resolved S1", got)
 	}
 }
 
@@ -168,100 +152,11 @@ func TestResolveOwnerAttributesSpoolToItsLaunchingSession(t *testing.T) {
 	s.noteTaskOwner("b1pi0nmip", "9b6a4f2d-transcript-id", "", OwnerSourceLiveLaunch)
 
 	// Act
-	got, ok := s.resolveOwner(spoolTarget("b1pi0nmip"), 1000)
+	got := s.resolveOwnerResult(spoolTarget("b1pi0nmip"))
 
 	// Assert — the TRANSCRIPT id, never the path's runtime id.
-	if !ok || got != "9b6a4f2d-transcript-id" {
-		t.Fatalf("resolveOwner = (%q, %v), want (9b6a4f2d-transcript-id, true)", got, ok)
-	}
-}
-
-func TestResolveOwnerClearsTheHoldOnceTheOwnerArrives(t *testing.T) {
-	// Arrange — held first, attributed after.
-	s, read := ownerSidecar(t)
-	s.resolveOwner(spoolTarget("b1pi0nmip"), 1000)
-	s.noteTaskOwner("b1pi0nmip", "S1", "", OwnerSourceLiveLaunch)
-
-	// Act
-	if _, ok := s.resolveOwner(spoolTarget("b1pi0nmip"), 1500); !ok {
-		t.Fatal("resolveOwner did not resolve after the owner was noted")
-	}
-
-	// Assert — the hold is released, not merely ignored.
-	if len(s.held) != 0 {
-		t.Fatalf("held = %v, want empty", s.held)
-	}
-	if got := linesContaining(read(), "owner resolved"); len(got) != 1 {
-		t.Fatalf("resolution lines = %v, want exactly 1", got)
-	}
-}
-
-func TestReportHeldSummarizesTheBacklogInOneLine(t *testing.T) {
-	// Arrange — three spools nothing can attribute. /tmp really does hold
-	// thousands of these, so the report must not scale with them.
-	s, read := ownerSidecar(t)
-	for _, id := range []string{"b1", "b2", "b3"} {
-		s.resolveOwner(spoolTarget(id), 1000)
-	}
-
-	// Act
-	s.reportHeld(1000)
-
-	// Assert
-	got := linesContaining(read(), "held awaiting attribution")
-	if len(got) != 1 {
-		t.Fatalf("summary lines = %v, want exactly 1", got)
-	}
-	if !strings.Contains(got[0], "3 held") {
-		t.Fatalf("summary %q does not carry the held count", got[0])
-	}
-}
-
-func TestReportHeldStaysSilentWhileTheBacklogIsUnchanged(t *testing.T) {
-	// Arrange — reported once already.
-	s, read := ownerSidecar(t)
-	s.resolveOwner(spoolTarget("b1"), 1000)
-	s.reportHeld(1000)
-	before := len(read())
-
-	// Act — the rescan timer keeps firing over the same backlog.
-	s.reportHeld(1000)
-
-	// Assert — a permanent backlog must not be re-reported every pass.
-	if after := read(); len(after) != before {
-		t.Fatalf("unchanged backlog logged %v", after[before:])
-	}
-}
-
-func TestReportHeldCountsAHoldPastTheWindowAsStale(t *testing.T) {
-	// Arrange — one spool held long enough to be an anomaly, not a race.
-	s, read := ownerSidecar(t)
-	s.resolveOwner(spoolTarget("b1"), 1000)
-
-	// Act
-	s.reportHeld(1000 + UnownedSpoolWindow.Milliseconds())
-
-	// Assert
-	got := linesContaining(read(), "held awaiting attribution")
-	if len(got) != 1 || !strings.Contains(got[0], "(1 past ") {
-		t.Fatalf("summary = %v, want one line counting 1 past the window", got)
-	}
-}
-
-func TestReportHeldAnnouncesTheBacklogClearing(t *testing.T) {
-	// Arrange — a backlog that then gets attributed.
-	s, read := ownerSidecar(t)
-	s.resolveOwner(spoolTarget("b1"), 1000)
-	s.reportHeld(1000)
-	s.noteTaskOwner("b1", "S1", "", OwnerSourceLiveLaunch)
-	s.resolveOwner(spoolTarget("b1"), 1100)
-
-	// Act
-	s.reportHeld(1100)
-
-	// Assert — the all-clear is reported, not just silently reached.
-	if got := linesContaining(read(), "no unattributed spools remain"); len(got) != 1 {
-		t.Fatalf("all-clear lines = %v, want exactly 1", got)
+	if !got.Resolved() || got.SessionID != "9b6a4f2d-transcript-id" {
+		t.Fatalf("resolveOwnerResult = %+v, want transcript owner", got)
 	}
 }
 

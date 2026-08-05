@@ -345,7 +345,7 @@ func TestRescanBuildsNoTailerForAnUnattributedSpool(t *testing.T) {
 	if _, ok := s.watchers[path]; ok {
 		t.Fatal("rescan tailed a spool with no known launching session")
 	}
-	if _, ok := s.held[path]; !ok {
+	if _, ok := s.held.active[normalizeOwnerOutputPath(path)]; !ok {
 		t.Fatal("unattributed spool was skipped without being recorded as held")
 	}
 }
@@ -448,7 +448,7 @@ func TestSpoolIsAttributedFromTheLaunchingTranscriptNotItsPath(t *testing.T) {
 	if got := s.owners["b1pi0nmip"]; got != backfillSession {
 		t.Fatalf("owner = %q, want the transcript session %q", got, backfillSession)
 	}
-	if _, held := s.held[spoolPath]; held {
+	if _, held := s.held.active[normalizeOwnerOutputPath(spoolPath)]; held {
 		t.Fatal("spool is still recorded as held after being attributed")
 	}
 }
