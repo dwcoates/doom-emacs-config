@@ -152,9 +152,11 @@ signals rather than being flattened into generic failure text."
          (create (plist-member resume :create))
          (transcript (plist-get resume :transcriptUnavailable))
          (mismatch (plist-get resume :identityMismatch))
+         (bring-up-failure (plist-get resume :bringUpFailure))
          (causes (cl-remove-if-not #'identity
                                    (list (and transcript :transcript-unavailable)
-                                         (and mismatch :identity-mismatch)))))
+                                         (and mismatch :identity-mismatch)
+                                         (and bring-up-failure :bring-up-failure)))))
     (unless (and (stringp claude-id) (not (string-empty-p claude-id))
                  (stringp cwd) (not (string-empty-p cwd))
                  (= (length causes) 1)
@@ -197,6 +199,20 @@ signals rather than being flattened into generic failure text."
            (agent-repl--log workspace
                             "failure-session-resume-text: cause=identity-mismatch claude-id=%S cwd=%S replacement=%S text=%S"
                             claude-id cwd replacement text)
+           text)))
+      (:bring-up-failure
+       (let ((cause (plist-get bring-up-failure :cause)))
+         (unless (and (stringp cause) (not (string-empty-p cause)))
+           (agent-repl--log workspace
+                            "failure-session-resume-text: MALFORMED bring-up-failure cause=%S claude-id=%S cwd=%S"
+                            cause claude-id cwd)
+           (error "agent-repl failure: SessionResumeFailure bring-up cause missing"))
+         (let ((text (format "Resume %s for Claude session %s in %s could not bring the session up: %s."
+                             (if automatic-restore "restoration" "creation")
+                             claude-id cwd cause)))
+           (agent-repl--log workspace
+                            "failure-session-resume-text: cause=bring-up-failure claude-id=%S cwd=%S cause=%S text=%S"
+                            claude-id cwd cause text)
            text))))))
 
 (defun agent-repl-failure-local (type message &optional detail)
