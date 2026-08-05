@@ -31,6 +31,7 @@ import {
   type FrontendCommandBody,
   PromptOrigin,
 } from "./frontend-command.js";
+import type { ClientFailureType } from "./local-failure.js";
 import { log, logVerbose } from "./wslog.js";
 
 /**
@@ -60,6 +61,62 @@ const MAX_CONSECUTIVE_CLIENT_LOG_REJECTIONS = 20;
 
 function asError(value: unknown): Error {
   return value instanceof Error ? value : new Error(String(value));
+}
+
+/**
+ * Mint the wire-shaped failure the ack sink takes.
+ *
+ * The sink's parameter is a decoded `SystemFailure` because its usual source
+ * IS one (`CommandAck.failure`), so a locally-classified refusal is minted in
+ * that shape rather than teaching the sink a second one. `itemUuid` follows
+ * `local-failure.ts`'s convention — derived from the type and the command, so
+ * a repeated refusal of the same command reconciles onto one card instead of
+ * stacking, while two different commands stay two cards.
+ *
+ * INTERNAL class always, for the same reason `clientFailure` is: nothing this
+ * end can classify implicates the account.
+ */
+function localCommandFailure(
+  type: ClientFailureType,
+  command: string,
+  message: string,
+  sourceDetail: string,
+): SystemFailure {
+  return {
+    errorClass: "INTERNAL",
+    errorType: type,
+    message,
+    sourceDetail,
+    resolvedAtMs: 0,
+    itemUuid: `local:${type}:${command}`,
+    detail: { kind: "none" },
+  };
+}
+
+/**
+ * The daemon refused a command and classified nothing.
+ *
+ * Its prose is carried VERBATIM: the daemon decided this refusal, and the only
+ * thing this end adds is a name for it, because an unnamed refusal reached the
+ * user through nothing at all.
+ */
+export function unclassifiedRejectionFailure(command: string, error: string): SystemFailure {
+  return localCommandFailure(
+    "client.command_rejection_unclassified",
+    command,
+    error === "" ? `${command} was refused` : error,
+    `command=${command}`,
+  );
+}
+
+/** The command never left this page: the socket was not open. */
+export function commandUnsentFailure(command: string): SystemFailure {
+  return localCommandFailure(
+    "client.command_unsent",
+    command,
+    `${command} was not sent: the connection to the daemon is down`,
+    `command=${command} cause=socket not open`,
+  );
 }
 
 function requiredSelectedModel(ack: CommandAck, disposition: "ack" | "nack"): string {
@@ -160,6 +217,16 @@ interface CreateWaiter {
   settled: boolean;
 }
 
+/** 16 hex chars (64 bits) of cryptographic entropy, one draw per page load. */
+function newLoadNonce(): string {
+  const source = globalThis.crypto;
+  if (!source?.getRandomValues) {
+    throw new Error("command-dispatch: crypto.getRandomValues is unavailable; cannot mint request ids");
+  }
+  const bytes = source.getRandomValues(new Uint8Array(8));
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 export class CommandDispatcher {
   private readonly pending = new Map<string, PendingAck>();
   private readonly knownSessions = new Set<string>();
@@ -170,6 +237,14 @@ export class CommandDispatcher {
   /** Set once forwarding has tripped off, so the reason is reported once. */
   private clientLogForwardingOff = false;
   private counter = 0;
+  /**
+   * Per-page-load random prefix. A request id is the durable turn-claim key
+   * (turn_id == the accepted SubmitPrompt.request_id) and the ledger refuses a
+   * duplicate loudly, so the counter alone — which restarts at zero on every
+   * page load — is not enough to keep ids unique across loads. 64 bits of
+   * per-load entropy makes a cross-load collision structurally negligible.
+   */
+  private readonly loadNonce = newLoadNonce();
 
   constructor(private readonly opts: DispatchOptions) {
     log("info", "command dispatcher initialized", {
@@ -180,7 +255,7 @@ export class CommandDispatcher {
 
   private newId(): string {
     if (this.opts.newRequestId) return this.opts.newRequestId();
-    return `fe-${++this.counter}-${Math.random().toString(16).slice(2, 6)}`;
+    return `fe-${this.loadNonce}-${++this.counter}`;
   }
 
   /** Feed a decoded inbound frame in so acks + SessionViews can correlate. */
@@ -289,6 +364,27 @@ export class CommandDispatcher {
     return this.dispatch(workspace, { case: "queueCancel", entryId });
   }
 
+  /**
+   * Put this workspace's session to sleep now.
+   *
+   * Ack-correlated like every other operation, and the rejection matters more
+   * here than most: the daemon refuses a hibernate while a turn is live or the
+   * merge lease is held, and that refusal is the ONLY thing that tells the user
+   * why the workspace they asked to sleep is still awake. It rides the ordinary
+   * `onFailure` path, so it lands as a classified card rather than a silence.
+   */
+  hibernateWorkspace(workspace: string): Promise<void> {
+    return this.dispatch(workspace, { case: "hibernateWorkspace" });
+  }
+
+  /**
+   * Answer the revival gate. Exactly one mode, because the wire's oneof leaves
+   * "no decision" unrepresentable and this signature does too.
+   */
+  reviveSession(workspace: string, mode: "compactFirst" | "direct"): Promise<void> {
+    return this.dispatch(workspace, { case: "reviveSession", mode });
+  }
+
   private dispatch(workspace: string, body: FrontendCommandBody): Promise<void> {
     const requestId = this.newId();
     log("info", "command dispatcher dispatching acknowledgement-correlated command", {
@@ -303,6 +399,11 @@ export class CommandDispatcher {
           operation: "command-dispatch.dispatch-rejected",
           context: { request_id: requestId, workspace, command: body.case, pending_count: this.pending.size, cause: "socket not open" },
         });
+        // A REFUSED SEND is a rejection shape too, and the one no ack will ever
+        // arrive for. Surfaced through the same sink so a command that never
+        // left the page is as visible as one the daemon turned down — log once
+        // (above), render once (here).
+        this.opts.onFailure?.(commandUnsentFailure(body.case));
         reject(new Error(`${body.case}: socket not open`));
       }
     });
@@ -424,7 +525,16 @@ export class CommandDispatcher {
     }
     // Surface BEFORE rejecting: every caller of these promises swallows the
     // rejection into a log line, so the reject alone reaches no one.
-    if (ack.failure !== undefined) this.opts.onFailure?.(ack.failure);
+    //
+    // EVERY rejection shape, not only the classified one. A nack carrying just
+    // an error string used to be log-only, which is exactly the disposition
+    // hibernate and revive cannot afford: their refusal ("a turn is live", "the
+    // merge lease is held") is the ONLY thing that tells the user why the
+    // workspace they asked to sleep is still awake. The daemon's prose is
+    // carried verbatim; naming it is all this end adds.
+    this.opts.onFailure?.(
+      ack.failure ?? unclassifiedRejectionFailure(p.command, ack.error),
+    );
     // CreateSession has its own two-phase waiter. Its rejection flows through
     // failCreate, which owns the one canonical failure record.
     if (p.command !== "createSession") {

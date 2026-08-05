@@ -234,6 +234,7 @@ func TestKindOfNamesEveryObservabilityPayload(t *testing.T) {
 		{"ContextCompacted", &corev1.Event{Payload: &corev1.Event_ContextCompacted{ContextCompacted: &corev1.ContextCompacted{}}}},
 		{"QueryLifecycle", &corev1.Event{Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{}}}},
 		{"AccountUsageObservation", &corev1.Event{Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: &corev1.AccountUsageObservation{}}}},
+		{"SessionRewound", &corev1.Event{Payload: &corev1.Event_SessionRewound{SessionRewound: &corev1.SessionRewound{}}}},
 	}
 
 	for _, test := range tests {
@@ -242,6 +243,36 @@ func TestKindOfNamesEveryObservabilityPayload(t *testing.T) {
 				t.Fatalf("kindOf(%s) = %q, want %q", test.name, got, test.name)
 			}
 		})
+	}
+}
+
+// A rewind is found by an envelope query on the `kind` column, so persisting it
+// as "Unknown" would hide the vendor-session lineage the store is meant to keep
+// reconstructable on its own.
+func TestIngestPersistsSessionRewoundKindColumn(t *testing.T) {
+	// Arrange
+	d := openTemp(t)
+	ev := &corev1.Event{
+		SessionId: "s-new",
+		Class:     corev1.EventClass_EVENT_CLASS_PERSISTENT,
+		Plane:     corev1.Plane_PLANE_STREAM,
+		Payload: &corev1.Event_SessionRewound{SessionRewound: &corev1.SessionRewound{
+			PreviousVendorSessionId: "s-old",
+			NewVendorSessionId:      "s-new",
+			RetainedLeafUuid:        "L1",
+		}},
+	}
+	// Act
+	if _, err := d.Ingest("shim", []*corev1.Event{ev}, nil); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	// Assert
+	var kind string
+	if err := d.sql.QueryRow(`SELECT kind FROM event WHERE session_id='s-new'`).Scan(&kind); err != nil {
+		t.Fatalf("querying kind column: %v", err)
+	}
+	if kind != "SessionRewound" {
+		t.Fatalf("kind column = %q, want SessionRewound", kind)
 	}
 }
 

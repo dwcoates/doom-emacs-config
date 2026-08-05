@@ -162,9 +162,14 @@ const testPromptOrigin = corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT
 func (l fakeLocator) Locate(ws string) (string, bool) { id, ok := l.m[ws]; return id, ok }
 
 type fakeClient struct {
-	cfg           shimclient.Config
-	mu            sync.Mutex
-	prompts       []string
+	cfg     shimclient.Config
+	mu      sync.Mutex
+	prompts []string
+	// requestIDs records the id each prompt was submitted UNDER, which the
+	// shim adopts as that turn's turn_id. It is the only place a test can see
+	// whether the daemon's own name for a prompt is the name the turn will
+	// come back with.
+	requestIDs    []string
 	origins       []string
 	promptOrigins []corev1.PromptOrigin
 	modes         []string
@@ -197,6 +202,10 @@ type fakeClient struct {
 	// returns. It is how a test observes the world as the shim round-trip
 	// begins, which is the only way to prove what was published BEFORE it.
 	onSubmit func()
+	// submitErrOnce, when non-nil, fails the NEXT SubmitPrompt and then clears
+	// itself. One-shot rather than sticky so a test can fail one submit and
+	// still observe what the failure released reaching the shim afterwards.
+	submitErrOnce error
 }
 
 type fakeFileDiagnosticPersister struct{}
@@ -217,7 +226,7 @@ func (c *fakeClient) Run(ctx context.Context) error {
 	<-ctx.Done()
 	return nil
 }
-func (c *fakeClient) SubmitPrompt(_ context.Context, text, origin, mode string, promptOrigin corev1.PromptOrigin) error {
+func (c *fakeClient) SubmitPrompt(_ context.Context, requestID, text, origin, mode string, promptOrigin corev1.PromptOrigin) error {
 	c.mu.Lock()
 	hook := c.onSubmit
 	c.mu.Unlock()
@@ -225,7 +234,14 @@ func (c *fakeClient) SubmitPrompt(_ context.Context, text, origin, mode string, 
 		hook()
 	}
 	c.mu.Lock()
+	if err := c.submitErrOnce; err != nil {
+		c.submitErrOnce = nil
+		c.mu.Unlock()
+		notifyTestActivity()
+		return err
+	}
 	c.prompts = append(c.prompts, text)
+	c.requestIDs = append(c.requestIDs, requestID)
 	c.origins = append(c.origins, origin)
 	c.promptOrigins = append(c.promptOrigins, promptOrigin)
 	c.modes = append(c.modes, mode)
@@ -327,9 +343,19 @@ func (c *fakeClient) interruptCount() int {
 // built fake so a test can inspect what the session controller sent it.
 func newTestManager(t *testing.T, locator SessionLocator, spawner Spawner) (*Manager, func() *fakeClient) {
 	t.Helper()
+	return newClockedTestManager(t, locator, spawner, nil)
+}
+
+// newClockedTestManager is newTestManager over an explicit Config.Now — the
+// exported clock seam production threads its one daemon clock into. A nil now
+// leaves the field unset, which is the wall-clock default every other test
+// runs on.
+func newClockedTestManager(t *testing.T, locator SessionLocator, spawner Spawner, now func() int64) (*Manager, func() *fakeClient) {
+	t.Helper()
 	var mu sync.Mutex
 	var last *fakeClient
 	m, err := New(Config{
+		Now:               now,
 		Push:              &fakePusher{},
 		SSM:               &fakeApplier{},
 		Spawner:           spawner,
@@ -748,7 +774,7 @@ func TestResumedSessionPromptsAreForwardedVerbatim(t *testing.T) {
 	if err != nil {
 		t.Fatalf("existing: %v", err)
 	}
-	m.onTurnBoundary(d, false)
+	m.onTurnBoundary(d, false, m.now())
 	d.consumer.Apply(&corev1.Event{
 		SessionId: "s1",
 		Payload: &corev1.Event_SessionStarted{SessionStarted: &corev1.SessionStarted{
@@ -759,7 +785,7 @@ func TestResumedSessionPromptsAreForwardedVerbatim(t *testing.T) {
 
 	// Act: the next two prompts.
 	_ = m.SubmitPrompt(context.Background(), "ws", "test-request-second", "second", "", testPromptOrigin)
-	m.onTurnBoundary(d, false)
+	m.onTurnBoundary(d, false, m.now())
 	_ = m.SubmitPrompt(context.Background(), "ws", "test-request-third", "third", "", testPromptOrigin)
 
 	// Assert: every prompt reaches the shim exactly as the user typed it.

@@ -41,6 +41,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/frontend"
+	"claude-repld/internal/keepalive"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/shim"
 	"claude-repld/internal/shimclient"
@@ -189,7 +190,11 @@ type sessionClient interface {
 	// It MUST NOT cause a lazy bring-up; session readiness is false until the
 	// existing live session controller can answer this probe.
 	Health(ctx context.Context, requestID string) (*corev1.HealthStatus, error)
-	SubmitPrompt(ctx context.Context, text, origin, permissionMode string, promptOrigin corev1.PromptOrigin) error
+	// SubmitPrompt hands one prompt to the shim under requestID, which the
+	// shim adopts as the turn_id of every boundary the prompt produces. A
+	// caller whose own bookkeeping is keyed by that identity — the keep-alive
+	// ping — passes it; an empty id is minted by the client.
+	SubmitPrompt(ctx context.Context, requestID, text, origin, permissionMode string, promptOrigin corev1.PromptOrigin) error
 	// Interrupt returns the shim's own verdict on what the stop did, which is
 	// the only place that verdict is observable.
 	Interrupt(ctx context.Context) (corev1.InterruptOutcome, error)
@@ -279,6 +284,31 @@ type Config struct {
 	// ModelCatalogs records the live query-owned menu for frontend rendering.
 	// Nil is allowed only in focused controller tests.
 	ModelCatalogs ModelCatalogRegistrar
+	// Hibernations is the durable half of hibernation and of the keep-alive
+	// policy's one input (hibernation.go). Nil makes HibernateWithCause a loud
+	// refusal rather than a sleep nothing records — an unrecorded sleep is
+	// revived implicitly by the next daemon, which is precisely the silent
+	// un-sleeping the durable flag exists to prevent.
+	Hibernations HibernationRegistrar
+	// KeepAlive is the resolved cache keep-alive policy. The zero value takes
+	// keepalive.DefaultConfig, because a zero TTL would read every session as
+	// already cache-expired.
+	KeepAlive keepalive.Config
+	// KeepAliveWindows is the durable ledger of when the daemon was pinging,
+	// and the sole evidence the conversation exclusion decides on
+	// (keepaliveexclude.go). Nil is the exclusion OFF: keep-alive turns would
+	// render as ordinary conversation, which is why every site that would have
+	// used it says so rather than failing quietly.
+	KeepAliveWindows KeepAliveWindowLedger
+	// VendorSessions performs the rewind's ATOMIC registry flip. It is the same
+	// object as Registrar in production; it is a separate field because the
+	// rewind needs exactly one method and a harness should be able to supply
+	// just that one.
+	VendorSessions VendorSessionAdopter
+	// VendorSessionOf reads the vendor conversation uuid a session currently
+	// resumes, which is the transcript the rewind truncates. Nil makes a rewind
+	// impossible rather than guessed at.
+	VendorSessionOf func(sessionID string) (string, bool)
 	// Logf is the daemon logger. Nil discards.
 	Logf func(string, ...any)
 	// Classifier judges prompts queued during a running turn (E4). Nil leaves
@@ -297,8 +327,18 @@ type Config struct {
 	// classifier runs under the same account as the session it is about. Nil
 	// leaves it empty, which inherits the daemon's own environment.
 	SessionConfigDir func(sessionID string) string
-	// now is the queue's clock, injected only by tests.
-	now func() int64
+	// Now is THE fleet's single clock authority, in unix milliseconds. It
+	// stamps the queue (queued_at_ms), the keep-alive window ledger, and — the
+	// reason it is exported — the hibernation transition's staleness re-check.
+	//
+	// That re-check re-derives idleness for a decision the SWEEPER took against
+	// server.Config.Now. Two clocks for one policy is two authorities: under an
+	// injected clock the sweeper measures hours idle while the gate measures
+	// milliseconds and refuses every automatic hibernation as stale. Production
+	// and every harness must therefore thread ONE clock into both fields.
+	//
+	// Nil defaults to wall clock.
+	Now func() int64
 
 	// Source yields each session's shim connection: shims dial the daemon's
 	// listening socket and the listener routes each connection to the client
@@ -354,7 +394,29 @@ type Manager struct {
 	// (shutdownlease.go). Written and read only under mu; the zero value is
 	// usable, so nothing has to construct it.
 	restoreTombstones restoreTombstones
-	lastCSID          map[string]string // session id -> last-persisted claude session uuid
+	// hibernating is the exclusive per-workspace claim one hibernation
+	// transition holds (hibernation.go). It is what makes two racing causes
+	// produce one transition and one durable account instead of two.
+	hibernating map[string]bool
+	// reviving is the exclusive per-workspace claim one revival holds
+	// (revive.go). It is hibernation's claim mirrored: without it two
+	// concurrent ReviveSessionCmds both submit `/compact` under one request id
+	// and the second overwrites the first's completion waiter.
+	reviving map[string]bool
+	// keepAliveRewinds names, per WORKSPACE, the keep-alive ping turn whose
+	// aftermath — the transcript rewind and the respawn behind it — is still
+	// running. It is the SECOND half of the ping's continuous hold: the ping's
+	// own claim (sessionController.keepAliveTurnID) is cleared at the turn's
+	// end, and without this a prompt arriving in the gap between that clear and
+	// the rewind's stop would start a real turn the rewind then SIGTERMs and
+	// truncates away.
+	//
+	// It is keyed by workspace rather than held on the sessionController for
+	// the reason the rewind exists at all: the rewind REPLACES the controller,
+	// so a claim living on the retired one would evaporate exactly when the
+	// respawned session starts accepting prompts again.
+	keepAliveRewinds map[string]string
+	lastCSID         map[string]string // session id -> last-persisted claude session uuid
 	// shimPID is the pid each session's shim announced on its ShimHello. It is
 	// the ONLY way to stop a shim this daemon did not spawn, and it is kept in
 	// memory rather than persisted deliberately: it is trustworthy exactly
@@ -383,9 +445,14 @@ type Manager struct {
 	// the wedged-pull branch can be driven without a minute-long wait (see
 	// repull.go).
 	repullWaitGraceOverride time.Duration
-	closed                  bool
-	rootCtx                 context.Context
-	rootStop                context.CancelFunc
+	// reviveCompactBoundOverride overrides how long a compact-first revival's
+	// detached completion wait allows the compaction. Zero means the production
+	// constant; only a test assigns one, so the timeout branch can be driven
+	// without a ten-minute wait (see revive.go).
+	reviveCompactBoundOverride time.Duration
+	closed                     bool
+	rootCtx                    context.Context
+	rootStop                   context.CancelFunc
 	// exits counts every session-controller-exit goroutine (the tail of bringUp's `go
 	// func`), so Close can JOIN them. Unjoined, that tail — which drains the
 	// queue, publishes the empty view, and persists queued_prompts through the
@@ -471,6 +538,12 @@ type sessionController struct {
 	// paused queue and is running ALONE. Its clean end resumes the drain; its
 	// interrupted end leaves the queue paused.
 	pausedRunner bool
+	// keepAliveTurnID is the in-flight cache keep-alive ping's turn id, empty
+	// when none is running. It is the claim taken under the manager mutex by
+	// the same acquisition that decided to ping, and it is what a real prompt
+	// arriving mid-ping is held behind (the queue's keep-alive hold). Read and
+	// written only under Manager.mu.
+	keepAliveTurnID string
 	// runningText is the prompt that started the turn now in flight, as far as
 	// this daemon saw it. It is the classifier's "what is already running"
 	// context, and is empty when the turn predates this daemon.
@@ -480,6 +553,13 @@ type sessionController struct {
 	// carried only the text would put the turn back under a different mode
 	// than the one it was cut from (mergelease.go, ResumeDisplacedTurn).
 	runningPermissionMode string
+	// queueMigrating marks this controller's queue as OWNED BY THE REWIND
+	// ORCHESTRATOR rather than by this controller. It is set under the manager
+	// mutex by the same acquisition that empties the queue into the
+	// orchestrator's own slice, BEFORE the rewind stops the shim, so the exit
+	// tail that stop causes cannot drop entries or persist nil over the durable
+	// record of what is still owed. Cleared when the entries are re-parked.
+	queueMigrating bool
 	// phantomTurnClosed names the durable turn claims the shim handshake just
 	// contradicted and the SSM synthesized an end for (phantomturn.go). It is
 	// carried from the handshake to ShimReady, where the queue is released on
@@ -599,7 +679,7 @@ func New(cfg Config) (*Manager, error) {
 		newControllerGenerationID = newSecureControllerGenerationID
 	}
 	rootCtx, rootStop := context.WithCancel(context.Background())
-	now := cfg.now
+	now := cfg.Now
 	if now == nil {
 		now = func() int64 { return time.Now().UnixMilli() }
 	}
@@ -867,6 +947,24 @@ func (m *Manager) submitPromptAs(ctx context.Context, workspace, requestID, text
 	if err := m.guardMergeLease(workspace, who, requestID, origin); err != nil {
 		return err
 	}
+	// THE REVIVAL GATE, ahead of ensure() on purpose: ensure() brings a stopped
+	// shim back up, so asking after it would have already paid the bring-up and
+	// silently un-slept the session the gate exists to hold (hibernation.go).
+	//
+	// IT IS ASKED ONLY WHERE A REFUSAL IS THE RIGHT ANSWER. A session that is
+	// hibernated with no revival decision behind it refuses prompts outright and
+	// that is unchanged. A session whose user HAS chosen compact-first is a
+	// different question: its record stays hibernated on purpose while the
+	// compaction runs, and the contract for that window is delayed-never-dropped
+	// — so the prompt is admitted to the queue as a PARKED entry instead
+	// (revive.go, queue.go). Skipping the gate here is safe because the entry is
+	// parked rather than forwarded, and forwardPrompt's own copy of the gate
+	// still stands behind every delivery path.
+	if !m.revivalParkAdmits(workspace, who) {
+		if err := m.guardHibernation(workspace, requestID, origin, who); err != nil {
+			return err
+		}
+	}
 	d, err := m.ensure(ctx, workspace)
 	if err != nil {
 		return err
@@ -924,6 +1022,31 @@ func (m *Manager) submitPromptAs(ctx context.Context, workspace, requestID, text
 	if entry.drainHeld() {
 		m.logf("session-controller: queued prompt entry=%s session=%s ws=%q origin=%q schedule=%s classifier=SKIPPED (parked by the drain lease)",
 			entry.id, d.sessionID, workspace, origin, entry.shutdownHoldScheduleID)
+		m.publish(d.sessionID, view, recs)
+		return nil
+	}
+	// THE CLASSIFIER NEVER RUNS ON A KEEP-ALIVE-HELD ENTRY EITHER, and the
+	// reason is sharper than the drain lease's. The classifier answers exactly
+	// one question — should this prompt interrupt the turn in front of it —
+	// and the turn in front of this one is a machine-generated ping. Spending a
+	// model call to judge whether the user's prompt should interrupt the
+	// daemon's own cache refresh would produce a verdict that could only be
+	// wrong: INTERJECT would demand an interrupt whose whole effect is to leave
+	// a half-finished ping in the transcript the rewind is about to clean up.
+	if entry.keepAliveHeld() {
+		m.logf("session-controller: queued prompt entry=%s session=%s ws=%q origin=%q keep_alive_turn=%s classifier=SKIPPED (held behind a cache keep-alive turn)",
+			entry.id, d.sessionID, workspace, origin, entry.keepAliveHoldTurnID)
+		m.publish(d.sessionID, view, recs)
+		return nil
+	}
+	// THE CLASSIFIER NEVER RUNS ON A REVIVAL-PARKED ENTRY EITHER. The turn in
+	// front of it is the revival's own `/compact`, and the only verdict the
+	// classifier could return that changes anything — INTERJECT — would demand
+	// an interrupt of the compaction the user chose to pay for. Spending a model
+	// call to ask for that is spending it to be wrong.
+	if entry.revivalHeld() {
+		m.logf("session-controller: queued prompt entry=%s session=%s ws=%q origin=%q revival_session=%s classifier=SKIPPED (parked by an in-flight compact-first revival)",
+			entry.id, d.sessionID, workspace, origin, entry.revivalHoldSessionID)
 		m.publish(d.sessionID, view, recs)
 		return nil
 	}
@@ -1706,7 +1829,7 @@ func (m *Manager) hibernate(workspace, wantSession string, cause StopCause) erro
 	d, ok := m.byWS[workspace]
 	if !ok {
 		m.mu.Unlock()
-		return fmt.Errorf("session-controller: no live session for workspace %q to hibernate", workspace)
+		return fmt.Errorf("%w: workspace %q", errNoLiveSessionToHibernate, workspace)
 	}
 	if wantSession != "" && d.sessionID != wantSession {
 		live := d.sessionID
@@ -1854,8 +1977,8 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 	}
 	cons := newConsumer(workspace, sessionID, m.cfg.Push, m.cfg.SSM, m.cfg.Progress, m.cfg.ClearCompactStore, m.cfg.TurnAccountings, m.logf, func(ss *corev1.SessionStarted) {
 		m.persistVendorSessionID(sessionID, ss.GetVendorSessionId())
-	}, func(active bool) {
-		m.onTurnBoundary(d, active)
+	}, func(active bool, atMs int64) {
+		m.onTurnBoundary(d, active, atMs)
 	}, func(state string) {
 		m.persistBackfillState(sessionID, state)
 		// The SSM composes green from this: a failed backfill is blue, and
@@ -1873,6 +1996,22 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 	// The durable receipt ledger. Bound before Run, so no durable user line can
 	// reach attributeUserTurn — the retirement point — with this unset.
 	cons.receipts = m.cfg.PromptReceipts
+	// The keep-alive exclusion's evidence. Bound before Run, so no conversation
+	// item can reach the curation block with the ledger unset and be rendered
+	// as though the user had typed it.
+	cons.keepAliveWindows = m.cfg.KeepAliveWindows
+	// The keep-alive window's LOWER bound, moved onto the vendor's clock by the
+	// ping's own start boundary. Bound before Run for the same reason the ledger
+	// itself is: the very first boundary a ping produces is the one that carries
+	// the instant, and there is no second chance to observe it.
+	cons.onTurnStarted = func(turnID string, atMs int64) {
+		m.restampKeepAliveWindowStart(d, turnID, atMs)
+	}
+	// A rewind's discarded turns hold claims in the seq space it retires, and
+	// nothing in the new space will ever deliver their ends (sessionrewound.go).
+	if superseder, ok := m.cfg.SSM.(TurnClaimSuperseder); ok {
+		cons.turnSuperseders = superseder
+	}
 	// The per-turn wait (mergeresolve.go) rides the SAME stream the queue's
 	// edges do, but correlated by turn id rather than by edge. Bound before Run,
 	// so no boundary can reach the consumer with this unset.
@@ -1888,6 +2027,14 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 	// accepted a boundary, and nothing user-visible has moved yet.
 	cons.onTurnClaims = func(activeIDs []string) {
 		m.noteTurnClaims(d, activeIDs)
+	}
+	// The keep-alive policy's measuring point. Persisted per accepted turn end,
+	// which is what makes every later decision a time-since check against a
+	// durable instant rather than a timer nothing can restore (hibernation.go).
+	if m.cfg.Hibernations != nil {
+		cons.onTurnEnded = func(atMs int64) {
+			m.cfg.Hibernations.TurnEndObserved(sessionID, atMs)
+		}
 	}
 	// Every PERSISTENT store event names the conversation it belongs to.
 	// Keeping the record current off the live stream is what gives a later
@@ -1941,6 +2088,7 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 		PermissionModes: m.cfg.PermissionModes,
 		StateSink:       cons,
 		TurnClaims:      cons,
+		Rewinds:         cons,
 		FrameSink:       cons,
 		Models:          modelCatalogReporter{m: m},
 		FileDiagnostics: fileDiagnosticSink{persister: m.cfg.FileDiagnostics, workspace: workspace, agentReplSessionID: sessionID},
@@ -2047,14 +2195,23 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 		// Empty the queue and PUSH the empty view: a frontend that keeps
 		// rendering chips for a dead session is offering the user controls
 		// that do nothing.
-		dropped := d.queue.drainAll()
+		//
+		// UNLESS THE QUEUE IS NOT THIS TAIL'S TO EMPTY. A rewind takes the
+		// entries into its own ownership before it stops the shim, so the exit
+		// this stop causes finds nothing here — and the publish is skipped with
+		// it, because pushing the empty view and persisting nil records is
+		// exactly how the durable evidence of prompts still owed was lost.
+		migrating := d.queueMigrating
+		dropped := m.drainQueueForExitLocked(d)
 		view := d.queue.view(workspace, sessionID)
 		m.mu.Unlock()
 		if len(dropped) > 0 {
 			m.logf("session-controller: session %s ended with %d queued prompt(s) undelivered ws=%q",
 				sessionID, len(dropped), workspace)
 		}
-		m.publish(sessionID, view, nil)
+		if !migrating {
+			m.publish(sessionID, view, nil)
+		}
 		// THE WIRING IS GONE with the session controller, and `runErr` is what says whether
 		// that is a FAULT or a teardown we asked for. Only the CURRENT controller
 		// reports it at all: a superseded one exiting says nothing about the

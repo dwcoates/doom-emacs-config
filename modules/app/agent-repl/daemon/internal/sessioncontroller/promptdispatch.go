@@ -117,6 +117,14 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 	if err := m.guardMergeLease(d.workspace, who, requestID, origin); err != nil {
 		return err
 	}
+	// THE REVIVAL GATE'S BACKSTOP, at the funnel every one of the prompt paths
+	// reaches — the immediate submit, the queue's drain, an interject's head
+	// jump, a merge's own submit, and anything added later. submitPromptAs asks
+	// first so a refused prompt never pays a bring-up; this is the one a new
+	// caller cannot forget to ask for (hibernation.go).
+	if err := m.guardHibernation(d.workspace, requestID, origin, who); err != nil {
+		return err
+	}
 	cmd := classifyPrompt(text)
 
 	// THE ACCEPTED EDGE AND ITS SYNCHRONOUS PUBLICATION, BEFORE THE SUBMIT.
@@ -158,8 +166,17 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 	// command and a purple bubble for a prompt nobody wrote. `echoes` implies
 	// `claimsTurn` by construction — an ordinary prompt is both — so the receipt
 	// below always sits inside a claimed turn.
+	// THE KEEP-ALIVE PING EARNS NO BUBBLE AND MINTS NO RECEIPT, for the reason
+	// `/model` does not: the user did not say it. It is conversation PLUMBING —
+	// the daemon refreshing a cache — and a purple bubble reading "respond with
+	// only a '.'" would claim a question the user never asked and would replay
+	// as one across every reconnect, since the receipt is durable.
+	//
+	// It DOES claim the turn. The shim really is occupied for the length of the
+	// ping, and a workspace that stayed green through it would be lying about a
+	// session that is busy — the same split `/model` makes.
 	claimsTurn := cmd.claimsTurn() && who != submitterMergeLeaseHolder
-	echoes := cmd.echoes() && who != submitterMergeLeaseHolder
+	echoes := cmd.echoes() && who != submitterMergeLeaseHolder && who != submitterKeepAlive
 
 	accepted := false
 	var turnBefore turnRecord
@@ -208,7 +225,19 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 		}
 	}
 
-	if err := d.client.SubmitPrompt(ctx, text, origin, permissionMode, promptOrigin); err != nil {
+	// THE SUBMITTED PROMPT CARRIES THE ID THE DAEMON ALREADY KEYED IT BY.
+	// The shim adopts this request id as the turn_id of the TurnStarted and
+	// TurnEnded it produces, so passing the daemon's own id is what makes the
+	// daemon's name for the prompt and the durable ledger's name for its turn
+	// ONE identity rather than two that need translating.
+	//
+	// It matters most where the daemon holds state keyed by that name before
+	// the turn exists — the keep-alive ping's claim, its queue holds, its
+	// window row and the dropped-turn list of the rewind that follows it. The
+	// client used to mint its own id here, so the ping's end boundary named a
+	// turn nothing was keyed by: the match at the boundary never fired, the
+	// window never closed, and the pings rendered as the user's own prompts.
+	if err := d.client.SubmitPrompt(ctx, requestID, text, origin, permissionMode, promptOrigin); err != nil {
 		if accepted {
 			// The `thinking` every frontend was just shown described a turn
 			// that is not going to happen, and nothing else will ever close it:

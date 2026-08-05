@@ -13,6 +13,8 @@
  * - anything else → a streamed text block echoing the input.
  * Every turn ends with a `result` message.
  */
+import { randomBytes } from "node:crypto";
+
 import { AsyncQueue } from "./input-queue.js";
 import { bindLog } from "./uds/log.js";
 import { ModelInfo, PermissionMode, SlashCommand } from "./protocol.js";
@@ -137,6 +139,30 @@ export function createFakeQuery(
   // model the agent ANSWERS with is what moves, and the mirror follows it.
   let model = "fake-model";
   let turn = 0;
+  // THE SPAWN TAG THAT MAKES A FAKE API MESSAGE ID GLOBALLY UNIQUE.
+  //
+  // The id used to be `msg_fake_<turn>` off this instance's own counter, which
+  // made it unique per QUERY and nothing more. That is not the scope the
+  // daemon keys it in: its token-utilization store is keyed by session plus
+  // api_message_id, and a session outlives its shim — a revival, a rewind, or
+  // any other respawn starts a fresh fake query whose first turn re-mints
+  // `msg_fake_1` under the SAME session. The store correctly refuses the
+  // divergent duplicate, and the refusal costs the whole shim link.
+  //
+  // The entropy is per CREATED QUERY rather than per process, because that is
+  // the boundary the collision actually has: two queries in one process — a
+  // respawn a test drives in-process, or any future multi-query host — must
+  // not share it either.
+  const spawnTag = randomBytes(4).toString("hex");
+  /**
+   * The api message id for one turn: `msg_fake_<spawn>_<turn>`.
+   *
+   * The shape stays recognizable on purpose. Every reader that had to know a
+   * fake id when it saw one — logs, the daemon's e2e assertions — still can,
+   * by the prefix and the turn suffix, rather than by an exact string that was
+   * only ever unique by accident.
+   */
+  const messageIdFor = (n: number): string => `msg_fake_${spawnTag}_${n}`;
   // The session uuid every message currently reports.
   //
   // MUTABLE because the real vendor mutates it: a `/clear` retires the
@@ -566,7 +592,7 @@ export function createFakeQuery(
           : content
               .map((b) => (b.type === "text" ? b.text : ""))
               .join("");
-      const messageId = `msg_fake_${turn}`;
+      const messageId = messageIdFor(turn);
       if (text.startsWith("!tool ")) {
         LOGGER.log({ agent_repl_session_id: opts.sessionId, message_id: messageId, branch: "tool" }, "selected fake turn branch");
         await runToolTurn(messageId, text.slice("!tool ".length));

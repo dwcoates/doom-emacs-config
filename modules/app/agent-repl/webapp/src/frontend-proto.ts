@@ -101,6 +101,16 @@ import {
   type SessionTokenUtilization as GeneratedSessionTokenUtilization,
 } from "../../proto/gen/ts/agentshim/frontend/v1/frontend_pb";
 import { fromJson, toJson, type JsonValue } from "@bufbuild/protobuf";
+import {
+  HIBERNATION_CAUSE,
+  KEEP_ALIVE_HOLD_TURN_ID,
+  PROMPT_ORIGIN_CACHE_KEEP_ALIVE,
+  PROMPT_ORIGIN_PREFIX,
+  PROMPT_ORIGIN_UNSPECIFIED,
+  QUEUE_ENTRY_KEEP_ALIVE_HOLD,
+  QUEUE_ENTRY_REVIVAL_HOLD,
+  REVIVAL_HOLD_SESSION_ID,
+} from "./proto-names.js";
 import { ApiUsageSchema } from "../../proto/gen/ts/agentshim/data/v1/tools_pb";
 import {
   AccountUsageAvailableSchema,
@@ -530,6 +540,53 @@ export interface SessionView {
    */
   death?: SystemFailure;
   tokenUtilization?: SessionTokenUtilization;
+  /**
+   * Present IFF the session is hibernated — the typed account behind the
+   * `hibernated` bool above, which stays as its compatibility projection.
+   * The revival gate is rendered from THIS, not from the bool: the bool can
+   * say a session is asleep but not why, and the gate's whole job is to tell
+   * the user what put it to sleep before asking them to pay for waking it.
+   */
+  hibernation?: HibernationDetail;
+}
+
+/**
+ * Why and since when a session is hibernated.
+ *
+ * The cause is a ONEOF of typed arms rather than a string, so "asleep at the
+ * idle cutoff", "the user asked for this", and "the cache went cold before a
+ * ping could fire" stay three distinguishable facts in every snapshot instead
+ * of three renderings of one sentence. Exactly one arm is always set.
+ */
+export interface HibernationDetail {
+  /** When the session entered hibernation, unix millis. */
+  sinceMs: number;
+  // The arm keys are the spelling table's (proto-names.ts), which is checked
+  // against the generated oneof — so this union cannot drift from the wire.
+  cause:
+    | { case: typeof HIBERNATION_CAUSE.idleCutoff; value: HibernationIdleCutoff }
+    | { case: typeof HIBERNATION_CAUSE.forced; value: HibernationForced }
+    | { case: typeof HIBERNATION_CAUSE.cacheExpired; value: HibernationCacheExpired };
+}
+
+/** Automatic hibernation at the idle cutoff. */
+export interface HibernationIdleCutoff {
+  /**
+   * The configured cutoff that tripped, millis — carried so the gate can say
+   * "asleep after 1h idle" without the frontend knowing daemon config.
+   */
+  cutoffMs: number;
+}
+
+/** User-forced hibernation. Deliberately empty: the cause IS the arm. */
+export type HibernationForced = Record<string, never>;
+
+/** Hibernation because the cache went cold before a ping could fire. */
+export interface HibernationCacheExpired {
+  /** How long the session had actually been idle when the check ran, millis. */
+  elapsedMs: number;
+  /** The expected cache TTL the elapsed time exceeded, millis. */
+  ttlMs: number;
 }
 
 export interface ModelOption {
@@ -1049,10 +1106,59 @@ export interface ProgressView {
    * instead of the hardcoded red no other surface consulted.
    */
   failure?: SystemFailure;
+  /**
+   * Set when a turn's UNCACHED input cost crossed the alert threshold — the
+   * loud "this prompt re-ingested context" signal. Persists until the next
+   * turn starts, exactly like `failure`. Absent means the last turn was
+   * cache-efficient, which is the only reading of absence.
+   */
+  expensiveTurn?: ContextCostAlert;
   pendingPermissions: number;
   queueDepth: number;
   liveTaskCount: number;
 }
+
+/**
+ * One turn's excessive uncached-input observation, resolved DAEMON-SIDE from
+ * the turn's result usage. The webapp renders it; it computes nothing here.
+ *
+ * `promptOrigin` is carried verbatim because a CACHE_KEEP_ALIVE origin is not
+ * a variant of "that turn was expensive" — it is the alarm that the ping meant
+ * to keep the cache warm came back COLD, having paid full freight for nothing.
+ */
+export interface ContextCostAlert {
+  /** The turn that crossed the threshold. */
+  turnId: string;
+  /** The observed uncached cost: input_tokens + cache_creation_input_tokens. */
+  uncachedInputTokens: number;
+  /** The configured threshold that tripped, so the row can say "N over M". */
+  thresholdTokens: number;
+  /** When the result carrying the usage arrived, unix millis. */
+  atMs: number;
+  /**
+   * The turn's attribution, as the canonical `core.v1.PromptOrigin` NAME.
+   *
+   * Kept as the wire name rather than mapped through a webapp keyword table:
+   * PromptOrigin is a large, still-growing enum and the webapp has exactly ONE
+   * question to ask of it (is this the keep-alive ping?). A local mirror of
+   * every arm would have to be extended on every daemon-side addition, and a
+   * strict name table would throw the whole ProgressView away over an origin
+   * this surface does not even distinguish.
+   */
+  promptOrigin: string;
+}
+
+/**
+ * The one `PromptOrigin` this surface distinguishes: the daemon's cache
+ * keep-alive ping. See `ContextCostAlert.promptOrigin` for why the rest of the
+ * enum is carried as an opaque name.
+ *
+ * Re-exported from the build-checked spelling table rather than spelled again:
+ * this name is the whole difference between "that turn was expensive" and "the
+ * ping came back cold", and a stale copy of it would silently pick the wrong
+ * alarm.
+ */
+export { PROMPT_ORIGIN_CACHE_KEEP_ALIVE };
 
 export interface StateSnapshot {
   workspaces: WorkspaceState[];
@@ -1227,6 +1333,32 @@ export interface QueueEntryShutdownHold {
   scheduleId: string;
 }
 
+/**
+ * Present when this entry is held because a CACHE KEEP-ALIVE turn is in
+ * flight. Like the drain lease and unlike an ordinary held prompt, the
+ * classifier never ran on it — but its exits are narrower still: there is NO
+ * force-through, because the keep-alive must complete before the daemon can
+ * rewind and submit this entry. The only ways out are delivery when the ping's
+ * turn ends, and cancel.
+ */
+export interface QueueEntryKeepAliveHold {
+  /** The in-flight keep-alive turn whose completion releases this entry. */
+  turnId: string;
+}
+
+/**
+ * Present when this entry is held because a COMPACT-FIRST REVIVAL's compaction
+ * is still pending. Like the other two holds the classifier never ran on it,
+ * and like the keep-alive hold there is NO force-through: a session still
+ * asleep cannot take a prompt at all. The exits are delivery once the
+ * compaction lands and the gate opens, a loud drop if the revival fails, and
+ * cancel.
+ */
+export interface QueueEntryRevivalHold {
+  /** The session being revived, whose completed compaction releases this. */
+  sessionId: string;
+}
+
 /** One prompt the daemon is holding (E4). */
 export interface QueueEntry {
   id: string;
@@ -1241,6 +1373,18 @@ export interface QueueEntry {
    * holding this", not a missing field to default away.
    */
   shutdownHold?: QueueEntryShutdownHold;
+  /**
+   * Set ONLY while an in-flight cache keep-alive turn holds this prompt.
+   * Absence is the real answer "no keep-alive is holding this", not a missing
+   * field: it selects the keep-alive bubble over the classifier bubble.
+   */
+  keepAliveHold?: QueueEntryKeepAliveHold;
+  /**
+   * Set ONLY while a pending compact-first revival holds this prompt. Absence
+   * is the real answer "no revival is holding this", not a missing field: it
+   * selects the revival bubble over the classifier bubble.
+   */
+  revivalHold?: QueueEntryRevivalHold;
 }
 
 /** The `idle` arm's payload: deliberately empty — the arm IS the state. */
@@ -1770,7 +1914,86 @@ const SESSION_VIEW_KEYS = new Set([
   "death",
   "modelOptions",
   "tokenUtilization",
+  "hibernation",
 ]);
+const HIBERNATION_DETAIL_ENVELOPE_KEYS = new Set(["sinceMs"]);
+const HIBERNATION_IDLE_CUTOFF_KEYS = new Set(["cutoffMs"]);
+const HIBERNATION_CACHE_EXPIRED_KEYS = new Set(["elapsedMs", "ttlMs"]);
+// Arm keys come from the build-checked spelling table (proto-names.ts), not
+// from literals typed out here: the decoder recognizes an arm by NAME, so a
+// name that drifted from the proto would make it refuse a well-formed frame.
+const HIBERNATION_CAUSE_ARM_DECODERS = new Map<
+  string,
+  (v: unknown) => HibernationDetail["cause"]
+>([
+  [
+    HIBERNATION_CAUSE.idleCutoff,
+    (v) => ({ case: HIBERNATION_CAUSE.idleCutoff, value: decodeHibernationIdleCutoff(v) }),
+  ],
+  [
+    HIBERNATION_CAUSE.forced,
+    (v) => ({ case: HIBERNATION_CAUSE.forced, value: decodeHibernationForced(v) }),
+  ],
+  [
+    HIBERNATION_CAUSE.cacheExpired,
+    (v) => ({ case: HIBERNATION_CAUSE.cacheExpired, value: decodeHibernationCacheExpired(v) }),
+  ],
+]);
+
+/**
+ * Decode `HibernationDetail`.
+ *
+ * A cause-less detail THROWS. The gate exists to say why the session is
+ * asleep, and there is no honest default: picking `forced` would tell the user
+ * they did this, and picking `idleCutoff` would tell them the daemon did.
+ * Absence here is a malformed frame, not a fourth cause.
+ */
+function decodeHibernationDetail(v: unknown): HibernationDetail {
+  const ctx = "SessionView.hibernation";
+  const o = ensureObject(v, ctx);
+  const arms = Object.keys(o).filter((k) => HIBERNATION_CAUSE_ARM_DECODERS.has(k));
+  const unknown = Object.keys(o).filter(
+    (k) => !HIBERNATION_DETAIL_ENVELOPE_KEYS.has(k) && !HIBERNATION_CAUSE_ARM_DECODERS.has(k),
+  );
+  if (unknown.length > 0) {
+    throw new Error(`frontend-proto: ${ctx} has unrecognized field(s): ${unknown.join(", ")}`);
+  }
+  if (arms.length === 0) {
+    throw new Error(
+      `frontend-proto: ${ctx} sets no cause ` +
+        "(WHICH member of the oneof is set IS the reason the gate explains)",
+    );
+  }
+  if (arms.length > 1) {
+    throw new Error(`frontend-proto: ${ctx} sets multiple causes: ${arms.join(", ")}`);
+  }
+  return {
+    sinceMs: num(o, "sinceMs", ctx),
+    cause: HIBERNATION_CAUSE_ARM_DECODERS.get(arms[0])!(o[arms[0]]),
+  };
+}
+
+function decodeHibernationIdleCutoff(v: unknown): HibernationIdleCutoff {
+  const ctx = "SessionView.hibernation.idleCutoff";
+  const o = ensureObject(v, ctx);
+  rejectUnknown(o, HIBERNATION_IDLE_CUTOFF_KEYS, ctx);
+  return { cutoffMs: num(o, "cutoffMs", ctx) };
+}
+
+/** The empty arm still validates: a stray field here is a contract drift. */
+function decodeHibernationForced(v: unknown): HibernationForced {
+  const ctx = "SessionView.hibernation.forced";
+  const o = ensureObject(v, ctx);
+  rejectUnknown(o, new Set<string>(), ctx);
+  return {};
+}
+
+function decodeHibernationCacheExpired(v: unknown): HibernationCacheExpired {
+  const ctx = "SessionView.hibernation.cacheExpired";
+  const o = ensureObject(v, ctx);
+  rejectUnknown(o, HIBERNATION_CACHE_EXPIRED_KEYS, ctx);
+  return { elapsedMs: num(o, "elapsedMs", ctx), ttlMs: num(o, "ttlMs", ctx) };
+}
 function decodeSessionView(v: unknown): SessionView {
   const o = ensureObject(v, "SessionView");
   rejectUnknown(o, SESSION_VIEW_KEYS, "SessionView");
@@ -1815,6 +2038,14 @@ function decodeSessionView(v: unknown): SessionView {
     sv.death = decodeSystemFailure(o.death, "SessionView.death");
   }
   if (o.tokenUtilization !== undefined) sv.tokenUtilization = decodeSessionTokenUtilization(o.tokenUtilization);
+  // ABSENCE IS "THE SESSION IS AWAKE", and that is its only reading. Decoded
+  // when present rather than synthesized from the `hibernated` bool: the bool
+  // is the compatibility projection of this message, so deriving one from the
+  // other would make the webapp a second authority on a fact the daemon
+  // already resolved — and it could not invent the cause anyway.
+  if (o.hibernation !== undefined && o.hibernation !== null) {
+    sv.hibernation = decodeHibernationDetail(o.hibernation);
+  }
   if (sv.sessionId === "") {
     throw new Error("frontend-proto: SessionView missing required `session_id`");
   }
@@ -2283,8 +2514,12 @@ const QUEUE_ENTRY_KEYS = new Set([
   "rationale",
   "accepted",
   "shutdownHold",
+  QUEUE_ENTRY_KEEP_ALIVE_HOLD,
+  QUEUE_ENTRY_REVIVAL_HOLD,
 ]);
 const QUEUE_ENTRY_SHUTDOWN_HOLD_KEYS = new Set(["scheduleId"]);
+const QUEUE_ENTRY_KEEP_ALIVE_HOLD_KEYS = new Set([KEEP_ALIVE_HOLD_TURN_ID]);
+const QUEUE_ENTRY_REVIVAL_HOLD_KEYS = new Set([REVIVAL_HOLD_SESSION_ID]);
 
 function decodeQueueView(v: unknown): QueueView {
   const o = ensureObject(v, "QueueView");
@@ -2326,7 +2561,49 @@ function decodeQueueEntry(v: unknown): QueueEntry {
   if (o.shutdownHold !== undefined && o.shutdownHold !== null) {
     e.shutdownHold = decodeQueueEntryShutdownHold(o.shutdownHold);
   }
+  // Same reading as the lease hold above: absence is the absence of a
+  // keep-alive hold. Decoded from the daemon's own claim, never inferred from
+  // the classification the classifier deliberately never produced.
+  if (
+    o[QUEUE_ENTRY_KEEP_ALIVE_HOLD] !== undefined &&
+    o[QUEUE_ENTRY_KEEP_ALIVE_HOLD] !== null
+  ) {
+    e.keepAliveHold = decodeQueueEntryKeepAliveHold(o[QUEUE_ENTRY_KEEP_ALIVE_HOLD]);
+  }
+  // Same reading again: absence is the absence of a revival hold. The daemon's
+  // own claim is what puts the "waiting on the revival's compaction" bubble on
+  // screen — the classifier never ran on this entry either.
+  if (o[QUEUE_ENTRY_REVIVAL_HOLD] !== undefined && o[QUEUE_ENTRY_REVIVAL_HOLD] !== null) {
+    e.revivalHold = decodeQueueEntryRevivalHold(o[QUEUE_ENTRY_REVIVAL_HOLD]);
+  }
   return e;
+}
+
+function decodeQueueEntryRevivalHold(v: unknown): QueueEntryRevivalHold {
+  const o = ensureObject(v, "QueueEntryRevivalHold");
+  rejectUnknown(o, QUEUE_ENTRY_REVIVAL_HOLD_KEYS, "QueueEntryRevivalHold");
+  const sessionId = str(o, REVIVAL_HOLD_SESSION_ID, "QueueEntryRevivalHold");
+  // The session id is the whole content of the message: it names the revival
+  // whose completed compaction releases this entry. A hold naming no session
+  // would claim the prompt waits on something nothing else on screen can
+  // corroborate.
+  if (sessionId === "") {
+    throw new Error("frontend-proto: QueueEntryRevivalHold missing required `sessionId`");
+  }
+  return { sessionId };
+}
+
+function decodeQueueEntryKeepAliveHold(v: unknown): QueueEntryKeepAliveHold {
+  const o = ensureObject(v, "QueueEntryKeepAliveHold");
+  rejectUnknown(o, QUEUE_ENTRY_KEEP_ALIVE_HOLD_KEYS, "QueueEntryKeepAliveHold");
+  const turnId = str(o, KEEP_ALIVE_HOLD_TURN_ID, "QueueEntryKeepAliveHold");
+  // The turn id is the whole content of the message: it names the ping whose
+  // completion releases this entry. A hold naming no turn would claim the
+  // prompt is waiting on something nothing else on screen can corroborate.
+  if (turnId === "") {
+    throw new Error("frontend-proto: QueueEntryKeepAliveHold missing required `turnId`");
+  }
+  return { turnId };
 }
 
 function decodeQueueEntryShutdownHold(v: unknown): QueueEntryShutdownHold {
@@ -2854,9 +3131,17 @@ const PROGRESS_VIEW_KEYS = new Set([
   "blocked",
   "interrupt",
   "failure",
+  "expensiveTurn",
   "pendingPermissions",
   "queueDepth",
   "liveTaskCount",
+]);
+const CONTEXT_COST_ALERT_KEYS = new Set([
+  "turnId",
+  "uncachedInputTokens",
+  "thresholdTokens",
+  "atMs",
+  "promptOrigin",
 ]);
 const PROGRESS_WINDOW_KEYS = new Set(["active", "sinceMs", "detail"]);
 const INTERRUPT_WINDOW_KEYS = new Set(["active", "sinceMs", "outcome"]);
@@ -2895,12 +3180,59 @@ function decodeProgressView(v: unknown): ProgressView {
   if (o.failure !== undefined && o.failure !== null) {
     pv.failure = decodeSystemFailure(o.failure, "ProgressView.failure");
   }
+  // Absent = the last turn was cache-efficient. Decoded when present so the
+  // alert is the daemon's own observation rather than anything re-derived from
+  // the input-token counter beside it.
+  if (o.expensiveTurn !== undefined && o.expensiveTurn !== null) {
+    pv.expensiveTurn = decodeContextCostAlert(o.expensiveTurn);
+  }
   // Without a workspace the view addresses nothing: the footer could not tell
   // which session it is describing.
   if (pv.workspace === "") {
     throw new Error("frontend-proto: ProgressView missing required `workspace`");
   }
   return pv;
+}
+
+/**
+ * Decode `ContextCostAlert`.
+ *
+ * The origin is REQUIRED to be a recognizable `PROMPT_ORIGIN_*` name. The
+ * daemon rejects UNSPECIFIED before a turn is accepted, so an alert without a
+ * usable attribution cannot be told apart from a keep-alive that came back
+ * cold — and the whole point of carrying the origin is that those two are
+ * different alarms.
+ */
+function decodeContextCostAlert(v: unknown): ContextCostAlert {
+  const ctx = "ProgressView.expensiveTurn";
+  const o = ensureObject(v, ctx);
+  rejectUnknown(o, CONTEXT_COST_ALERT_KEYS, ctx);
+  const promptOrigin = str(o, "promptOrigin", ctx);
+  if (!promptOrigin.startsWith(PROMPT_ORIGIN_PREFIX)) {
+    throw new Error(
+      `frontend-proto: ${ctx}.promptOrigin has unrecognized value '${promptOrigin}' ` +
+        "(expected a canonical core.v1.PromptOrigin name)",
+    );
+  }
+  if (promptOrigin === PROMPT_ORIGIN_UNSPECIFIED) {
+    throw new Error(
+      `frontend-proto: ${ctx}.promptOrigin is UNSPECIFIED — the daemon refuses a turn ` +
+        "without an attribution, so an alert cannot carry one",
+    );
+  }
+  const alert: ContextCostAlert = {
+    turnId: str(o, "turnId", ctx),
+    uncachedInputTokens: num(o, "uncachedInputTokens", ctx),
+    thresholdTokens: num(o, "thresholdTokens", ctx),
+    atMs: num(o, "atMs", ctx),
+    promptOrigin,
+  };
+  // Without a turn id the alert names no turn, so it could not be joined to
+  // the work that paid the cost it reports.
+  if (alert.turnId === "") {
+    throw new Error(`frontend-proto: ${ctx} missing required \`turnId\``);
+  }
+  return alert;
 }
 
 function decodeProgressWindow(v: unknown, ctx: string): ProgressWindow {

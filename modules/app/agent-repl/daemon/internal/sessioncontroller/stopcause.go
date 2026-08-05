@@ -52,6 +52,8 @@ const (
 	// causeUnset is the zero value: NOT a cause, and never rendered.
 	causeUnset stopCauseID = iota
 	causeHibernateIdleSweep
+	causeHibernateForced
+	causeHibernateCacheExpired
 	causeMergedTeardown
 	causeHardRestartLive
 	causeHardRestartOrphan
@@ -89,6 +91,16 @@ var stopCauseTable = map[stopCauseID]stopCauseRendering{
 		path:      "hibernate",
 		initiator: "idle_sweep",
 		reason:    "the workspace was quiet past the idle timeout, so the daemon hibernated its session",
+	},
+	causeHibernateForced: {
+		path:      "hibernate",
+		initiator: "user_hibernate",
+		reason:    "the user forced hibernation, so the daemon stopped the session's shim and gated it behind a revival choice",
+	},
+	causeHibernateCacheExpired: {
+		path:      "hibernate",
+		initiator: "cache_expired",
+		reason:    "the prompt cache went cold before a keep-alive ping could fire, so the daemon hibernated instead of paying a full re-ingest for nobody",
 	},
 	causeMergedTeardown: {
 		path:      "hibernate",
@@ -168,6 +180,13 @@ type StopCause struct {
 
 // StopCauseHibernateIdleSweep — the idle sweeper reaped a quiet workspace.
 func StopCauseHibernateIdleSweep() StopCause { return StopCause{id: causeHibernateIdleSweep} }
+
+// StopCauseHibernateForced — the user forced hibernation (HibernateWorkspaceCmd).
+func StopCauseHibernateForced() StopCause { return StopCause{id: causeHibernateForced} }
+
+// StopCauseHibernateCacheExpired — the keep-alive loop discovered the prompt
+// cache had already gone cold, so the discovery became the hibernation.
+func StopCauseHibernateCacheExpired() StopCause { return StopCause{id: causeHibernateCacheExpired} }
 
 // StopCauseMergedTeardown — the workspace merged and its session stood down.
 func StopCauseMergedTeardown() StopCause { return StopCause{id: causeMergedTeardown} }

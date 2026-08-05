@@ -47,6 +47,21 @@ func TestGuardMergeLease(t *testing.T) {
 			who:     submitterMergeLeaseHolder,
 			wantErr: "NO merge lease held",
 		},
+		{
+			// The revival gate admits this submitter past HIBERNATION; it must
+			// not also carry it past the merge lease, or a compact-first
+			// revival would inject a full-context `/compact` into a session in
+			// the middle of conflict resolution.
+			name:    "a revival compaction on a leased workspace is refused",
+			held:    true,
+			who:     submitterRevival,
+			wantErr: "revival of workspace",
+		},
+		{
+			name: "a revival compaction on an unleased workspace passes",
+			held: false,
+			who:  submitterRevival,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -1662,6 +1662,27 @@ side silently turns the keys into no-ops."
   (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () nil)))
     (should-error (agent-repl-restart-session) :type 'user-error)))
 
+;;;; ---- the deliberate hibernate command ---------------------------------
+
+(ert-deftest agent-repl-test-hibernate-workspace-command-dispatches ()
+  "`agent-repl-hibernate-workspace' asks the client to hibernate the current ws."
+  ;; Arrange
+  (let (asked)
+    (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+              ((symbol-function 'agent-repl--frontend-hibernate-workspace)
+               (lambda (ws) (setq asked ws) "req-1"))
+              ((symbol-function 'agent-repl--log) (lambda (&rest _) nil))
+              ((symbol-function 'message) (lambda (&rest _) nil)))
+      ;; Act
+      (agent-repl-hibernate-workspace)
+      ;; Assert
+      (should (equal asked "ws1")))))
+
+(ert-deftest agent-repl-test-hibernate-workspace-command-needs-a-workspace ()
+  "With no current workspace the hibernate signals rather than guessing one."
+  (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () nil)))
+    (should-error (agent-repl-hibernate-workspace) :type 'user-error)))
+
 ;;;; ---- Refreshing live webviews -----------------------------------------
 
 (defmacro agent-repl-test--with-webview-buffers (names &rest body)

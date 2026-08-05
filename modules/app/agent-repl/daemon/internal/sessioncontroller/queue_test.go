@@ -53,7 +53,7 @@ type failingClient struct {
 	err error
 }
 
-func (c *failingClient) SubmitPrompt(_ context.Context, _, _, _ string, _ corev1.PromptOrigin) error {
+func (c *failingClient) SubmitPrompt(_ context.Context, _, _, _, _ string, _ corev1.PromptOrigin) error {
 	return c.err
 }
 func (c *failingClient) SetModel(_ context.Context, _ string) (string, error) { return "", c.err }
@@ -147,7 +147,7 @@ func buildQueueHarness(t *testing.T, cls *fakeClassifier, wrap func(*fakePusher)
 		ProtocolVersion:   "1",
 		ShutdownHolds:     holds,
 		Logf:              logf,
-		now:               func() int64 { return 1000 },
+		Now:               func() int64 { return 1000 },
 		Source:            stubSource{},
 		FileDiagnostics:   fakeFileDiagnosticPersister{},
 		newClient: func(c shimclient.Config) sessionClient {
@@ -200,7 +200,7 @@ func (h *queueHarness) controller() *sessionController {
 // turn drives an observed turn boundary through the same callback the shim
 // stream drives, so the queue is exercised on its real trigger.
 func (h *queueHarness) turn(active bool) {
-	h.m.onTurnBoundary(h.controller(), active)
+	h.m.onTurnBoundary(h.controller(), active, h.m.now())
 }
 
 // submit submits a prompt for "ws".
@@ -1245,4 +1245,217 @@ func TestInterjectMootPathDoesNotSubmitIntoATurnThatStartedMeanwhile(t *testing.
 		got := h.client.promptTexts()
 		return len(got) == 2 && got[1] == "second"
 	})
+}
+
+// THE CLAIM IS TRANSFERRED IN THE SAME ACQUISITION THAT CLEARS THE PING'S OWN.
+// A boundary that cleared one without taking the other would leave an instant
+// in which a fresh prompt is admitted, starts a real turn, and is then killed
+// and truncated away by the rewind already on its way.
+func TestPingTurnEndTransfersItsClaimToTheRewind(t *testing.T) {
+	// Arrange.
+	m, _, _ := rewindRig(t)
+	// The aftermath goroutine is gated inside rewindIdentity so the claim can
+	// be observed while the rewind is genuinely in flight, with no sleep and no
+	// dependence on scheduling.
+	entered, release := make(chan struct{}), make(chan struct{})
+	m.cfg.SessionConfigDir = func(string) string {
+		close(entered)
+		<-release
+		// A root with no transcript, so the released aftermath degrades
+		// immediately instead of touching anything this test owns.
+		return "/nonexistent-rewind-gate"
+	}
+	pingTurn, err := m.SubmitKeepAlivePing(context.Background(), "ws")
+	if err != nil {
+		t.Fatalf("SubmitKeepAlivePing: %v", err)
+	}
+	if err := m.SubmitPrompt(context.Background(), "ws", "req-1", "real work", "",
+		corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+		t.Fatalf("SubmitPrompt: %v", err)
+	}
+	m.mu.Lock()
+	d := m.byWS["ws"]
+	m.mu.Unlock()
+
+	// Act.
+	m.onTurnBoundary(d, false, m.now())
+	<-entered
+	defer close(release)
+
+	// Assert.
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if got := m.keepAliveRewinds["ws"]; got != pingTurn {
+		t.Fatalf("rewind claim = %q while the aftermath runs, want the ended ping %q", got, pingTurn)
+	}
+	if d.keepAliveTurnID != "" {
+		t.Fatalf("the ping's own claim survived its turn end: %q", d.keepAliveTurnID)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The revival hold
+// ---------------------------------------------------------------------------
+
+// A REVIVAL-HELD ENTRY IS NOT DELIVERABLE. The ordinary turn-end drain must
+// skip it, or the prompt would run against the very conversation the pending
+// compaction has not compacted yet.
+func TestPopFrontDeliverableSkipsARevivalHeldEntry(t *testing.T) {
+	// Arrange.
+	q := &promptQueue{}
+	q.add(&queueEntry{id: "q1", revivalHoldSessionID: "s1"})
+
+	// Act.
+	got := q.popFrontDeliverable()
+
+	// Assert.
+	if got != nil {
+		t.Fatalf("popFrontDeliverable = %q, want nothing deliverable while a revival parks it", got.id)
+	}
+}
+
+// Releasing the hold restores an ordinary queued prompt, exactly as the
+// keep-alive release does: the HOLD stamp stood in for a classification that
+// never ran, and leaving it would render a chip claiming the prompt is still
+// waiting on a compaction that has landed.
+func TestReleaseRevivalHoldRestoresAnOrdinaryEntry(t *testing.T) {
+	// Arrange.
+	q := &promptQueue{}
+	q.add(&queueEntry{
+		id: "q1", revivalHoldSessionID: "s1",
+		classification: frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD,
+	})
+
+	// Act.
+	released := q.releaseRevivalHold("s1")
+
+	// Assert.
+	if released != 1 {
+		t.Fatalf("released %d entries, want 1", released)
+	}
+	if q.entries[0].revivalHeld() {
+		t.Fatal("the entry is still held after its revival's compaction landed")
+	}
+	if q.entries[0].classification != frontendv1.QueueClassification_QUEUE_CLASSIFICATION_PENDING {
+		t.Fatalf("classification = %s after release, want PENDING", q.entries[0].classification)
+	}
+}
+
+// A hold naming a DIFFERENT session is untouched, so one workspace's revival
+// cannot free a prompt another session's revival still owns.
+func TestReleaseRevivalHoldLeavesOtherHoldsAlone(t *testing.T) {
+	// Arrange.
+	q := &promptQueue{}
+	q.add(&queueEntry{id: "q1", revivalHoldSessionID: "s-other"})
+
+	// Act.
+	released := q.releaseRevivalHold("s1")
+
+	// Assert.
+	if released != 0 || !q.entries[0].revivalHeld() {
+		t.Fatalf("released=%d held=%v, want another revival's hold untouched", released, q.entries[0].revivalHeld())
+	}
+}
+
+// THE DROP TAKES ONLY WHAT THE REVIVAL PARKED. A revival that ends without
+// opening the gate disposes of its own entries and of nothing else: the other
+// prompts on the queue are waiting on turns, not on the gate.
+func TestDropRevivalHeldTakesOnlyTheRevivalsOwnEntries(t *testing.T) {
+	// Arrange.
+	q := &promptQueue{}
+	q.add(&queueEntry{id: "q1", revivalHoldSessionID: "s1"})
+	q.add(&queueEntry{id: "q2"})
+	q.add(&queueEntry{id: "q3", revivalHoldSessionID: "s1"})
+
+	// Act.
+	dropped := q.dropRevivalHeld("s1")
+
+	// Assert.
+	if len(dropped) != 2 || dropped[0].id != "q1" || dropped[1].id != "q3" {
+		t.Fatalf("dropped = %+v, want the two revival-parked entries front to back", dropped)
+	}
+	if len(q.entries) != 1 || q.entries[0].id != "q2" {
+		t.Fatalf("queue = %+v after the drop, want the unrelated entry kept", q.entries)
+	}
+}
+
+// THE HOLD IS PROJECTED ONTO THE WIRE. Without the field the entry reaches the
+// frontend as a bare HOLD, and the webapp cannot say what the prompt is waiting
+// on — the daemon's own `/compact`, not a classifier that will never run.
+func TestViewProjectsTheRevivalHoldSessionID(t *testing.T) {
+	// Arrange.
+	q := &promptQueue{}
+	q.add(&queueEntry{
+		id: "q1", revivalHoldSessionID: "s1",
+		classification: frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD,
+	})
+
+	// Act.
+	view := q.view("ws", "s1")
+
+	// Assert.
+	if got := view.GetEntries()[0].GetRevivalHold().GetSessionId(); got != "s1" {
+		t.Fatalf("revival_hold.session_id = %q, want the parking session %q", got, "s1")
+	}
+}
+
+// RELEASING THE HOLD CLEARS THE FIELD, so a delivered prompt does not keep
+// rendering a compaction it is no longer waiting on.
+func TestViewOmitsTheRevivalHoldOnceReleased(t *testing.T) {
+	// Arrange.
+	q := &promptQueue{}
+	q.add(&queueEntry{
+		id: "q1", revivalHoldSessionID: "s1",
+		classification: frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD,
+	})
+	q.releaseRevivalHold("s1")
+
+	// Act.
+	view := q.view("ws", "s1")
+
+	// Assert.
+	if hold := view.GetEntries()[0].GetRevivalHold(); hold != nil {
+		t.Fatalf("revival_hold = %v after release, want it gone", hold)
+	}
+}
+
+// THE THREE HOLDS ARE INDEPENDENT ON THE WIRE: a revival hold must not be
+// mistaken for, or projected as, a drain or keep-alive hold.
+func TestViewProjectsARevivalHoldWithoutTheOtherHolds(t *testing.T) {
+	// Arrange.
+	q := &promptQueue{}
+	q.add(&queueEntry{id: "q1", revivalHoldSessionID: "s1"})
+
+	// Act.
+	entry := q.view("ws", "s1").GetEntries()[0]
+
+	// Assert.
+	if entry.GetShutdownHold() != nil || entry.GetKeepAliveHold() != nil {
+		t.Fatalf("shutdown_hold=%v keep_alive_hold=%v, want a revival hold alone",
+			entry.GetShutdownHold(), entry.GetKeepAliveHold())
+	}
+}
+
+// A PING THAT HELD NOTHING RUNS NO REWIND, so it takes no rewind claim: the
+// pings stay in the transcript until a real prompt needs them gone, and a claim
+// with no aftermath to release it would hold every later prompt forever.
+func TestPingTurnEndWithNothingHeldTakesNoRewindClaim(t *testing.T) {
+	// Arrange.
+	m, _, _ := rewindRig(t)
+	if _, err := m.SubmitKeepAlivePing(context.Background(), "ws"); err != nil {
+		t.Fatalf("SubmitKeepAlivePing: %v", err)
+	}
+	m.mu.Lock()
+	d := m.byWS["ws"]
+	m.mu.Unlock()
+
+	// Act.
+	m.onTurnBoundary(d, false, m.now())
+
+	// Assert.
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if got, claimed := m.keepAliveRewinds["ws"]; claimed {
+		t.Fatalf("rewind claim = %q for a ping nothing was waiting on, want none", got)
+	}
 }

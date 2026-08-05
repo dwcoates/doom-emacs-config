@@ -268,6 +268,12 @@ describe("SessionView mapping", () => {
           cwd: "/work/ws",
           configDir: "/home/u/.claude",
           models: [{ value: "claude-opus", displayName: "Opus", description: "highest capability" }],
+          tokenUtilization: undefined,
+          // An awake session carries no hibernation detail, and the adapter
+          // normalizes that absence to an explicit null rather than leaving the
+          // key off: the store adopts this field WHOLESALE, so "awake" has to
+          // be a value it can write, not a key it never sees.
+          hibernation: null,
         },
       },
     ]);

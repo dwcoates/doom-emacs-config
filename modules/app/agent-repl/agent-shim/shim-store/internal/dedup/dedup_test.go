@@ -100,6 +100,23 @@ func TestDerive(t *testing.T) {
 			want: "",
 		},
 		{
+			name: "session rewound has no cross-plane twin and is never deduped",
+			ev: &corev1.Event{Payload: &corev1.Event_SessionRewound{SessionRewound: &corev1.SessionRewound{
+				PreviousVendorSessionId: "old",
+				NewVendorSessionId:      "new",
+				RetainedLeafUuid:        "L1",
+			}}},
+			want: "",
+		},
+		{
+			name: "producer-set key on session rewound is honored verbatim",
+			ev: withKey(&corev1.Event{Payload: &corev1.Event_SessionRewound{SessionRewound: &corev1.SessionRewound{
+				PreviousVendorSessionId: "old",
+				NewVendorSessionId:      "new",
+			}}}, "rewind:old:new"),
+			want: "rewind:old:new",
+		},
+		{
 			name: "vendor message without uuid is never deduped",
 			ev:   mustVendor(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{}}}),
 			want: "",

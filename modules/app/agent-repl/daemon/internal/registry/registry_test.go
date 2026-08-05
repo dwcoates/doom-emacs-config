@@ -660,3 +660,75 @@ func TestReplayFloorCheckpointKeepsTheHighestAcrossSessions(t *testing.T) {
 		t.Fatalf("checkpoint = %+v ok=%v, want newest_clear_or_compact_seq=900", cp, ok)
 	}
 }
+
+// THE LINEAGE OUTLIVES THE DAEMON. That is the whole point of moving it out of
+// memory: a daemon that dies after the rewind's flip must leave the record
+// carrying the argv the next bring-up owes the shim.
+func TestRewindLineageSurvivesAReopen(t *testing.T) {
+	// Arrange.
+	path := testPath(t)
+	reg := Open(path, func(string, ...any) {})
+	if err := reg.Put(Record{
+		SessionID: "s1", CWD: "/ws", ClaudeSessionID: "new-uuid",
+		Rewind: RewindLineage{
+			PreviousVendorSessionID: "old-uuid",
+			RetainedLeafUUID:        "leaf-uuid",
+			DroppedTurnIDs:          "ka_1,ka_2",
+		},
+	}); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	if err := reg.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Act.
+	reopened := Open(path, func(string, ...any) {})
+	defer reopened.Close()
+	rec, ok := reopened.Get("s1")
+
+	// Assert.
+	if !ok {
+		t.Fatal("the reopened registry lost the session record")
+	}
+	want := RewindLineage{PreviousVendorSessionID: "old-uuid", RetainedLeafUUID: "leaf-uuid", DroppedTurnIDs: "ka_1,ka_2"}
+	if rec.Rewind != want {
+		t.Fatalf("lineage after reopen = %+v, want %+v", rec.Rewind, want)
+	}
+}
+
+// Partial names the ONE shape that must never be stored or spawned with: the
+// shim rejects an empty dropped-turn list, so two of the three is a spawn that
+// fails at startup.
+func TestRewindLineagePartialNamesTheIncompleteShapes(t *testing.T) {
+	tests := []struct {
+		name    string
+		lineage RewindLineage
+		want    bool
+	}{
+		{name: "none set", lineage: RewindLineage{}, want: false},
+		{
+			name:    "all three set",
+			lineage: RewindLineage{PreviousVendorSessionID: "old", RetainedLeafUUID: "leaf", DroppedTurnIDs: "ka_1"},
+			want:    false,
+		},
+		{name: "only the predecessor", lineage: RewindLineage{PreviousVendorSessionID: "old"}, want: true},
+		{
+			name:    "predecessor and leaf without the dropped turns",
+			lineage: RewindLineage{PreviousVendorSessionID: "old", RetainedLeafUUID: "leaf"},
+			want:    true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got := tc.lineage.Partial()
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("Partial() = %v for %+v, want %v", got, tc.lineage, tc.want)
+			}
+		})
+	}
+}

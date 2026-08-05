@@ -16,6 +16,7 @@
 import type { CounterEntry } from "./counter-menu.js";
 import type {
   ErrorClass,
+  HibernationDetail,
   MergeStatus,
   RuntimeFault,
   SessionCommand,
@@ -557,6 +558,19 @@ export interface StoreState {
    * about the lease leaves whatever is standing alone.
    */
   shutdownSchedule: ShutdownScheduleDraining | null;
+  /**
+   * WHY this session is asleep, or `null` while it is awake — adopted straight
+   * off the pushed `SessionView`.
+   *
+   * It gates the composer and drives the revival gate card. Held as the typed
+   * detail rather than a boolean because both consumers need the CAUSE: the
+   * gate says it in prose, and a gate that could only say "asleep" would be
+   * asking the user to choose a revival mode with nothing to choose on.
+   *
+   * `null` also covers "no SessionView has landed yet", which is correct for
+   * both consumers: neither may block a live session on the absence of news.
+   */
+  hibernation: HibernationDetail | null;
   /** Monotonic SSM revision of the adopted WorkspaceState. */
   workspaceStateAtMs: number;
   /** Store sequence that caused the adopted state, or zero for daemon-local. */
@@ -595,6 +609,7 @@ function initialState(): StoreState {
     mergeLeaseHeld: false,
     mergeStatus: null,
     shutdownSchedule: null,
+    hibernation: null,
     workspaceStateAtMs: 0,
     workspaceStateCauseSeq: 0,
   };
@@ -1089,6 +1104,11 @@ export class ConversationStore {
     // Empty identity values never clobber a filled record.
     if (sv.claudeSessionId !== "") s.claudeSessionId = sv.claudeSessionId;
     if (sv.cwd !== "") s.cwd = sv.cwd;
+    // ADOPTED WHOLESALE, including the clear. Absence on a SessionView is the
+    // daemon saying the session is awake, and that is exactly the edge the
+    // revival gate closes on: the gate stands until a pushed view drops the
+    // field, so nothing local has to decide when a revive "probably" landed.
+    s.hibernation = sv.hibernation;
     return true;
   }
 
@@ -1297,6 +1317,12 @@ export class ConversationStore {
       // entry is parked, and the renderer picks the lease bubble off its
       // presence rather than guessing from the classification.
       shutdownHold: e.shutdownHold,
+      // Same carry-through, same reason: the keep-alive hold is WHY this entry
+      // is parked, and the renderer picks its bubble off the daemon's claim.
+      keepAliveHold: e.keepAliveHold,
+      // And again: the revival hold is WHY this entry is parked, so it is
+      // carried through untouched and the renderer picks its bubble off it.
+      revivalHold: e.revivalHold,
     }));
     return true;
   }

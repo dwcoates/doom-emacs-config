@@ -72,6 +72,26 @@ export const CLIENT_FAILURE_TYPES = [
    * diagnosis and a real defect is being hidden by reload churn.
    */
   "client.stale_bundle",
+  /**
+   * The daemon REFUSED a command and classified nothing: the ack came back
+   * `ok=false` carrying only an error string.
+   *
+   * Classified here, and legitimately so — the daemon decided the refusal but
+   * declined to name it, and somebody has to, or the refusal reaches the user
+   * through nothing at all. The daemon's own prose is carried verbatim as the
+   * message; this end invents no reading of it. The commands that made this
+   * load-bearing are hibernate and revive, whose refusal is the ONLY signal
+   * that the workspace the user asked to sleep (or wake) did not.
+   */
+  "client.command_rejection_unclassified",
+  /**
+   * A command never left this page: the socket was not open when it was sent.
+   *
+   * Necessarily classified here — the daemon cannot report a frame it never
+   * received — and it is not the same fact as a refusal: nothing was decided,
+   * so the operation can simply be retried once the socket is back.
+   */
+  "client.command_unsent",
 ] as const;
 export type ClientFailureType = (typeof CLIENT_FAILURE_TYPES)[number];
 

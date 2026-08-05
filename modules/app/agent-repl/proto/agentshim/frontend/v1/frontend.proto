@@ -559,6 +559,51 @@ message SessionView {
   // Cumulative token usage across the session's main agent and every
   // dispatched descendant subagent.
   SessionTokenUtilization token_utilization = 22;
+  // Present iff the session is hibernated; the typed account behind the
+  // `hibernated` bool (16), which stays as its compatibility projection.
+  // A frontend renders the revival gate from this.
+  HibernationDetail hibernation = 23;
+}
+
+// Why and since when a session is hibernated. Exists so the revival gate can
+// tell the user what put the session to sleep, and so forced and automatic
+// hibernation remain distinguishable facts in every snapshot.
+message HibernationDetail {
+  // When the session entered hibernation, unix millis.
+  int64 since_ms = 1;
+  oneof cause {
+    // The keep-alive loop reached its configured maximum: idle time crossed
+    // the cutoff, so the daemon stopped pinging and hibernated in the same
+    // transition (the two are one act by construction).
+    HibernationIdleCutoff idle_cutoff = 10;
+    // The user forced it via HibernateWorkspaceCmd.
+    HibernationForced forced = 11;
+    // The keep-alive loop discovered, at a time-since check against the
+    // durably recorded last turn end, that the expected cache TTL had
+    // already elapsed before a ping could fire (laptop sleep, daemon
+    // downtime). Pinging a cold cache would pay full re-ingest cost for
+    // nothing, so the discovery IS the hibernate transition — reported
+    // loudly to the user rather than silently absorbed.
+    HibernationCacheExpired cache_expired = 12;
+  }
+}
+
+// Automatic hibernation at the idle cutoff.
+message HibernationIdleCutoff {
+  // The configured cutoff that tripped, millis — carried so the gate can say
+  // "asleep after Nh idle" without the frontend knowing daemon config.
+  int64 cutoff_ms = 1;
+}
+
+// User-forced hibernation. Empty: the cause IS the arm.
+message HibernationForced {}
+
+// Hibernation because the cache went cold before a ping could fire.
+message HibernationCacheExpired {
+  // How long the session had actually been idle when the check ran, millis.
+  int64 elapsed_ms = 1;
+  // The expected cache TTL the elapsed time exceeded, millis.
+  int64 ttl_ms = 2;
 }
 
 message ModelOption {
@@ -1632,6 +1677,8 @@ message FrontendCommand {
     PublishWorkspaceRosterCmd publish_workspace_roster = 25;
     ScheduleShutdownCmd schedule_shutdown = 26;          // Additive (drain lease)
     CancelScheduledShutdownCmd cancel_scheduled_shutdown = 27;  // Additive (drain lease)
+    HibernateWorkspaceCmd hibernate_workspace = 28;
+    ReviveSessionCmd revive_session = 29;
   }
 }
 
@@ -1724,6 +1771,23 @@ message QueueEntry {
   // View state only — it changes nothing about when the entry is delivered.
   bool accepted = 6;
   QueueEntryShutdownHold shutdown_hold = 7;  // Additive (drain lease)
+  // Present when this entry is held because a cache keep-alive turn is in
+  // flight. The classifier NEVER runs on such an entry and there is NO
+  // force-through: the keep-alive must complete before the rewind-and-submit
+  // can run, so the only exits are delivery when the ping's turn ends (the
+  // daemon rewinds, then submits this entry) or QueueCancelCmd. The webapp
+  // renders a dedicated "waiting on a keep-alive response" bubble from this
+  // field instead of the classifier bubble.
+  QueueEntryKeepAliveHold keep_alive_hold = 8;
+  // Present when this entry is held because a compact-first revival's
+  // compaction is still pending. Like the other two holds, the classifier
+  // NEVER runs on such an entry and there is NO force-through: the exits are
+  // delivery once the compaction lands and the gate opens, a loud drop when
+  // the revival fails or expires (a session still asleep can never deliver,
+  // so a retained entry would be a leak, not a delay), or QueueCancelCmd.
+  // The webapp renders a dedicated "waiting on the revival's compaction"
+  // bubble from this field instead of the classifier bubble.
+  QueueEntryRevivalHold revival_hold = 9;
 }
 
 // Present when this QueueEntry is held by a scheduled shutdown's drain lease
@@ -1737,6 +1801,20 @@ message QueueEntryShutdownHold {
   // The schedule holding this entry, joining the bubble to the
   // ShutdownScheduleView it should explain.
   string schedule_id = 1;
+}
+
+// The keep-alive turn holding a queue entry.
+message QueueEntryKeepAliveHold {
+  // turn_id of the in-flight keep-alive turn, joining the bubble to the turn
+  // whose completion releases it.
+  string turn_id = 1;
+}
+
+// The pending compact-first revival holding a queue entry.
+message QueueEntryRevivalHold {
+  // The session being revived, joining the bubble to the revival whose
+  // completed compaction releases this entry.
+  string session_id = 1;
 }
 
 // The session's queue, pushed on EVERY change and carried in StateSnapshot.
@@ -1923,6 +2001,43 @@ message CancelScheduledShutdownCmd {
 // merely hibernated or severed is brought up, because "restart" and "start" are
 // the same request when nothing is running.
 message RestartSessionCmd {}
+
+// Deliberate, immediate hibernation of one workspace's session: the daemon
+// stops the shim (IntentionalQueryTermination) and marks the session
+// hibernated. Hibernated sessions are structurally outside the keep-alive
+// loop — hibernation and keep-alive-stop are ONE transition, so "hibernated
+// but still pinging" is unrepresentable. Refused with a loud nack while a
+// turn is live or the merge lease is held: the user interrupts first, the
+// daemon never discards in-flight work to satisfy a hibernate.
+message HibernateWorkspaceCmd {}
+
+// The user's revival decision for a hibernated workspace. Revival is LAZY and
+// GATED: the daemon nacks SubmitPromptCmd on a hibernated session, so no
+// model use can precede this choice — the webapp renders the gate from
+// SessionView.hibernation and sends exactly one of these. The daemon brings
+// the session up along the ordinary create/resume path and, under
+// compact_first, drives compaction to completion before accepting any prompt.
+message ReviveSessionCmd {
+  // The choice is a oneof of empty messages, not a bool: "no decision" must
+  // be unrepresentable on the wire, and a third revival mode later is a new
+  // arm rather than a second flag.
+  oneof mode {
+    // Compact the conversation as the first order of business; prompts are
+    // accepted only after compaction lands. This pays the full-context cost
+    // ONCE (compaction is a model call over the whole history) instead of on
+    // every subsequent turn.
+    ReviveCompactFirst compact_first = 1;
+    // Resume the conversation as-is, full accumulated context and all. The
+    // deliberate "I know it's big" path.
+    ReviveDirect direct = 2;
+  }
+}
+
+// Marks the compact-first revival choice. Empty: the choice IS the arm.
+message ReviveCompactFirst {}
+
+// Marks the resume-verbatim revival choice. Empty: the choice IS the arm.
+message ReviveDirect {}
 
 // Ask the daemon to assert that every boot-critical global dependency is
 // operational.  The matching DaemonHealthView, not socket existence, is the
@@ -2406,10 +2521,41 @@ message ProgressView {
   // ApiErrorLine (retries exhausted) or an errored turn end.
   SystemFailureItem failure = 19;
 
+  // Set when a turn's UNCACHED input cost crossed the alert threshold — the
+  // loud "this prompt re-ingested context" signal. Rendered red in the center
+  // footer (the webapp progress footer, displayed inside the Emacs webview);
+  // Emacs additionally surfaces it in the webview window's mode line, the
+  // only footer surface native Emacs owns. Persists until the next turn
+  // starts, like `failure`. Unset means the last turn was cache-efficient,
+  // which is the only reading of absence.
+  ContextCostAlert expensive_turn = 22;
+
   // Counts (ephemeral, session-scoped):
   int64 pending_permissions = 14;
   int64 queue_depth = 15;
   int64 live_task_count = 16;
+}
+
+// One turn's excessive uncached-input observation. Computed daemon-side from
+// the turn's result usage: the measure is input_tokens PLUS
+// cache_creation_input_tokens, because the vendor marks nearly all input
+// cacheable — a cold prompt surfaces as cache CREATION, and raw input_tokens
+// alone stays near-zero even on a full re-ingest.
+message ContextCostAlert {
+  // The turn that crossed the threshold.
+  string turn_id = 1;
+  // The observed uncached cost: input_tokens + cache_creation_input_tokens.
+  int64 uncached_input_tokens = 2;
+  // The configured threshold that tripped (default 20000), carried so the
+  // rendering can say "N over M" without knowing daemon config.
+  int64 threshold_tokens = 3;
+  // When the result carrying the usage arrived, unix millis.
+  int64 at_ms = 4;
+  // The turn's attribution, verbatim. A CACHE_KEEP_ALIVE origin here is the
+  // "keep-alive came back cold" alarm — the ping paid full freight, meaning
+  // the cache had already expired — and frontends render it as its own
+  // message rather than a generic expensive-turn note.
+  agentshim.core.v1.PromptOrigin prompt_origin = 5;
 }
 
 // Full resync on (re)connect: current state of every workspace + open tasks.

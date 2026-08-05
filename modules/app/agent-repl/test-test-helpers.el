@@ -220,6 +220,46 @@ clean; BODY runs after the load with the same bindings still active."
                                  agent-repl-test--external-original-functions)))))
       (fset 'agent-repl--uds-probe guard))))
 
+;;;; ---- Generated protocol vocabulary readers ----
+
+(ert-deftest agent-repl-test-helpers-generated-go-text-signals-when-absent ()
+  "A missing generated binding signals: silently reading nothing would make
+every vocabulary assertion built on it pass vacuously."
+  ;; Act / Assert
+  (should-error (agent-repl-test--generated-go-text "agentshim/nope/v1/nope.pb.go")))
+
+(ert-deftest agent-repl-test-helpers-generated-oneof-arms-reads-a-json-name ()
+  "The reader recovers a multi-word arm's lowerCamelCase protojson name."
+  ;; Act
+  (let ((arms (agent-repl-test--generated-oneof-arms
+               "agentshim/frontend/v1/frontend.pb.go" "FrontendCommand")))
+    ;; Assert
+    (should (member "hibernateWorkspace" arms))))
+
+(ert-deftest agent-repl-test-helpers-generated-oneof-arms-reads-a-bare-name ()
+  "A single-word arm has no `json=' half, so its `name=' half must be read."
+  ;; Act
+  (let ((arms (agent-repl-test--generated-oneof-arms
+               "agentshim/frontend/v1/frontend.pb.go" "FrontendFrame")))
+    ;; Assert
+    (should (member "snapshot" arms))))
+
+(ert-deftest agent-repl-test-helpers-generated-oneof-arms-are-message-scoped ()
+  "Arms are read per message: a command arm is not reported as a frame arm."
+  ;; Act
+  (let ((arms (agent-repl-test--generated-oneof-arms
+               "agentshim/frontend/v1/frontend.pb.go" "FrontendFrame")))
+    ;; Assert
+    (should-not (member "hibernateWorkspace" arms))))
+
+(ert-deftest agent-repl-test-helpers-generated-enum-names-reads-a-value-name ()
+  "The enum reader recovers a prefixed value name from the generated bindings."
+  ;; Act
+  (let ((names (agent-repl-test--generated-enum-names
+                "agentshim/core/v1/core.pb.go" "PROMPT_ORIGIN_")))
+    ;; Assert
+    (should (member "PROMPT_ORIGIN_CACHE_KEEP_ALIVE" names))))
+
 (provide 'test-test-helpers)
 
 ;;; test-test-helpers.el ends here
