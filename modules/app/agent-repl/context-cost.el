@@ -155,18 +155,16 @@ Records the decoded `expensiveTurn' under the frame's workspace, or
 clears the workspace's record when the field is absent.  Returns the
 recorded alarm plist, or nil when nothing is recorded.
 
-A frame whose workspace resolves to no known workspace is DROPPED loudly
-rather than keyed under the raw wire cwd — a stub entry would hold an
-alarm no footer ever reads."
+A frame whose workspace resolves to no known workspace violates the
+WorkspaceAvailable materialization handshake and signals before any alarm
+state is mutated."
   (let* ((wire (plist-get progress :workspace))
          (ws (agent-repl--frontend-ws-name wire))
          (alert (plist-get progress :expensiveTurn)))
     (cond
      ((null ws)
-      (agent-repl--log nil
-                       "context-cost-apply: DROPPED unresolvable workspace=%S expensive=%s"
-                       wire (and alert t))
-      nil)
+      (agent-repl--frontend-reject-unmaterialized-session-frame
+       "ProgressView" "unavailable" wire (plist-get progress :sessionId)))
      (alert
       (let ((normalized (agent-repl--context-cost-normalize ws alert)))
         (puthash ws normalized agent-repl--context-cost-alerts)
