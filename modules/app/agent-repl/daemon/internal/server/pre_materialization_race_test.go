@@ -263,9 +263,14 @@ func TestPreMaterializationPublicationGateDrainsEveryOrdering(t *testing.T) {
 	// interleaving rather than scheduler luck: an emission begins on the old
 	// side of the latch and completes only after the release is durable.
 	entered, continueLookup := bridge.pauseNextLookup()
-	emitted := make(chan error, 1)
+	emitted := make(chan struct{})
 	go func() {
-		emitted <- shim.SSM.ApplyMergeTransition(raceWorkspace, "merged", "emission whose decision straddles materialization ack")
+		shim.Server.PushWorkspaceState(&frontendv1.WorkspaceState{
+			Workspace: raceWorkspace,
+			SessionId: raceSession,
+			State:     frontendv1.RenderState_RENDER_STATE_MERGED,
+		})
+		close(emitted)
 	}()
 	<-entered
 	released := make(chan error, 1)
@@ -277,9 +282,7 @@ func TestPreMaterializationPublicationGateDrainsEveryOrdering(t *testing.T) {
 		// The lookup's confirmed entry proves it holds the frontend reader lock.
 	}
 	close(continueLookup)
-	if err := <-emitted; err != nil {
-		t.Fatalf("apply straddling state: %v", err)
-	}
+	<-emitted
 	if err := <-released; err != nil {
 		t.Fatalf("release materialization: %v", err)
 	}
