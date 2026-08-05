@@ -731,6 +731,52 @@ func TestUnmodeledUsageIsPreservedAndLoudLogged(t *testing.T) {
 	}
 }
 
+func TestUnmodeledUsageDiagnosticDeduplicatesByMessageAndPayload(t *testing.T) {
+	unmodeled, _ := structpb.NewStruct(map[string]any{"future_counter": 4})
+	var logs []string
+	c := newConsumer("ws", "s", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }, nil, nil, nil, nil, nil)
+	c.accounting.activeTurnID = "t"
+	c.accounting.turns["t"] = &accountingTurn{}
+	event := accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{Message: &datav1.ApiAssistantMessage{Id: "m", Usage: &datav1.ApiUsage{UnmodeledUsage: unmodeled}}}}})
+	for range 10 {
+		if err := c.Consume(proto.Clone(event).(*corev1.Event)); err != nil {
+			t.Fatalf("consume duplicated response: %v", err)
+		}
+	}
+	var diagnosticLogs []string
+	for _, line := range logs {
+		if strings.Contains(line, "API usage contains unmodeled fields") {
+			diagnosticLogs = append(diagnosticLogs, line)
+		}
+	}
+	if len(diagnosticLogs) != 2 {
+		t.Fatalf("diagnostic logs = %v, want first event plus one bounded repeat summary", diagnosticLogs)
+	}
+	if !strings.Contains(diagnosticLogs[0], "api_message_id=m") || !strings.Contains(diagnosticLogs[0], "diagnostic_kind=first") || !strings.Contains(diagnosticLogs[0], "repeat_count=0") || !strings.Contains(diagnosticLogs[0], "payload_fingerprint=") || !strings.Contains(diagnosticLogs[0], "field_count=1") {
+		t.Fatalf("first diagnostic = %q, want identity-complete first observation", diagnosticLogs[0])
+	}
+	if !strings.Contains(diagnosticLogs[1], "diagnostic_kind=repeat-summary") || !strings.Contains(diagnosticLogs[1], "repeat_count=3") || !strings.Contains(diagnosticLogs[1], "repeat_limit=3") {
+		t.Fatalf("repeat diagnostic = %q, want capped repeat summary", diagnosticLogs[1])
+	}
+}
+
+func TestUnmodeledUsageDiagnosticDoesNotLogPayloadValues(t *testing.T) {
+	const secret = "must-not-reach-diagnostic-log"
+	unmodeled, _ := structpb.NewStruct(map[string]any{"future_counter": secret})
+	var logs []string
+	c := newConsumer("ws", "s", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }, nil, nil, nil, nil, nil)
+	c.accounting.activeTurnID = "t"
+	c.accounting.turns["t"] = &accountingTurn{}
+	event := accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{Message: &datav1.ApiAssistantMessage{Id: "m", Usage: &datav1.ApiUsage{UnmodeledUsage: unmodeled}}}}})
+	if err := c.Consume(event); err != nil {
+		t.Fatalf("consume response: %v", err)
+	}
+	joined := strings.Join(logs, "\n")
+	if strings.Contains(joined, secret) || len(joined) > 512 {
+		t.Fatalf("diagnostic log leaked payload or exceeded bounded shape: %q", joined)
+	}
+}
+
 func TestTurnAccountingReducerInvalidatesMissingEvidence(t *testing.T) {
 	r := newTurnAccountingReducer()
 	r.observe(&corev1.Event{Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}, "s")

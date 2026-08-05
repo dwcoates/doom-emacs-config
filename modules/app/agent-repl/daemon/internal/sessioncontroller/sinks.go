@@ -514,6 +514,7 @@ type consumer struct {
 	replayedResponses      map[string]*frontendv1.TokenUtilization
 	completedTerminalBySeq map[uint64]*frontendv1.TurnAccounting
 	completedResponses     map[string]*frontendv1.TokenUtilization
+	responseDiagnostics    *diagnosticDeduper
 	// onTerminalAccountingPersisted republishes the SessionView from the
 	// durable aggregate only after the terminal conversation delta is visible.
 	onTerminalAccountingPersisted func()
@@ -557,6 +558,7 @@ func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier,
 		replayedResponses:      map[string]*frontendv1.TokenUtilization{},
 		completedTerminalBySeq: map[uint64]*frontendv1.TurnAccounting{},
 		completedResponses:     map[string]*frontendv1.TokenUtilization{},
+		responseDiagnostics:    newDiagnosticDeduper(responseDiagnosticDedupeCapacity, responseDiagnosticRepeatLimit),
 	}
 }
 
@@ -1130,7 +1132,18 @@ func (c *consumer) Consume(ev *corev1.Event) error {
 		c.surfaceUnexpectedQueryTermination(ev, terminationFailure)
 	}
 	if utilization != nil && utilization.GetUsage().GetUnmodeledUsage() != nil && len(utilization.GetUsage().GetUnmodeledUsage().GetFields()) > 0 {
-		c.logf("session-controller: API usage contains unmodeled fields session=%s api_message_id=%s fields=%v", c.sessionID, utilization.GetApiMessageId(), utilization.GetUsage().GetUnmodeledUsage().GetFields())
+		decision, err := c.responseDiagnostics.observe(utilization.GetApiMessageId(), utilization.GetUsage().GetUnmodeledUsage())
+		if err != nil {
+			c.logf("session-controller: API usage diagnostic REJECTED session=%s api_message_id=%s error=%v", c.sessionID, utilization.GetApiMessageId(), err)
+			return err
+		}
+		if decision.Emit {
+			kind := "first"
+			if decision.Summary {
+				kind = "repeat-summary"
+			}
+			c.logf("session-controller: API usage contains unmodeled fields session=%s api_message_id=%s payload_fingerprint=%s diagnostic_kind=%s repeat_count=%d repeat_limit=%d field_count=%d", c.sessionID, utilization.GetApiMessageId(), decision.Fingerprint, kind, decision.RepeatCount, responseDiagnosticRepeatLimit, len(utilization.GetUsage().GetUnmodeledUsage().GetFields()))
+		}
 	}
 	c.applyProgress(ev)
 	c.observeBackfill(ev)
