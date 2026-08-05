@@ -267,10 +267,31 @@ func (s *keepAliveSession) checkAfterAdvancing(t *testing.T, d time.Duration) {
 func (s *keepAliveSession) hibernate(t *testing.T, requestID string) *frontendv1.HibernationDetail {
 	t.Helper()
 	sendHibernate(t, s.conn, requestID)
-	if ack := awaitAck(t, s.conn, requestID, "the forced hibernate"); !ack.GetOk() {
-		t.Fatalf("hibernateWorkspace nacked while setting up a revival: %s", ack.GetError())
-	}
-	return awaitHibernationDetail(t, s.conn, s.sessionID)
+	// ONE combined await: the hibernated SessionView is pushed BEFORE the
+	// CommandAck, so sequential awaitAck-then-awaitHibernationDetail loops
+	// would consume and discard the view while hunting for the ack.
+	var detail *frontendv1.HibernationDetail
+	awaitAll(t, s.conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
+		"the forced hibernate's ack": func(frame *frontendv1.FrontendFrame) bool {
+			ack := ackFor(frame, requestID)
+			if ack == nil {
+				return false
+			}
+			if !ack.GetOk() {
+				t.Fatalf("hibernateWorkspace nacked while setting up a revival: %s", ack.GetError())
+			}
+			return true
+		},
+		"a SessionView reporting the session hibernated": func(frame *frontendv1.FrontendFrame) bool {
+			view := sessionViewFor(frame, s.sessionID)
+			if view == nil || !view.GetHibernated() {
+				return false
+			}
+			detail = view.GetHibernation()
+			return true
+		},
+	})
+	return detail
 }
 
 // awaitAwake blocks until the session reports a live, attached shim again —
@@ -428,12 +449,27 @@ func noKeepAlivePing(why string) func(*corev1.Event) string {
 // --- frontend accessors --------------------------------------------------------
 
 // sessionViewFor returns the SessionView a frame carries for sessionID, or nil.
+//
+// It reads BOTH carriages: the live SessionView arm and a StateSnapshot's
+// sessions list. Pushes are edge-triggered and a single-conn await loop that
+// ran earlier may have consumed the edge while hunting for a different frame;
+// the periodic snapshot redelivery makes every await ordering-robust instead
+// of dependent on which helper read the conn first.
 func sessionViewFor(frame *frontendv1.FrontendFrame, sessionID string) *frontendv1.SessionView {
-	sv, ok := frame.GetFrame().(*frontendv1.FrontendFrame_SessionView)
-	if !ok || sv.SessionView.GetSessionId() != sessionID {
+	if sv, ok := frame.GetFrame().(*frontendv1.FrontendFrame_SessionView); ok {
+		if sv.SessionView.GetSessionId() == sessionID {
+			return sv.SessionView
+		}
 		return nil
 	}
-	return sv.SessionView
+	if snap, ok := frame.GetFrame().(*frontendv1.FrontendFrame_Snapshot); ok {
+		for _, sv := range snap.Snapshot.GetSessions() {
+			if sv.GetSessionId() == sessionID {
+				return sv
+			}
+		}
+	}
+	return nil
 }
 
 // snapshotSessionView returns the SessionView a StateSnapshot carries for
