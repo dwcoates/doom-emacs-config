@@ -32,7 +32,7 @@ import (
 // its own: every terminal API failure the CLI reports — a rate limit, a
 // server error, a bad model id — is ALSO written as a `<synthetic>` assistant
 // record, and those are exactly the records a user most needs to see.
-const syntheticModel = tokenutilization.SyntheticModelIdentity
+var syntheticModel = tokenutilization.SyntheticModelIdentity
 
 // noResponseRequestedText is the placeholder's entire body.
 //
