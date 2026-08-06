@@ -105,26 +105,6 @@ the daemon receives, not the plist that happens to produce it."
   "Return the row vector of WIRE's first repository section."
   (alist-get 'rows (aref (alist-get 'sections (alist-get 'repository wire)) 0)))
 
-(defmacro agent-repl-test--with-sidebar-frame (fire &rest body)
-  "Run BODY capturing every scheduled roster flush into FIRE, newest first.
-Models one event-loop frame: `agent-repl--sidebar-push' requests a flush
-and nothing runs until a captured callback is funcalled, which is exactly
-the window requests are supposed to coalesce inside."
-  (declare (indent 1))
-  `(let ((,fire nil))
-     (setq agent-repl--sidebar-flush-pending nil)
-     (cl-letf (((symbol-function 'agent-repl--sidebar-run-timer)
-                (lambda (_seconds callback) (push callback ,fire) 'timer)))
-       ,@body)))
-
-(defun agent-repl-test--sidebar-publish-now ()
-  "Force one gated roster publish and return whatever the flush returned.
-Invalidates the last signature first, so a test about the PUBLISH (the
-wire shape, the revision counter, the ack tracking) is never silently
-turned into a test about the gate."
-  (agent-repl--sidebar-invalidate)
-  (agent-repl--sidebar-flush))
-
 (defun agent-repl-test--sidebar-publish-once (&rest plist)
   "Register one workspace from PLIST, publish, and return the parsed wire.
 PLIST is passed to `agent-repl-test--sidebar-ws' after NAME and DIR,
@@ -133,7 +113,7 @@ rows carry a live lifecycle rather than the perspective-less shortcut."
   (apply #'agent-repl-test--sidebar-ws "ws" "/tmp/ws" plist)
   (cl-letf (((symbol-function 'agent-repl--ws-open-p) (lambda (_ws) t)))
     (agent-repl-test--sidebar-with-link
-      (agent-repl-test--sidebar-publish-now)
+      (agent-repl--sidebar-push)
       (agent-repl-test--sidebar-wire))))
 
 (defun agent-repl-test--sidebar-task (id title &rest plist)
@@ -196,28 +176,14 @@ dot without changing anything true."
               ((symbol-function 'agent-repl--ws-render-status) (lambda (_ws) nil)))
       (should (equal (agent-repl--sidebar-wire-status "ws") "none")))))
 
-(ert-deftest agent-repl-test-sidebar-wire-status-perspective-less-merged-is-merged ()
-  "A perspective-less `:merged' workspace still serializes as \"merged\".
-`:merged' is perspective-independent in
-`agent-repl--sidebar-status-wire': the row is reporting concluded work,
-not tab-bar membership, so `agent-repl--ws-open-p' nil no longer
-overrides it — that override was exactly the defect that hid the
-Recently Merged dot behind a question mark."
+(ert-deftest agent-repl-test-sidebar-wire-status-perspective-less-is-inactive ()
+  "A perspective-less workspace serializes as \"inactive\", overriding its state.
+The `agent-repl--ws-open-p' nil branch dominates even a live `:merged'
+render state, since sidebar-but-not-tab-bar is the fact being conveyed."
   (agent-repl-test--with-clean-state
     (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
     (cl-letf (((symbol-function 'agent-repl--ws-open-p) (lambda (_ws) nil))
               ((symbol-function 'agent-repl--ws-render-status) (lambda (_ws) :merged)))
-      (should (equal (agent-repl--sidebar-wire-status "ws") "merged")))))
-
-(ert-deftest agent-repl-test-sidebar-wire-status-perspective-less-live-is-inactive ()
-  "A perspective-less LIVE status still serializes as \"inactive\".
-`:ready' is perspective-bound in `agent-repl--sidebar-status-wire', so
-losing the tab-bar membership still dominates: there is no live session
-whose lifecycle a status dot could report."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
-    (cl-letf (((symbol-function 'agent-repl--ws-open-p) (lambda (_ws) nil))
-              ((symbol-function 'agent-repl--ws-render-status) (lambda (_ws) :ready)))
       (should (equal (agent-repl--sidebar-wire-status "ws") "inactive")))))
 
 (ert-deftest agent-repl-test-sidebar-wire-status-unmapped-errors ()
@@ -228,35 +194,6 @@ whose lifecycle a status dot could report."
               ((symbol-function 'agent-repl--ws-render-status)
                (lambda (_ws) :not-a-state)))
       (should-error (agent-repl--sidebar-wire-status "ws")))))
-
-(ert-deftest agent-repl-test-sidebar-status-wire-every-entry-classified ()
-  "Every `agent-repl--sidebar-status-wire' entry names a boolean flag.
-A newly added render state whose entry omits the
-PERSPECTIVE-INDEPENDENT-P cell would leave `agent-repl--sidebar-wire-status'
-unable to decide whether it needs a live perspective — this pins that
-every entry lands on exactly one side of the rule rather than silently
-falling through as neither."
-  (dolist (entry agent-repl--sidebar-status-wire)
-    (let ((row (cdr entry)))
-      (should (stringp (car row)))
-      (should (memq (cdr row) '(nil t))))))
-
-(ert-deftest agent-repl-test-sidebar-wire-row-merged-perspective-less-publishes-merged-arm ()
-  "A merged, perspective-less workspace publishes the `merged' arm, not `inactive'.
-End-to-end reproduction of the fixed defect: `preserve-entry' leaves the
-merge landed but the perspective gone, and the row must still draw the
-merged dot instead of the inactive question mark."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--sidebar-ws "merged" "/tmp/merged"
-                                 :pushed-render-state :merged
-                                 :merge-completed-at 100.0)
-    (agent-repl-test--sidebar-with-persps '("other")
-      (agent-repl-test--sidebar-with-link
-        (agent-repl-test--sidebar-publish-now)
-        (let* ((wire (agent-repl-test--sidebar-wire))
-               (row (aref (alist-get 'rows (alist-get 'recentlyMerged wire)) 0)))
-          (should (assq 'merged row))
-          (should (null (assq 'inactive row))))))))
 
 ;;;; ---- The closed (greyed) predicate ---------------------------------------
 
@@ -399,22 +336,18 @@ merge instant, so that is what the arrangement carries."
 
 (ert-deftest agent-repl-test-sidebar-kill-repaints-without-the-killed-row ()
   "Killing a workspace publishes a roster that no longer carries its row.
-The publish is REQUESTED by the kill itself
-\(`agent-repl--ws-repaint-sidebar') and lands on the frame\='s flush, so
-the row goes with the tab rather than lingering until the next tick."
+The publish fires from the kill itself (`agent-repl--ws-repaint-sidebar'),
+so the row goes with the tab rather than lingering until the next tick."
   (agent-repl-test--with-clean-state
     (agent-repl-test--sidebar-ws "kept" "/tmp/kept")
     (agent-repl-test--sidebar-ws "doomed" "/tmp/doomed")
     (let ((persp-names-cache '("kept" "doomed")))
       (agent-repl-test--sidebar-with-link
-        (agent-repl-test--with-sidebar-frame fire
-          (cl-letf ((;; The kill: the persp leaves the cache, exactly as
-                     ;; `+workspace/kill' would make it.
-                     (symbol-function '+workspace/kill)
-                     (lambda (ws) (setq persp-names-cache (delete ws persp-names-cache)))))
-            (agent-repl--ws-kill "doomed"))
-          (should (= (length fire) 1))
-          (funcall (car fire)))
+        (cl-letf ((;; The kill: the persp leaves the cache, exactly as
+                   ;; `+workspace/kill' would make it.
+                   (symbol-function '+workspace/kill)
+                   (lambda (ws) (setq persp-names-cache (delete ws persp-names-cache)))))
+          (agent-repl--ws-kill "doomed"))
         (let ((published (json-encode (car (last (agent-repl-test--sidebar-rosters))))))
           (should (= (length agent-repl-test--sidebar-published) 1))
           (should (string-match-p "/tmp/kept" published))
@@ -707,7 +640,7 @@ to be greyed."
     (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
     (setq agent-repl--sidebar-flat-dirs '("/stale"))
     (agent-repl-test--sidebar-with-link
-      (agent-repl-test--sidebar-publish-now))
+      (agent-repl--sidebar-push))
     (should (equal agent-repl--sidebar-flat-dirs
                    (list (agent-repl--path-canonical "/tmp/ws"))))))
 
@@ -718,7 +651,7 @@ to be greyed."
   (agent-repl-test--with-clean-state
     (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
     (agent-repl-test--sidebar-with-link
-      (agent-repl-test--sidebar-publish-now)
+      (agent-repl--sidebar-push)
       (should (equal (mapcar #'car agent-repl-test--sidebar-published)
                      '("publishWorkspaceRoster"))))))
 
@@ -733,7 +666,7 @@ execute-script here would be a second, divergent delivery channel."
       (cl-letf (((symbol-function 'agent-repl--frontend-webview-execute-script)
                  (lambda (_buf script) (push script scripts))))
         (agent-repl-test--sidebar-with-link
-          (agent-repl-test--sidebar-publish-now)))
+          (agent-repl--sidebar-push)))
       (should (null scripts)))))
 
 (ert-deftest agent-repl-test-sidebar-roster-hook-constant-is-gone ()
@@ -751,14 +684,14 @@ publish delivers a fresher one than the frame that could not be sent."
   (agent-repl-test--with-clean-state
     (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
     (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () nil)))
-      (should (null (agent-repl-test--sidebar-publish-now))))))
+      (should (null (agent-repl--sidebar-push))))))
 
 (ert-deftest agent-repl-test-sidebar-publish-holds-revision-when-link-down ()
   "A skipped publish consumes no revision, so the counter stays truthful."
   (agent-repl-test--with-clean-state
     (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
     (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () nil)))
-      (agent-repl-test--sidebar-publish-now))
+      (agent-repl--sidebar-push))
     (should (= agent-repl--sidebar-roster-revision 0))))
 
 ;;;; ---- The published protojson shape ---------------------------------------
@@ -815,7 +748,7 @@ Folding is display state, so unfolding must need no republish."
     (agent-repl-test--sidebar-ws "ws" "/tmp/ws" :task-id "t1")
     (cl-letf (((symbol-function 'agent-repl--ws-open-p) (lambda (_ws) t)))
       (agent-repl-test--sidebar-with-link
-        (agent-repl-test--sidebar-publish-now)
+        (agent-repl--sidebar-push)
         (let* ((wire (agent-repl-test--sidebar-wire))
                (section (cl-find-if (lambda (s) (equal (alist-get 'taskId s) "t1"))
                                     (append (alist-get 'sections
@@ -832,7 +765,7 @@ Folding is display state, so unfolding must need no republish."
     (agent-repl-test--sidebar-ws "ws" "/tmp/ws" :task-id "t1")
     (cl-letf (((symbol-function 'agent-repl--ws-open-p) (lambda (_ws) t)))
       (agent-repl-test--sidebar-with-link
-        (agent-repl-test--sidebar-publish-now)
+        (agent-repl--sidebar-push)
         (let* ((wire (agent-repl-test--sidebar-wire))
                (section (cl-find-if (lambda (s) (equal (alist-get 'taskId s) "t1"))
                                     (append (alist-get 'sections
@@ -902,7 +835,7 @@ Folding is display state, so unfolding must need no republish."
   (agent-repl-test--with-clean-state
     (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
     (agent-repl-test--sidebar-with-link
-      (agent-repl-test--sidebar-publish-now)
+      (agent-repl--sidebar-push)
       (let* ((wire (agent-repl-test--sidebar-wire))
              (row (aref (agent-repl-test--sidebar-wire-rows wire) 0)))
         (should (assq 'inactive row))))))
@@ -910,7 +843,7 @@ Folding is display state, so unfolding must need no republish."
 (ert-deftest agent-repl-test-sidebar-status-arm-table-covers-every-wire-status ()
   "Every wire status the sidebar can emit maps to an arm key."
   (dolist (pair agent-repl--sidebar-status-wire)
-    (should (agent-repl--sidebar-status-arm (cadr pair)))))
+    (should (agent-repl--sidebar-status-arm (cdr pair)))))
 
 (ert-deftest agent-repl-test-sidebar-status-arm-unmapped-errors ()
   "An unmapped wire status signals rather than publishing an armless row."
@@ -924,7 +857,7 @@ Folding is display state, so unfolding must need no republish."
                                  :source-ws-dir "/tmp/parent")
     (cl-letf (((symbol-function 'agent-repl--ws-open-p) (lambda (_ws) t)))
       (agent-repl-test--sidebar-with-link
-        (agent-repl-test--sidebar-publish-now)
+        (agent-repl--sidebar-push)
         (let* ((wire (agent-repl-test--sidebar-wire))
                (rows (agent-repl-test--sidebar-wire-rows wire))
                (parent (aref rows 0)))
@@ -940,7 +873,7 @@ Folding is display state, so unfolding must need no republish."
     (cl-letf (((symbol-function 'agent-repl--ws-open-p) (lambda (_ws) t))
               ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws")))
       (agent-repl-test--sidebar-with-link
-        (agent-repl-test--sidebar-publish-now)
+        (agent-repl--sidebar-push)
         (should (equal (alist-get 'currentDir (agent-repl-test--sidebar-wire))
                        (agent-repl--path-canonical "/tmp/ws")))))))
 
@@ -991,7 +924,7 @@ Folding is display state, so unfolding must need no republish."
     (agent-repl-test--sidebar-ws "merged" "/tmp/merged" :merge-completed-at 100.0)
     (agent-repl-test--sidebar-with-persps '("other")
       (agent-repl-test--sidebar-with-link
-        (agent-repl-test--sidebar-publish-now)
+        (agent-repl--sidebar-push)
         (let* ((wire (agent-repl-test--sidebar-wire))
                (row (aref (alist-get 'rows (alist-get 'recentlyMerged wire)) 0)))
           (should (= (alist-get 'mergedAtMs row) 100000)))))))
@@ -1069,7 +1002,7 @@ Folding is display state, so unfolding must need no republish."
     (agent-repl-test--sidebar-ws "merged" "/tmp/merged" :merge-completed-at 100.0)
     (agent-repl-test--sidebar-with-persps '("other")
       (agent-repl-test--sidebar-with-link
-        (agent-repl-test--sidebar-publish-now)
+        (agent-repl--sidebar-push)
         (let ((section (alist-get 'recentlyMerged
                                   (agent-repl-test--sidebar-wire))))
           (should (equal (alist-get 'label section) "Recently Merged")))))))
@@ -1081,7 +1014,7 @@ Folding is display state, so unfolding must need no republish."
     (agent-repl--toggle-repo-fold agent-repl--sidebar-merged-key)
     (agent-repl-test--sidebar-with-persps '("other")
       (agent-repl-test--sidebar-with-link
-        (agent-repl-test--sidebar-publish-now)
+        (agent-repl--sidebar-push)
         (let ((section (alist-get 'recentlyMerged
                                   (agent-repl-test--sidebar-wire))))
           (should (eq (alist-get 'folded section) t)))))))
@@ -1100,8 +1033,8 @@ Folding is display state, so unfolding must need no republish."
   (agent-repl-test--with-clean-state
     (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
     (agent-repl-test--sidebar-with-link
-      (agent-repl-test--sidebar-publish-now)
-      (agent-repl-test--sidebar-publish-now)
+      (agent-repl--sidebar-push)
+      (agent-repl--sidebar-push)
       (let ((ids (mapcar (lambda (r) (plist-get r :bootId))
                          (agent-repl-test--sidebar-rosters))))
         (should (= (length ids) 2))
@@ -1133,9 +1066,9 @@ Folding is display state, so unfolding must need no republish."
   (agent-repl-test--with-clean-state
     (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
     (agent-repl-test--sidebar-with-link
-      (agent-repl-test--sidebar-publish-now)
-      (agent-repl-test--sidebar-publish-now)
-      (agent-repl-test--sidebar-publish-now)
+      (agent-repl--sidebar-push)
+      (agent-repl--sidebar-push)
+      (agent-repl--sidebar-push)
       (should (equal (mapcar (lambda (r) (plist-get r :revision))
                              (agent-repl-test--sidebar-rosters))
                      '(1 2 3))))))
@@ -1147,25 +1080,9 @@ Folding is display state, so unfolding must need no republish."
   (agent-repl-test--with-clean-state
     (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
     (agent-repl-test--sidebar-with-link
-      (agent-repl-test--with-sidebar-frame fire
-        (agent-repl--sidebar-publish-on-connect)
-        (funcall (car fire)))
+      (agent-repl--sidebar-publish-on-connect)
       (should (equal (mapcar #'car agent-repl-test--sidebar-published)
                      '("publishWorkspaceRoster"))))))
-
-(ert-deftest agent-repl-test-sidebar-connect-publish-survives-an-unmoved-signature ()
-  "A reconnect republishes even though no roster field moved.
-The daemon that just replaced the old one retains nothing, so the gate
-must not observe `unchanged' and drop the one publish that restores it."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
-    (agent-repl-test--sidebar-with-link
-      ;; Publish once so the signature is current and genuinely unmoved.
-      (agent-repl-test--sidebar-publish-now)
-      (agent-repl-test--with-sidebar-frame fire
-        (agent-repl--sidebar-publish-on-connect)
-        (funcall (car fire)))
-      (should (= (length agent-repl-test--sidebar-published) 2)))))
 
 (ert-deftest agent-repl-test-sidebar-connect-publisher-is-registered ()
   "The reconnect publish is wired to the UDS connected hook, not to a timer."
@@ -1179,7 +1096,7 @@ must not observe `unchanged' and drop the one publish that restores it."
   (agent-repl-test--with-clean-state
     (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
     (agent-repl-test--sidebar-with-link
-      (agent-repl-test--sidebar-publish-now)
+      (agent-repl--sidebar-push)
       (should (equal (mapcar (lambda (e) (plist-get e :field))
                              agent-repl-test--sidebar-tracked)
                      '("publishWorkspaceRoster"))))))
@@ -1192,7 +1109,7 @@ must not observe `unchanged' and drop the one publish that restores it."
       (cl-letf (((symbol-function 'agent-repl--log)
                  (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
         (agent-repl-test--sidebar-with-link
-          (agent-repl-test--sidebar-publish-now)
+          (agent-repl--sidebar-push)
           (funcall (plist-get (car agent-repl-test--sidebar-tracked) :on-failure)
                    "daemon said no")))
       (should (cl-find-if (lambda (line)
@@ -1209,10 +1126,10 @@ roster over a newer one."
   (agent-repl-test--with-clean-state
     (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
     (agent-repl-test--sidebar-with-link
-      (agent-repl-test--sidebar-publish-now)
+      (agent-repl--sidebar-push)
       (funcall (plist-get (car agent-repl-test--sidebar-tracked) :on-failure)
                "revision 7 is not newer than 9")
-      (agent-repl-test--sidebar-publish-now)
+      (agent-repl--sidebar-push)
       (should (equal (mapcar (lambda (r) (plist-get r :revision))
                              (agent-repl-test--sidebar-rosters))
                      '(1 2))))))
@@ -1247,80 +1164,28 @@ roster over a newer one."
 
 ;;;; ---- The 1Hz gate --------------------------------------------------------
 
-(ert-deftest agent-repl-test-sidebar-tick-publishes-once-over-unchanged-state ()
-  "Two ticks over unchanged state publish exactly once."
+(ert-deftest agent-repl-test-sidebar-tick-skips-when-signature-unchanged ()
+  "Two ticks over unchanged state push exactly once."
   (agent-repl-test--with-clean-state
     (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
-    (agent-repl-test--sidebar-with-link
-      (agent-repl--sidebar-tick)
-      (agent-repl--sidebar-tick)
-      (should (= (length agent-repl-test--sidebar-published) 1)))))
+    (let ((pushes 0))
+      (cl-letf (((symbol-function 'agent-repl--sidebar-push)
+                 (lambda () (cl-incf pushes))))
+        (agent-repl--sidebar-tick)
+        (agent-repl--sidebar-tick))
+      (should (= pushes 1)))))
 
-(ert-deftest agent-repl-test-sidebar-tick-publishes-on-fold-change ()
-  "A fold flip between ticks republishes."
+(ert-deftest agent-repl-test-sidebar-tick-pushes-on-fold-change ()
+  "A fold flip between ticks re-pushes."
   (agent-repl-test--with-clean-state
     (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
-    (agent-repl-test--sidebar-with-link
-      (agent-repl--sidebar-tick)
-      (agent-repl--toggle-repo-fold "/repos/doom/.git")
-      (agent-repl--sidebar-tick)
-      (should (= (length agent-repl-test--sidebar-published) 2)))))
-
-;;;; ---- The publish gate is unbypassable ------------------------------------
-
-(ert-deftest agent-repl-test-sidebar-many-requests-in-one-frame-publish-once ()
-  "N `--sidebar-push' requests inside one frame produce exactly one publish.
-This is the whole of the roster-rate fix: nine callers reached past the
-1Hz gate and published the full roster on every fold, switch, nav and
-state change (277 sends in twenty minutes, peaking at ten in a second)."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
-    (agent-repl-test--sidebar-with-link
-      (agent-repl-test--with-sidebar-frame fire
-        (dotimes (_ 8) (agent-repl--sidebar-push))
-        ;; Eight requests, one scheduled flush.
-        (should (= (length fire) 1))
-        (funcall (car fire)))
-      (should (= (length agent-repl-test--sidebar-published) 1)))))
-
-(ert-deftest agent-repl-test-sidebar-unchanged-signature-publishes-nothing ()
-  "A request over an unmoved signature drops its flush entirely."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
-    (agent-repl-test--sidebar-with-link
-      ;; Publish once so the signature is current.
-      (agent-repl-test--sidebar-publish-now)
-      (agent-repl-test--with-sidebar-frame fire
-        (dotimes (_ 5) (agent-repl--sidebar-push))
-        (funcall (car fire)))
-      (should (= (length agent-repl-test--sidebar-published) 1)))))
-
-(ert-deftest agent-repl-test-sidebar-push-publishes-nothing-by-itself ()
-  "The request is a request: on its own it neither builds nor publishes.
-There is no remaining spelling of \"publish the roster right now,
-ungated\" for a new caller to reach for."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
-    (setq agent-repl--sidebar-flat-dirs '("/stale"))
-    (agent-repl-test--sidebar-with-link
-      (agent-repl-test--with-sidebar-frame _fire
-        (agent-repl--sidebar-push))
-      (should (null agent-repl-test--sidebar-published))
-      (should (equal agent-repl--sidebar-flat-dirs '("/stale"))))))
-
-(ert-deftest agent-repl-test-sidebar-a-second-frame-schedules-again ()
-  "Coalescing is per frame: a request after the flush schedules a new one."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
-    (agent-repl-test--sidebar-with-link
-      (agent-repl-test--with-sidebar-frame fire
-        (agent-repl--sidebar-push)
-        (funcall (car fire))
-        (agent-repl-test--sidebar-ws "ws2" "/tmp/ws2")
-        (agent-repl--sidebar-push)
-        (should (= (length fire) 2))
-        (funcall (car fire)))
-      (should (= (length agent-repl-test--sidebar-published) 2)))))
+    (let ((pushes 0))
+      (cl-letf (((symbol-function 'agent-repl--sidebar-push)
+                 (lambda () (cl-incf pushes))))
+        (agent-repl--sidebar-tick)
+        (agent-repl--toggle-repo-fold "/repos/doom/.git")
+        (agent-repl--sidebar-tick))
+      (should (= pushes 2)))))
 
 ;;;; ---- The rail moves with the tab bar, not a second later -----------------
 ;;
@@ -1350,16 +1215,16 @@ ungated\" for a new caller to reach for."
         (agent-repl--sidebar-react-to-pushed-state "ws" :ready :ready))
       (should (= pushes 0)))))
 
-(ert-deftest agent-repl-test-sidebar-transition-publish-quiets-the-next-tick ()
-  "The transition\='s flush refreshes the signature, so the tick adds nothing."
+(ert-deftest agent-repl-test-sidebar-transition-push-quiets-the-next-tick ()
+  "The transition push refreshes the signature, so the tick does not repeat it."
   (agent-repl-test--with-clean-state
     (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
-    (agent-repl-test--sidebar-with-link
-      (agent-repl-test--with-sidebar-frame fire
+    (let ((pushes 0))
+      (cl-letf (((symbol-function 'agent-repl--sidebar-push)
+                 (lambda () (cl-incf pushes))))
         (agent-repl--sidebar-react-to-pushed-state "ws" :ready :init)
-        (funcall (car fire)))
-      (agent-repl--sidebar-tick)
-      (should (= (length agent-repl-test--sidebar-published) 1)))))
+        (agent-repl--sidebar-tick))
+      (should (= pushes 1)))))
 
 (ert-deftest agent-repl-test-sidebar-reactor-is-registered-on-the-state-hook ()
   "The repaint is wired to the state-transition hook, not to a timer alone."
@@ -2044,12 +1909,12 @@ Both read the one minibuffer, so the guard is shared rather than per-action."
 (ert-deftest agent-repl-test-sidebar-wire-status-clearing ()
   ":clearing carries its own wire string rather than borrowing thinking's."
   ;; Act / Assert
-  (should (equal (car (alist-get :clearing agent-repl--sidebar-status-wire)) "clearing")))
+  (should (equal (alist-get :clearing agent-repl--sidebar-status-wire) "clearing")))
 
 (ert-deftest agent-repl-test-sidebar-wire-status-compacting ()
   ":compacting carries its own wire string rather than borrowing thinking's."
   ;; Act / Assert
-  (should (equal (car (alist-get :compacting agent-repl--sidebar-status-wire)) "compacting")))
+  (should (equal (alist-get :compacting agent-repl--sidebar-status-wire) "compacting")))
 
 ;;;; ---- The RosterRow.status proto vocabulary ---------------------------
 
@@ -2094,7 +1959,7 @@ beside it are declarations, not vocabulary."
 The mapped render states, plus the two `agent-repl--sidebar-wire-status'
 derives structurally rather than from the table."
   (delete-dups
-   (append (mapcar #'cadr agent-repl--sidebar-status-wire)
+   (append (mapcar #'cdr agent-repl--sidebar-status-wire)
            '("inactive" "none"))))
 
 (ert-deftest agent-repl-test-sidebar-roster-oneof-covers-every-wire-status ()

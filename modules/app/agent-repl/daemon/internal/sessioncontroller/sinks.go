@@ -13,6 +13,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/frontend"
+	"claude-repld/internal/keepalive"
 	"claude-repld/internal/ssm"
 	"claude-repld/internal/statedb"
 	"claude-repld/internal/tokenutilization"
@@ -428,6 +429,20 @@ type consumer struct {
 	// Called on the shim read-loop goroutine, with the same non-blocking
 	// obligation onTurn carries.
 	onTurnStarted func(turnID string, atMs int64)
+	// onTurnResultCost reports one turn's terminal UNCACHED input cost — what
+	// the turn fed the model NEW rather than read from the prompt cache — named
+	// by the turn the accounting reducer just attributed the result to.
+	//
+	// IT MATTERS FOR EXACTLY ONE KIND OF TURN. A keep-alive ping is a dozen
+	// tokens of prompt, so a ping that paid for the whole conversation is the
+	// cache's absence MEASURED rather than predicted, and that measurement is
+	// what puts the session to sleep (keepalivecold.go). Every other turn's cost
+	// is a cost report and is rendered as one by the progress footer. The
+	// session controller decides which is which; this reports the figure.
+	//
+	// Called on the shim read-loop goroutine, with the same non-blocking
+	// obligation onTurn carries.
+	onTurnResultCost func(turnID string, uncachedInputTokens int64)
 	// onContextCompacted reports that a compaction COMPLETED — the compacting
 	// axis closing, which is the only first-class report the vendor gives.
 	// A compact-first revival waits on it before it will accept prompts.
@@ -1093,6 +1108,20 @@ func (c *consumer) Consume(ev *corev1.Event) error {
 	if err := c.accounting.observe(ev, c.sessionID); err != nil {
 		if fatal := c.degradeAccountingObservation(ev, err); fatal != nil {
 			return fmt.Errorf("session-controller: observe turn accounting before frame mutation: %w", fatal)
+		}
+	}
+	// THE TERMINAL RESULT'S COST, reported against the SAME turn the accounting
+	// reducer just attributed the result to. Placed immediately after that
+	// attribution — and before anything is pushed — so the durable ledger and
+	// this report can never name different turns for one result.
+	//
+	// Only the DATA plane can carry a result, which is why this is here and not
+	// in Apply: Apply's events are lifecycle boundaries, and asking them for a
+	// vendor result would be asking a question no lifecycle event can answer.
+	if result := resultFromVendor(ev.GetVendor()); result != nil && c.onTurnResultCost != nil {
+		if usage := result.GetUsage(); usage != nil {
+			c.onTurnResultCost(c.accounting.activeTurn(),
+				keepalive.UncachedInputTokens(usage.GetInputTokens(), usage.GetCacheCreationInputTokens()))
 		}
 	}
 	if historicalQueryLifecycle {

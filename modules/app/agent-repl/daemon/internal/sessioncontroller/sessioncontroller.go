@@ -559,6 +559,13 @@ type sessionController struct {
 	// arriving mid-ping is held behind (the queue's keep-alive hold). Read and
 	// written only under Manager.mu.
 	keepAliveTurnID string
+	// keepAlivePing is what the in-flight ping measured about the cache it was
+	// sent to refresh, nil when no ping is running. It is acquired and released
+	// with keepAliveTurnID, by the same acquisitions, because it has no meaning
+	// apart from the claim: a measurement outliving its ping would be read at
+	// the next ping's turn end as though it were that ping's own. Read and
+	// written only under Manager.mu (keepalivecold.go).
+	keepAlivePing *keepAlivePingMeasurement
 	// runningText is the prompt that started the turn now in flight, as far as
 	// this daemon saw it. It is the classifier's "what is already running"
 	// context, and is empty when the turn predates this daemon.
@@ -2151,6 +2158,14 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 		cons.onTurnEnded = func(atMs int64) {
 			m.cfg.Hibernations.TurnEndObserved(sessionID, atMs)
 		}
+	}
+	// THE KEEP-ALIVE PING'S OWN VERDICT on the cache it was sent to refresh.
+	// Bound before Run, so a ping's terminal result can never reach the consumer
+	// with nothing to latch it in: the result is the ONE observation the feature
+	// makes about its own premise, and it arrives exactly once
+	// (keepalivecold.go).
+	cons.onTurnResultCost = func(turnID string, uncachedInputTokens int64) {
+		m.noteKeepAlivePingCost(d, turnID, uncachedInputTokens)
 	}
 	// Every PERSISTENT store event names the conversation it belongs to.
 	// Keeping the record current off the live stream is what gives a later

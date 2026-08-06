@@ -24,9 +24,8 @@
 #                       via cold cursor recovery)
 #   5. daemon bounce    first loads daemon.el from THIS checkout so its
 #                       artifact-root constants name the binaries built above,
-#                       then DISPATCHES the restart via emacsclient and waits
-#                       on its completion artifact (never on the editor's main
-#                       loop). This ordering is load-bearing for linked
+#                       then calls `(agent-repl-frontend-daemon-restart)` via
+#                       emacsclient. This ordering is load-bearing for linked
 #                       worktrees: the running Emacs may have loaded the module
 #                       from the main worktree, and restarting before rebinding
 #                       those paths launches the main worktree's stale build.
@@ -90,11 +89,6 @@
 # Environment:
 #   AGENT_REPL_STORE_SOCK_TIMEOUT  seconds to wait for store.sock after the
 #                                  store kickstart (default 15)
-#   AGENT_REPL_STATE_DIR           agent-repl's state root, which is where the
-#                                  runtime-restart completion artifact lands
-#                                  (default ~/.claude-emacs)
-#   AGENT_REPL_RESTART_TIMEOUT     seconds to wait for that artifact to reach a
-#                                  terminal status (default 360)
 
 set -euo pipefail
 
@@ -112,13 +106,6 @@ STORE_LABEL="com.agentrepl.shim-store"
 SIDECAR_LABEL="com.agentrepl.shim-claude-sidecar"
 SOCK_TIMEOUT="${AGENT_REPL_STORE_SOCK_TIMEOUT:-15}"
 READINESS_REPORT="$THIS_DIR/readiness-report.sh"
-
-# The runtime restart is DISPATCHED into the running Emacs and settles into a
-# completion artifact under agent-repl's state dir. The wait lives here rather
-# than in the editor: this script has nothing else to do, and the editor has a
-# user in it.
-STATE_DIR="${AGENT_REPL_STATE_DIR:-$HOME/.claude-emacs}"
-RESTART_TIMEOUT="${AGENT_REPL_RESTART_TIMEOUT:-360}"
 
 # Overridable so the hermetic test harness can substitute its PATH stub — the
 # default absolute path would silently bypass any stub and reach the LIVE
@@ -351,72 +338,28 @@ else
             ;;
     esac
 
-    # The eval DISPATCHES the restart and returns its request identity at once.
-    # Awaiting inside Emacs used to hold the editor's input for the restart's
-    # whole duration (~9s), which is unacceptable for a surface whose only
-    # caller drives the session the user is sitting in. The terminal result
-    # travels through the completion artifact this script waits on below.
     if [ "$SHIM_CHANGED" -eq 1 ]; then
-        RESTART_FORM='(agent-repl-frontend-daemon-restart-dispatch t)'
-        log "daemon: dispatching the restart via emacsclient (stop-shims: the bundle changed)..."
+        RESTART_FORM='(agent-repl-frontend-daemon-restart-await t)'
+        log "daemon: restarting and awaiting completion via emacsclient (stop-shims: the bundle changed)..."
     else
-        RESTART_FORM='(agent-repl-frontend-daemon-restart-dispatch)'
-        log "daemon: dispatching the restart via emacsclient..."
+        RESTART_FORM='(agent-repl-frontend-daemon-restart-await)'
+        log "daemon: restarting and awaiting completion via emacsclient..."
     fi
     RESTART_OUT="$("$EMACSCLIENT" --eval "$RESTART_FORM" 2>&1)" || {
-        echo "[deploy-all] daemon restart dispatch failed: $RESTART_OUT" >&2
+        echo "[deploy-all] daemon restart failed: $RESTART_OUT" >&2
         exit 3
     }
     case "$RESTART_OUT" in
         *refusing*)
             # emacsclient exits 0 even when the elisp signals; the refusal text
             # is the only tell. A refused bounce means the deploy is NOT complete.
-            echo "[deploy-all] daemon restart refused: $RESTART_OUT" >&2
+            echo "[deploy-all] daemon restart refused (turn in flight): $RESTART_OUT" >&2
             exit 3
             ;;
-        *runtime-restart-dispatched:*)
+        *runtime-restart-complete*)
             ;;
         *)
-            echo "[deploy-all] daemon restart dispatch returned no request identity: $RESTART_OUT" >&2
-            exit 3
-            ;;
-    esac
-
-    # Strip everything but the id: emacsclient prints the returned string with
-    # its elisp quoting, and the stub prints it the same way.
-    RESTART_ID="${RESTART_OUT##*runtime-restart-dispatched:}"
-    RESTART_ID="${RESTART_ID%%[^A-Za-z0-9_-]*}"
-    if [ -z "$RESTART_ID" ]; then
-        echo "[deploy-all] daemon restart dispatch returned an unparseable request identity: $RESTART_OUT" >&2
-        exit 3
-    fi
-    RESTART_RESULT="$STATE_DIR/restart/$RESTART_ID.result"
-    log "daemon: dispatched request-id=$RESTART_ID; waiting on $RESTART_RESULT"
-
-    # The artifact is written with `status=pending' BEFORE the dispatch returns
-    # and rewritten exactly once with a terminal status, so there is no window
-    # in which a leftover file from an earlier deploy could be mistaken for
-    # this one's answer.
-    RESTART_STATUS=""
-    RESTART_WAITED=0
-    while [ "$RESTART_WAITED" -le "$RESTART_TIMEOUT" ]; do
-        if [ -f "$RESTART_RESULT" ]; then
-            RESTART_STATUS="$(sed -n 's/^status=//p' "$RESTART_RESULT")"
-            [ "$RESTART_STATUS" != "pending" ] && [ -n "$RESTART_STATUS" ] && break
-        fi
-        sleep 1
-        RESTART_WAITED=$((RESTART_WAITED + 1))
-    done
-
-    case "$RESTART_STATUS" in
-        complete)
-            ;;
-        failed)
-            echo "[deploy-all] daemon restart failed: $(sed -n 's/^detail=//p' "$RESTART_RESULT")" >&2
-            exit 3
-            ;;
-        *)
-            echo "[deploy-all] daemon restart did not settle within ${RESTART_TIMEOUT}s (request-id=$RESTART_ID, artifact=$RESTART_RESULT, status=${RESTART_STATUS:-<absent>})" >&2
+            echo "[deploy-all] daemon restart returned no terminal completion: $RESTART_OUT" >&2
             exit 3
             ;;
     esac

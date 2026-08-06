@@ -2153,25 +2153,22 @@ still fire (poll runs before the in-flight check on the timer path)."
         ;; Toggle survives the in-flight guard so the tab-bar keeps animating.
         (should-not (eq toggle-before agent-repl--tabline-space-toggle))))))
 
-(ert-deftest agent-repl-test-update-all-in-flight-stale-stamp-signals ()
-  "A stale `--update-in-flight' stamp aborts the tick instead of self-healing.
-The force-clear this replaces only ever fired because a runtime restart
-blocked the main thread past the threshold.  With the restart asynchronous,
-a stale stamp means the chain genuinely never finalized, which is a bug the
-timer must surface rather than paper over."
+(ert-deftest agent-repl-test-update-all-in-flight-stale-flag-recovers ()
+  "An `--update-in-flight' stamp older than the stale threshold is force-cleared.
+Without this, an error in a per-step body that escapes the `condition-case'
+net could wedge the periodic timer permanently."
   (agent-repl-test--with-clean-state
-    (let ((chain-started nil)
+    (let ((poll-called nil)
           (agent-repl-state-stale-threshold 5.0))
       ;; Simulate a chain that started 10s ago and never finalized.
       (setq agent-repl--update-in-flight (- (float-time) 10.0))
-      (cl-letf (((symbol-function 'agent-repl--poll-workspace-notifications) #'ignore)
-                ((symbol-function 'agent-repl--update-all-workspace-states-now)
-                 (lambda () (setq chain-started t))))
-        (should-error (agent-repl--update-all-workspace-states) :type 'error)
-        ;; No new chain was started off the violated invariant.
-        (should-not chain-started)
-        ;; The stamp is left exactly as found: nothing self-healed it.
-        (should agent-repl--update-in-flight)))))
+      (cl-letf (((symbol-function 'agent-repl--poll-workspace-notifications)
+                 (lambda () (setq poll-called t))))
+        (agent-repl--update-all-workspace-states)
+        ;; Stale flag was cleared and the new chain ran.
+        (should poll-called)
+        ;; After the chain finalizes, in-flight is back to nil.
+        (should-not agent-repl--update-in-flight)))))
 
 (ert-deftest agent-repl-test-update-all-tabline-toggle-survives-in-flight-skip ()
   "Tabline space toggle flips on every tick, even when the in-flight guard skips.
@@ -2204,31 +2201,15 @@ advance.  Verified explicitly here so the entrypoint structure doesn't drift."
       (setq agent-repl--update-in-flight (float-time))
       (should (agent-repl--update-in-flight-p)))))
 
-(ert-deftest agent-repl-test-update-in-flight-p-stale-stamp-signals ()
-  "A stale stamp signals through the canonical logging helper."
+(ert-deftest agent-repl-test-update-in-flight-p-stale-flag-clears ()
+  "in-flight-p clears a stale flag and returns nil.
+Stale-flag recovery is side-effecting: the flag is reset to nil so subsequent
+callers see a fresh state."
   (agent-repl-test--with-clean-state
     (let ((agent-repl-state-stale-threshold 5.0))
       (setq agent-repl--update-in-flight (- (float-time) 10.0))
-      (should-error (agent-repl--update-in-flight-p) :type 'error))))
-
-(ert-deftest agent-repl-test-update-in-flight-p-stale-stamp-logs-its-context ()
-  "The stale-stamp record carries the age, threshold, and the stamp itself.
-Diagnosing a chain that never finalized from the shared log alone needs all
-three, so the canonical record is asserted rather than just the signal."
-  (agent-repl-test--with-clean-state
-    (let ((agent-repl-state-stale-threshold 5.0)
-          record)
-      (setq agent-repl--update-in-flight (- (float-time) 10.0))
-      (cl-letf (((symbol-function 'agent-repl--error)
-                 (lambda (_ws fmt &rest args)
-                   (setq record (apply #'format fmt args))
-                   (error "%s" record))))
-        (should-error (agent-repl--update-in-flight-p) :type 'error))
-      (should (string-match-p "update-in-flight-p: chain never finalized" record))
-      (should (string-match-p "age=10\\.[0-9][0-9]s" record))
-      (should (string-match-p "threshold=5\\.00s" record))
-      (should (string-match-p "started-at=" record))
-      (should (string-match-p "terminal finalize step did not run" record)))))
+      (should-not (agent-repl--update-in-flight-p))
+      (should-not agent-repl--update-in-flight))))
 
 ;;;; ---- Tests: sync entrypoint bypasses guard ----
 

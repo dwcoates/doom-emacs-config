@@ -246,7 +246,7 @@ makes their agreement structural rather than coincidental."
         (should (eq (agent-repl--ws-bracket-state "ws") keyword))
         ;; The rail's wire string is that same keyword's row.
         (should (equal (agent-repl--sidebar-wire-status "ws")
-                       (car (alist-get keyword agent-repl--sidebar-status-wire))))))))
+                       (alist-get keyword agent-repl--sidebar-status-wire)))))))
 
 (ert-deftest agent-repl-test-colors-the-dot-and-the-tab-take-the-same-color ()
   "Every state the tab bar does not override reads alike on both surfaces.

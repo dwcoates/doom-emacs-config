@@ -13,8 +13,11 @@ import (
 // hibernation.go — THE ONE TRANSITION, and the gate it makes unavoidable.
 //
 // Three causes put a session to sleep: the idle cutoff, a cache that went cold
-// before a ping could fire, and the user's own HibernateWorkspaceCmd. All three
-// call HibernateWithCause and nothing else. That is not tidiness — it is what
+// before a ping could fire, and the user's own HibernateWorkspaceCmd. The
+// cache-expired cause has two routes into it — the sweeper's time-since
+// prediction and a keep-alive ping that came back cold, which measured the same
+// thing instead of predicting it (keepalivecold.go) — and every route calls
+// hibernateWithCause and nothing else. That is not tidiness — it is what
 // makes "hibernated but still being pinged" unrepresentable rather than merely
 // unlikely:
 //
@@ -118,13 +121,48 @@ type LegacyTurnEndStamper interface {
 	StampLegacyTurnEnd(sessionID, workspace string) (int64, bool)
 }
 
-// HibernateWithCause is THE hibernation transition. account.Cause names why,
-// and must be one of the registry's hibernation cause tokens.
+// hibernationEvidence says what KIND of claim an account makes, and therefore
+// whether the claim may re-measure it against the clock.
+//
+// It is not a knob. It names the difference between the two ways this daemon
+// can come to believe a prompt cache is gone, and only one of them is
+// re-checkable.
+type hibernationEvidence int
+
+const (
+	// evidencePredicted is a TIME-SINCE decision: the account says the session
+	// has been quiet for longer than a threshold, which is a prediction about a
+	// cache nobody observed. A prediction is re-measured at claim time, because
+	// the reading it was taken from can have moved between the sweep and the
+	// transition (revalidateElapsedLocked).
+	evidencePredicted hibernationEvidence = iota
+	// evidenceObserved is proof already in hand: a cache keep-alive ping paid a
+	// full context re-ingest, which is the cache's absence MEASURED rather than
+	// inferred from idle time (keepalivecold.go).
+	//
+	// Re-measuring it would refuse it every single time and for a reason that
+	// has nothing to do with the question — the ping's own turn end has just
+	// stamped the durable last-turn-end to now, so the fresh elapsed is ~0 —
+	// which is the prediction overruling the observation that exists precisely
+	// because the prediction was wrong.
+	evidenceObserved
+)
+
+// HibernateWithCause is THE hibernation transition for a PREDICTED account: the
+// idle sweeper's two time-since causes and the user's own forced sleep.
+// account.Cause names why, and must be one of the registry's hibernation cause
+// tokens.
 //
 // The workspace must be SETTLED: the underlying teardown refuses a live turn or
 // an unseen vendor block with ErrNotSettled, which is what makes a teal tab over
 // a working agent unreachable rather than merely rare.
 func (m *Manager) HibernateWithCause(workspace string, account registry.HibernationDetail) error {
+	return m.hibernateWithCause(workspace, account, evidencePredicted)
+}
+
+// hibernateWithCause is the transition itself. Every cause reaches it, and
+// evidence decides only whether the claim re-measures the account's threshold.
+func (m *Manager) hibernateWithCause(workspace string, account registry.HibernationDetail, evidence hibernationEvidence) error {
 	if account.Cause == "" || !registry.ValidHibernationCause(account.Cause) {
 		return fmt.Errorf("session-controller: refusing a hibernation transition for workspace %q with cause %q; a sleep the gate cannot explain is not one to take",
 			workspace, account.Cause)
@@ -145,7 +183,7 @@ func (m *Manager) HibernateWithCause(workspace string, account registry.Hibernat
 	if !ok {
 		return fmt.Errorf("session-controller: workspace %q has no session to hibernate", workspace)
 	}
-	release, account, err := m.claimHibernation(workspace, sessionID, account)
+	release, account, err := m.claimHibernation(workspace, sessionID, account, evidence)
 	if err != nil {
 		return err
 	}
@@ -228,7 +266,7 @@ var errNoLiveSessionToHibernate = errors.New("session-controller: no live sessio
 // than from the snapshot's.
 //
 // account is the caller's decision; the returned detail is the one to persist.
-func (m *Manager) claimHibernation(workspace, sessionID string, account registry.HibernationDetail) (release func(), fresh registry.HibernationDetail, err error) {
+func (m *Manager) claimHibernation(workspace, sessionID string, account registry.HibernationDetail, evidence hibernationEvidence) (release func(), fresh registry.HibernationDetail, err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.hibernating == nil {
@@ -241,7 +279,7 @@ func (m *Manager) claimHibernation(workspace, sessionID string, account registry
 		return nil, account, fmt.Errorf("%w: workspace %q session %s is asleep since %d for %s; the %s transition changes nothing",
 			ErrAlreadyHibernated, workspace, sessionID, detail.SinceMs, detail.Cause, account.Cause)
 	}
-	fresh, err = m.revalidateElapsedLocked(workspace, sessionID, account)
+	fresh, err = m.revalidateElapsedLocked(workspace, sessionID, account, evidence)
 	if err != nil {
 		return nil, account, err
 	}
@@ -266,7 +304,17 @@ func (m *Manager) claimHibernation(workspace, sessionID string, account registry
 // threshold, or a session with no durable instant to measure from, is left
 // alone: this gate refuses a stale reading, and it has no business inventing a
 // refusal where there is nothing to read.
-func (m *Manager) revalidateElapsedLocked(workspace, sessionID string, account registry.HibernationDetail) (registry.HibernationDetail, error) {
+//
+// AN OBSERVED ACCOUNT IS NOT RE-VALIDATED AT ALL, for the same reason a forced
+// one is not: idleness was never its premise. A cold keep-alive ping MEASURED
+// the cache's absence, and the ping's own turn end has just moved the durable
+// instant this gate would measure against to now — so re-measuring would refuse
+// every cold-ping hibernation there will ever be, on the strength of the very
+// prediction the measurement exists to overrule.
+func (m *Manager) revalidateElapsedLocked(workspace, sessionID string, account registry.HibernationDetail, evidence hibernationEvidence) (registry.HibernationDetail, error) {
+	if evidence == evidenceObserved {
+		return account, nil
+	}
 	threshold := automaticHibernationThreshold(account)
 	if threshold <= 0 {
 		return account, nil
