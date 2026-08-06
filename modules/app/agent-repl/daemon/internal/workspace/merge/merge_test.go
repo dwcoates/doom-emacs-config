@@ -414,6 +414,94 @@ func TestMergeConflictDetection(t *testing.T) {
 	assertPhases(t, sink.phases(), PhaseMerging, PhaseMergeConflict)
 }
 
+// --- empty picks are skipped, not parked as conflicts -------------------
+
+// A pick whose change is ALREADY in the target's tree goes empty, and git parks
+// CHERRY_PICK_HEAD over an empty pick exactly as it does over a conflict. The
+// patch-id probes cannot see this one coming: the change reached the target
+// inside a LARGER commit, whose patch-id differs from the commit being picked.
+// Reporting it as a conflict parks the merge on work no resolver can do and
+// holds the target worktree against every later merge in the repository.
+func TestMergeSkipsAPickEmptiedByALargerCommitOnTheTarget(t *testing.T) {
+	// Arrange: feature edits base.txt, and the target already carries that same
+	// edit inside a commit that also adds an unrelated file.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "base.txt", "feature\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "feature edit")
+	writeFile(t, target, "base.txt", "feature\n")
+	writeFile(t, target, "unrelated.txt", "landed alongside the same edit\n")
+	gitRun(t, target, "add", ".")
+	gitRun(t, target, "commit", "-q", "-m", "the same edit inside a larger commit")
+
+	sink := &recordingSink{}
+	e := newTestDriver(t, sink)
+	req := withRun(t, sink, Request{Workspace: "/ws/empty-ws", Name: "empty-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+
+	// Act.
+	res, err := e.Merge(context.Background(), req)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Merge() err = %v", err)
+	}
+	if res.Outcome != OutcomeMerged {
+		t.Fatalf("Merge() outcome = %s, want merged — an empty pick is the change already being on the target", res.Outcome)
+	}
+	if cherryPickHeadPresent(t, target) {
+		t.Errorf("CHERRY_PICK_HEAD still parked — the empty pick was left wedging the target worktree")
+	}
+	for _, phase := range sink.phases() {
+		if phase == PhaseMergeConflict {
+			t.Errorf("transition phases = %v, want no conflict for an empty pick", sink.phases())
+			break
+		}
+	}
+}
+
+// A resolution that discards the whole change empties the pick too, and
+// `--continue` refuses an empty pick while leaving CHERRY_PICK_HEAD exactly
+// where it was — the fixpoint that re-parks the merge on every resume.
+func TestResumeSkipsAPickTheResolutionEmptied(t *testing.T) {
+	// Arrange: a real conflict, resolved by keeping the target's own content.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "base.txt", "feature\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "feature edit")
+	writeFile(t, target, "base.txt", "target\n")
+	gitRun(t, target, "add", ".")
+	gitRun(t, target, "commit", "-q", "-m", "target edit")
+
+	sink := &recordingSink{}
+	e := newTestDriver(t, sink)
+	req := withRun(t, sink, Request{Workspace: "/ws/rs-empty-ws", Name: "rs-empty-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+
+	if res, err := e.Merge(context.Background(), req); err != nil || res.Outcome != OutcomeConflict {
+		t.Fatalf("setup Merge() res=%+v err=%v, want conflict", res, err)
+	}
+	writeFile(t, target, "base.txt", "target\n")
+	gitRun(t, target, "add", "base.txt")
+
+	// Act.
+	res, err := e.Resume(context.Background(), req)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Resume() err = %v", err)
+	}
+	if res.Outcome != OutcomeMerged {
+		t.Fatalf("Resume() outcome = %s, want merged", res.Outcome)
+	}
+	if cherryPickHeadPresent(t, target) {
+		t.Errorf("CHERRY_PICK_HEAD still parked after resuming an emptied pick")
+	}
+	if got := readFile(t, target, "base.txt"); got != "target\n" {
+		t.Errorf("base.txt = %q, want the resolution's content", got)
+	}
+}
+
 // --- resume-after-resolve completing the merge --------------------------
 
 func TestResumeCompletesMergeAndOrdersTransitions(t *testing.T) {

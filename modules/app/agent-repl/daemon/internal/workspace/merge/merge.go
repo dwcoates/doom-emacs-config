@@ -404,6 +404,28 @@ func (e *Driver) pickLoop(ctx context.Context, req Request, base string, landedE
 			return Result{}, err
 		}
 		if inProgress {
+			// CHERRY_PICK_HEAD ALONE DOES NOT MEAN CONFLICT. git parks the same
+			// marker for a pick that went EMPTY — the commit's change is already
+			// in the target's tree, so there is nothing to apply and nothing to
+			// resolve — and only `--skip` or `--quit` clears that state.
+			// Classifying it as a conflict parks a merge on work no resolver can
+			// do, and the resume that follows can only fail: `--continue`
+			// refuses an empty pick, re-parks the same marker, and the target
+			// worktree stays held against every later merge in its repository.
+			empty, err := e.pickWentEmpty(ctx, req.TargetDir)
+			if err != nil {
+				return Result{}, err
+			}
+			if empty {
+				if err := e.finishEmptyPick(ctx, req, short, progress); err != nil {
+					return Result{}, err
+				}
+				// IT COUNTS AS LANDED, for the same reason the patch-id skip
+				// above does: the change is on the target, and a progress figure
+				// that skipped it would count toward a total it could never reach.
+				req.Run.CommitLanded()
+				continue
+			}
 			return e.markConflict(ctx, req)
 		}
 		if exit != 0 {
@@ -524,6 +546,28 @@ func (e *Driver) Resume(ctx context.Context, req Request) (Result, error) {
 		return Result{}, err
 	} else if exit != 0 {
 		return Result{}, fmt.Errorf("merge: `git add -u` exited %d in %s: %s", exit, req.TargetDir, dlog.Clamp(out, 400))
+	}
+
+	// A RESOLUTION CAN EMPTY A PICK, and `--continue` cannot commit one. Both
+	// the resolution that discards the whole change and the pick that was empty
+	// the moment it parked leave the staged tree identical to HEAD, where
+	// `--continue` exits non-zero and leaves CHERRY_PICK_HEAD exactly where it
+	// was — a fixpoint that re-parks the merge on every resume and holds the
+	// target worktree forever.
+	empty, err := e.pickWentEmpty(ctx, req.TargetDir)
+	if err != nil {
+		return Result{}, err
+	}
+	if empty {
+		emptied, err := e.gitString(ctx, req.TargetDir, "rev-parse", "--short", "CHERRY_PICK_HEAD")
+		if err != nil {
+			return Result{}, err
+		}
+		if err := e.finishEmptyPick(ctx, req, emptied, "resumed"); err != nil {
+			return Result{}, err
+		}
+		req.Run.CommitLanded()
+		return e.continueRange(ctx, req)
 	}
 
 	// -c core.editor=true + --no-edit keep the original commit message
@@ -926,6 +970,82 @@ func (e *Driver) cherryPickInProgress(ctx context.Context, dir string) (bool, er
 		return false, err
 	}
 	return exit == 0, nil
+}
+
+// pickWentEmpty reports whether the cherry-pick parked in dir has NOTHING to
+// resolve and NOTHING to commit: the change it carries is already in the
+// target's tree, so git parked CHERRY_PICK_HEAD over an empty patch.
+//
+// IT ASKS GIT WHAT HAPPENED RATHER THAN PREDICTING IT. The patch-id probes that
+// run BEFORE a pick (commitAlreadyIncorporated, rangeAlreadyIncorporated) can
+// only recognize a change that landed as its own commit — a change absorbed into
+// a LARGER commit on the target has a different patch-id, so the probes clear
+// the pick and git then finds nothing to apply. Observed live on 2026-08-06: a
+// test fix committed by the merge's own resolution turn carried the next
+// commit's one-line change plus an unrelated file, the patch-id probe missed it,
+// the pick went empty, and the empty pick was reported as a conflict.
+//
+// The two conditions are both necessary. Zero unmerged paths distinguishes an
+// empty pick from a real conflict; an index identical to HEAD distinguishes it
+// from a conflict a resolver has already staged, which `--continue` must commit
+// rather than skip.
+func (e *Driver) pickWentEmpty(ctx context.Context, dir string) (bool, error) {
+	unmerged, err := e.gitString(ctx, dir, "diff", "--name-only", "--diff-filter=U")
+	if err != nil {
+		return false, err
+	}
+	if strings.TrimSpace(unmerged) != "" {
+		return false, nil
+	}
+	// `--quiet` exits 0 when the staged tree matches HEAD and 1 when it does
+	// not, which is the whole question, so the exit code IS the answer.
+	exit, _, err := e.gitExit(ctx, dir, "diff", "--cached", "--quiet", "HEAD")
+	if err != nil {
+		return false, err
+	}
+	return exit == 0, nil
+}
+
+// finishEmptyPick completes an empty parked pick as an EMPTY COMMIT, with
+// `git commit --allow-empty --no-edit` — the spelling git's own hint offers,
+// which keeps CHERRY_PICK_HEAD's message and therefore its `-x` annotation.
+//
+// THE COMMIT IS WHAT MAKES THE ACCOUNTING DURABLE, and it is why `--skip` is
+// wrong here. The replay derives its remaining work from git alone, by advancing
+// cherryPickBase past every `-x` annotation on the target, so a skipped commit
+// leaves no trace and the very next re-entry — a resume, a test fix, a daemon
+// bounce — plans it again. For a pick that went empty because the change is
+// already present that replay is merely wasted; for one emptied by a resolution
+// that dropped the change it re-picks a commit that then conflicts for real,
+// which is an endless loop rather than a merge. The empty commit records
+// "accounted for, carried no change" in the only place the replay reads.
+//
+// A FAILING FINISH IS A HARD ERROR. It is the sole exit from a state no resolve
+// and no resume can clear, so a finish that did not take leaves the target
+// worktree wedged against every later merge in its repository — the failure must
+// reach the caller loudly rather than fall through to a conflict park that
+// cannot be honored.
+func (e *Driver) finishEmptyPick(ctx context.Context, req Request, short, progress string) error {
+	e.logf("merge: cherry-pick of %s (%s) went EMPTY — it carries no change against the target, recording it as an empty commit {ws=%s target=%s}",
+		short, progress, req.Name, req.TargetDir)
+	exit, out, err := e.gitExit(ctx, req.TargetDir,
+		"-c", "core.editor=true", "commit", "--allow-empty", "--no-edit")
+	if err != nil {
+		return err
+	}
+	if exit != 0 {
+		return fmt.Errorf("merge: `git commit --allow-empty` for the empty pick of %s exited %d in %s: %s",
+			short, exit, req.TargetDir, dlog.Clamp(out, 400))
+	}
+	stillParked, err := e.cherryPickInProgress(ctx, req.TargetDir)
+	if err != nil {
+		return err
+	}
+	if stillParked {
+		return fmt.Errorf("merge: `git commit --allow-empty` for the empty pick of %s left CHERRY_PICK_HEAD parked in %s",
+			short, req.TargetDir)
+	}
+	return nil
 }
 
 // staleSequencerState reports whether dir carries sequencer residue WITHOUT a
