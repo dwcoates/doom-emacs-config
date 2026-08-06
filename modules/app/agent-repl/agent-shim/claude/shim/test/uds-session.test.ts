@@ -1110,7 +1110,6 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
         live_sdk_task_count: 2,
         live_sdk_task_ids: ["agent-go", "agent-python"],
         sdk_task_count: 2,
-        task_notification_result: false,
         pending_task_notification_count: 0,
         decision: "retain_turn_for_sdk_task_cycles",
       },
@@ -1130,6 +1129,200 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
         decision: "retain_vendor_message_without_duplicate_task_end",
       },
     });
+  });
+
+  /** Submit one prompt and drain its acknowledged TurnStarted batch. */
+  async function acceptPrompt(
+    store: Awaited<ReturnType<typeof rig>>["store"],
+    daemon: Awaited<ReturnType<typeof rig>>["daemon"],
+    requestId: string,
+  ): Promise<void> {
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, {
+      requestId,
+      text: "go",
+      promptOrigin: PromptOrigin.USER_SENT,
+    }));
+    const start = await store.peer().next(StoreWriteSchema);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(start.batch!.events.length),
+      lastSeq: 8n,
+    }));
+    await daemon.next(AckSchema);
+  }
+
+  /** Emit one SDK task_started and ack the batch it writes. */
+  async function emitTaskStarted(
+    query: Awaited<ReturnType<typeof rig>>["query"],
+    store: Awaited<ReturnType<typeof rig>>["store"],
+    taskId: string,
+    lastSeq: bigint,
+  ): Promise<void> {
+    query.emit({
+      type: "system",
+      subtype: "task_started",
+      uuid: `task-start-${taskId}`,
+      session_id: "vendor-uuid",
+      task_id: taskId,
+      task_type: "local_agent",
+      tool_use_id: `tool-${taskId}`,
+      description: "background work",
+    } as unknown as SdkMessageLike);
+    const write = await store.peer().next(StoreWriteSchema);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(write.batch!.events.length),
+      lastSeq,
+    }));
+  }
+
+  it("retains the turn when a result arrives while an SDK task is still live", async () => {
+    // Arrange: p1 launches one task that has not reported terminal.
+    const { query, store, daemon, session } = await rig({ storeSessionId: "vendor-uuid" });
+    await acceptPrompt(store, daemon, "p1");
+    await emitTaskStarted(query, store, "agent-python", 10n);
+
+    // Act.
+    query.emit({
+      type: "result",
+      uuid: "parent-result",
+      session_id: "vendor-uuid",
+      subtype: "success",
+    } as unknown as SdkMessageLike);
+    const result = await store.peer().next(StoreWriteSchema);
+
+    // Assert: durable intermediate evidence only, no terminal lifecycle.
+    expect(result.batch!.events.map((event) => event.payload.case)).toEqual(["vendor"]);
+    expect(session.turnCount()).toBe(1);
+  });
+
+  it("retains the turn when a result arrives while a task notification is queued", async () => {
+    // Arrange: no task ever ran; only the file-plane queue is non-empty.
+    const { query, store, daemon, session } = await rig({ storeSessionId: "vendor-uuid" });
+    await acceptPrompt(store, daemon, "p1");
+    store.latest().send(EventSchema, transcriptEvent(18n, create(TranscriptLineSchema, {
+      line: {
+        case: "queueOperation",
+        value: create(QueueOperationLineSchema, {
+          operation: QueueOp.ENQUEUE,
+          content: "<task-notification>agent-go</task-notification>",
+        }),
+      },
+    })));
+    await daemon.next(EventSchema);
+
+    // Act.
+    query.emit({
+      type: "result",
+      uuid: "parent-result",
+      session_id: "vendor-uuid",
+      subtype: "success",
+    } as unknown as SdkMessageLike);
+    const result = await store.peer().next(StoreWriteSchema);
+
+    // Assert.
+    expect(result.batch!.events.map((event) => event.payload.case)).toEqual(["vendor"]);
+    expect(session.turnCount()).toBe(1);
+  });
+
+  it("closes the turn on a result once every launched task has ended and no notification is queued", async () => {
+    // Arrange: p1 launched a task and that task has already reported terminal,
+    // so the only remaining retention inputs are both drained. A cumulative
+    // per-turn task count would latch this turn open forever.
+    const { query, store, daemon, session } = await rig({ storeSessionId: "vendor-uuid" });
+    await acceptPrompt(store, daemon, "p1");
+    await emitTaskStarted(query, store, "agent-python", 10n);
+    query.emit({
+      type: "system",
+      subtype: "task_notification",
+      uuid: "task-end-1",
+      session_id: "vendor-uuid",
+      task_id: "agent-python",
+      tool_use_id: "tool-agent-python",
+      status: "completed",
+      output_file: "/tmp/agent-python.output",
+      summary: "done",
+    } as unknown as SdkMessageLike);
+    const taskEnd = await store.peer().next(StoreWriteSchema);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(taskEnd.batch!.events.length),
+      lastSeq: 12n,
+    }));
+
+    // Act: an ORDINARY result, which is what a turn's final result always is.
+    query.emit({
+      type: "result",
+      uuid: "final-result",
+      session_id: "vendor-uuid",
+      subtype: "success",
+    } as unknown as SdkMessageLike);
+    const terminal = await store.peer().next(StoreWriteSchema);
+
+    // Assert.
+    const ended = terminal.batch!.events.find((event) => event.payload.case === "turnEnded");
+    if (ended?.payload.case !== "turnEnded") throw new Error("case");
+    expect(ended.payload.value.turnId).toBe("p1");
+  });
+
+  it("orders the closing TurnEnded after the vendor result it terminates", async () => {
+    // Arrange: same drained-task shape, asserting the batch ORDER the daemon's
+    // pendingTerminal parking depends on.
+    const { query, store, daemon } = await rig({ storeSessionId: "vendor-uuid" });
+    await acceptPrompt(store, daemon, "p1");
+    await emitTaskStarted(query, store, "agent-python", 10n);
+    query.emit({
+      type: "system",
+      subtype: "task_notification",
+      uuid: "task-end-1",
+      session_id: "vendor-uuid",
+      task_id: "agent-python",
+      tool_use_id: "tool-agent-python",
+      status: "completed",
+      output_file: "/tmp/agent-python.output",
+      summary: "done",
+    } as unknown as SdkMessageLike);
+    const taskEnd = await store.peer().next(StoreWriteSchema);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(taskEnd.batch!.events.length),
+      lastSeq: 12n,
+    }));
+
+    // Act.
+    query.emit({
+      type: "result",
+      uuid: "final-result",
+      session_id: "vendor-uuid",
+      subtype: "success",
+    } as unknown as SdkMessageLike);
+    const terminal = await store.peer().next(StoreWriteSchema);
+
+    // Assert: the vendor result is durable before the boundary that releases it.
+    const kinds = terminal.batch!.events.map((event) => event.payload.case);
+    expect(kinds.indexOf("turnEnded")).toBeGreaterThan(kinds.indexOf("vendor"));
+    expect(kinds.indexOf("turnEnded")).toBe(kinds.length - 1);
+  });
+
+  it("closes the turn on a result for a turn that never launched a task", async () => {
+    // Arrange: the simple path, with no task and no queue activity at all.
+    const { query, store, daemon, session } = await rig({ storeSessionId: "vendor-uuid" });
+    const log = captureLog();
+    await acceptPrompt(store, daemon, "p1");
+
+    // Act.
+    query.emit({
+      type: "result",
+      uuid: "r1",
+      session_id: "vendor-uuid",
+      subtype: "success",
+    } as unknown as SdkMessageLike);
+    const terminal = await store.peer().next(StoreWriteSchema);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(terminal.batch!.events.length),
+      lastSeq: 12n,
+    }));
+
+    // Assert: closed outright, with no retention decision recorded.
+    expect(terminal.batch!.events.map((event) => event.payload.case)).toContain("turnEnded");
+    await until(() => session.turnCount() === 0);
+    expect(log.count("retain_turn_for_sdk_task_cycles")).toBe(0);
   });
 
   it("writes a non-lifecycle turn claim bridge into a rotated vendor seq space before its end", async () => {
