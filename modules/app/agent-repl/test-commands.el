@@ -2058,11 +2058,12 @@ swallows the signal so subsequent queue entries still get processed."
         (delete-directory failed-dir t)
         (delete-directory later-dir t)))))
 
-;;;; ---- snapshot-load: main workspace nuked first ----
+;;;; ---- snapshot-load: main workspace nuked after first restore ----
 
-(ert-deftest agent-repl-cmd-test-snapshot-load/close-main-runs-before-first-establish ()
-  "Doom's startup `main' workspace is nuked at load BEGIN, before the
-first entry is established — not at end-of-load as it used to be."
+(ert-deftest agent-repl-cmd-test-snapshot-load/close-main-runs-after-first-establish ()
+  "Doom's startup `main' workspace is nuked right after the first entry
+is established — not at load BEGIN, where `main' would still be the
+only workspace alive."
   (agent-repl-test--with-clean-state
     (let ((snapshot-file (make-temp-file "agent-snap-"))
           (proj-dir (make-temp-file "agent-proj-" t))
@@ -2080,20 +2081,45 @@ first entry is established — not at end-of-load as it used to be."
                        (lambda (&rest _) nil)))
               (agent-repl-load-workspace-snapshot)
               (should (equal (nreverse order)
-                             '(close-main (establish "ws-a"))))))
+                             '((establish "ws-a") close-main)))))
         (delete-file snapshot-file)
         (delete-directory proj-dir t)))))
 
-(ert-deftest agent-repl-cmd-test-snapshot-load/close-main-not-called-at-finish ()
-  "Close-main fires exactly once per load (at BEGIN) — finish must not
-call it a second time."
+(ert-deftest agent-repl-cmd-test-snapshot-load/close-main-not-called-when-queue-empty ()
+  "When the snapshot has no live entries to establish, `main' is never
+the only thing left standing to be safely killed — close-main must not
+fire at all rather than leave the frame with zero workspaces."
   (agent-repl-test--with-clean-state
     (let ((snapshot-file (make-temp-file "agent-snap-"))
           (proj-dir (make-temp-file "agent-proj-" t))
           (close-calls 0))
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file))
-            (agent-repl--write-sexp-file snapshot-file `(("ws-a" . ,proj-dir)))
+            (agent-repl--write-sexp-file
+             snapshot-file `(("ws-nuked" :project-dir ,proj-dir :nuked-at "2024-01-01")))
+            (cl-letf (((symbol-function 'agent-repl--snapshot-load-close-main)
+                       (lambda () (cl-incf close-calls)))
+                      ((symbol-function 'run-with-timer)
+                       (lambda (&rest _) nil)))
+              (agent-repl-load-workspace-snapshot)
+              (should (= close-calls 0))))
+        (delete-file snapshot-file)
+        (delete-directory proj-dir t)))))
+
+(ert-deftest agent-repl-cmd-test-snapshot-load/close-main-called-once-across-multiple-entries ()
+  "Close-main is naturally idempotent: with multiple entries in the
+queue it may be invoked again on later establishes, but only fires
+(kills something) once in practice — this test just confirms it is
+attempted after every successful establish, not only the first."
+  (agent-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
+          (proj-dir-a (make-temp-file "agent-proj-a-" t))
+          (proj-dir-b (make-temp-file "agent-proj-b-" t))
+          (close-calls 0))
+      (unwind-protect
+          (let ((agent-repl-workspace-snapshot-file snapshot-file))
+            (agent-repl--write-sexp-file
+             snapshot-file `(("ws-a" . ,proj-dir-a) ("ws-b" . ,proj-dir-b)))
             (cl-letf (((symbol-function 'agent-repl--snapshot-load-close-main)
                        (lambda () (cl-incf close-calls)))
                       ((symbol-function 'agent-repl--establish-workspace)
@@ -2103,9 +2129,10 @@ call it a second time."
                       ((symbol-function 'run-with-timer)
                        (lambda (&rest _) nil)))
               (agent-repl-load-workspace-snapshot)
-              (should (= close-calls 1))))
+              (should (= close-calls 2))))
         (delete-file snapshot-file)
-        (delete-directory proj-dir t)))))
+        (delete-directory proj-dir-a t)
+        (delete-directory proj-dir-b t)))))
 
 (ert-deftest agent-repl-cmd-test-snapshot-load/origin-main-not-switched-back-to ()
   "When the load began FROM `main' (the startup restore path), finish
