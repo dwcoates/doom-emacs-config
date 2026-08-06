@@ -347,8 +347,6 @@ switch they did not initiate."
           (setq request-id
                 (agent-repl--uds-send-command
                  "workspaceMaterialized" (list :jobId job-id) ws))
-          (agent-repl--uds-track-command
-           request-id "workspaceMaterialized" ws)
           (agent-repl--log
            ws
            "workspace-available: ACK SENT request-id=%s job-id=%s materialization=%s"
@@ -602,9 +600,21 @@ Exactly one UI action arm must be present."
                  "hostActionCompleted"
                  (append (list :actionId action-id
                                :ok (if ok t json-false))
-                         (when error-text (list :error error-text)))))
-          (agent-repl--uds-track-command
-           request-id "hostActionCompleted" ws)
+                         (when error-text (list :error error-text)))
+                 ;; No wire workspace: the daemon routes a completion by its
+                 ;; action id.  WS is diagnostic only, so it rides the
+                 ;; rejection log rather than the frame — the tracked
+                 ;; workspace is now always the one on the wire.
+                 nil nil
+                 ;; Bound before the write so a reentrantly-delivered
+                 ;; rejection names the request rather than logging nil.
+                 :on-registered (lambda (id) (setq request-id id))
+                 :on-failure
+                 (lambda (ack-err)
+                   (agent-repl--log
+                    ws
+                    "host-action: COMPLETION REJECTED action-id=%s request-id=%s ok=%S err=%s"
+                    action-id request-id ok ack-err))))
           (agent-repl--log
            ws
            "host-action: COMPLETION SENT action-id=%s request-id=%s ok=%S error-present=%S error-length=%s"

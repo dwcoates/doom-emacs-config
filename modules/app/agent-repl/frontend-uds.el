@@ -128,13 +128,14 @@ is retained here until its newline arrives.")
 
 (defvar agent-repl--uds-pending-commands (make-hash-table :test 'equal)
   "Hash of outbound `request_id' -> plist awaiting its `CommandAck'.
-Populated by `agent-repl--uds-track-command'; entries are removed by
-`agent-repl--uds-handle-command-ack' when the matching ack lands.  Each
-value plist carries `:field' (the command oneof name), `:workspace', and
-an optional `:on-failure' (a function of one arg, the error string, run
-when the ack reports failure — in addition to the loud log + echo).  Each
-value also carries `:deadline-timer', the ack-aging alarm armed by
-`agent-repl--uds-track-command'.")
+Populated by `agent-repl--uds-register-pending-command', which
+`agent-repl--uds-send-command' runs BEFORE the frame reaches the socket;
+entries are removed by `agent-repl--uds-handle-command-ack' when the
+matching ack lands.  Each value plist carries `:field' (the command oneof
+name), `:workspace', and an optional `:on-failure' (a function of one
+arg, the error string, run when the ack reports failure — in addition to
+the loud log + echo).  Each value also carries `:deadline-timer', the
+ack-aging alarm armed at registration.")
 
 (defvar agent-repl--uds-timed-out-commands (make-hash-table :test 'equal)
   "Hash of request_id -> plist for commands whose ack deadline expired.
@@ -880,7 +881,9 @@ Combines a monotonic counter with a random suffix.  Isolated so tests
           (cl-incf agent-repl--uds-request-id-counter)
           (random #x10000)))
 
-(defun agent-repl--uds-send-command (field payload &optional workspace process)
+(cl-defun agent-repl--uds-send-command (field payload &optional workspace process
+                                              &key on-failure on-success on-challenge
+                                              on-registered)
   "Send a `FrontendCommand' selecting oneof arm FIELD with PAYLOAD.
 FIELD is the protojson command name (e.g. \"submitPrompt\"); it must be
 one of `agent-repl--uds-known-command-fields'.  PAYLOAD is the plist for
@@ -890,9 +893,37 @@ message object `{}' (for `closeWorkspace'/`openWorkspace').  WORKSPACE,
 when non-nil, is set as the frame's `workspace' field.  PROCESS defaults
 to the live connection.
 
+ON-FAILURE, ON-SUCCESS and ON-CHALLENGE are the ack callbacks documented
+on `agent-repl--uds-register-pending-command'.
+
+ON-REGISTERED, when non-nil, is a function of one argument (the
+`request_id') run after the pending entry exists and BEFORE the frame is
+written or queued.  It is the seam for the rest of a caller's own
+correlation state — the health-response registry, a lexical `request-id'
+its continuations untrack by — which must be in place before an ack can
+arrive for the same reason the pending entry must.  A signal from it
+unregisters the command (nothing was written, so no ack is coming) and
+propagates: a pre-send hook that fails is a bug, not a condition to
+absorb.
+
+SENDING IS TRACKING.  Every command this function writes is registered in
+`agent-repl--uds-pending-commands' BEFORE a single byte reaches the
+socket, and there is no other way to put a `FrontendCommand' on the wire.
+`process-send-string' yields to the event loop on a frame large enough to
+block, and the connection's filter then runs the reply REENTRANTLY inside
+that yield — so a caller that sent first and registered afterwards could
+have its ack arrive, be logged as UNTRACKED, and be dropped, leaving the
+ack-aging alarm to declare a command lost that the daemon had already
+answered.  Registering first makes that interleaving unrepresentable
+rather than merely unlikely.
+
 Fails loudly (`user-error' + log) when there is no dialing or live connection
-or FIELD is unknown.  Frames submitted while `dialing' are queued and only the
-connection sentinel flushes them after `open'.  Returns `request_id'."
+or FIELD is unknown; nothing is registered on either refusal, because
+nothing was sent.  Frames submitted while `dialing' are queued and only the
+connection sentinel flushes them after `open' — registration is identical
+for a queued frame, so a dial that fails before delivery settles the
+command through its tracked callbacks instead of aging out.  Returns
+`request_id'."
   (let ((proc (or process agent-repl--uds-process))
         ;; WORKSPACE goes ON THE WIRE verbatim below — the daemon routes by
         ;; cwd — so it must not be rewritten.  LOG-WORKSPACE is a separate
@@ -943,6 +974,21 @@ connection sentinel flushes them after `open'.  Returns `request_id'."
                          "uds-send-command: start field=%s request-id=%s ws=%s bytes=%d state=%s"
                          field request-id workspace (length json)
                          agent-repl--uds-connection-state)
+        ;; BEFORE the write, unconditionally: see the reentrancy note above.
+        ;; This is the sole registration point, and the write below is the
+        ;; sole caller-reachable path to the socket.
+        (agent-repl--uds-register-pending-command
+         request-id field workspace on-failure on-success on-challenge)
+        (when on-registered
+          (condition-case err
+              (funcall on-registered request-id)
+            (error
+             (agent-repl--log log-workspace
+                              "uds-send-command: on-registered FAILED field=%s request-id=%s error=%s — nothing written"
+                              field request-id (error-message-string err))
+             (agent-repl--uds-untrack-command request-id workspace
+                                              "on-registered-failed")
+             (signal (car err) (cdr err)))))
         (if (eq agent-repl--uds-connection-state 'open)
             (agent-repl--uds-write-frame proc entry)
           (setq agent-repl--uds-outbound-queue
@@ -955,11 +1001,13 @@ connection sentinel flushes them after `open'.  Returns `request_id'."
 ;;;; ---- Command-ack tracking --------------------------------------------
 ;;
 ;; A `FrontendCommand' is acknowledged asynchronously by a `CommandAck'
-;; frame ({request_id, ok, error}).  Callers that need the ack outcome
-;; surfaced (e.g. the merge re-route) record the request via
-;; `agent-repl--uds-track-command'; the `commandAck' handler below matches
-;; it and, on failure, surfaces loudly (log + echo area) per
-;; No-Silent-Fallbacks — a rejected command is never dropped silently.
+;; frame ({request_id, ok, error}).  EVERY command is recorded when
+;; `agent-repl--uds-send-command' registers it, before the frame is
+;; written; the `commandAck' handler below matches it and, on failure,
+;; surfaces loudly (log + echo area) per No-Silent-Fallbacks — a rejected
+;; command is never dropped silently.  Callers that need the outcome hand
+;; `agent-repl--uds-send-command' its `:on-failure' / `:on-success' /
+;; `:on-challenge' callbacks.
 
 ;;;; ---- Command-link health (Emacs's own fact) --------------------------
 
@@ -1052,9 +1100,9 @@ running is not lost at all, and is recorded only in the verbose trace."
                   agent-repl-uds-command-ack-deadline)))
         request-id))))
 
-(defun agent-repl--uds-track-command (request-id field workspace
-                                                 &optional on-failure on-success
-                                                 on-challenge)
+(defun agent-repl--uds-register-pending-command (request-id field workspace
+                                                           on-failure on-success
+                                                           on-challenge)
   "Record REQUEST-ID as an in-flight FIELD command for WORKSPACE.
 Pends until its `CommandAck' arrives (see
 `agent-repl--uds-handle-command-ack').  ON-FAILURE, when non-nil, is a
@@ -1068,12 +1116,17 @@ interrupt confirmation CHALLENGE — NOT a failure: the command was
 understood and deliberately not performed, so the challenge branch
 replaces the failure surfacing rather than adding to it.
 
-Tracking also ARMS an ack-aging alarm for
+Registration also ARMS an ack-aging alarm for
 `agent-repl-uds-command-ack-deadline' seconds (via the injectable
 `agent-repl--uds-run-timer' seam, so this is one scheduled alarm per
 command rather than any polling).  If the ack has not landed by then,
 `agent-repl--uds-command-deadline-expired' declares the command lost.
-Returns REQUEST-ID."
+
+PRIVATE TO `agent-repl--uds-send-command', which is the only caller and
+runs this before the frame reaches the socket.  It is deliberately NOT a
+public entry point: a separately callable tracker is what allowed the
+send-then-track shape whose reentrant ack this ordering exists to
+prevent.  Returns REQUEST-ID."
   ;; The RETAINED `:workspace' stays raw: it is the identity the ack path
   ;; correlates against, and callers hand it whatever they put on the wire.
   (puthash request-id
@@ -1087,7 +1140,7 @@ Returns REQUEST-ID."
                     (agent-repl--uds-command-deadline-expired request-id))))
            agent-repl--uds-pending-commands)
   (agent-repl--log (agent-repl--frontend-ws-name workspace)
-                   "uds-track-command: tracking request-id=%s field=%s ws=%s ack-deadline=%ss"
+                   "uds-register-pending-command: tracking request-id=%s field=%s ws=%s ack-deadline=%ss"
                    request-id field workspace
                    agent-repl-uds-command-ack-deadline)
   request-id)
@@ -1266,9 +1319,11 @@ leak through a daemon-provided error string.
             message (No-Silent-Fallbacks — never a silent drop), run any
             tracked `:on-failure' callback, and drop the entry.
 
-An ack for an UNTRACKED request-id is logged (a command sent without
-tracking, or a duplicate ack) — informational, not an error.  Returns
-the `:ok' flag."
+An ack for an UNTRACKED request-id is logged — informational, not an
+error.  Since `agent-repl--uds-send-command' registers every command
+before writing it, this can no longer be an ack that overtook its own
+caller; what remains is a duplicate ack or an ack for a request this
+Emacs never sent.  Returns the `:ok' flag."
   (let* ((request-id (plist-get ack :requestId))
          (ok (plist-get ack :ok))
          (err (plist-get ack :error))

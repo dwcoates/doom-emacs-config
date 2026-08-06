@@ -46,11 +46,8 @@
 (declare-function agent-repl--log "core" (ws fmt &rest args))
 (declare-function agent-repl--ws-get "core" (ws key))
 (declare-function agent-repl--uds-send-command "frontend-uds"
-                  (field payload &optional workspace process))
+                  (field payload &optional workspace process &rest keys))
 (declare-function agent-repl--frontend-ws-command-key "frontend-client" (ws))
-(declare-function agent-repl--uds-track-command "frontend-uds"
-                  (request-id field workspace
-                              &optional on-failure on-success on-challenge))
 (declare-function agent-repl--host-action-defer "workspace-create-client"
                   (token))
 (declare-function agent-repl--host-action-settle "workspace-create-client"
@@ -86,32 +83,37 @@ outcome rather than the fact that a frame was written.
 
 The envelope is routed by WS's workspace command key, exactly like every
 other command; the DISPLAY name rides `:workspaceName'."
-  (let ((req (agent-repl--uds-send-command
-              "mergeWorkspace"
-              (agent-repl--merge-command-payload ws)
-              (agent-repl--frontend-ws-command-key ws))))
-    (agent-repl--log ws
-                     "merge-dispatch-over-uds: ws=%s command-issued request-id=%s"
-                     ws req)
-    (message "agent-repl: merge of %s requested — the daemon reports each phase here" ws)
-    ;; THE HOST ACTION'S OUTCOME IS THIS COMMAND'S ACK, not this dispatch.
-    ;; Returning here without deferring is what let the daemon record a merge
-    ;; as `ok=true' 52ms before its own rejection arrived, so the failure that
-    ;; killed every merge left no trace on the workspace at all.
-    (agent-repl--host-action-defer req)
-    (agent-repl--uds-track-command
-     req "mergeWorkspace" ws
+  (let ((req nil))
+    (agent-repl--uds-send-command
+     "mergeWorkspace"
+     (agent-repl--merge-command-payload ws)
+     (agent-repl--frontend-ws-command-key ws) nil
+     ;; THE HOST ACTION'S OUTCOME IS THIS COMMAND'S ACK, not this dispatch.
+     ;; Returning here without deferring is what let the daemon record a merge
+     ;; as `ok=true' 52ms before its own rejection arrived, so the failure that
+     ;; killed every merge left no trace on the workspace at all.  The deferral
+     ;; is declared from `:on-registered', ahead of the write, so it is never
+     ;; behind an ack the socket delivers reentrantly.
+     :on-registered (lambda (id)
+                      (setq req id)
+                      (agent-repl--host-action-defer id))
+     :on-failure
      (lambda (err)
        (agent-repl--host-action-settle req nil err)
        (agent-repl--log ws
                         "merge-dispatch-over-uds: ws=%s request-id=%s command REJECTED err=%s"
                         ws req err)
        (message "agent-repl: merge of %s refused: %s" ws err))
+     :on-success
      (lambda ()
        (agent-repl--host-action-settle req t nil)
        (agent-repl--log ws
                         "merge-dispatch-over-uds: ws=%s request-id=%s command ACKED"
                         ws req)))
+    (agent-repl--log ws
+                     "merge-dispatch-over-uds: ws=%s command-issued request-id=%s"
+                     ws req)
+    (message "agent-repl: merge of %s requested — the daemon reports each phase here" ws)
     req))
 
 (defun agent-repl--merge-resume-over-uds (ws)
@@ -125,7 +127,6 @@ request-id."
               "mergeWorkspace"
               (agent-repl--merge-command-payload ws 'resume)
               (agent-repl--frontend-ws-command-key ws))))
-    (agent-repl--uds-track-command req "mergeWorkspace" ws)
     (agent-repl--log ws
                      "merge-resume-over-uds: ws=%s command-issued request-id=%s tracking-registered"
                      ws req)
