@@ -556,7 +556,10 @@ type consumer struct {
 	// RE-ANNOUNCES on every submit, which is what makes it a live signal rather
 	// than a start-of-life one. The controller persists the model off it, so a
 	// respawn stops replaying whatever model was requested at create.
-	onSystemInit func(*datav1.SystemInit)
+	// seq is the file-plane seq the SystemInit was carried on, which is what
+	// orders the model it announces against a shim confirmation
+	// (registry.ModelObservation).
+	onSystemInit func(si *datav1.SystemInit, seq uint64)
 	// onSessionEnded reports that the session's shim reported it is over (F4).
 	// Nothing marked a record terminal on shim death before this, so
 	// RENDER_STATE_DEAD and death_reason sat on two disconnected axes: the
@@ -583,6 +586,13 @@ type consumer struct {
 	// HTTP /status and /commands routes now that the L2 translator that used to
 	// cache it is gone. Nil until the first init lands (honest empty).
 	systemInit *datav1.SystemInit
+	// streamSeq is the HIGHEST file-plane seq this consumer has taken in.
+	//
+	// It is the instant a shim confirmation is true AS OF: everything already
+	// consumed is by construction older than an answer the shim gave after it,
+	// so a `SystemInit` from at-or-below the mark cannot outrank that
+	// confirmation (registry.ModelObservation). Read and written under c.mu.
+	streamSeq uint64
 	// permItems retains the LATEST permission ConversationItem per request_id,
 	// in first-seen order, so a resync replays each permission's current
 	// resolution (S8). The retained ring holds core.v1.Events; a permission item
@@ -656,7 +666,7 @@ func (c *consumer) warn(format string, args ...any) {
 	c.logf(format, args...)
 }
 
-func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier, prog ProgressResolver, floors ClearCompactStore, accountingStore TurnAccountingStore, logf func(string, ...any), onSessionStarted func(*corev1.SessionStarted), onTurn func(active bool, atMs int64), onBackfill func(state string), onSystemInit func(*datav1.SystemInit), onSessionEnded func()) *consumer {
+func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier, prog ProgressResolver, floors ClearCompactStore, accountingStore TurnAccountingStore, logf func(string, ...any), onSessionStarted func(*corev1.SessionStarted), onTurn func(active bool, atMs int64), onBackfill func(state string), onSystemInit func(si *datav1.SystemInit, seq uint64), onSessionEnded func()) *consumer {
 	if accountingStore == nil {
 		panic("session-controller: newConsumer needs a TurnAccountingStore")
 	}
@@ -793,6 +803,24 @@ func (c *consumer) newestRetainedSeq() uint64 {
 		}
 	}
 	return 0
+}
+
+// noteStreamSeq advances the consumed-seq high-water mark. Monotone: an
+// out-of-order or re-delivered event never lowers it, because the mark states
+// what has been SEEN rather than what arrived last.
+func (c *consumer) noteStreamSeq(seq uint64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if seq > c.streamSeq {
+		c.streamSeq = seq
+	}
+}
+
+// consumedStreamSeq is the highest file-plane seq this consumer has taken in.
+func (c *consumer) consumedStreamSeq() uint64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.streamSeq
 }
 
 // latestSystemInit returns the last SDK system:init snapshot seen on this
@@ -1410,6 +1438,10 @@ func turnBridgeDecision(err error) string {
 // relays. A vendor payload that cannot be translated is a loud error, never a
 // silent drop.
 func (c *consumer) Consume(ev *corev1.Event) error {
+	// THE HIGH-WATER MARK, advanced before anything can be decided from it and
+	// unconditionally: an event this consumer refuses further down was still
+	// PRODUCED, and a confirmation taken after it is still newer than it.
+	c.noteStreamSeq(ev.GetSeq())
 	identityMismatch, identityErr := c.resumeIdentity.observe(ev)
 	if identityErr != nil {
 		c.logf("session-controller: query identity observation REJECTED before mutation session=%s seq=%d error=%v", c.sessionID, ev.GetSeq(), identityErr)
@@ -1547,7 +1579,7 @@ func (c *consumer) Consume(ev *corev1.Event) error {
 			// only place the daemon learns that a running session's model
 			// changed out from under the model it was spawned with.
 			if c.onSystemInit != nil {
-				c.onSystemInit(si)
+				c.onSystemInit(si, ev.GetSeq())
 			}
 			// The session's retained SystemInit just became available (attach or a
 			// fresh init): push it as a SessionInitView so frontends can source
