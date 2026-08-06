@@ -32,6 +32,7 @@ func TestSentinelClassifiesEachSentinel(t *testing.T) {
 		{"shim version mismatch", ErrShimVersionMismatch, TypeShimVersionMismatch},
 		{"shim seq regression", ErrShimSeqRegression, TypeShimSeqRegression},
 		{"not live session", ErrNotLiveSession, TypeSessionNotLive},
+		{"session superseded by resync", ErrSessionSuperseded, TypeSessionReconnectSuperseded},
 		{"repull in flight", ErrRepullInFlight, TypeHistoryRepullInFlight},
 		{"repull truncated", ErrRepullTruncated, TypeHistoryReplayTruncated},
 		{"interrupt undelivered", ErrInterruptUndelivered, TypeInterruptUndelivered},
