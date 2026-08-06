@@ -976,9 +976,10 @@ func main() {
 		mux.Handle("/widget-assets/", http.StripPrefix("/widget-assets/", http.FileServer(http.Dir(*widgetAssets))))
 	}
 	// Unfiltered frontend.v1 consumers: the /frontend WS endpoint and the Emacs
-	// UDS listener, both serving every workspace's frames. (The webapp's
-	// per-session view rides GET /sessions/{id}/stream, scope-filtered by the
-	// server handler.)
+	// UDS listener, both serving every workspace's frames. (The webapp's scoped
+	// view rides GET /workspace-stream?workspace=<dir> or GET
+	// /sessions/{id}/stream, scope-filtered by the server handler; both mount
+	// off server.APIPrefixes above.)
 	mux.HandleFunc("/frontend", agentShim.Server.ServeWS)
 	sockPath, perr := frontend.DefaultSocketPath()
 	if perr != nil {
