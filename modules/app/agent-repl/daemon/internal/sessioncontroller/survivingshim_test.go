@@ -46,6 +46,7 @@ func (l *fakeWorkspaceLock) held(string) (bool, error) {
 type gateHarness struct {
 	m       *Manager
 	spawner *fakeSpawner
+	applier *fakeApplier
 	lock    *fakeWorkspaceLock
 	log     *logCapture
 }
@@ -54,12 +55,13 @@ func newGateHarness(t *testing.T, lock *fakeWorkspaceLock) *gateHarness {
 	t.Helper()
 	h := &gateHarness{
 		spawner: &fakeSpawner{resume: map[string]string{}},
+		applier: &fakeApplier{},
 		lock:    lock,
 		log:     &logCapture{},
 	}
 	m, err := New(Config{
 		Push:              &fakePusher{},
-		SSM:               &fakeApplier{},
+		SSM:               h.applier,
 		Spawner:           h.spawner,
 		Locator:           fakeLocator{m: map[string]string{"ws": "s1"}},
 		SeqStore:          &fakeSeqStore{seq: map[string]uint64{}},
