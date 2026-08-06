@@ -18,6 +18,23 @@
  * So the shim takes a kernel-enforced lock at startup and holds it for its
  * lifetime. Held is what the daemon probes before spawning.
  *
+ * # Two keys, both required
+ *
+ * A session id names one daemon-side conversation attempt; a WORKSPACE names
+ * the thing the invariant is actually about. A workspace and each resumed
+ * transcript keep exactly one live session at a time, and two daemon session
+ * ids can point at one workspace and one vendor transcript — so a claim keyed
+ * only by session id lets two shims take two different locks over one
+ * transcript and excludes nothing.
+ *
+ * The workspace key is the CWD rather than the vendor transcript uuid because a
+ * FRESH session has no transcript yet: a transcript key cannot cover the window
+ * in which the duplicate is spawned.
+ *
+ * Both locks are taken, in a fixed order — session lock first, then workspace
+ * lock — so no two shims can ever take them in opposite orders. Failing to take
+ * either is a refusal to start.
+ *
  * # Mechanism
  *
  * `open(2)`'s `O_EXLOCK`, which takes a BSD flock as part of opening the file —
@@ -37,6 +54,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { createHash } from "node:crypto";
 import { bindLog } from "./log.js";
 
 const COMPONENT = "shim-session-lock";
@@ -68,6 +86,41 @@ export function lockPath(sessionId: string): string {
 }
 
 /**
+ * The workspace's identity in a file name: the first eight hex digits of the
+ * MD5 of its normalized absolute directory.
+ *
+ * This is the SAME derivation as the `workspace_id` on every canonical log
+ * record (log.ts, and dlog.WorkspaceFromDirectory on the Go side), so a lock
+ * file is greppable against the log lines of the shim holding it. The daemon
+ * hands the shim an already symlink-resolved absolute `--cwd`, and both sides
+ * normalize identically (cleanForKey is Go's filepath.Clean), so the Node and
+ * Go derivations agree on one path for one workspace.
+ */
+export function workspaceLockKey(cwd: string): string {
+  if (cwd === "") {
+    throw new Error(`${COMPONENT}: a workspace lock needs an absolute workspace directory, got ""`);
+  }
+  return createHash("md5").update(cleanForKey(cwd)).digest("hex").slice(0, 8);
+}
+
+/**
+ * Go's `filepath.Clean`, spelled in Node. `path.normalize` collapses `.`, `..`
+ * and repeated separators the same way and differs in exactly one respect: it
+ * KEEPS a trailing separator where Clean strips it. Unreconciled, that one
+ * difference gives `/ws` and `/ws/` two locks on the Node side and one on the
+ * Go side — two shims over one workspace, which is what the lock exists to stop.
+ */
+function cleanForKey(p: string): string {
+  const normalized = path.normalize(p);
+  return normalized.length > 1 ? normalized.replace(/\/+$/, "") : normalized;
+}
+
+/** The lock file for the workspace rooted at cwd. */
+export function workspaceLockPath(cwd: string): string {
+  return path.join(lockDir(), `workspace-${workspaceLockKey(cwd)}.lock`);
+}
+
+/**
  * Take this session's exclusive lock and hold it until the process exits.
  *
  * Returns a release function for a deliberate teardown. Not calling it is fine
@@ -79,42 +132,74 @@ export function lockPath(sessionId: string): string {
  * that cannot prove it is the only one for its session must not start.
  */
 export function acquireSessionLock(sessionId: string): () => void {
-  LOGGER.log({ agent_repl_session_id: sessionId, platform: process.platform }, "acquiring exclusive shim session lock");
+  return acquireExclusiveLock({
+    kind: "session",
+    subject: `session ${sessionId}`,
+    file: lockPath(sessionId),
+    context: { agent_repl_session_id: sessionId },
+  });
+}
+
+/**
+ * Take the workspace's exclusive lock and hold it until the process exits.
+ *
+ * Identical in contract to acquireSessionLock, and taken AFTER it: the fixed
+ * order is what keeps two shims racing for the same pair from deadlocking each
+ * other. Throws when another shim already owns the workspace or when the
+ * platform cannot take the lock; a shim that cannot prove it is the workspace's
+ * only one must not start.
+ */
+export function acquireWorkspaceLock(cwd: string): () => void {
+  return acquireExclusiveLock({
+    kind: "workspace",
+    subject: `workspace ${cwd}`,
+    file: workspaceLockPath(cwd),
+    context: { workspace_dir: cwd, workspace_id: workspaceLockKey(cwd) },
+  });
+}
+
+/** One kernel-enforced claim, which is the whole of both locks' mechanism. */
+function acquireExclusiveLock(claim: {
+  kind: string;
+  subject: string;
+  file: string;
+  context: Record<string, unknown>;
+}): () => void {
+  LOGGER.log({ ...claim.context, platform: process.platform }, `acquiring exclusive shim ${claim.kind} lock`);
   if (O_EXLOCK === undefined) {
     throw new Error(
-      `${COMPONENT}: ${process.platform} has no O_EXLOCK, so the shim cannot claim session ${sessionId} ` +
+      `${COMPONENT}: ${process.platform} has no O_EXLOCK, so the shim cannot claim ${claim.subject} ` +
         `exclusively; refusing to start rather than risk two shims writing one transcript`,
     );
   }
-  const exlock = O_EXLOCK;
-  const file = lockPath(sessionId);
+  const file = claim.file;
   fs.mkdirSync(path.dirname(file), { recursive: true });
 
   let fd: number;
   try {
     // O_NONBLOCK so an already-held lock fails immediately instead of hanging
-    // this process behind whichever shim owns the session.
-    fd = fs.openSync(file, fs.constants.O_CREAT | fs.constants.O_RDWR | exlock | fs.constants.O_NONBLOCK);
+    // this process behind whichever shim owns the claim.
+    fd = fs.openSync(file, fs.constants.O_CREAT | fs.constants.O_RDWR | O_EXLOCK | fs.constants.O_NONBLOCK);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "EAGAIN" || code === "EWOULDBLOCK") {
       throw new Error(
-        `${COMPONENT}: session ${sessionId} is already held by another shim (${file}); refusing to start a duplicate`,
+        `${COMPONENT}: ${claim.subject} is already held by another shim (${file}); refusing to start a duplicate`,
       );
     }
-    throw new Error(`${COMPONENT}: cannot take the session lock ${file}: ${(err as Error).message}`);
+    throw new Error(`${COMPONENT}: cannot take the ${claim.kind} lock ${file}: ${(err as Error).message}`);
   }
 
-  LOGGER.log({ agent_repl_session_id: sessionId }, `holding session lock ${file}`);
+  LOGGER.log(claim.context, `holding ${claim.kind} lock ${file}`);
   let released = false;
   return () => {
     if (released) return;
     released = true;
     try {
       fs.closeSync(fd); // closing drops the flock
-      LOGGER.log({ agent_repl_session_id: sessionId, lock_path: file }, "released exclusive shim session lock");
+      LOGGER.log({ ...claim.context, lock_path: file }, `released exclusive shim ${claim.kind} lock`);
     } catch (err) {
-      LOGGER.log({ level: "error", agent_repl_session_id: sessionId, cause: err }, `releasing session lock failed: ${(err as Error).message}`);
+      LOGGER.log({ level: "error", ...claim.context, cause: err }, `releasing the ${claim.kind} lock failed: ${(err as Error).message}`);
     }
   };
 }

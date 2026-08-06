@@ -43,6 +43,7 @@ import (
 	"claude-repld/internal/frontend"
 	"claude-repld/internal/keepalive"
 	"claude-repld/internal/registry"
+	"claude-repld/internal/sessionlock"
 	"claude-repld/internal/shim"
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/ssm"
@@ -355,6 +356,15 @@ type Config struct {
 	// Nil defaults to wall clock.
 	Now func() int64
 
+	// WorkspaceLockHeld probes the kernel-enforced claim a live shim holds on a
+	// WORKSPACE, which is the one fact that distinguishes "no shim" from "a
+	// shim that has not dialled in yet" before anything is spawned
+	// (survivingshim.go). An error from it means "I could not tell", and is
+	// never read as free.
+	//
+	// Default = sessionlock.WorkspaceLockHeld
+	WorkspaceLockHeld func(cwd string) (bool, error)
+
 	// Source yields each session's shim connection: shims dial the daemon's
 	// listening socket and the listener routes each connection to the client
 	// that owns that session. Required.
@@ -390,6 +400,9 @@ type Manager struct {
 	newControllerGenerationID func() (string, error)
 	// now is the queue's clock (queued_at_ms), injected by tests.
 	now func() int64
+	// workspaceLockHeld is the pre-spawn workspace-ownership probe
+	// (survivingshim.go).
+	workspaceLockHeld func(cwd string) (bool, error)
 
 	// shutdownLease binds the daemon-global scheduled-shutdown drain lease
 	// (shutdownlease.go). Late-bound because the engine takes this fleet as a
@@ -438,6 +451,12 @@ type Manager struct {
 	// while the connection that carried it is live, and a pid outliving its
 	// connection is a pid-reuse hazard rather than a stop handle.
 	shimPID map[string]int32
+	// bringUpFailures counts each session's CONSECUTIVE resolved bring-up
+	// failures. It is the ladder's give-up bound (bringupescape.go): a session
+	// that reaches bringUpGiveUpAfter is not respawned again, because every
+	// further attempt costs a whole bringUpTimeout of the daemon's attention.
+	// Cleared by a bring-up that wires and by a deliberate hibernation.
+	bringUpFailures map[string]int
 	// buildBounced remembers the sessions already bounced for a stale bundle,
 	// so a shim that comes back still reporting a mismatched build (a bundle
 	// whose identity cannot move, a stamp that is wrong) is loud ONCE instead
@@ -460,6 +479,12 @@ type Manager struct {
 	// the wedged-pull branch can be driven without a minute-long wait (see
 	// repull.go).
 	repullWaitGraceOverride time.Duration
+	// survivingShimWaitOverride and survivingShimPollOverride override the
+	// pre-spawn wait for a lock-holding shim to dial in (survivingshim.go).
+	// Zero means the production constants; only a test assigns them, so the
+	// expiry branch can be driven without a ten-second wait.
+	survivingShimWaitOverride time.Duration
+	survivingShimPollOverride time.Duration
 	// reviveCompactBoundOverride overrides how long a compact-first revival's
 	// detached completion wait allows the compaction. Zero means the production
 	// constant; only a test assigns one, so the timeout branch can be driven
@@ -719,6 +744,10 @@ func New(cfg Config) (*Manager, error) {
 	if now == nil {
 		now = func() int64 { return time.Now().UnixMilli() }
 	}
+	workspaceLockHeld := cfg.WorkspaceLockHeld
+	if workspaceLockHeld == nil {
+		workspaceLockHeld = sessionlock.WorkspaceLockHeld
+	}
 	// THE STOP HALF IS TAKEN OFF THE SPAWNER HERE and never put back: the gate
 	// below is its only holder, and the spawner the Manager retains REFUSES
 	// stops (turnstop.go). That is what keeps stopShimSettlingTurn the sole
@@ -733,10 +762,12 @@ func New(cfg Config) (*Manager, error) {
 		newClient:                 newClient,
 		newControllerGenerationID: newControllerGenerationID,
 		now:                       now,
+		workspaceLockHeld:         workspaceLockHeld,
 		byWS:                      make(map[string]*sessionController),
 		parked:                    make(map[string]*parkedSession),
 		lastCSID:                  make(map[string]string),
 		shimPID:                   make(map[string]int32),
+		bringUpFailures:           make(map[string]int),
 		buildBounced:              make(map[string]bool),
 		buildRefresh:              make(map[string]*buildRefreshState),
 		rootCtx:                   rootCtx,
@@ -1964,6 +1995,10 @@ func (m *Manager) hibernate(workspace, wantSession string, cause StopCause) erro
 	// is silent for this retired generation, so no later connectivity edge can
 	// overwrite this completed teardown.
 	m.noteConnectivity(workspace, d.sessionID, d.generationID, ssm.SessionConnectivityHibernated, "hibernated")
+	// A deliberate stand-down retires whatever streak of bring-up failures the
+	// session had accumulated, so a revival climbs the ladder from the bottom
+	// rather than inheriting a park (bringupescape.go).
+	m.clearBringUpFailures(d.sessionID)
 	return nil
 }
 
@@ -2042,6 +2077,19 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 	}
 	m.mu.Unlock()
 
+	// THE WORKSPACE-OWNERSHIP GATE, BEFORE ANY IDENTITY IS MINTED. A live shim
+	// can own this workspace under a session id this daemon knows nothing about
+	// — a survivor of a previous daemon, or a second id minted for the same
+	// workspace — and every session-keyed probe downstream answers "free" for
+	// it. Asked here because this is the line that leads to a spawn, and the
+	// answer decides between adopting the survivor, waiting for it, and
+	// refusing (survivingshim.go).
+	if survivor, err := m.awaitSurvivingShim(workspace); err != nil {
+		return nil, false, err
+	} else if survivor != nil {
+		return survivor, false, nil
+	}
+
 	sessionID, ok := m.cfg.Locator.Locate(workspace)
 	if !ok {
 		return nil, false, fmt.Errorf("session-controller: workspace %q has no live session to drive", workspace)
@@ -2059,6 +2107,18 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 			workspace, sessionID, detail.Cause, detail.SinceMs)
 		return nil, false, fmt.Errorf("%w: workspace %q session %s has been asleep since %d (%s)",
 			ErrHibernated, workspace, sessionID, detail.SinceMs, detail.Cause)
+	}
+	// THE GIVE-UP BOUND, BEFORE ANYTHING IS SPAWNED. A session that has already
+	// failed bring-up bringUpGiveUpAfter times in a row is parked: its failure
+	// card is standing, and every further attempt would cost another
+	// bringUpTimeout during which the daemon dispatches nothing. The park is
+	// lifted by a bring-up that wires or by a deliberate hibernation
+	// (bringupescape.go).
+	if failures := m.bringUpFailuresFor(sessionID); failures >= bringUpGiveUpAfter {
+		m.logf("session-controller: bring-up REFUSED by the give-up bound ws=%q session=%s consecutive_failures=%d bound=%d — the session is parked on its standing failure card and no shim was spawned",
+			workspace, sessionID, failures, bringUpGiveUpAfter)
+		return nil, false, fmt.Errorf("%w: workspace %q session %s has failed bring-up %d times in a row",
+			ErrBringUpGaveUp, workspace, sessionID, failures)
 	}
 	generationID, err := m.newControllerGenerationID()
 	if err != nil {
