@@ -60,6 +60,18 @@ alarm.  Tests that assert ON the seam shadow it again with their own
                 (lambda (&rest _) 'fake-timer)))
        ,@body)))
 
+(defun agent-repl-test--pend (request-id field workspace
+                                         &optional on-failure on-success on-challenge)
+  "ARRANGE a pending command entry the way a real send would.
+
+`agent-repl--uds-register-pending-command' is private to
+`agent-repl--uds-send-command' — there is deliberately no public tracker —
+so the ack-machinery tests below reach it through this one helper rather
+than reproducing the send-then-track shape the transport now forbids.
+Tests of the SEND path drive `agent-repl--uds-send-command' itself."
+  (agent-repl--uds-register-pending-command
+   request-id field workspace on-failure on-success on-challenge))
+
 (defmacro agent-repl-test--with-captured-deadline (thunk-var &rest body)
   "Run BODY capturing the ack-deadline alarm thunk into THUNK-VAR.
 The timer seam is shadowed so no real timer is armed; calling THUNK-VAR is
@@ -1120,12 +1132,12 @@ as a user-visible malformed-frame error on every roster publish."
 
 ;;;; ---- command-ack tracking --------------------------------------------
 
-(ert-deftest agent-repl-test-uds-track-command-records-entry ()
+(ert-deftest agent-repl-test-uds-register-pending-command-records-entry ()
   "Tracking a command records its field + workspace under the request-id."
   ;; Arrange
   (agent-repl-test--with-uds
     ;; Act
-    (agent-repl--uds-track-command "req-1" "mergeWorkspace" "ws1")
+    (agent-repl-test--pend "req-1" "mergeWorkspace" "ws1")
     ;; Assert
     (let ((entry (gethash "req-1" agent-repl--uds-pending-commands)))
       (should (equal (plist-get entry :field) "mergeWorkspace"))
@@ -1135,7 +1147,7 @@ as a user-visible malformed-frame error on every roster publish."
   "An ok=t ack drops the pending entry and returns t."
   ;; Arrange
   (agent-repl-test--with-uds
-    (agent-repl--uds-track-command "req-1" "mergeWorkspace" "ws1")
+    (agent-repl-test--pend "req-1" "mergeWorkspace" "ws1")
     ;; Act / Assert
     (should (eq (agent-repl--uds-handle-command-ack '(:requestId "req-1" :ok t)) t))
     (should-not (gethash "req-1" agent-repl--uds-pending-commands))))
@@ -1144,7 +1156,7 @@ as a user-visible malformed-frame error on every roster publish."
   "A failed ack (ok omitted) surfaces an echo-area message and returns nil."
   ;; Arrange
   (agent-repl-test--with-uds
-    (agent-repl--uds-track-command "req-1" "mergeWorkspace" "ws1")
+    (agent-repl-test--pend "req-1" "mergeWorkspace" "ws1")
     (let (echoed)
       (cl-letf (((symbol-function 'message)
                  (lambda (fmt &rest args) (setq echoed (apply #'format fmt args)))))
@@ -1161,7 +1173,7 @@ as a user-visible malformed-frame error on every roster publish."
   ;; Arrange
   (agent-repl-test--with-uds
     (let (cb-arg)
-      (agent-repl--uds-track-command
+      (agent-repl-test--pend
        "req-1" "mergeWorkspace" "ws1"
        (lambda (err) (setq cb-arg err)))
       (cl-letf (((symbol-function 'message) (lambda (&rest _) nil)))
@@ -1175,7 +1187,7 @@ as a user-visible malformed-frame error on every roster publish."
   ;; Arrange
   (agent-repl-test--with-uds
     (let (cb-arg)
-      (agent-repl--uds-track-command
+      (agent-repl-test--pend
        "req-1" "interrupt" "ws1" nil nil
        (lambda (challenge) (setq cb-arg challenge)))
       ;; Act
@@ -1189,7 +1201,7 @@ as a user-visible malformed-frame error on every roster publish."
   ;; Arrange
   (agent-repl-test--with-uds
     (let (echoed failed)
-      (agent-repl--uds-track-command
+      (agent-repl-test--pend
        "req-1" "interrupt" "ws1"
        (lambda (_err) (setq failed t)) nil #'ignore)
       (cl-letf (((symbol-function 'message)
@@ -1206,7 +1218,7 @@ as a user-visible malformed-frame error on every roster publish."
   ;; Arrange
   (agent-repl-test--with-uds
     (let (echoed)
-      (agent-repl--uds-track-command "req-1" "interrupt" "ws1")
+      (agent-repl-test--pend "req-1" "interrupt" "ws1")
       (cl-letf (((symbol-function 'message)
                  (lambda (fmt &rest args) (setq echoed (apply #'format fmt args)))))
         ;; Act
@@ -1220,7 +1232,7 @@ as a user-visible malformed-frame error on every roster publish."
   ;; Arrange
   (agent-repl-test--with-uds
     (let (challenged succeeded)
-      (agent-repl--uds-track-command
+      (agent-repl-test--pend
        "req-1" "interrupt" "ws1" nil
        (lambda () (setq succeeded t))
        (lambda (_challenge) (setq challenged t)))
@@ -1235,7 +1247,7 @@ as a user-visible malformed-frame error on every roster publish."
   ;; Arrange
   (agent-repl-test--with-uds
     (let (challenged failed)
-      (agent-repl--uds-track-command
+      (agent-repl-test--pend
        "req-1" "interrupt" "ws1"
        (lambda (err) (setq failed err)) nil
        (lambda (_challenge) (setq challenged t)))
@@ -1408,22 +1420,22 @@ as a user-visible malformed-frame error on every roster publish."
                         "submitPrompt" '(:text "hi") "/nowhere/unowned" 'fake-proc)
                        "req-fixed"))))))
 
-(ert-deftest agent-repl-test-uds-track-command-unowned-cwd-does-not-signal ()
+(ert-deftest agent-repl-test-uds-register-pending-command-unowned-cwd-does-not-signal ()
   "Tracking a command issued for an unowned cwd must not signal."
   ;; Arrange
   (agent-repl-test--with-uds-log-sink
     ;; Act / Assert
-    (should (equal (agent-repl--uds-track-command
+    (should (equal (agent-repl-test--pend
                     "req-1" "submitPrompt" "/nowhere/unowned")
                    "req-1"))))
 
-(ert-deftest agent-repl-test-uds-track-command-retains-the-raw-cwd ()
+(ert-deftest agent-repl-test-uds-register-pending-command-retains-the-raw-cwd ()
   "The retained `:workspace' stays raw — the ack path correlates against it."
   ;; Arrange
   (agent-repl-test--with-uds-log-sink
     (agent-repl--ws-put "ws1" :project-dir temporary-file-directory)
     ;; Act
-    (agent-repl--uds-track-command "req-1" "submitPrompt" temporary-file-directory)
+    (agent-repl-test--pend "req-1" "submitPrompt" temporary-file-directory)
     ;; Assert
     (should (equal (plist-get (gethash "req-1" agent-repl--uds-pending-commands)
                               :workspace)
@@ -1433,7 +1445,7 @@ as a user-visible malformed-frame error on every roster publish."
   "Untracking after a local timeout must not signal on an unowned cwd."
   ;; Arrange
   (agent-repl-test--with-uds-log-sink
-    (agent-repl--uds-track-command "req-1" "submitPrompt" "/nowhere/unowned")
+    (agent-repl-test--pend "req-1" "submitPrompt" "/nowhere/unowned")
     ;; Act / Assert
     (should-not (agent-repl--uds-untrack-command
                  "req-1" "/nowhere/unowned" "health-timeout"))))
@@ -1505,7 +1517,7 @@ as a user-visible malformed-frame error on every roster publish."
   "An ACCEPTED ack logs under the tracked cwd and must not signal."
   ;; Arrange
   (agent-repl-test--with-uds-log-sink
-    (agent-repl--uds-track-command "req-1" "submitPrompt" "/nowhere/unowned")
+    (agent-repl-test--pend "req-1" "submitPrompt" "/nowhere/unowned")
     ;; Act / Assert
     (should (agent-repl--uds-handle-command-ack
              '(:requestId "req-1" :ok t)))))
@@ -1514,7 +1526,7 @@ as a user-visible malformed-frame error on every roster publish."
   "A REJECTED ack also routes its classified failure through the log sink."
   ;; Arrange
   (agent-repl-test--with-uds-log-sink
-    (agent-repl--uds-track-command "req-1" "submitPrompt" "/nowhere/unowned")
+    (agent-repl-test--pend "req-1" "submitPrompt" "/nowhere/unowned")
     ;; Act / Assert
     (should-not (agent-repl--uds-handle-command-ack
                  '(:requestId "req-1" :error "nope"
@@ -1526,7 +1538,7 @@ as a user-visible malformed-frame error on every roster publish."
   "The interrupt-confirmation CHALLENGE branch logs with the same cwd."
   ;; Arrange
   (agent-repl-test--with-uds-log-sink
-    (agent-repl--uds-track-command "req-1" "interrupt" "/nowhere/unowned")
+    (agent-repl-test--pend "req-1" "interrupt" "/nowhere/unowned")
     ;; Act / Assert
     (should-not (agent-repl--uds-handle-command-ack
                  '(:requestId "req-1"
@@ -1549,7 +1561,7 @@ as a user-visible malformed-frame error on every roster publish."
     ;; Assert
     (should (eq (agent-repl-uds-link-health) :degraded))))
 
-(ert-deftest agent-repl-test-uds-track-command-arms-deadline-alarm ()
+(ert-deftest agent-repl-test-uds-register-pending-command-arms-deadline-alarm ()
   "Tracking a command arms the ack alarm through the injectable timer seam."
   ;; Arrange
   (agent-repl-test--with-uds
@@ -1558,7 +1570,7 @@ as a user-visible malformed-frame error on every roster publish."
       (cl-letf (((symbol-function 'agent-repl--uds-run-timer)
                  (lambda (delay fn) (setq scheduled (list delay fn)) 'fake-timer)))
         ;; Act
-        (agent-repl--uds-track-command "req-1" "mergeWorkspace" "ws1")
+        (agent-repl-test--pend "req-1" "mergeWorkspace" "ws1")
         ;; Assert
         (should (equal (nth 0 scheduled) 7.5))
         (should (functionp (nth 1 scheduled)))))))
@@ -1568,7 +1580,7 @@ as a user-visible malformed-frame error on every roster publish."
   ;; Arrange
   (agent-repl-test--with-uds
     (agent-repl-test--with-captured-deadline expire
-      (agent-repl--uds-track-command "req-1" "mergeWorkspace" "ws1")
+      (agent-repl-test--pend "req-1" "mergeWorkspace" "ws1")
       (let (echoed)
         (cl-letf (((symbol-function 'message)
                    (lambda (fmt &rest args) (setq echoed (apply #'format fmt args)))))
@@ -1583,7 +1595,7 @@ as a user-visible malformed-frame error on every roster publish."
   ;; Arrange
   (agent-repl-test--with-uds
     (agent-repl-test--with-captured-deadline expire
-      (agent-repl--uds-track-command "req-1" "mergeWorkspace" "ws1")
+      (agent-repl-test--pend "req-1" "mergeWorkspace" "ws1")
       (let (echoed)
         (cl-letf (((symbol-function 'message)
                    (lambda (fmt &rest args) (setq echoed (apply #'format fmt args)))))
@@ -1597,7 +1609,7 @@ as a user-visible malformed-frame error on every roster publish."
   ;; Arrange
   (agent-repl-test--with-uds
     (agent-repl-test--with-captured-deadline expire
-      (agent-repl--uds-track-command "req-1" "mergeWorkspace" "ws1")
+      (agent-repl-test--pend "req-1" "mergeWorkspace" "ws1")
       (let (logged)
         (cl-letf (((symbol-function 'message) (lambda (&rest _) nil))
                   ((symbol-function 'agent-repl--log)
@@ -1619,7 +1631,7 @@ as a user-visible malformed-frame error on every roster publish."
   ;; Arrange
   (agent-repl-test--with-uds
     (agent-repl-test--with-captured-deadline expire
-      (agent-repl--uds-track-command "req-1" "mergeWorkspace" "ws1")
+      (agent-repl-test--pend "req-1" "mergeWorkspace" "ws1")
       (cl-letf (((symbol-function 'message) (lambda (&rest _) nil)))
         ;; Act
         (funcall expire)
@@ -1631,7 +1643,7 @@ as a user-visible malformed-frame error on every roster publish."
   ;; Arrange
   (agent-repl-test--with-uds
     (agent-repl-test--with-captured-deadline expire
-      (agent-repl--uds-track-command "req-1" "mergeWorkspace" "ws1")
+      (agent-repl-test--pend "req-1" "mergeWorkspace" "ws1")
       (cl-letf (((symbol-function 'message) (lambda (&rest _) nil)))
         ;; Act
         (funcall expire)
@@ -1648,7 +1660,7 @@ as a user-visible malformed-frame error on every roster publish."
   (agent-repl-test--with-uds
     (agent-repl-test--with-captured-deadline expire
       (let (failed)
-        (agent-repl--uds-track-command
+        (agent-repl-test--pend
          "req-1" "mergeWorkspace" "ws1" (lambda (_err) (setq failed t)))
         (cl-letf (((symbol-function 'message) (lambda (&rest _) nil)))
           ;; Act
@@ -1661,7 +1673,7 @@ as a user-visible malformed-frame error on every roster publish."
   ;; Arrange
   (agent-repl-test--with-uds
     (agent-repl-test--with-captured-deadline expire
-      (agent-repl--uds-track-command "req-1" "mergeWorkspace" "ws1")
+      (agent-repl-test--pend "req-1" "mergeWorkspace" "ws1")
       (agent-repl--uds-handle-command-ack '(:requestId "req-1" :ok t))
       (let (echoed)
         (cl-letf (((symbol-function 'message)
@@ -1682,7 +1694,7 @@ as a user-visible malformed-frame error on every roster publish."
                 ((symbol-function 'timerp) (lambda (tm) (eq tm 'armed-timer)))
                 ((symbol-function 'cancel-timer)
                  (lambda (tm) (setq cancelled tm))))
-        (agent-repl--uds-track-command "req-1" "mergeWorkspace" "ws1")
+        (agent-repl-test--pend "req-1" "mergeWorkspace" "ws1")
         ;; Act
         (agent-repl--uds-handle-command-ack '(:requestId "req-1" :ok t))
         ;; Assert
@@ -1692,7 +1704,7 @@ as a user-visible malformed-frame error on every roster publish."
   "An ack inside the deadline leaves the command link healthy."
   ;; Arrange
   (agent-repl-test--with-uds
-    (agent-repl--uds-track-command "req-1" "mergeWorkspace" "ws1")
+    (agent-repl-test--pend "req-1" "mergeWorkspace" "ws1")
     ;; Act
     (agent-repl--uds-handle-command-ack '(:requestId "req-1" :ok t))
     ;; Assert
@@ -1708,7 +1720,7 @@ as a user-visible malformed-frame error on every roster publish."
                 ((symbol-function 'timerp) (lambda (tm) (eq tm 'armed-timer)))
                 ((symbol-function 'cancel-timer)
                  (lambda (tm) (setq cancelled tm))))
-        (agent-repl--uds-track-command "req-1" "mergeWorkspace" "ws1")
+        (agent-repl-test--pend "req-1" "mergeWorkspace" "ws1")
         ;; Act
         (agent-repl--uds-untrack-command "req-1" "ws1" "local-wait-aborted")
         ;; Assert
@@ -1719,7 +1731,7 @@ as a user-visible malformed-frame error on every roster publish."
   ;; Arrange
   (agent-repl-test--with-uds
     (agent-repl-test--with-captured-deadline expire
-      (agent-repl--uds-track-command "req-1" "mergeWorkspace" "ws1")
+      (agent-repl-test--pend "req-1" "mergeWorkspace" "ws1")
       (cl-letf (((symbol-function 'message) (lambda (&rest _) nil)))
         (funcall expire)
         ;; Act / Assert
@@ -1732,7 +1744,7 @@ as a user-visible malformed-frame error on every roster publish."
   ;; Arrange
   (agent-repl-test--with-uds
     (agent-repl-test--with-captured-deadline expire
-      (agent-repl--uds-track-command "req-1" "mergeWorkspace" "ws1")
+      (agent-repl-test--pend "req-1" "mergeWorkspace" "ws1")
       (cl-letf (((symbol-function 'message) (lambda (&rest _) nil)))
         (funcall expire))
       (let (logged)
@@ -1753,7 +1765,7 @@ as a user-visible malformed-frame error on every roster publish."
   ;; Arrange
   (agent-repl-test--with-uds
     (agent-repl-test--with-captured-deadline expire
-      (agent-repl--uds-track-command "req-1" "mergeWorkspace" "ws1")
+      (agent-repl-test--pend "req-1" "mergeWorkspace" "ws1")
       (cl-letf (((symbol-function 'message) (lambda (&rest _) nil)))
         (funcall expire))
       ;; Act
@@ -1766,7 +1778,7 @@ as a user-visible malformed-frame error on every roster publish."
   ;; Arrange
   (agent-repl-test--with-uds
     (agent-repl-test--with-captured-deadline expire
-      (agent-repl--uds-track-command "req-1" "mergeWorkspace" "ws1")
+      (agent-repl-test--pend "req-1" "mergeWorkspace" "ws1")
       (cl-letf (((symbol-function 'message) (lambda (&rest _) nil)))
         (funcall expire))
       ;; Act
@@ -1779,10 +1791,10 @@ as a user-visible malformed-frame error on every roster publish."
   ;; Arrange
   (agent-repl-test--with-uds
     (agent-repl-test--with-captured-deadline expire
-      (agent-repl--uds-track-command "req-1" "mergeWorkspace" "ws1")
+      (agent-repl-test--pend "req-1" "mergeWorkspace" "ws1")
       (cl-letf (((symbol-function 'message) (lambda (&rest _) nil)))
         (funcall expire))
-      (agent-repl--uds-track-command "req-2" "mergeWorkspace" "ws1")
+      (agent-repl-test--pend "req-2" "mergeWorkspace" "ws1")
       ;; Act
       (agent-repl--uds-handle-command-ack '(:requestId "req-2" :ok t))
       ;; Assert
@@ -1793,10 +1805,10 @@ as a user-visible malformed-frame error on every roster publish."
   ;; Arrange
   (agent-repl-test--with-uds
     (agent-repl-test--with-captured-deadline expire
-      (agent-repl--uds-track-command "req-1" "mergeWorkspace" "ws1")
+      (agent-repl-test--pend "req-1" "mergeWorkspace" "ws1")
       (cl-letf (((symbol-function 'message) (lambda (&rest _) nil)))
         (funcall expire)
-        (agent-repl--uds-track-command "req-2" "mergeWorkspace" "ws1")
+        (agent-repl-test--pend "req-2" "mergeWorkspace" "ws1")
         ;; Act
         (agent-repl--uds-handle-command-ack
          '(:requestId "req-2" :error "branch not found"))
@@ -1927,3 +1939,323 @@ unfinished-wiring log, which is the opposite of what the list means."
     (should generated)
     (should-not (cl-remove-if (lambda (field) (member field generated))
                               agent-repl--uds-ignored-frame-fields))))
+
+;;;; ---- registration precedes the write ---------------------------------
+;;
+;; `process-send-string' YIELDS TO THE EVENT LOOP on a frame large enough
+;; to block, and the connection's own filter then runs the daemon's reply
+;; REENTRANTLY inside that yield — before the send has returned to its
+;; caller.  Two `publishWorkspaceRoster' commands took exactly that path
+;; live: both acks were received and logged as "UNTRACKED ... — ignoring",
+;; and ten seconds later the ack-aging alarm surfaced two
+;; `client.command_unacked' failure cards for commands the daemon had
+;; already retained.  These tests drive that exact interleaving.
+
+(defmacro agent-repl-test--with-reentrant-ack (ack &rest body)
+  "Run BODY with the write seam delivering ACK reentrantly, before it returns.
+Stands in for the real `process-send-string' yield in which the connection
+filter runs the daemon's answer while the send is still on the stack."
+  (declare (indent 1))
+  `(cl-letf (((symbol-function 'process-live-p) (lambda (p) (eq p 'fake-proc)))
+             ((symbol-function 'agent-repl--uds-generate-request-id)
+              (lambda () "req-reentrant"))
+             ((symbol-function 'process-send-string)
+              (lambda (_proc _s) (agent-repl--uds-handle-command-ack ,ack))))
+     (let ((agent-repl--uds-connection-state 'open)
+           (agent-repl--uds-outbound-queue nil))
+       ,@body)))
+
+(ert-deftest agent-repl-test-uds-reentrant-ack-is-matched ()
+  "An ack delivered inside the write is matched, not logged as UNTRACKED."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (acked)
+      (agent-repl-test--with-reentrant-ack '(:requestId "req-reentrant" :ok t)
+        ;; Act
+        (agent-repl--uds-send-command
+         "publishWorkspaceRoster" '(:roster nil) nil 'fake-proc
+         :on-success (lambda () (setq acked t)))
+        ;; Assert
+        (should acked)))))
+
+(ert-deftest agent-repl-test-uds-reentrant-ack-disarms-the-deadline ()
+  "The reentrant ack cancels the alarm that would have declared it lost."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (cancelled)
+      (cl-letf (((symbol-function 'agent-repl--uds-run-timer)
+                 (lambda (&rest _) 'deadline-timer))
+                ((symbol-function 'agent-repl--uds-cancel-ack-deadline)
+                 (lambda (pending)
+                   (setq cancelled (plist-get pending :deadline-timer)))))
+        (agent-repl-test--with-reentrant-ack '(:requestId "req-reentrant" :ok t)
+          ;; Act
+          (agent-repl--uds-send-command
+           "publishWorkspaceRoster" '(:roster nil) nil 'fake-proc)))
+      ;; Assert
+      (should (eq cancelled 'deadline-timer)))))
+
+(ert-deftest agent-repl-test-uds-reentrant-ack-drops-the-pending-entry ()
+  "The reentrant ack settles the command: nothing is left pending."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl-test--with-reentrant-ack '(:requestId "req-reentrant" :ok t)
+      ;; Act
+      (agent-repl--uds-send-command
+       "publishWorkspaceRoster" '(:roster nil) nil 'fake-proc))
+    ;; Assert
+    (should-not (gethash "req-reentrant" agent-repl--uds-pending-commands))))
+
+(ert-deftest agent-repl-test-uds-reentrant-ack-leaves-the-link-healthy ()
+  "A command answered inside its own write never degrades the link."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl-test--with-reentrant-ack '(:requestId "req-reentrant" :ok t)
+      ;; Act
+      (agent-repl--uds-send-command
+       "publishWorkspaceRoster" '(:roster nil) nil 'fake-proc))
+    ;; Assert
+    (should (eq (agent-repl-uds-link-health) :healthy))))
+
+(ert-deftest agent-repl-test-uds-reentrant-ack-surfaces-no-failure ()
+  "No failure is surfaced for a command the daemon demonstrably answered."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (surfaced)
+      (cl-letf (((symbol-function 'agent-repl-failure-surface)
+                 (lambda (&rest args) (push args surfaced))))
+        (agent-repl-test--with-reentrant-ack '(:requestId "req-reentrant" :ok t)
+          ;; Act
+          (agent-repl--uds-send-command
+           "publishWorkspaceRoster" '(:roster nil) nil 'fake-proc)))
+      ;; Assert
+      (should-not surfaced))))
+
+(ert-deftest agent-repl-test-uds-two-interleaved-sends-are-both-matched ()
+  "Two sends whose acks arrive inside their own writes both settle.
+The live failure interleaved two roster publishes and unwound them in
+reverse order; neither was tracked when its ack landed."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let ((ids '("fe-108" "fe-109")) settled)
+      (cl-letf (((symbol-function 'process-live-p) (lambda (p) (eq p 'fake-proc)))
+                ((symbol-function 'agent-repl--uds-generate-request-id)
+                 (lambda () (pop ids)))
+                ((symbol-function 'process-send-string)
+                 (lambda (_proc _s) nil)))
+        (let ((agent-repl--uds-connection-state 'open)
+              (agent-repl--uds-outbound-queue nil))
+          ;; Act — both acks arrive after both sends, out of order.
+          (agent-repl--uds-send-command
+           "publishWorkspaceRoster" '(:roster nil) nil 'fake-proc
+           :on-success (lambda () (push "fe-108" settled)))
+          (agent-repl--uds-send-command
+           "publishWorkspaceRoster" '(:roster nil) nil 'fake-proc
+           :on-success (lambda () (push "fe-109" settled)))
+          (agent-repl--uds-handle-command-ack '(:requestId "fe-109" :ok t))
+          (agent-repl--uds-handle-command-ack '(:requestId "fe-108" :ok t))))
+      ;; Assert
+      (should (equal (sort settled #'string<) '("fe-108" "fe-109"))))))
+
+(ert-deftest agent-repl-test-uds-registration-precedes-the-write ()
+  "The pending entry EXISTS by the time the first byte reaches the socket.
+This is the structural guarantee: no schedule can put an ack ahead of its
+own tracking, because the tracking is already done when the write starts."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (pending-at-write)
+      (cl-letf (((symbol-function 'process-live-p) (lambda (p) (eq p 'fake-proc)))
+                ((symbol-function 'agent-repl--uds-generate-request-id)
+                 (lambda () "req-order"))
+                ((symbol-function 'process-send-string)
+                 (lambda (_proc _s)
+                   (setq pending-at-write
+                         (gethash "req-order" agent-repl--uds-pending-commands)))))
+        (let ((agent-repl--uds-connection-state 'open)
+              (agent-repl--uds-outbound-queue nil))
+          ;; Act
+          (agent-repl--uds-send-command "interrupt" nil "ws1" 'fake-proc)))
+      ;; Assert
+      (should (equal (plist-get pending-at-write :field) "interrupt")))))
+
+(ert-deftest agent-repl-test-uds-queued-send-registers-before-queueing ()
+  "A frame withheld while `dialing' is tracked the moment it is queued.
+The sentinel writes it much later, so an entry registered only after the
+send returned would be no safer here than on the immediate path."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_p) t))
+              ((symbol-function 'process-name) (lambda (_p) "fake"))
+              ((symbol-function 'process-send-string) (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl--uds-generate-request-id)
+               (lambda () "queued-track-1")))
+      (let ((agent-repl--uds-process 'fake-proc)
+            (agent-repl--uds-connection-state 'dialing)
+            (agent-repl--uds-connect-started-at (float-time))
+            (agent-repl--uds-outbound-queue nil))
+        ;; Act
+        (agent-repl--uds-send-command "interrupt" '(:hard t) "ws1")
+        ;; Assert
+        (should (gethash "queued-track-1" agent-repl--uds-pending-commands))))))
+
+(ert-deftest agent-repl-test-uds-queued-send-ack-after-flush-settles ()
+  "The queued frame's ack, arriving after the sentinel flush, still settles."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (acked)
+      (cl-letf (((symbol-function 'process-live-p) (lambda (_p) t))
+                ((symbol-function 'process-name) (lambda (_p) "fake"))
+                ((symbol-function 'process-send-string) (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--uds-generate-request-id)
+                 (lambda () "queued-track-2")))
+        (let ((agent-repl--uds-process 'fake-proc)
+              (agent-repl--uds-connection-state 'dialing)
+              (agent-repl--uds-connect-started-at (float-time))
+              (agent-repl--uds-outbound-queue nil)
+              ;; The connected hook would send commands of its own through
+              ;; the stubbed id generator, colliding with this request-id.
+              (agent-repl-uds-connected-functions nil))
+          ;; Act
+          (agent-repl--uds-send-command
+           "interrupt" '(:hard t) "ws1" nil
+           :on-success (lambda () (setq acked t)))
+          (agent-repl--uds-sentinel 'fake-proc "open\n")
+          (agent-repl--uds-handle-command-ack '(:requestId "queued-track-2" :ok t))))
+      ;; Assert
+      (should acked))))
+
+(ert-deftest agent-repl-test-uds-queued-send-dial-failure-runs-on-failure ()
+  "A dial that dies before delivery settles the queued command as failed.
+The command is tracked from the moment it is queued, so the synthesized
+failure ack reaches the caller instead of aging out ten seconds later."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let ((live t) failure)
+      (cl-letf (((symbol-function 'process-live-p) (lambda (_p) live))
+                ((symbol-function 'process-name) (lambda (_p) "fake"))
+                ((symbol-function 'agent-repl--uds-generate-request-id)
+                 (lambda () "queued-dead-1")))
+        (let ((agent-repl--uds-process 'fake-proc)
+              (agent-repl--uds-connection-state 'dialing)
+              (agent-repl--uds-connect-started-at (float-time))
+              (agent-repl--uds-outbound-queue nil))
+          ;; Act
+          (agent-repl--uds-send-command
+           "interrupt" '(:hard t) "ws1" nil
+           :on-failure (lambda (err) (setq failure err)))
+          (setq live nil)
+          (agent-repl--uds-sentinel 'fake-proc "connection broken\n")))
+      ;; Assert
+      (should (equal failure "UDS dial failed before command delivery")))))
+
+(ert-deftest agent-repl-test-uds-on-registered-runs-before-the-write ()
+  "`:on-registered' fires after registration and before the first byte."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (order)
+      (cl-letf (((symbol-function 'process-live-p) (lambda (p) (eq p 'fake-proc)))
+                ((symbol-function 'agent-repl--uds-generate-request-id)
+                 (lambda () "req-hook"))
+                ((symbol-function 'process-send-string)
+                 (lambda (_proc _s) (push 'written order))))
+        (let ((agent-repl--uds-connection-state 'open)
+              (agent-repl--uds-outbound-queue nil))
+          ;; Act
+          (agent-repl--uds-send-command
+           "interrupt" nil "ws1" 'fake-proc
+           :on-registered (lambda (_id) (push 'registered order)))))
+      ;; Assert
+      (should (equal (nreverse order) '(registered written))))))
+
+(ert-deftest agent-repl-test-uds-on-registered-failure-untracks-and-signals ()
+  "A signalling `:on-registered' unregisters the command and propagates.
+Nothing was written, so leaving the entry armed would age out a command
+that never went anywhere."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (written)
+      (cl-letf (((symbol-function 'process-live-p) (lambda (p) (eq p 'fake-proc)))
+                ((symbol-function 'agent-repl--uds-generate-request-id)
+                 (lambda () "req-hook-bad"))
+                ((symbol-function 'process-send-string)
+                 (lambda (_proc _s) (setq written t))))
+        (let ((agent-repl--uds-connection-state 'open)
+              (agent-repl--uds-outbound-queue nil))
+          ;; Act / Assert
+          (should-error
+           (agent-repl--uds-send-command
+            "interrupt" nil "ws1" 'fake-proc
+            :on-registered (lambda (_id) (error "hook is broken"))))
+          (should-not written)
+          (should-not (gethash "req-hook-bad"
+                               agent-repl--uds-pending-commands)))))))
+
+(ert-deftest agent-repl-test-uds-unanswered-send-still-ages-out ()
+  "A command the daemon never answers still degrades the link and surfaces.
+The fix must not buy a quiet reentrant ack at the price of the aging that
+caught three vanished `mergeWorkspace' commands."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (surfaced)
+      (agent-repl-test--with-captured-deadline expire
+        (cl-letf (((symbol-function 'process-live-p) (lambda (p) (eq p 'fake-proc)))
+                  ((symbol-function 'agent-repl--uds-generate-request-id)
+                   (lambda () "req-lost"))
+                  ((symbol-function 'process-send-string) (lambda (&rest _) nil))
+                  ((symbol-function 'agent-repl-failure-surface)
+                   (lambda (_ws failure) (push failure surfaced))))
+          (let ((agent-repl--uds-connection-state 'open)
+                (agent-repl--uds-outbound-queue nil))
+            (agent-repl--uds-send-command
+             "mergeWorkspace" '(:workspaceName "ws1") "ws1" 'fake-proc)
+            ;; Act — no ack ever arrives; the alarm fires.
+            (funcall expire))))
+      ;; Assert
+      (should (eq (agent-repl-uds-link-health) :degraded))
+      (should (= (length surfaced) 1))
+      (should (equal (plist-get (car surfaced) :type) "client.command_unacked")))))
+
+(ert-deftest agent-repl-test-uds-unanswered-send-logs-its-loss ()
+  "The aged-out command is recorded through the canonical log helper."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (logged)
+      (agent-repl-test--with-captured-deadline expire
+        (cl-letf (((symbol-function 'process-live-p) (lambda (p) (eq p 'fake-proc)))
+                  ((symbol-function 'agent-repl--uds-generate-request-id)
+                   (lambda () "req-lost-2"))
+                  ((symbol-function 'process-send-string) (lambda (&rest _) nil))
+                  ((symbol-function 'agent-repl-failure-surface) (lambda (&rest _) nil))
+                  ((symbol-function 'agent-repl--log)
+                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+          (let ((agent-repl--uds-connection-state 'open)
+                (agent-repl--uds-outbound-queue nil))
+            (agent-repl--uds-send-command
+             "mergeWorkspace" '(:workspaceName "ws1") "ws1" 'fake-proc)
+            ;; Act
+            (funcall expire))))
+      ;; Assert
+      (should (cl-some (lambda (line)
+                         (and (string-match-p "UNACKED" line)
+                              (string-match-p "req-lost-2" line)
+                              (string-match-p "mergeWorkspace" line)))
+                       logged)))))
+
+(ert-deftest agent-repl-test-uds-untrack-still-cleans-an-aborted-wait ()
+  "An aborted synchronous wait can still retire its own registration."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl-test--with-captured-deadline expire
+      (cl-letf (((symbol-function 'process-live-p) (lambda (p) (eq p 'fake-proc)))
+                ((symbol-function 'agent-repl--uds-generate-request-id)
+                 (lambda () "req-abandoned"))
+                ((symbol-function 'process-send-string) (lambda (&rest _) nil)))
+        (let ((agent-repl--uds-connection-state 'open)
+              (agent-repl--uds-outbound-queue nil))
+          (agent-repl--uds-send-command "interrupt" nil "ws1" 'fake-proc)
+          ;; Act
+          (agent-repl--uds-untrack-command "req-abandoned" "ws1" "caller-gave-up")
+          ;; Assert
+          (should-not (gethash "req-abandoned" agent-repl--uds-pending-commands))
+          (funcall expire)
+          (should (eq (agent-repl-uds-link-health) :healthy)))))))
