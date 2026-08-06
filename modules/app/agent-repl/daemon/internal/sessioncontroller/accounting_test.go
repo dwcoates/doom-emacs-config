@@ -294,6 +294,61 @@ func TestHistoricalResumeIdentityMismatchRemainsFatalBeforeLiveQueryBoundary(t *
 	}
 }
 
+// ---------------------------------------------------------------------------
+// THE BLAST-RADIUS CONTRACT, pinned once more directly on Apply (the
+// lifecycle path the three diagnosed failures actually took), alongside the
+// per-error-class coverage above: a bookkeeping-only accounting failure never
+// denies the turn boundary or session establishment (the GUARANTEE), while
+// the one accounting failure that is a genuine protocol contradiction — the
+// live query lifecycle disagreeing with its own bound identity — stays
+// exactly as fatal as it always was (the VIOLATION).
+// ---------------------------------------------------------------------------
+
+// TestAccountingBookkeepingFailureOnApplyDoesNotDenyEstablishment is the
+// GUARANTEE: a malformed usage observation delivered through Apply (the
+// lifecycle path, not just Consume's frame-translation path) still lets the
+// turn boundary reach the SSM — establishment proceeds — with only this
+// event's accounting degraded.
+func TestAccountingBookkeepingFailureOnApplyDoesNotDenyEstablishment(t *testing.T) {
+	// Arrange.
+	applier := &fakeApplier{}
+	c := newConsumer("ws", "s", &fakePusher{}, applier, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, func(string, ...any) {}, nil, nil, nil, nil, nil)
+	c.accounting.queryID = "q"
+	malformed := usageObservation("t-missing", true) // names a turn the reducer never admitted.
+
+	// Act.
+	err := c.Apply(&corev1.Event{Seq: 1, RequestId: "t-missing", Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: malformed}})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Apply error = %v, want the bookkeeping failure to leave the boundary and establishment unaffected", err)
+	}
+	if len(applier.applied) != 1 {
+		t.Fatalf("ssm apply count = %d, want the event still applied", len(applier.applied))
+	}
+}
+
+// TestAccountingQueryIdentityContradictionOnApplyStaysFatal is the
+// VIOLATION: the live query lifecycle contradicting its own bound identity is
+// not bookkeeping, so Apply still refuses the delivery for it exactly as it
+// did before the blast-radius change.
+func TestAccountingQueryIdentityContradictionOnApplyStaysFatal(t *testing.T) {
+	// Arrange.
+	c := newConsumer("ws", "s", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, func(string, ...any) {}, nil, nil, nil, nil, nil)
+	c.accounting.queryID = "live-query"
+	contradiction := &corev1.Event{Seq: 1, QueryInstanceId: "live-query", Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+		QueryInstanceId: "other-query",
+	}}}
+
+	// Act.
+	err := c.Apply(contradiction)
+
+	// Assert.
+	if err == nil || !errors.Is(err, ErrAccountingQueryIdentityContradiction) {
+		t.Fatalf("Apply error = %v, want the query identity contradiction to stay fatal", err)
+	}
+}
+
 func TestTokenUsageFromAPIPreservesEveryRawUsageField(t *testing.T) {
 	cache, _ := structpb.NewStruct(map[string]any{"ephemeral_5m_input_tokens": 11, "ephemeral_1h_input_tokens": 12})
 	tools, _ := structpb.NewStruct(map[string]any{"web_search_requests": 2, "web_fetch_requests": 3})
@@ -770,7 +825,14 @@ func TestTurnAccountingReducerInvalidatesUsageWindowReset(t *testing.T) {
 	}
 }
 
-func TestTerminalAccountingPersistenceFailurePreventsTerminalFrontendDelivery(t *testing.T) {
+// TestTerminalAccountingPersistenceFailureDegradesAccountingWithoutDenyingEstablishment
+// covers the BLAST-RADIUS requirement: a terminal accounting persistence
+// failure is bookkeeping, not a protocol violation, so it must not deny the
+// turn boundary itself or the session's establishment — Apply succeeds, the
+// turn's own lifecycle state is unaffected, and only its accounting (and the
+// terminal conversation delivery that accounting gates) stays withheld,
+// loudly logged.
+func TestTerminalAccountingPersistenceFailureDegradesAccountingWithoutDenyingEstablishment(t *testing.T) {
 	push := &fakePusher{}
 	var logs []string
 	c := newConsumer("ws", "s", push, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }, nil, nil, nil, nil, nil)
@@ -780,8 +842,8 @@ func TestTerminalAccountingPersistenceFailurePreventsTerminalFrontendDelivery(t 
 	}
 	c.Consume(accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Result{Result: &datav1.ResultMessage{}}}))
 	err := c.Apply(&corev1.Event{Seq: 2, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "t"}}})
-	if err == nil || !strings.Contains(err.Error(), "disk unavailable") {
-		t.Fatalf("Apply error = %v", err)
+	if err != nil {
+		t.Fatalf("Apply error = %v, want the turn boundary accepted despite the persistence failure", err)
 	}
 	if len(push.convo) != 0 {
 		t.Fatalf("terminal conversation delivered before persistence: %+v", push.convo)
@@ -789,8 +851,12 @@ func TestTerminalAccountingPersistenceFailurePreventsTerminalFrontendDelivery(t 
 	if c.accounting.turns["t"] == nil || c.accounting.activeTurnID != "t" {
 		t.Fatalf("failed terminal persistence retired reducer state: turns=%+v active=%q", c.accounting.turns, c.accounting.activeTurnID)
 	}
-	if !strings.Contains(strings.Join(logs, "\n"), "terminal accounting persistence FAILED") {
+	log := strings.Join(logs, "\n")
+	if !strings.Contains(log, "terminal accounting persistence FAILED") {
 		t.Fatalf("logs = %v", logs)
+	}
+	if !strings.Contains(log, "ACCOUNTING DEGRADED") {
+		t.Fatalf("logs = %v, want the blast-radius demotion logged loudly", logs)
 	}
 }
 
@@ -986,26 +1052,34 @@ func historicalUsageEvent(t *testing.T) *corev1.Event {
 	return &corev1.Event{Seq: 9, SessionId: "claude", Plane: corev1.Plane_PLANE_FILE, Payload: &corev1.Event_Vendor{Vendor: vendor}}
 }
 
-func TestUnknownUsageObservationFailsBeforeAnyConsumerMutation(t *testing.T) {
+// TestUnknownUsageObservationDegradesAccountingWithoutDenyingTheEvent is the
+// blast-radius contract for one of the three accounting error classes: an
+// observation naming a turn the reducer never admitted is bookkeeping
+// evidence the reducer cannot use, not a protocol violation, so it degrades
+// this event's accounting (loudly) rather than rejecting the event itself.
+func TestUnknownUsageObservationDegradesAccountingWithoutDenyingTheEvent(t *testing.T) {
 	applier := &fakeApplier{}
 	var logs []string
 	c := newConsumer("ws", "s", &fakePusher{}, applier, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }, nil, nil, nil, nil, nil)
 	c.accounting.queryID = "q"
 	ev := &corev1.Event{Seq: 9, RequestId: "t-missing", Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation("t-missing", true)}}
 	err := c.Apply(ev)
-	var unknown *unknownAccountingTurnError
-	if !errors.As(err, &unknown) || unknown.turnID != "t-missing" || unknown.boundary != "turn_start" {
-		t.Fatalf("Apply error = %v", err)
+	if err != nil {
+		t.Fatalf("Apply error = %v, want the event still applied despite the unknown-turn observation", err)
 	}
-	if len(applier.applied) != 0 || len(c.snapshotRing()) != 0 {
-		t.Fatalf("consumer mutated before rejection: applied=%d retained=%d", len(applier.applied), len(c.snapshotRing()))
+	if len(applier.applied) != 1 || len(c.snapshotRing()) != 1 {
+		t.Fatalf("event was not applied and retained: applied=%d retained=%d", len(applier.applied), len(c.snapshotRing()))
 	}
-	if !strings.Contains(strings.Join(logs, "\n"), "turn accounting observation REJECTED") {
+	log := strings.Join(logs, "\n")
+	if !strings.Contains(log, "turn accounting observation REJECTED") || !strings.Contains(log, `turn_id="t-missing"`) {
 		t.Fatalf("logs = %v", logs)
+	}
+	if !strings.Contains(log, "ACCOUNTING DEGRADED") {
+		t.Fatalf("logs = %v, want the blast-radius demotion logged loudly", logs)
 	}
 }
 
-func TestMalformedUsageObservationFailsBeforeAnyConsumerMutation(t *testing.T) {
+func TestMalformedUsageObservationDegradesAccountingWithoutDenyingTheEvent(t *testing.T) {
 	tests := []struct {
 		name            string
 		authoritativeID string
@@ -1123,8 +1197,18 @@ func TestTurnAccountingReducerAcceptsEveryUnavailableReason(t *testing.T) {
 	}
 }
 
+// assertMalformedUsageObservationRejected is the blast-radius contract for
+// the third accounting error class: a malformed observation is bookkeeping
+// evidence the reducer must refuse to retain, not a protocol violation, so it
+// degrades this event's accounting (loudly, with the exact malformed cause)
+// rather than rejecting the event itself.
 func assertMalformedUsageObservationRejected(t *testing.T, authoritativeID, requestID string, observation *corev1.AccountUsageObservation, want string) {
 	t.Helper()
+	wantCause := validateAccountUsageObservation(liveEvidence{queryID: authoritativeID}, requestID, observation)
+	var malformed *malformedAccountUsageObservationError
+	if !errors.As(wantCause, &malformed) || !strings.Contains(wantCause.Error(), want) {
+		t.Fatalf("expected malformed cause = %v, want it containing %q", wantCause, want)
+	}
 	applier := &fakeApplier{}
 	var logs []string
 	c := newConsumer("ws", "s", &fakePusher{}, applier, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }, nil, nil, nil, nil, nil)
@@ -1134,14 +1218,16 @@ func assertMalformedUsageObservationRejected(t *testing.T, authoritativeID, requ
 	}
 	beforeApplied, beforeRetained := len(applier.applied), len(c.snapshotRing())
 	err := c.Apply(&corev1.Event{Seq: 2, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: requestID, Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: observation}})
-	var malformed *malformedAccountUsageObservationError
-	if !errors.As(err, &malformed) || !strings.Contains(err.Error(), want) {
-		t.Fatalf("Apply error = %v, want malformed observation containing %q", err, want)
+	if err != nil {
+		t.Fatalf("Apply error = %v, want the event still applied despite the malformed observation", err)
 	}
-	if len(applier.applied) != beforeApplied || len(c.snapshotRing()) != beforeRetained {
-		t.Fatalf("consumer mutated before rejection: applied=%d retained=%d", len(applier.applied), len(c.snapshotRing()))
+	if len(applier.applied) != beforeApplied+1 || len(c.snapshotRing()) != beforeRetained+1 {
+		t.Fatalf("event was not applied and retained: applied=%d retained=%d", len(applier.applied), len(c.snapshotRing()))
 	}
 	log := strings.Join(logs, "\n")
+	if !strings.Contains(log, "ACCOUNTING DEGRADED") {
+		t.Fatalf("logs = %v, want the blast-radius demotion logged loudly", logs)
+	}
 	boundary := "unspecified"
 	switch observation.GetBoundary().(type) {
 	case *corev1.AccountUsageObservation_TurnStart:

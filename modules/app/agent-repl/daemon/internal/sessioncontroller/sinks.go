@@ -765,12 +765,28 @@ func (c *consumer) applyCommandsChanged(cc *datav1.CommandsChanged) *datav1.Syst
 // the session controller sees the start. A lifecycle rejection or SSM
 // apply error is loud-logged and aborts this delivery, so shimclient cannot
 // advance last_seen_seq past state the daemon did not accept.
+//
+// ACCOUNTING IS BOOKKEEPING AND MAY NOT GATE THIS DELIVERY. A failure inside
+// c.accounting.observe is, by construction, about the TOKEN-UTILIZATION
+// LEDGER alone — a malformed usage observation, an unattributed response, a
+// response whose embedded session id cannot be reconciled — never about
+// whether this event is a valid turn-lifecycle or SSM boundary. Before this,
+// every one of those failures returned from Apply exactly like a genuine
+// protocol violation (a seq regression, a rejected handshake), which
+// shimclient's dispatch treats identically: the shim connection is torn down
+// as terminal, the session controller exits, and if this happens during
+// bring-up the workspace never establishes at all — a bookkeeping
+// disagreement about one turn's token accounting denying the user their
+// entire conversation. See degradeAccountingObservation.
 func (c *consumer) Apply(ev *corev1.Event) error {
 	// The reducer consumes every durable lifecycle and observation fact before
-	// derived state can publish a terminal result.
+	// derived state can publish a terminal result. Its failure DEGRADES this
+	// turn's accounting — loudly, below — and does not stop the boundary
+	// itself from reaching the turn ledger, the SSM, or the frontend.
 	if err := c.accounting.observe(ev, c.sessionID); err != nil {
-		c.logRejectedAccountingObservation(ev, err)
-		return fmt.Errorf("session-controller: observe turn accounting: %w", err)
+		if fatal := c.degradeAccountingObservation(ev, err); fatal != nil {
+			return fmt.Errorf("session-controller: observe turn accounting: %w", fatal)
+		}
 	}
 	applyState := true
 	var turnResult *turnResolution
@@ -871,14 +887,42 @@ func (c *consumer) Apply(ev *corev1.Event) error {
 		}
 	}
 	if ended := ev.GetTurnEnded(); ended != nil && ended.GetTurnId() != "" {
+		// A settlement failure DEGRADES this turn's accounting only. The turn
+		// itself already reached the durable ledger, the SSM, and the frontend
+		// above — establishment and the conversation are unaffected. See the
+		// comment on Apply's own accounting.observe call for why this may not
+		// be allowed to abort the delivery.
 		if err := c.settleTurnAccounting(ended.GetTurnId()); err != nil {
-			return err
-		}
-		if c.onTerminalAccountingPersisted != nil {
+			c.logf("session-controller: ACCOUNTING DEGRADED session=%s turn_id=%s seq=%d — terminal settlement FAILED and this turn's accounting is unavailable, but the turn boundary itself was already accepted and the session establishes normally: %v",
+				c.sessionID, ended.GetTurnId(), ev.GetSeq(), err)
+		} else if c.onTerminalAccountingPersisted != nil {
 			c.onTerminalAccountingPersisted()
 			c.logf("session-controller: terminal accounting SessionView republished session=%s turn_id=%s", c.sessionID, ended.GetTurnId())
 		}
 	}
+	return nil
+}
+
+// degradeAccountingObservation records an accounting-observation failure
+// LOUDLY, through the same structured helper the old fatal path used, and
+// reports whether the caller may still continue.
+//
+// EVERY FAILURE EXCEPT ONE DEGRADES: the boundary this event carries still
+// reaches the turn ledger, the SSM, and the frontend, because a
+// token-utilization bookkeeping failure is never a reason to withhold a
+// user's conversation or deny a workspace's establishment. See the comment
+// on Apply. The one exception —
+// ErrAccountingQueryIdentityContradiction — is not bookkeeping: it is the
+// live query() invocation disagreeing with itself about its own identity,
+// which stays exactly as fatal as it always was and is returned unchanged
+// for the caller to propagate.
+func (c *consumer) degradeAccountingObservation(ev *corev1.Event, cause error) error {
+	c.logRejectedAccountingObservation(ev, cause)
+	if errors.Is(cause, ErrAccountingQueryIdentityContradiction) {
+		return cause
+	}
+	c.logf("session-controller: ACCOUNTING DEGRADED session=%s seq=%d kind=%s — this event's token-utilization evidence is unavailable, but the event itself is still applied and the session establishes normally: %v",
+		c.sessionID, ev.GetSeq(), stateKind(ev), cause)
 	return nil
 }
 
@@ -1038,9 +1082,15 @@ func (c *consumer) Consume(ev *corev1.Event) error {
 		return fmt.Errorf("session-controller: resumed query identity mismatch before frame mutation: %w", mismatchErr)
 	}
 	historicalQueryID, historicalQueryLifecycle := c.accounting.HistoricalQueryLifecycle(ev)
+	// ACCOUNTING IS BOOKKEEPING AND MAY NOT GATE CONVERSATION DELIVERY EITHER.
+	// See the comment on consumer.Apply: a token-utilization ledger failure is
+	// never a reason to withhold this event's conversation content from the
+	// user, so it degrades this event's accounting, loudly, rather than
+	// aborting the frame translation below.
 	if err := c.accounting.observe(ev, c.sessionID); err != nil {
-		c.logRejectedAccountingObservation(ev, err)
-		return fmt.Errorf("session-controller: observe turn accounting before frame mutation: %w", err)
+		if fatal := c.degradeAccountingObservation(ev, err); fatal != nil {
+			return fmt.Errorf("session-controller: observe turn accounting before frame mutation: %w", fatal)
+		}
 	}
 	if historicalQueryLifecycle {
 		c.logf("session-controller: historical query lifecycle ACCEPTED without accounting rebind session=%s seq=%d historical_query_instance_id=%q live_query_instance_id=%q lifecycle=%T decision=retain_history_keep_live_handshake_authority",
