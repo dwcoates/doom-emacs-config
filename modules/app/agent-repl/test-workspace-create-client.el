@@ -344,6 +344,25 @@ carries one gets exactly that string on its `:priority'."
            :priority "p1"))
         (should (equal (agent-repl--ws-get "prioritized" :priority) "p1"))))))
 
+(ert-deftest agent-repl-test-available-priority-reseats-the-tab ()
+  "A daemon-announced priority reorders the tab immediately.
+`agent-repl-set-priority' and the open-workspace path both reseat the
+workspace in `persp-names-cache' right after mutating `:priority', so
+materialization must do the same rather than leaving the new tab
+wherever `persp-add-new' happened to append it."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-command-inbox
+      (let (reordered)
+        (cl-letf (((symbol-function 'agent-repl--eager-open-panels)
+                   (lambda (&rest _) nil))
+                  ((symbol-function 'agent-repl--reorder-workspace-by-priority)
+                   (lambda (ws) (push ws reordered))))
+          (agent-repl-test--materialize-available
+           '(:jobId "workspace_commands_seat:0" :finalName "reseated"
+             :worktreePath "/tmp/wt/reseated" :sessionId "session-seat"
+             :priority "p1"))
+          (should (equal reordered '("reseated"))))))))
+
 (ert-deftest agent-repl-test-available-without-priority-leaves-it-nil ()
   "An announcement carrying no priority leaves the workspace without one,
 so the tab paints no badge rather than inventing a default."
