@@ -631,17 +631,21 @@ func resolve(db *sql.DB, workspace string, logf dlog.Logf) (resolved, error) {
 		mergePhase = mergeState.String
 	}
 
-	// The shim-accepted command edge is the first authoritative observation
-	// that a turn is beginning; the durable stream TurnStarted later replaces
-	// its cause without changing the truth value.
-	// EVERY edge that opens a turn counts, and the split into `submitting` and
-	// `thinking` added one. Omitting the delivered edge would report no turn
-	// active for the whole span between the shim ack and the durable
-	// TurnStarted, which is exactly when the agent is working hardest.
-	turnActive := agentCause.Valid &&
-		(agentCause.String == causeTurnStarted ||
-			agentCause.String == causePromptAccepted ||
-			agentCause.String == causePromptDelivered)
+	// TURN LIVENESS IS NOT RESOLVED HERE. It is DERIVED, once, by
+	// deriveTurnLiveness, and this is one of its readers — the same value the
+	// prompt queue, the drain hold and the interrupt gate hold.
+	//
+	// It used to be folded out of the winning row's cause kind, which made the
+	// resolver a second authority on the question: a workspace whose axis
+	// dropped a `thinking` row (a store replay the axis deduplicated and the
+	// turn ledger did not) resolved turn_active=false while every prompt queued
+	// behind a claim the ledger still held open. Reading the derivation is what
+	// makes the two answers one answer.
+	liveness, err := deriveTurnLiveness(db, workspace)
+	if err != nil {
+		return resolved{}, err
+	}
+	turnActive := liveness.Active()
 
 	// AN INVARIANT VIOLATION, never a benign combination. A hibernation is
 	// something WE do on purpose, and sessioncontroller's hibernate() refuses any

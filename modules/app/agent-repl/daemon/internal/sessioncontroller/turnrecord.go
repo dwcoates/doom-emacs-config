@@ -1,6 +1,10 @@
 package sessioncontroller
 
-import "fmt"
+import (
+	"fmt"
+
+	"claude-repld/internal/ssm"
+)
 
 // This file holds the session controller's ONE answer to "is a turn in flight,
 // and which turn is it".
@@ -139,31 +143,36 @@ func (d *sessionController) noteTurnAcceptedLocked(requestID string) (before tur
 // Caller holds m.mu.
 func (d *sessionController) noteTurnRestoreLocked(before turnRecord) { d.turn = before }
 
-// turnClaimProjection is what a durable claim set says the record should be, and
-// what actually happened when it was applied.
+// turnClaimProjection is what the ONE turn-liveness derivation says the record
+// should be, and what actually happened when it was applied.
 type turnClaimProjection struct {
 	before   turnRecord
 	after    turnRecord
 	changed  bool
-	unnamed  bool // the claim set is non-empty and names nothing (legacy start)
-	released bool // the claim set is empty: this projection RELEASES the hold
+	unnamed  bool // the derivation holds a live turn and names nothing (legacy start)
+	released bool // the derivation holds no live turn: this projection RELEASES the hold
 }
 
-// noteTurnClaimsLocked projects the SSM's durable active-turn claim set onto the
-// record. The ledger is the authority on which turns are in flight, so the
-// record is derived from it rather than accumulated beside it — which is what
-// makes "active without provenance" unreachable instead of merely unlikely.
+// noteTurnLivenessLocked binds the record to the SSM's ONE turn-liveness
+// derivation — the same value the workspace color was painted from, in the same
+// transaction that moved the durable ledger.
 //
-// An UNNAMEABLE claim set (a legacy start, which carries no turn id) resolves to
+// IT DOES NOT RE-FOLD ANYTHING. There is no count of claims here and no
+// event-stream memory: the record is the derivation, projected onto the phases
+// this process can honestly claim. That is what makes the queue's "turn in
+// flight" answer and the color's answer the SAME answer rather than two that
+// have to be kept in step.
+//
+// An UNNAMEABLE live turn (a legacy start, which carries no turn id) resolves to
 // adopted, never to named with an empty string. The caller reports it loudly:
 // the turn is real and holds the drain, and the record says so, but nothing
 // pretends to have an id for it.
 //
 // Caller holds m.mu.
-func (d *sessionController) noteTurnClaimsLocked(activeIDs []string) turnClaimProjection {
+func (d *sessionController) noteTurnLivenessLocked(l ssm.TurnLiveness) turnClaimProjection {
 	p := turnClaimProjection{before: d.turn}
-	switch id, named := firstNamedClaim(activeIDs); {
-	case len(activeIDs) == 0:
+	switch id, named := l.Name(); {
+	case !l.Active():
 		p.after = turnRecord{}
 		p.released = true
 	case named:

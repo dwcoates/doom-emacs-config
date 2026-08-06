@@ -9,6 +9,7 @@ import (
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"claude-repld/internal/registry"
+	"claude-repld/internal/ssm"
 	"claude-repld/internal/statedb"
 )
 
@@ -291,9 +292,10 @@ func (m *Manager) WiredSessions() []string {
 	return out
 }
 
-// noteTurnClaims binds the controller's turn record to the SSM turn ledger's
-// active claim set, at the moment the ledger accepted a boundary and before this
-// delivery moves anything user-visible (sinks.go, consumer.Apply).
+// noteTurnLiveness binds the controller's turn record to the SSM's ONE
+// turn-liveness derivation, at the moment the boundary transaction that
+// produced it committed and before this delivery moves anything user-visible
+// (sinks.go, consumer.Apply).
 //
 // The engine is told AFTER the mutex is released, and it is told on the NAMING
 // edge as well as on the active/idle one. A turn that starts while another is
@@ -301,24 +303,37 @@ func (m *Manager) WiredSessions() []string {
 // about the rename from nothing, and a hold broadcast in that window named the
 // turn that had ended.
 //
+// AN UNDERIVED VALUE IS AN INVARIANT VIOLATION, and it fails hard here. The only
+// way to hold an ssm.TurnLiveness is to be handed one by the ssm package, so a
+// zero value arriving means a caller declared its own and passed it off as the
+// derivation — the second authority this whole design exists to make
+// unreachable. It is refused rather than read: a zero value's Active() is false,
+// and treating that as "no turn in flight" is precisely the wedge (green sidebar,
+// prompts delivered into a live turn) rather than a safe default.
+//
 // Must be called with m.mu RELEASED.
-func (m *Manager) noteTurnClaims(d *sessionController, activeIDs []string) {
+func (m *Manager) noteTurnLiveness(d *sessionController, l ssm.TurnLiveness) {
+	if !l.Derived() {
+		m.logf("session-controller: INVARIANT VIOLATION ws=%q session=%s edge=turn_liveness liveness=%s — the turn record was handed a turn-liveness value nothing derived; the record is left exactly as it was and no drain, queue or color decision is taken from it: %v",
+			d.workspace, d.sessionID, l, ssm.ErrTurnLivenessUnderived)
+		return
+	}
 	m.mu.Lock()
-	p := d.noteTurnClaimsLocked(activeIDs)
+	p := d.noteTurnLivenessLocked(l)
 	m.mu.Unlock()
 
 	if p.unnamed {
 		// LOUD, NEVER AN EMPTY STRING IN A NAMED RECORD. A legacy start carries
-		// no turn id, so the ledger holds a claim nothing can name. The record
-		// says exactly that (adopted) and the drain still holds for the turn.
-		m.logf("session-controller: turn claim set NAMES NOTHING ws=%q session=%s claims=%s before=%s after=%s edge=turn_claims — the boundary carried no turn id, so the record is held as adopted rather than named with an empty id; the drain hold for this turn cannot be correlated with the ledger",
-			d.workspace, d.sessionID, formatTurnIDs(activeIDs), p.before, p.after)
+		// no turn id, so the derivation holds a live turn nothing can name. The
+		// record says exactly that (adopted) and the drain still holds for it.
+		m.logf("session-controller: turn liveness NAMES NOTHING ws=%q session=%s liveness=%s before=%s after=%s edge=turn_liveness — the boundary carried no turn id, so the record is held as adopted rather than named with an empty id; the drain hold for this turn cannot be correlated with the ledger",
+			d.workspace, d.sessionID, l, p.before, p.after)
 	}
 	if !p.changed {
 		return
 	}
-	m.logf("session-controller: turn record BOUND ws=%q session=%s before=%s after=%s claims=%s edge=turn_claims",
-		d.workspace, d.sessionID, p.before, p.after, formatTurnIDs(activeIDs))
+	m.logf("session-controller: turn record BOUND ws=%q session=%s before=%s after=%s liveness=%s edge=turn_liveness",
+		d.workspace, d.sessionID, p.before, p.after, l)
 	// The hold this daemon reports for the session just gained a name (or a
 	// different one). The engine never trusts a delta, so it is simply told a
 	// fact moved and re-reads DrainHolds itself.

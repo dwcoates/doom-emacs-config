@@ -2219,8 +2219,8 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 	}
 	// The turn record's binding edge: the SSM's durable claim ledger has just
 	// accepted a boundary, and nothing user-visible has moved yet.
-	cons.onTurnClaims = func(activeIDs []string) {
-		m.noteTurnClaims(d, activeIDs)
+	cons.onTurnLiveness = func(l ssm.TurnLiveness) {
+		m.noteTurnLiveness(d, l)
 	}
 	// The keep-alive policy's measuring point. Persisted per accepted turn end,
 	// which is what makes every later decision a time-since check against a
