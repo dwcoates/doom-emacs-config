@@ -76,7 +76,7 @@ func TestOpenRepairsPersistedOrphanEndsOnce(t *testing.T) {
 
 func TestApplyRejectsTaskEndWithoutIdentity(t *testing.T) {
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	err := m.Apply(evTaskEnded("s1", 1, "", corev1.TerminalStatus_TERMINAL_STATUS_LOST))
+	err := applyTest(m, evTaskEnded("s1", 1, "", corev1.TerminalStatus_TERMINAL_STATUS_LOST))
 	if err == nil {
 		t.Fatal("TaskEnded without task_id must fail")
 	}

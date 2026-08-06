@@ -20,14 +20,14 @@ import (
 func TestMarkedTurnEndResolvesInterrupted(t *testing.T) {
 	// Arrange — a turn is running and the user's stop was delivered.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 	if err := m.MarkTurnInterrupted("ws1"); err != nil {
 		t.Fatalf("mark: %v", err)
 	}
 	// Act.
-	if err := m.Apply(evTurnEndedReason("s1", 2, "aborted", true)); err != nil {
+	if err := applyTest(m, evTurnEndedReason("s1", 2, "aborted", true)); err != nil {
 		t.Fatalf("turn ended: %v", err)
 	}
 	// Assert.
@@ -42,11 +42,11 @@ func TestMarkedTurnEndResolvesInterrupted(t *testing.T) {
 func TestUnmarkedTurnEndStillResolvesDone(t *testing.T) {
 	// Arrange — a turn ends after an interject's stop, which never marks.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 	// Act.
-	if err := m.Apply(evTurnEndedReason("s1", 2, "aborted", true)); err != nil {
+	if err := applyTest(m, evTurnEndedReason("s1", 2, "aborted", true)); err != nil {
 		t.Fatalf("turn ended: %v", err)
 	}
 	// Assert.
@@ -60,11 +60,14 @@ func TestUnmarkedTurnEndStillResolvesDone(t *testing.T) {
 func TestMarkedTurnEndSupersedesVendorBlocked(t *testing.T) {
 	// Arrange.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
+		t.Fatalf("turn started: %v", err)
+	}
 	if err := m.MarkTurnInterrupted("ws1"); err != nil {
 		t.Fatalf("mark: %v", err)
 	}
 	// Act.
-	if err := m.Apply(evTurnEndedReason("s1", 1, "error_during_execution", true)); err != nil {
+	if err := applyTest(m, evTurnEndedReason("s1", 2, "error_during_execution", true)); err != nil {
 		t.Fatalf("turn ended: %v", err)
 	}
 	// Assert.
@@ -79,11 +82,14 @@ func TestMarkedTurnEndSupersedesVendorBlocked(t *testing.T) {
 func TestInterruptedTurnEndWritesExactlyOneAgentRow(t *testing.T) {
 	// Arrange.
 	m, _, path := openTest(t, fakeResolver{"s1": "ws1"})
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
+		t.Fatalf("turn started: %v", err)
+	}
 	if err := m.MarkTurnInterrupted("ws1"); err != nil {
 		t.Fatalf("mark: %v", err)
 	}
 	// Act.
-	if err := m.Apply(evTurnEndedReason("s1", 1, "aborted", true)); err != nil {
+	if err := applyTest(m, evTurnEndedReason("s1", 2, "aborted", true)); err != nil {
 		t.Fatalf("turn ended: %v", err)
 	}
 	// Assert.
@@ -93,7 +99,7 @@ func TestInterruptedTurnEndWritesExactlyOneAgentRow(t *testing.T) {
 	}
 	defer db.Close()
 	got := agentRowsOnly(rowsFor(t, db, "ws1"))
-	want := [][2]string{{sigInterrupted, causeInterrupted}}
+	want := [][2]string{{sigThinking, causeTurnStarted}, {sigInterrupted, causeInterrupted}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("rows = %v, want %v", got, want)
 	}
@@ -107,11 +113,17 @@ func TestTheNextTurnAfterAnInterruptReportsItsOwnOutcome(t *testing.T) {
 	if err := m.MarkTurnInterrupted("ws1"); err != nil {
 		t.Fatalf("mark: %v", err)
 	}
-	if err := m.Apply(evTurnEndedReason("s1", 1, "aborted", true)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
+		t.Fatalf("interrupted turn start: %v", err)
+	}
+	if err := applyTest(m, evTurnEndedReason("s1", 2, "aborted", true)); err != nil {
 		t.Fatalf("interrupted turn: %v", err)
 	}
 	// Act — the next turn ends cleanly.
-	if err := m.Apply(evTurnEndedReason("s1", 2, "end_turn", false)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 3)); err != nil {
+		t.Fatalf("clean turn start: %v", err)
+	}
+	if err := applyTest(m, evTurnEndedReason("s1", 4, "end_turn", false)); err != nil {
 		t.Fatalf("clean turn: %v", err)
 	}
 	// Assert.
@@ -150,11 +162,11 @@ func TestAStopOutrunningItsTurnsOwnStartStillResolvesInterrupted(t *testing.T) {
 	if err := m.MarkTurnInterrupted("ws1"); err != nil {
 		t.Fatalf("mark: %v", err)
 	}
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 	// Act — the stopped turn's end, aborted by the delivered stop.
-	if err := m.Apply(evTurnEndedReason("s1", 2, "aborted", true)); err != nil {
+	if err := applyTest(m, evTurnEndedReason("s1", 2, "aborted", true)); err != nil {
 		t.Fatalf("turn ended: %v", err)
 	}
 	// Assert.
@@ -171,18 +183,23 @@ func TestAnUnspentMarkDoesNotPaintTheFollowingTurn(t *testing.T) {
 	// Arrange — a turn is applied and running when the stop is marked; its end
 	// is never observed, and a NEW turn starts.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 	if err := m.MarkTurnInterrupted("ws1"); err != nil {
 		t.Fatalf("mark: %v", err)
 	}
-	if err := m.Apply(evTurnStarted("s1", 2)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 2)); err != nil {
 		t.Fatalf("new turn started: %v", err)
 	}
-	// Act.
-	if err := m.Apply(evTurnEndedReason("s1", 3, "end_turn", false)); err != nil {
+	// Act — BOTH applied turns end. The lost turn's claim is real, and the one
+	// turn-liveness derivation holds the workspace `thinking` until it closes:
+	// exactly what a second, axis-only fold used to paint over.
+	if err := applyTest(m, evTurnEndedReason("s1", 3, "end_turn", false)); err != nil {
 		t.Fatalf("turn ended: %v", err)
+	}
+	if err := applyTest(m, evTurnEndedReason("s1", 4, "end_turn", false)); err != nil {
+		t.Fatalf("second turn ended: %v", err)
 	}
 	// Assert.
 	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_DONE {
@@ -199,15 +216,19 @@ func TestTheLateStartToleranceSpendsOnExactlyOneStart(t *testing.T) {
 	if err := m.MarkTurnInterrupted("ws1"); err != nil {
 		t.Fatalf("mark: %v", err)
 	}
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("late start: %v", err)
 	}
-	if err := m.Apply(evTurnStarted("s1", 2)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 2)); err != nil {
 		t.Fatalf("new turn started: %v", err)
 	}
-	// Act.
-	if err := m.Apply(evTurnEndedReason("s1", 3, "end_turn", false)); err != nil {
+	// Act — both applied turns end; see the sibling test for why the second end
+	// is needed now that liveness is derived from the claims themselves.
+	if err := applyTest(m, evTurnEndedReason("s1", 3, "end_turn", false)); err != nil {
 		t.Fatalf("turn ended: %v", err)
+	}
+	if err := applyTest(m, evTurnEndedReason("s1", 4, "end_turn", false)); err != nil {
+		t.Fatalf("second turn ended: %v", err)
 	}
 	// Assert.
 	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_DONE {

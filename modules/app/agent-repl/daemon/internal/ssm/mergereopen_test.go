@@ -12,10 +12,10 @@ import (
 // operational controller with no status at all.
 func settledSession(t *testing.T, m *Manager, workspace, sessionID string) {
 	t.Helper()
-	if err := m.Apply(evTurnStarted(sessionID, 1)); err != nil {
+	if err := applyTest(m, evTurnStarted(sessionID, 1)); err != nil {
 		t.Fatalf("Apply(turn started) for %s: %v", workspace, err)
 	}
-	if err := m.Apply(evTurnEnded(sessionID, 2, false)); err != nil {
+	if err := applyTest(m, evTurnEnded(sessionID, 2, false)); err != nil {
 		t.Fatalf("Apply(turn ended) for %s: %v", workspace, err)
 	}
 }
