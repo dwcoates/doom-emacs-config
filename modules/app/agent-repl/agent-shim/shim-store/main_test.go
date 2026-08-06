@@ -89,6 +89,76 @@ func TestRunHealthCheckWritesResultWhenLoggerBootstrapFails(t *testing.T) {
 	}
 }
 
+func TestLogProcessExitNamesCleanOrErrorExit(t *testing.T) {
+	// Arrange
+	for _, tc := range []struct {
+		name        string
+		err         error
+		wantLevel   string
+		wantMessage string
+	}{
+		{name: "clean", err: nil, wantLevel: "info", wantMessage: "shim-store exiting cleanly"},
+		{name: "error", err: errors.New("accept failed"), wantLevel: "error", wantMessage: "shim-store exiting: accept failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var file, stderr bytes.Buffer
+			log := logging.New(&file, &stderr, false).With(logging.Fields{Component: "store"})
+
+			// Act
+			logProcessExit(log, &tc.err)
+
+			// Assert
+			var record struct {
+				Level     string `json:"level"`
+				Operation string `json:"operation"`
+				Message   string `json:"message"`
+			}
+			if err := json.Unmarshal(file.Bytes(), &record); err != nil {
+				t.Fatalf("exit trace is not JSON: %v: %q", err, file.String())
+			}
+			if record.Operation != "exit" || record.Level != tc.wantLevel || record.Message != tc.wantMessage {
+				t.Fatalf("exit trace = %#v, want operation=exit level=%q message=%q", record, tc.wantLevel, tc.wantMessage)
+			}
+		})
+	}
+}
+
+// TestLogProcessExitLogsThenRepanics proves the exit trace narrates a panic
+// without recovering it: logProcessExit must remain deferred directly (not
+// wrapped) for its own recover() to observe the panic, so this drives it
+// through a real deferred panic rather than calling it as a plain function.
+func TestLogProcessExitLogsThenRepanics(t *testing.T) {
+	// Arrange
+	var file, stderr bytes.Buffer
+	log := logging.New(&file, &stderr, false).With(logging.Fields{Component: "store"})
+	var recovered any
+
+	// Act
+	func() {
+		defer func() { recovered = recover() }()
+		func() {
+			var err error
+			defer logProcessExit(log, &err)
+			panic("invariant violated")
+		}()
+	}()
+
+	// Assert
+	if recovered != "invariant violated" {
+		t.Fatalf("re-panicked value = %v, want the original panic to survive the trace", recovered)
+	}
+	var record struct {
+		Level   string `json:"level"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(file.Bytes(), &record); err != nil {
+		t.Fatalf("panic exit trace is not JSON: %v: %q", err, file.String())
+	}
+	if record.Level != "error" || record.Message != "shim-store exiting: panic: invariant violated" {
+		t.Fatalf("panic exit trace = %#v", record)
+	}
+}
+
 func TestRunLoggedRecordsPostBootstrapErrorExactlyOnce(t *testing.T) {
 	var file, stderr bytes.Buffer
 	log := logging.New(&file, &stderr, false).With(logging.Fields{

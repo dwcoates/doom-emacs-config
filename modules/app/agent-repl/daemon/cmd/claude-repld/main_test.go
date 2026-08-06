@@ -60,6 +60,56 @@ func TestBootFatalLineIsCanonicalJSON(t *testing.T) {
 	}
 }
 
+func TestLogDaemonProcessExitLogsCleanExit(t *testing.T) {
+	// Arrange
+	var durable bytes.Buffer
+	logger := dlog.New(&durable, io.Discard, false)
+
+	// Act
+	logDaemonProcessExit(logger)
+
+	// Assert
+	var record dlog.Record
+	if err := json.Unmarshal(bytes.TrimSpace(durable.Bytes()), &record); err != nil {
+		t.Fatalf("exit trace is not JSON: %v: %q", err, durable.String())
+	}
+	if record.Operation != "exit" || record.Message != "claude-repld exiting cleanly" {
+		t.Fatalf("exit trace = %#v, want operation=exit clean message", record)
+	}
+}
+
+// TestLogDaemonProcessExitLogsThenRepanics proves the exit trace narrates a
+// panic without recovering it: logDaemonProcessExit must remain deferred
+// directly (not wrapped) for its own recover() to observe the panic, so this
+// drives it through a real deferred panic rather than calling it directly.
+func TestLogDaemonProcessExitLogsThenRepanics(t *testing.T) {
+	// Arrange
+	var durable bytes.Buffer
+	logger := dlog.New(&durable, io.Discard, false)
+	var recovered any
+
+	// Act
+	func() {
+		defer func() { recovered = recover() }()
+		func() {
+			defer logDaemonProcessExit(logger)
+			panic("invariant violated")
+		}()
+	}()
+
+	// Assert
+	if recovered != "invariant violated" {
+		t.Fatalf("re-panicked value = %v, want the original panic to survive the trace", recovered)
+	}
+	var record dlog.Record
+	if err := json.Unmarshal(bytes.TrimSpace(durable.Bytes()), &record); err != nil {
+		t.Fatalf("panic exit trace is not JSON: %v: %q", err, durable.String())
+	}
+	if record.Message != "claude-repld exiting: panic: invariant violated" {
+		t.Fatalf("panic exit trace = %#v", record)
+	}
+}
+
 func TestUDSShimLoggerPersistsDaemonOwnedDiagnosticsToWorkspaceTarget(t *testing.T) {
 	workspace := dlog.Workspace{Directory: t.TempDir(), ID: "ws-test"}
 	manager := dlog.NewTargetManager()

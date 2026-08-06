@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -357,5 +358,99 @@ func TestRunLoggedRecordsPostBootstrapErrorExactlyOnce(t *testing.T) {
 		if record.Operation != "run" || record.Context["store_socket"] != "/tmp/store.sock" {
 			t.Fatalf("%s missing canonical runtime context: %#v", sink, record)
 		}
+	}
+}
+
+func TestLogProcessExitNamesCleanOrErrorExit(t *testing.T) {
+	// Arrange
+	for _, tc := range []struct {
+		name        string
+		err         error
+		wantLevel   string
+		wantMessage string
+	}{
+		{name: "clean", err: nil, wantLevel: "info", wantMessage: "sidecar exiting cleanly"},
+		{name: "error", err: errors.New("run failed"), wantLevel: "error", wantMessage: "sidecar exiting: run failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var stderr, file bytes.Buffer
+			log := logging.New(&stderr, &file).With(logging.Context{Component: "sidecar"})
+
+			// Act
+			logProcessExit(log, &tc.err)
+
+			// Assert
+			var record struct {
+				Level     string `json:"level"`
+				Operation string `json:"operation"`
+				Message   string `json:"message"`
+			}
+			if err := json.Unmarshal(file.Bytes(), &record); err != nil {
+				t.Fatalf("exit trace is not JSON: %v: %q", err, file.String())
+			}
+			if record.Operation != "exit" || record.Level != tc.wantLevel || record.Message != tc.wantMessage {
+				t.Fatalf("exit trace = %#v, want operation=exit level=%q message=%q", record, tc.wantLevel, tc.wantMessage)
+			}
+		})
+	}
+}
+
+// TestLogProcessExitLogsThenRepanics proves the exit trace narrates a panic
+// without recovering it: logProcessExit must remain deferred directly (not
+// wrapped) for its own recover() to observe the panic, so this drives it
+// through a real deferred panic rather than calling it as a plain function.
+func TestLogProcessExitLogsThenRepanics(t *testing.T) {
+	// Arrange
+	var stderr, file bytes.Buffer
+	log := logging.New(&stderr, &file).With(logging.Context{Component: "sidecar"})
+	var recovered any
+
+	// Act
+	func() {
+		defer func() { recovered = recover() }()
+		func() {
+			var err error
+			defer logProcessExit(log, &err)
+			panic("invariant violated")
+		}()
+	}()
+
+	// Assert
+	if recovered != "invariant violated" {
+		t.Fatalf("re-panicked value = %v, want the original panic to survive the trace", recovered)
+	}
+	var record struct {
+		Level   string `json:"level"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(file.Bytes(), &record); err != nil {
+		t.Fatalf("panic exit trace is not JSON: %v: %q", err, file.String())
+	}
+	if record.Level != "error" || record.Message != "sidecar exiting: panic: invariant violated" {
+		t.Fatalf("panic exit trace = %#v", record)
+	}
+}
+
+// TestRunReturnsOnSignalAndNamesWhichOne drives Run's stop branch with a real
+// (never-dialed) storeclient — Close() on one is a documented no-op success —
+// to prove the shutdown cause and the received signal both reach the log
+// before the one teardown step (the store connection) runs.
+func TestRunReturnsOnSignalAndNamesWhichOne(t *testing.T) {
+	// Arrange
+	logf, lines := capturingLog()
+	sc := newSidecar("/tmp/agent-repl-test-nonexistent.sock", nil, t.TempDir(), logf)
+	stop := make(chan os.Signal, 1)
+	stop <- syscall.SIGTERM
+
+	// Act
+	err := sc.Run(stop)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Run() error = %v, want nil (a never-dialed store close succeeds)", err)
+	}
+	want := "received signal=" + syscall.SIGTERM.String() + "; beginning sidecar shutdown"
+	if got := linesContaining(lines(), want); len(got) != 1 {
+		t.Fatalf("shutdown-cause line count = %d, want 1 containing %q; lines=%v", len(got), want, lines())
 	}
 }
