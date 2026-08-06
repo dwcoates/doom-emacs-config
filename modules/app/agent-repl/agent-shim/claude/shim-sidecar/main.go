@@ -71,16 +71,37 @@ func reportFatal(err error, stderr io.Writer) {
 	}
 }
 
-func run(storeSocket string, roots []string, spoolRoot, logPath string) error {
+func run(storeSocket string, roots []string, spoolRoot, logPath string) (err error) {
 	logf, closeLog, err := openLogger(storeSocket, logPath)
 	if err != nil {
 		return err
 	}
 	defer closeLog()
+	defer logProcessExit(logf, &err)
 
 	sigc := make(chan os.Signal, 1)
 	signal.Notify(sigc, syscall.SIGINT, syscall.SIGTERM)
 	return runWithLogger(storeSocket, roots, spoolRoot, logf, sigc)
+}
+
+// logProcessExit is the sidecar's one deferred exit trace: whatever caused
+// runWithLogger to return — a clean signal-driven shutdown, a runtime
+// failure, or a panic — is the last record this process writes, so a
+// truncated log still names why the process is gone.
+//
+// It re-panics after logging rather than recovering: a panic here is an
+// invariant violation, and this trace exists to narrate the crash, not to
+// turn it into a normal exit.
+func logProcessExit(logf *logging.Bound, err *error) {
+	if r := recover(); r != nil {
+		logf.With(logging.Context{Operation: "exit", Level: "error"}).Log("sidecar exiting: panic: %v", r)
+		panic(r)
+	}
+	if *err != nil {
+		logf.With(logging.Context{Operation: "exit", Level: "error"}).Log("sidecar exiting: %v", *err)
+		return
+	}
+	logf.With(logging.Context{Operation: "exit"}).Log("sidecar exiting cleanly")
 }
 
 // openLogger creates the sidecar's only persistent diagnostic sink. Failures
@@ -234,8 +255,11 @@ func (s *sidecar) Run(stop <-chan os.Signal) error {
 
 	for {
 		select {
-		case <-stop:
-			s.log.With(logging.Context{Operation: "shutdown"}).Log("received signal")
+		case sig := <-stop:
+			// storeclient.Client.Close (storeclient/client.go) owns the
+			// close-requested/closed-or-failed narration for the one teardown
+			// step this shutdown has: the shim-store connection.
+			s.log.With(logging.Context{Operation: "shutdown"}).Log("received signal=%s; beginning sidecar shutdown", sig)
 			return s.store.Close()
 		case <-s.dialT.C:
 			s.dial()
