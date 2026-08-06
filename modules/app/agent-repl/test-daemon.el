@@ -520,28 +520,12 @@ start a daemon against a half-built stack."
   (let (sent)
     (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () t))
               ((symbol-function 'agent-repl--uds-send-command)
-               (lambda (field payload &rest _) (setq sent (list field payload)) "req-1"))
-              ((symbol-function 'agent-repl--uds-track-command)
-               (lambda (request-id &rest _) request-id)))
+               (lambda (field payload &rest _) (setq sent (list field payload)) "req-1")))
       ;; Act
       (agent-repl--frontend-request-foreign-shutdown)
       ;; Assert — empty ShutdownCmd message (nil payload encodes as `{}').
       (should (equal sent '("shutdown" nil))))))
 
-(ert-deftest agent-repl-test-daemon-foreign-shutdown-tracks-its-ack ()
-  "The shutdown command is tracked so a rejected ack surfaces loudly."
-  ;; Arrange
-  (let (tracked)
-    (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () t))
-              ((symbol-function 'agent-repl--uds-send-command)
-               (lambda (&rest _) "req-7"))
-              ((symbol-function 'agent-repl--uds-track-command)
-               (lambda (request-id field &rest _) (setq tracked (list request-id field))
-                 request-id)))
-      ;; Act
-      (agent-repl--frontend-request-foreign-shutdown)
-      ;; Assert
-      (should (equal tracked '("req-7" "shutdown"))))))
 
 (ert-deftest agent-repl-test-daemon-foreign-shutdown-dials-when-disconnected ()
   "A down link is dialed first — the foreign daemon owns the same socket."
@@ -550,9 +534,7 @@ start a daemon against a half-built stack."
     (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () nil))
               ((symbol-function 'agent-repl-uds-connect)
                (lambda (&optional _p) (cl-incf dials) nil))
-              ((symbol-function 'agent-repl--uds-send-command) (lambda (&rest _) "req-1"))
-              ((symbol-function 'agent-repl--uds-track-command)
-               (lambda (request-id &rest _) request-id)))
+              ((symbol-function 'agent-repl--uds-send-command) (lambda (&rest _) "req-1")))
       ;; Act
       (agent-repl--frontend-request-foreign-shutdown)
       ;; Assert
@@ -926,8 +908,7 @@ whenever a real session happened to be mid-turn."
   (let (sent)
     (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () t))
               ((symbol-function 'agent-repl--uds-send-command)
-               (lambda (field payload &rest _) (setq sent (list field payload)) "req-1"))
-              ((symbol-function 'agent-repl--uds-track-command) (lambda (&rest _) nil)))
+               (lambda (field payload &rest _) (setq sent (list field payload)) "req-1")))
       (agent-repl--frontend-request-foreign-shutdown)
       (should (equal sent (list "shutdown" nil))))))
 
@@ -936,8 +917,7 @@ whenever a real session happened to be mid-turn."
   (let (sent)
     (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () t))
               ((symbol-function 'agent-repl--uds-send-command)
-               (lambda (field payload &rest _) (setq sent (list field payload)) "req-1"))
-              ((symbol-function 'agent-repl--uds-track-command) (lambda (&rest _) nil)))
+               (lambda (field payload &rest _) (setq sent (list field payload)) "req-1")))
       (agent-repl--frontend-request-foreign-shutdown t)
       (should (equal sent (list "shutdown" (list :stopShims t)))))))
 
@@ -953,9 +933,7 @@ load, so they are stubbed here rather than reached."
               (lambda () ,lease-id))
              ((symbol-function 'agent-repl-frontend-shutdown-schedule)
               (lambda () (when ,lease-id (list :state :draining :scheduleId ,lease-id))))
-             ((symbol-function 'agent-repl--uds-connected-p) (lambda () t))
-             ((symbol-function 'agent-repl--uds-track-command)
-              (lambda (request-id &rest _) request-id)))
+             ((symbol-function 'agent-repl--uds-connected-p) (lambda () t)))
      ,@body))
 
 (ert-deftest agent-repl-test-scheduled-shutdown-sends-the-schedule-command ()
@@ -994,19 +972,6 @@ load, so they are stubbed here rather than reached."
         ;; Assert
         (should (equal sent '(:cause "bundle changed" :stopShims t)))))))
 
-(ert-deftest agent-repl-test-scheduled-shutdown-tracks-its-ack ()
-  "The schedule command is tracked so a daemon nack surfaces loudly."
-  ;; Arrange
-  (let (tracked)
-    (agent-repl-test--with-lease nil
-      (cl-letf (((symbol-function 'agent-repl--uds-send-command) (lambda (&rest _) "req-3"))
-                ((symbol-function 'agent-repl--uds-track-command)
-                 (lambda (request-id field &rest _) (setq tracked (list request-id field))
-                   request-id)))
-        ;; Act
-        (agent-repl--frontend-request-scheduled-shutdown "manual restart")
-        ;; Assert
-        (should (equal tracked '("req-3" "scheduleShutdown")))))))
 
 (ert-deftest agent-repl-test-scheduled-shutdown-dials-when-disconnected ()
   "A down link is dialed first — a foreign daemon owns the same socket."
@@ -1054,19 +1019,6 @@ load, so they are stubbed here rather than reached."
         ;; Assert
         (should (equal sent '("cancelScheduledShutdown" (:scheduleId "sch-live"))))))))
 
-(ert-deftest agent-repl-test-cancel-scheduled-shutdown-tracks-its-ack ()
-  "The cancel is tracked so a stale-id nack surfaces loudly."
-  ;; Arrange
-  (let (tracked)
-    (agent-repl-test--with-lease "sch-live"
-      (cl-letf (((symbol-function 'agent-repl--uds-send-command) (lambda (&rest _) "req-5"))
-                ((symbol-function 'agent-repl--uds-track-command)
-                 (lambda (request-id field &rest _) (setq tracked (list request-id field))
-                   request-id)))
-        ;; Act
-        (agent-repl--frontend-request-cancel-scheduled-shutdown)
-        ;; Assert
-        (should (equal tracked '("req-5" "cancelScheduledShutdown")))))))
 
 (ert-deftest agent-repl-test-cancel-without-a-schedule-errors-loudly ()
   "A cancel with no known schedule is a loud refusal, never a silent no-op."
