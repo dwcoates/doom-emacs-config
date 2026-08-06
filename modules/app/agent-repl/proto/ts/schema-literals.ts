@@ -41,7 +41,7 @@ import {
   SessionCommand,
   SessionCommandSchema,
   session_command_spec,
-} from "../gen/ts/agentshim/frontend/v1/frontend_pb.js";
+} from "../gen/ts/agentshim/frontend/v1/slash-menu_pb.js";
 
 /** One session command's schema facts. */
 export interface SessionCommandSpec {

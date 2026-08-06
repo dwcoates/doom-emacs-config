@@ -119,24 +119,25 @@ func TestLookupSessionCommand(t *testing.T) {
 }
 
 func TestEverySessionCommandSpecNamesADistinctCommand(t *testing.T) {
-	// Arrange — the table IS the wire enum's mirror, and a duplicate on either
-	// side would make one entry unreachable rather than loudly wrong.
+	// Arrange — the table IS the wire enum, read back off its own descriptor,
+	// and a duplicate literal would make one entry unreachable rather than
+	// loudly wrong.
 	seenCommand := map[frontendv1.SessionCommand]string{}
 	seenLiteral := map[string]bool{}
 
 	// Act / Assert.
 	for _, spec := range sessionCommandSpecs {
 		if spec.command == frontendv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED {
-			t.Fatalf("spec %q maps to UNSPECIFIED, which is the ordinary-prompt verdict", spec.literal)
+			t.Fatalf("spec %q maps to UNSPECIFIED, which is the ordinary-prompt verdict", spec.Literal)
 		}
 		if prev, dup := seenCommand[spec.command]; dup {
-			t.Fatalf("%s is claimed by both %q and %q", spec.command, prev, spec.literal)
+			t.Fatalf("%s is claimed by both %q and %q", spec.command, prev, spec.Literal)
 		}
-		if seenLiteral[spec.literal] {
-			t.Fatalf("literal %q appears twice", spec.literal)
+		if seenLiteral[spec.Literal] {
+			t.Fatalf("literal %q appears twice", spec.Literal)
 		}
-		seenCommand[spec.command] = spec.literal
-		seenLiteral[spec.literal] = true
+		seenCommand[spec.command] = spec.Literal
+		seenLiteral[spec.Literal] = true
 	}
 }
 

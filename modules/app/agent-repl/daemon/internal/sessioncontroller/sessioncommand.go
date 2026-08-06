@@ -1,9 +1,12 @@
 package sessioncontroller
 
 import (
+	"sort"
 	"strings"
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+
+	"claude-repld/internal/protocmd"
 )
 
 // THE SESSION COMMANDS: the slash commands the CLI answers ITSELF, the one
@@ -27,67 +30,39 @@ import (
 // project command — EXPANDS into a prompt for the agent, so the text the user
 // typed really is that turn's opening and really does belong in the feed.
 // Suppressing every slash-prefixed submit would silently delete the opening
-// line of the majority of this workspace's turns. The set below is closed, is
-// mirrored one-for-one by the `SessionCommand` enum on the wire, and is the
+// line of the majority of this workspace's turns. The set below is closed, IS
+// the `SessionCommand` enum on the wire rather than a mirror of it, and is the
 // only thing that can suppress a bubble.
 
-// sessionCommandSpec is ONE recognized session command: the enum the wire
-// names it by, the literal the user types, and whether an argument may follow.
+// THE TABLE IS THE SCHEMA'S, NOT THIS FILE'S. The literal each command is
+// typed as, and whether an argument may follow it, are carried as options on
+// the `SessionCommand` enum values themselves and read back off the generated
+// descriptor (protocmd). This file used to hold its own copy, the webapp held
+// two more — its command list and its label table — and nothing compared the
+// three: a corrected literal here left the frontend's chip rendering the old
+// spelling, with each side's tests passing against its own copy.
+//
+// Ordered by enum number so recognition is deterministic. The descriptor read
+// returns a map, and a table whose iteration order changed between runs would
+// make which command a prompt matched depend on the map's seed.
+var sessionCommandSpecs = orderedSessionCommandSpecs()
+
+// sessionCommandSpec is ONE recognized session command, as this file needs it:
+// the enum the wire names it by, beside the schema facts protocmd read back.
 type sessionCommandSpec struct {
 	command frontendv1.SessionCommand
-	literal string
-	// takesArgs allows `/<literal> <anything>` to be recognized as this
-	// command. FALSE IS THE DEFAULT AND THE SAFE SIDE: a command marked as
-	// taking no arguments is recognized only when it is the ENTIRE prompt, so
-	// "/status of the build" stays a prompt and keeps its bubble. Marking a
-	// command that takes none as taking some is the one way this table can
-	// swallow something a user genuinely wrote, which is why the flag is set
-	// only for commands with a documented argument form.
-	takesArgs bool
+	protocmd.Spec
 }
 
-// sessionCommandSpecs is THE table. Ordering is the enum's, not significance.
-var sessionCommandSpecs = []sessionCommandSpec{
-	// `/clear` takes no argument on purpose, and the exactness matters more
-	// here than anywhere else in the table: "/clear the build cache" is a
-	// prompt, and mistaking it for the command that DISCARDS THE CONVERSATION
-	// would destroy the context the user was speaking into.
-	{frontendv1.SessionCommand_SESSION_COMMAND_CLEAR, "/clear", false},
-	// `/compact <instructions>` steers what the summary keeps.
-	{frontendv1.SessionCommand_SESSION_COMMAND_COMPACT, "/compact", true},
-	// `/model <name>` selects the model inline.
-	{frontendv1.SessionCommand_SESSION_COMMAND_MODEL, "/model", true},
-	{frontendv1.SessionCommand_SESSION_COMMAND_COST, "/cost", false},
-	{frontendv1.SessionCommand_SESSION_COMMAND_USAGE, "/usage", false},
-	{frontendv1.SessionCommand_SESSION_COMMAND_STATUS, "/status", false},
-	{frontendv1.SessionCommand_SESSION_COMMAND_CONTEXT, "/context", false},
-	{frontendv1.SessionCommand_SESSION_COMMAND_CONFIG, "/config", false},
-	{frontendv1.SessionCommand_SESSION_COMMAND_HELP, "/help", false},
-	{frontendv1.SessionCommand_SESSION_COMMAND_DOCTOR, "/doctor", false},
-	{frontendv1.SessionCommand_SESSION_COMMAND_LOGIN, "/login", false},
-	{frontendv1.SessionCommand_SESSION_COMMAND_LOGOUT, "/logout", false},
-	{frontendv1.SessionCommand_SESSION_COMMAND_MEMORY, "/memory", false},
-	{frontendv1.SessionCommand_SESSION_COMMAND_PERMISSIONS, "/permissions", false},
-	{frontendv1.SessionCommand_SESSION_COMMAND_AGENTS, "/agents", false},
-	{frontendv1.SessionCommand_SESSION_COMMAND_MCP, "/mcp", false},
-	{frontendv1.SessionCommand_SESSION_COMMAND_HOOKS, "/hooks", false},
-	// `/output-style <name>` selects a style inline.
-	{frontendv1.SessionCommand_SESSION_COMMAND_OUTPUT_STYLE, "/output-style", true},
-	{frontendv1.SessionCommand_SESSION_COMMAND_RELEASE_NOTES, "/release-notes", false},
-	{frontendv1.SessionCommand_SESSION_COMMAND_TODOS, "/todos", false},
-	// `/export <file>` names where the transcript goes.
-	{frontendv1.SessionCommand_SESSION_COMMAND_EXPORT, "/export", true},
-	// `/add-dir <path>` is the whole point of the command.
-	{frontendv1.SessionCommand_SESSION_COMMAND_ADD_DIR, "/add-dir", true},
-	// `/resume <session>` names the session to resume.
-	{frontendv1.SessionCommand_SESSION_COMMAND_RESUME, "/resume", true},
-	{frontendv1.SessionCommand_SESSION_COMMAND_EXIT, "/exit", false},
-	{frontendv1.SessionCommand_SESSION_COMMAND_PRIVACY_SETTINGS, "/privacy-settings", false},
-	{frontendv1.SessionCommand_SESSION_COMMAND_STATUSLINE, "/statusline", false},
-	{frontendv1.SessionCommand_SESSION_COMMAND_TERMINAL_SETUP, "/terminal-setup", false},
-	{frontendv1.SessionCommand_SESSION_COMMAND_VIM, "/vim", false},
-	{frontendv1.SessionCommand_SESSION_COMMAND_REWIND, "/rewind", false},
-	{frontendv1.SessionCommand_SESSION_COMMAND_BUG, "/bug", false},
+// orderedSessionCommandSpecs sorts the schema's specs by enum number.
+func orderedSessionCommandSpecs() []sessionCommandSpec {
+	specs := protocmd.SessionCommandSpecs()
+	out := make([]sessionCommandSpec, 0, len(specs))
+	for command, spec := range specs {
+		out = append(out, sessionCommandSpec{command: command, Spec: spec})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].command < out[j].command })
+	return out
 }
 
 // lookupSessionCommand reports which session command a submitted prompt IS —
@@ -110,13 +85,13 @@ var sessionCommandSpecs = []sessionCommandSpec{
 func lookupSessionCommand(text string) (frontendv1.SessionCommand, string) {
 	trimmed := strings.TrimSpace(text)
 	for _, spec := range sessionCommandSpecs {
-		if trimmed == spec.literal {
+		if trimmed == spec.Literal {
 			return spec.command, ""
 		}
-		if !spec.takesArgs {
+		if !spec.TakesArgs {
 			continue
 		}
-		rest, ok := strings.CutPrefix(trimmed, spec.literal)
+		rest, ok := strings.CutPrefix(trimmed, spec.Literal)
 		if ok && rest != "" && strings.TrimLeft(rest, " \t") != rest {
 			return spec.command, strings.TrimSpace(rest)
 		}

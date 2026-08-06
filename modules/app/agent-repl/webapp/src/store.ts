@@ -48,6 +48,7 @@ import type {
 import type { AsyncBubbleDelta } from "./async-bubble.js";
 import { AsyncBubbleRegistry, type AsyncApplyResult, type AsyncGap } from "./async-routing.js";
 import { mergeStatusLogValue } from "./merge-status.js";
+import { syntheticModelLiteral } from "../../proto/ts/schema-literals.js";
 import { applyStreamDelta, blockKey, insertBySeq, settleStreamedBlock } from "./streaming.js";
 import type { ClientLogContext } from "./protocol.js";
 import {
@@ -1240,7 +1241,7 @@ export class ConversationStore {
    * while a later SessionView remains the durable snapshot authority.
    */
   applyAcknowledgedModel(model: string): boolean {
-    if (model === "" || model.trim() === "<synthetic>") {
+    if (model === "" || model.trim() === syntheticModelLiteral()) {
       throw new Error("store: SetModel receipt omitted a real selected model");
     }
     if (this.state.model === model) return false;
