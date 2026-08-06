@@ -127,10 +127,28 @@ func (m *Manager) ResolveTurnLifecycle(workspace, claimantSessionID, liveQueryIn
 			tx, workspace, claimantSessionID, ev.GetSessionId(), id, ev.GetSeq(),
 		)
 	case *corev1.Event_TurnEnded:
-		replayed, err = recordTurnEnd(
+		var crossGeneration bool
+		replayed, crossGeneration, err = recordTurnEnd(
 			tx, workspace, claimantSessionID, ev.GetSessionId(), id, ev.GetSeq(),
 			turnEndIsHistorical(liveQueryInstanceID, ev),
 		)
+		if crossGeneration {
+			// THE CLAIM OUTLIVES ITS CLAIMANT. A workspace's daemon session id is
+			// re-minted on every CreateSession (hibernate/revive/reopen all mint a
+			// fresh claimant for the SAME underlying vendor conversation), but
+			// turn_lifecycle_claim rows stay keyed to whichever claimant opened
+			// them and are never rebound. A turn's own end, replayed for a
+			// generation that never opened it, is not evidence of anything wrong
+			// with the turn — it is the ordinary cost of the claimant rotating out
+			// from under a claim that outlived it. The durable identity is the
+			// turn id within the workspace, not the claimant, so the lookup
+			// widens to the whole workspace exactly once (only after the caller's
+			// own generation proves it holds NOTHING for this turn id) and this
+			// is the loud record of that widened match, kept separate from the
+			// ordinary accept/reject line below.
+			m.logf("ssm: turn ledger CROSS-GENERATION CLAIM MATCH workspace=%s claimant_session=%s event_session=%s seq=%d turn_id=%q request_id=%q — the caller's own claimant generation held no row for this turn id, so the lookup widened to the workspace and found the claim under a retired claimant; the turn's own identity is what matched, not the claimant",
+				workspace, claimantSessionID, ev.GetSessionId(), ev.GetSeq(), id, ev.GetRequestId())
+		}
 	default:
 		err = fmt.Errorf("ssm: turn lifecycle resolver received %T", ev.GetPayload())
 	}
@@ -737,31 +755,28 @@ func turnEndIsHistorical(liveQueryInstanceID string, ev *corev1.Event) bool {
 	return eventQuery != "" && eventQuery != liveQueryInstanceID
 }
 
-// historical says the end was produced by a retired query. Such an end reports
-// a turn whose owning query() invocation is gone: there is no live claim it
-// could belong to, and no live state it may touch.
-func recordTurnEnd(
-	tx *sql.Tx,
-	workspace, claimantSessionID, eventSessionID, id string,
-	seq uint64,
-	historical bool,
-) (bool, error) {
-	query := `SELECT claim_id, start_event_session_id, bridge_event_session_id,
-			end_seq, end_event_session_id, end_cause
-		FROM turn_lifecycle_claim
-		WHERE workspace=? AND claimant_session_id=? AND turn_id=?`
-	if id == "" {
-		query += ` ORDER BY claim_id`
-	}
-	rows, err := tx.Query(query, workspace, claimantSessionID, id)
-	if err != nil {
-		return false, fmt.Errorf("ssm: read turn end claim %q: %w", id, err)
-	}
-	defer rows.Close()
-	var activeClaim int64
-	var sessionConflict string
-	var synthesizedCause string
+// turnEndClaimScan is one query's classification of a turn end's candidate
+// claim rows: at most one of activeClaim, sessionConflict, or
+// synthesizedCause is set, on the same terms the original single-scope scan
+// enforced. rowCount is the RAW row total — including rows that resolved
+// neither an active claim, a conflict, nor a synthesized cause — so a caller
+// can tell "found nothing at all" from "found rows that did not classify".
+type turnEndClaimScan struct {
+	activeClaim      int64
+	sessionConflict  string
+	synthesizedCause string
+	rowCount         int
+}
+
+// scanTurnEndCandidates classifies rows already scoped to one claim lookup.
+// exact is true the instant a row proves this exact boundary (its own seq and
+// event_session_id) already closed the claim — an idempotent replay receipt,
+// returned immediately without classifying the remaining rows, exactly as the
+// single-scope version did.
+func scanTurnEndCandidates(rows *sql.Rows, id string, seq uint64, eventSessionID string) (turnEndClaimScan, bool, error) {
+	var scan turnEndClaimScan
 	for rows.Next() {
+		scan.rowCount++
 		var claimID int64
 		var startEventSessionID string
 		var bridgeEventSessionID string
@@ -772,50 +787,131 @@ func recordTurnEnd(
 			&claimID, &startEventSessionID, &bridgeEventSessionID,
 			&endSeq, &endEventSessionID, &endCause,
 		); err != nil {
-			return false, fmt.Errorf("ssm: scan turn end claim %q: %w", id, err)
+			return scan, false, fmt.Errorf("ssm: scan turn end claim %q: %w", id, err)
 		}
 		if endSeq.Valid && uint64(endSeq.Int64) == seq &&
 			endEventSessionID == eventSessionID {
-			return true, nil
+			return scan, true, nil
 		}
-		if endSeq.Valid && endCause != "" && activeClaim == 0 && synthesizedCause == "" {
+		if endSeq.Valid && endCause != "" && scan.activeClaim == 0 && scan.synthesizedCause == "" {
 			// The claim was ended by a SYNTHESIZED close, and this is the real
 			// boundary arriving afterwards — the pre-restart turn's own
 			// `TurnEnded`, replayed off the store once the subscription
 			// reopened. It reports the very thing the synthesized close already
 			// recorded, so it is admitted as an already-accounted boundary
 			// rather than rejected as a contradiction.
-			synthesizedCause = endCause
+			scan.synthesizedCause = endCause
 			continue
 		}
-		if !endSeq.Valid && activeClaim == 0 {
+		if !endSeq.Valid && scan.activeClaim == 0 {
 			expectedSessionID := startEventSessionID
 			if bridgeEventSessionID != "" {
 				expectedSessionID = bridgeEventSessionID
 			}
 			if expectedSessionID != "" && expectedSessionID != eventSessionID {
-				sessionConflict = expectedSessionID
+				scan.sessionConflict = expectedSessionID
 				continue
 			}
-			activeClaim = claimID
+			scan.activeClaim = claimID
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return false, fmt.Errorf("ssm: iterate turn end claim %q: %w", id, err)
+		return scan, false, fmt.Errorf("ssm: iterate turn end claim %q: %w", id, err)
+	}
+	return scan, false, nil
+}
+
+// queryTurnEndCandidates runs one turn-end lookup and classifies it.
+// scopeToClaimant narrows the WHERE clause to claimantSessionID; the legacy
+// (id=="") path always scopes to the claimant, since an empty identity can
+// only be correlated by FIFO order within one claimant's own queue.
+func queryTurnEndCandidates(tx *sql.Tx, workspace, claimantSessionID, id string, seq uint64, eventSessionID string, scopeToClaimant bool) (turnEndClaimScan, bool, error) {
+	query := `SELECT claim_id, start_event_session_id, bridge_event_session_id,
+			end_seq, end_event_session_id, end_cause
+		FROM turn_lifecycle_claim
+		WHERE workspace=?`
+	args := []any{workspace}
+	if scopeToClaimant {
+		query += ` AND claimant_session_id=?`
+		args = append(args, claimantSessionID)
+	}
+	query += ` AND turn_id=?`
+	args = append(args, id)
+	if id == "" {
+		query += ` ORDER BY claim_id`
+	}
+	rows, err := tx.Query(query, args...)
+	if err != nil {
+		return turnEndClaimScan{}, false, fmt.Errorf("ssm: read turn end claim %q: %w", id, err)
+	}
+	defer rows.Close()
+	scan, exact, err := scanTurnEndCandidates(rows, id, seq, eventSessionID)
+	if err != nil {
+		return scan, false, err
 	}
 	if err := rows.Close(); err != nil {
-		return false, fmt.Errorf("ssm: close turn end claim rows %q: %w", id, err)
+		return scan, false, fmt.Errorf("ssm: close turn end claim rows %q: %w", id, err)
 	}
-	if activeClaim == 0 {
-		if sessionConflict != "" {
-			return false, fmt.Errorf("turn end id %q seq=%d belongs to event_session=%q, durable claim expects %q",
-				id, seq, eventSessionID, sessionConflict)
+	return scan, exact, nil
+}
+
+// historical says the end was produced by a retired query. Such an end reports
+// a turn whose owning query() invocation is gone: there is no live claim it
+// could belong to, and no live state it may touch.
+//
+// crossGeneration reports whether the claim this end resolved against was
+// found only by widening the lookup past the caller's own claimant — see the
+// CROSS-GENERATION log line at the call site for why that is expected rather
+// than suspicious.
+func recordTurnEnd(
+	tx *sql.Tx,
+	workspace, claimantSessionID, eventSessionID, id string,
+	seq uint64,
+	historical bool,
+) (replayed bool, crossGeneration bool, err error) {
+	scan, exact, err := queryTurnEndCandidates(tx, workspace, claimantSessionID, id, seq, eventSessionID, true)
+	if err != nil {
+		return false, false, err
+	}
+	if exact {
+		return true, false, nil
+	}
+	// THE CLAIM'S IDENTITY IS ITS TURN ID, NOT ITS CLAIMANT. A workspace's
+	// daemon session id is re-minted on every CreateSession — hibernate,
+	// revive, and reopen all mint a fresh claimant for the very same vendor
+	// conversation — while turn_lifecycle_claim rows stay keyed to whichever
+	// claimant opened them and are never rebound to the replacement. A named
+	// turn id is generated fresh per turn, so at most one claimant in a
+	// workspace will ever hold a row for it; when the CALLER's OWN generation
+	// proves it holds NOTHING for this turn id (rowCount==0, not merely no
+	// active/conflicting/synthesized match among rows it did find), the search
+	// widens to the whole workspace exactly once before this boundary is
+	// judged a violation. A row found only there is not a contradiction: it is
+	// the SAME claim, opened by a generation that no longer exists to answer
+	// for it.
+	if id != "" && scan.rowCount == 0 {
+		widened, widenedExact, widenErr := queryTurnEndCandidates(tx, workspace, "", id, seq, eventSessionID, false)
+		if widenErr != nil {
+			return false, false, widenErr
 		}
-		if synthesizedCause != "" {
+		if widenedExact {
+			return true, true, nil
+		}
+		if widened.rowCount > 0 {
+			scan = widened
+			crossGeneration = true
+		}
+	}
+	if scan.activeClaim == 0 {
+		if scan.sessionConflict != "" {
+			return false, crossGeneration, fmt.Errorf("turn end id %q seq=%d belongs to event_session=%q, durable claim expects %q",
+				id, seq, eventSessionID, scan.sessionConflict)
+		}
+		if scan.synthesizedCause != "" {
 			// Idempotent, and deliberately reported as a REPLAY: the boundary is
 			// real, the daemon already accounted for it, and nothing about the
 			// state it produces is left to write a second time.
-			return true, nil
+			return true, crossGeneration, nil
 		}
 		if historical {
 			// AN END FROM A RETIRED QUERY IS HISTORY, NOT A CONTRADICTION.
@@ -823,17 +919,17 @@ func recordTurnEnd(
 			// live claim and there is nothing here to be inconsistent with.
 			// Accepted, reported as a replay, and no row is written: the
 			// transaction leaves the ledger exactly as it found it.
-			return true, nil
+			return true, crossGeneration, nil
 		}
-		return false, fmt.Errorf("turn end id %q seq=%d has no durable active claim", id, seq)
+		return false, crossGeneration, fmt.Errorf("turn end id %q seq=%d has no durable active claim", id, seq)
 	}
 	if _, err := tx.Exec(`UPDATE turn_lifecycle_claim
 			SET end_seq=?, end_event_session_id=?
 			WHERE claim_id=? AND end_seq IS NULL`,
-		int64(seq), eventSessionID, activeClaim); err != nil {
-		return false, fmt.Errorf("ssm: persist turn end %q seq=%d: %w", id, seq, err)
+		int64(seq), eventSessionID, scan.activeClaim); err != nil {
+		return false, crossGeneration, fmt.Errorf("ssm: persist turn end %q seq=%d: %w", id, seq, err)
 	}
-	return false, nil
+	return false, crossGeneration, nil
 }
 
 // ActiveTurnIDs reports every turn claim the session holds OPEN, in claim order.

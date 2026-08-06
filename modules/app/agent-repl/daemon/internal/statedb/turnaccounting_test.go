@@ -81,28 +81,61 @@ func TestTurnAccountingsRollsBackResponseWhenTerminalPersistenceFails(t *testing
 	}
 }
 
-func TestTurnAccountingsReplayReturnsCanonicalSettlementAndRejectsOtherDrift(t *testing.T) {
+// THE PERSISTED ROW WINS ON REPLAY, and everything a fresh bring-up is
+// entitled to recompute differently — Timing (wall-clock instants taken at
+// settlement time), QueryInstanceId and Runtime (the live query()
+// invocation's identity, re-minted every bring-up by design), and Verdict
+// (derived from both, so an Invalid verdict's problem paths embed the very
+// query id that just changed) — is tolerated rather than compared. This is
+// the regression guard for the divergent-replay defect diagnosed against two
+// real turns ("ka_26779facc41beb8f1ae45d61" and "fe-4383-0fb7"): both
+// recomputed with a brand-new query_instance_id on every bring-up and were
+// rejected as "divergent" purely on that ephemeral field.
+func TestTurnAccountingsReplayReturnsCanonicalSettlementToleratingEphemeralFields(t *testing.T) {
 	store, _ := openReceipts(t)
 	accountings, err := NewTurnAccountings(store.db)
 	if err != nil {
 		t.Fatal(err)
 	}
-	first := &frontendv1.TurnAccounting{TurnId: "t", Timing: &frontendv1.TurnAccountingTiming{AccountingSettledAtMs: 100, ResultToSettlementMs: 10}, Verdict: &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}}}
+	first := &frontendv1.TurnAccounting{TurnId: "t", QueryInstanceId: "query-a", Timing: &frontendv1.TurnAccountingTiming{AccountingSettledAtMs: 100, ResultToSettlementMs: 10}, Verdict: &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}}}
 	if _, err := accountings.Record("s", first); err != nil {
 		t.Fatal(err)
 	}
-	replay := &frontendv1.TurnAccounting{TurnId: "t", Timing: &frontendv1.TurnAccountingTiming{AccountingSettledAtMs: 900, ResultToSettlementMs: 810}, Verdict: &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}}}
+	// A later bring-up recomputes this SAME turn under a brand-new
+	// query_instance_id (query-b) and a later settlement instant — both
+	// EXPECTED to differ, never a sign of corruption.
+	replay := &frontendv1.TurnAccounting{TurnId: "t", QueryInstanceId: "query-b", Timing: &frontendv1.TurnAccountingTiming{AccountingSettledAtMs: 900, ResultToSettlementMs: 810}, Verdict: &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}}}
 	canonical, err := accountings.Record("s", replay)
 	if err != nil {
-		t.Fatalf("idempotent replay: %v", err)
+		t.Fatalf("idempotent replay under a fresh query_instance_id: %v", err)
+	}
+	if canonical.GetQueryInstanceId() != "query-a" {
+		t.Fatalf("canonical replay query_instance_id = %q, want the persisted row's %q", canonical.GetQueryInstanceId(), "query-a")
 	}
 	if canonical.GetTiming().GetAccountingSettledAtMs() != 100 || canonical.GetTiming().GetResultToSettlementMs() != 10 {
 		t.Fatalf("canonical replay = %+v", canonical.GetTiming())
 	}
-	divergent := proto.Clone(replay).(*frontendv1.TurnAccounting)
-	divergent.QueryInstanceId = "different"
-	if _, err := accountings.Record("s", divergent); err == nil {
-		t.Fatal("divergent replay was accepted")
+}
+
+// A REPLAY WHOSE RESPONSES DISAGREE ON RAW EVIDENCE IS STILL A VIOLATION: the
+// api_message_id set and each response's own raw usage are the turn's
+// durable identity, not a bring-up-scoped recomputation, so they stay fatal
+// even after the ephemeral-field tolerance above.
+func TestTurnAccountingsRejectsDivergentResponseEvidence(t *testing.T) {
+	store, _ := openReceipts(t)
+	accountings, err := NewTurnAccountings(store.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := &frontendv1.TurnAccounting{TurnId: "t", QueryInstanceId: "query-a", Responses: []*frontendv1.TokenUtilization{completeUtilization("s", "claude", "t", "m")}, Verdict: &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}}}
+	if _, err := accountings.Record("s", first); err != nil {
+		t.Fatal(err)
+	}
+	divergentResponse := completeUtilization("s", "claude", "t", "m")
+	divergentResponse.Usage.OutputTokens = 999
+	replay := &frontendv1.TurnAccounting{TurnId: "t", QueryInstanceId: "query-b", Responses: []*frontendv1.TokenUtilization{divergentResponse}, Verdict: &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}}}
+	if _, err := accountings.Record("s", replay); err == nil {
+		t.Fatal("divergent response evidence was accepted")
 	}
 }
 
