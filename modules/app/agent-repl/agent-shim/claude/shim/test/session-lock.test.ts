@@ -2,7 +2,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { acquireSessionLock, lockPath } from "../src/uds/session-lock.js";
+import {
+  acquireSessionLock,
+  acquireWorkspaceLock,
+  lockPath,
+  workspaceLockPath,
+} from "../src/uds/session-lock.js";
 
 // The lock replaces the uniqueness bind() used to give away for free: while
 // each shim listened on its own path, a second shim for one session could not
@@ -65,5 +70,54 @@ describe("session lock", () => {
     // Assert
     expect(path.basename(path.dirname(p))).toBe("run");
     expect(path.basename(p)).toBe("session-s_abc.lock");
+  });
+});
+
+// The workspace lock is the claim the session lock cannot make: two daemon
+// session ids over one workspace take two session locks and exclude nothing.
+describe("workspace lock", () => {
+  const WORKTREE = "/Users/dodgecoates/.config/doom-worktrees/model-selection-convergence-hwx";
+
+  it.each([
+    ["a worktree path", WORKTREE],
+    ["a trailing slash naming the same workspace", `${WORKTREE}/`],
+  ])("derives the pinned lock file for %s", (_name, cwd) => {
+    // Arrange: the Go side pins these same literals in
+    // daemon/internal/sessionlock/sessionlock_test.go, so the two derivations
+    // cannot drift into two locks over one workspace.
+    isolateHome();
+    // Act
+    const p = workspaceLockPath(cwd);
+    // Assert
+    expect(path.basename(path.dirname(p))).toBe("run");
+    expect(path.basename(p)).toBe("workspace-0b96ccc5.lock");
+  });
+
+  it("refuses an unnamed workspace rather than resolving one shared lock", () => {
+    // Arrange
+    isolateHome();
+    // Act / Assert
+    expect(() => workspaceLockPath("")).toThrow(/absolute workspace directory/);
+  });
+
+  it("refuses a workspace another shim already holds", () => {
+    // Arrange: a live shim owns the workspace under some other session id.
+    isolateHome();
+    releases.push(acquireWorkspaceLock(WORKTREE));
+
+    // Act / Assert
+    expect(() => acquireWorkspaceLock(WORKTREE)).toThrow(/already held/);
+  });
+
+  it("is independent of the session lock, so both must be taken", () => {
+    // Arrange: one shim holds session s_first over the workspace.
+    isolateHome();
+    releases.push(acquireSessionLock("s_first"));
+    releases.push(acquireWorkspaceLock(WORKTREE));
+
+    // Act / Assert: a DIFFERENT session id sails through the session lock and
+    // is stopped only by the workspace lock — the exact duplicate spawn.
+    releases.push(acquireSessionLock("s_second"));
+    expect(() => acquireWorkspaceLock(WORKTREE)).toThrow(/already held/);
   });
 });
