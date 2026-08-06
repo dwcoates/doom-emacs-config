@@ -1238,7 +1238,15 @@ func (s *Server) CreateSession(_ context.Context, opts CreateOpts) (string, erro
 	// session still holding either stands down BEFORE a second CLI exists
 	// (see supersede.go). After the viability gate so a create about to be
 	// rejected never tears down a healthy session.
-	s.supersedeCreateConflicts(opts)
+	//
+	// A stand-down whose shim SURVIVED its stop ends the create HERE. Minting
+	// the replacement past a live writer of the same transcript is the
+	// double-writer condition the supersede exists to remove, so no session id
+	// is allocated, no record is written and no shim is spawned.
+	if err := s.supersedeCreateConflicts(opts); err != nil {
+		s.logf("session create REFUSED: a session it supersedes is still alive and holding its transcript: %v", err)
+		return "", err
+	}
 	id := newSessionID()
 	// Register BEFORE bring-up: the session controller's SessionLocator resolves a
 	// workspace to a session by reading the registry, so the record MUST exist
