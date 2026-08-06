@@ -152,6 +152,16 @@ func (m *Manager) onTurnEvent(d *sessionController, started bool, turnID string,
 	for _, w := range newlyBound {
 		close(w.boundDone)
 	}
+
+	// THE BARE `/model`'s OWN BOUNDARY. The CLI resolves `/model` inside a
+	// turn, so that turn's end is the instant its answer exists — which makes
+	// this a rendezvous rather than a delay long enough to probably work
+	// (modelreadback.go). Claimed exactly once, so a re-observed end cannot ask
+	// the shim twice.
+	if !started && m.takeModelReadback(d, turnID) {
+		m.readBackObservedModel(d, turnID)
+	}
+
 	for _, w := range completed {
 		close(w.done)
 	}

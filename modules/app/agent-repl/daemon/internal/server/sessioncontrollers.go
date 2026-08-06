@@ -1016,15 +1016,19 @@ func (r *RegistryRegistrar) BackfillStateChanged(sessionID, state string) {
 //
 // Idempotent by value: the SDK re-announces its init on every submit, so this
 // is called constantly with an unchanged model and must not write each time.
-func (r *RegistryRegistrar) SessionModelObserved(sessionID, model string, obs registry.ModelObservation) {
+// It returns the model the record held BEFORE this write, and whether the
+// write was applied — the two facts a caller needs to state the TRANSITION in
+// its own log rather than just the value it wrote.
+func (r *RegistryRegistrar) SessionModelObserved(sessionID, model string, obs registry.ModelObservation) (previous string, applied bool) {
 	if r.Reg == nil || model == "" {
-		return
+		return "", false
 	}
 	if !r.admitModelObservation(sessionID, model, obs) {
-		return
+		return r.recordedModel(sessionID), false
 	}
 	changed := false
 	found, err := r.Reg.Update(sessionID, func(rec *registry.Record) {
+		previous = rec.Model
 		if rec.Model == model {
 			return
 		}
@@ -1036,15 +1040,30 @@ func (r *RegistryRegistrar) SessionModelObserved(sessionID, model string, obs re
 	})
 	if err != nil && r.Logf != nil {
 		r.Logf("server: session %s: registry model write FAILED — a respawn may re-pin the stale model: %v", sessionID, err)
-		return
+		return previous, false
 	}
 	if !found && r.Logf != nil {
 		r.Logf("server: session %s: model write found no record (never registered)", sessionID)
-		return
+		return "", false
 	}
 	if changed {
 		r.repush(sessionID)
 	}
+	return previous, changed
+}
+
+// recordedModel is the model sessionID's record currently holds, empty when
+// there is no record. Read for the caller's log line on a REFUSED write, where
+// the standing value is the news.
+func (r *RegistryRegistrar) recordedModel(sessionID string) string {
+	if r.Reg == nil {
+		return ""
+	}
+	rec, ok := r.Reg.Get(sessionID)
+	if !ok {
+		return ""
+	}
+	return rec.Model
 }
 
 // admitModelObservation decides whether one model report may reach the record,

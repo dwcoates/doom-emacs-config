@@ -404,8 +404,8 @@ func TestARepeatedInvocationUnderOneRequestIdReplacesTheRetainedItem(t *testing.
 	c := h.controller().consumer
 
 	// Act.
-	c.pushSessionCommand("r1", frontendv1.SessionCommand_SESSION_COMMAND_MODEL)
-	c.pushSessionCommand("r1", frontendv1.SessionCommand_SESSION_COMMAND_MODEL)
+	c.pushSessionCommand("r1", frontendv1.SessionCommand_SESSION_COMMAND_MODEL, "")
+	c.pushSessionCommand("r1", frontendv1.SessionCommand_SESSION_COMMAND_MODEL, "")
 
 	// Assert.
 	if got := len(c.snapshotCommandItems()); got != 1 {
@@ -418,7 +418,7 @@ func TestAContextCutDropsTheRetainedInvocationItems(t *testing.T) {
 	// in a feed the cut exists to open.
 	h := newQueueHarness(t, nil)
 	c := h.controller().consumer
-	c.pushSessionCommand("r1", frontendv1.SessionCommand_SESSION_COMMAND_MODEL)
+	c.pushSessionCommand("r1", frontendv1.SessionCommand_SESSION_COMMAND_MODEL, "")
 
 	// Act.
 	c.Consume(clearEvent(7, "u-clear"))

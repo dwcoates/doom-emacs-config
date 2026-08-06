@@ -103,6 +103,17 @@ func (c sessionCommand) performsLocally() bool {
 	return c.command == frontendv1.SessionCommand_SESSION_COMMAND_MODEL && c.arg != ""
 }
 
+// awaitsModelReadback reports whether this submit is the BARE `/model` — the
+// one model change the daemon can neither perform nor observe, because the CLI
+// opens its own picker and the user chooses inside it.
+//
+// The daemon reads the result back from the shim when the command's turn ends
+// (modelreadback.go). Every other classification answers false: `/model <name>`
+// is performed rather than forwarded, and nothing else touches the model.
+func (c sessionCommand) awaitsModelReadback() bool {
+	return c.command == frontendv1.SessionCommand_SESSION_COMMAND_MODEL && c.arg == ""
+}
+
 // modelArgument is the model id a `/model <name>` names, empty for every other
 // classification.
 //
@@ -341,7 +352,17 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 	// the command is withheld as machinery (machinery.go), so without this the
 	// user's `/model` would vanish from the conversation entirely and the
 	// session's model would appear to change for no reason.
-	m.noteSessionCommand(d, requestID, cmd)
+	// The forwarded path resolves nothing itself — the CLI does — so the item's
+	// log line carries no outcome. For the bare `/model` the read-back logs the
+	// selection it confirms (modelreadback.go).
+	m.noteSessionCommand(d, requestID, cmd, "")
+
+	// THE BARE `/model`'s READ-BACK, armed only after the submit: a turn that
+	// never started will never end, so arming ahead of it would leave a
+	// read-back pending forever on a command no session took.
+	if cmd.awaitsModelReadback() {
+		m.noteModelReadbackPending(d, requestID)
+	}
 
 	// AFTER THE ACCEPT, never before: an axis opened for a prompt that never
 	// reached the shim would be waiting on a cut that is not coming, and would
@@ -537,11 +558,11 @@ func (m *Manager) notePromptDelivered(d *sessionController, requestID string) {
 // reconcile or replace.
 //
 // Must be called with m.mu RELEASED: the push reaches the frontend server.
-func (m *Manager) noteSessionCommand(d *sessionController, requestID string, cmd sessionCommand) {
+func (m *Manager) noteSessionCommand(d *sessionController, requestID string, cmd sessionCommand, outcome string) {
 	if !cmd.recognized() || requestID == "" {
 		return
 	}
-	d.consumer.pushSessionCommand(requestID, cmd.command)
+	d.consumer.pushSessionCommand(requestID, cmd.command, outcome)
 }
 
 // applyLocalSessionCommand performs a session command the daemon owns rather
@@ -572,10 +593,17 @@ func (m *Manager) applyLocalSessionCommand(ctx context.Context, d *sessionContro
 			d.workspace, d.sessionID, requestID, cmd.command, err)
 		return err
 	}
-	if _, err := m.setModelOn(ctx, d, requested, "session_command"); err != nil {
+	change, err := m.setModelOn(ctx, d, requested, "session_command")
+	if err != nil {
 		return err
 	}
-	m.noteSessionCommand(d, requestID, cmd)
+	// THE COMMAND'S OWN RECORD IN THE LOG, naming the transition rather than
+	// just the fact that a command ran. Without the resolved argument and the
+	// value it replaced, an operator reading this line after the picker and the
+	// session disagreed could not tell what the session was switched to, or
+	// that a switch was the reason.
+	m.noteSessionCommand(d, requestID, cmd, fmt.Sprintf(" resolved_model=%q shim_selected=%q record_previous=%q",
+		change.requested, change.selected, change.previous))
 	return nil
 }
 
