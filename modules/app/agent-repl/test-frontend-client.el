@@ -1298,7 +1298,7 @@ the wire would deprive the agent of the directive it must read."
         ;; Assert
         (should (equal sent input))))))
 
-;;;; ---- session-url ---------------------------------------------------------------
+;;;; ---- webview URLs --------------------------------------------------------------
 
 (ert-deftest agent-repl-test-frontend-session-url-shape ()
   "The webapp attach URL carries the session query param."
@@ -1307,6 +1307,27 @@ the wire would deprive the agent of the directive it must read."
     ;; Act / Assert
     (should (equal (agent-repl--frontend-session-url "s_9")
                    "http://127.0.0.1:9999/?session=s_9"))))
+
+(ert-deftest agent-repl-test-frontend-workspace-url-shape ()
+  "The workspace attach URL carries the directory path, URL-encoded.
+Every case is a path the daemon must read back byte-for-byte: the
+scoped connection compares it against the workspace key on each frame,
+so a path that survives the round trip only for plain ASCII would
+silently serve nothing for the rest."
+  ;; Arrange
+  (let ((agent-repl-frontend-daemon-addr "127.0.0.1:9999")
+        (cases '(("/repos/proj"
+                  . "http://127.0.0.1:9999/?workspace=%2Frepos%2Fproj")
+                 ("/repos/My Projects/agent repl"
+                  . "http://127.0.0.1:9999/?workspace=%2Frepos%2FMy%20Projects%2Fagent%20repl")
+                 ("/repos/prosjekt/æøå"
+                  . "http://127.0.0.1:9999/?workspace=%2Frepos%2Fprosjekt%2F%C3%A6%C3%B8%C3%A5")
+                 ("/repos/a&b=c/d?e#f"
+                  . "http://127.0.0.1:9999/?workspace=%2Frepos%2Fa%26b%3Dc%2Fd%3Fe%23f"))))
+    (dolist (case cases)
+      ;; Act / Assert
+      (should (equal (agent-repl--frontend-workspace-url (car case))
+                     (cdr case))))))
 
 ;; The GET /commands fetch + POST /commands/refresh tests were deleted in
 ;; the S9 slash-menu cutover: those HTTP calls are gone.  The slash-command
