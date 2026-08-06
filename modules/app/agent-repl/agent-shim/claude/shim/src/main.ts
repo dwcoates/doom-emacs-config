@@ -41,7 +41,7 @@ import {
   isUnexpectedSdkStreamTerminationError,
   type UdsQuery,
 } from "./uds/uds-session.js";
-import { acquireSessionLock } from "./uds/session-lock.js";
+import { acquireSessionLock, acquireWorkspaceLock } from "./uds/session-lock.js";
 import { SessionSource } from "./uds/proto.js";
 import { FAKE_COMMANDS, createFakeQuery } from "./fake-query.js";
 import { importRealSDK } from "./vendor-guard.js";
@@ -536,16 +536,34 @@ export async function runUdsMode(
     canUseTool: CanUseToolLike,
   ) => UdsQuery,
 ): Promise<void> {
-  // Claim the session BEFORE anything else. Uniqueness used to come free from
-  // binding session-<id>.sock — a second shim could not exist. Dialling out
-  // removes that, and two shims on one conversation means two writers on one
-  // transcript, so the claim is now explicit. Holding it is what tells the
-  // daemon this session is alive even before we have dialled in.
+  // Claim the session and its workspace BEFORE anything else. Uniqueness came
+  // free from binding session-<id>.sock — a second shim could not exist.
+  // Dialling out removes that, and two shims on one conversation means two
+  // writers on one transcript, so the claim is explicit. Holding it is what
+  // tells the daemon this session is alive even before we have dialled in.
   //
-  // Failure to claim is a refusal to start: another shim owns this session.
-  const releaseLock = acquireSessionLock(args.sessionId);
+  // BOTH CLAIMS, SESSION FIRST THEN WORKSPACE, always in that order so two
+  // shims racing for the same pair cannot take them in opposite orders. The
+  // session id alone does not carry the invariant: a workspace and each resumed
+  // transcript keep exactly one live session at a time, and two daemon session
+  // ids can name one workspace over one transcript, so two shims would take two
+  // different session locks and exclude nothing.
+  //
+  // Failure to take either is a refusal to start.
+  const releaseSessionLock = acquireSessionLock(args.sessionId);
+  process.on("exit", releaseSessionLock);
   logMainLifecycle({ agent_repl_session_id: args.sessionId, outcome: "session_lock_acquired" }, "exclusive session lock acquired");
-  process.on("exit", releaseLock);
+  if (args.cwd === undefined || args.cwd === "") {
+    throw new Error(
+      "shim: UDS mode requires --cwd; with no workspace directory the shim cannot claim its workspace exclusively and must not start",
+    );
+  }
+  const releaseWorkspaceLock = acquireWorkspaceLock(args.cwd);
+  process.on("exit", releaseWorkspaceLock);
+  logMainLifecycle(
+    { agent_repl_session_id: args.sessionId, workspace_dir: args.cwd, outcome: "workspace_lock_acquired" },
+    "exclusive workspace lock acquired",
+  );
 
   const session = new UdsSession({
     sessionId: args.sessionId,
@@ -602,7 +620,10 @@ export async function runUdsMode(
   } finally {
     process.off("SIGTERM", onSigterm);
     process.off("SIGINT", onSigint);
-    releaseLock();
+    // Released in reverse acquisition order, the mirror of the fixed
+    // session-then-workspace order they were taken in.
+    releaseWorkspaceLock();
+    releaseSessionLock();
   }
 }
 

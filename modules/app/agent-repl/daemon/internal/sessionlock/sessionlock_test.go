@@ -116,6 +116,86 @@ func TestProbingDoesNotRetainTheLock(t *testing.T) {
 	_ = syscall.Flock(int(g.Fd()), syscall.LOCK_UN)
 }
 
+// TestWorkspaceLockPathIsPinned pins the exact file name a workspace derives,
+// because the Node side derives it independently: agent-shim's
+// test/session-lock.test.ts asserts these same literals, so a change to either
+// derivation fails on both sides instead of silently handing the daemon and the
+// shim two different locks over one workspace.
+func TestWorkspaceLockPathIsPinned(t *testing.T) {
+	tests := []struct {
+		name string
+		cwd  string
+		want string
+	}{
+		{
+			name: "worktree path",
+			cwd:  "/Users/dodgecoates/.config/doom-worktrees/model-selection-convergence-hwx",
+			want: "workspace-0b96ccc5.lock",
+		},
+		{
+			name: "a trailing slash names the same workspace",
+			cwd:  "/Users/dodgecoates/.config/doom-worktrees/model-selection-convergence-hwx/",
+			want: "workspace-0b96ccc5.lock",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange / Act
+			p, err := WorkspaceLockPath(tc.cwd)
+			if err != nil {
+				t.Fatalf("WorkspaceLockPath: %v", err)
+			}
+
+			// Assert
+			if got := filepath.Base(filepath.Dir(p)); got != "run" {
+				t.Fatalf("lock dir = %q, want run", got)
+			}
+			if got := filepath.Base(p); got != tc.want {
+				t.Fatalf("lock file = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestWorkspaceLockPathRefusesAnEmptyWorkspace: an empty cwd would hash to the
+// path cleaner's "." and give every unnamed caller ONE shared lock.
+func TestWorkspaceLockPathRefusesAnEmptyWorkspace(t *testing.T) {
+	// Arrange / Act
+	_, err := WorkspaceLockPath("")
+
+	// Assert
+	if err == nil {
+		t.Fatal("WorkspaceLockPath(\"\") returned no error; an unnamed workspace must not resolve to a lock")
+	}
+}
+
+// TestWorkspaceLockHeldSeesALiveHolder proves the workspace probe contends with
+// the same flock a shim takes, which is the whole basis for refusing to spawn.
+func TestWorkspaceLockHeldSeesALiveHolder(t *testing.T) {
+	// Arrange
+	cwd := t.TempDir()
+	path, err := WorkspaceLockPath(cwd)
+	if err != nil {
+		t.Fatalf("WorkspaceLockPath: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Remove(path) })
+	hold(t, path)
+
+	// Act
+	held, err := WorkspaceLockHeld(cwd)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("WorkspaceLockHeld: %v", err)
+	}
+	if !held {
+		t.Fatal("held = false while a shim held the workspace lock — the daemon would spawn a duplicate")
+	}
+}
+
 func TestPathIsUnderTheRunDirectory(t *testing.T) {
 	// Arrange / Act
 	p, err := Path("s_abc")
