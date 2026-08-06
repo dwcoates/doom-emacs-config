@@ -90,8 +90,9 @@ var sessionCommandSpecs = []sessionCommandSpec{
 	{frontendv1.SessionCommand_SESSION_COMMAND_BUG, "/bug", false},
 }
 
-// lookupSessionCommand reports which session command a submitted prompt IS, or
-// UNSPECIFIED when it is an ordinary prompt.
+// lookupSessionCommand reports which session command a submitted prompt IS —
+// or UNSPECIFIED when it is an ordinary prompt — together with the ARGUMENT
+// that followed it, empty for the bare form.
 //
 // Matched on the TRIMMED submitted text, which is where the daemon sees it: the
 // CLI recognizes these itself and never yields the command back on the stream,
@@ -100,21 +101,27 @@ var sessionCommandSpecs = []sessionCommandSpec{
 // An argument is admitted only for a command whose table entry allows one, and
 // only behind whitespace: `/models` must never match `/model`, and `/modelfoo`
 // must never match it either.
-func lookupSessionCommand(text string) frontendv1.SessionCommand {
+//
+// THE ARGUMENT IS RETURNED, NOT DISCARDED, because for `/model <name>` it is
+// the whole operation: the daemon performs that command itself through
+// Manager.SetModel rather than forwarding the text (promptdispatch.go), so the
+// name has to survive the reading. It still never reaches the wire — the
+// invocation item has no field to put it in.
+func lookupSessionCommand(text string) (frontendv1.SessionCommand, string) {
 	trimmed := strings.TrimSpace(text)
 	for _, spec := range sessionCommandSpecs {
 		if trimmed == spec.literal {
-			return spec.command
+			return spec.command, ""
 		}
 		if !spec.takesArgs {
 			continue
 		}
 		rest, ok := strings.CutPrefix(trimmed, spec.literal)
 		if ok && rest != "" && strings.TrimLeft(rest, " \t") != rest {
-			return spec.command
+			return spec.command, strings.TrimSpace(rest)
 		}
 	}
-	return frontendv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED
+	return frontendv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED, ""
 }
 
 // sessionCommandUUID is the item identity one invocation is pushed under.
