@@ -61,7 +61,7 @@ import type {
 } from "../src/session.js";
 import type { ModelInfo, PermissionMode, SlashCommand } from "../src/protocol.js";
 import type { SubscriptionUsageResponse } from "../src/subscription-usage.js";
-import type { Event, ShimHello, ShimReady, Subscribe } from "../src/uds/proto.js";
+import type { Event, ShimHello, ShimReady, StoreWrite, Subscribe } from "../src/uds/proto.js";
 import {
   AckSchema,
   DaemonHelloSchema,
@@ -243,6 +243,15 @@ interface Rig {
   ready: ShimReady;
   /** The Subscribe the gate opened the standing store tail with. */
   standingSubscribe: Subscribe;
+  /**
+   * The session's own QueryCreated write, already drained off the store.
+   *
+   * It is written BEFORE the handshake supplies a from_seq, so the standing
+   * subscription cannot yet exist and the store serves this row back during
+   * catch-up on every later replay. That makes it the exact record whose
+   * ORIGIN must not be confused with its DELIVERY.
+   */
+  createdLifecycle: StoreWrite;
 }
 
 const cleanups: Array<() => void | Promise<void>> = [];
@@ -489,6 +498,7 @@ async function rig(
     readiness,
     ready,
     standingSubscribe,
+    createdLifecycle: created,
   };
 }
 
@@ -3288,5 +3298,42 @@ describe("UdsSession keep-alive turns: prompt_origin passthrough", () => {
     expect(query.prompts[0]!.message.content).toEqual([
       { type: "text", text: "respond with only '.'" },
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Producer provenance: every envelope the session builds names the query it is
+// running, INCLUDING the one written before the subscription is open.
+// ---------------------------------------------------------------------------
+
+describe("UdsSession stamps the query it is running", () => {
+  it("names the running query on the QueryCreated written before the subscription opens", async () => {
+    // Arrange: a session whose first act is persisting its own QueryCreated --
+    // written to the store BEFORE the handshake supplies a from_seq, so the
+    // store serves it back during catch-up on every later replay.
+    const { createdLifecycle, hello } = await rig({ queryInstanceId: "startup-query" });
+
+    // Act: read the envelope the shim actually wrote.
+    const event = createdLifecycle.batch!.events[0]!;
+
+    // Assert: it names the LIVE query -- the same id the handshake announces.
+    // A consumer therefore classifies it with one comparison and gets "live",
+    // which is the whole point: delivery order says nothing about origin.
+    expect(event.queryInstanceId).toBe("startup-query");
+    expect(event.queryInstanceId).toBe(hello.queryInstanceId);
+  });
+
+  it("names the running query on a persisted turn start", async () => {
+    // Arrange: a resumed session bound to a known query.
+    const { store, daemon } = await rig({ storeSessionId: "vendor-uuid", queryInstanceId: "turn-query" });
+
+    // Act.
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
+    const sw = await store.peer().next(StoreWriteSchema);
+
+    // Assert: the turn boundary carries the same provenance as the lifecycle.
+    const event = sw.batch!.events[0]!;
+    expect(event.payload.case).toBe("turnStarted");
+    expect(event.queryInstanceId).toBe("turn-query");
   });
 });

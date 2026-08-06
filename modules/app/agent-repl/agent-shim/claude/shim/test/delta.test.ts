@@ -362,3 +362,45 @@ describe("StreamMessageTracker", () => {
     expect(t.current()).toBe("");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Producer provenance: the query() invocation an event was built inside.
+// ---------------------------------------------------------------------------
+
+describe("delta mappers stamp the query they are running", () => {
+  it("stamps the running query on a persistent MessageLatency", () => {
+    // Arrange: a message_start carrying a ttft stamp, converted inside a query.
+    const msg = loadStream("stream_event-message_start");
+
+    // Act.
+    const evt = toPersistentEvent(msg, { nowMs: 1000, queryInstanceId: "query-running" });
+
+    // Assert: the envelope names the query that produced it.
+    expect(evt).not.toBeNull();
+    expect(evt!.queryInstanceId).toBe("query-running");
+  });
+
+  it("stamps the running query on an ephemeral ContentDelta", () => {
+    // Arrange.
+    const msg = loadStream("stream_event-content_block_delta-text");
+
+    // Act.
+    const evt = toEphemeralEvent(msg, { nowMs: 1000, queryInstanceId: "query-running" });
+
+    // Assert.
+    expect(evt).not.toBeNull();
+    expect(evt!.queryInstanceId).toBe("query-running");
+  });
+
+  it("leaves the envelope empty when no query is supplied", () => {
+    // Arrange: the single-message decode path used by probes has no query.
+    const msg = loadStream("stream_event-content_block_delta-text");
+
+    // Act.
+    const evt = toEphemeralEvent(msg, { nowMs: 1000 });
+
+    // Assert: empty, which consumers read as live. Never a substituted fact.
+    expect(evt).not.toBeNull();
+    expect(evt!.queryInstanceId).toBe("");
+  });
+});
