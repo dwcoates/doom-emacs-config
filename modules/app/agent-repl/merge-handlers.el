@@ -92,8 +92,9 @@ other command; the DISPLAY name rides `:workspaceName'."
      ;; Returning here without deferring is what let the daemon record a merge
      ;; as `ok=true' 52ms before its own rejection arrived, so the failure that
      ;; killed every merge left no trace on the workspace at all.  The deferral
-     ;; is declared from `:on-registered', ahead of the write, so it is never
-     ;; behind an ack the socket delivers reentrantly.
+     ;; is declared from `:on-registered', ahead of the write, and
+     ;; `agent-repl--host-action-defer' REGISTERS it there and then, so the
+     ;; settle below can never run against a deferral nobody has recorded.
      :on-registered (lambda (id)
                       (setq req id)
                       (agent-repl--host-action-defer id))
