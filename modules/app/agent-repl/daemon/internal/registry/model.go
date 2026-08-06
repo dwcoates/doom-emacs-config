@@ -1,10 +1,28 @@
 package registry
 
-import "strings"
+import (
+	"strings"
+
+	"claude-repld/internal/protocmd"
+)
 
 // placeholderModel is what the Claude CLI reports as its model when it is not
 // running a real, nameable one. It is a marker, not a model id.
-const placeholderModel = "<synthetic>"
+//
+// READ OFF THE SCHEMA, NEVER SPELLED HERE. The literal used to be written out
+// once per runtime — twice in Go, once in the shim, and three times inline in
+// the webapp — with nothing comparing the copies. A vendor that renamed the
+// marker would have been adopted in some of them and not the others, and the
+// ones left behind would have begun treating the placeholder as a selectable
+// model. The one definition is now the MODEL_MARKER_SYNTHETIC enum value's
+// option, and this reads it back.
+//
+// Resolved at package init, which is the loudest and earliest this can fail.
+// The value is fixed the moment the bindings are generated, so a schema that
+// disagrees with them is a broken build rather than a runtime condition, and
+// protocmd panics on it. Failing at init means it can never be observed as a
+// wrong model instead.
+var placeholderModel = protocmd.SyntheticModelLiteral()
 
 // IsPlaceholderModel reports whether model is the CLI's placeholder rather than
 // a real model id.
