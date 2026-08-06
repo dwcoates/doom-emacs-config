@@ -35,6 +35,7 @@ import {
   PermissionResponse,
   PromptOrigin,
   PromptOriginSchema,
+  QuerySelectedModel,
   SetModel,
   SubmitPrompt,
 } from "./proto.js";
@@ -63,6 +64,16 @@ export interface SdkControlTarget {
   interrupt(input: { requestId: string }): InterruptOutcome;
   /** Set a model and return the SDK-confirmed selection. */
   setModel(input: { requestId: string; model: string }): Promise<string>;
+  /**
+   * The model this session is CURRENTLY running.
+   *
+   * A READ, not a change, and synchronous: the implementation already holds
+   * the answer — it tracks every SDK `system:init` and every confirmed
+   * `setModel` — so there is nothing to await and nothing to race. Empty means
+   * the shim has never observed a real model, which is a refusal rather than
+   * an answer (see handleQuerySelectedModel).
+   */
+  selectedModel(): string;
 }
 
 /**
@@ -217,6 +228,38 @@ export class ControlDispatch {
       const selectedModel = err instanceof ModelSelectionError ? normalizeModel(err.selectedModel) : "";
       LOGGER.log({ level: "error", request_id: msg.requestId, model, selected_model: selectedModel }, `set-model failed: ${reason}`);
       return create(NackSchema, { requestId: msg.requestId, reason, selectedModel });
+    }
+  }
+
+  /**
+   * Answer which model this session is currently running.
+   *
+   * WHY THE DAEMON ASKS. The bare argument-less `/model` opens the CLI's own
+   * picker, which no layer above can intercept: without this read the daemon
+   * learns the resulting model only when some later submit happens to
+   * re-announce a `system:init`, so the topbar picker names the OLD model
+   * until then and a hibernation before that respawns the session on it.
+   *
+   * AN UNKNOWN MODEL IS A NACK, NEVER AN EMPTY ACK. An Ack carrying no
+   * selection would be indistinguishable from a confirmed absence, and the
+   * daemon would have to guess which it was; the whole point of the read is
+   * that the value it commits was verified. A refusal is the honest answer and
+   * the daemon surfaces it as a failure.
+   */
+  handleQuerySelectedModel(msg: QuerySelectedModel): Ack | Nack {
+    try {
+      const selectedModel = normalizeModel(this.target.selectedModel());
+      if (selectedModel === "") {
+        const reason = "query-selected-model: this session has not observed a real model yet";
+        LOGGER.log({ level: "error", request_id: msg.requestId }, reason);
+        return create(NackSchema, { requestId: msg.requestId, reason });
+      }
+      LOGGER.log({ request_id: msg.requestId, selected_model: selectedModel }, "reported the live selected model");
+      return create(AckSchema, { requestId: msg.requestId, selectedModel });
+    } catch (err) {
+      const reason = errMsg(err);
+      LOGGER.log({ level: "error", request_id: msg.requestId, cause: err }, `query-selected-model failed: ${reason}`);
+      return create(NackSchema, { requestId: msg.requestId, reason });
     }
   }
 
