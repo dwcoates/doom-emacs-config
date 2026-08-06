@@ -123,13 +123,34 @@ func reportFatal(err error, stderr io.Writer) {
 // run wires up logging, the database, and the server, then blocks until a
 // termination signal or a fatal serve error. Factored out of main so its wiring
 // is exercised with temp paths in tests.
-func run(socketPath, dbPath, logPath string) error {
+func run(socketPath, dbPath, logPath string) (err error) {
 	log, closeLog, err := openLogger(socketPath, dbPath, logPath)
 	if err != nil {
 		return err
 	}
 	defer closeLog()
+	defer logProcessExit(log, &err)
 	return runWithLogger(socketPath, dbPath, log)
+}
+
+// logProcessExit is shim-store's one deferred exit trace: whatever caused
+// runWithLogger to return — a clean signal-driven shutdown, a runtime
+// failure, or a panic — is the last record this process writes, so a
+// truncated log still names why the process is gone.
+//
+// It re-panics after logging rather than recovering: a panic here is an
+// invariant violation (e.g. server.New's nil-dependency guard), and this
+// trace exists to narrate the crash, not to turn it into a normal exit.
+func logProcessExit(log *logging.Logger, err *error) {
+	if r := recover(); r != nil {
+		log.Log(logging.Fields{Operation: "exit", Level: "error"}, "shim-store exiting: panic: %v", r)
+		panic(r)
+	}
+	if *err != nil {
+		log.Log(logging.Fields{Operation: "exit", Level: "error"}, "shim-store exiting: %v", *err)
+		return
+	}
+	log.Log(logging.Fields{Operation: "exit"}, "shim-store exiting cleanly")
 }
 
 // openLogger creates shim-store's only persistent diagnostic sink. Directory
