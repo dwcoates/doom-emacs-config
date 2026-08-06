@@ -5,27 +5,46 @@ import (
 )
 
 // Scope restricts a single frontend connection to the frames about ONE session
-// (or its workspace). It is the mechanism behind the daemon's per-session
-// GET /sessions/{id}/stream WebSocket: the same frontend.Server that fans
-// unfiltered frames to /frontend serves a session-scoped view here, filtering
-// per connection rather than re-deriving frames (design ruling: the webapp
-// keeps its existing /stream URL and now parses frontend.v1 there).
+// or ONE workspace. It is the mechanism behind the daemon's scoped WebSockets:
+// the same frontend.Server that fans unfiltered frames to /frontend serves a
+// filtered view here, filtering per connection rather than re-deriving frames.
 //
-// Durable/control views carry an agent-repl session id and therefore require
-// an exact session match. ConversationDelta is the exception: its session_id
-// is the vendor conversation id from the durable event, which can rotate while
-// the agent-repl session and scoped WebSocket remain stable. It routes by the
-// authoritative workspace instead.
+// A scope has one of two ADDRESSES, and which one it holds decides how every
+// session-bearing frame routes:
+//
+//   - SESSION-ADDRESSED (SessionID set, GET /sessions/{id}/stream). Durable and
+//     control views carry an agent-repl session id and require an exact match on
+//     it, so a retired session sharing the workspace cannot rebind the page.
+//     ConversationDelta is the exception: its session_id is the vendor
+//     conversation id from the durable event, which rotates while the agent-repl
+//     session and the scoped WebSocket both stand, so it routes by workspace.
+//
+//   - WORKSPACE-ADDRESSED (SessionID empty, Workspace set, GET
+//     /workspace-stream?workspace=<dir>). The connection holds NO session
+//     identity, so there is no id to match a frame's against and EVERY frame
+//     routes by its workspace. This is what lets a viewer outlive the sessions
+//     its workspace runs: which session the workspace owns is the daemon's
+//     ruling, re-read from each arriving frame, not a key the viewer pinned at
+//     connect and must be remounted to change.
 type Scope struct {
 	SessionID string
 	Workspace string
 }
 
+// matchesAgentSession decides whether a frame bearing (sessionID, workspace)
+// belongs to this scope. sessionID is the agent-repl session id; an empty one
+// means the frame names no session (merge-only workspace state, say) and can
+// only route by workspace.
 func (s Scope) matchesAgentSession(sessionID, workspace string) bool {
-	if sessionID != "" {
-		return s.SessionID != "" && sessionID == s.SessionID
+	if s.SessionID == "" {
+		// Workspace-addressed: the frame's session id is not a key this
+		// connection holds a counterpart for, so the workspace decides alone.
+		return s.matchesWorkspace(workspace)
 	}
-	return s.Workspace != "" && workspace == s.Workspace
+	if sessionID != "" {
+		return sessionID == s.SessionID
+	}
+	return s.matchesWorkspace(workspace)
 }
 
 func (s Scope) matchesWorkspace(workspace string) bool {
