@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+
+	"google.golang.org/protobuf/proto"
 )
 
 func validationRecord(rootTurnID string) *frontendv1.TokenUtilization {
@@ -121,14 +123,17 @@ func TestValidateHistoricalAgainstLiveAllowsOnlyProvenanceAndTimingEnrichment(t 
 	if err := ValidateHistoricalAgainstLive(historical, live); err != nil {
 		t.Fatalf("compatible enrichment: %v", err)
 	}
-	conflict := *live
-	conflict.Usage = &frontendv1.TokenUsage{InputTokens: 2}
-	if err := ValidateHistoricalAgainstLive(historical, &conflict); err == nil || !strings.Contains(err.Error(), "payloads disagree") {
+	// proto.Clone, never a struct-value copy: TokenUtilization embeds a
+	// protoimpl.MessageState (a sync.Mutex), which go vet's copylocks check
+	// forbids copying by value.
+	usageConflict := proto.Clone(live).(*frontendv1.TokenUtilization)
+	usageConflict.Usage = &frontendv1.TokenUsage{InputTokens: 2}
+	if err := ValidateHistoricalAgainstLive(historical, usageConflict); err == nil || !strings.Contains(err.Error(), "payloads disagree") {
 		t.Fatalf("usage conflict error = %v", err)
 	}
-	conflict = *live
-	conflict.Actor = &frontendv1.TokenUtilization_Subagent{Subagent: &frontendv1.TokenUtilizationSubagent{AgentId: "other"}}
-	if err := ValidateHistoricalAgainstLive(historical, &conflict); err == nil || !strings.Contains(err.Error(), "agent_id disagree") {
+	actorConflict := proto.Clone(live).(*frontendv1.TokenUtilization)
+	actorConflict.Actor = &frontendv1.TokenUtilization_Subagent{Subagent: &frontendv1.TokenUtilizationSubagent{AgentId: "other"}}
+	if err := ValidateHistoricalAgainstLive(historical, actorConflict); err == nil || !strings.Contains(err.Error(), "agent_id disagree") {
 		t.Fatalf("actor conflict error = %v", err)
 	}
 }
