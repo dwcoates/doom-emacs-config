@@ -327,11 +327,10 @@ func (m *Manager) tearDownFailedBringUp(workspace string, d *sessionController) 
 	// The drain runs before the cancel like every other teardown's, even though
 	// a bring-up that never wired has almost never started a turn: a RETRY
 	// after a partially handshaked shim is the exception, and the interrupt
-	// costs nothing when the connection was never established.
-	m.drainLiveTurnForStop(workspace, d.sessionID, StopCauseBringUpFailed().path(), d.client)
-	if d.cancel != nil {
-		d.cancel()
-	}
+	// costs nothing when the connection was never established. That same
+	// exception is the one that can leave a terminal result held, which is why
+	// the shared prologue's release belongs on this path too.
+	m.drainAndCancelSessionController(workspace, d, StopCauseBringUpFailed())
 	// SOLE SESSION CONTROLLER ONLY WHEN THIS SESSION CONTROLLER OWNED THE WORKSPACE. A bring-up that
 	// lost the concurrent-first-prompt race is being torn down while the winner
 	// drives the workspace, and closing an unattributed claim there would blue

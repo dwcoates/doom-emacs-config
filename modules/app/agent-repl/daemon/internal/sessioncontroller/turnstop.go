@@ -187,6 +187,62 @@ func (m *Manager) drainLiveTurnForStop(workspace, sessionID, path string, cl tur
 		workspace, sessionID, path, outcome)
 }
 
+// releaseHeldTerminalResults publishes every terminal result a session
+// controller's consumer still holds, so a teardown carries the same release a
+// real `TurnEnded` does (sinks.go, settleTurnAccounting).
+//
+// THE SET IS EVERY TURN THE CONSUMER STILL HOLDS, and nothing narrower is
+// correct. A hold is entered only while a turn is active and is discharged the
+// instant that turn's accounting settles, so a turn still held when a teardown
+// reaches here is one whose end boundary has no remaining way to arrive: the
+// shim is about to be stopped and the stream that boundary would travel on is
+// about to end with it. The set cannot over-reach either — the map is private
+// to this session's own consumer, so it names no turn belonging to any other
+// session or to a replacement controller.
+//
+// IT MUST RUN BEFORE THE SESSION CONTROLLER CONTEXT IS CANCELLED. The release
+// publishes through the consumer's conversation path, and the cancel is what
+// stands the consumer down.
+func (m *Manager) releaseHeldTerminalResults(d *sessionController, cause StopCause) {
+	// A controller torn down before its consumer was bound has no stream behind
+	// it and therefore nothing held. This is the absence of a hold, not the
+	// suppression of one.
+	if d.consumer == nil {
+		return
+	}
+	held := d.consumer.heldTerminalTurnIDs()
+	if len(held) == 0 {
+		return
+	}
+	m.logf("session-controller: teardown releasing %d retained terminal result(s) ws=%q session=%s path=%s turns=%s — no TurnEnded can reach these turns once this teardown completes, so the teardown is what publishes their results",
+		len(held), d.workspace, d.sessionID, cause.path(), formatTurnIDs(held))
+	// Per-turn failures are reported and never abort the rest: one turn whose
+	// accounting will not persist must not strand the results of the others.
+	d.consumer.ReleaseSynthesizedTurnClose(held, cause.path())
+}
+
+// drainAndCancelSessionController is the teardown prologue every path that
+// holds a live session controller shares, and it exists so the three steps
+// cannot drift apart across the paths that need them:
+//
+//  1. interrupt the turn the shim is running, while the connection an interrupt
+//     travels over is still up;
+//  2. release the terminal results the consumer holds, while the consumer is
+//     still consuming; and
+//  3. cancel the session controller context, which ends client.Run.
+//
+// STEP 3 FORECLOSES BOTH STEPS BEFORE IT, which is also why neither of them can
+// live in stopShimSettlingTurn: by the time the axis close runs the controller
+// has been evicted from byWS, the cancel has landed, and neither the shim nor
+// the consumer is reachable from what that close is handed.
+func (m *Manager) drainAndCancelSessionController(workspace string, d *sessionController, cause StopCause) {
+	m.drainLiveTurnForStop(workspace, d.sessionID, cause.path(), d.client)
+	m.releaseHeldTerminalResults(d, cause)
+	if d.cancel != nil {
+		d.cancel()
+	}
+}
+
 // stopShimSettlingTurn stops a session's shim and then GUARANTEES the workspace's
 // session-status lifecycle carries no live turn. It is the only route from this package to
 // Spawner.StopShim.
@@ -245,6 +301,12 @@ func (m *Manager) stopShimSettlingTurn(workspace, sessionID string, cause StopCa
 // A workspace it cannot name is the one case with nothing to settle — there is
 // no axis to close — and it is loud rather than silent, because a session-scoped
 // stop with no workspace behind it means the caller lost the binding.
+//
+// IT SETTLES THE STATUS AXIS AND NOTHING ELSE. A turn's retained terminal
+// result is released by the teardown prologue instead
+// (drainAndCancelSessionController), and it has to be: this runs after the
+// controller has been evicted from byWS and its context cancelled, and the four
+// strings it is handed cannot reach the consumer that holds the result.
 func (m *Manager) settleTurnAfterStop(workspace, sessionID, path string, soleSessionController bool) {
 	if workspace == "" {
 		m.logf("session-controller: teardown axis close SKIPPED session=%s path=%s — the stop named no workspace, so there is no session-status lifecycle to close",
