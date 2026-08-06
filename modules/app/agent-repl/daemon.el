@@ -33,7 +33,7 @@
 (declare-function agent-repl--doctor-log "agent-repl-doctor" (fmt &rest args))
 (declare-function agent-repl--frontend-turn-active-sessions "agent-repl-frontend-client" ())
 (declare-function agent-repl-runtime-restart "services" (&optional stop-shims))
-(declare-function agent-repl-runtime-restart-await "services" (&optional stop-shims timeout))
+(declare-function agent-repl-runtime-restart-dispatch "services" (&optional stop-shims timeout))
 (declare-function agent-repl--uds-connected-p "frontend-uds" ())
 (declare-function agent-repl-uds-probe-async "frontend-uds" (path on-open on-failure))
 (declare-function agent-repl--uds-run-timer "frontend-uds" (seconds function &rest args))
@@ -340,24 +340,61 @@ CONTEXT and every terminal value are persisted for lifecycle diagnosis."
 
 ;;;; ---- Build-if-stale ---------------------------------------------------
 
-(defun agent-repl--frontend-run-build-script (args)
-  "External-boundary wrapper: run the build shell with ARGS, return exit code.
+(defun agent-repl--frontend-run-build-script (args callback)
+  "External-boundary wrapper: run the build shell with ARGS asynchronously.
 ARGS is the full argument list following the shell interpreter (script
 path plus optional flags).  Output is captured into
-`agent-repl--frontend-build-buffer'.  Body does nothing but invoke the
-external process so tests mock it via `cl-letf'; registered in
-`agent-repl--external-boundary-functions'."
-  (apply #'call-process ;; ALLOW-EXTERNAL-BOUNDARY
-         agent-repl-frontend-build-shell nil
-         agent-repl--frontend-build-buffer nil
-         args))
+`agent-repl--frontend-build-buffer'.  CALLBACK receives the integer exit
+code once the process terminates.
 
-(defun agent-repl--frontend-build-targets-if-stale (targets &optional force)
+THERE IS NO BLOCKING SPELLING.  This wrapper used to be a `call-process'
+and was one of the sites that froze the interactive editor for the whole
+of a runtime restart (a `fresh, skipping' build run still cost over a
+second of held input).  The continuation is a required argument rather
+than an optional one precisely so no future build step can be written
+that blocks the main thread.
+
+Body does nothing but invoke the external process so tests mock it via
+`cl-letf'; registered in `agent-repl--external-boundary-functions'."
+  (make-process ;; ALLOW-EXTERNAL-BOUNDARY
+   :name "agent-repl-frontend-build"
+   :command (cons agent-repl-frontend-build-shell args)
+   :connection-type 'pipe
+   :noquery t
+   :buffer (get-buffer-create agent-repl--frontend-build-buffer)
+   :sentinel (agent-repl--exit-code-sentinel callback)))
+
+(defun agent-repl--frontend-build-report (label exit-code on-success on-failure)
+  "Settle an asynchronous build of LABEL from its EXIT-CODE.
+Copies the captured subprocess output into the persistent agent-repl log,
+then hands a zero EXIT-CODE to ON-SUCCESS and any other to ON-FAILURE
+with the same diagnostic the blocking spelling used to signal.  Shared by
+every build-shell caller so the log record and the failure text cannot
+drift between them."
+  (let ((output
+         (with-current-buffer (get-buffer-create agent-repl--frontend-build-buffer)
+           (string-trim-right (buffer-string)))))
+    (agent-repl--log nil "frontend build: %s exit=%S output=%s"
+                     label exit-code
+                     (if (string-empty-p output) "<empty>" output))
+    (if (eq exit-code 0)
+        (funcall on-success exit-code)
+      (display-buffer agent-repl--frontend-build-buffer)
+      (funcall on-failure
+               (format "agent-repl: %s failed (exit %s) — see %s"
+                       label exit-code agent-repl--frontend-build-buffer)))))
+
+(defun agent-repl--frontend-build-targets-if-stale
+    (targets force on-success on-failure)
   "Build stale TARGETS through the shared artifact orchestrator.
 TARGETS is a list of build-frontend target strings, or nil for its normal
 shim/webapp/daemon set.  With FORCE non-nil, every selected artifact is
-rebuilt.  The complete captured subprocess output is copied into the
-persistent agent-repl log before success or failure is decided."
+rebuilt.  ON-SUCCESS receives the zero exit code; ON-FAILURE receives the
+diagnostic string.  A missing build script is an invariant violation, not
+a build failure, so it signals through the canonical logging helper
+rather than reaching ON-FAILURE."
+  (unless (and (functionp on-success) (functionp on-failure))
+    (error "agent-repl: frontend build requires callable continuations"))
   (agent-repl--log nil "frontend build-if-stale: requested targets=%S force=%s script=%s"
                    (or targets 'default) (if force "t" "nil")
                    agent-repl--frontend-build-script)
@@ -368,36 +405,37 @@ persistent agent-repl log before success or failure is decided."
            agent-repl--frontend-build-script))
   (with-current-buffer (get-buffer-create agent-repl--frontend-build-buffer)
     (erase-buffer))
-  (let* ((args (append (list agent-repl--frontend-build-script)
-                       (when force '("--force"))
-                       targets))
-         (exit-code (agent-repl--frontend-run-build-script args))
-         (output
-          (with-current-buffer agent-repl--frontend-build-buffer
-            (string-trim-right (buffer-string)))))
-    (agent-repl--log nil
-                     "frontend build-if-stale targets=%S force=%s exit=%S output=%s"
-                     (or targets 'default) (if force "t" "nil") exit-code
-                     (if (string-empty-p output) "<empty>" output))
-    (unless (eq exit-code 0)
-      (display-buffer agent-repl--frontend-build-buffer)
-      (error "agent-repl: frontend build failed (exit %s) — see %s"
-             exit-code agent-repl--frontend-build-buffer))
-    exit-code))
+  (let ((args (append (list agent-repl--frontend-build-script)
+                      (when force '("--force"))
+                      targets)))
+    (agent-repl--frontend-run-build-script
+     args
+     (lambda (exit-code)
+       (agent-repl--frontend-build-report
+        (format "build-if-stale targets=%S force=%s"
+                (or targets 'default) (if force "t" "nil"))
+        exit-code on-success on-failure))))
+  :pending)
 
-(defun agent-repl--frontend-build-if-stale (&optional force)
+(defun agent-repl--frontend-build-if-stale (force on-success on-failure)
   "Build stale shim, webapp, and daemon artifacts.
-With FORCE non-nil, rebuild all three.  Signals loudly on failure.
+With FORCE non-nil, rebuild all three.  ON-SUCCESS and ON-FAILURE carry
+the same meaning as in `agent-repl--frontend-build-targets-if-stale'.
 
 Covers the three build-frontend targets ONLY.  The boot path wants the
 whole stack and calls `agent-repl--frontend-deploy-stack' instead; this
 stays the narrow build for callers that own the rest of the deploy
 themselves (notably `agent-repl-runtime-restart', which kickstarts the
 services in elisp and would otherwise do it twice)."
-  (agent-repl--frontend-build-targets-if-stale nil force))
+  (agent-repl--frontend-build-targets-if-stale nil force on-success on-failure))
 
-(defun agent-repl--frontend-deploy-stack (&optional force)
-  "Build and deploy the WHOLE agent-repl stack; signal loudly on failure.
+(defun agent-repl--frontend-deploy-stack (force on-success on-failure)
+  "Build and deploy the WHOLE agent-repl stack; fail loudly on failure.
+ON-SUCCESS receives the zero exit code once the script terminates;
+ON-FAILURE receives the diagnostic string.  Asynchronous for the same
+reason the narrow build is: this runs on the boot path, and a blocking
+spelling holds the editor's input for the whole of a stack deploy.
+
 Runs `bin/deploy-all.sh --no-daemon-bounce': protobuf regeneration, the
 shim/webapp/daemon build, a forced daemon rebuild (proto codegen lands
 outside `daemon/', where its staleness check cannot see it), and the
@@ -416,6 +454,8 @@ daemon rebuilt against it, and the two launchd services were only ever
 deployed by the interactive `agent-repl-runtime-restart'.  A wire-format
 change could therefore leave a new Emacs talking to a daemon built before
 it, which fails every command rather than degrading."
+  (unless (and (functionp on-success) (functionp on-failure))
+    (error "agent-repl: stack deploy requires callable continuations"))
   (agent-repl--log nil "frontend deploy-stack: requested force=%s script=%s"
                    (if force "t" "nil") agent-repl--frontend-deploy-script)
   (unless (file-exists-p agent-repl--frontend-deploy-script)
@@ -425,20 +465,15 @@ it, which fails every command rather than degrading."
            agent-repl--frontend-deploy-script))
   (with-current-buffer (get-buffer-create agent-repl--frontend-build-buffer)
     (erase-buffer))
-  (let* ((args (append (list agent-repl--frontend-deploy-script "--no-daemon-bounce")
-                       (when force (list "--force"))))
-         (exit-code (agent-repl--frontend-run-build-script args))
-         (output
-          (with-current-buffer agent-repl--frontend-build-buffer
-            (string-trim-right (buffer-string)))))
-    (agent-repl--log nil "frontend deploy-stack: force=%s exit=%S output=%s"
-                     (if force "t" "nil") exit-code
-                     (if (string-empty-p output) "<empty>" output))
-    (unless (eq exit-code 0)
-      (display-buffer agent-repl--frontend-build-buffer)
-      (error "agent-repl: stack deploy failed (exit %s) — see %s"
-             exit-code agent-repl--frontend-build-buffer))
-    exit-code))
+  (let ((args (append (list agent-repl--frontend-deploy-script "--no-daemon-bounce")
+                      (when force (list "--force")))))
+    (agent-repl--frontend-run-build-script
+     args
+     (lambda (exit-code)
+       (agent-repl--frontend-build-report
+        (format "deploy-stack force=%s" (if force "t" "nil"))
+        exit-code on-success on-failure))))
+  :pending)
 
 ;;;; ---- Launch -----------------------------------------------------------
 
@@ -1019,8 +1054,21 @@ transition returns `:pending' immediately and completes from its callback."
       (cl-labels ((build-and-launch ()
                     (agent-repl--log nil "ensure-frontend-daemon: build-and-launch force=%s"
                                      (if force "t" "nil"))
-                    (agent-repl--frontend-deploy-stack force)
-                    (agent-repl--frontend-start-daemon)))
+                    ;; The stack deploy no longer blocks, so the launch that
+                    ;; used to follow it in straight-line order is now its
+                    ;; success continuation.  A failed deploy must never reach
+                    ;; the launch: starting the daemon on a half-built stack is
+                    ;; exactly the wire-format mismatch the deploy exists to
+                    ;; prevent, so the failure arm signals through the module's
+                    ;; canonical helper instead.
+                    (agent-repl--frontend-deploy-stack
+                     force
+                     (lambda (_exit-code) (agent-repl--frontend-start-daemon))
+                     (lambda (detail)
+                       (agent-repl--error
+                        nil
+                        "ensure-frontend-daemon: stack deploy FAILED force=%s detail=%s"
+                        (if force "t" "nil") detail)))))
         (if (and force (agent-repl--frontend-daemon-live-p))
             (progn
               (agent-repl--log nil "ensure-frontend-daemon: force=t; asynchronously stopping tracked daemon before rebuild")
@@ -1153,15 +1201,21 @@ survivors would otherwise keep running the previous build\=' code."
   (interactive "P")
   (agent-repl-runtime-restart (and stop-shims t)))
 
-(defun agent-repl-frontend-daemon-restart-await (&optional stop-shims timeout)
-  "Restart the complete runtime and await its terminal deployment result.
+(defun agent-repl-frontend-daemon-restart-dispatch (&optional stop-shims timeout)
+  "Dispatch the runtime restart and return its request identity at once.
 STOP-SHIMS and TIMEOUT are forwarded to
-`agent-repl-runtime-restart-await'.  This is the deployment-only companion to
-the asynchronous interactive command `agent-repl-frontend-daemon-restart'."
+`agent-repl-runtime-restart-dispatch'.  This is the deployment-only
+companion to the interactive `agent-repl-frontend-daemon-restart'.
+
+It RETURNS IMMEDIATELY.  A deployment caller reaching this over
+`emacsclient --eval' drives the editor the user is sitting in, so the
+terminal result travels through the completion artifact rather than
+through the editor's main loop; see the commentary above
+`agent-repl-runtime-restart-dispatch'."
   (agent-repl--log nil
-                   "frontend restart-await: requested stop-shims=%s timeout=%S root=%s"
+                   "frontend restart-dispatch: requested stop-shims=%s timeout=%S root=%s"
                    (if stop-shims "t" "nil") timeout agent-repl--frontend-root)
-  (agent-repl-runtime-restart-await (and stop-shims t) timeout))
+  (agent-repl-runtime-restart-dispatch (and stop-shims t) timeout))
 
 ;;;###autoload
 (defun agent-repl-frontend-daemon-restart-scheduled (reason &optional stop-shims)

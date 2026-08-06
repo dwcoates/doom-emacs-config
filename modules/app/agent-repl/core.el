@@ -1612,6 +1612,27 @@ introducing a sibling raw `make-process' site."
    :buffer nil
    :sentinel sentinel))
 
+(defun agent-repl--exit-code-sentinel (callback)
+  "Return a process sentinel handing CALLBACK the process exit code.
+CALLBACK is invoked exactly once, with the integer exit status, at the
+moment the process stops being live.  Shared by every external-boundary
+wrapper that replaced a blocking `call-process' with `make-process' plus
+a continuation (`agent-repl--launchctl-call',
+`agent-repl--frontend-run-build-script'), so those wrappers differ only
+in the argv they spawn.
+
+`process-exit-status' is authoritative here rather than parsing the
+sentinel's EVENT string: a signalled process reports its signal number
+through the same accessor, which is exactly the nonzero the caller's
+failure continuation must see."
+  (unless (functionp callback)
+    (error "agent-repl: exit-code sentinel requires a callable continuation"))
+  (let (settled)
+    (lambda (proc _event)
+      (unless (or settled (process-live-p proc))
+        (setq settled t)
+        (funcall callback (process-exit-status proc))))))
+
 ;;;; --- External-boundary registry -----------------------------------------
 ;;
 ;; Every function that wraps an external process or external-state side
@@ -1656,7 +1677,7 @@ introducing a sibling raw `make-process' site."
     agent-repl--shim-service-file-sha256
     agent-repl--shim-service-write-stamp
     agent-repl--shim-store-socket-present-p
-    agent-repl--runtime-pump-events
+    agent-repl--runtime-restart-write-result
     agent-repl--frontend-make-webview-buffer
     agent-repl--frontend-webview-selection
     agent-repl--frontend-webview-execute-script-1
