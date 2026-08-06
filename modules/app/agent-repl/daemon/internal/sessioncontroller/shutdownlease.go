@@ -865,3 +865,11 @@ func (m *Manager) restoreShutdownHolds(d *sessionController) {
 		go m.deliver(d, kick)
 	}
 }
+
+// noteTurnLivenessIDs is the Manager-level half of the same test seam; see
+// sessionController.noteTurnLivenessIDsLocked.
+//
+// Must be called with m.mu RELEASED.
+func (m *Manager) noteTurnLivenessIDs(d *sessionController, activeIDs []string) {
+	m.noteTurnLiveness(d, ssm.TurnLivenessFixture(d.workspace, activeIDs, false))
+}

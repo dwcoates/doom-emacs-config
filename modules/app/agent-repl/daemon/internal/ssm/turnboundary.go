@@ -258,11 +258,21 @@ func (m *Manager) paintTurnBandLocked(
 	if band, live := turnBandToken(l); live {
 		want, causeKind = band, causeTurnStarted
 	}
-	top, _, err := sessionStatusTop(tx, workspace)
+	// AGREEMENT IS ON THE PAIR, NOT THE TOKEN. `thinking` written by
+	// MarkPromptDelivered is the DAEMON's commitment to a prompt whose start has
+	// not reached the store; `thinking` written by a turn boundary is the stream
+	// confirming it. They render identically and mean different things, and the
+	// submit leg of the derivation reads the cause to tell them apart — so a
+	// boundary arriving over a commitment must SUPERSEDE it rather than find the
+	// axis already agreeable. Leaving the commitment row standing let it outlive
+	// the very turn it predicted: the turn's end closed the claim, and the stale
+	// prompt cause underneath resurrected liveness and painted `submitting` over
+	// a finished turn.
+	top, topCause, err := sessionStatusTopCause(tx, workspace)
 	if err != nil {
 		return "", err
 	}
-	if top == want {
+	if top == want && topCause == causeKind {
 		return "", nil
 	}
 	causeSeq := sql.NullInt64{Int64: int64(ev.GetSeq()), Valid: true}

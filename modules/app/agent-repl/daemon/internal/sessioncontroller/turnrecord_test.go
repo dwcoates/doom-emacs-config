@@ -46,25 +46,25 @@ func TestTurnRecordTransitions(t *testing.T) {
 		{
 			name:  "the ledger's claim names an accepted turn",
 			start: accepted("r-1"),
-			edge:  func(d *sessionController) { d.noteTurnClaimsLocked([]string{"t_42"}) },
+			edge:  func(d *sessionController) { d.noteTurnLivenessIDsLocked([]string{"t_42"}) },
 			want:  named("t_42"),
 		},
 		{
 			name:  "the ledger's claim names a turn nothing accepted",
 			start: turnRecord{},
-			edge:  func(d *sessionController) { d.noteTurnClaimsLocked([]string{"t_42"}) },
+			edge:  func(d *sessionController) { d.noteTurnLivenessIDsLocked([]string{"t_42"}) },
 			want:  named("t_42"),
 		},
 		{
 			name:  "an overlapping boundary renames the record onto the surviving claim",
 			start: named("t_42"),
-			edge:  func(d *sessionController) { d.noteTurnClaimsLocked([]string{"t_99"}) },
+			edge:  func(d *sessionController) { d.noteTurnLivenessIDsLocked([]string{"t_99"}) },
 			want:  named("t_99"),
 		},
 		{
 			name:  "an emptied claim set releases the record",
 			start: named("t_42"),
-			edge:  func(d *sessionController) { d.noteTurnClaimsLocked(nil) },
+			edge:  func(d *sessionController) { d.noteTurnLivenessIDsLocked(nil) },
 			want:  turnRecord{},
 		},
 		{
@@ -126,7 +126,7 @@ func TestANamedTransitionRefusesAnEmptyTurnID(t *testing.T) {
 	d := &sessionController{workspace: "ws", sessionID: "s1"}
 
 	// Act.
-	p := d.noteTurnClaimsLocked([]string{""})
+	p := d.noteTurnLivenessIDsLocked([]string{""})
 
 	// Assert.
 	if !p.unnamed {
@@ -153,14 +153,14 @@ func TestARefusedNamingIsReportedThroughTheDaemonLog(t *testing.T) {
 	})
 
 	// Act.
-	h.m.noteTurnClaims(h.controller(), []string{""})
+	h.m.noteTurnLivenessIDs(h.controller(), []string{""})
 
 	// Assert.
 	mu.Lock()
 	defer mu.Unlock()
 	found := false
 	for _, line := range lines {
-		if strings.Contains(line, "turn claim set NAMES NOTHING") && strings.Contains(line, `session=s1`) {
+		if strings.Contains(line, "turn liveness NAMES NOTHING") && strings.Contains(line, `session=s1`) {
 			found = true
 		}
 	}
@@ -171,18 +171,18 @@ func TestARefusedNamingIsReportedThroughTheDaemonLog(t *testing.T) {
 
 // --- the ordering the flake lived in ----------------------------------------
 
-// TestTheTurnRecordIsNamedBeforeTheSSMSeesTheBoundary pins the ordering the
-// torn pair came from. The SSM apply is what publishes the WorkspaceState a
+// TestTheTurnRecordIsNamedBeforeAnyoneCanObserveTheBoundary pins the ordering the
+// torn pair came from. The boundary is what publishes the WorkspaceState a
 // frontend (and the e2e that reproduced this) reads as "a turn is in flight",
 // and the name used to bind after it returned — so a scheduled shutdown taken on
 // the strength of that publication derived a hold it could not name.
-func TestTheTurnRecordIsNamedBeforeTheSSMSeesTheBoundary(t *testing.T) {
+func TestTheTurnRecordIsNamedBeforeAnyoneCanObserveTheBoundary(t *testing.T) {
 	// Arrange.
 	h := newQueueHarness(t, nil)
 	d := h.controller()
 	var mu sync.Mutex
 	var atApply turnRecord
-	h.applier.onApply = func(*corev1.Event) {
+	d.consumer.onTurn = func(bool, int64) {
 		h.m.mu.Lock()
 		defer h.m.mu.Unlock()
 		mu.Lock()
@@ -199,7 +199,7 @@ func TestTheTurnRecordIsNamedBeforeTheSSMSeesTheBoundary(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 	if id, named := atApply.name(); !named || id != "t_42" {
-		t.Fatalf("turn record at the SSM apply = %s, want named(t_42): every frontend-visible consequence of this boundary follows the apply, so the hold must be nameable by then", atApply)
+		t.Fatalf("turn record at the queue's boundary edge = %s, want named(t_42): every frontend-visible consequence of this boundary follows that edge, so the hold must be nameable by then", atApply)
 	}
 }
 
@@ -212,7 +212,7 @@ func TestANamingEdgeTellsTheDrainEngine(t *testing.T) {
 	before := h.lease.activityCount()
 
 	// Act.
-	h.m.noteTurnClaims(h.controller(), []string{"t_42"})
+	h.m.noteTurnLivenessIDs(h.controller(), []string{"t_42"})
 
 	// Assert.
 	if got := h.lease.activityCount(); got <= before {

@@ -119,7 +119,9 @@ func (r *vendorBlockedRig) apply(payload any) {
 	if err != nil {
 		r.t.Fatalf("existing: %v", err)
 	}
-	d.consumer.Apply(ev)
+	if err := d.consumer.Apply(ev); err != nil {
+		r.t.Fatalf("consumer apply seq=%d: %v", r.seq, err)
+	}
 }
 
 // state is the workspace's resolved render state — the value a footer frame

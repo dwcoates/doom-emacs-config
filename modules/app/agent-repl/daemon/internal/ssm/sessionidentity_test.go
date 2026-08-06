@@ -76,7 +76,7 @@ func TestApplyStampsTheDaemonSessionIDOnAStoreStreamTurn(t *testing.T) {
 	}
 
 	// Act: the turn arrives under the identity the STORE knows.
-	if err := m.Apply(evTurnStarted("vendor-uuid", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("vendor-uuid", 1)); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 
@@ -99,7 +99,7 @@ func TestApplyRecordsTheStoreCoordinateOfATurnEvent(t *testing.T) {
 	}
 
 	// Act
-	if err := m.Apply(evTurnStarted("vendor-uuid", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("vendor-uuid", 1)); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 
@@ -118,18 +118,21 @@ func TestApplyStillDeduplicatesAReplayedEvent(t *testing.T) {
 	if err := m.ApplyWired("ws1", WiringWired, "test arrangement"); err != nil {
 		t.Fatalf("ApplyWired: %v", err)
 	}
-	if err := m.Apply(evTurnStarted("vendor-uuid", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("vendor-uuid", 1)); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 
 	// Act: the same event again.
-	if err := m.Apply(evTurnStarted("vendor-uuid", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("vendor-uuid", 1)); err != nil {
 		t.Fatalf("Apply (replay): %v", err)
 	}
 
 	// Assert
-	if !cl.contains("ssm: duplicate event skipped") {
-		t.Fatalf("a replayed event was applied again: no duplicate-skip was logged")
+	if !cl.contains("replayed=true") {
+		t.Fatalf("a replayed event was not recognized by the durable ledger: %v", cl.lines)
+	}
+	if got := cl.count("→RENDER_STATE_THINKING"); got != 1 {
+		t.Fatalf("thinking transitions logged = %d, want 1 — the replay must not repaint", got)
 	}
 }
 
@@ -148,13 +151,23 @@ func TestApplyAcceptsTheFirstSeqOfARotatedVendorSpace(t *testing.T) {
 	if err := m.ApplyWired("ws1", WiringWired, "test arrangement"); err != nil {
 		t.Fatalf("ApplyWired: %v", err)
 	}
-	if err := m.Apply(evTurnStarted("vendor-retired", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("vendor-retired", 1)); err != nil {
 		t.Fatalf("Apply (retired space): %v", err)
 	}
 
 	// Act: the NEW space's own first event.
-	if err := m.Apply(evTurnEnded("vendor-fresh", 1, false)); err != nil {
+	if err := applyTest(m, evTurnStarted("vendor-fresh", 1)); err != nil {
 		t.Fatalf("Apply (fresh space): %v", err)
+	}
+	// Both spaces' turns end, so the workspace settles rather than standing on
+	// a claim the retired space opened.
+	// Oldest claim first: a LEGACY start carries no turn id, so the ledger can
+	// only correlate its end by FIFO order within the claimant's own queue.
+	if err := applyTest(m, evTurnEnded("vendor-retired", 2, false)); err != nil {
+		t.Fatalf("Apply (retired space end): %v", err)
+	}
+	if err := applyTest(m, evTurnEnded("vendor-fresh", 2, false)); err != nil {
+		t.Fatalf("Apply (fresh space end): %v", err)
 	}
 
 	// Assert

@@ -658,6 +658,22 @@ func sessionStatusTop(q rowQuerier, workspace string) (top, beneath string, err 
 	return top, beneath, nil
 }
 
+// sessionStatusTopCause returns the workspace's newest session-status token AND
+// the cause that wrote it. The pair is what distinguishes two rows that render
+// the same and mean different things — see paintTurnBandLocked.
+func sessionStatusTopCause(q rowQuerier, workspace string) (state, causeKind string, err error) {
+	e := q.QueryRow(`SELECT state, cause_kind FROM workspace_state
+		 WHERE workspace = ? AND state IN `+sessionStatusMembers+`
+		 ORDER BY at DESC LIMIT 1`, workspace).Scan(&state, &causeKind)
+	if e == sql.ErrNoRows {
+		return "", "", nil
+	}
+	if e != nil {
+		return "", "", fmt.Errorf("ssm: session-status top read for workspace %q: %w", workspace, e)
+	}
+	return state, causeKind, nil
+}
+
 // permissionOpenWorkspaces lists every workspace whose session-status lifecycle currently
 // tops out in `permission`. It backs the release at Open: the pendings a
 // permission row stands for are in-process rendezvous that do not survive a

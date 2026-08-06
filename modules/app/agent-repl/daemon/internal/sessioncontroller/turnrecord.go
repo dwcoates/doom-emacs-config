@@ -220,3 +220,16 @@ func (d *sessionController) noteTurnIdleLocked() (before turnRecord, changed boo
 	d.turn = turnRecord{}
 	return before, before.active()
 }
+
+// noteTurnLivenessIDsLocked and Manager.noteTurnLivenessIDs are TEST SEAMS that
+// name a claim set directly instead of a derived value.
+//
+// They exist because the record's transitions are worth testing on their own,
+// and a test that only wants to say "the ledger holds these two turns" should
+// not have to stand up an SSM to say it. They wrap the value in the fixture and
+// then travel the ordinary path, so nothing here is a second projection.
+//
+// Caller holds m.mu.
+func (d *sessionController) noteTurnLivenessIDsLocked(activeIDs []string) turnClaimProjection {
+	return d.noteTurnLivenessLocked(ssm.TurnLivenessFixture(d.workspace, activeIDs, false))
+}

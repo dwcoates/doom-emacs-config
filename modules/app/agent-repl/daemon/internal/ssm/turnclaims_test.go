@@ -45,8 +45,10 @@ func openTurnClaimManager(t *testing.T, path string) *Manager {
 	m, err := Open(Options{
 		DBPath: path,
 		Logf:   func(string, ...any) {},
-		Resolver: fakeResolver{
-			"vendor-session": "ws",
+		Resolver: vendorAliasResolver{
+			workspace: "ws",
+			daemonID:  "daemon-session",
+			vendorIDs: []string{"vendor-session", "vendor-old", "vendor-new", "vendor-other"},
 		},
 	})
 	if err != nil {
@@ -301,7 +303,7 @@ func TestLegacyHandshakeClaimBindsToFirstOrderedStreamStart(t *testing.T) {
 func TestHandshakeWithNoTurnsClosesAStaleThinking(t *testing.T) {
 	// Arrange — a latched `thinking` survives into a fresh handshake.
 	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 	// Act.
@@ -312,7 +314,7 @@ func TestHandshakeWithNoTurnsClosesAStaleThinking(t *testing.T) {
 	if got := mustCurrent(t, m, "ws1").State; got == frontendv1.RenderState_RENDER_STATE_THINKING {
 		t.Fatalf("state = THINKING, want the stale claim closed by the handshake")
 	}
-	if !cl.contains("ssm: stale turn CLOSED ws=ws1 session=s1 reason=\"shim_handshake_no_turns\"") {
+	if !cl.contains("ssm: stale turn CLOSED ws=ws1 session=s1 reason=\"" + TurnCloseRestartInterrupted + "\"") {
 		t.Fatalf("missing the canonical handshake close record; log:\n%s", strings.Join(cl.lines, "\n"))
 	}
 }
@@ -321,9 +323,7 @@ func TestHandshakeWithNoTurnsClosesAStaleThinking(t *testing.T) {
 func TestHandshakeNamingLiveTurnsLeavesTheAxisAlone(t *testing.T) {
 	// Arrange.
 	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
-		t.Fatalf("turn started: %v", err)
-	}
+	claimTurn(t, m, "ws1", "s1", "s1", "turn-a", 1)
 	// Act.
 	if _, _, _, err := m.ReconcileTurnHandshake("ws1", "s1", []string{"turn-a"}, false); err != nil {
 		t.Fatalf("ReconcileTurnHandshake: %v", err)
@@ -342,7 +342,7 @@ func TestHandshakeNamingLiveTurnsLeavesTheAxisAlone(t *testing.T) {
 func TestHandshakeWithLegacyActiveLeavesTheAxisAlone(t *testing.T) {
 	// Arrange.
 	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 	// Act.
@@ -362,10 +362,10 @@ func TestHandshakeWithLegacyActiveLeavesTheAxisAlone(t *testing.T) {
 func TestHandshakeOverASettledAxisAppendsNothing(t *testing.T) {
 	// Arrange.
 	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
-	if err := m.Apply(evTurnEnded("s1", 2, false)); err != nil {
+	if err := applyTest(m, evTurnEnded("s1", 2, false)); err != nil {
 		t.Fatalf("turn ended: %v", err)
 	}
 	// Act.
@@ -409,10 +409,10 @@ func TestHandshakeCloseFailureIsLoggedWithoutFailingTheHandshake(t *testing.T) {
 func TestHandshakeCloseUnblocksTheSuppressedReadiness(t *testing.T) {
 	// Arrange — a latched `thinking` is suppressing readiness.
 	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
-	if err := m.Apply(evSessionStarted("s1", 2)); err != nil {
+	if err := applyTest(m, evSessionStarted("s1", 2)); err != nil {
 		t.Fatalf("session started: %v", err)
 	}
 	if !cl.contains("ssm: readiness suppressed (turn in flight) ws=ws1") {
@@ -422,7 +422,7 @@ func TestHandshakeCloseUnblocksTheSuppressedReadiness(t *testing.T) {
 	if _, _, _, err := m.ReconcileTurnHandshake("ws1", "s1", nil, false); err != nil {
 		t.Fatalf("ReconcileTurnHandshake: %v", err)
 	}
-	if err := m.Apply(evSessionStarted("s1", 3)); err != nil {
+	if err := applyTest(m, evSessionStarted("s1", 3)); err != nil {
 		t.Fatalf("session started after the handshake: %v", err)
 	}
 	// Assert.
@@ -531,7 +531,7 @@ func TestHandshakeReportingNoTurnClosesThePhantomClaim(t *testing.T) {
 func TestHandshakePhantomCloseRecordsTheRestartInterruptCause(t *testing.T) {
 	// Arrange — the user must be able to see the turn was CUT, not merely lost.
 	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 	claimTurn(t, m, "ws1", "s1", "s1", "daemon-prompt-1", 2)
@@ -545,7 +545,7 @@ func TestHandshakePhantomCloseRecordsTheRestartInterruptCause(t *testing.T) {
 	if got := mustCurrent(t, m, "ws1").GetCauseKind(); got != causeShimStopped+":"+TurnCloseRestartInterrupted {
 		t.Fatalf("cause_kind = %q, want the restart interrupt named on the workspace state", got)
 	}
-	if !cl.contains("ssm: turn claims INTERRUPTED BY RESTART workspace=ws1 claimant_session=s1 closed=[daemon-prompt-1]") {
+	if !cl.contains("ssm: turn claims INTERRUPTED BY RESTART workspace=ws1 claimant_session=s1 closed=[<legacy>,daemon-prompt-1]") {
 		t.Fatalf("missing the loud restart-interrupt record; log:\n%s", strings.Join(cl.lines, "\n"))
 	}
 }

@@ -656,10 +656,19 @@ func recordTurnStartRow(tx *sql.Tx, workspace, claimantSessionID, eventSessionID
 	if id == "" {
 		var claimID int64
 		var startSeq uint64
-		err := tx.QueryRow(`SELECT claim_id, start_seq FROM turn_lifecycle_claim
+		// THE STORE COORDINATE IS PART OF A LEGACY CLAIM'S IDENTITY TOO. A
+		// vendor uuid rotation restarts the store's seq space at 1 under the
+		// SAME claimant, so a check on seq alone reads the NEW space's first
+		// start as a replay of the retired space's and silently drops the turn
+		// it opens. The named path has always compared the event session; the
+		// legacy path must, because it is the only other thing distinguishing
+		// two starts that both carry no turn id.
+		var startEventSessionID string
+		err := tx.QueryRow(`SELECT claim_id, start_seq, start_event_session_id FROM turn_lifecycle_claim
 			WHERE workspace=? AND claimant_session_id=? AND turn_id='' AND end_seq IS NULL
 			ORDER BY claim_id LIMIT 1`,
-			workspace, claimantSessionID).Scan(&claimID, &startSeq)
+			workspace, claimantSessionID).Scan(&claimID, &startSeq, &startEventSessionID)
+		sameSpace := startEventSessionID == "" || eventSessionID == "" || startEventSessionID == eventSessionID
 		switch {
 		case err == nil && startSeq == 0:
 			if _, err := tx.Exec(`UPDATE turn_lifecycle_claim SET start_seq=? WHERE claim_id=?`,
@@ -667,7 +676,7 @@ func recordTurnStartRow(tx *sql.Tx, workspace, claimantSessionID, eventSessionID
 				return false, fmt.Errorf("ssm: bind legacy handshake claim to seq=%d: %w", seq, err)
 			}
 			return false, nil
-		case err == nil && startSeq == seq:
+		case err == nil && startSeq == seq && sameSpace:
 			return true, nil
 		case err == nil:
 			// A second legacy turn may be queued behind the first. Its empty
@@ -678,8 +687,9 @@ func recordTurnStartRow(tx *sql.Tx, workspace, claimantSessionID, eventSessionID
 		}
 		var one int
 		err = tx.QueryRow(`SELECT 1 FROM turn_lifecycle_claim
-			WHERE workspace=? AND claimant_session_id=? AND turn_id='' AND start_seq=? LIMIT 1`,
-			workspace, claimantSessionID, int64(seq)).Scan(&one)
+			WHERE workspace=? AND claimant_session_id=? AND turn_id='' AND start_seq=?
+				AND (start_event_session_id='' OR start_event_session_id=?) LIMIT 1`,
+			workspace, claimantSessionID, int64(seq), eventSessionID).Scan(&one)
 		if err == nil {
 			return true, nil
 		}

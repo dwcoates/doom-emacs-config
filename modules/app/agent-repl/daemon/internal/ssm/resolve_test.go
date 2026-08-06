@@ -40,6 +40,19 @@ func newWiredTestDB(t *testing.T, workspace string) *sql.DB {
 // seedSignal appends one raw signal row at a caller-chosen `at`, so tests
 // can control latest-per-axis ordering deterministically. The row carries no
 // task id; use seedTaskSignal for the live-task counter.
+// seedTurnClaim opens a durable turn claim, which is what turn liveness is
+// DERIVED from (turnliveness.go). A test that wants a workspace to read
+// "a turn is in flight" seeds this rather than a `thinking` row: the row is
+// the color's rendering of the derivation, never a second source for it.
+func seedTurnClaim(t *testing.T, db *sql.DB, ws, sid, turnID string, startSeq int64) {
+	t.Helper()
+	if _, err := db.Exec(`INSERT INTO turn_lifecycle_claim(
+		workspace, claimant_session_id, turn_id, start_seq, start_event_session_id
+	) VALUES (?,?,?,?,?)`, ws, sid, turnID, startSeq, sid); err != nil {
+		t.Fatalf("seed turn claim: %v", err)
+	}
+}
+
 func seedSignal(t *testing.T, db *sql.DB, ws, sid, state, cause string, seq int64, at int64) {
 	t.Helper()
 	seedTaskSignal(t, db, ws, sid, state, cause, seq, at, "")
@@ -259,6 +272,9 @@ func TestResolveTurnActive(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			db := newWiredTestDB(t, "ws")
 			seedSignal(t, db, "ws", "sess", tt.state, tt.cause, 0, 1)
+			if tt.want {
+				seedTurnClaim(t, db, "ws", "sess", "turn-1", 1)
+			}
 			got, err := resolve(db, "ws", nil)
 			if err != nil {
 				t.Fatalf("resolve: %v", err)

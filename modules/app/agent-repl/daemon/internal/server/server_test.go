@@ -964,7 +964,7 @@ func TestAccountSwitchGuardsTurnActive(t *testing.T) {
 	h := newHarnessWith(t, Config{Accounts: accountRoster()})
 	id := createSession(t, h, `{"cwd":"/w"}`)
 	markControllerOperational(t, h, "/w")
-	if err := h.ssm.Apply(&corev1.Event{
+	if _, err := h.ssm.ApplyTurnBoundary("/w", id, "", &corev1.Event{
 		SessionId: id,
 		Seq:       2,
 		Plane:     corev1.Plane_PLANE_STREAM,
