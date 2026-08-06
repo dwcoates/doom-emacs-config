@@ -174,14 +174,28 @@ dot without changing anything true."
               ((symbol-function 'agent-repl--ws-render-status) (lambda (_ws) nil)))
       (should (equal (agent-repl--sidebar-wire-status "ws") "none")))))
 
-(ert-deftest agent-repl-test-sidebar-wire-status-perspective-less-is-inactive ()
-  "A perspective-less workspace serializes as \"inactive\", overriding its state.
-The `agent-repl--ws-open-p' nil branch dominates even a live `:merged'
-render state, since sidebar-but-not-tab-bar is the fact being conveyed."
+(ert-deftest agent-repl-test-sidebar-wire-status-perspective-less-merged-is-merged ()
+  "A perspective-less `:merged' workspace still serializes as \"merged\".
+`:merged' is perspective-independent in
+`agent-repl--sidebar-status-wire': the row is reporting concluded work,
+not tab-bar membership, so `agent-repl--ws-open-p' nil no longer
+overrides it — that override was exactly the defect that hid the
+Recently Merged dot behind a question mark."
   (agent-repl-test--with-clean-state
     (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
     (cl-letf (((symbol-function 'agent-repl--ws-open-p) (lambda (_ws) nil))
               ((symbol-function 'agent-repl--ws-render-status) (lambda (_ws) :merged)))
+      (should (equal (agent-repl--sidebar-wire-status "ws") "merged")))))
+
+(ert-deftest agent-repl-test-sidebar-wire-status-perspective-less-live-is-inactive ()
+  "A perspective-less LIVE status still serializes as \"inactive\".
+`:ready' is perspective-bound in `agent-repl--sidebar-status-wire', so
+losing the tab-bar membership still dominates: there is no live session
+whose lifecycle a status dot could report."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (cl-letf (((symbol-function 'agent-repl--ws-open-p) (lambda (_ws) nil))
+              ((symbol-function 'agent-repl--ws-render-status) (lambda (_ws) :ready)))
       (should (equal (agent-repl--sidebar-wire-status "ws") "inactive")))))
 
 (ert-deftest agent-repl-test-sidebar-wire-status-unmapped-errors ()
@@ -192,6 +206,35 @@ render state, since sidebar-but-not-tab-bar is the fact being conveyed."
               ((symbol-function 'agent-repl--ws-render-status)
                (lambda (_ws) :not-a-state)))
       (should-error (agent-repl--sidebar-wire-status "ws")))))
+
+(ert-deftest agent-repl-test-sidebar-status-wire-every-entry-classified ()
+  "Every `agent-repl--sidebar-status-wire' entry names a boolean flag.
+A newly added render state whose entry omits the
+PERSPECTIVE-INDEPENDENT-P cell would leave `agent-repl--sidebar-wire-status'
+unable to decide whether it needs a live perspective — this pins that
+every entry lands on exactly one side of the rule rather than silently
+falling through as neither."
+  (dolist (entry agent-repl--sidebar-status-wire)
+    (let ((row (cdr entry)))
+      (should (stringp (car row)))
+      (should (memq (cdr row) '(nil t))))))
+
+(ert-deftest agent-repl-test-sidebar-wire-row-merged-perspective-less-publishes-merged-arm ()
+  "A merged, perspective-less workspace publishes the `merged' arm, not `inactive'.
+End-to-end reproduction of the fixed defect: `preserve-entry' leaves the
+merge landed but the perspective gone, and the row must still draw the
+merged dot instead of the inactive question mark."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "merged" "/tmp/merged"
+                                 :pushed-render-state :merged
+                                 :merge-completed-at 100.0)
+    (agent-repl-test--sidebar-with-persps '("other")
+      (agent-repl-test--sidebar-with-link
+        (agent-repl--sidebar-push)
+        (let* ((wire (agent-repl-test--sidebar-wire))
+               (row (aref (alist-get 'rows (alist-get 'recentlyMerged wire)) 0)))
+          (should (assq 'merged row))
+          (should (null (assq 'inactive row))))))))
 
 ;;;; ---- The closed (greyed) predicate ---------------------------------------
 
@@ -841,7 +884,7 @@ Folding is display state, so unfolding must need no republish."
 (ert-deftest agent-repl-test-sidebar-status-arm-table-covers-every-wire-status ()
   "Every wire status the sidebar can emit maps to an arm key."
   (dolist (pair agent-repl--sidebar-status-wire)
-    (should (agent-repl--sidebar-status-arm (cdr pair)))))
+    (should (agent-repl--sidebar-status-arm (cadr pair)))))
 
 (ert-deftest agent-repl-test-sidebar-status-arm-unmapped-errors ()
   "An unmapped wire status signals rather than publishing an armless row."
@@ -1907,12 +1950,12 @@ Both read the one minibuffer, so the guard is shared rather than per-action."
 (ert-deftest agent-repl-test-sidebar-wire-status-clearing ()
   ":clearing carries its own wire string rather than borrowing thinking's."
   ;; Act / Assert
-  (should (equal (alist-get :clearing agent-repl--sidebar-status-wire) "clearing")))
+  (should (equal (car (alist-get :clearing agent-repl--sidebar-status-wire)) "clearing")))
 
 (ert-deftest agent-repl-test-sidebar-wire-status-compacting ()
   ":compacting carries its own wire string rather than borrowing thinking's."
   ;; Act / Assert
-  (should (equal (alist-get :compacting agent-repl--sidebar-status-wire) "compacting")))
+  (should (equal (car (alist-get :compacting agent-repl--sidebar-status-wire)) "compacting")))
 
 ;;;; ---- The RosterRow.status proto vocabulary ---------------------------
 
@@ -1957,7 +2000,7 @@ beside it are declarations, not vocabulary."
 The mapped render states, plus the two `agent-repl--sidebar-wire-status'
 derives structurally rather than from the table."
   (delete-dups
-   (append (mapcar #'cdr agent-repl--sidebar-status-wire)
+   (append (mapcar #'cadr agent-repl--sidebar-status-wire)
            '("inactive" "none"))))
 
 (ert-deftest agent-repl-test-sidebar-roster-oneof-covers-every-wire-status ()
