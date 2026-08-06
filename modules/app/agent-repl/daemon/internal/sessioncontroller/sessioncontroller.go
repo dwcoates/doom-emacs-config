@@ -32,6 +32,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
@@ -120,7 +121,13 @@ type SessionRegistrar interface {
 	// SessionModelObserved persists the model a LIVE session reports itself to
 	// be running, which is the only model a respawn should ever be pinned to.
 	// The requested-at-create model is a seed and nothing more.
-	SessionModelObserved(sessionID, model string)
+	//
+	// obs states WHEN the report was true. The implementation admits the write
+	// only when obs strictly supersedes the last one it accepted for this
+	// session, and refuses it loudly otherwise: two unordered writers feed this
+	// value, and last-writer-wins let a SystemInit from an already-in-flight
+	// submit overwrite a selection the user had just confirmed.
+	SessionModelObserved(sessionID, model string, obs registry.ModelObservation)
 }
 
 // ModelCatalogRegistrar receives the live SDK's model menu. It is separate
@@ -501,6 +508,10 @@ type Manager struct {
 	// exact moment the replacement starts accepting prompts.
 	keepAliveResidue map[string][]string
 	lastCSID         map[string]string // session id -> last-persisted claude session uuid
+	// genOrdinals is the monotone counter behind sessionController.genOrdinal.
+	// Process-local by design: it orders controllers within one daemon, which
+	// is exactly the scope an in-flight model report can survive.
+	genOrdinals atomic.Uint64
 	// shimPID is the pid each session's shim announced on its ShimHello. It is
 	// the ONLY way to stop a shim this daemon did not spawn, and it is kept in
 	// memory rather than persisted deliberately: it is trustworthy exactly
@@ -570,6 +581,14 @@ type sessionController struct {
 	// generationID distinguishes this in-memory controller from every retired
 	// controller for the same workspace and session.
 	generationID string
+	// genOrdinal ORDERS this controller against every other one this daemon
+	// process has built, which the opaque generationID cannot do.
+	//
+	// It exists for the model-observation token (registry.ModelObservation): a
+	// report of a session's model left in flight by a controller this one
+	// replaced must lose to anything this one observes, and only a monotone
+	// ordinal can decide that. Minted with the generation id, never reused.
+	genOrdinal uint64
 	// resumedVendorSessionID records the exact durable conversation this
 	// generation asked the spawner to resume. A transport failure may retry
 	// only while preserving this identity.
@@ -1131,7 +1150,7 @@ func (m *Manager) setModelOn(ctx context.Context, d *sessionController, requeste
 	selected = registry.NormalizeModel(selected)
 	if err != nil {
 		if selected != "" {
-			m.persistObservedModel(d.sessionID, selected)
+			m.persistObservedModel(d.sessionID, selected, d.modelObservationNow())
 			m.logf("session-controller: model request REJECTED session=%s ws=%q route=%s requested=%q shim_selected=%q: %v", d.sessionID, d.workspace, route, requested, selected, err)
 			return selected, err
 		}
@@ -1144,7 +1163,7 @@ func (m *Manager) setModelOn(ctx context.Context, d *sessionController, requeste
 		return "", err
 	}
 	m.logf("session-controller: model request CONFIRMED session=%s ws=%q route=%s requested=%q selected=%q", d.sessionID, d.workspace, route, requested, selected)
-	m.persistObservedModel(d.sessionID, selected)
+	m.persistObservedModel(d.sessionID, selected, d.modelObservationNow())
 	return selected, nil
 }
 
@@ -1391,9 +1410,26 @@ func (m *Manager) persistBackfillState(sessionID, state string) {
 // real model to name. Normalize it to the same empty representation and do not
 // overwrite a record that may already hold the last real observed model.
 //
+// EVERY REPORT CARRIES WHEN IT WAS TRUE. obs is the ordering token the
+// registrar admits or refuses the write on (registry.ModelObservation): the
+// two authorities that report a session's model — the shim's confirmation of a
+// deliberate change, and the SystemInit the SDK re-announces on every submit —
+// used to race, and a SystemInit belonging to an already-in-flight submit could
+// rewrite the record to the model that submit began under.
+//
+// An INVALID token is refused here rather than passed on. It would order
+// against nothing, which is precisely the last-writer-wins behavior the token
+// exists to remove, so it fails hard at the funnel instead of degrading the
+// guarantee for every observation that follows it.
+//
 // No-op without a registrar (a test harness).
-func (m *Manager) persistObservedModel(sessionID, model string) {
+func (m *Manager) persistObservedModel(sessionID, model string, obs registry.ModelObservation) {
 	if m.cfg.Registrar == nil {
+		return
+	}
+	if !obs.Valid() {
+		m.logf("session-controller: model observation REFUSED session=%s model=%q %s reason=untokened_observation — a report that cannot be ordered would restore last-writer-wins; the record is left alone",
+			sessionID, model, obs)
 		return
 	}
 	normalized := registry.NormalizeModel(model)
@@ -1403,7 +1439,21 @@ func (m *Manager) persistObservedModel(sessionID, model string) {
 		}
 		return
 	}
-	m.cfg.Registrar.SessionModelObserved(sessionID, normalized)
+	m.cfg.Registrar.SessionModelObserved(sessionID, normalized, obs)
+}
+
+// modelObservationNow is the token for something the SHIM just confirmed.
+//
+// Its seq is the highest the controller has consumed, which is exactly what
+// makes the confirmation dominate the stale SystemInit: that init rode an event
+// the controller had already taken in, so its seq is at or below this mark and
+// it cannot supersede.
+func (d *sessionController) modelObservationNow() registry.ModelObservation {
+	return registry.ModelObservation{
+		Generation: d.generationID,
+		GenOrdinal: d.genOrdinal,
+		StreamSeq:  d.consumer.consumedStreamSeq(),
+	}
 }
 
 // modelCatalogReporter is the shimclient boundary for query-supported model
@@ -2517,8 +2567,13 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 			workspace, sessionID, err)
 		return nil, false, err
 	}
-	m.logf("session-controller: controller generation minted ws=%q session=%s generation=%s decision=begin_bring_up",
-		workspace, sessionID, generationID)
+	// THE GENERATION'S ORDER, minted with its id and never reused. The id is
+	// opaque and cannot be compared; the ordinal is what lets a model report
+	// from a RETIRED controller lose to one from this controller
+	// (registry.ModelObservation).
+	genOrdinal := m.genOrdinals.Add(1)
+	m.logf("session-controller: controller generation minted ws=%q session=%s generation=%s generation_ordinal=%d decision=begin_bring_up",
+		workspace, sessionID, generationID, genOrdinal)
 	rawReleaseRegistration, err := m.cfg.SSM.AcquireControllerRegistration(workspace, sessionID, generationID)
 	if err != nil {
 		return nil, false, fmt.Errorf("session-controller: reserve controller registration for workspace %q: %w", workspace, err)
@@ -2538,7 +2593,7 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 
 	d := &sessionController{
 		sessionID: sessionID, workspace: workspace,
-		generationID: generationID, resumedVendorSessionID: spawn.Resumed,
+		generationID: generationID, genOrdinal: genOrdinal, resumedVendorSessionID: spawn.Resumed,
 		faulted:                       make(chan struct{}),
 		buildRefreshStarted:           make(chan struct{}),
 		controllerRegistrationRelease: releaseRegistration,
@@ -2554,8 +2609,16 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 		if err := m.cfg.SSM.ApplyBackfillState(workspace, state); err != nil {
 			m.logf("session-controller: applying backfill %s to the SSM (ws %q): %v", state, workspace, err)
 		}
-	}, func(si *datav1.SystemInit) {
-		m.persistObservedModel(sessionID, si.GetModel())
+	}, func(si *datav1.SystemInit, seq uint64) {
+		// THE STREAM'S REPORT, ordered by the seq it rode in on. A SystemInit
+		// belonging to a submit that was already in flight when the user
+		// changed the model carries a seq at or below the confirmation's mark,
+		// and is refused rather than rewriting the record to the older value.
+		m.persistObservedModel(sessionID, si.GetModel(), registry.ModelObservation{
+			Generation: d.generationID,
+			GenOrdinal: d.genOrdinal,
+			StreamSeq:  seq,
+		})
 	}, func() {
 		m.persistSessionDeath(sessionID, errclass.DeathReasonShimDied)
 	})

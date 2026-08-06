@@ -102,6 +102,11 @@ type fakeRegistrar struct {
 	adoptions []string
 	// observedModels records one entry per SessionModelObserved call.
 	observedModels []string
+	// observedTokens records each call's ordering token, so a test can assert
+	// that every report of a session's model carries WHEN it was true. The
+	// admission rule those tokens feed lives in the production registrar
+	// (server.RegistryRegistrar), which is where refusal is asserted.
+	observedTokens []registry.ModelObservation
 	// operationals records one "workspace=session" entry per
 	// SessionOperational call — the edge that resolves superseded deaths.
 	operationals []string
@@ -174,10 +179,11 @@ func (f *fakeRegistrar) BackfillStateChanged(sessionID, state string) {
 // SessionDied records the terminal write a shim death produces (F4).
 // SessionModelObserved records the models a live session reported, so a test
 // can assert the record follows the session rather than the create request.
-func (f *fakeRegistrar) SessionModelObserved(sessionID, model string) {
+func (f *fakeRegistrar) SessionModelObserved(sessionID, model string, obs registry.ModelObservation) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.observedModels = append(f.observedModels, model)
+	f.observedTokens = append(f.observedTokens, obs)
 }
 
 func (f *fakeRegistrar) SessionDied(sessionID, reason string) {
