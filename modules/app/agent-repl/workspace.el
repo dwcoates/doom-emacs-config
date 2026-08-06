@@ -1668,6 +1668,15 @@ the original error is re-signaled."
                "ws-materialize-daemon: CREATED ws=%s job-id=%s path=%s session-id=%s branch=%s prompt-queued=%S"
                ws job-id path session-id (plist-get metadata :branch-name)
                (plist-get metadata :initial-prompt-queued))
+              ;; The workspace lands in `persp-names-cache' wherever
+              ;; `persp-add-new' put it (end of the tab-bar), so a daemon
+              ;; job that carried a priority needs an explicit reseat here
+              ;; — the same step `agent-repl-set-priority' and the
+              ;; open-workspace path already perform after mutating
+              ;; `:priority'.  fboundp-guarded so a partial-load test
+              ;; environment without the reorder helper does not crash.
+              (when (fboundp 'agent-repl--reorder-workspace-by-priority)
+                (agent-repl--reorder-workspace-by-priority ws))
               'created)
           (error
            (when hash-created
