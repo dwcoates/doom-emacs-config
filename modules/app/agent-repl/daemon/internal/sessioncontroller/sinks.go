@@ -520,9 +520,16 @@ type consumer struct {
 	// registry record once per line.
 	backfill string
 	// accounting owns the ordered query, usage, response, and turn evidence.
-	accounting             *turnAccountingReducer
-	accountingStore        TurnAccountingStore
-	historicalUsageStore   HistoricalTokenUtilizationStore
+	accounting           *turnAccountingReducer
+	accountingStore      TurnAccountingStore
+	historicalUsageStore HistoricalTokenUtilizationStore
+	// pendingTerminal parks a turn's terminal result under its accounting turn
+	// id until that turn's end boundary is known. Reached ONLY through
+	// holdTerminalResult, heldTerminalResult, takeHeldTerminalResult and
+	// heldTerminalTurnIDs, all of which take mu: the stream writes it from the
+	// consumer's own event path while teardowns and interrupt acks read and
+	// drain it from their goroutines, and an unguarded range over a map another
+	// goroutine is writing kills the process outright.
 	pendingTerminal        map[string]*corev1.Event
 	terminalAccounting     map[uint64]*frontendv1.TurnAccounting
 	replayedAccounting     map[string]*frontendv1.TurnAccounting
@@ -944,19 +951,73 @@ func (c *consumer) degradeAccountingObservation(ev *corev1.Event, cause error) e
 	return nil
 }
 
+// holdTerminalResult parks a turn's terminal result until its end boundary is
+// known. See pendingTerminal for why the map is only ever reached under mu.
+func (c *consumer) holdTerminalResult(turnID string, ev *corev1.Event) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.pendingTerminal[turnID] = ev
+}
+
+// heldTerminalResult reports the terminal result parked for a turn without
+// discharging the hold. Nil means nothing is held for that turn.
+func (c *consumer) heldTerminalResult(turnID string) *corev1.Event {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.pendingTerminal[turnID]
+}
+
+// takeHeldTerminalResult discharges a turn's hold and hands back what it held,
+// in one step so two settlements of the same turn cannot both publish it. Nil
+// means nothing was held.
+func (c *consumer) takeHeldTerminalResult(turnID string) *corev1.Event {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	ev := c.pendingTerminal[turnID]
+	delete(c.pendingTerminal, turnID)
+	return ev
+}
+
+// heldTerminalTurnIDs reports every turn whose terminal result this consumer
+// still holds, in unspecified order.
+//
+// A turn appears here only between the arrival of its result and the settlement
+// of its accounting, so the set is exactly "the turns this consumer owes the
+// frontend an answer for and has no end boundary from".
+func (c *consumer) heldTerminalTurnIDs() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	turnIDs := make([]string, 0, len(c.pendingTerminal))
+	for turnID := range c.pendingTerminal {
+		turnIDs = append(turnIDs, turnID)
+	}
+	return turnIDs
+}
+
 // settleTurnAccounting resolves, persists, and RELEASES one turn's accounting.
 //
 // IT IS THE SINGLE RELEASE PATH FOR A RETAINED TERMINAL RESULT, and that is the
 // whole point. A terminal result is parked in pendingTerminal until its turn's
-// end is known; before this existed the only thing that could release it was a
-// stream `TurnEnded`. When the daemon closed a claim ITSELF — SynthesizeTurnClose,
-// which writes end_seq=0 because no event produced the close — no `TurnEnded`
-// ever arrived and the result was stranded permanently: the user never saw the
-// turn's answer, hibernation was refused every 30 seconds, and daemon restarts
-// were refused. One daemon lifetime held 16 results and released none.
+// end is known; the only stream event that supplies that end is `TurnEnded`.
+// When the daemon closes a claim ITSELF — SynthesizeTurnClose, which writes
+// end_seq=0 because no event produced the close — no `TurnEnded` ever arrives,
+// and a result with no route to this function is stranded permanently: the user
+// never sees the turn's answer, hibernation is refused every 30 seconds, and
+// daemon restarts are refused.
 //
-// Both authorities on "this turn ended" now settle through here, so a close can
-// never happen without the release that belongs to it.
+// Every authority on "this turn ended" settles through here, so a close cannot
+// happen without the release that belongs to it:
+//
+//   - a stream `TurnEnded` settles the turn it closes;
+//   - a phantom close settles the claims SynthesizeTurnClose reports
+//     (phantomturn.go); and
+//   - a teardown settles everything the consumer still holds, before the
+//     session controller context is cancelled (turnstop.go,
+//     releaseHeldTerminalResults).
+//
+// The teardown's axis close (settleTurnAfterStop) is deliberately NOT one of
+// them and cannot be: it runs after the eviction and the cancel, with neither
+// the session controller nor its consumer in reach.
 func (c *consumer) settleTurnAccounting(turnID string) error {
 	accounting := c.accounting.resolveTurn(turnID, c.now())
 	accounting, err := c.accountingStore.Record(c.sessionID, accounting)
@@ -965,7 +1026,7 @@ func (c *consumer) settleTurnAccounting(turnID string) error {
 		return fmt.Errorf("session-controller: persist terminal accounting: %w", err)
 	}
 	c.accounting.commitResolved(turnID)
-	terminal := c.pendingTerminal[turnID]
+	terminal := c.takeHeldTerminalResult(turnID)
 	if terminal == nil {
 		return nil
 	}
@@ -976,7 +1037,6 @@ func (c *consumer) settleTurnAccounting(turnID string) error {
 		c.completedResponses[response.GetApiMessageId()] = response
 	}
 	c.mu.Unlock()
-	delete(c.pendingTerminal, turnID)
 	c.pushConversation(terminal, true)
 	return nil
 }
@@ -991,7 +1051,7 @@ func (c *consumer) ReleaseSynthesizedTurnClose(turnIDs []string, cause string) {
 		if turnID == "" {
 			continue
 		}
-		retained := c.pendingTerminal[turnID] != nil
+		retained := c.heldTerminalResult(turnID) != nil
 		if err := c.settleTurnAccounting(turnID); err != nil {
 			c.logf("session-controller: synthesized turn close could NOT settle accounting session=%s turn_id=%s cause=%s retained_terminal=%v: %v — the turn's result stays unpublished and this is the record of why",
 				c.sessionID, turnID, cause, retained, err)
@@ -1242,7 +1302,7 @@ func (c *consumer) Consume(ev *corev1.Event) error {
 		// boundary and its accounting record has committed. The same path is
 		// used for replay because replay also drives this consumer.
 		if resultFromVendor(p.Vendor) != nil && c.accounting.activeTurnID != "" {
-			c.pendingTerminal[c.accounting.activeTurnID] = ev
+			c.holdTerminalResult(c.accounting.activeTurnID, ev)
 			c.logf("session-controller: terminal result held for accounting session=%s turn_id=%s seq=%d", c.sessionID, c.accounting.activeTurnID, ev.GetSeq())
 			return nil
 		}
