@@ -56,8 +56,7 @@
 (declare-function agent-repl--ws-current-name "workspace" ())
 (declare-function agent-repl--notify "notifications" (ws title message))
 (declare-function agent-repl--uds-register-handler "frontend-uds" (field fn))
-(declare-function agent-repl--uds-send-command "frontend-uds" (field payload &optional workspace process))
-(declare-function agent-repl--uds-track-command "frontend-uds" (request-id field workspace &optional on-failure on-success))
+(declare-function agent-repl--uds-send-command "frontend-uds" (field payload &optional workspace process &rest keys))
 (declare-function agent-repl--frontend-ws-command-key "frontend-client" (ws))
 
 ;;;; ---- Resolution vocabulary -------------------------------------------
@@ -288,17 +287,14 @@ request id of the sent command."
                     "permissionAnswer" payload
                     (agent-repl--frontend-ws-command-key ws))
                  (error
+                  ;; Tracking is no longer a separate step that could fail on
+                  ;; its own: `agent-repl--uds-send-command' registers the
+                  ;; command before writing it, so this one handler owns every
+                  ;; way the dispatch can fail.
                   (agent-repl--log ws
                                    "send-permission-answer: request=%s uds-send-failed error-type=%s"
                                    request-id (car err))
                   (signal (car err) (cdr err))))))
-      (condition-case err
-          (agent-repl--uds-track-command req "permissionAnswer" ws)
-        (error
-         (agent-repl--log ws
-                          "send-permission-answer: request=%s uds-request=%s tracking-failed error-type=%s"
-                          request-id req (car err))
-         (signal (car err) (cdr err))))
       (agent-repl--log ws "send-permission-answer: ws=%s request=%s uds-request=%s allow=%s"
                        ws request-id req (if allow "yes" "no"))
       req)))

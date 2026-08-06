@@ -71,16 +71,18 @@ their `:on-failure' callback reachable so a NACK can be delivered."
          (agent-repl-test--sidebar-tracked nil)
          (agent-repl-test--sidebar-request-n 0))
      (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () t))
+               ;; One stub covers both records now: the transport registers a
+               ;; command's ack callbacks as part of sending it, so there is
+               ;; no separate tracker left to shadow.
                ((symbol-function 'agent-repl--uds-send-command)
-                (lambda (field payload &optional _ws _proc)
+                (lambda (field payload &optional _ws _proc &rest keys)
                   (push (cons field payload) agent-repl-test--sidebar-published)
-                  (format "req-%d" (cl-incf agent-repl-test--sidebar-request-n))))
-               ((symbol-function 'agent-repl--uds-track-command)
-                (lambda (request-id field _ws &optional on-failure &rest _)
-                  (push (list :request-id request-id :field field
-                              :on-failure on-failure)
-                        agent-repl-test--sidebar-tracked)
-                  request-id)))
+                  (let ((request-id (format "req-%d"
+                                            (cl-incf agent-repl-test--sidebar-request-n))))
+                    (push (list :request-id request-id :field field
+                                :on-failure (plist-get keys :on-failure))
+                          agent-repl-test--sidebar-tracked)
+                    request-id))))
        ,@body)))
 
 (defvar agent-repl-test--sidebar-request-n 0

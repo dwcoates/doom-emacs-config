@@ -69,9 +69,7 @@
 (declare-function agent-repl--tasks-signature "tasks" ())
 (declare-function agent-repl--uds-connected-p "frontend-uds" ())
 (declare-function agent-repl--uds-send-command "frontend-uds"
-                  (field payload &optional workspace process))
-(declare-function agent-repl--uds-track-command "frontend-uds"
-                  (request-id field workspace &optional on-failure on-success on-challenge))
+                  (field payload &optional workspace process &rest keys))
 
 ;;;; ---- The view selector -----------------------------------------------
 
@@ -1085,15 +1083,16 @@ would instead fire on every 1Hz tick for the whole of an outage."
         nil)
     (let* ((revision (cl-incf agent-repl--sidebar-roster-revision))
            (proto (agent-repl--sidebar-proto-roster roster revision))
+           ;; TRACKED, not fire-and-forget: a rejected roster means the sidebar
+           ;; every client draws is not the one Emacs authored, which is exactly
+           ;; the kind of divergence that must never pass silently.  The roster
+           ;; frame is the multi-kilobyte one whose write yields, so its ack is
+           ;; the one that used to overtake its own tracking.
            (request-id (agent-repl--uds-send-command
                         agent-repl--sidebar-publish-field
-                        (list :roster proto))))
-      ;; TRACKED, not fire-and-forget: a rejected roster means the sidebar
-      ;; every client draws is not the one Emacs authored, which is exactly
-      ;; the kind of divergence that must never pass silently.
-      (agent-repl--uds-track-command
-       request-id agent-repl--sidebar-publish-field nil
-       (lambda (err) (agent-repl--sidebar-publish-nacked revision err)))
+                        (list :roster proto) nil nil
+                        :on-failure
+                        (lambda (err) (agent-repl--sidebar-publish-nacked revision err)))))
       (agent-repl--log nil "sidebar-publish: boot-id=%s revision=%d request-id=%s view=%s"
                        (agent-repl--sidebar-boot-id) revision request-id
                        (plist-get roster :view))

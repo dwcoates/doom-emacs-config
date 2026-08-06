@@ -52,8 +52,7 @@
 (declare-function agent-repl--frontend-session-live-p "agent-repl-frontend-client" (id))
 (declare-function agent-repl--frontend-session-url "agent-repl-frontend-client" (session-id))
 (declare-function agent-repl-frontend-ungated-permission-mode-p "agent-repl-frontend-client" (mode))
-(declare-function agent-repl--uds-send-command "frontend-uds" (field payload &optional workspace process))
-(declare-function agent-repl--uds-track-command "frontend-uds" (request-id field workspace &optional on-failure on-success))
+(declare-function agent-repl--uds-send-command "frontend-uds" (field payload &optional workspace process &rest keys))
 (declare-function agent-repl--frontend-make-webview-buffer "agent-repl-frontend" (url))
 (declare-function agent-repl--frontend-adopt-webview-buffer "agent-repl-frontend" (buf name))
 (declare-function agent-repl--frontend-kill-webview "agent-repl-frontend" (buf))
@@ -542,7 +541,6 @@ inheriting the contract from the conversation's context."
                 "submitPrompt"
                 (list :text text :promptOrigin "PROMPT_ORIGIN_EXPLAIN_CONFIG")
                 cwd)))
-      (agent-repl--uds-track-command req "submitPrompt" cwd)
       (agent-repl--log nil "explain-config: send submitted session=%S request=%S cwd=%S"
                        session-id req cwd))
     (setq agent-repl--explain-config-primed-p t)
