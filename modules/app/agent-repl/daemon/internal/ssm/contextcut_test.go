@@ -104,7 +104,7 @@ func TestContextCutAxesResolveTheirOwnState(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange — a turn in flight, which is where a cut always happens.
 			m, _, _, _ := openCutTest(t, fakeResolver{"s1": "ws1"})
-			if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+			if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 				t.Fatalf("turn started: %v", err)
 			}
 
@@ -142,7 +142,7 @@ func TestContextCutReturnsToSessionStatusWhenClosed(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange.
 			m, _, _, _ := openCutTest(t, fakeResolver{"s1": "ws1"})
-			if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+			if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 				t.Fatalf("turn started: %v", err)
 			}
 			if err := tc.open(m); err != nil {
@@ -167,7 +167,7 @@ func TestClearingOutranksCompactingWhenBothStand(t *testing.T) {
 	// Arrange — both cuts somehow open at once. The user-initiated one is the
 	// more useful report, and its rotation is about to invalidate the other.
 	m, _, _, _ := openCutTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 	if err := m.ApplyCompacting("ws1", true, "vendor_status:compacting"); err != nil {
@@ -189,7 +189,7 @@ func TestAContextCutOutranksThinkingButNotBlue(t *testing.T) {
 	// Arrange — blue outranks everything, INCLUDING a cut: a cut running
 	// behind a route the user cannot see is not something to advertise.
 	m, _, _, _ := openCutTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 	if err := m.ApplyCompacting("ws1", true, "vendor_status:compacting"); err != nil {
@@ -211,7 +211,7 @@ func TestClosingAnAxisThatNeverOpenedAppendsNoRow(t *testing.T) {
 	// Arrange — a compaction the file plane reports on a daemon that never saw
 	// its status ticker. Not an error, and not a row either.
 	m, cl, _, _ := openCutTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 
@@ -234,7 +234,7 @@ func TestClosingAnAxisThatNeverOpenedAppendsNoRow(t *testing.T) {
 func TestAClearWhoseContextClearedNeverLandsExpires(t *testing.T) {
 	// Arrange — a dispatched clear with nothing coming back for it.
 	m, cl, tf, _ := openCutTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 	if err := m.ApplyClearing("ws1", true, "clear_dispatched"); err != nil {
@@ -278,7 +278,7 @@ func TestAnExpiryAfterTheClearCompletedChangesNothing(t *testing.T) {
 	// Arrange — the race: the deadline callback was already in flight when the
 	// ContextCleared landed.
 	m, cl, tf, _ := openCutTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 	if err := m.ApplyClearing("ws1", true, "clear_dispatched"); err != nil {
@@ -360,7 +360,7 @@ func TestATurnEndClosesAnOpenCompaction(t *testing.T) {
 	// Arrange — the vendor opened the window with a status ticker and never
 	// closed it, and then the turn ended.
 	m, cl, _, _ := openCutTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 	if err := m.ApplyCompacting("ws1", true, "vendor_status:compacting"); err != nil {
@@ -368,7 +368,7 @@ func TestATurnEndClosesAnOpenCompaction(t *testing.T) {
 	}
 
 	// Act.
-	if err := m.Apply(evTurnEnded("s1", 2, false)); err != nil {
+	if err := applyTest(m, evTurnEnded("s1", 2, false)); err != nil {
 		t.Fatalf("turn ended: %v", err)
 	}
 
@@ -385,7 +385,7 @@ func TestARotationClosesAnOpenCompaction(t *testing.T) {
 	// Arrange — the ContextCompacted belongs to the retired identity and will
 	// never arrive, exactly as the in-flight turn's end will not.
 	m, cl, _, _ := openCutTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 	if err := m.ApplyCompacting("ws1", true, "vendor_status:compacting"); err != nil {
@@ -424,7 +424,7 @@ func TestARotationClosesTheClearItsOwnDispatchCaused(t *testing.T) {
 	// Arrange — the real sequence: `/clear` dispatched, then the vendor retires
 	// the session uuid.
 	m, cl, _, _ := openCutTest(t, fakeResolver{"s1": "ws1", "s2": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 	if err := m.ApplyClearing("ws1", true, "clear_dispatched"); err != nil {
@@ -471,7 +471,7 @@ func TestARotationWithNoClearInFlightLeavesTheClearingAxisAlone(t *testing.T) {
 	// vendor-side re-key). The dispatch site is the axis's sole opener, so there
 	// is nothing here to close.
 	m, cl, _, _ := openCutTest(t, fakeResolver{"s1": "ws1", "s2": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 

@@ -30,19 +30,20 @@ import (
 // in the same transaction that moved the ledger, so the axis cannot carry a turn
 // band the derivation does not hold.
 //
-// A NEW CONSUMER CANNOT REACH A SECOND ANSWER. TurnLiveness has no exported
-// fields and no exported constructor, so the only way to obtain one is to ask
-// this package. Manager.Apply — the one door the rest of the daemon pushes
-// events through — REFUSES turn boundaries outright (see Apply), so folding the
-// event stream into a private answer is not something a caller can do by
-// accident or on purpose.
+// A NEW CONSUMER CANNOT REACH A SECOND ANSWER. TurnLiveness has unexported
+// fields, so the only way to obtain a derived one is to ask this package.
+// Manager.Apply — the one door the rest of the daemon pushes events through —
+// REFUSES turn boundaries outright (see Apply), so folding the event stream into
+// a private answer is not something a caller can do by accident or on purpose.
+// TurnLivenessFixture is the single documented exception and cannot fold
+// anything; see its comment.
 
 // TurnLiveness is THE answer to "is a turn in flight in this workspace", and
 // the only value in the daemon that answers it.
 //
-// Its fields are unexported and it has no exported constructor on purpose: a
-// value of this type can only come from deriveTurnLiveness, which is the single
-// fold. `derived` is what separates a genuine answer from Go's zero value — an
+// Its fields are unexported on purpose: a value of this type comes from
+// deriveTurnLiveness, which is the single fold (TurnLivenessFixture aside, which
+// is for other packages' fakes and folds nothing). `derived` is what separates a genuine answer from Go's zero value — an
 // undeclared TurnLiveness is not "no turn in flight", it is NOT AN ANSWER, and
 // every accessor refuses it rather than reporting the workspace idle on the
 // strength of a struct nobody filled in.
@@ -304,5 +305,28 @@ func turnBandToken(l TurnLiveness) (string, bool) {
 		return sigSubmitting, true
 	default:
 		return "", false
+	}
+}
+
+// TurnLivenessFixture builds a TurnLiveness for a test in ANOTHER package.
+//
+// IT IS A FIXTURE, AND IT IS THE ONE DOCUMENTED EXCEPTION. TurnLiveness has
+// unexported fields precisely so that the only way to obtain one is to ask this
+// package to derive it, and no production code may call this — a value it
+// returns was fabricated from arguments rather than folded from the ledger, so
+// it answers for nothing. It exists because the session controller's fake SSM
+// has to hand its consumer a value of this type, and a fake by definition has no
+// ledger to derive from.
+//
+// It does NOT reopen the defect. The defect was two FOLDS of the event stream;
+// there is still exactly one, deriveTurnLiveness, and Apply refuses a turn
+// boundary outright so no caller can build a second one. This constructor
+// cannot fold anything: it takes the answer and wraps it.
+func TurnLivenessFixture(workspace string, claims []string, submitting bool) TurnLiveness {
+	return TurnLiveness{
+		workspace:  workspace,
+		claims:     append([]string(nil), claims...),
+		submitting: submitting,
+		derived:    true,
 	}
 }

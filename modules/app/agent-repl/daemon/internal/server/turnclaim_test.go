@@ -24,7 +24,7 @@ func TestDeleteSessionReleasesTheWorkspacesTurnClaim(t *testing.T) {
 		Payload:   &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "turn-1"}},
 	}
 	markControllerOperational(t, h, "/w")
-	if err := h.ssm.Apply(turn); err != nil {
+	if _, err := h.ssm.ApplyTurnBoundary("/w", id, "", turn); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 	cur, found, err := h.ssm.Current("/w")

@@ -100,7 +100,7 @@ func TestRegistryResolverBindsSSMToWorkspace(t *testing.T) {
 		RequestId: "turn-1",
 		Payload:   &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "turn-1"}},
 	}
-	if err := mgr.Apply(ev); err != nil {
+	if _, err := mgr.ApplyTurnBoundary("/w", "s1", "", ev); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 	// Assert — the SSM resolved workspace /w and moved it to THINKING.

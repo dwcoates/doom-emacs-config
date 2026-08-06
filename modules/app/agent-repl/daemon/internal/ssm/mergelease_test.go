@@ -293,7 +293,7 @@ func TestMergeLeaseAcquireRollsBackAnUndeliverableInterrupt(t *testing.T) {
 func TestMergeLeaseHeldReachesTheWorkspaceState(t *testing.T) {
 	// Arrange.
 	m, l, _, _, _ := openLeaseTest(t, "ws1")
-	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evSessionStarted("s1", 1)); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 
@@ -320,7 +320,7 @@ func TestMergeLeaseHeldReachesTheWorkspaceState(t *testing.T) {
 func TestConnectivityEdgePushCarriesTheHeldLease(t *testing.T) {
 	// Arrange — a held lease, then subscribe so only edge-driven pushes land.
 	m, l, _, _, _ := openLeaseTest(t, "ws1")
-	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evSessionStarted("s1", 1)); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 	if _, err := l.Acquire(context.Background(), "ws1"); err != nil {
@@ -614,7 +614,7 @@ func TestALeaseHeldWithNoQueueBoundIsReported(t *testing.T) {
 	// into a held lease window — the shape only a caller that bypassed
 	// NewMergeLease can produce.
 	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evSessionStarted("s1", 1)); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 	if _, err := m.openMergeLease("ws1"); err != nil {
@@ -636,7 +636,7 @@ func TestALeaseHeldWithNoQueueBoundIsReported(t *testing.T) {
 func TestABoundQueueLeavesTheWiringInvariantQuiet(t *testing.T) {
 	// Arrange. The well-formed shape: NewMergeLease bound the queue.
 	m, l, _, _, cl := openLeaseTest(t, "ws1")
-	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evSessionStarted("s1", 1)); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 	release, err := l.Acquire(context.Background(), "ws1")
