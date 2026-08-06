@@ -319,7 +319,7 @@ func TestTokenUtilizationFromEventMapsSubagentLineageExactly(t *testing.T) {
 		Message: &datav1.ApiAssistantMessage{Id: "message", Usage: &datav1.ApiUsage{InputTokens: 1}},
 	}}})
 
-	record, err := tokenUtilizationFromEvent(event, "session")
+	record, err := tokenUtilizationFromEvent(event, "session", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,7 +336,7 @@ func TestTokenUtilizationFromEventLeavesAbsentSubagentLineageEmpty(t *testing.T)
 		Message: &datav1.ApiAssistantMessage{Id: "message", Usage: &datav1.ApiUsage{InputTokens: 1}},
 	}}})
 
-	record, err := tokenUtilizationFromEvent(event, "session")
+	record, err := tokenUtilizationFromEvent(event, "session", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -352,7 +352,7 @@ func TestTokenUtilizationFromEventClassifiesTaskDescriptionOnlyAsSubagent(t *tes
 		Message:         &datav1.ApiAssistantMessage{Id: "message", Usage: &datav1.ApiUsage{InputTokens: 1}},
 	}}})
 
-	record, err := tokenUtilizationFromEvent(event, "session")
+	record, err := tokenUtilizationFromEvent(event, "session", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -379,7 +379,7 @@ func TestTokenUtilizationObservationMapsHistoricalTranscriptWithoutInventingTurn
 	}
 	event := &corev1.Event{SessionId: "claude", Plane: corev1.Plane_PLANE_FILE, Payload: &corev1.Event_Vendor{Vendor: vendor}}
 
-	observation, err := tokenUtilizationObservationFromEvent(event, "session")
+	observation, err := tokenUtilizationObservationFromEvent(event, "session", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -413,8 +413,117 @@ func TestTokenUtilizationObservationRejectsHistoricalTranscriptSessionMismatch(t
 		t.Fatal(err)
 	}
 	event := &corev1.Event{SessionId: "claude", Plane: corev1.Plane_PLANE_FILE, Payload: &corev1.Event_Vendor{Vendor: vendor}}
-	if _, err := tokenUtilizationObservationFromEvent(event, "session"); err == nil || !strings.Contains(err.Error(), "Claude session mismatch") {
+	if _, err := tokenUtilizationObservationFromEvent(event, "session", nil); err == nil || !strings.Contains(err.Error(), "Claude session mismatch") {
 		t.Fatalf("mismatched transcript error = %v, want Claude session mismatch", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// A RESUMED CONVERSATION'S RETIRED VENDOR SESSION IS STILL THIS
+// CONVERSATION'S OWN HISTORY. The live incident: workspace session
+// s_109c53d47ad718f0 resumed a conversation from vendor session
+// fe97f7a9-f138-45ec-b3cb-e608fa2fceb2 into 60f52b56-ed1d-4577-9f27-88d85d88dbb4.
+// The SDK carries the prior transcript content into the resumed session's own
+// file unchanged, so replaying api_message_id="msg_011Cdk3va97299HDHGq6tun3"
+// off the CURRENT file (envelope session_id=60f52b56...) surfaces an
+// assistant message still embedding the RETIRED session id
+// (fe97f7a9-f138-45ec-b3cb-e608fa2fceb2) it was actually produced under. That
+// is expected history, not corruption, once the conversation's own resume
+// lineage proves the retired id belongs to it.
+// ---------------------------------------------------------------------------
+
+func historicalTranscriptEvent(t *testing.T, envelopeSessionID, assistantSessionID string) *corev1.Event {
+	t.Helper()
+	line := &datav1.TranscriptLine{Line: &datav1.TranscriptLine_Assistant{Assistant: &datav1.AssistantLine{
+		Envelope: &datav1.LineEnvelope{SessionId: assistantSessionID},
+		Message:  &datav1.ApiAssistantMessage{Id: "message", Usage: &datav1.ApiUsage{InputTokens: 1}},
+	}}}
+	vendor, err := anypb.New(line)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &corev1.Event{SessionId: envelopeSessionID, Plane: corev1.Plane_PLANE_FILE, Payload: &corev1.Event_Vendor{Vendor: vendor}}
+}
+
+// TestTokenUtilizationObservationAcceptsHistoricalResponseFromAKnownPriorVendorSession
+// is the GUARANTEE: a historical transcript response naming a RETIRED vendor
+// session this conversation has proven as its own resume ancestor is admitted
+// as history rather than rejected.
+func TestTokenUtilizationObservationAcceptsHistoricalResponseFromAKnownPriorVendorSession(t *testing.T) {
+	event := historicalTranscriptEvent(t, "60f52b56-ed1d-4577-9f27-88d85d88dbb4", "fe97f7a9-f138-45ec-b3cb-e608fa2fceb2")
+	known := func(id string) bool { return id == "fe97f7a9-f138-45ec-b3cb-e608fa2fceb2" }
+
+	observation, err := tokenUtilizationObservationFromEvent(event, "session", known)
+
+	if err != nil {
+		t.Fatalf("known prior-session response = %v, want it admitted as history", err)
+	}
+	if !observation.historical || observation.priorVendorSession != "fe97f7a9-f138-45ec-b3cb-e608fa2fceb2" {
+		t.Fatalf("observation = %+v, want it marked as a prior-vendor-session record", observation)
+	}
+	if observation.record.GetClaudeSessionId() != "fe97f7a9-f138-45ec-b3cb-e608fa2fceb2" {
+		t.Fatalf("record claude_session_id = %q, want the RETIRED session preserved as the historical fact", observation.record.GetClaudeSessionId())
+	}
+}
+
+// TestTokenUtilizationObservationRejectsHistoricalResponseFromAnUnknownVendorSession
+// is the VIOLATION: the exception is not a blanket amnesty for any historical
+// mismatch. A vendor session this conversation has never proven as its own
+// stays fatal even with a knownVendorSession func wired in.
+func TestTokenUtilizationObservationRejectsHistoricalResponseFromAnUnknownVendorSession(t *testing.T) {
+	event := historicalTranscriptEvent(t, "60f52b56-ed1d-4577-9f27-88d85d88dbb4", "some-unrelated-conversations-session")
+	known := func(id string) bool { return id == "fe97f7a9-f138-45ec-b3cb-e608fa2fceb2" }
+
+	if _, err := tokenUtilizationObservationFromEvent(event, "session", known); err == nil || !strings.Contains(err.Error(), "Claude session mismatch") {
+		t.Fatalf("unknown prior-session response err = %v, want Claude session mismatch", err)
+	}
+}
+
+// TestTokenUtilizationObservationRejectsLiveResponseFromAKnownPriorVendorSession
+// is the VIOLATION's other edge: the prior-session exception applies only to
+// HISTORICAL evidence. A LIVE stream response naming a session other than the
+// one it is streaming on is a genuine contradiction and stays fatal, even
+// when that other session is a proven prior session of this conversation.
+func TestTokenUtilizationObservationRejectsLiveResponseFromAKnownPriorVendorSession(t *testing.T) {
+	event := accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{
+		SessionId: "fe97f7a9-f138-45ec-b3cb-e608fa2fceb2",
+		Message:   &datav1.ApiAssistantMessage{Id: "message", Usage: &datav1.ApiUsage{InputTokens: 1}},
+	}}})
+	known := func(id string) bool { return id == "fe97f7a9-f138-45ec-b3cb-e608fa2fceb2" }
+
+	if _, err := tokenUtilizationObservationFromEvent(event, "session", known); err == nil || !strings.Contains(err.Error(), "Claude session mismatch") {
+		t.Fatalf("live prior-session response err = %v, want Claude session mismatch", err)
+	}
+}
+
+// TestReducerRecordsResumeLineageAndAdmitsTheRetiredSession is the reducer-
+// level GUARANTEE: a QueryLifecycle stream naming the resume's requested
+// vendor session durably teaches the reducer that lineage, so a LATER
+// historical response naming that retired session is admitted through the
+// full accounting path — the exact path settleTurnAccounting depends on.
+func TestReducerRecordsResumeLineageAndAdmitsTheRetiredSession(t *testing.T) {
+	// Arrange.
+	reducer := newTurnAccountingReducer()
+	created := &corev1.Event{Seq: 1, QueryInstanceId: "q2", Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+		QueryInstanceId: "q2",
+		Event: &corev1.QueryLifecycle_Created{Created: &corev1.QueryCreated{
+			Invocation: &corev1.QueryCreated_Resumed{Resumed: &corev1.ResumedQuery{RequestedVendorSessionId: "fe97f7a9-f138-45ec-b3cb-e608fa2fceb2"}},
+		}},
+	}}}
+	if err := reducer.observe(created, "session"); err != nil {
+		t.Fatalf("observe QueryCreated: %v", err)
+	}
+
+	// Act.
+	response := historicalTranscriptEvent(t, "60f52b56-ed1d-4577-9f27-88d85d88dbb4", "fe97f7a9-f138-45ec-b3cb-e608fa2fceb2")
+	err := reducer.observe(response, "session")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("observe historical response from the resume's own prior session: %v", err)
+	}
+	if !reducer.isKnownVendorSession("fe97f7a9-f138-45ec-b3cb-e608fa2fceb2") {
+		t.Fatal("resume lineage was not recorded as known")
 	}
 }
 
@@ -439,7 +548,7 @@ func TestTokenUtilizationFromEventRejectsSessionCorrelationViolations(t *testing
 				t.Fatal(err)
 			}
 			event := &corev1.Event{SessionId: tc.eventSessionID, RequestId: "turn", Payload: &corev1.Event_Vendor{Vendor: vendor}}
-			if _, err := tokenUtilizationFromEvent(event, tc.daemonSessionID); err == nil || !strings.Contains(err.Error(), tc.want) {
+			if _, err := tokenUtilizationFromEvent(event, tc.daemonSessionID, nil); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("error = %v, want %q", err, tc.want)
 			}
 		})

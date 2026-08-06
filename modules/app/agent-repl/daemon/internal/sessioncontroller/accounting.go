@@ -29,6 +29,15 @@ type turnAccountingReducer struct {
 	activeTurnID        string
 	turns               map[string]*accountingTurn
 	latencies           map[string]responseLatency
+	// knownVendorSessionIDs is this conversation's PROVEN vendor session
+	// lineage: every vendor session id durable evidence has actually tied to
+	// this conversation, via a shim handshake, a query's own observed runtime
+	// identity, or a resumed query's requested_vendor_session_id (the prior
+	// session it continued FROM). It is what lets a historical response
+	// carrying a RETIRED vendor session id be recognized as this
+	// conversation's own history rather than rejected as evidence about some
+	// other conversation entirely — see isKnownVendorSession.
+	knownVendorSessionIDs map[string]struct{}
 }
 
 type responseLatency struct {
@@ -86,7 +95,42 @@ func (e *unknownAccountingTurnError) Error() string {
 }
 
 func newTurnAccountingReducer() *turnAccountingReducer {
-	return &turnAccountingReducer{turns: map[string]*accountingTurn{}, latencies: map[string]responseLatency{}}
+	return &turnAccountingReducer{turns: map[string]*accountingTurn{}, latencies: map[string]responseLatency{}, knownVendorSessionIDs: map[string]struct{}{}}
+}
+
+// recordKnownVendorSession admits id into the conversation's proven vendor
+// session lineage. A blank id is never proof of anything and is silently
+// ignored rather than admitted as a wildcard.
+func (r *turnAccountingReducer) recordKnownVendorSession(id string) {
+	if id == "" {
+		return
+	}
+	r.knownVendorSessionIDs[id] = struct{}{}
+}
+
+// isKnownVendorSession reports whether id has been durably proven, by this
+// conversation's own handshake, runtime, or resume evidence, to belong to
+// THIS conversation. It is never a blanket allowlist: an id this conversation
+// has never once produced or named as its own resume ancestor stays unknown,
+// however real a Claude session it names elsewhere.
+func (r *turnAccountingReducer) isKnownVendorSession(id string) bool {
+	_, ok := r.knownVendorSessionIDs[id]
+	return ok
+}
+
+// recordQueryLifecycleVendorLineage folds one QueryLifecycle event's vendor
+// session evidence into the conversation's proven lineage, REGARDLESS of
+// whether the event is live or historical: a retired query's own resume
+// record and observed identity are exactly the durable proof a later
+// historical response needs to be recognized as this conversation's history
+// rather than rejected as evidence about an unrelated one.
+func (r *turnAccountingReducer) recordQueryLifecycleVendorLineage(q *corev1.QueryLifecycle) {
+	if resumed := q.GetCreated().GetResumed(); resumed != nil {
+		r.recordKnownVendorSession(resumed.GetRequestedVendorSessionId())
+	}
+	if observed := q.GetRuntimeObserved(); observed != nil {
+		r.recordKnownVendorSession(observed.GetIdentity().GetVendorSessionId())
+	}
 }
 
 // bindHandshakeIdentity gives a replacement daemon the query facts that its
@@ -124,6 +168,7 @@ func (r *turnAccountingReducer) bindHandshakeIdentity(hello *corev1.ShimHello) e
 	r.queryID = queryID
 	r.queryCreatedSeq = hello.GetQueryCreatedSeq()
 	r.queryStoreSessionID = vendorSessionID
+	r.recordKnownVendorSession(vendorSessionID)
 	if runtime != nil {
 		r.runtime = runtime
 	}
@@ -213,6 +258,7 @@ func (r *turnAccountingReducer) observeTurnClaimBridge(ev *corev1.Event) {
 
 func (r *turnAccountingReducer) observe(ev *corev1.Event, daemonSessionID string) error {
 	if q := ev.GetQueryLifecycle(); q != nil {
+		r.recordQueryLifecycleVendorLineage(q)
 		if _, historical := r.HistoricalQueryLifecycle(ev); historical {
 			// Lifecycle history from a retired query is retained and translated by
 			// the consumer, while the live handshake remains the accounting
@@ -261,7 +307,7 @@ func (r *turnAccountingReducer) observe(ev *corev1.Event, daemonSessionID string
 	if latency := ev.GetMessageLatency(); latency != nil && latency.GetUuid() != "" {
 		r.latencies[latency.GetUuid()] = responseLatency{ttftMs: latency.GetTtftMs(), messageStartedAtMs: ev.GetProducedAtMs()}
 	}
-	observation, err := tokenUtilizationObservationFromEvent(ev, daemonSessionID)
+	observation, err := tokenUtilizationObservationFromEvent(ev, daemonSessionID, r.isKnownVendorSession)
 	if err != nil {
 		return err
 	}
@@ -546,10 +592,23 @@ func resultFromVendor(a *anypb.Any) *datav1.ResultMessage {
 type tokenUtilizationObservation struct {
 	record     *frontendv1.TokenUtilization
 	historical bool
+	// priorVendorSession is set only when this record was admitted under the
+	// prior-session exception below: a historical response whose embedded
+	// Claude session id is a RETIRED session this conversation itself proved
+	// as its own resume ancestor, not the file's own authoritative id. Empty
+	// on every ordinary record, including every live one.
+	priorVendorSession string
 }
 
-func tokenUtilizationFromEvent(ev *corev1.Event, daemonSessionID string) (*frontendv1.TokenUtilization, error) {
-	observation, err := tokenUtilizationObservationFromEvent(ev, daemonSessionID)
+// knownVendorSessionFunc reports whether id has been durably proven to belong
+// to the caller's own conversation. Satisfied by
+// turnAccountingReducer.isKnownVendorSession; a nil func admits none, which
+// is the fail-closed default for any caller not tracking conversation
+// lineage at all.
+type knownVendorSessionFunc func(id string) bool
+
+func tokenUtilizationFromEvent(ev *corev1.Event, daemonSessionID string, knownVendorSession knownVendorSessionFunc) (*frontendv1.TokenUtilization, error) {
+	observation, err := tokenUtilizationObservationFromEvent(ev, daemonSessionID, knownVendorSession)
 	if observation == nil || err != nil {
 		return nil, err
 	}
@@ -561,7 +620,7 @@ func tokenUtilizationFromEvent(ev *corev1.Event, daemonSessionID string) (*front
 // transcript responses have stable response/session identity but no reliable
 // enclosing turn or stream timing, so replay may attach them only as explicit
 // historical evidence.
-func tokenUtilizationObservationFromEvent(ev *corev1.Event, daemonSessionID string) (*tokenUtilizationObservation, error) {
+func tokenUtilizationObservationFromEvent(ev *corev1.Event, daemonSessionID string, knownVendorSession knownVendorSessionFunc) (*tokenUtilizationObservation, error) {
 	a := ev.GetVendor()
 	if a == nil {
 		return nil, nil
@@ -616,8 +675,23 @@ func tokenUtilizationObservationFromEvent(ev *corev1.Event, daemonSessionID stri
 	if assistant.GetSessionId() == "" {
 		return nil, fmt.Errorf("turn accounting response has blank assistant Claude session id (agent_repl_session_id=%q authoritative_claude_session_id=%q api_message_id=%q)", daemonSessionID, authoritativeClaudeSessionID, assistant.GetMessage().GetId())
 	}
+	priorVendorSession := ""
 	if assistant.GetSessionId() != authoritativeClaudeSessionID {
-		return nil, fmt.Errorf("turn accounting response Claude session mismatch (agent_repl_session_id=%q authoritative_claude_session_id=%q assistant_claude_session_id=%q api_message_id=%q)", daemonSessionID, authoritativeClaudeSessionID, assistant.GetSessionId(), assistant.GetMessage().GetId())
+		// A RESUMED CONVERSATION'S OLD FILE IS STILL THIS CONVERSATION'S OWN
+		// HISTORY. The SDK carries prior transcript content forward into a
+		// resumed session's own file, unchanged, so an assistant message
+		// produced under a RETIRED vendor session id can be read back from the
+		// CURRENT file's replay — the record's own embedded session id names
+		// the retired session, while the envelope names the file it is being
+		// read from today. That disagreement is expected, not corruption, for
+		// exactly the ids this conversation has already proven belong to it:
+		// see recordQueryLifecycleVendorLineage. Live evidence gets no such
+		// exception — a live stream response naming a session other than the
+		// one it is streaming on is a genuine contradiction, not history.
+		if !historical || knownVendorSession == nil || !knownVendorSession(assistant.GetSessionId()) {
+			return nil, fmt.Errorf("turn accounting response Claude session mismatch (agent_repl_session_id=%q authoritative_claude_session_id=%q assistant_claude_session_id=%q api_message_id=%q historical=%v)", daemonSessionID, authoritativeClaudeSessionID, assistant.GetSessionId(), assistant.GetMessage().GetId(), historical)
+		}
+		priorVendorSession = assistant.GetSessionId()
 	}
 	u := assistant.GetMessage().GetUsage()
 	record := &frontendv1.TokenUtilization{AgentReplSessionId: daemonSessionID, ClaudeSessionId: assistant.GetSessionId(), ApiMessageId: assistant.GetMessage().GetId(), Model: assistant.GetMessage().GetModel(), Usage: tokenUsageFromAPI(u, assistant.GetCacheRates())}
@@ -627,14 +701,24 @@ func tokenUtilizationObservationFromEvent(ev *corev1.Event, daemonSessionID stri
 	}
 	frontend.SetTokenUtilizationActor(record, assistant)
 	if historical {
+		// expectedClaudeSessionID is the record's OWN session id when the
+		// prior-session exception admitted it: the identity agreement was
+		// already proven above (against the conversation's known lineage,
+		// not the current file alone), so this check is left to enforce every
+		// OTHER historical invariant without re-litigating a question already
+		// answered.
+		expectedClaudeSessionID := authoritativeClaudeSessionID
+		if priorVendorSession != "" {
+			expectedClaudeSessionID = priorVendorSession
+		}
 		if err := tokenutilization.ValidateHistorical(record, tokenutilization.Identity{
 			AgentReplSessionID: daemonSessionID,
-			ClaudeSessionID:    authoritativeClaudeSessionID,
+			ClaudeSessionID:    expectedClaudeSessionID,
 		}); err != nil {
 			return nil, fmt.Errorf("historical token utilization identity: %w", err)
 		}
 	}
-	return &tokenUtilizationObservation{record: record, historical: historical}, nil
+	return &tokenUtilizationObservation{record: record, historical: historical, priorVendorSession: priorVendorSession}, nil
 }
 
 func tokenUsageFromAPI(u *datav1.ApiUsage, rates *datav1.PromptCacheRates) *frontendv1.TokenUsage {
