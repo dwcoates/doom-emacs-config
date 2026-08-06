@@ -24,16 +24,17 @@
 (defmacro agent-repl-test--with-captured-merge-command (sent-var &rest body)
   "Run BODY with `--uds-send-command' capturing into SENT-VAR.
 SENT-VAR is bound to `(:field F :payload P :ws W)' for the last command
-sent.  Tracking and the host-action helpers are stubbed inert so a test
-that does not care about them is not forced to mock them."
+sent.  The host-action helpers are stubbed inert so a test that does not
+care about them is not forced to mock them."
   (declare (indent 1))
   `(let (,sent-var)
      (cl-letf (((symbol-function 'agent-repl--uds-send-command)
-                (lambda (field payload &optional ws &rest _)
-                  (setq ,sent-var (list :field field :payload payload :ws ws))
-                  "req-1"))
-               ((symbol-function 'agent-repl--uds-track-command)
-                (lambda (&rest _) "req-1"))
+                (agent-repl-test--send-command-stub
+                 "req-1"
+                 (lambda (call)
+                   (setq ,sent-var (list :field (plist-get call :field)
+                                         :payload (plist-get call :payload)
+                                         :ws (plist-get call :workspace))))))
                ((symbol-function 'agent-repl--host-action-defer)
                 (lambda (&rest _) nil))
                ((symbol-function 'agent-repl--host-action-settle)
@@ -131,19 +132,19 @@ connectivity verdict and Emacs refused the frame."
         (should-not (agent-repl--ws-get "DWC/foo" key))))))
 
 (ert-deftest agent-repl-test-merge-dispatch-tracks-the-request ()
-  "The dispatch tracks the sent request-id so a rejected ack surfaces."
+  "The dispatch hands the send its ack callbacks so a rejection surfaces."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "DWC/foo" :project-dir "/src")
-    (let (tracked)
+    (let (call)
       (cl-letf (((symbol-function 'agent-repl--uds-send-command)
-                 (lambda (&rest _) "req-9"))
-                ((symbol-function 'agent-repl--uds-track-command)
-                 (lambda (req field ws &optional _fail _ok _challenge)
-                   (setq tracked (list req field ws))))
+                 (agent-repl-test--send-command-stub
+                  "req-9" (lambda (c) (setq call c))))
                 ((symbol-function 'agent-repl--host-action-defer)
                  (lambda (&rest _) nil)))
         (agent-repl--merge-dispatch-over-uds "DWC/foo")
-        (should (equal tracked '("req-9" "mergeWorkspace" "DWC/foo")))))))
+        (should (equal (plist-get call :field) "mergeWorkspace"))
+        (should (functionp (plist-get call :on-failure)))
+        (should (functionp (plist-get call :on-success)))))))
 
 (ert-deftest agent-repl-test-merge-dispatch-returns-the-request-id ()
   "The dispatch returns the request-id its caller correlates on."
@@ -163,60 +164,69 @@ connectivity verdict and Emacs refused the frame."
     (agent-repl--ws-put "DWC/foo" :project-dir "/src")
     (let (deferred)
       (cl-letf (((symbol-function 'agent-repl--uds-send-command)
-                 (lambda (&rest _) "req-9"))
-                ((symbol-function 'agent-repl--uds-track-command)
-                 (lambda (&rest _) nil))
+                 (agent-repl-test--send-command-stub "req-9"))
                 ((symbol-function 'agent-repl--host-action-defer)
                  (lambda (token) (setq deferred token))))
         (agent-repl--merge-dispatch-over-uds "DWC/foo")
         (should (equal deferred "req-9"))))))
 
+(ert-deftest agent-repl-test-merge-dispatch-defers-before-the-frame-is-written ()
+  "The host-action deferral is declared BEFORE the command reaches the socket.
+An ack the socket delivers reentrantly inside `process-send-string' would
+otherwise settle an action nothing had yet deferred."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "DWC/foo" :project-dir "/src")
+    (let (order)
+      (cl-letf (((symbol-function 'agent-repl--uds-send-command)
+                 (lambda (_field _payload &optional _ws _proc &rest keys)
+                   (funcall (plist-get keys :on-registered) "req-9")
+                   (push 'written order)
+                   "req-9"))
+                ((symbol-function 'agent-repl--host-action-defer)
+                 (lambda (_token) (push 'deferred order))))
+        (agent-repl--merge-dispatch-over-uds "DWC/foo")
+        (should (equal (nreverse order) '(deferred written)))))))
+
 (ert-deftest agent-repl-test-merge-ack-failure-settles-the-host-action ()
   "A rejected merge ack completes the deferred host action as FAILED."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "DWC/foo" :project-dir "/src")
-    (let (on-failure settled)
+    (let (call settled)
       (cl-letf (((symbol-function 'agent-repl--uds-send-command)
-                 (lambda (&rest _) "req-1"))
-                ((symbol-function 'agent-repl--uds-track-command)
-                 (lambda (_req _field _ws &optional cb &rest _)
-                   (setq on-failure cb)))
+                 (agent-repl-test--send-command-stub
+                  "req-1" (lambda (c) (setq call c))))
                 ((symbol-function 'agent-repl--host-action-defer)
                  (lambda (_token) nil))
                 ((symbol-function 'agent-repl--host-action-settle)
                  (lambda (token ok text) (setq settled (list token ok text)))))
         (agent-repl--merge-dispatch-over-uds "DWC/foo")
-        (funcall on-failure "resolve dirs: not wired")
+        (funcall (plist-get call :on-failure) "resolve dirs: not wired")
         (should (equal settled '("req-1" nil "resolve dirs: not wired")))))))
 
 (ert-deftest agent-repl-test-merge-ack-success-settles-the-host-action ()
   "An accepted merge ack completes the deferred host action as OK."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "DWC/foo" :project-dir "/src")
-    (let (on-success settled)
+    (let (call settled)
       (cl-letf (((symbol-function 'agent-repl--uds-send-command)
-                 (lambda (&rest _) "req-1"))
-                ((symbol-function 'agent-repl--uds-track-command)
-                 (lambda (_req _field _ws &optional _cb ok-cb &rest _)
-                   (setq on-success ok-cb)))
+                 (agent-repl-test--send-command-stub
+                  "req-1" (lambda (c) (setq call c))))
                 ((symbol-function 'agent-repl--host-action-defer)
                  (lambda (_token) nil))
                 ((symbol-function 'agent-repl--host-action-settle)
                  (lambda (token ok text) (setq settled (list token ok text)))))
         (agent-repl--merge-dispatch-over-uds "DWC/foo")
-        (funcall on-success)
+        (funcall (plist-get call :on-success))
         (should (equal settled '("req-1" t nil)))))))
 
 (ert-deftest agent-repl-test-merge-ack-failure-logs-the-rejection ()
   "A rejected ack is recorded through the canonical log helper."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "DWC/foo" :project-dir "/src")
-    (let (on-failure logged)
+    (let (call logged)
       (cl-letf (((symbol-function 'agent-repl--uds-send-command)
-                 (lambda (&rest _) "req-1"))
-                ((symbol-function 'agent-repl--uds-track-command)
-                 (lambda (_req _field _ws &optional cb &rest _)
-                   (setq on-failure cb)))
+                 (agent-repl-test--send-command-stub
+                  "req-1" (lambda (c) (setq call c))))
                 ((symbol-function 'agent-repl--host-action-defer)
                  (lambda (_token) nil))
                 ((symbol-function 'agent-repl--host-action-settle)
@@ -225,7 +235,7 @@ connectivity verdict and Emacs refused the frame."
                  (lambda (_ws fmt &rest args)
                    (push (apply #'format fmt args) logged))))
         (agent-repl--merge-dispatch-over-uds "DWC/foo")
-        (funcall on-failure "branch not found")
+        (funcall (plist-get call :on-failure) "branch not found")
         (should (cl-some (lambda (line)
                            (and (string-match-p "REJECTED" line)
                                 (string-match-p "branch not found" line)))
@@ -237,8 +247,6 @@ connectivity verdict and Emacs refused the frame."
     (let (sent)
       (cl-letf (((symbol-function 'agent-repl--uds-send-command)
                  (lambda (&rest _) (setq sent t) "req-1"))
-                ((symbol-function 'agent-repl--uds-track-command)
-                 (lambda (&rest _) nil))
                 ((symbol-function 'agent-repl--host-action-defer)
                  (lambda (&rest _) nil)))
         (should-error (agent-repl--merge-dispatch-over-uds nil)
@@ -279,26 +287,22 @@ connectivity verdict and Emacs refused the frame."
           (should-not (plist-member payload key)))))))
 
 (ert-deftest agent-repl-test-resume-tracks-the-request ()
-  "Resume tracks its request-id so a rejected ack surfaces loudly."
+  "Resume returns the request-id the transport registered before writing."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "DWC/foo" :project-dir "/src")
-    (let (tracked)
+    (let (call)
       (cl-letf (((symbol-function 'agent-repl--uds-send-command)
-                 (lambda (&rest _) "req-7"))
-                ((symbol-function 'agent-repl--uds-track-command)
-                 (lambda (req field ws &rest _)
-                   (setq tracked (list req field ws)))))
-        (agent-repl--merge-resume-over-uds "DWC/foo")
-        (should (equal tracked '("req-7" "mergeWorkspace" "DWC/foo")))))))
+                 (agent-repl-test--send-command-stub
+                  "req-7" (lambda (c) (setq call c)))))
+        (should (equal (agent-repl--merge-resume-over-uds "DWC/foo") "req-7"))
+        (should (equal (plist-get call :field) "mergeWorkspace"))))))
 
 (ert-deftest agent-repl-test-resume-propagates-the-payload-error ()
   "An unkeyed resume aborts BEFORE any frame is written."
   (agent-repl-test--with-clean-state
     (let (sent)
       (cl-letf (((symbol-function 'agent-repl--uds-send-command)
-                 (lambda (&rest _) (setq sent t) "req-1"))
-                ((symbol-function 'agent-repl--uds-track-command)
-                 (lambda (&rest _) nil)))
+                 (lambda (&rest _) (setq sent t) "req-1")))
         (should-error (agent-repl--merge-resume-over-uds "") :type 'user-error)
         (should-not sent)))))
 
@@ -326,20 +330,18 @@ connectivity verdict and Emacs refused the frame."
 (ert-deftest agent-repl-test-merge-dispatch-echoes-a-rejection ()
   "A rejected merge command's error reaches the minibuffer."
   (agent-repl-test--with-captured-messages msgs
-    (let (on-failure)
+    (let (call)
       (cl-letf (((symbol-function 'agent-repl--uds-send-command)
-                 (lambda (&rest _) "req-1"))
+                 (agent-repl-test--send-command-stub
+                  "req-1" (lambda (c) (setq call c))))
                 ((symbol-function 'agent-repl--frontend-ws-command-key)
                  (lambda (ws) ws))
                 ((symbol-function 'agent-repl--host-action-defer)
                  (lambda (&rest _) nil))
                 ((symbol-function 'agent-repl--host-action-settle)
-                 (lambda (&rest _) nil))
-                ((symbol-function 'agent-repl--uds-track-command)
-                 (lambda (_req _field _ws &optional fail _ok _challenge)
-                   (setq on-failure fail))))
+                 (lambda (&rest _) nil)))
         (agent-repl--merge-dispatch-over-uds "ws1")
-        (funcall on-failure "lease unavailable")))
+        (funcall (plist-get call :on-failure) "lease unavailable")))
     (should (cl-some (lambda (m)
                        (string-match-p "merge of ws1 refused: lease unavailable" m))
                      msgs))))

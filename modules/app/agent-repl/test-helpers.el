@@ -327,6 +327,35 @@ from START (default 0), or nil when NEEDLE does not occur."
   (defvar agent-repl--notification-backend (lambda (_ws _title _msg) nil)
     "Stub: no-op notification backend for test environments."))
 
+(defun agent-repl-test--send-command-stub (request-id &optional record)
+  "Return a stand-in for `agent-repl--uds-send-command' answering REQUEST-ID.
+
+RECORD, when non-nil, is a function of one plist describing the call:
+`:request-id', `:field', `:payload', `:workspace' and the four callbacks
+`:on-registered', `:on-failure', `:on-success', `:on-challenge'.  Tests
+drive a callback by pulling it out of that plist, which is now the ONLY
+way to reach one — the transport folded command tracking into the send,
+so there is no separate tracker to shadow.
+
+The stub reproduces the real function's ORDER: it runs `:on-registered'
+with REQUEST-ID before returning, exactly as the real send runs it after
+registering the pending entry and before writing the frame.  A test whose
+subject sets a lexical request-id from that hook therefore sees the same
+state a live send would leave it in."
+  (lambda (field payload &optional workspace _process &rest keys)
+    (let ((call (list :request-id request-id
+                      :field field
+                      :payload payload
+                      :workspace workspace
+                      :on-registered (plist-get keys :on-registered)
+                      :on-failure (plist-get keys :on-failure)
+                      :on-success (plist-get keys :on-success)
+                      :on-challenge (plist-get keys :on-challenge))))
+      (when record (funcall record call))
+      (when-let ((registered (plist-get keys :on-registered)))
+        (funcall registered request-id))
+      request-id)))
+
 (defun agent-repl-test--inert-timer (&rest _)
   "Return a fresh timer object that is not scheduled on any timer list.
 Used as the `:override' for `run-with-timer' / `run-with-idle-timer'

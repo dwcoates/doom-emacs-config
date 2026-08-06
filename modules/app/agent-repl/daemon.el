@@ -38,8 +38,7 @@
 (declare-function agent-repl-uds-probe-async "frontend-uds" (path on-open on-failure))
 (declare-function agent-repl--uds-run-timer "frontend-uds" (seconds function &rest args))
 (declare-function agent-repl-uds-connect "frontend-uds" (&optional path readiness-p))
-(declare-function agent-repl--uds-send-command "frontend-uds" (field payload &optional workspace process))
-(declare-function agent-repl--uds-track-command "frontend-uds" (request-id field workspace &optional on-failure on-success))
+(declare-function agent-repl--uds-send-command "frontend-uds" (field payload &optional workspace process &rest keys))
 (declare-function agent-repl--frontend-daemon-view-binary-mtime-seconds "frontend-state" ())
 (declare-function agent-repl-frontend-shutdown-schedule "frontend-state" ())
 (declare-function agent-repl-frontend-scheduled-shutdown-id "frontend-state" ())
@@ -631,7 +630,6 @@ asynchronous socket probe determine the exit outcome."
     (agent-repl-uds-connect))
     (let ((req (agent-repl--uds-send-command
                 "shutdown" (and stop-shims (list :stopShims t)))))
-      (agent-repl--uds-track-command req "shutdown" nil)
       (agent-repl--log nil
                        "foreign daemon shutdown: command accepted request-id=%S stop-shims=%s"
                        req (if stop-shims "t" "nil"))
@@ -689,7 +687,6 @@ Tracks the command so a rejected ack surfaces loudly.  Returns the
                 "scheduleShutdown"
                 (append (list :cause cause)
                         (when stop-shims (list :stopShims t))))))
-      (agent-repl--uds-track-command req "scheduleShutdown" nil)
       (agent-repl--log nil
                        "scheduled shutdown: command accepted request-id=%S"
                        req)
@@ -719,7 +716,6 @@ read the log to find.  Returns the `request_id'."
         (agent-repl-uds-connect))
       (let ((req (agent-repl--uds-send-command
                   "cancelScheduledShutdown" (list :scheduleId schedule-id))))
-        (agent-repl--uds-track-command req "cancelScheduledShutdown" nil)
         (agent-repl--log nil
                          "cancel scheduled shutdown: command accepted request-id=%S schedule-id=%s"
                          req schedule-id)

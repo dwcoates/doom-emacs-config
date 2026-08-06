@@ -38,8 +38,7 @@ Suitable for submitPrompt/interrupt/deleteSession, which do not await."
                   (setq uds-commands
                         (append uds-commands (list (list field payload workspace))))
                   (format "req-%d" (cl-incf uds-counter))))
-               ((symbol-function 'agent-repl--uds-track-command)
-                (lambda (request-id &rest _) request-id)))
+               )
        ,@body)))
 
 (defmacro agent-repl-test--with-ws (ws plist &rest body)
@@ -66,11 +65,23 @@ Suitable for submitPrompt/interrupt/deleteSession, which do not await."
   `(let ((uds-commands '()) (uds-counter 0) (asked '()) (echoed nil))
      (ignore uds-commands asked echoed)
      (clrhash agent-repl--uds-pending-commands)
-     (cl-letf (((symbol-function 'agent-repl--uds-send-command)
-                (lambda (field payload &optional workspace &rest _)
+     (cl-letf (;; Shadows ONLY the socket write: the stub still registers the
+               ;; pending command the way the real send does, so the ack
+               ;; handler under test matches a genuinely tracked request.
+               ((symbol-function 'agent-repl--uds-send-command)
+                (lambda (field payload &optional workspace _process &rest keys)
                   (setq uds-commands
                         (append uds-commands (list (list field payload workspace))))
-                  (format "req-%d" (cl-incf uds-counter))))
+                  (let ((request-id (format "req-%d" (cl-incf uds-counter))))
+                    (agent-repl--uds-register-pending-command
+                     request-id field workspace
+                     (plist-get keys :on-failure)
+                     (plist-get keys :on-success)
+                     (plist-get keys :on-challenge))
+                    (when-let ((registered (plist-get keys :on-registered)))
+                      (funcall registered request-id))
+                    request-id)))
+               ((symbol-function 'agent-repl--uds-run-timer) (lambda (&rest _) 'timer))
                ((symbol-function 'y-or-n-p)
                 (lambda (question)
                   (setq asked (append asked (list question)))
@@ -113,9 +124,9 @@ Suitable for submitPrompt/interrupt/deleteSession, which do not await."
   (let (success failure ack)
     (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
       (cl-letf (((symbol-function 'agent-repl--frontend-after-ready) (lambda (ok _fail &optional _ws) (funcall ok) :ready))
-                ((symbol-function 'agent-repl--uds-send-command) (lambda (&rest _) "open-1"))
-                ((symbol-function 'agent-repl--uds-track-command)
-                 (lambda (_id _field _ws _failure on-success &rest _) (setq ack on-success)))
+                ((symbol-function 'agent-repl--uds-send-command)
+                 (agent-repl-test--send-command-stub
+                  "open-1" (lambda (c) (setq ack (plist-get c :on-success)))))
                 ((symbol-function 'agent-repl--uds-run-timer) (lambda (&rest _) 'timer)))
         (should (eq :pending (agent-repl--frontend-after-open-workspace
                               "ws1" (lambda () (setq success t)) (lambda (_e) (setq failure t)))))
@@ -130,9 +141,9 @@ Suitable for submitPrompt/interrupt/deleteSession, which do not await."
   (let (success failure ack poll)
     (clrhash agent-repl--frontend-session-views)
     (cl-letf (((symbol-function 'agent-repl--frontend-after-ready) (lambda (ok _fail &optional _ws) (funcall ok) :ready))
-              ((symbol-function 'agent-repl--uds-send-command) (lambda (&rest _) "create-1"))
-              ((symbol-function 'agent-repl--uds-track-command)
-               (lambda (_id _field _ws _failure on-success &rest _) (setq ack on-success)))
+              ((symbol-function 'agent-repl--uds-send-command)
+               (agent-repl-test--send-command-stub
+                "create-1" (lambda (c) (setq ack (plist-get c :on-success)))))
               ((symbol-function 'agent-repl--uds-run-timer)
                (lambda (delay fn) (when (= delay 0.05) (setq poll fn)) 'timer)))
       (should (eq :pending (agent-repl--frontend-after-create-session
@@ -149,7 +160,7 @@ Suitable for submitPrompt/interrupt/deleteSession, which do not await."
 
 (ert-deftest agent-repl-test-frontend-after-create-canonicalizes-every-routing-key ()
   "createSession and its bookkeeping share one canonical cwd string."
-  (let (sent tracked ack poll canonicalized)
+  (let (sent ack poll canonicalized)
     (clrhash agent-repl--frontend-session-views)
     (remhash "/w" agent-repl--frontend-creates-in-flight)
     (cl-letf (((symbol-function 'agent-repl--path-canonical)
@@ -159,11 +170,11 @@ Suitable for submitPrompt/interrupt/deleteSession, which do not await."
               ((symbol-function 'agent-repl--frontend-after-ready)
                (lambda (ok _fail &optional _ws) (funcall ok) :ready))
               ((symbol-function 'agent-repl--uds-send-command)
-               (lambda (&rest args) (setq sent args) "create-canonical"))
-              ((symbol-function 'agent-repl--uds-track-command)
                (lambda (&rest args)
-                 (setq tracked args)
-                 (setq ack (nth 4 args))))
+                 (setq sent args)
+                 (funcall (plist-get (nthcdr 4 args) :on-registered) "create-canonical")
+                 (setq ack (plist-get (nthcdr 4 args) :on-success))
+                 "create-canonical"))
               ((symbol-function 'agent-repl--uds-run-timer)
                (lambda (delay fn) (when (= delay 0.05) (setq poll fn)) 'timer)))
       (agent-repl--frontend-after-create-session
@@ -174,7 +185,6 @@ Suitable for submitPrompt/interrupt/deleteSession, which do not await."
       (setq canonicalized (nreverse canonicalized))
       (should (equal (car canonicalized) "/w/"))
       (should (cl-every (lambda (path) (equal path "/w")) (cdr canonicalized)))
-      (should (equal (nth 2 tracked) "/w"))
       (should (gethash "/w" agent-repl--frontend-creates-in-flight))
       (should-not (gethash "/w/" agent-repl--frontend-creates-in-flight))
       (funcall ack)
@@ -200,10 +210,10 @@ Suitable for submitPrompt/interrupt/deleteSession, which do not await."
   "A rejected health command invokes failure and retires both registrations."
   (let (failure untracked-command untracked-health rejection)
     (cl-letf (((symbol-function 'agent-repl--frontend-after-ready) (lambda (ok _fail &optional _ws) (funcall ok) :ready))
-              ((symbol-function 'agent-repl--uds-send-command) (lambda (&rest _) "health-1"))
+              ((symbol-function 'agent-repl--uds-send-command)
+               (agent-repl-test--send-command-stub
+                "health-1" (lambda (c) (setq rejection (plist-get c :on-failure)))))
               ((symbol-function 'agent-repl--uds-track-health-response) (lambda (&rest _) nil))
-              ((symbol-function 'agent-repl--uds-track-command)
-               (lambda (_id _field _ws on-failure &rest _) (setq rejection on-failure)))
               ((symbol-function 'agent-repl--uds-run-timer) (lambda (&rest _) 'timer))
               ((symbol-function 'agent-repl--uds-untrack-command) (lambda (&rest args) (setq untracked-command args)))
               ((symbol-function 'agent-repl--uds-untrack-health-response) (lambda (&rest args) (setq untracked-health args))))
@@ -221,11 +231,10 @@ Suitable for submitPrompt/interrupt/deleteSession, which do not await."
     (cl-letf (((symbol-function 'agent-repl--frontend-after-ready)
                (lambda (ok _fail &optional _ws) (funcall ok) :ready))
               ((symbol-function 'agent-repl--uds-send-command)
-               (lambda (&rest _) "health-2"))
+               (agent-repl-test--send-command-stub "health-2"))
               ((symbol-function 'agent-repl--uds-track-health-response)
                (lambda (_id _field _ws _session-id callback)
                  (setq response-callback callback)))
-              ((symbol-function 'agent-repl--uds-track-command) #'ignore)
               ((symbol-function 'agent-repl--uds-run-timer)
                (lambda (&rest _) 'timer))
               ((symbol-function 'agent-repl--uds-untrack-command) #'ignore)
@@ -283,7 +292,7 @@ Suitable for submitPrompt/interrupt/deleteSession, which do not await."
                 ((symbol-function 'agent-repl--uds-send-command)
                  (lambda (field payload key)
                    (setq sent (list field payload key)) "req-1"))
-                ((symbol-function 'agent-repl--uds-track-command) #'ignore))
+                )
         (agent-repl--frontend-send-user-message
          "ws1" "hello" "PROMPT_ORIGIN_USER_SENT" (lambda (id) (setq request id)) #'error)
         (should-not sent)
@@ -1494,16 +1503,16 @@ reaching the daemon, so this is the guard that the wiring exists at all."
 (ert-deftest agent-repl-test-frontend-restart-session-surfaces-a-rejection ()
   "A REJECTED restart is logged, never read as a session that came back."
   ;; Arrange
-  (let (logged)
-    (cl-letf (((symbol-function 'agent-repl--uds-send-command) (lambda (&rest _) "req-1"))
-              ((symbol-function 'agent-repl--uds-track-command)
-               (lambda (_req _field _ws &optional on-failure &rest _)
-                 (when on-failure (funcall on-failure "no session to restart"))))
+  (let (logged call)
+    (cl-letf (((symbol-function 'agent-repl--uds-send-command)
+               (agent-repl-test--send-command-stub
+                "req-1" (lambda (c) (setq call c))))
               ((symbol-function 'agent-repl--log)
                (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
       (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
-        ;; Act
+        ;; Act — the daemon nacks the command the dispatch registered.
         (agent-repl--frontend-restart-session "ws1")
+        (funcall (plist-get call :on-failure) "no live session")
         ;; Assert
         (should (cl-some (lambda (l) (string-match-p "REJECTED" l)) logged))))))
 
@@ -1536,17 +1545,17 @@ reaching the daemon, so this is the guard that the wiring exists at all."
 (ert-deftest agent-repl-test-frontend-hibernate-workspace-surfaces-a-rejection ()
   "A REJECTED hibernate is logged, never read as a session that went to sleep."
   ;; Arrange
-  (let (logged)
-    (cl-letf (((symbol-function 'agent-repl--uds-send-command) (lambda (&rest _) "req-1"))
-              ((symbol-function 'agent-repl--uds-track-command)
-               (lambda (_req _field _ws &optional on-failure &rest _)
-                 (when on-failure (funcall on-failure "turn in flight"))))
+  (let (logged call)
+    (cl-letf (((symbol-function 'agent-repl--uds-send-command)
+               (agent-repl-test--send-command-stub
+                "req-1" (lambda (c) (setq call c))))
               ((symbol-function 'agent-repl--log)
                (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged)))
               ((symbol-function 'message) (lambda (&rest _) nil)))
       (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
         ;; Act
         (agent-repl--frontend-hibernate-workspace "ws1")
+        (funcall (plist-get call :on-failure) "a turn is live")
         ;; Assert
         (should (cl-some (lambda (l) (string-match-p "REJECTED" l)) logged))))))
 
@@ -1555,16 +1564,16 @@ reaching the daemon, so this is the guard that the wiring exists at all."
 The log is where the reason is diagnosed; the echo area is the only place
 the person who pressed the key learns the memory was never freed."
   ;; Arrange
-  (let (echoed)
-    (cl-letf (((symbol-function 'agent-repl--uds-send-command) (lambda (&rest _) "req-1"))
-              ((symbol-function 'agent-repl--uds-track-command)
-               (lambda (_req _field _ws &optional on-failure &rest _)
-                 (when on-failure (funcall on-failure "turn in flight"))))
+  (let (echoed call)
+    (cl-letf (((symbol-function 'agent-repl--uds-send-command)
+               (agent-repl-test--send-command-stub
+                "req-1" (lambda (c) (setq call c))))
               ((symbol-function 'agent-repl--log) (lambda (&rest _) nil))
               ((symbol-function 'message)
                (lambda (fmt &rest args) (push (apply #'format fmt args) echoed))))
       (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
         ;; Act
         (agent-repl--frontend-hibernate-workspace "ws1")
+        (funcall (plist-get call :on-failure) "a turn is live")
         ;; Assert
         (should (cl-some (lambda (l) (string-match-p "refused" l)) echoed))))))
