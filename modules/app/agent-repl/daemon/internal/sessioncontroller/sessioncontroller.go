@@ -127,7 +127,12 @@ type SessionRegistrar interface {
 	// session, and refuses it loudly otherwise: two unordered writers feed this
 	// value, and last-writer-wins let a SystemInit from an already-in-flight
 	// submit overwrite a selection the user had just confirmed.
-	SessionModelObserved(sessionID, model string, obs registry.ModelObservation)
+	// It reports the model the record held BEFORE this write, and whether the
+	// write was applied. The prior value is what makes a model transition
+	// readable from the shared log alone: "opus replaces sonnet" is a
+	// diagnosis, while "opus" on its own is a value with no transition around
+	// it. A refused or unchanged write reports the standing value and false.
+	SessionModelObserved(sessionID, model string, obs registry.ModelObservation) (previous string, applied bool)
 }
 
 // ModelCatalogRegistrar receives the live SDK's model menu. It is separate
@@ -225,6 +230,12 @@ type sessionClient interface {
 	// at that turn forever.
 	UnpinAccountingTurn(turnIDs ...string)
 	SetModel(ctx context.Context, model string) (string, error)
+	// QuerySelectedModel reads back which model the session is CURRENTLY
+	// running. It is the only way the daemon can learn what a bare
+	// argument-less `/model` settled on, because the CLI owns that choice
+	// (modelreadback.go). A shim that cannot answer fails rather than
+	// returning an empty selection.
+	QuerySelectedModel(ctx context.Context) (string, error)
 	// Replay asks the shim for a bounded slice of persisted history, streaming
 	// it to onEvent. Its events arrive over the wire as ReplayEvent, a
 	// different type from live Events, which is what keeps replayed history
@@ -512,6 +523,10 @@ type Manager struct {
 	// Process-local by design: it orders controllers within one daemon, which
 	// is exactly the scope an in-flight model report can survive.
 	genOrdinals atomic.Uint64
+	// modelReadbacks tracks the in-flight live-model read-backs
+	// (modelreadback.go), so a shutdown can wait for a read that has already
+	// asked the shim rather than abandoning its answer mid-flight.
+	modelReadbacks sync.WaitGroup
 	// shimPID is the pid each session's shim announced on its ShimHello. It is
 	// the ONLY way to stop a shim this daemon did not spawn, and it is kept in
 	// memory rather than persisted deliberately: it is trustworthy exactly
@@ -589,6 +604,12 @@ type sessionController struct {
 	// replaced must lose to anything this one observes, and only a monotone
 	// ordinal can decide that. Minted with the generation id, never reused.
 	genOrdinal uint64
+	// modelReadbacks is the set of submitted turn ids that are a BARE `/model`
+	// whose result must be read back from the shim when the turn ends
+	// (modelreadback.go). Keyed by request id, which the shim adopts as the
+	// turn_id, so the turn that ends is nameable as the command that started
+	// it. Guarded by Manager.mu.
+	modelReadbacks map[string]struct{}
 	// resumedVendorSessionID records the exact durable conversation this
 	// generation asked the spawner to resume. A transport failure may retry
 	// only while preserving this identity.
@@ -1124,7 +1145,8 @@ func (m *Manager) SetModel(ctx context.Context, workspace, model string) (string
 	if err != nil {
 		return "", err
 	}
-	return m.setModelOn(ctx, d, requested, "frontend_picker")
+	change, err := m.setModelOn(ctx, d, requested, "frontend_picker")
+	return change.selected, err
 }
 
 // setModelOn is THE model change: the shim round-trip, the confirmed value, and
@@ -1139,32 +1161,47 @@ func (m *Manager) SetModel(ctx context.Context, workspace, model string) (string
 // requested must ALREADY be normalized. That is an invariant of every caller,
 // not an input to validate away, so a violation fails hard here rather than
 // being quietly normalized a second time.
-func (m *Manager) setModelOn(ctx context.Context, d *sessionController, requested, route string) (string, error) {
+func (m *Manager) setModelOn(ctx context.Context, d *sessionController, requested, route string) (modelChange, error) {
 	if requested == "" || registry.NormalizeModel(requested) != requested {
 		err := fmt.Errorf("session-controller: set model for workspace %q was handed the unnormalized model %q", d.workspace, requested)
 		m.logf("session-controller: model request INVARIANT VIOLATED session=%s ws=%q route=%s requested=%q: %v",
 			d.sessionID, d.workspace, route, requested, err)
-		return "", err
+		return modelChange{}, err
 	}
 	selected, err := d.client.SetModel(ctx, requested)
 	selected = registry.NormalizeModel(selected)
 	if err != nil {
 		if selected != "" {
-			m.persistObservedModel(d.sessionID, selected, d.modelObservationNow())
-			m.logf("session-controller: model request REJECTED session=%s ws=%q route=%s requested=%q shim_selected=%q: %v", d.sessionID, d.workspace, route, requested, selected, err)
-			return selected, err
+			previous, _ := m.persistObservedModel(d.sessionID, selected, d.modelObservationNow())
+			m.logf("session-controller: model request REJECTED session=%s ws=%q route=%s requested=%q shim_selected=%q record_previous=%q: %v",
+				d.sessionID, d.workspace, route, requested, selected, previous, err)
+			return modelChange{requested: requested, selected: selected, previous: previous}, err
 		}
 		m.logf("session-controller: model request FAILED session=%s ws=%q route=%s requested=%q without a shim-selected model: %v", d.sessionID, d.workspace, route, requested, err)
-		return "", err
+		return modelChange{requested: requested}, err
 	}
 	if selected == "" {
 		err := fmt.Errorf("session-controller: shim acknowledged model request for %q without a selected model", d.workspace)
 		m.logf("session-controller: model request UNCONFIRMED session=%s ws=%q route=%s requested=%q: %v", d.sessionID, d.workspace, route, requested, err)
-		return "", err
+		return modelChange{requested: requested}, err
 	}
-	m.logf("session-controller: model request CONFIRMED session=%s ws=%q route=%s requested=%q selected=%q", d.sessionID, d.workspace, route, requested, selected)
-	m.persistObservedModel(d.sessionID, selected, d.modelObservationNow())
-	return selected, nil
+	previous, applied := m.persistObservedModel(d.sessionID, selected, d.modelObservationNow())
+	m.logf("session-controller: model request CONFIRMED session=%s ws=%q route=%s requested=%q selected=%q record_previous=%q record_written=%t",
+		d.sessionID, d.workspace, route, requested, selected, previous, applied)
+	return modelChange{requested: requested, selected: selected, previous: previous}, nil
+}
+
+// modelChange is ONE model transition, as the log needs to state it: what was
+// asked for, what the shim confirmed, and what the record held before.
+//
+// All three, because any one alone is unreadable. The requested value without
+// the confirmed one cannot say whether the change took; the confirmed value
+// without the prior one is a reading rather than a transition; and neither
+// explains a picker that disagrees with the session.
+type modelChange struct {
+	requested string
+	selected  string
+	previous  string
 }
 
 // SubmitWorkspaceInitialPrompt submits a durable workspace-create job's initial
@@ -1423,23 +1460,23 @@ func (m *Manager) persistBackfillState(sessionID, state string) {
 // guarantee for every observation that follows it.
 //
 // No-op without a registrar (a test harness).
-func (m *Manager) persistObservedModel(sessionID, model string, obs registry.ModelObservation) {
+func (m *Manager) persistObservedModel(sessionID, model string, obs registry.ModelObservation) (previous string, applied bool) {
 	if m.cfg.Registrar == nil {
-		return
+		return "", false
 	}
 	if !obs.Valid() {
 		m.logf("session-controller: model observation REFUSED session=%s model=%q %s reason=untokened_observation — a report that cannot be ordered would restore last-writer-wins; the record is left alone",
 			sessionID, model, obs)
-		return
+		return "", false
 	}
 	normalized := registry.NormalizeModel(model)
 	if normalized == "" {
 		if model != "" {
 			m.logf("session-controller: session %s reported model marker %q — normalized to empty; leaving the record's model alone", sessionID, model)
 		}
-		return
+		return "", false
 	}
-	m.cfg.Registrar.SessionModelObserved(sessionID, normalized, obs)
+	return m.cfg.Registrar.SessionModelObserved(sessionID, normalized, obs)
 }
 
 // modelObservationNow is the token for something the SHIM just confirmed.
