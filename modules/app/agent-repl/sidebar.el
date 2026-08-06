@@ -1122,16 +1122,84 @@ would instead fire on every 1Hz tick for the whole of an outage."
                        (plist-get roster :view))
       request-id)))
 
+;;;; ---- The publish gate --------------------------------------------------
+;;
+;; `agent-repl--sidebar-push' is a REQUEST to publish, never a publish.
+;;
+;; It used to be an unconditional publish, documented as such, and the change
+;; gate lived in the 1Hz tick's signature compare — which nine callers reached
+;; past by calling the publisher directly.  Every fold, switch, nav, view
+;; change, task edit and workspace teardown therefore rebuilt the whole roster
+;; and made an ack round trip immediately: 277 `publishWorkspaceRoster' sends
+;; and 1.05 MB of frames in a twenty-minute window, peaking at ten sends inside
+;; one second, each one rebuilding 17 live workspaces, 85 workspace states and
+;; 201 sessions.
+;;
+;; The fix is not a rate limit, a hand-tuned debounce, or an `unless changed'
+;; check at each caller — those all leave the gate bypassable by the next
+;; caller written.  Instead the ONLY function that publishes is
+;; `agent-repl--sidebar-flush', and it publishes only when the signature moved.
+;; Requests coalesce into one flush per event-loop pass.  N requests in one
+;; frame therefore produce at most one publish, an unchanged roster produces
+;; none, and there is no spelling of "publish right now, ungated" left to call.
+
+(defun agent-repl--sidebar-run-timer (seconds callback)
+  "Integration boundary: run CALLBACK after SECONDS without blocking Emacs."
+  (run-with-timer seconds nil callback))
+
+(defvar agent-repl--sidebar-last-signature nil
+  "Signature of the roster state as of the last published build.")
+
+(defvar agent-repl--sidebar-flush-pending nil
+  "Non-nil when a roster flush is already scheduled for this frame.
+Set by `agent-repl--sidebar-push' and cleared by
+`agent-repl--sidebar-flush', so any number of requests between the two
+collapse into the single flush already on its way.")
+
+(defun agent-repl--sidebar-flush ()
+  "Publish the roster IF the signature moved; drop the flush otherwise.
+This is the sole publisher.  Refreshes `agent-repl--sidebar-flat-dirs' as
+the build's side product, so navigation always walks the order last
+shown.
+
+Called from the coalescing timer `agent-repl--sidebar-push' arms, and
+directly by the 1Hz tick.  The tick calling it directly is deliberate:
+the gate lives HERE, so a direct call is still gated, and it means a
+never-fired flush timer cannot wedge the rail — the next tick publishes
+anyway."
+  (setq agent-repl--sidebar-flush-pending nil)
+  (let ((sig (agent-repl--sidebar-signature)))
+    (if (equal sig agent-repl--sidebar-last-signature)
+        (agent-repl--log-verbose
+         nil "sidebar-flush: signature unchanged, dropping the publish")
+      (setq agent-repl--sidebar-last-signature sig)
+      (agent-repl--log-verbose nil "sidebar-flush: signature changed, publishing roster")
+      (let ((built (agent-repl--sidebar-build)))
+        (setq agent-repl--sidebar-flat-dirs (cdr built))
+        (agent-repl--sidebar-publish (car built))))))
+
 (defun agent-repl--sidebar-push ()
-  "Rebuild the roster and publish it to the daemon.
-Unconditional: change-gating lives in `agent-repl--sidebar-tick's
-signature compare, and the event-driven callers (fold / switch / nav)
-push precisely because they just changed what the sidebar shows.
-Also refreshes `agent-repl--sidebar-flat-dirs' as the build's side
-product, so navigation always walks the order last shown."
-  (let ((built (agent-repl--sidebar-build)))
-    (setq agent-repl--sidebar-flat-dirs (cdr built))
-    (agent-repl--sidebar-publish (car built))))
+  "REQUEST a roster publish, coalescing into one flush per frame.
+Does not publish and does not rebuild.  A zero-delay timer runs the flush
+from the ordinary event loop, so a burst of requests inside one frame
+\(a fold that also forces a tab-bar redraw, a switch that boots a
+session, a state transition that lands beside a nav move) settles into a
+single gated flush."
+  (if agent-repl--sidebar-flush-pending
+      (agent-repl--log-verbose
+       nil "sidebar-push: request coalesced into the pending flush")
+    (setq agent-repl--sidebar-flush-pending t)
+    (agent-repl--log-verbose nil "sidebar-push: scheduling the roster flush")
+    (agent-repl--sidebar-run-timer 0 #'agent-repl--sidebar-flush)))
+
+(defun agent-repl--sidebar-invalidate ()
+  "Forget the last published signature so the next flush cannot be dropped.
+For the one case where the roster is unchanged but the DAEMON's copy of
+it is gone: a replacement daemon retains no roster, and the signature
+gate would otherwise correctly observe that nothing moved and publish
+nothing.  Invalidating rather than adding a force flag keeps a single
+gate that every path goes through."
+  (setq agent-repl--sidebar-last-signature nil))
 
 (defun agent-repl--sidebar-publish-on-connect ()
   "Republish the roster onto a freshly opened frontend UDS connection.
@@ -1142,6 +1210,7 @@ without this the sidebar would stay empty until something happened to
 move the signature.  Rebuilding rather than resending the last frame is
 the point: the roster published is the state of the world NOW."
   (agent-repl--log nil "sidebar-publish-on-connect: republishing the roster")
+  (agent-repl--sidebar-invalidate)
   (agent-repl--sidebar-push))
 
 (add-hook 'agent-repl-uds-connected-functions
@@ -1160,9 +1229,6 @@ flips the panel and re-renders on its own.  No roster round-trip means
     (agent-repl--log nil "sidebar-expand-push: dir=%s webviews=%d" dir (length bufs))))
 
 ;;;; ---- The 1Hz change gate ----------------------------------------------
-
-(defvar agent-repl--sidebar-last-signature nil
-  "Signature of the roster state as of the last pushed build.")
 
 (defun agent-repl--sidebar-signature ()
   "Return a cheap value that changes whenever the roster would.
@@ -1202,21 +1268,21 @@ and this signature is purely a change detector over roster CONTENT."
         agent-repl--sidebar-merged-epoch))
 
 (defun agent-repl--sidebar-tick ()
-  "1Hz entry point (status.el's state tick): push when the signature moved.
-The signature compare is the hot-path gate — the rebuild and push
-behind it run only on actual change, so per-tick logging stays on the
-verbose ladder.
+  "1Hz entry point (status.el's state tick): flush the roster gate.
+The flush's signature compare is the hot-path gate — the rebuild and
+publish behind it run only on actual change, so per-tick logging stays
+on the verbose ladder.
 
-The merged-window refresh runs BEFORE the signature is taken, since the
-epoch it maintains is one of the signature's inputs and a wipe must be
-visible to this very tick's compare rather than the next one."
+Flushes DIRECTLY rather than requesting one, because the tick already IS
+a per-frame cadence: routing it through the coalescing timer would only
+add a timer per second, and calling the gate itself means a flush timer
+that never fired cannot leave the rail stale.
+
+The merged-window refresh runs BEFORE the flush, since the epoch it
+maintains is one of the signature's inputs and a wipe must be visible to
+this very tick's compare rather than the next one."
   (agent-repl--sidebar-refresh-merged-window)
-  (let ((sig (agent-repl--sidebar-signature)))
-    (if (equal sig agent-repl--sidebar-last-signature)
-        (agent-repl--log-verbose nil "sidebar-tick: signature unchanged, skip")
-      (setq agent-repl--sidebar-last-signature sig)
-      (agent-repl--log-verbose nil "sidebar-tick: signature changed, pushing roster")
-      (agent-repl--sidebar-push))))
+  (agent-repl--sidebar-flush))
 
 ;;;; ---- The dot and the tab take the same value at the same moment --------
 ;;
@@ -1244,12 +1310,14 @@ Subscriber for `agent-repl-ws-state-transition-functions'
 \(frontend-state.el).  NEW and PREVIOUS are the render keywords; a push
 that did not move the keyword changes no dot, so it is skipped.
 
-The push also refreshes `agent-repl--sidebar-last-signature', so the
-next 1Hz tick sees the state it already delivered and stays quiet."
+The request is what refreshes `agent-repl--sidebar-last-signature', via
+the flush it coalesces into, so the next 1Hz tick sees the state already
+delivered and stays quiet.  This function must NOT pre-set that
+signature itself: doing so would tell the flush nothing had moved and
+drop the very publish it was asking for."
   (unless (eq new previous)
     (agent-repl--log ws "sidebar-react-to-pushed-state: ws=%s %s -> %s — repainting the rail with the tab bar"
                      ws previous new)
-    (setq agent-repl--sidebar-last-signature (agent-repl--sidebar-signature))
     (agent-repl--sidebar-push))
   (when (eq new previous)
     (agent-repl--log-verbose ws "sidebar-react-to-pushed-state: ws=%s state=%s unchanged, skip"

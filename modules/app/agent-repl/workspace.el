@@ -1447,17 +1447,20 @@ directly or wrapping it themselves with `fboundp'."
        (+workspace-exists-p ws)))
 
 (defun agent-repl--ws-repaint-sidebar (ws reason)
-  "Push a fresh sidebar roster after WS left the tab bar, tagged REASON.
+  "Request a fresh sidebar roster after WS left the tab bar, tagged REASON.
 Killing a perspective REMOVES that workspace's sidebar row
 \(`agent-repl--sidebar-rostered-p'), and a removal the user triggered
-must land at once rather than waiting on the 1Hz signature tick — the
-row would otherwise linger for up to a second after its tab vanished.
+must land on this frame rather than waiting on the 1Hz signature tick —
+the row would otherwise linger for up to a second after its tab vanished.
+The request coalesces into the frame's single gated flush
+\(`agent-repl--sidebar-flush'), so a teardown that touches several
+workspaces still publishes one roster.
 Guarded with `fboundp' and `condition-case': the repaint is a courtesy
 on top of the tick that would eventually notice anyway, so it must
 never turn a teardown into an error."
   (if (not (fboundp 'agent-repl--sidebar-push))
       (agent-repl--log ws "ws-repaint-sidebar: skip ws=%s reason=%s (sidebar not loaded)" ws reason)
-    (agent-repl--log ws "ws-repaint-sidebar: pushing ws=%s reason=%s" ws reason)
+    (agent-repl--log ws "ws-repaint-sidebar: requesting ws=%s reason=%s" ws reason)
     (condition-case err
         (agent-repl--sidebar-push)
       (error (agent-repl--log ws "ws-repaint-sidebar: push error ws=%s reason=%s err=%S"
