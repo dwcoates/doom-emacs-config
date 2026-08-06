@@ -152,12 +152,27 @@ case "$*" in
         echo \"\"${EC_STUB_ARTIFACT_ROOT_RESULT:-artifact-root-same}\"\"
         exit 0
         ;;
-    *frontend-daemon-restart-await*)
+    *frontend-daemon-restart-dispatch*)
         if [ "${EC_STUB_REFUSE:-0}" = "1" ]; then
             echo "*ERROR*: agent-repl: refusing daemon stop — turn in flight"
             exit 1
         fi
-        echo \"\"${EC_STUB_RESTART_RESULT:-runtime-restart-complete}\"\"
+        # The dispatch returns the request identity immediately and the
+        # coordinator settles the artifact from its own continuations. The stub
+        # stands in for both halves: it publishes whichever terminal status the
+        # case selected, or leaves the artifact `pending' for the timeout case,
+        # so the deploy's wait is exercised without any real Emacs.
+        if [ "${EC_STUB_RESTART_NO_ID:-0}" = "1" ]; then
+            echo \"\"runtime-restart-queued\"\"
+            exit 0
+        fi
+        id="${EC_STUB_RESTART_ID:-4242-1}"
+        rdir="${AGENT_REPL_STATE_DIR:-$HOME/.claude-emacs}/restart"
+        mkdir -p "$rdir"
+        printf 'request-id=%s\nstatus=%s\ndetail=%s\n' \
+            "$id" "${EC_STUB_RESTART_STATUS:-complete}" \
+            "${EC_STUB_RESTART_DETAIL:-}" > "$rdir/$id.result"
+        echo \"\"runtime-restart-dispatched:$id\"\"
         exit 0
         ;;
     *refresh-webviews*)
@@ -274,7 +289,7 @@ fi
 d="$TMP/t1b"; mkdir -p "$d"
 RUN_ENV="EC_STUB_ARTIFACT_ROOT_RESULT=artifact-root-changed" run_deploy "$d"
 if [ "$RC" -eq 0 ] \
-   && log_before "load .*daemon.el" "daemon-restart-await t" \
+   && log_before "load .*daemon.el" "daemon-restart-dispatch t" \
    && grep -q "artifact root changed — surviving shims will stop" "$d/stdout"; then
     pass "a moved runtime artifact root is bound before restart and stops surviving shims"
 else
@@ -401,15 +416,61 @@ else
     fail "a refused daemon restart exits 3 with the refusal surfaced" "rc=$RC stderr: $(cat "$d/stderr")"
 fi
 
-# --- 6b. pending dispatch is not terminal restart completion ---------------
-d="$TMP/t6b"; mkdir -p "$d"; RUN_ENV="EC_STUB_RESTART_RESULT=runtime-restart-pending" run_deploy "$d"
+# --- 6b. a dispatch with no request identity aborts -------------------------
+# The eval now returns the identity of the restart rather than its outcome, so
+# an answer carrying no identity leaves the deploy with nothing to wait on.
+d="$TMP/t6b"; mkdir -p "$d"; RUN_ENV="EC_STUB_RESTART_NO_ID=1" run_deploy "$d"
 if [ "$RC" -eq 3 ] \
-   && grep -q "no terminal completion" "$d/stderr" \
+   && grep -q "no request identity" "$d/stderr" \
    && ! log_has "refresh-webviews" \
    && ! log_has "readiness-report"; then
-    pass "a non-terminal restart result aborts before refresh and revision readiness"
+    pass "a dispatch without a request identity aborts before refresh and revision readiness"
 else
-    fail "a non-terminal restart result aborts before refresh and revision readiness" \
+    fail "a dispatch without a request identity aborts before refresh and revision readiness" \
+         "rc=$RC stderr: $(cat "$d/stderr") log: $(cat "$STUB_LOG")"
+fi
+
+# --- 6c. the deploy waits on the completion artifact, not on the editor -----
+# The restart's terminal result travels through a file so the editor's main
+# loop is never held. The deploy must read THAT file's status, keyed by the
+# request identity the dispatch handed back.
+d="$TMP/t6c"; mkdir -p "$d"
+RUN_ENV="EC_STUB_RESTART_ID=7001-3" run_deploy "$d"
+if [ "$RC" -eq 0 ] \
+   && grep -q "dispatched request-id=7001-3" "$d/stdout" \
+   && grep -q "waiting on .*/.claude-emacs/restart/7001-3.result" "$d/stdout" \
+   && grep -q "daemon: restart completed" "$d/stdout"; then
+    pass "the deploy waits on the completion artifact named by the dispatched request identity"
+else
+    fail "the deploy waits on the completion artifact named by the dispatched request identity" \
+         "rc=$RC stdout: $(cat "$d/stdout") stderr: $(cat "$d/stderr")"
+fi
+
+# --- 6d. a failed coordinator artifact fails the deploy loudly --------------
+d="$TMP/t6d"; mkdir -p "$d"
+RUN_ENV="EC_STUB_RESTART_STATUS=failed EC_STUB_RESTART_DETAIL=daemon_unhealthy" run_deploy "$d"
+if [ "$RC" -eq 3 ] \
+   && grep -q "daemon restart failed: daemon_unhealthy" "$d/stderr" \
+   && ! log_has "refresh-webviews" \
+   && ! log_has "readiness-report"; then
+    pass "a failed completion artifact exits 3 with the coordinator's detail"
+else
+    fail "a failed completion artifact exits 3 with the coordinator's detail" \
+         "rc=$RC stderr: $(cat "$d/stderr") log: $(cat "$STUB_LOG")"
+fi
+
+# --- 6e. an artifact that never leaves `pending' times out loudly -----------
+# A coordinator that hangs must never read as a completed deployment.
+d="$TMP/t6e"; mkdir -p "$d"
+RUN_ENV="EC_STUB_RESTART_STATUS=pending AGENT_REPL_RESTART_TIMEOUT=1" run_deploy "$d"
+if [ "$RC" -eq 3 ] \
+   && grep -q "did not settle within 1s" "$d/stderr" \
+   && grep -q "status=pending" "$d/stderr" \
+   && ! log_has "refresh-webviews" \
+   && ! log_has "readiness-report"; then
+    pass "a completion artifact stuck at pending times out and fails the deploy"
+else
+    fail "a completion artifact stuck at pending times out and fails the deploy" \
          "rc=$RC stderr: $(cat "$d/stderr") log: $(cat "$STUB_LOG")"
 fi
 
@@ -501,7 +562,7 @@ fi
 # code, so this is the one case that must not preserve.
 d="$TMP/t13"; mkdir -p "$d"
 RUN_ENV="BF_STUB_SHIM_CONTENT=bundle-v2" run_deploy "$d"
-if [ "$RC" -eq 0 ] && log_has "daemon-restart-await t"; then
+if [ "$RC" -eq 0 ] && log_has "daemon-restart-dispatch t"; then
     pass "a changed shim bundle bounces the daemon in stop-shims mode"
 else
     fail "a changed shim bundle bounces the daemon in stop-shims mode" \
@@ -514,7 +575,7 @@ fi
 d="$TMP/t14"; mkdir -p "$d"
 RUN_ENV="BF_STUB_SHIM_CONTENT=bundle-v1" run_deploy "$d"
 RUN_ENV="BF_STUB_SHIM_CONTENT=bundle-v1" run_deploy "$d"
-if [ "$RC" -eq 0 ] && log_has "daemon-restart-await)" && ! log_has "daemon-restart-await t"; then
+if [ "$RC" -eq 0 ] && log_has "daemon-restart-dispatch)" && ! log_has "daemon-restart-dispatch t"; then
     pass "an unchanged shim bundle leaves the daemon bounce preserving shims"
 else
     fail "an unchanged shim bundle leaves the daemon bounce preserving shims" \
@@ -527,7 +588,7 @@ fi
 d="$TMP/t15"; mkdir -p "$d"
 RUN_ENV="BF_STUB_SHIM_CONTENT=bundle-v1 GIT_STUB_DIRTY=M__x" run_deploy "$d"
 RUN_ENV="BF_STUB_SHIM_CONTENT=bundle-v2 GIT_STUB_DIRTY=M__x" run_deploy "$d"
-if [ "$RC" -eq 0 ] && log_has "daemon-restart-await t"; then
+if [ "$RC" -eq 0 ] && log_has "daemon-restart-dispatch t"; then
     pass "a bundle that moved within one revision still stops the shims"
 else
     fail "a bundle that moved within one revision still stops the shims" \
