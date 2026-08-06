@@ -114,43 +114,57 @@ roster never carries, so the keyboard reaches it through this hook
 rather than a roster rebuild.")
 
 (defconst agent-repl--sidebar-status-wire
-  '((:submitting     . "submitting")
-    (:thinking       . "thinking")
-    (:clearing       . "clearing")
-    (:compacting     . "compacting")
-    (:permission     . "permission")
-    (:init           . "init")
-    (:severed        . "severed")
-    (:hibernated     . "hibernated")
-    (:done           . "done")
-    (:interrupted    . "interrupted")
-    (:ready          . "ready")
-    (:idle           . "ready")
-    (:idle-async     . "idle-async")
-    (:vendor-blocked . "vendor-blocked")
-    (:start-failed   . "start-failed")
-    (:degraded       . "degraded")
-    (:dead           . "dead")
-    (:merge-enqueuing . "merge-enqueuing")
-    (:merging        . "merging")
-    (:merge-queued   . "merge-queued")
-    (:merge-conflict . "merge-conflict")
-    (:merge-failed   . "merge-failed")
-    (:merged         . "merged"))
-  "Maps `agent-repl--ws-render-status' keywords onto sidebar wire strings.
-The dots speak the SAME six-color vocabulary the tab-bar does, so a
-workspace can never read one way in the rail and another in the tabs.
-Nothing coarsens any more: `:idle-async' is its own yellow dot rather
-than borrowing idle's ring, and `:vendor-blocked' is its own purple dot
-rather than sharing the grey one with `:dead'.  A workspace that read
-differently in the two places was exactly what the old coarsening
-produced.
+  '((:submitting      . ("submitting"      . nil))
+    (:thinking        . ("thinking"        . nil))
+    (:clearing        . ("clearing"        . nil))
+    (:compacting      . ("compacting"      . nil))
+    (:permission      . ("permission"      . nil))
+    (:init            . ("init"            . nil))
+    (:severed         . ("severed"         . nil))
+    (:hibernated      . ("hibernated"      . nil))
+    (:done            . ("done"            . nil))
+    (:interrupted     . ("interrupted"     . nil))
+    (:ready           . ("ready"           . nil))
+    (:idle            . ("ready"           . nil))
+    (:idle-async      . ("idle-async"      . nil))
+    (:vendor-blocked  . ("vendor-blocked"  . nil))
+    (:start-failed    . ("start-failed"    . nil))
+    (:degraded        . ("degraded"        . nil))
+    (:dead            . ("dead"            . nil))
+    (:merge-enqueuing . ("merge-enqueuing" . nil))
+    (:merging         . ("merging"         . nil))
+    (:merge-queued    . ("merge-queued"    . nil))
+    (:merge-conflict  . ("merge-conflict"  . nil))
+    (:merge-failed    . ("merge-failed"    . nil))
+    (:merged          . ("merged"          . t)))
+  "Maps `agent-repl--ws-render-status' keywords onto sidebar wire rows.
+Each entry's value is (WIRE-STRING . PERSPECTIVE-INDEPENDENT-P).
+
+WIRE-STRING is the dot the row draws.  The dots speak the SAME
+six-color vocabulary the tab-bar does, so a workspace can never read
+one way in the rail and another in the tabs.  Nothing coarsens any
+more: `:idle-async' is its own yellow dot rather than borrowing idle's
+ring, and `:vendor-blocked' is its own purple dot rather than sharing
+the grey one with `:dead'.  A workspace that read differently in the
+two places was exactly what the old coarsening produced.
 
 `:start-failed' and `:degraded' are mapped rather than absent: both are
 real render states the daemon can push, and an unmapped one signals an
 error instead of drawing a dot.
 
-The value set is the webapp's closed WorkspaceRow.status union
+PERSPECTIVE-INDEPENDENT-P marks a status that describes CONCLUDED work:
+its dot is meaningful even when the workspace has no open perspective,
+because the status itself — not the tab-bar — is what is being
+reported.  `:merged' is the only such status: `preserve-entry' keeps a
+landed merge's roster row alive specifically so it can outlive its tab
+inside Recently Merged, so its dot must survive perspective loss.  Every
+in-flight merge status (`:merge-enqueuing', `:merging', `:merge-queued',
+`:merge-conflict', `:merge-failed') is still live work riding a real
+tab, exactly like `:ready' or `:thinking', so it stays perspective-bound:
+losing the tab mid-merge is itself the noteworthy fact, and that fact is
+`\"inactive\"'.
+
+The wire-string set is the webapp's closed WorkspaceRow.status union
 \(webapp/src/sidebar.ts) — the two sides are one contract and MUST
 stay in sync.  \"done-viewed\" and \"inactive\" are absent
 here because neither is a render-status keyword —
@@ -160,37 +174,46 @@ here because neither is a render-status keyword —
 (defun agent-repl--sidebar-wire-status (name)
   "Return the wire status string for known workspace NAME.
 \"inactive\" when NAME has no open perspective (`agent-repl--ws-open-p'
-nil): a workspace registered in the roster but absent from the tab-bar
-has no live session whose lifecycle a status dot could report, so the
-webapp draws a question mark in place of the dot.  This
-perspective-membership check dominates every render state — a merged,
-dead, or idle registration that is perspective-less still serializes
-\"inactive\" — because being in the sidebar yet not the tab-bar is the
-fact the row is conveying.
+nil) AND its render status is perspective-bound: a workspace registered
+in the roster but absent from the tab-bar has no live session whose
+lifecycle a status dot could report, so the webapp draws a question
+mark in place of the dot.  A status marked perspective-independent in
+`agent-repl--sidebar-status-wire' is the one exception — it describes
+concluded work the row is reporting on its own account, not the
+workspace's tab-bar membership, so it serializes regardless of
+`agent-repl--ws-open-p'.
 
 \"none\" when `agent-repl--ws-render-status' reports nil (tombstoned /
-unborn).
+unborn) and NAME has an open perspective; a perspective-less workspace
+with no render status still reads \"inactive\", since there is no
+concluded-work status to report on its own account.
+
 Signals on an unmapped keyword: a render state missing from
 `agent-repl--sidebar-status-wire' means a new state was added without
 extending the sidebar contract — a violated invariant, never a silent
 default dot."
-  (if (not (agent-repl--ws-open-p name))
-      (progn
-        (agent-repl--log-verbose name "sidebar-wire-status: ws=%s open=nil -> inactive" name)
-        "inactive")
-    (let ((kw (agent-repl--ws-render-status name)))
-      (cond
-       ((null kw)
-        (agent-repl--log-verbose name "sidebar-wire-status: ws=%s open=t status=nil -> none" name)
-        "none")
-       (t (if-let ((wire (alist-get kw agent-repl--sidebar-status-wire)))
-              (progn
-                (agent-repl--log-verbose name "sidebar-wire-status: ws=%s open=t status=%s -> %s"
-                                          name kw wire)
-                wire)
-            (agent-repl--log name "sidebar-wire-status: ws=%s unmapped render-status=%S" name kw)
-            (error "agent-repl--sidebar-wire-status: unmapped render state %S for ws=%s"
-                   kw name)))))))
+  (let ((kw (agent-repl--ws-render-status name)))
+    (cond
+     ((null kw)
+      (if (agent-repl--ws-open-p name)
+          (progn
+            (agent-repl--log-verbose name "sidebar-wire-status: ws=%s open=t status=nil -> none" name)
+            "none")
+        (agent-repl--log-verbose name "sidebar-wire-status: ws=%s open=nil status=nil -> inactive" name)
+        "inactive"))
+     (t (if-let ((entry (alist-get kw agent-repl--sidebar-status-wire)))
+            (let ((wire (car entry))
+                  (independent (cdr entry)))
+              (if (or independent (agent-repl--ws-open-p name))
+                  (progn
+                    (agent-repl--log-verbose name "sidebar-wire-status: ws=%s open=%s status=%s -> %s"
+                                              name (agent-repl--ws-open-p name) kw wire)
+                    wire)
+                (agent-repl--log-verbose name "sidebar-wire-status: ws=%s open=nil status=%s -> inactive" name kw)
+                "inactive"))
+          (agent-repl--log name "sidebar-wire-status: ws=%s unmapped render-status=%S" name kw)
+          (error "agent-repl--sidebar-wire-status: unmapped render state %S for ws=%s"
+                 kw name))))))
 
 (defconst agent-repl--sidebar-status-arm
   '(("submitting"      . :submitting)
