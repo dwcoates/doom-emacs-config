@@ -932,6 +932,8 @@ export class StoreClient {
 
   /** Close both connections deliberately (not an error path). */
   close(): void {
+    LOGGER.log({ agent_repl_session_id: this.opts.sessionId, connected: this.connected },
+      "closing shim-store connection and disarming relink");
     this.closed = true;
     // Disarm recovery FIRST: a relink firing after teardown would redial the
     // store out from under a shim that is shutting down.
@@ -950,6 +952,7 @@ export class StoreClient {
       this.connectingSocket.destroy();
       this.connectingSocket = null;
     }
+    LOGGER.log({ agent_repl_session_id: this.opts.sessionId }, "shim-store connection closed");
   }
 
   private onMessage(msg: Any): void {

@@ -385,6 +385,8 @@ export class SessionServer {
 
   /** Drop the connection and stop reconnecting. Does not touch the SDK turn. */
   close(): Promise<void> {
+    LOGGER.log({ agent_repl_session_id: this.opts.sessionId, connected: this.conn !== null },
+      "closing daemon UDS connection and disarming reconnect");
     this.closed = true;
     this.stopHeartbeat();
     if (this.reconnectTimer) {
@@ -397,6 +399,7 @@ export class SessionServer {
       this.conn = null;
     }
     this.handshaked = false;
+    LOGGER.log({ agent_repl_session_id: this.opts.sessionId }, "daemon UDS connection closed");
     return Promise.resolve();
   }
 

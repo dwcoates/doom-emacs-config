@@ -2,6 +2,28 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { METAPROMPT_REL_PATH } from "../src/metaprompt.js";
+
+// runUdsMode's own dependencies (the session lock and the owned SDK session)
+// are mocked so its exit-trace test below exercises only the signal/exit
+// wiring runUdsMode itself owns, never a real lock file or SDK session.
+const udsSessionMocks = vi.hoisted(() => ({
+  start: vi.fn(async (): Promise<void> => undefined),
+}));
+vi.mock("../src/uds/session-lock.js", () => ({
+  acquireSessionLock: vi.fn(() => vi.fn()),
+}));
+vi.mock("../src/uds/uds-session.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/uds/uds-session.js")>();
+  return {
+    ...actual,
+    UdsSession: vi.fn().mockImplementation(() => ({
+      start: udsSessionMocks.start,
+      shutdown: vi.fn(async (): Promise<void> => undefined),
+    })),
+  };
+});
+
 import {
   makeUdsQueryFactory,
   MAIN_LIFECYCLE_OPERATION,
@@ -9,10 +31,10 @@ import {
   probeQueryOptions,
   realQueryOptions,
   logMainLifecycle,
+  runUdsMode,
   udsShutdownSignalHandlers,
   validateUdsLoggingArgs,
 } from "../src/main.js";
-import { METAPROMPT_REL_PATH } from "../src/metaprompt.js";
 
 const metapromptRoots: string[] = [];
 afterEach(() => {
@@ -344,6 +366,58 @@ describe("UDS query signal ownership", () => {
       }),
     }));
     stderr.mockRestore();
+  });
+});
+
+describe("runUdsMode exit trace", () => {
+  function spyStderr(): { records: Array<Record<string, unknown>>; restore: () => void } {
+    const records: Array<Record<string, unknown>> = [];
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(((chunk: unknown): boolean => {
+      records.push(JSON.parse(String(chunk)) as Record<string, unknown>);
+      return true;
+    }) as typeof process.stderr.write);
+    return { records, restore: () => stderr.mockRestore() };
+  }
+
+  const noopCreateQuery = (() => ({})) as unknown as Parameters<typeof runUdsMode>[1];
+
+  it("logs a clean exit when a signal drives shutdown before session.start() resolves", async () => {
+    // Arrange: the owned session's start() resolves only after SIGTERM fires,
+    // exactly as a real UdsSession's bring-up racing a signal would.
+    udsSessionMocks.start.mockImplementation(async () => {
+      process.emit("SIGTERM", "SIGTERM");
+    });
+    const { records, restore } = spyStderr();
+    const args = parseArgs(["--session-id", "sess-clean", "--daemon-socket", "/tmp/d.sock", "--cwd", "/tmp", "--log-fd", "3"]);
+
+    // Act
+    await runUdsMode(args, noopCreateQuery);
+
+    // Assert
+    expect(records).toContainEqual(expect.objectContaining({
+      message: "runUdsMode exiting",
+      context: expect.objectContaining({ outcome: "uds_main_exit_clean" }),
+    }));
+    restore();
+  });
+
+  it("logs an error exit and rethrows when the session ends without an intentional shutdown", async () => {
+    // Arrange: start() resolves with no signal ever fired.
+    udsSessionMocks.start.mockImplementation(async () => undefined);
+    const { records, restore } = spyStderr();
+    const args = parseArgs(["--session-id", "sess-error", "--daemon-socket", "/tmp/d.sock", "--cwd", "/tmp", "--log-fd", "3"]);
+
+    // Act + Assert
+    await expect(runUdsMode(args, noopCreateQuery)).rejects.toThrow(/without an intentional shutdown signal/);
+    expect(records).toContainEqual(expect.objectContaining({
+      level: "error",
+      message: "runUdsMode exiting",
+      context: expect.objectContaining({
+        outcome: "uds_main_exit_error",
+        error: expect.stringContaining("without an intentional shutdown signal"),
+      }),
+    }));
+    restore();
   });
 });
 
