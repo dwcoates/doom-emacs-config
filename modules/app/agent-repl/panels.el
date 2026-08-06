@@ -24,11 +24,6 @@ window is selected so the user can start typing immediately."
   :type 'boolean
   :group 'agent-repl)
 
-(defcustom agent-repl-session-id-display-length 8
-  "Number of characters of session ID to display in messages."
-  :type 'integer
-  :group 'agent-repl)
-
 ;;;; Panel visibility predicates
 
 (defun agent-repl--ws-buffer-visible-p (key)

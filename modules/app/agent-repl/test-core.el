@@ -1008,7 +1008,10 @@ quiet `agent-repl--emit-message' gate, so a fatal line always reaches the modeli
         (delete-directory project t)))))
 
 (ert-deftest agent-repl-test-log-workspace-record-attributes-known-sessions ()
-  "Workspace JSONL records expose known session identifiers as top-level fields."
+  "Workspace JSONL records expose the DURABLE conversation id, and only it.
+The daemon session id is ephemeral — it dies with the daemon process, so
+a log line carrying one cannot be correlated after a bounce, while the
+workspace beside it can."
   (agent-repl-test--with-clean-state
     (let* ((project (make-temp-file "agent-repl-identity-log-" t))
            (ws "identity-ws")
@@ -1027,7 +1030,7 @@ quiet `agent-repl--emit-message' gate, so a fatal line always reaches the modeli
                    (record (with-temp-buffer
                              (insert-file-contents target)
                              (json-parse-string (buffer-string) :object-type 'alist))))
-              (should (equal (alist-get 'agent_repl_session_id record) "agent-session-1"))
+              (should-not (assoc 'agent_repl_session_id record))
               (should (equal (alist-get 'claude_session_id record) "claude-session-1"))))
         (delete-directory project t)))))
 
@@ -1056,7 +1059,7 @@ quiet `agent-repl--emit-message' gate, so a fatal line always reaches the modeli
         (delete-directory project t)))))
 
 (ert-deftest agent-repl-test-log-workspace-record-omits-missing-session-identities ()
-  "Absent optional session identities are not serialized as null fields."
+  "An absent durable conversation id is not serialized as a null field."
   (agent-repl-test--with-clean-state
     (let* ((project (make-temp-file "agent-repl-missing-identity-" t))
            (ws "missing-identity-ws")
@@ -1071,7 +1074,6 @@ quiet `agent-repl--emit-message' gate, so a fatal line always reaches the modeli
                    (record (with-temp-buffer
                              (insert-file-contents target)
                              (json-parse-string (buffer-string) :object-type 'alist))))
-              (should-not (assoc 'agent_repl_session_id record))
               (should-not (assoc 'claude_session_id record))))
         (delete-directory project t)))))
 
@@ -1085,9 +1087,6 @@ quiet `agent-repl--emit-message' gate, so a fatal line always reaches the modeli
       (unwind-protect
           (progn
             (agent-repl--ws-put ws :project-dir project)
-            (agent-repl--ws-put ws :frontend-session-id 42)
-            (let ((agent-repl-log-to-file t))
-              (should-error (agent-repl--log ws "invalid identity")))
             (agent-repl--ws-put ws :frontend-session-id "s_1")
             (let ((agent-repl-log-to-file t))
               (cl-letf (((symbol-function 'agent-repl--frontend-session-view)
