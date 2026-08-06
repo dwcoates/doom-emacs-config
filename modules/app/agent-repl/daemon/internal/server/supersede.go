@@ -38,6 +38,9 @@
 package server
 
 import (
+	"errors"
+	"fmt"
+
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/session"
@@ -76,7 +79,18 @@ func transcriptOwner(configDir, cwd, claudeSessionID string) string {
 // live in its roster, correlates the cwd to the stale id on the next
 // create, and binds its workspace to a session that no longer exists
 // (the observed every-restore mis-bind).
-func (s *Server) supersedeCreateConflicts(opts CreateOpts) {
+//
+// ONE STOP FAILURE IS NOT LIKE THE OTHERS. A stop that could not be completed
+// is logged and the sweep continues, because a record whose shim was never
+// brought up, or whose teardown failed for a bookkeeping reason, still has to
+// be stood down. But ErrShimSurvivedStop says something else: a LIVE shim owns
+// that conversation and refused to die. Continuing there produces exactly the
+// double writer this file exists to prevent, so it is returned and the create
+// that asked for it does not proceed. Every surviving stop is collected rather
+// than the first one only, so the caller's error names each shim still holding
+// a transcript.
+func (s *Server) supersedeCreateConflicts(opts CreateOpts) error {
+	var survived error
 	var wantTranscript string
 	if opts.Resume != "" {
 		wantTranscript = transcriptOwner(opts.ConfigDir, opts.CWD, opts.Resume)
@@ -109,6 +123,11 @@ func (s *Server) supersedeCreateConflicts(opts CreateOpts) {
 		// newer session that already owns the same cwd.
 		if err := s.controller.HibernateSession(rec.CWD, rec.SessionID, sessioncontroller.StopCauseSessionSuperseded()); err != nil {
 			s.logf("session %s: supersede exact shim stop FAILED (ws %s): %v", rec.SessionID, rec.CWD, err)
+			if errors.Is(err, ErrShimSurvivedStop) {
+				s.logf("session %s: supersede shim SURVIVED its stop (ws %s) — the superseding create is refused rather than started beside a live writer of the same transcript",
+					rec.SessionID, rec.CWD)
+				survived = errors.Join(survived, fmt.Errorf("superseded session %s (ws %s): %w", rec.SessionID, rec.CWD, err))
+			}
 		}
 		// Deliver the stand-down to every connected frontend so their rosters
 		// mark this session terminal NOW, not at their next full resync.
@@ -116,4 +135,5 @@ func (s *Server) supersedeCreateConflicts(opts CreateOpts) {
 		s.logf("session %s: supersede terminal SessionView pushed {ws=%s resume=%s same_workspace=%v same_transcript=%v}",
 			rec.SessionID, rec.CWD, opts.Resume, workspaceConflict, transcriptConflict)
 	}
+	return survived
 }

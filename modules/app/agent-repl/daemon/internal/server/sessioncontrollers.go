@@ -218,10 +218,21 @@ type ShimSpawner struct {
 	// signal delivers a signal to a pid. Injected so the surviving-shim stop
 	// is unit-testable without spawning a real process to kill.
 	signal func(pid int, sig syscall.Signal) error
-	// awaitStopped blocks until sessionID's shim is really gone. Injected so a
-	// unit harness, which has no processes and no locks, is not made to wait
-	// for a condition it can never observe.
-	awaitStopped func(sessionID string) error
+	// awaitStopped blocks until sessionID's shim is really gone, for at most
+	// within. Injected so a unit harness, which has no processes and no locks,
+	// is not made to wait for a condition it can never observe.
+	//
+	// It reports errStopWaitExpired, and ONLY that, for "the bound elapsed with
+	// the lock still held" — the one outcome the stop escalates on. Every other
+	// error is "I could not tell", which is a hard failure rather than grounds
+	// to signal anything.
+	awaitStopped func(sessionID string, within time.Duration) error
+	// termGraceOverride and killGraceOverride override the escalation bounds
+	// (stopTermGrace, stopKillGrace). Zero means the production constants; only
+	// a test assigns them, so every rung of the escalation can be driven
+	// without waiting out a real grace.
+	termGraceOverride time.Duration
+	killGraceOverride time.Duration
 	// forceFake mirrors the daemon-wide -fake decision, which the create path
 	// already consults. See ForceFake and EnsureShim's resume gate.
 	forceFake bool
@@ -499,8 +510,11 @@ func (s *ShimSpawner) StopShim(sessionID string, hintPID int32, by shim.Stop) er
 		// THE SURVIVOR'S STOP IS ATTRIBUTED TOO. A signal sent by pid leaves no
 		// stop record of its own — the process handle that would have written
 		// one belongs to a daemon that is gone — so this line is the only place
-		// the survivor's death is explained, and it used to carry no
-		// attribution at all.
+		// the survivor's death is explained.
+		if err := signallablePID(sessionID, hintPID); err != nil {
+			s.logf("server: session %s: SHIM STOP REFUSED — %v; nothing was signalled", sessionID, err)
+			return err
+		}
 		s.logf("server: session %s: no daemon-spawned shim; stopping the SURVIVING shim by its announced pid %d (SIGTERM) initiator=%s reason=%s",
 			sessionID, hintPID, by.Initiator, by.Reason)
 		if err := s.signal(int(hintPID), syscall.SIGTERM); err != nil {
@@ -526,11 +540,115 @@ func (s *ShimSpawner) StopShim(sessionID string, hintPID int32, by shim.Stop) er
 	// The wait is on the CONDITION the spawn is gated by — the session lock,
 	// which the kernel releases when the holder dies, however it dies — not on
 	// a duration chosen to be probably long enough.
-	if err := s.awaitStopped(sessionID); err != nil {
-		return err
+	//
+	// A SIGTERM THAT IS IGNORED ESCALATES. The bound elapsing with the lock
+	// still held is the one outcome that licenses a harder signal, because it
+	// is proof that a process is alive for this session; every other error from
+	// the wait means the truth is unknown, and an unknown truth is a hard
+	// failure rather than grounds to kill something.
+	termGrace, killGrace := s.stopGraces()
+	if err := s.awaitStopped(sessionID, termGrace); err != nil {
+		if !errors.Is(err, errStopWaitExpired) {
+			return err
+		}
+		if err := s.escalateStopToKill(sessionID, hintPID, by, termGrace, killGrace, err); err != nil {
+			return err
+		}
 	}
 	s.awaitReaped(sessionID, handle)
 	s.evictStoppedParked(sessionID)
+	return nil
+}
+
+// stopGraces resolves the escalation bounds, honoring the test overrides.
+func (s *ShimSpawner) stopGraces() (term, kill time.Duration) {
+	term, kill = stopTermGrace, stopKillGrace
+	if s.termGraceOverride > 0 {
+		term = s.termGraceOverride
+	}
+	if s.killGraceOverride > 0 {
+		kill = s.killGraceOverride
+	}
+	return term, kill
+}
+
+// escalateStopToKill is the second rung of the stop: SIGKILL, then the same
+// bounded wait on the same condition.
+//
+// # Why a second rung exists at all
+//
+// A SIGTERM only ASKS, and a shim that is wedged — blocked in the vendor SDK,
+// stuck on a write, mid-uninterruptible-syscall — does not answer. Reporting
+// the stop successful there hands the caller a workspace it believes is free
+// while a live process still owns the transcript, which is how two shims end
+// up writing one conversation. The escalation removes the "asked nicely and
+// gave up" outcome; what remains is a dead process or a loud typed failure.
+//
+// # What licenses signalling this pid
+//
+// The pid is the one the shim announced on its own ShimHello, over its own
+// connection to this daemon — so it was reported by the process that opened
+// that connection, not inferred. That is the strongest identity claim
+// available: a pid cannot be tied to a process portably from inside Go, and
+// this deliberately does NOT pretend otherwise by reading /proc or shelling
+// out to ps.
+//
+// What makes the signal justified rather than a guess is the session lock. The
+// escalation is reached ONLY from an expired wait, which means the lock was
+// still held at the deadline — so a process is provably alive for this session
+// at that instant. The signal is aimed at the only pid that process ever
+// claimed. If the pid has been recycled onto something else the kernel refuses
+// or the wait still expires, and the typed failure below is the outcome; the
+// stop never reports success it did not earn.
+//
+// A pid whose process is already gone is a SUCCESS, not a failure: the thing
+// this wants dead is dead. The lock wait still runs, because the lock rather
+// than the signal is the proof.
+func (s *ShimSpawner) escalateStopToKill(sessionID string, hintPID int32, by shim.Stop, termGrace, killGrace time.Duration, termErr error) error {
+	if hintPID <= 0 {
+		s.logf("server: session %s: shim SURVIVED SIGTERM after %s and this daemon holds no pid to escalate to initiator=%s reason=%s — the stop cannot be completed and is reported FAILED rather than assumed",
+			sessionID, termGrace, by.Initiator, by.Reason)
+		return fmt.Errorf("%w: session %s ignored SIGTERM for %s and no announced pid is available to escalate to: %w",
+			ErrShimSurvivedStop, sessionID, termGrace, termErr)
+	}
+	if err := signallablePID(sessionID, hintPID); err != nil {
+		s.logf("server: session %s: shim SURVIVED SIGTERM after %s and the escalation is REFUSED — %v", sessionID, termGrace, err)
+		return err
+	}
+	s.logf("server: session %s: shim SURVIVED SIGTERM after %s; escalating to SIGKILL at the announced pid %d initiator=%s reason=%s — the session lock was still held at the deadline, so a process is alive for this session, and this pid is the only one its shim ever announced",
+		sessionID, termGrace, hintPID, by.Initiator, by.Reason)
+	if err := s.signal(int(hintPID), syscall.SIGKILL); err != nil {
+		if !errors.Is(err, os.ErrProcessDone) {
+			return fmt.Errorf("server: session %s: SIGKILL of shim pid %d: %w", sessionID, hintPID, err)
+		}
+		s.logf("server: session %s: shim pid %d was already gone when the SIGKILL was delivered; the session lock is still the proof", sessionID, hintPID)
+	}
+	if err := s.awaitStopped(sessionID, killGrace); err != nil {
+		if !errors.Is(err, errStopWaitExpired) {
+			return err
+		}
+		s.logf("server: session %s: shim SURVIVED SIGKILL at pid %d after a further %s initiator=%s reason=%s — the stop FAILED and nothing may proceed as though this session were free",
+			sessionID, hintPID, killGrace, by.Initiator, by.Reason)
+		return fmt.Errorf("%w: session %s survived SIGTERM (%s) and SIGKILL (%s) at pid %d: %w",
+			ErrShimSurvivedStop, sessionID, termGrace, killGrace, hintPID, err)
+	}
+	s.logf("server: session %s: shim pid %d is gone after SIGKILL; the stop completed at the second rung", sessionID, hintPID)
+	return nil
+}
+
+// signallablePID refuses the pids that can never name a shim.
+//
+// Neither check is theoretical. A zero or negative pid is a process GROUP or
+// "every process we may signal" to kill(2), and the daemon's own pid would have
+// it kill itself while reporting a shim stopped. Both are refusals rather than
+// no-ops: a stop that cannot name its target has not established anything.
+func signallablePID(sessionID string, pid int32) error {
+	switch {
+	case pid <= 1:
+		return fmt.Errorf("server: session %s: refusing to signal pid %d, which names no shim (kill(2) reads it as a process group or as init)", sessionID, pid)
+	case int(pid) == os.Getpid():
+		return fmt.Errorf("server: session %s: refusing to signal pid %d, which is this daemon's own process", sessionID, pid)
+	}
 	return nil
 }
 
@@ -567,11 +685,43 @@ func (s *ShimSpawner) evictStoppedParked(sessionID string) {
 	s.logf("server: session %s: parked transport cleanup after stop evicted=%t", sessionID, evicted)
 }
 
-// stopGrace bounds how long StopShim waits for a signalled shim to actually
-// exit. It is a FAILURE bound, not a delay: the wait ends the instant the
-// session lock is free, and this only decides how long to wait before calling
-// a shim that ignored SIGTERM what it is.
-const stopGrace = 10 * time.Second
+// ErrShimSurvivedStop reports that a shim was signalled, escalated to SIGKILL,
+// and STILL held its session lock — so the process this daemon asked to die is
+// alive and owns the session.
+//
+// It is a sentinel because of what a caller must do differently. An ordinary
+// stop failure says the teardown did not complete; this says a live shim owns
+// the conversation, so anything that would put a SECOND shim on it — a
+// supersede minting a replacement session, a bounce respawning onto a new
+// bundle — must abort rather than continue. That decision cannot be made by
+// matching message text.
+var ErrShimSurvivedStop = errors.New("server: the shim survived its stop and still holds its session lock")
+
+// errStopWaitExpired reports that a bounded wait for a signalled shim to
+// release its session lock elapsed with the lock still held.
+//
+// It is distinct from every other error the wait can produce, and the
+// distinction is load-bearing: this one means "a process is provably alive for
+// this session", which is what licenses escalating to a harder signal, while
+// any other error means the truth could not be read at all and nothing may be
+// signalled on the strength of it.
+var errStopWaitExpired = errors.New("server: the shim still holds its session lock")
+
+// stopTermGrace bounds how long a SIGTERMed shim is given to exit before the
+// stop escalates to SIGKILL. It is a FAILURE bound, not a delay: the wait ends
+// the instant the session lock is free, and this only decides how long a clean
+// stop is given before it stops being asked for politely. Generous, because a
+// shim shutting down cleanly flushes its transcript and closes its store link.
+const stopTermGrace = 10 * time.Second
+
+// stopKillGrace bounds how long a SIGKILLed shim is given to disappear.
+//
+// Short, and for a structural reason rather than a tuned one: SIGKILL cannot be
+// caught, blocked or ignored, so the only thing being waited on is the kernel
+// tearing the process down and releasing its flock. A wait that expires here
+// means the lock is held by something that is not the process that was killed,
+// which is a fact to report loudly rather than to wait longer for.
+const stopKillGrace = 2 * time.Second
 
 // stopPoll is how often the session lock is re-probed while waiting.
 //
@@ -585,10 +735,14 @@ const stopGrace = 10 * time.Second
 const stopPoll = 20 * time.Millisecond
 
 // awaitShimStopped blocks until no process holds sessionID's lock, i.e. until
-// the shim is really gone. An unreadable lock ends the wait with that error
-// rather than a guess: "I could not tell" must never be read as "it is free".
-func awaitShimStopped(sessionID string) error {
-	deadline := time.Now().Add(stopGrace)
+// the shim is really gone, for at most within.
+//
+// An unreadable lock ends the wait with that error rather than a guess: "I
+// could not tell" must never be read as "it is free". The bound elapsing is
+// reported as errStopWaitExpired specifically, because that is the one outcome
+// the caller may escalate on.
+func awaitShimStopped(sessionID string, within time.Duration) error {
+	deadline := time.Now().Add(within)
 	for {
 		held, err := sessionlock.Held(sessionID)
 		if err != nil {
@@ -598,7 +752,7 @@ func awaitShimStopped(sessionID string) error {
 			return nil
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("server: session %s: its shim still holds the session lock %s after SIGTERM; it is not stopping", sessionID, stopGrace)
+			return fmt.Errorf("%w: session %s is still holding it %s after the signal; it is not stopping", errStopWaitExpired, sessionID, within)
 		}
 		time.Sleep(stopPoll)
 	}
