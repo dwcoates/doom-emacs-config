@@ -1051,7 +1051,7 @@ func (c *consumer) Consume(ev *corev1.Event) error {
 		c.logf("session-controller: typed query termination REJECTED before mutation session=%s seq=%d query_instance_id=%q vendor_session_id=%q vendor_identity_unavailable=%v observed_at_ms=%d error=%v", c.sessionID, ev.GetSeq(), ev.GetQueryLifecycle().GetQueryInstanceId(), ev.GetQueryLifecycle().GetTerminated().GetVendorSessionId(), ev.GetQueryLifecycle().GetTerminated().GetVendorSessionIdentityUnavailable() != nil, ev.GetQueryLifecycle().GetObservedAtMs(), err)
 		return fmt.Errorf("session-controller: translate typed query termination before frame mutation: %w", err)
 	}
-	observation, utilizationErr := tokenUtilizationObservationFromEvent(ev, c.sessionID)
+	observation, utilizationErr := tokenUtilizationObservationFromEvent(ev, c.sessionID, c.accounting.isKnownVendorSession)
 	if utilizationErr != nil {
 		return fmt.Errorf("session-controller: translate token utilization before frame mutation: %w", utilizationErr)
 	}
@@ -1503,7 +1503,7 @@ func userTurnReceipt(cd *frontendv1.ConversationDelta) (requestID string, textLe
 // pushConversation converts a vendor event to a ConversationDelta and pushes it,
 // loud-logging (never swallowing) a translation failure.
 func (c *consumer) pushConversation(ev *corev1.Event, live bool) {
-	observation, err := tokenUtilizationObservationFromEvent(ev, c.sessionID)
+	observation, err := tokenUtilizationObservationFromEvent(ev, c.sessionID, c.accounting.isKnownVendorSession)
 	if err != nil {
 		c.logf("session-controller: historical token utilization translate REJECTED session=%s seq=%d: %v", c.sessionID, ev.GetSeq(), err)
 		return
