@@ -132,7 +132,12 @@ type SessionRegistrar interface {
 	// readable from the shared log alone: "opus replaces sonnet" is a
 	// diagnosis, while "opus" on its own is a value with no transition around
 	// it. A refused or unchanged write reports the standing value and false.
-	SessionModelObserved(sessionID, model string, obs registry.ModelObservation) (previous string, applied bool)
+	//
+	// THE MODEL IS A registry.Model, NOT A STRING. Its only constructor is the
+	// normalizer, so an implementation of this interface cannot be handed the
+	// CLI's placeholder or an unnormalized value — that is a compile error
+	// rather than a rule every caller has to remember.
+	SessionModelObserved(sessionID string, model registry.Model, obs registry.ModelObservation) (previous string, applied bool)
 }
 
 // ModelCatalogRegistrar receives the live SDK's model menu. It is separate
@@ -1460,23 +1465,26 @@ func (m *Manager) persistBackfillState(sessionID, state string) {
 // guarantee for every observation that follows it.
 //
 // No-op without a registrar (a test harness).
-func (m *Manager) persistObservedModel(sessionID, model string, obs registry.ModelObservation) (previous string, applied bool) {
+// raw is the value as its reporter spelled it, and is normalized HERE, at the
+// funnel, so no caller can hand a placeholder onward: everything downstream of
+// this line carries registry.Model and cannot represent one.
+func (m *Manager) persistObservedModel(sessionID, raw string, obs registry.ModelObservation) (previous string, applied bool) {
 	if m.cfg.Registrar == nil {
 		return "", false
 	}
 	if !obs.Valid() {
 		m.logf("session-controller: model observation REFUSED session=%s model=%q %s reason=untokened_observation — a report that cannot be ordered would restore last-writer-wins; the record is left alone",
-			sessionID, model, obs)
+			sessionID, raw, obs)
 		return "", false
 	}
-	normalized := registry.NormalizeModel(model)
-	if normalized == "" {
-		if model != "" {
-			m.logf("session-controller: session %s reported model marker %q — normalized to empty; leaving the record's model alone", sessionID, model)
+	model := registry.NewModel(raw)
+	if model.Empty() {
+		if raw != "" {
+			m.logf("session-controller: session %s reported model marker %q — normalized to empty; leaving the record's model alone", sessionID, raw)
 		}
 		return "", false
 	}
-	return m.cfg.Registrar.SessionModelObserved(sessionID, normalized, obs)
+	return m.cfg.Registrar.SessionModelObserved(sessionID, model, obs)
 }
 
 // modelObservationNow is the token for something the SHIM just confirmed.

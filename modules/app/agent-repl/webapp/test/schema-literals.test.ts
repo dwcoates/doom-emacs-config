@@ -9,6 +9,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  selectedModel,
   sessionCommandSpecs,
   syntheticModelLiteral,
 } from "../../proto/ts/schema-literals";
@@ -109,5 +110,38 @@ describe("syntheticModelLiteral", () => {
 
     // Assert.
     expect(literal).toBe("<synthetic>");
+  });
+});
+
+describe("selectedModel", () => {
+  it("accepts a real model id", () => {
+    // Arrange + Act + Assert.
+    expect(selectedModel("claude-opus-5", "SetModel.selectedModel")).toBe("claude-opus-5");
+  });
+
+  it("refuses the synthetic marker", () => {
+    // Arrange + Act + Assert — a picker offering the marker as a selectable
+    // option was the concrete failure this type prevents.
+    expect(() => selectedModel(syntheticModelLiteral(), "SessionView.model")).toThrow(/marker/);
+  });
+
+  it("refuses a surrounded synthetic marker", () => {
+    // Arrange + Act + Assert — the marker arrives off a vendor stream, where
+    // surrounding whitespace is ordinary.
+    expect(() => selectedModel(` ${syntheticModelLiteral()}\n`, "SessionView.model")).toThrow(/marker/);
+  });
+
+  it("refuses an empty model", () => {
+    // Arrange + Act + Assert — every frontend call site was promised a real
+    // selection, so absence is a producer violation rather than "pin nothing".
+    expect(() => selectedModel("", "SetModel.selectedModel")).toThrow(/absent, empty/);
+  });
+
+  it("names the field the violating producer filled", () => {
+    // Arrange + Act + Assert — the throw must say WHICH producer broke the
+    // contract, not only that one did.
+    expect(() => selectedModel("", "SessionView.modelOptions[2].value")).toThrow(
+      /SessionView\.modelOptions\[2\]\.value/,
+    );
   });
 });

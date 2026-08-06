@@ -39,7 +39,7 @@ import {
 } from "./local-failure.js";
 import type { FailureCardItem } from "./store.js";
 import { log, logVerbose } from "./wslog.js";
-import { syntheticModelLiteral } from "../../proto/ts/schema-literals.js";
+import { selectedModel, type SelectedModel } from "../../proto/ts/schema-literals.js";
 
 /**
  * How many in-flight `clientLog` request ids are remembered for ack
@@ -203,12 +203,10 @@ function unrevealedRefusalCard(refusal: Extract<CommandRefusal, { kind: "reveal"
   };
 }
 
-function requiredSelectedModel(ack: CommandAck, disposition: "ack" | "nack"): string {
-  const selected = ack.selectedModel;
-  if (selected === "" || selected.trim() === syntheticModelLiteral()) {
-    throw new Error(`setModel ${disposition} protocol violation: selectedModel is absent, empty, or <synthetic>`);
-  }
-  return selected;
+function requiredSelectedModel(ack: CommandAck, disposition: "ack" | "nack"): SelectedModel {
+  // Checked INTO its type at the receipt, so every consumer downstream — the
+  // store, the picker — receives a value that cannot be empty or the marker.
+  return selectedModel(ack.selectedModel, `setModel ${disposition} selectedModel`);
 }
 
 /**
@@ -241,7 +239,10 @@ export class InterruptConfirmRequiredError extends Error {
  * parse.
  */
 export class ModelSelectionRejectedError extends Error {
-  constructor(readonly selectedModel: string, reason: string) {
+  // The live selection the shim reported ALONGSIDE its refusal, so the picker
+  // can be reset from authority rather than optimistically. Carried as the
+  // checked type: a rejection is still a statement about a real model.
+  constructor(readonly selectedModel: SelectedModel, reason: string) {
     super(`setModel rejected: ${reason}`);
     this.name = "ModelSelectionRejectedError";
   }
@@ -474,13 +475,13 @@ export class CommandDispatcher {
   }
 
   /** Request a model switch and return the shim-confirmed selected model. */
-  setModel(workspace: string, model: string): Promise<string> {
+  setModel(workspace: string, model: string): Promise<SelectedModel> {
     const requestId = this.newId();
     log("info", "command dispatcher dispatching model selection request", {
       operation: "command-dispatch.set-model",
       context: { request_id: requestId, workspace, requested_model: model, pending_count: this.pending.size },
     });
-    return new Promise<string>((resolve, reject) => {
+    return new Promise<SelectedModel>((resolve, reject) => {
       this.pending.set(requestId, {
         command: "setModel",
         resolve: (ack) => {

@@ -120,3 +120,47 @@ export function syntheticModelLiteral(): string {
   }
   return literal;
 }
+
+/**
+ * A model value that HAS ALREADY BEEN NORMALIZED, carried as a type rather
+ * than as a convention.
+ *
+ * THE RUNG THIS CLIMBS. A shared normalizer achieves agreement rather than
+ * enforcement: every call site is expected to remember to call it, a new one
+ * compiles perfectly well without doing so, and three sites in this codebase
+ * had already drifted into hand-inlined `trim() === "<synthetic>"` comparisons
+ * instead. A branded value inverts that — a consumer added later inherits the
+ * rule without knowing it exists, and handing an arbitrary string to something
+ * expecting a checked selection is a COMPILE ERROR rather than a lapse.
+ *
+ * The brand is a phantom property that exists only in the type system, so
+ * there is no runtime cost and no wrapper to unwrap: a `SelectedModel` IS its
+ * string wherever a plain string is wanted. What it is not is assignable FROM
+ * one — `selectedModel()` is the only way in.
+ */
+export type SelectedModel = string & { readonly __selectedModel: unique symbol };
+
+/**
+ * THE constructor, and the only way to obtain a `SelectedModel`.
+ *
+ * It REFUSES rather than normalizing to absence, which is the difference
+ * between this and Go's `registry.Model`: every TypeScript call site is a
+ * point where a real selection was promised — a `SetModel` receipt, a picker
+ * option, a `SessionView` snapshot — so an empty or placeholder value there is
+ * a protocol violation by the producer, not an honest "pin nothing". The
+ * daemon's side has an absent-model case to represent; the frontend's does
+ * not, and a picker rendering the marker as a selectable option was the
+ * concrete failure.
+ *
+ * @param where names the field being decoded, so the throw says which
+ *   producer violated the contract rather than only that one did.
+ */
+export function selectedModel(raw: string, where: string): SelectedModel {
+  const trimmed = raw.trim();
+  if (trimmed === "" || trimmed === syntheticModelLiteral()) {
+    throw new Error(
+      `schema-literals: ${where} is absent, empty, or the ${syntheticModelLiteral()} marker, none of which names a model`,
+    );
+  }
+  return raw as SelectedModel;
+}
