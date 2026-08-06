@@ -1090,6 +1090,12 @@ func (m *Manager) SubmitPrompt(ctx context.Context, workspace, requestID, text, 
 
 // SetModel forwards a deliberate model request to the live shim, then persists
 // the shim-confirmed selection so the next respawn preserves the choice.
+//
+// THE FRONTEND PICKER'S ENTRY POINT. The `/model <name>` slash form enters the
+// same operation one layer down, at setModelOn, having already resolved the
+// session controller it is being submitted against (promptdispatch.go). Both
+// spellings therefore change a session's model through ONE call, which is what
+// leaves nothing for the record and the picker to disagree about.
 func (m *Manager) SetModel(ctx context.Context, workspace, model string) (string, error) {
 	requested := registry.NormalizeModel(model)
 	if requested == "" {
@@ -1099,21 +1105,45 @@ func (m *Manager) SetModel(ctx context.Context, workspace, model string) (string
 	if err != nil {
 		return "", err
 	}
+	return m.setModelOn(ctx, d, requested, "frontend_picker")
+}
+
+// setModelOn is THE model change: the shim round-trip, the confirmed value, and
+// the record write, for a session controller the caller already holds.
+//
+// route names which spelling asked — the picker or the slash command — and is
+// carried into the log line so an operator reading a model transition can tell
+// them apart. It changes NOTHING about what the function does, and deliberately
+// so: a route that behaved differently would be the second authority this
+// convergence exists to remove.
+//
+// requested must ALREADY be normalized. That is an invariant of every caller,
+// not an input to validate away, so a violation fails hard here rather than
+// being quietly normalized a second time.
+func (m *Manager) setModelOn(ctx context.Context, d *sessionController, requested, route string) (string, error) {
+	if requested == "" || registry.NormalizeModel(requested) != requested {
+		err := fmt.Errorf("session-controller: set model for workspace %q was handed the unnormalized model %q", d.workspace, requested)
+		m.logf("session-controller: model request INVARIANT VIOLATED session=%s ws=%q route=%s requested=%q: %v",
+			d.sessionID, d.workspace, route, requested, err)
+		return "", err
+	}
 	selected, err := d.client.SetModel(ctx, requested)
 	selected = registry.NormalizeModel(selected)
 	if err != nil {
 		if selected != "" {
 			m.persistObservedModel(d.sessionID, selected)
-			m.logf("session-controller: model request REJECTED session=%s ws=%q requested=%q shim_selected=%q: %v", d.sessionID, workspace, requested, selected, err)
+			m.logf("session-controller: model request REJECTED session=%s ws=%q route=%s requested=%q shim_selected=%q: %v", d.sessionID, d.workspace, route, requested, selected, err)
 			return selected, err
 		}
-		m.logf("session-controller: model request FAILED session=%s ws=%q requested=%q without a shim-selected model: %v", d.sessionID, workspace, requested, err)
+		m.logf("session-controller: model request FAILED session=%s ws=%q route=%s requested=%q without a shim-selected model: %v", d.sessionID, d.workspace, route, requested, err)
 		return "", err
 	}
 	if selected == "" {
-		return "", fmt.Errorf("session-controller: shim acknowledged model request for %q without a selected model", workspace)
+		err := fmt.Errorf("session-controller: shim acknowledged model request for %q without a selected model", d.workspace)
+		m.logf("session-controller: model request UNCONFIRMED session=%s ws=%q route=%s requested=%q: %v", d.sessionID, d.workspace, route, requested, err)
+		return "", err
 	}
-	m.logf("session-controller: model request CONFIRMED session=%s ws=%q requested=%q selected=%q", d.sessionID, workspace, requested, selected)
+	m.logf("session-controller: model request CONFIRMED session=%s ws=%q route=%s requested=%q selected=%q", d.sessionID, d.workspace, route, requested, selected)
 	m.persistObservedModel(d.sessionID, selected)
 	return selected, nil
 }
