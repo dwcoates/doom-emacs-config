@@ -1617,9 +1617,12 @@ can call finish without worrying whether a normal finish already ran."
 Doom always creates `+workspaces-main' (typically \"main\") at startup;
 the snapshot loader replaces it with the real workspace set, so this
 artifact is never useful and we tear it down to keep the tabline
-clean.  Called at load BEGIN — before the first entry is established —
-so main never occupies a tab-bar slot during the load.  Absent main,
-the function is a no-op.
+clean.  Called right after the FIRST entry has been established — not
+at load BEGIN — because `main' is the only workspace alive until then;
+killing it any earlier would leave the frame with zero workspaces.
+Naturally idempotent (guarded by `agent-repl--ws-exists-p'), so later
+entries in the same load may call it again for free.  Absent main, the
+function is a no-op.
 
 NUKE semantics (vs. a plain `+workspace/kill'): we first sweep every
 buffer that belongs to the persp via
@@ -1786,7 +1789,9 @@ the error-routing `condition-case'."
             (condition-case err
                 (progn
                   (agent-repl--establish-workspace ws dir)
-                  (agent-repl--reorder-workspace-to-front ws))
+                  (agent-repl--reorder-workspace-to-front ws)
+                  ;; A real workspace now exists — safe to nuke `main'.
+                  (agent-repl--snapshot-load-close-main))
               (error
                (agent-repl--log nil "snapshot-load: failed-restore establish err ws=%s err=%S" ws err))))
           (setq agent-repl--snapshot-load-state
@@ -1825,6 +1830,10 @@ the error-routing `condition-case'."
               (setq agent-repl--snapshot-load-state
                     (plist-put agent-repl--snapshot-load-state :loaded
                                (1+ (plist-get agent-repl--snapshot-load-state :loaded))))
+              ;; A real workspace now exists (this entry's tab was just
+              ;; created) — safe to nuke Doom's leftover startup `main'.
+              ;; No-op on later entries once main is already gone.
+              (agent-repl--snapshot-load-close-main)
               (cond
                ((agent-repl--snapshot-load-ws-ready-p ws)
                 ;; Already ready (e.g. the origin ws the user was sitting
@@ -1974,19 +1983,19 @@ gate for each live shim/store route."
           (agent-repl--log ws "snapshot-load: restored tombstone ws=%s dir=%s hidden=%s"
                             ws (plist-get plist :project-dir)
                             (if (plist-get plist :hidden-project-dir) "t" "nil"))))
-      ;; Nuke Doom's startup `main' workspace BEFORE establishing any
-      ;; entry (not at end-of-load, where it used to happen): the user
-      ;; never wants it, and killing it first keeps it from occupying a
-      ;; tab-bar slot for the whole load.  When the loader was started
-      ;; FROM main (the startup restore path), main is also the origin —
-      ;; clear `:origin' so finish doesn't try to switch back to the
-      ;; workspace we just killed and instead stays on the last-loaded
-      ;; one.
+      ;; Doom's startup `main' workspace is nuked once the FIRST entry
+      ;; has been established (see `agent-repl--snapshot-load-close-main'),
+      ;; not here at load BEGIN: `main' is the only workspace alive right
+      ;; now, and killing it before another one exists would leave the
+      ;; frame with zero workspaces.  When the loader was started FROM
+      ;; main (the startup restore path), main is also the origin — clear
+      ;; `:origin' so finish doesn't try to switch back to the workspace
+      ;; that will be killed once loading gets underway, and instead stays
+      ;; on the last-loaded one.
       (let ((main (agent-repl--ws-main-name)))
         (when (and main (equal origin-ws main))
           (agent-repl--log nil "snapshot-load: origin is startup-main=%s; clearing return target" main)
-          (setq origin-ws nil))
-        (agent-repl--snapshot-load-close-main))
+          (setq origin-ws nil)))
       (setq agent-repl--snapshot-load-state
             (list :queue queue
                   :origin origin-ws
