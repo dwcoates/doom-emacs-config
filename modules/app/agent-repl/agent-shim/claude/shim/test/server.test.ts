@@ -63,6 +63,7 @@ function harness(
       return create(AckSchema, { requestId: m.requestId });
     },
     onSetModel: async (m) => create(AckSchema, { requestId: m.requestId, selectedModel: m.model }),
+        onQuerySelectedModel: (m) => create(AckSchema, { requestId: m.requestId, selectedModel: "claude-sonnet-5" }),
     onPermissionResponse: (m) => calls.perms.push(m),
     onReplayRequest: (m) => calls.replays.push(m),
     onHealthCheck: (m) => create(HealthStatusSchema, {
@@ -614,6 +615,7 @@ describe("SessionServer vendor session rotation bounce", () => {
         onSubmitPrompt: (m): Receipt => create(AckSchema, { requestId: m.requestId }),
         onInterrupt: (m): Receipt => create(AckSchema, { requestId: m.requestId }),
         onSetModel: async (m) => create(AckSchema, { requestId: m.requestId, selectedModel: m.model }),
+        onQuerySelectedModel: (m) => create(AckSchema, { requestId: m.requestId, selectedModel: "claude-sonnet-5" }),
         onPermissionResponse: () => {},
         onReplayRequest: () => {},
         onHealthCheck: (m) => create(HealthStatusSchema, { requestId: m.requestId, healthy: true, component: "test-shim" }),
