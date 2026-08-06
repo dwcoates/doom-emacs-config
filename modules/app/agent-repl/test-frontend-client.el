@@ -5,8 +5,9 @@
 ;; Tests for the daemon session client.  Emacs speaks no HTTP to the
 ;; daemon: session CRUD travels as UDS commands and every read comes off
 ;; pushed frames, so the boundaries shadowed here are
-;; `agent-repl--uds-send-command' / `--uds-track-command' /
-;; `--uds-connected-p' — no real socket ever opens.
+;; `agent-repl--uds-send-command' / `--uds-connected-p' — no real socket
+;; ever opens.  The send is also where a command's ack callbacks are
+;; registered, so shadowing it shadows tracking too.
 ;;
 ;; Run with:
 ;;   emacs -batch -Q -l ert -l test-frontend-client.el -f ert-run-tests-batch-and-exit
@@ -23,7 +24,7 @@
 ;;
 ;; The session-CRUD/prompt/interrupt paths were migrated off HTTP onto the
 ;; frontend.v1 UDS command channel (S7).  These shadow that boundary
-;; (`agent-repl--uds-send-command'/`--uds-track-command') so no real socket
+;; (`agent-repl--uds-send-command') so no real socket
 ;; fires; commands accumulate in the anaphoric `uds-commands' as
 ;; \(FIELD PAYLOAD WORKSPACE) lists, newest last.
 

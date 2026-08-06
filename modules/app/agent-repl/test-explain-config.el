@@ -335,9 +335,7 @@ Each captured command is (FIELD PAYLOAD WORKSPACE), newest last."
      (ignore uds-cmds)
      (cl-letf (((symbol-function 'agent-repl--uds-send-command)
                 (lambda (field payload &optional ws &rest _)
-                  (setq uds-cmds (append uds-cmds (list (list field payload ws)))) "req"))
-               ((symbol-function 'agent-repl--uds-track-command)
-                (lambda (request-id &rest _) request-id)))
+                  (setq uds-cmds (append uds-cmds (list (list field payload ws)))) "req")))
        ,@body)))
 
 (ert-deftest agent-repl-ecfg-test-send/first-turn-carries-the-preamble ()
