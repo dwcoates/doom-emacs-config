@@ -99,7 +99,13 @@ product behind a connection, fixed at accept from the endpoint that accepted it,
 and it is the authority for the host-only frames and commands Emacs alone may
 see.
 
-- `/sessions/{id}/stream` — `ClientKindGUIStream`, the rendering webview.
+- `/workspace-stream?workspace=<dir>` — `ClientKindGUIStream`, the rendering
+  webview addressed by workspace. `WorkspaceScopeFromQuery` (scopequery.go)
+  derives its `Scope` and admits only a workspace the daemon holds state for;
+  every other outcome is a typed `*ScopeRefusal` and the socket is never
+  upgraded, because an unscoped connection carries every workspace's frames.
+- `/sessions/{id}/stream` — `ClientKindGUIStream`, the rendering webview
+  addressed by one session.
 - the frontend UDS — `ClientKindHost`, the Emacs tab bar.
 - `/frontend` — `ClientKindGUIBootstrap`, the webapp's short-lived bootstrap
   socket, which creates a session and closes.
