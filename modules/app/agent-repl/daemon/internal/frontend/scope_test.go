@@ -28,6 +28,31 @@ func TestScopeRequiresExactAgentSessionForControlState(t *testing.T) {
 	}
 }
 
+func TestWorkspaceAddressedScopeRoutesEverySessionByWorkspace(t *testing.T) {
+	// Arrange — a workspace-addressed connection holds no session id, so a
+	// frame's own session id is not a key it can be matched against and the
+	// workspace decides alone.
+	sc := Scope{Workspace: "/w"}
+	// Act / Assert.
+	cases := []struct {
+		name    string
+		sid, ws string
+		want    bool
+	}{
+		{"session-bearing frame for this workspace", "s1", "/w", true},
+		{"a later session for this workspace", "s2", "/w", true},
+		{"session-bearing frame for another workspace", "s1", "/other", false},
+		{"sessionless frame for this workspace", "", "/w", true},
+		{"sessionless frame for another workspace", "", "/other", false},
+		{"frame naming no workspace at all", "s1", "", false},
+	}
+	for _, c := range cases {
+		if got := sc.matchesAgentSession(c.sid, c.ws); got != c.want {
+			t.Errorf("%s: matchesAgentSession(%q,%q) = %v, want %v", c.name, c.sid, c.ws, got, c.want)
+		}
+	}
+}
+
 func TestScopeFrameDropsHistoricalSameWorkspaceSessionView(t *testing.T) {
 	// Arrange — terminal records remain in snapshots and legitimately share
 	// the cwd with their successor. They must not rebind the successor's page.
