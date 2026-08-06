@@ -7,17 +7,21 @@ import {
   ToolPermissionResult,
 } from "../src/uds/control.js";
 import {
+  Ack,
   AckSchema,
   InterruptOutcome,
   InterruptSchema,
+  Nack,
   NackSchema,
   PermissionDecision,
   PermissionRequest,
   PermissionResponseSchema,
   PromptOrigin,
+  QuerySelectedModelSchema,
   SetModelSchema,
   SubmitPromptSchema,
 } from "../src/uds/proto.js";
+import { SYNTHETIC_MODEL } from "../src/model.js";
 
 interface Recorder {
   target: SdkControlTarget;
@@ -25,6 +29,12 @@ interface Recorder {
   interrupts: Array<{ requestId: string }>;
   models: Array<{ requestId: string; model: string }>;
   throwOnPrompt?: string;
+  /**
+   * What the target reports as its live selection, and the only way a test can
+   * drive the two answers a read has: a real model, or the empty "this session
+   * has never observed one" that must NACK rather than Ack emptily.
+   */
+  selected: { value: string; throws?: string };
 }
 
 /**
@@ -41,11 +51,13 @@ function recorder(
   const prompts: Recorder["prompts"] = [];
   const interrupts: Recorder["interrupts"] = [];
   const models: Recorder["models"] = [];
+  const selected: Recorder["selected"] = { value: "claude-sonnet-5" };
   return {
     prompts,
     interrupts,
     models,
     throwOnPrompt,
+    selected,
     target: {
       submitPrompt: async (input) => {
         if (throwOnPrompt) throw new Error(throwOnPrompt);
@@ -59,6 +71,10 @@ function recorder(
       setModel: async (input) => {
         models.push(input);
         return input.model;
+      },
+      selectedModel: () => {
+        if (selected.throws !== undefined) throw new Error(selected.throws);
+        return selected.value;
       },
     },
   };
@@ -637,5 +653,71 @@ describe("ControlDispatch.resendPending", () => {
       request_id: "req-1",
       message: "permission request re-send failed: socket gone",
     });
+  });
+});
+
+describe("ControlDispatch.handleQuerySelectedModel", () => {
+  it("answers with the model the session is running", () => {
+    // Arrange — the read exists so the daemon does not have to wait for the
+    // next submit's system:init to learn what a bare `/model` settled on.
+    const rec = recorder();
+    rec.selected.value = "claude-opus-5";
+
+    // Act.
+    const receipt = dispatch(rec, []).handleQuerySelectedModel(
+      create(QuerySelectedModelSchema, { requestId: "q1" }),
+    );
+
+    // Assert.
+    expect(receipt.$typeName).toBe("agentshim.core.v1.Ack");
+    expect((receipt as Ack).selectedModel).toBe("claude-opus-5");
+  });
+
+  it("normalizes the synthetic marker away and then refuses", () => {
+    // Arrange — the marker is not a model, so reporting it would hand the
+    // daemon a value nothing can be spawned under.
+    const rec = recorder();
+    rec.selected.value = SYNTHETIC_MODEL;
+
+    // Act.
+    const receipt = dispatch(rec, []).handleQuerySelectedModel(
+      create(QuerySelectedModelSchema, { requestId: "q1" }),
+    );
+
+    // Assert.
+    expect(receipt.$typeName).toBe("agentshim.core.v1.Nack");
+    expect((receipt as Nack).reason).toMatch(/has not observed a real model/);
+  });
+
+  it("NACKs rather than acking an empty selection", () => {
+    // Arrange — an Ack carrying no model is indistinguishable from a confirmed
+    // absence, and the daemon would have to guess which it was. The whole
+    // point of the read is that what it commits was verified.
+    const rec = recorder();
+    rec.selected.value = "";
+
+    // Act.
+    const receipt = dispatch(rec, []).handleQuerySelectedModel(
+      create(QuerySelectedModelSchema, { requestId: "q1" }),
+    );
+
+    // Assert.
+    expect(receipt.$typeName).toBe("agentshim.core.v1.Nack");
+  });
+
+  it("NACKs when the target throws instead of answering", () => {
+    // Arrange — a read that cannot be served is a failure the daemon surfaces,
+    // never a picker left naming a model nobody verified.
+    const rec = recorder();
+    rec.selected.throws = "the SDK query does not exist yet";
+
+    // Act.
+    const receipt = dispatch(rec, []).handleQuerySelectedModel(
+      create(QuerySelectedModelSchema, { requestId: "q1" }),
+    );
+
+    // Assert.
+    expect(receipt.$typeName).toBe("agentshim.core.v1.Nack");
+    expect((receipt as Nack).reason).toMatch(/does not exist yet/);
   });
 });

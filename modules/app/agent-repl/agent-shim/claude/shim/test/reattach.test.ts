@@ -100,6 +100,7 @@ describe("daemon reattach with from_seq continuation", () => {
         onSubmitPrompt: (m): Receipt => create(AckSchema, { requestId: m.requestId }),
         onInterrupt: (m): Receipt => create(AckSchema, { requestId: m.requestId }),
         onSetModel: async (m) => create(AckSchema, { requestId: m.requestId, selectedModel: m.model }),
+        onQuerySelectedModel: (m) => create(AckSchema, { requestId: m.requestId, selectedModel: "claude-sonnet-5" }),
         onPermissionResponse: () => {},
         onReplayRequest: () => {},
         onHealthCheck: (m) => create(HealthStatusSchema, {
