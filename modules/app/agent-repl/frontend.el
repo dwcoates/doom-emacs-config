@@ -716,53 +716,42 @@ webview OURS never drift apart:
                         name err))))
   buf)
 
-(defun agent-repl--frontend-ensure-webview-buffer (ws session-id url)
-  "Return a live webview buffer for WS attached to SESSION-ID at URL.
-Reuses the recorded `:frontend-buffer' only while it is live AND still
-bound to SESSION-ID (`:frontend-buffer-session-id'); a session change
-kills the stale webview and mounts a fresh one, since an xwidget
-session cannot be retargeted reliably from outside.  The fresh buffer
-is handed to `agent-repl--frontend-adopt-webview-buffer', which pins its
-name, drops the browser header-line, and arms the copy chords.
+(defun agent-repl--frontend-ensure-webview-buffer (ws url)
+  "Return a live webview buffer for WS at URL.
+Reuses the recorded `:frontend-buffer' while it is live.  WS's webview
+URL addresses the WORKSPACE, so it names the same thing for as long as
+the workspace exists and a live buffer never needs retargeting — which
+is fortunate, because an xwidget session cannot be retargeted reliably
+from outside.  A freshly mounted buffer is handed to
+`agent-repl--frontend-adopt-webview-buffer', which pins its name, drops
+the browser header-line, and arms the copy chords.
 
 Whichever buffer is returned — reused or freshly mounted — its
 `default-directory' is realigned to WS's project root via
 `agent-repl--align-buffer-to-ws-dir', so `SPC .' from the webview window
 resolves against the worktree the REPL is attached to rather than the
 foreign directory the xwidget session inherited at creation."
-  ;; This is the one rendering choke point: every initial mount, sync, and
-  ;; remount arrives here.
+  ;; This is the one rendering choke point: every initial mount and remount
+  ;; arrives here.
   ;;
-  ;; NO HEALTH PROBE.  This used to poll session health before mounting,
-  ;; because `createSession' acked as soon as a spawn was issued and the mount
-  ;; had no other way to know the shim was up.  The daemon now acks the create
-  ;; only once the session is ESTABLISHED — its shim answered a health probe
-  ;; healthy over the fully wired connection — so by the time a session id
-  ;; reaches this function it is usable, and a probe here could only re-ask a
-  ;; question already answered (and lose the race it kept losing).
-  (let ((existing (agent-repl--ws-get ws :frontend-buffer))
-        (bound-to (agent-repl--ws-get ws :frontend-buffer-session-id)))
-    (agent-repl--log ws "ensure-webview: session=%s existing-live=%s bound-session=%s"
-                     session-id (buffer-live-p existing) bound-to))
+  ;; NO HEALTH PROBE.  A mount used to poll session health first, because the
+  ;; establishment command acked as soon as a spawn was issued and the mount
+  ;; had no other way to know the shim was up.  The daemon acks only once the
+  ;; session is ESTABLISHED — its shim answered a health probe healthy over
+  ;; the fully wired connection — so a probe here could only re-ask a question
+  ;; already answered (and lose the race it kept losing).
   (let* ((existing (agent-repl--ws-get ws :frontend-buffer))
-         (bound-to (agent-repl--ws-get ws :frontend-buffer-session-id))
-         (buf (if (and (buffer-live-p existing) (equal bound-to session-id))
+         (buf (if (buffer-live-p existing)
                   (progn
-                    (agent-repl--log ws "ensure-webview: outcome=reused buf=%s session=%s"
-                                     (buffer-name existing) session-id)
+                    (agent-repl--log ws "ensure-webview: outcome=reused buf=%s"
+                                     (buffer-name existing))
                     existing)
-                (progn
-                  (when (buffer-live-p existing)
-                    (agent-repl--log ws "frontend webview rebind: session %s -> %s (killing stale webview)"
-                                      bound-to session-id)
-                    (agent-repl--frontend-kill-webview existing))
-                  (let* ((buf (agent-repl--frontend-make-webview-buffer url))
-                         (name (agent-repl--frontend-webview-buffer-name ws)))
-                    (agent-repl--frontend-adopt-webview-buffer buf name)
-                    (agent-repl--ws-put ws :frontend-buffer buf)
-                    (agent-repl--ws-put ws :frontend-buffer-session-id session-id)
-                    (agent-repl--log ws "frontend webview mounted: %s -> %s" name url)
-                    buf)))))
+                (let* ((buf (agent-repl--frontend-make-webview-buffer url))
+                       (name (agent-repl--frontend-webview-buffer-name ws)))
+                  (agent-repl--frontend-adopt-webview-buffer buf name)
+                  (agent-repl--ws-put ws :frontend-buffer buf)
+                  (agent-repl--log ws "frontend webview mounted: %s -> %s" name url)
+                  buf))))
     (agent-repl--align-buffer-to-ws-dir buf ws)
     buf))
 
@@ -917,12 +906,11 @@ panel."
   (agent-repl--frontend-validate-for-ws 'gui ws)
   (agent-repl--frontend-after-ensure-session
    ws
-   (lambda (session-id)
+   (lambda ()
      (let* ((url (agent-repl--frontend-webview-url ws))
-            (buf (agent-repl--frontend-ensure-webview-buffer ws session-id url)))
+            (buf (agent-repl--frontend-ensure-webview-buffer ws url)))
        (agent-repl--frontend-display-webview ws buf)
-       (agent-repl--log ws "gui-open: outcome=displayed session=%s buf=%s"
-                        session-id buf)))
+       (agent-repl--log ws "gui-open: outcome=displayed buf=%s" buf)))
    (lambda (detail) (agent-repl--log ws "gui-open: FAILED detail=%s" detail)))
   :pending)
 
@@ -955,7 +943,7 @@ hydrated the environment with them, and the gui reads WS's
   (agent-repl--ws-set-agent-state ws :init)
   (agent-repl--frontend-after-ensure-session
    ws
-   (lambda (session-id) (agent-repl--log ws "gui-boot: outcome=session-started session=%s" session-id))
+   (lambda () (agent-repl--log ws "gui-boot: outcome=established"))
    (lambda (detail) (agent-repl--log ws "gui-boot: FAILED detail=%s" detail)))
   :pending)
 
@@ -976,42 +964,25 @@ topbar.  Omitted when the workspace has no recorded parent."
           (when-let ((parent (agent-repl--frontend-parent-ws-name ws)))
             (concat "&parent_ws=" (url-hexify-string parent)))))
 
-(defun agent-repl--frontend-sync-webview (ws session-id)
-  "Remount WS's displayed webview when bound to a session other than SESSION-ID.
-The send path heals a dead daemon session by creating a fresh one
-\(`agent-repl--frontend-after-ensure-session'); without this remount the
-displayed webview keeps rendering the DEAD session while the turn
-streams into the replacement.  No-op when no webview buffer is live
-\(panel closed — the next open mounts fresh anyway) or when the
-binding already matches."
-  (let ((buf (agent-repl--ws-get ws :frontend-buffer))
-        (bound (agent-repl--ws-get ws :frontend-buffer-session-id)))
-    (cond
-     ((not (buffer-live-p buf))
-      (agent-repl--log-verbose ws "sync-webview: skipped=no-live-webview target-session=%s" session-id))
-     ((equal bound session-id)
-      (agent-repl--log-verbose ws "sync-webview: skipped=already-bound buf=%s session=%s"
-                               (buffer-name buf) session-id))
-     (t
-      (agent-repl--log ws "sync-webview: displayed webview %s -> %s" bound session-id)
-      (let ((win (get-buffer-window buf t))
-            (new (agent-repl--frontend-ensure-webview-buffer
-                  ws session-id (agent-repl--frontend-webview-url ws))))
-        (when (window-live-p win)
-          (set-window-buffer win new)
-          (agent-repl--log ws "sync-webview: outcome=swapped old-window=%s new-buffer=%s"
-                           win (buffer-name new)))
-        (unless (window-live-p win)
-          (agent-repl--log ws "sync-webview: outcome=remounted-not-displayed new-buffer=%s"
-                           (buffer-name new))))))))
+;; THERE IS NO WEBVIEW RETARGETING.  A displayed webview used to be remounted
+;; whenever the workspace's session changed underneath it, because the mounted
+;; URL named that session and would otherwise keep rendering a dead one.  A
+;; webview URL addresses the WORKSPACE, so the workspace's session changing is
+;; something the page re-reads off the daemon's pushed views on its own live
+;; socket.  Remounting for it would throw away a rendered feed to navigate to
+;; the identical address.
+;;
+;; `agent-repl--frontend-remount-webview' below is a different operation and
+;; remains: it exists to reload a rebuilt BUNDLE, which a live page has no way
+;; to learn about.
 
 (defun agent-repl--frontend-remount-webview (ws)
   "Force WS's open webview to reload the freshly served webapp bundle.
 The daemon serves the webapp off disk (`http.FileServer'), so a rebuilt
 bundle is live the moment `bin/build-frontend.sh' finishes — but an
 already-mounted webview keeps rendering the bundle it first loaded, and
-`agent-repl--frontend-after-ensure-session' would REUSE that live buffer
-because the session is unchanged.  Kill the buffer and drop its binding
+`agent-repl--frontend-ensure-webview-buffer' would REUSE that live
+buffer.  Kill the buffer and drop its binding
 first, so the fresh mount navigates the URL clean and refetches (Vite's
 content-hashed asset names turn the refetch into a guaranteed cache
 miss).  The freshly mounted buffer is swapped back into the window that
@@ -1029,13 +1000,12 @@ current bundle anyway.  Returns the new buffer when a remount happened."
       (let ((win (get-buffer-window buf t)))
         (agent-repl--frontend-after-ensure-session
          ws
-         (lambda (session-id)
+         (lambda ()
            (let ((url (agent-repl--frontend-webview-url ws)))
              (agent-repl--frontend-kill-webview buf)
              (agent-repl--ws-put ws :frontend-buffer nil)
-             (agent-repl--ws-put ws :frontend-buffer-session-id nil)
-             (let ((new (agent-repl--frontend-ensure-webview-buffer ws session-id url)))
-               (agent-repl--log ws "remount-webview: reloaded bundle ws=%s -> %s" ws session-id)
+             (let ((new (agent-repl--frontend-ensure-webview-buffer ws url)))
+               (agent-repl--log ws "remount-webview: reloaded bundle ws=%s" ws)
                (when (window-live-p win) (set-window-buffer win new)))))
          (lambda (detail) (agent-repl--log ws "remount-webview: FAILED detail=%s" detail)))
         :pending))))
@@ -1083,10 +1053,9 @@ there is no current workspace."
     (agent-repl--log ws "force-fresh-conversation: begin")
     (agent-repl--frontend-force-fresh-session
      ws
-     (lambda (id)
-       (agent-repl--frontend-sync-webview ws id)
-       (agent-repl--log ws "force-fresh-conversation: outcome=session=%s" id)
-       (message "agent-repl: started a fresh conversation (%s)" id))
+     (lambda ()
+       (agent-repl--log ws "force-fresh-conversation: outcome=established")
+       (message "agent-repl: started a fresh conversation in %s" ws))
      (lambda (detail)
        (agent-repl--log ws "force-fresh-conversation: FAILED detail=%s" detail)))
     :pending))
@@ -1161,8 +1130,7 @@ daemon session is operational.  This is the `SPC o c' wake invariant:
 a hibernated workspace is brought up before its UI can look available."
   (agent-repl--frontend-after-ensure-session
    ws
-   (lambda (session-id)
-     (agent-repl--frontend-sync-webview ws session-id)
+   (lambda ()
      (let ((buf (agent-repl--ws-get ws :frontend-buffer)))
        (if (buffer-live-p buf)
            (agent-repl--frontend-display-webview ws buf)
@@ -1215,8 +1183,7 @@ itself survives — it is workspace furniture, not session state."
   (agent-repl--gui-hide ws)
   (agent-repl--frontend-release-workspace-session ws)
   (agent-repl--frontend-release-workspace-webview ws)
-  (agent-repl--ws-put ws :frontend-buffer nil)
-  (agent-repl--ws-put ws :frontend-buffer-session-id nil))
+  (agent-repl--ws-put ws :frontend-buffer nil))
 
 (agent-repl-register-frontend
  (agent-repl-frontend-create
@@ -1272,7 +1239,6 @@ workspace nuke path (`agent-repl-ws-del-hook')."
     (agent-repl--log ws "close-panel: killing buf=%s" (buffer-name buf))
     (agent-repl--frontend-kill-webview buf)
     (agent-repl--ws-put ws :frontend-buffer nil)
-    (agent-repl--ws-put ws :frontend-buffer-session-id nil)
     (message "agent-repl: webview closed (session kept)")))
 
 ;;;; ---- Workspace teardown -----------------------------------------------------

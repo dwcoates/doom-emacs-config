@@ -249,7 +249,9 @@ Suitable for submitPrompt/interrupt/deleteSession, which do not await."
                      "healthy continuation failed: rebind invariant")))))
 
 (ert-deftest agent-repl-test-frontend-after-ensure-session-reuses-a-live-binding ()
-  "ensure-session returns immediately and passes an operational live id onward."
+  "ensure-session reopens the workspace, then reports establishment.
+The continuation takes no arguments: what the workspace's session IS
+belongs to the daemon."
   (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s-live")
     (let (success failure)
       (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&optional _force) t))
@@ -258,13 +260,13 @@ Suitable for submitPrompt/interrupt/deleteSession, which do not await."
                 ((symbol-function 'agent-repl--frontend-after-open-workspace)
                  (lambda (_ws ok _fail) (funcall ok) :pending)))
         (should (eq :pending (agent-repl--frontend-after-ensure-session
-                              "ws1" (lambda (id) (setq success id))
+                              "ws1" (lambda () (setq success t))
                               (lambda (detail) (setq failure detail)))))
-        (should (equal success "s-live"))
+        (should success)
         (should-not failure)))))
 
 (ert-deftest agent-repl-test-frontend-after-ensure-send-skips-presentation-gate ()
-  "Send-purpose ensure delivers a live binding without opening the workspace."
+  "Send-purpose ensure reports establishment without opening the workspace."
   (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s-live")
     (let (success opened)
       (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&rest _) t))
@@ -274,22 +276,20 @@ Suitable for submitPrompt/interrupt/deleteSession, which do not await."
                 ((symbol-function 'agent-repl--frontend-after-open-workspace)
                  (lambda (&rest _) (setq opened t))))
         (agent-repl--frontend-after-ensure-session
-         "ws1" (lambda (id) (setq success id)) #'error 'send)
-        (should (equal success "s-live"))
+         "ws1" (lambda () (setq success t)) #'error 'send)
+        (should success)
         (should-not opened)))))
 
 (ert-deftest agent-repl-test-frontend-async-send-mutates-only-after-ensure-success ()
-  "Prompt dispatch, origin clearing, and webview sync follow ensure success."
+  "Prompt dispatch and origin clearing follow ensure success."
   (agent-repl-test--with-ws "ws1"
       '(:project-dir "/w" :frontend-session-id "old" :next-send-origin merge)
-    (let (ensure-success sent synced request)
+    (let (ensure-success sent request)
       (cl-letf (((symbol-function 'agent-repl--frontend-after-ensure-session)
                  (lambda (_ws ok _fail &optional purpose)
                    (should (eq purpose 'send))
                    (setq ensure-success ok)
                    :pending))
-                ((symbol-function 'agent-repl--frontend-sync-webview)
-                 (lambda (ws id) (setq synced (list ws id))))
                 ((symbol-function 'agent-repl--uds-send-command)
                  (lambda (field payload key)
                    (setq sent (list field payload key)) "req-1"))
@@ -298,8 +298,7 @@ Suitable for submitPrompt/interrupt/deleteSession, which do not await."
          "ws1" "hello" "PROMPT_ORIGIN_USER_SENT" (lambda (id) (setq request id)) #'error)
         (should-not sent)
         (should (eq (agent-repl--ws-get "ws1" :next-send-origin) 'merge))
-        (funcall ensure-success "s-new")
-        (should (equal synced '("ws1" "s-new")))
+        (funcall ensure-success)
         (should (equal sent '("submitPrompt" (:text "hello" :promptOrigin "PROMPT_ORIGIN_USER_SENT") "/w")))
         (should (equal request "req-1"))
         (should-not (agent-repl--ws-get "ws1" :next-send-origin))))))
@@ -331,10 +330,10 @@ Suitable for submitPrompt/interrupt/deleteSession, which do not await."
                    (setq create-success ok)
                    :pending)))
         (agent-repl--frontend-force-fresh-session
-         "ws1" (lambda (id) (setq result id)) #'error)
+         "ws1" (lambda () (setq result t)) #'error)
         (should (equal (agent-repl--ws-get "ws1" :frontend-session-id) "old"))
         (funcall create-success "fresh")
-        (should (equal result "fresh"))
+        (should result)
         (should (equal (agent-repl--ws-get "ws1" :frontend-session-id) "fresh"))
         (should-not (agent-repl--ws-get "ws1" :reattach-failed))))))
 
@@ -741,20 +740,20 @@ end had merely decided to attempt."
       (should (equal agent-repl--frontend-last-boot-id "b_old"))
       (should (agent-repl--ws-get "ws1" :reattach-failed)))))
 
-(ert-deftest agent-repl-test-frontend-reattach-ws-success-remounts ()
-  "A successful reattach re-ensures, remounts, and clears counters."
+(ert-deftest agent-repl-test-frontend-reattach-ws-success-clears-counters ()
+  "A successful reattach re-ensures and clears the failure counters.
+No webview is touched: its URL addresses the workspace, so a reattach
+leaves it naming the same thing."
   ;; Arrange
   (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_gone"
                                     :reattach-failures 2 :project-dir "/w")
-    (let ((synced nil))
-       (cl-letf (((symbol-function 'agent-repl--frontend-after-ensure-session)
-                  (lambda (_ws ok _fail) (funcall ok "s_new") :ready))
-                ((symbol-function 'agent-repl--frontend-sync-webview)
-                 (lambda (ws id) (setq synced (list ws id)))))
+    (let ((ensured nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-after-ensure-session)
+                 (lambda (ws ok _fail) (setq ensured ws) (funcall ok) :ready)))
         ;; Act
         (agent-repl--frontend-reattach-ws "ws1" "s_gone")
         ;; Assert
-        (should (equal synced '("ws1" "s_new")))
+        (should (equal ensured "ws1"))
         (should-not (agent-repl--ws-get "ws1" :reattach-failures))))))
 
 (ert-deftest agent-repl-test-frontend-reattach-ws-failure-restores-binding ()
