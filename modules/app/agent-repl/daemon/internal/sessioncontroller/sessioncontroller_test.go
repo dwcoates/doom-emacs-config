@@ -214,6 +214,19 @@ type fakeClient struct {
 	// itself. One-shot rather than sticky so a test can fail one submit and
 	// still observe what the failure released reaching the shim afterwards.
 	submitErrOnce error
+	// setModels records every deliberate model request the daemon made, which
+	// is how a test tells a `/model <name>` that was PERFORMED from one that
+	// was forwarded to the CLI as prompt text.
+	setModels []string
+	// setModelSelected, when non-empty, is the model the fake shim reports as
+	// selected regardless of what was requested — the real shim's answer is
+	// its own post-operation state, never an echo, and a test needs the two to
+	// differ to prove the daemon commits the CONFIRMED value.
+	setModelSelected string
+	// setModelErr, when non-nil, fails every SetModel. Paired with
+	// setModelSelected it is the shim's REJECTION, which carries the live
+	// selection alongside the refusal.
+	setModelErr error
 }
 
 type fakeFileDiagnosticPersister struct{}
@@ -325,7 +338,34 @@ func (c *fakeClient) Interrupt(_ context.Context, originRequestID string) (corev
 	}
 	return outcome, nil
 }
-func (c *fakeClient) SetModel(_ context.Context, model string) (string, error) { return model, nil }
+// SetModel records the deliberate model requests the daemon made and answers
+// with the model the fake shim "selected".
+//
+// Recording is what lets a test prove the `/model <name>` slash form reaches
+// the SAME shim operation the topbar picker reaches, rather than being
+// forwarded to the CLI as prompt text.
+func (c *fakeClient) SetModel(_ context.Context, model string) (string, error) {
+	c.mu.Lock()
+	c.setModels = append(c.setModels, model)
+	selected, err := c.setModelSelected, c.setModelErr
+	c.mu.Unlock()
+	notifyTestActivity()
+	if err != nil {
+		return selected, err
+	}
+	if selected != "" {
+		return selected, nil
+	}
+	return model, nil
+}
+
+// setModelRequests returns the models the daemon asked the shim to select, in
+// request order.
+func (c *fakeClient) setModelRequests() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.setModels...)
+}
 
 func TestManagerSetModelRejectsSyntheticBeforeSessionLookup(t *testing.T) {
 	// A zero Manager has no locator or shim; reaching either would panic. The

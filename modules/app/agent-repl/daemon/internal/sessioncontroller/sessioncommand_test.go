@@ -1,6 +1,7 @@
 package sessioncontroller
 
 import (
+	"errors"
 	"testing"
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
@@ -37,6 +38,11 @@ func TestLookupSessionCommand(t *testing.T) {
 		name string
 		text string
 		want frontendv1.SessionCommand
+		// wantArg is the argument the reading must carry out. It is the whole
+		// input to the operation `/model <name>` now PERFORMS rather than
+		// forwards, so losing it here would put the model change back out of
+		// the daemon's reach.
+		wantArg string
 	}{
 		{
 			name: "the bare model command",
@@ -51,15 +57,17 @@ func TestLookupSessionCommand(t *testing.T) {
 		},
 		{
 			// `/model <name>` is the command's documented argument form.
-			name: "a command that takes an argument, with one",
-			text: "/model opus",
-			want: frontendv1.SessionCommand_SESSION_COMMAND_MODEL,
+			name:    "a command that takes an argument, with one",
+			text:    "/model opus",
+			want:    frontendv1.SessionCommand_SESSION_COMMAND_MODEL,
+			wantArg: "opus",
 		},
 		{
 			// `/compact <instructions>` steers the summary.
-			name: "a compaction with instructions",
-			text: "/compact focus on the parser",
-			want: frontendv1.SessionCommand_SESSION_COMMAND_COMPACT,
+			name:    "a compaction with instructions",
+			text:    "/compact focus on the parser",
+			want:    frontendv1.SessionCommand_SESSION_COMMAND_COMPACT,
+			wantArg: "focus on the parser",
 		},
 		{
 			// A command that takes NO argument is the whole prompt or nothing:
@@ -97,11 +105,14 @@ func TestLookupSessionCommand(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange / Act.
-			got := lookupSessionCommand(tc.text)
+			got, arg := lookupSessionCommand(tc.text)
 
 			// Assert.
 			if got != tc.want {
 				t.Fatalf("lookupSessionCommand(%q) = %s, want %s", tc.text, got, tc.want)
+			}
+			if arg != tc.wantArg {
+				t.Fatalf("lookupSessionCommand(%q) argument = %q, want %q", tc.text, arg, tc.wantArg)
 			}
 		})
 	}
@@ -192,8 +203,100 @@ func TestSubmittingAModelCommandPushesItsInvocationItem(t *testing.T) {
 	}
 }
 
-func TestSubmittingAModelCommandStillForwardsItToTheShim(t *testing.T) {
-	// Arrange — withholding the BUBBLE must not withhold the COMMAND.
+func TestSubmittingTheBareModelCommandStillForwardsItToTheShim(t *testing.T) {
+	// Arrange — withholding the BUBBLE must not withhold the COMMAND. The bare
+	// form opens the CLI's own interactive picker, which the daemon cannot
+	// stand in for, so it is still forwarded verbatim.
+	h := newQueueHarness(t, nil)
+
+	// Act.
+	if err := h.submitAs("r1", "/model"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	// Assert.
+	got := h.client.promptTexts()
+	if len(got) != 1 || got[0] != "/model" {
+		t.Fatalf("forwarded %q, want the bare /model verbatim", got)
+	}
+}
+
+// THE GUARANTEE (C1): a `/model <name>` submit changes the model through the
+// SAME shim operation the topbar picker uses, so the daemon's record of what
+// the session is running is written at the moment of the command.
+//
+// It used to be forwarded as prompt text: the CLI changed its own model, the
+// daemon learned nothing, and the picker went on naming the previous model
+// until some later submit's SystemInit corrected it.
+func TestSubmittingANamedModelCommandPerformsTheModelChangeInsteadOfForwardingIt(t *testing.T) {
+	// Arrange.
+	h := newQueueHarness(t, nil)
+
+	// Act.
+	if err := h.submitAs("r1", "/model opus"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	// Assert — the shim was asked to SELECT the model...
+	if got := h.client.setModelRequests(); len(got) != 1 || got[0] != "opus" {
+		t.Fatalf("set-model requests = %q, want exactly [opus]", got)
+	}
+	// ...and nothing was forwarded as a prompt, so the CLI has no second
+	// codepath through which to change the model behind the daemon's back.
+	if got := h.client.promptTexts(); len(got) != 0 {
+		t.Fatalf("forwarded %q, want nothing forwarded for a named model command", got)
+	}
+}
+
+// THE RECORD FOLLOWS THE SHIM'S CONFIRMATION, not the requested name. The two
+// are deliberately different here: the shim's answer is its own post-operation
+// state, and committing the request instead would record a selection nobody
+// confirmed.
+func TestANamedModelCommandPersistsTheShimConfirmedSelection(t *testing.T) {
+	// Arrange.
+	h := newQueueHarness(t, nil)
+	h.client.mu.Lock()
+	h.client.setModelSelected = "claude-opus-5"
+	h.client.mu.Unlock()
+
+	// Act.
+	if err := h.submitAs("r1", "/model opus"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	// Assert.
+	if got := h.observedModels(); len(got) != 1 || got[0] != "claude-opus-5" {
+		t.Fatalf("observed models = %q, want the shim-confirmed selection", got)
+	}
+}
+
+// A named model command that the shim REFUSES fails the frontend command and
+// draws no invocation item: a chip reading `/model` over a session whose model
+// did not change is the one thing in the feed claiming the command took effect.
+func TestARefusedNamedModelCommandFailsAndDrawsNoInvocationItem(t *testing.T) {
+	// Arrange.
+	h := newQueueHarness(t, nil)
+	h.client.mu.Lock()
+	h.client.setModelErr = errors.New("shim refused the model")
+	h.client.mu.Unlock()
+
+	// Act.
+	err := h.submitAs("r1", "/model nonesuch")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("a refused model change must fail the submit, not be swallowed")
+	}
+	if items := h.commandItems(); len(items) != 0 {
+		t.Fatalf("pushed %d session-command item(s), want none for a change that did not happen", len(items))
+	}
+}
+
+// A named model command claims NO turn. No prompt is submitted, so the shim
+// runs no turn and no TurnEnded is ever coming — a claimed edge would leave the
+// workspace `thinking` forever and queue every later prompt behind it.
+func TestANamedModelCommandClaimsNoTurn(t *testing.T) {
+	// Arrange.
 	h := newQueueHarness(t, nil)
 
 	// Act.
@@ -202,9 +305,8 @@ func TestSubmittingAModelCommandStillForwardsItToTheShim(t *testing.T) {
 	}
 
 	// Assert.
-	got := h.client.promptTexts()
-	if len(got) != 1 || got[0] != "/model opus" {
-		t.Fatalf("forwarded %q, want the /model verbatim", got)
+	if h.turnActiveFlag() {
+		t.Error("a performed model change claimed a turn that no TurnEnded can ever close")
 	}
 }
 
