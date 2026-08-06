@@ -54,6 +54,7 @@ package corev1
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	descriptorpb "google.golang.org/protobuf/types/descriptorpb"
 	anypb "google.golang.org/protobuf/types/known/anypb"
 	structpb "google.golang.org/protobuf/types/known/structpb"
 	reflect "reflect"
@@ -583,6 +584,69 @@ func (ContextCompactTrigger) EnumDescriptor() ([]byte, []int) {
 	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{7}
 }
 
+// The closed set of model names the CLI reports that are NOT model ids.
+//
+// The CLI answers `<synthetic>` whenever it is not running a real nameable
+// model.  Treated as an id it is corrosive twice over: it poisons the live
+// registry record with a value nothing can ever be spawned under, and it
+// reaches the webapp picker as a selectable option that cannot be selected.
+// So a marker must be RECOGNIZED before a reported model is committed, and
+// recognizing it requires the literal.
+//
+// That literal was re-declared SIX times — in Go, in the shim, and in three
+// inline webapp comparisons — kept aligned by review alone, which is exactly
+// the arrangement where one corrected spelling leaves five stale ones and the
+// marker silently becomes an id again on the surfaces that missed the change.
+// This enum is now the one definition, and the option below is how the other
+// five sites read it instead of writing it.
+type ModelMarker int32
+
+const (
+	ModelMarker_MODEL_MARKER_UNSPECIFIED ModelMarker = 0
+	// Not a model: the CLI's own stand-in for "no real nameable model is in
+	// play".  Never a spawnable id, never an offerable picker entry.
+	ModelMarker_MODEL_MARKER_SYNTHETIC ModelMarker = 1
+)
+
+// Enum value maps for ModelMarker.
+var (
+	ModelMarker_name = map[int32]string{
+		0: "MODEL_MARKER_UNSPECIFIED",
+		1: "MODEL_MARKER_SYNTHETIC",
+	}
+	ModelMarker_value = map[string]int32{
+		"MODEL_MARKER_UNSPECIFIED": 0,
+		"MODEL_MARKER_SYNTHETIC":   1,
+	}
+)
+
+func (x ModelMarker) Enum() *ModelMarker {
+	p := new(ModelMarker)
+	*p = x
+	return p
+}
+
+func (x ModelMarker) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ModelMarker) Descriptor() protoreflect.EnumDescriptor {
+	return file_agentshim_core_v1_core_proto_enumTypes[8].Descriptor()
+}
+
+func (ModelMarker) Type() protoreflect.EnumType {
+	return &file_agentshim_core_v1_core_proto_enumTypes[8]
+}
+
+func (x ModelMarker) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ModelMarker.Descriptor instead.
+func (ModelMarker) EnumDescriptor() ([]byte, []int) {
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{8}
+}
+
 // The three-valued outcome of an Interrupt, decided by the SHIM.
 //
 // The shim owns turn lifecycle (it counts prompts in and results out) and
@@ -639,11 +703,11 @@ func (x InterruptOutcome) String() string {
 }
 
 func (InterruptOutcome) Descriptor() protoreflect.EnumDescriptor {
-	return file_agentshim_core_v1_core_proto_enumTypes[8].Descriptor()
+	return file_agentshim_core_v1_core_proto_enumTypes[9].Descriptor()
 }
 
 func (InterruptOutcome) Type() protoreflect.EnumType {
-	return &file_agentshim_core_v1_core_proto_enumTypes[8]
+	return &file_agentshim_core_v1_core_proto_enumTypes[9]
 }
 
 func (x InterruptOutcome) Number() protoreflect.EnumNumber {
@@ -652,7 +716,7 @@ func (x InterruptOutcome) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use InterruptOutcome.Descriptor instead.
 func (InterruptOutcome) EnumDescriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{8}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{9}
 }
 
 // Runtime that originated a FilePlaneDiagnostic. File-plane diagnostics come
@@ -687,11 +751,11 @@ func (x DiagnosticSourceRuntime) String() string {
 }
 
 func (DiagnosticSourceRuntime) Descriptor() protoreflect.EnumDescriptor {
-	return file_agentshim_core_v1_core_proto_enumTypes[9].Descriptor()
+	return file_agentshim_core_v1_core_proto_enumTypes[10].Descriptor()
 }
 
 func (DiagnosticSourceRuntime) Type() protoreflect.EnumType {
-	return &file_agentshim_core_v1_core_proto_enumTypes[9]
+	return &file_agentshim_core_v1_core_proto_enumTypes[10]
 }
 
 func (x DiagnosticSourceRuntime) Number() protoreflect.EnumNumber {
@@ -700,7 +764,7 @@ func (x DiagnosticSourceRuntime) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use DiagnosticSourceRuntime.Descriptor instead.
 func (DiagnosticSourceRuntime) EnumDescriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{9}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{10}
 }
 
 type PermissionItem_Resolution int32
@@ -742,11 +806,11 @@ func (x PermissionItem_Resolution) String() string {
 }
 
 func (PermissionItem_Resolution) Descriptor() protoreflect.EnumDescriptor {
-	return file_agentshim_core_v1_core_proto_enumTypes[10].Descriptor()
+	return file_agentshim_core_v1_core_proto_enumTypes[11].Descriptor()
 }
 
 func (PermissionItem_Resolution) Type() protoreflect.EnumType {
-	return &file_agentshim_core_v1_core_proto_enumTypes[10]
+	return &file_agentshim_core_v1_core_proto_enumTypes[11]
 }
 
 func (x PermissionItem_Resolution) Number() protoreflect.EnumNumber {
@@ -755,7 +819,7 @@ func (x PermissionItem_Resolution) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use PermissionItem_Resolution.Descriptor instead.
 func (PermissionItem_Resolution) EnumDescriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{59, 0}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{60, 0}
 }
 
 // Event is THE envelope every observation travels in.
@@ -4814,6 +4878,66 @@ func (x *SetModel) GetModel() string {
 	return ""
 }
 
+// Ask the shim which model the live query is CURRENTLY on.  A read, not a
+// change: nothing about the session moves as a result of this message.
+//
+// WHY A READ IS NEEDED AT ALL.  The argument-less `/model` opens the CLI's own
+// interactive picker, which the daemon cannot intercept — the selection is
+// made inside the CLI and announced nowhere the daemon is listening.  Without
+// this request the daemon learns the outcome only when some later submit
+// re-announces a SystemInit, so until the user happens to send a prompt the
+// topbar picker names the OLD model, and a hibernation landing in that window
+// respawns the session on the stale one.
+//
+// The answer rides Ack.selected_model, and deliberately not a new field: that
+// value is defined as the SHIM's own post-operation state rather than an echo
+// the daemon assembled, which is exactly what is being asked for here.  A shim
+// that cannot answer NACKs — a guessed model is the failure this whole path
+// exists to remove.
+type QuerySelectedModel struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *QuerySelectedModel) Reset() {
+	*x = QuerySelectedModel{}
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[48]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QuerySelectedModel) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QuerySelectedModel) ProtoMessage() {}
+
+func (x *QuerySelectedModel) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[48]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QuerySelectedModel.ProtoReflect.Descriptor instead.
+func (*QuerySelectedModel) Descriptor() ([]byte, []int) {
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{48}
+}
+
+func (x *QuerySelectedModel) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 // The shim's SDK-provided model menu.  This is published rather than inferred
 // by a frontend, because the live query is the only authority on selectable
 // model ids for this session/account.
@@ -4828,7 +4952,7 @@ type ModelOption struct {
 
 func (x *ModelOption) Reset() {
 	*x = ModelOption{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[48]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4840,7 +4964,7 @@ func (x *ModelOption) String() string {
 func (*ModelOption) ProtoMessage() {}
 
 func (x *ModelOption) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[48]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4853,7 +4977,7 @@ func (x *ModelOption) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelOption.ProtoReflect.Descriptor instead.
 func (*ModelOption) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{48}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *ModelOption) GetValue() string {
@@ -4887,7 +5011,7 @@ type ModelCatalog struct {
 
 func (x *ModelCatalog) Reset() {
 	*x = ModelCatalog{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[49]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4899,7 +5023,7 @@ func (x *ModelCatalog) String() string {
 func (*ModelCatalog) ProtoMessage() {}
 
 func (x *ModelCatalog) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[49]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4912,7 +5036,7 @@ func (x *ModelCatalog) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelCatalog.ProtoReflect.Descriptor instead.
 func (*ModelCatalog) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{49}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *ModelCatalog) GetSessionId() string {
@@ -4942,7 +5066,7 @@ type Interrupt struct {
 
 func (x *Interrupt) Reset() {
 	*x = Interrupt{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[50]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4954,7 +5078,7 @@ func (x *Interrupt) String() string {
 func (*Interrupt) ProtoMessage() {}
 
 func (x *Interrupt) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[50]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4967,7 +5091,7 @@ func (x *Interrupt) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Interrupt.ProtoReflect.Descriptor instead.
 func (*Interrupt) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{50}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *Interrupt) GetRequestId() string {
@@ -4983,8 +5107,11 @@ type Ack struct {
 	// Set only on an Interrupt's ack; UNSPECIFIED on every other command,
 	// whose success is unqualified.
 	InterruptOutcome InterruptOutcome `protobuf:"varint,2,opt,name=interrupt_outcome,json=interruptOutcome,proto3,enum=agentshim.core.v1.InterruptOutcome" json:"interrupt_outcome,omitempty"`
-	// Set only on a SetModel receipt.  This is the shim's own post-operation
-	// selected model, not an echo assembled by the daemon.
+	// Set on the receipt of EITHER model command — a SetModel (the model after
+	// the change) or a QuerySelectedModel (the model with nothing changed).  One
+	// field for both because both answer the same question and both answer it
+	// with the same authority: the shim's own post-operation selected model, not
+	// an echo assembled by the daemon.  UNSET on every other command's ack.
 	SelectedModel string `protobuf:"bytes,3,opt,name=selected_model,json=selectedModel,proto3" json:"selected_model,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -4992,7 +5119,7 @@ type Ack struct {
 
 func (x *Ack) Reset() {
 	*x = Ack{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[51]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5004,7 +5131,7 @@ func (x *Ack) String() string {
 func (*Ack) ProtoMessage() {}
 
 func (x *Ack) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[51]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5017,7 +5144,7 @@ func (x *Ack) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Ack.ProtoReflect.Descriptor instead.
 func (*Ack) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{51}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *Ack) GetRequestId() string {
@@ -5054,7 +5181,7 @@ type Nack struct {
 
 func (x *Nack) Reset() {
 	*x = Nack{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[52]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5066,7 +5193,7 @@ func (x *Nack) String() string {
 func (*Nack) ProtoMessage() {}
 
 func (x *Nack) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[52]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5079,7 +5206,7 @@ func (x *Nack) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Nack.ProtoReflect.Descriptor instead.
 func (*Nack) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{52}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *Nack) GetRequestId() string {
@@ -5118,7 +5245,7 @@ type Subscribe struct {
 
 func (x *Subscribe) Reset() {
 	*x = Subscribe{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[53]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5130,7 +5257,7 @@ func (x *Subscribe) String() string {
 func (*Subscribe) ProtoMessage() {}
 
 func (x *Subscribe) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[53]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5143,7 +5270,7 @@ func (x *Subscribe) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Subscribe.ProtoReflect.Descriptor instead.
 func (*Subscribe) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{53}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{54}
 }
 
 func (x *Subscribe) GetSessionId() string {
@@ -5201,7 +5328,7 @@ type ReplayRequest struct {
 
 func (x *ReplayRequest) Reset() {
 	*x = ReplayRequest{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[54]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5213,7 +5340,7 @@ func (x *ReplayRequest) String() string {
 func (*ReplayRequest) ProtoMessage() {}
 
 func (x *ReplayRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[54]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5226,7 +5353,7 @@ func (x *ReplayRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplayRequest.ProtoReflect.Descriptor instead.
 func (*ReplayRequest) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{54}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{55}
 }
 
 func (x *ReplayRequest) GetRequestId() string {
@@ -5282,7 +5409,7 @@ type ReplayEvent struct {
 
 func (x *ReplayEvent) Reset() {
 	*x = ReplayEvent{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[55]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[56]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5294,7 +5421,7 @@ func (x *ReplayEvent) String() string {
 func (*ReplayEvent) ProtoMessage() {}
 
 func (x *ReplayEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[55]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[56]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5307,7 +5434,7 @@ func (x *ReplayEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplayEvent.ProtoReflect.Descriptor instead.
 func (*ReplayEvent) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{55}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{56}
 }
 
 func (x *ReplayEvent) GetRequestId() string {
@@ -5345,7 +5472,7 @@ type ReplayDone struct {
 
 func (x *ReplayDone) Reset() {
 	*x = ReplayDone{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[56]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[57]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5357,7 +5484,7 @@ func (x *ReplayDone) String() string {
 func (*ReplayDone) ProtoMessage() {}
 
 func (x *ReplayDone) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[56]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[57]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5370,7 +5497,7 @@ func (x *ReplayDone) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplayDone.ProtoReflect.Descriptor instead.
 func (*ReplayDone) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{56}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{57}
 }
 
 func (x *ReplayDone) GetRequestId() string {
@@ -5413,7 +5540,7 @@ type PermissionRequest struct {
 
 func (x *PermissionRequest) Reset() {
 	*x = PermissionRequest{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[57]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5425,7 +5552,7 @@ func (x *PermissionRequest) String() string {
 func (*PermissionRequest) ProtoMessage() {}
 
 func (x *PermissionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[57]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5438,7 +5565,7 @@ func (x *PermissionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PermissionRequest.ProtoReflect.Descriptor instead.
 func (*PermissionRequest) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{57}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{58}
 }
 
 func (x *PermissionRequest) GetRequestId() string {
@@ -5474,7 +5601,7 @@ type PermissionResponse struct {
 
 func (x *PermissionResponse) Reset() {
 	*x = PermissionResponse{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[58]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[59]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5486,7 +5613,7 @@ func (x *PermissionResponse) String() string {
 func (*PermissionResponse) ProtoMessage() {}
 
 func (x *PermissionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[58]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[59]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5499,7 +5626,7 @@ func (x *PermissionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PermissionResponse.ProtoReflect.Descriptor instead.
 func (*PermissionResponse) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{58}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{59}
 }
 
 func (x *PermissionResponse) GetRequestId() string {
@@ -5544,7 +5671,7 @@ type PermissionItem struct {
 
 func (x *PermissionItem) Reset() {
 	*x = PermissionItem{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[59]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[60]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5556,7 +5683,7 @@ func (x *PermissionItem) String() string {
 func (*PermissionItem) ProtoMessage() {}
 
 func (x *PermissionItem) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[59]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[60]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5569,7 +5696,7 @@ func (x *PermissionItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PermissionItem.ProtoReflect.Descriptor instead.
 func (*PermissionItem) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{59}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{60}
 }
 
 func (x *PermissionItem) GetRequest() *PermissionRequest {
@@ -5602,7 +5729,7 @@ type Heartbeat struct {
 
 func (x *Heartbeat) Reset() {
 	*x = Heartbeat{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[60]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[61]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5614,7 +5741,7 @@ func (x *Heartbeat) String() string {
 func (*Heartbeat) ProtoMessage() {}
 
 func (x *Heartbeat) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[60]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[61]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5627,7 +5754,7 @@ func (x *Heartbeat) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Heartbeat.ProtoReflect.Descriptor instead.
 func (*Heartbeat) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{60}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{61}
 }
 
 func (x *Heartbeat) GetSentAtMs() int64 {
@@ -5656,7 +5783,7 @@ type HealthCheck struct {
 
 func (x *HealthCheck) Reset() {
 	*x = HealthCheck{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[61]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[62]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5668,7 +5795,7 @@ func (x *HealthCheck) String() string {
 func (*HealthCheck) ProtoMessage() {}
 
 func (x *HealthCheck) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[61]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[62]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5681,7 +5808,7 @@ func (x *HealthCheck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthCheck.ProtoReflect.Descriptor instead.
 func (*HealthCheck) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{61}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{62}
 }
 
 func (x *HealthCheck) GetRequestId() string {
@@ -5707,7 +5834,7 @@ type HealthStatus struct {
 
 func (x *HealthStatus) Reset() {
 	*x = HealthStatus{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[62]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[63]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5719,7 +5846,7 @@ func (x *HealthStatus) String() string {
 func (*HealthStatus) ProtoMessage() {}
 
 func (x *HealthStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[62]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[63]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5732,7 +5859,7 @@ func (x *HealthStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthStatus.ProtoReflect.Descriptor instead.
 func (*HealthStatus) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{62}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{63}
 }
 
 func (x *HealthStatus) GetRequestId() string {
@@ -5775,7 +5902,7 @@ type StoreWrite struct {
 
 func (x *StoreWrite) Reset() {
 	*x = StoreWrite{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[63]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[64]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5787,7 +5914,7 @@ func (x *StoreWrite) String() string {
 func (*StoreWrite) ProtoMessage() {}
 
 func (x *StoreWrite) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[63]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[64]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5800,7 +5927,7 @@ func (x *StoreWrite) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StoreWrite.ProtoReflect.Descriptor instead.
 func (*StoreWrite) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{63}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{64}
 }
 
 func (x *StoreWrite) GetProducer() string {
@@ -5829,7 +5956,7 @@ type StoreWriteAck struct {
 
 func (x *StoreWriteAck) Reset() {
 	*x = StoreWriteAck{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[64]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[65]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5841,7 +5968,7 @@ func (x *StoreWriteAck) String() string {
 func (*StoreWriteAck) ProtoMessage() {}
 
 func (x *StoreWriteAck) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[64]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[65]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5854,7 +5981,7 @@ func (x *StoreWriteAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StoreWriteAck.ProtoReflect.Descriptor instead.
 func (*StoreWriteAck) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{64}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{65}
 }
 
 func (x *StoreWriteAck) GetAccepted() uint64 {
@@ -5898,7 +6025,7 @@ type CursorState struct {
 
 func (x *CursorState) Reset() {
 	*x = CursorState{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[65]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[66]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5910,7 +6037,7 @@ func (x *CursorState) String() string {
 func (*CursorState) ProtoMessage() {}
 
 func (x *CursorState) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[65]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[66]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5923,7 +6050,7 @@ func (x *CursorState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CursorState.ProtoReflect.Descriptor instead.
 func (*CursorState) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{65}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{66}
 }
 
 func (x *CursorState) GetFileId() string {
@@ -5965,7 +6092,7 @@ type CursorQuery struct {
 
 func (x *CursorQuery) Reset() {
 	*x = CursorQuery{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[66]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[67]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5977,7 +6104,7 @@ func (x *CursorQuery) String() string {
 func (*CursorQuery) ProtoMessage() {}
 
 func (x *CursorQuery) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[66]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[67]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5990,7 +6117,7 @@ func (x *CursorQuery) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CursorQuery.ProtoReflect.Descriptor instead.
 func (*CursorQuery) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{66}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{67}
 }
 
 func (x *CursorQuery) GetFileId() string {
@@ -6010,7 +6137,7 @@ type OpenTaskState struct {
 
 func (x *OpenTaskState) Reset() {
 	*x = OpenTaskState{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[67]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[68]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6022,7 +6149,7 @@ func (x *OpenTaskState) String() string {
 func (*OpenTaskState) ProtoMessage() {}
 
 func (x *OpenTaskState) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[67]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[68]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6035,7 +6162,7 @@ func (x *OpenTaskState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenTaskState.ProtoReflect.Descriptor instead.
 func (*OpenTaskState) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{67}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{68}
 }
 
 func (x *OpenTaskState) GetStarted() *Event {
@@ -6069,7 +6196,7 @@ type CursorList struct {
 
 func (x *CursorList) Reset() {
 	*x = CursorList{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[68]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[69]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6081,7 +6208,7 @@ func (x *CursorList) String() string {
 func (*CursorList) ProtoMessage() {}
 
 func (x *CursorList) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[68]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[69]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6094,7 +6221,7 @@ func (x *CursorList) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CursorList.ProtoReflect.Descriptor instead.
 func (*CursorList) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{68}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{69}
 }
 
 func (x *CursorList) GetCursors() []*CursorState {
@@ -6149,7 +6276,7 @@ type FilePlaneDiagnostic struct {
 
 func (x *FilePlaneDiagnostic) Reset() {
 	*x = FilePlaneDiagnostic{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[69]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[70]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6161,7 +6288,7 @@ func (x *FilePlaneDiagnostic) String() string {
 func (*FilePlaneDiagnostic) ProtoMessage() {}
 
 func (x *FilePlaneDiagnostic) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[69]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[70]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6174,7 +6301,7 @@ func (x *FilePlaneDiagnostic) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FilePlaneDiagnostic.ProtoReflect.Descriptor instead.
 func (*FilePlaneDiagnostic) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{69}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{70}
 }
 
 func (x *FilePlaneDiagnostic) GetSourceRuntime() DiagnosticSourceRuntime {
@@ -6233,11 +6360,28 @@ func (x *FilePlaneDiagnostic) GetSourcePath() string {
 	return ""
 }
 
+var file_agentshim_core_v1_core_proto_extTypes = []protoimpl.ExtensionInfo{
+	{
+		ExtendedType:  (*descriptorpb.EnumValueOptions)(nil),
+		ExtensionType: (*string)(nil),
+		Field:         60001,
+		Name:          "agentshim.core.v1.model_marker_literal",
+		Tag:           "bytes,60001,opt,name=model_marker_literal",
+		Filename:      "agentshim/core/v1/core.proto",
+	},
+}
+
+// Extension fields to descriptorpb.EnumValueOptions.
+var (
+	// optional string model_marker_literal = 60001;
+	E_ModelMarkerLiteral = &file_agentshim_core_v1_core_proto_extTypes[0]
+)
+
 var File_agentshim_core_v1_core_proto protoreflect.FileDescriptor
 
 const file_agentshim_core_v1_core_proto_rawDesc = "" +
 	"\n" +
-	"\x1cagentshim/core/v1/core.proto\x12\x11agentshim.core.v1\x1a\x19google/protobuf/any.proto\x1a\x1cgoogle/protobuf/struct.proto\"\xcd\x0e\n" +
+	"\x1cagentshim/core/v1/core.proto\x12\x11agentshim.core.v1\x1a\x19google/protobuf/any.proto\x1a google/protobuf/descriptor.proto\x1a\x1cgoogle/protobuf/struct.proto\"\xcd\x0e\n" +
 	"\x05Event\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x10\n" +
@@ -6510,7 +6654,10 @@ const file_agentshim_core_v1_core_proto_rawDesc = "" +
 	"\bSetModel\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x14\n" +
-	"\x05model\x18\x02 \x01(\tR\x05model\"h\n" +
+	"\x05model\x18\x02 \x01(\tR\x05model\"3\n" +
+	"\x12QuerySelectedModel\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\"h\n" +
 	"\vModelOption\x12\x14\n" +
 	"\x05value\x18\x01 \x01(\tR\x05value\x12!\n" +
 	"\fdisplay_name\x18\x02 \x01(\tR\vdisplayName\x12 \n" +
@@ -6691,7 +6838,10 @@ const file_agentshim_core_v1_core_proto_rawDesc = "" +
 	"\x15ContextCompactTrigger\x12'\n" +
 	"#CONTEXT_COMPACT_TRIGGER_UNSPECIFIED\x10\x00\x12\"\n" +
 	"\x1eCONTEXT_COMPACT_TRIGGER_MANUAL\x10\x01\x12 \n" +
-	"\x1cCONTEXT_COMPACT_TRIGGER_AUTO\x10\x02*\x9e\x01\n" +
+	"\x1cCONTEXT_COMPACT_TRIGGER_AUTO\x10\x02*X\n" +
+	"\vModelMarker\x12\x1c\n" +
+	"\x18MODEL_MARKER_UNSPECIFIED\x10\x00\x12+\n" +
+	"\x16MODEL_MARKER_SYNTHETIC\x10\x01\x1a\x0f\x8a\xa6\x1d\v<synthetic>*\x9e\x01\n" +
 	"\x10InterruptOutcome\x12!\n" +
 	"\x1dINTERRUPT_OUTCOME_UNSPECIFIED\x10\x00\x12!\n" +
 	"\x1dINTERRUPT_OUTCOME_INTERRUPTED\x10\x01\x12&\n" +
@@ -6699,7 +6849,8 @@ const file_agentshim_core_v1_core_proto_rawDesc = "" +
 	"\x18INTERRUPT_OUTCOME_FAILED\x10\x03*k\n" +
 	"\x17DiagnosticSourceRuntime\x12)\n" +
 	"%DIAGNOSTIC_SOURCE_RUNTIME_UNSPECIFIED\x10\x00\x12%\n" +
-	"!DIAGNOSTIC_SOURCE_RUNTIME_SIDECAR\x10\x01B*Z(agentrepl/proto/agentshim/core/v1;corev1b\x06proto3"
+	"!DIAGNOSTIC_SOURCE_RUNTIME_SIDECAR\x10\x01:U\n" +
+	"\x14model_marker_literal\x12!.google.protobuf.EnumValueOptions\x18\xe1\xd4\x03 \x01(\tR\x12modelMarkerLiteralB*Z(agentrepl/proto/agentshim/core/v1;corev1b\x06proto3"
 
 var (
 	file_agentshim_core_v1_core_proto_rawDescOnce sync.Once
@@ -6713,8 +6864,8 @@ func file_agentshim_core_v1_core_proto_rawDescGZIP() []byte {
 	return file_agentshim_core_v1_core_proto_rawDescData
 }
 
-var file_agentshim_core_v1_core_proto_enumTypes = make([]protoimpl.EnumInfo, 11)
-var file_agentshim_core_v1_core_proto_msgTypes = make([]protoimpl.MessageInfo, 70)
+var file_agentshim_core_v1_core_proto_enumTypes = make([]protoimpl.EnumInfo, 12)
+var file_agentshim_core_v1_core_proto_msgTypes = make([]protoimpl.MessageInfo, 71)
 var file_agentshim_core_v1_core_proto_goTypes = []any{
 	(Plane)(0),                               // 0: agentshim.core.v1.Plane
 	(EventClass)(0),                          // 1: agentshim.core.v1.EventClass
@@ -6724,162 +6875,166 @@ var file_agentshim_core_v1_core_proto_goTypes = []any{
 	(PermissionDecision)(0),                  // 5: agentshim.core.v1.PermissionDecision
 	(PromptOrigin)(0),                        // 6: agentshim.core.v1.PromptOrigin
 	(ContextCompactTrigger)(0),               // 7: agentshim.core.v1.ContextCompactTrigger
-	(InterruptOutcome)(0),                    // 8: agentshim.core.v1.InterruptOutcome
-	(DiagnosticSourceRuntime)(0),             // 9: agentshim.core.v1.DiagnosticSourceRuntime
-	(PermissionItem_Resolution)(0),           // 10: agentshim.core.v1.PermissionItem.Resolution
-	(*Event)(nil),                            // 11: agentshim.core.v1.Event
-	(*EventBatch)(nil),                       // 12: agentshim.core.v1.EventBatch
-	(*UnparsedEvent)(nil),                    // 13: agentshim.core.v1.UnparsedEvent
-	(*SessionStarted)(nil),                   // 14: agentshim.core.v1.SessionStarted
-	(*SessionEnded)(nil),                     // 15: agentshim.core.v1.SessionEnded
-	(*TurnStarted)(nil),                      // 16: agentshim.core.v1.TurnStarted
-	(*TurnClaimBridge)(nil),                  // 17: agentshim.core.v1.TurnClaimBridge
-	(*SessionRewound)(nil),                   // 18: agentshim.core.v1.SessionRewound
-	(*KeepAliveDiscard)(nil),                 // 19: agentshim.core.v1.KeepAliveDiscard
-	(*TurnEnded)(nil),                        // 20: agentshim.core.v1.TurnEnded
-	(*QueryLifecycle)(nil),                   // 21: agentshim.core.v1.QueryLifecycle
-	(*QueryCreated)(nil),                     // 22: agentshim.core.v1.QueryCreated
-	(*FreshQuery)(nil),                       // 23: agentshim.core.v1.FreshQuery
-	(*ResumedQuery)(nil),                     // 24: agentshim.core.v1.ResumedQuery
-	(*QueryRuntimeObserved)(nil),             // 25: agentshim.core.v1.QueryRuntimeObserved
-	(*QueryRuntimeIdentity)(nil),             // 26: agentshim.core.v1.QueryRuntimeIdentity
-	(*EvidenceFingerprint)(nil),              // 27: agentshim.core.v1.EvidenceFingerprint
-	(*FingerprintUnavailable)(nil),           // 28: agentshim.core.v1.FingerprintUnavailable
-	(*QueryTerminated)(nil),                  // 29: agentshim.core.v1.QueryTerminated
-	(*VendorSessionIdentityUnavailable)(nil), // 30: agentshim.core.v1.VendorSessionIdentityUnavailable
-	(*IntentionalQueryTermination)(nil),      // 31: agentshim.core.v1.IntentionalQueryTermination
-	(*UnexpectedQueryEof)(nil),               // 32: agentshim.core.v1.UnexpectedQueryEof
-	(*QueryIteratorFailure)(nil),             // 33: agentshim.core.v1.QueryIteratorFailure
-	(*QueryStartupFailure)(nil),              // 34: agentshim.core.v1.QueryStartupFailure
-	(*AccountUsageObservation)(nil),          // 35: agentshim.core.v1.AccountUsageObservation
-	(*TurnStartUsageBoundary)(nil),           // 36: agentshim.core.v1.TurnStartUsageBoundary
-	(*TurnEndUsageBoundary)(nil),             // 37: agentshim.core.v1.TurnEndUsageBoundary
-	(*AccountUsageAvailable)(nil),            // 38: agentshim.core.v1.AccountUsageAvailable
-	(*UsageWindow)(nil),                      // 39: agentshim.core.v1.UsageWindow
-	(*AccountUsageUnavailable)(nil),          // 40: agentshim.core.v1.AccountUsageUnavailable
-	(*UsageServiceUnavailable)(nil),          // 41: agentshim.core.v1.UsageServiceUnavailable
-	(*FiveHourWindowUnavailable)(nil),        // 42: agentshim.core.v1.FiveHourWindowUnavailable
-	(*UtilizationUnavailable)(nil),           // 43: agentshim.core.v1.UtilizationUnavailable
-	(*UsageSamplingFailure)(nil),             // 44: agentshim.core.v1.UsageSamplingFailure
-	(*ContextCleared)(nil),                   // 45: agentshim.core.v1.ContextCleared
-	(*ContextCompacted)(nil),                 // 46: agentshim.core.v1.ContextCompacted
-	(*TaskStarted)(nil),                      // 47: agentshim.core.v1.TaskStarted
-	(*TaskProgress)(nil),                     // 48: agentshim.core.v1.TaskProgress
-	(*TaskEnded)(nil),                        // 49: agentshim.core.v1.TaskEnded
-	(*ContentDelta)(nil),                     // 50: agentshim.core.v1.ContentDelta
-	(*HeartbeatProgress)(nil),                // 51: agentshim.core.v1.HeartbeatProgress
-	(*MessageLatency)(nil),                   // 52: agentshim.core.v1.MessageLatency
-	(*DegradedState)(nil),                    // 53: agentshim.core.v1.DegradedState
-	(*ShimHello)(nil),                        // 54: agentshim.core.v1.ShimHello
-	(*DaemonHello)(nil),                      // 55: agentshim.core.v1.DaemonHello
-	(*ShimReady)(nil),                        // 56: agentshim.core.v1.ShimReady
-	(*SubmitPrompt)(nil),                     // 57: agentshim.core.v1.SubmitPrompt
-	(*SetModel)(nil),                         // 58: agentshim.core.v1.SetModel
-	(*ModelOption)(nil),                      // 59: agentshim.core.v1.ModelOption
-	(*ModelCatalog)(nil),                     // 60: agentshim.core.v1.ModelCatalog
-	(*Interrupt)(nil),                        // 61: agentshim.core.v1.Interrupt
-	(*Ack)(nil),                              // 62: agentshim.core.v1.Ack
-	(*Nack)(nil),                             // 63: agentshim.core.v1.Nack
-	(*Subscribe)(nil),                        // 64: agentshim.core.v1.Subscribe
-	(*ReplayRequest)(nil),                    // 65: agentshim.core.v1.ReplayRequest
-	(*ReplayEvent)(nil),                      // 66: agentshim.core.v1.ReplayEvent
-	(*ReplayDone)(nil),                       // 67: agentshim.core.v1.ReplayDone
-	(*PermissionRequest)(nil),                // 68: agentshim.core.v1.PermissionRequest
-	(*PermissionResponse)(nil),               // 69: agentshim.core.v1.PermissionResponse
-	(*PermissionItem)(nil),                   // 70: agentshim.core.v1.PermissionItem
-	(*Heartbeat)(nil),                        // 71: agentshim.core.v1.Heartbeat
-	(*HealthCheck)(nil),                      // 72: agentshim.core.v1.HealthCheck
-	(*HealthStatus)(nil),                     // 73: agentshim.core.v1.HealthStatus
-	(*StoreWrite)(nil),                       // 74: agentshim.core.v1.StoreWrite
-	(*StoreWriteAck)(nil),                    // 75: agentshim.core.v1.StoreWriteAck
-	(*CursorState)(nil),                      // 76: agentshim.core.v1.CursorState
-	(*CursorQuery)(nil),                      // 77: agentshim.core.v1.CursorQuery
-	(*OpenTaskState)(nil),                    // 78: agentshim.core.v1.OpenTaskState
-	(*CursorList)(nil),                       // 79: agentshim.core.v1.CursorList
-	(*FilePlaneDiagnostic)(nil),              // 80: agentshim.core.v1.FilePlaneDiagnostic
-	(*anypb.Any)(nil),                        // 81: google.protobuf.Any
-	(*structpb.Struct)(nil),                  // 82: google.protobuf.Struct
+	(ModelMarker)(0),                         // 8: agentshim.core.v1.ModelMarker
+	(InterruptOutcome)(0),                    // 9: agentshim.core.v1.InterruptOutcome
+	(DiagnosticSourceRuntime)(0),             // 10: agentshim.core.v1.DiagnosticSourceRuntime
+	(PermissionItem_Resolution)(0),           // 11: agentshim.core.v1.PermissionItem.Resolution
+	(*Event)(nil),                            // 12: agentshim.core.v1.Event
+	(*EventBatch)(nil),                       // 13: agentshim.core.v1.EventBatch
+	(*UnparsedEvent)(nil),                    // 14: agentshim.core.v1.UnparsedEvent
+	(*SessionStarted)(nil),                   // 15: agentshim.core.v1.SessionStarted
+	(*SessionEnded)(nil),                     // 16: agentshim.core.v1.SessionEnded
+	(*TurnStarted)(nil),                      // 17: agentshim.core.v1.TurnStarted
+	(*TurnClaimBridge)(nil),                  // 18: agentshim.core.v1.TurnClaimBridge
+	(*SessionRewound)(nil),                   // 19: agentshim.core.v1.SessionRewound
+	(*KeepAliveDiscard)(nil),                 // 20: agentshim.core.v1.KeepAliveDiscard
+	(*TurnEnded)(nil),                        // 21: agentshim.core.v1.TurnEnded
+	(*QueryLifecycle)(nil),                   // 22: agentshim.core.v1.QueryLifecycle
+	(*QueryCreated)(nil),                     // 23: agentshim.core.v1.QueryCreated
+	(*FreshQuery)(nil),                       // 24: agentshim.core.v1.FreshQuery
+	(*ResumedQuery)(nil),                     // 25: agentshim.core.v1.ResumedQuery
+	(*QueryRuntimeObserved)(nil),             // 26: agentshim.core.v1.QueryRuntimeObserved
+	(*QueryRuntimeIdentity)(nil),             // 27: agentshim.core.v1.QueryRuntimeIdentity
+	(*EvidenceFingerprint)(nil),              // 28: agentshim.core.v1.EvidenceFingerprint
+	(*FingerprintUnavailable)(nil),           // 29: agentshim.core.v1.FingerprintUnavailable
+	(*QueryTerminated)(nil),                  // 30: agentshim.core.v1.QueryTerminated
+	(*VendorSessionIdentityUnavailable)(nil), // 31: agentshim.core.v1.VendorSessionIdentityUnavailable
+	(*IntentionalQueryTermination)(nil),      // 32: agentshim.core.v1.IntentionalQueryTermination
+	(*UnexpectedQueryEof)(nil),               // 33: agentshim.core.v1.UnexpectedQueryEof
+	(*QueryIteratorFailure)(nil),             // 34: agentshim.core.v1.QueryIteratorFailure
+	(*QueryStartupFailure)(nil),              // 35: agentshim.core.v1.QueryStartupFailure
+	(*AccountUsageObservation)(nil),          // 36: agentshim.core.v1.AccountUsageObservation
+	(*TurnStartUsageBoundary)(nil),           // 37: agentshim.core.v1.TurnStartUsageBoundary
+	(*TurnEndUsageBoundary)(nil),             // 38: agentshim.core.v1.TurnEndUsageBoundary
+	(*AccountUsageAvailable)(nil),            // 39: agentshim.core.v1.AccountUsageAvailable
+	(*UsageWindow)(nil),                      // 40: agentshim.core.v1.UsageWindow
+	(*AccountUsageUnavailable)(nil),          // 41: agentshim.core.v1.AccountUsageUnavailable
+	(*UsageServiceUnavailable)(nil),          // 42: agentshim.core.v1.UsageServiceUnavailable
+	(*FiveHourWindowUnavailable)(nil),        // 43: agentshim.core.v1.FiveHourWindowUnavailable
+	(*UtilizationUnavailable)(nil),           // 44: agentshim.core.v1.UtilizationUnavailable
+	(*UsageSamplingFailure)(nil),             // 45: agentshim.core.v1.UsageSamplingFailure
+	(*ContextCleared)(nil),                   // 46: agentshim.core.v1.ContextCleared
+	(*ContextCompacted)(nil),                 // 47: agentshim.core.v1.ContextCompacted
+	(*TaskStarted)(nil),                      // 48: agentshim.core.v1.TaskStarted
+	(*TaskProgress)(nil),                     // 49: agentshim.core.v1.TaskProgress
+	(*TaskEnded)(nil),                        // 50: agentshim.core.v1.TaskEnded
+	(*ContentDelta)(nil),                     // 51: agentshim.core.v1.ContentDelta
+	(*HeartbeatProgress)(nil),                // 52: agentshim.core.v1.HeartbeatProgress
+	(*MessageLatency)(nil),                   // 53: agentshim.core.v1.MessageLatency
+	(*DegradedState)(nil),                    // 54: agentshim.core.v1.DegradedState
+	(*ShimHello)(nil),                        // 55: agentshim.core.v1.ShimHello
+	(*DaemonHello)(nil),                      // 56: agentshim.core.v1.DaemonHello
+	(*ShimReady)(nil),                        // 57: agentshim.core.v1.ShimReady
+	(*SubmitPrompt)(nil),                     // 58: agentshim.core.v1.SubmitPrompt
+	(*SetModel)(nil),                         // 59: agentshim.core.v1.SetModel
+	(*QuerySelectedModel)(nil),               // 60: agentshim.core.v1.QuerySelectedModel
+	(*ModelOption)(nil),                      // 61: agentshim.core.v1.ModelOption
+	(*ModelCatalog)(nil),                     // 62: agentshim.core.v1.ModelCatalog
+	(*Interrupt)(nil),                        // 63: agentshim.core.v1.Interrupt
+	(*Ack)(nil),                              // 64: agentshim.core.v1.Ack
+	(*Nack)(nil),                             // 65: agentshim.core.v1.Nack
+	(*Subscribe)(nil),                        // 66: agentshim.core.v1.Subscribe
+	(*ReplayRequest)(nil),                    // 67: agentshim.core.v1.ReplayRequest
+	(*ReplayEvent)(nil),                      // 68: agentshim.core.v1.ReplayEvent
+	(*ReplayDone)(nil),                       // 69: agentshim.core.v1.ReplayDone
+	(*PermissionRequest)(nil),                // 70: agentshim.core.v1.PermissionRequest
+	(*PermissionResponse)(nil),               // 71: agentshim.core.v1.PermissionResponse
+	(*PermissionItem)(nil),                   // 72: agentshim.core.v1.PermissionItem
+	(*Heartbeat)(nil),                        // 73: agentshim.core.v1.Heartbeat
+	(*HealthCheck)(nil),                      // 74: agentshim.core.v1.HealthCheck
+	(*HealthStatus)(nil),                     // 75: agentshim.core.v1.HealthStatus
+	(*StoreWrite)(nil),                       // 76: agentshim.core.v1.StoreWrite
+	(*StoreWriteAck)(nil),                    // 77: agentshim.core.v1.StoreWriteAck
+	(*CursorState)(nil),                      // 78: agentshim.core.v1.CursorState
+	(*CursorQuery)(nil),                      // 79: agentshim.core.v1.CursorQuery
+	(*OpenTaskState)(nil),                    // 80: agentshim.core.v1.OpenTaskState
+	(*CursorList)(nil),                       // 81: agentshim.core.v1.CursorList
+	(*FilePlaneDiagnostic)(nil),              // 82: agentshim.core.v1.FilePlaneDiagnostic
+	(*anypb.Any)(nil),                        // 83: google.protobuf.Any
+	(*structpb.Struct)(nil),                  // 84: google.protobuf.Struct
+	(*descriptorpb.EnumValueOptions)(nil),    // 85: google.protobuf.EnumValueOptions
 }
 var file_agentshim_core_v1_core_proto_depIdxs = []int32{
 	0,  // 0: agentshim.core.v1.Event.plane:type_name -> agentshim.core.v1.Plane
 	1,  // 1: agentshim.core.v1.Event.class:type_name -> agentshim.core.v1.EventClass
-	14, // 2: agentshim.core.v1.Event.session_started:type_name -> agentshim.core.v1.SessionStarted
-	15, // 3: agentshim.core.v1.Event.session_ended:type_name -> agentshim.core.v1.SessionEnded
-	16, // 4: agentshim.core.v1.Event.turn_started:type_name -> agentshim.core.v1.TurnStarted
-	20, // 5: agentshim.core.v1.Event.turn_ended:type_name -> agentshim.core.v1.TurnEnded
-	47, // 6: agentshim.core.v1.Event.task_started:type_name -> agentshim.core.v1.TaskStarted
-	48, // 7: agentshim.core.v1.Event.task_progress:type_name -> agentshim.core.v1.TaskProgress
-	49, // 8: agentshim.core.v1.Event.task_ended:type_name -> agentshim.core.v1.TaskEnded
-	50, // 9: agentshim.core.v1.Event.content_delta:type_name -> agentshim.core.v1.ContentDelta
-	51, // 10: agentshim.core.v1.Event.heartbeat_progress:type_name -> agentshim.core.v1.HeartbeatProgress
-	53, // 11: agentshim.core.v1.Event.degraded_state:type_name -> agentshim.core.v1.DegradedState
-	13, // 12: agentshim.core.v1.Event.unparsed:type_name -> agentshim.core.v1.UnparsedEvent
-	52, // 13: agentshim.core.v1.Event.message_latency:type_name -> agentshim.core.v1.MessageLatency
-	45, // 14: agentshim.core.v1.Event.context_cleared:type_name -> agentshim.core.v1.ContextCleared
-	46, // 15: agentshim.core.v1.Event.context_compacted:type_name -> agentshim.core.v1.ContextCompacted
-	80, // 16: agentshim.core.v1.Event.file_plane_diagnostic:type_name -> agentshim.core.v1.FilePlaneDiagnostic
-	17, // 17: agentshim.core.v1.Event.turn_claim_bridge:type_name -> agentshim.core.v1.TurnClaimBridge
-	21, // 18: agentshim.core.v1.Event.query_lifecycle:type_name -> agentshim.core.v1.QueryLifecycle
-	35, // 19: agentshim.core.v1.Event.account_usage_observation:type_name -> agentshim.core.v1.AccountUsageObservation
-	18, // 20: agentshim.core.v1.Event.session_rewound:type_name -> agentshim.core.v1.SessionRewound
-	81, // 21: agentshim.core.v1.Event.vendor:type_name -> google.protobuf.Any
-	82, // 22: agentshim.core.v1.Event.extras:type_name -> google.protobuf.Struct
-	11, // 23: agentshim.core.v1.EventBatch.events:type_name -> agentshim.core.v1.Event
-	76, // 24: agentshim.core.v1.EventBatch.cursor_advance:type_name -> agentshim.core.v1.CursorState
+	15, // 2: agentshim.core.v1.Event.session_started:type_name -> agentshim.core.v1.SessionStarted
+	16, // 3: agentshim.core.v1.Event.session_ended:type_name -> agentshim.core.v1.SessionEnded
+	17, // 4: agentshim.core.v1.Event.turn_started:type_name -> agentshim.core.v1.TurnStarted
+	21, // 5: agentshim.core.v1.Event.turn_ended:type_name -> agentshim.core.v1.TurnEnded
+	48, // 6: agentshim.core.v1.Event.task_started:type_name -> agentshim.core.v1.TaskStarted
+	49, // 7: agentshim.core.v1.Event.task_progress:type_name -> agentshim.core.v1.TaskProgress
+	50, // 8: agentshim.core.v1.Event.task_ended:type_name -> agentshim.core.v1.TaskEnded
+	51, // 9: agentshim.core.v1.Event.content_delta:type_name -> agentshim.core.v1.ContentDelta
+	52, // 10: agentshim.core.v1.Event.heartbeat_progress:type_name -> agentshim.core.v1.HeartbeatProgress
+	54, // 11: agentshim.core.v1.Event.degraded_state:type_name -> agentshim.core.v1.DegradedState
+	14, // 12: agentshim.core.v1.Event.unparsed:type_name -> agentshim.core.v1.UnparsedEvent
+	53, // 13: agentshim.core.v1.Event.message_latency:type_name -> agentshim.core.v1.MessageLatency
+	46, // 14: agentshim.core.v1.Event.context_cleared:type_name -> agentshim.core.v1.ContextCleared
+	47, // 15: agentshim.core.v1.Event.context_compacted:type_name -> agentshim.core.v1.ContextCompacted
+	82, // 16: agentshim.core.v1.Event.file_plane_diagnostic:type_name -> agentshim.core.v1.FilePlaneDiagnostic
+	18, // 17: agentshim.core.v1.Event.turn_claim_bridge:type_name -> agentshim.core.v1.TurnClaimBridge
+	22, // 18: agentshim.core.v1.Event.query_lifecycle:type_name -> agentshim.core.v1.QueryLifecycle
+	36, // 19: agentshim.core.v1.Event.account_usage_observation:type_name -> agentshim.core.v1.AccountUsageObservation
+	19, // 20: agentshim.core.v1.Event.session_rewound:type_name -> agentshim.core.v1.SessionRewound
+	83, // 21: agentshim.core.v1.Event.vendor:type_name -> google.protobuf.Any
+	84, // 22: agentshim.core.v1.Event.extras:type_name -> google.protobuf.Struct
+	12, // 23: agentshim.core.v1.EventBatch.events:type_name -> agentshim.core.v1.Event
+	78, // 24: agentshim.core.v1.EventBatch.cursor_advance:type_name -> agentshim.core.v1.CursorState
 	4,  // 25: agentshim.core.v1.SessionStarted.source:type_name -> agentshim.core.v1.SessionSource
 	6,  // 26: agentshim.core.v1.TurnStarted.prompt_origin:type_name -> agentshim.core.v1.PromptOrigin
-	19, // 27: agentshim.core.v1.SessionRewound.keep_alive_discard:type_name -> agentshim.core.v1.KeepAliveDiscard
-	22, // 28: agentshim.core.v1.QueryLifecycle.created:type_name -> agentshim.core.v1.QueryCreated
-	25, // 29: agentshim.core.v1.QueryLifecycle.runtime_observed:type_name -> agentshim.core.v1.QueryRuntimeObserved
-	29, // 30: agentshim.core.v1.QueryLifecycle.terminated:type_name -> agentshim.core.v1.QueryTerminated
-	23, // 31: agentshim.core.v1.QueryCreated.fresh:type_name -> agentshim.core.v1.FreshQuery
-	24, // 32: agentshim.core.v1.QueryCreated.resumed:type_name -> agentshim.core.v1.ResumedQuery
-	26, // 33: agentshim.core.v1.QueryRuntimeObserved.identity:type_name -> agentshim.core.v1.QueryRuntimeIdentity
-	27, // 34: agentshim.core.v1.QueryRuntimeIdentity.effective_options:type_name -> agentshim.core.v1.EvidenceFingerprint
-	27, // 35: agentshim.core.v1.QueryRuntimeIdentity.settings:type_name -> agentshim.core.v1.EvidenceFingerprint
-	27, // 36: agentshim.core.v1.QueryRuntimeIdentity.tools:type_name -> agentshim.core.v1.EvidenceFingerprint
-	27, // 37: agentshim.core.v1.QueryRuntimeIdentity.mcp:type_name -> agentshim.core.v1.EvidenceFingerprint
-	27, // 38: agentshim.core.v1.QueryRuntimeIdentity.context_prefix:type_name -> agentshim.core.v1.EvidenceFingerprint
-	28, // 39: agentshim.core.v1.EvidenceFingerprint.unavailable:type_name -> agentshim.core.v1.FingerprintUnavailable
-	30, // 40: agentshim.core.v1.QueryTerminated.vendor_session_identity_unavailable:type_name -> agentshim.core.v1.VendorSessionIdentityUnavailable
-	31, // 41: agentshim.core.v1.QueryTerminated.intentional:type_name -> agentshim.core.v1.IntentionalQueryTermination
-	32, // 42: agentshim.core.v1.QueryTerminated.unexpected_eof:type_name -> agentshim.core.v1.UnexpectedQueryEof
-	33, // 43: agentshim.core.v1.QueryTerminated.iterator_failure:type_name -> agentshim.core.v1.QueryIteratorFailure
-	34, // 44: agentshim.core.v1.QueryTerminated.startup_failure:type_name -> agentshim.core.v1.QueryStartupFailure
-	36, // 45: agentshim.core.v1.AccountUsageObservation.turn_start:type_name -> agentshim.core.v1.TurnStartUsageBoundary
-	37, // 46: agentshim.core.v1.AccountUsageObservation.turn_end:type_name -> agentshim.core.v1.TurnEndUsageBoundary
-	38, // 47: agentshim.core.v1.AccountUsageObservation.available:type_name -> agentshim.core.v1.AccountUsageAvailable
-	40, // 48: agentshim.core.v1.AccountUsageObservation.unavailable:type_name -> agentshim.core.v1.AccountUsageUnavailable
-	39, // 49: agentshim.core.v1.AccountUsageAvailable.five_hour:type_name -> agentshim.core.v1.UsageWindow
-	41, // 50: agentshim.core.v1.AccountUsageUnavailable.service_unavailable:type_name -> agentshim.core.v1.UsageServiceUnavailable
-	42, // 51: agentshim.core.v1.AccountUsageUnavailable.window_unavailable:type_name -> agentshim.core.v1.FiveHourWindowUnavailable
-	43, // 52: agentshim.core.v1.AccountUsageUnavailable.utilization_unavailable:type_name -> agentshim.core.v1.UtilizationUnavailable
-	44, // 53: agentshim.core.v1.AccountUsageUnavailable.sampling_failure:type_name -> agentshim.core.v1.UsageSamplingFailure
+	20, // 27: agentshim.core.v1.SessionRewound.keep_alive_discard:type_name -> agentshim.core.v1.KeepAliveDiscard
+	23, // 28: agentshim.core.v1.QueryLifecycle.created:type_name -> agentshim.core.v1.QueryCreated
+	26, // 29: agentshim.core.v1.QueryLifecycle.runtime_observed:type_name -> agentshim.core.v1.QueryRuntimeObserved
+	30, // 30: agentshim.core.v1.QueryLifecycle.terminated:type_name -> agentshim.core.v1.QueryTerminated
+	24, // 31: agentshim.core.v1.QueryCreated.fresh:type_name -> agentshim.core.v1.FreshQuery
+	25, // 32: agentshim.core.v1.QueryCreated.resumed:type_name -> agentshim.core.v1.ResumedQuery
+	27, // 33: agentshim.core.v1.QueryRuntimeObserved.identity:type_name -> agentshim.core.v1.QueryRuntimeIdentity
+	28, // 34: agentshim.core.v1.QueryRuntimeIdentity.effective_options:type_name -> agentshim.core.v1.EvidenceFingerprint
+	28, // 35: agentshim.core.v1.QueryRuntimeIdentity.settings:type_name -> agentshim.core.v1.EvidenceFingerprint
+	28, // 36: agentshim.core.v1.QueryRuntimeIdentity.tools:type_name -> agentshim.core.v1.EvidenceFingerprint
+	28, // 37: agentshim.core.v1.QueryRuntimeIdentity.mcp:type_name -> agentshim.core.v1.EvidenceFingerprint
+	28, // 38: agentshim.core.v1.QueryRuntimeIdentity.context_prefix:type_name -> agentshim.core.v1.EvidenceFingerprint
+	29, // 39: agentshim.core.v1.EvidenceFingerprint.unavailable:type_name -> agentshim.core.v1.FingerprintUnavailable
+	31, // 40: agentshim.core.v1.QueryTerminated.vendor_session_identity_unavailable:type_name -> agentshim.core.v1.VendorSessionIdentityUnavailable
+	32, // 41: agentshim.core.v1.QueryTerminated.intentional:type_name -> agentshim.core.v1.IntentionalQueryTermination
+	33, // 42: agentshim.core.v1.QueryTerminated.unexpected_eof:type_name -> agentshim.core.v1.UnexpectedQueryEof
+	34, // 43: agentshim.core.v1.QueryTerminated.iterator_failure:type_name -> agentshim.core.v1.QueryIteratorFailure
+	35, // 44: agentshim.core.v1.QueryTerminated.startup_failure:type_name -> agentshim.core.v1.QueryStartupFailure
+	37, // 45: agentshim.core.v1.AccountUsageObservation.turn_start:type_name -> agentshim.core.v1.TurnStartUsageBoundary
+	38, // 46: agentshim.core.v1.AccountUsageObservation.turn_end:type_name -> agentshim.core.v1.TurnEndUsageBoundary
+	39, // 47: agentshim.core.v1.AccountUsageObservation.available:type_name -> agentshim.core.v1.AccountUsageAvailable
+	41, // 48: agentshim.core.v1.AccountUsageObservation.unavailable:type_name -> agentshim.core.v1.AccountUsageUnavailable
+	40, // 49: agentshim.core.v1.AccountUsageAvailable.five_hour:type_name -> agentshim.core.v1.UsageWindow
+	42, // 50: agentshim.core.v1.AccountUsageUnavailable.service_unavailable:type_name -> agentshim.core.v1.UsageServiceUnavailable
+	43, // 51: agentshim.core.v1.AccountUsageUnavailable.window_unavailable:type_name -> agentshim.core.v1.FiveHourWindowUnavailable
+	44, // 52: agentshim.core.v1.AccountUsageUnavailable.utilization_unavailable:type_name -> agentshim.core.v1.UtilizationUnavailable
+	45, // 53: agentshim.core.v1.AccountUsageUnavailable.sampling_failure:type_name -> agentshim.core.v1.UsageSamplingFailure
 	7,  // 54: agentshim.core.v1.ContextCompacted.trigger:type_name -> agentshim.core.v1.ContextCompactTrigger
 	2,  // 55: agentshim.core.v1.TaskStarted.kind:type_name -> agentshim.core.v1.TaskKind
 	2,  // 56: agentshim.core.v1.TaskProgress.kind:type_name -> agentshim.core.v1.TaskKind
 	2,  // 57: agentshim.core.v1.TaskEnded.kind:type_name -> agentshim.core.v1.TaskKind
 	3,  // 58: agentshim.core.v1.TaskEnded.status:type_name -> agentshim.core.v1.TerminalStatus
-	26, // 59: agentshim.core.v1.ShimHello.query_runtime_identity:type_name -> agentshim.core.v1.QueryRuntimeIdentity
+	27, // 59: agentshim.core.v1.ShimHello.query_runtime_identity:type_name -> agentshim.core.v1.QueryRuntimeIdentity
 	6,  // 60: agentshim.core.v1.SubmitPrompt.prompt_origin:type_name -> agentshim.core.v1.PromptOrigin
-	59, // 61: agentshim.core.v1.ModelCatalog.models:type_name -> agentshim.core.v1.ModelOption
-	8,  // 62: agentshim.core.v1.Ack.interrupt_outcome:type_name -> agentshim.core.v1.InterruptOutcome
-	11, // 63: agentshim.core.v1.ReplayEvent.event:type_name -> agentshim.core.v1.Event
-	82, // 64: agentshim.core.v1.PermissionRequest.input:type_name -> google.protobuf.Struct
+	61, // 61: agentshim.core.v1.ModelCatalog.models:type_name -> agentshim.core.v1.ModelOption
+	9,  // 62: agentshim.core.v1.Ack.interrupt_outcome:type_name -> agentshim.core.v1.InterruptOutcome
+	12, // 63: agentshim.core.v1.ReplayEvent.event:type_name -> agentshim.core.v1.Event
+	84, // 64: agentshim.core.v1.PermissionRequest.input:type_name -> google.protobuf.Struct
 	5,  // 65: agentshim.core.v1.PermissionResponse.decision:type_name -> agentshim.core.v1.PermissionDecision
-	82, // 66: agentshim.core.v1.PermissionResponse.updated_input:type_name -> google.protobuf.Struct
-	68, // 67: agentshim.core.v1.PermissionItem.request:type_name -> agentshim.core.v1.PermissionRequest
-	10, // 68: agentshim.core.v1.PermissionItem.resolution:type_name -> agentshim.core.v1.PermissionItem.Resolution
-	12, // 69: agentshim.core.v1.StoreWrite.batch:type_name -> agentshim.core.v1.EventBatch
-	11, // 70: agentshim.core.v1.OpenTaskState.started:type_name -> agentshim.core.v1.Event
-	76, // 71: agentshim.core.v1.CursorList.cursors:type_name -> agentshim.core.v1.CursorState
-	78, // 72: agentshim.core.v1.CursorList.open_tasks:type_name -> agentshim.core.v1.OpenTaskState
-	9,  // 73: agentshim.core.v1.FilePlaneDiagnostic.source_runtime:type_name -> agentshim.core.v1.DiagnosticSourceRuntime
-	82, // 74: agentshim.core.v1.FilePlaneDiagnostic.context:type_name -> google.protobuf.Struct
-	75, // [75:75] is the sub-list for method output_type
-	75, // [75:75] is the sub-list for method input_type
-	75, // [75:75] is the sub-list for extension type_name
-	75, // [75:75] is the sub-list for extension extendee
+	84, // 66: agentshim.core.v1.PermissionResponse.updated_input:type_name -> google.protobuf.Struct
+	70, // 67: agentshim.core.v1.PermissionItem.request:type_name -> agentshim.core.v1.PermissionRequest
+	11, // 68: agentshim.core.v1.PermissionItem.resolution:type_name -> agentshim.core.v1.PermissionItem.Resolution
+	13, // 69: agentshim.core.v1.StoreWrite.batch:type_name -> agentshim.core.v1.EventBatch
+	12, // 70: agentshim.core.v1.OpenTaskState.started:type_name -> agentshim.core.v1.Event
+	78, // 71: agentshim.core.v1.CursorList.cursors:type_name -> agentshim.core.v1.CursorState
+	80, // 72: agentshim.core.v1.CursorList.open_tasks:type_name -> agentshim.core.v1.OpenTaskState
+	10, // 73: agentshim.core.v1.FilePlaneDiagnostic.source_runtime:type_name -> agentshim.core.v1.DiagnosticSourceRuntime
+	84, // 74: agentshim.core.v1.FilePlaneDiagnostic.context:type_name -> google.protobuf.Struct
+	85, // 75: agentshim.core.v1.model_marker_literal:extendee -> google.protobuf.EnumValueOptions
+	76, // [76:76] is the sub-list for method output_type
+	76, // [76:76] is the sub-list for method input_type
+	76, // [76:76] is the sub-list for extension type_name
+	75, // [75:76] is the sub-list for extension extendee
 	0,  // [0:75] is the sub-list for field type_name
 }
 
@@ -6958,15 +7113,16 @@ func file_agentshim_core_v1_core_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_core_v1_core_proto_rawDesc), len(file_agentshim_core_v1_core_proto_rawDesc)),
-			NumEnums:      11,
-			NumMessages:   70,
-			NumExtensions: 0,
+			NumEnums:      12,
+			NumMessages:   71,
+			NumExtensions: 1,
 			NumServices:   0,
 		},
 		GoTypes:           file_agentshim_core_v1_core_proto_goTypes,
 		DependencyIndexes: file_agentshim_core_v1_core_proto_depIdxs,
 		EnumInfos:         file_agentshim_core_v1_core_proto_enumTypes,
 		MessageInfos:      file_agentshim_core_v1_core_proto_msgTypes,
+		ExtensionInfos:    file_agentshim_core_v1_core_proto_extTypes,
 	}.Build()
 	File_agentshim_core_v1_core_proto = out.File
 	file_agentshim_core_v1_core_proto_goTypes = nil

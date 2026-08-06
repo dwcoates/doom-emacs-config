@@ -5,6 +5,8 @@ syntax = "proto3";
 
 package agentshim.frontend.v1;
 
+import "google/protobuf/descriptor.proto";
+
 option go_package = "agentrepl/proto/agentshim/frontend/v1;frontendv1";
 
 // A slash command the CLI answers ITSELF, rather than a prompt for the agent.
@@ -19,40 +21,80 @@ option go_package = "agentrepl/proto/agentshim/frontend/v1;frontendv1";
 // A custom command (a skill, a project command) is deliberately absent and
 // always will be: those EXPAND into a prompt for the agent, so the text the
 // user typed really is the turn's opening and really does belong in the feed.
+// Everything about a session command that is a FACT rather than an event: how
+// it is spelled, and whether text after the name belongs to it.
+//
+// Carried as an enum-value OPTION below rather than as traffic, because no
+// frame carries these facts and every process needs the same answer to them —
+// the daemon to recognize a submitted prompt, the webapp to complete and to
+// label one. The three hand-written copies this replaces (the daemon's
+// recognition table, the webapp's SESSION_COMMANDS list, the webapp's
+// SESSION_COMMAND_LABELS table) had nothing comparing them, so they drifted:
+// each was correct on its own and none of them agreed.
+message SessionCommandSpec {
+  // The command as the user TYPES it, leading slash included — and also the
+  // form a reader is shown. One field for both so a corrected spelling cannot
+  // land in the recognizer while the webapp chip keeps rendering the old one.
+  string literal = 1;
+
+  // Whether text following the name is an ARGUMENT to this command rather
+  // than prose the user wrote.
+  //
+  // FALSE IS THE DEFAULT AND FALSE IS THE SAFE SIDE. A command that takes no
+  // argument is recognized only as an ENTIRE prompt, so "/status of the build"
+  // stays a prompt and keeps its bubble. Marking a command that takes none as
+  // taking some is the one way this table can swallow something a user
+  // genuinely meant to say to the agent — an unrecoverable loss, since a
+  // suppressed bubble is never drawn later.
+  bool takes_args = 2;
+}
+
+// Attaches a spec to the enum value that names the command. An extension
+// because the facts belong to the SCHEMA and there is no other construct that
+// keeps them there: a Go map, a TypeScript array and a proto enum can be kept
+// consistent only by whoever remembers all three, whereas an option is read
+// back by reflection from the one definition.
+extend google.protobuf.EnumValueOptions {
+  SessionCommandSpec session_command_spec = 60002;
+}
+
 enum SessionCommand {
   // Never set by the daemon. A receiver seeing UNSPECIFIED is looking at a
   // malformed frame and must reject it loudly rather than pick a command.
+  //
+  // It carries NO spec, deliberately: it names no command, so there is no
+  // literal to spell and nothing a recognizer could ever match it against.
   SESSION_COMMAND_UNSPECIFIED = 0;
-  SESSION_COMMAND_CLEAR = 1;
-  SESSION_COMMAND_COMPACT = 2;
-  SESSION_COMMAND_MODEL = 3;
-  SESSION_COMMAND_COST = 4;
-  SESSION_COMMAND_USAGE = 5;
-  SESSION_COMMAND_STATUS = 6;
-  SESSION_COMMAND_CONTEXT = 7;
-  SESSION_COMMAND_CONFIG = 8;
-  SESSION_COMMAND_HELP = 9;
-  SESSION_COMMAND_DOCTOR = 10;
-  SESSION_COMMAND_LOGIN = 11;
-  SESSION_COMMAND_LOGOUT = 12;
-  SESSION_COMMAND_MEMORY = 13;
-  SESSION_COMMAND_PERMISSIONS = 14;
-  SESSION_COMMAND_AGENTS = 15;
-  SESSION_COMMAND_MCP = 16;
-  SESSION_COMMAND_HOOKS = 17;
-  SESSION_COMMAND_OUTPUT_STYLE = 18;
-  SESSION_COMMAND_RELEASE_NOTES = 19;
-  SESSION_COMMAND_TODOS = 20;
-  SESSION_COMMAND_EXPORT = 21;
-  SESSION_COMMAND_ADD_DIR = 22;
-  SESSION_COMMAND_RESUME = 23;
-  SESSION_COMMAND_EXIT = 24;
-  SESSION_COMMAND_PRIVACY_SETTINGS = 25;
-  SESSION_COMMAND_STATUSLINE = 26;
-  SESSION_COMMAND_TERMINAL_SETUP = 27;
-  SESSION_COMMAND_VIM = 28;
-  SESSION_COMMAND_REWIND = 29;
-  SESSION_COMMAND_BUG = 30;
+  SESSION_COMMAND_CLEAR = 1 [(session_command_spec) = {literal: "/clear"}];
+  SESSION_COMMAND_COMPACT = 2 [(session_command_spec) = {literal: "/compact", takes_args: true}];
+  SESSION_COMMAND_MODEL = 3 [(session_command_spec) = {literal: "/model", takes_args: true}];
+  SESSION_COMMAND_COST = 4 [(session_command_spec) = {literal: "/cost"}];
+  SESSION_COMMAND_USAGE = 5 [(session_command_spec) = {literal: "/usage"}];
+  SESSION_COMMAND_STATUS = 6 [(session_command_spec) = {literal: "/status"}];
+  SESSION_COMMAND_CONTEXT = 7 [(session_command_spec) = {literal: "/context"}];
+  SESSION_COMMAND_CONFIG = 8 [(session_command_spec) = {literal: "/config"}];
+  SESSION_COMMAND_HELP = 9 [(session_command_spec) = {literal: "/help"}];
+  SESSION_COMMAND_DOCTOR = 10 [(session_command_spec) = {literal: "/doctor"}];
+  SESSION_COMMAND_LOGIN = 11 [(session_command_spec) = {literal: "/login"}];
+  SESSION_COMMAND_LOGOUT = 12 [(session_command_spec) = {literal: "/logout"}];
+  SESSION_COMMAND_MEMORY = 13 [(session_command_spec) = {literal: "/memory"}];
+  SESSION_COMMAND_PERMISSIONS = 14 [(session_command_spec) = {literal: "/permissions"}];
+  SESSION_COMMAND_AGENTS = 15 [(session_command_spec) = {literal: "/agents"}];
+  SESSION_COMMAND_MCP = 16 [(session_command_spec) = {literal: "/mcp"}];
+  SESSION_COMMAND_HOOKS = 17 [(session_command_spec) = {literal: "/hooks"}];
+  SESSION_COMMAND_OUTPUT_STYLE = 18 [(session_command_spec) = {literal: "/output-style", takes_args: true}];
+  SESSION_COMMAND_RELEASE_NOTES = 19 [(session_command_spec) = {literal: "/release-notes"}];
+  SESSION_COMMAND_TODOS = 20 [(session_command_spec) = {literal: "/todos"}];
+  SESSION_COMMAND_EXPORT = 21 [(session_command_spec) = {literal: "/export", takes_args: true}];
+  SESSION_COMMAND_ADD_DIR = 22 [(session_command_spec) = {literal: "/add-dir", takes_args: true}];
+  SESSION_COMMAND_RESUME = 23 [(session_command_spec) = {literal: "/resume", takes_args: true}];
+  SESSION_COMMAND_EXIT = 24 [(session_command_spec) = {literal: "/exit"}];
+  SESSION_COMMAND_PRIVACY_SETTINGS = 25 [(session_command_spec) = {literal: "/privacy-settings"}];
+  SESSION_COMMAND_STATUSLINE = 26 [(session_command_spec) = {literal: "/statusline"}];
+  SESSION_COMMAND_TERMINAL_SETUP = 27 [(session_command_spec) = {literal: "/terminal-setup"}];
+  SESSION_COMMAND_VIM = 28 [(session_command_spec) = {literal: "/vim"}];
+  SESSION_COMMAND_REWIND = 29 [(session_command_spec) = {literal: "/rewind"}];
+  SESSION_COMMAND_BUG = 30 [(session_command_spec) = {literal: "/bug"}];
 }
 
 // Additive: ONE session command the user invoked, as the feed's record that

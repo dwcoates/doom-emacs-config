@@ -5,15 +5,76 @@
 // @generated from file agentshim/frontend/v1/slash-menu.proto (package agentshim.frontend.v1, syntax proto3)
 /* eslint-disable */
 
-import type { GenEnum, GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
-import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { GenEnum, GenExtension, GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
+import { enumDesc, extDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { EnumValueOptions } from "@bufbuild/protobuf/wkt";
+import { file_google_protobuf_descriptor } from "@bufbuild/protobuf/wkt";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file agentshim/frontend/v1/slash-menu.proto.
  */
 export const file_agentshim_frontend_v1_slash_menu: GenFile = /*@__PURE__*/
-  fileDesc("CiZhZ2VudHNoaW0vZnJvbnRlbmQvdjEvc2xhc2gtbWVudS5wcm90bxIVYWdlbnRzaGltLmZyb250ZW5kLnYxIkwKElNlc3Npb25Db21tYW5kSXRlbRI2Cgdjb21tYW5kGAEgASgOMiUuYWdlbnRzaGltLmZyb250ZW5kLnYxLlNlc3Npb25Db21tYW5kIjsKDVNraWxsQm9keUl0ZW0SEwoLdG9vbF91c2VfaWQYASABKAkSFQoNYm9keV9tYXJrZG93bhgCIAEoCSqPBwoOU2Vzc2lvbkNvbW1hbmQSHwobU0VTU0lPTl9DT01NQU5EX1VOU1BFQ0lGSUVEEAASGQoVU0VTU0lPTl9DT01NQU5EX0NMRUFSEAESGwoXU0VTU0lPTl9DT01NQU5EX0NPTVBBQ1QQAhIZChVTRVNTSU9OX0NPTU1BTkRfTU9ERUwQAxIYChRTRVNTSU9OX0NPTU1BTkRfQ09TVBAEEhkKFVNFU1NJT05fQ09NTUFORF9VU0FHRRAFEhoKFlNFU1NJT05fQ09NTUFORF9TVEFUVVMQBhIbChdTRVNTSU9OX0NPTU1BTkRfQ09OVEVYVBAHEhoKFlNFU1NJT05fQ09NTUFORF9DT05GSUcQCBIYChRTRVNTSU9OX0NPTU1BTkRfSEVMUBAJEhoKFlNFU1NJT05fQ09NTUFORF9ET0NUT1IQChIZChVTRVNTSU9OX0NPTU1BTkRfTE9HSU4QCxIaChZTRVNTSU9OX0NPTU1BTkRfTE9HT1VUEAwSGgoWU0VTU0lPTl9DT01NQU5EX01FTU9SWRANEh8KG1NFU1NJT05fQ09NTUFORF9QRVJNSVNTSU9OUxAOEhoKFlNFU1NJT05fQ09NTUFORF9BR0VOVFMQDxIXChNTRVNTSU9OX0NPTU1BTkRfTUNQEBASGQoVU0VTU0lPTl9DT01NQU5EX0hPT0tTEBESIAocU0VTU0lPTl9DT01NQU5EX09VVFBVVF9TVFlMRRASEiEKHVNFU1NJT05fQ09NTUFORF9SRUxFQVNFX05PVEVTEBMSGQoVU0VTU0lPTl9DT01NQU5EX1RPRE9TEBQSGgoWU0VTU0lPTl9DT01NQU5EX0VYUE9SVBAVEhsKF1NFU1NJT05fQ09NTUFORF9BRERfRElSEBYSGgoWU0VTU0lPTl9DT01NQU5EX1JFU1VNRRAXEhgKFFNFU1NJT05fQ09NTUFORF9FWElUEBgSJAogU0VTU0lPTl9DT01NQU5EX1BSSVZBQ1lfU0VUVElOR1MQGRIeChpTRVNTSU9OX0NPTU1BTkRfU1RBVFVTTElORRAaEiIKHlNFU1NJT05fQ09NTUFORF9URVJNSU5BTF9TRVRVUBAbEhcKE1NFU1NJT05fQ09NTUFORF9WSU0QHBIaChZTRVNTSU9OX0NPTU1BTkRfUkVXSU5EEB0SFwoTU0VTU0lPTl9DT01NQU5EX0JVRxAeQjJaMGFnZW50cmVwbC9wcm90by9hZ2VudHNoaW0vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z");
+  fileDesc("CiZhZ2VudHNoaW0vZnJvbnRlbmQvdjEvc2xhc2gtbWVudS5wcm90bxIVYWdlbnRzaGltLmZyb250ZW5kLnYxIjkKElNlc3Npb25Db21tYW5kU3BlYxIPCgdsaXRlcmFsGAEgASgJEhIKCnRha2VzX2FyZ3MYAiABKAgiTAoSU2Vzc2lvbkNvbW1hbmRJdGVtEjYKB2NvbW1hbmQYASABKA4yJS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuU2Vzc2lvbkNvbW1hbmQiOwoNU2tpbGxCb2R5SXRlbRITCgt0b29sX3VzZV9pZBgBIAEoCRIVCg1ib2R5X21hcmtkb3duGAIgASgJKvMKCg5TZXNzaW9uQ29tbWFuZBIfChtTRVNTSU9OX0NPTU1BTkRfVU5TUEVDSUZJRUQQABInChVTRVNTSU9OX0NPTU1BTkRfQ0xFQVIQARoMkqYdCAoGL2NsZWFyEi0KF1NFU1NJT05fQ09NTUFORF9DT01QQUNUEAIaEJKmHQwKCC9jb21wYWN0EAESKQoVU0VTU0lPTl9DT01NQU5EX01PREVMEAMaDpKmHQoKBi9tb2RlbBABEiUKFFNFU1NJT05fQ09NTUFORF9DT1NUEAQaC5KmHQcKBS9jb3N0EicKFVNFU1NJT05fQ09NTUFORF9VU0FHRRAFGgySph0ICgYvdXNhZ2USKQoWU0VTU0lPTl9DT01NQU5EX1NUQVRVUxAGGg2Sph0JCgcvc3RhdHVzEisKF1NFU1NJT05fQ09NTUFORF9DT05URVhUEAcaDpKmHQoKCC9jb250ZXh0EikKFlNFU1NJT05fQ09NTUFORF9DT05GSUcQCBoNkqYdCQoHL2NvbmZpZxIlChRTRVNTSU9OX0NPTU1BTkRfSEVMUBAJGguSph0HCgUvaGVscBIpChZTRVNTSU9OX0NPTU1BTkRfRE9DVE9SEAoaDZKmHQkKBy9kb2N0b3ISJwoVU0VTU0lPTl9DT01NQU5EX0xPR0lOEAsaDJKmHQgKBi9sb2dpbhIpChZTRVNTSU9OX0NPTU1BTkRfTE9HT1VUEAwaDZKmHQkKBy9sb2dvdXQSKQoWU0VTU0lPTl9DT01NQU5EX01FTU9SWRANGg2Sph0JCgcvbWVtb3J5EjMKG1NFU1NJT05fQ09NTUFORF9QRVJNSVNTSU9OUxAOGhKSph0OCgwvcGVybWlzc2lvbnMSKQoWU0VTU0lPTl9DT01NQU5EX0FHRU5UUxAPGg2Sph0JCgcvYWdlbnRzEiMKE1NFU1NJT05fQ09NTUFORF9NQ1AQEBoKkqYdBgoEL21jcBInChVTRVNTSU9OX0NPTU1BTkRfSE9PS1MQERoMkqYdCAoGL2hvb2tzEjcKHFNFU1NJT05fQ09NTUFORF9PVVRQVVRfU1RZTEUQEhoVkqYdEQoNL291dHB1dC1zdHlsZRABEjcKHVNFU1NJT05fQ09NTUFORF9SRUxFQVNFX05PVEVTEBMaFJKmHRAKDi9yZWxlYXNlLW5vdGVzEicKFVNFU1NJT05fQ09NTUFORF9UT0RPUxAUGgySph0ICgYvdG9kb3MSKwoWU0VTU0lPTl9DT01NQU5EX0VYUE9SVBAVGg+Sph0LCgcvZXhwb3J0EAESLQoXU0VTU0lPTl9DT01NQU5EX0FERF9ESVIQFhoQkqYdDAoIL2FkZC1kaXIQARIrChZTRVNTSU9OX0NPTU1BTkRfUkVTVU1FEBcaD5KmHQsKBy9yZXN1bWUQARIlChRTRVNTSU9OX0NPTU1BTkRfRVhJVBAYGguSph0HCgUvZXhpdBI9CiBTRVNTSU9OX0NPTU1BTkRfUFJJVkFDWV9TRVRUSU5HUxAZGheSph0TChEvcHJpdmFjeS1zZXR0aW5ncxIxChpTRVNTSU9OX0NPTU1BTkRfU1RBVFVTTElORRAaGhGSph0NCgsvc3RhdHVzbGluZRI5Ch5TRVNTSU9OX0NPTU1BTkRfVEVSTUlOQUxfU0VUVVAQGxoVkqYdEQoPL3Rlcm1pbmFsLXNldHVwEiMKE1NFU1NJT05fQ09NTUFORF9WSU0QHBoKkqYdBgoEL3ZpbRIpChZTRVNTSU9OX0NPTU1BTkRfUkVXSU5EEB0aDZKmHQkKBy9yZXdpbmQSIwoTU0VTU0lPTl9DT01NQU5EX0JVRxAeGgqSph0GCgQvYnVnOoABChRzZXNzaW9uX2NvbW1hbmRfc3BlYxIhLmdvb2dsZS5wcm90b2J1Zi5FbnVtVmFsdWVPcHRpb25zGOLUAyABKAsyKS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuU2Vzc2lvbkNvbW1hbmRTcGVjUhJzZXNzaW9uQ29tbWFuZFNwZWNCMlowYWdlbnRyZXBsL3Byb3RvL2FnZW50c2hpbS9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM", [file_google_protobuf_descriptor]);
+
+/**
+ * A slash command the CLI answers ITSELF, rather than a prompt for the agent.
+ *
+ * THE CLOSED SET IS THE POINT. The daemon recognizes a submitted prompt as one
+ * of these before it forwards it (sessioncontroller/sessioncommand.go), and a
+ * recognized command earns NO prompt bubble — so the set of things that can
+ * suppress a bubble is exactly the set of names below, fixed on the wire and
+ * reviewable in one place. A command that is not here is a prompt, and a
+ * prompt is always drawn.
+ *
+ * A custom command (a skill, a project command) is deliberately absent and
+ * always will be: those EXPAND into a prompt for the agent, so the text the
+ * user typed really is the turn's opening and really does belong in the feed.
+ * Everything about a session command that is a FACT rather than an event: how
+ * it is spelled, and whether text after the name belongs to it.
+ *
+ * Carried as an enum-value OPTION below rather than as traffic, because no
+ * frame carries these facts and every process needs the same answer to them —
+ * the daemon to recognize a submitted prompt, the webapp to complete and to
+ * label one. The three hand-written copies this replaces (the daemon's
+ * recognition table, the webapp's SESSION_COMMANDS list, the webapp's
+ * SESSION_COMMAND_LABELS table) had nothing comparing them, so they drifted:
+ * each was correct on its own and none of them agreed.
+ *
+ * @generated from message agentshim.frontend.v1.SessionCommandSpec
+ */
+export type SessionCommandSpec = Message<"agentshim.frontend.v1.SessionCommandSpec"> & {
+  /**
+   * The command as the user TYPES it, leading slash included — and also the
+   * form a reader is shown. One field for both so a corrected spelling cannot
+   * land in the recognizer while the webapp chip keeps rendering the old one.
+   *
+   * @generated from field: string literal = 1;
+   */
+  literal: string;
+
+  /**
+   * Whether text following the name is an ARGUMENT to this command rather
+   * than prose the user wrote.
+   *
+   * FALSE IS THE DEFAULT AND FALSE IS THE SAFE SIDE. A command that takes no
+   * argument is recognized only as an ENTIRE prompt, so "/status of the build"
+   * stays a prompt and keeps its bubble. Marking a command that takes none as
+   * taking some is the one way this table can swallow something a user
+   * genuinely meant to say to the agent — an unrecoverable loss, since a
+   * suppressed bubble is never drawn later.
+   *
+   * @generated from field: bool takes_args = 2;
+   */
+  takesArgs: boolean;
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.SessionCommandSpec.
+ * Use `create(SessionCommandSpecSchema)` to create a new message.
+ */
+export const SessionCommandSpecSchema: GenMessage<SessionCommandSpec> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_slash_menu, 0);
 
 /**
  * Additive: ONE session command the user invoked, as the feed's record that
@@ -56,7 +117,7 @@ export type SessionCommandItem = Message<"agentshim.frontend.v1.SessionCommandIt
  * Use `create(SessionCommandItemSchema)` to create a new message.
  */
 export const SessionCommandItemSchema: GenMessage<SessionCommandItem> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_slash_menu, 0);
+  messageDesc(file_agentshim_frontend_v1_slash_menu, 1);
 
 /**
  * Additive: the launched skill's own SKILL.md body, addressed to the Skill
@@ -113,28 +174,18 @@ export type SkillBodyItem = Message<"agentshim.frontend.v1.SkillBodyItem"> & {
  * Use `create(SkillBodyItemSchema)` to create a new message.
  */
 export const SkillBodyItemSchema: GenMessage<SkillBodyItem> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_slash_menu, 1);
+  messageDesc(file_agentshim_frontend_v1_slash_menu, 2);
 
 /**
- * A slash command the CLI answers ITSELF, rather than a prompt for the agent.
- *
- * THE CLOSED SET IS THE POINT. The daemon recognizes a submitted prompt as one
- * of these before it forwards it (sessioncontroller/sessioncommand.go), and a
- * recognized command earns NO prompt bubble — so the set of things that can
- * suppress a bubble is exactly the set of names below, fixed on the wire and
- * reviewable in one place. A command that is not here is a prompt, and a
- * prompt is always drawn.
- *
- * A custom command (a skill, a project command) is deliberately absent and
- * always will be: those EXPAND into a prompt for the agent, so the text the
- * user typed really is the turn's opening and really does belong in the feed.
- *
  * @generated from enum agentshim.frontend.v1.SessionCommand
  */
 export enum SessionCommand {
   /**
    * Never set by the daemon. A receiver seeing UNSPECIFIED is looking at a
    * malformed frame and must reject it loudly rather than pick a command.
+   *
+   * It carries NO spec, deliberately: it names no command, so there is no
+   * literal to spell and nothing a recognizer could ever match it against.
    *
    * @generated from enum value: SESSION_COMMAND_UNSPECIFIED = 0;
    */
@@ -296,4 +347,10 @@ export enum SessionCommand {
  */
 export const SessionCommandSchema: GenEnum<SessionCommand> = /*@__PURE__*/
   enumDesc(file_agentshim_frontend_v1_slash_menu, 0);
+
+/**
+ * @generated from extension: agentshim.frontend.v1.SessionCommandSpec session_command_spec = 60002;
+ */
+export const session_command_spec: GenExtension<EnumValueOptions, SessionCommandSpec> = /*@__PURE__*/
+  extDesc(file_agentshim_frontend_v1_slash_menu, 0);
 
