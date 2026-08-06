@@ -495,12 +495,35 @@ func (m *Manager) ReconcileAlreadyComplete(
 			return false, err
 		}
 
+		// THE LEDGER GOES WITH THE AXIS. The shim has stated, live, that no
+		// foreground turn exists; turn liveness is derived from the durable
+		// claims, so retiring the row without retiring the claims would leave
+		// the color idle while the prompt queue still held every prompt behind
+		// a turn the shim says is over — the exact disagreement this whole
+		// design removes. See retireTurnsLocked.
+		tx, txErr := m.db.Begin()
+		if txErr != nil {
+			return false, fmt.Errorf("ssm: begin already-complete reconciliation for workspace %q: %w", workspace, txErr)
+		}
+		defer tx.Rollback()
+		retired, liveness, retireErr := m.retireTurnsLocked(tx, workspace, sessionID, TurnCloseAlreadyComplete)
+		if retireErr != nil {
+			return false, retireErr
+		}
 		if err := appendRow(
-			m.db, workspace, sessionID, sigIdle, causeInterruptAlreadyComplete,
+			tx, workspace, sessionID, sigIdle, causeInterruptAlreadyComplete,
 			sql.NullInt64{}, m.nextAt(), "",
 		); err != nil {
 			return false, fmt.Errorf("ssm: reconcile already-complete verdict for workspace %q session %q: %w",
 				workspace, sessionID, err)
+		}
+		if err := tx.Commit(); err != nil {
+			return false, fmt.Errorf("ssm: commit already-complete reconciliation for workspace %q session %q: %w",
+				workspace, sessionID, err)
+		}
+		if len(retired) > 0 {
+			m.logf("ssm: turn claims RETIRED BY AN ALREADY-COMPLETE ACK ws=%s session=%s closed=%s cause=%s liveness=%s — the shim answered live that no foreground turn exists, so these claims name turns whose ends can never arrive",
+				workspace, sessionID, formatClosedTurnIDs(retired), TurnCloseAlreadyComplete, liveness)
 		}
 		m.logf("ssm: already-complete reconciliation CLOSED ws=%s session=%s previous=%s active_claimant=%q — shim reports no foreground turn, so the footer cannot coexist with an active state",
 			workspace, sessionID, topState, claimant)
