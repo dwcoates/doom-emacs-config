@@ -191,11 +191,97 @@ var unsettledStates = func() map[frontendv1.RenderState]bool {
 	return m
 }()
 
+// staleTurnReasonOrphaned names the reconciliation in the closing row's cause.
+//
+// It is distinct from every teardown token in the stop vocabulary because it
+// describes the OPPOSITE situation: no stop is happening and no shim is being
+// killed. A turn claim was left standing by a shim that died mid-turn, and the
+// daemon has proved — no controller, no process holding the workspace — that
+// nothing can ever report its end.
+const staleTurnReasonOrphaned = "orphaned_turn_no_live_shim"
+
 // acquireSettledHibernationLease returns ErrNotSettled when the workspace is
 // working and otherwise excludes every new prompt/turn start until its release
 // function runs. The SSM owns the snapshot and exclusion under one lock, so no
 // turn can begin between the settled verdict and StopShim.
+//
+// A refusal caused by a turn claim gets ONE reconciliation attempt before it
+// stands (reconcileOrphanedTurn), because a claim whose reporter is gone would
+// otherwise refuse every hibernation for that workspace forever.
 func (m *Manager) acquireSettledHibernationLease(workspace string) (func(), error) {
+	return m.acquireSettledHibernationLeaseAfter(workspace, false)
+}
+
+// reconcileOrphanedTurn closes a workspace's standing turn claim when the party
+// that could report its end is PROVABLY gone, and reports whether it did.
+//
+// # The wedge
+//
+// `state=hibernated` with `turn_active=true` is self-contradictory: hibernation
+// SIGTERMs the shim, so a hibernated session cannot have a live turn. The flag
+// is what a shim killed mid-turn leaves behind. Only a successful shim
+// handshake clears it (the `shim_handshake_no_turns` close), so when the
+// handshake is what keeps failing the workspace can never settle, can never
+// hibernate, and the pair persists across every restart after it.
+//
+// # The proof, and why nothing weaker will do
+//
+// A turn is never GUESSED dead. Two facts must both hold, and either being
+// unavailable is a refusal:
+//
+//   - the daemon drives NO controller for the workspace; and
+//   - NO process holds the workspace's kernel lock, which covers a live shim
+//     that has not dialled in as well as one that has.
+//
+// The second is the load-bearing half. Connection tracking alone answers "not
+// connected" for a surviving shim still inside its reconnect backoff, and
+// closing a turn under a shim that is genuinely mid-turn would paint a running
+// turn idle.
+//
+// The close itself goes through the SAME mechanism every teardown uses, so
+// there is exactly one writer of a synthesized closing row; only the reason
+// distinguishes this cause from a teardown's.
+func (m *Manager) reconcileOrphanedTurn(workspace string, st *frontendv1.WorkspaceState) bool {
+	m.mu.Lock()
+	d, live := m.byWS[workspace]
+	m.mu.Unlock()
+	if live {
+		m.logf("session-controller: orphaned-turn reconciliation DECLINED ws=%q session=%s — a live controller drives this workspace, so its turn claim is not provably stale",
+			workspace, d.sessionID)
+		return false
+	}
+	held, err := m.workspaceLockHeld(workspace)
+	if err != nil {
+		m.logf("session-controller: orphaned-turn reconciliation REFUSED ws=%q — cannot determine whether a shim is alive for it (%v). A turn is never guessed dead, so the claim stands.",
+			workspace, err)
+		return false
+	}
+	if held {
+		m.logf("session-controller: orphaned-turn reconciliation DECLINED ws=%q — a live shim holds this workspace's lock, so the turn may be genuinely running even though nothing has dialled in",
+			workspace)
+		return false
+	}
+	sessionID := st.GetSessionId()
+	closed, err := m.cfg.SSM.CloseStaleTurn(workspace, sessionID, staleTurnReasonOrphaned, true)
+	if err != nil {
+		m.logf("session-controller: orphaned-turn reconciliation FAILED ws=%q session=%q reason=%s: %v — the workspace stays latched in a turn it cannot leave",
+			workspace, sessionID, staleTurnReasonOrphaned, err)
+		return false
+	}
+	if !closed {
+		m.logf("session-controller: orphaned-turn reconciliation WROTE NOTHING ws=%q session=%q reason=%s — the claim is not this session's to spend, or the axis already carried no live turn",
+			workspace, sessionID, staleTurnReasonOrphaned)
+		return false
+	}
+	m.logf("session-controller: orphaned turn CLOSED ws=%q session=%q reason=%s state=%s — no controller and no process hold this workspace, so the turn's end can never be reported and the claim was reconciled",
+		workspace, sessionID, staleTurnReasonOrphaned, st.GetState())
+	return true
+}
+
+// acquireSettledHibernationLeaseAfter is the lease acquisition itself.
+// reconciled records that the orphaned-turn reconciliation has already run for
+// this request, which bounds it to one attempt.
+func (m *Manager) acquireSettledHibernationLeaseAfter(workspace string, reconciled bool) (func(), error) {
 	st, found, release, err := m.cfg.SSM.AcquireHibernationLease(workspace)
 	if err != nil {
 		if errors.Is(err, ssm.ErrControllerRegistrationInProgress) {
@@ -217,5 +303,14 @@ func (m *Manager) acquireSettledHibernationLease(workspace string) (func(), erro
 	release()
 	m.logf("session-controller: REFUSING to hibernate ws=%q — it has not settled (state=%s turn_active=%v). Hibernating it would SIGTERM a shim that is still working and paint the workspace asleep over a live turn",
 		workspace, state, st.GetTurnActive())
+	// ONE CHANCE TO BECOME LEGITIMATE. A turn claim whose reporter is gone
+	// refuses every hibernation of this workspace for as long as the daemon
+	// lives, so the refusal caused by one is where the claim is tested against
+	// the liveness that would justify it. The reconciliation refuses on its own
+	// account whenever it cannot PROVE the turn dead, and it runs at most once
+	// per request, so the retry below cannot recur.
+	if !reconciled && st.GetTurnActive() && m.reconcileOrphanedTurn(workspace, st) {
+		return m.acquireSettledHibernationLeaseAfter(workspace, true)
+	}
 	return nil, fmt.Errorf("%w: workspace %q reads %s (turn_active=%v)", ErrNotSettled, workspace, state, st.GetTurnActive())
 }
