@@ -910,6 +910,18 @@ type RegistryRegistrar struct {
 	// is only right in a unit harness, because a daemon with no backups can
 	// only ever answer a lost transcript with the ladder's hard fault.
 	Backups *TranscriptBackups
+
+	// modelObsMu guards modelObs.
+	modelObsMu sync.Mutex
+	// modelObs is the newest model observation ACCEPTED for each session, and
+	// is what every later one must strictly supersede.
+	//
+	// Process-local on purpose: it exists to order two writers that are both
+	// in this daemon, and a report left in flight cannot outlive the process
+	// that was going to deliver it. A fresh process therefore admits its first
+	// observation for a session unconditionally, which is correct — there is
+	// nothing older still in flight for it to lose to.
+	modelObs map[string]registry.ModelObservation
 }
 
 // SessionModelCatalogObserved accepts a shim-published menu, then re-pushes
@@ -989,10 +1001,26 @@ func (r *RegistryRegistrar) BackfillStateChanged(sessionID, state string) {
 // changed model mid-life was relaunched as the ORIGINAL model after each
 // hibernation. The observed value is the only one a respawn should trust.
 //
+// ORDERED, NOT LAST-WRITER-WINS. rec.Model has two writers — the shim's
+// confirmation of a deliberate model change, and the SystemInit the SDK
+// re-announces on every submit — and nothing used to order them. A SystemInit
+// belonging to a submit that was ALREADY IN FLIGHT when the user changed the
+// model announces the model that submit began under, and rewrote the record to
+// it: the picker repainted to the older value and the next respawn pinned it.
+//
+// An observation that does not strictly supersede the last accepted one is
+// REFUSED and logged, and the record is not touched. That is the whole
+// guarantee, and it is why the check lives here, at the write, rather than at
+// either caller: a new writer added later inherits it without knowing it
+// exists.
+//
 // Idempotent by value: the SDK re-announces its init on every submit, so this
 // is called constantly with an unchanged model and must not write each time.
-func (r *RegistryRegistrar) SessionModelObserved(sessionID, model string) {
+func (r *RegistryRegistrar) SessionModelObserved(sessionID, model string, obs registry.ModelObservation) {
 	if r.Reg == nil || model == "" {
+		return
+	}
+	if !r.admitModelObservation(sessionID, model, obs) {
 		return
 	}
 	changed := false
@@ -1017,6 +1045,42 @@ func (r *RegistryRegistrar) SessionModelObserved(sessionID, model string) {
 	if changed {
 		r.repush(sessionID)
 	}
+}
+
+// admitModelObservation decides whether one model report may reach the record,
+// and records it as the newest accepted one when it may.
+//
+// REFUSAL IS LOUD AND TOTAL. An out-of-order report mutates nothing: it does
+// not advance the accepted token, it does not touch rec.Model, and it does not
+// re-push a SessionView. The canonical log carries both tokens and both models,
+// so the transition that was preserved and the one that was refused are both
+// readable from the shared log alone.
+//
+// An UNTOKENED observation is refused for the same reason: it orders against
+// nothing, so admitting it would restore the last-writer-wins behavior the
+// token exists to remove.
+func (r *RegistryRegistrar) admitModelObservation(sessionID, model string, obs registry.ModelObservation) bool {
+	if !obs.Valid() {
+		if r.Logf != nil {
+			r.Logf("server: session %s: model observation REFUSED model=%q %s reason=untokened_observation — the record is unchanged",
+				sessionID, model, obs)
+		}
+		return false
+	}
+	r.modelObsMu.Lock()
+	defer r.modelObsMu.Unlock()
+	if prev, seen := r.modelObs[sessionID]; seen && !obs.Supersedes(prev) {
+		if r.Logf != nil {
+			r.Logf("server: session %s: model observation REFUSED model=%q %s reason=not_newer_than_accepted accepted=[%s] — the record is unchanged and no SessionView is pushed",
+				sessionID, model, obs, prev)
+		}
+		return false
+	}
+	if r.modelObs == nil {
+		r.modelObs = map[string]registry.ModelObservation{}
+	}
+	r.modelObs[sessionID] = obs
+	return true
 }
 
 // SessionDied marks sessionID's record terminal with the reason its death
