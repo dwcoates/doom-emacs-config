@@ -491,7 +491,12 @@ func historicalTranscriptEvent(t *testing.T, envelopeSessionID, assistantSession
 	t.Helper()
 	line := &datav1.TranscriptLine{Line: &datav1.TranscriptLine_Assistant{Assistant: &datav1.AssistantLine{
 		Envelope: &datav1.LineEnvelope{SessionId: assistantSessionID},
-		Message:  &datav1.ApiAssistantMessage{Id: "message", Usage: &datav1.ApiUsage{InputTokens: 1}},
+		Message: &datav1.ApiAssistantMessage{
+			Id:      "message",
+			Model:   "model",
+			Usage:   &datav1.ApiUsage{InputTokens: 1},
+			Content: []*datav1.ContentBlock{{Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: "historical response"}}}},
+		},
 	}}}
 	vendor, err := anypb.New(line)
 	if err != nil {
@@ -1083,7 +1088,7 @@ func TestHistoricalUsagePersistenceFailurePrecedesConsumerMutation(t *testing.T)
 	}
 }
 
-func TestTokenUtilizationModelRejectionLogsCanonicalIngressContextBeforeConsumerMutation(t *testing.T) {
+func TestTokenUtilizationModelRejectionDegradesAccountingWithoutWithholdingConversation(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		plane     corev1.Plane
@@ -1096,7 +1101,12 @@ func TestTokenUtilizationModelRejectionLogsCanonicalIngressContextBeforeConsumer
 			name:  "live whitespace model",
 			plane: corev1.Plane_PLANE_STREAM,
 			event: func(t *testing.T) *corev1.Event {
-				ev := accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{Message: &datav1.ApiAssistantMessage{Id: "live-message", Model: " \t\n", Usage: &datav1.ApiUsage{InputTokens: 1}}}}})
+				ev := accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{Message: &datav1.ApiAssistantMessage{
+					Id:      "live-message",
+					Model:   " \t\n",
+					Usage:   &datav1.ApiUsage{InputTokens: 1},
+					Content: []*datav1.ContentBlock{{Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: "live response"}}}},
+				}}}})
 				ev.Seq, ev.Plane = 11, corev1.Plane_PLANE_STREAM
 				ev.RequestId = "turn"
 				return ev
@@ -1134,11 +1144,24 @@ func TestTokenUtilizationModelRejectionLogsCanonicalIngressContextBeforeConsumer
 			c := newConsumer("workspace", "daemon-session", push, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }, nil, nil, nil, nil, nil)
 			tc.prepare(c)
 			err := c.Consume(tc.event(t))
-			if err == nil || !strings.Contains(err.Error(), "blank model") {
-				t.Fatalf("Consume error = %v, want blank model rejection", err)
+			if err != nil {
+				t.Fatalf("Consume error = %v, want accounting-only degradation", err)
 			}
-			if len(c.snapshotRing()) != 0 || len(push.convo) != 0 {
-				t.Fatalf("rejected token utilization mutated consumer: retained=%d pushes=%d", len(c.snapshotRing()), len(push.convo))
+			if len(c.snapshotRing()) != 1 || len(push.convo) != 1 {
+				t.Fatalf("conversation delivery after accounting rejection: retained=%d pushes=%d, want 1/1", len(c.snapshotRing()), len(push.convo))
+			}
+			for _, delta := range push.convo {
+				for _, item := range delta.GetItems() {
+					if len(item.GetTokenUtilization()) != 0 {
+						t.Fatalf("invalid token utilization reached conversation item: %+v", item.GetTokenUtilization())
+					}
+				}
+			}
+			if tc.plane == corev1.Plane_PLANE_STREAM && len(c.accounting.turns["turn"].responses) != 0 {
+				t.Fatalf("invalid live token utilization mutated response ledger: %+v", c.accounting.turns["turn"].responses)
+			}
+			if tc.plane == corev1.Plane_PLANE_FILE && len(c.historicalUsageStore.(*fakeHistoricalUsageStore).records) != 0 {
+				t.Fatalf("invalid historical token utilization reached durable store: %+v", c.historicalUsageStore.(*fakeHistoricalUsageStore).records)
 			}
 			log := strings.Join(logs, "\n")
 			for _, field := range []string{
