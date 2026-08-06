@@ -783,24 +783,27 @@ func (m *Manager) applyAssistantLocked(workspace string, wp *workspaceProgress, 
 // applyResultCostLocked decides one turn's UNCACHED input cost and raises the
 // expensive-turn alert when it crosses the threshold.
 //
-// THE MEASURE IS input_tokens PLUS cache_creation_input_tokens, and the second
-// term is the whole point. The CLI marks nearly all input cacheable, so a
-// COLD prompt — a full context re-ingest, the most expensive thing that can
-// happen — surfaces as cache CREATION while raw input_tokens stays near zero.
-// Alerting on input_tokens alone would therefore fire on almost nothing and
-// stay silent for exactly the case it exists to catch.
+// THE MEASURE IS keepalive.UncachedInputTokens, shared with the session
+// controller rather than restated here, so the footer's alert and the cold-ping
+// hibernation can never disagree about whether one turn was cold.
 //
 // A CACHE_KEEP_ALIVE ORIGIN HERE IS THE SHARPEST SIGNAL THE FEATURE PRODUCES.
 // The ping is a dozen tokens of prompt; if it came back having paid for the
 // whole conversation, the cache it was sent to refresh had already expired and
 // the keep-alive is buying nothing. That is a fact about the policy's own
 // premise, so it is logged loudly rather than only rendered.
+//
+// THE ALERT IS STILL ONLY AN ALERT, and deliberately. This resolver produces
+// VIEWS: it holds no session identity, no hibernation claim and no shim, so it
+// reports the cost and stops there. The session controller observes the same
+// result on its own stream and is the thing that stops the session
+// (sessioncontroller/keepalivecold.go).
 func (m *Manager) applyResultCostLocked(workspace string, wp *workspaceProgress, result *datav1.ResultMessage, atMs int64) {
 	usage := result.GetUsage()
 	if usage == nil {
 		return
 	}
-	uncached := usage.GetInputTokens() + usage.GetCacheCreationInputTokens()
+	uncached := keepalive.UncachedInputTokens(usage.GetInputTokens(), usage.GetCacheCreationInputTokens())
 	if uncached <= m.uncachedAlertTokens {
 		return
 	}

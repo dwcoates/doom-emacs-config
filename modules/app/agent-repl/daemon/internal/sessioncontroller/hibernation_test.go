@@ -25,6 +25,16 @@ type fakeHibernations struct {
 	turnEnd map[string]int64
 	// writeErr, when set, fails every HibernationChanged.
 	writeErr error
+	// writeSeen, when non-nil, receives every attempted HibernationChanged —
+	// successful or failed. It is the DETERMINISTIC SEAM an asynchronous
+	// hibernation is awaited on: a test that has dispatched one blocks on this
+	// channel rather than sleeping and hoping.
+	writeSeen chan registry.HibernationDetail
+	// onWrite runs INSIDE HibernationChanged, before anything is recorded and
+	// before the fake's own mutex is taken, so a test can snapshot the manager's
+	// state at the exact instant the sleep is being made durable. Taking no lock
+	// here is what lets the snapshot call back into the manager.
+	onWrite func()
 }
 
 func newFakeHibernations() *fakeHibernations {
@@ -35,6 +45,12 @@ func newFakeHibernations() *fakeHibernations {
 }
 
 func (f *fakeHibernations) HibernationChanged(sessionID string, detail registry.HibernationDetail) error {
+	if f.onWrite != nil {
+		f.onWrite()
+	}
+	if f.writeSeen != nil {
+		f.writeSeen <- detail
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.writeErr != nil {

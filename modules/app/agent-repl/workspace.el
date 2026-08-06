@@ -1447,20 +1447,17 @@ directly or wrapping it themselves with `fboundp'."
        (+workspace-exists-p ws)))
 
 (defun agent-repl--ws-repaint-sidebar (ws reason)
-  "Request a fresh sidebar roster after WS left the tab bar, tagged REASON.
+  "Push a fresh sidebar roster after WS left the tab bar, tagged REASON.
 Killing a perspective REMOVES that workspace's sidebar row
 \(`agent-repl--sidebar-rostered-p'), and a removal the user triggered
-must land on this frame rather than waiting on the 1Hz signature tick —
-the row would otherwise linger for up to a second after its tab vanished.
-The request coalesces into the frame's single gated flush
-\(`agent-repl--sidebar-flush'), so a teardown that touches several
-workspaces still publishes one roster.
+must land at once rather than waiting on the 1Hz signature tick — the
+row would otherwise linger for up to a second after its tab vanished.
 Guarded with `fboundp' and `condition-case': the repaint is a courtesy
 on top of the tick that would eventually notice anyway, so it must
 never turn a teardown into an error."
   (if (not (fboundp 'agent-repl--sidebar-push))
       (agent-repl--log ws "ws-repaint-sidebar: skip ws=%s reason=%s (sidebar not loaded)" ws reason)
-    (agent-repl--log ws "ws-repaint-sidebar: requesting ws=%s reason=%s" ws reason)
+    (agent-repl--log ws "ws-repaint-sidebar: pushing ws=%s reason=%s" ws reason)
     (condition-case err
         (agent-repl--sidebar-push)
       (error (agent-repl--log ws "ws-repaint-sidebar: push error ws=%s reason=%s err=%S"
@@ -1671,15 +1668,6 @@ the original error is re-signaled."
                "ws-materialize-daemon: CREATED ws=%s job-id=%s path=%s session-id=%s branch=%s prompt-queued=%S"
                ws job-id path session-id (plist-get metadata :branch-name)
                (plist-get metadata :initial-prompt-queued))
-              ;; The workspace lands in `persp-names-cache' wherever
-              ;; `persp-add-new' put it (end of the tab-bar), so a daemon
-              ;; job that carried a priority needs an explicit reseat here
-              ;; — the same step `agent-repl-set-priority' and the
-              ;; open-workspace path already perform after mutating
-              ;; `:priority'.  fboundp-guarded so a partial-load test
-              ;; environment without the reorder helper does not crash.
-              (when (fboundp 'agent-repl--reorder-workspace-by-priority)
-                (agent-repl--reorder-workspace-by-priority ws))
               'created)
           (error
            (when hash-created
