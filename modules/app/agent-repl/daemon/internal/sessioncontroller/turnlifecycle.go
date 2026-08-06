@@ -67,7 +67,11 @@ func (c *consumer) reconcileTurnHandshake(hello *corev1.ShimHello) (active bool,
 }
 
 // resolve decides whether ev may mutate live turn state.
-func (t turnLifecycle) resolve(ev *corev1.Event) (turnResolution, error) {
+//
+// liveQueryInstanceID is the query the consumer is currently bound to. It is
+// handed down per call rather than held on the struct because the binding
+// changes at each handshake while the resolver lives for the consumer.
+func (t turnLifecycle) resolve(ev *corev1.Event, liveQueryInstanceID string) (turnResolution, error) {
 	base := turnResolution{correlation: turnID(ev)}
 	if ev.GetPlane() != corev1.Plane_PLANE_STREAM {
 		base.decision = "reject_non_authoritative_plane"
@@ -75,7 +79,7 @@ func (t turnLifecycle) resolve(ev *corev1.Event) (turnResolution, error) {
 		return base, fmt.Errorf("turn lifecycle plane %s is not authoritative", ev.GetPlane().String())
 	}
 	before, after, replayed, err := t.store.ResolveTurnLifecycle(
-		t.workspace, t.claimantSessionID, ev,
+		t.workspace, t.claimantSessionID, liveQueryInstanceID, ev,
 	)
 	base.before = formatTurnIDs(before)
 	base.after = formatTurnIDs(after)

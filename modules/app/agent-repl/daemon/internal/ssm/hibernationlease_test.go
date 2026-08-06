@@ -83,7 +83,7 @@ func TestHibernationLeaseExcludesNewPromptAndTurnStarts(t *testing.T) {
 	}
 
 	start := turnClaimEvent(true, 1, "turn-after-lease")
-	if _, _, _, err := m.ResolveTurnLifecycle("ws", "daemon-session", start); err == nil || !strings.Contains(err.Error(), "hibernation owns turn admission") {
+	if _, _, _, err := m.ResolveTurnLifecycle("ws", "daemon-session", "", start); err == nil || !strings.Contains(err.Error(), "hibernation owns turn admission") {
 		t.Fatalf("ResolveTurnLifecycle during lease = %v, want refusal", err)
 	}
 	if err := m.MarkPromptAccepted("ws", "daemon-session", "request", func(*frontendv1.WorkspaceState) {}); err == nil || !strings.Contains(err.Error(), "hibernation owns turn admission") {
@@ -91,14 +91,14 @@ func TestHibernationLeaseExcludesNewPromptAndTurnStarts(t *testing.T) {
 	}
 
 	release()
-	if _, _, _, err := m.ResolveTurnLifecycle("ws", "daemon-session", start); err != nil {
+	if _, _, _, err := m.ResolveTurnLifecycle("ws", "daemon-session", "", start); err != nil {
 		t.Fatalf("ResolveTurnLifecycle after release: %v", err)
 	}
 }
 
 func TestHibernationLeaseSnapshotIncludesDurableUnappliedTurnClaim(t *testing.T) {
 	m, _, _ := openUnwiredTest(t, fakeResolver{"vendor-session": "ws"})
-	if _, _, _, err := m.ResolveTurnLifecycle("ws", "daemon-session", turnClaimEvent(true, 1, "turn-before-lease")); err != nil {
+	if _, _, _, err := m.ResolveTurnLifecycle("ws", "daemon-session", "", turnClaimEvent(true, 1, "turn-before-lease")); err != nil {
 		t.Fatalf("ResolveTurnLifecycle: %v", err)
 	}
 
@@ -116,13 +116,13 @@ func TestHibernationLeaseAdmitsExactCompletedTurnReplayWithoutStartingATurn(t *t
 	m, _, _ := openUnwiredTest(t, fakeResolver{"vendor-session": "ws"})
 	start := turnClaimEvent(true, 1, "completed-turn")
 	end := turnClaimEvent(false, 2, "completed-turn")
-	if _, _, _, err := m.ResolveTurnLifecycle("ws", "daemon-session", start); err != nil {
+	if _, _, _, err := m.ResolveTurnLifecycle("ws", "daemon-session", "", start); err != nil {
 		t.Fatalf("Resolve start: %v", err)
 	}
 	if err := m.Apply(start); err != nil {
 		t.Fatalf("Apply start: %v", err)
 	}
-	if _, _, _, err := m.ResolveTurnLifecycle("ws", "daemon-session", end); err != nil {
+	if _, _, _, err := m.ResolveTurnLifecycle("ws", "daemon-session", "", end); err != nil {
 		t.Fatalf("Resolve end: %v", err)
 	}
 	if err := m.Apply(end); err != nil {
@@ -134,7 +134,7 @@ func TestHibernationLeaseAdmitsExactCompletedTurnReplayWithoutStartingATurn(t *t
 		t.Fatalf("AcquireHibernationLease: %v", err)
 	}
 	defer release()
-	before, after, replayed, err := m.ResolveTurnLifecycle("ws", "daemon-session", start)
+	before, after, replayed, err := m.ResolveTurnLifecycle("ws", "daemon-session", "", start)
 	if err != nil || !replayed || len(before) != 0 || len(after) != 0 {
 		t.Fatalf("completed replay during lease = before:%v after:%v replayed:%t err:%v", before, after, replayed, err)
 	}

@@ -60,7 +60,10 @@ const (
 // crashes after recording a boundary but before advancing last_seen_seq, the
 // replayed event is admitted only when both its identity and seq match the
 // durable receipt.
-func (m *Manager) ResolveTurnLifecycle(workspace, claimantSessionID string, ev *corev1.Event) (before, after []string, replayed bool, err error) {
+// liveQueryInstanceID is the query() invocation the CALLER is bound to. It is
+// compared, once, against the query the event's producer stamped on its
+// envelope; see turnEndIsHistorical.
+func (m *Manager) ResolveTurnLifecycle(workspace, claimantSessionID, liveQueryInstanceID string, ev *corev1.Event) (before, after []string, replayed bool, err error) {
 	if workspace == "" {
 		err := fmt.Errorf("ssm: turn lifecycle got an empty workspace")
 		m.logf("ssm: turn ledger decision=reject_validation workspace=%q claimant_session=%q event=%v error=%v",
@@ -126,6 +129,7 @@ func (m *Manager) ResolveTurnLifecycle(workspace, claimantSessionID string, ev *
 	case *corev1.Event_TurnEnded:
 		replayed, err = recordTurnEnd(
 			tx, workspace, claimantSessionID, ev.GetSessionId(), id, ev.GetSeq(),
+			turnEndIsHistorical(liveQueryInstanceID, ev),
 		)
 	default:
 		err = fmt.Errorf("ssm: turn lifecycle resolver received %T", ev.GetPayload())
@@ -715,10 +719,32 @@ func recordTurnBridge(
 	return false, nil
 }
 
+// turnEndIsHistorical reports whether ev was produced by a query other than the
+// one the caller is bound to.
+//
+// ONE COMPARISON, nothing else. The producer stamped the query it was running
+// onto the envelope at construction time, so the answer is carried by the event
+// rather than reconstructed here from delivery order or ledger archaeology.
+//
+// EMPTY IS LIVE. FAIL CLOSED. A producer that predates query_instance_id stamps
+// nothing, and the claim check must then apply to it exactly as it did before
+// the field existed. A caller with no bound query likewise admits no history.
+func turnEndIsHistorical(liveQueryInstanceID string, ev *corev1.Event) bool {
+	if liveQueryInstanceID == "" {
+		return false
+	}
+	eventQuery := ev.GetQueryInstanceId()
+	return eventQuery != "" && eventQuery != liveQueryInstanceID
+}
+
+// historical says the end was produced by a retired query. Such an end reports
+// a turn whose owning query() invocation is gone: there is no live claim it
+// could belong to, and no live state it may touch.
 func recordTurnEnd(
 	tx *sql.Tx,
 	workspace, claimantSessionID, eventSessionID, id string,
 	seq uint64,
+	historical bool,
 ) (bool, error) {
 	query := `SELECT claim_id, start_event_session_id, bridge_event_session_id,
 			end_seq, end_event_session_id, end_cause
@@ -789,6 +815,14 @@ func recordTurnEnd(
 			// Idempotent, and deliberately reported as a REPLAY: the boundary is
 			// real, the daemon already accounted for it, and nothing about the
 			// state it produces is left to write a second time.
+			return true, nil
+		}
+		if historical {
+			// AN END FROM A RETIRED QUERY IS HISTORY, NOT A CONTRADICTION.
+			// The query that produced it no longer exists, so it can own no
+			// live claim and there is nothing here to be inconsistent with.
+			// Accepted, reported as a replay, and no row is written: the
+			// transaction leaves the ledger exactly as it found it.
 			return true, nil
 		}
 		return false, fmt.Errorf("turn end id %q seq=%d has no durable active claim", id, seq)
