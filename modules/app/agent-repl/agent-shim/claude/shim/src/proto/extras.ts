@@ -268,6 +268,11 @@ export function unparsedEvent(
     sessionId?: string;
     requestId?: string;
     producedAtMs?: number;
+    /**
+     * The query() invocation the producer was running when the unreadable
+     * record arrived. See the `query_instance_id` contract in core.proto.
+     */
+    queryInstanceId?: string;
     /** False when the converter already emitted the owning causal record. */
     log?: boolean;
   } = {},
@@ -283,6 +288,7 @@ export function unparsedEvent(
     plane: Plane.STREAM,
     class: EventClass.PERSISTENT,
     requestId: fields.requestId ?? "",
+    queryInstanceId: fields.queryInstanceId ?? "",
     producedAtMs: BigInt(fields.producedAtMs ?? Date.now()),
     payload: {
       case: "unparsed",

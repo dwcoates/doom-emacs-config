@@ -106,3 +106,25 @@ describe("unparsedEvent", () => {
     expect(e.message).toBe("nope");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Producer provenance on the unparsable-record envelope.
+// ---------------------------------------------------------------------------
+
+describe("unparsedEvent provenance", () => {
+  it("stamps the query the producer was running", () => {
+    // Arrange / Act.
+    const evt = unparsedEvent("{bad", "boom", { queryInstanceId: "query-running", log: false });
+
+    // Assert.
+    expect(evt.queryInstanceId).toBe("query-running");
+  });
+
+  it("leaves the envelope empty when the caller names no query", () => {
+    // Arrange / Act.
+    const evt = unparsedEvent("{bad", "boom", { log: false });
+
+    // Assert: empty means no query, which consumers treat as live.
+    expect(evt.queryInstanceId).toBe("");
+  });
+});
