@@ -73,7 +73,7 @@ agent panel it is, with no special-casing left to carve out."
 ;;;; ---- ensure-webview-buffer ------------------------------------------------
 
 (ert-deftest agent-repl-test-frontend-webview-created-and-pinned ()
-  "A fresh webview is created at the session URL with a pinned name."
+  "A fresh webview is created at the workspace URL with a pinned name."
   ;; Arrange
   (defvar agent-repl-test--urls)
   (let ((agent-repl-test--urls '()))
@@ -81,15 +81,13 @@ agent panel it is, with no special-casing left to carve out."
       (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
                  (agent-repl-test--fake-webview-factory 'agent-repl-test--urls)))
         ;; Act
-        (let ((buf (agent-repl--frontend-ensure-webview-buffer
-                    "ws1" "s_1" "http://x/?session=s_1")))
+        (let ((buf (agent-repl--frontend-ensure-webview-buffer "ws1" "http://x/?workspace=%2Fw")))
           ;; Assert
-          (should (equal agent-repl-test--urls '("http://x/?session=s_1")))
+          (should (equal agent-repl-test--urls '("http://x/?workspace=%2Fw")))
           (should (equal (buffer-name buf) "*agent-frontend-ws1*"))
           (should (equal (buffer-local-value 'xwidget-webkit-buffer-name-format buf)
                          "*agent-frontend-ws1*"))
-          (should (eq (agent-repl--ws-get "ws1" :frontend-buffer) buf))
-          (should (equal (agent-repl--ws-get "ws1" :frontend-buffer-session-id) "s_1")))))))
+          (should (eq (agent-repl--ws-get "ws1" :frontend-buffer) buf)))))))
 
 (ert-deftest agent-repl-test-frontend-webview-mount-never-probes-health ()
   "The render chokepoint asks the daemon nothing about the session's health.
@@ -107,8 +105,7 @@ establishment, so a probe here would be a question already answered."
                 ((symbol-function 'agent-repl--frontend-make-webview-buffer)
                  (agent-repl-test--fake-webview-factory 'agent-repl-test--urls)))
         ;; Act
-        (agent-repl--frontend-ensure-webview-buffer
-         "ws1" "s_1" "http://x/?session=s_1")
+        (agent-repl--frontend-ensure-webview-buffer "ws1" "http://x/?workspace=%2Fw")
         ;; Assert
         (should-not probed)))))
 
@@ -121,8 +118,7 @@ establishment, so a probe here would be a question already answered."
       (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
                  (agent-repl-test--fake-webview-factory 'agent-repl-test--urls)))
         ;; Act
-        (let ((buf (agent-repl--frontend-ensure-webview-buffer
-                    "ws1" "s_1" "http://x/?session=s_1")))
+        (let ((buf (agent-repl--frontend-ensure-webview-buffer "ws1" "http://x/?workspace=%2Fw")))
           ;; Assert
           (should-not (buffer-local-value 'header-line-format buf)))))))
 
@@ -134,11 +130,9 @@ establishment, so a probe here would be a question already answered."
     (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
       (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
                  (agent-repl-test--fake-webview-factory 'agent-repl-test--urls)))
-        (let ((first (agent-repl--frontend-ensure-webview-buffer
-                      "ws1" "s_1" "http://x/?session=s_1")))
+        (let ((first (agent-repl--frontend-ensure-webview-buffer "ws1" "http://x/?workspace=%2Fw")))
           ;; Act
-          (let ((second (agent-repl--frontend-ensure-webview-buffer
-                         "ws1" "s_1" "http://x/?session=s_1")))
+          (let ((second (agent-repl--frontend-ensure-webview-buffer "ws1" "http://x/?workspace=%2Fw")))
             ;; Assert — one creation only.
             (should (eq first second))
             (should (= (length agent-repl-test--urls) 1))))))))
@@ -152,31 +146,30 @@ establishment, so a probe here would be a question already answered."
       (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
                  (agent-repl-test--fake-webview-factory 'agent-repl-test--urls)))
         ;; Act
-        (let ((buf (agent-repl--frontend-ensure-webview-buffer
-                    "ws1" "s_1" "http://x/?session=s_1")))
+        (let ((buf (agent-repl--frontend-ensure-webview-buffer "ws1" "http://x/?workspace=%2Fw")))
           ;; Assert
           (should (equal (buffer-local-value 'default-directory buf) "/w/")))))))
 
-(ert-deftest agent-repl-test-frontend-webview-rebound-on-session-change ()
-  "A session change kills the stale webview and mounts a fresh one."
+(ert-deftest agent-repl-test-frontend-webview-survives-a-session-change ()
+  "A live webview is kept whatever happens to the workspace's session.
+The mounted URL addresses the WORKSPACE, so a session change leaves it
+naming the same thing; remounting for one would throw away a rendered
+feed to navigate to the identical address."
   ;; Arrange
   (defvar agent-repl-test--urls)
   (let ((agent-repl-test--urls '()))
     (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
       (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
                  (agent-repl-test--fake-webview-factory 'agent-repl-test--urls)))
-        (let ((old (agent-repl--frontend-ensure-webview-buffer
-                    "ws1" "s_old" "http://x/?session=s_old")))
-          ;; Act
-          (let ((new (agent-repl--frontend-ensure-webview-buffer
-                      "ws1" "s_new" "http://x/?session=s_new")))
+        (let ((old (agent-repl--frontend-ensure-webview-buffer "ws1" "http://x/?workspace=%2Fw")))
+          ;; Act — the workspace's session turns over underneath the view.
+          (let ((new (agent-repl--frontend-ensure-webview-buffer "ws1" "http://x/?workspace=%2Fw")))
             ;; Assert
-            (should-not (buffer-live-p old))
-            (should (buffer-live-p new))
-            (should (equal (agent-repl--ws-get "ws1" :frontend-buffer-session-id) "s_new"))
-            (should (= (length agent-repl-test--urls) 2))))))))
+            (should (eq old new))
+            (should (buffer-live-p old))
+            (should (= (length agent-repl-test--urls) 1))))))))
 
-;;;; ---- sync-webview -----------------------------------------------------------
+;;;; ---- webview URL ------------------------------------------------------------
 
 (ert-deftest agent-repl-test-frontend-webview-url-carries-composer-flag ()
   "The webview URL always hides the webapp composer (Emacs owns input)."
@@ -217,65 +210,13 @@ from it to different places."
              (regexp-quote (url-hexify-string (agent-repl--frontend-ws-command-key "ws1")))
              (agent-repl--frontend-webview-url "ws1")))))
 
-(ert-deftest agent-repl-test-frontend-sync-webview-no-op-when-binding-matches ()
-  "sync-webview does not touch a webview already bound to the session."
-  ;; Arrange
-  (defvar agent-repl-test--urls)
-  (let ((agent-repl-test--urls '()))
-    (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-      (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
-                 (agent-repl-test--fake-webview-factory 'agent-repl-test--urls)))
-        (let ((buf (agent-repl--frontend-ensure-webview-buffer
-                    "ws1" "s_1" "http://x/?session=s_1")))
-          ;; Act
-          (agent-repl--frontend-sync-webview "ws1" "s_1")
-          ;; Assert — no second mount.
-          (should (buffer-live-p buf))
-          (should (= (length agent-repl-test--urls) 1)))))))
-
-(ert-deftest agent-repl-test-frontend-sync-webview-remounts-on-heal ()
-  "sync-webview remounts the webview onto a healed session's id."
-  ;; Arrange
-  (defvar agent-repl-test--urls)
-  (let ((agent-repl-test--urls '()))
-    (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-      (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
-                 (agent-repl-test--fake-webview-factory 'agent-repl-test--urls)))
-        (let ((old (agent-repl--frontend-ensure-webview-buffer
-                    "ws1" "s_dead" "http://x/?session=s_dead")))
-          ;; Act
-          (agent-repl--frontend-sync-webview "ws1" "s_fresh")
-          ;; Assert — stale webview replaced, bound to the new session.
-          (should-not (buffer-live-p old))
-          (should (equal (agent-repl--ws-get "ws1" :frontend-buffer-session-id)
-                         "s_fresh"))
-          ;; The factory pushes newest-first; the remount URL is the head. It
-          ;; addresses the WORKSPACE, so the healed session is what the
-          ;; buffer binding records, not what the browser navigates to.
-          (should (string-match-p "workspace=%2Fw"
-                                  (car agent-repl-test--urls)))
-          (should-not (string-match-p "session" (car agent-repl-test--urls))))))))
-
-(ert-deftest agent-repl-test-frontend-sync-webview-no-op-without-live-buffer ()
-  "sync-webview does nothing when no webview buffer exists (panel closed)."
-  ;; Arrange
-  (defvar agent-repl-test--urls)
-  (let ((agent-repl-test--urls '()))
-    (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-      (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
-                 (agent-repl-test--fake-webview-factory 'agent-repl-test--urls)))
-        ;; Act
-        (agent-repl--frontend-sync-webview "ws1" "s_1")
-        ;; Assert
-        (should (null agent-repl-test--urls))))))
-
 ;;;; ---- remount-webview (bundle reload) ----------------------------------------
 
 (ert-deftest agent-repl-test-frontend-remount-webview-reloads-live-buffer ()
-  "Remount kills the live webview and mounts a fresh one on the SAME session.
-This is the whole point over `agent-repl--frontend-ensure-session' reuse:
-an unchanged session would otherwise keep the stale buffer, so the served
-bundle would never be refetched."
+  "Remount kills the live webview and mounts a fresh one at the same URL.
+This is the whole point over `agent-repl--frontend-ensure-webview-buffer'
+reuse: a live buffer would otherwise be kept, so the served bundle would
+never be refetched."
   ;; Arrange
   (defvar agent-repl-test--urls)
   (let ((agent-repl-test--urls '()))
@@ -283,16 +224,14 @@ bundle would never be refetched."
       (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
                  (agent-repl-test--fake-webview-factory 'agent-repl-test--urls))
                  ((symbol-function 'agent-repl--frontend-after-ensure-session)
-                  (lambda (_ws ok _fail) (funcall ok "s_1") :ready)))
-        (let ((old (agent-repl--frontend-ensure-webview-buffer
-                    "ws1" "s_1" "http://x/?session=s_1")))
+                  (lambda (_ws ok _fail) (funcall ok) :ready)))
+        (let ((old (agent-repl--frontend-ensure-webview-buffer "ws1" "http://x/?workspace=%2Fw")))
           ;; Act
           (let ((new (agent-repl--frontend-remount-webview "ws1")))
             ;; Assert
             (should-not (buffer-live-p old))
             (should (eq new :pending))
             (should (buffer-live-p (agent-repl--ws-get "ws1" :frontend-buffer)))
-            (should (equal (agent-repl--ws-get "ws1" :frontend-buffer-session-id) "s_1"))
             (should (= (length agent-repl-test--urls) 2))))))))
 
 (ert-deftest agent-repl-test-frontend-remount-webview-noop-when-closed ()
@@ -324,7 +263,7 @@ bundle would never be refetched."
                    (lambda (_ws &optional _purpose) "s_x"))
                   ((symbol-function 'agent-repl--live-ws-names)
                    (lambda () '("ws1" "ws2"))))
-          (agent-repl--frontend-ensure-webview-buffer "ws1" "s_x" "http://x/?session=s_x")
+          (agent-repl--frontend-ensure-webview-buffer "ws1" "http://x/?workspace=%2Fw")
           ;; Act
           (let ((count (agent-repl--frontend-remount-all-webviews)))
             ;; Assert — only ws1 had an open webview.
@@ -349,10 +288,9 @@ bundle would never be refetched."
       (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
                  (agent-repl-test--fake-webview-factory 'agent-repl-test--urls))
                  ((symbol-function 'agent-repl--frontend-after-ensure-session)
-                  (lambda (_ws ok _fail) (funcall ok "s_1") :ready))
+                  (lambda (_ws ok _fail) (funcall ok) :ready))
                 ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1")))
-        (let ((old (agent-repl--frontend-ensure-webview-buffer
-                    "ws1" "s_1" "http://x/?session=s_1")))
+        (let ((old (agent-repl--frontend-ensure-webview-buffer "ws1" "http://x/?workspace=%2Fw")))
           ;; Act
           (agent-repl-frontend-reload-webview)
           ;; Assert
@@ -372,19 +310,18 @@ bundle would never be refetched."
 (ert-deftest agent-repl-test-frontend-force-fresh-command-recreates-and-syncs ()
   "The force-fresh command recreates the session and snaps the webview to it."
   ;; Arrange
-  (let (synced)
+  (let (freshened)
     (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
               ((symbol-function 'agent-repl--frontend-force-fresh-session)
                (lambda (ws ok _fail)
-                 (should (equal ws "ws1"))
-                 (funcall ok "fresh-sid")
-                 :pending))
-              ((symbol-function 'agent-repl--frontend-sync-webview)
-               (lambda (ws id) (setq synced (list ws id)))))
+                 (setq freshened ws)
+                 (funcall ok)
+                 :pending)))
       ;; Act
       (agent-repl-force-fresh-conversation)
-      ;; Assert — the fresh id is what the displayed webview is synced to.
-      (should (equal synced '("ws1" "fresh-sid"))))))
+      ;; Assert — the displayed webview is left alone: its URL addresses the
+      ;; workspace, so a fresh conversation arrives on the socket it holds.
+      (should (equal freshened "ws1")))))
 
 ;;;; ---- Copy chords ------------------------------------------------------------
 
@@ -397,8 +334,7 @@ bundle would never be refetched."
       (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
                  (agent-repl-test--fake-webview-factory 'agent-repl-test--urls)))
         ;; Act
-        (let ((buf (agent-repl--frontend-ensure-webview-buffer
-                    "ws1" "s_1" "http://x/?session=s_1")))
+        (let ((buf (agent-repl--frontend-ensure-webview-buffer "ws1" "http://x/?workspace=%2Fw")))
           ;; Assert
           (should (buffer-local-value 'agent-repl-frontend-webview-mode buf)))))))
 
@@ -1272,9 +1208,7 @@ exact failure seen live in the fresh instance."
       (should required))))
 
 (ert-deftest agent-repl-test-frontend-open-panel-wires-session-to-webview ()
-  "open-panel threads ensure-session's id into the webview binding and display.
-The URL it mounts addresses the WORKSPACE; the session id is the buffer
-binding that decides whether a later sync must remount."
+  "open-panel establishes the workspace, then mounts and displays its webview."
   ;; Arrange
   (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
     (let ((displayed nil)
@@ -1284,10 +1218,9 @@ binding that decides whether a later sync must remount."
                 ((symbol-function 'agent-repl--ws-current-name)
                  (lambda () "ws1"))
                  ((symbol-function 'agent-repl--frontend-after-ensure-session)
-                  (lambda (ws ok _fail) (setq ensured ws) (funcall ok "s_42") :ready))
+                  (lambda (ws ok _fail) (setq ensured ws) (funcall ok) :ready))
                 ((symbol-function 'agent-repl--frontend-ensure-webview-buffer)
-                 (lambda (_ws id url)
-                   (should (equal id "s_42"))
+                 (lambda (_ws url)
                    ;; composer=0: Emacs owns input in the hybrid UI.
                    (should (string-suffix-p "/?workspace=%2Fw&composer=0" url))
                    'fake-buffer))
@@ -1361,7 +1294,7 @@ The webapp status bar renders it in its topbar."
   (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
     (let ((ensured nil))
        (cl-letf (((symbol-function 'agent-repl--frontend-after-ensure-session)
-                  (lambda (ws ok _fail) (setq ensured ws) (funcall ok "s_42") :ready)))
+                  (lambda (ws ok _fail) (setq ensured ws) (funcall ok) :ready)))
         ;; Act
         (agent-repl--gui-boot "ws1" "/w" :bare-metal)
         ;; Assert
@@ -1426,19 +1359,17 @@ must be rejected before the daemon is ever contacted."
 ;;;; ---- close-panel ------------------------------------------------------------------
 
 (ert-deftest agent-repl-test-frontend-close-panel-kills-and-clears ()
-  "close-panel kills the webview and clears both plist keys."
+  "close-panel kills the webview and clears its plist key."
   ;; Arrange
   (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
     (let ((buf (generate-new-buffer "*fake-webview*")))
       (agent-repl--ws-put "ws1" :frontend-buffer buf)
-      (agent-repl--ws-put "ws1" :frontend-buffer-session-id "s_1")
       (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1")))
         ;; Act
         (agent-repl-frontend-close-panel)
         ;; Assert
         (should-not (buffer-live-p buf))
-        (should (null (agent-repl--ws-get "ws1" :frontend-buffer)))
-        (should (null (agent-repl--ws-get "ws1" :frontend-buffer-session-id)))))))
+        (should (null (agent-repl--ws-get "ws1" :frontend-buffer)))))))
 
 (ert-deftest agent-repl-test-frontend-kill-webview-suppresses-query-prompt ()
   "Webview kills bypass kill-buffer query functions.
@@ -1572,8 +1503,7 @@ reopen mid-initialize (the \"webview buffer is null/dead\" cascade)."
         (agent-repl--gui-kill "ws1")
         ;; Assert — layout teardown precedes the releases.
         (should (equal (nreverse order) '(hide release-session release-webview)))
-        (should (null (agent-repl--ws-get "ws1" :frontend-buffer)))
-        (should (null (agent-repl--ws-get "ws1" :frontend-buffer-session-id)))))))
+        (should (null (agent-repl--ws-get "ws1" :frontend-buffer)))))))
 
 (ert-deftest agent-repl-test-frontend-webview-killed-on-ws-nuke ()
   "The nuke hook kills the webview so the WKWebView never outlives the ws."
