@@ -451,6 +451,12 @@ type Manager struct {
 	// while the connection that carried it is live, and a pid outliving its
 	// connection is a pid-reuse hazard rather than a stop handle.
 	shimPID map[string]int32
+	// bringUpFailures counts each session's CONSECUTIVE resolved bring-up
+	// failures. It is the ladder's give-up bound (bringupescape.go): a session
+	// that reaches bringUpGiveUpAfter is not respawned again, because every
+	// further attempt costs a whole bringUpTimeout of the daemon's attention.
+	// Cleared by a bring-up that wires and by a deliberate hibernation.
+	bringUpFailures map[string]int
 	// buildBounced remembers the sessions already bounced for a stale bundle,
 	// so a shim that comes back still reporting a mismatched build (a bundle
 	// whose identity cannot move, a stamp that is wrong) is loud ONCE instead
@@ -761,6 +767,7 @@ func New(cfg Config) (*Manager, error) {
 		parked:                    make(map[string]*parkedSession),
 		lastCSID:                  make(map[string]string),
 		shimPID:                   make(map[string]int32),
+		bringUpFailures:           make(map[string]int),
 		buildBounced:              make(map[string]bool),
 		buildRefresh:              make(map[string]*buildRefreshState),
 		rootCtx:                   rootCtx,
@@ -1988,6 +1995,10 @@ func (m *Manager) hibernate(workspace, wantSession string, cause StopCause) erro
 	// is silent for this retired generation, so no later connectivity edge can
 	// overwrite this completed teardown.
 	m.noteConnectivity(workspace, d.sessionID, d.generationID, ssm.SessionConnectivityHibernated, "hibernated")
+	// A deliberate stand-down retires whatever streak of bring-up failures the
+	// session had accumulated, so a revival climbs the ladder from the bottom
+	// rather than inheriting a park (bringupescape.go).
+	m.clearBringUpFailures(d.sessionID)
 	return nil
 }
 
@@ -2096,6 +2107,18 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 			workspace, sessionID, detail.Cause, detail.SinceMs)
 		return nil, false, fmt.Errorf("%w: workspace %q session %s has been asleep since %d (%s)",
 			ErrHibernated, workspace, sessionID, detail.SinceMs, detail.Cause)
+	}
+	// THE GIVE-UP BOUND, BEFORE ANYTHING IS SPAWNED. A session that has already
+	// failed bring-up bringUpGiveUpAfter times in a row is parked: its failure
+	// card is standing, and every further attempt would cost another
+	// bringUpTimeout during which the daemon dispatches nothing. The park is
+	// lifted by a bring-up that wires or by a deliberate hibernation
+	// (bringupescape.go).
+	if failures := m.bringUpFailuresFor(sessionID); failures >= bringUpGiveUpAfter {
+		m.logf("session-controller: bring-up REFUSED by the give-up bound ws=%q session=%s consecutive_failures=%d bound=%d — the session is parked on its standing failure card and no shim was spawned",
+			workspace, sessionID, failures, bringUpGiveUpAfter)
+		return nil, false, fmt.Errorf("%w: workspace %q session %s has failed bring-up %d times in a row",
+			ErrBringUpGaveUp, workspace, sessionID, failures)
 	}
 	generationID, err := m.newControllerGenerationID()
 	if err != nil {

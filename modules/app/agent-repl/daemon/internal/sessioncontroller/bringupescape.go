@@ -17,9 +17,19 @@
 //     same conversation exactly once.
 //  3. A vendor failure or failed retry is terminal: the axis closes with
 //     `bring_up_failed` and a loud failure card names the error.
+//  4. A session whose bring-ups keep failing is GIVEN UP ON after
+//     bringUpGiveUpAfter of them in a row: the ladder stops respawning and the
+//     session parks on the same closed axis and failure card rung 3 publishes,
+//     with the card naming the give-up.
 //
-// So every bring-up now ends on `wired` or on a resolved failure, and
-// "wedged on starting" has no path left.
+// So every bring-up ends on `wired` or on a resolved failure, and "wedged on
+// starting" has no path left.
+//
+// RUNG 4 IS A BOUND ON THE LADDER, NOT A REPLACEMENT FOR IT. Every rung above
+// still runs exactly as it did; the bound only decides when the ladder stops
+// being re-climbed. Without it a session that cannot come up is retried
+// forever, and each attempt costs a full bringUpTimeout during which the
+// daemon's inline frontend read loop dispatches nothing.
 package sessioncontroller
 
 import (
@@ -41,6 +51,62 @@ import (
 // with `sdk_error`, so it arrives over the live connection even when ShimReady
 // never does, and it carries the vendor's own message verbatim.
 const shimSDKComponent = "claude-shim-sdk"
+
+// bringUpGiveUpAfter is how many CONSECUTIVE resolved bring-up failures a
+// session is allowed before the daemon stops respawning it.
+//
+// Three, because a healthy bring-up takes under four seconds end to end while a
+// failing one costs a full bringUpTimeout: three is enough to ride out a
+// transient (a machine under load, a vendor blip) and few enough that a session
+// which genuinely cannot start stops eating half a minute of the daemon's
+// attention per attempt. The count is per session and is cleared by any
+// successful bring-up, so an intermittent session never accumulates toward it.
+const bringUpGiveUpAfter = 3
+
+// ErrBringUpGaveUp reports that a session reached bringUpGiveUpAfter
+// consecutive bring-up failures and will not be respawned.
+//
+// It is a sentinel because it is a POLICY refusal rather than a failure of the
+// attempt in front of the caller: nothing was tried this time. A caller must be
+// able to tell "this session is parked" from "this bring-up failed" without
+// matching message text.
+var ErrBringUpGaveUp = errors.New("session-controller: the session has failed bring-up too many times in a row and is no longer being respawned")
+
+// noteBringUpFailure records one resolved bring-up failure and reports the
+// session's consecutive-failure count together with whether that count has
+// reached the give-up bound.
+func (m *Manager) noteBringUpFailure(sessionID string) (failures int, givenUp bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.bringUpFailures == nil {
+		m.bringUpFailures = make(map[string]int)
+	}
+	m.bringUpFailures[sessionID]++
+	failures = m.bringUpFailures[sessionID]
+	return failures, failures >= bringUpGiveUpAfter
+}
+
+// bringUpFailuresFor reports the session's consecutive resolved bring-up
+// failures so far, NOT counting one currently being resolved.
+func (m *Manager) bringUpFailuresFor(sessionID string) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.bringUpFailures[sessionID]
+}
+
+// clearBringUpFailures resets the session's consecutive-failure count. Called
+// from the two edges that make the count meaningless: a bring-up that WIRED,
+// and a deliberate hibernation, which stands the session down and so is also
+// the operator's way out of a parked session.
+func (m *Manager) clearBringUpFailures(sessionID string) {
+	m.mu.Lock()
+	cleared := m.bringUpFailures[sessionID]
+	delete(m.bringUpFailures, sessionID)
+	m.mu.Unlock()
+	if cleared > 0 {
+		m.logf("session-controller: bring-up failure streak CLEARED session=%s failures=%d", sessionID, cleared)
+	}
+}
 
 type bringUpFailureKind string
 
@@ -118,6 +184,9 @@ func (m *Manager) noteWired(workspace, sessionID string) {
 		d.wired = true
 	}
 	m.mu.Unlock()
+	// A bring-up that wired says the previous failures were transient, so the
+	// streak toward the give-up bound starts again from zero.
+	m.clearBringUpFailures(sessionID)
 }
 
 // awaitDriveable waits for the bring-up to finish, one way or the other.
@@ -191,6 +260,18 @@ func (m *Manager) escapeFailedBringUp(ctx context.Context, workspace string, d *
 	if kind != bringUpFailureTransport && kind != bringUpFailureTimeout {
 		m.logf("session-controller: bring-up FAILED ws=%q session=%s generation=%s failure_kind=%s resume=%q resume_decision=preserve retry=false cause=%v",
 			workspace, d.sessionID, d.generationID, kind, d.resumedVendorSessionID, cause)
+		m.resolveStartFailed(workspace, d, cause)
+		return nil, cause
+	}
+
+	// RUNG 4. The retry below is the ladder's last rung, and this is the bound
+	// on how many times the whole ladder may be climbed for one session. The
+	// failure in hand is not yet recorded, so it is counted here: reaching the
+	// bound with it means this failure is the last one, and it resolves
+	// terminally through rung 3's own publication rather than spawning again.
+	if m.bringUpFailuresFor(d.sessionID)+1 >= bringUpGiveUpAfter {
+		m.logf("session-controller: bring-up GIVING UP ws=%q session=%s generation=%s failure_kind=%s consecutive_failures=%d bound=%d resume=%q resume_decision=preserve retry=false cause=%v — every further respawn would cost another bring-up timeout, so the session parks until it wires or is hibernated",
+			workspace, d.sessionID, d.generationID, kind, m.bringUpFailuresFor(d.sessionID)+1, bringUpGiveUpAfter, d.resumedVendorSessionID, cause)
 		m.resolveStartFailed(workspace, d, cause)
 		return nil, cause
 	}
@@ -298,10 +379,18 @@ func (m *Manager) cancelRetiredBringUp(workspace string, d, current *sessionCont
 // teardown here cancels the session controller ctx, ending Run with nil, and this row is
 // already the truer answer that tail would otherwise overwrite.
 func (m *Manager) resolveStartFailed(workspace string, d *sessionController, cause error) {
-	m.logf("session-controller: START FAILED ws=%q session=%s generation=%s connectivity=unavailable cause=%v branch=bring_up_failed",
-		workspace, d.sessionID, d.generationID, cause)
+	failures, givenUp := m.noteBringUpFailure(d.sessionID)
+	m.logf("session-controller: START FAILED ws=%q session=%s generation=%s connectivity=unavailable consecutive_failures=%d bound=%d given_up=%t cause=%v branch=bring_up_failed",
+		workspace, d.sessionID, d.generationID, failures, bringUpGiveUpAfter, givenUp, cause)
+	// THE GIVE-UP RIDES THE EXISTING CARD rather than adding a second one. The
+	// card identity is stable per session, so the user sees one failure that has
+	// gained an account of why nothing is retrying it, not a pile of them.
+	carded := cause
+	if givenUp {
+		carded = fmt.Errorf("%w after %d consecutive failures — last failure: %v", ErrBringUpGaveUp, failures, cause)
+	}
 	if d.consumer != nil {
-		d.consumer.pushFailure(d.consumer.startFailedUUID(), errclass.StartFailed(cause.Error()))
+		d.consumer.pushFailure(d.consumer.startFailedUUID(), errclass.StartFailed(carded.Error()))
 	}
 	m.noteConnectivity(workspace, d.sessionID, d.generationID, ssm.SessionConnectivityUnavailable, "bring_up_failed")
 }
