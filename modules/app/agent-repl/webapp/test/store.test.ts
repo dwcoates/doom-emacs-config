@@ -635,6 +635,30 @@ describe("ingest session-view", () => {
     expect(store.state.model).toBe("");
   });
 
+  // THE PICKER REPAINTS ON A SESSION-COMMAND MODEL CHANGE (C1).
+  //
+  // `/model <name>` is no longer forwarded to the CLI as prompt text; the
+  // daemon performs it through the same SetModel the picker uses, and the
+  // shim's confirmation writes the record and pushes a fresh `SessionView`.
+  // What the browser must do with that push is repaint — the failure this
+  // replaces is a topbar that went on naming the PREVIOUS model until some
+  // later prompt's SystemInit happened to correct it.
+  it("repaints the model from the SessionView pushed by a session-command model change", () => {
+    // Arrange — the session is running Sonnet and the topbar says so.
+    const store = new ConversationStore();
+    store.ingest([sessionEffect({ sessionId: "s1", model: "claude-sonnet-5" })]);
+    expect(store.state.model).toBe("claude-sonnet-5");
+
+    // Act — the user submits `/model opus`; the daemon performs it and pushes
+    // the view carrying the shim-confirmed selection.
+    const result = store.ingest([sessionEffect({ sessionId: "s1", model: "claude-opus-5" })]);
+
+    // Assert — the picker names what the session is ACTUALLY running, and the
+    // store reports the change so a rerender is triggered.
+    expect(store.state.model).toBe("claude-opus-5");
+    expect(result.changed).toBe(true);
+  });
+
   it("adopts the permission mode", () => {
     // Arrange
     const store = new ConversationStore();
