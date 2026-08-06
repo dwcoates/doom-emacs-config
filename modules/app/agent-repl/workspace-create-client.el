@@ -650,16 +650,74 @@ preserves entries across module hot reload, exactly as
 `agent-repl--host-action-outcomes' does, so a reload mid-merge does not
 strand the completion.")
 
+(defvar agent-repl--host-action-in-flight nil
+  "The record of the host action whose handler is running, or nil.
+Bound by the executor around each handler call to a plist carrying
+`:action-id', `:type', `:handler', `:cmd' and `:ws' — everything
+`agent-repl--host-action-hold' needs.
+
+WHY IT EXISTS.  It is what lets `agent-repl--host-action-defer' register
+the deferral ITSELF, at the instant the token exists, instead of parking
+the token for the executor to register after the handler returns.  It is
+also the honest guard for \"am I inside a handler\": the old
+`\(boundp \\='agent-repl--host-action-deferral)' test is true everywhere,
+because a `defvar' is globally bound, so it never actually distinguished
+the interactive merge from the daemon-routed one.")
+
 (defun agent-repl--host-action-defer (token)
-  "Declare that the running host action's outcome is not yet known.
+  "Declare the running host action's outcome unknown and REGISTER the wait.
 TOKEN is the handler's own correlation handle (the merge path uses its
 `mergeWorkspace' request id), later passed to
-`agent-repl--host-action-settle'.  A no-op when called outside a host-action
-handler, so the same dispatch function stays callable from an interactive
-command that has no action to complete."
-  (when (and token (boundp 'agent-repl--host-action-deferral))
-    (setq agent-repl--host-action-deferral token))
+`agent-repl--host-action-settle'.
+
+REGISTERS IMMEDIATELY, through `agent-repl--host-action-hold', rather than
+recording TOKEN for the executor to register once the handler returns.
+The handler's own socket write sits between those two moments, and
+`process-send-string' yields there: the connection filter then runs the
+command's ack REENTRANTLY, `agent-repl--host-action-settle' looks TOKEN up
+in `agent-repl--host-action-deferrals', finds nothing, and the action is
+stranded `in-flight' forever — where every redelivery is suppressed as a
+duplicate and no completion is ever sent.  Holding here closes that window
+to nothing, exactly as `agent-repl--uds-send-command' closed the one
+between sending a command and tracking it.
+
+A no-op outside a host-action handler, so the same dispatch function stays
+callable from an interactive command that has no action to complete.  That
+is TODAY THE ONLY WAY the merge reaches this: `agent-repl--host-action-arms'
+has no merge arm and `agent-repl--legacy-host-action-handlers' deliberately
+dropped its \"merge\" entry, so `agent-repl--merge-dispatch-over-uds' is
+reached only from `SPC TAB M'.  The ordering this function establishes is
+therefore latent rather than live, and it holds for whichever handler defers
+next rather than for the merge alone."
+  (when (and token agent-repl--host-action-in-flight)
+    (let ((record agent-repl--host-action-in-flight))
+      (setq agent-repl--host-action-deferral token)
+      (agent-repl--host-action-hold (plist-get record :action-id)
+                                    (plist-get record :type)
+                                    (plist-get record :handler)
+                                    (plist-get record :cmd)
+                                    (plist-get record :ws)
+                                    token)))
   token)
+
+(defun agent-repl--host-action-release (token ws reason)
+  "Drop TOKEN's deferral because nothing will ever settle it.
+WS supplies log context and REASON records why.  The one caller is the
+executor's handler-failure branch: a handler that deferred and then
+signalled has already had its action completed as failed, so a later ack
+arriving on TOKEN must not find a deferral and resurrect it.  A TOKEN that
+is already gone (its ack settled it inside the handler) is the ordinary
+case and is recorded only in the verbose trace."
+  (if (gethash token agent-repl--host-action-deferrals)
+      (progn
+        (remhash token agent-repl--host-action-deferrals)
+        (agent-repl--log
+         ws
+         "host-action: DEFERRAL RELEASED token=%s reason=%s" token reason))
+    (agent-repl--log-verbose
+     ws
+     "host-action: deferral for token=%s already settled reason=%s"
+     token reason)))
 
 (defun agent-repl--workspace-create-cache-host-success
     (action-id type handler cmd ws duplicates)
@@ -849,17 +907,29 @@ duplicate resends its cached outcome."
                "host-action: DISPATCH action-id=%s type=%s handler=%s cmd-shape=%s"
                action-id type handler
                (agent-repl--workspace-create-log-payload-shape cmd))
-              ;; The handler may declare its outcome UNKNOWN yet by setting
-              ;; this (see `agent-repl--host-action-defer'), in which case the
-              ;; completion waits for whatever the handler is waiting on.
-              (let ((agent-repl--host-action-deferral nil))
-                (funcall handler cmd)
-                (setq deferral agent-repl--host-action-deferral)))
+              ;; The handler may declare its outcome UNKNOWN yet (see
+              ;; `agent-repl--host-action-defer'), in which case the completion
+              ;; waits for whatever the handler is waiting on.  The record is
+              ;; bound HERE so the defer can register that wait itself, before
+              ;; the handler's own write can be answered reentrantly.
+              (let ((agent-repl--host-action-deferral nil)
+                    (agent-repl--host-action-in-flight
+                     (list :action-id action-id :type type :handler handler
+                           :cmd cmd :ws ws)))
+                ;; `unwind-protect', not a trailing `setq': a handler that
+                ;; deferred and THEN signalled has already registered a
+                ;; deferral, and the failure branch below has to release it.
+                (unwind-protect
+                    (funcall handler cmd)
+                  (setq deferral agent-repl--host-action-deferral))))
           (error (setq handler-error err)))
         (if (null handler-error)
             (if deferral
-                (agent-repl--host-action-hold action-id type handler cmd ws
-                                              deferral)
+                ;; No hold here: `agent-repl--host-action-defer' already ran it
+                ;; at the moment the token existed.  Re-holding would resurrect
+                ;; an action whose ack settled it while the handler was still
+                ;; on the stack.
+                :deferred
               (agent-repl--host-action-succeed action-id type handler cmd ws))
           (let* ((text (error-message-string handler-error))
                  (in-flight
@@ -870,6 +940,12 @@ duplicate resends its cached outcome."
                         :cmd cmd :ws ws :ok nil :error text
                         :duplicates duplicates))
                  completion-error)
+            ;; A handler that deferred and THEN signalled is completed as
+            ;; failed right here, so its deferral must go: a later ack on that
+            ;; token would otherwise find a live entry and settle an action
+            ;; that has already been answered.
+            (when deferral
+              (agent-repl--host-action-release deferral ws "handler-signalled"))
             (puthash action-id failed agent-repl--host-action-outcomes)
             (condition-case completion-err
                 (progn
