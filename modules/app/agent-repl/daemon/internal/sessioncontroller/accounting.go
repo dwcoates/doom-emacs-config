@@ -152,24 +152,35 @@ type liveEvidence struct{ queryID string }
 // liveEvidenceFor classifies one event's epoch ONCE, returning proof only when
 // the event belongs to the live query.
 //
-// historical reports a row whose durable sequence proves it predates the live
-// query's QueryCreated record. A shim restart keeps the vendor session and its
-// ordered store sequence while creating a new query() invocation, so a resuming
-// daemon replays the retired query's rows before reaching the replacement's
-// creation boundary. Those rows stay authoritative history; they simply cannot
-// rebind, or be judged by, the query carried by the live handshake.
+// THE CLASSIFICATION IS ONE COMPARISON: the query the event's producer stamped
+// on its envelope against the query this reducer is bound to. Nothing about how
+// the event was DELIVERED enters into it, which is the point — a row the store
+// serves during subscription catch-up still names the query that wrote it, so
+// the session's own QueryCreated (written before its subscription can exist)
+// classifies as live on that single comparison and needs no companion fact.
 //
-// A different query id AT OR BEYOND the creation boundary is a live protocol
-// contradiction and stays a hard failure. A zero boundary admits no history at
-// all: the announced stream does not carry this query's creation record, so no
-// row can be proven to predate it. Query-specific resume validation is owned by
+// historical means the row belongs to a DIFFERENT query. A shim restart keeps
+// the vendor session and its ordered store sequence while creating a new
+// query() invocation, so a resuming daemon replays the retired query's rows
+// before reaching the replacement's. Those rows stay authoritative history;
+// they simply cannot rebind, or be judged by, the query carried by the live
+// handshake.
+//
+// EMPTY IS LIVE, DELIBERATELY. A producer that predates query_instance_id
+// stamps nothing, and such an event must keep precisely the behavior it had
+// before the field existed: judged against the live query, fatal on a
+// contradiction. Fail closed — an unstamped row is never waved through as
+// history.
+//
+// An unbound reducer (no query id yet) has nothing to compare against, so it
+// admits no history at all. Query-specific resume validation is owned by
 // resumeIdentityTracker, which independently follows every query_instance_id in
 // the durable sequence.
-func (r *turnAccountingReducer) liveEvidenceFor(ev *corev1.Event, queryInstanceID string) (live liveEvidence, historical bool) {
-	if r.queryID == "" || queryInstanceID == "" || r.queryCreatedSeq == 0 {
+func (r *turnAccountingReducer) liveEvidenceFor(ev *corev1.Event) (live liveEvidence, historical bool) {
+	if r.queryID == "" {
 		return liveEvidence{queryID: r.queryID}, false
 	}
-	if queryInstanceID != r.queryID && ev.GetSeq() < r.queryCreatedSeq {
+	if eventQuery := ev.GetQueryInstanceId(); eventQuery != "" && eventQuery != r.queryID {
 		return liveEvidence{}, true
 	}
 	return liveEvidence{queryID: r.queryID}, false
@@ -183,7 +194,7 @@ func (r *turnAccountingReducer) HistoricalQueryLifecycle(ev *corev1.Event) (stri
 	if lifecycle == nil {
 		return "", false
 	}
-	_, historical := r.liveEvidenceFor(ev, lifecycle.GetQueryInstanceId())
+	_, historical := r.liveEvidenceFor(ev)
 	return lifecycle.GetQueryInstanceId(), historical
 }
 
@@ -209,7 +220,7 @@ func (r *turnAccountingReducer) observe(ev *corev1.Event, daemonSessionID string
 			return nil
 		}
 		if r.queryID != "" && r.queryID != q.GetQueryInstanceId() {
-			return fmt.Errorf("query lifecycle query_instance_id %q does not match bound query_instance_id %q at seq %d with live query_created_seq %d", q.GetQueryInstanceId(), r.queryID, ev.GetSeq(), r.queryCreatedSeq)
+			return fmt.Errorf("query lifecycle query_instance_id %q does not match bound query_instance_id %q at seq %d (event_query_instance_id=%q)", q.GetQueryInstanceId(), r.queryID, ev.GetSeq(), ev.GetQueryInstanceId())
 		}
 		r.queryID = q.GetQueryInstanceId()
 		if observed := q.GetRuntimeObserved(); observed != nil {
@@ -221,7 +232,7 @@ func (r *turnAccountingReducer) observe(ev *corev1.Event, daemonSessionID string
 		r.activeTurnID = started.GetTurnId()
 	}
 	if observation := ev.GetAccountUsageObservation(); observation != nil {
-		live, historical := r.liveEvidenceFor(ev, observation.GetQueryInstanceId())
+		live, historical := r.liveEvidenceFor(ev)
 		if historical {
 			// Retired-query evidence: retained as history, not admitted as live
 			// accounting, on the same terms as the lifecycle rows around it.

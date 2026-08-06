@@ -37,7 +37,7 @@ func testTurnLifecycle() (turnLifecycle, *fakeApplier) {
 
 func TestTurnLifecycleRejectsDelayedFileEndAcrossANewerTurn(t *testing.T) {
 	lifecycle, store := testTurnLifecycle()
-	start, err := lifecycle.resolve(turnStartEvent(corev1.Plane_PLANE_STREAM, 12885, "turn-new"))
+	start, err := lifecycle.resolve(turnStartEvent(corev1.Plane_PLANE_STREAM, 12885, "turn-new"), "")
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -45,7 +45,7 @@ func TestTurnLifecycleRejectsDelayedFileEndAcrossANewerTurn(t *testing.T) {
 		t.Fatalf("start resolution = %+v, want applied active transition", start)
 	}
 
-	stale, err := lifecycle.resolve(turnEndEvent(corev1.Plane_PLANE_FILE, 12891, ""))
+	stale, err := lifecycle.resolve(turnEndEvent(corev1.Plane_PLANE_FILE, 12891, ""), "")
 	if err == nil {
 		t.Fatal("stale file end succeeded")
 	}
@@ -56,7 +56,7 @@ func TestTurnLifecycleRejectsDelayedFileEndAcrossANewerTurn(t *testing.T) {
 		t.Fatalf("durable active turns after stale file end = %v, want [turn-new]", store.turns)
 	}
 
-	real, err := lifecycle.resolve(turnEndEvent(corev1.Plane_PLANE_STREAM, 12905, "turn-new"))
+	real, err := lifecycle.resolve(turnEndEvent(corev1.Plane_PLANE_STREAM, 12905, "turn-new"), "")
 	if err != nil {
 		t.Fatalf("real stream end: %v", err)
 	}
@@ -67,11 +67,11 @@ func TestTurnLifecycleRejectsDelayedFileEndAcrossANewerTurn(t *testing.T) {
 
 func TestTurnLifecycleRejectsWrongTurnIdentity(t *testing.T) {
 	lifecycle, store := testTurnLifecycle()
-	if _, err := lifecycle.resolve(turnStartEvent(corev1.Plane_PLANE_STREAM, 1, "turn-current")); err != nil {
+	if _, err := lifecycle.resolve(turnStartEvent(corev1.Plane_PLANE_STREAM, 1, "turn-current"), ""); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 
-	got, err := lifecycle.resolve(turnEndEvent(corev1.Plane_PLANE_STREAM, 2, "turn-prior"))
+	got, err := lifecycle.resolve(turnEndEvent(corev1.Plane_PLANE_STREAM, 2, "turn-prior"), "")
 	if err == nil {
 		t.Fatal("mismatched end succeeded")
 	}
@@ -85,10 +85,10 @@ func TestTurnLifecycleRejectsWrongTurnIdentity(t *testing.T) {
 
 func TestTurnLifecycleKeepsStateActiveUntilEveryQueuedTurnEnds(t *testing.T) {
 	lifecycle, _ := testTurnLifecycle()
-	if _, err := lifecycle.resolve(turnStartEvent(corev1.Plane_PLANE_STREAM, 1, "turn-1")); err != nil {
+	if _, err := lifecycle.resolve(turnStartEvent(corev1.Plane_PLANE_STREAM, 1, "turn-1"), ""); err != nil {
 		t.Fatalf("first start: %v", err)
 	}
-	second, err := lifecycle.resolve(turnStartEvent(corev1.Plane_PLANE_STREAM, 2, "turn-2"))
+	second, err := lifecycle.resolve(turnStartEvent(corev1.Plane_PLANE_STREAM, 2, "turn-2"), "")
 	if err != nil {
 		t.Fatalf("second start: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestTurnLifecycleKeepsStateActiveUntilEveryQueuedTurnEnds(t *testing.T) {
 		t.Fatalf("second start resolution = %+v, want applied without a second active edge", second)
 	}
 
-	firstEnd, err := lifecycle.resolve(turnEndEvent(corev1.Plane_PLANE_STREAM, 3, "turn-1"))
+	firstEnd, err := lifecycle.resolve(turnEndEvent(corev1.Plane_PLANE_STREAM, 3, "turn-1"), "")
 	if err != nil {
 		t.Fatalf("first end: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestTurnLifecycleKeepsStateActiveUntilEveryQueuedTurnEnds(t *testing.T) {
 		t.Fatalf("first queued end resolution = %+v, want state held active", firstEnd)
 	}
 
-	lastEnd, err := lifecycle.resolve(turnEndEvent(corev1.Plane_PLANE_STREAM, 4, "turn-2"))
+	lastEnd, err := lifecycle.resolve(turnEndEvent(corev1.Plane_PLANE_STREAM, 4, "turn-2"), "")
 	if err != nil {
 		t.Fatalf("last end: %v", err)
 	}
@@ -117,10 +117,10 @@ func TestTurnLifecycleAdmitsOrderedLegacyReplay(t *testing.T) {
 	lifecycle, _ := testTurnLifecycle()
 	start := turnStartEvent(corev1.Plane_PLANE_STREAM, 1, "")
 	end := turnEndEvent(corev1.Plane_PLANE_STREAM, 2, "")
-	if got, err := lifecycle.resolve(start); err != nil || got.decision != "accept_legacy_stream_start" || !got.apply {
+	if got, err := lifecycle.resolve(start, ""); err != nil || got.decision != "accept_legacy_stream_start" || !got.apply {
 		t.Fatalf("legacy start resolution = %+v", got)
 	}
-	if got, err := lifecycle.resolve(end); err != nil || got.decision != "accept_legacy_stream_end" || !got.apply {
+	if got, err := lifecycle.resolve(end, ""); err != nil || got.decision != "accept_legacy_stream_end" || !got.apply {
 		t.Fatalf("legacy end resolution = %+v", got)
 	}
 }
@@ -150,7 +150,7 @@ func TestTurnLifecycleHandshakeRestoresCorrelationForAnUnseenEnd(t *testing.T) {
 	}
 
 	lifecycle := newTurnLifecycle(store, "ws", "s1")
-	end, err := lifecycle.resolve(turnEndEvent(corev1.Plane_PLANE_STREAM, 99, "turn-live"))
+	end, err := lifecycle.resolve(turnEndEvent(corev1.Plane_PLANE_STREAM, 99, "turn-live"), "")
 	if err != nil {
 		t.Fatalf("end after handshake: %v", err)
 	}
@@ -161,7 +161,7 @@ func TestTurnLifecycleHandshakeRestoresCorrelationForAnUnseenEnd(t *testing.T) {
 
 func TestTurnLifecycleRejectsAStreamEndWithoutDurableClaim(t *testing.T) {
 	lifecycle, _ := testTurnLifecycle()
-	got, err := lifecycle.resolve(turnEndEvent(corev1.Plane_PLANE_STREAM, 99, "turn-live"))
+	got, err := lifecycle.resolve(turnEndEvent(corev1.Plane_PLANE_STREAM, 99, "turn-live"), "")
 	if err == nil {
 		t.Fatal("unclaimed stream end succeeded")
 	}
@@ -172,14 +172,14 @@ func TestTurnLifecycleRejectsAStreamEndWithoutDurableClaim(t *testing.T) {
 
 func TestTurnLifecycleReplaysARecordedFinalEndToInterruptedConsumers(t *testing.T) {
 	lifecycle, _ := testTurnLifecycle()
-	if _, err := lifecycle.resolve(turnStartEvent(corev1.Plane_PLANE_STREAM, 1, "turn-live")); err != nil {
+	if _, err := lifecycle.resolve(turnStartEvent(corev1.Plane_PLANE_STREAM, 1, "turn-live"), ""); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	end := turnEndEvent(corev1.Plane_PLANE_STREAM, 2, "turn-live")
-	if _, err := lifecycle.resolve(end); err != nil {
+	if _, err := lifecycle.resolve(end, ""); err != nil {
 		t.Fatalf("first end: %v", err)
 	}
-	replayed, err := lifecycle.resolve(end)
+	replayed, err := lifecycle.resolve(end, "")
 	if err != nil {
 		t.Fatalf("replayed end: %v", err)
 	}
@@ -193,15 +193,15 @@ func TestTurnLifecycleReplayDoesNotPaintIdleWhileQueuedTurnRemains(t *testing.T)
 	for seq, id := range []string{"turn-1", "turn-2"} {
 		if _, err := lifecycle.resolve(turnStartEvent(
 			corev1.Plane_PLANE_STREAM, uint64(seq+1), id,
-		)); err != nil {
+		), ""); err != nil {
 			t.Fatalf("start %s: %v", id, err)
 		}
 	}
 	end := turnEndEvent(corev1.Plane_PLANE_STREAM, 3, "turn-1")
-	if _, err := lifecycle.resolve(end); err != nil {
+	if _, err := lifecycle.resolve(end, ""); err != nil {
 		t.Fatalf("first queued end: %v", err)
 	}
-	replayed, err := lifecycle.resolve(end)
+	replayed, err := lifecycle.resolve(end, "")
 	if err != nil {
 		t.Fatalf("replayed queued end: %v", err)
 	}
