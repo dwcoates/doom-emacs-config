@@ -587,6 +587,11 @@ export async function runUdsMode(
   const onSigint = signals.onSigint;
   process.on("SIGTERM", onSigterm);
   process.on("SIGINT", onSigint);
+  // exitError, set only on the rethrow path below, is what the `finally` trace
+  // reports the process exiting for: a signal-driven shutdown (including one
+  // that raced session.start() into throwing) is reported clean, since
+  // `signals.stopping()` had already resolved it as intentional.
+  let exitError: unknown;
   try {
     await session.start();
     if (signals.stopping() === null) {
@@ -598,8 +603,19 @@ export async function runUdsMode(
       await signals.stopping();
       return;
     }
+    exitError = err;
     throw err;
   } finally {
+    logMainLifecycle({
+      agent_repl_session_id: args.sessionId,
+      ...(exitError === undefined
+        ? { outcome: "uds_main_exit_clean" }
+        : {
+          level: "error",
+          outcome: "uds_main_exit_error",
+          error: exitError instanceof Error ? exitError.message : String(exitError),
+        }),
+    }, "runUdsMode exiting");
     process.off("SIGTERM", onSigterm);
     process.off("SIGINT", onSigint);
     releaseLock();
