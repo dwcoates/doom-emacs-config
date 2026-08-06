@@ -184,6 +184,34 @@ lost the attempt, and nothing else would ever advance the phase. The sweep
 reads the phase back through `merge.PhaseSource`, the package's third
 outbound port.
 
+## An interrupt EVICTS the workspace's waiting merges
+
+A stop from a frontend means "stop what this workspace is doing", and a merge
+waiting its turn used to be the one piece of that work no user action could
+reach: the composer is gated on the merge lease, the stop went to a shim with no
+turn to end, and the merge ran anyway some minutes later.
+`merge.Coordinator.Evict` is the interrupt's queue half — the frontend command
+handler calls it on every interrupt it does not challenge, before the stop
+reaches the shim.
+
+- ONLY WAITING ENTRIES GO. `DurableQueue.EvictWaiting` never touches a
+  repository's HEAD: that entry has already been handed to the drain, holds the
+  shim lease, and may be mid-cherry-pick, so removing its record would strand a
+  running merge with nothing left to `Complete`. The verbs for a merge in flight
+  are unchanged — resolve it, or close the workspace, which abandons it.
+- EACH REPOSITORY IS EVICTED UNDER ITS ADVANCE GATE, the mutex `Enqueue` holds
+  across its durable publish and its `enqueued` status. An eviction therefore
+  cannot land between an admission's write and the status announcing it, so a
+  run can never be told it was evicted and then told it is queued.
+- THE ENTRY GOES FIRST, THE WORD SECOND. The durable file is removed before the
+  terminal `failed` status is published, exactly as `finish` retires a terminal
+  merge — and there is no `MarkTerminal` beside it, because keeping the entry so
+  a later boot could re-announce the removal would put back the very merge the
+  user took off the queue.
+- THE WORD RIDES THE SAME RUN. The evicted status publishes under the run id the
+  `enqueued` status the user is looking at carried, so the admission and its
+  removal are one run rather than two unrelated events.
+
 The queue is keyed by REPOSITORY, not by worktree: sibling worktrees of one
 repo cherry-pick into the same target, so one queue serializes them all.
 Single ownership is what makes a same-target cherry-pick race structurally

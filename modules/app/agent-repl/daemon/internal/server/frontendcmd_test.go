@@ -123,13 +123,22 @@ func (f fakeLiveTasks) LiveTasks(string) (int64, bool) {
 // the given turn state and live-task count.
 func newGatedHandler(t *testing.T, turnActive bool, tasks LiveTaskSource) (*commandHandler, *fakePrompts) {
 	t.Helper()
+	h, p, _ := newGatedHandlerWithMerges(t, turnActive, tasks, &fakeMerges{})
+	return h, p
+}
+
+// newGatedHandlerWithMerges is newGatedHandler for a test that also drives the
+// merge runner behind the interrupt's queue half. The two share one constructor
+// so a gate test and an eviction test cannot end up wiring different handlers.
+func newGatedHandlerWithMerges(t *testing.T, turnActive bool, tasks LiveTaskSource, merges *fakeMerges) (*commandHandler, *fakePrompts, *fakeMerges) {
+	t.Helper()
 	p := &fakePrompts{turnActive: turnActive}
-	h, err := newCommandHandler(p, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil,
+	h, err := newCommandHandler(p, merges, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil,
 		CommandHandlerConfig{Interrupt: InterruptGateConfig{Turns: p, LiveTasks: tasks}})
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
 	}
-	return h, p
+	return h, p, merges
 }
 
 func (f *fakePrompts) SubmitPrompt(_ context.Context, ws, requestID, text, _ string, promptOrigin corev1.PromptOrigin) error {
@@ -163,6 +172,16 @@ type fakeMerges struct {
 	// fail. Zero values are the common "no merge in flight" answer.
 	abandonHit bool
 	abandonErr error
+	// evicted records every workspace Evict was asked about, evictCount is what
+	// it reports having dropped, and evictErr makes it fail. The zero values are
+	// the common "nothing was queued" answer.
+	evicted    []string
+	evictCount int
+	evictErr   error
+	// onEvict runs INSIDE Evict, before it answers, exactly as onEnqueue does:
+	// it is how a test reads what the handler had already done at the instant
+	// the eviction was asked for, rather than assuming the ordering.
+	onEvict func()
 	// enqueueErr refuses the admission, which is the path that must still leave
 	// a terminal merge phase behind.
 	enqueueErr error
@@ -192,6 +211,17 @@ func (f *fakeMerges) Abandon(_ context.Context, workspace string) (bool, error) 
 		return false, f.abandonErr
 	}
 	return f.abandonHit, nil
+}
+
+func (f *fakeMerges) Evict(_ context.Context, workspace string) (int, error) {
+	if f.onEvict != nil {
+		f.onEvict()
+	}
+	f.evicted = append(f.evicted, workspace)
+	if f.evictErr != nil {
+		return 0, f.evictErr
+	}
+	return f.evictCount, nil
 }
 
 // mergedWorkspaces returns just the workspace names of the recorded merges, for
