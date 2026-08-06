@@ -10,10 +10,11 @@
 ;; binding, so the panel layer (frontend.el) and any future consumer share
 ;; one client instead of hand-rolling command round-trips.
 ;;
-;; The one URL this module still builds is the WEBVIEW's
-;; (`agent-repl--frontend-session-url'): the webapp bundle is served over
-;; HTTP to an embedded browser, which is a browser navigation, not an
-;; Emacs-side HTTP client call.
+;; The only URLs this module still builds are the WEBVIEW's
+;; (`agent-repl--frontend-workspace-url' for a workspace's own view,
+;; `agent-repl--frontend-session-url' for a viewer with no workspace): the
+;; webapp bundle is served over HTTP to an embedded browser, which is a
+;; browser navigation, not an Emacs-side HTTP client call.
 ;;
 ;; Binding model:
 ;;   - Each workspace gets AT MOST one daemon session, tracked under the
@@ -35,6 +36,7 @@
 
 (require 'cl-lib)
 (require 'subr-x)
+(require 'url-util)
 
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl-connection-notice-warn "connection-notice" (text &optional level))
@@ -195,7 +197,8 @@ creation consume this helper so the two entry points cannot drift."
   "Return the daemon's HTTP base URL from the configured address.
 The ONLY surviving URL construction in the Emacs client: it addresses the
 webapp bundle the daemon serves to the embedded browser
-\(`agent-repl--frontend-session-url'), which is a browser navigation.
+\(`agent-repl--frontend-workspace-url',
+`agent-repl--frontend-session-url'), which is a browser navigation.
 Emacs itself never issues an HTTP request to the daemon."
   (format "http://%s" agent-repl-frontend-daemon-addr))
 
@@ -689,8 +692,28 @@ an obsolete binding block forever."
 
 ;;;; ---- Workspace binding ---------------------------------------------------
 
+(defun agent-repl--frontend-workspace-url (workspace)
+  "Return the webapp URL that renders WORKSPACE.
+WORKSPACE is an absolute directory path: the same `workspace' wire key
+the daemon routes that workspace's frames and commands by
+\(`agent-repl--frontend-ws-command-key'), URL-encoded into the query
+rather than hashed — the daemon's connection scope, every
+`FrontendCommand', and this URL then all carry one greppable key.
+
+The webapp holds no session identity behind this URL; the daemon rules
+on which session the workspace owns and re-pushes the answer.  So the
+URL outlives every session the workspace runs: a rotation, a supersede,
+or a daemon bounce leaves it addressing the same thing."
+  (format "%s/?workspace=%s"
+          (agent-repl--frontend-base-url)
+          (url-hexify-string workspace)))
+
 (defun agent-repl--frontend-session-url (session-id)
-  "Return the webapp URL that attaches to SESSION-ID."
+  "Return the webapp URL that attaches to SESSION-ID alone.
+For a viewer that has a session and NO workspace to render — the
+config explainer's popup, whose session is global and rooted outside any
+workspace.  A workspace's webview addresses itself by workspace
+\(`agent-repl--frontend-workspace-url')."
   (format "%s/?session=%s" (agent-repl--frontend-base-url) session-id))
 
 ;;;; ---- Daemon-bounce resilience: the reattach loop -----------------------
