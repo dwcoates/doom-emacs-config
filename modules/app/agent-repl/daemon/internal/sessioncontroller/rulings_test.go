@@ -182,14 +182,15 @@ func (f *fakeRegistrar) BackfillStateChanged(sessionID, state string) {
 // SessionDied records the terminal write a shim death produces (F4).
 // SessionModelObserved records the models a live session reported, so a test
 // can assert the record follows the session rather than the create request.
-func (f *fakeRegistrar) SessionModelObserved(sessionID, model string, obs registry.ModelObservation) (string, bool) {
+func (f *fakeRegistrar) SessionModelObserved(sessionID string, model registry.Model, obs registry.ModelObservation) (string, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	previous := f.currentModel
-	f.observedModels = append(f.observedModels, model)
+	observed := model.String()
+	f.observedModels = append(f.observedModels, observed)
 	f.observedTokens = append(f.observedTokens, obs)
-	f.currentModel = model
-	return previous, previous != model
+	f.currentModel = observed
+	return previous, previous != observed
 }
 
 func (f *fakeRegistrar) SessionDied(sessionID, reason string) {

@@ -74,7 +74,7 @@ func TestAStrictlyNewerModelObservationIsAccepted(t *testing.T) {
 	h := newModelObsHarness(t, "sonnet")
 
 	// Act.
-	h.r.SessionModelObserved("s1", "opus", obs(1, 7))
+	h.r.SessionModelObserved("s1", registry.NewModel("opus"), obs(1, 7))
 
 	// Assert.
 	if got := h.model(); got != "opus" {
@@ -88,7 +88,7 @@ func TestAnAcceptedModelObservationRepushesTheSessionView(t *testing.T) {
 	h := newModelObsHarness(t, "sonnet")
 
 	// Act.
-	h.r.SessionModelObserved("s1", "opus", obs(1, 7))
+	h.r.SessionModelObserved("s1", registry.NewModel("opus"), obs(1, 7))
 
 	// Assert.
 	if len(h.pushed) != 1 || h.pushed[0] != "s1" {
@@ -101,10 +101,10 @@ func TestAModelObservationFromANewerGenerationSupersedesRegardlessOfSeq(t *testi
 	// controller's FIRST init carries a low seq. Ordering on seq alone would
 	// refuse the only report the new session has made about itself.
 	h := newModelObsHarness(t, "sonnet")
-	h.r.SessionModelObserved("s1", "opus", obs(1, 900))
+	h.r.SessionModelObserved("s1", registry.NewModel("opus"), obs(1, 900))
 
 	// Act.
-	h.r.SessionModelObserved("s1", "haiku", obs(2, 1))
+	h.r.SessionModelObserved("s1", registry.NewModel("haiku"), obs(2, 1))
 
 	// Assert.
 	if got := h.model(); got != "haiku" {
@@ -119,11 +119,11 @@ func TestAModelObservationFromANewerGenerationSupersedesRegardlessOfSeq(t *testi
 func TestAStaleSystemInitCannotOverwriteANewerConfirmedSelection(t *testing.T) {
 	// Arrange — the user's Opus selection is confirmed as of stream seq 12.
 	h := newModelObsHarness(t, "sonnet")
-	h.r.SessionModelObserved("s1", "opus", obs(1, 12))
+	h.r.SessionModelObserved("s1", registry.NewModel("opus"), obs(1, 12))
 
 	// Act — the in-flight submit's init, riding seq 9, announces the model
 	// that submit began under.
-	h.r.SessionModelObserved("s1", "sonnet", obs(1, 9))
+	h.r.SessionModelObserved("s1", registry.NewModel("sonnet"), obs(1, 9))
 
 	// Assert.
 	if got := h.model(); got != "opus" {
@@ -134,11 +134,11 @@ func TestAStaleSystemInitCannotOverwriteANewerConfirmedSelection(t *testing.T) {
 func TestARefusedModelObservationIsRecordedInTheCanonicalLog(t *testing.T) {
 	// Arrange.
 	h := newModelObsHarness(t, "sonnet")
-	h.r.SessionModelObserved("s1", "opus", obs(1, 12))
+	h.r.SessionModelObserved("s1", registry.NewModel("opus"), obs(1, 12))
 	h.logged = nil
 
 	// Act.
-	h.r.SessionModelObserved("s1", "sonnet", obs(1, 9))
+	h.r.SessionModelObserved("s1", registry.NewModel("sonnet"), obs(1, 9))
 
 	// Assert — the shared log alone must explain why the record disagrees with
 	// the report, so it carries the refusal and both tokens.
@@ -153,11 +153,11 @@ func TestARefusedModelObservationIsRecordedInTheCanonicalLog(t *testing.T) {
 func TestARefusedModelObservationPushesNoSessionView(t *testing.T) {
 	// Arrange — a push would repaint the picker to the value that was refused.
 	h := newModelObsHarness(t, "sonnet")
-	h.r.SessionModelObserved("s1", "opus", obs(1, 12))
+	h.r.SessionModelObserved("s1", registry.NewModel("opus"), obs(1, 12))
 	h.pushed = nil
 
 	// Act.
-	h.r.SessionModelObserved("s1", "sonnet", obs(1, 9))
+	h.r.SessionModelObserved("s1", registry.NewModel("sonnet"), obs(1, 9))
 
 	// Assert.
 	if len(h.pushed) != 0 {
@@ -169,10 +169,10 @@ func TestAnEqualModelObservationTokenIsNotNewerAndIsRefused(t *testing.T) {
 	// Arrange — a re-delivered event carries the seq it originally carried, so
 	// equal is a REPLAY rather than a fresh report.
 	h := newModelObsHarness(t, "sonnet")
-	h.r.SessionModelObserved("s1", "opus", obs(1, 12))
+	h.r.SessionModelObserved("s1", registry.NewModel("opus"), obs(1, 12))
 
 	// Act.
-	h.r.SessionModelObserved("s1", "sonnet", obs(1, 12))
+	h.r.SessionModelObserved("s1", registry.NewModel("sonnet"), obs(1, 12))
 
 	// Assert.
 	if got := h.model(); got != "opus" {
@@ -186,7 +186,7 @@ func TestAnUntokenedModelObservationIsRefusedLoudly(t *testing.T) {
 	h := newModelObsHarness(t, "sonnet")
 
 	// Act.
-	h.r.SessionModelObserved("s1", "opus", registry.ModelObservation{})
+	h.r.SessionModelObserved("s1", registry.NewModel("opus"), registry.ModelObservation{})
 
 	// Assert.
 	if got := h.model(); got != "sonnet" {
@@ -202,11 +202,11 @@ func TestARefusedModelObservationDoesNotLowerTheAcceptedMark(t *testing.T) {
 	// is refused. A refusal that still moved the mark down to 15 would let
 	// everything between 15 and 20 back in.
 	h := newModelObsHarness(t, "sonnet")
-	h.r.SessionModelObserved("s1", "opus", obs(1, 20))
-	h.r.SessionModelObserved("s1", "haiku", obs(1, 15))
+	h.r.SessionModelObserved("s1", registry.NewModel("opus"), obs(1, 20))
+	h.r.SessionModelObserved("s1", registry.NewModel("haiku"), obs(1, 15))
 
 	// Act — a second stale report, still below the standing mark.
-	h.r.SessionModelObserved("s1", "fable", obs(1, 18))
+	h.r.SessionModelObserved("s1", registry.NewModel("fable"), obs(1, 18))
 
 	// Assert.
 	if got := h.model(); got != "opus" {

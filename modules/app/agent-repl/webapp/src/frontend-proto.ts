@@ -181,7 +181,7 @@ import {
   type QueryRuntimeIdentity as GeneratedQueryRuntimeIdentity,
 } from "../../proto/gen/ts/agentshim/core/v1/core_pb";
 import { SessionCommand as GeneratedSessionCommand } from "../../proto/gen/ts/agentshim/frontend/v1/slash-menu_pb";
-import { syntheticModelLiteral } from "../../proto/ts/schema-literals.js";
+import { selectedModel, type SelectedModel } from "../../proto/ts/schema-literals.js";
 
 // --- enums ------------------------------------------------------------------
 
@@ -3038,17 +3038,14 @@ const MODEL_OPTION_KEYS = new Set(["value", "displayName", "description"]);
 function decodeModelOption(v: unknown, i: number): ModelOption {
   const o = ensureObject(v, `SessionView.modelOptions[${i}]`);
   rejectUnknown(o, MODEL_OPTION_KEYS, `SessionView.modelOptions[${i}]`);
-  const model = {
-    value: str(o, "value", `SessionView.modelOptions[${i}]`),
+  // The value is CHECKED INTO its type here, at the decode, so nothing
+  // downstream can be handed a picker option that is empty or is the marker —
+  // rendering the marker as a selectable option was the concrete failure.
+  return {
+    value: selectedModel(str(o, "value", `SessionView.modelOptions[${i}]`), `SessionView.modelOptions[${i}].value`),
     displayName: str(o, "displayName", `SessionView.modelOptions[${i}]`),
     description: str(o, "description", `SessionView.modelOptions[${i}]`),
   };
-  if (model.value === "" || model.value.trim() === syntheticModelLiteral()) {
-    throw new Error(
-      `frontend-proto: SessionView.modelOptions[${i}] has no selectable model value`,
-    );
-  }
-  return model;
 }
 
 const CONVERSATION_DELTA_KEYS = new Set([
