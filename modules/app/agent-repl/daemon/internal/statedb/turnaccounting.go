@@ -3,6 +3,7 @@ package statedb
 import (
 	"database/sql"
 	"fmt"
+	"sort"
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
@@ -108,13 +109,12 @@ func (s *TurnAccountings) Record(sessionID string, accounting *frontendv1.TurnAc
 	err = tx.QueryRow(`SELECT record FROM turn_accounting WHERE agent_repl_session_id=? AND turn_id=?`, sessionID, accounting.GetTurnId()).Scan(&prior)
 	switch err {
 	case nil:
+		// THE PERSISTED ROW IS AUTHORITATIVE ON REPLAY. It is not merely
+		// COMPARED against a fresh recompute and picked as the winner on a tie
+		// — see canonicalTurnAccounting for why a byte-identical recompute is
+		// not even the right bar to clear.
 		persisted := mustUnmarshalTurnAccounting(prior)
-		comparable := proto.Clone(accounting).(*frontendv1.TurnAccounting)
-		if comparable.GetTiming() != nil && persisted.GetTiming() != nil {
-			comparable.Timing.AccountingSettledAtMs = persisted.GetTiming().GetAccountingSettledAtMs()
-			comparable.Timing.ResultToSettlementMs = persisted.GetTiming().GetResultToSettlementMs()
-		}
-		if !proto.Equal(persisted, comparable) {
+		if !proto.Equal(canonicalTurnAccounting(persisted), canonicalTurnAccounting(accounting)) {
 			return nil, fmt.Errorf("statedb: divergent replay for turn accounting %q", accounting.GetTurnId())
 		}
 		accounting = persisted
@@ -198,6 +198,53 @@ func validateTurnAccountingResponses(sessionID string, accounting *frontendv1.Tu
 		seenMessages[response.GetApiMessageId()] = struct{}{}
 	}
 	return nil
+}
+
+// canonicalTurnAccounting strips a TurnAccounting down to the DURABLE FACTS a
+// replay is entitled to hold the persisted row to: the turn's own identity,
+// its responses' raw evidence (each independently re-validated against its
+// own persisted row above), and the Reconciliation summary built
+// deterministically from those responses and the vendor's own Result message.
+//
+// EVERYTHING ELSE IS A RECOMPUTATION THE PERSISTED ROW OWNS, and it is
+// stripped WHOLESALE rather than field by field:
+//
+//   - QueryInstanceId and Runtime are the live query() invocation's identity.
+//     They are regenerated on every bring-up by design — see
+//     turnAccountingReducer.liveEvidenceFor — so a replay's freshly minted
+//     query id can never equal the frozen one a prior generation settled
+//     under, and comparing them was never checking anything about the turn.
+//   - Timing is wall-clock instants taken at settlement and reconciliation
+//     time, not evidence the turn itself produced.
+//   - Verdict (Complete or Invalid-with-Problems) is DERIVED from the two
+//     fields above along with the response/result reconciliation: an Invalid
+//     verdict's RuntimeIdentityIncomplete problem embeds the very
+//     QueryInstanceId that just got stripped, so a verdict comparison would
+//     silently reintroduce the same non-determinism one level down.
+//
+// This is deliberately a WHOLESALE exclusion of three top-level fields
+// instead of the hand-maintained list of individual timing fields it
+// replaces: the next field added to Timing, Runtime, or Verdict inherits the
+// exclusion automatically, rather than needing a future author to remember to
+// add it.
+//
+// Responses are sorted by api_message_id first: the reducer appends them in
+// arrival order, which is already deterministic across a byte-identical
+// replay of the same durable stream, but sorting removes any dependence on
+// that being true forever.
+func canonicalTurnAccounting(acc *frontendv1.TurnAccounting) *frontendv1.TurnAccounting {
+	c, ok := proto.Clone(acc).(*frontendv1.TurnAccounting)
+	if !ok || c == nil {
+		return &frontendv1.TurnAccounting{}
+	}
+	c.QueryInstanceId = ""
+	c.Runtime = nil
+	c.Timing = nil
+	c.Verdict = nil
+	sort.Slice(c.Responses, func(i, j int) bool {
+		return c.Responses[i].GetApiMessageId() < c.Responses[j].GetApiMessageId()
+	})
+	return c
 }
 
 func mustUnmarshalTurnAccounting(raw []byte) *frontendv1.TurnAccounting {
