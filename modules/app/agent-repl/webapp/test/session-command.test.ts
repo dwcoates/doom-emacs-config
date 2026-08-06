@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ConversationItem, SessionCommandItem } from "../src/store.js";
 import { SESSION_COMMANDS, decodeFrontendFrame, sessionCommandOf } from "../src/frontend-proto.js";
+import { SessionCommand as GeneratedSessionCommand } from "../../proto/gen/ts/agentshim/frontend/v1/slash-menu_pb";
 import { StateAdapter, type AdapterEffect } from "../src/state-adapter.js";
 import { renderItem, itemKey, sessionCommandLabel } from "../src/render.js";
 
@@ -88,6 +89,26 @@ describe("the sessionCommand arm", () => {
   it("rejects a frame whose command cannot be read", () => {
     // Arrange + Act + Assert
     expect(() => itemsFrom({ uuid: "m1", sessionCommand: {} })).toThrow(/unrecognized value/);
+  });
+});
+
+describe("the command set is the schema's", () => {
+  it("covers every generated enum arm except UNSPECIFIED", () => {
+    // Arrange — this parity used to be maintained by review across three
+    // hand-written tables. A command added to the wire simply went missing
+    // from the webapp, and both sides' tests passed.
+    const generated = Object.keys(GeneratedSessionCommand).filter(
+      (key) => Number.isNaN(Number(key)) && key !== "UNSPECIFIED",
+    );
+
+    // Act + Assert.
+    expect([...SESSION_COMMANDS].sort()).toEqual(generated.sort());
+  });
+
+  it("excludes UNSPECIFIED, which names no command", () => {
+    // Arrange + Act + Assert — an item reporting it is malformed rather than
+    // a command the user ran.
+    expect(SESSION_COMMANDS).not.toContain("UNSPECIFIED");
   });
 });
 

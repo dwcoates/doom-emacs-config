@@ -39,6 +39,7 @@ import {
 } from "./local-failure.js";
 import type { FailureCardItem } from "./store.js";
 import { log, logVerbose } from "./wslog.js";
+import { syntheticModelLiteral } from "../../proto/ts/schema-literals.js";
 
 /**
  * How many in-flight `clientLog` request ids are remembered for ack
@@ -204,7 +205,7 @@ function unrevealedRefusalCard(refusal: Extract<CommandRefusal, { kind: "reveal"
 
 function requiredSelectedModel(ack: CommandAck, disposition: "ack" | "nack"): string {
   const selected = ack.selectedModel;
-  if (selected === "" || selected.trim() === "<synthetic>") {
+  if (selected === "" || selected.trim() === syntheticModelLiteral()) {
     throw new Error(`setModel ${disposition} protocol violation: selectedModel is absent, empty, or <synthetic>`);
   }
   return selected;
