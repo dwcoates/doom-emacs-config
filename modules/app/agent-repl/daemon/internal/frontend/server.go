@@ -912,7 +912,7 @@ func (s *Server) readLoop(c conn, cl *client) {
 		// history failure. Capture again AFTER the daemon made that decision so
 		// a transition crossing the pre-dispatch capture cannot leave the client
 		// holding the very identity the command just proved was retired.
-		if cmd.GetResync() != nil && ack.GetFailure().GetErrorType() == string(errclass.TypeSessionSuperseded) {
+		if cmd.GetResync() != nil && ack.GetFailure().GetErrorType() == string(errclass.TypeSessionReconnectSuperseded) {
 			s.enqueueResyncSnapshot(cl, cmd, "after_superseded")
 		}
 		if !ack.GetOk() {

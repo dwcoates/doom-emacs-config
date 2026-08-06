@@ -126,8 +126,8 @@ func TestStaleResyncCommandAckIsClassifiedSuperseded(t *testing.T) {
 		RequestId: "r-stale", Workspace: "/w",
 		Command: &frontendv1.FrontendCommand_Resync{Resync: &frontendv1.ResyncCmd{SessionId: "retired", ControllerGenerationId: "old"}},
 	})
-	if ack.GetFailure().GetErrorType() != string(errclass.TypeSessionSuperseded) {
-		t.Fatalf("failure type = %q, want %q", ack.GetFailure().GetErrorType(), errclass.TypeSessionSuperseded)
+	if ack.GetFailure().GetErrorType() != string(errclass.TypeSessionReconnectSuperseded) {
+		t.Fatalf("failure type = %q, want %q", ack.GetFailure().GetErrorType(), errclass.TypeSessionReconnectSuperseded)
 	}
 }
 

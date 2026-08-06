@@ -101,8 +101,25 @@ const (
 	TypeSessionNotLive Type = "session.not_live"
 	// TypeSessionDeleted — the session was deleted by the user.
 	TypeSessionDeleted Type = "session.deleted"
-	// TypeSessionSuperseded — a newer session took over the workspace.
+	// TypeSessionSuperseded — a NEW Claude session (a fresh conversation or a
+	// resume) was created for this workspace, so this registry record was
+	// stood down. The workspace and every resumed transcript each take
+	// exactly one live session, so minting a new one always retires
+	// whatever was running before it — see supersedeCreateConflicts.
 	TypeSessionSuperseded Type = "session.superseded"
+	// TypeSessionReconnectSuperseded — a resync named a session/generation
+	// identity that is no longer the workspace's live one. Unlike
+	// TypeSessionSuperseded this does NOT mean a new Claude session was
+	// created: the SAME Claude session's controller mints a fresh
+	// generation on every bring-up (first prompt, hibernation revival,
+	// post-crash rebuild, transport retry, or a daemon restart handed back
+	// a surviving agent process), so the mismatch can equally mean a new
+	// agent process was spawned for the same conversation, or the daemon
+	// simply reconnected to one that survived a restart. Because the
+	// resync alone cannot tell which of those happened — or whether a new
+	// Claude session is in fact what happened — the message names all
+	// three possibilities rather than asserting the wrong one.
+	TypeSessionReconnectSuperseded Type = "session.reconnect_superseded"
 	// TypeSessionShimDied — the session's shim process died, which is what
 	// makes the session terminal.
 	TypeSessionShimDied Type = "session.shim_died"
@@ -264,7 +281,8 @@ var prose = map[Type]string{
 	TypeSessionNotEstablished:      "the session did not finish connecting in time",
 	TypeSessionNotLive:             "this is no longer the workspace's live session",
 	TypeSessionDeleted:             "the session was deleted",
-	TypeSessionSuperseded:          "a newer session took over this workspace",
+	TypeSessionSuperseded:          "a new Claude session was started for this workspace, so this session was stopped — a workspace and each resumed transcript keep exactly one live session at a time",
+	TypeSessionReconnectSuperseded: "this view's session identity is stale — the live session's connection changed, which could mean a new Claude session took over this workspace, a new agent process was spawned for it, or the daemon reconnected to it after a restart; resync to see the current state",
 	TypeSessionShimDied:            "the agent process exited",
 	TypeSessionStartFailed:         "the session could not be started",
 	TypeSessionResumeFailed:        "the Claude conversation could not be resumed",
@@ -384,7 +402,7 @@ var sentinelTypes = []struct {
 	{ErrShimVersionMismatch, TypeShimVersionMismatch},
 	{ErrShimSeqRegression, TypeShimSeqRegression},
 	{ErrNotLiveSession, TypeSessionNotLive},
-	{ErrSessionSuperseded, TypeSessionSuperseded},
+	{ErrSessionSuperseded, TypeSessionReconnectSuperseded},
 	{ErrNoLiveSessionController, TypeShimNotSpawned},
 	{ErrShimNotReady, TypeShimHandshakeIncomplete},
 	{ErrShimUnhealthy, TypeShimUnhealthy},
@@ -774,6 +792,7 @@ func AllTypes() []Type {
 		TypeSessionNotLive,
 		TypeSessionDeleted,
 		TypeSessionSuperseded,
+		TypeSessionReconnectSuperseded,
 		TypeSessionShimDied,
 		TypeSessionStartFailed,
 		TypeSessionResumeFailed,

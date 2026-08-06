@@ -260,7 +260,7 @@ func TestSupersededResyncReceivesSnapshotCapturedAfterClassification(t *testing.
 		t.Fatalf("post-supersession identity = (%q, %q), want (s2, g-new)", post.GetSessionId(), post.GetControllerGenerationId())
 	}
 	ack := readWSFrame(t, conn).GetCommandAck()
-	if ack.GetFailure().GetErrorType() != string(errclass.TypeSessionSuperseded) {
-		t.Fatalf("failure type = %q, want %q", ack.GetFailure().GetErrorType(), errclass.TypeSessionSuperseded)
+	if ack.GetFailure().GetErrorType() != string(errclass.TypeSessionReconnectSuperseded) {
+		t.Fatalf("failure type = %q, want %q", ack.GetFailure().GetErrorType(), errclass.TypeSessionReconnectSuperseded)
 	}
 }
