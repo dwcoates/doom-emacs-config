@@ -220,6 +220,9 @@ type fakeApplier struct {
 	staleTurnCloses []staleTurnCloseCall
 	staleTurnClosed bool
 	staleTurnErr    error
+	// staleTurnCloseHook runs after a close is recorded, so a test can move the
+	// resolved state the way a real closing row does.
+	staleTurnCloseHook func(workspace string)
 	// mergeLeases names the workspaces merge.Coordinator holds the exclusivity
 	// lease on. Empty is the ordinary case: no merge is running.
 	mergeLeases map[string]bool
@@ -640,13 +643,22 @@ type staleTurnCloseCall struct {
 // value answers "there was nothing stale to close", which is what every test
 // that does not care about the invariant wants; a test exercising it sets
 // staleTurnClosed or staleTurnErr.
+//
+// staleTurnCloseHook, when set, runs after the call is recorded and OUTSIDE the
+// fake's lock, so it can move the resolved state the way a real closing row
+// does — which is what lets a test observe the state a close produced rather
+// than only the call that produced it.
 func (f *fakeApplier) CloseStaleTurn(workspace, sessionID, reason string, soleSessionController bool) (bool, error) {
 	f.reconcMutex.Lock()
-	defer f.reconcMutex.Unlock()
 	f.staleTurnCloses = append(f.staleTurnCloses, staleTurnCloseCall{
 		workspace: workspace, sessionID: sessionID, reason: reason, soleSessionController: soleSessionController,
 	})
-	return f.staleTurnClosed, f.staleTurnErr
+	closed, err, hook := f.staleTurnClosed, f.staleTurnErr, f.staleTurnCloseHook
+	f.reconcMutex.Unlock()
+	if hook != nil {
+		hook(workspace)
+	}
+	return closed, err
 }
 
 // staleTurnClosesApplied returns the recorded teardown axis closes, taken under
