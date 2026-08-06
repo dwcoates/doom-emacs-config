@@ -15,8 +15,11 @@
 // this session?" answers NO when the truth is NOT YET, and the daemon would
 // spawn a duplicate of a shim that is alive and mid-turn.
 //
-// So the shim takes an exclusive lock on its session at startup and holds it
-// for its lifetime. The lock is:
+// So the shim takes TWO exclusive locks at startup — one keyed by session id,
+// one keyed by workspace directory — and holds both for its lifetime. The
+// session key names one conversation attempt; the workspace key names the thing
+// the invariant is about, and only it catches two daemon session ids pointed at
+// one workspace over one transcript (WorkspaceLockPath). Each lock is:
 //
 //   - kernel-enforced, so exclusion is not advisory bookkeeping;
 //   - released automatically when the holder dies, however it dies, so there
@@ -34,6 +37,8 @@
 package sessionlock
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -58,6 +63,56 @@ func Path(sessionID string) (string, error) {
 		return "", err
 	}
 	return filepath.Join(dir, "session-"+sessionID+".lock"), nil
+}
+
+// WorkspaceKey is a workspace directory's identity in a file name: the first
+// eight hex digits of the MD5 of its cleaned absolute path.
+//
+// It is the SAME derivation as the workspace_id on every canonical log record
+// (dlog.WorkspaceFromDirectory, and the shim's own log.ts), so a lock file is
+// greppable against the log lines of the shim holding it. The shim recomputes
+// it in Node from the --cwd the daemon hands it — already symlink-resolved and
+// absolute — and both sides normalize with their platform's path cleaner, so
+// one workspace derives one path on both sides.
+func WorkspaceKey(cwd string) string {
+	sum := md5.Sum([]byte(filepath.Clean(cwd)))
+	return hex.EncodeToString(sum[:])[:8]
+}
+
+// WorkspaceLockPath returns the lock file for the workspace rooted at cwd.
+//
+// It is a SECOND lock, held alongside the session lock rather than instead of
+// it, because the two answer different questions. A session id names one
+// daemon-side conversation attempt; a workspace names the thing the invariant
+// is about — a workspace and each resumed transcript keep exactly one live
+// session at a time. Two daemon session ids can point at one workspace over one
+// vendor transcript, and each would take its own session lock and exclude
+// nothing.
+//
+// The key is the CWD rather than the vendor transcript uuid because a FRESH
+// session has no transcript yet, so a transcript key cannot cover the window in
+// which a duplicate gets spawned.
+func WorkspaceLockPath(cwd string) (string, error) {
+	if cwd == "" {
+		return "", fmt.Errorf("sessionlock: a workspace lock path needs a workspace directory, got an empty one")
+	}
+	dir, err := Dir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "workspace-"+WorkspaceKey(cwd)+".lock"), nil
+}
+
+// WorkspaceLockHeld reports whether a live process holds the workspace's lock —
+// i.e. whether a shim is alive for that workspace, INCLUDING one that has not
+// dialled in yet. It answers exactly as Held does, and its errors mean the same
+// thing: "I could not tell", which a caller must never read as free.
+func WorkspaceLockHeld(cwd string) (bool, error) {
+	path, err := WorkspaceLockPath(cwd)
+	if err != nil {
+		return false, err
+	}
+	return heldAt(path)
 }
 
 // EnsureDir creates the lock directory. Called at daemon boot alongside the
