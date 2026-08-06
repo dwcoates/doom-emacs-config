@@ -1,6 +1,7 @@
 package sessioncontroller
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -256,6 +257,17 @@ func (r *turnAccountingReducer) observeTurnClaimBridge(ev *corev1.Event) {
 	r.activeTurnID = id
 }
 
+// ErrAccountingQueryIdentityContradiction marks the ONE error observe can
+// return that is NOT bookkeeping: a LIVE query lifecycle event claiming an
+// identity other than the one this reducer is already bound to. That is a
+// genuine protocol contradiction — the running query() invocation disagreeing
+// with itself about its own identity — and stays fatal to the delivery,
+// unlike every other observe failure (a malformed usage observation, an
+// unattributed response, a response session mismatch), which is pure
+// token-utilization bookkeeping and must not gate session establishment or
+// conversation delivery. See consumer.degradeAccountingObservation.
+var ErrAccountingQueryIdentityContradiction = errors.New("session-controller: live query lifecycle contradicts its own bound identity")
+
 func (r *turnAccountingReducer) observe(ev *corev1.Event, daemonSessionID string) error {
 	if q := ev.GetQueryLifecycle(); q != nil {
 		r.recordQueryLifecycleVendorLineage(q)
@@ -266,7 +278,7 @@ func (r *turnAccountingReducer) observe(ev *corev1.Event, daemonSessionID string
 			return nil
 		}
 		if r.queryID != "" && r.queryID != q.GetQueryInstanceId() {
-			return fmt.Errorf("query lifecycle query_instance_id %q does not match bound query_instance_id %q at seq %d (event_query_instance_id=%q)", q.GetQueryInstanceId(), r.queryID, ev.GetSeq(), ev.GetQueryInstanceId())
+			return fmt.Errorf("%w: query lifecycle query_instance_id %q does not match bound query_instance_id %q at seq %d (event_query_instance_id=%q)", ErrAccountingQueryIdentityContradiction, q.GetQueryInstanceId(), r.queryID, ev.GetSeq(), ev.GetQueryInstanceId())
 		}
 		r.queryID = q.GetQueryInstanceId()
 		if observed := q.GetRuntimeObserved(); observed != nil {
