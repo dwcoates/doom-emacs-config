@@ -257,6 +257,17 @@ func (m *Manager) paintTurnBandLocked(
 	want, causeKind := endState, endCause
 	if band, live := turnBandToken(l); live {
 		want, causeKind = band, causeTurnStarted
+	} else if _, started := ev.GetPayload().(*corev1.Event_TurnStarted); started {
+		// A START THAT ARRIVES ALREADY ENDED PAINTS NOTHING. The derivation
+		// holds no live turn because this start replays a turn the daemon
+		// killed, and its durable end closed the claim in the same statement
+		// that admitted it (turninterruption.go). A start's own token says
+		// `thinking`, which would be a lie here, and the end it carries was
+		// already painted when the turn was killed — so the axis is left
+		// exactly as the derivation already has it.
+		m.logf("ssm: turn band unchanged ws=%s event_session=%s seq=%d turn_id=%q liveness=%s — this start replays an already-ended turn, so there is no colour for it to move",
+			workspace, eventSessionID, ev.GetSeq(), turnCorrelation(ev), l)
+		return "", nil
 	}
 	// AGREEMENT IS ON THE PAIR, NOT THE TOKEN. `thinking` written by
 	// MarkPromptDelivered is the DAEMON's commitment to a prompt whose start has
