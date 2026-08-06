@@ -706,9 +706,15 @@ slash produced a key the daemon has no session for."
       (should-not completions))))
 
 (ert-deftest agent-repl-test-host-action-defer-outside-a-handler-is-inert ()
-  "The merge dispatch stays callable from an interactive command."
-  (let ((agent-repl--host-action-deferral nil))
-    (should (equal (agent-repl--host-action-defer "tok-1") "tok-1"))))
+  "The merge dispatch stays callable from an interactive command.
+It returns the token and registers NOTHING: there is no action to
+complete.  The old `boundp' guard was true everywhere, because a `defvar'
+is globally bound, so this is the first time the guard actually holds."
+  (let ((agent-repl--host-action-deferral nil)
+        (agent-repl--host-action-outcomes (make-hash-table :test 'equal))
+        (agent-repl--host-action-deferrals (make-hash-table :test 'equal)))
+    (should (equal (agent-repl--host-action-defer "tok-1") "tok-1"))
+    (should (= (hash-table-count agent-repl--host-action-deferrals) 0))))
 
 (ert-deftest agent-repl-test-host-action-workspace-create-failure-is-announced ()
   "A failed creation job is logged and echoed, then completed ok."
@@ -924,3 +930,137 @@ slash produced a key the daemon has no session for."
 (provide 'test-workspace-create-client)
 
 ;;; test-workspace-create-client.el ends here
+
+;;;; ---- the deferral is registered before the handler can be answered ----
+;;
+;; `agent-repl--host-action-defer' used to only set a dynamic variable, and
+;; the executor registered the token in `agent-repl--host-action-deferrals'
+;; after the handler RETURNED.  The daemon-routed merge writes its command
+;; inside that window, and `process-send-string' yields there: the filter
+;; ran the ack reentrantly, `agent-repl--host-action-settle' looked the
+;; token up, found nothing, and the action stayed `in-flight' forever --
+;; where every redelivery is suppressed as a duplicate and no completion is
+;; ever sent.
+
+(ert-deftest agent-repl-test-host-action-defer-registers-immediately ()
+  "The deferral is readable the instant the handler defers, not after it returns."
+  (let ((agent-repl--host-action-outcomes (make-hash-table :test 'equal))
+        (agent-repl--host-action-deferrals (make-hash-table :test 'equal))
+        registered-during-handler)
+    (cl-letf (((symbol-function 'agent-repl--handle-switch-command)
+               (lambda (_cmd)
+                 (agent-repl--host-action-defer "tok-1")
+                 (setq registered-during-handler
+                       (gethash "tok-1" agent-repl--host-action-deferrals))))
+              ((symbol-function 'agent-repl--uds-send-command)
+               (lambda (&rest _) "host-ack")))
+      ;; Act
+      (agent-repl--workspace-create-handle-host-action
+       '(:actionId "action-1" :switchWorkspace (:dir "/tmp/repo")))
+      ;; Assert
+      (should (equal registered-during-handler "action-1")))))
+
+(ert-deftest agent-repl-test-host-action-reentrant-settle-completes-the-action ()
+  "An ack answered while the handler is still on the stack still completes it.
+This is the exact interleaving: the handler defers, its write yields, and
+the settle runs before the handler has returned."
+  (let ((agent-repl--host-action-outcomes (make-hash-table :test 'equal))
+        (agent-repl--host-action-deferrals (make-hash-table :test 'equal))
+        (agent-repl--host-action-success-order nil)
+        (completions nil))
+    (cl-letf (((symbol-function 'agent-repl--handle-switch-command)
+               (lambda (_cmd)
+                 (agent-repl--host-action-defer "tok-1")
+                 ;; Stands in for the reentrant CommandAck delivered from
+                 ;; inside `process-send-string'.
+                 (agent-repl--host-action-settle "tok-1" t nil)))
+              ((symbol-function 'agent-repl--uds-send-command)
+               (lambda (_field payload &rest _)
+                 (push payload completions)
+                 "host-ack")))
+      ;; Act
+      (agent-repl--workspace-create-handle-host-action
+       '(:actionId "action-1" :switchWorkspace (:dir "/tmp/repo")))
+      ;; Assert
+      (should (equal (length completions) 1))
+      (should (equal (plist-get (car completions) :actionId) "action-1"))
+      (should (eq (plist-get (car completions) :ok) t)))))
+
+(ert-deftest agent-repl-test-host-action-reentrant-settle-is-not-resurrected ()
+  "The executor does not re-hold an action its reentrant ack already settled.
+Re-holding would put a completed action back to `in-flight', where every
+later delivery is suppressed and no completion is ever sent again."
+  (let ((agent-repl--host-action-outcomes (make-hash-table :test 'equal))
+        (agent-repl--host-action-deferrals (make-hash-table :test 'equal))
+        (agent-repl--host-action-success-order nil))
+    (cl-letf (((symbol-function 'agent-repl--handle-switch-command)
+               (lambda (_cmd)
+                 (agent-repl--host-action-defer "tok-1")
+                 (agent-repl--host-action-settle "tok-1" t nil)))
+              ((symbol-function 'agent-repl--uds-send-command)
+               (lambda (&rest _) "host-ack")))
+      ;; Act
+      (agent-repl--workspace-create-handle-host-action
+       '(:actionId "action-1" :switchWorkspace (:dir "/tmp/repo")))
+      ;; Assert
+      (should (eq (plist-get (gethash "action-1" agent-repl--host-action-outcomes)
+                             :state)
+                  'succeeded))
+      (should-not (gethash "tok-1" agent-repl--host-action-deferrals)))))
+
+(ert-deftest agent-repl-test-host-action-reentrant-settle-sends-one-completion ()
+  "The reentrantly-settled action is completed EXACTLY once, never twice."
+  (let ((agent-repl--host-action-outcomes (make-hash-table :test 'equal))
+        (agent-repl--host-action-deferrals (make-hash-table :test 'equal))
+        (agent-repl--host-action-success-order nil)
+        (completions 0))
+    (cl-letf (((symbol-function 'agent-repl--handle-switch-command)
+               (lambda (_cmd)
+                 (agent-repl--host-action-defer "tok-1")
+                 (agent-repl--host-action-settle "tok-1" t nil)))
+              ((symbol-function 'agent-repl--uds-send-command)
+               (lambda (&rest _) (cl-incf completions) "host-ack")))
+      ;; Act
+      (agent-repl--workspace-create-handle-host-action
+       '(:actionId "action-1" :switchWorkspace (:dir "/tmp/repo")))
+      ;; Assert
+      (should (= completions 1)))))
+
+(ert-deftest agent-repl-test-host-action-handler-signal-releases-its-deferral ()
+  "A handler that defers and then signals leaves no deferral behind.
+Its action is completed as FAILED right there, so a later ack on that token
+must not find a live entry and settle an action already answered."
+  (let ((agent-repl--host-action-outcomes (make-hash-table :test 'equal))
+        (agent-repl--host-action-deferrals (make-hash-table :test 'equal)))
+    (cl-letf (((symbol-function 'agent-repl--handle-switch-command)
+               (lambda (_cmd)
+                 (agent-repl--host-action-defer "tok-1")
+                 (error "the dispatch blew up after deferring")))
+              ((symbol-function 'agent-repl--uds-send-command)
+               (lambda (&rest _) "host-ack")))
+      ;; Act
+      (should-error
+       (agent-repl--workspace-create-handle-host-action
+        '(:actionId "action-1" :switchWorkspace (:dir "/tmp/repo"))))
+      ;; Assert
+      (should-not (gethash "tok-1" agent-repl--host-action-deferrals)))))
+
+(ert-deftest agent-repl-test-host-action-released-token-cannot-resurrect ()
+  "An ack arriving after a released deferral completes nothing."
+  (let ((agent-repl--host-action-outcomes (make-hash-table :test 'equal))
+        (agent-repl--host-action-deferrals (make-hash-table :test 'equal))
+        (completions 0))
+    (cl-letf (((symbol-function 'agent-repl--handle-switch-command)
+               (lambda (_cmd)
+                 (agent-repl--host-action-defer "tok-1")
+                 (error "the dispatch blew up after deferring")))
+              ((symbol-function 'agent-repl--uds-send-command)
+               (lambda (&rest _) (cl-incf completions) "host-ack")))
+      (should-error
+       (agent-repl--workspace-create-handle-host-action
+        '(:actionId "action-1" :switchWorkspace (:dir "/tmp/repo"))))
+      (setq completions 0)
+      ;; Act — the late ack for a handler that already failed
+      (agent-repl--host-action-settle "tok-1" t nil)
+      ;; Assert
+      (should (= completions 0)))))
