@@ -91,6 +91,20 @@ func (m *Manager) keepAliveEligibleLocked(d *sessionController) (ok bool, why st
 //
 // Returns ErrKeepAliveNotEligible when the re-check under the mutex declines.
 func (m *Manager) SubmitKeepAlivePing(ctx context.Context, workspace string) (turnID string, err error) {
+	// THE ELAPSED IS MEASURED BEFORE THE CLAIM, and remembered with it. It is
+	// what a cold ping's hibernation reports, and it cannot be taken afterwards:
+	// the ping's own turn end stamps the durable last-turn-end to now, so a
+	// figure derived later would read ~0 for a session that had in fact been
+	// quiet for an hour (keepalivecold.go).
+	//
+	// Taken with NO mutex held, because the durable read may reach the legacy
+	// stamper, which lives outside this package. The id is minted here for the
+	// same reason the measurement is — the two are one fact about one ping — and
+	// an id minted for a ping that then turns out to be ineligible is simply
+	// discarded, having named nothing.
+	turnID = newKeepAliveTurnID()
+	measurement := m.measureKeepAlivePing(workspace, turnID)
+
 	m.mu.Lock()
 	d, live := m.byWS[workspace]
 	if !live {
@@ -108,8 +122,14 @@ func (m *Manager) SubmitKeepAlivePing(ctx context.Context, workspace string) (tu
 	// (queue.go, the keep-alive hold), so a claim published after the mutex was
 	// released would leave a window in which the ping is in flight and nothing
 	// says so.
-	turnID = newKeepAliveTurnID()
+	//
+	// THE MEASUREMENT IS PUBLISHED WITH THE CLAIM, in this one acquisition. It
+	// is what the ping's own result fills and what the ping's own turn end
+	// reads, and a measurement published a moment after the claim would leave an
+	// instant in which a result could land against a ping that had nothing to
+	// record it in.
 	d.keepAliveTurnID = turnID
+	d.keepAlivePing = &measurement
 	sessionID := d.sessionID
 	m.mu.Unlock()
 
@@ -184,6 +204,10 @@ func (m *Manager) abandonKeepAlivePing(d *sessionController, turnID string) int 
 	m.mu.Lock()
 	if d.keepAliveTurnID == turnID {
 		d.keepAliveTurnID = ""
+		// The measurement goes with the claim it was published with. A ping that
+		// never ran measured nothing, and a measurement left standing here would
+		// be read at the NEXT ping's turn end as though it were that ping's own.
+		d.keepAlivePing = nil
 	}
 	released := d.queue.releaseKeepAliveHold(turnID)
 	if released == 0 {
@@ -347,18 +371,27 @@ func (m *Manager) releaseKeepAliveRewindLocked(workspace, pingTurnID string) {
 }
 
 // noteKeepAliveTurnEndedLocked clears the ping claim when the ending turn is
-// the ping's own. Caller holds m.mu.
+// the ping's own, and hands back the measurement that claim carried. Caller
+// holds m.mu.
 //
 // IT MATCHES ON TURN ID rather than clearing unconditionally, because a turn
 // end for some other turn — a user prompt that raced in, a late end for a turn
 // the daemon already accounted — must not release a hold the ping still owns.
-func (d *sessionController) noteKeepAliveTurnEndedLocked(turnID string) bool {
+//
+// THE MEASUREMENT LEAVES WITH THE CLAIM, in this one acquisition, and is
+// RETURNED rather than left for the caller to read separately. That is what
+// makes the cold-ping verdict ordered after the ping's turn end by construction:
+// the only way to obtain the measurement is to be the boundary that ended the
+// turn it belongs to (keepalivecold.go).
+func (d *sessionController) noteKeepAliveTurnEndedLocked(turnID string) (*keepAlivePingMeasurement, bool) {
 	if d.keepAliveTurnID == "" {
-		return false
+		return nil, false
 	}
 	if turnID != "" && turnID != d.keepAliveTurnID {
-		return false
+		return nil, false
 	}
 	d.keepAliveTurnID = ""
-	return true
+	measurement := d.keepAlivePing
+	d.keepAlivePing = nil
+	return measurement, true
 }

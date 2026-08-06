@@ -1807,32 +1807,16 @@ export class UdsSession {
       }
       return;
     }
-    // A result closes the oldest accepted input turn unless work is still
-    // OUTSTANDING at that instant: an SDK task that has not reported terminal
-    // (`liveSdkTaskIds`), or a task notification the CLI has queued but not yet
-    // consumed (`pendingTaskNotificationQueue`). A result arriving while either
-    // holds is durable intermediate evidence and leaves the turn authoritative,
-    // because Claude emits further result messages as those notifications drive
-    // additional internal agent cycles.
-    //
-    // Retention MUST be a function of DRAINING sets only. Both inputs above
-    // return to zero when the work they name finishes, so retention releases
-    // itself. A cumulative input — `turnSdkTaskIds`, which only grows until the
-    // close it would gate clears it — would latch the predicate true forever
-    // after the turn's first task, and the turn would never end. That is
-    // exactly the wedge this shape exists to prevent.
-    //
-    // The residual hazard is accepted deliberately. `pendingTaskNotificationQueue`
-    // is fed by the FILE plane (see observeTaskNotificationQueue), so an ENQUEUE
-    // the sidecar has not delivered yet when the result lands lets the turn
-    // close early; the notification's own later result cycle then finds no
-    // accepted turn and takes the reportDegraded path below. That is loud and
-    // self-correcting, and is strictly preferable to a silent permanent wedge.
-    // Do NOT add a timer, deadline, or watchdog to absorb it.
+    // A result closes the oldest accepted input turn only when it has no live
+    // SDK tasks. A result with live tasks is durable intermediate evidence,
+    // but the turn remains authoritative until the SDK emits a result after
+    // every task has terminated. Claude may emit multiple result messages as
+    // background-task notifications drive additional internal agent cycles.
     let terminalTurnId: string | undefined;
     let terminalBoundaryAtMs: number | undefined;
     let turnStart: Event | undefined;
     let retainResultTurn = false;
+    let taskNotificationResult = false;
     if (msg.type === "result") {
       const claimedTurnId = this.activeTurnIds[0];
       if (claimedTurnId === undefined) {
@@ -1841,20 +1825,27 @@ export class UdsSession {
           "SDK result has no accepted prompt turn to close",
         );
       } else {
+        const origin = typeof msg.origin === "object" && msg.origin !== null
+          ? msg.origin as Record<string, unknown>
+          : undefined;
+        taskNotificationResult = origin?.kind === "task_notification" || origin?.kind === "task-notification";
+        const taskCount = this.turnSdkTaskIds.get(claimedTurnId)?.size ?? 0;
         retainResultTurn = this.liveSdkTaskIds.size > 0
+          || (taskCount > 0 && !taskNotificationResult)
           || this.pendingTaskNotificationQueue.size > 0;
       }
       if (claimedTurnId !== undefined && retainResultTurn) {
+        retainResultTurn = true;
         turnStart = this.activeTurnStarts.get(claimedTurnId);
+        const taskCount = this.turnSdkTaskIds.get(claimedTurnId)?.size ?? 0;
         LOGGER.log({
           agent_repl_session_id: this.deps.sessionId,
           request_id: claimedTurnId,
           turn_id: claimedTurnId,
           live_sdk_task_count: this.liveSdkTaskIds.size,
           live_sdk_task_ids: [...this.liveSdkTaskIds].sort(),
-          // Cumulative, and NOT a retention input: logged because the per-turn
-          // task census is what made the original retention latch diagnosable.
-          sdk_task_count: this.turnSdkTaskIds.get(claimedTurnId)?.size ?? 0,
+          sdk_task_count: taskCount,
+          task_notification_result: taskNotificationResult,
           pending_task_notification_count: this.pendingTaskNotificationQueue.size,
           turns_in_flight: this.activeTurnIds.length,
           decision: "retain_turn_for_sdk_task_cycles",

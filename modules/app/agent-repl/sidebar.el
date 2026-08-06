@@ -112,57 +112,43 @@ roster never carries, so the keyboard reaches it through this hook
 rather than a roster rebuild.")
 
 (defconst agent-repl--sidebar-status-wire
-  '((:submitting      . ("submitting"      . nil))
-    (:thinking        . ("thinking"        . nil))
-    (:clearing        . ("clearing"        . nil))
-    (:compacting      . ("compacting"      . nil))
-    (:permission      . ("permission"      . nil))
-    (:init            . ("init"            . nil))
-    (:severed         . ("severed"         . nil))
-    (:hibernated      . ("hibernated"      . nil))
-    (:done            . ("done"            . nil))
-    (:interrupted     . ("interrupted"     . nil))
-    (:ready           . ("ready"           . nil))
-    (:idle            . ("ready"           . nil))
-    (:idle-async      . ("idle-async"      . nil))
-    (:vendor-blocked  . ("vendor-blocked"  . nil))
-    (:start-failed    . ("start-failed"    . nil))
-    (:degraded        . ("degraded"        . nil))
-    (:dead            . ("dead"            . nil))
-    (:merge-enqueuing . ("merge-enqueuing" . nil))
-    (:merging         . ("merging"         . nil))
-    (:merge-queued    . ("merge-queued"    . nil))
-    (:merge-conflict  . ("merge-conflict"  . nil))
-    (:merge-failed    . ("merge-failed"    . nil))
-    (:merged          . ("merged"          . t)))
-  "Maps `agent-repl--ws-render-status' keywords onto sidebar wire rows.
-Each entry's value is (WIRE-STRING . PERSPECTIVE-INDEPENDENT-P).
-
-WIRE-STRING is the dot the row draws.  The dots speak the SAME
-six-color vocabulary the tab-bar does, so a workspace can never read
-one way in the rail and another in the tabs.  Nothing coarsens any
-more: `:idle-async' is its own yellow dot rather than borrowing idle's
-ring, and `:vendor-blocked' is its own purple dot rather than sharing
-the grey one with `:dead'.  A workspace that read differently in the
-two places was exactly what the old coarsening produced.
+  '((:submitting     . "submitting")
+    (:thinking       . "thinking")
+    (:clearing       . "clearing")
+    (:compacting     . "compacting")
+    (:permission     . "permission")
+    (:init           . "init")
+    (:severed        . "severed")
+    (:hibernated     . "hibernated")
+    (:done           . "done")
+    (:interrupted    . "interrupted")
+    (:ready          . "ready")
+    (:idle           . "ready")
+    (:idle-async     . "idle-async")
+    (:vendor-blocked . "vendor-blocked")
+    (:start-failed   . "start-failed")
+    (:degraded       . "degraded")
+    (:dead           . "dead")
+    (:merge-enqueuing . "merge-enqueuing")
+    (:merging        . "merging")
+    (:merge-queued   . "merge-queued")
+    (:merge-conflict . "merge-conflict")
+    (:merge-failed   . "merge-failed")
+    (:merged         . "merged"))
+  "Maps `agent-repl--ws-render-status' keywords onto sidebar wire strings.
+The dots speak the SAME six-color vocabulary the tab-bar does, so a
+workspace can never read one way in the rail and another in the tabs.
+Nothing coarsens any more: `:idle-async' is its own yellow dot rather
+than borrowing idle's ring, and `:vendor-blocked' is its own purple dot
+rather than sharing the grey one with `:dead'.  A workspace that read
+differently in the two places was exactly what the old coarsening
+produced.
 
 `:start-failed' and `:degraded' are mapped rather than absent: both are
 real render states the daemon can push, and an unmapped one signals an
 error instead of drawing a dot.
 
-PERSPECTIVE-INDEPENDENT-P marks a status that describes CONCLUDED work:
-its dot is meaningful even when the workspace has no open perspective,
-because the status itself — not the tab-bar — is what is being
-reported.  `:merged' is the only such status: `preserve-entry' keeps a
-landed merge's roster row alive specifically so it can outlive its tab
-inside Recently Merged, so its dot must survive perspective loss.  Every
-in-flight merge status (`:merge-enqueuing', `:merging', `:merge-queued',
-`:merge-conflict', `:merge-failed') is still live work riding a real
-tab, exactly like `:ready' or `:thinking', so it stays perspective-bound:
-losing the tab mid-merge is itself the noteworthy fact, and that fact is
-`\"inactive\"'.
-
-The wire-string set is the webapp's closed WorkspaceRow.status union
+The value set is the webapp's closed WorkspaceRow.status union
 \(webapp/src/sidebar.ts) — the two sides are one contract and MUST
 stay in sync.  \"done-viewed\" and \"inactive\" are absent
 here because neither is a render-status keyword —
@@ -172,46 +158,37 @@ here because neither is a render-status keyword —
 (defun agent-repl--sidebar-wire-status (name)
   "Return the wire status string for known workspace NAME.
 \"inactive\" when NAME has no open perspective (`agent-repl--ws-open-p'
-nil) AND its render status is perspective-bound: a workspace registered
-in the roster but absent from the tab-bar has no live session whose
-lifecycle a status dot could report, so the webapp draws a question
-mark in place of the dot.  A status marked perspective-independent in
-`agent-repl--sidebar-status-wire' is the one exception — it describes
-concluded work the row is reporting on its own account, not the
-workspace's tab-bar membership, so it serializes regardless of
-`agent-repl--ws-open-p'.
+nil): a workspace registered in the roster but absent from the tab-bar
+has no live session whose lifecycle a status dot could report, so the
+webapp draws a question mark in place of the dot.  This
+perspective-membership check dominates every render state — a merged,
+dead, or idle registration that is perspective-less still serializes
+\"inactive\" — because being in the sidebar yet not the tab-bar is the
+fact the row is conveying.
 
 \"none\" when `agent-repl--ws-render-status' reports nil (tombstoned /
-unborn) and NAME has an open perspective; a perspective-less workspace
-with no render status still reads \"inactive\", since there is no
-concluded-work status to report on its own account.
-
+unborn).
 Signals on an unmapped keyword: a render state missing from
 `agent-repl--sidebar-status-wire' means a new state was added without
 extending the sidebar contract — a violated invariant, never a silent
 default dot."
-  (let ((kw (agent-repl--ws-render-status name)))
-    (cond
-     ((null kw)
-      (if (agent-repl--ws-open-p name)
-          (progn
-            (agent-repl--log-verbose name "sidebar-wire-status: ws=%s open=t status=nil -> none" name)
-            "none")
-        (agent-repl--log-verbose name "sidebar-wire-status: ws=%s open=nil status=nil -> inactive" name)
-        "inactive"))
-     (t (if-let ((entry (alist-get kw agent-repl--sidebar-status-wire)))
-            (let ((wire (car entry))
-                  (independent (cdr entry)))
-              (if (or independent (agent-repl--ws-open-p name))
-                  (progn
-                    (agent-repl--log-verbose name "sidebar-wire-status: ws=%s open=%s status=%s -> %s"
-                                              name (agent-repl--ws-open-p name) kw wire)
-                    wire)
-                (agent-repl--log-verbose name "sidebar-wire-status: ws=%s open=nil status=%s -> inactive" name kw)
-                "inactive"))
-          (agent-repl--log name "sidebar-wire-status: ws=%s unmapped render-status=%S" name kw)
-          (error "agent-repl--sidebar-wire-status: unmapped render state %S for ws=%s"
-                 kw name))))))
+  (if (not (agent-repl--ws-open-p name))
+      (progn
+        (agent-repl--log-verbose name "sidebar-wire-status: ws=%s open=nil -> inactive" name)
+        "inactive")
+    (let ((kw (agent-repl--ws-render-status name)))
+      (cond
+       ((null kw)
+        (agent-repl--log-verbose name "sidebar-wire-status: ws=%s open=t status=nil -> none" name)
+        "none")
+       (t (if-let ((wire (alist-get kw agent-repl--sidebar-status-wire)))
+              (progn
+                (agent-repl--log-verbose name "sidebar-wire-status: ws=%s open=t status=%s -> %s"
+                                          name kw wire)
+                wire)
+            (agent-repl--log name "sidebar-wire-status: ws=%s unmapped render-status=%S" name kw)
+            (error "agent-repl--sidebar-wire-status: unmapped render state %S for ws=%s"
+                   kw name)))))))
 
 (defconst agent-repl--sidebar-status-arm
   '(("submitting"      . :submitting)
@@ -1121,84 +1098,16 @@ would instead fire on every 1Hz tick for the whole of an outage."
                        (plist-get roster :view))
       request-id)))
 
-;;;; ---- The publish gate --------------------------------------------------
-;;
-;; `agent-repl--sidebar-push' is a REQUEST to publish, never a publish.
-;;
-;; It used to be an unconditional publish, documented as such, and the change
-;; gate lived in the 1Hz tick's signature compare — which nine callers reached
-;; past by calling the publisher directly.  Every fold, switch, nav, view
-;; change, task edit and workspace teardown therefore rebuilt the whole roster
-;; and made an ack round trip immediately: 277 `publishWorkspaceRoster' sends
-;; and 1.05 MB of frames in a twenty-minute window, peaking at ten sends inside
-;; one second, each one rebuilding 17 live workspaces, 85 workspace states and
-;; 201 sessions.
-;;
-;; The fix is not a rate limit, a hand-tuned debounce, or an `unless changed'
-;; check at each caller — those all leave the gate bypassable by the next
-;; caller written.  Instead the ONLY function that publishes is
-;; `agent-repl--sidebar-flush', and it publishes only when the signature moved.
-;; Requests coalesce into one flush per event-loop pass.  N requests in one
-;; frame therefore produce at most one publish, an unchanged roster produces
-;; none, and there is no spelling of "publish right now, ungated" left to call.
-
-(defun agent-repl--sidebar-run-timer (seconds callback)
-  "Integration boundary: run CALLBACK after SECONDS without blocking Emacs."
-  (run-with-timer seconds nil callback))
-
-(defvar agent-repl--sidebar-last-signature nil
-  "Signature of the roster state as of the last published build.")
-
-(defvar agent-repl--sidebar-flush-pending nil
-  "Non-nil when a roster flush is already scheduled for this frame.
-Set by `agent-repl--sidebar-push' and cleared by
-`agent-repl--sidebar-flush', so any number of requests between the two
-collapse into the single flush already on its way.")
-
-(defun agent-repl--sidebar-flush ()
-  "Publish the roster IF the signature moved; drop the flush otherwise.
-This is the sole publisher.  Refreshes `agent-repl--sidebar-flat-dirs' as
-the build's side product, so navigation always walks the order last
-shown.
-
-Called from the coalescing timer `agent-repl--sidebar-push' arms, and
-directly by the 1Hz tick.  The tick calling it directly is deliberate:
-the gate lives HERE, so a direct call is still gated, and it means a
-never-fired flush timer cannot wedge the rail — the next tick publishes
-anyway."
-  (setq agent-repl--sidebar-flush-pending nil)
-  (let ((sig (agent-repl--sidebar-signature)))
-    (if (equal sig agent-repl--sidebar-last-signature)
-        (agent-repl--log-verbose
-         nil "sidebar-flush: signature unchanged, dropping the publish")
-      (setq agent-repl--sidebar-last-signature sig)
-      (agent-repl--log-verbose nil "sidebar-flush: signature changed, publishing roster")
-      (let ((built (agent-repl--sidebar-build)))
-        (setq agent-repl--sidebar-flat-dirs (cdr built))
-        (agent-repl--sidebar-publish (car built))))))
-
 (defun agent-repl--sidebar-push ()
-  "REQUEST a roster publish, coalescing into one flush per frame.
-Does not publish and does not rebuild.  A zero-delay timer runs the flush
-from the ordinary event loop, so a burst of requests inside one frame
-\(a fold that also forces a tab-bar redraw, a switch that boots a
-session, a state transition that lands beside a nav move) settles into a
-single gated flush."
-  (if agent-repl--sidebar-flush-pending
-      (agent-repl--log-verbose
-       nil "sidebar-push: request coalesced into the pending flush")
-    (setq agent-repl--sidebar-flush-pending t)
-    (agent-repl--log-verbose nil "sidebar-push: scheduling the roster flush")
-    (agent-repl--sidebar-run-timer 0 #'agent-repl--sidebar-flush)))
-
-(defun agent-repl--sidebar-invalidate ()
-  "Forget the last published signature so the next flush cannot be dropped.
-For the one case where the roster is unchanged but the DAEMON's copy of
-it is gone: a replacement daemon retains no roster, and the signature
-gate would otherwise correctly observe that nothing moved and publish
-nothing.  Invalidating rather than adding a force flag keeps a single
-gate that every path goes through."
-  (setq agent-repl--sidebar-last-signature nil))
+  "Rebuild the roster and publish it to the daemon.
+Unconditional: change-gating lives in `agent-repl--sidebar-tick's
+signature compare, and the event-driven callers (fold / switch / nav)
+push precisely because they just changed what the sidebar shows.
+Also refreshes `agent-repl--sidebar-flat-dirs' as the build's side
+product, so navigation always walks the order last shown."
+  (let ((built (agent-repl--sidebar-build)))
+    (setq agent-repl--sidebar-flat-dirs (cdr built))
+    (agent-repl--sidebar-publish (car built))))
 
 (defun agent-repl--sidebar-publish-on-connect ()
   "Republish the roster onto a freshly opened frontend UDS connection.
@@ -1209,7 +1118,6 @@ without this the sidebar would stay empty until something happened to
 move the signature.  Rebuilding rather than resending the last frame is
 the point: the roster published is the state of the world NOW."
   (agent-repl--log nil "sidebar-publish-on-connect: republishing the roster")
-  (agent-repl--sidebar-invalidate)
   (agent-repl--sidebar-push))
 
 (add-hook 'agent-repl-uds-connected-functions
@@ -1228,6 +1136,9 @@ flips the panel and re-renders on its own.  No roster round-trip means
     (agent-repl--log nil "sidebar-expand-push: dir=%s webviews=%d" dir (length bufs))))
 
 ;;;; ---- The 1Hz change gate ----------------------------------------------
+
+(defvar agent-repl--sidebar-last-signature nil
+  "Signature of the roster state as of the last pushed build.")
 
 (defun agent-repl--sidebar-signature ()
   "Return a cheap value that changes whenever the roster would.
@@ -1267,21 +1178,21 @@ and this signature is purely a change detector over roster CONTENT."
         agent-repl--sidebar-merged-epoch))
 
 (defun agent-repl--sidebar-tick ()
-  "1Hz entry point (status.el's state tick): flush the roster gate.
-The flush's signature compare is the hot-path gate — the rebuild and
-publish behind it run only on actual change, so per-tick logging stays
-on the verbose ladder.
+  "1Hz entry point (status.el's state tick): push when the signature moved.
+The signature compare is the hot-path gate — the rebuild and push
+behind it run only on actual change, so per-tick logging stays on the
+verbose ladder.
 
-Flushes DIRECTLY rather than requesting one, because the tick already IS
-a per-frame cadence: routing it through the coalescing timer would only
-add a timer per second, and calling the gate itself means a flush timer
-that never fired cannot leave the rail stale.
-
-The merged-window refresh runs BEFORE the flush, since the epoch it
-maintains is one of the signature's inputs and a wipe must be visible to
-this very tick's compare rather than the next one."
+The merged-window refresh runs BEFORE the signature is taken, since the
+epoch it maintains is one of the signature's inputs and a wipe must be
+visible to this very tick's compare rather than the next one."
   (agent-repl--sidebar-refresh-merged-window)
-  (agent-repl--sidebar-flush))
+  (let ((sig (agent-repl--sidebar-signature)))
+    (if (equal sig agent-repl--sidebar-last-signature)
+        (agent-repl--log-verbose nil "sidebar-tick: signature unchanged, skip")
+      (setq agent-repl--sidebar-last-signature sig)
+      (agent-repl--log-verbose nil "sidebar-tick: signature changed, pushing roster")
+      (agent-repl--sidebar-push))))
 
 ;;;; ---- The dot and the tab take the same value at the same moment --------
 ;;
@@ -1309,14 +1220,12 @@ Subscriber for `agent-repl-ws-state-transition-functions'
 \(frontend-state.el).  NEW and PREVIOUS are the render keywords; a push
 that did not move the keyword changes no dot, so it is skipped.
 
-The request is what refreshes `agent-repl--sidebar-last-signature', via
-the flush it coalesces into, so the next 1Hz tick sees the state already
-delivered and stays quiet.  This function must NOT pre-set that
-signature itself: doing so would tell the flush nothing had moved and
-drop the very publish it was asking for."
+The push also refreshes `agent-repl--sidebar-last-signature', so the
+next 1Hz tick sees the state it already delivered and stays quiet."
   (unless (eq new previous)
     (agent-repl--log ws "sidebar-react-to-pushed-state: ws=%s %s -> %s — repainting the rail with the tab bar"
                      ws previous new)
+    (setq agent-repl--sidebar-last-signature (agent-repl--sidebar-signature))
     (agent-repl--sidebar-push))
   (when (eq new previous)
     (agent-repl--log-verbose ws "sidebar-react-to-pushed-state: ws=%s state=%s unchanged, skip"

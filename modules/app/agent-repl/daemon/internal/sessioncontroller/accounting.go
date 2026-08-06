@@ -257,6 +257,16 @@ func (r *turnAccountingReducer) observeTurnClaimBridge(ev *corev1.Event) {
 	r.activeTurnID = id
 }
 
+// activeTurn reports the turn the reducer is currently attributing evidence to.
+//
+// It exists so a reader OUTSIDE the ledger — the cold keep-alive ping's cost
+// report — names a result's turn with the SAME attribution the durable ledger
+// used for that result, rather than re-deriving one from the event and risking
+// the two disagreeing about which turn paid.
+func (r *turnAccountingReducer) activeTurn() string {
+	return r.activeTurnID
+}
+
 // ErrAccountingQueryIdentityContradiction marks the ONE error observe can
 // return that is NOT bookkeeping: a LIVE query lifecycle event claiming an
 // identity other than the one this reducer is already bound to. That is a

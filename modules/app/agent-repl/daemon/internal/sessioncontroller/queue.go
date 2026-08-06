@@ -718,7 +718,14 @@ func (m *Manager) onTurnBoundary(d *sessionController, active bool, endedAtMs in
 	// the rewind stops and respawns the shim, which cannot happen on the shim
 	// read-loop goroutine this runs on, and the ordinary drain must not deliver
 	// anything into a session that is about to be bounced.
-	if pingTurn := d.keepAliveTurnID; pingTurn != "" && d.noteKeepAliveTurnEndedLocked(endingTurnID) {
+	pingTurn := d.keepAliveTurnID
+	// THE PING'S MEASUREMENT LEAVES WITH ITS CLAIM, in this same acquisition.
+	// The ping's terminal result filled it earlier on this very goroutine, so it
+	// is complete by the time the boundary that ended that turn can read it —
+	// which is what makes the cold-ping hibernation ordered after the turn end
+	// structurally rather than by timing (keepalivecold.go).
+	pingMeasurement, pingEnded := d.noteKeepAliveTurnEndedLocked(endingTurnID)
+	if pingEnded {
 		heldIDs := d.queue.keepAliveHeldIDs(pingTurn)
 		// THE CLAIM IS TRANSFERRED, NOT DROPPED, whenever an aftermath is going
 		// to run. noteKeepAliveTurnEndedLocked has just cleared the ping's own
@@ -747,6 +754,10 @@ func (m *Manager) onTurnBoundary(d *sessionController, active bool, endedAtMs in
 		// made at the moment of writing.
 		m.closeKeepAliveWindow(d, pingTurn, endedAtMs)
 		m.noteDrainActivity()
+		// THE PING'S OWN VERDICT ON THE CACHE, taken after the window is closed
+		// and the drain is told, so a hibernation it decides on finds this ping
+		// fully accounted for rather than half-retired (keepalivecold.go).
+		m.actOnColdKeepAlivePing(d, pingMeasurement, rewinding)
 		if rewinding {
 			go m.releaseKeepAliveHolds(d, pingTurn, heldIDs)
 			return

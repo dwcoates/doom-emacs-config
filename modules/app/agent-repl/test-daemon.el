@@ -110,9 +110,9 @@ against whatever holds port 8787 on the developer's machine."
   ;; Arrange
   (let (captured)
     (cl-letf (((symbol-function 'agent-repl--frontend-run-build-script)
-               (lambda (args callback) (setq captured args) (funcall callback 0))))
+               (lambda (args) (setq captured args) 0)))
       ;; Act
-      (agent-repl--frontend-build-if-stale nil #'ignore #'error)
+      (agent-repl--frontend-build-if-stale nil)
       ;; Assert
       (should (equal captured (list agent-repl--frontend-build-script))))))
 
@@ -121,9 +121,9 @@ against whatever holds port 8787 on the developer's machine."
   ;; Arrange
   (let (captured)
     (cl-letf (((symbol-function 'agent-repl--frontend-run-build-script)
-               (lambda (args callback) (setq captured args) (funcall callback 0))))
+               (lambda (args) (setq captured args) 0)))
       ;; Act
-      (agent-repl--frontend-build-if-stale t #'ignore #'error)
+      (agent-repl--frontend-build-if-stale t)
       ;; Assert
       (should (equal captured
                      (list agent-repl--frontend-build-script "--force"))))))
@@ -132,20 +132,11 @@ against whatever holds port 8787 on the developer's machine."
   "Targeted stale builds pass both launchd service names to the shared script."
   (let (captured)
     (cl-letf (((symbol-function 'agent-repl--frontend-run-build-script)
-               (lambda (args callback) (setq captured args) (funcall callback 0))))
-      (agent-repl--frontend-build-targets-if-stale
-       '("store" "sidecar") nil #'ignore #'error)
+               (lambda (args) (setq captured args) 0)))
+      (agent-repl--frontend-build-targets-if-stale '("store" "sidecar"))
       (should (equal captured
                      (list agent-repl--frontend-build-script
                            "store" "sidecar"))))))
-
-(ert-deftest agent-repl-test-daemon-build-requires-a-continuation ()
-  "The build boundary has no blocking spelling: continuations are required.
-Calling it without them is a programming error rather than a build that
-quietly runs on the main thread."
-  (cl-letf (((symbol-function 'agent-repl--frontend-run-build-script)
-             (lambda (_args _callback) (error "must not spawn"))))
-    (should-error (agent-repl--frontend-build-targets-if-stale nil nil nil nil))))
 
 ;;;; ---- deploy-stack: the boot path's whole-stack deploy --------------------
 ;;
@@ -159,9 +150,9 @@ quietly runs on the main thread."
   ;; Arrange
   (let (captured)
     (cl-letf (((symbol-function 'agent-repl--frontend-run-build-script)
-               (lambda (args callback) (setq captured args) (funcall callback 0))))
+               (lambda (args) (setq captured args) 0)))
       ;; Act
-      (agent-repl--frontend-deploy-stack nil #'ignore #'error)
+      (agent-repl--frontend-deploy-stack nil)
       ;; Assert
       (should (equal (car captured) agent-repl--frontend-deploy-script)))))
 
@@ -173,9 +164,9 @@ is mid-boot, and the caller starts the daemon directly anyway."
   ;; Arrange
   (let (captured)
     (cl-letf (((symbol-function 'agent-repl--frontend-run-build-script)
-               (lambda (args callback) (setq captured args) (funcall callback 0))))
+               (lambda (args) (setq captured args) 0)))
       ;; Act
-      (agent-repl--frontend-deploy-stack nil #'ignore #'error)
+      (agent-repl--frontend-deploy-stack nil)
       ;; Assert
       (should (member "--no-daemon-bounce" captured)))))
 
@@ -183,28 +174,23 @@ is mid-boot, and the caller starts the daemon directly anyway."
   "Without FORCE the deploy argv carries no --force."
   (let (captured)
     (cl-letf (((symbol-function 'agent-repl--frontend-run-build-script)
-               (lambda (args callback) (setq captured args) (funcall callback 0))))
-      (agent-repl--frontend-deploy-stack nil #'ignore #'error)
+               (lambda (args) (setq captured args) 0)))
+      (agent-repl--frontend-deploy-stack nil)
       (should-not (member "--force" captured)))))
 
 (ert-deftest agent-repl-test-daemon-deploy-stack-passes-force-flag ()
   "With FORCE the deploy argv appends --force."
   (let (captured)
     (cl-letf (((symbol-function 'agent-repl--frontend-run-build-script)
-               (lambda (args callback) (setq captured args) (funcall callback 0))))
-      (agent-repl--frontend-deploy-stack t #'ignore #'error)
+               (lambda (args) (setq captured args) 0)))
+      (agent-repl--frontend-deploy-stack t)
       (should (member "--force" captured)))))
 
 (ert-deftest agent-repl-test-daemon-deploy-stack-surfaces-a-failed-deploy ()
-  "A non-zero deploy exit reaches the failure continuation with its detail."
-  (let (detail)
-    (cl-letf (((symbol-function 'agent-repl--frontend-run-build-script)
-               (lambda (_args callback) (funcall callback 1)))
-              ((symbol-function 'display-buffer) #'ignore))
-      (agent-repl--frontend-deploy-stack
-       nil (lambda (_exit) (error "unexpected success"))
-       (lambda (d) (setq detail d)))
-      (should (string-match-p "exit 1" detail)))))
+  "A non-zero deploy exit signals rather than launching against stale code."
+  (cl-letf (((symbol-function 'agent-repl--frontend-run-build-script)
+             (lambda (_args) 1)))
+    (should-error (agent-repl--frontend-deploy-stack nil))))
 
 ;;;; ---- build-if-stale: failure surfacing -----------------------------------
 
@@ -214,33 +200,24 @@ is mid-boot, and the caller starts the daemon directly anyway."
   ;; which would trip a native-comp trampoline warning; see test-sentinel.el).
   (let ((agent-repl--frontend-build-script "/agent-repl-nonexistent/build.sh"))
     ;; Act / Assert
-    (should-error (agent-repl--frontend-build-if-stale nil #'ignore #'error))))
+    (should-error (agent-repl--frontend-build-if-stale nil))))
 
-(ert-deftest agent-repl-test-daemon-build-reaches-failure-on-nonzero-exit ()
-  "A non-zero build exit reaches the failure continuation, never swallowed."
+(ert-deftest agent-repl-test-daemon-build-errors-on-nonzero-exit ()
+  "A non-zero build exit signals an error, never swallowed."
   ;; Arrange
-  (let (detail succeeded)
-    (cl-letf (((symbol-function 'agent-repl--frontend-run-build-script)
-               (lambda (_args callback) (funcall callback 1)))
-              ((symbol-function 'display-buffer) #'ignore))
-      ;; Act
-      (agent-repl--frontend-build-if-stale
-       nil (lambda (_exit) (setq succeeded t)) (lambda (d) (setq detail d)))
-      ;; Assert
-      (should-not succeeded)
-      (should (string-match-p "exit 1" detail)))))
+  (cl-letf (((symbol-function 'agent-repl--frontend-run-build-script)
+             (lambda (_args) 1))
+            ((symbol-function 'display-buffer) #'ignore))
+    ;; Act / Assert
+    (should-error (agent-repl--frontend-build-if-stale nil))))
 
-(ert-deftest agent-repl-test-daemon-build-reaches-success-on-zero-exit ()
-  "A zero build exit reaches the success continuation with the exit code."
+(ert-deftest agent-repl-test-daemon-build-returns-zero-on-success ()
+  "A zero build exit returns 0."
   ;; Arrange
-  (let (seen)
-    (cl-letf (((symbol-function 'agent-repl--frontend-run-build-script)
-               (lambda (_args callback) (funcall callback 0))))
-      ;; Act
-      (agent-repl--frontend-build-if-stale
-       nil (lambda (exit) (setq seen exit)) #'error)
-      ;; Assert
-      (should (eq 0 seen)))))
+  (cl-letf (((symbol-function 'agent-repl--frontend-run-build-script)
+             (lambda (_args) 0)))
+    ;; Act / Assert
+    (should (eq 0 (agent-repl--frontend-build-if-stale nil)))))
 
 ;;;; ---- timer-backed lifecycle waiting --------------------------------------
 
@@ -444,7 +421,7 @@ VIEW is the `DaemonView' plist the daemon last pushed (nil = none yet)."
      (cl-letf (((symbol-function 'agent-repl--frontend-daemon-responsive-async)
                 (lambda (_open absent) (funcall absent 'no-listener)))
                ((symbol-function 'agent-repl--frontend-deploy-stack)
-                (lambda (_f ok _fail) (setq built t) (funcall ok 0)))
+                (lambda (&optional _f) (setq built t) 0))
                ((symbol-function 'agent-repl--frontend-spawn-daemon)
                 (lambda () fresh)))
        ;; Act
@@ -453,24 +430,6 @@ VIEW is the `DaemonView' plist the daemon last pushed (nil = none yet)."
          (should built)
          (should (eq result :pending))
          (should (eq agent-repl--frontend-daemon-process fresh)))))))
-
-(ert-deftest agent-repl-test-daemon-ensure-never-spawns-on-a-failed-stack-deploy ()
-  "A failed stack deploy signals and never reaches the daemon spawn.
-The deploy is asynchronous now, so the launch that used to follow it in
-straight-line order is its success continuation; the failure arm must not
-start a daemon against a half-built stack."
-  ;; Arrange
-  (agent-repl-test--with-daemon-env
-   (let (spawned)
-     (cl-letf (((symbol-function 'agent-repl--frontend-daemon-responsive-async)
-                (lambda (_open absent) (funcall absent 'no-listener)))
-               ((symbol-function 'agent-repl--frontend-deploy-stack)
-                (lambda (_f _ok fail) (funcall fail "stack deploy failed (exit 1)")))
-               ((symbol-function 'agent-repl--frontend-spawn-daemon)
-                (lambda () (setq spawned t))))
-       ;; Act / Assert
-       (should-error (agent-repl--ensure-frontend-daemon))
-       (should-not spawned)))))
 
 (ert-deftest agent-repl-test-daemon-ensure-force-restarts-live ()
   "Ensure with FORCE stops the live daemon, rebuilds, and respawns."
@@ -482,7 +441,7 @@ start a daemon against a half-built stack."
      (cl-letf (((symbol-function 'agent-repl--frontend-turn-active-sessions)
                 (lambda () nil))
                ((symbol-function 'agent-repl--frontend-deploy-stack)
-                (lambda (_f ok _fail) (funcall ok 0)))
+                (lambda (&optional _f) 0))
                ((symbol-function 'agent-repl--frontend-spawn-daemon)
                 (lambda () new)))
        ;; Act
@@ -586,7 +545,7 @@ start a daemon against a half-built stack."
      (cl-letf (((symbol-function 'agent-repl--frontend-daemon-responsive-async)
                 (lambda (open _absent) (funcall open)))
                ((symbol-function 'agent-repl--frontend-deploy-stack)
-                (lambda (_f ok _fail) (setq built t) (funcall ok 0)))
+                (lambda (&optional _f) (setq built t) 0))
                ((symbol-function 'agent-repl--frontend-spawn-daemon)
                 (lambda () (setq spawned t) (agent-repl-test--make-live-daemon))))
        ;; Act
@@ -605,7 +564,7 @@ start a daemon against a half-built stack."
      (cl-letf (((symbol-function 'agent-repl--frontend-daemon-responsive-async)
                 (lambda (open _absent) (funcall open)))
                ((symbol-function 'agent-repl--frontend-deploy-stack)
-                (lambda (_f ok _fail) (setq built t) (funcall ok 0)))
+                (lambda (&optional _f) (setq built t) 0))
                ((symbol-function 'agent-repl--frontend-spawn-daemon)
                 (lambda () fresh)))
        ;; Act
@@ -892,15 +851,15 @@ whenever a real session happened to be mid-turn."
       (agent-repl-frontend-daemon-restart '(4))
       (should (equal arg (list t))))))
 
-(ert-deftest agent-repl-test-daemon-restart-dispatch-delegates-terminal-coordinator ()
+(ert-deftest agent-repl-test-daemon-restart-await-delegates-terminal-coordinator ()
   "The deployment restart surface forwards mode and timeout exactly once."
   (let (args)
-    (cl-letf (((symbol-function 'agent-repl-runtime-restart-dispatch)
+    (cl-letf (((symbol-function 'agent-repl-runtime-restart-await)
                (lambda (&optional stop-shims timeout)
                  (setq args (list stop-shims timeout))
-                 "runtime-restart-dispatched:99-1")))
-      (should (equal "runtime-restart-dispatched:99-1"
-                     (agent-repl-frontend-daemon-restart-dispatch '(4) 17.0)))
+                 "runtime-restart-complete")))
+      (should (equal "runtime-restart-complete"
+                     (agent-repl-frontend-daemon-restart-await '(4) 17.0)))
       (should (equal args '(t 17.0))))))
 
 (ert-deftest agent-repl-test-foreign-shutdown-omits-stop-shims-by-default ()

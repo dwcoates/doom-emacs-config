@@ -2413,9 +2413,10 @@ Set by `agent-repl--update-all-workspace-states-now' at chain
 kickoff and cleared by the terminal finalize step.  Read by
 `agent-repl--update-in-flight-p' so the periodic timer entrypoint
 can skip its tick when a previous chain has not finished.  Carries a
-timestamp rather than a plain `t' so a chain that escaped the per-step
-`condition-case' and never finalized is DETECTED — its stamp ages past
-`agent-repl-state-stale-threshold' and the next read signals.")
+timestamp rather than a plain `t' so stale flags from an errored
+chain (one that escaped the per-step `condition-case' and never
+finalized) can be detected and force-cleared via
+`agent-repl-state-stale-threshold'.")
 
 (defvar agent-repl--update-spread-sync nil
   "When non-nil, the chain processes all workspaces synchronously.
@@ -2428,19 +2429,10 @@ immediately after the call, without having to advance time to let
   "Return non-nil when an update chain is in flight and not stale.
 A non-nil `agent-repl--update-in-flight' set within the last
 `agent-repl-state-stale-threshold' seconds means a chain is still
-running and a new tick should skip.
-
-AN OLDER STAMP SIGNALS.  It used to be force-cleared in place, and that
-self-heal existed for one reason: a runtime restart blocked the main
-thread for seconds at a time, so the chain's own timers could not run and
-its stamp aged past the threshold with nothing actually wedged.  The
-restart no longer blocks — `agent-repl--launchctl-call' and
-`agent-repl--frontend-run-build-script' are asynchronous and the
-deployment surface returns immediately — so a stamp older than the
-threshold can only mean the chain genuinely never finalized, which is an
-invariant violation of the chain's own contract.  Failing hard through
-the canonical logging helper surfaces that bug at its origin instead of
-papering over it every tick."
+running and a new tick should skip.  An older stamp is treated as a
+wedged chain (the per-step `condition-case' didn't catch some error
+path or the finalize never ran), force-cleared in place, and the
+caller is told to proceed."
   (cond
    ((null agent-repl--update-in-flight)
     (agent-repl--log-verbose nil "update-in-flight-p: result=nil reason=no-chain")
@@ -2452,13 +2444,10 @@ papering over it every tick."
                               agent-repl-state-stale-threshold)
     t)
    (t
-    (agent-repl--error
-     nil
-     "update-in-flight-p: chain never finalized age=%.2fs threshold=%.2fs started-at=%.3f tick=%d — the update chain's terminal finalize step did not run"
-     (- (float-time) agent-repl--update-in-flight)
-     agent-repl-state-stale-threshold
-     agent-repl--update-in-flight
-     agent-repl--update-tick-counter))))
+    (agent-repl--log nil "update-in-flight-p: stale flag (%.2fs old), force-clearing"
+                      (- (float-time) agent-repl--update-in-flight))
+    (setq agent-repl--update-in-flight nil)
+    nil)))
 
 (defun agent-repl--update-one-workspace-state (ws do-git-p)
   "Run the per-workspace state-update body for WS.
@@ -2624,9 +2613,9 @@ reaches the display without invoking Emacs's one-line height policy.
 
 When a previous chain is still in flight (per
 `agent-repl--update-in-flight-p'), skips this tick — the in-flight
-chain will catch up.  A stamp older than
-`agent-repl-state-stale-threshold' means the chain never finalized,
-which `agent-repl--update-in-flight-p' signals rather than heals.
+chain will catch up.  Stale flags older than
+`agent-repl-state-stale-threshold' are force-cleared so a wedged
+chain can't permanently disable the timer.
 
 Otherwise delegates to `agent-repl--update-all-workspace-states-now',
 which owns the actual per-workspace iteration with the mod-N git
