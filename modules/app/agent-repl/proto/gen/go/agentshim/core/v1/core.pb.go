@@ -774,6 +774,32 @@ type Event struct {
 	ProducedAtMs int64 `protobuf:"varint,6,opt,name=produced_at_ms,json=producedAtMs,proto3" json:"produced_at_ms,omitempty"`
 	// Store dedup key (see shim-store §6.4 derivation). Empty = never deduped.
 	DedupKey string `protobuf:"bytes,7,opt,name=dedup_key,json=dedupKey,proto3" json:"dedup_key,omitempty"`
+	// The query instance this event BELONGS TO: the id of the SDK query()
+	// invocation that was running when the producer built the event.
+	//
+	// This is a fact about the event's ORIGIN, never about its DELIVERY. An
+	// event the store replays during a subscription's catch-up still names the
+	// query that produced it, so a row written before its own subscription was
+	// open — which is exactly how a session's first QueryCreated is written —
+	// reads back as belonging to the query running right now.
+	//
+	// CONTRACT:
+	//   - Written by the PRODUCER, at construction time, naming the query the
+	//     producer is itself running.
+	//   - NEVER set, cleared, or amended by any reader, relay, or replay path.
+	//     The store round-trips it verbatim; the daemon compares it and does
+	//     nothing else with it.
+	//   - EMPTY means the event belongs to no query. The file plane is the
+	//     standing case: its records are attributed to a vendor session, which
+	//     outlives any single query() invocation, so a query instance is not a
+	//     property of them. A producer that predates this field is the other.
+	//
+	// Consumers classify with ONE comparison against the query they are bound
+	// to. Equal, or EMPTY, means live and every live check applies in full and
+	// stays fatal. Non-empty and different means history: accept it, mutate no
+	// live state, raise no error. Empty deliberately FAILS CLOSED so an older
+	// producer keeps precisely the behavior it had before this field existed.
+	QueryInstanceId string `protobuf:"bytes,8,opt,name=query_instance_id,json=queryInstanceId,proto3" json:"query_instance_id,omitempty"`
 	// Types that are valid to be assigned to Payload:
 	//
 	//	*Event_SessionStarted
@@ -880,6 +906,13 @@ func (x *Event) GetProducedAtMs() int64 {
 func (x *Event) GetDedupKey() string {
 	if x != nil {
 		return x.DedupKey
+	}
+	return ""
+}
+
+func (x *Event) GetQueryInstanceId() string {
+	if x != nil {
+		return x.QueryInstanceId
 	}
 	return ""
 }
@@ -6194,7 +6227,7 @@ var File_agentshim_core_v1_core_proto protoreflect.FileDescriptor
 
 const file_agentshim_core_v1_core_proto_rawDesc = "" +
 	"\n" +
-	"\x1cagentshim/core/v1/core.proto\x12\x11agentshim.core.v1\x1a\x19google/protobuf/any.proto\x1a\x1cgoogle/protobuf/struct.proto\"\xa1\x0e\n" +
+	"\x1cagentshim/core/v1/core.proto\x12\x11agentshim.core.v1\x1a\x19google/protobuf/any.proto\x1a\x1cgoogle/protobuf/struct.proto\"\xcd\x0e\n" +
 	"\x05Event\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x10\n" +
@@ -6204,7 +6237,8 @@ const file_agentshim_core_v1_core_proto_rawDesc = "" +
 	"\n" +
 	"request_id\x18\x05 \x01(\tR\trequestId\x12$\n" +
 	"\x0eproduced_at_ms\x18\x06 \x01(\x03R\fproducedAtMs\x12\x1b\n" +
-	"\tdedup_key\x18\a \x01(\tR\bdedupKey\x12L\n" +
+	"\tdedup_key\x18\a \x01(\tR\bdedupKey\x12*\n" +
+	"\x11query_instance_id\x18\b \x01(\tR\x0fqueryInstanceId\x12L\n" +
 	"\x0fsession_started\x18\n" +
 	" \x01(\v2!.agentshim.core.v1.SessionStartedH\x00R\x0esessionStarted\x12F\n" +
 	"\rsession_ended\x18\v \x01(\v2\x1f.agentshim.core.v1.SessionEndedH\x00R\fsessionEnded\x12C\n" +

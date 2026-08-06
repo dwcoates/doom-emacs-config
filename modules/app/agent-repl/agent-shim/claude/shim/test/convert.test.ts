@@ -1936,3 +1936,53 @@ describe("ToolReferenceBlock typing", () => {
 
 // Silence unused-import lint for the dir constants documenting fixture roots.
 void toolResultsDir;
+
+// ---------------------------------------------------------------------------
+// Producer provenance: the query() invocation a converted event was built
+// inside. The converter is part of the producer, so it stamps at construction
+// and nothing downstream ever infers provenance from delivery.
+// ---------------------------------------------------------------------------
+
+describe("convert stamps the query it is running", () => {
+  it("stamps the running query on the vendor envelope", () => {
+    // Arrange: an assistant message converted inside a live query.
+    const msg = loadStream("assistant");
+
+    // Act.
+    const result = convert(msg, { queryInstanceId: "query-running" });
+
+    // Assert.
+    expect(result.vendor.queryInstanceId).toBe("query-running");
+  });
+
+  it("stamps the running query on every lifecycle twin", () => {
+    // Arrange: a terminal result, which carries a TurnEnded lifecycle twin.
+    const msg = loadStream("result_success");
+
+    // Act.
+    const result = convert(msg, { queryInstanceId: "query-running", rootTurnId: "turn-1" });
+
+    // Assert: the twin is a separate Event and must carry the same provenance.
+    expect(result.lifecycle.length).toBeGreaterThan(0);
+    for (const ev of result.lifecycle) expect(ev.queryInstanceId).toBe("query-running");
+  });
+
+  it("stamps the running query on an unparsable record", () => {
+    // Arrange: a record with no `type` discriminator becomes an UnparsedEvent.
+    // Act.
+    const result = convert({ no: "type" }, { queryInstanceId: "query-running" });
+
+    // Assert: a record the converter could not read still says where it came
+    // from -- provenance is an envelope fact, independent of payload health.
+    expect(result.vendor.payload.case).toBe("unparsed");
+    expect(result.vendor.queryInstanceId).toBe("query-running");
+  });
+
+  it("leaves the envelope empty when no query is supplied", () => {
+    // Arrange / Act: the single-message decode path has no query to name.
+    const result = convert(loadStream("assistant"));
+
+    // Assert: empty, never a substituted fact. Consumers read empty as live.
+    expect(result.vendor.queryInstanceId).toBe("");
+  });
+});

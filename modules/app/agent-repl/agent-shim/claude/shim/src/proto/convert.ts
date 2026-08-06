@@ -344,6 +344,19 @@ export interface ConvertOptions {
    * lone convert() call has no lifetime to be the second init of.
    */
   sessionGate?: SessionStartGate;
+  /**
+   * The query() invocation this conversion is running inside, stamped onto
+   * every Event envelope this call builds.
+   *
+   * The converter is part of the PRODUCER, not a relay: UdsSession knows which
+   * query it is running and hands it down, so the fact is recorded where the
+   * event is constructed rather than inferred later from how it was delivered.
+   *
+   * Absent — the single-message decode path used by probes and unit tests —
+   * leaves the envelope empty, which consumers treat as live. See the
+   * `query_instance_id` contract in core.proto.
+   */
+  queryInstanceId?: string;
 }
 
 /** The full result of converting one SDK message. */
@@ -371,7 +384,7 @@ export function convert(message: unknown, opts?: ConvertOptions): ConvertResult 
     const reason = "message is not a JSON object";
     logUnparsed("<non-object>", "", "", reason, { input_kind: message === null ? "null" : typeof message });
     return {
-      vendor: unparsedEvent(safeStringify(message), reason, { log: false }),
+      vendor: unparsedEvent(safeStringify(message), reason, { queryInstanceId: opts?.queryInstanceId, log: false }),
       lifecycle: [],
       loggedExtras: [],
     };
@@ -386,7 +399,7 @@ export function convert(message: unknown, opts?: ConvertOptions): ConvertResult 
       reason,
     );
     return {
-      vendor: unparsedEvent(safeStringify(message), reason, { log: false }),
+      vendor: unparsedEvent(safeStringify(message), reason, { queryInstanceId: opts?.queryInstanceId, log: false }),
       lifecycle: [],
       loggedExtras: [],
     };
@@ -429,6 +442,7 @@ export function convert(message: unknown, opts?: ConvertOptions): ConvertResult 
           sessionId: envelope.sessionId,
           requestId: envelope.requestId,
           producedAtMs: envelope.producedAtMs,
+          queryInstanceId: envelope.queryInstanceId,
           log: false,
         }),
         lifecycle: [],
@@ -466,6 +480,8 @@ interface Envelope {
   sessionId: string;
   requestId: string;
   producedAtMs: number;
+  /** The query() invocation the shim was running when this record arrived. */
+  queryInstanceId: string;
 }
 
 /**
@@ -481,7 +497,7 @@ function readEnvelope(message: Record<string, unknown>, opts?: ConvertOptions): 
   reader.ignore("uuid"); // dedup key is the store's to derive (§4.2)
   const ts = reader.val("timestamp");
   const producedAtMs = parseTimestamp(ts) ?? opts?.nowMs ?? Date.now();
-  return { reader, sessionId, requestId, producedAtMs };
+  return { reader, sessionId, requestId, producedAtMs, queryInstanceId: opts?.queryInstanceId ?? "" };
 }
 
 function vendorEvent(
@@ -496,6 +512,7 @@ function vendorEvent(
     plane: Plane.STREAM,
     class: ephemeral ? EventClass.EPHEMERAL : EventClass.PERSISTENT,
     requestId: env.requestId,
+    queryInstanceId: env.queryInstanceId,
     producedAtMs: BigInt(env.producedAtMs),
     payload: { case: "vendor", value: anyPack(ClaudeStreamMessageSchema, csm) },
     extras: extras.extras,
@@ -513,6 +530,7 @@ function lifecycleEvent(env: Envelope, payload: Event["payload"]): Event {
     // accepted-prompt FIFO and stamps TurnEnded.turn_id before this wrapper is
     // built. Keep the envelope correlation identical to that authoritative id.
     requestId: turnId !== "" ? turnId : env.requestId,
+    queryInstanceId: env.queryInstanceId,
     producedAtMs: BigInt(env.producedAtMs),
     payload,
   });

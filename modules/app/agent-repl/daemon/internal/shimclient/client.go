@@ -38,7 +38,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"maps"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -384,11 +383,13 @@ type Client struct {
 	// transport reconnect; a daemon restart reads the pinned durable cursor and
 	// therefore replays the complete uncommitted logical record.
 	pinnedAccountingTurns map[string]struct{}
-	// claimsOpenAtHandshake is the durable open-claim set this connection
-	// resumed against. It is what separates a REPLAYED end (a turn the daemon
-	// had already completed before we resumed) from a genuine inconsistency (a
-	// turn we knew was open, pinned, and then lost).
-	claimsOpenAtHandshake   map[string]struct{}
+	// liveQueryInstanceID is the query() invocation this connection is bound
+	// to, taken from the ShimHello that opened it. It is the ONLY thing an
+	// event's envelope stamp is compared against, and it is owned by the Run
+	// goroutine exactly as pinnedAccountingTurns is: runOnce writes it before
+	// the read loop starts, and one runOnce's read loop has fully returned
+	// before the next begins.
+	liveQueryInstanceID     string
 	pendingTerminationQuery string
 	// pendingResumeQuery pins the durable cursor before a resumed QueryCreated
 	// until runtime identity is accepted or a typed termination proves that the
@@ -711,10 +712,12 @@ func (c *Client) runOnce(ctx context.Context) (retErr error) {
 		// replayed alone and was rejected as unpinned. The open claims are the
 		// authority on what is actually in flight across a reconnect.
 		c.pinnedAccountingTurns = c.reconstructPinnedTurns()
-		c.claimsOpenAtHandshake = maps.Clone(c.pinnedAccountingTurns)
 		c.pendingTerminationQuery = ""
 		c.pendingResumeQuery = ""
 	}
+	// The query this connection speaks for, bound from the hello before any
+	// event is read. Every provenance comparison is against this value.
+	c.liveQueryInstanceID = hello.GetQueryInstanceId()
 	c.lastSeen = from
 	// The generation THIS connection speaks for. seqGeneration is deliberately
 	// left alone: it still names the generation that earned the mark, and a
@@ -1076,9 +1079,24 @@ func (c *Client) UnpinAccountingTurn(turnIDs ...string) {
 	}
 }
 
-// hasDurableClaimAuthority reports whether this client can ask the ledger what
-// was in flight. Without it, replayed history is indistinguishable from a
-// protocol violation and the strict check stands.
-func (c *Client) hasDurableClaimAuthority() bool {
-	return c.cfg.OpenTurnClaims != nil && c.cfg.Workspace != ""
+// eventIsHistorical reports whether ev was produced by a query other than the
+// one this connection is bound to.
+//
+// ONE COMPARISON, and deliberately nothing else: the producer stamped the query
+// it was running onto the envelope at construction, so the answer is a fact the
+// event carries rather than something reconstructed here from delivery order,
+// sequence boundaries, or a ledger lookup. A row the store serves during
+// catch-up still names its producing query, so a session's own startup records
+// classify as LIVE without any companion condition.
+//
+// EMPTY IS LIVE. FAIL CLOSED. A producer that predates query_instance_id stamps
+// nothing, and every check must then apply to it exactly as it did before the
+// field existed. An unbound connection (no hello query) has nothing to compare
+// against and likewise admits no history.
+func (c *Client) eventIsHistorical(ev *corev1.Event) bool {
+	if c.liveQueryInstanceID == "" {
+		return false
+	}
+	eventQuery := ev.GetQueryInstanceId()
+	return eventQuery != "" && eventQuery != c.liveQueryInstanceID
 }

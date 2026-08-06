@@ -182,6 +182,33 @@ message Event {
   // Store dedup key (see shim-store §6.4 derivation). Empty = never deduped.
   string dedup_key = 7;
 
+  // The query instance this event BELONGS TO: the id of the SDK query()
+  // invocation that was running when the producer built the event.
+  //
+  // This is a fact about the event's ORIGIN, never about its DELIVERY. An
+  // event the store replays during a subscription's catch-up still names the
+  // query that produced it, so a row written before its own subscription was
+  // open — which is exactly how a session's first QueryCreated is written —
+  // reads back as belonging to the query running right now.
+  //
+  // CONTRACT:
+  //   - Written by the PRODUCER, at construction time, naming the query the
+  //     producer is itself running.
+  //   - NEVER set, cleared, or amended by any reader, relay, or replay path.
+  //     The store round-trips it verbatim; the daemon compares it and does
+  //     nothing else with it.
+  //   - EMPTY means the event belongs to no query. The file plane is the
+  //     standing case: its records are attributed to a vendor session, which
+  //     outlives any single query() invocation, so a query instance is not a
+  //     property of them. A producer that predates this field is the other.
+  //
+  // Consumers classify with ONE comparison against the query they are bound
+  // to. Equal, or EMPTY, means live and every live check applies in full and
+  // stays fatal. Non-empty and different means history: accept it, mutate no
+  // live state, raise no error. Empty deliberately FAILS CLOSED so an older
+  // producer keeps precisely the behavior it had before this field existed.
+  string query_instance_id = 8;
+
   oneof payload {
     // Vendor-neutral lifecycle payloads:
     SessionStarted session_started = 10;

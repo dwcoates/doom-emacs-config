@@ -57,7 +57,7 @@ func openTurnClaimManager(t *testing.T, path string) *Manager {
 
 func resolveTurnClaim(t *testing.T, m *Manager, ev *corev1.Event) (before, after []string, replayed bool) {
 	t.Helper()
-	before, after, replayed, err := m.ResolveTurnLifecycle("ws", "daemon-session", ev)
+	before, after, replayed, err := m.ResolveTurnLifecycle("ws", "daemon-session", "", ev)
 	if err != nil {
 		t.Fatalf("ResolveTurnLifecycle(seq=%d id=%q): %v", ev.GetSeq(), turnCorrelation(ev), err)
 	}
@@ -93,7 +93,7 @@ func TestTurnClaimLedgerSurvivesRestartAndReceiptsMakeCrashWindowsIdempotent(t *
 		t.Fatalf("replayed end = before:%v after:%v replayed:%v", before, after, replayed)
 	}
 	if _, _, _, err := second.ResolveTurnLifecycle(
-		"ws", "daemon-session", turnClaimEvent(false, 12906, "turn-live"),
+		"ws", "daemon-session", "", turnClaimEvent(false, 12906, "turn-live"),
 	); err == nil || !strings.Contains(err.Error(), "no durable active claim") {
 		t.Fatalf("same identity at a different end seq err = %v, want no active claim", err)
 	}
@@ -105,13 +105,13 @@ func TestTurnClaimLedgerSurvivesRestartAndReceiptsMakeCrashWindowsIdempotent(t *
 func TestTurnClaimLedgerRejectsUnprovedAndMismatchedEndsWithoutMutation(t *testing.T) {
 	m, _, _ := openUnwiredTest(t, fakeResolver{"vendor-session": "ws"})
 	if _, _, _, err := m.ResolveTurnLifecycle(
-		"ws", "daemon-session", turnClaimEvent(false, 1, "turn-unseen"),
+		"ws", "daemon-session", "", turnClaimEvent(false, 1, "turn-unseen"),
 	); err == nil || !strings.Contains(err.Error(), "no durable active claim") {
 		t.Fatalf("unproved end err = %v", err)
 	}
 	resolveTurnClaim(t, m, turnClaimEvent(true, 2, "turn-current"))
 	before, after, _, err := m.ResolveTurnLifecycle(
-		"ws", "daemon-session", turnClaimEvent(false, 3, "turn-other"),
+		"ws", "daemon-session", "", turnClaimEvent(false, 3, "turn-other"),
 	)
 	if err == nil {
 		t.Fatal("mismatched end succeeded")
@@ -127,7 +127,7 @@ func TestTurnClaimLedgerRejectsEnvelopeAndHandshakeIdentityAmbiguity(t *testing.
 	envelopeMismatch := turnClaimEvent(true, 1, "turn-payload")
 	envelopeMismatch.RequestId = "turn-envelope"
 	if _, _, _, err := m.ResolveTurnLifecycle(
-		"ws", "daemon-session", envelopeMismatch,
+		"ws", "daemon-session", "", envelopeMismatch,
 	); err == nil || !strings.Contains(err.Error(), "envelope mismatch") {
 		t.Fatalf("envelope mismatch err = %v", err)
 	}
@@ -209,7 +209,7 @@ func TestTurnClaimBridgeProvesMissedRetiredStartWithoutSynthesizingOne(t *testin
 	end := turnClaimEvent(false, 2, "turn-missed")
 	end.SessionId = "vendor-old"
 	if _, _, _, err := second.ResolveTurnLifecycle(
-		"ws", "daemon-session", end,
+		"ws", "daemon-session", "", end,
 	); err == nil || !strings.Contains(err.Error(), `expects "vendor-new"`) {
 		t.Fatalf("retired-session end err = %v, want rotated-session rejection", err)
 	}
@@ -229,7 +229,7 @@ func TestTurnStartedNeverActsAsRotationProof(t *testing.T) {
 	duplicate := turnClaimEvent(true, 1, "turn-real")
 	duplicate.SessionId = "vendor-new"
 	if _, _, _, err := m.ResolveTurnLifecycle(
-		"ws", "daemon-session", duplicate,
+		"ws", "daemon-session", "", duplicate,
 	); err == nil || !strings.Contains(err.Error(), "duplicate turn start identity") {
 		t.Fatalf("rotated duplicate TurnStarted err = %v, want hard rejection", err)
 	}
@@ -448,7 +448,7 @@ func claimTurn(t *testing.T, m *Manager, ws, claimant, vendorSession, id string,
 	t.Helper()
 	ev := turnClaimEvent(true, seq, id)
 	ev.SessionId = vendorSession
-	if _, _, _, err := m.ResolveTurnLifecycle(ws, claimant, ev); err != nil {
+	if _, _, _, err := m.ResolveTurnLifecycle(ws, claimant, "", ev); err != nil {
 		t.Fatalf("seed durable turn claim %q: %v", id, err)
 	}
 }
@@ -664,7 +664,7 @@ func TestGenuineTurnEndAfterASynthesizedCloseIsAdmittedAsAReplay(t *testing.T) {
 	end.SessionId = "s1"
 
 	// Act.
-	_, after, replayed, err := m.ResolveTurnLifecycle("ws1", "s1", end)
+	_, after, replayed, err := m.ResolveTurnLifecycle("ws1", "s1", "", end)
 
 	// Assert.
 	if err != nil {
@@ -686,7 +686,7 @@ func TestUnknownTurnEndWithoutAnyClaimIsStillRejected(t *testing.T) {
 	end.SessionId = "s1"
 
 	// Act.
-	_, _, _, err := m.ResolveTurnLifecycle("ws1", "s1", end)
+	_, _, _, err := m.ResolveTurnLifecycle("ws1", "s1", "", end)
 
 	// Assert.
 	if err == nil || !strings.Contains(err.Error(), "no durable active claim") {
@@ -794,5 +794,122 @@ func TestDeadClaimBridgeRefusalLeavesTheClosedClaimUntouched(t *testing.T) {
 	if len(before) != 0 || len(after) != 0 || len(closed) != 0 {
 		t.Fatalf("ledger after refusal = before:%v after:%v closed:%v, want no active claim — a refused bridge must not revive a closed one",
 			before, after, closed)
+	}
+}
+
+// --- turn ends and the query that produced them -------------------------------
+//
+// The four cases every provenance consumer owes, at the durable claim ledger.
+
+// stampedEnd is a TurnEnded for ID produced by ENVELOPEQUERY.
+func stampedEnd(seq uint64, id, envelopeQuery string) *corev1.Event {
+	ev := turnClaimEvent(false, seq, id)
+	ev.QueryInstanceId = envelopeQuery
+	return ev
+}
+
+// (a) A claimless end PRODUCED BY the live query is a genuine contradiction and
+// stays fatal, exactly as it was before provenance existed.
+func TestClaimlessEndFromTheLiveQueryStaysFatal(t *testing.T) {
+	// Arrange
+	m, _, _ := openUnwiredTest(t, fakeResolver{"vendor-session": "ws"})
+
+	// Act
+	_, _, _, err := m.ResolveTurnLifecycle("ws", "daemon-session", "live-query",
+		stampedEnd(1, "turn-unclaimed", "live-query"))
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "no durable active claim") {
+		t.Fatalf("claimless live end = %v, want the hard rejection", err)
+	}
+}
+
+// (b) A claimless end produced by a RETIRED query is history: the invocation
+// that owned the turn is gone, so there is no live claim it could belong to.
+func TestClaimlessEndFromARetiredQueryIsHistory(t *testing.T) {
+	// Arrange
+	m, _, _ := openUnwiredTest(t, fakeResolver{"vendor-session": "ws"})
+
+	// Act
+	_, _, replayed, err := m.ResolveTurnLifecycle("ws", "daemon-session", "live-query",
+		stampedEnd(1, "turn-unclaimed", "retired-query"))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("claimless retired end = %v, want it accepted as history", err)
+	}
+	if !replayed {
+		t.Fatal("a historical end was not reported as a replay")
+	}
+}
+
+// (b) And it writes NOTHING: the ledger is left exactly as it was found.
+func TestClaimlessEndFromARetiredQueryMutatesNoLedgerRow(t *testing.T) {
+	// Arrange -- one live turn open, so there is state that could be corrupted.
+	m, _, _ := openUnwiredTest(t, fakeResolver{"vendor-session": "ws"})
+	resolveTurnClaim(t, m, turnClaimEvent(true, 1, "turn-live"))
+
+	// Act
+	if _, _, _, err := m.ResolveTurnLifecycle("ws", "daemon-session", "live-query",
+		stampedEnd(2, "turn-unclaimed", "retired-query")); err != nil {
+		t.Fatalf("claimless retired end: %v", err)
+	}
+
+	// Assert
+	after, err := m.ActiveTurnIDs("ws", "daemon-session")
+	if err != nil {
+		t.Fatalf("ActiveTurnIDs: %v", err)
+	}
+	if len(after) != 1 || after[0] != "turn-live" {
+		t.Fatalf("active turns = %v, want the live claim untouched by a historical end", after)
+	}
+}
+
+// (c) EMPTY FAILS CLOSED. A producer that predates query_instance_id keeps
+// precisely the strict behavior it had before the field existed.
+func TestUnstampedClaimlessEndStaysFatal(t *testing.T) {
+	// Arrange
+	m, _, _ := openUnwiredTest(t, fakeResolver{"vendor-session": "ws"})
+
+	// Act
+	_, _, _, err := m.ResolveTurnLifecycle("ws", "daemon-session", "live-query",
+		stampedEnd(1, "turn-unclaimed", ""))
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "no durable active claim") {
+		t.Fatalf("unstamped claimless end = %v, want it judged exactly as a live row is", err)
+	}
+}
+
+// (d) THE STARTUP CASE. A row the session wrote before its subscription could
+// exist arrives during catch-up at a low seq, but it names the query running
+// right now -- so it is LIVE on ONE comparison and still gets the full check.
+func TestCatchUpDeliveredEndFromTheLiveQueryIsStillChecked(t *testing.T) {
+	// Arrange
+	m, _, _ := openUnwiredTest(t, fakeResolver{"vendor-session": "ws"})
+
+	// Act -- seq 1, beneath everything, exactly how catch-up delivers it.
+	_, _, _, err := m.ResolveTurnLifecycle("ws", "daemon-session", "live-query",
+		stampedEnd(1, "turn-unclaimed", "live-query"))
+
+	// Assert -- delivery order bought it no exemption.
+	if err == nil || !strings.Contains(err.Error(), "no durable active claim") {
+		t.Fatalf("catch-up-delivered live end = %v, want the hard rejection", err)
+	}
+}
+
+// A caller with no bound query has nothing to compare against, so the check
+// stays strict.
+func TestClaimlessEndWithNoBoundQueryStaysFatal(t *testing.T) {
+	// Arrange
+	m, _, _ := openUnwiredTest(t, fakeResolver{"vendor-session": "ws"})
+
+	// Act
+	_, _, _, err := m.ResolveTurnLifecycle("ws", "daemon-session", "",
+		stampedEnd(1, "turn-unclaimed", "retired-query"))
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "no durable active claim") {
+		t.Fatalf("claimless end with no bound query = %v, want the hard rejection", err)
 	}
 }

@@ -752,7 +752,7 @@ func (a *fakeApplier) Apply(ev *corev1.Event) error {
 	return a.err
 }
 
-func (a *fakeApplier) ResolveTurnLifecycle(_ string, _ string, ev *corev1.Event) (before, after []string, replayed bool, err error) {
+func (a *fakeApplier) ResolveTurnLifecycle(_ string, _ string, _ string, ev *corev1.Event) (before, after []string, replayed bool, err error) {
 	a.reconcMutex.Lock()
 	defer a.reconcMutex.Unlock()
 	if a.starts == nil {
@@ -2456,5 +2456,70 @@ func TestSynthesizedTurnCloseWithNothingRetainedIsQuiet(t *testing.T) {
 	// Assert.
 	if len(push.convo) != before {
 		t.Fatalf("pushes = %d, want none for a close with no retained result", len(push.convo)-before)
+	}
+}
+
+// --- observationIsHistorical: the rejection log's classifier -------------------
+//
+// It must never disagree with the decision it is reporting, so it asks the same
+// single question the reducer asked: which query PRODUCED this row?
+
+func TestObservationIsHistoricalTableDriven(t *testing.T) {
+	tests := []struct {
+		name          string
+		envelopeQuery string
+		want          bool
+		why           string
+	}{
+		{
+			name:          "live query produced it",
+			envelopeQuery: "live-query",
+			want:          false,
+			why:           "a row the bound query produced is live, and its rejection is a genuine contradiction",
+		},
+		{
+			name:          "a retired query produced it",
+			envelopeQuery: "retired-query",
+			want:          true,
+			why:           "a row from a retired invocation is history",
+		},
+		{
+			name:          "no producer stamp",
+			envelopeQuery: "",
+			want:          false,
+			why:           "empty fails closed and is reported exactly as a live row is",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			r := boundReducer(t)
+			ev := observationEvent(84, tt.envelopeQuery, "retired-query", "turn-1")
+
+			// Act
+			got := observationIsHistorical(r, ev, ev.GetAccountUsageObservation())
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("observationIsHistorical = %v, want %v: %s", got, tt.want, tt.why)
+			}
+		})
+	}
+}
+
+// THE STARTUP CASE at the log's classifier: a row the session itself wrote
+// before its subscription existed is served during catch-up but names the live
+// query, so it is reported LIVE on one comparison.
+func TestObservationIsHistoricalTreatsOwnCatchUpRowAsLive(t *testing.T) {
+	// Arrange -- seq 1, beneath everything, exactly how catch-up delivers it.
+	r := boundReducer(t)
+	ev := observationEvent(1, "live-query", "live-query", "turn-1")
+
+	// Act
+	got := observationIsHistorical(r, ev, ev.GetAccountUsageObservation())
+
+	// Assert
+	if got {
+		t.Fatal("the session's own catch-up-delivered row was reported as history")
 	}
 }

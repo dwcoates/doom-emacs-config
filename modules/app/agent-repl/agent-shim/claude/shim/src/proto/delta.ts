@@ -60,6 +60,13 @@ export interface DeltaOptions {
    * grow a single block instead of opening a new one per chunk.
    */
   messageId?: string;
+  /**
+   * The query() invocation the shim was running when the frame arrived,
+   * stamped onto the envelope this mapper builds. The mapper is part of the
+   * PRODUCER, so the fact is recorded here rather than inferred downstream
+   * from how the event was delivered. See core.proto's contract.
+   */
+  queryInstanceId?: string;
 }
 
 /**
@@ -138,6 +145,7 @@ function ephemeralEvent(
   sessionId: string,
   producedAtMs: bigint,
   payload: Event["payload"],
+  queryInstanceId: string,
 ): Event {
   return create(EventSchema, {
     sessionId,
@@ -145,6 +153,7 @@ function ephemeralEvent(
     plane: Plane.STREAM,
     class: EventClass.EPHEMERAL,
     requestId: "",
+    queryInstanceId,
     producedAtMs,
     payload,
   });
@@ -185,7 +194,7 @@ export function streamEventToContentDelta(
       delta: arm,
       estimatedTokens,
     }),
-  });
+  }, opts?.queryInstanceId ?? "");
   LOGGER.logVerbose({ claude_session_id: sessionOf(msg), message_id: uuid, block_index: index, delta_arm: arm.case, delta_length: arm.value.length }, "converted ephemeral content delta");
   return event;
 }
@@ -224,6 +233,7 @@ export function streamEventToMessageLatency(
     seq: 0n,
     plane: Plane.STREAM,
     class: EventClass.PERSISTENT,
+    queryInstanceId: opts?.queryInstanceId ?? "",
     producedAtMs: producedAt(opts),
     payload: {
       case: "messageLatency",
@@ -280,7 +290,7 @@ export function toolProgressToHeartbeat(
       parentToolUseId: firstString(msg["parent_tool_use_id"], msg["parentToolUseId"]),
       elapsedSeconds: elapsed,
     }),
-  });
+  }, opts?.queryInstanceId ?? "");
   LOGGER.logVerbose({ claude_session_id: sessionId, elapsed_seconds: elapsed }, "converted ephemeral tool heartbeat");
   return event;
 }

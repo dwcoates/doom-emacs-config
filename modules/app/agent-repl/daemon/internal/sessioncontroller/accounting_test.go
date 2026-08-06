@@ -194,17 +194,17 @@ func TestTurnAccountingAcceptsRetiredQueryLifecycleWithoutReplacingLiveHandshake
 		t.Fatalf("bind live handshake: %v", err)
 	}
 
-	historicalCreated := &corev1.Event{Seq: 5, Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+	historicalCreated := &corev1.Event{Seq: 5, QueryInstanceId: "retired-query", Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
 		QueryInstanceId: "retired-query",
 		Event: &corev1.QueryLifecycle_Created{Created: &corev1.QueryCreated{
 			Invocation: &corev1.QueryCreated_Resumed{Resumed: &corev1.ResumedQuery{RequestedVendorSessionId: "vendor"}},
 		}},
 	}}}
-	historicalRuntime := &corev1.Event{Seq: 6, Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+	historicalRuntime := &corev1.Event{Seq: 6, QueryInstanceId: "retired-query", Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
 		QueryInstanceId: "retired-query",
 		Event:           &corev1.QueryLifecycle_RuntimeObserved{RuntimeObserved: &corev1.QueryRuntimeObserved{Identity: liveRuntime}},
 	}}}
-	historicalTerminated := &corev1.Event{Seq: 7, Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+	historicalTerminated := &corev1.Event{Seq: 7, QueryInstanceId: "retired-query", Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
 		QueryInstanceId: "retired-query",
 		ObservedAtMs:    1234,
 		Event: &corev1.QueryLifecycle_Terminated{Terminated: &corev1.QueryTerminated{
@@ -222,7 +222,7 @@ func TestTurnAccountingAcceptsRetiredQueryLifecycleWithoutReplacingLiveHandshake
 	if c.accounting.queryID != "live-query" || !proto.Equal(c.accounting.runtime, liveRuntime) {
 		t.Fatalf("retired lifecycle rebound accounting identity: query=%q runtime=%+v", c.accounting.queryID, c.accounting.runtime)
 	}
-	created := &corev1.Event{Seq: 8, Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+	created := &corev1.Event{Seq: 8, QueryInstanceId: "live-query", Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
 		QueryInstanceId: "live-query",
 		Event: &corev1.QueryLifecycle_Created{Created: &corev1.QueryCreated{
 			Invocation: &corev1.QueryCreated_Resumed{Resumed: &corev1.ResumedQuery{RequestedVendorSessionId: "vendor"}},
@@ -233,7 +233,7 @@ func TestTurnAccountingAcceptsRetiredQueryLifecycleWithoutReplacingLiveHandshake
 	}
 	observedRuntime := proto.Clone(liveRuntime).(*corev1.QueryRuntimeIdentity)
 	observedRuntime.FastModeReason = "runtime event"
-	runtimeObserved := &corev1.Event{Seq: 9, Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+	runtimeObserved := &corev1.Event{Seq: 9, QueryInstanceId: "live-query", Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
 		QueryInstanceId: "live-query",
 		Event: &corev1.QueryLifecycle_RuntimeObserved{RuntimeObserved: &corev1.QueryRuntimeObserved{
 			Identity: observedRuntime,
@@ -245,10 +245,14 @@ func TestTurnAccountingAcceptsRetiredQueryLifecycleWithoutReplacingLiveHandshake
 	if c.accounting.queryID != "live-query" || !proto.Equal(c.accounting.runtime, observedRuntime) {
 		t.Fatalf("live lifecycle was not authoritative: query=%q runtime=%+v", c.accounting.queryID, c.accounting.runtime)
 	}
+	// THE LIVE CONTRADICTION IS STILL FATAL. The same retired-query payload,
+	// but PRODUCED BY the live query: the running invocation is claiming a
+	// lifecycle that is not its own, which no provenance rule excuses.
 	contradiction := proto.Clone(historicalTerminated).(*corev1.Event)
 	contradiction.Seq = 10
-	if err := c.Consume(contradiction); err == nil || !strings.Contains(err.Error(), "with live query_created_seq 8") {
-		t.Fatalf("post-boundary retired lifecycle error = %v, want hard identity failure", err)
+	contradiction.QueryInstanceId = "live-query"
+	if err := c.Consume(contradiction); err == nil || !strings.Contains(err.Error(), "does not match bound query_instance_id") {
+		t.Fatalf("live-produced retired lifecycle error = %v, want hard identity failure", err)
 	}
 	log := strings.Join(logs, "\n")
 	for _, field := range []string{
@@ -270,14 +274,14 @@ func TestHistoricalResumeIdentityMismatchRemainsFatalBeforeLiveQueryBoundary(t *
 	if err := c.accounting.bindHandshakeIdentity(&corev1.ShimHello{QueryInstanceId: "live-query", QueryCreatedSeq: 10, VendorSessionId: "vendor"}); err != nil {
 		t.Fatalf("bind live handshake: %v", err)
 	}
-	created := &corev1.Event{Seq: 5, Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+	created := &corev1.Event{Seq: 5, QueryInstanceId: "retired-query", Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
 		QueryInstanceId: "retired-query",
 		Event:           &corev1.QueryLifecycle_Created{Created: &corev1.QueryCreated{Invocation: &corev1.QueryCreated_Resumed{Resumed: &corev1.ResumedQuery{RequestedVendorSessionId: "requested-vendor"}}}},
 	}}}
 	if err := c.Consume(created); err != nil {
 		t.Fatalf("consume historical QueryCreated: %v", err)
 	}
-	runtime := &corev1.Event{Seq: 6, Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+	runtime := &corev1.Event{Seq: 6, QueryInstanceId: "retired-query", Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
 		QueryInstanceId: "retired-query",
 		Event:           &corev1.QueryLifecycle_RuntimeObserved{RuntimeObserved: &corev1.QueryRuntimeObserved{Identity: &corev1.QueryRuntimeIdentity{VendorSessionId: "replacement-vendor"}}},
 	}}}

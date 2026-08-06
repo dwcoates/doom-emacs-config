@@ -42,7 +42,7 @@ type StateApplier interface {
 	// before any derived state mutates. The returned queues are ordered active
 	// identities before and after the boundary; replayed is true only for an
 	// exact identity+seq receipt from a partially committed prior delivery.
-	ResolveTurnLifecycle(workspace, claimantSessionID string, ev *corev1.Event) (before, after []string, replayed bool, err error)
+	ResolveTurnLifecycle(workspace, claimantSessionID, liveQueryInstanceID string, ev *corev1.Event) (before, after []string, replayed bool, err error)
 	// ResolveTurnClaimBridge persists cross-session correlation proof without
 	// applying lifecycle state. This is the only route for TurnClaimBridge.
 	ResolveTurnClaimBridge(workspace, claimantSessionID string, ev *corev1.Event) (replayed bool, err error)
@@ -781,7 +781,7 @@ func (c *consumer) Apply(ev *corev1.Event) error {
 			c.sessionID, ev.GetSeq(), ev.GetTurnClaimBridge().GetTurnId(), ev.GetRequestId(), err)
 		return err
 	case *corev1.Event_TurnStarted, *corev1.Event_TurnEnded:
-		res, turnErr := c.turns.resolve(ev)
+		res, turnErr := c.turns.resolve(ev, c.accounting.queryID)
 		c.logf("session-controller: turn lifecycle plane=%s kind=%s session=%s seq=%d turn_id=%q request_id=%q dedup_key=%q active_before=%s active_after=%s decision=%s apply=%v notify=%v replayed=%v error=%v",
 			ev.GetPlane().String(), stateKind(ev), c.sessionID, ev.GetSeq(),
 			res.correlation, ev.GetRequestId(), ev.GetDedupKey(), res.before,
@@ -1174,11 +1174,16 @@ func (c *consumer) Consume(ev *corev1.Event) error {
 // observationIsHistorical answers the rejection log's "was this replayed
 // history?" question through the same classifier the reducer used, so the log
 // can never disagree with the decision it is reporting.
+//
+// It reads the ENVELOPE, exactly as the reducer does: one comparison of the
+// producer-stamped query against the bound live query. An empty stamp is live
+// (fail closed), so a rejection from an unstamped producer is reported as the
+// live contradiction it is.
 func observationIsHistorical(r *turnAccountingReducer, ev *corev1.Event, observation *corev1.AccountUsageObservation) bool {
 	if observation == nil {
 		return false
 	}
-	_, historical := r.liveEvidenceFor(ev, observation.GetQueryInstanceId())
+	_, historical := r.liveEvidenceFor(ev)
 	return historical
 }
 
@@ -1194,13 +1199,14 @@ func (c *consumer) logRejectedAccountingObservation(ev *corev1.Event, cause erro
 			boundary = "turn_end"
 		}
 	}
-	// query_created_seq is the boundary that decides whether this row is
-	// REPLAYED HISTORY or live evidence, and its absence from this line is why a
-	// rejection could not be told apart from a genuine contradiction: both print
-	// two mismatched ids and nothing about which side of the boundary the row
-	// sits on.
-	c.logf("session-controller: turn accounting observation REJECTED before mutation session=%s authoritative_query_instance_id=%q query_instance_id=%q seq=%d query_created_seq=%d historical=%v request_id=%q turn_id=%q boundary=%s cause=%q kind=%s",
-		c.sessionID, c.accounting.queryID, queryID, ev.GetSeq(), c.accounting.queryCreatedSeq,
+	// event_query_instance_id is the ENVELOPE stamp — the query whose producer
+	// built this row — and it is the whole basis of the historical verdict. It
+	// is printed beside the payload's own id because the two answer different
+	// questions: the payload says which query the OBSERVATION is about, the
+	// envelope says which query WROTE it. A rejection cannot be told apart from
+	// a genuine contradiction without the latter.
+	c.logf("session-controller: turn accounting observation REJECTED before mutation session=%s authoritative_query_instance_id=%q query_instance_id=%q event_query_instance_id=%q seq=%d historical=%v request_id=%q turn_id=%q boundary=%s cause=%q kind=%s",
+		c.sessionID, c.accounting.queryID, queryID, ev.GetQueryInstanceId(), ev.GetSeq(),
 		observationIsHistorical(c.accounting, ev, observation),
 		ev.GetRequestId(), turnID, boundary, cause.Error(), stateKind(ev))
 }

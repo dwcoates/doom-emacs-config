@@ -995,6 +995,7 @@ export class UdsSession {
       seq: 0n,
       plane: Plane.SYNTHETIC,
       class: EventClass.EPHEMERAL,
+      queryInstanceId: this.queryInstanceId,
       producedAtMs: BigInt(this.now()),
       payload: {
         case: "sessionStarted",
@@ -1194,6 +1195,7 @@ export class UdsSession {
       seq: 0n,
       plane: Plane.STREAM,
       class: EventClass.PERSISTENT,
+      queryInstanceId: this.queryInstanceId,
       producedAtMs: BigInt(this.now()),
       payload: { case: "degradedState", value: report },
     });
@@ -1356,6 +1358,7 @@ export class UdsSession {
       plane: Plane.STREAM,
       class: EventClass.PERSISTENT,
       requestId: turnId,
+      queryInstanceId: this.queryInstanceId,
       producedAtMs: BigInt(this.now()),
       payload: {
         case: "accountUsageObservation",
@@ -1475,6 +1478,7 @@ export class UdsSession {
       seq: 0n,
       plane: Plane.STREAM,
       class: EventClass.PERSISTENT,
+      queryInstanceId: this.queryInstanceId,
       producedAtMs: BigInt(this.now()),
       dedupKey: sessionRewoundDedupKey(lineage.previousVendorSessionId),
       payload: {
@@ -1650,6 +1654,7 @@ export class UdsSession {
       seq: 0n,
       plane: Plane.STREAM,
       class: EventClass.PERSISTENT,
+      queryInstanceId: this.queryInstanceId,
       producedAtMs: BigInt(this.now()),
       payload: { case: "queryLifecycle", value: create(QueryLifecycleSchema, {
         queryInstanceId: this.queryInstanceId,
@@ -1892,6 +1897,7 @@ export class UdsSession {
         plane: turnStart.plane,
         class: turnStart.class,
         requestId: rootTurnId,
+        queryInstanceId: this.queryInstanceId,
         producedAtMs: turnStart.producedAtMs,
         payload: {
           case: "turnClaimBridge",
@@ -2090,6 +2096,7 @@ export class UdsSession {
       plane: Plane.STREAM,
       class: EventClass.PERSISTENT,
       requestId,
+      queryInstanceId: this.queryInstanceId,
       producedAtMs: BigInt(boundaryAtMs),
       payload: {
         case: "turnStarted",
@@ -2102,8 +2109,21 @@ export class UdsSession {
     });
   }
 
-  private convertOpts(): { nowMs?: number } {
-    return this.deps.nowMs !== undefined ? { nowMs: this.deps.nowMs() } : {};
+  /**
+   * The options every converter call shares, including the query this session
+   * is running.
+   *
+   * Threading it HERE is what makes the converters part of the PRODUCER rather
+   * than relays: there is exactly one funnel, so no conversion path can build
+   * an Event that forgot to say which query it belongs to, and nothing
+   * downstream ever has to infer it from how the event was delivered. See the
+   * `query_instance_id` contract in core.proto.
+   */
+  private convertOpts(): { nowMs?: number; queryInstanceId: string } {
+    return {
+      ...(this.deps.nowMs !== undefined ? { nowMs: this.deps.nowMs() } : {}),
+      queryInstanceId: this.queryInstanceId,
+    };
   }
 
   private now(): number {
@@ -2182,6 +2202,7 @@ export class UdsSession {
       seq: 0n,
       plane: Plane.SYNTHETIC,
       class: EventClass.EPHEMERAL,
+      queryInstanceId: this.queryInstanceId,
       producedAtMs: BigInt(this.now()),
       payload: { case: "degradedState", value: report },
     });
