@@ -58,6 +58,9 @@ type fakeSpawner struct {
 	stopBy  []shim.Stop
 	dropped []string
 	err     error
+	// stopErr, when set, makes every StopShim report it. A test arranges it
+	// after the sessions whose bring-up it needs are already up.
+	stopErr error
 }
 
 func (f *fakeSpawner) EnsureShim(_ context.Context, sessionID string) (sessioncontroller.SpawnResult, error) {
@@ -79,7 +82,7 @@ func (f *fakeSpawner) StopShim(sessionID string, _ int32, by shim.Stop) error {
 	defer f.mu.Unlock()
 	f.stopped = append(f.stopped, sessionID)
 	f.stopBy = append(f.stopBy, by)
-	return nil
+	return f.stopErr
 }
 
 // stopAttributions returns the attribution each stop carried, so a server-level
