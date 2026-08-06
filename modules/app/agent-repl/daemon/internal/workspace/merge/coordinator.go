@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -537,6 +538,117 @@ func (c *QueueCoordinator) Abandon(ctx context.Context, workspace string) (bool,
 	case <-ctx.Done():
 		return false, ctx.Err()
 	}
+}
+
+// evictedCause is the terminal `failed` cause an evicted run carries. It is a
+// full sentence for the same reason every other terminal cause is: it is the
+// only thing the user will see about a merge they took off the queue, and
+// "merge failed" alone would read as a merge that broke.
+const evictedCause = "evicted from the merge queue: the workspace was interrupted while this merge waited its turn"
+
+// Evict takes workspace's WAITING merges off their repositories' queues and
+// publishes each one's terminal `failed` status. It reports how many entries it
+// dropped; zero is the ordinary answer for a workspace with nothing queued.
+//
+// IT IS THE INTERRUPT'S QUEUE HALF. An interrupt means "stop what this
+// workspace is doing", and until now a merge waiting its turn was the one piece
+// of that work no user action could reach: the composer was gated, the stop
+// went to a shim that had no turn to end, and the merge ran anyway some minutes
+// later. Nothing else on the wire says this, which is why the interrupt says it.
+//
+// A MERGE ALREADY IN FLIGHT IS NOT EVICTED, and the queue is where that rule
+// lives (see FileQueue.EvictWaiting): the head holds the shim lease and may be
+// mid-cherry-pick, so taking it off the queue would strand a running merge. The
+// user's remaining verbs for that one are unchanged — resolve it, or close the
+// workspace, which abandons it through Abandon.
+//
+// EACH REPOSITORY IS EVICTED UNDER ITS ADVANCE GATE, the same mutex Enqueue
+// holds across its durable publish and its `enqueued` status. That is what makes
+// the interleaving unrepresentable rather than unlikely: an eviction cannot land
+// between an admission's write and the status announcing it, so a run can never
+// be told it was evicted and then told it is queued.
+func (c *QueueCoordinator) Evict(_ context.Context, workspace string) (int, error) {
+	if workspace == "" {
+		return 0, fmt.Errorf("merge: evict needs a workspace")
+	}
+	var (
+		evicted int
+		failed  error
+	)
+	for _, repo := range c.reposWaitingOn(workspace) {
+		gate := c.gate(repo)
+		gate.Lock()
+		reqs, err := c.queue.EvictWaiting(repo, workspace)
+		gate.Unlock()
+		if err != nil {
+			c.logf("merge: evict FAILED {repo=%s ws=%s}: %v — whatever could not be dropped is still queued and still merges when its turn comes",
+				repo, workspace, err)
+			failed = errors.Join(failed, err)
+		}
+		for _, req := range reqs {
+			evicted++
+			failed = errors.Join(failed, c.publishEviction(repo, req))
+		}
+	}
+	if evicted == 0 {
+		c.logf("merge: evict found NOTHING WAITING {ws=%s} — the workspace has no queued merge behind a head, so the interrupt has no queue half to perform", workspace)
+	}
+	return evicted, failed
+}
+
+// reposWaitingOn is every repository whose queue holds a NON-HEAD entry for
+// workspace, in a stable order.
+//
+// IT ONLY NARROWS WHAT EVICT LOOKS AT. The head test that actually decides an
+// eviction is made again inside the queue, under the queue's own lock and the
+// repository's advance gate, so a snapshot that went stale between the two costs
+// nothing but a repo visited for no entries.
+func (c *QueueCoordinator) reposWaitingOn(workspace string) []string {
+	var repos []string
+	for repo, reqs := range c.queue.Snapshot() {
+		for i, req := range reqs {
+			if i > 0 && req.Workspace == workspace {
+				repos = append(repos, repo)
+				break
+			}
+		}
+	}
+	sort.Strings(repos)
+	return repos
+}
+
+// publishEviction says the terminal word for one entry Evict has dropped.
+//
+// THE ENTRY IS ALREADY GONE, DELIBERATELY, so there is no keepForTerminalReplay
+// here and no MarkTerminal beside it. Those exist to make a terminal word
+// survive a bounce by keeping the entry that carries it; keeping an evicted
+// merge's entry would put back the very thing the user asked to remove, and the
+// next boot would replay the merge rather than re-announce its removal. A
+// publication failure is therefore loud-logged and returned to the caller, whose
+// failing ack is the only channel left.
+//
+// The run rides the in-memory request wherever it still has one, so the terminal
+// status lands under the SAME run id the `enqueued` status the user is looking at
+// carried. An entry a boot hydrated from disk has no publisher, and rebuildRun
+// resumes one under the id the durable record kept.
+func (c *QueueCoordinator) publishEviction(repo string, req Request) error {
+	driven := req
+	if driven.Run == nil {
+		run, err := c.rebuildRun(repo, req)
+		if err != nil {
+			c.logf("merge: evicted run construction FAILED {repo=%s ws=%s name=%s}: %v — the entry is GONE from the queue, so this eviction reaches no frontend",
+				repo, req.Workspace, req.Name, err)
+			return fmt.Errorf("merge: evict %q: %w", req.Name, err)
+		}
+		driven.Run = run
+	}
+	if err := driven.Run.Failed(evictedCause); err != nil {
+		c.logf("merge: evicted run terminal status FAILED {repo=%s ws=%s name=%s run=%s}: %v — the entry is GONE from the queue, so nothing will ever re-publish this word",
+			repo, req.Workspace, req.Name, driven.Run.RunID(), err)
+		return fmt.Errorf("merge: evict %q: record %s: %w", req.Name, PhaseMergeFailed, err)
+	}
+	c.logf("merge: run EVICTED {repo=%s ws=%s name=%s run=%s}", repo, req.Workspace, req.Name, driven.Run.RunID())
+	return nil
 }
 
 // Close stops every drain goroutine and waits for them. A merge in flight when

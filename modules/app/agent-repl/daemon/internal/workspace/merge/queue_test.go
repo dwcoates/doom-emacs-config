@@ -830,3 +830,148 @@ func TestCompleteDropsAMarkedEntry(t *testing.T) {
 		t.Fatalf("snapshot after Complete = %+v, want empty", got)
 	}
 }
+
+// --- eviction -----------------------------------------------------------
+
+func TestEvictWaitingDropsTheWaitingEntriesAndTheirRecords(t *testing.T) {
+	// Arrange — one head and two entries waiting behind it for one workspace.
+	q, dir := newTestQueue(t)
+	head, waiting := testRequest("a"), testRequest("b")
+	second := waiting
+	second.Name = "b2"
+	for _, req := range []Request{head, waiting, second} {
+		if _, err := q.Publish(context.Background(), testRepoKey, req); err != nil {
+			t.Fatalf("Publish(%s): %v", req.Name, err)
+		}
+	}
+
+	// Act.
+	evicted, err := q.EvictWaiting(testRepoKey, waiting.Workspace)
+
+	// Assert — both waiting entries came back, in queue order, and the head stands.
+	if err != nil {
+		t.Fatalf("EvictWaiting() error = %v, want nil", err)
+	}
+	if len(evicted) != 2 || evicted[0].Name != "b" || evicted[1].Name != "b2" {
+		t.Fatalf("evicted = %+v, want [b b2] in queue order", evicted)
+	}
+	if got := q.Snapshot()[testRepoKey]; len(got) != 1 || got[0].Name != "a" {
+		t.Fatalf("queue after eviction = %+v, want the head alone", got)
+	}
+	// And nothing is left on disk for the next boot to replay.
+	next, err := NewFileQueue(dir, t.Logf)
+	if err != nil {
+		t.Fatalf("NewFileQueue: %v", err)
+	}
+	if got := next.Snapshot()[testRepoKey]; len(got) != 1 || got[0].Name != "a" {
+		t.Fatalf("durable queue after eviction = %+v, want the head alone", got)
+	}
+}
+
+// The HEAD is the merge in flight, and its drain owns it. Evicting it would
+// leave a running cherry-pick with no entry left to Complete.
+func TestEvictWaitingRetainsTheHead(t *testing.T) {
+	// Arrange — the workspace's only entry IS the head.
+	q, _ := newTestQueue(t)
+	head := testRequest("a")
+	if _, err := q.Publish(context.Background(), testRepoKey, head); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+
+	// Act.
+	evicted, err := q.EvictWaiting(testRepoKey, head.Workspace)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("EvictWaiting() error = %v, want nil", err)
+	}
+	if len(evicted) != 0 {
+		t.Fatalf("evicted = %+v, want nothing — the head is the merge in flight", evicted)
+	}
+	if got := len(q.Snapshot()[testRepoKey]); got != 1 {
+		t.Fatalf("depth after eviction = %d, want 1", got)
+	}
+}
+
+// Another workspace's entries are none of this eviction's business.
+func TestEvictWaitingLeavesOtherWorkspacesAlone(t *testing.T) {
+	// Arrange.
+	q, _ := newTestQueue(t)
+	for _, req := range []Request{testRequest("a"), testRequest("b"), testRequest("c")} {
+		if _, err := q.Publish(context.Background(), testRepoKey, req); err != nil {
+			t.Fatalf("Publish(%s): %v", req.Name, err)
+		}
+	}
+
+	// Act.
+	evicted, err := q.EvictWaiting(testRepoKey, testRequest("b").Workspace)
+
+	// Assert — only b went, and c kept its place behind the head.
+	if err != nil || len(evicted) != 1 || evicted[0].Name != "b" {
+		t.Fatalf("EvictWaiting() = (%+v, %v), want just b", evicted, err)
+	}
+	got := q.Snapshot()[testRepoKey]
+	if len(got) != 2 || got[0].Name != "a" || got[1].Name != "c" {
+		t.Fatalf("queue after eviction = %+v, want [a c]", got)
+	}
+}
+
+func TestEvictWaitingRejectsBadInput(t *testing.T) {
+	tests := []struct {
+		name      string
+		repo      string
+		workspace string
+	}{
+		{name: "empty repo key", repo: "", workspace: "/ws/a"},
+		{name: "empty workspace", repo: testRepoKey, workspace: ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			q, _ := newTestQueue(t)
+
+			// Act.
+			evicted, err := q.EvictWaiting(tc.repo, tc.workspace)
+
+			// Assert.
+			if err == nil {
+				t.Fatalf("EvictWaiting() error = nil, want error")
+			}
+			if evicted != nil {
+				t.Fatalf("evicted = %+v, want nothing", evicted)
+			}
+		})
+	}
+}
+
+// A record that could not be removed KEEPS its entry: a merge that left memory
+// but not disk would be replayed by the next boot as one the user had already
+// taken off the queue.
+func TestEvictWaitingSurfacesARemoveFailureAndKeepsTheEntry(t *testing.T) {
+	// Arrange — the durable records are gone from under the queue, so their
+	// removal fails.
+	q, dir := newTestQueue(t)
+	head, waiting := testRequest("a"), testRequest("b")
+	for _, req := range []Request{head, waiting} {
+		if _, err := q.Publish(context.Background(), testRepoKey, req); err != nil {
+			t.Fatalf("Publish(%s): %v", req.Name, err)
+		}
+	}
+	if err := os.RemoveAll(filepath.Join(dir, filepath.Base(q.repoDir(testRepoKey)))); err != nil {
+		t.Fatalf("remove repo dir: %v", err)
+	}
+
+	// Act.
+	evicted, err := q.EvictWaiting(testRepoKey, waiting.Workspace)
+
+	// Assert — loud failure, nothing reported evicted, the entry still queued.
+	if err == nil {
+		t.Fatalf("EvictWaiting() error = nil, want error")
+	}
+	if len(evicted) != 0 {
+		t.Fatalf("evicted = %+v, want nothing reported for an entry that never left", evicted)
+	}
+	if got := len(q.Snapshot()[testRepoKey]); got != 2 {
+		t.Fatalf("depth after failed eviction = %d, want 2", got)
+	}
+}

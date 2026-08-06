@@ -137,6 +137,15 @@ type MergeRunner interface {
 	// other terminal phase — and abandonment has no command of its own on the
 	// wire, so close_workspace routes here before the lifecycle close.
 	Abandon(ctx context.Context, workspace string) (bool, error)
+	// Evict takes the workspace's WAITING merges off their repositories'
+	// queues, reporting how many entries it dropped. It is the queue half of an
+	// interrupt: a merge waiting its turn is work the user asked to stop, and
+	// no other command on the wire reaches it.
+	//
+	// A merge already in flight is NOT evicted — the coordinator's head holds
+	// the shim lease and may be mid-cherry-pick — so zero is the ordinary
+	// answer and never an error.
+	Evict(ctx context.Context, workspace string) (int, error)
 }
 
 // MergeGeometrySource answers a workspace's recorded merge geometry: its source
@@ -683,6 +692,24 @@ func validatePromptOrigin(origin corev1.PromptOrigin) error {
 // ALREADY_COMPLETE atomically and remains the sole authority on the verdict —
 // the daemon's view of "no turn" is an observation, not a ruling, and refusing
 // on it would let a stale observation swallow a stop.
+//
+// IT ALSO EVICTS THE WORKSPACE'S WAITING MERGES, and that is the second half of
+// what a stop means here. A merge queued behind another one is work this
+// workspace is doing that the user can see, cannot prompt past (the composer is
+// gated on the merge lease), and had no way to call off: the stop went to a shim
+// with no turn to end, and the merge ran anyway when its turn came. Nothing else
+// on the wire reaches a queued merge, so the interrupt reaches it.
+//
+// EVICTION HAPPENS AFTER THE GATE AND BEFORE THE SHIM. After the gate because a
+// challenged interrupt performs NOTHING — the whole point of the challenge is
+// that the user has not decided yet — and before the shim because the queue is
+// the part that can still be stopped cleanly, where the shim's verdict is its
+// own to make.
+//
+// NEITHER HALF SWALLOWS THE OTHER'S FAILURE. A queue that could not be evicted
+// must not cancel the stop the user asked for, and a shim that refused the stop
+// must not hide an eviction that did happen, so both run and both errors travel
+// back joined on the one ack.
 func (h *commandHandler) Interrupt(ctx context.Context, workspace, requestID string, cmd *frontendv1.InterruptCmd) error {
 	h.logf("frontend cmd: interrupt ws=%s request_id=%s confirm_agents=%v", workspace, requestID, cmd.GetConfirmAgents())
 	if err := checkWorkspaceKey("interrupt", workspace); err != nil {
@@ -697,7 +724,28 @@ func (h *commandHandler) Interrupt(ctx context.Context, workspace, requestID str
 			return challenge
 		}
 	}
-	return h.prompts.Interrupt(ctx, workspace)
+	evictErr := h.evictQueuedMerges(ctx, workspace, requestID)
+	return errors.Join(evictErr, h.prompts.Interrupt(ctx, workspace))
+}
+
+// evictQueuedMerges performs the interrupt's queue half and reports its failure.
+//
+// The count is logged rather than returned because it is not the command's
+// answer: an interrupt acks the stop, not the number of merges that came off a
+// queue. What the number IS for is the record — a merge that vanished from a
+// user's queue has to be findable in the log — so both the eviction and the
+// ordinary nothing-was-queued case are written down.
+func (h *commandHandler) evictQueuedMerges(ctx context.Context, workspace, requestID string) error {
+	evicted, err := h.merges.Evict(ctx, workspace)
+	if err != nil {
+		h.logf("frontend cmd: interrupt merge eviction FAILED ws=%s request_id=%s evicted=%d: %v — the merges it could not drop are still queued and still run when their turn comes",
+			workspace, requestID, evicted, err)
+		return fmt.Errorf("frontend cmd: interrupt ws=%s: evict queued merges: %w", workspace, err)
+	}
+	if evicted > 0 {
+		h.logf("frontend cmd: interrupt EVICTED %d queued merge(s) ws=%s request_id=%s", evicted, workspace, requestID)
+	}
+	return nil
 }
 
 // interruptChallenge decides whether an unconfirmed interrupt must be
