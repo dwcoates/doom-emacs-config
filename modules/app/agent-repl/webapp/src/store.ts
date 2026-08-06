@@ -48,7 +48,7 @@ import type {
 import type { AsyncBubbleDelta } from "./async-bubble.js";
 import { AsyncBubbleRegistry, type AsyncApplyResult, type AsyncGap } from "./async-routing.js";
 import { mergeStatusLogValue } from "./merge-status.js";
-import { syntheticModelLiteral } from "../../proto/ts/schema-literals.js";
+import type { SelectedModel } from "../../proto/ts/schema-literals.js";
 import { applyStreamDelta, blockKey, insertBySeq, settleStreamedBlock } from "./streaming.js";
 import type { ClientLogContext } from "./protocol.js";
 import {
@@ -1240,10 +1240,11 @@ export class ConversationStore {
    * Apply the explicit SetModel receipt. The receipt is shim-confirmed state,
    * while a later SessionView remains the durable snapshot authority.
    */
-  applyAcknowledgedModel(model: string): boolean {
-    if (model === "" || model.trim() === syntheticModelLiteral()) {
-      throw new Error("store: SetModel receipt omitted a real selected model");
-    }
+  applyAcknowledgedModel(model: SelectedModel): boolean {
+    // No check here, and deliberately: the parameter's TYPE is the check, and
+    // the only way to obtain one is through the constructor that refuses an
+    // empty or placeholder value. A caller added later inherits that without
+    // knowing the rule exists.
     if (this.state.model === model) return false;
     this.state.model = model;
     return true;

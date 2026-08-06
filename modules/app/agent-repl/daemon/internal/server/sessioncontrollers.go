@@ -1019,23 +1019,27 @@ func (r *RegistryRegistrar) BackfillStateChanged(sessionID, state string) {
 // It returns the model the record held BEFORE this write, and whether the
 // write was applied — the two facts a caller needs to state the TRANSITION in
 // its own log rather than just the value it wrote.
-func (r *RegistryRegistrar) SessionModelObserved(sessionID, model string, obs registry.ModelObservation) (previous string, applied bool) {
-	if r.Reg == nil || model == "" {
+func (r *RegistryRegistrar) SessionModelObserved(sessionID string, model registry.Model, obs registry.ModelObservation) (previous string, applied bool) {
+	if r.Reg == nil || model.Empty() {
 		return "", false
 	}
-	if !r.admitModelObservation(sessionID, model, obs) {
+	// The record's own field is still a string (it is persisted JSON), so the
+	// validated value is unwrapped exactly here, at the write, having been
+	// impossible to spell wrongly on the whole way down.
+	observed := model.String()
+	if !r.admitModelObservation(sessionID, observed, obs) {
 		return r.recordedModel(sessionID), false
 	}
 	changed := false
 	found, err := r.Reg.Update(sessionID, func(rec *registry.Record) {
 		previous = rec.Model
-		if rec.Model == model {
+		if rec.Model == observed {
 			return
 		}
 		if r.Logf != nil {
-			r.Logf("server: session %s: observed model %q replaces the record's %q", sessionID, model, rec.Model)
+			r.Logf("server: session %s: observed model %q replaces the record's %q", sessionID, observed, rec.Model)
 		}
-		rec.Model = model
+		rec.Model = observed
 		changed = true
 	})
 	if err != nil && r.Logf != nil {
