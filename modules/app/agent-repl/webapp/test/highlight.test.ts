@@ -31,6 +31,11 @@ describe("languageForPath", () => {
     expect(languageForPath("/docs/README.MD")).toBe("markdown");
   });
 
+  it("maps a .proto file to protobuf", () => {
+    // Arrange + Act + Assert
+    expect(languageForPath("/src/messages.proto")).toBe("protobuf");
+  });
+
   it("returns null for an unknown extension", () => {
     // Arrange + Act + Assert
     expect(languageForPath("/tmp/data.xyz")).toBeNull();
@@ -57,6 +62,13 @@ describe("highlightCode", () => {
     // Arrange + Act + Assert
     expect(highlightCode("const x = 1;", "typescript")).toContain(
       `<span class="hljs-keyword">const</span>`,
+    );
+  });
+
+  it("emits hljs token spans for protobuf", () => {
+    // Arrange + Act + Assert
+    expect(highlightCode("message Foo {}", "protobuf")).toContain(
+      `<span class="hljs-title class_">Foo</span>`,
     );
   });
 

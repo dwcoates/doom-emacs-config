@@ -111,6 +111,16 @@ describe("renderMarkdown fenced code", () => {
     expect(html).toContain(`<span class="hljs-keyword">func</span>`);
   });
 
+  it("syntax-highlights fenced protobuf code", () => {
+    // Arrange
+    const src = "```protobuf\nmessage Foo {}\n```";
+    // Act
+    const html = renderMarkdown(src);
+    // Assert
+    expect(html).toContain(`<code class="hljs lang-protobuf">`);
+    expect(html).toContain(`<span class="hljs-title class_">Foo</span>`);
+  });
+
   it("falls back to plain escaped text for an unknown language tag", () => {
     // Arrange
     const src = "```klingon\n<qapla> & stuff\n```";

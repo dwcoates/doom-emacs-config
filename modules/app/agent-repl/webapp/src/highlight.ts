@@ -18,6 +18,7 @@ import javascript from "highlight.js/lib/languages/javascript";
 import json from "highlight.js/lib/languages/json";
 import lisp from "highlight.js/lib/languages/lisp";
 import markdown from "highlight.js/lib/languages/markdown";
+import protobuf from "highlight.js/lib/languages/protobuf";
 import python from "highlight.js/lib/languages/python";
 import ruby from "highlight.js/lib/languages/ruby";
 import rust from "highlight.js/lib/languages/rust";
@@ -38,6 +39,7 @@ hljs.registerLanguage("javascript", javascript);
 hljs.registerLanguage("json", json);
 hljs.registerLanguage("lisp", lisp);
 hljs.registerLanguage("markdown", markdown);
+hljs.registerLanguage("protobuf", protobuf);
 hljs.registerLanguage("python", python);
 hljs.registerLanguage("ruby", ruby);
 hljs.registerLanguage("rust", rust);
@@ -96,6 +98,7 @@ const EXT_LANGUAGES: Record<string, string> = {
   lisp: "lisp",
   markdown: "markdown",
   md: "markdown",
+  proto: "protobuf",
   py: "python",
   rb: "ruby",
   rs: "rust",
