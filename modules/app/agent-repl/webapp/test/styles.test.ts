@@ -1624,7 +1624,6 @@ describe("thinking spinner", () => {
 const breathUserBubble = blockAfter(css, ".bubble.user {");
 const breathBubbleBody = blockAfter(css, ".bubble.user > .bubble-body {");
 const bubbleBreathKeyframes = blockAfter(css, "@keyframes bubble-breath {");
-const bubbleBreathTextKeyframes = blockAfter(css, "@keyframes bubble-breath-text {");
 const reducedBubbleBreath = blockAfter(
   blockAfter(css, "@media (prefers-reduced-motion: reduce)"),
   ".bubble.user,",
@@ -1645,18 +1644,18 @@ describe("prompt bubble breath", () => {
     expect(breathUserBubble).toMatch(/animation:\s*bubble-breath\s+[\d.]+s\s+ease-in-out\s+infinite/);
   });
 
-  it("breathes the body text with its own, distinct keyframes", () => {
+  it("breathes the body text with the same bubble-breath keyframes as the bubble", () => {
     // Arrange / Act — the .bubble.user > .bubble-body rule.
     // Assert
     expect(breathBubbleBody).toMatch(
-      /animation:\s*bubble-breath-text\s+[\d.]+s\s+ease-in-out\s+infinite/,
+      /animation:\s*bubble-breath\s+[\d.]+s\s+ease-in-out\s+infinite/,
     );
   });
 
   it("keeps the bubble and its text breathing in the same phase", () => {
     // Arrange — the duration each animation shorthand declares.
     const bubbleDuration = breathUserBubble.match(/animation:\s*bubble-breath\s+([\d.]+)s/)?.[1];
-    const textDuration = breathBubbleBody.match(/animation:\s*bubble-breath-text\s+([\d.]+)s/)?.[1];
+    const textDuration = breathBubbleBody.match(/animation:\s*bubble-breath\s+([\d.]+)s/)?.[1];
     // Act / Assert — one shared period, so neither drifts out of sync with the other.
     expect(textDuration).toBe(bubbleDuration);
   });
@@ -1670,12 +1669,13 @@ describe("prompt bubble breath", () => {
     expect(peak - rest).toBeLessThan(0.02);
   });
 
-  it("swings the text's scale wider than the bubble's, so the two move relative to each other", () => {
-    // Arrange
-    const [bubbleRest, bubblePeak] = scaleSwing(bubbleBreathKeyframes);
-    const [textRest, textPeak] = scaleSwing(bubbleBreathTextKeyframes);
-    // Act / Assert — the text's own swing is the LESS subtle of the two.
-    expect(textPeak - textRest).toBeGreaterThan(bubblePeak - bubbleRest);
+  it("swings the text's scale at the same rate as the bubble's, so the two stay relatively the same size", () => {
+    // Arrange — both rules share the same bubble-breath keyframes, so a
+    // single scale swing governs bubble and text alike.
+    const [rest, peak] = scaleSwing(bubbleBreathKeyframes);
+    // Act / Assert — no separate, wider text swing exists to diverge from it.
+    expect(breathBubbleBody).toMatch(/animation:\s*bubble-breath\s/);
+    expect(peak - rest).toBeLessThan(0.02);
   });
 
   it("scales from the bubble's own center, not a corner, so the breath reads as symmetric growth", () => {

@@ -1102,22 +1102,17 @@ pre {
   animation: bubble-breath 5.2s ease-in-out infinite;
   transform-origin: center;
 }
-/* The body's own breath is a shade LESS subtle than the bubble's (a wider
-   scale swing), so the text visibly grows and shrinks relative to the
-   bubble's edge rather than moving in lockstep with it — the bubble
-   breathes, and the text inside it breathes a little harder. Same period
-   and easing as `.bubble.user` so the two stay in phase. */
+/* The body breathes at the same scale swing as the bubble itself, so the
+   two stay the same relative size throughout the cycle instead of the text
+   growing and shrinking faster than its container. Same period and easing
+   as `.bubble.user` so the two stay in phase. */
 .bubble.user > .bubble-body {
-  animation: bubble-breath-text 5.2s ease-in-out infinite;
+  animation: bubble-breath 5.2s ease-in-out infinite;
   transform-origin: center;
 }
 @keyframes bubble-breath {
   0%, 100% { transform: scale(0.995); }
   50% { transform: scale(1.005); }
-}
-@keyframes bubble-breath-text {
-  0%, 100% { transform: scale(0.99); }
-  50% { transform: scale(1.01); }
 }
 /* A markdown fenced code block the user typed into their prompt renders as
    the same card the agent's markdown fences get (.md pre.md-code), but the
