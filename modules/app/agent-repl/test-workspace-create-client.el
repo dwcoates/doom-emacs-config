@@ -230,7 +230,7 @@ session, which is a visibly broken workspace rather than a quiet one."
             ((symbol-function 'set-persp-parameter) (lambda (&rest _) nil))
             ((symbol-function 'persp-kill) (lambda (&rest _) nil))
             ((symbol-function 'agent-repl--uds-send-command) (lambda (&rest _) "ack"))
-            ((symbol-function 'agent-repl--uds-track-command) (lambda (&rest _) nil)))
+            )
     (agent-repl--workspace-create-handle-available available)))
 
 (ert-deftest agent-repl-test-available-correlated-to-own-request-jumps ()
@@ -451,7 +451,6 @@ turn the next reconnect replay into a false conflict."
     (let ((creates 0)
           (sets 0)
           (acks nil)
-          (tracks nil)
           (available
            '(:jobId "job-1" :finalName "new"
              :worktreePath "/tmp/new" :sessionId "session-1"
@@ -472,11 +471,10 @@ turn the next reconnect replay into a false conflict."
                 ((symbol-function 'persp-kill)
                  (lambda (&rest _) (error "rollback must not run")))
                 ((symbol-function 'agent-repl--uds-send-command)
-                 (lambda (field payload &optional workspace _process)
+                 (lambda (field payload &optional workspace _process &rest _)
                    (push (list field payload workspace) acks)
                    (format "ack-%d" (length acks))))
-                ((symbol-function 'agent-repl--uds-track-command)
-                 (lambda (&rest args) (push args tracks))))
+                )
         (should (eq (agent-repl--workspace-create-handle-available available)
                     'created))
         (should (eq (agent-repl--workspace-create-handle-available available)
@@ -488,7 +486,6 @@ turn the next reconnect replay into a false conflict."
           (should (equal (car ack) "workspaceMaterialized"))
           (should (equal (plist-get (cadr ack) :jobId) "job-1"))
           (should (equal (caddr ack) "new")))
-        (should (= (length tracks) 2))
         (should (equal (agent-repl--ws-get "new" :frontend-session-id)
                        "session-1"))
         (should (equal (agent-repl--ws-get "new" :config-dir-override)
@@ -514,8 +511,6 @@ turn the next reconnect replay into a false conflict."
                 ((symbol-function 'persp-kill) (lambda (&rest _) nil))
                 ((symbol-function 'agent-repl--uds-send-command)
                  (lambda (&rest _) "ack"))
-                ((symbol-function 'agent-repl--uds-track-command)
-                 (lambda (&rest _) nil))
                 ((symbol-function 'agent-repl--async-git)
                  (lambda (&rest _) (error "git forbidden")))
                 ((symbol-function 'agent-repl--frontend-create-session)
@@ -548,8 +543,7 @@ slash produced a key the daemon has no session for."
                 ((symbol-function 'persp-kill) (lambda (&rest _) nil))
                 ((symbol-function 'agent-repl--uds-send-command)
                  (lambda (&rest _) "ack"))
-                ((symbol-function 'agent-repl--uds-track-command)
-                 (lambda (&rest _) nil)))
+                )
         (agent-repl--workspace-create-handle-available available)
         (should (equal (agent-repl--ws-get "sluggish" :project-dir)
                        "/tmp/wt/sluggish"))))))
@@ -570,8 +564,7 @@ slash produced a key the daemon has no session for."
                 ((symbol-function 'persp-kill) (lambda (&rest _) nil))
                 ((symbol-function 'agent-repl--uds-send-command)
                  (lambda (&rest _) "ack"))
-                ((symbol-function 'agent-repl--uds-track-command)
-                 (lambda (&rest _) nil)))
+                )
         (agent-repl--workspace-create-handle-available available)
         (should (equal (agent-repl--ws-get "ided" :ws-id)
                        (substring (md5 (agent-repl--path-canonical
@@ -629,11 +622,10 @@ slash produced a key the daemon has no session for."
     (cl-letf (((symbol-function 'agent-repl--handle-switch-command)
                (lambda (cmd) (setq handled cmd)))
               ((symbol-function 'agent-repl--uds-send-command)
-               (lambda (field payload &optional workspace _process)
+               (lambda (field payload &optional workspace _process &rest _)
                  (setq completion (list field payload workspace))
                  "host-ack"))
-              ((symbol-function 'agent-repl--uds-track-command)
-               (lambda (&rest _) nil)))
+              )
       (should
        (agent-repl--workspace-create-handle-host-action
         '(:actionId "action-1" :switchWorkspace (:dir "/tmp/repo"))))
@@ -657,11 +649,10 @@ slash produced a key the daemon has no session for."
     (cl-letf (((symbol-function 'agent-repl--handle-switch-command)
                (lambda (_cmd) (agent-repl--host-action-defer "tok-1")))
               ((symbol-function 'agent-repl--uds-send-command)
-               (lambda (field payload &optional _ws _process)
+               (lambda (field payload &optional _ws _process &rest _)
                  (push (list field payload) completions)
                  "host-ack"))
-              ((symbol-function 'agent-repl--uds-track-command)
-               (lambda (&rest _) nil)))
+              )
       (should (eq (agent-repl--workspace-create-handle-host-action
                    '(:actionId "action-1" :switchWorkspace (:dir "/tmp/repo")))
                   :deferred))
@@ -676,11 +667,10 @@ slash produced a key the daemon has no session for."
     (cl-letf (((symbol-function 'agent-repl--handle-switch-command)
                (lambda (_cmd) (agent-repl--host-action-defer "tok-1")))
               ((symbol-function 'agent-repl--uds-send-command)
-               (lambda (_field payload &optional _ws _process)
+               (lambda (_field payload &optional _ws _process &rest _)
                  (push payload completions)
                  "host-ack"))
-              ((symbol-function 'agent-repl--uds-track-command)
-               (lambda (&rest _) nil)))
+              )
       (agent-repl--workspace-create-handle-host-action
        '(:actionId "action-1" :switchWorkspace (:dir "/tmp/repo")))
       (agent-repl--host-action-settle "tok-1" t nil)
@@ -696,11 +686,10 @@ slash produced a key the daemon has no session for."
     (cl-letf (((symbol-function 'agent-repl--handle-switch-command)
                (lambda (_cmd) (agent-repl--host-action-defer "tok-1")))
               ((symbol-function 'agent-repl--uds-send-command)
-               (lambda (_field payload &optional _ws _process)
+               (lambda (_field payload &optional _ws _process &rest _)
                  (push payload completions)
                  "host-ack"))
-              ((symbol-function 'agent-repl--uds-track-command)
-               (lambda (&rest _) nil)))
+              )
       (agent-repl--workspace-create-handle-host-action
        '(:actionId "action-1" :switchWorkspace (:dir "/tmp/repo")))
       (agent-repl--host-action-settle "tok-1" nil "resolve dirs: not wired")
@@ -717,8 +706,7 @@ slash produced a key the daemon has no session for."
                (lambda (_cmd) (agent-repl--host-action-defer "tok-1")))
               ((symbol-function 'agent-repl--uds-send-command)
                (lambda (&rest _) "host-ack"))
-              ((symbol-function 'agent-repl--uds-track-command)
-               (lambda (&rest _) nil)))
+              )
       (agent-repl--workspace-create-handle-host-action
        '(:actionId "action-1" :switchWorkspace (:dir "/tmp/repo")))
       (agent-repl--host-action-settle "tok-1" nil "merge rejected")
@@ -730,7 +718,7 @@ slash produced a key the daemon has no session for."
         (agent-repl--host-action-deferrals (make-hash-table :test 'equal))
         (completions nil))
     (cl-letf (((symbol-function 'agent-repl--uds-send-command)
-               (lambda (_field payload &optional _ws _process)
+               (lambda (_field payload &optional _ws _process &rest _)
                  (push payload completions)
                  "host-ack")))
       (agent-repl--host-action-settle "interactive-merge" t nil)
@@ -754,8 +742,7 @@ slash produced a key the daemon has no session for."
                (lambda (field payload &rest _)
                  (setq completion (list field payload))
                  "failure-ack"))
-              ((symbol-function 'agent-repl--uds-track-command)
-               (lambda (&rest _) nil)))
+              )
       (should
        (agent-repl--workspace-create-handle-host-action
         '(:actionId "job-1:failed"
@@ -773,16 +760,14 @@ slash produced a key the daemon has no session for."
 (ert-deftest agent-repl-test-host-action-legacy-command-translates-struct ()
   "legacyCommand converts its recursive Struct and ACKs handler completion."
   (let ((handled nil)
-        (completion nil)
-        (tracked nil))
+        (completion nil))
     (cl-letf (((symbol-function 'agent-repl--handle-send-command)
                (lambda (cmd) (setq handled cmd)))
               ((symbol-function 'agent-repl--uds-send-command)
-               (lambda (field payload &optional workspace _process)
+               (lambda (field payload &optional workspace _process &rest _)
                  (setq completion (list field payload workspace))
                  "host-legacy-ack"))
-              ((symbol-function 'agent-repl--uds-track-command)
-               (lambda (&rest args) (setq tracked args))))
+              )
       (should
        (agent-repl--workspace-create-handle-host-action
         '(:actionId "legacy-1"
@@ -797,8 +782,10 @@ slash produced a key the daemon has no session for."
       (should (equal (car completion) "hostActionCompleted"))
       (should (equal (plist-get (cadr completion) :actionId) "legacy-1"))
       (should (eq (plist-get (cadr completion) :ok) t))
-      (should (equal tracked
-                     '("host-legacy-ack" "hostActionCompleted" "ws1"))))))
+      ;; The completion carries no wire workspace: the daemon routes it by
+      ;; action id, and the tracked workspace is now always the one on the
+      ;; wire rather than a second, diverging value.
+      (should-not (caddr completion)))))
 
 (ert-deftest agent-repl-test-host-action-legacy-types-are-exact ()
   "Only the eight daemon legacy-command types resolve to host handlers.
@@ -819,8 +806,7 @@ slash produced a key the daemon has no session for."
                (lambda (field payload &rest _)
                  (setq completion (list field payload))
                  "host-failure-ack"))
-              ((symbol-function 'agent-repl--uds-track-command)
-               (lambda (&rest _) nil)))
+              )
       (should-error
        (agent-repl--workspace-create-handle-host-action
         '(:actionId "legacy-bad"
@@ -839,11 +825,10 @@ slash produced a key the daemon has no session for."
     (cl-letf (((symbol-function 'agent-repl--handle-set-view-command)
                (lambda (cmd) (setq seen cmd)))
               ((symbol-function 'agent-repl--uds-send-command)
-               (lambda (field payload &optional workspace _process)
+               (lambda (field payload &optional workspace _process &rest _)
                  (setq completion (list field payload workspace))
                  "host-ok-ack"))
-              ((symbol-function 'agent-repl--uds-track-command)
-               (lambda (&rest _) nil)))
+              )
       (agent-repl--workspace-create-handle-host-action
        '(:actionId "legacy-set-view"
          :legacyCommand (:type "set-view" :payload (:view "task"))))
@@ -860,8 +845,7 @@ slash produced a key the daemon has no session for."
                (lambda (_field payload &rest _)
                  (setq completion payload)
                  "host-failure-ack"))
-              ((symbol-function 'agent-repl--uds-track-command)
-               (lambda (&rest _) nil)))
+              )
       (should-error
        (agent-repl--workspace-create-handle-host-action
         '(:actionId "legacy-handler-failure"
@@ -891,8 +875,7 @@ slash produced a key the daemon has no session for."
                (lambda (_field payload &rest _)
                  (push payload completions)
                  (format "completion-%d" (length completions))))
-              ((symbol-function 'agent-repl--uds-track-command)
-               (lambda (&rest _) nil)))
+              )
       (should
        (agent-repl--workspace-create-handle-host-action action))
       ;; One original completion plus one replay for the suppressed overlap.
@@ -927,8 +910,7 @@ slash produced a key the daemon has no session for."
                (lambda (_field payload &rest _)
                  (push payload completions)
                  (format "completion-%d" (length completions))))
-              ((symbol-function 'agent-repl--uds-track-command)
-               (lambda (&rest _) nil)))
+              )
       (should-error
        (agent-repl--workspace-create-handle-host-action action))
       (should-not

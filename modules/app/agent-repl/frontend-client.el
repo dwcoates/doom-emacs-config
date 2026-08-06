@@ -55,8 +55,7 @@
 (declare-function agent-repl--mark-ws-thinking "input" (ws))
 ;; The UDS command channel + pushed-frame SessionView store (the daemon plane
 ;; that replaced the GET /sessions poller); resolved at call time.
-(declare-function agent-repl--uds-send-command "frontend-uds" (field payload &optional workspace process))
-(declare-function agent-repl--uds-track-command "frontend-uds" (request-id field workspace &optional on-failure on-success on-challenge))
+(declare-function agent-repl--uds-send-command "frontend-uds" (field payload &optional workspace process &rest keys))
 (declare-function agent-repl--uds-untrack-command "frontend-uds" (request-id workspace reason))
 (declare-function agent-repl--uds-track-health-response
                   "frontend-uds"
@@ -301,22 +300,30 @@ timer or UDS callback after either continuation runs."
                              (error-message-string err)))))
                (agent-repl--frontend-async-fail ws what request-id started on-failure detail))))
          (dispatch ()
-           (setq request-id (agent-repl--uds-send-command field payload workspace))
+           ;; `:on-registered' runs before the frame is written, so BOTH this
+           ;; dispatch's correlation handles — the lexical REQUEST-ID that
+           ;; `finish' untracks by, and the health-response registry — exist
+           ;; before an ack or a health reply can be delivered reentrantly
+           ;; from inside `process-send-string's yield.
+           (agent-repl--uds-send-command
+            field payload workspace nil
+            :on-registered
+            (lambda (id)
+              (setq request-id id)
+              (agent-repl--uds-track-health-response
+               id field workspace session-id
+               (lambda (response)
+                 (if (plist-get response :healthy)
+                     (finish t nil)
+                   (finish nil (format "daemon reported unhealthy: %s"
+                                       (or (plist-get response :reason) "no reason supplied")))))))
+            :on-failure (lambda (err) (finish nil (format "command rejected: %s" err))))
            (agent-repl--log ws "frontend-health-async: dispatched what=%s field=%s request-id=%s workspace=%s session-id=%s"
                             what field request-id workspace session-id)
-           (agent-repl--uds-track-health-response
-            request-id field workspace session-id
-            (lambda (response)
-              (if (plist-get response :healthy)
-                  (finish t nil)
-                (finish nil (format "daemon reported unhealthy: %s"
-                                    (or (plist-get response :reason) "no reason supplied"))))))
-           (agent-repl--uds-track-command
-            request-id field workspace
-            (lambda (err) (finish nil (format "command rejected: %s" err))))
-           (setq timer (agent-repl--uds-run-timer
-                        agent-repl-frontend-health-timeout
-                        (lambda () (finish nil (format "timed out after %.3fs" agent-repl-frontend-health-timeout)))))))
+           (unless settled
+             (setq timer (agent-repl--uds-run-timer
+                          agent-repl-frontend-health-timeout
+                          (lambda () (finish nil (format "timed out after %.3fs" agent-repl-frontend-health-timeout))))))))
       (agent-repl--frontend-after-ready #'dispatch
                                          (lambda (detail) (finish nil detail)) ws)
       :pending)))
@@ -337,12 +344,14 @@ timer or UDS callback after either continuation runs."
                       (agent-repl--frontend-async-fail ws "openWorkspace" request-id started on-failure detail)))))
       (agent-repl--frontend-after-ready
        (lambda ()
-         (setq request-id (agent-repl--uds-send-command "openWorkspace" nil key))
-         (agent-repl--uds-track-command request-id "openWorkspace" key
-                                        (lambda (err) (finish nil (format "command rejected: %s" err)))
-                                        (lambda () (finish t nil)))
-         (setq timer (agent-repl--uds-run-timer agent-repl-frontend-open-workspace-timeout
-                                                (lambda () (finish nil (format "timed out after %.3fs" agent-repl-frontend-open-workspace-timeout))))))
+         (agent-repl--uds-send-command
+          "openWorkspace" nil key nil
+          :on-registered (lambda (id) (setq request-id id))
+          :on-failure (lambda (err) (finish nil (format "command rejected: %s" err)))
+          :on-success (lambda () (finish t nil)))
+         (unless settled
+           (setq timer (agent-repl--uds-run-timer agent-repl-frontend-open-workspace-timeout
+                                                  (lambda () (finish nil (format "timed out after %.3fs" agent-repl-frontend-open-workspace-timeout)))))))
        (lambda (detail) (finish nil detail)) ws)
       :pending)))
 
@@ -417,14 +426,16 @@ timer or UDS callback after either continuation runs."
            (observe-view)
            (unless settled (setq poll-timer (agent-repl--uds-run-timer 0.05 #'poll-view))))
          (dispatch ()
-           (setq request-id (agent-repl--uds-send-command "createSession" payload cwd))
+           (agent-repl--uds-send-command
+            "createSession" payload cwd nil
+            :on-registered (lambda (id) (setq request-id id))
+            :on-failure #'reject
+            :on-success (lambda () (setq acked t) (observe-view)))
            (agent-repl--log ws "createSession-async: dispatched cwd=%s request-id=%s resume-mode=%s model=%s" cwd request-id resume-mode model)
-           (agent-repl--uds-track-command request-id "createSession" cwd
-                                          #'reject
-                                          (lambda () (setq acked t) (observe-view)))
-           (setq deadline-timer (agent-repl--uds-run-timer agent-repl-frontend-create-timeout
-                                                           (lambda () (finish nil (format "timed out after %.3fs awaiting acknowledgement and SessionView" agent-repl-frontend-create-timeout)))))
-           (setq poll-timer (agent-repl--uds-run-timer 0.05 #'poll-view))))
+           (unless settled
+             (setq deadline-timer (agent-repl--uds-run-timer agent-repl-frontend-create-timeout
+                                                             (lambda () (finish nil (format "timed out after %.3fs awaiting acknowledgement and SessionView" agent-repl-frontend-create-timeout)))))
+             (setq poll-timer (agent-repl--uds-run-timer 0.05 #'poll-view)))))
       ;; Reserve the cwd before readiness polling.  Two UI actions issued while
       ;; the daemon is still starting must not arm two future creates.
       (puthash cwd t agent-repl--frontend-creates-in-flight)
@@ -597,7 +608,6 @@ WS, when known, keys the frame + logging.
 Fire-and-forget: the terminal `SessionView' the daemon pushes updates the
 store, and a rejected ack surfaces loudly via the shared ack handler."
   (let ((req (agent-repl--uds-send-command "deleteSession" (list :sessionId id) ws)))
-    (agent-repl--uds-track-command req "deleteSession" ws)
     (agent-repl--log ws "deleteSession: dispatched session=%s request-id=%s" id req)
     req))
 
@@ -1003,13 +1013,13 @@ confirmation round trip completes long after this returns."
         (key (agent-repl--frontend-ws-command-key ws)))
     ;; nil payload -> the daemon reads InterruptCmd{} (confirm_agents=false),
     ;; a plain stop of the live turn.
-    (let ((req (agent-repl--uds-send-command "interrupt" nil key)))
-      (agent-repl--uds-track-command
-       req "interrupt" ws nil nil
-       (lambda (challenge) (agent-repl--gui-interrupt-challenge ws key challenge)))
-      (agent-repl--log ws "interrupt[gui]: ws=%s session=%s kind=%s (uds interrupt)"
-                       ws id kind)
-      t)))
+    (agent-repl--uds-send-command
+     "interrupt" nil key nil
+     :on-challenge
+     (lambda (challenge) (agent-repl--gui-interrupt-challenge ws key challenge)))
+    (agent-repl--log ws "interrupt[gui]: ws=%s session=%s kind=%s (uds interrupt)"
+                     ws id kind)
+    t))
 
 (defun agent-repl--frontend-restart-session (ws)
   "Send the `restartSession\=' command for WS, keyed by its cwd.
@@ -1017,12 +1027,18 @@ Returns the request-id.  Signals (via `agent-repl--uds-send-command\=') when
 there is no link to send on; a REJECTED ack is surfaced loudly through the
 shared ack handler, which is the whole point of tracking it: a restart that
 failed must never read as a session that came back."
-  (let* ((key (agent-repl--frontend-ws-command-key ws))
-         (req (agent-repl--uds-send-command "restartSession" nil key)))
-    (agent-repl--uds-track-command
-     req "restartSession" ws
+  (let ((key (agent-repl--frontend-ws-command-key ws))
+        ;; Bound by `:on-registered' BEFORE the write, so the ack callbacks
+        ;; below can name the request even when the ack is delivered
+        ;; reentrantly from inside `process-send-string'.
+        (req nil))
+    (agent-repl--uds-send-command
+     "restartSession" nil key nil
+     :on-registered (lambda (id) (setq req id))
+     :on-failure
      (lambda (err)
        (agent-repl--log ws "restart-session: ws=%s REJECTED: %s" ws err))
+     :on-success
      (lambda ()
        (agent-repl--log ws "restart-session: ws=%s complete request-id=%s" ws req)
        (message "agent-repl: session restarted (same conversation, fresh shim)")))
@@ -1041,13 +1057,16 @@ in-flight work to satisfy a hibernate.  A refusal that read as success
 would leave the user believing they had reclaimed memory the machine is
 still holding, so the rejection is surfaced loudly through the shared ack
 handler and echoed here as well."
-  (let* ((key (agent-repl--frontend-ws-command-key ws))
-         (req (agent-repl--uds-send-command "hibernateWorkspace" nil key)))
-    (agent-repl--uds-track-command
-     req "hibernateWorkspace" ws
+  (let ((key (agent-repl--frontend-ws-command-key ws))
+        (req nil))
+    (agent-repl--uds-send-command
+     "hibernateWorkspace" nil key nil
+     :on-registered (lambda (id) (setq req id))
+     :on-failure
      (lambda (err)
        (agent-repl--log ws "hibernate-workspace: ws=%s REJECTED: %s" ws err)
        (message "agent-repl: hibernate refused for %s: %s" ws err))
+     :on-success
      (lambda ()
        (agent-repl--log ws "hibernate-workspace: ws=%s complete request-id=%s" ws req)
        (message "agent-repl: %s hibernated (session reclaimable, conversation kept)" ws)))
@@ -1087,7 +1106,6 @@ re-ask, and re-arming here would loop the prompt."
     (if (y-or-n-p question)
         (let ((req (agent-repl--uds-send-command
                     "interrupt" (list :confirmAgents t) key)))
-          (agent-repl--uds-track-command req "interrupt" ws)
           (agent-repl--log ws "interrupt[gui]: CONFIRMED ws=%s live-tasks=%d request-id=%s"
                            ws live req)
           t)
@@ -1205,7 +1223,6 @@ is gone — matching the already-dead server behavior (the retired HTTP
        (let ((req (agent-repl--uds-send-command
                    "submitPrompt" (list :text text :promptOrigin prompt-origin)
                    (agent-repl--frontend-ws-command-key ws))))
-         (agent-repl--uds-track-command req "submitPrompt" ws)
          (agent-repl--log ws "frontend send: dispatched session=%s request-id=%s" id req)
          (funcall on-success req))))
    on-failure 'send)
@@ -1405,15 +1422,17 @@ guards above cannot be the only protection."
           (progn
             (agent-repl--ws-put ws :ensure-at (float-time))
             (agent-repl--log ws "ensure: ws=%s -> openWorkspace (never-blue backfill)" ws)
-            (let ((req (agent-repl--uds-send-command
-                        "openWorkspace" nil (agent-repl--frontend-ws-command-key ws))))
-              (agent-repl--uds-track-command
-               req "openWorkspace" ws
-               (lambda (e) (agent-repl--frontend-note-ensure-failure ws e))
-               (lambda ()
-                 (agent-repl--ws-put ws :ensure-failures nil)
-                 (agent-repl--log-verbose ws
-                                          "ensure: ack ACCEPTED request-id=%s" req)))
+            (let ((req nil))
+              (setq req
+                    (agent-repl--uds-send-command
+                     "openWorkspace" nil (agent-repl--frontend-ws-command-key ws) nil
+                     :on-registered (lambda (id) (setq req id))
+                     :on-failure (lambda (e) (agent-repl--frontend-note-ensure-failure ws e))
+                     :on-success
+                     (lambda ()
+                       (agent-repl--ws-put ws :ensure-failures nil)
+                       (agent-repl--log-verbose ws
+                                                "ensure: ack ACCEPTED request-id=%s" req))))
               req))
         (error
          (agent-repl--log ws "ensure: ws=%s send FAILED: %s"
