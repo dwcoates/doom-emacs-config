@@ -394,6 +394,7 @@ var APIPrefixes = []string{
 	"/accounts",
 	"/capabilities",
 	"/workspace-command",
+	"/workspace-stream",
 }
 
 // routes is the daemon's full HTTP surface.
@@ -428,6 +429,7 @@ func (s *Server) routes() []route {
 		{"GET /sessions/{id}/chess-game", s.handleChessGameFile},
 		{"POST /sessions/{id}/add-support", s.handleAddSupport},
 		{"POST /workspace-command", s.handleWorkspaceCommand},
+		{"GET /workspace-stream", s.handleWorkspaceStream},
 	}
 }
 
@@ -1614,6 +1616,62 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	// frontend's render pace gates another's delivery.
 	s.frontend.ServeWSScoped(w, r, frontend.Scope{SessionID: id, Workspace: cwd},
 		frontend.ClientKindGUIStream, s.frontendCommandTranslator(cwd))
+}
+
+// handleWorkspaceStream is the WORKSPACE-ADDRESSED half of the rendering
+// webview's transport: GET /workspace-stream?workspace=<URL-encoded absolute
+// directory path>. It serves the same frames handleStream does, scoped by the
+// workspace the URL names instead of by a session id, so a viewer attaches to a
+// workspace without holding any session identity of its own.
+//
+// Every way the query can fail to name a servable workspace ends here as a
+// typed frontend.ScopeRefusal carrying its own status, and the socket is never
+// upgraded: an unscoped connection would receive every workspace's frames.
+func (s *Server) handleWorkspaceStream(w http.ResponseWriter, r *http.Request) {
+	scope, err := frontend.WorkspaceScopeFromQuery(r.URL.RawQuery, s.workspaceKnown)
+	if err != nil {
+		var refusal *frontend.ScopeRefusal
+		if !errors.As(err, &refusal) {
+			// Unreachable by construction, and reported rather than assumed
+			// away: an unclassified failure here still must not upgrade.
+			s.httpFail(w, r, http.StatusInternalServerError,
+				"workspace-stream: unclassified scope failure: %v", err)
+			return
+		}
+		s.httpFail(w, r, refusal.HTTPStatus(),
+			"workspace-stream: reason=%s workspace=%q: %v", refusal.Reason, refusal.Workspace, err)
+		return
+	}
+	s.frontend.ServeWSScoped(w, r, scope,
+		frontend.ClientKindGUIStream, s.frontendCommandTranslator(scope.Workspace))
+}
+
+// workspaceKnown reports whether the daemon holds state for workspace: a
+// resolved render state in the SSM, or a non-terminal registry record rooted
+// there. The union is deliberate — a workspace whose session is still being
+// established has a record before the SSM resolves anything for it, and one
+// whose session ended still has render state — so a viewer attaching around
+// either edge is admitted rather than refused for a workspace that exists.
+//
+// A lookup failure is returned as an error, never as "not known": the two are
+// different answers and the caller reports them differently.
+func (s *Server) workspaceKnown(workspace string) (bool, error) {
+	if s.ssm == nil {
+		return false, fmt.Errorf("server: workspace %q: no SSM is wired", workspace)
+	}
+	_, found, err := s.ssm.Current(workspace)
+	if err != nil {
+		return false, fmt.Errorf("server: workspace %q: resolve render state: %w", workspace, err)
+	}
+	if found {
+		return true, nil
+	}
+	for _, rec := range s.registry.All() {
+		if !rec.Terminal && rec.CWD == workspace {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // frontendCommandTranslator decodes an inbound FrontendCommand protojson frame

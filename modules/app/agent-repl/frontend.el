@@ -54,7 +54,8 @@
 (declare-function agent-repl--frontend-force-fresh-session "agent-repl-frontend-client" (ws on-success on-failure))
 (declare-function agent-repl--frontend-restart-session "agent-repl-frontend-client" (ws))
 (declare-function agent-repl--frontend-hibernate-workspace "agent-repl-frontend-client" (ws))
-(declare-function agent-repl--frontend-session-url "agent-repl-frontend-client" (session-id))
+(declare-function agent-repl--frontend-workspace-url "agent-repl-frontend-client" (workspace))
+(declare-function agent-repl--frontend-ws-command-key "agent-repl-frontend-client" (ws))
 (declare-function agent-repl-window--panel-window "agent-repl-window" (kind &optional ws frame))
 (declare-function agent-repl-window--side-window-p "agent-repl-window" (win))
 (declare-function agent-repl-window--harden "agent-repl-window" (win &rest recipe))
@@ -917,7 +918,7 @@ panel."
   (agent-repl--frontend-after-ensure-session
    ws
    (lambda (session-id)
-     (let* ((url (agent-repl--frontend-webview-url ws session-id))
+     (let* ((url (agent-repl--frontend-webview-url ws))
             (buf (agent-repl--frontend-ensure-webview-buffer ws session-id url)))
        (agent-repl--frontend-display-webview ws buf)
        (agent-repl--log ws "gui-open: outcome=displayed session=%s buf=%s"
@@ -958,13 +959,19 @@ hydrated the environment with them, and the gui reads WS's
    (lambda (detail) (agent-repl--log ws "gui-boot: FAILED detail=%s" detail)))
   :pending)
 
-(defun agent-repl--frontend-webview-url (ws session-id)
-  "Return the webapp URL for WS's webview attached to SESSION-ID.
+(defun agent-repl--frontend-webview-url (ws)
+  "Return the webapp URL for WS's webview.
+The address is WS's WORKSPACE — its `:project-dir', the same wire key
+every command WS sends is routed by — so the view attaches to the
+workspace itself and the daemon rules on which session that workspace
+owns.  A session rotating, being superseded, or being re-created under
+this view therefore leaves the URL naming the same thing.
+
 composer=0: Emacs owns input (the panel below), so the webview hides
 its own composer and stays output-only.  parent_ws: the recorded
 parent worktree's basename — the webapp's status bar shows it in its
 topbar.  Omitted when the workspace has no recorded parent."
-  (concat (agent-repl--frontend-session-url session-id)
+  (concat (agent-repl--frontend-workspace-url (agent-repl--frontend-ws-command-key ws))
           "&composer=0"
           (when-let ((parent (agent-repl--frontend-parent-ws-name ws)))
             (concat "&parent_ws=" (url-hexify-string parent)))))
@@ -989,7 +996,7 @@ binding already matches."
       (agent-repl--log ws "sync-webview: displayed webview %s -> %s" bound session-id)
       (let ((win (get-buffer-window buf t))
             (new (agent-repl--frontend-ensure-webview-buffer
-                  ws session-id (agent-repl--frontend-webview-url ws session-id))))
+                  ws session-id (agent-repl--frontend-webview-url ws))))
         (when (window-live-p win)
           (set-window-buffer win new)
           (agent-repl--log ws "sync-webview: outcome=swapped old-window=%s new-buffer=%s"
@@ -1023,7 +1030,7 @@ current bundle anyway.  Returns the new buffer when a remount happened."
         (agent-repl--frontend-after-ensure-session
          ws
          (lambda (session-id)
-           (let ((url (agent-repl--frontend-webview-url ws session-id)))
+           (let ((url (agent-repl--frontend-webview-url ws)))
              (agent-repl--frontend-kill-webview buf)
              (agent-repl--ws-put ws :frontend-buffer nil)
              (agent-repl--ws-put ws :frontend-buffer-session-id nil)

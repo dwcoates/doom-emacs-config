@@ -24,7 +24,7 @@ type ClientKind int
 const (
 	ClientKindHost         ClientKind = iota // the Emacs frontend UDS host
 	ClientKindGUIBootstrap                   // unscoped /frontend bootstrap WebSocket
-	ClientKindGUIStream                      // scoped /sessions/{id}/stream webview
+	ClientKindGUIStream                      // scoped rendering webview (/sessions/{id}/stream, /workspace-stream)
 	ClientKindGUIObserver                    // scoped GUI test/auxiliary connection
 )
 

@@ -320,3 +320,32 @@ describe("the revival verdict's ingest wiring", () => {
     expect(onMessage).toContain("reviveFailedLog(");
   });
 });
+
+// A page's URL is its ADDRESS, and an address that changes underneath a page is
+// a different page on the next reload. A workspace-addressed webview once
+// rewrote itself into `?session=<id>` the moment it created a session, which
+// made every reload, bookmark, restored tab and remount of that URL an attach
+// against whatever session it had recorded — stale by then in every case the
+// rewrite was supposed to help.
+describe("the page's own URL", () => {
+  /** Every mutation of the live location's query, across every module. */
+  const searchParamWrites = Object.entries(sources).flatMap(([path, source]) =>
+    [...source.matchAll(/(?:searchParams|history)\.(?:set|replaceState|pushState)\s*\(/g)].map(
+      (match) => `${path}: ${match[0]}`,
+    ),
+  );
+
+  it("never acquires a session parameter", () => {
+    // Assert — no module writes the page's session identity into its address.
+    const offenders = Object.entries(sources).filter(([, source]) =>
+      /searchParams\.set\(\s*["']session["']/.test(source),
+    );
+    expect(offenders.map(([path]) => path)).toEqual([]);
+  });
+
+  it("is never rewritten at all, so the address a page opened with is the one it keeps", () => {
+    // Assert — the broader guard: any query mutation or history rewrite is a
+    // second way to change what a reload attaches to.
+    expect(searchParamWrites).toEqual([]);
+  });
+});
