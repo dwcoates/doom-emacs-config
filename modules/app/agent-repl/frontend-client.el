@@ -49,7 +49,6 @@
 (declare-function agent-repl--ensure-frontend-daemon "agent-repl-daemon" (&optional force))
 (declare-function agent-repl--resolve-current-git-root "agent-repl-core" ())
 (declare-function agent-repl--initialize-ws-env "agent-repl-session" (ws &optional project-dir-hint active-env-hint))
-(declare-function agent-repl--frontend-sync-webview "agent-repl-frontend" (ws session-id))
 (declare-function agent-repl--frontend-snap-webview-to-tail "agent-repl-frontend" (ws))
 (declare-function agent-repl--frontend-remount-all-webviews "agent-repl-frontend" ())
 (declare-function agent-repl--frontend-init-inhibited-p "agent-repl-daemon" ())
@@ -446,7 +445,11 @@ timer or UDS callback after either continuation runs."
       :pending)))
 
 (defun agent-repl--frontend-after-ensure-session (ws on-success on-failure &optional purpose)
-  "Asynchronously provide WS's live session id through exactly one continuation.
+  "Asynchronously establish WS, then call exactly one continuation.
+ON-SUCCESS takes no arguments: establishment is a fact about the
+WORKSPACE, and which session the daemon has bound to it is the daemon\='s
+to know.  Emacs routes everything by WS\='s workspace key.
+
 PURPOSE is `presentation' or `send'.  A presentation reopens an existing
 workspace before delivering it; a send dispatches directly because
 `submitPrompt' performs the daemon-side establishment itself."
@@ -469,8 +472,8 @@ workspace before delivering it; a send dispatches directly because
                               (if gated "awaited" "skipped"))
              (if gated
                  (agent-repl--frontend-after-open-workspace
-                  ws (lambda () (funcall on-success existing)) on-failure)
-               (funcall on-success existing)))
+                  ws on-success on-failure)
+               (funcall on-success)))
          (let ((dir (or (agent-repl--ws-get ws :project-dir) (agent-repl--resolve-current-git-root))))
            (agent-repl--frontend-after-create-session
             dir (agent-repl--ws-get ws :model) 'continue nil nil
@@ -481,7 +484,7 @@ workspace before delivering it; a send dispatches directly because
               (agent-repl--ws-put ws :reattach-failed nil)
               (agent-repl--ws-put ws :reattach-failures nil)
               (agent-repl--frontend-reattach-timer-start)
-              (funcall on-success id))
+              (funcall on-success))
             on-failure ws))))
        on-failure ws)
       :pending)))
@@ -913,10 +916,9 @@ the workspace is marked `:reattach-failed' and a warning surfaces."
     (agent-repl--ws-put ws :frontend-session-id nil)
     (agent-repl--frontend-after-ensure-session
      ws
-     (lambda (id)
-       (agent-repl--frontend-sync-webview ws id)
+     (lambda ()
        (agent-repl--ws-put ws :reattach-failures nil)
-       (agent-repl--log ws "reattach: ws=%s recovered as %s" ws id))
+       (agent-repl--log ws "reattach: ws=%s recovered" ws))
      #'failed)
     :pending))
 
@@ -944,11 +946,11 @@ workspaces that carried a session binding to rebind."
       (agent-repl--log nil
                        "reattach: explicit rebind recovery-owner=snapshot-hook bound-workspaces=%d"
                        n)
-      ;; The snapshot hook drives each workspace's daemon session and, via
-      ;; `agent-repl--frontend-sync-webview', remounts only those whose
-      ;; session id CHANGED.  A session that rehydrated under its old id is
-      ;; left untouched, so its webview would keep rendering the pre-bounce
-      ;; bundle.  Force a remount of EVERY open webview so a bounce reliably
+      ;; The snapshot hook drives each workspace's daemon session, but no
+      ;; webview is remounted for it: a webview addresses its workspace, so a
+      ;; bounce leaves every mounted URL naming the same thing and the pages
+      ;; keep rendering the pre-bounce BUNDLE.  Force a remount of EVERY open
+      ;; webview so a bounce reliably
       ;; reloads the served bundle across the board — a bounce is exactly
       ;; when a fresh build lands, and each remount replays history off the
       ;; live session, so nothing is lost.
@@ -1183,10 +1185,9 @@ the subsequent open attaches to the continued conversation."
 Mirrors `agent-repl--gui-adopt-session' but passes NO resume, so a BLANK
 conversation replaces whatever the normal ensure path would replay.
 Resets the reattach failure markers so the fresh binding reads as healthy.
-Does NOT sync the webview — callers that display do that.  The fresh
-session captures its own durable id through the usual hook path once it
-runs, so a later resume continues the fresh conversation rather than the
-discarded one."
+ON-SUCCESS takes no arguments.  The fresh session captures its own
+durable id through the usual hook path once it runs, so a later resume
+continues the fresh conversation rather than the discarded one."
   (unless (and (functionp on-success) (functionp on-failure))
     (error "agent-repl: force-fresh requires callable continuations"))
   (if (not (agent-repl--ensure-frontend-daemon))
@@ -1203,7 +1204,7 @@ discarded one."
          (agent-repl--ws-put ws :reattach-failures nil)
          (agent-repl--log ws "force-fresh-conversation: fresh session %s bound (cwd=%s)"
                           id dir)
-         (funcall on-success id))
+         (funcall on-success))
        on-failure ws)))
   :pending)
 
@@ -1236,17 +1237,15 @@ is gone — matching the already-dead server behavior (the retired HTTP
     (error "agent-repl: frontend send requires an explicit prompt origin"))
   (agent-repl--frontend-after-ensure-session
    ws
-   (lambda (id)
+   (lambda ()
      (let ((origin (agent-repl--ws-get ws :next-send-origin)))
-       ;; The ensure may have HEALED a dead binding into a fresh session.
-       (agent-repl--frontend-sync-webview ws id)
        (when origin (agent-repl--ws-put ws :next-send-origin nil))
-       (agent-repl--log ws "frontend send: session=%s len=%d origin=%s prompt-origin=%s (uds submitPrompt)"
-                        id (length text) origin prompt-origin)
+       (agent-repl--log ws "frontend send: len=%d origin=%s prompt-origin=%s (uds submitPrompt)"
+                        (length text) origin prompt-origin)
        (let ((req (agent-repl--uds-send-command
                    "submitPrompt" (list :text text :promptOrigin prompt-origin)
                    (agent-repl--frontend-ws-command-key ws))))
-         (agent-repl--log ws "frontend send: dispatched session=%s request-id=%s" id req)
+         (agent-repl--log ws "frontend send: dispatched request-id=%s" req)
          (funcall on-success req))))
    on-failure 'send)
   :pending)
