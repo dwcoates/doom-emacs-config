@@ -183,7 +183,7 @@ establishment, so a probe here would be a question already answered."
   (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
     ;; Act / Assert
     (should (string-match-p "composer=0"
-                            (agent-repl--frontend-webview-url "ws1" "s_1")))))
+                            (agent-repl--frontend-webview-url "ws1")))))
 
 (ert-deftest agent-repl-test-frontend-webview-url-carries-parent-ws ()
   "A recorded parent worktree lands in the URL as parent_ws."
@@ -191,7 +191,31 @@ establishment, so a probe here would be a question already answered."
       '(:project-dir "/w" :source-ws-dir "/repos/parent-tree/")
     ;; Act / Assert
     (should (string-match-p "parent_ws=parent-tree"
-                            (agent-repl--frontend-webview-url "ws1" "s_1")))))
+                            (agent-repl--frontend-webview-url "ws1")))))
+
+(ert-deftest agent-repl-test-frontend-webview-url-addresses-the-workspace ()
+  "The webview URL names WS's workspace, and carries no session at all.
+A session id in the address is what tied the view's lifetime to one
+session's: a rotation invalidated the URL and a reload attached to
+whatever session the address had recorded."
+  (let ((agent-repl-frontend-daemon-addr "127.0.0.1:9999"))
+    (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/repos/proj")
+      ;; Act
+      (let ((url (agent-repl--frontend-webview-url "ws1")))
+        ;; Assert
+        (should (string-prefix-p
+                 "http://127.0.0.1:9999/?workspace=%2Frepos%2Fproj" url))
+        (should-not (string-match-p "session" url))))))
+
+(ert-deftest agent-repl-test-frontend-webview-url-uses-the-command-wire-key ()
+  "The URL's workspace is the SAME key the daemon routes WS's commands by.
+Two keyings of one workspace would route a view and the commands sent
+from it to different places."
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/repos/proj")
+    ;; Act / Assert
+    (should (string-match-p
+             (regexp-quote (url-hexify-string (agent-repl--frontend-ws-command-key "ws1")))
+             (agent-repl--frontend-webview-url "ws1")))))
 
 (ert-deftest agent-repl-test-frontend-sync-webview-no-op-when-binding-matches ()
   "sync-webview does not touch a webview already bound to the session."
@@ -225,9 +249,12 @@ establishment, so a probe here would be a question already answered."
           (should-not (buffer-live-p old))
           (should (equal (agent-repl--ws-get "ws1" :frontend-buffer-session-id)
                          "s_fresh"))
-          ;; The factory pushes newest-first; the remount URL is the head.
-          (should (string-match-p "session=s_fresh"
-                                  (car agent-repl-test--urls))))))))
+          ;; The factory pushes newest-first; the remount URL is the head. It
+          ;; addresses the WORKSPACE, so the healed session is what the
+          ;; buffer binding records, not what the browser navigates to.
+          (should (string-match-p "workspace=%2Fw"
+                                  (car agent-repl-test--urls)))
+          (should-not (string-match-p "session" (car agent-repl-test--urls))))))))
 
 (ert-deftest agent-repl-test-frontend-sync-webview-no-op-without-live-buffer ()
   "sync-webview does nothing when no webview buffer exists (panel closed)."
@@ -1245,7 +1272,9 @@ exact failure seen live in the fresh instance."
       (should required))))
 
 (ert-deftest agent-repl-test-frontend-open-panel-wires-session-to-webview ()
-  "open-panel threads ensure-session's id into the webview URL and display."
+  "open-panel threads ensure-session's id into the webview binding and display.
+The URL it mounts addresses the WORKSPACE; the session id is the buffer
+binding that decides whether a later sync must remount."
   ;; Arrange
   (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
     (let ((displayed nil)
@@ -1260,7 +1289,7 @@ exact failure seen live in the fresh instance."
                  (lambda (_ws id url)
                    (should (equal id "s_42"))
                    ;; composer=0: Emacs owns input in the hybrid UI.
-                   (should (string-suffix-p "/?session=s_42&composer=0" url))
+                   (should (string-suffix-p "/?workspace=%2Fw&composer=0" url))
                    'fake-buffer))
                 ((symbol-function 'agent-repl--frontend-display-webview)
                  (lambda (_ws buf) (setq displayed buf))))

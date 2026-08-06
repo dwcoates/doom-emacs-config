@@ -3,9 +3,15 @@
  *
  * URL parameters:
  *   ?daemon=host:port   daemon address (default: current host)
- *   ?session=<id>       join an existing session (else one is created)
+ *   ?workspace=<dir>    render this workspace (absolute path, URL-encoded)
+ *   ?session=<id>       render this one session (else one is created)
  *   ?fake=1             create the session against the offline fake SDK
  *   ?parent_ws=<name>   parent workspace basename shown in the topbar
+ *
+ * `?workspace` and `?session` are the two page ADDRESSES; address.ts owns
+ * reading them and the scoped daemon socket each one opens. The URL is read
+ * only — nothing here ever writes an address back into it, so a page attaches
+ * to the same thing for every reload, bookmark, restored tab and remount.
  */
 import {
   TOPBAR_AGENT_ATTR,
@@ -15,6 +21,7 @@ import {
   topbarClickAction,
   topbarInfoHtml,
 } from "./topbar.js";
+import { addressLabel, pageAddress, scopedStreamUrl, type PageAddress } from "./address.js";
 import { AgentClock } from "./agent-clock.js";
 import { AGENTS_SPEC, sessionSubagents } from "./agents.js";
 import { TASKS_SPEC } from "./tasks.js";
@@ -137,11 +144,17 @@ async function boot(): Promise<void> {
   const httpBase = `${location.protocol === "https:" ? "https" : "http"}://${daemon}`;
   const wsBase = `${location.protocol === "https:" ? "wss" : "ws"}://${daemon}`;
 
-  // The session id to join. When ?session is unset it is created over the WS
-  // (CreateSessionCmd) once the command dispatcher exists — see below.
-  const joinParam = params.get("session");
-  // Mutable until an omitted ?session is created through the command plane.
-  let activeSessionId: string = joinParam ?? "";
+  // What this page renders (address.ts). A malformed address throws here,
+  // before anything connects, rather than surfacing as a failed handshake.
+  const address = pageAddress(params);
+
+  // The session the page's HTTP side-calls target (account, task tail, chess
+  // payloads, login). It is INTERNAL STATE, never an address: an unaddressed
+  // page creates it over the WS (CreateSessionCmd) once the command dispatcher
+  // exists, and a workspace-addressed page learns it from the SessionView plane
+  // the daemon pushes — the daemon rules on which session a workspace owns, and
+  // a rotation there re-reads through the same channel.
+  let activeSessionId: string = address.kind === "session" ? address.sessionId : "";
   let ws: WsClient;
 
   // Resume/rebind tracking, re-fed by the SessionView plane now that the
@@ -988,14 +1001,19 @@ async function boot(): Promise<void> {
   });
 
   let logConnectionGeneration = 0;
-  const makeClient = (sessionId: string): WsClient => {
+  // The live socket, opened against the page's address. A workspace-addressed
+  // connection has no session id of its own; `activeSessionId` is whatever the
+  // pushed plane has said so far, and it is the log attribution rather than the
+  // routing key.
+  const makeClient = (connectionAddress: PageAddress): WsClient => {
     logConnectionGeneration++;
     bindLogContext({
-      agent_repl_session_id: sessionId,
+      agent_repl_session_id: activeSessionId,
       connection_id: `${pageLogInstance}:${logConnectionGeneration}`,
+      ...(connectionAddress.kind === "workspace" ? { workspace: connectionAddress.workspace } : {}),
     });
     const client = new WsClient({
-      url: `${wsBase}/sessions/${sessionId}/stream`,
+      url: scopedStreamUrl(wsBase, connectionAddress),
       onMessage: (data) => {
         // The one path: decode the protojson `frontend.v1` frame, let the
         // command dispatcher correlate its CommandAcks + a createSession's
@@ -1052,6 +1070,21 @@ async function boot(): Promise<void> {
           else log("info", line, { operation: "webapp.main.user-turn-receipt", localOnly: true });
         }
         const result = store.ingest(effects);
+        // WHICH SESSION THE HTTP SIDE-CALLS TARGET, re-read from the pushed
+        // plane the store just took. A workspace-addressed connection carries
+        // no session id of its own, so the daemon's ruling on which session the
+        // workspace owns is the only source for it — and a session that rotates
+        // under a live view arrives through exactly this channel, which is why
+        // it is re-read on every ingest rather than pinned at connect.
+        if (store.state.sessionId !== "" && store.state.sessionId !== activeSessionId) {
+          clog(
+            "info",
+            `page session rebound ${activeSessionId || "none"} -> ${store.state.sessionId} ` +
+              `(address=${addressLabel(connectionAddress)})`,
+          );
+          activeSessionId = store.state.sessionId;
+          bindLogContext({ agent_repl_session_id: activeSessionId });
+        }
         // THE REVIVAL VERDICT, ruled on against the batch the store just took.
         // `revived` needs nothing here — renderChrome clears the pending line
         // off the cleared hibernation field, which is the same authority. What
@@ -1069,11 +1102,12 @@ async function boot(): Promise<void> {
         if (isSnapshot) {
           if (store.state.renderState === null || store.state.workspaceStateAtMs <= 0) {
             const err = new Error(
-              `session snapshot omitted a revisioned WorkspaceState session=${sessionId} ` +
+              `scoped snapshot omitted a revisioned WorkspaceState ` +
+                `address=${addressLabel(connectionAddress)} ` +
                 `state=${store.state.renderState ?? "none"} at_ms=${store.state.workspaceStateAtMs}`,
             );
             clog("error", err.message, {
-              session_id: sessionId,
+              session_id: activeSessionId,
               workspace: store.state.cwd,
               render_state: store.state.renderState ?? "none",
               revision_at_ms: store.state.workspaceStateAtMs,
@@ -1173,7 +1207,6 @@ async function boot(): Promise<void> {
         statusEl.textContent = label[freshness];
         statusEl.classList.toggle("ok", current);
       },
-      sessionExists: makeSessionExistsProbe(httpBase, sessionId),
       // The daemon-unreachable window (F4). It is the ONE fact the daemon
       // definitionally cannot report about itself, so it is one of the very
       // few things this end classifies for itself — and it now says WHICH
@@ -1185,17 +1218,32 @@ async function boot(): Promise<void> {
       onReachable: () => {
         if (store.addFailure(daemonReachableFailure(Date.now()))) frames.schedule();
       },
-      onGone: () => {
-        if (store.addFailure(sessionGoneFailure(sessionId))) frames.schedule();
-        statusEl.textContent = "session gone";
-        statusEl.classList.remove("ok");
-        // A vanished session is terminal for this page. Keep the failure
-        // visible and stop here rather than synthesizing a successor session
-        // or submitting any agent-authored recovery prompt.
-        spinnerEl.classList.add("alarm");
-        remediationEl.textContent = "session unavailable";
-        clog("error", `session ${sessionId} is gone; automatic recovery is disabled`);
-      },
+      // The session-existence probe and the terminal verdict it feeds belong to
+      // a SESSION-ADDRESSED page: its address names one session, so that
+      // session disappearing ends the page. A workspace-addressed page outlives
+      // the sessions its workspace runs — the daemon rules on which one the
+      // workspace owns and re-pushes the answer — so there is no such verdict
+      // for it to reach, and a socket that will not open keeps reporting
+      // through the unreachable card above.
+      ...(connectionAddress.kind === "session"
+        ? {
+            sessionExists: makeSessionExistsProbe(httpBase, connectionAddress.sessionId),
+            onGone: (): void => {
+              if (store.addFailure(sessionGoneFailure(connectionAddress.sessionId))) frames.schedule();
+              statusEl.textContent = "session gone";
+              statusEl.classList.remove("ok");
+              // A vanished session is terminal for this page. Keep the failure
+              // visible and stop here rather than synthesizing a successor
+              // session or submitting any agent-authored recovery prompt.
+              spinnerEl.classList.add("alarm");
+              remediationEl.textContent = "session unavailable";
+              clog(
+                "error",
+                `session ${connectionAddress.sessionId} is gone; automatic recovery is disabled`,
+              );
+            },
+          }
+        : {}),
     });
     return client;
   };
@@ -1290,13 +1338,19 @@ async function boot(): Promise<void> {
       bootWs.connect();
     });
 
-  if (activeSessionId === "") {
+  // The address the live socket opens against. An unaddressed page has to make
+  // something to render first; every other page already names what it renders.
+  //
+  // The created id is held as internal state and NEVER written back into the
+  // URL. A page that rewrote itself into a session address would turn its own
+  // reload, bookmark, restored tab and remount into an attach against whatever
+  // session that URL used to name.
+  let connectionAddress: PageAddress = address;
+  if (connectionAddress.kind === "unaddressed") {
     activeSessionId = await createSessionViaWs();
-    const url = new URL(location.href);
-    url.searchParams.set("session", activeSessionId);
-    history.replaceState(null, "", url.toString());
+    connectionAddress = { kind: "session", sessionId: activeSessionId };
   }
-  ws = makeClient(activeSessionId);
+  ws = makeClient(connectionAddress);
   ws.connect();
 
   if (composerEls !== null) {
