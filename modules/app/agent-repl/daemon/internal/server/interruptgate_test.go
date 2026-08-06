@@ -152,3 +152,105 @@ func TestATurnSourceErrorSurfaces(t *testing.T) {
 		t.Fatalf("Interrupt = %v, want the turn source's own error", got)
 	}
 }
+
+// --- the interrupt's queue half ---------------------------------------------
+
+// A delivered interrupt takes the workspace's WAITING merges off their queues,
+// and does it BEFORE the stop reaches the shim.
+func TestAnInterruptEvictsTheWorkspacesQueuedMerges(t *testing.T) {
+	// Arrange — a live turn (so the gate never asks) and two queued merges.
+	merges := &fakeMerges{evictCount: 2}
+	h, p, _ := newGatedHandlerWithMerges(t, true, fakeLiveTasks{}, merges)
+	var interruptsAtEviction int
+	merges.onEvict = func() { interruptsAtEviction = len(p.interrupts) }
+
+	// Act.
+	err := h.Interrupt(context.Background(), "/ws1", "r1", &frontendv1.InterruptCmd{})
+
+	// Assert — the queue was evicted for this workspace, and the shim came after.
+	if err != nil {
+		t.Fatalf("Interrupt() error = %v, want nil", err)
+	}
+	if len(merges.evicted) != 1 || merges.evicted[0] != "/ws1" {
+		t.Fatalf("evicted = %v, want [/ws1]", merges.evicted)
+	}
+	if interruptsAtEviction != 0 {
+		t.Fatalf("shim had %d interrupts at eviction time, want 0 — the queue half runs first", interruptsAtEviction)
+	}
+	if len(p.interrupts) != 1 {
+		t.Fatalf("interrupts = %v, want the stop delivered after the eviction", p.interrupts)
+	}
+}
+
+// A workspace with nothing queued is the ordinary case: the eviction reports
+// zero and the interrupt is exactly what it always was.
+func TestAnInterruptWithNothingQueuedIsUnchanged(t *testing.T) {
+	// Arrange.
+	merges := &fakeMerges{}
+	h, p, _ := newGatedHandlerWithMerges(t, true, fakeLiveTasks{}, merges)
+
+	// Act.
+	err := h.Interrupt(context.Background(), "/ws1", "r1", &frontendv1.InterruptCmd{})
+
+	// Assert.
+	if err != nil || len(p.interrupts) != 1 {
+		t.Fatalf("Interrupt = %v with interrupts %v, want a delivered stop", err, p.interrupts)
+	}
+}
+
+// A CHALLENGED interrupt evicts nothing, for the same reason it delivers
+// nothing: the user has not decided yet, and a merge that left the queue behind
+// a question they never answered cannot be put back.
+func TestAChallengedInterruptEvictsNothing(t *testing.T) {
+	// Arrange — no turn in flight, live subagents, so the gate challenges.
+	merges := &fakeMerges{evictCount: 1}
+	h, _, _ := newGatedHandlerWithMerges(t, false, fakeLiveTasks{count: 2}, merges)
+
+	// Act.
+	_ = h.Interrupt(context.Background(), "/ws1", "r1", &frontendv1.InterruptCmd{})
+
+	// Assert.
+	if len(merges.evicted) != 0 {
+		t.Fatalf("evicted = %v, want nothing evicted behind a challenge", merges.evicted)
+	}
+}
+
+// An eviction that FAILED surfaces on the ack, and the stop is delivered
+// anyway: a queue storage failure must not swallow the interrupt the user
+// asked for.
+func TestAnEvictionFailureSurfacesAndStillStopsTheShim(t *testing.T) {
+	// Arrange.
+	evictErr := errors.New("remove queue entry: permission denied")
+	merges := &fakeMerges{evictErr: evictErr}
+	h, p, _ := newGatedHandlerWithMerges(t, true, fakeLiveTasks{}, merges)
+
+	// Act.
+	err := h.Interrupt(context.Background(), "/ws1", "r1", &frontendv1.InterruptCmd{})
+
+	// Assert.
+	if err == nil || !errors.Is(err, evictErr) {
+		t.Fatalf("Interrupt() error = %v, want the eviction's own error", err)
+	}
+	if len(p.interrupts) != 1 {
+		t.Fatalf("interrupts = %v, want the stop delivered despite the failed eviction", p.interrupts)
+	}
+}
+
+// Both halves failing reports BOTH: a shim that refused the stop must not hide
+// the queue failure beside it.
+func TestAnInterruptReportsBothHalvesFailures(t *testing.T) {
+	// Arrange.
+	evictErr := errors.New("remove queue entry: permission denied")
+	shimErr := errors.New("no live session for workspace")
+	merges := &fakeMerges{evictErr: evictErr}
+	h, p, _ := newGatedHandlerWithMerges(t, true, fakeLiveTasks{}, merges)
+	p.err = shimErr
+
+	// Act.
+	err := h.Interrupt(context.Background(), "/ws1", "r1", &frontendv1.InterruptCmd{})
+
+	// Assert.
+	if !errors.Is(err, evictErr) || !errors.Is(err, shimErr) {
+		t.Fatalf("Interrupt() error = %v, want both the eviction and the shim failure", err)
+	}
+}

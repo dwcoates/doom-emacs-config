@@ -123,6 +123,9 @@ func (stubMerge) Resume(context.Context, merge.Request) error { return nil }
 func (stubMerge) Abandon(context.Context, string) (bool, error) {
 	return false, nil
 }
+func (stubMerge) Evict(context.Context, string) (int, error) {
+	return 0, nil
+}
 
 type stubLifecycle struct{}
 

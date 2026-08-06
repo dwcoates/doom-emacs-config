@@ -448,6 +448,7 @@ func (q failingQueue) RecordStatusWatermark(string, string, int64) error  { retu
 func (q failingQueue) PendingTerminal(string, Request) (TerminalStatus, bool, error) {
 	return TerminalStatus{}, false, nil
 }
+func (q failingQueue) EvictWaiting(string, string) ([]Request, error) { return nil, nil }
 
 // harness bundles a coordinator with the fakes behind it.
 type harness struct {
@@ -2308,4 +2309,128 @@ func TestASecondBootAfterAReplayedTerminalPublishesNothing(t *testing.T) {
 	if got := second.sink.transitions(); len(got) != 0 {
 		t.Fatalf("second boot published %+v, want nothing", got)
 	}
+}
+
+// --- eviction -----------------------------------------------------------
+
+// A waiting merge comes off the queue, says so under the run the user has been
+// watching, and never reaches the picker.
+func TestEvictTakesAWaitingMergeOffTheQueue(t *testing.T) {
+	// Arrange — a merge in flight and another queued behind it.
+	h := newHarness(t)
+	head, waiting, later := testRequest("a"), testRequest("b"), testRequest("c")
+	if _, err := h.coord.Enqueue(context.Background(), head); err != nil {
+		t.Fatalf("Enqueue(a): %v", err)
+	}
+	<-h.picker.merges
+	if _, err := h.coord.Enqueue(context.Background(), waiting); err != nil {
+		t.Fatalf("Enqueue(b): %v", err)
+	}
+	h.sink.awaitPhase(t, PhaseMergeQueued)
+
+	// Act.
+	evicted, err := h.coord.Evict(context.Background(), waiting.Workspace)
+
+	// Assert — one entry dropped, the head untouched.
+	if err != nil || evicted != 1 {
+		t.Fatalf("Evict() = (%d, %v), want (1, nil)", evicted, err)
+	}
+	if got := h.queue.Snapshot()[testRepoKey]; len(got) != 1 || got[0].Name != head.Name {
+		t.Fatalf("queue after eviction = %+v, want the head alone", got)
+	}
+	// The terminal word lands on the SAME run the admission published under.
+	runID := enqueuedRunID(t, h.sink.publishedStatuses(), 2)
+	failed := failedStatus(t, h.sink.publishedStatuses(), runID)
+	if failed.GetCause() != evictedCause {
+		t.Fatalf("failed cause = %q, want %q", failed.GetCause(), evictedCause)
+	}
+
+	// And the drain skips it: the next merge the picker sees is the one queued
+	// AFTER the eviction, never the evicted one.
+	if _, err := h.coord.Enqueue(context.Background(), later); err != nil {
+		t.Fatalf("Enqueue(c): %v", err)
+	}
+	h.sink.awaitPhase(t, PhaseMergeQueued)
+	h.picker.results <- pickResult{res: Result{Outcome: OutcomeMerged}}
+	if got := <-h.picker.merges; !sameRequest(got, later) {
+		t.Fatalf("next merge = %+v, want %+v", got, later)
+	}
+}
+
+// The merge ALREADY RUNNING is not evicted: it holds the shim lease and may be
+// mid-cherry-pick, so taking its entry would strand it.
+func TestEvictLeavesTheMergeInFlightAlone(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	req := testRequest("a")
+	if _, err := h.coord.Enqueue(context.Background(), req); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	<-h.picker.merges
+
+	// Act.
+	evicted, err := h.coord.Evict(context.Background(), req.Workspace)
+
+	// Assert.
+	if err != nil || evicted != 0 {
+		t.Fatalf("Evict() = (%d, %v), want (0, nil)", evicted, err)
+	}
+	if got := len(h.queue.Snapshot()[testRepoKey]); got != 1 {
+		t.Fatalf("queue depth = %d, want the in-flight merge still on it", got)
+	}
+}
+
+// A workspace with nothing queued is the ordinary case, not an error.
+func TestEvictWithNothingQueuedIsANoOp(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	evicted, err := h.coord.Evict(context.Background(), "/nowhere/ws")
+
+	// Assert.
+	if err != nil || evicted != 0 {
+		t.Fatalf("Evict() = (%d, %v), want (0, nil)", evicted, err)
+	}
+}
+
+// An unnamed workspace is a construction bug at the call site, refused rather
+// than swept across every repository on the queue.
+func TestEvictRefusesAnEmptyWorkspace(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	evicted, err := h.coord.Evict(context.Background(), "")
+
+	// Assert.
+	if err == nil || evicted != 0 {
+		t.Fatalf("Evict() = (%d, %v), want (0, error)", evicted, err)
+	}
+}
+
+// enqueuedRunID is the run id of the `enqueued` status published at position,
+// which is how a test names the run an admission created without reaching into
+// the coordinator for it.
+func enqueuedRunID(t *testing.T, statuses []*frontendv1.MergeStatus, position int32) string {
+	t.Helper()
+	for _, s := range statuses {
+		if arm := s.GetEnqueued(); arm != nil && arm.GetPosition() == position {
+			return s.GetRunId()
+		}
+	}
+	t.Fatalf("no enqueued status at position %d in %d published statuses", position, len(statuses))
+	return ""
+}
+
+// failedStatus is runID's terminal `failed` arm.
+func failedStatus(t *testing.T, statuses []*frontendv1.MergeStatus, runID string) *frontendv1.MergeStatusFailed {
+	t.Helper()
+	for _, s := range statuses {
+		if s.GetRunId() == runID && s.GetFailed() != nil {
+			return s.GetFailed()
+		}
+	}
+	t.Fatalf("no failed status for run %s in %d published statuses", runID, len(statuses))
+	return nil
 }

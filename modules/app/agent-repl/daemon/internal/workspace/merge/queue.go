@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -59,6 +60,22 @@ type DurableQueue interface {
 	// entry, which MUST be req. The bool is false for the ordinary entry, whose
 	// run has not reached a terminal at all.
 	PendingTerminal(repo string, req Request) (TerminalStatus, bool, error)
+
+	// EvictWaiting drops every entry on repo's queue for workspace that is NOT
+	// the head, and returns the requests it dropped in queue order.
+	//
+	// THE HEAD IS NEVER EVICTED, which is why the verb is "waiting" rather than
+	// "cancel". The head is the entry the repository's one drain goroutine has
+	// already been handed: it holds the shim lease and may be mid-cherry-pick,
+	// so dropping its record would leave a merge running with nothing left to
+	// Complete. Every entry behind it has been delivered to nobody, so removing
+	// it is a pure queue operation with no second party to race.
+	//
+	// A remove failure LEAVES THAT ENTRY EXACTLY WHERE IT WAS — memory follows
+	// disk here as everywhere else in this file — and travels back beside the
+	// entries that did go, so a caller says the terminal word for precisely the
+	// merges that really left the queue.
+	EvictWaiting(repo, workspace string) ([]Request, error)
 }
 
 // TerminalStatus is a run's TERMINAL word, recorded durably when publishing it
@@ -536,6 +553,62 @@ func (q *FileQueue) PendingTerminal(repo string, req Request) (TerminalStatus, b
 		return TerminalStatus{}, false, nil
 	}
 	return *head.terminal, true, nil
+}
+
+// EvictWaiting implements DurableQueue: it drops repo's non-head entries for
+// workspace and returns the requests it dropped.
+//
+// THE DURABLE FILE GOES FIRST, ENTRY BY ENTRY, exactly as Complete does it: an
+// entry that left memory but not disk would be replayed by the next boot as a
+// merge the user had already taken off the queue. So a remove failure keeps its
+// entry in the slice, is loud-logged, and is returned — that merge is still
+// queued and still runs when its turn comes, which is the honest outcome of an
+// eviction that did not happen.
+//
+// THE HEAD IS RETAINED AND SAID SO. It is not a failure and not a silent skip:
+// the head is the merge in flight, and a user who interrupted a workspace whose
+// merge is already cherry-picking needs the log to show that its entry stayed.
+func (q *FileQueue) EvictWaiting(repo, workspace string) ([]Request, error) {
+	if repo == "" {
+		return nil, fmt.Errorf("merge: queue EvictWaiting needs a repo key")
+	}
+	if workspace == "" {
+		return nil, fmt.Errorf("merge: queue EvictWaiting on repo %s needs a workspace", repo)
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if err := q.hydrateLocked(repo); err != nil {
+		return nil, err
+	}
+	rq := q.repos[repo]
+	var (
+		evicted []Request
+		kept    []*queueEntry
+		failed  error
+	)
+	for i, e := range rq.entries {
+		switch {
+		case e.req.Workspace != workspace:
+			kept = append(kept, e)
+		case i == 0:
+			q.logf("merge: queue evict RETAINING THE HEAD {repo=%s ws=%s id=%s run=%s} — the head is the merge in flight, and its drain owns the entry until the merge reaches a terminal outcome",
+				repo, workspace, e.id, e.req.runIdentity())
+			kept = append(kept, e)
+		default:
+			path := q.entryPath(repo, e.id)
+			if err := os.Remove(path); err != nil {
+				q.logf("merge: queue evict remove FAILED {repo=%s ws=%s id=%s path=%s}: %v — the entry is KEPT, so the merge still runs when its turn comes rather than leaving the queue in memory only",
+					repo, workspace, e.id, path, err)
+				failed = errors.Join(failed, fmt.Errorf("merge: remove queue entry %s: %w", path, err))
+				kept = append(kept, e)
+				continue
+			}
+			evicted = append(evicted, e.req)
+			q.logf("merge: queue EVICTED {repo=%s ws=%s id=%s run=%s index=%d}", repo, workspace, e.id, e.req.runIdentity(), i+1)
+		}
+	}
+	rq.entries = kept
+	return evicted, failed
 }
 
 // headForLocked resolves repo's head entry and asserts it IS req, which is the
