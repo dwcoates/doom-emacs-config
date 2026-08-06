@@ -159,6 +159,17 @@
 
 I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y broken?' do not infer that I want a fix; just answer.
 
+### Style no-no's
+- **No invented compound adjectives.** 
+  - E.g., no "under-signposted", "well-factored", "under-tested" as a coined label
+  - Instead, say what happened: "the Button path isn't documented anywhere, so nobody finds it."
+- **No abstraction-as-noun where a plain noun exists.** 
+  - "polarity" → "which one is the default"
+  - "the population" → "the call sites"
+  - "surface area" → "how much of it is public".
+- **No register-borrowing.** 
+  - Consultant-speak, conference-talk phrasing, and dev-influencer register all read as showing off and cost comprehension. If a phrase would sound at home in a LinkedIn post, replace it.
+
 ### Markdown inline code for every code-like reference
 
 - Every code-like reference in the response MUST be wrapped in markdown inline code (a single backtick on each side).
