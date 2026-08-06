@@ -183,7 +183,27 @@ func bootFatalLine(message string) []byte {
 
 func daemonFatal(logger *dlog.Logger, format string, args ...any) {
 	logger.Log(format, args...)
+	logger.With("operation", "exit", "level", "error").Log("claude-repld exiting: fatal error above")
 	os.Exit(1)
+}
+
+// logDaemonProcessExit is the daemon's deferred exit trace for the graceful
+// shutdown path (a SIGTERM/SIGINT or a shutdown FrontendCommand): whatever
+// causes main to return — completed teardown, or a recovered panic — is the
+// last record this process writes, so a truncated log still names why the
+// daemon is gone. daemonFatal (above) carries the equivalent trace for every
+// non-graceful exit path, since those terminate via os.Exit before this
+// defer would ever run.
+//
+// It re-panics after logging rather than recovering: a panic here is an
+// invariant violation, and this trace exists to narrate the crash, not to
+// turn it into a normal exit.
+func logDaemonProcessExit(logger *dlog.Logger) {
+	if r := recover(); r != nil {
+		logger.With("operation", "exit", "level", "error").Log("claude-repld exiting: panic: %v", r)
+		panic(r)
+	}
+	logger.With("operation", "exit").Log("claude-repld exiting cleanly")
 }
 
 // udsShimLogger keeps daemon-owned errors in daemon.log while direct shim JSON
@@ -240,6 +260,7 @@ func main() {
 	cappedLog := replog.NewCappedWriter(logRoot, logFile, replog.CapBytes)
 	defer cappedLog.Close()
 	daemonLog := dlog.New(cappedLog, os.Stderr, os.Getenv("AGENT_REPL_LOG_VERBOSE") != "")
+	defer logDaemonProcessExit(daemonLog)
 	targets := dlog.NewTargetManager()
 	defer func() {
 		if err := targets.Close(); err != nil {
@@ -991,21 +1012,30 @@ func main() {
 			daemonLog.With("operation", "shutdown", "source", "frontend", "stop_shims", req.stopShims, "cause", req.cause.String()).Log("claude-repld: shutdown command received")
 		}
 		ready.ready.Store(false)
+		daemonLog.With("operation", "shutdown-stop-workspace-creation").Log("claude-repld: shutdown step: stopping workspace creation workers")
 		cancelWorkspaceCreate()
+		daemonLog.With("operation", "shutdown-all-sessions").Log("claude-repld: shutdown step: stopping session work (idle sweeper drain, shim stop decisions)")
 		srv.ShutdownAll(req.stopShims, req.cause)
 		// Login terminals are children of THIS process, so a daemon that
 		// exits without killing them strands an orphaned claude TUI on a pty
 		// nobody is reading.
+		daemonLog.With("operation", "shutdown-close-logins").Log("claude-repld: shutdown step: closing login terminals")
 		logins.CloseAll()
 		// Belt-and-suspenders: the registry is write-through crash-safe
 		// (SIGKILL loses nothing), so this flush is an optimization that
 		// re-asserts the on-disk state after the drain, never the
 		// mechanism durability depends on.
+		daemonLog.With("operation", "shutdown-flush-registry").Log("claude-repld: shutdown step: flushing session registry")
 		if err := sessionRegistry.Flush(); err != nil {
-			daemonLog.With("operation", "shutdown-flush-registry").Log("claude-repld: registry flush on shutdown: %v", err)
+			daemonLog.With("operation", "shutdown-flush-registry", "level", "error").Log("claude-repld: registry flush on shutdown: %v", err)
+		} else {
+			daemonLog.With("operation", "shutdown-flush-registry").Log("claude-repld: session registry flushed")
 		}
+		daemonLog.With("operation", "shutdown-close-http").Log("claude-repld: shutdown step: closing HTTP server")
 		if err := httpServer.Close(); err != nil {
-			daemonLog.With("operation", "shutdown-close-http").Log("claude-repld: http close: %v", err)
+			daemonLog.With("operation", "shutdown-close-http", "level", "error").Log("claude-repld: http close: %v", err)
+		} else {
+			daemonLog.With("operation", "shutdown-close-http").Log("claude-repld: HTTP server closed")
 		}
 	}()
 
