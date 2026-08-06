@@ -1914,6 +1914,14 @@ func (m *Manager) stopSessionController(workspace, sessionID string, cause StopC
 		// the shim being stopped. A claim naming the requested session is still
 		// closed; anything else is left for the live session controller to report.
 		//
+		// NO RETAINED-RESULT RELEASE EITHER, and for the same reason. The only
+		// consumer in reach belongs to the LIVE session, whose held results
+		// belong to turns that session is still running and will still close;
+		// publishing them from a stop aimed at a different record would answer
+		// a live turn on behalf of a shim that is not being stopped. The
+		// requested record's own consumer, if it ever had one, went with the
+		// controller the replacement displaced.
+		//
 		// The caller's cause is REFINED rather than replaced: the record names
 		// both what was asked for (a delete, a supersede) and what the daemon
 		// found when it got here (a record a replacement had already taken).
@@ -1927,8 +1935,7 @@ func (m *Manager) stopSessionController(workspace, sessionID string, cause StopC
 	// a record down even when it is mid-turn, so the terminal stop must retire
 	// the turn that can no longer emit its own completion.
 	if ok {
-		m.drainLiveTurnForStop(workspace, sessionID, cause.path(), d.client)
-		d.cancel()
+		m.drainAndCancelSessionController(workspace, d, cause)
 	}
 	m.logf("session-controller: exact session stop ws=%q session=%s path=%s session_controller_present=%v (SIGTERM child shim)",
 		workspace, sessionID, cause.path(), ok)
@@ -1984,8 +1991,12 @@ func (m *Manager) hibernate(workspace, wantSession string, cause StopCause) erro
 	// proves no turn is active and prevents a new one from beginning throughout
 	// this stop sequence; the drain therefore reconciles only already-settled
 	// transport bookkeeping.
-	m.drainLiveTurnForStop(workspace, d.sessionID, cause.path(), d.client)
-	d.cancel() // stop consuming; the shimclient Run ends
+	//
+	// A settled turn can still be one whose result this daemon holds — a hold
+	// outlives the answer's arrival and is discharged by the turn's end
+	// boundary, which a hibernation is precisely what prevents from ever
+	// arriving — so the release rides the same prologue (turnstop.go).
+	m.drainAndCancelSessionController(workspace, d, cause)
 	m.logf("session-controller: hibernating ws=%q session=%s (SIGTERM child shim)", workspace, d.sessionID)
 	if err := m.stopShimSettlingTurn(workspace, d.sessionID, cause, true); err != nil {
 		return err
@@ -2329,7 +2340,11 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 			delete(m.byWS, workspace)
 		}
 		m.mu.Unlock()
-		cancel()
+		// The shared prologue, because this abort owns the whole teardown: no
+		// exit tail runs for it (the Run goroutine below is not launched yet),
+		// so this is the only place its shim can be interrupted and the only
+		// place its consumer's held results can still be published.
+		m.drainAndCancelSessionController(workspace, d, StopCauseBringUpFailed())
 		stopErr := m.stopShimSettlingTurn(workspace, sessionID, StopCauseBringUpFailed(), true)
 		if stopErr != nil {
 			return nil, false, fmt.Errorf("%w; stopping rejected generation: %v", err, stopErr)
@@ -2404,6 +2419,22 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 			m.logf("session-controller: session %s ended with %d queued prompt(s) undelivered ws=%q",
 				sessionID, len(dropped), workspace)
 		}
+		// THE LAST CHANCE ANY HELD RESULT GETS. Run has returned, so no further
+		// event can reach this consumer and no `TurnEnded` can discharge a hold
+		// it is still carrying. Unconditional, because the reason Run ended
+		// changes nothing about a turn whose answer is already in hand, and it
+		// covers two distinct arrivals:
+		//
+		//   - a shim that DIED on its own went through no teardown prologue at
+		//     all, so this is the only edge its held results ever get; and
+		//   - a teardown's own interrupt is waited on to the ACK, not to the
+		//     terminal event that ack causes, so a result landing between the
+		//     prologue's release and the cancel is held with nothing left to
+		//     free it. This frees it.
+		//
+		// What no edge can reach is a result the shim never managed to send
+		// before the stop, because it is not evidence this daemon ever held.
+		m.releaseHeldTerminalResults(d, StopCauseControllerExit())
 		if !migrating {
 			m.publish(sessionID, view, nil)
 		}
