@@ -250,7 +250,7 @@ merged dot instead of the inactive question mark."
                                  :merge-completed-at 100.0)
     (agent-repl-test--sidebar-with-persps '("other")
       (agent-repl-test--sidebar-with-link
-        (agent-repl--sidebar-push)
+        (agent-repl-test--sidebar-publish-now)
         (let* ((wire (agent-repl-test--sidebar-wire))
                (row (aref (alist-get 'rows (alist-get 'recentlyMerged wire)) 0)))
           (should (assq 'merged row))
