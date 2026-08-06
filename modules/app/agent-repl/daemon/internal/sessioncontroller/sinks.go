@@ -1107,7 +1107,9 @@ func (c *consumer) Consume(ev *corev1.Event) error {
 	observation, utilizationErr := tokenUtilizationObservationFromEvent(ev, c.sessionID, c.accounting.isKnownVendorSession)
 	if utilizationErr != nil {
 		c.logRejectedTokenUtilization(ev, utilizationErr)
-		return fmt.Errorf("session-controller: translate token utilization before frame mutation: %w", utilizationErr)
+		c.logf("session-controller: token utilization translation DEGRADED session=%s seq=%d kind=%s — invalid accounting was rejected before accounting mutation, but conversation delivery continues: %v",
+			c.sessionID, ev.GetSeq(), stateKind(ev), utilizationErr)
+		observation = nil
 	}
 	var utilization *frontendv1.TokenUtilization
 	historicalInserted := false
@@ -1584,8 +1586,8 @@ func (c *consumer) pushConversation(ev *corev1.Event, live bool) {
 	observation, err := tokenUtilizationObservationFromEvent(ev, c.sessionID, c.accounting.isKnownVendorSession)
 	if err != nil {
 		c.logRejectedTokenUtilization(ev, err)
-		c.logf("session-controller: historical token utilization translate REJECTED session=%s seq=%d: %v", c.sessionID, ev.GetSeq(), err)
-		return
+		c.logf("session-controller: conversation token utilization DEGRADED session=%s seq=%d — invalid accounting attachment was rejected, but conversation translation continues: %v", c.sessionID, ev.GetSeq(), err)
+		observation = nil
 	}
 	var historicalUsage *frontendv1.TokenUtilization
 	if observation != nil && observation.historical {
