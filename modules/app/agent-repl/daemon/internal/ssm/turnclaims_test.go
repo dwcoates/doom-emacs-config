@@ -913,3 +913,93 @@ func TestClaimlessEndWithNoBoundQueryStaysFatal(t *testing.T) {
 		t.Fatalf("claimless end with no bound query = %v, want the hard rejection", err)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// THE CLAIMANT OUTLIVES ITS CLAIM. A workspace's daemon session id (claimant)
+// is re-minted on every CreateSession — hibernate, revive, and reopen all
+// mint a fresh one for the SAME underlying vendor conversation — but
+// turn_lifecycle_claim rows stay keyed to whichever claimant opened them and
+// are never rebound. The live incident: workspace slack-ceac-tech-xfq's turn
+// "daemon-prompt-1-8550144961a9" opened under claimant s_cdc521e7a5647643,
+// its real TurnEnded (seq=171) arrived and was never durably closed, the
+// workspace hibernated and later revived under a brand-new claimant, and
+// every subsequent bring-up replayed that same TurnEnded under the NEW
+// claimant — finding zero rows under (workspace, new-claimant, turn_id) and
+// rejecting "has no durable active claim" forever, permanently denying the
+// workspace.
+// ---------------------------------------------------------------------------
+
+// TestTurnEndForAPriorGenerationClaimantIsAdmitted is the GUARANTEE: a
+// TurnEnded whose OWN claimant generation holds nothing for this turn id is
+// resolved against the workspace's claim under a RETIRED claimant, once the
+// event's own vendor session proves it is the same durable boundary.
+func TestTurnEndForAPriorGenerationClaimantIsAdmitted(t *testing.T) {
+	// Arrange — the claim opens under a RETIRED claimant generation.
+	m, cl, _ := openTest(t, fakeResolver{"vend1": "ws"})
+	claimTurn(t, m, "ws", "s-old", "vend1", "turn-x", 1)
+
+	end := turnClaimEvent(false, 5, "turn-x")
+	end.SessionId = "vend1"
+
+	// Act — a NEW claimant generation (revival after hibernation) replays the
+	// turn's own end.
+	_, _, replayed, err := m.ResolveTurnLifecycle("ws", "s-new", "", end)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ResolveTurnLifecycle = %v, want the prior generation's claim resolved", err)
+	}
+	if replayed {
+		t.Fatal("first delivery of the real end reported as replayed")
+	}
+	oldActive, err := m.ActiveTurnIDs("ws", "s-old")
+	if err != nil {
+		t.Fatalf("ActiveTurnIDs(s-old): %v", err)
+	}
+	if len(oldActive) != 0 {
+		t.Fatalf("retired claimant's active turns = %v, want the claim closed", oldActive)
+	}
+	if !cl.contains("CROSS-GENERATION CLAIM MATCH") {
+		t.Fatal("cross-generation admission was not logged loudly")
+	}
+}
+
+// TestTurnEndForAPriorGenerationClaimantStaysFatalOnVendorSessionConflict is
+// the VIOLATION: widening the search past the caller's own claimant is not a
+// blanket amnesty. A turn id that resolves to a DIFFERENT vendor session than
+// the one this end claims is a genuine contradiction and stays rejected.
+func TestTurnEndForAPriorGenerationClaimantStaysFatalOnVendorSessionConflict(t *testing.T) {
+	// Arrange — claimed under vend1, by a retired claimant.
+	m, _, _ := openTest(t, fakeResolver{"vend1": "ws", "vend2": "ws"})
+	claimTurn(t, m, "ws", "s-old", "vend1", "turn-x", 1)
+
+	end := turnClaimEvent(false, 5, "turn-x")
+	end.SessionId = "vend2"
+
+	// Act — a different vendor session, under a new claimant, contradicts it.
+	_, _, _, err := m.ResolveTurnLifecycle("ws", "s-new", "", end)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "belongs to event_session") {
+		t.Fatalf("ResolveTurnLifecycle err = %v, want the vendor session conflict rejected", err)
+	}
+}
+
+// TestTurnEndForAnUnknownTurnStaysFatalAcrossEveryClaimant is the VIOLATION's
+// other edge: a turn id no claimant in the workspace ever held is rejected
+// even after the cross-generation widening, exactly as it was before.
+func TestTurnEndForAnUnknownTurnStaysFatalAcrossEveryClaimant(t *testing.T) {
+	// Arrange — nothing has ever claimed this turn id, under any claimant.
+	m, _, _ := openTest(t, fakeResolver{"vend1": "ws"})
+
+	end := turnClaimEvent(false, 5, "turn-never-claimed")
+	end.SessionId = "vend1"
+
+	// Act.
+	_, _, _, err := m.ResolveTurnLifecycle("ws", "s-new", "", end)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "no durable active claim") {
+		t.Fatalf("ResolveTurnLifecycle err = %v, want the unknown turn rejected", err)
+	}
+}
