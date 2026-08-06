@@ -227,6 +227,42 @@ type fakeClient struct {
 	// setModelSelected it is the shim's REJECTION, which carries the live
 	// selection alongside the refusal.
 	setModelErr error
+	// modelQueries counts the live-model read-backs the daemon asked for, so a
+	// test can prove the bare `/model` is resolved AT ITS OWN TURN BOUNDARY
+	// rather than on the schedule of the user's next prompt.
+	modelQueries int
+	// queriedModel is the live selection the fake shim reports back. Empty
+	// means the fake answers with the same default a real shim would have
+	// observed.
+	queriedModel string
+	// queryModelErr, when non-nil, is a shim that CANNOT answer the read. It
+	// must surface as a failure rather than leaving the record holding a model
+	// nobody verified.
+	queryModelErr error
+}
+
+// QuerySelectedModel answers which model the fake session is running, and
+// records that it was asked.
+func (c *fakeClient) QuerySelectedModel(_ context.Context) (string, error) {
+	c.mu.Lock()
+	c.modelQueries++
+	selected, err := c.queriedModel, c.queryModelErr
+	c.mu.Unlock()
+	notifyTestActivity()
+	if err != nil {
+		return "", err
+	}
+	if selected == "" {
+		selected = "claude-sonnet-5"
+	}
+	return selected, nil
+}
+
+// modelQueryCount is how many live-model read-backs the daemon asked for.
+func (c *fakeClient) modelQueryCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.modelQueries
 }
 
 type fakeFileDiagnosticPersister struct{}

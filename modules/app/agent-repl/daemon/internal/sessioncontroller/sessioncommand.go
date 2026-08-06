@@ -133,7 +133,17 @@ func sessionCommandItem(requestID string, command frontendv1.SessionCommand, tsM
 // receipt that would otherwise stand in for it was deliberately not pushed —
 // so losing it on a reconnect would leave the feed with no account of why the
 // session's model changed.
-func (c *consumer) pushSessionCommand(requestID string, command frontendv1.SessionCommand) {
+//
+// outcome is what the daemon RESOLVED the command to, for the log only. It is
+// empty for every command that resolves to nothing, and it never reaches the
+// item: the item has no field to put it in, which is what keeps the argument
+// the user typed off every frontend surface.
+//
+// `/model` fills it. An operator reading "session command SESSION_COMMAND_MODEL
+// invoked" could not tell what the session was switched TO, or that a switch
+// was the reason the picker disagreed with the session — the one line about the
+// command named no model at all.
+func (c *consumer) pushSessionCommand(requestID string, command frontendv1.SessionCommand, outcome string) {
 	item := sessionCommandItem(requestID, command, c.now())
 	c.mu.Lock()
 	if c.cmdItems == nil {
@@ -144,8 +154,8 @@ func (c *consumer) pushSessionCommand(requestID string, command frontendv1.Sessi
 	}
 	c.cmdItems[item.GetUuid()] = item
 	c.mu.Unlock()
-	c.logf("session-controller: session command %s invoked ws=%q session=%s request_id=%s — pushed as a SessionCommandItem, NOT as a prompt bubble (a session command is not a prompt, and the item carries no prompt text)",
-		command.String(), c.workspace, c.sessionID, requestID)
+	c.logf("session-controller: session command %s invoked ws=%q session=%s request_id=%s%s — pushed as a SessionCommandItem, NOT as a prompt bubble (a session command is not a prompt, and the item carries no prompt text)",
+		command.String(), c.workspace, c.sessionID, requestID, outcome)
 	c.pushLocalItem(item)
 }
 
