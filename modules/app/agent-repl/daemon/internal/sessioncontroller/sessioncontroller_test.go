@@ -338,6 +338,7 @@ func (c *fakeClient) Interrupt(_ context.Context, originRequestID string) (corev
 	}
 	return outcome, nil
 }
+
 // SetModel records the deliberate model requests the daemon made and answers
 // with the model the fake shim "selected".
 //
