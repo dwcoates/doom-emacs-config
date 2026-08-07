@@ -74,7 +74,7 @@ func (cap *capture) toStruct() *structpb.Struct {
 	if err != nil {
 		// A non-representable extras value should never happen (the inputs came
 		// straight from encoding/json), but never drop it silently.
-		cap.c.log.With(logging.Context{Operation: "build-extras"}).Log("failed to build extras struct: %v", err)
+		cap.c.log.With(logging.Context{Operation: "build-extras", Level: "error"}).Log("failed to build extras struct; every captured unknown field for this record is discarded: %v", err)
 		return nil
 	}
 	return s
@@ -781,7 +781,9 @@ func (c *Converter) toolUseResult(m protoreflect.Message, v any, cap *capture) {
 	if arm == "" {
 		// Unclassifiable object: preserve verbatim into the unclassified Struct
 		// arm and loud-log (capture, never silent classification).
-		c.log.With(logging.Context{Operation: "classify-tool-use-result"}).Log("unclassified toolUseResult object keys=%v", sortedKeys(obj))
+		// Preserved but unmodeled: a schema gap the contract requires surfaced
+		// loudly, not a routine observation.
+		c.log.With(logging.Context{Operation: "classify-tool-use-result", Level: "warn"}).Log("unclassified toolUseResult object keys=%v", sortedKeys(obj))
 		s, err := structpb.NewStruct(obj)
 		if err != nil {
 			cap.add("toolUseResult", obj)

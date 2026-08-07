@@ -98,7 +98,10 @@ func (s *sidecar) dial() {
 	if err := s.establish(); err != nil {
 		s.dialFailures++
 		s.backoff = nextBackoff(s.backoff)
-		s.log.With(logging.Context{Operation: "dial"}).Log("dial attempt %d failed, retrying in %s while reading no files: %v", s.dialFailures, s.backoff, err)
+		// "Reading no files" is the whole file plane stopped: for the length
+		// of this backoff nothing on disk reaches the store, so the record
+		// belongs at the severity an ingestion outage carries.
+		s.log.With(logging.Context{Operation: "dial", Level: "warn"}).Log("dial attempt %d failed, retrying in %s while reading no files: %v", s.dialFailures, s.backoff, err)
 		s.armDial(s.backoff)
 		return
 	}
@@ -170,7 +173,9 @@ func (s *sidecar) linkLost(operation string) {
 	// The caller owns the causal error with the session or request context it
 	// alone knows. This record owns only the link-state transition so the same
 	// error is not copied into both narratives.
-	s.log.With(logging.Context{Operation: "link-lost"}).Log("store link lost after operation=%s; reading no files until it returns", operation)
+	// The record that OPENS the degradation window: every tail stops here and
+	// the file plane produces nothing until the link returns.
+	s.log.With(logging.Context{Operation: "link-lost", Level: "warn"}).Log("store link lost after operation=%s; reading no files until it returns", operation)
 	s.armDial(0)
 }
 

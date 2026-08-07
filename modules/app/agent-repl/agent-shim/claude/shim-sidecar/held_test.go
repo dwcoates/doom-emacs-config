@@ -44,6 +44,31 @@ func TestHeldLifecycleTerminatesHistoricalSpoolDespiteAwaitingOwner(t *testing.T
 	}
 }
 
+func TestHeldLifecycleTerminalSpoolWarnsOutsideTheVerboseGate(t *testing.T) {
+	// Arrange — TERMINAL is final: the spool is never tailed again, so its
+	// bytes never reach the store and the record must persist unconditionally.
+	now := time.UnixMilli(1_000_000)
+	target := heldTarget("b-old", now.Add(-UnownedSpoolWindow-time.Millisecond))
+	l, records := heldLifecycle(t)
+	// Act
+	if _, err := l.Observe(target, unresolvedOwner(target), heldEvidence(target.ModTime, false), now); err != nil {
+		t.Fatal(err)
+	}
+	// Assert
+	var terminal []HeldLogRecord
+	for _, record := range *records {
+		if record.State == HeldStateTerminal {
+			terminal = append(terminal, record)
+		}
+	}
+	if len(terminal) != 1 {
+		t.Fatalf("terminal records = %d, want 1", len(terminal))
+	}
+	if terminal[0].Level != "warn" || terminal[0].Verbose {
+		t.Fatalf("terminal record level = %q verbose = %v, want warn and non-verbose", terminal[0].Level, terminal[0].Verbose)
+	}
+}
+
 func TestHeldLifecycleRetriesUntilLateAuthoritativeOwnerArrives(t *testing.T) {
 	now := time.UnixMilli(1_000_000)
 	target := heldTarget("b-late", now)
