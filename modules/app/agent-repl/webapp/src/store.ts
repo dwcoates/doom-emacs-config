@@ -797,6 +797,26 @@ export class ConversationStore {
   progress: ProgressInput | null = null;
 
   /**
+   * IDENTITY AUTHORITY. True once a `WorkspaceState` has named this
+   * workspace's owning session, which is the daemon's session-state machine
+   * ruling on WHICH agent-repl session owns the workspace right now.
+   *
+   * `SessionView` is a PER-SESSION catalog entry and legitimately describes
+   * retired sessions, so under last-writer-wins a dead session's terminal view
+   * could rebind `state.sessionId` behind a live `WorkspaceState`. Every
+   * outbound resync and client-log persist then carried a stale session with
+   * the current controller generation, which the daemon refuses
+   * (`rejection_cause=identity_mismatch`), deadlocking the view on a permanent
+   * "session identity is stale" banner.
+   *
+   * So: once this flag is set, ONLY `WorkspaceState` may write
+   * `state.sessionId`. A `SessionView` may corroborate it, never change it.
+   * Before it is set, a `SessionView` may still seed a provisional identity —
+   * that is the absence of an authoritative ruling, not a competing one.
+   */
+  private sessionIdAuthoritative = false;
+
+  /**
    * Diagnostic sink and clock. LOG surfaces ingestion anomalies (a typing
    * delta with nowhere to land); NOW stamps a turn's start (the effect carries
    * no timestamp). Both injected so the store stays transport- and clock-
@@ -819,6 +839,7 @@ export class ConversationStore {
     this.state = initialState();
     this.taskRoster = [];
     this.progress = null;
+    this.sessionIdAuthoritative = false;
   }
 
   /**
@@ -1054,7 +1075,13 @@ export class ConversationStore {
     const previousConnectivity = s.sessionConnectivity;
     const previousStatus = s.sessionStatus;
     const previousActive = s.turnInFlight;
-    if (ws.sessionId !== "") s.sessionId = ws.sessionId;
+    // THE sole writer of the workspace's live session identity (see
+    // `sessionIdAuthoritative`). A rotation to a new owning session is a
+    // WorkspaceState revision, so it lands here and nowhere else.
+    if (ws.sessionId !== "") {
+      s.sessionId = ws.sessionId;
+      this.sessionIdAuthoritative = true;
+    }
     // THE workspace's phase, kept so the footer reads the same authority the
     // tab bar does.
     s.renderState = ws.state;
@@ -1100,6 +1127,11 @@ export class ConversationStore {
    *
    * The view's in-progress windows (including `compacting`) are read straight
    * off the retained `ProgressView` by the footer — the store keeps no copy.
+   *
+   * `ProgressView.sessionId` is CORRELATION ONLY: it says which session the
+   * progress describes, and is logged as such. It never writes
+   * `state.sessionId` — WorkspaceState owns that (see
+   * `sessionIdAuthoritative`).
    */
   private applyProgress(p: ProgressInput): boolean {
     const previousInterrupt = this.progress?.interrupt?.outcome ?? null;
@@ -1122,7 +1154,24 @@ export class ConversationStore {
 
   private applySessionView(sv: SessionViewInput): boolean {
     const s = this.state;
-    if (sv.sessionId !== "") s.sessionId = sv.sessionId;
+    // IDENTITY IS WORKSPACESTATE'S, NOT THIS FRAME'S. A SessionView is a
+    // per-session catalog entry — the snapshot carries retired and superseded
+    // sessions alongside the live one — so it may only SEED an identity no
+    // WorkspaceState has ruled on yet, and may never rebind one that has been
+    // ruled on. A disagreement is a dead session's view arriving behind the
+    // live workspace ruling; it is reported, not adopted.
+    if (sv.sessionId !== "") {
+      if (!this.sessionIdAuthoritative) {
+        s.sessionId = sv.sessionId;
+      } else if (sv.sessionId !== s.sessionId) {
+        this.log(
+          "warn",
+          `session view identity rejected workspace=${sv.workspace} ` +
+            `view_session=${sv.sessionId} workspace_session=${s.sessionId || "none"} ` +
+            `reason=workspace_state_owns_identity`,
+        );
+      }
+    }
     // Empty is an authoritative "no model override" state, not a missing
     // field. Retaining a prior selection here would make the browser lie
     // after a session rebind or daemon-side clear.

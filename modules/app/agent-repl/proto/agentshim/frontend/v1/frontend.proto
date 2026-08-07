@@ -280,7 +280,11 @@ message FrontendFrame {
   reserved "degraded_notice";
   oneof frame {
     StateSnapshot snapshot = 1;
+    // THE authority on which session owns a workspace, whether it arrives on
+    // its own or inside `snapshot`.
     WorkspaceState workspace_state = 2;
+    // A catalog entry for ONE session, live or retired. Never a workspace's
+    // live identity (see SessionView).
     SessionView session_view = 3;
     ConversationDelta conversation_delta = 4;
     TypingDelta typing_delta = 5;
@@ -345,8 +349,19 @@ message SessionHealthView {
 
 // THE resolved per-workspace state, plus the inputs snapshot that produced
 // it (for debuggability: a frontend can show WHY a state was resolved).
+//
+// IDENTITY AUTHORITY: this message is the SOLE authority for which session
+// owns a workspace. `session_id` below is the daemon session-state machine's
+// ruling, revisioned like every other field here, and a rotation to a new
+// owning session arrives as a new revision of this message. No consumer may
+// take a workspace's live session identity from any other frame.
 message WorkspaceState {
   string workspace = 1;
+  // THE workspace's owning session, and the only field on this protocol that
+  // may bind it. A consumer adopts this value and nothing else as "which
+  // session am I talking to for this workspace"; per-session frames
+  // (SessionView, ProgressView, QueueView, …) name a session for CORRELATION
+  // only and may corroborate this value but never replace it.
   string session_id = 2;
   // Primary UX projection resolved by the daemon. This is retained for merge
   // and context-cut presentation; it is not the authority for connectivity or
@@ -504,6 +519,21 @@ message MergeStatusFailed {
   string failed_json = 6;
 }
 
+// A PER-SESSION CATALOG ENTRY, not a statement about who owns a workspace.
+//
+// This message is published for retired, superseded, terminal and hibernated
+// sessions exactly as it is for the live one — `terminal` and `death` below
+// exist precisely so a dead session still has a view. A connect snapshot
+// therefore carries several of these for the same `workspace`, in no
+// authority order.
+//
+// SO: NO CONSUMER MAY ADOPT `session_id` BELOW AS A WORKSPACE'S LIVE SESSION
+// IDENTITY. WorkspaceState is the sole authority for that (see its comment).
+// A consumer that binds identity from this message under last-writer-wins
+// will rebind to whichever entry happened to arrive last — including a dead
+// one — and then address the daemon with a stale session under the current
+// controller generation, which the daemon refuses as an identity mismatch.
+// That is a real, observed outage, not a hypothetical.
 message SessionView {
   // 14 was death_reason (string): RETIRED (step 11). It had two producers
   // and zero readers on either frontend; `death` below (F4) is the sole
@@ -511,6 +541,10 @@ message SessionView {
   reserved 14;
   reserved "death_reason";
   string workspace = 1;
+  // WHICH session this catalog entry describes — a correlation key, never a
+  // binding. It says "the facts below belong to this session"; it does not
+  // say "this session owns `workspace`". Only WorkspaceState.session_id says
+  // that.
   string session_id = 2;
   string model = 3;
   string slug = 4;
@@ -2594,8 +2628,18 @@ message ContextCostAlert {
 }
 
 // Full resync on (re)connect: current state of every workspace + open tasks.
+//
+// IDENTITY AUTHORITY: `workspaces` below is the only place in this snapshot a
+// consumer may read a workspace's live session identity from. The per-session
+// and per-task repeated fields are CATALOGS — they include retired and
+// superseded entries by design, and their order carries no authority — so
+// folding them onto a store must never move a workspace's session binding.
 message StateSnapshot {
+  // THE authoritative rulings, one per workspace. Sole source of session
+  // ownership for everything in this snapshot.
   repeated WorkspaceState workspaces = 1;
+  // The session catalog, live and retired alike. Read for per-session facts,
+  // never for a workspace's identity (see SessionView).
   repeated SessionView sessions = 2;
   repeated TaskCatalog catalogs = 3;
   DaemonView daemon = 4;  // Additive (S7)

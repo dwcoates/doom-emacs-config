@@ -626,6 +626,118 @@ describe("ingest session-view", () => {
   });
 });
 
+// --- session identity authority ---------------------------------------------
+//
+// WorkspaceState is the SOLE writer of the workspace's live session identity.
+// A SessionView is a per-session catalog entry that legitimately describes
+// retired sessions, so it may seed an identity nobody has ruled on, never
+// rebind one WorkspaceState has.
+
+describe("session identity authority", () => {
+  it("seeds the identity from a session view before any workspace state rules", () => {
+    // Arrange
+    const store = new ConversationStore();
+    // Act
+    store.ingest([sessionEffect({ sessionId: "s_live" })]);
+    // Assert
+    expect(store.state.sessionId).toBe("s_live");
+  });
+
+  it("adopts the identity from a workspace state", () => {
+    // Arrange
+    const store = new ConversationStore();
+    // Act
+    store.ingest([workspaceEffect({ sessionId: "s_live" })]);
+    // Assert
+    expect(store.state.sessionId).toBe("s_live");
+  });
+
+  it("keeps the workspace-state identity when a retired session view follows", () => {
+    // Arrange — the mount ordering that deadlocked the view: live workspace
+    // ruling, then the superseded session's catalog entry.
+    const store = new ConversationStore();
+    store.ingest([workspaceEffect({ sessionId: "s_live" })]);
+    // Act
+    store.ingest([sessionEffect({ sessionId: "s_retired" })]);
+    // Assert
+    expect(store.state.sessionId).toBe("s_live");
+  });
+
+  it("reports the rejected session view identity", () => {
+    // Arrange
+    const logged: string[] = [];
+    const store = new ConversationStore((_level, message) => logged.push(message));
+    store.ingest([workspaceEffect({ sessionId: "s_live" })]);
+    // Act
+    store.ingest([sessionEffect({ sessionId: "s_retired" })]);
+    // Assert
+    expect(logged.some((line) => line.includes("session view identity rejected"))).toBe(true);
+  });
+
+  it("rebinds the identity when the workspace state rotates its owning session", () => {
+    // Arrange
+    const store = new ConversationStore();
+    store.ingest([workspaceEffect({ sessionId: "s_old" })]);
+    // Act
+    store.ingest([workspaceEffect({ sessionId: "s_new" })]);
+    // Assert
+    expect(store.state.sessionId).toBe("s_new");
+  });
+
+  it("keeps the ruled identity when a corroborating session view repeats it", () => {
+    // Arrange
+    const store = new ConversationStore();
+    store.ingest([workspaceEffect({ sessionId: "s_live" })]);
+    // Act
+    store.ingest([sessionEffect({ sessionId: "s_live" })]);
+    // Assert
+    expect(store.state.sessionId).toBe("s_live");
+  });
+
+  it("lets a session view seed again after a reset drops the workspace ruling", () => {
+    // Arrange
+    const store = new ConversationStore();
+    store.ingest([workspaceEffect({ sessionId: "s_live" })]);
+    store.reset();
+    // Act
+    store.ingest([sessionEffect({ sessionId: "s_next" })]);
+    // Assert
+    expect(store.state.sessionId).toBe("s_next");
+  });
+
+  it("leaves the ruled identity untouched when a progress view names another session", () => {
+    // Arrange — the interrupt-adoption path correlates a session, never binds
+    // one.
+    const store = new ConversationStore();
+    store.ingest([workspaceEffect({ sessionId: "s_live" })]);
+    const progress: ProgressInput = {
+      workspace: "ws",
+      sessionId: "s_retired",
+      turnStartedAtMs: 0,
+      thinkingTokens: 0,
+      inputTokens: 0,
+      ttftMs: 0,
+      compacting: null,
+      retrying: null,
+      authenticating: null,
+      hook: null,
+      blocked: null,
+      interrupt: { outcome: "interrupted", sinceMs: 0 },
+      rateLimited: null,
+      rateLimitedWeekly: null,
+      failure: null,
+      expensiveTurn: null,
+      pendingPermissions: 0,
+      queueDepth: 0,
+      liveTaskCount: 0,
+    };
+    // Act
+    store.ingest([{ kind: "progress", value: progress }]);
+    // Assert
+    expect(store.state.sessionId).toBe("s_live");
+  });
+});
+
 // --- conversation-items -----------------------------------------------------
 
 describe("ingest conversation-items", () => {
