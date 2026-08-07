@@ -2,10 +2,10 @@
 
 Use this runbook when the question is not "why did this one thing fail" but
 "is the whole stack being driven to a healthy steady state?" The loop bounces
-the full stack to current builds, bounces Emacs, observes startup and one
-probe, root-causes every issue it finds, fans the fixes out to parallel
-implementation subagents, merges them, and repeats until the exit criteria
-hold.
+the full stack to current builds, bounces Emacs, observes startup and an
+all-workspace probe sweep, root-causes every issue it finds, fans the fixes
+out to parallel implementation subagents, merges them, and repeats until the
+exit criteria hold.
 
 This runbook owns the orchestration. It owns no contract: the baseline sweep
 belongs to `health-and-readiness.md`, the evidence belongs to
@@ -40,9 +40,10 @@ paths, and clear exactly those files — nothing else.
 
 Do this at the start of every iteration, not only the first. Once an
 iteration's findings are recorded, its log lines have done their work, and a
-fresh empty window makes the next sweep and the probe delta unambiguous: no
-byte-offset arithmetic, no reasoning about which rotation a record came from,
-no risk of attributing a previous iteration's error to this one.
+fresh empty window makes the next sweep and the probe-sweep delta
+unambiguous: no byte-offset arithmetic, no reasoning about which rotation a
+record came from, no risk of attributing a previous iteration's error to this
+one.
 
 Clearing the logs is an explicit, user-directed exception to the Safety rule
 "Never mutate logs, snapshots, registries, sockets, or runtime state merely to
@@ -92,12 +93,29 @@ Measure per-workspace startup latency. The target is one second or less per
 workspace, with no workspace taking more than a couple of seconds. Record the
 per-workspace numbers; a mean hides the one workspace that is actually broken.
 
-Then run one probe. Choose a workspace at random, invoke `SPC o c`
-(`agent-repl-simple`), and inspect:
+Then probe every workspace. Once the full workspace load has completed, open
+each workspace in turn with `SPC o c` (`agent-repl-simple`) — all of them, one
+after another, not a sample. After the last one is open, wait one minute before
+moving on to the log perusal below.
 
-- The daemon-log delta produced by the probe.
+The startup sweep alone misses issues that only manifest when a workspace first
+establishes its daemon connection: the webview mount, the shim attach, the
+first resync. Probing every workspace forces every one of those
+first-connection paths to execute rather than the one path a randomly chosen
+workspace happened to exercise. The one-minute settle window then lets delayed
+failures — timers, retries, async publishes — land in the logs before they are
+swept, instead of arriving after the sweep has already declared the iteration
+clean.
+
+The wait composes with the five-minute cap of step 3 rather than competing with
+it. It is a fixed settle window inside an iteration, not an open-ended wait on
+something that may never arrive.
+
+Then inspect:
+
+- The daemon-log delta produced by the probe sweep.
 - The webapp console for identity rejections, warnings, and connectivity
-  failure cards.
+  failure cards, in every workspace opened.
 
 Use `identity-correlation.md` to tie any rejection back to a workspace,
 session, or connection before treating it as a class of failure.
@@ -124,8 +142,8 @@ Iterate until all of the following hold in a single iteration:
 | Correct attach | Existing shims are identified and reattached rather than replaced. |
 | Correct spawn | A new shim is spawned if and only if no shim exists for that workspace. |
 | Correct resume | An existing transcript is always detected and resumed; a fresh conversation where a transcript exists is a failure, not a cosmetic difference. |
-| Clean probe | The probe opens cleanly, with zero connectivity or failure cards in the session view. |
-| No warnings observed | Under `--address-warnings` or `--address-warnings-first` only: zero warning records in the startup log sweep and the probe delta. Not a criterion by default; see Invocation modifiers below. |
+| Clean probe | Every workspace opens cleanly, with zero connectivity or failure cards in any session view, and the one-minute settle window adds none. |
+| No warnings observed | Under `--address-warnings` or `--address-warnings-first` only: zero warning records in the startup log sweep and the probe-sweep delta. Not a criterion by default; see Invocation modifiers below. |
 
 A criterion that holds only because the evidence for it is missing does not
 hold. Complete `observability-gaps.md` before declaring an iteration clean.
@@ -136,9 +154,10 @@ The loop takes one optional modifier, named by the operator when the loop is
 started. It is the same modifier pair the
 `interaction-replay-remediation.md` runbook defines, with the observation
 window read as this loop's own: the startup log sweep of step 2 plus the delta
-the single probe produces. The modifier decides whether WARNINGS in those
-windows are loop-critical — gating the next iteration and the exit — or
-non-gating, in the sense step 7 gives those words.
+the all-workspace probe sweep and its one-minute settle window produce. The
+modifier decides whether WARNINGS in those windows are loop-critical — gating
+the next iteration and the exit — or non-gating, in the sense step 7 gives
+those words.
 
 | Modifier | Warnings gate the exit | Order |
 |---|---|---|
@@ -146,10 +165,10 @@ non-gating, in the sense step 7 gives those words.
 | `--address-warnings` | Yes | Errors, timing, and cards first, then warnings. |
 | `--address-warnings-first` | Yes | Warnings first, then errors, timing, and cards. |
 
-**Default, no modifier.** Warnings observed in the startup sweep or the probe
-delta are recorded and reported to the user each iteration, but they are not
-loop-critical: they never gate an iteration and never hold the exit open. Only
-the criteria in the table above do.
+**Default, no modifier.** Warnings observed in the startup sweep or the
+probe-sweep delta are recorded and reported to the user each iteration, but
+they are not loop-critical: they never gate an iteration and never hold the
+exit open. Only the criteria in the table above do.
 
 **`--address-warnings`.** The exit criteria widen to require zero warnings in
 the observation windows as well. The loop runs in two phases, and the order is
@@ -168,7 +187,7 @@ justification no longer exists.
 
 **`--address-warnings-first`.** Same widened exit criteria, opposite order:
 
-1. Phase 1 iterates until the startup sweep and the probe delta are
+1. Phase 1 iterates until the startup sweep and the probe-sweep delta are
    warning-clean. Errors, timing, and cards are recorded and left alone.
 2. Phase 2 then iterates on the errors, timing, and cards of the exit table.
 
@@ -190,9 +209,10 @@ it has moved back into phase 1.
 
 Under either modifier, a warning is closed by removing what provoked it.
 Silencing the warning itself is not remediation: do not suppress it, downgrade
-it to debug, filter it out of the startup sweep or the probe delta, or delete
-the emit site. A window that is warning-clean because the warnings were muted
-satisfies no criterion; it only destroys the evidence the next iteration needed.
+it to debug, filter it out of the startup sweep or the probe-sweep delta, or
+delete the emit site. A window that is warning-clean because the warnings were
+muted satisfies no criterion; it only destroys the evidence the next iteration
+needed.
 
 Silencing is permitted only when there is a very good reason and that reason is
 stated explicitly to the user — and only when the warning is not hinting at a
@@ -262,6 +282,6 @@ cannot attribute its findings to any revision.
 - `observability-gaps.md` before concluding any iteration is clean.
 - `performance-investigation.md` when startup latency is the surviving issue
   and the log record cannot localize the time.
-- `interaction-replay-remediation.md` when the probe of step 2 cannot provoke
-  the issue and a recorded interaction must stand in for it; it defines the
-  same warning modifiers over a replay window instead of the startup sweep.
+- `interaction-replay-remediation.md` when the probe sweep of step 2 cannot
+  provoke the issue and a recorded interaction must stand in for it; it defines
+  the same warning modifiers over a replay window instead of the startup sweep.
