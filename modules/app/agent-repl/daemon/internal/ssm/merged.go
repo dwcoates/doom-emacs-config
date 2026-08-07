@@ -47,13 +47,13 @@ func (m *Manager) recordMergedAtLocked(workspace string, at int64) (mergedAt int
 		workspace, at,
 	)
 	if err != nil {
-		m.logf("ssm: merged-at record FAILED workspace=%s at=%d error=%v — the workspace is merged and carries no merged_at_ms, so no frontend can order it",
+		m.warn("ssm: merged-at record FAILED workspace=%s at=%d error=%v — the workspace is merged and carries no merged_at_ms, so no frontend can order it",
 			workspace, at, err)
 		return 0, false, fmt.Errorf("ssm: record merged-at for workspace %q at %d: %w", workspace, at, err)
 	}
 	inserted, err := res.RowsAffected()
 	if err != nil {
-		m.logf("ssm: merged-at record inspection FAILED workspace=%s at=%d error=%v", workspace, at, err)
+		m.warn("ssm: merged-at record inspection FAILED workspace=%s at=%d error=%v", workspace, at, err)
 		return 0, false, fmt.Errorf("ssm: inspect merged-at record for workspace %q: %w", workspace, err)
 	}
 	if inserted == 1 {
@@ -151,7 +151,7 @@ func (m *Manager) teardownMerged(workspace string, mergedAt int64) {
 	m.logf("ssm: merged teardown ws=%s merged_at_ms=%d decision=stand_down — the merge landed, so the daemon stops this workspace's session and shim",
 		workspace, mergedAt)
 	if err := teardown.TeardownMerged(workspace); err != nil {
-		m.logf("ssm: merged teardown FAILED ws=%s merged_at_ms=%d error=%v — the merged fact STANDS and was already pushed; the session is still running and must be stood down by hand",
+		m.warn("ssm: merged teardown FAILED ws=%s merged_at_ms=%d error=%v — the merged fact STANDS and was already pushed; the session is still running and must be stood down by hand",
 			workspace, mergedAt, err)
 		return
 	}

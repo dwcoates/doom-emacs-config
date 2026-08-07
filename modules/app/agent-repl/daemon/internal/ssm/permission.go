@@ -125,7 +125,7 @@ func (m *Manager) applyPermissionLocked(workspace string, pending bool, reason s
 func (m *Manager) closePermissionLocked(workspace, reason string) {
 	top, _, err := sessionStatusTop(m.db, workspace)
 	if err != nil {
-		m.logf("ssm: reading the session-status lifecycle FAILED ws=%s reason=%s: %v — a pending permission row may stay open", workspace, reason, err)
+		m.warn("ssm: reading the session-status lifecycle FAILED ws=%s reason=%s: %v — a pending permission row may stay open", workspace, reason, err)
 		return
 	}
 	if top != sigPermission {
@@ -133,7 +133,7 @@ func (m *Manager) closePermissionLocked(workspace, reason string) {
 	}
 	m.logf("ssm: permission row released by %s ws=%s — the pending request cannot outlive it, and the shim re-asks on reattach", reason, workspace)
 	if err := m.applyPermissionLocked(workspace, false, reason); err != nil {
-		m.logf("ssm: releasing the permission row FAILED ws=%s reason=%s: %v", workspace, reason, err)
+		m.warn("ssm: releasing the permission row FAILED ws=%s reason=%s: %v", workspace, reason, err)
 	}
 }
 
