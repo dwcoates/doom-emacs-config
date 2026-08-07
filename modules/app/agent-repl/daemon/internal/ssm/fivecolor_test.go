@@ -33,7 +33,7 @@ func TestSessionStartedReachesReadyWithoutAnyPrompt(t *testing.T) {
 	// Arrange.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
 	// Act — readiness alone; no prompt is ever submitted.
-	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evSessionStarted("s1", 1)); err != nil {
 		t.Fatalf("session started: %v", err)
 	}
 	// Assert.
@@ -47,11 +47,11 @@ func TestSessionStartedReachesReadyWithoutAnyPrompt(t *testing.T) {
 func TestReadinessDuringActiveTurnDoesNotRegress(t *testing.T) {
 	// Arrange — a turn is running.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 	// Act — a shim relaunch/revive re-asserts readiness underneath it.
-	if err := m.Apply(evSessionStarted("s1", 2)); err != nil {
+	if err := applyTest(m, evSessionStarted("s1", 2)); err != nil {
 		t.Fatalf("session started: %v", err)
 	}
 	// Assert — the running turn is the stronger claim and stands.
@@ -63,11 +63,11 @@ func TestReadinessDuringActiveTurnDoesNotRegress(t *testing.T) {
 func TestSuppressedReadinessIsLoggedNotSilent(t *testing.T) {
 	// Arrange.
 	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 	// Act.
-	if err := m.Apply(evSessionStarted("s1", 2)); err != nil {
+	if err := applyTest(m, evSessionStarted("s1", 2)); err != nil {
 		t.Fatalf("session started: %v", err)
 	}
 	// Assert — a dropped signal must never be invisible.
@@ -81,14 +81,14 @@ func TestSuppressedReadinessIsLoggedNotSilent(t *testing.T) {
 func TestReadinessAfterTurnEndsApplies(t *testing.T) {
 	// Arrange.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
-	if err := m.Apply(evTurnEnded("s1", 2, false)); err != nil {
+	if err := applyTest(m, evTurnEnded("s1", 2, false)); err != nil {
 		t.Fatalf("turn ended: %v", err)
 	}
 	// Act.
-	if err := m.Apply(evSessionStarted("s1", 3)); err != nil {
+	if err := applyTest(m, evSessionStarted("s1", 3)); err != nil {
 		t.Fatalf("session started: %v", err)
 	}
 	// Assert.
@@ -164,11 +164,11 @@ func TestVendorBlockingRateLimit(t *testing.T) {
 func TestAbnormalConclusionResolvesVendorBlocked(t *testing.T) {
 	// Arrange.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 	// Act.
-	if err := m.Apply(evTurnEndedReason("s1", 2, "error_max_turns", true)); err != nil {
+	if err := applyTest(m, evTurnEndedReason("s1", 2, "error_max_turns", true)); err != nil {
 		t.Fatalf("turn ended: %v", err)
 	}
 	// Assert.
@@ -180,11 +180,11 @@ func TestAbnormalConclusionResolvesVendorBlocked(t *testing.T) {
 func TestUserInterruptConcludesGreen(t *testing.T) {
 	// Arrange.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 	// Act — the user asked for the turn to stop, and it stopped.
-	if err := m.Apply(evTurnEndedReason("s1", 2, "aborted", true)); err != nil {
+	if err := applyTest(m, evTurnEndedReason("s1", 2, "aborted", true)); err != nil {
 		t.Fatalf("turn ended: %v", err)
 	}
 	// Assert.
@@ -198,14 +198,20 @@ func TestUserInterruptConcludesGreen(t *testing.T) {
 func TestCleanTurnAfterABlockReportsDone(t *testing.T) {
 	// Arrange — blocked by an auth failure.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnEndedReason("s1", 1, "authentication_failed", true)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
+		t.Fatalf("blocked turn start: %v", err)
+	}
+	if err := applyTest(m, evTurnEndedReason("s1", 2, "authentication_failed", true)); err != nil {
 		t.Fatalf("blocked turn: %v", err)
 	}
 	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_VENDOR_BLOCKED {
 		t.Fatalf("state = %s, want VENDOR_BLOCKED before the clean turn", renderName(got))
 	}
 	// Act — the next turn concludes cleanly.
-	if err := m.Apply(evTurnEndedReason("s1", 2, "end_turn", false)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 3)); err != nil {
+		t.Fatalf("clean turn start: %v", err)
+	}
+	if err := applyTest(m, evTurnEndedReason("s1", 4, "end_turn", false)); err != nil {
 		t.Fatalf("clean turn: %v", err)
 	}
 	// Assert.
@@ -273,7 +279,10 @@ func TestAbnormalTurnEndWritesExactlyOneAgentRow(t *testing.T) {
 	// Arrange.
 	m, _, path := openTest(t, fakeResolver{"s1": "ws1"})
 	// Act.
-	if err := m.Apply(evTurnEndedReason("s1", 1, "error_max_turns", true)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
+		t.Fatalf("turn started: %v", err)
+	}
+	if err := applyTest(m, evTurnEndedReason("s1", 2, "error_max_turns", true)); err != nil {
 		t.Fatalf("turn ended: %v", err)
 	}
 	// Assert.
@@ -285,7 +294,7 @@ func TestAbnormalTurnEndWritesExactlyOneAgentRow(t *testing.T) {
 	// The wiring arrangement's own row is dropped: this asserts what the TURN
 	// END wrote, and the legacy connectivity projection is a different axis entirely.
 	got := agentRowsOnly(rowsFor(t, db, "ws1"))
-	want := [][2]string{{sigVendorBlocked, causeVendorBlocked}}
+	want := [][2]string{{sigThinking, causeTurnStarted}, {sigVendorBlocked, causeVendorBlocked}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("rows = %v, want %v", got, want)
 	}
@@ -296,7 +305,10 @@ func TestCleanTurnEndWritesExactlyOneDoneRow(t *testing.T) {
 	// Arrange.
 	m, _, path := openTest(t, fakeResolver{"s1": "ws1"})
 	// Act.
-	if err := m.Apply(evTurnEndedReason("s1", 1, "end_turn", false)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
+		t.Fatalf("turn started: %v", err)
+	}
+	if err := applyTest(m, evTurnEndedReason("s1", 2, "end_turn", false)); err != nil {
 		t.Fatalf("turn ended: %v", err)
 	}
 	// Assert.
@@ -306,7 +318,7 @@ func TestCleanTurnEndWritesExactlyOneDoneRow(t *testing.T) {
 	}
 	defer db.Close()
 	got := agentRowsOnly(rowsFor(t, db, "ws1"))
-	want := [][2]string{{sigDone, causeTurnEnded}}
+	want := [][2]string{{sigThinking, causeTurnStarted}, {sigDone, causeTurnEnded}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("rows = %v, want %v", got, want)
 	}
@@ -601,7 +613,7 @@ func TestReopenedSessionWithIngestedHistoryReachesGreen(t *testing.T) {
 	if err := m.ApplyBackfillState("ws1", "done"); err != nil {
 		t.Fatalf("backfill: %v", err)
 	}
-	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evSessionStarted("s1", 1)); err != nil {
 		t.Fatalf("session started: %v", err)
 	}
 	// Act — readiness lands with the backfill already settled.
@@ -616,7 +628,7 @@ func TestReopenedSessionWithIngestedHistoryReachesGreen(t *testing.T) {
 func TestFailedBackfillResolvesBlue(t *testing.T) {
 	// Arrange — everything else healthy.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evSessionStarted("s1", 1)); err != nil {
 		t.Fatalf("session started: %v", err)
 	}
 	// Act.
@@ -637,7 +649,7 @@ func TestEmptyWorkspaceBackfillDoesNotHoldBlue(t *testing.T) {
 	if err := m.ApplyBackfillState("ws1", "pending"); err != nil {
 		t.Fatalf("backfill: %v", err)
 	}
-	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evSessionStarted("s1", 1)); err != nil {
 		t.Fatalf("session started: %v", err)
 	}
 	// Assert.
@@ -650,7 +662,7 @@ func TestEmptyWorkspaceBackfillDoesNotHoldBlue(t *testing.T) {
 func TestBackfillRecoveryReleasesBlue(t *testing.T) {
 	// Arrange.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evSessionStarted("s1", 1)); err != nil {
 		t.Fatalf("session started: %v", err)
 	}
 	if err := m.ApplyBackfillState("ws1", "failed"); err != nil {

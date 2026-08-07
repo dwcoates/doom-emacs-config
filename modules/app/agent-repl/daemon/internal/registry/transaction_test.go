@@ -168,12 +168,15 @@ func TestRegistryAndStateLogInterleaveOnOneSharedStore(t *testing.T) {
 		}()
 		go func() {
 			defer wg.Done()
-			if err := mgr.Apply(&corev1.Event{
+			if _, err := mgr.ApplyTurnBoundary("/ws", "uuid-1", "", &corev1.Event{
 				SessionId: "uuid-1",
 				Seq:       uint64(i + 1),
 				Plane:     corev1.Plane_PLANE_STREAM,
-				RequestId: "turn",
-				Payload:   &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "turn"}},
+				// One identity per round: a turn id names ONE turn, and the
+				// durable ledger refuses a second start under a name it already
+				// holds. The subject here is store contention, not correlation.
+				RequestId: fmt.Sprintf("turn-%d", i),
+				Payload:   &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: fmt.Sprintf("turn-%d", i)}},
 			}); err != nil {
 				ssmErrs <- err
 			}
@@ -193,12 +196,26 @@ func TestRegistryAndStateLogInterleaveOnOneSharedStore(t *testing.T) {
 	if rec, ok := reg.Get("uuid-1"); !ok || rec.LastSeq == 0 {
 		t.Fatalf("record after interleaved writes = %+v ok=%v", rec, ok)
 	}
+	// EVERY boundary landed, counted where a boundary is now recorded. The
+	// session-status axis is RECONCILED to the one turn-liveness derivation
+	// rather than appended per event, so twenty starts that all leave the
+	// workspace `thinking` write one row and twenty claims. The claims are what
+	// prove no write was lost to store contention.
+	var claims int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM turn_lifecycle_claim WHERE claimant_session_id = 'uuid-1'`,
+	).Scan(&claims); err != nil {
+		t.Fatalf("count turn claims: %v", err)
+	}
+	if claims != rounds {
+		t.Fatalf("durable turn claims = %d, want %d", claims, rounds)
+	}
 	var rows int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM workspace_state WHERE session_id = 'uuid-1'`).Scan(&rows); err != nil {
 		t.Fatalf("count state rows: %v", err)
 	}
-	if rows != rounds {
-		t.Fatalf("state-log rows = %d, want %d", rows, rounds)
+	if rows == 0 {
+		t.Fatal("state-log rows = 0, want the workspace painted `thinking` at least once")
 	}
 }
 

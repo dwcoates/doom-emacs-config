@@ -38,7 +38,7 @@ func openPermTest(t *testing.T, resolver Resolver) (*Manager, *capLog, string) {
 // question is ever asked from.
 func startTurn(t *testing.T, m *Manager) {
 	t.Helper()
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 }
@@ -125,7 +125,7 @@ func TestPermissionCloseWithNoLiveTurnBeneathLeavesTheAxis(t *testing.T) {
 	// still the PREVIOUS turn's end. There is then no `thinking` to restore.
 	m, cl, _ := openPermTest(t, fakeResolver{"s1": "ws1"})
 	startTurn(t, m)
-	if err := m.Apply(evTurnEnded("s1", 2, false)); err != nil {
+	if err := applyTest(m, evTurnEnded("s1", 2, false)); err != nil {
 		t.Fatalf("turn ended: %v", err)
 	}
 	mustApplyPermission(t, m, true, "pending=1")
@@ -151,7 +151,7 @@ func TestTurnEndedDuringAPendingPermissionWins(t *testing.T) {
 	mustApplyPermission(t, m, true, "pending=1")
 
 	// Act — the turn ends while the question is still pending.
-	if err := m.Apply(evTurnEnded("s1", 2, false)); err != nil {
+	if err := applyTest(m, evTurnEnded("s1", 2, false)); err != nil {
 		t.Fatalf("turn ended: %v", err)
 	}
 
@@ -167,7 +167,7 @@ func TestPermissionCloseAfterTurnEndedIsALoudNoOp(t *testing.T) {
 	m, cl, _ := openPermTest(t, fakeResolver{"s1": "ws1"})
 	startTurn(t, m)
 	mustApplyPermission(t, m, true, "pending=1")
-	if err := m.Apply(evTurnEnded("s1", 2, false)); err != nil {
+	if err := applyTest(m, evTurnEnded("s1", 2, false)); err != nil {
 		t.Fatalf("turn ended: %v", err)
 	}
 

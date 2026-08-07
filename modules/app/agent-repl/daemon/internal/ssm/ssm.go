@@ -388,11 +388,31 @@ func (m *Manager) Apply(ev *corev1.Event) error {
 	}
 	switch ev.GetPayload().(type) {
 	case *corev1.Event_TurnStarted, *corev1.Event_TurnEnded:
-		if ev.GetPlane() != corev1.Plane_PLANE_STREAM {
-			return fmt.Errorf("ssm: rejected non-authoritative turn lifecycle plane=%s session=%s seq=%d kind=%s turn_id=%q request_id=%q dedup_key=%q",
-				ev.GetPlane().String(), sid, ev.GetSeq(), payloadKind(ev),
-				turnCorrelation(ev), ev.GetRequestId(), ev.GetDedupKey())
-		}
+		// THE ENFORCEMENT RUNG, and the reason turn liveness has exactly one
+		// answer. Apply is the general door every lifecycle event comes
+		// through, and it used to fold turn boundaries into the session-status
+		// axis on its OWN idempotency rule — (event_session_id, cause_seq) —
+		// while the durable turn ledger folded the very same events on a
+		// different one. Two folds, two answers: a replay under a replacement
+		// session was fresh work to the ledger and a duplicate to the axis, so
+		// the sidebar painted green over a turn the prompt queue was holding
+		// every prompt behind.
+		//
+		// A boundary now has ONE destination, ApplyTurnBoundary, which moves the
+		// ledger and paints the axis from the same derivation in one
+		// transaction. Reaching turn liveness by folding the event stream here
+		// is not merely discouraged; it is refused, so a future consumer cannot
+		// re-create the second authority by accident.
+		//
+		// A VIOLATED INVARIANT, NOT A ROUTING PREFERENCE. Nothing is written and
+		// nothing is degraded: the caller gets the error and the log carries the
+		// structured account of what tried to fold what.
+		err := fmt.Errorf("ssm: turn boundaries must use ApplyTurnBoundary, never Apply; turn liveness has exactly one derivation (session=%s seq=%d kind=%s turn_id=%q)",
+			sid, ev.GetSeq(), payloadKind(ev), turnCorrelation(ev))
+		m.logf("ssm: INVARIANT VIOLATION operation=apply event_session=%s seq=%d kind=%s plane=%s turn_id=%q request_id=%q dedup_key=%q — a turn boundary reached the general lifecycle apply, which would fold turn liveness a second time on its own idempotency rule; refused with no row written: %v",
+			sid, ev.GetSeq(), payloadKind(ev), ev.GetPlane().String(),
+			turnCorrelation(ev), ev.GetRequestId(), ev.GetDedupKey(), err)
+		return err
 	case *corev1.Event_TurnClaimBridge:
 		return fmt.Errorf("ssm: TurnClaimBridge must use the durable turn-claim ledger, never Apply (session=%s seq=%d turn_id=%q)",
 			sid, ev.GetSeq(), ev.GetTurnClaimBridge().GetTurnId())
@@ -705,8 +725,28 @@ func (m *Manager) ApplySessionRotated(workspace, previous, next string) error {
 		return nil
 	}
 	cause := causeSessionRotated + ":" + next
-	if err := appendRow(m.db, workspace, "", sigIdle, cause, sql.NullInt64{}, m.nextAt(), ""); err != nil {
+	// THE LEDGER GOES WITH THE AXIS. A rotation retires the conversation the
+	// open claims belong to, so no identity remains that could ever end them.
+	// Appending `idle` while leaving them standing would put the color and the
+	// one turn-liveness derivation in contradiction — see retireTurnsLocked.
+	tx, err := m.db.Begin()
+	if err != nil {
+		return fmt.Errorf("ssm: begin vendor rotation transaction for workspace %q: %w", workspace, err)
+	}
+	defer tx.Rollback()
+	closed, liveness, err := m.retireTurnsLocked(tx, workspace, "", TurnCloseShimStopped)
+	if err != nil {
 		return err
+	}
+	if err := appendRow(tx, workspace, "", sigIdle, cause, sql.NullInt64{}, m.nextAt(), ""); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("ssm: commit vendor rotation for workspace %q: %w", workspace, err)
+	}
+	if len(closed) > 0 {
+		m.logf("ssm: turn claims RETIRED BY A VENDOR ROTATION ws=%s %s -> %s closed=%s cause=%s liveness=%s — the conversation these turns ran in was retired mid-flight, so their ends can never arrive and each killed start's store coordinate is recorded durably against a later replay",
+			workspace, previous, next, formatClosedTurnIDs(closed), TurnCloseShimStopped, liveness)
 	}
 	m.logf("ssm: vendor session rotated ws=%s %s -> %s — the in-flight turn's end belongs to the retired identity, so the session-status lifecycle is reconciled to `idle` rather than held in `thinking`",
 		workspace, previous, next)
@@ -753,8 +793,28 @@ func (m *Manager) InvalidateTurnClaim(workspace, staleSessionID, reason string) 
 		return nil
 	}
 	cause := causeSessionEnded + ":" + reason
-	if err := appendRow(m.db, workspace, staleSessionID, sigIdle, cause, sql.NullInt64{}, m.nextAt(), ""); err != nil {
+	// THE LEDGER GOES WITH THE AXIS, for the same reason the rotation's does:
+	// turn liveness is derived from the claims, so releasing the row while
+	// leaving the claim standing would leave the color idle and the prompt
+	// queue holding.
+	tx, err := m.db.Begin()
+	if err != nil {
+		return fmt.Errorf("ssm: begin turn claim invalidation for workspace %q: %w", workspace, err)
+	}
+	defer tx.Rollback()
+	closed, liveness, err := m.retireTurnsLocked(tx, workspace, staleSessionID, TurnCloseShimStopped)
+	if err != nil {
 		return err
+	}
+	if err := appendRow(tx, workspace, staleSessionID, sigIdle, cause, sql.NullInt64{}, m.nextAt(), ""); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("ssm: commit turn claim invalidation for workspace %q: %w", workspace, err)
+	}
+	if len(closed) > 0 {
+		m.logf("ssm: turn claims RETIRED WITH THEIR SESSION ws=%s session=%s reason=%q closed=%s cause=%s liveness=%s — the session that opened these turns is gone, so their ends can never arrive and each killed start's store coordinate is recorded durably against a later replay",
+			workspace, staleSessionID, reason, formatClosedTurnIDs(closed), TurnCloseShimStopped, liveness)
 	}
 	m.logf("ssm: turn claim INVALIDATED ws=%s session=%s reason=%q — the session holding `thinking` is gone and its turn's end will never arrive, so the session-status lifecycle is reconciled to `idle` rather than held in `thinking`",
 		workspace, staleSessionID, reason)

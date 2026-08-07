@@ -40,11 +40,14 @@ type Pusher interface {
 // Satisfied by *ssm.Manager.
 type StateApplier interface {
 	Apply(ev *corev1.Event) error
-	// ResolveTurnLifecycle durably validates and records a STREAM turn boundary
-	// before any derived state mutates. The returned queues are ordered active
-	// identities before and after the boundary; replayed is true only for an
-	// exact identity+seq receipt from a partially committed prior delivery.
-	ResolveTurnLifecycle(workspace, claimantSessionID, liveQueryInstanceID string, ev *corev1.Event) (before, after []string, replayed bool, err error)
+	// ApplyTurnBoundary is the ONE destination of a STREAM turn boundary. It
+	// moves the durable turn ledger, derives turn liveness from it, and paints
+	// the session-status axis from that SAME derivation, in one transaction.
+	//
+	// It replaced a pair — a ledger resolve followed by a general Apply — whose
+	// two idempotency rules could disagree about whether a turn was in flight.
+	// The color and the queue now read one value; see ssm.TurnLiveness.
+	ApplyTurnBoundary(workspace, claimantSessionID, liveQueryInstanceID string, ev *corev1.Event) (ssm.TurnBoundary, error)
 	// ResolveTurnClaimBridge persists cross-session correlation proof without
 	// applying lifecycle state. This is the only route for TurnClaimBridge.
 	ResolveTurnClaimBridge(workspace, claimantSessionID string, ev *corev1.Event) (replayed bool, err error)
@@ -383,27 +386,24 @@ type consumer struct {
 	// Called on the shim read-loop goroutine, with the same non-blocking
 	// obligation onTurn carries.
 	onTurnEvent func(started bool, turnID string, outcome turnOutcome)
-	// onTurnClaims reports the SSM turn ledger's ACTIVE CLAIM SET the instant
-	// the ledger accepted a boundary, before this delivery mutates anything
-	// user-visible. It is what binds the controller's turn record to the turn's
-	// own id (turnrecord.go).
+	// onTurnLiveness hands the controller the SSM's ONE derived turn liveness
+	// the instant the boundary transaction that produced it committed. It is
+	// what binds the controller's turn record to the turn's own id
+	// (turnrecord.go).
 	//
-	// IT FIRES BEFORE THE SSM APPLY, and that ordering is the fix rather than an
-	// optimization. The SSM's apply publishes the WorkspaceState that tells every
-	// frontend — and every test — that a turn is in flight, and a scheduled
-	// shutdown taken on the strength of that publication used to derive its drain
-	// hold from a record that had latched "active" and not yet learned "which".
-	// Binding the name first makes the hold nameable by the time anyone can
-	// observe the turn at all.
+	// IT CARRIES THE VALUE, NOT A COPY OF ITS INPUTS. The same ssm.TurnLiveness
+	// the workspace color was painted from is the one the prompt queue then acts
+	// on, so "the color says green" and "the queue says a turn is in flight" are
+	// not two computations that must agree — they are one value read twice.
 	//
-	// It is called ONLY when the claim set is non-empty: a boundary that binds or
-	// renames a hold may run ahead of the SSM (it can only make the daemon hold
-	// MORE), while the one that RELEASES the last claim waits for the SSM and
+	// It is called ONLY when the derivation holds a live turn: a boundary that
+	// binds or renames a hold may run ahead of the frontend publication (it can
+	// only make the daemon hold MORE), while the one that RELEASES the last claim
 	// rides the queue's own end edge (onTurn) instead.
 	//
 	// Called on the shim read-loop goroutine, with the same non-blocking
 	// obligation onTurn carries.
-	onTurnClaims func(activeIDs []string)
+	onTurnLiveness func(l ssm.TurnLiveness)
 	// onTurnEnded reports the instant an accepted turn END landed, so the
 	// controller can persist it as the keep-alive policy's measuring point.
 	// Assigned after construction, like onVendorSessionID.
@@ -831,15 +831,21 @@ func (c *consumer) Apply(ev *corev1.Event) error {
 			return fmt.Errorf("session-controller: turn lifecycle rejected: %w", turnErr)
 		}
 		turnResult = &res
+		// THE BOUNDARY ALREADY REACHED THE SSM. ApplyTurnBoundary moved the
+		// ledger and painted the session-status axis from one derivation in one
+		// transaction, so there is no second state apply to make here and no
+		// `apply` flag deciding whether the color gets to move. What is left is
+		// binding the controller's own record to the very value the color was
+		// painted from.
 		applyState = res.apply
 		// THE NAME BINDS FIRST, on the durable ledger's own acceptance and
-		// before this delivery touches the SSM, the frontend, or the progress
-		// footer. See onTurnClaims for why the release direction does not.
-		if len(res.afterIDs) > 0 && c.onTurnClaims != nil {
-			c.onTurnClaims(res.afterIDs)
+		// before this delivery touches the frontend or the progress footer. See
+		// onTurnLiveness for why the release direction does not.
+		if res.liveness.Active() && c.onTurnLiveness != nil {
+			c.onTurnLiveness(res.liveness)
 		}
 	}
-	if applyState {
+	if turnResult == nil && applyState {
 		if err := c.ssm.Apply(ev); err != nil {
 			c.logf("session-controller: ssm apply failed session=%s seq=%d kind=%s: %v",
 				c.sessionID, ev.GetSeq(), stateKind(ev), err)

@@ -197,7 +197,7 @@ func TestATurnActiveWorkspaceIsHeldHoweverOldItsLogIs(t *testing.T) {
 	// Arrange — a live turn, with the clock long past the window. The elapsed
 	// gate must never be able to override the turn gate.
 	h, id, quietFor := sweptWorkspace(t, time.Hour)
-	if err := h.ssm.Apply(&corev1.Event{
+	if _, err := h.ssm.ApplyTurnBoundary("/w", id, "", &corev1.Event{
 		SessionId: id, Seq: 2,
 		Plane:     corev1.Plane_PLANE_STREAM,
 		RequestId: "turn-1",

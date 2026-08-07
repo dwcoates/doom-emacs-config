@@ -20,7 +20,7 @@ import (
 func TestRotationResolvesARunningTurnOutOfThinking(t *testing.T) {
 	// Arrange — a turn in flight when the uuid rotated.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_THINKING {
@@ -42,7 +42,7 @@ func TestRotationReportsIdleRatherThanDone(t *testing.T) {
 	// Arrange — `done` would claim the turn COMPLETED, which no vendor message
 	// ever reported. The distinction is the point of the row.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 
@@ -61,10 +61,10 @@ func TestRotationLeavesSettledSessionStatusAlone(t *testing.T) {
 	// Arrange — no turn in flight. There is nothing stuck to unstick, and
 	// appending `idle` over `done` would discard a more specific true fact.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
-	if err := m.Apply(evTurnEnded("s1", 2, false)); err != nil {
+	if err := applyTest(m, evTurnEnded("s1", 2, false)); err != nil {
 		t.Fatalf("turn ended: %v", err)
 	}
 
@@ -84,7 +84,7 @@ func TestRotationDropsAStandingInterruptMark(t *testing.T) {
 	// uuid rotated. That turn's end belongs to the retired identity, so the
 	// mark could only ever be spent by a LATER turn that received no stop.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1", "s2": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 	if err := m.MarkTurnInterrupted("ws1"); err != nil {
@@ -95,10 +95,10 @@ func TestRotationDropsAStandingInterruptMark(t *testing.T) {
 	}
 
 	// Act — a genuinely new turn under the new identity, run to completion.
-	if err := m.Apply(evTurnStarted("s2", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s2", 1)); err != nil {
 		t.Fatalf("new turn started: %v", err)
 	}
-	if err := m.Apply(evTurnEnded("s2", 2, false)); err != nil {
+	if err := applyTest(m, evTurnEnded("s2", 2, false)); err != nil {
 		t.Fatalf("new turn ended: %v", err)
 	}
 
@@ -112,7 +112,7 @@ func TestRotationAnnouncesTheDroppedMarkLoudly(t *testing.T) {
 	// Arrange — silently discarding a user's stop is the failure mode; the log
 	// line is the only account of why the stop stopped mattering.
 	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 	if err := m.MarkTurnInterrupted("ws1"); err != nil {
