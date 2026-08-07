@@ -1305,7 +1305,7 @@ func (c *consumer) Consume(ev *corev1.Event) error {
 	c.retain(ev)
 	c.observeVendorSessionID(ev)
 	if terminationFailure != nil {
-		c.surfaceUnexpectedQueryTermination(ev, terminationFailure)
+		c.surfaceUnexpectedQueryTermination(ev, terminationFailure, historicalQueryLifecycle)
 	}
 	if utilization != nil && utilization.GetUsage().GetUnmodeledUsage() != nil && len(utilization.GetUsage().GetUnmodeledUsage().GetFields()) > 0 {
 		decision, err := c.responseDiagnostics.observe(utilization.GetApiMessageId(), utilization.GetUsage().GetUnmodeledUsage())
@@ -1465,7 +1465,30 @@ func (c *consumer) logRejectedTokenUtilization(ev *corev1.Event, cause error) {
 		invalid.FieldPath, invalid.APIMessageID, invalid.Model, ev.GetPlane().String(), invalid.AgentReplSessionID, invalid.ClaudeSessionID, c.sessionID, ev.GetSeq(), cause)
 }
 
-func (c *consumer) surfaceUnexpectedQueryTermination(ev *corev1.Event, item *frontendv1.SystemFailureItem) {
+// surfaceUnexpectedQueryTermination reports an SDK query termination read off
+// the durable sequence.
+//
+// historical is the single classifier's verdict (turnAccountingReducer.
+// liveEvidenceFor): the row was stamped by a query OTHER than the live one, so
+// it is a termination the store replays from a RETIRED shim invocation. Such a
+// row stays authoritative history and keeps its card, but it may not be spoken
+// of in the present tense: it did not happen to this process.
+//
+// THAT DISTINCTION IS LOAD-BEARING, NOT COSMETIC. The termination pair is
+// persisted, so every later bring-up replays it; feeding a retired query's
+// death to the bring-up gate made the workspace kill each fresh attempt on a
+// fault that predated it, before the handshake could ever land. The park
+// cooldown then expired, retried, and died on the same seq — a latch no restart
+// could clear, because the evidence was durable. A bring-up may only be failed
+// by a fault its OWN query produced.
+//
+// A historical row therefore skips three things and only three: the bring-up
+// gate (onQueryTermination/onDegraded), the runtime fault (which would open a
+// turn-terminal degradation on a session that never saw it), and the
+// duplicate-suppression latch (which would swallow a genuine LIVE termination
+// arriving later through Degraded). The card is still pushed, under the same
+// stable identity, so nothing the user could see is lost.
+func (c *consumer) surfaceUnexpectedQueryTermination(ev *corev1.Event, item *frontendv1.SystemFailureItem, historical bool) {
 	lifecycle := ev.GetQueryLifecycle()
 	terminated := lifecycle.GetTerminated()
 	detail := item.GetQueryTermination()
@@ -1474,6 +1497,12 @@ func (c *consumer) surfaceUnexpectedQueryTermination(ev *corev1.Event, item *fro
 		reason, cause = "iterator_failure", failure.GetCause()
 	} else if failure := terminated.GetStartupFailure(); failure != nil {
 		reason, cause = "startup_failure", failure.GetCause()
+	}
+	if historical {
+		c.warn("session-controller: typed query termination WITHHELD from the bring-up gate session=%s replayed_query_instance_id=%s live_query_instance_id=%q vendor_session_id=%s observed_at_ms=%d termination_kind=%s cause=%q seq=%d decision=retain_history_no_bring_up_fault",
+			c.sessionID, detail.GetQueryInstanceId(), c.accounting.queryID, detail.GetVendorSessionId(), detail.GetObservedAtMs(), reason, cause, ev.GetSeq())
+		c.pushFailure(c.degradedUUID("claude-shim-sdk"), item)
+		return
 	}
 	c.unexpectedQueryTerminationSurfaced = true
 	c.warn("session-controller: typed query termination surfaced directly session=%s query_instance_id=%s vendor_session_id=%s vendor_identity_unavailable=%v observed_at_ms=%d termination_kind=%s cause=%q seq=%d replay_authority=query_lifecycle", c.sessionID, detail.GetQueryInstanceId(), detail.GetVendorSessionId(), detail.GetVendorSessionIdentityUnavailable() != nil, detail.GetObservedAtMs(), reason, cause, ev.GetSeq())
