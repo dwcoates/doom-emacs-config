@@ -908,8 +908,25 @@ func (s *Server) writeLoop(c conn, cl *client) {
 	}
 }
 
+// readLoop reads this connection's commands and routes each onto its
+// workspace's lane (lanes.go). Reading is deliberately NOT gated on the
+// previous command finishing: a bring-up takes seconds, and a read loop that
+// waited for one starved every command behind it — including commands for
+// other workspaces — past the client's ack deadline.
+//
+// The lanes preserve every ordering the inline loop gave: one workspace's
+// commands still run one at a time in arrival order, and each is still
+// answered only once it has actually run.
 func (s *Server) readLoop(c conn, cl *client) {
-	defer s.disconnect(cl)
+	lanes := newCommandLanes(s.logf, func(cmd *frontendv1.FrontendCommand) {
+		s.processCommand(cl, cmd)
+	})
+	defer func() {
+		// Drain first, disconnect second: a command already read still owes
+		// the client an answer, exactly as it did when dispatch ran inline.
+		lanes.close()
+		s.disconnect(cl)
+	}()
 	for {
 		cmd, err := c.readCommand()
 		if err != nil {
@@ -918,35 +935,41 @@ func (s *Server) readLoop(c conn, cl *client) {
 			}
 			return
 		}
-		// A resync re-sends a fresh StateSnapshot to THIS client (§5.4),
-		// scope-filtered for a scoped connection. The handler covers the
-		// conversation-delta replay the snapshot omits.
-		if cmd.GetResync() != nil {
-			s.enqueueResyncSnapshot(cl, cmd, "before_dispatch")
-		}
-		ack, response := s.dispatchClientCommand(cl, cmd)
-		// A stale generation is a request to adopt current authority, not a
-		// history failure. Capture again AFTER the daemon made that decision so
-		// a transition crossing the pre-dispatch capture cannot leave the client
-		// holding the very identity the command just proved was retired.
-		if cmd.GetResync() != nil && ack.GetFailure().GetErrorType() == string(errclass.TypeSessionReconnectSuperseded) {
-			s.enqueueResyncSnapshot(cl, cmd, "after_superseded")
-		}
-		if !ack.GetOk() {
-			s.logf("frontend: command nack {request_id=%s ws=%s}: %s", ack.GetRequestId(), cmd.GetWorkspace(), ack.GetError())
-		}
-		if response != nil {
-			if data, err := marshalFrame(response); err != nil {
-				s.logf("frontend: marshal command response request_id=%s: %v", ack.GetRequestId(), err)
-			} else {
-				s.enqueue(cl, outFrame{key: coalesceKey(response), data: data})
-			}
-		}
-		if data, err := marshalFrame(CommandAckFrame(ack)); err != nil {
-			s.logf("frontend: marshal command ack: %v", err)
+		lanes.submit(cmd)
+	}
+}
+
+// processCommand performs one command and answers it. It is the body the read
+// loop used to run inline, unchanged in every respect except where it runs.
+func (s *Server) processCommand(cl *client, cmd *frontendv1.FrontendCommand) {
+	// A resync re-sends a fresh StateSnapshot to THIS client (§5.4),
+	// scope-filtered for a scoped connection. The handler covers the
+	// conversation-delta replay the snapshot omits.
+	if cmd.GetResync() != nil {
+		s.enqueueResyncSnapshot(cl, cmd, "before_dispatch")
+	}
+	ack, response := s.dispatchClientCommand(cl, cmd)
+	// A stale generation is a request to adopt current authority, not a
+	// history failure. Capture again AFTER the daemon made that decision so
+	// a transition crossing the pre-dispatch capture cannot leave the client
+	// holding the very identity the command just proved was retired.
+	if cmd.GetResync() != nil && ack.GetFailure().GetErrorType() == string(errclass.TypeSessionReconnectSuperseded) {
+		s.enqueueResyncSnapshot(cl, cmd, "after_superseded")
+	}
+	if !ack.GetOk() {
+		s.logf("frontend: command nack {request_id=%s ws=%s}: %s", ack.GetRequestId(), cmd.GetWorkspace(), ack.GetError())
+	}
+	if response != nil {
+		if data, err := marshalFrame(response); err != nil {
+			s.logf("frontend: marshal command response request_id=%s: %v", ack.GetRequestId(), err)
 		} else {
 			s.enqueue(cl, outFrame{key: coalesceKey(response), data: data})
 		}
+	}
+	if data, err := marshalFrame(CommandAckFrame(ack)); err != nil {
+		s.logf("frontend: marshal command ack: %v", err)
+	} else {
+		s.enqueue(cl, outFrame{key: coalesceKey(response), data: data})
 	}
 }
 
