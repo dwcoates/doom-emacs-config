@@ -17,6 +17,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -26,6 +27,7 @@ import (
 	"agentrepl/shim-store/internal/db"
 	"agentrepl/shim-store/internal/healthcheck"
 	"agentrepl/shim-store/internal/logging"
+	"agentrepl/shim-store/internal/pprofsurface"
 	"agentrepl/shim-store/internal/server"
 
 	sharedlogging "agentrepl/logging"
@@ -39,12 +41,13 @@ func main() {
 	healthCheck := flag.Bool("health-check", false, "send one correlated HealthCheck and emit its JSON result")
 	healthRequestID := flag.String("health-request-id", "", "required correlation ID for -health-check")
 	healthTimeout := flag.Duration("health-timeout", 0, "required deadline for -health-check")
+	pprofAddr := flag.String("pprof", envStr(pprofsurface.EnvAddr, ""), "OPT-IN Go profiling surface: a unix socket path, or an explicitly loopback host:port (127.0.0.1:6061). Empty = OFF, which is the default; there is no always-on listener. The resolved surface is named in the store.pprof.enabled record at startup")
 	flag.Parse()
 	if *healthCheck {
 		os.Exit(runHealthCheck(*socketPath, *logPath, *healthRequestID, *healthTimeout, os.Stdout, os.Stderr))
 	}
 
-	if err := run(*socketPath, *dbPath, *logPath); err != nil {
+	if err := run(*socketPath, *dbPath, *logPath, *pprofAddr); err != nil {
 		reportFatal(err, os.Stderr)
 		os.Exit(1)
 	}
@@ -123,14 +126,53 @@ func reportFatal(err error, stderr io.Writer) {
 // run wires up logging, the database, and the server, then blocks until a
 // termination signal or a fatal serve error. Factored out of main so its wiring
 // is exercised with temp paths in tests.
-func run(socketPath, dbPath, logPath string) (err error) {
+func run(socketPath, dbPath, logPath, pprofAddr string) (err error) {
 	log, closeLog, err := openLogger(socketPath, dbPath, logPath)
 	if err != nil {
 		return err
 	}
 	defer closeLog()
 	defer logProcessExit(log, &err)
-	return runWithLogger(socketPath, dbPath, log)
+	return runWithLogger(socketPath, dbPath, pprofAddr, log)
+}
+
+// openPprofSurface binds the opt-in profiling surface and records the decision
+// either way.
+//
+// BOTH OUTCOMES ARE LOGGED. "Off" is the shipped state and must be
+// distinguishable from "on but nobody can find the address", and an enabled
+// surface is only usable if its record names the exact socket or port a
+// `go tool pprof` invocation should target. A configured surface that cannot
+// bind is a hard error: an operator who asked for profiles and silently got
+// none is the failure this addition exists to end.
+func openPprofSurface(addr string, log *logging.Logger) (*pprofsurface.Surface, error) {
+	surface, err := pprofsurface.Open(addr)
+	if err != nil {
+		return nil, err
+	}
+	if surface == nil {
+		log.LogVerbose(logging.Fields{Operation: "store.pprof.disabled", Level: "debug"},
+			"Go profiling surface is off env=%s flag=-pprof", pprofsurface.EnvAddr)
+		return nil, nil
+	}
+	log.Log(logging.Fields{Operation: "store.pprof.enabled", Level: "warn", Socket: surface.Address()},
+		"Go profiling surface is LISTENING; it exposes goroutine stacks, the command line and heap contents network=%s address=%s url=%s env=%s",
+		surface.Network(), surface.Address(), surface.URL(), pprofsurface.EnvAddr)
+	go func() {
+		if serveErr := surface.Serve(); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+			log.Log(logging.Fields{Operation: "store.pprof.serve", Level: "error"}, "pprof surface serve ended: %v", serveErr)
+		}
+	}()
+	return surface, nil
+}
+
+// envStr returns the environment variable's value, or def when it is unset or
+// empty. Used to source a flag's default from the environment.
+func envStr(name, def string) string {
+	if v := os.Getenv(name); v != "" {
+		return v
+	}
+	return def
 }
 
 // logProcessExit is shim-store's one deferred exit trace: whatever caused
@@ -173,7 +215,19 @@ func openLogger(socketPath, dbPath, logPath string) (*logging.Logger, func(), er
 
 // runWithLogger owns errors that reach the process orchestration after logging
 // is available. db.Open and server.Listen retain their lower-layer ownership.
-func runWithLogger(socketPath, dbPath string, log *logging.Logger) error {
+func runWithLogger(socketPath, dbPath, pprofAddr string, log *logging.Logger) error {
+	// Opened BEFORE the database, so a store wedged in schema migration or a
+	// cold-cache first read of a multi-gigabyte events.db is still profilable.
+	pprofSurface, err := openPprofSurface(pprofAddr, log)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if closeErr := pprofSurface.Close(); closeErr != nil {
+			log.Log(logging.Fields{Operation: "store.pprof.close", Level: "error"}, "closing pprof surface failed: %v", closeErr)
+		}
+	}()
+
 	database, err := db.Open(dbPath, log.With(logging.Fields{Component: "db", Table: "event"}))
 	if err != nil {
 		return err
