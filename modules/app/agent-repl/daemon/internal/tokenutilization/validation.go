@@ -196,6 +196,35 @@ func SameOptionalAPIRequestID(a, b *frontendv1.TokenUtilization) bool {
 	return a.ApiRequestId == nil || *a.ApiRequestId == *b.ApiRequestId
 }
 
+// CarriesSubagentAlias reports whether any record contributes a node to the
+// subagent topology — that is, whether ValidateSubagentTopology would look at
+// it at all.
+//
+// IT IS THE SAME PREDICATE THE VALIDATOR ITSELF USES, and it is exported for
+// exactly one reason: a caller validating an INCREMENT against an
+// already-validated persisted set needs to know whether the increment can
+// change the verdict, and the only correct answer is the validator's own rule.
+// A caller that restated the rule ("has a subagent", say) would drift from it
+// the moment the topology gained a third alias.
+//
+// The skip it licenses is exact rather than approximate. Records with no alias
+// are skipped by the loop below, so a set of them contributes nothing to the
+// alias map; the union of an invariant-holding persisted set with such records
+// therefore has the persisted set's own verdict.
+func CarriesSubagentAlias(records []*frontendv1.TokenUtilization) bool {
+	for _, record := range records {
+		if record == nil || record.GetSubagent() == nil {
+			continue
+		}
+		agent := record.GetSubagent()
+		if agent.GetAgentId() == "" && agent.GetParentToolUseId() == "" {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
 // ValidateSubagentTopology rejects contradictory stable aliases before a
 // response becomes durable. A record carrying both aliases is a bridge that
 // joins prior agent-id-only and parent-tool-use-id-only observations.

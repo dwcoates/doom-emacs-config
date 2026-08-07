@@ -158,7 +158,10 @@ func (r *Registry) writeImport(path string, records map[string]Record, checkpoin
 			r.logf("registry: legacy import rollback FAILED: %v", err)
 		}
 	}()
-	if err := saveState(tx, &registryState{records: records, checkpoints: checkpoints}); err != nil {
+	// nil `before`: the import ESTABLISHES the tables' contents rather than
+	// advancing them, so there is no prior state to write the difference
+	// against and both tables are cleared first (saveState).
+	if err := saveState(tx, nil, &registryState{records: records, checkpoints: checkpoints}); err != nil {
 		r.logf("registry: legacy import WRITE FAILED: %v", err)
 		return err
 	}
