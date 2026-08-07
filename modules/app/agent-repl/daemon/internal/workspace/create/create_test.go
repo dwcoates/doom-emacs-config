@@ -193,12 +193,53 @@ type fixture struct {
 	// tests that happen to be single-threaded.
 	logMu sync.Mutex
 	logs  []string
+	// errorLogs are the records the manager emitted at ERROR severity, kept
+	// apart from logs so a test can assert a fault was reported AS a fault.
+	errorLogs []string
+
+	// clock is the manager's time source. The awaiting-host re-request cadence
+	// is a time-since check, and driving it with a controlled instant is what
+	// lets a test cross the interval boundary WITHOUT sleeping.
+	clockMu sync.Mutex
+	clock   time.Time
+}
+
+func (f *fixture) now() time.Time {
+	f.clockMu.Lock()
+	defer f.clockMu.Unlock()
+	return f.clock
+}
+
+func (f *fixture) advance(d time.Duration) {
+	f.clockMu.Lock()
+	defer f.clockMu.Unlock()
+	f.clock = f.clock.Add(d)
 }
 
 func (f *fixture) log(format string, _ ...any) {
 	f.logMu.Lock()
 	defer f.logMu.Unlock()
 	f.logs = append(f.logs, format)
+}
+
+func (f *fixture) logError(format string, _ ...any) {
+	f.logMu.Lock()
+	defer f.logMu.Unlock()
+	f.errorLogs = append(f.errorLogs, format)
+	f.logs = append(f.logs, format)
+}
+
+// loggedErrorFormat reports whether any ERROR-severity record's format contains
+// want.
+func (f *fixture) loggedErrorFormat(want string) bool {
+	f.logMu.Lock()
+	defer f.logMu.Unlock()
+	for _, line := range f.errorLogs {
+		if strings.Contains(line, want) {
+			return true
+		}
+	}
+	return false
 }
 
 func newFixture(t *testing.T, statePath string) *fixture {
@@ -214,6 +255,7 @@ func newFixture(t *testing.T, statePath string) *fixture {
 		publication: &fakePublication{},
 		actions:     &fakeActions{},
 		merges:      &fakeMerges{},
+		clock:       time.Date(2026, 8, 7, 11, 44, 0, 0, time.UTC),
 	}
 	logf := f.log
 	store, err := OpenJobStore(statePath, logf)
@@ -224,6 +266,7 @@ func newFixture(t *testing.T, statePath string) *fixture {
 	f.manager, err = NewManager(Config{
 		Store: store, Planner: f.worktrees, Worktrees: f.worktrees, Geometry: f.geometry, Sessions: f.sessions, Health: f.health,
 		Prompts: f.prompts, Available: f.available, Releases: f.releases, Publication: f.publication, HostActions: f.actions, Logf: logf,
+		Now: f.now, Errorf: f.logError,
 	})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
@@ -884,7 +927,7 @@ func TestResolvedSessionMetadataPersistsBeforeCreateAndSurvivesRestart(t *testin
 	statePath := filepath.Join(root, "jobs.json")
 	f := newFixture(t, statePath)
 	sessions := &metadataSessions{fakeSessions: fakeSessions{id: "s_new"}, resolved: Request{Name: "DWC/child", GitRoot: "/repo", SourceWorkspace: "parent", SourceDir: "/parent", ConfigDir: "/cfg", PermissionMode: "plan"}}
-	manager, err := NewManager(Config{Store: f.store, Planner: f.worktrees, Worktrees: f.worktrees, Geometry: f.geometry, Sessions: sessions, Health: f.health, Prompts: f.prompts, Available: f.available, Releases: f.releases, Publication: f.publication, HostActions: f.actions, Logf: func(string, ...any) {}})
+	manager, err := NewManager(Config{Store: f.store, Planner: f.worktrees, Worktrees: f.worktrees, Geometry: f.geometry, Sessions: sessions, Health: f.health, Prompts: f.prompts, Available: f.available, Releases: f.releases, Publication: f.publication, HostActions: f.actions, Logf: func(string, ...any) {}, Errorf: func(string, ...any) {}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1915,5 +1958,395 @@ func TestHostActionWorkerPublishesUntilItsContextEnds(t *testing.T) {
 	cancel()
 	if err := <-stopped; !errors.Is(err, context.Canceled) {
 		t.Fatalf("RunHostActionWorker = %v, want the context's cancellation", err)
+	}
+}
+
+// parkOnHost drives one job to awaiting_emacs, which is where every
+// materialization-cadence test starts.
+func parkOnHost(t *testing.T, f *fixture, id string) {
+	t.Helper()
+	if _, _, err := f.store.Enqueue(Job{ID: id, Request: Request{Name: "DWC/" + id, GitRoot: "/repo", Prompt: "build it"}, State: StateQueued}); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	if err := f.manager.Process(context.Background(), id); err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+	if got := job(t, f.store, id); got.State != StateAwaitingEmacs {
+		t.Fatalf("job %s state = %s, want awaiting_emacs", id, got.State)
+	}
+}
+
+func TestAwaitingHostSweepReRequestsMaterializationAfterTheInterval(t *testing.T) {
+	// Arrange: a job parked on the host with its one original request already
+	// spent — exactly the state a workspace created while no Emacs host was
+	// connected is left in.
+	f := newFixture(t, filepath.Join(t.TempDir(), "jobs.json"))
+	parkOnHost(t, f, "held")
+	before := f.available.calls
+
+	// Act: the interval elapses and the host-action worker sweeps.
+	f.advance(defaultMaterializationRequestInterval)
+	if err := f.manager.SweepAwaitingHost(context.Background()); err != nil {
+		t.Fatalf("SweepAwaitingHost: %v", err)
+	}
+
+	// Assert.
+	if f.available.calls != before+1 {
+		t.Fatalf("available publishes = %d, want %d", f.available.calls, before+1)
+	}
+	if got := job(t, f.store, "held"); got.MaterializationRequests != 2 {
+		t.Fatalf("materialization requests = %d, want 2", got.MaterializationRequests)
+	}
+	if !f.loggedFormat("RE-REQUESTING materialization") {
+		t.Fatal("the re-request was not logged")
+	}
+}
+
+func TestAwaitingHostSweepDoesNotReRequestInsideTheInterval(t *testing.T) {
+	// Arrange.
+	f := newFixture(t, filepath.Join(t.TempDir(), "jobs.json"))
+	parkOnHost(t, f, "fresh")
+	before := f.available.calls
+
+	// Act: less than the interval has passed since the original request.
+	f.advance(defaultMaterializationRequestInterval - time.Millisecond)
+	if err := f.manager.SweepAwaitingHost(context.Background()); err != nil {
+		t.Fatalf("SweepAwaitingHost: %v", err)
+	}
+
+	// Assert.
+	if f.available.calls != before {
+		t.Fatalf("available publishes = %d, want %d (no re-request inside the interval)", f.available.calls, before)
+	}
+}
+
+func TestAwaitingHostSweepIgnoresJobsThatAreNotWaitingOnTheHost(t *testing.T) {
+	// Arrange: an acknowledged job is past the host entirely.
+	f := newFixture(t, filepath.Join(t.TempDir(), "jobs.json"))
+	parkOnHost(t, f, "done")
+	if err := f.manager.MarkMaterialized(context.Background(), "done"); err != nil {
+		t.Fatalf("MarkMaterialized: %v", err)
+	}
+	before := f.available.calls
+
+	// Act.
+	f.advance(10 * defaultMaterializationRequestInterval)
+	if err := f.manager.SweepAwaitingHost(context.Background()); err != nil {
+		t.Fatalf("SweepAwaitingHost: %v", err)
+	}
+
+	// Assert.
+	if f.available.calls != before {
+		t.Fatalf("available publishes = %d, want %d (a materialized job is never re-requested)", f.available.calls, before)
+	}
+}
+
+func TestAwaitingHostSweepStampsAJobPersistedBeforeTheCadenceExisted(t *testing.T) {
+	// Arrange: a job whose park predates the durable timestamps, so both are
+	// zero — the shape every job in an upgraded store has on its first sweep.
+	f := newFixture(t, filepath.Join(t.TempDir(), "jobs.json"))
+	parkOnHost(t, f, "legacy")
+	if _, err := f.store.Update("legacy", func(j *Job) error {
+		j.AwaitingEmacsSinceMs = 0
+		j.MaterializationLastRequestMs = 0
+		return nil
+	}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	// Act.
+	if err := f.manager.SweepAwaitingHost(context.Background()); err != nil {
+		t.Fatalf("SweepAwaitingHost: %v", err)
+	}
+
+	// Assert: it is dated from this sweep, not from the epoch.
+	if got := job(t, f.store, "legacy"); got.AwaitingEmacsSinceMs != f.now().UnixMilli() {
+		t.Fatalf("awaiting-since = %d, want %d", got.AwaitingEmacsSinceMs, f.now().UnixMilli())
+	}
+}
+
+func TestAwaitingHostSweepKeepsAJobHeldWhenTheReRequestFails(t *testing.T) {
+	// Arrange: a re-request that cannot be published must not consume the
+	// job's attempt, or a transient host fault would end the cadence.
+	f := newFixture(t, filepath.Join(t.TempDir(), "jobs.json"))
+	parkOnHost(t, f, "held")
+	spent := job(t, f.store, "held").MaterializationRequests
+	f.available.err = errors.New("host channel is gone")
+
+	// Act.
+	f.advance(defaultMaterializationRequestInterval)
+	if err := f.manager.SweepAwaitingHost(context.Background()); err != nil {
+		t.Fatalf("SweepAwaitingHost: %v", err)
+	}
+
+	// Assert.
+	if got := job(t, f.store, "held"); got.MaterializationRequests != spent {
+		t.Fatalf("materialization requests = %d, want the failed re-request not to count (%d)", got.MaterializationRequests, spent)
+	}
+	if !f.loggedFormat("materialization RE-REQUEST FAILED") {
+		t.Fatalf("logs = %v, want the failed re-request named", f.logs)
+	}
+}
+
+func TestAwaitingHostSweepReportsAListingFailure(t *testing.T) {
+	// Arrange.
+	f := newFixture(t, filepath.Join(t.TempDir(), "jobs.json"))
+	f.manager.cfg.Store = listFailingStore{JobStore: f.store}
+
+	// Act.
+	err := f.manager.SweepAwaitingHost(context.Background())
+
+	// Assert: a broken store is structural and propagates rather than being
+	// mistaken for "no jobs are waiting".
+	if err == nil || !strings.Contains(err.Error(), "awaiting-host sweep") {
+		t.Fatalf("SweepAwaitingHost error = %v, want a listing failure", err)
+	}
+}
+
+type listFailingStore struct{ JobStore }
+
+func (s listFailingStore) List() ([]Job, error) { return nil, errors.New("store is unreadable") }
+
+func TestHeldMaterializationPastTheDeadlineIsReportedAtErrorSeverity(t *testing.T) {
+	// Arrange: a workspace nobody has answered for, which is what two jobs
+	// spent DAYS being while every line about them was emitted at info.
+	f := newFixture(t, filepath.Join(t.TempDir(), "jobs.json"))
+	parkOnHost(t, f, "stuck")
+
+	// Act.
+	f.advance(defaultMaterializationHeldDeadline)
+	if err := f.manager.SweepAwaitingHost(context.Background()); err != nil {
+		t.Fatalf("SweepAwaitingHost: %v", err)
+	}
+
+	// Assert.
+	if !f.loggedErrorFormat("MATERIALIZATION HELD PAST DEADLINE") {
+		t.Fatalf("error records = %v, want the held-materialization escalation", f.errorLogs)
+	}
+}
+
+func TestHeldMaterializationEscalationSurfacesAUserVisibleFailure(t *testing.T) {
+	// Arrange.
+	f := newFixture(t, filepath.Join(t.TempDir(), "jobs.json"))
+	parkOnHost(t, f, "stuck")
+
+	// Act.
+	f.advance(defaultMaterializationHeldDeadline)
+	if err := f.manager.SweepAwaitingHost(context.Background()); err != nil {
+		t.Fatalf("SweepAwaitingHost: %v", err)
+	}
+
+	// Assert: the host is handed one notice naming the job.
+	var notice *HostAction
+	for i := range f.actions.items {
+		if f.actions.items[i].ID == "stuck:materialization-held" {
+			notice = &f.actions.items[i]
+		}
+	}
+	if notice == nil {
+		t.Fatalf("host actions = %+v, want a held-materialization notice", f.actions.items)
+	}
+	var failure WorkspaceCreateFailure
+	if err := json.Unmarshal(notice.Payload, &failure); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if failure.JobID != "stuck" || !strings.Contains(failure.Error, "no editor materialized it") {
+		t.Fatalf("failure payload = %+v, want it to name the job and the unanswered wait", failure)
+	}
+}
+
+func TestHeldMaterializationEscalationIsReportedExactlyOnce(t *testing.T) {
+	// Arrange.
+	f := newFixture(t, filepath.Join(t.TempDir(), "jobs.json"))
+	parkOnHost(t, f, "stuck")
+	f.advance(defaultMaterializationHeldDeadline)
+	if err := f.manager.SweepAwaitingHost(context.Background()); err != nil {
+		t.Fatalf("SweepAwaitingHost: %v", err)
+	}
+	first := len(f.errorLogs)
+
+	// Act: many more sweeps, long past the deadline.
+	for i := 0; i < 5; i++ {
+		f.advance(defaultMaterializationHeldDeadline)
+		if err := f.manager.SweepAwaitingHost(context.Background()); err != nil {
+			t.Fatalf("SweepAwaitingHost: %v", err)
+		}
+	}
+
+	// Assert.
+	if len(f.errorLogs) != first {
+		t.Fatalf("error records = %d after repeated sweeps, want the %d from the single escalation", len(f.errorLogs), first)
+	}
+}
+
+func TestHeldMaterializationEscalationLeavesTheJobRecoverable(t *testing.T) {
+	// Arrange: the escalation is a REPORT, never a cleanup — the worktree,
+	// session and shim are all real and all still the user's.
+	f := newFixture(t, filepath.Join(t.TempDir(), "jobs.json"))
+	parkOnHost(t, f, "stuck")
+	f.advance(defaultMaterializationHeldDeadline)
+	if err := f.manager.SweepAwaitingHost(context.Background()); err != nil {
+		t.Fatalf("SweepAwaitingHost: %v", err)
+	}
+
+	// Act: a host finally connects and acknowledges.
+	if err := f.manager.MarkMaterialized(context.Background(), "stuck"); err != nil {
+		t.Fatalf("MarkMaterialized: %v", err)
+	}
+
+	// Assert: the held prompt is still delivered.
+	got := job(t, f.store, "stuck")
+	if got.State != StateReady || !got.PromptDelivered {
+		t.Fatalf("job after a late acknowledgement = %#v, want ready with its prompt delivered", got)
+	}
+}
+
+func TestEscalatedJobStopsBeingReRequested(t *testing.T) {
+	// Arrange.
+	f := newFixture(t, filepath.Join(t.TempDir(), "jobs.json"))
+	parkOnHost(t, f, "stuck")
+	f.advance(defaultMaterializationHeldDeadline)
+	if err := f.manager.SweepAwaitingHost(context.Background()); err != nil {
+		t.Fatalf("SweepAwaitingHost: %v", err)
+	}
+	before := f.available.calls
+
+	// Act.
+	f.advance(10 * defaultMaterializationRequestInterval)
+	if err := f.manager.SweepAwaitingHost(context.Background()); err != nil {
+		t.Fatalf("SweepAwaitingHost: %v", err)
+	}
+
+	// Assert.
+	if f.available.calls != before {
+		t.Fatalf("available publishes = %d, want %d (an escalated wait stops re-requesting)", f.available.calls, before)
+	}
+}
+
+func TestManagerRefusesConstructionWithoutAnErrorLogger(t *testing.T) {
+	// Arrange: a manager that can only speak at info cannot report a fault as
+	// one, which is exactly how the incident hid.
+	f := newFixture(t, filepath.Join(t.TempDir(), "jobs.json"))
+
+	// Act.
+	_, err := NewManager(Config{
+		Store: f.store, Planner: f.worktrees, Worktrees: f.worktrees, Geometry: f.geometry,
+		Sessions: f.sessions, Health: f.health, Prompts: f.prompts, Available: f.available,
+		Releases: f.releases, Publication: f.publication, HostActions: f.actions, Logf: f.log,
+	})
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "error-level logger") {
+		t.Fatalf("NewManager error = %v, want a refusal naming the missing error-level logger", err)
+	}
+}
+
+// faultyStore fails one named durable operation, so the escalation's own error
+// paths can be exercised instead of assumed.
+type faultyStore struct {
+	JobStore
+	failUpdate        string
+	failEnqueueAction bool
+}
+
+func (s *faultyStore) Update(id string, change func(*Job) error) (Job, error) {
+	if id == s.failUpdate {
+		return Job{}, errors.New("store is unwritable")
+	}
+	return s.JobStore.Update(id, change)
+}
+
+func (s *faultyStore) EnqueueHostAction(action HostAction) (HostAction, bool, error) {
+	if s.failEnqueueAction {
+		return HostAction{}, false, errors.New("store is unwritable")
+	}
+	return s.JobStore.EnqueueHostAction(action)
+}
+
+func TestHeldMaterializationEscalationThatCannotLatchReportsNothingAndRetries(t *testing.T) {
+	// Arrange: a latch that cannot be written must not produce a report, or the
+	// next sweep repeats it forever.
+	f := newFixture(t, filepath.Join(t.TempDir(), "jobs.json"))
+	parkOnHost(t, f, "stuck")
+	f.manager.cfg.Store = &faultyStore{JobStore: f.store, failUpdate: "stuck"}
+
+	// Act.
+	f.advance(defaultMaterializationHeldDeadline)
+	if err := f.manager.SweepAwaitingHost(context.Background()); err != nil {
+		t.Fatalf("SweepAwaitingHost: %v", err)
+	}
+
+	// Assert.
+	if f.loggedErrorFormat("MATERIALIZATION HELD PAST DEADLINE") {
+		t.Fatalf("error records = %v, want no report when the latch could not be written", f.errorLogs)
+	}
+	if !f.loggedFormat("held-materialization escalation could not latch") {
+		t.Fatalf("logs = %v, want the failed latch named", f.logs)
+	}
+}
+
+func TestHeldMaterializationEscalationThatCannotEnqueueIsLoud(t *testing.T) {
+	// Arrange.
+	f := newFixture(t, filepath.Join(t.TempDir(), "jobs.json"))
+	parkOnHost(t, f, "stuck")
+	f.manager.cfg.Store = &faultyStore{JobStore: f.store, failEnqueueAction: true}
+
+	// Act.
+	f.advance(defaultMaterializationHeldDeadline)
+	if err := f.manager.SweepAwaitingHost(context.Background()); err != nil {
+		t.Fatalf("SweepAwaitingHost: %v", err)
+	}
+
+	// Assert.
+	if !f.loggedErrorFormat("HELD MATERIALIZATION NOT SURFACED") {
+		t.Fatalf("error records = %v, want the unsurfaceable escalation reported as a fault", f.errorLogs)
+	}
+}
+
+func TestHeldMaterializationNoticeIsRetainedWhenTheHostRefusesIt(t *testing.T) {
+	// Arrange: a host that cannot take the notice right now must not cause the
+	// notice to be lost — it stays pending for the next drain.
+	f := newFixture(t, filepath.Join(t.TempDir(), "jobs.json"))
+	parkOnHost(t, f, "stuck")
+	f.actions.err = errors.New("host is gone")
+
+	// Act.
+	f.advance(defaultMaterializationHeldDeadline)
+	if err := f.manager.SweepAwaitingHost(context.Background()); err != nil {
+		t.Fatalf("SweepAwaitingHost: %v", err)
+	}
+
+	// Assert.
+	pending, err := f.store.PendingHostActions()
+	if err != nil {
+		t.Fatalf("PendingHostActions: %v", err)
+	}
+	found := false
+	for _, action := range pending {
+		if action.ID == "stuck:materialization-held" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("pending host actions = %+v, want the retained held-materialization notice", pending)
+	}
+}
+
+func TestHostActionWorkerRunsTheAwaitingHostSweep(t *testing.T) {
+	// Arrange: the sweep must be owned by the worker that owns host
+	// publication, not by a caller that happens to remember to run it.
+	f := newFixture(t, filepath.Join(t.TempDir(), "jobs.json"))
+	parkOnHost(t, f, "worker")
+	before := f.available.calls
+	f.advance(defaultMaterializationRequestInterval)
+
+	// Act: exactly what RunHostActionWorker does on one wake.
+	f.manager.RouteHostActions()
+	for f.manager.drainHostOnce(context.Background()) {
+	}
+
+	// Assert.
+	if f.available.calls != before+1 {
+		t.Fatalf("available publishes = %d, want %d", f.available.calls, before+1)
 	}
 }

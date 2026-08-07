@@ -438,12 +438,22 @@ func (l *Logger) With(kv ...any) *Logger {
 }
 
 // Log is the legacy normal-emission adapter. New code uses EmitNormal.
-func (l *Logger) Log(format string, args ...any) { l.legacyEmit(Normal, format, args...) }
+func (l *Logger) Log(format string, args ...any) { l.legacyEmit(LevelInfo, Normal, format, args...) }
+
+// LogError is Log at ERROR severity. It exists because a subsystem wired with
+// only a Logf callback had no way to say a record was a fault: everything it
+// emitted landed at info, which is how a durable failure ends up indexed beside
+// routine chatter and invisible to a level filter.
+func (l *Logger) LogError(format string, args ...any) {
+	l.legacyEmit(LevelError, Normal, format, args...)
+}
 
 // LogVerbose is the legacy verbose-emission adapter. New code uses EmitVerbose.
-func (l *Logger) LogVerbose(format string, args ...any) { l.legacyEmit(Verbose, format, args...) }
+func (l *Logger) LogVerbose(format string, args ...any) {
+	l.legacyEmit(LevelInfo, Verbose, format, args...)
+}
 
-func (l *Logger) legacyEmit(verbosity Verbosity, format string, args ...any) {
+func (l *Logger) legacyEmit(level Level, verbosity Verbosity, format string, args ...any) {
 	if l == nil {
 		panic("dlog: log called on nil Logger")
 	}
@@ -452,7 +462,7 @@ func (l *Logger) legacyEmit(verbosity Verbosity, format string, args ...any) {
 	if operation == "" {
 		operation = "daemon.legacy"
 	}
-	event := Event{Runtime: daemonRuntime, Level: LevelInfo, Operation: operation, Message: fmt.Sprintf(format, args...), Context: context}
+	event := Event{Runtime: daemonRuntime, Level: level, Operation: operation, Message: fmt.Sprintf(format, args...), Context: context}
 	var err error
 	if verbosity == Normal {
 		err = l.EmitNormal(GlobalScope(), event)
@@ -485,6 +495,15 @@ func Legacy(l *Logger) Logf {
 		panic("dlog: Legacy requires Logger")
 	}
 	return l.Log
+}
+
+// LegacyError is Legacy at ERROR severity, for the failure channel of a
+// subsystem that is still injected with plain callbacks.
+func LegacyError(l *Logger) Logf {
+	if l == nil {
+		panic("dlog: LegacyError requires Logger")
+	}
+	return l.LogError
 }
 
 const OutputClampLen = 2000
