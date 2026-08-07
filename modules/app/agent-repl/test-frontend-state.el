@@ -701,7 +701,7 @@ is demonstrably answering."
        :catalogs ((:workspace "a" :tasks nil))))
     ;; Assert — the workspace state applied AND the session view is stored.
     (should (eq (agent-repl--ws-get "a" :pushed-render-state) :idle))
-    (should (equal (plist-get (agent-repl--frontend-session-view "s_a") :model) "haiku"))))
+    (should (equal (plist-get (agent-repl--frontend-session-view "a") :model) "haiku"))))
 
 (ert-deftest agent-repl-test-apply-snapshot-rebuilds-session-store ()
   "A snapshot REBUILDS the roster wholesale, dropping stale entries a bounced
@@ -717,8 +717,8 @@ daemon no longer knows."
     (agent-repl-test--apply-snapshot
      '(:workspaces nil :sessions ((:sessionId "s_new" :workspace "a"))))
     ;; Assert — the stale entry is gone, only the snapshot's roster remains.
-    (should-not (agent-repl--frontend-session-view "s_stale"))
-    (should (agent-repl--frontend-session-view "s_new"))))
+    (should-not (agent-repl--frontend-session-view "old"))
+    (should (agent-repl--frontend-session-view "a"))))
 
 (ert-deftest agent-repl-test-snapshot-replaces-workspace-state-safety-store ()
   "A reconnect snapshot drops raw states the daemon no longer reports."
@@ -853,8 +853,8 @@ daemon no longer knows."
 
 ;;;; ---- SessionView store + handler -------------------------------------
 
-(ert-deftest agent-repl-test-apply-session-view-stores-by-id ()
-  "The sessionView handler upserts the view into the store, keyed by id."
+(ert-deftest agent-repl-test-apply-session-view-stores-by-workspace ()
+  "The sessionView handler upserts the view into the store, keyed by workspace."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (agent-repl-test--register-ws "ws1")
@@ -865,28 +865,61 @@ daemon no longer knows."
     (agent-repl--frontend-apply-session-view
      '(:sessionId "s_1" :workspace "/w" :claudeSessionId "cli-1"))
     ;; Assert
-    (should (equal (plist-get (agent-repl--frontend-session-view "s_1") :claudeSessionId) "cli-1"))))
+    (should (equal (plist-get (agent-repl--frontend-session-view "/w") :claudeSessionId) "cli-1"))))
 
-(ert-deftest agent-repl-test-store-session-view-missing-id-errors ()
-  "A SessionView with no id fails loudly (No-Silent-Fallbacks)."
+(ert-deftest agent-repl-test-store-session-view-missing-workspace-errors ()
+  "A SessionView with no workspace fails loudly (No-Silent-Fallbacks).
+The workspace is the key the store is indexed by, so a view without one
+cannot be filed at all."
   ;; Arrange / Act / Assert
-  (should-error (agent-repl--frontend-store-session-view '(:workspace "/w"))))
+  (should-error (agent-repl--frontend-store-session-view '(:sessionId "s_1"))))
 
-(ert-deftest agent-repl-test-live-session-id-for-cwd-finds-non-terminal ()
-  "The cwd correlation returns the non-terminal session bound to that cwd."
+(ert-deftest agent-repl-test-store-session-view-keeps-the-live-session ()
+  "A superseded predecessor never displaces the live session it lost to.
+The daemon re-pushes every terminal view on each snapshot, in no
+guaranteed order, so a predecessor arriving after its successor must not
+retire a session that is running."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (agent-repl-test--register-ws "ws1")
-    (agent-repl-test--register-ws "a")
-    (agent-repl-test--register-ws "b")
+    (clrhash agent-repl--frontend-session-views)
+    (agent-repl--frontend-store-session-view '(:sessionId "s_live" :workspace "/w"))
+    ;; Act — the retired predecessor lands afterwards.
+    (agent-repl--frontend-store-session-view
+     '(:sessionId "s_dead" :workspace "/w" :terminal t))
+    ;; Assert
+    (should (equal (plist-get (agent-repl--frontend-session-view "/w") :sessionId) "s_live"))
+    (should (agent-repl--frontend-workspace-session-live-p "/w"))))
+
+(ert-deftest agent-repl-test-store-session-view-records-its-own-death ()
+  "A session's own terminal view replaces the live one it reports on.
+Only a DIFFERENT session's terminal view is a superseded predecessor."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    (clrhash agent-repl--frontend-session-views)
+    (agent-repl--frontend-store-session-view '(:sessionId "s_1" :workspace "/w"))
+    ;; Act
+    (agent-repl--frontend-store-session-view
+     '(:sessionId "s_1" :workspace "/w" :terminal t))
+    ;; Assert
+    (should-not (agent-repl--frontend-workspace-session-live-p "/w"))))
+
+(ert-deftest agent-repl-test-store-session-view-successor-replaces-predecessor ()
+  "A live successor replaces whatever the workspace held before it."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
     (clrhash agent-repl--frontend-session-views)
     (agent-repl--frontend-store-session-view '(:sessionId "s_dead" :workspace "/w" :terminal t))
+    ;; Act
     (agent-repl--frontend-store-session-view '(:sessionId "s_live" :workspace "/w"))
-    ;; Act / Assert — the terminal one is skipped, the live one is returned.
-    (should (equal (agent-repl--frontend-live-session-id-for-cwd "/w") "s_live"))))
+    ;; Assert — one entry per workspace, and it is the current session.
+    (should (equal (plist-get (agent-repl--frontend-session-view "/w") :sessionId) "s_live"))
+    (should (= (hash-table-count agent-repl--frontend-session-views) 1))))
 
-(ert-deftest agent-repl-test-live-session-id-for-cwd-nil-when-none ()
-  "The cwd correlation returns nil when no live session is bound to the cwd."
+(ert-deftest agent-repl-test-session-view-nil-for-unknown-workspace ()
+  "The store reports nothing for a workspace no view has been pushed for."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (agent-repl-test--register-ws "ws1")
@@ -894,7 +927,8 @@ daemon no longer knows."
     (agent-repl-test--register-ws "b")
     (clrhash agent-repl--frontend-session-views)
     ;; Act / Assert
-    (should (null (agent-repl--frontend-live-session-id-for-cwd "/nope")))))
+    (should (null (agent-repl--frontend-session-view "/nope")))
+    (should-not (agent-repl--frontend-workspace-session-live-p "/nope"))))
 
 (ert-deftest agent-repl-test-apply-daemon-view-notes-boot-id ()
   "The daemonView handler routes its bootId into `--frontend-note-boot-id'."
@@ -995,8 +1029,8 @@ daemon no longer knows."
 
 ;;;; ---- SessionInit store + handler (slash-menu source) -----------------
 
-(ert-deftest agent-repl-test-apply-session-init-stores-by-id ()
-  "The sessionInit handler stores its SystemInit keyed by session id."
+(ert-deftest agent-repl-test-apply-session-init-stores-by-workspace ()
+  "The sessionInit handler stores its SystemInit keyed by workspace."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (agent-repl-test--register-ws "ws1")
@@ -1007,13 +1041,14 @@ daemon no longer knows."
     (agent-repl--frontend-apply-session-init
      '(:sessionId "s_1" :workspace "/w" :init (:slashCommands ("commit" "review"))))
     ;; Assert
-    (should (equal (plist-get (agent-repl--frontend-session-init "s_1") :slashCommands)
+    (should (equal (plist-get (agent-repl--frontend-session-init "/w") :slashCommands)
                    '("commit" "review")))))
 
-(ert-deftest agent-repl-test-store-session-init-missing-id-errors ()
-  "A SessionInitView with no id fails loudly (No-Silent-Fallbacks)."
+(ert-deftest agent-repl-test-store-session-init-missing-workspace-errors ()
+  "A SessionInitView with no workspace fails loudly (No-Silent-Fallbacks)."
   ;; Arrange / Act / Assert
-  (should-error (agent-repl--frontend-store-session-init '(:workspace "/w" :init (:slashCommands ())))))
+  (should-error (agent-repl--frontend-store-session-init
+                 '(:sessionId "s_1" :init (:slashCommands ())))))
 
 (ert-deftest agent-repl-test-session-init-nil-for-unknown ()
   "The session-init accessor returns nil for a session with no pushed init."
@@ -1022,7 +1057,7 @@ daemon no longer knows."
     (agent-repl-test--register-ws "a")
     (agent-repl-test--register-ws "b")
     (clrhash agent-repl--frontend-session-inits)
-    (should (null (agent-repl--frontend-session-init "s_nope")))))
+    (should (null (agent-repl--frontend-session-init "/nowhere")))))
 
 (ert-deftest agent-repl-test-apply-snapshot-rebuilds-session-inits ()
   "A StateSnapshot rebuilds the session-init roster from its :inits list."
@@ -1033,13 +1068,13 @@ daemon no longer knows."
     (clrhash agent-repl--frontend-session-inits)
     ;; Arrange — a stale init that the snapshot must drop.
     (agent-repl--frontend-store-session-init
-     '(:sessionId "s_stale" :init (:slashCommands ("old"))))
+     '(:workspace "/stale" :init (:slashCommands ("old"))))
     ;; Act
     (agent-repl-test--apply-snapshot
-     '(:inits ((:sessionId "s_new" :init (:slashCommands ("new"))))))
+     '(:inits ((:workspace "/new" :init (:slashCommands ("new"))))))
     ;; Assert — stale gone, new present.
-    (should-not (agent-repl--frontend-session-init "s_stale"))
-    (should (equal (plist-get (agent-repl--frontend-session-init "s_new") :slashCommands)
+    (should-not (agent-repl--frontend-session-init "/stale"))
+    (should (equal (plist-get (agent-repl--frontend-session-init "/new") :slashCommands)
                    '("new")))))
 
 (ert-deftest agent-repl-test-state-registers-session-init-handler ()

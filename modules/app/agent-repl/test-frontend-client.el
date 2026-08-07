@@ -256,7 +256,7 @@ belongs to the daemon."
     (let (success failure)
       (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&optional _force) t))
                 ((symbol-function 'agent-repl--frontend-after-ready) (lambda (ok _fail &optional _ws) (funcall ok) :ready))
-                ((symbol-function 'agent-repl--frontend-session-live-p) (lambda (_id) t))
+                ((symbol-function 'agent-repl--frontend-workspace-session-live-p) (lambda (_key) t))
                 ((symbol-function 'agent-repl--frontend-after-open-workspace)
                  (lambda (_ws ok _fail) (funcall ok) :pending)))
         (should (eq :pending (agent-repl--frontend-after-ensure-session
@@ -272,7 +272,7 @@ belongs to the daemon."
       (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&rest _) t))
                 ((symbol-function 'agent-repl--frontend-after-ready)
                  (lambda (ok _fail &optional _ws) (funcall ok) :ready))
-                ((symbol-function 'agent-repl--frontend-session-live-p) (lambda (_id) t))
+                ((symbol-function 'agent-repl--frontend-workspace-session-live-p) (lambda (_key) t))
                 ((symbol-function 'agent-repl--frontend-after-open-workspace)
                  (lambda (&rest _) (setq opened t))))
         (agent-repl--frontend-after-ensure-session
@@ -401,25 +401,25 @@ nack can name the link that is still pending."
 ;;;; ---- session health as a diagnostic ----------------------------------------
 
 (ert-deftest agent-repl-test-frontend-session-live-p-true-for-listed ()
-  "A stored, non-terminal SessionView is live."
+  "A workspace whose stored SessionView is non-terminal is live."
   ;; Arrange
   (agent-repl-test--with-views '((:sessionId "s_1" :workspace "/w"))
     ;; Act / Assert
-    (should (agent-repl--frontend-session-live-p "s_1"))))
+    (should (agent-repl--frontend-workspace-session-live-p "/w"))))
 
 (ert-deftest agent-repl-test-frontend-session-live-p-nil-for-terminal ()
-  "A terminal SessionView is not live."
+  "A workspace whose stored SessionView is terminal is not live."
   ;; Arrange
   (agent-repl-test--with-views '((:sessionId "s_1" :workspace "/w" :terminal t))
     ;; Act / Assert
-    (should-not (agent-repl--frontend-session-live-p "s_1"))))
+    (should-not (agent-repl--frontend-workspace-session-live-p "/w"))))
 
 (ert-deftest agent-repl-test-frontend-session-live-p-nil-for-unlisted ()
-  "An id with no stored SessionView is not live."
+  "A workspace with no stored SessionView is not live."
   ;; Arrange
   (agent-repl-test--with-views '()
     ;; Act / Assert
-    (should-not (agent-repl--frontend-session-live-p "ghost"))))
+    (should-not (agent-repl--frontend-workspace-session-live-p "/ghost"))))
 
 ;;;; ---- wait-ready -------------------------------------------------------------
 
@@ -479,7 +479,7 @@ daemon that may be gone."
     (should-not (agent-repl--gui-running-p "ws2"))))
 
 (ert-deftest agent-repl-test-frontend-turn-active-sessions-extracts-busy-ids ()
-  "An active workspace resolves its live agent session by workspace path."
+  "An active workspace with a live session is reported busy, by path."
   (let ((agent-repl--frontend-workspace-state-views
          (make-hash-table :test 'equal)))
     (puthash "/w1"
@@ -490,7 +490,7 @@ daemon that may be gone."
              agent-repl--frontend-workspace-state-views)
     (agent-repl-test--with-views '((:sessionId "s_busy" :workspace "/w1")
                                    (:sessionId "s_idle" :workspace "/w2"))
-      (should (equal (agent-repl--frontend-turn-active-sessions) '("s_busy"))))))
+      (should (equal (agent-repl--frontend-turn-active-sessions) '("/w1"))))))
 
 (ert-deftest agent-repl-test-frontend-turn-active-sessions-skips-terminal ()
   "A terminal session is never counted busy for its active workspace."
@@ -502,7 +502,7 @@ daemon that may be gone."
              agent-repl--frontend-workspace-state-views)
     (agent-repl-test--with-views '((:sessionId "s_zombie" :workspace "/w1" :terminal t)
                                    (:sessionId "s_live" :workspace "/w2"))
-      (should (equal (agent-repl--frontend-turn-active-sessions) '("s_live"))))))
+      (should (equal (agent-repl--frontend-turn-active-sessions) '("/w2"))))))
 
 (ert-deftest agent-repl-test-frontend-turn-active-sessions-ignores-stale-local-binding ()
   "A stale local binding cannot turn an idle authoritative workspace busy."
@@ -534,8 +534,8 @@ daemon that may be gone."
              agent-repl--frontend-workspace-state-views)
     (agent-repl-test--with-views
         '((:sessionId "s_busy" :workspace "/unrestored"))
-      (should (equal (agent-repl--frontend-all-turn-active-session-ids)
-                     '("s_busy"))))))
+      (should (equal (agent-repl--frontend-all-turn-active-workspaces)
+                     '("/unrestored"))))))
 
 (ert-deftest agent-repl-test-frontend-all-turn-active-skips-terminal-session ()
   "A terminal session cannot block the coordinated startup restart."
@@ -546,7 +546,7 @@ daemon that may be gone."
              agent-repl--frontend-workspace-state-views)
     (agent-repl-test--with-views
         '((:sessionId "s_dead" :workspace "/old" :terminal t))
-      (should-not (agent-repl--frontend-all-turn-active-session-ids)))))
+      (should-not (agent-repl--frontend-all-turn-active-workspaces)))))
 
 ;;;; ---- reattach loop -----------------------------------------------------------
 
