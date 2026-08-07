@@ -26,6 +26,9 @@
 (declare-function agent-repl--frontend-runtime-bounce-preflight-async "daemon" (callback))
 (declare-function agent-repl--log "core" (ws fmt &rest args))
 (declare-function agent-repl--log-verbose "core" (ws fmt &rest args))
+(declare-function agent-repl--backend-phase "core" (ws fmt &rest args))
+(declare-function agent-repl--backend-output-tail "core" (output &optional lines))
+(declare-function agent-repl--logfile-path "core" ())
 (declare-function agent-repl-uds-disconnect "frontend-uds" ())
 (declare-function agent-repl--frontend-invalidate-daemon-view "frontend-state" (reason))
 
@@ -155,6 +158,13 @@ terminal latch timeout and is restored when the latch returns."
                      verb label service exit-code
                      (if (string-empty-p output) "<empty>" output))
     (unless (eq exit-code 0)
+      ;; `call-process' merged launchctl's stderr into the capture buffer, so
+      ;; the refusal text is already in the durable record above.  The echo
+      ;; line names the phase and carries only its tail.
+      (agent-repl--backend-phase
+       nil "launchctl %s FAILED for %s (exit %s): %s — full output in %s"
+       verb label exit-code (agent-repl--backend-output-tail output)
+       (agent-repl--logfile-path))
       (agent-repl--error nil
                          "launchd service %s failed `%s' (exit %s): %s"
                          label verb exit-code
@@ -263,24 +273,32 @@ validated both jobs before building any runtime artifact."
                          "shim service build completed without both binaries: store=%s present=%s sidecar=%s present=%s"
                          agent-repl--shim-store-binary (if store-present "t" "nil")
                          agent-repl--shim-sidecar-binary (if sidecar-present "t" "nil"))))
+  (agent-repl--backend-phase nil "bouncing the store service…")
   (agent-repl--shim-services-launchctl "kickstart" agent-repl--shim-store-label)
   (agent-repl--shim-store-after-ready
    (lambda ()
      (condition-case err
          (progn
            (agent-repl--shim-service-record-deployed agent-repl--shim-store-binary)
+           (agent-repl--backend-phase nil "store up; bouncing the sidecar service…")
            (agent-repl--shim-services-launchctl "kickstart" agent-repl--shim-sidecar-label)
            (agent-repl--shim-service-record-deployed agent-repl--shim-sidecar-binary)
            (agent-repl--log nil "shim-services bounce complete: store=%s sidecar=%s"
                             agent-repl--shim-store-label agent-repl--shim-sidecar-label)
+           (agent-repl--backend-phase nil "store and sidecar services up")
            (funcall on-success))
        (error
         (let ((detail (error-message-string err)))
           (agent-repl--log nil "shim-services bounce FAILED after store readiness: %s" detail)
+          (agent-repl--backend-phase
+           nil "sidecar service bounce FAILED: %s — full output in %s"
+           detail (agent-repl--logfile-path))
           (funcall on-failure detail)))))
    (lambda (detail)
      (agent-repl--log nil "shim-services bounce FAILED before sidecar: %s" detail)
-     (message "agent-repl: shim service bounce failed: %s" detail)
+     (agent-repl--backend-phase
+      nil "store service never came up: %s — full output in %s"
+      detail (agent-repl--logfile-path))
      (funcall on-failure detail)))
   :pending)
 
@@ -310,6 +328,8 @@ receives the first diagnostic and no later stage starts."
   (agent-repl--assert-main-thread "runtime-restart")
   (unless (and (functionp on-success) (functionp on-failure))
     (error "agent-repl: runtime preparation requires callable continuations"))
+  (agent-repl--backend-phase nil "backend %s beginning…"
+                             (if rebind "restart" "startup"))
   (let ((started (float-time)) settled)
     (cl-labels
         ((fail (detail)
@@ -318,7 +338,10 @@ receives the first diagnostic and no later stage starts."
              (agent-repl--log nil
                               "runtime-prepare: FAILED rebind=%s elapsed=%.3fs detail=%s"
                               (if rebind "t" "nil") (- (float-time) started) detail)
-             (message "agent-repl: runtime preparation failed: %s" detail)
+             (agent-repl--backend-phase
+              nil "backend %s FAILED: %s — full output in %s"
+              (if rebind "restart" "startup") detail
+              (agent-repl--logfile-path))
              (funcall on-failure detail)))
          (complete (&optional rebound)
            (unless settled
@@ -328,6 +351,9 @@ receives the first diagnostic and no later stage starts."
                               (if rebind "restart" "startup") rebound
                               (- (float-time) started)
                               agent-repl--shim-store-label agent-repl--shim-sidecar-label)
+             (agent-repl--backend-phase nil "backend %s complete (%.1fs)"
+                                        (if rebind "restart" "startup")
+                                        (- (float-time) started))
              (funcall on-success)))
          (after-daemon-bounce ()
            (agent-repl--frontend-after-ready
@@ -393,7 +419,10 @@ to reattach to.  The default PRESERVES them; see
                    (if stop-shims "t" "nil"))
   (agent-repl--runtime-prepare
    t
-   (lambda () (message "agent-repl: runtime restart complete"))
+   ;; `agent-repl--runtime-prepare' already echoes the terminal phase line
+   ;; with its elapsed time; a second completion message here would only
+   ;; overwrite it with less information.
+   #'ignore
    (lambda (detail)
      (agent-repl--log nil "runtime-restart command: FAILED detail=%s" detail))
    (and stop-shims t)))
