@@ -613,7 +613,7 @@ stops containing failures."
     (condition-case err
         (funcall fn)
       (error
-       (agent-repl--log nil "%s: subscriber %S FAILED: %s"
+       (agent-repl--warn nil "%s: subscriber %S FAILED: %s"
                         label fn (error-message-string err))))))
 
 (defun agent-repl--uds-run-connected-hook ()
@@ -667,7 +667,7 @@ and reconnects (design §4.4)."
           (agent-repl--uds-handle-command-ack
            (list :requestId (plist-get entry :request-id)
                  :ok nil :error "UDS dial failed before command delivery")))
-        (agent-repl--log nil "uds-connect: failed proc=%s elapsed=%S event=%s"
+        (agent-repl--warn nil "uds-connect: failed proc=%s elapsed=%S event=%s"
                          (process-name proc) elapsed (string-trim event))))
         (setq agent-repl--uds-read-accumulator "")
     (agent-repl--log nil "uds-sentinel: link down — scheduling reconnect")
@@ -867,7 +867,7 @@ length of a drain batch and re-signals it afterwards."
                            (- (float-time) started)
                            (- started (plist-get entry :enqueued-at))))
       (error
-       (agent-repl--log ws "uds-send-command: FAILED field=%s request-id=%s error=%s"
+       (agent-repl--warn ws "uds-send-command: FAILED field=%s request-id=%s error=%s"
                         (plist-get entry :field) (plist-get entry :request-id)
                         (error-message-string err))
        (agent-repl--uds-handle-command-ack

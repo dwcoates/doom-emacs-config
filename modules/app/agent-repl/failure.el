@@ -373,7 +373,7 @@ Returns the text echoed, or nil when the failure was resolved."
                            (plist-get failure :item-uuid)
                            text)
           nil)
-      (agent-repl--log workspace
+      (agent-repl--warn workspace
                        "failure OPEN class=%s type=%s resolved-at=%S item-uuid=%S: %s"
                        (plist-get failure :class)
                        (plist-get failure :type)

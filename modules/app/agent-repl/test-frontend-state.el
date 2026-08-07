@@ -800,7 +800,7 @@ daemon no longer knows."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (let (logged)
-      (cl-letf (((symbol-function 'agent-repl--log)
+      (cl-letf (((symbol-function 'agent-repl--warn)
                  (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged)))
                 ((symbol-function 'agent-repl--workspace-create-handle-host-action)
                  (lambda (_item) (error "no live workspace owns that dir")))
@@ -1127,7 +1127,12 @@ Only a DIFFERENT session's terminal view is a superseded predecessor."
                  :death (:errorClass "ERROR_CLASS_INTERNAL"
                          :errorType "session.shim_died"
                          :message "the agent process exited"))))
-     (cl-letf (((symbol-function 'message) (lambda (&rest _) (setq count (1+ count)))))
+     ;; Only echo-area announcements count.  The quiet log rung the failure
+     ;; record rides (`agent-repl--warn') also goes through `message', with
+     ;; `inhibit-message' bound — that is the durable record, not an
+     ;; announcement, so it must not read as re-announcing the death.
+     (cl-letf (((symbol-function 'message)
+                (lambda (&rest _) (unless inhibit-message (setq count (1+ count))))))
        ;; Act
        (agent-repl--frontend-apply-session-view view)
        (agent-repl--frontend-apply-session-view view)
@@ -1872,6 +1877,38 @@ first."
                               :shutdownHold (:scheduleId "sch-8")))))))
       ;; Assert
       (should (eq (agent-repl--ws-get "ws1" :pushed-render-state) :idle)))))
+
+(ert-deftest agent-repl-test-apply-snapshot-item-failure-records-at-the-warn-rung ()
+  "A CONTAINED per-item apply failure is recorded at `warn', not below it.
+The item's state never applied, so the containment is a UX regression the
+warning sweeps must see — containment is about not aborting the resync,
+never about lowering the severity."
+  ;; Arrange
+  (let (levels)
+    (cl-letf (((symbol-function 'agent-repl--persist-log-record)
+               (lambda (_ws level _verbosity fmt _args)
+                 (when (string-match-p "item FAILED" fmt)
+                   (push level levels))))
+              ((symbol-function 'agent-repl--emit-message) (lambda (&rest _) nil)))
+      ;; Act
+      (agent-repl--frontend-apply-snapshot-items
+       "session" '((:sessionId "s1")) '(:sessionId)
+       (lambda (_item) (error "apply blew up")))
+      ;; Assert
+      (should (equal levels '("warn"))))))
+
+(ert-deftest agent-repl-test-apply-snapshot-item-failure-stays-contained ()
+  "The warn rung does not change the containment: the resync still counts on."
+  ;; Arrange / Act
+  (let ((failures
+         (cl-letf (((symbol-function 'agent-repl--persist-log-record)
+                    (lambda (&rest _) nil))
+                   ((symbol-function 'agent-repl--emit-message) (lambda (&rest _) nil)))
+           (agent-repl--frontend-apply-snapshot-items
+            "session" '((:sessionId "s1") (:sessionId "s2")) '(:sessionId)
+            (lambda (_item) (error "apply blew up"))))))
+    ;; Assert
+    (should (= failures 2))))
 
 (ert-deftest agent-repl-test-shutdown-schedule-handler-is-registered ()
   "The lease arm is wired to its handler, not left as unfinished wiring."

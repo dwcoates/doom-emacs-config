@@ -716,7 +716,7 @@ webview OURS never drift apart:
     (condition-case err
         (run-hooks 'agent-repl-frontend-webview-adopt-hook)
       (error
-       (agent-repl--log nil "frontend webview adopt-hook failed buffer=%s err=%S"
+       (agent-repl--warn nil "frontend webview adopt-hook failed buffer=%s err=%S"
                         name err))))
   buf)
 
@@ -915,7 +915,7 @@ panel."
             (buf (agent-repl--frontend-ensure-webview-buffer ws url)))
        (agent-repl--frontend-display-webview ws buf)
        (agent-repl--log ws "gui-open: outcome=displayed buf=%s" buf)))
-   (lambda (detail) (agent-repl--log ws "gui-open: FAILED detail=%s" detail)))
+   (lambda (detail) (agent-repl--warn ws "gui-open: FAILED detail=%s" detail)))
   :pending)
 
 (defun agent-repl--gui-boot (ws &optional _project-dir-hint _active-env-hint)
@@ -948,7 +948,7 @@ hydrated the environment with them, and the gui reads WS's
   (agent-repl--frontend-after-ensure-session
    ws
    (lambda () (agent-repl--log ws "gui-boot: outcome=established"))
-   (lambda (detail) (agent-repl--log ws "gui-boot: FAILED detail=%s" detail)))
+   (lambda (detail) (agent-repl--warn ws "gui-boot: FAILED detail=%s" detail)))
   :pending)
 
 (defun agent-repl--frontend-webview-url (ws)
@@ -1011,7 +1011,7 @@ current bundle anyway.  Returns the new buffer when a remount happened."
              (let ((new (agent-repl--frontend-ensure-webview-buffer ws url)))
                (agent-repl--log ws "remount-webview: reloaded bundle ws=%s" ws)
                (when (window-live-p win) (set-window-buffer win new)))))
-         (lambda (detail) (agent-repl--log ws "remount-webview: FAILED detail=%s" detail)))
+         (lambda (detail) (agent-repl--warn ws "remount-webview: FAILED detail=%s" detail)))
         :pending))))
 
 (defun agent-repl--frontend-remount-all-webviews ()
@@ -1119,7 +1119,7 @@ a hibernated workspace is brought up before its UI can look available."
        (if (buffer-live-p buf)
            (agent-repl--frontend-display-webview ws buf)
          (agent-repl--gui-open ws))))
-   (lambda (detail) (agent-repl--log ws "gui-show: FAILED detail=%s" detail)))
+   (lambda (detail) (agent-repl--warn ws "gui-show: FAILED detail=%s" detail)))
   :pending)
 
 (defun agent-repl--gui-hide (ws)

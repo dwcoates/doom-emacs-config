@@ -2444,7 +2444,7 @@ caller is told to proceed."
                               agent-repl-state-stale-threshold)
     t)
    (t
-    (agent-repl--log nil "update-in-flight-p: stale flag (%.2fs old), force-clearing"
+    (agent-repl--warn nil "update-in-flight-p: stale flag (%.2fs old), force-clearing"
                       (- (float-time) agent-repl--update-in-flight))
     (setq agent-repl--update-in-flight nil)
     nil)))
@@ -2517,7 +2517,7 @@ recurses directly instead of via `run-at-time'."
              ws (agent-repl--ws-live-p ws)
              (agent-repl--ws-get ws :project-dir)))
         (error
-         (agent-repl--log ws "update-all-workspace-states--step: error ws=%s err=%S"
+         (agent-repl--warn ws "update-all-workspace-states--step: error ws=%s err=%S"
                            ws err)))
       (if rest
           (if agent-repl--update-spread-sync
