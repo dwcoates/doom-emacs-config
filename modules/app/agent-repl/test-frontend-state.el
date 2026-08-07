@@ -1205,6 +1205,27 @@ Only a DIFFERENT session's terminal view is a superseded predecessor."
        ;; Assert
        (should (null echoed))))))
 
+(ert-deftest agent-repl-test-resolved-supersede-death-is-silent-with-string-instant ()
+  "A protojson STRING resolution instant applies and stays silent.
+protojson encodes int64 as a JSON string, so the daemon's own frames
+carry `resolvedAtMs' as \"1786127506030\" — the shape that made every
+session-view item fail to apply at boot."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+   (clrhash agent-repl--frontend-surfaced-deaths)
+   (let (echoed)
+     (cl-letf (((symbol-function 'message)
+                (lambda (fmt &rest args) (setq echoed (apply #'format fmt args)))))
+       ;; Act
+       (agent-repl--frontend-apply-session-view
+        '(:sessionId "s1" :workspace "/w" :terminal t
+          :death (:errorClass "ERROR_CLASS_INTERNAL"
+                  :errorType "session.superseded"
+                  :message "a new Claude session was started for this workspace"
+                  :itemUuid "death:s1" :resolvedAtMs "1786127506030")))
+       ;; Assert
+       (should (null echoed))))))
+
 ;;;; ---- Handler registration wiring -------------------------------------
 
 (ert-deftest agent-repl-test-state-load-does-not-dial-before-lazy-daemon ()

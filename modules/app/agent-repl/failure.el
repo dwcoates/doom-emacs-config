@@ -32,6 +32,8 @@
 (require 'cl-lib)
 (require 'subr-x)
 
+(declare-function agent-repl--frontend-int64 "frontend-state" (raw))
+
 ;;;; ---- Namespace partition ---------------------------------------------
 
 (defconst agent-repl-failure-client-prefix "client."
@@ -113,6 +115,27 @@ a mis-colored failure rather than a missing one."
 
 ;;;; ---- Construction ----------------------------------------------------
 
+(defun agent-repl-failure--resolved-at (item)
+  "Return decoded `SystemFailureItem' ITEM's `resolved_at_ms' as a NUMBER.
+
+protojson encodes int64 as a JSON STRING, so a daemon-sent resolution
+instant arrives here as \"1786127506030\" while a hand-built test frame
+carries 1786127506030.  Both are the same fact, and every consumer of
+`:resolved-at' does arithmetic on it (`agent-repl-failure-surface' asks
+whether it is positive), so the coercion belongs at this decode boundary
+rather than at each crash site.
+
+Absence is 0 — protojson omits a zero-valued int64, so \"unresolved\" and
+\"field absent\" are the same wire fact.  A PRESENT but uncoercible value
+is not defaulted away: it signals, because a resolution instant that
+cannot be read would silently downgrade a settled failure into a
+permanent alarm."
+  (let ((raw (plist-get item :resolvedAtMs)))
+    (if (null raw)
+        0
+      (or (agent-repl--frontend-int64 raw)
+          (error "agent-repl failure: unreadable resolved_at_ms %S" raw)))))
+
 (defun agent-repl-failure-from-wire (item)
   "Normalize a decoded `SystemFailureItem' ITEM plist into a failure plist.
 
@@ -126,7 +149,7 @@ the type and the prose are the daemon's verdict."
          (type (or (plist-get item :errorType) ""))
          (message (or (plist-get item :message) ""))
          (detail (or (plist-get item :sourceDetail) ""))
-         (resolved-at (or (plist-get item :resolvedAtMs) 0))
+         (resolved-at (agent-repl-failure--resolved-at item))
          (item-uuid (or (plist-get item :itemUuid) ""))
          (session-resume (plist-get item :sessionResume)))
     (agent-repl--log nil
