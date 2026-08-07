@@ -155,6 +155,16 @@ type AgentShimConfig struct {
 	// quiescent and bounce over every surviving mid-turn shim. Satisfied by
 	// RegistryDrainEvidence.
 	DrainEvidence DrainEvidenceSource
+	// CommandLatency persists one lifecycle-timing record per completed
+	// frontend command: its ack and processing durations, and the command
+	// queue depth at receipt. main always supplies it; a focused harness that
+	// leaves it nil gets a loud construction line from frontend.New and no
+	// telemetry, never a silently timed daemon.
+	CommandLatency frontend.CommandLatencyRecorder
+	// AckWarnThreshold is the ack latency at which a command's lifecycle
+	// record is raised from debug to warn. Non-positive uses the frontend
+	// package's default.
+	AckWarnThreshold time.Duration
 	// Logf is the daemon logger. Nil discards.
 	Logf func(string, ...any)
 	// LogVerbosef persists frequent lease-success diagnostics without forcing
@@ -552,6 +562,13 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 	}
 	publicationAllowed := sessionPublicationGate(cfg.WorkspaceCreation, logf)
 	handler.clientLogs = cfg.ClientLogs
+	// An unwired recorder is stated rather than assumed. main always supplies
+	// one; a focused harness legitimately does not, and the difference between
+	// those two cases must not be something an operator has to infer from an
+	// absent record.
+	if cfg.CommandLatency == nil {
+		logf("server: frontend command lifecycle latency telemetry is NOT wired; per-command ack and processing durations, and the command queue depth at receipt, will not be recorded")
+	}
 
 	// The daemon-side merge ingress. It shares the handler above so a dispatched
 	// merge and a frontend merge record the same phases through the same sink.
@@ -573,6 +590,8 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 		State:                     snapshots,
 		Handler:                   handler,
 		SessionPublicationAllowed: publicationAllowed,
+		CommandLatency:            cfg.CommandLatency,
+		AckWarnThreshold:          cfg.AckWarnThreshold,
 	})
 
 	// THE DRAIN LEASE, constructed last because it needs the frontend server to
