@@ -85,6 +85,8 @@ type discardShimLogger struct{}
 func (discardShimLogger) Log(string, ...any)        {}
 func (discardShimLogger) LogVerbose(string, ...any) {}
 
+func (discardShimLogger) LogLifecycle(string, ...any) {}
+
 // THE CHILD RUNS IN THE CANONICAL WORKSPACE, not in whatever alias the caller
 // happened to hold: the workspace identity the log targets are keyed by is the
 // resolved directory, and a child running under the alias would file its

@@ -18,6 +18,7 @@ import (
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/errclass"
 	"claude-repld/internal/progress"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/sessioncontroller"
@@ -1808,6 +1809,38 @@ func TestTargetClientLogWriterMismatchNamesReceivedAndAuthoritativeAgentReplIDs(
 
 	if err == nil || !strings.Contains(err.Error(), `got="session-retired"`) || !strings.Contains(err.Error(), `want="session-current"`) {
 		t.Fatalf("mismatch error = %v, want got and authoritative agent-repl ids", err)
+	}
+}
+
+func TestTargetClientLogWriterMismatchWrapsTheStaleIdentitySentinel(t *testing.T) {
+	// Arrange — a page that outlived its session forwards one record per log
+	// call, and each rejection used to reach the classifier as an unmatched
+	// error. The sentinel is what keeps it out of internal.unclassified.
+	workspace := t.TempDir()
+	writer, err := NewTargetClientLogWriter(dlog.NewTargetManager(), fakeClientLogIdentityResolver{
+		identity: ClientLogSessionIdentity{AgentReplSessionID: "session-current", ClaudeSessionID: "claude-current"},
+		known:    true,
+	}, io.Discard, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	context, err := structpb.NewStruct(map[string]any{
+		"timestamp": "2026-07-28T12:00:00Z", "runtime": "webapp", "level": "info", "verbosity": "normal",
+		"operation": "webapp.x", "message": "source", "context": map[string]any{}, "connection_id": "connection-1",
+		"agent_repl_session_id": "session-retired", "claude_session_id": "claude-current",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act.
+	err = writer.PersistClientLog(workspace, "request-1", &frontendv1.ClientLogCmd{
+		Level: frontendv1.ClientLogLevel_CLIENT_LOG_LEVEL_INFO, Message: "source", Context: context,
+	})
+
+	// Assert.
+	if !errors.Is(err, errclass.ErrClientLogIdentityStale) {
+		t.Fatalf("mismatch error = %v, want it to wrap the stale-identity sentinel", err)
 	}
 }
 

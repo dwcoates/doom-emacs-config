@@ -258,6 +258,15 @@ func (l *udsShimLogger) Log(format string, args ...any) {
 func (l *udsShimLogger) LogVerbose(format string, args ...any) {
 	l.emit(dlog.LevelInfo, dlog.Verbose, fmt.Sprintf(format, args...))
 }
+
+// LogLifecycle keeps the stderr pump's own bring-up and teardown at INFO. Every
+// healthy spawn writes one of each, and routing them through Log stamped a
+// level=error record on a workspace that had nothing wrong with it — the one
+// thing a level is for is telling those two cases apart. The verbosity stays
+// NORMAL: this is the context a spawn post-mortem reads first.
+func (l *udsShimLogger) LogLifecycle(format string, args ...any) {
+	l.emit(dlog.LevelInfo, dlog.Normal, fmt.Sprintf(format, args...))
+}
 func (l *udsShimLogger) MirrorShimRecord(line string) { fmt.Fprintln(l.terminal, line) }
 func main() {
 	// One-off subcommands are dispatched BEFORE any daemon bootstrap: a
