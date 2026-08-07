@@ -629,4 +629,39 @@ naturally."
           (ignore-errors (delete-window other-win)))
         (kill-buffer other-buf)))))
 
+;;;; ---- Panel-finder log routing ----
+
+(ert-deftest agent-repl-test-window-panel-window-placeholder-logs-globally ()
+  "Asking about a persp PLACEHOLDER's panel logs against the global sink.
+The workspace-switch path queries this finder for whatever perspective
+persp-mode activated, and \"main\"/\"none\" own no durable log sink."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((logged 'no-record))
+      (cl-letf (((symbol-function 'agent-repl--log-verbose)
+                 (lambda (ws &rest _)
+                   (when (eq logged 'no-record) (setq logged ws)))))
+        ;; Act
+        (agent-repl-window--panel-window :input "main"))
+      ;; Assert
+      (should (null logged)))))
+
+(ert-deftest agent-repl-test-window-panel-window-routable-ws-keeps-attribution ()
+  "Asking about a REAL workspace's panel keeps the record attributed to it."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((project (make-temp-file "agent-repl-panel-route-" t))
+          (logged 'no-record))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "ws1" :project-dir project)
+            (cl-letf (((symbol-function 'agent-repl--log-verbose)
+                       (lambda (ws &rest _)
+                         (when (eq logged 'no-record) (setq logged ws)))))
+              ;; Act
+              (agent-repl-window--panel-window :input "ws1")))
+        (delete-directory project t))
+      ;; Assert
+      (should (equal logged "ws1")))))
+
 ;;; test-window.el ends here

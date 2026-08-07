@@ -3191,4 +3191,50 @@ Screening the log name must not demote records that legitimately own a sink."
       ;; Assert
       (should (equal logged "ws1")))))
 
+;;;; ---- Tests: on-workspace-switch log routing ----
+
+(ert-deftest agent-repl-test-panels-on-workspace-switch-placeholder-logs-globally ()
+  "Activating a persp PLACEHOLDER emits no workspace-attributed record.
+`--after-persp-activated' hands this path whatever perspective persp-mode
+activated, including its own \"none\" and Doom's initial \"main\".  Neither
+owns a `:project-dir', so a record attributed to one is unroutable and
+`--note-unroutable-log-workspace' warned about it once per boot."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((unroutable nil))
+      (cl-letf* ((collect (lambda (ws &rest _)
+                            (unless (or (null ws) (agent-repl--ws-log-routable-p ws))
+                              (push ws unroutable))))
+                 ((symbol-function '+workspace-current-name) (lambda () "main"))
+                 ((symbol-function 'agent-repl--update-all-workspace-states-now) #'ignore)
+                 ((symbol-function 'agent-repl--log) collect)
+                 ((symbol-function 'agent-repl--log-verbose) collect)
+                 ((symbol-function 'agent-repl--info) collect)
+                 ((symbol-function 'agent-repl--warn) collect))
+        ;; Act
+        (agent-repl--on-workspace-switch "main"))
+      ;; Assert
+      (should-not unroutable))))
+
+(ert-deftest agent-repl-test-panels-on-workspace-switch-routable-ws-keeps-attribution ()
+  "Activating a REAL workspace still attributes its records to that workspace.
+Screening the log name must not demote records that legitimately own a sink."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((project (make-temp-file "agent-repl-switch-route-" t))
+          (logged 'no-record))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "ws1" :project-dir project)
+            (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                      ((symbol-function 'agent-repl--update-all-workspace-states-now) #'ignore)
+                      ((symbol-function 'agent-repl--log)
+                       (lambda (ws &rest _)
+                         (when (eq logged 'no-record) (setq logged ws)))))
+              ;; Act
+              (agent-repl--on-workspace-switch "ws1")))
+        (delete-directory project t))
+      ;; Assert
+      (should (equal logged "ws1")))))
+
 ;;; test-panels.el ends here
