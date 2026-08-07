@@ -1415,6 +1415,124 @@ by position."
       (should (equal records
                      '("claude-repld output: listen tcp: address in use"))))))
 
+(defmacro agent-repl-test--with-daemon-mirror (records &rest body)
+  "Run BODY with the daemon log mirror accumulating into RECORDS, in order.
+RECORDS is in scope for BODY's assertions.  The capture buffer is taken
+out of the picture so the log path is exercised alone, and the line
+accumulator starts empty."
+  (declare (indent 1) (debug (symbolp body)))
+  `(let ((,records nil)
+         (agent-repl--frontend-daemon-line-accumulator ""))
+     (cl-letf (((symbol-function 'agent-repl--persist-log-record)
+                (lambda (_ws _level _verbosity fmt args)
+                  (setq ,records
+                        (append ,records (list (apply #'format fmt args))))))
+               ((symbol-function 'process-buffer) (lambda (_proc) nil)))
+       ,@body)))
+
+(ert-deftest agent-repl-test-daemon-filter-holds-a-partial-line ()
+  "A chunk ending mid-line logs nothing until its newline arrives."
+  ;; Arrange
+  (agent-repl-test--with-daemon-mirror records
+    ;; Act
+    (agent-repl--frontend-daemon-filter 'proc "panic: turn accounting names")
+    ;; Assert
+    (should-not records)))
+
+(ert-deftest agent-repl-test-daemon-filter-rejoins-a-split-line ()
+  "A record split across two chunks is mirrored as ONE line, not two fragments."
+  ;; Arrange
+  (agent-repl-test--with-daemon-mirror records
+    ;; Act
+    (agent-repl--frontend-daemon-filter 'proc "panic: turn accounting")
+    (agent-repl--frontend-daemon-filter 'proc " names unknown turn\n")
+    ;; Assert
+    (should (equal records
+                   '("claude-repld output: panic: turn accounting names unknown turn")))))
+
+(ert-deftest agent-repl-test-daemon-filter-skips-the-daemons-own-record ()
+  "A record the daemon already wrote to claude-repld.log is not mirrored again."
+  ;; Arrange
+  (agent-repl-test--with-daemon-mirror records
+    ;; Act
+    (agent-repl--frontend-daemon-filter
+     'proc "{\"timestamp\":\"2026-08-07T15:53:38-04:00\",\"runtime\":\"daemon\",\"message\":\"x\"}\n")
+    ;; Assert
+    (should-not records)))
+
+(ert-deftest agent-repl-test-daemon-filter-mirrors-a-relayed-sidecar-record ()
+  "A sidecar record has no other durable home, so the mirror must keep it."
+  ;; Arrange
+  (agent-repl-test--with-daemon-mirror records
+    ;; Act
+    (agent-repl--frontend-daemon-filter
+     'proc "{\"timestamp\":\"2026-08-07T15:53:38-04:00\",\"runtime\":\"sidecar\",\"message\":\"x\"}\n")
+    ;; Assert
+    (should (= (length records) 1))))
+
+(ert-deftest agent-repl-test-daemon-filter-mirrors-a-relayed-webapp-record ()
+  "A webapp record has no other durable home either."
+  ;; Arrange
+  (agent-repl-test--with-daemon-mirror records
+    ;; Act
+    (agent-repl--frontend-daemon-filter
+     'proc "{\"timestamp\":\"2026-08-07T15:53:38-04:00\",\"runtime\":\"webapp\",\"message\":\"x\"}\n")
+    ;; Assert
+    (should (= (length records) 1))))
+
+(ert-deftest agent-repl-test-daemon-filter-mirrors-a-quoted-daemon-tag ()
+  "A relayed record QUOTING the daemon's runtime tag is still mirrored."
+  ;; Arrange — the anchor is what keeps this from being read as a daemon record.
+  (agent-repl-test--with-daemon-mirror records
+    ;; Act
+    (agent-repl--frontend-daemon-filter
+     'proc (concat "{\"timestamp\":\"2026-08-07T15:53:38-04:00\",\"runtime\":\"sidecar\","
+                   "\"message\":\"saw \\\"runtime\\\":\\\"daemon\\\" upstream\"}\n"))
+    ;; Assert
+    (should (= (length records) 1))))
+
+(ert-deftest agent-repl-test-daemon-filter-drops-a-blank-line ()
+  "Blank separators between records are not mirrored as empty log lines."
+  ;; Arrange
+  (agent-repl-test--with-daemon-mirror records
+    ;; Act
+    (agent-repl--frontend-daemon-filter 'proc "\n   \n")
+    ;; Assert
+    (should-not records)))
+
+(ert-deftest agent-repl-test-daemon-flush-partial-line-surfaces-a-dying-line ()
+  "A daemon that dies mid-line still gets its last line into the log."
+  ;; Arrange
+  (agent-repl-test--with-daemon-mirror records
+    (agent-repl--frontend-daemon-filter 'proc "fatal error: out of memory")
+    ;; Act
+    (agent-repl--frontend-daemon-flush-partial-line)
+    ;; Assert
+    (should (equal records '("claude-repld output: fatal error: out of memory")))))
+
+(ert-deftest agent-repl-test-daemon-flush-partial-line-keeps-a-dying-daemon-record ()
+  "The dying line is flushed even when it LOOKS like the daemon's own record.
+Unfinished on stdout means very likely unfinished in its own log too, so the
+duplication argument that skips complete daemon records does not apply."
+  ;; Arrange
+  (agent-repl-test--with-daemon-mirror records
+    (agent-repl--frontend-daemon-filter
+     'proc "{\"timestamp\":\"2026-08-07T15:53:38-04:00\",\"runtime\":\"daemon\",\"messa")
+    ;; Act
+    (agent-repl--frontend-daemon-flush-partial-line)
+    ;; Assert
+    (should (= (length records) 1))))
+
+(ert-deftest agent-repl-test-daemon-flush-partial-line-is-idempotent ()
+  "A second flush with nothing held logs nothing."
+  ;; Arrange
+  (agent-repl-test--with-daemon-mirror records
+    (agent-repl--frontend-daemon-filter 'proc "fatal error\n")
+    ;; Act
+    (agent-repl--frontend-daemon-flush-partial-line)
+    ;; Assert
+    (should (= (length records) 1))))
+
 (ert-deftest agent-repl-test-daemon-filter-preserves-buffer-capture ()
   "Routing output to the log must not cost the capture buffer its content."
   ;; Arrange
