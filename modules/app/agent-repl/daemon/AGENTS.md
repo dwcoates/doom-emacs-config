@@ -43,6 +43,16 @@ thinking" or infer session-controller liveness from persisted session fields.
 - The daemon's normal helper persists and emits to the terminal. The verbose
   helper always persists and gates terminal output through the daemon's
   established verbose setting.
+- THE DURABLE SINK IS AUTHORITATIVE AND SYNCHRONOUS; THE TERMINAL IS A MIRROR
+  AND IS NOT. Every logger's terminal is the one shared `dlog.TerminalSink` the
+  daemon builds at boot, which queues the line and returns. In production the
+  terminal is a pty Emacs drains, so a synchronous terminal write blocks for as
+  long as Emacs is busy — and it used to block holding the durable sink's
+  mutex, which put every other emitter, and therefore every frontend command's
+  ack, behind Emacs's own startup. Never wire a logger's terminal straight to
+  `os.Stderr` again; the only exceptions are the documented bootstrap-fatal and
+  sink-emergency paths. The mirror drops nothing, reorders nothing, and reports
+  a write failure to the next emitter rather than swallowing it.
 - Each error is logged exactly once by its owning layer with session, workspace,
   operation, resolved inputs, branch outcome, and cause. Error-path tests assert
   the canonical record and its context.
