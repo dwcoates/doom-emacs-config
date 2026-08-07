@@ -10691,8 +10691,34 @@ func (*CloseWorkspaceCmd) Descriptor() ([]byte, []int) {
 	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{116}
 }
 
+// Open a workspace: reattach to the session it already has, or start one when
+// it has none. The fields are the workspace's RUN PREFERENCES — the posture and
+// account a session for this workspace runs under — which the editor owns
+// because they are properties of the checkout, not of any session.
+//
+// There is deliberately NO session identity here. Which session a workspace
+// owns is the daemon's ruling; a frontend that named one would be asserting an
+// answer to a question it cannot hold across a daemon restart.
 type OpenWorkspaceCmd struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The permission posture a session started by this open runs under, empty to
+	// accept the daemon's default. Ignored when the workspace already has a
+	// session: an open never re-postures a live one.
+	PermissionMode string `protobuf:"bytes,1,opt,name=permission_mode,json=permissionMode,proto3" json:"permission_mode,omitempty"`
+	// The CLAUDE_CONFIG_DIR — i.e. WHICH ACCOUNT — a session started by this open
+	// runs under. One shared daemon serves every workspace, so its own
+	// environment cannot encode a per-workspace account.
+	//
+	// Empty means the daemon's own default, NOT the absence of a config dir.
+	ConfigDir string `protobuf:"bytes,2,opt,name=config_dir,json=configDir,proto3" json:"config_dir,omitempty"`
+	// Run a session started by this open against the offline scripted SDK.
+	Fake bool `protobuf:"varint,3,opt,name=fake,proto3" json:"fake,omitempty"`
+	// The caller's DELIBERATE consent to start a session with NO permission gate,
+	// required on exactly the same terms as CreateSessionCmd.allow_ungated and
+	// enforced by the same refusal. An open that could reach an ungated posture
+	// without it would be a second, quieter door to the one thing that consent
+	// exists to make loud.
+	AllowUngated  bool `protobuf:"varint,4,opt,name=allow_ungated,json=allowUngated,proto3" json:"allow_ungated,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -10725,6 +10751,34 @@ func (x *OpenWorkspaceCmd) ProtoReflect() protoreflect.Message {
 // Deprecated: Use OpenWorkspaceCmd.ProtoReflect.Descriptor instead.
 func (*OpenWorkspaceCmd) Descriptor() ([]byte, []int) {
 	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{117}
+}
+
+func (x *OpenWorkspaceCmd) GetPermissionMode() string {
+	if x != nil {
+		return x.PermissionMode
+	}
+	return ""
+}
+
+func (x *OpenWorkspaceCmd) GetConfigDir() string {
+	if x != nil {
+		return x.ConfigDir
+	}
+	return ""
+}
+
+func (x *OpenWorkspaceCmd) GetFake() bool {
+	if x != nil {
+		return x.Fake
+	}
+	return false
+}
+
+func (x *OpenWorkspaceCmd) GetAllowUngated() bool {
+	if x != nil {
+		return x.AllowUngated
+	}
+	return false
 }
 
 type ResyncCmd struct {
@@ -15268,8 +15322,13 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\x0eworkspace_name\x18\x06 \x01(\tR\rworkspaceNameJ\x04\b\x01\x10\x02J\x04\b\x03\x10\x04J\x04\b\x04\x10\x05J\x04\b\x05\x10\x06R\ahandlerR\rsource_branchR\n" +
 	"source_dirR\n" +
 	"target_dir\"\x13\n" +
-	"\x11CloseWorkspaceCmd\"\x12\n" +
-	"\x10OpenWorkspaceCmd\"\x7f\n" +
+	"\x11CloseWorkspaceCmd\"\x93\x01\n" +
+	"\x10OpenWorkspaceCmd\x12'\n" +
+	"\x0fpermission_mode\x18\x01 \x01(\tR\x0epermissionMode\x12\x1d\n" +
+	"\n" +
+	"config_dir\x18\x02 \x01(\tR\tconfigDir\x12\x12\n" +
+	"\x04fake\x18\x03 \x01(\bR\x04fake\x12#\n" +
+	"\rallow_ungated\x18\x04 \x01(\bR\fallowUngated\"\x7f\n" +
 	"\tResyncCmd\x12\x19\n" +
 	"\bfrom_seq\x18\x01 \x01(\x04R\afromSeq\x12\x1d\n" +
 	"\n" +

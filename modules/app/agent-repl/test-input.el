@@ -1651,7 +1651,6 @@ saved to history) stays untagged."
 a hybrid-UI or gui-only workspace's send."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :frontend (quote gui))
-    (agent-repl--ws-put "ws1" :frontend-session-id "s_1")
     (let ((sent nil)
           (committed nil))
       (cl-letf (((symbol-function 'agent-repl--do-send)
@@ -1670,7 +1669,6 @@ a hybrid-UI or gui-only workspace's send."
   "Empty input in a frontend workspace sends nothing (no bare-RET analog)."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :frontend (quote gui))
-    (agent-repl--ws-put "ws1" :frontend-session-id "s_1")
     (let ((sent nil))
       (cl-letf (((symbol-function 'agent-repl--do-send)
                  (lambda (&rest _) (setq sent t))))
@@ -2495,7 +2493,6 @@ when point sits on a slash command in a workspace."
   "A bound session whose SystemInit has not been pushed yet yields nil (transient)."
   (agent-repl-test--with-clean-state
     (clrhash agent-repl--frontend-session-inits)
-    (agent-repl--ws-put "ws1" :frontend-session-id "s1")
     (should-not (agent-repl--slash-commands-for-ws "ws1"))))
 
 ;; The GET /commands fetch/cache tests and the skill-directory-watch tests

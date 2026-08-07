@@ -2210,7 +2210,34 @@ message MergeWorkspaceCmd {
 
 message CloseWorkspaceCmd {}
 
-message OpenWorkspaceCmd {}
+// Open a workspace: reattach to the session it already has, or start one when
+// it has none. The fields are the workspace's RUN PREFERENCES — the posture and
+// account a session for this workspace runs under — which the editor owns
+// because they are properties of the checkout, not of any session.
+//
+// There is deliberately NO session identity here. Which session a workspace
+// owns is the daemon's ruling; a frontend that named one would be asserting an
+// answer to a question it cannot hold across a daemon restart.
+message OpenWorkspaceCmd {
+  // The permission posture a session started by this open runs under, empty to
+  // accept the daemon's default. Ignored when the workspace already has a
+  // session: an open never re-postures a live one.
+  string permission_mode = 1;
+  // The CLAUDE_CONFIG_DIR — i.e. WHICH ACCOUNT — a session started by this open
+  // runs under. One shared daemon serves every workspace, so its own
+  // environment cannot encode a per-workspace account.
+  //
+  // Empty means the daemon's own default, NOT the absence of a config dir.
+  string config_dir = 2;
+  // Run a session started by this open against the offline scripted SDK.
+  bool fake = 3;
+  // The caller's DELIBERATE consent to start a session with NO permission gate,
+  // required on exactly the same terms as CreateSessionCmd.allow_ungated and
+  // enforced by the same refusal. An open that could reach an ungated posture
+  // without it would be a second, quieter door to the one thing that consent
+  // exists to make loud.
+  bool allow_ungated = 4;
+}
 
 message ResyncCmd {
   uint64 from_seq = 1;
