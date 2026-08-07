@@ -546,10 +546,13 @@ func TestPushWorkspaceAvailableReportsTheHostClientsItReached(t *testing.T) {
 
 // --- Slow-consumer hard disconnect (white-box, deterministic) ---------------
 
+// TestSlowConsumerHardDisconnect covers the NON-HOST policy: a flat bound with
+// no elastic region, so the first frame past it severs the connection. The host
+// is deliberately excluded — it has its own elastic policy, covered separately.
 func TestSlowConsumerHardDisconnect(t *testing.T) {
 	// Arrange: a registered client whose writer never drains, buffer size 2.
 	s, _ := newTestServer(t, 2)
-	cl := newClient(s.bufSize, nil, ClientKindHost)
+	cl := newClient(s.bufSize, nil, ClientKindGUIStream)
 	s.mu.Lock()
 	s.clients[cl] = struct{}{}
 	s.mu.Unlock()
@@ -586,7 +589,7 @@ func TestSlowConsumerDisconnectReportsTheCompactionItAttempted(t *testing.T) {
 		Handler:     &mockHandler{},
 		BufSize:     2,
 	})
-	cl := newClient(s.bufSize, nil, ClientKindHost)
+	cl := newClient(s.bufSize, nil, ClientKindGUIStream)
 	s.clients[cl] = struct{}{}
 	s.enqueue(cl, outFrame{data: []byte("a")})
 	s.enqueue(cl, outFrame{data: []byte("b")})
@@ -653,7 +656,7 @@ func TestDeliverCompactsSupersededWorkspaceStatesForASlowConsumer(t *testing.T) 
 func TestDeliverNeverCompactsConversationDeltasForASlowConsumer(t *testing.T) {
 	// Arrange: a client whose buffer holds exactly two conversation deltas.
 	s, _ := newTestServer(t, 2)
-	cl := newClient(s.bufSize, nil, ClientKindHost)
+	cl := newClient(s.bufSize, nil, ClientKindGUIStream)
 	s.mu.Lock()
 	s.clients[cl] = struct{}{}
 	s.mu.Unlock()
@@ -990,5 +993,188 @@ func TestQueueClassificationUnspecifiedIsOmittedOnTheWire(t *testing.T) {
 	// Assert
 	if strings.Contains(string(data), "classification") {
 		t.Fatalf("UNSPECIFIED must be omitted by protojson, but the wire form carries it: %s", data)
+	}
+}
+
+// --- Host elasticity ---------------------------------------------------------
+
+// newSeveritySplitServer builds a server whose WARN and INFO channels are
+// captured separately, so a record's severity is assertable.
+func newSeveritySplitServer(t *testing.T, buf int) (*Server, *[]string, *[]string) {
+	t.Helper()
+	var info, warn []string
+	s := New(Config{
+		Logf:        func(format string, args ...any) { info = append(info, fmt.Sprintf(format, args...)) },
+		Warnf:       func(format string, args ...any) { warn = append(warn, fmt.Sprintf(format, args...)) },
+		LogVerbosef: testLogf(t),
+		State:       staticState{snap: sampleSnapshot()},
+		Handler:     &mockHandler{},
+		BufSize:     buf,
+	})
+	return s, &info, &warn
+}
+
+// registerClient adds cl to the fan-out set (test aid).
+func registerClient(s *Server, cl *client) {
+	s.mu.Lock()
+	s.clients[cl] = struct{}{}
+	s.mu.Unlock()
+}
+
+// TestClientOutboxPolicyFollowsKind pins WHICH connections get headroom: the
+// host alone, decided at accept from its kind and never reassigned.
+func TestClientOutboxPolicyFollowsKind(t *testing.T) {
+	tests := []struct {
+		name     string
+		kind     ClientKind
+		wantHard int
+	}{
+		{name: "host absorbs a blocked event loop", kind: ClientKindHost, wantHard: 8 * hostBufferElasticity},
+		{name: "gui stream keeps the flat bound", kind: ClientKindGUIStream, wantHard: 8},
+		{name: "gui bootstrap keeps the flat bound", kind: ClientKindGUIBootstrap, wantHard: 8},
+		{name: "gui observer keeps the flat bound", kind: ClientKindGUIObserver, wantHard: 8},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange / Act.
+			cl := newClient(8, nil, tc.kind)
+
+			// Assert.
+			if cl.out.capacity() != 8 {
+				t.Fatalf("soft bound = %d, want 8 for every kind", cl.out.capacity())
+			}
+			if cl.out.ceiling() != tc.wantHard {
+				t.Fatalf("hard ceiling = %d, want %d", cl.out.ceiling(), tc.wantHard)
+			}
+		})
+	}
+}
+
+// TestHostSurvivesTransientBusynessWithoutEviction is the live regression: an
+// Emacs host that blocks its event loop long enough to overrun the soft bound,
+// then drains, must keep its connection.
+func TestHostSurvivesTransientBusynessWithoutEviction(t *testing.T) {
+	// Arrange: a host whose soft bound is 4 and whose ceiling is therefore 64.
+	s, _, warn := newSeveritySplitServer(t, 4)
+	cl := newClient(s.bufSize, nil, ClientKindHost)
+	registerClient(s, cl)
+
+	// Act: far more irreplaceable frames than the soft bound while Emacs is
+	// blocked, then Emacs wakes up and drains everything.
+	for i := 0; i < 40; i++ {
+		s.enqueue(cl, outFrame{data: []byte(fmt.Sprintf("conv%d", i))})
+	}
+	drained := len(drain(cl.out))
+
+	// Assert.
+	if s.clientCount() != 1 {
+		t.Fatalf("client count = %d, want the busy host still connected", s.clientCount())
+	}
+	if drained != 40 {
+		t.Fatalf("drained = %d, want all 40 frames absorbed", drained)
+	}
+	if len(*warn) != 0 {
+		t.Fatalf("warn log = %v, want no degradation record for transient busyness", *warn)
+	}
+}
+
+// TestWedgedHostIsStillEvicted keeps the load-shedding coverage: a host that
+// never reads must still be cut loose so the daemon cannot queue forever.
+func TestWedgedHostIsStillEvicted(t *testing.T) {
+	// Arrange: a host that never drains a single frame.
+	s, _, _ := newSeveritySplitServer(t, 2)
+	cl := newClient(s.bufSize, nil, ClientKindHost)
+	registerClient(s, cl)
+
+	// Act: push past the ceiling with nothing compactible.
+	for i := 0; i <= s.bufSize*hostBufferElasticity; i++ {
+		s.enqueue(cl, outFrame{data: []byte(fmt.Sprintf("conv%d", i))})
+	}
+
+	// Assert.
+	if s.clientCount() != 0 {
+		t.Fatalf("client count = %d, want the wedged host disconnected", s.clientCount())
+	}
+	select {
+	case <-cl.done:
+	default:
+		t.Fatal("client done channel was not closed on eviction")
+	}
+}
+
+// TestHostEvictionRecordsAtWarnWithKindAndBufferStats covers the severity
+// asymmetry: Emacs warns about its own link going down, so the daemon's record
+// of the same event is a warning too, and it names what it gave up on.
+func TestHostEvictionRecordsAtWarnWithKindAndBufferStats(t *testing.T) {
+	// Arrange.
+	s, _, warn := newSeveritySplitServer(t, 2)
+	cl := newClient(s.bufSize, nil, ClientKindHost)
+	registerClient(s, cl)
+
+	// Act.
+	for i := 0; i <= s.bufSize*hostBufferElasticity; i++ {
+		s.enqueue(cl, outFrame{data: []byte(fmt.Sprintf("conv%d", i))})
+	}
+
+	// Assert: exactly one warn record, naming kind, bounds and reason.
+	if len(*warn) != 1 {
+		t.Fatalf("warn log = %v, want exactly one host eviction record", *warn)
+	}
+	for _, want := range []string{"(host)", "soft 2", "hard 32", "after compacting 0 superseded frames", "reason=hard_ceiling"} {
+		if !strings.Contains((*warn)[0], want) {
+			t.Fatalf("warn record = %q, want it to name %q", (*warn)[0], want)
+		}
+	}
+}
+
+// TestNonHostEvictionStaysAtInfo pins the other half of that asymmetry: shedding
+// a backgrounded webview is the contract working, not a degradation.
+func TestNonHostEvictionStaysAtInfo(t *testing.T) {
+	// Arrange.
+	s, info, warn := newSeveritySplitServer(t, 2)
+	cl := newClient(s.bufSize, nil, ClientKindGUIStream)
+	registerClient(s, cl)
+
+	// Act.
+	for i := 0; i < 3; i++ {
+		s.enqueue(cl, outFrame{data: []byte(fmt.Sprintf("conv%d", i))})
+	}
+
+	// Assert.
+	if len(*warn) != 0 {
+		t.Fatalf("warn log = %v, want a GUI eviction to stay off the warn channel", *warn)
+	}
+	if len(*info) == 0 || !strings.Contains((*info)[0], "(gui_stream)") {
+		t.Fatalf("info log = %v, want the eviction recorded at info naming the kind", *info)
+	}
+}
+
+// TestHostStalledEvictionRecordsItsStallDuration covers the second eviction
+// reason: a host under its ceiling that has drained nothing for the whole grace
+// period is wedged, and the record says so.
+func TestHostStalledEvictionRecordsItsStallDuration(t *testing.T) {
+	// Arrange: a host over its soft bound with a manually advanced clock.
+	s, _, warn := newSeveritySplitServer(t, 2)
+	cl := newClient(s.bufSize, nil, ClientKindHost)
+	clock := newFakeClock()
+	cl.out.now = clock.Now
+	registerClient(s, cl)
+	s.enqueue(cl, outFrame{data: []byte("a")})
+	s.enqueue(cl, outFrame{data: []byte("b")})
+	s.enqueue(cl, outFrame{data: []byte("c")})
+
+	// Act.
+	clock.advance(hostStallGrace + time.Second)
+	s.enqueue(cl, outFrame{data: []byte("d")})
+
+	// Assert.
+	if s.clientCount() != 0 {
+		t.Fatalf("client count = %d, want the stalled host disconnected", s.clientCount())
+	}
+	if len(*warn) != 1 || !strings.Contains((*warn)[0], "reason=stalled") {
+		t.Fatalf("warn log = %v, want a stalled-reason eviction record", *warn)
+	}
+	if !strings.Contains((*warn)[0], "stalled_for_ms=31000") {
+		t.Fatalf("warn record = %q, want the stall duration reported", (*warn)[0])
 	}
 }

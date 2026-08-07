@@ -4,6 +4,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
@@ -126,17 +127,17 @@ func TestOutboxCompactionKeepsOnlyTheNewestRoster(t *testing.T) {
 	o.push(outFrame{key: coalesceKey(WorkspaceRosterFrame(validRoster(2))), data: []byte("r2")})
 
 	// Act: a third roster forces a compaction.
-	queued, compacted := o.push(outFrame{key: coalesceKey(WorkspaceRosterFrame(validRoster(3))), data: []byte("r3")})
+	res := o.push(outFrame{key: coalesceKey(WorkspaceRosterFrame(validRoster(3))), data: []byte("r3")})
 
 	// Assert: the superseded roster made room for the new one instead of the
 	// connection being given up on. Compaction rewrites what is ALREADY queued,
 	// so the survivor of that pass (r2) still precedes the frame that triggered
 	// it (r3) — the roster the consumer ends on is the newest either way.
-	if !queued {
+	if !res.queued {
 		t.Fatal("push after compaction was refused, want the newest roster queued")
 	}
-	if compacted != 1 {
-		t.Errorf("compacted = %d, want 1 superseded roster removed", compacted)
+	if res.compacted != 1 {
+		t.Errorf("compacted = %d, want 1 superseded roster removed", res.compacted)
 	}
 	var drained []string
 	for {
@@ -206,7 +207,7 @@ func fill(t *testing.T, o *outbox, specs ...string) {
 		if key, _, ok := strings.Cut(spec, ":"); ok {
 			f.key = key
 		}
-		if queued, _ := o.push(f); !queued {
+		if res := o.push(f); !res.queued {
 			t.Fatalf("push %q refused while arranging the queue", spec)
 		}
 	}
@@ -218,14 +219,14 @@ func TestOutboxPushCoalescesSupersededFramesWhenFull(t *testing.T) {
 	fill(t, o, "progress:p1", "progress:p2", "conv1")
 
 	// Act: a third progress revision arrives with no room left.
-	queued, compacted := o.push(outFrame{key: "progress", data: []byte("progress:p3")})
+	res := o.push(outFrame{key: "progress", data: []byte("progress:p3")})
 
 	// Assert: the stale revisions are gone and the newest one is queued.
-	if !queued {
+	if !res.queued {
 		t.Fatal("push = false, want the frame queued after compaction")
 	}
-	if compacted != 1 {
-		t.Fatalf("compacted = %d, want the one superseded progress frame removed", compacted)
+	if res.compacted != 1 {
+		t.Fatalf("compacted = %d, want the one superseded progress frame removed", res.compacted)
 	}
 	if got, want := drain(o), []string{"progress:p2", "conv1", "progress:p3"}; !equalStrings(got, want) {
 		t.Fatalf("queue = %v, want %v", got, want)
@@ -238,15 +239,15 @@ func TestOutboxCompactionNeverDropsIrreplaceableFrames(t *testing.T) {
 	fill(t, o, "conv1", "conv2", "conv3")
 
 	// Act: one more arrives.
-	queued, compacted := o.push(outFrame{data: []byte("conv4")})
+	res := o.push(outFrame{data: []byte("conv4")})
 
 	// Assert: nothing was removed and the push is refused rather than silently
 	// dropping content.
-	if queued {
+	if res.queued {
 		t.Fatal("push = true, want refusal when no queued frame is supersedable")
 	}
-	if compacted != 0 {
-		t.Fatalf("compacted = %d, want 0 — append-semantic frames are never dropped", compacted)
+	if res.compacted != 0 {
+		t.Fatalf("compacted = %d, want 0 — append-semantic frames are never dropped", res.compacted)
 	}
 	if got, want := drain(o), []string{"conv1", "conv2", "conv3"}; !equalStrings(got, want) {
 		t.Fatalf("queue = %v, want it untouched %v", got, want)
@@ -259,7 +260,7 @@ func TestOutboxCompactionKeepsTheNewestFramesPosition(t *testing.T) {
 	fill(t, o, "ws:a1", "conv1", "ws:a2")
 
 	// Act: fill beyond the bound to force compaction.
-	if queued, _ := o.push(outFrame{data: []byte("conv2")}); !queued {
+	if res := o.push(outFrame{data: []byte("conv2")}); !res.queued {
 		t.Fatal("push = false, want the frame queued after compaction")
 	}
 
@@ -276,8 +277,8 @@ func TestOutboxCompactionKeepsDistinctKeys(t *testing.T) {
 	fill(t, o, "ws-a:a1", "ws-b:b1", "ws-a:a2")
 
 	// Act.
-	if queued, compacted := o.push(outFrame{data: []byte("conv1")}); !queued || compacted != 1 {
-		t.Fatalf("push = (%v, %d), want (true, 1)", queued, compacted)
+	if res := o.push(outFrame{data: []byte("conv1")}); !res.queued || res.compacted != 1 {
+		t.Fatalf("push = (%v, %d), want (true, 1)", res.queued, res.compacted)
 	}
 
 	// Assert: only the superseded revision went; the other workspace stayed.
@@ -292,11 +293,11 @@ func TestOutboxPushBelowBoundDoesNotCompact(t *testing.T) {
 	fill(t, o, "progress:p1", "progress:p2")
 
 	// Act.
-	queued, compacted := o.push(outFrame{key: "progress", data: []byte("progress:p3")})
+	res := o.push(outFrame{key: "progress", data: []byte("progress:p3")})
 
 	// Assert: a consumer keeping up sees every frame, unchanged.
-	if !queued || compacted != 0 {
-		t.Fatalf("push = (%v, %d), want (true, 0)", queued, compacted)
+	if !res.queued || res.compacted != 0 {
+		t.Fatalf("push = (%v, %d), want (true, 0)", res.queued, res.compacted)
 	}
 	if got, want := drain(o), []string{"progress:p1", "progress:p2", "progress:p3"}; !equalStrings(got, want) {
 		t.Fatalf("queue = %v, want every frame kept %v", got, want)
@@ -308,7 +309,7 @@ func TestOutboxPushSignalsTheWriter(t *testing.T) {
 	o := newOutbox(2)
 
 	// Act.
-	if queued, _ := o.push(outFrame{data: []byte("a")}); !queued {
+	if res := o.push(outFrame{data: []byte("a")}); !res.queued {
 		t.Fatal("push = false, want the frame queued")
 	}
 
@@ -374,4 +375,196 @@ func equalStrings(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// --- elasticity -------------------------------------------------------------
+
+// fakeClock is a manually advanced time source, so a grace period can be
+// crossed without a test ever sleeping.
+type fakeClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
+
+func newFakeClock() *fakeClock {
+	return &fakeClock{now: time.Date(2026, 8, 7, 16, 28, 0, 0, time.UTC)}
+}
+
+func (c *fakeClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *fakeClock) advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = c.now.Add(d)
+}
+
+// TestElasticOutboxAbsorbsPressureWhileTheConsumerDrains is the busy-then-
+// drains case: a consumer blocked long enough to overrun its soft bound, which
+// then catches up, must never be refused.
+func TestElasticOutboxAbsorbsPressureWhileTheConsumerDrains(t *testing.T) {
+	// Arrange: soft 2, hard 8, and a consumer blocked past the soft bound.
+	clock := newFakeClock()
+	o := newElasticOutbox(2, 8, time.Minute)
+	o.now = clock.Now
+	fill(t, o, "conv1", "conv2", "conv3")
+
+	// Act: the consumer wakes, drains one frame, and more frames arrive well
+	// past the grace period's wall-clock length.
+	if _, ok := o.pop(); !ok {
+		t.Fatal("pop = false, want the blocked consumer to drain a frame")
+	}
+	clock.advance(5 * time.Minute)
+	res := o.push(outFrame{data: []byte("conv4")})
+
+	// Assert: drain progress resets the stall mark, so the busy host is
+	// absorbed rather than evicted.
+	if !res.queued {
+		t.Fatalf("push = %+v, want a draining consumer's frame queued", res)
+	}
+	if res.reason != "" {
+		t.Fatalf("reason = %q, want no refusal reason", res.reason)
+	}
+}
+
+// TestElasticOutboxRefusesAtTheHardCeiling covers the memory bound: no amount
+// of drain progress buys a queue past its absolute ceiling.
+func TestElasticOutboxRefusesAtTheHardCeiling(t *testing.T) {
+	// Arrange: an irreplaceable backlog filled exactly to the hard ceiling.
+	o := newElasticOutbox(2, 4, time.Hour)
+	fill(t, o, "conv1", "conv2", "conv3", "conv4")
+
+	// Act.
+	res := o.push(outFrame{data: []byte("conv5")})
+
+	// Assert.
+	if res.queued {
+		t.Fatal("push = true, want refusal at the hard ceiling")
+	}
+	if res.reason != overflowCeiling {
+		t.Fatalf("reason = %q, want %q", res.reason, overflowCeiling)
+	}
+	if res.depth != 4 || res.soft != 2 || res.hard != 4 {
+		t.Fatalf("stats = (depth %d, soft %d, hard %d), want (4, 2, 4)", res.depth, res.soft, res.hard)
+	}
+}
+
+// TestElasticOutboxRefusesAConsumerThatDrainsNothingPastTheGrace covers the
+// genuinely wedged consumer: still under its ceiling, but it has not taken a
+// single frame for the whole grace period.
+func TestElasticOutboxRefusesAConsumerThatDrainsNothingPastTheGrace(t *testing.T) {
+	// Arrange: a queue over its soft bound whose consumer never pops.
+	clock := newFakeClock()
+	o := newElasticOutbox(2, 64, 30*time.Second)
+	o.now = clock.Now
+	fill(t, o, "conv1", "conv2", "conv3")
+
+	// Act: time passes with no drain at all, then another frame arrives.
+	clock.advance(31 * time.Second)
+	res := o.push(outFrame{data: []byte("conv4")})
+
+	// Assert.
+	if res.queued {
+		t.Fatal("push = true, want a wedged consumer refused")
+	}
+	if res.reason != overflowStalled {
+		t.Fatalf("reason = %q, want %q", res.reason, overflowStalled)
+	}
+	if res.stalledFor != 31*time.Second {
+		t.Fatalf("stalledFor = %s, want 31s", res.stalledFor)
+	}
+}
+
+// TestElasticOutboxKeepsAcceptingBeforeTheGraceExpires covers the other side of
+// that deadline: an undrained queue inside the grace window is still absorbed.
+func TestElasticOutboxKeepsAcceptingBeforeTheGraceExpires(t *testing.T) {
+	// Arrange.
+	clock := newFakeClock()
+	o := newElasticOutbox(2, 64, 30*time.Second)
+	o.now = clock.Now
+	fill(t, o, "conv1", "conv2", "conv3")
+
+	// Act.
+	clock.advance(29 * time.Second)
+	res := o.push(outFrame{data: []byte("conv4")})
+
+	// Assert.
+	if !res.queued {
+		t.Fatalf("push = %+v, want the frame absorbed inside the grace window", res)
+	}
+}
+
+// TestElasticOutboxReportsEnteringPressureOnce covers the pressure telemetry:
+// an episode is reported when it begins, not once per frame.
+func TestElasticOutboxReportsEnteringPressureOnce(t *testing.T) {
+	// Arrange: a queue filled exactly to its soft bound.
+	o := newElasticOutbox(2, 8, time.Minute)
+	fill(t, o, "conv1", "conv2")
+
+	// Act.
+	first := o.push(outFrame{data: []byte("conv3")})
+	second := o.push(outFrame{data: []byte("conv4")})
+
+	// Assert.
+	if !first.entered || !first.overSoft {
+		t.Fatalf("first push = %+v, want it to report entering the elastic region", first)
+	}
+	if second.entered {
+		t.Fatalf("second push = %+v, want no second entry record for one episode", second)
+	}
+}
+
+// TestElasticOutboxReEntersPressureAfterDraining covers the episode boundary: a
+// queue that recovers below its soft bound reports the NEXT overrun as new.
+func TestElasticOutboxReEntersPressureAfterDraining(t *testing.T) {
+	// Arrange: one completed pressure episode, then a full drain.
+	o := newElasticOutbox(2, 8, time.Minute)
+	fill(t, o, "conv1", "conv2")
+	o.push(outFrame{data: []byte("conv3")})
+	drain(o)
+
+	// Act.
+	fill(t, o, "conv4", "conv5")
+	res := o.push(outFrame{data: []byte("conv6")})
+
+	// Assert.
+	if !res.entered {
+		t.Fatalf("push = %+v, want a fresh episode reported after recovery", res)
+	}
+}
+
+// TestOutboxWithoutElasticityRefusesAtItsBound pins the non-host policy: a flat
+// queue is exactly a soft==hard elastic one, so the first frame past the bound
+// is refused at the ceiling with no grace consulted.
+func TestOutboxWithoutElasticityRefusesAtItsBound(t *testing.T) {
+	// Arrange.
+	o := newOutbox(2)
+	fill(t, o, "conv1", "conv2")
+
+	// Act.
+	res := o.push(outFrame{data: []byte("conv3")})
+
+	// Assert.
+	if res.queued {
+		t.Fatal("push = true, want a flat queue refused at its bound")
+	}
+	if res.reason != overflowCeiling {
+		t.Fatalf("reason = %q, want %q", res.reason, overflowCeiling)
+	}
+}
+
+// TestNewElasticOutboxClampsAHardBoundBelowItsSoft guards the constructor: a
+// ceiling under the soft bound would refuse frames below the queue's own stated
+// capacity, so it is raised rather than silently honored.
+func TestNewElasticOutboxClampsAHardBoundBelowItsSoft(t *testing.T) {
+	// Arrange / Act.
+	o := newElasticOutbox(8, 2, time.Minute)
+
+	// Assert.
+	if o.capacity() != 8 || o.ceiling() != 8 {
+		t.Fatalf("bounds = (soft %d, hard %d), want (8, 8)", o.capacity(), o.ceiling())
+	}
 }
