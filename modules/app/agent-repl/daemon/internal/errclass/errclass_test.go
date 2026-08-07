@@ -624,6 +624,21 @@ func TestEveryTypeHasProse(t *testing.T) {
 	}
 }
 
+func TestStaleSessionIdentityProseNamesTheReloadCommand(t *testing.T) {
+	// Arrange: the card tells the reader to resync, and the webapp ships no
+	// control that does it — so the sentence has to name the Emacs command
+	// that does, or it is an instruction with no way to follow it.
+	want := "agent-repl-frontend-reload-webview"
+
+	// Act.
+	got := prose[TypeSessionReconnectSuperseded]
+
+	// Assert.
+	if !strings.Contains(got, want) {
+		t.Fatalf("stale-identity prose = %q, want it to name %q", got, want)
+	}
+}
+
 func TestProseHasNoRowsOutsideTheVocabulary(t *testing.T) {
 	// Arrange: the other direction — a sentence for a type that no longer
 	// exists is dead weight that reads as coverage.
