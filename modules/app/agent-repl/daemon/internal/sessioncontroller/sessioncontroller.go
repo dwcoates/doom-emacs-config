@@ -109,6 +109,14 @@ type SessionRegistrar interface {
 	// leaving the SSM's dead state and the record's death reason on two
 	// disconnected axes.
 	SessionDied(sessionID, reason string)
+	// SessionOperational reports that workspace's sessionID has reached
+	// OPERATIONAL — the bring-up gate closed, the session is genuinely
+	// driveable. It is the resolving edge of every WINDOW-shaped death already
+	// recorded against that workspace's earlier sessions: a supersede says "a
+	// newer session took this workspace", and this is the moment that newer
+	// session demonstrably has it. The registrar stamps and re-pushes; nothing
+	// here waits on it.
+	SessionOperational(workspace, sessionID string)
 	// SessionModelObserved persists the model a LIVE session reports itself to
 	// be running, which is the only model a respawn should ever be pinned to.
 	// The requested-at-create model is a seed and nothing more.
@@ -2835,6 +2843,16 @@ func (m *Manager) onConnectedForGeneration(workspace, sessionID, generationID st
 	// THE BRING-UP GATE IS CLOSED. Anything that fails from here is a
 	// mid-session fault, never an escapable bring-up failure.
 	m.noteWired(workspace, sessionID)
+	// The handover this session completes is now FACT, so the predecessors it
+	// displaced stop being an open failure. Resolving here rather than at the
+	// supersede itself is the whole point: at supersede time the successor did
+	// not exist yet, and a card that closed then would have closed on a promise.
+	if m.cfg.Registrar != nil {
+		m.cfg.Registrar.SessionOperational(workspace, sessionID)
+	} else {
+		m.logf("session-controller: operational reached with NO registrar ws=%q session=%s — superseded predecessors keep their open death cards until a boot reconciliation stamps them",
+			workspace, sessionID)
+	}
 	// The pid and the build identity are BOTH only trustworthy on a live
 	// connection, and this is the moment the connection is proven usable. A
 	// shim running a superseded bundle is bounced from here onto the current

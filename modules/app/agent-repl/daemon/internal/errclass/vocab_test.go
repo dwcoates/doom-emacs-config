@@ -338,7 +338,7 @@ func TestEveryTypeBelongsToAColoredClass(t *testing.T) {
 	// Act + Assert: exercise the class each construction path assigns.
 	for _, item := range []*frontendv1.SystemFailureItem{
 		Command(logf, ErrShimNack),
-		Death(logf, DeathReasonShimDied),
+		Death(logf, "s_1", DeathReasonShimDied, 0),
 		Degraded("shim-store", "boom", 0),
 		ConnectionDegraded("no traffic"),
 	} {
@@ -357,7 +357,7 @@ func TestNoConstructionPathEmitsAnUnspecifiedClass(t *testing.T) {
 	for _, item := range []*frontendv1.SystemFailureItem{
 		Command(logf, ErrShimNack),
 		Command(logf, errUnknownForVocabTest{}),
-		Death(logf, "some ancient reason"),
+		Death(logf, "s_1", "some ancient reason", 0),
 		Degraded("shim-store", "boom", 0),
 		ConnectionDegraded("no traffic"),
 	} {
