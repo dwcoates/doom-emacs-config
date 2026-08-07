@@ -3,6 +3,7 @@ package sessioncontroller
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -540,6 +541,12 @@ type consumer struct {
 	// resync replays that rather than re-opening the alarm.
 	failItems map[string]*frontendv1.ConversationItem
 	failOrder []string
+	// withheldCards are the failItems uuids the WITHHOLD arms put up — cards
+	// about a RETIRED query, replayed off durable history. They are settled at
+	// the bring-up gate by resolveWithheldDegradations, because an unresolved
+	// degradation for a query that is already dead misrepresents a session whose
+	// LIVE query is up and driveable. Guarded by mu, beside failItems.
+	withheldCards map[string]struct{}
 	// echoes are the prompt receipts this daemon has pushed and the durable
 	// transcript has not yet claimed, OLDEST FIRST. See pushUserEcho.
 	echoes []*promptEcho
@@ -2132,7 +2139,7 @@ func (c *consumer) withholdHistoricalDegradation(ev *corev1.Event, ds *corev1.De
 		c.pushHistoricalTerminationCard(ds.GetQueryInstanceId(), item)
 		return
 	}
-	c.pushFailure(c.degradedUUID(ds.GetComponent()), item)
+	c.pushWithheldFailure(c.degradedUUID(ds.GetComponent()), item)
 }
 
 // pushHistoricalTerminationCard pushes the failure card for a REPLAYED
@@ -2167,7 +2174,7 @@ func (c *consumer) pushHistoricalTerminationCard(retiredQueryID string, item *fr
 		}
 		c.historicalTerminationPairs[retiredQueryID] = struct{}{}
 	}
-	c.pushFailure(c.degradedUUID(shimSDKComponent), item)
+	c.pushWithheldFailure(c.degradedUUID(shimSDKComponent), item)
 }
 
 // Canonical cause kinds for a fault edge whose DegradedState carried no
@@ -2435,6 +2442,21 @@ func (c *consumer) pushReplayedReceipt(item *frontendv1.ConversationItem) bool {
 // the settled card rather than re-opening an alarm about something that
 // already ended.
 func (c *consumer) pushFailure(uuid string, failure *frontendv1.SystemFailureItem) {
+	c.retainFailure(uuid, failure)
+	c.warn("session-controller: system failure session=%s uuid=%s type=%s resolved=%v: %s",
+		c.sessionID, uuid, failure.GetErrorType(), failure.GetResolvedAtMs() != 0, failure.GetSourceDetail())
+	c.pushLocalItem(c.retainedFailure(uuid))
+}
+
+// retainFailure is pushFailure without the record: it retains the card and
+// nothing else.
+//
+// It is split out because a card's edges are not all the same NEWS. Opening one
+// is the warn pushFailure emits; closing a WITHHELD one because the live
+// successor wired is ordinary progress, and routing that through pushFailure
+// would put a second, differently-worded record on the same edge — the very
+// double-record shape the replayed pair already had.
+func (c *consumer) retainFailure(uuid string, failure *frontendv1.SystemFailureItem) {
 	item := &frontendv1.ConversationItem{
 		Uuid: uuid,
 		TsMs: c.now(),
@@ -2452,11 +2474,97 @@ func (c *consumer) pushFailure(uuid string, failure *frontendv1.SystemFailureIte
 		c.failOrder = append(c.failOrder, uuid)
 	}
 	c.failItems[uuid] = item
+	// A card pushed on ANY other path supersedes a withheld one under the same
+	// uuid, so the live successor's readiness may no longer resolve it. The
+	// withhold path re-arms this immediately afterwards, which is why the delete
+	// is unconditional here rather than conditional on the caller.
+	delete(c.withheldCards, uuid)
 	c.mu.Unlock()
+}
 
-	c.warn("session-controller: system failure session=%s uuid=%s type=%s resolved=%v: %s",
+// retainedFailure reads back the retained ConversationItem for uuid under the
+// lock, so a push cannot race a concurrent retention of the same card.
+func (c *consumer) retainedFailure(uuid string) *frontendv1.ConversationItem {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.failItems[uuid]
+}
+
+// pushWithheldFailure retains and pushes a card the WITHHOLD arms produced,
+// recording it as those arms record everything: on the ordinary channel, as a
+// replay being classified rather than a fresh anomaly.
+//
+// The uuid is remembered so the bring-up gate can settle the card once the LIVE
+// query for this session is genuinely up. Without that, an unresolved
+// degradation card for a RETIRED query sat on a healthy session forever — the
+// row is durable, so it came back at every boot and never had a closing edge,
+// which misrepresents a session that is working.
+func (c *consumer) pushWithheldFailure(uuid string, failure *frontendv1.SystemFailureItem) {
+	c.retainFailure(uuid, failure)
+	c.logf("session-controller: system failure session=%s uuid=%s type=%s resolved=%v origin=withheld_replay: %s",
 		c.sessionID, uuid, failure.GetErrorType(), failure.GetResolvedAtMs() != 0, failure.GetSourceDetail())
-	c.pushLocalItem(item)
+	c.mu.Lock()
+	if c.withheldCards == nil {
+		c.withheldCards = map[string]struct{}{}
+	}
+	c.withheldCards[uuid] = struct{}{}
+	c.mu.Unlock()
+	c.pushLocalItem(c.retainedFailure(uuid))
+}
+
+// resolveWithheldDegradations settles every card the WITHHOLD arms retained,
+// now that the LIVE query for this session has reached ShimReady and wired.
+//
+// THIS IS THE SAME SHAPE AS THE SUPERSEDED-DEATH RESOLUTION (server/
+// supersederesolve.go), and for the same reason. Both cards are WINDOW-shaped
+// and were recorded as if they were EVENT-shaped: a retired query's death is a
+// true account of something that happened, and it stops describing this session
+// the moment a live query genuinely has it — not one edge before. The supersede
+// resolves at SessionOperational because the successor does not exist any
+// earlier; this resolves at the same edge because "the live query is up" is not
+// a fact until the bring-up gate closes.
+//
+// It is a RESOLUTION, never a deletion: the card keeps its uuid, its type and
+// its whole source detail, and is re-sent with resolved_at_ms stamped, so the
+// history stays queryable and a resync replays the settled card rather than
+// re-opening the alarm. A LIVE degradation is untouched — pushing one on any
+// other path drops the uuid from the withheld set (retainFailure), so this can
+// only ever settle a card the withhold arms themselves put up.
+func (c *consumer) resolveWithheldDegradations(reason string) {
+	c.mu.Lock()
+	uuids := make([]string, 0, len(c.withheldCards))
+	for uuid := range c.withheldCards {
+		uuids = append(uuids, uuid)
+	}
+	items := make(map[string]*frontendv1.SystemFailureItem, len(uuids))
+	for _, uuid := range uuids {
+		items[uuid] = c.failItems[uuid].GetSystemFailure()
+	}
+	c.withheldCards = nil
+	c.mu.Unlock()
+	// Sorted so a session holding more than one withheld card records and
+	// pushes them in a stable order rather than Go's map order.
+	sort.Strings(uuids)
+	for _, uuid := range uuids {
+		failure := items[uuid]
+		if failure == nil {
+			// The retained item went away under us (a rotation purge). Loud,
+			// because a withheld uuid with no card behind it means the two
+			// structures disagreed, and silently skipping would hide that.
+			c.warn("session-controller: withheld degradation card RESOLUTION SKIPPED session=%s uuid=%s reason=%s branch=no_retained_card — the card is gone, so nothing could be settled",
+				c.sessionID, uuid, reason)
+			continue
+		}
+		if failure.GetResolvedAtMs() != 0 {
+			continue
+		}
+		resolved := proto.Clone(failure).(*frontendv1.SystemFailureItem)
+		resolved.ResolvedAtMs = c.now()
+		c.retainFailure(uuid, resolved)
+		c.logf("session-controller: withheld degradation card RESOLVED session=%s uuid=%s type=%s resolved_at_ms=%d reason=%s decision=live_successor_healthy",
+			c.sessionID, uuid, resolved.GetErrorType(), resolved.GetResolvedAtMs(), reason)
+		c.pushLocalItem(c.retainedFailure(uuid))
+	}
 }
 
 // snapshotFailItems returns the retained failure items in first-seen order,
