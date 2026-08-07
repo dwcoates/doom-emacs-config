@@ -133,7 +133,7 @@ func validateRosterRows(revision int64, where string, rows []*frontendv1.RosterR
 // revision to resync against).
 func (s *Server) PublishWorkspaceRoster(roster *frontendv1.WorkspaceRoster) error {
 	if err := validateRoster(roster); err != nil {
-		s.logf("frontend: workspace roster rejected: %v", err)
+		s.warn("frontend: workspace roster rejected: %v", err)
 		return err
 	}
 	s.mu.Lock()
@@ -144,7 +144,7 @@ func (s *Server) PublishWorkspaceRoster(roster *frontendv1.WorkspaceRoster) erro
 		s.mu.Unlock()
 		err := fmt.Errorf("frontend: workspace roster revision=%d does not supersede the retained revision=%d for boot_id=%q; refusing",
 			roster.GetRevision(), heldRevision, roster.GetBootId())
-		s.logf("frontend: workspace roster rejected: %v", err)
+		s.warn("frontend: workspace roster rejected: %v", err)
 		return err
 	}
 	var heldBootID string

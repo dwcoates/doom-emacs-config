@@ -56,7 +56,16 @@ type StateProvider interface {
 
 // Config configures a Server. Logf, State, and Handler are required.
 type Config struct {
-	Logf        dlog.Logf
+	Logf dlog.Logf
+	// Warnf is the WARN channel, for a record that accompanies something the
+	// user can see go wrong: a refused command, a connect served without the
+	// snapshot or roster it was supposed to carry, a resync that could not be
+	// marshalled. At info those sit beside the per-command chatter this server
+	// emits constantly and are invisible to a level filter.
+	//
+	// Nil falls back to Logf, so the record is still made and only its
+	// severity is lost.
+	Warnf       dlog.Logf
 	LogVerbosef dlog.Logf
 	State       StateProvider
 	Handler     CommandHandler
@@ -81,7 +90,10 @@ type Config struct {
 // message). Every connected frontend receives every broadcast frame (workspace
 // entitlement is "all" for now; the fan-out list is the future filter point).
 type Server struct {
-	logf                      dlog.Logf
+	logf dlog.Logf
+	// warnf is the WARN channel described on Config.Warnf. Never nil after
+	// New; reached through warn.
+	warnf                     dlog.Logf
 	logVerbosef               dlog.Logf
 	state                     StateProvider
 	handler                   CommandHandler
@@ -149,6 +161,10 @@ func newClient(bufSize int, scope *Scope, kind ClientKind) *client {
 	}
 }
 
+// warn emits through the Server's WARN channel (Config.Warnf, or Logf when
+// that is unwired). It is the sole reader of warnf.
+func (s *Server) warn(format string, args ...any) { s.warnf(format, args...) }
+
 // New builds a Server. It panics on a missing required dependency: a frontend
 // server with no state provider or handler is a programmer error, surfaced
 // loudly rather than as a nil-deref later.
@@ -173,8 +189,13 @@ func New(cfg Config) *Server {
 	if ackWarn <= 0 {
 		ackWarn = DefaultAckWarnThreshold
 	}
+	warnf := cfg.Warnf
+	if warnf == nil {
+		warnf = cfg.Logf
+	}
 	return &Server{
 		logf:                      cfg.Logf,
+		warnf:                     warnf,
 		logVerbosef:               cfg.LogVerbosef,
 		state:                     cfg.State,
 		handler:                   cfg.Handler,
@@ -302,7 +323,9 @@ func (s *Server) ServeWSScoped(w http.ResponseWriter, r *http.Request, scope Sco
 	}
 	wc := newWSConn(conn)
 	wc.translate = translate
-	wc.logf = s.logf
+	// The scoped stream logs only refusals through this handle, so it takes
+	// the WARN channel rather than the plain one.
+	wc.warnf = s.warnf
 	s.serveClient(wc, &scope, kind)
 }
 
@@ -676,7 +699,7 @@ func isHostOnlyCommand(cmd *frontendv1.FrontendCommand) bool {
 func (s *Server) dispatchClientCommand(cl *client, cmd *frontendv1.FrontendCommand) (*frontendv1.CommandAck, *frontendv1.FrontendFrame) {
 	if isHostOnlyCommand(cmd) && !cl.kind.isHost() {
 		err := fmt.Errorf("frontend: host-only command rejected from client kind %s", cl.kind)
-		s.logf("frontend: host-only command rejected kind=%s request_id=%s", cl.kind, cmd.GetRequestId())
+		s.warn("frontend: host-only command rejected kind=%s request_id=%s", cl.kind, cmd.GetRequestId())
 		return failAck(s.logf, cmd.GetRequestId(), err), nil
 	}
 	return DispatchWithResponse(context.Background(), s.logf, s.handler, s, cmd)
@@ -703,7 +726,7 @@ func (s *Server) serveClient(c conn, scope *Scope, kind ClientKind) {
 		snapshot = snapshotForClient(rawSnapshot, scope, kind)
 		snap, err := marshalFrame(SnapshotFrame(snapshot))
 		if err != nil {
-			s.logf("frontend: marshal connect snapshot kind=%s scope_workspace=%q scope_session=%q: %v",
+			s.warn("frontend: marshal connect snapshot kind=%s scope_workspace=%q scope_session=%q: %v",
 				kind, scopeWorkspace(scope), scopeSession(scope), err)
 			_ = c.close()
 			return
@@ -728,7 +751,7 @@ func (s *Server) serveClient(c conn, scope *Scope, kind ClientKind) {
 		// refusal here would be a programmer error, not a slow consumer.
 		if queued, _ := enqueueLocked(cl, outFrame{data: snap}); !queued {
 			s.mu.Unlock()
-			s.logf("frontend: connect snapshot rejected by an empty outbox kind=%s scope_workspace=%q scope_session=%q",
+			s.warn("frontend: connect snapshot rejected by an empty outbox kind=%s scope_workspace=%q scope_session=%q",
 				kind, scopeWorkspace(scope), scopeSession(scope))
 			_ = c.close()
 			return
@@ -746,14 +769,14 @@ func (s *Server) serveClient(c conn, scope *Scope, kind ClientKind) {
 			rosterData, rosterErr := marshalFrame(WorkspaceRosterFrame(held))
 			if rosterErr != nil {
 				s.mu.Unlock()
-				s.logf("frontend: marshal connect roster kind=%s scope_workspace=%q revision=%d: %v",
+				s.warn("frontend: marshal connect roster kind=%s scope_workspace=%q revision=%d: %v",
 					kind, scopeWorkspace(scope), held.GetRevision(), rosterErr)
 				_ = c.close()
 				return
 			}
 			if queued, _ := enqueueLocked(cl, outFrame{key: coalesceKey(WorkspaceRosterFrame(held)), data: rosterData}); !queued {
 				s.mu.Unlock()
-				s.logf("frontend: connect roster rejected by a near-empty outbox kind=%s scope_workspace=%q revision=%d",
+				s.warn("frontend: connect roster rejected by a near-empty outbox kind=%s scope_workspace=%q revision=%d",
 					kind, scopeWorkspace(scope), held.GetRevision())
 				_ = c.close()
 				return
@@ -1041,7 +1064,7 @@ func (s *Server) enqueueResyncSnapshot(cl *client, cmd *frontendv1.FrontendComma
 	snapshot := snapshotForClient(s.state.Snapshot(), cl.scope, cl.kind)
 	snap, err := marshalFrame(SnapshotFrame(snapshot))
 	if err != nil {
-		s.logf("frontend: marshal resync snapshot FAILED client_id=%d request_id=%q ws=%q phase=%q error=%v",
+		s.warn("frontend: marshal resync snapshot FAILED client_id=%d request_id=%q ws=%q phase=%q error=%v",
 			cl.id, cmd.GetRequestId(), cmd.GetWorkspace(), phase, err)
 		return
 	}
@@ -1194,7 +1217,9 @@ func (u *udsConn) close() error { return u.nc.Close() }
 type wsConn struct {
 	ws        *websocket.Conn
 	translate CommandTranslator
-	logf      dlog.Logf
+	// warnf is the WARN channel for the one thing this handle reports: an
+	// inbound command the scoped translator refused.
+	warnf dlog.Logf
 }
 
 func newWSConn(ws *websocket.Conn) *wsConn { return &wsConn{ws: ws} }
@@ -1214,8 +1239,8 @@ func (w *wsConn) readCommand() (*frontendv1.FrontendCommand, error) {
 		}
 		cmd, dispatch, terr := w.translate(data)
 		if terr != nil {
-			if w.logf != nil {
-				w.logf("frontend: scoped stream: inbound command rejected: %v", terr)
+			if w.warnf != nil {
+				w.warnf("frontend: scoped stream: inbound command rejected: %v", terr)
 			}
 			continue
 		}
