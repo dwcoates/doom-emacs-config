@@ -46,6 +46,8 @@
 (declare-function agent-repl--ws-put "agent-repl-workspace" (ws key val))
 (declare-function agent-repl--ws-name-for-dir "agent-repl-workspace" (dir))
 (declare-function agent-repl--ensure-frontend-daemon "agent-repl-daemon" (&optional force))
+(declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
+(defvar agent-repl--frontend-webapp-dir)
 (declare-function agent-repl--resolve-current-git-root "agent-repl-core" ())
 (declare-function agent-repl--initialize-ws-env "agent-repl-session" (ws &optional project-dir-hint active-env-hint))
 (declare-function agent-repl--frontend-snap-webview-to-tail "agent-repl-frontend" (ws))
@@ -695,6 +697,40 @@ This covers unrestored workspace paths too, protecting every real turn."
 
 ;;;; ---- Workspace binding ---------------------------------------------------
 
+(defconst agent-repl--frontend-build-id-stamp ".build-id"
+  "Name of the stamp the build script writes beside the built webapp.
+Its content is the artifact's own identity — the content hash Vite
+fingerprints the entry bundle with — written by `write_webapp_build_id'
+in `bin/build-frontend.sh'.")
+
+(defun agent-repl--frontend-build-id ()
+  "Return the built webapp's artifact identity.
+
+THE WEBVIEW'S URL CARRIES THIS.  `index.html' is served from a fixed
+path and is the only thing naming which bundle to run, so a URL without
+it is a stable cache key: a client can go on answering out of its own
+cache with a bundle from an earlier build, including one whose file has
+since been deleted, and no deploy reaches the screen.  Folding the
+artifact's identity into the URL makes each build a different address,
+which a cache cannot satisfy from an older one.
+
+A MISSING STAMP IS AN ERROR, not a reason to address the page without
+one: a URL built without it is precisely the stale-cache bug, and it
+would reappear silently.  The stamp is written by the build script, so
+its absence means the webapp was built some other way."
+  (let ((stamp (expand-file-name agent-repl--frontend-build-id-stamp
+                                 agent-repl--frontend-webapp-dir)))
+    (unless (file-readable-p stamp)
+      (agent-repl--error nil
+                         "webapp build id missing at %s — build the webapp with bin/build-frontend.sh webapp"
+                         stamp))
+    (let ((id (string-trim (with-temp-buffer
+                             (insert-file-contents stamp)
+                             (buffer-string)))))
+      (when (string-empty-p id)
+        (agent-repl--error nil "webapp build id at %s is empty" stamp))
+      id)))
+
 (defun agent-repl--frontend-workspace-url (workspace)
   "Return the webapp URL that renders WORKSPACE.
 WORKSPACE is an absolute directory path: the same `workspace' wire key
@@ -706,10 +742,15 @@ rather than hashed — the daemon's connection scope, every
 The webapp holds no session identity behind this URL; the daemon rules
 on which session the workspace owns and re-pushes the answer.  So the
 URL outlives every session the workspace runs: a rotation, a supersede,
-or a daemon bounce leaves it addressing the same thing."
-  (format "%s/?workspace=%s"
+or a daemon bounce leaves it addressing the same thing.
+
+`build' carries the artifact's identity (`agent-repl--frontend-build-id')
+so the address changes with every build, which is what keeps a client
+from rendering the workspace out of a cache filled by an earlier one."
+  (format "%s/?workspace=%s&build=%s"
           (agent-repl--frontend-base-url)
-          (url-hexify-string workspace)))
+          (url-hexify-string workspace)
+          (url-hexify-string (agent-repl--frontend-build-id))))
 
 (defun agent-repl--frontend-session-url (session-id)
   "Return the webapp URL that attaches to SESSION-ID alone.

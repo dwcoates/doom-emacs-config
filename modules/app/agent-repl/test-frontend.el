@@ -1221,8 +1221,10 @@ exact failure seen live in the fresh instance."
                   (lambda (ws ok _fail) (setq ensured ws) (funcall ok) :ready))
                 ((symbol-function 'agent-repl--frontend-ensure-webview-buffer)
                  (lambda (_ws url)
-                   ;; composer=0: Emacs owns input in the hybrid UI.
-                   (should (string-suffix-p "/?workspace=%2Fw&composer=0" url))
+                   ;; composer=0: Emacs owns input in the hybrid UI.  build: the
+                   ;; artifact's identity, so a rebuild is a different address.
+                   (should (string-match-p
+                            "/\\?workspace=%2Fw&build=[^&]+&composer=0\\'" url))
                    'fake-buffer))
                 ((symbol-function 'agent-repl--frontend-display-webview)
                  (lambda (_ws buf) (setq displayed buf))))

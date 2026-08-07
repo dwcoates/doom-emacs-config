@@ -1235,17 +1235,36 @@ silently serve nothing for the rest."
   ;; Arrange
   (let ((agent-repl-frontend-daemon-addr "127.0.0.1:9999")
         (cases '(("/repos/proj"
-                  . "http://127.0.0.1:9999/?workspace=%2Frepos%2Fproj")
+                  . "http://127.0.0.1:9999/?workspace=%2Frepos%2Fproj&build=bid1")
                  ("/repos/My Projects/agent repl"
-                  . "http://127.0.0.1:9999/?workspace=%2Frepos%2FMy%20Projects%2Fagent%20repl")
+                  . "http://127.0.0.1:9999/?workspace=%2Frepos%2FMy%20Projects%2Fagent%20repl&build=bid1")
                  ("/repos/prosjekt/æøå"
-                  . "http://127.0.0.1:9999/?workspace=%2Frepos%2Fprosjekt%2F%C3%A6%C3%B8%C3%A5")
+                  . "http://127.0.0.1:9999/?workspace=%2Frepos%2Fprosjekt%2F%C3%A6%C3%B8%C3%A5&build=bid1")
                  ("/repos/a&b=c/d?e#f"
-                  . "http://127.0.0.1:9999/?workspace=%2Frepos%2Fa%26b%3Dc%2Fd%3Fe%23f"))))
-    (dolist (case cases)
-      ;; Act / Assert
-      (should (equal (agent-repl--frontend-workspace-url (car case))
-                     (cdr case))))))
+                  . "http://127.0.0.1:9999/?workspace=%2Frepos%2Fa%26b%3Dc%2Fd%3Fe%23f&build=bid1"))))
+    (cl-letf (((symbol-function 'agent-repl--frontend-build-id) (lambda () "bid1")))
+      (dolist (case cases)
+        ;; Act / Assert
+        (should (equal (agent-repl--frontend-workspace-url (car case))
+                       (cdr case)))))))
+
+(ert-deftest agent-repl-test-frontend-build-id-refuses-a-missing-stamp ()
+  "An unbuilt webapp is named, not addressed without its identity.
+A URL built with no build id is a stable cache key, which is the stale
+bundle this stamp exists to prevent."
+  ;; Arrange — a webapp directory the build script has never stamped.
+  (let ((agent-repl--frontend-webapp-dir (make-temp-file "agent-repl-webapp" t)))
+    ;; Act / Assert
+    (should-error (agent-repl--frontend-build-id))))
+
+(ert-deftest agent-repl-test-frontend-build-id-reads-the-stamp ()
+  "The build id is the stamp's content, whitespace trimmed."
+  ;; Arrange
+  (let* ((agent-repl--frontend-webapp-dir (make-temp-file "agent-repl-webapp" t))
+         (stamp (expand-file-name ".build-id" agent-repl--frontend-webapp-dir)))
+    (with-temp-file stamp (insert "q56e9Rm0\n"))
+    ;; Act / Assert
+    (should (equal (agent-repl--frontend-build-id) "q56e9Rm0"))))
 
 ;; The GET /commands fetch + POST /commands/refresh tests were deleted in
 ;; the S9 slash-menu cutover: those HTTP calls are gone.  The slash-command
