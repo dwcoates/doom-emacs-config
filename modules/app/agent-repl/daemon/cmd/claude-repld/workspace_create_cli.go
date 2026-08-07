@@ -183,6 +183,7 @@ func createWorkspaceJobID(name string) (string, error) {
 var oneOffSubcommands = map[string]func(context.Context, []string, io.Writer, io.Writer) error{
 	createWorkspaceSubcommand: runCreateWorkspace,
 	listWorkspacesSubcommand:  runListWorkspaces,
+	listTranscriptsSubcommand: runListTranscripts,
 }
 
 // dispatchSubcommand runs a one-off subcommand when argv names one, reporting
