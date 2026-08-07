@@ -835,6 +835,23 @@ func main() {
 	if err != nil {
 		daemonFatal(daemonLog, "claude-repld: build client log writer: %v", err)
 	}
+	// THE COMMAND LATENCY KNOB IS RESOLVED AT BOOT AND FATAL ON A BAD VALUE,
+	// for keepalive's reason: an operator who set the threshold meant something
+	// by it, and running the shipped two seconds while they believe they
+	// changed it is exactly the silence this telemetry exists to end.
+	ackWarn, err := frontend.AckWarnFromEnv()
+	if err != nil {
+		daemonFatal(daemonLog, "claude-repld: %v", err)
+	}
+	commandLatency, err := server.NewTargetCommandLatencyRecorder(
+		targets, daemonLog, os.Stderr, os.Getenv("AGENT_REPL_LOG_VERBOSE") != "",
+	)
+	if err != nil {
+		daemonFatal(daemonLog, "claude-repld: build command latency recorder: %v", err)
+	}
+	daemonLog.With("operation", "command-latency-policy", "ack_warn_ms", ackWarn.Milliseconds(),
+		"ack_deadline_ms", frontend.CommandAckDeadline.Milliseconds()).
+		Log("claude-repld: frontend command latency telemetry armed")
 	// NEVER-BLUE (workspaceopen.go): bind each registered workspace to its
 	// on-disk transcript at boot, so a restart already knows every resume
 	// target before a frontend can connect, and ensure eagerly on open.
@@ -888,7 +905,9 @@ func main() {
 			Connected: shimListener.Connected,
 			Held:      sessionlock.Held,
 		},
-		ClientLogs: clientLogs,
+		ClientLogs:       clientLogs,
+		CommandLatency:   commandLatency,
+		AckWarnThreshold: ackWarn,
 		// A closed workspace gives its log descriptors back (dlog.EvictWorkspace),
 		// so a long-lived daemon does not accumulate one set per workspace it has
 		// ever touched.
