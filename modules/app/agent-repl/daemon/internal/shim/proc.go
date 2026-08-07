@@ -307,6 +307,13 @@ type Options struct {
 type Logger interface {
 	Log(format string, args ...any)
 	LogVerbose(format string, args ...any)
+	// LogLifecycle records the pump's OWN bring-up and teardown, which happen
+	// on every healthy spawn. It is a third method rather than a reuse of Log
+	// because Log is the shim's error channel — the daemon's implementation
+	// stamps it level=error — and a scanner that started is not a failure. It
+	// is not LogVerbose either: the lifecycle context is what a spawn
+	// post-mortem reads first, so it must survive normal verbosity.
+	LogLifecycle(format string, args ...any)
 }
 
 // stderrMirror receives canonical shim JSON for terminal-only display when the
@@ -463,7 +470,7 @@ func (p *stderrPump) run() {
 	defer close(p.done)
 	if p.logLifecycle {
 		lifecycle := p.snapshot()
-		p.logger.Log("shim: stderr scanner started pid=%d pgid=%d shutdown_initiator=%q shutdown_reason=%q close_owner=%q", lifecycle.pid, lifecycle.pgid, lifecycle.shutdownInitiator, lifecycle.shutdownReason, lifecycle.closeOwner)
+		p.logger.LogLifecycle("shim: stderr scanner started pid=%d pgid=%d shutdown_initiator=%q shutdown_reason=%q close_owner=%q", lifecycle.pid, lifecycle.pgid, lifecycle.shutdownInitiator, lifecycle.shutdownReason, lifecycle.closeOwner)
 	}
 	scanner := bufio.NewScanner(p.reader)
 	scanner.Buffer(make([]byte, 64*1024), maxEventLine)
@@ -502,7 +509,7 @@ func (p *stderrPump) run() {
 		p.logger.Log("shim: stderr scan error: %v [pid=%d pgid=%d shutdown_initiator=%q shutdown_reason=%q close_owner=%q close_expected=%t]", readErr, lifecycle.pid, lifecycle.pgid, lifecycle.shutdownInitiator, lifecycle.shutdownReason, lifecycle.closeOwner, lifecycle.closeExpected)
 	}
 	if p.logLifecycle {
-		p.logger.Log("shim: stderr scanner completed pid=%d pgid=%d shutdown_initiator=%q shutdown_reason=%q close_owner=%q close_expected=%t outcome=%s expected_close=%t", lifecycle.pid, lifecycle.pgid, lifecycle.shutdownInitiator, lifecycle.shutdownReason, lifecycle.closeOwner, lifecycle.closeExpected, outcome, expectedClose)
+		p.logger.LogLifecycle("shim: stderr scanner completed pid=%d pgid=%d shutdown_initiator=%q shutdown_reason=%q close_owner=%q close_expected=%t outcome=%s expected_close=%t", lifecycle.pid, lifecycle.pgid, lifecycle.shutdownInitiator, lifecycle.shutdownReason, lifecycle.closeOwner, lifecycle.closeExpected, outcome, expectedClose)
 	}
 }
 

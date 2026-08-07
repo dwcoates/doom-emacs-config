@@ -117,6 +117,12 @@ func (l *recordingLogger) LogVerbose(format string, args ...any) {
 	l.records = append(l.records, loggedRecord{level: "verbose", line: fmt.Sprintf(format, args...)})
 }
 
+func (l *recordingLogger) LogLifecycle(format string, args ...any) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.records = append(l.records, loggedRecord{level: "lifecycle", line: fmt.Sprintf(format, args...)})
+}
+
 func (l *recordingLogger) record(t *testing.T, index int, level, contains string) {
 	t.Helper()
 	records := l.logged()
