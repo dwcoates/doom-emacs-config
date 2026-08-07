@@ -297,6 +297,10 @@ func (s *servedPrompts) claim(r statedb.PromptReceipt) (string, bool) {
 // per replay, which is what a replay read in store order from the floor wants.
 func (m *Manager) durableConsumer(workspace, sessionID string) *consumer {
 	cons := newConsumer(workspace, sessionID, m.cfg.Push, m.cfg.SSM, nil, m.cfg.ClearCompactStore, m.cfg.TurnAccountings, m.logf, nil, nil, nil, nil, nil)
+	// A replay's degradations are as user-visible as a live one's — the same
+	// conversation reaches the same frontend — so it takes the same WARN
+	// channel.
+	cons.warnf = m.warnf
 	// The one durable store it DOES hold, and it holds it to RETIRE rows: a
 	// replay that finds a receipt's prompt already in the store has established
 	// the fact the live retirement point would have established, for a daemon
