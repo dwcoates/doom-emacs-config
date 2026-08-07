@@ -448,6 +448,15 @@ func (l *Logger) LogError(format string, args ...any) {
 	l.legacyEmit(LevelError, Normal, format, args...)
 }
 
+// LogWarn is Log at WARN severity. It is the channel for a record that
+// accompanies a user-visible regression — degraded accounting, a refused
+// command, a dropped event, a failure card — but is not itself a hard fault.
+// Without it such a record lands at info, where a level filter and the
+// warning sweeps cannot tell it apart from routine progress.
+func (l *Logger) LogWarn(format string, args ...any) {
+	l.legacyEmit(LevelWarn, Normal, format, args...)
+}
+
 // LogVerbose is the legacy verbose-emission adapter. New code uses EmitVerbose.
 func (l *Logger) LogVerbose(format string, args ...any) {
 	l.legacyEmit(LevelInfo, Verbose, format, args...)
@@ -504,6 +513,15 @@ func LegacyError(l *Logger) Logf {
 		panic("dlog: LegacyError requires Logger")
 	}
 	return l.LogError
+}
+
+// LegacyWarn is Legacy at WARN severity, for the user-visible-degradation
+// channel of a subsystem that is still injected with plain callbacks.
+func LegacyWarn(l *Logger) Logf {
+	if l == nil {
+		panic("dlog: LegacyWarn requires Logger")
+	}
+	return l.LogWarn
 }
 
 const OutputClampLen = 2000
