@@ -767,7 +767,7 @@ silent fallback.  Returns the number of items that failed."
           (funcall apply-fn item)
         (error
          (setq failures (1+ failures))
-         (agent-repl--log
+         (agent-repl--warn
           nil
           "frontend-apply-snapshot: %s item FAILED — %s err-type=%s err=%s; CONTAINED, resync continues"
           kind (agent-repl--frontend-snapshot-item-id item id-keys)
@@ -890,7 +890,7 @@ receives every catalog but has no per-task roster."
       (when (> failures 0)
         ;; Loud on BOTH channels: a contained failure that only reached the log
         ;; would be a silent fallback from the user's seat.
-        (agent-repl--log nil
+        (agent-repl--warn nil
                          "frontend-apply-snapshot: %d item(s) FAILED during snapshot resync — see the per-item lines above; resync completed for the rest"
                          failures)
         (message "agent-repl: %d item(s) FAILED during snapshot resync (see the agent-repl log)"

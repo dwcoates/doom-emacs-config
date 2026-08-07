@@ -1456,7 +1456,9 @@ reaching the daemon, so this is the guard that the wiring exists at all."
     (cl-letf (((symbol-function 'agent-repl--uds-send-command)
                (agent-repl-test--send-command-stub
                 "req-1" (lambda (c) (setq call c))))
-              ((symbol-function 'agent-repl--log)
+              ;; A refused restart is a UX regression, so the rejection rides
+              ;; the warn rung.
+              ((symbol-function 'agent-repl--warn)
                (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
       (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
         ;; Act — the daemon nacks the command the dispatch registered.
@@ -1498,7 +1500,9 @@ reaching the daemon, so this is the guard that the wiring exists at all."
     (cl-letf (((symbol-function 'agent-repl--uds-send-command)
                (agent-repl-test--send-command-stub
                 "req-1" (lambda (c) (setq call c))))
-              ((symbol-function 'agent-repl--log)
+              ;; A refused hibernate is a UX regression, so the rejection rides
+              ;; the warn rung.
+              ((symbol-function 'agent-repl--warn)
                (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged)))
               ((symbol-function 'message) (lambda (&rest _) nil)))
       (agent-repl-test--with-ws "ws1" '(:project-dir "/w")

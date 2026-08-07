@@ -513,7 +513,7 @@ the process exits."
               (let ((current-raw (agent-repl--ws-get ws :last-prompt-text)))
                 (if (equal current-raw raw)
                     (progn
-                      (agent-repl--log ws "prompt-summary: sentinel rejected result; clearing pending status=%s current-raw-len=%d" status (length current-raw))
+                      (agent-repl--warn ws "prompt-summary: sentinel rejected result; clearing pending status=%s current-raw-len=%d" status (length current-raw))
                       (agent-repl--ws-put ws :last-prompt-summary-pending nil)
                       (agent-repl--prompt-summary-redisplay ws)
                       (agent-repl--log ws "prompt-summary: persist rejected result begin")
@@ -573,7 +573,7 @@ state-mutation entry point."
             (agent-repl--log ws "prompt-summary: spawn accepted process=%S" proc)
             proc))
       (error
-       (agent-repl--log ws "prompt-summary: spawn failed raw-len=%d err=%S" (length raw) err)
+       (agent-repl--warn ws "prompt-summary: spawn failed raw-len=%d err=%S" (length raw) err)
        (when (buffer-live-p out-buf) (kill-buffer out-buf))
        nil))))
 

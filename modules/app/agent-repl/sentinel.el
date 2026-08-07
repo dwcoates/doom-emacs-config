@@ -203,7 +203,7 @@ own a sink keeps its attribution."
                                       (agent-repl--log log-ws "ws-fully-loaded-hook: ws=%s completed fn=%S"
                                                         ws fn))
                                   (error
-                                   (agent-repl--log log-ws
+                                   (agent-repl--warn log-ws
                                                      "ws-fully-loaded-hook: ws=%s failed fn=%S err=%S"
                                                      ws fn err))))
                               nil)

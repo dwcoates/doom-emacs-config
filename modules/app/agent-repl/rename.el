@@ -203,7 +203,7 @@ rename so the repo is left in its original state."
                   "rename-execute-git: rollback-branch ws=%S from=%S to=%S outcome=restored"
                   ws new-branch old-branch))
              (error
-              (agent-repl--log
+              (agent-repl--warn
                ws
                "rename-execute-git: rollback-branch ws=%S from=%S to=%S outcome=failed error=%S"
                ws new-branch old-branch rollback-branch-err)))
@@ -284,7 +284,7 @@ WS, when non-nil, supplies workspace metadata for diagnostics."
                ws buf old-name new-name (buffer-name buf))
               t)
           (error
-           (agent-repl--log
+           (agent-repl--warn
             ws
             "rename-buffer-safe: ws=%S buffer=%S old-name=%S requested-name=%S outcome=failed error=%S"
             ws buf old-name new-name err)
@@ -415,7 +415,7 @@ persistent old-name persp would diverge from the renamed state."
            "rename-update-projectile: ws=%S step=unregister old-path=%S old-dir=%S outcome=complete"
            ws old-path old-dir))
       (error
-       (agent-repl--log
+       (agent-repl--warn
         ws
         "rename-update-projectile: ws=%S step=unregister old-path=%S old-dir=%S outcome=ignored-error error=%S"
         ws old-path old-dir err)))
@@ -427,7 +427,7 @@ persistent old-name persp would diverge from the renamed state."
            "rename-update-projectile: ws=%S step=register new-path=%S new-dir=%S outcome=complete"
            ws new-path new-dir))
       (error
-       (agent-repl--log
+       (agent-repl--warn
         ws
         "rename-update-projectile: ws=%S step=register new-path=%S new-dir=%S outcome=ignored-error error=%S"
         ws new-path new-dir err)))))
@@ -532,11 +532,11 @@ errors verbatim after attempting a best-effort rollback."
                "rename: state-save old-ws=%S new-ws=%S new-path=%S outcome=saved"
                old-ws new-bare new-path))
           (error
-           (agent-repl--log
+           (agent-repl--warn
             new-bare
             "rename: state-save old-ws=%S new-ws=%S new-path=%S outcome=ignored-error error=%S"
             old-ws new-bare new-path err)))
-      (agent-repl--log
+      (agent-repl--warn
        new-bare
        "rename: state-save old-ws=%S new-ws=%S new-path=%S action=skip reason=function-unavailable"
        old-ws new-bare new-path))

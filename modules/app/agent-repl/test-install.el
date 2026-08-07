@@ -807,12 +807,23 @@ sentinel files nobody reads must not be able to break startup."
                                            home ".claude"
                                            "{\"hooks\":{\"Stop\":[{\"hooks\":[{\"command\":\"stop-notify.sh\"}]}]}}")
                                           (let ((agent-repl--legacy-hooks-purged nil)
-                                                (agent-repl-auto-install-hooks t))
+                                                (agent-repl-auto-install-hooks t)
+                                                (warned nil))
                                             (cl-letf (((symbol-function 'agent-repl--run-install-script)
-                                                       (lambda (_a) (error "script exploded"))))
+                                                       (lambda (_a) (error "script exploded")))
+                                                      ;; The failure rides the warn rung (legacy hooks
+                                                      ;; survive the purge), so the helper's value is the
+                                                      ;; log emitter's rather than a contract; a signal
+                                                      ;; escaping the containment still fails this test.
+                                                      ((symbol-function 'agent-repl--warn)
+                                                       (lambda (_ws fmt &rest args)
+                                                         (push (apply #'format fmt args) warned))))
                                               (let ((noninteractive nil))
-                                                ;; Act / Assert
-                                                (should-not (agent-repl--maybe-purge-legacy-hooks)))))))
+                                                ;; Act
+                                                (agent-repl--maybe-purge-legacy-hooks))
+                                              ;; Assert
+                                              (should (cl-some (lambda (l) (string-match-p "FAILED" l))
+                                                               warned))))))
 
 (ert-deftest agent-repl-test-purge-scripts-mirror-the-installer-list ()
   "The elisp skip-check list must cover every script install.sh purges,
