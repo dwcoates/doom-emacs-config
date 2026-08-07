@@ -85,6 +85,11 @@ type fakeResumes struct {
 	// asked records every (configDir, cwd) the create path resolved, so a test
 	// can prove the daemon consulted its own records rather than the caller.
 	asked [][2]string
+	// evidence is what ConversationEvidence reports. The zero value is an
+	// UNCONSULTABLE registry, which proves nothing; establishHandler pins the
+	// "brand-new workspace" answer explicitly so a test that wants the refusal
+	// has to ask for it.
+	evidence conversationEvidence
 }
 
 func (f *fakeResumes) ResolveResume(configDir, cwd string) (string, bool) {
@@ -96,12 +101,15 @@ func (f *fakeResumes) ResolveResume(configDir, cwd string) (string, bool) {
 // distinguish "what we resumed" from "what we landed on".
 func (f *fakeResumes) ObservedClaudeSessionID(string) string { return f.observed }
 
+func (f *fakeResumes) ConversationEvidence(string, string) conversationEvidence { return f.evidence }
+
 // establishHandlerWithPrompts is establishHandler with the prompt router left
 // to the caller, so a test can watch what the create sends down the model path.
 func establishHandlerWithPrompts(t *testing.T, prompts *fakePrompts, sessions *fakeSessionCmds, router SessionHealthRouter) *commandHandler {
 	t.Helper()
 	h, err := newCommandHandler(prompts, &fakeMerges{}, &fakeLifecycle{}, nil, sessions, nil, nil, nil,
-		CommandHandlerConfig{Health: HealthConfig{Router: router}, Resumes: &fakeResumes{}})
+		CommandHandlerConfig{Health: HealthConfig{Router: router},
+			Resumes: &fakeResumes{evidence: conversationEvidence{available: true}}})
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
 	}
@@ -609,7 +617,8 @@ func TestCreateSessionNackOnTheEstablishmentsOwnDeadline(t *testing.T) {
 	// caller's own (absent) deadline.
 	router := &probeHealthRouter{healthy: true, gate: make(chan struct{})}
 	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil,
-		CommandHandlerConfig{Health: HealthConfig{Router: router}, EstablishTimeout: 30 * time.Millisecond, Resumes: &fakeResumes{}})
+		CommandHandlerConfig{Health: HealthConfig{Router: router}, EstablishTimeout: 30 * time.Millisecond,
+			Resumes: &fakeResumes{evidence: conversationEvidence{available: true}}})
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
 	}

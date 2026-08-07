@@ -47,7 +47,7 @@
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--ensure-frontend-daemon "agent-repl-daemon" (&optional force))
 (declare-function agent-repl--frontend-after-ready "agent-repl-frontend-client" (on-ready on-failure &optional ws))
-(declare-function agent-repl--frontend-after-create-session "agent-repl-frontend-client" (cwd model resume-mode explicit-id force-fresh on-success on-failure &optional ws))
+(declare-function agent-repl--frontend-after-create-session "agent-repl-frontend-client" (cwd model resume-mode explicit-id on-success on-failure &optional ws))
 (declare-function agent-repl--frontend-delete-session "agent-repl-frontend-client" (id &optional ws))
 (declare-function agent-repl--frontend-session-views-all "agent-repl-frontend-state" ())
 (declare-function agent-repl--frontend-session-url "agent-repl-frontend-client" (session-id))
@@ -441,7 +441,7 @@ priming state change only after a new SessionView has been correlated."
                   (agent-repl-frontend-ungated-permission-mode-p
                    agent-repl-explain-config-permission-mode)))
              (agent-repl--frontend-after-create-session
-              dir agent-repl-explain-config-model 'continue nil nil
+              dir agent-repl-explain-config-model 'continue nil
               (lambda (id)
                 (setq agent-repl--explain-config-session-id id
                       agent-repl--explain-config-primed-p nil)

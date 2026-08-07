@@ -639,7 +639,16 @@ func main() {
 	// Held by pointer so its SessionView re-push can be late-bound below: the
 	// Server it pushes through does not exist yet (same shape as forwarder).
 	modelCatalogs := server.NewSessionModelCatalogs()
-	registrar := &server.RegistryRegistrar{Reg: sessionRegistry, Logf: legacyLog, ModelCatalogs: modelCatalogs}
+	// The transcript backup plane rides the registrar because the registrar is
+	// the first thing in the daemon to hear both boundaries a copy is worth
+	// taking at — a turn ending and a vendor uuid rotating — and it already
+	// holds the registry that turns a session id into a transcript path.
+	registrar := &server.RegistryRegistrar{
+		Reg:           sessionRegistry,
+		Logf:          legacyLog,
+		ModelCatalogs: modelCatalogs,
+		Backups:       &server.TranscriptBackups{Reg: sessionRegistry, Logf: legacyLog},
+	}
 	// One registry adapter serves both durable seq marks: last_seen_seq (the
 	// shimclient replay high-water) and newest_clear_or_compact_seq (the
 	// frontend replay floor).

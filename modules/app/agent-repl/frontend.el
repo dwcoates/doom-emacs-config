@@ -51,7 +51,6 @@
 (declare-function agent-repl--ws-put "agent-repl-workspace" (ws key val))
 (declare-function agent-repl--align-buffer-to-ws-dir "agent-repl-status" (buf ws))
 (declare-function agent-repl--frontend-after-ensure-session "agent-repl-frontend-client" (ws on-success on-failure))
-(declare-function agent-repl--frontend-force-fresh-session "agent-repl-frontend-client" (ws on-success on-failure))
 (declare-function agent-repl--frontend-restart-session "agent-repl-frontend-client" (ws))
 (declare-function agent-repl--frontend-hibernate-workspace "agent-repl-frontend-client" (ws))
 (declare-function agent-repl--frontend-workspace-url "agent-repl-frontend-client" (workspace))
@@ -1037,30 +1036,6 @@ the current workspace."
     (message "agent-repl: webview reloaded")))
 
 ;;;###autoload
-(defun agent-repl-force-fresh-conversation ()
-  "Start a FRESH conversation for the current workspace, discarding resume.
-Recreates the workspace's daemon session with no resume — a blank
-conversation replaces the resumed one — via
-`agent-repl--frontend-force-fresh-session', then snaps the displayed
-webview to the fresh session.  Use to abandon a wedged or unwanted
-resumed conversation on demand, without opening the resume-loss
-investigation workspace the automatic path dispatches.  Signals when
-there is no current workspace."
-  (interactive)
-  (let ((ws (agent-repl--ws-current-name)))
-    (unless ws
-      (user-error "agent-repl: no current workspace"))
-    (agent-repl--log ws "force-fresh-conversation: begin")
-    (agent-repl--frontend-force-fresh-session
-     ws
-     (lambda ()
-       (agent-repl--log ws "force-fresh-conversation: outcome=established")
-       (message "agent-repl: started a fresh conversation in %s" ws))
-     (lambda (detail)
-       (agent-repl--log ws "force-fresh-conversation: FAILED detail=%s" detail)))
-    :pending))
-
-;;;###autoload
 (defun agent-repl-restart-session ()
   "HARD-RESTART the current workspace\='s session: new shim, same conversation.
 
@@ -1072,8 +1047,12 @@ respawn resumes the same vendor conversation and nothing is lost.
 This is a PROCESS restart, not a new conversation.  Reach for it when the
 shim is wedged, when it survived a deploy and is running superseded code,
 or when the backend simply needs rebuilding under a conversation worth
-keeping.  Use `agent-repl-force-fresh-conversation\=' instead to abandon
-the conversation itself.
+keeping.
+
+There is no editor verb for abandoning the conversation itself, and there
+deliberately is not one: a workspace\='s conversation is not replaceable
+from here.  A blank conversation exists only where the daemon can prove the
+workspace never had one.
 
 A workspace whose session is merely hibernated or severed is brought up,
 because a

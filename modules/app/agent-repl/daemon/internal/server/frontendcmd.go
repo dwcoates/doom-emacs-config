@@ -501,6 +501,11 @@ type ConversationResumeResolver interface {
 	// unknown, which is a fine answer: an unattributed client log is accepted,
 	// where a MISattributed one is rejected.
 	ObservedClaudeSessionID(sessionID string) string
+	// ConversationEvidence reports the daemon's durable answer to "has this
+	// workspace ever had a Claude conversation?". It is consulted only when
+	// ResolveResume names nothing, and it is what decides between a legitimate
+	// fresh start and the resume ladder's terminal fault. See freshgate.go.
+	ConversationEvidence(configDir, cwd string) conversationEvidence
 }
 
 // InterruptGateConfig supplies the interrupt confirm gate's two facts. Both

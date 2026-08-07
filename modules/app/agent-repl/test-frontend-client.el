@@ -148,7 +148,7 @@ Suitable for submitPrompt/interrupt/deleteSession, which do not await."
               ((symbol-function 'agent-repl--uds-run-timer)
                (lambda (delay fn) (when (= delay 0.05) (setq poll fn)) 'timer)))
       (should (eq :pending (agent-repl--frontend-after-create-session
-                            "/w" nil 'continue nil nil
+                            "/w" nil 'continue nil
                             (lambda (id) (setq success id))
                             (lambda (e) (setq failure e)))))
       (should-not success)
@@ -179,7 +179,7 @@ Suitable for submitPrompt/interrupt/deleteSession, which do not await."
               ((symbol-function 'agent-repl--uds-run-timer)
                (lambda (delay fn) (when (= delay 0.05) (setq poll fn)) 'timer)))
       (agent-repl--frontend-after-create-session
-       "/w/" nil 'continue nil nil #'ignore #'error)
+       "/w/" nil 'continue nil #'ignore #'error)
       (should (equal (car sent) "createSession"))
       (should (equal (plist-get (cadr sent) :cwd) "/w"))
       (should (equal (nth 2 sent) "/w"))
@@ -202,7 +202,7 @@ Suitable for submitPrompt/interrupt/deleteSession, which do not await."
                  (funcall fail "no daemon")
                  :pending)))
       (agent-repl--frontend-after-create-session
-       "/w-fail" nil 'continue nil nil #'ignore
+       "/w-fail" nil 'continue nil #'ignore
        (lambda (detail) (setq failure detail)))
       (should (equal failure "no daemon"))
       (should-not (gethash "/w-fail" agent-repl--frontend-creates-in-flight)))))
@@ -358,25 +358,15 @@ cannot offer the daemon different answers for one workspace."
         (should-not (agent-repl--ws-get "ws1" :sent-turn))
         (should-not (agent-repl--ws-get "ws1" :thinking))))))
 
-(ert-deftest agent-repl-test-frontend-force-fresh-binds-only-on-create-success ()
-  "Fresh-session state changes are continuation-owned."
-  (agent-repl-test--with-ws "ws1"
-      '(:project-dir "/w" :reattach-failed t)
-    (let (create-success result)
-      (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&rest _) t))
-                ((symbol-function 'agent-repl--frontend-after-create-session)
-                 (lambda (_cwd _model mode _explicit _force ok _fail &optional _ws)
-                   (should (eq mode 'fresh))
-                   (setq create-success ok)
-                   :pending)))
-        (agent-repl--frontend-force-fresh-session
-         "ws1" (lambda () (setq result t)) #'error)
-        (should-not result)
-        (funcall create-success "fresh")
-        (should result)
-        (should-not (agent-repl--ws-get "ws1" :reattach-failed))))))
-
 ;;;; ---- webview URL ---------------------------------------------------------
+
+(ert-deftest agent-repl-test-frontend-resume-mode-fresh-is-not-expressible ()
+  "There is no fresh resume mode to send.
+The proto retired RESUME_MODE_FRESH, so a caller reaching for it must hit
+the wire-map's own refusal rather than silently landing on `continue' —
+which would resume a conversation the caller believed it was replacing."
+  ;; Arrange / Act / Assert
+  (should-error (agent-repl--frontend-resume-mode-wire 'fresh)))
 
 (ert-deftest agent-repl-test-frontend-base-url-is-the-webview-address ()
   "The one surviving URL builder addresses the daemon's served webapp.

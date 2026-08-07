@@ -37,7 +37,7 @@
 (declare-function agent-repl--ai-title-encode-cwd "agent-repl-ai-title" (path))
 (declare-function agent-repl--ai-title-projects-dir-for-ws "agent-repl-ai-title" (ws))
 (declare-function agent-repl--frontend-after-create-session "agent-repl-frontend-client"
-                  (cwd model resume-mode explicit-id force-fresh on-success on-failure &optional ws))
+                  (cwd model resume-mode explicit-id on-success on-failure &optional ws))
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
@@ -143,7 +143,7 @@ existing."
     (agent-repl--info ws "transcript resume: ws=%s uuid=%s path=%s"
                       ws uuid (plist-get entry :path))
     (agent-repl--frontend-after-create-session
-     cwd nil 'explicit uuid nil
+     cwd nil 'explicit uuid
      (lambda (id)
        (agent-repl--info ws "transcript resume: ws=%s uuid=%s RESUMED session=%s" ws uuid id)
        (message "[agent-repl] %s resumed %s" ws (substring uuid 0 8)))
