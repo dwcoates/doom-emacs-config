@@ -28,6 +28,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/frontend"
+	"claude-repld/internal/protocol"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/sessioncontroller"
 	"claude-repld/internal/ssm"
@@ -169,7 +170,10 @@ type MergeGeometrySource interface {
 // workspace-command channel (workspacecmd) at stitch.
 type WorkspaceLifecycle interface {
 	Close(ctx context.Context, workspace string) error
-	Open(ctx context.Context, workspace string) error
+	// Open makes a workspace ready to render and drive, CREATING its session
+	// when it has none. opts carries the run preferences for a session it
+	// starts and is unread when the workspace already has one.
+	Open(ctx context.Context, workspace string, opts WorkspaceOpenOpts) error
 	// OpenDriveable is Open for a caller that will DRIVE the session it opens
 	// (merge.SessionBringUp): it returns only once the shim has handshaked, so
 	// the caller's next send cannot race the shim's boot, and it reports
@@ -1016,9 +1020,16 @@ func (h *commandHandler) evictWorkspaceLogTargets(workspace, requestID string) {
 	h.logf("frontend cmd: close_workspace log targets RELEASED ws=%s request_id=%s evicted=%d", workspace, requestID, evicted)
 }
 
-func (h *commandHandler) OpenWorkspace(ctx context.Context, workspace, requestID string, _ *frontendv1.OpenWorkspaceCmd) error {
-	h.logf("frontend cmd: open_workspace ws=%s request_id=%s", workspace, requestID)
-	return h.lifecycle.Open(ctx, workspace)
+func (h *commandHandler) OpenWorkspace(ctx context.Context, workspace, requestID string, cmd *frontendv1.OpenWorkspaceCmd) error {
+	h.logf("frontend cmd: open_workspace ws=%s request_id=%s permission_mode=%s config_dir=%s fake=%v%s",
+		workspace, requestID, cmd.GetPermissionMode(), cmd.GetConfigDir(), cmd.GetFake(),
+		protocol.UngatedNote("a session this open starts", cmd.GetPermissionMode(), cmd.GetAllowUngated()))
+	return h.lifecycle.Open(ctx, workspace, WorkspaceOpenOpts{
+		PermissionMode: cmd.GetPermissionMode(),
+		ConfigDir:      cmd.GetConfigDir(),
+		Fake:           cmd.GetFake(),
+		AllowUngated:   cmd.GetAllowUngated(),
+	})
 }
 
 // Resync drives the conversation-delta replay half of a frontend resync (the
