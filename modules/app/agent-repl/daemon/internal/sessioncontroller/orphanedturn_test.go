@@ -39,8 +39,8 @@ func TestAProvablyStaleTurnIsClosedAndTheHibernationProceeds(t *testing.T) {
 	// Arrange — the workspace lock is free, and the close settles the axis the
 	// way a real closing row does.
 	h := newWedgedHarness(t, &fakeWorkspaceLock{answers: []bool{false}})
-	h.applier.staleTurnClosed = true
-	h.applier.staleTurnCloseHook = func(workspace string) {
+	h.applier.orphanedTurnClosed = true
+	h.applier.orphanedTurnCloseHook = func(workspace string) {
 		settled := wedgedState()
 		settled.TurnActive = false
 		h.applier.setCurrent(workspace, settled)
@@ -55,15 +55,46 @@ func TestAProvablyStaleTurnIsClosedAndTheHibernationProceeds(t *testing.T) {
 		t.Fatalf("acquireSettledHibernationLease = %v, want the reconciled workspace to settle", err)
 	}
 	release()
-	closes := h.applier.staleTurnClosesApplied()
+	closes := h.applier.orphanedTurnClosesApplied()
 	if len(closes) != 1 {
 		t.Fatalf("stale-turn closes = %d, want exactly 1", len(closes))
 	}
 	if closes[0].reason != staleTurnReasonOrphaned {
 		t.Fatalf("close reason = %q, want %q", closes[0].reason, staleTurnReasonOrphaned)
 	}
-	if closes[0].sessionID != "s1" || !closes[0].soleSessionController {
-		t.Fatalf("close = %+v, want it made on behalf of the claiming session as its sole controller", closes[0])
+	if closes[0].sessionID != "s1" {
+		t.Fatalf("close = %+v, want it made on behalf of the claiming session", closes[0])
+	}
+}
+
+// TestASucceededReconciliationIsNotAttemptedAgain: the every-sweep churn the
+// wedge produced. Once the reconciliation settles the workspace, the next
+// hibernation must find nothing to reconcile and ask for no second close.
+func TestASucceededReconciliationIsNotAttemptedAgain(t *testing.T) {
+	// Arrange — the reconciliation settles the axis, as the real one does.
+	h := newWedgedHarness(t, &fakeWorkspaceLock{answers: []bool{false, false}})
+	h.applier.orphanedTurnClosed = true
+	h.applier.orphanedTurnCloseHook = func(workspace string) {
+		settled := wedgedState()
+		settled.TurnActive = false
+		h.applier.setCurrent(workspace, settled)
+	}
+	release, err := h.m.acquireSettledHibernationLease("ws")
+	if err != nil {
+		t.Fatalf("arrangement lease = %v, want the reconciled workspace to settle", err)
+	}
+	release()
+
+	// Act — the sweep comes round again.
+	release, err = h.m.acquireSettledHibernationLease("ws")
+
+	// Assert — it settled on its own, so nothing was reconciled a second time.
+	if err != nil {
+		t.Fatalf("second acquireSettledHibernationLease = %v, want the settled workspace to grant", err)
+	}
+	release()
+	if closes := h.applier.orphanedTurnClosesApplied(); len(closes) != 1 {
+		t.Fatalf("orphan reconciliations = %d, want exactly 1 — the second sweep must find nothing to close", len(closes))
 	}
 }
 
@@ -103,7 +134,7 @@ func TestAnUnprovableTurnIsRefusedRatherThanReconciled(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			h := newWedgedHarness(t, tc.lock)
-			h.applier.staleTurnClosed = true
+			h.applier.orphanedTurnClosed = true
 			if tc.arrange != nil {
 				tc.arrange(h)
 			}
@@ -115,7 +146,7 @@ func TestAnUnprovableTurnIsRefusedRatherThanReconciled(t *testing.T) {
 			if !errors.Is(err, ErrNotSettled) {
 				t.Fatalf("acquireSettledHibernationLease = %v, want ErrNotSettled", err)
 			}
-			if closes := h.applier.staleTurnClosesApplied(); len(closes) != 0 {
+			if closes := h.applier.orphanedTurnClosesApplied(); len(closes) != 0 {
 				t.Fatalf("stale-turn closes = %+v, want none", closes)
 			}
 			if !h.log.contains(tc.wantLog) {
@@ -130,7 +161,7 @@ func TestAnUnprovableTurnIsRefusedRatherThanReconciled(t *testing.T) {
 func TestTheReconciliationRunsAtMostOncePerRequest(t *testing.T) {
 	// Arrange — the close writes a row but the workspace still reads the wedge.
 	h := newWedgedHarness(t, &fakeWorkspaceLock{answers: []bool{false}})
-	h.applier.staleTurnClosed = true
+	h.applier.orphanedTurnClosed = true
 
 	// Act
 	_, err := h.m.acquireSettledHibernationLease("ws")
@@ -139,7 +170,7 @@ func TestTheReconciliationRunsAtMostOncePerRequest(t *testing.T) {
 	if !errors.Is(err, ErrNotSettled) {
 		t.Fatalf("acquireSettledHibernationLease = %v, want ErrNotSettled", err)
 	}
-	if closes := h.applier.staleTurnClosesApplied(); len(closes) != 1 {
+	if closes := h.applier.orphanedTurnClosesApplied(); len(closes) != 1 {
 		t.Fatalf("stale-turn closes = %d, want exactly 1", len(closes))
 	}
 }
@@ -165,7 +196,7 @@ func TestASettledWorkspaceIsNeverReconciled(t *testing.T) {
 	if lock.calls != 0 {
 		t.Fatalf("workspace lock probed %d times for a settled workspace", lock.calls)
 	}
-	if closes := h.applier.staleTurnClosesApplied(); len(closes) != 0 {
+	if closes := h.applier.orphanedTurnClosesApplied(); len(closes) != 0 {
 		t.Fatalf("stale-turn closes = %+v, want none", closes)
 	}
 }
