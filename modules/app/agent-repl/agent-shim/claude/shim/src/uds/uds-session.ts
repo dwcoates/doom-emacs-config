@@ -1990,10 +1990,44 @@ export class UdsSession {
         decision: "retain_vendor_message_without_duplicate_task_end",
       }, "SDK repeated a stored terminal task fact; retaining vendor evidence without duplicating lifecycle");
     }
-    for (const taskId of endedTaskIds) {
-      if (!liveAfterThisEvent.delete(taskId)) {
-        throw new Error(`SDK emitted TaskEnded for unknown task ${JSON.stringify(taskId)}`);
-      }
+    // An end for a task this PROCESS never saw start is a contained accounting
+    // gap, never a reason to kill the live query. The task tables are in-memory
+    // and per query instance, so `--resume` (and any shim restart) attaches to a
+    // vendor conversation whose background tasks were started under the previous
+    // shim's lifetime; their terminal fact then arrives with no local start to
+    // retire. Throwing here escaped into pump(), which read it as
+    // `iterator_throw` and tore down the WHOLE conversation over one unmatched
+    // task id.
+    //
+    // The durable TaskEnded is still FORWARDED, not dropped. The daemon already
+    // owns this reconciliation: its SSM appends the entailed TaskStarted before
+    // an orphan end (`daemon/internal/ssm/orphan.go`, cause kind
+    // `task_reconciled`), and its frontend task catalog creates the entry on
+    // demand. Swallowing the end here would instead strand the task as
+    // forever-running for every reader.
+    const unknownEndedTaskIds = endedTaskIds.filter((taskId) => !liveAfterThisEvent.has(taskId));
+    for (const taskId of endedTaskIds) liveAfterThisEvent.delete(taskId);
+    if (unknownEndedTaskIds.length > 0) {
+      const unknown = [...new Set(unknownEndedTaskIds)].sort();
+      LOGGER.log({
+        level: "warn",
+        agent_repl_session_id: this.deps.sessionId,
+        request_id: rootTurnId,
+        turn_id: rootTurnId,
+        unknown_ended_sdk_task_ids: unknown,
+        live_sdk_task_count: this.liveSdkTaskIds.size,
+        live_sdk_task_ids: [...this.liveSdkTaskIds].sort(),
+        completed_sdk_task_count: this.completedSdkTaskIds.size,
+        completed_sdk_task_ids: [...this.completedSdkTaskIds].sort(),
+        sdk_type: msg.type,
+        sdk_subtype: typeof msg.subtype === "string" ? msg.subtype : "",
+        decision: "contain_unknown_task_end",
+      }, "SDK emitted TaskEnded for a task this query instance never saw start; containing the accounting gap");
+      this.reportDegraded(
+        "claude-shim-task-lifecycle",
+        `SDK emitted TaskEnded for unknown task(s) ${JSON.stringify(unknown)}; live tasks ${JSON.stringify([...this.liveSdkTaskIds].sort())}`,
+        { recovered: true, level: "warn" },
+      );
     }
     if (msg.type === "result" && terminalTurnId !== undefined) {
       LOGGER.log({
@@ -2164,14 +2198,22 @@ export class UdsSession {
    * The one channel this session has for "something the user asked for did
    * not happen": a loud log PLUS a DegradedState the daemon can surface. A
    * bare `log` is not enough — nobody watching the UI ever sees it.
+   *
+   * `recovered: true` marks a CONTAINED degradation: the shim absorbed an
+   * anomaly and the session keeps serving, so the daemon can surface the notice
+   * without treating the session as ongoing downtime. Default is uncontained.
    */
-  private reportDegraded(component: string, reason: string): void {
-    LOGGER.log({ level: "error", agent_repl_session_id: this.deps.sessionId }, reason);
+  private reportDegraded(
+    component: string,
+    reason: string,
+    opts: { recovered?: boolean; level?: "warn" | "error" } = {},
+  ): void {
+    LOGGER.log({ level: opts.level ?? "error", agent_repl_session_id: this.deps.sessionId }, reason);
     this.server.sendEvent(this.degradedEvent(create(DegradedStateSchema, {
       component,
       reason,
       droppedCount: 0n,
-      recovered: false,
+      recovered: opts.recovered ?? false,
     })));
   }
 
