@@ -1169,6 +1169,31 @@ describe("explicit-ignore path", () => {
     expect(logs.filter(([, m]) => m.includes("commandAck"))).toHaveLength(1);
   });
 
+  it("keeps a REGISTERED ignored shape at debug (its frame is consumed elsewhere)", () => {
+    const logs: Array<[AdapterLogLevel, string]> = [];
+    const adapter = new StateAdapter((lvl, msg) => logs.push([lvl, msg]));
+
+    adapter.apply(frame({ commandAck: { requestId: "r1", ok: true } }));
+
+    expect(logs.filter(([, m]) => m.includes("commandAck")).map(([lvl]) => lvl)).toEqual(["debug"]);
+  });
+
+  it("warns on an UNREGISTERED ignored shape (conversation the user simply never sees)", () => {
+    const logs: Array<[AdapterLogLevel, string]> = [];
+    const adapter = new StateAdapter((lvl, msg) => logs.push([lvl, msg]));
+
+    adapter.apply(
+      frame({
+        conversationDelta: {
+          sessionId: "s1",
+          items: [userItem({ uuid: "m1", toolUseResult: { rawString: "x" } })],
+        },
+      }),
+    );
+
+    expect(logs.filter(([, m]) => m.includes("conversation-item:toolUseResult")).map(([lvl]) => lvl)).toEqual(["warn"]);
+  });
+
   it("ignores a daemonView frame (S7 unsupported shape)", () => {
     const adapter = new StateAdapter();
     const dv = frame({

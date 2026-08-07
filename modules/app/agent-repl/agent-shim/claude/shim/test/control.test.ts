@@ -412,4 +412,22 @@ describe("ControlDispatch.requestPermission round-trip", () => {
     expect(await pb).toEqual({ behavior: "deny", message: "interrupted" });
     expect(d.pendingCount()).toBe(0);
   });
+
+  it("warns when cancelAll force-denies asks the user never saw, naming them", async () => {
+    // Arrange
+    const sent: PermissionRequest[] = [];
+    const d = dispatch(recorder(), sent, ["a", "b"]);
+    void d.requestPermission("Bash", {});
+    void d.requestPermission("Bash", {});
+    vi.mocked(writeSync).mockClear();
+    // Act
+    d.cancelAll("interrupted");
+    // Assert
+    const cancelled = persistedLogs().filter((r) => String(r.message).includes("force-denied"));
+    expect(cancelled).toHaveLength(1);
+    expect(cancelled[0]).toMatchObject({
+      level: "warn",
+      context: { pending_count: 2, reason: "interrupted", request_ids: ["a", "b"] },
+    });
+  });
 });
