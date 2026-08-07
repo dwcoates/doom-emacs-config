@@ -254,6 +254,37 @@ popping the `*agent-repl-install*' window on every reload."
       (agent-repl--maybe-install-hooks)
       (should logged))))
 
+(ert-deftest agent-repl-test-maybe-install-succeeds-without-warning ()
+  "A zero-exit auto-install emits NO warning.
+Regression: under `core.hooksPath = .githooks' the script's pre-commit
+step copied the managed hook onto itself, `cp' refused, and `set -e' made
+a fully successful install exit 1 — warning on every Emacs boot."
+  (let ((warned nil))
+    (cl-letf (((symbol-function 'agent-repl--doctor-issues)
+               (lambda () '((warn . "skill symlink missing"))))
+              ((symbol-function 'agent-repl--run-install-script)
+               (lambda (_) '(0 "[install] Done.\n")))
+              ((symbol-function 'agent-repl--warn)
+               (lambda (&rest _) (setq warned t)))
+              (noninteractive nil)
+              (agent-repl-auto-install-hooks t))
+      (agent-repl--maybe-install-hooks)
+      (should-not warned))))
+
+(ert-deftest agent-repl-test-maybe-install-warns-on-script-failure ()
+  "A genuinely failing install script still raises the auto-install warning."
+  (let ((warned nil))
+    (cl-letf (((symbol-function 'agent-repl--doctor-issues)
+               (lambda () '((warn . "skill symlink missing"))))
+              ((symbol-function 'agent-repl--run-install-script)
+               (lambda (_) '(1 "[install] FAILED: 1 skill impl path(s) missing\n")))
+              ((symbol-function 'agent-repl--warn)
+               (lambda (&rest _) (setq warned t)))
+              (noninteractive nil)
+              (agent-repl-auto-install-hooks t))
+      (agent-repl--maybe-install-hooks)
+      (should warned))))
+
 (ert-deftest agent-repl-test-maybe-install-not-on-startup-hook ()
   "Auto-install must NOT be deferred to `emacs-startup-hook' — later
 agent-repl sub-modules depend on hooks being registered at load time."
