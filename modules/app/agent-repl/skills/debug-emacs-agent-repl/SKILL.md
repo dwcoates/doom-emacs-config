@@ -1,6 +1,6 @@
 ---
 name: debug-emacs-agent-repl
-description: Investigate the agent-repl system across Emacs, daemon, shim, webapp, sidecar, store, state, deployment, logging, and test coverage. Use for current or historical workspace failures, wrong colors or stuck states, missing conversation data, service-health questions, source-versus-running readiness, workspace/session/process correlation, structured-log analysis, SSM or store SQL investigation, coverage questions, missing telemetry, and iterative critical-path instrumentation, reload, reproduction, and log-analysis loops.
+description: Investigate the agent-repl system across Emacs, daemon, shim, webapp, sidecar, store, state, deployment, logging, and test coverage. Use for current or historical workspace failures, wrong colors or stuck states, missing conversation data, service-health questions, source-versus-running readiness, workspace/session/process correlation, structured-log analysis, SSM or store SQL investigation, coverage questions, missing telemetry, iterative critical-path instrumentation, reload, reproduction, and log-analysis loops, and orchestrated bounce-observe-remediate loops that drive the stack to a healthy steady state.
 ---
 
 # Debug agent-repl
@@ -59,6 +59,7 @@ the symptom crosses planes.
 | Testing and coverage | What tests or coverage exercise this path? | `references/testing-coverage.md` | observability |
 | Observability gaps | Is the evidence itself adequate for a diagnosis? | `references/observability-gaps.md` | the active runbooks |
 | Critical-path observability loop | Must the path be instrumented, reloaded, provoked, and inspected iteratively to expose and verify the bug? | `references/critical-path-observability-loop.md` | logs, observability, testing |
+| Iterative fix-verify loop | Is the system being driven to a healthy steady state through repeated bounce, observe, and remediate iterations? | `references/iterative-fix-verify-loop.md` | health, logs, identity, critical path, observability |
 
 Apply an ambiguity gate before choosing:
 
