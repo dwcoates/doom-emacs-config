@@ -2107,19 +2107,28 @@ message SessionHealthCmd {
 // nothing and a frontend saying "start fresh" were the same wire value.
 //
 // They are now different values, which is the whole point of this enum.
+// FRESH IS NOT CALLER-EXPRESSIBLE. Tag 2 was RESUME_MODE_FRESH: "begin a NEW
+// conversation even though a resumable one exists". It is retired, not
+// renamed. A workspace's conversation is not replaceable by a caller — no
+// frontend, no user command, no automatic recovery may abandon one — because
+// the abandonment is silent and irreversible while every alternative (resume,
+// restore from backup, or a loud refusal) is recoverable. A fresh conversation
+// may now exist only for a workspace the daemon can PROVE never had one, and
+// that proof is the daemon's to mint from its own durable evidence, never a
+// caller's to assert. The wire therefore has no way to ask for it.
 enum ResumeMode {
+  reserved 2;
+  reserved "RESUME_MODE_FRESH";
+
   // Unset. Treated as RESUME_MODE_CONTINUE so an older or simpler caller gets
   // the safe behavior: continuing an existing conversation is recoverable,
   // stranding one is not.
   RESUME_MODE_UNSPECIFIED = 0;
 
   // Continue this workspace's conversation, whichever one that is. The daemon
-  // resolves it and starts fresh only when no viable conversation exists.
+  // resolves it; when nothing resolves it consults its own evidence and either
+  // proves the workspace never had a conversation (fresh) or fails loudly.
   RESUME_MODE_CONTINUE = 1;
-
-  // Deliberately begin a NEW conversation, even though a resumable one exists.
-  // The user asked for a blank slate; the daemon must not helpfully reattach.
-  RESUME_MODE_FRESH = 2;
 
   // Land on one SPECIFIC conversation named in explicit_claude_session_id.
   // Reserved for a human choosing from among conversations (a picker, a fork)

@@ -80,6 +80,13 @@ type sessionEstablishment struct {
 	hibernated bool
 }
 
+// resumeModeFreshRetired is the RETIRED wire value tag 2 (RESUME_MODE_FRESH).
+// The generated enum no longer names it — that is the point of reserving the
+// tag — so the daemon names the raw number itself in order to REFUSE it. It is
+// a named constant rather than a bare 2 at the switch arm because a bare
+// number in a resume-mode switch reads like a bug.
+const resumeModeFreshRetired = frontendv1.ResumeMode(2)
+
 // resolveResume turns the caller's INTENT into the concrete conversation the
 // create will land on.
 //
@@ -100,10 +107,18 @@ func (h *commandHandler) resolveResume(cmd *frontendv1.CreateSessionCmd) (string
 	}
 
 	switch mode {
-	case frontendv1.ResumeMode_RESUME_MODE_FRESH:
-		h.logf("frontend cmd: create_session cwd=%s resume_mode=FRESH — the caller deliberately asked for a NEW conversation, so no resolution is attempted",
+	case resumeModeFreshRetired:
+		// AN OUT-OF-DATE CLIENT, NOT A CONFUSED ONE. Tag 2 was
+		// RESUME_MODE_FRESH and it is retired (see the ResumeMode enum): a
+		// caller may no longer ask for a workspace's conversation to be
+		// replaced. Reading it as CONTINUE would be the daemon quietly
+		// answering a different question than the one asked, and reading it as
+		// "unknown mode" would tell the user their client is broken when it is
+		// merely old. It is named, refused, and the remedy is stated.
+		h.logf("frontend cmd: create_session cwd=%s resume_mode=2 REFUSED — RESUME_MODE_FRESH is retired and this daemon will not start a conversation over an existing one",
 			cmd.GetCwd())
-		return "", nil
+		return "", fmt.Errorf("%w: resume_mode=2 (RESUME_MODE_FRESH) was retired because a workspace's conversation is not caller-replaceable; update the client to send RESUME_MODE_CONTINUE",
+			errclass.ErrResumeModeRetired)
 
 	case frontendv1.ResumeMode_RESUME_MODE_EXPLICIT:
 		if explicit == "" {

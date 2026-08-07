@@ -2,10 +2,13 @@ package server
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+
+	"claude-repld/internal/errclass"
 )
 
 // ---------------------------------------------------------------------------
@@ -101,25 +104,60 @@ func TestContinueStartsFreshWhenNothingResolves(t *testing.T) {
 	}
 }
 
-func TestFreshNeverConsultsTheResolver(t *testing.T) {
-	// Arrange — the user asked for a blank slate over a workspace that HAS a
-	// resumable conversation. Helpfully reattaching would ignore them.
+// TestRetiredFreshResumeModeIsRefused pins the wire retirement. Tag 2 was
+// RESUME_MODE_FRESH; an out-of-date client can still put the raw number on the
+// wire, and reading it as CONTINUE would answer a question the caller did not
+// ask.
+func TestRetiredFreshResumeModeIsRefused(t *testing.T) {
+	// Arrange — an old client asking to replace this workspace's conversation.
 	resumes := &fakeResumes{uuid: "uuid-resolved"}
 
 	// Act
 	sessions, err := createWith(t, resumes, &frontendv1.CreateSessionCmd{
-		Cwd: "/w", ConfigDir: "/cfg", ResumeMode: frontendv1.ResumeMode_RESUME_MODE_FRESH,
+		Cwd: "/w", ConfigDir: "/cfg", ResumeMode: resumeModeFreshRetired,
 	})
 
 	// Assert
-	if err != nil {
-		t.Fatalf("CreateSession: %v", err)
+	if !errors.Is(err, errclass.ErrResumeModeRetired) {
+		t.Fatalf("err = %v, want errclass.ErrResumeModeRetired", err)
 	}
-	if len(sessions.created) != 1 || sessions.created[0].Resume != "" {
-		t.Fatalf("created = %+v, want no resume for an explicit FRESH", sessions.created)
+	if len(sessions.created) != 0 {
+		t.Fatalf("created = %+v, want no session for a retired resume mode", sessions.created)
 	}
+}
+
+// TestRetiredFreshResumeModeNamesTheRetirement: an out-of-date client must be
+// told WHAT is out of date, not merely refused.
+func TestRetiredFreshResumeModeNamesTheRetirement(t *testing.T) {
+	// Arrange
+	resumes := &fakeResumes{uuid: "uuid-resolved"}
+
+	// Act
+	_, err := createWith(t, resumes, &frontendv1.CreateSessionCmd{
+		Cwd: "/w", ConfigDir: "/cfg", ResumeMode: resumeModeFreshRetired,
+	})
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "RESUME_MODE_FRESH") {
+		t.Fatalf("err = %v, want the retired mode named", err)
+	}
+}
+
+// TestRetiredFreshResumeModeIsNeverReadAsContinue: the dangerous degradation is
+// not a refusal but a silent substitution, so the resolver must not even be
+// consulted.
+func TestRetiredFreshResumeModeIsNeverReadAsContinue(t *testing.T) {
+	// Arrange
+	resumes := &fakeResumes{uuid: "uuid-resolved"}
+
+	// Act
+	_, _ = createWith(t, resumes, &frontendv1.CreateSessionCmd{
+		Cwd: "/w", ConfigDir: "/cfg", ResumeMode: resumeModeFreshRetired,
+	})
+
+	// Assert
 	if len(resumes.asked) != 0 {
-		t.Fatalf("resolver was consulted %v times for a FRESH create, want none", len(resumes.asked))
+		t.Fatalf("resolver consulted %d times for a retired mode, want none", len(resumes.asked))
 	}
 }
 
@@ -172,17 +210,22 @@ func TestAUUIDUnderContinueIsRefused(t *testing.T) {
 	}
 }
 
-func TestAUUIDUnderFreshIsRefused(t *testing.T) {
-	// Arrange — FRESH plus a named conversation is self-contradictory.
-	_, err := createWith(t, &fakeResumes{}, &frontendv1.CreateSessionCmd{
+func TestAUUIDUnderTheRetiredFreshModeIsRefused(t *testing.T) {
+	// Arrange — the uuid guard runs before the mode switch, so an old client
+	// sending both is refused for carrying a uuid it may not carry. Either
+	// refusal is correct; what must never happen is a create.
+	sessions, err := createWith(t, &fakeResumes{}, &frontendv1.CreateSessionCmd{
 		Cwd: "/w", ConfigDir: "/cfg",
-		ResumeMode:              frontendv1.ResumeMode_RESUME_MODE_FRESH,
+		ResumeMode:              resumeModeFreshRetired,
 		ExplicitClaudeSessionId: "uuid-smuggled",
 	})
 
 	// Assert
-	if err == nil || !strings.Contains(err.Error(), "RESUME_MODE_EXPLICIT") {
-		t.Fatalf("err = %v, want the contradiction refused", err)
+	if err == nil {
+		t.Fatal("a uuid under the retired fresh mode must be refused")
+	}
+	if len(sessions.created) != 0 {
+		t.Fatalf("created = %+v, want no session", sessions.created)
 	}
 }
 

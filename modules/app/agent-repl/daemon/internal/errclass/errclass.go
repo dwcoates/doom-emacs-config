@@ -131,6 +131,13 @@ const (
 	// Claude conversation. The typed SessionResumeFailure detail carries the
 	// exact session, Claude UUID, attempted operation, and continuity cause.
 	TypeSessionResumeFailed Type = "session.resume_failed"
+	// TypeResumeModeRetired — a create arrived naming a resume mode this
+	// daemon no longer implements. Today that is exactly one value: the
+	// retired RESUME_MODE_FRESH (tag 2), which an old client may still put on
+	// the wire. It is named rather than folded into "unknown resume mode"
+	// because the caller is not confused, it is OUT OF DATE, and the remedy is
+	// to update it — not to guess at what it meant.
+	TypeResumeModeRetired Type = "session.resume_mode_retired"
 	// TypeSessionEndedUnclassified — a persisted death reason from an older
 	// build that predates this vocabulary. The raw string rides source_detail
 	// rather than being guessed at.
@@ -295,6 +302,7 @@ var prose = map[Type]string{
 	TypeSessionShimDied:            "the agent process exited",
 	TypeSessionStartFailed:         "the session could not be started",
 	TypeSessionResumeFailed:        "the Claude conversation could not be resumed",
+	TypeResumeModeRetired:          "this client asked for a resume mode the daemon no longer supports; update the client",
 	TypeSessionEndedUnclassified:   "the session ended",
 	TypeHistoryRepullInFlight:      "a history re-pull is already running",
 	TypeHistoryReplayTruncated:     "the history re-pull ended before it reached the live window",
@@ -404,6 +412,12 @@ var (
 	// session produces one of these per forwarded record and every one of them
 	// used to be logged as an unclassified daemon fault.
 	ErrClientLogIdentityStale = errors.New("server: client log source session identity disagrees with the daemon registry")
+	// ErrResumeModeRetired anchors the refusal of a wire resume_mode this
+	// daemon no longer implements — currently only the retired
+	// RESUME_MODE_FRESH (tag 2). Refused loudly rather than read as CONTINUE:
+	// an out-of-date client that asked to abandon a conversation must be told
+	// its request no longer exists, not quietly given a different one.
+	ErrResumeModeRetired = errors.New("server: create_session names a retired resume_mode")
 )
 
 // sentinelTypes is the ladder, as data rather than as a switch, so the
@@ -431,6 +445,7 @@ var sentinelTypes = []struct {
 	{ErrQueueEntryKeepAliveHeld, TypeQueueEntryKeepAliveHeld},
 	{ErrSessionHibernated, TypeSessionHibernated},
 	{ErrClientLogIdentityStale, TypeClientLogIdentityStale},
+	{ErrResumeModeRetired, TypeResumeModeRetired},
 }
 
 // Sentinel is the errors.Is ladder over the daemon's sentinel errors. It
@@ -814,6 +829,7 @@ func AllTypes() []Type {
 		TypeSessionShimDied,
 		TypeSessionStartFailed,
 		TypeSessionResumeFailed,
+		TypeResumeModeRetired,
 		TypeSessionEndedUnclassified,
 		TypeHistoryRepullInFlight,
 		TypeHistoryReplayTruncated,
