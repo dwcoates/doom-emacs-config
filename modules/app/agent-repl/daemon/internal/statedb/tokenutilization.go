@@ -117,7 +117,27 @@ func (s *TokenUtilizations) record(in *frontendv1.TokenUtilization, historical b
 	return false, nil
 }
 
+// validateSubagentTopologyTx checks the INCOMING responses against every
+// response the session has already made durable.
+//
+// WHY A SESSION'S WHOLE SET IS NOT ALWAYS READ. The check is a union-find over
+// subagent aliases, and only a record naming an agent id or a parent tool-use
+// id contributes a node to it (tokenutilization.CarriesSubagentAlias). The
+// persisted set is INVARIANT-HOLDING by induction: every row in this table was
+// written through this function, so it passed the union of itself with
+// everything before it. An increment that contributes no node therefore cannot
+// change the verdict, and the persisted verdict is already known to be nil.
+//
+// This is not an optimization that trades away a check — it is the same check,
+// evaluated where its answer can differ. Reading the whole session on every
+// insert made a transcript replay QUADRATIC: a four-thousand-event drain
+// re-selected and re-unmarshalled the entire session's responses per assistant
+// message, which measured as the single dominant cost of bring-up. An
+// aliasing increment still reads and validates the whole set, unchanged.
 func validateSubagentTopologyTx(tx *sql.Tx, sessionID string, incoming []*frontendv1.TokenUtilization) error {
+	if !tokenutilization.CarriesSubagentAlias(incoming) {
+		return nil
+	}
 	rows, err := tx.Query(`SELECT record FROM token_utilization WHERE agent_repl_session_id=? ORDER BY api_message_id`, sessionID)
 	if err != nil {
 		return fmt.Errorf("list persisted response topology: %w", err)

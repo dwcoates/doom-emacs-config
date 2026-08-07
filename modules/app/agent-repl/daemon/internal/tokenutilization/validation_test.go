@@ -139,3 +139,71 @@ func TestValidateHistoricalAgainstLiveAllowsOnlyProvenanceAndTimingEnrichment(t 
 }
 
 func int64Pointer(value int64) *int64 { return &value }
+
+// CarriesSubagentAlias IS THE VALIDATOR'S OWN ADMISSION RULE, exported so a
+// caller validating an increment against an already-validated set can tell
+// whether the increment can change the verdict. Its answer must therefore
+// track exactly which records ValidateSubagentTopology's loop looks at.
+func TestCarriesSubagentAlias(t *testing.T) {
+	subagent := func(agentID, parentToolUseID string) *frontendv1.TokenUtilization {
+		record := validationRecord("turn")
+		record.Actor = &frontendv1.TokenUtilization_Subagent{Subagent: &frontendv1.TokenUtilizationSubagent{
+			AgentId: agentID, ParentToolUseId: parentToolUseID, SubagentType: "explore",
+		}}
+		return record
+	}
+	tests := []struct {
+		name    string
+		records []*frontendv1.TokenUtilization
+		want    bool
+	}{
+		{name: "no records", records: nil, want: false},
+		{name: "nil record", records: []*frontendv1.TokenUtilization{nil}, want: false},
+		{name: "main agent actor", records: []*frontendv1.TokenUtilization{validationRecord("turn")}, want: false},
+		{name: "subagent naming neither alias", records: []*frontendv1.TokenUtilization{subagent("", "")}, want: false},
+		{name: "subagent naming only an agent id", records: []*frontendv1.TokenUtilization{subagent("agent-a", "")}, want: true},
+		{name: "subagent naming only a parent tool use id", records: []*frontendv1.TokenUtilization{subagent("", "tool-a")}, want: true},
+		{name: "subagent bridging both aliases", records: []*frontendv1.TokenUtilization{subagent("agent-a", "tool-a")}, want: true},
+		{name: "an aliasing record among unaliased ones", records: []*frontendv1.TokenUtilization{
+			validationRecord("turn"), subagent("", ""), subagent("agent-a", ""),
+		}, want: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange is the table row.
+
+			// Act.
+			got := CarriesSubagentAlias(tc.records)
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("CarriesSubagentAlias = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// THE PREDICATE AND THE VALIDATOR MUST AGREE. A set the predicate says carries
+// no alias cannot be rejected by the validator, because the validator's loop
+// skips every record in it — which is exactly what licenses skipping the read
+// of the persisted set in statedb.validateSubagentTopologyTx.
+func TestUnaliasedRecordsAreAlwaysTopologyClean(t *testing.T) {
+	// Arrange — a subagent naming neither alias, beside a main-agent record.
+	unaliased := validationRecord("turn")
+	unaliased.Actor = &frontendv1.TokenUtilization_Subagent{Subagent: &frontendv1.TokenUtilizationSubagent{
+		SubagentType: "explore", TaskDescription: "look around",
+	}}
+	records := []*frontendv1.TokenUtilization{validationRecord("turn"), unaliased}
+	if CarriesSubagentAlias(records) {
+		t.Fatal("the arranged records carry an alias; the case under test needs ones that do not")
+	}
+
+	// Act.
+	err := ValidateSubagentTopology(records)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ValidateSubagentTopology over unaliased records = %v, want nil", err)
+	}
+}
