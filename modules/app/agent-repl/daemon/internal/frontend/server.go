@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
@@ -65,6 +66,14 @@ type Config struct {
 	SessionPublicationAllowed func(workspace, sessionID string) (bool, error)
 	// BufSize is the per-client outbound buffer; <=0 uses defaultClientBuffer.
 	BufSize int
+	// CommandLatency persists one lifecycle-timing record per completed
+	// command. Leaving it unset disables the telemetry, which New reports
+	// loudly: transport-only tests legitimately run without it, a daemon does
+	// not.
+	CommandLatency CommandLatencyRecorder
+	// AckWarnThreshold is the ack latency at which a command's record is
+	// raised from debug to warn; <=0 uses DefaultAckWarnThreshold.
+	AckWarnThreshold time.Duration
 }
 
 // Server serves agentshim.frontend.v1 frames as protojson over a UDS listener
@@ -78,6 +87,13 @@ type Server struct {
 	handler                   CommandHandler
 	sessionPublicationAllowed func(workspace, sessionID string) (bool, error)
 	bufSize                   int
+	latency                   CommandLatencyRecorder
+	ackWarn                   time.Duration
+	// inflight is the daemon-wide count of frontend commands currently between
+	// receipt and ack. It is the QUEUE DEPTH every latency record carries: a
+	// per-connection read loop dispatches serially, so a command that waited
+	// behind other work can only see that work by counting it.
+	inflight atomic.Int64
 
 	upgrader websocket.Upgrader
 
@@ -153,6 +169,10 @@ func New(cfg Config) *Server {
 	if buf <= 0 {
 		buf = defaultClientBuffer
 	}
+	ackWarn := cfg.AckWarnThreshold
+	if ackWarn <= 0 {
+		ackWarn = DefaultAckWarnThreshold
+	}
 	return &Server{
 		logf:                      cfg.Logf,
 		logVerbosef:               cfg.LogVerbosef,
@@ -160,6 +180,8 @@ func New(cfg Config) *Server {
 		handler:                   cfg.Handler,
 		sessionPublicationAllowed: cfg.SessionPublicationAllowed,
 		bufSize:                   buf,
+		latency:                   cfg.CommandLatency,
+		ackWarn:                   ackWarn,
 		upgrader: websocket.Upgrader{
 			// Local-loopback developer tool; the webview origin is app-scoped,
 			// so origin checks are permissive by design (mirrors the existing
@@ -901,13 +923,23 @@ func (s *Server) readLoop(c conn, cl *client) {
 			}
 			return
 		}
+		// EVERY COMMAND IS TIMED, and the clock starts the instant the frame
+		// was decoded rather than inside dispatch: the interval the client
+		// actually waits out is receipt through ack, and instrumenting only
+		// the handler would report a fast command sitting behind slow work as
+		// fast. The depth is taken here, before any of this command's own work
+		// runs, so it counts what was ALREADY in flight.
+		received := time.Now()
+		depth := s.inflight.Add(1)
 		// A resync re-sends a fresh StateSnapshot to THIS client (§5.4),
 		// scope-filtered for a scoped connection. The handler covers the
 		// conversation-delta replay the snapshot omits.
 		if cmd.GetResync() != nil {
 			s.enqueueResyncSnapshot(cl, cmd, "before_dispatch")
 		}
+		dispatchStart := time.Now()
 		ack, response := s.dispatchClientCommand(cl, cmd)
+		processing := time.Since(dispatchStart)
 		// A stale generation is a request to adopt current authority, not a
 		// history failure. Capture again AFTER the daemon made that decision so
 		// a transition crossing the pre-dispatch capture cannot leave the client
@@ -930,6 +962,36 @@ func (s *Server) readLoop(c conn, cl *client) {
 		} else {
 			s.enqueue(cl, outFrame{key: coalesceKey(response), data: data})
 		}
+		// The ack is on the wire's queue; that is the moment the client's wait
+		// ends. The in-flight gauge is released BEFORE the record is written so
+		// the telemetry never inflates the depth it reports.
+		ackElapsed := time.Since(received)
+		s.inflight.Add(-1)
+		s.recordCommandLatency(cl, cmd, ack, depth, ackElapsed, processing)
+	}
+}
+
+// recordCommandLatency persists one completed command's lifecycle timing. A
+// recorder failure is a routing or persistence invariant violation, so it is
+// surfaced through the transport's own log rather than dropped.
+func (s *Server) recordCommandLatency(cl *client, cmd *frontendv1.FrontendCommand, ack *frontendv1.CommandAck, depth int64, elapsed, processing time.Duration) {
+	if s.latency == nil {
+		return
+	}
+	sample := CommandLatencySample{
+		Workspace:  cmd.GetWorkspace(),
+		RequestID:  cmd.GetRequestId(),
+		Command:    CommandFieldName(cmd),
+		ClientKind: cl.kind.String(),
+		QueueDepth: depth,
+		Ack:        elapsed,
+		Processing: processing,
+		Threshold:  s.ackWarn,
+		Ok:         ack.GetOk(),
+	}
+	if err := s.latency.RecordCommandLatency(sample); err != nil {
+		s.logf("frontend: record command latency FAILED request_id=%q command=%s ws=%q ack_ms=%d: %v",
+			sample.RequestID, sample.Command, sample.Workspace, sample.Ack.Milliseconds(), err)
 	}
 }
 
