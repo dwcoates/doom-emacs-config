@@ -8,7 +8,10 @@ pointers — the first stop when diagnosing a degraded state.
 `agent-repl-log-discovery.sh` is the read-only resolver for structured logs.
 It lists canonical workspace links at `<workspace>/.claude/emacs/*.log`, the
 small set of genuine global logs, and can filter JSONL by a Claude/agent-repl
-session identifier or process id. Keep its focused test beside it in
+session identifier or process id. It also extracts latency evidence from those
+records with `--spans`, `--latency-by` and `--gaps`, which compose with every
+selector and emit headerless TSV; `--help` documents the exact columns.
+Keep its focused test beside it in
 `test-agent-repl-log-discovery.sh`; the test must create all state under a
 temporary directory.
 
