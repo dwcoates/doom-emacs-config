@@ -1779,7 +1779,7 @@ before this is called."
       (agent-repl--log-verbose ws "active-inst: SUCCESS env=%S inst=%S" env inst)
       inst)))
 
-(declare-function agent-repl--frontend-session-view "agent-repl-frontend-state" (session-id))
+(declare-function agent-repl--frontend-session-view "agent-repl-frontend-state" (workspace))
 
 (defun agent-repl--ws-observed-claude-session-id (ws)
   "Return the vendor conversation uuid WS's session is CURRENTLY on, or nil.
@@ -1801,8 +1801,8 @@ Never enters the logger: JSON record construction calls this while the
 logging stack is already active, and instrumenting it would recursively
 construct another workspace record."
   (when (fboundp 'agent-repl--frontend-session-view)
-    (when-let ((sid (agent-repl--ws-get ws :frontend-session-id)))
-      (plist-get (agent-repl--frontend-session-view sid) :claudeSessionId))))
+    (when-let ((workspace (agent-repl--ws-get ws :project-dir)))
+      (plist-get (agent-repl--frontend-session-view workspace) :claudeSessionId))))
 
 (defvar-local agent-repl--owning-workspace nil
   "Workspace name that owns this agent session.

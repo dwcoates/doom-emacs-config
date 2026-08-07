@@ -55,8 +55,8 @@
   (let (mutated failure)
     (cl-letf (((symbol-function 'agent-repl--frontend-runtime-bounce-preflight-async)
                (lambda (callback) (funcall callback :absent)))
-              ((symbol-function 'agent-repl--frontend-all-turn-active-session-ids)
-               (lambda () '("s_busy")))
+              ((symbol-function 'agent-repl--frontend-all-turn-active-workspaces)
+               (lambda () '("/w-busy")))
               ((symbol-function 'agent-repl--shim-services-assert-launchd-loaded)
                (lambda () (setq mutated t))))
       (agent-repl--runtime-prepare

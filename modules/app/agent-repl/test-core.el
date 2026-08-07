@@ -1944,9 +1944,9 @@ ownership intact across that transition."
 (ert-deftest agent-repl-test-observed-session-id-reads-the-pushed-view ()
   "ws-observed-claude-session-id reads the daemon-pushed SessionView."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :frontend-session-id "s_1")
+    (agent-repl--ws-put "ws1" :project-dir "/w")
     (cl-letf (((symbol-function 'agent-repl--frontend-session-view)
-               (lambda (sid) (when (equal sid "s_1") '(:claudeSessionId "cli-uuid-1")))))
+               (lambda (key) (when (equal key "/w") '(:claudeSessionId "cli-uuid-1")))))
       (should (equal (agent-repl--ws-observed-claude-session-id "ws1") "cli-uuid-1")))))
 
 (ert-deftest agent-repl-test-observed-session-id-ignores-the-in-memory-instantiation ()

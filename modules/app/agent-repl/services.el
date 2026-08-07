@@ -14,7 +14,7 @@
 
 (declare-function agent-repl--assert-main-thread "core" (what))
 (declare-function agent-repl--error "core" (ws fmt &rest args))
-(declare-function agent-repl--frontend-all-turn-active-session-ids "frontend-client" ())
+(declare-function agent-repl--frontend-all-turn-active-workspaces "frontend-client" ())
 (declare-function agent-repl--frontend-artifact-exists-p "daemon" (path))
 (declare-function agent-repl--frontend-bounce-after-build "daemon" (&optional preflight stop-shims on-complete))
 (declare-function agent-repl--frontend-build-if-stale "daemon" (&optional force))
@@ -322,7 +322,7 @@ receives the first diagnostic and no later stage starts."
          (bounce-runtime (daemon-state)
            (condition-case err
                (progn
-                 (let ((busy (agent-repl--frontend-all-turn-active-session-ids)))
+                 (let ((busy (agent-repl--frontend-all-turn-active-workspaces)))
                    (agent-repl--log nil
                                     "runtime-restart preflight: daemon-state=%S busy=%S store=%s sidecar=%s"
                                     daemon-state busy agent-repl--shim-store-label
