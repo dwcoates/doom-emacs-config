@@ -314,6 +314,29 @@ type Config struct {
 	AckTimeout        time.Duration // control Ack/Nack await bound
 	BackoffMin        time.Duration // initial reconnect backoff
 	BackoffMax        time.Duration // reconnect backoff ceiling
+
+	// BringUpStall is how long AwaitReady tolerates SILENCE from the shim
+	// before the caller's expired context is allowed to end the wait.
+	//
+	// ShimReady is the LAST frame of the bring-up gate, and it is ordered
+	// behind everything the shim wrote before it on the same stream — for a
+	// workspace with a long transcript that is thousands of replayed events,
+	// which this daemon's single read loop drains one sink call at a time.
+	// A purely absolute deadline therefore declared "the shim never dialled
+	// in" about a shim that had dialled in, handshaked, and was feeding this
+	// client at full rate; the bigger the conversation, the more certainly it
+	// tripped, which made it a permanent failure for exactly the workspaces
+	// with the most to lose.
+	//
+	// So the failure bound is SILENCE, not elapsed time. A shim that never
+	// connects, or that wedges mid-gate, still fails inside this window with
+	// the same evidence it always carried. A shim that is demonstrably
+	// working is no longer killed for taking longer than a constant. The
+	// caller's context still supplies the absolute cap, so a shim that
+	// trickles frames forever without ever acking is bounded too.
+	//
+	// Zero disables the inactivity rule and restores the pure-context bound.
+	BringUpStall time.Duration
 }
 
 // Defaults for the Config tunables.
@@ -554,10 +577,25 @@ func (c *Client) markNotReadyLocked() {
 // wait at the instant of the exit and carries the process's own evidence, and
 // the deadline path (still reached when the process is alive and simply never
 // dialled) now says which of the two it was.
+// IT FAILS ON SILENCE, NOT ON ELAPSED TIME (Config.BringUpStall). See that
+// field for why: ShimReady is the last frame of the gate and sits behind the
+// shim's whole replayed backlog, so a busy shim and a dead one are only
+// distinguishable by whether frames are still arriving.
 func (c *Client) AwaitReady(ctx context.Context) error {
 	var died <-chan struct{}
 	if c.cfg.ShimDeaths != nil {
 		died = c.cfg.ShimDeaths.DiedBeforeConnect(c.cfg.SessionID)
+	}
+	// The staleness reference before the first frame: a client that has never
+	// received anything is silent as of NOW, not as of the unix epoch.
+	started := time.Now()
+	stall := c.cfg.BringUpStall
+	var stallTimer *time.Timer
+	var stallC <-chan time.Time
+	if stall > 0 {
+		stallTimer = time.NewTimer(stall)
+		defer stallTimer.Stop()
+		stallC = stallTimer.C
 	}
 	for {
 		c.mu.Lock()
@@ -583,6 +621,17 @@ func (c *Client) AwaitReady(ctx context.Context) error {
 			err := c.spawnDeathError()
 			c.logf("bring-up ABORTED: %v", err)
 			return err
+		case <-stallC:
+			// A frame may have landed since the timer was armed. Re-arm for the
+			// remainder rather than failing a shim that is still feeding us.
+			if remaining := stall - time.Since(c.lastActivity(started)); remaining > 0 {
+				stallTimer.Reset(remaining)
+				continue
+			}
+			err := fmt.Errorf("shimclient: awaiting shim connection for session %s: %w after %s of silence%s",
+				c.cfg.SessionID, context.DeadlineExceeded, stall, c.spawnEvidence())
+			c.logf("bring-up wait ENDED without a ready shim: no frame has arrived from this shim for %s: %v", stall, err)
+			return err
 		case <-ctx.Done():
 			err := fmt.Errorf("shimclient: awaiting shim connection for session %s: %w%s",
 				c.cfg.SessionID, ctx.Err(), c.spawnEvidence())
@@ -590,6 +639,17 @@ func (c *Client) AwaitReady(ctx context.Context) error {
 			return err
 		}
 	}
+}
+
+// lastActivity is the most recent moment this client heard from the shim, with
+// started standing in until the first frame arrives.
+func (c *Client) lastActivity(started time.Time) time.Time {
+	if nanos := c.lastRecvNanos.Load(); nanos > 0 {
+		if recv := time.Unix(0, nanos); recv.After(started) {
+			return recv
+		}
+	}
+	return started
 }
 
 // Run attaches to the shim and keeps the connection alive until ctx is

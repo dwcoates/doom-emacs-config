@@ -396,6 +396,34 @@ func TestRestartSessionBringsUpAnUnwiredWorkspace(t *testing.T) {
 	}
 }
 
+// A HARD RESTART IS THE DELIBERATE WAY OUT OF A BRING-UP PARK. The park is a
+// cooldown on AUTOMATIC respawns; refusing an explicit "replace this process"
+// with "it is resting" would leave the one control that exists for a wedged
+// session unable to reach the session most in need of it.
+func TestRestartSessionLiftsABringUpPark(t *testing.T) {
+	// Arrange — the session is parked at the give-up bound with a fresh
+	// cooldown, so an ordinary open would be refused.
+	m, _, _ := newRefreshRig(t, "sha-1")
+	m.bringUpFailures["s1"] = &bringUpStreak{
+		failures:      bringUpGiveUpAfter,
+		cooldown:      bringUpParkCooldown,
+		parkedUntilMs: m.now() + bringUpParkCooldown.Milliseconds(),
+	}
+	if _, _, err := m.bringUpTracked("ws"); !errors.Is(err, ErrBringUpGaveUp) {
+		t.Fatalf("bring-up while parked = %v, want ErrBringUpGaveUp", err)
+	}
+
+	// Act.
+	if err := m.RestartSession(context.Background(), "ws"); err != nil {
+		t.Fatalf("RestartSession on a parked session: %v", err)
+	}
+
+	// Assert.
+	if !m.Live("ws") {
+		t.Fatal("the hard restart did not bring the parked session up")
+	}
+}
+
 // A workspace with NO SESSION RECORD is a loud error: there is nothing to
 // restart, and reporting success would tell the user their session came back.
 func TestRestartSessionFailsWithoutASession(t *testing.T) {

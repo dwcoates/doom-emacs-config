@@ -36,6 +36,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 
@@ -63,27 +64,86 @@ const shimSDKComponent = "claude-shim-sdk"
 // successful bring-up, so an intermittent session never accumulates toward it.
 const bringUpGiveUpAfter = 3
 
+// THE PARK IS A COOLDOWN, NOT A WALL.
+//
+// The bound above stops the daemon respawning a session that cannot start. What
+// it must NOT do is dead-end the workspace, and as first written it did exactly
+// that: the only two edges that cleared the streak were a bring-up that WIRED
+// and a deliberate hibernation — and a parked session is refused BEFORE
+// anything is spawned, so the wiring that would clear it could never happen.
+// The one clearing edge reachable from a park was therefore an action no
+// message ever named. Every subsequent open of that workspace was nacked, for
+// as long as the daemon lived.
+//
+// So reaching the bound now starts a COOLDOWN. While it runs, bring-up is
+// refused exactly as before, and the refusal says how long is left. When it
+// expires, the next bring-up request RELEASES the park and climbs the ladder
+// once more; a failure re-parks immediately on a longer cooldown, so a session
+// that genuinely cannot start costs one attempt per cooldown rather than a
+// tight crash-loop. The bound's whole purpose — never burn the daemon's
+// attention on an endless respawn — is preserved; only the permanence is gone.
+const (
+	// bringUpParkCooldown is the first park's duration. One wasted attempt per
+	// minute is a rounding error against the daemon's attention, and a minute
+	// is short enough that a user who steps away and comes back finds a
+	// workspace that will try again rather than one that has given up forever.
+	bringUpParkCooldown = time.Minute
+	// bringUpParkCooldownMax caps the doubling. A session parked this long is
+	// broken in a way no retry cadence fixes, and the cap keeps the workspace
+	// self-healing on the timescale a user might plausibly return on.
+	bringUpParkCooldownMax = 15 * time.Minute
+)
+
 // ErrBringUpGaveUp reports that a session reached bringUpGiveUpAfter
-// consecutive bring-up failures and will not be respawned.
+// consecutive bring-up failures and is parked on its cooldown.
 //
 // It is a sentinel because it is a POLICY refusal rather than a failure of the
 // attempt in front of the caller: nothing was tried this time. A caller must be
 // able to tell "this session is parked" from "this bring-up failed" without
 // matching message text.
-var ErrBringUpGaveUp = errors.New("session-controller: the session has failed bring-up too many times in a row and is no longer being respawned")
+var ErrBringUpGaveUp = errors.New("session-controller: the session has failed bring-up too many times in a row and is not being respawned yet")
+
+// bringUpStreak is one session's consecutive-failure count plus, once the bound
+// is reached, the cooldown that park is serving.
+type bringUpStreak struct {
+	// failures is the number of CONSECUTIVE resolved bring-up failures.
+	failures int
+	// parkedUntilMs is when the current park expires, on the Manager's clock.
+	// Zero means not parked.
+	parkedUntilMs int64
+	// cooldown is the park duration in force, doubled on each re-park and
+	// capped at bringUpParkCooldownMax.
+	cooldown time.Duration
+}
 
 // noteBringUpFailure records one resolved bring-up failure and reports the
 // session's consecutive-failure count together with whether that count has
-// reached the give-up bound.
-func (m *Manager) noteBringUpFailure(sessionID string) (failures int, givenUp bool) {
+// reached the give-up bound. Reaching it (re-)arms the park's cooldown.
+func (m *Manager) noteBringUpFailure(sessionID string) (failures int, givenUp bool, cooldown time.Duration) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.bringUpFailures == nil {
-		m.bringUpFailures = make(map[string]int)
+		m.bringUpFailures = make(map[string]*bringUpStreak)
 	}
-	m.bringUpFailures[sessionID]++
-	failures = m.bringUpFailures[sessionID]
-	return failures, failures >= bringUpGiveUpAfter
+	s := m.bringUpFailures[sessionID]
+	if s == nil {
+		s = &bringUpStreak{}
+		m.bringUpFailures[sessionID] = s
+	}
+	s.failures++
+	if s.failures < bringUpGiveUpAfter {
+		return s.failures, false, 0
+	}
+	if s.cooldown == 0 {
+		s.cooldown = bringUpParkCooldown
+	} else if s.cooldown < bringUpParkCooldownMax {
+		s.cooldown *= 2
+		if s.cooldown > bringUpParkCooldownMax {
+			s.cooldown = bringUpParkCooldownMax
+		}
+	}
+	s.parkedUntilMs = m.now() + s.cooldown.Milliseconds()
+	return s.failures, true, s.cooldown
 }
 
 // bringUpFailuresFor reports the session's consecutive resolved bring-up
@@ -91,20 +151,55 @@ func (m *Manager) noteBringUpFailure(sessionID string) (failures int, givenUp bo
 func (m *Manager) bringUpFailuresFor(sessionID string) int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.bringUpFailures[sessionID]
+	if s := m.bringUpFailures[sessionID]; s != nil {
+		return s.failures
+	}
+	return 0
 }
 
-// clearBringUpFailures resets the session's consecutive-failure count. Called
-// from the two edges that make the count meaningless: a bring-up that WIRED,
-// and a deliberate hibernation, which stands the session down and so is also
-// the operator's way out of a parked session.
+// bringUpParkRemaining reports how much of the session's park is left, and
+// RELEASES an expired park as a side effect so the caller's bring-up proceeds.
+//
+// A release drops the failure count to one below the bound rather than to zero:
+// the session has not proven anything yet, so a single further failure re-parks
+// it at once. That is what keeps the released attempt an attempt rather than
+// the start of a fresh streak of bringUpGiveUpAfter timeouts.
+func (m *Manager) bringUpParkRemaining(sessionID string) (remaining time.Duration, parked bool) {
+	m.mu.Lock()
+	s := m.bringUpFailures[sessionID]
+	if s == nil || s.failures < bringUpGiveUpAfter {
+		m.mu.Unlock()
+		return 0, false
+	}
+	if leftMs := s.parkedUntilMs - m.now(); leftMs > 0 {
+		left := time.Duration(leftMs) * time.Millisecond
+		cooldown, failures := s.cooldown, s.failures
+		m.mu.Unlock()
+		m.logf("session-controller: bring-up park HOLDS session=%s failures=%d bound=%d cooldown=%s remaining=%s — the cooldown has not expired, so no shim is spawned",
+			sessionID, failures, bringUpGiveUpAfter, cooldown, left.Round(time.Second))
+		return left, true
+	}
+	served := s.cooldown
+	s.failures = bringUpGiveUpAfter - 1
+	s.parkedUntilMs = 0
+	m.mu.Unlock()
+	m.logf("session-controller: bring-up park RELEASED session=%s cooldown_served=%s failures=%d bound=%d — the cooldown expired, so this bring-up climbs the ladder again",
+		sessionID, served, bringUpGiveUpAfter-1, bringUpGiveUpAfter)
+	return 0, false
+}
+
+// clearBringUpFailures resets the session's consecutive-failure count AND its
+// park, cooldown included. Called from the edges that make the streak
+// meaningless: a bring-up that WIRED, a deliberate hibernation, and a hard
+// restart — the last being the user's explicit "replace this process", which is
+// the immediate way out of a park that has not yet cooled down.
 func (m *Manager) clearBringUpFailures(sessionID string) {
 	m.mu.Lock()
-	cleared := m.bringUpFailures[sessionID]
+	s := m.bringUpFailures[sessionID]
 	delete(m.bringUpFailures, sessionID)
 	m.mu.Unlock()
-	if cleared > 0 {
-		m.logf("session-controller: bring-up failure streak CLEARED session=%s failures=%d", sessionID, cleared)
+	if s != nil && s.failures > 0 {
+		m.logf("session-controller: bring-up failure streak CLEARED session=%s failures=%d cooldown=%s", sessionID, s.failures, s.cooldown)
 	}
 }
 
@@ -195,7 +290,10 @@ func (m *Manager) noteWired(workspace, sessionID string) {
 // SDK died (the fault), or bringUpTimeout elapses. There is no fourth, which is
 // what makes `starting` non-terminal.
 func (m *Manager) awaitDriveable(ctx context.Context, d *sessionController) error {
-	waitCtx, cancel := context.WithTimeout(ctx, bringUpTimeout)
+	// The CAP, not the failure bound: AwaitReady resolves a wedged shim on its
+	// own silence window (bringUpTimeout). This only stops an attempt that keeps
+	// producing frames without ever acking readiness.
+	waitCtx, cancel := context.WithTimeout(ctx, bringUpProgressCap)
 	defer cancel()
 	ready := make(chan error, 1)
 	go func() { ready <- d.client.AwaitReady(waitCtx) }()
@@ -378,15 +476,20 @@ func (m *Manager) cancelRetiredBringUp(workspace string, d, current *sessionCont
 // teardown here cancels the session controller ctx, ending Run with nil, and this row is
 // already the truer answer that tail would otherwise overwrite.
 func (m *Manager) resolveStartFailed(workspace string, d *sessionController, cause error) {
-	failures, givenUp := m.noteBringUpFailure(d.sessionID)
-	m.logf("session-controller: START FAILED ws=%q session=%s generation=%s connectivity=unavailable consecutive_failures=%d bound=%d given_up=%t cause=%v branch=bring_up_failed",
-		workspace, d.sessionID, d.generationID, failures, bringUpGiveUpAfter, givenUp, cause)
+	failures, givenUp, cooldown := m.noteBringUpFailure(d.sessionID)
+	m.logf("session-controller: START FAILED ws=%q session=%s generation=%s connectivity=unavailable consecutive_failures=%d bound=%d given_up=%t park_cooldown=%s cause=%v branch=bring_up_failed",
+		workspace, d.sessionID, d.generationID, failures, bringUpGiveUpAfter, givenUp, cooldown, cause)
 	// THE GIVE-UP RIDES THE EXISTING CARD rather than adding a second one. The
 	// card identity is stable per session, so the user sees one failure that has
 	// gained an account of why nothing is retrying it, not a pile of them.
+	//
+	// The card names the WAY OUT, not only the wall. A park that expires is only
+	// useful to a user who is told it expires, and the card is the one surface
+	// that reaches them.
 	carded := cause
 	if givenUp {
-		carded = fmt.Errorf("%w after %d consecutive failures — last failure: %v", ErrBringUpGaveUp, failures, cause)
+		carded = fmt.Errorf("%w after %d consecutive failures — retrying automatically when it is next opened after %s, or immediately on a hard restart. Last failure: %v",
+			ErrBringUpGaveUp, failures, cooldown, cause)
 	}
 	if d.consumer != nil {
 		d.consumer.pushFailure(d.consumer.startFailedUUID(), errclass.StartFailed(carded.Error()))
