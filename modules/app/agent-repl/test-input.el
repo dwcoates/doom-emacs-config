@@ -2440,9 +2440,9 @@ nothing to complete."
   "Candidates are `/name' strings sourced from the pushed SystemInit."
   (agent-repl-test--with-clean-state
     (clrhash agent-repl--frontend-session-inits)
-    (agent-repl--ws-put "ws1" :frontend-session-id "s1")
+    (agent-repl--ws-put "ws1" :project-dir "/w")
     (agent-repl--frontend-store-session-init
-     '(:sessionId "s1" :init (:slashCommands ("debug-logs"))))
+     '(:workspace "/w" :init (:slashCommands ("debug-logs"))))
     (should (equal (agent-repl--skill-capf-candidates "ws1") '("/debug-logs")))))
 
 ;; The hint/description candidate-property + annotation tests were deleted in
@@ -2454,9 +2454,9 @@ nothing to complete."
 when point sits on a slash command in a workspace."
   (agent-repl-test--with-clean-state
     (clrhash agent-repl--frontend-session-inits)
-    (agent-repl--ws-put "ws1" :frontend-session-id "s1")
+    (agent-repl--ws-put "ws1" :project-dir "/w")
     (agent-repl--frontend-store-session-init
-     '(:sessionId "s1" :init (:slashCommands ("debug-logs"))))
+     '(:workspace "/w" :init (:slashCommands ("debug-logs"))))
     (with-temp-buffer
       (setq-local agent-repl--owning-workspace "ws1")
       (insert "/deb")
@@ -2479,14 +2479,14 @@ when point sits on a slash command in a workspace."
   "`agent-repl--slash-commands-for-ws' returns the pushed SystemInit's names."
   (agent-repl-test--with-clean-state
     (clrhash agent-repl--frontend-session-inits)
-    (agent-repl--ws-put "ws1" :frontend-session-id "s1")
+    (agent-repl--ws-put "ws1" :project-dir "/w")
     (agent-repl--frontend-store-session-init
-     '(:sessionId "s1" :init (:slashCommands ("debug-logs" "compact"))))
+     '(:workspace "/w" :init (:slashCommands ("debug-logs" "compact"))))
     (should (equal (agent-repl--slash-commands-for-ws "ws1")
                    '("debug-logs" "compact")))))
 
 (ert-deftest agent-repl-test-slash-commands-for-ws-nil-without-session ()
-  "With no bound session there is no menu, so the result is nil."
+  "With no project dir there is nothing to key a menu by, so the result is nil."
   (agent-repl-test--with-clean-state
     (clrhash agent-repl--frontend-session-inits)
     (should-not (agent-repl--slash-commands-for-ws "ws1"))))

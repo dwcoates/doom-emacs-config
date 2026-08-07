@@ -762,14 +762,16 @@ through `agent-repl--ws-log-routable-p' first and pass nil when it does not."
                             (error "agent-repl log routing invariant violated: workspace %S has no workspace ID" ws)))))
 
 (defun agent-repl--log-add-workspace-identity (record ws)
-  "Add WS identity and known session fields to JSON RECORD when WS is non-nil."
+  "Add WS identity and its durable conversation id to JSON RECORD when WS is non-nil.
+`claude_session_id' is the CLI transcript uuid: it survives the daemon,
+names the conversation on disk, and is the resume target, so it is the
+one conversation identifier worth correlating a log line by."
   (when ws
     (let ((identity (agent-repl--workspace-log-identity ws)))
       (puthash "workspace_dir" (plist-get identity :project-dir) record)
       (puthash "workspace_id" (plist-get identity :workspace-id) record)
       (dolist (field-value
-               `(("agent_repl_session_id" . ,(agent-repl--ws-get ws :frontend-session-id))
-                 ("claude_session_id" . ,(agent-repl--ws-observed-claude-session-id ws))))
+               `(("claude_session_id" . ,(agent-repl--ws-observed-claude-session-id ws))))
         (let ((field (car field-value))
               (value (cdr field-value)))
           (cond
@@ -1777,7 +1779,7 @@ before this is called."
       (agent-repl--log-verbose ws "active-inst: SUCCESS env=%S inst=%S" env inst)
       inst)))
 
-(declare-function agent-repl--frontend-session-view "agent-repl-frontend-state" (session-id))
+(declare-function agent-repl--frontend-session-view "agent-repl-frontend-state" (workspace))
 
 (defun agent-repl--ws-observed-claude-session-id (ws)
   "Return the vendor conversation uuid WS's session is CURRENTLY on, or nil.
@@ -1799,8 +1801,8 @@ Never enters the logger: JSON record construction calls this while the
 logging stack is already active, and instrumenting it would recursively
 construct another workspace record."
   (when (fboundp 'agent-repl--frontend-session-view)
-    (when-let ((sid (agent-repl--ws-get ws :frontend-session-id)))
-      (plist-get (agent-repl--frontend-session-view sid) :claudeSessionId))))
+    (when-let ((workspace (agent-repl--ws-get ws :project-dir)))
+      (plist-get (agent-repl--frontend-session-view workspace) :claudeSessionId))))
 
 (defvar-local agent-repl--owning-workspace nil
   "Workspace name that owns this agent session.
