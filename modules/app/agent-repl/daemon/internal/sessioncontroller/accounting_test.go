@@ -1425,3 +1425,166 @@ func accountingVendorEvent(t *testing.T, m *datav1.ClaudeStreamMessage) *corev1.
 	}
 	return &corev1.Event{SessionId: "vendor-session", ProducedAtMs: 20, RequestId: requestID, Payload: &corev1.Event_Vendor{Vendor: a}}
 }
+
+// divergentTurnAccountingStore refuses every write the way the state store
+// refuses a divergent replay, while still serving the settlement it already
+// holds. It is the fake shape of the live failure: the row exists, and only
+// the attempt to overwrite it fails.
+type divergentTurnAccountingStore struct{ persisted []*frontendv1.TurnAccounting }
+
+func (s divergentTurnAccountingStore) Record(string, *frontendv1.TurnAccounting) (*frontendv1.TurnAccounting, error) {
+	return nil, errors.New(`statedb: divergent replay for turn accounting "t"`)
+}
+
+func (s divergentTurnAccountingStore) List(string) ([]*frontendv1.TurnAccounting, error) {
+	return s.persisted, nil
+}
+
+// THE DEGRADATION THE USER SEES MUST BE THE MEASURED ACCOUNTING, NOT NONE.
+//
+// A cross-generation replay recomputes an evidence-free record the state store
+// rightly refuses as divergent (statedb/turnaccounting.go). Withholding the
+// settlement on that refusal left the turn with no accounting at all and the
+// webapp rendering "INVALID ACCOUNTING"/"INCOMPLETE ACCOUNTING" in the
+// conversation. The already-persisted settlement was written by the generation
+// that actually observed the turn, so it is what the turn is served.
+func TestDivergentTerminalSettlementServesThePersistedAccounting(t *testing.T) {
+	// Arrange.
+	persisted := &frontendv1.TurnAccounting{
+		TurnId:          "t",
+		QueryInstanceId: "retired-query",
+		Responses:       []*frontendv1.TokenUtilization{{ApiMessageId: "m"}},
+		Verdict:         &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}},
+	}
+	push := &fakePusher{}
+	c := newConsumer("ws", "s", push, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, t.Logf, nil, nil, nil, nil, nil)
+	c.accountingStore = divergentTurnAccountingStore{persisted: []*frontendv1.TurnAccounting{persisted}}
+	if err := c.Apply(&corev1.Event{Seq: 1, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Consume(accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Result{Result: &datav1.ResultMessage{}}})); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act.
+	err := c.Apply(&corev1.Event{Seq: 2, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "t"}}})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Apply error = %v, want the turn boundary accepted", err)
+	}
+	c.mu.Lock()
+	served := make([]*frontendv1.TurnAccounting, 0, len(c.completedTerminalBySeq))
+	for _, accounting := range c.completedTerminalBySeq {
+		served = append(served, accounting)
+	}
+	c.mu.Unlock()
+	if len(served) != 1 || !proto.Equal(served[0], persisted) {
+		t.Fatalf("served accounting = %+v, want exactly the persisted settlement %+v", served, persisted)
+	}
+}
+
+// THE TERMINAL RESULT IS RELEASED by the substitution. A held result is
+// published only by the settlement that closes its turn, so a refused write
+// that serves nothing strands the answer with no completion border.
+func TestDivergentTerminalSettlementReleasesTheHeldTerminalResult(t *testing.T) {
+	// Arrange.
+	persisted := &frontendv1.TurnAccounting{TurnId: "t", Verdict: &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}}}
+	push := &fakePusher{}
+	c := newConsumer("ws", "s", push, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, t.Logf, nil, nil, nil, nil, nil)
+	c.accountingStore = divergentTurnAccountingStore{persisted: []*frontendv1.TurnAccounting{persisted}}
+	if err := c.Apply(&corev1.Event{Seq: 1, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Consume(accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Result{Result: &datav1.ResultMessage{}}})); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act.
+	if err := c.Apply(&corev1.Event{Seq: 2, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "t"}}}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert.
+	if len(push.convo) == 0 {
+		t.Fatal("the terminal conversation was withheld even though a settlement is on record")
+	}
+}
+
+// THE DIVERGENCE STAYS LOUD even when the user is served correctly: an
+// overwrite refused by the state store is an invariant violation whose record
+// must survive the degradation that hides it from the conversation.
+func TestDivergentTerminalSettlementStillLogsTheRefusalAndTheSubstitution(t *testing.T) {
+	// Arrange.
+	persisted := &frontendv1.TurnAccounting{TurnId: "t", Verdict: &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}}}
+	var logs []string
+	c := newConsumer("ws", "s", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }, nil, nil, nil, nil, nil)
+	c.accountingStore = divergentTurnAccountingStore{persisted: []*frontendv1.TurnAccounting{persisted}}
+	if err := c.Apply(&corev1.Event{Seq: 1, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act.
+	if err := c.Apply(&corev1.Event{Seq: 2, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "t"}}}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert.
+	log := strings.Join(logs, "\n")
+	if !strings.Contains(log, "divergent replay for turn accounting") {
+		t.Fatalf("logs = %v, want the store's refusal recorded verbatim", logs)
+	}
+	if !strings.Contains(log, "SERVED FROM PERSISTED SETTLEMENT") {
+		t.Fatalf("logs = %v, want the substitution recorded", logs)
+	}
+}
+
+// WITH NO SETTLEMENT ON RECORD there is nothing to serve, so the turn's
+// accounting stays unavailable and degraded exactly as before — the
+// substitution above must not become a blanket amnesty for write failures.
+func TestFailedTerminalSettlementWithoutAPersistedRowStaysDegraded(t *testing.T) {
+	// Arrange.
+	var logs []string
+	c := newConsumer("ws", "s", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }, nil, nil, nil, nil, nil)
+	c.accountingStore = divergentTurnAccountingStore{}
+	if err := c.Apply(&corev1.Event{Seq: 1, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act.
+	if err := c.Apply(&corev1.Event{Seq: 2, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "t"}}}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert.
+	log := strings.Join(logs, "\n")
+	if !strings.Contains(log, "ACCOUNTING DEGRADED") {
+		t.Fatalf("logs = %v, want the turn's accounting reported unavailable", logs)
+	}
+	if strings.Contains(log, "SERVED FROM PERSISTED SETTLEMENT") {
+		t.Fatalf("logs = %v, want no substitution when no settlement exists", logs)
+	}
+}
+
+// A FAILED SETTLEMENT WITH NOTHING TO SERVE KEEPS THE TURN RESOLVABLE. The
+// reducer's memory of the turn is the only thing a later settlement attempt
+// could resolve from, so retiring it on a failure would make the loss
+// permanent.
+func TestFailedTerminalSettlementWithoutAPersistedRowKeepsReducerState(t *testing.T) {
+	// Arrange.
+	c := newConsumer("ws", "s", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, t.Logf, nil, nil, nil, nil, nil)
+	c.accountingStore = divergentTurnAccountingStore{}
+	if err := c.Apply(&corev1.Event{Seq: 1, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act.
+	if err := c.Apply(&corev1.Event{Seq: 2, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "t"}}}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert.
+	if c.accounting.turns["t"] == nil {
+		t.Fatal("a failed settlement with nothing to serve retired reducer state")
+	}
+}
