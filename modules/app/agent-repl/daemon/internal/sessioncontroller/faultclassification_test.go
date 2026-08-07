@@ -47,7 +47,7 @@ func TestUnknownDegradedProducerFailsLoudlyWithoutStateMutation(t *testing.T) {
 	)
 	c.generationID = "g1"
 
-	c.Degraded("s1", &corev1.DegradedState{
+	c.Degraded("s1", nil, &corev1.DegradedState{
 		Component: "new-unclassified-component",
 		Reason:    "opaque failure",
 	})
