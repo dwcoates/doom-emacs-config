@@ -129,6 +129,47 @@ Recommend source changes when telemetry is inadequate. Do not make those
 changes during a read-only investigation unless the user also asked for an
 implementation.
 
+## Adding a runbook
+
+A runbook codifies one operator workflow. Add one when a workflow has been
+worked out in practice and will be repeated, not to record a single
+investigation.
+
+To add one:
+
+1. Write it as `references/<kebab-name>.md` in the repository skill directory,
+   `modules/app/agent-repl/skills/debug-emacs-agent-repl/`. The installed
+   skill is a symlink to that directory; never edit the installed copy.
+2. Register it in the runbook-selection table above with its investigative
+   question, its read-first path, and its common companions. An unregistered
+   reference is unreachable, because selection happens only through that
+   table.
+3. Write it in the operator-workflow style the other references use: the
+   investigative question and scope up top, when to select it and when not to,
+   the ordered workflow, and a closing pointer to the runbooks it composes
+   with.
+4. Defer to the Sources of authority. A runbook points at the logging
+   contract, the executable scripts, and the component `AGENTS.md` files; it
+   never restates a contract those own, and never states one that contradicts
+   them.
+5. Do not duplicate what a sibling runbook owns. Point to it instead.
+
+### Keeping a new runbook current within its session
+
+A runbook written during a working session codifies the loop or process as it
+stood at that moment. Subsequent discussion in the same session frequently
+revises it implicitly — a new gate, a changed threshold, a step reordered, a
+criterion added or dropped — without anyone saying "update the runbook."
+
+Detect those implicit revisions and offer them. When later instruction or
+agreement in the session diverges from what the runbook says, state the
+divergence and offer the update as a proposed diff or a short summary for the
+user to accept or decline.
+
+Two failure modes are equally unacceptable: silently drifting from the written
+runbook while claiming to follow it, and silently rewriting the runbook to
+match what just happened. The revision is the user's call; surfacing it is not.
+
 ## Safety
 
 - Keep investigations read-only unless the user explicitly asks for a change.
