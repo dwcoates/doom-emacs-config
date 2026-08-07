@@ -3,7 +3,6 @@ package frontend
 import (
 	"fmt"
 	"sync"
-	"time"
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
@@ -68,11 +67,13 @@ type commandLanes struct {
 	logf dlog.Logf
 	// run performs one command to completion, including answering it. It is
 	// called from a lane goroutine and may be called concurrently for
-	// different lanes. The receipt instant and in-flight depth captured by the
-	// read loop ride along so command-latency telemetry keeps timing the
-	// interval the CLIENT waits out — receipt through ack — with the lane's
-	// own queue wait included, not just the handler's processing time.
-	run func(cmd *frontendv1.FrontendCommand, received time.Time, depth int64)
+	// different lanes. It is handed the command's TICKET rather than the bare
+	// command: the receipt instant and in-flight depth the read loop captured
+	// ride along on it, so command-latency telemetry keeps timing the interval
+	// the CLIENT waits out — receipt through ack — with the lane's own queue
+	// wait included, not just the handler's processing time, and the ticket's
+	// deferred settle is what releases the in-flight gauge.
+	run func(t *commandTicket)
 
 	mu     sync.Mutex
 	lanes  map[string]*commandLane
@@ -80,12 +81,10 @@ type commandLanes struct {
 	wg     sync.WaitGroup
 }
 
-// laneItem is one queued command plus the receipt-side facts its eventual
-// execution must report against.
+// laneItem is one queued command's ticket, which carries both the command and
+// the receipt-side facts its eventual execution must report against.
 type laneItem struct {
-	cmd      *frontendv1.FrontendCommand
-	received time.Time
-	depth    int64
+	ticket *commandTicket
 }
 
 // commandLane is one serialization domain's FIFO plus its worker's wakeup.
@@ -103,7 +102,7 @@ type commandLane struct {
 	ready chan struct{}
 }
 
-func newCommandLanes(logf dlog.Logf, run func(cmd *frontendv1.FrontendCommand, received time.Time, depth int64)) *commandLanes {
+func newCommandLanes(logf dlog.Logf, run func(t *commandTicket)) *commandLanes {
 	return &commandLanes{logf: logf, run: run, lanes: map[string]*commandLane{}}
 }
 
@@ -117,7 +116,8 @@ func newCommandLanes(logf dlog.Logf, run func(cmd *frontendv1.FrontendCommand, r
 // was already taken off the socket or running it outside the ordering the
 // lanes exist to guarantee, so it panics with the offending identity instead
 // (the same loudness New uses for a missing dependency).
-func (l *commandLanes) submit(cmd *frontendv1.FrontendCommand, received time.Time, depth int64) {
+func (l *commandLanes) submit(t *commandTicket) {
+	cmd := t.cmd
 	key := laneKey(cmd)
 	l.mu.Lock()
 	if l.closed {
@@ -137,7 +137,7 @@ func (l *commandLanes) submit(cmd *frontendv1.FrontendCommand, received time.Tim
 		}()
 	}
 	l.mu.Unlock()
-	lane.push(laneItem{cmd: cmd, received: received, depth: depth})
+	lane.push(laneItem{ticket: t})
 }
 
 // serve runs one lane's commands in arrival order until the lane is closed AND
@@ -147,7 +147,7 @@ func (l *commandLanes) serve(lane *commandLane) {
 		item, ok, done := lane.next()
 		switch {
 		case ok:
-			l.run(item.cmd, item.received, item.depth)
+			l.run(item.ticket)
 		case done:
 			return
 		default:
