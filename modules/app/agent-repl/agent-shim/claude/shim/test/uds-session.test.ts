@@ -1132,6 +1132,201 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
     });
   });
 
+  it("keeps the query alive when the SDK ends a task this instance never saw start", async () => {
+    // Arrange: a resumed shim attaches to a vendor conversation whose
+    // background task was started under the PREVIOUS shim process, so the
+    // in-memory task table has no record of it.
+    const { query, store, daemon, session, done } = await rig({ storeSessionId: "vendor-uuid" });
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, {
+      requestId: "p1",
+      text: "carry on",
+      promptOrigin: PromptOrigin.USER_SENT,
+    }));
+    const start = await store.peer().next(StoreWriteSchema);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(start.batch!.events.length),
+      lastSeq: 8n,
+    }));
+    await daemon.next(AckSchema);
+
+    // Act: the orphaned task reports its terminal fact.
+    query.emit({
+      type: "system",
+      subtype: "task_notification",
+      uuid: "orphan-end",
+      session_id: "vendor-uuid",
+      task_id: "a4699ecc217adfa70",
+      status: "completed",
+      output_file: "/tmp/orphan.output",
+      summary: "done",
+    } as unknown as SdkMessageLike);
+
+    // Assert: the durable end still reaches the store, the turn is intact, and
+    // the stream keeps flowing instead of dying as an iterator failure.
+    const orphanEnd = await store.peer().next(StoreWriteSchema);
+    expect(orphanEnd.batch!.events.map((event) => event.payload.case)).toEqual(["vendor", "taskEnded"]);
+    expect(orphanEnd.batch!.events.every((event) => event.requestId === "p1")).toBe(true);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(orphanEnd.batch!.events.length),
+      lastSeq: 10n,
+    }));
+    expect(session.turnCount()).toBe(1);
+    expect(query.abortCalls).toBe(0);
+    await expect(Promise.race([done, Promise.resolve("alive")])).resolves.toBe("alive");
+  });
+
+  it("warns with the known-task census when it contains an unknown task end", async () => {
+    // Arrange: one live task, so the census in the record is non-trivial.
+    const { query, store, daemon } = await rig({ storeSessionId: "vendor-uuid" });
+    const log = captureLog();
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, {
+      requestId: "p1",
+      text: "fan out",
+      promptOrigin: PromptOrigin.USER_SENT,
+    }));
+    const start = await store.peer().next(StoreWriteSchema);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(start.batch!.events.length),
+      lastSeq: 8n,
+    }));
+    await daemon.next(AckSchema);
+    query.emit({
+      type: "system",
+      subtype: "task_started",
+      uuid: "task-start-1",
+      session_id: "vendor-uuid",
+      task_id: "agent-go",
+      task_type: "local_agent",
+      tool_use_id: "tool-agent-go",
+      description: "Go hello world",
+    } as unknown as SdkMessageLike);
+    const taskStart = await store.peer().next(StoreWriteSchema);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(taskStart.batch!.events.length),
+      lastSeq: 10n,
+    }));
+
+    // Act
+    query.emit({
+      type: "system",
+      subtype: "task_notification",
+      uuid: "orphan-end",
+      session_id: "vendor-uuid",
+      task_id: "a4699ecc217adfa70",
+      status: "completed",
+    } as unknown as SdkMessageLike);
+    const orphanEnd = await store.peer().next(StoreWriteSchema);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(orphanEnd.batch!.events.length),
+      lastSeq: 12n,
+    }));
+
+    // Assert
+    expect(log.record("SDK emitted TaskEnded for a task this query instance never saw start")).toMatchObject({
+      level: "warn",
+      request_id: "p1",
+      context: {
+        unknown_ended_sdk_task_ids: ["a4699ecc217adfa70"],
+        live_sdk_task_ids: ["agent-go"],
+        sdk_subtype: "task_notification",
+        decision: "contain_unknown_task_end",
+      },
+    });
+  });
+
+  it("reports an unknown task end to the daemon as a recovered DegradedState", async () => {
+    // Arrange
+    const { query, store, daemon } = await rig({ storeSessionId: "vendor-uuid" });
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, {
+      requestId: "p1",
+      text: "carry on",
+      promptOrigin: PromptOrigin.USER_SENT,
+    }));
+    const start = await store.peer().next(StoreWriteSchema);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(start.batch!.events.length),
+      lastSeq: 8n,
+    }));
+    await daemon.next(AckSchema);
+
+    // Act
+    query.emit({
+      type: "system",
+      subtype: "task_notification",
+      uuid: "orphan-end",
+      session_id: "vendor-uuid",
+      task_id: "a4699ecc217adfa70",
+      status: "completed",
+    } as unknown as SdkMessageLike);
+
+    // Assert: a contained notice, not ongoing downtime.
+    const evt = await daemon.next(EventSchema);
+    expect(evt.payload.case).toBe("degradedState");
+    if (evt.payload.case !== "degradedState") throw new Error("case");
+    expect(evt.payload.value.component).toBe("claude-shim-task-lifecycle");
+    expect(evt.payload.value.recovered).toBe(true);
+    expect(evt.payload.value.reason).toContain("a4699ecc217adfa70");
+  });
+
+  it("still ends a known task without any containment notice", async () => {
+    // Arrange: the task is started under THIS instance.
+    const { query, store, daemon } = await rig({ storeSessionId: "vendor-uuid" });
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, {
+      requestId: "p1",
+      text: "fan out",
+      promptOrigin: PromptOrigin.USER_SENT,
+    }));
+    const start = await store.peer().next(StoreWriteSchema);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(start.batch!.events.length),
+      lastSeq: 8n,
+    }));
+    await daemon.next(AckSchema);
+    query.emit({
+      type: "system",
+      subtype: "task_started",
+      uuid: "task-start-1",
+      session_id: "vendor-uuid",
+      task_id: "agent-go",
+      task_type: "local_agent",
+      tool_use_id: "tool-agent-go",
+      description: "Go hello world",
+    } as unknown as SdkMessageLike);
+    const taskStart = await store.peer().next(StoreWriteSchema);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(taskStart.batch!.events.length),
+      lastSeq: 10n,
+    }));
+    const log = captureLog();
+
+    // Act
+    query.emit({
+      type: "system",
+      subtype: "task_notification",
+      uuid: "task-end-1",
+      session_id: "vendor-uuid",
+      task_id: "agent-go",
+      tool_use_id: "tool-agent-go",
+      status: "completed",
+    } as unknown as SdkMessageLike);
+    const taskEnd = await store.peer().next(StoreWriteSchema);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(taskEnd.batch!.events.length),
+      lastSeq: 12n,
+    }));
+
+    // Assert
+    expect(taskEnd.batch!.events.map((event) => event.payload.case)).toEqual(["vendor", "taskEnded"]);
+    expect(log.count("SDK emitted TaskEnded for a task this query instance never saw start")).toBe(0);
+    // Needle on the end's own commit record: the START commits under the same
+    // message, so matching on the message alone would find the wrong line.
+    await until(() => log.count(`"ended_sdk_task_ids":["agent-go"]`) === 1);
+    expect(log.record(`"ended_sdk_task_ids":["agent-go"]`).context).toMatchObject({
+      live_sdk_task_ids: [],
+      decision: "commit_sdk_task_lifecycle",
+    });
+  });
+
   it("writes a non-lifecycle turn claim bridge into a rotated vendor seq space before its end", async () => {
     // Arrange: the old key has delivered data, so a different result UUID is
     // a real rotation. The prompt start is first written under that old key.
