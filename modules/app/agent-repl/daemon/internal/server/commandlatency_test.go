@@ -228,6 +228,75 @@ func TestRecordCommandLatencyRefusesAnUnresolvableWorkspace(t *testing.T) {
 	}
 }
 
+// overdueSampleFor is one still-in-flight observation: no verdict, no final
+// processing share, and an Ack that is how long the command has been running.
+func overdueSampleFor(workspace string, elapsed time.Duration) frontend.CommandLatencySample {
+	sample := sampleFor(workspace, elapsed, 2*time.Second)
+	sample.Processing = 0
+	sample.Ok = false
+	sample.Overdue = true
+	return sample
+}
+
+func TestRecordCommandLatencyGivesAnOverdueCommandItsOwnOperation(t *testing.T) {
+	// Arrange. A count of completions must not be inflated by a command that
+	// has merely announced it is still running.
+	workspace := t.TempDir()
+	recorder, _, _ := newTestLatencyRecorder(t)
+
+	// Act.
+	if err := recorder.RecordCommandLatency(overdueSampleFor(workspace, 90*time.Second)); err != nil {
+		t.Fatalf("RecordCommandLatency = %v, want nil", err)
+	}
+
+	// Assert.
+	if got := readWorkspaceDaemonRecords(t, workspace)[0].Operation; got != CommandOverdueOperation {
+		t.Fatalf("operation = %q, want %q", got, CommandOverdueOperation)
+	}
+}
+
+func TestRecordCommandLatencyWarnsAboutAnOverdueCommandWithoutVerbose(t *testing.T) {
+	// Arrange. A wedged bring-up must be visible while it is wedged, with
+	// nothing enabled in advance.
+	workspace := t.TempDir()
+	recorder, _, _ := newTestLatencyRecorder(t)
+
+	// Act.
+	if err := recorder.RecordCommandLatency(overdueSampleFor(workspace, 90*time.Second)); err != nil {
+		t.Fatalf("RecordCommandLatency = %v, want nil", err)
+	}
+
+	// Assert.
+	record := readWorkspaceDaemonRecords(t, workspace)[0]
+	if record.Level != dlog.LevelWarn || record.Verbosity != dlog.Normal {
+		t.Fatalf("overdue record level/verbosity = %s/%s, want %s/%s",
+			record.Level, record.Verbosity, dlog.LevelWarn, dlog.Normal)
+	}
+}
+
+func TestRecordCommandLatencyOverdueContextReportsElapsedRatherThanAVerdict(t *testing.T) {
+	// Arrange.
+	workspace := t.TempDir()
+	recorder, _, _ := newTestLatencyRecorder(t)
+
+	// Act.
+	if err := recorder.RecordCommandLatency(overdueSampleFor(workspace, 90*time.Second)); err != nil {
+		t.Fatalf("RecordCommandLatency = %v, want nil", err)
+	}
+
+	// Assert. An unfinished command has no ok and no processing share, so
+	// reporting either would be inventing one.
+	record := readWorkspaceDaemonRecords(t, workspace)[0]
+	if got := record.Context["elapsed_ms"]; got != float64(90000) {
+		t.Fatalf("context[elapsed_ms] = %#v, want 90000", got)
+	}
+	for _, key := range []string{"ok", "processing_ms", "duration_ms"} {
+		if _, present := record.Context[key]; present {
+			t.Fatalf("context[%q] = %#v, want it absent from an overdue record", key, record.Context[key])
+		}
+	}
+}
+
 func TestNewTargetCommandLatencyRecorderRequiresItsDependencies(t *testing.T) {
 	tests := []struct {
 		name     string

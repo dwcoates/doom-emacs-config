@@ -83,6 +83,11 @@ type Config struct {
 	// AckWarnThreshold is the ack latency at which a command's record is
 	// raised from debug to warn; <=0 uses DefaultAckWarnThreshold.
 	AckWarnThreshold time.Duration
+	// AckDeadline is the point at which a command still in flight is announced
+	// as overdue; <=0 uses CommandAckDeadline, the budget the Emacs client
+	// itself enforces. It is a knob only so tests can reach the branch without
+	// waiting out the production deadline.
+	AckDeadline time.Duration
 }
 
 // Server serves agentshim.frontend.v1 frames as protojson over a UDS listener
@@ -101,10 +106,17 @@ type Server struct {
 	bufSize                   int
 	latency                   CommandLatencyRecorder
 	ackWarn                   time.Duration
+	// ackDeadline is when a command still in flight is announced as overdue.
+	// See Config.AckDeadline.
+	ackDeadline time.Duration
 	// inflight is the daemon-wide count of frontend commands currently between
 	// receipt and ack. It is the QUEUE DEPTH every latency record carries: a
 	// per-connection read loop dispatches serially, so a command that waited
 	// behind other work can only see that work by counting it.
+	//
+	// Every increment is paired with a commandTicket whose deferred settle
+	// decrements it, so the gauge cannot leak past a panicking dispatch —
+	// see ticket.go.
 	inflight atomic.Int64
 
 	upgrader websocket.Upgrader
@@ -189,6 +201,10 @@ func New(cfg Config) *Server {
 	if ackWarn <= 0 {
 		ackWarn = DefaultAckWarnThreshold
 	}
+	ackDeadline := cfg.AckDeadline
+	if ackDeadline <= 0 {
+		ackDeadline = CommandAckDeadline
+	}
 	warnf := cfg.Warnf
 	if warnf == nil {
 		warnf = cfg.Logf
@@ -203,6 +219,7 @@ func New(cfg Config) *Server {
 		bufSize:                   buf,
 		latency:                   cfg.CommandLatency,
 		ackWarn:                   ackWarn,
+		ackDeadline:               ackDeadline,
 		upgrader: websocket.Upgrader{
 			// Local-loopback developer tool; the webview origin is app-scoped,
 			// so origin checks are permissive by design (mirrors the existing
@@ -963,9 +980,7 @@ func (s *Server) writeLoop(c conn, cl *client) {
 // commands still run one at a time in arrival order, and each is still
 // answered only once it has actually run.
 func (s *Server) readLoop(c conn, cl *client) {
-	lanes := newCommandLanes(s.logf, func(cmd *frontendv1.FrontendCommand, received time.Time, depth int64) {
-		s.processCommand(cl, cmd, received, depth)
-	})
+	lanes := newCommandLanes(s.logf, s.processCommand)
 	defer func() {
 		// Drain first, disconnect second: a command already read still owes
 		// the client an answer, exactly as it did when dispatch ran inline.
@@ -987,16 +1002,30 @@ func (s *Server) readLoop(c conn, cl *client) {
 		// the handler would report a fast command sitting behind slow work as
 		// fast. The depth is taken here, before any of this command's own work
 		// runs, so it counts what was ALREADY in flight.
+		//
+		// The increment and the ticket that owes its decrement are created
+		// together, so there is no window in which a command counts against
+		// the gauge with nothing obliged to release it.
 		received := time.Now()
 		depth := s.inflight.Add(1)
-		lanes.submit(cmd, received, depth)
+		lanes.submit(s.newCommandTicket(cl, cmd, received, depth))
 	}
 }
 
 // processCommand performs one command and answers it. It is the body the read
 // loop used to run inline, unchanged in every respect except where it runs and
 // the receipt-side timing facts it reports against.
-func (s *Server) processCommand(cl *client, cmd *frontendv1.FrontendCommand, received time.Time, depth int64) {
+func (s *Server) processCommand(t *commandTicket) {
+	cl, cmd := t.cl, t.cmd
+	var ack *frontendv1.CommandAck
+	var processing time.Duration
+	// SETTLING IS DEFERRED, and that is the whole guarantee: the in-flight
+	// gauge comes back and the one completion record is written on EVERY exit
+	// from this function, including a panic unwinding out of a handler (which
+	// still propagates — nothing here recovers it). A command that returned
+	// without settling used to inflate every later command's queue_depth for
+	// the rest of the daemon's life.
+	defer func() { t.finish(ack, processing) }()
 	// A resync re-sends a fresh StateSnapshot to THIS client (§5.4),
 	// scope-filtered for a scoped connection. The handler covers the
 	// conversation-delta replay the snapshot omits.
@@ -1004,8 +1033,9 @@ func (s *Server) processCommand(cl *client, cmd *frontendv1.FrontendCommand, rec
 		s.enqueueResyncSnapshot(cl, cmd, "before_dispatch")
 	}
 	dispatchStart := time.Now()
-	ack, response := s.dispatchClientCommand(cl, cmd)
-	processing := time.Since(dispatchStart)
+	var response *frontendv1.FrontendFrame
+	ack, response = s.dispatchClientCommand(cl, cmd)
+	processing = time.Since(dispatchStart)
 	// A stale generation is a request to adopt current authority, not a
 	// history failure. Capture again AFTER the daemon made that decision so
 	// a transition crossing the pre-dispatch capture cannot leave the client
@@ -1029,34 +1059,39 @@ func (s *Server) processCommand(cl *client, cmd *frontendv1.FrontendCommand, rec
 		s.enqueue(cl, outFrame{key: coalesceKey(response), data: data})
 	}
 	// The ack is on the wire's queue; that is the moment the client's wait
-	// ends. The in-flight gauge is released BEFORE the record is written so
-	// the telemetry never inflates the depth it reports.
-	ackElapsed := time.Since(received)
-	s.inflight.Add(-1)
-	s.recordCommandLatency(cl, cmd, ack, depth, ackElapsed, processing)
+	// ends. The deferred settle above releases the gauge and writes the record
+	// from here, in that order, so the telemetry never inflates the depth it
+	// reports.
 }
 
-// recordCommandLatency persists one completed command's lifecycle timing. A
-// recorder failure is a routing or persistence invariant violation, so it is
-// surfaced through the transport's own log rather than dropped.
-func (s *Server) recordCommandLatency(cl *client, cmd *frontendv1.FrontendCommand, ack *frontendv1.CommandAck, depth int64, elapsed, processing time.Duration) {
+// recordCommandLatency persists one command lifecycle sample — a completion, or
+// an overdue in-flight observation. A recorder failure is a routing or
+// persistence invariant violation, so it is surfaced through the transport's
+// own log rather than dropped.
+//
+// It is called only from commandTicket, under that ticket's lock, which is what
+// makes "exactly one completion record per received command" structural rather
+// than a convention this function has to be trusted to honor.
+func (s *Server) recordCommandLatency(rec commandLatencyRecord) {
 	if s.latency == nil {
 		return
 	}
+	t := rec.ticket
 	sample := CommandLatencySample{
-		Workspace:  cmd.GetWorkspace(),
-		RequestID:  cmd.GetRequestId(),
-		Command:    CommandFieldName(cmd),
-		ClientKind: cl.kind.String(),
-		QueueDepth: depth,
-		Ack:        elapsed,
-		Processing: processing,
+		Workspace:  t.cmd.GetWorkspace(),
+		RequestID:  t.cmd.GetRequestId(),
+		Command:    CommandFieldName(t.cmd),
+		ClientKind: t.cl.kind.String(),
+		QueueDepth: t.depth,
+		Ack:        rec.elapsed,
+		Processing: rec.processing,
 		Threshold:  s.ackWarn,
-		Ok:         ack.GetOk(),
+		Ok:         rec.ack.GetOk(),
+		Overdue:    rec.overdue,
 	}
 	if err := s.latency.RecordCommandLatency(sample); err != nil {
-		s.logf("frontend: record command latency FAILED request_id=%q command=%s ws=%q ack_ms=%d: %v",
-			sample.RequestID, sample.Command, sample.Workspace, sample.Ack.Milliseconds(), err)
+		s.logf("frontend: record command latency FAILED request_id=%q command=%s ws=%q overdue=%v ack_ms=%d: %v",
+			sample.RequestID, sample.Command, sample.Workspace, sample.Overdue, sample.Ack.Milliseconds(), err)
 	}
 }
 
