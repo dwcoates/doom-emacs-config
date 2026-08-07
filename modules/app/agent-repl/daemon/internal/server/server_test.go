@@ -132,8 +132,8 @@ func (stubMerge) Evict(context.Context, string) (int, error) {
 
 type stubLifecycle struct{}
 
-func (stubLifecycle) Close(context.Context, string) error { return nil }
-func (stubLifecycle) Open(context.Context, string) error  { return nil }
+func (stubLifecycle) Close(context.Context, string) error                   { return nil }
+func (stubLifecycle) Open(context.Context, string, WorkspaceOpenOpts) error { return nil }
 
 // OpenDriveable is the merge's bring-up seam; these command-handler tests drive
 // no merge, so it answers exactly as Open does.

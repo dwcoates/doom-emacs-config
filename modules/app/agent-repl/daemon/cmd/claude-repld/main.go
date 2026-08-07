@@ -798,8 +798,12 @@ func main() {
 	// on-disk transcript at boot, so a restart already knows every resume
 	// target before a frontend can connect, and ensure eagerly on open.
 	opener := &server.WorkspaceOpener{
-		Reg:        sessionRegistry,
-		Ensurer:    controller,
+		Reg:     sessionRegistry,
+		Ensurer: controller,
+		// The SAME creation entry point the createSession command reaches, so
+		// an open that starts a workspace's first session runs every check an
+		// explicit create runs — the ungated-consent refusal above all.
+		Creator:    sessionCommands,
 		ConfigDirs: knownConfigDirs(accounts),
 		Logf:       legacyLog,
 	}

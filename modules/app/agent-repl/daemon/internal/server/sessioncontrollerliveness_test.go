@@ -102,7 +102,7 @@ func TestOpenWaitsForDriveabilityDespiteASettledRecord(t *testing.T) {
 	}
 
 	// Act.
-	if err := o.Open(context.Background(), "/w"); err != nil {
+	if err := o.Open(context.Background(), "/w", WorkspaceOpenOpts{}); err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 
