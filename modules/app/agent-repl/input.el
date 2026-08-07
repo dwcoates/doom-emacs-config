@@ -473,13 +473,12 @@ matching) is untouched."
 
 (defun agent-repl--slash-commands-for-ws (ws)
   "Return WS's slash-command names from the pushed `SessionInit' store.
-Reads WS's bound `:frontend-session-id', looks up its retained `SystemInit'
-\(`agent-repl--frontend-session-init'), and returns the `slashCommands'
-list (command NAME strings).  nil when WS has no bound session or no init
-has been pushed yet (a transient startup state, not an error)."
-  (let ((session-id (agent-repl--ws-get ws :frontend-session-id)))
-    (when session-id
-      (plist-get (agent-repl--frontend-session-init session-id) :slashCommands))))
+Looks WS's retained `SystemInit' up by its workspace
+\(`agent-repl--frontend-session-init') and returns the `slashCommands'
+list (command NAME strings).  nil when WS has no project dir, or no init
+has been pushed for it yet (a transient startup state, not an error)."
+  (when-let ((workspace (agent-repl--ws-get ws :project-dir)))
+    (plist-get (agent-repl--frontend-session-init workspace) :slashCommands)))
 
 (defun agent-repl--skill-capf-bounds ()
   "Return (START . END) of the slash-command token at point, or nil.
