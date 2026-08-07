@@ -545,6 +545,78 @@ the recorded error, so containing it there would be swallowing it."
         (should (string-empty-p agent-repl--uds-read-accumulator))
         (should (eq (nth 1 scheduled) #'agent-repl-uds-connect))))))
 
+(ert-deftest agent-repl-test-uds-sentinel-established-link-loss-says-link-down ()
+  "Losing an OPEN link is reported as a link loss, not as a dial failure."
+  ;; Arrange — a cleared started-at is what an `open' transition leaves behind.
+  (agent-repl-test--with-uds
+    (setq agent-repl--uds-process 'dead-proc
+          agent-repl--uds-connect-started-at nil)
+    (let (warned)
+      (cl-letf (((symbol-function 'process-live-p) (lambda (_p) nil))
+                ((symbol-function 'process-name) (lambda (_p) "uds<8>"))
+                ((symbol-function 'agent-repl--warn)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warned)))
+                ((symbol-function 'agent-repl--uds-run-timer)
+                 (lambda (&rest _) 'fake-timer)))
+        ;; Act
+        (agent-repl--uds-sentinel 'dead-proc "connection broken by remote peer\n")
+        ;; Assert
+        (should (string-match-p "uds-link: DOWN" (car warned)))))))
+
+(ert-deftest agent-repl-test-uds-sentinel-established-link-loss-omits-nil-elapsed ()
+  "A link loss never reports `elapsed=nil', which read as an instant dial failure."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (setq agent-repl--uds-process 'dead-proc
+          agent-repl--uds-connect-started-at nil)
+    (let (warned)
+      (cl-letf (((symbol-function 'process-live-p) (lambda (_p) nil))
+                ((symbol-function 'process-name) (lambda (_p) "uds<8>"))
+                ((symbol-function 'agent-repl--warn)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warned)))
+                ((symbol-function 'agent-repl--uds-run-timer)
+                 (lambda (&rest _) 'fake-timer)))
+        ;; Act
+        (agent-repl--uds-sentinel 'dead-proc "connection broken by remote peer\n")
+        ;; Assert
+        (should-not (string-match-p "elapsed=nil" (car warned)))))))
+
+(ert-deftest agent-repl-test-uds-sentinel-failed-dial-reports-its-elapsed ()
+  "A dial that never opened is reported as a dial failure carrying its elapsed."
+  ;; Arrange — a live started-at is what a dial still in flight leaves behind.
+  (agent-repl-test--with-uds
+    (setq agent-repl--uds-process 'dead-proc
+          agent-repl--uds-connect-started-at (- (float-time) 1.5))
+    (let (warned)
+      (cl-letf (((symbol-function 'process-live-p) (lambda (_p) nil))
+                ((symbol-function 'process-name) (lambda (_p) "uds<8>"))
+                ((symbol-function 'agent-repl--warn)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warned)))
+                ((symbol-function 'agent-repl--uds-run-timer)
+                 (lambda (&rest _) 'fake-timer)))
+        ;; Act
+        (agent-repl--uds-sentinel 'dead-proc "connection broken by remote peer\n")
+        ;; Assert
+        (should (string-match-p "uds-connect: dial FAILED" (car warned)))))))
+
+(ert-deftest agent-repl-test-uds-sentinel-link-loss-still-warns ()
+  "A link loss stays LOUD: this ladder retries forever and never gives up."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (setq agent-repl--uds-process 'dead-proc
+          agent-repl--uds-connect-started-at nil)
+    (let ((warned 0))
+      (cl-letf (((symbol-function 'process-live-p) (lambda (_p) nil))
+                ((symbol-function 'process-name) (lambda (_p) "uds<8>"))
+                ((symbol-function 'agent-repl--warn)
+                 (lambda (&rest _) (cl-incf warned)))
+                ((symbol-function 'agent-repl--uds-run-timer)
+                 (lambda (&rest _) 'fake-timer)))
+        ;; Act
+        (agent-repl--uds-sentinel 'dead-proc "connection broken by remote peer\n")
+        ;; Assert
+        (should (= warned 1))))))
+
 (ert-deftest agent-repl-test-uds-sentinel-live-link-does-not-reconnect ()
   "A sentinel event on a still-live process does not schedule a reconnect."
   ;; Arrange
