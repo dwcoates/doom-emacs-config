@@ -35,6 +35,18 @@ type Fields struct {
 	Operation          string
 	Level              string
 	RequestID          string
+	// Statement is a SQL statement FAMILY — "replay", "ingest", "open_tasks" —
+	// never rendered SQL and never bound values. The store's payloads are
+	// opaque to it by design, and a slow-query record that quoted a statement
+	// with its parameters would put session content into the global log.
+	//
+	// It is also the marker for the query-timing trio below: Duration, Rows
+	// and Threshold are emitted only alongside a statement family, so a zero
+	// row count is reported as zero rather than omitted as "unset".
+	Statement string
+	Duration  time.Duration
+	Rows      int64
+	Threshold time.Duration
 }
 
 type record struct {
@@ -142,6 +154,12 @@ func (l *Logger) write(verbosity string, fields Fields, format string, args []an
 		if value != "" {
 			context[key] = value
 		}
+	}
+	if merged.Statement != "" {
+		context["statement"] = merged.Statement
+		context["duration_ms"] = merged.Duration.Milliseconds()
+		context["rows"] = merged.Rows
+		context["threshold_ms"] = merged.Threshold.Milliseconds()
 	}
 	terminal := merged.TerminalOwner != "" || merged.TerminalReason != ""
 	for key, value := range map[string]uint64{
@@ -283,6 +301,18 @@ func merge(base, extra Fields) Fields {
 	}
 	if extra.RequestID != "" {
 		base.RequestID = extra.RequestID
+	}
+	if extra.Statement != "" {
+		base.Statement = extra.Statement
+	}
+	if extra.Duration != 0 {
+		base.Duration = extra.Duration
+	}
+	if extra.Rows != 0 {
+		base.Rows = extra.Rows
+	}
+	if extra.Threshold != 0 {
+		base.Threshold = extra.Threshold
 	}
 	return base
 }
