@@ -131,6 +131,15 @@ const (
 	// Claude conversation. The typed SessionResumeFailure detail carries the
 	// exact session, Claude UUID, attempted operation, and continuity cause.
 	TypeSessionResumeFailed Type = "session.resume_failed"
+	// TypeSessionConversationUnresumable — the workspace HAS a conversation
+	// and the daemon could not land on it: its transcript is gone, or every
+	// candidate the resolver knows was excluded. It is deliberately a
+	// DIFFERENT name from session.resume_failed, which reports one named
+	// target that could not be resumed; this one reports that the workspace's
+	// conversation as a whole could not be reached, and that starting a blank
+	// one in its place is refused rather than performed. It is the terminal
+	// rung of the resume ladder and has no fallback below it.
+	TypeSessionConversationUnresumable Type = "session.conversation_unresumable"
 	// TypeResumeModeRetired — a create arrived naming a resume mode this
 	// daemon no longer implements. Today that is exactly one value: the
 	// retired RESUME_MODE_FRESH (tag 2), which an old client may still put on
@@ -283,37 +292,38 @@ func Assistant(e datav1.AssistantMessageError) (Type, bool) {
 // it arrived through.
 var prose = map[Type]string{
 	// INTERNAL — agent-repl's own machinery.
-	TypeShimNotConnected:           "the agent process is not connected",
-	TypeShimRejected:               "the agent process rejected the request",
-	TypeShimAckTimeout:             "the agent process did not respond in time",
-	TypeShimVersionMismatch:        "the agent process speaks a different protocol version",
-	TypeShimSeqRegression:          "the agent process's event stream went backwards",
-	TypeShimDegraded:               "no traffic from the agent process",
-	TypeShimStoreWriteRejected:     "the agent process could not write to the store",
-	TypeUnexpectedQueryTermination: "the agent SDK query ended unexpectedly",
-	TypeShimNotSpawned:             "the agent process was never started for this session",
-	TypeShimHandshakeIncomplete:    "the agent process connected but never finished wiring up",
-	TypeShimUnhealthy:              "the agent process reported itself unhealthy",
-	TypeSessionNotEstablished:      "the session did not finish connecting in time",
-	TypeSessionNotLive:             "this is no longer the workspace's live session",
-	TypeSessionDeleted:             "the session was deleted",
-	TypeSessionSuperseded:          "a new Claude session was started for this workspace, so this session was stopped — a workspace and each resumed transcript keep exactly one live session at a time",
-	TypeSessionReconnectSuperseded: "this view's session identity is stale — the live session's connection changed, which could mean a new Claude session took over this workspace, a new agent process was spawned for it, or the daemon reconnected to it after a restart; to resync, reload this webview from Emacs with SPC o l (agent-repl-frontend-reload-webview), or run M-x agent-repl-refresh-webviews to remount every workspace view",
-	TypeSessionShimDied:            "the agent process exited",
-	TypeSessionStartFailed:         "the session could not be started",
-	TypeSessionResumeFailed:        "the Claude conversation could not be resumed",
-	TypeResumeModeRetired:          "this client asked for a resume mode the daemon no longer supports; update the client",
-	TypeSessionEndedUnclassified:   "the session ended",
-	TypeHistoryRepullInFlight:      "a history re-pull is already running",
-	TypeHistoryReplayTruncated:     "the history re-pull ended before it reached the live window",
-	TypeInterruptUndelivered:       "the stop could not be delivered",
-	TypeQueueEntrySessionUnwired:   "the queued prompt's session is not attached to this daemon, so it cannot be run yet",
-	TypeQueueEntryKeepAliveHeld:    "the queued prompt is waiting for a cache keep-alive response and cannot be forced ahead of it",
-	TypeSessionHibernated:          "the session is hibernated; choose how to revive it before sending prompts",
-	TypeKeepAliveWindowUnclosed:    "a cache keep-alive window could not be closed, so new conversation is being withheld until it is repaired",
-	TypeKeepAliveWindowInverted:    "a cache keep-alive window ended before it began, so the daemon's own keep-alive turn may appear in the conversation",
-	TypeClientLogIdentityStale:     "a browser log record named a session this workspace no longer runs, so it was not recorded",
-	TypeInternalUnclassified:       "the command failed",
+	TypeShimNotConnected:               "the agent process is not connected",
+	TypeShimRejected:                   "the agent process rejected the request",
+	TypeShimAckTimeout:                 "the agent process did not respond in time",
+	TypeShimVersionMismatch:            "the agent process speaks a different protocol version",
+	TypeShimSeqRegression:              "the agent process's event stream went backwards",
+	TypeShimDegraded:                   "no traffic from the agent process",
+	TypeShimStoreWriteRejected:         "the agent process could not write to the store",
+	TypeUnexpectedQueryTermination:     "the agent SDK query ended unexpectedly",
+	TypeShimNotSpawned:                 "the agent process was never started for this session",
+	TypeShimHandshakeIncomplete:        "the agent process connected but never finished wiring up",
+	TypeShimUnhealthy:                  "the agent process reported itself unhealthy",
+	TypeSessionNotEstablished:          "the session did not finish connecting in time",
+	TypeSessionNotLive:                 "this is no longer the workspace's live session",
+	TypeSessionDeleted:                 "the session was deleted",
+	TypeSessionSuperseded:              "a new Claude session was started for this workspace, so this session was stopped — a workspace and each resumed transcript keep exactly one live session at a time",
+	TypeSessionReconnectSuperseded:     "this view's session identity is stale — the live session's connection changed, which could mean a new Claude session took over this workspace, a new agent process was spawned for it, or the daemon reconnected to it after a restart; to resync, reload this webview from Emacs with SPC o l (agent-repl-frontend-reload-webview), or run M-x agent-repl-refresh-webviews to remount every workspace view",
+	TypeSessionShimDied:                "the agent process exited",
+	TypeSessionStartFailed:             "the session could not be started",
+	TypeSessionResumeFailed:            "the Claude conversation could not be resumed",
+	TypeSessionConversationUnresumable: "this workspace has a Claude conversation that could not be reached, and a blank one will NOT be started in its place",
+	TypeResumeModeRetired:              "this client asked for a resume mode the daemon no longer supports; update the client",
+	TypeSessionEndedUnclassified:       "the session ended",
+	TypeHistoryRepullInFlight:          "a history re-pull is already running",
+	TypeHistoryReplayTruncated:         "the history re-pull ended before it reached the live window",
+	TypeInterruptUndelivered:           "the stop could not be delivered",
+	TypeQueueEntrySessionUnwired:       "the queued prompt's session is not attached to this daemon, so it cannot be run yet",
+	TypeQueueEntryKeepAliveHeld:        "the queued prompt is waiting for a cache keep-alive response and cannot be forced ahead of it",
+	TypeSessionHibernated:              "the session is hibernated; choose how to revive it before sending prompts",
+	TypeKeepAliveWindowUnclosed:        "a cache keep-alive window could not be closed, so new conversation is being withheld until it is repaired",
+	TypeKeepAliveWindowInverted:        "a cache keep-alive window ended before it began, so the daemon's own keep-alive turn may appear in the conversation",
+	TypeClientLogIdentityStale:         "a browser log record named a session this workspace no longer runs, so it was not recorded",
+	TypeInternalUnclassified:           "the command failed",
 
 	// API — the SDK or the vendor refusing or concluding the work.
 	TypeAPIAuthenticationFailed: "authentication failed",
@@ -412,6 +422,14 @@ var (
 	// session produces one of these per forwarded record and every one of them
 	// used to be logged as an unclassified daemon fault.
 	ErrClientLogIdentityStale = errors.New("server: client log source session identity disagrees with the daemon registry")
+	// ErrConversationUnresumable anchors the terminal rung of the resume
+	// ladder: the workspace's conversation could not be resumed AND the
+	// daemon's own durable evidence says the workspace HAS one, so no fresh
+	// conversation may be started. It is a sentinel because it must be
+	// distinguishable from every recoverable resume failure — nothing below it
+	// retries, degrades, or substitutes, and a caller that reads it is being
+	// told the conversation still exists and needs a human.
+	ErrConversationUnresumable = errors.New("server: the workspace has a conversation that could not be resumed, and starting a fresh one in its place is refused")
 	// ErrResumeModeRetired anchors the refusal of a wire resume_mode this
 	// daemon no longer implements — currently only the retired
 	// RESUME_MODE_FRESH (tag 2). Refused loudly rather than read as CONTINUE:
@@ -445,6 +463,7 @@ var sentinelTypes = []struct {
 	{ErrQueueEntryKeepAliveHeld, TypeQueueEntryKeepAliveHeld},
 	{ErrSessionHibernated, TypeSessionHibernated},
 	{ErrClientLogIdentityStale, TypeClientLogIdentityStale},
+	{ErrConversationUnresumable, TypeSessionConversationUnresumable},
 	{ErrResumeModeRetired, TypeResumeModeRetired},
 }
 
@@ -829,6 +848,7 @@ func AllTypes() []Type {
 		TypeSessionShimDied,
 		TypeSessionStartFailed,
 		TypeSessionResumeFailed,
+		TypeSessionConversationUnresumable,
 		TypeResumeModeRetired,
 		TypeSessionEndedUnclassified,
 		TypeHistoryRepullInFlight,
