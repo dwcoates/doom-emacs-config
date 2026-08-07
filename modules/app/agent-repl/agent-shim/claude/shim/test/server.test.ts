@@ -1,10 +1,12 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { writeSync } from "node:fs";
 import { create } from "@bufbuild/protobuf";
 import { SessionServer, SessionServerHandlers, Receipt } from "../src/uds/server.js";
 import type { SessionServerOptions } from "../src/uds/server.js";
 import {
   AckSchema,
   DaemonHelloSchema,
+  EventClass,
   EventSchema,
   HealthCheckSchema,
   HealthStatusSchema,
@@ -80,6 +82,21 @@ function harness(
     handlers,
   );
   return { server, socketPath, calls };
+}
+
+/**
+ * Read back the JSONL records the shim persisted to inherited fd 3 from this
+ * point on. `test/log-setup.ts` mocks `node:fs`'s `writeSync`, which is the
+ * canonical sink's only write, so the mock's calls ARE the durable records.
+ */
+function persistedRecords(): () => Record<string, unknown>[] {
+  const mocked = vi.mocked(writeSync);
+  mocked.mockClear();
+  return () =>
+    (mocked.mock.calls as unknown as Array<[number, Buffer, number, number]>).map(
+      ([, bytes, offset, length]) =>
+        JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as Record<string, unknown>,
+    );
 }
 
 const listeners: Array<() => void> = [];
@@ -330,6 +347,56 @@ describe("SessionServer outbound", () => {
     // Act / Assert: durable in the store, replays on resubscribe
     expect(() => server.sendEvent(create(EventSchema, { sessionId: "sess-1", seq: 1n }))).not.toThrow();
     expect(server.isConnected()).toBe(false);
+  });
+
+  it("keeps a detached PERSISTENT event at info, since the store still replays it", async () => {
+    // Arrange
+    const { server } = harness();
+    track(server);
+    const records = persistedRecords();
+    // Act
+    server.sendEvent(create(EventSchema, { sessionId: "sess-1", seq: 1n, class: EventClass.PERSISTENT }));
+    // Assert
+    expect(records().filter((r) => r.message === "no daemon attached; event not forwarded (durable in store, replays on resubscribe)").map((r) => r.level)).toEqual(["info"]);
+  });
+
+  it("records a detached EPHEMERAL event as an error, since nothing replays it", async () => {
+    // Arrange — the class a DegradedState rides: seq 0, never persisted.
+    const { server } = harness();
+    track(server);
+    const records = persistedRecords();
+    // Act
+    server.sendEvent(create(EventSchema, { sessionId: "sess-1", seq: 0n, class: EventClass.EPHEMERAL }));
+    // Assert
+    const dropped = records().filter((r) => String(r.message).includes("EPHEMERAL event dropped permanently"));
+    expect(dropped).toHaveLength(1);
+    expect(dropped[0].level).toBe("error");
+  });
+
+  it("warns when a replay event is lost, since the daemon reads the short replay as complete", async () => {
+    // Arrange
+    const { server } = harness();
+    track(server);
+    const records = persistedRecords();
+    // Act
+    server.sendReplayEvent("req-1", create(EventSchema, { sessionId: "sess-1", seq: 7n }));
+    // Assert
+    const dropped = records().filter((r) => String(r.message).includes("replay event not forwarded"));
+    expect(dropped).toHaveLength(1);
+    expect(dropped[0].level).toBe("warn");
+  });
+
+  it("warns when a replay completion is lost, since the daemon's request never terminates", async () => {
+    // Arrange
+    const { server } = harness();
+    track(server);
+    const records = persistedRecords();
+    // Act
+    server.sendReplayDone(create(ReplayDoneSchema, { requestId: "req-1" }));
+    // Assert
+    const dropped = records().filter((r) => String(r.message).includes("replay completion not forwarded"));
+    expect(dropped).toHaveLength(1);
+    expect(dropped[0].level).toBe("warn");
   });
 
   it("forwards a PermissionRequest to the daemon", async () => {

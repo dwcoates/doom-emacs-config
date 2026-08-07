@@ -45,6 +45,7 @@ import {
   DaemonHello,
   DaemonHelloSchema,
   Event,
+  EventClass,
   EventSchema,
   HealthCheck,
   HealthCheckSchema,
@@ -236,14 +237,27 @@ export class SessionServer {
   }
 
   /**
-   * Forward one store-merged Event to the daemon. Dropped (with a debug log)
-   * when no daemon is attached — the event is durable in the store and
-   * replayed on the next gate's from_seq, so buffering here would be a
-   * forbidden spill path.
+   * Forward one store-merged Event to the daemon. Dropped when no daemon is
+   * attached — a PERSISTENT event is durable in the store and replayed on the
+   * next gate's from_seq, so buffering here would be a forbidden spill path.
+   *
+   * An EPHEMERAL event has no such second chance. The synthetic seq-0 frames
+   * that ride this same call — a DegradedState above all — are never written
+   * to the store, so dropping one is permanent: the user is never told the
+   * session degraded, and the only trace was an info line. The two outcomes
+   * are recorded at the severity each actually carries.
    */
   sendEvent(evt: Event): void {
     if (!this.isConnected()) {
-      LOGGER.log({ agent_repl_session_id: this.opts.sessionId, seq: evt.seq }, `no daemon attached; event not forwarded (durable in store, replays on resubscribe)`);
+      const durable = evt.class !== EventClass.EPHEMERAL;
+      LOGGER.log({
+        level: durable ? "info" : "error",
+        agent_repl_session_id: this.opts.sessionId,
+        seq: evt.seq,
+        event_class: EventClass[evt.class],
+      }, durable
+        ? `no daemon attached; event not forwarded (durable in store, replays on resubscribe)`
+        : `no daemon attached; EPHEMERAL event dropped permanently (never written to the store, never replayed)`);
       return;
     }
     this.conn!.send(EventSchema, evt);
@@ -321,7 +335,10 @@ export class SessionServer {
    */
   sendReplayEvent(requestId: string, evt: Event): void {
     if (!this.isConnected()) {
-      LOGGER.log({ agent_repl_session_id: this.opts.sessionId, request_id: requestId, seq: evt.seq }, `no daemon attached; replay event not forwarded`);
+      // A hole punched in a replay the daemon explicitly asked for: it
+      // receives a history it believes complete, so the gap is silent on the
+      // receiving end and this record is the only place it exists.
+      LOGGER.log({ level: "warn", agent_repl_session_id: this.opts.sessionId, request_id: requestId, seq: evt.seq }, `no daemon attached; replay event not forwarded and the replay the daemon receives is short by it`);
       return;
     }
     this.conn!.send(ReplayEventSchema, create(ReplayEventSchema, { requestId, event: evt }));
@@ -330,7 +347,10 @@ export class SessionServer {
   /** Close a replay. Exactly one per ReplayRequest, whatever the outcome. */
   sendReplayDone(done: ReplayDone): void {
     if (!this.isConnected()) {
-      LOGGER.log({ agent_repl_session_id: this.opts.sessionId, request_id: done.requestId }, `no daemon attached; replay completion not forwarded`);
+      // "Exactly one per ReplayRequest, whatever the outcome" is the contract
+      // this drop breaks: the daemon's request never terminates and stays
+      // indistinguishable from one still in flight.
+      LOGGER.log({ level: "warn", agent_repl_session_id: this.opts.sessionId, request_id: done.requestId }, `no daemon attached; replay completion not forwarded and the daemon's replay request never terminates`);
       return;
     }
     this.conn!.send(ReplayDoneSchema, done);

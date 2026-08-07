@@ -1,9 +1,12 @@
 package discover
 
 import (
+	"bytes"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -128,6 +131,27 @@ func TestClassifySpoolCarriesNoSessionID(t *testing.T) {
 	}
 	if got.TaskID != "b1pi0nmip" {
 		t.Fatalf("task id = %q, want b1pi0nmip", got.TaskID)
+	}
+}
+
+func TestClassifyRejectingASpoolWarnsThatItIsNeverIngested(t *testing.T) {
+	// Arrange — a rejected spool leaves discovery for good.
+	var sink bytes.Buffer
+	spool := t.TempDir()
+	d := New(nil, spool, logging.New(io.Discard, &sink).With(logging.Context{Component: "test"}))
+	p := filepath.Join(spool, "claude-501", "slug", "SESS", "tasks", "x999.output")
+	// Act
+	d.Classify(p)
+	// Assert
+	var record struct {
+		Level   string `json:"level"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(sink.String())), &record); err != nil {
+		t.Fatalf("persisted record is not JSON: %v", err)
+	}
+	if record.Level != "warn" {
+		t.Fatalf("classify-spool level = %q, want warn (%q)", record.Level, record.Message)
 	}
 }
 

@@ -165,7 +165,10 @@ func (l *HeldLifecycle) Observe(target HeldTarget, owner OwnerResolution, eviden
 		l.terminal[target.Path] = entry
 		delete(l.active, target.Path)
 		decision := HeldDecision{State: HeldStateTerminal, Reason: reason}
-		l.report(HeldLogRecord{Operation: "held-transition", State: decision.State, Reason: decision.Reason, PathHash: heldPathHash(target.Path), TaskID: target.TaskID, Root: target.Root, AgeBucket: heldAgeBucket(now.Sub(target.ModTime)), Message: "terminal historical or closed spool without session assignment", Verbose: true})
+		// TERMINAL is final: the spool is never reconsidered or tailed again,
+		// so its bytes never reach the database. A permanent ingestion drop
+		// must not depend on the verbose gate to be persisted at all.
+		l.report(HeldLogRecord{Operation: "held-transition", Level: "warn", State: decision.State, Reason: decision.Reason, PathHash: heldPathHash(target.Path), TaskID: target.TaskID, Root: target.Root, AgeBucket: heldAgeBucket(now.Sub(target.ModTime)), Message: "terminal historical or closed spool without session assignment; its bytes never reach the store"})
 		return decision, nil
 	}
 	if owner.Outcome == OwnerUnresolvedConflict {

@@ -1,9 +1,12 @@
 package tail
 
 import (
+	"bytes"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
@@ -128,6 +131,72 @@ func TestTailerPartialLineCarriedThenCompleted(t *testing.T) {
 	}
 	if len(r2.Next.GetCarry()) != 0 {
 		t.Fatalf("carry should be drained after completion")
+	}
+}
+
+// levelsFor returns the persisted level of every record whose message contains
+// substring. The persistent sink is the canonical JSONL log, one object a line.
+func levelsFor(t *testing.T, sink *bytes.Buffer, substring string) []string {
+	t.Helper()
+	var out []string
+	for _, line := range strings.Split(strings.TrimSpace(sink.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		var record struct {
+			Level   string `json:"level"`
+			Message string `json:"message"`
+		}
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			t.Fatalf("persisted record is not JSON: %v", err)
+		}
+		if strings.Contains(record.Message, substring) {
+			out = append(out, record.Level)
+		}
+	}
+	return out
+}
+
+func TestTailerTruncationWarnsAboutUnrecoverableBytes(t *testing.T) {
+	// Arrange — a truncation destroys bytes in place, unlike a rotation.
+	var sink bytes.Buffer
+	dir := t.TempDir()
+	p := filepath.Join(dir, "t.jsonl")
+	writeFile(t, p, `{"a":1}`+"\n"+`{"b":2}`+"\n")
+	tr := New(p, JSONLCodec{}, &stubHandler{}, &Context{SessionID: "s1"},
+		logging.New(io.Discard, &sink).With(logging.Context{Component: "test"}))
+	r1, _ := tr.Poll()
+	tr.Commit(r1)
+	// Act
+	writeFile(t, p, `{"z":9}`+"\n")
+	r2, _ := tr.Poll()
+	tr.Commit(r2)
+	// Assert
+	if got := levelsFor(t, &sink, "resetting cursor to 0; bytes past the committed offset"); len(got) != 1 || got[0] != "warn" {
+		t.Fatalf("truncation record levels = %v, want exactly one warn", got)
+	}
+}
+
+func TestTailerRotationStaysInfo(t *testing.T) {
+	// Arrange — a new inode loses nothing: the whole file is re-read.
+	var sink bytes.Buffer
+	dir := t.TempDir()
+	p := filepath.Join(dir, "t.jsonl")
+	writeFile(t, p, `{"a":1}`+"\n")
+	tr := New(p, JSONLCodec{}, &stubHandler{}, &Context{SessionID: "s1"},
+		logging.New(io.Discard, &sink).With(logging.Context{Component: "test"}))
+	r1, _ := tr.Poll()
+	tr.Commit(r1)
+	// Act — replace the file so the inode changes but the size does not shrink.
+	if err := os.Remove(p); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	writeFile(t, p, `{"a":1}`+"\n"+`{"b":2}`+"\n")
+	r2, _ := tr.Poll()
+	tr.Commit(r2)
+	// Assert
+	if got := levelsFor(t, &sink, "resetting cursor to 0"); len(got) != 1 || got[0] != "info" {
+		t.Fatalf("rotation record levels = %v, want exactly one info", got)
 	}
 }
 

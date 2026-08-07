@@ -41,7 +41,9 @@ func (w *Watcher) addTree(root string) {
 		}
 		if d.IsDir() {
 			if aerr := w.fsw.Add(path); aerr != nil {
-				w.log.With(logging.Context{Operation: "watch-add", Path: path}).Log("watch add failed: %v", aerr)
+				// No watch on this subtree: change detection there falls back
+				// to the slow periodic scan, so new bytes are picked up late.
+				w.log.With(logging.Context{Operation: "watch-add", Path: path, Level: "warn"}).Log("watch add failed, falling back to the periodic scan for this subtree: %v", aerr)
 			}
 		}
 		return nil
@@ -60,7 +62,8 @@ func (w *Watcher) Errors() <-chan error { return w.fsw.Errors }
 func (w *Watcher) AddDir(dir string) {
 	if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
 		if aerr := w.fsw.Add(dir); aerr != nil {
-			w.log.With(logging.Context{Operation: "watch-add", Path: dir}).Log("watch add failed: %v", aerr)
+			// A new session dir with no watch loses its low-latency pickup.
+			w.log.With(logging.Context{Operation: "watch-add", Path: dir, Level: "warn"}).Log("watch add failed, falling back to the periodic scan for this directory: %v", aerr)
 		}
 	}
 }

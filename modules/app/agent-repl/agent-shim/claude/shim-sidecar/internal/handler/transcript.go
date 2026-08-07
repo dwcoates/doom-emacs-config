@@ -59,13 +59,13 @@ func (h *SessionTranscriptHandler) Handle(frames []tail.Frame, ctx *Context) []*
 	}
 	for i, f := range frames {
 		if f.ParseErr != nil {
-			h.log.With(logging.Context{Operation: "parse", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).Log("parse failure at offset=%d: %v", f.Offset, f.ParseErr)
+			h.log.With(logging.Context{Operation: "parse", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID, Level: "warn"}).Log("parse failure at offset=%d; the record persists only as an UnparsedEvent and the user reads a structureless bubble: %v", f.Offset, f.ParseErr)
 			out = append(out, unparsedEvent(ctx.SessionID, ctx.Path, f.Offset, f.Raw, f.ParseErr))
 			continue
 		}
 		c := h.convertAt(memo, frames, i)
 		if c.err != nil {
-			h.log.With(logging.Context{Operation: "convert", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).Log("conversion failure at offset=%d: %v", f.Offset, c.err)
+			h.log.With(logging.Context{Operation: "convert", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID, Level: "warn"}).Log("conversion failure at offset=%d; the record persists only as an UnparsedEvent and the user reads a structureless bubble: %v", f.Offset, c.err)
 			out = append(out, unparsedEvent(ctx.SessionID, ctx.Path, f.Offset, f.Raw, c.err))
 			continue
 		}

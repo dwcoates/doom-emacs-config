@@ -183,6 +183,27 @@ func TestSessionHandlerParseFailureBecomesUnparsed(t *testing.T) {
 	}
 }
 
+func TestSessionHandlerParseFailureIsWarnBecauseTheBubbleLosesItsStructure(t *testing.T) {
+	// Arrange — a parse failure persists only as an UnparsedEvent.
+	var seen []logging.Diagnostic
+	log := logging.New(io.Discard, io.Discard).With(logging.Context{Component: "test"})
+	log.SetDiagnosticSink(func(d logging.Diagnostic) { seen = append(seen, d) })
+	h := NewSessionTranscriptHandler(log)
+	bad := tail.Frame{Raw: []byte("not json"), Offset: 128, ParseErr: errors.New("boom")}
+	// Act
+	h.Handle([]tail.Frame{bad}, &Context{SessionID: "s1", Path: "/x/y.jsonl"})
+	// Assert
+	var levels []string
+	for _, d := range seen {
+		if d.Operation == "parse" {
+			levels = append(levels, d.Level)
+		}
+	}
+	if len(levels) != 1 || levels[0] != "warn" {
+		t.Fatalf("parse-failure levels = %v, want exactly one warn", levels)
+	}
+}
+
 func TestSessionHandlerVendorTwinHasNoDedupKey(t *testing.T) {
 	// Arrange: a plain assistant line (store derives its uuid: key itself).
 	h := NewSessionTranscriptHandler(quietLog)
