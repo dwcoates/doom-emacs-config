@@ -146,6 +146,58 @@ func TestReplayedRetiredQueryTerminationIsNamedInTheLog(t *testing.T) {
 	}
 }
 
+func TestReplayedRetiredQueryTerminationWithholdTakesTheInfoChannel(t *testing.T) {
+	// Arrange — the row is DURABLE, so this record is emitted at every boot for
+	// the rest of the session's life. Classifying a replay correctly is normal
+	// branch selection, not a new anomaly.
+	h := terminationHarness(t, &fakeClient{})
+
+	// Act.
+	consumeTermination(t, h, terminationEvent(4141, "retired-query"))
+
+	// Assert.
+	if h.warn.contains("typed query termination WITHHELD from the bring-up gate") {
+		t.Fatalf("a replayed termination re-warned about history: %v", h.warn.lines)
+	}
+}
+
+func TestALiveQueryTerminationRecordStaysOnTheWarnChannel(t *testing.T) {
+	// Arrange — the severity moved on the HISTORICAL arm only. A live SDK death
+	// is new news and must stay loud.
+	h := terminationHarness(t, blocked())
+
+	// Act.
+	consumeTermination(t, h, terminationEvent(4141, "live-query"))
+
+	// Assert.
+	if !h.warn.contains("typed query termination surfaced directly") {
+		t.Fatalf("a LIVE termination lost its warn severity: %v", h.warn.lines)
+	}
+}
+
+func TestReplayedRetiredQueryTerminationKeepsItsFullContextAtInfo(t *testing.T) {
+	// Arrange — a demoted record that also dropped its identity context would
+	// be a silencing rather than a reclassification.
+	h := terminationHarness(t, &fakeClient{})
+
+	// Act.
+	consumeTermination(t, h, terminationEvent(4141, "retired-query"))
+
+	// Assert.
+	for _, want := range []string{
+		"typed query termination WITHHELD from the bring-up gate",
+		"replayed_query_instance_id=retired-query",
+		`live_query_instance_id="live-query"`,
+		"vendor_session_id=vendor-1",
+		"seq=4141",
+		"decision=retain_history_no_bring_up_fault",
+	} {
+		if !h.log.contains(want) {
+			t.Fatalf("the withheld replay's record lost %q: %v", want, h.log.lines)
+		}
+	}
+}
+
 func TestReplayedRetiredQueryTerminationDoesNotSwallowALaterLiveOne(t *testing.T) {
 	// Arrange — the replay must not arm the duplicate-suppression latch, or the
 	// live query's own death would be discarded as a repeat of yesterday's.

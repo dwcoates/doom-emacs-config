@@ -86,6 +86,9 @@ type chanDegraded struct {
 	ds        chan *corev1.DegradedState
 	degraded  chan string
 	recovered chan struct{}
+	// disposition is the verdict this fake reporter hands back, which is what
+	// the client's own relay record takes its severity from.
+	disposition Disposition
 }
 
 func newChanDegraded() *chanDegraded {
@@ -96,9 +99,12 @@ func newChanDegraded() *chanDegraded {
 	}
 }
 
-func (d *chanDegraded) Degraded(_ string, _ *corev1.Event, ds *corev1.DegradedState) { d.ds <- ds }
-func (d *chanDegraded) ConnectionDegraded(_, reason string)         { d.degraded <- reason }
-func (d *chanDegraded) ConnectionRecovered(_ string)                { d.recovered <- struct{}{} }
+func (d *chanDegraded) Degraded(_ string, _ *corev1.Event, ds *corev1.DegradedState) Disposition {
+	d.ds <- ds
+	return d.disposition
+}
+func (d *chanDegraded) ConnectionDegraded(_, reason string) { d.degraded <- reason }
+func (d *chanDegraded) ConnectionRecovered(_ string)        { d.recovered <- struct{}{} }
 
 // funcPerm adapts a func to PermissionHandler.
 type funcPerm func(sessionID string, req *corev1.PermissionRequest) *corev1.PermissionResponse

@@ -7,6 +7,7 @@ import (
 	corev1 "agentrepl/proto/agentshim/core/v1"
 
 	"claude-repld/internal/errclass"
+	"claude-repld/internal/shimclient"
 )
 
 // ---------------------------------------------------------------------------
@@ -115,6 +116,81 @@ func TestReplayedRetiredQueryDegradationIsNamedInTheLog(t *testing.T) {
 		!h.log.contains("replayed_query_instance_id=retired-query") ||
 		!h.log.contains(`live_query_instance_id="live-query"`) {
 		t.Fatalf("the withheld replay was not named in the log: %v", h.log.lines)
+	}
+}
+
+func TestReplayedRetiredQueryDegradationWithholdTakesTheInfoChannel(t *testing.T) {
+	// Arrange — the durable row replays at every boot, so a warn here alarms
+	// forever about a degradation that was already warned about once.
+	h := terminationHarness(t, &fakeClient{})
+
+	// Act.
+	reportDegradation(t, h, degradationEvent(4142, "retired-query"))
+
+	// Assert.
+	if h.warn.contains("shim degradation WITHHELD from the bring-up gate") {
+		t.Fatalf("a replayed degradation re-warned about history: %v", h.warn.lines)
+	}
+}
+
+func TestReplayedRetiredQueryDegradationKeepsItsFullContextAtInfo(t *testing.T) {
+	// Arrange — reclassification, not silencing: every identity field the warn
+	// carried must still be on the record.
+	h := terminationHarness(t, &fakeClient{})
+
+	// Act.
+	reportDegradation(t, h, degradationEvent(4142, "retired-query"))
+
+	// Assert.
+	for _, want := range []string{
+		"shim degradation WITHHELD from the bring-up gate",
+		"replayed_query_instance_id=retired-query",
+		`live_query_instance_id="live-query"`,
+		"component=claude-shim-sdk",
+		"seq=4142",
+		"decision=retain_history_no_bring_up_fault",
+	} {
+		if !h.log.contains(want) {
+			t.Fatalf("the withheld degradation's record lost %q: %v", want, h.log.lines)
+		}
+	}
+}
+
+func TestReplayedRetiredQueryDegradationReportsItselfAsHistorical(t *testing.T) {
+	// Arrange — the shim client's own relay record takes its severity from this
+	// verdict and can compute nothing itself.
+	h := terminationHarness(t, &fakeClient{})
+	d, err := h.m.existing("ws")
+	if err != nil {
+		t.Fatalf("existing: %v", err)
+	}
+	ev := degradationEvent(4142, "retired-query")
+
+	// Act.
+	got := d.consumer.Degraded("", ev, ev.GetDegradedState())
+
+	// Assert.
+	if got != shimclient.DegradationHistorical {
+		t.Fatalf("disposition = %v, want historical for a retired query's replayed row", got)
+	}
+}
+
+func TestALiveQueryDegradationReportsItselfAsLive(t *testing.T) {
+	// Arrange — the live arm's verdict, and therefore the relay's warn
+	// severity, is untouched.
+	h := terminationHarness(t, blocked())
+	d, err := h.m.existing("ws")
+	if err != nil {
+		t.Fatalf("existing: %v", err)
+	}
+	ev := degradationEvent(4142, "live-query")
+
+	// Act.
+	got := d.consumer.Degraded("", ev, ev.GetDegradedState())
+
+	// Assert.
+	if got != shimclient.DegradationLive {
+		t.Fatalf("disposition = %v, want live for the bound query's own row", got)
 	}
 }
 
