@@ -49,6 +49,7 @@
 (require 'subr-x)
 
 (declare-function agent-repl--log "core" (ws fmt &rest args))
+(declare-function agent-repl--warn "core" (ws fmt &rest args))
 (declare-function agent-repl--log-verbose "core" (ws fmt &rest args))
 (declare-function agent-repl--ws-get "workspace" (ws key))
 (declare-function agent-repl--ws-put "workspace" (ws key val))
@@ -220,7 +221,7 @@ managed hook used to fire."
           (agent-repl--log log-ws "permission-notify: ws=%s request=%s dispatched"
                            ws request-id))
       (error
-       (agent-repl--log log-ws "permission-notify: ws=%s request=%s failed error-type=%s"
+       (agent-repl--warn log-ws "permission-notify: ws=%s request=%s failed error-type=%s"
                         ws request-id (car err))
        (signal (car err) (cdr err))))))
 

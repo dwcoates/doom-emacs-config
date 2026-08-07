@@ -233,6 +233,12 @@ otherwise settle an action nothing had yet deferred."
                  (lambda (&rest _) nil))
                 ((symbol-function 'agent-repl--log)
                  (lambda (_ws fmt &rest args)
+                   (push (apply #'format fmt args) logged)))
+                ;; A refused merge is a UX regression, so the rejection rides
+                ;; the warn rung; capture both so this test keeps asserting
+                ;; the CONTENT rather than the severity.
+                ((symbol-function 'agent-repl--warn)
+                 (lambda (_ws fmt &rest args)
                    (push (apply #'format fmt args) logged))))
         (agent-repl--merge-dispatch-over-uds "DWC/foo")
         (funcall (plist-get call :on-failure) "branch not found")

@@ -646,7 +646,10 @@ would compound one outage into several."
   ;; Arrange
   (let ((ran nil)
         (logged nil))
-    (cl-letf (((symbol-function 'agent-repl--log)
+    ;; The contained subscriber failure rides the warn rung: the recovery step
+    ;; it owned never ran, which is a UX regression even though the rest of the
+    ;; hook continued.
+    (cl-letf (((symbol-function 'agent-repl--warn)
                (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
       (let ((agent-repl-uds-connected-functions
              (list (lambda () (error "subscriber blew up"))
@@ -674,7 +677,8 @@ The same containment the connected hook keeps, from the same shared runner."
   ;; Arrange
   (let ((ran nil)
         (logged nil))
-    (cl-letf (((symbol-function 'agent-repl--log)
+    ;; Same warn rung as the connected hook, from the same shared runner.
+    (cl-letf (((symbol-function 'agent-repl--warn)
                (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
       (let ((agent-repl-uds-snapshot-applied-functions
              (list (lambda () (error "subscriber blew up"))

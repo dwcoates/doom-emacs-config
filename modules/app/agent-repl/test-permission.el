@@ -288,6 +288,11 @@
     (let (logs)
       (cl-letf (((symbol-function 'agent-repl--log)
                  (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs)))
+                ;; A dropped permission notification is a UX regression, so the
+                ;; diagnostic rides the warn rung; capture both so this test
+                ;; keeps asserting the CONTENT rather than the severity.
+                ((symbol-function 'agent-repl--warn)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs)))
                 ((symbol-function 'agent-repl--notify)
                  (lambda (&rest _) (error "desktop unavailable"))))
         ;; Act / Assert
