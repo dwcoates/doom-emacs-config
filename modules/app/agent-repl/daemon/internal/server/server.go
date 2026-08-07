@@ -1419,6 +1419,10 @@ func (s *Server) DaemonView() *frontendv1.DaemonView {
 // outside the known set. A record written by an earlier build may hold an
 // arbitrary string, and passing one through silently is precisely what the
 // backfillState precedent below exists to avoid.
+// The registry-less shapers below pass a nil registry, which withholds
+// nothing: see deathForView. They exist for callers that shape a record in
+// isolation, where "does this workspace have a claiming successor" is not a
+// question that can be asked.
 func SessionViewFromRecord(logf dlog.Logf, rec registry.Record, pendingPermissions []string, shimAttached bool) *frontendv1.SessionView {
 	return SessionViewFromRecordWithModels(logf, rec, pendingPermissions, shimAttached, nil)
 }
@@ -1427,12 +1431,18 @@ func SessionViewFromRecord(logf dlog.Logf, rec registry.Record, pendingPermissio
 // query-published model menu. The menu does not select a model; rec.Model is
 // still the one authoritative current selection.
 func SessionViewFromRecordWithModels(logf dlog.Logf, rec registry.Record, pendingPermissions []string, shimAttached bool, modelOptions []*frontendv1.ModelOption) *frontendv1.SessionView {
-	return SessionViewFromRecordWithModelsAndUsage(logf, rec, pendingPermissions, shimAttached, modelOptions, nil)
+	return SessionViewFromRecordWithModelsAndUsage(logf, nil, rec, pendingPermissions, shimAttached, modelOptions, nil)
 }
 
 // SessionViewFromRecordWithModelsAndUsage is the complete canonical SessionView
 // shaper, including the durable completed-response aggregate.
-func SessionViewFromRecordWithModelsAndUsage(logf dlog.Logf, rec registry.Record, pendingPermissions []string, shimAttached bool, modelOptions []*frontendv1.ModelOption, usage *frontendv1.SessionTokenUtilization) *frontendv1.SessionView {
+//
+// reg is the registry the record was read from, and it is read for exactly one
+// question: whether a superseded predecessor's workspace still has a successor
+// claiming it, in which case the handover is in flight and its death card is
+// withheld rather than presented as an open failure (supersedepresent.go). A
+// nil reg withholds nothing.
+func SessionViewFromRecordWithModelsAndUsage(logf dlog.Logf, reg *registry.Registry, rec registry.Record, pendingPermissions []string, shimAttached bool, modelOptions []*frontendv1.ModelOption, usage *frontendv1.SessionTokenUtilization) *frontendv1.SessionView {
 	return &frontendv1.SessionView{
 		Workspace:       rec.CWD,
 		SessionId:       rec.SessionID,
@@ -1453,7 +1463,11 @@ func SessionViewFromRecordWithModelsAndUsage(logf dlog.Logf, rec registry.Record
 		// frontend could not tell what class of failure the string described;
 		// this is the same fact classified once so the dead-state card can
 		// render it like every other failure.
-		Death:              errclass.Death(logf, rec.SessionID, rec.DeathReason, rec.DeathResolvedAtMs),
+		// Derived through deathForView, not errclass.Death directly, so the ONE
+		// case where a recorded death must not be presented — a supersede whose
+		// successor is still claiming the workspace — is decided in one place
+		// for the snapshot and the pushes alike.
+		Death:              deathForView(logf, reg, rec),
 		PendingPermissions: int64(len(pendingPermissions)),
 		// The CLAUDE_CONFIG_DIR the session's shim runs against — the ACCOUNT it
 		// runs as (S8). Empty names the CLI's own default root. Carried on every
@@ -1605,7 +1619,7 @@ func (s *Server) pushSessionView(id string) {
 		panic(fmt.Sprintf("server: session %s: pushSessionView requires ModelCatalogs", id))
 	}
 	modelOptions := s.modelCatalogs.Get(id)
-	s.frontend.PushSessionView(SessionViewFromRecordWithModelsAndUsage(s.logf, rec, pending, live, modelOptions, sessionTokenUtilization(s.logf, s.tokenUsage, id)))
+	s.frontend.PushSessionView(SessionViewFromRecordWithModelsAndUsage(s.logf, s.registry, rec, pending, live, modelOptions, sessionTokenUtilization(s.logf, s.tokenUsage, id)))
 }
 
 func (s *Server) handleListSessions(w http.ResponseWriter, _ *http.Request) {
