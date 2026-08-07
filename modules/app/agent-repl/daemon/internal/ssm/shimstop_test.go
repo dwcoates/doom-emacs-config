@@ -64,7 +64,7 @@ func TestCloseStaleTurnRejectsMissingInputs(t *testing.T) {
 func TestCloseStaleTurnClosesTheClaimantsThinking(t *testing.T) {
 	// Arrange — a turn is running under s1.
 	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_THINKING {
@@ -92,10 +92,10 @@ func TestCloseStaleTurnClosesTheClaimantsThinking(t *testing.T) {
 func TestCloseStaleTurnWritesNothingOverASettledAxis(t *testing.T) {
 	// Arrange — the turn ended honestly.
 	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
-	if err := m.Apply(evTurnEnded("s1", 2, false)); err != nil {
+	if err := applyTest(m, evTurnEnded("s1", 2, false)); err != nil {
 		t.Fatalf("turn ended: %v", err)
 	}
 	// Act.
@@ -126,7 +126,7 @@ func TestCloseStaleTurnDeclinesAnotherSessionsClaim(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			// Arrange — s2 holds the running turn.
 			m, cl, _ := openTest(t, fakeResolver{"s2": "ws1"})
-			if err := m.Apply(evTurnStarted("s2", 1)); err != nil {
+			if err := applyTest(m, evTurnStarted("s2", 1)); err != nil {
 				t.Fatalf("turn started: %v", err)
 			}
 			// Act — the stop is aimed at s1.
@@ -173,7 +173,7 @@ func TestCloseStaleTurnSpendsAnUnattributedClaimOnlyForTheSoleSessionController(
 			// Arrange — a permission opened over a live turn and was answered,
 			// which restores `thinking` with NO session id on it.
 			m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
-			if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+			if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 				t.Fatalf("turn started: %v", err)
 			}
 			if err := m.ApplyPermission("ws1", true, "ask"); err != nil {
@@ -207,7 +207,7 @@ func TestCloseStaleTurnSpendsAnUnattributedClaimOnlyForTheSoleSessionController(
 func TestCloseStaleTurnReleasesAPendingPermissionAndThenTheTurnBeneathIt(t *testing.T) {
 	// Arrange — a turn is running and the agent is parked on a question.
 	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 	if err := m.ApplyPermission("ws1", true, "ask"); err != nil {
@@ -261,10 +261,10 @@ func TestCloseStaleTurnSurfacesAStateReadFailure(t *testing.T) {
 func TestCloseStaleTurnUnblocksTheReadinessTheStaleRowWasSuppressing(t *testing.T) {
 	// Arrange — a latched `thinking` suppresses readiness, as the wedge does.
 	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
-	if err := m.Apply(evSessionStarted("s1", 2)); err != nil {
+	if err := applyTest(m, evSessionStarted("s1", 2)); err != nil {
 		t.Fatalf("session started: %v", err)
 	}
 	if !cl.contains("ssm: readiness suppressed (turn in flight) ws=ws1") {
@@ -274,7 +274,7 @@ func TestCloseStaleTurnUnblocksTheReadinessTheStaleRowWasSuppressing(t *testing.
 	if _, err := m.CloseStaleTurn("ws1", "s1", "hibernate_session", true); err != nil {
 		t.Fatalf("CloseStaleTurn: %v", err)
 	}
-	if err := m.Apply(evSessionStarted("s1", 3)); err != nil {
+	if err := applyTest(m, evSessionStarted("s1", 3)); err != nil {
 		t.Fatalf("session started after the close: %v", err)
 	}
 	// Assert.
@@ -292,7 +292,7 @@ func TestCloseStaleTurnUnblocksTheReadinessTheStaleRowWasSuppressing(t *testing.
 func TestCloseStaleTurnSurfacesAFailedAppend(t *testing.T) {
 	// Arrange — a latched `thinking`, then the log is made unwritable.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 	if _, err := m.db.Exec(`CREATE TRIGGER refuse_rows BEFORE INSERT ON workspace_state

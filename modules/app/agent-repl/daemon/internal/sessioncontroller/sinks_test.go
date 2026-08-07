@@ -132,13 +132,16 @@ func lastPermissionDenyMessage(p *fakePusher, uuid string) string {
 
 // fakeApplier records applied events and optionally returns an error.
 type fakeApplier struct {
-	applied   []*corev1.Event
-	err       error
-	turns     []string
-	starts    map[string]uint64
-	ends      map[string]uint64
-	bridges   []*corev1.Event
-	bridgeErr error
+	applied []*corev1.Event
+	// boundaries are the turn boundaries that reached the ONE boundary door
+	// (ApplyTurnBoundary), which is where a turn now touches state at all.
+	boundaries []*corev1.Event
+	err        error
+	turns      []string
+	starts     map[string]uint64
+	ends       map[string]uint64
+	bridges    []*corev1.Event
+	bridgeErr  error
 	// reconciled records one entry per ReconcileTasks call, as
 	// (sessionID, liveTaskIDs).
 	reconciled  []reconcileCall
@@ -764,7 +767,26 @@ func (a *fakeApplier) Apply(ev *corev1.Event) error {
 	return a.err
 }
 
-func (a *fakeApplier) ResolveTurnLifecycle(_ string, _ string, _ string, ev *corev1.Event) (before, after []string, replayed bool, err error) {
+// ApplyTurnBoundary is the fake's ONE turn-boundary door, mirroring the real
+// SSM: it moves the fake ledger and reports the turn liveness that ledger
+// implies, so the consumer under test reads liveness from the same place
+// production does.
+func (a *fakeApplier) ApplyTurnBoundary(workspace, claimant, liveQueryID string, ev *corev1.Event) (ssm.TurnBoundary, error) {
+	before, after, replayed, err := a.resolveTurnLifecycle(workspace, claimant, liveQueryID, ev)
+	if err == nil {
+		a.reconcMutex.Lock()
+		a.boundaries = append(a.boundaries, ev)
+		a.reconcMutex.Unlock()
+	}
+	return ssm.TurnBoundary{
+		Before:   before,
+		After:    after,
+		Replayed: replayed,
+		Liveness: ssm.TurnLivenessFixture(workspace, after, false),
+	}, err
+}
+
+func (a *fakeApplier) resolveTurnLifecycle(_ string, _ string, _ string, ev *corev1.Event) (before, after []string, replayed bool, err error) {
 	a.reconcMutex.Lock()
 	defer a.reconcMutex.Unlock()
 	if a.starts == nil {
@@ -1485,8 +1507,14 @@ func TestApplyRejectsFileTurnEndBeforeQueueAndStateConsumers(t *testing.T) {
 	c.Apply(turnStartEvent(corev1.Plane_PLANE_STREAM, 12885, "turn-new"))
 	c.Apply(turnEndEvent(corev1.Plane_PLANE_FILE, 12891, ""))
 
-	if len(applier.applied) != 1 || applier.applied[0].GetTurnStarted() == nil {
-		t.Fatalf("SSM applied = %+v, want only the stream TurnStarted", applier.applied)
+	// A turn boundary reaches state through ApplyTurnBoundary and nowhere else,
+	// so that is where the accepted one is counted. The file-plane end never got
+	// there at all.
+	if len(applier.boundaries) != 1 || applier.boundaries[0].GetTurnStarted() == nil {
+		t.Fatalf("SSM boundaries = %+v, want only the stream TurnStarted", applier.boundaries)
+	}
+	if len(applier.applied) != 0 {
+		t.Fatalf("SSM lifecycle applied = %+v, want no turn boundary through the general apply", applier.applied)
 	}
 	if !reflect.DeepEqual(boundaries, []bool{true}) {
 		t.Fatalf("queue boundaries = %v, want only active=true", boundaries)

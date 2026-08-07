@@ -88,7 +88,7 @@ func TestALaterNonMergeTransitionDoesNotMoveMergedAt(t *testing.T) {
 	want := mustCurrent(t, m, ws).GetMergedAtMs()
 
 	// Act.
-	if err := m.Apply(evTurnStarted("s1", 10)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 10)); err != nil {
 		t.Fatalf("Apply(TurnStarted): %v", err)
 	}
 

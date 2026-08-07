@@ -52,7 +52,8 @@ const (
 	TurnCloseAlreadyComplete = "interrupt_already_complete"
 )
 
-// ResolveTurnLifecycle durably validates and records one STREAM turn boundary.
+// moveTurnLedgerLocked durably validates and records one STREAM turn boundary
+// inside the boundary's own transaction.
 //
 // The ledger is separate from workspace_state because queued turns have
 // multiple simultaneous identities while the rendered session-status lifecycle remains one
@@ -60,60 +61,25 @@ const (
 // crashes after recording a boundary but before advancing last_seen_seq, the
 // replayed event is admitted only when both its identity and seq match the
 // durable receipt.
+//
+// IT NO LONGER OWNS ITS OWN TRANSACTION, and that is the point. The
+// session-status row this boundary paints is derived from the ledger this
+// method just moved, so both must land or neither may — see ApplyTurnBoundary,
+// which is the only caller.
+//
 // liveQueryInstanceID is the query() invocation the CALLER is bound to. It is
 // compared, once, against the query the event's producer stamped on its
 // envelope; see turnEndIsHistorical.
-func (m *Manager) ResolveTurnLifecycle(workspace, claimantSessionID, liveQueryInstanceID string, ev *corev1.Event) (before, after []string, replayed bool, err error) {
-	if workspace == "" {
-		err := fmt.Errorf("ssm: turn lifecycle got an empty workspace")
-		m.logf("ssm: turn ledger decision=reject_validation workspace=%q claimant_session=%q event=%v error=%v",
-			workspace, claimantSessionID, ev, err)
-		return nil, nil, false, err
-	}
-	if claimantSessionID == "" {
-		err := fmt.Errorf("ssm: turn lifecycle for workspace %q got an empty claimant session id", workspace)
-		m.logf("ssm: turn ledger decision=reject_validation workspace=%q claimant_session=%q event=%v error=%v",
-			workspace, claimantSessionID, ev, err)
-		return nil, nil, false, err
-	}
-	if ev == nil || ev.GetSessionId() == "" || ev.GetSeq() == 0 {
-		err := fmt.Errorf("ssm: turn lifecycle requires a persistent event with session_id and seq")
-		m.logf("ssm: turn ledger decision=reject_validation workspace=%q claimant_session=%q event=%v error=%v",
-			workspace, claimantSessionID, ev, err)
-		return nil, nil, false, err
-	}
-	if ev.GetPlane() != corev1.Plane_PLANE_STREAM {
-		err := fmt.Errorf("ssm: turn lifecycle rejected plane=%s workspace=%s claimant_session=%s event_session=%s seq=%d",
-			ev.GetPlane().String(), workspace, claimantSessionID, ev.GetSessionId(), ev.GetSeq())
-		m.logf("ssm: turn ledger decision=reject_validation workspace=%q claimant_session=%q event_session=%q seq=%d plane=%s turn_id=%q request_id=%q error=%v",
-			workspace, claimantSessionID, ev.GetSessionId(), ev.GetSeq(), ev.GetPlane().String(),
-			turnCorrelation(ev), ev.GetRequestId(), err)
-		return nil, nil, false, err
-	}
+//
+// Caller holds m.mu and owns tx.
+func (m *Manager) moveTurnLedgerLocked(tx *sql.Tx, workspace, claimantSessionID, liveQueryInstanceID string, ev *corev1.Event) (before, after []string, replayed bool, err error) {
 	id := turnCorrelation(ev)
-	if ev.GetRequestId() != id {
-		err := fmt.Errorf("ssm: turn lifecycle envelope mismatch workspace=%s claimant_session=%s event_session=%s seq=%d turn_id=%q request_id=%q",
-			workspace, claimantSessionID, ev.GetSessionId(), ev.GetSeq(), id, ev.GetRequestId())
-		m.logf("ssm: turn ledger decision=reject_validation workspace=%q claimant_session=%q event_session=%q seq=%d plane=%s turn_id=%q request_id=%q error=%v",
-			workspace, claimantSessionID, ev.GetSessionId(), ev.GetSeq(), ev.GetPlane().String(),
-			id, ev.GetRequestId(), err)
-		return nil, nil, false, err
-	}
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	tx, err := m.db.Begin()
-	if err != nil {
-		return nil, nil, false, fmt.Errorf("ssm: begin turn lifecycle transaction: %w", err)
-	}
-	defer tx.Rollback()
-
 	before, err = activeTurnIDs(tx, workspace, claimantSessionID)
 	if err != nil {
 		return nil, nil, false, err
 	}
 	if _, started := ev.GetPayload().(*corev1.Event_TurnStarted); started && m.hibernationLeases[workspace] != 0 {
-		isReplay, probeErr := recordTurnStart(tx, workspace, claimantSessionID, ev.GetSessionId(), id, ev.GetSeq())
+		isReplay, _, probeErr := recordTurnStart(tx, workspace, claimantSessionID, ev.GetSessionId(), id, ev.GetSeq())
 		if probeErr != nil {
 			return before, before, false, probeErr
 		}
@@ -123,9 +89,19 @@ func (m *Manager) ResolveTurnLifecycle(workspace, claimantSessionID, liveQueryIn
 	}
 	switch ev.GetPayload().(type) {
 	case *corev1.Event_TurnStarted:
-		replayed, err = recordTurnStart(
+		var reconstructedEnd string
+		replayed, reconstructedEnd, err = recordTurnStart(
 			tx, workspace, claimantSessionID, ev.GetSessionId(), id, ev.GetSeq(),
 		)
+		if reconstructedEnd != "" {
+			// PART B, VISIBLE. A replacement session replayed the start of a
+			// turn this daemon had already killed, and the durable end recorded
+			// against that start's store coordinate closed it in the same
+			// statement that admitted it. The workspace derives idle rather than
+			// standing behind a turn whose `TurnEnded` no process exists to send.
+			m.logf("ssm: turn start ADMITTED ALREADY ENDED workspace=%s claimant_session=%s event_session=%s seq=%d turn_id=%q cause=%s — this start replays a turn the daemon killed; the durable end recorded against its store coordinate closed the claim as it was created, so the replay reconstructs a matched start/end pair rather than a turn nothing can finish",
+				workspace, claimantSessionID, ev.GetSessionId(), ev.GetSeq(), id, reconstructedEnd)
+		}
 	case *corev1.Event_TurnEnded:
 		var crossGeneration bool
 		replayed, crossGeneration, err = recordTurnEnd(
@@ -161,9 +137,6 @@ func (m *Manager) ResolveTurnLifecycle(workspace, claimantSessionID, liveQueryIn
 	after, err = activeTurnIDs(tx, workspace, claimantSessionID)
 	if err != nil {
 		return before, nil, false, err
-	}
-	if err := tx.Commit(); err != nil {
-		return before, nil, false, fmt.Errorf("ssm: commit turn lifecycle transaction: %w", err)
 	}
 	m.logf("ssm: turn ledger decision=accept workspace=%s claimant_session=%s event_session=%s seq=%d plane=%s turn_id=%q request_id=%q active_before=%v active_after=%v replayed=%v",
 		workspace, claimantSessionID, ev.GetSessionId(), ev.GetSeq(), ev.GetPlane().String(),
@@ -316,7 +289,7 @@ func (m *Manager) ReconcileTurnHandshake(workspace, claimantSessionID string, id
 		// naming ids the ledger disagrees with, or a legacy shim positively
 		// asserting a turn under a protocol too old to name it, both stay on
 		// their existing loud paths above.
-		closed, err = synthesizeTurnEnds(tx, workspace, claimantSessionID, TurnCloseRestartInterrupted)
+		closed, err = synthesizeTurnEnds(tx, workspace, claimantSessionID, TurnCloseRestartInterrupted, m.nextAt())
 	}
 	if err != nil {
 		m.logf("ssm: turn handshake decision=reject workspace=%s claimant_session=%s hello_ids=%v legacy_active=%v durable_before=%v error=%v",
@@ -402,9 +375,9 @@ func (m *Manager) SynthesizeTurnClose(workspace, claimantSessionID, cause string
 	if claimantSessionID == "" {
 		return nil, fmt.Errorf("ssm: SynthesizeTurnClose for workspace %q got an empty claimant session id; a turn claim can only be ended on behalf of the session that holds it", workspace)
 	}
-	if cause != TurnCloseRestartInterrupted && cause != TurnCloseAlreadyComplete {
-		return nil, fmt.Errorf("ssm: SynthesizeTurnClose for workspace %q session %q got cause %q; a synthesized end must name one of the observations that authorize it (%q, %q)",
-			workspace, claimantSessionID, cause, TurnCloseRestartInterrupted, TurnCloseAlreadyComplete)
+	if cause != TurnCloseRestartInterrupted && cause != TurnCloseAlreadyComplete && cause != TurnCloseShimStopped {
+		return nil, fmt.Errorf("ssm: SynthesizeTurnClose for workspace %q session %q got cause %q; a synthesized end must name one of the observations that authorize it (%q, %q, %q)",
+			workspace, claimantSessionID, cause, TurnCloseRestartInterrupted, TurnCloseAlreadyComplete, TurnCloseShimStopped)
 	}
 
 	m.mu.Lock()
@@ -414,7 +387,7 @@ func (m *Manager) SynthesizeTurnClose(workspace, claimantSessionID, cause string
 		return nil, fmt.Errorf("ssm: begin synthesized turn close transaction: %w", err)
 	}
 	defer tx.Rollback()
-	closed, err = synthesizeTurnEnds(tx, workspace, claimantSessionID, cause)
+	closed, err = synthesizeTurnEnds(tx, workspace, claimantSessionID, cause, m.nextAt())
 	if err != nil {
 		m.logf("ssm: synthesized turn close decision=reject workspace=%s claimant_session=%s cause=%s error=%v",
 			workspace, claimantSessionID, cause, err)
@@ -560,13 +533,29 @@ func attributeClosedTurnClaim(tx *sql.Tx, workspace, claimantSessionID, turnID, 
 // close. That is exactly what distinguishes it in the ledger, and it is why
 // end_cause is written alongside: `end_seq IS NULL` remains the ONE definition
 // of an active claim, so nothing downstream has to learn a second one.
-func synthesizeTurnEnds(tx *sql.Tx, workspace, claimantSessionID, cause string) ([]string, error) {
+//
+// IT ALSO WRITES THE END WHERE A REPLAY WILL SEE IT. Closing the claim closes it
+// for THIS claimant only, and a superseded workspace re-mints its claimant and
+// replays the same store stream — which reconstructs the killed turn as a fresh
+// open claim under a session that never ran it. So each closed claim's START
+// COORDINATE is recorded durably too (turninterruption.go), because that
+// coordinate is what the replayed event itself carries. Both writes are in this
+// one transaction: a claim closed without its durable end is the orphan this
+// exists to prevent.
+func synthesizeTurnEnds(tx *sql.Tx, workspace, claimantSessionID, cause string, at int64) ([]string, error) {
 	active, err := activeTurnIDs(tx, workspace, claimantSessionID)
 	if err != nil {
 		return nil, err
 	}
 	if len(active) == 0 {
 		return nil, nil
+	}
+	starts, err := activeInterruptedStarts(tx, workspace, claimantSessionID)
+	if err != nil {
+		return nil, err
+	}
+	if _, _, err := recordTurnInterruptions(tx, workspace, starts, cause, at); err != nil {
+		return nil, err
 	}
 	result, err := tx.Exec(`UPDATE turn_lifecycle_claim
 			SET end_seq=0, end_cause=?
@@ -599,7 +588,44 @@ func formatClosedTurnIDs(ids []string) string {
 	return "[" + strings.Join(printable, ",") + "]"
 }
 
-func recordTurnStart(tx *sql.Tx, workspace, claimantSessionID, eventSessionID, id string, seq uint64) (bool, error) {
+// recordTurnStart admits one turn start into the ledger.
+//
+// A START WHOSE TURN THIS DAEMON ALREADY KILLED IS ADMITTED CLOSED. This is the
+// edge PART B of the turn-liveness work exists for. When a supersede or teardown
+// interrupts a live turn, the end is recorded against the start's STORE
+// coordinate (turninterruption.go) — the identity a later replay of the same
+// stream presents, which is claimant-independent. A replacement session
+// subscribing to that stream replays the very same `turn_started`, and here it
+// reconstructs a MATCHED START/END PAIR rather than an open claim for a turn
+// that was killed minutes ago and whose `TurnEnded` no process exists to send.
+//
+// reconstructedEnd names the cause when that happened, so the caller can say out
+// loud that a replayed start arrived for an already-ended turn. It is "" on the
+// ordinary path.
+func recordTurnStart(tx *sql.Tx, workspace, claimantSessionID, eventSessionID, id string, seq uint64) (replayed bool, reconstructedEnd string, err error) {
+	killedCause, killed, err := interruptedStartCause(tx, workspace, eventSessionID, id)
+	if err != nil {
+		return false, "", err
+	}
+	endSeqValue := any(nil)
+	endCauseValue := ""
+	if killed {
+		// end_seq=0 with a named end_cause is the ledger's existing vocabulary
+		// for "the daemon ended this, no event produced the close" — the same
+		// shape synthesizeTurnEnds writes. `end_seq IS NULL` stays the ONE
+		// definition of an active claim, so the derivation needs no second rule.
+		endSeqValue = int64(0)
+		endCauseValue = killedCause
+		reconstructedEnd = killedCause
+	}
+	replayed, err = recordTurnStartRow(tx, workspace, claimantSessionID, eventSessionID, id, seq, endSeqValue, endCauseValue)
+	if err != nil || replayed {
+		return replayed, "", err
+	}
+	return false, reconstructedEnd, nil
+}
+
+func recordTurnStartRow(tx *sql.Tx, workspace, claimantSessionID, eventSessionID, id string, seq uint64, endSeqValue any, endCauseValue string) (bool, error) {
 	if id != "" {
 		var startSeq uint64
 		var startEventSessionID string
@@ -614,9 +640,11 @@ func recordTurnStart(tx *sql.Tx, workspace, claimantSessionID, eventSessionID, i
 		case startSeq == 0 && !endSeq.Valid &&
 			(startEventSessionID == "" || startEventSessionID == eventSessionID):
 			_, err = tx.Exec(`UPDATE turn_lifecycle_claim
-				SET start_seq=?, start_event_session_id=?
+				SET start_seq=?, start_event_session_id=?,
+					end_seq=COALESCE(end_seq, ?), end_cause=CASE WHEN ?='' THEN end_cause ELSE ? END
 				WHERE workspace=? AND claimant_session_id=? AND turn_id=?`,
-				int64(seq), eventSessionID, workspace, claimantSessionID, id)
+				int64(seq), eventSessionID, endSeqValue, endCauseValue, endCauseValue,
+				workspace, claimantSessionID, id)
 			return false, err
 		case startEventSessionID == eventSessionID && startSeq == seq:
 			return true, nil
@@ -628,10 +656,19 @@ func recordTurnStart(tx *sql.Tx, workspace, claimantSessionID, eventSessionID, i
 	if id == "" {
 		var claimID int64
 		var startSeq uint64
-		err := tx.QueryRow(`SELECT claim_id, start_seq FROM turn_lifecycle_claim
+		// THE STORE COORDINATE IS PART OF A LEGACY CLAIM'S IDENTITY TOO. A
+		// vendor uuid rotation restarts the store's seq space at 1 under the
+		// SAME claimant, so a check on seq alone reads the NEW space's first
+		// start as a replay of the retired space's and silently drops the turn
+		// it opens. The named path has always compared the event session; the
+		// legacy path must, because it is the only other thing distinguishing
+		// two starts that both carry no turn id.
+		var startEventSessionID string
+		err := tx.QueryRow(`SELECT claim_id, start_seq, start_event_session_id FROM turn_lifecycle_claim
 			WHERE workspace=? AND claimant_session_id=? AND turn_id='' AND end_seq IS NULL
 			ORDER BY claim_id LIMIT 1`,
-			workspace, claimantSessionID).Scan(&claimID, &startSeq)
+			workspace, claimantSessionID).Scan(&claimID, &startSeq, &startEventSessionID)
+		sameSpace := startEventSessionID == "" || eventSessionID == "" || startEventSessionID == eventSessionID
 		switch {
 		case err == nil && startSeq == 0:
 			if _, err := tx.Exec(`UPDATE turn_lifecycle_claim SET start_seq=? WHERE claim_id=?`,
@@ -639,7 +676,7 @@ func recordTurnStart(tx *sql.Tx, workspace, claimantSessionID, eventSessionID, i
 				return false, fmt.Errorf("ssm: bind legacy handshake claim to seq=%d: %w", seq, err)
 			}
 			return false, nil
-		case err == nil && startSeq == seq:
+		case err == nil && startSeq == seq && sameSpace:
 			return true, nil
 		case err == nil:
 			// A second legacy turn may be queued behind the first. Its empty
@@ -650,8 +687,9 @@ func recordTurnStart(tx *sql.Tx, workspace, claimantSessionID, eventSessionID, i
 		}
 		var one int
 		err = tx.QueryRow(`SELECT 1 FROM turn_lifecycle_claim
-			WHERE workspace=? AND claimant_session_id=? AND turn_id='' AND start_seq=? LIMIT 1`,
-			workspace, claimantSessionID, int64(seq)).Scan(&one)
+			WHERE workspace=? AND claimant_session_id=? AND turn_id='' AND start_seq=?
+				AND (start_event_session_id='' OR start_event_session_id=?) LIMIT 1`,
+			workspace, claimantSessionID, int64(seq), eventSessionID).Scan(&one)
 		if err == nil {
 			return true, nil
 		}
@@ -660,8 +698,10 @@ func recordTurnStart(tx *sql.Tx, workspace, claimantSessionID, eventSessionID, i
 		}
 	}
 	_, err := tx.Exec(`INSERT INTO turn_lifecycle_claim(
-		workspace, claimant_session_id, turn_id, start_seq, start_event_session_id
-	) VALUES (?,?,?,?,?)`, workspace, claimantSessionID, id, int64(seq), eventSessionID)
+		workspace, claimant_session_id, turn_id, start_seq, start_event_session_id,
+		end_seq, end_cause
+	) VALUES (?,?,?,?,?,?,?)`, workspace, claimantSessionID, id, int64(seq), eventSessionID,
+		endSeqValue, endCauseValue)
 	if err != nil {
 		return false, fmt.Errorf("ssm: persist turn start %q seq=%d: %w", id, seq, err)
 	}

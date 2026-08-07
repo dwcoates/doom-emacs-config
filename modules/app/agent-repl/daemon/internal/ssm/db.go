@@ -97,6 +97,19 @@ func migrate(db *sql.DB, logf dlog.Logf) error {
 		CREATE UNIQUE INDEX IF NOT EXISTS turn_lifecycle_claim_identity
 			ON turn_lifecycle_claim(workspace, claimant_session_id, turn_id)
 			WHERE turn_id <> '';
+		-- THE DURABLE END OF A TURN THE DAEMON KILLED, keyed by the killed
+		-- start's STORE coordinate rather than by the claimant that happened to
+		-- hold it. A superseded workspace re-mints its claimant, replays the
+		-- same stream, and would otherwise reconstruct the dead turn as a fresh
+		-- open claim. See turninterruption.go.
+		CREATE TABLE IF NOT EXISTS turn_interruption (
+			workspace              TEXT    NOT NULL,
+			start_event_session_id TEXT    NOT NULL,
+			turn_id                TEXT    NOT NULL,
+			cause                  TEXT    NOT NULL,
+			at                     INTEGER NOT NULL,
+			PRIMARY KEY (workspace, start_event_session_id, turn_id)
+		);
 		CREATE TABLE IF NOT EXISTS session_connectivity (
 			workspace                 TEXT    NOT NULL,
 			agent_repl_session_id     TEXT    NOT NULL,
@@ -612,10 +625,16 @@ func turnClaim(db *sql.DB, workspace string) (active bool, claimant string, err 
 // running is the row it buried. Reading it back is how the close restores
 // `thinking` for a turn that is genuinely still in flight — and how it knows
 // NOT to, for one that is not.
-func sessionStatusTop(db *sql.DB, workspace string) (top, beneath string, err error) {
+//
+// It reads through a rowQuerier rather than a *sql.DB so the SAME read runs
+// inside the transaction that is moving the turn ledger. Turn liveness is
+// derived in that transaction (turnliveness.go), and a submit leg read on a
+// separate connection would be a second observation of a state the derivation
+// is mid-way through changing.
+func sessionStatusTop(q rowQuerier, workspace string) (top, beneath string, err error) {
 	scan := func(query string) (string, error) {
 		var state string
-		e := db.QueryRow(query, workspace).Scan(&state)
+		e := q.QueryRow(query, workspace).Scan(&state)
 		if e == sql.ErrNoRows {
 			return "", nil
 		}
@@ -637,6 +656,22 @@ func sessionStatusTop(db *sql.DB, workspace string) (top, beneath string, err er
 		return "", "", err
 	}
 	return top, beneath, nil
+}
+
+// sessionStatusTopCause returns the workspace's newest session-status token AND
+// the cause that wrote it. The pair is what distinguishes two rows that render
+// the same and mean different things — see paintTurnBandLocked.
+func sessionStatusTopCause(q rowQuerier, workspace string) (state, causeKind string, err error) {
+	e := q.QueryRow(`SELECT state, cause_kind FROM workspace_state
+		 WHERE workspace = ? AND state IN `+sessionStatusMembers+`
+		 ORDER BY at DESC LIMIT 1`, workspace).Scan(&state, &causeKind)
+	if e == sql.ErrNoRows {
+		return "", "", nil
+	}
+	if e != nil {
+		return "", "", fmt.Errorf("ssm: session-status top read for workspace %q: %w", workspace, e)
+	}
+	return state, causeKind, nil
 }
 
 // permissionOpenWorkspaces lists every workspace whose session-status lifecycle currently

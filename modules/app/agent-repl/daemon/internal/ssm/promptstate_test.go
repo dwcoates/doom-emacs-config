@@ -10,7 +10,7 @@ import (
 
 func TestMarkPromptAcceptedIsIdempotentWhenTurnStartedWonTheRace(t *testing.T) {
 	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 
@@ -29,7 +29,7 @@ func TestMarkPromptAcceptedIsIdempotentWhenTurnStartedWonTheRace(t *testing.T) {
 
 func TestMarkPromptAcceptedRejectsAnotherSessionsTurn(t *testing.T) {
 	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1", "s2": "ws1"})
-	if err := m.Apply(evTurnStarted("s2", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s2", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 
@@ -52,7 +52,7 @@ func TestMarkPromptAcceptedRejectsAnotherSessionsTurn(t *testing.T) {
 
 func TestMarkPromptAcceptedLandsOnSubmitting(t *testing.T) {
 	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evSessionStarted("s1", 1)); err != nil {
 		t.Fatalf("session started: %v", err)
 	}
 
@@ -147,7 +147,7 @@ func TestMarkPromptDeliveredPreservesASupersededRow(t *testing.T) {
 	// A durable TurnStarted landed first, so there is no submitting row left to
 	// advance and overwriting would restate a row already more authoritative.
 	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 
@@ -169,7 +169,7 @@ func TestMarkPromptDeliveredPreservesASupersededRow(t *testing.T) {
 
 func TestMarkPromptDeliveredRefusesAnotherSessionsClaim(t *testing.T) {
 	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1", "s2": "ws1"})
-	if err := m.Apply(evTurnStarted("s2", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s2", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 
@@ -192,7 +192,7 @@ func TestMarkPromptDeliveredRefusesAnotherSessionsClaim(t *testing.T) {
 
 func TestMarkPromptRejectedRetractsItsOwnAcceptedRow(t *testing.T) {
 	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evSessionStarted("s1", 1)); err != nil {
 		t.Fatalf("session started: %v", err)
 	}
 	if err := m.MarkPromptAccepted("ws1", "s1", "req-1", func(*frontendv1.WorkspaceState) {}); err != nil {
@@ -232,7 +232,7 @@ func TestMarkPromptRejectedPreservesADurableTurnStarted(t *testing.T) {
 	if err := m.MarkPromptAccepted("ws1", "s1", "req-1", func(*frontendv1.WorkspaceState) {}); err != nil {
 		t.Fatalf("MarkPromptAccepted: %v", err)
 	}
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 
@@ -257,7 +257,10 @@ func TestMarkPromptRejectedPreservesASettledOutcome(t *testing.T) {
 	// The turn the accept claimed has already ENDED. Its outcome is the more
 	// specific account and a retraction must not overwrite it.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnEnded("s1", 1, false)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
+		t.Fatalf("turn started: %v", err)
+	}
+	if err := applyTest(m, evTurnEnded("s1", 2, false)); err != nil {
 		t.Fatalf("turn ended: %v", err)
 	}
 
@@ -278,7 +281,7 @@ func TestMarkPromptRejectedRefusesAnotherSessionsClaim(t *testing.T) {
 	// Two submitters disagreeing about who owns the workspace's turn is a fault
 	// to surface, never one to resolve by closing the other session's turn.
 	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1", "s2": "ws1"})
-	if err := m.Apply(evTurnStarted("s2", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s2", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 
@@ -317,7 +320,7 @@ func TestMarkPromptRejectedOnAWorkspaceWithNoAgentAxis(t *testing.T) {
 
 func TestReconcileAlreadyCompleteClosesThinkingBeforeFooterWindow(t *testing.T) {
 	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 
@@ -364,7 +367,10 @@ func TestReconcileAlreadyCompleteClosesSubmittingBeforeFooterWindow(t *testing.T
 
 func TestReconcileAlreadyCompletePreservesSettledOutcome(t *testing.T) {
 	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnEnded("s1", 1, false)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
+		t.Fatalf("turn started: %v", err)
+	}
+	if err := applyTest(m, evTurnEnded("s1", 2, false)); err != nil {
 		t.Fatalf("turn ended: %v", err)
 	}
 
@@ -390,7 +396,7 @@ func TestReconcileAlreadyCompletePreservesSettledOutcome(t *testing.T) {
 
 func TestReconcileAlreadyCompleteClosesStalePermission(t *testing.T) {
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 	if err := m.ApplyPermission("ws1", true, "request"); err != nil {
@@ -412,7 +418,7 @@ func TestReconcileAlreadyCompleteClosesStalePermission(t *testing.T) {
 
 func TestReconcileAlreadyCompleteRejectsAnotherSessionsClaim(t *testing.T) {
 	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1", "s2": "ws1"})
-	if err := m.Apply(evTurnStarted("s2", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s2", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 
@@ -591,7 +597,7 @@ func TestRetractUnpublishedAcceptReportsAnAxisWithNoAcceptedRow(t *testing.T) {
 func TestRetractUnpublishedAcceptRefusesAnotherSessionsRow(t *testing.T) {
 	// It retracts only what the accept wrote, exactly as MarkPromptRejected does.
 	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1", "s2": "ws1"})
-	if err := m.Apply(evTurnStarted("s2", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s2", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 	cause := errors.New("accept failed")

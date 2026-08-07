@@ -48,7 +48,7 @@ func TestCompositeHealthyReadyAndThinking(t *testing.T) {
 	m, logs, _ := openUnwiredTest(t, fakeResolver{"session-1": "ws"})
 	connectOperational(t, m, "ws", "session-1", "generation-1")
 
-	if err := m.Apply(evSessionStarted("session-1", 1)); err != nil {
+	if err := applyTest(m, evSessionStarted("session-1", 1)); err != nil {
 		t.Fatalf("Apply(SessionStarted): %v", err)
 	}
 	ready := mustComposite(t, m, "ws")
@@ -61,7 +61,7 @@ func TestCompositeHealthyReadyAndThinking(t *testing.T) {
 			ready.AgentReplSessionID, ready.ControllerGenerationID)
 	}
 
-	if err := m.Apply(evTurnStarted("session-1", 2)); err != nil {
+	if err := applyTest(m, evTurnStarted("session-1", 2)); err != nil {
 		t.Fatalf("Apply(TurnStarted): %v", err)
 	}
 	thinking := mustComposite(t, m, "ws")
@@ -86,7 +86,7 @@ func TestCompositeHealthyReadyAndThinking(t *testing.T) {
 func TestConnectivityFaultDegradesWithoutDestroyingSessionStatus(t *testing.T) {
 	m, _, _ := openUnwiredTest(t, fakeResolver{"session-1": "ws"})
 	connectOperational(t, m, "ws", "session-1", "generation-1")
-	if err := m.Apply(evTurnStarted("session-1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("session-1", 1)); err != nil {
 		t.Fatalf("Apply(TurnStarted): %v", err)
 	}
 
@@ -258,7 +258,7 @@ func TestSameGenerationCannotMoveToAnotherSession(t *testing.T) {
 func TestReplacementDoesNotInheritRetiredSessionStatus(t *testing.T) {
 	m, _, _ := openUnwiredTest(t, fakeResolver{"session-old": "ws", "session-new": "ws"})
 	connectOperational(t, m, "ws", "session-old", "generation-old")
-	if err := m.Apply(evTurnStarted("session-old", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("session-old", 1)); err != nil {
 		t.Fatalf("Apply old TurnStarted: %v", err)
 	}
 	connectOperational(t, m, "ws", "session-new", "generation-new")
@@ -267,7 +267,7 @@ func TestReplacementDoesNotInheritRetiredSessionStatus(t *testing.T) {
 	if replaced.Status != "" {
 		t.Fatalf("replacement status = %q, want unspecified until the current session reports status", replaced.Status)
 	}
-	if err := m.Apply(evSessionStarted("session-new", 1)); err != nil {
+	if err := applyTest(m, evSessionStarted("session-new", 1)); err != nil {
 		t.Fatalf("Apply new SessionStarted: %v", err)
 	}
 	if current := mustComposite(t, m, "ws"); current.Status != SessionStatusReady {
@@ -380,7 +380,7 @@ func TestDaemonRestartSeedsLegacyWorkspaceHibernatedWithoutFabricatedGeneration(
 	if err != nil {
 		t.Fatalf("Open first: %v", err)
 	}
-	if err := first.Apply(evSessionStarted("session-1", 1)); err != nil {
+	if err := applyTest(first, evSessionStarted("session-1", 1)); err != nil {
 		t.Fatalf("Apply SessionStarted: %v", err)
 	}
 	if err := first.Close(); err != nil {
@@ -784,7 +784,7 @@ func connectivityRowCount(t *testing.T, db *sql.DB, workspace string) int {
 func TestCompositeConnectingKeepsInitForAClaimOlderThanTheBringUp(t *testing.T) {
 	m, _, _ := openUnwiredTest(t, fakeResolver{"session-1": "ws"})
 	connectOperational(t, m, "ws", "session-1", "generation-1")
-	if err := m.Apply(evTurnStarted("session-1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("session-1", 1)); err != nil {
 		t.Fatalf("Apply(TurnStarted): %v", err)
 	}
 	if err := m.ApplySessionConnectivity(
@@ -809,7 +809,7 @@ func TestWorkspaceMessageReportsHibernatedWithoutAControllerLifecycle(t *testing
 	// UNSPECIFIED names a malformed frame, which the webapp's validating
 	// decoder refuses whole.
 	m, _, _ := openTest(t, fakeResolver{"session-1": "ws"})
-	if err := m.Apply(evSessionStarted("session-1", 1)); err != nil {
+	if err := applyTest(m, evSessionStarted("session-1", 1)); err != nil {
 		t.Fatalf("Apply(SessionStarted): %v", err)
 	}
 
