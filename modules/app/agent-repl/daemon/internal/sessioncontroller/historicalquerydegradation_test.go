@@ -7,6 +7,7 @@ import (
 	corev1 "agentrepl/proto/agentshim/core/v1"
 
 	"claude-repld/internal/errclass"
+	"claude-repld/internal/shimclient"
 )
 
 // ---------------------------------------------------------------------------
@@ -115,6 +116,177 @@ func TestReplayedRetiredQueryDegradationIsNamedInTheLog(t *testing.T) {
 		!h.log.contains("replayed_query_instance_id=retired-query") ||
 		!h.log.contains(`live_query_instance_id="live-query"`) {
 		t.Fatalf("the withheld replay was not named in the log: %v", h.log.lines)
+	}
+}
+
+func TestReplayedRetiredQueryDegradationWithholdTakesTheInfoChannel(t *testing.T) {
+	// Arrange — the durable row replays at every boot, so a warn here alarms
+	// forever about a degradation that was already warned about once.
+	h := terminationHarness(t, &fakeClient{})
+
+	// Act.
+	reportDegradation(t, h, degradationEvent(4142, "retired-query"))
+
+	// Assert.
+	if h.warn.contains("shim degradation WITHHELD from the bring-up gate") {
+		t.Fatalf("a replayed degradation re-warned about history: %v", h.warn.lines)
+	}
+}
+
+func TestReplayedRetiredQueryDegradationKeepsItsFullContextAtInfo(t *testing.T) {
+	// Arrange — reclassification, not silencing: every identity field the warn
+	// carried must still be on the record.
+	h := terminationHarness(t, &fakeClient{})
+
+	// Act.
+	reportDegradation(t, h, degradationEvent(4142, "retired-query"))
+
+	// Assert.
+	for _, want := range []string{
+		"shim degradation WITHHELD from the bring-up gate",
+		"replayed_query_instance_id=retired-query",
+		`live_query_instance_id="live-query"`,
+		"component=claude-shim-sdk",
+		"seq=4142",
+		"decision=retain_history_no_bring_up_fault",
+	} {
+		if !h.log.contains(want) {
+			t.Fatalf("the withheld degradation's record lost %q: %v", want, h.log.lines)
+		}
+	}
+}
+
+func TestReplayedRetiredQueryDegradationReportsItselfAsHistorical(t *testing.T) {
+	// Arrange — the shim client's own relay record takes its severity from this
+	// verdict and can compute nothing itself.
+	h := terminationHarness(t, &fakeClient{})
+	d, err := h.m.existing("ws")
+	if err != nil {
+		t.Fatalf("existing: %v", err)
+	}
+	ev := degradationEvent(4142, "retired-query")
+
+	// Act.
+	got := d.consumer.Degraded("", ev, ev.GetDegradedState())
+
+	// Assert.
+	if got != shimclient.DegradationHistorical {
+		t.Fatalf("disposition = %v, want historical for a retired query's replayed row", got)
+	}
+}
+
+func TestALiveQueryDegradationReportsItselfAsLive(t *testing.T) {
+	// Arrange — the live arm's verdict, and therefore the relay's warn
+	// severity, is untouched.
+	h := terminationHarness(t, blocked())
+	d, err := h.m.existing("ws")
+	if err != nil {
+		t.Fatalf("existing: %v", err)
+	}
+	ev := degradationEvent(4142, "live-query")
+
+	// Act.
+	got := d.consumer.Degraded("", ev, ev.GetDegradedState())
+
+	// Assert.
+	if got != shimclient.DegradationLive {
+		t.Fatalf("disposition = %v, want live for the bound query's own row", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ONE CARD, ONE RECORD, PER REPLAYED PAIR.
+//
+// The pair's two halves reach two different sinks and both derive
+// degradedUUID("claude-shim-sdk"), so one replayed death used to record
+// "system failure … resolved=false" twice per boot. The live path has always
+// collapsed that through unexpectedQueryTerminationSurfaced; the withhold path
+// now does the same, keyed by the retired query so it can never swallow a live
+// one.
+// ---------------------------------------------------------------------------
+
+func TestAReplayedTerminationPairRecordsOneSystemFailure(t *testing.T) {
+	// Arrange — both halves of the SAME retired query's acknowledged pair, in
+	// the order the store writes them.
+	h := terminationHarness(t, &fakeClient{})
+
+	// Act.
+	consumeTermination(t, h, terminationEvent(4141, "retired-query"))
+	reportDegradation(t, h, degradationEvent(4142, "retired-query"))
+
+	// Assert.
+	if got := h.log.count("system failure session="); got != 1 {
+		t.Fatalf("system-failure records = %d, want exactly 1 for one replayed pair: %v", got, h.log.lines)
+	}
+}
+
+func TestAReplayedTerminationPairPushesOneFailureCard(t *testing.T) {
+	// Arrange.
+	h := terminationHarness(t, &fakeClient{})
+
+	// Act.
+	consumeTermination(t, h, terminationEvent(4141, "retired-query"))
+	reportDegradation(t, h, degradationEvent(4142, "retired-query"))
+
+	// Assert.
+	cards := 0
+	for _, c := range h.failureCards() {
+		if c.GetErrorType() == string(errclass.TypeUnexpectedQueryTermination) {
+			cards++
+		}
+	}
+	if cards != 1 {
+		t.Fatalf("failure cards = %d, want exactly 1 for one replayed pair: %v", cards, h.failureCards())
+	}
+}
+
+func TestAReplayedTerminationPairKeepsTheTypedDetail(t *testing.T) {
+	// Arrange — first-wins is only correct because the store writes the RICHER
+	// half first: only the QueryLifecycle row carries the typed detail, and the
+	// confirming DegradedState must not clobber the card with a poorer one.
+	h := terminationHarness(t, &fakeClient{})
+
+	// Act.
+	consumeTermination(t, h, terminationEvent(4141, "retired-query"))
+	reportDegradation(t, h, degradationEvent(4142, "retired-query"))
+
+	// Assert.
+	cards := h.failureCards()
+	if len(cards) == 0 || cards[len(cards)-1].GetQueryTermination().GetQueryInstanceId() != "retired-query" {
+		t.Fatalf("the replayed pair's card lost its typed query-termination detail: %v", cards)
+	}
+}
+
+func TestTwoDistinctRetiredQueriesEachGetTheirOwnRecord(t *testing.T) {
+	// Arrange — the latch is keyed by the retired query, not a bare bool, so a
+	// second retired query's replay is its own event rather than a duplicate of
+	// the first.
+	h := terminationHarness(t, &fakeClient{})
+
+	// Act.
+	reportDegradation(t, h, degradationEvent(4142, "retired-query"))
+	reportDegradation(t, h, degradationEvent(4143, "other-retired-query"))
+
+	// Assert.
+	if got := h.log.count("system failure session="); got != 2 {
+		t.Fatalf("system-failure records = %d, want one per distinct retired query: %v", got, h.log.lines)
+	}
+}
+
+func TestAReplayedPairWithNoQueryIdentityStillCards(t *testing.T) {
+	// Arrange — an unkeyed latch would collapse every unidentified replay into
+	// one card. Losing a card is worse than recording one twice, so an empty
+	// retired-query id pushes unlatched.
+	h := terminationHarness(t, &fakeClient{})
+	ev := degradationEvent(4142, "retired-query")
+	ev.GetDegradedState().QueryInstanceId = nil
+
+	// Act.
+	reportDegradation(t, h, ev)
+
+	// Assert.
+	if !h.hasCard(errclass.TypeUnexpectedQueryTermination) {
+		t.Fatalf("an unidentified replayed degradation lost its card: %v", h.failureCards())
 	}
 }
 

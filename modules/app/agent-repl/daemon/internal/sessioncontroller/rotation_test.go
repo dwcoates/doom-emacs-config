@@ -56,15 +56,21 @@ func (c *logCapture) logf(format string, args ...any) {
 	c.lines = append(c.lines, fmt.Sprintf(format, args...))
 }
 
-func (c *logCapture) contains(substr string) bool {
+func (c *logCapture) contains(substr string) bool { return c.count(substr) > 0 }
+
+// count is how many captured records contain substr. A dedup assertion needs
+// the COUNT, not the presence: "emitted once" and "emitted twice" both satisfy
+// contains.
+func (c *logCapture) count(substr string) int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	n := 0
 	for _, l := range c.lines {
 		if strings.Contains(l, substr) {
-			return true
+			n++
 		}
 	}
-	return false
+	return n
 }
 
 func TestHandshakeAdoptsAFirstAnnouncementImmediately(t *testing.T) {
