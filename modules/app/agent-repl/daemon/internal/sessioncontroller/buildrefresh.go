@@ -287,6 +287,12 @@ func (m *Manager) RestartSession(ctx context.Context, workspace string) error {
 	} else {
 		m.logf("session-controller: hard restart ws=%q session=%s: no live session controller; stopped any orphaned shim", workspace, sessionID)
 	}
+	// A HARD RESTART IS THE DELIBERATE WAY OUT OF A BRING-UP PARK. The park is a
+	// cooldown on AUTOMATIC respawns; this is a user who has explicitly asked for
+	// the process to be replaced, and refusing that with "it is resting" would
+	// leave the one control that exists for a wedged session unable to reach the
+	// session most in need of it (bringupescape.go).
+	m.clearBringUpFailures(sessionID)
 	if _, err := m.ensure(ctx, workspace); err != nil {
 		return fmt.Errorf("session-controller: restarting session %s (ws %q): bringing it back up: %w", sessionID, workspace, err)
 	}
