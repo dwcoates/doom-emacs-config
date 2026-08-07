@@ -373,3 +373,73 @@ func TestLogTimestampUsesLocalZoneRatherThanUTC(t *testing.T) {
 		t.Fatalf("timestamp = %q, want %q", got.Timestamp, at.Local().Format(sharedlogging.TimestampLayout))
 	}
 }
+
+func TestStatementFamilyEmitsTheQueryTimingTrio(t *testing.T) {
+	tests := []struct {
+		name   string
+		fields Fields
+		want   map[string]any
+	}{
+		{
+			name: "a statement family carries duration, rows and threshold",
+			fields: Fields{
+				Operation: "store.db.slow-query", Level: "warn",
+				Statement: "replay", Duration: 900 * time.Millisecond, Rows: 4212, Threshold: 250 * time.Millisecond,
+			},
+			want: map[string]any{
+				"statement": "replay", "duration_ms": float64(900),
+				"rows": float64(4212), "threshold_ms": float64(250),
+			},
+		},
+		{
+			name: "a zero row count is reported as zero, never omitted",
+			fields: Fields{
+				Operation: "store.db.slow-query", Level: "warn",
+				Statement: "cursor", Duration: 300 * time.Millisecond, Rows: 0, Threshold: 250 * time.Millisecond,
+			},
+			want: map[string]any{"statement": "cursor", "rows": float64(0)},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			var file, stderr bytes.Buffer
+			log := New(&file, &stderr, false)
+
+			// Act.
+			log.Log(tc.fields, "slow")
+
+			// Assert.
+			var got record
+			if err := json.Unmarshal(file.Bytes(), &got); err != nil {
+				t.Fatalf("record is not JSON: %v\n%s", err, file.String())
+			}
+			for key, value := range tc.want {
+				if got.Context[key] != value {
+					t.Fatalf("context[%q] = %#v, want %#v", key, got.Context[key], value)
+				}
+			}
+		})
+	}
+}
+
+func TestNoStatementFamilyOmitsTheQueryTimingTrio(t *testing.T) {
+	// Arrange. Every ordinary store record would otherwise carry three zeroed
+	// query-timing fields it has no query for.
+	var file, stderr bytes.Buffer
+	log := New(&file, &stderr, false)
+
+	// Act.
+	log.Log(Fields{Operation: "open", Table: "event"}, "ready")
+
+	// Assert.
+	var got record
+	if err := json.Unmarshal(file.Bytes(), &got); err != nil {
+		t.Fatalf("record is not JSON: %v\n%s", err, file.String())
+	}
+	for _, key := range []string{"statement", "duration_ms", "rows", "threshold_ms"} {
+		if _, present := got.Context[key]; present {
+			t.Fatalf("context carries %q on a non-query record: %+v", key, got.Context)
+		}
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net/url"
+	"time"
 
 	"agentrepl/shim-store/internal/logging"
 	_ "modernc.org/sqlite"
@@ -21,12 +22,40 @@ const SchemaVersion = 1
 type DB struct {
 	sql *sql.DB
 	log *logging.Logger
+	// slowQuery is the duration past which a completed statement is reported
+	// at warn. Non-positive disables the reporting entirely, which only an
+	// explicit Options caller can ask for.
+	slowQuery time.Duration
+}
+
+// Options are the injectable knobs Open resolves from the environment.
+type Options struct {
+	// SlowQuery is the slow-query threshold; non-positive disables reporting.
+	SlowQuery time.Duration
 }
 
 // Open opens (creating if absent) the event database at path with WAL enabled
 // and runs migrations to SchemaVersion. path may be an on-disk file; callers
 // running tests pass a temp-dir path so WAL is genuinely exercised.
+//
+// The slow-query threshold is resolved from the environment here. A malformed
+// value aborts the open rather than running the shipped default underneath an
+// operator who believes they changed it.
 func Open(path string, log *logging.Logger) (*DB, error) {
+	slowQuery, err := SlowQueryFromEnv()
+	if err != nil {
+		if log != nil {
+			log.Log(logging.Fields{Operation: "open", DatabasePath: path, Level: "error"}, "slow-query threshold rejected: %v", err)
+		}
+		return nil, err
+	}
+	return OpenWithOptions(path, log, Options{SlowQuery: slowQuery})
+}
+
+// OpenWithOptions is Open with the knobs supplied rather than read from the
+// environment. Tests use it to exercise both sides of a threshold without
+// mutating process state.
+func OpenWithOptions(path string, log *logging.Logger, opts Options) (*DB, error) {
 	if log == nil {
 		panic("shim-store db: nil logger")
 	}
@@ -69,13 +98,14 @@ func Open(path string, log *logging.Logger) (*DB, error) {
 		log.Log(logging.Fields{Operation: "ping", DatabasePath: path, Level: "error"}, "SQLite ping failed: %v", err)
 		return nil, fmt.Errorf("shim-store db: pinging %q: %w", path, err)
 	}
-	d := &DB{sql: sqldb, log: log}
+	d := &DB{sql: sqldb, log: log, slowQuery: opts.SlowQuery}
 	if err := d.migrate(); err != nil {
 		sqldb.Close()
 		log.Log(logging.Fields{Operation: "migrate", DatabasePath: path, Table: "schema_meta", Level: "error"}, "schema migration failed: %v", err)
 		return nil, err
 	}
-	log.Log(logging.Fields{Operation: "open", DatabasePath: path, Table: "event"}, "SQLite database ready")
+	log.Log(logging.Fields{Operation: "open", DatabasePath: path, Table: "event"},
+		"SQLite database ready slow_query_threshold_ms=%d", opts.SlowQuery.Milliseconds())
 	return d, nil
 }
 
