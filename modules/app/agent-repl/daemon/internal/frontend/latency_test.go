@@ -13,14 +13,36 @@ import (
 
 // recordingLatency captures every sample the transport hands it, and can be
 // asked to fail so the transport's error surfacing is exercised.
+//
+// It is mutex-guarded because the transport genuinely records from more than
+// one goroutine: a lane records a completion while the ack-deadline watchdog
+// may be recording an overdue observation for a different command.
 type recordingLatency struct {
+	mu      sync.Mutex
 	samples []CommandLatencySample
 	err     error
+	// notify, when non-nil, receives every recorded sample. It lets a test
+	// rendezvous with an emission instead of waiting out a clock.
+	notify chan CommandLatencySample
 }
 
 func (r *recordingLatency) RecordCommandLatency(sample CommandLatencySample) error {
+	r.mu.Lock()
 	r.samples = append(r.samples, sample)
-	return r.err
+	err := r.err
+	notify := r.notify
+	r.mu.Unlock()
+	if notify != nil {
+		notify <- sample
+	}
+	return err
+}
+
+// all returns a snapshot of the recorded samples.
+func (r *recordingLatency) all() []CommandLatencySample {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]CommandLatencySample(nil), r.samples...)
 }
 
 // concurrentLogs captures log lines from every goroutine that logs. With
