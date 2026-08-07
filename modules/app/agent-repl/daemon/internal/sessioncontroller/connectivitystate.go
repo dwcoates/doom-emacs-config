@@ -241,6 +241,18 @@ func (m *Manager) acquireSettledHibernationLease(workspace string) (func(), erro
 // The close itself goes through the SAME mechanism every teardown uses, so
 // there is exactly one writer of a synthesized closing row; only the reason
 // distinguishes this cause from a teardown's.
+//
+// # Why the close is workspace-scoped rather than session-scoped
+//
+// A teardown's close retires the claims of the ONE session whose shim it
+// stopped. This reconciliation's proof is stronger and differently shaped —
+// nothing is alive to end ANY turn here — and using the narrower close under it
+// is what made the observed churn: when the standing claim belonged to a
+// claimant other than the resolved state's session, the close retired nothing,
+// the workspace-wide liveness fold still held a turn open, and the workspace
+// stayed `thinking` with no shim while this ran again every sweep. So it calls
+// CloseOrphanedTurn, which retires the whole workspace's ledger in the same
+// transaction that reconciles the axis.
 func (m *Manager) reconcileOrphanedTurn(workspace string, st *frontendv1.WorkspaceState) bool {
 	m.mu.Lock()
 	d, live := m.byWS[workspace]
@@ -262,14 +274,14 @@ func (m *Manager) reconcileOrphanedTurn(workspace string, st *frontendv1.Workspa
 		return false
 	}
 	sessionID := st.GetSessionId()
-	closed, err := m.cfg.SSM.CloseStaleTurn(workspace, sessionID, staleTurnReasonOrphaned, true)
+	closed, err := m.cfg.SSM.CloseOrphanedTurn(workspace, sessionID, staleTurnReasonOrphaned)
 	if err != nil {
 		m.logf("session-controller: orphaned-turn reconciliation FAILED ws=%q session=%q reason=%s: %v — the workspace stays latched in a turn it cannot leave",
 			workspace, sessionID, staleTurnReasonOrphaned, err)
 		return false
 	}
 	if !closed {
-		m.logf("session-controller: orphaned-turn reconciliation WROTE NOTHING ws=%q session=%q reason=%s — the claim is not this session's to spend, or the axis already carried no live turn",
+		m.logf("session-controller: orphaned-turn reconciliation WROTE NOTHING ws=%q session=%q reason=%s — the workspace held no open claim and its axis carried no live turn, so there was nothing stale to reconcile",
 			workspace, sessionID, staleTurnReasonOrphaned)
 		return false
 	}

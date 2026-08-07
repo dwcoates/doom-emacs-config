@@ -163,6 +163,16 @@ type StateApplier interface {
 	// the good outcome, meaning the shim's own end reached the log first and
 	// closed the axis honestly. See turnstop.go, which is the only caller.
 	CloseStaleTurn(workspace, sessionID, reason string, soleSessionController bool) (closed bool, err error)
+	// CloseOrphanedTurn reconciles a workspace whose turn NOTHING CAN EVER END:
+	// the caller has proved that no controller drives it and no process holds
+	// its lock, so every claim standing in it — under ANY claimant — was opened
+	// by a shim that is gone. Unlike CloseStaleTurn it therefore retires the
+	// whole workspace's ledger rather than one session's, which is what makes it
+	// converge instead of re-running against the same untouched claim forever.
+	//
+	// It reports whether it reconciled anything. See connectivitystate.go's
+	// reconcileOrphanedTurn, which is the only caller and which owns the proof.
+	CloseOrphanedTurn(workspace, sessionID, reason string) (closed bool, err error)
 }
 
 // ProgressResolver is the slice of the progress-footer resolver (F1) the session controller

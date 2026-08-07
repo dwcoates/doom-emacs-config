@@ -56,7 +56,85 @@ func (m *Manager) CloseStaleTurn(workspace, sessionID, reason string, soleSessio
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.closePermissionLocked(workspace, reason)
-	return m.closeStaleTurnLocked(workspace, sessionID, reason, soleSessionController)
+	return m.closeStaleTurnLocked(workspace, sessionID, reason, soleSessionController, turnCloseScopeClaimant)
+}
+
+// turnCloseScope names WHOSE open turn claims a stale-turn close retires.
+//
+// It exists because the two callers of the close have different PROOFS behind
+// them, and the narrower proof cannot license the wider retirement.
+type turnCloseScope int
+
+const (
+	// turnCloseScopeClaimant retires only the claims held by the session named
+	// in the close. It is the teardown's scope: the daemon stopped THAT
+	// session's shim, and it knows nothing about any other claimant in the
+	// workspace, which may still be driven by a live replacement.
+	turnCloseScopeClaimant turnCloseScope = iota
+	// turnCloseScopeWorkspace retires EVERY claimant's claims in the workspace.
+	// It is licensed only by the orphan proof (see CloseOrphanedTurn): no
+	// controller and no process hold the workspace, so no claim in it — under
+	// any claimant — has a party left that could report its end.
+	turnCloseScopeWorkspace
+)
+
+// CloseOrphanedTurn reconciles a workspace whose turn NOTHING CAN EVER END: no
+// session controller drives it and no process holds its kernel lock, so every
+// claim standing in it was opened by a shim that is gone.
+//
+// # Why CloseStaleTurn could not do this, and why it churned forever
+//
+// CloseStaleTurn retires claims held by ONE claimant — the session whose shim
+// the daemon stopped — while turn liveness is derived over the WHOLE workspace
+// (turnliveness.go: claimant scoping is precisely the defect that fold exists to
+// remove). When the standing claim belongs to a different claimant than the
+// session the reconciliation names — a superseded session, or a `thinking` the
+// SSM itself restored with no session id over another session's claim — the
+// close retired nothing (`closed=[]`), the derivation still held the workspace
+// live, and the "a turn remains in flight" arm declined to write. The workspace
+// stayed `thinking` with no shim behind it, the hibernation lease kept folding
+// the same open claim into TurnActive, and the reconciliation re-ran on every
+// sweep with the same empty result — observed as `closed=[]` every ~30s for
+// hours across several workspaces, refusing hibernation and runtime restarts
+// the whole time.
+//
+// # What makes the wider retirement honest
+//
+// The caller's proof is about the WORKSPACE, not about one session: nothing is
+// alive that could end ANY of its turns. So the retirement is workspace-scoped
+// too, and the claimant test CloseStaleTurn applies — "that claim is not this
+// stop's to spend" — no longer names anyone who could spend it. A turn whose
+// shim IS alive never reaches here: the caller declines while a controller
+// drives the workspace, while any process holds its lock, and whenever it cannot
+// determine either.
+//
+// # Convergence
+//
+// One pass leaves nothing for the next to find: every claim is retired and the
+// axis is reconciled to `idle` in ONE transaction, so the sweep that follows
+// reads a settled workspace and no reconciliation runs at all.
+//
+// An EMPTY session id is accepted here, unlike in CloseStaleTurn. The close is
+// the workspace's, not a session's, and a workspace latched in a turn whose
+// resolved state carries no session id is exactly one this must be able to
+// unstick rather than refuse forever. The appended row then names no session, as
+// the vendor rotation's does.
+//
+// It reports whether it reconciled anything — a closing row, a retired claim, or
+// both.
+func (m *Manager) CloseOrphanedTurn(workspace, sessionID, reason string) (bool, error) {
+	if workspace == "" {
+		return false, fmt.Errorf("ssm: CloseOrphanedTurn got an empty workspace")
+	}
+	if reason == "" {
+		return false, fmt.Errorf("ssm: CloseOrphanedTurn for workspace %q got an empty reason; the closing row must name the reconciliation that produced it", workspace)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.logf("ssm: orphaned turn close ws=%s session=%s reason=%q scope=workspace — the caller proved no controller and no process hold this workspace, so EVERY claimant's open claims are retired rather than only this session's",
+		workspace, sessionID, reason)
+	m.closePermissionLocked(workspace, reason)
+	return m.closeStaleTurnLocked(workspace, sessionID, reason, true, turnCloseScopeWorkspace)
 }
 
 // closeStaleTurnLocked appends the closing session-status lifecycle row when the workspace's
@@ -81,27 +159,47 @@ func (m *Manager) CloseStaleTurn(workspace, sessionID, reason string, soleSessio
 // claims this session holds and (b) records each killed start's STORE coordinate
 // in `turn_interruption`, which is the part a later replay actually consults.
 // All three writes — claims, durable ends, axis row — are in one transaction.
-func (m *Manager) closeStaleTurnLocked(workspace, sessionID, reason string, soleSessionController bool) (bool, error) {
+func (m *Manager) closeStaleTurnLocked(workspace, sessionID, reason string, soleSessionController bool, scope turnCloseScope) (bool, error) {
 	standing, claimant, err := turnClaim(m.db, workspace)
 	if err != nil {
 		return false, err
 	}
-	spendable := claimant == sessionID || (claimant == "" && soleSessionController)
+	// A WORKSPACE-SCOPED CLOSE HAS NOBODY TO DECLINE IN FAVOUR OF. The claimant
+	// test protects a turn some OTHER live session is running; the orphan proof
+	// that licenses this scope is that no such session exists, for any claim in
+	// the workspace. See CloseOrphanedTurn.
+	spendable := scope == turnCloseScopeWorkspace ||
+		claimant == sessionID || (claimant == "" && soleSessionController)
 	tx, err := m.db.Begin()
 	if err != nil {
 		return false, fmt.Errorf("ssm: begin stale turn close transaction: %w", err)
 	}
 	defer tx.Rollback()
 
-	closed, err := synthesizeTurnEnds(tx, workspace, sessionID, TurnCloseShimStopped, m.nextAt())
+	// RETIRE THE LEDGER FIRST, AND IN EVERY ARM. The axis and the ledger are
+	// separate records of the same turn, and a claim left standing under a
+	// settled axis is still a turn in flight to the hibernation lease and the
+	// prompt queue — which is one of the shapes the orphan wedge took.
+	retiring := sessionID
+	if scope == turnCloseScopeWorkspace {
+		retiring = ""
+	}
+	closed, liveness, err := m.retireTurnsLocked(tx, workspace, retiring, TurnCloseShimStopped)
 	if err != nil {
 		return false, err
 	}
-	// THE ONE FOLD, over the ledger this transaction has just retired.
-	liveness, err := deriveTurnLiveness(tx, workspace)
-	if err != nil {
-		return false, err
+	// A WORKSPACE-SCOPED RETIREMENT LEAVES NO CLAIM BEHIND, by construction:
+	// retireTurnsLocked enumerated every claimant holding one. If the fold still
+	// names a claim the two disagree, and that is an invariant violation rather
+	// than a condition to work around.
+	if scope == turnCloseScopeWorkspace && len(liveness.Claims()) > 0 {
+		return false, fmt.Errorf("ssm: orphaned turn close for workspace %q retired every claimant and %s still holds open claims", workspace, liveness)
 	}
+	// The remaining live leg a workspace-scoped close may face is the SUBMIT
+	// one: a prompt this daemon committed to whose TurnStarted never reached the
+	// store. Nothing is alive to deliver it either, and the `idle` row below is
+	// what retires it — so it must not stand in the way of that row.
+	stillLive := liveness.Active() && scope != turnCloseScopeWorkspace
 	cause := causeShimStopped + ":" + reason
 	wrote := false
 	switch {
@@ -111,7 +209,7 @@ func (m *Manager) closeStaleTurnLocked(workspace, sessionID, reason string, sole
 	case !spendable:
 		m.logf("ssm: stale turn close ws=%s session=%s reason=%q sole_session_controller=%v DECLINED — the standing `thinking` is held by session=%q, which is not this stop's to spend",
 			workspace, sessionID, reason, soleSessionController, claimant)
-	case liveness.Active():
+	case stillLive:
 		// A turn is STILL live after this session's claims were retired — it
 		// belongs to some other session driving this workspace. The derivation
 		// is the authority on the color, and it says a turn runs.
@@ -131,6 +229,17 @@ func (m *Manager) closeStaleTurnLocked(workspace, sessionID, reason string, sole
 			workspace, sessionID, reason, formatClosedTurnIDs(closed), TurnCloseShimStopped)
 	}
 	if !wrote {
+		// A WORKSPACE-SCOPED CLOSE REPORTS THE LEDGER RETIREMENT TOO. Its caller
+		// retries the settledness test on a true answer, and a retired claim
+		// changes that verdict on its own: the hibernation lease folds open
+		// claims into TurnActive, so a workspace whose axis was already settled
+		// stays unsettled until the claim goes. Answering false there is what
+		// would send the sweep round again for a workspace this call just fixed.
+		if scope == turnCloseScopeWorkspace && len(closed) > 0 {
+			m.logf("ssm: orphaned turn RECONCILED IN THE LEDGER ONLY ws=%s session=%s reason=%q closed=%s — the axis had already settled, so no row was appended, but the open claims underneath it are what the hibernation lease reads as a turn in flight and they are now retired",
+				workspace, sessionID, reason, formatClosedTurnIDs(closed))
+			return true, nil
+		}
 		return false, nil
 	}
 	m.logf("ssm: stale turn CLOSED ws=%s session=%s reason=%q sole_session_controller=%v claimant=%q — the shim behind the running turn is gone, so its end can never arrive and the session-status lifecycle is reconciled to `idle` rather than latched in `thinking`",
