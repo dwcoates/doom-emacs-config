@@ -1009,6 +1009,21 @@ on-disk roster with the freshly started live roster (which only holds
 the workspaces the user has visited manually so far).  Set to t at the
 end of a successful load; reset by Emacs restart.")
 
+(defvar agent-repl--snapshot-materialized-pending nil
+  "Names of daemon-materialized workspaces still missing from the roster file.
+A workspace materialized before the snapshot loader has finished (the
+boot-resume path: the daemon replays a `WorkspaceAvailable' while the
+recursive loader is still walking the on-disk roster) cannot write the
+roster immediately — `agent-repl--snapshot-save-safe-p' refuses, and
+rightly so: the live hash is still a partial view of the file.  The name
+is parked here instead and
+`agent-repl--snapshot-flush-materialized-pending' issues one roster write
+once the loader has finished and the live hash is authoritative again.
+
+Names only.  The flush re-collects from the live hash, so a workspace
+closed between materialization and flush is simply absent from the write
+rather than resurrected by it.")
+
 (defvar agent-repl--restored-workspaces nil
   "List of workspace names established by snapshot-restore in this session.
 Populated incrementally as each entry of the snapshot loader (either
@@ -1332,6 +1347,59 @@ without waiting for the next `--state-save' piggyback."
     (message "Updated snapshot: %d workspace(s) -> %s"
              live-count file)))
 
+(defun agent-repl--snapshot-persist-materialized-workspace (ws)
+  "Durably record daemon-materialized WS in the roster snapshot.
+
+Materialization (`agent-repl--ws-materialize-daemon-workspace') commits a
+workspace to `agent-repl--workspaces' and the tab-bar without starting a
+session, so it never reaches `agent-repl--state-save' — the piggyback that
+rewrites the roster for every normally-opened workspace.  Without this
+call the new workspace lives only in memory and vanishes at the next
+Emacs restart, its worktree and daemon session still on disk.  This is
+the materialization path's equivalent of that piggyback: roster only, no
+per-project `state.el', because a later real session-init still owns that
+file.
+
+Two cases, and neither may silently drop the workspace:
+
+- Loader already finished this session (`agent-repl--snapshot-loaded-p'):
+  the live hash is authoritative, so write the roster now.
+- Loader has not finished (boot-resume replay, or a session with no
+  roster file at all): park WS in
+  `agent-repl--snapshot-materialized-pending' so
+  `agent-repl--snapshot-flush-materialized-pending' writes it once the
+  loader finishes, and still attempt the write — on a fresh install
+  `agent-repl--snapshot-save-safe-p' permits it (nothing to lose), and
+  when a richer roster is on disk that guard refuses and the parked name
+  is what carries the workspace to the flush."
+  (if agent-repl--snapshot-loaded-p
+      (progn
+        (agent-repl--log ws "snapshot-persist-materialized: writing roster now ws=%s" ws)
+        (agent-repl-save-workspace-snapshot))
+    (cl-pushnew ws agent-repl--snapshot-materialized-pending :test #'equal)
+    (agent-repl--log
+     ws
+     "snapshot-persist-materialized: loader unfinished — parked ws=%s pending=%d"
+     ws (length agent-repl--snapshot-materialized-pending))
+    (agent-repl-save-workspace-snapshot)))
+
+(defun agent-repl--snapshot-flush-materialized-pending ()
+  "Write the roster once for workspaces materialized before the load finished.
+No-op when nothing was parked.  The pending list is cleared before the
+write so a failing write cannot make the flush re-enter on the next load.
+
+The write re-collects from the live hash rather than replaying the parked
+names, so a workspace closed between its materialization and this flush
+stays out of the roster — parking records that a write is owed, never
+what the write must contain."
+  (when agent-repl--snapshot-materialized-pending
+    (let ((pending agent-repl--snapshot-materialized-pending))
+      (setq agent-repl--snapshot-materialized-pending nil)
+      (agent-repl--log nil
+                       "snapshot-flush-materialized: flushing pending=%d names=%S"
+                       (length pending) pending)
+      (agent-repl-save-workspace-snapshot))))
+
 (defun agent-repl--clean-frame-foreign-windows (ws)
   "Delete frame windows whose buffer is owned by a different workspace.
 A window is foreign iff its buffer's `agent-repl--owning-workspace'
@@ -1619,6 +1687,14 @@ can call finish without worrying whether a normal finish already ran."
         (agent-repl--ws-frame-switch origin))
       (force-mode-line-update t)
       (setq agent-repl--snapshot-loaded-p t)
+      ;; Any workspace the daemon materialized while this load was running
+      ;; (boot-resume replay) could not write the roster then — the live
+      ;; hash was a partial view of the file.  It is authoritative now, so
+      ;; settle the debt before anything else can restart Emacs.  Wrapped
+      ;; because finish must stay robust: a roster write that fails is
+      ;; logged, never allowed to strand the load mid-finalization.
+      (agent-repl--with-error-logging "snapshot-load: flush-materialized"
+        (agent-repl--snapshot-flush-materialized-pending))
       (agent-repl--log nil
                         "snapshot-load: END loaded=%d skipped=%d load-error=%d returned-to=%s"
                         loaded skipped load-error (or origin "nil"))

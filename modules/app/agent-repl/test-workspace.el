@@ -1540,6 +1540,26 @@ identity-distinct string injected by `agent-repl-set-priority' from
       (fmakunbound 'persp-frame-save-state)
       (should-not (agent-repl--ws-frame-save-state)))))
 
+;;;; ---- Tests: --ws-materialize-daemon-workspace roster durability ----
+
+(ert-deftest agent-repl-test-ws-materialize-daemon-persists-roster ()
+  "A successful materialization writes the new workspace to the roster.
+Materialization starts no session, so the `--state-save' piggyback that
+persists a normally-opened workspace never runs for it; without this
+call the workspace exists only in memory and its perspective is gone
+after the next Emacs restart."
+  (agent-repl-test--with-clean-state
+    (let ((persisted nil))
+      (cl-letf (((symbol-function 'persp-add-new) (lambda (_ws) 'a-persp))
+                ((symbol-function 'set-persp-parameter) #'ignore)
+                ((symbol-function 'persp-kill) #'ignore)
+                ((symbol-function 'agent-repl--snapshot-persist-materialized-workspace)
+                 (lambda (ws) (setq persisted ws))))
+        (should (eq (agent-repl--ws-materialize-daemon-workspace
+                     "dws" '(:project-dir "/tmp/dws" :daemon-workspace-job-id "j1"))
+                    'created))
+        (should (equal persisted "dws"))))))
+
 ;;;; ---- Tests: --ws-create ----
 
 (ert-deftest agent-repl-test-ws-create-returns-persp-and-tags-project ()
