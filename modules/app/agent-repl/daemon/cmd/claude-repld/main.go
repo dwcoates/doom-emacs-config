@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -25,6 +26,7 @@ import (
 	"claude-repld/internal/frontend"
 	"claude-repld/internal/keepalive"
 	"claude-repld/internal/login"
+	"claude-repld/internal/pprofsurface"
 	"claude-repld/internal/progress"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/replog"
@@ -327,6 +329,7 @@ func main() {
 		webappDir    = flag.String("webapp", "", "optional directory of webapp static files to serve at /")
 		widgetAssets = flag.String("widget-assets", envStr("AGENT_REPL_WIDGET_ASSETS", ""), "optional directory of embeddable-widget assets (e.g. a chess-widget dist) to serve at /widget-assets/; empty = capability off")
 		accountsFlag = flag.String("accounts", "", "canonical account roster as comma-separated label=config-dir pairs (empty dir = the CLI's default root), e.g. \"personal=,work=/home/u/.claude-chesscom\"; empty = account routes disabled")
+		pprofAddr    = flag.String("pprof", envStr(pprofsurface.EnvAddr, ""), "OPT-IN Go profiling surface: a unix socket path, or an explicitly loopback host:port (127.0.0.1:6060). Empty = OFF, which is the default; there is no always-on listener. The resolved surface is named in the daemon.pprof.enabled record at startup")
 	)
 	flag.Parse()
 
@@ -335,6 +338,19 @@ func main() {
 		daemonLog.With("operation", "parse-accounts").Log("claude-repld: -accounts: %v", err)
 		os.Exit(2)
 	}
+
+	// The profiling surface is opened BEFORE the daemon's dependencies, so a
+	// boot that wedges in state-store or geometry work is still profilable —
+	// which is precisely the window the command-path stalls were observed in.
+	pprofSurface, err := openPprofSurface(*pprofAddr, daemonLog)
+	if err != nil {
+		daemonFatal(daemonLog, "claude-repld: %v", err)
+	}
+	defer func() {
+		if err := pprofSurface.Close(); err != nil {
+			daemonLog.With("operation", "daemon.pprof.close", "level", "error").Log("claude-repld: close pprof surface: %v", err)
+		}
+	}()
 
 	if *shimScript == "" {
 		daemonLog.With("operation", "validate-config").Log("claude-repld: --shim is required (path to agent-shim/claude/shim/dist/main.js)")
@@ -1130,6 +1146,49 @@ func main() {
 	if err := httpServer.Serve(httpListener); err != nil && err != http.ErrServerClosed {
 		daemonFatal(daemonLog, "claude-repld: %v", err)
 	}
+}
+
+// openPprofSurface binds the opt-in profiling surface and records the decision
+// either way.
+//
+// BOTH OUTCOMES ARE LOGGED. "Off" is the shipped state and must be
+// distinguishable from "on but nobody can find the address", and an enabled
+// surface is only usable if its record names the exact socket or port a
+// `go tool pprof` invocation should target. A configured surface that cannot
+// bind is a hard error: an operator who asked for profiles and silently got
+// none is the failure this whole addition exists to end.
+func openPprofSurface(addr string, logger *dlog.Logger) (*pprofsurface.Surface, error) {
+	surface, err := pprofsurface.Open(addr)
+	if err != nil {
+		return nil, err
+	}
+	if surface == nil {
+		if err := logger.EmitVerbose(dlog.GlobalScope(), dlog.Event{
+			Runtime: dlog.RuntimeDaemon, Level: dlog.LevelDebug, Operation: "daemon.pprof.disabled",
+			Message: "Go profiling surface is off",
+			Context: map[string]any{"env": pprofsurface.EnvAddr, "flag": "-pprof"},
+		}); err != nil {
+			return nil, fmt.Errorf("claude-repld: record pprof surface state: %w", err)
+		}
+		return nil, nil
+	}
+	if err := logger.EmitNormal(dlog.GlobalScope(), dlog.Event{
+		Runtime: dlog.RuntimeDaemon, Level: dlog.LevelWarn, Operation: "daemon.pprof.enabled",
+		Message: "Go profiling surface is LISTENING; it exposes goroutine stacks, the command line and heap contents",
+		Context: map[string]any{
+			"network": surface.Network(), "address": surface.Address(),
+			"url": surface.URL(), "env": pprofsurface.EnvAddr,
+		},
+	}); err != nil {
+		surface.Close()
+		return nil, fmt.Errorf("claude-repld: record pprof surface state: %w", err)
+	}
+	go func() {
+		if err := surface.Serve(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.With("operation", "daemon.pprof.serve", "level", "error").Log("claude-repld: pprof surface serve ended: %v", err)
+		}
+	}()
+	return surface, nil
 }
 
 func startWorkspaceLogMaintenance(targets *dlog.TargetManager, logger *dlog.Logger, terminal io.Writer, verbose bool) func() {
