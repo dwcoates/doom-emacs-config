@@ -15,6 +15,41 @@ content, no frontend's render pace gating another's delivery. `PushWorkspaceStat
 fans out under the client-registry lock, so an emission, a connect and a
 disconnect are serialized against each other, and that is the whole mechanism.
 
+## Commands run on per-workspace lanes, and the ack still means DONE
+
+A connection's inbound commands used to run one at a time, inline in its read
+loop, so a connection's throughput was the sum of every command's cost. A
+workspace bring-up costs seconds, and Emacs opens every restored workspace at
+startup: sixteen `open_workspace` commands behind each other starved later
+commands past the client's ack deadline, and each starved command opened a
+`client.command_unacked` failure card for a command the daemon had not even
+read yet.
+
+Acking on receipt was NOT the fix. The Emacs client treats a successful
+`CommandAck` as COMPLETION: `openWorkspace`'s async bridge resolves on it,
+`createSession` unblocks its await loop on it, `restartSession` reports the
+session came back from it. An early ack would report an open workspace before
+any shim existed.
+
+So the ack contract is untouched and the CONCURRENCY changed instead
+(`lanes.go`). Each command is routed onto a lane keyed by its workspace; a
+lane runs its commands strictly in arrival order, and lanes run in parallel
+with one another. A workspace's `open_workspace` therefore still precedes
+every session command that followed it on the wire, while a wedged bring-up
+can no longer delay another workspace's ack, and a startup costs
+max(bring-up) rather than sum(bring-ups). Every workspace-less command (the
+roster publish, the daemon-global controls) shares one global lane, which is
+never behind any workspace's bring-up.
+
+Concurrency across workspaces is not a new demand on `CommandHandler`: the
+Emacs UDS connection and every webview connection already ran their read loops
+in parallel. What is new is that ONE connection may have several commands in
+flight, always for different workspaces.
+
+A lane's queue is unbounded on purpose — every frame in it has already been
+read off the socket and owes the client an answer — and closing a connection
+DRAINS its lanes before disconnecting, for the same reason.
+
 ## A saturated queue is compacted before the connection is given up on
 
 Each connection's outbound queue is bounded. A hidden or backgrounded webview
