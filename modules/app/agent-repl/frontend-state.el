@@ -828,7 +828,7 @@ receives every catalog but has no per-task roster."
       (setq failures
             (+ failures
                (agent-repl--frontend-apply-snapshot-items
-                "session-view" sessions '(:sessionId :workspace)
+                "session-view" sessions '(:workspace)
                 #'agent-repl--frontend-apply-session-view)))
       ;; Rebuild the retained-SystemInit roster wholesale too (same rationale):
       ;; the slash-command menu source must not carry a bounced daemon's stale
@@ -837,7 +837,7 @@ receives every catalog but has no per-task roster."
       (setq failures
             (+ failures
                (agent-repl--frontend-apply-snapshot-items
-                "session-init" inits '(:sessionId)
+                "session-init" inits '(:workspace)
                 #'agent-repl--frontend-apply-session-init)))
       ;; Identity/readiness lands BEFORE any item that can fail on side
       ;; effects: `agent-repl--frontend-daemon-ready-p' reads the DaemonView,
@@ -872,7 +872,7 @@ receives every catalog but has no per-task roster."
             (+ failures
                (let ((agent-repl--frontend-applying-snapshot-state t))
                  (agent-repl--frontend-apply-snapshot-items
-                  "workspace-state" workspaces '(:workspace :sessionId :state)
+                  "workspace-state" workspaces '(:workspace :state)
                   #'agent-repl--frontend-apply-workspace-state))))
       ;; Last, and deliberately after the DaemonView: the host-action executor
       ;; re-signals handler failures by contract, and a retained action for a
@@ -933,55 +933,86 @@ receives every catalog but has no per-task roster."
 ;; is the decoded SessionView plist.
 
 (defvar agent-repl--frontend-session-views (make-hash-table :test 'equal)
-  "Hash of session-id -> decoded `SessionView' plist (pushed-frame roster).
-Populated by `agent-repl--frontend-apply-session-view' (per-session pushes)
-and rebuilt wholesale from the connect snapshot's `:sessions'.  The single
-source of truth for daemon session metadata now that Emacs no longer polls
-GET /sessions for it.")
+  "Hash of WORKSPACE -> the decoded `SessionView' plist of its CURRENT session.
 
-(defun agent-repl--frontend-session-view (session-id)
-  "Return the stored `SessionView' plist for SESSION-ID, or nil when unknown."
-  (and session-id (gethash session-id agent-repl--frontend-session-views)))
+ONE ENTRY PER WORKSPACE, and it is the workspace\='s current session: a
+superseded predecessor REPLACES nothing and a successor replaces its
+predecessor, rather than the two accumulating side by side.  A workspace
+has at most one live session — the daemon supersedes every older session
+on the same cwd at create time (supersede.go), so a workspace\='s session
+is a well-defined single thing and this is the store that says so.
+
+Populated by `agent-repl--frontend-apply-session-view' (per-session
+pushes) and rebuilt wholesale from the connect snapshot\='s `:sessions'.
+The single source of truth for daemon session metadata; Emacs does not
+poll for it.")
+
+(defun agent-repl--frontend-session-view (workspace)
+  "Return the stored `SessionView' plist for WORKSPACE, or nil when unknown.
+WORKSPACE is the absolute cwd the daemon routes by — WS\='s
+`agent-repl--frontend-ws-command-key', not a workspace NAME."
+  (and workspace (gethash workspace agent-repl--frontend-session-views)))
 
 (defun agent-repl--frontend-session-views-all ()
-  "Return every stored `SessionView' plist (the full known roster)."
+  "Return every stored `SessionView' plist (one per known workspace)."
   (hash-table-values agent-repl--frontend-session-views))
 
-(defun agent-repl--frontend-live-session-id-for-cwd (cwd)
-  "Return the id of a NON-TERMINAL stored SessionView whose workspace is CWD.
-The daemon supersedes every older session on the same cwd at create time
-and PUSHES each stood-down record's terminal view (supersede.go), so at
-most one live session per cwd exists in this store; nil when none is
-known yet.  This is how `createSession' correlates its (ack-receipt-only)
-command to the id the daemon delivers on the pushed SessionView."
-  (catch 'found
-    (maphash (lambda (id view)
-               (when (and (equal (plist-get view :workspace) cwd)
-                          (not (eq (plist-get view :terminal) t)))
-                 (throw 'found id)))
-             agent-repl--frontend-session-views)
-    nil))
+(defun agent-repl--frontend-workspace-session-live-p (workspace)
+  "Return non-nil when WORKSPACE\='s current `SessionView' is not terminal.
+The pushed-frame replacement for a per-session liveness probe: liveness
+is a fact about the workspace, answered from the view the daemon last
+pushed for it."
+  (let ((view (agent-repl--frontend-session-view workspace)))
+    (and view (not (eq (plist-get view :terminal) t)))))
+
+(defun agent-repl--frontend-session-view-supersedes-p (incoming stored)
+  "Return non-nil when INCOMING should replace STORED for their workspace.
+
+A LIVE view always wins: it is the workspace\='s current session by
+definition.  A TERMINAL view wins only over nothing, over another
+terminal view, or over the SAME session it reports the death of —
+otherwise it is a superseded predecessor arriving after its successor,
+and letting it land would retire a session that is running.
+
+Both ids read here come from the daemon\='s own views; neither is a key
+this store is indexed by."
+  (cond
+   ((null stored) t)
+   ((not (eq (plist-get incoming :terminal) t)) t)
+   ((eq (plist-get stored :terminal) t) t)
+   (t (equal (plist-get incoming :sessionId) (plist-get stored :sessionId)))))
 
 (defun agent-repl--frontend-store-session-view (view)
-  "Upsert VIEW (a decoded `SessionView' plist) into the store, keyed by id.
-A view with no `:sessionId' is an invariant violation and fails loudly
-\(No-Silent-Fallbacks) — the daemon always stamps the id.  Returns the id."
-  (let ((id (plist-get view :sessionId)))
-    (when (or (null id) (and (stringp id) (string-empty-p id)))
+  "Upsert VIEW (a decoded `SessionView' plist) as its workspace\='s current one.
+A view with no `:workspace' is an invariant violation and fails loudly
+\(No-Silent-Fallbacks) — the daemon always stamps the routing key it
+delivers the view under.  Returns the workspace."
+  (let ((workspace (plist-get view :workspace)))
+    (when (or (null workspace) (and (stringp workspace) (string-empty-p workspace)))
       (agent-repl--log nil
-                       "frontend-store-session-view: MISSING sessionId in %S — no fallback"
+                       "frontend-store-session-view: MISSING workspace in %S — no fallback"
                        view)
-      (error "agent-repl frontend: SessionView missing sessionId"))
-    (puthash id view agent-repl--frontend-session-views)
-    id))
+      (error "agent-repl frontend: SessionView missing workspace"))
+    (let ((stored (gethash workspace agent-repl--frontend-session-views)))
+      (if (agent-repl--frontend-session-view-supersedes-p view stored)
+          (puthash workspace view agent-repl--frontend-session-views)
+        (agent-repl--log-verbose
+         (agent-repl--frontend-ws-name workspace)
+         "frontend-store-session-view: DROPPED superseded terminal view workspace=%S"
+         workspace)))
+    workspace))
 
 (defvar agent-repl--frontend-surfaced-deaths (make-hash-table :test 'equal)
-  "Session ids whose death has already been surfaced.
+  "Hash of WORKSPACE -> the classified death already surfaced for it.
 
 A terminal SessionView is re-pushed on every snapshot and on any later
 write to its record, so without this latch a dead session would announce
 its death again on every reconnect — turning one honest report into
-recurring noise about something the user already knows.")
+recurring noise about something the user already knows.
+
+The DEATH ITSELF is the latch value, not the session it befell: what
+must not repeat is the report, and a workspace whose next session dies
+differently has something new to say.")
 
 (defun agent-repl--frontend-apply-session-view (view)
   "Apply a `SessionView' frame VIEW (a plist).  Handler for `sessionView'.
@@ -994,23 +1025,24 @@ readers — this file never read it at all, despite a comment elsewhere
 claiming the detail rides the pushed `SessionView' — because a free string
 gave no way to know what class of failure it described.  `:death' is that
 same fact classified, so it can finally be shown."
-  (let ((id (agent-repl--frontend-store-session-view view)))
+  (let ((workspace (agent-repl--frontend-store-session-view view)))
     ;; A `SessionView''s `:workspace' is the wire's session CWD, not a
     ;; workspace name, so it can never index the workspace hash.  Route through
     ;; the file's own resolver, which also passes a frame that already carries
     ;; a name.  The raw wire value stays in the message text, since that is the
     ;; field an operator correlates against the daemon.
-    (agent-repl--log (agent-repl--frontend-ws-name (plist-get view :workspace))
-                     "frontend-apply-session-view: id=%s ws=%s terminal=%S claude-id=%s pending=%s token-utilization=%S"
-                     id (plist-get view :workspace) (plist-get view :terminal)
+    (agent-repl--log (agent-repl--frontend-ws-name workspace)
+                     "frontend-apply-session-view: ws=%s terminal=%S claude-id=%s pending=%s token-utilization=%S"
+                     workspace (plist-get view :terminal)
                      (or (plist-get view :claudeSessionId) "nil")
                      (or (plist-get view :pendingPermissions) "0")
                      (and (plist-get view :tokenUtilization) t))
-    (agent-repl--frontend-surface-session-death id view)
-    id))
+    (agent-repl--frontend-surface-session-death workspace view)
+    workspace))
 
-(defun agent-repl--frontend-surface-session-death (id view)
-  "Surface VIEW's classified death for session ID, at most once.
+(defun agent-repl--frontend-surface-session-death (key view)
+  "Surface VIEW's classified death for workspace KEY, at most once.
+KEY is the wire cwd the view arrived under.
 
 Returns the surfaced text, or nil when the session is alive, carries no
 classified death, or has already been reported."
@@ -1018,26 +1050,26 @@ classified death, or has already been reported."
   ;; replayed SessionView frame — including the no-death verbose path — so
   ;; carrying the wire CWD any further would make the chattiest branch in the
   ;; frame handler signal inside the connection's process filter.
-  (let ((workspace (agent-repl--frontend-ws-name (plist-get view :workspace)))
+  (let ((workspace (agent-repl--frontend-ws-name key))
         (item (plist-get view :death)))
     (cond
      ((null item)
       ;; SessionView frames are replayed in every snapshot; absence of death
       ;; is useful only while tracing that chatty stream.
       (agent-repl--log-verbose workspace
-                               "frontend-surface-session-death: id=%s outcome=no-death"
-                               id)
+                               "frontend-surface-session-death: ws=%s outcome=no-death"
+                               key)
       nil)
-     ((gethash id agent-repl--frontend-surfaced-deaths)
+     ((equal item (gethash key agent-repl--frontend-surfaced-deaths))
       (agent-repl--log-verbose workspace
-                               "frontend-surface-session-death: id=%s outcome=already-surfaced"
-                               id)
+                               "frontend-surface-session-death: ws=%s outcome=already-surfaced"
+                               key)
       nil)
      (t
-      (puthash id t agent-repl--frontend-surfaced-deaths)
+      (puthash key item agent-repl--frontend-surfaced-deaths)
       (agent-repl--log workspace
-                       "frontend-surface-session-death: id=%s outcome=surface error-class=%s error-type=%s"
-                       id (plist-get item :errorClass) (plist-get item :errorType))
+                       "frontend-surface-session-death: ws=%s outcome=surface error-class=%s error-type=%s"
+                       key (plist-get item :errorClass) (plist-get item :errorType))
       (agent-repl-failure-surface workspace (agent-repl-failure-from-wire item))))))
 
 ;;;; ---- SessionInit store (slash-command menu source) -------------------
@@ -1047,49 +1079,55 @@ classified death, or has already been reported."
 ;; the pushed-frame replacement for the deleted GET /commands HTTP menu: the
 ;; input buffer's slash-command completion (input.el) reads the retained
 ;; `SystemInit''s `slashCommands' off THIS store instead of fetching.  Keyed
-;; by session id; each value is the decoded `SystemInit' plist.
+;; by workspace; each value is the decoded `SystemInit' plist.
 
 (defvar agent-repl--frontend-session-inits (make-hash-table :test 'equal)
-  "Hash of session-id -> decoded `SystemInit' plist (from `SessionInitView').
-Populated by `agent-repl--frontend-apply-session-init' (per-session pushes)
-and rebuilt wholesale from the connect snapshot's `:inits'.  The source of
-truth for the slash-command menu now that Emacs no longer polls GET
-/commands.")
+  "Hash of WORKSPACE -> decoded `SystemInit' plist (from `SessionInitView').
 
-(defun agent-repl--frontend-session-init (session-id)
-  "Return the stored `SystemInit' plist for SESSION-ID, or nil when unknown."
-  (and session-id (gethash session-id agent-repl--frontend-session-inits)))
+ONE ENTRY PER WORKSPACE, for its current session: a successor's init
+replaces its predecessor's rather than accumulating beside it, so the
+menu a workspace offers is the one its running session announced.
+
+Populated by `agent-repl--frontend-apply-session-init' (per-session
+pushes) and rebuilt wholesale from the connect snapshot's `:inits'.  The
+source of truth for the slash-command menu; Emacs does not poll for it.")
+
+(defun agent-repl--frontend-session-init (workspace)
+  "Return the stored `SystemInit' plist for WORKSPACE, or nil when unknown.
+WORKSPACE is the absolute cwd the daemon routes by — WS's
+`agent-repl--frontend-ws-command-key', not a workspace NAME."
+  (and workspace (gethash workspace agent-repl--frontend-session-inits)))
 
 (defun agent-repl--frontend-store-session-init (view)
-  "Upsert a `SessionInitView' VIEW's `SystemInit' into the store, keyed by id.
-A view with no `:sessionId' is an invariant violation and fails loudly
-\(No-Silent-Fallbacks).  Returns the id."
-  (let ((id (plist-get view :sessionId))
+  "Upsert a `SessionInitView' VIEW's `SystemInit' under its workspace.
+A view with no `:workspace' is an invariant violation and fails loudly
+\(No-Silent-Fallbacks).  Returns the workspace."
+  (let ((workspace (plist-get view :workspace))
         (init (plist-get view :init)))
-    (when (or (null id) (and (stringp id) (string-empty-p id)))
+    (when (or (null workspace) (and (stringp workspace) (string-empty-p workspace)))
       (agent-repl--log nil
-                       "frontend-store-session-init: MISSING sessionId in %S — no fallback"
+                       "frontend-store-session-init: MISSING workspace in %S — no fallback"
                        view)
-      (error "agent-repl frontend: SessionInitView missing sessionId"))
-    (puthash id init agent-repl--frontend-session-inits)
-    id))
+      (error "agent-repl frontend: SessionInitView missing workspace"))
+    (puthash workspace init agent-repl--frontend-session-inits)
+    workspace))
 
 (defun agent-repl--frontend-apply-session-init (view)
   "Apply a `SessionInitView' frame VIEW (a plist).  Handler for `sessionInit'.
 Upserts its retained `SystemInit' into `agent-repl--frontend-session-inits'
 and logs the slash-command count the completion menu consumes.  Returns the
-id."
-  (let ((id (agent-repl--frontend-store-session-init view)))
+workspace."
+  (let ((workspace (agent-repl--frontend-store-session-init view)))
     ;; `:workspace' is a session CWD on the wire — see
     ;; `agent-repl--frontend-apply-session-view' for why it must be resolved
     ;; to a name before it can select a workspace log sink.
-    (agent-repl--log (agent-repl--frontend-ws-name (plist-get view :workspace))
-                     "frontend-apply-session-init: id=%s ws=%s slash-commands=%d skills=%d model=%s"
-                     id (plist-get view :workspace)
+    (agent-repl--log (agent-repl--frontend-ws-name workspace)
+                     "frontend-apply-session-init: ws=%s slash-commands=%d skills=%d model=%s"
+                     workspace
                      (length (plist-get (plist-get view :init) :slashCommands))
                      (length (plist-get (plist-get view :init) :skills))
                      (or (plist-get (plist-get view :init) :model) "nil"))
-    id))
+    workspace))
 
 ;;;; ---- DaemonView (boot/version/binary mtime) --------------------------
 ;;

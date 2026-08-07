@@ -49,7 +49,6 @@
 (declare-function agent-repl--ensure-frontend-daemon "agent-repl-daemon" (&optional force))
 (declare-function agent-repl--resolve-current-git-root "agent-repl-core" ())
 (declare-function agent-repl--initialize-ws-env "agent-repl-session" (ws &optional project-dir-hint active-env-hint))
-(declare-function agent-repl--frontend-sync-webview "agent-repl-frontend" (ws session-id))
 (declare-function agent-repl--frontend-snap-webview-to-tail "agent-repl-frontend" (ws))
 (declare-function agent-repl--frontend-remount-all-webviews "agent-repl-frontend" ())
 (declare-function agent-repl--frontend-init-inhibited-p "agent-repl-daemon" ())
@@ -68,10 +67,10 @@
 (declare-function agent-repl-uds-connect "frontend-uds" (&optional path readiness-p))
 (declare-function agent-repl--uds-run-timer "frontend-uds" (delay fn))
 (declare-function agent-repl--frontend-ws-name "frontend-state" (workspace))
-(declare-function agent-repl--frontend-session-view "frontend-state" (session-id))
+(declare-function agent-repl--frontend-session-view "frontend-state" (workspace))
+(declare-function agent-repl--frontend-workspace-session-live-p "frontend-state" (workspace))
 (declare-function agent-repl--frontend-session-views-all "frontend-state" ())
 (declare-function agent-repl--frontend-workspace-state-views-all "frontend-state" ())
-(declare-function agent-repl--frontend-live-session-id-for-cwd "frontend-state" (cwd))
 (declare-function agent-repl--frontend-daemon-view "frontend-state" ())
 (declare-function agent-repl--ws-dir "agent-repl-status" (ws))
 
@@ -423,8 +422,14 @@ timer or UDS callback after either continuation runs."
                 ws "createSession" request-id started on-failure
                 (format "command rejected: %s" (or err "no reason supplied"))))))
          (observe-view ()
+           ;; The create is correlated by CWD, which is what the command was
+           ;; keyed by: the daemon delivers the new session as the pushed
+           ;; SessionView for that workspace, and the id this reports is read
+           ;; out of that view rather than tracked by this end.
            (when acked
-             (when-let ((id (agent-repl--frontend-live-session-id-for-cwd cwd))) (finish id nil))))
+             (when-let ((view (agent-repl--frontend-session-view cwd)))
+               (unless (eq (plist-get view :terminal) t)
+                 (finish (plist-get view :sessionId) nil)))))
          (poll-view ()
            (observe-view)
            (unless settled (setq poll-timer (agent-repl--uds-run-timer 0.05 #'poll-view))))
@@ -446,7 +451,11 @@ timer or UDS callback after either continuation runs."
       :pending)))
 
 (defun agent-repl--frontend-after-ensure-session (ws on-success on-failure &optional purpose)
-  "Asynchronously provide WS's live session id through exactly one continuation.
+  "Asynchronously establish WS, then call exactly one continuation.
+ON-SUCCESS takes no arguments: establishment is a fact about the
+WORKSPACE, and which session the daemon has bound to it is the daemon\='s
+to know.  Emacs routes everything by WS\='s workspace key.
+
 PURPOSE is `presentation' or `send'.  A presentation reopens an existing
 workspace before delivering it; a send dispatches directly because
 `submitPrompt' performs the daemon-side establishment itself."
@@ -457,20 +466,20 @@ workspace before delivering it; a send dispatches directly because
         (agent-repl--frontend-async-fail ws "ensure-session" nil (float-time) on-failure
                                          "frontend daemon not started (auto-start disabled or init inhibited)")
         :failed)
-    (let ((existing (agent-repl--ws-get ws :frontend-session-id))
+    (let ((key (agent-repl--frontend-ws-command-key ws))
           (gated (not (eq purpose 'send))))
       (agent-repl--frontend-after-ready
      (lambda ()
-       (if (and existing (agent-repl--frontend-session-live-p existing))
+       (if (agent-repl--frontend-workspace-session-live-p key)
            (progn
              (agent-repl--log ws
-                              "ensure-session-async: reusing session=%s purpose=%s presentation-gate=%s"
-                              existing (or purpose 'presentation)
+                              "ensure-session-async: reusing the workspace's session purpose=%s presentation-gate=%s"
+                              (or purpose 'presentation)
                               (if gated "awaited" "skipped"))
              (if gated
                  (agent-repl--frontend-after-open-workspace
-                  ws (lambda () (funcall on-success existing)) on-failure)
-               (funcall on-success existing)))
+                  ws on-success on-failure)
+               (funcall on-success)))
          (let ((dir (or (agent-repl--ws-get ws :project-dir) (agent-repl--resolve-current-git-root))))
            (agent-repl--frontend-after-create-session
             dir (agent-repl--ws-get ws :model) 'continue nil nil
@@ -481,7 +490,7 @@ workspace before delivering it; a send dispatches directly because
               (agent-repl--ws-put ws :reattach-failed nil)
               (agent-repl--ws-put ws :reattach-failures nil)
               (agent-repl--frontend-reattach-timer-start)
-              (funcall on-success id))
+              (funcall on-success))
             on-failure ws))))
        on-failure ws)
       :pending)))
@@ -520,9 +529,9 @@ rather than leaving a hibernated session looking open."
 (defvar agent-repl--frontend-creates-in-flight (make-hash-table :test 'equal)
   "Set of cwds with a `createSession' command awaiting its ack.
 Serializes concurrent creates per workspace so the SessionView->id
-correlation (`agent-repl--frontend-live-session-id-for-cwd') stays
-unambiguous: a second create for the same cwd while one is in flight is
-refused loudly rather than racing two views onto one key.")
+correlation stays unambiguous: a second create for the same cwd while
+one is in flight is refused loudly rather than racing two creates onto
+one workspace.")
 
 (defun agent-repl--frontend-after-daemon-healthy (on-success on-failure)
   "Asynchronously require the daemon's initialization-readiness assertion.
@@ -619,64 +628,46 @@ store, and a rejected ack surfaces loudly via the shared ack handler."
 ;; `SessionInitView' (retained `SystemInit'), read off frontend-state.el's
 ;; session-init store by input.el's completion — no HTTP round-trip.
 
-(defun agent-repl--frontend-session-live-p (id)
-  "Return non-nil when ID has a pushed `SessionView' that is not terminal.
-Reads the frontend-state.el SessionView store the daemon pushes into — the
-replacement for the GET /sessions per-id probe."
-  (let ((view (agent-repl--frontend-session-view id)))
-    (and view (not (eq (plist-get view :terminal) t)))))
-
 (defun agent-repl--frontend-turn-active-sessions ()
-  "Return live session ids whose authoritative workspace is mid-turn.
+  "Return the workspaces whose latest daemon state is mid-turn.
 This daemon-stop guard delegates to
-`agent-repl--frontend-all-turn-active-session-ids' so startup and explicit
+`agent-repl--frontend-all-turn-active-workspaces' so startup and explicit
 stop cannot form two opinions from different caches."
-  (agent-repl--frontend-all-turn-active-session-ids))
+  (agent-repl--frontend-all-turn-active-workspaces))
 
-(defun agent-repl--frontend-all-turn-active-session-ids ()
-  "Return every live session id whose latest daemon state is turn-active.
-Correlates daemon-owned snapshot collections by WORKSPACE PATH: an active
-`WorkspaceState' contributes every non-terminal `SessionView' whose
-`:workspace' is the same path.  It never compares their session ids:
-lifecycle-backed WorkspaceState rows can name the vendor UUID, while
-SessionView.sessionId is the daemon's `s_...' identity.
+(defun agent-repl--frontend-all-turn-active-workspaces ()
+  "Return every workspace with a live session whose daemon state is turn-active.
+Correlates the two daemon-owned collections by WORKSPACE PATH, which is
+the key both are stored under: a turn-active `WorkspaceState' counts when
+the same path also has a non-terminal `SessionView'.
 
-This includes unrestored workspace paths and ignores stale local
-`:frontend-session-id' bindings, protecting every real turn without letting
-an obsolete binding block forever."
+No session id is compared, and none could be: a lifecycle-backed
+WorkspaceState row can name the vendor UUID while the SessionView beside
+it names the daemon's own identity for the session.  The workspace path
+is the one key both agree on.
+
+This covers unrestored workspace paths too, protecting every real turn."
   (let ((states (agent-repl--frontend-workspace-state-views-all))
-        (sessions (agent-repl--frontend-session-views-all))
         busy
         active-workspaces
         unmatched)
     (dolist (state states)
       (when (eq (plist-get state :turnActive) t)
         (let* ((workspace (plist-get state :workspace))
-               (state-session-id (plist-get state :sessionId))
-               (matches
-                (delq nil
-                      (mapcar
-                       (lambda (view)
-                         (let ((sid (plist-get view :sessionId)))
-                           (and sid
-                                (equal (plist-get view :workspace) workspace)
-                                (agent-repl--frontend-session-live-p sid)
-                                sid)))
-                       sessions))))
+               (live (agent-repl--frontend-workspace-session-live-p workspace)))
           (push workspace active-workspaces)
-          (if matches
-              (setq busy (append matches busy))
-            (push (list workspace state-session-id) unmatched))
+          (if live
+              (push workspace busy)
+            (push workspace unmatched))
           (agent-repl--log-verbose
            (agent-repl--frontend-ws-name workspace)
-           "frontend turn-active correlate: workspace=%S state-session-id=%S matching-live-session-ids=%S matched=%s"
-           workspace state-session-id matches (if matches "t" "nil")))))
+           "frontend turn-active correlate: workspace=%S live-session=%s"
+           workspace (if live "t" "nil")))))
     (setq busy (sort (delete-dups busy) #'string<))
     (agent-repl--log
      nil
-     "frontend turn-active probe: source=workspace-state+session-roster state-count=%d session-count=%d active-workspaces=%S busy=%S unmatched=%S"
-     (length states) (length sessions) (nreverse active-workspaces) busy
-     (nreverse unmatched))
+     "frontend turn-active probe: source=workspace-state+session-roster state-count=%d active-workspaces=%S busy=%S unmatched=%S"
+     (length states) (nreverse active-workspaces) busy (nreverse unmatched))
     busy))
 
 ;; The client-side orphan reaper that used to live here is GONE, on purpose.
@@ -913,10 +904,9 @@ the workspace is marked `:reattach-failed' and a warning surfaces."
     (agent-repl--ws-put ws :frontend-session-id nil)
     (agent-repl--frontend-after-ensure-session
      ws
-     (lambda (id)
-       (agent-repl--frontend-sync-webview ws id)
+     (lambda ()
        (agent-repl--ws-put ws :reattach-failures nil)
-       (agent-repl--log ws "reattach: ws=%s recovered as %s" ws id))
+       (agent-repl--log ws "reattach: ws=%s recovered" ws))
      #'failed)
     :pending))
 
@@ -944,11 +934,11 @@ workspaces that carried a session binding to rebind."
       (agent-repl--log nil
                        "reattach: explicit rebind recovery-owner=snapshot-hook bound-workspaces=%d"
                        n)
-      ;; The snapshot hook drives each workspace's daemon session and, via
-      ;; `agent-repl--frontend-sync-webview', remounts only those whose
-      ;; session id CHANGED.  A session that rehydrated under its old id is
-      ;; left untouched, so its webview would keep rendering the pre-bounce
-      ;; bundle.  Force a remount of EVERY open webview so a bounce reliably
+      ;; The snapshot hook drives each workspace's daemon session, but no
+      ;; webview is remounted for it: a webview addresses its workspace, so a
+      ;; bounce leaves every mounted URL naming the same thing and the pages
+      ;; keep rendering the pre-bounce BUNDLE.  Force a remount of EVERY open
+      ;; webview so a bounce reliably
       ;; reloads the served bundle across the board — a bounce is exactly
       ;; when a fresh build lands, and each remount replays history off the
       ;; live session, so nothing is lost.
@@ -1148,12 +1138,13 @@ Fetches the daemon-captured claude_session_id for WS's bound session;
 nil when unbound, not yet initialized, or the daemon is unreachable
 \(logged — a dead daemon degrades a frontend switch to a fresh
 conversation rather than aborting it)."
-  (when-let ((sid (agent-repl--ws-get ws :frontend-session-id)))
-    ;; Read the durable id off the pushed `SessionView' store (the daemon
-    ;; stamps `claudeSessionId' once the CLI reports it), not a GET /sessions
-    ;; round-trip.  Absent until the first frame lands — nil then, exactly as
-    ;; the old unreachable/uninitialized path degraded.
-    (plist-get (agent-repl--frontend-session-view sid) :claudeSessionId)))
+  ;; Read the durable id off the pushed `SessionView' store (the daemon
+  ;; stamps `claudeSessionId' once the CLI reports it), keyed by the same
+  ;; workspace every command from WS is routed by.  Absent until the first
+  ;; frame lands — nil then, exactly as an unreachable daemon degrades.
+  (plist-get (agent-repl--frontend-session-view
+              (agent-repl--frontend-ws-command-key ws))
+             :claudeSessionId))
 
 (defun agent-repl--gui-adopt-session
     (ws claude-session-id on-success on-failure)
@@ -1183,10 +1174,9 @@ the subsequent open attaches to the continued conversation."
 Mirrors `agent-repl--gui-adopt-session' but passes NO resume, so a BLANK
 conversation replaces whatever the normal ensure path would replay.
 Resets the reattach failure markers so the fresh binding reads as healthy.
-Does NOT sync the webview — callers that display do that.  The fresh
-session captures its own durable id through the usual hook path once it
-runs, so a later resume continues the fresh conversation rather than the
-discarded one."
+ON-SUCCESS takes no arguments.  The fresh session captures its own
+durable id through the usual hook path once it runs, so a later resume
+continues the fresh conversation rather than the discarded one."
   (unless (and (functionp on-success) (functionp on-failure))
     (error "agent-repl: force-fresh requires callable continuations"))
   (if (not (agent-repl--ensure-frontend-daemon))
@@ -1203,7 +1193,7 @@ discarded one."
          (agent-repl--ws-put ws :reattach-failures nil)
          (agent-repl--log ws "force-fresh-conversation: fresh session %s bound (cwd=%s)"
                           id dir)
-         (funcall on-success id))
+         (funcall on-success))
        on-failure ws)))
   :pending)
 
@@ -1236,17 +1226,15 @@ is gone — matching the already-dead server behavior (the retired HTTP
     (error "agent-repl: frontend send requires an explicit prompt origin"))
   (agent-repl--frontend-after-ensure-session
    ws
-   (lambda (id)
+   (lambda ()
      (let ((origin (agent-repl--ws-get ws :next-send-origin)))
-       ;; The ensure may have HEALED a dead binding into a fresh session.
-       (agent-repl--frontend-sync-webview ws id)
        (when origin (agent-repl--ws-put ws :next-send-origin nil))
-       (agent-repl--log ws "frontend send: session=%s len=%d origin=%s prompt-origin=%s (uds submitPrompt)"
-                        id (length text) origin prompt-origin)
+       (agent-repl--log ws "frontend send: len=%d origin=%s prompt-origin=%s (uds submitPrompt)"
+                        (length text) origin prompt-origin)
        (let ((req (agent-repl--uds-send-command
                    "submitPrompt" (list :text text :promptOrigin prompt-origin)
                    (agent-repl--frontend-ws-command-key ws))))
-         (agent-repl--log ws "frontend send: dispatched session=%s request-id=%s" id req)
+         (agent-repl--log ws "frontend send: dispatched request-id=%s" req)
          (funcall on-success req))))
    on-failure 'send)
   :pending)
@@ -1295,8 +1283,8 @@ sweep uses, so a workspace the daemon simply cannot open never retry-loops."
   :type 'integer
   :group 'agent-repl)
 
-(defun agent-repl--frontend-backfill-settled-p (session-id)
-  "Return non-nil when SESSION-ID's history has finished arriving (F2).
+(defun agent-repl--frontend-backfill-settled-p (workspace)
+  "Return non-nil when WORKSPACE's history has finished arriving (F2).
 Reads the daemon-resolved `SessionView.backfill' off the pushed-frame store
 \(frontend-state.el); the webapp and Emacs share one verdict and neither
 derives it.
@@ -1314,19 +1302,19 @@ must never be mistaken for \"nothing to backfill\".
 
 A daemon too old to send the field reports nil, which reads as settled: it
 cannot backfill on switch either, so retrying would loop for nothing."
-  (let ((state (plist-get (agent-repl--frontend-session-view session-id) :backfill)))
+  (let ((state (plist-get (agent-repl--frontend-session-view workspace) :backfill)))
     (or (null state)
         (member state '("BACKFILL_STATE_DONE" "BACKFILL_STATE_UNSPECIFIED")))))
 
-(defun agent-repl--frontend-session-controller-live-p (session-id)
-  "Return non-nil when the daemon holds a LIVE SESSION CONTROLLER for SESSION-ID.
+(defun agent-repl--frontend-session-controller-live-p (workspace)
+  "Return non-nil when the daemon holds a LIVE SESSION CONTROLLER for WORKSPACE.
 Reads `SessionView.shim_attached\=' off the pushed-frame store — the one
 field on that message that is NOT read back from the durable registry
 record.
 
 WHY LIVENESS CANNOT BE READ OFF THE RECORD (the dead perspective switch).
-`agent-repl--frontend-session-live-p\=' answers whether this record is
-non-terminal, and `agent-repl--frontend-backfill-settled-p\=' answers
+`agent-repl--frontend-workspace-session-live-p\=' answers whether this
+record is non-terminal, and `agent-repl--frontend-backfill-settled-p\=' answers
 whether its history finished arriving.  Both are DURABLE, so both keep
 answering yes across a daemon restart — about a daemon that has no session controller for the
 workspace at all.  The switch-ensure skipped on exactly that pair, so
@@ -1337,7 +1325,7 @@ blue until the user typed.
 A daemon too old to send the field reports nil, which reads as NOT live
 and therefore sends: the cooldown bounds the cost, and an unnecessary
 ensure is idempotent while a skipped one is the bug above."
-  (eq (plist-get (agent-repl--frontend-session-view session-id) :shimAttached) t))
+  (eq (plist-get (agent-repl--frontend-session-view workspace) :shimAttached) t))
 
 (defun agent-repl--frontend-ensure-skip-reason (ws)
   "Return a string naming why WS must not send `openWorkspace', or nil to send.
@@ -1374,11 +1362,10 @@ reattach sweep — are each other's retry."
    ;;
    ;; Everything that falls through is bounded by the cooldown and give-up
    ;; below.
-   ((let ((id (agent-repl--ws-get ws :frontend-session-id)))
-      (and id
-           (agent-repl--frontend-session-live-p id)
-           (agent-repl--frontend-session-controller-live-p id)
-           (agent-repl--frontend-backfill-settled-p id)))
+   ((let ((key (agent-repl--frontend-ws-command-key ws)))
+      (and (agent-repl--frontend-workspace-session-live-p key)
+           (agent-repl--frontend-session-controller-live-p key)
+           (agent-repl--frontend-backfill-settled-p key)))
     "session already live, driven and backfilled")
    ((agent-repl--ws-get ws :ensure-failed) "gave up after repeated failures")
    ((let ((at (agent-repl--ws-get ws :ensure-at)))

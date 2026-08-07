@@ -49,7 +49,7 @@
 (declare-function agent-repl--frontend-after-ready "agent-repl-frontend-client" (on-ready on-failure &optional ws))
 (declare-function agent-repl--frontend-after-create-session "agent-repl-frontend-client" (cwd model resume-mode explicit-id force-fresh on-success on-failure &optional ws))
 (declare-function agent-repl--frontend-delete-session "agent-repl-frontend-client" (id &optional ws))
-(declare-function agent-repl--frontend-session-live-p "agent-repl-frontend-client" (id))
+(declare-function agent-repl--frontend-session-views-all "agent-repl-frontend-state" ())
 (declare-function agent-repl--frontend-session-url "agent-repl-frontend-client" (session-id))
 (declare-function agent-repl-frontend-ungated-permission-mode-p "agent-repl-frontend-client" (mode))
 (declare-function agent-repl--uds-send-command "frontend-uds" (field payload &optional workspace process &rest keys))
@@ -374,6 +374,24 @@ touched."
 
 ;;;; ---- Session ---------------------------------------------------------------
 
+(defun agent-repl--explain-config-session-live-p (id)
+  "Return non-nil when the daemon's pushed roster carries ID as non-terminal.
+
+THE ONLY SESSION-ID LOOKUP LEFT IN THE EDITOR, and it is confined here
+because this module is the one thing without a workspace to ask about:
+its session is global, pinned, and rooted at the canonical config
+checkout rather than at any workspace, so a workspace-keyed liveness
+question would answer about whichever session owns that directory
+instead of about the explainer.
+
+A linear scan of the pushed roster, not an index: the roster is keyed by
+workspace, one entry per workspace, and there is exactly one caller."
+  (and id
+       (cl-some (lambda (view)
+                  (and (equal (plist-get view :sessionId) id)
+                       (not (eq (plist-get view :terminal) t))))
+                (agent-repl--frontend-session-views-all))))
+
 (defun agent-repl--explain-config-cwd ()
   "Return the fixed cwd the explain-config session runs in (its workspace key).
 The daemon keys `submitPrompt'/`createSession'/`deleteSession' by this cwd,
@@ -410,7 +428,7 @@ priming state change only after a new SessionView has been correlated."
      (lambda ()
        (let* ((recorded-id agent-repl--explain-config-session-id)
               (live-p (and recorded-id
-                           (agent-repl--frontend-session-live-p recorded-id))))
+                           (agent-repl--explain-config-session-live-p recorded-id))))
          (agent-repl--log nil
                           "explain-config: daemon ready recorded-session=%S live=%s"
                           recorded-id live-p)
