@@ -17,6 +17,15 @@
 // from atomic renames and whose "these three fields move together" property
 // came from write-ordering discipline. The one-time import of that file lives
 // in legacy.go; after it, the tables are the sole authority.
+//
+// THE JSON REGISTRY IS RETIRED, NOT BROKEN. $AGENT_REPL_STATE_DIR/
+// claude-repld-sessions.json has not been written since that migration and
+// never will be again: its mtime is frozen at the import, and a session created
+// afterwards is deliberately absent from it. Anything reading it for identity
+// is reading pre-migration history. legacy.go plants a `.RETIRED` deprecation
+// record beside it saying exactly that, and sweeps the dead writer's orphaned
+// `.tmp-<n>` partials and `.lock`, so the freeze cannot be mistaken for an
+// atomic-write path that keeps failing.
 package registry
 
 import (
@@ -277,6 +286,12 @@ type Options struct {
 	// LegacyJSONPath is the pre-SQLite registry file to import ONCE, on the
 	// first open of an empty database. Empty disables the import.
 	LegacyJSONPath string
+	// StorePath is the state store's path, recorded in the retired JSON
+	// registry's deprecation record as the successor authority. It cannot be
+	// derived when DB carries a handle whose path this package never saw, and
+	// naming the wrong store in a signpost is worse than planting none.
+	// Defaults to DBPath.
+	StorePath string
 	// Logf is the loud failure/anomaly logger. Nil discards.
 	Logf func(string, ...any)
 }
@@ -364,6 +379,15 @@ func OpenWith(opts Options) *Registry {
 		r.loadErr = err
 		return r
 	}
+	// The import decision is settled, so the file's status is now certain:
+	// retired, unread, unwritten. Say so on disk (see retireLegacyJSON) —
+	// otherwise the frozen file and the dead writer's orphaned temp files keep
+	// answering identity questions with a snapshot from the migration.
+	storePath := opts.StorePath
+	if storePath == "" {
+		storePath = opts.DBPath
+	}
+	r.retireLegacyJSON(opts.LegacyJSONPath, storePath)
 	records, checkpoints, err := loadState(r.db, r.logf)
 	if err != nil {
 		r.loadErr = err
