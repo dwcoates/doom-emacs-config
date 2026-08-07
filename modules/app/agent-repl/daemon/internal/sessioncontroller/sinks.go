@@ -1055,7 +1055,18 @@ func (c *consumer) heldTerminalTurnIDs() []string {
 // The teardown's axis close (settleTurnAfterStop) is deliberately NOT one of
 // them and cannot be: it runs after the eviction and the cancel, with neither
 // the session controller nor its consumer in reach.
+//
+// A TURN CAN BE NAMED BY TWO OF THEM AT ONCE. Each authority snapshots the held
+// set and then settles it, and nothing serializes one snapshot against the
+// other's discharge: a synthesized close and a teardown observed the same turn
+// held, and the second to run reached a reducer entry the first had already
+// retired. That second settlement is served from the durable store by
+// serveRetiredTurnAccounting rather than recomputed — the recompute would be
+// evidence-free, and it used to kill the daemon outright.
 func (c *consumer) settleTurnAccounting(turnID string) error {
+	if !c.accounting.hasTurn(turnID) {
+		return c.serveRetiredTurnAccounting(turnID)
+	}
 	accounting := c.accounting.resolveTurn(turnID, c.now())
 	accounting, err := c.accountingStore.Record(c.sessionID, accounting)
 	if err != nil {
@@ -1089,10 +1100,62 @@ func (c *consumer) settleTurnAccounting(turnID string) error {
 			c.sessionID, turnID)
 		accounting = persisted
 	}
-	c.accounting.commitResolved(turnID)
+	if err := c.accounting.commitResolved(turnID); err != nil {
+		// The precheck above already answered this question, so reaching here
+		// means the reducer changed underneath a settlement that owns it. Report
+		// it rather than absorb it: the record was persisted and the turn must
+		// still be published, but the ledger and the settlement disagreeing is an
+		// invariant violation in its own right.
+		c.warn("session-controller: ACCOUNTING LEDGER RETIRED UNDER SETTLEMENT session=%s ws=%s turn_id=%s decision=publish_persisted_record — the turn's accounting record persisted, but its reducer entry was already retired when the commit ran: %v",
+			c.sessionID, c.workspace, turnID, err)
+	}
+	c.publishHeldTerminalResult(turnID, accounting)
+	return nil
+}
+
+// serveRetiredTurnAccounting answers a settlement naming a turn the reducer
+// holds no unsettled entry for.
+//
+// THE REDUCER IS NOT THE AUTHORITY HERE, the store is. A retired entry means
+// this turn's accounting was already resolved and persisted — by an earlier
+// release authority in this process, or by the generation that actually
+// observed the turn before a replay carried its rows past a fresh reducer.
+// Recomputing would produce an evidence-free record, so the persisted
+// settlement is served instead, on exactly the terms settleTurnAccounting
+// serves one on a divergent-replay persistence failure.
+//
+// THE CONDITION STAYS LOUD. Every branch records through the consumer's WARN
+// channel with the session, workspace, turn, the held result's seq, and the
+// branch decision, because a second settlement for one turn is a collision
+// worth the record even when the user is served correctly.
+func (c *consumer) serveRetiredTurnAccounting(turnID string) error {
+	held := c.heldTerminalResult(turnID)
+	seq := held.GetSeq()
+	persisted, found, err := c.persistedTurnAccounting(turnID)
+	if err != nil {
+		c.warn("session-controller: ACCOUNTING SETTLEMENT NAMES RETIRED TURN session=%s ws=%s turn_id=%s seq=%d decision=persisted_lookup_failed — this turn's reducer entry was already retired by an earlier settlement and the persisted settlement could NOT be read either: %v",
+			c.sessionID, c.workspace, turnID, seq, err)
+		return err
+	}
+	if !found {
+		c.warn("session-controller: ACCOUNTING SETTLEMENT NAMES RETIRED TURN session=%s ws=%s turn_id=%s seq=%d decision=no_persisted_settlement — this turn has neither a reducer entry nor a persisted settlement, so its accounting is unavailable and any retained terminal result stays unpublished",
+			c.sessionID, c.workspace, turnID, seq)
+		return fmt.Errorf("%w %q", ErrAccountingCommitUnknownTurn, turnID)
+	}
+	c.warn("session-controller: ACCOUNTING SETTLEMENT NAMES RETIRED TURN session=%s ws=%s turn_id=%s seq=%d decision=served_persisted_settlement held_terminal=%v — an earlier release authority already settled and retired this turn, so its already-persisted settlement is authoritative and is served rather than recomputed",
+		c.sessionID, c.workspace, turnID, seq, held != nil)
+	c.publishHeldTerminalResult(turnID, persisted)
+	return nil
+}
+
+// publishHeldTerminalResult discharges a turn's hold, if it still has one, and
+// publishes what it held against the settled accounting record. Discharge and
+// publication are one step so two settlements naming the same turn cannot both
+// push its result.
+func (c *consumer) publishHeldTerminalResult(turnID string, accounting *frontendv1.TurnAccounting) {
 	terminal := c.takeHeldTerminalResult(turnID)
 	if terminal == nil {
-		return nil
+		return
 	}
 	c.terminalAccounting[terminal.GetSeq()] = accounting
 	c.mu.Lock()
@@ -1102,7 +1165,6 @@ func (c *consumer) settleTurnAccounting(turnID string) error {
 	}
 	c.mu.Unlock()
 	c.pushConversation(terminal, true)
-	return nil
 }
 
 // persistedTurnAccounting reports the settlement the store already holds for
