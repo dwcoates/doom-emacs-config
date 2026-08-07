@@ -238,7 +238,16 @@ export class ControlDispatch {
    */
   cancelAll(reason: string): void {
     if (this.pending.size > 0) {
-      LOGGER.log({ pending_count: this.pending.size, reason }, "cancelling outstanding permission requests");
+      // Each cancelled wait is a tool DENIED without the user ever being
+      // asked, so this is a decision made on their behalf rather than a
+      // lifecycle note. The request ids go with it: the bounded set is what
+      // lets an operator tell which asks were answered for them.
+      LOGGER.log({
+        level: "warn",
+        pending_count: this.pending.size,
+        reason,
+        request_ids: [...this.pending.keys()],
+      }, "cancelling outstanding permission requests; each is force-denied without the user seeing the prompt");
     }
     for (const [id, pending] of this.pending) {
       this.pending.delete(id);
