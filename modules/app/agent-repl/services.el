@@ -26,6 +26,8 @@
 (declare-function agent-repl--frontend-runtime-bounce-preflight-async "daemon" (callback))
 (declare-function agent-repl--log "core" (ws fmt &rest args))
 (declare-function agent-repl--log-verbose "core" (ws fmt &rest args))
+(declare-function agent-repl-uds-disconnect "frontend-uds" ())
+(declare-function agent-repl--frontend-invalidate-daemon-view "frontend-state" (reason))
 
 (defvar agent-repl-frontend-health-timeout)
 (defvar agent-repl-frontend-ready-attempts)
@@ -282,6 +284,25 @@ validated both jobs before building any runtime artifact."
      (funcall on-failure detail)))
   :pending)
 
+(defun agent-repl--runtime-retire-bounced-link ()
+  "Retire the UDS link that belonged to the daemon a bounce just replaced.
+
+A bounce DEFINITIONALLY ends the connection it was issued over: the old
+daemon has already exited by the time the replacement is started.  Left
+alone, the retired socket can still read as live for a beat while the
+retained `DaemonView' still describes the daemon that is gone, so
+`agent-repl--frontend-after-ready' returns `ready' against the corpse and
+the next command's `process-send-string' fails with \"no longer connected
+to pipe\" — a restart that SUCCEEDED reported as a rejected command.
+
+Retiring the link here makes that unrepresentable rather than unlikely:
+readiness after a bounce can only be satisfied by a fresh dial and the
+REPLACEMENT daemon's own snapshot.  A replacement that never arrives still
+exhausts the readiness budget and fails loudly."
+  (agent-repl--log nil "runtime-prepare: retiring bounced daemon link before readiness")
+  (agent-repl-uds-disconnect)
+  (agent-repl--frontend-invalidate-daemon-view "runtime-bounce-retired-link"))
+
 (defun agent-repl--runtime-prepare (rebind on-success on-failure &optional stop-shims)
   "Asynchronously bounce dependencies, verify the daemon, and optionally REBIND.
 ON-SUCCESS runs only after every requested stage completes.  ON-FAILURE
@@ -339,7 +360,9 @@ receives the first diagnostic and no later stage starts."
                   (lambda ()
                     (agent-repl--frontend-bounce-after-build
                      daemon-state stop-shims
-                     (lambda (_started) (after-daemon-bounce))))
+                     (lambda (_started)
+                      (agent-repl--runtime-retire-bounced-link)
+                      (after-daemon-bounce))))
                   #'fail))
              (error (fail (error-message-string err)))))
          (after-preflight (daemon-state)

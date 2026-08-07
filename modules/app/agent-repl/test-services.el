@@ -120,6 +120,61 @@
       (agent-repl--runtime-prepare t #'ignore #'error t)
       (should seen))))
 
+(defmacro agent-repl-services-test--with-bounced-link (bindings &rest body)
+  "Run BODY over a runtime restart whose bounce retires the pre-bounce link.
+BINDINGS are extra `cl-letf' forms appended after the shared stubs, so a
+test can override readiness without restating the whole coordinator."
+  (declare (indent 1))
+  `(cl-letf (((symbol-function 'agent-repl--frontend-runtime-bounce-preflight-async)
+              (lambda (callback) (funcall callback :tracked)))
+             ((symbol-function 'agent-repl--frontend-all-turn-active-workspaces)
+              (lambda () nil))
+             ((symbol-function 'agent-repl--shim-services-assert-launchd-loaded) #'ignore)
+             ((symbol-function 'agent-repl--frontend-build-if-stale) #'ignore)
+             ((symbol-function 'agent-repl--shim-services-build-and-bounce)
+              (lambda (_preflight ok _fail) (funcall ok) :pending))
+             ((symbol-function 'agent-repl--frontend-bounce-after-build)
+              (lambda (_state _stop on-complete) (funcall on-complete 'started)))
+             ((symbol-function 'agent-repl--frontend-after-daemon-healthy)
+              (lambda (ok _fail) (funcall ok) :pending))
+             ((symbol-function 'agent-repl--frontend-rebind-workspaces-after-restart)
+              (lambda (ok _fail) (funcall ok 0) :pending))
+             ,@bindings)
+     ,@body))
+
+(ert-deftest agent-repl-services-test-runtime-restart-await-retires-bounced-link ()
+  "Post-bounce readiness can no longer be satisfied by the retired link."
+  (let ((agent-repl--frontend-last-daemon-view '(:bootId "outgoing"))
+        disconnected observed)
+    (agent-repl-services-test--with-bounced-link
+        (((symbol-function 'agent-repl-uds-disconnect)
+          (lambda () (setq disconnected t)))
+         ((symbol-function 'agent-repl--frontend-after-ready)
+          (lambda (ok _fail &optional _ws)
+            (push (list :view (agent-repl--frontend-daemon-view)
+                        :disconnected disconnected)
+                  observed)
+            (funcall ok)
+            :pending)))
+      (should (equal "runtime-restart-complete"
+                     (agent-repl-runtime-restart-await nil 1.0)))
+      (should (equal (car observed) '(:view nil :disconnected t))))))
+
+(ert-deftest agent-repl-services-test-runtime-restart-await-fails-when-replacement-never-ready ()
+  "Retiring the bounced link never converts a missing replacement into success."
+  (let ((agent-repl--frontend-last-daemon-view '(:bootId "outgoing"))
+        (ready-calls 0))
+    (agent-repl-services-test--with-bounced-link
+        (((symbol-function 'agent-repl-uds-disconnect) #'ignore)
+         ((symbol-function 'agent-repl--frontend-after-ready)
+          (lambda (ok fail &optional _ws)
+            (cl-incf ready-calls)
+            (if (= ready-calls 1)
+                (funcall ok)
+              (funcall fail "daemon at /sock never became ready"))
+            :pending)))
+      (should-error (agent-repl-runtime-restart-await nil 1.0) :type 'error))))
+
 (ert-deftest agent-repl-services-test-runtime-restart-await-requires-terminal-success ()
   "The deployment surface returns only after its success continuation runs."
   (let (finish pumps)
