@@ -1013,7 +1013,7 @@ file intake."
           (process-send-eof proc)
           proc)
       (error
-       (agent-repl--log nil "spawn-workspace-generation[%s]: spawn failed err=%S" gen-id err)
+       (agent-repl--warn nil "spawn-workspace-generation[%s]: spawn failed err=%S" gen-id err)
        (when (buffer-live-p out-buf) (kill-buffer out-buf))
        nil))))
 
@@ -1749,7 +1749,7 @@ Falls back to immediate invocation after
                         ws state elapsed)
       (funcall teardown-fn))
      ((>= elapsed agent-repl-gns-sockets-close-timeout)
-      (agent-repl--log ws "gns-sockets-close-poll: ws=%s timeout after %.2fs (state=%s) — tearing down anyway"
+      (agent-repl--warn ws "gns-sockets-close-poll: ws=%s timeout after %.2fs (state=%s) — tearing down anyway"
                         ws elapsed state)
       (funcall teardown-fn))
      (t
@@ -1930,9 +1930,9 @@ annotation must not error out the whole batch."
         (note (alist-get 'note cmd)))
     (cond
      ((not ws)
-      (agent-repl--log nil "host-action legacy-command clipboard: missing workspace, skipping"))
+      (agent-repl--warn nil "host-action legacy-command clipboard: missing workspace, skipping"))
      ((not text)
-      (agent-repl--log ws "host-action legacy-command clipboard: missing text, skipping"))
+      (agent-repl--warn ws "host-action legacy-command clipboard: missing text, skipping"))
      (t
       (agent-repl--log ws "host-action legacy-command clipboard: ws=%s len=%d note=%s"
                         ws (length text) (or note "nil"))
@@ -2019,9 +2019,9 @@ absent — a malformed command must not error out the whole batch."
         (data-cell (assq 'data cmd)))
     (cond
      ((not ws)
-      (agent-repl--log nil "host-action legacy-command send: missing workspace, skipping"))
+      (agent-repl--warn nil "host-action legacy-command send: missing workspace, skipping"))
      ((not data-cell)
-      (agent-repl--log ws "host-action legacy-command send: missing data, skipping"))
+      (agent-repl--warn ws "host-action legacy-command send: missing data, skipping"))
      (t
       (let ((data (cdr data-cell)))
         (agent-repl--log ws "host-action legacy-command send: ws=%s data-type=%s"
@@ -2572,7 +2572,7 @@ genuine silent failure."
                                   (length target-only) landed)
                 landed))))
         (error
-         (agent-repl--log ws "detect-merge-actually-landed: err ws=%s err=%S — defaulting to t"
+         (agent-repl--warn ws "detect-merge-actually-landed: err ws=%s err=%S — defaulting to t"
                            ws err)
          t))))))
 

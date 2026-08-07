@@ -240,7 +240,7 @@ corrupts window-layout assertions in the test suite."
         (condition-case err
             (agent-repl--run-install-action "install" t)
           (error
-           (agent-repl--log nil "auto-install failed: %S" err))))))))
+           (agent-repl--warn nil "auto-install failed: %S" err))))))))
 
 ;; The actual call happens at the bottom of this file, after
 ;; `agent-repl--doctor-issues' and its helpers are defined.
@@ -421,7 +421,7 @@ appear in the registered command string however it is spelled."
                       ;; way; report it and treat this file as clean rather
                       ;; than forcing a purge run on a guess.
                       (error
-                       (agent-repl--log nil "purge-legacy-hooks: cannot read %s" settings)
+                       (agent-repl--warn nil "purge-legacy-hooks: cannot read %s" settings)
                        nil))))
           (when body
             (let ((legacy-name
@@ -479,9 +479,9 @@ reads, which must not be allowed to break module load."
                            (agent-repl--run-install-script "purge-legacy-hooks")))
                 (if (eq code 0)
                     (agent-repl--log nil "purge-legacy-hooks: done\n%s" output)
-                  (agent-repl--log nil "purge-legacy-hooks: FAILED (exit %s)\n%s" code output)))
+                  (agent-repl--warn nil "purge-legacy-hooks: FAILED (exit %s)\n%s" code output)))
             (error
-             (agent-repl--log nil "purge-legacy-hooks: FAILED (%s)"
+             (agent-repl--warn nil "purge-legacy-hooks: FAILED (%s)"
                               (error-message-string err)))))
       (agent-repl--log nil "purge-legacy-hooks: skipped; no legacy entries")))))
 

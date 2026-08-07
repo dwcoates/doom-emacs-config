@@ -1007,7 +1007,7 @@ would wipe that workspace's running session."
                   (agent-repl--log ws "kill-workspace-buffers: buf=%s done elapsed=%.3fs"
                                     buf-name (- (float-time) t-buf))))
             (error
-             (agent-repl--log ws "kill-workspace-buffers: error on %s: %S"
+             (agent-repl--warn ws "kill-workspace-buffers: error on %s: %S"
                                (agent-repl--safe-buffer-name buf) err))))
         (agent-repl--log ws "kill-workspace-buffers: dolist done count=%d" (length bufs))))))
 

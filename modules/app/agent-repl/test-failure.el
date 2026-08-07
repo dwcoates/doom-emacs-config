@@ -444,6 +444,12 @@ something the user may never have seen the start of is noise."
     (cl-letf (((symbol-function 'agent-repl--log)
                (lambda (ws fmt &rest args)
                  (push (list ws (apply #'format fmt args)) logs)))
+              ;; The OPEN branch rides the warn rung (a surfaced failure is a
+              ;; UX regression); capture both rungs so this test keeps
+              ;; asserting the CONTEXT rather than the severity.
+              ((symbol-function 'agent-repl--warn)
+               (lambda (ws fmt &rest args)
+                 (push (list ws (apply #'format fmt args)) logs)))
               ((symbol-function 'message) (lambda (&rest _) nil)))
       ;; Act
       (agent-repl-failure-surface
@@ -458,6 +464,26 @@ something the user may never have seen the start of is noise."
       (should (string-match-p "OPEN.*resolved-at=0.*item-uuid=\\\"open-1\\\""
                               (cadr (caddr logs))))
       (should (cl-every (lambda (entry) (equal (car entry) "ws-a")) logs)))))
+
+(ert-deftest agent-repl-test-failure-surface-open-records-at-the-warn-rung ()
+  "An OPEN failure is recorded at `warn', not below it.
+A surfaced failure card IS a user-visible regression, so it must clear the
+warning sweeps and the remediation loops' warning gate rather than hiding
+on the debug rung."
+  ;; Arrange
+  (let (levels)
+    (cl-letf (((symbol-function 'agent-repl--persist-log-record)
+               (lambda (_ws level _verbosity fmt _args)
+                 (when (string-match-p "failure OPEN" fmt)
+                   (push level levels))))
+              ((symbol-function 'agent-repl--emit-message) (lambda (&rest _) nil))
+              ((symbol-function 'message) (lambda (&rest _) nil)))
+      ;; Act
+      (agent-repl-failure-surface
+       "ws-a" '(:class :internal :type "shim.rejected" :message "rejected"
+                :detail "" :resolved-at 0 :item-uuid "open-1"))
+      ;; Assert
+      (should (equal levels '("warn"))))))
 
 (provide 'test-failure)
 ;;; test-failure.el ends here
