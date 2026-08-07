@@ -222,8 +222,16 @@ function buildRecord(level: ClientLogLevel, message: string, context: Record<str
     timestamp: logTimestamp(), runtime: "webapp", level: canonicalLevel, verbosity, operation, message,
     context: evidence, ...routing,
   };
+  // An identity is stamped on the record only when the caller HAS one. An empty
+  // string is the absence of an identity, not a malformed one: a
+  // workspace-addressed page carries no session id until the daemon rules on
+  // which session its workspace owns, and a record written before that ruling
+  // is correctly attributed to the workspace alone. A wrong TYPE is still a
+  // programming error and still refused, so the check that matters is kept.
   for (const identity of ["agent_repl_session_id", "claude_session_id", "request_id"] as const) {
-    if (fields[identity] !== undefined) record[identity] = requireString(fields, identity);
+    const value = fields[identity];
+    if (value === undefined || value === "") continue;
+    record[identity] = requireString(fields, identity);
   }
   return record;
 }

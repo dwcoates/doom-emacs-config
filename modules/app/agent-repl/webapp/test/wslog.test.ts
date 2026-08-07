@@ -362,6 +362,30 @@ describe("verbose and bound runtime context", () => {
       connection_id: "c1", agent_repl_session_id: "s1", request_id: "r1",
     });
   });
+
+  it("omits an empty bound identity rather than refusing the record", () => {
+    // Arrange — a workspace-addressed page binds no session id until the daemon
+    // rules on which session its workspace owns.
+    const spy = spyLogger();
+    installCanonicalLogger(spy.logger);
+    bindLogContext({ agent_repl_session_id: "", connection_id: "c1" });
+
+    // Act
+    log("info", "socket opening", { operation: "connect" });
+
+    // Assert — the record is written, attributed to the workspace alone.
+    expect(spy.forwarded).toHaveLength(1);
+    expect(spy.forwarded[0].context).not.toHaveProperty("agent_repl_session_id");
+  });
+
+  it("still refuses a bound identity of the wrong type", () => {
+    const spy = spyLogger();
+    installCanonicalLogger(spy.logger);
+    bindLogContext({ agent_repl_session_id: 7 as unknown as string, connection_id: "c1" });
+    expect(() => log("info", "socket opening", { operation: "connect" })).toThrow(
+      "requires agent_repl_session_id",
+    );
+  });
 });
 
 describe("local-only canonical option", () => {
