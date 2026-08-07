@@ -10,9 +10,33 @@ import { METAPROMPT_REL_PATH } from "../src/metaprompt.js";
 const udsSessionMocks = vi.hoisted(() => ({
   start: vi.fn(async (): Promise<void> => undefined),
 }));
-vi.mock("../src/uds/session-lock.js", () => ({
-  acquireSessionLock: vi.fn(() => vi.fn()),
-}));
+// Both claims are doubled, since runUdsMode takes the session lock AND the
+// workspace lock before it constructs anything. The doubles keep the real
+// exports' contract — a refusal to run is an exception, and success hands back
+// an idempotent release — while the pure helpers (lockPath, workspaceLockKey,
+// …) stay real so a drift between double and module surfaces here rather than
+// silently.
+vi.mock("../src/uds/session-lock.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/uds/session-lock.js")>();
+  return {
+    ...actual,
+    acquireSessionLock: vi.fn((sessionId: string) => {
+      if (sessionId === "") throw new Error("shim-session-lock: a session lock needs a session id");
+      return releaseDouble();
+    }),
+    // Faithful to the real export, which derives the lock file through
+    // workspaceLockKey and so refuses an empty workspace directory outright.
+    acquireWorkspaceLock: vi.fn((cwd: string) => {
+      actual.workspaceLockKey(cwd);
+      return releaseDouble();
+    }),
+  };
+});
+
+/** A release that, like the real one, is idempotent — extra calls are no-ops. */
+function releaseDouble(): () => void {
+  return vi.fn(() => undefined);
+}
 vi.mock("../src/uds/uds-session.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/uds/uds-session.js")>();
   return {
