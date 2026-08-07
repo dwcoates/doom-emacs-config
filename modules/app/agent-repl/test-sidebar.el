@@ -88,6 +88,63 @@ their `:on-failure' callback reachable so a NACK can be delivered."
 (defvar agent-repl-test--sidebar-request-n 0
   "Request-id counter for the link mock, rebound per capture.")
 
+(defvar agent-repl-test--sidebar-unacked nil
+  "Request-ids the pending-link mock still holds unacknowledged.")
+
+(defmacro agent-repl-test--sidebar-with-pending-link (&rest body)
+  "Run BODY with a link whose publishes stay UNACKED until settled by hand.
+The coalescing gate is driven by whether the transport still holds a
+command, so this mock keeps every send pending — the state a slow daemon
+leaves behind — and answers `agent-repl--uds-command-pending-p' from that
+record.  `agent-repl-test--sidebar-ack' and
+`agent-repl-test--sidebar-expire' are the two ways out."
+  (declare (indent 0) (debug t))
+  `(let ((agent-repl-test--sidebar-published nil)
+         (agent-repl-test--sidebar-tracked nil)
+         (agent-repl-test--sidebar-unacked nil)
+         (agent-repl-test--sidebar-request-n 0))
+     (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () t))
+               ((symbol-function 'agent-repl--uds-command-pending-p)
+                (lambda (request-id)
+                  (and (member request-id agent-repl-test--sidebar-unacked) t)))
+               ((symbol-function 'agent-repl--uds-send-command)
+                (lambda (field payload &optional _ws _proc &rest keys)
+                  (push (cons field payload) agent-repl-test--sidebar-published)
+                  (let ((request-id (format "req-%d"
+                                            (cl-incf agent-repl-test--sidebar-request-n))))
+                    (push request-id agent-repl-test--sidebar-unacked)
+                    (push (list :request-id request-id :field field
+                                :on-failure (plist-get keys :on-failure)
+                                :on-success (plist-get keys :on-success)
+                                :on-timeout (plist-get keys :on-timeout))
+                          agent-repl-test--sidebar-tracked)
+                    ;; Before the frame would reach the socket, exactly as
+                    ;; the real transport runs it.
+                    (when-let ((on-registered (plist-get keys :on-registered)))
+                      (funcall on-registered request-id))
+                    request-id))))
+       ,@body)))
+
+(defun agent-repl-test--sidebar-tracked-command (request-id)
+  "Return the tracked record for REQUEST-ID under the pending-link mock."
+  (cl-find-if (lambda (e) (equal (plist-get e :request-id) request-id))
+              agent-repl-test--sidebar-tracked))
+
+(defun agent-repl-test--sidebar-ack (request-id)
+  "Deliver an accepting ack for REQUEST-ID under the pending-link mock."
+  (setq agent-repl-test--sidebar-unacked
+        (delete request-id agent-repl-test--sidebar-unacked))
+  (funcall (plist-get (agent-repl-test--sidebar-tracked-command request-id)
+                      :on-success)))
+
+(defun agent-repl-test--sidebar-expire (request-id)
+  "Expire REQUEST-ID's ack deadline; return the sender's supersede verdict."
+  (setq agent-repl-test--sidebar-unacked
+        (delete request-id agent-repl-test--sidebar-unacked))
+  (funcall (plist-get (agent-repl-test--sidebar-tracked-command request-id)
+                      :on-timeout)
+           request-id))
+
 (defun agent-repl-test--sidebar-rosters ()
   "Return every published `WorkspaceRoster' payload plist, oldest first."
   (mapcar (lambda (sent) (plist-get (cdr sent) :roster))
@@ -1133,6 +1190,142 @@ roster over a newer one."
       (should (equal (mapcar (lambda (r) (plist-get r :revision))
                              (agent-repl-test--sidebar-rosters))
                      '(1 2))))))
+
+;;;; ---- Coalescing: one publish in flight, one queued -----------------------
+
+(ert-deftest agent-repl-test-sidebar-burst-sends-only-one-publish ()
+  "A burst of rosters built behind an unacked publish sends exactly one."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (agent-repl-test--sidebar-with-pending-link
+      (dotimes (_ 5) (agent-repl--sidebar-push))
+      (should (= (length agent-repl-test--sidebar-published) 1)))))
+
+(ert-deftest agent-repl-test-sidebar-burst-releases-one-trailing-publish ()
+  "The ack of the in-flight publish releases exactly one trailing roster."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (agent-repl-test--sidebar-with-pending-link
+      (dotimes (_ 5) (agent-repl--sidebar-push))
+      (agent-repl-test--sidebar-ack "req-1")
+      (should (= (length agent-repl-test--sidebar-published) 2)))))
+
+(ert-deftest agent-repl-test-sidebar-settled-gate-owes-nothing-when-clean ()
+  "An ack with nothing coalesced behind it publishes no trailing roster."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (agent-repl-test--sidebar-with-pending-link
+      (agent-repl--sidebar-push)
+      (agent-repl-test--sidebar-ack "req-1")
+      (should (= (length agent-repl-test--sidebar-published) 1)))))
+
+(ert-deftest agent-repl-test-sidebar-coalesced-push-returns-nil ()
+  "A coalesced push reports no request-id: nothing went on the wire."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (agent-repl-test--sidebar-with-pending-link
+      (agent-repl--sidebar-push)
+      (should (null (agent-repl--sidebar-push))))))
+
+(ert-deftest agent-repl-test-sidebar-coalesced-roster-consumes-no-revision ()
+  "A coalesced roster burns no revision, so the counter stays truthful."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (agent-repl-test--sidebar-with-pending-link
+      (dotimes (_ 4) (agent-repl--sidebar-push))
+      (should (= agent-repl--sidebar-roster-revision 1)))))
+
+(ert-deftest agent-repl-test-sidebar-trailing-publish-is-rebuilt-fresh ()
+  "The trailing roster is REBUILT, so it carries state added while coalesced."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (agent-repl-test--sidebar-with-pending-link
+      (agent-repl--sidebar-push)
+      (agent-repl-test--sidebar-ws "late" "/tmp/late")
+      (agent-repl--sidebar-push)
+      (agent-repl-test--sidebar-ack "req-1")
+      (should (member "late"
+                      (mapcar (lambda (row) (alist-get 'name row))
+                              (append (agent-repl-test--sidebar-wire-rows
+                                       (agent-repl-test--sidebar-wire))
+                                      nil)))))))
+
+(ert-deftest agent-repl-test-sidebar-nacked-publish-releases-the-gate ()
+  "A NACK settles the gate too: the coalesced roster is not stranded."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (agent-repl-test--sidebar-with-pending-link
+      (agent-repl--sidebar-push)
+      (agent-repl--sidebar-push)
+      (funcall (plist-get (agent-repl-test--sidebar-tracked-command "req-1")
+                          :on-failure)
+               "daemon said no")
+      (should (= (length agent-repl-test--sidebar-published) 2)))))
+
+(ert-deftest agent-repl-test-sidebar-unacked-publish-releases-the-gate ()
+  "An expired ack deadline settles the gate: the coalesced roster still goes."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (agent-repl-test--sidebar-with-pending-link
+      (agent-repl--sidebar-push)
+      (agent-repl--sidebar-push)
+      (agent-repl-test--sidebar-expire "req-1")
+      (should (= (length agent-repl-test--sidebar-published) 2)))))
+
+(ert-deftest agent-repl-test-sidebar-superseded-publish-opens-no-failure ()
+  "A lost publish with a newer roster queued behind it reports SUPERSEDED."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (agent-repl-test--sidebar-with-pending-link
+      (agent-repl--sidebar-push)
+      (agent-repl--sidebar-push)
+      (should (agent-repl-test--sidebar-expire "req-1")))))
+
+(ert-deftest agent-repl-test-sidebar-final-unacked-publish-opens-a-failure ()
+  "A lost publish with nothing newer behind it is a REAL loss, reported so."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (agent-repl-test--sidebar-with-pending-link
+      (agent-repl--sidebar-push)
+      (should (null (agent-repl-test--sidebar-expire "req-1"))))))
+
+(ert-deftest agent-repl-test-sidebar-overtaken-publish-is-superseded ()
+  "A publish already overtaken by a NEWER revision is superseded when lost."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (agent-repl-test--sidebar-with-pending-link
+      (agent-repl--sidebar-push)
+      (agent-repl--sidebar-publish-abandon-inflight "test")
+      (agent-repl--sidebar-push)
+      (should (agent-repl-test--sidebar-expire "req-1")))))
+
+(ert-deftest agent-repl-test-sidebar-connect-publish-is-never-coalesced ()
+  "The reconnect publish drops the gate: its roster cannot wait on a dead socket."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (agent-repl-test--sidebar-with-pending-link
+      (agent-repl--sidebar-push)
+      (agent-repl--sidebar-publish-on-connect)
+      (should (= (length agent-repl-test--sidebar-published) 2)))))
+
+(ert-deftest agent-repl-test-sidebar-stale-gate-marker-does-not-wedge-publishes ()
+  "A marker naming a request the transport no longer holds publishes anyway."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (agent-repl-test--sidebar-with-pending-link
+      (setq agent-repl--sidebar-publish-inflight "req-vanished")
+      (agent-repl--sidebar-push)
+      (should (= (length agent-repl-test--sidebar-published) 1)))))
+
+(ert-deftest agent-repl-test-sidebar-foreign-settle-leaves-the-gate-closed ()
+  "A settle naming some other request releases nothing: the gate is not its."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (agent-repl-test--sidebar-with-pending-link
+      (agent-repl--sidebar-push)
+      (agent-repl--sidebar-push)
+      (agent-repl--sidebar-publish-settled "req-not-mine" "test")
+      (should (= (length agent-repl-test--sidebar-published) 1)))))
 
 (ert-deftest agent-repl-test-sidebar-expand-script-guards-missing-hook ()
   "The expand script no-ops (page side) when the hook is not yet planted."
