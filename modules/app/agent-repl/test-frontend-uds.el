@@ -61,7 +61,8 @@ alarm.  Tests that assert ON the seam shadow it again with their own
        ,@body)))
 
 (defun agent-repl-test--pend (request-id field workspace
-                                         &optional on-failure on-success on-challenge)
+                                         &optional on-failure on-success
+                                         on-challenge on-timeout)
   "ARRANGE a pending command entry the way a real send would.
 
 `agent-repl--uds-register-pending-command' is private to
@@ -70,7 +71,7 @@ so the ack-machinery tests below reach it through this one helper rather
 than reproducing the send-then-track shape the transport now forbids.
 Tests of the SEND path drive `agent-repl--uds-send-command' itself."
   (agent-repl--uds-register-pending-command
-   request-id field workspace on-failure on-success on-challenge))
+   request-id field workspace on-failure on-success on-challenge on-timeout))
 
 (defmacro agent-repl-test--with-captured-deadline (thunk-var &rest body)
   "Run BODY capturing the ack-deadline alarm thunk into THUNK-VAR.
@@ -1667,6 +1668,135 @@ as a user-visible malformed-frame error on every roster publish."
           (funcall expire)
           ;; Assert
           (should-not failed))))))
+
+(ert-deftest agent-repl-test-uds-deadline-superseded-opens-no-failure ()
+  "A lost command its sender calls SUPERSEDED opens no failure card."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl-test--with-captured-deadline expire
+      (agent-repl-test--pend "req-1" "publishWorkspaceRoster" nil
+                             nil nil nil (lambda (_id) t))
+      (let (echoed)
+        (cl-letf (((symbol-function 'message)
+                   (lambda (fmt &rest args)
+                     (push (apply #'format fmt args) echoed))))
+          ;; Act
+          (funcall expire)
+          ;; Assert
+          (should-not echoed))))))
+
+(ert-deftest agent-repl-test-uds-deadline-superseded-leaves-link-healthy ()
+  "A superseded loss leaves the command link healthy: nothing diverged."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl-test--with-captured-deadline expire
+      (agent-repl-test--pend "req-1" "publishWorkspaceRoster" nil
+                             nil nil nil (lambda (_id) t))
+      (cl-letf (((symbol-function 'message) (lambda (&rest _) nil)))
+        ;; Act
+        (funcall expire)
+        ;; Assert
+        (should (eq (agent-repl-uds-link-health) :healthy))))))
+
+(ert-deftest agent-repl-test-uds-deadline-superseded-is-still-marked ()
+  "A superseded loss is still recorded, so a late ack is never unexplained."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl-test--with-captured-deadline expire
+      (agent-repl-test--pend "req-1" "publishWorkspaceRoster" nil
+                             nil nil nil (lambda (_id) t))
+      (cl-letf (((symbol-function 'message) (lambda (&rest _) nil)))
+        ;; Act
+        (funcall expire)
+        ;; Assert
+        (should (gethash "req-1" agent-repl--uds-timed-out-commands))))))
+
+(ert-deftest agent-repl-test-uds-deadline-unsuperseded-still-degrades ()
+  "An `on-timeout' answering NO leaves the loud loss path exactly as it was."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl-test--with-captured-deadline expire
+      (agent-repl-test--pend "req-1" "publishWorkspaceRoster" nil
+                             nil nil nil (lambda (_id) nil))
+      (cl-letf (((symbol-function 'message) (lambda (&rest _) nil)))
+        ;; Act
+        (funcall expire)
+        ;; Assert
+        (should (eq (agent-repl-uds-link-health) :degraded))))))
+
+(ert-deftest agent-repl-test-uds-deadline-on-timeout-error-still-surfaces ()
+  "A supersede callback that signals is not consent: the loss still surfaces."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl-test--with-captured-deadline expire
+      (agent-repl-test--pend "req-1" "publishWorkspaceRoster" nil
+                             nil nil nil (lambda (_id) (error "callback broke")))
+      (let (echoed)
+        (cl-letf (((symbol-function 'message)
+                   (lambda (fmt &rest args)
+                     (push (apply #'format fmt args) echoed))))
+          ;; Act
+          (funcall expire)
+          ;; Assert
+          (should (cl-find-if (lambda (line)
+                                (string-match-p "never acknowledged" line))
+                              echoed)))))))
+
+(ert-deftest agent-repl-test-uds-deadline-without-on-timeout-surfaces ()
+  "A command carrying no supersede callback keeps the unchanged loud path."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl-test--with-captured-deadline expire
+      (agent-repl-test--pend "req-1" "mergeWorkspace" "ws1")
+      (let (echoed)
+        (cl-letf (((symbol-function 'message)
+                   (lambda (fmt &rest args)
+                     (push (apply #'format fmt args) echoed))))
+          ;; Act
+          (funcall expire)
+          ;; Assert
+          (should (cl-find-if (lambda (line)
+                                (string-match-p "never acknowledged" line))
+                              echoed)))))))
+
+(ert-deftest agent-repl-test-uds-deadline-supersede-question-names-request ()
+  "The supersede question hands the sender the request-id that was lost."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl-test--with-captured-deadline expire
+      (let (asked)
+        (agent-repl-test--pend "req-1" "publishWorkspaceRoster" nil
+                               nil nil nil (lambda (id) (setq asked id) t))
+        (cl-letf (((symbol-function 'message) (lambda (&rest _) nil)))
+          ;; Act
+          (funcall expire)
+          ;; Assert
+          (should (equal asked "req-1")))))))
+
+(ert-deftest agent-repl-test-uds-command-pending-p-while-unacked ()
+  "A registered command reads as pending until its ack lands."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl-test--pend "req-1" "mergeWorkspace" "ws1")
+    ;; Act / Assert
+    (should (agent-repl--uds-command-pending-p "req-1"))))
+
+(ert-deftest agent-repl-test-uds-command-pending-p-after-ack ()
+  "An acked command no longer reads as pending."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl-test--pend "req-1" "mergeWorkspace" "ws1")
+    ;; Act
+    (agent-repl--uds-handle-command-ack '(:requestId "req-1" :ok t))
+    ;; Assert
+    (should-not (agent-repl--uds-command-pending-p "req-1"))))
+
+(ert-deftest agent-repl-test-uds-command-pending-p-unknown-request ()
+  "A request-id this Emacs never sent is not pending."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    ;; Act / Assert
+    (should-not (agent-repl--uds-command-pending-p "req-never-sent"))))
 
 (ert-deftest agent-repl-test-uds-deadline-after-ack-is-a-no-op ()
   "A deadline thunk that runs after its ack landed reports nothing."
