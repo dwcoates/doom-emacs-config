@@ -1,6 +1,7 @@
 package ssm
 
 import (
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"testing"
@@ -223,6 +224,67 @@ func TestTheAgentDrivenPhasesRenderAsMerging(t *testing.T) {
 		if got := renderStateOf(token); got != frontendv1.RenderState_RENDER_STATE_MERGING {
 			t.Fatalf("renderStateOf(%q) = %v, want RENDER_STATE_MERGING", token, got)
 		}
+	}
+}
+
+// openLevelSplitTest opens a Manager whose info and warn channels are separate
+// sinks, so a test can assert WHICH channel a record took. A refusal indexed at
+// info is invisible to a level filter, which is the defect these tests fence.
+func openLevelSplitTest(t *testing.T) (*Manager, *capLog, *capLog) {
+	t.Helper()
+	info, warn := &capLog{}, &capLog{}
+	m, err := Open(Options{DBPath: filepath.Join(t.TempDir(), "state.db"), Logf: info.logf, Warnf: warn.logf, Resolver: fakeResolver{}})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { m.Close() })
+	return m, info, warn
+}
+
+func TestWorkspacesAtMergePhaseRefusalTakesTheWarnChannel(t *testing.T) {
+	// Arrange — a sweep on a token nothing writes silently reports a clean
+	// system, so its refusal is a user-visible-consequence record.
+	m, _, warn := openLevelSplitTest(t)
+
+	// Act.
+	if _, err := m.WorkspacesAtMergePhase(merge.Phase("not-a-phase")); err == nil {
+		t.Fatal("WorkspacesAtMergePhase accepted an unknown phase")
+	}
+
+	// Assert.
+	if !warn.contains("WorkspacesAtMergePhase REFUSED") {
+		t.Fatalf("warn = %v, want the refusal at warn", warn.lines)
+	}
+}
+
+func TestWorkspacesAtMergePhaseRefusalLeavesNothingOnTheInfoChannel(t *testing.T) {
+	// Arrange.
+	m, info, _ := openLevelSplitTest(t)
+
+	// Act.
+	if _, err := m.WorkspacesAtMergePhase(merge.Phase("not-a-phase")); err == nil {
+		t.Fatal("WorkspacesAtMergePhase accepted an unknown phase")
+	}
+
+	// Assert.
+	if info.contains("WorkspacesAtMergePhase REFUSED") {
+		t.Fatalf("info = %v, want the refusal off the info channel entirely", info.lines)
+	}
+}
+
+func TestWorkspacesAtMergePhaseRefusalStillRecordsWithNoWarnChannelWired(t *testing.T) {
+	// Arrange — an unwired warn channel must lose the SEVERITY, never the
+	// record.
+	m, info, _ := openUnwiredTest(t, fakeResolver{})
+
+	// Act.
+	if _, err := m.WorkspacesAtMergePhase(merge.Phase("not-a-phase")); err == nil {
+		t.Fatal("WorkspacesAtMergePhase accepted an unknown phase")
+	}
+
+	// Assert.
+	if !info.contains("WorkspacesAtMergePhase REFUSED") {
+		t.Fatalf("info = %v, want the refusal still recorded through Logf", info.lines)
 	}
 }
 

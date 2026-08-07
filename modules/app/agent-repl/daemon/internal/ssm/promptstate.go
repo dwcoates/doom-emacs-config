@@ -134,7 +134,7 @@ func (m *Manager) retractUnpublishedAcceptLocked(workspace, sessionID, requestID
 	if err != nil {
 		readErr := fmt.Errorf("ssm: read back the accepted row to retract for workspace %q session %q request %q: %w",
 			workspace, sessionID, requestID, err)
-		m.logf("ssm: prompt accepted RETRACTION FAILED ws=%s session=%s request_id=%q stage=read_back accept_error=%v error=%v — the workspace holds a turn claim for a turn that never began",
+		m.warn("ssm: prompt accepted RETRACTION FAILED ws=%s session=%s request_id=%q stage=read_back accept_error=%v error=%v — the workspace holds a turn claim for a turn that never began",
 			workspace, sessionID, requestID, cause, readErr)
 		return errors.Join(cause, readErr)
 	}
@@ -142,7 +142,7 @@ func (m *Manager) retractUnpublishedAcceptLocked(workspace, sessionID, requestID
 		(topSID.String != "" && topSID.String != sessionID) {
 		invariant := fmt.Errorf("ssm: the accepted row to retract for workspace %q session %q request %q is no longer on top: state=%s cause_kind=%s session=%q",
 			workspace, sessionID, requestID, topState, topCause, topSID.String)
-		m.logf("ssm: prompt accepted RETRACTION FAILED ws=%s session=%s request_id=%q stage=identify state=%s cause_kind=%s top_session=%q accept_error=%v error=%v — nothing may write this axis inside the accept's own lock hold",
+		m.warn("ssm: prompt accepted RETRACTION FAILED ws=%s session=%s request_id=%q stage=identify state=%s cause_kind=%s top_session=%q accept_error=%v error=%v — nothing may write this axis inside the accept's own lock hold",
 			workspace, sessionID, requestID, topState, topCause, topSID.String, cause, invariant)
 		return errors.Join(cause, invariant)
 	}
@@ -153,7 +153,7 @@ func (m *Manager) retractUnpublishedAcceptLocked(workspace, sessionID, requestID
 	); err != nil {
 		writeErr := fmt.Errorf("ssm: retract the unpublished accepted prompt for workspace %q session %q request %q: %w",
 			workspace, sessionID, requestID, err)
-		m.logf("ssm: prompt accepted RETRACTION FAILED ws=%s session=%s request_id=%q stage=append accept_error=%v error=%v — the workspace holds a turn claim for a turn that never began",
+		m.warn("ssm: prompt accepted RETRACTION FAILED ws=%s session=%s request_id=%q stage=append accept_error=%v error=%v — the workspace holds a turn claim for a turn that never began",
 			workspace, sessionID, requestID, cause, writeErr)
 		return errors.Join(cause, writeErr)
 	}
@@ -162,7 +162,7 @@ func (m *Manager) retractUnpublishedAcceptLocked(workspace, sessionID, requestID
 	if err := m.reresolveLocked(workspace, causePromptRejected, 0); err != nil {
 		resolveErr := fmt.Errorf("ssm: re-resolve after retracting the unpublished accepted prompt for workspace %q session %q request %q: %w",
 			workspace, sessionID, requestID, err)
-		m.logf("ssm: prompt accepted RETRACTION FAILED ws=%s session=%s request_id=%q stage=reresolve accept_error=%v error=%v — the claim is withdrawn in the log but no frontend was told",
+		m.warn("ssm: prompt accepted RETRACTION FAILED ws=%s session=%s request_id=%q stage=reresolve accept_error=%v error=%v — the claim is withdrawn in the log but no frontend was told",
 			workspace, sessionID, requestID, cause, resolveErr)
 		return errors.Join(cause, resolveErr)
 	}
@@ -358,7 +358,7 @@ func (m *Manager) MarkPromptRejected(
 
 	if topSID.String != "" && topSID.String != sessionID {
 		err := fmt.Errorf("ssm: prompt rejected for workspace %q session %q cannot retract state owned by session %q", workspace, sessionID, topSID.String)
-		m.logf("ssm: prompt rejected REJECTED ws=%s session=%s request_id=%q state=%s cause_kind=%s active_claimant=%q error=%v",
+		m.warn("ssm: prompt rejected REJECTED ws=%s session=%s request_id=%q state=%s cause_kind=%s active_claimant=%q error=%v",
 			workspace, sessionID, requestID, topState, topCause, topSID.String, err)
 		return false, err
 	}

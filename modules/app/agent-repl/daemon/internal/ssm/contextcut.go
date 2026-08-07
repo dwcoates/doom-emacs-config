@@ -137,7 +137,7 @@ func (m *Manager) applyCutLocked(workspace, openToken, closeToken, causeKind str
 func (m *Manager) closeCompactingLocked(workspace, reason string) {
 	open, err := cutOpen(m.db, workspace, sigCompacting, sigCompacted)
 	if err != nil {
-		m.logf("ssm: reading the compacting axis FAILED ws=%s reason=%s: %v — the window may stay open until the next compaction closes it", workspace, reason, err)
+		m.warn("ssm: reading the compacting axis FAILED ws=%s reason=%s: %v — the window may stay open until the next compaction closes it", workspace, reason, err)
 		return
 	}
 	if !open {
@@ -145,7 +145,7 @@ func (m *Manager) closeCompactingLocked(workspace, reason string) {
 	}
 	m.logf("ssm: compacting window closed by %s ws=%s — a compaction cannot outlive it, and holding the phase word here would wedge the workspace red", reason, workspace)
 	if err := m.applyCutLocked(workspace, sigCompacting, sigCompacted, causeCompacting, false, reason); err != nil {
-		m.logf("ssm: closing the compacting axis FAILED ws=%s reason=%s: %v", workspace, reason, err)
+		m.warn("ssm: closing the compacting axis FAILED ws=%s reason=%s: %v", workspace, reason, err)
 	}
 }
 
@@ -169,7 +169,7 @@ func (m *Manager) closeCompactingLocked(workspace, reason string) {
 func (m *Manager) closeClearingLocked(workspace, reason string) {
 	open, err := cutOpen(m.db, workspace, sigClearing, sigCleared)
 	if err != nil {
-		m.logf("ssm: reading the clearing axis FAILED ws=%s reason=%s: %v — the axis may stay open until its watchdog expires it", workspace, reason, err)
+		m.warn("ssm: reading the clearing axis FAILED ws=%s reason=%s: %v — the axis may stay open until its watchdog expires it", workspace, reason, err)
 		return
 	}
 	if !open {
@@ -178,7 +178,7 @@ func (m *Manager) closeClearingLocked(workspace, reason string) {
 	m.disarmClearingWatchdogLocked(workspace)
 	m.logf("ssm: clearing axis closed by %s ws=%s — the vendor retired the transcript identity, which is the dispatched /clear reporting that it took effect; waiting for a ContextCleared that has no guaranteed producer under the new identity is what left this axis to expire", reason, workspace)
 	if err := m.applyCutLocked(workspace, sigClearing, sigCleared, causeClearing, false, reason); err != nil {
-		m.logf("ssm: closing the clearing axis FAILED ws=%s reason=%s: %v", workspace, reason, err)
+		m.warn("ssm: closing the clearing axis FAILED ws=%s reason=%s: %v", workspace, reason, err)
 	}
 }
 
