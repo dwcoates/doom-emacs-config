@@ -248,6 +248,102 @@ test can override readiness without restating the whole coordinator."
       (should-error (agent-repl-runtime-restart-await nil 1.0)
                     :type 'error))))
 
+;;;; ---- Backend-initiation output: record and echo --------------------------
+;;
+;; A launchd refusal and a failed coordinated restart both used to be visible
+;; only to whoever went looking in the log afterwards.
+
+(defmacro agent-repl-services-test--with-phase-echo (var &rest body)
+  "Run BODY with VAR collecting every echoed backend phase line, newest first."
+  (declare (indent 1))
+  `(let (,var)
+     (cl-letf (((symbol-function 'agent-repl--emit-message)
+                (lambda (text &optional _echo) (push text ,var)))
+               ((symbol-function 'agent-repl--persist-log-record) #'ignore))
+       ,@body)))
+
+(defun agent-repl-services-test--phase-line-p (lines &rest fragments)
+  "Return non-nil when one line in LINES contains every one of FRAGMENTS."
+  (cl-some (lambda (line)
+             (cl-every (lambda (fragment)
+                         (string-match-p (regexp-quote fragment) line))
+                       fragments))
+           lines))
+
+(ert-deftest agent-repl-services-test-launchctl-failure-echoes-captured-output ()
+  "A refused kickstart echoes the phase, the exit status, and its output tail."
+  ;; Arrange
+  (agent-repl-services-test--with-phase-echo lines
+    (cl-letf (((symbol-function 'agent-repl--launchctl-call)
+               (lambda (_args)
+                 (with-current-buffer
+                     (get-buffer-create agent-repl--shim-services-buffer)
+                   (insert "Could not find service in domain\n"))
+                 64)))
+      ;; Act
+      (should-error
+       (agent-repl--shim-services-launchctl "kickstart"
+                                            agent-repl--shim-store-label)))
+    ;; Assert
+    (should (agent-repl-services-test--phase-line-p
+             lines "launchctl kickstart FAILED" "exit 64"
+             "Could not find service in domain"))))
+
+(ert-deftest agent-repl-services-test-launchctl-failure-still-signals ()
+  "The echo line is additive: a nonzero launchctl exit still signals."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--emit-message) #'ignore)
+            ((symbol-function 'agent-repl--persist-log-record) #'ignore)
+            ((symbol-function 'agent-repl--launchctl-call) (lambda (_args) 64)))
+    ;; Act
+    (let ((detail (should-error
+                   (agent-repl--shim-services-launchctl
+                    "kickstart" agent-repl--shim-store-label))))
+      ;; Assert
+      (should (string-match-p "exit 64" (cadr detail))))))
+
+(ert-deftest agent-repl-services-test-runtime-failure-echoes-the-phase ()
+  "A refused restart names its phase and points at the log file."
+  ;; Arrange
+  (agent-repl-services-test--with-phase-echo lines
+    (cl-letf (((symbol-function 'agent-repl--frontend-runtime-bounce-preflight-async)
+               (lambda (callback) (funcall callback :absent)))
+              ((symbol-function 'agent-repl--frontend-all-turn-active-workspaces)
+               (lambda () '("/w-busy"))))
+      ;; Act
+      (agent-repl--runtime-prepare
+       t (lambda () (error "unexpected success")) #'ignore))
+    ;; Assert
+    (should (agent-repl-services-test--phase-line-p
+             lines "backend restart FAILED" "turn in flight"
+             (agent-repl--logfile-path)))))
+
+(ert-deftest agent-repl-services-test-runtime-success-echoes-completion ()
+  "A completed startup reports that it finished, not only that it began."
+  ;; Arrange
+  (agent-repl-services-test--with-phase-echo lines
+    (cl-letf (((symbol-function 'agent-repl--frontend-runtime-bounce-preflight-async)
+               (lambda (callback) (funcall callback :absent)))
+              ((symbol-function 'agent-repl--frontend-all-turn-active-workspaces)
+               (lambda () nil))
+              ((symbol-function 'agent-repl--shim-services-assert-launchd-loaded)
+               #'ignore)
+              ((symbol-function 'agent-repl--frontend-build-if-stale) #'ignore)
+              ((symbol-function 'agent-repl--shim-services-build-and-bounce)
+               (lambda (_preflight on-success _on-failure) (funcall on-success)))
+              ((symbol-function 'agent-repl--frontend-bounce-after-build)
+               (lambda (_state _stop on-complete) (funcall on-complete 'proc)))
+              ((symbol-function 'agent-repl--runtime-retire-bounced-link) #'ignore)
+              ((symbol-function 'agent-repl--frontend-after-ready)
+               (lambda (on-ready _fail &optional _ws) (funcall on-ready)))
+              ((symbol-function 'agent-repl--frontend-after-daemon-healthy)
+               (lambda (on-success _fail) (funcall on-success))))
+      ;; Act
+      (agent-repl--runtime-prepare nil #'ignore (lambda (detail) (error "%s" detail))))
+    ;; Assert
+    (should (agent-repl-services-test--phase-line-p
+             lines "backend startup complete"))))
+
 (provide 'test-services)
 
 ;;; test-services.el ends here
