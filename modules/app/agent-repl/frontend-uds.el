@@ -667,8 +667,25 @@ and reconnects (design §4.4)."
           (agent-repl--uds-handle-command-ack
            (list :requestId (plist-get entry :request-id)
                  :ok nil :error "UDS dial failed before command delivery")))
-        (agent-repl--warn nil "uds-connect: failed proc=%s elapsed=%S event=%s"
-                         (process-name proc) elapsed (string-trim event))))
+        ;; TWO different events arrive here and they are not the same failure.
+        ;; `agent-repl--uds-connect-started-at' is the discriminator: the
+        ;; `open' transition above clears it, so a non-nil value means the
+        ;; dial never completed, and nil means an ESTABLISHED link went down.
+        ;; One message for both reported a real link loss as
+        ;; "uds-connect: failed ... elapsed=nil", which reads as a dial that
+        ;; failed instantly and sent every reader hunting a connect bug
+        ;; instead of the disconnect that actually happened.
+        ;;
+        ;; BOTH stay at warn.  The attempt/give-up pattern that puts a retried
+        ;; attempt at info needs a give-up rung to carry the warning, and this
+        ;; ladder has none — `agent-repl--uds-schedule-reconnect' retries
+        ;; forever and never exhausts.  Demoting either branch here would not
+        ;; move the warning later, it would delete it.
+        (if elapsed
+            (agent-repl--warn nil "uds-connect: dial FAILED proc=%s elapsed=%.3fs event=%s"
+                              (process-name proc) elapsed (string-trim event))
+          (agent-repl--warn nil "uds-link: DOWN proc=%s (link was established) event=%s"
+                            (process-name proc) (string-trim event)))))
         (setq agent-repl--uds-read-accumulator "")
     (agent-repl--log nil "uds-sentinel: link down — scheduling reconnect")
     (agent-repl--uds-schedule-reconnect))))
