@@ -459,12 +459,11 @@ type Manager struct {
 	// while the connection that carried it is live, and a pid outliving its
 	// connection is a pid-reuse hazard rather than a stop handle.
 	shimPID map[string]int32
-	// bringUpFailures counts each session's CONSECUTIVE resolved bring-up
-	// failures. It is the ladder's give-up bound (bringupescape.go): a session
-	// that reaches bringUpGiveUpAfter is not respawned again, because every
-	// further attempt costs a whole bringUpTimeout of the daemon's attention.
-	// Cleared by a bring-up that wires and by a deliberate hibernation.
-	bringUpFailures map[string]int
+	// bringUpFailures tracks each session's CONSECUTIVE resolved bring-up
+	// failures and, once the give-up bound is reached, the PARK that bound
+	// imposes (bringupescape.go). The park is a cooldown, never a wall: it
+	// expires on its own so no workspace can be dead-ended by it.
+	bringUpFailures map[string]*bringUpStreak
 	// buildBounced remembers the sessions already bounced for a stale bundle,
 	// so a shim that comes back still reporting a mismatched build (a bundle
 	// whose identity cannot move, a stamp that is wrong) is loud ONCE instead
@@ -775,7 +774,7 @@ func New(cfg Config) (*Manager, error) {
 		parked:                    make(map[string]*parkedSession),
 		lastCSID:                  make(map[string]string),
 		shimPID:                   make(map[string]int32),
-		bringUpFailures:           make(map[string]int),
+		bringUpFailures:           make(map[string]*bringUpStreak),
 		buildBounced:              make(map[string]bool),
 		buildRefresh:              make(map[string]*buildRefreshState),
 		rootCtx:                   rootCtx,
@@ -2047,7 +2046,22 @@ func (m *Manager) hibernate(workspace, wantSession string, cause StopCause) erro
 // instant the connection is ready, and this only decides how long we wait
 // before declaring the shim genuinely dead. Generous enough that a loaded
 // machine never trips it spuriously.
+//
+// IT IS A BOUND ON SILENCE, not on elapsed time (shimclient.Config.BringUpStall
+// carries the full account). A shim streaming its replayed backlog is working,
+// however long the backlog takes; a shim that has said nothing for this long is
+// not.
 const bringUpTimeout = 30 * time.Second
+
+// bringUpProgressCap is the ABSOLUTE ceiling on one bring-up, whatever the shim
+// is doing. The silence bound above is what normally resolves a bring-up, and
+// it cannot bound a shim that trickles a frame every few seconds forever, so
+// this caps the whole attempt.
+//
+// It is deliberately far larger than bringUpTimeout: the case it exists for is
+// pathological, and the case it must NOT cut short — a genuinely large
+// conversation replaying into the daemon's sinks — is ordinary.
+const bringUpProgressCap = 10 * time.Minute
 
 // ensure returns a session controller that is READY TO DRIVE: the shim is running and its
 // connection has completed the handshake, so a control send will not fail with
@@ -2151,14 +2165,18 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 	// THE GIVE-UP BOUND, BEFORE ANYTHING IS SPAWNED. A session that has already
 	// failed bring-up bringUpGiveUpAfter times in a row is parked: its failure
 	// card is standing, and every further attempt would cost another
-	// bringUpTimeout during which the daemon dispatches nothing. The park is
-	// lifted by a bring-up that wires or by a deliberate hibernation
-	// (bringupescape.go).
-	if failures := m.bringUpFailuresFor(sessionID); failures >= bringUpGiveUpAfter {
-		m.logf("session-controller: bring-up REFUSED by the give-up bound ws=%q session=%s consecutive_failures=%d bound=%d — the session is parked on its standing failure card and no shim was spawned",
-			workspace, sessionID, failures, bringUpGiveUpAfter)
-		return nil, false, fmt.Errorf("%w: workspace %q session %s has failed bring-up %d times in a row",
-			ErrBringUpGaveUp, workspace, sessionID, failures)
+	// bring-up window during which the daemon dispatches nothing.
+	//
+	// THE PARK EXPIRES ON ITS OWN (bringupescape.go). This call is what releases
+	// it, so the refusal below is only ever "not yet", never "not again" — and
+	// it says how long "not yet" is, plus the two things that end the park
+	// immediately, because a refusal the user cannot act on is a dead workspace
+	// with extra steps.
+	if remaining, parked := m.bringUpParkRemaining(sessionID); parked {
+		m.logf("session-controller: bring-up REFUSED by the give-up bound ws=%q session=%s consecutive_failures=%d bound=%d retry_in=%s — the session is parked on its standing failure card and no shim was spawned; the park expires on its own, and a hard restart or a hibernation ends it now",
+			workspace, sessionID, m.bringUpFailuresFor(sessionID), bringUpGiveUpAfter, remaining.Round(time.Second))
+		return nil, false, fmt.Errorf("%w: workspace %q session %s failed bring-up %d times in a row, so it is resting for another %s — opening it again after that retries automatically, and a hard restart (RestartSession) retries right now",
+			ErrBringUpGaveUp, workspace, sessionID, m.bringUpFailuresFor(sessionID), remaining.Round(time.Second))
 	}
 	generationID, err := m.newControllerGenerationID()
 	if err != nil {
@@ -2316,6 +2334,9 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 		DaemonVersion:   m.cfg.DaemonVersion,
 		ProtocolVersion: m.cfg.ProtocolVersion,
 		SeqStore:        m.cfg.SeqStore,
+		// The bring-up gate fails on SILENCE from this shim, not on elapsed
+		// time, so a long conversation's replay cannot time its own session out.
+		BringUpStall: bringUpTimeout,
 		// The durable authority on what is in flight, so a reconnect rebuilds
 		// the accounting pin set instead of discarding it.
 		OpenTurnClaims:  m.cfg.SSM,

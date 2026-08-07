@@ -5,7 +5,9 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
@@ -30,9 +32,16 @@ type escapeHarness struct {
 	applier *fakeApplier
 	log     *logCapture
 
+	// clockMs is the manager's whole notion of time, so a cooldown test can
+	// advance past a park without waiting on one.
+	clockMs atomic.Int64
+
 	mu      sync.Mutex
 	clients []*fakeClient
 }
+
+// advance moves the harness clock forward.
+func (h *escapeHarness) advance(d time.Duration) { h.clockMs.Add(d.Milliseconds()) }
 
 // newEscapeHarness builds a manager whose Nth bring-up gets clients[N]. A
 // client with a non-nil notReady never finishes handshaking, which is what a
@@ -58,6 +67,7 @@ func newEscapeHarness(t *testing.T, clients ...*fakeClient) *escapeHarness {
 		ProtocolVersion:   "1",
 		Source:            stubSource{},
 		FileDiagnostics:   fakeFileDiagnosticPersister{},
+		Now:               h.clockMs.Load,
 		Logf:              h.log.logf,
 		newClient: func(c shimclient.Config) sessionClient {
 			h.mu.Lock()
