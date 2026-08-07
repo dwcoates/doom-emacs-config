@@ -106,6 +106,14 @@ thinking" or infer session-controller liveness from persisted session fields.
   - Both are the standing guard on bring-up latency. A change to the consumer
     sinks, the state-database writes, or the registry's write path runs them
     and reports the before/after.
+  - `go -C modules/app/agent-repl/daemon test ./internal/frontend/ -run XXX
+    -bench BenchmarkRosterPublish` — one editor-global roster publication at
+    fleet scale (16 workspaces, 4 connected clients) through validation,
+    retention, per-client fan-out and its canonical log record. It is the
+    standing guard on publication latency: a startup issues one publication per
+    restored workspace and blocks on each ack. A change to roster validation,
+    frontend delivery, or the daemon's logging sinks runs it and reports the
+    before/after.
 - `make coverage` runs all `cmd`, `e2e`, and `internal` packages with
   `-coverpkg=./...` and reports `go tool cover -func` output.
 - `modules/app/agent-repl/bin/test-all.sh` (from the repository root) runs
