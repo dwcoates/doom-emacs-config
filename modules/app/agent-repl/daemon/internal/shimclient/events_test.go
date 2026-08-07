@@ -685,6 +685,97 @@ func TestTurnClaimBridgeCannotReachLifecycleOrFrontendSinks(t *testing.T) {
 	}
 }
 
+// splitLevelConfig wires the client's info and warn channels to separate
+// sinks so a test can assert WHICH one a record took. A shim-reported
+// degradation that lands on the info channel is invisible to a level filter,
+// which is the defect these tests fence.
+func splitLevelConfig(t *testing.T, h *harness, info, warn *[]string) Config {
+	t.Helper()
+	cfg := h.config(t, "s", "/unused.sock")
+	cfg.Logf = func(format string, args ...any) { *info = append(*info, fmt.Sprintf(format, args...)) }
+	cfg.Warnf = func(format string, args ...any) { *warn = append(*warn, fmt.Sprintf(format, args...)) }
+	return cfg
+}
+
+func TestShimDegradedStateTakesTheWarnChannel(t *testing.T) {
+	// Arrange.
+	var info, warn []string
+	c := New(splitLevelConfig(t, newHarness(), &info, &warn))
+	ev := &corev1.Event{SessionId: "s", Payload: &corev1.Event_DegradedState{DegradedState: &corev1.DegradedState{
+		Component: "claude-shim-sdk", Reason: "unexpected_query_termination",
+	}}}
+
+	// Act.
+	if err := c.dispatchEvent(ev); err != nil {
+		t.Fatalf("dispatchEvent: %v", err)
+	}
+
+	// Assert.
+	if !strings.Contains(strings.Join(warn, "\n"), "shim reported DegradedState") {
+		t.Fatalf("warn = %v, want the shim degradation at warn", warn)
+	}
+}
+
+func TestRecoveredShimDegradedStateStaysOnTheInfoChannel(t *testing.T) {
+	// Arrange -- the RECOVERY of a degradation is ordinary good news and must
+	// not inflate the warn channel.
+	var info, warn []string
+	c := New(splitLevelConfig(t, newHarness(), &info, &warn))
+	ev := &corev1.Event{SessionId: "s", Payload: &corev1.Event_DegradedState{DegradedState: &corev1.DegradedState{
+		Component: "claude-shim-sdk", Recovered: true,
+	}}}
+
+	// Act.
+	if err := c.dispatchEvent(ev); err != nil {
+		t.Fatalf("dispatchEvent: %v", err)
+	}
+
+	// Assert.
+	if len(warn) != 0 {
+		t.Fatalf("warn = %v, want a recovery recorded at info only", warn)
+	}
+}
+
+func TestUnparsedEventTakesTheWarnChannel(t *testing.T) {
+	// Arrange -- an unparsable vendor line is conversation content the user
+	// will never see.
+	var info, warn []string
+	c := New(splitLevelConfig(t, newHarness(), &info, &warn))
+	ev := &corev1.Event{SessionId: "s", Payload: &corev1.Event_Unparsed{Unparsed: &corev1.UnparsedEvent{
+		Producer: "claude-shim", Error: "bad json",
+	}}}
+
+	// Act.
+	if err := c.dispatchEvent(ev); err != nil {
+		t.Fatalf("dispatchEvent: %v", err)
+	}
+
+	// Assert.
+	if !strings.Contains(strings.Join(warn, "\n"), "received UnparsedEvent") {
+		t.Fatalf("warn = %v, want the unparsable event at warn", warn)
+	}
+}
+
+func TestShimDegradedStateStillRecordsWithNoWarnChannelWired(t *testing.T) {
+	// Arrange -- an unwired warn channel must lose the SEVERITY, never the
+	// record.
+	var info []string
+	cfg := newHarness().config(t, "s", "/unused.sock")
+	cfg.Logf = func(format string, args ...any) { info = append(info, fmt.Sprintf(format, args...)) }
+	c := New(cfg)
+	ev := &corev1.Event{SessionId: "s", Payload: &corev1.Event_DegradedState{DegradedState: &corev1.DegradedState{Component: "store-client"}}}
+
+	// Act.
+	if err := c.dispatchEvent(ev); err != nil {
+		t.Fatalf("dispatchEvent: %v", err)
+	}
+
+	// Assert.
+	if !strings.Contains(strings.Join(info, "\n"), "shim reported DegradedState") {
+		t.Fatalf("info = %v, want the degradation still recorded through Logf", info)
+	}
+}
+
 func assertRecv(t *testing.T, ch chan *corev1.Event) {
 	t.Helper()
 	select {

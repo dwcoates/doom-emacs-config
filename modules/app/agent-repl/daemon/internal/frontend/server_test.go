@@ -892,6 +892,81 @@ func TestQueueClassificationWireNames(t *testing.T) {
 	}
 }
 
+// levelSplitServer builds a Server whose info and warn channels are separate
+// sinks, so a test can assert WHICH channel a record took. A refused command
+// indexed at info sits beside the per-command chatter and is invisible to a
+// level filter.
+func levelSplitServer(t *testing.T, info, warn *[]string) *Server {
+	t.Helper()
+	return New(Config{
+		Logf:        func(format string, args ...any) { *info = append(*info, fmt.Sprintf(format, args...)) },
+		Warnf:       func(format string, args ...any) { *warn = append(*warn, fmt.Sprintf(format, args...)) },
+		LogVerbosef: testLogf(t),
+		State:       staticState{snap: sampleSnapshot()},
+		Handler:     &mockHandler{},
+	})
+}
+
+func hostOnlyCommandFromGUI() (*client, *frontendv1.FrontendCommand) {
+	cl := &client{id: 1, out: newOutbox(4), done: make(chan struct{}), kind: ClientKindGUIStream}
+	cmd := &frontendv1.FrontendCommand{
+		RequestId: "materialized-from-gui",
+		Command:   &frontendv1.FrontendCommand_WorkspaceMaterialized{WorkspaceMaterialized: &frontendv1.WorkspaceMaterializedCmd{JobId: "job-nope"}},
+	}
+	return cl, cmd
+}
+
+func TestHostOnlyCommandRefusalTakesTheWarnChannel(t *testing.T) {
+	// Arrange.
+	var info, warn []string
+	s := levelSplitServer(t, &info, &warn)
+	cl, cmd := hostOnlyCommandFromGUI()
+
+	// Act.
+	s.dispatchClientCommand(cl, cmd)
+
+	// Assert.
+	if !strings.Contains(strings.Join(warn, "\n"), "host-only command rejected") {
+		t.Fatalf("warn = %v, want the refusal at warn", warn)
+	}
+}
+
+func TestHostOnlyCommandRefusalLeavesNothingOnTheInfoChannel(t *testing.T) {
+	// Arrange.
+	var info, warn []string
+	s := levelSplitServer(t, &info, &warn)
+	cl, cmd := hostOnlyCommandFromGUI()
+
+	// Act.
+	s.dispatchClientCommand(cl, cmd)
+
+	// Assert.
+	if strings.Contains(strings.Join(info, "\n"), "host-only command rejected kind=") {
+		t.Fatalf("info = %v, want the refusal off the info channel entirely", info)
+	}
+}
+
+func TestHostOnlyCommandRefusalStillRecordsWithNoWarnChannelWired(t *testing.T) {
+	// Arrange -- an unwired warn channel must lose the SEVERITY, never the
+	// record.
+	var info []string
+	s := New(Config{
+		Logf:        func(format string, args ...any) { info = append(info, fmt.Sprintf(format, args...)) },
+		LogVerbosef: testLogf(t),
+		State:       staticState{snap: sampleSnapshot()},
+		Handler:     &mockHandler{},
+	})
+	cl, cmd := hostOnlyCommandFromGUI()
+
+	// Act.
+	s.dispatchClientCommand(cl, cmd)
+
+	// Assert.
+	if !strings.Contains(strings.Join(info, "\n"), "host-only command rejected kind=") {
+		t.Fatalf("info = %v, want the refusal still recorded through Logf", info)
+	}
+}
+
 // TestQueueClassificationUnspecifiedIsOmittedOnTheWire pins the fact the
 // webapp's strict decoder rests on: UNSPECIFIED is the proto3 zero, so
 // protojson drops the field entirely. Absent and UNSPECIFIED are therefore the

@@ -308,6 +308,20 @@ type Config struct {
 	// protocol and transport failures always reach the daemon's canonical log.
 	Logf dlog.Logf
 
+	// Warnf is the daemon logger's WARN channel, for records that accompany a
+	// regression the user can see — a shim-reported degradation, an unparsable
+	// vendor event, a lost accounting pin. At info those sit beside routine
+	// handshake chatter and are invisible to a level filter.
+	//
+	// Nil falls back to Logf, so the record is still made; only its severity
+	// is lost.
+	Warnf dlog.Logf
+
+	// Errorf is the daemon logger's ERROR channel, for a hard failure of this
+	// link — a broken capability channel the session cannot work around. Nil
+	// falls back to Warnf, then to Logf.
+	Errorf dlog.Logf
+
 	// Tunables. Zero uses the defaults below.
 	HeartbeatInterval time.Duration // how often we send Heartbeat
 	HeartbeatTimeout  time.Duration // missed-heartbeat degraded window
@@ -362,6 +376,12 @@ type ConnSource interface {
 type Client struct {
 	cfg  Config
 	logf dlog.Logf
+	// warnf is the WARN channel described on Config.Warnf. Never nil after
+	// New; reached through warn.
+	warnf dlog.Logf
+	// errorf is the ERROR channel described on Config.Errorf. Never nil after
+	// New; reached through logError.
+	errorf dlog.Logf
 
 	// active holds the current connection (nil while disconnected). Guarded by
 	// mu. Control senders read it to write on the live connection.
@@ -512,8 +532,43 @@ func New(cfg Config) *Client {
 		}
 	}
 	logf := dlog.Tag(cfg.Logf, "component", "shimclient", "session", cfg.SessionID)
+	warnSource := cfg.Warnf
+	if warnSource == nil {
+		warnSource = cfg.Logf
+	}
+	warnf := dlog.Tag(warnSource, "component", "shimclient", "session", cfg.SessionID)
+	errorSource := cfg.Errorf
+	if errorSource == nil {
+		errorSource = warnSource
+	}
+	errorf := dlog.Tag(errorSource, "component", "shimclient", "session", cfg.SessionID)
 	// An OPEN latch: a freshly built client has no connection yet.
-	return &Client{cfg: cfg, logf: logf, ready: make(chan struct{}), terminal: make(chan struct{}), replays: newReplayRegistry()}
+	return &Client{cfg: cfg, logf: logf, warnf: warnf, errorf: errorf, ready: make(chan struct{}), terminal: make(chan struct{}), replays: newReplayRegistry()}
+}
+
+// warn emits through the client's WARN channel (Config.Warnf, or Logf when
+// that is unwired). It is the sole reader of warnf.
+//
+// A Client assembled field-by-field rather than through New has no warnf at
+// all; such a record still goes to logf, because losing it outright would be
+// strictly worse than logging it at the wrong level.
+func (c *Client) warn(format string, args ...any) {
+	if c.warnf == nil {
+		c.logf(format, args...)
+		return
+	}
+	c.warnf(format, args...)
+}
+
+// logError emits through the client's ERROR channel (Config.Errorf, falling
+// back to Warnf and then Logf). It is the sole reader of errorf, and degrades
+// to warn for the same reason warn degrades to logf.
+func (c *Client) logError(format string, args ...any) {
+	if c.errorf == nil {
+		c.warn(format, args...)
+		return
+	}
+	c.errorf(format, args...)
 }
 
 // permissionMode resolves the posture this connection's DaemonHello announces:
@@ -619,7 +674,7 @@ func (c *Client) AwaitReady(ctx context.Context) error {
 			return err
 		case <-died:
 			err := c.spawnDeathError()
-			c.logf("bring-up ABORTED: %v", err)
+			c.warn("bring-up ABORTED: %v", err)
 			return err
 		case <-stallC:
 			// A frame may have landed since the timer was armed. Re-arm for the
@@ -635,7 +690,7 @@ func (c *Client) AwaitReady(ctx context.Context) error {
 		case <-ctx.Done():
 			err := fmt.Errorf("shimclient: awaiting shim connection for session %s: %w%s",
 				c.cfg.SessionID, ctx.Err(), c.spawnEvidence())
-			c.logf("bring-up wait ENDED without a ready shim: %v", err)
+			c.warn("bring-up wait ENDED without a ready shim: %v", err)
 			return err
 		}
 	}
@@ -678,7 +733,7 @@ func (c *Client) Run(ctx context.Context) (retErr error) {
 			errors.Is(err, ErrHandshakeRejected), errors.Is(err, ErrLifecycleRejected),
 			errors.Is(err, ErrTurnClaimRejected), errors.Is(err, ErrReplayCursorInvariant),
 			errors.Is(err, ErrShimDiedAfterConnect):
-			c.logf("terminal protocol error, not reconnecting: %v", err)
+			c.warn("terminal protocol error, not reconnecting: %v", err)
 			return err
 		default:
 			c.logf("shim connection ended: %v (will reconnect)", err)
@@ -699,7 +754,7 @@ func (c *Client) Run(ctx context.Context) (retErr error) {
 				return nil
 			}
 			err := c.afterConnectDeathError(exit)
-			c.logf("terminal shim process death, not reconnecting: %v", err)
+			c.warn("terminal shim process death, not reconnecting: %v", err)
 			return err
 		case <-time.After(backoff):
 		}
@@ -965,7 +1020,8 @@ func (c *Client) heartbeatSender(ctx context.Context, ac *activeConn) {
 			return
 		case <-t.C:
 			if err := ac.writeMsg(&corev1.Heartbeat{SentAtMs: time.Now().UnixMilli()}); err != nil {
-				c.logf("heartbeat send failed: %v", err)
+				// The sender stops here, so the link is on its way down.
+				c.warn("heartbeat send failed: %v", err)
 				return
 			}
 		}
@@ -993,7 +1049,11 @@ func (c *Client) heartbeatMonitor(ctx context.Context) {
 				if c.degraded.CompareAndSwap(false, true) {
 					reason := fmt.Sprintf("no shim traffic for %s (>%s window)",
 						since.Round(time.Millisecond), c.cfg.HeartbeatTimeout)
-					c.logf("connection degraded: %s", reason)
+					// The workspace turns DEGRADED in the frontend on this
+					// edge, so the record that explains it must not sit at
+					// info beside the heartbeats it is reporting the absence
+					// of.
+					c.warn("connection degraded: %s", reason)
 					c.cfg.Degraded.ConnectionDegraded(c.cfg.SessionID, reason)
 				}
 			} else if c.degraded.CompareAndSwap(true, false) {
@@ -1091,7 +1151,7 @@ func (c *Client) reconstructPinnedTurns() map[string]struct{} {
 	}
 	ids, err := c.cfg.OpenTurnClaims.ActiveTurnIDs(c.cfg.Workspace, c.cfg.SessionID)
 	if err != nil {
-		c.logf("shimclient: accounting pin reconstruction FAILED session=%s workspace=%s: %v — the pin set starts empty, so the durable cursor is no longer held behind any turn this session had in flight",
+		c.warn("shimclient: accounting pin reconstruction FAILED session=%s workspace=%s: %v — the pin set starts empty, so the durable cursor is no longer held behind any turn this session had in flight",
 			c.cfg.SessionID, c.cfg.Workspace, err)
 		return pinned
 	}
