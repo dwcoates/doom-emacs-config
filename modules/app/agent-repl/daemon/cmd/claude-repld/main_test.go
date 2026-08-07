@@ -132,6 +132,65 @@ func TestUDSShimLoggerPersistsDaemonOwnedDiagnosticsToWorkspaceTarget(t *testing
 	}
 }
 
+// TestUDSShimLoggerLevelsSeparateLifecycleFromStderrContent pins the split the
+// level exists for: the stderr pump announces itself on every healthy spawn, and
+// routing that announcement through the error channel put a level=error record
+// in the workspace log of a session that came up perfectly.
+func TestUDSShimLoggerLevelsSeparateLifecycleFromStderrContent(t *testing.T) {
+	tests := []struct {
+		name  string
+		emit  func(*udsShimLogger)
+		want  dlog.Level
+		match string
+	}{
+		{
+			name:  "scanner lifecycle announcement",
+			emit:  func(l *udsShimLogger) { l.LogLifecycle("shim: stderr scanner started pid=%d", 4242) },
+			want:  dlog.LevelInfo,
+			match: "stderr scanner started",
+		},
+		{
+			name:  "genuine shim stderr content",
+			emit:  func(l *udsShimLogger) { l.Log("shim stderr malformed: %s", "node stack trace") },
+			want:  dlog.LevelError,
+			match: "shim stderr malformed",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			workspace := dlog.Workspace{Directory: t.TempDir(), ID: "ws-test"}
+			manager := dlog.NewTargetManager()
+			target, err := manager.OpenWorkspace(workspace)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer manager.Close()
+			var terminal bytes.Buffer
+			logger := &udsShimLogger{workspace: workspace, daemon: dlog.New(target, &terminal, true), terminal: &terminal, sessionID: "s1"}
+
+			// Act.
+			tc.emit(logger)
+
+			// Assert.
+			contents, err := os.ReadFile(target.Name())
+			if err != nil {
+				t.Fatal(err)
+			}
+			var record dlog.Record
+			if err := json.Unmarshal(bytes.TrimSpace(contents), &record); err != nil {
+				t.Fatalf("shim stderr record is not JSON: %v: %q", err, contents)
+			}
+			if !strings.Contains(record.Message, tc.match) {
+				t.Fatalf("record message = %q, want it to carry %q", record.Message, tc.match)
+			}
+			if record.Level != tc.want {
+				t.Fatalf("record level = %q, want %q", record.Level, tc.want)
+			}
+		})
+	}
+}
+
 func TestUDSShimLoggerReportsWorkspacePersistenceFailureToTerminal(t *testing.T) {
 	workspace := dlog.Workspace{Directory: t.TempDir(), ID: "ws-test"}
 	var terminal bytes.Buffer
