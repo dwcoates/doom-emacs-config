@@ -1370,6 +1370,53 @@ state.  Returns non-nil exactly when a record was emitted."
       (apply #'agent-repl--log-verbose ws fmt args)
       t)))
 
+(defconst agent-repl--backend-output-tail-lines 5
+  "Nonblank captured lines a backend-initiation echo line may carry.")
+
+(defconst agent-repl--backend-output-tail-limit 400
+  "Maximum characters a backend-initiation echo tail may occupy.")
+
+(defun agent-repl--backend-output-tail (output &optional lines)
+  "Return the last LINES nonblank lines of OUTPUT as one echo-safe string.
+
+The FULL captured output always goes to the durable structured record;
+this is only the fragment a one-line minibuffer failure can carry, so it
+is deliberately lossy and never the sole record of anything.  Returns
+\"<no output>\" when OUTPUT carries nothing, so an empty capture is
+reported as an empty capture rather than as an absent field."
+  (let* ((text (if (stringp output) output ""))
+         (kept (last (split-string text "\n" t "[ \t\r]+")
+                     (or lines agent-repl--backend-output-tail-lines)))
+         (joined (string-join kept " / ")))
+    (cond
+     ((string-empty-p joined) "<no output>")
+     ((> (length joined) agent-repl--backend-output-tail-limit)
+      (concat "…" (substring joined
+                             (- (length joined)
+                                agent-repl--backend-output-tail-limit))))
+     (t joined))))
+
+(defun agent-repl--backend-phase (ws fmt &rest args)
+  "Record a backend-initiation phase transition and ECHO it to the user.
+
+This is the ONE background flow the ladder commentary above exempts from
+its no-`message' rule, and the exemption is narrow: artifact builds,
+launchd kickstarts, the daemon spawn and the runtime bounce.  The build
+step is a synchronous `call-process' that blocks the frame outright, so a
+user with no line at all cannot tell a rebuild from a hang — and a bounce
+that fails silently looks exactly like a bounce that never started.
+
+Only PHASE TRANSITIONS and outcomes come through here.  The subprocess
+spew itself stays on `agent-repl--log', where the runbooks mine it; a
+failure echo carries at most `agent-repl--backend-output-tail' of it plus
+a pointer at the log file.
+
+FMT and ARGS keep the ladder's format-string signature, so the persisted
+`operation' name stays derived from the template and never from a runtime
+value."
+  (agent-repl--persist-log-record ws "info" "normal" fmt args)
+  (agent-repl--emit-message (concat "agent-repl: " (apply #'format fmt args)) t))
+
 (defun agent-repl--error (ws fmt &rest args)
   "Signal an error with a [agent-repl] tag, timestamp, and workspace metadata.
 WS is the workspace name for context (or nil).  FMT and ARGS are formatted
