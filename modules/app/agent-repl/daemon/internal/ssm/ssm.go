@@ -57,6 +57,18 @@ type Options struct {
 	DB *sql.DB
 	// Logf is the loud transition/anomaly logger. Required.
 	Logf dlog.Logf
+	// Warnf is the WARN channel, for a record that accompanies a regression
+	// the user can see: a lease that stays open and keeps refusing prompts, a
+	// turn claim that outlives its turn, a stopped turn that will not be
+	// resumed. At info those are indistinguishable from the routine
+	// transitions this manager logs constantly.
+	//
+	// Nil falls back to Logf, so the record is still made and only its
+	// severity is lost.
+	Warnf dlog.Logf
+	// Errorf is the ERROR channel, for a failure that leaves durable state
+	// wrong rather than merely degraded. Nil falls back to Warnf.
+	Errorf dlog.Logf
 	// Resolver binds session ids to workspaces. Required for Apply.
 	Resolver Resolver
 	// Clock returns wall-clock unix millis; injectable for tests. Nil uses
@@ -93,8 +105,12 @@ type Manager struct {
 	// ownsDB is false when the state store was handed in already open (see
 	// Options.DB): closing another owner's handle would take the session
 	// registry's tables down with the SSM.
-	ownsDB   bool
-	logf     dlog.Logf
+	ownsDB bool
+	logf   dlog.Logf
+	// warnf and errorf are the leveled channels described on Options. Never
+	// nil after Open; reached through warn and logError.
+	warnf    dlog.Logf
+	errorf   dlog.Logf
 	resolver Resolver
 	clock    func() int64
 
@@ -203,6 +219,14 @@ type Manager struct {
 // Open opens the SSM database and warms the last-resolved cache from the
 // persisted log so a reopen does not re-announce every workspace as a fresh
 // transition (state survives the reopen).
+// warn emits through the Manager's WARN channel (Options.Warnf, or Logf when
+// that is unwired). It is the sole reader of warnf.
+func (m *Manager) warn(format string, args ...any) { m.warnf(format, args...) }
+
+// logError emits through the Manager's ERROR channel (Options.Errorf, falling
+// back to Warnf and then Logf). It is the sole reader of errorf.
+func (m *Manager) logError(format string, args ...any) { m.errorf(format, args...) }
+
 func Open(opts Options) (*Manager, error) {
 	path := opts.DBPath
 	if path == "" {
@@ -216,6 +240,14 @@ func Open(opts Options) (*Manager, error) {
 		return nil, fmt.Errorf("ssm: Options.Logf is required")
 	}
 	logf := opts.Logf
+	warnf := opts.Warnf
+	if warnf == nil {
+		warnf = logf
+	}
+	errorf := opts.Errorf
+	if errorf == nil {
+		errorf = warnf
+	}
 	clock := opts.Clock
 	if clock == nil {
 		clock = func() int64 { return time.Now().UnixMilli() }
@@ -242,6 +274,8 @@ func Open(opts Options) (*Manager, error) {
 		db:                      db,
 		ownsDB:                  ownsDB,
 		logf:                    logf,
+		warnf:                   warnf,
+		errorf:                  errorf,
 		resolver:                opts.Resolver,
 		clock:                   clock,
 		last:                    make(map[string]frontendv1.RenderState),
