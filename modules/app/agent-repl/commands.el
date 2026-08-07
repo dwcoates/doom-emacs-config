@@ -1460,6 +1460,23 @@ Each call:
   frontend (`agent-repl--frontend-boot-session') — the vterm process for
   a vterm workspace, a background daemon session (resuming the durable
   claude session) for a gui one."
+  ;; Register the log sink BEFORE the first record is emitted for WS.
+  ;; Every line below is workspace-attributed, and `agent-repl--log' resolves
+  ;; a durable per-workspace sink from `:project-dir'.  Registering it later
+  ;; (as this function used to, just before the display-state hydration) sent
+  ;; the whole establish prologue to the global sink and made
+  ;; `agent-repl--note-unroutable-log-workspace' warn once per restored
+  ;; workspace at every startup.  DIR is already known here — the caller
+  ;; verified it is an existing directory — so there is nothing to wait for.
+  ;;
+  ;; `:project-dir' goes first so the hash entry is born with it: any other
+  ;; key would create the non-workspace stub shape `--ws-put' diagnoses.
+  ;; Waking a pre-existing tombstone follows immediately, because an
+  ;; `--establish-workspace' call is the canonical resurrection path for
+  ;; snapshot-loaded entries tombstoned in a prior session, and `--ws-live-p'
+  ;; must agree with the post-establish state from here on.
+  (agent-repl--ws-put ws :project-dir dir)
+  (agent-repl--ws-put ws :nuked-at nil)
   (agent-repl--log ws "establish-workspace: begin ws=%s dir=%s" ws dir)
   (agent-repl--with-error-logging (format "establish-workspace[%s]" ws)
     ;; Create the persp and tag it with `+workspace-project' so a later
@@ -1505,13 +1522,13 @@ Each call:
             (agent-repl--log ws "establish-workspace: opening recent-file=%s" recent-file)
             (find-file recent-file))
         (agent-repl--log ws "establish-workspace: no existing recent-file candidate=%s" recent-file)))
-    ;; Wake any pre-existing tombstone before re-asserting identity keys —
-    ;; an `--establish-workspace' call is the canonical resurrection path
-    ;; for snapshot-loaded entries that may have been tombstoned in a prior
-    ;; session.  Clearing `:nuked-at' first keeps `--ws-live-p' coherent
-    ;; with the post-establish state.
-    (agent-repl--ws-put ws :nuked-at nil)
+    ;; Re-assert the identity keys registered at the top of this function.
+    ;; Both puts are no-ops on the ordinary path; they stay because the steps
+    ;; above run third-party code (`+workspaces-switch-project-function',
+    ;; `find-file-hook') that is free to tombstone or re-key this workspace,
+    ;; and everything below must see the established state.
     (agent-repl--ws-put ws :project-dir dir)
+    (agent-repl--ws-put ws :nuked-at nil)
     ;; Hydrate the priority badge then reseat this ws into its priority
     ;; slot, via the shared opener step so `SPC p p' and snapshot/worktree
     ;; restore agree on ordering.  The reorder is skipped mid-snapshot-load
@@ -2144,6 +2161,14 @@ time.  Clean merges set `:repl-state :merged' so the 🔀
 badge re-appears post-restart (the snapshot loader does not pass
 through `--initialize-ws-env' for merged entries)."
   (agent-repl--with-error-logging (format "register-merged-workspace[%s]" ws)
+    ;; Register the log sink before the first workspace-attributed record,
+    ;; for the reason spelled out in `agent-repl--establish-workspace': the
+    ;; state-file read below logs against WS, and a WS without
+    ;; `:project-dir' has no sink for those records to land in.
+    (agent-repl--ws-put ws :project-dir dir)
+    ;; Merged workspaces are a re-registration path; clear any prior
+    ;; tombstone so `--ws-live-p' agrees the entry is back in play.
+    (agent-repl--ws-put ws :nuked-at nil)
     (let* ((state-file (agent-repl--state-file-for-read dir))
            (saved (and state-file
                        (file-exists-p state-file)
@@ -2154,10 +2179,6 @@ through `--initialize-ws-env' for merged entries)."
                           nil)))))
       (agent-repl--log ws "register-merged: ws=%s dir=%s saved=%s"
                         ws dir (if saved "yes" "no"))
-      ;; Merged workspaces are a re-registration path; clear any prior
-      ;; tombstone so `--ws-live-p' agrees the entry is back in play.
-      (agent-repl--ws-put ws :nuked-at nil)
-      (agent-repl--ws-put ws :project-dir dir)
       (agent-repl--ws-put ws :merge-completed t)
       (when saved
         (dolist (key '(:priority :source-ws-dir :last-prompt-summary
