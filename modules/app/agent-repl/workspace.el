@@ -1564,11 +1564,40 @@ workspaces return nil."
        (equal (agent-repl--ws-get ws :daemon-workspace-metadata)
               metadata)))
 
+(defun agent-repl--ws-persist-materialized-roster (ws)
+  "Record freshly materialized WS in the durable workspace roster snapshot.
+Delegates to `agent-repl--snapshot-persist-materialized-workspace' in
+`commands.el', which owns the roster file.
+
+Materialization creates a perspective and a hash entry without starting a
+session, so it never reaches `agent-repl--state-save' — the piggyback
+through which every normally-opened workspace lands in the roster.  Left
+unpersisted, the workspace survives only as long as this Emacs process:
+its worktree and daemon session keep running while the perspective
+silently disappears at the next restart.
+
+Guarded with `fboundp' because `workspace.el' loads before `commands.el';
+the guard's else-branch logs the skip rather than passing over it, since a
+missing roster write is exactly the failure this function exists to
+prevent."
+  (if (fboundp 'agent-repl--snapshot-persist-materialized-workspace)
+      (agent-repl--snapshot-persist-materialized-workspace ws)
+    (agent-repl--log
+     ws
+     "ws-materialize-daemon: roster persist SKIPPED ws=%s reason=persist-fn-unavailable"
+     ws)))
+
 (defun agent-repl--ws-materialize-daemon-workspace (ws metadata)
   "Materialize daemon-owned workspace WS from authoritative METADATA.
 Creates only the perspective and the `agent-repl--workspaces' bookkeeping
 entry.  It never invokes git, session creation, shim startup, prompt
 delivery, projectile registration, or frontend mounting.
+
+A successful materialization does write the workspace roster snapshot
+via `agent-repl--ws-persist-materialized-roster'.  That is not session
+state: without it the workspace has no durable record anywhere and
+disappears at the next Emacs restart while its worktree and daemon
+session keep running.
 
 Returns `created' for a new materialization and `existing' for an exact
 replay.  A same-name conflict, duplicate path owner, tombstone, or missing
@@ -1612,7 +1641,7 @@ the original error is re-signaled."
       (error "agent-repl: perspective %s exists without daemon bookkeeping" ws))
      (t
       ;; Check every rollback dependency before creating anything.
-     (dolist (fn '(persp-add-new set-persp-parameter persp-kill))
+      (dolist (fn '(persp-add-new set-persp-parameter persp-kill))
         (unless (fboundp fn)
           (agent-repl--log
            ws
@@ -1621,66 +1650,72 @@ the original error is re-signaled."
           (error "agent-repl: cannot materialize %s; %s is unavailable" ws fn)))
       (let ((persp-created nil)
             (hash-created nil))
-        (condition-case err
-            (let ((persp (persp-add-new ws)))
-              (unless (and persp (not (keywordp persp)))
-                (agent-repl--log
-                 ws
-                 "ws-materialize-daemon: CREATE-FAILED ws=%s job-id=%s reason=invalid-persp result=%S"
-                 ws job-id persp)
-                (error "persp-add-new did not create perspective %s" ws))
-              (setq persp-created t)
-              (set-persp-parameter '+workspace-project path persp)
-              ;; One write is the bookkeeping commit point.  Keeping all
-              ;; metadata in one plist prevents observers from seeing a
-              ;; project-dir-only or session-id-only partial workspace.
-              (puthash
-               ws
-               (append
-                (list :created-at (current-time)
-                      :worktree-p t
-                      ;; Preserve the immutable creation envelope separately
-                      ;; from mutable top-level fields such as :priority.
-                      ;; Reconnect replay compares this exact original value,
-                      ;; so a later user priority edit cannot turn the same
-                      ;; daemon job into a false conflict.  The copy is what
-                      ;; makes that true: `append' below SHARES METADATA's
-                      ;; cons cells as the plist tail, so without it a
-                      ;; `plist-put' on any metadata-supplied key would
-                      ;; rewrite the envelope in place.
-                      :daemon-workspace-metadata (copy-sequence metadata)
-                      ;; Derive the id through the SAME canonicalizer every
-                      ;; other ws-id producer uses (`agent-repl--workspace-id',
-                      ;; `--path-canonical'), or a symlinked worktree would get
-                      ;; two different ids for one directory.
-                      :ws-id (substring
-                              (md5 (agent-repl--path-canonical path))
-                              0 agent-repl-workspace-id-length))
-                metadata)
-               agent-repl--workspaces)
-              (setq hash-created t)
-              (agent-repl--log
-               ws
-               "ws-materialize-daemon: CREATED ws=%s job-id=%s path=%s branch=%s prompt-queued=%S"
-               ws job-id path (plist-get metadata :branch-name)
-               (plist-get metadata :initial-prompt-queued))
-              'created)
-          (error
-           (when hash-created
-             (remhash ws agent-repl--workspaces))
-           (when persp-created
-             (condition-case rollback-err
-                 (persp-kill ws)
-               (error
-                (agent-repl--log
-                 ws
-                 "ws-materialize-daemon: ROLLBACK perspective kill FAILED ws=%s job-id=%s err=%S"
-                 ws job-id rollback-err))))
-           (agent-repl--log
-            ws
-            "ws-materialize-daemon: FAILED and rolled back ws=%s job-id=%s hash-created=%S persp-created=%S err=%S"
-            ws job-id hash-created persp-created err)
-           (signal (car err) (cdr err)))))))))
+        ;; `prog1', so the roster write runs only after the guarded body
+        ;; returned normally.  Inside the `condition-case' a failing write
+        ;; would trip the rollback and destroy a workspace that was
+        ;; materialized correctly.
+        (prog1
+            (condition-case err
+		(let ((persp (persp-add-new ws)))
+		  (unless (and persp (not (keywordp persp)))
+                    (agent-repl--log
+                     ws
+                     "ws-materialize-daemon: CREATE-FAILED ws=%s job-id=%s reason=invalid-persp result=%S"
+                     ws job-id persp)
+                    (error "persp-add-new did not create perspective %s" ws))
+		  (setq persp-created t)
+		  (set-persp-parameter '+workspace-project path persp)
+		  ;; One write is the bookkeeping commit point.  Keeping all
+		  ;; metadata in one plist prevents observers from seeing a
+		  ;; project-dir-only or session-id-only partial workspace.
+		  (puthash
+		   ws
+		   (append
+                    (list :created-at (current-time)
+			  :worktree-p t
+			  ;; Preserve the immutable creation envelope separately
+			  ;; from mutable top-level fields such as :priority.
+			  ;; Reconnect replay compares this exact original value,
+			  ;; so a later user priority edit cannot turn the same
+			  ;; daemon job into a false conflict.  The copy is what
+			  ;; makes that true: `append' below SHARES METADATA's
+			  ;; cons cells as the plist tail, so without it a
+			  ;; `plist-put' on any metadata-supplied key would
+			  ;; rewrite the envelope in place.
+			  :daemon-workspace-metadata (copy-sequence metadata)
+			  ;; Derive the id through the SAME canonicalizer every
+			  ;; other ws-id producer uses (`agent-repl--workspace-id',
+			  ;; `--path-canonical'), or a symlinked worktree would get
+			  ;; two different ids for one directory.
+			  :ws-id (substring
+				  (md5 (agent-repl--path-canonical path))
+				  0 agent-repl-workspace-id-length))
+                    metadata)
+		   agent-repl--workspaces)
+		  (setq hash-created t)
+		  (agent-repl--log
+		   ws
+		   "ws-materialize-daemon: CREATED ws=%s job-id=%s path=%s branch=%s prompt-queued=%S"
+		   ws job-id path (plist-get metadata :branch-name)
+		   (plist-get metadata :initial-prompt-queued))
+		  'created)
+              (error
+               (when hash-created
+		 (remhash ws agent-repl--workspaces))
+               (when persp-created
+		 (condition-case rollback-err
+                     (persp-kill ws)
+		   (error
+                    (agent-repl--log
+                     ws
+                     "ws-materialize-daemon: ROLLBACK perspective kill FAILED ws=%s job-id=%s err=%S"
+                     ws job-id rollback-err))))
+               (agent-repl--log
+		ws
+		"ws-materialize-daemon: FAILED and rolled back ws=%s job-id=%s hash-created=%S persp-created=%S err=%S"
+		ws job-id hash-created persp-created err)
+               (signal (car err) (cdr err))))
+          (agent-repl--ws-persist-materialized-roster ws)))))))
 
 (defun agent-repl--ws-protected-p (ws)
   "Return non-nil when workspace WS is protected from deletion/cycling.
