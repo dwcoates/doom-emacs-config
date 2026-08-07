@@ -176,6 +176,19 @@ _is_managed_precommit() {
   grep -q -e "$PRECOMMIT_MARKER" -e "$PRECOMMIT_MARKER_LEGACY" "$1" 2>/dev/null
 }
 
+# Return 0 iff SRC and DEST are the SAME file on disk (same device+inode, so
+# a symlinked or `..`-spelled path still matches).
+#
+# This is the `core.hooksPath = .githooks` layout: git already reads hooks
+# straight out of the managed source dir, so the install destination IS the
+# install source.  Copying it onto itself is what `cp` rejects ("are
+# identical"), which under `set -e` aborted the whole install with exit 1 —
+# the auto-install failure seen on every Emacs boot.  Nothing needs doing in
+# that layout: the managed hook is already the live hook.
+_same_file() {
+  [ -e "$1" ] && [ -e "$2" ] && [ "$1" -ef "$2" ]
+}
+
 # --- Helpers ---
 
 show_help() {
@@ -251,7 +264,12 @@ do_install() {
         mkdir -p "$hooks_path"
         src_hook="$GITHOOKS_DIR/pre-commit"
         dest_hook="$hooks_path/pre-commit"
-        if [ ! -f "$dest_hook" ]; then
+        if _same_file "$src_hook" "$dest_hook"; then
+          # core.hooksPath already points at the managed source dir: the
+          # hook is live exactly as checked in.  Nothing to copy.
+          chmod +x "$dest_hook"
+          echo "[install] Pre-commit hook already live via core.hooksPath -> $dest_hook"
+        elif [ ! -f "$dest_hook" ]; then
           cp "$src_hook" "$dest_hook"
           chmod +x "$dest_hook"
           echo "[install] Installed pre-commit hook -> $dest_hook"
@@ -316,7 +334,11 @@ do_uninstall() {
           hooks_path="$repo_top/$hooks_path"
         fi
         dest_hook="$hooks_path/pre-commit"
-        if [ -f "$dest_hook" ] && _is_managed_precommit "$dest_hook"; then
+        if _same_file "$GITHOOKS_DIR/pre-commit" "$dest_hook"; then
+          # core.hooksPath points at the managed source dir: removing the
+          # "installed" hook here would delete the repo's CHECKED-IN source.
+          echo "[uninstall] Pre-commit hook is the checked-in source (core.hooksPath); left in place: $dest_hook"
+        elif [ -f "$dest_hook" ] && _is_managed_precommit "$dest_hook"; then
           rm -f "$dest_hook"
           echo "[uninstall] Removed managed pre-commit hook: $dest_hook"
         fi

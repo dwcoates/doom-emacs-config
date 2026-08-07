@@ -337,6 +337,38 @@ test_uninstall_removes_legacy_marked_hook() {
   cleanup "$repo" "$home"
 }
 
+# --- install: core.hooksPath == .githooks is a no-op, not a `cp` failure ---
+# Regression: this repo sets core.hooksPath to the MANAGED SOURCE dir, so
+# src_hook and dest_hook are the same file.  `cp` refuses ("are identical"),
+# and under `set -e` that aborted the whole install with exit 1 — the
+# auto-install warning on every Emacs boot.
+test_install_hookspath_is_source_dir_exits_zero() {
+  local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
+  git -C "$repo" config core.hooksPath "$repo/.githooks"
+  run_install "$repo" "$home"
+  if [ "$LAST_RC" -eq 0 ] \
+     && grep -q "already live via core.hooksPath" "$repo/.install.log" \
+     && grep -q "agent-repl-precommit" "$repo/.githooks/pre-commit"; then
+    pass "core.hooksPath pointing at .githooks installs as a no-op, exit 0"
+  else
+    fail "core.hooksPath no-op install" "rc: $LAST_RC" "$(cat "$repo/.install.log")"
+  fi
+  cleanup "$repo" "$home"
+}
+
+# --- uninstall: never deletes the CHECKED-IN hook under core.hooksPath ---
+test_uninstall_keeps_checked_in_hook_under_hookspath() {
+  local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
+  git -C "$repo" config core.hooksPath "$repo/.githooks"
+  run_install "$repo" "$home" uninstall
+  if [ "$LAST_RC" -eq 0 ] && [ -f "$repo/.githooks/pre-commit" ]; then
+    pass "uninstall leaves the checked-in .githooks/pre-commit in place"
+  else
+    fail "uninstall checked-in hook preservation" "rc: $LAST_RC" "$(cat "$repo/.install.log")"
+  fi
+  cleanup "$repo" "$home"
+}
+
 # --- install: foreign pre-commit hook is preserved ---
 test_install_preserves_foreign_pre_commit() {
   local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
@@ -548,6 +580,8 @@ test_install_installs_pre_commit_hook
 test_install_refreshes_managed_hook
 test_install_refreshes_legacy_marked_hook
 test_uninstall_removes_legacy_marked_hook
+test_install_hookspath_is_source_dir_exits_zero
+test_uninstall_keeps_checked_in_hook_under_hookspath
 test_install_preserves_foreign_pre_commit
 test_uninstall_removes_impl_symlink
 test_uninstall_only_removes_managed_hook
