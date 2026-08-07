@@ -1066,7 +1066,7 @@ inherited-pipe EOF."
           (when on-stopped (funcall on-stopped)))
       (unless force
         (when-let ((busy (agent-repl--frontend-turn-active-sessions)))
-          (agent-repl--log nil "frontend stop: refused force=nil active-sessions=%S" busy)
+          (agent-repl--log nil "frontend stop: refused force=nil active-workspaces=%S" busy)
           (error "agent-repl: refusing daemon stop — turn in flight in %s; retry when idle or pass FORCE"
                  busy)))
     (when stop-shims
