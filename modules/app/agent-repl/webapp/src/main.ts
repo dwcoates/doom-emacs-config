@@ -1008,7 +1008,7 @@ async function boot(): Promise<void> {
   const makeClient = (connectionAddress: PageAddress): WsClient => {
     logConnectionGeneration++;
     bindLogContext({
-      agent_repl_session_id: activeSessionId,
+      ...(activeSessionId !== "" ? { agent_repl_session_id: activeSessionId } : {}),
       connection_id: `${pageLogInstance}:${logConnectionGeneration}`,
       ...(connectionAddress.kind === "workspace" ? { workspace: connectionAddress.workspace } : {}),
     });
