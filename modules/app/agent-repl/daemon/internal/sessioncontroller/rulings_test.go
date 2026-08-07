@@ -96,6 +96,23 @@ type fakeRegistrar struct {
 	adoptions []string
 	// observedModels records one entry per SessionModelObserved call.
 	observedModels []string
+	// operationals records one "workspace=session" entry per
+	// SessionOperational call — the edge that resolves superseded deaths.
+	operationals []string
+}
+
+// SessionOperational records the bring-up gate's resolving edge.
+func (f *fakeRegistrar) SessionOperational(workspace, sessionID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.operationals = append(f.operationals, workspace+"="+sessionID)
+}
+
+// operationalEdges returns the recorded operational edges, taken under the lock.
+func (f *fakeRegistrar) operationalEdges() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.operationals...)
 }
 
 // ClaudeSessionIDChanged mirrors the registry adapter: adoption is EAGER, so
