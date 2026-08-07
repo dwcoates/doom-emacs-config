@@ -58,6 +58,23 @@ func (r *ConversationResolver) ObservedClaudeSessionID(sessionID string) string 
 	return rec.ClaudeSessionID
 }
 
+// ConversationEvidence reports what the daemon's own durable records say about
+// whether this workspace has ever had a Claude conversation.
+//
+// It is a SEPARATE question from ResolveResume, and deliberately so.
+// ResolveResume answers "which conversation should this create land on?", and
+// it excludes candidates (a user delete) that are nonetheless proof the
+// workspace HAS a conversation. Reading a false from ResolveResume as "brand
+// new workspace" is exactly the conflation that let an excluded candidate
+// become a silent blank slate. This asks the other question, over the same
+// registry, and does no excluding at all.
+func (r *ConversationResolver) ConversationEvidence(configDir, cwd string) conversationEvidence {
+	if r == nil {
+		return conversationEvidence{}
+	}
+	return gatherConversationEvidence(r.Reg, configDir, cwd)
+}
+
 // resumeCandidate is one conversation the resolver is considering, carrying
 // the ordering key and the provenance the log line reports.
 type resumeCandidate struct {

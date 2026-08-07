@@ -80,6 +80,13 @@ type sessionEstablishment struct {
 	hibernated bool
 }
 
+// resumeModeFreshRetired is the RETIRED wire value tag 2 (RESUME_MODE_FRESH).
+// The generated enum no longer names it — that is the point of reserving the
+// tag — so the daemon names the raw number itself in order to REFUSE it. It is
+// a named constant rather than a bare 2 at the switch arm because a bare
+// number in a resume-mode switch reads like a bug.
+const resumeModeFreshRetired = frontendv1.ResumeMode(2)
+
 // resolveResume turns the caller's INTENT into the concrete conversation the
 // create will land on.
 //
@@ -100,10 +107,18 @@ func (h *commandHandler) resolveResume(cmd *frontendv1.CreateSessionCmd) (string
 	}
 
 	switch mode {
-	case frontendv1.ResumeMode_RESUME_MODE_FRESH:
-		h.logf("frontend cmd: create_session cwd=%s resume_mode=FRESH — the caller deliberately asked for a NEW conversation, so no resolution is attempted",
+	case resumeModeFreshRetired:
+		// AN OUT-OF-DATE CLIENT, NOT A CONFUSED ONE. Tag 2 was
+		// RESUME_MODE_FRESH and it is retired (see the ResumeMode enum): a
+		// caller may no longer ask for a workspace's conversation to be
+		// replaced. Reading it as CONTINUE would be the daemon quietly
+		// answering a different question than the one asked, and reading it as
+		// "unknown mode" would tell the user their client is broken when it is
+		// merely old. It is named, refused, and the remedy is stated.
+		h.logf("frontend cmd: create_session cwd=%s resume_mode=2 REFUSED — RESUME_MODE_FRESH is retired and this daemon will not start a conversation over an existing one",
 			cmd.GetCwd())
-		return "", nil
+		return "", fmt.Errorf("%w: resume_mode=2 (RESUME_MODE_FRESH) was retired because a workspace's conversation is not caller-replaceable; update the client to send RESUME_MODE_CONTINUE",
+			errclass.ErrResumeModeRetired)
 
 	case frontendv1.ResumeMode_RESUME_MODE_EXPLICIT:
 		if explicit == "" {
@@ -122,10 +137,33 @@ func (h *commandHandler) resolveResume(cmd *frontendv1.CreateSessionCmd) (string
 			return "", fmt.Errorf("create_session resume_mode=%s needs a conversation resolver and none is wired; refusing rather than silently starting a fresh conversation over an existing one", mode)
 		}
 		resume, ok := h.resumes.ResolveResume(cmd.GetConfigDir(), cmd.GetCwd())
-		if !ok {
-			return "", nil
+		if ok {
+			return resume, nil
 		}
-		return resume, nil
+		// NOTHING RESOLVED. That used to end here with `return "", nil` — a
+		// blank conversation, indistinguishable on the wire and in the log from
+		// a genuinely new workspace. It is exactly the fallback the ruling
+		// removes: "the resolver found nothing" covers a brand-new workspace
+		// AND a workspace whose every candidate was excluded (a stale delete
+		// tombstone, a pruned record), and only the first of those may start
+		// fresh.
+		//
+		// The evidence decides, and it is the daemon's own durable record. The
+		// same check runs again at the spawn chokepoint (ShimSpawner.EnsureShim),
+		// which is where the structural gate lives; it runs HERE too because a
+		// create that is going to be refused should be refused by the command
+		// that asked, naming the workspace, rather than surfacing later as a
+		// bring-up failure.
+		evidence := h.resumes.ConversationEvidence(cmd.GetConfigDir(), cmd.GetCwd())
+		proof, reason := proveFreshEligible(evidence)
+		if proof == nil {
+			h.logf("frontend cmd: create_session cwd=%s config_dir=%s REFUSED — the resolver named no resumable conversation and %s",
+				cmd.GetCwd(), cmd.GetConfigDir(), reason)
+			return "", unresumableConversation(cmd.GetCwd(), cmd.GetConfigDir(), reason)
+		}
+		h.logf("frontend cmd: create_session cwd=%s config_dir=%s starts a FRESH conversation — the registry proves this workspace has never run one",
+			cmd.GetCwd(), cmd.GetConfigDir())
+		return "", nil
 
 	default:
 		return "", fmt.Errorf("create_session carries unknown resume_mode=%d", int32(mode))

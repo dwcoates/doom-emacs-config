@@ -394,6 +394,27 @@ func (s *ShimSpawner) EnsureShim(ctx context.Context, sessionID string) (session
 	// every respawn hard-failed on a file only a real CLI ever creates.
 	fake := s.fakeForced()
 	opts.Fake = fake
+	// freshProof is the ticket to the no-resume spawn below. It is nil here and
+	// stays nil unless some rung of the ladder MINTS it from evidence; see
+	// freshgate.go for why the permission is an object rather than a bool.
+	var freshProof *freshEligibility
+	if missing := validateResumeTarget(opts, fake); missing != nil {
+		// THE RESTORE RUNG, above every other answer to a missing transcript.
+		// The conversation may still exist on disk beside the workspace
+		// (transcriptbackup.go); putting it back turns what used to be a lost
+		// conversation into a resumed one, and it must be tried before any rung
+		// that starts something blank.
+		restored, restoreErr := attemptTranscriptRestore(s.logf, "automatic_restore", sessionID, opts)
+		if restoreErr != nil {
+			return res, restoreErr
+		}
+		// A successful restore is deliberately NOT taken as proof the target is
+		// now viable. The gate below re-derives that from the disk, because the
+		// gate is the sole authority on resume viability and a restore that
+		// landed somewhere it could not be read back from is a fact only the
+		// gate can report.
+		_ = restored
+	}
 	if missing := validateResumeTarget(opts, fake); missing != nil {
 		if !resumeTargetCarriesAConversation(rec) {
 			// A HANDSHAKE THAT NEVER BECAME A CONVERSATION. The vendor mints a
@@ -420,9 +441,67 @@ func (s *ShimSpawner) EnsureShim(ctx context.Context, sessionID string) (session
 			s.logf("server: session %s: resume viability gate WAIVED for respawn resume=%q reason=handshake_only_no_turn_ever_ran cwd=%q config_dir=%q — the vendor minted this uuid at bring-up and no turn ever ran under it, so there is no conversation to lose and the held work would otherwise be dropped",
 				sessionID, opts.Resume, opts.CWD, opts.ConfigDir)
 			opts.Resume = ""
+			// NO PROOF IS MINTED HERE. The waiver establishes only that THIS
+			// record never spoke; the gate below asks the wider question the
+			// ruling actually turns on — has this WORKSPACE ever had a
+			// conversation — over the same evidence, through the same
+			// function. A handshake-only record in a workspace that has been
+			// talking for a week is not a blank slate, and letting the waiver
+			// mint its own permission is how it would become one.
 		} else {
 			logResumeContinuityFailure(s.logf, "automatic_restore", sessionID, opts, missing)
 			return res, missing
+		}
+	}
+	// THE STRUCTURAL GATE. Every path that reaches a spawn with no --resume
+	// passes through here, because EnsureShim is the daemon's only spawn site:
+	// Server.CreateSession registers the record and hands bring-up to the
+	// controller, which arrives back at this function. A record that names no
+	// conversation is therefore either a workspace that never had one — which
+	// the evidence must SAY, not merely fail to contradict — or a conversation
+	// about to be silently replaced.
+	//
+	// Fake sessions are the one standing exception, on the grounds the resume
+	// gate already waives them for: the scripted offline SDK has no
+	// conversation plane at all, so there is nothing a blank start could
+	// destroy.
+	if opts.Resume == "" && freshProof == nil {
+		if fake {
+			s.logf("server: session %s: no-resume spawn permitted for a FAKE session — the scripted offline SDK has no conversation to lose (cwd=%q)",
+				sessionID, opts.CWD)
+		} else {
+			proof, reason := proveFreshEligible(gatherConversationEvidence(s.reg, rec.ConfigDir, rec.CWD))
+			if proof == nil {
+				// THE RESTORE RUNG AGAIN, and this placement recovers the worst
+				// case: the workspace HAS a conversation, nothing on the record
+				// names a resumable one, and the refusal below is otherwise the
+				// end of the road. With no uuid to aim at, the newest backup
+				// this workspace holds names the conversation it should be
+				// returned to.
+				noTarget := opts
+				noTarget.Resume = ""
+				restored, restoreErr := attemptTranscriptRestore(s.logf, "automatic_restore", sessionID, noTarget)
+				if restoreErr != nil {
+					return res, restoreErr
+				}
+				if recovered, ok := newestBackupConversation(rec.CWD); restored && ok {
+					// Resumed rather than refused, and the spawn below carries
+					// it exactly as an ordinary resume would: the whole point of
+					// the backup plane is that a recovered conversation is not
+					// a special kind of session afterwards.
+					opts.Resume = recovered
+					s.logf("server: session %s: conversation %s RECOVERED from backup and will be RESUMED rather than refused (cwd=%q)",
+						sessionID, recovered, rec.CWD)
+				} else {
+					s.logf("server: session %s: no-resume spawn REFUSED cwd=%q config_dir=%q — %s",
+						sessionID, rec.CWD, rec.ConfigDir, reason)
+					return res, unresumableConversation(rec.CWD, rec.ConfigDir, reason)
+				}
+			} else {
+				freshProof = proof
+				s.logf("server: session %s: no-resume spawn PERMITTED cwd=%q config_dir=%q — the registry proves this workspace has never run a conversation",
+					sessionID, rec.CWD, rec.ConfigDir)
+			}
 		}
 	}
 	if opts.Fake && opts.Resume != "" {
@@ -431,7 +510,7 @@ func (s *ShimSpawner) EnsureShim(ctx context.Context, sessionID string) (session
 	}
 	res.Resumed = opts.Resume
 	s.logf("server: session %s: no live shim — spawning UDS shim (resume=%q fake=%t)", sessionID, opts.Resume, opts.Fake)
-	handle, err := s.spawn(sessionID, opts)
+	handle, err := s.spawnShim(sessionID, opts, freshProof)
 	if err != nil {
 		// The lineage stays on the record: this spawn never announced it, so
 		// the next bring-up still owes it.
@@ -825,6 +904,12 @@ type RegistryRegistrar struct {
 	// (supersederesolve.go), in unix millis. Nil takes the wall clock; it is a
 	// field so a harness can assert the exact stamp rather than a range.
 	Now func() int64
+	// Backups copies a workspace's vendor transcript aside at the two
+	// boundaries this registrar is the first to hear about: a turn ending and
+	// a vendor uuid rotating. Optional — a nil writer takes no copies, which
+	// is only right in a unit harness, because a daemon with no backups can
+	// only ever answer a lost transcript with the ladder's hard fault.
+	Backups *TranscriptBackups
 }
 
 // SessionModelCatalogObserved accepts a shim-published menu, then re-pushes
@@ -1109,6 +1194,16 @@ func (r *RegistryRegistrar) adoptVendorSessionID(sessionID, claudeSessionID stri
 			r.Logf("server: session %s: VENDOR SESSION ROTATED %s -> %s — last_seq and the replay floor reset to zero for the new store seq space",
 				sessionID, previous, claudeSessionID)
 		}
+		// THE RETIRING CONVERSATION'S LAST CHANCE. A rotation is the one
+		// moment a transcript stops being appended to forever, and the record
+		// now points at its successor — so the retiring uuid is named
+		// explicitly here rather than read back off the record, which would
+		// copy the new empty transcript and leave the retired one uncovered.
+		if r.Backups != nil {
+			if rec, ok := r.Reg.Get(sessionID); ok {
+				r.Backups.CaptureConversation(rec.CWD, rec.ConfigDir, previous, "vendor_session_rotated")
+			}
+		}
 		// The session's conversation IDENTITY just changed, which is exactly
 		// the kind of record change a connected frontend should not have to
 		// wait for an unrelated event to learn.
@@ -1161,6 +1256,14 @@ func (r *RegistryRegistrar) TurnEndObserved(sessionID string, atMs int64) {
 		r.Logf("server: session %s: registry last_turn_end_ms write FAILED at_ms=%d — the cache keep-alive has no durable instant to measure this session from and will leave it alone: %v",
 			sessionID, atMs, err)
 		return
+	}
+	// A TURN THAT ENDED IS A TRANSCRIPT AT REST. The vendor has finished
+	// appending, so this is the cheapest moment at which a copy is worth
+	// exactly one whole exchange. It is deliberately AFTER the durable write
+	// and it never reports upward: a backup that could not be taken is loud in
+	// the log and changes nothing about the turn.
+	if r.Backups != nil {
+		r.Backups.Capture(sessionID)
 	}
 	if !found && r.Logf != nil {
 		r.Logf("server: session %s: last_turn_end_ms write found no record (never registered) at_ms=%d", sessionID, atMs)

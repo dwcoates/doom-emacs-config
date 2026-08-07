@@ -961,6 +961,15 @@ func (ClientLogLevel) EnumDescriptor() ([]byte, []int) {
 // nothing and a frontend saying "start fresh" were the same wire value.
 //
 // They are now different values, which is the whole point of this enum.
+// FRESH IS NOT CALLER-EXPRESSIBLE. Tag 2 was RESUME_MODE_FRESH: "begin a NEW
+// conversation even though a resumable one exists". It is retired, not
+// renamed. A workspace's conversation is not replaceable by a caller — no
+// frontend, no user command, no automatic recovery may abandon one — because
+// the abandonment is silent and irreversible while every alternative (resume,
+// restore from backup, or a loud refusal) is recoverable. A fresh conversation
+// may now exist only for a workspace the daemon can PROVE never had one, and
+// that proof is the daemon's to mint from its own durable evidence, never a
+// caller's to assert. The wire therefore has no way to ask for it.
 type ResumeMode int32
 
 const (
@@ -969,11 +978,9 @@ const (
 	// stranding one is not.
 	ResumeMode_RESUME_MODE_UNSPECIFIED ResumeMode = 0
 	// Continue this workspace's conversation, whichever one that is. The daemon
-	// resolves it and starts fresh only when no viable conversation exists.
+	// resolves it; when nothing resolves it consults its own evidence and either
+	// proves the workspace never had a conversation (fresh) or fails loudly.
 	ResumeMode_RESUME_MODE_CONTINUE ResumeMode = 1
-	// Deliberately begin a NEW conversation, even though a resumable one exists.
-	// The user asked for a blank slate; the daemon must not helpfully reattach.
-	ResumeMode_RESUME_MODE_FRESH ResumeMode = 2
 	// Land on one SPECIFIC conversation named in explicit_claude_session_id.
 	// Reserved for a human choosing from among conversations (a picker, a fork)
 	// — never for ordinary restore, which is what CONTINUE is for. A caller that
@@ -986,13 +993,11 @@ var (
 	ResumeMode_name = map[int32]string{
 		0: "RESUME_MODE_UNSPECIFIED",
 		1: "RESUME_MODE_CONTINUE",
-		2: "RESUME_MODE_FRESH",
 		3: "RESUME_MODE_EXPLICIT",
 	}
 	ResumeMode_value = map[string]int32{
 		"RESUME_MODE_UNSPECIFIED": 0,
 		"RESUME_MODE_CONTINUE":    1,
-		"RESUME_MODE_FRESH":       2,
 		"RESUME_MODE_EXPLICIT":    3,
 	}
 )
@@ -15734,13 +15739,12 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\x1cCLIENT_LOG_LEVEL_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15CLIENT_LOG_LEVEL_INFO\x10\x01\x12\x19\n" +
 	"\x15CLIENT_LOG_LEVEL_WARN\x10\x02\x12\x1a\n" +
-	"\x16CLIENT_LOG_LEVEL_ERROR\x10\x03*t\n" +
+	"\x16CLIENT_LOG_LEVEL_ERROR\x10\x03*v\n" +
 	"\n" +
 	"ResumeMode\x12\x1b\n" +
 	"\x17RESUME_MODE_UNSPECIFIED\x10\x00\x12\x18\n" +
-	"\x14RESUME_MODE_CONTINUE\x10\x01\x12\x15\n" +
-	"\x11RESUME_MODE_FRESH\x10\x02\x12\x18\n" +
-	"\x14RESUME_MODE_EXPLICIT\x10\x03B2Z0agentrepl/proto/agentshim/frontend/v1;frontendv1b\x06proto3"
+	"\x14RESUME_MODE_CONTINUE\x10\x01\x12\x18\n" +
+	"\x14RESUME_MODE_EXPLICIT\x10\x03\"\x04\b\x02\x10\x02*\x11RESUME_MODE_FRESHB2Z0agentrepl/proto/agentshim/frontend/v1;frontendv1b\x06proto3"
 
 var (
 	file_agentshim_frontend_v1_frontend_proto_rawDescOnce sync.Once
