@@ -930,8 +930,25 @@ func (s *Server) writeLoop(c conn, cl *client) {
 	}
 }
 
+// readLoop reads this connection's commands and routes each onto its
+// workspace's lane (lanes.go). Reading is deliberately NOT gated on the
+// previous command finishing: a bring-up takes seconds, and a read loop that
+// waited for one starved every command behind it — including commands for
+// other workspaces — past the client's ack deadline.
+//
+// The lanes preserve every ordering the inline loop gave: one workspace's
+// commands still run one at a time in arrival order, and each is still
+// answered only once it has actually run.
 func (s *Server) readLoop(c conn, cl *client) {
-	defer s.disconnect(cl)
+	lanes := newCommandLanes(s.logf, func(cmd *frontendv1.FrontendCommand, received time.Time, depth int64) {
+		s.processCommand(cl, cmd, received, depth)
+	})
+	defer func() {
+		// Drain first, disconnect second: a command already read still owes
+		// the client an answer, exactly as it did when dispatch ran inline.
+		lanes.close()
+		s.disconnect(cl)
+	}()
 	for {
 		cmd, err := c.readCommand()
 		if err != nil {
@@ -942,50 +959,58 @@ func (s *Server) readLoop(c conn, cl *client) {
 		}
 		// EVERY COMMAND IS TIMED, and the clock starts the instant the frame
 		// was decoded rather than inside dispatch: the interval the client
-		// actually waits out is receipt through ack, and instrumenting only
+		// actually waits out is receipt through ack, and with lanes that
+		// interval includes any wait in the lane's queue — instrumenting only
 		// the handler would report a fast command sitting behind slow work as
 		// fast. The depth is taken here, before any of this command's own work
 		// runs, so it counts what was ALREADY in flight.
 		received := time.Now()
 		depth := s.inflight.Add(1)
-		// A resync re-sends a fresh StateSnapshot to THIS client (§5.4),
-		// scope-filtered for a scoped connection. The handler covers the
-		// conversation-delta replay the snapshot omits.
-		if cmd.GetResync() != nil {
-			s.enqueueResyncSnapshot(cl, cmd, "before_dispatch")
-		}
-		dispatchStart := time.Now()
-		ack, response := s.dispatchClientCommand(cl, cmd)
-		processing := time.Since(dispatchStart)
-		// A stale generation is a request to adopt current authority, not a
-		// history failure. Capture again AFTER the daemon made that decision so
-		// a transition crossing the pre-dispatch capture cannot leave the client
-		// holding the very identity the command just proved was retired.
-		if cmd.GetResync() != nil && ack.GetFailure().GetErrorType() == string(errclass.TypeSessionReconnectSuperseded) {
-			s.enqueueResyncSnapshot(cl, cmd, "after_superseded")
-		}
-		if !ack.GetOk() {
-			s.logf("frontend: command nack {request_id=%s ws=%s}: %s", ack.GetRequestId(), cmd.GetWorkspace(), ack.GetError())
-		}
-		if response != nil {
-			if data, err := marshalFrame(response); err != nil {
-				s.logf("frontend: marshal command response request_id=%s: %v", ack.GetRequestId(), err)
-			} else {
-				s.enqueue(cl, outFrame{key: coalesceKey(response), data: data})
-			}
-		}
-		if data, err := marshalFrame(CommandAckFrame(ack)); err != nil {
-			s.logf("frontend: marshal command ack: %v", err)
+		lanes.submit(cmd, received, depth)
+	}
+}
+
+// processCommand performs one command and answers it. It is the body the read
+// loop used to run inline, unchanged in every respect except where it runs and
+// the receipt-side timing facts it reports against.
+func (s *Server) processCommand(cl *client, cmd *frontendv1.FrontendCommand, received time.Time, depth int64) {
+	// A resync re-sends a fresh StateSnapshot to THIS client (§5.4),
+	// scope-filtered for a scoped connection. The handler covers the
+	// conversation-delta replay the snapshot omits.
+	if cmd.GetResync() != nil {
+		s.enqueueResyncSnapshot(cl, cmd, "before_dispatch")
+	}
+	dispatchStart := time.Now()
+	ack, response := s.dispatchClientCommand(cl, cmd)
+	processing := time.Since(dispatchStart)
+	// A stale generation is a request to adopt current authority, not a
+	// history failure. Capture again AFTER the daemon made that decision so
+	// a transition crossing the pre-dispatch capture cannot leave the client
+	// holding the very identity the command just proved was retired.
+	if cmd.GetResync() != nil && ack.GetFailure().GetErrorType() == string(errclass.TypeSessionReconnectSuperseded) {
+		s.enqueueResyncSnapshot(cl, cmd, "after_superseded")
+	}
+	if !ack.GetOk() {
+		s.logf("frontend: command nack {request_id=%s ws=%s}: %s", ack.GetRequestId(), cmd.GetWorkspace(), ack.GetError())
+	}
+	if response != nil {
+		if data, err := marshalFrame(response); err != nil {
+			s.logf("frontend: marshal command response request_id=%s: %v", ack.GetRequestId(), err)
 		} else {
 			s.enqueue(cl, outFrame{key: coalesceKey(response), data: data})
 		}
-		// The ack is on the wire's queue; that is the moment the client's wait
-		// ends. The in-flight gauge is released BEFORE the record is written so
-		// the telemetry never inflates the depth it reports.
-		ackElapsed := time.Since(received)
-		s.inflight.Add(-1)
-		s.recordCommandLatency(cl, cmd, ack, depth, ackElapsed, processing)
 	}
+	if data, err := marshalFrame(CommandAckFrame(ack)); err != nil {
+		s.logf("frontend: marshal command ack: %v", err)
+	} else {
+		s.enqueue(cl, outFrame{key: coalesceKey(response), data: data})
+	}
+	// The ack is on the wire's queue; that is the moment the client's wait
+	// ends. The in-flight gauge is released BEFORE the record is written so
+	// the telemetry never inflates the depth it reports.
+	ackElapsed := time.Since(received)
+	s.inflight.Add(-1)
+	s.recordCommandLatency(cl, cmd, ack, depth, ackElapsed, processing)
 }
 
 // recordCommandLatency persists one completed command's lifecycle timing. A
