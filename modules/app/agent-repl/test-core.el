@@ -3382,3 +3382,63 @@ survives into the rest of the batch run."
       (agent-repl--log nil "ordinary")
       ;; Assert — the file recorded it even though no buffer would show it.
       (should (= writes 1)))))
+
+;;;; ---- Tests: backend-initiation phase surfacing ----
+;;
+;; The backend-initiation ladder (artifact builds, launchd kickstarts, the
+;; daemon spawn and the runtime bounce) is the ONE background flow allowed to
+;; reach the echo area, and `agent-repl--backend-phase' is its only door.  A
+;; regression here is invisible by construction: the user sees nothing at all
+;; while a synchronous build blocks the frame.
+
+(ert-deftest agent-repl-test-backend-output-tail-names-an-empty-capture ()
+  "An empty capture is reported as empty rather than as an absent field."
+  ;; Arrange / Act
+  (let ((tail (agent-repl--backend-output-tail "")))
+    ;; Assert
+    (should (equal tail "<no output>"))))
+
+(ert-deftest agent-repl-test-backend-output-tail-keeps-only-the-last-lines ()
+  "Only the trailing nonblank lines survive into the echo fragment."
+  ;; Arrange
+  (let ((output (mapconcat #'number-to-string (number-sequence 1 20) "\n")))
+    ;; Act
+    (let ((tail (agent-repl--backend-output-tail output 3)))
+      ;; Assert
+      (should (equal tail "18 / 19 / 20")))))
+
+(ert-deftest agent-repl-test-backend-output-tail-truncates-an-overlong-line ()
+  "A single enormous line is truncated so one echo line cannot be flooded."
+  ;; Arrange
+  (let ((output (make-string 2000 ?x)))
+    ;; Act
+    (let ((tail (agent-repl--backend-output-tail output)))
+      ;; Assert
+      (should (= (length tail) (1+ agent-repl--backend-output-tail-limit)))
+      (should (string-prefix-p "…" tail)))))
+
+(ert-deftest agent-repl-test-backend-phase-persists-a-structured-record ()
+  "A phase transition reaches the durable sink at the info rung."
+  ;; Arrange
+  (let (records)
+    (cl-letf (((symbol-function 'agent-repl--persist-log-record)
+               (lambda (ws level verbosity fmt args)
+                 (push (list ws level verbosity fmt args) records)))
+              ((symbol-function 'agent-repl--emit-message) #'ignore))
+      ;; Act
+      (agent-repl--backend-phase nil "daemon up (pid %s)" 41)
+      ;; Assert
+      (should (equal (car records)
+                     (list nil "info" "normal" "daemon up (pid %s)" '(41)))))))
+
+(ert-deftest agent-repl-test-backend-phase-reaches-the-echo-area ()
+  "A phase transition is echoed loudly, not filed quietly like other chatter."
+  ;; Arrange
+  (let (emitted)
+    (cl-letf (((symbol-function 'agent-repl--persist-log-record) #'ignore)
+              ((symbol-function 'agent-repl--emit-message)
+               (lambda (text &optional echo) (setq emitted (cons text echo)))))
+      ;; Act
+      (agent-repl--backend-phase nil "daemon up (pid %s)" 41)
+      ;; Assert
+      (should (equal emitted (cons "agent-repl: daemon up (pid 41)" t))))))
