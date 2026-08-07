@@ -3,8 +3,8 @@ package frontend
 import (
 	"errors"
 	"fmt"
-	"io"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,49 +23,42 @@ func (r *recordingLatency) RecordCommandLatency(sample CommandLatencySample) err
 	return r.err
 }
 
-// scriptedConn replays a fixed command list to readLoop and then reports EOF,
-// which is the loop's ordinary termination. Nothing here waits on a clock: the
-// loop returns when the script is exhausted, so a test rendezvouses with the
-// loop's own completion rather than with elapsed time.
-type scriptedConn struct {
-	commands []*frontendv1.FrontendCommand
-	written  [][]byte
+// concurrentLogs captures log lines from every goroutine that logs. With
+// commands dispatched on lane goroutines, the transport's Logf is genuinely
+// called concurrently — by a lane running a command and by the read loop
+// closing its lanes — so an unguarded slice would be capturing a race rather
+// than the log.
+type concurrentLogs struct {
+	mu    sync.Mutex
+	lines []string
 }
 
-func (c *scriptedConn) writeFrame(data []byte) error {
-	c.written = append(c.written, data)
-	return nil
+func (r *concurrentLogs) logf(format string, args ...any) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.lines = append(r.lines, fmt.Sprintf(format, args...))
 }
 
-func (c *scriptedConn) readCommand() (*frontendv1.FrontendCommand, error) {
-	if len(c.commands) == 0 {
-		return nil, io.EOF
-	}
-	next := c.commands[0]
-	c.commands = c.commands[1:]
-	return next, nil
-}
-
-func (c *scriptedConn) close() error { return nil }
-
-func submitCommand(workspace, requestID string) *frontendv1.FrontendCommand {
-	return &frontendv1.FrontendCommand{
-		RequestId: requestID,
-		Workspace: workspace,
-		Command: &frontendv1.FrontendCommand_SubmitPrompt{
-			SubmitPrompt: &frontendv1.SubmitPromptCmd{Text: "hi"},
-		},
-	}
+func (r *concurrentLogs) all() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.lines...)
 }
 
 // runOneCommand drives readLoop over a single scripted command and returns the
-// samples the recorder collected.
+// server once the loop has finished. Nothing here waits on a clock: the
+// command stream is closed up front, so the loop returns when the script is
+// exhausted and its lanes have drained — a rendezvous with the loop's own
+// completion rather than with elapsed time.
 func runOneCommand(t *testing.T, cfg Config, cmd *frontendv1.FrontendCommand) *Server {
 	t.Helper()
 	s := New(cfg)
-	cl := newClient(4, nil, ClientKindHost)
+	cl := newClient(defaultClientBuffer, nil, ClientKindHost)
 	s.clients[cl] = struct{}{}
-	s.readLoop(&scriptedConn{commands: []*frontendv1.FrontendCommand{cmd}}, cl)
+	c := newScriptedConn()
+	c.cmds <- cmd
+	close(c.cmds)
+	s.readLoop(c, cl)
 	return s
 }
 
@@ -101,7 +94,7 @@ func TestReadLoopRecordsOneLatencySamplePerCommand(t *testing.T) {
 			}
 
 			// Act.
-			runOneCommand(t, cfg, submitCommand("/ws", "r-1"))
+			runOneCommand(t, cfg, submitCmd("r-1", "/ws"))
 
 			// Assert.
 			if len(latency.samples) != 1 {
@@ -125,7 +118,7 @@ func TestReadLoopSampleCarriesTheCommandIdentity(t *testing.T) {
 	}
 
 	// Act.
-	runOneCommand(t, cfg, submitCommand("/ws", "r-7"))
+	runOneCommand(t, cfg, submitCmd("r-7", "/ws"))
 
 	// Assert.
 	got := latency.samples[0]
@@ -145,7 +138,7 @@ func TestReadLoopSampleReportsTheQueueDepthAtReceipt(t *testing.T) {
 
 	// Act. One connection dispatching alone must report a depth of exactly
 	// one: itself, and nothing it waited behind.
-	runOneCommand(t, cfg, submitCommand("/ws", "r-1"))
+	runOneCommand(t, cfg, submitCmd("r-1", "/ws"))
 
 	// Assert.
 	if got := latency.samples[0].QueueDepth; got != 1 {
@@ -162,7 +155,7 @@ func TestReadLoopReleasesTheInflightGaugeAfterEachCommand(t *testing.T) {
 	}
 
 	// Act.
-	s := runOneCommand(t, cfg, submitCommand("/ws", "r-1"))
+	s := runOneCommand(t, cfg, submitCmd("r-1", "/ws"))
 
 	// Assert. A gauge that only climbs would report every later command as
 	// queued behind work that had already finished.
@@ -184,7 +177,7 @@ func TestReadLoopSampleCarriesTheAckVerdict(t *testing.T) {
 	}
 
 	// Act.
-	runOneCommand(t, cfg, submitCommand("/ws", "r-1"))
+	runOneCommand(t, cfg, submitCmd("r-1", "/ws"))
 
 	// Assert.
 	if latency.samples[0].Ok {
@@ -194,9 +187,9 @@ func TestReadLoopSampleCarriesTheAckVerdict(t *testing.T) {
 
 func TestReadLoopSurfacesARecorderFailure(t *testing.T) {
 	// Arrange.
-	var logs []string
+	logs := &concurrentLogs{}
 	cfg := Config{
-		Logf:        func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) },
+		Logf:        logs.logf,
 		LogVerbosef: testLogf(t),
 		State:       staticState{snap: sampleSnapshot()}, Handler: &mockHandler{},
 		CommandLatency:   &recordingLatency{err: errors.New("workspace routing failure")},
@@ -204,17 +197,18 @@ func TestReadLoopSurfacesARecorderFailure(t *testing.T) {
 	}
 
 	// Act.
-	runOneCommand(t, cfg, submitCommand("/ws", "r-1"))
+	runOneCommand(t, cfg, submitCmd("r-1", "/ws"))
 
 	// Assert. A telemetry write that failed must never be silent.
+	lines := logs.all()
 	var found bool
-	for _, line := range logs {
+	for _, line := range lines {
 		if strings.Contains(line, "record command latency FAILED") && strings.Contains(line, "workspace routing failure") {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("logs = %v, want a loud recorder-failure line", logs)
+		t.Fatalf("logs = %v, want a loud recorder-failure line", lines)
 	}
 }
 
@@ -228,7 +222,7 @@ func TestReadLoopWithoutARecorderStillCompletesTheCommand(t *testing.T) {
 	}
 
 	// Act.
-	runOneCommand(t, cfg, submitCommand("/ws", "r-1"))
+	runOneCommand(t, cfg, submitCmd("r-1", "/ws"))
 
 	// Assert.
 	if handler.called != "submit_prompt" {
@@ -258,7 +252,7 @@ func TestCommandFieldNameNamesTheSetOneofArm(t *testing.T) {
 	}{
 		{
 			name: "a submit prompt",
-			cmd:  submitCommand("/ws", "r"),
+			cmd:  submitCmd("r", "/ws"),
 			want: "submit_prompt",
 		},
 		{
