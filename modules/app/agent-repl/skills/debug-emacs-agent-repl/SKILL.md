@@ -55,6 +55,7 @@ the symptom crosses planes.
 | Structured logs | What happened across runtimes and in what order? | `references/structured-logs.md` | identity |
 | State investigation | Why is a workspace this color or state? | `references/state-investigation.md` | identity, logs |
 | Conversation investigation | Why is conversation data missing or malformed? | `references/conversation-investigation.md` | identity, logs, health |
+| Performance investigation | Where is the time going — latency, stalls, hitching? | `references/performance-investigation.md` | logs, identity, observability |
 | Testing and coverage | What tests or coverage exercise this path? | `references/testing-coverage.md` | observability |
 | Observability gaps | Is the evidence itself adequate for a diagnosis? | `references/observability-gaps.md` | the active runbooks |
 | Critical-path observability loop | Must the path be instrumented, reloaded, provoked, and inspected iteratively to expose and verify the bug? | `references/critical-path-observability-loop.md` | logs, observability, testing |
@@ -101,8 +102,11 @@ gate again when more than one next runbook is plausible. Do not load every
 reference merely because it exists.
 
 Use `/runtime-eval-code` when the needed fact exists only inside the live Emacs
-process or in third-party `*Messages*` output. Use `/profile` for performance
-and hitching. Neither handoff replaces the evidence already collected here.
+process or in third-party `*Messages*` output. For latency, stalls, or
+hitching, enter through `references/performance-investigation.md`, which
+decides between log-derived history and live sampling and hands off to
+`/profile` as the sampling authority. Neither handoff replaces the evidence
+already collected here.
 
 ### 5. Audit observability before concluding
 
