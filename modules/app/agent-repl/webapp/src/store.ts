@@ -1160,17 +1160,30 @@ export class ConversationStore {
     // WorkspaceState has ruled on yet, and may never rebind one that has been
     // ruled on. A disagreement is a dead session's view arriving behind the
     // live workspace ruling; it is reported, not adopted.
-    if (sv.sessionId !== "") {
-      if (!this.sessionIdAuthoritative) {
-        s.sessionId = sv.sessionId;
-      } else if (sv.sessionId !== s.sessionId) {
-        this.log(
-          "warn",
-          `session view identity rejected workspace=${sv.workspace} ` +
-            `view_session=${sv.sessionId} workspace_session=${s.sessionId || "none"} ` +
-            `reason=workspace_state_owns_identity`,
-        );
-      }
+    //
+    // THE WHOLE VIEW IS GATED, NOT JUST THE IDENTITY FIELD. Every field below
+    // describes the session the view names, so once the workspace has ruled
+    // that this is not that session, none of them describe THIS workspace:
+    // rejecting `sessionId` while still adopting `model`, `costUsd`,
+    // `contextTokens`, `taskSummary`, `claudeSessionId`, `cwd` — and above all
+    // `hibernation`, which gates the composer and the revival card — let a dead
+    // session's view flip user-facing gates under the live one. A non-owning
+    // view contributes NOTHING.
+    if (
+      sv.sessionId !== "" &&
+      this.sessionIdAuthoritative &&
+      sv.sessionId !== s.sessionId
+    ) {
+      this.log(
+        "warn",
+        `session view identity rejected workspace=${sv.workspace} ` +
+          `view_session=${sv.sessionId} workspace_session=${s.sessionId || "none"} ` +
+          `reason=workspace_state_owns_identity dropped=whole_view`,
+      );
+      return false;
+    }
+    if (sv.sessionId !== "" && !this.sessionIdAuthoritative) {
+      s.sessionId = sv.sessionId;
     }
     // Empty is an authoritative "no model override" state, not a missing
     // field. Retaining a prior selection here would make the browser lie
