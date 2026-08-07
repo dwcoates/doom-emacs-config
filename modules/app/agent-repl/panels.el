@@ -127,7 +127,10 @@ webview).  A generated workspace is born with this flag set and its
 session booted headlessly (`agent-repl--frontend-boot-session'), so
 this drain is where a gui workspace first becomes visible."
   (if (not (agent-repl--ws-get ws :pending-show-panels))
-      (agent-repl--log-verbose ws "drain-pending-show-panels: ws=%s branch=no-pending no-op" ws)
+      ;; The no-op branch is the one a persp placeholder reaches (it owns no
+      ;; pending flags), so its record is screened for routability.
+      (agent-repl--log-verbose (agent-repl--ws-log-name ws)
+                                "drain-pending-show-panels: ws=%s branch=no-pending no-op" ws)
     (agent-repl--log ws "drain-pending-show-panels: ws=%s branch=had-pending draining frontend=%s"
                       ws (agent-repl--ws-frontend-name ws))
     (agent-repl--ws-put ws :pending-show-panels nil)
@@ -160,7 +163,10 @@ still displays magit as before."
               (agent-repl--remove-doom-dashboard))
           (agent-repl--log ws "drain-pending-magit: ws=%s branch=missing-project-dir request-cleared=t"
                             ws)))
-    (agent-repl--log-verbose ws "drain-pending-magit: ws=%s branch=no-pending no-op" ws)))
+    ;; See `--drain-pending-show-panels': the no-pending branch is the persp
+    ;; placeholder's branch, so it is screened for routability.
+    (agent-repl--log-verbose (agent-repl--ws-log-name ws)
+                              "drain-pending-magit: ws=%s branch=no-pending no-op" ws)))
 
 (defun agent-repl--drain-pending-initial-buffers (ws)
   "Open configured initial buffers for WS if `:pending-initial-buffers' is set.
@@ -176,19 +182,27 @@ the caller's workspace."
             (agent-repl--open-initial-buffers ws path)
           (agent-repl--log ws "drain-pending-initial-buffers: ws=%s branch=missing-project-dir request-cleared=t"
                             ws)))
-    (agent-repl--log-verbose ws "drain-pending-initial-buffers: ws=%s branch=no-pending no-op" ws)))
+    ;; See `--drain-pending-show-panels': the no-pending branch is the persp
+    ;; placeholder's branch, so it is screened for routability.
+    (agent-repl--log-verbose (agent-repl--ws-log-name ws)
+                              "drain-pending-initial-buffers: ws=%s branch=no-pending no-op" ws)))
 
 (defun agent-repl--maybe-autoselect-input (ws)
   "Select the agent input window for WS if visible and autoselect is enabled.
 Respects `agent-repl-autoselect-input-on-workspace-switch'.
-Window lookup delegates to `agent-repl-window--panel-window'."
-  (if agent-repl-autoselect-input-on-workspace-switch
-      (if-let ((win (agent-repl-window--panel-window :input ws)))
-          (progn
-            (agent-repl--log ws "maybe-autoselect-input: ws=%s branch=select input-win=%s" ws win)
-            (select-window win))
-        (agent-repl--log ws "maybe-autoselect-input: ws=%s branch=no-input-window" ws))
-    (agent-repl--log ws "maybe-autoselect-input: ws=%s branch=disabled" ws)))
+Window lookup delegates to `agent-repl-window--panel-window'.
+
+WS reaches here straight off the persp activation path, so it may be a
+persp-mode placeholder that owns no log sink; the records go through
+`agent-repl--ws-log-name' and carry the name in their text instead."
+  (let ((log-ws (agent-repl--ws-log-name ws)))
+    (if agent-repl-autoselect-input-on-workspace-switch
+        (if-let ((win (agent-repl-window--panel-window :input ws)))
+            (progn
+              (agent-repl--log log-ws "maybe-autoselect-input: ws=%s branch=select input-win=%s" ws win)
+              (select-window win))
+          (agent-repl--log log-ws "maybe-autoselect-input: ws=%s branch=no-input-window" ws))
+      (agent-repl--log log-ws "maybe-autoselect-input: ws=%s branch=disabled" ws))))
 
 (defun agent-repl--stale-panel-windows ()
   "Return a list of windows showing agent panel buffers from a different workspace.
@@ -314,15 +328,21 @@ they were visible when this workspace was last deactivated
 \(`:panels-were-visible' flag set by `--before-persp-deactivate').
 
 The visibility flag is per-workspace rather than global because each
-workspace has its own panel buffers."
+workspace has its own panel buffers.
+
+WS arrives from the persp activation path, so it can be persp-mode's own
+\"main\" or \"none\" — a perspective whose stale panels must still be purged
+but which owns no log sink.  The reconciliation therefore uses the
+unscreened WS while every record uses `agent-repl--ws-log-name'."
   (let* ((stale (agent-repl--stale-panel-windows))
-         (foreign-bufs (agent-repl--stale-window-buffers stale)))
-    (agent-repl--log ws "ensure-own-panels: ws=%s stale=%d panels-visible=%s windows=%d"
+         (foreign-bufs (agent-repl--stale-window-buffers stale))
+         (log-ws (agent-repl--ws-log-name ws)))
+    (agent-repl--log log-ws "ensure-own-panels: ws=%s stale=%d panels-visible=%s windows=%d"
                       ws (length stale)
                       (agent-repl--panels-visible-p) (length (window-list)))
     (when stale
-      (agent-repl--log ws "ensure-own-panels: closing %d stale panel windows: %S"
-                        (length stale)
+      (agent-repl--log log-ws "ensure-own-panels: ws=%s closing %d stale panel windows: %S"
+                        ws (length stale)
                         (mapcar (lambda (w) (buffer-name (window-buffer w))) stale))
       (dolist (win stale)
         ;; Sole-window-safe deletion: a stale window that is the frame's
@@ -348,13 +368,13 @@ workspace has its own panel buffers."
                ;; recreates a dead/nil input buffer itself
                ;; (`agent-repl--ensure-input-buffer').
                (agent-repl-window--panels-restorable-p ws))
-      (agent-repl--log ws "ensure-own-panels: re-showing panels (were-visible but now missing)")
+      (agent-repl--log log-ws "ensure-own-panels: ws=%s re-showing panels (were-visible but now missing)" ws)
       (agent-repl--frontend-dispatch-show ws))
     ;; Take over the frame with THIS workspace's own panels in fullscreen —
     ;; replacing every visible window with the input+view panels — when a
     ;; foreign workspace's panels were just purged.
     (when stale
-      (agent-repl--log ws "ensure-own-panels: reclaiming frame stale=%s" (and stale t))
+      (agent-repl--log log-ws "ensure-own-panels: ws=%s reclaiming frame stale=%s" ws (and stale t))
       (agent-repl--reclaim-frame-fullscreen ws))))
 
 (defun agent-repl--on-workspace-switch (&optional ws)
@@ -373,9 +393,17 @@ Snaps the agent's webview feed to its last message
 workspace never shows stale middle-of-history output.
 
 never causes a silent decay.
+
+WS is whatever perspective persp-mode activated, which includes its own
+\"none\" and Doom's initial \"main\".  Those are not agent-repl workspaces and
+own no durable log sink, so every record this path emits is screened through
+`agent-repl--ws-log-name' and carries the name in its message text.  A real
+workspace keeps its attribution — the screen only demotes names that could
+not be routed at all.
 "
-  (let ((ws (or ws (agent-repl--ws-current-name))))
-    (agent-repl--log-verbose ws "workspace-switch ws=%s" ws)
+  (let* ((ws (or ws (agent-repl--ws-current-name)))
+         (log-ws (agent-repl--ws-log-name ws)))
+    (agent-repl--log-verbose log-ws "workspace-switch ws=%s" ws)
     ;; Purge stale panel windows from other workspaces and restore own
     ;; panels if they were visible before this workspace was deactivated.
     ;; Must run BEFORE autoselect so it sees the correct panel windows.

@@ -302,7 +302,12 @@ open."
       (agent-repl--frontend-webview-execute-script
        buf (agent-repl--frontend-tail-script)))
     (unless (buffer-live-p buf)
-      (agent-repl--log-verbose ws "snap-webview-to-tail: skipped=no-live-webview"))))
+      ;; The workspace-switch path calls this for whatever perspective
+      ;; persp-mode activated, and persp-mode's own "main"/"none" have no
+      ;; webview AND no durable log sink, so this branch screens WS through
+      ;; `agent-repl--ws-log-name' and names it in the message instead.
+      (agent-repl--log-verbose (agent-repl--ws-log-name ws)
+                                "snap-webview-to-tail: ws=%s skipped=no-live-webview" ws))))
 
 (defun agent-repl--frontend-kill-webview (buf)
   "Kill webview BUF without the xwidget kill-query prompt.
