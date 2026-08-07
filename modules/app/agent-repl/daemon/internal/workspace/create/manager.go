@@ -377,15 +377,14 @@ func (m *Manager) process(ctx context.Context, id string) error {
 				}
 				continue
 			}
-			if job.WorktreePath == "" {
-				result, err := m.cfg.Planner.PlanWorktree(ctx, job)
-				if err != nil {
-					return m.fail(ctx, id, "plan worktree", err)
-				}
-				if result.Path == "" || result.FinalName == "" || result.Branch == "" || result.BaseCommit == "" {
-					return m.fail(ctx, id, "plan worktree", fmt.Errorf("planner returned incomplete worktree identity path=%q final_name=%q branch=%q base=%q", result.Path, result.FinalName, result.Branch, result.BaseCommit))
-				}
-				if _, err := m.cfg.Store.Update(id, func(j *Job) error {
+			// The plan/create/record-geometry sequence is SHARED with the
+			// one-off `create-workspace` command through WorktreeStage, so a
+			// command-line workspace resolves its name, branch and base
+			// exactly as a daemon-created one does and carries the same merge
+			// geometry. The checkpoint below is this caller's durability
+			// boundary: the plan is persisted before any git mutation.
+			if _, err := m.worktreeStage().Materialize(ctx, job, func(_ context.Context, result WorktreeResult) (Job, error) {
+				return m.cfg.Store.Update(id, func(j *Job) error {
 					j.WorktreePath = result.Path
 					j.FinalName = result.FinalName
 					j.Branch = result.Branch
@@ -393,22 +392,15 @@ func (m *Manager) process(ctx context.Context, id string) error {
 					j.Request.ForkSessionID = result.ForkSessionID
 					j.LastError = ""
 					return nil
-				}); err != nil {
-					return err
+				})
+			}); err != nil {
+				var stageErr *StageError
+				if errors.As(err, &stageErr) {
+					return m.fail(ctx, id, stageErr.Action, stageErr.Err)
 				}
-				continue
-			}
-			if err := m.cfg.Worktrees.EnsureWorktree(ctx, job); err != nil {
-				return m.fail(ctx, id, "ensure worktree", err)
-			}
-			// The worktree now exists, so its merge geometry is an observed
-			// fact: this branch, this directory, and the worktree it was cut
-			// from. Record it BEFORE the worktree stage completes — a
-			// workspace that reaches the user without geometry is one nobody
-			// can ever merge. The recorder is idempotent, so a crash between
-			// this call and the checkpoint below re-records the same facts.
-			if err := m.cfg.Geometry.RecordWorkspaceGeometry(ctx, job); err != nil {
-				return m.fail(ctx, id, "record merge geometry", err)
+				// Anything else came from the store update above, which is
+				// structural: nothing about THIS job is wrong.
+				return err
 			}
 			if _, err := m.cfg.Store.Update(id, func(j *Job) error {
 				j.State = StateWorktreeReady
@@ -618,6 +610,13 @@ func (m *Manager) CompleteHostAction(id string, ok bool, failure string) error {
 	}
 	m.cfg.Logf("workspace-create: completed host action id=%s ok=%t failure=%q", id, ok, failure)
 	return nil
+}
+
+// worktreeStage binds the manager's configured collaborators into the shared
+// worktree stage. It is built per call rather than cached because Config is
+// immutable after NewManager and the value is three interface words wide.
+func (m *Manager) worktreeStage() WorktreeStage {
+	return WorktreeStage{Planner: m.cfg.Planner, Worktrees: m.cfg.Worktrees, Geometry: m.cfg.Geometry, Logf: m.cfg.Logf}
 }
 
 func (m *Manager) transition(id string, state JobState, lastError string) (Job, error) {

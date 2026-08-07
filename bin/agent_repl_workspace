@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+
+# shellcheck disable=SC2250,SC2292,SC2312
+# The three checks above are OPT-IN (`shellcheck -o all`) and are declined
+# deliberately, matching modules/app/agent-repl/bin/build-frontend.sh: they are
+# house-style opinions (${x} braces, [[ ]] preference) and a warning about
+# command substitutions that genuinely cannot fail in a way this script should
+# abort on. The file is clean at shellcheck's default bar plus `-S style`.
+
+# agent_repl_workspace — create a workspace from the command line and drop a
+# Claude session into it, WITHOUT the agent-repl runtime.
+#
+# Usage:
+#   agent_repl_workspace <workspace-name>
+#
+# Runnable from ANY worktree of the repository the workspace should be cut
+# from: the repository's MAIN worktree is resolved from the current directory
+# (that is what `git worktree list` puts first), and passed as --git-root, so
+# the new worktree lands where the daemon would have put it rather than beside
+# whichever linked worktree you happened to be standing in.
+#
+# What it does, in order:
+#   1. Resolve the repository's main worktree from $PWD.
+#   2. Locate this checkout's claude-repld binary (daemon/bin/claude-repld, the
+#      artifact path build-frontend.sh owns), building it if it is missing.
+#   3. Run `claude-repld create-workspace`, which creates the worktree, its
+#      branch, and the merge geometry that lets the workspace be merged later.
+#      It creates NO agent-repl session and needs NO running daemon.
+#   4. cd into the created worktree and exec `claude --permission-mode auto`.
+#
+# The daemon binary is located relative to THIS SCRIPT's own checkout, not the
+# current directory: the script is deployed at <repo>/bin/agent_repl_workspace
+# and its sibling module is the one that built the binary. The workspace is
+# still cut from the CURRENT directory's repository.
+#
+# Environment:
+#   AGENT_REPL_WORKSPACE_BASE  base commit for the new workspace (default HEAD
+#                              of the main worktree). "master" makes the daemon
+#                              fetch origin/master and fast-forward first.
+#   AGENT_REPL_CLAUDE_BIN      the claude CLI to exec (default `claude`).
+#   AGENT_REPL_DAEMON_BIN      the claude-repld to run (default this checkout's
+#                              daemon/bin/claude-repld). For tests.
+
+set -euo pipefail
+
+die() { echo "agent_repl_workspace: $*" >&2; exit 1; }
+
+[ $# -eq 1 ] || die "usage: agent_repl_workspace <workspace-name>"
+NAME="$1"
+[ -n "$NAME" ] || die "the workspace name cannot be empty"
+
+# A pre-commit hook exports its live repository bindings to children. Inheriting
+# them here would resolve the main worktree of the HOOK's repository instead of
+# the one the user is standing in.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX
+
+command -v git >/dev/null 2>&1 || die "git is not on PATH"
+
+# --- 1. the repository's main worktree, resolved from $PWD ------------------
+# `git worktree list --porcelain` always lists the MAIN worktree first, which is
+# the repository root the daemon adds new worktrees to. rev-parse --show-toplevel
+# would answer the current LINKED worktree instead, which is exactly the wrong
+# root when this is run from a workspace.
+resolve_main_worktree() {
+    local dir="$1" first
+    git -C "$dir" rev-parse --git-dir >/dev/null 2>&1 ||
+        die "$dir is not inside a git repository"
+    first="$(git -C "$dir" worktree list --porcelain | sed -n 's/^worktree //p' | head -1)"
+    [ -n "$first" ] || die "could not resolve the main worktree of the repository at $dir"
+    printf '%s\n' "$first"
+}
+
+GIT_ROOT="$(resolve_main_worktree "$PWD")"
+
+# --- 2. the daemon binary, at build-frontend.sh's artifact path -------------
+THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_REPO="$(cd "$THIS_DIR/.." && pwd)"
+AGENT_REPL_DIR="$SCRIPT_REPO/modules/app/agent-repl"
+DAEMON_DIR="$AGENT_REPL_DIR/daemon"
+DAEMON_BIN="${AGENT_REPL_DAEMON_BIN:-$DAEMON_DIR/bin/claude-repld}"
+
+if [ ! -x "$DAEMON_BIN" ]; then
+    [ -x "$AGENT_REPL_DIR/bin/build-frontend.sh" ] ||
+        die "no claude-repld at $DAEMON_BIN and no build-frontend.sh at $AGENT_REPL_DIR/bin"
+    echo "agent_repl_workspace: building claude-repld (missing at $DAEMON_BIN)" >&2
+    "$AGENT_REPL_DIR/bin/build-frontend.sh" daemon >&2
+    [ -x "$DAEMON_BIN" ] || die "build-frontend.sh daemon did not produce $DAEMON_BIN"
+fi
+
+# --- 3. create the workspace ------------------------------------------------
+# The command prints the created worktree's absolute path as its last stdout
+# line and everything else on stderr, so the path is read without parsing logs.
+BASE="${AGENT_REPL_WORKSPACE_BASE:-HEAD}"
+WORKTREE="$("$DAEMON_BIN" create-workspace --git-root "$GIT_ROOT" --name "$NAME" --base-commit "$BASE" | tail -1)"
+[ -n "$WORKTREE" ] || die "create-workspace printed no worktree path"
+[ -d "$WORKTREE" ] || die "create-workspace reported $WORKTREE, which is not a directory"
+
+# --- 4. hand the worktree to claude ----------------------------------------
+cd "$WORKTREE"
+echo "agent_repl_workspace: $NAME -> $WORKTREE" >&2
+exec "${AGENT_REPL_CLAUDE_BIN:-claude}" --permission-mode auto
