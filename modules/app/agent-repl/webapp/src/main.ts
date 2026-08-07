@@ -105,6 +105,7 @@ import type { CommandStruct } from "./frontend-command.js";
 import { PendingPermissionMode } from "./pending-mode.js";
 import { ungatedBannerHtml, ungatedModeOf, unswitchableModeOptionHtml } from "./ungated.js";
 import { DRAINING_BODY_CLASS, drainBannerHtml } from "./drain.js";
+import { SessionIdentityGate } from "./session-identity.js";
 import { SessionRebase, claudeSessionIdOf } from "./session-rebase.js";
 import { requestSupportWorkspace } from "./unsupported.js";
 import { statusSnapshotFromInit } from "./status.js";
@@ -156,6 +157,12 @@ async function boot(): Promise<void> {
   // a rotation there re-reads through the same channel.
   let activeSessionId: string = address.kind === "session" ? address.sessionId : "";
   let ws: WsClient;
+
+  // What runs only once the page knows WHICH session it targets, and again on
+  // every rebind (session-identity.ts). A workspace-addressed page mounts with
+  // no id at all, so a side-call wired straight to mount asked for
+  // `/sessions//…` and reported the inevitable 404 as a failure.
+  const sessionIdentity = new SessionIdentityGate(() => activeSessionId);
 
   // Resume/rebind tracking, re-fed by the SessionView plane now that the
   // frontend.v1 cutover routes it through the adapter. It rules on every
@@ -1084,6 +1091,7 @@ async function boot(): Promise<void> {
           );
           activeSessionId = store.state.sessionId;
           bindLogContext({ agent_repl_session_id: activeSessionId });
+          sessionIdentity.announce();
         }
         // THE REVIVAL VERDICT, ruled on against the batch the store just took.
         // `revived` needs nothing here — renderChrome clears the pending line
@@ -1490,7 +1498,13 @@ async function boot(): Promise<void> {
         renderAccountChip();
         clog("warn", `account lookup failed: ${String(err)}`);
       });
-  void refreshAccount();
+  // Gated on identity rather than fired at mount: the account endpoint is
+  // session-addressed, so asking before the page knows its session asks for
+  // `/sessions//account`. It re-fires on rebind because the new session may
+  // run under a different config root than the one the chip is showing.
+  sessionIdentity.whenBound(() => {
+    void refreshAccount();
+  });
 
   // Re-auth is the one account verb that does not talk to the SDK session.
   // The daemon runs the login on a pty it owns and streams it here, where it
