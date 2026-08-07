@@ -349,3 +349,15 @@ describe("the page's own URL", () => {
     expect(searchParamWrites).toEqual([]);
   });
 });
+
+// A session-addressed side-call made before the daemon has ruled on which
+// session the workspace owns is a request against `/sessions//…`, and the
+// account lookup made exactly that request on every workspace-addressed mount.
+describe("session-addressed side-calls at mount", () => {
+  it("gates the account lookup on a bound identity", () => {
+    // Assert — the only account refresh at boot scope goes through the gate,
+    // so nothing re-wires it back to mount.
+    expect(main).toContain("sessionIdentity.whenBound(");
+    expect(main).not.toMatch(/\n {2}void refreshAccount\(\);/);
+  });
+});

@@ -223,6 +223,25 @@ type Server struct {
 	idleSweep   func()
 	stopOnce    sync.Once
 
+	// viewsMu and viewsClosed own the SessionView push's access to DAEMON-OWNED
+	// DURABLE STATE, on exactly the reasoning that already ends the idle
+	// sweeper's lifetime inside ShutdownAll.
+	//
+	// A push is not daemon-initiated: it is driven by whatever the SHIMS say —
+	// a model catalog, a persisted accounting, a backfill verdict — through the
+	// registrar's PushView hook, from goroutines the server does not own and
+	// cannot join. Those goroutines outlive the request that started them, so
+	// during teardown one of them would reach the token ledger after its owner
+	// had closed the database, and the read's own no-fallback contract turned
+	// that into a panic ("sql: database is closed").
+	//
+	// The read lock is what makes the ordering structural rather than likely:
+	// ShutdownAll takes the WRITE lock, so it cannot return while a push is
+	// mid-read, and no push begun afterwards can pass the closed flag. Once
+	// ShutdownAll returns, closing the stores is safe by construction.
+	viewsMu     sync.RWMutex
+	viewsClosed bool
+
 	mu sync.Mutex
 }
 
@@ -1524,7 +1543,36 @@ func backfillState(s string) frontendv1.BackfillState {
 // unrelated event would next push one.
 func (s *Server) RepushSessionView(id string) { s.pushSessionView(id) }
 
+// closeViewPushes ends the SessionView push's access to daemon-owned durable
+// state, joining whichever push is in flight.
+//
+// Taking the WRITE lock is the join: it cannot be acquired while any push holds
+// the read side, so once this returns there is no reader left and no new one
+// can start. That is what lets the caller close the state database next without
+// racing a shim-driven push it has no handle on.
+func (s *Server) closeViewPushes(cause sessioncontroller.StopCause) {
+	s.viewsMu.Lock()
+	already := s.viewsClosed
+	s.viewsClosed = true
+	s.viewsMu.Unlock()
+	if !already {
+		s.logf("server: SessionView pushes CLOSED before daemon teardown initiator=%s", cause)
+	}
+}
+
 func (s *Server) pushSessionView(id string) {
+	// Held for the WHOLE push: the durable reads are not only the token ledger
+	// read at the end — the registry and the SSM are on the same database, and
+	// releasing early would put the rest of the push back in the race.
+	s.viewsMu.RLock()
+	defer s.viewsMu.RUnlock()
+	if s.viewsClosed {
+		// Reported, never swallowed: a view that could not be delivered is a
+		// frontend left one revision stale, and during teardown that is the
+		// correct outcome — but it is still a delivery that did not happen.
+		s.logf("server: session %s: SessionView push DECLINED — daemon teardown has closed durable-state access; the frontend keeps its last delivered revision", id)
+		return
+	}
 	if s.registry == nil || s.frontend == nil {
 		return
 	}
@@ -2091,6 +2139,12 @@ func (s *Server) ShutdownAll(stopShims bool, cause sessioncontroller.StopCause) 
 	// merely less likely during process or test teardown.
 	<-s.sweeperDone
 	s.logf("server: idle sweeper STOPPED before daemon teardown initiator=%s", cause)
+	// The shim-driven SessionView pushes end for the sweeper's reason: they read
+	// the same durable state, from goroutines this server does not own. It is a
+	// DEFER rather than a statement here so the stop-shims pass below still
+	// delivers the views its hibernations produce — what the caller needs is
+	// only that no push survives this call.
+	defer s.closeViewPushes(cause)
 	if !stopShims {
 		s.logf("server: SHIM STOP DECLINED initiator=%s scope=all_sessions reason=stop_shims_false — every session shim is PRESERVED; survivors redial the daemon shim socket and park until the next daemon claims them", cause)
 		return
