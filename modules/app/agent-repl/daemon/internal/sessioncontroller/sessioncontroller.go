@@ -1551,7 +1551,13 @@ func (m *Manager) AnswerPermission(_ context.Context, workspace, permissionReque
 // from its authoritative WorkspaceState is still current.  The comparison is
 // linearized under the controller lock before ring replay, replay allocation,
 // store reads, or shim reads can begin.  The durable-history branch compares
-// against the SSM snapshot because it deliberately has no live controller.
+// against the SSM snapshot because it deliberately has no live controller, and
+// keeps the full identity requirement.
+//
+// Against a LIVE controller the non-empty controller generation is the identity
+// that decides: a request carrying it is current even when its session field
+// names a superseded session (decision=current_generation_session_rebound).
+// A generation mismatch still rejects.
 func (m *Manager) ResyncForGeneration(workspace, expectedSessionID, expectedGenerationID string, fromSeq uint64) error {
 	m.mu.Lock()
 	d, live := m.byWS[workspace]
@@ -1565,10 +1571,25 @@ func (m *Manager) ResyncForGeneration(workspace, expectedSessionID, expectedGene
 	}
 	if live {
 		liveSessionID, liveGenerationID := d.sessionID, d.generationID
-		matches := expectedSessionID == liveSessionID && expectedGenerationID == liveGenerationID
 		m.mu.Unlock()
-		if !matches {
+		if expectedGenerationID != liveGenerationID {
 			return m.rejectSupersededResync(workspace, expectedSessionID, expectedGenerationID, liveSessionID, liveGenerationID, fromSeq, "live_controller", "identity_mismatch")
+		}
+		if expectedSessionID != liveSessionID {
+			// A NON-EMPTY controller generation uniquely identifies THIS live
+			// controller, so a client carrying it is current on the pushed plane and
+			// only its session field is stale — the exact shape a webview ends up in
+			// when a session id rotates underneath a store that already took the new
+			// generation. Rejecting it deadlocked the view: resync is the only
+			// recovery mechanism, so a rejected resync is a permanent stale banner.
+			// The replay is served from the live controller under ITS identity, which
+			// is also what any re-arm is bound to.
+			if expectedGenerationID == "" {
+				return m.rejectSupersededResync(workspace, expectedSessionID, expectedGenerationID, liveSessionID, liveGenerationID, fromSeq, "live_controller", "identity_mismatch")
+			}
+			m.logf("session-controller: resync eligibility ACCEPTED ws=%q request_session=%q request_generation=%q live_session=%q live_generation=%q from_seq=%d replay_source=%q decision=current_generation_session_rebound",
+				workspace, expectedSessionID, expectedGenerationID, liveSessionID, liveGenerationID, fromSeq, "live_controller")
+			return m.resyncFromController(d, fromSeq, liveSessionID, liveGenerationID)
 		}
 		m.logf("session-controller: resync eligibility ACCEPTED ws=%q request_session=%q request_generation=%q live_session=%q live_generation=%q from_seq=%d replay_source=%q decision=current_live_controller",
 			workspace, expectedSessionID, expectedGenerationID, liveSessionID, liveGenerationID, fromSeq, "live_controller")
