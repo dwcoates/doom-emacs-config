@@ -260,6 +260,11 @@ func (l *udsShimLogger) LogVerbose(format string, args ...any) {
 }
 func (l *udsShimLogger) MirrorShimRecord(line string) { fmt.Fprintln(l.terminal, line) }
 func main() {
+	// One-off subcommands are dispatched BEFORE any daemon bootstrap: a
+	// `create-workspace` run must not open the daemon's run log, its listeners,
+	// or its session fleet. It exits from here and never reaches the code below.
+	runSubcommandOrExit(context.Background())
+
 	ready := &daemonReadiness{}
 
 	// Disk log, wired before daemon logging begins: every dlog record
