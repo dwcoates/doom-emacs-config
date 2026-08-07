@@ -12,12 +12,14 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -274,6 +276,46 @@ func TestBootWithNoStoreLeavesTheLinkDown(t *testing.T) {
 	if s.link != linkDown {
 		t.Fatalf("link = %v, want linkDown while the store is unreachable", s.link)
 	}
+}
+
+func TestFailedDialWarnsBecauseTheFilePlaneStops(t *testing.T) {
+	// Arrange — "reading no files" is an ingestion outage, not a retry note.
+	var sink bytes.Buffer
+	h := newStoreHarness(t)
+	root, _ := writeHistory(t, 5)
+	s := newSidecar(h.sock, []string{root}, t.TempDir(),
+		logging.New(io.Discard, &sink).With(logging.Context{Component: "test"}))
+	t.Cleanup(func() { s.store.Close() })
+
+	// Act
+	s.dial()
+
+	// Assert
+	if got := recordLevelsFor(t, &sink, "dial"); len(got) != 1 || got[0] != "warn" {
+		t.Fatalf("dial-failure levels = %v, want exactly one warn", got)
+	}
+}
+
+// recordLevelsFor returns the level of every persisted record with operation.
+func recordLevelsFor(t *testing.T, sink *bytes.Buffer, operation string) []string {
+	t.Helper()
+	var out []string
+	for _, line := range strings.Split(strings.TrimSpace(sink.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		var record struct {
+			Level     string `json:"level"`
+			Operation string `json:"operation"`
+		}
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			t.Fatalf("persisted record is not JSON: %v", err)
+		}
+		if record.Operation == operation {
+			out = append(out, record.Level)
+		}
+	}
+	return out
 }
 
 func TestBootWithNoStoreRecoversNoCursors(t *testing.T) {

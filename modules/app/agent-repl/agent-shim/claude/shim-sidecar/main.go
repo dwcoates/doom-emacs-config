@@ -128,7 +128,7 @@ func runWithLogger(storeSocket string, roots []string, spoolRoot string, logf *l
 
 func runLogged(logf *logging.Bound, execute func() error) error {
 	if err := execute(); err != nil {
-		logf.With(logging.Context{Operation: "run"}).Log("sidecar stopped with error: %v", err)
+		logf.With(logging.Context{Operation: "run", Level: "error"}).Log("sidecar stopped with error: %v", err)
 		return err
 	}
 	return nil
@@ -289,7 +289,9 @@ func (s *sidecar) sweep() {
 func (s *sidecar) heartbeat() {
 	requestID := fmt.Sprintf("sidecar-health-%d", time.Now().UnixNano())
 	if err := s.store.Health(requestID); err != nil {
-		s.log.With(logging.Context{Operation: "health", RequestID: requestID}).Log("health check failed: %v", err)
+		// The probe that FAILS here is what tears the link down and halts every
+		// tail, so it is the cause of an ingestion outage, not a poll result.
+		s.log.With(logging.Context{Operation: "health", RequestID: requestID, Level: "error"}).Log("health check failed: %v", err)
 		s.noteStoreErr("health", err)
 	}
 }
@@ -300,7 +302,9 @@ func (s *sidecar) heartbeat() {
 func (s *sidecar) bootSweep() {
 	boot := bootTimeMillis()
 	if boot == 0 {
-		s.log.With(logging.Context{Operation: "boot-sweep"}).Log("boot time unavailable")
+		// Without a boot time the pre-boot sweep never runs, so tasks killed by
+		// the reboot stay "running" in the GUI forever.
+		s.log.With(logging.Context{Operation: "boot-sweep", Level: "warn"}).Log("boot time unavailable; pre-boot open tasks are not swept and stay running")
 		return
 	}
 	now := time.Now().UnixMilli()
@@ -423,7 +427,8 @@ func (s *sidecar) pollAll() {
 					s.tracker.MarkVanished(w.sessionID, w.target.TaskID, now)
 				}
 				delete(s.watchers, path)
-				s.log.With(logging.Context{Operation: "vanished", Path: path, Session: w.sessionID, Task: w.target.TaskID}).Log("tail vanished, grace clock started")
+				// Any appended bytes past the committed offset went with the file.
+				s.log.With(logging.Context{Operation: "vanished", Path: path, Session: w.sessionID, Task: w.target.TaskID, Level: "warn"}).Log("tail vanished, grace clock started; uncommitted appended bytes are unrecoverable")
 				continue
 			}
 			s.log.With(logging.Context{Operation: "poll", Path: path, Session: w.sessionID, Task: w.target.TaskID, Level: "error"}).Log("tail poll failed: %v", err)
