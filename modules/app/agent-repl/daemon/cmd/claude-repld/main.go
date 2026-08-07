@@ -414,13 +414,16 @@ func main() {
 	// FIRST BOOT AFTER THIS MIGRATION performs a one-time import of the
 	// pre-SQLite JSON registry (and its checkpoint sidecar) into the tables,
 	// logged loudly. The file is left on disk as inert history; nothing reads
-	// it again.
+	// it again, and NOTHING WRITES IT — every boot re-asserts a `.RETIRED`
+	// deprecation record beside it naming this store as the successor
+	// authority, so its frozen mtime cannot be read as a broken writer.
 	legacyRegistryPath, err := registry.LegacyJSONPath()
 	if err != nil {
 		daemonFatal(daemonLog, "claude-repld: %v", err)
 	}
 	sessionRegistry := registry.OpenWith(registry.Options{
 		DB:             stateStore,
+		StorePath:      statePath,
 		LegacyJSONPath: legacyRegistryPath,
 		Logf:           legacyLog,
 	})
