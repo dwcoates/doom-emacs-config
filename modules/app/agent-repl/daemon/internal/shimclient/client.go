@@ -188,7 +188,17 @@ type FileDiagnosticSink interface {
 // SystemFailureItem conversation card (F4).
 type DegradedReporter interface {
 	// Degraded reports a shim-sourced DegradedState event.
-	Degraded(sessionID string, ds *corev1.DegradedState)
+	//
+	// ev IS THE ENVELOPE THAT CARRIED ds, and it is a parameter rather than a
+	// convenience: the envelope's query_instance_id is the ONLY thing that says
+	// whether this degradation happened to the live query or is a row the store
+	// is replaying from a retired one. Handing over the payload alone forced the
+	// reporter to treat every replayed degradation as present-tense news, which
+	// is how a retired query's death kept failing fresh bring-ups. A
+	// daemon-originated degradation (one this client synthesises rather than
+	// reads off the sequence) passes nil, and nil classifies as live — fail
+	// closed, exactly as an unstamped event does.
+	Degraded(sessionID string, ev *corev1.Event, ds *corev1.DegradedState)
 	// ConnectionDegraded reports that the missed-heartbeat window elapsed with
 	// no inbound traffic on the shim connection.
 	ConnectionDegraded(sessionID, reason string)

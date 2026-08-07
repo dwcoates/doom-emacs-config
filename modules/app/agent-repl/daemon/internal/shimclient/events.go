@@ -92,7 +92,10 @@ func (c *Client) modelCatalogInvariant(format string, args ...any) error {
 	// the user sees a failure card in place of a model list.
 	c.logError("MODEL CATALOG INVARIANT VIOLATION: %s", reason)
 	if c.cfg.Degraded != nil {
-		c.cfg.Degraded.Degraded(c.cfg.SessionID, &corev1.DegradedState{
+		// nil envelope: this degradation is the DAEMON's own report about a
+		// broken capability channel, not a row read off the durable sequence, so
+		// there is no producer stamp to classify it by. It is live by definition.
+		c.cfg.Degraded.Degraded(c.cfg.SessionID, nil, &corev1.DegradedState{
 			Component: "daemon-model-catalog",
 			Reason:    reason,
 		})
@@ -189,7 +192,7 @@ func (c *Client) dispatchEvent(ev *corev1.Event) error {
 		emit("shim reported DegradedState component=%s reason=%q dropped=%d recovered=%v",
 			p.DegradedState.GetComponent(), p.DegradedState.GetReason(),
 			p.DegradedState.GetDroppedCount(), p.DegradedState.GetRecovered())
-		c.cfg.Degraded.Degraded(c.cfg.SessionID, p.DegradedState)
+		c.cfg.Degraded.Degraded(c.cfg.SessionID, ev, p.DegradedState)
 	case *corev1.Event_Unparsed:
 		// The vendor produced a line nothing could read, so that content is
 		// missing from the conversation the user sees.

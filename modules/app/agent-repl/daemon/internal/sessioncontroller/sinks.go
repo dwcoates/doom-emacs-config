@@ -2021,7 +2021,19 @@ var faultClassifications = map[string]faultClassification{
 // correlation id, and threw dropped_count away in translation. A user whose
 // workspace changed color needs to find out why from the conversation itself,
 // so the account lives there now.
-func (c *consumer) Degraded(_ string, ds *corev1.DegradedState) {
+func (c *consumer) Degraded(_ string, ev *corev1.Event, ds *corev1.DegradedState) {
+	// THE SAME EPOCH TEST THE TYPED TERMINATION CHANNEL ALREADY MAKES, asked of
+	// the ONE classifier, on the envelope. The shim writes an unexpected
+	// termination as an ACKNOWLEDGED PAIR — the QueryLifecycle row and this
+	// DegradedState, adjacent in the store — so every bring-up replays both.
+	// surfaceUnexpectedQueryTermination withheld the first from the bring-up
+	// gate; nothing withheld the second, and the second alone was enough to kill
+	// each fresh attempt on a fault written by a query that had already died.
+	// A bring-up may only be failed by a fault its OWN query produced.
+	if _, historical := c.accounting.liveEvidenceFor(ev); historical {
+		c.withholdHistoricalDegradation(ev, ds)
+		return
+	}
 	if !ds.GetRecovered() && ds.GetComponent() == "claude-shim-sdk" && ds.GetReason() == "unexpected_query_termination" {
 		if ds.QueryInstanceId == nil || ds.GetQueryInstanceId() == "" {
 			panic(fmt.Sprintf("session-controller: unexpected query termination degradation has no query_instance_id session=%s", c.sessionID))
@@ -2044,6 +2056,35 @@ func (c *consumer) Degraded(_ string, ds *corev1.DegradedState) {
 	} else {
 		c.applyRuntimeFault(ds.GetComponent(), classification, !ds.GetRecovered(), faultCauseKind(ds))
 	}
+	item := frontend.SystemFailureItemFromDegradedState(ds, c.now())
+	if item == nil {
+		return
+	}
+	c.pushFailure(c.degradedUUID(ds.GetComponent()), item)
+}
+
+// withholdHistoricalDegradation retains a replayed degradation as history while
+// keeping it out of everything that speaks in the present tense.
+//
+// It skips exactly what surfaceUnexpectedQueryTermination's historical arm
+// skips, and for the identical reasons:
+//
+//   - the BRING-UP GATE (onDegraded → noteBringUpFault), because a retired
+//     query's death did not happen to the attempt now in flight;
+//   - the RUNTIME FAULT, because opening a fault window would colour a
+//     workspace over a degradation that has already been superseded — and a
+//     replayed recovery, stamped by the same retired query, is withheld here
+//     too, so the pair still cancels rather than half-applying;
+//   - the DUPLICATE-SUPPRESSION LATCH, because arming it on history would make
+//     the latch swallow a genuine LIVE termination arriving afterwards.
+//
+// The failure CARD is still pushed, under the same stable per-component
+// identity, so nothing the user could see is lost — this is a retention
+// decision, not a drop.
+func (c *consumer) withholdHistoricalDegradation(ev *corev1.Event, ds *corev1.DegradedState) {
+	c.warn("session-controller: shim degradation WITHHELD from the bring-up gate session=%s ws=%q replayed_query_instance_id=%s live_query_instance_id=%q component=%s reason=%q recovered=%v dropped_count=%d seq=%d decision=retain_history_no_bring_up_fault",
+		c.sessionID, c.workspace, ev.GetQueryInstanceId(), c.accounting.queryID,
+		ds.GetComponent(), ds.GetReason(), ds.GetRecovered(), ds.GetDroppedCount(), ev.GetSeq())
 	item := frontend.SystemFailureItemFromDegradedState(ds, c.now())
 	if item == nil {
 		return

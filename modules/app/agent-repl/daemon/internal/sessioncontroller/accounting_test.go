@@ -945,7 +945,7 @@ func TestUnexpectedQueryTerminationUsesOneAuthoritativeDegradedState(t *testing.
 		t.Fatal(err)
 	}
 	queryID := "q"
-	c.Degraded("s", &corev1.DegradedState{Component: "claude-shim-sdk", Reason: "unexpected_query_termination", QueryInstanceId: &queryID})
+	c.Degraded("s", nil, &corev1.DegradedState{Component: "claude-shim-sdk", Reason: "unexpected_query_termination", QueryInstanceId: &queryID})
 	if degraded != 1 {
 		t.Fatalf("degraded callbacks = %d", degraded)
 	}
@@ -967,7 +967,7 @@ func TestReplayOnlyUnexpectedQueryDegradedStateSurfacesOnce(t *testing.T) {
 	c := newConsumer("ws", "s", push, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, t.Logf, nil, nil, nil, nil, nil)
 	c.onDegraded = func(*corev1.DegradedState) { degraded++ }
 	queryID := "q"
-	c.Degraded("s", &corev1.DegradedState{Component: "claude-shim-sdk", Reason: "unexpected_query_termination", QueryInstanceId: &queryID})
+	c.Degraded("s", nil, &corev1.DegradedState{Component: "claude-shim-sdk", Reason: "unexpected_query_termination", QueryInstanceId: &queryID})
 	if degraded != 1 || len(push.convo) != 1 || push.convo[0].GetItems()[0].GetSystemFailure().GetErrorType() != "unexpected_query_termination" {
 		t.Fatalf("replay-only degraded state: callbacks=%d pushes=%+v", degraded, push.convo)
 	}
