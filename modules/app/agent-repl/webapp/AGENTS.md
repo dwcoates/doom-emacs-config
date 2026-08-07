@@ -63,23 +63,20 @@
   Direct `console` calls or ad hoc logger aliases are forbidden except a
   documented pre-logger bootstrap failure or logger-sink emergency path.
 
-- Before finishing a webapp change, run `npm run typecheck` and
-  `npm run coverage`. Both commands must pass. Coverage measures authored
-  `src/**/*.ts`, including branch data, and excludes declarations and generated
+- `npm run typecheck` type-checks and `npm run coverage` measures authored
+  `src/**/*.ts`, including branch data, excluding declarations and generated
   sources.
-- Before handoff, run `modules/app/agent-repl/bin/test-all.sh` from the
-  repository root. Every tracked suite must pass.
+- `modules/app/agent-repl/bin/test-all.sh` (from the repository root) runs
+  every tracked suite across the module.
 - Maintain at least 90% statement coverage. Never reduce the measured baseline,
   and add focused tests for every critical branch and every error path changed.
-- After a commit lands on `master`, run
-  `modules/app/agent-repl/bin/test-all.sh --record`, inspect the canonical
-  `modules/app/agent-repl/test_time.csv`, and surface every reported timing
-  regression.
+- `modules/app/agent-repl/bin/test-all.sh --record` records suite timings to
+  the canonical `modules/app/agent-repl/test_time.csv` for spotting timing
+  regressions.
 
 ## Logging-density audit
 
-Before handoff, run
-`modules/app/agent-repl/bin/report-logging-density.sh webapp` and report its
+`modules/app/agent-repl/bin/report-logging-density.sh webapp` reports
 source-line and canonical-call counts. This is a rough syntactic review aid,
 not semantic logging coverage. Directly audit every critical branch and error
 path even when the ratio rises.

@@ -48,11 +48,11 @@ needs offline behavior must pass `--fake`. Production must never set it.
 
 ## Verification
 
-- Before completing changes, run `npm run typecheck` and `npm run coverage`.
-  Both commands must pass. Coverage measures authored `src/**/*.ts`, including
-  branch data, and excludes declarations and generated sources.
-- Before handoff, run `modules/app/agent-repl/bin/test-all.sh` from the
-  repository root. Every tracked suite must pass.
+- `npm run typecheck` type-checks and `npm run coverage` measures authored
+  `src/**/*.ts`, including branch data, excluding declarations and generated
+  sources.
+- `modules/app/agent-repl/bin/test-all.sh` (from the repository root) runs
+  every tracked suite across the module.
 - Maintain at least 90% statement coverage. Never reduce the measured baseline,
   and add focused tests for every critical branch and every error path changed.
 - Run `modules/app/agent-repl/bin/report-logging-density.sh shim` and report

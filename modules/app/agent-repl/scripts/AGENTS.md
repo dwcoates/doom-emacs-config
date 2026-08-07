@@ -15,8 +15,9 @@ Keep its focused test beside it in
 `test-agent-repl-log-discovery.sh`; the test must create all state under a
 temporary directory.
 
-Run `test-agent-repl-log-discovery.sh` after changing the resolver, then run
-`modules/app/agent-repl/bin/test-all.sh` before handoff. Dependencies include
+`test-agent-repl-log-discovery.sh` exercises the resolver, and
+`modules/app/agent-repl/bin/test-all.sh` runs every tracked suite across the
+module. Dependencies include
 the running services' sockets under `~/.cache/agent-repl/sock/`, global logs
 under `~/.cache/agent-repl/log/`, `~/.claude-emacs/`, and Emacs's
 UID-qualified OS-temporary log directory, plus workspace symlinks under

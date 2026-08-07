@@ -98,11 +98,10 @@ Dependencies: `proto/agentshim/` (generated Go), SQLite.
 
 ## Verification
 
-- Run `make coverage` after every store Go change. It exercises every package
-  with `-coverpkg=./...` and prints `go tool cover -func` statement output.
-  The command must pass.
-- Before handoff, run `modules/app/agent-repl/bin/test-all.sh` from the
-  repository root. Every tracked suite must pass.
+- `make coverage` exercises every package with `-coverpkg=./...` and prints
+  `go tool cover -func` statement output.
+- `modules/app/agent-repl/bin/test-all.sh` (from the repository root) runs
+  every tracked suite across the module.
 - Maintain at least 90% statement coverage. Until the measured store baseline
   reaches that target, never reduce it, report the gap explicitly, and add
   focused tests for every critical branch and every error path changed.
