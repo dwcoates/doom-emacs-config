@@ -147,21 +147,30 @@ func mustCurrent(t *testing.T, m *Manager, ws string) *frontendv1.WorkspaceState
 func TestApplyLifecycleTransitions(t *testing.T) {
 	tests := []struct {
 		name string
+		// pre is the boundary that must already have happened for ev to be a
+		// well-formed one. A turn END has always required the durable START it
+		// closes; only the axis's separate fold let a test skip it.
+		pre  *corev1.Event
 		ev   *corev1.Event
 		want frontendv1.RenderState
 	}{
-		{"session started -> ready", evSessionStarted("s1", 1), frontendv1.RenderState_RENDER_STATE_READY},
-		{"turn started -> thinking", evTurnStarted("s1", 1), frontendv1.RenderState_RENDER_STATE_THINKING},
-		{"clean turn end -> done", evTurnEnded("s1", 1, false), frontendv1.RenderState_RENDER_STATE_DONE},
-		{"errored turn end -> vendor_blocked", evTurnEnded("s1", 1, true), frontendv1.RenderState_RENDER_STATE_VENDOR_BLOCKED},
-		{"session ended -> dead", evSessionEnded("s1", 1), frontendv1.RenderState_RENDER_STATE_DEAD},
+		{"session started -> ready", nil, evSessionStarted("s1", 1), frontendv1.RenderState_RENDER_STATE_READY},
+		{"turn started -> thinking", nil, evTurnStarted("s1", 1), frontendv1.RenderState_RENDER_STATE_THINKING},
+		{"clean turn end -> done", evTurnStarted("s1", 1), evTurnEnded("s1", 2, false), frontendv1.RenderState_RENDER_STATE_DONE},
+		{"errored turn end -> vendor_blocked", evTurnStarted("s1", 1), evTurnEnded("s1", 2, true), frontendv1.RenderState_RENDER_STATE_VENDOR_BLOCKED},
+		{"session ended -> dead", nil, evSessionEnded("s1", 1), frontendv1.RenderState_RENDER_STATE_DEAD},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange.
 			m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+			if tt.pre != nil {
+				if err := applyTest(m, tt.pre); err != nil {
+					t.Fatalf("Apply(pre): %v", err)
+				}
+			}
 			// Act.
-			if err := m.Apply(tt.ev); err != nil {
+			if err := applyTest(m, tt.ev); err != nil {
 				t.Fatalf("Apply: %v", err)
 			}
 			// Assert.
@@ -178,19 +187,19 @@ func TestApplyIdempotentReapply(t *testing.T) {
 	// Arrange.
 	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
 	ev := evTurnStarted("s1", 7)
-	if err := m.Apply(ev); err != nil {
+	if err := applyTest(m, ev); err != nil {
 		t.Fatalf("Apply first: %v", err)
 	}
 	// Act: apply the identical event again.
-	if err := m.Apply(evTurnStarted("s1", 7)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 7)); err != nil {
 		t.Fatalf("Apply second: %v", err)
 	}
 	// Assert: only one thinking transition, and the duplicate was logged.
 	if got := cl.count("→RENDER_STATE_THINKING"); got != 1 {
 		t.Fatalf("thinking transitions logged = %d, want 1", got)
 	}
-	if !cl.contains("duplicate event skipped") {
-		t.Fatalf("expected a duplicate-skip log line, got: %v", cl.lines)
+	if !cl.contains("replayed=true") {
+		t.Fatalf("expected the durable ledger to report the replay, got: %v", cl.lines)
 	}
 }
 
@@ -199,7 +208,7 @@ func TestApplyIdempotentReapply(t *testing.T) {
 func TestLiveTaskCounting(t *testing.T) {
 	// Arrange: an idle session — yellow is a promotion of a green.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evSessionStarted("s1", 1)); err != nil {
 		t.Fatalf("session start: %v", err)
 	}
 	// Act + Assert, step by step (each step is one counting edge).
@@ -214,7 +223,7 @@ func TestLiveTaskCounting(t *testing.T) {
 		{evTaskEnded("s1", 5, "a2", corev1.TerminalStatus_TERMINAL_STATUS_LOST), 0, frontendv1.RenderState_RENDER_STATE_READY},
 	}
 	for i, s := range steps {
-		if err := m.Apply(s.ev); err != nil {
+		if err := applyTest(m, s.ev); err != nil {
 			t.Fatalf("step %d Apply: %v", i, err)
 		}
 		cur := mustCurrent(t, m, "ws1")
@@ -233,7 +242,7 @@ func TestLiveTaskCounting(t *testing.T) {
 func TestMergeTransitionInterleaving(t *testing.T) {
 	// Arrange: a thinking session.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn start: %v", err)
 	}
 	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_THINKING {
@@ -250,7 +259,7 @@ func TestMergeTransitionInterleaving(t *testing.T) {
 	}
 
 	// Act 2: turn ends underneath the merge; then the merge clears.
-	if err := m.Apply(evTurnEnded("s1", 2, false)); err != nil {
+	if err := applyTest(m, evTurnEnded("s1", 2, false)); err != nil {
 		t.Fatalf("turn end: %v", err)
 	}
 	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_MERGE_QUEUED {
@@ -290,10 +299,10 @@ func TestPersistenceAcrossReopen(t *testing.T) {
 		t.Fatalf("Open 1: %v", err)
 	}
 	wireAll(t, m1, res)
-	if err := m1.Apply(evSessionStarted("s1", 1)); err != nil {
+	if err := applyTest(m1, evSessionStarted("s1", 1)); err != nil {
 		t.Fatalf("session start: %v", err)
 	}
-	if err := m1.Apply(evTaskStarted("s1", 2, "a1")); err != nil {
+	if err := applyTest(m1, evTaskStarted("s1", 2, "a1")); err != nil {
 		t.Fatalf("task start: %v", err)
 	}
 	before := mustCurrent(t, m1, "ws1")
@@ -340,7 +349,7 @@ func TestPersistenceAcrossReopen(t *testing.T) {
 		t.Fatalf("post-reopen live_task_count = %d, want 1", after.LiveTaskCount)
 	}
 	// And a subsequent real change on m2 still resolves correctly.
-	if err := m2.Apply(evTaskEnded("s1", 3, "a1", corev1.TerminalStatus_TERMINAL_STATUS_DONE)); err != nil {
+	if err := applyTest(m2, evTaskEnded("s1", 3, "a1", corev1.TerminalStatus_TERMINAL_STATUS_DONE)); err != nil {
 		t.Fatalf("task end: %v", err)
 	}
 	if got := mustCurrent(t, m2, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_READY {
@@ -356,7 +365,7 @@ func TestSubscribePushesTransitions(t *testing.T) {
 	ch, cancel := m.Subscribe()
 
 	// Act 1: a transition.
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 	// Assert 1: the push arrived with the resolved state.
@@ -374,7 +383,7 @@ func TestSubscribePushesTransitions(t *testing.T) {
 
 	// Act 2: unsubscribe, then cause another transition.
 	cancel()
-	if err := m.Apply(evTurnEnded("s1", 2, false)); err != nil {
+	if err := applyTest(m, evTurnEnded("s1", 2, false)); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 	// Assert 2: the channel is closed (drained), no further live values.
@@ -388,11 +397,11 @@ func TestSubscribePushesTransitions(t *testing.T) {
 func TestApplyLogsNoSelfTransition(t *testing.T) {
 	// Arrange: an already-thinking session.
 	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("Apply turn: %v", err)
 	}
 	// Act: a task starts; the winning state stays thinking.
-	if err := m.Apply(evTaskStarted("s1", 2, "a1")); err != nil {
+	if err := applyTest(m, evTaskStarted("s1", 2, "a1")); err != nil {
 		t.Fatalf("Apply task: %v", err)
 	}
 	// Assert: only the original turn-start transition line.
@@ -408,12 +417,12 @@ func TestApplyLogsNoSelfTransition(t *testing.T) {
 func TestApplyPushesWhenOnlyTheLiveTaskCountMoves(t *testing.T) {
 	// Arrange: an already-thinking session with a subscriber.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("Apply turn: %v", err)
 	}
 	ch, _ := m.Subscribe()
 	// Act: a task starts; the state stays thinking but the count goes 0→1.
-	if err := m.Apply(evTaskStarted("s1", 2, "a1")); err != nil {
+	if err := applyTest(m, evTaskStarted("s1", 2, "a1")); err != nil {
 		t.Fatalf("Apply task: %v", err)
 	}
 	// Assert.
@@ -432,12 +441,12 @@ func TestApplyPushesWhenOnlyTheLiveTaskCountMoves(t *testing.T) {
 func TestApplyNoVisibleChangeNoPush(t *testing.T) {
 	// Arrange: an already-thinking session with a subscriber.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("Apply turn: %v", err)
 	}
 	ch, _ := m.Subscribe()
 	// Act: another turn start — same state, same (zero) task count.
-	if err := m.Apply(evTurnStarted("s1", 2)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 2)); err != nil {
 		t.Fatalf("Apply turn: %v", err)
 	}
 	// Assert.
@@ -452,7 +461,7 @@ func TestApplyNoVisibleChangeNoPush(t *testing.T) {
 // binding errors loudly rather than dropping the event.
 func TestApplyUnboundSessionErrors(t *testing.T) {
 	m, _, _ := openTest(t, fakeResolver{})
-	err := m.Apply(evTurnStarted("orphan", 1))
+	err := applyTest(m, evTurnStarted("orphan", 1))
 	if err == nil {
 		t.Fatalf("expected error for unbound session, got nil")
 	}
@@ -464,10 +473,10 @@ func TestApplyUnboundSessionErrors(t *testing.T) {
 // TestApplyNilAndEmptyEventErrors: malformed inputs error loudly.
 func TestApplyNilAndEmptyEventErrors(t *testing.T) {
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(nil); err == nil {
+	if err := applyTest(m, nil); err == nil {
 		t.Fatalf("expected error for nil event")
 	}
-	if err := m.Apply(&corev1.Event{Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{}}}); err == nil {
+	if err := applyTest(m, &corev1.Event{Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{}}}); err == nil {
 		t.Fatalf("expected error for event with empty session_id")
 	}
 }
@@ -483,11 +492,11 @@ func TestApplyRejectsFilePlaneTurnLifecycle(t *testing.T) {
 			StopReason: "end_turn",
 		}},
 	}
-	err := m.Apply(ev)
+	err := applyTest(m, ev)
 	if err == nil {
 		t.Fatal("file-plane TurnEnded was accepted")
 	}
-	if !strings.Contains(err.Error(), "non-authoritative turn lifecycle") ||
+	if !strings.Contains(err.Error(), "turn boundary rejected") ||
 		!strings.Contains(err.Error(), "plane=PLANE_FILE") ||
 		!strings.Contains(err.Error(), "seq=7") {
 		t.Fatalf("error = %q", err)
@@ -501,7 +510,7 @@ func TestApplyIgnoresEphemeral(t *testing.T) {
 	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
 	// Act: a content delta (ephemeral) with a bound session.
 	ev := &corev1.Event{SessionId: "s1", Seq: 1, Payload: &corev1.Event_ContentDelta{ContentDelta: &corev1.ContentDelta{}}}
-	if err := m.Apply(ev); err != nil {
+	if err := applyTest(m, ev); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 	// Assert: no state resolved, and the ignore was logged.
@@ -518,10 +527,10 @@ func TestApplyIgnoresEphemeral(t *testing.T) {
 func TestSnapshotAllWorkspaces(t *testing.T) {
 	// Arrange: two bound sessions in two workspaces.
 	m, _, _ := openTest(t, fakeResolver{"s1": "wsA", "s2": "wsB"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("Apply s1: %v", err)
 	}
-	if err := m.Apply(evSessionStarted("s2", 1)); err != nil {
+	if err := applyTest(m, evSessionStarted("s2", 1)); err != nil {
 		t.Fatalf("Apply s2: %v", err)
 	}
 	// Act.
@@ -547,7 +556,7 @@ func TestTransitionLogFormat(t *testing.T) {
 	// Arrange.
 	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
 	// Act.
-	if err := m.Apply(evTurnStarted("s1", 42)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 42)); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 	// Assert.
@@ -651,7 +660,7 @@ func TestLiveTaskCountStillCountsDistinctTasks(t *testing.T) {
 // mustApply applies ev, failing the test on error.
 func mustApply(t *testing.T, m *Manager, ev *corev1.Event) {
 	t.Helper()
-	if err := m.Apply(ev); err != nil {
+	if err := applyTest(m, ev); err != nil {
 		t.Fatalf("Apply(seq %d): %v", ev.GetSeq(), err)
 	}
 }
@@ -811,7 +820,7 @@ func TestConnectionRecoveredRevealsTheStateUnderneath(t *testing.T) {
 	// ON TOP of the session-status lifecycle rather than replacing it, so clearing it must
 	// reveal the session underneath rather than leave the workspace stateless.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evSessionStarted("s1", 1)); err != nil {
 		t.Fatalf("session started: %v", err)
 	}
 	if err := m.ApplyConnectionDegraded("ws1", true, "no traffic"); err != nil {

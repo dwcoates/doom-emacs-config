@@ -215,7 +215,7 @@ func TestTheMoreSpecificBluesOutrankSevered(t *testing.T) {
 func TestWiringOpensSessionStatus(t *testing.T) {
 	// Arrange — a turn running behind a workspace nothing is wired to.
 	m, _, _ := openUnwiredTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 	if got := mustCurrent(t, m, "ws1").GetState(); got != frontendv1.RenderState_RENDER_STATE_HIBERNATED {
@@ -236,7 +236,7 @@ func TestWiringOpensSessionStatus(t *testing.T) {
 func TestHibernationDropsAWiredWorkspaceToHibernated(t *testing.T) {
 	// Arrange — a wired, thinking workspace.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 	// Act.
@@ -253,7 +253,7 @@ func TestHibernationDropsAWiredWorkspaceToHibernated(t *testing.T) {
 func TestARotationBounceReopensOnTheReHandshake(t *testing.T) {
 	// Arrange — a wired workspace mid-turn.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 	// Act — the bounce, then the new ShimReady.
@@ -322,10 +322,10 @@ func TestOpenMarksEveryRestoredWorkspaceHibernated(t *testing.T) {
 		t.Fatalf("Open 1: %v", err)
 	}
 	wireAll(t, first, res)
-	if err := first.Apply(evSessionStarted("s1", 1)); err != nil {
+	if err := applyTest(first, evSessionStarted("s1", 1)); err != nil {
 		t.Fatalf("session started: %v", err)
 	}
-	if err := first.Apply(evTurnStarted("s2", 1)); err != nil {
+	if err := applyTest(first, evTurnStarted("s2", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 	if err := first.Close(); err != nil {
@@ -362,7 +362,7 @@ func TestTheBootSweepAppendsNothingForAnAlreadyAsleepWorkspace(t *testing.T) {
 		t.Fatalf("Open 1: %v", err)
 	}
 	wireAll(t, first, res)
-	if err := first.Apply(evSessionStarted("s1", 1)); err != nil {
+	if err := applyTest(first, evSessionStarted("s1", 1)); err != nil {
 		t.Fatalf("session started: %v", err)
 	}
 	if err := first.Close(); err != nil {
@@ -551,6 +551,7 @@ func TestTheBlueBandOutranksHibernated(t *testing.T) {
 func TestHibernatedOverALiveTurnLogsAnInvariantViolation(t *testing.T) {
 	// Arrange — the impossible pair, seeded directly because no writer can make it.
 	db := newTestDB(t)
+	seedTurnClaim(t, db, "ws", "s1", "turn-1", 1)
 	seedSignal(t, db, "ws", "s1", sigThinking, causeTurnStarted, 1, 1)
 	seedSignal(t, db, "ws", "", sigHibernated, causeWired, -1, 2)
 	cl := &capLog{}

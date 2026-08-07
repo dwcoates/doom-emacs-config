@@ -20,11 +20,12 @@ type turnResolution struct {
 	after       string
 	correlation string
 	replayed    bool
-	// afterIDs is the durable claim set the ledger holds AFTER this boundary,
-	// unformatted. It is what the session controller's turn record is projected
-	// from: the ledger is the authority on which turns are in flight, so the
-	// record is derived from it rather than accumulated beside it.
-	afterIDs []string
+	// liveness is the SSM's ONE derivation of turn liveness, produced in the
+	// same transaction that moved the ledger and painted the workspace color.
+	// The session controller's turn record IS this value; it is not projected
+	// from it and not recomputed beside it, which is what makes the queue's
+	// "turn in flight" answer and the color's the same answer.
+	liveness ssm.TurnLiveness
 }
 
 // turnLifecycle routes every turn boundary through the SSM-owned durable
@@ -78,18 +79,23 @@ func (t turnLifecycle) resolve(ev *corev1.Event, liveQueryInstanceID string) (tu
 		base.before, base.after = "unknown", "unknown"
 		return base, fmt.Errorf("turn lifecycle plane %s is not authoritative", ev.GetPlane().String())
 	}
-	before, after, replayed, err := t.store.ResolveTurnLifecycle(
+	boundary, err := t.store.ApplyTurnBoundary(
 		t.workspace, t.claimantSessionID, liveQueryInstanceID, ev,
 	)
+	before, after, replayed := boundary.Before, boundary.After, boundary.Replayed
 	base.before = formatTurnIDs(before)
 	base.after = formatTurnIDs(after)
-	base.afterIDs = after
+	base.liveness = boundary.Liveness
 	base.replayed = replayed
 	if err != nil {
 		base.decision = "reject_durable_claim"
 		return base, err
 	}
-	base.active = len(after) > 0
+	// THE ONE DERIVATION, not a second count of the claim set. `active` is what
+	// the workspace color was painted from a few microseconds ago, inside the
+	// same transaction; reading len(after) here would be this file folding the
+	// ledger on its own terms again.
+	base.active = boundary.Liveness.Active()
 	// An exact receipt replay means the daemon died after the durable claim
 	// moved but before last_seen_seq advanced. Re-emit the boundary snapshot so
 	// process-local consumers can finish their side of that interrupted

@@ -34,7 +34,7 @@ func mustMergeStatus(t *testing.T, m *Manager, ws string) *frontendv1.MergeStatu
 func TestMergeStatusIsAbsentWithoutAMergeAxis(t *testing.T) {
 	// Arrange — a workspace with a session-status row and no merge history.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evSessionStarted("s1", 1)); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 
@@ -50,7 +50,7 @@ func TestMergeStatusIsAbsentWithoutAMergeAxis(t *testing.T) {
 func TestMergeStatusIsAbsentOnAClearedMergeAxis(t *testing.T) {
 	// Arrange — a merge attempt that was cleared off the axis again.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evSessionStarted("s1", 1)); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 	applyPhases(t, m, "ws1", merge.PhaseMergeEnqueuing)
@@ -113,7 +113,7 @@ func TestTheRetainedStatusRidesEveryLaterFrame(t *testing.T) {
 	}
 
 	// Act — an unrelated push for the same workspace.
-	if err := m.Apply(evSessionStarted("s1", 2)); err != nil {
+	if err := applyTest(m, evSessionStarted("s1", 2)); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 

@@ -988,7 +988,7 @@ func TestATurnAndLiveTasksAreBothReportedOnOneHold(t *testing.T) {
 func TestAHoldNamesTheTurnItIsWaitingOn(t *testing.T) {
 	// Arrange.
 	h := newLeaseHarness(t)
-	h.m.noteTurnClaims(h.controller(), []string{"t_42"})
+	h.m.noteTurnLivenessIDs(h.controller(), []string{"t_42"})
 	h.turn(true)
 
 	// Act.
@@ -1020,7 +1020,7 @@ func TestATurnsIDIsClearedAtItsOwnEnd(t *testing.T) {
 	// idle edge releases the record whole.
 	h := newLeaseHarness(t)
 	d := h.controller()
-	h.m.noteTurnClaims(d, []string{"t_42"})
+	h.m.noteTurnLivenessIDs(d, []string{"t_42"})
 
 	// Act.
 	h.turn(false)
@@ -1039,10 +1039,10 @@ func TestADifferentTurnsEndDoesNotClearTheActiveTurnID(t *testing.T) {
 	// still holds t_42 afterwards, and the record is projected from the ledger.
 	h := newLeaseHarness(t)
 	d := h.controller()
-	h.m.noteTurnClaims(d, []string{"t_42"})
+	h.m.noteTurnLivenessIDs(d, []string{"t_42"})
 
 	// Act — the surviving claim set the other turn's end resolved to.
-	h.m.noteTurnClaims(d, []string{"t_42"})
+	h.m.noteTurnLivenessIDs(d, []string{"t_42"})
 
 	// Assert.
 	h.m.mu.Lock()

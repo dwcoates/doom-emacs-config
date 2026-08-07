@@ -119,13 +119,13 @@ func TestHibernationLeaseAdmitsExactCompletedTurnReplayWithoutStartingATurn(t *t
 	if _, _, _, err := m.ResolveTurnLifecycle("ws", "daemon-session", "", start); err != nil {
 		t.Fatalf("Resolve start: %v", err)
 	}
-	if err := m.Apply(start); err != nil {
+	if err := applyTest(m, start); err != nil {
 		t.Fatalf("Apply start: %v", err)
 	}
 	if _, _, _, err := m.ResolveTurnLifecycle("ws", "daemon-session", "", end); err != nil {
 		t.Fatalf("Resolve end: %v", err)
 	}
-	if err := m.Apply(end); err != nil {
+	if err := applyTest(m, end); err != nil {
 		t.Fatalf("Apply end: %v", err)
 	}
 
@@ -138,7 +138,7 @@ func TestHibernationLeaseAdmitsExactCompletedTurnReplayWithoutStartingATurn(t *t
 	if err != nil || !replayed || len(before) != 0 || len(after) != 0 {
 		t.Fatalf("completed replay during lease = before:%v after:%v replayed:%t err:%v", before, after, replayed, err)
 	}
-	if err := m.Apply(start); err != nil {
+	if err := applyTest(m, start); err != nil {
 		t.Fatalf("Apply completed replay during lease: %v", err)
 	}
 }

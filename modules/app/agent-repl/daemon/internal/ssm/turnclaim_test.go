@@ -20,12 +20,12 @@ import (
 func TestReadinessSuppressedWhenTheSameSessionReattaches(t *testing.T) {
 	// Arrange — s1 owns a running turn.
 	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 
 	// Act — the SAME session re-announces readiness (a reattach).
-	if err := m.Apply(evSessionStarted("s1", 2)); err != nil {
+	if err := applyTest(m, evSessionStarted("s1", 2)); err != nil {
 		t.Fatalf("session started: %v", err)
 	}
 
@@ -41,12 +41,12 @@ func TestReadinessSuppressedWhenTheSameSessionReattaches(t *testing.T) {
 func TestReadinessInvalidatesAPriorSessionsTurnClaim(t *testing.T) {
 	// Arrange — s1 leaves a `thinking` row behind and never ends its turn.
 	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1", "s2": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 
 	// Act — a NEW session now drives the workspace and reports ready.
-	if err := m.Apply(evSessionStarted("s2", 1)); err != nil {
+	if err := applyTest(m, evSessionStarted("s2", 1)); err != nil {
 		t.Fatalf("session started: %v", err)
 	}
 
@@ -64,7 +64,7 @@ func TestReadinessStillDefersToAnUnattributedTurnClaim(t *testing.T) {
 	// id. It describes the workspace's own turn, so there is no rival identity
 	// in it and it must keep suppressing exactly as it always has.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 	if err := m.ApplyPermission("ws1", true, "asked"); err != nil {
@@ -75,7 +75,7 @@ func TestReadinessStillDefersToAnUnattributedTurnClaim(t *testing.T) {
 	}
 
 	// Act.
-	if err := m.Apply(evSessionStarted("s1", 2)); err != nil {
+	if err := applyTest(m, evSessionStarted("s1", 2)); err != nil {
 		t.Fatalf("session started: %v", err)
 	}
 
@@ -88,7 +88,7 @@ func TestReadinessStillDefersToAnUnattributedTurnClaim(t *testing.T) {
 func TestInvalidateTurnClaimReleasesTheDeletedSessionsTurn(t *testing.T) {
 	// Arrange.
 	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 
@@ -110,10 +110,10 @@ func TestInvalidateTurnClaimLeavesSettledSessionStatusAlone(t *testing.T) {
 	// Arrange — the turn already ended, so there is nothing stuck to unstick
 	// and `idle` would discard a more specific true fact.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
-	if err := m.Apply(evTurnEnded("s1", 2, false)); err != nil {
+	if err := applyTest(m, evTurnEnded("s1", 2, false)); err != nil {
 		t.Fatalf("turn ended: %v", err)
 	}
 
@@ -132,7 +132,7 @@ func TestInvalidateTurnClaimDeclinesAnotherSessionsClaim(t *testing.T) {
 	// Arrange — s2 holds the running turn; deleting s1 is not s2's claim to
 	// spend.
 	m, cl, _ := openTest(t, fakeResolver{"s2": "ws1"})
-	if err := m.Apply(evTurnStarted("s2", 1)); err != nil {
+	if err := applyTest(m, evTurnStarted("s2", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
 
