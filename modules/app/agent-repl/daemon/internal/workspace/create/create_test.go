@@ -193,6 +193,24 @@ type fixture struct {
 	// tests that happen to be single-threaded.
 	logMu sync.Mutex
 	logs  []string
+
+	// clock is the manager's time source. The awaiting-host re-request cadence
+	// is a time-since check, and driving it with a controlled instant is what
+	// lets a test cross the interval boundary WITHOUT sleeping.
+	clockMu sync.Mutex
+	clock   time.Time
+}
+
+func (f *fixture) now() time.Time {
+	f.clockMu.Lock()
+	defer f.clockMu.Unlock()
+	return f.clock
+}
+
+func (f *fixture) advance(d time.Duration) {
+	f.clockMu.Lock()
+	defer f.clockMu.Unlock()
+	f.clock = f.clock.Add(d)
 }
 
 func (f *fixture) log(format string, _ ...any) {
@@ -214,6 +232,7 @@ func newFixture(t *testing.T, statePath string) *fixture {
 		publication: &fakePublication{},
 		actions:     &fakeActions{},
 		merges:      &fakeMerges{},
+		clock:       time.Date(2026, 8, 7, 11, 44, 0, 0, time.UTC),
 	}
 	logf := f.log
 	store, err := OpenJobStore(statePath, logf)
@@ -224,6 +243,7 @@ func newFixture(t *testing.T, statePath string) *fixture {
 	f.manager, err = NewManager(Config{
 		Store: store, Planner: f.worktrees, Worktrees: f.worktrees, Geometry: f.geometry, Sessions: f.sessions, Health: f.health,
 		Prompts: f.prompts, Available: f.available, Releases: f.releases, Publication: f.publication, HostActions: f.actions, Logf: logf,
+		Now: f.now,
 	})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
@@ -1915,5 +1935,128 @@ func TestHostActionWorkerPublishesUntilItsContextEnds(t *testing.T) {
 	cancel()
 	if err := <-stopped; !errors.Is(err, context.Canceled) {
 		t.Fatalf("RunHostActionWorker = %v, want the context's cancellation", err)
+	}
+}
+
+// parkOnHost drives one job to awaiting_emacs, which is where every
+// materialization-cadence test starts.
+func parkOnHost(t *testing.T, f *fixture, id string) {
+	t.Helper()
+	if _, _, err := f.store.Enqueue(Job{ID: id, Request: Request{Name: "DWC/" + id, GitRoot: "/repo", Prompt: "build it"}, State: StateQueued}); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	if err := f.manager.Process(context.Background(), id); err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+	if got := job(t, f.store, id); got.State != StateAwaitingEmacs {
+		t.Fatalf("job %s state = %s, want awaiting_emacs", id, got.State)
+	}
+}
+
+func TestAwaitingHostSweepReRequestsMaterializationAfterTheInterval(t *testing.T) {
+	// Arrange: a job parked on the host with its one original request already
+	// spent — exactly the state a workspace created while no Emacs host was
+	// connected is left in.
+	f := newFixture(t, filepath.Join(t.TempDir(), "jobs.json"))
+	parkOnHost(t, f, "held")
+	before := f.available.calls
+
+	// Act: the interval elapses and the host-action worker sweeps.
+	f.advance(defaultMaterializationRequestInterval)
+	if err := f.manager.SweepAwaitingHost(context.Background()); err != nil {
+		t.Fatalf("SweepAwaitingHost: %v", err)
+	}
+
+	// Assert.
+	if f.available.calls != before+1 {
+		t.Fatalf("available publishes = %d, want %d", f.available.calls, before+1)
+	}
+	if got := job(t, f.store, "held"); got.MaterializationRequests != 2 {
+		t.Fatalf("materialization requests = %d, want 2", got.MaterializationRequests)
+	}
+	if !f.loggedFormat("RE-REQUESTING materialization") {
+		t.Fatal("the re-request was not logged")
+	}
+}
+
+func TestAwaitingHostSweepDoesNotReRequestInsideTheInterval(t *testing.T) {
+	// Arrange.
+	f := newFixture(t, filepath.Join(t.TempDir(), "jobs.json"))
+	parkOnHost(t, f, "fresh")
+	before := f.available.calls
+
+	// Act: less than the interval has passed since the original request.
+	f.advance(defaultMaterializationRequestInterval - time.Millisecond)
+	if err := f.manager.SweepAwaitingHost(context.Background()); err != nil {
+		t.Fatalf("SweepAwaitingHost: %v", err)
+	}
+
+	// Assert.
+	if f.available.calls != before {
+		t.Fatalf("available publishes = %d, want %d (no re-request inside the interval)", f.available.calls, before)
+	}
+}
+
+func TestAwaitingHostSweepIgnoresJobsThatAreNotWaitingOnTheHost(t *testing.T) {
+	// Arrange: an acknowledged job is past the host entirely.
+	f := newFixture(t, filepath.Join(t.TempDir(), "jobs.json"))
+	parkOnHost(t, f, "done")
+	if err := f.manager.MarkMaterialized(context.Background(), "done"); err != nil {
+		t.Fatalf("MarkMaterialized: %v", err)
+	}
+	before := f.available.calls
+
+	// Act.
+	f.advance(10 * defaultMaterializationRequestInterval)
+	if err := f.manager.SweepAwaitingHost(context.Background()); err != nil {
+		t.Fatalf("SweepAwaitingHost: %v", err)
+	}
+
+	// Assert.
+	if f.available.calls != before {
+		t.Fatalf("available publishes = %d, want %d (a materialized job is never re-requested)", f.available.calls, before)
+	}
+}
+
+func TestAwaitingHostSweepStampsAJobPersistedBeforeTheCadenceExisted(t *testing.T) {
+	// Arrange: a job whose park predates the durable timestamps, so both are
+	// zero — the shape every job in an upgraded store has on its first sweep.
+	f := newFixture(t, filepath.Join(t.TempDir(), "jobs.json"))
+	parkOnHost(t, f, "legacy")
+	if _, err := f.store.Update("legacy", func(j *Job) error {
+		j.AwaitingEmacsSinceMs = 0
+		j.MaterializationLastRequestMs = 0
+		return nil
+	}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	// Act.
+	if err := f.manager.SweepAwaitingHost(context.Background()); err != nil {
+		t.Fatalf("SweepAwaitingHost: %v", err)
+	}
+
+	// Assert: it is dated from this sweep, not from the epoch.
+	if got := job(t, f.store, "legacy"); got.AwaitingEmacsSinceMs != f.now().UnixMilli() {
+		t.Fatalf("awaiting-since = %d, want %d", got.AwaitingEmacsSinceMs, f.now().UnixMilli())
+	}
+}
+
+func TestHostActionWorkerRunsTheAwaitingHostSweep(t *testing.T) {
+	// Arrange: the sweep must be owned by the worker that owns host
+	// publication, not by a caller that happens to remember to run it.
+	f := newFixture(t, filepath.Join(t.TempDir(), "jobs.json"))
+	parkOnHost(t, f, "worker")
+	before := f.available.calls
+	f.advance(defaultMaterializationRequestInterval)
+
+	// Act: exactly what RunHostActionWorker does on one wake.
+	f.manager.RouteHostActions()
+	for f.manager.drainHostOnce(context.Background()) {
+	}
+
+	// Assert.
+	if f.available.calls != before+1 {
+		t.Fatalf("available publishes = %d, want %d", f.available.calls, before+1)
 	}
 }

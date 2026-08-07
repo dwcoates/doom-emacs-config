@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 )
 
 // Config supplies the daemon-owned creation collaborators.  They are all
@@ -24,6 +25,13 @@ type Config struct {
 	Publication SessionPublicationPreparer
 	HostActions HostActionSink
 	Logf        func(string, ...any)
+	// Now is the manager's clock, used only by the awaiting-host sweep.  Tests
+	// supply a controlled one so a cadence can be exercised without waiting on
+	// wall time; production leaves it nil and gets time.Now.
+	Now func() time.Time
+	// MaterializationRequestInterval bounds how often one job's unanswered
+	// materialization request is re-sent.  Zero takes the package default.
+	MaterializationRequestInterval time.Duration
 }
 
 // routedJobBuffer is how many job ids the creation worker may fall behind by
@@ -32,6 +40,20 @@ type Config struct {
 // job store is the source of truth, so a dropped id costs a re-list and never a
 // lost workspace.
 const routedJobBuffer = 256
+
+// defaultMaterializationRequestInterval is how long an unanswered
+// materialization request is left standing before the daemon asks again.
+//
+// THE ORIGINAL REQUEST IS NOT A DELIVERY GUARANTEE.  It is a host-only frame
+// broadcast to whoever is connected at that instant, and a daemon that bounced
+// out from under a running Emacs has no host client at all for as long as the
+// editor takes to notice and reconnect — every request issued in that window is
+// dropped with nobody to receive it.  The only other path to the host is the
+// snapshot a host connect replays, so before this cadence existed a workspace
+// created during that window waited for an EDITOR RESTART.  One did, for
+// sixteen minutes, while the daemon logged the same held-publication line 1592
+// times and never once said the request had reached no one.
+const defaultMaterializationRequestInterval = 15 * time.Second
 
 // Manager drives durable workspace creation jobs to the next safe boundary.
 // It has no dependency on frontend/server or sessioncontroller so ownership remains
@@ -293,10 +315,92 @@ func (m *Manager) resumableIDs() ([]string, error) {
 
 // publishHostActions runs one drain and contains its failure: a retained action
 // stays pending in the store, so the next signal redelivers it.
+//
+// It also runs the awaiting-host sweep, because re-asking the host to
+// materialize a workspace IS host publication and belongs on the worker that
+// owns it: the creation worker must not be able to stall behind a slow host,
+// and a second goroutine publishing to the same host would be a second owner of
+// the same channel.
 func (m *Manager) publishHostActions(ctx context.Context) {
 	if err := m.DrainHostActions(ctx); err != nil {
 		m.cfg.Logf("workspace-create: host-action publication FAILED error=%v; the actions stay pending and are redelivered on the next signal", err)
 	}
+	if err := m.SweepAwaitingHost(ctx); err != nil {
+		m.cfg.Logf("workspace-create: awaiting-host sweep FAILED error=%v; every held job stays held and the next signal sweeps again", err)
+	}
+}
+
+func (m *Manager) now() time.Time {
+	if m.cfg.Now != nil {
+		return m.cfg.Now()
+	}
+	return time.Now()
+}
+
+func (m *Manager) materializationRequestInterval() time.Duration {
+	if m.cfg.MaterializationRequestInterval > 0 {
+		return m.cfg.MaterializationRequestInterval
+	}
+	return defaultMaterializationRequestInterval
+}
+
+// SweepAwaitingHost re-asks the host to materialize every job parked on
+// awaiting_emacs whose last request has gone unanswered past the re-request
+// interval.
+//
+// IT IS THE ONLY REDELIVERY THE DAEMON OWNS.  A host connect replays the whole
+// awaiting_emacs set in its snapshot, but that path belongs to the host: it
+// fires when the editor decides to reconnect and never otherwise, so a job
+// created while no host was connected was previously unreachable until someone
+// restarted Emacs.  Re-requesting on a bounded interval makes materialization a
+// thing the daemon keeps asking for rather than a thing it announced once.
+//
+// A failed re-request is CONTAINED per job: the next job's workspace has nothing
+// to do with this one, and the store still holds every one of them.
+func (m *Manager) SweepAwaitingHost(ctx context.Context) error {
+	jobs, err := m.cfg.Store.List()
+	if err != nil {
+		return fmt.Errorf("workspace create: list jobs for the awaiting-host sweep: %w", err)
+	}
+	nowMs := m.now().UnixMilli()
+	interval := m.materializationRequestInterval().Milliseconds()
+	for _, job := range jobs {
+		if job.State != StateAwaitingEmacs {
+			continue
+		}
+		// A job persisted before this cadence existed, or one whose park was
+		// never stamped, is dated from the first sweep that sees it. Dating it
+		// from zero instead would report an age measured from the epoch.
+		if job.AwaitingEmacsSinceMs == 0 {
+			updated, err := m.cfg.Store.Update(job.ID, func(j *Job) error {
+				j.AwaitingEmacsSinceMs = nowMs
+				return nil
+			})
+			if err != nil {
+				m.cfg.Logf("workspace-create: awaiting-host sweep could not stamp id=%s error=%v; the job stays held and the next sweep retries", job.ID, err)
+				continue
+			}
+			job = updated
+		}
+		if job.MaterializationLastRequestMs != 0 && nowMs-job.MaterializationLastRequestMs < interval {
+			continue
+		}
+		heldMs := nowMs - job.AwaitingEmacsSinceMs
+		available := Available{JobID: job.ID, Name: job.FinalName, Branch: job.Branch, BaseCommit: job.ResolvedBaseCommit, WorktreePath: job.WorktreePath, SessionID: job.SessionID, Request: job.Request}
+		m.cfg.Logf("workspace-create: RE-REQUESTING materialization id=%s name=%q worktree=%s session=%s held_ms=%d attempt=%d", job.ID, job.FinalName, job.WorktreePath, job.SessionID, heldMs, job.MaterializationRequests+1)
+		if err := m.cfg.Available.PublishWorkspaceAvailable(ctx, available); err != nil {
+			m.cfg.Logf("workspace-create: materialization RE-REQUEST FAILED id=%s held_ms=%d error=%v; the job stays held and the next sweep asks again", job.ID, heldMs, err)
+			continue
+		}
+		if _, err := m.cfg.Store.Update(job.ID, func(j *Job) error {
+			j.MaterializationRequests++
+			j.MaterializationLastRequestMs = nowMs
+			return nil
+		}); err != nil {
+			m.cfg.Logf("workspace-create: materialization re-request checkpoint FAILED id=%s error=%v; the request was sent and the next sweep may repeat it (the host acknowledgement is idempotent)", job.ID, err)
+		}
+	}
+	return nil
 }
 
 // EnqueueInteractiveCreate durably accepts one frontend create command before
@@ -472,7 +576,13 @@ func (m *Manager) process(ctx context.Context, id string) error {
 			// Persist the visible descriptor before publishing it.  A fast host ACK
 			// can arrive synchronously from the publisher; it must see an
 			// awaiting-emacs job instead of being rejected as premature.
-			if _, err := m.transition(id, StateAwaitingEmacs, ""); err != nil {
+			parkedMs := m.now().UnixMilli()
+			if _, err := m.cfg.Store.Update(id, func(j *Job) error {
+				j.State = StateAwaitingEmacs
+				j.AwaitingEmacsSinceMs = parkedMs
+				j.LastError = ""
+				return nil
+			}); err != nil {
 				return err
 			}
 			job, _, err = m.cfg.Store.Get(id)
@@ -486,6 +596,8 @@ func (m *Manager) process(ctx context.Context, id string) error {
 			}
 			if _, err := m.cfg.Store.Update(id, func(j *Job) error {
 				j.AvailablePublished = true
+				j.MaterializationRequests++
+				j.MaterializationLastRequestMs = parkedMs
 				j.LastError = ""
 				return nil
 			}); err != nil {

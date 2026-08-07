@@ -320,10 +320,16 @@ func (s *Server) Close() error {
 // A WorkspaceState frame is routed through PushWorkspaceState, here rather than
 // only at the convenience helper, so its one delivery path cannot be bypassed
 // by reaching for the general fan-out.
-func (s *Server) Broadcast(frame *frontendv1.FrontendFrame) {
+// It reports HOW MANY clients the frame was actually queued to. The count is
+// not decoration: a host-only frame (workspace availability, a host action) is
+// addressed to exactly one kind of client, and delivering it while no client of
+// that kind is connected loses it silently — the caller has no other way to
+// learn that happened, and the host-only push helpers below turn a zero into a
+// loud line rather than a shrug.
+func (s *Server) Broadcast(frame *frontendv1.FrontendFrame) int {
 	if ws := frame.GetWorkspaceState(); ws != nil {
 		s.PushWorkspaceState(ws)
-		return
+		return 0
 	}
 	_, _, scoped := frameSessionIdentity(frame)
 	if scoped {
@@ -331,7 +337,7 @@ func (s *Server) Broadcast(frame *frontendv1.FrontendFrame) {
 		defer s.publicationMu.RUnlock()
 	}
 	if !s.requireSessionPublication(frame) {
-		return
+		return 0
 	}
 	var (
 		unscoped     []byte
@@ -351,6 +357,7 @@ func (s *Server) Broadcast(frame *frontendv1.FrontendFrame) {
 		clients = append(clients, cl)
 	}
 	s.mu.Unlock()
+	delivered := 0
 	for _, cl := range clients {
 		if isHostOnlyFrame(frame) && !cl.kind.isHost() {
 			continue
@@ -375,7 +382,9 @@ func (s *Server) Broadcast(frame *frontendv1.FrontendFrame) {
 			continue
 		}
 		s.enqueue(cl, outFrame{key: coalesceKey(sent), data: data})
+		delivered++
 	}
+	return delivered
 }
 
 // PushWorkspaceState delivers a resolved state to EVERY connected frontend at
@@ -543,10 +552,18 @@ func (s *Server) PushQueueView(q *frontendv1.QueueView) { s.Broadcast(QueueViewF
 func (s *Server) PushProgressView(p *frontendv1.ProgressView) {
 	s.Broadcast(ProgressViewFrame(p))
 }
-func (s *Server) PushWorkspaceAvailable(v *frontendv1.WorkspaceAvailable) {
-	s.Broadcast(WorkspaceAvailableFrame(v))
+
+// PushWorkspaceAvailable and PushHostAction carry HOST-ONLY work, and both
+// report the number of host clients the frame reached. Zero means the frame was
+// addressed to a kind of client that is not connected right now and is gone —
+// the durable record behind it is the only remaining path to the host, and the
+// caller is the one who has to say so.
+func (s *Server) PushWorkspaceAvailable(v *frontendv1.WorkspaceAvailable) int {
+	return s.Broadcast(WorkspaceAvailableFrame(v))
 }
-func (s *Server) PushHostAction(v *frontendv1.HostAction) { s.Broadcast(HostActionFrame(v)) }
+func (s *Server) PushHostAction(v *frontendv1.HostAction) int {
+	return s.Broadcast(HostActionFrame(v))
+}
 func (s *Server) PushShutdownSchedule(v *frontendv1.ShutdownScheduleView) {
 	s.Broadcast(ShutdownScheduleFrame(v))
 }

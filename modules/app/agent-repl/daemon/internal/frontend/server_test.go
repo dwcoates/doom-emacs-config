@@ -506,6 +506,44 @@ func TestBroadcastReachesClient(t *testing.T) {
 	}
 }
 
+func TestPushWorkspaceAvailableReportsZeroWhenOnlyGUIClientsAreConnected(t *testing.T) {
+	// Arrange: a GUI stream is barred from host-only frames, so a fan-out of
+	// GUI clients alone is a fan-out to nobody. This is the exact shape a
+	// daemon that bounced out from under a running Emacs is left in.
+	s, _ := newTestServer(t, 8)
+	gui := newClient(s.bufSize, nil, ClientKindGUIStream)
+	s.mu.Lock()
+	s.clients[gui] = struct{}{}
+	s.mu.Unlock()
+
+	// Act.
+	delivered := s.PushWorkspaceAvailable(&frontendv1.WorkspaceAvailable{JobId: "job-1", FinalName: "fresh"})
+
+	// Assert.
+	if delivered != 0 {
+		t.Fatalf("delivered = %d, want 0 (a GUI stream never receives host-only work)", delivered)
+	}
+}
+
+func TestPushWorkspaceAvailableReportsTheHostClientsItReached(t *testing.T) {
+	// Arrange.
+	s, _ := newTestServer(t, 8)
+	host := newClient(s.bufSize, nil, ClientKindHost)
+	gui := newClient(s.bufSize, nil, ClientKindGUIStream)
+	s.mu.Lock()
+	s.clients[host] = struct{}{}
+	s.clients[gui] = struct{}{}
+	s.mu.Unlock()
+
+	// Act.
+	delivered := s.PushWorkspaceAvailable(&frontendv1.WorkspaceAvailable{JobId: "job-1", FinalName: "fresh"})
+
+	// Assert: the host counts, the GUI stream does not.
+	if delivered != 1 {
+		t.Fatalf("delivered = %d, want 1", delivered)
+	}
+}
+
 // --- Slow-consumer hard disconnect (white-box, deterministic) ---------------
 
 func TestSlowConsumerHardDisconnect(t *testing.T) {

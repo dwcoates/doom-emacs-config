@@ -412,6 +412,23 @@ turn the next reconnect replay into a false conflict."
   (should-not (fboundp 'agent-repl--workspace-create-send))
   (should-not (member "createWorkspace" agent-repl--uds-known-command-fields)))
 
+(ert-deftest agent-repl-test-workspace-available-logs-arrival-before-validation ()
+  "An unusable request still leaves proof it arrived.
+The daemon logs whether it SENT a materialization request; only Emacs can
+say whether one was RECEIVED, and a request that dies in validation used
+to leave nothing on this side to say it ever came."
+  (let (logged)
+    (cl-letf (((symbol-function 'agent-repl--log)
+               (lambda (_ws fmt &rest args)
+                 (push (apply #'format fmt args) logged))))
+      (should-error
+       (agent-repl--workspace-create-handle-available
+        '(:jobId "job-1" :finalName "new" :worktreePath "/tmp/new")))
+      (should (cl-find-if
+               (lambda (line)
+                 (string-match-p "MATERIALIZATION REQUEST RECEIVED" line))
+               logged)))))
+
 (ert-deftest agent-repl-test-workspace-available-validates-before-mutation ()
   "A missing authoritative field causes no materialization and no ACK."
   (let ((materialized nil)
