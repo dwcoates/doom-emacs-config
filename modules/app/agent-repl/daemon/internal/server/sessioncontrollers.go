@@ -394,6 +394,10 @@ func (s *ShimSpawner) EnsureShim(ctx context.Context, sessionID string) (session
 	// every respawn hard-failed on a file only a real CLI ever creates.
 	fake := s.fakeForced()
 	opts.Fake = fake
+	// freshProof is the ticket to the no-resume spawn below. It is nil here and
+	// stays nil unless some rung of the ladder MINTS it from evidence; see
+	// freshgate.go for why the permission is an object rather than a bool.
+	var freshProof *freshEligibility
 	if missing := validateResumeTarget(opts, fake); missing != nil {
 		if !resumeTargetCarriesAConversation(rec) {
 			// A HANDSHAKE THAT NEVER BECAME A CONVERSATION. The vendor mints a
@@ -420,9 +424,44 @@ func (s *ShimSpawner) EnsureShim(ctx context.Context, sessionID string) (session
 			s.logf("server: session %s: resume viability gate WAIVED for respawn resume=%q reason=handshake_only_no_turn_ever_ran cwd=%q config_dir=%q — the vendor minted this uuid at bring-up and no turn ever ran under it, so there is no conversation to lose and the held work would otherwise be dropped",
 				sessionID, opts.Resume, opts.CWD, opts.ConfigDir)
 			opts.Resume = ""
+			// NO PROOF IS MINTED HERE. The waiver establishes only that THIS
+			// record never spoke; the gate below asks the wider question the
+			// ruling actually turns on — has this WORKSPACE ever had a
+			// conversation — over the same evidence, through the same
+			// function. A handshake-only record in a workspace that has been
+			// talking for a week is not a blank slate, and letting the waiver
+			// mint its own permission is how it would become one.
 		} else {
 			logResumeContinuityFailure(s.logf, "automatic_restore", sessionID, opts, missing)
 			return res, missing
+		}
+	}
+	// THE STRUCTURAL GATE. Every path that reaches a spawn with no --resume
+	// passes through here, because EnsureShim is the daemon's only spawn site:
+	// Server.CreateSession registers the record and hands bring-up to the
+	// controller, which arrives back at this function. A record that names no
+	// conversation is therefore either a workspace that never had one — which
+	// the evidence must SAY, not merely fail to contradict — or a conversation
+	// about to be silently replaced.
+	//
+	// Fake sessions are the one standing exception, on the grounds the resume
+	// gate already waives them for: the scripted offline SDK has no
+	// conversation plane at all, so there is nothing a blank start could
+	// destroy.
+	if opts.Resume == "" && freshProof == nil {
+		if fake {
+			s.logf("server: session %s: no-resume spawn permitted for a FAKE session — the scripted offline SDK has no conversation to lose (cwd=%q)",
+				sessionID, opts.CWD)
+		} else {
+			proof, reason := proveFreshEligible(gatherConversationEvidence(s.reg, rec.ConfigDir, rec.CWD))
+			if proof == nil {
+				s.logf("server: session %s: no-resume spawn REFUSED cwd=%q config_dir=%q — %s",
+					sessionID, rec.CWD, rec.ConfigDir, reason)
+				return res, unresumableConversation(rec.CWD, rec.ConfigDir, reason)
+			}
+			freshProof = proof
+			s.logf("server: session %s: no-resume spawn PERMITTED cwd=%q config_dir=%q — the registry proves this workspace has never run a conversation",
+				sessionID, rec.CWD, rec.ConfigDir)
 		}
 	}
 	if opts.Fake && opts.Resume != "" {
@@ -431,7 +470,7 @@ func (s *ShimSpawner) EnsureShim(ctx context.Context, sessionID string) (session
 	}
 	res.Resumed = opts.Resume
 	s.logf("server: session %s: no live shim — spawning UDS shim (resume=%q fake=%t)", sessionID, opts.Resume, opts.Fake)
-	handle, err := s.spawn(sessionID, opts)
+	handle, err := s.spawnShim(sessionID, opts, freshProof)
 	if err != nil {
 		// The lineage stays on the record: this spawn never announced it, so
 		// the next bring-up still owes it.

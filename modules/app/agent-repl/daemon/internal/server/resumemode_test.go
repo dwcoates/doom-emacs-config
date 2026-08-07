@@ -87,8 +87,10 @@ func TestAnUnspecifiedModeIsTreatedAsContinue(t *testing.T) {
 }
 
 func TestContinueStartsFreshWhenNothingResolves(t *testing.T) {
-	// Arrange — a brand-new workspace has no conversation to continue.
-	resumes := &fakeResumes{}
+	// Arrange — a brand-new workspace has no conversation to continue, and the
+	// registry PROVES it has never run one. That proof, not the resolver's
+	// silence, is what permits the blank start.
+	resumes := &fakeResumes{evidence: conversationEvidence{available: true}}
 
 	// Act
 	sessions, err := createWith(t, resumes, &frontendv1.CreateSessionCmd{
@@ -158,6 +160,71 @@ func TestRetiredFreshResumeModeIsNeverReadAsContinue(t *testing.T) {
 	// Assert
 	if len(resumes.asked) != 0 {
 		t.Fatalf("resolver consulted %d times for a retired mode, want none", len(resumes.asked))
+	}
+}
+
+// TestNothingResolvesAndAConversationExistsIsAHardFault is the ruling's centre:
+// "the resolver named nothing" used to mean "start fresh", and it covered both
+// a brand-new workspace AND a workspace whose every candidate was excluded.
+// Only the first may start fresh.
+func TestNothingResolvesAndAConversationExistsIsAHardFault(t *testing.T) {
+	// Arrange — the resolver excluded every candidate, but the registry proves
+	// a turn ran here.
+	resumes := &fakeResumes{evidence: conversationEvidence{
+		available: true, everRan: true, conversations: []string{"uuid-excluded"},
+	}}
+
+	// Act
+	sessions, err := createWith(t, resumes, &frontendv1.CreateSessionCmd{
+		Cwd: "/w", ConfigDir: "/cfg", ResumeMode: frontendv1.ResumeMode_RESUME_MODE_CONTINUE,
+	})
+
+	// Assert
+	if !errors.Is(err, errclass.ErrConversationUnresumable) {
+		t.Fatalf("err = %v, want errclass.ErrConversationUnresumable", err)
+	}
+	if len(sessions.created) != 0 {
+		t.Fatalf("created = %+v, want no session started over an existing conversation", sessions.created)
+	}
+}
+
+// TestTheUnresumableFaultNamesTheConversationItIsProtecting: a refusal the user
+// cannot act on is a refusal that will be worked around.
+func TestTheUnresumableFaultNamesTheConversationItIsProtecting(t *testing.T) {
+	// Arrange
+	resumes := &fakeResumes{evidence: conversationEvidence{
+		available: true, everRan: true, conversations: []string{"uuid-excluded"},
+	}}
+
+	// Act
+	_, err := createWith(t, resumes, &frontendv1.CreateSessionCmd{
+		Cwd: "/w", ConfigDir: "/cfg", ResumeMode: frontendv1.ResumeMode_RESUME_MODE_CONTINUE,
+	})
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "uuid-excluded") {
+		t.Fatalf("err = %v, want the protected conversation named", err)
+	}
+}
+
+// TestUnavailableEvidenceIsNotPermissionToStartFresh: "I cannot tell" and "I
+// proved it never happened" are different answers, and only the second one may
+// start a blank conversation.
+func TestUnavailableEvidenceIsNotPermissionToStartFresh(t *testing.T) {
+	// Arrange — a resolver that names nothing over evidence that cannot be read.
+	resumes := &fakeResumes{evidence: conversationEvidence{available: false}}
+
+	// Act
+	sessions, err := createWith(t, resumes, &frontendv1.CreateSessionCmd{
+		Cwd: "/w", ConfigDir: "/cfg", ResumeMode: frontendv1.ResumeMode_RESUME_MODE_CONTINUE,
+	})
+
+	// Assert
+	if !errors.Is(err, errclass.ErrConversationUnresumable) {
+		t.Fatalf("err = %v, want unconsultable evidence refused", err)
+	}
+	if len(sessions.created) != 0 {
+		t.Fatalf("created = %+v, want no session on unprovable evidence", sessions.created)
 	}
 }
 
@@ -247,7 +314,7 @@ func TestTheAckReportsTheConversationTheSessionLandedOn(t *testing.T) {
 	// Arrange — the client needs this to attribute its logs before the first
 	// pushed SessionView. An empty value there is accepted by the client-log
 	// validator; a WRONG one is what nacks.
-	resumes := &fakeResumes{observed: "uuid-landed"}
+	resumes := &fakeResumes{observed: "uuid-landed", evidence: conversationEvidence{available: true}}
 	sessions := &fakeSessionCmds{}
 	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, sessions, nil, nil, t.Logf,
 		CommandHandlerConfig{Health: HealthConfig{Router: &probeHealthRouter{healthy: true}}, Resumes: resumes})
