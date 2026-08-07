@@ -148,6 +148,11 @@ type Job struct {
 	// dropped outright when no host client is connected to receive it.
 	MaterializationRequests      int   `json:"materialization_requests,omitempty"`
 	MaterializationLastRequestMs int64 `json:"materialization_last_request_ms,omitempty"`
+	// MaterializationEscalated latches the one report the daemon makes about a
+	// wait that ran past its deadline.  It is durable so a restart cannot
+	// re-report an escalation the user has already been shown, and an
+	// escalation that repeats every sweep is one nobody reads.
+	MaterializationEscalated bool `json:"materialization_escalated,omitempty"`
 }
 
 // PublicationDecision is the durable creation job's verdict about whether a

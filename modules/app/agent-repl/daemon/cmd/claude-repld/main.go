@@ -797,6 +797,7 @@ func main() {
 		Health:         sessionControllerHealthProbe{Controller: controller, Logf: legacyLog},
 		InitialPrompts: controller,
 		Logf:           legacyLog,
+		Errorf:         dlog.LegacyError(daemonLog),
 		InboxInterval:  time.Second,
 	})
 	if err != nil {
