@@ -282,6 +282,13 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 (agent-repl--load-module "emoji")
 (agent-repl--load-module "prevent-select")
 (agent-repl--load-module "close-panels-on-open")
+;; WHY: interaction-record.el depends on core.el alone (the logging
+;; ladder and the state-dir resolver) and is loaded LAST so its
+;; startup env check (`AGENT_REPL_RECORD_INTERACTIONS') arms
+;; `pre-command-hook' only once every other module's own hooks and
+;; advice are installed — a recording that started mid-load would
+;; capture the tail of the module load rather than the user's session.
+(agent-repl--load-module "interaction-record")
 
 ;; Task notes popup: the sidebar's Task view opens each task's org notes
 ;; file (`agent-repl--task-open', tasks.el) in a right-side popup that
