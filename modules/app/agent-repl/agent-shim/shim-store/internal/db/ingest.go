@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	"agentrepl/shim-store/internal/dedup"
@@ -32,6 +33,12 @@ func (d *DB) Ingest(producer string, events []*corev1.Event, cursor *corev1.Curs
 	d.log.LogVerbose(logging.Fields{
 		Operation: "ingest", Producer: producer, Table: "event", Transaction: "BEGIN IMMEDIATE",
 	}, "starting transaction events=%d cursor_advance=%t", len(events), cursor != nil)
+	// The whole transaction is one timed unit: it is a read-then-write under
+	// BEGIN IMMEDIATE, so what an operator needs to see is the interval the
+	// writer lock was held, not one statement inside it. Rows are the events
+	// the batch actually resolved.
+	started := time.Now()
+	defer func() { d.observeQuery(StatementIngest, "event", "", started, int64(res.Accepted+res.Deduped)) }()
 	defer func() {
 		if resultErr != nil {
 			d.log.Log(logging.Fields{
