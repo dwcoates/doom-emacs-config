@@ -880,8 +880,15 @@ export class StateAdapter {
     if (!this.loggedShapes.has(shape)) {
       this.loggedShapes.add(shape);
       const why = UNSUPPORTED_SHAPES.get(shape);
+      // A REGISTERED shape is deliberate: its frame is consumed elsewhere (the
+      // command dispatcher, the Emacs frontend), so nothing the user should
+      // have seen is lost and the note stays a debug breadcrumb. An
+      // UNREGISTERED one is a conversation shape the daemon sent and this end
+      // draws nothing for — content the user is simply missing, with the feed
+      // giving no sign of the gap. That is a degradation and must be findable
+      // by a warning sweep. Either way it is said once per distinct shape.
       this.log(
-        "debug",
+        why === undefined ? "warn" : "debug",
         `state-adapter: ignoring unsupported shape '${shape}' (no webapp ` +
           `visual)${why ? ` — ${why}` : ""}`,
       );
