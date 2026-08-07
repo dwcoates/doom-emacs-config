@@ -14,6 +14,19 @@ import (
 // text; see logging-contract.md.
 const CommandLatencyOperation = "daemon.frontend.command-latency"
 
+// CommandOverdueOperation is the stable operation name for a command still IN
+// FLIGHT past the client's ack deadline.
+//
+// It is deliberately NOT CommandLatencyOperation. A completion record and an
+// "it has not finished" record answer different questions, and an operator
+// counting completions against receipts must not have that count inflated by
+// commands that had merely announced themselves. The overdue record exists so a
+// wedged bring-up is visible WHILE it is wedged: an open_workspace has been
+// observed running for two minutes, and until this record the only evidence was
+// other commands reporting a queue_depth with nothing to attribute it to — and
+// none at all if the daemon exited before the command finished.
+const CommandOverdueOperation = "daemon.frontend.command-overdue"
+
 // targetCommandLatencyRecorder writes one lifecycle-timing record per completed
 // frontend command.
 //
@@ -74,8 +87,23 @@ func (r *targetCommandLatencyRecorder) RecordCommandLatency(sample frontend.Comm
 		event.Level = dlog.LevelWarn
 		event.Message = "frontend command ack exceeded its latency threshold"
 	}
+	// An overdue sample reports a command that has NOT finished. It carries no
+	// verdict and no final processing share, so those two keys are replaced by
+	// the one fact it does have — how long the command has been running — and
+	// it is always normal/warn: an unfinished command past the client's
+	// deadline is exactly what an operator must see without verbose mode.
+	if sample.Overdue {
+		event.Operation = CommandOverdueOperation
+		event.Level = dlog.LevelWarn
+		event.Message = "frontend command still in flight past the client ack deadline"
+		delete(event.Context, "processing_ms")
+		delete(event.Context, "ok")
+		delete(event.Context, "duration_ms")
+		event.Context["elapsed_ms"] = sample.Ack.Milliseconds()
+	}
+	loud := sample.Slow() || sample.Overdue
 	if sample.Workspace == "" {
-		return r.emitGlobal(event, sample.Slow())
+		return r.emitGlobal(event, loud)
 	}
 	workspace, err := dlog.WorkspaceFromDirectory(sample.Workspace)
 	if err != nil {
@@ -85,7 +113,7 @@ func (r *targetCommandLatencyRecorder) RecordCommandLatency(sample frontend.Comm
 	if err != nil {
 		return fmt.Errorf("server: open command latency workspace logger for %q: %w", workspace.Directory, err)
 	}
-	if sample.Slow() {
+	if loud {
 		return logger.EmitWorkspaceNormal(workspace, event)
 	}
 	return logger.EmitWorkspaceVerbose(workspace, event)

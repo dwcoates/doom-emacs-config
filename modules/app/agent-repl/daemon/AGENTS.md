@@ -75,8 +75,26 @@ thinking" or infer session-controller liveness from persisted session fields.
   ack deadline) is `warn`/`normal`, so a slow ack is visible without verbose
   mode and before the client's own deadline expires. A malformed value aborts
   boot.
+- The completion record is written from a DEFERRED settle on the command's
+  ticket (`internal/frontend/ticket.go`), so it happens on every exit from the
+  dispatch — success, nack, connection-teardown drain, or a panic unwinding out
+  of a handler (which still propagates). The same settle releases the in-flight
+  gauge, so `queue_depth` cannot leak past a non-local exit. Settling is
+  idempotent: exactly one completion record per received command.
+- A command still IN FLIGHT past the client's ack deadline emits
+  `daemon.frontend.command-overdue` at `warn`/`normal` — a separate operation,
+  so a census of completions is never inflated by one. It carries `command`,
+  `client_kind`, `workspace`, `queue_depth`, `elapsed_ms`, `ack_deadline_ms`
+  and `threshold_ms`, and deliberately omits `ok` and `processing_ms`: an
+  unfinished command has neither. It does not release the gauge, and the
+  command's own completion record still follows when it finishes. This is how a
+  wedged bring-up is visible while it is wedged rather than only in retrospect,
+  or not at all if the daemon exits first.
 - A command that names a workspace is workspace-owned; only the genuinely
-  workspace-less commands reach the global service log.
+  workspace-less commands reach the global service log. An `open_workspace`
+  record therefore lands in THAT WORKSPACE's `daemon.log`, never in
+  `~/.claude-emacs/claude-repld.log` — a completion census run against the
+  global log alone will always appear to be missing every workspace command.
 - `-pprof` (default `AGENT_REPL_PPROF_ADDR`) opens the OPT-IN Go profiling
   surface: a unix socket path, or an explicitly loopback `host:port`. Empty is
   OFF and is the default — there is no always-on listener, and a wildcard or
