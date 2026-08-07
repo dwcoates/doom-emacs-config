@@ -568,17 +568,41 @@ func (r *turnAccountingReducer) resolveTurn(turnID string, settledAt int64) *fro
 	return accounting
 }
 
+// ErrAccountingCommitUnknownTurn marks a terminal accounting commit naming a
+// turn this reducer holds no unsettled ledger entry for.
+//
+// IT USED TO BE A PANIC, and a panic is the wrong shape for it. The condition
+// is reachable from ordinary DATA — two legitimate release authorities naming
+// the same turn (a synthesized close and a teardown, each snapshotting the held
+// set before the other discharged it), or a replayed historical turn whose
+// accounting was settled and retired by an earlier generation. Killing the
+// daemon process on either one turns a bookkeeping collision into an outage
+// that recurs on every boot that replays the same rows. The invariant is not
+// weakened: the condition still travels as an error and is still recorded
+// LOUDLY through the consumer's WARN channel by the settlement path that owns
+// it. See consumer.settleTurnAccounting.
+var ErrAccountingCommitUnknownTurn = errors.New("session-controller: turn accounting commit names unknown turn")
+
+// hasTurn reports whether the reducer still holds an unsettled ledger entry for
+// turnID. A settled turn is retired by commitResolved, so a false answer means
+// "already settled, or never admitted" — the two cases the settlement path must
+// serve from the durable store rather than recompute.
+func (r *turnAccountingReducer) hasTurn(turnID string) bool {
+	return r.turns[turnID] != nil
+}
+
 // commitResolved retires reducer memory only after the durable terminal
 // accounting transaction succeeds. A persistence failure therefore leaves the
 // complete turn available for the replayed TurnEnded to resolve again.
-func (r *turnAccountingReducer) commitResolved(turnID string) {
+func (r *turnAccountingReducer) commitResolved(turnID string) error {
 	if r.turns[turnID] == nil {
-		panic(fmt.Sprintf("turn accounting commit names unknown turn %q", turnID))
+		return fmt.Errorf("%w %q", ErrAccountingCommitUnknownTurn, turnID)
 	}
 	delete(r.turns, turnID)
 	if r.activeTurnID == turnID {
 		r.activeTurnID = ""
 	}
+	return nil
 }
 
 func (r *turnAccountingReducer) response(apiMessageID string) *frontendv1.TokenUtilization {

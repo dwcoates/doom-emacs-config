@@ -94,6 +94,13 @@ func (p *fakePusher) lastQueue() *frontendv1.QueueView {
 	return p.queues[len(p.queues)-1]
 }
 
+// conversationDeltas returns every conversation push in push order.
+func (p *fakePusher) conversationDeltas() []*frontendv1.ConversationDelta {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]*frontendv1.ConversationDelta(nil), p.convo...)
+}
+
 // permissionResolutions extracts, in push order, the resolution of every
 // permission ConversationItem keyed by uuid across the recorded deltas.
 func (p *fakePusher) permissionResolutions(uuid string) []corev1.PermissionItem_Resolution {
