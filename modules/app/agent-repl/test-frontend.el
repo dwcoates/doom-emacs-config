@@ -1868,3 +1868,38 @@ VAR is bound to a list in reverse call order."
   "The raw execute-script wrapper is registered as an external boundary."
   (should (memq 'agent-repl--frontend-webview-execute-script-1
                 agent-repl--external-boundary-functions)))
+
+;;;; ---- snap-webview-to-tail skip-record routing ----
+
+(ert-deftest agent-repl-test-frontend-snap-skip-for-a-placeholder-logs-globally ()
+  "Snapping a persp PLACEHOLDER's absent webview records globally.
+The workspace-switch path snaps whatever perspective persp-mode activated,
+and \"main\"/\"none\" have neither a webview nor a durable log sink."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((logged 'no-record))
+      (cl-letf (((symbol-function 'agent-repl--log-verbose)
+                 (lambda (ws &rest _)
+                   (when (eq logged 'no-record) (setq logged ws)))))
+        ;; Act
+        (agent-repl--frontend-snap-webview-to-tail "main"))
+      ;; Assert
+      (should (null logged)))))
+
+(ert-deftest agent-repl-test-frontend-snap-skip-for-a-routable-ws-keeps-attribution ()
+  "A REAL workspace's snap-skip record stays attributed to that workspace."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((project (make-temp-file "agent-repl-snap-route-" t))
+          (logged 'no-record))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "ws1" :project-dir project)
+            (cl-letf (((symbol-function 'agent-repl--log-verbose)
+                       (lambda (ws &rest _)
+                         (when (eq logged 'no-record) (setq logged ws)))))
+              ;; Act
+              (agent-repl--frontend-snap-webview-to-tail "ws1")))
+        (delete-directory project t))
+      ;; Assert
+      (should (equal logged "ws1")))))

@@ -2539,5 +2539,32 @@ must keep seeing what persp-mode actually says."
       (should-not saved)
       (should (agent-repl--ws-get "ws" :project-dir)))))
 
+;;;; ---- ws-log-name screens a caller-supplied name ----
+
+(ert-deftest agent-repl-test-workspace-ws-log-name-demotes-a-persp-placeholder ()
+  "A persp-mode placeholder name resolves to the global sink.
+\"main\" and \"none\" are real perspectives that are not agent-repl
+workspaces, so they own no `:project-dir' and no durable log sink."
+  (agent-repl-test--with-clean-state
+    ;; Arrange / Act
+    (let ((resolved (agent-repl--ws-log-name "main")))
+      ;; Assert
+      (should (null resolved)))))
+
+(ert-deftest agent-repl-test-workspace-ws-log-name-keeps-a-registered-workspace ()
+  "A workspace that owns a sink is returned unchanged.
+The screen must only demote names that could not be routed at all."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((project (make-temp-file "agent-repl-log-name-" t)))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "ws1" :project-dir project)
+            ;; Act
+            (let ((resolved (agent-repl--ws-log-name "ws1")))
+              ;; Assert
+              (should (equal resolved "ws1"))))
+        (delete-directory project t)))))
+
 (provide 'test-workspace)
 ;;; test-workspace.el ends here
