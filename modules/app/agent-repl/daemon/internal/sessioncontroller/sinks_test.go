@@ -226,6 +226,14 @@ type fakeApplier struct {
 	// staleTurnCloseHook runs after a close is recorded, so a test can move the
 	// resolved state the way a real closing row does.
 	staleTurnCloseHook func(workspace string)
+	// orphanedTurnCloses records one entry per CloseOrphanedTurn call — the
+	// workspace-scoped reconciliation of a turn no live party can end. It is
+	// kept apart from staleTurnCloses because the two carry different proofs and
+	// retire different ledgers.
+	orphanedTurnCloses    []orphanedTurnCloseCall
+	orphanedTurnClosed    bool
+	orphanedTurnErr       error
+	orphanedTurnCloseHook func(workspace string)
 	// mergeLeases names the workspaces merge.Coordinator holds the exclusivity
 	// lease on. Empty is the ordinary case: no merge is running.
 	mergeLeases map[string]bool
@@ -662,6 +670,40 @@ func (f *fakeApplier) CloseStaleTurn(workspace, sessionID, reason string, soleSe
 		hook(workspace)
 	}
 	return closed, err
+}
+
+// orphanedTurnCloseCall is one workspace-scoped orphan reconciliation the
+// session controller asked the SSM for.
+type orphanedTurnCloseCall struct {
+	workspace string
+	sessionID string
+	reason    string
+}
+
+// CloseOrphanedTurn records the orphan reconciliation. The zero value answers
+// "there was nothing stale to reconcile"; a test exercising it sets
+// orphanedTurnClosed or orphanedTurnErr. orphanedTurnCloseHook runs after the
+// call is recorded and OUTSIDE the fake's lock, so it can move the resolved
+// state the way a real reconciliation does.
+func (f *fakeApplier) CloseOrphanedTurn(workspace, sessionID, reason string) (bool, error) {
+	f.reconcMutex.Lock()
+	f.orphanedTurnCloses = append(f.orphanedTurnCloses, orphanedTurnCloseCall{
+		workspace: workspace, sessionID: sessionID, reason: reason,
+	})
+	closed, err, hook := f.orphanedTurnClosed, f.orphanedTurnErr, f.orphanedTurnCloseHook
+	f.reconcMutex.Unlock()
+	if hook != nil {
+		hook(workspace)
+	}
+	return closed, err
+}
+
+// orphanedTurnClosesApplied returns the recorded orphan reconciliations, taken
+// under the lock so a session controller goroutine cannot race the read.
+func (f *fakeApplier) orphanedTurnClosesApplied() []orphanedTurnCloseCall {
+	f.reconcMutex.Lock()
+	defer f.reconcMutex.Unlock()
+	return append([]orphanedTurnCloseCall(nil), f.orphanedTurnCloses...)
 }
 
 // staleTurnClosesApplied returns the recorded teardown axis closes, taken under
