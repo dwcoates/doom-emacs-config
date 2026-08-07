@@ -8,13 +8,124 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"google.golang.org/protobuf/encoding/protojson"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/frontend/rostertest"
 )
+
+// --- the publication's cost -------------------------------------------------
+
+// THE REGRESSION THIS SUITE'S BENCHMARK EXISTS FOR.
+//
+// A roster publication's own work is microseconds, but in production one cost
+// 6957ms of ack latency at boot, ALL of it inside the publication's final log
+// call. The daemon's terminal mirror is a pty Emacs reads, Emacs stops reading
+// while it boots, and the blocked mirror write held the durable sink's mutex
+// that every other emitter — including this verbose record, which never reaches
+// the terminal at all — has to take. The ack means COMPLETION (lanes.go), so
+// the publisher waited out Emacs's own startup for a publication that had
+// already been retained and fanned out.
+//
+// The publication must therefore complete while the terminal consumes nothing.
+func TestARosterPublicationDoesNotWaitOnABlockedTerminalMirror(t *testing.T) {
+	// Arrange.
+	terminal := newBlockedTerminal()
+	sink := dlog.NewTerminalSink(terminal, 0)
+	logger := dlog.New(discardSyncWriter{}, sink, false)
+	h := &mockHandler{}
+	s := New(Config{
+		Logf:        dlog.Legacy(logger),
+		LogVerbosef: logger.LogVerbose,
+		State:       staticState{snap: &frontendv1.StateSnapshot{}},
+		Handler:     h,
+	})
+	// A NORMAL record parks the drain goroutine inside the blocked terminal
+	// write, which is exactly the state a booting Emacs leaves it in.
+	logger.Log("frontend: a normal record the terminal has not consumed")
+	<-terminal.entered
+
+	// Act.
+	acked := make(chan *frontendv1.CommandAck, 1)
+	go func() {
+		acked <- Dispatch(context.Background(), dlog.Legacy(logger), h, s,
+			publishRosterCmd("r-blocked", rostertest.FleetRoster(testBootID, 1, rostertest.FleetRosterWorkspaces)))
+	}()
+
+	// Assert.
+	select {
+	case ack := <-acked:
+		if !ack.GetOk() {
+			t.Fatalf("publish behind a blocked terminal nacked: %s", ack.GetError())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a roster publication waited on a terminal mirror it does not write to; the durable sink is coupled to the terminal's reader again")
+	}
+	close(terminal.release)
+	if err := sink.Close(); err != nil {
+		t.Fatalf("close terminal sink: %v", err)
+	}
+}
+
+// The publication a blocked terminal cannot delay is also the publication a
+// draining terminal produces: same retained roster, same delivered frame.
+func TestARosterPublicationDeliversTheSameFrameWhateverTheTerminalIsDoing(t *testing.T) {
+	tests := []struct {
+		name    string
+		blocked bool
+	}{
+		{name: "a terminal that drains", blocked: false},
+		{name: "a terminal that consumes nothing", blocked: true},
+	}
+	published := rostertest.FleetRoster(testBootID, 1, rostertest.FleetRosterWorkspaces)
+	want, err := protojson.Marshal(WorkspaceRosterFrame(published))
+	if err != nil {
+		t.Fatalf("marshal expectation: %v", err)
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			terminal := newBlockedTerminal()
+			if !tt.blocked {
+				close(terminal.release)
+			}
+			sink := dlog.NewTerminalSink(terminal, 0)
+			logger := dlog.New(discardSyncWriter{}, sink, false)
+			s := New(Config{
+				Logf:        dlog.Legacy(logger),
+				LogVerbosef: logger.LogVerbose,
+				State:       staticState{snap: &frontendv1.StateSnapshot{}},
+				Handler:     &mockHandler{},
+			})
+			cl := newClient(8, nil, ClientKindHost)
+			s.clients[cl] = struct{}{}
+
+			// Act.
+			if err := s.PublishWorkspaceRoster(published); err != nil {
+				t.Fatalf("publish: %v", err)
+			}
+
+			// Assert.
+			got := mustPop(t, cl)
+			if string(got) != string(want) {
+				t.Fatalf("delivered frame = %s\nwant %s", got, want)
+			}
+			if s.roster != published {
+				t.Fatal("the retained roster is not the published one")
+			}
+			if tt.blocked {
+				close(terminal.release)
+			}
+			if err := sink.Close(); err != nil {
+				t.Fatalf("close terminal sink: %v", err)
+			}
+		})
+	}
+}
 
 // testBootID is the publisher epoch every single-epoch test publishes under.
 // Tests that care about the epoch boundary name their own ids instead.
@@ -83,6 +194,35 @@ func TestTheSharedRosterFixtureSatisfiesTheValidator(t *testing.T) {
 			if err != nil {
 				t.Fatalf("the shared roster fixture no longer satisfies validateRoster: %v\n"+
 					"the validator was tightened without amending rostertest.ValidRoster; amend the fixture in one place and every suite follows", err)
+			}
+		})
+	}
+}
+
+// The FLEET fixture is held to the same standard as the contract fixture: the
+// publication benchmark measures a roster the daemon would really accept, so a
+// tightened validator must fail here rather than leave the guard measuring an
+// illegal shape.
+func TestTheFleetRosterFixtureSatisfiesTheValidator(t *testing.T) {
+	tests := []struct {
+		name       string
+		workspaces int
+	}{
+		{name: "an empty fleet", workspaces: 0},
+		{name: "the benchmark's fleet", workspaces: rostertest.FleetRosterWorkspaces},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			roster := rostertest.FleetRoster(testBootID, 1, tt.workspaces)
+
+			// Act.
+			err := validateRoster(roster)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("the fleet roster fixture no longer satisfies validateRoster: %v\n"+
+					"the validator was tightened without amending rostertest.FleetRoster; the publication benchmark would measure a roster the daemon refuses", err)
 			}
 		})
 	}

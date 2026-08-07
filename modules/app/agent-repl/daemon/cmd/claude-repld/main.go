@@ -299,7 +299,38 @@ func main() {
 	// bound between restarts.
 	cappedLog := replog.NewCappedWriter(logRoot, logFile, replog.CapBytes)
 	defer cappedLog.Close()
-	daemonLog := dlog.New(cappedLog, os.Stderr, os.Getenv("AGENT_REPL_LOG_VERBOSE") != "")
+	// THE TERMINAL MIRROR IS DECOUPLED FROM THE DAEMON'S CRITICAL PATH.
+	//
+	// In production this process is a child of Emacs and stderr is a pty Emacs
+	// drains from its process filter. While Emacs is busy — its whole startup,
+	// which is also when the daemon logs hardest — that pty stops being read,
+	// its kernel buffer fills, and a synchronous terminal write blocks for as
+	// long as Emacs stays busy. It used to block holding the durable sink's
+	// mutex, which put every other emitter behind it, and the daemon logs on
+	// the critical path of every frontend command: one boot's roster publish
+	// spent 6957ms of its 6957ms ack inside a single log call for exactly that
+	// reason. TerminalSink queues the mirror line and returns, so the durable
+	// sink — which is authoritative and fast — is never held hostage by
+	// whoever owns the terminal. Nothing is dropped and no failure is
+	// swallowed; see dlog/terminal.go.
+	//
+	// ONE sink is shared by every logger so the mirror keeps a single FIFO
+	// order across the daemon log, the workspace logs and the forwarded runtime
+	// logs, and its Close is registered first so it flushes LAST.
+	logTerminal := dlog.NewTerminalSink(os.Stderr, dlog.DefaultTerminalBufferBytes)
+	defer func() {
+		if err := logTerminal.Close(); err != nil {
+			// A mirror failure is latched and already reported to whichever
+			// emitter met it during the run; this is the backstop for one that
+			// happened with no emitter left to tell. It is recorded through a
+			// logger writing to the still-open durable sink and to the real
+			// stderr, because the queued mirror is exactly what just failed.
+			dlog.New(cappedLog, os.Stderr, true).
+				With("operation", "daemon.logging.terminal-mirror-failure").
+				LogError("claude-repld: terminal log mirror failed: %v", err)
+		}
+	}()
+	daemonLog := dlog.New(cappedLog, logTerminal, os.Getenv("AGENT_REPL_LOG_VERBOSE") != "")
 	defer logDaemonProcessExit(daemonLog)
 	targets := dlog.NewTargetManager()
 	defer func() {
@@ -308,7 +339,7 @@ func main() {
 		}
 	}()
 	stopWorkspaceLogMaintenance := startWorkspaceLogMaintenance(
-		targets, daemonLog, os.Stderr, os.Getenv("AGENT_REPL_LOG_VERBOSE") != "",
+		targets, daemonLog, logTerminal, os.Getenv("AGENT_REPL_LOG_VERBOSE") != "",
 	)
 	defer stopWorkspaceLogMaintenance()
 	legacyLog := dlog.Legacy(daemonLog)
@@ -599,7 +630,7 @@ func main() {
 	// persistence fails; a second plaintext stderr line would duplicate the
 	// error and violate the all-JSON logging contract.
 	spawnEvent := func(level dlog.Level, workspace dlog.Workspace, sessionID, message string, context map[string]any) {
-		workspaceLog, err := targets.OpenWorkspaceLogger(workspace, os.Stderr, os.Getenv("AGENT_REPL_LOG_VERBOSE") != "")
+		workspaceLog, err := targets.OpenWorkspaceLogger(workspace, logTerminal, os.Getenv("AGENT_REPL_LOG_VERBOSE") != "")
 		if err != nil {
 			panic(fmt.Sprintf("claude-repld: open daemon workspace logger for %q: %v", workspace.Directory, err))
 		}
@@ -619,11 +650,11 @@ func main() {
 		ExtraArgv:  extraShimArgv,
 		ExtraEnv:   func(opts server.CreateOpts) []string { return server.ShimEnv(opts, *addr) },
 		Logger: func(workspace dlog.Workspace, sessionID string) shim.Logger {
-			workspaceLog, logErr := targets.OpenWorkspaceLogger(workspace, os.Stderr, os.Getenv("AGENT_REPL_LOG_VERBOSE") != "")
+			workspaceLog, logErr := targets.OpenWorkspaceLogger(workspace, logTerminal, os.Getenv("AGENT_REPL_LOG_VERBOSE") != "")
 			if logErr != nil {
 				panic(fmt.Sprintf("claude-repld: open daemon workspace logger for %q: %v", workspace.Directory, logErr))
 			}
-			return &udsShimLogger{workspace: workspace, daemon: workspaceLog, terminal: os.Stderr, sessionID: sessionID}
+			return &udsShimLogger{workspace: workspace, daemon: workspaceLog, terminal: logTerminal, sessionID: sessionID}
 		},
 		Event: spawnEvent,
 		Spawned: func(s server.SpawnedShim) {
@@ -661,7 +692,7 @@ func main() {
 	// shimclient replay high-water) and newest_clear_or_compact_seq (the
 	// frontend replay floor).
 	seqStore := server.NewRegistrySeqStore(sessionRegistry, legacyLog)
-	fileDiagnostics, err := server.NewTargetFileDiagnosticPersister(targets, os.Stderr, os.Getenv("AGENT_REPL_LOG_VERBOSE") != "")
+	fileDiagnostics, err := server.NewTargetFileDiagnosticPersister(targets, logTerminal, os.Getenv("AGENT_REPL_LOG_VERBOSE") != "")
 	if err != nil {
 		daemonFatal(daemonLog, "claude-repld: build sidecar diagnostic persister: %v", err)
 	}
@@ -872,7 +903,7 @@ func main() {
 	clientLogs, err := server.NewTargetClientLogWriter(
 		targets,
 		&server.RegistryClientLogIdentityResolver{Reg: sessionRegistry},
-		os.Stderr,
+		logTerminal,
 		os.Getenv("AGENT_REPL_LOG_VERBOSE") != "",
 	)
 	if err != nil {
@@ -887,7 +918,7 @@ func main() {
 		daemonFatal(daemonLog, "claude-repld: %v", err)
 	}
 	commandLatency, err := server.NewTargetCommandLatencyRecorder(
-		targets, daemonLog, os.Stderr, os.Getenv("AGENT_REPL_LOG_VERBOSE") != "",
+		targets, daemonLog, logTerminal, os.Getenv("AGENT_REPL_LOG_VERBOSE") != "",
 	)
 	if err != nil {
 		daemonFatal(daemonLog, "claude-repld: build command latency recorder: %v", err)
