@@ -2529,6 +2529,68 @@ roster is at least as large as the on-disk one."
               (should (= 2 (length data)))))
         (delete-file snapshot-file)))))
 
+;;;; ---- Tests: roster durability for daemon-materialized workspaces ----
+
+(ert-deftest agent-repl-cmd-test-persist-materialized/appears-in-snapshot ()
+  "A workspace materialized into a running session lands in the roster file.
+Materialization starts no session, so it never reaches the
+`--state-save' piggyback that writes the roster for a normally-opened
+workspace; the persist helper is what keeps it from existing only in
+memory until the next Emacs restart drops it."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--snapshot-loaded-p t))
+      (agent-repl--ws-put "existing" :project-dir "/tmp/existing")
+      (agent-repl--ws-put "materialized" :project-dir "/tmp/materialized")
+      (agent-repl--snapshot-persist-materialized-workspace "materialized")
+      (let ((data (plist-get (agent-repl--read-workspace-snapshot
+                              agent-repl-workspace-snapshot-file)
+                             :workspaces)))
+        (should (equal (plist-get (cdr (assoc "materialized" data)) :project-dir)
+                       "/tmp/materialized"))))))
+
+(ert-deftest agent-repl-cmd-test-persist-materialized/closed-workspace-stays-absent ()
+  "A workspace closed after materialization is not written back by a later save."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--snapshot-loaded-p t))
+      (agent-repl--ws-put "keeper" :project-dir "/tmp/keeper")
+      (agent-repl--ws-put "closed" :project-dir "/tmp/closed")
+      (agent-repl--snapshot-persist-materialized-workspace "closed")
+      (remhash "closed" agent-repl--workspaces)
+      (agent-repl--snapshot-persist-materialized-workspace "keeper")
+      (let ((data (plist-get (agent-repl--read-workspace-snapshot
+                              agent-repl-workspace-snapshot-file)
+                             :workspaces)))
+        (should-not (assoc "closed" data))))))
+
+(ert-deftest agent-repl-cmd-test-flush-materialized-pending/boot-resume-appears ()
+  "A boot-resume materialization joins the roster once the loader finishes.
+The daemon replays `WorkspaceAvailable' while the startup loader is
+still walking the on-disk roster, so the immediate save is refused (the
+live hash is smaller than the file it would clobber).  The parked name
+is what makes the loader's finish settle that debt."
+  (agent-repl-test--with-clean-state
+    (agent-repl--write-sexp-file agent-repl-workspace-snapshot-file
+                                 '(("restored-a" :project-dir "/tmp/restored-a")
+                                   ("restored-b" :project-dir "/tmp/restored-b")))
+    ;; Loader still running: only the resumed workspace is live so far.
+    (agent-repl--ws-put "resumed" :project-dir "/tmp/resumed")
+    (agent-repl--snapshot-persist-materialized-workspace "resumed")
+    (should (equal agent-repl--snapshot-materialized-pending '("resumed")))
+    (should-not (assoc "resumed"
+                       (plist-get (agent-repl--read-workspace-snapshot
+                                   agent-repl-workspace-snapshot-file)
+                                  :workspaces)))
+    ;; Loader finished: the restored entries are live and the debt settles.
+    (agent-repl--ws-put "restored-a" :project-dir "/tmp/restored-a")
+    (agent-repl--ws-put "restored-b" :project-dir "/tmp/restored-b")
+    (let ((agent-repl--snapshot-loaded-p t))
+      (agent-repl--snapshot-flush-materialized-pending))
+    (let ((data (plist-get (agent-repl--read-workspace-snapshot
+                            agent-repl-workspace-snapshot-file)
+                           :workspaces)))
+      (should (equal (plist-get (cdr (assoc "resumed" data)) :project-dir)
+                     "/tmp/resumed")))))
+
 ;;;; ---- Tests: snapshot save/load preserves tab-bar order ----
 
 (ert-deftest agent-repl-cmd-test-collect-snapshot-entries/orders-by-persp-cache ()
@@ -3532,6 +3594,11 @@ Older entries (lexicographically earliest filenames) are pruned."
         (when (and dir (not (file-directory-p dir))) (make-directory dir t)))
       (with-temp-file agent-repl-workspace-snapshot-file
         (insert "((\"prior\" :project-dir \"/tmp/p\" :priority nil))"))
+      ;; One live workspace against the one on-disk entry, so
+      ;; `--snapshot-save-safe-p' permits the write this test needs the
+      ;; archival to ride on.  Without it the save aborts and the
+      ;; assertions below silently measure an archival that never ran.
+      (agent-repl--ws-put "ws" :project-dir "/tmp/ws")
       (agent-repl-save-workspace-snapshot)
       ;; After pruning, only the two newest entries remain.  The new
       ;; archive (named after live file's mtime) is one of them; the
