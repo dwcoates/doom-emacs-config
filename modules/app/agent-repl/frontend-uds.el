@@ -135,7 +135,8 @@ matching ack lands.  Each value plist carries `:field' (the command oneof
 name), `:workspace', and an optional `:on-failure' (a function of one
 arg, the error string, run when the ack reports failure — in addition to
 the loud log + echo).  Each value also carries `:deadline-timer', the
-ack-aging alarm armed at registration.")
+ack-aging alarm armed at registration, and an optional `:on-timeout'
+consulted by `agent-repl--uds-command-deadline-expired'.")
 
 (defvar agent-repl--uds-timed-out-commands (make-hash-table :test 'equal)
   "Hash of request_id -> plist for commands whose ack deadline expired.
@@ -883,7 +884,7 @@ Combines a monotonic counter with a random suffix.  Isolated so tests
 
 (cl-defun agent-repl--uds-send-command (field payload &optional workspace process
                                               &key on-failure on-success on-challenge
-                                              on-registered)
+                                              on-timeout on-registered)
   "Send a `FrontendCommand' selecting oneof arm FIELD with PAYLOAD.
 FIELD is the protojson command name (e.g. \"submitPrompt\"); it must be
 one of `agent-repl--uds-known-command-fields'.  PAYLOAD is the plist for
@@ -893,8 +894,8 @@ message object `{}' (for `closeWorkspace'/`openWorkspace').  WORKSPACE,
 when non-nil, is set as the frame's `workspace' field.  PROCESS defaults
 to the live connection.
 
-ON-FAILURE, ON-SUCCESS and ON-CHALLENGE are the ack callbacks documented
-on `agent-repl--uds-register-pending-command'.
+ON-FAILURE, ON-SUCCESS, ON-CHALLENGE and ON-TIMEOUT are the ack callbacks
+documented on `agent-repl--uds-register-pending-command'.
 
 ON-REGISTERED, when non-nil, is a function of one argument (the
 `request_id') run after the pending entry exists and BEFORE the frame is
@@ -978,7 +979,8 @@ command through its tracked callbacks instead of aging out.  Returns
         ;; This is the sole registration point, and the write below is the
         ;; sole caller-reachable path to the socket.
         (agent-repl--uds-register-pending-command
-         request-id field workspace on-failure on-success on-challenge)
+         request-id field workspace on-failure on-success on-challenge
+         on-timeout)
         (when on-registered
           (condition-case err
               (funcall on-registered request-id)
@@ -1057,6 +1059,28 @@ sentinel instead of a real timer object."
     (when (timerp timer)
       (cancel-timer timer))))
 
+(defun agent-repl--uds-command-superseded-p (request-id field workspace on-timeout)
+  "Ask ON-TIMEOUT whether losing REQUEST-ID still matters.
+
+Returns non-nil only when the sender answers that the lost command has
+already been SUPERSEDED by a newer one carrying the same state — the
+publish-latest-wins shape, where surfacing the loss would report a
+divergence that no longer exists.  FIELD and WORKSPACE are log context.
+
+Nil ON-TIMEOUT, or a callback that signals, both mean NOT superseded: the
+loss is surfaced exactly as it was before.  A sender whose supersede
+verdict errored has told us nothing, and \"nothing\" must never be read as
+\"harmless\" (No-Silent-Fallbacks) — the callback's own failure is logged
+loudly on top of the command's."
+  (when on-timeout
+    (condition-case cb-err
+        (funcall on-timeout request-id)
+      (error
+       (agent-repl--log workspace
+                        "uds-ack-deadline: on-timeout callback ERROR request-id=%s field=%s error-type=%s — treating the loss as unsuperseded"
+                        request-id field (car cb-err))
+       nil))))
+
 (defun agent-repl--uds-command-deadline-expired (request-id)
   "Declare REQUEST-ID lost: no `CommandAck' arrived within the deadline.
 
@@ -1068,7 +1092,14 @@ a command they issued went nowhere.
 The tracked callbacks are NOT run.  `:on-failure' means \"the daemon
 rejected this\", and a command that was never answered was never rejected;
 inventing a rejection would hand callers a verdict the daemon never
-reached.
+reached.  The one exception is `:on-timeout', which is not a verdict but a
+QUESTION back to the sender: has this command already been superseded?  A
+sender that publishes a latest-wins snapshot (the sidebar roster) answers
+yes when a newer publish has since gone out, and the loss is then logged
+without a failure card or a link degrade — a superseded frame's
+non-arrival changes nothing about what the daemon holds.  Every other
+command, and a superseded-question answered no, takes the unchanged loud
+path.
 
 A request-id already settled between the alarm firing and this body
 running is not lost at all, and is recorded only in the verbose trace."
@@ -1079,7 +1110,8 @@ running is not lost at all, and is recorded only in the verbose trace."
          request-id)
       (let* ((field (plist-get pending :field))
              (raw-workspace (plist-get pending :workspace))
-             (workspace (agent-repl--frontend-ws-name raw-workspace)))
+             (workspace (agent-repl--frontend-ws-name raw-workspace))
+             (on-timeout (plist-get pending :on-timeout)))
         (remhash request-id agent-repl--uds-pending-commands)
         (puthash request-id (list :field field :workspace raw-workspace)
                  agent-repl--uds-timed-out-commands)
@@ -1088,21 +1120,41 @@ running is not lost at all, and is recorded only in the verbose trace."
          "uds-ack-deadline: UNACKED request-id=%s field=%s ws=%s deadline=%ss — command lost, callbacks abandoned"
          request-id field (or raw-workspace "none")
          agent-repl-uds-command-ack-deadline)
-        (agent-repl--uds-link-degrade request-id field workspace)
-        (agent-repl-failure-surface
-         workspace
-         (agent-repl-failure-local
-          "client.command_unacked"
-          (format "the daemon never acknowledged the %s command; the daemon link is degraded"
-                  (or field "frontend"))
-          (format "request-id=%s workspace=%s deadline=%ss"
-                  request-id (or raw-workspace "none")
-                  agent-repl-uds-command-ack-deadline)))
+        ;; Asked AFTER the entry has moved, so a sender that responds by
+        ;; sending its replacement frame cannot see this one as pending.
+        (if (agent-repl--uds-command-superseded-p request-id field workspace
+                                                  on-timeout)
+            (agent-repl--log
+             workspace
+             "uds-ack-deadline: SUPERSEDED request-id=%s field=%s ws=%s — a newer %s replaced it; no failure opened, link health untouched"
+             request-id field (or raw-workspace "none") (or field "command"))
+          (agent-repl--uds-link-degrade request-id field workspace)
+          (agent-repl-failure-surface
+           workspace
+           (agent-repl-failure-local
+            "client.command_unacked"
+            (format "the daemon never acknowledged the %s command; the daemon link is degraded"
+                    (or field "frontend"))
+            (format "request-id=%s workspace=%s deadline=%ss"
+                    request-id (or raw-workspace "none")
+                    agent-repl-uds-command-ack-deadline))))
         request-id))))
+
+(defun agent-repl--uds-command-pending-p (request-id)
+  "Return non-nil while REQUEST-ID is still awaiting its `CommandAck'.
+
+The transport's own record is the authority on whether a command is in
+flight, so a sender that keeps its own in-flight marker (the sidebar's
+roster coalescer) can reconcile against this rather than trust a flag it
+might have missed clearing on some settle path."
+  (and request-id
+       (gethash request-id agent-repl--uds-pending-commands)
+       t))
 
 (defun agent-repl--uds-register-pending-command (request-id field workspace
                                                            on-failure on-success
-                                                           on-challenge)
+                                                           on-challenge
+                                                           &optional on-timeout)
   "Record REQUEST-ID as an in-flight FIELD command for WORKSPACE.
 Pends until its `CommandAck' arrives (see
 `agent-repl--uds-handle-command-ack').  ON-FAILURE, when non-nil, is a
@@ -1121,6 +1173,10 @@ Registration also ARMS an ack-aging alarm for
 `agent-repl--uds-run-timer' seam, so this is one scheduled alarm per
 command rather than any polling).  If the ack has not landed by then,
 `agent-repl--uds-command-deadline-expired' declares the command lost.
+ON-TIMEOUT, when non-nil, is a function of one argument (the request id)
+that alarm consults: a non-nil return declares the lost command
+SUPERSEDED by a newer one and suppresses the failure card and the link
+degrade for it alone (see `agent-repl--uds-command-superseded-p').
 
 PRIVATE TO `agent-repl--uds-send-command', which is the only caller and
 runs this before the frame reaches the socket.  It is deliberately NOT a
@@ -1132,7 +1188,7 @@ prevent.  Returns REQUEST-ID."
   (puthash request-id
            (list :field field :workspace workspace
                  :on-failure on-failure :on-success on-success
-                 :on-challenge on-challenge
+                 :on-challenge on-challenge :on-timeout on-timeout
                  :deadline-timer
                  (agent-repl--uds-run-timer
                   agent-repl-uds-command-ack-deadline
