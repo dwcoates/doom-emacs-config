@@ -716,6 +716,74 @@ func TestShimDegradedStateTakesTheWarnChannel(t *testing.T) {
 	}
 }
 
+func TestHistoricalShimDegradedStateStaysOnTheInfoChannel(t *testing.T) {
+	// Arrange -- the reporter classified this row as a RETIRED query's, replayed
+	// off the durable sequence. The anomaly was warned about when it happened;
+	// re-warning at every later bring-up would alarm forever over one durable
+	// row.
+	var info, warn []string
+	h := newHarness()
+	h.deg.disposition = DegradationHistorical
+	c := New(splitLevelConfig(t, h, &info, &warn))
+	ev := &corev1.Event{SessionId: "s", Payload: &corev1.Event_DegradedState{DegradedState: &corev1.DegradedState{
+		Component: "claude-shim-sdk", Reason: "unexpected_query_termination",
+	}}}
+
+	// Act.
+	if err := c.dispatchEvent(ev); err != nil {
+		t.Fatalf("dispatchEvent: %v", err)
+	}
+
+	// Assert.
+	if len(warn) != 0 {
+		t.Fatalf("warn = %v, want a replayed degradation recorded at info only", warn)
+	}
+}
+
+func TestHistoricalShimDegradedStateKeepsItsRecord(t *testing.T) {
+	// Arrange -- the severity moved; the record did not. A silent drop would be
+	// strictly worse than the noise it replaced.
+	var info, warn []string
+	h := newHarness()
+	h.deg.disposition = DegradationHistorical
+	c := New(splitLevelConfig(t, h, &info, &warn))
+	ev := &corev1.Event{SessionId: "s", Payload: &corev1.Event_DegradedState{DegradedState: &corev1.DegradedState{
+		Component: "claude-shim-sdk", Reason: "unexpected_query_termination",
+	}}}
+
+	// Act.
+	if err := c.dispatchEvent(ev); err != nil {
+		t.Fatalf("dispatchEvent: %v", err)
+	}
+
+	// Assert.
+	joined := strings.Join(info, "\n")
+	if !strings.Contains(joined, "shim reported DegradedState") || !strings.Contains(joined, "disposition=historical") {
+		t.Fatalf("info = %v, want the replayed degradation recorded with its disposition", info)
+	}
+}
+
+func TestLiveShimDegradedStateNamesItsDispositionToo(t *testing.T) {
+	// Arrange -- the live arm's severity is untouched, and its record carries
+	// the same verdict field so the two are told apart by reading, not by
+	// absence.
+	var info, warn []string
+	c := New(splitLevelConfig(t, newHarness(), &info, &warn))
+	ev := &corev1.Event{SessionId: "s", Payload: &corev1.Event_DegradedState{DegradedState: &corev1.DegradedState{
+		Component: "claude-shim-sdk", Reason: "unexpected_query_termination",
+	}}}
+
+	// Act.
+	if err := c.dispatchEvent(ev); err != nil {
+		t.Fatalf("dispatchEvent: %v", err)
+	}
+
+	// Assert.
+	if !strings.Contains(strings.Join(warn, "\n"), "disposition=live") {
+		t.Fatalf("warn = %v, want the live degradation named as such at warn", warn)
+	}
+}
+
 func TestRecoveredShimDegradedStateStaysOnTheInfoChannel(t *testing.T) {
 	// Arrange -- the RECOVERY of a degradation is ordinary good news and must
 	// not inflate the warn channel.

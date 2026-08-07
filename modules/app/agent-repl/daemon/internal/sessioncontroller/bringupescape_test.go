@@ -31,6 +31,10 @@ type escapeHarness struct {
 	pusher  *fakePusher
 	applier *fakeApplier
 	log     *logCapture
+	// warn captures ONLY the records that took the WARN channel. log stays the
+	// UNION of both channels, so every assertion written before this split still
+	// reads the whole record stream and a severity test has something to ask.
+	warn *logCapture
 
 	// clockMs is the manager's whole notion of time, so a cooldown test can
 	// advance past a park without waiting on one.
@@ -53,6 +57,7 @@ func newEscapeHarness(t *testing.T, clients ...*fakeClient) *escapeHarness {
 		pusher:  &fakePusher{},
 		applier: &fakeApplier{},
 		log:     &logCapture{},
+		warn:    &logCapture{},
 		clients: clients,
 	}
 	m, err := New(Config{
@@ -69,6 +74,10 @@ func newEscapeHarness(t *testing.T, clients ...*fakeClient) *escapeHarness {
 		FileDiagnostics:   fakeFileDiagnosticPersister{},
 		Now:               h.clockMs.Load,
 		Logf:              h.log.logf,
+		Warnf: func(format string, args ...any) {
+			h.warn.logf(format, args...)
+			h.log.logf(format, args...)
+		},
 		newClient: func(c shimclient.Config) sessionClient {
 			h.mu.Lock()
 			defer h.mu.Unlock()
