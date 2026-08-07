@@ -688,7 +688,6 @@ so a chord wins key lookup regardless of which evil state is current.")
       :desc "Claude interrupt" "o x" #'agent-repl-interrupt
       :desc "Copy file reference" "o r" #'agent-repl-copy-reference
       :desc "Reload webview (rebuilt bundle)" "o l" #'agent-repl-frontend-reload-webview
-      :desc "Force fresh conversation" "o f" #'agent-repl-force-fresh-conversation
       ;; SPC o z -- put the session to sleep on purpose.  It sits beside the
       ;; restart because they are the two session-process verbs: `o C-c'
       ;; replaces the process under a conversation worth keeping, `o z' gives
