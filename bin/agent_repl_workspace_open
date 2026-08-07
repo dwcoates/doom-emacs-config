@@ -1,0 +1,195 @@
+#!/usr/bin/env bash
+
+# shellcheck disable=SC2250,SC2292,SC2312
+# The three checks above are OPT-IN (`shellcheck -o all`) and are declined
+# deliberately, matching bin/agent_repl_workspace and
+# modules/app/agent-repl/bin/build-frontend.sh: they are house-style opinions
+# (${x} braces, [[ ]] preference) and a warning about command substitutions that
+# genuinely cannot fail in a way this script should abort on. The file is clean
+# at shellcheck's default bar plus `-S style`.
+
+# agent_repl_workspace_open — open a Claude session in an EXISTING agent-repl
+# workspace, WITHOUT the agent-repl runtime.
+#
+# Usage:
+#   agent_repl_workspace_open                    # pick a workspace from a menu
+#   agent_repl_workspace_open <workspace-name>   # name the workspace outright
+#
+# It is the read counterpart of bin/agent_repl_workspace, which CREATES a
+# workspace and drops Claude into it. This one enters a workspace that already
+# exists, and lets the conversation continue rather than always starting fresh.
+#
+# Runnable from ANY worktree of the repository whose workspaces you want: the
+# repository's MAIN worktree is resolved from the current directory (that is
+# what `git worktree list` puts first), so running this from inside one
+# workspace lists all of that repository's workspaces rather than nothing.
+#
+# What it does, in order:
+#   1. Resolve the repository's main worktree from $PWD.
+#   2. Locate this checkout's claude-repld binary (daemon/bin/claude-repld, the
+#      artifact path build-frontend.sh owns), building it if it is missing.
+#   3. `claude-repld list-workspaces --git-root <main worktree>` and either
+#      match the named workspace or prompt with a numbered menu.
+#   4. `claude-repld list-transcripts --workspace <path>` and prompt with a
+#      numbered menu of resumable conversations plus a "new conversation" entry.
+#   5. cd into the workspace and exec `claude --permission-mode auto`, adding
+#      `--resume <uuid>` when a conversation was picked.
+#
+# THE CONFIG DIR TRAVELS WITH THE TRANSCRIPT. Each listed conversation names the
+# `~/.claude*` root it lives under, and that root is exported as
+# CLAUDE_CONFIG_DIR for the resume — a `--resume` run against the other
+# account's root is a CLI that exits 1 on a uuid it cannot see.
+#
+# Neither subcommand needs (or starts) a running daemon.
+#
+# Environment:
+#   AGENT_REPL_CLAUDE_BIN            the claude CLI to exec (default `claude`).
+#   AGENT_REPL_DAEMON_BIN            the claude-repld to run (default this
+#                                    checkout's daemon/bin/claude-repld).
+#   AGENT_REPL_WORKSPACE_STATE_DB    state database holding the merge geometry
+#                                    (default the daemon's own).
+#   AGENT_REPL_INCLUDE_UNMANAGED     set to 1 to also list linked worktrees with
+#                                    no recorded agent-repl merge geometry.
+
+set -euo pipefail
+
+die() { echo "agent_repl_workspace_open: $*" >&2; exit 1; }
+
+[ $# -le 1 ] || die "usage: agent_repl_workspace_open [workspace-name]"
+WANTED="${1:-}"
+
+# A pre-commit hook exports its live repository bindings to children. Inheriting
+# them here would resolve the main worktree of the HOOK's repository instead of
+# the one the user is standing in.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX
+
+command -v git >/dev/null 2>&1 || die "git is not on PATH"
+
+# --- 1. the repository's main worktree, resolved from $PWD ------------------
+# `git worktree list --porcelain` always lists the MAIN worktree first, which is
+# the root the workspaces of this repository hang off. rev-parse --show-toplevel
+# would answer the current LINKED worktree instead, which is exactly the wrong
+# root when this is run from a workspace.
+resolve_main_worktree() {
+    local dir="$1" first
+    git -C "$dir" rev-parse --git-dir >/dev/null 2>&1 ||
+        die "$dir is not inside a git repository"
+    first="$(git -C "$dir" worktree list --porcelain | sed -n 's/^worktree //p' | head -1)"
+    [ -n "$first" ] || die "could not resolve the main worktree of the repository at $dir"
+    printf '%s\n' "$first"
+}
+
+GIT_ROOT="$(resolve_main_worktree "$PWD")"
+
+# --- 2. the daemon binary, at build-frontend.sh's artifact path -------------
+THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_REPO="$(cd "$THIS_DIR/.." && pwd)"
+AGENT_REPL_DIR="$SCRIPT_REPO/modules/app/agent-repl"
+DAEMON_DIR="$AGENT_REPL_DIR/daemon"
+DAEMON_BIN="${AGENT_REPL_DAEMON_BIN:-$DAEMON_DIR/bin/claude-repld}"
+
+if [ ! -x "$DAEMON_BIN" ]; then
+    [ -x "$AGENT_REPL_DIR/bin/build-frontend.sh" ] ||
+        die "no claude-repld at $DAEMON_BIN and no build-frontend.sh at $AGENT_REPL_DIR/bin"
+    echo "agent_repl_workspace_open: building claude-repld (missing at $DAEMON_BIN)" >&2
+    "$AGENT_REPL_DIR/bin/build-frontend.sh" daemon >&2
+    [ -x "$DAEMON_BIN" ] || die "build-frontend.sh daemon did not produce $DAEMON_BIN"
+fi
+
+# --- 3. pick the workspace --------------------------------------------------
+# `list-workspaces` prints one tab-separated row per workspace:
+#   <name>\t<absolute-path>\t<branch>\t<origin>
+LIST_ARGS=(list-workspaces --git-root "$GIT_ROOT")
+[ -z "${AGENT_REPL_WORKSPACE_STATE_DB:-}" ] ||
+    LIST_ARGS+=(--state-db "$AGENT_REPL_WORKSPACE_STATE_DB")
+[ "${AGENT_REPL_INCLUDE_UNMANAGED:-}" != "1" ] || LIST_ARGS+=(--include-unmanaged)
+
+WORKSPACES="$("$DAEMON_BIN" "${LIST_ARGS[@]}")"
+[ -n "$WORKSPACES" ] ||
+    die "no workspaces recorded for $GIT_ROOT — create one with agent_repl_workspace"
+
+WS_NAMES=() WS_PATHS=() WS_LABELS=()
+while IFS=$'\t' read -r ws_name ws_path ws_branch ws_origin; do
+    [ -n "$ws_name" ] || continue
+    WS_NAMES+=("$ws_name")
+    WS_PATHS+=("$ws_path")
+    WS_LABELS+=("$ws_name  [$ws_branch, $ws_origin]")
+done <<< "$WORKSPACES"
+
+# prompt_choice PROMPT LABEL... — print a numbered menu on stderr, read one
+# choice from stdin, and echo the chosen 1-based index on stdout.
+prompt_choice() {
+    local prompt="$1" reply i=1
+    shift
+    local label
+    for label in "$@"; do
+        printf '  %2d) %s\n' "$i" "$label" >&2
+        i=$((i + 1))
+    done
+    printf '%s ' "$prompt" >&2
+    read -r reply || die "no selection was made"
+    case "$reply" in
+        ''|*[!0-9]*) die "$reply is not a number" ;;
+    esac
+    [ "$reply" -ge 1 ] && [ "$reply" -le $# ] ||
+        die "$reply is not one of the $# choices"
+    printf '%s\n' "$reply"
+}
+
+if [ -n "$WANTED" ]; then
+    INDEX=""
+    for i in "${!WS_NAMES[@]}"; do
+        [ "${WS_NAMES[$i]}" = "$WANTED" ] || continue
+        [ -z "$INDEX" ] ||
+            die "$WANTED names more than one workspace of $GIT_ROOT"
+        INDEX="$i"
+    done
+    [ -n "$INDEX" ] ||
+        die "no workspace named $WANTED under $GIT_ROOT (run with no arguments to see the list)"
+else
+    echo "agent_repl_workspace_open: workspaces of $GIT_ROOT" >&2
+    # Captured into its own variable first: prompt_choice runs in a command
+    # substitution, so a refusal inside it is a non-zero exit `set -e` acts on
+    # only when the substitution IS the assignment. Inlining it in an arithmetic
+    # expansion would turn the refusal into an empty string and index -1.
+    SELECTED="$(prompt_choice "workspace:" "${WS_LABELS[@]}")"
+    INDEX=$((SELECTED - 1))
+fi
+
+WORKSPACE="${WS_PATHS[$INDEX]}"
+[ -d "$WORKSPACE" ] || die "workspace ${WS_NAMES[$INDEX]} reports $WORKSPACE, which is not a directory"
+
+# --- 4. pick the conversation ----------------------------------------------
+# `list-transcripts` prints one tab-separated row per conversation, newest
+# first:  <uuid>\t<config-dir>\t<modified>\t<records>\t<status>\t<excerpt>
+TRANSCRIPTS="$("$DAEMON_BIN" list-transcripts --workspace "$WORKSPACE")"
+
+TR_UUIDS=() TR_CONFIGS=() TR_LABELS=()
+while IFS=$'\t' read -r tr_uuid tr_config tr_modified tr_records tr_status tr_excerpt; do
+    [ -n "$tr_uuid" ] || continue
+    TR_UUIDS+=("$tr_uuid")
+    TR_CONFIGS+=("$tr_config")
+    TR_LABELS+=("$tr_modified  ${tr_records}rec  $tr_status  $tr_excerpt")
+done <<< "$TRANSCRIPTS"
+
+# The NEW-conversation entry is last so the numbers of the real conversations
+# never move when one is added — the newest is always 1.
+TR_LABELS+=("start a NEW conversation")
+echo "agent_repl_workspace_open: conversations in ${WS_NAMES[$INDEX]}" >&2
+CHOICE="$(prompt_choice "conversation:" "${TR_LABELS[@]}")"
+
+# --- 5. hand the workspace to claude ---------------------------------------
+cd "$WORKSPACE"
+CLAUDE_ARGS=(--permission-mode auto)
+if [ "$CHOICE" -le "${#TR_UUIDS[@]}" ]; then
+    RESUME="${TR_UUIDS[$((CHOICE - 1))]}"
+    # The config dir travels with the transcript: resuming under the other
+    # account's root is a CLI that exits 1 on a uuid it cannot see.
+    export CLAUDE_CONFIG_DIR="${TR_CONFIGS[$((CHOICE - 1))]}"
+    CLAUDE_ARGS+=(--resume "$RESUME")
+    echo "agent_repl_workspace_open: ${WS_NAMES[$INDEX]} -> $WORKSPACE (resume $RESUME under $CLAUDE_CONFIG_DIR)" >&2
+else
+    echo "agent_repl_workspace_open: ${WS_NAMES[$INDEX]} -> $WORKSPACE (new conversation)" >&2
+fi
+
+exec "${AGENT_REPL_CLAUDE_BIN:-claude}" "${CLAUDE_ARGS[@]}"
