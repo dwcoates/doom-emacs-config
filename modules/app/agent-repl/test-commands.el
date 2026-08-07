@@ -534,6 +534,80 @@ rather than staying pinned to the vterm it happened to boot once."
           ;; Assert
           (should (equal ensured "ws-old")))))))
 
+;;;; ---- establish-workspace registers its log sink before logging ----
+
+(ert-deftest agent-repl-cmd-test-establish-workspace/first-record-is-routable ()
+  "The FIRST record establish emits already routes to WS's own sink.
+Establish used to register `:project-dir' near its end, so its whole
+prologue was workspace-attributed while the workspace still owned no sink —
+one `unroutable log workspace' warning per restored workspace, every boot."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((project (make-temp-file "agent-repl-establish-route-" t))
+          (first-record-routable 'no-record))
+      (unwind-protect
+          (agent-repl-cmd-test--with-establish-stubs
+            (cl-letf (((symbol-function 'agent-repl--frontend-after-ensure-session)
+                       (lambda (_ws on-success _on-failure)
+                         (funcall on-success "s-test") :ready))
+                      ((symbol-function 'agent-repl--log)
+                       (lambda (ws &rest _)
+                         (when (eq first-record-routable 'no-record)
+                           (setq first-record-routable
+                                 (and (agent-repl--ws-log-routable-p ws) t))))))
+              ;; Act
+              (agent-repl--establish-workspace "route-ws" project)))
+        (delete-directory project t))
+      ;; Assert
+      (should (eq first-record-routable t)))))
+
+(ert-deftest agent-repl-cmd-test-establish-workspace/no-record-is-unroutable ()
+  "EVERY record establish emits is routable, so none can trip the warning.
+Asserted over the whole call rather than just the prologue: any future line
+added ahead of the registration would reintroduce the boot warning."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((project (make-temp-file "agent-repl-establish-warn-" t))
+          (unroutable nil))
+      (unwind-protect
+          (agent-repl-cmd-test--with-establish-stubs
+            (cl-letf (((symbol-function 'agent-repl--frontend-after-ensure-session)
+                       (lambda (_ws on-success _on-failure)
+                         (funcall on-success "s-test") :ready))
+                      ((symbol-function 'agent-repl--log)
+                       (lambda (ws &rest _)
+                         (unless (or (null ws) (agent-repl--ws-log-routable-p ws))
+                           (push ws unroutable)))))
+              ;; Act
+              (agent-repl--establish-workspace "warn-free-ws" project)))
+        (delete-directory project t))
+      ;; Assert
+      (should-not unroutable))))
+
+(ert-deftest agent-repl-cmd-test-register-merged-workspace/first-record-is-routable ()
+  "The merged-entry registration path also registers its sink before logging.
+Its state-file read logs against WS, so `:project-dir' must already be in
+the hash by then."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((project (make-temp-file "agent-repl-merged-route-" t))
+          (first-record-routable 'no-record))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--state-file-for-read)
+                     (lambda (_) "/nonexistent/state.el"))
+                    ((symbol-function 'agent-repl--detect-merge-actually-landed-p)
+                     (lambda (_ws) t))
+                    ((symbol-function 'agent-repl--log)
+                     (lambda (ws &rest _)
+                       (when (eq first-record-routable 'no-record)
+                         (setq first-record-routable
+                               (and (agent-repl--ws-log-routable-p ws) t))))))
+            ;; Act
+            (agent-repl--register-merged-workspace "merged-route-ws" project))
+        (delete-directory project t))
+      ;; Assert
+      (should (eq first-record-routable t)))))
+
 ;;;; ---- agent-repl-explain ----
 
 (ert-deftest agent-repl-cmd-test-explain/sends-context-reference ()
