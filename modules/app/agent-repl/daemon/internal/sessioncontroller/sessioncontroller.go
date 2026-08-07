@@ -335,6 +335,19 @@ type Config struct {
 	VendorSessionOf func(sessionID string) (string, bool)
 	// Logf is the daemon logger. Nil discards.
 	Logf func(string, ...any)
+	// Warnf is the daemon logger's WARN channel, for a record that accompanies
+	// a regression the user can see — degraded accounting, a failure card, a
+	// dropped or rejected event — but that is not itself a hard fault. At info
+	// such a record is indistinguishable from routine progress and invisible
+	// to a level filter, which is the whole reason this channel exists beside
+	// Logf.
+	//
+	// Nil falls back to Logf, so an unwired warn channel still records the
+	// event (at Logf's level) rather than losing it.
+	Warnf func(string, ...any)
+	// Errorf is the daemon logger's ERROR channel, for a hard failure rather
+	// than a degradation. Nil falls back to Warnf.
+	Errorf func(string, ...any)
 	// Classifier judges prompts queued during a running turn (E4). Nil leaves
 	// the queue unclassified: entries are marked ERROR with that stated
 	// reason and still delivered by the ordinary turn-end drain, so the
@@ -394,7 +407,13 @@ type Config struct {
 type Manager struct {
 	cfg  Config
 	logf func(string, ...any)
-	reg  *permRegistry
+	// warnf is the WARN channel described on Config.Warnf. It is never nil
+	// after New: an unset Config.Warnf resolves to logf.
+	warnf func(string, ...any)
+	// errorf is the ERROR channel described on Config.Errorf. Never nil after
+	// New: an unset Config.Errorf resolves to warnf.
+	errorf func(string, ...any)
+	reg    *permRegistry
 
 	// shimStops is the SOLE holder of the wired spawner's stop half, taken off
 	// it in New. cfg.Spawner keeps the bring-up half and refuses stops, so the
@@ -739,6 +758,14 @@ func New(cfg Config) (*Manager, error) {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
+	warnf := cfg.Warnf
+	if warnf == nil {
+		warnf = logf
+	}
+	errorf := cfg.Errorf
+	if errorf == nil {
+		errorf = warnf
+	}
 	newClient := cfg.newClient
 	if newClient == nil {
 		newClient = func(c shimclient.Config) sessionClient { return shimclient.New(c) }
@@ -766,6 +793,8 @@ func New(cfg Config) (*Manager, error) {
 		cfg:                       cfg,
 		shimStops:                 stops,
 		logf:                      logf,
+		warnf:                     warnf,
+		errorf:                    errorf,
 		reg:                       newPermRegistry(logf),
 		newClient:                 newClient,
 		newControllerGenerationID: newControllerGenerationID,
@@ -2214,6 +2243,10 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 	}, func() {
 		m.persistSessionDeath(sessionID, errclass.DeathReasonShimDied)
 	})
+	// The WARN channel for the consumer's user-visible degradations (degraded
+	// accounting, failure cards, rejected events). Bound before Run so no such
+	// record can be emitted at info.
+	cons.warnf = m.warnf
 	cons.historicalUsageStore = m.cfg.HistoricalUsage
 	cons.generationID = generationID
 	// The durable receipt ledger. Bound before Run, so no durable user line can
@@ -2337,6 +2370,8 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 		},
 		OnLinkLost: func(cause error) { m.onLinkLostForGeneration(workspace, sessionID, generationID, cause) },
 		Logf:       m.logf,
+		Warnf:      m.warnf,
+		Errorf:     m.errorf,
 	})
 	d.client = client
 
