@@ -166,6 +166,74 @@ func TestResyncForGenerationAcceptsTheCurrentController(t *testing.T) {
 	}
 }
 
+func TestResyncForGenerationAcceptsAStaleSessionWithinTheCurrentGeneration(t *testing.T) {
+	client := &replayClient{}
+	h := newRepullHarness(t, client)
+	d := h.controller(t)
+
+	err := h.m.ResyncForGeneration("ws", d.sessionID+"-superseded", d.generationID, 0)
+
+	if err != nil {
+		t.Fatalf("same-generation stale-session resync: %v", err)
+	}
+	if got := client.callCount(); got != 1 {
+		t.Fatalf("same-generation stale-session resync started %d shim replay(s), want 1", got)
+	}
+}
+
+func TestResyncForGenerationRejectsAStaleSessionInAnotherGeneration(t *testing.T) {
+	client := &replayClient{}
+	h := newRepullHarness(t, client)
+	d := h.controller(t)
+
+	err := h.m.ResyncForGeneration("ws", d.sessionID+"-superseded", d.generationID+"-retired", 0)
+
+	if !errors.Is(err, errclass.ErrSessionSuperseded) {
+		t.Fatalf("error = %v, want superseded", err)
+	}
+	if got := client.callCount(); got != 0 {
+		t.Fatalf("cross-generation stale resync started %d shim replay(s), want 0", got)
+	}
+}
+
+func TestResyncForGenerationRejectsAStaleSessionWithNoGeneration(t *testing.T) {
+	client := &replayClient{}
+	h := newRepullHarness(t, client)
+	d := h.controller(t)
+	h.m.mu.Lock()
+	d.generationID = ""
+	h.m.mu.Unlock()
+
+	err := h.m.ResyncForGeneration("ws", d.sessionID+"-superseded", "", 0)
+
+	if !errors.Is(err, errclass.ErrSessionSuperseded) {
+		t.Fatalf("error = %v, want superseded", err)
+	}
+	if got := client.callCount(); got != 0 {
+		t.Fatalf("generationless stale resync started %d shim replay(s), want 0", got)
+	}
+}
+
+func TestResyncForGenerationLogsTheSessionRebindingDecision(t *testing.T) {
+	var lines []string
+	client := &replayClient{}
+	h := newRepullHarnessWithLog(t, client, func(format string, args ...any) {
+		lines = append(lines, fmt.Sprintf(format, args...))
+	})
+	d := h.controller(t)
+
+	_ = h.m.ResyncForGeneration("ws", "retired-session", d.generationID, 0)
+
+	for _, line := range lines {
+		if strings.Contains(line, "decision=current_generation_session_rebound") &&
+			strings.Contains(line, "request_session=\"retired-session\"") &&
+			strings.Contains(line, "live_session=\""+d.sessionID+"\"") {
+			return
+		}
+	}
+	t.Fatalf("missing session-rebound acceptance diagnostic: %v", lines)
+}
+
 func TestResyncForGenerationLogsBothIdentitiesAndReplaySource(t *testing.T) {
 	var lines []string
 	client := &replayClient{}
