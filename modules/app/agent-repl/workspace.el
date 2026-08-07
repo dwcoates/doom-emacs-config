@@ -357,8 +357,8 @@ debug logging on."
     :ready-timer :pending-show-panels
     :fork-session-id :fullscreen-config :active-env :bare-metal
     :deferred-input-queue :done-ack :permission-prompt-active
-    :done-ack-pending :source-ws-name :frontend-session-id
-    :frontend-buffer :frontend-buffer-session-id
+    :done-ack-pending :source-ws-name
+    :frontend-buffer
     :incoming-session-id :pushed-render-state :pushed-render-state-meta
     :daemon-workspace-metadata)
   "Plist keys cleared by `agent-repl--ws-del' when tombstoning a workspace.
@@ -464,10 +464,9 @@ path-keyed stub."
 (defvar agent-repl-ws-del-hook nil
   "Abnormal hook run with WS just before `agent-repl--ws-del' tombstones it.
 Runs while the runtime keys (`agent-repl--ws-runtime-keys') are still
-readable, so consumers can release external resources keyed on them —
-e.g. frontend-client.el deletes the workspace's daemon session using
-`:frontend-session-id'.  Handlers must not signal: a teardown hook that
-errors would abort the nuke midway.")
+readable, so consumers can release external resources keyed on them.
+Handlers must not signal: a teardown hook that errors would abort the
+nuke midway.")
 
 (defun agent-repl--ws-del (ws)
   "Tombstone workspace WS instead of removing its hash entry.
@@ -496,8 +495,7 @@ log line preserves the pre-existing diagnostic shape."
     (when had-entry
       (agent-repl--ws-forget-emacs-log-target ws "workspace deletion")
       ;; Pre-tombstone hook: runs while the runtime keys are still
-      ;; readable (e.g. frontend-client's session release needs
-      ;; :frontend-session-id before the clear below wipes it).
+      ;; readable, so a handler can act on them before the clear below.
       (run-hook-with-args 'agent-repl-ws-del-hook ws)
       (dolist (key agent-repl--ws-runtime-keys)
         (agent-repl--ws-put ws key nil))
@@ -1578,27 +1576,25 @@ persp-mode primitive fails before mutation.  If perspective setup fails
 after creation, the perspective and fresh hash entry are rolled back before
 the original error is re-signaled."
   (let ((path (plist-get metadata :project-dir))
-        (job-id (plist-get metadata :daemon-workspace-job-id))
-        (session-id (plist-get metadata :frontend-session-id)))
+        (job-id (plist-get metadata :daemon-workspace-job-id)))
     (agent-repl--log
      ws
-     "ws-materialize-daemon: ENTRY ws=%s job-id=%s path=%s session-id=%s known=%S live=%S"
-     ws job-id path session-id (agent-repl--ws-known-p ws)
+     "ws-materialize-daemon: ENTRY ws=%s job-id=%s path=%s known=%S live=%S"
+     ws job-id path (agent-repl--ws-known-p ws)
      (agent-repl--ws-live-p ws))
     (cond
      ((agent-repl--ws-daemon-materialization-matches-p ws metadata)
       (agent-repl--log
        ws
-       "ws-materialize-daemon: IDEMPOTENT replay ws=%s job-id=%s path=%s session-id=%s"
-       ws job-id path session-id)
+       "ws-materialize-daemon: IDEMPOTENT replay ws=%s job-id=%s path=%s"
+       ws job-id path)
       'existing)
      ((agent-repl--ws-known-p ws)
       (agent-repl--log
        ws
-       "ws-materialize-daemon: CONFLICT known workspace ws=%s job-id=%s existing-job=%s existing-path=%s existing-session=%s"
+       "ws-materialize-daemon: CONFLICT known workspace ws=%s job-id=%s existing-job=%s existing-path=%s"
        ws job-id (agent-repl--ws-get ws :daemon-workspace-job-id)
-       (agent-repl--ws-get ws :project-dir)
-       (agent-repl--ws-get ws :frontend-session-id))
+       (agent-repl--ws-get ws :project-dir))
       (error "agent-repl: daemon workspace %s conflicts with registered workspace" ws))
      ((agent-repl--ws-dir-owner path)
       (let ((owner (agent-repl--ws-dir-owner path)))
@@ -1665,8 +1661,8 @@ the original error is re-signaled."
               (setq hash-created t)
               (agent-repl--log
                ws
-               "ws-materialize-daemon: CREATED ws=%s job-id=%s path=%s session-id=%s branch=%s prompt-queued=%S"
-               ws job-id path session-id (plist-get metadata :branch-name)
+               "ws-materialize-daemon: CREATED ws=%s job-id=%s path=%s branch=%s prompt-queued=%S"
+               ws job-id path (plist-get metadata :branch-name)
                (plist-get metadata :initial-prompt-queued))
               'created)
           (error

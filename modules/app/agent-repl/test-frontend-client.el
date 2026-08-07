@@ -252,7 +252,7 @@ Suitable for submitPrompt/interrupt/deleteSession, which do not await."
   "ensure-session reopens the workspace, then reports establishment.
 The continuation takes no arguments: what the workspace's session IS
 belongs to the daemon."
-  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s-live")
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
     (let (success failure)
       (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&optional _force) t))
                 ((symbol-function 'agent-repl--frontend-after-ready) (lambda (ok _fail &optional _ws) (funcall ok) :ready))
@@ -265,9 +265,49 @@ belongs to the daemon."
         (should success)
         (should-not failure)))))
 
+(ert-deftest agent-repl-test-frontend-after-ensure-never-creates-a-session ()
+  "Establishment is `openWorkspace' and nothing else.
+Emacs creating on its own is the duplicate-session generator: it asked
+whether a session was live, got a stale answer off a durable record, and
+minted a rival for a workspace that already had one.  The daemon owns the
+question and creates on open when there is nothing to reattach to."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (let (opened created)
+      (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&rest _) t))
+                ((symbol-function 'agent-repl--frontend-after-ready)
+                 (lambda (ok _fail &optional _ws) (funcall ok) :ready))
+                ((symbol-function 'agent-repl--frontend-after-open-workspace)
+                 (lambda (ws ok _fail) (setq opened ws) (funcall ok) :pending))
+                ((symbol-function 'agent-repl--frontend-after-create-session)
+                 (lambda (&rest _) (setq created t) :pending)))
+        ;; Act — the workspace has no live session, which is exactly the case
+        ;; that used to create one here.
+        (agent-repl--frontend-after-ensure-session "ws1" #'ignore #'error)
+        ;; Assert
+        (should (equal opened "ws1"))
+        (should-not created)))))
+
+(ert-deftest agent-repl-test-frontend-open-workspace-carries-the-run-preferences ()
+  "openWorkspace sends the posture a session the daemon starts runs under.
+It is the SAME posture an explicit create sends, so the two entry points
+cannot offer the daemon different answers for one workspace."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--frontend-session-posture)
+             (lambda (_dir) '(:config-dir "/cfg" :permission-mode "acceptEdits"
+                              :allow-ungated t))))
+    ;; Act
+    (let ((payload (agent-repl--frontend-open-workspace-payload "/w")))
+      ;; Assert
+      (should (equal (plist-get payload :configDir) "/cfg"))
+      (should (equal (plist-get payload :permissionMode) "acceptEdits"))
+      (should (eq (plist-get payload :allowUngated) t))
+      ;; No session identity: which session a workspace owns is the daemon's.
+      (should-not (plist-member payload :sessionId)))))
+
 (ert-deftest agent-repl-test-frontend-after-ensure-send-skips-presentation-gate ()
   "Send-purpose ensure reports establishment without opening the workspace."
-  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s-live")
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
     (let (success opened)
       (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&rest _) t))
                 ((symbol-function 'agent-repl--frontend-after-ready)
@@ -283,7 +323,7 @@ belongs to the daemon."
 (ert-deftest agent-repl-test-frontend-async-send-mutates-only-after-ensure-success ()
   "Prompt dispatch and origin clearing follow ensure success."
   (agent-repl-test--with-ws "ws1"
-      '(:project-dir "/w" :frontend-session-id "old" :next-send-origin merge)
+      '(:project-dir "/w" :next-send-origin merge)
     (let (ensure-success sent request)
       (cl-letf (((symbol-function 'agent-repl--frontend-after-ensure-session)
                  (lambda (_ws ok _fail &optional purpose)
@@ -321,7 +361,7 @@ belongs to the daemon."
 (ert-deftest agent-repl-test-frontend-force-fresh-binds-only-on-create-success ()
   "Fresh-session state changes are continuation-owned."
   (agent-repl-test--with-ws "ws1"
-      '(:project-dir "/w" :frontend-session-id "old" :reattach-failed t)
+      '(:project-dir "/w" :reattach-failed t)
     (let (create-success result)
       (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&rest _) t))
                 ((symbol-function 'agent-repl--frontend-after-create-session)
@@ -331,10 +371,9 @@ belongs to the daemon."
                    :pending)))
         (agent-repl--frontend-force-fresh-session
          "ws1" (lambda () (setq result t)) #'error)
-        (should (equal (agent-repl--ws-get "ws1" :frontend-session-id) "old"))
+        (should-not result)
         (funcall create-success "fresh")
         (should result)
-        (should (equal (agent-repl--ws-get "ws1" :frontend-session-id) "fresh"))
         (should-not (agent-repl--ws-get "ws1" :reattach-failed))))))
 
 ;;;; ---- webview URL ---------------------------------------------------------
@@ -469,14 +508,21 @@ daemon that may be gone."
     ;; Act / Assert
     (should (agent-repl--frontend-daemon-ready-p))))
 
-(ert-deftest agent-repl-test-gui-running-p-tracks-session-binding ()
-  "The gui liveness capability is exactly the presence of :frontend-session-id."
+(ert-deftest agent-repl-test-gui-running-p-tracks-the-pushed-view ()
+  "The gui liveness capability reads the daemon's pushed view for the workspace."
   ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_1")
+  (agent-repl-test--with-views '((:sessionId "s_1" :workspace "/w1")
+                                 (:sessionId "s_2" :workspace "/w2" :terminal t))
     ;; Act / Assert
-    (should (agent-repl--gui-running-p "ws1")))
-  (agent-repl-test--with-ws "ws2" '(:project-dir "/w")
-    (should-not (agent-repl--gui-running-p "ws2"))))
+    (agent-repl-test--with-ws "ws1" '(:project-dir "/w1")
+      (should (agent-repl--gui-running-p "ws1")))
+    (agent-repl-test--with-ws "ws2" '(:project-dir "/w2")
+      (should-not (agent-repl--gui-running-p "ws2")))
+    (agent-repl-test--with-ws "ws3" '(:project-dir "/unknown")
+      (should-not (agent-repl--gui-running-p "ws3")))
+    ;; A workspace with no project dir has no wire key to ask about.
+    (agent-repl-test--with-ws "ws4" '()
+      (should-not (agent-repl--gui-running-p "ws4")))))
 
 (ert-deftest agent-repl-test-frontend-turn-active-sessions-extracts-busy-ids ()
   "An active workspace with a live session is reported busy, by path."
@@ -512,7 +558,7 @@ daemon that may be gone."
              agent-repl--frontend-workspace-state-views)
     (agent-repl-test--with-views '((:sessionId "s_current" :workspace "/w1"))
       (agent-repl-test--with-ws "ws1"
-          '(:frontend-session-id "s_stale" :project-dir "/w1"
+          '(:project-dir "/w1"
             :pushed-render-state-meta (:turn-active t))
         (should-not (agent-repl--frontend-turn-active-sessions))))))
 
@@ -550,56 +596,43 @@ daemon that may be gone."
 
 ;;;; ---- reattach loop -----------------------------------------------------------
 
-(ert-deftest agent-repl-test-frontend-reattach-check-no-op-when-listed ()
-  "A binding present (non-terminal) in the pushed roster is left alone; markers clear."
+(ert-deftest agent-repl-test-frontend-reattach-check-ensures-every-live-workspace ()
+  "The sweep ensures every live workspace, whatever the roster says.
+There is one question — is this workspace wired to the daemon answering
+right now — and the ensure both asks it and acts on it."
   ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_1" :reattach-failed t
-                                    :reattach-failures 2 :project-dir "/w")
-    (agent-repl-test--with-views '((:sessionId "s_1" :workspace "/w"))
-      (let ((reattached nil))
-        (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () t))
-                  ((symbol-function 'agent-repl--frontend-reattach-ws)
-                   (lambda (&rest args) (push args reattached))))
-          ;; Act
-          (agent-repl--frontend-reattach-check)
-          ;; Assert
-          (should (null reattached))
-          (should-not (agent-repl--ws-get "ws1" :reattach-failed))
-          (should-not (agent-repl--ws-get "ws1" :reattach-failures)))))))
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w1")
+    (agent-repl-test--with-ws "ws2" '(:project-dir "/w2")
+      (agent-repl-test--with-views '((:sessionId "s_1" :workspace "/w1"))
+        (let ((ensured nil))
+          (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () t))
+                    ((symbol-function 'agent-repl--live-ws-names)
+                     (lambda () '("ws1" "ws2")))
+                    ((symbol-function 'agent-repl--frontend-ensure-workspace)
+                     (lambda (ws) (push ws ensured))))
+            ;; Act
+            (agent-repl--frontend-reattach-check)
+            ;; Assert — the workspace with a live view and the one without are
+            ;; both ensured; the ensure's own skip reason decides what to send.
+            (should (equal (sort ensured #'string<) '("ws1" "ws2")))))))))
 
-(ert-deftest agent-repl-test-frontend-reattach-check-reattaches-vanished ()
-  "A binding missing from the pushed roster triggers a reattach."
-  ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_gone" :project-dir "/w")
-    (agent-repl-test--with-views '((:sessionId "s_other" :workspace "/w2"))
-      (let ((reattached nil))
-        (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () t))
-                  ((symbol-function 'agent-repl--frontend-reattach-ws)
-                   (lambda (ws stale) (push (list ws stale) reattached))))
-          ;; Act
-          (agent-repl--frontend-reattach-check)
-          ;; Assert
-          (should (equal reattached '(("ws1" "s_gone")))))))))
-
-(ert-deftest agent-repl-test-frontend-reattach-check-skips-given-up-workspaces ()
-  "A workspace marked :reattach-failed is not retried."
-  ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_gone" :reattach-failed t
-                                    :project-dir "/w")
-    (agent-repl-test--with-views '()
-      (let ((reattached nil))
-        (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () t))
-                  ((symbol-function 'agent-repl--frontend-reattach-ws)
-                   (lambda (&rest args) (push args reattached))))
-          ;; Act
-          (agent-repl--frontend-reattach-check)
-          ;; Assert
-          (should (null reattached)))))))
+(ert-deftest agent-repl-test-frontend-reattach-check-names-no-session ()
+  "The sweep reads no session identity at all.
+It once compared a recorded id against the pushed roster to decide
+between reattaching and ensuring; which session a workspace owns is the
+daemon's ruling, and asking it here is what let a stale local answer mint
+a rival session."
+  ;; Arrange / Act / Assert
+  (let ((source (with-temp-buffer
+                  (insert-file-contents
+                   (expand-file-name "frontend-client.el" agent-repl-test--module-dir))
+                  (buffer-string))))
+    (should-not (string-match-p ":frontend-session-id" source))))
 
 (ert-deftest agent-repl-test-frontend-reattach-check-ensures-daemon-when-link-down ()
-  "A down UDS link with live bindings triggers a daemon ensure."
+  "A down UDS link with live workspaces triggers a daemon ensure."
   ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_1" :project-dir "/w")
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
     (let ((ensured nil))
       (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () nil))
                 ((symbol-function 'agent-repl--ensure-frontend-daemon)
@@ -622,7 +655,7 @@ daemon that may be gone."
 The bounce case: the record is durable and still listed, but no session
 controller is attached, so the workspace needs bringing up."
   ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_1" :project-dir "/w")
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
     (agent-repl-test--with-views '((:sessionId "s_1" :workspace "/w"))
       (let ((ensured nil))
         (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () t))
@@ -648,21 +681,6 @@ leave its bring-up waiting for a switch."
           (agent-repl--frontend-reattach-check)
           ;; Assert
           (should (equal ensured '("ws1"))))))))
-
-(ert-deftest agent-repl-test-frontend-reattach-check-never-ensures-a-vanished-binding ()
-  "A vanished binding reattaches instead of ensuring: one recovery, not two."
-  ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_gone" :project-dir "/w")
-    (agent-repl-test--with-views '((:sessionId "s_other" :workspace "/w2"))
-      (let ((ensured nil))
-        (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () t))
-                  ((symbol-function 'agent-repl--frontend-reattach-ws) #'ignore)
-                  ((symbol-function 'agent-repl--frontend-ensure-workspace)
-                   (lambda (ws) (push ws ensured))))
-          ;; Act
-          (agent-repl--frontend-reattach-check)
-          ;; Assert
-          (should (null ensured)))))))
 
 ;;;; ---- recovery is driven by the RECONNECT, not by a switch --------------
 
@@ -706,7 +724,7 @@ end had merely decided to attempt."
 (ert-deftest agent-repl-test-frontend-note-boot-id-first-observation-sets ()
   "The first boot id observation records without resetting anything."
   ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_1" :reattach-failed t
+  (agent-repl-test--with-ws "ws1" '(:reattach-failed t
                                     :project-dir "/w")
     (let ((agent-repl--frontend-last-boot-id nil))
       ;; Act
@@ -718,7 +736,7 @@ end had merely decided to attempt."
 (ert-deftest agent-repl-test-frontend-note-boot-id-change-resets-give-ups ()
   "A boot id change resets :reattach-failed give-ups across workspaces."
   ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_1" :reattach-failed t
+  (agent-repl-test--with-ws "ws1" '(:reattach-failed t
                                     :reattach-failures 3 :project-dir "/w")
     (let ((agent-repl--frontend-last-boot-id "b_old"))
       ;; Act
@@ -731,7 +749,7 @@ end had merely decided to attempt."
 (ert-deftest agent-repl-test-frontend-note-boot-id-nil-never-resets ()
   "A pre-boot-id daemon (nil boot id) neither records nor resets."
   ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_1" :reattach-failed t
+  (agent-repl-test--with-ws "ws1" '(:reattach-failed t
                                     :project-dir "/w")
     (let ((agent-repl--frontend-last-boot-id "b_old"))
       ;; Act
@@ -739,55 +757,6 @@ end had merely decided to attempt."
       ;; Assert
       (should (equal agent-repl--frontend-last-boot-id "b_old"))
       (should (agent-repl--ws-get "ws1" :reattach-failed)))))
-
-(ert-deftest agent-repl-test-frontend-reattach-ws-success-clears-counters ()
-  "A successful reattach re-ensures and clears the failure counters.
-No webview is touched: its URL addresses the workspace, so a reattach
-leaves it naming the same thing."
-  ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_gone"
-                                    :reattach-failures 2 :project-dir "/w")
-    (let ((ensured nil))
-      (cl-letf (((symbol-function 'agent-repl--frontend-after-ensure-session)
-                 (lambda (ws ok _fail) (setq ensured ws) (funcall ok) :ready)))
-        ;; Act
-        (agent-repl--frontend-reattach-ws "ws1" "s_gone")
-        ;; Assert
-        (should (equal ensured "ws1"))
-        (should-not (agent-repl--ws-get "ws1" :reattach-failures))))))
-
-(ert-deftest agent-repl-test-frontend-reattach-ws-failure-restores-binding ()
-  "A failed reattach restores the stale binding and counts the failure."
-  ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_gone" :project-dir "/w")
-     (cl-letf (((symbol-function 'agent-repl--frontend-after-ensure-session)
-                (lambda (_ws _ok fail) (funcall fail "boom") :failed)))
-      ;; Act
-      (agent-repl--frontend-reattach-ws "ws1" "s_gone")
-      ;; Assert — binding restored so the next sweep retries.
-      (should (equal (agent-repl--ws-get "ws1" :frontend-session-id) "s_gone"))
-      (should (= (agent-repl--ws-get "ws1" :reattach-failures) 1))
-      (should-not (agent-repl--ws-get "ws1" :reattach-failed)))))
-
-(ert-deftest agent-repl-test-frontend-reattach-give-up-is-a-retractable-notice ()
-  "The reattach give-up goes out as a notice the reconnect can take back.
-It names a workspace that cannot reach THIS instance, and the next
-instance's snapshot already resets the give-up state beside it."
-  ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_gone"
-                                    :reattach-failures 2 :project-dir "/w")
-    (let ((notices nil))
-      (cl-letf (((symbol-function 'agent-repl--frontend-after-ensure-session)
-                 (lambda (_ws _ok fail) (funcall fail "boom") :failed))
-                ((symbol-function 'agent-repl-connection-notice-warn)
-                 (lambda (text &optional level) (push (list text level) notices)))
-                ((symbol-function 'display-warning)
-                 (lambda (&rest _) (error "the give-up must not bypass the notice"))))
-        ;; Act
-        (agent-repl--frontend-reattach-ws "ws1" "s_gone")
-        ;; Assert
-        (should (= 1 (length notices)))
-        (should (string-match-p "failed to reattach" (caar notices)))))))
 
 (ert-deftest agent-repl-test-frontend-ensure-give-up-is-a-retractable-notice ()
   "The ensure give-up goes out as a notice the reconnect can take back."
@@ -879,8 +848,8 @@ instance's snapshot already resets the give-up state beside it."
 (ert-deftest agent-repl-test-frontend-rebind-returns-bound-workspace-count ()
   "The rebind returns how many open workspaces carried a session binding."
   ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_1" :project-dir "/w")
-    (agent-repl-test--with-ws "ws2" '(:frontend-session-id "s_2" :project-dir "/w2")
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (agent-repl-test--with-ws "ws2" '(:project-dir "/w2")
       (agent-repl-test--with-ws "ws3" '(:project-dir "/w3")
         (cl-letf (((symbol-function 'agent-repl--frontend-after-ready) (lambda (ok _fail &optional _ws) (funcall ok) :ready))
                   ((symbol-function 'agent-repl--frontend-reattach-check) #'ignore))
@@ -897,56 +866,6 @@ instance's snapshot already resets the give-up state beside it."
       (should (eq :pending (agent-repl--frontend-rebind-workspaces-after-restart))))))
 
 ;;;; ---- release on nuke ------------------------------------------------------------
-
-(ert-deftest agent-repl-test-frontend-release-never-deletes-the-session ()
-  "THE INVARIANT: a teardown must not invalidate the conversation.
-A `deleteSession' stamps the daemon record `delete session', which
-`resume-resolve' excludes from every future resume — permanently, while
-the transcript sits intact on disk."
-  ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_1")
-    (agent-repl-test--with-uds
-      ;; Act
-      (agent-repl--frontend-release-workspace-session "ws1")
-      ;; Assert
-      (should (null (seq-filter (lambda (c) (equal (car c) "deleteSession"))
-                                uds-commands))))))
-
-(ert-deftest agent-repl-test-frontend-release-clears-the-binding ()
-  "Release still drops the in-memory binding; the daemon re-binds by CWD."
-  ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_1")
-    (agent-repl-test--with-uds
-      ;; Act
-      (agent-repl--frontend-release-workspace-session "ws1")
-      ;; Assert
-      (should (null (agent-repl--ws-get "ws1" :frontend-session-id))))))
-
-(ert-deftest agent-repl-test-frontend-release-sends-no-command-at-all ()
-  "Release is now purely local: it dispatches nothing over the link."
-  ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_1")
-    (agent-repl-test--with-uds
-      ;; Act
-      (agent-repl--frontend-release-workspace-session "ws1")
-      ;; Assert
-      (should (null uds-commands)))))
-
-(ert-deftest agent-repl-test-frontend-release-noop-without-id ()
-  "Release without a recorded id sends no command at all."
-  ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
-    (agent-repl-test--with-uds
-      ;; Act
-      (agent-repl--frontend-release-workspace-session "ws1")
-      ;; Assert
-      (should (null uds-commands)))))
-
-(ert-deftest agent-repl-test-frontend-release-registered-on-ws-del-hook ()
-  "The release fn is registered on the pre-tombstone hook."
-  ;; Assert
-  (should (memq #'agent-repl--frontend-release-workspace-session
-                agent-repl-ws-del-hook)))
 
 ;;;; ---- never-blue: the workspace-switch ensure ---------------------------
 ;;
@@ -978,7 +897,7 @@ the transcript sits intact on disk."
 (ert-deftest agent-repl-test-frontend-switch-ensure-skips-when-session-live ()
   "A workspace this daemon is already DRIVING has nothing to ensure."
   ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_1")
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
     (cl-letf (((symbol-function 'agent-repl--frontend-session-live-p) (lambda (_id) t))
               ((symbol-function 'agent-repl--frontend-session-controller-live-p) (lambda (_id) t)))
       (agent-repl-test--with-switch-ensure
@@ -1012,7 +931,7 @@ the transcript sits intact on disk."
 Every durable fact says the workspace is up; only `shim_attached' knows the
 daemon has never brought it up.  A missing session controller must ALWAYS ensure."
   ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_1")
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
     (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () t))
               ((symbol-function 'agent-repl--frontend-session-live-p) (lambda (_id) t))
               ((symbol-function 'agent-repl--frontend-session-view)
@@ -1072,7 +991,7 @@ It cannot backfill on switch either, so retrying would loop for nothing."
 (ert-deftest agent-repl-test-frontend-switch-ensure-skips-a-live-backfilled-session ()
   "The steady state: live AND backfilled earns the skip."
   ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_1")
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
     (agent-repl-test--with-backfill "BACKFILL_STATE_DONE"
       ;; Act
       (agent-repl--frontend-ensure-workspace "ws1")
@@ -1082,7 +1001,7 @@ It cannot backfill on switch either, so retrying would loop for nothing."
 (ert-deftest agent-repl-test-frontend-switch-ensure-sends-for-a-live-but-unbackfilled-session ()
   "THE residual this closes: live but blue must re-ensure, not skip."
   ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_1")
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
     (agent-repl-test--with-backfill "BACKFILL_STATE_PENDING"
       ;; Act
       (agent-repl--frontend-ensure-workspace "ws1")
@@ -1092,7 +1011,7 @@ It cannot backfill on switch either, so retrying would loop for nothing."
 (ert-deftest agent-repl-test-frontend-switch-ensure-sends-for-a-failed-backfill ()
   "A failed sidecar read re-ensures rather than being mistaken for done."
   ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_1")
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
     (agent-repl-test--with-backfill "BACKFILL_STATE_FAILED"
       ;; Act
       (agent-repl--frontend-ensure-workspace "ws1")
@@ -1104,7 +1023,7 @@ It cannot backfill on switch either, so retrying would loop for nothing."
 The give-up latch is what bounds it: the unsettled backfill would otherwise
 re-send on every single switch forever."
   ;; Arrange — unsettled AND already given up.
-  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_1"
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w"
                                     :ensure-failed t)
     (agent-repl-test--with-backfill "BACKFILL_STATE_FAILED"
       ;; Act
@@ -1115,7 +1034,7 @@ re-send on every single switch forever."
 (ert-deftest agent-repl-test-frontend-switch-ensure-failed-backfill-respects-cooldown ()
   "An unsettled backfill still debounces within the cooldown."
   ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_1")
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
     (agent-repl-test--with-backfill "BACKFILL_STATE_PENDING"
       (agent-repl--frontend-ensure-workspace "ws1")
       ;; Act — a rapid re-switch.
@@ -1126,7 +1045,7 @@ re-send on every single switch forever."
 (ert-deftest agent-repl-test-frontend-switch-ensure-sends-when-bound-session-dead ()
   "A bound-but-dead session still needs the ensure (that is the blue case)."
   ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_gone")
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
     (cl-letf (((symbol-function 'agent-repl--frontend-session-live-p) (lambda (_id) nil)))
       (agent-repl-test--with-switch-ensure
         ;; Act
@@ -1282,7 +1201,7 @@ protection."
 The webapp hides the bracketed spans at render time, so stripping them on
 the wire would deprive the agent of the directive it must read."
   ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_1" :project-dir "/w")
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
     (let ((sent nil)
           (input (concat (agent-repl--meta-wrap "READ-DIRECTIVE") "\n\nhello")))
       (cl-letf (((symbol-function 'agent-repl--frontend-send-user-message)
@@ -1345,7 +1264,7 @@ silently serve nothing for the rest."
   "Interrupt dispatches the UDS `interrupt' command keyed by the workspace CWD."
   ;; Arrange
   (agent-repl-test--with-ws "ws1"
-      '(:project-dir "/w" :frontend-session-id "s_1" :sent-turn (:request-id "r_9" :raw "draft"))
+      '(:project-dir "/w" :sent-turn (:request-id "r_9" :raw "draft"))
     (agent-repl-test--with-uds
       ;; Act
       (agent-repl--gui-interrupt "ws1" 'escape)
@@ -1357,7 +1276,7 @@ silently serve nothing for the rest."
 (ert-deftest agent-repl-test-gui-interrupt-returns-t ()
   "Both gestures return t (dispatched); the retract verdict is gone."
   ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_1")
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
     (agent-repl-test--with-uds
       ;; Act / Assert
       (should (eq (agent-repl--gui-interrupt "ws1" 'escape) t))
@@ -1374,7 +1293,7 @@ silently serve nothing for the rest."
 (ert-deftest agent-repl-test-gui-interrupt-challenge-yes-resends-confirmed ()
   "A yes to the challenge resends the interrupt carrying `confirmAgents'."
   ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_1")
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
     (agent-repl-test--with-interrupt-acks t
       (agent-repl--gui-interrupt "ws1" 'escape)
       ;; Act — the daemon challenges the first (unconfirmed) send
@@ -1387,7 +1306,7 @@ silently serve nothing for the rest."
 (ert-deftest agent-repl-test-gui-interrupt-challenge-no-sends-nothing ()
   "A no to the challenge sends nothing further — the subagents keep running."
   ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_1")
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
     (agent-repl-test--with-interrupt-acks nil
       (agent-repl--gui-interrupt "ws1" 'escape)
       ;; Act
@@ -1403,7 +1322,7 @@ silently serve nothing for the rest."
                   ("1" . "Interrupt 1 running subagent? ")
                   (2 . "Interrupt 2 running subagents? ")
                   (nil . "Interrupt the running subagents? ")))
-    (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_1")
+    (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
       (agent-repl-test--with-interrupt-acks nil
         (agent-repl--gui-interrupt "ws1" 'escape)
         ;; Act
@@ -1416,7 +1335,7 @@ silently serve nothing for the rest."
 (ert-deftest agent-repl-test-gui-interrupt-ok-ack-never-prompts ()
   "An accepted interrupt is done: no question, no resend."
   ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_1")
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
     (agent-repl-test--with-interrupt-acks t
       (agent-repl--gui-interrupt "ws1" 'escape)
       ;; Act
@@ -1428,7 +1347,7 @@ silently serve nothing for the rest."
 (ert-deftest agent-repl-test-gui-interrupt-error-ack-still-surfaces ()
   "A genuine error ack keeps the old failure path: echoed, never a question."
   ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_1")
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
     (agent-repl-test--with-interrupt-acks t
       (agent-repl--gui-interrupt "ws1" 'escape)
       ;; Act — protojson omits ok=false, so a rejection arrives with no :ok
@@ -1443,7 +1362,7 @@ silently serve nothing for the rest."
 (ert-deftest agent-repl-test-gui-interrupt-confirmed-resend-is-not-rechallenged ()
   "The confirmed resend carries no challenge handler — a re-challenge cannot loop."
   ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_1")
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
     (agent-repl-test--with-interrupt-acks t
       (agent-repl--gui-interrupt "ws1" 'escape)
       (agent-repl--uds-handle-command-ack
@@ -1458,7 +1377,7 @@ silently serve nothing for the rest."
 (ert-deftest agent-repl-test-gui-send-turn-records-the-sent-turn ()
   "The send records what an undo of it would need: the id and the RAW text."
   ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_1")
+  (agent-repl-test--with-ws "ws1" '()
     (cl-letf (((symbol-function 'agent-repl--frontend-send-user-message)
                (lambda (_ws _text _origin ok _fail)
                  (funcall ok "r_9")
@@ -1491,7 +1410,7 @@ silently serve nothing for the rest."
 (ert-deftest agent-repl-test-frontend-ws-command-key-signals-without-project-dir ()
   "A workspace with no `:project-dir' fails loudly rather than sending its name."
   ;; Arrange
-  (agent-repl-test--with-ws "doom" '(:frontend-session-id "s1")
+  (agent-repl-test--with-ws "doom" '()
     ;; Act / Assert
     (should-error (agent-repl--frontend-ws-command-key "doom"))))
 
@@ -1505,7 +1424,7 @@ silently serve nothing for the rest."
 (ert-deftest agent-repl-test-frontend-restart-session-sends-the-command ()
   "The restart sends `restartSession' keyed by the workspace's cwd."
   ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_1")
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
     (agent-repl-test--with-uds
       ;; Act
       (agent-repl--frontend-restart-session "ws1")
@@ -1547,7 +1466,7 @@ reaching the daemon, so this is the guard that the wiring exists at all."
 (ert-deftest agent-repl-test-frontend-hibernate-workspace-sends-the-command ()
   "The hibernate sends `hibernateWorkspace' keyed by the workspace's cwd."
   ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_1")
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
     (agent-repl-test--with-uds
       ;; Act
       (agent-repl--frontend-hibernate-workspace "ws1")

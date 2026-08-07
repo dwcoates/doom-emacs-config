@@ -171,7 +171,7 @@ func TestOpenWaitsForTheSessionToBecomeDriveable(t *testing.T) {
 	}
 
 	// Act
-	if err := o.Open(context.Background(), "/w"); err != nil {
+	if err := o.Open(context.Background(), "/w", WorkspaceOpenOpts{}); err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 
@@ -195,7 +195,7 @@ func TestRepeatedOpensAreIdempotent(t *testing.T) {
 
 	// Act — three switches to the same workspace.
 	for i := 0; i < 3; i++ {
-		if err := o.Open(context.Background(), "/w"); err != nil {
+		if err := o.Open(context.Background(), "/w", WorkspaceOpenOpts{}); err != nil {
 			t.Fatalf("Open #%d: %v", i+1, err)
 		}
 	}
@@ -223,13 +223,13 @@ func TestRepeatedOpensNeverRebindADiscoveredTranscript(t *testing.T) {
 	if err := reg.Put(registry.Record{SessionID: "s_1", CWD: "/w", ConfigDir: cfg, CreatedAt: "2026-07-25T10:00:00Z"}); err != nil {
 		t.Fatalf("put: %v", err)
 	}
-	if err := o.Open(context.Background(), "/w"); err != nil {
+	if err := o.Open(context.Background(), "/w", WorkspaceOpenOpts{}); err != nil {
 		t.Fatalf("first Open: %v", err)
 	}
 	writeProjectTranscript(t, cfg, "/w", "uuid-second")
 
 	// Act
-	if err := o.Open(context.Background(), "/w"); err != nil {
+	if err := o.Open(context.Background(), "/w", WorkspaceOpenOpts{}); err != nil {
 		t.Fatalf("second Open: %v", err)
 	}
 
@@ -311,7 +311,7 @@ func TestOpenSurfacesAnEnsureFailure(t *testing.T) {
 	}
 
 	// Act
-	err := o.Open(context.Background(), "/w")
+	err := o.Open(context.Background(), "/w", WorkspaceOpenOpts{})
 
 	// Assert
 	if err == nil {
@@ -334,7 +334,7 @@ func TestOpenPreservesTypedAutomaticRestoreEvidence(t *testing.T) {
 	}
 
 	// Act.
-	err := o.Open(context.Background(), "/w")
+	err := o.Open(context.Background(), "/w", WorkspaceOpenOpts{})
 	failure := errclass.Command(nil, err).GetSessionResume()
 
 	// Assert.
@@ -573,4 +573,152 @@ func containsSubstring(lines []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// --- Open creates the workspace's first session ----------------------------
+
+// recordingCreator is a WorkspaceSessionCreator that registers a record the way
+// the real creation entry point does, so the open path's bind + bring-up run
+// against a session that actually exists.
+type recordingCreator struct {
+	reg   *registry.Registry
+	opts  []CreateOpts
+	id    string
+	err   error
+	calls int
+}
+
+func (c *recordingCreator) CreateSession(_ context.Context, opts CreateOpts) (string, error) {
+	c.calls++
+	c.opts = append(c.opts, opts)
+	if c.err != nil {
+		return "", c.err
+	}
+	if err := c.reg.Put(registry.Record{SessionID: c.id, CWD: opts.CWD}); err != nil {
+		return "", err
+	}
+	return c.id, nil
+}
+
+func TestOpenCreatesASessionForAWorkspaceThatHasNone(t *testing.T) {
+	// Arrange — a workspace the daemon has never seen. Open is the single
+	// establishment path, so it must not report success having done nothing.
+	o, reg, ens, _ := openerRig(t)
+	creator := &recordingCreator{reg: reg, id: "s_new"}
+	o.Creator = creator
+
+	// Act.
+	err := o.Open(context.Background(), "/w", WorkspaceOpenOpts{
+		PermissionMode: "acceptEdits",
+		ConfigDir:      "/cfg",
+		Fake:           true,
+	})
+
+	// Assert — created once, for this cwd, carrying the run preferences, and
+	// then brought up driveable like any reattach.
+	if err != nil {
+		t.Fatalf("Open errored: %v", err)
+	}
+	if creator.calls != 1 {
+		t.Fatalf("CreateSession calls = %d, want 1", creator.calls)
+	}
+	want := CreateOpts{CWD: "/w", PermissionMode: "acceptEdits", ConfigDir: "/cfg", Fake: true}
+	if creator.opts[0] != want {
+		t.Fatalf("CreateOpts = %+v, want %+v", creator.opts[0], want)
+	}
+	if !slices.Contains(ens.driveable, "/w") {
+		t.Fatalf("driveable bring-up = %v, want it to include /w", ens.driveable)
+	}
+}
+
+func TestOpenNeverCreatesWhenTheWorkspaceAlreadyHasASession(t *testing.T) {
+	// Arrange — a reattach. Creating here would mint a rival session for a
+	// workspace that already has one.
+	o, reg, ens, _ := openerRig(t)
+	creator := &recordingCreator{reg: reg, id: "s_rival"}
+	o.Creator = creator
+	if err := reg.Put(registry.Record{SessionID: "s_existing", CWD: "/w"}); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+
+	// Act.
+	if err := o.Open(context.Background(), "/w", WorkspaceOpenOpts{}); err != nil {
+		t.Fatalf("Open errored: %v", err)
+	}
+
+	// Assert.
+	if creator.calls != 0 {
+		t.Fatalf("CreateSession was called %d times for a workspace with a session", creator.calls)
+	}
+	if !slices.Contains(ens.driveable, "/w") {
+		t.Fatalf("driveable bring-up = %v, want it to include /w", ens.driveable)
+	}
+}
+
+func TestOpenSurfacesACreateFailureRatherThanProceeding(t *testing.T) {
+	// Arrange — a refused create leaves no session, so continuing into the
+	// bind and bring-up would be the open forming its own opinion.
+	o, reg, ens, _ := openerRig(t)
+	boom := errors.New("create refused")
+	o.Creator = &recordingCreator{reg: reg, id: "s_new", err: boom}
+
+	// Act.
+	err := o.Open(context.Background(), "/w", WorkspaceOpenOpts{})
+
+	// Assert.
+	if !errors.Is(err, boom) {
+		t.Fatalf("Open err = %v, want it to wrap %v", err, boom)
+	}
+	if len(ens.driveable) != 0 {
+		t.Fatalf("a refused create still brought up %v", ens.driveable)
+	}
+}
+
+func TestOpenFailsLoudlyWithNoCreatorWired(t *testing.T) {
+	// Arrange — a missing dependency is a construction error, never a silent
+	// return to the old do-nothing behavior.
+	o, _, _, _ := openerRig(t)
+
+	// Act.
+	err := o.Open(context.Background(), "/w", WorkspaceOpenOpts{})
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "no session creator wired") {
+		t.Fatalf("Open err = %v, want a loud missing-creator failure", err)
+	}
+}
+
+func TestOnlyOpenCreates(t *testing.T) {
+	// Arrange — the other two entry points report a sessionless workspace so
+	// their callers can decide what it means. Merging a plain worktree must
+	// not conjure a session for it.
+	cases := []struct {
+		name string
+		open func(*WorkspaceOpener) error
+	}{
+		{"OpenDriveable", func(o *WorkspaceOpener) error {
+			return o.OpenDriveable(context.Background(), "/w")
+		}},
+		{"OpenForMerge", func(o *WorkspaceOpener) error {
+			return o.OpenForMerge(context.Background(), "/w")
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			o, reg, _, _ := openerRig(t)
+			creator := &recordingCreator{reg: reg, id: "s_new"}
+			o.Creator = creator
+
+			// Act.
+			err := c.open(o)
+
+			// Assert.
+			if !errors.Is(err, merge.ErrNoSession) {
+				t.Fatalf("%s err = %v, want merge.ErrNoSession", c.name, err)
+			}
+			if creator.calls != 0 {
+				t.Fatalf("%s created %d sessions; only Open creates", c.name, creator.calls)
+			}
+		})
+	}
 }
