@@ -258,7 +258,9 @@ func runWithLogger(socketPath, dbPath, pprofAddr string, log *logging.Logger) er
 
 func runLogged(log *logging.Logger, operation string, execute func() error) error {
 	if err := execute(); err != nil {
-		log.Log(logging.Fields{Operation: operation}, "runtime operation failed: %v", err)
+		// The only callers are a fatal serve error and a failed Close, both of
+		// which end the process; an omitted Level would persist either as info.
+		log.Log(logging.Fields{Operation: operation, Level: "error"}, "runtime operation failed: %v", err)
 		return err
 	}
 	return nil

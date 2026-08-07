@@ -192,7 +192,9 @@ func (d *Discoverer) classifySpool(path string) (Target, bool) {
 	case strings.HasPrefix(taskID, "w"):
 		t.Kind = tail.KindWorkflowJournal
 	default:
-		d.log.With(logging.Context{Operation: "classify-spool", Path: path, Task: taskID}).Log("spool task has no a/b/w kind prefix")
+		// Unclassifiable means the file leaves discovery entirely and is never
+		// ingested — a total-ingestion violation, not a note.
+		d.log.With(logging.Context{Operation: "classify-spool", Path: path, Task: taskID, Level: "warn"}).Log("spool task has no a/b/w kind prefix; the file is dropped from discovery and never ingested")
 		return Target{}, false
 	}
 	return t, true

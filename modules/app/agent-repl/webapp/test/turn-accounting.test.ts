@@ -1,6 +1,44 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { accountingSummary, latestTurnAccounting } from "../src/turn-accounting.js";
 import type { TurnAccounting } from "../src/frontend-proto.js";
+import type { ClientLogCmd } from "../src/protocol.js";
+import { ForwardingLogger, bindLogContext, setLogger } from "../src/wslog.js";
+
+/** Every record the accounting projection forwarded toward the daemon. */
+let forwarded: ClientLogCmd[] = [];
+
+interface ForwardedRecord {
+  level: string;
+  operation: string;
+  turn_id: string;
+  query_instance_id: string;
+  verdict: string;
+  missing_evidence: string[];
+  problems?: string[];
+  agent_repl_session_id?: string;
+}
+
+function records(): ForwardedRecord[] {
+  return forwarded.map((cmd) => {
+    const record = cmd.context as unknown as {
+      level: string;
+      operation: string;
+      agent_repl_session_id?: string;
+      context: { turn_id: string; query_instance_id: string; verdict: string; missing_evidence: string[]; problems?: string[] };
+    };
+    return {
+      level: record.level,
+      operation: record.operation,
+      agent_repl_session_id: record.agent_repl_session_id,
+      ...record.context,
+    };
+  });
+}
+
+const invalidAccounting: TurnAccounting = {
+  turnId: "turn", queryInstanceId: "query",
+  verdict: { kind: "invalid", problems: [{ kind: "tokenLedgerMismatch", differingFieldPaths: ["usage.inputTokens"] }] },
+};
 
 const accounting: TurnAccounting = {
   turnId: "turn", queryInstanceId: "query",
@@ -13,13 +51,73 @@ const accounting: TurnAccounting = {
   verdict: { kind: "complete" },
 };
 
+beforeEach(() => {
+  forwarded = [];
+  setLogger(new ForwardingLogger((cmd) => {
+    forwarded.push(cmd);
+    return true;
+  }, () => {}));
+  bindLogContext({ connection_id: "test-connection", agent_repl_session_id: "agent-session" });
+});
+
 describe("turn accounting projection", () => {
   it("renders the carried aggregate cache rate rather than recomputing response data", () => {
     expect(accountingSummary(accounting)).toContain("5h 10.0%→12.5% (2.5pp) · 2s · in 11 · out 22 · read 73 · write 9 · hit 25.0% · 1 subagent · 11.0 tok/s");
   });
   it("makes invalid accounting loud without requiring absent partial evidence", () => {
-    const invalid: TurnAccounting = { turnId: "turn", queryInstanceId: "query", verdict: { kind: "invalid", problems: [{ kind: "tokenLedgerMismatch", differingFieldPaths: ["usage.inputTokens"] }] } };
-    expect(accountingSummary(invalid)).toContain("INVALID ACCOUNTING: tokenLedgerMismatch · runtime absent");
+    expect(accountingSummary(invalidAccounting)).toContain("INVALID ACCOUNTING: tokenLedgerMismatch · runtime absent");
     expect(latestTurnAccounting([{ kind: "result", subtype: "success", durationMs: 0, numTurns: 0, totalCostUsd: 0, usage: { input_tokens: 0, output_tokens: 0 }, isError: false, context: null, turnAccounting: accounting }])).toBe(accounting);
+  });
+});
+
+describe("the degraded-accounting log record", () => {
+  it("warns once with the turn identity when an invalid verdict is drawn", () => {
+    accountingSummary(invalidAccounting);
+
+    expect(records()).toEqual([{
+      level: "warn",
+      operation: "turn-accounting.verdict-degraded",
+      agent_repl_session_id: "agent-session",
+      verdict: "invalid",
+      turn_id: "turn",
+      query_instance_id: "query",
+      problems: ["tokenLedgerMismatch"],
+      missing_evidence: ["runtime", "timing", "usage start", "usage end", "reconciliation"],
+    }]);
+  });
+
+  it("names the absent evidence when an incomplete verdict is drawn", () => {
+    accountingSummary({ ...accounting, reconciliation: undefined });
+
+    expect(records()).toEqual([{
+      level: "warn",
+      operation: "turn-accounting.verdict-degraded",
+      agent_repl_session_id: "agent-session",
+      verdict: "incomplete",
+      turn_id: "turn",
+      query_instance_id: "query",
+      missing_evidence: ["reconciliation"],
+    }]);
+  });
+
+  it("does not repeat the record when the same verdict re-renders", () => {
+    accountingSummary(invalidAccounting);
+    accountingSummary(invalidAccounting);
+    accountingSummary(invalidAccounting);
+
+    expect(records()).toHaveLength(1);
+  });
+
+  it("records again when the same turn's verdict changes", () => {
+    accountingSummary({ ...accounting, reconciliation: undefined });
+    accountingSummary(invalidAccounting);
+
+    expect(records().map((record) => record.verdict)).toEqual(["incomplete", "invalid"]);
+  });
+
+  it("keeps a complete verdict off the warning channel", () => {
+    accountingSummary(accounting);
+
+    expect(records()).toEqual([]);
   });
 });

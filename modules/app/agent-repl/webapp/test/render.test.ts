@@ -4429,6 +4429,30 @@ describe("async fold", () => {
     expect(html).not.toContain("stream-dropped");
   });
 
+  it("warns once with the stream identity when the cap leaves entries out", () => {
+    // Arrange — one line past STREAM_ITEM_CAP, so exactly one entry is cut.
+    const forwarded: Array<Record<string, unknown>> = [];
+    setLogger(new ForwardingLogger((cmd) => {
+      forwarded.push(cmd.context as unknown as Record<string, unknown>);
+      return true;
+    }, () => {}));
+    const overCap = Array.from({ length: 201 }, (_, i) =>
+      txLine({ type: "assistant", message: { id: `m${i}`, content: [{ type: "text", text: `t${i}` }] } }),
+    ).join("\n");
+    const panels = asyncPanels(true, overCap);
+    // Act — the fold re-renders, as the live feed does on every frame.
+    const html = renderItem(sourcedCard(), undefined, undefined, panels);
+    renderItem(sourcedCard(), undefined, undefined, panels);
+    // Assert
+    expect(html).toContain("stream-dropped");
+    const capRecords = forwarded.filter((r) => r.operation === "render.stream-cap-dropped");
+    expect(capRecords).toHaveLength(1);
+    expect(capRecords[0]).toMatchObject({
+      level: "warn",
+      context: { source_id: "a9", format: "transcript", dropped: 1, cap: 200 },
+    });
+  });
+
   it("does not double the tail, painting it in the fold and beneath the card", () => {
     // Arrange
     const shell = sourcedCard(
