@@ -125,9 +125,9 @@ push onto it through `symbol-value'.")
                  (lambda (ok _fail &optional _ws) (funcall ok) :ready))
                 ((symbol-function 'agent-repl--frontend-session-live-p) (lambda (_id) nil))
                 ((symbol-function 'agent-repl--frontend-after-create-session)
-                 (lambda (cwd model mode explicit force ok _fail &optional _ws)
+                 (lambda (cwd model mode explicit ok _fail &optional _ws)
                    (setq captured
-                         (list cwd model mode explicit force
+                         (list cwd model mode explicit
                                agent-repl-frontend-permission-mode
                                agent-repl-frontend-allow-ungated))
                    (funcall ok "s-new")
@@ -139,7 +139,7 @@ push onto it through `symbol-value'.")
         (should (equal captured
                        (list (file-name-as-directory
                               (expand-file-name agent-repl-explain-config-dir))
-                             agent-repl-explain-config-model 'continue nil nil
+                             agent-repl-explain-config-model 'continue nil
                              "bypassPermissions" t)))
         (should (equal agent-repl--explain-config-session-id "s-new"))
         (should-not agent-repl--explain-config-primed-p)))))

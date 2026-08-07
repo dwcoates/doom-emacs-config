@@ -94,8 +94,10 @@ export interface CreateSessionBody {
   configDir: string;
   /**
     * Which conversation to land on, as an INTENT rather than a pointer:
-    * "RESUME_MODE_CONTINUE" (the daemon resolves this cwd's conversation),
-    * "RESUME_MODE_FRESH", or "RESUME_MODE_EXPLICIT".
+    * "RESUME_MODE_CONTINUE" (the daemon resolves this cwd's conversation) or
+    * "RESUME_MODE_EXPLICIT". There is no fresh intent — the enum's tag 2 was
+    * retired because a workspace's conversation is not caller-replaceable,
+    * and the daemon refuses a create that still names it.
     *
     * The browser has no business naming a conversation — it used to send a
     * uuid it had put in localStorage, which made it a second authority on
