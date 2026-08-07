@@ -32,6 +32,29 @@ import (
 // lost by construction.
 const defaultClientBuffer = 256
 
+// hostBufferElasticity multiplies the HOST connection's soft bound to get its
+// absolute ceiling, and hostStallGrace is how long that connection's queue may
+// sit above the soft bound without a single frame being drained before it is
+// treated as wedged.
+//
+// The host is not just another consumer. There is exactly one, it owns the UI,
+// and evicting it costs a visible link-down, a reconnect, and a full snapshot
+// replay. It is also SINGLE-THREADED: Emacs legitimately blocks its event loop
+// for seconds at a time restoring seventeen workspaces at startup or mounting a
+// webview, and every one of those blocks used to fill the flat 256-frame buffer
+// with frames nothing could supersede and sever the link. Transient busyness is
+// inherent to that frontend, not a defect in it, so the host's queue absorbs it
+// instead of the connection paying for it.
+//
+// The two bounds are still hard limits, not a suggestion: 256*16 frames caps
+// the memory a wedged host can pin, and a host that drains NOTHING for the
+// grace period is cut loose exactly as before. Load shedding is preserved; only
+// the threshold for calling a busy consumer a dead one moved.
+const (
+	hostBufferElasticity = 16
+	hostStallGrace       = 30 * time.Second
+)
+
 // guiSnapshotLeaseInterval is the maximum time a live GUI stream goes without
 // receiving a fresh authoritative snapshot. The browser expires its visible
 // WorkspaceState after three missed leases, so a wedged writer cannot leave an
@@ -163,14 +186,26 @@ type client struct {
 	kind      ClientKind
 }
 
-// newClient builds a client with a bounded outbox of the given size.
+// newClient builds a client with a bounded outbox of the given size. The HOST
+// gets the elastic queue described on hostBufferElasticity; every other kind
+// gets the flat bound it always had.
 func newClient(bufSize int, scope *Scope, kind ClientKind) *client {
 	return &client{
-		out:   newOutbox(bufSize),
+		out:   newClientOutbox(bufSize, kind),
 		done:  make(chan struct{}),
 		scope: scope,
 		kind:  kind,
 	}
+}
+
+// newClientOutbox selects a connection's queue policy from its kind. The
+// policy is fixed at accept alongside the kind itself, so no connection can
+// acquire or lose the host's headroom while it is running.
+func newClientOutbox(bufSize int, kind ClientKind) *outbox {
+	if kind.isHost() {
+		return newElasticOutbox(bufSize, bufSize*hostBufferElasticity, hostStallGrace)
+	}
+	return newOutbox(bufSize)
 }
 
 // warn emits through the Server's WARN channel (Config.Warnf, or Logf when
@@ -564,26 +599,29 @@ func (s *Server) deliverLocked(frame *frontendv1.FrontendFrame, want func(*clien
 			s.logf("frontend: marshal frame for delivery: %v", err)
 			continue
 		}
-		queued, compacted := enqueueLocked(cl, outFrame{key: coalesceKey(sent), data: data})
-		if !queued {
-			s.logf("frontend: slow consumer (%s), outbound buffer full (%d frames) after compacting %d superseded frames, hard-disconnecting; reconnect replays snapshot",
-				cl.kind, cl.out.capacity(), compacted)
+		res := enqueueLocked(cl, outFrame{key: coalesceKey(sent), data: data})
+		if !res.queued {
+			s.recordOverflow(cl, res, "broadcast")
 			slow = append(slow, cl)
+			continue
 		}
+		s.notePressure(cl, res, "broadcast")
 	}
 	return slow
 }
 
 // enqueueLocked offers a frame to a client's bounded outbox without blocking,
 // compacting superseded frames first if the queue is already full. It reports
-// queued=false ONLY for a live client whose queue is still full of frames
-// nothing may replace; an already disconnected client is not a slow one and
-// needs no second teardown. compacted is how many frames compaction removed,
-// so a refusal can say what was tried.
-func enqueueLocked(cl *client, f outFrame) (queued bool, compacted int) {
+// queued=false ONLY for a live client whose queue is past its ceiling, or which
+// has drained nothing for the whole grace period, and in both cases still full
+// of frames nothing may replace; an already disconnected client is not a slow
+// one and needs no second teardown. The result carries how many frames
+// compaction removed and the queue's bounds, so a refusal can say what was
+// tried.
+func enqueueLocked(cl *client, f outFrame) pushResult {
 	select {
 	case <-cl.done:
-		return true, 0
+		return pushResult{queued: true, soft: cl.out.capacity(), hard: cl.out.ceiling()}
 	default:
 	}
 	return cl.out.push(f)
@@ -645,8 +683,9 @@ func (s *Server) PushAuthoritativeSnapshot(snapshot *frontendv1.StateSnapshot) {
 			s.logf("frontend: marshal authoritative snapshot client_id=%d kind=%s: %v", cl.id, cl.kind, err)
 			continue
 		}
-		if queued, _ := enqueueLocked(cl, outFrame{data: data}); !queued {
-			s.logf("frontend: authoritative snapshot queue saturated client_id=%d kind=%s scope_workspace=%q scope_session=%q outcome=disconnect", cl.id, cl.kind, scopeWorkspace(cl.scope), scopeSession(cl.scope))
+		if res := enqueueLocked(cl, outFrame{data: data}); !res.queued {
+			s.overflowEmit(cl)("frontend: authoritative snapshot queue saturated client_id=%d kind=%s scope_workspace=%q scope_session=%q depth=%d soft=%d hard=%d reason=%s stalled_for_ms=%d outcome=disconnect",
+				cl.id, cl.kind, scopeWorkspace(cl.scope), scopeSession(cl.scope), res.depth, res.soft, res.hard, res.reason, res.stalledFor.Milliseconds())
 			slow = append(slow, cl)
 		} else {
 			s.logVerbosef("frontend: authoritative snapshot queued client_id=%d kind=%s scope_workspace=%q scope_session=%q", cl.id, cl.kind, scopeWorkspace(cl.scope), scopeSession(cl.scope))
@@ -766,7 +805,7 @@ func (s *Server) serveClient(c conn, scope *Scope, kind ClientKind) {
 		cl.id = s.nextClientID
 		// A fresh outbox is empty, so this first FIFO frame always fits; a
 		// refusal here would be a programmer error, not a slow consumer.
-		if queued, _ := enqueueLocked(cl, outFrame{data: snap}); !queued {
+		if res := enqueueLocked(cl, outFrame{data: snap}); !res.queued {
 			s.mu.Unlock()
 			s.warn("frontend: connect snapshot rejected by an empty outbox kind=%s scope_workspace=%q scope_session=%q",
 				kind, scopeWorkspace(scope), scopeSession(scope))
@@ -791,7 +830,7 @@ func (s *Server) serveClient(c conn, scope *Scope, kind ClientKind) {
 				_ = c.close()
 				return
 			}
-			if queued, _ := enqueueLocked(cl, outFrame{key: coalesceKey(WorkspaceRosterFrame(held)), data: rosterData}); !queued {
+			if res := enqueueLocked(cl, outFrame{key: coalesceKey(WorkspaceRosterFrame(held)), data: rosterData}); !res.queued {
 				s.mu.Unlock()
 				s.warn("frontend: connect roster rejected by a near-empty outbox kind=%s scope_workspace=%q revision=%d",
 					kind, scopeWorkspace(scope), held.GetRevision())
@@ -867,11 +906,11 @@ func (s *Server) renewSnapshotLease(cl *client) bool {
 		// A snapshot supersedes nothing on the wire: the lease is the browser's
 		// bounded freshness proof, and a full lease queue stays a hard
 		// disconnect rather than a silent skip (AGENTS.md).
-		queued, compacted := enqueueLocked(cl, outFrame{data: data})
+		res := enqueueLocked(cl, outFrame{data: data})
 		s.mu.Unlock()
-		if !queued {
-			s.logf("frontend: snapshot lease queue full client_id=%d kind=%s scope_workspace=%q scope_session=%q buffer=%d compacted=%d; hard-disconnecting",
-				cl.id, cl.kind, scopeWorkspace(cl.scope), scopeSession(cl.scope), cl.out.capacity(), compacted)
+		if !res.queued {
+			s.overflowEmit(cl)("frontend: snapshot lease queue full client_id=%d kind=%s scope_workspace=%q scope_session=%q buffer=%d ceiling=%d compacted=%d reason=%s stalled_for_ms=%d; hard-disconnecting",
+				cl.id, cl.kind, scopeWorkspace(cl.scope), scopeSession(cl.scope), cl.out.capacity(), cl.out.ceiling(), res.compacted, res.reason, res.stalledFor.Milliseconds())
 			s.disconnect(cl)
 			return false
 		}
@@ -1116,13 +1155,47 @@ func (s *Server) enqueueResyncSnapshot(cl *client, cmd *frontendv1.FrontendComma
 // hard-disconnect it loudly (reconnect replays a fresh snapshot — no data loss
 // by construction).
 func (s *Server) enqueue(cl *client, f outFrame) {
-	queued, compacted := enqueueLocked(cl, f)
-	if queued {
+	res := enqueueLocked(cl, f)
+	if res.queued {
+		s.notePressure(cl, res, "delivery")
 		return
 	}
-	s.logf("frontend: slow consumer, outbound buffer full (%d frames) after compacting %d superseded frames, hard-disconnecting; reconnect replays snapshot",
-		cl.out.capacity(), compacted)
+	s.recordOverflow(cl, res, "delivery")
 	s.disconnect(cl)
+}
+
+// notePressure records a queue that has crossed into its elastic region but is
+// still accepting frames. This is the transient case — a busy consumer that
+// will drain — so it is verbose, once per episode rather than once per frame.
+func (s *Server) notePressure(cl *client, res pushResult, phase string) {
+	if !res.entered {
+		return
+	}
+	s.logVerbosef("frontend: outbound buffer above soft bound client_id=%d kind=%s phase=%s depth=%d soft=%d hard=%d grace_ms=%d; absorbing, no disconnect",
+		cl.id, cl.kind, phase, res.depth, res.soft, res.hard, hostStallGrace.Milliseconds())
+}
+
+// recordOverflow is the single canonical record for a refused push, i.e. for
+// giving up on a connection.
+//
+// The HOST's eviction is emitted at WARN and every other kind's at info, and
+// that asymmetry is deliberate: losing the host is a user-visible service
+// degradation — Emacs logs its own `uds-link: DOWN` warning for the very same
+// event — whereas a backgrounded webview being shed is the load-shedding
+// contract working as designed. It also names the reason, so "hit the memory
+// ceiling" is never confused with "drained nothing for the whole grace period".
+func (s *Server) recordOverflow(cl *client, res pushResult, phase string) {
+	s.overflowEmit(cl)("frontend: slow consumer (%s), outbound buffer full (%d frames, soft %d, hard %d) after compacting %d superseded frames, client_id=%d phase=%s reason=%s stalled_for_ms=%d, hard-disconnecting; reconnect replays snapshot",
+		cl.kind, res.depth, res.soft, res.hard, res.compacted, cl.id, phase, res.reason, res.stalledFor.Milliseconds())
+}
+
+// overflowEmit selects the severity every give-up-on-this-connection record is
+// written at. See recordOverflow for why the host is the loud one.
+func (s *Server) overflowEmit(cl *client) dlog.Logf {
+	if cl.kind.isHost() {
+		return s.warn
+	}
+	return s.logf
 }
 
 // disconnect removes a client from the fan-out set and signals its writer to
