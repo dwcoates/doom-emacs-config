@@ -39,11 +39,10 @@ The TypeScript twin lives in `agent-shim/claude/shim/src/uds/framing.ts`
 
 ## Verification and coverage
 
-- Run `make coverage` after every wire Go change. It tests every local package
-  with `-coverpkg=./...` and prints per-function coverage plus total statement
-  coverage. The command must pass.
-- Before handoff, run `modules/app/agent-repl/bin/test-all.sh` from the
-  repository root. Every tracked suite must pass.
+- `make coverage` tests every local package with `-coverpkg=./...` and prints
+  per-function coverage plus total statement coverage.
+- `modules/app/agent-repl/bin/test-all.sh` (from the repository root) runs
+  every tracked suite across the module.
 - Maintain at least 90% statement coverage. Never reduce the measured baseline,
   and add focused tests for every critical branch and every error path changed.
 - `modules/app/agent-repl/bin/report-logging-density.sh wire` should report zero
