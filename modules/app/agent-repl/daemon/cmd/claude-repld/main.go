@@ -209,7 +209,7 @@ func bootFatalLine(message string) []byte {
 
 func daemonFatal(logger *dlog.Logger, format string, args ...any) {
 	logger.Log(format, args...)
-	logger.With("operation", "exit", "level", "error").Log("claude-repld exiting: fatal error above")
+	logger.With("operation", "exit").LogError("claude-repld exiting: fatal error above")
 	os.Exit(1)
 }
 
@@ -226,7 +226,7 @@ func daemonFatal(logger *dlog.Logger, format string, args ...any) {
 // turn it into a normal exit.
 func logDaemonProcessExit(logger *dlog.Logger) {
 	if r := recover(); r != nil {
-		logger.With("operation", "exit", "level", "error").Log("claude-repld exiting: panic: %v", r)
+		logger.With("operation", "exit").LogError("claude-repld exiting: panic: %v", r)
 		panic(r)
 	}
 	logger.With("operation", "exit").Log("claude-repld exiting cleanly")
@@ -312,6 +312,12 @@ func main() {
 	)
 	defer stopWorkspaceLogMaintenance()
 	legacyLog := dlog.Legacy(daemonLog)
+	// The leveled companions of legacyLog. A subsystem injected with plain
+	// callbacks takes these for records that accompany a regression the user
+	// can see, so a degraded turn, a refused command or a lost accounting row
+	// is not indexed at info beside routine progress.
+	legacyWarn := dlog.LegacyWarn(daemonLog)
+	legacyError := dlog.LegacyError(daemonLog)
 	daemonLog.With("operation", "boot", "pid", os.Getpid(), "log_path", cappedLog.Name()).Log("claude-repld: booted")
 	for _, w := range logWarnings {
 		daemonLog.With("operation", "boot").Log("claude-repld: %s", w)
@@ -348,7 +354,7 @@ func main() {
 	}
 	defer func() {
 		if err := pprofSurface.Close(); err != nil {
-			daemonLog.With("operation", "daemon.pprof.close", "level", "error").Log("claude-repld: close pprof surface: %v", err)
+			daemonLog.With("operation", "daemon.pprof.close").LogError("claude-repld: close pprof surface: %v", err)
 		}
 	}()
 
@@ -515,6 +521,8 @@ func main() {
 		DB:       stateStore,
 		Resolver: server.NewRegistryResolver(sessionRegistry),
 		Logf:     legacyLog,
+		Warnf:    legacyWarn,
+		Errorf:   legacyError,
 	})
 	if err != nil {
 		daemonFatal(daemonLog, "claude-repld: open SSM: %v", err)
@@ -734,6 +742,8 @@ func main() {
 		DaemonVersion:   daemonVersion,
 		ProtocolVersion: shimProtocolVersion,
 		Logf:            legacyLog,
+		Warnf:           legacyWarn,
+		Errorf:          legacyError,
 		// One authority with the server's idle sweeper (see nowFn above).
 		Now: nowMsFn,
 		// The prompt queue's classifier (E4). A queued prompt is judged by a
@@ -953,6 +963,7 @@ func main() {
 		MergeQueue:    mergeQueue,
 		MergeGeometry: geometryStore,
 		Logf:          legacyLog,
+		Warnf:         legacyWarn,
 		LogVerbosef:   daemonLog.LogVerbose,
 	})
 	if err != nil {
@@ -1030,20 +1041,20 @@ func main() {
 	// goroutine having owned both.
 	go func() {
 		if err := workspaceAssembly.Manager.RunCreationWorker(workspaceCreateCtx); err != nil && workspaceCreateCtx.Err() == nil {
-			daemonLog.With("operation", "workspace-creation-worker", "level", "error").
-				Log("claude-repld: workspace creation worker stopped: %v", err)
+			daemonLog.With("operation", "workspace-creation-worker").
+				LogError("claude-repld: workspace creation worker stopped: %v", err)
 		}
 	}()
 	go func() {
 		if err := workspaceAssembly.Manager.RunHostActionWorker(workspaceCreateCtx); err != nil && workspaceCreateCtx.Err() == nil {
-			daemonLog.With("operation", "workspace-host-action-worker", "level", "error").
-				Log("claude-repld: workspace host-action worker stopped: %v", err)
+			daemonLog.With("operation", "workspace-host-action-worker").
+				LogError("claude-repld: workspace host-action worker stopped: %v", err)
 		}
 	}()
 	go func() {
 		if inboxErr := workspaceAssembly.Inbox.Run(workspaceCreateCtx); inboxErr != nil && workspaceCreateCtx.Err() == nil {
-			daemonLog.With("operation", "workspace-creation-inbox", "level", "error").
-				Log("claude-repld: workspace creation inbox stopped: %v", inboxErr)
+			daemonLog.With("operation", "workspace-creation-inbox").
+				LogError("claude-repld: workspace creation inbox stopped: %v", inboxErr)
 		}
 	}()
 	// Same late bind for the registrar's SessionView re-push, so a backfill
@@ -1125,13 +1136,13 @@ func main() {
 		// mechanism durability depends on.
 		daemonLog.With("operation", "shutdown-flush-registry").Log("claude-repld: shutdown step: flushing session registry")
 		if err := sessionRegistry.Flush(); err != nil {
-			daemonLog.With("operation", "shutdown-flush-registry", "level", "error").Log("claude-repld: registry flush on shutdown: %v", err)
+			daemonLog.With("operation", "shutdown-flush-registry").LogError("claude-repld: registry flush on shutdown: %v", err)
 		} else {
 			daemonLog.With("operation", "shutdown-flush-registry").Log("claude-repld: session registry flushed")
 		}
 		daemonLog.With("operation", "shutdown-close-http").Log("claude-repld: shutdown step: closing HTTP server")
 		if err := httpServer.Close(); err != nil {
-			daemonLog.With("operation", "shutdown-close-http", "level", "error").Log("claude-repld: http close: %v", err)
+			daemonLog.With("operation", "shutdown-close-http").LogError("claude-repld: http close: %v", err)
 		} else {
 			daemonLog.With("operation", "shutdown-close-http").Log("claude-repld: HTTP server closed")
 		}
@@ -1202,7 +1213,7 @@ func openPprofSurface(addr string, logger *dlog.Logger) (*pprofsurface.Surface, 
 	}
 	go func() {
 		if err := surface.Serve(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.With("operation", "daemon.pprof.serve", "level", "error").Log("claude-repld: pprof surface serve ended: %v", err)
+			logger.With("operation", "daemon.pprof.serve").LogError("claude-repld: pprof surface serve ended: %v", err)
 		}
 	}()
 	return surface, nil
