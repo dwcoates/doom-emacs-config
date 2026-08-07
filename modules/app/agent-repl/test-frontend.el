@@ -1486,24 +1486,40 @@ workspace restore a stale configuration, so the plist key is cleared."
         (kill-buffer "*layout-input*")))))
 
 (ert-deftest agent-repl-test-frontend-gui-kill-tears-down-layout-first ()
-  "gui kill hides the webview/input windows BEFORE releasing state.
+  "gui kill hides the webview/input windows BEFORE releasing the webview.
 The registry's `:restart-fn' composes this kill immediately followed by
 `agent-repl--gui-open'; a leftover dedicated input window aborts that
 reopen mid-initialize (the \"webview buffer is null/dead\" cascade)."
   ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_1")
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
     (let ((order nil))
       (cl-letf (((symbol-function 'agent-repl--gui-hide)
                  (lambda (_ws) (push 'hide order)))
-                ((symbol-function 'agent-repl--frontend-release-workspace-session)
-                 (lambda (_ws) (push 'release-session order)))
                 ((symbol-function 'agent-repl--frontend-release-workspace-webview)
                  (lambda (_ws) (push 'release-webview order))))
         ;; Act
         (agent-repl--gui-kill "ws1")
-        ;; Assert — layout teardown precedes the releases.
-        (should (equal (nreverse order) '(hide release-session release-webview)))
+        ;; Assert — layout teardown precedes the release.
+        (should (equal (nreverse order) '(hide release-webview)))
         (should (null (agent-repl--ws-get "ws1" :frontend-buffer)))))))
+
+(ert-deftest agent-repl-test-frontend-gui-kill-leaves-the-daemon-session-alone ()
+  "Closing a panel is not discarding the conversation.
+A teardown that ended the session would stamp its record with a death
+reason `resume-resolve' reads as the user discarding the conversation,
+which is not what closing a panel says.  The daemon locates a session by
+cwd, so a reopened workspace reattaches to the same record."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((commands nil))
+      (cl-letf (((symbol-function 'agent-repl--gui-hide) #'ignore)
+                ((symbol-function 'agent-repl--frontend-release-workspace-webview) #'ignore)
+                ((symbol-function 'agent-repl--uds-send-command)
+                 (lambda (field &rest _) (push field commands) "req")))
+        ;; Act
+        (agent-repl--gui-kill "ws1")
+        ;; Assert
+        (should (null commands))))))
 
 (ert-deftest agent-repl-test-frontend-webview-killed-on-ws-nuke ()
   "The nuke hook kills the webview so the WKWebView never outlives the ws."
