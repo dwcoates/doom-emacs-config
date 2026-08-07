@@ -1630,7 +1630,7 @@ func TestDegradedStateBecomesAFailureCard(t *testing.T) {
 	c := newTestConsumer(push, &fakeApplier{})
 
 	// Act.
-	c.Degraded("s1", &corev1.DegradedState{Component: "store", Reason: "down"})
+	c.Degraded("s1", nil, &corev1.DegradedState{Component: "store", Reason: "down"})
 
 	// Assert.
 	got := failureItems(push)
@@ -1648,7 +1648,7 @@ func TestDegradedStateCardCarriesTheDroppedCount(t *testing.T) {
 	c := newTestConsumer(push, &fakeApplier{})
 
 	// Act.
-	c.Degraded("s1", &corev1.DegradedState{Component: "store", Reason: "down", DroppedCount: 12})
+	c.Degraded("s1", nil, &corev1.DegradedState{Component: "store", Reason: "down", DroppedCount: 12})
 
 	// Assert.
 	if got := failureItems(push)[0].GetSourceDetail(); !strings.Contains(got, "dropped=12") {
