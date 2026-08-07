@@ -53,6 +53,15 @@ thinking" or infer session-controller liveness from persisted session fields.
 
 ## Verification
 
+- Non-interactive agents run under a permission classifier that blocks
+  compound shell chains such as `cd modules/app/agent-repl/daemon && go
+  test ./...`. Every command documented below is a single, standalone
+  invocation runnable from the repository root, with no `cd` and no `&&`:
+  - `go -C modules/app/agent-repl/daemon test ./...` — canonical unit test
+    invocation.
+  - `go -C modules/app/agent-repl/daemon vet ./...` — vet.
+  - `make -C modules/app/agent-repl/daemon coverage` — the module-rooted
+    form of `make coverage` below.
 - Run `make coverage` after every daemon Go change. It runs all `cmd`, `e2e`,
   and `internal` packages with `-coverpkg=./...` and reports `go tool
   cover -func` output. The command must pass.
