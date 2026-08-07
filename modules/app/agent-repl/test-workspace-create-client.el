@@ -738,6 +738,11 @@ is globally bound, so this is the first time the guard actually holds."
         (completion nil))
     (cl-letf (((symbol-function 'agent-repl--log)
                (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged)))
+              ;; A failed creation job is a UX regression, so the report rides
+              ;; the warn rung; capture both so this test keeps asserting the
+              ;; CONTENT rather than the severity.
+              ((symbol-function 'agent-repl--warn)
+               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged)))
               ((symbol-function 'message)
                (lambda (fmt &rest args) (setq echoed (apply #'format fmt args))))
               ((symbol-function 'agent-repl--uds-send-command)

@@ -1089,13 +1089,13 @@ finish-workspace path."
   ;; condition-case so a save error doesn't abort the nuke itself.
   (condition-case err
       (agent-repl--state-save ws)
-    (error (agent-repl--log ws "nuke-one-workspace: pre-teardown state-save error: %S" err)))
+    (error (agent-repl--warn ws "nuke-one-workspace: pre-teardown state-save error: %S" err)))
   (unwind-protect
       (progn
         (agent-repl--log ws "nuke-one-workspace: calling frontend kill-fn ws=%s" ws)
         (condition-case err
             (funcall (agent-repl-frontend-kill-fn (agent-repl--ws-frontend ws)) ws)
-          (error (agent-repl--log ws "nuke-one-workspace: frontend kill-fn error: %S" err)))
+          (error (agent-repl--warn ws "nuke-one-workspace: frontend kill-fn error: %S" err)))
         (agent-repl--log ws "nuke-one-workspace: frontend kill-fn returned ws=%s" ws))
     ;; Cleanup: always remove the hashmap entry regardless of any error
     ;; in the steps above (unless PRESERVE-ENTRY was requested).
@@ -1106,7 +1106,7 @@ finish-workspace path."
       (agent-repl--log ws "nuke-one-workspace: ws-del decision=tombstone")
       (condition-case err
           (agent-repl--ws-del ws)
-        (error (agent-repl--log ws "nuke-one-workspace: ws-del error: %S" err))))
+        (error (agent-repl--warn ws "nuke-one-workspace: ws-del error: %S" err))))
     ;; WHY: keep `agent-repl--restored-workspaces' consistent with the
     ;; live hash — a ws that's been nuked is no longer a restore-batch
     ;; member, so a follow-up `nuke-restored-workspaces' won't try to
@@ -1124,7 +1124,7 @@ finish-workspace path."
     (agent-repl--log ws "nuke-one-workspace: calling kill-workspace-buffers ws=%s" ws)
     (condition-case err
         (agent-repl--kill-workspace-buffers ws)
-      (error (agent-repl--log ws "nuke-one-workspace: kill-workspace-buffers error: %S" err)))
+      (error (agent-repl--warn ws "nuke-one-workspace: kill-workspace-buffers error: %S" err)))
     (agent-repl--log ws "nuke-one-workspace: kill-workspace-buffers returned ws=%s" ws)
     ;; Kill the persp workspace last so all internal state is already
     ;; cleaned up before the UI workspace disappears.
@@ -1159,7 +1159,7 @@ finish-workspace path."
           (+workspace/kill ws)
           (agent-repl--log ws "nuke-one-workspace: post-persp-kill ws=%s in-cache=%s cache=%S"
                             ws (if (member ws persp-names-cache) "t" "nil") persp-names-cache)))
-      (error (agent-repl--log ws "nuke-one-workspace: workspace-kill error: %S" err)))
+      (error (agent-repl--warn ws "nuke-one-workspace: workspace-kill error: %S" err)))
     ;; The workspace is now gone from both the hash (tombstoned, unless
     ;; PRESERVE-ENTRY) and the tab bar, so its sidebar row is gone too.
     ;; Repaint immediately rather than letting the row outlive its tab
@@ -1485,7 +1485,7 @@ never turn a teardown into an error."
     (agent-repl--log ws "ws-repaint-sidebar: pushing ws=%s reason=%s" ws reason)
     (condition-case err
         (agent-repl--sidebar-push)
-      (error (agent-repl--log ws "ws-repaint-sidebar: push error ws=%s reason=%s err=%S"
+      (error (agent-repl--warn ws "ws-repaint-sidebar: push error ws=%s reason=%s err=%S"
                                ws reason err)))))
 
 (defun agent-repl--ws-kill (ws)
@@ -1609,7 +1609,7 @@ missing roster write is exactly the failure this function exists to
 prevent."
   (if (fboundp 'agent-repl--snapshot-persist-materialized-workspace)
       (agent-repl--snapshot-persist-materialized-workspace ws)
-    (agent-repl--log
+    (agent-repl--warn
      ws
      "ws-materialize-daemon: roster persist SKIPPED ws=%s reason=persist-fn-unavailable"
      ws)))
@@ -1733,7 +1733,7 @@ the original error is re-signaled."
 		 (condition-case rollback-err
                      (persp-kill ws)
 		   (error
-                    (agent-repl--log
+                    (agent-repl--warn
                      ws
                      "ws-materialize-daemon: ROLLBACK perspective kill FAILED ws=%s job-id=%s err=%S"
                      ws job-id rollback-err))))

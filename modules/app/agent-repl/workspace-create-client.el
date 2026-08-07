@@ -427,7 +427,7 @@ and redelivered forever, replacing a visible failure with a loop."
          ;; come.  The failure is announced either way — the daemon's report
          ;; IS the collision/validation preflight Emacs no longer runs.
          (pending (agent-repl--workspace-create-take-request job-id)))
-    (agent-repl--log
+    (agent-repl--warn
      name
      "workspace-create: JOB FAILED job-id=%s requested-name=%s requested-by-emacs=%S command-file=%s error=%s"
      job-id name (not (null pending))
@@ -622,7 +622,7 @@ Exactly one UI action arm must be present."
                  :on-registered (lambda (id) (setq request-id id))
                  :on-failure
                  (lambda (ack-err)
-                   (agent-repl--log
+                   (agent-repl--warn
                     ws
                     "host-action: COMPLETION REJECTED action-id=%s request-id=%s ok=%S err=%s"
                     action-id request-id ok ack-err))))
@@ -970,7 +970,7 @@ duplicate resends its cached outcome."
                    action-id duplicates))
               (error (setq completion-error completion-err)))
             (when completion-error
-              (agent-repl--log
+              (agent-repl--warn
                ws
                "host-action: FAILURE completion send failed action-id=%s type=%s handler=%s handler-err-type=%s handler-err-length=%d completion-err-type=%s retryable=no-until-completion-resend"
                action-id (or type "unresolved") (or handler "unresolved")
