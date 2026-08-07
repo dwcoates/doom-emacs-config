@@ -31,11 +31,16 @@ type ReplayStats struct {
 // the subscriber before SQLite advances to the next row. A slice-returning API
 // would make it possible to buffer an arbitrarily large replay before the
 // first socket write, defeating every downstream activity deadline.
-func (d *DB) ReplayFrom(ctx context.Context, sessionID string, fromSeq uint64, yield func(*corev1.Event) error) (ReplayStats, error) {
+func (d *DB) ReplayFrom(ctx context.Context, sessionID string, fromSeq uint64, yield func(*corev1.Event) error) (stats ReplayStats, replayErr error) {
 	if yield == nil {
 		panic("shim-store db: ReplayFrom requires a yield callback")
 	}
 	started := time.Now()
+	// DEFERRED so every exit — the sink stopping the stream, a scan failure, a
+	// completed replay — reports what the statement cost. A replay's elapsed
+	// time deliberately includes the per-row writes to the subscriber: that is
+	// the interval the store spent holding this query open.
+	defer func() { d.observeQuery(StatementReplay, "event", sessionID, started, int64(stats.Events)) }()
 	fields := logging.Fields{Operation: "replay", Table: "event", Session: sessionID}
 	d.log.LogVerbose(fields, "streaming replay query from_seq=%d", fromSeq)
 	rows, err := d.sql.QueryContext(ctx,
@@ -46,7 +51,6 @@ func (d *DB) ReplayFrom(ctx context.Context, sessionID string, fromSeq uint64, y
 	}
 	defer rows.Close()
 
-	var stats ReplayStats
 	for rows.Next() {
 		var blob []byte
 		if err := rows.Scan(&blob); err != nil {
@@ -81,9 +85,12 @@ func (d *DB) ReplayFrom(ctx context.Context, sessionID string, fromSeq uint64, y
 // MaxSeq returns the highest assigned seq for a session (0 if none).
 func (d *DB) MaxSeq(sessionID string) (uint64, error) {
 	d.log.LogVerbose(logging.Fields{Operation: "max-seq", Table: "event", Session: sessionID}, "querying highest sequence")
+	started := time.Now()
 	var v uint64
 	row := d.sql.QueryRow(`SELECT COALESCE(MAX(seq), 0) FROM event WHERE session_id = ?`, sessionID)
-	if err := row.Scan(&v); err != nil {
+	err := row.Scan(&v)
+	d.observeQuery(StatementMaxSeq, "event", sessionID, started, 1)
+	if err != nil {
 		return 0, d.queryError("max-seq", "event", sessionID, fmt.Errorf("shim-store query: max seq (session=%q): %w", sessionID, err))
 	}
 	d.log.LogVerbose(logging.Fields{Operation: "max-seq", Table: "event", Session: sessionID}, "highest sequence=%d", v)
@@ -94,6 +101,9 @@ func (d *DB) MaxSeq(sessionID string) (uint64, error) {
 // It exercises the event_task index and is used for task-scoped queries.
 func (d *DB) EventsByTask(sessionID, taskID string) ([]*corev1.Event, error) {
 	d.log.LogVerbose(logging.Fields{Operation: "by-task", Table: "event", Session: sessionID}, "querying task_id=%q", taskID)
+	started := time.Now()
+	var out []*corev1.Event
+	defer func() { d.observeQuery(StatementEventsByTask, "event", sessionID, started, int64(len(out))) }()
 	rows, err := d.sql.Query(
 		`SELECT payload FROM event WHERE session_id = ? AND task_id = ? ORDER BY seq ASC`,
 		sessionID, taskID)
@@ -102,7 +112,6 @@ func (d *DB) EventsByTask(sessionID, taskID string) ([]*corev1.Event, error) {
 	}
 	defer rows.Close()
 
-	var out []*corev1.Event
 	for rows.Next() {
 		var blob []byte
 		if err := rows.Scan(&blob); err != nil {
@@ -128,6 +137,9 @@ func (d *DB) EventsByTask(sessionID, taskID string) ([]*corev1.Event, error) {
 // start events back onto the wire.
 func (d *DB) OpenTasks() ([]*corev1.OpenTaskState, error) {
 	d.log.LogVerbose(logging.Fields{Operation: "open-tasks", Table: "event"}, "querying persisted task lifecycle state")
+	started := time.Now()
+	var out []*corev1.OpenTaskState
+	defer func() { d.observeQuery(StatementOpenTasks, "event", "", started, int64(len(out))) }()
 	rows, err := d.sql.Query(`
 		SELECT started.payload, (
 		  SELECT active.produced_at
@@ -158,7 +170,6 @@ func (d *DB) OpenTasks() ([]*corev1.OpenTaskState, error) {
 		return nil, d.queryError("open-tasks", "event", "", fmt.Errorf("shim-store query: open tasks: %w", err))
 	}
 	defer rows.Close()
-	var out []*corev1.OpenTaskState
 	for rows.Next() {
 		var blob []byte
 		var lastActivityAtMs int64
@@ -185,13 +196,15 @@ func (d *DB) OpenTasks() ([]*corev1.OpenTaskState, error) {
 // recovery (§7.3). The sidecar resumes each file from its stored offset/carry.
 func (d *DB) Cursors() ([]*corev1.CursorState, error) {
 	d.log.LogVerbose(logging.Fields{Operation: "list-cursors", Table: "cursor"}, "querying all persisted cursors")
+	started := time.Now()
+	var out []*corev1.CursorState
+	defer func() { d.observeQuery(StatementListCursors, "cursor", "", started, int64(len(out))) }()
 	rows, err := d.sql.Query(`SELECT file_id, path, offset, carry FROM cursor`)
 	if err != nil {
 		return nil, d.queryError("list-cursors", "cursor", "", fmt.Errorf("shim-store query: listing cursors: %w", err))
 	}
 	defer rows.Close()
 
-	var out []*corev1.CursorState
 	for rows.Next() {
 		c := &corev1.CursorState{}
 		var carry []byte
@@ -211,10 +224,17 @@ func (d *DB) Cursors() ([]*corev1.CursorState, error) {
 // Cursor returns one file's persisted cursor, or (nil, nil) if absent.
 func (d *DB) Cursor(fileID string) (*corev1.CursorState, error) {
 	d.log.LogVerbose(logging.Fields{Operation: "cursor", Table: "cursor"}, "querying file_id=%q", fileID)
+	started := time.Now()
 	c := &corev1.CursorState{}
 	var carry []byte
 	row := d.sql.QueryRow(`SELECT file_id, path, offset, carry FROM cursor WHERE file_id = ?`, fileID)
-	switch err := row.Scan(&c.FileId, &c.Path, &c.Offset, &carry); {
+	scanErr := row.Scan(&c.FileId, &c.Path, &c.Offset, &carry)
+	rowsRead := int64(1)
+	if errors.Is(scanErr, sql.ErrNoRows) {
+		rowsRead = 0
+	}
+	d.observeQuery(StatementCursor, "cursor", "", started, rowsRead)
+	switch err := scanErr; {
 	case err == nil:
 		c.Carry = carry
 		d.log.LogVerbose(logging.Fields{Operation: "cursor", Table: "cursor"}, "cursor found file_id=%q offset=%d", fileID, c.GetOffset())
