@@ -176,19 +176,32 @@ func createWorkspaceJobID(name string) (string, error) {
 	return createWorkspaceSubcommand + ":" + name + ":" + hex.EncodeToString(raw[:]), nil
 }
 
+// oneOffSubcommands is THE roster of runtime-free subcommands, so adding one is
+// a table entry rather than another branch in dispatchSubcommand. Every entry
+// obeys the same two rules: stdout carries only machine-readable output, and no
+// entry starts a listener, a session controller, or a shim.
+var oneOffSubcommands = map[string]func(context.Context, []string, io.Writer, io.Writer) error{
+	createWorkspaceSubcommand: runCreateWorkspace,
+	listWorkspacesSubcommand:  runListWorkspaces,
+}
+
 // dispatchSubcommand runs a one-off subcommand when argv names one, reporting
 // whether it handled the invocation and the exit code it wants. The daemon
-// runtime starts only when it reports false, so `create-workspace` never boots
-// a listener, a session controller, or a shim.
+// runtime starts only when it reports false, so a one-off subcommand never
+// boots a listener, a session controller, or a shim.
 func dispatchSubcommand(ctx context.Context, argv []string, stdout, stderr io.Writer) (handled bool, code int) {
-	if len(argv) < 2 || argv[1] != createWorkspaceSubcommand {
+	if len(argv) < 2 {
 		return false, 0
 	}
-	if err := runCreateWorkspace(ctx, argv[2:], stdout, stderr); err != nil {
+	run, ok := oneOffSubcommands[argv[1]]
+	if !ok {
+		return false, 0
+	}
+	if err := run(ctx, argv[2:], stdout, stderr); err != nil {
 		// This is the documented pre-logger boundary: the failure must reach
 		// the operator's terminal even when it happened before (or while
 		// building) the command's own logger.
-		fmt.Fprintf(stderr, "claude-repld %s: %v\n", createWorkspaceSubcommand, err)
+		fmt.Fprintf(stderr, "claude-repld %s: %v\n", argv[1], err)
 		if err == flag.ErrHelp {
 			return true, 2
 		}
