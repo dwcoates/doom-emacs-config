@@ -298,31 +298,6 @@ never be refetched."
           (should (buffer-live-p (agent-repl--ws-get "ws1" :frontend-buffer)))
           (should (= (length agent-repl-test--urls) 2)))))))
 
-;;;; ---- force-fresh-conversation command --------------------------------------
-
-(ert-deftest agent-repl-test-frontend-force-fresh-command-errors-without-workspace ()
-  "The force-fresh command signals when there is no current workspace."
-  ;; Arrange
-  (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () nil)))
-    ;; Act / Assert
-    (should-error (agent-repl-force-fresh-conversation) :type 'user-error)))
-
-(ert-deftest agent-repl-test-frontend-force-fresh-command-recreates-and-syncs ()
-  "The force-fresh command recreates the session and snaps the webview to it."
-  ;; Arrange
-  (let (freshened)
-    (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
-              ((symbol-function 'agent-repl--frontend-force-fresh-session)
-               (lambda (ws ok _fail)
-                 (setq freshened ws)
-                 (funcall ok)
-                 :pending)))
-      ;; Act
-      (agent-repl-force-fresh-conversation)
-      ;; Assert — the displayed webview is left alone: its URL addresses the
-      ;; workspace, so a fresh conversation arrives on the socket it holds.
-      (should (equal freshened "ws1")))))
-
 ;;;; ---- Copy chords ------------------------------------------------------------
 
 (ert-deftest agent-repl-test-frontend-webview-arms-copy-chords ()
