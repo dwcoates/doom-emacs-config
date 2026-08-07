@@ -278,20 +278,18 @@ switch they did not initiate."
          (ws (agent-repl--workspace-create-required-string
               available :finalName context candidate-ws))
          (raw-path (agent-repl--workspace-create-required-string
-                    available :worktreePath context ws))
-         (session-id (agent-repl--workspace-create-required-string
-                      available :sessionId context ws)))
+                    available :worktreePath context ws)))
     (unless (file-name-absolute-p raw-path)
       (agent-repl--log
        ws
-       "workspace-available: INVALID non-absolute path=%s job-id=%s session-id=%s — aborting before mutation"
-       raw-path job-id session-id)
+       "workspace-available: INVALID non-absolute path=%s job-id=%s — aborting before mutation"
+       raw-path job-id)
       (error "agent-repl: WorkspaceAvailable path is not absolute: %s" raw-path))
     (unless (file-directory-p raw-path)
       (agent-repl--log
        ws
-       "workspace-available: INVALID missing directory path=%s job-id=%s session-id=%s — aborting before mutation"
-       raw-path job-id session-id)
+       "workspace-available: INVALID missing directory path=%s job-id=%s — aborting before mutation"
+       raw-path job-id)
       (error "agent-repl: WorkspaceAvailable directory does not exist: %s"
              raw-path))
     ;; Store the announced worktree in the SAME spelling every other
@@ -305,8 +303,8 @@ switch they did not initiate."
     (let ((path (directory-file-name (expand-file-name raw-path))))
       (agent-repl--log
        ws
-       "workspace-available: METADATA READY job-id=%s path=%s session-id=%s branch-present=%S source-ws-present=%S source-dir-present=%S config-dir-present=%S permission-mode-present=%S allow-ungated=%S prompt-queued=%S"
-       job-id path session-id
+       "workspace-available: METADATA READY job-id=%s path=%s branch-present=%S source-ws-present=%S source-dir-present=%S config-dir-present=%S permission-mode-present=%S allow-ungated=%S prompt-queued=%S"
+       job-id path
        (not (null (plist-get available :branch)))
        (not (null (plist-get available :sourceWorkspace)))
        (not (null (plist-get available :sourceDir)))
@@ -318,7 +316,6 @@ switch they did not initiate."
        ws
        (list :daemon-workspace-job-id job-id
              :project-dir path
-             :frontend-session-id session-id
              :branch-name (plist-get available :branch)
              :git-root (plist-get available :gitRoot)
              :base-commit (plist-get available :baseCommit)
@@ -372,16 +369,14 @@ local state."
          (job-id (plist-get metadata :daemon-workspace-job-id)))
     (agent-repl--log
      ws
-     "workspace-available: VALIDATED ws=%s job-id=%s path=%s session-id=%s branch=%s prompt-queued=%S"
+     "workspace-available: VALIDATED ws=%s job-id=%s path=%s branch=%s prompt-queued=%S"
      ws job-id (plist-get metadata :project-dir)
-     (plist-get metadata :frontend-session-id)
      (or (plist-get metadata :branch-name) "nil")
      (plist-get metadata :initial-prompt-queued))
     (agent-repl--log
      ws
-     "workspace-available: MATERIALIZE BEGIN job-id=%s path=%s session-id=%s"
-     job-id (plist-get metadata :project-dir)
-     (plist-get metadata :frontend-session-id))
+     "workspace-available: MATERIALIZE BEGIN job-id=%s path=%s"
+     job-id (plist-get metadata :project-dir))
     (let ((result
            (condition-case err
                (agent-repl--ws-materialize-daemon-workspace ws metadata)

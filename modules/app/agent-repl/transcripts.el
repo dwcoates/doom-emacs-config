@@ -11,10 +11,10 @@
 ;; whose newest daemon session record died by `delete session' is excluded from
 ;; resume permanently, and a workspace torn down and re-created used to end up
 ;; in exactly that state — its transcripts intact on disk, all of them
-;; unreachable, a fresh empty conversation created in their place.  The teardown
-;; no longer stamps that reason (see
-;; `agent-repl--frontend-release-workspace-session'), but the records it already
-;; wrote are durable, so the conversations it stranded need a way back.
+;; unreachable, a fresh empty conversation created in their place.  No teardown
+;; stamps that reason — `agent-repl--gui-kill' tears down the layout and leaves
+;; the session alone — but the records the old one wrote are durable, so the
+;; conversations it stranded need a way back.
 ;;
 ;; EXPLICIT RESUME IS THAT WAY BACK.  `resume-resolve' only chooses among
 ;; candidates for a CONTINUE create; an EXPLICIT create names its conversation

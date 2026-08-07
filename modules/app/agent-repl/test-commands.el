@@ -499,11 +499,14 @@ file into the fake project dir."
           (should (equal ensured "ws-gui")))))))
 
 (ert-deftest agent-repl-cmd-test-establish-workspace/gui-skips-ensure-when-bound ()
-  "A gui workspace already holding a daemon binding is not re-ensured."
+  "A gui workspace the daemon already reports live is not re-ensured."
   (let (ensured)
     (agent-repl-test--with-clean-state
       (agent-repl--ws-put "ws-gui" :frontend 'gui)
-      (agent-repl--ws-put "ws-gui" :frontend-session-id "s_live")
+      (agent-repl--ws-put "ws-gui" :project-dir "/tmp/ws-gui")
+      (clrhash agent-repl--frontend-session-views)
+      (agent-repl--frontend-store-session-view
+       '(:sessionId "s_live" :workspace "/tmp/ws-gui"))
       (agent-repl-cmd-test--with-establish-stubs
          (cl-letf (((symbol-function 'agent-repl--frontend-after-ensure-session)
                     (lambda (ws _on-success _on-failure) (setq ensured ws))))

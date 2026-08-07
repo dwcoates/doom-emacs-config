@@ -467,8 +467,6 @@ turn the next reconnect replay into a false conflict."
           (should (equal (car ack) "workspaceMaterialized"))
           (should (equal (plist-get (cadr ack) :jobId) "job-1"))
           (should (equal (caddr ack) "new")))
-        (should (equal (agent-repl--ws-get "new" :frontend-session-id)
-                       "session-1"))
         (should (equal (agent-repl--ws-get "new" :config-dir-override)
                        "/tmp/account"))
         (should (equal (agent-repl--ws-get "new" :permission-mode) "auto"))
@@ -586,12 +584,12 @@ slash produced a key the daemon has no session for."
     (should-not (fboundp fn))))
 
 (ert-deftest agent-repl-test-daemon-materialization-envelope-clears-on-tombstone ()
-  "The replay envelope does not retain a dead workspace's session id."
+  "The replay envelope does not survive a dead workspace's tombstone."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "dead" :project-dir "/tmp/dead/")
     (agent-repl--ws-put
      "dead" :daemon-workspace-metadata
-     '(:frontend-session-id "session-dead"))
+     '(:daemon-workspace-job-id "job-dead"))
     (agent-repl--ws-del "dead")
     (should-not
      (agent-repl--ws-get "dead" :daemon-workspace-metadata))))
