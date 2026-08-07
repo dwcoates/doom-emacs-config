@@ -92,11 +92,23 @@ measuring.
 
 Each iteration:
 
-1. Bounce the stack and Emacs per `iterative-fix-verify-loop.md` step 1.
+1. Clear the observation logs before the bounce, per "Clear the observation
+   logs first" in `iterative-fix-verify-loop.md` step 1: the global Emacs
+   agent-repl log and the daemon log, plus any further sink this case's replay
+   window is mined on in step 4. The previous iteration's findings are already
+   recorded, and an empty file makes the begin and end markers bound a window
+   with nothing before them to reason about. That runbook also owns the
+   carve-out this step depends on — iteration-start clearing is a
+   user-directed exception to the skill's "never mutate logs" Safety rule,
+   valid inside these two loops' iterations and nowhere else — and the
+   instruction to STOP clearing and surface it to the user the moment clearing
+   costs something, such as a forensic trail that was still needed or a
+   comparison across replays that became impossible.
+2. Bounce the stack and Emacs per `iterative-fix-verify-loop.md` step 1.
    Recording must be OFF for these bounces; replay refuses to run while the
    recorder is armed, so a bounce that re-reads
    `AGENT_REPL_RECORD_INTERACTIONS=1` will block the replay.
-2. Replay the saved sequence:
+3. Replay the saved sequence:
 
    ```sh
    emacsclient -e '(agent-repl-interaction-replay "/absolute/path/to/recording.el")'
@@ -110,7 +122,7 @@ Each iteration:
    (`(agent-repl-interaction-replay FILE 2.0)` replays twice as fast). Leave it
    at the default while the bug is unexplained: compressing the gaps changes
    the timing the bug may depend on.
-3. Bound the replay window in the logs. The replay logs a begin line and an end
+4. Bound the replay window in the logs. The replay logs a begin line and an end
    line carrying the returned replay id:
 
    - `interaction-replay: begin replay_id=<id> ...`
@@ -119,13 +131,13 @@ Each iteration:
    Resolve log paths through the discovery script per `structured-logs.md`;
    never guess a path. The two markers are what make "attributable to the
    replayed window" a fact rather than an assumption.
-4. Mine that window for errors, warnings, and slowdowns, across the Emacs,
+5. Mine that window for errors, warnings, and slowdowns, across the Emacs,
    daemon, shim, webapp, and sidecar sinks the case implicates. A nonzero
    `failures=` count on the end line names events that could not be executed at
    all; per-event failures are logged individually with their index and
    command. Record the warnings whether or not they gate this run — which they
    do is decided by the modifier in step 5.
-5. Root-cause, fan out, merge, and redeploy exactly per
+6. Root-cause, fan out, merge, and redeploy exactly per
    `iterative-fix-verify-loop.md` steps 5 through 8, dispatching only the
    findings the current phase owns (step 5). The user does not mediate between
    finding an issue and dispatching its fix.

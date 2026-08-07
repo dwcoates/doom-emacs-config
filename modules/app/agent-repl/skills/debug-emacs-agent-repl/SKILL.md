@@ -179,6 +179,9 @@ match what just happened. The revision is the user's call; surfacing it is not.
 - Never restart `shim-store` or `shim-claude-sidecar` without explicit user
   permission.
 - Never mutate logs, snapshots, registries, sockets, or runtime state merely
-  to simplify an investigation.
+  to simplify an investigation. One scoped exception exists: the user-directed
+  remediation loops clear the observation logs at each iteration boundary, per
+  "Clear the observation logs first" in
+  `references/iterative-fix-verify-loop.md` step 1.
 - Never substitute a global log when a record is conceptually workspace-owned.
 - Never fill missing telemetry with speculation.

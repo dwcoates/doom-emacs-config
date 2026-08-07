@@ -31,6 +31,35 @@ and it requires the user to have asked for an implementation.
 
 ## 1. Bounce the stack to current builds
 
+### Clear the observation logs first
+
+Before the bounce, truncate the two sinks step 2 observes: the global Emacs
+agent-repl log and the daemon log. Resolve both through
+`agent-repl-log-discovery.sh` per `structured-logs.md` rather than guessing
+paths, and clear exactly those files — nothing else.
+
+Do this at the start of every iteration, not only the first. Once an
+iteration's findings are recorded, its log lines have done their work, and a
+fresh empty window makes the next sweep and the probe delta unambiguous: no
+byte-offset arithmetic, no reasoning about which rotation a record came from,
+no risk of attributing a previous iteration's error to this one.
+
+Clearing the logs is an explicit, user-directed exception to the Safety rule
+"Never mutate logs, snapshots, registries, sockets, or runtime state merely to
+simplify an investigation." That rule governs read-only investigations. This
+loop is neither read-only nor an investigation — it mutates source, deployed
+artifacts, and runtime state by design, and the user asked for exactly that
+when they started it. The exception is scoped to the iteration boundary of this
+loop and of `interaction-replay-remediation.md`. Everywhere else in this skill,
+the Safety rule stands unqualified.
+
+The exception is also revocable in practice. If clearing ever turns out to
+cost something — a forensic trail that was still needed was destroyed, a
+comparison across iterations became impossible, or another consumer proves to
+be reading the same files — STOP clearing and surface the situation to the
+user. Do not keep clearing on the assumption it is fine, and do not silently
+abandon the step either; either way the user is owed the finding.
+
 Run the full deploy chain so that no later observation can be blamed on a
 stale artifact:
 
