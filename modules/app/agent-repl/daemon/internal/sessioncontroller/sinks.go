@@ -381,6 +381,22 @@ type consumer struct {
 	// persistent DegradedState is the replay authority. A fresh replay consumer
 	// starts false and therefore surfaces the persistent record exactly once.
 	unexpectedQueryTerminationSurfaced bool
+	// historicalTerminationPairs is the HISTORICAL mirror of the latch above,
+	// keyed by the RETIRED query the replayed pair belongs to.
+	//
+	// It exists because the pair's two halves reach two different sinks — the
+	// QueryLifecycle row through surfaceUnexpectedQueryTermination, the
+	// DegradedState through Degraded — and both derive the SAME card identity
+	// (degradedUUID("claude-shim-sdk")). The live path already collapses that to
+	// one push through unexpectedQueryTerminationSurfaced; the withhold path had
+	// no equivalent, so one replayed death pushed the card twice and recorded
+	// "system failure … resolved=false" twice in the same microsecond.
+	//
+	// It is deliberately SEPARATE from the live latch, and keyed rather than a
+	// bool, for the reason historicalquerydegradation_test.go pins: arming the
+	// live latch on history would make it swallow a genuine live termination
+	// arriving afterwards.
+	historicalTerminationPairs map[string]struct{}
 	// onTurn reports an observed turn boundary (true = TurnStarted, false =
 	// TurnEnded). It drives the prompt queue's interception and drain (E4).
 	// Called on the shim read-loop goroutine, so the handler must not block on
@@ -1572,7 +1588,7 @@ func (c *consumer) surfaceUnexpectedQueryTermination(ev *corev1.Event, item *fro
 		// below stays at warn, because a live termination IS new news.
 		c.logf("session-controller: typed query termination WITHHELD from the bring-up gate session=%s replayed_query_instance_id=%s live_query_instance_id=%q vendor_session_id=%s observed_at_ms=%d termination_kind=%s cause=%q seq=%d decision=retain_history_no_bring_up_fault",
 			c.sessionID, detail.GetQueryInstanceId(), c.accounting.queryID, detail.GetVendorSessionId(), detail.GetObservedAtMs(), reason, cause, ev.GetSeq())
-		c.pushFailure(c.degradedUUID("claude-shim-sdk"), item)
+		c.pushHistoricalTerminationCard(detail.GetQueryInstanceId(), item)
 		return
 	}
 	c.unexpectedQueryTerminationSurfaced = true
@@ -2094,7 +2110,9 @@ func (c *consumer) Degraded(_ string, ev *corev1.Event, ds *corev1.DegradedState
 //
 // The failure CARD is still pushed, under the same stable per-component
 // identity, so nothing the user could see is lost — this is a retention
-// decision, not a drop.
+// decision, not a drop. It is pushed ONCE per replayed pair, through
+// pushHistoricalTerminationCard, because the QueryLifecycle half derives the
+// same card identity from the other sink.
 func (c *consumer) withholdHistoricalDegradation(ev *corev1.Event, ds *corev1.DegradedState) {
 	// INFO, NOT WARN, for the same reason the typed termination's historical arm
 	// is at info (surfaceUnexpectedQueryTermination): a replayed row is history
@@ -2107,7 +2125,49 @@ func (c *consumer) withholdHistoricalDegradation(ev *corev1.Event, ds *corev1.De
 	if item == nil {
 		return
 	}
+	// The DegradedState half of a replayed unexpected-termination PAIR derives
+	// the very same card identity as the QueryLifecycle half, so it goes through
+	// the pair latch rather than pushing a second, identical card.
+	if ds.GetComponent() == shimSDKComponent && ds.GetReason() == "unexpected_query_termination" {
+		c.pushHistoricalTerminationCard(ds.GetQueryInstanceId(), item)
+		return
+	}
 	c.pushFailure(c.degradedUUID(ds.GetComponent()), item)
+}
+
+// pushHistoricalTerminationCard pushes the failure card for a REPLAYED
+// unexpected-termination pair exactly once, keyed by the retired query the pair
+// belongs to.
+//
+// The shim persists such a termination as an acknowledged pair — the
+// QueryLifecycle row and the confirming DegradedState, adjacent in the store —
+// and the two halves reach two different sinks that both derive
+// degradedUUID("claude-shim-sdk"). Pushing both meant one replayed death
+// recorded "system failure … resolved=false" TWICE per boot for one event. The
+// live path has collapsed this to a single push since it was written
+// (unexpectedQueryTerminationSurfaced); this is the same discipline on the
+// withhold path.
+//
+// FIRST WINS, and the store's own write order makes that the RICHER half: the
+// lifecycle row is written before its confirmation, and only the lifecycle row
+// carries the typed QueryTerminationFailure detail.
+//
+// A pair whose retired query id is EMPTY is pushed unlatched. An unkeyed latch
+// would collapse every unidentified replay into one card, and losing a card is
+// worse than logging one twice.
+func (c *consumer) pushHistoricalTerminationCard(retiredQueryID string, item *frontendv1.SystemFailureItem) {
+	if retiredQueryID != "" {
+		if _, seen := c.historicalTerminationPairs[retiredQueryID]; seen {
+			c.logf("session-controller: replayed termination pair already carded session=%s retired_query_instance_id=%s uuid=%s decision=single_card_per_replayed_pair",
+				c.sessionID, retiredQueryID, c.degradedUUID(shimSDKComponent))
+			return
+		}
+		if c.historicalTerminationPairs == nil {
+			c.historicalTerminationPairs = map[string]struct{}{}
+		}
+		c.historicalTerminationPairs[retiredQueryID] = struct{}{}
+	}
+	c.pushFailure(c.degradedUUID(shimSDKComponent), item)
 }
 
 // Canonical cause kinds for a fault edge whose DegradedState carried no
