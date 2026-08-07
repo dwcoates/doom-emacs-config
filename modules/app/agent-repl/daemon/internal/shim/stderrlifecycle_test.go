@@ -83,6 +83,28 @@ func TestStderrPumpLogsCleanEOFWithCanonicalLifecycleContext(t *testing.T) {
 	assertNoLogContains(t, logger, "stderr scan error")
 }
 
+func TestStderrPumpAnnouncesItselfOnTheLifecycleChannel(t *testing.T) {
+	// Arrange: the daemon's logger stamps Log level=error, so the channel the
+	// pump announces itself on decides whether a healthy spawn writes an error
+	// record. The scan-error path keeps Log, which the tests above cover.
+	logger := &recordingLogger{}
+	pump := newLifecycleTestPump(&scriptedStderrReader{terminal: io.EOF}, logger)
+
+	// Act.
+	pump.run()
+
+	// Assert.
+	for _, record := range logger.logged() {
+		if strings.Contains(record.line, "stderr scanner started") {
+			if record.level != "lifecycle" {
+				t.Fatalf("scanner-start record = %#v, want the lifecycle channel", record)
+			}
+			return
+		}
+	}
+	t.Fatalf("no scanner-start record at all: %#v", logger.logged())
+}
+
 func TestStderrPumpClassifiesOnlyLifecycleOwnedClosedReaderAsExpected(t *testing.T) {
 	logger := &recordingLogger{}
 	pump := newLifecycleTestPump(&scriptedStderrReader{terminal: os.ErrClosed}, logger)

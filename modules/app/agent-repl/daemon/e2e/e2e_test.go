@@ -376,6 +376,8 @@ func (l testShimLogger) Log(format string, args ...any) { l.t.Logf(format, args.
 
 func (l testShimLogger) LogVerbose(format string, args ...any) { l.t.Logf(format, args...) }
 
+func (l testShimLogger) LogLifecycle(format string, args ...any) { l.t.Logf(format, args...) }
+
 // --- minimal WireAgentShim stubs (lifecycle unused here) --------------------
 
 type stubLifecycle struct{}
