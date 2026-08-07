@@ -274,6 +274,17 @@ alongside the install and codex checks."
 (defconst agent-repl--frontend-daemon-buffer "*claude-repld*"
   "Buffer capturing the daemon process's stdout/stderr.")
 
+(defvar agent-repl--frontend-daemon-line-accumulator ""
+  "Trailing PARTIAL line of daemon output, held until its newline arrives.
+
+`make-process' chunks a pipe wherever the kernel happened to split it,
+so a record straddling two chunks reaches the filter as two fragments.
+Without this the mirror logged both halves as separate lines and the
+record was destroyed — observed on a real daemon panic whose goroutine
+dump landed spliced through unrelated records and could not be read.
+The capture BUFFER never had this problem (it inserts raw chunks); only
+the log mirror did.")
+
 (defconst agent-repl--frontend-build-buffer "*agent-repl-build-frontend*"
   "Buffer capturing build-script output.")
 
@@ -524,7 +535,28 @@ already explained itself.
 
 The daemon owns `daemon.log' for its own structured records.  This
 mirrors only what it wrote to a TERMINAL, at the quiet debug rung, so the
-two never become duplicate narratives of one event."
+two never become duplicate narratives of one event.
+
+Two things make that promise real, and neither is cosmetic — this filter
+runs on the SAME event loop that must drain the frontend UDS, and the
+daemon hard-disconnects a host client whose outbound queue it fills
+faster than the client reads (`frontend: slow consumer', a 256-frame
+bound).  At boot the mirror was doing ~130 log writes a second while the
+UDS managed 14 frame dispatches in sixteen seconds; the daemon evicted
+Emacs, and the sentinel reported the eviction as a broken connection.
+So:
+
+- Lines are reassembled across chunk boundaries via
+  `agent-repl--frontend-daemon-line-accumulator' before anything is
+  logged.  A record split by the kernel is one record, not two.
+- A line the daemon ALREADY wrote to its own structured log
+  (`runtime':\"daemon\") is not mirrored again — that is the duplicate
+  narrative the docstring above forbids, and it was the largest single
+  share of the volume.  Everything else is mirrored verbatim: the
+  relayed `sidecar' and `webapp' records, whose ONLY durable home is
+  this mirror, and every unstructured line — panics, goroutine dumps,
+  flag errors, Go runtime output — which is the failure evidence this
+  filter was built for."
   (when (buffer-live-p (process-buffer proc))
     (with-current-buffer (process-buffer proc)
       (let ((moving (= (point) (process-mark proc))))
@@ -533,8 +565,49 @@ two never become duplicate narratives of one event."
           (insert chunk)
           (set-marker (process-mark proc) (point)))
         (when moving (goto-char (process-mark proc))))))
-  (dolist (line (split-string (or chunk "") "\n" t "[ \t\r]+"))
-    (agent-repl--log nil "claude-repld output: %s" line)))
+  (let* ((pending (concat agent-repl--frontend-daemon-line-accumulator
+                          (or chunk "")))
+         (parts (split-string pending "\n"))
+         ;; The final element is whatever followed the last newline: a
+         ;; complete line only if the chunk ended on one, in which case
+         ;; `split-string' leaves "" there.  Either way it is exactly the
+         ;; carry-over, so taking it unconditionally is correct.
+         (complete (butlast parts)))
+    (setq agent-repl--frontend-daemon-line-accumulator (car (last parts)))
+    (dolist (line complete)
+      (let ((line (string-trim line)))
+        (unless (or (string-empty-p line)
+                    (agent-repl--frontend-daemon-own-record-p line))
+          (agent-repl--log nil "claude-repld output: %s" line))))))
+
+(defun agent-repl--frontend-daemon-own-record-p (line)
+  "Return non-nil when LINE is a record the daemon already logged itself.
+
+Its own structured records carry a leading `\"runtime\":\"daemon\"' and
+land in `claude-repld.log' durably, so mirroring them is pure
+duplication.
+
+The match is ANCHORED at the head of the record rather than searched for
+anywhere in it, because a relayed `sidecar' or `webapp' record may quote
+the daemon's runtime tag inside its own message text, and skipping one of
+those would destroy the only durable copy that exists.  Anchoring also
+fixes the failure DIRECTION: if the daemon ever reorders its envelope
+this stops matching and the line is mirrored again — redundant, never
+absent."
+  (string-match-p "\\`{\"timestamp\":\"[^\"]*\",\"runtime\":\"daemon\"" line))
+
+(defun agent-repl--frontend-daemon-flush-partial-line ()
+  "Mirror any held partial daemon line and clear the accumulator.
+
+Called when no newline can still arrive for it — the daemon is gone.  The
+held text is mirrored WITHOUT the own-record filter: a line the daemon
+did not finish writing to stdout is a line it very likely did not finish
+writing to its own log either, so the duplication argument that justifies
+skipping complete daemon records does not hold for this one."
+  (let ((partial (string-trim agent-repl--frontend-daemon-line-accumulator)))
+    (setq agent-repl--frontend-daemon-line-accumulator "")
+    (unless (string-empty-p partial)
+      (agent-repl--log nil "claude-repld output: %s" partial))))
 
 (defun agent-repl--frontend-daemon-output ()
   "Return the captured `claude-repld' terminal output, trimmed.
@@ -589,6 +662,11 @@ Assumes the artifacts are already built; call
        nil "Claude shim entrypoint missing after build: %s"
        agent-repl--frontend-shim-entry))
     (agent-repl--backend-phase nil "starting the daemon…")
+    ;; A dead daemon's unterminated last line belongs to THAT daemon.  Carrying
+    ;; it across a spawn would glue it onto the next daemon's first record and
+    ;; corrupt both — and the last line before a death is exactly the line a
+    ;; crash investigation reads.
+    (setq agent-repl--frontend-daemon-line-accumulator "")
     (let ((proc (agent-repl--frontend-spawn-daemon)))
       (setq agent-repl--frontend-daemon-process proc)
       (agent-repl--log nil "claude-repld started (pid %s) on %s"
@@ -615,6 +693,11 @@ under the reserved `client.\=' prefix."
                                   tracked trimmed-event)
       (when tracked
         (setq agent-repl--frontend-daemon-process nil))
+      ;; A daemon that dies mid-line leaves its last line unterminated, and
+      ;; that line is precisely the one a crash investigation wants.  Nothing
+      ;; will ever deliver its newline, so flush it here rather than let the
+      ;; next spawn's reset discard it.
+      (agent-repl--frontend-daemon-flush-partial-line)
       (let* ((output (agent-repl--frontend-daemon-output))
              (tail (agent-repl--backend-output-tail output)))
         ;; The exit EVENT alone ("exited abnormally with code 1") never says
