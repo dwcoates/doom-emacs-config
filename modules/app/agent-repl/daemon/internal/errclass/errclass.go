@@ -181,6 +181,15 @@ const (
 	// What it reports is a disagreement between the clock that stamped the
 	// start and the clock that stamped the end.
 	TypeKeepAliveWindowInverted Type = "keep_alive.window_inverted"
+	// TypeClientLogIdentityStale — a browser log record named an agent-repl or
+	// Claude session that is not the one the daemon registry holds for the
+	// command's workspace, so the record was refused rather than persisted
+	// under an attribution the daemon knows to be wrong. It is an ORDINARY
+	// outcome of a page that outlived its session (a rebind, a resume, or a
+	// daemon restart), which is exactly why it is named: reaching a human as
+	// internal.unclassified logged a routine staleness as a daemon fault on
+	// every single rejected record.
+	TypeClientLogIdentityStale Type = "client_log.identity_stale"
 	// TypeInternalUnclassified — the loud fallthrough. It carries the raw
 	// error text and is always logged; a silent fallthrough would let the
 	// vocabulary rot without anyone noticing.
@@ -295,6 +304,7 @@ var prose = map[Type]string{
 	TypeSessionHibernated:          "the session is hibernated; choose how to revive it before sending prompts",
 	TypeKeepAliveWindowUnclosed:    "a cache keep-alive window could not be closed, so new conversation is being withheld until it is repaired",
 	TypeKeepAliveWindowInverted:    "a cache keep-alive window ended before it began, so the daemon's own keep-alive turn may appear in the conversation",
+	TypeClientLogIdentityStale:     "a browser log record named a session this workspace no longer runs, so it was not recorded",
 	TypeInternalUnclassified:       "the command failed",
 
 	// API — the SDK or the vendor refusing or concluding the work.
@@ -387,6 +397,13 @@ var (
 	// ErrSessionHibernated anchors the revival gate's refusal, so a client can
 	// render the revival choice from a NAMED failure rather than parsing text.
 	ErrSessionHibernated = errors.New("session-controller: the session is hibernated")
+	// ErrClientLogIdentityStale anchors the client-log persistence boundary's
+	// session-attribution refusal. The rejecting site wraps it with the exact
+	// got/want identities, so nothing the old bare fmt.Errorf reported is lost;
+	// what the sentinel adds is a NAME, because a webview that outlived its
+	// session produces one of these per forwarded record and every one of them
+	// used to be logged as an unclassified daemon fault.
+	ErrClientLogIdentityStale = errors.New("server: client log source session identity disagrees with the daemon registry")
 )
 
 // sentinelTypes is the ladder, as data rather than as a switch, so the
@@ -413,6 +430,7 @@ var sentinelTypes = []struct {
 	{ErrQueueEntrySessionUnwired, TypeQueueEntrySessionUnwired},
 	{ErrQueueEntryKeepAliveHeld, TypeQueueEntryKeepAliveHeld},
 	{ErrSessionHibernated, TypeSessionHibernated},
+	{ErrClientLogIdentityStale, TypeClientLogIdentityStale},
 }
 
 // Sentinel is the errors.Is ladder over the daemon's sentinel errors. It
@@ -805,6 +823,7 @@ func AllTypes() []Type {
 		TypeSessionHibernated,
 		TypeKeepAliveWindowUnclosed,
 		TypeKeepAliveWindowInverted,
+		TypeClientLogIdentityStale,
 		TypeInternalUnclassified,
 		TypeAPIAuthenticationFailed,
 		TypeAPIBillingError,
