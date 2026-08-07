@@ -44,6 +44,7 @@
 ;; Transport helpers; defined in frontend-uds.el / frontend-client.el /
 ;; workspace-create-client.el, resolved at call time (same module).
 (declare-function agent-repl--log "core" (ws fmt &rest args))
+(declare-function agent-repl--warn "core" (ws fmt &rest args))
 (declare-function agent-repl--ws-get "core" (ws key))
 (declare-function agent-repl--uds-send-command "frontend-uds"
                   (field payload &optional workspace process &rest keys))
@@ -101,7 +102,7 @@ other command; the DISPLAY name rides `:workspaceName'."
      :on-failure
      (lambda (err)
        (agent-repl--host-action-settle req nil err)
-       (agent-repl--log ws
+       (agent-repl--warn ws
                         "merge-dispatch-over-uds: ws=%s request-id=%s command REJECTED err=%s"
                         ws req err)
        (message "agent-repl: merge of %s refused: %s" ws err))

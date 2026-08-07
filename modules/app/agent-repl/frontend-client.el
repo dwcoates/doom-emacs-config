@@ -38,6 +38,7 @@
 (require 'url-util)
 
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl-connection-notice-warn "connection-notice" (text &optional level))
 (declare-function agent-repl-connection-notices-retract "connection-notice" (reason))
 (declare-function agent-repl--log-verbose "agent-repl-core" (ws fmt &rest args))
@@ -600,7 +601,7 @@ unreachable, or has no recorded id."
        (agent-repl--log ws "session-health command: HEALTHY session-id=%s" session-id)
        (message "agent-repl: %s session %s is healthy" ws session-id))
      (lambda (detail)
-       (agent-repl--log ws "session-health command: FAILED session-id=%s detail=%s"
+       (agent-repl--warn ws "session-health command: FAILED session-id=%s detail=%s"
                         session-id detail)))
     :pending))
 
@@ -847,7 +848,7 @@ boot id, which is what resets each workspace's give-up."
         (condition-case err
             (agent-repl--ensure-frontend-daemon)
           (error
-           (agent-repl--log nil "reattach: daemon ensure failed: %s"
+           (agent-repl--warn nil "reattach: daemon ensure failed: %s"
                             (error-message-string err)))))
     (dolist (ws (agent-repl--live-ws-names))
       (agent-repl--frontend-ensure-workspace ws))))
@@ -937,7 +938,7 @@ workspaces that carried a session binding to rebind."
       (agent-repl--log nil "reattach: explicit rebind complete remounted-workspaces=%d" n)
       (when on-success (funcall on-success n)))
      (lambda (detail)
-       (agent-repl--log nil "reattach: explicit rebind FAILED detail=%s" detail)
+       (agent-repl--warn nil "reattach: explicit rebind FAILED detail=%s" detail)
        (when on-failure (funcall on-failure detail))))
     :pending))
 
@@ -989,7 +990,7 @@ sender watches the bottom from the instant the prompt leaves."
                       request-id (length raw))
      (when on-settle (funcall on-settle)))
    (lambda (detail)
-     (agent-repl--log ws "do-send[gui]: FAILED before dispatch detail=%s" detail)
+     (agent-repl--warn ws "do-send[gui]: FAILED before dispatch detail=%s" detail)
      (when on-settle (funcall on-settle))))
   :pending)
 
@@ -1039,7 +1040,7 @@ failed must never read as a session that came back."
      :on-registered (lambda (id) (setq req id))
      :on-failure
      (lambda (err)
-       (agent-repl--log ws "restart-session: ws=%s REJECTED: %s" ws err))
+       (agent-repl--warn ws "restart-session: ws=%s REJECTED: %s" ws err))
      :on-success
      (lambda ()
        (agent-repl--log ws "restart-session: ws=%s complete request-id=%s" ws req)
@@ -1066,7 +1067,7 @@ handler and echoed here as well."
      :on-registered (lambda (id) (setq req id))
      :on-failure
      (lambda (err)
-       (agent-repl--log ws "hibernate-workspace: ws=%s REJECTED: %s" ws err)
+       (agent-repl--warn ws "hibernate-workspace: ws=%s REJECTED: %s" ws err)
        (message "agent-repl: hibernate refused for %s: %s" ws err))
      :on-success
      (lambda ()
@@ -1416,7 +1417,7 @@ and the send, so the guards above cannot be the only protection."
                                                 "ensure: ack ACCEPTED request-id=%s" req))))
               req))
         (error
-         (agent-repl--log ws "ensure: ws=%s send FAILED: %s"
+         (agent-repl--warn ws "ensure: ws=%s send FAILED: %s"
                           ws (error-message-string err))
          nil)))))
 

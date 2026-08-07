@@ -484,7 +484,7 @@ nothing left to undo."
          (buf (agent-repl--ws-get ws :input-buffer)))
     (agent-repl--ws-put ws :sent-turn nil)
     (if (not (buffer-live-p buf))
-        (agent-repl--log ws "interrupt: retracted %S but the input buffer is dead" raw)
+        (agent-repl--warn ws "interrupt: retracted %S but the input buffer is dead" raw)
       (with-current-buffer buf
         (if (not (zerop (buffer-size)))
             (agent-repl--log ws "interrupt: retracted prompt not restored over a draft: %S" raw)
@@ -585,7 +585,7 @@ the agent-shim cutover; that hook counter no longer exists.)"
       ;; the done-marking must not fire for an undelivered interrupt.
       (let ((outcome (agent-repl--frontend-dispatch-interrupt ws 'escape)))
         (if (not outcome)
-            (agent-repl--log ws "interrupt: frontend reported not delivered, skipping")
+            (agent-repl--warn ws "interrupt: frontend reported not delivered, skipping")
           (agent-repl--mark-agent-done ws)
           ;; Restore before the re-insert timer so the prompt is already
           ;; there to revise when the buffer takes insert state.
@@ -1235,7 +1235,7 @@ the sexp is unreadable."
                 :default-frontend
                 (agent-repl--snapshot-plist-key-from-raw raw :default-frontend)))
       (error
-       (agent-repl--log nil "read-workspace-snapshot: read err file=%s err=%S"
+       (agent-repl--warn nil "read-workspace-snapshot: read err file=%s err=%S"
                          file err)
        nil))))
 
@@ -1850,7 +1850,7 @@ the error-routing `condition-case'."
               (plist-put state :queue (cdr queue)))
         (cond
          ((not (and dir (file-directory-p dir)))
-          (agent-repl--log nil "snapshot-load iter=%d/%d SKIPPED ws=%s dir=%s reason=dir-missing-or-nil"
+          (agent-repl--warn nil "snapshot-load iter=%d/%d SKIPPED ws=%s dir=%s reason=dir-missing-or-nil"
                             iter total ws (or dir "nil"))
           (setq agent-repl--snapshot-load-state
                 (plist-put agent-repl--snapshot-load-state :skipped
@@ -1875,7 +1875,7 @@ the error-routing `condition-case'."
           (condition-case err
               (agent-repl--register-merged-workspace ws dir)
             (error
-             (agent-repl--log nil "snapshot-load: register-merged err ws=%s err=%S" ws err)))
+             (agent-repl--warn nil "snapshot-load: register-merged err ws=%s err=%S" ws err)))
           (when (eq (agent-repl--ws-get ws :merge-failed) t)
             (agent-repl--log nil "snapshot-load iter=%d/%d ws=%s dir=%s merge-failed -> establish + front-reorder"
                               iter total ws dir)
@@ -1886,7 +1886,7 @@ the error-routing `condition-case'."
                   ;; A real workspace now exists — safe to nuke `main'.
                   (agent-repl--snapshot-load-close-main))
               (error
-               (agent-repl--log nil "snapshot-load: failed-restore establish err ws=%s err=%S" ws err))))
+               (agent-repl--warn nil "snapshot-load: failed-restore establish err ws=%s err=%S" ws err))))
           (setq agent-repl--snapshot-load-state
                 (plist-put agent-repl--snapshot-load-state :loaded
                            (1+ (plist-get agent-repl--snapshot-load-state :loaded))))
@@ -2129,7 +2129,7 @@ there is no post-restore bounce and no degraded restore path."
                           "startup restore: no snapshot file=%s; no restore requested"
                           file))))
    (lambda (detail)
-     (agent-repl--log nil "startup restore: backend preparation FAILED detail=%s" detail))))
+     (agent-repl--warn nil "startup restore: backend preparation FAILED detail=%s" detail))))
 
 ;;;; Workspace snapshot archive picker
 
@@ -2251,7 +2251,7 @@ through `--initialize-ws-env' for merged entries)."
                        (condition-case err
                            (agent-repl--read-sexp-file state-file)
                          (error
-                          (agent-repl--log ws "register-merged: state-read err err=%S" err)
+                          (agent-repl--warn ws "register-merged: state-read err err=%S" err)
                           nil)))))
       (agent-repl--log ws "register-merged: ws=%s dir=%s saved=%s"
                         ws dir (if saved "yes" "no"))

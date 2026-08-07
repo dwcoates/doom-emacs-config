@@ -45,6 +45,7 @@
 (require 'cl-lib)
 
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--ensure-frontend-daemon "agent-repl-daemon" (&optional force))
 (declare-function agent-repl--frontend-after-ready "agent-repl-frontend-client" (on-ready on-failure &optional ws))
 (declare-function agent-repl--frontend-after-create-session "agent-repl-frontend-client" (cwd model resume-mode explicit-id on-success on-failure &optional ws))
@@ -469,7 +470,7 @@ lands in the agent-repl log."
             (agent-repl--log nil "explain-config: session released %S"
                              agent-repl--explain-config-session-id))
         (error
-         (agent-repl--log nil "explain-config: session release FAILED for %S: %s"
+         (agent-repl--warn nil "explain-config: session release FAILED for %S: %s"
                           agent-repl--explain-config-session-id
                           (error-message-string err))))
     (agent-repl--log nil "explain-config: release-session skipped; no session is bound"))
@@ -614,7 +615,7 @@ clarification and explanation only."
                           "explain-config: command completed session=%S webview=%S"
                           session-id buf)))
      (lambda (detail)
-       (agent-repl--log nil "explain-config: command FAILED detail=%s" detail)))
+       (agent-repl--warn nil "explain-config: command FAILED detail=%s" detail)))
     :pending))
 
 ;;;###autoload

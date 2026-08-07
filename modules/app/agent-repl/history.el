@@ -438,7 +438,7 @@ launches under the same request."
           (progn
             (agent-repl-save-workspace-snapshot)
             (agent-repl--log ws "state-save: snapshot complete ws=%s" ws))
-        (agent-repl--log ws "state-save: snapshot skipped ws=%s reason=function-unavailable" ws)))))
+        (agent-repl--warn ws "state-save: snapshot skipped ws=%s reason=function-unavailable" ws)))))
 
 (defun agent-repl--validate-ws-env (ws)
   "Validate that workspace WS has well-formed environment state.

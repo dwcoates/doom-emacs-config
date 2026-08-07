@@ -28,6 +28,7 @@
 (require 'cl-lib)
 
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--log-verbose "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--doctor-log "agent-repl-doctor" (fmt &rest args))
@@ -1077,7 +1078,7 @@ inherited-pipe EOF."
          ;; below still stops the daemon; it simply cannot carry the mode, so
          ;; the shims are preserved. Loud, because the caller asked for the
          ;; opposite and is entitled to know it did not happen.
-         (agent-repl--log nil
+         (agent-repl--warn nil
                           "frontend stop: stop-shims request FAILED (%s) — the daemon will preserve its shims"
                           (error-message-string err)))))
     (let ((proc agent-repl--frontend-daemon-process))

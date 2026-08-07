@@ -85,7 +85,7 @@ project directory in the trace."
          kind path canonical)
         canonical)
     (error
-     (agent-repl--log
+     (agent-repl--warn
       ws "hide-project-dirs: canonicalization failed kind=%s path=%S error=%S"
       kind path err)
      nil)))
@@ -271,7 +271,7 @@ Returns the list of restored workspace names."
                (agent-repl--log
                 ws "hide-project-dirs: restore reorder failed ws=%s error=%S" ws err)
                (signal (car err) (cdr err))))))
-      (agent-repl--log
+      (agent-repl--warn
        origin "hide-project-dirs: restore reorder skipped reason=reorder-helper-unavailable"))
     ;; Return focus to wherever the user was before the restore cascade
     ;; switched the frame through each re-established workspace.
@@ -282,7 +282,7 @@ Returns the list of restored workspace names."
               (agent-repl--log
                origin "hide-project-dirs: restore focus-returned origin=%S" origin))
           (error
-           (agent-repl--log
+           (agent-repl--warn
             origin "hide-project-dirs: restore focus-return-failed origin=%S error=%S"
             origin err)))
       (agent-repl--log
@@ -314,7 +314,7 @@ the hidden set."
           ws "hide-project-dirs: persist failed enabled=%s error=%S"
           agent-repl-hide-project-dirs-enabled err)
          (signal (car err) (cdr err))))
-    (agent-repl--log
+    (agent-repl--warn
      ws "hide-project-dirs: persist skipped reason=snapshot-saver-unavailable enabled=%s"
      agent-repl-hide-project-dirs-enabled)))
 
@@ -377,7 +377,7 @@ than waiting for the next 1Hz poll."
             (agent-repl--force-tab-bar-redraw)
             (agent-repl--log
              origin "hide-project-dirs: toggle redraw-complete origin=%S" origin))
-        (agent-repl--log
+        (agent-repl--warn
          origin "hide-project-dirs: toggle redraw-skipped reason=redraw-helper-unavailable"))
       (message "agent-repl hide-project-dirs %s (%s %d workspace(s))"
                (if agent-repl-hide-project-dirs-enabled "enabled" "disabled")

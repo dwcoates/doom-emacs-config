@@ -25,6 +25,7 @@
 (declare-function agent-repl--frontend-rebind-workspaces-after-restart "frontend-client" (&optional on-success on-failure))
 (declare-function agent-repl--frontend-runtime-bounce-preflight-async "daemon" (callback))
 (declare-function agent-repl--log "core" (ws fmt &rest args))
+(declare-function agent-repl--warn "core" (ws fmt &rest args))
 (declare-function agent-repl--log-verbose "core" (ws fmt &rest args))
 (declare-function agent-repl-uds-disconnect "frontend-uds" ())
 (declare-function agent-repl--frontend-invalidate-daemon-view "frontend-state" (reason))
@@ -276,10 +277,10 @@ validated both jobs before building any runtime artifact."
            (funcall on-success))
        (error
         (let ((detail (error-message-string err)))
-          (agent-repl--log nil "shim-services bounce FAILED after store readiness: %s" detail)
+          (agent-repl--warn nil "shim-services bounce FAILED after store readiness: %s" detail)
           (funcall on-failure detail)))))
    (lambda (detail)
-     (agent-repl--log nil "shim-services bounce FAILED before sidecar: %s" detail)
+     (agent-repl--warn nil "shim-services bounce FAILED before sidecar: %s" detail)
      (message "agent-repl: shim service bounce failed: %s" detail)
      (funcall on-failure detail)))
   :pending)
@@ -395,7 +396,7 @@ to reattach to.  The default PRESERVES them; see
    t
    (lambda () (message "agent-repl: runtime restart complete"))
    (lambda (detail)
-     (agent-repl--log nil "runtime-restart command: FAILED detail=%s" detail))
+     (agent-repl--warn nil "runtime-restart command: FAILED detail=%s" detail))
    (and stop-shims t)))
 
 (defun agent-repl-runtime-restart-await (&optional stop-shims timeout)

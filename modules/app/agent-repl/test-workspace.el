@@ -1482,9 +1482,16 @@ identity-distinct string injected by `agent-repl-set-priority' from
 (ert-deftest agent-repl-test-ws-repaint-sidebar-survives-a-push-error ()
   "A failing roster push never turns a teardown into an error."
   (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl--sidebar-push)
-               (lambda () (error "boom"))))
-      (should-not (agent-repl--ws-repaint-sidebar "doomed" "test")))))
+    (let (warned)
+      (cl-letf (((symbol-function 'agent-repl--sidebar-push)
+                 (lambda () (error "boom")))
+                ;; The contained failure rides the warn rung, so the helper's
+                ;; value is the log emitter's rather than a contract; a signal
+                ;; escaping the containment still fails this test.
+                ((symbol-function 'agent-repl--warn)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warned))))
+        (agent-repl--ws-repaint-sidebar "doomed" "test")
+        (should (cl-some (lambda (l) (string-match-p "push error" l)) warned))))))
 
 (ert-deftest agent-repl-test-ws-repaint-sidebar-noop-without-sidebar ()
   "The repaint is skipped when sidebar.el is not loaded."
