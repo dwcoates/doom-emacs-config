@@ -79,6 +79,17 @@ type Record struct {
 	// deliberately leaves records non-terminal so they rehydrate.
 	Terminal    bool   `json:"terminal,omitempty"`
 	DeathReason string `json:"death_reason,omitempty"`
+	// DeathResolvedAtMs is when this record's death STOPPED BEING TRUE, unix
+	// millis, or zero while it still is. It is the durable half of
+	// frontendv1.SystemFailureItem.resolved_at_ms for the death card: the item
+	// is re-derived from DeathReason on every SessionView push, so without a
+	// persisted instant the card reopens, unresolved, on every boot forever.
+	//
+	// Only a WINDOW-shaped death has one. A supersede is the window: it says
+	// "a newer session took this workspace", and that sentence stops describing
+	// anything the moment the successor is genuinely up. A delete does not —
+	// the conversation stays deleted — so nothing stamps it.
+	DeathResolvedAtMs int64 `json:"death_resolved_at_ms,omitempty"`
 	// TerminalAt records when the record became terminal. It orders the bounded
 	// recent SessionView retention set; legacy records are migrated from
 	// CreatedAt, with session id as the deterministic final tie-break.

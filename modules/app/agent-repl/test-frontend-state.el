@@ -1165,6 +1165,46 @@ Only a DIFFERENT session's terminal view is a superseded predecessor."
        ;; Assert
        (should (string-match-p "some ancient reason" echoed))))))
 
+(ert-deftest agent-repl-test-open-supersede-death-surfaces ()
+  "A supersede whose successor is not yet up still announces itself."
+  ;; Arrange — the daemon resolves a supersede only once the replacement
+  ;; session reaches operational, so an unresolved one is a handover the user
+  ;; just triggered and must still be reported.
+  (agent-repl-test--with-clean-state
+   (clrhash agent-repl--frontend-surfaced-deaths)
+   (let (echoed)
+     (cl-letf (((symbol-function 'message)
+                (lambda (fmt &rest args) (setq echoed (apply #'format fmt args)))))
+       ;; Act
+       (agent-repl--frontend-apply-session-view
+        '(:sessionId "s1" :workspace "/w" :terminal t
+          :death (:errorClass "ERROR_CLASS_INTERNAL"
+                  :errorType "session.superseded"
+                  :message "a new Claude session was started for this workspace"
+                  :itemUuid "death:s1" :resolvedAtMs 0)))
+       ;; Assert
+       (should (string-match-p "a new Claude session was started" echoed))))))
+
+(ert-deftest agent-repl-test-resolved-supersede-death-is-silent ()
+  "A supersede the daemon has resolved re-presents nothing on restore."
+  ;; Arrange — this is the boot burst the resolution exists to end: historical
+  ;; supersedes replayed in every snapshot, each one an open blue card about a
+  ;; handover completed days earlier.
+  (agent-repl-test--with-clean-state
+   (clrhash agent-repl--frontend-surfaced-deaths)
+   (let (echoed)
+     (cl-letf (((symbol-function 'message)
+                (lambda (fmt &rest args) (setq echoed (apply #'format fmt args)))))
+       ;; Act
+       (agent-repl--frontend-apply-session-view
+        '(:sessionId "s1" :workspace "/w" :terminal t
+          :death (:errorClass "ERROR_CLASS_INTERNAL"
+                  :errorType "session.superseded"
+                  :message "a new Claude session was started for this workspace"
+                  :itemUuid "death:s1" :resolvedAtMs 1700000000000)))
+       ;; Assert
+       (should (null echoed))))))
+
 ;;;; ---- Handler registration wiring -------------------------------------
 
 (ert-deftest agent-repl-test-state-load-does-not-dial-before-lazy-daemon ()

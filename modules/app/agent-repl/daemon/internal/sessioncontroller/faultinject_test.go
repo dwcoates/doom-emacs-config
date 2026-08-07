@@ -267,7 +267,7 @@ func TestShimDeathClassifiesAsInternal(t *testing.T) {
 	rig.apply(&corev1.SessionEnded{})
 
 	// Act
-	item := errclass.Death(t.Logf, rig.death[0])
+	item := errclass.Death(t.Logf, "s_fault", rig.death[0], 0)
 
 	// Assert
 	if item.GetErrorClass() != frontendv1.ErrorClass_ERROR_CLASS_INTERNAL {

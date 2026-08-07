@@ -664,7 +664,19 @@ var deathReasonTypes = map[string]Type{
 // A string outside the known set becomes session.ended_unclassified carrying
 // the raw value, and logs — the backfillState precedent of a closed switch
 // with a loud default, never a silent pass-through.
-func Death(logf dlog.Logf, reason string) *frontendv1.SystemFailureItem {
+//
+// resolvedAtMs is the durable instant the death STOPPED BEING TRUE (unix
+// millis), zero while it still is. It rides straight onto the item because the
+// item itself is derived fresh from the registry on every push: a death card
+// that could not carry its own resolution would reopen on every push and every
+// boot for the rest of the record's retention, which is exactly what a
+// superseded session did. WINDOW-shaped deaths are the only ones a writer
+// stamps; an EVENT-shaped one (a delete) passes zero forever.
+//
+// The item also carries a stable item_uuid keyed on the session, so a resolved
+// re-push SETTLES the card the open one opened instead of landing beside it as
+// a second card.
+func Death(logf dlog.Logf, sessionID, reason string, resolvedAtMs int64) *frontendv1.SystemFailureItem {
 	if reason == "" {
 		return nil
 	}
@@ -681,7 +693,19 @@ func Death(logf dlog.Logf, reason string) *frontendv1.SystemFailureItem {
 		ErrorType:    string(t),
 		Message:      prose[t],
 		SourceDetail: reason,
+		ItemUuid:     DeathItemUUID(sessionID),
+		ResolvedAtMs: resolvedAtMs,
 	}
+}
+
+// DeathItemUUID is the stable card identity of a session's death item. One
+// session dies once, so the session id IS the identity; a resolved re-push
+// therefore replaces the open card rather than joining it.
+func DeathItemUUID(sessionID string) string {
+	if sessionID == "" {
+		return ""
+	}
+	return "death:" + sessionID
 }
 
 // StartFailed classifies a bring-up that never wired and could not be retried

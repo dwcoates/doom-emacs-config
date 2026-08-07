@@ -1439,7 +1439,7 @@ func SessionViewFromRecordWithModelsAndUsage(logf dlog.Logf, rec registry.Record
 		// frontend could not tell what class of failure the string described;
 		// this is the same fact classified once so the dead-state card can
 		// render it like every other failure.
-		Death:              errclass.Death(logf, rec.DeathReason),
+		Death:              errclass.Death(logf, rec.SessionID, rec.DeathReason, rec.DeathResolvedAtMs),
 		PendingPermissions: int64(len(pendingPermissions)),
 		// The CLAUDE_CONFIG_DIR the session's shim runs against — the ACCOUNT it
 		// runs as (S8). Empty names the CLI's own default root. Carried on every
