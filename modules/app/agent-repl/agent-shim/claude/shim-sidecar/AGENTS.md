@@ -94,11 +94,10 @@ the Claude harness file formats it parses.
 
 ## Verification
 
-- Run `make coverage` after every sidecar Go change. It runs the full suite
-  with `-coverpkg=./...` and reports per-function and aggregate statement
-  coverage. The command must pass.
-- Before handoff, run `modules/app/agent-repl/bin/test-all.sh` from the
-  repository root. Every tracked suite must pass.
+- `make coverage` runs the full suite with `-coverpkg=./...` and reports
+  per-function and aggregate statement coverage.
+- `modules/app/agent-repl/bin/test-all.sh` (from the repository root) runs
+  every tracked suite across the module.
 - Maintain at least 90% statement coverage. Until the measured sidecar baseline
   reaches that target, never reduce it, report the gap explicitly, and add
   focused tests for every critical branch and every error path changed.

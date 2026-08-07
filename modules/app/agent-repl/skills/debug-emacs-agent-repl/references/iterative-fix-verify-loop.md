@@ -124,7 +124,8 @@ Dispatch fixes as parallel implementation subagents under these rules:
 - Each agent is required to fast-forward from the main checkout first.
   Worktrees materialize stale, and an agent that skips this silently rebuilds
   against an old tree.
-- Each agent runs the affected test suites before committing.
+- Each agent typically runs the affected test suites as its own evidence;
+  suite invocations are documented in the component `AGENTS.md` files.
 - The orchestrator never edits code itself. Its only writes are merges and the
   conflict resolutions those merges require, which are exclusively its job and
   are never delegated back to an agent.

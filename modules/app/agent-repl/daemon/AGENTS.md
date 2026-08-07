@@ -86,19 +86,16 @@ thinking" or infer session-controller liveness from persisted session fields.
   - `go -C modules/app/agent-repl/daemon vet ./...` — vet.
   - `make -C modules/app/agent-repl/daemon coverage` — the module-rooted
     form of `make coverage` below.
-- Run `make coverage` after every daemon Go change. It runs all `cmd`, `e2e`,
-  and `internal` packages with `-coverpkg=./...` and reports `go tool
-  cover -func` output. The command must pass.
-- Before handoff, run `modules/app/agent-repl/bin/test-all.sh` from the
-  repository root. Every tracked suite must pass.
+- `make coverage` runs all `cmd`, `e2e`, and `internal` packages with
+  `-coverpkg=./...` and reports `go tool cover -func` output.
+- `modules/app/agent-repl/bin/test-all.sh` (from the repository root) runs
+  every tracked suite across the module.
 - Maintain at least 90% statement coverage. Until the measured daemon baseline
   reaches that target, never reduce it, report the gap explicitly, and add
   focused tests for every critical branch and every error path changed.
-- Run `modules/app/agent-repl/bin/report-logging-density.sh daemon` and report
-  its source-line and canonical-call counts as a rough review aid. It is not
+- `modules/app/agent-repl/bin/report-logging-density.sh daemon` reports
+  source-line and canonical-call counts as a rough review aid. It is not
   semantic logging coverage, so directly audit all critical branches and
   errors even when the ratio rises.
-- After a commit lands on `master`, run
-  `modules/app/agent-repl/bin/test-all.sh --record`, inspect
-  `modules/app/agent-repl/test_time.csv`, and surface every reported timing
-  regression.
+- `modules/app/agent-repl/bin/test-all.sh --record` records suite timings to
+  `modules/app/agent-repl/test_time.csv` for spotting timing regressions.
