@@ -290,6 +290,47 @@ func TestWebappHandlerSelfCorrectsWhenIndexAppears(t *testing.T) {
 	}
 }
 
+func TestWebappHandlerRefusesToCacheTheDocumentButNotItsAssets(t *testing.T) {
+	// Arrange — a build whose entry point names one fingerprinted bundle.
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<!doctype html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "assets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "assets", "index-abc123.js"), []byte("//"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h := webappHandler(dir, func(string, ...any) {})
+
+	for _, tc := range []struct {
+		name    string
+		path    string
+		noStore bool
+		reason  string
+	}{
+		{"root document", "/", true, "the entry point is the only thing naming which build to run"},
+		{"explicit document", "/index.html", true, "the same document reached by its own name"},
+		{"fingerprinted asset", "/assets/index-abc123.js", false, "the URL addresses exactly one build"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tc.path, nil))
+
+			// Assert
+			got := rec.Header().Get("Cache-Control")
+			if tc.noStore && !strings.Contains(got, "no-store") {
+				t.Fatalf("Cache-Control %q for %s must forbid storing: %s", got, tc.path, tc.reason)
+			}
+			if !tc.noStore && got != "" {
+				t.Fatalf("Cache-Control %q for %s must be left to the client: %s", got, tc.path, tc.reason)
+			}
+		})
+	}
+}
+
 func TestLaunchedBinaryMTimeMatchesExecutableStat(t *testing.T) {
 	// Arrange — the running test binary IS an executable on disk, so
 	// launchedBinaryMTime must report exactly its stat mtime.
