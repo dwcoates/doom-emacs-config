@@ -800,6 +800,41 @@ watchdog path to signal `:timed-out'."
         (agent-repl--latch-and-maybe-fire-loaded "ws1" :ws-loaded)
         (should second-called)))))
 
+;;;; ---- latch-and-maybe-fire-loaded log routing ----
+
+(ert-deftest agent-repl-test-sentinel-latch-placeholder-logs-globally ()
+  "Latching a persp PLACEHOLDER emits its record against the global sink.
+`--on-workspace-switch' latches whatever perspective persp-mode activated,
+so \"main\" and \"none\" reach the latch; neither owns a durable log sink."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((logged 'no-record))
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (ws &rest _)
+                   (when (eq logged 'no-record) (setq logged ws)))))
+        ;; Act
+        (agent-repl--latch-and-maybe-fire-loaded "main" :ws-loaded))
+      ;; Assert
+      (should (null logged)))))
+
+(ert-deftest agent-repl-test-sentinel-latch-routable-ws-keeps-attribution ()
+  "Latching a REAL workspace keeps its records attributed to that workspace."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((project (make-temp-file "agent-repl-latch-route-" t))
+          (logged 'no-record))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "ws1" :project-dir project)
+            (cl-letf (((symbol-function 'agent-repl--log)
+                       (lambda (ws &rest _)
+                         (when (eq logged 'no-record) (setq logged ws)))))
+              ;; Act
+              (agent-repl--latch-and-maybe-fire-loaded "ws1" :ws-loaded)))
+        (delete-directory project t))
+      ;; Assert
+      (should (equal logged "ws1")))))
+
 (provide 'test-sentinel)
 
 ;;; test-sentinel.el ends here

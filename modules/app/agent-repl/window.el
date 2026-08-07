@@ -61,26 +61,32 @@ Returns the buffer object regardless of liveness — callers needing
 liveness must check `buffer-live-p' (matches the historical lookup
 pattern this helper replaces).  Returns nil when the panel has not
 been initialized.  Signals an error for an unknown KIND so typos
-surface at call time."
-  (let ((resolved-ws (or ws (agent-repl--ws-current-name))))
+surface at call time.
+
+WS is caller-supplied and may name any perspective — the persp activation
+path asks this helper about persp-mode's own \"main\" and \"none\", which own
+no durable log sink.  Lookups use the resolved name; records use
+`agent-repl--ws-log-name' and carry the name in their text."
+  (let* ((resolved-ws (or ws (agent-repl--ws-current-name)))
+         (log-ws (agent-repl--ws-log-name resolved-ws)))
     (pcase kind
       (:view
        (let ((buf (agent-repl--ws-get resolved-ws :frontend-buffer)))
          (agent-repl--log-verbose
-          resolved-ws
-          "window--panel-buffer: kind=%S key=:frontend-buffer buffer=%S live=%s"
-          kind buf (and buf (buffer-live-p buf)))
+          log-ws
+          "window--panel-buffer: ws=%s kind=%S key=:frontend-buffer buffer=%S live=%s"
+          resolved-ws kind buf (and buf (buffer-live-p buf)))
          buf))
       (:input
        (let ((buf (agent-repl--ws-get resolved-ws :input-buffer)))
          (agent-repl--log-verbose
-          resolved-ws
-          "window--panel-buffer: kind=%S key=:input-buffer buffer=%S live=%s"
-          kind buf (and buf (buffer-live-p buf)))
+          log-ws
+          "window--panel-buffer: ws=%s kind=%S key=:input-buffer buffer=%S live=%s"
+          resolved-ws kind buf (and buf (buffer-live-p buf)))
          buf))
       (_
-       (agent-repl--log resolved-ws
-                         "window--panel-buffer: unknown kind=%S" kind)
+       (agent-repl--log log-ws
+                         "window--panel-buffer: ws=%s unknown kind=%S" resolved-ws kind)
        (error "agent-repl-window--panel-buffer: unknown KIND %S" kind)))))
 
 (defun agent-repl-window--panel-window (kind &optional ws frame)
@@ -97,9 +103,9 @@ rather than tripping `get-buffer-window' with a dead buffer."
          (live (and buf (buffer-live-p buf)))
          (win (and live (get-buffer-window buf frame))))
     (agent-repl--log-verbose
-     resolved-ws
-     "window--panel-window: kind=%S buffer=%S live=%s frame=%S found=%S"
-     kind buf live frame win)
+     (agent-repl--ws-log-name resolved-ws)
+     "window--panel-window: ws=%s kind=%S buffer=%S live=%s frame=%S found=%S"
+     resolved-ws kind buf live frame win)
     win))
 
 ;;;; --- Side-window awareness ---------------------------------------------

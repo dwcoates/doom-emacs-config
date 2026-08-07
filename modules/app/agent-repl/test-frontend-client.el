@@ -1526,3 +1526,39 @@ the person who pressed the key learns the memory was never freed."
         (funcall (plist-get call :on-failure) "a turn is live")
         ;; Assert
         (should (cl-some (lambda (l) (string-match-p "refused" l)) echoed))))))
+
+;;;; ---- ensure-workspace skip-record routing ----
+
+(ert-deftest agent-repl-test-frontend-ensure-skip-for-a-placeholder-logs-globally ()
+  "Skipping a persp PLACEHOLDER records against the global sink.
+The persp-activation driver reaches ensure with persp-mode's own \"main\"
+and \"none\", which own no `:project-dir' and so no durable log sink."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((logged 'no-record))
+      (cl-letf (((symbol-function 'agent-repl--log-verbose)
+                 (lambda (ws &rest _)
+                   (when (eq logged 'no-record) (setq logged ws)))))
+        ;; Act
+        (agent-repl--frontend-ensure-workspace "main"))
+      ;; Assert
+      (should (null logged)))))
+
+(ert-deftest agent-repl-test-frontend-ensure-skip-for-a-routable-ws-keeps-attribution ()
+  "A REAL workspace's skip record stays attributed to that workspace."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((project (make-temp-file "agent-repl-ensure-route-" t))
+          (logged 'no-record))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "ws1" :project-dir project)
+            (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () nil))
+                      ((symbol-function 'agent-repl--log-verbose)
+                       (lambda (ws &rest _)
+                         (when (eq logged 'no-record) (setq logged ws)))))
+              ;; Act
+              (agent-repl--frontend-ensure-workspace "ws1")))
+        (delete-directory project t))
+      ;; Assert
+      (should (equal logged "ws1")))))

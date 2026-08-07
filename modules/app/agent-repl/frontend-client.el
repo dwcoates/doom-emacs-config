@@ -1392,7 +1392,13 @@ and the send, so the guards above cannot be the only protection."
   (let* ((ws (or ws (agent-repl--ws-current-name)))
          (skip (agent-repl--frontend-ensure-skip-reason ws)))
     (if skip
-        (progn (agent-repl--log-verbose ws "ensure: skipped (%s)" skip) nil)
+        ;; The persp-activation driver reaches here with persp-mode's own
+        ;; "main"/"none" too: they are skipped (no session to ensure) and own
+        ;; no durable log sink, so the skip record is screened through
+        ;; `agent-repl--ws-log-name' and names WS in its text.
+        (progn (agent-repl--log-verbose (agent-repl--ws-log-name ws)
+                                         "ensure: ws=%s skipped (%s)" ws skip)
+               nil)
       (condition-case err
           (progn
             (agent-repl--ws-put ws :ensure-at (float-time))
