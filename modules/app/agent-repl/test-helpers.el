@@ -734,6 +734,11 @@ re-routes their frontend resolution instead."
          ;; a publish carries would depend on how many publishes ran before
          ;; it, which is suite order.
          (agent-repl--sidebar-roster-revision 0)
+         ;; The roster coalescing gate (sidebar.el): a test that leaves a
+         ;; publish in flight would otherwise make every later test's push
+         ;; coalesce into a gate nobody is going to settle.
+         (agent-repl--sidebar-publish-inflight nil)
+         (agent-repl--sidebar-publish-dirty nil)
          ;; Active sidebar view (sidebar.el): a test that flips to the
          ;; Task view would otherwise leak that choice into every later
          ;; test's roster build.  Task hash state is rebound alongside so

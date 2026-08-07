@@ -70,6 +70,7 @@
 (declare-function agent-repl--uds-connected-p "frontend-uds" ())
 (declare-function agent-repl--uds-send-command "frontend-uds"
                   (field payload &optional workspace process &rest keys))
+(declare-function agent-repl--uds-command-pending-p "frontend-uds" (request-id))
 
 ;;;; ---- The view selector -----------------------------------------------
 
@@ -1067,22 +1068,138 @@ silently reverses could publish a stale roster over a newer one."
   (agent-repl--log nil "sidebar-publish: NACKED revision=%d reason=%s"
                    revision (or err "unspecified")))
 
+;;;; ---- One publish in flight, one queued behind it ----------------------
+;;
+;; The roster is LATEST-WINS: the daemon retains exactly one, so of N
+;; rosters built while a publish is unacked, only the newest has any
+;; effect.  Sending all N is not merely wasteful — the daemon processes
+;; frontend commands serially, and a restore that stacks dozens of
+;; multi-kilobyte publishes behind one slow open pushes every one of them
+;; past its ack deadline, opening a `client.command_unacked' failure card
+;; per frame and degrading the link.  Observed live: 58 publishes in 32
+;; seconds, every one of them noise about a roster already superseded.
+;;
+;; So a publish issued while one is in flight is COALESCED: nothing is
+;; sent, the roster is marked dirty, and one fresh build is published when
+;; the in-flight one settles (ack, nack or deadline).  At most one in
+;; flight plus at most one queued, and the queued one is rebuilt at send
+;; time rather than held as a stale frame.
+
+(defvar agent-repl--sidebar-publish-inflight nil
+  "`request_id' of the publish awaiting its ack, or nil when none is.
+
+Emacs's own record of the coalescing gate.  Reconciled against the
+transport's `agent-repl--uds-command-pending-p' on every read, so a
+publish that settled through a path this module does not hook cannot
+wedge the gate shut.")
+
+(defvar agent-repl--sidebar-publish-dirty nil
+  "Non-nil when a roster was coalesced away and still owes a publish.
+Cleared by `agent-repl--sidebar-publish-settled', which sends it.")
+
+(defun agent-repl--sidebar-publish-in-flight ()
+  "Return the in-flight publish's `request_id', or nil if none is.
+The transport's pending table is the authority: a marker naming a request
+it no longer holds is stale bookkeeping, cleared here rather than trusted."
+  (when agent-repl--sidebar-publish-inflight
+    (if (agent-repl--uds-command-pending-p agent-repl--sidebar-publish-inflight)
+        agent-repl--sidebar-publish-inflight
+      (agent-repl--log-verbose
+       nil "sidebar-publish: request-id=%s no longer tracked — clearing the stale in-flight marker"
+       agent-repl--sidebar-publish-inflight)
+      (setq agent-repl--sidebar-publish-inflight nil))))
+
+(defun agent-repl--sidebar-publish-settled (request-id reason)
+  "Release the coalescing gate held by REQUEST-ID, settled for REASON.
+
+Publishes the coalesced roster when one is owed, REBUILT rather than
+replayed: the queued publish must carry the state of the world now, not
+the one that was current when the gate closed.  Returns non-nil when a
+coalesced roster was released.
+
+A settle naming anything other than the in-flight publish releases
+nothing: the gate belongs to whichever publish currently holds it."
+  (if (not (equal request-id agent-repl--sidebar-publish-inflight))
+      (progn
+        (agent-repl--log-verbose
+         nil "sidebar-publish: settle request-id=%s (%s) is not the in-flight publish=%S — gate untouched"
+         request-id reason agent-repl--sidebar-publish-inflight)
+        nil)
+    (setq agent-repl--sidebar-publish-inflight nil)
+    (when agent-repl--sidebar-publish-dirty
+      (setq agent-repl--sidebar-publish-dirty nil)
+      (agent-repl--log nil "sidebar-publish: releasing the coalesced roster after request-id=%s (%s)"
+                       request-id reason)
+      (agent-repl--sidebar-push)
+      t)))
+
+(defun agent-repl--sidebar-publish-abandon-inflight (reason)
+  "Drop the coalescing gate without publishing, because of REASON.
+
+For the case where the in-flight publish's connection is GONE: its ack
+can never arrive on the socket that replaced it, so holding the gate for
+it would delay the reconnect roster by a whole ack deadline.  The
+abandoned command stays tracked by the transport and still reports itself
+when its own deadline expires — this hides nothing, it only stops the
+sidebar from waiting on it."
+  (when agent-repl--sidebar-publish-inflight
+    (agent-repl--log nil "sidebar-publish: abandoning in-flight request-id=%s reason=%s"
+                     agent-repl--sidebar-publish-inflight reason)
+    (setq agent-repl--sidebar-publish-inflight nil))
+  (setq agent-repl--sidebar-publish-dirty nil))
+
+(defun agent-repl--sidebar-publish-timed-out (request-id revision)
+  "Answer the transport's supersede question for the REVISION publish.
+
+Non-nil means REQUEST-ID's loss is HARMLESS: a newer roster has since
+been published, or one is queued behind this very gate, so the daemon is
+about to hold (or already holds) fresher state than the frame that never
+landed.  The transport then logs the loss without opening a
+`client.command_unacked' failure or degrading the link.
+
+Nil means this was the FINAL roster — nothing newer was built — and its
+loss is a real divergence between what Emacs authored and what every
+client draws, surfaced by the transport exactly as any other lost
+command.
+
+The verdict is read BEFORE the gate is released, since releasing it may
+publish the queued roster and move both inputs."
+  (let ((superseded (or agent-repl--sidebar-publish-dirty
+                        (< revision agent-repl--sidebar-roster-revision))))
+    (agent-repl--log nil "sidebar-publish: UNACKED revision=%d request-id=%s superseded=%s"
+                     revision request-id (if superseded "yes" "no"))
+    (agent-repl--sidebar-publish-settled request-id "ack deadline expired")
+    superseded))
+
 (defun agent-repl--sidebar-publish (roster)
   "Publish built ROSTER to the daemon as the next revision.
 
-Returns the command's `request_id', or nil when the link is down.
+Returns the command's `request_id', or nil when the link is down or the
+roster was coalesced behind a publish already in flight.
 
 A DOWN LINK IS NOT A LOST ROSTER, and is logged rather than raised: the
 daemon that would receive it does not exist to receive anything, and the
 reconnect publish delivers the state of the world as of reconnection —
 which is fresher than the frame that could not be sent.  Raising here
 would instead fire on every 1Hz tick for the whole of an outage."
-  (if (not (agent-repl--uds-connected-p))
-      (progn
-        (agent-repl--log nil "sidebar-publish: link down — deferring to the reconnect publish")
-        nil)
+  (cond
+   ((not (agent-repl--uds-connected-p))
+    (agent-repl--log nil "sidebar-publish: link down — deferring to the reconnect publish")
+    nil)
+   ((agent-repl--sidebar-publish-in-flight)
+    ;; Coalesced, not dropped: the gate's settle publishes a fresh build.
+    (setq agent-repl--sidebar-publish-dirty t)
+    (agent-repl--log-verbose
+     nil "sidebar-publish: coalescing behind unacked request-id=%s — only the newest roster is sent"
+     agent-repl--sidebar-publish-inflight)
+    nil)
+   (t
     (let* ((revision (cl-incf agent-repl--sidebar-roster-revision))
            (proto (agent-repl--sidebar-proto-roster roster revision))
+           ;; Filled by `:on-registered', which the transport runs before the
+           ;; frame reaches the socket — so an ack that arrives reentrantly
+           ;; inside the write already finds the id its callbacks settle by.
+           (sent nil)
            ;; TRACKED, not fire-and-forget: a rejected roster means the sidebar
            ;; every client draws is not the one Emacs authored, which is exactly
            ;; the kind of divergence that must never pass silently.  The roster
@@ -1091,12 +1208,23 @@ would instead fire on every 1Hz tick for the whole of an outage."
            (request-id (agent-repl--uds-send-command
                         agent-repl--sidebar-publish-field
                         (list :roster proto) nil nil
+                        :on-registered
+                        (lambda (id)
+                          (setq sent id
+                                agent-repl--sidebar-publish-inflight id))
+                        :on-success
+                        (lambda () (agent-repl--sidebar-publish-settled sent "acked"))
                         :on-failure
-                        (lambda (err) (agent-repl--sidebar-publish-nacked revision err)))))
+                        (lambda (err)
+                          (agent-repl--sidebar-publish-nacked revision err)
+                          (agent-repl--sidebar-publish-settled sent "nacked"))
+                        :on-timeout
+                        (lambda (id) (agent-repl--sidebar-publish-timed-out
+                                      (or sent id) revision)))))
       (agent-repl--log nil "sidebar-publish: boot-id=%s revision=%d request-id=%s view=%s"
                        (agent-repl--sidebar-boot-id) revision request-id
                        (plist-get roster :view))
-      request-id)))
+      request-id))))
 
 (defun agent-repl--sidebar-push ()
   "Rebuild the roster and publish it to the daemon.
@@ -1116,8 +1244,14 @@ Subscriber for `agent-repl-uds-connected-functions'.  A daemon that just
 restarted retains no roster, and Emacs is the only author of one, so
 without this the sidebar would stay empty until something happened to
 move the signature.  Rebuilding rather than resending the last frame is
-the point: the roster published is the state of the world NOW."
+the point: the roster published is the state of the world NOW.
+
+The coalescing gate is dropped first: anything still in flight belonged
+to the socket that is gone, and waiting out its ack deadline before
+republishing would leave the new connection's sidebar empty for that
+whole window."
   (agent-repl--log nil "sidebar-publish-on-connect: republishing the roster")
+  (agent-repl--sidebar-publish-abandon-inflight "new connection")
   (agent-repl--sidebar-push))
 
 (add-hook 'agent-repl-uds-connected-functions
