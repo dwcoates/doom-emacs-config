@@ -1,5 +1,24 @@
 # Webapp
 
+## Building
+
+- **Finish every webapp change by running `bin/build-frontend.sh webapp`.** Not
+  `npm run build`. The script builds the same artifact AND writes the two stamps
+  beside it that nothing else writes: `dist/.built-sha` (the source revision,
+  read by the deploy report) and `dist/.build-id` (the artifact's own identity,
+  taken from the entry bundle's content hash).
+- `dist/.build-id` is what the webview's URL carries as `&build=`. The URL is
+  otherwise fixed per workspace, so it is a stable cache key: a client can go on
+  answering out of its own cache with a bundle from an earlier build — including
+  one whose file has since been deleted — and no amount of rebuilding reaches
+  the screen. The build id makes every build a different address.
+- A missing `dist/.build-id` is a hard error at webview-mount time, not a
+  degraded mode. Building with `npm run build` alone leaves it stale or absent,
+  which is exactly that failure.
+- The daemon serves `index.html` with `Cache-Control: no-store` for the same
+  reason. That governs new responses only; it cannot evict what a client already
+  stored, which is why the identity lives in the URL as well.
+
 ## Workspace-state freshness
 
 - An open WebSocket is transport reachability, not current session state.
