@@ -341,7 +341,11 @@ func (m *Manager) ReconcileTurnHandshake(workspace, claimantSessionID string, id
 		if len(closed) > 0 {
 			reason = TurnCloseRestartInterrupted
 		}
-		if _, err := m.closeStaleTurnLocked(workspace, claimantSessionID, reason, true); err != nil {
+		// CLAIMANT SCOPE, because the shim behind this handshake IS ALIVE: it
+		// just said hello. The workspace-scoped retirement is licensed only by a
+		// proof that nothing alive can end any turn here, which is the opposite
+		// of what a handshake reports.
+		if _, err := m.closeStaleTurnLocked(workspace, claimantSessionID, reason, true, turnCloseScopeClaimant); err != nil {
 			// Never swallowed, and never allowed to fail the handshake: the
 			// reconciliation above has already committed and DaemonHello is
 			// gated on this call's error, so returning here would refuse a
