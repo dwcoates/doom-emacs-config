@@ -78,9 +78,22 @@ type CommandLatencySample struct {
 	// Ok is the ack's own verdict, so a slow command is distinguishable from a
 	// slow refusal.
 	Ok bool
+	// Overdue marks the sample as an IN-FLIGHT observation rather than a
+	// completion: the command passed the client's ack deadline without
+	// finishing, and this is the evidence emitted while it is still running.
+	//
+	// An overdue sample has no verdict and no final processing share yet — Ok
+	// is false and Processing is zero because neither exists — and Ack is how
+	// long the command has been running so far. The command's ONE completion
+	// sample still follows when it finishes. The recorder routes an overdue
+	// sample to its own operation name so a count of completions is never
+	// inflated by one.
+	Overdue bool
 }
 
-// Slow reports whether this sample's ack latency reached its threshold.
+// Slow reports whether this sample's ack latency reached its threshold. An
+// overdue sample is past the ack deadline by construction, and the deadline is
+// a multiple of the threshold, so it is always slow.
 func (s CommandLatencySample) Slow() bool {
 	return s.Threshold > 0 && s.Ack >= s.Threshold
 }
