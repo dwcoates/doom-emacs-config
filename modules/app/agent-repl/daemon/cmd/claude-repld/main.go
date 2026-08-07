@@ -108,8 +108,32 @@ func webappHandler(dir string, logf func(format string, args ...any)) http.Handl
 			http.Error(w, webappMissingMessage(dir), http.StatusServiceUnavailable)
 			return
 		}
+		// THE HTML ENTRY POINT IS NEVER CACHED, and the hashed assets it names
+		// are cached freely. Vite fingerprints every bundle, so an asset URL
+		// addresses exactly one build and can be held forever; index.html is the
+		// only thing that says WHICH build, and it is served from a fixed path.
+		//
+		// Without this the response carries no cache directive at all, and a
+		// client applies heuristic freshness from Last-Modified — so a webview
+		// keeps running a bundle from a previous build, and keeps running it
+		// after that file has been deleted, because it is answering out of its
+		// own cache rather than asking. A deploy is then invisible for as long
+		// as the heuristic holds.
+		if isWebappDocument(r.URL.Path) {
+			w.Header().Set("Cache-Control", "no-store, must-revalidate")
+		}
 		fs.ServeHTTP(w, r)
 	})
+}
+
+// isWebappDocument reports whether path addresses the SPA's HTML entry point
+// rather than one of its fingerprinted assets.
+//
+// The entry point is reachable both as "/" and as an explicit "/index.html",
+// and an SPA route that is not a file resolves to it too — so anything that is
+// not under the build's hashed asset tree is treated as the document.
+func isWebappDocument(path string) bool {
+	return !strings.HasPrefix(path, "/assets/")
 }
 
 // webappMissingMessage is the diagnostic body served at "/" when the
