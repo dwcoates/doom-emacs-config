@@ -282,7 +282,7 @@ var prose = map[Type]string{
 	TypeSessionNotLive:             "this is no longer the workspace's live session",
 	TypeSessionDeleted:             "the session was deleted",
 	TypeSessionSuperseded:          "a new Claude session was started for this workspace, so this session was stopped — a workspace and each resumed transcript keep exactly one live session at a time",
-	TypeSessionReconnectSuperseded: "this view's session identity is stale — the live session's connection changed, which could mean a new Claude session took over this workspace, a new agent process was spawned for it, or the daemon reconnected to it after a restart; resync to see the current state",
+	TypeSessionReconnectSuperseded: "this view's session identity is stale — the live session's connection changed, which could mean a new Claude session took over this workspace, a new agent process was spawned for it, or the daemon reconnected to it after a restart; to resync, reload this webview from Emacs with SPC o l (agent-repl-frontend-reload-webview), or run M-x agent-repl-refresh-webviews to remount every workspace view",
 	TypeSessionShimDied:            "the agent process exited",
 	TypeSessionStartFailed:         "the session could not be started",
 	TypeSessionResumeFailed:        "the Claude conversation could not be resumed",
