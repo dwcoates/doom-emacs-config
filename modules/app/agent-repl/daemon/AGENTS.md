@@ -86,6 +86,16 @@ thinking" or infer session-controller liveness from persisted session fields.
   - `go -C modules/app/agent-repl/daemon vet ./...` — vet.
   - `make -C modules/app/agent-repl/daemon coverage` — the module-rooted
     form of `make coverage` below.
+  - `go -C modules/app/agent-repl/daemon test ./internal/sessioncontroller/
+    -run XXX -bench BenchmarkReplayDrain` — the shim-bring-up drain: one
+    realistic replayed transcript through the consumer sinks over a real SSM,
+    state database and durable log sink. Reports `events/s` and `ms/event`.
+  - `go -C modules/app/agent-repl/daemon test ./internal/registry/ -run XXX
+    -bench BenchmarkCursorWrite` — the per-event durable `last_seq` advance
+    against a steady-state registry. Reports `writes/s` and `ms/write`.
+  - Both are the standing guard on bring-up latency. A change to the consumer
+    sinks, the state-database writes, or the registry's write path runs them
+    and reports the before/after.
 - `make coverage` runs all `cmd`, `e2e`, and `internal` packages with
   `-coverpkg=./...` and reports `go tool cover -func` output.
 - `modules/app/agent-repl/bin/test-all.sh` (from the repository root) runs

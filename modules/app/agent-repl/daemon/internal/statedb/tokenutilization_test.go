@@ -1,6 +1,7 @@
 package statedb
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -198,5 +199,63 @@ func TestTokenUtilizationRejectsInconsistentSubagentAliasTopologyBeforeMutation(
 	bridge.Actor = &frontendv1.TokenUtilization_Subagent{Subagent: &frontendv1.TokenUtilizationSubagent{AgentId: "agent-a", ParentToolUseId: "tool-b"}}
 	if _, err := utilizations.Record(bridge); err == nil {
 		t.Fatal("inconsistent alias bridge was accepted")
+	}
+}
+
+// THE TOPOLOGY CHECK IS SKIPPED ONLY WHERE ITS ANSWER CANNOT DIFFER.
+// validateSubagentTopologyTx no longer reads the session's whole persisted set
+// for an increment that contributes no alias — the quadratic cost that
+// dominated a transcript replay. These cases pin both halves of that: the
+// records the skip covers still persist exactly as before, and every record it
+// does NOT cover is still checked against the whole set.
+func TestTokenUtilizationTopologyCheckCoversTheAliasesItSkipsFor(t *testing.T) {
+	tests := []struct {
+		name       string
+		actor      *frontendv1.TokenUtilizationSubagent
+		wantReject bool
+	}{
+		{name: "main agent record is admitted", actor: nil},
+		{name: "subagent naming neither alias is admitted", actor: &frontendv1.TokenUtilizationSubagent{SubagentType: "explore"}},
+		{name: "agent id contradicting a persisted bridge is rejected", actor: &frontendv1.TokenUtilizationSubagent{AgentId: "agent-a", ParentToolUseId: "tool-b"}, wantReject: true},
+		{name: "parent tool use id contradicting a persisted bridge is rejected", actor: &frontendv1.TokenUtilizationSubagent{AgentId: "agent-b", ParentToolUseId: "tool-a"}, wantReject: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange — two disjoint alias groups already durable.
+			store, _ := openReceipts(t)
+			utilizations, err := NewTokenUtilizations(store.db)
+			if err != nil {
+				t.Fatalf("NewTokenUtilizations: %v", err)
+			}
+			for i, seed := range []*frontendv1.TokenUtilizationSubagent{
+				{AgentId: "agent-a", ParentToolUseId: "tool-a"},
+				{AgentId: "agent-b", ParentToolUseId: "tool-b"},
+			} {
+				record := completeUtilization("s", "claude", "turn", fmt.Sprintf("seed-%d", i))
+				record.Actor = &frontendv1.TokenUtilization_Subagent{Subagent: seed}
+				if _, err := utilizations.Record(record); err != nil {
+					t.Fatalf("seed %d: %v", i, err)
+				}
+			}
+			incoming := completeUtilization("s", "claude", "turn", "incoming")
+			if tc.actor != nil {
+				incoming.Actor = &frontendv1.TokenUtilization_Subagent{Subagent: tc.actor}
+			}
+
+			// Act.
+			inserted, err := utilizations.Record(incoming)
+
+			// Assert.
+			if tc.wantReject {
+				if err == nil {
+					t.Fatalf("Record = %v, nil, want a topology rejection", inserted)
+				}
+				return
+			}
+			if err != nil || !inserted {
+				t.Fatalf("Record = %v, %v, want the record inserted", inserted, err)
+			}
+		})
 	}
 }

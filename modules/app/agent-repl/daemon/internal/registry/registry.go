@@ -482,6 +482,10 @@ func (r *Registry) mutate(fn func(*registryState) error) (maintenanceStats, erro
 		return zero, err
 	}
 	state := &registryState{records: records, checkpoints: checkpoints}
+	// The tables' contents as this transaction found them. saveState writes the
+	// difference against it, so a mutation costs its own size rather than the
+	// registry's — see saveState.
+	before := cloneState(state)
 	if err := fn(state); err != nil {
 		return zero, err
 	}
@@ -489,7 +493,7 @@ func (r *Registry) mutate(fn func(*registryState) error) (maintenanceStats, erro
 	if err != nil {
 		return zero, err
 	}
-	if err := saveState(tx, state); err != nil {
+	if err := saveState(tx, before, state); err != nil {
 		return zero, err
 	}
 	if err := tx.Commit(); err != nil {
