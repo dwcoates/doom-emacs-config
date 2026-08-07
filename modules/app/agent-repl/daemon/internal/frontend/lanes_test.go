@@ -427,9 +427,10 @@ func TestCommandLanesRunEveryReadCommandBeforeCloseReturns(t *testing.T) {
 	var ran []string
 	started := make(chan struct{})
 	release := make(chan struct{})
-	lanes := newCommandLanes(testLogf(t), func(cmd *frontendv1.FrontendCommand, _ time.Time, _ int64) {
+	s := newLaneServer(t, newLaneHandler())
+	lanes := newCommandLanes(testLogf(t), func(ticket *commandTicket) {
 		mu.Lock()
-		ran = append(ran, cmd.GetRequestId())
+		ran = append(ran, ticket.cmd.GetRequestId())
 		first := len(ran) == 1
 		mu.Unlock()
 		if first {
@@ -439,9 +440,9 @@ func TestCommandLanesRunEveryReadCommandBeforeCloseReturns(t *testing.T) {
 	})
 
 	// Act.
-	lanes.submit(openCmd("r1", "/ws/a"), time.Now(), 1)
+	lanes.submit(s.newCommandTicket(nil, openCmd("r1", "/ws/a"), time.Now(), 1))
 	<-started
-	lanes.submit(openCmd("r2", "/ws/a"), time.Now(), 2)
+	lanes.submit(s.newCommandTicket(nil, openCmd("r2", "/ws/a"), time.Now(), 2))
 	close(release)
 	lanes.close()
 
@@ -459,16 +460,17 @@ func TestCommandLanesFailHardOnASubmitAfterClose(t *testing.T) {
 	// to cope with.
 	var logs []string
 	var ran []string
+	s := newLaneServer(t, newLaneHandler())
 	lanes := newCommandLanes(
 		func(format string, args ...any) { logs = append(logs, sprintfLane(format, args...)) },
-		func(cmd *frontendv1.FrontendCommand, _ time.Time, _ int64) { ran = append(ran, cmd.GetRequestId()) },
+		func(ticket *commandTicket) { ran = append(ran, ticket.cmd.GetRequestId()) },
 	)
 	lanes.close()
 
 	// Act.
 	recovered := func() (v any) {
 		defer func() { v = recover() }()
-		lanes.submit(openCmd("late", "/ws/a"), time.Now(), 1)
+		lanes.submit(s.newCommandTicket(nil, openCmd("late", "/ws/a"), time.Now(), 1))
 		return nil
 	}()
 
