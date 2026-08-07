@@ -328,7 +328,17 @@ type consumer struct {
 	// (durablereplay.go). Nil on every live consumer.
 	onPushedConversation func(*frontendv1.ConversationDelta)
 	logf                 func(string, ...any)
-	now                  func() int64
+	// warnf is the WARN channel for records that accompany a regression the
+	// user can see — degraded accounting, a failure card, a rejected event.
+	// At info those are indistinguishable from routine progress and invisible
+	// to a level filter. Reached through warn, never called directly.
+	//
+	// Assigned after construction for the same reason as onVendorSessionID
+	// below: newConsumer's positional list is already long enough that one
+	// more argument would be a hazard rather than a clarification. Unset it
+	// falls back to logf, so a record is never lost — only its severity.
+	warnf func(string, ...any)
+	now   func() int64
 	// onSessionStarted fires when a SessionStarted event arrives, letting the
 	// controller adopt the vendor session uuid the start announced.
 	onSessionStarted func(*corev1.SessionStarted)
@@ -553,6 +563,17 @@ type consumer struct {
 	// onHistoricalUsagePersisted republishes the SessionView only when a
 	// file-plane record inserted a normalized response row.
 	onHistoricalUsagePersisted func()
+}
+
+// warn emits through the consumer's WARN channel. An unwired channel still
+// records the event through logf rather than dropping it, because losing the
+// record entirely would be strictly worse than logging it at the wrong level.
+func (c *consumer) warn(format string, args ...any) {
+	if c.warnf != nil {
+		c.warnf(format, args...)
+		return
+	}
+	c.logf(format, args...)
 }
 
 func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier, prog ProgressResolver, floors ClearCompactStore, accountingStore TurnAccountingStore, logf func(string, ...any), onSessionStarted func(*corev1.SessionStarted), onTurn func(active bool, atMs int64), onBackfill func(state string), onSystemInit func(*datav1.SystemInit), onSessionEnded func()) *consumer {
@@ -934,7 +955,7 @@ func (c *consumer) Apply(ev *corev1.Event) error {
 		// comment on Apply's own accounting.observe call for why this may not
 		// be allowed to abort the delivery.
 		if err := c.settleTurnAccounting(ended.GetTurnId()); err != nil {
-			c.logf("session-controller: ACCOUNTING DEGRADED session=%s turn_id=%s seq=%d — terminal settlement FAILED and this turn's accounting is unavailable, but the turn boundary itself was already accepted and the session establishes normally: %v",
+			c.warn("session-controller: ACCOUNTING DEGRADED session=%s turn_id=%s seq=%d — terminal settlement FAILED and this turn's accounting is unavailable, but the turn boundary itself was already accepted and the session establishes normally: %v",
 				c.sessionID, ended.GetTurnId(), ev.GetSeq(), err)
 		} else if c.onTerminalAccountingPersisted != nil {
 			c.onTerminalAccountingPersisted()
@@ -962,7 +983,7 @@ func (c *consumer) degradeAccountingObservation(ev *corev1.Event, cause error) e
 	if errors.Is(cause, ErrAccountingQueryIdentityContradiction) {
 		return cause
 	}
-	c.logf("session-controller: ACCOUNTING DEGRADED session=%s seq=%d kind=%s — this event's token-utilization evidence is unavailable, but the event itself is still applied and the session establishes normally: %v",
+	c.warn("session-controller: ACCOUNTING DEGRADED session=%s seq=%d kind=%s — this event's token-utilization evidence is unavailable, but the event itself is still applied and the session establishes normally: %v",
 		c.sessionID, ev.GetSeq(), stateKind(ev), cause)
 	return nil
 }
@@ -1254,13 +1275,13 @@ func (c *consumer) Consume(ev *corev1.Event) error {
 	}
 	terminationFailure, err := frontend.SystemFailureItemFromQueryTermination(c.sessionID, ev.GetQueryLifecycle(), ev.GetQueryLifecycle().GetObservedAtMs())
 	if err != nil {
-		c.logf("session-controller: typed query termination REJECTED before mutation session=%s seq=%d query_instance_id=%q vendor_session_id=%q vendor_identity_unavailable=%v observed_at_ms=%d error=%v", c.sessionID, ev.GetSeq(), ev.GetQueryLifecycle().GetQueryInstanceId(), ev.GetQueryLifecycle().GetTerminated().GetVendorSessionId(), ev.GetQueryLifecycle().GetTerminated().GetVendorSessionIdentityUnavailable() != nil, ev.GetQueryLifecycle().GetObservedAtMs(), err)
+		c.warn("session-controller: typed query termination REJECTED before mutation session=%s seq=%d query_instance_id=%q vendor_session_id=%q vendor_identity_unavailable=%v observed_at_ms=%d error=%v", c.sessionID, ev.GetSeq(), ev.GetQueryLifecycle().GetQueryInstanceId(), ev.GetQueryLifecycle().GetTerminated().GetVendorSessionId(), ev.GetQueryLifecycle().GetTerminated().GetVendorSessionIdentityUnavailable() != nil, ev.GetQueryLifecycle().GetObservedAtMs(), err)
 		return fmt.Errorf("session-controller: translate typed query termination before frame mutation: %w", err)
 	}
 	observation, utilizationErr := tokenUtilizationObservationFromEvent(ev, c.sessionID, c.accounting.isKnownVendorSession)
 	if utilizationErr != nil {
 		c.logRejectedTokenUtilization(ev, utilizationErr)
-		c.logf("session-controller: token utilization translation DEGRADED session=%s seq=%d kind=%s — invalid accounting was rejected before accounting mutation, but conversation delivery continues: %v",
+		c.warn("session-controller: token utilization translation DEGRADED session=%s seq=%d kind=%s — invalid accounting was rejected before accounting mutation, but conversation delivery continues: %v",
 			c.sessionID, ev.GetSeq(), stateKind(ev), utilizationErr)
 		observation = nil
 	}
@@ -1426,7 +1447,7 @@ func (c *consumer) logRejectedAccountingObservation(ev *corev1.Event, cause erro
 	// questions: the payload says which query the OBSERVATION is about, the
 	// envelope says which query WROTE it. A rejection cannot be told apart from
 	// a genuine contradiction without the latter.
-	c.logf("session-controller: turn accounting observation REJECTED before mutation session=%s authoritative_query_instance_id=%q query_instance_id=%q event_query_instance_id=%q seq=%d historical=%v request_id=%q turn_id=%q boundary=%s cause=%q kind=%s",
+	c.warn("session-controller: turn accounting observation REJECTED before mutation session=%s authoritative_query_instance_id=%q query_instance_id=%q event_query_instance_id=%q seq=%d historical=%v request_id=%q turn_id=%q boundary=%s cause=%q kind=%s",
 		c.sessionID, c.accounting.queryID, queryID, ev.GetQueryInstanceId(), ev.GetSeq(),
 		observationIsHistorical(c.accounting, ev, observation),
 		ev.GetRequestId(), turnID, boundary, cause.Error(), stateKind(ev))
@@ -1440,7 +1461,7 @@ func (c *consumer) logRejectedTokenUtilization(ev *corev1.Event, cause error) {
 	if !errors.As(cause, &invalid) {
 		return
 	}
-	c.logf("session-controller: token utilization REJECTED before mutation field_path=%q api_message_id=%q model=%q source_plane=%s agent_repl_session_id=%q claude_session_id=%q session=%q seq=%d error=%v",
+	c.warn("session-controller: token utilization REJECTED before mutation field_path=%q api_message_id=%q model=%q source_plane=%s agent_repl_session_id=%q claude_session_id=%q session=%q seq=%d error=%v",
 		invalid.FieldPath, invalid.APIMessageID, invalid.Model, ev.GetPlane().String(), invalid.AgentReplSessionID, invalid.ClaudeSessionID, c.sessionID, ev.GetSeq(), cause)
 }
 
@@ -1455,7 +1476,7 @@ func (c *consumer) surfaceUnexpectedQueryTermination(ev *corev1.Event, item *fro
 		reason, cause = "startup_failure", failure.GetCause()
 	}
 	c.unexpectedQueryTerminationSurfaced = true
-	c.logf("session-controller: typed query termination surfaced directly session=%s query_instance_id=%s vendor_session_id=%s vendor_identity_unavailable=%v observed_at_ms=%d termination_kind=%s cause=%q seq=%d replay_authority=query_lifecycle", c.sessionID, detail.GetQueryInstanceId(), detail.GetVendorSessionId(), detail.GetVendorSessionIdentityUnavailable() != nil, detail.GetObservedAtMs(), reason, cause, ev.GetSeq())
+	c.warn("session-controller: typed query termination surfaced directly session=%s query_instance_id=%s vendor_session_id=%s vendor_identity_unavailable=%v observed_at_ms=%d termination_kind=%s cause=%q seq=%d replay_authority=query_lifecycle", c.sessionID, detail.GetQueryInstanceId(), detail.GetVendorSessionId(), detail.GetVendorSessionIdentityUnavailable() != nil, detail.GetObservedAtMs(), reason, cause, ev.GetSeq())
 	if c.onQueryTermination != nil {
 		c.onQueryTermination(proto.Clone(detail).(*frontendv1.QueryTerminationFailure))
 	}
@@ -1739,7 +1760,7 @@ func (c *consumer) pushConversation(ev *corev1.Event, live bool) {
 	observation, err := tokenUtilizationObservationFromEvent(ev, c.sessionID, c.accounting.isKnownVendorSession)
 	if err != nil {
 		c.logRejectedTokenUtilization(ev, err)
-		c.logf("session-controller: conversation token utilization DEGRADED session=%s seq=%d — invalid accounting attachment was rejected, but conversation translation continues: %v", c.sessionID, ev.GetSeq(), err)
+		c.warn("session-controller: conversation token utilization DEGRADED session=%s seq=%d — invalid accounting attachment was rejected, but conversation translation continues: %v", c.sessionID, ev.GetSeq(), err)
 		observation = nil
 	}
 	var historicalUsage *frontendv1.TokenUtilization
@@ -2223,7 +2244,7 @@ func (c *consumer) pushFailure(uuid string, failure *frontendv1.SystemFailureIte
 	c.failItems[uuid] = item
 	c.mu.Unlock()
 
-	c.logf("session-controller: system failure session=%s uuid=%s type=%s resolved=%v: %s",
+	c.warn("session-controller: system failure session=%s uuid=%s type=%s resolved=%v: %s",
 		c.sessionID, uuid, failure.GetErrorType(), failure.GetResolvedAtMs() != 0, failure.GetSourceDetail())
 	c.pushLocalItem(item)
 }

@@ -88,7 +88,9 @@ func (c *Client) dispatchModelCatalog(catalog *corev1.ModelCatalog) error {
 // the card is not a substitute for a correct catalog sink.
 func (c *Client) modelCatalogInvariant(format string, args ...any) error {
 	reason := fmt.Sprintf(format, args...)
-	c.logf("MODEL CATALOG INVARIANT VIOLATION: %s", reason)
+	// ERROR, not warn: the capability channel is broken, the link aborts, and
+	// the user sees a failure card in place of a model list.
+	c.logError("MODEL CATALOG INVARIANT VIOLATION: %s", reason)
 	if c.cfg.Degraded != nil {
 		c.cfg.Degraded.Degraded(c.cfg.SessionID, &corev1.DegradedState{
 			Component: "daemon-model-catalog",
@@ -177,12 +179,21 @@ func (c *Client) dispatchEvent(ev *corev1.Event) error {
 				p.SessionRewound.GetNewVendorSessionId(), err)
 		}
 	case *corev1.Event_DegradedState:
-		c.logf("shim reported DegradedState component=%s reason=%q dropped=%d recovered=%v",
+		// A degradation the shim reports becomes a failure card and, for an
+		// unexpected query termination, a dead session. It is a warning; the
+		// RECOVERY of one is ordinary good news and stays at info.
+		emit := c.warn
+		if p.DegradedState.GetRecovered() {
+			emit = c.logf
+		}
+		emit("shim reported DegradedState component=%s reason=%q dropped=%d recovered=%v",
 			p.DegradedState.GetComponent(), p.DegradedState.GetReason(),
 			p.DegradedState.GetDroppedCount(), p.DegradedState.GetRecovered())
 		c.cfg.Degraded.Degraded(c.cfg.SessionID, p.DegradedState)
 	case *corev1.Event_Unparsed:
-		c.logf("received UnparsedEvent producer=%s path=%s offset=%d error=%q",
+		// The vendor produced a line nothing could read, so that content is
+		// missing from the conversation the user sees.
+		c.warn("received UnparsedEvent producer=%s path=%s offset=%d error=%q",
 			p.Unparsed.GetProducer(), p.Unparsed.GetSourcePath(),
 			p.Unparsed.GetByteOffset(), p.Unparsed.GetError())
 		if err := c.consumeFrame(ev, fmt.Sprintf("%T", p)); err != nil {

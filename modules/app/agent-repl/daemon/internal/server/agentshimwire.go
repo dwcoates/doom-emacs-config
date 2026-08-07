@@ -167,6 +167,10 @@ type AgentShimConfig struct {
 	AckWarnThreshold time.Duration
 	// Logf is the daemon logger. Nil discards.
 	Logf func(string, ...any)
+	// Warnf is the daemon logger's WARN channel, carried to the frontend
+	// server so a refused command or a connect served without its snapshot is
+	// not recorded at info. Nil leaves the frontend server on Logf.
+	Warnf func(string, ...any)
 	// LogVerbosef persists frequent lease-success diagnostics without forcing
 	// them onto the daemon terminal. Required so freshness cannot be opaque or
 	// inflate normal console volume.
@@ -607,6 +611,7 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 	}
 	srv := frontend.New(frontend.Config{
 		Logf:                      logf,
+		Warnf:                     cfg.Warnf,
 		LogVerbosef:               cfg.LogVerbosef,
 		State:                     snapshots,
 		Handler:                   handler,

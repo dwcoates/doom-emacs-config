@@ -2605,3 +2605,140 @@ func TestObservationIsHistoricalTreatsOwnCatchUpRowAsLive(t *testing.T) {
 		t.Fatal("the session's own catch-up-delivered row was reported as history")
 	}
 }
+
+// levelSplitLogs captures the info and warn channels separately so a test can
+// assert WHICH channel a record took, not merely that it was recorded. The
+// live finding this exists for is a genuine user-visible degradation indexed
+// at info, where a level filter and the remediation loops' warning sweeps
+// cannot see it.
+type levelSplitLogs struct {
+	info []string
+	warn []string
+}
+
+func (l *levelSplitLogs) logf(format string, args ...any) {
+	l.info = append(l.info, fmt.Sprintf(format, args...))
+}
+
+func (l *levelSplitLogs) warnf(format string, args ...any) {
+	l.warn = append(l.warn, fmt.Sprintf(format, args...))
+}
+
+// degradedAccountingConsumer builds a consumer with the info and warn channels
+// wired to separate sinks.
+func degradedAccountingConsumer(logs *levelSplitLogs) *consumer {
+	c := newConsumer("ws", "s", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, logs.logf, nil, nil, nil, nil, nil)
+	c.warnf = logs.warnf
+	return c
+}
+
+// runTerminalSettlementFailure drives one turn to its end boundary with a
+// settlement store that cannot persist, which is the ACCOUNTING DEGRADED path.
+func runTerminalSettlementFailure(t *testing.T, c *consumer) {
+	t.Helper()
+	c.accountingStore = failingTurnAccountingStore{err: errors.New("disk unavailable")}
+	if err := c.Apply(&corev1.Event{Seq: 1, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}); err != nil {
+		t.Fatal(err)
+	}
+	c.Consume(accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Result{Result: &datav1.ResultMessage{}}}))
+	if err := c.Apply(&corev1.Event{Seq: 2, Plane: corev1.Plane_PLANE_STREAM, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "t", Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "t"}}}); err != nil {
+		t.Fatalf("Apply error = %v, want the turn boundary accepted despite the settlement failure", err)
+	}
+}
+
+func TestTerminalSettlementFailureTakesTheWarnChannel(t *testing.T) {
+	// Arrange.
+	logs := &levelSplitLogs{}
+	c := degradedAccountingConsumer(logs)
+
+	// Act.
+	runTerminalSettlementFailure(t, c)
+
+	// Assert.
+	if !strings.Contains(strings.Join(logs.warn, "\n"), "ACCOUNTING DEGRADED") {
+		t.Fatalf("warn = %v, want the terminal settlement degradation at warn", logs.warn)
+	}
+}
+
+func TestTerminalSettlementFailureLeavesNothingOnTheInfoChannel(t *testing.T) {
+	// Arrange.
+	logs := &levelSplitLogs{}
+	c := degradedAccountingConsumer(logs)
+
+	// Act.
+	runTerminalSettlementFailure(t, c)
+
+	// Assert -- an info copy would keep the degradation indexed beside routine
+	// progress even though the warn copy exists.
+	if strings.Contains(strings.Join(logs.info, "\n"), "ACCOUNTING DEGRADED") {
+		t.Fatalf("info = %v, want the degradation off the info channel entirely", logs.info)
+	}
+}
+
+func TestTerminalSettlementFailureStillRecordsWithNoWarnChannelWired(t *testing.T) {
+	// Arrange -- an unwired warn channel must lose the SEVERITY, never the
+	// record.
+	logs := &levelSplitLogs{}
+	c := newConsumer("ws", "s", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, logs.logf, nil, nil, nil, nil, nil)
+
+	// Act.
+	runTerminalSettlementFailure(t, c)
+
+	// Assert.
+	if !strings.Contains(strings.Join(logs.info, "\n"), "ACCOUNTING DEGRADED") {
+		t.Fatalf("info = %v, want the degradation still recorded through logf", logs.info)
+	}
+}
+
+func TestUnknownUsageObservationDegradationTakesTheWarnChannel(t *testing.T) {
+	// Arrange.
+	logs := &levelSplitLogs{}
+	c := degradedAccountingConsumer(logs)
+	c.accounting.queryID = "q"
+
+	// Act.
+	if err := c.Apply(&corev1.Event{Seq: 9, RequestId: "t-missing", Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation("t-missing", true)}}); err != nil {
+		t.Fatalf("Apply error = %v, want the event still applied", err)
+	}
+
+	// Assert.
+	if !strings.Contains(strings.Join(logs.warn, "\n"), "ACCOUNTING DEGRADED") {
+		t.Fatalf("warn = %v, want the observation degradation at warn", logs.warn)
+	}
+}
+
+func TestRejectedAccountingObservationTakesTheWarnChannel(t *testing.T) {
+	// Arrange.
+	logs := &levelSplitLogs{}
+	c := degradedAccountingConsumer(logs)
+	c.accounting.queryID = "q"
+
+	// Act.
+	if err := c.Apply(&corev1.Event{Seq: 9, RequestId: "t-missing", Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation("t-missing", true)}}); err != nil {
+		t.Fatalf("Apply error = %v, want the event still applied", err)
+	}
+
+	// Assert -- the detail record naming the rejected row is as user-relevant
+	// as the demotion it explains.
+	if !strings.Contains(strings.Join(logs.warn, "\n"), "turn accounting observation REJECTED") {
+		t.Fatalf("warn = %v, want the rejection detail at warn", logs.warn)
+	}
+}
+
+func TestSystemFailureCardTakesTheWarnChannel(t *testing.T) {
+	// Arrange -- a failure card is the most literally user-visible regression
+	// the consumer produces.
+	logs := &levelSplitLogs{}
+	c := degradedAccountingConsumer(logs)
+
+	// Act.
+	c.pushFailure("failure-1", &frontendv1.SystemFailureItem{
+		ErrorType:    frontendv1.ErrorClass_ERROR_CLASS_INTERNAL.String(),
+		SourceDetail: "the shim died",
+	})
+
+	// Assert.
+	if !strings.Contains(strings.Join(logs.warn, "\n"), "system failure session=") {
+		t.Fatalf("warn = %v, want the failure card recorded at warn", logs.warn)
+	}
+}

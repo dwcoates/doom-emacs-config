@@ -164,7 +164,7 @@ func (l *MergeLease) Acquire(ctx context.Context, ws string) (func(), error) {
 		l.m.logf("ssm: merge lease decision=rollback workspace=%s acquired_at=%d error=%v — the displaced turn is still running, so the claim is withdrawn rather than held over a shim the user still drives",
 			ws, at, err)
 		if closeErr := l.m.closeMergeLease(ws); closeErr != nil {
-			l.m.logf("ssm: merge lease ROLLBACK FAILED workspace=%s acquired_at=%d: %v — an open window remains on the ledger and will keep refusing user prompts until it is released",
+			l.m.logError("ssm: merge lease ROLLBACK FAILED workspace=%s acquired_at=%d: %v — an open window remains on the ledger and will keep refusing user prompts until it is released",
 				ws, at, closeErr)
 		}
 		return nil, wrapped
@@ -178,7 +178,7 @@ func (l *MergeLease) Acquire(ctx context.Context, ws string) (func(), error) {
 			// exists for must proceed; what is lost is the automatic resume,
 			// which is precisely the kind of degradation that must be visible
 			// rather than inferred from a turn that never came back.
-			l.m.logf("ssm: merge lease displaced-turn record FAILED workspace=%s acquired_at=%d: %v — the merge proceeds, but the user's stopped turn will NOT be resumed automatically",
+			l.m.warn("ssm: merge lease displaced-turn record FAILED workspace=%s acquired_at=%d: %v — the merge proceeds, but the user's stopped turn will NOT be resumed automatically",
 				ws, at, err)
 		}
 	}
@@ -196,11 +196,11 @@ func (l *MergeLease) Acquire(ctx context.Context, ws string) (func(), error) {
 			// the user did not ask for twice.
 			resume, err := l.m.takeDisplacedTurn(ws)
 			if err != nil {
-				l.m.logf("ssm: merge lease displaced-turn read FAILED workspace=%s acquired_at=%d: %v — the lease is still released, but nothing is resumed",
+				l.m.warn("ssm: merge lease displaced-turn read FAILED workspace=%s acquired_at=%d: %v — the lease is still released, but nothing is resumed",
 					ws, at, err)
 			}
 			if err := l.m.closeMergeLease(ws); err != nil {
-				l.m.logf("ssm: merge lease RELEASE FAILED workspace=%s acquired_at=%d: %v — the window stays open and user prompts stay refused",
+				l.m.logError("ssm: merge lease RELEASE FAILED workspace=%s acquired_at=%d: %v — the window stays open and user prompts stay refused",
 					ws, at, err)
 				return
 			}
@@ -222,7 +222,7 @@ func (l *MergeLease) Acquire(ctx context.Context, ws string) (func(), error) {
 			// passes a lifetime context; nothing about this path should
 			// depend on that staying true.
 			if err := l.interrupter.ResumeDisplacedTurn(context.WithoutCancel(ctx), ws, *resume); err != nil {
-				l.m.logf("ssm: merge lease displaced-turn RESUME FAILED workspace=%s acquired_at=%d: %v — the user's stopped turn was not put back and they will have to resubmit it",
+				l.m.warn("ssm: merge lease displaced-turn RESUME FAILED workspace=%s acquired_at=%d: %v — the user's stopped turn was not put back and they will have to resubmit it",
 					ws, at, err)
 				return
 			}
@@ -427,12 +427,12 @@ func (m *Manager) closeMergeLease(workspace string) error {
 		at, workspace,
 	)
 	if err != nil {
-		m.logf("ssm: merge lease close FAILED workspace=%s at=%d error=%v", workspace, at, err)
+		m.warn("ssm: merge lease close FAILED workspace=%s at=%d error=%v", workspace, at, err)
 		return fmt.Errorf("ssm: close merge lease for workspace %q: %w", workspace, err)
 	}
 	closed, err := res.RowsAffected()
 	if err != nil {
-		m.logf("ssm: merge lease close inspection FAILED workspace=%s at=%d error=%v", workspace, at, err)
+		m.warn("ssm: merge lease close inspection FAILED workspace=%s at=%d error=%v", workspace, at, err)
 		return fmt.Errorf("ssm: inspect merge lease close for workspace %q: %w", workspace, err)
 	}
 	if closed != 1 {

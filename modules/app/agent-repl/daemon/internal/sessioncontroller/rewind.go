@@ -227,7 +227,7 @@ func (m *Manager) releaseKeepAliveHolds(d *sessionController, pingTurnID string,
 			m.logf("session-controller: keep-alive rewind SKIPPED ws=%q session=%s turn_id=%s — the transcript tail holds no keep-alive turns to drop",
 				workspace, sessionID, pingTurnID)
 		} else {
-			m.logf("session-controller: keep-alive rewind DEGRADED ws=%q session=%s turn_id=%s error=%v — the held prompt is submitted WITHOUT rewinding, so the keep-alive turn stays visible in the conversation; correctness over cleanliness",
+			m.warnf("session-controller: keep-alive rewind DEGRADED ws=%q session=%s turn_id=%s error=%v — the held prompt is submitted WITHOUT rewinding, so the keep-alive turn stays visible in the conversation; correctness over cleanliness",
 				workspace, sessionID, pingTurnID, err)
 		}
 	} else {

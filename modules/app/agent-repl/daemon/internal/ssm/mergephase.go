@@ -54,7 +54,7 @@ func mergeAxisPlaceholders() string {
 func (m *Manager) WorkspacesAtMergePhase(phase merge.Phase) ([]string, error) {
 	token, err := mergeToken(string(phase))
 	if err != nil {
-		m.logf("ssm: WorkspacesAtMergePhase REFUSED unknown phase %q: %v", phase, err)
+		m.warn("ssm: WorkspacesAtMergePhase REFUSED unknown phase %q: %v", phase, err)
 		return nil, err
 	}
 
@@ -78,7 +78,7 @@ ORDER BY workspace`
 
 	rows, err := m.db.Query(query, args...)
 	if err != nil {
-		m.logf("ssm: WorkspacesAtMergePhase query FAILED {phase=%s}: %v", token, err)
+		m.warn("ssm: WorkspacesAtMergePhase query FAILED {phase=%s}: %v", token, err)
 		return nil, fmt.Errorf("ssm: list workspaces at merge phase %q: %w", token, err)
 	}
 	defer rows.Close()
@@ -86,13 +86,13 @@ ORDER BY workspace`
 	for rows.Next() {
 		var ws string
 		if err := rows.Scan(&ws); err != nil {
-			m.logf("ssm: WorkspacesAtMergePhase scan FAILED {phase=%s}: %v", token, err)
+			m.warn("ssm: WorkspacesAtMergePhase scan FAILED {phase=%s}: %v", token, err)
 			return nil, fmt.Errorf("ssm: scan workspace at merge phase %q: %w", token, err)
 		}
 		out = append(out, ws)
 	}
 	if err := rows.Err(); err != nil {
-		m.logf("ssm: WorkspacesAtMergePhase iterate FAILED {phase=%s}: %v", token, err)
+		m.warn("ssm: WorkspacesAtMergePhase iterate FAILED {phase=%s}: %v", token, err)
 		return nil, fmt.Errorf("ssm: iterate workspaces at merge phase %q: %w", token, err)
 	}
 	return out, nil
