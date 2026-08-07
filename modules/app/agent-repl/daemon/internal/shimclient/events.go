@@ -185,14 +185,27 @@ func (c *Client) dispatchEvent(ev *corev1.Event) error {
 		// A degradation the shim reports becomes a failure card and, for an
 		// unexpected query termination, a dead session. It is a warning; the
 		// RECOVERY of one is ordinary good news and stays at info.
+		//
+		// SO IS A REPLAY, and the severity for that is DEFERRED to the
+		// reporter's verdict rather than guessed at here: the verdict is one
+		// comparison against the query the handshake bound, and this client
+		// holds no such binding. A row stamped by a RETIRED query is durable
+		// history being re-read at bring-up — the anomaly was already warned
+		// about, loudly, when it actually happened — so recording it as fresh
+		// news re-alarmed on every boot, forever, over one durable row.
+		//
+		// The relay is therefore emitted AFTER the reporter runs. That is safe
+		// and not a reordering hazard: Degraded is synchronous, and this layer
+		// still emits exactly ONE record for the event, now carrying the
+		// disposition it was classified under.
+		disposition := c.cfg.Degraded.Degraded(c.cfg.SessionID, ev, p.DegradedState)
 		emit := c.warn
-		if p.DegradedState.GetRecovered() {
+		if p.DegradedState.GetRecovered() || disposition == DegradationHistorical {
 			emit = c.logf
 		}
-		emit("shim reported DegradedState component=%s reason=%q dropped=%d recovered=%v",
+		emit("shim reported DegradedState component=%s reason=%q dropped=%d recovered=%v disposition=%s",
 			p.DegradedState.GetComponent(), p.DegradedState.GetReason(),
-			p.DegradedState.GetDroppedCount(), p.DegradedState.GetRecovered())
-		c.cfg.Degraded.Degraded(c.cfg.SessionID, ev, p.DegradedState)
+			p.DegradedState.GetDroppedCount(), p.DegradedState.GetRecovered(), disposition)
 	case *corev1.Event_Unparsed:
 		// The vendor produced a line nothing could read, so that content is
 		// missing from the conversation the user sees.
