@@ -1039,7 +1039,34 @@ func (c *consumer) settleTurnAccounting(turnID string) error {
 	accounting, err := c.accountingStore.Record(c.sessionID, accounting)
 	if err != nil {
 		c.logf("session-controller: terminal accounting persistence FAILED session=%s turn_id=%s: %v", c.sessionID, turnID, err)
-		return fmt.Errorf("session-controller: persist terminal accounting: %w", err)
+		persisted, found, lookupErr := c.persistedTurnAccounting(turnID)
+		if lookupErr != nil {
+			c.logf("session-controller: terminal accounting persistence FAILED session=%s turn_id=%s and the already-persisted settlement could NOT be read either: %v", c.sessionID, turnID, lookupErr)
+			return fmt.Errorf("session-controller: persist terminal accounting: %w", err)
+		}
+		if !found {
+			return fmt.Errorf("session-controller: persist terminal accounting: %w", err)
+		}
+		// A SETTLEMENT ALREADY EXISTS FOR THIS TURN, so the failure above is a
+		// disagreement about a turn the store has already accounted — not the
+		// absence of an account. The persisted row was written by the
+		// generation that actually OBSERVED the turn's evidence, which is
+		// strictly more evidence than this attempt could have: a replay of a
+		// retired query's stream admits none of that generation's responses,
+		// usage boundaries, or vendor result (see
+		// turnAccountingReducer.liveEvidenceFor), so the record it recomputes
+		// is evidence-free by construction and can never match.
+		//
+		// Serving the persisted row is therefore the correct degradation: the
+		// user sees the accounting that was actually measured instead of the
+		// "INVALID ACCOUNTING"/"INCOMPLETE ACCOUNTING" a withheld settlement
+		// renders as. The failure itself stays LOUD — logged immediately above
+		// and again here — because a divergence between a live recompute and a
+		// persisted settlement is still an invariant violation worth the record
+		// even when the user is served correctly.
+		c.logf("session-controller: terminal accounting SERVED FROM PERSISTED SETTLEMENT session=%s turn_id=%s — the recomputed record could not be persisted (see the failure above) and the already-persisted settlement for this turn is authoritative, so the turn's accounting is served from it rather than withheld",
+			c.sessionID, turnID)
+		accounting = persisted
 	}
 	c.accounting.commitResolved(turnID)
 	terminal := c.takeHeldTerminalResult(turnID)
@@ -1055,6 +1082,27 @@ func (c *consumer) settleTurnAccounting(turnID string) error {
 	c.mu.Unlock()
 	c.pushConversation(terminal, true)
 	return nil
+}
+
+// persistedTurnAccounting reports the settlement the store already holds for
+// one turn of this session, and whether it holds one at all.
+//
+// It reads through List rather than a dedicated point lookup because List is
+// already the store's answer to "what settlements exist for this session", and
+// this is a failure path taken once per unpersistable turn: a second query
+// shape would be one more thing that could disagree with the row Record
+// compares against.
+func (c *consumer) persistedTurnAccounting(turnID string) (*frontendv1.TurnAccounting, bool, error) {
+	accountings, err := c.accountingStore.List(c.sessionID)
+	if err != nil {
+		return nil, false, fmt.Errorf("session-controller: read persisted turn accounting: %w", err)
+	}
+	for _, accounting := range accountings {
+		if accounting.GetTurnId() == turnID {
+			return accounting, true, nil
+		}
+	}
+	return nil, false, nil
 }
 
 // ReleaseSynthesizedTurnClose settles every turn whose claim the daemon closed
