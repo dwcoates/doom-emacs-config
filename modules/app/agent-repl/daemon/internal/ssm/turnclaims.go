@@ -350,7 +350,7 @@ func (m *Manager) ReconcileTurnHandshake(workspace, claimantSessionID string, id
 			// reconciliation above has already committed and DaemonHello is
 			// gated on this call's error, so returning here would refuse a
 			// perfectly good session over a stale row it merely failed to tidy.
-			m.logf("ssm: closing the stale turn on the shim handshake FAILED workspace=%s claimant_session=%s hello_ids=%v: %v — the session-status lifecycle may stay latched in `thinking` until the next edge supersedes it",
+			m.warn("ssm: closing the stale turn on the shim handshake FAILED workspace=%s claimant_session=%s hello_ids=%v: %v — the session-status lifecycle may stay latched in `thinking` until the next edge supersedes it",
 				workspace, claimantSessionID, ids, err)
 		}
 	}
