@@ -1173,15 +1173,21 @@ one workspace never disturbs another workspace's windows."
 (defun agent-repl--gui-kill (ws)
   "The gui frontend's kill capability (registry `:kill-fn').
 Tears down the LAYOUT first (webview + dedicated input windows), then
-deletes the daemon session (best-effort) and kills the webview.  The
-window teardown is contractual: the registry's `:restart-fn' composes
-this kill immediately followed by `agent-repl--gui-open', and a
-leftover dedicated input window aborts that reopen mid-initialize (the
-observed \"webview buffer is null/dead\" cascade).  The input buffer
-itself survives — it is workspace furniture, not session state."
+kills the webview.  The window teardown is contractual: the registry's
+`:restart-fn' composes this kill immediately followed by
+`agent-repl--gui-open', and a leftover dedicated input window aborts that
+reopen mid-initialize (the observed \"webview buffer is null/dead\"
+cascade).  The input buffer itself survives — it is workspace furniture,
+not session state.
+
+THE DAEMON SESSION IS LEFT ALONE, and that is the whole point of killing
+only the layout: the daemon locates a session by cwd, so a reopened
+workspace reattaches to the same record and the conversation comes back.
+A teardown that ended the session would stamp its record with a death
+reason `resume-resolve' reads as the user discarding the CONVERSATION,
+which is not what closing a panel says."
   (agent-repl--log ws "gui-kill: ws=%s kill-cause=%s" ws (agent-repl--kill-cause-str))
   (agent-repl--gui-hide ws)
-  (agent-repl--frontend-release-workspace-session ws)
   (agent-repl--frontend-release-workspace-webview ws)
   (agent-repl--ws-put ws :frontend-buffer nil))
 

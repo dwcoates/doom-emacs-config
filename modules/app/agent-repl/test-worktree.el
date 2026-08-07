@@ -1154,10 +1154,14 @@ Regression: the old body gated on the vterm-only buffer-local
 `:vterm-buffer' is ever set), so it ALWAYS took the immediate-teardown
 branch and silently skipped the GNS socket drain for every gui
 workspace close.  This test's workspace has a genuinely live session
-\(`:frontend-session-id' bound) and fails against that old body."
+\(the daemon has pushed a non-terminal view for it) and fails against
+that old body."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws" :frontend 'gui)
-    (agent-repl--ws-put "ws" :frontend-session-id "sid-1")
+    (agent-repl--ws-put "ws" :project-dir "/tmp/ws")
+    (clrhash agent-repl--frontend-session-views)
+    (agent-repl--frontend-store-session-view
+     '(:sessionId "sid-1" :workspace "/tmp/ws"))
     (let ((sent-prompt :unset)
           (sent-ws :unset)
           (teardown-called nil))
@@ -1180,7 +1184,10 @@ workspace close.  This test's workspace has a genuinely live session
 has time to fire before state is polled."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws" :frontend 'gui)
-    (agent-repl--ws-put "ws" :frontend-session-id "sid-1")
+    (agent-repl--ws-put "ws" :project-dir "/tmp/ws")
+    (clrhash agent-repl--frontend-session-views)
+    (agent-repl--frontend-store-session-view
+     '(:sessionId "sid-1" :workspace "/tmp/ws"))
     (let ((scheduled-fn :unset)
           (scheduled-delay :unset)
           (captured-on-settle nil))
@@ -1721,7 +1728,6 @@ registered gui frontend's `:kill-fn')."
   (agent-repl-test--with-clean-state
     (let ((killed-ws nil))
       (agent-repl--ws-put "ws1" :frontend 'gui)
-      (agent-repl--ws-put "ws1" :frontend-session-id "sid-1")
       (cl-letf (((symbol-function 'agent-repl--gui-kill)
                  (lambda (ws) (setq killed-ws ws)))
                 ((symbol-function '+workspace-list-names) (lambda () nil))
