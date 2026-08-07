@@ -325,7 +325,7 @@ func TestStoreOutageFilesAnInternalCard(t *testing.T) {
 	rig.settleGreen()
 
 	// Act
-	rig.cons.Degraded(rig.sid, &corev1.DegradedState{
+	rig.cons.Degraded(rig.sid, nil, &corev1.DegradedState{
 		Component:    "store-client",
 		Reason:       "store socket closed",
 		DroppedCount: 7,
@@ -350,7 +350,7 @@ func TestStoreOutageOpensUnresolved(t *testing.T) {
 	rig.settleGreen()
 
 	// Act
-	rig.cons.Degraded(rig.sid, &corev1.DegradedState{Component: "store-client", Reason: "store socket closed"})
+	rig.cons.Degraded(rig.sid, nil, &corev1.DegradedState{Component: "store-client", Reason: "store socket closed"})
 
 	// Assert
 	if got := rig.cards()[0].GetResolvedAtMs(); got != 0 {
@@ -367,10 +367,10 @@ func TestStoreRecoveryResolvesTheSameCardInPlace(t *testing.T) {
 	rig.settleGreen()
 	const recoveredAt int64 = 1_700_000_042_000
 	rig.cons.now = func() int64 { return recoveredAt }
-	rig.cons.Degraded(rig.sid, &corev1.DegradedState{Component: "store-client", Reason: "store socket closed"})
+	rig.cons.Degraded(rig.sid, nil, &corev1.DegradedState{Component: "store-client", Reason: "store socket closed"})
 
 	// Act
-	rig.cons.Degraded(rig.sid, &corev1.DegradedState{Component: "store-client", Recovered: true})
+	rig.cons.Degraded(rig.sid, nil, &corev1.DegradedState{Component: "store-client", Recovered: true})
 
 	// Assert
 	uuids := rig.cardUUIDs()
@@ -461,7 +461,7 @@ func TestShimStoreLinkDropOpensAConnectivityFault(t *testing.T) {
 	rig.settleGreen()
 
 	// Act
-	rig.cons.Degraded(rig.sid, &corev1.DegradedState{
+	rig.cons.Degraded(rig.sid, nil, &corev1.DegradedState{
 		Component: "shim-store-client",
 		Reason:    "store connection closed",
 	})
@@ -487,13 +487,13 @@ func TestShimStoreLinkRecoveryClosesTheFault(t *testing.T) {
 	// Arrange
 	rig := newFaultRig(t)
 	rig.settleGreen()
-	rig.cons.Degraded(rig.sid, &corev1.DegradedState{
+	rig.cons.Degraded(rig.sid, nil, &corev1.DegradedState{
 		Component: "shim-store-client",
 		Reason:    "store subscription closed",
 	})
 
 	// Act
-	rig.cons.Degraded(rig.sid, &corev1.DegradedState{
+	rig.cons.Degraded(rig.sid, nil, &corev1.DegradedState{
 		Component: "shim-store-client",
 		Reason:    "store link recovered",
 		Recovered: true,
@@ -511,11 +511,11 @@ func TestShimStoreLinkRecoveryLeavesTheBlueBand(t *testing.T) {
 	// Arrange
 	rig := newFaultRig(t)
 	rig.settleGreen()
-	rig.cons.Degraded(rig.sid, &corev1.DegradedState{Component: "shim-store-client", Reason: "store connection closed"})
+	rig.cons.Degraded(rig.sid, nil, &corev1.DegradedState{Component: "shim-store-client", Reason: "store connection closed"})
 	rig.wantState(frontendv1.RenderState_RENDER_STATE_DEGRADED, "store link down")
 
 	// Act
-	rig.cons.Degraded(rig.sid, &corev1.DegradedState{
+	rig.cons.Degraded(rig.sid, nil, &corev1.DegradedState{
 		Component: "shim-store-client",
 		Reason:    "store link recovered",
 		Recovered: true,
@@ -534,10 +534,10 @@ func TestShimStoreLinkRecoveryWithoutAReasonStillClosesTheFault(t *testing.T) {
 	// Arrange
 	rig := newFaultRig(t)
 	rig.settleGreen()
-	rig.cons.Degraded(rig.sid, &corev1.DegradedState{Component: "shim-store-client", Reason: "store connection closed"})
+	rig.cons.Degraded(rig.sid, nil, &corev1.DegradedState{Component: "shim-store-client", Reason: "store connection closed"})
 
 	// Act
-	rig.cons.Degraded(rig.sid, &corev1.DegradedState{Component: "shim-store-client", Recovered: true})
+	rig.cons.Degraded(rig.sid, nil, &corev1.DegradedState{Component: "shim-store-client", Recovered: true})
 
 	// Assert
 	if faults := rig.activeFaults(); len(faults) != 0 {
@@ -553,12 +553,12 @@ func TestShimStoreLinkRecoveryRepushesTheWorkspaceState(t *testing.T) {
 	// has already opened, so the only push in the channel is the recovery's.
 	rig := newFaultRig(t)
 	rig.settleGreen()
-	rig.cons.Degraded(rig.sid, &corev1.DegradedState{Component: "shim-store-client", Reason: "store connection closed"})
+	rig.cons.Degraded(rig.sid, nil, &corev1.DegradedState{Component: "shim-store-client", Reason: "store connection closed"})
 	states, cancel := rig.mgr.Subscribe()
 	defer cancel()
 
 	// Act
-	rig.cons.Degraded(rig.sid, &corev1.DegradedState{
+	rig.cons.Degraded(rig.sid, nil, &corev1.DegradedState{
 		Component: "shim-store-client",
 		Reason:    "store link recovered",
 		Recovered: true,

@@ -96,7 +96,7 @@ func newChanDegraded() *chanDegraded {
 	}
 }
 
-func (d *chanDegraded) Degraded(_ string, ds *corev1.DegradedState) { d.ds <- ds }
+func (d *chanDegraded) Degraded(_ string, _ *corev1.Event, ds *corev1.DegradedState) { d.ds <- ds }
 func (d *chanDegraded) ConnectionDegraded(_, reason string)         { d.degraded <- reason }
 func (d *chanDegraded) ConnectionRecovered(_ string)                { d.recovered <- struct{}{} }
 
