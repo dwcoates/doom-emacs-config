@@ -58,7 +58,7 @@ func (r RegistrySessions) SessionViews() []*frontendv1.SessionView {
 		if r.ModelCatalogs != nil {
 			modelOptions = r.ModelCatalogs.Get(rec.SessionID)
 		}
-		out = append(out, SessionViewFromRecordWithModelsAndUsage(r.Logf, rec, pending, live, modelOptions, sessionTokenUtilization(r.Logf, r.TokenUsage, rec.SessionID)))
+		out = append(out, SessionViewFromRecordWithModelsAndUsage(r.Logf, r.Reg, rec, pending, live, modelOptions, sessionTokenUtilization(r.Logf, r.TokenUsage, rec.SessionID)))
 	}
 	return out
 }
