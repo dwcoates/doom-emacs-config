@@ -25,6 +25,12 @@ type Config struct {
 	Publication SessionPublicationPreparer
 	HostActions HostActionSink
 	Logf        func(string, ...any)
+	// Errorf is the same canonical logger at ERROR severity.  It is REQUIRED
+	// and separate because a workspace the host has silently refused to
+	// materialize is a fault, and a fault emitted at info is a fault nobody
+	// finds: the incident that produced this escalation buried its own cause
+	// under 1592 info lines.
+	Errorf func(string, ...any)
 	// Now is the manager's clock, used only by the awaiting-host sweep.  Tests
 	// supply a controlled one so a cadence can be exercised without waiting on
 	// wall time; production leaves it nil and gets time.Now.
@@ -32,6 +38,9 @@ type Config struct {
 	// MaterializationRequestInterval bounds how often one job's unanswered
 	// materialization request is re-sent.  Zero takes the package default.
 	MaterializationRequestInterval time.Duration
+	// MaterializationHeldDeadline bounds how long a job may wait on the host
+	// before the wait is escalated.  Zero takes the package default.
+	MaterializationHeldDeadline time.Duration
 }
 
 // routedJobBuffer is how many job ids the creation worker may fall behind by
@@ -54,6 +63,24 @@ const routedJobBuffer = 256
 // sixteen minutes, while the daemon logged the same held-publication line 1592
 // times and never once said the request had reached no one.
 const defaultMaterializationRequestInterval = 15 * time.Second
+
+// defaultMaterializationHeldDeadline is how long a workspace may sit waiting on
+// the host before the daemon stops treating the wait as normal.
+//
+// SOMETHING MUST NOTICE.  A held job costs a worktree, a registered session and
+// a live shim's half-gigabyte, and it holds back the user's initial prompt; two
+// such jobs sat unnoticed for DAYS across daemon restarts because nothing ever
+// looked at how old a wait was.  Crossing this deadline is not a cleanup
+// trigger — the workspace is real and a host that comes back still materializes
+// it — it is a REPORT: one error-level record and one user-visible failure
+// card, both emitted exactly once per job.
+const defaultMaterializationHeldDeadline = 2 * time.Minute
+
+// HostActionTypeWorkspaceMaterializationHeld is the escalation's user-visible
+// arm.  It rides the create-failed action so the host renders it through the
+// path it already has for a creation that went wrong, and its ID is derived
+// from the job's so a second escalation for the same job is impossible.
+const HostActionTypeWorkspaceMaterializationHeld = HostActionTypeWorkspaceCreateFailed
 
 // Manager drives durable workspace creation jobs to the next safe boundary.
 // It has no dependency on frontend/server or sessioncontroller so ownership remains
@@ -117,6 +144,8 @@ func NewManager(cfg Config) (*Manager, error) {
 		return nil, fmt.Errorf("workspace create: manager needs a HostActionSink")
 	case cfg.Logf == nil:
 		return nil, fmt.Errorf("workspace create: manager needs a logger")
+	case cfg.Errorf == nil:
+		return nil, fmt.Errorf("workspace create: manager needs an error-level logger (without it a workspace the host never materialized is reported at the same severity as routine progress and nobody finds it)")
 	}
 	return &Manager{
 		cfg:      cfg,
@@ -344,6 +373,67 @@ func (m *Manager) materializationRequestInterval() time.Duration {
 	return defaultMaterializationRequestInterval
 }
 
+func (m *Manager) materializationHeldDeadline() time.Duration {
+	if m.cfg.MaterializationHeldDeadline > 0 {
+		return m.cfg.MaterializationHeldDeadline
+	}
+	return defaultMaterializationHeldDeadline
+}
+
+// escalateHeldMaterialization reports one job whose wait on the host has run
+// past the deadline: an error-level record and a retained user-visible failure,
+// each exactly once.
+//
+// IT DESTROYS NOTHING.  The worktree, the branch, the session and the shim are
+// all real and all still the user's; the only thing wrong is that no host ever
+// answered.  So the job STAYS on awaiting_emacs, and the next host connect
+// still materializes it from the reconnect snapshot.  The escalation is the
+// report, not the remedy.
+//
+// The durable latch is written FIRST.  A daemon that dies between the report
+// and the latch would re-report on every sweep forever, and an escalation that
+// repeats is one nobody reads.
+func (m *Manager) escalateHeldMaterialization(ctx context.Context, job Job, heldMs int64) {
+	latched, err := m.cfg.Store.Update(job.ID, func(j *Job) error {
+		j.MaterializationEscalated = true
+		return nil
+	})
+	if err != nil {
+		m.cfg.Logf("workspace-create: held-materialization escalation could not latch id=%s error=%v; nothing is reported this sweep and the next one retries", job.ID, err)
+		return
+	}
+	m.cfg.Errorf("workspace-create: MATERIALIZATION HELD PAST DEADLINE id=%s name=%q worktree=%s session=%s held_ms=%d requests=%d deadline_ms=%d — no host ever acknowledged this workspace; it exists on disk with a live session and its initial prompt is undelivered, and it will materialize on the next host connect",
+		latched.ID, latched.FinalName, latched.WorktreePath, latched.SessionID, heldMs, latched.MaterializationRequests, m.materializationHeldDeadline().Milliseconds())
+	payload, err := json.Marshal(WorkspaceCreateFailure{
+		JobID:         latched.ID,
+		RequestedName: latched.Request.Name,
+		Error: fmt.Sprintf("workspace %q was built but no editor materialized it after %ds and %d requests; it is intact on disk at %s and appears when the editor reconnects",
+			firstNonEmptyName(latched.FinalName, latched.Request.Name), heldMs/1000, latched.MaterializationRequests, latched.WorktreePath),
+	})
+	if err != nil {
+		m.cfg.Errorf("workspace-create: HELD MATERIALIZATION NOT SURFACED id=%s reason=payload error=%v", latched.ID, err)
+		return
+	}
+	notice := HostAction{ID: latched.ID + ":materialization-held", SourceFile: latched.SourceFile, SourceIndex: latched.SourceIndex, Type: HostActionTypeWorkspaceMaterializationHeld, Payload: payload}
+	if _, _, err := m.cfg.Store.EnqueueHostAction(notice); err != nil {
+		m.cfg.Errorf("workspace-create: HELD MATERIALIZATION NOT SURFACED id=%s reason=enqueue error=%v", latched.ID, err)
+		return
+	}
+	m.cfg.Logf("workspace-create: held materialization SURFACED id=%s host_action=%s name=%q", latched.ID, notice.ID, latched.FinalName)
+	if err := m.DrainHostActions(ctx); err != nil {
+		m.cfg.Logf("workspace-create: held-materialization notice not delivered yet id=%s host_action=%s error=%v retained=yes", latched.ID, notice.ID, err)
+	}
+}
+
+func firstNonEmptyName(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return "(unnamed)"
+}
+
 // SweepAwaitingHost re-asks the host to materialize every job parked on
 // awaiting_emacs whose last request has gone unanswered past the re-request
 // interval.
@@ -364,6 +454,7 @@ func (m *Manager) SweepAwaitingHost(ctx context.Context) error {
 	}
 	nowMs := m.now().UnixMilli()
 	interval := m.materializationRequestInterval().Milliseconds()
+	deadline := m.materializationHeldDeadline().Milliseconds()
 	for _, job := range jobs {
 		if job.State != StateAwaitingEmacs {
 			continue
@@ -382,10 +473,22 @@ func (m *Manager) SweepAwaitingHost(ctx context.Context) error {
 			}
 			job = updated
 		}
+		heldMs := nowMs - job.AwaitingEmacsSinceMs
+		if heldMs >= deadline && !job.MaterializationEscalated {
+			m.escalateHeldMaterialization(ctx, job, heldMs)
+			continue
+		}
+		// AN ESCALATED JOB STOPS BEING RE-ASKED.  The host has had every
+		// request the deadline allows for, the wait is now on the record as a
+		// fault, and a workspace nobody is coming back for must not go on
+		// republishing forever.  Recovery is still total: a host connect
+		// replays every awaiting_emacs job in its snapshot.
+		if job.MaterializationEscalated {
+			continue
+		}
 		if job.MaterializationLastRequestMs != 0 && nowMs-job.MaterializationLastRequestMs < interval {
 			continue
 		}
-		heldMs := nowMs - job.AwaitingEmacsSinceMs
 		available := Available{JobID: job.ID, Name: job.FinalName, Branch: job.Branch, BaseCommit: job.ResolvedBaseCommit, WorktreePath: job.WorktreePath, SessionID: job.SessionID, Request: job.Request}
 		m.cfg.Logf("workspace-create: RE-REQUESTING materialization id=%s name=%q worktree=%s session=%s held_ms=%d attempt=%d", job.ID, job.FinalName, job.WorktreePath, job.SessionID, heldMs, job.MaterializationRequests+1)
 		if err := m.cfg.Available.PublishWorkspaceAvailable(ctx, available); err != nil {

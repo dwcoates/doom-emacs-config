@@ -626,7 +626,10 @@ type WorkspaceCreateAssemblyConfig struct {
 	Health         WorkspaceHealthProbe
 	InitialPrompts InitialPromptRouter
 	Logf           func(string, ...any)
-	InboxInterval  time.Duration
+	// Errorf is the same canonical logger at ERROR severity, for the faults the
+	// creation manager reports rather than the progress it narrates.
+	Errorf        func(string, ...any)
+	InboxInterval time.Duration
 }
 
 // WorkspaceCreationBridge is the concrete server-local bridge over the
@@ -882,8 +885,8 @@ func toProtoSidebarAction(a workspacecreate.HostAction) (*frontendv1.HostAction,
 }
 
 func NewWorkspaceCreateAssembly(cfg WorkspaceCreateAssemblyConfig) (*WorkspaceCreateAssembly, error) {
-	if cfg.Commands == nil || cfg.Registry == nil || cfg.Geometry == nil || cfg.Health == nil || cfg.InitialPrompts == nil || cfg.Logf == nil {
-		return nil, fmt.Errorf("workspace create: startup requires commands, registry, geometry recorder, health probe, initial-prompt router, and logger")
+	if cfg.Commands == nil || cfg.Registry == nil || cfg.Geometry == nil || cfg.Health == nil || cfg.InitialPrompts == nil || cfg.Logf == nil || cfg.Errorf == nil {
+		return nil, fmt.Errorf("workspace create: startup requires commands, registry, geometry recorder, health probe, initial-prompt router, and both the normal and error-level loggers")
 	}
 	storePath, inboxPath, err := workspaceCreatePaths(cfg.StateRoot)
 	if err != nil {
@@ -901,6 +904,7 @@ func NewWorkspaceCreateAssembly(cfg WorkspaceCreateAssemblyConfig) (*WorkspaceCr
 		Health:    daemonSessionHealth{Probe: cfg.Health},
 		Prompts:   daemonInitialPromptSubmitter{Router: cfg.InitialPrompts, Registry: cfg.Registry},
 		Available: forwarder, Releases: forwarder, Publication: forwarder, HostActions: forwarder, Logf: cfg.Logf,
+		Errorf: cfg.Errorf,
 	})
 	if err != nil {
 		return nil, err
