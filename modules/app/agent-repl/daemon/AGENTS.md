@@ -51,6 +51,30 @@ thinking" or infer session-controller liveness from persisted session fields.
   forbidden except a documented pre-logger bootstrap failure or logger-sink
   emergency path.
 
+## Telemetry
+
+- Every completed frontend command emits one record at
+  `daemon.frontend.command-latency`. Its context carries `command` (the
+  `FrontendCommand` oneof field name), `client_kind`, `workspace`,
+  `queue_depth` (commands in flight daemon-wide at receipt, including this
+  one), `duration_ms` (receipt through ack enqueue — what the client waits
+  out), `processing_ms` (the dispatch's share), `threshold_ms`,
+  `ack_deadline_ms`, and `ok`. `request_id` is in its own top-level field.
+- A fast command is `debug`/`verbose`. An ack at or past
+  `AGENT_REPL_FRONTEND_ACK_WARN_MS` (default 2s, a fifth of the client's 10s
+  ack deadline) is `warn`/`normal`, so a slow ack is visible without verbose
+  mode and before the client's own deadline expires. A malformed value aborts
+  boot.
+- A command that names a workspace is workspace-owned; only the genuinely
+  workspace-less commands reach the global service log.
+- `-pprof` (default `AGENT_REPL_PPROF_ADDR`) opens the OPT-IN Go profiling
+  surface: a unix socket path, or an explicitly loopback `host:port`. Empty is
+  OFF and is the default — there is no always-on listener, and a wildcard or
+  routable bind is refused at construction. The decision is recorded either way
+  (`daemon.pprof.disabled` / `daemon.pprof.enabled`); the enabled record is
+  `warn` and names the resolved `network`, `address` and `url`, which is the
+  only place a port-0 bind's chosen port appears.
+
 ## Verification
 
 - Non-interactive agents run under a permission classifier that blocks

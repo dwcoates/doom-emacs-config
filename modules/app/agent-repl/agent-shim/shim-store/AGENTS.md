@@ -72,6 +72,30 @@ Dependencies: `proto/agentshim/` (generated Go), SQLite.
   forbidden except a documented pre-logger bootstrap failure or logger-sink
   emergency path.
 
+## Telemetry
+
+- Every statement family in `internal/db` is timed: `replay`, `max_seq`,
+  `events_by_task`, `open_tasks`, `list_cursors`, `cursor`, and the whole
+  `BEGIN IMMEDIATE` `ingest` transaction. One that exceeds
+  `AGENT_REPL_STORE_SLOW_QUERY_MS` (default 250ms) emits a `warn`,
+  normal-verbosity record at `store.db.slow-query` with `statement`,
+  `duration_ms`, `rows` and `threshold_ms`.
+- Normal verbosity is deliberate and is the one exception to the rule above
+  about hot per-operation diagnostics: a query that blew the threshold must be
+  visible without verbose mode, because by the time an operator knows to look
+  the replay that stalled is over. Successful query timing stays verbose.
+- `statement` is a FAMILY NAME, never rendered SQL and never bound values. The
+  payloads are opaque to the store, and quoting a parameterized statement would
+  put session content into the singleton global log.
+- A malformed threshold aborts `db.Open` rather than running the shipped
+  default underneath an operator who believes they changed it.
+- `-pprof` (default `AGENT_REPL_STORE_PPROF_ADDR` — store-specific, so
+  profiling one service does not open a listener in the other) is the OPT-IN Go
+  profiling surface. Empty is OFF and is the default. Same local-only rules as
+  the daemon's: a unix socket path, or an explicitly loopback `host:port`;
+  anything else is refused. Recorded at `store.pprof.disabled` /
+  `store.pprof.enabled`.
+
 ## Verification
 
 - Run `make coverage` after every store Go change. It exercises every package
