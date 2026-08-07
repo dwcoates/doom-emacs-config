@@ -256,6 +256,43 @@ common case, not a malformed frame."
     ;; Assert
     (should (equal (plist-get f :resolved-at) 1700000000000))))
 
+(ert-deftest agent-repl-test-failure-from-wire-coerces-a-string-resolution ()
+  "A protojson STRING resolution instant is adopted as a NUMBER.
+protojson encodes int64 as a JSON string, so every daemon-sent resolved
+failure arrives with `resolvedAtMs' as a string of digits."
+  ;; Arrange / Act
+  (let ((f (agent-repl-failure-from-wire
+            '(:errorClass "ERROR_CLASS_INTERNAL" :errorType "session.superseded"
+              :message "superseded" :resolvedAtMs "1786127506030"))))
+    ;; Assert
+    (should (equal (plist-get f :resolved-at) 1786127506030))))
+
+(ert-deftest agent-repl-test-failure-from-wire-rejects-an-unreadable-resolution ()
+  "A present but unreadable resolution instant signals rather than defaulting.
+Defaulting it to 0 would silently turn a settled failure back into a
+permanent alarm."
+  ;; Arrange / Act / Assert
+  (should-error
+   (agent-repl-failure-from-wire
+    '(:errorClass "ERROR_CLASS_INTERNAL" :errorType "session.superseded"
+      :message "superseded" :resolvedAtMs "later"))))
+
+(ert-deftest agent-repl-test-failure-surface-is-silent-for-a-string-resolution ()
+  "A wire failure resolved with a STRING instant is logged, not echoed."
+  ;; Arrange
+  (let ((failure (agent-repl-failure-from-wire
+                  '(:errorClass "ERROR_CLASS_INTERNAL"
+                    :errorType "session.superseded"
+                    :message "superseded" :resolvedAtMs "1786127506030")))
+        echoed)
+    (cl-letf (((symbol-function 'message)
+               (lambda (fmt &rest args) (setq echoed (apply #'format fmt args)))))
+      ;; Act
+      (let ((result (agent-repl-failure-surface "ws" failure)))
+        ;; Assert
+        (should (null result))
+        (should (null echoed))))))
+
 (ert-deftest agent-repl-test-failure-from-wire-logs-all-adopted-fields ()
   "Wire adoption logs every value that reaches the normalized failure."
   ;; Arrange
