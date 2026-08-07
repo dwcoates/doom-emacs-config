@@ -110,17 +110,6 @@ beats a daemon NACK that reads as \"no live session\"."
     (agent-repl--log ws "frontend-wire-key: ws=%s cwd=%s" ws key)
     key))
 
-;; When non-nil, a resume whose transcript the daemon cannot find DEGRADES
-;; to a fresh conversation.  The default (nil) behavior on the daemon's
-;; transcript-missing refusal is to surface the refusal unchanged.  Binding
-;; this non-nil explicitly OVERRIDES that and recreates the session with no
-;; resume.  `agent-repl-force-fresh-conversation' starts a fresh conversation
-;; directly and does not rely on this override.
-(defvar agent-repl--force-fresh-conversation nil
-  "When non-nil, a lost-transcript resume degrades to a fresh conversation.
-Overrides the default hard refusal in
-`agent-repl--frontend-after-create-session'.")
-
 ;;;; ---- Customization ----------------------------------------------------
 
 (defcustom agent-repl-frontend-permission-mode "auto"
@@ -378,8 +367,14 @@ it has, or starts one when it has none."
       :pending)))
 
 (defun agent-repl--frontend-after-create-session
-    (cwd model resume-mode explicit-id force-fresh on-success on-failure &optional ws)
-  "Asynchronously create CWD's session and await its pushed `SessionView'."
+    (cwd model resume-mode explicit-id on-success on-failure &optional ws)
+  "Asynchronously create CWD\='s session and await its pushed `SessionView\='.
+
+RESUME-MODE is `continue\=' or `explicit\='; there is no third value.  A
+conversation cannot be abandoned from here — see the ResumeMode enum in
+frontend.proto for why the wire no longer carries a fresh intent, and the
+daemon\='s resume ladder for the evidence that decides when a workspace
+with no conversation may start one."
   (unless (and (stringp cwd) (not (string-empty-p cwd))
                (functionp on-success) (functionp on-failure))
     (error "agent-repl: createSession requires cwd and callable continuations"))
@@ -393,7 +388,6 @@ it has, or starts one when it has none."
   (let* ((ws (or ws (agent-repl--ws-name-for-dir cwd)))
          (started (float-time)) request-id deadline-timer poll-timer settled acked
          (resume-mode (or resume-mode 'continue))
-         (force-fresh (or force-fresh agent-repl--force-fresh-conversation))
          (model (agent-repl--effective-model model))
          (posture (agent-repl--frontend-session-posture cwd))
          (payload (append (list :cwd cwd :resumeMode (agent-repl--frontend-resume-mode-wire resume-mode))
@@ -420,24 +414,24 @@ it has, or starts one when it has none."
            (unless settled
              (setq settled t)
              (cleanup)
+             ;; A LOST TRANSCRIPT IS REPORTED, NEVER ROUTED AROUND.  This used
+             ;; to be a fork: an override could recreate the session with no
+             ;; resume, replacing the conversation the daemon had just said it
+             ;; could not find.  The conversation is not this end\='s to
+             ;; abandon, and the daemon is the only party holding the evidence
+             ;; that would justify a blank start, so the refusal is surfaced
+             ;; unchanged.
              (if (and (stringp err) explicit-id
                       (string-match-p "has no transcript" err))
-                 (if force-fresh
-                     (progn
-                       (agent-repl--log ws
-                                        "createSession-async: lost transcript resume=%s force-fresh=t cwd=%s"
-                                        explicit-id cwd)
-                       (agent-repl--frontend-after-create-session
-                        cwd model 'fresh nil nil on-success on-failure ws))
-                   (let ((detail
-                          (format (concat "resume target %s has no transcript; refusing a fresh "
-                                          "conversation")
-                                  explicit-id)))
-                     (agent-repl--log ws
-                                      "createSession-async: resume refused resume=%s force-fresh=nil cwd=%s detail=%s"
-                                      explicit-id cwd detail)
-                     (agent-repl--frontend-async-fail
-                      ws "createSession" request-id started on-failure detail)))
+                 (let ((detail
+                        (format (concat "resume target %s has no transcript; refusing a fresh "
+                                        "conversation")
+                                explicit-id)))
+                   (agent-repl--log ws
+                                    "createSession-async: resume refused resume=%s cwd=%s detail=%s"
+                                    explicit-id cwd detail)
+                   (agent-repl--frontend-async-fail
+                    ws "createSession" request-id started on-failure detail))
                (agent-repl--frontend-async-fail
                 ws "createSession" request-id started on-failure
                 (format "command rejected: %s" (or err "no reason supplied"))))))
@@ -612,12 +606,15 @@ unreachable, or has no recorded id."
 
 (defconst agent-repl--frontend-resume-modes
   '((continue . "RESUME_MODE_CONTINUE")
-    (fresh    . "RESUME_MODE_FRESH")
     (explicit . "RESUME_MODE_EXPLICIT"))
   "Map of `agent-repl--frontend-after-create-session' RESUME-MODE to its wire name.
 Deliberately has no entry for the proto's `RESUME_MODE_UNSPECIFIED': that
 value exists so an older peer's absent field reads as `continue', and a
-caller here always knows which of the three it means.")
+caller here always knows which of the two it means.
+
+There is no fresh mode.  The proto retired RESUME_MODE_FRESH (tag 2) because
+a workspace's conversation is not caller-replaceable; a daemon that receives
+the raw value refuses the create outright.")
 
 (defun agent-repl--frontend-resume-mode-wire (mode)
   "Return the protojson enum name for resume MODE.
@@ -1159,38 +1156,11 @@ the subsequent open attaches to the continued conversation."
     (let ((dir (or (agent-repl--ws-get ws :project-dir)
                    (agent-repl--resolve-current-git-root))))
       (agent-repl--frontend-after-create-session
-       dir (agent-repl--ws-get ws :model) 'explicit claude-session-id nil
+       dir (agent-repl--ws-get ws :model) 'explicit claude-session-id
        (lambda (id)
          (agent-repl--log ws "gui adopted claude session %s as %s"
                           claude-session-id id)
          (funcall on-success id))
-       on-failure ws)))
-  :pending)
-
-(defun agent-repl--frontend-force-fresh-session (ws on-success on-failure)
-  "Asynchronously create and bind a FRESH daemon session for WS.
-Mirrors `agent-repl--gui-adopt-session' but passes NO resume, so a BLANK
-conversation replaces whatever the normal ensure path would replay.
-Resets the reattach failure markers so the fresh binding reads as healthy.
-ON-SUCCESS takes no arguments.  The fresh session captures its own
-durable id through the usual hook path once it runs, so a later resume
-continues the fresh conversation rather than the discarded one."
-  (unless (and (functionp on-success) (functionp on-failure))
-    (error "agent-repl: force-fresh requires callable continuations"))
-  (if (not (agent-repl--ensure-frontend-daemon))
-      (agent-repl--frontend-async-fail
-       ws "force-fresh-conversation" nil (float-time) on-failure
-       "frontend daemon not started (auto-start disabled or init inhibited)")
-    (let ((dir (or (agent-repl--ws-get ws :project-dir)
-                   (agent-repl--resolve-current-git-root))))
-      (agent-repl--frontend-after-create-session
-       dir (agent-repl--ws-get ws :model) 'fresh nil nil
-       (lambda (id)
-         (agent-repl--ws-put ws :reattach-failed nil)
-         (agent-repl--ws-put ws :reattach-failures nil)
-         (agent-repl--log ws "force-fresh-conversation: fresh session %s bound (cwd=%s)"
-                          id dir)
-         (funcall on-success))
        on-failure ws)))
   :pending)
 
