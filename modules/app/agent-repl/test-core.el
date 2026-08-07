@@ -2865,6 +2865,108 @@ whole snapshot restore at startup."
                                :target)))
         (delete-directory project t)))))
 
+;;;; ---- Tests: pseudo-perspectives are classified, not warned about ----
+;;
+;; persp-mode's own perspectives are not agent-repl workspaces, so a record
+;; attributed to one is routed globally by `agent-repl--log-sink-workspace'
+;; without a warning.  Screening at the router (rather than at each producer)
+;; is what stops an unscreened producer from putting the warning back.
+
+(ert-deftest agent-repl-test-pseudo-workspace-record-emits-no-warning ()
+  "Doom's startup perspective owns no sink and that is not an anomaly."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      (let ((+workspaces-main "main")
+            (agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
+        ;; Act
+        (cl-letf (((symbol-function 'message) #'ignore))
+          (agent-repl--log "main" "startup perspective probe"))
+        ;; Assert
+        (with-temp-buffer
+          (insert-file-contents path)
+          (should-not (string-match-p "unroutable log workspace" (buffer-string))))))))
+
+(ert-deftest agent-repl-test-persp-nil-name-record-emits-no-warning ()
+  "persp-mode's nil perspective is the other built-in and warns no more than main."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      (let ((persp-nil-name "none")
+            (agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
+        ;; Act
+        (cl-letf (((symbol-function 'message) #'ignore))
+          (agent-repl--log "none" "nil perspective probe"))
+        ;; Assert
+        (with-temp-buffer
+          (insert-file-contents path)
+          (should-not (string-match-p "unroutable log workspace" (buffer-string))))))))
+
+(ert-deftest agent-repl-test-pseudo-workspace-record-reaches-global-sink ()
+  "Demoting the attribution must not drop the record."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      (let ((+workspaces-main "main")
+            (agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
+        ;; Act
+        (cl-letf (((symbol-function 'message) #'ignore))
+          (agent-repl--log "main" "still recorded globally"))
+        ;; Assert
+        (with-temp-buffer
+          (insert-file-contents path)
+          (should (string-match-p "still recorded globally" (buffer-string))))))))
+
+(ert-deftest agent-repl-test-pseudo-workspace-name-is-preserved-on-the-record ()
+  "The routed record still says which perspective it was about."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      (let ((+workspaces-main "main")
+            (agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
+        ;; Act
+        (cl-letf (((symbol-function 'message) #'ignore))
+          (agent-repl--log "main" "named probe"))
+        ;; Assert
+        (with-temp-buffer
+          (insert-file-contents path)
+          (should (string-match-p "\"pseudo_workspace\":\"main\"" (buffer-string))))))))
+
+(ert-deftest agent-repl-test-pseudo-workspace-record-carries-no-workspace-identity ()
+  "A globally-routed pseudo record must not claim a workspace sink identity."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      (let ((+workspaces-main "main")
+            (agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
+        ;; Act
+        (cl-letf (((symbol-function 'message) #'ignore))
+          (agent-repl--log "main" "identity probe"))
+        ;; Assert
+        (with-temp-buffer
+          (insert-file-contents path)
+          (should-not (string-match-p "workspace_id" (buffer-string))))))))
+
+(ert-deftest agent-repl-test-registered-workspace-named-main-still-routes-to-its-sink ()
+  "The pseudo screen never outranks a real registration of the same name."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let* ((project (make-temp-file "agent-repl-real-main-" t))
+           (+workspaces-main "main")
+           (agent-repl-log-to-file nil)
+           (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "main" :project-dir project)
+            ;; Act
+            (let ((agent-repl-log-to-file t))
+              (cl-letf (((symbol-function 'message) #'ignore))
+                (agent-repl--log "main" "owned line")))
+            ;; Assert
+            (should (plist-get (gethash "main" agent-repl--workspace-log-targets)
+                               :target)))
+        (delete-directory project t)))))
+
 (ert-deftest agent-repl-test-log-identity-resolver-still-signals-when-called-directly ()
   "The invariant itself is unchanged; only the ladder screens before calling it.
 Keeping this coverage means a direct caller that skips the screen is still
