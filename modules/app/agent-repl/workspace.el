@@ -1400,6 +1400,27 @@ Callers must use this function instead of calling
   (and (fboundp '+workspace-current-name)
        (+workspace-current-name)))
 
+(defun agent-repl--ws-log-name (ws)
+  "Return WS when it owns a durable log sink, else nil for the global sink.
+The name-taking form of `agent-repl--ws-current-log-name', for the callers
+that hold a workspace name they did not read from ambient state — a persp
+name captured at hook-fire time and carried through a timer, a name passed
+down as a function argument.
+
+Use it wherever a name of persp-mode provenance reaches the logging ladder.
+persp-mode's own perspectives (`persp-nil-name' \"none\", Doom's initial
+\"main\") are live perspectives that are not agent-repl workspaces and own no
+`:project-dir', so attributing a record to one asks the ladder to route to a
+sink that does not exist.  Passing nil instead routes the record to the
+global sink, which is where a line about a non-workspace belongs; keep the
+name in the message text so the record still says which perspective it is
+about.
+
+This never suppresses `agent-repl--note-unroutable-log-workspace': a
+workspace that genuinely should own a sink and does not still reaches the
+ladder unscreened from its own call sites and still warns."
+  (and (agent-repl--ws-log-routable-p ws) ws))
+
 (defun agent-repl--ws-current-log-name ()
   "Return the current workspace name, or nil when it owns no log sink.
 `agent-repl--ws-current-name' answers a persp-mode question, and persp-mode
@@ -1421,8 +1442,7 @@ no workspace is current IS a global-scope line, which is exactly what nil
 routes it to.  Use this instead of `agent-repl--ws-current-name' whenever
 the value is destined for the logging ladder; the behavioral callers that
 switch, compare, or resolve directories keep using the unscreened name."
-  (let ((ws (agent-repl--ws-current-name)))
-    (and (agent-repl--ws-log-routable-p ws) ws)))
+  (agent-repl--ws-log-name (agent-repl--ws-current-name)))
 
 (defun agent-repl--ws-switch (ws &rest args)
   "Switch the active workspace to WS, passing ARGS to `+workspace-switch'.

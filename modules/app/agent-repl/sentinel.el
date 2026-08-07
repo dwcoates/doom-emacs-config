@@ -171,35 +171,45 @@ WS (and MARKER, when non-nil — typically `:timed-out' from the
 watchdog path).  Both bits are explicitly cleared after firing so a
 later kill-and-relaunch cycle starts clean (kill clears the whole
 plist; explicit clear here covers the case where the ws keeps
-running but its load cycle has logically ended)."
+running but its load cycle has logically ended).
+
+One caller is `agent-repl--on-workspace-switch', which is driven by the
+persp activation hook and so hands over whatever perspective persp-mode
+activated — including persp-mode's own \"none\" and Doom's initial \"main\".
+Those perspectives own no `:project-dir' and therefore no durable log sink,
+so the latch bookkeeping uses the unscreened WS while the records go through
+`agent-repl--ws-log-name' and name WS in their text.  A workspace that does
+own a sink keeps its attribution."
   (agent-repl--ws-put ws key t)
   (let ((agent-ready (agent-repl--ws-get ws :agent-ready))
-        (ws-loaded (agent-repl--ws-get ws :ws-loaded)))
-    (agent-repl--log ws "ws-fully-loaded: latch-set key=%s marker=%S agent-ready=%S ws-loaded=%S"
-                      key marker agent-ready ws-loaded)
+        (ws-loaded (agent-repl--ws-get ws :ws-loaded))
+        (log-ws (agent-repl--ws-log-name ws)))
+    (agent-repl--log log-ws "ws-fully-loaded: latch-set ws=%s key=%s marker=%S agent-ready=%S ws-loaded=%S"
+                      ws key marker agent-ready ws-loaded)
     (if (and agent-ready ws-loaded)
         (progn
           (agent-repl--ws-put ws :agent-ready nil)
           (agent-repl--ws-put ws :ws-loaded nil)
-          (agent-repl--log ws "ws-fully-loaded: firing ws=%s marker=%S hook-count=%d"
+          (agent-repl--log log-ws "ws-fully-loaded: firing ws=%s marker=%S hook-count=%d"
                             ws marker (length agent-repl-ws-fully-loaded-functions))
           (run-hook-wrapped 'agent-repl-ws-fully-loaded-functions
                             (lambda (fn ws marker)
-                              (condition-case err
-                                  (progn
-                                    (agent-repl--log ws "ws-fully-loaded-hook: invoke fn=%S marker=%S"
-                                                      fn marker)
-                                    (funcall fn ws marker)
-                                    (agent-repl--log ws "ws-fully-loaded-hook: completed fn=%S"
-                                                      fn))
-                                (error
-                                 (agent-repl--log ws
-                                                   "ws-fully-loaded-hook: failed fn=%S err=%S"
-                                                   fn err)))
+                              (let ((log-ws (agent-repl--ws-log-name ws)))
+                                (condition-case err
+                                    (progn
+                                      (agent-repl--log log-ws "ws-fully-loaded-hook: ws=%s invoke fn=%S marker=%S"
+                                                        ws fn marker)
+                                      (funcall fn ws marker)
+                                      (agent-repl--log log-ws "ws-fully-loaded-hook: ws=%s completed fn=%S"
+                                                        ws fn))
+                                  (error
+                                   (agent-repl--log log-ws
+                                                     "ws-fully-loaded-hook: ws=%s failed fn=%S err=%S"
+                                                     ws fn err))))
                               nil)
                             ws marker))
-      (agent-repl--log ws "ws-fully-loaded: waiting key=%s agent-ready=%S ws-loaded=%S"
-                        key agent-ready ws-loaded))))
+      (agent-repl--log log-ws "ws-fully-loaded: waiting ws=%s key=%s agent-ready=%S ws-loaded=%S"
+                        ws key agent-ready ws-loaded))))
 
 ;;; Event dispatch
 
