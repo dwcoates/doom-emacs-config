@@ -177,6 +177,15 @@ same two phases. If both are specified, refuse to start and ask the user which
 ordering they meant. Do not pick one, and do not silently run the phases
 concurrently.
 
+Under either modifier, a warning is closed by removing what provoked it, never
+by silencing the warning: no suppressing it, no downgrading it to debug, no
+filtering it out of the replay window, no deleting the emit site. A window that
+is warning-clean because the warnings were muted satisfies no criterion. The
+narrow exception — a very good reason, stated explicitly, and only where the
+warning is not hinting at a structural invariant being violated or eroded — is
+defined once under "Addressing a warning means fixing its cause" in
+`iterative-fix-verify-loop.md` step 4, which this runbook follows unchanged.
+
 ## 6. Exit criteria
 
 Iterate until, in a single iteration:
