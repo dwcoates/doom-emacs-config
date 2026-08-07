@@ -195,18 +195,37 @@ type AgentShim struct {
 // hostWorkPublisher is the narrow frontend surface the durable creation
 // manager needs. *frontend.Server satisfies it; isolating the forwarding loop
 // here keeps it testable without opening a real listener.
+// Both methods report the number of HOST clients the frame reached, because
+// host-only work delivered to zero host clients is lost work and the forwarding
+// loops below are the only place that can say so.
 type hostWorkPublisher interface {
-	PushWorkspaceAvailable(*frontendv1.WorkspaceAvailable)
-	PushHostAction(*frontendv1.HostAction)
+	PushWorkspaceAvailable(*frontendv1.WorkspaceAvailable) int
+	PushHostAction(*frontendv1.HostAction) int
 }
 
+// forwardWorkspaceAvailable is the daemon's MATERIALIZATION REQUEST — the line
+// that asks the editor to render a freshly created workspace.
+//
+// It logs the request and its delivery separately on purpose. A workspace that
+// never materializes has exactly two explanations — the request never reached
+// the editor, or the editor received it and did nothing — and one line saying
+// "pushed" could not distinguish them. That ambiguity cost a whole afternoon:
+// the daemon had bounced, the running editor never re-established its HOST
+// connection, and every materialization request went to a client set containing
+// only GUI streams, which are barred from host-only frames. The push was logged,
+// the delivery was zero, and nothing anywhere said so.
 func forwardWorkspaceAvailable(logf func(string, ...any), publisher hostWorkPublisher, values <-chan *frontendv1.WorkspaceAvailable) {
 	for available := range values {
 		if available == nil {
 			panic("server: workspace creation bridge published nil WorkspaceAvailable")
 		}
-		logf("server: host-work push workspace_available job_id=%s workspace=%s", available.GetJobId(), available.GetFinalName())
-		publisher.PushWorkspaceAvailable(available)
+		logf("server: MATERIALIZATION REQUESTED job_id=%s workspace=%s worktree=%q session=%s", available.GetJobId(), available.GetFinalName(), available.GetWorktreePath(), available.GetSessionId())
+		delivered := publisher.PushWorkspaceAvailable(available)
+		if delivered == 0 {
+			logf("server: MATERIALIZATION REQUEST UNDELIVERED job_id=%s workspace=%s host_clients=0 — no Emacs host is connected, so this request reached nobody; the job stays awaiting_emacs and is re-requested until a host answers", available.GetJobId(), available.GetFinalName())
+			continue
+		}
+		logf("server: materialization request delivered job_id=%s workspace=%s host_clients=%d", available.GetJobId(), available.GetFinalName(), delivered)
 	}
 }
 
@@ -216,7 +235,9 @@ func forwardHostActions(logf func(string, ...any), publisher hostWorkPublisher, 
 			panic("server: workspace creation bridge published nil HostAction")
 		}
 		logf("server: host-work push host_action action_id=%s action_type=%T", action.GetActionId(), action.GetAction())
-		publisher.PushHostAction(action)
+		if delivered := publisher.PushHostAction(action); delivered == 0 {
+			logf("server: HOST ACTION UNDELIVERED action_id=%s action_type=%T host_clients=0 — the action stays pending and rides the next host connect's snapshot", action.GetActionId(), action.GetAction())
+		}
 	}
 }
 
