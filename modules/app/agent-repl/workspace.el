@@ -347,8 +347,15 @@ debug logging on."
     (when stub-create
       (let ((trace (or (ignore-errors (agent-repl--ws-put-caller-trace))
                        "<trace-failed>")))
+        ;; Emitted with a nil workspace ON PURPOSE.  This record's whole
+        ;; subject is that WS owns no `:project-dir', which is exactly the
+        ;; state that gives WS no durable log sink; attributing the record to
+        ;; WS would ask the ladder to route it somewhere that does not exist,
+        ;; and `--note-unroutable-log-workspace' would warn about the very
+        ;; condition this line already reports.  The global sink is the
+        ;; correct destination, and the name is carried in the message text.
         (agent-repl--do-log
-         ws
+         nil
          "ws-put: STUB-CREATE ws=%s key=%s val=%S — entry created without :project-dir (non-workspace stub; filtered out of workspace renders). caller-trace=%s"
          (list ws key val trace))))))
 

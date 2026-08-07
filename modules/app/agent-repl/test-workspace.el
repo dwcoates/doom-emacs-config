@@ -249,6 +249,36 @@ emit a noisy unconditional log via `agent-repl--do-log'."
       (should (= 1 (length log-calls)))
       (should (string-match-p "STUB-CREATE" (nth 1 (car log-calls)))))))
 
+(ert-deftest agent-repl-test-ws-put-stub-create-log-routes-globally ()
+  "The stub-create record is emitted with a nil workspace.
+Its subject IS that the entry has no `:project-dir', which is exactly what
+denies it a durable sink, so the global sink is the record's correct
+destination and the name travels in the message text instead."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((log-calls nil))
+      (cl-letf (((symbol-function 'agent-repl--do-log)
+                 (lambda (ws fmt args &optional _err)
+                   (push (list ws fmt args) log-calls))))
+        ;; Act
+        (agent-repl--ws-put "stub-ws" :priority "p1"))
+      ;; Assert
+      (should (null (nth 0 (car log-calls)))))))
+
+(ert-deftest agent-repl-test-ws-put-stub-create-names-the-workspace ()
+  "Routing the stub-create record globally must not lose the workspace name."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((log-calls nil))
+      (cl-letf (((symbol-function 'agent-repl--do-log)
+                 (lambda (ws fmt args &optional _err)
+                   (push (list ws fmt args) log-calls))))
+        ;; Act
+        (agent-repl--ws-put "stub-ws" :priority "p1"))
+      ;; Assert
+      (should (member "stub-ws" (nth 2 (car log-calls)))))))
+
+
 (ert-deftest agent-repl-test-ws-put-project-dir-first-no-log ()
   "ws-put that creates an entry by setting :project-dir as the first key
 should not emit the stub-create log."

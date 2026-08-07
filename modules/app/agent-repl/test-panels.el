@@ -3127,4 +3127,68 @@ rather than booting a session as a side effect."
       (agent-repl--before-persp-deactivate)
       (should-not (agent-repl--ws-get "ws1" :panels-were-visible)))))
 
+;;;; ---- Tests: before-persp-deactivate log routing ----
+
+(ert-deftest agent-repl-test-panels-before-persp-deactivate-placeholder-logs-globally ()
+  "Deactivating a persp PLACEHOLDER logs against the global sink.
+The hook fires for persp-mode's own perspectives too (`persp-nil-name'
+\"none\", Doom's initial \"main\").  Those are not agent-repl workspaces and
+own no durable sink, so the record is global by design."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((logged 'no-record))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "none"))
+                ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
+                ((symbol-function 'agent-repl--redirect-from-agent-before-save) #'ignore)
+                ((symbol-function 'agent-repl--ws-frame-save-state) #'ignore)
+                ((symbol-function 'agent-repl--log)
+                 (lambda (ws &rest _)
+                   (when (eq logged 'no-record) (setq logged ws)))))
+        ;; Act
+        (agent-repl--before-persp-deactivate))
+      ;; Assert
+      (should (null logged)))))
+
+(ert-deftest agent-repl-test-panels-before-persp-deactivate-placeholder-warns-loudly-once ()
+  "The failure path of a placeholder deactivation is global too.
+`--ws-frame-save-state' can fail for a placeholder as readily as for a real
+workspace, and that warning must not itself become an unroutable record."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((warned 'no-warning))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "none"))
+                ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
+                ((symbol-function 'agent-repl--redirect-from-agent-before-save) #'ignore)
+                ((symbol-function 'agent-repl--ws-frame-save-state)
+                 (lambda () (error "save blew up")))
+                ((symbol-function 'agent-repl--warn)
+                 (lambda (ws &rest _) (setq warned ws))))
+        ;; Act
+        (agent-repl--before-persp-deactivate))
+      ;; Assert
+      (should (null warned)))))
+
+(ert-deftest agent-repl-test-panels-before-persp-deactivate-routable-ws-keeps-attribution ()
+  "A REAL workspace's deactivation record still routes to that workspace.
+Screening the log name must not demote records that legitimately own a sink."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((project (make-temp-file "agent-repl-deactivate-route-" t))
+          (logged 'no-record))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "ws1" :project-dir project)
+            (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                      ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
+                      ((symbol-function 'agent-repl--redirect-from-agent-before-save) #'ignore)
+                      ((symbol-function 'agent-repl--ws-frame-save-state) #'ignore)
+                      ((symbol-function 'agent-repl--log)
+                       (lambda (ws &rest _)
+                         (when (eq logged 'no-record) (setq logged ws)))))
+              ;; Act
+              (agent-repl--before-persp-deactivate)))
+        (delete-directory project t))
+      ;; Assert
+      (should (equal logged "ws1")))))
+
 ;;; test-panels.el ends here
