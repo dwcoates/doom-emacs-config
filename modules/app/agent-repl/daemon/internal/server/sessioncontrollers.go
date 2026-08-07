@@ -395,8 +395,35 @@ func (s *ShimSpawner) EnsureShim(ctx context.Context, sessionID string) (session
 	fake := s.fakeForced()
 	opts.Fake = fake
 	if missing := validateResumeTarget(opts, fake); missing != nil {
-		logResumeContinuityFailure(s.logf, "automatic_restore", sessionID, opts, missing)
-		return res, missing
+		if !resumeTargetCarriesAConversation(rec) {
+			// A HANDSHAKE THAT NEVER BECAME A CONVERSATION. The vendor mints a
+			// uuid at system:init, before a single word has been exchanged, and
+			// the daemon records it the moment it arrives. Bring a workspace up
+			// and lose its shim before the first turn — which is exactly what a
+			// daemon bounce during a create does — and the record names a uuid
+			// with no transcript and no history, because there was never
+			// anything to write down.
+			//
+			// The gate's refusal is right about every OTHER shape of this: a
+			// transcript that was deleted, moved, or written under a different
+			// account is a conversation the user still has, and starting a
+			// blank one in its place silently destroys it. That is why the
+			// waiver is not "the file is missing" but "the file is missing AND
+			// this record proves no turn ever ran". LastTurnEndMs is the
+			// registry's own durable answer to the second half; it survives the
+			// bounce the transcript never existed across.
+			//
+			// The stale uuid is deliberately NOT cleared here. Automatic
+			// restoration does not mutate durable identity, and the spawn's own
+			// system:init overwrites the pointer with the uuid it mints. A
+			// respawn that dies before that simply hits this same waiver again.
+			s.logf("server: session %s: resume viability gate WAIVED for respawn resume=%q reason=handshake_only_no_turn_ever_ran cwd=%q config_dir=%q — the vendor minted this uuid at bring-up and no turn ever ran under it, so there is no conversation to lose and the held work would otherwise be dropped",
+				sessionID, opts.Resume, opts.CWD, opts.ConfigDir)
+			opts.Resume = ""
+		} else {
+			logResumeContinuityFailure(s.logf, "automatic_restore", sessionID, opts, missing)
+			return res, missing
+		}
 	}
 	if opts.Fake && opts.Resume != "" {
 		s.logf("server: session %s: resume viability gate WAIVED for respawn (this daemon forces the scripted offline SDK, which writes no transcript) resume=%q",
@@ -424,6 +451,24 @@ func (s *ShimSpawner) EnsureShim(ctx context.Context, sessionID string) (session
 			sessionID, lineage.PreviousVendorSessionID, lineage.DroppedTurnIDs)
 	}
 	return res, nil
+}
+
+// resumeTargetCarriesAConversation reports whether this record's vendor uuid
+// has ever named an actual exchange, as opposed to a handshake the vendor
+// answered with an identity and nothing else.
+//
+// LastTurnEndMs IS THE AUTHORITY, and it is the registry's own: it is written
+// by the turn-boundary sink when a turn ENDS, it is durable precisely so it
+// survives the restarts an in-memory flag would not, and zero means no turn has
+// ever ended under this record. It is deliberately not re-derived from the file
+// plane or the event store here — a second definition of "has this conversation
+// said anything" is how two subsystems come to disagree about one session.
+//
+// A record that HAS run a turn always carries a conversation, whether or not
+// its transcript is currently readable; that is the case the resume gate exists
+// to refuse, and this function reports true for it.
+func resumeTargetCarriesAConversation(rec registry.Record) bool {
+	return rec.LastTurnEndMs > 0
 }
 
 // DropResume clears the session's vendor conversation pointer so the next spawn

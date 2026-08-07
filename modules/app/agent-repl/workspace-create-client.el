@@ -361,7 +361,23 @@ switch they did not initiate."
 Validation completes before local mutation.  On success, creates only the
 perspective/bookkeeping state through `workspace.el', then sends the
 `workspaceMaterialized' ACK.  Exact replays ACK again without duplicating
-local state."
+local state.
+
+The FIRST thing it does is record that the request arrived, before any
+validation can signal.  A workspace that never appears has two possible
+explanations — the daemon's request never reached Emacs, or Emacs received
+it and failed — and until this line existed the Emacs log could not tell
+them apart: every other line here is emitted after validation, so a
+malformed or unreachable request left no trace at all.  It pairs with the
+daemon's own `MATERIALIZATION REQUESTED'/`UNDELIVERED' lines, and the two
+logs together locate the break on one side or the other."
+  (agent-repl--log
+   (plist-get available :finalName)
+   "workspace-available: MATERIALIZATION REQUEST RECEIVED job-id=%s final-name=%s worktree=%s session=%s"
+   (or (plist-get available :jobId) "nil")
+   (or (plist-get available :finalName) "nil")
+   (or (plist-get available :worktreePath) "nil")
+   (or (plist-get available :sessionId) "nil"))
   (let* ((validated
           (agent-repl--workspace-create-available-metadata available))
          (ws (car validated))

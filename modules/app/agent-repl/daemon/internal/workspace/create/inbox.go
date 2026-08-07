@@ -136,6 +136,13 @@ func (i *Inbox) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
+			// The same tick that looks for new commands PULSES the host-action
+			// worker.  That worker owns every publication to the host,
+			// including the re-request for a workspace still waiting to be
+			// materialized, and without a periodic pulse its only wake-ups are
+			// the events it is meant to recover FROM.  The signal is coalescing
+			// and nonblocking, so a slow host cannot back this loop up.
+			i.Manager.RouteHostActions()
 			if err := i.ScanAndDrain(ctx); err != nil {
 				return err
 			}

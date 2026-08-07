@@ -134,6 +134,25 @@ type Job struct {
 	PublicationReleased bool   `json:"publication_released,omitempty"`
 	PromptDelivered     bool   `json:"prompt_delivered,omitempty"`
 	LastError           string `json:"last_error,omitempty"`
+	// AwaitingEmacsSinceMs is when this job first parked on the host, unix
+	// millis.  It is the clock the re-request cadence and the held-job
+	// escalation are both measured against, and it is DURABLE because the wait
+	// outlives the daemon: a bounce mid-wait must not reset a job's age and hide
+	// how long the user has been staring at a workspace that never appeared.
+	AwaitingEmacsSinceMs int64 `json:"awaiting_emacs_since_ms,omitempty"`
+	// MaterializationRequests counts how many times the daemon has asked the
+	// host to materialize this workspace, and
+	// MaterializationLastRequestMs when it last asked.  Together they are the
+	// re-request cadence's whole state: an unanswered request is re-sent on a
+	// bounded interval rather than once, because the single original request is
+	// dropped outright when no host client is connected to receive it.
+	MaterializationRequests      int   `json:"materialization_requests,omitempty"`
+	MaterializationLastRequestMs int64 `json:"materialization_last_request_ms,omitempty"`
+	// MaterializationEscalated latches the one report the daemon makes about a
+	// wait that ran past its deadline.  It is durable so a restart cannot
+	// re-report an escalation the user has already been shown, and an
+	// escalation that repeats every sweep is one nobody reads.
+	MaterializationEscalated bool `json:"materialization_escalated,omitempty"`
 }
 
 // PublicationDecision is the durable creation job's verdict about whether a

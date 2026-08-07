@@ -342,6 +342,36 @@ func TestLegacyCompatibilityWritesJSONL(t *testing.T) {
 	}
 }
 
+func TestLegacyErrorWritesAtErrorSeverity(t *testing.T) {
+	// Arrange: a subsystem injected with only a Logf callback must still be
+	// able to say a record is a fault; at info it is indistinguishable from
+	// routine progress.
+	var durable, terminal strings.Builder
+
+	// Act.
+	LegacyError(New(&durable, &terminal, false).With("operation", "legacy.fault"))("held %d", 3)
+
+	// Assert.
+	record := decodeOne(t, durable.String())
+	if record.Level != LevelError || record.Message != "held 3" {
+		t.Fatalf("record=%#v, want an error-level record", record)
+	}
+}
+
+func TestLegacyStillWritesAtInfoSeverity(t *testing.T) {
+	// Arrange.
+	var durable, terminal strings.Builder
+
+	// Act.
+	Legacy(New(&durable, &terminal, false).With("operation", "legacy.progress"))("fine")
+
+	// Assert.
+	record := decodeOne(t, durable.String())
+	if record.Level != LevelInfo {
+		t.Fatalf("record level = %q, want info", record.Level)
+	}
+}
+
 func TestTargetManagerInstallsExternalTargetAndAtomicallyReplacesHostileEntries(t *testing.T) {
 	workspaceDir := t.TempDir()
 	link := filepath.Join(workspaceDir, ".claude", "emacs", "daemon.log")
