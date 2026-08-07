@@ -3,6 +3,7 @@ package registry
 import (
 	"database/sql"
 	"fmt"
+	"slices"
 )
 
 // metaSchemaVersion is the registry_meta key holding the schema stamp.
@@ -283,49 +284,147 @@ func mergeCheckpoint(dst map[ConversationIdentity]ConversationCheckpoint, cp Con
 	return nil
 }
 
+// sessionRecordInsert is the statement one session record is written by, and
+// sessionRecordValues supplies its bind values in the same column order.
+//
+// THE TWO ARE ONE DEFINITION ON PURPOSE. The dirty-row write in saveState
+// decides whether a row changed by comparing these VALUE TUPLES rather than
+// the Go structs they came from, so what the diff compares is exactly what the
+// statement writes. A column added to the insert therefore joins the
+// comparison by construction, instead of leaving a new field's changes
+// silently unwritten until someone remembered to extend a second predicate.
+const sessionRecordInsert = `INSERT OR REPLACE INTO session_record(session_id, cwd, model, permission_mode,
+	config_dir, claude_session_id, created_at, terminal, death_reason, terminal_at,
+	last_seq, newest_clear_or_compact_seq, backfill_state, queued_prompts,
+	last_turn_end_ms, hibernated, hibernation_cause, hibernated_since_ms,
+	hibernation_cutoff_ms, hibernation_elapsed_ms, hibernation_ttl_ms,
+	rewind_previous_vendor_session_id, rewind_retained_leaf_uuid, rewind_dropped_turn_ids,
+	death_resolved_at_ms)
+	VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+
+func sessionRecordValues(rec Record) ([]any, error) {
+	queued, err := encodeQueuedPrompts(rec.QueuedPrompts)
+	if err != nil {
+		return nil, err
+	}
+	return []any{
+		rec.SessionID, rec.CWD, rec.Model, rec.PermissionMode, rec.ConfigDir,
+		rec.ClaudeSessionID, rec.CreatedAt, rec.Terminal, rec.DeathReason, rec.TerminalAt,
+		int64(rec.LastSeq), int64(rec.NewestClearOrCompactSeq), rec.BackfillState, queued,
+		rec.LastTurnEndMs, rec.Hibernated, rec.Hibernation.Cause, rec.Hibernation.SinceMs,
+		rec.Hibernation.CutoffMs, rec.Hibernation.ElapsedMs, rec.Hibernation.TTLMs,
+		rec.Rewind.PreviousVendorSessionID, rec.Rewind.RetainedLeafUUID, rec.Rewind.DroppedTurnIDs,
+		rec.DeathResolvedAtMs,
+	}, nil
+}
+
+// cloneState snapshots the state loaded at the start of a mutation, so the
+// dirty-row diff compares against what the TABLES hold rather than against a
+// value the mutation may have edited in place through a shared slice.
+func cloneState(state *registryState) *registryState {
+	out := &registryState{
+		records:     make(map[string]Record, len(state.records)),
+		checkpoints: make(map[ConversationIdentity]ConversationCheckpoint, len(state.checkpoints)),
+	}
+	for id, rec := range state.records {
+		if rec.QueuedPrompts != nil {
+			queued := make([]QueuedPrompt, len(rec.QueuedPrompts))
+			copy(queued, rec.QueuedPrompts)
+			rec.QueuedPrompts = queued
+		}
+		out.records[id] = rec
+	}
+	for id, cp := range state.checkpoints {
+		out.checkpoints[id] = cp
+	}
+	return out
+}
+
 // execer is the write half, satisfied by *sql.Tx (every write is in one).
 type execer interface {
 	Exec(query string, args ...any) (sql.Result, error)
 }
 
-// saveState rewrites both tables from state, inside the caller's transaction.
-// A whole rewrite rather than a diff: the maintenance pass can hydrate,
-// create and prune in one go, and a rewrite is how "the new state or the old
-// one, never a blend" stays true by construction.
-func saveState(tx execer, state *registryState) error {
-	if _, err := tx.Exec(`DELETE FROM session_record`); err != nil {
-		return fmt.Errorf("registry: clear session records: %w", err)
+// saveState writes state into both tables, inside the caller's transaction.
+//
+// "THE NEW STATE OR THE OLD ONE, NEVER A BLEND" IS THE TRANSACTION'S PROPERTY,
+// not the rewrite's. Every statement here runs inside the caller's single
+// transaction, so a reader sees the whole write or none of it however many
+// rows it touched.
+//
+// WHAT IS WRITTEN is the DIFFERENCE between `before` — the tables' contents
+// when the caller's transaction began — and `state`. A row whose content did
+// not change is not rewritten, because rewriting it produces the identical row
+// at the cost of a statement, a page write and a WAL frame.
+//
+// The whole rewrite this replaced made every registry mutation cost the size
+// of the registry. That is charged once per prompt for the mutations users
+// notice, but the durable replay cursor advances ONCE PER STORE EVENT
+// (shimclient.advanceDurableCursor), so a redeployed daemon draining a
+// four-thousand-event transcript rewrote the entire registry four thousand
+// times — measured at 2.9ms apiece on a steady-state fleet, which is most of
+// the bring-up wait it was blamed for.
+//
+// A NIL `before` means the prior contents are unknown rather than empty, and
+// the tables are cleared and rewritten wholesale. The legacy JSON import is
+// the one such caller: it establishes the tables' contents rather than
+// advancing them.
+func saveState(tx execer, before, state *registryState) error {
+	if before == nil {
+		if _, err := tx.Exec(`DELETE FROM session_record`); err != nil {
+			return fmt.Errorf("registry: clear session records: %w", err)
+		}
+		if _, err := tx.Exec(`DELETE FROM conversation_checkpoint`); err != nil {
+			return fmt.Errorf("registry: clear conversation checkpoints: %w", err)
+		}
+	} else {
+		for id := range before.records {
+			if _, kept := state.records[id]; kept {
+				continue
+			}
+			if _, err := tx.Exec(`DELETE FROM session_record WHERE session_id = ?`, id); err != nil {
+				return fmt.Errorf("registry: delete session record %s: %w", id, err)
+			}
+		}
+		for id := range before.checkpoints {
+			if _, kept := state.checkpoints[id]; kept {
+				continue
+			}
+			if _, err := tx.Exec(`DELETE FROM conversation_checkpoint
+				WHERE config_dir = ? AND cwd = ? AND claude_session_id = ?`,
+				id.ConfigDir, id.CWD, id.ClaudeSessionID); err != nil {
+				return fmt.Errorf("registry: delete conversation checkpoint %+v: %w", id, err)
+			}
+		}
 	}
 	for _, rec := range state.records {
-		queued, err := encodeQueuedPrompts(rec.QueuedPrompts)
+		values, err := sessionRecordValues(rec)
 		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec(`INSERT INTO session_record(session_id, cwd, model, permission_mode,
-			config_dir, claude_session_id, created_at, terminal, death_reason, terminal_at,
-			last_seq, newest_clear_or_compact_seq, backfill_state, queued_prompts,
-			last_turn_end_ms, hibernated, hibernation_cause, hibernated_since_ms,
-			hibernation_cutoff_ms, hibernation_elapsed_ms, hibernation_ttl_ms,
-			rewind_previous_vendor_session_id, rewind_retained_leaf_uuid, rewind_dropped_turn_ids,
-			death_resolved_at_ms)
-			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			rec.SessionID, rec.CWD, rec.Model, rec.PermissionMode, rec.ConfigDir,
-			rec.ClaudeSessionID, rec.CreatedAt, rec.Terminal, rec.DeathReason, rec.TerminalAt,
-			int64(rec.LastSeq), int64(rec.NewestClearOrCompactSeq), rec.BackfillState, queued,
-			rec.LastTurnEndMs, rec.Hibernated, rec.Hibernation.Cause, rec.Hibernation.SinceMs,
-			rec.Hibernation.CutoffMs, rec.Hibernation.ElapsedMs, rec.Hibernation.TTLMs,
-			rec.Rewind.PreviousVendorSessionID, rec.Rewind.RetainedLeafUUID, rec.Rewind.DroppedTurnIDs,
-			rec.DeathResolvedAtMs,
-		); err != nil {
+		if before != nil {
+			if prior, ok := before.records[rec.SessionID]; ok {
+				priorValues, err := sessionRecordValues(prior)
+				if err != nil {
+					return err
+				}
+				if slices.Equal(priorValues, values) {
+					continue
+				}
+			}
+		}
+		if _, err := tx.Exec(sessionRecordInsert, values...); err != nil {
 			return fmt.Errorf("registry: write session record %s: %w", rec.SessionID, err)
 		}
 	}
 
-	if _, err := tx.Exec(`DELETE FROM conversation_checkpoint`); err != nil {
-		return fmt.Errorf("registry: clear conversation checkpoints: %w", err)
-	}
 	for id, cp := range state.checkpoints {
-		if _, err := tx.Exec(`INSERT INTO conversation_checkpoint(config_dir, cwd, claude_session_id,
+		if before != nil {
+			if prior, ok := before.checkpoints[id]; ok && prior == cp {
+				continue
+			}
+		}
+		if _, err := tx.Exec(`INSERT OR REPLACE INTO conversation_checkpoint(config_dir, cwd, claude_session_id,
 			last_seq, newest_clear_or_compact_seq, backfill_state) VALUES (?,?,?,?,?,?)`,
 			id.ConfigDir, id.CWD, id.ClaudeSessionID,
 			int64(cp.LastSeq), int64(cp.NewestClearOrCompactSeq), cp.BackfillState,
