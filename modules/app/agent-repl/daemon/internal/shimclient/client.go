@@ -181,6 +181,43 @@ type FileDiagnosticSink interface {
 	PersistFileDiagnostic(ev *corev1.Event, diagnostic *corev1.FilePlaneDiagnostic) error
 }
 
+// Disposition is the reporter's verdict on one DegradedState: whether the row
+// happened to the LIVE query or is history the store is replaying from a
+// retired one.
+//
+// It is returned to this client because the client cannot make the call itself
+// — the verdict is one comparison against the query the handshake bound, and
+// only the reporter holds that binding — yet the client owns its own record of
+// the event, and that record's SEVERITY depends on the verdict. Without it the
+// relay had to assume every replayed degradation was present-tense news, so a
+// single durable termination re-warned on every boot for the rest of the
+// session's life.
+type Disposition int
+
+const (
+	// DegradationLive is a degradation stamped by the query now in flight (or
+	// carrying no stamp at all, which fails closed as live).
+	DegradationLive Disposition = iota
+	// DegradationHistorical is a degradation stamped by a RETIRED query,
+	// replayed off the durable sequence.
+	DegradationHistorical
+)
+
+// String names the disposition for the log record that carries it. An
+// unrecognised value is reported as itself rather than defaulted to a familiar
+// word, so a future arm nobody taught this method about is visible instead of
+// silently reading as "live".
+func (d Disposition) String() string {
+	switch d {
+	case DegradationLive:
+		return "live"
+	case DegradationHistorical:
+		return "historical"
+	default:
+		return fmt.Sprintf("unknown(%d)", int(d))
+	}
+}
+
 // DegradedReporter receives sad-path signals. DegradedState events come from
 // the shim (store unreachable, converter storm, …); ConnectionDegraded /
 // ConnectionRecovered are transport-level, detected by this client's
@@ -198,7 +235,11 @@ type DegradedReporter interface {
 	// daemon-originated degradation (one this client synthesises rather than
 	// reads off the sequence) passes nil, and nil classifies as live — fail
 	// closed, exactly as an unstamped event does.
-	Degraded(sessionID string, ev *corev1.Event, ds *corev1.DegradedState)
+	//
+	// It returns the disposition it classified ds under, so this client can
+	// record the same event at the severity that verdict earns instead of
+	// guessing at one it has no way to compute.
+	Degraded(sessionID string, ev *corev1.Event, ds *corev1.DegradedState) Disposition
 	// ConnectionDegraded reports that the missed-heartbeat window elapsed with
 	// no inbound traffic on the shim connection.
 	ConnectionDegraded(sessionID, reason string)

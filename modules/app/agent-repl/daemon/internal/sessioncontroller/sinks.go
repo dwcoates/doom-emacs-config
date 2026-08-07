@@ -14,6 +14,7 @@ import (
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/frontend"
 	"claude-repld/internal/keepalive"
+	"claude-repld/internal/shimclient"
 	"claude-repld/internal/ssm"
 	"claude-repld/internal/statedb"
 	"claude-repld/internal/tokenutilization"
@@ -1561,7 +1562,15 @@ func (c *consumer) surfaceUnexpectedQueryTermination(ev *corev1.Event, item *fro
 		reason, cause = "startup_failure", failure.GetCause()
 	}
 	if historical {
-		c.warn("session-controller: typed query termination WITHHELD from the bring-up gate session=%s replayed_query_instance_id=%s live_query_instance_id=%q vendor_session_id=%s observed_at_ms=%d termination_kind=%s cause=%q seq=%d decision=retain_history_no_bring_up_fault",
+		// INFO, NOT WARN, AND ONLY ON THIS ARM. The anomaly was surfaced loudly
+		// when it actually happened; this row is its durable history being
+		// replayed, and classifying a replay correctly is ordinary branch
+		// selection rather than a new anomaly. Leaving it at warn made a single
+		// durable Aug-6 row re-alarm on EVERY subsequent boot, forever, about a
+		// query that had died once. The record is unchanged and complete — same
+		// channel, same identity context — only its severity moved. The LIVE arm
+		// below stays at warn, because a live termination IS new news.
+		c.logf("session-controller: typed query termination WITHHELD from the bring-up gate session=%s replayed_query_instance_id=%s live_query_instance_id=%q vendor_session_id=%s observed_at_ms=%d termination_kind=%s cause=%q seq=%d decision=retain_history_no_bring_up_fault",
 			c.sessionID, detail.GetQueryInstanceId(), c.accounting.queryID, detail.GetVendorSessionId(), detail.GetObservedAtMs(), reason, cause, ev.GetSeq())
 		c.pushFailure(c.degradedUUID("claude-shim-sdk"), item)
 		return
@@ -2021,7 +2030,11 @@ var faultClassifications = map[string]faultClassification{
 // correlation id, and threw dropped_count away in translation. A user whose
 // workspace changed color needs to find out why from the conversation itself,
 // so the account lives there now.
-func (c *consumer) Degraded(_ string, ev *corev1.Event, ds *corev1.DegradedState) {
+//
+// It returns the disposition it classified ds under, because the shim client's
+// own relay record for this event takes its severity from that verdict and has
+// no way to compute it (shimclient.DegradedReporter).
+func (c *consumer) Degraded(_ string, ev *corev1.Event, ds *corev1.DegradedState) shimclient.Disposition {
 	// THE SAME EPOCH TEST THE TYPED TERMINATION CHANNEL ALREADY MAKES, asked of
 	// the ONE classifier, on the envelope. The shim writes an unexpected
 	// termination as an ACKNOWLEDGED PAIR — the QueryLifecycle row and this
@@ -2032,7 +2045,7 @@ func (c *consumer) Degraded(_ string, ev *corev1.Event, ds *corev1.DegradedState
 	// A bring-up may only be failed by a fault its OWN query produced.
 	if _, historical := c.accounting.liveEvidenceFor(ev); historical {
 		c.withholdHistoricalDegradation(ev, ds)
-		return
+		return shimclient.DegradationHistorical
 	}
 	if !ds.GetRecovered() && ds.GetComponent() == "claude-shim-sdk" && ds.GetReason() == "unexpected_query_termination" {
 		if ds.QueryInstanceId == nil || ds.GetQueryInstanceId() == "" {
@@ -2040,7 +2053,7 @@ func (c *consumer) Degraded(_ string, ev *corev1.Event, ds *corev1.DegradedState
 		}
 		if c.unexpectedQueryTerminationSurfaced {
 			c.logf("session-controller: duplicate unexpected query termination suppressed session=%s component=%s reason=%s", c.sessionID, ds.GetComponent(), ds.GetReason())
-			return
+			return shimclient.DegradationLive
 		}
 		c.unexpectedQueryTerminationSurfaced = true
 	}
@@ -2058,9 +2071,10 @@ func (c *consumer) Degraded(_ string, ev *corev1.Event, ds *corev1.DegradedState
 	}
 	item := frontend.SystemFailureItemFromDegradedState(ds, c.now())
 	if item == nil {
-		return
+		return shimclient.DegradationLive
 	}
 	c.pushFailure(c.degradedUUID(ds.GetComponent()), item)
+	return shimclient.DegradationLive
 }
 
 // withholdHistoricalDegradation retains a replayed degradation as history while
@@ -2082,7 +2096,11 @@ func (c *consumer) Degraded(_ string, ev *corev1.Event, ds *corev1.DegradedState
 // identity, so nothing the user could see is lost — this is a retention
 // decision, not a drop.
 func (c *consumer) withholdHistoricalDegradation(ev *corev1.Event, ds *corev1.DegradedState) {
-	c.warn("session-controller: shim degradation WITHHELD from the bring-up gate session=%s ws=%q replayed_query_instance_id=%s live_query_instance_id=%q component=%s reason=%q recovered=%v dropped_count=%d seq=%d decision=retain_history_no_bring_up_fault",
+	// INFO, NOT WARN, for the same reason the typed termination's historical arm
+	// is at info (surfaceUnexpectedQueryTermination): a replayed row is history
+	// being classified, not a fresh degradation. The live arm in Degraded keeps
+	// its warn/error severity untouched.
+	c.logf("session-controller: shim degradation WITHHELD from the bring-up gate session=%s ws=%q replayed_query_instance_id=%s live_query_instance_id=%q component=%s reason=%q recovered=%v dropped_count=%d seq=%d decision=retain_history_no_bring_up_fault",
 		c.sessionID, c.workspace, ev.GetQueryInstanceId(), c.accounting.queryID,
 		ds.GetComponent(), ds.GetReason(), ds.GetRecovered(), ds.GetDroppedCount(), ev.GetSeq())
 	item := frontend.SystemFailureItemFromDegradedState(ds, c.now())
