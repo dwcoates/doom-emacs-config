@@ -2909,6 +2909,15 @@ func (m *Manager) onConnectedForGeneration(workspace, sessionID, generationID st
 		m.logf("session-controller: operational reached with NO registrar ws=%q session=%s — superseded predecessors keep their open death cards until a boot reconciliation stamps them",
 			workspace, sessionID)
 	}
+	// And the SAME edge settles the degradation cards the withhold arms put up
+	// from durable history, for the identical reason. A retired query's death is
+	// a true account of something that happened, and it stops describing this
+	// session the moment a live query genuinely has it. Because that row is
+	// DURABLE it replays at every boot and would otherwise never acquire a
+	// closing edge, leaving an unresolved failure card on a healthy session
+	// forever. Resolution, not deletion — the card keeps its identity and its
+	// detail and is re-sent with resolved_at_ms stamped (sinks.go).
+	d.consumer.resolveWithheldDegradations("shim_ready")
 	// The pid and the build identity are BOTH only trustworthy on a live
 	// connection, and this is the moment the connection is proven usable. A
 	// shim running a superseded bundle is bounced from here onto the current
