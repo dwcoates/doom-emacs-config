@@ -1289,6 +1289,165 @@ obvious (no listener, no build, no spawn) rather than reaching the host."
     (agent-repl--frontend-runtime-bounce-preflight-async (lambda (value) (setq state value)))
     (should (equal state '(:incompatible 987 . "claude-repld"))))))
 
+;;;; ---- Backend-initiation output: capture, record, echo --------------------
+;;
+;; A build that fails silently and a daemon that prints a refusal to stderr
+;; used to look identical from outside: `*agent-repl-build-frontend*' and
+;; `*claude-repld*' held the evidence and nothing persisted or showed either.
+
+(defmacro agent-repl-test--with-phase-echo (var &rest body)
+  "Run BODY with VAR bound to a collector of every echoed phase line.
+VAR accumulates newest-first, so BODY asserts with `cl-some' rather than
+by position."
+  (declare (indent 1))
+  `(let (,var)
+     (cl-letf (((symbol-function 'agent-repl--emit-message)
+                (lambda (text &optional _echo) (push text ,var)))
+               ((symbol-function 'agent-repl--persist-log-record) #'ignore))
+       ,@body)))
+
+(defun agent-repl-test--phase-line-p (lines &rest fragments)
+  "Return non-nil when one line in LINES contains every one of FRAGMENTS."
+  (cl-some (lambda (line)
+             (cl-every (lambda (fragment) (string-match-p (regexp-quote fragment) line))
+                       fragments))
+           lines))
+
+(defun agent-repl-test--seed-build-output (text)
+  "Return a build-script stub that writes TEXT into the capture buffer."
+  (lambda (_args)
+    (with-current-buffer (get-buffer-create agent-repl--frontend-build-buffer)
+      (insert text))
+    3))
+
+(ert-deftest agent-repl-test-daemon-build-failure-records-captured-output ()
+  "A failing build's captured stderr lands in the durable structured record."
+  ;; Arrange
+  (let (records)
+    (cl-letf (((symbol-function 'agent-repl--frontend-run-build-script)
+               (agent-repl-test--seed-build-output "go: cannot find module\n"))
+              ((symbol-function 'display-buffer) #'ignore)
+              ((symbol-function 'agent-repl--emit-message) #'ignore)
+              ((symbol-function 'agent-repl--persist-log-record)
+               (lambda (_ws _level _verbosity fmt args)
+                 (push (apply #'format fmt args) records))))
+      ;; Act
+      (should-error (agent-repl--frontend-build-if-stale nil))
+      ;; Assert
+      (should (cl-some (lambda (line)
+                         (string-match-p "go: cannot find module" line))
+                       records)))))
+
+(ert-deftest agent-repl-test-daemon-build-failure-echoes-the-phase-and-log ()
+  "A failing build names its phase and points at the log file."
+  ;; Arrange
+  (agent-repl-test--with-phase-echo lines
+    (cl-letf (((symbol-function 'agent-repl--frontend-run-build-script)
+               (agent-repl-test--seed-build-output "go: cannot find module\n"))
+              ((symbol-function 'display-buffer) #'ignore))
+      ;; Act
+      (should-error (agent-repl--frontend-build-if-stale nil)))
+    ;; Assert
+    (should (agent-repl-test--phase-line-p
+             lines "shim/webapp/daemon build FAILED" "exit 3"
+             "go: cannot find module" (agent-repl--logfile-path)))))
+
+(ert-deftest agent-repl-test-daemon-build-failure-preserves-the-exit-status ()
+  "The signalled error still carries the subprocess exit status."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--frontend-run-build-script)
+             (agent-repl-test--seed-build-output "boom\n"))
+            ((symbol-function 'display-buffer) #'ignore)
+            ((symbol-function 'agent-repl--emit-message) #'ignore)
+            ((symbol-function 'agent-repl--persist-log-record) #'ignore))
+    ;; Act
+    (let ((detail (should-error (agent-repl--frontend-build-if-stale nil))))
+      ;; Assert
+      (should (string-match-p "exit 3" (cadr detail))))))
+
+(ert-deftest agent-repl-test-daemon-build-success-echoes-a-completion-phase ()
+  "A successful build reports that it finished, not only that it started."
+  ;; Arrange
+  (agent-repl-test--with-phase-echo lines
+    (cl-letf (((symbol-function 'agent-repl--frontend-run-build-script)
+               (lambda (_args) 0)))
+      ;; Act
+      (agent-repl--frontend-build-if-stale nil))
+    ;; Assert
+    (should (agent-repl-test--phase-line-p
+             lines "agent-repl: shim/webapp/daemon built"))))
+
+(ert-deftest agent-repl-test-daemon-deploy-stack-failure-echoes-its-phase ()
+  "A failed whole-stack deploy names itself rather than the narrower build."
+  ;; Arrange
+  (agent-repl-test--with-phase-echo lines
+    (cl-letf (((symbol-function 'agent-repl--frontend-run-build-script)
+               (agent-repl-test--seed-build-output "protoc: not found\n"))
+              ((symbol-function 'display-buffer) #'ignore))
+      ;; Act
+      (should-error (agent-repl--frontend-deploy-stack nil)))
+    ;; Assert
+    (should (agent-repl-test--phase-line-p
+             lines "stack deploy FAILED" "protoc: not found"))))
+
+(ert-deftest agent-repl-test-daemon-deploy-restart-echoes-its-origin ()
+  "A restart driven over emacsclient names itself before Emacs blocks."
+  ;; Arrange
+  (agent-repl-test--with-phase-echo lines
+    (cl-letf (((symbol-function 'agent-repl-runtime-restart-await)
+               (lambda (&rest _) "runtime-restart-complete")))
+      ;; Act
+      (agent-repl-frontend-daemon-restart-await))
+    ;; Assert
+    (should (agent-repl-test--phase-line-p lines "deploy-driven restart requested"))))
+
+(ert-deftest agent-repl-test-daemon-filter-records-process-output ()
+  "Daemon stdout/stderr reaches the structured log, not only its buffer."
+  ;; Arrange
+  (let (records)
+    (cl-letf (((symbol-function 'agent-repl--persist-log-record)
+               (lambda (_ws _level _verbosity fmt args)
+                 (push (apply #'format fmt args) records))))
+      ;; Act — a nil process buffer exercises the log path alone.
+      (cl-letf (((symbol-function 'process-buffer) (lambda (_proc) nil)))
+        (agent-repl--frontend-daemon-filter 'proc "listen tcp: address in use\n"))
+      ;; Assert
+      (should (equal records
+                     '("claude-repld output: listen tcp: address in use"))))))
+
+(ert-deftest agent-repl-test-daemon-filter-preserves-buffer-capture ()
+  "Routing output to the log must not cost the capture buffer its content."
+  ;; Arrange
+  (let ((buffer (generate-new-buffer " *agent-repl-test-daemon-out*")))
+    (unwind-protect
+        (cl-letf (((symbol-function 'agent-repl--persist-log-record) #'ignore)
+                  ((symbol-function 'process-buffer) (lambda (_proc) buffer))
+                  ((symbol-function 'process-mark)
+                   (lambda (_proc) (with-current-buffer buffer (point-max-marker)))))
+          ;; Act
+          (agent-repl--frontend-daemon-filter 'proc "refusing to start\n")
+          ;; Assert
+          (should (equal (with-current-buffer buffer (buffer-string))
+                         "refusing to start\n")))
+      (kill-buffer buffer))))
+
+(ert-deftest agent-repl-test-daemon-exit-carries-the-captured-output ()
+  "The daemon's dying words ride its failure card, not only its exit event."
+  ;; Arrange
+  (let (surfaced)
+    (with-current-buffer (get-buffer-create agent-repl--frontend-daemon-buffer)
+      (erase-buffer)
+      (insert "claude-repld: -accounts is malformed\n"))
+    (cl-letf (((symbol-function 'agent-repl--persist-log-record) #'ignore)
+              ((symbol-function 'agent-repl--emit-message) #'ignore)
+              ((symbol-function 'process-live-p) (lambda (_proc) nil))
+              ((symbol-function 'agent-repl-failure-surface)
+               (lambda (_ws failure) (setq surfaced failure))))
+      ;; Act
+      (agent-repl--frontend-daemon-sentinel 'proc "exited abnormally with code 1\n")
+      ;; Assert
+      (should (string-match-p "-accounts is malformed" (format "%S" surfaced))))))
+
 (provide 'test-daemon)
 
 ;;; test-daemon.el ends here
