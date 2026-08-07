@@ -191,6 +191,12 @@ export class LazyUpgrader {
   constructor(root: HTMLElement, onNear: (keys: string[]) => void) {
     this.onNear = onNear;
     if (!canDeferItems()) {
+      // Deliberately NOT a warning. Deferral is a rendering optimization, not
+      // a correctness guarantee: without it every feed item renders in full,
+      // which costs frames but loses no conversation and shows the user no
+      // failure. The consequence that WOULD matter — a frame the renderer
+      // could not deliver — has its own detector and its own warning in
+      // main.ts, so raising this note too would only double-count it.
       logVerbose("info", "lazy: no IntersectionObserver, deferral disabled", {
         operation: "render.lazy-unavailable",
       });

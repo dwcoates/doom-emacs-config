@@ -5,7 +5,7 @@
  * so streaming updates do not rebuild the whole list.
  */
 import { SUBAGENT_TOOLS } from "./agents.js";
-import { parseJournal } from "./async-stream.js";
+import { STREAM_ITEM_CAP, parseJournal } from "./async-stream.js";
 import { clearLogDedup, log } from "./wslog.js";
 import {
   TOPBAR_AGENT_ATTR,
@@ -1243,9 +1243,22 @@ function descend(panels: PanelContext | undefined, sourceId: string): PanelConte
   };
 }
 
-/** A line naming what the cap left out, so a bounded fold never poses as whole. */
-function droppedNotice(dropped: number): string {
+/**
+ * A line naming what the cap left out, so a bounded fold never poses as whole.
+ *
+ * The notice is the USER's evidence of the gap; this log is the operator's.
+ * A fold that silently ends at its cap is conversation the reader cannot get
+ * back, so it is recorded at warn rather than left to the on-screen line
+ * alone. Deduped per stream: the fold re-renders on every frame, and only a
+ * CHANGED drop count (the stream grew past the cap again) says anything new.
+ */
+function droppedNotice(dropped: number, sourceId: string, format: string): string {
   if (dropped === 0) return "";
+  log("warn", `${format}: the ${STREAM_ITEM_CAP}-entry parse cap left ${dropped} earlier entry/entries out of the rendered fold`, {
+    operation: "render.stream-cap-dropped",
+    dedupKey: `stream-cap-dropped:${format}:${sourceId}`,
+    context: { source_id: sourceId, format, dropped, cap: STREAM_ITEM_CAP },
+  });
   return `<div class="stream-dropped">… ${dropped} earlier ${
     dropped === 1 ? "entry" : "entries"
   } not shown</div>`;
@@ -1261,7 +1274,7 @@ function droppedNotice(dropped: number): string {
  * frames. The bytes already reached the browser before this; they were
  * painted as an opaque <pre>.
  */
-function transcriptBubbles(text: string, panels?: PanelContext): string {
+function transcriptBubbles(text: string, sourceId: string, panels?: PanelContext): string {
   const { top, children, dropped } = transcriptFeed(text);
   if (top.length === 0) return "";
   // The transcript's own partition rides a derived context, so a nested
@@ -1272,7 +1285,7 @@ function transcriptBubbles(text: string, panels?: PanelContext): string {
     panels && children.size > 0
       ? { ...panels, children: mergeChildren(panels.children, children) }
       : panels;
-  return `${droppedNotice(dropped)}${feedChildren(top, nested)}`;
+  return `${droppedNotice(dropped, sourceId, "transcript")}${feedChildren(top, nested)}`;
 }
 
 /**
@@ -1280,7 +1293,7 @@ function transcriptBubbles(text: string, panels?: PanelContext): string {
  * record log of the run's agent() calls, not a conversation, and inventing
  * a speaker per record would be a lie about what the data is.
  */
-function journalRows(text: string): string {
+function journalRows(text: string, sourceId: string): string {
   const { rows, dropped } = parseJournal(text);
   if (rows.length === 0) return "";
   const body = rows
@@ -1291,7 +1304,7 @@ function journalRows(text: string): string {
         )}</span><span class="stream-detail">${escapeHtml(r.detail)}</span></div>`,
     )
     .join("");
-  return `${droppedNotice(dropped)}${body}`;
+  return `${droppedNotice(dropped, sourceId, "journal")}${body}`;
 }
 
 /**
@@ -1303,16 +1316,16 @@ function journalRows(text: string): string {
  * spool is bytes, so it stays a <pre>. The member's tail is already the
  * one-precedence text (stream-member.ts), so no surface re-decides it.
  */
-function streamBodyHtml(spec: BodySpec, panels?: PanelContext): string {
+function streamBodyHtml(spec: BodySpec, streamId: string, panels?: PanelContext): string {
   switch (spec.kind) {
     case "child-feed":
       return feedChildren(spec.items, panels);
     case "transcript":
       // Recursing into a parsed stream is the one place depth grows, so
       // the descended context carries the guards a deeper fold reads.
-      return transcriptBubbles(spec.text, descend(panels, spec.sourceId));
+      return transcriptBubbles(spec.text, spec.sourceId, descend(panels, spec.sourceId));
     case "journal":
-      return journalRows(spec.text);
+      return journalRows(spec.text, streamId);
     case "raw":
       return taskOutputPre(spec.text);
   }
@@ -1356,7 +1369,7 @@ function MemberFold(member: StreamMember, spec: BodySpec, panels?: PanelContext)
     foldClass: "async-fold",
     tickerClass: "async-ticker",
     ticker: `${arc}${escapeHtml(face)}`,
-    body: () => streamBodyHtml(spec, panels),
+    body: () => streamBodyHtml(spec, source?.source_id ?? item.toolUseId, panels),
     open: panels.isOpen(id),
   });
 }
