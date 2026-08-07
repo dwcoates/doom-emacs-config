@@ -390,24 +390,27 @@ caller to stamp the timestamp."
 
 (ert-deftest agent-repl-test-ws-del-hook-runs-before-runtime-key-clear ()
   "`agent-repl-ws-del-hook' fires while runtime keys are still readable.
-The frontend session/webview release handlers depend on reading
-`:frontend-session-id' / `:frontend-buffer' pre-clear; a regression
-that moves the hook after the clear loop would silently strand daemon
-sessions and WKWebViews on every nuke."
+A release handler reads the key it releases pre-clear (`:frontend-buffer'
+is the webview's); a regression that moves the hook after the clear loop
+would silently strand every resource one of them owns."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-    (agent-repl--ws-put "ws1" :frontend-session-id "s_live")
-    (let ((seen 'unset)
-          (agent-repl-ws-del-hook nil))
-      (add-hook 'agent-repl-ws-del-hook
-                (lambda (ws)
-                  (setq seen (agent-repl--ws-get ws :frontend-session-id))))
-      ;; Act
-      (agent-repl--ws-del "ws1")
-      ;; Assert — the hook observed the pre-clear value, and the
-      ;; tombstone cleared it afterwards.
-      (should (equal seen "s_live"))
-      (should (null (agent-repl--ws-get "ws1" :frontend-session-id))))))
+    (let ((buf (generate-new-buffer " *fake-webview*")))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+            (agent-repl--ws-put "ws1" :frontend-buffer buf)
+            (let ((seen 'unset)
+                  (agent-repl-ws-del-hook nil))
+              (add-hook 'agent-repl-ws-del-hook
+                        (lambda (ws)
+                          (setq seen (agent-repl--ws-get ws :frontend-buffer))))
+              ;; Act
+              (agent-repl--ws-del "ws1")
+              ;; Assert — the hook observed the pre-clear value, and the
+              ;; tombstone cleared it afterwards.
+              (should (eq seen buf))
+              (should (null (agent-repl--ws-get "ws1" :frontend-buffer)))))
+        (kill-buffer buf)))))
 
 (ert-deftest agent-repl-test-ws-del-keeps-entry-in-hash ()
   "ws-del leaves the hash entry in place (tombstone, not remhash).

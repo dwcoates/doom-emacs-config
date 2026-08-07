@@ -1020,7 +1020,6 @@ workspace beside it can."
       (unwind-protect
           (progn
             (agent-repl--ws-put ws :project-dir project)
-            (agent-repl--ws-put ws :frontend-session-id "agent-session-1")
             (let ((agent-repl-log-to-file t))
               (cl-letf (((symbol-function 'message) #'ignore)
                         ((symbol-function 'agent-repl--frontend-session-view)
@@ -1087,7 +1086,6 @@ workspace beside it can."
       (unwind-protect
           (progn
             (agent-repl--ws-put ws :project-dir project)
-            (agent-repl--ws-put ws :frontend-session-id "s_1")
             (let ((agent-repl-log-to-file t))
               (cl-letf (((symbol-function 'agent-repl--frontend-session-view)
                          (lambda (_) '(:claudeSessionId 99))))
@@ -1954,7 +1952,6 @@ ownership intact across that transition."
 Reading it back would be the persisted-pointer path returning by another
 name; the daemon-pushed view is the only source."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :frontend-session-id "s_1")
     (agent-repl--ws-put "ws1" :active-env :bare-metal)
     (agent-repl--ws-put "ws1" :bare-metal
                         (make-agent-repl-instantiation :session-id "stale-uuid"))
@@ -1974,7 +1971,6 @@ name; the daemon-pushed view is the only source."
 An unattributed log record is accepted by the daemon; a misattributed one is
 what gets rejected, so guessing would be strictly worse than saying nothing."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :frontend-session-id "s_1")
     (cl-letf (((symbol-function 'agent-repl--frontend-session-view)
                (lambda (_) nil)))
       (should-not (agent-repl--ws-observed-claude-session-id "ws1")))))
