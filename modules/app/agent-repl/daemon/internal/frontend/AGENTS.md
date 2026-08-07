@@ -70,9 +70,43 @@ chunk that GROWS an open block, so dropping one deletes prose. `StateSnapshot`
 is excluded too — the lease is the browser's bounded freshness proof, and a
 full lease queue stays a hard disconnect rather than a silent skip.
 
-The hard disconnect remains, unchanged, for a queue still full of frames
-nothing may replace. Its log line reports how many frames compaction freed, so
-"we gave up" is always distinguishable from "we never tried".
+The hard disconnect remains for a queue still full of frames nothing may
+replace. Its log line reports how many frames compaction freed, so "we gave up"
+is always distinguishable from "we never tried".
+
+## The host's queue is elastic, because Emacs is single-threaded
+
+Compaction is no help when the backlog is all `ConversationDelta` and
+`TypingDelta`, and that is exactly what the Emacs host accumulates while it is
+busy. Emacs blocks its own event loop for seconds at a time restoring
+seventeen workspaces at startup or mounting a webview, and every one of those
+blocks used to fill the flat 256-frame queue with irreplaceable frames and get
+the host evicted — five evictions in one observed boot-plus-probe cycle, each
+costing a visible `uds-link: DOWN`, a reconnect, and a full snapshot replay.
+That busyness is inherent to a single-threaded UI, not a defect in it.
+
+So `ClientKindHost` alone gets an ELASTIC outbox: two bounds instead of one.
+`soft` (the configured buffer, 256) is the depth at which the consumer is
+declared behind; `hard` (`soft * hostBufferElasticity`, 4096) is the absolute
+frame ceiling. Between them the queue keeps accepting, for up to
+`hostStallGrace` (30s), PROVIDED the consumer drains at least one frame in that
+window. Every other kind is built with `soft == hard` and no grace, which is
+literally the old flat queue — a backgrounded webview's shedding behavior is
+unchanged.
+
+Eviction is preserved, not weakened; only the threshold for calling a busy
+consumer a dead one moved. A refused push names which of the two limits it hit:
+`hard_ceiling` (the memory bound, unconditional — no amount of recent drain
+progress buys a queue past it) or `stalled` (under the ceiling, but not one
+frame drained for the whole grace period, which is what a genuinely wedged
+consumer looks like).
+
+Severity is asymmetric on purpose. Evicting the HOST is a user-visible service
+degradation — there is exactly one, it owns the UI, and Emacs logs its own
+warning for the same event — so that record is `warn`. Every other kind's is
+`info`: shedding a slow webview is the contract working. Transient pressure that
+resolves without eviction is verbose, once per episode rather than once per
+frame.
 
 `WorkspaceRoster` is the one coalescable frame with a GLOBAL key: there is
 exactly one roster for the whole editor, it is always whole and never a delta,
