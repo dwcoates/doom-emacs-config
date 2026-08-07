@@ -158,7 +158,7 @@ func TestReplayedRetiredQueryTerminationDoesNotSwallowALaterLiveOne(t *testing.T
 
 	// Act.
 	queryID := "live-query"
-	d.consumer.Degraded("", &corev1.DegradedState{
+	d.consumer.Degraded("", nil, &corev1.DegradedState{
 		Component:       shimSDKComponent,
 		Reason:          "unexpected_query_termination",
 		QueryInstanceId: &queryID,

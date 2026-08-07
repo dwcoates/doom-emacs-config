@@ -98,7 +98,7 @@ func (h *escapeHarness) sdkDied(t *testing.T, reason string) {
 	if err != nil {
 		t.Fatalf("existing: %v", err)
 	}
-	d.consumer.Degraded("", &corev1.DegradedState{Component: shimSDKComponent, Reason: reason})
+	d.consumer.Degraded("", nil, &corev1.DegradedState{Component: shimSDKComponent, Reason: reason})
 }
 
 // failureCards returns every SystemFailureItem pushed into the feed.
