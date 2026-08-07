@@ -2,6 +2,7 @@ package frontend
 
 import (
 	"sync"
+	"time"
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 )
@@ -107,26 +108,98 @@ type outFrame struct {
 	data []byte
 }
 
-// outbox is one connection's bounded outbound queue.
+// overflowReason names WHY a push was refused. It is empty for a queued push.
+type overflowReason string
+
+const (
+	// overflowCeiling — the queue reached its absolute frame ceiling. This is
+	// the memory bound: it holds regardless of how recently the consumer drained.
+	overflowCeiling overflowReason = "hard_ceiling"
+	// overflowStalled — the queue sat above its soft bound for longer than the
+	// grace period without a single frame being drained. That is a consumer
+	// which is not merely busy but WEDGED: transient busyness always drains
+	// something eventually, and this one drained nothing at all.
+	overflowStalled overflowReason = "stalled"
+)
+
+// pushResult reports one push's outcome plus the queue statistics a caller
+// needs to say what it observed. It exists because "the buffer was full" is no
+// longer a single condition: an elastic queue distinguishes transient pressure
+// (queued, above the soft bound) from the two refusals above.
+type pushResult struct {
+	queued    bool
+	compacted int
+	// depth is the queue length after the push, or at the moment of refusal.
+	depth int
+	soft  int
+	hard  int
+	// overSoft is set when the queue is above its soft bound, whether or not
+	// the frame was queued.
+	overSoft bool
+	// entered is set only on the push that CROSSED from below the soft bound
+	// into the elastic region, so the pressure record fires once per episode
+	// rather than once per frame.
+	entered    bool
+	reason     overflowReason
+	stalledFor time.Duration
+}
+
+// outbox is one connection's ELASTIC bounded outbound queue.
 //
 // It is an explicit slice under a mutex rather than a buffered channel because
 // a saturated queue is COMPACTED before the connection is given up on, and a
 // channel's contents cannot be rewritten in place. ready is a wakeup signal of
 // capacity one, not the queue itself: the writer drains everything each time it
 // wakes, so a coalesced token is never a lost frame.
+//
+// TWO bounds, not one. soft is the depth at which the consumer is declared
+// behind; hard is the absolute ceiling. Between them the queue keeps accepting
+// frames for up to grace, PROVIDED the consumer drains at least one frame in
+// that window. That window is what separates a single-threaded UI blocking its
+// event loop for a few seconds — which always drains afterwards — from a
+// consumer that will never read again. Setting soft == hard with grace == 0
+// collapses the whole thing back to a plain bounded queue, which is exactly
+// what every non-host connection uses.
 type outbox struct {
 	mu     sync.Mutex
 	frames []outFrame
-	max    int
+	soft   int
+	hard   int
+	grace  time.Duration
+	now    func() time.Time
 	ready  chan struct{}
+	// popped counts every frame the writer has taken. It is the drain-progress
+	// evidence: a wedged consumer is one whose count does not move.
+	popped uint64
+	// overSince is when the queue last crossed into the elastic region with no
+	// drain progress since; zero means it is not currently under pressure.
+	overSince  time.Time
+	overPopped uint64
 }
 
+// newOutbox builds a plain bounded queue: no elastic region, so a push refused
+// at the bound is refused immediately, exactly as it always was.
 func newOutbox(max int) *outbox {
-	return &outbox{max: max, ready: make(chan struct{}, 1)}
+	return newElasticOutbox(max, max, 0)
 }
 
-// capacity reports the bound this queue was built with (log/introspection aid).
-func (o *outbox) capacity() int { return o.max }
+// newElasticOutbox builds a queue that may grow from soft up to hard while the
+// consumer keeps draining, giving up only past hard or past grace without a
+// single drained frame. A hard below soft is meaningless and is clamped up, so
+// no caller can accidentally build a queue that refuses below its own bound.
+func newElasticOutbox(soft, hard int, grace time.Duration) *outbox {
+	if hard < soft {
+		hard = soft
+	}
+	return &outbox{soft: soft, hard: hard, grace: grace, now: time.Now, ready: make(chan struct{}, 1)}
+}
+
+// capacity reports the soft bound this queue was built with (log/introspection
+// aid): the depth at which the consumer is declared behind.
+func (o *outbox) capacity() int { return o.soft }
+
+// ceiling reports the absolute frame bound (log/introspection aid).
+func (o *outbox) ceiling() int { return o.hard }
 
 // depth reports how many frames are waiting (test/introspection aid).
 func (o *outbox) depth() int {
@@ -135,23 +208,53 @@ func (o *outbox) depth() int {
 	return len(o.frames)
 }
 
-// push appends f, compacting first if the queue is already at its bound.
-// It reports whether the frame was queued and how many superseded frames
-// compaction removed, so a caller that must give up on the connection can say
-// what it already tried. A refused push has left the queue untouched apart from
-// that compaction: nothing irreplaceable is ever dropped to make room.
-func (o *outbox) push(f outFrame) (queued bool, compacted int) {
+// push appends f, compacting first if the queue is already at its soft bound.
+// It reports whether the frame was queued, how many superseded frames
+// compaction removed, and the pressure the queue is under, so a caller that
+// must give up on the connection can say what it already tried. A refused push
+// has left the queue untouched apart from that compaction: nothing
+// irreplaceable is ever dropped to make room.
+func (o *outbox) push(f outFrame) pushResult {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	if len(o.frames) >= o.max {
-		compacted = o.compactLocked()
+	res := pushResult{soft: o.soft, hard: o.hard}
+	if len(o.frames) >= o.soft {
+		res.compacted = o.compactLocked()
 	}
-	if len(o.frames) >= o.max {
-		return false, compacted
+	// The ceiling is unconditional: no amount of recent drain progress buys a
+	// queue past its memory bound.
+	if len(o.frames) >= o.hard {
+		res.depth, res.overSoft, res.reason = len(o.frames), true, overflowCeiling
+		res.stalledFor = o.stalledForLocked()
+		return res
+	}
+	if len(o.frames) >= o.soft {
+		res.overSoft = true
+		switch {
+		case o.overSince.IsZero() || o.popped != o.overPopped:
+			// Either pressure just began, or the consumer has drained something
+			// since the mark. Both are progress: re-mark and keep accepting.
+			res.entered = o.overSince.IsZero()
+			o.overSince, o.overPopped = o.now(), o.popped
+		case o.now().Sub(o.overSince) >= o.grace:
+			res.depth, res.reason = len(o.frames), overflowStalled
+			res.stalledFor = o.stalledForLocked()
+			return res
+		}
 	}
 	o.frames = append(o.frames, f)
 	o.signalLocked()
-	return true, compacted
+	res.queued, res.depth = true, len(o.frames)
+	return res
+}
+
+// stalledForLocked reports how long the queue has been under pressure with no
+// drain progress, or zero when it is not marked. Caller holds mu.
+func (o *outbox) stalledForLocked() time.Duration {
+	if o.overSince.IsZero() {
+		return 0
+	}
+	return o.now().Sub(o.overSince)
 }
 
 // pop removes the oldest queued frame, reporting false when none is waiting.
@@ -164,6 +267,12 @@ func (o *outbox) pop() ([]byte, bool) {
 	f := o.frames[0]
 	o.frames[0] = outFrame{}
 	o.frames = o.frames[1:]
+	o.popped++
+	if len(o.frames) < o.soft {
+		// The episode is over: clear the mark so the next one is reported as a
+		// new entry into the elastic region rather than a continuation.
+		o.overSince, o.overPopped = time.Time{}, 0
+	}
 	return f.data, true
 }
 
