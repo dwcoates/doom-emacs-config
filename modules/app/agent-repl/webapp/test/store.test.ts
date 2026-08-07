@@ -694,6 +694,56 @@ describe("session identity authority", () => {
     expect(store.state.sessionId).toBe("s_live");
   });
 
+  it("leaves hibernation untouched when a non-owning session view reports it", () => {
+    // Arrange — a retired session's catalog entry must not flip the composer
+    // and revival gates the live session owns.
+    const store = new ConversationStore();
+    store.ingest([workspaceEffect({ sessionId: "s_live" })]);
+    // Act
+    store.ingest([
+      sessionEffect({
+        sessionId: "s_retired",
+        hibernation: { sinceMs: 1, cause: { case: "forced", value: {} } },
+      }),
+    ]);
+    // Assert
+    expect(store.state.hibernation).toBeNull();
+  });
+
+  it("leaves the cost and model fields untouched when a non-owning session view carries them", () => {
+    // Arrange
+    const store = new ConversationStore();
+    store.ingest([workspaceEffect({ sessionId: "s_live" })]);
+    store.ingest([sessionEffect({ sessionId: "s_live", model: "opus", totalCostUsd: 1.5 })]);
+    // Act
+    store.ingest([sessionEffect({ sessionId: "s_retired", model: "haiku", totalCostUsd: 99 })]);
+    // Assert
+    expect([store.state.model, store.state.costUsd]).toEqual(["opus", 1.5]);
+  });
+
+  it("applies the whole view when the owning session reports it", () => {
+    // Arrange
+    const store = new ConversationStore();
+    store.ingest([workspaceEffect({ sessionId: "s_live" })]);
+    // Act
+    store.ingest([sessionEffect({ sessionId: "s_live", model: "opus", totalCostUsd: 2.5 })]);
+    // Assert
+    expect([store.state.model, store.state.costUsd]).toEqual(["opus", 2.5]);
+  });
+
+  it("still seeds the whole view before any workspace state rules", () => {
+    // Arrange
+    const store = new ConversationStore();
+    // Act
+    store.ingest([sessionEffect({ sessionId: "s_seed", model: "opus", totalCostUsd: 3.5 })]);
+    // Assert
+    expect([store.state.sessionId, store.state.model, store.state.costUsd]).toEqual([
+      "s_seed",
+      "opus",
+      3.5,
+    ]);
+  });
+
   it("lets a session view seed again after a reset drops the workspace ruling", () => {
     // Arrange
     const store = new ConversationStore();
