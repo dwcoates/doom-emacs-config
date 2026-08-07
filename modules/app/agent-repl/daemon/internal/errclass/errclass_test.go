@@ -493,7 +493,7 @@ func TestDeathClassifiesEachPersistedLiteral(t *testing.T) {
 			// Arrange.
 			logf, lines := capture()
 			// Act.
-			got := Death(logf, tc.reason)
+			got := Death(logf, "s_1", tc.reason, 0)
 			// Assert.
 			if got.GetErrorType() != string(tc.want) {
 				t.Fatalf("Death(%q) = %q, want %q", tc.reason, got.GetErrorType(), tc.want)
@@ -510,7 +510,7 @@ func TestDeathClassifiesALegacyStringLoudly(t *testing.T) {
 	// vocabulary may hold anything.
 	logf, lines := capture()
 	// Act.
-	got := Death(logf, "some ancient reason")
+	got := Death(logf, "s_1", "some ancient reason", 0)
 	// Assert.
 	if got.GetErrorType() != string(TypeSessionEndedUnclassified) {
 		t.Fatalf("error_type = %q, want %q", got.GetErrorType(), TypeSessionEndedUnclassified)
@@ -524,10 +524,60 @@ func TestDeathKeepsALegacyStringVerbatim(t *testing.T) {
 	// Arrange.
 	logf, _ := capture()
 	// Act.
-	got := Death(logf, "some ancient reason")
+	got := Death(logf, "s_1", "some ancient reason", 0)
 	// Assert: the raw value is preserved rather than guessed at.
 	if got.GetSourceDetail() != "some ancient reason" {
 		t.Fatalf("source_detail = %q, want the raw string", got.GetSourceDetail())
+	}
+}
+
+func TestDeathCarriesTheResolutionItWasGiven(t *testing.T) {
+	// Arrange: a supersede whose successor is up is no longer true, and the
+	// item is re-derived on every push, so it must carry its own close.
+	logf, _ := capture()
+	// Act.
+	got := Death(logf, "s_1", DeathReasonSuperseded, 4242)
+	// Assert.
+	if got.GetResolvedAtMs() != 4242 {
+		t.Fatalf("resolved_at_ms = %d, want 4242", got.GetResolvedAtMs())
+	}
+}
+
+func TestDeathIsOpenWithoutAResolution(t *testing.T) {
+	// Arrange: a supersede that just happened has not been closed by anything.
+	logf, _ := capture()
+	// Act.
+	got := Death(logf, "s_1", DeathReasonSuperseded, 0)
+	// Assert.
+	if got.GetResolvedAtMs() != 0 {
+		t.Fatalf("resolved_at_ms = %d, want 0", got.GetResolvedAtMs())
+	}
+}
+
+func TestDeathKeysTheCardOnTheSession(t *testing.T) {
+	// Arrange: a resolved re-push must SETTLE the open card rather than land
+	// beside it, which needs a stable per-session item uuid.
+	logf, _ := capture()
+	// Act.
+	open := Death(logf, "s_1", DeathReasonSuperseded, 0)
+	settled := Death(logf, "s_1", DeathReasonSuperseded, 4242)
+	// Assert.
+	if open.GetItemUuid() != settled.GetItemUuid() || open.GetItemUuid() == "" {
+		t.Fatalf("open uuid %q, settled uuid %q; want one non-empty shared identity",
+			open.GetItemUuid(), settled.GetItemUuid())
+	}
+}
+
+func TestDeathGivesTwoSessionsDistinctCards(t *testing.T) {
+	// Arrange: two sessions of one workspace both die; neither may settle the
+	// other's card.
+	logf, _ := capture()
+	// Act.
+	first := Death(logf, "s_1", DeathReasonSuperseded, 0)
+	second := Death(logf, "s_2", DeathReasonSuperseded, 0)
+	// Assert.
+	if first.GetItemUuid() == second.GetItemUuid() {
+		t.Fatalf("both sessions share item uuid %q", first.GetItemUuid())
 	}
 }
 
@@ -535,7 +585,7 @@ func TestDeathReturnsNilForNoReason(t *testing.T) {
 	// Arrange: a session with no recorded reason has not died.
 	logf, _ := capture()
 	// Act.
-	got := Death(logf, "")
+	got := Death(logf, "s_1", "", 0)
 	// Assert.
 	if got != nil {
 		t.Fatalf("Death(\"\") = %v, want nil", got)

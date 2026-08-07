@@ -48,7 +48,8 @@ func migrate(db *sql.DB) error {
 			hibernation_ttl_ms          INTEGER NOT NULL DEFAULT 0,
 			rewind_previous_vendor_session_id TEXT NOT NULL DEFAULT '',
 			rewind_retained_leaf_uuid         TEXT NOT NULL DEFAULT '',
-			rewind_dropped_turn_ids           TEXT NOT NULL DEFAULT ''
+			rewind_dropped_turn_ids           TEXT NOT NULL DEFAULT '',
+			death_resolved_at_ms              INTEGER NOT NULL DEFAULT 0
 		);
 		CREATE INDEX IF NOT EXISTS session_record_conversation
 			ON session_record(config_dir, cwd, claude_session_id);
@@ -110,6 +111,7 @@ var sessionRecordAddedColumns = []struct{ name, ddl string }{
 	{"rewind_previous_vendor_session_id", "TEXT NOT NULL DEFAULT ''"},
 	{"rewind_retained_leaf_uuid", "TEXT NOT NULL DEFAULT ''"},
 	{"rewind_dropped_turn_ids", "TEXT NOT NULL DEFAULT ''"},
+	{"death_resolved_at_ms", "INTEGER NOT NULL DEFAULT 0"},
 }
 
 // addSessionRecordColumns brings an existing session_record table up to the
@@ -177,7 +179,7 @@ func loadState(q querier, logf func(string, ...any)) (map[string]Record, map[Con
 		backfill_state, queued_prompts, last_turn_end_ms, hibernated, hibernation_cause,
 		hibernated_since_ms, hibernation_cutoff_ms, hibernation_elapsed_ms,
 		hibernation_ttl_ms, rewind_previous_vendor_session_id, rewind_retained_leaf_uuid,
-		rewind_dropped_turn_ids FROM session_record`)
+		rewind_dropped_turn_ids, death_resolved_at_ms FROM session_record`)
 	if err != nil {
 		logf("registry: READ FAILED for session_record — refusing to serve: %v", err)
 		return records, checkpoints, fmt.Errorf("registry: read session records: %w", err)
@@ -194,7 +196,7 @@ func loadState(q querier, logf func(string, ...any)) (map[string]Record, map[Con
 			&rec.LastTurnEndMs, &rec.Hibernated, &rec.Hibernation.Cause, &rec.Hibernation.SinceMs,
 			&rec.Hibernation.CutoffMs, &rec.Hibernation.ElapsedMs, &rec.Hibernation.TTLMs,
 			&rec.Rewind.PreviousVendorSessionID, &rec.Rewind.RetainedLeafUUID,
-			&rec.Rewind.DroppedTurnIDs); err != nil {
+			&rec.Rewind.DroppedTurnIDs, &rec.DeathResolvedAtMs); err != nil {
 			logf("registry: CORRUPT session_record row — refusing to serve: %v", err)
 			return records, checkpoints, fmt.Errorf("registry: scan session record: %w", err)
 		}
@@ -304,14 +306,16 @@ func saveState(tx execer, state *registryState) error {
 			last_seq, newest_clear_or_compact_seq, backfill_state, queued_prompts,
 			last_turn_end_ms, hibernated, hibernation_cause, hibernated_since_ms,
 			hibernation_cutoff_ms, hibernation_elapsed_ms, hibernation_ttl_ms,
-			rewind_previous_vendor_session_id, rewind_retained_leaf_uuid, rewind_dropped_turn_ids)
-			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			rewind_previous_vendor_session_id, rewind_retained_leaf_uuid, rewind_dropped_turn_ids,
+			death_resolved_at_ms)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			rec.SessionID, rec.CWD, rec.Model, rec.PermissionMode, rec.ConfigDir,
 			rec.ClaudeSessionID, rec.CreatedAt, rec.Terminal, rec.DeathReason, rec.TerminalAt,
 			int64(rec.LastSeq), int64(rec.NewestClearOrCompactSeq), rec.BackfillState, queued,
 			rec.LastTurnEndMs, rec.Hibernated, rec.Hibernation.Cause, rec.Hibernation.SinceMs,
 			rec.Hibernation.CutoffMs, rec.Hibernation.ElapsedMs, rec.Hibernation.TTLMs,
 			rec.Rewind.PreviousVendorSessionID, rec.Rewind.RetainedLeafUUID, rec.Rewind.DroppedTurnIDs,
+			rec.DeathResolvedAtMs,
 		); err != nil {
 			return fmt.Errorf("registry: write session record %s: %w", rec.SessionID, err)
 		}
