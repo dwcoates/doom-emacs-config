@@ -149,6 +149,10 @@ SIDECAR_ARTIFACT="$CACHE_BIN/shim-claude-sidecar"
 # lib-deploy-stamp.sh. Never write one from the other's code path.
 SHIM_SHA_STAMP="$SHIM_DIR/dist/.built-sha"
 WEBAPP_SHA_STAMP="$WEBAPP_DIR/dist/.built-sha"
+# The webapp ARTIFACT's own identity, which is a different question from the
+# source revision beside it: two builds of a dirty tree share one revision, and
+# the cache key that identifies a build must not.
+WEBAPP_BUILD_ID_STAMP="$WEBAPP_DIR/dist/.build-id"
 DAEMON_SHA_STAMP="$DAEMON_DIR/bin/.built-sha"
 STORE_SHA_STAMP="$CACHE_BIN/.shim-store.built-sha"
 SIDECAR_SHA_STAMP="$CACHE_BIN/.shim-claude-sidecar.built-sha"
@@ -475,10 +479,38 @@ build_shim() {
     echo "[build-frontend] shim: done"
 }
 
+# write_webapp_build_id — stamp the built webapp with the identity of the
+# artifact itself, taken from the content hash Vite already fingerprints its
+# entry bundle with.
+#
+# THE WEBVIEW'S URL CARRIES THIS, because index.html is served from a fixed
+# path and is the only thing naming which bundle to run. A stable URL is a
+# stable cache key, so a client can go on answering out of its own cache with a
+# bundle from an earlier build — including one whose file has since been
+# deleted. Folding the artifact's identity into the URL makes each build a
+# different address, which a cache cannot satisfy from an older one.
+#
+# It is taken from the artifact rather than from git on purpose: two builds of
+# a dirty tree report one revision, and this must differ whenever the output
+# does.
+write_webapp_build_id() {
+    local index="$WEBAPP_DIR/dist/index.html" entry
+    entry="$(sed -n 's|.*src="/assets/index-\([A-Za-z0-9_-]*\)\.js".*|\1|p' "$index" | head -1)"
+    if [ -z "$entry" ]; then
+        echo "[build-frontend] webapp: FAILED to read the entry bundle hash from $index" >&2
+        return 1
+    fi
+    write_built_sha_value "$WEBAPP_BUILD_ID_STAMP" "$entry"
+}
+
 build_webapp() {
     link_node_modules "$WEBAPP_DIR" webapp
     load_sources "$WEBAPP_DIR"
     if ! is_stale "$WEBAPP_ARTIFACT" ${SOURCES[@]+"${SOURCES[@]}"}; then
+        # The build-id describes the ARTIFACT, so a skipped build still owes it:
+        # the artifact standing here is the one the webview must address, and a
+        # stamp missing beside it would leave that address unbuildable.
+        write_webapp_build_id
         echo "[build-frontend] webapp: fresh, skipping"
         return 0
     fi
@@ -486,6 +518,7 @@ build_webapp() {
     echo "[build-frontend] webapp: building..."
     ( cd "$WEBAPP_DIR" && npm run build )
     write_built_sha "$WEBAPP_SHA_STAMP" "$ROOT"
+    write_webapp_build_id
     echo "[build-frontend] webapp: done"
 }
 
