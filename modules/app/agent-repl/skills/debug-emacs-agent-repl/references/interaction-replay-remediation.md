@@ -86,9 +86,9 @@ cheapest failure to catch here, before it costs an iteration.
 ## 4. Iterate autonomously on the replay
 
 From here the loop is `iterative-fix-verify-loop.md`, unchanged, with one
-substitution: the replay stands in for the single `SPC o c` probe of its step
-2, either replacing it or following it when the startup probe is still worth
-measuring.
+substitution: the replay stands in for the all-workspace `SPC o c` probe sweep
+of its step 2, either replacing it or following it when the startup probe sweep
+is still worth measuring.
 
 Each iteration:
 
