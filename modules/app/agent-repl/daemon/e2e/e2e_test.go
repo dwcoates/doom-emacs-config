@@ -380,8 +380,8 @@ func (l testShimLogger) LogVerbose(format string, args ...any) { l.t.Logf(format
 
 type stubLifecycle struct{}
 
-func (stubLifecycle) Close(context.Context, string) error { return nil }
-func (stubLifecycle) Open(context.Context, string) error  { return nil }
+func (stubLifecycle) Close(context.Context, string) error                          { return nil }
+func (stubLifecycle) Open(context.Context, string, server.WorkspaceOpenOpts) error { return nil }
 
 // OpenDriveable succeeds for the same reason Open does: the harnesses that bind
 // this stub run no merge ACTION, so nothing is ever sent to the session this

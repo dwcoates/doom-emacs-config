@@ -244,8 +244,11 @@ func (f *fakeMerges) resumedWorkspaces() []string {
 }
 
 type fakeLifecycle struct {
-	closed          []string
-	opened          []string
+	closed []string
+	opened []string
+	// openOpts records the run preferences each Open carried, positionally
+	// alongside opened.
+	openOpts        []WorkspaceOpenOpts
 	openedDriveable []string
 	openedForMerge  []string
 	// closeErr, when set, refuses every close.
@@ -279,8 +282,9 @@ func (f *fakeLifecycle) Close(_ context.Context, ws string) error {
 	f.closed = append(f.closed, ws)
 	return nil
 }
-func (f *fakeLifecycle) Open(_ context.Context, ws string) error {
+func (f *fakeLifecycle) Open(_ context.Context, ws string, opts WorkspaceOpenOpts) error {
 	f.opened = append(f.opened, ws)
+	f.openOpts = append(f.openOpts, opts)
 	return nil
 }
 

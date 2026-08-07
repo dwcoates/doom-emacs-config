@@ -85,12 +85,42 @@ type WorkspaceEnsurer interface {
 	ReviveForMerge(ctx context.Context, workspace string) error
 }
 
+// WorkspaceSessionCreator mints a workspace's first session. Satisfied by the
+// daemon core's one creation entry point (*Server.CreateSession, reached
+// through *SessionCommandBinding), so an open and an explicit create cannot
+// diverge on validation, consent, supersede or registration.
+type WorkspaceSessionCreator interface {
+	CreateSession(ctx context.Context, opts CreateOpts) (string, error)
+}
+
+// WorkspaceOpenOpts are the workspace's RUN PREFERENCES: the posture and
+// account a session started by an open runs under. They carry no session
+// identity — which session a workspace owns is the daemon's ruling.
+//
+// They apply ONLY to a session this open starts. A workspace that already has
+// a session is reattached to as it stands; an open never re-postures a live
+// session, because a running conversation's safety posture is not something a
+// window activation gets to change underneath it.
+type WorkspaceOpenOpts struct {
+	PermissionMode string
+	ConfigDir      string
+	Fake           bool
+	// AllowUngated is the caller's deliberate consent to a session with no
+	// permission gate. It is passed to CreateSession, which owns the refusal.
+	AllowUngated bool
+}
+
 // WorkspaceOpener is the production WorkspaceLifecycle.
 type WorkspaceOpener struct {
 	// Reg is the persistent session registry (required).
 	Reg *registry.Registry
 	// Ensurer brings a workspace's session up (required for Open).
 	Ensurer WorkspaceEnsurer
+	// Creator mints a session for a workspace that has none (required for
+	// Open). Only Open uses it: OpenDriveable and OpenForMerge report a
+	// sessionless workspace instead, because their callers must decide what
+	// that means for them.
+	Creator WorkspaceSessionCreator
 	// ConfigDirs lists every Claude config root the daemon knows about. The
 	// session's own dir is probed first; the rest only ever produce migration
 	// candidates.
@@ -101,24 +131,34 @@ type WorkspaceOpener struct {
 
 var _ WorkspaceLifecycle = (*WorkspaceOpener)(nil)
 
-// Open binds a discovered transcript to the workspace's session when it has
-// none, then waits for the restore's authoritative bring-up outcome. A command
+// Open makes a workspace ready to render and drive: it creates the workspace's
+// session when it has none, binds a discovered transcript to that session, then
+// waits for the restore's authoritative bring-up outcome. A command
 // acknowledgement therefore means the session is driveable; a failed exact
 // resume returns its typed continuity evidence to that same command.
-func (o *WorkspaceOpener) Open(ctx context.Context, workspace string) error {
+//
+// opts are the run preferences for a session this open STARTS; they are unread
+// when the workspace already has one.
+func (o *WorkspaceOpener) Open(ctx context.Context, workspace string, opts WorkspaceOpenOpts) error {
 	if o.Ensurer == nil {
 		return fmt.Errorf("server: open-workspace %q has no session ensurer wired", workspace)
 	}
 	id, found := (&SessionLocator{Reg: o.Reg}).Locate(workspace)
 	if !found {
-		// Loud, and NOT an error: a workspace that has never had a session is
-		// not a failed open, it is a fresh one. Returning an error here made
-		// the frontend retry and eventually warn the user for a workspace that
-		// was never broken — it simply has nothing to restore. See
-		// OpenDriveable's merge.ErrNoSession for the same distinction made for
-		// a caller that must decide what "no session" means for it.
-		o.Logf("server: open-workspace %q has no session record; nothing to restore — the workspace loads fresh", workspace)
-		return nil
+		// A workspace with no session record gets one HERE. Open is the single
+		// establishment path: the editor asks for a workspace to be open and
+		// the daemon decides what that requires, so a workspace that has never
+		// had a session and one whose session must be reattached to are the
+		// same request from the caller's side.
+		//
+		// Creation runs through the daemon's one creation entry point, so this
+		// path cannot diverge from an explicit create on permission-mode
+		// validation, the ungated-consent refusal, supersede, or registration.
+		created, err := o.create(ctx, workspace, opts)
+		if err != nil {
+			return err
+		}
+		id = created
 	}
 	o.BindWorkspace(workspace)
 	rec, found := o.Reg.Get(id)
@@ -126,6 +166,39 @@ func (o *WorkspaceOpener) Open(ctx context.Context, workspace string) error {
 		return fmt.Errorf("server: open-workspace %q session %q disappeared after transcript binding", workspace, id)
 	}
 	return o.establish(rec, workspace, o.Ensurer.EnsureDriveable(ctx, workspace))
+}
+
+// create mints workspace's first session through the daemon's one creation
+// entry point and returns its id.
+//
+// RESUME INTENT IS LEFT UNSET, which means a fresh conversation. It is not a
+// choice this path gets to make differently: BindWorkspace below discovers a
+// transcript on disk and binds it to the new record, and the bring-up that
+// follows resumes from that binding. Naming a resume target here would make
+// the opener a second authority on which conversation the workspace owns.
+func (o *WorkspaceOpener) create(ctx context.Context, workspace string, opts WorkspaceOpenOpts) (string, error) {
+	if o.Creator == nil {
+		return "", fmt.Errorf("server: open-workspace %q has no session creator wired", workspace)
+	}
+	o.Logf("server: open-workspace %q has no session record; creating one (permission_mode=%q config_dir=%q fake=%v)",
+		workspace, opts.PermissionMode, opts.ConfigDir, opts.Fake)
+	id, err := o.Creator.CreateSession(ctx, CreateOpts{
+		CWD:            workspace,
+		PermissionMode: opts.PermissionMode,
+		ConfigDir:      opts.ConfigDir,
+		Fake:           opts.Fake,
+		AllowUngated:   opts.AllowUngated,
+	})
+	if err != nil {
+		// The id is returned alongside some failures (a registered session
+		// whose bring-up did not complete), and it is deliberately NOT used to
+		// continue: the create said no, and proceeding into a bind and a second
+		// bring-up would be this path forming its own opinion about a session
+		// the creation boundary already ruled on.
+		return "", fmt.Errorf("server: open-workspace %q: create session: %w", workspace, err)
+	}
+	o.Logf("server: open-workspace %q created session %s", workspace, id)
+	return id, nil
 }
 
 // establish classifies a bring-up outcome for the open commands, and keeps ONE
