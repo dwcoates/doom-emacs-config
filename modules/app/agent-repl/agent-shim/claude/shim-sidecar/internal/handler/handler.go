@@ -36,7 +36,7 @@ func vendorEvent(sessionID string, vendor proto.Message, extras *structpb.Struct
 	if err != nil {
 		// A generated data.v1 message always marshals into Any; a failure is a
 		// build-time impossibility, surfaced loudly rather than dropped.
-		log.With(logging.Context{Operation: "wrap-any", Session: sessionID}).Log("wrapping %T in Any failed: %v", vendor, err)
+		log.With(logging.Context{Operation: "wrap-any", Session: sessionID, Level: "error"}).Log("wrapping %T in Any failed; the record on disk never reaches the store: %v", vendor, err)
 		return nil
 	}
 	return &corev1.Event{

@@ -92,7 +92,10 @@ func (t *Tailer) Poll() (PollResult, error) {
 		t.log.With(logging.Context{Operation: "rotation", Path: t.path}).Log("file_id %s -> %s, resetting cursor to 0", t.fileID, fileID)
 		offset, carry, records = 0, nil, 0
 	case size < offset:
-		t.log.With(logging.Context{Operation: "truncation", Path: t.path}).Log("size %d < offset %d, resetting cursor to 0", size, offset)
+		// Unlike a rotation, a truncation destroys bytes IN PLACE: anything
+		// appended past the committed offset before it is unrecoverable, and
+		// everything re-read from 0 leans on store dedup not to duplicate.
+		t.log.With(logging.Context{Operation: "truncation", Path: t.path, Level: "warn"}).Log("size %d < offset %d, resetting cursor to 0; bytes past the committed offset are unrecoverable", size, offset)
 		offset, carry, records = 0, nil, 0
 	}
 

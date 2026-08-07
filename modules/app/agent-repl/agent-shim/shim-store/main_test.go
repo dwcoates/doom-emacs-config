@@ -178,6 +178,7 @@ func TestRunLoggedRecordsPostBootstrapErrorExactlyOnce(t *testing.T) {
 		}
 		var record struct {
 			Operation string         `json:"operation"`
+			Level     string         `json:"level"`
 			Context   map[string]any `json:"context"`
 		}
 		if err := json.Unmarshal([]byte(got), &record); err != nil {
@@ -185,6 +186,11 @@ func TestRunLoggedRecordsPostBootstrapErrorExactlyOnce(t *testing.T) {
 		}
 		if record.Operation != "serve" || record.Context["db"] != "/tmp/events.db" || record.Context["socket"] != "/tmp/store.sock" {
 			t.Fatalf("%s missing canonical context: %#v", sink, record)
+		}
+		// Both callers end the process; an omitted level would persist as info
+		// and hide a fatal serve failure from every warning sweep.
+		if record.Level != "error" {
+			t.Fatalf("%s runtime-failure level = %q, want error", sink, record.Level)
 		}
 	}
 }

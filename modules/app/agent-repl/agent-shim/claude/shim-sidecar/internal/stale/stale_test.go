@@ -38,6 +38,28 @@ func onlyLost(t *testing.T, evs []*corev1.Event) *corev1.TaskEnded {
 	return te
 }
 
+func TestInferredLostIsWarnBecauseTheUserReadsTheVerdict(t *testing.T) {
+	// Arrange — a synthetic LOST draws the task as lost, never DONE.
+	var seen []logging.Diagnostic
+	log := logging.New(io.Discard, io.Discard).With(logging.Context{Component: "test"})
+	log.SetDiagnosticSink(func(d logging.Diagnostic) { seen = append(seen, d) })
+	tr := New(Options{Grace: 30 * time.Second}, log)
+	tr.Open("b1", tail.KindShellSpool, "s1", "/p/b1.output", 1000, 1000)
+	tr.MarkVanished("s1", "b1", 10_000)
+	// Act
+	tr.Sweep(10_000 + 30_000)
+	// Assert
+	var levels []string
+	for _, d := range seen {
+		if d.Operation == "infer-lost" {
+			levels = append(levels, d.Level)
+		}
+	}
+	if len(levels) != 1 || levels[0] != "warn" {
+		t.Fatalf("infer-lost levels = %v, want exactly one warn", levels)
+	}
+}
+
 func TestVanishGraceEmitsLostAfterWindow(t *testing.T) {
 	// Arrange
 	tr := New(Options{Grace: 30 * time.Second}, testLog())

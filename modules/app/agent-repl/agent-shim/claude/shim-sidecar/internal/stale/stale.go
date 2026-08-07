@@ -274,7 +274,9 @@ func (t *Tracker) BootSweep(bootMs, nowMs int64) []*corev1.Event {
 
 // lost builds the synthetic-plane LOST TaskEnded and loud-logs the transition.
 func (t *Tracker) lost(tk *task, inference string) *corev1.Event {
-	t.log.With(logging.Context{Operation: "infer-lost", Task: tk.id, Session: tk.session}).Log("LOST kind=%d inference=%s never DONE", tk.kind, inference)
+	// A synthetic LOST is a terminal verdict the user READS: the task is drawn
+	// as lost and never reaches DONE.
+	t.log.With(logging.Context{Operation: "infer-lost", Task: tk.id, Session: tk.session, Level: "warn"}).Log("LOST kind=%d inference=%s never DONE", tk.kind, inference)
 	return &corev1.Event{
 		SessionId:    tk.session,
 		Plane:        corev1.Plane_PLANE_SYNTHETIC,
