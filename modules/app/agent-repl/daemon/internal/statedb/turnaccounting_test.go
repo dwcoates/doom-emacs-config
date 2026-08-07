@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 	"google.golang.org/protobuf/proto"
 )
@@ -161,6 +162,85 @@ func TestTurnAccountingsRejectsDivergentResponseEvidence(t *testing.T) {
 	if _, err := accountings.Record("s", replay); err == nil {
 		t.Fatal("divergent response evidence was accepted")
 	}
+}
+
+// AN EVIDENCE-FREE CROSS-GENERATION RECOMPUTE STAYS DIVERGENT, and this test
+// exists to pin that it does.
+//
+// This is the exact shape observed live on session s_4418b0d983d8d5b5, turns
+// "fe-365-6c53" and "ka_23d27a02b4cc643e46cf1b64", after a full-stack deploy
+// stopped every shim and the sessions re-established with stream replay. The
+// generation that RAN the turn settled a record carrying account-usage
+// boundaries (usage_at_start / usage_at_end, each stamping the retired query's
+// query_instance_id plus its own wall-clock observed_at_ms and
+// sample_latency_ms), the turn's responses, and a reconciliation built from
+// the vendor Result. The replaying generation admits NONE of that: every one
+// of those rows names the retired query, so the reducer classifies them
+// historical and refuses them as live evidence, and what it recomputes is an
+// empty turn.
+//
+// The store must not paper over that by widening its tolerance any further —
+// the canonical comparison already forgives the genuinely ephemeral fields,
+// and forgiving the usage boundaries and the response ledger too would leave
+// nothing being compared at all. The recompute is simply not a competing
+// account of the turn, and the layer that KNOWS that (the session controller,
+// which holds the epoch classification) is where the degradation belongs.
+func TestTurnAccountingsRejectsEvidenceFreeCrossGenerationRecompute(t *testing.T) {
+	// Arrange: the generation that ran the turn settles it with full evidence.
+	accountings := newTurnAccountings(t)
+	settled := &frontendv1.TurnAccounting{
+		TurnId:          "fe-365-6c53",
+		QueryInstanceId: "query-a",
+		UsageAtStart:    boundaryUsageObservation("query-a", "fe-365-6c53", true),
+		UsageAtEnd:      boundaryUsageObservation("query-a", "fe-365-6c53", false),
+		Responses:       []*frontendv1.TokenUtilization{completeUtilization("s", "claude", "fe-365-6c53", "m")},
+		Reconciliation:  &frontendv1.TokenUsageReconciliation{ResponseRecordCount: 1, ApiMessageIds: []string{"m"}},
+		Verdict:         &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}},
+	}
+	if _, err := accountings.Record("s", settled); err != nil {
+		t.Fatalf("first settlement: %v", err)
+	}
+
+	// Act: the replaying generation recomputes the same turn with no admitted
+	// evidence whatsoever, under a freshly minted query id.
+	replay := &frontendv1.TurnAccounting{
+		TurnId:          "fe-365-6c53",
+		QueryInstanceId: "query-b",
+		Reconciliation:  &frontendv1.TokenUsageReconciliation{},
+		Verdict:         &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}},
+	}
+	_, err := accountings.Record("s", replay)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("an evidence-free cross-generation recompute overwrote a settled turn")
+	}
+	if !strings.Contains(err.Error(), "divergent replay for turn accounting") {
+		t.Fatalf("Record error = %v, want the divergent-replay rejection", err)
+	}
+}
+
+// boundaryUsageObservation is one account-usage boundary sample of the shape
+// the live poller writes: stamped with the query instance that took it and
+// with the wall-clock instants of the sampling itself.
+func boundaryUsageObservation(queryID, turnID string, start bool) *corev1.AccountUsageObservation {
+	observation := &corev1.AccountUsageObservation{
+		QueryInstanceId:  queryID,
+		TurnId:           turnID,
+		BoundaryAtMs:     1786053233408,
+		ObservedAtMs:     1786053234013,
+		SampleLatencyMs:  605,
+		SubscriptionType: "max",
+		Outcome: &corev1.AccountUsageObservation_Available{Available: &corev1.AccountUsageAvailable{
+			FiveHour: &corev1.UsageWindow{UtilizationPercent: 8, ResetsAtMs: 1786064399579},
+		}},
+	}
+	if start {
+		observation.Boundary = &corev1.AccountUsageObservation_TurnStart{TurnStart: &corev1.TurnStartUsageBoundary{}}
+	} else {
+		observation.Boundary = &corev1.AccountUsageObservation_TurnEnd{TurnEnd: &corev1.TurnEndUsageBoundary{}}
+	}
+	return observation
 }
 
 // newTurnAccountings is a turn accounting store on a fresh state database.
