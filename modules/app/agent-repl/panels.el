@@ -462,18 +462,25 @@ Redirects away from agent buffers and saves frame state.  Also
 records `:panels-were-visible' so `--ensure-own-panels-on-persp-switch'
 can restore the correct workspace's panels after activation.
 Logs `persp-names-cache' so cache mutations across persp lifecycle
-events (kill, switch, add) are traceable."
-  (let ((ws (agent-repl--ws-current-name)))
-    (agent-repl--log ws "before-persp-deactivate: entry cache=%S"
-                      (or (agent-repl--ws-names-cache) "(unbound)"))
+events (kill, switch, add) are traceable.
+
+This hook fires for EVERY perspective, including persp-mode's own
+placeholders (`persp-nil-name' \"none\", Doom's initial \"main\"), so the
+bookkeeping uses the unscreened name while the log lines use
+`agent-repl--ws-current-log-name': a placeholder owns no durable sink, and
+its deactivation is a genuinely global-scope event."
+  (let ((ws (agent-repl--ws-current-name))
+        (log-ws (agent-repl--ws-current-log-name)))
+    (agent-repl--log log-ws "before-persp-deactivate: entry ws=%s cache=%S"
+                      ws (or (agent-repl--ws-names-cache) "(unbound)"))
     ;; Record whether panels are visible BEFORE redirecting/saving so
     ;; the activated hook can restore them if persp-mode drops them.
     (agent-repl--ws-put ws :panels-were-visible (agent-repl--panels-visible-p))
     (agent-repl--redirect-from-agent-before-save)
     (condition-case err
         (agent-repl--ws-frame-save-state)
-      (error (agent-repl--warn ws "persp-frame-save-state failed: %S" err)
-             (agent-repl--log ws "before-persp-deactivate: persp-frame-save-state error: %S" err)))))
+      (error (agent-repl--warn log-ws "persp-frame-save-state failed for ws=%s: %S" ws err)
+             (agent-repl--log log-ws "before-persp-deactivate: persp-frame-save-state error ws=%s: %S" ws err)))))
 
 (defun agent-repl--after-persp-activated (&rest _)
   "Handle perspective activation by scheduling a workspace switch.
