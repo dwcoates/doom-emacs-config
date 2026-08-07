@@ -713,6 +713,14 @@ re-routes their frontend resolution instead."
          (agent-repl-workspace-snapshot-file
           (expand-file-name (format "agent-snap-%s" (random)) temporary-file-directory))
          (agent-repl--snapshot-archived-this-run nil)
+         ;; Roster-durability state (commands.el).  Both are per-Emacs-boot
+         ;; globals: `--snapshot-loaded-p' gates whether a save may write at
+         ;; all, and `--snapshot-materialized-pending' is the debt list a
+         ;; boot-resume materialization parks there.  A test that sets
+         ;; either would otherwise decide whether a LATER test's save is
+         ;; permitted, which is suite order.
+         (agent-repl--snapshot-loaded-p nil)
+         (agent-repl--snapshot-materialized-pending nil)
          (agent-repl--restored-workspaces nil)
          ;; Reset workspace-state update timer state so each test starts
          ;; from a clean slate: counter at 0, no chain in flight, async
