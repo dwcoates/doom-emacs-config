@@ -699,6 +699,37 @@ invariant; it lets a caller avoid violating it."
               (agent-repl--ws-id-cached ws)
               t))))
 
+;; persp-mode and Doom own these; core.el only reads them, and only when the
+;; owning package has bound them.
+(defvar persp-nil-name)
+(declare-function agent-repl--ws-main-name "workspace" ())
+
+(defun agent-repl--pseudo-workspace-name-p (ws)
+  "Return non-nil when WS names one of persp-mode's own built-in perspectives.
+Those are `persp-nil-name' (\"none\", the perspective that is active outside
+any perspective) and Doom's startup perspective (`+workspaces-main', read
+through `agent-repl--ws-main-name').  Both are real, live perspectives that
+agent-repl never created and that intentionally own no `:project-dir', so a
+record attributed to one is not an anomaly — it is simply a record about
+something that is not a workspace.
+
+The classification is grounded in the two variables persp-mode and Doom
+publish for their own perspectives rather than in string literals, so it
+tracks a renamed built-in instead of drifting from it.  Neither variable being
+bound means the built-in does not exist in this session, and nothing can be
+that perspective.
+
+This is deliberately NOT \"any name without a registered directory\": a real
+agent-repl workspace whose registration is missing is exactly the anomaly
+`agent-repl--note-unroutable-log-workspace' exists to shout about, and it must
+keep shouting."
+  (and (stringp ws)
+       (let ((nil-name (and (boundp 'persp-nil-name) persp-nil-name))
+             (main-name (and (fboundp 'agent-repl--ws-main-name)
+                             (agent-repl--ws-main-name))))
+         (or (and (stringp nil-name) (equal ws nil-name))
+             (and (stringp main-name) (equal ws main-name))))))
+
 (defvar agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)
   "Workspace names already reported as unable to own a durable log sink.")
 
@@ -740,10 +771,21 @@ workspace path — symlinked directory components, a non-directory component,
 a canonical log path that is a directory — remain fatal in
 `agent-repl--ensure-real-log-directory' and
 `agent-repl--workspace-emacs-log-target', because those describe an attack,
-not an absence."
+not an absence.
+
+A THIRD condition is not a degradation at all: WS may name one of persp-mode's
+own perspectives (`agent-repl--pseudo-workspace-name-p').  Those own no sink
+because they are not workspaces, so routing such a record globally is the
+correct classification rather than a fallback, and it does not warn.  Screening
+that case HERE — at the one point where attribution becomes a sink — is what
+keeps it from being every producer's job to know which names persp-mode
+invented; call sites that screen themselves through `agent-repl--ws-log-name'
+stay correct and simply never reach this branch.  The name is not lost: the
+ladder puts it on the record as `pseudo_workspace'."
   (cond
    ((null ws) nil)
    ((agent-repl--ws-log-routable-p ws) ws)
+   ((agent-repl--pseudo-workspace-name-p ws) nil)
    (t (agent-repl--note-unroutable-log-workspace ws) nil)))
 
 (defun agent-repl--workspace-log-identity (ws)
@@ -783,8 +825,13 @@ one conversation identifier worth correlating a log line by."
                    ws field value)))))))
   record)
 
-(defun agent-repl--log-record (ws level verbosity fmt args)
-  "Serialize WS / LEVEL / VERBOSITY / FMT / ARGS as one JSONL record."
+(defun agent-repl--log-record (ws level verbosity fmt args &optional pseudo-ws)
+  "Serialize WS / LEVEL / VERBOSITY / FMT / ARGS as one JSONL record.
+PSEUDO-WS, when non-nil, is the persp-mode pseudo-perspective the caller
+attributed this record to (see `agent-repl--pseudo-workspace-name-p').  Such a
+name owns no durable sink, so WS is nil and the record lands globally; the name
+is preserved on the record as `pseudo_workspace' so the line still says which
+perspective it is about."
   (let* ((message (if (stringp fmt)
                       (apply #'format fmt args)
                     (agent-repl--log-format-capture-bug fmt)
@@ -803,6 +850,8 @@ one conversation identifier worth correlating a log line by."
                   (cons "message" message)
                   (cons "context" context))))
     (agent-repl--log-add-workspace-identity record ws)
+    (when pseudo-ws
+      (puthash "pseudo_workspace" pseudo-ws record))
     (json-serialize record)))
 
 (defun agent-repl--workspace-emacs-log-path (project-dir)
@@ -1091,7 +1140,14 @@ the debug lines a reader actually wants."
       ;; record's identity fields and the sink path must agree about which
       ;; workspace owns this line, and both derive from this single answer.
       (let* ((sink-ws (agent-repl--log-sink-workspace ws))
-             (record (agent-repl--log-record sink-ws level verbosity fmt args)))
+             ;; A pseudo-perspective loses its attribution to the global sink
+             ;; above; carry the name onto the record so the demotion does not
+             ;; also erase which perspective the line was about.
+             (pseudo-ws (and (null sink-ws)
+                             (agent-repl--pseudo-workspace-name-p ws)
+                             ws))
+             (record (agent-repl--log-record sink-ws level verbosity fmt args
+                                             pseudo-ws)))
         (when to-file
           (agent-repl--do-log-to-file record sink-ws))
         (when to-buffer
