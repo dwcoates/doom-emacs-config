@@ -330,14 +330,19 @@ type fakeWorkspaceCreation struct {
 type fakeHostWorkPublisher struct {
 	available []*frontendv1.WorkspaceAvailable
 	actions   []*frontendv1.HostAction
+	// hostClients is how many host clients each push reports reaching. Zero is
+	// the "no Emacs host is connected" case the forwarding loops must call out.
+	hostClients int
 }
 
-func (f *fakeHostWorkPublisher) PushWorkspaceAvailable(available *frontendv1.WorkspaceAvailable) {
+func (f *fakeHostWorkPublisher) PushWorkspaceAvailable(available *frontendv1.WorkspaceAvailable) int {
 	f.available = append(f.available, available)
+	return f.hostClients
 }
 
-func (f *fakeHostWorkPublisher) PushHostAction(action *frontendv1.HostAction) {
+func (f *fakeHostWorkPublisher) PushHostAction(action *frontendv1.HostAction) int {
 	f.actions = append(f.actions, action)
+	return f.hostClients
 }
 
 func newFakeWorkspaceCreation() *fakeWorkspaceCreation {
@@ -1173,7 +1178,7 @@ func TestSnapshotProviderIncludesDurableHostWork(t *testing.T) {
 func TestHostWorkForwardersPublishEachTypedStream(t *testing.T) {
 	// Arrange — separate typed streams make it impossible for a host action to
 	// masquerade as workspace availability or vice versa.
-	publisher := &fakeHostWorkPublisher{}
+	publisher := &fakeHostWorkPublisher{hostClients: 1}
 	available := make(chan *frontendv1.WorkspaceAvailable, 1)
 	actions := make(chan *frontendv1.HostAction, 1)
 	available <- &frontendv1.WorkspaceAvailable{JobId: "job-1", FinalName: "fresh"}
@@ -1192,6 +1197,58 @@ func TestHostWorkForwardersPublishEachTypedStream(t *testing.T) {
 	if got := publisher.actions; len(got) != 1 || got[0].GetActionId() != "action-1" {
 		t.Fatalf("host action pushes = %+v", got)
 	}
+}
+
+func TestMaterializationRequestReachingNoHostIsLoggedAsUndelivered(t *testing.T) {
+	// Arrange — a host-only frame pushed while no Emacs host is connected is
+	// dropped by the fan-out, and this line is the only trace it ever leaves.
+	publisher := &fakeHostWorkPublisher{hostClients: 0}
+	available := make(chan *frontendv1.WorkspaceAvailable, 1)
+	available <- &frontendv1.WorkspaceAvailable{JobId: "job-1", FinalName: "fresh"}
+	close(available)
+	var lines []string
+	logf := func(format string, _ ...any) { lines = append(lines, format) }
+
+	// Act.
+	forwardWorkspaceAvailable(logf, publisher, available)
+
+	// Assert.
+	if !containsFormat(lines, "MATERIALIZATION REQUEST UNDELIVERED") {
+		t.Fatalf("logged = %q, want an undelivered materialization request", lines)
+	}
+	if containsFormat(lines, "materialization request delivered") {
+		t.Fatalf("logged = %q, want no delivery claim for a request nobody received", lines)
+	}
+}
+
+func TestMaterializationRequestReachingAHostIsLoggedAsDelivered(t *testing.T) {
+	// Arrange.
+	publisher := &fakeHostWorkPublisher{hostClients: 2}
+	available := make(chan *frontendv1.WorkspaceAvailable, 1)
+	available <- &frontendv1.WorkspaceAvailable{JobId: "job-1", FinalName: "fresh"}
+	close(available)
+	var lines []string
+	logf := func(format string, _ ...any) { lines = append(lines, format) }
+
+	// Act.
+	forwardWorkspaceAvailable(logf, publisher, available)
+
+	// Assert.
+	if !containsFormat(lines, "materialization request delivered") {
+		t.Fatalf("logged = %q, want a delivery line", lines)
+	}
+	if containsFormat(lines, "MATERIALIZATION REQUEST UNDELIVERED") {
+		t.Fatalf("logged = %q, want no undelivered claim for a request two hosts received", lines)
+	}
+}
+
+func containsFormat(lines []string, want string) bool {
+	for _, line := range lines {
+		if strings.Contains(line, want) {
+			return true
+		}
+	}
+	return false
 }
 
 // --- snapshot provider ----------------------------------------------------
