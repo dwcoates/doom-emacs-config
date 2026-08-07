@@ -1251,8 +1251,22 @@ func (s *Server) CreateSession(_ context.Context, opts CreateOpts) (string, erro
 	// HARD-FAIL the create before bringing anything up. Fake sessions skip the
 	// gate — the scripted SDK has no transcripts by design.
 	if missing := validateResumeTarget(opts, opts.Fake || s.forceFake); missing != nil {
-		logResumeContinuityFailure(s.logf, "session_create", "", opts, missing)
-		return "", missing
+		// THE RESTORE RUNG. A create naming a conversation whose transcript is
+		// gone is not automatically a failed create: the workspace keeps its
+		// own backups beside the work (transcriptbackup.go), and putting one
+		// back is what turns this into an ordinary resume. Only when there is
+		// nothing to put back does the gate's refusal stand.
+		restored, restoreErr := attemptTranscriptRestore(s.logf, "session_create", "", opts)
+		if restoreErr != nil {
+			return "", restoreErr
+		}
+		if restored {
+			missing = validateResumeTarget(opts, opts.Fake || s.forceFake)
+		}
+		if missing != nil {
+			logResumeContinuityFailure(s.logf, "session_create", "", opts, missing)
+			return "", missing
+		}
 	}
 	// A workspace takes exactly one live session and a transcript exactly one
 	// writer, and this create is the newest claim on both, so any older

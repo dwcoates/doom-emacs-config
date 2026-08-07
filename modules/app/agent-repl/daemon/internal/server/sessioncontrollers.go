@@ -399,6 +399,23 @@ func (s *ShimSpawner) EnsureShim(ctx context.Context, sessionID string) (session
 	// freshgate.go for why the permission is an object rather than a bool.
 	var freshProof *freshEligibility
 	if missing := validateResumeTarget(opts, fake); missing != nil {
+		// THE RESTORE RUNG, above every other answer to a missing transcript.
+		// The conversation may still exist on disk beside the workspace
+		// (transcriptbackup.go); putting it back turns what used to be a lost
+		// conversation into a resumed one, and it must be tried before any rung
+		// that starts something blank.
+		restored, restoreErr := attemptTranscriptRestore(s.logf, "automatic_restore", sessionID, opts)
+		if restoreErr != nil {
+			return res, restoreErr
+		}
+		// A successful restore is deliberately NOT taken as proof the target is
+		// now viable. The gate below re-derives that from the disk, because the
+		// gate is the sole authority on resume viability and a restore that
+		// landed somewhere it could not be read back from is a fact only the
+		// gate can report.
+		_ = restored
+	}
+	if missing := validateResumeTarget(opts, fake); missing != nil {
 		if !resumeTargetCarriesAConversation(rec) {
 			// A HANDSHAKE THAT NEVER BECAME A CONVERSATION. The vendor mints a
 			// uuid at system:init, before a single word has been exchanged, and
@@ -455,13 +472,36 @@ func (s *ShimSpawner) EnsureShim(ctx context.Context, sessionID string) (session
 		} else {
 			proof, reason := proveFreshEligible(gatherConversationEvidence(s.reg, rec.ConfigDir, rec.CWD))
 			if proof == nil {
-				s.logf("server: session %s: no-resume spawn REFUSED cwd=%q config_dir=%q — %s",
-					sessionID, rec.CWD, rec.ConfigDir, reason)
-				return res, unresumableConversation(rec.CWD, rec.ConfigDir, reason)
+				// THE RESTORE RUNG AGAIN, and this placement recovers the worst
+				// case: the workspace HAS a conversation, nothing on the record
+				// names a resumable one, and the refusal below is otherwise the
+				// end of the road. With no uuid to aim at, the newest backup
+				// this workspace holds names the conversation it should be
+				// returned to.
+				noTarget := opts
+				noTarget.Resume = ""
+				restored, restoreErr := attemptTranscriptRestore(s.logf, "automatic_restore", sessionID, noTarget)
+				if restoreErr != nil {
+					return res, restoreErr
+				}
+				if recovered, ok := newestBackupConversation(rec.CWD); restored && ok {
+					// Resumed rather than refused, and the spawn below carries
+					// it exactly as an ordinary resume would: the whole point of
+					// the backup plane is that a recovered conversation is not
+					// a special kind of session afterwards.
+					opts.Resume = recovered
+					s.logf("server: session %s: conversation %s RECOVERED from backup and will be RESUMED rather than refused (cwd=%q)",
+						sessionID, recovered, rec.CWD)
+				} else {
+					s.logf("server: session %s: no-resume spawn REFUSED cwd=%q config_dir=%q — %s",
+						sessionID, rec.CWD, rec.ConfigDir, reason)
+					return res, unresumableConversation(rec.CWD, rec.ConfigDir, reason)
+				}
+			} else {
+				freshProof = proof
+				s.logf("server: session %s: no-resume spawn PERMITTED cwd=%q config_dir=%q — the registry proves this workspace has never run a conversation",
+					sessionID, rec.CWD, rec.ConfigDir)
 			}
-			freshProof = proof
-			s.logf("server: session %s: no-resume spawn PERMITTED cwd=%q config_dir=%q — the registry proves this workspace has never run a conversation",
-				sessionID, rec.CWD, rec.ConfigDir)
 		}
 	}
 	if opts.Fake && opts.Resume != "" {
@@ -860,6 +900,12 @@ type RegistryRegistrar struct {
 	// is held by pointer. Nil-safe: the connect snapshot still carries the
 	// record, so a nil pusher costs freshness, never correctness.
 	PushView func(sessionID string)
+	// Backups copies a workspace's vendor transcript aside at the two
+	// boundaries this registrar is the first to hear about: a turn ending and
+	// a vendor uuid rotating. Optional — a nil writer takes no copies, which
+	// is only right in a unit harness, because a daemon with no backups can
+	// only ever answer a lost transcript with the ladder's hard fault.
+	Backups *TranscriptBackups
 }
 
 // SessionModelCatalogObserved accepts a shim-published menu, then re-pushes
@@ -1144,6 +1190,16 @@ func (r *RegistryRegistrar) adoptVendorSessionID(sessionID, claudeSessionID stri
 			r.Logf("server: session %s: VENDOR SESSION ROTATED %s -> %s — last_seq and the replay floor reset to zero for the new store seq space",
 				sessionID, previous, claudeSessionID)
 		}
+		// THE RETIRING CONVERSATION'S LAST CHANCE. A rotation is the one
+		// moment a transcript stops being appended to forever, and the record
+		// now points at its successor — so the retiring uuid is named
+		// explicitly here rather than read back off the record, which would
+		// copy the new empty transcript and leave the retired one uncovered.
+		if r.Backups != nil {
+			if rec, ok := r.Reg.Get(sessionID); ok {
+				r.Backups.CaptureConversation(rec.CWD, rec.ConfigDir, previous, "vendor_session_rotated")
+			}
+		}
 		// The session's conversation IDENTITY just changed, which is exactly
 		// the kind of record change a connected frontend should not have to
 		// wait for an unrelated event to learn.
@@ -1196,6 +1252,14 @@ func (r *RegistryRegistrar) TurnEndObserved(sessionID string, atMs int64) {
 		r.Logf("server: session %s: registry last_turn_end_ms write FAILED at_ms=%d — the cache keep-alive has no durable instant to measure this session from and will leave it alone: %v",
 			sessionID, atMs, err)
 		return
+	}
+	// A TURN THAT ENDED IS A TRANSCRIPT AT REST. The vendor has finished
+	// appending, so this is the cheapest moment at which a copy is worth
+	// exactly one whole exchange. It is deliberately AFTER the durable write
+	// and it never reports upward: a backup that could not be taken is loud in
+	// the log and changes nothing about the turn.
+	if r.Backups != nil {
+		r.Backups.Capture(sessionID)
 	}
 	if !found && r.Logf != nil {
 		r.Logf("server: session %s: last_turn_end_ms write found no record (never registered) at_ms=%d", sessionID, atMs)
