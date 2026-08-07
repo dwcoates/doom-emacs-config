@@ -358,6 +358,21 @@ func TestLegacyErrorWritesAtErrorSeverity(t *testing.T) {
 	}
 }
 
+func TestLegacyWarnWritesAtWarnSeverity(t *testing.T) {
+	// Arrange: a user-visible degradation is not a fault, but at info it is
+	// indistinguishable from routine progress and invisible to a level filter.
+	var durable, terminal strings.Builder
+
+	// Act.
+	LegacyWarn(New(&durable, &terminal, false).With("operation", "legacy.degraded"))("degraded %d", 5)
+
+	// Assert.
+	record := decodeOne(t, durable.String())
+	if record.Level != LevelWarn || record.Message != "degraded 5" {
+		t.Fatalf("record=%#v, want a warn-level record", record)
+	}
+}
+
 func TestLegacyStillWritesAtInfoSeverity(t *testing.T) {
 	// Arrange.
 	var durable, terminal strings.Builder
