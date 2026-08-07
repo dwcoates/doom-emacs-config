@@ -105,12 +105,18 @@ export type FrontendFrame = Message<"agentshim.frontend.v1.FrontendFrame"> & {
     case: "snapshot";
   } | {
     /**
+     * THE authority on which session owns a workspace, whether it arrives on
+     * its own or inside `snapshot`.
+     *
      * @generated from field: agentshim.frontend.v1.WorkspaceState workspace_state = 2;
      */
     value: WorkspaceState;
     case: "workspaceState";
   } | {
     /**
+     * A catalog entry for ONE session, live or retired. Never a workspace's
+     * live identity (see SessionView).
+     *
      * @generated from field: agentshim.frontend.v1.SessionView session_view = 3;
      */
     value: SessionView;
@@ -355,6 +361,12 @@ export const SessionHealthViewSchema: GenMessage<SessionHealthView> = /*@__PURE_
  * THE resolved per-workspace state, plus the inputs snapshot that produced
  * it (for debuggability: a frontend can show WHY a state was resolved).
  *
+ * IDENTITY AUTHORITY: this message is the SOLE authority for which session
+ * owns a workspace. `session_id` below is the daemon session-state machine's
+ * ruling, revisioned like every other field here, and a rotation to a new
+ * owning session arrives as a new revision of this message. No consumer may
+ * take a workspace's live session identity from any other frame.
+ *
  * @generated from message agentshim.frontend.v1.WorkspaceState
  */
 export type WorkspaceState = Message<"agentshim.frontend.v1.WorkspaceState"> & {
@@ -364,6 +376,12 @@ export type WorkspaceState = Message<"agentshim.frontend.v1.WorkspaceState"> & {
   workspace: string;
 
   /**
+   * THE workspace's owning session, and the only field on this protocol that
+   * may bind it. A consumer adopts this value and nothing else as "which
+   * session am I talking to for this workspace"; per-session frames
+   * (SessionView, ProgressView, QueueView, …) name a session for CORRELATION
+   * only and may corroborate this value but never replace it.
+   *
    * @generated from field: string session_id = 2;
    */
   sessionId: string;
@@ -823,6 +841,22 @@ export const MergeStatusFailedSchema: GenMessage<MergeStatusFailed> = /*@__PURE_
   messageDesc(file_agentshim_frontend_v1_frontend, 14);
 
 /**
+ * A PER-SESSION CATALOG ENTRY, not a statement about who owns a workspace.
+ *
+ * This message is published for retired, superseded, terminal and hibernated
+ * sessions exactly as it is for the live one — `terminal` and `death` below
+ * exist precisely so a dead session still has a view. A connect snapshot
+ * therefore carries several of these for the same `workspace`, in no
+ * authority order.
+ *
+ * SO: NO CONSUMER MAY ADOPT `session_id` BELOW AS A WORKSPACE'S LIVE SESSION
+ * IDENTITY. WorkspaceState is the sole authority for that (see its comment).
+ * A consumer that binds identity from this message under last-writer-wins
+ * will rebind to whichever entry happened to arrive last — including a dead
+ * one — and then address the daemon with a stale session under the current
+ * controller generation, which the daemon refuses as an identity mismatch.
+ * That is a real, observed outage, not a hypothetical.
+ *
  * @generated from message agentshim.frontend.v1.SessionView
  */
 export type SessionView = Message<"agentshim.frontend.v1.SessionView"> & {
@@ -832,6 +866,11 @@ export type SessionView = Message<"agentshim.frontend.v1.SessionView"> & {
   workspace: string;
 
   /**
+   * WHICH session this catalog entry describes — a correlation key, never a
+   * binding. It says "the facts below belong to this session"; it does not
+   * say "this session owns `workspace`". Only WorkspaceState.session_id says
+   * that.
+   *
    * @generated from field: string session_id = 2;
    */
   sessionId: string;
@@ -6145,15 +6184,27 @@ export const ContextCostAlertSchema: GenMessage<ContextCostAlert> = /*@__PURE__*
 /**
  * Full resync on (re)connect: current state of every workspace + open tasks.
  *
+ * IDENTITY AUTHORITY: `workspaces` below is the only place in this snapshot a
+ * consumer may read a workspace's live session identity from. The per-session
+ * and per-task repeated fields are CATALOGS — they include retired and
+ * superseded entries by design, and their order carries no authority — so
+ * folding them onto a store must never move a workspace's session binding.
+ *
  * @generated from message agentshim.frontend.v1.StateSnapshot
  */
 export type StateSnapshot = Message<"agentshim.frontend.v1.StateSnapshot"> & {
   /**
+   * THE authoritative rulings, one per workspace. Sole source of session
+   * ownership for everything in this snapshot.
+   *
    * @generated from field: repeated agentshim.frontend.v1.WorkspaceState workspaces = 1;
    */
   workspaces: WorkspaceState[];
 
   /**
+   * The session catalog, live and retired alike. Read for per-session facts,
+   * never for a workspace's identity (see SessionView).
+   *
    * @generated from field: repeated agentshim.frontend.v1.SessionView sessions = 2;
    */
   sessions: SessionView[];

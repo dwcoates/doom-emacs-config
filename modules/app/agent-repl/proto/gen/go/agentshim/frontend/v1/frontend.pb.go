@@ -1339,10 +1339,14 @@ type FrontendFrame_Snapshot struct {
 }
 
 type FrontendFrame_WorkspaceState struct {
+	// THE authority on which session owns a workspace, whether it arrives on
+	// its own or inside `snapshot`.
 	WorkspaceState *WorkspaceState `protobuf:"bytes,2,opt,name=workspace_state,json=workspaceState,proto3,oneof"`
 }
 
 type FrontendFrame_SessionView struct {
+	// A catalog entry for ONE session, live or retired. Never a workspace's
+	// live identity (see SessionView).
 	SessionView *SessionView `protobuf:"bytes,3,opt,name=session_view,json=sessionView,proto3,oneof"`
 }
 
@@ -1670,10 +1674,21 @@ func (x *SessionHealthView) GetReason() string {
 
 // THE resolved per-workspace state, plus the inputs snapshot that produced
 // it (for debuggability: a frontend can show WHY a state was resolved).
+//
+// IDENTITY AUTHORITY: this message is the SOLE authority for which session
+// owns a workspace. `session_id` below is the daemon session-state machine's
+// ruling, revisioned like every other field here, and a rotation to a new
+// owning session arrives as a new revision of this message. No consumer may
+// take a workspace's live session identity from any other frame.
 type WorkspaceState struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	Workspace string                 `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	SessionId string                 `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	// THE workspace's owning session, and the only field on this protocol that
+	// may bind it. A consumer adopts this value and nothing else as "which
+	// session am I talking to for this workspace"; per-session frames
+	// (SessionView, ProgressView, QueueView, …) name a session for CORRELATION
+	// only and may corroborate this value but never replace it.
+	SessionId string `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
 	// Primary UX projection resolved by the daemon. This is retained for merge
 	// and context-cut presentation; it is not the authority for connectivity or
 	// session status.
@@ -2566,17 +2581,36 @@ func (x *MergeStatusFailed) GetFailedJson() string {
 	return ""
 }
 
+// A PER-SESSION CATALOG ENTRY, not a statement about who owns a workspace.
+//
+// This message is published for retired, superseded, terminal and hibernated
+// sessions exactly as it is for the live one — `terminal` and `death` below
+// exist precisely so a dead session still has a view. A connect snapshot
+// therefore carries several of these for the same `workspace`, in no
+// authority order.
+//
+// SO: NO CONSUMER MAY ADOPT `session_id` BELOW AS A WORKSPACE'S LIVE SESSION
+// IDENTITY. WorkspaceState is the sole authority for that (see its comment).
+// A consumer that binds identity from this message under last-writer-wins
+// will rebind to whichever entry happened to arrive last — including a dead
+// one — and then address the daemon with a stale session under the current
+// controller generation, which the daemon refuses as an identity mismatch.
+// That is a real, observed outage, not a hypothetical.
 type SessionView struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	Workspace      string                 `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	SessionId      string                 `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	Model          string                 `protobuf:"bytes,3,opt,name=model,proto3" json:"model,omitempty"`
-	Slug           string                 `protobuf:"bytes,4,opt,name=slug,proto3" json:"slug,omitempty"`
-	Title          string                 `protobuf:"bytes,5,opt,name=title,proto3" json:"title,omitempty"`
-	TotalTokens    int64                  `protobuf:"varint,6,opt,name=total_tokens,json=totalTokens,proto3" json:"total_tokens,omitempty"`
-	TotalCostUsd   float64                `protobuf:"fixed64,7,opt,name=total_cost_usd,json=totalCostUsd,proto3" json:"total_cost_usd,omitempty"`
-	ContextWindow  int64                  `protobuf:"varint,8,opt,name=context_window,json=contextWindow,proto3" json:"context_window,omitempty"`
-	PermissionMode string                 `protobuf:"bytes,9,opt,name=permission_mode,json=permissionMode,proto3" json:"permission_mode,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Workspace string                 `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	// WHICH session this catalog entry describes — a correlation key, never a
+	// binding. It says "the facts below belong to this session"; it does not
+	// say "this session owns `workspace`". Only WorkspaceState.session_id says
+	// that.
+	SessionId      string  `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	Model          string  `protobuf:"bytes,3,opt,name=model,proto3" json:"model,omitempty"`
+	Slug           string  `protobuf:"bytes,4,opt,name=slug,proto3" json:"slug,omitempty"`
+	Title          string  `protobuf:"bytes,5,opt,name=title,proto3" json:"title,omitempty"`
+	TotalTokens    int64   `protobuf:"varint,6,opt,name=total_tokens,json=totalTokens,proto3" json:"total_tokens,omitempty"`
+	TotalCostUsd   float64 `protobuf:"fixed64,7,opt,name=total_cost_usd,json=totalCostUsd,proto3" json:"total_cost_usd,omitempty"`
+	ContextWindow  int64   `protobuf:"varint,8,opt,name=context_window,json=contextWindow,proto3" json:"context_window,omitempty"`
+	PermissionMode string  `protobuf:"bytes,9,opt,name=permission_mode,json=permissionMode,proto3" json:"permission_mode,omitempty"`
 	// Whether the daemon holds a LIVE SESSION CONTROLLER for this session's
 	// workspace — i.e. a shim is attached, or its client is reconnecting to one.
 	//
@@ -12570,15 +12604,25 @@ func (x *ContextCostAlert) GetPromptOrigin() v11.PromptOrigin {
 }
 
 // Full resync on (re)connect: current state of every workspace + open tasks.
+//
+// IDENTITY AUTHORITY: `workspaces` below is the only place in this snapshot a
+// consumer may read a workspace's live session identity from. The per-session
+// and per-task repeated fields are CATALOGS — they include retired and
+// superseded entries by design, and their order carries no authority — so
+// folding them onto a store must never move a workspace's session binding.
 type StateSnapshot struct {
-	state      protoimpl.MessageState `protogen:"open.v1"`
-	Workspaces []*WorkspaceState      `protobuf:"bytes,1,rep,name=workspaces,proto3" json:"workspaces,omitempty"`
-	Sessions   []*SessionView         `protobuf:"bytes,2,rep,name=sessions,proto3" json:"sessions,omitempty"`
-	Catalogs   []*TaskCatalog         `protobuf:"bytes,3,rep,name=catalogs,proto3" json:"catalogs,omitempty"`
-	Daemon     *DaemonView            `protobuf:"bytes,4,opt,name=daemon,proto3" json:"daemon,omitempty"`     // Additive (S7)
-	Inits      []*SessionInitView     `protobuf:"bytes,5,rep,name=inits,proto3" json:"inits,omitempty"`       // Additive (S9)
-	Queues     []*QueueView           `protobuf:"bytes,6,rep,name=queues,proto3" json:"queues,omitempty"`     // Additive (E4)
-	Progress   []*ProgressView        `protobuf:"bytes,7,rep,name=progress,proto3" json:"progress,omitempty"` // Additive (F1)
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// THE authoritative rulings, one per workspace. Sole source of session
+	// ownership for everything in this snapshot.
+	Workspaces []*WorkspaceState `protobuf:"bytes,1,rep,name=workspaces,proto3" json:"workspaces,omitempty"`
+	// The session catalog, live and retired alike. Read for per-session facts,
+	// never for a workspace's identity (see SessionView).
+	Sessions []*SessionView     `protobuf:"bytes,2,rep,name=sessions,proto3" json:"sessions,omitempty"`
+	Catalogs []*TaskCatalog     `protobuf:"bytes,3,rep,name=catalogs,proto3" json:"catalogs,omitempty"`
+	Daemon   *DaemonView        `protobuf:"bytes,4,opt,name=daemon,proto3" json:"daemon,omitempty"`     // Additive (S7)
+	Inits    []*SessionInitView `protobuf:"bytes,5,rep,name=inits,proto3" json:"inits,omitempty"`       // Additive (S9)
+	Queues   []*QueueView       `protobuf:"bytes,6,rep,name=queues,proto3" json:"queues,omitempty"`     // Additive (E4)
+	Progress []*ProgressView    `protobuf:"bytes,7,rep,name=progress,proto3" json:"progress,omitempty"` // Additive (F1)
 	// Host-only durable work.  frontend.Server strips both fields from every
 	// GUI client, regardless of observer/painter role.
 	WorkspaceAvailable []*WorkspaceAvailable `protobuf:"bytes,8,rep,name=workspace_available,json=workspaceAvailable,proto3" json:"workspace_available,omitempty"`
