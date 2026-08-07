@@ -30,6 +30,9 @@
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--log-verbose "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl--backend-phase "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl--backend-output-tail "agent-repl-core" (output &optional lines))
+(declare-function agent-repl--logfile-path "agent-repl-core" ())
 (declare-function agent-repl--doctor-log "agent-repl-doctor" (fmt &rest args))
 (declare-function agent-repl--frontend-turn-active-sessions "agent-repl-frontend-client" ())
 (declare-function agent-repl-runtime-restart "services" (&optional stop-shims))
@@ -351,6 +354,14 @@ external process so tests mock it via `cl-letf'; registered in
          agent-repl--frontend-build-buffer nil
          args))
 
+(defun agent-repl--frontend-build-label (targets)
+  "Return the terse phrase naming TARGETS in a minibuffer phase line.
+Nil TARGETS is the script's own default set, which is what the user sees
+on every ordinary bounce, so it is named rather than printed as `nil'."
+  (if targets
+      (string-join targets "/")
+    "shim/webapp/daemon"))
+
 (defun agent-repl--frontend-build-targets-if-stale (targets &optional force)
   "Build stale TARGETS through the shared artifact orchestrator.
 TARGETS is a list of build-frontend target strings, or nil for its normal
@@ -367,22 +378,35 @@ persistent agent-repl log before success or failure is decided."
            agent-repl--frontend-build-script))
   (with-current-buffer (get-buffer-create agent-repl--frontend-build-buffer)
     (erase-buffer))
-  (let* ((args (append (list agent-repl--frontend-build-script)
+  (let* ((label (agent-repl--frontend-build-label targets))
+         (started (float-time))
+         (args (append (list agent-repl--frontend-build-script)
                        (when force '("--force"))
-                       targets))
-         (exit-code (agent-repl--frontend-run-build-script args))
-         (output
-          (with-current-buffer agent-repl--frontend-build-buffer
-            (string-trim-right (buffer-string)))))
-    (agent-repl--log nil
-                     "frontend build-if-stale targets=%S force=%s exit=%S output=%s"
-                     (or targets 'default) (if force "t" "nil") exit-code
-                     (if (string-empty-p output) "<empty>" output))
-    (unless (eq exit-code 0)
-      (display-buffer agent-repl--frontend-build-buffer)
-      (error "agent-repl: frontend build failed (exit %s) — see %s"
-             exit-code agent-repl--frontend-build-buffer))
-    exit-code))
+                       targets)))
+    (agent-repl--backend-phase nil "rebuilding %s if stale…" label)
+    (let* ((exit-code (agent-repl--frontend-run-build-script args))
+           (output
+            (with-current-buffer agent-repl--frontend-build-buffer
+              (string-trim-right (buffer-string)))))
+      ;; The full capture (stdout AND stderr, which `call-process' merges into
+      ;; the destination buffer) reaches the durable record BEFORE success or
+      ;; failure is decided, so a build that fails is never the only evidence
+      ;; that it ran.
+      (agent-repl--log nil
+                       "frontend build-if-stale targets=%S force=%s exit=%S output=%s"
+                       (or targets 'default) (if force "t" "nil") exit-code
+                       (if (string-empty-p output) "<empty>" output))
+      (unless (eq exit-code 0)
+        (agent-repl--backend-phase
+         nil "%s build FAILED (exit %s): %s — full output in %s"
+         label exit-code (agent-repl--backend-output-tail output)
+         (agent-repl--logfile-path))
+        (display-buffer agent-repl--frontend-build-buffer)
+        (error "agent-repl: frontend build failed (exit %s) — see %s"
+               exit-code agent-repl--frontend-build-buffer))
+      (agent-repl--backend-phase nil "%s built (%.1fs)" label
+                                 (- (float-time) started))
+      exit-code)))
 
 (defun agent-repl--frontend-build-if-stale (&optional force)
   "Build stale shim, webapp, and daemon artifacts.
@@ -424,20 +448,28 @@ it, which fails every command rather than degrading."
            agent-repl--frontend-deploy-script))
   (with-current-buffer (get-buffer-create agent-repl--frontend-build-buffer)
     (erase-buffer))
-  (let* ((args (append (list agent-repl--frontend-deploy-script "--no-daemon-bounce")
-                       (when force (list "--force"))))
-         (exit-code (agent-repl--frontend-run-build-script args))
-         (output
-          (with-current-buffer agent-repl--frontend-build-buffer
-            (string-trim-right (buffer-string)))))
-    (agent-repl--log nil "frontend deploy-stack: force=%s exit=%S output=%s"
-                     (if force "t" "nil") exit-code
-                     (if (string-empty-p output) "<empty>" output))
-    (unless (eq exit-code 0)
-      (display-buffer agent-repl--frontend-build-buffer)
-      (error "agent-repl: stack deploy failed (exit %s) — see %s"
-             exit-code agent-repl--frontend-build-buffer))
-    exit-code))
+  (let* ((started (float-time))
+         (args (append (list agent-repl--frontend-deploy-script "--no-daemon-bounce")
+                       (when force (list "--force")))))
+    (agent-repl--backend-phase nil "deploying the backend stack…")
+    (let* ((exit-code (agent-repl--frontend-run-build-script args))
+           (output
+            (with-current-buffer agent-repl--frontend-build-buffer
+              (string-trim-right (buffer-string)))))
+      (agent-repl--log nil "frontend deploy-stack: force=%s exit=%S output=%s"
+                       (if force "t" "nil") exit-code
+                       (if (string-empty-p output) "<empty>" output))
+      (unless (eq exit-code 0)
+        (agent-repl--backend-phase
+         nil "stack deploy FAILED (exit %s): %s — full output in %s"
+         exit-code (agent-repl--backend-output-tail output)
+         (agent-repl--logfile-path))
+        (display-buffer agent-repl--frontend-build-buffer)
+        (error "agent-repl: stack deploy failed (exit %s) — see %s"
+               exit-code agent-repl--frontend-build-buffer))
+      (agent-repl--backend-phase nil "backend stack deployed (%.1fs)"
+                                 (- (float-time) started))
+      exit-code)))
 
 ;;;; ---- Launch -----------------------------------------------------------
 
@@ -479,16 +511,49 @@ compares against."
   (format "personal=,work=%s"
           (expand-file-name agent-repl-multi-repo-config-dir)))
 
+(defun agent-repl--frontend-daemon-filter (proc chunk)
+  "Capture CHUNK from PROC into its buffer AND the durable structured log.
+
+`make-process' with no `:stderr' merges the daemon's standard error into
+its standard output, and before this filter existed BOTH landed only in
+`*claude-repld*' — a buffer no runbook reads and nothing persists.  A
+daemon that refuses to start prints the reason there and exits, so the
+sentinel's bare exit event was the entire record of a failure that had
+already explained itself.
+
+The daemon owns `daemon.log' for its own structured records.  This
+mirrors only what it wrote to a TERMINAL, at the quiet debug rung, so the
+two never become duplicate narratives of one event."
+  (when (buffer-live-p (process-buffer proc))
+    (with-current-buffer (process-buffer proc)
+      (let ((moving (= (point) (process-mark proc))))
+        (save-excursion
+          (goto-char (process-mark proc))
+          (insert chunk)
+          (set-marker (process-mark proc) (point)))
+        (when moving (goto-char (process-mark proc))))))
+  (dolist (line (split-string (or chunk "") "\n" t "[ \t\r]+"))
+    (agent-repl--log nil "claude-repld output: %s" line)))
+
+(defun agent-repl--frontend-daemon-output ()
+  "Return the captured `claude-repld' terminal output, trimmed.
+Empty string when the capture buffer was never created."
+  (let ((buffer (get-buffer agent-repl--frontend-daemon-buffer)))
+    (if (buffer-live-p buffer)
+        (with-current-buffer buffer (string-trim-right (buffer-string)))
+      "")))
+
 (defun agent-repl--frontend-spawn-daemon ()
   "External-boundary wrapper: spawn `claude-repld' via `make-process'.
-Body does nothing but invoke `make-process' with the daemon argv and
-sentinel, returning the live process.  Tests mock it via `cl-letf';
+Body does nothing but invoke `make-process' with the daemon argv, filter
+and sentinel, returning the live process.  Tests mock it via `cl-letf';
 registered in `agent-repl--external-boundary-functions'."
   (make-process ;; ALLOW-EXTERNAL-BOUNDARY
    :name "claude-repld"
    :buffer agent-repl--frontend-daemon-buffer
    :command (agent-repl--frontend-daemon-command)
    :noquery t
+   :filter #'agent-repl--frontend-daemon-filter
    :sentinel #'agent-repl--frontend-daemon-sentinel))
 
 (defun agent-repl--frontend-artifact-exists-p (path)
@@ -522,10 +587,14 @@ Assumes the artifacts are already built; call
       (agent-repl--error
        nil "Claude shim entrypoint missing after build: %s"
        agent-repl--frontend-shim-entry))
+    (agent-repl--backend-phase nil "starting the daemon…")
     (let ((proc (agent-repl--frontend-spawn-daemon)))
       (setq agent-repl--frontend-daemon-process proc)
       (agent-repl--log nil "claude-repld started (pid %s) on %s"
                         (process-id proc) agent-repl-frontend-daemon-addr)
+      (agent-repl--backend-phase nil "daemon up (pid %s) on %s"
+                                 (process-id proc)
+                                 agent-repl-frontend-daemon-addr)
       proc)))
 
 (defun agent-repl--frontend-daemon-sentinel (proc event)
@@ -545,15 +614,25 @@ under the reserved `client.\=' prefix."
                                   tracked trimmed-event)
       (when tracked
         (setq agent-repl--frontend-daemon-process nil))
-      (agent-repl--log nil
-                       "claude-repld exited: tracked=%s event=%s"
-                       tracked trimmed-event)
-      (agent-repl-failure-surface
-       nil
-       (agent-repl-failure-local
-        "client.daemon_exited"
-        "the agent-repl daemon exited"
-        trimmed-event)))))
+      (let* ((output (agent-repl--frontend-daemon-output))
+             (tail (agent-repl--backend-output-tail output)))
+        ;; The exit EVENT alone ("exited abnormally with code 1") never says
+        ;; why.  The reason is whatever the daemon printed on its way out, so
+        ;; the full capture rides the durable record and its tail rides both
+        ;; the failure card and the echo line.
+        (agent-repl--log nil
+                         "claude-repld exited: tracked=%s event=%s output=%s"
+                         tracked trimmed-event
+                         (if (string-empty-p output) "<empty>" output))
+        (agent-repl--backend-phase nil "daemon exited (%s): %s — full output in %s"
+                                   trimmed-event tail
+                                   (agent-repl--logfile-path))
+        (agent-repl-failure-surface
+         nil
+         (agent-repl-failure-local
+          "client.daemon_exited"
+          "the agent-repl daemon exited"
+          (format "%s: %s" trimmed-event tail)))))))
 
 ;;;; ---- Entry point ------------------------------------------------------
 
@@ -854,9 +933,13 @@ detection below a no-op rather than a guess."
 
 (defun agent-repl--frontend-run-listener-probe (port)
   "External-boundary wrapper: return `lsof' output naming PORT's listener.
-Returns the raw stdout string, or nil when the probe cannot run.  Body
-does nothing but invoke the external process so tests mock it via
-`cl-letf'; registered in `agent-repl--external-boundary-functions'."
+Returns the raw stdout string, or nil when the probe cannot run.  Tests
+mock it via `cl-letf'; registered in
+`agent-repl--external-boundary-functions'.
+
+Beyond the external call the body only RECORDS a probe that failed: the
+exit code and the merged output are both lost the moment this returns
+nil, and neither is reconstructible by the caller."
   (with-temp-buffer
     (let ((code (call-process ;; ALLOW-EXTERNAL-BOUNDARY
                  agent-repl--frontend-listener-probe-program nil t nil
@@ -864,8 +947,18 @@ does nothing but invoke the external process so tests mock it via
                  (concat "-i" "TCP:" port))))
       ;; lsof exits 1 when nothing matches, which is a legitimate "no
       ;; listener" answer rather than a failure.
-      (when (memq code '(0 1))
-        (buffer-string)))))
+      (if (memq code '(0 1))
+          (buffer-string)
+        ;; Any OTHER exit is the probe itself failing, and its diagnosis is
+        ;; on the merged stdout/stderr this buffer holds.  Returning nil
+        ;; without recording it made a broken probe indistinguishable from a
+        ;; free port.
+        (let ((output (string-trim-right (buffer-string))))
+          (agent-repl--log nil
+                           "daemon listener probe: FAILED port=%s exit=%S output=%s"
+                           port code
+                           (if (string-empty-p output) "<empty>" output))
+          nil)))))
 
 (defun agent-repl--frontend-parse-listener (output)
   "Parse `lsof -F' OUTPUT into (PID . COMMAND), or nil when nothing listens.
@@ -1157,6 +1250,12 @@ the asynchronous interactive command `agent-repl-frontend-daemon-restart'."
   (agent-repl--log nil
                    "frontend restart-await: requested stop-shims=%s timeout=%S root=%s"
                    (if stop-shims "t" "nil") timeout agent-repl--frontend-root)
+  ;; `bin/deploy-all.sh' reaches this over emacsclient, so the user never typed
+  ;; a command and Emacs is about to block for the whole coordinated restart.
+  ;; Naming the origin is what separates "the deploy is driving" from a frame
+  ;; that has simply stopped responding.
+  (agent-repl--backend-phase nil "deploy-driven restart requested (stop-shims=%s)"
+                             (if stop-shims "t" "nil"))
   (agent-repl-runtime-restart-await (and stop-shims t) timeout))
 
 ;;;###autoload
