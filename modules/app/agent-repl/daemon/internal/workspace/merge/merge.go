@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/gitexec"
@@ -469,7 +470,7 @@ func (e *Driver) pickLoop(ctx context.Context, req Request, base string, landedE
 		landed++
 		req.Run.CommitLanded()
 
-		failure, err := e.gateOnSuite(ctx, req, progress+" after cherry-pick of "+short, short)
+		failure, err := e.gateOnSuite(ctx, req, progress+" after cherry-pick of "+short, short, nil)
 		if err != nil {
 			return Result{}, err
 		}
@@ -493,14 +494,20 @@ func (e *Driver) pickLoop(ctx context.Context, req Request, base string, landedE
 // serves repositories that have no agent-repl suite — and it is loud-logged by
 // the runner AND here, because a merge landing untested is precisely the fact a
 // user later needs to find in the log.
-func (e *Driver) gateOnSuite(ctx context.Context, req Request, progress, short string) (*Result, error) {
-	// The testing phase carries the SAME commit context the cherry_picking phase
-	// just did — the run holds it, so the two cannot disagree — which is what
-	// lets a frontend render one progress figure across both.
-	if err := req.Run.Testing("testing " + progress); err != nil {
+func (e *Driver) gateOnSuite(ctx context.Context, req Request, progress, short string, extraPaths []string) (*Result, error) {
+	sel, err := e.selectSuites(ctx, req, extraPaths)
+	if err != nil {
 		return nil, err
 	}
-	sr, err := e.suite.RunSuite(ctx, req.TargetDir)
+	// The testing phase carries the SAME commit context the cherry_picking phase
+	// just did — the run holds it, so the two cannot disagree — which is what
+	// lets a frontend render one progress figure across both. It also carries the
+	// SELECTION, which is the merge's own record of which suites were asked to
+	// testify about it.
+	if err := req.Run.Testing("testing " + progress + " [" + selectionLabel(sel.Suites) + "]"); err != nil {
+		return nil, err
+	}
+	sr, err := e.suite.RunSuite(ctx, req.TargetDir, SuiteRun{Suites: sel.Suites, Attempt: 1})
 	if err != nil {
 		e.logf("merge: test gate UNRUNNABLE after cherry-pick of %s {ws=%s target=%s}: %v", short, req.Name, req.TargetDir, err)
 		return nil, fmt.Errorf("merge: test gate for %q after cherry-picking %s: %w", req.Name, short, err)
@@ -511,11 +518,23 @@ func (e *Driver) gateOnSuite(ctx context.Context, req Request, progress, short s
 		return nil, nil
 	}
 	if sr.Passed {
-		e.logf("merge: test gate PASSED after cherry-pick of %s (%s) {ws=%s}", short, progress, req.Name)
+		e.logf("merge: test gate PASSED after cherry-pick of %s (%s) {ws=%s suites=%s duration=%s}",
+			short, progress, req.Name, selectionLabel(sel.Suites), sr.Duration.Round(time.Millisecond))
 		return nil, nil
 	}
-	e.logf("merge: test gate FAILED after cherry-pick of %s (%s) {ws=%s target=%s} tail:\n%s",
-		short, progress, req.Name, req.TargetDir, sr.Tail)
+	e.logf("merge: test gate FAILED after cherry-pick of %s (%s) {ws=%s target=%s suites=%s duration=%s full_output=%s} tail:\n%s",
+		short, progress, req.Name, req.TargetDir, selectionLabel(sel.Suites),
+		sr.Duration.Round(time.Millisecond), sr.OutputPath, sr.Tail)
+
+	rerun, err := e.rerunAfterFailure(ctx, req, sel, progress, short, sr)
+	if err != nil {
+		return nil, err
+	}
+	if rerun == nil {
+		// The re-run passed on the same tree: a flake, already reported loudly.
+		return nil, nil
+	}
+	sr = *rerun
 	// The head the suite just judged. It is read here rather than recomputed at
 	// rollback time because the rollback happens after an unbounded resolution
 	// window, and the whole point is to compare against the target as this merge
@@ -531,6 +550,116 @@ func (e *Driver) gateOnSuite(ctx context.Context, req Request, progress, short s
 		TestFailureOutputPath: sr.OutputPath,
 		TestedHead:            tested,
 	}, nil
+}
+
+// rerunAfterFailure runs the same suites over the same tree exactly ONCE more
+// and classifies the pair.
+//
+// WHY ONE RE-RUN AND ONLY ONE. A merge gate that denies on a first failure
+// denies on every flake, and this gate's suites include ones that share a
+// machine with a live daemon, a browser build and whatever else the user is
+// running — a suite that fails under that load and passes on a quiet tree told
+// the merge nothing about the code. One re-run separates those two stories at
+// the cost of one run. It stops at one because a suite that fails twice on an
+// unchanged tree is not a flake by any reading, and a gate that keeps retrying
+// is a gate that eventually passes anything.
+//
+// A PASS ON THE RE-RUN IS REPORTED, NOT SWALLOWED: both verdicts, both
+// durations and both archives are logged, because the merge proceeding is
+// exactly when nobody goes looking for the failure.
+//
+// It returns (nil, nil) for a flake — the gate proceeds — and the SECOND run's
+// result for a genuine failure.
+func (e *Driver) rerunAfterFailure(ctx context.Context, req Request, sel SuiteSelection, progress, short string, first SuiteResult) (*SuiteResult, error) {
+	e.logf("merge: test gate RE-RUNNING once on the SAME tree to separate a flake from a genuine failure {ws=%s target=%s suites=%s commit=%s}",
+		req.Name, req.TargetDir, selectionLabel(sel.Suites), short)
+	if err := req.Run.Testing("re-testing " + progress + " [" + selectionLabel(sel.Suites) + "] after a failure"); err != nil {
+		return nil, err
+	}
+	second, err := e.suite.RunSuite(ctx, req.TargetDir, SuiteRun{Suites: sel.Suites, Attempt: 2})
+	if err != nil {
+		e.logf("merge: test gate RE-RUN UNRUNNABLE after cherry-pick of %s {ws=%s target=%s}: %v", short, req.Name, req.TargetDir, err)
+		return nil, fmt.Errorf("merge: test gate re-run for %q after cherry-picking %s: %w", req.Name, short, err)
+	}
+	if second.Skipped {
+		// The first run produced a verdict, so the entrypoint was there. Its
+		// disappearance between the two runs is a contradiction, not a skip to
+		// wave through.
+		return nil, fmt.Errorf("merge: test gate re-run for %q after cherry-picking %s reported the suite SKIPPED (%s) when the first run had a verdict",
+			req.Name, short, second.Reason)
+	}
+	if second.Passed {
+		e.logf("merge: test gate FLAKE after cherry-pick of %s (%s) {ws=%s target=%s suites=%s} — FAILED in %s then PASSED in %s on the UNCHANGED tree; the merge proceeds. first_output=%s rerun_output=%s",
+			short, progress, req.Name, req.TargetDir, selectionLabel(sel.Suites),
+			first.Duration.Round(time.Millisecond), second.Duration.Round(time.Millisecond),
+			first.OutputPath, second.OutputPath)
+		return nil, nil
+	}
+	e.logf("merge: test gate FAILED TWICE after cherry-pick of %s (%s) {ws=%s target=%s suites=%s} — %s then %s, a genuine failure. first_output=%s rerun_output=%s",
+		short, progress, req.Name, req.TargetDir, selectionLabel(sel.Suites),
+		first.Duration.Round(time.Millisecond), second.Duration.Round(time.Millisecond),
+		first.OutputPath, second.OutputPath)
+	// The re-run's tail is the freshest evidence and is what the resolution turn
+	// reads, but the first run's archive is half the record and must not vanish
+	// with it.
+	if first.OutputPath != "" {
+		second.Tail += fmt.Sprintf("\n[merge] this suite failed TWICE on the same tree; the first run's complete output is at %s\n", first.OutputPath)
+	}
+	return &second, nil
+}
+
+// selectSuites decides which of the target repository's suites this gate runs,
+// from the paths the merge's own range touches plus any extra paths the caller
+// knows about.
+//
+// THE RANGE, NOT THE COMMIT. The gate runs after each landing, but the suites it
+// picks are the ones the WHOLE merge can affect: narrowing per commit would let
+// commit 1 of a webapp-and-daemon branch be gated on the webapp alone, and the
+// commit that breaks the daemon is then judged by a suite chosen for it. Using
+// the range also makes the selection identical across a merge's every gate,
+// which is what lets a re-entered replay reach the same answer as the run that
+// started it.
+func (e *Driver) selectSuites(ctx context.Context, req Request, extraPaths []string) (SuiteSelection, error) {
+	base, err := e.gitString(ctx, req.TargetDir, "merge-base", "HEAD", req.SourceBranch)
+	if err != nil {
+		return SuiteSelection{}, err
+	}
+	paths, err := e.changedPaths(ctx, req.TargetDir, base+".."+req.SourceBranch)
+	if err != nil {
+		return SuiteSelection{}, err
+	}
+	paths = append(paths, extraPaths...)
+	sel := SelectSuites(paths)
+	e.logf("merge: suite SELECTION {ws=%s target=%s range=%s..%s paths=%d full=%t suites=%s}: %s",
+		req.Name, req.TargetDir, shortSHA(base), req.SourceBranch, len(paths), sel.Full,
+		selectionLabel(sel.Suites), sel.Reason)
+	return sel, nil
+}
+
+// changedPaths lists the repository-relative paths the given `git log`
+// revision arguments touch, de-duplicated.
+//
+// A PATH THE GATE CANNOT READ IS AN ERROR, never an empty list: an empty list
+// means "this change touches nothing", which SelectSuites answers with the full
+// set — so a swallowed git failure would look like the conservative answer while
+// actually being a guess.
+func (e *Driver) changedPaths(ctx context.Context, dir string, revArgs ...string) ([]string, error) {
+	args := append([]string{"log", "--no-merges", "--name-only", "--pretty=format:"}, revArgs...)
+	out, err := e.gitString(ctx, dir, args...)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	var paths []string
+	for _, line := range splitLines(out) {
+		line = strings.TrimSpace(line)
+		if line == "" || seen[line] {
+			continue
+		}
+		seen[line] = true
+		paths = append(paths, line)
+	}
+	return paths, nil
 }
 
 // Resume continues a cherry-pick that a human (or the workspace's own agent)
@@ -633,7 +762,7 @@ func (e *Driver) Resume(ctx context.Context, req Request) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	failure, err := e.gateOnSuite(ctx, req, "the resumed cherry-pick of "+resumed, resumed)
+	failure, err := e.gateOnSuite(ctx, req, "the resumed cherry-pick of "+resumed, resumed, nil)
 	if err != nil {
 		return Result{}, err
 	}
@@ -673,7 +802,17 @@ func (e *Driver) ContinueAfterTestFix(ctx context.Context, req Request, failingC
 	if err := e.commitTestFix(ctx, req, failingCommit); err != nil {
 		return Result{}, err
 	}
-	failure, err := e.gateOnSuite(ctx, req, "again after the resolution attempt on "+failingCommit, failingCommit)
+	// A FIX IS NOT BOUND BY THE SOURCE RANGE. The resolution turn may have edited
+	// a file no cherry-picked commit touched, and a gate narrowed to the range's
+	// suites alone would then run nothing that covers the fix. The target's HEAD
+	// is read here — the fix commit when there was one, the cherry-picked commit
+	// when the turn staged nothing, and in-range either way — so the selection can
+	// only widen.
+	fixPaths, err := e.changedPaths(ctx, req.TargetDir, "HEAD", "-1")
+	if err != nil {
+		return Result{}, err
+	}
+	failure, err := e.gateOnSuite(ctx, req, "again after the resolution attempt on "+failingCommit, failingCommit, fixPaths)
 	if err != nil {
 		return Result{}, err
 	}
