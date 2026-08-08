@@ -79,6 +79,7 @@ func TestSpawnClassifierExecsWhenPermitted(t *testing.T) {
 // Classify is the exported surface; the guard must surface through it as an
 // error rather than a verdict.
 func TestClassifySurfacesTheGuardError(t *testing.T) {
+	usePrompts(t)
 	// Arrange
 	fakeClaudeOnPath(t)
 	t.Setenv(vendorguard.EnvVar, "1")

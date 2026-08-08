@@ -3,6 +3,8 @@ package merge
 import (
 	"strings"
 	"testing"
+
+	"claude-repld/internal/prompts"
 )
 
 func TestConflictResolutionRequiresEveryFact(t *testing.T) {
@@ -61,7 +63,8 @@ func TestConflictResolutionPromptNamesTheConflict(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange + Act.
-			got := res.Prompt()
+			usePrompts(t)
+			got := mustPrompt(t)(res.Prompt())
 
 			// Assert.
 			if !strings.Contains(got, tc.want) {
@@ -79,7 +82,8 @@ func TestConflictResolutionPromptForbidsContinuingThePick(t *testing.T) {
 	}
 
 	// Act.
-	got := res.Prompt()
+	usePrompts(t)
+	got := mustPrompt(t)(res.Prompt())
 
 	// Assert.
 	if !strings.Contains(got, "Do NOT run `git cherry-pick --continue`") {
@@ -101,5 +105,54 @@ func TestResolutionRequestIDsAreUnique(t *testing.T) {
 	}
 	if !strings.HasPrefix(first, "merge_resolve_") {
 		t.Fatalf("resolution request id = %q, want a merge_resolve_ prefix", first)
+	}
+}
+
+// TestConflictResolutionPromptMatchesTheGolden pins the extracted file's text
+// against the wording that lived in this file before the prompt moved to
+// prompts/merge-conflict-resolve.md. The move is a RELOCATION, so any drift
+// from this literal is either an intentional edit that should update the
+// golden or an accident that must not reach an agent unnoticed.
+func TestConflictResolutionPromptMatchesTheGolden(t *testing.T) {
+	// Arrange.
+	usePrompts(t)
+	res := ConflictResolution{
+		Workspace: "/ws/a", RequestID: "merge_resolve_1",
+		ConflictCommit: "abc1234", SourceBranch: "feature/a", TargetDir: "/target",
+	}
+	want := "A cherry-pick of commit abc1234 from branch feature/a is CONFLICTED in the worktree at /target.\n" +
+		"\n" +
+		"Resolve every conflict in that worktree and stage each resolution with `git add`.\n" +
+		"\n" +
+		"Then STOP. Do NOT run `git cherry-pick --continue`, do NOT commit, do NOT amend, and do NOT run `git cherry-pick --abort` or `git reset`. The daemon resumes the pick itself as soon as your turn ends, and it can only do that against a cherry-pick that is still paused.\n" +
+		"\n" +
+		"If the conflicts cannot be resolved, say so plainly and leave the tree as you found it — a human takes it from there."
+
+	// Act.
+	got := mustPrompt(t)(res.Prompt())
+
+	// Assert.
+	if got != want {
+		t.Fatalf("prompt drifted from the pre-extraction text.\n got: %q\nwant: %q", got, want)
+	}
+}
+
+func TestConflictResolutionPromptErrorsWhenItsFileIsMissing(t *testing.T) {
+	// Arrange — an empty prompts directory stands for a deleted or misnamed file.
+	t.Setenv(prompts.DirEnv, t.TempDir())
+	res := ConflictResolution{
+		Workspace: "/ws/a", RequestID: "merge_resolve_1",
+		ConflictCommit: "abc1234", SourceBranch: "feature/a", TargetDir: "/target",
+	}
+
+	// Act.
+	got, err := res.Prompt()
+
+	// Assert — never a baked-in fallback copy.
+	if err == nil {
+		t.Fatalf("Prompt() = %q, nil; want a loud error when %s is unreadable", got, ConflictPromptFile)
+	}
+	if got != "" {
+		t.Fatalf("Prompt() returned text %q alongside an error", got)
 	}
 }

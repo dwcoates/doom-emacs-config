@@ -548,10 +548,19 @@ func (s *Server) handleAddSupport(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusInternalServerError, "resolving the workspace-commands directory failed")
 		return
 	}
+	// The brief is read from prompts/ per request. A missing or malformed prompt
+	// file is a 500 rather than a workspace opened around an empty brief, which
+	// would burn a worktree, a branch, and a session on nothing.
+	brief, err := addsupport.Prompt(body.Command, configDir)
+	if err != nil {
+		s.logf("session %s: compose add-support brief for /%s: %v", id, body.Command, err)
+		httpError(w, http.StatusInternalServerError, "composing the add-support prompt failed")
+		return
+	}
 	cmd := workspacecmd.NewCreate(
 		addsupport.WorkspaceName(body.Command),
 		cwd,
-		addsupport.Prompt(body.Command, configDir),
+		brief,
 	)
 	path, err := workspacecmd.Emit(dir, []workspacecmd.Entry{cmd})
 	if err != nil {
