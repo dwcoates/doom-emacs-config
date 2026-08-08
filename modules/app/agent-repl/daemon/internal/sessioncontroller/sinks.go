@@ -2519,7 +2519,19 @@ func (c *consumer) pushReplayedReceipt(item *frontendv1.ConversationItem) bool {
 // already ended.
 func (c *consumer) pushFailure(uuid string, failure *frontendv1.SystemFailureItem) {
 	c.retainFailure(uuid, failure)
-	c.warn("session-controller: system failure session=%s uuid=%s type=%s resolved=%v: %s",
+	// THE TWO EDGES ARE NOT THE SAME NEWS, and recording both at warn made the
+	// good one as loud as the bad one: every store bounce that resolved itself
+	// still left a "system failure ... resolved=true" warn per session, which is
+	// how a self-healing fleet-wide event read as a fleet-wide alarm. Opening a
+	// card is a warning; SETTLING one is the report that it ended.
+	//
+	// The record itself is unchanged in wording and in identity, so the open
+	// edge is byte-identical to what it always was.
+	emit := c.warn
+	if failure.GetResolvedAtMs() != 0 {
+		emit = c.logf
+	}
+	emit("session-controller: system failure session=%s uuid=%s type=%s resolved=%v: %s",
 		c.sessionID, uuid, failure.GetErrorType(), failure.GetResolvedAtMs() != 0, failure.GetSourceDetail())
 	c.pushLocalItem(c.retainedFailure(uuid))
 }

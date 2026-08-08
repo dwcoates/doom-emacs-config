@@ -361,3 +361,21 @@ describe("session-addressed side-calls at mount", () => {
     expect(main).not.toMatch(/\n {2}void refreshAccount\(\);/);
   });
 });
+
+// A workspace switch relayouts the webview around the host's tail snap, in an
+// order neither Emacs nor the page controls, so the feed's return to its tail
+// hangs on the resize event rather than on the snap winning that race. The
+// wiring is boot-scope closure state with no importable seam, so it is pinned
+// here.
+describe("the feed's tail re-anchor", () => {
+  it("is armed on the feed element itself", () => {
+    // Assert — the box observed is the one the snap parks, not the document.
+    expect(main).toContain("installTailReanchor(\n    feedEl,");
+  });
+
+  it("is driven by a real resize observation", () => {
+    // Assert — the resize event is the signal; a timer would be a bet on how
+    // long the relayout takes.
+    expect(main).toContain("new ResizeObserver(onResize).observe(feedEl)");
+  });
+});

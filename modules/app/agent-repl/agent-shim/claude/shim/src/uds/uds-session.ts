@@ -210,6 +210,13 @@ export interface UdsSessionDeps {
   newRequestId?: () => string;
   /** Heartbeat cadence on both UDS connections; 0 disables. Test injects 0. */
   heartbeatIntervalMs?: number;
+  /**
+   * How long a dropped store link may stay down before the store client reports
+   * it as a degradation (its relink retry budget). Production leaves this at
+   * the client's own default; a test that wants the report without waiting out
+   * the real budget compresses it.
+   */
+  storeRelinkReportAfterMs?: number;
   /** Wall-clock injection for deterministic tests. */
   nowMs?: () => number;
   /** Stable identity assigned once to the long-lived SDK query. */
@@ -579,6 +586,7 @@ export class UdsSession {
       producer: `claude-shim:${this.deps.sessionId}`,
       ...(this.deps.heartbeatIntervalMs !== undefined ? { heartbeatIntervalMs: this.deps.heartbeatIntervalMs } : {}),
       ...(this.deps.storeSessionId !== undefined ? { storeSessionId: this.deps.storeSessionId } : {}),
+      ...(this.deps.storeRelinkReportAfterMs !== undefined ? { relinkReportAfterMs: this.deps.storeRelinkReportAfterMs } : {}),
     });
 
     const handlers: SessionServerHandlers = {
