@@ -736,6 +736,20 @@ A plist: `:initiator' (who ordered the restart), `:armed-at' (`float-time'),
 window — `:exit' (the withheld failure), `:event' and `:tail' (its echo
 material).")
 
+(defvar agent-repl--frontend-expected-restart-last-close nil
+  "The last window CLOSED by its replacement daemon reconnecting, or nil.
+A plist: `:initiator', `:armed-at' and `:closed-at' (`float-time').
+
+Kept after the window itself is gone because work that was already in
+flight when the daemon went away can still be finishing when the link
+comes back, and that work is as much a consequence of the restart as the
+exit was.  `agent-repl--frontend-expected-restart-covering-initiator'
+attributes such work to this closed window.
+
+Only a reconnect records one.  A window that EXPIRED describes a daemon
+that never came back, which is a genuine outage rather than a bounce, so
+expiry clears this and every downstream site returns to warning.")
+
 (defun agent-repl--frontend-expected-restart-cancel-timer ()
   "Cancel the armed window's expiry timer, if it still holds one."
   (let ((timer (plist-get agent-repl--frontend-expected-restart :timer)))
@@ -754,6 +768,10 @@ closes quietly: there is nothing to report."
         (agent-repl--log nil "expected-restart: expiry fired with no window armed")
       (agent-repl--frontend-expected-restart-cancel-timer)
       (setq agent-repl--frontend-expected-restart nil)
+      ;; No replacement arrived, so nothing downstream gets the benefit of the
+      ;; doubt any more: a prior bounce's grace must not soften the reporting
+      ;; of an outage this window just proved.
+      (setq agent-repl--frontend-expected-restart-last-close nil)
       (let ((initiator (plist-get state :initiator))
             (elapsed (- (float-time) (plist-get state :armed-at)))
             (exit (plist-get state :exit)))
@@ -822,6 +840,33 @@ withheld rather than dropping it."
             nil)
         (plist-get state :initiator)))))
 
+(defun agent-repl--frontend-expected-restart-covering-initiator (&optional as-of)
+  "Return the initiator of the restart window covering AS-OF, or nil.
+
+AS-OF is a `float-time' naming the moment whose classification is being
+asked about; nil asks about NOW.  A live window covers now, and therefore
+covers any AS-OF at all — something happening inside an open window is
+inside it whatever moment it refers back to.
+
+With no live window, the only other covering window is the last one a
+replacement daemon CLOSED, and it covers exactly its own lifetime:
+`[:armed-at, :closed-at]'.  That interval is the boundary, not a fixed
+grace period, because it is the span during which the daemon was going
+away or gone.  Work stamped inside it stalled BECAUSE of the restart;
+work stamped before the window was armed predates the restart entirely,
+and work stamped after the close had a live daemon to talk to.  Both of
+those keep their unsoftened reporting."
+  (let ((live (agent-repl--frontend-expected-restart-initiator)))
+    (cond
+     (live live)
+     ((null as-of) nil)
+     (t
+      (let ((closed agent-repl--frontend-expected-restart-last-close))
+        (when (and closed
+                   (<= (plist-get closed :armed-at) as-of)
+                   (<= as-of (plist-get closed :closed-at)))
+          (plist-get closed :initiator)))))))
+
 (defun agent-repl--frontend-expected-restart-withhold-exit (failure event tail)
   "Retain FAILURE, with its EVENT and TAIL echo material, in the armed window.
 Withheld, never dropped: `agent-repl--frontend-expected-restart-expire'
@@ -854,6 +899,10 @@ window before the exit it exists to classify ever happened."
           (progn
             (agent-repl--frontend-expected-restart-cancel-timer)
             (setq agent-repl--frontend-expected-restart nil)
+            (setq agent-repl--frontend-expected-restart-last-close
+                  (list :initiator (plist-get state :initiator)
+                        :armed-at (plist-get state :armed-at)
+                        :closed-at (float-time)))
             (agent-repl--info nil
                               "expected-restart: replacement daemon connected; window CLOSED initiator=%s elapsed=%.3fs"
                               (plist-get state :initiator)
