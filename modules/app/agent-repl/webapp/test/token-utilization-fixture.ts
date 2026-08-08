@@ -2,7 +2,7 @@ import type { TokenUtilization } from "../src/frontend-proto.js";
 import { create } from "@bufbuild/protobuf";
 import {
   SessionTokenUtilizationSchema,
-  TokenUsageSchema,
+  VendorTokenUsageSchema,
   TokenUsageTotalsSchema,
   TokenUtilizationSchema,
   TokenUtilizationSubagentSchema,
@@ -55,7 +55,7 @@ export function generatedUngroupedResponse(over: Partial<TokenUtilization> = {})
     apiMessageId: response.apiMessageId,
     model: response.model,
     actor: { case: "subagent", value: create(TokenUtilizationSubagentSchema, response.subagent) },
-    usage: create(TokenUsageSchema, {
+    usage: create(VendorTokenUsageSchema, {
       inputTokens: BigInt(response.usage.inputTokens),
       outputTokens: BigInt(response.usage.outputTokens),
       cacheReadInputTokens: BigInt(response.usage.cacheReadInputTokens),
@@ -75,6 +75,10 @@ export function generatedSessionUtilization(responses: GeneratedTokenUtilization
   return create(SessionTokenUtilizationSchema, {
     allAgents: create(TokenUsageTotalsSchema, { inputTokens: input, outputTokens: output }),
     mainAgent: create(TokenUsageTotalsSchema),
+    // The daemon resolves the canonical economics onto this aggregate; the
+    // renderer requires them rather than re-partitioning the vendor buckets.
+    allAgentsTokens: { inputMisses: { unwritten: input }, outputTokens: output },
+    mainAgentTokens: {},
     ungroupedSubagentResponses: responses,
   });
 }

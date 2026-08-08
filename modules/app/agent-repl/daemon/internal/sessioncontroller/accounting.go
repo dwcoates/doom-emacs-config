@@ -747,7 +747,7 @@ func tokenUtilizationObservationFromEvent(ev *corev1.Event, daemonSessionID stri
 		priorVendorSession = assistant.GetSessionId()
 	}
 	u := assistant.GetMessage().GetUsage()
-	record := &frontendv1.TokenUtilization{AgentReplSessionId: daemonSessionID, ClaudeSessionId: assistant.GetSessionId(), ApiMessageId: assistant.GetMessage().GetId(), Model: assistant.GetMessage().GetModel(), Usage: tokenUsageFromAPI(u, assistant.GetCacheRates())}
+	record := &frontendv1.TokenUtilization{AgentReplSessionId: daemonSessionID, ClaudeSessionId: assistant.GetSessionId(), ApiMessageId: assistant.GetMessage().GetId(), Model: assistant.GetMessage().GetModel(), Usage: vendorTokenUsageFromAPI(u)}
 	if assistant.RequestId != nil {
 		requestID := assistant.GetRequestId()
 		record.ApiRequestId = &requestID
@@ -774,13 +774,21 @@ func tokenUtilizationObservationFromEvent(ev *corev1.Event, daemonSessionID stri
 	return &tokenUtilizationObservation{record: record, historical: historical, priorVendorSession: priorVendorSession}, nil
 }
 
-func tokenUsageFromAPI(u *datav1.ApiUsage, rates *datav1.PromptCacheRates) *frontendv1.TokenUsage {
-	usage := &frontendv1.TokenUsage{InputTokens: u.GetInputTokens(), OutputTokens: u.GetOutputTokens(), CacheReadInputTokens: u.GetCacheReadInputTokens(), CacheCreationInputTokens: u.GetCacheCreationInputTokens(), ServiceTier: u.GetServiceTier(), Speed: u.GetSpeed(), InferenceGeo: u.GetInferenceGeo(), RawUsage: proto.Clone(u).(*datav1.ApiUsage), CacheCreation: &frontendv1.TokenCacheCreation{Ephemeral_5MInputTokens: structInt(u.GetCacheCreation(), "ephemeral_5m_input_tokens"), Ephemeral_1HInputTokens: structInt(u.GetCacheCreation(), "ephemeral_1h_input_tokens")}, ServerToolUse: &frontendv1.TokenServerToolUse{WebSearchRequests: structInt(u.GetServerToolUse(), "web_search_requests"), WebFetchRequests: structInt(u.GetServerToolUse(), "web_fetch_requests")}}
-	if rates != nil {
-		usage.CacheRates = &frontendv1.TokenCacheRates{TotalPromptInputTokens: rates.GetTotalPromptInputTokens(), CacheHitRate: rates.GetCacheHitRate(), CacheWriteRate: rates.GetCacheWriteRate(), UncachedInputRate: rates.GetUncachedInputRate()}
-	} else {
-		usage.CacheRates = frontend.CacheRatesFromCounters(u.GetInputTokens(), u.GetCacheReadInputTokens(), u.GetCacheCreationInputTokens())
-	}
+// vendorTokenUsageFromAPI builds the DURABLE, vendor-faithful record this
+// response is persisted as. It is not the economics layer: the canonical
+// TokenUsage is derived from this at read time (internal/tokenusage), never
+// stored beside it.
+//
+// THE SHAPE IS FROZEN, INCLUDING THE RATES. cache_rates is durable-legacy — see
+// frontendv1.TokenCacheRates — and it stays populated because a persisted row
+// written by an earlier build must keep replaying byte-identically through
+// statedb's proto.Equal comparison. It is computed HERE, from the same counters
+// the shim used to divide before its rate partition was retired, so a replayed
+// pre-retirement store event produces the identical durable record it always
+// did. Nothing reads it to decide anything.
+func vendorTokenUsageFromAPI(u *datav1.ApiUsage) *frontendv1.VendorTokenUsage {
+	usage := &frontendv1.VendorTokenUsage{InputTokens: u.GetInputTokens(), OutputTokens: u.GetOutputTokens(), CacheReadInputTokens: u.GetCacheReadInputTokens(), CacheCreationInputTokens: u.GetCacheCreationInputTokens(), ServiceTier: u.GetServiceTier(), Speed: u.GetSpeed(), InferenceGeo: u.GetInferenceGeo(), RawUsage: proto.Clone(u).(*datav1.ApiUsage), CacheCreation: &frontendv1.TokenCacheCreation{Ephemeral_5MInputTokens: structInt(u.GetCacheCreation(), "ephemeral_5m_input_tokens"), Ephemeral_1HInputTokens: structInt(u.GetCacheCreation(), "ephemeral_1h_input_tokens")}, ServerToolUse: &frontendv1.TokenServerToolUse{WebSearchRequests: structInt(u.GetServerToolUse(), "web_search_requests"), WebFetchRequests: structInt(u.GetServerToolUse(), "web_fetch_requests")}}
+	usage.CacheRates = frontend.CacheRatesFromCounters(u.GetInputTokens(), u.GetCacheReadInputTokens(), u.GetCacheCreationInputTokens())
 	usage.Iterations = tokenIterations(u.GetIterations())
 	thinkingTokens := structInt(u.GetOutputTokensDetails(), "thinking_tokens")
 	if u.GetOutputTokensDetails().GetFields()["thinking_tokens"] == nil {

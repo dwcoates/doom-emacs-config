@@ -993,7 +993,7 @@ message TokenUtilization {
     TokenUtilizationSubagent subagent = 11;
   }
   // The complete usage object reported by the Claude SDK for this response.
-  TokenUsage usage = 20;
+  VendorTokenUsage usage = 20;
   // Timing measured for this specific Messages API response. Absent when the
   // source is a historical transcript without corresponding stream events.
   TokenResponseTiming response_timing = 21;
@@ -1031,9 +1031,84 @@ message TokenResponseTiming {
   optional int64 output_generation_duration_ms = 2;
 }
 
-// Complete token and billing usage reported by the Claude SDK for one API
-// response.
+// THE ONE CANONICAL TOKEN SHAPE, and the only representation in which this
+// system states what a request cost.
+//
+// IT IS ORGANIZED BY ECONOMICS, NOT BY THE VENDOR'S FIELD NAMES. The vendor
+// reports three disjoint input counters whose names describe WHERE the tokens
+// went, not what they were charged, and reading any one of them as "the cost"
+// is the mistake this shape makes unrepresentable:
+//
+//   - `input_hits.read` (vendor `cache_read_input_tokens`) is the ONLY cheap
+//     bucket: the standing prefix presented again and served from the prompt
+//     cache.
+//   - `input_misses.written` (vendor `cache_creation_input_tokens`) was
+//     processed fresh at full price AND carries the cache-write premium (1.25x).
+//   - `input_misses.unwritten` (vendor `input_tokens`) was processed fresh at
+//     the base rate and never entered the cache at all. It carries no cache
+//     label because it was never cached, not because it was served from a cache.
+//
+// THE EXPENSIVE SUM IS STRUCTURAL HERE: it is `input_misses` — both of its
+// fields, together, because both missed the cache — rather than an addition a
+// reader has to know to perform. That is the whole reason for the nesting. The
+// CLI marks nearly all input cacheable, so a COLD prompt (a full context
+// re-ingest, the most expensive thing that can happen) surfaces almost entirely
+// as `written` while `unwritten` stays near zero; a turn with a deliberately
+// uncacheable prefix surfaces the other way round. Neither field alone is ever
+// the answer.
+//
+// RATES ARE NOT STORED. The cache-hit / cache-write / fresh-input partition is
+// three quotients over these same counters, so it is DERIVED at the point of
+// use by the daemon (`internal/tokenusage`) and never persisted as a field
+// alongside the counters it is computed from.
+//
+// THE DAEMON IS THE SOLE OWNER of every judgment taken from this shape. The
+// shim translates vendor usage into it at the boundary and stops there; the
+// webapp renders what the daemon resolved.
 message TokenUsage {
+  // What the prompt cache served: the cheap bucket.
+  TokenCacheHits input_hits = 1;
+  // What the prompt cache did not serve: the expensive buckets, together.
+  TokenCacheMisses input_misses = 2;
+  // Generated tokens, including extended thinking where the API includes it.
+  // There is no output cache, so this is a plain total with no partition.
+  uint64 output_tokens = 3;
+}
+
+// The prompt input this request did not have to process, because the prompt
+// cache already held it.
+message TokenCacheHits {
+  // Prompt-prefix tokens served from the prompt cache (vendor
+  // `cache_read_input_tokens`). Billed at the cache-read rate.
+  uint64 read = 1;
+}
+
+// The prompt input this request processed fresh, split by whether processing it
+// also placed it in the cache. BOTH FIELDS ARE EXPENSIVE and their sum is the
+// figure every cost judgment in this system reads.
+message TokenCacheMisses {
+  // Tokens processed fresh that entered the cache as they were processed
+  // (vendor `cache_creation_input_tokens`). Billed at 1.25x the base input rate
+  // — the base price plus the cache-write premium.
+  uint64 written = 1;
+  // Tokens processed fresh that never entered the cache at all (vendor
+  // `input_tokens`). Billed at the base input rate.
+  uint64 unwritten = 2;
+}
+
+// DURABLE, VENDOR-FAITHFUL usage for one API response — the persisted evidence
+// layer, not the economics layer.
+//
+// THIS SHAPE IS FROZEN. Every field here is written into the statedb
+// `token_utilization` and `turn_accounting` rows as binary protobuf, and a
+// replayed durable stream is required to reproduce a persisted row byte for
+// byte (`statedb.TurnAccountings.Record`, `statedb.TokenUtilizations.record`).
+// Adding a populated field, removing a populated field, or changing what any
+// field holds would make every row written by an earlier build fail its replay
+// comparison. Field numbers, presence, and population rules are therefore not
+// negotiable; the canonical economics shape above is derived FROM this at read
+// time and is never stored beside it.
+message VendorTokenUsage {
   // Tokens charged as uncached input at the base input rate.
   int64 input_tokens = 1;
   // Generated tokens, including extended thinking where the API includes it.
@@ -1059,8 +1134,10 @@ message TokenUsage {
   repeated TokenUsageIteration iterations = 11;
   // Diagnosed prompt-cache miss information when diagnostics were requested.
   TokenCacheDiagnostic cache_diagnostic = 12;
-  // Cache ratios derived from the authoritative token counters. Absent when
-  // the total prompt input is zero.
+  // DURABLE-LEGACY. Cache ratios derived from the authoritative token counters,
+  // absent when the total prompt input is zero. See TokenCacheRates: it is kept
+  // populated only because removing it from a durable record would break replay
+  // of every row an earlier build wrote, and no judgment reads it.
   TokenCacheRates cache_rates = 13;
   // The API's fallback-credit billing outcome.
   google.protobuf.Struct fallback_credit = 14;
@@ -1094,16 +1171,23 @@ message TokenOutputDetails {
   int64 thinking_tokens = 1;
 }
 
-// Derived prompt-cache rates calculated from the authoritative token
-// counters on one usage record or a cumulative usage total.
+// DURABLE-LEGACY prompt-cache rates. NOT the economics representation and not
+// an input to any decision.
 //
-// THE THREE RATES PARTITION THE PROMPT INPUT and sum to 1: each names ONE of
-// the three disjoint SDK buckets. `uncached_input_rate` is therefore the
-// `input_tokens` BUCKET's share and NOT the module's "uncached input" measure,
-// which is `input_tokens + cache_creation_input_tokens` (AGENTS.md, "Uncached
-// input tokens are a SUM, and the field names lie about it"). The EXPENSIVE
-// share is `uncached_input_rate + cache_write_rate`; reading this one field as
-// "what the turn paid for" is exactly the mistake its name invites.
+// RATES ARE DERIVED, NOT STORED — that is the canonical TokenUsage contract,
+// and this message is the one place the system still violates it. It survives
+// for exactly one reason: it is populated inside VendorTokenUsage and
+// TokenUsageTotals, both of which are persisted verbatim, and a durable row
+// written by an earlier build must keep replaying byte-identically. Removing it
+// would fail every such replay. The database is not migrated, so the field
+// stays and stays populated.
+//
+// NOTHING MAY READ IT TO DECIDE ANYTHING. Every rate a surface needs is derived
+// from the canonical TokenUsage at the point of use (the daemon's
+// `internal/tokenusage`), where the partition cannot be mistaken for a cost:
+// the three quotients sum to 1, one per disjoint bucket, so `uncached_input_rate`
+// is the `unwritten` bucket's SHARE alone and the expensive share is
+// `uncached_input_rate + cache_write_rate`.
 message TokenCacheRates {
   // Total prompt input: the three disjoint buckets summed.
   int64 total_prompt_input_tokens = 1;
@@ -1268,6 +1352,14 @@ message SessionTokenUtilization {
   // identifiers. Each record retains its unique api_message_id and complete
   // usage without inventing an aggregate identity from descriptive metadata.
   repeated TokenUtilization ungrouped_subagent_responses = 5;
+  // The canonical economics of `all_agents`, resolved by the daemon so a
+  // frontend never re-partitions the vendor buckets to learn what the session
+  // paid. This aggregate is rebuilt from durable records on every read and is
+  // itself never persisted, which is what lets it carry the canonical shape at
+  // all — the persisted record types cannot (see VendorTokenUsage).
+  TokenUsage all_agents_tokens = 6;
+  // The canonical economics of `main_agent`, resolved by the daemon.
+  TokenUsage main_agent_tokens = 7;
 }
 
 // Cumulative usage attributed to one dispatched subagent invocation.
@@ -1278,6 +1370,9 @@ message AgentTokenUtilization {
   TokenUsageTotals totals = 2;
   // Usage grouped by model when the subagent used more than one model.
   repeated ModelTokenUtilization models = 3;
+  // The canonical economics of `totals`, resolved by the daemon. Same reasoning
+  // as SessionTokenUtilization.all_agents_tokens.
+  TokenUsage tokens = 4;
 }
 
 // Cumulative usage served by one model.
@@ -1316,8 +1411,9 @@ message TokenUsageTotals {
   TokenServerToolUse server_tool_use = 6;
   // Sum of output-token categories reported by the API.
   TokenOutputDetails output_details = 7;
-  // Cache ratios derived from the cumulative authoritative counters. Absent
-  // when total prompt input is zero.
+  // DURABLE-LEGACY, exactly as on VendorTokenUsage: kept and kept populated so
+  // a persisted TurnAccounting reconciliation still replays byte-identically,
+  // read by no judgment. See TokenCacheRates.
   TokenCacheRates cache_rates = 8;
   // Additive timing measurements across the API responses represented by
   // this total. Absent when none of those responses has timing data.
@@ -2560,12 +2656,14 @@ message ProgressView {
   // Live tickers (latest-wins), coalesced daemon-side so a high-frequency
   // source cannot drive the frame rate.
   int64 thinking_tokens = 5;   // data.ThinkingTokens.estimated_tokens
-  // THIS TURN's cumulative UNCACHED input: input_tokens +
-  // cache_creation_input_tokens summed across the turn's assistant messages.
-  // Cache READS are excluded, which is the whole point of the figure — see the
-  // daemon's one derivation (internal/keepalive.UncachedInputTokens) and the
-  // module AGENTS.md section "Uncached input tokens are a SUM, and the field
-  // names lie about it".
+  // THIS TURN's cumulative EXPENSIVE input, resolved by the daemon: the
+  // canonical TokenUsage.input_misses total — both misses, written and
+  // unwritten — summed across the turn's assistant messages. Cache READS are
+  // excluded, which is the whole point of the figure. This is the canonical
+  // expensive sum and the frontend renders it verbatim; see the daemon's one
+  // derivation (internal/tokenusage.ExpensiveInput) and the module AGENTS.md
+  // section "One canonical token shape, and the daemon owns every judgment
+  // taken from it".
   int64 input_tokens = 6;
   int64 ttft_ms = 7;           // first-token latency of the current message
 
@@ -2629,15 +2727,16 @@ message ProgressView {
   int64 live_task_count = 16;
 }
 
-// One turn's excessive uncached-input observation. Computed daemon-side from
-// the turn's result usage: the measure is input_tokens PLUS
-// cache_creation_input_tokens, because the vendor marks nearly all input
-// cacheable — a cold prompt surfaces as cache CREATION, and raw input_tokens
-// alone stays near-zero even on a full re-ingest.
+// One turn's excessive expensive-input observation. Computed daemon-side from
+// the turn's result usage as the canonical TokenUsage.input_misses total —
+// both misses together — because the vendor marks nearly all input cacheable:
+// a cold prompt surfaces as `written` while `unwritten` stays near zero even on
+// a full re-ingest.
 message ContextCostAlert {
   // The turn that crossed the threshold.
   string turn_id = 1;
-  // The observed uncached cost: input_tokens + cache_creation_input_tokens.
+  // The observed expensive cost: the canonical TokenUsage.input_misses total
+  // (written + unwritten), resolved by internal/tokenusage.ExpensiveInput.
   int64 uncached_input_tokens = 2;
   // The configured threshold that tripped (default 20000), carried so the
   // rendering can say "N over M" without knowing daemon config.

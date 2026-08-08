@@ -88,7 +88,7 @@ import {
   type TokenCacheRates as GeneratedTokenCacheRates,
   type TokenOutputDetails as GeneratedTokenOutputDetails,
   type TokenServerToolUse as GeneratedTokenServerToolUse,
-  type TokenUsage as GeneratedTokenUsage,
+  type VendorTokenUsage as GeneratedVendorTokenUsage,
   type TokenUsageIteration as GeneratedTokenUsageIteration,
   type TokenUtilization as GeneratedTokenUtilization,
   type TurnAccounting as GeneratedTurnAccounting,
@@ -1075,10 +1075,12 @@ export interface ProgressView {
   turnStartedAtMs: number;
   thinkingTokens: number;
   /**
-   * THIS turn's cumulative UNCACHED input tokens: `input_tokens` +
-   * `cache_creation_input_tokens`, summed daemon-side across the turn's
-   * assistant messages. Cache READS are excluded — see `uncachedInputTokens`
-   * in `tokens.ts` for the contract this figure is the daemon's side of.
+   * THIS turn's cumulative EXPENSIVE input tokens, resolved daemon-side: the
+   * canonical TokenUsage.input_misses total — both misses together — summed
+   * across the turn's assistant messages. Cache READS are excluded. This is the
+   * daemon's own figure and is rendered verbatim; `expensiveInput` in
+   * `tokens.ts` is the same reading taken over a record the daemon could not
+   * resolve onto the wire.
    */
   inputTokens: number;
   ttftMs: number;
@@ -2377,7 +2379,7 @@ function projectCacheDiagnostic(value: GeneratedTokenCacheDiagnostic, where: str
   return unreachableGeneratedCase(arm, where);
 }
 
-function projectResponseTokenUsage(value: GeneratedTokenUsage, where: string): ResponseTokenUsage {
+function projectResponseTokenUsage(value: GeneratedVendorTokenUsage, where: string): ResponseTokenUsage {
   if (value.rawUsage === undefined) throw new Error(`frontend-proto: ${where}.rawUsage is required`);
   const rawUsage = ensureObject(toJson(ApiUsageSchema, value.rawUsage), `${where}.rawUsage`);
   const projected = {
@@ -2397,7 +2399,7 @@ function projectResponseTokenUsage(value: GeneratedTokenUsage, where: string): R
     fallbackCredit: value.fallbackCredit,
     unmodeledUsage: value.unmodeledUsage,
     rawUsage,
-  } satisfies { [K in Exclude<keyof GeneratedTokenUsage, "$typeName" | "$unknown">]-?: K extends keyof ResponseTokenUsage ? ResponseTokenUsage[K] : never };
+  } satisfies { [K in Exclude<keyof GeneratedVendorTokenUsage, "$typeName" | "$unknown">]-?: K extends keyof ResponseTokenUsage ? ResponseTokenUsage[K] : never };
   return {
     inputTokens: projected.inputTokens,
     outputTokens: projected.outputTokens,

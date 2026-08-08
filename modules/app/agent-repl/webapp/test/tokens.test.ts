@@ -11,7 +11,8 @@ import {
   tokenHeatHue,
   tokensMenuHtml,
   tokensOverlayHtml,
-  uncachedInputTokens,
+  canonicalTokens,
+  expensiveInput,
 } from "../src/tokens.js";
 import { generatedSessionUtilization, generatedUngroupedResponse, ungroupedResponse } from "./token-utilization-fixture.js";
 import {
@@ -364,13 +365,18 @@ describe("tokensOverlayHtml generated session accounting", () => {
       timing: create(TokenTimingTotalsSchema, { outputTokensWithGenerationDuration: 20n, outputGenerationDurationMs: 100n, responsesWithGenerationDuration: 1n, responsesWithoutGenerationDuration: 2n, totalTimeToFirstTokenMs: 50n, responsesWithTimeToFirstToken: 1n, responsesWithoutTimeToFirstToken: 3n }),
     });
     const model = create(ModelTokenUtilizationSchema, { model: "opus", canonicalModel: "claude-opus", provider: "anthropic", totals, contextWindow: 200000n, maxOutputTokens: 32000n, costUsd: 1.25 });
+    // The daemon's canonical resolution of `totals`: 30 read, 40 written, 10
+    // unwritten, 20 output. The renderer requires it rather than partitioning
+    // the vendor buckets itself.
+    const canonical = { inputHits: { read: 30n }, inputMisses: { written: 40n, unwritten: 10n }, outputTokens: 20n };
     const subagent = create(AgentTokenUtilizationSchema, {
       agent: create(TokenUtilizationSubagentSchema, { agentId: "agent-7", parentToolUseId: "tool-parent", parentAgentId: "agent-parent", subagentType: "research", taskDescription: "inspect evidence" }),
       totals,
+      tokens: canonical,
       models: [model],
     });
     const ungrouped = generatedUngroupedResponse({ apiMessageId: "message-ungrouped" });
-    const session = create(SessionTokenUtilizationSchema, { allAgents: totals, mainAgent: totals, subagents: [subagent], models: [model], ungroupedSubagentResponses: [ungrouped] });
+    const session = create(SessionTokenUtilizationSchema, { allAgents: totals, mainAgent: totals, allAgentsTokens: canonical, mainAgentTokens: canonical, subagents: [subagent], models: [model], ungroupedSubagentResponses: [ungrouped] });
 
     const html = tokensOverlayHtml(data({ sessionUtilization: session }));
     expect(html).toContain("main agent");
@@ -403,10 +409,30 @@ describe("tokensOverlayHtml generated session accounting", () => {
     expect(() => tokensOverlayHtml(data({ sessionUtilization: create(SessionTokenUtilizationSchema) }))).toThrow(/lacks mainAgent or allAgents/);
   });
 
+  // A MISSING DAEMON RESOLUTION IS A FAILURE, NOT A CUE TO DERIVE ONE HERE.
+  // Falling back to a local partition of the vendor buckets would put a second
+  // owner of the session economics in the renderer, silently, on exactly the
+  // frames where the daemon failed to resolve one.
+  it("fails loudly when the daemon resolved no canonical session tokens", () => {
+    const totals = create(TokenUsageTotalsSchema, { inputTokens: 10n });
+    const session = create(SessionTokenUtilizationSchema, { allAgents: totals, mainAgent: totals });
+    expect(() => tokensOverlayHtml(data({ sessionUtilization: session }))).toThrow(/lacks daemon-resolved canonical tokens/);
+  });
+
+  it("fails loudly when the daemon resolved no canonical subagent tokens", () => {
+    const totals = create(TokenUsageTotalsSchema, { inputTokens: 10n });
+    const subagent = create(AgentTokenUtilizationSchema, {
+      agent: create(TokenUtilizationSubagentSchema, { agentId: "agent-7" }),
+      totals,
+    });
+    const session = create(SessionTokenUtilizationSchema, { allAgents: totals, mainAgent: totals, allAgentsTokens: {}, mainAgentTokens: {}, subagents: [subagent] });
+    expect(() => tokensOverlayHtml(data({ sessionUtilization: session }))).toThrow(/subagent 0 lacks daemon-resolved canonical tokens/);
+  });
+
   it("renders unavailable model metadata without fabricating scalar defaults", () => {
     const totals = create(TokenUsageTotalsSchema);
     const model = create(ModelTokenUtilizationSchema, { model: "opus", totals });
-    const session = create(SessionTokenUtilizationSchema, { allAgents: totals, mainAgent: totals, models: [model] });
+    const session = create(SessionTokenUtilizationSchema, { allAgents: totals, mainAgent: totals, allAgentsTokens: {}, mainAgentTokens: {}, models: [model] });
     const html = tokensOverlayHtml(data({ sessionUtilization: session }));
     const start = html.indexOf("all agents model opus");
     const modelRows = rows(html.slice(start));
@@ -427,33 +453,47 @@ describe("tokensOverlayHtml generated session accounting", () => {
   });
 });
 
-describe("uncachedInputTokens: the NEW input a turn fed the model", () => {
-  it("sums the uncached input and the cache write", () => {
+describe("expensiveInput: the NEW input a turn fed the model", () => {
+  /**
+   * `canonicalTokens` is the webapp's ONE translation of vendor buckets into
+   * the canonical shape, so these cases pin BOTH halves at once: that each
+   * vendor counter lands in the bucket whose economics it describes, and that
+   * the expensive figure is the two misses together.
+   */
+  it("sums the fresh-input miss and the cache-write miss", () => {
     // Arrange
-    const u = usage({ input_tokens: 100, cache_creation_input_tokens: 20 });
+    const u = canonicalTokens({ input: 100, cacheCreation: 20, cacheRead: 0, output: 0 });
     // Act + Assert
-    expect(uncachedInputTokens(u)).toBe(120);
+    expect(expensiveInput(u)).toBe(120);
   });
 
-  it("excludes the cache read, which is the standing prefix presented again", () => {
+  it("excludes the cache hit, which is the standing prefix presented again", () => {
     // Arrange — a re-read prefix dwarfing everything the turn actually added.
-    const u = usage({ input_tokens: 100, cache_creation_input_tokens: 20, cache_read_input_tokens: 900_000 });
+    const u = canonicalTokens({ input: 100, cacheCreation: 20, cacheRead: 900_000, output: 0 });
     // Act + Assert
-    expect(uncachedInputTokens(u)).toBe(120);
+    expect(expensiveInput(u)).toBe(120);
   });
 
   it("excludes the output tokens, this being an INPUT figure", () => {
     // Arrange
-    const u = usage({ input_tokens: 100, cache_creation_input_tokens: 20, output_tokens: 5_000 });
+    const u = canonicalTokens({ input: 100, cacheCreation: 20, cacheRead: 0, output: 5_000 });
     // Act + Assert
-    expect(uncachedInputTokens(u)).toBe(120);
+    expect(expensiveInput(u)).toBe(120);
   });
 
-  it("treats an absent cache-write field as no cache write", () => {
-    // Arrange — the dimension is optional on the wire.
-    const u: Usage = { input_tokens: 100, output_tokens: 40 };
+  it("treats an absent cache write as no cache write", () => {
+    // Arrange — the dimension is optional on the vendor wire.
+    const u = canonicalTokens({ input: 100, cacheCreation: 0, cacheRead: 0, output: 40 });
     // Act + Assert
-    expect(uncachedInputTokens(u)).toBe(100);
+    expect(expensiveInput(u)).toBe(100);
+  });
+
+  it("reports nothing expensive when the misses are absent entirely", () => {
+    // Arrange — a canonical usage the daemon left with no miss submessage.
+    const u = canonicalTokens({ input: 0, cacheCreation: 0, cacheRead: 500, output: 0 });
+    u.inputMisses = undefined;
+    // Act + Assert
+    expect(expensiveInput(u)).toBe(0);
   });
 });
 

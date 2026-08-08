@@ -183,7 +183,13 @@ describe("assistant", () => {
     expect(m.msg.value.message!.usage!.inputTokens).toBe(10n);
   });
 
-  it("carries the canonical normalized cache rates on the assistant envelope", () => {
+  // THE ASSISTANT ENVELOPE CARRIES NO DERIVED RATES. The shim used to divide
+  // this response's buckets into a cache-rate partition and ship the quotients;
+  // that was token judgment taken outside the daemon, and the daemon now
+  // derives every rate it needs from the canonical TokenUsage shape. The
+  // counters themselves still ride verbatim, which is what a faithful
+  // translator owes.
+  it("ships the vendor counters without a derived rate partition", () => {
     const m = vendor(convert(assistantRecord({}, {
       usage: {
         input_tokens: 10,
@@ -193,18 +199,10 @@ describe("assistant", () => {
       },
     })));
     if (m.msg.case !== "assistant") throw new Error("case");
-    expect(m.msg.value.cacheRates).toMatchObject({
-      totalPromptInputTokens: 100n,
-      cacheHitRate: 0.8,
-      cacheWriteRate: 0.1,
-      uncachedInputRate: 0.1,
-    });
-  });
-
-  it("leaves cache rates absent when total prompt input is zero", () => {
-    const m = vendor(convert(assistantRecord()));
-    if (m.msg.case !== "assistant") throw new Error("case");
-    expect(m.msg.value.cacheRates).toBeUndefined();
+    expect(m.msg.value.message!.usage!.inputTokens).toBe(10n);
+    expect(m.msg.value.message!.usage!.cacheReadInputTokens).toBe(80n);
+    expect(m.msg.value.message!.usage!.cacheCreationInputTokens).toBe(10n);
+    expect(Object.keys(m.msg.value)).not.toContain("cacheRates");
   });
 
   // The CLI stamps `<synthetic>` on the assistant records it authors itself —

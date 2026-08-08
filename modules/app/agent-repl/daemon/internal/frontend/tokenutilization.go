@@ -8,6 +8,7 @@ import (
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
+	"claude-repld/internal/tokenusage"
 	"claude-repld/internal/tokenutilization"
 )
 
@@ -74,19 +75,25 @@ func hasSubagentProvenance(agent *frontendv1.TokenUtilizationSubagent) bool {
 	return agent != nil && (agent.GetAgentId() != "" || agent.GetParentToolUseId() != "" || agent.GetParentAgentId() != "" || agent.GetSubagentType() != "" || agent.GetTaskDescription() != "")
 }
 
-// CacheRatesFromCounters is the sole aggregate cache-rate calculation. Every
-// aggregate passes its authoritative summed counters through this helper, so
-// session, agent, and model totals cannot acquire different rate semantics.
+// CacheRatesFromCounters fills the DURABLE-LEGACY TokenCacheRates field, and
+// nothing else.
 //
-// THESE ARE BUCKET SHARES, NOT A COST MEASURE. The three rates partition the
-// prompt input and sum to 1, one per disjoint SDK bucket, so UncachedInputRate
-// is the input_tokens bucket's share ALONE — it is NOT this module's "uncached
-// input", which is input_tokens + cache_creation_input_tokens (AGENTS.md,
-// "Uncached input tokens are a SUM, and the field names lie about it", and the
-// one derivation in internal/keepalive.UncachedInputTokens). The expensive
-// share is UncachedInputRate + CacheWriteRate. Nothing here may be changed to
-// fold cache creation into UncachedInputRate: that would double-count against
-// CacheWriteRate and break the partition every consumer reads these as.
+// IT IS NOT THE SYSTEM'S RATE DERIVATION. Rates are derived from the canonical
+// TokenUsage at the point of use (tokenusage.DeriveRates); this function exists
+// because TokenCacheRates is populated inside the two persisted record types
+// and a row written by an earlier build must keep replaying byte-identically.
+// The quotients are therefore reproduced EXACTLY as they have always been
+// computed — including by the shim's retired PromptCacheRates, which used the
+// same three counters and the same divisor — so removing the shim's copy left
+// every durable row unchanged.
+//
+// THESE ARE BUCKET SHARES, NOT A COST MEASURE. The three partition the prompt
+// input and sum to 1, one per disjoint bucket, so UncachedInputRate is the
+// fresh bucket's share ALONE and the expensive share is UncachedInputRate +
+// CacheWriteRate. Nothing here may be changed to fold cache creation into
+// UncachedInputRate: that would double-count against CacheWriteRate, break the
+// partition, and — because these values are durable — make every persisted row
+// irreproducible.
 func CacheRatesFromCounters(input, read, creation int64) *frontendv1.TokenCacheRates {
 	total := input + read + creation
 	if total == 0 {
@@ -149,6 +156,7 @@ func AggregateTokenUtilization(records []*frontendv1.TokenUtilization) *frontend
 			addTokenUsage(entry.Totals, record)
 			entry.Models = addModelUsage(entry.Models, record)
 		}
+		entry.Tokens = resolveCanonicalTokens(entry.Totals, "subagent totals")
 		subagents = append(subagents, entry)
 	}
 	sort.Slice(subagents, func(i, j int) bool {
@@ -156,7 +164,28 @@ func AggregateTokenUtilization(records []*frontendv1.TokenUtilization) *frontend
 	})
 	out.Subagents = subagents
 	out.Models = sortedModelUsage(models)
+	// THE ECONOMICS ARE RESOLVED HERE, ONCE, so a frontend never re-partitions
+	// the vendor buckets to learn what the session paid. This aggregate is
+	// rebuilt from the durable records on every read and is itself never
+	// persisted, which is exactly what lets it carry the canonical shape at all.
+	out.AllAgentsTokens = resolveCanonicalTokens(out.AllAgents, "all-agent totals")
+	out.MainAgentTokens = resolveCanonicalTokens(out.MainAgent, "main-agent totals")
 	return out
+}
+
+// resolveCanonicalTokens converts one vendor total at the read boundary.
+//
+// A NEGATIVE SUM IS CORRUPTION AND FAILS LOUDLY, in the same manner as the
+// aggregation invariant this function's caller already panics on: every
+// contributing record was validated non-negative before it was made durable, so
+// a negative total means the durable evidence itself is wrong, and a view built
+// from it would report a session costing nearly 2^64 tokens.
+func resolveCanonicalTokens(totals *frontendv1.TokenUsageTotals, what string) *frontendv1.TokenUsage {
+	canonical, err := tokenusage.FromTotals(totals)
+	if err != nil {
+		panic(fmt.Sprintf("token utilization %s cannot be made canonical: %v", what, err))
+	}
+	return canonical
 }
 
 type subagentAggregateGroup struct {
