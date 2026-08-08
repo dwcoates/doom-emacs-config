@@ -174,6 +174,15 @@ type StateApplier interface {
 	// It reports whether it reconciled anything. See connectivitystate.go's
 	// reconcileOrphanedTurn, which is the only caller and which owns the proof.
 	CloseOrphanedTurn(workspace, sessionID, reason string) (closed bool, err error)
+	// CloseOriginTurns ends the NAMED turns' claims because the ORIGIN that
+	// submitted them reached its own terminal. It is the closing edge for the
+	// turns the daemon opens on a machine's behalf — a keep-alive ping, a
+	// workspace-create prompt, a merge run's resolution — none of which has
+	// anybody watching for its end once the origin is done.
+	//
+	// It reports the identities it closed. A turn whose own end already retired
+	// its claim is left exactly as it was and is not among them.
+	CloseOriginTurns(workspace string, turnIDs []string, cause string) (closed []string, err error)
 }
 
 // ProgressResolver is the slice of the progress-footer resolver (F1) the session controller
