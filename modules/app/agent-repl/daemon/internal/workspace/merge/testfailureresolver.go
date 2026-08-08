@@ -104,6 +104,14 @@ type TestFailureResolver interface {
 	//
 	// An error means no fix happened. The coordinator does not retry: it fails
 	// the merge and rolls the target back.
+	//
+	// IT MAY FAIL FAST, and the coordinator must not read a quick error as a
+	// mistake. The turn has to START before the long wait for it to finish
+	// means anything: a prompt that produced no turn — because the workspace is
+	// busy with a turn of the user's own, or because the shim never began one —
+	// fails within a short bind bound rather than holding the merge (and the
+	// workspace's shim lease) for the whole of a window sized for an agent that
+	// is actually working. The cause names which of those it was.
 	Resolve(ctx context.Context, res TestFailureResolution) error
 }
 

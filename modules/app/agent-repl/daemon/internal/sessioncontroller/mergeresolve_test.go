@@ -145,10 +145,72 @@ func TestMergeResolutionSurfacesASubmitRefusal(t *testing.T) {
 	}
 }
 
+// A turn that BINDS and then goes quiet keeps the long bound: the agent is
+// working, and the bind deadline has nothing left to say about it.
 func TestMergeResolutionTurnThatNeverEndsIsAnError(t *testing.T) {
-	// Arrange — a resolution turn that never reports its end.
+	// Arrange — the resolution turn STARTS and then never reports its end. The
+	// bind bound is left generous so only the work bound can be what fires.
 	h := newMergeResolveHarness(t)
-	h.m.cfg.MergeResolutionTurnBound = 20 * time.Millisecond
+	h.m.cfg.MergeResolutionTurnBound = time.Second
+	h.m.cfg.MergeResolutionTurnBindBound = time.Minute
+	submitted := submitHook(h)
+	done := make(chan error, 1)
+
+	// Act.
+	go func() {
+		done <- h.m.ResolveMergeConflict(context.Background(), merge.ConflictResolution{
+			Workspace: "ws", RequestID: "req-1", ConflictCommit: "abc1234",
+			SourceBranch: "feature/a", TargetDir: "/target",
+		})
+	}()
+	<-submitted
+	h.m.onTurnEvent(h.controller(), true, "t1", turnOutcome{})
+
+	// Assert — reported as the turn that never ENDED, not one that never began.
+	err := <-done
+	if err == nil {
+		t.Fatal("ResolveMergeConflict() = nil, want the unfinished-turn error")
+	}
+	if !strings.Contains(err.Error(), "never reported its end") {
+		t.Fatalf("error = %q, want it to name the turn that never ended", err)
+	}
+}
+
+// THE GUARANTEE THIS EDGE EXISTS FOR: a prompt that produces no turn at all
+// fails at the SHORT bind bound, not after the whole work bound. A test-fix
+// prompt once burned all thirty minutes bound to nothing.
+func TestMergeResolutionTurnThatNeverStartsFailsAtTheBindDeadline(t *testing.T) {
+	// Arrange — the prompt is forwarded, but no turn ever starts for it.
+	h := newMergeResolveHarness(t)
+	h.m.cfg.MergeResolutionTurnBindBound = 20 * time.Millisecond
+	h.m.cfg.MergeResolutionTurnBound = 30 * time.Second
+
+	// Act.
+	started := time.Now()
+	err := h.m.ResolveMergeConflict(context.Background(), merge.ConflictResolution{
+		Workspace: "ws", RequestID: "req-1", ConflictCommit: "abc1234",
+		SourceBranch: "feature/a", TargetDir: "/target",
+	})
+	elapsed := time.Since(started)
+
+	// Assert — the bind bound is what freed it, and the cause says so.
+	if err == nil {
+		t.Fatal("ResolveMergeConflict() = nil, want the never-started error")
+	}
+	if !strings.Contains(err.Error(), "never started") {
+		t.Fatalf("error = %q, want it to say the turn never started", err)
+	}
+	if elapsed > 5*time.Second {
+		t.Fatalf("ResolveMergeConflict took %s, want it freed at the bind bound rather than the 30s work bound", elapsed)
+	}
+}
+
+// The failure cause names the SUBMIT'S OWN DISPOSITION, so the record states
+// what became of the prompt instead of leaving it to be reconstructed.
+func TestMergeResolutionNeverStartedCauseNamesTheSubmitDisposition(t *testing.T) {
+	// Arrange.
+	h := newMergeResolveHarness(t)
+	h.m.cfg.MergeResolutionTurnBindBound = 20 * time.Millisecond
 
 	// Act.
 	err := h.m.ResolveMergeConflict(context.Background(), merge.ConflictResolution{
@@ -156,12 +218,57 @@ func TestMergeResolutionTurnThatNeverEndsIsAnError(t *testing.T) {
 		SourceBranch: "feature/a", TargetDir: "/target",
 	})
 
-	// Assert — reported, never reported as a completed resolution.
-	if err == nil {
-		t.Fatal("ResolveMergeConflict() = nil, want the unfinished-turn error")
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "FORWARDED to the shim") {
+		t.Fatalf("error = %v, want it to name the forwarded submit", err)
 	}
-	if !strings.Contains(err.Error(), "never reported its end") {
-		t.Fatalf("error = %q, want it to name the turn that never ended", err)
+}
+
+// A BUSY WORKSPACE IS ITS OWN ANSWER: the user's agent is working in the
+// session, so the merge prompt lands on the queue instead of the shim. Waiting
+// out any deadline would only be the merge competing with the user.
+func TestMergeResolutionOnABusyWorkspaceFailsWithTheBusyCause(t *testing.T) {
+	// Arrange — a turn of the user's own is in flight.
+	h := newMergeResolveHarness(t)
+	h.m.cfg.MergeResolutionTurnBindBound = 30 * time.Second
+	h.m.cfg.MergeResolutionTurnBound = 30 * time.Second
+	h.turn(true)
+
+	// Act.
+	err := h.m.ResolveMergeConflict(context.Background(), merge.ConflictResolution{
+		Workspace: "ws", RequestID: "req-1", ConflictCommit: "abc1234",
+		SourceBranch: "feature/a", TargetDir: "/target",
+	})
+
+	// Assert — refused for the busy session, naming the parked submit.
+	if err == nil {
+		t.Fatal("ResolveMergeConflict() = nil on a busy workspace, want the busy refusal")
+	}
+	if !strings.Contains(err.Error(), "BUSY with a turn of the user's own") {
+		t.Fatalf("error = %q, want it to name the workspace as busy", err)
+	}
+	if !strings.Contains(err.Error(), "QUEUED as entry") {
+		t.Fatalf("error = %q, want it to name the queued submit disposition", err)
+	}
+}
+
+// The parked prompt goes with the failed merge. Left queued, it would reach the
+// agent whenever the user's turn ended — an instruction to repair a merge that
+// has by then been failed and rolled back.
+func TestMergeResolutionOnABusyWorkspaceTakesItsParkedPromptBack(t *testing.T) {
+	// Arrange — a turn of the user's own is in flight.
+	h := newMergeResolveHarness(t)
+	h.turn(true)
+
+	// Act.
+	_ = h.m.ResolveMergeConflict(context.Background(), merge.ConflictResolution{
+		Workspace: "ws", RequestID: "req-1", ConflictCommit: "abc1234",
+		SourceBranch: "feature/a", TargetDir: "/target",
+	})
+
+	// Assert.
+	if got := h.entries(); len(got) != 0 {
+		t.Fatalf("queue entries after a refused merge resolution = %d, want 0", len(got))
 	}
 }
 
@@ -292,9 +399,40 @@ func TestResolveMergeTestFailureRejectsAnIncompleteResolution(t *testing.T) {
 }
 
 func TestResolveMergeTestFailureTurnThatNeverEndsIsAnError(t *testing.T) {
-	// Arrange — a fix turn that never reports its end.
+	// Arrange — a fix turn that STARTS and then never reports its end.
 	h := newMergeResolveHarness(t)
-	h.m.cfg.MergeResolutionTurnBound = 20 * time.Millisecond
+	h.m.cfg.MergeResolutionTurnBound = time.Second
+	h.m.cfg.MergeResolutionTurnBindBound = time.Minute
+	submitted := submitHook(h)
+	done := make(chan error, 1)
+
+	// Act.
+	go func() {
+		done <- h.m.ResolveMergeTestFailure(context.Background(), merge.TestFailureResolution{
+			Workspace: "ws", RequestID: "req-1", FailingCommit: "abc1234",
+			SourceBranch: "feature/a", TargetDir: "/target", FailureTail: "boom",
+		})
+	}()
+	<-submitted
+	h.m.onTurnEvent(h.controller(), true, "t1", turnOutcome{})
+
+	// Assert — reported, never reported as a completed fix.
+	err := <-done
+	if err == nil {
+		t.Fatal("ResolveMergeTestFailure() = nil, want the unfinished-turn error")
+	}
+	if !strings.Contains(err.Error(), "never reported its end") {
+		t.Fatalf("error = %q, want it to name the turn that never ended", err)
+	}
+}
+
+// The test-fix resolution refuses a busy workspace for the conflict
+// resolution's reason: it is the same wait, and a merge must not compete with
+// the user's own agent for the shim.
+func TestResolveMergeTestFailureOnABusyWorkspaceFailsWithTheBusyCause(t *testing.T) {
+	// Arrange — a turn of the user's own is in flight.
+	h := newMergeResolveHarness(t)
+	h.turn(true)
 
 	// Act.
 	err := h.m.ResolveMergeTestFailure(context.Background(), merge.TestFailureResolution{
@@ -302,12 +440,12 @@ func TestResolveMergeTestFailureTurnThatNeverEndsIsAnError(t *testing.T) {
 		SourceBranch: "feature/a", TargetDir: "/target", FailureTail: "boom",
 	})
 
-	// Assert — reported, never reported as a completed fix.
+	// Assert.
 	if err == nil {
-		t.Fatal("ResolveMergeTestFailure() = nil, want the unfinished-turn error")
+		t.Fatal("ResolveMergeTestFailure() = nil on a busy workspace, want the busy refusal")
 	}
-	if !strings.Contains(err.Error(), "never reported its end") {
-		t.Fatalf("error = %q, want it to name the turn that never ended", err)
+	if !strings.Contains(err.Error(), "BUSY with a turn of the user's own") {
+		t.Fatalf("error = %q, want it to name the workspace as busy", err)
 	}
 }
 

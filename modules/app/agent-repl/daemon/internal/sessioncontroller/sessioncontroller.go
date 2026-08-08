@@ -283,6 +283,14 @@ type Config struct {
 	// unfinished-turn error without waiting out a bound sized for real conflict
 	// resolution.
 	MergeResolutionTurnBound time.Duration
+	// MergeResolutionTurnBindBound bounds the FIRST phase of that wait: how long
+	// a submitted merge prompt may go without a turn STARTING for it
+	// (mergeresolve.go). Zero takes mergeResolutionTurnBindBound. It is a
+	// separate knob from MergeResolutionTurnBound because a harness proving the
+	// never-started failure and one proving the never-ended failure must shrink
+	// different clocks — collapsing them would make the two indistinguishable in
+	// exactly the tests that exist to tell them apart.
+	MergeResolutionTurnBindBound time.Duration
 	// ShimBuildSHA reports the build identity of the shim bundle this daemon
 	// would spawn TODAY — the `dist/.built-sha` stamp beside the entrypoint.
 	// A shim announcing a different identity is running superseded code and is
@@ -1058,7 +1066,38 @@ func (m *Manager) SubmitWorkspaceInitialPrompt(ctx context.Context, workspace, j
 }
 
 func (m *Manager) submitPrompt(ctx context.Context, workspace, requestID, text, permissionMode, origin string, promptOrigin corev1.PromptOrigin) error {
-	return m.submitPromptAs(ctx, workspace, requestID, text, permissionMode, origin, promptOrigin, submitterUser)
+	_, err := m.submitPromptAs(ctx, workspace, requestID, text, permissionMode, origin, promptOrigin, submitterUser)
+	return err
+}
+
+// promptDisposition is WHAT BECAME OF an accepted prompt: forwarded straight to
+// the shim, or parked on the queue behind work already in flight.
+//
+// IT EXISTS BECAUSE "THE SUBMIT SUCCEEDED" IS NOT "A TURN IS BEGINNING". Both
+// outcomes return a nil error, and for a user's prompt that is the whole point —
+// a queue chip is a promise of later delivery. For a MERGE prompt it is not: the
+// merge holds the workspace's lease and is waiting for the turn its submit was
+// supposed to start, so a prompt that only reached the queue means no turn is
+// coming until whatever is in front of it ends. That distinction used to be
+// invisible above the submit, and a merge resolution parked behind a turn whose
+// end never arrived waited out its entire 30-minute bound on a prompt the shim
+// had never even been handed (mergeresolve.go).
+type promptDisposition struct {
+	// queuedEntryID is the queue entry the prompt was parked as. Empty means it
+	// was forwarded to the shim instead.
+	queuedEntryID string
+}
+
+// queued reports whether the prompt was parked rather than forwarded.
+func (p promptDisposition) queued() bool { return p.queuedEntryID != "" }
+
+// String is the phrase that goes onto a failure cause, so the record states the
+// submit's fate rather than leaving it to be inferred from the log.
+func (p promptDisposition) String() string {
+	if p.queued() {
+		return "the prompt was QUEUED as entry " + p.queuedEntryID + " behind a turn already in flight, never handed to the shim"
+	}
+	return "the prompt was FORWARDED to the shim"
 }
 
 // submitPromptAs is submitPrompt with the SUBMITTER named, which is what the
@@ -1069,13 +1108,13 @@ func (m *Manager) submitPrompt(ctx context.Context, workspace, requestID, text, 
 // parked on the queue of a leased session would be delivered into the middle of
 // merge.Coordinator's conflict resolution the moment its turn ended, which is
 // the silent drop-shaped failure the loud refusal replaces.
-func (m *Manager) submitPromptAs(ctx context.Context, workspace, requestID, text, permissionMode, origin string, promptOrigin corev1.PromptOrigin, who submitter) error {
+func (m *Manager) submitPromptAs(ctx context.Context, workspace, requestID, text, permissionMode, origin string, promptOrigin corev1.PromptOrigin, who submitter) (promptDisposition, error) {
 	if err := validatePromptOrigin(promptOrigin); err != nil {
 		m.logf("session-controller: prompt REFUSED ws=%q request_id=%s origin=%q prompt_origin=%d error=%v — no session or queue state was touched", workspace, requestID, origin, promptOrigin, err)
-		return err
+		return promptDisposition{}, err
 	}
 	if err := m.guardMergeLease(workspace, who, requestID, origin); err != nil {
-		return err
+		return promptDisposition{}, err
 	}
 	// THE REVIVAL GATE, ahead of ensure() on purpose: ensure() brings a stopped
 	// shim back up, so asking after it would have already paid the bring-up and
@@ -1092,12 +1131,12 @@ func (m *Manager) submitPromptAs(ctx context.Context, workspace, requestID, text
 	// still stands behind every delivery path.
 	if !m.revivalParkAdmits(workspace, who) {
 		if err := m.guardHibernation(workspace, requestID, origin, who); err != nil {
-			return err
+			return promptDisposition{}, err
 		}
 	}
 	d, err := m.ensure(ctx, workspace)
 	if err != nil {
-		return err
+		return promptDisposition{}, err
 	}
 
 	// THE DRAIN LEASE IS READ BEFORE THE MUTEX, never under it: the lease engine
@@ -1114,7 +1153,7 @@ func (m *Manager) submitPromptAs(ctx context.Context, workspace, requestID, text
 		// keeping the prompt anyway would be the daemon promising a delivery it
 		// has no way to make.
 		m.mu.Unlock()
-		return err
+		return promptDisposition{}, err
 	}
 	if !queued {
 		m.mu.Unlock()
@@ -1135,10 +1174,11 @@ func (m *Manager) submitPromptAs(ctx context.Context, workspace, requestID, text
 			m.mu.Lock()
 			d.pausedRunner = false
 			m.mu.Unlock()
-			return err
+			return promptDisposition{}, err
 		}
-		return nil
+		return promptDisposition{}, nil
 	}
+	parked := promptDisposition{queuedEntryID: entry.id}
 	running := d.runningText
 	view, recs := m.publishQueueLocked(d)
 	m.mu.Unlock()
@@ -1153,7 +1193,7 @@ func (m *Manager) submitPromptAs(ctx context.Context, workspace, requestID, text
 		m.logf("session-controller: queued prompt entry=%s session=%s ws=%q origin=%q schedule=%s classifier=SKIPPED (parked by the drain lease)",
 			entry.id, d.sessionID, workspace, origin, entry.shutdownHoldScheduleID)
 		m.publish(d.sessionID, view, recs)
-		return nil
+		return parked, nil
 	}
 	// THE CLASSIFIER NEVER RUNS ON A KEEP-ALIVE-HELD ENTRY EITHER, and the
 	// reason is sharper than the drain lease's. The classifier answers exactly
@@ -1167,7 +1207,7 @@ func (m *Manager) submitPromptAs(ctx context.Context, workspace, requestID, text
 		m.logf("session-controller: queued prompt entry=%s session=%s ws=%q origin=%q keep_alive_turn=%s classifier=SKIPPED (held behind a cache keep-alive turn)",
 			entry.id, d.sessionID, workspace, origin, entry.keepAliveHoldTurnID)
 		m.publish(d.sessionID, view, recs)
-		return nil
+		return parked, nil
 	}
 	// THE CLASSIFIER NEVER RUNS ON A REVIVAL-PARKED ENTRY EITHER. The turn in
 	// front of it is the revival's own `/compact`, and the only verdict the
@@ -1178,13 +1218,13 @@ func (m *Manager) submitPromptAs(ctx context.Context, workspace, requestID, text
 		m.logf("session-controller: queued prompt entry=%s session=%s ws=%q origin=%q revival_session=%s classifier=SKIPPED (parked by an in-flight compact-first revival)",
 			entry.id, d.sessionID, workspace, origin, entry.revivalHoldSessionID)
 		m.publish(d.sessionID, view, recs)
-		return nil
+		return parked, nil
 	}
 	m.logf("session-controller: queued prompt entry=%s session=%s ws=%q origin=%q (turn in flight)",
 		entry.id, d.sessionID, workspace, origin)
 	m.publish(d.sessionID, view, recs)
 	go m.classify(d, entry.id, running, text)
-	return nil
+	return parked, nil
 }
 
 // persistBackfillState writes the never-blue backfill signal (F2) through to
