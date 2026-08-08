@@ -5,6 +5,7 @@
  * so streaming updates do not rebuild the whole list.
  */
 import { SUBAGENT_TOOLS } from "./agents.js";
+import { bubbleBreathStyle } from "./breathing.js";
 import { STREAM_ITEM_CAP, parseJournal } from "./async-stream.js";
 import { clearLogDedup, log } from "./wslog.js";
 import {
@@ -386,17 +387,26 @@ export function formatBubbleTime(ts: string, nowMs: number = Date.now()): string
  * The corner holds its own flex column rather than floating over the body,
  * so a full-width response line never runs beneath it.
  */
-function Bubble(cls: string, body: string, ts: string, meta = ""): string {
-  return `<div class="${cls}"><div class="bubble-body">${body}</div><span class="turn-meta">${meta}<span class="turn-ts">${escapeHtml(
+function Bubble(cls: string, body: string, ts: string, meta = "", style = ""): string {
+  const styled = style === "" ? "" : ` style="${style}"`;
+  return `<div class="${cls}"${styled}><div class="bubble-body">${body}</div><span class="turn-meta">${meta}<span class="turn-ts">${escapeHtml(
     formatBubbleTime(ts),
   )}</span></span></div>`;
 }
 
 /**
- * The prompt bubble. It never breathes: a just-sent prompt whose turn has
- * produced nothing visible yet is covered by the orange `working…` tail row
- * now (the progress footer), which retired the prompt breath — so the bubble is
- * a plain `bubble user`, the same way a running tool card ignores the pulse.
+ * The prompt bubble.
+ *
+ * It breathes — a slow scale oscillation that says nothing about the turn's
+ * state, only that the session is live (the orange `working…` tail row carries
+ * progress). The animation itself is the stylesheet's (`.bubble.user`); what
+ * this function must supply is the PHASE. The feed rebuilds bubble markup
+ * wholesale, and a fresh node restarts a CSS animation at 0%, so every rebuild
+ * would snap the bubble back to the deflated end of the swing. The inline
+ * negative `animation-delay` seeks the new node to where the page-global
+ * breath already was, which makes a rebuild indistinguishable from a node that
+ * was never replaced. This is the ONLY construction site of a `.bubble.user`,
+ * so stamping it here covers every render path that produces one.
  */
 function UserTurn(item: UserTurnItem, panels?: PanelContext): string {
   // A tools-only turn hosts its live async on its own prompt bubble (see
@@ -409,7 +419,7 @@ function UserTurn(item: UserTurnItem, panels?: PanelContext): string {
   // which render as the same highlighted card the agent's own fences get
   // (see renderPromptBody). A fence-free prompt keeps its plain <pre>.
   const body = `${renderPromptBody(userTurnText(item))}${catalog}`;
-  return Bubble(`bubble user${stateCls}`, body, item.ts);
+  return Bubble(`bubble user${stateCls}`, body, item.ts, "", bubbleBreathStyle());
 }
 
 /** The fixed body of the Merge status card (see `MergeCard`). */
