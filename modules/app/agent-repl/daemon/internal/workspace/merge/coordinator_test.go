@@ -51,24 +51,28 @@ type fakePicker struct {
 	continueResults chan pickResult
 	// rollbacks announces each Rollback with the head it was asked to reset to,
 	// which is how a test pins that the target went back to its pre-merge HEAD.
-	rollbacks   chan string
-	rollbackErr error
-	queued      chan queuedRecord
-	queuedErr   error
-	stop        chan struct{}
+	rollbacks chan string
+	// rollbackExpected announces the head the coordinator claimed the merge left
+	// the target on, which the driver checks the target against before resetting.
+	rollbackExpected chan string
+	rollbackErr      error
+	queued           chan queuedRecord
+	queuedErr        error
+	stop             chan struct{}
 }
 
 func newFakePicker(capacity int) *fakePicker {
 	return &fakePicker{
-		merges:          make(chan Request, capacity),
-		results:         make(chan pickResult, capacity),
-		resumes:         make(chan Request, capacity),
-		resumeResults:   make(chan pickResult, capacity),
-		continues:       make(chan string, capacity),
-		continueResults: make(chan pickResult, capacity),
-		rollbacks:       make(chan string, capacity),
-		queued:          make(chan queuedRecord, capacity),
-		stop:            make(chan struct{}),
+		merges:           make(chan Request, capacity),
+		results:          make(chan pickResult, capacity),
+		resumes:          make(chan Request, capacity),
+		resumeResults:    make(chan pickResult, capacity),
+		continues:        make(chan string, capacity),
+		continueResults:  make(chan pickResult, capacity),
+		rollbacks:        make(chan string, capacity),
+		rollbackExpected: make(chan string, capacity),
+		queued:           make(chan queuedRecord, capacity),
+		stop:             make(chan struct{}),
 	}
 }
 
@@ -104,7 +108,8 @@ func (p *fakePicker) ContinueAfterTestFix(ctx context.Context, _ Request, failin
 	}
 }
 
-func (p *fakePicker) Rollback(_ context.Context, _ Request, head string) error {
+func (p *fakePicker) Rollback(_ context.Context, _ Request, head, expected string) error {
+	p.rollbackExpected <- expected
 	p.rollbacks <- head
 	return p.rollbackErr
 }
@@ -1742,8 +1747,19 @@ func TestCloseRetainsAParkedConflictForTheNextBoot(t *testing.T) {
 // testFailure is the Result merge.Driver returns when a landed commit broke the
 // suite. The pre-merge head is what the rollback path resets the target to.
 func testFailure(commit, tail, preHead string) Result {
-	return Result{Outcome: OutcomeTestFailed, FailingCommit: commit, TestFailureTail: tail, PreMergeHead: preHead}
+	return Result{
+		Outcome:         OutcomeTestFailed,
+		FailingCommit:   commit,
+		TestFailureTail: tail,
+		PreMergeHead:    preHead,
+		TestedHead:      testedHeadOfFailure,
+	}
 }
+
+// testedHeadOfFailure is the head every testFailure claims the suite ran
+// against. The coordinator owes it to the rollback as the ownership proof that
+// nothing else has written to the target meanwhile.
+const testedHeadOfFailure = "tested0"
 
 func TestTestFailureIsHandedToTheWorkspacesOwnShim(t *testing.T) {
 	// Arrange — a merge whose first landed commit breaks the suite.
@@ -1937,6 +1953,28 @@ func TestAFailedRollbackStillFailsTheMergeAndSaysSo(t *testing.T) {
 	got := h.sink.awaitPhase(t, PhaseMergeFailed)
 	if !strings.Contains(got.cause, "rollback to head0 FAILED") {
 		t.Fatalf("merge_failed cause = %q, want it to name the failed rollback", got.cause)
+	}
+}
+
+func TestTheRollbackIsGivenTheHeadTheMergeLeftTheTargetOn(t *testing.T) {
+	// Arrange — a merge that failed its gate. The reset that follows happens
+	// after an unbounded resolution window, so the driver needs the head this
+	// merge left behind to tell "my own commits" from somebody else's.
+	h := newHarness(t)
+	req := testRequest("a")
+	if _, err := h.coord.Enqueue(context.Background(), req); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	<-h.picker.merges
+	h.picker.results <- pickResult{res: testFailure("abc1234", "FAIL: suite", "head0")}
+	<-h.testResolver.calls
+
+	// Act.
+	h.testResolver.results <- sentinelError("no live session")
+
+	// Assert.
+	if got := <-h.picker.rollbackExpected; got != testedHeadOfFailure {
+		t.Fatalf("Rollback expected head = %q, want the tested %q", got, testedHeadOfFailure)
 	}
 }
 
