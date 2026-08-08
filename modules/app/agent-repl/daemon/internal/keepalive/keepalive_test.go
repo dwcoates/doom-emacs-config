@@ -32,9 +32,13 @@ func TestEvaluateAction(t *testing.T) {
 			wantAction:    ActionNone,
 		},
 		{
-			name:          "one millisecond before the window opens does not ping",
+			// AMENDED for warm compaction. What this row has always been about —
+			// this instant is not a ping — is unchanged; the instant now falls
+			// inside the warm-compaction span, which by construction ends
+			// exactly where the ping window begins.
+			name:          "one millisecond before the ping window opens warm-compacts rather than pinging",
 			lastTurnEndMs: msAgo(DefaultCacheTTL - DefaultLeeway - time.Millisecond),
-			wantAction:    ActionNone,
+			wantAction:    ActionWarmCompact,
 		},
 		{
 			name:          "the instant the window opens pings",

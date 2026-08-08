@@ -59,6 +59,41 @@ const (
 // be retried while it was being tried.
 const RetryFloor = time.Minute
 
+// WarmCompactMargin is how far AHEAD of the last usable keep-alive instant a
+// warm compaction is submitted.
+//
+// THE WHOLE FEATURE IS THIS MARGIN. A compaction reads the entire conversation,
+// so it is either the cheapest turn of the session — every token of it a cache
+// READ — or the most expensive one, at the uncached rate, depending on nothing
+// but whether it runs before or after the prompt cache dies. Compacting only at
+// REVIVAL, which is where the daemon used to do it, is by construction the
+// second case: revival happens after the cache has already expired. Five
+// minutes is the room the compaction itself needs — it is a model call across
+// the whole history — inside a cache that is still provably alive.
+//
+// IT IS MEASURED BACK FROM CacheTTL-RetryFloor, not from the ping window's
+// opening edge, because CacheTTL-RetryFloor is the LAST instant at which this
+// policy will submit anything at all (ActionAwaitExpiry owns everything after
+// it). Anchoring on the ping window's opening edge would move with Leeway and
+// say nothing about how much cache lifetime is actually left.
+const WarmCompactMargin = 5 * time.Minute
+
+// WarmCompactMinContextTokens is the conversation size below which a warm
+// compaction is NOT worth submitting.
+//
+// COMPACTING A SMALL CONVERSATION IS PURE WASTE. It costs a model call across
+// the whole history and buys back a context that was never the problem, and it
+// throws away detail the user may still be working against. Fifty thousand
+// tokens is roughly a quarter of the usual context window: below it the
+// re-ingest a cold revival would pay is bounded and cheap, and the compaction
+// would cost more than the miss it prevents.
+//
+// The figure is compared against the total input the session's most recent
+// turn presented to the model — cache reads included, because a token read from
+// cache is still a token of standing context that a cold revival would re-ingest
+// at full price.
+const WarmCompactMinContextTokens int64 = 50_000
+
 // Config is the resolved keep-alive policy configuration.
 type Config struct {
 	// CacheTTL is how long the vendor prompt cache is expected to survive
@@ -127,6 +162,14 @@ func (c Config) Validate() error {
 		return fmt.Errorf("keepalive: leeway %s must be longer than the retry floor %s; otherwise the whole ping window lies inside the floor and no ping could ever be submitted",
 			c.Leeway, RetryFloor)
 	}
+	if c.WarmCompactAt() <= 0 {
+		return fmt.Errorf("keepalive: cache TTL %s leaves no warm-compaction instant: it must exceed the retry floor %s plus the warm-compaction margin %s, or the compaction would be due before the turn that started the window had ended",
+			c.CacheTTL, RetryFloor, WarmCompactMargin)
+	}
+	if c.WarmCompactAt() >= c.CacheTTL-c.Leeway {
+		return fmt.Errorf("keepalive: leeway %s must be shorter than the retry floor %s plus the warm-compaction margin %s; otherwise the warm compaction is due at or after the ping window opens and the ping arm swallows it, leaving the compaction silently inert",
+			c.Leeway, RetryFloor, WarmCompactMargin)
+	}
 	if c.IdleCutoff <= 0 {
 		return fmt.Errorf("keepalive: idle cutoff must be positive, got %s", c.IdleCutoff)
 	}
@@ -158,6 +201,18 @@ func (c Config) SweepInterval(existing time.Duration) time.Duration {
 	return derived
 }
 
+// WarmCompactAt is the elapsed idleness at which a warm compaction becomes
+// due: WarmCompactMargin ahead of CacheTTL-RetryFloor, which is the last
+// instant this policy submits anything at all.
+//
+// Validate refuses a configuration whose answer here is non-positive or does
+// not precede the ping window, so every Config that reached Evaluate has a real
+// warm-compaction instant. A silently inert feature is the one outcome the
+// startup refusal exists to prevent.
+func (c Config) WarmCompactAt() time.Duration {
+	return c.CacheTTL - RetryFloor - WarmCompactMargin
+}
+
 // Action is what the policy decided to do about one session.
 type Action int
 
@@ -167,6 +222,15 @@ const (
 	ActionNone Action = iota
 	// ActionPing submits a cache keep-alive prompt.
 	ActionPing
+	// ActionWarmCompact submits a COMPACTION while the prompt cache is still
+	// provably warm, WarmCompactMargin ahead of the last instant at which this
+	// policy would submit anything.
+	//
+	// It is a distinct arm rather than a flag on ActionPing for the reason
+	// ActionAwaitExpiry is: the two submit different things with different
+	// costs, and a caller switching on Action cannot conflate them without
+	// writing a case that says it is doing so.
+	ActionWarmCompact
 	// ActionHibernate takes the hibernation transition, with Decision.Cause
 	// saying why.
 	ActionHibernate
@@ -187,6 +251,8 @@ func (a Action) String() string {
 		return "ping"
 	case ActionHibernate:
 		return "hibernate"
+	case ActionWarmCompact:
+		return "warm_compact"
 	case ActionAwaitExpiry:
 		return "await_expiry"
 	default:
@@ -276,6 +342,19 @@ func (c Config) Evaluate(nowMs, lastTurnEndMs int64) Decision {
 			Action:      ActionPing,
 			ElapsedMs:   elapsedMs,
 			RemainingMs: remainingMs,
+		}
+	}
+	if elapsed >= c.WarmCompactAt() {
+		// THE WARM COMPACTION IS TESTED BELOW THE PING WINDOW, not inside it,
+		// and the ordering is the policy. Its instant precedes the window by
+		// construction (Validate refuses any configuration where it does not),
+		// so a session reaching here is one whose cache is still provably alive
+		// with room to spare — which is the only condition under which reading
+		// the whole conversation is cheap.
+		return Decision{
+			Action:      ActionWarmCompact,
+			ElapsedMs:   elapsedMs,
+			RemainingMs: int64((c.CacheTTL - elapsed) / time.Millisecond),
 		}
 	}
 	return Decision{Action: ActionNone, ElapsedMs: elapsedMs}

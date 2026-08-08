@@ -219,8 +219,31 @@ func (m *Manager) ReviveSession(ctx context.Context, workspace string, mode Revi
 	if err != nil {
 		return err
 	}
+	// THE COLD-READ ALARM'S CLAIM, taken before the submit so the compaction's
+	// own terminal result can never arrive with nothing to match it against.
+	//
+	// A REVIVAL COMPACTION IS THE INCIDENT THIS ALARM WAS BUILT FROM. It runs
+	// after the cache has already expired by construction — that expiry is why
+	// the session was asleep — so it is the likeliest cold read in the daemon,
+	// and covering only the warm path would leave the measured 1.5-million-token
+	// case silent. The claim is released on submit failure and at the turn's own
+	// end (queue.go), the same lifecycle the keep-alive ping's claim has.
+	m.mu.Lock()
+	claimErr := m.claimDaemonCompactionLocked(d, daemonCompaction{turnID: compactRequestID, kind: compactionRevive})
+	m.mu.Unlock()
+	if claimErr != nil {
+		m.errorf("session-controller: revive compaction NOT CLAIMED ws=%q session=%s turn_id=%s error=%v — the session STAYS GATED and nothing was submitted",
+			workspace, sessionID, compactRequestID, claimErr)
+		return claimErr
+	}
 	if err := m.forwardPrompt(ctx, d, compactRequestID, compactCommandText,
 		"revive-compact:"+sessionID, "", corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, submitterRevival); err != nil {
+		// The claim goes with the compaction that never ran. Leaving it standing
+		// would hand the NEXT turn's cost to a compaction that was never
+		// submitted, which is the misattribution the claim exists to prevent.
+		m.mu.Lock()
+		m.releaseDaemonCompactionLocked(d, compactRequestID)
+		m.mu.Unlock()
 		m.logf("session-controller: revive COMPACTION SUBMIT FAILED ws=%q session=%s error=%v — the session STAYS GATED; it was not left half-revived and accepting prompts",
 			workspace, sessionID, err)
 		return fmt.Errorf("session-controller: reviving session %s (ws %q): submitting the compaction: %w", sessionID, workspace, err)
@@ -240,7 +263,7 @@ func (m *Manager) ReviveSession(ctx context.Context, workspace string, mode Revi
 	m.exits.Add(1)
 	detached = true
 	m.mu.Unlock()
-	go m.awaitReviveCompaction(workspace, sessionID, compacted, disarm, release)
+	go m.awaitReviveCompaction(workspace, sessionID, compactRequestID, compacted, disarm, release)
 
 	m.logf("session-controller: revive ACCEPTED ws=%q session=%s mode=compact_first — %s is submitted and the session STAYS GATED until it lands",
 		workspace, sessionID, compactCommandText)
@@ -298,10 +321,27 @@ func (m *Manager) ReviveForMerge(ctx context.Context, workspace string) error {
 // EVERY FAILING EXIT LEAVES THE RECORD UNTOUCHED. The clear is reached only on
 // the completion signal, which is what makes "a failed compaction leaves the
 // session gated" structural rather than a promise each error path has to keep.
-func (m *Manager) awaitReviveCompaction(workspace, sessionID string, compacted <-chan struct{}, disarm, release func()) {
+func (m *Manager) awaitReviveCompaction(workspace, sessionID, compactRequestID string, compacted <-chan struct{}, disarm, release func()) {
 	defer m.exits.Done()
 	defer release()
 	defer disarm()
+	// THE COLD-READ CLAIM ENDS WHERE THIS REVIVAL'S OWNERSHIP OF THE COMPACTION
+	// ENDS, on every exit, and that is a WIDER boundary than the compaction
+	// turn's own end (queue.go releases it there too, and the two are idempotent
+	// against each other because both match on the turn id).
+	//
+	// The turn-end release alone would not be enough: a compaction that lands on
+	// the compacting axis without this daemon ever seeing its turn end — the
+	// bound expiring, the daemon shutting down mid-compaction — would leave the
+	// claim standing, and the NEXT revival of this session would then be refused
+	// its own claim by a compaction that is long over.
+	defer func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		if d, live := m.byWS[workspace]; live {
+			m.releaseDaemonCompactionLocked(d, compactRequestID)
+		}
+	}()
 	bound := m.reviveCompactBound()
 	select {
 	case <-compacted:
@@ -370,8 +410,13 @@ func (m *Manager) revivalHoldSessionLocked(d *sessionController) string {
 //   - submitterKeepAlive is a ping, and a hibernated session is outside the
 //     keep-alive loop by construction — a ping reaching here is that
 //     construction having failed, which is said out loud rather than queued.
+//   - submitterWarmCompaction is the daemon's pre-expiry `/compact`, and it is
+//     named for the ping's exact reason: a hibernated session is outside the
+//     keep-alive policy that schedules it, so one reaching here is that same
+//     construction having failed. Parking it would also be absurd on its own
+//     terms — it would wait behind a compaction to run a second compaction.
 func (m *Manager) revivalParkAdmits(workspace string, who submitter) bool {
-	if who == submitterRevival || who == submitterKeepAlive {
+	if who == submitterRevival || who == submitterKeepAlive || who == submitterWarmCompaction {
 		return false
 	}
 	if m.cfg.Hibernations == nil {

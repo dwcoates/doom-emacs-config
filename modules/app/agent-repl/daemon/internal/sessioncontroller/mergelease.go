@@ -50,6 +50,14 @@ const (
 	// alternative — clearing the record first and inventing a second
 	// "compacting, still gated" state — would be two gates that could disagree.
 	submitterRevival
+	// submitterWarmCompaction is the daemon's own pre-expiry `/compact`
+	// (warmcompact.go). It is a submitter of its own for submitterKeepAlive's
+	// reason — it is refused outright while the merge lease is held, and it must
+	// never be parked behind a revival gate — and because it is the ONE producer
+	// whose whole purpose is to be cheap: conflating it with the revival's
+	// compaction would make "which compaction read cold" unanswerable at exactly
+	// the moment the answer matters.
+	submitterWarmCompaction
 )
 
 func (s submitter) String() string {
@@ -60,6 +68,8 @@ func (s submitter) String() string {
 		return "keep-alive"
 	case submitterRevival:
 		return "revival"
+	case submitterWarmCompaction:
+		return "warm-compaction"
 	default:
 		return "user"
 	}
@@ -105,6 +115,16 @@ func (m *Manager) guardMergeLease(workspace string, who submitter, requestID, or
 		// is the same safe direction every other revival failure lands in.
 		err := fmt.Errorf("session-controller: revival of workspace %q refused: merge.Coordinator holds the exclusivity lease on its session, so the compaction cannot be submitted until the merge reaches a terminal phase. The session remains hibernated and can be revived again", workspace)
 		m.logf("session-controller: revival compaction REFUSED ws=%q request_id=%s origin=%q — the merge lease is held; nothing was submitted and the session stays gated",
+			workspace, requestID, origin)
+		return err
+	case held && who == submitterWarmCompaction:
+		// A WARM COMPACTION NEVER INTERRUPTS A MERGE, for the keep-alive ping's
+		// reason and more so: it is still a turn, and it would rewrite the
+		// conversation merge.Coordinator is resolving conflicts against. The
+		// cache is allowed to go cold instead — the cheaper mistake, reported by
+		// the cold-read alarm if the revival compaction later pays for it.
+		err := fmt.Errorf("session-controller: warm compaction for workspace %q refused: merge.Coordinator holds the exclusivity lease on its session", workspace)
+		m.logf("session-controller: warm compaction REFUSED ws=%q request_id=%s origin=%q — the merge lease is held, so the cache is allowed to expire rather than a compaction landing inside conflict resolution",
 			workspace, requestID, origin)
 		return err
 	case held && who == submitterUser:

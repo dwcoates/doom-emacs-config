@@ -710,6 +710,21 @@ func (m *Manager) onTurnBoundary(d *sessionController, active bool, endedAtMs in
 	wasInterrupted, wasLoneRunner := d.interruptedTurn, d.pausedRunner
 	d.interruptedTurn, d.pausedRunner = false, false
 
+	// A DAEMON COMPACTION'S CLAIM IS RETIRED AT ITS OWN TURN'S END, matched on
+	// the ending turn's name for the keep-alive claim's reason: a late end for
+	// some other turn must not retire a claim this compaction still owns.
+	//
+	// NOTHING IS DECIDED HERE. The cold-read alarm is a REPORT, not a lifecycle
+	// transition, so it is taken at the observation itself (compactioncold.go) —
+	// which by then has already happened, because the terminal result reaches
+	// the consumer on this same goroutine before the boundary that ends the
+	// turn. This is only the release, and it is placed ahead of the keep-alive
+	// branch below because that branch returns.
+	if m.releaseDaemonCompactionLocked(d, endingTurnID) {
+		m.logf("session-controller: daemon compaction turn ENDED ws=%q session=%s turn_id=%s — the cold-read claim is retired; its verdict was already taken when the terminal result was reduced",
+			d.workspace, d.sessionID, endingTurnID)
+	}
+
 	// THE KEEP-ALIVE PING'S END is the event the whole rewind sequence hangs
 	// off. It is taken here, at the same boundary the ordinary drain uses, so
 	// there is one place that decides what a turn ending means.
