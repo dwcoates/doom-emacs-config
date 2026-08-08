@@ -1588,6 +1588,7 @@ captured rather than armed and the echo area is silenced, so nothing here
 escapes the test."
   (declare (indent 1))
   `(let ((agent-repl--frontend-expected-restart nil)
+         (agent-repl--frontend-expected-restart-last-close nil)
          (agent-repl-frontend-expected-restart-window-seconds 180.0)
          (,records nil))
      (with-current-buffer (get-buffer-create agent-repl--frontend-daemon-buffer)
@@ -1707,6 +1708,80 @@ escapes the test."
       (agent-repl--frontend-expected-restart-note-reconnect)
       ;; Assert
       (should-not agent-repl--frontend-expected-restart))
+    (ignore records)))
+
+(ert-deftest agent-repl-test-daemon-covering-initiator-covers-any-moment-while-live ()
+  "A LIVE window covers whatever moment it is asked about."
+  ;; Arrange
+  (agent-repl-test--with-expected-restart records
+    (agent-repl--frontend-arm-expected-restart "deploy (emacsclient)")
+    ;; Act / Assert
+    (should (equal (agent-repl--frontend-expected-restart-covering-initiator
+                    (- (float-time) 3600.0))
+                   "deploy (emacsclient)"))
+    (ignore records)))
+
+(ert-deftest agent-repl-test-daemon-covering-initiator-needs-a-moment-once-closed ()
+  "With no live window, `nil' AS-OF asks about NOW, which no closed window covers."
+  ;; Arrange
+  (agent-repl-test--with-expected-restart records
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_p) nil))
+              ((symbol-function 'agent-repl-failure-surface) #'ignore))
+      (agent-repl--frontend-arm-expected-restart "deploy (emacsclient)")
+      (agent-repl--frontend-daemon-sentinel 'proc "killed: 9\n")
+      (agent-repl--frontend-expected-restart-note-reconnect))
+    ;; Act / Assert
+    (should-not (agent-repl--frontend-expected-restart-covering-initiator))
+    (ignore records)))
+
+(ert-deftest agent-repl-test-daemon-covering-initiator-covers-a-closed-windows-span ()
+  "A reconnect-closed window still covers the moments inside its own lifetime."
+  ;; Arrange
+  (agent-repl-test--with-expected-restart records
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_p) nil))
+              ((symbol-function 'agent-repl-failure-surface) #'ignore))
+      (agent-repl--frontend-arm-expected-restart "deploy (emacsclient)")
+      (setq agent-repl--frontend-expected-restart
+            (plist-put agent-repl--frontend-expected-restart
+                       :armed-at (- (float-time) 20.0)))
+      (agent-repl--frontend-daemon-sentinel 'proc "killed: 9\n")
+      (agent-repl--frontend-expected-restart-note-reconnect))
+    ;; Act / Assert
+    (should (equal (agent-repl--frontend-expected-restart-covering-initiator
+                    (- (float-time) 10.0))
+                   "deploy (emacsclient)"))
+    (ignore records)))
+
+(ert-deftest agent-repl-test-daemon-covering-initiator-excludes-what-predates-the-window ()
+  "A moment before the window was armed is outside it, so nothing covers it."
+  ;; Arrange
+  (agent-repl-test--with-expected-restart records
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_p) nil))
+              ((symbol-function 'agent-repl-failure-surface) #'ignore))
+      (agent-repl--frontend-arm-expected-restart "deploy (emacsclient)")
+      (agent-repl--frontend-daemon-sentinel 'proc "killed: 9\n")
+      (agent-repl--frontend-expected-restart-note-reconnect))
+    ;; Act / Assert
+    (should-not (agent-repl--frontend-expected-restart-covering-initiator
+                 (- (float-time) 10.0)))
+    (ignore records)))
+
+(ert-deftest agent-repl-test-daemon-expiry-leaves-no-covering-window-behind ()
+  "A window that EXPIRED describes an outage, so it grants nothing any grace."
+  ;; Arrange
+  (agent-repl-test--with-expected-restart records
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_p) nil))
+              ((symbol-function 'agent-repl-failure-surface) #'ignore))
+      (agent-repl--frontend-arm-expected-restart "deploy (emacsclient)")
+      (setq agent-repl--frontend-expected-restart
+            (plist-put agent-repl--frontend-expected-restart
+                       :armed-at (- (float-time) 20.0)))
+      (agent-repl--frontend-daemon-sentinel 'proc "killed: 9\n")
+      ;; Act
+      (agent-repl--frontend-expected-restart-expire))
+    ;; Assert
+    (should-not (agent-repl--frontend-expected-restart-covering-initiator
+                 (- (float-time) 10.0)))
     (ignore records)))
 
 (ert-deftest agent-repl-test-daemon-expected-restart-survives-a-preflight-connect ()
