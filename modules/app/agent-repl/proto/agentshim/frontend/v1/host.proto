@@ -1,0 +1,186 @@
+// host.proto — HOST surface: the Emacs-only workspace lifecycle and UI action inbox.
+
+syntax = "proto3";
+
+package agentshim.frontend.v1;
+
+import "google/protobuf/struct.proto";
+
+option go_package = "agentrepl/proto/agentshim/frontend/v1;frontendv1";
+
+// Request one agent-repl workspace.  This is the sole creation ingress for
+// both host UI requests (SPC TAB n/N) and skill-produced JSON dispatches.  The
+// daemon owns name resolution, worktree creation, session startup, and initial
+// prompt delivery; a request never asks for a promptless/no-shim workspace.
+message CreateWorkspaceCmd {
+  string requested_name = 1;
+  string git_root = 2;
+  string base_commit = 3;
+  string source_workspace = 4;
+  string source_dir = 5;
+  optional string initial_prompt = 6;
+  string priority = 7;
+  string model = 8;
+  string fork_from = 9;
+  string fork_session_id = 10;
+  string postprocessing_prompt = 11;
+  string before_ws_merge = 12;
+  // Explicit session account/safety posture. The daemon must not infer these
+  // from its ambient process when a host asks it to create a workspace.
+  string config_dir = 13;
+  string permission_mode = 14;
+  bool allow_ungated = 15;
+}
+
+// The daemon's authoritative account of a workspace ready for host
+// materialization.  A `WorkspaceAvailable` is retained until Emacs sends
+// WorkspaceMaterializedCmd, so reconnecting Emacs cannot lose it.
+message WorkspaceAvailable {
+  string job_id = 1;
+  string final_name = 2;
+  string worktree_path = 3;
+  string branch = 4;
+  string git_root = 5;
+  string base_commit = 6;
+  string source_workspace = 7;
+  string source_dir = 8;
+  string fork_from = 9;
+  string fork_session_id = 10;
+  string session_id = 11;
+  string priority = 12;
+  string model = 13;
+  bool initial_prompt_queued = 14;
+  string config_dir = 15;
+  string permission_mode = 16;
+  bool allow_ungated = 17;
+}
+
+// Emacs has created the perspective/local bookkeeping for the authoritative
+// workspace descriptor.  The daemon uses this durable acknowledgement to
+// release an initial prompt that was held until a visible host workspace
+// exists.
+message WorkspaceMaterializedCmd {
+  string job_id = 1;
+}
+
+// Open a workspace: reattach to the session it already has, or start one when
+// it has none. The fields are the workspace's RUN PREFERENCES — the posture and
+// account a session for this workspace runs under — which the editor owns
+// because they are properties of the checkout, not of any session.
+//
+// There is deliberately NO session identity here. Which session a workspace
+// owns is the daemon's ruling; a frontend that named one would be asserting an
+// answer to a question it cannot hold across a daemon restart.
+message OpenWorkspaceCmd {
+  // The permission posture a session started by this open runs under, empty to
+  // accept the daemon's default. Ignored when the workspace already has a
+  // session: an open never re-postures a live one.
+  string permission_mode = 1;
+  // The CLAUDE_CONFIG_DIR — i.e. WHICH ACCOUNT — a session started by this open
+  // runs under. One shared daemon serves every workspace, so its own
+  // environment cannot encode a per-workspace account.
+  //
+  // Empty means the daemon's own default, NOT the absence of a config dir.
+  string config_dir = 2;
+  // Run a session started by this open against the offline scripted SDK.
+  bool fake = 3;
+  // The caller's DELIBERATE consent to start a session with NO permission gate,
+  // required on exactly the same terms as CreateSessionCmd.allow_ungated and
+  // enforced by the same refusal. An open that could reach an ungated posture
+  // without it would be a second, quieter door to the one thing that consent
+  // exists to make loud.
+  bool allow_ungated = 4;
+}
+
+message CloseWorkspaceCmd {}
+
+message MergeWorkspaceCmd {
+  // 1 was handler (string, e.g. "cherry-pick"), 3/4/5 were the caller-stated
+  // merge geometry (source_branch, source_dir, target_dir): RETIRED.
+  //
+  // THE DAEMON OWNS THE GEOMETRY MAP (internal/workspace/geometry). It records
+  // a workspace's source branch, source worktree and merge target when it
+  // CREATES the workspace, and derives them at boot for pre-cutover ones, so a
+  // merge command has nothing left to state. Emacs already sends a bare
+  // request keyed by workspace; the caller-stated path was the second owner of
+  // one map, which is how a cherry-pick reached a target the daemon had never
+  // heard of. `handler` went the same way: there has only ever been one merge
+  // handler, and a field naming it invited a caller to select a mechanism the
+  // daemon does not dispatch on.
+  reserved 1, 3, 4, 5;
+  reserved "handler", "source_branch", "source_dir", "target_dir";
+  bool conflict_resolved_continue = 2;  // the resolve-and-continue handoff
+  // Additive: the workspace's DISPLAY name, for the `merge/<name>` completion
+  // tag and the daemon's merge logs.
+  //
+  // It exists because the envelope's `workspace` field is the daemon's
+  // workspace KEY — the session cwd — exactly as it is for every other
+  // command. This command used to put the bare Emacs name there instead, which
+  // filed every merge state row under a workspace key nothing else used: the
+  // row had no session identity, so its WorkspaceState reached Emacs with an
+  // absent connectivity verdict and was refused, and the merge never tore its
+  // workspace down. The two identities are now separate fields rather than one
+  // slot meaning different things per command.
+  string workspace_name = 6;
+}
+
+// A daemon-owned inbox may contain UI-only actions alongside creates.  These
+// typed messages hand those actions to the Emacs host without two processes
+// racing to consume the same JSON file.  They are retained until completed.
+message HostAction {
+  string action_id = 1;
+  oneof action {
+    HostSwitchWorkspace switch_workspace = 2;
+    HostSetRepositoryFold set_repository_fold = 3;
+    HostSetSidebarView set_sidebar_view = 4;
+    HostTaskCreate task_create = 5;
+    HostTaskById task_toggle_done = 6;
+    HostTaskById task_open = 7;
+    HostTaskById task_add_workspace = 8;
+    HostLegacyCommand legacy_command = 9;
+    HostWorkspaceCreateFailed workspace_create_failed = 10;
+  }
+}
+
+// A durably-failed workspace-creation job. It rides the same
+// retained-until-completed HostAction envelope every other host action uses,
+// so a creation that died is delivered, replayed across reconnects, and
+// acknowledged exactly like a creation that succeeded. A failed job is never
+// silent: the daemon records it, logs it, and hands it to the host to show.
+message HostWorkspaceCreateFailed {
+  string job_id = 1;
+  string requested_name = 2;
+  string error = 3;
+}
+
+message HostSwitchWorkspace { string dir = 1; }
+
+message HostSetRepositoryFold { string repo_key = 1; bool folded = 2; }
+
+message HostSetSidebarView { string view = 1; }
+
+message HostTaskCreate {}
+
+message HostTaskById { string id = 1; }
+
+// Deliberate structured handoff for the established workspace-command verbs
+// whose payloads are not stable enough to promise a field-by-field protobuf
+// schema yet. `type` MUST be exactly one of: prompt, finish, close, open,
+// clipboard, send, merge, or eval. `payload` is the JSON-object command body
+// after the type discriminator, represented as protobuf Struct rather than an
+// opaque JSON string so the daemon can validate the verb and the host can
+// inspect every supplied field. This preserves every non-create inbox command
+// while creation ownership moves to the daemon.
+message HostLegacyCommand {
+  string type = 1;
+  google.protobuf.Struct payload = 2;
+}
+
+// Completion is host-only.  `ok=false` preserves the action and records the
+// supplied error in the daemon's durable inbox rather than silently dropping
+// a UI request that Emacs could not perform.
+message HostActionCompletedCmd {
+  string action_id = 1;
+  bool ok = 2;
+  string error = 3;
+}
