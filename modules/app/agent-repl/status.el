@@ -2418,6 +2418,24 @@ chain (one that escaped the per-step `condition-case' and never
 finalized) can be detected and force-cleared via
 `agent-repl-state-stale-threshold'.")
 
+(defvar agent-repl--update-chain-timer nil
+  "Timer holding the pending next step of the update chain, or nil.
+The chain hops from workspace to workspace through `run-at-time', so
+between two steps the ONLY thing keeping it alive is that timer.  Holding
+it here is what makes the chain tearable-down: `agent-repl--update-chain-
+teardown' cancels it and clears `agent-repl--update-in-flight', so a
+module reload or an explicit restart cannot leave a flag armed by a
+generation whose continuation has been cancelled out from under it.
+
+Deliberately NOT registered in `agent-repl--timers': the entry is a
+one-shot continuation replaced on every hop, and registering it would
+churn the keyed-timer registry once per workspace per second.
+
+When concurrent chains overlap (an event-driven `-now' call landing on
+top of a running timer chain), this holds the most recent hop only.  The
+older chain is harmless: it still finalizes, and finalize is an
+idempotent clear.")
+
 (defvar agent-repl--update-spread-sync nil
   "When non-nil, the chain processes all workspaces synchronously.
 Test-only affordance: production code never sets this.  Tests bind it
@@ -2502,37 +2520,86 @@ going.
 
 When `agent-repl--update-spread-sync' is non-nil (tests only),
 recurses directly instead of via `run-at-time'."
+  ;; This invocation IS the continuation the previous hop scheduled, so the
+  ;; slot no longer holds anything cancellable until we schedule the next.
+  (setq agent-repl--update-chain-timer nil)
   (cond
    ((null remaining)
     (agent-repl--update-all-workspace-states--finalize))
    (t
-    (let ((ws (car remaining))
-          (rest (cdr remaining)))
-      (condition-case err
-          (if (agent-repl--ws-project-pollable-p ws)
-              (agent-repl--update-one-workspace-state ws do-git-p)
-            (agent-repl--log-verbose
-             ws
-             "update-all-workspace-states--step: skipped ws=%s live=%S project-dir=%S"
-             ws (agent-repl--ws-live-p ws)
-             (agent-repl--ws-get ws :project-dir)))
-        (error
-         (agent-repl--warn ws "update-all-workspace-states--step: error ws=%s err=%S"
-                           ws err)))
-      (if rest
-          (if agent-repl--update-spread-sync
-              (agent-repl--update-all-workspace-states--step rest do-git-p gap)
-            (run-at-time gap nil
-                         #'agent-repl--update-all-workspace-states--step
-                         rest do-git-p gap))
-        (agent-repl--update-all-workspace-states--finalize))))))
+    ;; CONTINUED tracks whether the chain still has a successor that will
+    ;; reach a finalize.  Anything that escapes the body — an error from
+    ;; `agent-repl--warn' itself, or from `run-at-time' — leaves it nil, and
+    ;; the unwind clause finalizes so the flag never outlives the chain.
+    ;; The error still propagates; nothing here swallows it.
+    (let ((continued nil))
+      (unwind-protect
+          (let ((ws (car remaining))
+                (rest (cdr remaining)))
+            (condition-case err
+                (if (agent-repl--ws-project-pollable-p ws)
+                    (agent-repl--update-one-workspace-state ws do-git-p)
+                  (agent-repl--log-verbose
+                   ws
+                   "update-all-workspace-states--step: skipped ws=%s live=%S project-dir=%S"
+                   ws (agent-repl--ws-live-p ws)
+                   (agent-repl--ws-get ws :project-dir)))
+              (error
+               (agent-repl--warn ws "update-all-workspace-states--step: error ws=%s err=%S"
+                                 ws err)))
+            (cond
+             ((null rest)
+              (setq continued t)
+              (agent-repl--update-all-workspace-states--finalize))
+             (agent-repl--update-spread-sync
+              (setq continued t)
+              (agent-repl--update-all-workspace-states--step rest do-git-p gap))
+             (t
+              (setq agent-repl--update-chain-timer
+                    (run-at-time gap nil
+                                 #'agent-repl--update-all-workspace-states--step
+                                 rest do-git-p gap))
+              (setq continued t))))
+        (unless continued
+          (agent-repl--update-all-workspace-states--finalize)))))))
 
 (defun agent-repl--update-all-workspace-states--finalize ()
   "Terminal step of the workspace-state update chain.
-Clears the in-flight flag so the next timer tick can run."
-  (agent-repl--log-verbose nil "update-all-workspace-states--finalize: previous=%S"
-                            agent-repl--update-in-flight)
-  (setq agent-repl--update-in-flight nil))
+Clears the in-flight flag so the next timer tick can run.
+
+The clear happens BEFORE the trace, not after: logging goes through the
+module's file-backed logger, and a logger that signals (a state directory
+swapped out from under us by a deploy is the observed way that happens)
+must not be able to strand the flag.  Idempotent — safe to call from any
+exit path, including one where a concurrent chain already cleared."
+  (let ((previous agent-repl--update-in-flight))
+    (setq agent-repl--update-in-flight nil)
+    (agent-repl--log-verbose nil "update-all-workspace-states--finalize: previous=%S"
+                              previous)))
+
+(defun agent-repl--update-chain-teardown ()
+  "Abort any in-flight workspace-state update chain and clear its flag.
+Cancels the pending continuation (`agent-repl--update-chain-timer') and
+clears `agent-repl--update-in-flight'.
+
+This is the death path for the chain.  The chain has no process and no
+connection behind it — it is a sequence of `run-at-time' hops — so it
+dies exactly when its timers are torn down, which is what
+`agent-repl--cancel-all-timers' does on every module reload and on the
+explicit restart command.  Without this clear, a reload landing mid-chain
+left the flag armed at the old generation's timestamp while the heartbeat
+that would have force-cleared it was itself being cancelled, so the flag
+survived until some later tick noticed it was minutes stale and warned.
+
+Clears before logging for the same reason `--finalize' does."
+  (when (timerp agent-repl--update-chain-timer)
+    (cancel-timer agent-repl--update-chain-timer))
+  (setq agent-repl--update-chain-timer nil)
+  (let ((previous agent-repl--update-in-flight))
+    (setq agent-repl--update-in-flight nil)
+    (when previous
+      (agent-repl--log nil "update-chain-teardown: aborted in-flight chain age=%.2fs"
+                       (- (float-time) previous)))))
 
 (defun agent-repl--update-all-workspace-states-now ()
   "Unguarded entrypoint for the workspace-state update chain.
@@ -2586,7 +2653,16 @@ the poll."
      "update-all-workspace-states-now: count=%d placeholders=%S do-git=%s gap=%.3fs counter=%d"
      n placeholder-names do-git-p gap agent-repl--update-tick-counter)
     (setq agent-repl--update-in-flight (float-time))
-    (agent-repl--update-all-workspace-states--step ws-names do-git-p gap)))
+    ;; Arm-and-enter is one unit: if the first step signals before it can
+    ;; install its own unwind protection, the flag must not survive the
+    ;; error.  The error is re-raised by `unwind-protect', not swallowed.
+    (let ((entered nil))
+      (unwind-protect
+          (progn
+            (agent-repl--update-all-workspace-states--step ws-names do-git-p gap)
+            (setq entered t))
+        (unless entered
+          (agent-repl--update-all-workspace-states--finalize))))))
 
 (declare-function agent-repl--sidebar-tick "sidebar" ())
 
