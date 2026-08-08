@@ -2266,6 +2266,89 @@ the flag-clear invariant."
     (agent-repl--update-all-workspace-states--finalize)
     (should-not agent-repl--update-in-flight)))
 
+(ert-deftest agent-repl-test-update-all-finalize-clears-before-logging ()
+  "Finalize clears the flag even when the logger itself signals.
+A deploy can swap the state directory out from under the file-backed
+logger mid-chain; if the clear came after the trace, that signal would
+strand the flag until the stale backstop noticed it minutes later."
+  (agent-repl-test--with-clean-state
+    (setq agent-repl--update-in-flight (float-time))
+    (cl-letf (((symbol-function 'agent-repl--log-verbose)
+               (lambda (&rest _) (error "log sink gone"))))
+      (should-error (agent-repl--update-all-workspace-states--finalize)))
+    (should-not agent-repl--update-in-flight)))
+
+(ert-deftest agent-repl-test-update-all-step-clears-flag-when-handler-signals ()
+  "An error escaping the per-step `condition-case' still clears the flag.
+The handler's own `agent-repl--warn' is the escape hatch the old code had
+no cover for: it runs outside anything that could finalize, so a signal
+from it aborted the chain with the flag armed."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws-a" :project-dir "/tmp/a")
+    (setq agent-repl--update-in-flight (float-time))
+    (cl-letf (((symbol-function 'agent-repl--update-one-workspace-state)
+               (lambda (&rest _) (error "boom")))
+              ((symbol-function 'agent-repl--warn)
+               (lambda (&rest _) (error "warn sink gone"))))
+      (should-error
+       (agent-repl--update-all-workspace-states--step '("ws-a") nil 0.0)))
+    (should-not agent-repl--update-in-flight)))
+
+(ert-deftest agent-repl-test-update-all-now-clears-flag-when-step-signals ()
+  "A kickoff whose first step signals does not leave the flag armed.
+The arm and the entry into the chain are one unit; without the unwind the
+flag outlives a chain that never started."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws-a" :project-dir "/tmp/a")
+    (cl-letf (((symbol-function 'agent-repl--poll-workspace-notifications) #'ignore)
+              ((symbol-function 'agent-repl--update-all-workspace-states--step)
+               (lambda (&rest _) (error "boom"))))
+      (should-error (agent-repl--update-all-workspace-states-now)))
+    (should-not agent-repl--update-in-flight)))
+
+;;;; ---- Tests: chain teardown ----
+
+(ert-deftest agent-repl-test-update-chain-teardown-clears-in-flight-flag ()
+  "Tearing the chain down clears the in-flight flag.
+This is the death path: a module reload cancels the heartbeat that would
+otherwise have force-cleared the flag, so the flag must not survive it."
+  (agent-repl-test--with-clean-state
+    (setq agent-repl--update-in-flight (float-time))
+    (agent-repl--update-chain-teardown)
+    (should-not agent-repl--update-in-flight)))
+
+(ert-deftest agent-repl-test-update-chain-teardown-cancels-pending-step ()
+  "Tearing the chain down cancels the pending continuation timer.
+A surviving continuation would run a step belonging to a generation whose
+timers have already been cancelled."
+  (agent-repl-test--with-clean-state
+    (let ((timer (run-with-timer 9999 nil #'ignore)))
+      (setq agent-repl--update-chain-timer timer)
+      (agent-repl--update-chain-teardown)
+      (should-not (memq timer timer-list))
+      (should-not agent-repl--update-chain-timer))))
+
+(ert-deftest agent-repl-test-update-chain-teardown-idempotent-with-no-chain ()
+  "Tearing down with nothing in flight is a no-op, not an error."
+  (agent-repl-test--with-clean-state
+    (agent-repl--update-chain-teardown)
+    (should-not agent-repl--update-in-flight)
+    (should-not agent-repl--update-chain-timer)))
+
+(ert-deftest agent-repl-test-update-in-flight-p-stale-flag-warns ()
+  "The stale backstop still warns when it force-clears.
+The leak fix must not silence the warn: a genuinely stale flag is a real
+defect report and has to stay visible."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-state-stale-threshold 5.0)
+          (warnings nil))
+      (setq agent-repl--update-in-flight (- (float-time) 10.0))
+      (cl-letf (((symbol-function 'agent-repl--warn)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warnings))))
+        (should-not (agent-repl--update-in-flight-p)))
+      (should (= 1 (length warnings)))
+      (should (string-match-p "stale flag" (car warnings))))))
+
 ;;;; ---- Tests: mid-chain ws removal ----
 
 (ert-deftest agent-repl-test-update-all-step-skips-removed-ws ()
