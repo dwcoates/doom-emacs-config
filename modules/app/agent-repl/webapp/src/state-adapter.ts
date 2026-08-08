@@ -352,7 +352,13 @@ export interface ProgressInput {
   /** 0 = no turn in flight. */
   turnStartedAtMs: number;
   thinkingTokens: number;
-  /** THIS turn's cumulative cached + uncached input tokens. */
+  /**
+   * THIS turn's cumulative UNCACHED input tokens (`input_tokens` +
+   * `cache_creation_input_tokens`, cache reads excluded), resolved daemon-side.
+   * The footer's token cell renders and HEATS this figure, and it is the same
+   * measure `uncachedInputTokens` (tokens.ts) computes for the response
+   * bubble's stamp, so the live cell converges on the stamp it becomes.
+   */
   inputTokens: number;
   ttftMs: number;
   compacting: ProgressWindowInput | null;
