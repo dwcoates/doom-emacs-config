@@ -1,57 +1,41 @@
 package keepalive
 
-import "testing"
+import (
+	"testing"
 
-// THE SECOND TERM IS THE WHOLE POINT. A cold prompt surfaces as cache CREATION
-// with raw input_tokens near zero, so a measure that read input_tokens alone
-// would report almost nothing for exactly the case it exists to catch.
-func TestUncachedInputTokensCountsCacheCreation(t *testing.T) {
-	tests := []struct {
-		name          string
-		input         int64
-		cacheCreation int64
-		want          int64
-	}{
-		{name: "the observed cold ping", input: 2, cacheCreation: 22862, want: 22864},
-		{name: "a warm ping pays neither", input: 0, cacheCreation: 0, want: 0},
-		{name: "raw input alone still counts", input: 500, cacheCreation: 0, want: 500},
-		{name: "cache creation alone still counts", input: 0, cacheCreation: 500, want: 500},
-		{name: "both buckets nonzero add rather than shadow each other", input: 12000, cacheCreation: 12000, want: 24000},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange, Act.
-			got := UncachedInputTokens(tc.input, tc.cacheCreation)
+	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+)
 
-			// Assert.
-			if got != tc.want {
-				t.Fatalf("UncachedInputTokens(%d, %d) = %d, want %d", tc.input, tc.cacheCreation, got, tc.want)
-			}
-		})
+// usage builds one canonical measurement from the two vendor buckets a cost
+// verdict is taken from. The cache hit is named explicitly so a test can prove
+// it is excluded rather than merely omitted.
+func usage(freshInput, cacheWrite, cacheRead uint64) *frontendv1.TokenUsage {
+	return &frontendv1.TokenUsage{
+		InputHits:   &frontendv1.TokenCacheHits{Read: cacheRead},
+		InputMisses: &frontendv1.TokenCacheMisses{Written: cacheWrite, Unwritten: freshInput},
 	}
 }
 
-// ONLY THE SUM CROSSES. Two buckets each comfortably under the threshold still
+// ONLY THE SUM CROSSES. Two misses each comfortably under the threshold still
 // name a ping that paid for the whole conversation, and either one read alone
 // would call that cold ping warm — which is the exact silent-alarm shape the
-// sum exists to close (AGENTS.md, "Uncached input tokens are a SUM, and the
-// field names lie about it").
-func TestOnlyTheUncachedSumCrossesTheColdThreshold(t *testing.T) {
-	// Arrange — neither bucket reaches the 20k default on its own.
+// canonical input_misses grouping exists to close.
+func TestOnlyTheExpensiveSumCrossesTheColdThreshold(t *testing.T) {
+	// Arrange — neither miss reaches the 20k default on its own.
 	cfg := DefaultConfig()
-	const input, cacheCreation int64 = 12_000, 12_000
+	const fresh, written uint64 = 12_000, 12_000
 
 	// Act.
-	uncached := UncachedInputTokens(input, cacheCreation)
+	both := usage(fresh, written, 0)
 
 	// Assert.
-	if cfg.CameBackCold(input) || cfg.CameBackCold(cacheCreation) {
-		t.Fatalf("a single bucket (%d / %d) already crosses the %d threshold, so this case cannot prove the sum is what crosses it",
-			input, cacheCreation, cfg.UncachedCostAlertTokens)
+	if cfg.CameBackCold(usage(fresh, 0, 0)) || cfg.CameBackCold(usage(0, written, 0)) {
+		t.Fatalf("a single miss bucket (%d / %d) already crosses the %d threshold, so this case cannot prove the sum is what crosses it",
+			fresh, written, cfg.UncachedCostAlertTokens)
 	}
-	if !cfg.CameBackCold(uncached) {
-		t.Fatalf("CameBackCold(UncachedInputTokens(%d, %d) = %d) = false against a %d threshold; reading either bucket alone hides a ping that re-ingested the whole conversation",
-			input, cacheCreation, uncached, cfg.UncachedCostAlertTokens)
+	if !cfg.CameBackCold(both) {
+		t.Fatalf("CameBackCold(fresh=%d written=%d) = false against a %d threshold; reading either miss alone hides a ping that re-ingested the whole conversation",
+			fresh, written, cfg.UncachedCostAlertTokens)
 	}
 }
 
@@ -59,83 +43,96 @@ func TestOnlyTheUncachedSumCrossesTheColdThreshold(t *testing.T) {
 // same figure: a turn exactly at the threshold has not crossed it.
 func TestCameBackColdComparesAgainstTheConfiguredThreshold(t *testing.T) {
 	tests := []struct {
-		name     string
-		uncached int64
-		want     bool
+		name  string
+		usage *frontendv1.TokenUsage
+		want  bool
 	}{
-		{name: "over the threshold is proof the cache was gone", uncached: 20001, want: true},
-		{name: "exactly at the threshold has not crossed it", uncached: 20000, want: false},
-		{name: "under the threshold is an ordinary warm ping", uncached: 12, want: false},
-		{name: "a ping that paid nothing", uncached: 0, want: false},
+		{name: "over the threshold is proof the cache was gone", usage: usage(20001, 0, 0), want: true},
+		{name: "exactly at the threshold has not crossed it", usage: usage(20000, 0, 0), want: false},
+		{name: "under the threshold is an ordinary warm ping", usage: usage(12, 0, 0), want: false},
+		{name: "a ping that paid nothing", usage: usage(0, 0, 0), want: false},
 	}
 	cfg := DefaultConfig()
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange, Act.
-			got := cfg.CameBackCold(tc.uncached)
+			got := cfg.CameBackCold(tc.usage)
 
 			// Assert.
 			if got != tc.want {
-				t.Fatalf("CameBackCold(%d) against a %d threshold = %v, want %v",
-					tc.uncached, cfg.UncachedCostAlertTokens, got, tc.want)
+				t.Fatalf("CameBackCold(%v) against a %d threshold = %v, want %v",
+					tc.usage, cfg.UncachedCostAlertTokens, got, tc.want)
 			}
 		})
 	}
 }
 
-// THE THREE INPUT BUCKETS ARE DISJOINT AND THE TRIPWIRE READS THE SUM OF TWO.
-// The SDK's Usage contract is that total input = input_tokens +
-// cache_creation_input_tokens + cache_read_input_tokens with no overlap, so
-// each of the two counted buckets can be individually below the threshold while
-// what was actually paid for at the uncached rate is above it. Reading either
-// bucket alone would miss exactly that case.
-func TestColdCompactionReadsTheSumOfBothUncachedBuckets(t *testing.T) {
+// A CACHE HIT NEVER TRIPS THE COLD-PING ALARM, however large. The standing
+// prefix presented again is exactly what the keep-alive is paying to preserve.
+func TestCameBackColdIgnoresCacheHitsHoweverLarge(t *testing.T) {
+	// Arrange: a ping that read 1.5 million tokens, every one of them served
+	// from cache, and paid a dozen uncached.
+	cfg := DefaultConfig()
+
+	// Act.
+	got := cfg.CameBackCold(usage(12, 0, 1_500_000))
+
+	// Assert.
+	if got {
+		t.Fatal("a ping that read 1500000 tokens from cache and paid 12 uncached was called cold; the cached read is the warm case")
+	}
+}
+
+// THE TWO MISS BUCKETS ARE DISJOINT AND THE TRIPWIRE READS THEIR SUM. Each can
+// be individually below the threshold while what was actually paid for at
+// uncached rates is above it. Reading either alone would miss exactly that case.
+func TestColdCompactionReadsTheSumOfBothMisses(t *testing.T) {
 	tests := []struct {
-		name          string
-		input         int64
-		cacheCreation int64
-		want          bool
+		name       string
+		freshInput uint64
+		cacheWrite uint64
+		want       bool
 	}{
 		{
-			name:          "neither bucket crosses alone but their sum does",
-			input:         6_000,
-			cacheCreation: 6_000,
-			want:          true,
+			name:       "neither miss crosses alone but their sum does",
+			freshInput: 6_000,
+			cacheWrite: 6_000,
+			want:       true,
 		},
 		{
-			name:          "the same two buckets summing below the threshold do not trip",
-			input:         6_000,
-			cacheCreation: 3_000,
-			want:          false,
+			name:       "the same two misses summing below the threshold do not trip",
+			freshInput: 6_000,
+			cacheWrite: 3_000,
+			want:       false,
 		},
 		{
-			name:          "cache creation alone crosses",
-			input:         0,
-			cacheCreation: 1_500_000,
-			want:          true,
+			name:       "a cold full-context read surfaces as cache writes and crosses",
+			freshInput: 0,
+			cacheWrite: 1_500_000,
+			want:       true,
 		},
 		{
-			name:          "raw input alone crosses",
-			input:         10_001,
-			cacheCreation: 0,
-			want:          true,
+			name:       "fresh input alone crosses",
+			freshInput: 10_001,
+			cacheWrite: 0,
+			want:       true,
 		},
 		{
-			name:          "exactly at the threshold has not crossed it",
-			input:         4_000,
-			cacheCreation: 6_000,
-			want:          false,
+			name:       "exactly at the threshold has not crossed it",
+			freshInput: 4_000,
+			cacheWrite: 6_000,
+			want:       false,
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange, Act.
-			got := ColdCompaction(UncachedInputTokens(tc.input, tc.cacheCreation))
+			got := ColdCompaction(usage(tc.freshInput, tc.cacheWrite, 0))
 
 			// Assert.
 			if got != tc.want {
-				t.Fatalf("ColdCompaction(UncachedInputTokens(%d, %d)) = %v, want %v (threshold %d)",
-					tc.input, tc.cacheCreation, got, tc.want, ColdCompactionUncachedTokens)
+				t.Fatalf("ColdCompaction(fresh=%d written=%d) = %v, want %v (threshold %d)",
+					tc.freshInput, tc.cacheWrite, got, tc.want, ColdCompactionUncachedTokens)
 			}
 		})
 	}
@@ -148,16 +145,16 @@ func TestColdCompactionReadsTheSumOfBothUncachedBuckets(t *testing.T) {
 func TestColdCompactionIgnoresCacheReadsHoweverLarge(t *testing.T) {
 	// Arrange: a compaction that read 1.5 million tokens, every one of them
 	// served from cache, and paid a few hundred uncached.
-	const cacheRead int64 = 1_500_000
-	const input, cacheCreation int64 = 200, 0
+	const cacheRead uint64 = 1_500_000
+	const freshInput, cacheWrite uint64 = 200, 0
 
-	// Act: the measure takes only the two uncached buckets, so the read is not
-	// an argument to it at all — which is the guarantee under test.
-	got := ColdCompaction(UncachedInputTokens(input, cacheCreation))
+	// Act: the cache hit rides the same canonical message the verdict is taken
+	// from, so this proves the read is EXCLUDED rather than merely unsupplied.
+	got := ColdCompaction(usage(freshInput, cacheWrite, cacheRead))
 
 	// Assert.
 	if got {
 		t.Fatalf("a compaction that read %d tokens from cache and paid %d uncached tripped the alarm; the cached read is the success case",
-			cacheRead, UncachedInputTokens(input, cacheCreation))
+			cacheRead, freshInput+cacheWrite)
 	}
 }
