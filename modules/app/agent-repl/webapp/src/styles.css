@@ -1098,15 +1098,16 @@ pre {
      than the footer's 2.6s liveness pulse, `.pfooter-breath`, which encodes
      a signal rather than an ambience), and `transform` (not width/height)
      means the animation never triggers layout — box-shadow and everything
-     else in `.bubble` stays untouched by it. */
-  animation: bubble-breath 5.2s ease-in-out infinite;
-  transform-origin: center;
-}
-/* The body breathes at the same scale swing as the bubble itself, so the
-   two stay the same relative size throughout the cycle instead of the text
-   growing and shrinking faster than its container. Same period and easing
-   as `.bubble.user` so the two stay in phase. */
-.bubble.user > .bubble-body {
+     else in `.bubble` stays untouched by it.
+
+     NOTHING INSIDE THE BUBBLE CARRIES ITS OWN COPY OF THIS ANIMATION. The
+     body is a child of this transformed element, so it is already scaled by
+     this rule; a second `bubble-breath` on `.bubble-body` MULTIPLIED the two
+     scales and swung the text at roughly twice the bubble's amplitude. What
+     locks bubble and text together is structural, not a matched pair of
+     declarations: the body inherits this transform, so it has the same start,
+     the same rate, and the same phase by construction, with no second rule
+     that could drift. */
   animation: bubble-breath 5.2s ease-in-out infinite;
   transform-origin: center;
 }
@@ -2390,9 +2391,9 @@ pre {
   }
   /* The prompt bubble's breath is pure ambience, not a progress or liveness
      signal (unlike the spinner and footer breath above), so it simply stops
-     rather than slowing. */
-  .bubble.user,
-  .bubble.user > .bubble-body {
+     rather than slowing. The body needs no entry — it never had an animation
+     of its own, only this element's inherited transform. */
+  .bubble.user {
     animation: none;
   }
 }
