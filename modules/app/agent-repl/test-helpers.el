@@ -728,6 +728,7 @@ re-routes their frontend resolution instead."
          ;; can read state immediately after the call).
          (agent-repl--update-tick-counter 0)
          (agent-repl--update-in-flight nil)
+         (agent-repl--update-chain-timer nil)
          (agent-repl--update-spread-sync t)
          ;; Sidebar roster state (sidebar.el): the 1Hz tick rides
          ;; `agent-repl--update-all-workspace-states', so any test
