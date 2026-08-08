@@ -3,6 +3,7 @@ package frontend
 import (
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
@@ -125,16 +126,21 @@ func TestStreamContractRecordKeepsEnvelopeUUID(t *testing.T) {
 		}
 		for _, item := range cd.GetItems() {
 			seen++
+			// Each fixture item is one SDK assistant record. Reasoning arrives
+			// as its own emission under a uuid DERIVED from the envelope's, so
+			// the envelope uuid is recovered by cutting the derivation off, and
+			// the record itself is rebuilt from whichever arm the item carries.
+			envelopeUUID, _, _ := strings.Cut(item.GetUuid(), "#")
 			// Act: rebuild the event the shim delivered and translate it.
 			ev := &corev1.Event{
 				SessionId:    fx.SessionID,
 				ProducedAtMs: producedMs,
 				Payload: &corev1.Event_Vendor{Vendor: mustAny(t, &datav1.AssistantMessage{
-					Uuid:    item.GetUuid(),
-					Message: item.GetAssistantMessage(),
+					Uuid:    envelopeUUID,
+					Message: recordBodyFor(t, item, fx.MessageID),
 				})},
 			}
-			got, _, err := ConversationDeltaFromEvent(fx.Workspace, ev)
+			got, _, err := ConversationDeltaFromEvent(fx.Workspace, "", ev)
 			if err != nil {
 				t.Fatalf("ConversationDeltaFromEvent: %v", err)
 			}
@@ -145,10 +151,12 @@ func TestStreamContractRecordKeepsEnvelopeUUID(t *testing.T) {
 			}
 			out := got.GetItems()[0]
 			if out.GetUuid() != item.GetUuid() {
-				t.Errorf("item uuid = %q, want the envelope uuid %q", out.GetUuid(), item.GetUuid())
+				t.Errorf("item uuid = %q, want %q", out.GetUuid(), item.GetUuid())
 			}
-			if id := out.GetAssistantMessage().GetId(); id != fx.MessageID {
-				t.Errorf("message id = %q, want %q", id, fx.MessageID)
+			if out.GetAgent().GetThinking() == nil {
+				if id := out.GetAgent().GetResponse().GetBody().GetId(); id != fx.MessageID {
+					t.Errorf("message id = %q, want %q", id, fx.MessageID)
+				}
 			}
 			uuids[out.GetUuid()] = true
 		}
@@ -159,5 +167,26 @@ func TestStreamContractRecordKeepsEnvelopeUUID(t *testing.T) {
 	}
 	if len(uuids) != seen {
 		t.Errorf("got %d distinct record identities for %d records; they must not collide", len(uuids), seen)
+	}
+}
+
+// recordBodyFor rebuilds the ApiAssistantMessage the SDK delivered for one
+// fixture item. A response item carries it directly; a thinking item carries
+// only the block, because the emission is what the reasoning became once the
+// daemon stripped it out of the body.
+func recordBodyFor(t *testing.T, item *frontendv1.ConversationItem, messageID string) *datav1.ApiAssistantMessage {
+	t.Helper()
+	if body := item.GetAgent().GetResponse().GetBody(); body != nil {
+		return body
+	}
+	thinking := item.GetAgent().GetThinking().GetBody()
+	if thinking == nil {
+		t.Fatalf("fixture item %q carries neither a response nor a thinking emission", item.GetUuid())
+	}
+	return &datav1.ApiAssistantMessage{
+		Id: messageID,
+		Content: []*datav1.ContentBlock{
+			{Block: &datav1.ContentBlock_Thinking{Thinking: thinking}},
+		},
 	}
 }

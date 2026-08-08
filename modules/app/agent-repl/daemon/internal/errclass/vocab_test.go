@@ -81,13 +81,24 @@ func TestTheFixtureHasNoRenderStateRowsOutsideTheEnum(t *testing.T) {
 	}
 }
 
-func TestEveryErrorClassHasAFixtureRow(t *testing.T) {
-	// Arrange.
+func TestEveryToneHasAFixtureRow(t *testing.T) {
+	// Arrange: the class enum left the wire — each kind arm states its own side
+	// now — and the daemon resolves that side to one of exactly two tones. Both
+	// must still be rows in the shared table, because a card takes its color
+	// from the same place the workspace dot takes its own.
 	f := loadFixture(t)
 	// Act + Assert.
-	for value, name := range frontendv1.ErrorClass_name {
-		if _, ok := f.ErrorClasses[name]; !ok {
-			t.Errorf("ErrorClass %s (%d) has no row in the color fixture", name, value)
+	for class, tone := range map[string]string{
+		"ERROR_CLASS_INTERNAL": ToneLocal,
+		"ERROR_CLASS_API":      ToneVendor,
+	} {
+		got, ok := f.ErrorClasses[class]
+		if !ok {
+			t.Errorf("%s has no row in the color fixture, but the daemon still resolves that side to %q", class, tone)
+			continue
+		}
+		if got != tone {
+			t.Errorf("%s is %q in the color fixture, but the daemon resolves that side to %q", class, got, tone)
 		}
 	}
 }
@@ -330,39 +341,36 @@ func TestTheApiClassTakesTheSameColorAsTheStateItDescribes(t *testing.T) {
 	}
 }
 
-func TestEveryTypeBelongsToAColoredClass(t *testing.T) {
-	// Arrange: a type whose class has no color would render an uncolored
-	// card, which is a failure that does not look like one.
+func TestEveryTypeResolvesToAColoredTone(t *testing.T) {
+	// Arrange: a type whose tone has no color would render an uncolored card,
+	// which is a failure that does not look like one.
 	f := loadFixture(t)
-	logf, _ := capture()
-	// Act + Assert: exercise the class each construction path assigns.
-	for _, item := range []*frontendv1.SystemFailureItem{
-		Command(logf, ErrShimNack),
-		Death(logf, "s_1", DeathReasonShimDied, 0),
-		Degraded("shim-store", "boom", 0),
-		ConnectionDegraded("no traffic"),
-	} {
-		name := frontendv1.ErrorClass_name[int32(item.GetErrorClass())]
-		if f.ErrorClasses[name] == "none" {
-			t.Errorf("failure %q carries class %s, which has no color", item.GetErrorType(), name)
+	// Act + Assert: the WHOLE vocabulary, not a sample of construction paths —
+	// the tone is now a total function of the type, so every type can be asked.
+	for _, typ := range AllTypes() {
+		tone := Tone(typ)
+		if tone == "none" || !validColor(f, tone) {
+			t.Errorf("failure %q resolves to tone %q, which is not a color the shared table names", typ, tone)
 		}
 	}
 }
 
-func TestNoConstructionPathEmitsAnUnspecifiedClass(t *testing.T) {
-	// Arrange: UNSPECIFIED is the absence of a classification. Emitting it
-	// would be the classifier declining to classify, silently.
+func TestNoConstructionPathEmitsAnUnkindedCard(t *testing.T) {
+	// Arrange: an unset kind arm is the absence of a classification — it is
+	// what UNSPECIFIED used to be — and emitting one would be the classifier
+	// declining to classify, silently. A renderer receiving it has a failure
+	// with nothing to draw and no way to say why.
 	logf, _ := capture()
 	// Act + Assert.
-	for _, item := range []*frontendv1.SystemFailureItem{
+	for _, item := range []*frontendv1.FailureCardView{
 		Command(logf, ErrShimNack),
 		Command(logf, errUnknownForVocabTest{}),
 		Death(logf, "s_1", "some ancient reason", 0),
 		Degraded("shim-store", "boom", 0),
 		ConnectionDegraded("no traffic"),
 	} {
-		if item.GetErrorClass() == frontendv1.ErrorClass_ERROR_CLASS_UNSPECIFIED {
-			t.Errorf("failure %q was emitted with an UNSPECIFIED class", item.GetErrorType())
+		if _, ok := TypeOf(item.GetKind()); !ok {
+			t.Errorf("a construction path emitted a card whose kind arm names no daemon failure type: %v", item.GetKind())
 		}
 	}
 }

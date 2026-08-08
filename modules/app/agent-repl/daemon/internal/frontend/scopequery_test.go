@@ -180,10 +180,10 @@ func TestWorkspaceScopedConnectionSeesOnlyItsOwnWorkspace(t *testing.T) {
 		{"other workspace state", WorkspaceStateFrame(&frontendv1.WorkspaceState{SessionId: "s2", Workspace: "/other"}), false},
 		{"own session view", SessionViewFrame(&frontendv1.SessionView{SessionId: "s1", Workspace: "/w"}), true},
 		{"other session view", SessionViewFrame(&frontendv1.SessionView{SessionId: "s2", Workspace: "/other"}), false},
-		{"own conversation delta", ConversationDeltaFrame(&frontendv1.ConversationDelta{SessionId: "vendor", Workspace: "/w"}), true},
-		{"other conversation delta", ConversationDeltaFrame(&frontendv1.ConversationDelta{SessionId: "vendor", Workspace: "/other"}), false},
-		{"own progress", ProgressViewFrame(&frontendv1.ProgressView{SessionId: "s1", Workspace: "/w"}), true},
-		{"other progress", ProgressViewFrame(&frontendv1.ProgressView{SessionId: "s2", Workspace: "/other"}), false},
+		{"own conversation delta", ConversationDeltaFrame(&frontendv1.ConversationDelta{Fence: "vendor", Workspace: "/w"}), true},
+		{"other conversation delta", ConversationDeltaFrame(&frontendv1.ConversationDelta{Fence: "vendor", Workspace: "/other"}), false},
+		{"own progress", ProgressViewFrame(&frontendv1.ProgressView{Fence: "s1", Workspace: "/w"}), true},
+		{"other progress", ProgressViewFrame(&frontendv1.ProgressView{Fence: "s2", Workspace: "/other"}), false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

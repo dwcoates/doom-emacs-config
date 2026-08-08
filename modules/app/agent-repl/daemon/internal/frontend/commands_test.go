@@ -470,7 +470,7 @@ func TestDispatchClassifiesEachSentinel(t *testing.T) {
 			ack := Dispatch(context.Background(), nil, h, nil, cmd)
 
 			// Assert.
-			if got := ack.GetFailure().GetErrorType(); got != string(tc.want) {
+			if got := errclass.KindName(ack.GetFailure()); got != string(tc.want) {
 				t.Fatalf("error_type = %q, want %q", got, tc.want)
 			}
 		})
@@ -487,8 +487,8 @@ func TestDispatchClassifiesAWrappedNackWithItsReason(t *testing.T) {
 	ack := Dispatch(context.Background(), nil, h, nil, cmd)
 
 	// Assert.
-	if !strings.Contains(ack.GetFailure().GetSourceDetail(), "store rejected batch") {
-		t.Fatalf("source_detail = %q, want the shim's raw reason", ack.GetFailure().GetSourceDetail())
+	if !strings.Contains(ack.GetError(), "store rejected batch") {
+		t.Fatalf("source_detail = %q, want the shim's raw reason", ack.GetError())
 	}
 }
 
@@ -503,8 +503,8 @@ func TestDispatchFallsThroughLoudlyForAnUnclassifiedError(t *testing.T) {
 	ack := Dispatch(context.Background(), logf, h, nil, cmd)
 
 	// Assert.
-	if ack.GetFailure().GetErrorType() != string(errclass.TypeInternalUnclassified) {
-		t.Fatalf("error_type = %q, want %q", ack.GetFailure().GetErrorType(), errclass.TypeInternalUnclassified)
+	if errclass.KindName(ack.GetFailure()) != string(errclass.TypeInternalUnclassified) {
+		t.Fatalf("error_type = %q, want %q", errclass.KindName(ack.GetFailure()), errclass.TypeInternalUnclassified)
 	}
 	if len(logged) == 0 {
 		t.Fatal("an unclassified command error passed SILENTLY; the fallthrough must be loud")
@@ -559,8 +559,8 @@ func TestDispatchNeverEmitsAClientPrefixedType(t *testing.T) {
 	ack := Dispatch(context.Background(), nil, h, nil, cmd)
 
 	// Assert.
-	if !errclass.IsDaemonType(ack.GetFailure().GetErrorType()) {
-		t.Fatalf("daemon emitted %q, which is frontend-reserved", ack.GetFailure().GetErrorType())
+	if !errclass.IsDaemonType(errclass.KindName(ack.GetFailure())) {
+		t.Fatalf("daemon emitted %q, which is frontend-reserved", errclass.KindName(ack.GetFailure()))
 	}
 }
 
