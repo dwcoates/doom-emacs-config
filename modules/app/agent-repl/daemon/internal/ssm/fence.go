@@ -17,10 +17,16 @@ import "strings"
 // below is free to change, and the only property anything may depend on is that
 // two fences are equal exactly when neither identity has rotated.
 //
-// The separator is a unit separator rather than a character either identity can
-// contain, so no pair of distinct identities can compose to one token.
+// The separator is a PRINTABLE character neither identity can contain — both
+// are an ASCII prefix followed by hex — so no pair of distinct identities can
+// compose to one token, and the token survives every hand-written JSON encoder
+// without an escape rule. A control character composed just as unambiguously
+// and then broke exactly that: %q-quoting one into a JSON command produced an
+// escape the wire's own decoder rejected.
+const fenceSeparator = '|'
+
 func Fence(sessionID, controllerGenerationID string) string {
-	return sessionID + "\x1f" + controllerGenerationID
+	return sessionID + string(fenceSeparator) + controllerGenerationID
 }
 
 // SplitFence is Fence's INVERSE, and it is the daemon's alone.
@@ -36,7 +42,7 @@ func Fence(sessionID, controllerGenerationID string) string {
 // client, or a value invented somewhere. It yields two empty identities, which
 // the ladder rejects loudly, rather than being guessed at.
 func SplitFence(fence string) (sessionID, controllerGenerationID string) {
-	sep := strings.IndexByte(fence, '\x1f')
+	sep := strings.IndexByte(fence, fenceSeparator)
 	if sep < 0 {
 		return "", ""
 	}

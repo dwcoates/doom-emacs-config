@@ -281,8 +281,8 @@ func storedAssistantEvent(t *testing.T, vendorSessionID, uuid, text string) *cor
 // command at a time and pushes the whole replay before acking.
 func (h *bouncedHarness) resyncFrom(t *testing.T, conn *websocket.Conn, state *frontendv1.WorkspaceState, requestID string, fromSeq uint64) []string {
 	t.Helper()
-	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"workspace":%q,"resync":{"fromSeq":"%d","sessionId":%q,"controllerGenerationId":%q}}`,
-		requestID, h.workspace, fromSeq, state.GetSessionId(), state.GetControllerGenerationId()))
+	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"workspace":%q,"resync":{"fromSeq":"%d","fence":%q}}`,
+		requestID, h.workspace, fromSeq, state.GetFence()))
 	var texts []string
 	deadline := time.Now().Add(frameTimeout)
 	for time.Now().Before(deadline) {

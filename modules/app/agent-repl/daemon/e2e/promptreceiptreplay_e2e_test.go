@@ -507,8 +507,8 @@ func (f *bouncedFrontend) dial(t *testing.T, workspace string) (*websocket.Conn,
 // arrives before its CommandAck, which terminates the read.
 func (f *bouncedFrontend) resyncItems(t *testing.T, conn *websocket.Conn, state *frontendv1.WorkspaceState, workspace, requestID string) []*frontendv1.ConversationItem {
 	t.Helper()
-	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"workspace":%q,"resync":{"fromSeq":"0","sessionId":%q,"controllerGenerationId":%q}}`,
-		requestID, workspace, state.GetSessionId(), state.GetControllerGenerationId()))
+	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"workspace":%q,"resync":{"fromSeq":"0","fence":%q}}`,
+		requestID, workspace, state.GetFence()))
 	var items []*frontendv1.ConversationItem
 	deadline := time.Now().Add(frameTimeout)
 	for time.Now().Before(deadline) {
