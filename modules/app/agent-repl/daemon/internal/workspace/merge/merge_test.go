@@ -502,6 +502,91 @@ func TestResumeSkipsAPickTheResolutionEmptied(t *testing.T) {
 	}
 }
 
+// A pick finished as empty is ACCOUNTED FOR, not silently dropped: it counts
+// toward the run's landed total exactly as a pick that carried a change does.
+// A run whose landed figure skipped it would count toward a total it could never
+// reach, and a frontend would render a merge that finished as one stuck one
+// commit short.
+func TestAnEmptyPickCountsTowardTheRunsLandedTotal(t *testing.T) {
+	// Arrange: two feature commits; the target already carries the FIRST one's
+	// edit inside a larger commit, so that pick goes empty and the second lands.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "base.txt", "feature\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "feature edit")
+	writeFile(t, featureDir, "second.txt", "second\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "second commit")
+	writeFile(t, target, "base.txt", "feature\n")
+	writeFile(t, target, "unrelated.txt", "landed alongside the same edit\n")
+	gitRun(t, target, "add", ".")
+	gitRun(t, target, "commit", "-q", "-m", "the same edit inside a larger commit")
+
+	sink := &recordingSink{}
+	e := newTestDriver(t, sink)
+	req := withRun(t, sink, Request{Workspace: "/ws/count-ws", Name: "count-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+
+	// Act.
+	res, err := e.Merge(context.Background(), req)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Merge() err = %v", err)
+	}
+	if res.Outcome != OutcomeMerged {
+		t.Fatalf("Merge() outcome = %s, want merged", res.Outcome)
+	}
+	picks := cherryPickingStatuses(sink.statuses)
+	if len(picks) != 2 {
+		t.Fatalf("cherry_picking statuses = %d, want one per planned commit", len(picks))
+	}
+	if got := picks[1].GetCommitsLanded(); got != 1 {
+		t.Fatalf("the second pick reports commits_landed=%d of %d, want 1 — the empty pick was not counted",
+			got, picks[1].GetCommitsTotal())
+	}
+}
+
+// The empty pick's accounting is DURABLE, which is what `git cherry-pick --skip`
+// could not give it: the replay derives its remaining work from the `-x`
+// annotations on the target, so a pick that left no commit would be planned
+// again by the very next re-entry — and one emptied by a resolution that dropped
+// the change would then be re-picked, conflict for real, and loop forever.
+func TestAnEmptyPickLeavesTheReplayNothingToPlanAgain(t *testing.T) {
+	// Arrange: the same fixture, merged once.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "base.txt", "feature\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "feature edit")
+	writeFile(t, target, "base.txt", "feature\n")
+	writeFile(t, target, "unrelated.txt", "landed alongside the same edit\n")
+	gitRun(t, target, "add", ".")
+	gitRun(t, target, "commit", "-q", "-m", "the same edit inside a larger commit")
+
+	sink := &recordingSink{}
+	e := newTestDriver(t, sink)
+	req := withRun(t, sink, Request{Workspace: "/ws/replay-ws", Name: "replay-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+	if res, err := e.Merge(context.Background(), req); err != nil || res.Outcome != OutcomeMerged {
+		t.Fatalf("setup Merge() res=%+v err=%v, want merged", res, err)
+	}
+
+	// Act — a re-entry, exactly as a daemon bounce or a resume produces.
+	replay := withRun(t, sink, req)
+	res, err := e.Merge(context.Background(), replay)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("replay Merge() err = %v", err)
+	}
+	if res.Outcome != OutcomeMerged {
+		t.Fatalf("replay Merge() outcome = %s, want merged", res.Outcome)
+	}
+	if !res.AlreadyIncorporated {
+		t.Fatal("the replay planned the empty pick again — its empty commit's -x annotation did not advance the cherry-pick base")
+	}
+}
+
 // --- resume-after-resolve completing the merge --------------------------
 
 func TestResumeCompletesMergeAndOrdersTransitions(t *testing.T) {
@@ -1174,6 +1259,19 @@ func firstCherryPicking(statuses []*frontendv1.MergeStatus) *frontendv1.MergeSta
 		}
 	}
 	return nil
+}
+
+// cherryPickingStatuses is every cherry_picking status a run published, in
+// order, which is what an accounting assertion reads: the run's landed figure is
+// only ever visible on the NEXT commit's status.
+func cherryPickingStatuses(statuses []*frontendv1.MergeStatus) []*frontendv1.MergeStatusCherryPicking {
+	var out []*frontendv1.MergeStatusCherryPicking
+	for _, s := range statuses {
+		if pick := s.GetCherryPicking(); pick != nil {
+			out = append(out, pick)
+		}
+	}
+	return out
 }
 
 func firstConflictStatus(statuses []*frontendv1.MergeStatus) *frontendv1.MergeStatusConflict {

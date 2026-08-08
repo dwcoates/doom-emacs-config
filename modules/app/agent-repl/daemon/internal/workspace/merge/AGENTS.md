@@ -184,6 +184,20 @@ lost the attempt, and nothing else would ever advance the phase. The sweep
 reads the phase back through `merge.PhaseSource`, the package's third
 outbound port.
 
+`merge_enqueuing` is not the only phase that can outlive its merge, so `Drain`
+carries a SECOND sweep beside it: every workspace resting on `merge_queued`,
+`merging`, `merge_before_action` or `merge_conflict` with NO durable queue
+entry, NO open `merge.Lease` and NO live run gets a terminal `merge_failed`
+naming `orphaned_by_restart`. A daemon killed while a cherry-pick was parked on
+a conflict leaves exactly that state, and a non-terminal merge axis refuses
+every later prompt, fails the revive path's synchronous-prompt invariant, and
+holds the workspace's teardown guard shut forever. ANY ONE of the three facts
+retains the workspace — the entry is a merge this boot replays, an open lease is
+one the drain reconstructs, a live run is the opposite of orphaned — and every
+decision is logged, retentions included. `merge_after_action` is deliberately
+NOT swept: every commit is on the target by then, and failing it would deny a
+merge that demonstrably happened.
+
 ## An interrupt EVICTS the workspace's waiting merges
 
 A stop from a frontend means "stop what this workspace is doing", and a merge
