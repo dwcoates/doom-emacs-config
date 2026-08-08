@@ -2211,6 +2211,112 @@ callers see a fresh state."
       (should-not (agent-repl--update-in-flight-p))
       (should-not agent-repl--update-in-flight))))
 
+;;;; ---- Tests: a stale flag against the expected-restart window ----
+
+(defmacro agent-repl-test--with-stale-flag (warned informed &rest body)
+  "Run BODY over a stale in-flight flag stamped 10s ago, capturing log text.
+WARNED and INFORMED are bound to the messages each level received.  The
+expected-restart window starts disarmed; BODY arms or closes one to place
+the flag's stamp inside or outside a restart."
+  (declare (indent 2))
+  `(agent-repl-test--with-clean-state
+     (let ((agent-repl-state-stale-threshold 5.0)
+           (agent-repl--frontend-expected-restart nil)
+           (agent-repl--frontend-expected-restart-last-close nil)
+           (agent-repl-frontend-expected-restart-window-seconds 180.0)
+           (,warned nil)
+           (,informed nil))
+       (setq agent-repl--update-in-flight (- (float-time) 10.0))
+       (cl-letf (((symbol-function 'agent-repl--uds-run-timer)
+                  (lambda (&rest _) 'fake-timer))
+                 ((symbol-function 'agent-repl--warn)
+                  (lambda (_ws fmt &rest args) (push (apply #'format fmt args) ,warned)))
+                 ((symbol-function 'agent-repl--info)
+                  (lambda (_ws fmt &rest args) (push (apply #'format fmt args) ,informed))))
+         ,@body))))
+
+(ert-deftest agent-repl-test-update-in-flight-p-stale-flag-in-window-logs-info ()
+  "A chain stalled by a deliberate bounce is recorded at info, naming the initiator."
+  ;; Arrange
+  (agent-repl-test--with-stale-flag warned informed
+    (agent-repl--frontend-arm-expected-restart "deploy (emacsclient)")
+    ;; Act
+    (should-not (agent-repl--update-in-flight-p))
+    ;; Assert
+    (should (string-match-p "stale flag (10.00s old) from the deploy (emacsclient) restart"
+                            (car informed)))
+    (ignore warned)))
+
+(ert-deftest agent-repl-test-update-in-flight-p-stale-flag-in-window-emits-no-warn ()
+  "The bounce's own stalled chain does not spend the leak detector's warning."
+  ;; Arrange
+  (agent-repl-test--with-stale-flag warned informed
+    (agent-repl--frontend-arm-expected-restart "deploy (emacsclient)")
+    ;; Act
+    (should-not (agent-repl--update-in-flight-p))
+    ;; Assert
+    (should-not warned)
+    (ignore informed)))
+
+(ert-deftest agent-repl-test-update-in-flight-p-stale-flag-in-window-still-clears ()
+  "The force-clear is unconditional: a wedged flag is wedged however it got there."
+  ;; Arrange
+  (agent-repl-test--with-stale-flag warned informed
+    (agent-repl--frontend-arm-expected-restart "deploy (emacsclient)")
+    ;; Act
+    (should-not (agent-repl--update-in-flight-p))
+    ;; Assert
+    (should-not agent-repl--update-in-flight)
+    (ignore warned informed)))
+
+(ert-deftest agent-repl-test-update-in-flight-p-stale-flag-outside-a-window-warns-verbatim ()
+  "With no window in play the leak detector's warning is byte-identical to before."
+  ;; Arrange
+  (agent-repl-test--with-stale-flag warned informed
+    ;; Act
+    (should-not (agent-repl--update-in-flight-p))
+    ;; Assert
+    (should (equal (car warned)
+                   "update-in-flight-p: stale flag (10.00s old), force-clearing"))
+    (ignore informed)))
+
+(ert-deftest agent-repl-test-update-in-flight-p-stale-flag-survives-the-window-close ()
+  "A chain stamped inside the window is still the restart's doing once it closes.
+The daemon's replacement arriving does not retroactively make the stall
+that happened while it was away someone else's fault."
+  ;; Arrange
+  (agent-repl-test--with-stale-flag warned informed
+    (agent-repl--frontend-arm-expected-restart "deploy (emacsclient)")
+    ;; The window must predate the flag for the flag to fall inside it.
+    (setq agent-repl--frontend-expected-restart
+          (plist-put agent-repl--frontend-expected-restart
+                     :armed-at (- (float-time) 20.0)))
+    (setq agent-repl--frontend-expected-restart
+          (plist-put agent-repl--frontend-expected-restart :exit 'withheld))
+    (agent-repl--frontend-expected-restart-note-reconnect)
+    ;; Act
+    (should-not (agent-repl--update-in-flight-p))
+    ;; Assert
+    (should-not warned)
+    (should (string-match-p "from the deploy (emacsclient) restart" (car informed)))))
+
+(ert-deftest agent-repl-test-update-in-flight-p-stale-flag-predating-the-window-warns ()
+  "A flag stamped BEFORE the window was armed predates the restart, so it warns.
+Grace covers the span the daemon was going away or gone, and nothing else:
+a flag older than that is the leak this warning exists to catch."
+  ;; Arrange
+  (agent-repl-test--with-stale-flag warned informed
+    (agent-repl--frontend-arm-expected-restart "deploy (emacsclient)")
+    (setq agent-repl--frontend-expected-restart
+          (plist-put agent-repl--frontend-expected-restart :exit 'withheld))
+    ;; Armed AFTER the flag's stamp, and closed by the replacement's link.
+    (agent-repl--frontend-expected-restart-note-reconnect)
+    ;; Act
+    (should-not (agent-repl--update-in-flight-p))
+    ;; Assert
+    (should (string-match-p "stale flag (10.00s old), force-clearing" (car warned)))
+    (ignore informed)))
+
 ;;;; ---- Tests: sync entrypoint bypasses guard ----
 
 (ert-deftest agent-repl-test-update-all-now-bypasses-in-flight-flag ()
