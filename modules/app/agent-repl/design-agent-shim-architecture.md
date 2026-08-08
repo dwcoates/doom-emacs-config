@@ -976,7 +976,11 @@ corpus.
   loop to an injected sink, honest sad path (drop + loud-log every event +
   `DegradedState` to an injected reporter; NO spill, NO retry of a rejected
   batch); producer-connection redial, once per outage, driven by the next
-  write (§4.4).
+  write (§4.4). A dropped LINK, as opposed to a dropped batch, is reported
+  only once it fails to relink within a retry budget: a store kickstart drops
+  both connections of every live shim at once, and a link back inside the
+  budget lost nothing — no event dropped, and the subscription resumed at the
+  last forwarded seq with the gap replayed — so it reports nothing at all.
 - `agent-shim/claude/shim/src/uds/control.ts` — `SubmitPrompt`/`Interrupt` dispatch onto an
   injected `SdkControlTarget` (does NOT import src/session.ts); `canUseTool`→
   `PermissionRequest` round-trip blocking on a pending-request map keyed by
