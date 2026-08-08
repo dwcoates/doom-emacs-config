@@ -16,6 +16,7 @@ func TestUncachedInputTokensCountsCacheCreation(t *testing.T) {
 		{name: "a warm ping pays neither", input: 0, cacheCreation: 0, want: 0},
 		{name: "raw input alone still counts", input: 500, cacheCreation: 0, want: 500},
 		{name: "cache creation alone still counts", input: 0, cacheCreation: 500, want: 500},
+		{name: "both buckets nonzero add rather than shadow each other", input: 12000, cacheCreation: 12000, want: 24000},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -27,6 +28,30 @@ func TestUncachedInputTokensCountsCacheCreation(t *testing.T) {
 				t.Fatalf("UncachedInputTokens(%d, %d) = %d, want %d", tc.input, tc.cacheCreation, got, tc.want)
 			}
 		})
+	}
+}
+
+// ONLY THE SUM CROSSES. Two buckets each comfortably under the threshold still
+// name a ping that paid for the whole conversation, and either one read alone
+// would call that cold ping warm — which is the exact silent-alarm shape the
+// sum exists to close (AGENTS.md, "Uncached input tokens are a SUM, and the
+// field names lie about it").
+func TestOnlyTheUncachedSumCrossesTheColdThreshold(t *testing.T) {
+	// Arrange — neither bucket reaches the 20k default on its own.
+	cfg := DefaultConfig()
+	const input, cacheCreation int64 = 12_000, 12_000
+
+	// Act.
+	uncached := UncachedInputTokens(input, cacheCreation)
+
+	// Assert.
+	if cfg.CameBackCold(input) || cfg.CameBackCold(cacheCreation) {
+		t.Fatalf("a single bucket (%d / %d) already crosses the %d threshold, so this case cannot prove the sum is what crosses it",
+			input, cacheCreation, cfg.UncachedCostAlertTokens)
+	}
+	if !cfg.CameBackCold(uncached) {
+		t.Fatalf("CameBackCold(UncachedInputTokens(%d, %d) = %d) = false against a %d threshold; reading either bucket alone hides a ping that re-ingested the whole conversation",
+			input, cacheCreation, uncached, cfg.UncachedCostAlertTokens)
 	}
 }
 

@@ -174,3 +174,30 @@ func TestCacheRatesFromCountersIsTheAggregateAuthority(t *testing.T) {
 		t.Fatal("zero prompt total fabricated cache rates")
 	}
 }
+
+// THE THREE RATES ARE A PARTITION, one per disjoint SDK bucket, so
+// UncachedInputRate is the input_tokens bucket's share ALONE and the EXPENSIVE
+// share is that plus CacheWriteRate. Pinning both facts is what stops a later
+// "fix" from folding cache creation into UncachedInputRate, which would
+// double-count it against CacheWriteRate and break every consumer that reads
+// these as shares of one whole.
+func TestCacheRatesPartitionTheBucketsAndLeaveTheExpensiveShareASum(t *testing.T) {
+	// Arrange — every bucket nonzero, so no term can hide inside another.
+	const input, read, creation int64 = 10, 50, 40
+
+	// Act.
+	got := CacheRatesFromCounters(input, read, creation)
+
+	// Assert.
+	if sum := got.GetUncachedInputRate() + got.GetCacheWriteRate() + got.GetCacheHitRate(); sum != 1 {
+		t.Fatalf("the three bucket rates sum to %v, want exactly 1: they are a partition of the prompt input", sum)
+	}
+	if got.GetUncachedInputRate() != float64(input)/float64(input+read+creation) {
+		t.Fatalf("uncached_input_rate = %v, want the input_tokens BUCKET's share %v", got.GetUncachedInputRate(), float64(input)/float64(input+read+creation))
+	}
+	wantExpensive := float64(input+creation) / float64(input+read+creation)
+	if expensive := got.GetUncachedInputRate() + got.GetCacheWriteRate(); expensive != wantExpensive {
+		t.Fatalf("uncached_input_rate + cache_write_rate = %v, want the uncached (expensive) share %v; reading uncached_input_rate alone as the cost understates it by the cache writes",
+			expensive, wantExpensive)
+	}
+}

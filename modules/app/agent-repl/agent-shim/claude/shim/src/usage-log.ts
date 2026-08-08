@@ -1,6 +1,6 @@
 /** Canonical accounting logs for completed Anthropic Messages API responses. */
 import { bindLog, type LogFields } from "./uds/log.js";
-import type { NormalizedApiUsage } from "./api-usage.js";
+import { uncachedInputTokens, type NormalizedApiUsage } from "./api-usage.js";
 
 const LOGGER = bindLog({ component: "claude-shim-usage", operation: "shim.usage.assistant_api_response" });
 const CACHE_HIT_RATE_WARNING_THRESHOLD = 0.80;
@@ -27,6 +27,11 @@ export function logAssistantApiResponseUsage(
     agent_repl_session_id: agentReplSessionId, claude_session_id: string(sdkMessage["session_id"]), api_message_id: string(message["id"]), api_request_id: optionalString(sdkMessage["request_id"]), model: string(message["model"]),
     input_tokens: inputTokens, output_tokens: outputTokens, cache_read_input_tokens: cacheReadInputTokens, cache_creation_input_tokens: cacheCreationInputTokens,
     cache_creation_5m_input_tokens: usage.cacheCreation5mInputTokens, cache_creation_1h_input_tokens: usage.cacheCreation1hInputTokens, total_prompt_input_tokens: usage.promptCache.totalPromptInputTokens,
+    // The EXPENSIVE input, logged as its own figure because no bucket carries
+    // it: a reader adding up the per-bucket fields by eye reaches for
+    // input_tokens, which is near zero on exactly the cold re-ingests that cost
+    // the most (see uncachedInputTokens).
+    uncached_input_tokens: uncachedInputTokens(usage),
     cache_hit_rate: cacheRates?.cacheHitRate, cache_write_rate: cacheRates?.cacheWriteRate, uncached_input_rate: cacheRates?.uncachedInputRate,
     service_tier: usage.serviceTier, speed: usage.speed, inference_geo: usage.inferenceGeo,
     cache_creation: usage.cacheCreation, server_tool_use: usage.serverToolUse, iterations: usage.iterations, output_tokens_details: usage.outputTokensDetails, cache_diagnostic: usage.cacheDiagnostic, fallback_credit: usage.fallbackCredit, unmodeled_usage: usage.unmodeledUsage, unmodeled_usage_fields: usage.unknownUsageFields,
