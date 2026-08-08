@@ -5424,16 +5424,25 @@ func (x *TokenOutputDetails) GetThinkingTokens() int64 {
 
 // Derived prompt-cache rates calculated from the authoritative token
 // counters on one usage record or a cumulative usage total.
+//
+// THE THREE RATES PARTITION THE PROMPT INPUT and sum to 1: each names ONE of
+// the three disjoint SDK buckets. `uncached_input_rate` is therefore the
+// `input_tokens` BUCKET's share and NOT the module's "uncached input" measure,
+// which is `input_tokens + cache_creation_input_tokens` (AGENTS.md, "Uncached
+// input tokens are a SUM, and the field names lie about it"). The EXPENSIVE
+// share is `uncached_input_rate + cache_write_rate`; reading this one field as
+// "what the turn paid for" is exactly the mistake its name invites.
 type TokenCacheRates struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Total prompt input calculated as uncached input plus cache creation plus
-	// cache reads.
+	// Total prompt input: the three disjoint buckets summed.
 	TotalPromptInputTokens int64 `protobuf:"varint,1,opt,name=total_prompt_input_tokens,json=totalPromptInputTokens,proto3" json:"total_prompt_input_tokens,omitempty"`
-	// Cache-read tokens divided by total prompt input.
+	// Cache-read tokens divided by total prompt input. The ONLY cheap bucket.
 	CacheHitRate float64 `protobuf:"fixed64,2,opt,name=cache_hit_rate,json=cacheHitRate,proto3" json:"cache_hit_rate,omitempty"`
-	// Cache-creation tokens divided by total prompt input.
+	// Cache-creation tokens divided by total prompt input. Expensive: paid fresh
+	// plus the cache-write premium.
 	CacheWriteRate float64 `protobuf:"fixed64,3,opt,name=cache_write_rate,json=cacheWriteRate,proto3" json:"cache_write_rate,omitempty"`
-	// Uncached input tokens divided by total prompt input.
+	// The `input_tokens` bucket divided by total prompt input. Expensive, but
+	// only PART of the expensive share — see the message comment above.
 	UncachedInputRate float64 `protobuf:"fixed64,4,opt,name=uncached_input_rate,json=uncachedInputRate,proto3" json:"uncached_input_rate,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
@@ -12289,8 +12298,14 @@ type ProgressView struct {
 	// Live tickers (latest-wins), coalesced daemon-side so a high-frequency
 	// source cannot drive the frame rate.
 	ThinkingTokens int64 `protobuf:"varint,5,opt,name=thinking_tokens,json=thinkingTokens,proto3" json:"thinking_tokens,omitempty"` // data.ThinkingTokens.estimated_tokens
-	InputTokens    int64 `protobuf:"varint,6,opt,name=input_tokens,json=inputTokens,proto3" json:"input_tokens,omitempty"`          // THIS TURN's cumulative cached+uncached input
-	TtftMs         int64 `protobuf:"varint,7,opt,name=ttft_ms,json=ttftMs,proto3" json:"ttft_ms,omitempty"`                         // first-token latency of the current message
+	// THIS TURN's cumulative UNCACHED input: input_tokens +
+	// cache_creation_input_tokens summed across the turn's assistant messages.
+	// Cache READS are excluded, which is the whole point of the figure — see the
+	// daemon's one derivation (internal/keepalive.UncachedInputTokens) and the
+	// module AGENTS.md section "Uncached input tokens are a SUM, and the field
+	// names lie about it".
+	InputTokens int64 `protobuf:"varint,6,opt,name=input_tokens,json=inputTokens,proto3" json:"input_tokens,omitempty"`
+	TtftMs      int64 `protobuf:"varint,7,opt,name=ttft_ms,json=ttftMs,proto3" json:"ttft_ms,omitempty"` // first-token latency of the current message
 	// Activity windows: open until cleared.
 	Compacting *ProgressWindow `protobuf:"bytes,8,opt,name=compacting,proto3" json:"compacting,omitempty"` // data.StatusMessage status="compacting"
 	Retrying   *ProgressWindow `protobuf:"bytes,9,opt,name=retrying,proto3" json:"retrying,omitempty"`     // data.ApiRetry, else the ApiErrorLine

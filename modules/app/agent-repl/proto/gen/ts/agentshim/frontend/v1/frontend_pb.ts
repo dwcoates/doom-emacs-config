@@ -2361,33 +2361,42 @@ export const TokenOutputDetailsSchema: GenMessage<TokenOutputDetails> = /*@__PUR
  * Derived prompt-cache rates calculated from the authoritative token
  * counters on one usage record or a cumulative usage total.
  *
+ * THE THREE RATES PARTITION THE PROMPT INPUT and sum to 1: each names ONE of
+ * the three disjoint SDK buckets. `uncached_input_rate` is therefore the
+ * `input_tokens` BUCKET's share and NOT the module's "uncached input" measure,
+ * which is `input_tokens + cache_creation_input_tokens` (AGENTS.md, "Uncached
+ * input tokens are a SUM, and the field names lie about it"). The EXPENSIVE
+ * share is `uncached_input_rate + cache_write_rate`; reading this one field as
+ * "what the turn paid for" is exactly the mistake its name invites.
+ *
  * @generated from message agentshim.frontend.v1.TokenCacheRates
  */
 export type TokenCacheRates = Message<"agentshim.frontend.v1.TokenCacheRates"> & {
   /**
-   * Total prompt input calculated as uncached input plus cache creation plus
-   * cache reads.
+   * Total prompt input: the three disjoint buckets summed.
    *
    * @generated from field: int64 total_prompt_input_tokens = 1;
    */
   totalPromptInputTokens: bigint;
 
   /**
-   * Cache-read tokens divided by total prompt input.
+   * Cache-read tokens divided by total prompt input. The ONLY cheap bucket.
    *
    * @generated from field: double cache_hit_rate = 2;
    */
   cacheHitRate: number;
 
   /**
-   * Cache-creation tokens divided by total prompt input.
+   * Cache-creation tokens divided by total prompt input. Expensive: paid fresh
+   * plus the cache-write premium.
    *
    * @generated from field: double cache_write_rate = 3;
    */
   cacheWriteRate: number;
 
   /**
-   * Uncached input tokens divided by total prompt input.
+   * The `input_tokens` bucket divided by total prompt input. Expensive, but
+   * only PART of the expensive share — see the message comment above.
    *
    * @generated from field: double uncached_input_rate = 4;
    */
@@ -5979,7 +5988,12 @@ export type ProgressView = Message<"agentshim.frontend.v1.ProgressView"> & {
   thinkingTokens: bigint;
 
   /**
-   * THIS TURN's cumulative cached+uncached input
+   * THIS TURN's cumulative UNCACHED input: input_tokens +
+   * cache_creation_input_tokens summed across the turn's assistant messages.
+   * Cache READS are excluded, which is the whole point of the figure — see the
+   * daemon's one derivation (internal/keepalive.UncachedInputTokens) and the
+   * module AGENTS.md section "Uncached input tokens are a SUM, and the field
+   * names lie about it".
    *
    * @generated from field: int64 input_tokens = 6;
    */
