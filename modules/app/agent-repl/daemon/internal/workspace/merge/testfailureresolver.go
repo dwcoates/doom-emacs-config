@@ -9,7 +9,7 @@ import (
 )
 
 // This file is merge.Coordinator's outbound port onto the AGENT that owns the
-// work whose cherry-pick broke the target's test suite. It is the sibling of
+// work whose rebase broke the target's test suite. It is the sibling of
 // merge.ConflictResolver (conflictresolver.go) and follows the same shape for
 // the same reasons: the party best placed to fix a suite the merge just broke
 // is the session that wrote the commits, and the coordinator is already holding
@@ -43,7 +43,11 @@ type TestFailureResolution struct {
 	FailingCommit string
 	// SourceBranch is the branch that commit is being replayed from.
 	SourceBranch string
-	// TargetDir is the worktree the commit landed in — the tree the agent fixes.
+	// TargetDir is the worktree the agent fixes IN, which is the temporary
+	// REBASE WORKTREE rather than the merge target: the failing commit was
+	// replayed there and the target carries nothing of this merge yet. The name
+	// is kept because the prompt's {{target_dir}} placeholder is user-editable
+	// text this field fills.
 	TargetDir string
 	// FailureTail is the clamped tail of the failing suite's output.
 	FailureTail string
@@ -108,7 +112,8 @@ type TestFailureResolver interface {
 	// agent is still editing.
 	//
 	// An error means no fix happened. The coordinator does not retry: it fails
-	// the merge and rolls the target back.
+	// the merge, and the target — which this merge has not touched — stays
+	// exactly as it was.
 	//
 	// IT MAY FAIL FAST, and the coordinator must not read a quick error as a
 	// mistake. The turn has to START before the long wait for it to finish

@@ -251,6 +251,24 @@ func addFeatureWorktree(t *testing.T, target string) string {
 	return featureDir
 }
 
+// parkedAt threads a parked Result's rebase worktree back onto the request,
+// which is exactly what merge.Coordinator does before Resume and
+// ContinueAfterTestFix. A driver step that works INSIDE an existing rebase
+// cannot invent the tree it works in, and the alternative — falling back to the
+// target — is the target-mutating behavior this design removed.
+//
+// It also registers the cleanup the coordinator owns in production, so a parked
+// fixture never leaves a worktree registered in the repository.
+func parkedAt(t *testing.T, e *Driver, req Request, res Result) Request {
+	t.Helper()
+	if res.WorkDir == "" || res.BaseHead == "" {
+		t.Fatalf("parked Result names no rebase worktree: %+v", res)
+	}
+	req.WorkDir, req.BaseHead = res.WorkDir, res.BaseHead
+	t.Cleanup(func() { _ = e.Cleanup(context.Background(), req) })
+	return req
+}
+
 // --- construction -------------------------------------------------------
 
 func TestNewDriverRequiresDependencies(t *testing.T) {
@@ -334,8 +352,10 @@ func TestMergeCleanCherryPick(t *testing.T) {
 	if _, statErr := os.Stat(filepath.Join(target, "feature.txt")); statErr != nil {
 		t.Errorf("feature.txt did not land on target: %v", statErr)
 	}
-	// The landed commit carries the -x annotation.
-	if body := gitRun(t, target, "log", "-1", "--pretty=%B"); !strings.Contains(body, "cherry picked from commit") {
+	// The landed commit carries the -x annotation naming the branch commit it
+	// was replayed from. It is the merge commit's SECOND PARENT now, because the
+	// target's own head is reached by a --no-ff merge rather than by the pick.
+	if body := gitRun(t, target, "log", "-1", "--pretty=%B", "HEAD^2"); !strings.Contains(body, "cherry picked from commit") {
 		t.Errorf("landed commit missing -x annotation:\n%s", body)
 	}
 	// Finalization: the merge/<ws> tag exists at HEAD.
@@ -420,9 +440,14 @@ func TestMergeConflictDetection(t *testing.T) {
 	if res.ConflictCommit == "" {
 		t.Errorf("res.ConflictCommit empty; want the conflicting short SHA")
 	}
-	// The pick is left IN TREE (never aborted): CHERRY_PICK_HEAD survives.
-	if !cherryPickHeadPresent(t, target) {
-		t.Errorf("CHERRY_PICK_HEAD absent — driver aborted the conflict instead of leaving it in tree")
+	// The replay is left IN THE REBASE WORKTREE (never aborted), and the target
+	// is untouched: CHERRY_PICK_HEAD is there and not here.
+	req = parkedAt(t, e, req, res)
+	if !cherryPickHeadPresent(t, req.WorkDir) {
+		t.Errorf("CHERRY_PICK_HEAD absent — driver aborted the conflict instead of leaving it in the rebase worktree")
+	}
+	if cherryPickHeadPresent(t, target) {
+		t.Errorf("CHERRY_PICK_HEAD present in the TARGET; the rebase must never park there")
 	}
 	assertPhases(t, sink.phases(), PhaseMerging, PhaseMergeConflict)
 }
@@ -491,11 +516,15 @@ func TestResumeSkipsAPickTheResolutionEmptied(t *testing.T) {
 	e := newTestDriver(t, sink)
 	req := withRun(t, sink, Request{Workspace: "/ws/rs-empty-ws", Name: "rs-empty-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
 
-	if res, err := e.Merge(context.Background(), req); err != nil || res.Outcome != OutcomeConflict {
-		t.Fatalf("setup Merge() res=%+v err=%v, want conflict", res, err)
+	parked, err := e.Merge(context.Background(), req)
+	if err != nil || parked.Outcome != OutcomeConflict {
+		t.Fatalf("setup Merge() res=%+v err=%v, want conflict", parked, err)
 	}
-	writeFile(t, target, "base.txt", "target\n")
-	gitRun(t, target, "add", "base.txt")
+	// The conflict is parked in the REBASE WORKTREE, so that is where the
+	// resolution happens and what the resume must be pointed at.
+	req = parkedAt(t, e, req, parked)
+	writeFile(t, req.WorkDir, "base.txt", "target\n")
+	gitRun(t, req.WorkDir, "add", "base.txt")
 
 	// Act.
 	res, err := e.Resume(context.Background(), req)
@@ -507,8 +536,8 @@ func TestResumeSkipsAPickTheResolutionEmptied(t *testing.T) {
 	if res.Outcome != OutcomeMerged {
 		t.Fatalf("Resume() outcome = %s, want merged", res.Outcome)
 	}
-	if cherryPickHeadPresent(t, target) {
-		t.Errorf("CHERRY_PICK_HEAD still parked after resuming an emptied pick")
+	if cherryPickHeadPresent(t, req.WorkDir) {
+		t.Errorf("CHERRY_PICK_HEAD still parked after resuming an emptied replay")
 	}
 	if got := readFile(t, target, "base.txt"); got != "target\n" {
 		t.Errorf("base.txt = %q, want the resolution's content", got)
@@ -617,12 +646,16 @@ func TestResumeCompletesMergeAndOrdersTransitions(t *testing.T) {
 	e := newTestDriver(t, sink)
 	req := withRun(t, sink, Request{Workspace: "/ws/rz-ws", Name: "rz-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
 
-	if res, err := e.Merge(context.Background(), req); err != nil || res.Outcome != OutcomeConflict {
-		t.Fatalf("setup Merge() res=%+v err=%v, want conflict", res, err)
+	parked, err := e.Merge(context.Background(), req)
+	if err != nil || parked.Outcome != OutcomeConflict {
+		t.Fatalf("setup Merge() res=%+v err=%v, want conflict", parked, err)
 	}
-	// Human resolves the conflict and stages the file.
-	writeFile(t, target, "base.txt", "resolved\n")
-	gitRun(t, target, "add", "base.txt")
+	// The conflict is parked in the REBASE WORKTREE, so that is where the
+	// resolution happens and what the resume must be pointed at.
+	req = parkedAt(t, e, req, parked)
+	// Human resolves the conflict and stages the file, in the rebase worktree.
+	writeFile(t, req.WorkDir, "base.txt", "resolved\n")
+	gitRun(t, req.WorkDir, "add", "base.txt")
 
 	// Act.
 	res, err := e.Resume(context.Background(), req)
@@ -634,7 +667,7 @@ func TestResumeCompletesMergeAndOrdersTransitions(t *testing.T) {
 	if res.Outcome != OutcomeMerged {
 		t.Fatalf("Resume() outcome = %s, want merged", res.Outcome)
 	}
-	if cherryPickHeadPresent(t, target) {
+	if cherryPickHeadPresent(t, req.WorkDir) {
 		t.Errorf("CHERRY_PICK_HEAD still present after a completed Resume")
 	}
 	if got := readFile(t, target, "base.txt"); got != "resolved\n" {
@@ -895,9 +928,14 @@ func TestMergeRangeAlreadyIncorporatedByPatchID(t *testing.T) {
 // --- a dirty or colliding TARGET tree -----------------------------------
 
 func TestMergeTargetDirtyUnstagedFails(t *testing.T) {
-	// Arrange: the target has an uncommitted edit to a file the pick rewrites.
-	// Git refuses rather than clobbering it, and there is no conflict to
-	// resolve, so the merge is failed and NOT parked.
+	// Arrange: the target has an uncommitted edit to a file the merge rewrites.
+	// AMENDED for the rebase pipeline: the rebase itself runs in a clean temp
+	// worktree and succeeds, so the refusal now comes from the ONE merge commit
+	// at the end. The guarantee under test is unchanged and asserted unchanged —
+	// git refuses rather than clobbering the uncommitted work, and the merge is
+	// failed rather than parked — only the phase count grew, because the commits
+	// were genuinely replayed and gated before the target was asked to take
+	// them.
 	target := initTarget(t)
 	featureDir := addFeatureWorktree(t, target)
 	writeFile(t, featureDir, "base.txt", "feature\n")
@@ -922,13 +960,13 @@ func TestMergeTargetDirtyUnstagedFails(t *testing.T) {
 	if got := readFile(t, target, "base.txt"); got != "local uncommitted work\n" {
 		t.Errorf("target base.txt = %q; the refused merge overwrote uncommitted work", got)
 	}
-	assertPhases(t, sink.phases(), PhaseMerging, PhaseMergeFailed)
+	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging, PhaseMergeFailed)
 }
 
 func TestMergeTargetDirtyStagedFails(t *testing.T) {
 	// Arrange: same collision, but the target's edit is STAGED. Git reports it
-	// differently ("your local changes would be overwritten by cherry-pick"),
-	// and the classification must land the same way.
+	// differently, and the classification must land the same way. AMENDED for
+	// the rebase pipeline exactly as its unstaged sibling was.
 	target := initTarget(t)
 	featureDir := addFeatureWorktree(t, target)
 	writeFile(t, featureDir, "base.txt", "feature\n")
@@ -952,16 +990,21 @@ func TestMergeTargetDirtyStagedFails(t *testing.T) {
 		t.Fatalf("Merge() outcome = %s, want failed", res.Outcome)
 	}
 	if cherryPickHeadPresent(t, target) {
-		t.Errorf("CHERRY_PICK_HEAD present; a refused pick is not a resolvable conflict")
+		t.Errorf("CHERRY_PICK_HEAD present; a refused merge is not a resolvable conflict")
 	}
-	assertPhases(t, sink.phases(), PhaseMerging, PhaseMergeFailed)
+	if got := readFile(t, target, "base.txt"); got != "staged local work\n" {
+		t.Errorf("target base.txt = %q; the refused merge overwrote staged work", got)
+	}
+	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging, PhaseMergeFailed)
 }
 
 func TestMergeUntrackedCollisionFails(t *testing.T) {
-	// Arrange: an UNTRACKED target file with the same name a later commit in
-	// the range adds. Git applies the earlier commit and then refuses, so the
-	// merge is partially applied — and must still be reported failed rather
-	// than merged, because the rest of the range never landed.
+	// Arrange: an UNTRACKED target file with the same name a commit in the range
+	// adds. AMENDED for the rebase pipeline: the range now replays in full
+	// against a clean temp worktree, and the refusal comes from the ONE merge
+	// commit — so the merge is no longer PARTIALLY applied to the target, it is
+	// not applied at all. The assertions are strictly stronger: the untracked
+	// file survives, nothing is tagged, and the target keeps its own head.
 	target := initTarget(t)
 	featureDir := addFeatureWorktree(t, target)
 	writeFile(t, featureDir, "base.txt", "feature\n")
@@ -992,8 +1035,9 @@ func TestMergeUntrackedCollisionFails(t *testing.T) {
 	if tags := strings.TrimSpace(gitRun(t, target, "tag", "-l", "merge/untracked-ws")); tags != "" {
 		t.Errorf("merge/untracked-ws tagged on a failed merge; git tag -l = %q", tags)
 	}
-	// The first commit landed and was tested; the second is what git refused.
-	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging, PhaseMerging, PhaseMergeFailed)
+	// Both commits replayed and were gated in the rebase worktree (two phases
+	// each); the target then refused to take them and kept its own head.
+	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging, PhaseMerging, PhaseMerging, PhaseMergeFailed)
 }
 
 // --- the resumed run's commit cursor ------------------------------------
@@ -1028,11 +1072,15 @@ func TestResumeReportsTheRunsWholeRangeRatherThanTheEmptyRemainder(t *testing.T)
 	sink := &recordingSink{}
 	e := newTestDriver(t, sink)
 	req := withRun(t, sink, Request{Workspace: "/ws/rz-total", Name: "rz-total", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
-	if res, err := e.Merge(context.Background(), req); err != nil || res.Outcome != OutcomeConflict {
-		t.Fatalf("setup Merge() res=%+v err=%v, want conflict", res, err)
+	parked, err := e.Merge(context.Background(), req)
+	if err != nil || parked.Outcome != OutcomeConflict {
+		t.Fatalf("setup Merge() res=%+v err=%v, want conflict", parked, err)
 	}
-	writeFile(t, target, "base.txt", "resolved\n")
-	gitRun(t, target, "add", "base.txt")
+	// The conflict is parked in the REBASE WORKTREE, so that is where the
+	// resolution happens and what the resume must be pointed at.
+	req = parkedAt(t, e, req, parked)
+	writeFile(t, req.WorkDir, "base.txt", "resolved\n")
+	gitRun(t, req.WorkDir, "add", "base.txt")
 
 	// Act.
 	res, err := e.Resume(context.Background(), req)
@@ -1076,11 +1124,15 @@ func TestResumeRebuildsTheCursorForAPublisherThatLostIt(t *testing.T) {
 	sink := &recordingSink{}
 	e := newTestDriver(t, sink)
 	req := withRun(t, sink, Request{Workspace: "/ws/rz-bounce", Name: "rz-bounce", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
-	if res, err := e.Merge(context.Background(), req); err != nil || res.Outcome != OutcomeConflict {
-		t.Fatalf("setup Merge() res=%+v err=%v, want conflict", res, err)
+	parked, err := e.Merge(context.Background(), req)
+	if err != nil || parked.Outcome != OutcomeConflict {
+		t.Fatalf("setup Merge() res=%+v err=%v, want conflict", parked, err)
 	}
-	writeFile(t, target, "base.txt", "resolved\n")
-	gitRun(t, target, "add", "base.txt")
+	// The conflict is parked in the REBASE WORKTREE, so that is where the
+	// resolution happens and what the resume must be pointed at.
+	req = parkedAt(t, e, req, parked)
+	writeFile(t, req.WorkDir, "base.txt", "resolved\n")
+	gitRun(t, req.WorkDir, "add", "base.txt")
 	// The daemon that was publishing this run is gone; its successor rebuilds
 	// the publisher from the durable run id alone.
 	rebuilt, err := ResumeRunStatus(sink, t.Logf, req.Workspace, testClock(), req.Run.RunID(), 0)
@@ -1135,9 +1187,10 @@ func TestResumeSecondConflictReEmitsConflict(t *testing.T) {
 	if err != nil || first.Outcome != OutcomeConflict {
 		t.Fatalf("setup Merge() res=%+v err=%v, want conflict", first, err)
 	}
-	// A human resolves the FIRST conflict only.
-	writeFile(t, target, "base.txt", "resolved one\n")
-	gitRun(t, target, "add", "base.txt")
+	req = parkedAt(t, e, req, first)
+	// A human resolves the FIRST conflict only, in the rebase worktree.
+	writeFile(t, req.WorkDir, "base.txt", "resolved one\n")
+	gitRun(t, req.WorkDir, "add", "base.txt")
 
 	// Act.
 	res, err := e.Resume(context.Background(), req)
@@ -1152,8 +1205,8 @@ func TestResumeSecondConflictReEmitsConflict(t *testing.T) {
 	if res.ConflictCommit == first.ConflictCommit {
 		t.Errorf("Resume() re-reported the first conflict %s; want the NEXT commit", res.ConflictCommit)
 	}
-	if !cherryPickHeadPresent(t, target) {
-		t.Errorf("CHERRY_PICK_HEAD absent — the second conflict was not left in tree")
+	if !cherryPickHeadPresent(t, req.WorkDir) {
+		t.Errorf("CHERRY_PICK_HEAD absent — the second conflict was not left in the rebase worktree")
 	}
 	if tags := strings.TrimSpace(gitRun(t, target, "tag", "-l", "merge/rz2-ws")); tags != "" {
 		t.Errorf("merge/rz2-ws tagged while still conflicted; git tag -l = %q", tags)
@@ -1212,15 +1265,19 @@ func TestResumeSurfacesSinkError(t *testing.T) {
 	sink := &recordingSink{}
 	e := newTestDriver(t, sink)
 	req := withRun(t, sink, Request{Workspace: "/ws/rsink-ws", Name: "rsink-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
-	if res, err := e.Merge(context.Background(), req); err != nil || res.Outcome != OutcomeConflict {
-		t.Fatalf("setup Merge() res=%+v err=%v, want conflict", res, err)
+	parked, err := e.Merge(context.Background(), req)
+	if err != nil || parked.Outcome != OutcomeConflict {
+		t.Fatalf("setup Merge() res=%+v err=%v, want conflict", parked, err)
 	}
-	writeFile(t, target, "base.txt", "resolved\n")
-	gitRun(t, target, "add", "base.txt")
+	// The conflict is parked in the REBASE WORKTREE, so that is where the
+	// resolution happens and what the resume must be pointed at.
+	req = parkedAt(t, e, req, parked)
+	writeFile(t, req.WorkDir, "base.txt", "resolved\n")
+	gitRun(t, req.WorkDir, "add", "base.txt")
 	sink.failOn = PhaseMerging
 
 	// Act.
-	_, err := e.Resume(context.Background(), req)
+	_, err = e.Resume(context.Background(), req)
 
 	// Assert.
 	if err == nil {
@@ -1229,8 +1286,8 @@ func TestResumeSurfacesSinkError(t *testing.T) {
 	if !strings.Contains(err.Error(), string(errFakeSink)) {
 		t.Errorf("Resume() err = %v; want it to wrap the sink error", err)
 	}
-	if !cherryPickHeadPresent(t, target) {
-		t.Errorf("CHERRY_PICK_HEAD gone; Resume continued the pick despite the aborted transition")
+	if !cherryPickHeadPresent(t, req.WorkDir) {
+		t.Errorf("CHERRY_PICK_HEAD gone; Resume continued the replay despite the aborted transition")
 	}
 }
 
@@ -1477,7 +1534,9 @@ func TestMergeRunsTheSuiteOncePerLandedCommit(t *testing.T) {
 	// Act.
 	res, err := e.Merge(context.Background(), req)
 
-	// Assert — one run per commit, all against the target worktree.
+	// Assert — one run per commit, all against the REBASE WORKTREE. That is the
+	// tree the proposed merge exists in; running the gate in the target would
+	// mean the target already carried the untested work.
 	if err != nil {
 		t.Fatalf("Merge() err = %v", err)
 	}
@@ -1487,9 +1546,15 @@ func TestMergeRunsTheSuiteOncePerLandedCommit(t *testing.T) {
 	if suite.calls != 3 {
 		t.Fatalf("suite runs = %d, want 3 (one per landed commit)", suite.calls)
 	}
+	if res.WorkDir == "" {
+		t.Fatalf("merged Result names no rebase worktree")
+	}
 	for i, dir := range suite.targets {
-		if dir != target {
-			t.Errorf("suite run %d ran against %q, want the target %q", i, dir, target)
+		if dir != res.WorkDir {
+			t.Errorf("suite run %d ran against %q, want the rebase worktree %q", i, dir, res.WorkDir)
+		}
+		if dir == target {
+			t.Errorf("suite run %d ran in the TARGET checkout, which this merge must never write to", i)
 		}
 	}
 }
@@ -1597,7 +1662,7 @@ func TestMergeReportsATestFailureWithTheFailingCommitAndTail(t *testing.T) {
 	res, err := e.Merge(context.Background(), req)
 
 	// Assert — a non-terminal test failure carrying everything the coordinator
-	// needs to prompt a fix and, failing that, to roll back.
+	// needs to prompt a fix and, failing that, to discard the rebase worktree.
 	if err != nil {
 		t.Fatalf("Merge() err = %v", err)
 	}
@@ -1610,8 +1675,11 @@ func TestMergeReportsATestFailureWithTheFailingCommitAndTail(t *testing.T) {
 	if res.TestFailureTail != "FAIL: agent-repl-suite" {
 		t.Errorf("res.TestFailureTail = %q, want the suite's tail", res.TestFailureTail)
 	}
-	if res.PreMergeHead != head {
-		t.Errorf("res.PreMergeHead = %q, want the pre-merge HEAD %q", res.PreMergeHead, head)
+	if res.WorkDir == "" {
+		t.Errorf("res.WorkDir empty; the coordinator has no tree to point a fix turn at")
+	}
+	if res.BaseHead != head {
+		t.Errorf("res.BaseHead = %q, want the target head %q the rebase based itself on", res.BaseHead, head)
 	}
 	// No terminal transition: the coordinator classifies this one. The third
 	// `merging` is the gate's single re-run, which a scripted failure repeats.
@@ -1689,9 +1757,10 @@ func TestContinueAfterTestFixCommitsTheStagedFixAndFinishesTheRange(t *testing.T
 	if err != nil || first.Outcome != OutcomeTestFailed {
 		t.Fatalf("setup Merge() res=%+v err=%v, want test_failed", first, err)
 	}
-	headAfterPick := strings.TrimSpace(gitRun(t, target, "rev-parse", "HEAD"))
-	writeFile(t, target, "feature.txt", "fixed\n")
-	gitRun(t, target, "add", "feature.txt")
+	req = parkedAt(t, e, req, first)
+	headAfterPick := strings.TrimSpace(gitRun(t, req.WorkDir, "rev-parse", "HEAD"))
+	writeFile(t, req.WorkDir, "feature.txt", "fixed\n")
+	gitRun(t, req.WorkDir, "add", "feature.txt")
 
 	// Act.
 	res, err := e.ContinueAfterTestFix(context.Background(), req, first.FailingCommit)
@@ -1704,10 +1773,12 @@ func TestContinueAfterTestFixCommitsTheStagedFixAndFinishesTheRange(t *testing.T
 	if res.Outcome != OutcomeMerged {
 		t.Fatalf("ContinueAfterTestFix() outcome = %s, want merged", res.Outcome)
 	}
-	if parent := strings.TrimSpace(gitRun(t, target, "rev-parse", "HEAD^")); parent != headAfterPick {
-		t.Errorf("HEAD^ = %s, want the untouched picked commit %s (the fix must not amend it)", parent, headAfterPick)
+	// The target's HEAD is the merge commit; the rebased line hangs off its
+	// second parent, and that is where the fix's ancestry is read.
+	if parent := strings.TrimSpace(gitRun(t, target, "rev-parse", "HEAD^2^")); parent != headAfterPick {
+		t.Errorf("HEAD^2^ = %s, want the untouched replayed commit %s (the fix must not amend it)", parent, headAfterPick)
 	}
-	if body := gitRun(t, target, "log", "-1", "--pretty=%s"); !strings.Contains(body, "fix tests after cherry-pick of "+first.FailingCommit) {
+	if body := gitRun(t, target, "log", "-1", "--pretty=%s", "HEAD^2"); !strings.Contains(body, "fix tests after rebasing "+first.FailingCommit) {
 		t.Errorf("follow-up commit subject = %q, want it to name the failing commit", body)
 	}
 }
@@ -1728,6 +1799,8 @@ func TestContinueAfterTestFixReportsAStillFailingSuite(t *testing.T) {
 	if err != nil || first.Outcome != OutcomeTestFailed {
 		t.Fatalf("setup Merge() res=%+v err=%v, want test_failed", first, err)
 	}
+
+	req = parkedAt(t, e, req, first)
 
 	// Act.
 	res, err := e.ContinueAfterTestFix(context.Background(), req, first.FailingCommit)
@@ -1758,11 +1831,15 @@ func TestResumeGatesTheResolvedCommitOnTheSuite(t *testing.T) {
 	suite := &fakeSuite{verdicts: []SuiteResult{{Passed: false, Tail: "resolved badly"}}}
 	e := newTestDriverWithSuite(t, sink, suite)
 	req := withRun(t, sink, Request{Workspace: "/ws/rzgate-ws", Name: "rzgate-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
-	if res, err := e.Merge(context.Background(), req); err != nil || res.Outcome != OutcomeConflict {
-		t.Fatalf("setup Merge() res=%+v err=%v, want conflict", res, err)
+	parked, err := e.Merge(context.Background(), req)
+	if err != nil || parked.Outcome != OutcomeConflict {
+		t.Fatalf("setup Merge() res=%+v err=%v, want conflict", parked, err)
 	}
-	writeFile(t, target, "base.txt", "resolved\n")
-	gitRun(t, target, "add", "base.txt")
+	// The conflict is parked in the REBASE WORKTREE, so that is where the
+	// resolution happens and what the resume must be pointed at.
+	req = parkedAt(t, e, req, parked)
+	writeFile(t, req.WorkDir, "base.txt", "resolved\n")
+	gitRun(t, req.WorkDir, "add", "base.txt")
 
 	// Act.
 	res, err := e.Resume(context.Background(), req)
@@ -1781,120 +1858,55 @@ func TestResumeGatesTheResolvedCommitOnTheSuite(t *testing.T) {
 	}
 }
 
-// --- rollback -----------------------------------------------------------
+// --- the ONE target move, and the absence of a rollback -----------------
 
-func TestRollbackReturnsTheTargetToItsPreMergeHead(t *testing.T) {
-	// Arrange — a merge that landed a commit and then broke the suite.
+// Rollback is RETIRED. Nothing of a merge reaches the target until the whole
+// rebase has landed and passed, so there is nothing a failed merge could undo —
+// and the reset that used to do the undoing is the hazard the rebase design
+// removed. The tests that pinned its behavior are replaced by the ones below,
+// which pin the guarantee that made it unnecessary (the target is untouched) and
+// the migrated refusal guard (the target must not have moved).
+
+func TestAFailedGateLeavesTheTargetExactlyAsItWasFound(t *testing.T) {
+	// AMENDED FROM TestRollbackReturnsTheTargetToItsPreMergeHead. That test
+	// asserted the target came BACK to its pre-merge head after a reset; this
+	// asserts it never left, which is the same guarantee without the window.
+	// Arrange — a merge whose first landed commit breaks the suite twice.
 	target := initTarget(t)
 	featureDir := addFeatureWorktree(t, target)
 	writeFile(t, featureDir, "feature.txt", "hello\n")
 	gitRun(t, featureDir, "add", ".")
 	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
+	before := strings.TrimSpace(gitRun(t, target, "rev-parse", "HEAD"))
 
 	sink := &recordingSink{}
 	suite := &fakeSuite{verdicts: []SuiteResult{{Passed: false, Tail: "boom"}}}
 	e := newTestDriverWithSuite(t, sink, suite)
 	req := withRun(t, sink, Request{Workspace: "/ws/rb-ws", Name: "rb-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
-	res, err := e.Merge(context.Background(), req)
-	if err != nil || res.Outcome != OutcomeTestFailed {
-		t.Fatalf("setup Merge() res=%+v err=%v, want test_failed", res, err)
-	}
 
 	// Act.
-	if err := e.Rollback(context.Background(), req, res.PreMergeHead, res.TestedHead); err != nil {
-		t.Fatalf("Rollback() err = %v", err)
-	}
+	res, err := e.Merge(context.Background(), req)
 
-	// Assert — the target is exactly where the merge found it.
-	if head := strings.TrimSpace(gitRun(t, target, "rev-parse", "HEAD")); head != res.PreMergeHead {
-		t.Errorf("target HEAD = %s, want the pre-merge %s", head, res.PreMergeHead)
+	// Assert — the target never moved and never saw the work.
+	if err != nil || res.Outcome != OutcomeTestFailed {
+		t.Fatalf("Merge() res=%+v err=%v, want test_failed", res, err)
+	}
+	if head := strings.TrimSpace(gitRun(t, target, "rev-parse", "HEAD")); head != before {
+		t.Errorf("target HEAD = %s, want it untouched at %s", head, before)
 	}
 	if _, statErr := os.Stat(filepath.Join(target, "feature.txt")); statErr == nil {
-		t.Errorf("feature.txt survived the rollback")
+		t.Errorf("feature.txt reached the target, which a failing gate must never let happen")
 	}
 }
 
-func TestRollbackWithoutAHeadIsRefused(t *testing.T) {
-	// Arrange.
-	target := initTarget(t)
-	featureDir := addFeatureWorktree(t, target)
-	e := newTestDriver(t, &recordingSink{})
-	req := withRun(t, &recordingSink{}, Request{Workspace: "/ws/rb0-ws", Name: "rb0-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
-
-	// Act.
-	err := e.Rollback(context.Background(), req, "", "tested0")
-
-	// Assert — a rollback with no point to roll back to is a loud failure, not
-	// a no-op that leaves the target broken in silence.
-	if err == nil {
-		t.Fatalf("Rollback() err = nil; want a refusal")
-	}
-}
-
-func TestRollbackWithoutTheHeadItLeftIsRefused(t *testing.T) {
-	// Arrange — no record of where the merge left the target, so the reset has
-	// nothing to verify ownership against.
-	target := initTarget(t)
-	featureDir := addFeatureWorktree(t, target)
-	e := newTestDriver(t, &recordingSink{})
-	req := withRun(t, &recordingSink{}, Request{Workspace: "/ws/rb1-ws", Name: "rb1-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
-	head := strings.TrimSpace(gitRun(t, target, "rev-parse", "HEAD"))
-
-	// Act.
-	err := e.Rollback(context.Background(), req, head, "")
-
-	// Assert.
-	if err == nil {
-		t.Fatalf("Rollback() err = nil; want a refusal")
-	}
-}
-
-func TestRollbackIsRefusedWhenSomethingElseCommittedToTheTarget(t *testing.T) {
-	// Arrange — a merge that landed a commit, broke the suite, and then had an
-	// UNRELATED commit land on the target while its resolution was running. The
-	// merge lease covers the workspace's session, not the target checkout, so
-	// this is a write the pipeline cannot prevent — only refuse to destroy.
-	target := initTarget(t)
-	featureDir := addFeatureWorktree(t, target)
-	writeFile(t, featureDir, "feature.txt", "hello\n")
-	gitRun(t, featureDir, "add", ".")
-	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
-
-	sink := &recordingSink{}
-	suite := &fakeSuite{verdicts: []SuiteResult{{Passed: false, Tail: "boom"}}}
-	e := newTestDriverWithSuite(t, sink, suite)
-	req := withRun(t, sink, Request{Workspace: "/ws/rb2-ws", Name: "rb2-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
-	res, err := e.Merge(context.Background(), req)
-	if err != nil || res.Outcome != OutcomeTestFailed {
-		t.Fatalf("setup Merge() res=%+v err=%v, want test_failed", res, err)
-	}
-	writeFile(t, target, "someone-elses-work.txt", "do not delete me\n")
-	gitRun(t, target, "add", ".")
-	gitRun(t, target, "commit", "-q", "-m", "an external commit")
-	external := strings.TrimSpace(gitRun(t, target, "rev-parse", "HEAD"))
-
-	// Act.
-	err = e.Rollback(context.Background(), req, res.PreMergeHead, res.TestedHead)
-
-	// Assert — refused, and the external commit is still reachable.
-	if err == nil {
-		t.Fatalf("Rollback() err = nil; want a refusal that names the external write")
-	}
-	if head := strings.TrimSpace(gitRun(t, target, "rev-parse", "HEAD")); head != external {
-		t.Errorf("target HEAD = %s, want the external commit %s left untouched", head, external)
-	}
-	if _, statErr := os.Stat(filepath.Join(target, "someone-elses-work.txt")); statErr != nil {
-		t.Errorf("the external commit's file was destroyed by the rollback: %v", statErr)
-	}
-}
-
-func TestATestFailureRecordsTheHeadTheSuiteRanAgainst(t *testing.T) {
+func TestATestFailureParksInTheRebaseWorktreeNotTheTarget(t *testing.T) {
 	// Arrange — a merge whose landed commit breaks the suite.
 	target := initTarget(t)
 	featureDir := addFeatureWorktree(t, target)
 	writeFile(t, featureDir, "feature.txt", "hello\n")
 	gitRun(t, featureDir, "add", ".")
 	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
+	base := strings.TrimSpace(gitRun(t, target, "rev-parse", "HEAD"))
 
 	sink := &recordingSink{}
 	suite := &fakeSuite{verdicts: []SuiteResult{{Passed: false, Tail: "boom"}}}
@@ -1906,21 +1918,356 @@ func TestATestFailureRecordsTheHeadTheSuiteRanAgainst(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Merge() err = %v", err)
 	}
+	t.Cleanup(func() {
+		_ = e.Cleanup(context.Background(), Request{Name: req.Name, TargetDir: target, WorkDir: res.WorkDir})
+	})
 
-	// Assert — the recorded head is the target as the merge left it.
-	want := strings.TrimSpace(gitRun(t, target, "rev-parse", "HEAD"))
-	if res.TestedHead != want {
-		t.Errorf("TestedHead = %q, want the tested %s", res.TestedHead, want)
+	// Assert — the Result names the tree the failure lives in and the target
+	// head the whole rebase was based on.
+	if res.WorkDir == "" {
+		t.Fatalf("res.WorkDir empty; the coordinator has no tree to point the fix turn at")
+	}
+	if res.BaseHead != base {
+		t.Errorf("res.BaseHead = %q, want the target head %q the rebase based itself on", res.BaseHead, base)
+	}
+	if _, statErr := os.Stat(filepath.Join(res.WorkDir, "feature.txt")); statErr != nil {
+		t.Errorf("the failing commit is not in the rebase worktree: %v", statErr)
+	}
+}
+
+func TestARebaseLandsARealMergeCommitWhoseSecondParentIsTheBranch(t *testing.T) {
+	// Arrange.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "feature.txt", "hello\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
+	base := strings.TrimSpace(gitRun(t, target, "rev-parse", "HEAD"))
+
+	sink := &recordingSink{}
+	e := newTestDriver(t, sink)
+	req := withRun(t, sink, Request{Workspace: "/ws/topo-ws", Name: "topo-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+
+	// Act.
+	res, err := e.Merge(context.Background(), req)
+
+	// Assert — a merge commit with the target's old head first and the BRANCH
+	// second, which is what makes the workspace visible in git porcelain.
+	if err != nil || res.Outcome != OutcomeMerged {
+		t.Fatalf("Merge() res=%+v err=%v, want merged", res, err)
+	}
+	parents := strings.Fields(gitRun(t, target, "log", "-1", "--pretty=%P"))
+	if len(parents) != 2 {
+		t.Fatalf("target HEAD has %d parents (%v), want a 2-parent merge commit", len(parents), parents)
+	}
+	if parents[0] != base {
+		t.Errorf("first parent = %s, want the target's own head %s", parents[0], base)
+	}
+	branch := strings.TrimSpace(gitRun(t, target, "rev-parse", "refs/heads/feature"))
+	if parents[1] != branch {
+		t.Errorf("second parent = %s, want the branch tip %s", parents[1], branch)
+	}
+}
+
+func TestTheBranchRefIsForceMovedToTheRebasedLine(t *testing.T) {
+	// Arrange — the target advances after the branch was cut, so the rebase
+	// genuinely rewrites the branch's commits onto a new base.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "feature.txt", "hello\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
+	writeFile(t, target, "target-moved.txt", "moved\n")
+	gitRun(t, target, "add", ".")
+	gitRun(t, target, "commit", "-q", "-m", "B")
+	oldBranch := strings.TrimSpace(gitRun(t, target, "rev-parse", "refs/heads/feature"))
+	newBase := strings.TrimSpace(gitRun(t, target, "rev-parse", "HEAD"))
+
+	sink := &recordingSink{}
+	e := newTestDriver(t, sink)
+	req := withRun(t, sink, Request{Workspace: "/ws/mv-ws", Name: "mv-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+
+	// Act.
+	if _, err := e.Merge(context.Background(), req); err != nil {
+		t.Fatalf("Merge() err = %v", err)
+	}
+
+	// Assert — the branch moved off its old tip onto a line that descends from
+	// the target's new head, and the source worktree came with it.
+	moved := strings.TrimSpace(gitRun(t, target, "rev-parse", "refs/heads/feature"))
+	if moved == oldBranch {
+		t.Fatalf("branch ref = %s, want it force-moved off the pre-rebase tip", moved)
+	}
+	if got := strings.TrimSpace(gitRun(t, target, "merge-base", moved, newBase)); got != newBase {
+		t.Errorf("the moved branch does not descend from the target head %s", newBase)
+	}
+	if head := strings.TrimSpace(gitRun(t, featureDir, "rev-parse", "HEAD")); head != moved {
+		t.Errorf("source worktree HEAD = %s, want the moved branch %s", head, moved)
+	}
+	if _, statErr := os.Stat(filepath.Join(featureDir, "target-moved.txt")); statErr != nil {
+		t.Errorf("the source worktree was not re-synced onto the rebased line: %v", statErr)
+	}
+}
+
+func TestAnEmptyBranchNoOpsWithoutAnEmptyMergeCommit(t *testing.T) {
+	// Arrange — a branch that contributes nothing over the target.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	before := strings.TrimSpace(gitRun(t, target, "rev-parse", "HEAD"))
+
+	sink := &recordingSink{}
+	e := newTestDriver(t, sink)
+	req := withRun(t, sink, Request{Workspace: "/ws/empty-ws", Name: "empty-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+
+	// Act.
+	res, err := e.Merge(context.Background(), req)
+
+	// Assert — merged as a no-op, and NO merge commit was fabricated for it.
+	if err != nil || res.Outcome != OutcomeMerged || !res.AlreadyIncorporated {
+		t.Fatalf("Merge() res=%+v err=%v, want a merged no-op", res, err)
+	}
+	if head := strings.TrimSpace(gitRun(t, target, "rev-parse", "HEAD")); head != before {
+		t.Errorf("target HEAD = %s, want it unmoved at %s (an empty merge commit records work that never arrived)", head, before)
+	}
+}
+
+func TestAMovedTargetIsAnsweredByOneAutomaticReRebase(t *testing.T) {
+	// A target that moves while the gate runs invalidates everything the gate
+	// certified, so the merge re-bases onto the new head rather than merging a
+	// line nothing tested against it.
+	// Arrange — the suite advances the target the FIRST time it runs, and never
+	// again, so exactly one re-rebase is needed.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "feature.txt", "hello\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
+
+	sink := &recordingSink{}
+	var runs int
+	suite := suiteFunc(func(_ context.Context, _ string, _ SuiteRun) (SuiteResult, error) {
+		runs++
+		if runs == 1 {
+			writeFile(t, target, "external.txt", "somebody else\n")
+			gitRun(t, target, "add", ".")
+			gitRun(t, target, "commit", "-q", "-m", "an external commit")
+		}
+		return SuiteResult{Passed: true}, nil
+	})
+	e := newTestDriverWithSuite(t, sink, suite)
+	req := withRun(t, sink, Request{Workspace: "/ws/moved-ws", Name: "moved-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+
+	// Act.
+	res, err := e.Merge(context.Background(), req)
+
+	// Assert — the merge landed on the SECOND attempt, over the external commit,
+	// which is still reachable.
+	if err != nil || res.Outcome != OutcomeMerged {
+		t.Fatalf("Merge() res=%+v err=%v, want merged after one re-rebase", res, err)
+	}
+	if runs != 2 {
+		t.Errorf("suite runs = %d, want 2 (the first attempt, then the re-rebase)", runs)
+	}
+	if _, statErr := os.Stat(filepath.Join(target, "external.txt")); statErr != nil {
+		t.Errorf("the external commit was lost by the re-rebase: %v", statErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(target, "feature.txt")); statErr != nil {
+		t.Errorf("the merged work did not reach the target: %v", statErr)
+	}
+}
+
+func TestATargetThatKeepsMovingFailsLoudlyAtTheBound(t *testing.T) {
+	// Arrange — the suite moves the target on EVERY run, so no attempt can ever
+	// land. The loop is bounded at rebaseAttempts and must fail rather than spin.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "feature.txt", "hello\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
+
+	sink := &recordingSink{}
+	var runs int
+	suite := suiteFunc(func(_ context.Context, _ string, _ SuiteRun) (SuiteResult, error) {
+		runs++
+		writeFile(t, target, fmt.Sprintf("external-%d.txt", runs), "somebody else\n")
+		gitRun(t, target, "add", ".")
+		gitRun(t, target, "commit", "-q", "-m", "an external commit")
+		return SuiteResult{Passed: true}, nil
+	})
+	e := newTestDriverWithSuite(t, sink, suite)
+	req := withRun(t, sink, Request{Workspace: "/ws/spin-ws", Name: "spin-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+
+	// Act.
+	_, err := e.Merge(context.Background(), req)
+
+	// Assert — a loud failure naming the bound, and nothing of the merge on the
+	// target.
+	if err == nil {
+		t.Fatalf("Merge() err = nil; want a loud failure after %d attempts", rebaseAttempts)
+	}
+	if runs != rebaseAttempts {
+		t.Errorf("suite runs = %d, want exactly %d — the loop must be bounded", runs, rebaseAttempts)
+	}
+	if _, statErr := os.Stat(filepath.Join(target, "feature.txt")); statErr == nil {
+		t.Errorf("the merge landed on a target it never tested against")
+	}
+}
+
+func TestTheRebaseWorktreeIsRemovedAfterASuccessfulMerge(t *testing.T) {
+	// Arrange.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "feature.txt", "hello\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
+
+	sink := &recordingSink{}
+	e := newTestDriver(t, sink)
+	req := withRun(t, sink, Request{Workspace: "/ws/cl-ws", Name: "cl-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+
+	// Act.
+	res, err := e.Merge(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Merge() err = %v", err)
+	}
+
+	// Assert — the driver owns the tree it made on any path that does not park.
+	if res.WorkDir == "" {
+		t.Fatalf("res.WorkDir empty; a merged Result still names the tree it worked in")
+	}
+	if _, statErr := os.Stat(res.WorkDir); !os.IsNotExist(statErr) {
+		t.Errorf("rebase worktree %s survived a successful merge (stat err = %v)", res.WorkDir, statErr)
+	}
+	if list := gitRun(t, target, "worktree", "list"); strings.Contains(list, res.WorkDir) {
+		t.Errorf("the repository still lists the rebase worktree:\n%s", list)
+	}
+}
+
+func TestTheRebaseWorktreeIsRemovedWhenTheMergeFailsOutright(t *testing.T) {
+	// Arrange — a gate that cannot run at all, which is the driver's own error
+	// path rather than a parked outcome.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "feature.txt", "hello\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
+
+	sink := &recordingSink{}
+	e := newTestDriverWithSuite(t, sink, &fakeSuite{err: sentinelError("the entrypoint blew up")})
+	req := withRun(t, sink, Request{Workspace: "/ws/cl2-ws", Name: "cl2-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+
+	// Act.
+	if _, err := e.Merge(context.Background(), req); err == nil {
+		t.Fatalf("Merge() err = nil; want the unrunnable gate surfaced")
+	}
+
+	// Assert — no worktree is left behind for the repository to trip over.
+	if list := gitRun(t, target, "worktree", "list"); strings.Contains(list, "agent-repl-merge-rebase-") {
+		t.Errorf("a rebase worktree survived a failed merge:\n%s", list)
+	}
+}
+
+func TestCleanupRemovesTheParkedRebaseWorktree(t *testing.T) {
+	// A parked outcome hands the tree to merge.Coordinator, which discards it
+	// when the run reaches its terminal — including a run nobody ever resolved.
+	// Arrange — a conflict, parked.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, target, "shared.txt", "target\n")
+	gitRun(t, target, "add", ".")
+	gitRun(t, target, "commit", "-q", "-m", "target writes shared.txt")
+	writeFile(t, featureDir, "shared.txt", "feature\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "feature writes shared.txt")
+
+	sink := &recordingSink{}
+	e := newTestDriver(t, sink)
+	req := withRun(t, sink, Request{Workspace: "/ws/cl3-ws", Name: "cl3-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+	res, err := e.Merge(context.Background(), req)
+	if err != nil || res.Outcome != OutcomeConflict {
+		t.Fatalf("setup Merge() res=%+v err=%v, want a parked conflict", res, err)
+	}
+	req.WorkDir, req.BaseHead = res.WorkDir, res.BaseHead
+
+	// Act.
+	if err := e.Cleanup(context.Background(), req); err != nil {
+		t.Fatalf("Cleanup() err = %v", err)
+	}
+
+	// Assert — gone from disk AND from the repository's worktree list, even
+	// though it was parked mid-replay.
+	if _, statErr := os.Stat(res.WorkDir); !os.IsNotExist(statErr) {
+		t.Errorf("parked rebase worktree %s survived Cleanup (stat err = %v)", res.WorkDir, statErr)
+	}
+	if list := gitRun(t, target, "worktree", "list"); strings.Contains(list, res.WorkDir) {
+		t.Errorf("the repository still lists the parked rebase worktree:\n%s", list)
+	}
+}
+
+func TestAnAbandonedRebaseWorktreeIsPrunedByTheNextMerge(t *testing.T) {
+	// A daemon killed mid-merge leaves its rebase worktree REGISTERED in the
+	// repository. Merges are serialized per repository, so the next one to start
+	// knows every such tree is abandoned — and left alone they accumulate one
+	// per interrupted merge.
+	// Arrange — a leftover rebase worktree, shaped exactly like a dead daemon's.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "feature.txt", "hello\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
+	orphanParent, err := os.MkdirTemp("", rebaseWorktreeMarker)
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	orphan := filepath.Join(orphanParent, "rebase")
+	gitRun(t, target, "worktree", "add", "--detach", orphan, "HEAD")
+
+	sink := &recordingSink{}
+	e := newTestDriver(t, sink)
+	req := withRun(t, sink, Request{Workspace: "/ws/prune-ws", Name: "prune-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+
+	// Act.
+	if _, err := e.Merge(context.Background(), req); err != nil {
+		t.Fatalf("Merge() err = %v", err)
+	}
+
+	// Assert — the leftover is gone from disk and from the repository's list.
+	if _, statErr := os.Stat(orphan); !os.IsNotExist(statErr) {
+		t.Errorf("the abandoned rebase worktree %s survived (stat err = %v)", orphan, statErr)
+	}
+	if list := gitRun(t, target, "worktree", "list"); strings.Contains(list, orphan) {
+		t.Errorf("the repository still lists the abandoned rebase worktree:\n%s", list)
+	}
+}
+
+func TestCleanupOfARequestWithNoWorktreeIsANoOp(t *testing.T) {
+	// Arrange — the shape a run that never reached a rebase carries.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	e := newTestDriver(t, &recordingSink{})
+	req := Request{Workspace: "/ws/cl4-ws", Name: "cl4-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+
+	// Act.
+	err := e.Cleanup(context.Background(), req)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Cleanup() err = %v, want a silent no-op", err)
 	}
 }
 
 // --- boot replay --------------------------------------------------------
 
-func TestMergeReplayedAfterABounceSkipsTheCommitsThatAlreadyLanded(t *testing.T) {
-	// A daemon that dies mid-loop leaves its durable queue entry behind, and
-	// the next boot's Drain re-runs Merge from the top. The commits the dead
-	// process landed must be no-ops rather than a second replay.
-	// Arrange — two commits; the first "already landed" before the bounce.
+func TestMergeReplayedAfterABounceRebasesAfreshOntoAnUntouchedTarget(t *testing.T) {
+	// AMENDED FROM TestMergeReplayedAfterABounceSkipsTheCommitsThatAlreadyLanded.
+	// That test's premise — a dead daemon leaves commits half-landed ON THE
+	// TARGET, and the replay must skip them — cannot occur any more: a merge that
+	// did not finish never wrote to the target at all, and its temp worktree died
+	// with the process. So the replay's obligation changed from "skip what
+	// landed" to "start clean and land the whole thing", and the assertion is
+	// equal in strength: the same fixture, the same two commits, and an exact
+	// count of what the replay replays.
+	// Arrange — a first attempt that dies on a failing gate.
 	target := initTarget(t)
 	featureDir := addFeatureWorktree(t, target)
 	for _, name := range []string{"one.txt", "two.txt"} {
@@ -1932,29 +2279,34 @@ func TestMergeReplayedAfterABounceSkipsTheCommitsThatAlreadyLanded(t *testing.T)
 	suite := &fakeSuite{verdicts: []SuiteResult{{Passed: false, Tail: "the daemon died here"}}}
 	e := newTestDriverWithSuite(t, sink, suite)
 	req := withRun(t, sink, Request{Workspace: "/ws/replay-ws", Name: "replay-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
-	if res, err := e.Merge(context.Background(), req); err != nil || res.Outcome != OutcomeTestFailed {
-		t.Fatalf("setup Merge() res=%+v err=%v, want test_failed", res, err)
+	failed, err := e.Merge(context.Background(), req)
+	if err != nil || failed.Outcome != OutcomeTestFailed {
+		t.Fatalf("setup Merge() res=%+v err=%v, want test_failed", failed, err)
 	}
-	landedBefore := strings.TrimSpace(gitRun(t, target, "rev-parse", "HEAD"))
+	req = parkedAt(t, e, req, failed)
+	beforeReplay := strings.TrimSpace(gitRun(t, target, "rev-parse", "HEAD"))
 
-	// Act — the next boot replays the same request against a green suite.
+	// Act — the next boot replays the same request against a green suite. It
+	// carries no rebase worktree, because a temp tree does not survive a bounce.
 	replaySink := &recordingSink{}
 	replaySuite := &fakeSuite{}
 	replay := newTestDriverWithSuite(t, replaySink, replaySuite)
-	res, err := replay.Merge(context.Background(), req)
+	fresh := withRun(t, replaySink, Request{Workspace: req.Workspace, Name: req.Name, SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+	res, err := replay.Merge(context.Background(), fresh)
 
-	// Assert — only the SECOND commit was picked and tested.
+	// Assert — the whole range was replayed and gated afresh, and it landed on
+	// the head the dead attempt left untouched.
 	if err != nil {
 		t.Fatalf("replay Merge() err = %v", err)
 	}
 	if res.Outcome != OutcomeMerged {
 		t.Fatalf("replay Merge() outcome = %s, want merged", res.Outcome)
 	}
-	if replaySuite.calls != 1 {
-		t.Fatalf("replay suite runs = %d, want 1 (only the commit that had not landed)", replaySuite.calls)
+	if replaySuite.calls != 2 {
+		t.Fatalf("replay suite runs = %d, want 2 (both commits, replayed onto a target that kept nothing)", replaySuite.calls)
 	}
-	if parent := strings.TrimSpace(gitRun(t, target, "rev-parse", "HEAD^")); parent != landedBefore {
-		t.Errorf("HEAD^ = %s, want the pre-bounce landing %s; the replay re-applied a commit", parent, landedBefore)
+	if parent := strings.TrimSpace(gitRun(t, target, "rev-parse", "HEAD^")); parent != beforeReplay {
+		t.Errorf("HEAD^ = %s, want the untouched pre-replay head %s", parent, beforeReplay)
 	}
 }
 

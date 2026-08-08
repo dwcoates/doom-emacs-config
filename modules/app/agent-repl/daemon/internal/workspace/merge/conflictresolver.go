@@ -35,13 +35,15 @@ type ConflictResolution struct {
 	// the prompt receipt and the durable transcript line reconcile on, so it is
 	// minted per attempt rather than reused across merges.
 	RequestID string
-	// ConflictCommit is the short SHA of the commit whose cherry-pick
+	// ConflictCommit is the short SHA of the commit whose replay
 	// conflicted (CHERRY_PICK_HEAD), as merge.Driver reported it.
 	ConflictCommit string
 	// SourceBranch is the branch the conflicted commit is being replayed from.
 	SourceBranch string
-	// TargetDir is the worktree holding the paused cherry-pick — the tree the
-	// agent resolves in.
+	// TargetDir is the worktree holding the paused replay — the temporary
+	// REBASE WORKTREE, not the merge target, which carries nothing of this merge
+	// yet. The name is kept because the prompt's {{target_dir}} placeholder is
+	// user-editable text this field fills.
 	TargetDir string
 }
 
