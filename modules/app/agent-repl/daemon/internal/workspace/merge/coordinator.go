@@ -23,7 +23,10 @@ type Picker interface {
 	ContinueAfterTestFix(ctx context.Context, req Request, failingCommit string) (Result, error)
 	// Rollback resets the target worktree to head, undoing everything the merge
 	// landed. It is the tail of a merge whose test gate failed for good.
-	Rollback(ctx context.Context, req Request, head string) error
+	//
+	// expected is the head the merge left the target on. An implementation MUST
+	// refuse the reset when the target has moved off it — see Driver.Rollback.
+	Rollback(ctx context.Context, req Request, head, expected string) error
 	MarkQueued(ws, cause string) error
 }
 
@@ -1680,6 +1683,13 @@ func (c *QueueCoordinator) driveTestFix(ctx context.Context, repo string, req Re
 func (c *QueueCoordinator) failTestGate(repo string, req, driven Request, release func(), preHead string, res Result) bool {
 	cause := fmt.Sprintf("test suite failed after cherry-picking %s and the one resolution attempt did not fix it: %s",
 		res.FailingCommit, dlog.Clamp(res.TestFailureTail, testFailureCauseBytes))
+	// The tail is clamped twice over and, for a runner that keeps going after a
+	// suite fails, often carries no trace of the failure itself. The archive is
+	// the only complete record, so the cause names it rather than leaving the
+	// reader to go hunting through a rotated daemon log for it.
+	if res.TestFailureOutputPath != "" {
+		cause += fmt.Sprintf(" (full suite output: %s)", res.TestFailureOutputPath)
+	}
 	switch {
 	case preHead == "":
 		// No rollback point was recorded, which no merge.Driver Merge omits.
@@ -1690,7 +1700,7 @@ func (c *QueueCoordinator) failTestGate(repo string, req, driven Request, releas
 			repo, req.Workspace, req.Name)
 		cause += " (NOT rolled back: no pre-merge HEAD was recorded)"
 	default:
-		if err := c.picker.Rollback(c.ctx, req, preHead); err != nil {
+		if err := c.picker.Rollback(c.ctx, req, preHead, res.TestedHead); err != nil {
 			c.logf("merge: test-gate rollback FAILED {repo=%s ws=%s name=%s head=%s}: %v — the target is LEFT carrying the commits that failed the suite",
 				repo, req.Workspace, req.Name, preHead, err)
 			cause += fmt.Sprintf(" (rollback to %s FAILED: %v)", preHead, err)
