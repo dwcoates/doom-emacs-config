@@ -1,0 +1,216 @@
+// feed.proto — The conversation feed container: the ConversationItem envelope
+// and the deltas that carry it.
+//
+// ConversationItem is feed packaging — identity, ordering, provenance and
+// resolution stamps — wrapped around a payload. Agent-produced payloads are a
+// single AgentEmission arm (agent-emission.proto); everything the agent did
+// not emit keeps an arm of its own.
+
+syntax = "proto3";
+
+package agentshim.frontend.v1;
+
+import "agentshim/core/v1/core.proto";
+import "agentshim/data/v1/stream.proto";
+import "agentshim/data/v1/tools.proto";
+import "agentshim/frontend/v1/agent-emission.proto";
+import "agentshim/frontend/v1/async-bubble.proto";
+import "agentshim/frontend/v1/failure-card.proto";
+import "agentshim/frontend/v1/slash-menu.proto";
+
+option go_package = "agentrepl/proto/agentshim/frontend/v1;frontendv1";
+
+// Complete (store-round-tripped) conversation additions, composed from the
+// typed agent payloads (S9). daemon/internal/frontend/translate.go CURATES
+// which payloads are pushed but never re-types them — frontends render,
+// never interpret.
+message ConversationDelta {
+  // 2 was session_id. A frontend has no session vocabulary: the only question
+  // it ever asked of that field was "is this push still current", which the
+  // fence answers without naming what rotated.
+  reserved 2;
+  reserved "session_id";
+  string workspace = 1;
+  repeated ConversationItem items = 3;
+  uint64 through_seq = 4;  // frontends persist this for reconnect resync
+  // The workspace's staleness FENCE at the moment the daemon produced this
+  // push: an opaque token the client compares BYTE-WISE against the fence on
+  // the workspace's current WorkspaceState, and never parses, splits or
+  // interprets. Equal means current; different means stale, and a stale push
+  // is discarded whole rather than partially adopted.
+  //
+  // The daemon mints it and is the only thing that can read meaning into it.
+  // A client that learned to decode it would be depending on a fact this
+  // contract does not offer, and the token's composition is free to change.
+  string fence = 5;
+}
+
+// WHO drove the turn that produced a conversation item.
+//
+// The merge coordinator borrows a workspace's own shim to resolve a merge
+// conflict (the session holding the full context of the work is the one best
+// equipped to resolve it), so a session can emit a full turn the user never
+// prompted. That provenance is a durable FACT recorded on every item, not a
+// rendering hint: frontends decide independently what to do with it, and the
+// decision can change without another wire change.
+enum ConversationSource {
+  // Never set by the daemon. proto3 reserves 0 for "the field was not
+  // populated", and every item the daemon builds sets one of the arms below,
+  // so a receiver seeing UNSPECIFIED is looking at a malformed frame and must
+  // reject it loudly rather than assume USER.
+  CONVERSATION_SOURCE_UNSPECIFIED = 0;
+  // An ordinary turn: the user prompted it, or it followed from one.
+  CONVERSATION_SOURCE_USER = 1;
+  // A turn merge.Coordinator drove under its lease (conflict resolution).
+  CONVERSATION_SOURCE_MERGE = 2;
+}
+
+// One curated conversation addition: FEED PACKAGING wrapped around a payload.
+//
+// The packaging is what the feed knows about an item regardless of what the
+// item is — its identity, its place in the order, who drove it, and the
+// figures resolved against it. The payload is the item itself.
+//
+// Agent-produced payloads are ONE arm, AgentEmission, which is also the
+// vocabulary a detached agent's output arrives in (async-bubble.proto).
+// Everything the agent did not emit — the user's own prompt, the daemon's
+// failure cards, session-level events — keeps an arm of its own, because
+// folding those into AgentEmission would make that message's name untrue.
+//
+// Consumers reconcile by uuid (permission items use the permission request_id
+// as their uuid).
+message ConversationItem {
+  // 18 was api_error (ApiErrorLine). A terminal line now curates to
+  // system_failure below only; a mid-backoff line curates to no item at all
+  // (the retrying window covers it).
+  // 16/17 were compact_boundary/compact_boundary_line, retired in favour of
+  // context_compacted, which carries one coalesced compaction instead of two
+  // plane-shaped halves. Reserved so the wire numbers can never be reused.
+  reserved 16, 17, 18;
+  reserved "api_error", "compact_boundary", "compact_boundary_line";
+  // 10, 12, 13, 14, 15 and 34 were agent-output arms (assistant_message,
+  // tool_use, tool_result, tool_use_result, result, skill_body). They are arms
+  // of AgentEmission, reached through `agent` below. 40 was usage_stamp, which
+  // now rides AgentResponse, the message it stamps.
+  reserved 10, 12, 13, 14, 15, 34, 40;
+  reserved "assistant_message", "tool_use", "tool_result", "tool_use_result",
+      "result", "skill_body", "usage_stamp";
+  // 36/37 were token_utilization and turn_accounting: persistence records
+  // carried verbatim to a renderer that had to digest them itself. The
+  // figures they were read for are resolved elsewhere — a response's stamp on
+  // AgentResponse, a turn's verdict on FooterAccountingCell, session and
+  // per-model economics on TokenBreakdownView. Nothing on this message
+  // replaces them, because the feed rendered none of it directly.
+  reserved 36, 37;
+  reserved "token_utilization", "turn_accounting";
+
+  // ---- Feed packaging: identity, ordering, provenance, resolution ----
+
+  string uuid = 1;
+  int64 ts_ms = 2;
+  string request_id = 3;  // vendor API request correlation, "" when absent
+  // Provenance. ALWAYS set (see ConversationSource): persisted with the item
+  // so a resync or transcript replay reproduces the same verdict instead of
+  // re-deriving it from state that has since moved on.
+  ConversationSource source = 4;
+
+  // ---- Payload ----
+
+  oneof item {
+    // EVERYTHING the agent produced, in the one vocabulary that also carries
+    // a detached agent's output (AsyncAgentUpdate). See AgentEmission.
+    AgentEmission agent = 5;
+
+    // ---- Non-agent items: things the agent did not emit ----
+
+    // The user's own prompt.
+    agentshim.data.v1.ApiUserMessage user_message = 11;
+    // A permission request. Agent-CAUSED but not agent-emitted: it is a
+    // question addressed to the user and answered by a command
+    // (PermissionAnswerCmd), so it is an interaction, not an utterance, and
+    // it has no meaning inside a detached agent's fold.
+    agentshim.core.v1.PermissionItem permission = 30;
+    FailureCardView failure_card = 31;
+    // CLEAR and COMPACT, carried verbatim from core.v1 rather than re-modeled
+    // here: the daemon has already coalesced and de-duplicated them, so a
+    // second frontend-shaped copy would only be a chance to drift.
+    //
+    // A frontend renders one of these by discarding everything ABOVE it and
+    // drawing the event itself. It needs no rule for FINDING the event,
+    // because the daemon floors each replay at the newest one — an arriving
+    // clear or compact is therefore always live.
+    agentshim.core.v1.ContextCleared context_cleared = 32;
+    agentshim.core.v1.ContextCompacted context_compacted = 33;
+    SessionCommandItem session_command = 35;
+    // A piece of detached work, ANCHORED in the feed at the point it was
+    // launched.
+    //
+    // What rides here is the bubble's OPENING state; everything it produces
+    // afterwards arrives as AsyncBubbleUpdate addressed to `AsyncBubble.id`,
+    // on its own delta rather than as a stream of new feed items. A detached
+    // agent emitting a thousand lines must not insert a thousand rows into
+    // the conversation it was dispatched from.
+    AsyncBubble async_bubble = 38;
+    // The purple-washed summary block a compaction leaves behind. Its own arm
+    // so that the wash is a stated kind rather than an inference.
+    CompactionSummaryItem compaction_summary = 39;
+  }
+
+}
+
+// The compaction summary bubble: the purple-washed summary block that follows
+// a compaction.
+message CompactionSummaryItem {
+  // The summary text, verbatim (markdown).
+  string summary = 1;
+  // When the compaction completed, unix millis.
+  int64 compacted_at_ms = 2;
+  // The resolved expensive-input cost of producing this summary (canonical
+  // derivation), so the bubble can carry its own cost note; -1 when the
+  // result's usage was unavailable (never fabricated as 0).
+  int64 expensive_input_tokens = 3;
+}
+
+// Ephemeral live-typing relay (never persisted, never in snapshots).
+message TypingDelta {
+  // 2 was session_id. A frontend has no session vocabulary: the only question
+  // it ever asked of that field was "is this push still current", which the
+  // fence answers without naming what rotated.
+  reserved 2;
+  reserved "session_id";
+  string workspace = 1;
+  agentshim.core.v1.ContentDelta delta = 3;
+  // The workspace's staleness FENCE at the moment the daemon produced this
+  // push: an opaque token the client compares BYTE-WISE against the fence on
+  // the workspace's current WorkspaceState, and never parses, splits or
+  // interprets. Equal means current; different means stale, and a stale push
+  // is discarded whole rather than partially adopted.
+  //
+  // The daemon mints it and is the only thing that can read meaning into it.
+  // A client that learned to decode it would be depending on a fact this
+  // contract does not offer, and the token's composition is free to change.
+  string fence = 4;
+}
+
+// The session's retained SystemInit (slash commands, tools, skills, model
+// list), pushed on attach and included in StateSnapshot (S9). Replaces the
+// Emacs GET /commands HTTP menu source.
+message SessionInitView {
+  // 2 was session_id. A frontend has no session vocabulary: the only question
+  // it ever asked of that field was "is this push still current", which the
+  // fence answers without naming what rotated.
+  reserved 2;
+  reserved "session_id";
+  string workspace = 1;
+  agentshim.data.v1.SystemInit init = 3;
+  // The workspace's staleness FENCE at the moment the daemon produced this
+  // push: an opaque token the client compares BYTE-WISE against the fence on
+  // the workspace's current WorkspaceState, and never parses, splits or
+  // interprets. Equal means current; different means stale, and a stale push
+  // is discarded whole rather than partially adopted.
+  //
+  // The daemon mints it and is the only thing that can read meaning into it.
+  // A client that learned to decode it would be depending on a fact this
+  // contract does not offer, and the token's composition is free to change.
+  string fence = 4;
+}
