@@ -1,7 +1,10 @@
 package server
 
 import (
+	"errors"
+	"fmt"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -93,10 +96,96 @@ func TestShutdownStopShimsModeStopsThem(t *testing.T) {
 	}
 }
 
+// THE DRAIN OVERLAPS ITS SHIM EXIT WAITS, and this is the test that says so.
+//
+// Every session's hibernation ends in a SIGTERM plus a wait on the shim's
+// actual exit, so a serial drain costs the SUM of the fleet's exit waits: a
+// ~90-session fleet overran the daemon's 30s stop grace and was SIGKILLed
+// mid-drain, which is what skips lease release and merge reconstruction.
+//
+// The proof is structural rather than a stopwatch. Every stop blocks until ALL
+// of them have arrived, so a drain that issues them one at a time can never
+// reach the second one — the barrier is unsatisfiable under a serial drain and
+// trivially satisfied under a concurrent one.
+func TestShutdownDrainsItsShimStopsConcurrently(t *testing.T) {
+	// Arrange — a live fleet, sized under the pool's own bound rather than from
+	// it, so shrinking the bound fails this test instead of weakening it.
+	if shutdownHibernateWorkers < 8 {
+		t.Fatalf("shutdownHibernateWorkers = %d, too narrow to overlap a fleet's shim exit waits", shutdownHibernateWorkers)
+	}
+	h := newHarness(t)
+	const fleet = 8
+	for i := range fleet {
+		ws := fmt.Sprintf("/w%d", i)
+		createSession(t, h, fmt.Sprintf(`{"cwd":%q}`, ws))
+		if err := h.controller.Ensure(ws); err != nil {
+			t.Fatalf("Ensure(%s): %v", ws, err)
+		}
+		markControllerOperational(t, h, ws)
+	}
+	arrived := make(chan string, fleet)
+	release := make(chan struct{})
+	h.spawner.stopHook = func(sessionID string) {
+		arrived <- sessionID
+		<-release
+	}
+
+	// Act.
+	drained := make(chan struct{})
+	go func() {
+		h.srv.ShutdownAll(true, sessioncontroller.StopCauseDaemonShutdown())
+		close(drained)
+	}()
+
+	// Assert: all fleet stops are in flight at the same instant.
+	for i := range fleet {
+		select {
+		case <-arrived:
+		case <-time.After(30 * time.Second):
+			t.Fatalf("only %d of %d shim stops were in flight together; the drain is issuing them serially, so its cost is the sum of the fleet's exit waits", i, fleet)
+		}
+	}
+	close(release)
+	<-drained
+	if stopped := h.spawner.stoppedIDs(); len(stopped) != fleet {
+		t.Fatalf("stopped %d shims, want all %d — a concurrent drain must still reach every session", len(stopped), fleet)
+	}
+}
+
+// A parallel drain must surface every session's failure, not the last one to
+// finish: the joined error is what tells a shutdown it lost sessions.
+func TestShutdownDrainJoinsEverySessionsHibernateFailure(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	var ids []string
+	for i := range 3 {
+		ws := fmt.Sprintf("/w%d", i)
+		ids = append(ids, createSession(t, h, fmt.Sprintf(`{"cwd":%q}`, ws)))
+		if err := h.controller.Ensure(ws); err != nil {
+			t.Fatalf("Ensure(%s): %v", ws, err)
+		}
+		markControllerOperational(t, h, ws)
+	}
+	h.spawner.stopErr = errors.New("shim refused to stop")
+
+	// Act.
+	err := h.srv.hibernateAllForShutdown(sessioncontroller.StopCauseDaemonShutdown())
+
+	// Assert.
+	if err == nil {
+		t.Fatal("hibernateAllForShutdown reported success while every session's stop failed")
+	}
+	for _, id := range ids {
+		if !strings.Contains(err.Error(), id) {
+			t.Fatalf("joined drain error %v does not name session %s; a parallel drain must not lose a session's failure", err, id)
+		}
+	}
+}
+
 // The drain's join on the idle sweeper is only as short as the sweep it joins,
 // and a sweep is a serial walk that hibernates whatever it reaches. Once
 // teardown has begun the sweep abandons its remainder — the shutdown drain
-// hibernates those sessions itself.
+// hibernates those sessions itself, concurrently.
 func TestIdleSweepAbandonsItsRemainderOnceTeardownBegins(t *testing.T) {
 	// Arrange — the same fixture TestIdleSweepPersistsAnIdleCutoffHibernation
 	// proves this sweep DOES hibernate, with teardown already begun.
@@ -114,6 +203,42 @@ func TestIdleSweepAbandonsItsRemainderOnceTeardownBegins(t *testing.T) {
 	if rec.Hibernation.Cause != "" {
 		t.Fatalf("the sweep hibernated session %s (cause %q) after teardown began; it must abandon its remainder so the shutdown drain is not held behind a serial walk",
 			id, rec.Hibernation.Cause)
+	}
+}
+
+// benchmarkDrainFleet is the production fleet size the 2026-08-08 SIGKILL was
+// measured against, and benchmarkShimExit models the wait that dominates one
+// session's hibernation: SIGTERM, then the kernel releasing the workspace's
+// session lock when the shim actually dies. It is a MODEL of the wait, not a
+// synchronization delay — the benchmark exists to price the drain's overlap of
+// those waits against the daemon's 30s stop grace.
+const (
+	benchmarkDrainFleet = 90
+	benchmarkShimExit   = 250 * time.Millisecond
+)
+
+// BenchmarkShutdownDrain is the standing guard on the daemon's stop grace: a
+// serial drain of this fleet costs fleet*exit (~23s measured), which overran the
+// grace and got the daemon SIGKILLed mid-drain, skipping lease release and merge
+// reconstruction. Run it with -benchtime=1x.
+func BenchmarkShutdownDrain(b *testing.B) {
+	for b.Loop() {
+		b.StopTimer()
+		h := newHarness(b)
+		for i := range benchmarkDrainFleet {
+			ws := fmt.Sprintf("/w%d", i)
+			createSession(b, h, fmt.Sprintf(`{"cwd":%q}`, ws))
+			if err := h.controller.Ensure(ws); err != nil {
+				b.Fatalf("Ensure(%s): %v", ws, err)
+			}
+			markControllerOperational(b, h, ws)
+		}
+		h.spawner.stopHook = func(string) { time.Sleep(benchmarkShimExit) }
+		b.StartTimer()
+
+		if err := h.srv.hibernateAllForShutdown(sessioncontroller.StopCauseDaemonShutdown()); err != nil {
+			b.Fatalf("drain: %v", err)
+		}
 	}
 }
 
