@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { BREATH_PERIOD_MS } from "../src/breathing.js";
+import { BREATH_PERIOD_MS, BUBBLE_BREATH_PERIOD_MS } from "../src/breathing.js";
 import { CAPPED_CLASSES, EXPANDED_CLASS } from "../src/expand.js";
 import { NAV_CURRENT_CLASS } from "../src/nav.js";
 import { CURRENT_CLASS, MARK_CLASS, REVEAL_CLASS, SEARCHING_CLASS } from "../src/search.js";
@@ -1680,6 +1680,14 @@ describe("prompt bubble breath", () => {
     // Act / Assert
     expect(declarations.length).toBe(1);
     expect(breathUserBubble).toMatch(/animation:\s*bubble-breath/);
+  });
+
+  it("runs the breath at the period the renderer computes its delay against", () => {
+    // Arrange — the inline negative animation-delay only seeks to the right
+    // point in the cycle if the stylesheet and BUBBLE_BREATH_PERIOD_MS agree.
+    const seconds = breathUserBubble.match(/animation:\s*bubble-breath\s+([\d.]+)s/)?.[1];
+    // Act / Assert
+    expect(Number(seconds) * 1000).toBe(BUBBLE_BREATH_PERIOD_MS);
   });
 
   it("swings the bubble's own scale gently around 1", () => {

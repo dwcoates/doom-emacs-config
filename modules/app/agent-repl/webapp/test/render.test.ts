@@ -40,6 +40,7 @@ import {
   wakeRemainingLabel,
   navTokensForEntry,
 } from "../src/render.js";
+import { BUBBLE_BREATH_PERIOD_MS } from "../src/breathing.js";
 import { ForwardingLogger, resetLoggingForTests, setLogger } from "../src/wslog.js";
 import { DEFERRED_CLASS, HEIGHT_VAR, PLACEHOLDER_CLASS } from "../src/lazy-item.js";
 import { StubIntersectionObserver, withIntersectionObserver } from "./intersection-stub.js";
@@ -628,6 +629,21 @@ describe("context compaction", () => {
 
 });
 
+/** A markup string as a queryable element tree. */
+function htmlToElement(html: string): HTMLElement {
+  const host = document.createElement("div");
+  host.innerHTML = html;
+  return host;
+}
+
+/** The prompt bubble's breath offset, in ms, out of rendered markup. */
+function breathDelayMs(html: string): number {
+  const el = htmlToElement(html).querySelector<HTMLElement>(".bubble.user");
+  const got = /^-(\d+)ms$/.exec(el?.style.animationDelay ?? "");
+  if (got === null) throw new Error(`prompt bubble carries no breath delay: ${html}`);
+  return Number(got[1]);
+}
+
 describe("renderItem", () => {
   it("stamps a user prompt bubble with its relative age", () => {
     // Arrange — a send time firmly in the past, so the age reads `… ago`
@@ -644,8 +660,62 @@ describe("renderItem", () => {
     const html = renderItem(item);
     // Assert — the corner (with its stamp) trails the prompt's body column.
     expect(html).toContain(
-      `<div class="bubble user"><div class="bubble-body"><pre>do the thing</pre></div><span class="turn-meta"><span class="turn-ts">`,
+      `<div class="bubble-body"><pre>do the thing</pre></div><span class="turn-meta"><span class="turn-ts">`,
     );
+    expect(html).toMatch(/<div class="bubble user" style="[^"]*"><div class="bubble-body">/);
+  });
+
+  it("stamps the prompt bubble with the breath's negative animation delay", () => {
+    // Arrange — a rebuilt node restarts its CSS animation at 0%, which snaps
+    // the bubble back to the deflated end of the swing mid-cycle.
+    const item = userTurnAt(14, 32, "do the thing");
+    // Act
+    const el = htmlToElement(renderItem(item)).querySelector<HTMLElement>(".bubble.user");
+    // Assert — the delay seeks the fresh node to where the cycle already was.
+    expect(el?.style.animationDelay).toMatch(/^-\d+ms$/);
+  });
+
+  it("gives two prompt bubbles rendered at one instant the same breath phase", () => {
+    // Arrange — one page-global epoch, so the feed breathes in unison. The
+    // clock is pinned so the assertion is about the shared epoch rather than
+    // about how fast the two renders happened to run. It is pinned AHEAD of
+    // the real clock: the epoch was stamped by an earlier render in this
+    // process, and a pinned time before it would clamp both delays to zero
+    // and prove nothing.
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 10_000);
+    // Act
+    const first = breathDelayMs(renderItem(userTurnAt(14, 32, "one")));
+    const second = breathDelayMs(renderItem(userTurnAt(14, 33, "two")));
+    // Assert
+    expect(second).toBe(first);
+    clock.mockRestore();
+  });
+
+  it("advances the breath phase between two prompt bubbles rendered apart", () => {
+    // Arrange — the epoch never moves, so a rebuild is later in the cycle
+    // rather than back at its start.
+    const at = Date.now() + 10_000;
+    const clock = vi.spyOn(Date, "now").mockReturnValue(at);
+    const before = breathDelayMs(renderItem(userTurnAt(14, 32, "one")));
+    // Act — the same prompt rebuilt 300ms later.
+    clock.mockReturnValue(at + 300);
+    const after = breathDelayMs(renderItem(userTurnAt(14, 32, "one")));
+    // Assert — modulo the period, since a rebuild may straddle a cycle end.
+    const P = BUBBLE_BREATH_PERIOD_MS;
+    expect((after - before + P) % P).toBe(300);
+    clock.mockRestore();
+  });
+
+  it("leaves the prompt body without a delay of its own to fall out of phase", () => {
+    // Arrange — the body inherits the bubble's transform; it carries no
+    // animation, so a delay on it would be meaningless drift.
+    const item = userTurnAt(14, 32, "do the thing");
+    // Act
+    const body = htmlToElement(renderItem(item)).querySelector<HTMLElement>(
+      ".bubble.user > .bubble-body",
+    );
+    // Assert
+    expect(body?.getAttribute("style")).toBeNull();
   });
 
   it("renders a fenced code block in the prompt bubble as a highlighted card", () => {
