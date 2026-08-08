@@ -1,0 +1,284 @@
+// lifecycle.proto — Session and daemon lifecycle commands, the scheduled-shutdown drain lease,
+// and the frontend diagnostic log line.
+//
+// HOST SURFACE. Session lifecycle belongs to Emacs, which creates, deletes,
+// revives and health-checks sessions and therefore addresses them by identity.
+// A rendering frontend has no session vocabulary at all: it reads fenced,
+// workspace-addressed component views and compares fences.
+//
+// ONE CARVE-OUT: the ShutdownScheduleView family below is SHARED surface —
+// the webapp renders drain progress from it — and its one session-bearing
+// field is marked host-surface where it appears (see ShutdownHold).
+//
+
+syntax = "proto3";
+
+package agentshim.frontend.v1;
+
+import "google/protobuf/struct.proto";
+
+option go_package = "agentrepl/proto/agentshim/frontend/v1;frontendv1";
+
+// Session creation over UDS (replaces Emacs POST /sessions).
+// What conversation a create should land on.
+//
+// This is the caller's INTENT, not a pointer. It used to be a pointer —
+// `resume_claude_session_id`, a vendor uuid the frontend had remembered from a
+// previous session and handed back at boot — and that made every frontend a
+// second, weaker authority on a question the daemon can answer exactly.
+//
+// The daemon owns (config_dir, cwd) -> conversation. It keeps a session_record
+// per conversation and a conversation_checkpoint keyed on precisely that
+// triple, and it can check the vendor transcript on disk. A frontend has none
+// of that; it has a value it wrote down earlier and hopes is still true. When
+// the frontend's copy went missing, five workspaces silently started fresh
+// conversations on top of intact transcripts, because a frontend saying
+// nothing and a frontend saying "start fresh" were the same wire value.
+//
+// They are now different values, which is the whole point of this enum.
+// FRESH IS NOT CALLER-EXPRESSIBLE. Tag 2 was RESUME_MODE_FRESH: "begin a NEW
+// conversation even though a resumable one exists". It is retired, not
+// renamed. A workspace's conversation is not replaceable by a caller — no
+// frontend, no user command, no automatic recovery may abandon one — because
+// the abandonment is silent and irreversible while every alternative (resume,
+// restore from backup, or a loud refusal) is recoverable. A fresh conversation
+// may now exist only for a workspace the daemon can PROVE never had one, and
+// that proof is the daemon's to mint from its own durable evidence, never a
+// caller's to assert. The wire therefore has no way to ask for it.
+enum ResumeMode {
+  reserved 2;
+  reserved "RESUME_MODE_FRESH";
+
+  // Unset. Treated as RESUME_MODE_CONTINUE so an older or simpler caller gets
+  // the safe behavior: continuing an existing conversation is recoverable,
+  // stranding one is not.
+  RESUME_MODE_UNSPECIFIED = 0;
+
+  // Continue this workspace's conversation, whichever one that is. The daemon
+  // resolves it; when nothing resolves it consults its own evidence and either
+  // proves the workspace never had a conversation (fresh) or fails loudly.
+  RESUME_MODE_CONTINUE = 1;
+
+  // Land on one SPECIFIC conversation named in explicit_claude_session_id.
+  // Reserved for a human choosing from among conversations (a picker, a fork)
+  // — never for ordinary restore, which is what CONTINUE is for. A caller that
+  // reaches for this at boot is reintroducing the pointer.
+  RESUME_MODE_EXPLICIT = 3;
+}
+
+message CreateSessionCmd {
+  string cwd = 1;
+  string permission_mode = 3;
+  string config_dir = 4;
+  bool fake = 6;                        // test harness sessions
+  // The caller's DELIBERATE consent to create a session with NO permission
+  // gate. Required whenever permission_mode names a mode that shadows the
+  // shim's canUseTool callback in the fail-OPEN direction
+  // (bypassPermissions): under such a mode the SDK auto-approves every tool
+  // before canUseTool is consulted, so the daemon's whole permission
+  // round-trip never engages and no permission card can ever appear.
+  //
+  // The daemon REFUSES such a create without this flag. The mode is otherwise
+  // one string away from every ordinary create, and "reachable by a typo" is
+  // not an acceptable property for the switch that turns the gate off. It is
+  // a create-time consent only: a session already registered in that mode
+  // still rehydrates after a daemon restart, since refusing there would
+  // silently change a live session's posture.
+  bool allow_ungated = 7;
+
+  // The model this session should START on, empty to accept the shim's own
+  // default.  A caller that has a remembered selection would otherwise have to
+  // create and then immediately SetModel, which races: the session is live and
+  // driveable in between, so its first turn can run on the wrong model.
+  //
+  // This does NOT make the caller authoritative.  The daemon applies it through
+  // the same SetModel path a later change takes, once the shim is wired, and
+  // still publishes only the shim-confirmed selection.  A rejected model fails
+  // the create rather than silently leaving the session on another one.
+  string model = 8;
+
+  // Which conversation to land on. See ResumeMode: this is intent, and the
+  // daemon does the resolving.
+  ResumeMode resume_mode = 9;
+
+  // The conversation to land on, and ONLY meaningful under
+  // RESUME_MODE_EXPLICIT. The daemon rejects a create that sets this under any
+  // other mode rather than quietly ignoring it, because a caller that filled
+  // this in believes it is steering and must be told it is not.
+  string explicit_claude_session_id = 10;
+}
+
+// Session teardown over UDS (replaces DELETE /sessions/{id}).
+message DeleteSessionCmd {
+  string session_id = 1;
+}
+
+// HARD RESTART of one workspace's session: stop whatever shim is serving it
+// (including one that outlived a previous daemon, which this daemon never
+// spawned), then bring it up again along the ordinary path.
+//
+// THE SESSION RECORD IS UNCHANGED, so the respawn resumes the same vendor
+// conversation: the user loses nothing and the transcript continues. This is a
+// PROCESS restart, not a new session — what to reach for when the shim is
+// wedged, when it is running superseded code, or when the backend simply needs
+// rebuilding under a conversation worth keeping.
+//
+// A workspace with no live session is a loud nack; a workspace whose session is
+// merely hibernated or severed is brought up, because "restart" and "start" are
+// the same request when nothing is running.
+message RestartSessionCmd {}
+
+// Deliberate, immediate hibernation of one workspace's session: the daemon
+// stops the shim (IntentionalQueryTermination) and marks the session
+// hibernated. Hibernated sessions are structurally outside the keep-alive
+// loop — hibernation and keep-alive-stop are ONE transition, so "hibernated
+// but still pinging" is unrepresentable. Refused with a loud nack while a
+// turn is live or the merge lease is held: the user interrupts first, the
+// daemon never discards in-flight work to satisfy a hibernate.
+message HibernateWorkspaceCmd {}
+
+// Graceful daemon shutdown over UDS (replaces Emacs
+// POST /shutdown).
+message ShutdownCmd {
+  // stop_shims asks the daemon to SIGTERM every session shim on its way out.
+  //
+  // The DEFAULT (false) PRESERVES them. A shim outlives its daemon by design:
+  // it redials the daemon socket forever with backoff and is auto-parked by
+  // the next daemon's listener, so killing it on an orderly shutdown threw
+  // away a live, mid-conversation process the very next boot could have
+  // reattached to for free. Preserving is what makes a daemon bounce cheap.
+  //
+  // The mode exists for the one caller that genuinely needs the old behavior:
+  // a deploy that changed the shim BUNDLE, whose surviving shims would
+  // otherwise keep running the previous build's code (bin/deploy-all.sh
+  // passes it when its stamps show the bundle moved). It is belt-and-braces
+  // alongside the daemon's own version-driven stale-shim refresh, never the
+  // only thing standing between a deploy and stale shims.
+  bool stop_shims = 1;
+}
+
+// The daemon-global scheduled-shutdown lease. Pushed to every connected
+// client on EVERY change and carried in StateSnapshot, so a client that
+// connects mid-drain sees the lease without waiting for an edge. Exactly one
+// arm is always set: "idle" is a real broadcast value (a cancel or a
+// completed drain), never an absent field, so clearing the lease is
+// representable and a client cannot confuse "no information" with "no
+// lease". The draining state is durably persisted, so a daemon that crashes
+// mid-drain reboots knowing a schedule existed rather than silently
+// dropping it.
+message ShutdownScheduleView {
+  oneof state {
+    // No shutdown is scheduled; prompts flow normally.
+    ShutdownScheduleIdle idle = 1;
+    // A shutdown is scheduled and its drain lease is held: no NEW turn may
+    // start anywhere, and the daemon executes the shutdown the moment the
+    // holds list becomes empty.
+    ShutdownScheduleDraining draining = 2;
+  }
+}
+
+// Deliberately empty: the arm being set IS the state.
+message ShutdownScheduleIdle {}
+
+// The held lease. The holds list is the complete, live answer to "what is
+// the bounce waiting on", so the webapp renders drain progress from this
+// frame alone without deriving it from per-workspace states.
+message ShutdownScheduleDraining {
+  // Identity of this schedule, minted at ScheduleShutdownCmd time.
+  // Correlates CancelScheduledShutdownCmd and QueueEntryShutdownHold to one
+  // schedule, so a cancel can never race a newer schedule.
+  string schedule_id = 1;
+  // When the lease was taken (epoch ms), for elapsed-time display.
+  int64 scheduled_at_ms = 2;
+  // Why the bounce was scheduled ("merge of <ws> rebuilt the daemon",
+  // "manual restart"). Free text for display; never parsed.
+  string cause = 3;
+  // Whether the executed shutdown will also SIGTERM every session shim (the
+  // ShutdownCmd.stop_shims semantics, decided at schedule time because the
+  // decision is a property of WHAT was rebuilt, not of when the drain
+  // finishes). False preserves shims for reattach.
+  bool stop_shims = 4;
+  // Every workspace still blocking quiescence. Never empty on the wire: the
+  // daemon executes the shutdown instead of broadcasting a drained frame.
+  repeated ShutdownHold holds = 5;
+}
+
+// One workspace the drain is waiting on, and why. At least one of turn and
+// tasks is set; both may be, since a session can hold an active turn and
+// live background tasks simultaneously — co-occurring facts, not mutually
+// exclusive states, hence sibling messages rather than a oneof.
+message ShutdownHold {
+  // Absolute workspace CWD, the same key every session-routed command uses,
+  // so a client can join this hold to its workspace model.
+  string workspace = 1;
+  // HOST SURFACE: the owning session, so the host cannot attribute a hold to
+  // a successor session of the same workspace. A rendering frontend never
+  // reads it — the workspace key above joins the hold to everything a
+  // renderer draws.
+  string session_id = 2;
+  // Set when a turn is in flight in this workspace.
+  ShutdownHoldTurn turn = 3;
+  // Set when live background tasks are running in this workspace.
+  ShutdownHoldTasks tasks = 4;
+}
+
+// An active turn blocks the drain. Carries the turn id so logs, the webapp,
+// and the turn ledger all name the same turn.
+message ShutdownHoldTurn { string turn_id = 1; }
+
+// Live async tasks block the drain. The count is display-grade summary; the
+// task catalog remains the authority on which tasks they are.
+message ShutdownHoldTasks { int32 count = 1; }
+
+// Schedule a graceful shutdown instead of demanding one now. Takes the
+// drain lease immediately (broadcast via ShutdownScheduleView), blocks new
+// turns daemon-side at the prompt queue, and executes ShutdownCmd semantics
+// the moment every hold clears. Scheduling while a schedule already exists
+// is a loud nack, never a silent replace: the caller must cancel first, so
+// two deploy flows cannot silently merge their intents.
+message ScheduleShutdownCmd {
+  // Same semantics as ShutdownCmd.stop_shims, fixed at schedule time.
+  bool stop_shims = 1;
+  // Why (for the broadcast view and the durable log). Display only.
+  string cause = 2;
+}
+
+// Cancel a scheduled shutdown and release the drain lease. schedule_id must
+// match the live schedule; a stale id is a loud nack, so a cancel aimed at
+// an old schedule can never kill a newer one.
+message CancelScheduledShutdownCmd {
+  // The schedule to cancel, from ShutdownScheduleDraining.schedule_id.
+  string schedule_id = 1;
+}
+
+// The severity of a ClientLogCmd. A closed vocabulary rather than a free
+// string, so a frontend cannot invent a level the daemon has no policy for.
+enum ClientLogLevel {
+  CLIENT_LOG_LEVEL_UNSPECIFIED = 0;
+  CLIENT_LOG_LEVEL_INFO = 1;
+  CLIENT_LOG_LEVEL_WARN = 2;
+  CLIENT_LOG_LEVEL_ERROR = 3;
+}
+
+// A frontend-side diagnostic line, mirrored into the daemon's
+// own on-disk log.
+//
+// WHY THIS EXISTS: the webapp runs inside an Emacs xwidget whose JS console
+// nobody can see and nothing persists, so a delivery-path failure there (a
+// seq-gap loop, a lost replay request, a stalled rAF) left no evidence
+// anywhere at all. A pre-cutover HTTP route carried these; it was deleted with
+// the rest of the legacy plane, and this arm restores the capability on the
+// protobuf channel instead of reviving a second transport.
+//
+// The daemon WRITES these, it does not act on them: a client log is evidence,
+// never a control signal, and is tagged in the log so a line originating in a
+// frontend is never mistaken for one the daemon produced itself.
+message ClientLogCmd {
+  ClientLogLevel level = 1;
+  string message = 2;
+  // Optional structured payload (ids, counters, timings) accompanying the
+  // message. Schemaless on purpose: it is diagnostic evidence whose shape is
+  // the reporting call site's business, and pinning a schema here would make
+  // adding a diagnostic a proto change.
+  google.protobuf.Struct context = 3;
+}

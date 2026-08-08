@@ -1,0 +1,108 @@
+// merge.proto — The merge run's live progress — a SHARED FACT, projected independently by
+// every surface that shows a merge (the sidebar's glyph, the footer's chip,
+// the workspace's color).
+
+syntax = "proto3";
+
+package agentshim.frontend.v1;
+
+option go_package = "agentrepl/proto/agentshim/frontend/v1;frontendv1";
+
+// Live progress of the workspace's current (or most recent) merge run.
+// WHICH message is set in `phase` IS the phase — no enum to keep in sync,
+// no field that is meaningless for the current phase. Every phase
+// transition and every within-phase tick (a landed cherry-pick, a test
+// pass) is pushed as a WorkspaceState revision to both frontends.
+message MergeStatus {
+  string run_id = 1;  // daemon-minted, stable across the run
+
+  // When the CURRENT phase was entered. Set on every phase transition. For
+  // the terminal phases this is when the run finished — merged's landed
+  // instant, failed's failure instant.
+  int64 phase_started_at_ms = 2;
+
+  // Monotonic within the run; bumps on within-phase ticks too (a landed
+  // pick advances updated_at_ms but not phase_started_at_ms).
+  int64 updated_at_ms = 3;
+
+  oneof phase {
+    MergeStatusEnqueued      enqueued       = 4;
+    MergeStatusBeforeAction  before_action  = 5;
+    MergeStatusCherryPicking cherry_picking = 6;
+    MergeStatusTesting       testing        = 7;
+    MergeStatusConflict      conflict       = 8;
+    MergeStatusAfterAction   after_action   = 9;
+    MergeStatusMerged        merged         = 10;
+    MergeStatusFailed        failed         = 11;
+  }
+}
+
+message MergeStatusEnqueued {
+  int32 position = 1;  // 1-based
+  int32 depth    = 2;
+}
+
+message MergeStatusBeforeAction {
+  string prompt = 1;  // the configured action, for display
+}
+
+message MergeStatusCherryPicking {
+  int32  commits_total   = 1;
+  int32  commits_landed  = 2;
+  string current_sha     = 3;
+  string current_subject = 4;
+}
+
+message MergeStatusTesting {
+  int32  commits_total   = 1;
+  int32  commits_landed  = 2;  // the commit under test is landed but ungated
+  string current_sha     = 3;
+  string current_subject = 4;
+}
+
+message MergeStatusConflict {
+  string conflicted_sha     = 1;
+  string conflicted_subject = 2;
+  int32  commits_total      = 3;
+  int32  commits_landed     = 4;
+}
+
+message MergeStatusAfterAction {
+  string prompt = 1;
+}
+
+message MergeStatusMerged {
+  int32  commits_total      = 1;
+  string after_action_error = 2;  // empty when the after action succeeded or none ran
+}
+
+message MergeStatusFailed {
+  string cause           = 1;
+  int32  commits_total   = 2;  // 0 when planning never completed
+  int32  commits_landed  = 3;
+  string failing_sha     = 4;  // set only for commit-bound failures
+  string failing_subject = 5;
+
+  // THIS MESSAGE, serialized as JSON, carried verbatim so a frontend can
+  // report the WHOLE failure record as one field of the error it shows.
+  //
+  // A failed merge is the one merge status a human has to DIAGNOSE rather
+  // than watch go by, and the narration frontends echo is a single line:
+  // it quotes `cause` and `failing_subject` and drops everything else. The
+  // counts and the sha never reached the report at all, so a user reading
+  // "merge failed — cherry-pick refused" had to leave the editor and go to
+  // the daemon log for the rest of the record.
+  //
+  // IT IS PRODUCED BY PROTO3's OWN JSON MAPPING (protojson), never by
+  // hand-assembled string building. That is what makes it exhaustive
+  // WITHOUT MAINTENANCE: a field added to this message appears in the
+  // reported error the moment the schema learns it, whereas a formatter
+  // listing the fields it knows would report the schema as it stood when
+  // the formatter was written.
+  //
+  // STAMPED LAST, onto a message whose other fields are already filled and
+  // whose own `failed_json` is still empty, so it is the serialization of
+  // this message WITHOUT this field and can never nest inside itself.
+  // Empty is never valid on a published failed arm.
+  string failed_json = 6;
+}

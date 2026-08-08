@@ -1,0 +1,514 @@
+// state.proto — PLUMBING: the resolved per-workspace state and the per-session catalog
+// entry, plus the closed vocabularies they resolve onto.
+
+syntax = "proto3";
+
+package agentshim.frontend.v1;
+
+import "agentshim/core/v1/core.proto";
+import "agentshim/frontend/v1/failure-card.proto";
+import "agentshim/frontend/v1/gate-revival.proto";
+import "agentshim/frontend/v1/merge.proto";
+import "agentshim/frontend/v1/topbar.proto";
+
+option go_package = "agentrepl/proto/agentshim/frontend/v1;frontendv1";
+
+// The closed render-state vocabulary (SSM-resolved).
+//
+// Every state maps onto ONE of six colors, and the colors are a promise to
+// the user about what they can do rather than a description of daemon
+// internals. Frontends key their render tables on the color, so the tab-bar,
+// the sidebar dots, and the progress footer can never disagree:
+//
+//   BLUE   INIT, SEVERED, DEAD, DEGRADED — the route Emacs→daemon→shim→SDK is
+//          compromised on OUR side, and there is EVIDENCE of the breakage. A
+//          bring-up in flight (INIT), a bring-up that failed or a session controller that
+//          died on a terminal protocol error (SEVERED), a dead or unspawned
+//          shim, a store outage, or a failed backfill. Blue is the honest
+//          state whenever green's promise cannot be kept AND something is
+//          actually wrong.
+//   TEAL   HIBERNATED — nothing is wired, and nothing is wrong. We put the
+//          session to sleep on purpose to reclaim its ~500MB, or nothing has
+//          ever been wired to this workspace. It makes the SAME actionability
+//          claim blue does (you cannot interact without a bring-up) and the
+//          REASON is benign, which is exactly why it is not blue: blue's job
+//          is to mean "something is broken", and a hibernation rendered blue
+//          spent that meaning on the most ordinary event in the system.
+//   PURPLE VENDOR_BLOCKED — the last turn ended AT THE VENDOR or on the
+//          ACCOUNT. Auth, usage limit, persistent 4xx/5xx, or any other
+//          abnormal turn-CONCLUDING error. It is a REPORT of that
+//          conclusion, the counterpart to green's "ended normally", and
+//          gates nothing: prompting stays available, and the next thing
+//          the agent does replaces it.
+//   RED    THINKING, CLEARING, COMPACTING — a turn is in flight. The three
+//          share the color because they share the claim; only the phase WORD
+//          distinguishes what the agent is busy with.
+//   YELLOW IDLE_ASYNC — no foreground turn, but detached work is live.
+//   GREEN  READY, IDLE, DONE, PERMISSION — the route is proven usable
+//          WITHOUT requiring a first message. A pending permission is
+//          GREEN: the agent is ready for the user to view the response and
+//          answer.
+//
+// A WORKSPACE'S COLOR IS CONNECTION TRUTH. Blue and teal both mean there is
+// no live backend session for this workspace; they differ only on whether
+// that is a fault or a choice. Every OTHER color is a GUARANTEE that the
+// session substrate is fully wired — shim live, handshake complete, store
+// link settled — so selecting a green, red, yellow or purple workspace
+// involves no connection bootstrapping whatsoever.
+//
+// Precedence is blue > purple > red > yellow > green, resolved in the SSM's
+// SQL rank table (daemon/internal/ssm/resolve.go) rather than any Go or
+// elisp cond-ladder.
+enum RenderState {
+  RENDER_STATE_UNSPECIFIED = 0;
+  RENDER_STATE_INIT = 1;
+  RENDER_STATE_IDLE = 2;
+  RENDER_STATE_IDLE_ASYNC = 3;
+  RENDER_STATE_THINKING = 4;
+  RENDER_STATE_PERMISSION = 5;
+  RENDER_STATE_DONE = 6;
+  // DEPRECATED by RENDER_STATE_VENDOR_BLOCKED. It was never a state of its
+  // own: an errored turn end is an abnormal CONCLUSION, which is exactly
+  // what VENDOR_BLOCKED means, and its own color said "stopped" in a way
+  // that read as neither working nor blocked. The SSM no longer resolves
+  // it; the number stays reserved-by-use so no future state reuses it and
+  // an old frontend decoding an old log still reads what it always did.
+  RENDER_STATE_STOP_FAILED = 7 [deprecated = true];
+  RENDER_STATE_MERGING = 8;
+  RENDER_STATE_MERGE_QUEUED = 9;
+  RENDER_STATE_MERGE_CONFLICT = 10;
+  RENDER_STATE_MERGE_FAILED = 11;
+  RENDER_STATE_MERGED = 12;
+  RENDER_STATE_DEAD = 13;
+  RENDER_STATE_DEGRADED = 14;
+  // The five-color remap.
+  //
+  // READY is the green a session reaches WITHOUT being prompted: the shim
+  // asserted its own readiness and the backfill settled, with the session
+  // wired. IDLE remains for a session that went quiet after
+  // working; both are green, and the split is kept only because the SSM's
+  // cause chain distinguishes "never ran" from "ran and finished".
+  RENDER_STATE_READY = 15;
+  RENDER_STATE_VENDOR_BLOCKED = 16;
+  // A turn OUTCOME on the session-status lifecycle, exactly as DONE and
+  // VENDOR_BLOCKED are: it reports that the LAST turn ended because a stop
+  // was delivered (core.InterruptOutcome INTERRUPTED), and the next
+  // session-status lifecycle row supersedes it. Never a latch, never needs releasing.
+  RENDER_STATE_INTERRUPTED = 17;
+  // Additive: the two CONTEXT-CUT states. Both are red for the same reason
+  // THINKING is — the agent is busy and the user's prompt cannot land yet —
+  // and the WORD is the whole distinction, exactly as INTERRUPTED's green
+  // documents. They outrank thinking in the SSM's rank table because they are
+  // busy with something OTHER than the answer, which is the more specific
+  // true statement about what the session is doing.
+  //
+  // CLEARING is user-initiated (a dispatched `/clear`) and COMPACTING can be
+  // either the user's `/compact` or the vendor's automatic one; when both are
+  // somehow open, clearing wins.
+  RENDER_STATE_CLEARING = 18;
+  RENDER_STATE_COMPACTING = 19;
+  // NOT WIRED, and the SUBSTRATE IS BROKEN. A bring-up that could not be
+  // completed, or a session controller whose `client.Run` returned a terminal protocol
+  // error.
+  //
+  // It is the resting half of the connection-truth law above. INIT already
+  // says "a bring-up is in flight"; this says the opposite, that nothing is
+  // in flight and nothing is wired, which INIT's spinner would misreport as
+  // work in progress. Both are BLUE — the claim about what the user can do
+  // is identical, and so is the claim that something on our side went wrong —
+  // and the WORD and the (non-spinning) glyph are the whole distinction,
+  // exactly as CLEARING and COMPACTING split THINKING.
+  //
+  // Nothing about the agent shows through it. A severed workspace may have a
+  // `thinking` row from the turn it was driving when it broke; reporting that
+  // would advertise an agent nobody is connected to.
+  //
+  // KEEPS FIELD NUMBER 20, which it held while it was named
+  // RENDER_STATE_DORMANT. The rename is deliberately wire-compatible: an
+  // append-only state log written by an older daemon still carries the literal
+  // text `dormant`, and the SSM resolves that alias onto this state forever.
+  // What changed is only that the benign half of the old DORMANT — the
+  // deliberate hibernation, the never-wired workspace — moved to HIBERNATED
+  // below, so that BLUE finally means "something is actually wrong".
+  RENDER_STATE_SEVERED = 20;
+  // Additive: NOT WIRED, and NOTHING IS WRONG — the session was deliberately
+  // put to sleep to reclaim its memory, or nothing has ever been wired to this
+  // workspace.
+  //
+  // TEAL, and the reason it is not blue is the whole point of the split. The
+  // old single DORMANT state conflated "asleep on purpose" with "the backend
+  // is broken", so the most ordinary event in the system — the idle sweeper
+  // reclaiming ~500MB from a workspace nobody has touched for an hour —
+  // rendered identically to a dead shim. A color that fires on both cannot
+  // mean either.
+  //
+  // Its PRECEDENCE is nonetheless the blue band's, NOT green's: it makes the
+  // same actionability claim (you cannot interact without paying a bring-up),
+  // and only the reason is benign. Ranking it below green would let a stale
+  // `thinking` row from the turn a workspace was hibernated after mask a
+  // workspace that is genuinely asleep. See the SSM's `prec` table, where it
+  // sits at 15 — directly below the blue band and above purple's 20.
+  RENDER_STATE_HIBERNATED = 21;
+  // Additive: the FIRST half of a turn, before the shim has taken the prompt.
+  //
+  // RED, exactly as THINKING is, and for the identical reason: a turn is in
+  // flight and the user's next prompt cannot land yet. The WORD is the whole
+  // distinction, precisely as CLEARING and COMPACTING split THINKING above.
+  //
+  // WHAT IT SPLITS. The daemon publishes a turn's state the moment it commits
+  // to submitting, which is what stops a prompt from sitting against a green
+  // workspace while a busy shim gets round to acking it. That claim is
+  // truthful but coarse: it says the agent is thinking during a window in
+  // which the agent has not yet been handed anything. SUBMITTING names that
+  // window, so THINKING can go back to meaning the shim actually holds the
+  // prompt.
+  //
+  // ITS CLOSING EDGE IS THE SHIM ACK, and deliberately not the durable
+  // TurnStarted: the shim MINTS TurnStarted in the same synchronous block that
+  // acks the submit (uds-session.ts, emitTurnStarted), so the two report one
+  // instant and the gap between them is store round-trip time. A state cut
+  // there would move with store load rather than with the agent, lingering
+  // longest exactly when the model was fastest.
+  RENDER_STATE_SUBMITTING = 22;
+  // Additive: the FIRST instant of a merge attempt, before the request is
+  // durably on its repository's queue.
+  //
+  // WHAT IT SPLITS. MERGE_QUEUED and MERGING both describe a merge the
+  // daemon has already accepted and recorded; neither can describe the window
+  // between the frontend command arriving and the durable enqueue landing. A
+  // command that died in that window — an unresolvable geometry, a queue write
+  // that failed, a daemon that never got to process it — left no trace in any
+  // UI at all, so the user's merge simply never appeared to happen. This is
+  // the command handler's own "I have this" mark, emitted on receipt before
+  // geometry resolution and before Coordinator.Enqueue.
+  //
+  // IT IS DELIBERATELY TRANSIENT and has NO durable queue entry behind it. It
+  // is superseded within milliseconds by MERGE_QUEUED or MERGING on the happy
+  // path, and by MERGE_FAILED when the enqueue is refused. A daemon that
+  // bounces while a workspace sits here has by definition lost the attempt,
+  // so Coordinator.Drain sweeps it to MERGE_FAILED at the next boot rather
+  // than leaving a workspace pinned on a phase nothing will ever advance.
+  //
+  // Its PRECEDENCE is directly BELOW MERGE_QUEUED (rank 6 in the SSM's prec
+  // table, beneath merge_queued's 5): it is the weakest claim the merge axis
+  // can make — the attempt is not even on a queue yet — so any other merge row
+  // that exists is the more specific truth.
+  RENDER_STATE_MERGE_ENQUEUING = 23;
+}
+
+// SESSION CONNECTIVITY answers whether the current session-controller
+// generation can operate the session reliably now. The daemon is the sole
+// authority: frontends adopt this verdict unchanged and never infer it from
+// SessionView.live, a socket, a historical RenderState, or a fault card.
+enum SessionConnectivity {
+  SESSION_CONNECTIVITY_UNSPECIFIED = 0;
+  // Intentionally offline. No controller generation is current and no fault
+  // is implied; the session may be brought up on demand.
+  SESSION_CONNECTIVITY_HIBERNATED = 1;
+  // Establishment or re-establishment of the current controller generation is
+  // in progress.
+  SESSION_CONNECTIVITY_CONNECTING = 2;
+  // The current generation passed readiness and has no open
+  // connectivity-impacting fault.
+  SESSION_CONNECTIVITY_OPERATIONAL = 3;
+  // The current generation remains attached, but one or more
+  // connectivity-impacting fault windows are open.
+  SESSION_CONNECTIVITY_DEGRADED = 4;
+  // Establishment or operation failed and no operating route remains.
+  SESSION_CONNECTIVITY_UNAVAILABLE = 5;
+}
+
+// SESSION STATUS answers what the session is doing independently of whether
+// its current route is usable. Connectivity outranks it for primary
+// presentation whenever connectivity is not OPERATIONAL.
+enum SessionStatus {
+  SESSION_STATUS_UNSPECIFIED = 0;
+  SESSION_STATUS_READY = 1;
+  SESSION_STATUS_THINKING = 2;
+  SESSION_STATUS_PERMISSION = 3;
+  SESSION_STATUS_DONE = 4;
+  SESSION_STATUS_INTERRUPTED = 5;
+  SESSION_STATUS_VENDOR_BLOCKED = 6;
+  SESSION_STATUS_MONITORING = 7;
+  // The session-status twin of RENDER_STATE_SUBMITTING: the daemon has
+  // committed to submitting a prompt and the shim has not yet acked it.
+  SESSION_STATUS_SUBMITTING = 8;
+}
+
+// A runtime fault is explanatory evidence scoped to exactly one
+// session-controller generation. A close edge can close only its matching
+// (component, fault_type) window, and a retired generation's faults can never
+// affect its replacement.
+message RuntimeFault {
+  string component = 1;
+  string fault_type = 2;
+  string impact = 3;
+  string cause_kind = 4;
+  int64 opened_at_ms = 5;
+}
+
+// THE resolved per-workspace state, plus the inputs snapshot that produced
+// it (for debuggability: a frontend can show WHY a state was resolved).
+//
+// IDENTITY AUTHORITY: this message is the SOLE authority for which session
+// owns a workspace. `session_id` below is the daemon session-state machine's
+// ruling, revisioned like every other field here, and a rotation to a new
+// owning session arrives as a new revision of this message. No consumer may
+// take a workspace's live session identity from any other frame.
+message WorkspaceState {
+  string workspace = 1;
+  // THE workspace's owning session, and the only field on this protocol that
+  // may bind it. A consumer adopts this value and nothing else as "which
+  // session am I talking to for this workspace".
+  //
+  // HOST SURFACE. Emacs manages sessions — it creates, deletes and revives
+  // them — so it needs the identity itself. No webapp-facing message carries
+  // this field or anything derived from it; a rendering frontend reads
+  // `fence` below instead, which answers the only question it ever had.
+  string session_id = 2;
+  // THE workspace's authoritative staleness fence, and the value every fenced
+  // push is compared against.
+  //
+  // It is this message's own projection of the identity above: the daemon
+  // mints a new fence whenever the workspace's owning session or its
+  // controller generation rotates, so "the fence changed" and "what I was
+  // talking to was replaced" are the same event. Publishing the projection
+  // rather than the identity is what lets a rendering frontend answer
+  // current-vs-stale without ever holding a session vocabulary.
+  //
+  // OPAQUE. Compared byte-wise, never parsed. Its composition is the daemon's
+  // and is free to change without a wire change, which is only true for as
+  // long as nothing reads structure into it.
+  string fence = 19;
+  // Primary UX projection resolved by the daemon. This is retained for merge
+  // and context-cut presentation; it is not the authority for connectivity or
+  // session status.
+  RenderState state = 3;
+  // Resolution inputs (SSM):
+  bool turn_active = 4;
+  int64 live_task_count = 5;
+  string cause_kind = 7;  // event kind that caused this transition
+  uint64 cause_seq = 8;   // store seq when event-caused (0 = daemon-local)
+  int64 at_ms = 9;
+  SessionConnectivity connectivity = 10;
+  SessionStatus status = 11;
+  // HOST SURFACE, like session_id above: the identity of the session
+  // controller generation currently operating the session, which Emacs uses to
+  // scope health probes and fault windows. A rendering frontend never reads
+  // it — the fence is this identity's projection, re-minted on every rotation,
+  // and answers the only question a renderer has.
+  string controller_generation_id = 12;
+  repeated RuntimeFault active_faults = 13;
+  // The coarse flat merge trio: RETIRED, superseded by merge_status (18).
+  //
+  // `merge_phase` was one word for WHAT a merge was doing, and
+  // `merge_queue_position` / `merge_queue_depth` said WHERE it sat among the
+  // workspaces contending for the same repository. All three were a lossy
+  // re-derivation of facts the merge run itself already publishes: MergeStatus
+  // names a RUN, carries the phase as WHICH oneof arm is set, and reports the
+  // queue place the run was actually ADMITTED at rather than a snapshot
+  // re-read at push time. Two forms of the same fact could disagree on a
+  // frame, so the weaker one is gone rather than kept in sync.
+  //
+  // The merge AXIS is untouched: it still drives RenderState (3) and is still
+  // what MergeStatus is stamped behind.
+  reserved 6, 14, 15;
+  reserved "merge_phase", "merge_queue_position", "merge_queue_depth";
+  // Whether merge.Coordinator holds the exclusivity lease on this workspace's
+  // shim. While held, USER prompting is blocked (the merge owns the session)
+  // and every conversation item the session produces carries
+  // CONVERSATION_SOURCE_MERGE.
+  bool merge_lease_held = 16;
+  // WHEN this workspace's merge landed, in unix millis. 0 means it has never
+  // reached `merged`, which is the only reading of absence: a merged
+  // workspace always carries the instant it merged at.
+  //
+  // WRITTEN ONCE, at the `merged` transition, and never moved afterwards.
+  // merge_status (18) reports whichever run is currently newest and can
+  // therefore be superseded; this is the durable record that the merge
+  // LANDED, so a later transition on any axis leaves it exactly where it was.
+  //
+  // It is its own persisted fact rather than a re-derivation over the state
+  // log, so a frontend ordering a recently-merged section reads the identical
+  // instant from every push, snapshot and resync.
+  int64 merged_at_ms = 17;
+  // THE merge run's live progress, and the ONLY merge-run surface on this
+  // message. See MergeStatus. The coarse flat trio it replaced is reserved
+  // above; there is no second, weaker form of these facts to disagree with.
+  //
+  // UNSET means this workspace has no merge to report — the merge axis has
+  // never spoken for it, or its axis is cleared. It is never a zero-valued
+  // status standing in for absence.
+  MergeStatus merge_status = 18;
+}
+
+// A PER-SESSION CATALOG ENTRY, not a statement about who owns a workspace.
+//
+// This message is published for retired, superseded, terminal and hibernated
+// sessions exactly as it is for the live one — `terminal` and `death` below
+// exist precisely so a dead session still has a view. A connect snapshot
+// therefore carries several of these for the same `workspace`, in no
+// authority order.
+//
+// SO: NO CONSUMER MAY ADOPT `session_id` BELOW AS A WORKSPACE'S LIVE SESSION
+// IDENTITY. WorkspaceState is the sole authority for that (see its comment).
+// A consumer that binds identity from this message under last-writer-wins
+// will rebind to whichever entry happened to arrive last — including a dead
+// one — and then address the daemon with a stale session under the current
+// controller generation, which the daemon refuses as an identity mismatch.
+// That is a real, observed outage, not a hypothetical.
+message SessionView {
+  // HOST SURFACE. Emacs creates, deletes, revives and catalogs sessions, so
+  // it reads sessions as sessions. A rendering frontend does not: the facts it
+  // used to take from here reach it as fenced component views instead —
+  // WorkspaceGateView for the hibernation gate, TopbarView for the identity
+  // line, TokenBreakdownView for economics, and a resolved failure card for a
+  // terminal session's account.
+  //
+  // 14 was death_reason (string): RETIRED (step 11). It had two producers
+  // and zero readers on either frontend; `death` below (F4) is the sole
+  // reader-facing account now.
+  reserved 14;
+  reserved "death_reason";
+  string workspace = 1;
+  // WHICH session this catalog entry describes — a correlation key, never a
+  // binding. It says "the facts below belong to this session"; it does not
+  // say "this session owns `workspace`". Only WorkspaceState.session_id says
+  // that.
+  string session_id = 2;
+  string model = 3;
+  string slug = 4;
+  string title = 5;
+  int64 total_tokens = 6;
+  double total_cost_usd = 7;
+  int64 context_window = 8;
+  string permission_mode = 9;
+  // Whether the daemon holds a LIVE SESSION CONTROLLER for this session's
+  // workspace — i.e. a shim is attached, or its client is reconnecting to one.
+  //
+  // IT IS THE ONE FIELD ON THIS MESSAGE THAT IS NOT DURABLE, and that is
+  // exactly why it exists. Every other field here is read off the registry
+  // record, which survives a daemon restart; a frontend that judges "is this
+  // workspace already up?" from those sees a non-terminal, fully-backfilled
+  // record and concludes YES against a daemon that has no session controller
+  // for it at all. Emacs's switch-ensure did precisely that, so after a daemon
+  // restart switching to an unwired workspace skipped its openWorkspace and
+  // the workspace never bootstrapped.
+  //
+  // The field had NO producer before that bug; the name always meant this.
+  bool shim_attached = 10;
+  // Resume/rebind keys the webapp lost in the cutover.
+  string claude_session_id = 11;
+  string cwd = 12;
+  // GET /sessions parity so Emacs can drop HTTP entirely.
+  bool terminal = 13;
+  bool rehydratable = 15;
+  bool hibernated = 16;
+  int64 pending_permissions = 17;
+  // Account identity — the CLAUDE_CONFIG_DIR the session's
+  // shim runs against (account switching is daemon-executed, webapp-initiated).
+  string config_dir = 18;
+  // Whether this session's on-disk transcript has been read
+  // into the store — the NEVER-BLUE completion signal (see BackfillState).
+  BackfillState backfill = 19;
+  // The TYPED account of why this session is terminal,
+  // superseding the free-string death_reason (RETIRED, step 11).
+  //
+  // death_reason was a free string with two producers, zero readers, and no
+  // way for a frontend to know what class of failure it described. This is
+  // the same fact classified once, daemon-side, so the dead-state card can
+  // render it the way every other failure renders. Unset while the session
+  // lives.
+  FailureCardView death = 20;
+  // The SDK-published set this session can deliberately select.  A frontend
+  // only renders these choices; it never invents or owns a model selection.
+  repeated ModelOption model_options = 21;
+  // 22 was token_utilization (SessionTokenUtilization): a persistence
+  // aggregate shipped whole so a renderer could re-derive rows from it.
+  // TokenBreakdownView carries those rows resolved.
+  reserved 22;
+  reserved "token_utilization";
+  // Present iff the session is hibernated; the typed account behind the
+  // `hibernated` bool (16), which stays as its compatibility projection.
+  // A frontend renders the revival gate from this.
+  HibernationDetail hibernation = 23;
+}
+
+// Whether a session's on-disk transcript has been backfilled into the store.
+//
+// This is the completion signal the never-blue contract needs: a workspace
+// whose session is LIVE but whose history never arrived is still blue, and
+// "live" alone cannot tell those apart. DAEMON-RESOLVED, never frontend-
+// derived, and carried on SessionView so it rides every connect snapshot.
+//
+// DERIVED, not reported. The sidecar has no channel to the daemon at all: it
+// writes to the shim-store, discards the store's own StoreWriteAck, keeps its
+// cursor per-FILE (dev:inode) rather than per-session, and emits no terminal
+// marker for a finished file. So the daemon reads the only evidence that
+// actually reaches it — the event stream — and the mapping is:
+//
+//   PENDING  a transcript exists on disk for this session's cwd, but no
+//            file-plane event has arrived for it yet.
+//   DONE     at least one data.v1.TranscriptLine event has arrived, so the
+//            file plane really did deliver into the store.
+//   FAILED   the sidecar could not read part of the transcript: it emitted a
+//            core.v1.UnparsedEvent, which IS durable and DOES reach the
+//            daemon. Surfaced loudly rather than left reading as "not yet".
+//
+// KNOWN LIMITATION — a sidecar read error that is NOT a malformed line (a
+// permission error, an unreadable project dir) is only logged sidecar-side and
+// retried every second forever, with nothing durable written. It therefore
+// manifests here as a PENDING that never advances, not as FAILED. Closing that
+// needs a sidecar report the wire does not carry today; the cheapest honest
+// paths are the StoreWriteAck the sidecar currently throws away, or a status
+// event on its store connection.
+enum BackfillState {
+  // No transcript on disk for this session's cwd: a genuinely fresh
+  // workspace with nothing to backfill. NOT "unknown" — an empty workspace
+  // is a real, correct answer, and it is what a blue workspace should be.
+  BACKFILL_STATE_UNSPECIFIED = 0;
+  BACKFILL_STATE_PENDING = 1;
+  BACKFILL_STATE_DONE = 2;
+  BACKFILL_STATE_FAILED = 3;
+}
+
+// Daemon-level identity/liveness Emacs read from GET /sessions'
+// envelope (boot detection, version-mismatch warnings, binary staleness).
+message DaemonView {
+  string boot_id = 1;
+  string protocol_version = 2;
+  int64 daemon_binary_mtime_ms = 3;
+  string daemon_version = 4;
+}
+
+// EPHEMERAL long-tool liveness relay. The shim already emits
+// core.v1.HeartbeatProgress over its UDS while a tool runs; before this arm
+// existed the daemon had nowhere to put it and dropped it (a schema-forced
+// drop). This is the arm.
+//
+// The embedded HeartbeatProgress is carried UNCHANGED, exactly as TypingDelta
+// carries ContentDelta: the daemon relays, it does not re-type. Consumers key
+// on progress.tool_use_id to find the running tool and use
+// progress.elapsed_seconds to tick its liveness, so a long-running tool stops
+// looking hung. Like TypingDelta it is never persisted and never appears in a
+// StateSnapshot — a frontend that reconnects simply waits for the next
+// heartbeat.
+message HeartbeatView {
+  // 2 was session_id. A frontend has no session vocabulary: the only question
+  // it ever asked of that field was "is this push still current", which the
+  // fence answers without naming what rotated.
+  reserved 2;
+  reserved "session_id";
+  string workspace = 1;
+  agentshim.core.v1.HeartbeatProgress progress = 3;
+  // The workspace's staleness FENCE at the moment the daemon produced this
+  // push: an opaque token the client compares BYTE-WISE against the fence on
+  // the workspace's current WorkspaceState, and never parses, splits or
+  // interprets. Equal means current; different means stale, and a stale push
+  // is discarded whole rather than partially adopted.
+  //
+  // The daemon mints it and is the only thing that can read meaning into it.
+  // A client that learned to decode it would be depending on a fact this
+  // contract does not offer, and the token's composition is free to change.
+  string fence = 4;
+}
