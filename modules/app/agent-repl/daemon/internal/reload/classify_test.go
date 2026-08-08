@@ -17,7 +17,7 @@ func TestClassifyBucketsEachComponentsPaths(t *testing.T) {
 		{"store go", "modules/app/agent-repl/agent-shim/shim-store/store.go", ComponentStore},
 		{"webapp source", "modules/app/agent-repl/webapp/src/App.tsx", ComponentWebapp},
 		{"proto contract", "modules/app/agent-repl/proto/agentshim/frontend/v1/frontend.proto", ComponentProto},
-		{"elisp module", "modules/app/agent-repl/panels.el", ComponentElisp},
+		{"elisp module", "modules/app/agent-repl/lisp/panels.el", ComponentElisp},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -39,7 +39,7 @@ func TestClassifyBucketsEachComponentsPaths(t *testing.T) {
 // that only touched it has nothing for the running stack to pick up.
 func TestClassifyExcludesTheBatchOnlyTestHarness(t *testing.T) {
 	// Arrange.
-	paths := []string{"modules/app/agent-repl/test-panels.el"}
+	paths := []string{"modules/app/agent-repl/lisp/test-panels.el"}
 
 	// Act.
 	got := Classify(paths)
@@ -68,7 +68,7 @@ func TestClassifyReportsAMixedChangeInDeployOrder(t *testing.T) {
 	// Arrange — one path per component, deliberately shuffled relative to the
 	// order the deploy runs them in.
 	paths := []string{
-		"modules/app/agent-repl/status.el",
+		"modules/app/agent-repl/lisp/status.el",
 		"modules/app/agent-repl/webapp/src/App.tsx",
 		"modules/app/agent-repl/daemon/internal/reload/reload.go",
 		"modules/app/agent-repl/proto/agentshim/frontend/v1/frontend.proto",

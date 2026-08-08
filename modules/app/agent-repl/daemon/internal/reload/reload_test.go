@@ -57,7 +57,7 @@ func TestAfterMergedLaunchesARedeployForItsOwnCheckout(t *testing.T) {
 	// own checkout.
 	dir := mergedFixture(t, "feature", map[string]string{
 		"modules/app/agent-repl/daemon/internal/reload/reload.go": "package reload\n",
-		"modules/app/agent-repl/panels.el":                        ";; panels\n",
+		"modules/app/agent-repl/lisp/panels.el":                        ";; panels\n",
 	})
 	launcher := &fakeLauncher{}
 	trigger := newTestTrigger(t, fixtureSelf(t, dir), launcher)
@@ -152,7 +152,7 @@ func TestAfterMergedSkipsAMergeThatAddedNoCommits(t *testing.T) {
 	// already-incorporated merge leaves behind.
 	dir := newFixtureRepo(t)
 	commitOnBranch(t, dir, "feature", "unpicked", map[string]string{
-		"modules/app/agent-repl/panels.el": ";; unpicked\n",
+		"modules/app/agent-repl/lisp/panels.el": ";; unpicked\n",
 	})
 	launcher := &fakeLauncher{}
 	trigger := newTestTrigger(t, fixtureSelf(t, dir), launcher)

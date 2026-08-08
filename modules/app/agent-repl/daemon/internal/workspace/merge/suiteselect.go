@@ -134,8 +134,9 @@ var suiteRules = []suiteRule{
 	// The wire contract every producer and consumer is generated from.
 	{Kind: matchSubtree, Path: moduleRoot + "proto/", Suites: []string{"proto", "daemon", "shim", "webapp"}},
 
-	// The module's elisp: a flat set of files at the module root today, with a
-	// lisp/ subdirectory reserved for the day it is split up.
+	// The module's elisp: every source and suite lives in lisp/, while the
+	// three files Doom's module loader resolves by exact path (config.el,
+	// packages.el, doctor.el) stay directly at the module root.
 	{Kind: matchDirFile, Path: moduleRoot, Suffix: ".el", Suites: []string{"ert"}},
 	{Kind: matchSubtree, Path: moduleRoot + "lisp/", Suites: []string{"ert"}},
 }

@@ -30,7 +30,7 @@ fail() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; [ -n "${2:-}" ] && echo "       $
 make_tree() {
     local root="$1"
     local mod="$root/modules/app/agent-repl"
-    mkdir -p "$mod/bin" "$mod/proto" "$mod/daemon/cmd/claude-repld" \
+    mkdir -p "$mod/bin" "$mod/lisp" "$mod/proto" "$mod/daemon/cmd/claude-repld" \
              "$mod/agent-shim/shim-store" "$mod/agent-shim/claude/shim-sidecar" \
              "$mod/agent-shim/claude/shim/dist"
     cp "$SCRIPT_UNDER_TEST" "$mod/bin/deploy-all.sh"
@@ -46,9 +46,9 @@ printf '%s\n' '{"gate":{"system":"webapp","ready":true,"deployed_sha":"source-re
 EOF
     chmod +x "$mod/bin/readiness-report.sh"
     chmod +x "$mod/bin/deploy-all.sh"
-    printf ';; stub daemon control plane\n' > "$mod/daemon.el"
-    printf ';; stub frontend client control plane\n' > "$mod/frontend-client.el"
-    printf ';; stub runtime coordinator\n' > "$mod/services.el"
+    printf ';; stub daemon control plane\n' > "$mod/lisp/daemon.el"
+    printf ';; stub frontend client control plane\n' > "$mod/lisp/frontend-client.el"
+    printf ';; stub runtime coordinator\n' > "$mod/lisp/services.el"
 
     # BF_STUB_SHIM_CONTENT makes the stub behave like a real shim build: it
     # writes the bundle and its built-sha stamp, which is what deploy-all reads
@@ -73,9 +73,9 @@ EOF
     # core.el expansion reads. `emoji' is listed but has no file on disk, so
     # the expansion is also exercised against a loader entry whose module is
     # missing.
-    printf ';; stub\n' > "$mod/status.el"
-    printf ';; stub\n' > "$mod/core.el"
-    printf ';; stub\n' > "$mod/workspace.el"
+    printf ';; stub\n' > "$mod/lisp/status.el"
+    printf ';; stub\n' > "$mod/lisp/core.el"
+    printf ';; stub\n' > "$mod/lisp/workspace.el"
     cat > "$mod/config.el" <<'EOF'
 ;; stub loader
 (agent-repl--load-module "core")
@@ -197,9 +197,9 @@ case "$*" in
             printf '%s\n' ${GIT_STUB_DIFF_FILES//,/ }
         else
             printf '%s\n' \
-                "modules/app/agent-repl/status.el" \
-                "modules/app/agent-repl/test-foo.el" \
-                "modules/app/agent-repl/deleted.el"
+                "modules/app/agent-repl/lisp/status.el" \
+                "modules/app/agent-repl/lisp/test-foo.el" \
+                "modules/app/agent-repl/lisp/deleted.el"
         fi
         ;;
 esac
@@ -618,7 +618,7 @@ fi
 # core.el cancels every module timer at load time and only its owner files
 # re-arm them, so loading core.el with a partial set strands the 1Hz heartbeat.
 d="$TMP/t20"; mkdir -p "$d"
-RUN_ENV="GIT_STUB_DIFF_FILES=modules/app/agent-repl/core.el" run_deploy "$d" --elisp "abc..def"
+RUN_ENV="GIT_STUB_DIFF_FILES=modules/app/agent-repl/lisp/core.el" run_deploy "$d" --elisp "abc..def"
 if [ "$RC" -eq 0 ] \
    && grep -q "core.el in change set — expanding to full module reload (3 files)" "$d/stdout" \
    && log_has 'emacsclient --eval (load .*core.el' \
@@ -634,7 +634,7 @@ fi
 # Loading status.el before core.el would let core.el's cancel-all clear the
 # heartbeat status.el had just armed, which is the stranding this fixes.
 d="$TMP/t21"; mkdir -p "$d"
-RUN_ENV="GIT_STUB_DIFF_FILES=modules/app/agent-repl/core.el" run_deploy "$d" --elisp "abc..def"
+RUN_ENV="GIT_STUB_DIFF_FILES=modules/app/agent-repl/lisp/core.el" run_deploy "$d" --elisp "abc..def"
 if [ "$RC" -eq 0 ] \
    && log_before 'load .*/core.el' 'load .*/workspace.el' \
    && log_before 'load .*/workspace.el' 'load .*/status.el'; then
@@ -646,7 +646,7 @@ fi
 
 # --- 22. a change set without core.el stays minimal ------------------------
 d="$TMP/t22"; mkdir -p "$d"
-RUN_ENV="GIT_STUB_DIFF_FILES=modules/app/agent-repl/status.el" run_deploy "$d" --elisp "abc..def"
+RUN_ENV="GIT_STUB_DIFF_FILES=modules/app/agent-repl/lisp/status.el" run_deploy "$d" --elisp "abc..def"
 if [ "$RC" -eq 0 ] \
    && ! grep -q "expanding to full module reload" "$d/stdout" \
    && log_has 'emacsclient --eval (load .*status.el' \
@@ -659,7 +659,7 @@ fi
 
 # --- 23. a changed file outside the loader still loads after the expansion --
 d="$TMP/t23"; mkdir -p "$d"
-RUN_ENV="GIT_STUB_DIFF_FILES=modules/app/agent-repl/core.el,modules/app/agent-repl/config.el" \
+RUN_ENV="GIT_STUB_DIFF_FILES=modules/app/agent-repl/lisp/core.el,modules/app/agent-repl/config.el" \
     run_deploy "$d" --elisp "abc..def"
 if [ "$RC" -eq 0 ] \
    && grep -q "expanding to full module reload (4 files)" "$d/stdout" \

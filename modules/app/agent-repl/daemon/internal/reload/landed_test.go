@@ -34,10 +34,10 @@ func TestLandedRangeSpansEveryCommitOfAMultiCommitMerge(t *testing.T) {
 	// Arrange — two commits on the branch, both picked.
 	dir := newFixtureRepo(t)
 	gitFixture(t, dir, "checkout", "-b", "feature", "main")
-	writeFixtureFile(t, dir, "modules/app/agent-repl/status.el", ";; one\n")
+	writeFixtureFile(t, dir, "modules/app/agent-repl/lisp/status.el", ";; one\n")
 	gitFixture(t, dir, "add", "-A")
 	gitFixture(t, dir, "commit", "-m", "first")
-	writeFixtureFile(t, dir, "modules/app/agent-repl/panels.el", ";; two\n")
+	writeFixtureFile(t, dir, "modules/app/agent-repl/lisp/panels.el", ";; two\n")
 	gitFixture(t, dir, "add", "-A")
 	gitFixture(t, dir, "commit", "-m", "second")
 	gitFixture(t, dir, "checkout", "main")
@@ -62,11 +62,11 @@ func TestLandedRangeStopsAtAnEarlierMergesPicks(t *testing.T) {
 	// Arrange — an earlier branch merged first, then a second one.
 	dir := newFixtureRepo(t)
 	commitOnBranch(t, dir, "earlier", "earlier work", map[string]string{
-		"modules/app/agent-repl/status.el": ";; earlier\n",
+		"modules/app/agent-repl/lisp/status.el": ";; earlier\n",
 	})
 	cherryPickBranch(t, dir, "earlier")
 	commitOnBranch(t, dir, "later", "later work", map[string]string{
-		"modules/app/agent-repl/panels.el": ";; later\n",
+		"modules/app/agent-repl/lisp/panels.el": ";; later\n",
 	})
 	cherryPickBranch(t, dir, "later")
 
@@ -88,7 +88,7 @@ func TestLandedRangeReportsNothingWhenNoCommitLanded(t *testing.T) {
 	// Arrange — a branch that exists but was never picked onto main.
 	dir := newFixtureRepo(t)
 	commitOnBranch(t, dir, "feature", "unpicked work", map[string]string{
-		"modules/app/agent-repl/status.el": ";; unpicked\n",
+		"modules/app/agent-repl/lisp/status.el": ";; unpicked\n",
 	})
 
 	// Act.
@@ -138,7 +138,7 @@ func TestLandedRangeSurfacesAnUnreadableTarget(t *testing.T) {
 func TestChangedPathsListsTheRangesFiles(t *testing.T) {
 	// Arrange.
 	dir := mergedFixture(t, "feature", map[string]string{
-		"modules/app/agent-repl/panels.el":            ";; panels\n",
+		"modules/app/agent-repl/lisp/panels.el":            ";; panels\n",
 		"modules/app/agent-repl/daemon/internal/x.go": "package x\n",
 	})
 	land, err := landedRange(context.Background(), dir, "feature")
@@ -155,7 +155,7 @@ func TestChangedPathsListsTheRangesFiles(t *testing.T) {
 	}
 	want := []string{
 		"modules/app/agent-repl/daemon/internal/x.go",
-		"modules/app/agent-repl/panels.el",
+		"modules/app/agent-repl/lisp/panels.el",
 	}
 	slices.Sort(got)
 	if !slices.Equal(got, want) {
