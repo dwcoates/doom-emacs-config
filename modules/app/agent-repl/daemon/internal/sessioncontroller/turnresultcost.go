@@ -45,7 +45,7 @@ type turnResultCost struct {
 	// inputTokens, cacheCreationInputTokens and cacheReadInputTokens are the raw
 	// buckets, carried so a report can show the arithmetic that produced a
 	// verdict rather than only the verdict.
-	inputTokens             int64
+	inputTokens              int64
 	cacheCreationInputTokens int64
 	cacheReadInputTokens     int64
 }
