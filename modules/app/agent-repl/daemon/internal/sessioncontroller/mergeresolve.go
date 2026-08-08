@@ -35,6 +35,23 @@ import (
 // is, and merge.Coordinator leaves the conflict parked for a human.
 const mergeResolutionTurnBound = 30 * time.Minute
 
+// mergeResolutionTurnBindBound is how long a submitted merge prompt may go
+// without a turn STARTING for it.
+//
+// IT EXISTS BECAUSE THE 30-MINUTE BOUND IS SIZED FOR AN AGENT THAT IS WORKING,
+// and a turn that never began is not an agent that is working — it is an agent
+// that was never asked. A test-fix prompt once sat parked on a session's queue
+// behind a user turn whose end never arrived; the wait bound it to nothing and
+// burned all thirty minutes before the pipeline could take its rollback path,
+// with `bound_turn_id=""` the only trace that no turn had ever existed.
+//
+// So the wait is TWO PHASES: the turn must START within this bound, and only a
+// turn that started gets the long one. Two minutes is generous for the distance
+// between a forwarded prompt and the shim's TurnStarted — that boundary is one
+// round trip, not one unit of work — while still costing a broken merge minutes
+// instead of half an hour.
+const mergeResolutionTurnBindBound = 2 * time.Minute
+
 // turnWaiter is one wait for a specific turn to END.
 //
 // It is armed BEFORE the prompt is submitted and correlated to a turn ID
@@ -48,6 +65,11 @@ type turnWaiter struct {
 	// turnID is the turn this waiter is bound to, valid once bound is true.
 	turnID string
 	bound  bool
+	// boundDone is closed by the TurnStarted that binds this waiter, exactly
+	// once. It is what makes "a turn started for my prompt" observable on its
+	// own, separately from "that turn ended" — the two phases of the wait have
+	// different deadlines and different failure causes.
+	boundDone chan struct{}
 	// outcome is what the matching TurnEnded said about itself. Written before
 	// done is closed and read only after, so the close is its handoff.
 	outcome turnOutcome
@@ -72,7 +94,7 @@ type turnOutcome struct {
 
 // armTurnWaiter registers an unbound waiter on d. Caller must NOT hold m.mu.
 func (m *Manager) armTurnWaiter(d *sessionController) *turnWaiter {
-	w := &turnWaiter{done: make(chan struct{})}
+	w := &turnWaiter{done: make(chan struct{}), boundDone: make(chan struct{})}
 	m.mu.Lock()
 	d.turnWaiters = append(d.turnWaiters, w)
 	m.mu.Unlock()
@@ -100,7 +122,7 @@ func (m *Manager) dropTurnWaiter(d *sessionController, w *turnWaiter) {
 // that loop to make progress.
 func (m *Manager) onTurnEvent(d *sessionController, started bool, turnID string, outcome turnOutcome) {
 	m.mu.Lock()
-	var completed []*turnWaiter
+	var completed, newlyBound []*turnWaiter
 	var bound int
 	kept := d.turnWaiters[:0]
 	for _, w := range d.turnWaiters {
@@ -108,6 +130,7 @@ func (m *Manager) onTurnEvent(d *sessionController, started bool, turnID string,
 		case started && !w.bound:
 			w.turnID, w.bound = turnID, true
 			bound++
+			newlyBound = append(newlyBound, w)
 			kept = append(kept, w)
 		case !started && w.bound && w.turnID == turnID:
 			// Under m.mu and before the close below, which is what publishes it
@@ -122,6 +145,13 @@ func (m *Manager) onTurnEvent(d *sessionController, started bool, turnID string,
 	waiting := len(kept)
 	m.mu.Unlock()
 
+	// Both closes happen outside m.mu, like `done` always has: this runs on the
+	// shim read loop. No waiter is ever in both slices — the switch above is
+	// exclusive on `started` — so a waiter's bind is published by the TurnStarted
+	// call and its end by the later TurnEnded one, in that order.
+	for _, w := range newlyBound {
+		close(w.boundDone)
+	}
 	for _, w := range completed {
 		close(w.done)
 	}
@@ -142,6 +172,14 @@ func (m *Manager) onTurnEvent(d *sessionController, started bool, turnID string,
 // It deliberately uses existing rather than ensure: a merge prompt is only ever
 // admissible against a session the lease was taken over, and a workspace with no
 // live session controller is a loud failure rather than a reason to spawn one.
+//
+// THE WAIT IS TWO PHASES, BIND THEN WORK, and the split is the whole point. The
+// long bound is a budget for an AGENT THAT IS WORKING; spending it on a turn
+// that never started spends it on nothing. So the prompt must produce a
+// TurnStarted within mergeResolutionTurnBindBound, and only after that does the
+// long bound apply. Every failure names the submit's own disposition, because a
+// merge that fails on "the turn never began" is otherwise indistinguishable in
+// the record from one that fails on "the agent went quiet".
 func (m *Manager) SubmitMergePromptAwaitingTurn(ctx context.Context, workspace, requestID, text, permissionMode string, promptOrigin corev1.PromptOrigin) error {
 	d, err := m.existing(workspace)
 	if err != nil {
@@ -151,7 +189,43 @@ func (m *Manager) SubmitMergePromptAwaitingTurn(ctx context.Context, workspace, 
 	w := m.armTurnWaiter(d)
 	defer m.dropTurnWaiter(d, w)
 
-	if err := m.SubmitMergePrompt(ctx, workspace, requestID, text, permissionMode, promptOrigin); err != nil {
+	disposition, err := m.submitMergePrompt(ctx, workspace, requestID, text, permissionMode, promptOrigin)
+	if err != nil {
+		return err
+	}
+	// A PARKED MERGE PROMPT IS A BUSY WORKSPACE, and it is decided here rather
+	// than waited out. The lease's precondition is that nothing of the user's is
+	// running behind this shim; a prompt that reached the QUEUE says that
+	// precondition does not hold — the session still has a turn in flight, and
+	// the merge would be competing with the user's own agent for it. No bind
+	// deadline can improve that answer, so the gate fails now with the reason,
+	// and the parked prompt is taken back with it.
+	if disposition.queued() {
+		if cancelErr := m.cancelQueueEntry(workspace, disposition.queuedEntryID, "merge-gate", "cancelled_by_merge_gate"); cancelErr != nil {
+			m.logf("session-controller: merge resolution prompt could NOT be taken back off the queue ws=%q request_id=%s entry=%s: %v — it may still be delivered to the agent after the merge has been failed",
+				workspace, requestID, disposition.queuedEntryID, cancelErr)
+		}
+		err := fmt.Errorf("session-controller: the merge resolution turn for workspace %q (request %s) never started: the workspace is BUSY with a turn of the user's own, so %s; a merge resolution cannot run on a session the user's agent is working in",
+			workspace, requestID, disposition)
+		m.logf("session-controller: merge resolution turn NOT STARTED (workspace busy) ws=%q session=%s request_id=%s entry=%s: %v — the merge is failed now rather than competing with the user's turn for the shim",
+			workspace, d.sessionID, requestID, disposition.queuedEntryID, err)
+		return err
+	}
+	bind := time.NewTimer(m.mergeResolutionBindBound())
+	defer bind.Stop()
+	select {
+	case <-w.boundDone:
+	case <-bind.C:
+		err := fmt.Errorf("session-controller: the merge resolution turn for workspace %q (request %s) never started: no turn began within %s of the submit, and %s",
+			workspace, requestID, m.mergeResolutionBindBound(), disposition)
+		m.logf("session-controller: merge resolution turn NEVER STARTED ws=%q session=%s request_id=%s bind_bound=%s: %v — the merge is failed now rather than holding the shim for the rest of the turn bound",
+			workspace, d.sessionID, requestID, m.mergeResolutionBindBound(), err)
+		return err
+	case <-ctx.Done():
+		err := fmt.Errorf("session-controller: the merge resolution turn for workspace %q (request %s) never started: %w, and %s",
+			workspace, requestID, ctx.Err(), disposition)
+		m.logf("session-controller: merge resolution turn NEVER STARTED ws=%q session=%s request_id=%s: %v — the cherry-pick is NOT resumed",
+			workspace, d.sessionID, requestID, err)
 		return err
 	}
 	select {
@@ -342,4 +416,13 @@ func (m *Manager) mergeResolutionBound() time.Duration {
 		return m.cfg.MergeResolutionTurnBound
 	}
 	return mergeResolutionTurnBound
+}
+
+// mergeResolutionBindBound resolves the BIND phase's bound the same way: the
+// configured override when a harness set one, the package default otherwise.
+func (m *Manager) mergeResolutionBindBound() time.Duration {
+	if m.cfg.MergeResolutionTurnBindBound > 0 {
+		return m.cfg.MergeResolutionTurnBindBound
+	}
+	return mergeResolutionTurnBindBound
 }
