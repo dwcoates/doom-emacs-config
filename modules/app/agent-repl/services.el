@@ -17,6 +17,7 @@
 (declare-function agent-repl--frontend-all-turn-active-workspaces "frontend-client" ())
 (declare-function agent-repl--frontend-artifact-exists-p "daemon" (path))
 (declare-function agent-repl--frontend-bounce-after-build "daemon" (&optional preflight stop-shims on-complete))
+(declare-function agent-repl--frontend-arm-expected-restart "daemon" (initiator))
 (declare-function agent-repl--frontend-build-if-stale "daemon" (&optional force))
 (declare-function agent-repl--frontend-build-targets-if-stale "daemon" (targets &optional force))
 (declare-function agent-repl--frontend-init-inhibited-p "daemon" ())
@@ -322,10 +323,26 @@ exhausts the readiness budget and fails loudly."
   (agent-repl-uds-disconnect)
   (agent-repl--frontend-invalidate-daemon-view "runtime-bounce-retired-link"))
 
-(defun agent-repl--runtime-prepare (rebind on-success on-failure &optional stop-shims)
+(defun agent-repl--frontend-expected-restart-initiator-name (rebind initiator)
+  "Return the name the expected-restart window records for this bounce.
+INITIATOR, when the caller supplied one, names the control-plane surface
+that ordered the restart (a deploy over emacsclient, the interactive
+command).  Absent that, the mode itself is the initiator: REBIND
+distinguishes a restart from the once-per-Emacs startup bounce."
+  (if (and (stringp initiator) (not (string-empty-p (string-trim initiator))))
+      (string-trim initiator)
+    (if rebind "runtime-restart" "runtime-startup")))
+
+(defun agent-repl--runtime-prepare (rebind on-success on-failure &optional stop-shims initiator)
   "Asynchronously bounce dependencies, verify the daemon, and optionally REBIND.
 ON-SUCCESS runs only after every requested stage completes.  ON-FAILURE
-receives the first diagnostic and no later stage starts."
+receives the first diagnostic and no later stage starts.
+
+INITIATOR names the control-plane surface that ordered this bounce; it is
+recorded on the expected-restart window this coordinator arms immediately
+before it stops a daemon, so the exit Emacs itself ordered is classified as
+a restart phase rather than as the daemon dying.  See
+`agent-repl--frontend-arm-expected-restart'."
   (agent-repl--assert-main-thread "runtime-restart")
   (unless (and (functionp on-success) (functionp on-failure))
     (error "agent-repl: runtime preparation requires callable continuations"))
@@ -385,6 +402,15 @@ receives the first diagnostic and no later stage starts."
                  (agent-repl--shim-services-build-and-bounce
                   t
                   (lambda ()
+                    ;; ARMED HERE, and no earlier: this is the last instant
+                    ;; before a daemon is actually stopped, so nothing that
+                    ;; fails during the preflight or the build can leave a
+                    ;; window suppressing an unrelated daemon death.  A
+                    ;; `:absent' state stops nothing, so it arms nothing.
+                    (unless (eq daemon-state :absent)
+                      (agent-repl--frontend-arm-expected-restart
+                       (agent-repl--frontend-expected-restart-initiator-name
+                        rebind initiator)))
                     (agent-repl--frontend-bounce-after-build
                      daemon-state stop-shims
                      (lambda (_started)
@@ -404,7 +430,7 @@ receives the first diagnostic and no later stage starts."
                (bounce-runtime daemon-state)))))
       (agent-repl--frontend-runtime-bounce-preflight-async #'after-preflight)
       :pending)))
-(defun agent-repl-runtime-restart (&optional stop-shims)
+(defun agent-repl-runtime-restart (&optional stop-shims initiator)
   "Rebuild, bounce, verify, then rebind the complete agent-repl runtime.
 Refuses before any build or bounce when any daemon workspace reports an
 active turn.
@@ -412,12 +438,15 @@ active turn.
 STOP-SHIMS (the interactive prefix argument) asks the outgoing daemon to
 stop its session shims rather than leave them running for the replacement
 to reattach to.  The default PRESERVES them; see
-`agent-repl--runtime-prepare'."
+`agent-repl--runtime-prepare'.
+
+INITIATOR, when supplied, names the surface that ordered this restart on the
+expected-restart window; interactive callers leave it nil."
   (interactive "P")
   (agent-repl--log nil
-                   "runtime-restart command: invoked interactive=%s stop-shims=%s"
+                   "runtime-restart command: invoked interactive=%s stop-shims=%s initiator=%S"
                    (if (called-interactively-p 'interactive) "t" "nil")
-                   (if stop-shims "t" "nil"))
+                   (if stop-shims "t" "nil") initiator)
   (agent-repl--runtime-prepare
    t
    ;; `agent-repl--runtime-prepare' already echoes the terminal phase line
@@ -426,12 +455,14 @@ to reattach to.  The default PRESERVES them; see
    #'ignore
    (lambda (detail)
      (agent-repl--warn nil "runtime-restart command: FAILED detail=%s" detail))
-   (and stop-shims t)))
+   (and stop-shims t)
+   initiator))
 
-(defun agent-repl-runtime-restart-await (&optional stop-shims timeout)
+(defun agent-repl-runtime-restart-await (&optional stop-shims timeout initiator)
   "Restart the complete runtime and return only after terminal completion.
 STOP-SHIMS has the same meaning as in `agent-repl-runtime-restart'.  TIMEOUT,
 when non-nil, overrides `agent-repl-runtime-restart-await-timeout'.
+INITIATOR names the ordering surface on the expected-restart window.
 
 This synchronous surface is reserved for deployment orchestration.  It pumps
 Emacs process output and timers while the canonical asynchronous coordinator
@@ -479,7 +510,8 @@ initial `:pending' dispatch for a completed deployment."
        (lambda (detail)
          (setq failure detail
                state :failed))
-       (and stop-shims t))
+       (and stop-shims t)
+       initiator)
       (while (and (eq state :pending) (< (float-time) deadline))
         (agent-repl--runtime-pump-events 0.05))
       (pcase state
