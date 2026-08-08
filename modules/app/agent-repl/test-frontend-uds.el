@@ -617,6 +617,100 @@ the recorded error, so containing it there would be swallowing it."
         ;; Assert
         (should (= warned 1))))))
 
+;;;; ---- Tests: link loss inside an expected-restart window ----
+
+(defmacro agent-repl-test--with-link-down (initiator warned informed &rest body)
+  "Drive an ESTABLISHED link down, collecting warn/info text and running BODY.
+INITIATOR nil leaves the expected-restart window disarmed; a string arms a
+window on its behalf first.  WARNED and INFORMED are bound to the lists of
+messages each level received, newest first."
+  (declare (indent 3))
+  `(agent-repl-test--with-uds
+     (let ((agent-repl--frontend-expected-restart nil)
+           (agent-repl--frontend-expected-restart-last-close nil)
+           (agent-repl-frontend-expected-restart-window-seconds 180.0)
+           (,warned nil)
+           (,informed nil))
+       (setq agent-repl--uds-process 'dead-proc
+             agent-repl--uds-connect-started-at nil)
+       (cl-letf (((symbol-function 'process-live-p) (lambda (_p) nil))
+                 ((symbol-function 'process-name) (lambda (_p) "uds<9>"))
+                 ((symbol-function 'agent-repl--warn)
+                  (lambda (_ws fmt &rest args) (push (apply #'format fmt args) ,warned)))
+                 ((symbol-function 'agent-repl--info)
+                  (lambda (_ws fmt &rest args) (push (apply #'format fmt args) ,informed))))
+         (when ,initiator
+           (agent-repl--frontend-arm-expected-restart ,initiator))
+         ,@body))))
+
+(ert-deftest agent-repl-test-uds-link-down-inside-a-restart-window-logs-info ()
+  "A link that drops inside an expected-restart window is info, naming who ordered it."
+  ;; Arrange
+  (agent-repl-test--with-link-down "deploy (emacsclient)" warned informed
+    ;; Act
+    (agent-repl--uds-sentinel 'dead-proc "deleted\n")
+    ;; Assert
+    (should (string-match-p "uds-link: down for the deploy (emacsclient) restart"
+                            (car informed)))
+    (ignore warned)))
+
+(ert-deftest agent-repl-test-uds-link-down-inside-a-restart-window-emits-no-warn ()
+  "The deliberate drop spends no warning: the restart already explained it."
+  ;; Arrange
+  (agent-repl-test--with-link-down "deploy (emacsclient)" warned informed
+    ;; Act
+    (agent-repl--uds-sentinel 'dead-proc "deleted\n")
+    ;; Assert
+    (should-not warned)
+    (ignore informed)))
+
+(ert-deftest agent-repl-test-uds-link-down-outside-a-restart-window-warns-verbatim ()
+  "With no window armed the link-loss warning is byte-identical to before."
+  ;; Arrange
+  (agent-repl-test--with-link-down nil warned informed
+    ;; Act
+    (agent-repl--uds-sentinel 'dead-proc "connection broken by remote peer\n")
+    ;; Assert
+    (should (equal (car warned)
+                   "uds-link: DOWN proc=uds<9> (link was established) event=connection broken by remote peer"))
+    (ignore informed)))
+
+(ert-deftest agent-repl-test-uds-link-down-classifies-by-window-not-by-event ()
+  "A graceful peer-close inside the window classifies exactly as a `deleted' kill.
+The same deliberate bounce produces either event string, so the event can
+never be the discriminator."
+  ;; Arrange
+  (agent-repl-test--with-link-down "deploy (emacsclient)" warned informed
+    ;; Act
+    (agent-repl--uds-sentinel 'dead-proc "connection broken by remote peer\n")
+    ;; Assert
+    (should-not warned)
+    (should (string-match-p "uds-link: down for the" (car informed)))))
+
+(ert-deftest agent-repl-test-uds-link-down-inside-a-restart-window-still-reconnects ()
+  "Classification changes what is SAID about the drop, never the reconnect ladder."
+  ;; Arrange
+  (agent-repl-test--with-link-down "deploy (emacsclient)" warned informed
+    (let (scheduled)
+      (cl-letf (((symbol-function 'agent-repl--uds-run-timer)
+                 (lambda (delay fn) (setq scheduled (list delay fn)) 'fake-timer)))
+        ;; Act
+        (agent-repl--uds-sentinel 'dead-proc "deleted\n")
+        ;; Assert
+        (should (eq (nth 1 scheduled) #'agent-repl-uds-connect))))
+    (ignore warned informed)))
+
+(ert-deftest agent-repl-test-uds-dial-failure-inside-a-restart-window-still-warns ()
+  "The window explains an ESTABLISHED link dropping, never a dial that never opened."
+  ;; Arrange
+  (agent-repl-test--with-link-down "deploy (emacsclient)" warned informed
+    (setq agent-repl--uds-connect-started-at (- (float-time) 1.5))
+    ;; Act
+    (agent-repl--uds-sentinel 'dead-proc "connection broken by remote peer\n")
+    ;; Assert
+    (should (string-match-p "uds-connect: dial FAILED" (car warned)))
+    (ignore informed)))
+
 (ert-deftest agent-repl-test-uds-sentinel-live-link-does-not-reconnect ()
   "A sentinel event on a still-live process does not schedule a reconnect."
   ;; Arrange

@@ -56,6 +56,7 @@
 (declare-function agent-repl--frontend-ws-name "frontend-state" (workspace))
 (declare-function agent-repl-connection-notice-echo "connection-notice" (text))
 (declare-function agent-repl--frontend-invalidate-daemon-view "frontend-state" (reason))
+(declare-function agent-repl--frontend-expected-restart-initiator "daemon" ())
 
 ;;;; ---- Configuration ---------------------------------------------------
 
@@ -681,11 +682,30 @@ and reconnects (design §4.4)."
         ;; ladder has none — `agent-repl--uds-schedule-reconnect' retries
         ;; forever and never exhausts.  Demoting either branch here would not
         ;; move the warning later, it would delete it.
-        (if elapsed
+        ;;
+        ;; The ONE exception is an established link dropping while Emacs has an
+        ;; expected-restart window open: Emacs ordered that daemon's death, so
+        ;; the link following it down is a PHASE of the restart, classified
+        ;; exactly as the daemon's own exit is.  Classification is by the
+        ;; window, never by EVENT — the same deliberate bounce reports
+        ;; `deleted' when the daemon is killed outright and `connection broken
+        ;; by remote peer' when it stops gracefully, and neither string says
+        ;; anything about whether the death was wanted.  The reconnect ladder
+        ;; below is untouched either way: this changes what gets SAID about the
+        ;; drop, not what is done about it.
+        (let ((initiator (and (null elapsed)
+                              (agent-repl--frontend-expected-restart-initiator))))
+          (cond
+           (elapsed
             (agent-repl--warn nil "uds-connect: dial FAILED proc=%s elapsed=%.3fs event=%s"
-                              (process-name proc) elapsed (string-trim event))
-          (agent-repl--warn nil "uds-link: DOWN proc=%s (link was established) event=%s"
-                            (process-name proc) (string-trim event)))))
+                              (process-name proc) elapsed (string-trim event)))
+           (initiator
+            (agent-repl--info nil
+                              "uds-link: down for the %s restart proc=%s event=%s"
+                              initiator (process-name proc) (string-trim event)))
+           (t
+            (agent-repl--warn nil "uds-link: DOWN proc=%s (link was established) event=%s"
+                              (process-name proc) (string-trim event)))))))
         (setq agent-repl--uds-read-accumulator "")
     (agent-repl--log nil "uds-sentinel: link down — scheduling reconnect")
     (agent-repl--uds-schedule-reconnect))))
