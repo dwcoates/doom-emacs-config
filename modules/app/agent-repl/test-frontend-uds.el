@@ -725,6 +725,146 @@ never be the discriminator."
         ;; Assert
         (should-not scheduled)))))
 
+;;;; ---- a write that loses the link inside a restart window --------------
+;;
+;; Live evidence: five seconds after a deploy TERMed the daemon, the periodic
+;; roster export tried to write and Emacs warned "uds-send-command: FAILED
+;; field=publishWorkspaceRoster ... error=process ... no longer connected".
+;; The daemon was draining inside an open expected-restart window, and the
+;; next reconnect publish carries a fresher roster than the frame that could
+;; not go out — so that line is a phase of the restart, not news.
+
+(defun agent-repl-test--uds-failed-write (initiator field error-message)
+  "Fail one write of FIELD with ERROR-MESSAGE and report what was said.
+INITIATOR, when non-nil, arms an expected-restart window on its behalf
+first.  Returns a plist: `:warned' / `:informed' are the messages each
+level received (newest first), and `:ack' is the CommandAck the transport
+handed to the caller-settling path."
+  (let ((agent-repl--frontend-expected-restart nil)
+        (agent-repl--frontend-expected-restart-last-close nil)
+        (agent-repl-frontend-expected-restart-window-seconds 180.0)
+        (warned nil)
+        (informed nil)
+        (ack 'never-settled))
+    (cl-letf (((symbol-function 'agent-repl--frontend-ws-name) (lambda (_w) nil))
+              ((symbol-function 'agent-repl--log) (lambda (&rest _) nil))
+              ((symbol-function 'process-send-string)
+               (lambda (&rest _) (error "%s" error-message)))
+              ((symbol-function 'agent-repl--warn)
+               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warned)))
+              ((symbol-function 'agent-repl--info)
+               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) informed)))
+              ((symbol-function 'agent-repl--uds-handle-command-ack)
+               (lambda (a) (setq ack a))))
+      (when initiator
+        (agent-repl--frontend-arm-expected-restart initiator))
+      (unwind-protect
+          (agent-repl--uds-write-frame
+           'fake-proc (list :field field :request-id "fe-348-b00a"
+                            :frame "{}\n" :workspace nil
+                            :enqueued-at (float-time)))
+        (agent-repl--frontend-expected-restart-cancel-timer)))
+    (list :warned warned :informed informed :ack ack)))
+
+(ert-deftest agent-repl-test-uds-write-lost-link-in-window-logs-info ()
+  "A republished field losing the link inside the window is info, naming the initiator."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    ;; Act
+    (let ((result (agent-repl-test--uds-failed-write
+                   "deploy (emacsclient)" "publishWorkspaceRoster"
+                   "process agent-repl-frontend-uds<13> no longer connected")))
+      ;; Assert
+      (should (equal (car (plist-get result :informed))
+                     (concat "uds-send-command: field=publishWorkspaceRoster "
+                             "request-id=fe-348-b00a not sent — link down for the "
+                             "deploy (emacsclient) restart; the reconnect publish "
+                             "supersedes it"))))))
+
+(ert-deftest agent-repl-test-uds-write-lost-link-in-window-emits-no-warn ()
+  "The classified write spends no warning: the restart already explained it."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    ;; Act
+    (let ((result (agent-repl-test--uds-failed-write
+                   "deploy (emacsclient)" "publishWorkspaceRoster"
+                   "process agent-repl-frontend-uds<13> no longer connected")))
+      ;; Assert
+      (should-not (plist-get result :warned)))))
+
+(ert-deftest agent-repl-test-uds-write-lost-link-outside-a-window-warns-verbatim ()
+  "With no window armed the send-failure warning is byte-identical to before."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    ;; Act
+    (let ((result (agent-repl-test--uds-failed-write
+                   nil "publishWorkspaceRoster"
+                   "process agent-repl-frontend-uds<13> no longer connected")))
+      ;; Assert
+      (should (equal (car (plist-get result :warned))
+                     (concat "uds-send-command: FAILED field=publishWorkspaceRoster "
+                             "request-id=fe-348-b00a error=process "
+                             "agent-repl-frontend-uds<13> no longer connected"))))))
+
+(ert-deftest agent-repl-test-uds-write-non-link-failure-in-window-still-warns ()
+  "The window explains a lost link, never an unrecognized write failure."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    ;; Act
+    (let ((result (agent-repl-test--uds-failed-write
+                   "deploy (emacsclient)" "publishWorkspaceRoster"
+                   "Args out of range: 4096")))
+      ;; Assert
+      (should (string-match-p "uds-send-command: FAILED"
+                              (car (plist-get result :warned)))))))
+
+(ert-deftest agent-repl-test-uds-write-one-shot-command-in-window-still-warns ()
+  "A one-shot command nothing re-sends stays loud: its loss is real either way."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    ;; Act
+    (let ((result (agent-repl-test--uds-failed-write
+                   "deploy (emacsclient)" "submitPrompt"
+                   "process agent-repl-frontend-uds<13> no longer connected")))
+      ;; Assert
+      (should (string-match-p "uds-send-command: FAILED field=submitPrompt"
+                              (car (plist-get result :warned)))))))
+
+(ert-deftest agent-repl-test-uds-write-classified-failure-still-nacks-the-caller ()
+  "Classification picks a log level; the caller still sees the send fail."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    ;; Act
+    (let ((result (agent-repl-test--uds-failed-write
+                   "deploy (emacsclient)" "publishWorkspaceRoster"
+                   "process agent-repl-frontend-uds<13> no longer connected")))
+      ;; Assert
+      (should (equal (plist-get result :ack)
+                     (list :requestId "fe-348-b00a" :ok nil
+                           :error "process agent-repl-frontend-uds<13> no longer connected"))))))
+
+(ert-deftest agent-repl-test-uds-write-unclassified-failure-nacks-identically ()
+  "The unclassified branch hands the caller exactly the same CommandAck."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    ;; Act
+    (let ((result (agent-repl-test--uds-failed-write
+                   nil "publishWorkspaceRoster"
+                   "process agent-repl-frontend-uds<13> no longer connected")))
+      ;; Assert
+      (should (equal (plist-get result :ack)
+                     (list :requestId "fe-348-b00a" :ok nil
+                           :error "process agent-repl-frontend-uds<13> no longer connected"))))))
+
+(ert-deftest agent-repl-test-uds-write-failure-link-down-p-uses-process-status ()
+  "A process whose status is no longer live is link-down whatever the message says."
+  ;; Arrange
+  (cl-letf (((symbol-function 'processp) (lambda (_p) t))
+            ((symbol-function 'process-status) (lambda (_p) 'closed)))
+    ;; Act / Assert
+    (should (agent-repl--uds-write-failure-link-down-p
+             'fake-proc '(error "Args out of range: 4096")))))
+
 ;;;; ---- outbound command send -------------------------------------------
 
 (defmacro agent-repl-test--capturing-send (sent-var &rest body)
