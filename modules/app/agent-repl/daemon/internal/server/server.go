@@ -1839,6 +1839,27 @@ func (s *Server) runIdleSweeper() {
 func (s *Server) sweepIdle() {
 	nowMs := s.now().UnixMilli()
 	for _, rec := range s.registry.All() {
+		// THE SWEEP ABANDONS ITS REMAINDER ONCE SHUTDOWN HAS BEGUN, and this is
+		// what bounds ShutdownAll's join on sweeperDone. A sweep is a serial walk
+		// of the whole registry, and every session it reaches costs a full
+		// hibernation — the shim's interrupt ack plus its SIGTERM exit wait — so a
+		// sweep that started one tick before a stop held the teardown for the sum
+		// of the fleet's exit waits before the drain itself had begun. Measured on
+		// 2026-08-08 that join plus a serial drain took ~45s against a 30s stop
+		// grace, and the daemon was SIGKILLed mid-drain.
+		//
+		// ABANDONING IS SAFE AND WAITING IS NOT OPTIONAL. Every session this sweep
+		// would still have reached is hibernated by the shutdown drain immediately
+		// after, so nothing is left un-torn-down; and the join itself stays,
+		// because it is what makes a post-close read of the registry, SSM or token
+		// ledger structurally impossible rather than merely unlikely.
+		select {
+		case <-s.stopped:
+			s.logf("server: idle sweep ABANDONED at ws=%q — daemon teardown has begun, and the shutdown drain hibernates every remaining session itself; finishing the walk would only delay the teardown by the fleet's shim exit waits",
+				rec.CWD)
+			return
+		default:
+		}
 		if rec.Terminal || rec.CWD == "" {
 			continue
 		}
@@ -2178,26 +2199,120 @@ func (s *Server) ShutdownAll(stopShims bool, cause sessioncontroller.StopCause) 
 		return
 	}
 	s.logf("server: SHIM STOP DECIDED initiator=%s scope=all_sessions reason=stop_shims_true — the caller asked for the shim bundle to be replaced, so every non-terminal session's shim is stopped on the way out", cause)
+	if err := s.hibernateAllForShutdown(cause); err != nil {
+		// NOTHING HERE IS SWALLOWED. Each session's failure is already logged
+		// against its own identity by the worker; this is the joined account, so
+		// a drain that lost sessions cannot look like one that lost none.
+		s.logf("server: shutdown drain FAILURES initiator=%s: %v", cause, err)
+	}
+}
+
+// shutdownHibernateWorkers bounds the fan-out of the shutdown drain.
+//
+// THE DRAIN IS WAIT-BOUND, NOT CPU-BOUND, and the bound is sized from that.
+// One session's hibernation is almost entirely time spent waiting on other
+// processes: the teardown prologue asks the shim to interrupt its turn and
+// waits up to interruptDrainTimeout for the ack, and ShimSpawner.StopShim then
+// SIGTERMs the shim and waits on the workspace's kernel session lock for up to
+// stopTermGrace (10s), escalating to SIGKILL plus stopKillGrace (2s). Serially,
+// a single unresponsive shim spends the whole daemon's stop grace on its own,
+// and the ~90-record fleets seen in production overran the 30s grace and were
+// SIGKILLed mid-drain — which is what skips lease release and merge
+// reconstruction.
+//
+// Sixteen is generous on purpose. The workers hold no shared CPU-bound
+// resource; they block on pipes, signals and lock waits, so the marginal cost
+// of a worker is one goroutine and the marginal benefit is one more shim
+// exiting concurrently. It is bounded rather than unbounded because each worker
+// does touch the serialized durable stores (the SSM's single mutex, the
+// registry's write transaction), and an unbounded fan-out over a ~90-session
+// fleet would queue ~90 goroutines on those locks for no gain over a pool that
+// keeps them saturated.
+const shutdownHibernateWorkers = 16
+
+// hibernateAllForShutdown hibernates every non-terminal session CONCURRENTLY
+// and returns the joined failure of the ones that could not be hibernated.
+//
+// THE ORDER OF SESSIONS CARRIES NO MEANING, which is what makes the fan-out
+// legitimate. Each hibernation is keyed by its own workspace: the SSM's
+// hibernation lease is per-workspace under the manager's own mutex, the session
+// controller manager's byWS eviction is under its own mutex, and the registry's
+// writes go through one serialized write transaction. Two workspaces therefore
+// never contend for anything but those locks, and no session's teardown reads
+// state another session's teardown writes.
+func (s *Server) hibernateAllForShutdown(cause sessioncontroller.StopCause) error {
+	var victims []registry.Record
 	for _, rec := range s.registry.All() {
 		if rec.Terminal || rec.CWD == "" {
 			continue
 		}
-		s.logf("server: SHIM STOP ISSUED initiator=%s session=%s ws=%q reason=stop_shims_true", cause, rec.SessionID, rec.CWD)
-		if err := s.controller.Hibernate(rec.CWD, cause); err != nil {
-			// A MID-TURN WORKSPACE IS NOW REFUSED here too, because the settled
-			// check lives inside the shared teardown rather than in each caller.
-			// That is the right trade for this caller as well: a shim left running
-			// on the previous bundle is a stale binary, while a shim SIGTERMed
-			// mid-turn is lost work, and the version-driven stale-shim refresh
-			// already bounces the survivor the moment it reconnects.
-			if errors.Is(err, sessioncontroller.ErrNotSettled) {
-				s.logf("server: shutdown stop-shims mode PRESERVING the shim for session %s (ws %s): it has not settled, and the stale-shim refresh will bounce it after the turn: %v",
-					rec.SessionID, rec.CWD, err)
-			} else {
-				s.logf("server: shutdown stop shim (ws %s): %v", rec.CWD, err)
-			}
-		}
+		victims = append(victims, rec)
 	}
+	workers := shutdownHibernateWorkers
+	if len(victims) < workers {
+		workers = len(victims)
+	}
+	started := time.Now()
+	s.logf("server: shutdown drain ENTRY initiator=%s sessions=%d workers=%d — every non-terminal session's shim is stopped concurrently, because a serial drain is bounded by the sum of the fleet's shim exit waits and overran the daemon's stop grace",
+		cause, len(victims), workers)
+	if workers == 0 {
+		s.logf("server: shutdown drain COMPLETE initiator=%s sessions=0 failures=0 elapsed=%s — no non-terminal session had a workspace to drain", cause, time.Since(started).Round(time.Millisecond))
+		return nil
+	}
+
+	jobs := make(chan registry.Record)
+	errsCh := make(chan error, len(victims))
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for rec := range jobs {
+				if err := s.hibernateOneForShutdown(rec, cause); err != nil {
+					errsCh <- err
+				}
+			}
+		}()
+	}
+	for _, rec := range victims {
+		jobs <- rec
+	}
+	close(jobs)
+	wg.Wait()
+	close(errsCh)
+
+	var errs []error
+	for err := range errsCh {
+		errs = append(errs, err)
+	}
+	s.logf("server: shutdown drain COMPLETE initiator=%s sessions=%d workers=%d failures=%d elapsed=%s",
+		cause, len(victims), workers, len(errs), time.Since(started).Round(time.Millisecond))
+	return errors.Join(errs...)
+}
+
+// hibernateOneForShutdown is one worker's share of the drain: exactly the
+// per-session work the serial loop did, with the same lines against the same
+// identities, so parallelizing the drain changed what runs concurrently and
+// nothing about what each session's teardown reports.
+func (s *Server) hibernateOneForShutdown(rec registry.Record, cause sessioncontroller.StopCause) error {
+	s.logf("server: SHIM STOP ISSUED initiator=%s session=%s ws=%q reason=stop_shims_true", cause, rec.SessionID, rec.CWD)
+	err := s.controller.Hibernate(rec.CWD, cause)
+	if err == nil {
+		return nil
+	}
+	// A MID-TURN WORKSPACE IS NOW REFUSED here too, because the settled
+	// check lives inside the shared teardown rather than in each caller.
+	// That is the right trade for this caller as well: a shim left running
+	// on the previous bundle is a stale binary, while a shim SIGTERMed
+	// mid-turn is lost work, and the version-driven stale-shim refresh
+	// already bounces the survivor the moment it reconnects.
+	if errors.Is(err, sessioncontroller.ErrNotSettled) {
+		s.logf("server: shutdown stop-shims mode PRESERVING the shim for session %s (ws %s): it has not settled, and the stale-shim refresh will bounce it after the turn: %v",
+			rec.SessionID, rec.CWD, err)
+	} else {
+		s.logf("server: shutdown stop shim (ws %s): %v", rec.CWD, err)
+	}
+	return fmt.Errorf("server: shutdown stop shim for session %s (ws %q): %w", rec.SessionID, rec.CWD, err)
 }
 
 func httpError(w http.ResponseWriter, status int, msg string) {
