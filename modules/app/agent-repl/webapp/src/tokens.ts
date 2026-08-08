@@ -19,11 +19,13 @@ import { dropdownChipHtml } from "./counter-menu.js";
 import { escapeHtml } from "./highlight.js";
 import { ModelUsage, TokenTimingTotals, Usage } from "./protocol.js";
 import type { ResponseTokenUsage, TokenUtilization } from "./frontend-proto.js";
-import { toJson } from "@bufbuild/protobuf";
+import { create, toJson } from "@bufbuild/protobuf";
 import {
+  TokenUsageSchema,
   TokenUtilizationSchema,
   type SessionTokenUtilization,
   type TokenUsageTotals,
+  type TokenUsage as CanonicalTokenUsage,
   type TokenUtilization as GeneratedTokenUtilization,
 } from "../../proto/gen/ts/agentshim/frontend/v1/frontend_pb";
 
@@ -90,45 +92,58 @@ export function timingRows(timing: TokenTimingTotals | undefined): Array<[string
 }
 
 /**
- * THE WEBAPP'S ONE DERIVATION of uncached (expensive) input:
- * `input_tokens` + `cache_creation_input_tokens`.
+ * THE CANONICAL SHAPE IS WHAT THIS FILE RENDERS, and `canonicalTokens` is the
+ * webapp's ONE place where a vendor bucket record becomes it.
  *
- * THE THREE SDK INPUT BUCKETS ARE DISJOINT and their names describe where the
- * tokens went, not what they cost. `cache_read_input_tokens` is the ONLY cheap
- * one; `cache_creation_input_tokens` was processed fresh at full price PLUS the
- * cache-write premium, and `input_tokens` was processed fresh and never cached
- * at all — so both of the latter are uncached in every economic sense, and the
- * sum is the only honest answer to "what did this turn pay for". Reading
- * `input_tokens` alone reports near zero for a COLD full-context re-ingest,
- * which is the single case a cost figure exists to catch (module AGENTS.md,
- * "Uncached input tokens are a SUM, and the field names lie about it").
+ * The daemon owns every token judgment and resolves the canonical
+ * `agentshim.frontend.v1.TokenUsage` onto the wire wherever a message is free
+ * to carry it — the session and per-subagent totals here, `ProgressView.input_tokens`
+ * for the live footer. Two surfaces are not free: a per-response record and a
+ * result conversation item are DURABLE evidence whose shape is frozen (a
+ * persisted row must keep replaying byte-identically), so they arrive as vendor
+ * buckets. They pass through here, once, into the same shape everything else is
+ * displayed from — rather than each renderer restating an addition.
  *
- * THE CACHE READ IS EXCLUDED, and that exclusion is the other half of the
- * point. It is the same standing prefix presented to the model again on every
- * request of the turn, so counting it reports the conversation's size times the
- * request count — a 94-request turn against a 500k prefix reads as 47M "input
- * tokens". Output is excluded for the same reason it is excluded from the
- * footer: this is an INPUT figure.
- *
- * This is what the response bubble stamps and what `tokenHeatHue` colors; the
- * progress footer's live ticker is the daemon's side of the SAME arithmetic
- * (`ProgressView.input_tokens`, from `internal/keepalive.UncachedInputTokens`),
- * so the live cell converges on the stamp the turn lands with.
+ * THE MAPPING IS THE DAEMON'S, RESTATED NOWHERE ELSE:
+ * `cache_read_input_tokens` is the cache HIT, the only cheap bucket;
+ * `cache_creation_input_tokens` is the miss that was WRITTEN as it was
+ * processed; `input_tokens` is the miss that was never written at all. Both
+ * misses were paid fresh, which is why they share a field.
  */
-export function uncachedInputTokens(u: UncachedInputCounters): number {
-  return u.input_tokens + (u.cache_creation_input_tokens ?? 0);
+export function canonicalTokens(d: UsageDims): CanonicalTokenUsage {
+  return create(TokenUsageSchema, {
+    inputHits: { read: BigInt(d.cacheRead) },
+    inputMisses: { written: BigInt(d.cacheCreation), unwritten: BigInt(d.input) },
+    outputTokens: BigInt(d.output),
+  });
 }
 
 /**
- * The two counters the derivation needs, and no more. Typing the helper on this
- * rather than on `Usage` is what lets the breakdown rows — which carry
- * `UsageDims`, not a wire payload — reach the SAME function instead of
- * restating the addition, which is the second-derivation defect the contract
- * names.
+ * What a request fed the model NEW: everything the prompt cache did not serve.
+ *
+ * IT IS BOTH MISSES, and the canonical shape is why that is a field read rather
+ * than an arithmetic a caller has to know to perform. The CLI marks nearly all
+ * input cacheable, so a COLD prompt — a full context re-ingest, the most
+ * expensive thing that can happen — surfaces almost entirely as the WRITTEN
+ * miss while the unwritten one stays near zero. Reading either alone reports
+ * near nothing for exactly the case a cost figure exists to catch.
+ *
+ * THE CACHE HIT IS EXCLUDED, and that exclusion is the other half of the point.
+ * It is the same standing prefix presented to the model again on every request
+ * of the turn, so counting it reports the conversation's size times the request
+ * count — a 94-request turn against a 500k prefix reads as 47M "input tokens".
+ * Output is excluded for the same reason it is excluded from the footer: this
+ * is an INPUT figure.
+ *
+ * This is what the response bubble stamps and what `tokenHeatHue` colors; the
+ * progress footer's live ticker is the DAEMON's answer to the same question
+ * (`ProgressView.input_tokens`, from `internal/tokenusage.ExpensiveInput`), so
+ * the live cell converges on the stamp the turn lands with.
  */
-export interface UncachedInputCounters {
-  input_tokens: number;
-  cache_creation_input_tokens?: number;
+export function expensiveInput(tokens: CanonicalTokenUsage): number {
+  const misses = tokens.inputMisses;
+  if (misses === undefined) return 0;
+  return generatedInt(misses.written + misses.unwritten, "tokenUsage.inputMisses");
 }
 
 /**
@@ -154,9 +169,9 @@ const TOKEN_HEAT_STOPS: readonly (readonly [number, number])[] = [
 ];
 
 /**
- * The hue for a turn's UNCACHED input figure (`uncachedInputTokens` — the sum,
- * never `input_tokens` alone), for the corner stamp and the footer's token
- * cell. Coloring a single bucket would leave a cold re-ingest reading green.
+ * The hue for a turn's EXPENSIVE input figure (`expensiveInput` — both cache
+ * misses, never one alone), for the corner stamp and the footer's token cell.
+ * Coloring a single bucket would leave a cold re-ingest reading green.
  *
  * ONLY THE HUE IS COMPUTED HERE. Saturation and lightness belong to the
  * stylesheet, which has to pick different ones for the light and the dark
@@ -258,25 +273,28 @@ function section(title: string, rows: string[]): string {
 }
 
 /**
- * The stat rows one usage payload expands into: the input-side total the
+ * The stat rows one CANONICAL usage expands into: the input-side total the
  * chip's convention headlines, its three DISJOINT buckets indented under it,
- * the uncached (expensive) sum of two of them, then the output side.
+ * the expensive sum of the two misses, then the output side.
  *
- * THE BUCKET ROW IS NAMED "fresh input", NOT "uncached". It is the
- * `input_tokens` bucket alone, and labeling that "uncached" told the reader the
- * cheap-versus-expensive split was one row above where it is: cache WRITES are
- * uncached too. The sum gets its own unindented row so the figure the footer
- * headlines and heats is present here as a figure rather than as an addition
- * the reader is left to perform.
+ * THE BUCKET ROW IS NAMED "fresh input", NOT "uncached". It is the unwritten
+ * miss alone, and labeling that "uncached" told the reader the cheap-versus-
+ * expensive split was one row above where it is: cache WRITES are uncached too.
+ * The sum gets its own unindented row so the figure the footer headlines and
+ * heats is present here as a figure rather than as an addition the reader is
+ * left to perform.
  */
-function usageRows(d: UsageDims): string[] {
+function usageRows(tokens: CanonicalTokenUsage): string[] {
+  const read = generatedInt(tokens.inputHits?.read ?? 0n, "tokenUsage.inputHits.read");
+  const written = generatedInt(tokens.inputMisses?.written ?? 0n, "tokenUsage.inputMisses.written");
+  const unwritten = generatedInt(tokens.inputMisses?.unwritten ?? 0n, "tokenUsage.inputMisses.unwritten");
   return [
-    row("input", formatTokens(d.input + d.cacheRead + d.cacheCreation)),
-    row("fresh input", formatTokens(d.input), true),
-    row("cache read", formatTokens(d.cacheRead), true),
-    row("cache write", formatTokens(d.cacheCreation), true),
-    row("uncached input", formatTokens(uncachedInputTokens({ input_tokens: d.input, cache_creation_input_tokens: d.cacheCreation }))),
-    row("output", formatTokens(d.output)),
+    row("input", formatTokens(read + written + unwritten)),
+    row("fresh input", formatTokens(unwritten), true),
+    row("cache read", formatTokens(read), true),
+    row("cache write", formatTokens(written), true),
+    row("uncached input", formatTokens(expensiveInput(tokens))),
+    row("output", formatTokens(generatedInt(tokens.outputTokens, "tokenUsage.outputTokens"))),
   ];
 }
 
@@ -305,7 +323,7 @@ function ungroupedResponseRows(response: TokenUtilization): string[] {
     row("parent agent", response.subagent.parentAgentId),
     row("subagent type", response.subagent.subagentType),
     row("task", response.subagent.taskDescription),
-    ...usageRows(dimsOfResponseUsage(usage)),
+    ...usageRows(canonicalTokens(dimsOfResponseUsage(usage))),
     row("cache hit rate", percentage(usage.cacheRates?.cacheHitRate)),
     row("cache write rate", percentage(usage.cacheRates?.cacheWriteRate)),
     // "fresh input rate", not "uncached rate": the three rates partition the
@@ -324,8 +342,34 @@ function generatedInt(value: bigint, where: string): number {
   return number;
 }
 
-/** Every additive field carried by generated cumulative usage. */
-function generatedUsageRows(totals: TokenUsageTotals, where: string): string[] {
+/**
+ * The canonical shape of one per-model total.
+ *
+ * PER-MODEL IS THE ONE AGGREGATE THE DAEMON CANNOT RESOLVE ONTO THE WIRE.
+ * ModelTokenUtilization is embedded in the durable TurnAccounting
+ * reconciliation, so growing it a field would break the replay of every row an
+ * earlier build wrote. The conversion therefore happens here, through the same
+ * one translation every other vendor-shaped record in this file passes through.
+ */
+function canonicalTokensOfTotals(totals: TokenUsageTotals, where: string): CanonicalTokenUsage {
+  return canonicalTokens({
+    input: generatedInt(totals.inputTokens, `${where}.inputTokens`),
+    output: generatedInt(totals.outputTokens, `${where}.outputTokens`),
+    cacheRead: generatedInt(totals.cacheReadInputTokens, `${where}.cacheReadInputTokens`),
+    cacheCreation: generatedInt(totals.cacheCreationInputTokens, `${where}.cacheCreationInputTokens`),
+  });
+}
+
+/**
+ * Every additive field carried by generated cumulative usage.
+ *
+ * `tokens` is the DAEMON'S OWN canonical resolution of these same totals, and
+ * it is passed wherever the wire carries one. The fallback conversion is for
+ * the per-model totals alone: ModelTokenUtilization is embedded in the durable
+ * TurnAccounting reconciliation, so it cannot grow a field without breaking the
+ * replay of every row an earlier build wrote.
+ */
+function generatedUsageRows(totals: TokenUsageTotals, where: string, tokens: CanonicalTokenUsage): string[] {
   const input = generatedInt(totals.inputTokens, `${where}.inputTokens`);
   const output = generatedInt(totals.outputTokens, `${where}.outputTokens`);
   const cacheRead = generatedInt(totals.cacheReadInputTokens, `${where}.cacheReadInputTokens`);
@@ -340,7 +384,7 @@ function generatedUsageRows(totals: TokenUsageTotals, where: string): string[] {
       generatedInt(timing.responsesWithTimeToFirstToken, `${where}.timing.responsesWithTimeToFirstToken`)
     : null;
   return [
-    ...usageRows({ input, output, cacheRead, cacheCreation: cacheWrite }),
+    ...usageRows(tokens),
     row("cache write 5m", totals.cacheCreation === undefined ? "unavailable" : formatTokens(generatedInt(totals.cacheCreation.ephemeral5mInputTokens, `${where}.cacheCreation.ephemeral5mInputTokens`))),
     row("cache write 1h", totals.cacheCreation === undefined ? "unavailable" : formatTokens(generatedInt(totals.cacheCreation.ephemeral1hInputTokens, `${where}.cacheCreation.ephemeral1hInputTokens`))),
     row("total prompt input", totals.cacheRates === undefined ? "unavailable" : formatTokens(generatedInt(totals.cacheRates.totalPromptInputTokens, `${where}.cacheRates.totalPromptInputTokens`))),
@@ -387,10 +431,18 @@ export function tokensOverlayHtml(data: TokenMenuData): string {
     if (generated.mainAgent === undefined || generated.allAgents === undefined) {
       throw new Error("session token utilization lacks mainAgent or allAgents totals");
     }
-    sections.push(section("main agent", generatedUsageRows(generated.mainAgent, "session.mainAgent")));
-    sections.push(section("all agents", generatedUsageRows(generated.allAgents, "session.allAgents")));
+    // THE DAEMON'S RESOLUTION IS REQUIRED, NOT PREFERRED. Falling back to a
+    // local partition of the vendor buckets here would put a second owner of
+    // the session's economics in the renderer, silently, on exactly the frames
+    // where the daemon failed to resolve one.
+    if (generated.mainAgentTokens === undefined || generated.allAgentsTokens === undefined) {
+      throw new Error("session token utilization lacks daemon-resolved canonical tokens");
+    }
+    sections.push(section("main agent", generatedUsageRows(generated.mainAgent, "session.mainAgent", generated.mainAgentTokens)));
+    sections.push(section("all agents", generatedUsageRows(generated.allAgents, "session.allAgents", generated.allAgentsTokens)));
     for (const [index, subagent] of generated.subagents.entries()) {
       if (subagent.agent === undefined || subagent.totals === undefined) throw new Error(`session subagent ${index} lacks identity or totals`);
+      if (subagent.tokens === undefined) throw new Error(`session subagent ${index} lacks daemon-resolved canonical tokens`);
       const identity = subagent.agent;
       const title = `subagent ${identity.agentId || identity.parentToolUseId}`;
       sections.push(section(title, [
@@ -399,7 +451,7 @@ export function tokensOverlayHtml(data: TokenMenuData): string {
         row("parent agent ID", identity.parentAgentId || "unavailable"),
         row("subagent type", identity.subagentType || "unavailable"),
         row("task", identity.taskDescription || "unavailable"),
-        ...generatedUsageRows(subagent.totals, `session.subagents[${index}].totals`),
+        ...generatedUsageRows(subagent.totals, `session.subagents[${index}].totals`, subagent.tokens),
       ]));
       for (const [modelIndex, model] of subagent.models.entries()) {
         if (model.totals === undefined) throw new Error(`session subagent ${index} model ${modelIndex} lacks totals`);
@@ -409,7 +461,7 @@ export function tokensOverlayHtml(data: TokenMenuData): string {
           row("cost", model.costUsd === undefined ? "unavailable" : formatCost(model.costUsd)),
           row("context window", model.contextWindow === undefined ? "unavailable" : formatTokens(generatedInt(model.contextWindow, `session.subagents[${index}].models[${modelIndex}].contextWindow`))),
           row("max output", model.maxOutputTokens === undefined ? "unavailable" : formatTokens(generatedInt(model.maxOutputTokens, `session.subagents[${index}].models[${modelIndex}].maxOutputTokens`))),
-          ...generatedUsageRows(model.totals, `session.subagents[${index}].models[${modelIndex}].totals`),
+          ...generatedUsageRows(model.totals, `session.subagents[${index}].models[${modelIndex}].totals`, canonicalTokensOfTotals(model.totals, `session.subagents[${index}].models[${modelIndex}].totals`)),
         ]));
       }
     }
@@ -421,7 +473,7 @@ export function tokensOverlayHtml(data: TokenMenuData): string {
         row("cost", model.costUsd === undefined ? "unavailable" : formatCost(model.costUsd)),
         row("context window", model.contextWindow === undefined ? "unavailable" : formatTokens(generatedInt(model.contextWindow, `session.models[${index}].contextWindow`))),
         row("max output", model.maxOutputTokens === undefined ? "unavailable" : formatTokens(generatedInt(model.maxOutputTokens, `session.models[${index}].maxOutputTokens`))),
-        ...generatedUsageRows(model.totals, `session.models[${index}].totals`),
+        ...generatedUsageRows(model.totals, `session.models[${index}].totals`, canonicalTokensOfTotals(model.totals, `session.models[${index}].totals`)),
       ]));
     }
     for (const [index, response] of generated.ungroupedSubagentResponses.entries()) {
@@ -432,7 +484,7 @@ export function tokensOverlayHtml(data: TokenMenuData): string {
   sections.push(
     section(
       "top-level agent",
-      data.topLevel === null ? unknownRows() : usageRows(dimsOfUsage(data.topLevel)),
+      data.topLevel === null ? unknownRows() : usageRows(canonicalTokens(dimsOfUsage(data.topLevel))),
     ),
   );
   const modelMap = data.models ?? {};
@@ -446,7 +498,7 @@ export function tokensOverlayHtml(data: TokenMenuData): string {
     const totalSearches = models.reduce((sum, [, u]) => sum + u.web_search_requests, 0);
     sections.push(
       section("all agents", [
-        ...usageRows(totals), ...timing,
+        ...usageRows(canonicalTokens(totals)), ...timing,
         row("web searches", formatTokens(totalSearches)),
         row("cost", formatCost(totalCost)),
       ]),
@@ -455,7 +507,7 @@ export function tokensOverlayHtml(data: TokenMenuData): string {
     for (const [model, u] of models) {
       sections.push(
         section(model, [
-          ...usageRows(dimsOfModelUsage(u)),
+          ...usageRows(canonicalTokens(dimsOfModelUsage(u))),
           row("web searches", formatTokens(u.web_search_requests)),
           row("cost", formatCost(u.cost_usd)),
           row("context window", formatTokens(u.context_window)),
