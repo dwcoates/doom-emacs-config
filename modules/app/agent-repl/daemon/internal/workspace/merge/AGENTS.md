@@ -33,6 +33,35 @@ resolution attempt nothing narrower than the whole range to reason about.
   no patch of its own and both of its sides are already in the range. The
   whole-range driver this replaced failed outright on such a branch, because
   `git cherry-pick` refuses a range containing a merge.
+- THE SUITE SET IS A FUNCTION OF THE PATHS THE MERGE TOUCHES (`suiteselect.go`).
+  The gate used to hand the entrypoint no arguments, so every merge ran all
+  eighteen suites — and a four-file webapp-only merge was denied by a shell
+  harness and by a Go suite that shared not one line with the change. A suite
+  that cannot be affected by a change cannot testify about it; it can only add a
+  way for the merge to fail. `SelectSuites` maps the range's paths onto suite
+  names and the runner passes them as `bin/test-all.sh --suites a,b,c`.
+  - UNKNOWN BEATS WRONG. `suiteRules` names only the roots whose blast radius is
+    known; ANY path matching none of them selects the FULL set, as does a change
+    whose paths could not be read. Adding a directory to the repository can only
+    make the gate more conservative.
+  - AN EMPTY SELECTION IS "EVERYTHING", and it reaches the entrypoint as NO
+    ARGUMENTS — which is both that script's own default and the only shape a
+    foreign repository's entrypoint is guaranteed to accept.
+  - THE RANGE, NOT THE COMMIT. The gate runs per landing, but selects from the
+    whole `merge-base..branch` range, so every gate in one merge asks the same
+    question and a re-entered replay reaches the same answer.
+  - `merge.allSuites` and `bin/test-all.sh`'s `ALL_SUITES` are two lists that
+    can disagree, and a name the script does not declare is rejected at run
+    time. `TestRosterMatchesTheEntrypointScript` reads the script and holds them
+    identical.
+- A FAILING SUITE IS RE-RUN EXACTLY ONCE, on the same tree, with the same
+  selection. A gate that denies on a first failure denies on every flake, and
+  these suites share a machine with a live daemon and whatever else is running.
+  A pass on the re-run is a FLAKE: both verdicts, both durations and BOTH
+  archives are logged loudly and the merge proceeds. A second failure is
+  genuine and takes the pre-existing path; its result carries the re-run's tail
+  with the first run's archive path appended, so neither half is lost. It stops
+  at one because a gate that keeps retrying eventually passes anything.
 - THE GATE MOVED HERE FROM THE PRE-COMMIT HOOK. `.githooks/pre-commit` used to
   run the whole unified suite before any agent-authored commit. That taxed every
   intermediate commit on a workspace's own branch and said nothing about the
