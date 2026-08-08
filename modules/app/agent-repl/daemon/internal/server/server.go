@@ -1839,6 +1839,27 @@ func (s *Server) runIdleSweeper() {
 func (s *Server) sweepIdle() {
 	nowMs := s.now().UnixMilli()
 	for _, rec := range s.registry.All() {
+		// THE SWEEP ABANDONS ITS REMAINDER ONCE SHUTDOWN HAS BEGUN, and this is
+		// what bounds ShutdownAll's join on sweeperDone. A sweep is a serial walk
+		// of the whole registry, and every session it reaches costs a full
+		// hibernation — the shim's interrupt ack plus its SIGTERM exit wait — so a
+		// sweep that started one tick before a stop held the teardown for the sum
+		// of the fleet's exit waits before the drain itself had begun. Measured on
+		// 2026-08-08 that join plus a serial drain took ~45s against a 30s stop
+		// grace, and the daemon was SIGKILLed mid-drain.
+		//
+		// ABANDONING IS SAFE AND WAITING IS NOT OPTIONAL. Every session this sweep
+		// would still have reached is hibernated by the shutdown drain immediately
+		// after, so nothing is left un-torn-down; and the join itself stays,
+		// because it is what makes a post-close read of the registry, SSM or token
+		// ledger structurally impossible rather than merely unlikely.
+		select {
+		case <-s.stopped:
+			s.logf("server: idle sweep ABANDONED at ws=%q — daemon teardown has begun, and the shutdown drain hibernates every remaining session itself; finishing the walk would only delay the teardown by the fleet's shim exit waits",
+				rec.CWD)
+			return
+		default:
+		}
 		if rec.Terminal || rec.CWD == "" {
 			continue
 		}
