@@ -174,7 +174,8 @@ replace this with a bare \" \" — see the block comment above
   "Load priority badge PNGs from the module images/ directory.
 Populates `agent-repl--priority-images' with display-ready image specs."
   (let* ((dir (file-name-directory (or load-file-name buffer-file-name)))
-         (img-dir (expand-file-name "images/" dir))
+         ;; `images/' sits at the module root; this file lives in `lisp/'.
+         (img-dir (expand-file-name "../images/" dir))
          (names agent-repl-priority-levels)
          (height (frame-char-height)))
     (setq agent-repl--priority-images

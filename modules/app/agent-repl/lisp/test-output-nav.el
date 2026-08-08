@@ -205,7 +205,7 @@ A class only this side knows would raise inside the page's hook."
 
 (defun agent-repl-test--input-source ()
   "Return input.el's source text."
-  (let ((el (expand-file-name "input.el" agent-repl--frontend-root)))
+  (let ((el (expand-file-name "lisp/input.el" agent-repl--frontend-root)))
     (with-temp-buffer (insert-file-contents el) (buffer-string))))
 
 (defun agent-repl-test--binds-chord-p (source chord command)

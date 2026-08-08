@@ -4,10 +4,11 @@
 #
 # Implements the static half of AGENTS.md "No External Processes or
 # External State in Tests".  The runtime half (per-test guards) lives
-# in `modules/app/agent-repl/test-helpers.el'.
+# in `modules/app/agent-repl/lisp/test-helpers.el'.
 #
 # Rule:
-#   Production code (modules/app/agent-repl/*.el, excluding test-*.el
+#   Production code (modules/app/agent-repl/lisp/*.el plus the three root
+#   files Doom resolves by name, excluding test-*.el
 #   and the wrapper-defining `core.el') may invoke external binaries
 #   ONLY through a function listed in
 #   `agent-repl--external-boundary-functions' (the registry in
@@ -46,19 +47,24 @@ set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 MODULE_DIR="$REPO_ROOT/modules/app/agent-repl"
+# The elisp sources and suites live in lisp/; only the three files Doom's
+# module loader resolves by exact path (config.el, packages.el, doctor.el)
+# remain at the module root.  Both directories carry production code, so
+# both are scanned.
+LISP_DIR="$MODULE_DIR/lisp"
 
 # core.el holds the canonical wrapper family (`agent-repl--git-string',
 # etc.) — every external invocation in that file IS a wrapper definition,
 # so whole-file exempt.  Per-line ALLOW-EXTERNAL-BOUNDARY covers wrappers
 # that live elsewhere.
 EXEMPT_FILES=(
-  "$MODULE_DIR/core.el"
+  "$LISP_DIR/core.el"
 )
 
-# Production files = *.el under $MODULE_DIR excluding test-*.el and
-# any path in EXEMPT_FILES.
+# Production files = *.el at $MODULE_DIR and in $LISP_DIR, excluding
+# test-*.el and any path in EXEMPT_FILES.
 mapfile -t prod_files < <(
-  find "$MODULE_DIR" -maxdepth 1 -name "*.el" \
+  find "$MODULE_DIR" "$LISP_DIR" -maxdepth 1 -name "*.el" \
     ! -name "test-*.el" \
     ! -name "test-helpers.el" \
     -print

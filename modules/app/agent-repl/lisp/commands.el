@@ -937,11 +937,12 @@ agent-repl's own state tree, NOT the Claude CLI config dir).
 Auto-created on first save.")
 
 (defconst agent-repl--legacy-workspace-snapshot-file
-  (expand-file-name ".workspace-snapshot.el"
+  (expand-file-name "../.workspace-snapshot.el"
                     (file-name-directory (or load-file-name
                                               buffer-file-name
                                               default-directory)))
   "Pre-relocation snapshot file at the agent-repl module directory.
+This file lives in `lisp/', so the module root is one level up.
 Read-only fallback: when the configured file does not exist but this
 legacy file does, the loader uses it.  The writer never targets this
 path — first save naturally migrates to the configured location.")

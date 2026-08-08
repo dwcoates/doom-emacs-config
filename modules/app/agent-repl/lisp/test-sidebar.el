@@ -2119,7 +2119,7 @@ Both read the one minibuffer, so the guard is shared rather than per-action."
 ;; vocabulary in the test would be a fourth list to drift.
 
 (defconst agent-repl-test--frontend-proto-file
-  (expand-file-name "proto/agentshim/frontend/v1/frontend.proto"
+  (expand-file-name "../proto/agentshim/frontend/v1/frontend.proto"
                     (file-name-directory (or load-file-name buffer-file-name)))
   "Absolute path to frontend.proto, resolved at LOAD time.
 `load-file-name' is nil once loading finishes, so a helper that reads it

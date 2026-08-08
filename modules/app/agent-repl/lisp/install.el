@@ -40,10 +40,12 @@
 (defconst agent-repl--install-script
   (let ((module-dir (file-name-directory (or load-file-name
                                               (buffer-file-name)))))
-    (expand-file-name "../../../.claude/install.sh" module-dir))
+    (expand-file-name "../../../../.claude/install.sh" module-dir))
   "Absolute path to the bash install script.
 Resolved relative to this file so the wrapper keeps working regardless
-of where the Doom config tree is mounted.")
+of where the Doom config tree is mounted.  Four levels up: this file is
+`modules/app/agent-repl/lisp/install.el', so the repo root is `lisp/',
+`agent-repl/', `app/', `modules/' above it.")
 
 (defconst agent-repl--install-output-buffer "*agent-repl-install*"
   "Buffer name used to surface install-script output to the user.")
@@ -97,9 +99,10 @@ no longer managed here.")
 (defcustom agent-repl-local-skills-src-dir
   (when load-file-name
     (file-name-as-directory
-     (expand-file-name "skills" (file-name-directory load-file-name))))
+     (expand-file-name "../skills" (file-name-directory load-file-name))))
   "Source directory for repo-local managed skill targets.
-Defaults to `modules/app/agent-repl/skills/' alongside this file.
+Defaults to `modules/app/agent-repl/skills/', one level above this
+file's own `lisp/' directory.
 Must match the `LOCAL_SKILLS_SRC' value in `.claude/install.sh'."
   :type '(choice (const :tag "Unset" nil) directory)
   :group 'agent-repl)

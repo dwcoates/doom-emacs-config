@@ -31,9 +31,10 @@
 (require 'seq)
 
 (defvar agent-repl-prompts-dir
-  (expand-file-name "prompts"
+  (expand-file-name "../prompts"
                     (file-name-directory (or load-file-name buffer-file-name)))
   "Absolute path of the directory holding this module's prompt files.
+`prompts/' sits at the module root, one level above this file's `lisp/'.
 Captured at file-load time because `load-file-name' is only bound
 during load.  It names a DIRECTORY, not any file's contents, so
 capturing it is not the load-time snapshot this file exists to avoid:

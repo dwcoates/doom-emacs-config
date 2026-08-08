@@ -38,7 +38,7 @@ if [ -z "$REPO_ROOT" ]; then
 fi
 cd "$REPO_ROOT"
 
-TEST_FILE="modules/app/agent-repl/test-agent-repl.el"
+TEST_FILE="modules/app/agent-repl/lisp/test-agent-repl.el"
 if [ ! -f "$TEST_FILE" ]; then
   echo "[safe-test-run] FATAL: $TEST_FILE not found" >&2
   exit 3

@@ -36,7 +36,8 @@
 (cl-letf (((symbol-function 'message) #'ignore)
           ((symbol-function 'agent-repl--load-module) (lambda (&rest _args) nil)))
   (let ((dir (file-name-directory (or load-file-name buffer-file-name))))
-    (load (expand-file-name "config.el" dir) nil t)))
+    ;; config.el stays at the module root; this suite lives in `lisp/'.
+    (load (expand-file-name "../config.el" dir) nil t)))
 
 ;; Re-arm the boundary guards over the wrappers this load re-`defun'-ed.
 (when noninteractive
