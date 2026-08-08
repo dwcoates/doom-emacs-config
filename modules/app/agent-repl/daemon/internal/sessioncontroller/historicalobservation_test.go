@@ -11,7 +11,7 @@ import (
 // resuming daemon has while the store replays rows at it.
 func boundReducer(t *testing.T) *turnAccountingReducer {
 	t.Helper()
-	r := newTurnAccountingReducer()
+	r := newTurnAccountingReducer(nil)
 	if err := r.bindHandshakeIdentity(&corev1.ShimHello{
 		QueryInstanceId: "live-query",
 		QueryCreatedSeq: 100,
@@ -319,7 +319,7 @@ func TestLiveRowsCarryTheLiveQueryId(t *testing.T) {
 // An UNBOUND reducer has nothing to compare against, so it admits no history.
 func TestUnboundReducerAdmitsNoHistory(t *testing.T) {
 	// Arrange
-	r := newTurnAccountingReducer()
+	r := newTurnAccountingReducer(nil)
 
 	// Act
 	_, historical := r.liveEvidenceFor(observationEvent(84, "retired-query", "retired-query", "turn-1"))
