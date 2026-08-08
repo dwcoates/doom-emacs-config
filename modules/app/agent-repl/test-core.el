@@ -317,6 +317,18 @@ environments without notification tools (terminal-notifier or osascript)."
     (agent-repl--cancel-all-timers)
     (should (null agent-repl--timers))))
 
+(ert-deftest agent-repl-test-cancel-all-timers-clears-update-in-flight-flag ()
+  "Cancelling all timers tears down the workspace-state update chain.
+The chain's continuations are unregistered one-shot timers, so cancelling
+the registry alone left its in-flight flag armed across a module reload —
+observed as a stale flag force-cleared with a warning minutes later."
+  (let ((agent-repl--timers nil)
+        (agent-repl--keyed-timers nil)
+        (agent-repl--update-chain-timer nil)
+        (agent-repl--update-in-flight (float-time)))
+    (agent-repl--cancel-all-timers)
+    (should-not agent-repl--update-in-flight)))
+
 ;;;; ---- Tests: log-format ----
 
 (ert-deftest agent-repl-test-log-format-empty-string ()
