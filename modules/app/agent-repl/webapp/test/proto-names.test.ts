@@ -15,7 +15,9 @@ import {
   FrontendCommandSchema,
 } from "../../proto/gen/ts/agentshim/frontend/v1/frame_pb";
 import {
+  CompactionScopeSchema,
   HibernationDetailSchema,
+  ReviveCompactFirstSchema,
   ReviveSessionCmdSchema,
 } from "../../proto/gen/ts/agentshim/frontend/v1/gate-revival_pb";
 import {
@@ -41,8 +43,10 @@ import {
   QUEUE_CLASSIFICATION_ARM,
   QUEUE_HOLD_ARM,
   REVIVAL_HOLD_FIELDS,
+  REVIVE_COMPACT_SCOPE,
   REVIVE_MODE,
   WORKSPACE_GATE_ARM,
+  compactionScopeName,
 } from "../src/proto-names.js";
 
 /** The protojson keys of one generated oneof's arms, as the wire spells them. */
@@ -62,6 +66,9 @@ function fieldJsonNames(schema: { fields: readonly { jsonName: string }[] }): st
 
 /** Every canonical `PromptOrigin` member name the generated enum declares. */
 const PROMPT_ORIGIN_NAMES = new Set(PromptOriginSchema.values.map((v) => v.name));
+
+/** Every canonical `CompactionScope` member name the generated enum declares. */
+const COMPACTION_SCOPE_NAMES = new Set(CompactionScopeSchema.values.map((v) => v.name));
 
 describe("HIBERNATION_CAUSE: the gate's three arms, as the wire spells them", () => {
   it("covers exactly the generated cause arms", () => {
@@ -186,7 +193,6 @@ describe("PromptOrigin names: the one part no type can spell", () => {
   });
 });
 
-
 describe("the WorkspaceGateView.gate arms", () => {
   it("names only arms the generated gate oneof declares", () => {
     // Arrange / Act — a mis-spelled arm would make the decoder refuse a frame
@@ -247,5 +253,39 @@ describe("the FailureKind side table", () => {
     const sides = new Set(Object.values(FAILURE_KIND_SIDE));
     // Assert
     expect([...sides].sort()).toEqual(["machinery", "vendor"]);
+  });
+});
+
+describe("CompactionScope names: what a revival compaction may swallow", () => {
+  it("names the compact-first arm's scope field as the descriptor does", () => {
+    // Arrange / Act / Assert — a drifted key is an unrecognized field the
+    // daemon's decoder throws on, taking every compacting option out at once.
+    expect(fieldJsonNames(ReviveCompactFirstSchema)).toEqual([REVIVE_COMPACT_SCOPE]);
+  });
+
+  it("builds the whole-conversation scope name", () => {
+    // Arrange / Act / Assert
+    expect(COMPACTION_SCOPE_NAMES.has(compactionScopeName("ALL"))).toBe(true);
+  });
+
+  it("builds the responses-only scope name", () => {
+    // Arrange / Act / Assert
+    expect(COMPACTION_SCOPE_NAMES.has(compactionScopeName("RESPONSES"))).toBe(true);
+  });
+
+  it("builds the prompts-only scope name", () => {
+    // Arrange / Act / Assert
+    expect(COMPACTION_SCOPE_NAMES.has(compactionScopeName("PROMPTS"))).toBe(true);
+  });
+
+  it("builds the prompts-and-responses scope name", () => {
+    // Arrange / Act / Assert
+    expect(COMPACTION_SCOPE_NAMES.has(compactionScopeName("PROMPTS_AND_RESPONSES"))).toBe(true);
+  });
+
+  it("builds the refused zero's name, which both ends must agree on", () => {
+    // Arrange / Act / Assert — the daemon nacks it; the webapp must never send
+    // it, and naming it is how that stays checkable.
+    expect(COMPACTION_SCOPE_NAMES.has(compactionScopeName("UNSPECIFIED"))).toBe(true);
   });
 });

@@ -6,7 +6,8 @@
  * against the wire (see their headers for why), which means every oneof arm
  * key, command arm key and enum name they speak is a string literal a human
  * wrote. The hibernation surface made the cost of that concrete: the SAME
- * vocabulary — the three cause arms, the two revival modes, the keep-alive hold
+ * vocabulary — the three cause arms, the revival modes and their compaction
+ * scopes, the keep-alive hold
  * key, `PROMPT_ORIGIN_CACHE_KEEP_ALIVE` — was re-declared in the decoder, in
  * the encoder, and in the Emacs frontend, aligned only by review. A daemon-side
  * rename would have left each copy independently, silently wrong.
@@ -46,9 +47,11 @@ import type {
 } from "../../proto/gen/ts/agentshim/frontend/v1/frame_pb";
 import type {
   HibernationDetail as GeneratedHibernationDetail,
+  ReviveCompactFirst as GeneratedReviveCompactFirst,
   ReviveSessionCmd as GeneratedReviveSessionCmd,
   WorkspaceGateView as GeneratedWorkspaceGateView,
 } from "../../proto/gen/ts/agentshim/frontend/v1/gate-revival_pb";
+import { CompactionScope as GeneratedCompactionScope } from "../../proto/gen/ts/agentshim/frontend/v1/gate-revival_pb";
 import type { FailureKind as GeneratedFailureKind } from "../../proto/gen/ts/agentshim/frontend/v1/errors_pb";
 import type { FailureCardView as GeneratedFailureCardView } from "../../proto/gen/ts/agentshim/frontend/v1/failure-card_pb";
 import type {
@@ -173,6 +176,30 @@ export const KEEP_ALIVE_HOLD_TURN_ID: FieldKeys<GeneratedQueueEntryKeepAliveHold
  * message fails this build rather than being silently ignored.
  */
 export const REVIVAL_HOLD_FIELDS: readonly FieldKeys<GeneratedQueueEntryRevivalHold>[] = [];
+
+/** The compact-first arm's only field: how much the compaction may swallow. */
+export const REVIVE_COMPACT_SCOPE: FieldKeys<GeneratedReviveCompactFirst> = "scope";
+
+/**
+ * The `frontend.v1.CompactionScope` prefix protobuf-es strips from its members.
+ *
+ * Same discipline as {@link PROMPT_ORIGIN_PREFIX}, and the stakes are higher: a
+ * scope name the daemon does not recognize is NACKED rather than defaulted, so
+ * a drifted spelling here takes the revival gate's every compacting option out
+ * of service at once.
+ */
+export const COMPACTION_SCOPE_PREFIX = "COMPACTION_SCOPE_";
+
+/**
+ * The canonical protojson name of one generated `CompactionScope` member. The
+ * argument is checked against the generated enum, so a renamed member fails to
+ * compile here rather than producing a scope the daemon refuses.
+ */
+export function compactionScopeName<K extends keyof typeof GeneratedCompactionScope>(
+  member: K,
+): `${typeof COMPACTION_SCOPE_PREFIX}${K}` {
+  return `${COMPACTION_SCOPE_PREFIX}${member}`;
+}
 
 /**
  * The `core.v1.PromptOrigin` prefix protobuf-es strips from its enum members.
