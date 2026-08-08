@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 	"claude-repld/internal/gitexec"
@@ -89,6 +91,15 @@ func testClock() func() int64 {
 	}
 }
 
+// causes returns every recorded transition's cause, in order.
+func (s *recordingSink) causes() []string {
+	cs := make([]string, len(s.got))
+	for i, t := range s.got {
+		cs[i] = t.cause
+	}
+	return cs
+}
+
 func (s *recordingSink) phases() []Phase {
 	ps := make([]Phase, len(s.got))
 	for i, t := range s.got {
@@ -109,6 +120,7 @@ const errFakeSink = sentinelError("sink write failed")
 // scripts nothing at all.
 type fakeSuite struct {
 	targets  []string
+	runs     []SuiteRun
 	verdicts []SuiteResult
 	err      error
 	calls    int
@@ -120,8 +132,9 @@ func skippingSuite() *fakeSuite {
 	return &fakeSuite{verdicts: []SuiteResult{{Skipped: true, Reason: "fixture repo declares no test entrypoint"}}}
 }
 
-func (f *fakeSuite) RunSuite(_ context.Context, targetDir string) (SuiteResult, error) {
+func (f *fakeSuite) RunSuite(_ context.Context, targetDir string, run SuiteRun) (SuiteResult, error) {
 	f.targets = append(f.targets, targetDir)
+	f.runs = append(f.runs, run)
 	f.calls++
 	if f.err != nil {
 		return SuiteResult{}, f.err
@@ -1497,7 +1510,7 @@ func TestMergeOrdersEachSuiteRunAfterItsOwnCommit(t *testing.T) {
 	sink := &recordingSink{}
 	var seen []string
 	suite := &fakeSuite{}
-	observing := suiteFunc(func(ctx context.Context, dir string) (SuiteResult, error) {
+	observing := suiteFunc(func(ctx context.Context, dir string, run SuiteRun) (SuiteResult, error) {
 		files, err := os.ReadDir(dir)
 		if err != nil {
 			t.Fatalf("read target: %v", err)
@@ -1509,7 +1522,7 @@ func TestMergeOrdersEachSuiteRunAfterItsOwnCommit(t *testing.T) {
 			}
 		}
 		seen = append(seen, fmt.Sprintf("%d", landed))
-		return suite.RunSuite(ctx, dir)
+		return suite.RunSuite(ctx, dir, run)
 	})
 	e := newTestDriverWithSuite(t, sink, observing)
 	req := withRun(t, sink, Request{Workspace: "/ws/order-ws", Name: "order-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
@@ -1600,8 +1613,9 @@ func TestMergeReportsATestFailureWithTheFailingCommitAndTail(t *testing.T) {
 	if res.PreMergeHead != head {
 		t.Errorf("res.PreMergeHead = %q, want the pre-merge HEAD %q", res.PreMergeHead, head)
 	}
-	// No terminal transition: the coordinator classifies this one.
-	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging)
+	// No terminal transition: the coordinator classifies this one. The third
+	// `merging` is the gate's single re-run, which a scripted failure repeats.
+	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging, PhaseMerging)
 }
 
 func TestMergeStopsPickingAfterATestFailure(t *testing.T) {
@@ -1666,7 +1680,9 @@ func TestContinueAfterTestFixCommitsTheStagedFixAndFinishesTheRange(t *testing.T
 	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
 
 	sink := &recordingSink{}
-	suite := &fakeSuite{verdicts: []SuiteResult{{Passed: false, Tail: "boom"}, {Passed: true}}}
+	// The failure is scripted TWICE because the gate re-runs a failing suite
+	// once before believing it; the third verdict is the fixed tree's.
+	suite := &fakeSuite{verdicts: []SuiteResult{{Passed: false, Tail: "boom"}, {Passed: false, Tail: "boom"}, {Passed: true}}}
 	e := newTestDriverWithSuite(t, sink, suite)
 	req := withRun(t, sink, Request{Workspace: "/ws/fix-ws", Name: "fix-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
 	first, err := e.Merge(context.Background(), req)
@@ -1758,8 +1774,10 @@ func TestResumeGatesTheResolvedCommitOnTheSuite(t *testing.T) {
 	if res.Outcome != OutcomeTestFailed {
 		t.Fatalf("Resume() outcome = %s, want test_failed on the resumed commit", res.Outcome)
 	}
-	if suite.calls != 1 {
-		t.Errorf("suite runs = %d, want 1 (the resumed commit)", suite.calls)
+	// Two runs, one commit: the gate re-runs a failing suite once on the same
+	// tree before it believes the failure.
+	if suite.calls != 2 {
+		t.Errorf("suite runs = %d, want 2 (the resumed commit, gated and re-run)", suite.calls)
 	}
 }
 
@@ -1941,8 +1959,304 @@ func TestMergeReplayedAfterABounceSkipsTheCommitsThatAlreadyLanded(t *testing.T)
 }
 
 // suiteFunc adapts a plain function to SuiteRunner.
-type suiteFunc func(ctx context.Context, targetDir string) (SuiteResult, error)
+type suiteFunc func(ctx context.Context, targetDir string, run SuiteRun) (SuiteResult, error)
 
-func (f suiteFunc) RunSuite(ctx context.Context, targetDir string) (SuiteResult, error) {
-	return f(ctx, targetDir)
+func (f suiteFunc) RunSuite(ctx context.Context, targetDir string, run SuiteRun) (SuiteResult, error) {
+	return f(ctx, targetDir, run)
+}
+
+// --- the gate's suite selection -----------------------------------------
+
+// writeNested writes a file at a repository-relative path, creating its parents.
+func writeNested(t *testing.T, dir, rel, content string) {
+	t.Helper()
+	full := filepath.Join(dir, rel)
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatalf("mkdir for %s: %v", rel, err)
+	}
+	if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", rel, err)
+	}
+}
+
+func TestGateNarrowsTheSuitesToWhatTheRangeTouches(t *testing.T) {
+	// Arrange — a webapp-only branch, which is exactly the merge the gate used
+	// to run all eighteen suites for.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeNested(t, featureDir, "modules/app/agent-repl/webapp/src/App.tsx", "export const x = 1\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "webapp only")
+
+	sink := &recordingSink{}
+	suite := &fakeSuite{}
+	e := newTestDriverWithSuite(t, sink, suite)
+	req := withRun(t, sink, Request{Workspace: "/ws/sel-ws", Name: "sel-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+
+	// Act.
+	if _, err := e.Merge(context.Background(), req); err != nil {
+		t.Fatalf("Merge() err = %v", err)
+	}
+
+	// Assert.
+	if len(suite.runs) != 1 {
+		t.Fatalf("suite runs = %d, want 1", len(suite.runs))
+	}
+	want := []string{"build-frontend-harness", "webapp"}
+	if !reflect.DeepEqual(suite.runs[0].Suites, want) {
+		t.Fatalf("gate ran suites %v, want %v", suite.runs[0].Suites, want)
+	}
+}
+
+// UNKNOWN BEATS WRONG: a path the mapping does not recognize runs everything.
+func TestGateRunsEverySuiteForAnUnmappedPath(t *testing.T) {
+	// Arrange.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "somewhere-else.txt", "hello\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "unmapped")
+
+	sink := &recordingSink{}
+	suite := &fakeSuite{}
+	e := newTestDriverWithSuite(t, sink, suite)
+	req := withRun(t, sink, Request{Workspace: "/ws/unmapped-ws", Name: "unmapped-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+
+	// Act.
+	if _, err := e.Merge(context.Background(), req); err != nil {
+		t.Fatalf("Merge() err = %v", err)
+	}
+
+	// Assert — an empty selection is what the runner passes through as
+	// "everything".
+	if len(suite.runs) != 1 || len(suite.runs[0].Suites) != 0 {
+		t.Fatalf("gate ran suites %v, want the empty (full) selection", suite.runs)
+	}
+}
+
+// The selection is the merge's own record of which suites were asked to testify
+// about it, so it lands on the workspace's status cause.
+func TestGateRecordsTheSelectionOnTheWorkspaceStatus(t *testing.T) {
+	// Arrange.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeNested(t, featureDir, "modules/app/agent-repl/webapp/src/App.tsx", "export const x = 1\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "webapp only")
+
+	sink := &recordingSink{}
+	e := newTestDriverWithSuite(t, sink, &fakeSuite{})
+	req := withRun(t, sink, Request{Workspace: "/ws/selrec-ws", Name: "selrec-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+
+	// Act.
+	if _, err := e.Merge(context.Background(), req); err != nil {
+		t.Fatalf("Merge() err = %v", err)
+	}
+
+	// Assert.
+	var found bool
+	for _, c := range sink.causes() {
+		if strings.Contains(c, "testing ") && strings.Contains(c, "[build-frontend-harness,webapp]") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("status causes = %v, want a testing cause naming the selection", sink.causes())
+	}
+}
+
+// The gate runs after each landing, but the suites it picks are the ones the
+// WHOLE merge can affect — otherwise the commit that breaks the daemon is
+// judged by a selection made for the webapp commit before it.
+func TestGateSelectsFromTheWholeRangeNotOneCommit(t *testing.T) {
+	// Arrange — commit one touches the webapp, commit two the daemon.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeNested(t, featureDir, "modules/app/agent-repl/webapp/src/App.tsx", "export const x = 1\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "webapp")
+	writeNested(t, featureDir, "modules/app/agent-repl/daemon/main.go", "package main\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "daemon")
+
+	sink := &recordingSink{}
+	suite := &fakeSuite{}
+	e := newTestDriverWithSuite(t, sink, suite)
+	req := withRun(t, sink, Request{Workspace: "/ws/range-ws", Name: "range-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+
+	// Act.
+	if _, err := e.Merge(context.Background(), req); err != nil {
+		t.Fatalf("Merge() err = %v", err)
+	}
+
+	// Assert — the FIRST gate already carries the daemon suite.
+	want := []string{"build-frontend-harness", "daemon", "webapp"}
+	if len(suite.runs) != 2 {
+		t.Fatalf("suite runs = %d, want 2", len(suite.runs))
+	}
+	if !reflect.DeepEqual(suite.runs[0].Suites, want) {
+		t.Fatalf("first gate ran suites %v, want the whole range's %v", suite.runs[0].Suites, want)
+	}
+}
+
+// --- the flake re-run ---------------------------------------------------
+
+func TestGateRerunsAFailingSuiteOnceAndProceedsOnAPass(t *testing.T) {
+	// Arrange — the suite fails once and passes on the identical tree.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "feature.txt", "hello\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
+
+	sink := &recordingSink{}
+	suite := &fakeSuite{verdicts: []SuiteResult{
+		{Passed: false, Tail: "flaked under load", OutputPath: "/tmp/first.log", Duration: 4 * time.Second},
+		{Passed: true, OutputPath: "/tmp/second.log", Duration: 90 * time.Second},
+	}}
+	e := newTestDriverWithSuite(t, sink, suite)
+	req := withRun(t, sink, Request{Workspace: "/ws/flake-ws", Name: "flake-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+
+	// Act.
+	res, err := e.Merge(context.Background(), req)
+
+	// Assert — the merge proceeds, and it took exactly two runs to get there.
+	if err != nil {
+		t.Fatalf("Merge() err = %v", err)
+	}
+	if res.Outcome != OutcomeMerged {
+		t.Fatalf("Merge() outcome = %s, want merged (the failure was a flake)", res.Outcome)
+	}
+	if suite.calls != 2 {
+		t.Fatalf("suite runs = %d, want exactly 2 (one gate, one re-run)", suite.calls)
+	}
+	if suite.runs[1].Attempt != 2 {
+		t.Errorf("re-run Attempt = %d, want 2 so its output is archived", suite.runs[1].Attempt)
+	}
+	if !reflect.DeepEqual(suite.runs[0].Suites, suite.runs[1].Suites) {
+		t.Errorf("re-run suites = %v, want the same selection as the first run %v", suite.runs[1].Suites, suite.runs[0].Suites)
+	}
+}
+
+func TestGateFailsForGoodWhenTheSuiteFailsTwice(t *testing.T) {
+	// Arrange — the same failure on both runs.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "feature.txt", "hello\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
+
+	sink := &recordingSink{}
+	suite := &fakeSuite{verdicts: []SuiteResult{
+		{Passed: false, Tail: "first tail", OutputPath: "/tmp/first.log"},
+		{Passed: false, Tail: "second tail", OutputPath: "/tmp/second.log"},
+	}}
+	e := newTestDriverWithSuite(t, sink, suite)
+	req := withRun(t, sink, Request{Workspace: "/ws/genuine-ws", Name: "genuine-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+
+	// Act.
+	res, err := e.Merge(context.Background(), req)
+
+	// Assert — today's behavior, with BOTH archives reachable from the result.
+	if err != nil {
+		t.Fatalf("Merge() err = %v", err)
+	}
+	if res.Outcome != OutcomeTestFailed {
+		t.Fatalf("Merge() outcome = %s, want test_failed", res.Outcome)
+	}
+	if suite.calls != 2 {
+		t.Fatalf("suite runs = %d, want exactly 2; the gate never retries a second failure", suite.calls)
+	}
+	if res.TestFailureOutputPath != "/tmp/second.log" {
+		t.Errorf("res.TestFailureOutputPath = %q, want the re-run's archive", res.TestFailureOutputPath)
+	}
+	if !strings.Contains(res.TestFailureTail, "second tail") {
+		t.Errorf("res.TestFailureTail = %q, want the re-run's own output", res.TestFailureTail)
+	}
+	if !strings.Contains(res.TestFailureTail, "/tmp/first.log") {
+		t.Errorf("res.TestFailureTail = %q, want it to name the first run's archive too", res.TestFailureTail)
+	}
+}
+
+// A skipped suite is not a failure, so there is nothing to re-run.
+func TestGateNeverRerunsASkippedSuite(t *testing.T) {
+	// Arrange.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "feature.txt", "hello\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
+
+	sink := &recordingSink{}
+	suite := skippingSuite()
+	e := newTestDriverWithSuite(t, sink, suite)
+	req := withRun(t, sink, Request{Workspace: "/ws/skip-ws", Name: "skip-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+
+	// Act.
+	if _, err := e.Merge(context.Background(), req); err != nil {
+		t.Fatalf("Merge() err = %v", err)
+	}
+
+	// Assert.
+	if suite.calls != 1 {
+		t.Fatalf("suite runs = %d, want 1 (a skip is not a failure)", suite.calls)
+	}
+}
+
+// A re-run that cannot be CLASSIFIED is an error, never a quiet pass.
+func TestGateSurfacesAnUnrunnableRerun(t *testing.T) {
+	// Arrange — the first run fails with a verdict, the second cannot run.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "feature.txt", "hello\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
+
+	sink := &recordingSink{}
+	calls := 0
+	runner := suiteFunc(func(_ context.Context, _ string, _ SuiteRun) (SuiteResult, error) {
+		calls++
+		if calls == 1 {
+			return SuiteResult{Passed: false, Tail: "boom"}, nil
+		}
+		return SuiteResult{}, sentinelError("suite binary vanished")
+	})
+	e := newTestDriverWithSuite(t, sink, runner)
+	req := withRun(t, sink, Request{Workspace: "/ws/rerun-err-ws", Name: "rerun-err-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+
+	// Act.
+	_, err := e.Merge(context.Background(), req)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "suite binary vanished") {
+		t.Fatalf("Merge() err = %v, want the re-run's failure surfaced", err)
+	}
+}
+
+// The first run produced a verdict, so the entrypoint was there. Its
+// disappearance between the two runs is a contradiction, not a skip to wave
+// through.
+func TestGateRefusesARerunThatReportsTheSuiteSkipped(t *testing.T) {
+	// Arrange.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "feature.txt", "hello\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
+
+	sink := &recordingSink{}
+	suite := &fakeSuite{verdicts: []SuiteResult{
+		{Passed: false, Tail: "boom"},
+		{Skipped: true, Reason: "the entrypoint vanished"},
+	}}
+	e := newTestDriverWithSuite(t, sink, suite)
+	req := withRun(t, sink, Request{Workspace: "/ws/rerun-skip-ws", Name: "rerun-skip-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+
+	// Act.
+	_, err := e.Merge(context.Background(), req)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "SKIPPED") {
+		t.Fatalf("Merge() err = %v, want the contradiction refused", err)
+	}
 }
