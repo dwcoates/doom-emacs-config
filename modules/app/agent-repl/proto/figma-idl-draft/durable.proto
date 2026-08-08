@@ -1,0 +1,643 @@
+// durable.proto — THE FROZEN DURABLE EVIDENCE LAYER. PERSISTENCE ONLY.
+//
+// Every shape here is persisted verbatim into statedb rows and must replay
+// byte-identically. Field numbers, presence, and population rules are not
+// negotiable — see VendorTokenUsage. The canonical economics shape
+// (tokens.proto) is derived FROM this at read time and never stored beside it.
+//
+// NOTHING HERE IS EVER PUSHED TO A RENDERING FRONTEND, and no component file
+// may import this one. A persistence record is written to satisfy a replay,
+// not to be looked at: it carries every dimension the vendor reported, in the
+// vendor's own partitioning, with the redundancy an audit needs and a picture
+// does not. Handing one to a renderer makes the renderer the thing that
+// decides what it means, and two renderers then decide differently.
+//
+// What a frontend needs from this evidence reaches it already digested, by
+// the daemon's own accounting machinery, as resolved component views:
+// ResponseUsageStamp for a response's corner, FooterAccountingCell for a
+// turn's verdict, TokenBreakdownView for session and per-model economics.
+//
+// The invariant that makes this real: no message on the push surface names a
+// type declared in this file.
+
+syntax = "proto3";
+
+package agentshim.frontend.v1;
+
+import "agentshim/core/v1/core.proto";
+import "agentshim/data/v1/tools.proto";
+import "agentshim/frontend/v1/tokens.proto";
+import "google/protobuf/struct.proto";
+
+option go_package = "agentrepl/proto/agentshim/frontend/v1;frontendv1";
+
+// Complete token accounting for one Claude SDK API response.
+//
+// Each instance is one response-level measurement rather than a session
+// aggregate, which preserves request correlation, response ownership, and
+// the vendor's complete usage vocabulary.
+message TokenUtilization {
+  // The durable agent-repl session that owns this API activity.
+  string agent_repl_session_id = 1;
+  // The authoritative Claude conversation UUID that produced this API
+  // activity.
+  string claude_session_id = 2;
+  // The accepted user-prompt turn enclosing this API activity. Empty only
+  // when historical source data cannot identify the enclosing turn.
+  string root_turn_id = 3;
+  // The vendor request identifier used to correlate this record with a
+  // request-level diagnostic. Absence means the SDK response did not expose
+  // a request identifier; an empty present value is invalid.
+  optional string api_request_id = 4;
+  // The Messages API response identifier used as the stable deduplication
+  // key for this measurement.
+  string api_message_id = 5;
+  // The model that actually produced this response.
+  string model = 6;
+  // Identifies the only agent loop that owns this API response.
+  oneof actor {
+    // Attributes the response to the session's main agent loop.
+    TokenUtilizationMainAgent main_agent = 10;
+    // Attributes the response to one dispatched subagent invocation.
+    TokenUtilizationSubagent subagent = 11;
+  }
+  // The complete usage object reported by the Claude SDK for this response.
+  VendorTokenUsage usage = 20;
+  // Timing measured for this specific Messages API response. Absent when the
+  // source is a historical transcript without corresponding stream events.
+  TokenResponseTiming response_timing = 21;
+}
+
+// Identifies usage produced by the session's main agent loop.
+message TokenUtilizationMainAgent {}
+
+// Identifies usage produced by one dispatched subagent invocation and its
+// ownership lineage.
+message TokenUtilizationSubagent {
+  // The vendor agent identifier supplied by the live stream or transcript.
+  string agent_id = 1;
+  // The Agent tool call that owns this subagent when the vendor does not
+  // supply an agent identifier.
+  string parent_tool_use_id = 2;
+  // The owning agent identifier when nested-agent provenance supplies it.
+  string parent_agent_id = 3;
+  // The configured subagent designation, such as a research-agent type.
+  string subagent_type = 4;
+  // The task description associated with the dispatched subagent.
+  string task_description = 5;
+}
+
+// Latency and generation timing for one Messages API response, correlated by
+// TokenUtilization.api_message_id.
+message TokenResponseTiming {
+  // Elapsed time from API request dispatch until the message_start event.
+  // This is the SDK's ttft_ms measurement.
+  optional int64 time_to_first_token_ms = 1;
+
+  // Elapsed time from message_start until the completed assistant response
+  // carrying the usage record. This measures model output generation and
+  // excludes request latency, tool execution, hooks, and subagent waiting.
+  optional int64 output_generation_duration_ms = 2;
+}
+
+// DURABLE, VENDOR-FAITHFUL usage for one API response — the persisted evidence
+// layer, not the economics layer.
+//
+// THIS SHAPE IS FROZEN. Every field here is written into the statedb
+// `token_utilization` and `turn_accounting` rows as binary protobuf, and a
+// replayed durable stream is required to reproduce a persisted row byte for
+// byte (`statedb.TurnAccountings.Record`, `statedb.TokenUtilizations.record`).
+// Adding a populated field, removing a populated field, or changing what any
+// field holds would make every row written by an earlier build fail its replay
+// comparison. Field numbers, presence, and population rules are therefore not
+// negotiable; the canonical economics shape above is derived FROM this at read
+// time and is never stored beside it.
+message VendorTokenUsage {
+  // Tokens charged as uncached input at the base input rate.
+  int64 input_tokens = 1;
+  // Generated tokens, including extended thinking where the API includes it.
+  int64 output_tokens = 2;
+  // Prompt-prefix tokens served from the prompt cache.
+  int64 cache_read_input_tokens = 3;
+  // Prompt-prefix tokens written into the prompt cache.
+  int64 cache_creation_input_tokens = 4;
+  // Cache writes split by billing TTL when the API supplies the breakdown.
+  TokenCacheCreation cache_creation = 5;
+  // Billable server-side tool requests reported by the API.
+  TokenServerToolUse server_tool_use = 6;
+  // The serving tier reported by the API, such as standard or priority.
+  string service_tier = 7;
+  // The inference speed mode reported by the API.
+  string speed = 8;
+  // The geographic inference region reported by the API.
+  string inference_geo = 9;
+  // Output-token categories reported by the API.
+  TokenOutputDetails output_details = 10;
+  // Server-side sampling, compaction, advisor, and fallback iterations that
+  // contributed to this response.
+  repeated TokenUsageIteration iterations = 11;
+  // Diagnosed prompt-cache miss information when diagnostics were requested.
+  TokenCacheDiagnostic cache_diagnostic = 12;
+  // DURABLE-LEGACY. Cache ratios derived from the authoritative token counters,
+  // absent when the total prompt input is zero. See TokenCacheRates: it is kept
+  // populated only because removing it from a durable record would break replay
+  // of every row an earlier build wrote, and no judgment reads it.
+  TokenCacheRates cache_rates = 13;
+  // The API's fallback-credit billing outcome.
+  google.protobuf.Struct fallback_credit = 14;
+  // Usage fields introduced by the API before this typed contract learns
+  // them. Every populated key must also be logged loudly.
+  google.protobuf.Struct unmodeled_usage = 15;
+  // Complete API usage payload preserved without frontend normalization.
+  agentshim.data.v1.ApiUsage raw_usage = 16;
+}
+
+// Cache-creation tokens split by the prompt-cache TTL used for billing.
+message TokenCacheCreation {
+  // Tokens written with the five-minute prompt-cache TTL.
+  int64 ephemeral_5m_input_tokens = 1;
+  // Tokens written with the one-hour prompt-cache TTL.
+  int64 ephemeral_1h_input_tokens = 2;
+}
+
+// Billable server-side tool request counters reported by the API.
+message TokenServerToolUse {
+  // Web-search requests performed by the server.
+  int64 web_search_requests = 1;
+  // Web-fetch requests performed by the server.
+  int64 web_fetch_requests = 2;
+}
+
+// Output-token categories reported by the API.
+message TokenOutputDetails {
+  // Output tokens consumed by internal reasoning, including thinking
+  // delimiters.
+  int64 thinking_tokens = 1;
+}
+
+// DURABLE-LEGACY prompt-cache rates. NOT the economics representation and not
+// an input to any decision.
+//
+// RATES ARE DERIVED, NOT STORED — that is the canonical TokenUsage contract,
+// and this message is the one place the system still violates it. It survives
+// for exactly one reason: it is populated inside VendorTokenUsage and
+// TokenUsageTotals, both of which are persisted verbatim, and a durable row
+// written by an earlier build must keep replaying byte-identically. Removing it
+// would fail every such replay. The database is not migrated, so the field
+// stays and stays populated.
+//
+// NOTHING MAY READ IT TO DECIDE ANYTHING. Every rate a surface needs is derived
+// from the canonical TokenUsage at the point of use (the daemon's
+// `internal/tokenusage`), where the partition cannot be mistaken for a cost:
+// the three quotients sum to 1, one per disjoint bucket, so `uncached_input_rate`
+// is the `unwritten` bucket's SHARE alone and the expensive share is
+// `uncached_input_rate + cache_write_rate`.
+message TokenCacheRates {
+  // Total prompt input: the three disjoint buckets summed.
+  int64 total_prompt_input_tokens = 1;
+  // Cache-read tokens divided by total prompt input. The ONLY cheap bucket.
+  double cache_hit_rate = 2;
+  // Cache-creation tokens divided by total prompt input. Expensive: paid fresh
+  // plus the cache-write premium.
+  double cache_write_rate = 3;
+  // The `input_tokens` bucket divided by total prompt input. Expensive, but
+  // only PART of the expensive share — see the message comment above.
+  double uncached_input_rate = 4;
+}
+
+// One server-side iteration that contributed to a complete API response.
+message TokenUsageIteration {
+  // Identifies the iteration kind without flattening fields that have
+  // different model-identity semantics.
+  oneof iteration {
+    // An ordinary model sampling iteration.
+    TokenUsageIterationSampling sampling = 1;
+    // A context-compaction iteration that has no SDK model identity.
+    TokenUsageIterationCompaction compaction = 2;
+    // An advisor-model sampling iteration.
+    TokenUsageIterationAdvisor advisor = 3;
+    // A fallback-model sampling iteration.
+    TokenUsageIterationFallback fallback = 4;
+  }
+}
+
+// Token counters produced by an ordinary model sampling iteration.
+message TokenUsageIterationSampling {
+  // Tokens charged as uncached input for this iteration.
+  int64 input_tokens = 1;
+  // Tokens generated by this iteration.
+  int64 output_tokens = 2;
+  // Prompt-prefix tokens served from cache for this iteration.
+  int64 cache_read_input_tokens = 3;
+  // Prompt-prefix tokens written into cache for this iteration.
+  int64 cache_creation_input_tokens = 4;
+  // Cache writes split by TTL for this iteration.
+  TokenCacheCreation cache_creation = 5;
+  // The model identity reported for this sampling iteration.
+  string model = 6;
+}
+
+// Token counters produced by a context-compaction iteration.
+message TokenUsageIterationCompaction {
+  // Tokens charged as uncached input for this iteration.
+  int64 input_tokens = 1;
+  // Tokens generated by this iteration.
+  int64 output_tokens = 2;
+  // Prompt-prefix tokens served from cache for this iteration.
+  int64 cache_read_input_tokens = 3;
+  // Prompt-prefix tokens written into cache for this iteration.
+  int64 cache_creation_input_tokens = 4;
+  // Cache writes split by TTL for this iteration.
+  TokenCacheCreation cache_creation = 5;
+}
+
+// Token counters produced by an advisor-model sampling iteration.
+message TokenUsageIterationAdvisor {
+  // Tokens charged as uncached input for this iteration.
+  int64 input_tokens = 1;
+  // Tokens generated by this iteration.
+  int64 output_tokens = 2;
+  // Prompt-prefix tokens served from cache for this iteration.
+  int64 cache_read_input_tokens = 3;
+  // Prompt-prefix tokens written into cache for this iteration.
+  int64 cache_creation_input_tokens = 4;
+  // Cache writes split by TTL for this iteration.
+  TokenCacheCreation cache_creation = 5;
+  // The model identity reported for this advisor iteration.
+  string model = 6;
+}
+
+// Token counters produced by a fallback-model sampling iteration.
+message TokenUsageIterationFallback {
+  // Tokens charged as uncached input for this iteration.
+  int64 input_tokens = 1;
+  // Tokens generated by this iteration.
+  int64 output_tokens = 2;
+  // Prompt-prefix tokens served from cache for this iteration.
+  int64 cache_read_input_tokens = 3;
+  // Prompt-prefix tokens written into cache for this iteration.
+  int64 cache_creation_input_tokens = 4;
+  // Cache writes split by TTL for this iteration.
+  TokenCacheCreation cache_creation = 5;
+  // The model identity reported for this fallback iteration.
+  string model = 6;
+}
+
+// Diagnosed explanation for a prompt-cache miss associated with one usage
+// record.
+message TokenCacheDiagnostic {
+  // Identifies the mutually exclusive cache-diagnostic outcome.
+  oneof reason {
+    // Diagnostics were present but the API reported a null miss reason.
+    TokenCacheDiagnosticPending pending = 1;
+    // The cacheable prefix changed because the model changed.
+    TokenCacheDiagnosticModelChanged model_changed = 2;
+    // The cacheable prefix changed because the system prompt changed.
+    TokenCacheDiagnosticSystemChanged system_changed = 3;
+    // The cacheable prefix changed because the tool definitions changed.
+    TokenCacheDiagnosticToolsChanged tools_changed = 4;
+    // The cacheable prefix changed because the messages changed.
+    TokenCacheDiagnosticMessagesChanged messages_changed = 5;
+    // The cacheable prefix could not be assembled because a prior message was
+    // unavailable.
+    TokenCacheDiagnosticPreviousMessageUnavailable previous_message_unavailable = 6;
+    // Cache diagnostics were not available from the API.
+    TokenCacheDiagnosticDiagnosticsUnavailable diagnostics_unavailable = 7;
+  }
+}
+
+// Marks diagnostics explicitly present with a null cache-miss reason.
+message TokenCacheDiagnosticPending {}
+
+// Records a cache miss caused by a changed model in the cacheable prefix.
+message TokenCacheDiagnosticModelChanged {
+  // Input tokens that missed cache because the model changed.
+  int64 cache_missed_input_tokens = 1;
+}
+
+// Records a cache miss caused by a changed system prompt in the cacheable
+// prefix.
+message TokenCacheDiagnosticSystemChanged {
+  // Input tokens that missed cache because the system prompt changed.
+  int64 cache_missed_input_tokens = 1;
+}
+
+// Records a cache miss caused by changed tool definitions in the cacheable
+// prefix.
+message TokenCacheDiagnosticToolsChanged {
+  // Input tokens that missed cache because the tool definitions changed.
+  int64 cache_missed_input_tokens = 1;
+}
+
+// Records a cache miss caused by changed messages in the cacheable prefix.
+message TokenCacheDiagnosticMessagesChanged {
+  // Input tokens that missed cache because the messages changed.
+  int64 cache_missed_input_tokens = 1;
+}
+
+// Records a cache miss whose required prior message was unavailable.
+message TokenCacheDiagnosticPreviousMessageUnavailable {}
+
+// Records that the API did not provide cache diagnostics for this usage
+// record.
+message TokenCacheDiagnosticDiagnosticsUnavailable {}
+
+// Complete cumulative token account for one agent-repl session.
+message SessionTokenUtilization {
+  // Usage across the main agent and every descendant subagent.
+  TokenUsageTotals all_agents = 1;
+  // Usage attributed only to the session's main agent loop.
+  TokenUsageTotals main_agent = 2;
+  // Usage attributed to each dispatched subagent invocation.
+  repeated AgentTokenUtilization subagents = 3;
+  // Whole-tree usage grouped by the model that served each response.
+  repeated ModelTokenUtilization models = 4;
+  // Subagent response records whose provenance lacks both stable invocation
+  // identifiers. Each record retains its unique api_message_id and complete
+  // usage without inventing an aggregate identity from descriptive metadata.
+  repeated TokenUtilization ungrouped_subagent_responses = 5;
+  // The canonical economics of `all_agents`, resolved by the daemon so a
+  // frontend never re-partitions the vendor buckets to learn what the session
+  // paid. This aggregate is rebuilt from durable records on every read and is
+  // itself never persisted, which is what lets it carry the canonical shape at
+  // all — the persisted record types cannot (see VendorTokenUsage).
+  TokenUsage all_agents_tokens = 6;
+  // The canonical economics of `main_agent`, resolved by the daemon.
+  TokenUsage main_agent_tokens = 7;
+}
+
+// Cumulative usage attributed to one dispatched subagent invocation.
+message AgentTokenUtilization {
+  // The subagent invocation identity and parentage.
+  TokenUtilizationSubagent agent = 1;
+  // Usage summed from the subagent's individual API responses.
+  TokenUsageTotals totals = 2;
+  // Usage grouped by model when the subagent used more than one model.
+  repeated ModelTokenUtilization models = 3;
+  // The canonical economics of `totals`, resolved by the daemon. Same reasoning
+  // as SessionTokenUtilization.all_agents_tokens.
+  TokenUsage tokens = 4;
+}
+
+// Cumulative usage served by one model.
+message ModelTokenUtilization {
+  // The model name used as the SDK model-usage key.
+  string model = 1;
+  // The canonical model identifier used for pricing. Absent when response
+  // records do not carry result-level model metadata.
+  optional string canonical_model = 2;
+  // The API provider that served this model. Absent when unavailable.
+  optional string provider = 3;
+  // Usage summed across responses served by this model.
+  TokenUsageTotals totals = 4;
+  // The model context capacity, which is not additive. Absent when unavailable.
+  optional int64 context_window = 5;
+  // The model maximum response capacity, which is not additive. Absent when unavailable.
+  optional int64 max_output_tokens = 6;
+  // The SDK-reported cumulative cost for this model. Presence distinguishes a
+  // reported zero from unavailable pricing evidence.
+  optional double cost_usd = 7;
+}
+
+// Additive token counters summed across a defined set of API responses.
+message TokenUsageTotals {
+  // Sum of tokens charged as uncached input at the base input rate.
+  int64 input_tokens = 1;
+  // Sum of generated tokens, including extended thinking where applicable.
+  int64 output_tokens = 2;
+  // Sum of prompt-prefix tokens served from cache.
+  int64 cache_read_input_tokens = 3;
+  // Sum of prompt-prefix tokens written into cache.
+  int64 cache_creation_input_tokens = 4;
+  // Sum of cache writes split by billing TTL.
+  TokenCacheCreation cache_creation = 5;
+  // Sum of billable server-side tool requests.
+  TokenServerToolUse server_tool_use = 6;
+  // Sum of output-token categories reported by the API.
+  TokenOutputDetails output_details = 7;
+  // DURABLE-LEGACY, exactly as on VendorTokenUsage: kept and kept populated so
+  // a persisted TurnAccounting reconciliation still replays byte-identically,
+  // read by no judgment. See TokenCacheRates.
+  TokenCacheRates cache_rates = 8;
+  // Additive timing measurements across the API responses represented by
+  // this total. Absent when none of those responses has timing data.
+  TokenTimingTotals timing = 9;
+}
+
+// Additive timing information that permits rate calculation without combining
+// timed tokens with responses whose timing is unavailable.
+message TokenTimingTotals {
+  // Output tokens belonging only to responses with a measured output
+  // generation duration.
+  int64 output_tokens_with_generation_duration = 1;
+
+  // Sum of measured output-generation intervals. This is model-generation
+  // time, not session wall-clock time; concurrent subagent intervals remain
+  // additive.
+  int64 output_generation_duration_ms = 2;
+
+  // Number of responses contributing tokens and duration to the generation
+  // throughput calculation.
+  int64 responses_with_generation_duration = 3;
+
+  // Number of responses excluded because generation duration was unavailable.
+  int64 responses_without_generation_duration = 4;
+
+  // Sum of SDK-reported first-token latencies.
+  int64 total_time_to_first_token_ms = 5;
+
+  // Number of responses contributing to the average first-token latency.
+  int64 responses_with_time_to_first_token = 6;
+
+  // Number of responses excluded because first-token latency was unavailable.
+  int64 responses_without_time_to_first_token = 7;
+}
+
+// Provides a self-contained, auditable accounting record for one completed turn.
+message TurnAccounting {
+  // Identifies the accounted turn.
+  string turn_id = 1;
+
+  // Identifies the SDK query that served the turn.
+  string query_instance_id = 2;
+
+  // Identifies the runtime configuration that served the turn.
+  agentshim.core.v1.QueryRuntimeIdentity runtime = 3;
+
+  // Contains exact wall-clock and elapsed timing measurements.
+  TurnAccountingTiming timing = 4;
+
+  // Contains the account-usage sample taken before prompt submission.
+  agentshim.core.v1.AccountUsageObservation usage_at_start = 5;
+
+  // Contains the account-usage sample taken after the terminal result.
+  agentshim.core.v1.AccountUsageObservation usage_at_end = 6;
+
+  // Contains every response-level token record, including subagents.
+  repeated TokenUtilization responses = 7;
+
+  // Compares response-level records with terminal result totals.
+  TokenUsageReconciliation reconciliation = 8;
+
+  // States whether the record satisfies all requirements for comparison.
+  oneof verdict {
+    // Marks a complete and internally consistent record.
+    TurnAccountingComplete complete = 20;
+
+    // Describes every condition invalidating the record.
+    TurnAccountingInvalid invalid = 21;
+  }
+}
+
+// Contains wall-clock boundaries and monotonic elapsed durations.
+message TurnAccountingTiming {
+  // Gives the Unix epoch time at which the prompt was admitted.
+  int64 prompt_admitted_at_ms = 1;
+
+  // Gives the Unix epoch time at which the terminal result arrived.
+  int64 result_received_at_ms = 2;
+
+  // Gives the Unix epoch time at which accounting persistence completed.
+  int64 accounting_settled_at_ms = 3;
+
+  // Gives monotonic elapsed time from prompt admission through terminal result.
+  int64 prompt_to_result_ms = 4;
+
+  // Gives elapsed time from terminal result through accounting persistence.
+  int64 result_to_settlement_ms = 5;
+}
+
+// Reconciles response-level usage with the SDK terminal result.
+message TokenUsageReconciliation {
+  // Gives the number of response-level usage records.
+  int64 response_record_count = 1;
+
+  // Gives totals derived from all response records, including subagents.
+  TokenUsageTotals response_all_agents = 2;
+
+  // Gives totals derived from main-agent response records.
+  TokenUsageTotals response_main_agent = 3;
+
+  // Gives the main-agent totals reported by ResultMessage.usage.
+  TokenUsageTotals result_main_agent = 4;
+
+  // Gives per-model totals derived from response records.
+  repeated ModelTokenUtilization response_models = 5;
+
+  // Gives per-model totals reported by ResultMessage.model_usage.
+  repeated ModelTokenUtilization result_models = 6;
+
+  // Gives every API message identifier included in the response ledger.
+  repeated string api_message_ids = 7;
+}
+
+// Marks a complete turn accounting record.
+message TurnAccountingComplete {}
+
+// Describes conditions that make a turn unsuitable for definitive comparison.
+message TurnAccountingInvalid {
+  // Contains every independently detected invalidating condition.
+  repeated TurnAccountingProblem problems = 1;
+}
+
+// Identifies one accounting failure without relying on a status enum.
+message TurnAccountingProblem {
+  // Describes the detected problem.
+  oneof problem {
+    // Indicates that a boundary usage sample is unavailable.
+    MissingUsageBoundary missing_usage_boundary = 1;
+
+    // Indicates that the usage window reset between samples.
+    UsageWindowReset window_reset = 2;
+
+    // Indicates disagreement between response and terminal-result totals.
+    TokenLedgerMismatch token_ledger_mismatch = 3;
+
+    // Indicates that runtime identity evidence is incomplete.
+    RuntimeIdentityIncomplete runtime_identity_incomplete = 4;
+
+    // Indicates that an SDK usage field could not be represented.
+    UnmodeledUsageFields unmodeled_usage_fields = 5;
+
+    // Indicates loss of a required durable telemetry record.
+    TelemetryRecordMissing telemetry_record_missing = 6;
+  }
+}
+
+// Identifies which required account-usage boundary has no usable observation.
+message MissingUsageBoundary {
+  // Selects the missing boundary without permitting both boundaries.
+  oneof boundary {
+    // Indicates that no usable observation exists before prompt submission.
+    MissingUsageBoundaryTurnStart turn_start = 1;
+
+    // Indicates that no usable observation exists after the terminal result.
+    MissingUsageBoundaryTurnEnd turn_end = 2;
+  }
+}
+
+// Marks the absence of a usable turn-start usage observation.
+message MissingUsageBoundaryTurnStart {}
+
+// Marks the absence of a usable turn-end usage observation.
+message MissingUsageBoundaryTurnEnd {}
+
+// Records a reset-boundary change that prevents subtraction of two utilization samples.
+message UsageWindowReset {
+  // Gives the reset time reported by the turn-start observation.
+  int64 start_resets_at_ms = 1;
+
+  // Gives the reset time reported by the turn-end observation.
+  int64 end_resets_at_ms = 2;
+}
+
+// Identifies disagreements between response-level and terminal-result usage.
+message TokenLedgerMismatch {
+  // Lists canonical protobuf field paths whose reconciled values disagree.
+  repeated string differing_field_paths = 1;
+}
+
+// Identifies runtime identity evidence required for causal comparison but unavailable to the producer.
+message RuntimeIdentityIncomplete {
+  // Lists canonical protobuf field paths whose evidence is unavailable.
+  repeated string missing_field_paths = 1;
+}
+
+// Identifies SDK usage fields preserved as unmodeled data.
+message UnmodeledUsageFields {
+  // Lists canonical source field paths lacking typed protobuf representation.
+  repeated string source_field_paths = 1;
+}
+
+// Identifies a required durable telemetry record that could not be reconciled.
+message TelemetryRecordMissing {
+  // Selects the missing record category without using a stringly typed status.
+  oneof record {
+    // Identifies a missing query-lifecycle record.
+    TelemetryRecordMissingQueryLifecycle query_lifecycle = 1;
+
+    // Identifies a missing response-level usage record.
+    TelemetryRecordMissingResponseUsage response_usage = 2;
+
+    // Identifies a missing durable-persistence receipt.
+    TelemetryRecordMissingPersistenceReceipt persistence_receipt = 3;
+  }
+}
+
+// Identifies the missing lifecycle event for a query instance.
+message TelemetryRecordMissingQueryLifecycle {
+  // Gives the query instance lacking a required lifecycle event.
+  string query_instance_id = 1;
+}
+
+// Identifies the API response lacking a durable usage record.
+message TelemetryRecordMissingResponseUsage {
+  // Gives the API message identifier expected in the response ledger.
+  string api_message_id = 1;
+}
+
+// Identifies the turn whose accounting record lacks durable-persistence confirmation.
+message TelemetryRecordMissingPersistenceReceipt {
+  // Gives the turn identifier awaiting durable-persistence confirmation.
+  string turn_id = 1;
+}

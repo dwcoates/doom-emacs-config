@@ -1,0 +1,244 @@
+// frame.proto — TRANSPORT: the outbound frame envelope, the connect snapshot, the inbound
+// command envelope, and the command ack.
+
+syntax = "proto3";
+
+package agentshim.frontend.v1;
+
+import "agentshim/frontend/v1/async-bubble.proto";
+import "agentshim/frontend/v1/errors.proto";
+import "agentshim/frontend/v1/failure-card.proto";
+import "agentshim/frontend/v1/feed.proto";
+import "agentshim/frontend/v1/footer.proto";
+import "agentshim/frontend/v1/gate-revival.proto";
+import "agentshim/frontend/v1/host.proto";
+import "agentshim/frontend/v1/lifecycle.proto";
+import "agentshim/frontend/v1/permission-card.proto";
+import "agentshim/frontend/v1/prompt-queue.proto";
+import "agentshim/frontend/v1/sidebar.proto";
+import "agentshim/frontend/v1/state.proto";
+import "agentshim/frontend/v1/tokens-menu.proto";
+import "agentshim/frontend/v1/tool-call.proto";
+import "agentshim/frontend/v1/topbar.proto";
+
+option go_package = "agentrepl/proto/agentshim/frontend/v1;frontendv1";
+
+message FrontendFrame {
+  // 8 was degraded_notice (DegradedNotice): RETIRED (step 11). Stage 2
+  // replaced it with a self-resolving failure card in the conversation
+  // (F4); both frontends have shipped their readers.
+  reserved 8;
+  reserved "degraded_notice";
+  oneof frame {
+    StateSnapshot snapshot = 1;
+    // THE authority on which session owns a workspace, whether it arrives on
+    // its own or inside `snapshot`.
+    WorkspaceState workspace_state = 2;
+    // A catalog entry for ONE session, live or retired. Never a workspace's
+    // live identity (see SessionView). HOST SURFACE: never delivered to a GUI
+    // client, exactly as StateSnapshot.sessions is stripped.
+    SessionView session_view = 3;
+    ConversationDelta conversation_delta = 4;
+    TypingDelta typing_delta = 5;
+    TaskCatalog task_catalog = 6;
+    CommandAck command_ack = 7;
+    DaemonView daemon_view = 9;
+    SessionInitView session_init = 10;
+    HeartbeatView heartbeat = 11;
+    QueueView queue = 12;
+    ProgressView progress = 13;
+    // Host-only durable workspace lifecycle notification.  The daemon emits
+    // this only after the worktree and waiting shim are healthy; Emacs then
+    // materializes its perspective and acknowledges it.
+    WorkspaceAvailable workspace_available = 14;
+    // Host-only durable UI action sourced by the daemon-owned JSON inbox.
+    HostAction host_action = 15;
+    DaemonHealthView daemon_health = 16;
+    SessionHealthView session_health = 17;
+    // The workspace roster, the sidebar's entire model, previously delivered
+    // by Emacs script-injection per webview. Emacs remains the single author;
+    // the daemon retains the latest roster, includes it in every connect
+    // snapshot, and rebroadcasts on change.
+    WorkspaceRoster workspace_roster = 18;
+    ShutdownScheduleView shutdown_schedule = 19;
+    // Detached work opening, and typed incremental updates to work already
+    // open. Its own frame rather than more ConversationDelta items, because a
+    // detached agent produces at its own rate and must not flood the
+    // conversation that dispatched it.
+    AsyncBubbleDelta async_bubble_delta = 20;
+    // One workspace's topbar, fully resolved. Pushed whenever any fact the
+    // topbar renders changes.
+    TopbarView topbar = 21;
+    // One workspace's token-breakdown menu, fully resolved. Pushed whenever
+    // the figures change.
+    TokenBreakdownView token_breakdown = 22;
+    // One workspace's revival gate, resolved and fenced. Pushed on every gate
+    // transition (hibernate, revival start, revival settle).
+    WorkspaceGateView workspace_gate = 23;
+  }
+}
+
+// Full resync on (re)connect: current state of every workspace + open tasks.
+//
+// IDENTITY AUTHORITY: `workspaces` below is the only place in this snapshot a
+// consumer may read a workspace's live session identity from. The per-session
+// and per-task repeated fields are CATALOGS — they include retired and
+// superseded entries by design, and their order carries no authority — so
+// folding them onto a store must never move a workspace's session binding.
+message StateSnapshot {
+  // THE authoritative rulings, one per workspace. Sole source of session
+  // ownership for everything in this snapshot.
+  repeated WorkspaceState workspaces = 1;
+  // The session catalog, live and retired alike. Read for per-session facts,
+  // never for a workspace's identity (see SessionView). HOST SURFACE:
+  // frontend.Server strips it from every GUI client, exactly as it strips the
+  // host-only fields below — a rendering frontend's chrome arrives as the
+  // resolved component views (12-14) instead.
+  repeated SessionView sessions = 2;
+  repeated TaskCatalog catalogs = 3;
+  DaemonView daemon = 4;
+  repeated SessionInitView inits = 5;
+  repeated QueueView queues = 6;
+  repeated ProgressView progress = 7;
+  // Host-only durable work.  frontend.Server strips both fields from every
+  // GUI client, regardless of observer/painter role.
+  repeated WorkspaceAvailable workspace_available = 8;
+  repeated HostAction host_actions = 9;
+  // The daemon-global lease state as of this connect, so a client joining
+  // mid-drain renders the banner without waiting for the next edge.
+  ShutdownScheduleView shutdown_schedule = 10;
+  // Every async bubble the session still holds, folded to date, so a
+  // reconnecting client resumes a running detached agent rather than starting
+  // its fold over. Each bubble carries its own AsyncFold accounting, so the
+  // client also knows exactly what it is NOT being shown.
+  repeated AsyncBubble async_bubbles = 11;
+  // The resolved component views, one per workspace, so a connecting client
+  // draws its chrome without waiting for each view's first push.
+  repeated TopbarView topbars = 12;
+  repeated TokenBreakdownView token_breakdowns = 13;
+  repeated WorkspaceGateView workspace_gates = 14;
+}
+
+// Frontend→daemon commands (the ONLY inbound frame).
+message FrontendCommand {
+  string request_id = 1;
+  string workspace = 2;
+  oneof command {
+    SubmitPromptCmd submit_prompt = 3;
+    InterruptCmd interrupt = 4;
+    PermissionAnswerCmd permission_answer = 5;
+    MergeWorkspaceCmd merge_workspace = 6;
+    CloseWorkspaceCmd close_workspace = 7;
+    OpenWorkspaceCmd open_workspace = 8;
+    ResyncCmd resync = 9;
+    CreateSessionCmd create_session = 10;
+    DeleteSessionCmd delete_session = 11;
+    ShutdownCmd shutdown = 12;
+    ClientLogCmd client_log = 13;
+    QueueForceCmd queue_force = 14;
+    QueueAcceptCmd queue_accept = 15;
+    QueueCancelCmd queue_cancel = 16;
+    CreateWorkspaceCmd create_workspace = 18;
+    WorkspaceMaterializedCmd workspace_materialized = 19;
+    HostActionCompletedCmd host_action_completed = 20;
+    DaemonHealthCmd daemon_health = 21;
+    SessionHealthCmd session_health = 22;
+    RestartSessionCmd restart_session = 23;
+    SetModelCmd set_model = 24;
+    PublishWorkspaceRosterCmd publish_workspace_roster = 25;
+    ScheduleShutdownCmd schedule_shutdown = 26;
+    CancelScheduledShutdownCmd cancel_scheduled_shutdown = 27;
+    HibernateWorkspaceCmd hibernate_workspace = 28;
+    ReviveSessionCmd revive_session = 29;
+  }
+}
+
+// (The retired PaintAckCmd rode the command oneof at field 17, with its
+// PaintOutcome enum beside it: a frontend's attestation that it had drawn a
+// workspace's history and its render state, which the daemon required before
+// it would resolve that workspace green and before it would forward the state
+// to Emacs.
+//
+// It is GONE, and so is the whole viewer-based attestation model behind it. A
+// workspace's color is CONNECTION TRUTH: blue means no live backend session,
+// and every non-blue color is a guarantee that the session substrate is fully
+// wired. What a viewer has or has not drawn says nothing about that, so it can
+// no longer hold a workspace blue or hold a state back from Emacs.
+//
+// Deleted rather than reserved, following this repo's established style for
+// retired frontend surface — the same treatment InterruptCmd.hard and
+// ContextCompacted.result received — because no live frontend commitment
+// survives the same change.)
+
+message CommandAck {
+  string request_id = 1;
+  bool ok = 2;
+  string error = 3;
+  // The CLASSIFIED account of a refusal, superseding the free
+  // string above.
+  //
+  // `error` was an err.Error() funnel: every handler failure, every Nack
+  // reason, every truncated replay arrived as raw Go text that Emacs echoed
+  // verbatim and the webapp did not render at all. This is that same failure
+  // run through the daemon's one classifier, so both frontends can show a
+  // refusal as a failure card instead of as a log line or as nothing.
+  // Unset when ok is true.
+  FailureKind failure = 4;
+  // The feed card this refusal was filed under, when it produced one, so the
+  // client can offer to reveal it instead of restating the account inline.
+  FailureCardRef failure_card = 20;
+  // The interrupt confirmation CHALLENGE. Not a failure and
+  // not an error: the command was understood and deliberately not performed,
+  // because no turn was live and stopping live subagents deserves an
+  // explicit yes. Set with ok=false and `failure` unset; the client asks the
+  // user and resends InterruptCmd{confirm_agents: true}.
+  InterruptConfirmRequired interrupt_confirm_required = 5;
+  // Present only for SetModelCmd.  It is the shim-confirmed current model on
+  // both success and rejection, so a frontend never needs an optimistic model
+  // state or a local recovery guess.
+  string selected_model = 6;
+
+  // Present only for CreateSessionCmd, and FOR OBSERVABILITY ONLY: the vendor
+  // conversation uuid the created session actually landed on, so a client can
+  // attribute its logs from its very first line instead of waiting for the
+  // first pushed SessionView.
+  //
+  // A CLIENT MUST NOT PERSIST THIS OR FEED IT BACK. It is an observation of
+  // daemon state at one instant, not a durable fact: the uuid ROTATES (a
+  // /clear or a compact starts a new vendor conversation and resets the
+  // cursors with it), so a stored copy is wrong from the next rotation
+  // onward. The steady-state source is the pushed SessionView, which tracks
+  // rotations; this field only covers the gap before the first push.
+  //
+  // Feeding it back is what this whole change removed — see ResumeMode. The
+  // rule is not enforceable from here, so it is also enforced where it
+  // matters: the Emacs frontend has no persistence path that can reach a
+  // vendor uuid, and a test asserts its state file never contains one.
+  string observed_claude_session_id = 7;
+}
+
+// The challenge payload: what the interrupt would actually stop, so the
+// client can render a concrete question ("interrupt 3 running subagents?")
+// rather than a bare are-you-sure.
+message InterruptConfirmRequired {
+  int64 live_tasks = 1;
+}
+
+message ResyncCmd {
+  // 2/3 were session_id and controller_generation_id: two identities a client
+  // had to copy, hold and send back in agreement. The fence is the one token
+  // that answers the only question they were asked together.
+  reserved 2, 3;
+  reserved "session_id", "controller_generation_id";
+  uint64 from_seq = 1;
+  // The fence ECHO: the exact fence the client held when it decided to ask
+  // for this replay, copied byte-for-byte from the WorkspaceState it was
+  // reading at that moment.
+  //
+  // It must be captured AT DECISION TIME, not read from current state when
+  // the transport sends, or a delayed request silently rebinds itself to a
+  // newer generation and asks for a replay nobody wanted. The daemon compares
+  // it against the workspace's live fence and REFUSES the command before
+  // replaying anything when they differ.
+  string fence = 4;
+}
