@@ -890,6 +890,23 @@ Without region: copies file:line."
     (kill-new ref)
     (message "Copied: %s" ref)))
 
+(defun agent-repl-copy-workspace-name ()
+  "Copy the current workspace's name to the kill ring and system clipboard.
+The kill ring is the system clipboard's Emacs end
+\(`select-enable-clipboard'), so the killed name is pasteable outside
+Emacs too.
+
+Signals `user-error' when there is no current workspace — persp-mode is
+the identity boundary here, and outside it there is no name to copy."
+  (interactive)
+  (let ((ws (agent-repl--ws-current-name)))
+    (unless ws
+      (user-error "No current workspace to copy the name of"))
+    (kill-new ws)
+    (agent-repl--log (agent-repl--ws-current-log-name)
+                     "copy-workspace-name: ws=%s outcome=copied" ws)
+    (message "Copied workspace name: %s" ws)))
+
 (defun agent-repl-paste-clipboard ()
   "Insert the current workspace's `:clipboard' text at point.
 The slot is populated by a daemon HostAction carrying the legacy

@@ -825,6 +825,7 @@ aux maps for every state in `agent-repl--scroll-output-intercept-states'
        :desc "Toggle verbose to disk"  "V" #'agent-repl-debug/toggle-verbose-to-disk
        (:prefix ("h" . "help/debug")
         :desc "Dump workspace state"     "p" #'agent-repl-debug/dump-workspace
+        :desc "Copy workspace name"      "y" #'agent-repl-copy-workspace-name
         :desc "Explain config (read-only Q&A)" "c" #'agent-repl-explain-config
         :desc "Close explain-config popup"     "C" #'agent-repl-explain-config-close
         :desc "New explain-config conversation" "n" #'agent-repl-explain-config-reset)
