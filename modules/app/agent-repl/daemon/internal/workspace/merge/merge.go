@@ -224,6 +224,22 @@ type Result struct {
 	// when Outcome is OutcomeTestFailed. It travels into the resolution prompt
 	// and into the merge_failed cause.
 	TestFailureTail string
+	// TestedHead is the target's HEAD as it stood when the failing suite ran,
+	// set when Outcome is OutcomeTestFailed.
+	//
+	// IT IS THE ROLLBACK'S PROOF OF OWNERSHIP, not a diagnostic. The rollback
+	// resets the target to PreMergeHead, and between the failing suite and that
+	// reset the merge does not touch the target at all — it hands the failure to
+	// an agent and waits, which can take many minutes. A `git reset --hard`
+	// fired blind at the end of that window destroys ANY commit that reached the
+	// target meanwhile, including one no part of this merge produced: the merge
+	// lease is a claim on the WORKSPACE'S SESSION (internal/ssm/mergelease.go),
+	// and the per-repository queue serializes merges against each other, so
+	// neither excludes a human or another agent committing straight into the
+	// target checkout. Recording the head the merge left, and refusing the reset
+	// unless the target is still on it, is what turns "no one else should be
+	// writing here" into something the rollback can actually verify.
+	TestedHead string
 }
 
 // cherryPickAnnotationRE matches the "(cherry picked from commit <sha>)"
@@ -494,7 +510,20 @@ func (e *Driver) gateOnSuite(ctx context.Context, req Request, progress, short s
 	}
 	e.logf("merge: test gate FAILED after cherry-pick of %s (%s) {ws=%s target=%s} tail:\n%s",
 		short, progress, req.Name, req.TargetDir, sr.Tail)
-	return &Result{Outcome: OutcomeTestFailed, FailingCommit: short, TestFailureTail: sr.Tail}, nil
+	// The head the suite just judged. It is read here rather than recomputed at
+	// rollback time because the rollback happens after an unbounded resolution
+	// window, and the whole point is to compare against the target as this merge
+	// left it — see Result.TestedHead.
+	tested, err := e.gitString(ctx, req.TargetDir, "rev-parse", "HEAD")
+	if err != nil {
+		return nil, err
+	}
+	return &Result{
+		Outcome:         OutcomeTestFailed,
+		FailingCommit:   short,
+		TestFailureTail: sr.Tail,
+		TestedHead:      tested,
+	}, nil
 }
 
 // Resume continues a cherry-pick that a human (or the workspace's own agent)
@@ -745,12 +774,36 @@ func (e *Driver) resumeRunPlan(ctx context.Context, req Request, remaining Commi
 //
 // It deliberately does NOT `git clean`: untracked files in the target may be a
 // human's own work, and a merge failure is no license to delete them.
-func (e *Driver) Rollback(ctx context.Context, req Request, head string) error {
+//
+// IT IS GUARDED BY expected, the head this merge left the target on. A rollback
+// is a `reset --hard` over a window the merge spends waiting on an agent, and a
+// blind one destroys whatever reached the target meanwhile — an external commit
+// or merge is unreachable afterwards from any ref, which is the one outcome a
+// merge failure must never produce. Nothing the pipeline holds prevents that
+// write: the merge lease claims the workspace's SESSION, and the per-repository
+// queue only serializes merges against each other. So the reset is conditional
+// on the target still being where the merge left it, and a target that moved is
+// a REFUSAL — surfaced to the coordinator, which records it on the merge_failed
+// cause. The commits this merge landed stay on the target in that case, which is
+// worse than a clean rollback and far better than deleting someone else's work;
+// the named refusal is what tells a human which it is.
+func (e *Driver) Rollback(ctx context.Context, req Request, head, expected string) error {
 	if err := req.validate(); err != nil {
 		return err
 	}
 	if head == "" {
 		return fmt.Errorf("merge: rollback of %q needs the pre-merge HEAD", req.Name)
+	}
+	if expected == "" {
+		return fmt.Errorf("merge: rollback of %q needs the head this merge left the target on, so it can verify nothing else has written there", req.Name)
+	}
+	current, err := e.gitString(ctx, req.TargetDir, "rev-parse", "HEAD")
+	if err != nil {
+		return err
+	}
+	if current != expected {
+		return fmt.Errorf("merge: target %s moved from %s to %s while %q waited on its test-failure resolution — something outside this merge committed there, and resetting to %s would destroy it, so the rollback is REFUSED and the target KEEPS the commits that failed the suite",
+			req.TargetDir, expected, current, req.Name, head)
 	}
 	exit, out, err := e.gitExit(ctx, req.TargetDir, "reset", "--hard", head)
 	if err != nil {

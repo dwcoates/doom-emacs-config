@@ -1783,7 +1783,7 @@ func TestRollbackReturnsTheTargetToItsPreMergeHead(t *testing.T) {
 	}
 
 	// Act.
-	if err := e.Rollback(context.Background(), req, res.PreMergeHead); err != nil {
+	if err := e.Rollback(context.Background(), req, res.PreMergeHead, res.TestedHead); err != nil {
 		t.Fatalf("Rollback() err = %v", err)
 	}
 
@@ -1804,12 +1804,95 @@ func TestRollbackWithoutAHeadIsRefused(t *testing.T) {
 	req := withRun(t, &recordingSink{}, Request{Workspace: "/ws/rb0-ws", Name: "rb0-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
 
 	// Act.
-	err := e.Rollback(context.Background(), req, "")
+	err := e.Rollback(context.Background(), req, "", "tested0")
 
 	// Assert — a rollback with no point to roll back to is a loud failure, not
 	// a no-op that leaves the target broken in silence.
 	if err == nil {
 		t.Fatalf("Rollback() err = nil; want a refusal")
+	}
+}
+
+func TestRollbackWithoutTheHeadItLeftIsRefused(t *testing.T) {
+	// Arrange — no record of where the merge left the target, so the reset has
+	// nothing to verify ownership against.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	e := newTestDriver(t, &recordingSink{})
+	req := withRun(t, &recordingSink{}, Request{Workspace: "/ws/rb1-ws", Name: "rb1-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+	head := strings.TrimSpace(gitRun(t, target, "rev-parse", "HEAD"))
+
+	// Act.
+	err := e.Rollback(context.Background(), req, head, "")
+
+	// Assert.
+	if err == nil {
+		t.Fatalf("Rollback() err = nil; want a refusal")
+	}
+}
+
+func TestRollbackIsRefusedWhenSomethingElseCommittedToTheTarget(t *testing.T) {
+	// Arrange — a merge that landed a commit, broke the suite, and then had an
+	// UNRELATED commit land on the target while its resolution was running. The
+	// merge lease covers the workspace's session, not the target checkout, so
+	// this is a write the pipeline cannot prevent — only refuse to destroy.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "feature.txt", "hello\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
+
+	sink := &recordingSink{}
+	suite := &fakeSuite{verdicts: []SuiteResult{{Passed: false, Tail: "boom"}}}
+	e := newTestDriverWithSuite(t, sink, suite)
+	req := withRun(t, sink, Request{Workspace: "/ws/rb2-ws", Name: "rb2-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+	res, err := e.Merge(context.Background(), req)
+	if err != nil || res.Outcome != OutcomeTestFailed {
+		t.Fatalf("setup Merge() res=%+v err=%v, want test_failed", res, err)
+	}
+	writeFile(t, target, "someone-elses-work.txt", "do not delete me\n")
+	gitRun(t, target, "add", ".")
+	gitRun(t, target, "commit", "-q", "-m", "an external commit")
+	external := strings.TrimSpace(gitRun(t, target, "rev-parse", "HEAD"))
+
+	// Act.
+	err = e.Rollback(context.Background(), req, res.PreMergeHead, res.TestedHead)
+
+	// Assert — refused, and the external commit is still reachable.
+	if err == nil {
+		t.Fatalf("Rollback() err = nil; want a refusal that names the external write")
+	}
+	if head := strings.TrimSpace(gitRun(t, target, "rev-parse", "HEAD")); head != external {
+		t.Errorf("target HEAD = %s, want the external commit %s left untouched", head, external)
+	}
+	if _, statErr := os.Stat(filepath.Join(target, "someone-elses-work.txt")); statErr != nil {
+		t.Errorf("the external commit's file was destroyed by the rollback: %v", statErr)
+	}
+}
+
+func TestATestFailureRecordsTheHeadTheSuiteRanAgainst(t *testing.T) {
+	// Arrange — a merge whose landed commit breaks the suite.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "feature.txt", "hello\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
+
+	sink := &recordingSink{}
+	suite := &fakeSuite{verdicts: []SuiteResult{{Passed: false, Tail: "boom"}}}
+	e := newTestDriverWithSuite(t, sink, suite)
+	req := withRun(t, sink, Request{Workspace: "/ws/rb3-ws", Name: "rb3-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+
+	// Act.
+	res, err := e.Merge(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Merge() err = %v", err)
+	}
+
+	// Assert — the recorded head is the target as the merge left it.
+	want := strings.TrimSpace(gitRun(t, target, "rev-parse", "HEAD"))
+	if res.TestedHead != want {
+		t.Errorf("TestedHead = %q, want the tested %s", res.TestedHead, want)
 	}
 }
 
