@@ -35,68 +35,79 @@ describe("logAssistantApiResponseUsage", () => {
       unmodeled_usage: { beta_counter: 11 },
       service_tier: "standard", speed: "standard", inference_geo: "us-east-1",
     }, "req_123");
-    expect(out).toHaveLength(2);
+    expect(out).toHaveLength(1);
     expect(out[0]).toMatchObject({ agent_repl_session_id: "test-agent-session", claude_session_id: "claude-session", message: "completed assistant API response usage", context: {
       api_message_id: "msg_123", api_request_id: "req_123", model: "claude-fable-5",
       input_tokens: 10, output_tokens: 20, cache_read_input_tokens: 50, cache_creation_input_tokens: 40,
-      cache_creation_5m_input_tokens: 30, cache_creation_1h_input_tokens: 10, total_prompt_input_tokens: 100,
-      cache_hit_rate: 0.5, cache_write_rate: 0.4, uncached_input_rate: 0.1, service_tier: "standard", speed: "standard", inference_geo: "us-east-1",
+      cache_creation_5m_input_tokens: 30, cache_creation_1h_input_tokens: 10,
+      service_tier: "standard", speed: "standard", inference_geo: "us-east-1",
       server_tool_use: { web_search_requests: 2 }, iterations: [{ input_tokens: 4 }], output_tokens_details: { reasoning_tokens: 3 },
       cache_diagnostic: { status: "verified" }, fallback_credit: { status: { type: "redeemed" } }, unmodeled_usage_fields: {},
       unmodeled_usage: { beta_counter: 11 },
     } });
-    expect(out[1]).toMatchObject({ level: "warn", context: {
-      api_request_id: "req_123", output_tokens_details: { reasoning_tokens: 3 },
-      cache_diagnostic: { status: "verified" }, fallback_credit: { status: { type: "redeemed" } },
-      unmodeled_usage: { beta_counter: 11 },
-    } });
   });
 
-  it("logs the uncached input as the SUM of the two expensive buckets", () => {
+  /**
+   * THE LOG IS RAW EVIDENCE, NOT A VERDICT. Every derived figure it used to
+   * carry — the expensive-input sum, the total prompt input, the three rates,
+   * and the low-reuse warning raised from them — was token judgment taken
+   * outside the daemon. The daemon owns all of it now, over the canonical
+   * TokenUsage shape (internal/tokenusage), and raises the expensive-turn alert
+   * and the cold-ping alarm from it. These cases pin the shim on the faithful
+   * side of that line: the buckets behind the daemon's verdict are still on
+   * disk, and nothing computed from them is.
+   */
+  it("logs the vendor buckets of a cold re-ingest without summing them", () => {
     // Arrange — a cold re-ingest: input_tokens is a rounding error beside the
-    // cache creation, so a log carrying only the buckets reads as cheap.
+    // cache creation, and the sum is exactly the figure the daemon derives.
     const out = records();
     // Act
     log({ input_tokens: 12, output_tokens: 3, cache_read_input_tokens: 0, cache_creation_input_tokens: 500_000 });
     // Assert
-    expect(out[0].context).toMatchObject({ uncached_input_tokens: 500_012 });
+    expect(out[0].context).toMatchObject({ input_tokens: 12, cache_creation_input_tokens: 500_000, cache_read_input_tokens: 0 });
+    expect(out[0].context).not.toHaveProperty("uncached_input_tokens");
   });
 
-  it("keeps the cache read out of the logged uncached input", () => {
-    // Arrange — a large standing prefix presented again costs ~a tenth.
+  it("logs the cache read verbatim rather than a share of the prompt", () => {
+    // Arrange — a large standing prefix presented again.
     const out = records();
     // Act
     log({ input_tokens: 10, output_tokens: 3, cache_read_input_tokens: 900_000, cache_creation_input_tokens: 20 });
     // Assert
-    expect(out[0].context).toMatchObject({ uncached_input_tokens: 30 });
+    expect(out[0].context).toMatchObject({ cache_read_input_tokens: 900_000 });
+    expect(out[0].context).not.toHaveProperty("total_prompt_input_tokens");
   });
 
-  it("warns below but not at the eighty percent cache-hit boundary", () => {
+  it("raises no cache-reuse warning of its own, however cold the response", () => {
+    // Arrange — a response that would have tripped the retired 80% threshold.
     const out = records();
+    // Act
     log({ input_tokens: 21, output_tokens: 1, cache_read_input_tokens: 79, cache_creation_input_tokens: 0 });
-    log({ input_tokens: 20, output_tokens: 1, cache_read_input_tokens: 80, cache_creation_input_tokens: 0 });
-    expect(out.filter((record) => record.message.includes("below threshold"))).toHaveLength(1);
-    expect(out[1].context).toMatchObject({ input_tokens: 21, cache_read_input_tokens: 79, total_prompt_input_tokens: 100, cache_hit_rate: 0.79 });
-    expect(out[2].context).toMatchObject({ input_tokens: 20, cache_read_input_tokens: 80, total_prompt_input_tokens: 100, cache_hit_rate: 0.8 });
+    // Assert
+    expect(out).toHaveLength(1);
+    expect(out.filter((record) => record.message.includes("below threshold"))).toHaveLength(0);
   });
 
-  it("keeps rates absent when the prompt-token denominator is zero", () => {
+  it("carries no rate partition, whatever the prompt-token denominator", () => {
     const out = records();
     log({ input_tokens: 0, output_tokens: 9, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 });
     expect(out).toHaveLength(1);
-    expect(out[0].context).toMatchObject({ total_prompt_input_tokens: 0 });
     expect(out[0].context).not.toHaveProperty("cache_hit_rate");
     expect(out[0].context).not.toHaveProperty("cache_write_rate");
     expect(out[0].context).not.toHaveProperty("uncached_input_rate");
     expect(out[0].context).not.toHaveProperty("api_request_id");
   });
 
+  /**
+   * THE ONE WARNING LEFT IS ABOUT TRANSLATION, NOT TOKENS. A usage key this
+   * typed contract cannot express is a defect in the shim's own job, so the
+   * shim is exactly the thing that should be shouting about it.
+   */
   it("warns loudly while retaining unknown usage fields", () => {
     const out = records();
     log({ input_tokens: 1, output_tokens: 2, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, future_counter: 7 });
-    expect(out).toHaveLength(2);
+    expect(out).toHaveLength(1);
     expect(out[0]).toMatchObject({ level: "warn", message: "completed assistant API response usage includes unmodeled fields", context: { unmodeled_usage_fields: { future_counter: 7 } } });
-    expect(out[1]).toMatchObject({ level: "warn", context: { unmodeled_usage_fields: { future_counter: 7 } } });
   });
 
 });
