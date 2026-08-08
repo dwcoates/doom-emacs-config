@@ -116,22 +116,22 @@ func (m *Manager) measureKeepAlivePing(workspace, turnID string) keepAlivePingMe
 // Every other turn's cost is simply not this function's business: an expensive
 // USER turn is a cost report, not evidence that a cache died, and the footer
 // already reports it (progress.applyResultCostLocked).
-func (m *Manager) noteKeepAlivePingCost(d *sessionController, turnID string, uncachedInputTokens int64) {
-	if d == nil || turnID == "" {
+func (m *Manager) noteKeepAlivePingCost(d *sessionController, cost turnResultCost) {
+	if d == nil || cost.turnID == "" {
 		return
 	}
 	m.mu.Lock()
 	measurement := d.keepAlivePing
-	if measurement == nil || measurement.turnID != turnID || d.keepAliveTurnID != turnID {
+	if measurement == nil || measurement.turnID != cost.turnID || d.keepAliveTurnID != cost.turnID {
 		m.mu.Unlock()
 		return
 	}
-	measurement.uncachedInputTokens = uncachedInputTokens
+	measurement.uncachedInputTokens = cost.uncachedInputTokens
 	measurement.resultObserved = true
 	elapsedMs, ttlMs := measurement.elapsedMs, measurement.ttlMs
 	m.mu.Unlock()
-	m.logf("session-controller: keep-alive ping COST OBSERVED ws=%q session=%s turn_id=%s uncached_input_tokens=%d threshold=%d elapsed_ms=%d ttl_ms=%d — the figure is latched and read at the ping's own turn end, which is the only place it can be acted on without racing the turn's teardown",
-		d.workspace, d.sessionID, turnID, uncachedInputTokens, m.keepAliveConfig().UncachedCostAlertTokens, elapsedMs, ttlMs)
+	m.logf("session-controller: keep-alive ping COST OBSERVED ws=%q session=%s turn_id=%s threshold=%d elapsed_ms=%d ttl_ms=%d %s — the figure is latched and read at the ping's own turn end, which is the only place it can be acted on without racing the turn's teardown",
+		d.workspace, d.sessionID, cost.turnID, m.keepAliveConfig().UncachedCostAlertTokens, elapsedMs, ttlMs, cost.breakdown())
 }
 
 // actOnColdKeepAlivePing takes the ping's verdict on the cache at the boundary

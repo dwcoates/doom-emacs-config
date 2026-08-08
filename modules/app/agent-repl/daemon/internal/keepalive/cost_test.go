@@ -57,3 +57,82 @@ func TestCameBackColdComparesAgainstTheConfiguredThreshold(t *testing.T) {
 		})
 	}
 }
+
+// THE THREE INPUT BUCKETS ARE DISJOINT AND THE TRIPWIRE READS THE SUM OF TWO.
+// The SDK's Usage contract is that total input = input_tokens +
+// cache_creation_input_tokens + cache_read_input_tokens with no overlap, so
+// each of the two counted buckets can be individually below the threshold while
+// what was actually paid for at the uncached rate is above it. Reading either
+// bucket alone would miss exactly that case.
+func TestColdCompactionReadsTheSumOfBothUncachedBuckets(t *testing.T) {
+	tests := []struct {
+		name          string
+		input         int64
+		cacheCreation int64
+		want          bool
+	}{
+		{
+			name:          "neither bucket crosses alone but their sum does",
+			input:         6_000,
+			cacheCreation: 6_000,
+			want:          true,
+		},
+		{
+			name:          "the same two buckets summing below the threshold do not trip",
+			input:         6_000,
+			cacheCreation: 3_000,
+			want:          false,
+		},
+		{
+			name:          "cache creation alone crosses",
+			input:         0,
+			cacheCreation: 1_500_000,
+			want:          true,
+		},
+		{
+			name:          "raw input alone crosses",
+			input:         10_001,
+			cacheCreation: 0,
+			want:          true,
+		},
+		{
+			name:          "exactly at the threshold has not crossed it",
+			input:         4_000,
+			cacheCreation: 6_000,
+			want:          false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange, Act.
+			got := ColdCompaction(UncachedInputTokens(tc.input, tc.cacheCreation))
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("ColdCompaction(UncachedInputTokens(%d, %d)) = %v, want %v (threshold %d)",
+					tc.input, tc.cacheCreation, got, tc.want, ColdCompactionUncachedTokens)
+			}
+		})
+	}
+}
+
+// A CACHE READ NEVER TRIPS THE ALARM, however large. A warm compaction reads
+// the entire conversation from the cache — that is precisely what it is
+// scheduled before the cache's expiry to do — so counting the read would fire
+// the alarm on every single success it exists to confirm.
+func TestColdCompactionIgnoresCacheReadsHoweverLarge(t *testing.T) {
+	// Arrange: a compaction that read 1.5 million tokens, every one of them
+	// served from cache, and paid a few hundred uncached.
+	const cacheRead int64 = 1_500_000
+	const input, cacheCreation int64 = 200, 0
+
+	// Act: the measure takes only the two uncached buckets, so the read is not
+	// an argument to it at all — which is the guarantee under test.
+	got := ColdCompaction(UncachedInputTokens(input, cacheCreation))
+
+	// Assert.
+	if got {
+		t.Fatalf("a compaction that read %d tokens from cache and paid %d uncached tripped the alarm; the cached read is the success case",
+			cacheRead, UncachedInputTokens(input, cacheCreation))
+	}
+}

@@ -167,3 +167,52 @@ func TestSweepIntervalIsTightenedToThePingWindow(t *testing.T) {
 		t.Fatalf("sweep interval %s is wider than the %s ping window; a tick could step over it entirely", got, cfg.Leeway)
 	}
 }
+
+// THE WARM-COMPACTION ARM OWNS ITS TICK. The sweep must claim the session at
+// the compaction instant for the same reason it claims the retry floor: a
+// session falling through here would be torn down by the legacy idle sweep for
+// a reason the policy has already answered.
+func TestKeepAlivePolicyOwnsTheWarmCompactionInstant(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	cfg := keepalive.DefaultConfig()
+	now := h.srv.now().UnixMilli()
+	rec := registry.Record{
+		SessionID:     "s1",
+		CWD:           "/ws",
+		LastTurnEndMs: msAgo(now, cfg.WarmCompactAt()),
+	}
+
+	// Act.
+	owned := h.srv.applyKeepAlivePolicy(rec, now)
+
+	// Assert.
+	if !owned {
+		t.Fatal("a session at the warm-compaction instant was not claimed by the policy; it would fall through to the legacy idle sweep")
+	}
+}
+
+// A SESSION SHORT OF THE COMPACTION INSTANT IS LEFT TO THE ORDINARY IDLE
+// SWEEP. The span is bounded below as well as above: a compaction taken early
+// is one submitted with more cache life left than the policy claims to be
+// trading on, and claiming the tick there would mask the idle sweep for a
+// session the policy has said nothing about.
+func TestKeepAlivePolicyLeavesASessionShortOfTheCompactionInstantAlone(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	cfg := keepalive.DefaultConfig()
+	now := h.srv.now().UnixMilli()
+	rec := registry.Record{
+		SessionID:     "s1",
+		CWD:           "/ws",
+		LastTurnEndMs: msAgo(now, cfg.WarmCompactAt()-time.Minute),
+	}
+
+	// Act.
+	owned := h.srv.applyKeepAlivePolicy(rec, now)
+
+	// Assert.
+	if owned {
+		t.Fatal("the policy claimed a session a minute short of the warm-compaction instant")
+	}
+}
