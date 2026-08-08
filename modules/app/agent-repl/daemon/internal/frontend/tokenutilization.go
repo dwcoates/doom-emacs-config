@@ -77,6 +77,16 @@ func hasSubagentProvenance(agent *frontendv1.TokenUtilizationSubagent) bool {
 // CacheRatesFromCounters is the sole aggregate cache-rate calculation. Every
 // aggregate passes its authoritative summed counters through this helper, so
 // session, agent, and model totals cannot acquire different rate semantics.
+//
+// THESE ARE BUCKET SHARES, NOT A COST MEASURE. The three rates partition the
+// prompt input and sum to 1, one per disjoint SDK bucket, so UncachedInputRate
+// is the input_tokens bucket's share ALONE — it is NOT this module's "uncached
+// input", which is input_tokens + cache_creation_input_tokens (AGENTS.md,
+// "Uncached input tokens are a SUM, and the field names lie about it", and the
+// one derivation in internal/keepalive.UncachedInputTokens). The expensive
+// share is UncachedInputRate + CacheWriteRate. Nothing here may be changed to
+// fold cache creation into UncachedInputRate: that would double-count against
+// CacheWriteRate and break the partition every consumer reads these as.
 func CacheRatesFromCounters(input, read, creation int64) *frontendv1.TokenCacheRates {
 	total := input + read + creation
 	if total == 0 {
