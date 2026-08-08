@@ -22,18 +22,25 @@ import (
 // hours of accumulated context is expensive to resume, and the user should be
 // told the price before paying it rather than after.
 //
-// THE TWO MODES DIFFER IN WHEN THE GATE COMES DOWN, not in how the session is
-// brought up. Both take the ordinary create/resume path.
+// THE MODES DIFFER IN WHEN THE GATE COMES DOWN, not in how the session is
+// brought up. All of them take the ordinary create/resume path.
 //
 //   - DIRECT clears the durable hibernation first, then brings up. The gate is
 //     gone the moment the record is written, and the session behaves exactly as
 //     any other live session does.
 //
-//   - COMPACT_FIRST brings up while the record STILL SAYS HIBERNATED, drives a
-//     compaction to completion, and only then clears. Keeping the record is
-//     what keeps the gate standing, so "prompts are refused until compaction
-//     lands" is the same mechanism that refused them before the revival began
-//     rather than a second, parallel gate that could disagree with it.
+//   - EVERY COMPACTING MODE brings up while the record STILL SAYS HIBERNATED,
+//     drives a compaction to completion, and only then clears. Keeping the
+//     record is what keeps the gate standing, so "prompts are refused until
+//     compaction lands" is the same mechanism that refused them before the
+//     revival began rather than a second, parallel gate that could disagree
+//     with it.
+//
+// THE COMPACTING MODES DIFFER ONLY IN THEIR SUBMITTED TEXT. All four submit one
+// `/compact`, wait on one completion axis, and clear one record; the scoped
+// three carry instructions naming what the summary must leave verbatim. There
+// is no second compaction machinery, which is why a new scope is a new command
+// string and nothing else.
 //
 // AND THAT IS WHY A FAILED COMPACTION LEAVES THE SESSION GATED. The clear is
 // the LAST step and happens only on the completion signal; there is no path in
@@ -50,15 +57,42 @@ import (
 // session gated, which is the safe direction.
 const compactFirstBound = 10 * time.Minute
 
-// compactCommandText is the prompt a compact-first revival submits. It is
+// compactCommandText is the prompt an UNSCOPED compaction submits. It is
 // ordinary prompt text: sessioncommand.go recognizes it, promptdispatch.go
 // forwards it verbatim, and the CLI runs the compaction. The daemon does not
 // need a control frame for something the conversation surface already has.
 const compactCommandText = "/compact"
 
+// The SCOPED compactions' prompts, which are the same session command with the
+// steering the harness already accepts (`/compact <instructions>`) — and which
+// sessioncommand.go recognizes as SESSION_COMMAND_COMPACT precisely because
+// that entry takes arguments, so a scoped revival compaction earns no more of a
+// prompt bubble than an unscoped one does.
+//
+// EACH ONE NAMES WHAT SURVIVES, not only what goes. An instruction that said
+// only "summarize the responses" leaves the harness to guess whether the rest
+// is fair game, and the whole point of the scope is that it is not.
+const (
+	compactResponsesCommandText = compactCommandText +
+		" Summarize ONLY the assistant's own response messages. Preserve every user prompt," +
+		" every tool call, and every tool result verbatim."
+	compactPromptsCommandText = compactCommandText +
+		" Summarize ONLY the user's prompt messages. Preserve every assistant response," +
+		" every tool call, and every tool result verbatim."
+	compactPromptsAndResponsesCommandText = compactCommandText +
+		" Summarize ONLY the user's prompt messages and the assistant's own response messages." +
+		" Preserve every tool call and every tool result verbatim."
+)
+
 // ReviveMode is the user's revival choice. It has no zero value that means
 // anything: the wire oneof makes "no decision" unrepresentable, and so does
 // this — Revive refuses a mode it was not given.
+//
+// ONE VALUE IS ONE WHOLE DECISION, deliberately, rather than a direct/compact
+// flag beside a separate scope. A scope only means anything to a compaction, so
+// carrying the two apart would make "resume as-is, summarizing the prompts"
+// representable — a combination with no meaning that every reader of the pair
+// would then have to rule out.
 type ReviveMode int
 
 const (
@@ -67,19 +101,64 @@ const (
 	// ReviveModeDirect resumes the conversation as-is, full accumulated
 	// context and all. The deliberate "I know it's big" path.
 	ReviveModeDirect
-	// ReviveModeCompactFirst compacts before accepting any prompt, paying the
-	// full-context cost ONCE instead of on every subsequent turn.
-	ReviveModeCompactFirst
+	// ReviveModeCompactAll compacts the whole conversation before accepting any
+	// prompt, paying the full-context cost ONCE instead of on every subsequent
+	// turn.
+	ReviveModeCompactAll
+	// ReviveModeCompactResponses summarizes only the assistant's responses and
+	// keeps the prompts, the tool calls, and the tool results verbatim.
+	ReviveModeCompactResponses
+	// ReviveModeCompactPrompts summarizes only the user's prompts and keeps
+	// everything the agent produced verbatim.
+	ReviveModeCompactPrompts
+	// ReviveModeCompactPromptsAndResponses summarizes the conversation's prose —
+	// prompts and responses both — and keeps the work verbatim.
+	ReviveModeCompactPromptsAndResponses
 )
 
 func (m ReviveMode) String() string {
 	switch m {
 	case ReviveModeDirect:
 		return "direct"
-	case ReviveModeCompactFirst:
-		return "compact_first"
+	case ReviveModeCompactAll:
+		return "compact_all"
+	case ReviveModeCompactResponses:
+		return "compact_responses"
+	case ReviveModeCompactPrompts:
+		return "compact_prompts"
+	case ReviveModeCompactPromptsAndResponses:
+		return "compact_prompts_and_responses"
 	default:
 		return "unset"
+	}
+}
+
+// compacts reports whether the mode revives by compacting first. Every mode but
+// direct does, which is why the compaction path is reached by exclusion rather
+// than by a list that a fifth scope could be forgotten from.
+func (m ReviveMode) compacts() bool {
+	return m != ReviveModeUnset && m != ReviveModeDirect
+}
+
+// compactCommand is the prompt this mode's compaction submits.
+//
+// A NON-COMPACTING MODE IS AN INVARIANT VIOLATION, not a case to default: the
+// only caller reaches here after ReviveSession has already routed direct and
+// unset elsewhere, so a mode arriving here that has no compaction text is the
+// routing having broken, and it says so rather than quietly submitting a
+// whole-conversation `/compact` the user never asked for.
+func (m ReviveMode) compactCommand() (string, error) {
+	switch m {
+	case ReviveModeCompactAll:
+		return compactCommandText, nil
+	case ReviveModeCompactResponses:
+		return compactResponsesCommandText, nil
+	case ReviveModeCompactPrompts:
+		return compactPromptsCommandText, nil
+	case ReviveModeCompactPromptsAndResponses:
+		return compactPromptsAndResponsesCommandText, nil
+	default:
+		return "", fmt.Errorf("session-controller: revival mode %s has no compaction command; only a compacting mode reaches the compaction path", m)
 	}
 }
 
@@ -183,6 +262,17 @@ func (m *Manager) ReviveSession(ctx context.Context, workspace string, mode Revi
 
 	// COMPACT-FIRST: bring up while the record STILL SAYS HIBERNATED, so the
 	// gate that has been refusing prompts keeps refusing them for free.
+	//
+	// THE COMMAND TEXT IS RESOLVED BEFORE THE BRING-UP. A mode with no
+	// compaction text is a routing failure, and discovering it after the session
+	// is up would leave a session brought up for a compaction that can never be
+	// submitted.
+	commandText, err := mode.compactCommand()
+	if err != nil {
+		m.errorf("session-controller: revive REFUSED ws=%q session=%s mode=%s error=%v — nothing was brought up and the session STAYS GATED",
+			workspace, sessionID, mode, err)
+		return err
+	}
 	d, err := m.ensure(ctx, workspace)
 	if err != nil {
 		return fmt.Errorf("session-controller: reviving session %s (ws %q) for compaction: bringing it up: %w", sessionID, workspace, err)
@@ -199,8 +289,8 @@ func (m *Manager) ReviveSession(ctx context.Context, workspace string, mode Revi
 			disarm()
 		}
 	}()
-	m.logf("session-controller: revive ws=%q session=%s mode=compact_first — the session is up and STILL GATED; submitting %s before any prompt is accepted",
-		workspace, sessionID, compactCommandText)
+	m.logf("session-controller: revive ws=%q session=%s mode=%s — the session is up and STILL GATED; submitting %q before any prompt is accepted",
+		workspace, sessionID, mode, commandText)
 
 	// THE REVIVAL'S OWN COMPACTION IS THE ONE THING THE GATE LETS THROUGH. It
 	// is submitted as submitterRevival, which guardHibernation admits precisely
@@ -236,7 +326,7 @@ func (m *Manager) ReviveSession(ctx context.Context, workspace string, mode Revi
 			workspace, sessionID, compactRequestID, claimErr)
 		return claimErr
 	}
-	if err := m.forwardPrompt(ctx, d, compactRequestID, compactCommandText,
+	if err := m.forwardPrompt(ctx, d, compactRequestID, commandText,
 		"revive-compact:"+sessionID, "", corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, submitterRevival); err != nil {
 		// The claim goes with the compaction that never ran. Leaving it standing
 		// would hand the NEXT turn's cost to a compaction that was never
@@ -265,8 +355,8 @@ func (m *Manager) ReviveSession(ctx context.Context, workspace string, mode Revi
 	m.mu.Unlock()
 	go m.awaitReviveCompaction(workspace, sessionID, compactRequestID, compacted, disarm, release)
 
-	m.logf("session-controller: revive ACCEPTED ws=%q session=%s mode=compact_first — %s is submitted and the session STAYS GATED until it lands",
-		workspace, sessionID, compactCommandText)
+	m.logf("session-controller: revive ACCEPTED ws=%q session=%s mode=%s — %q is submitted and the session STAYS GATED until it lands",
+		workspace, sessionID, mode, commandText)
 	return nil
 }
 

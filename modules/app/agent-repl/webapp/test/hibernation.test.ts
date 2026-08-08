@@ -1,10 +1,10 @@
 /**
  * hibernation — the revival gate and the composer block it enforces.
  *
- * The gate's whole job is to say WHY the session is asleep and to make the two
- * revival modes a deliberate choice, so most of these assert the cause arm
- * reaching the prose and the costlier mode never being reachable by default.
- * One edge per test.
+ * The gate's whole job is to say WHY the session is asleep and to make the
+ * revival decisions deliberate, so most of these assert the cause arm reaching
+ * the prose, each offered decision reaching the socket as itself, and the
+ * costlier mode never being reachable by default. One edge per test.
  */
 import { describe, expect, it } from "vitest";
 
@@ -14,11 +14,15 @@ import {
   HIBERNATED_BODY_CLASS,
   HIBERNATION_COMPOSER_NOTICE,
   REVIVAL_GATE_HEADING,
-  REVIVE_COMPACT_ATTR,
+  REVIVE_ATTR,
   REVIVE_COMPACT_EXPLANATION,
-  REVIVE_DIRECT_ATTR,
+  REVIVE_COMPACT_PROMPTS_AND_RESPONSES_EXPLANATION,
+  REVIVE_COMPACT_PROMPTS_EXPLANATION,
+  REVIVE_COMPACT_RESPONSES_EXPLANATION,
   REVIVE_FAILED_TEXT,
   ReviveWatch,
+  reviveDecisionFromAttr,
+  reviveOptions,
   hibernateRefusedNotice,
   hibernationBlocked,
   hibernationBlockedLog,
@@ -176,23 +180,58 @@ describe("revivalGateHtml: the blocking card", () => {
     expect(revivalGateHtml(cacheExpired(), null, NOW)).toContain("cause-cacheExpired");
   });
 
-  it("offers the compact-first action", () => {
+  it("offers the compact-everything action", () => {
     // Arrange / Act / Assert
-    expect(revivalGateHtml(forced(), null, NOW)).toContain(REVIVE_COMPACT_ATTR);
+    expect(revivalGateHtml(forced(), null, NOW)).toContain(`${REVIVE_ATTR}="compactAll"`);
+  });
+
+  it("offers the responses-only compaction", () => {
+    // Arrange / Act / Assert
+    expect(revivalGateHtml(forced(), null, NOW)).toContain(`${REVIVE_ATTR}="compactResponses"`);
+  });
+
+  it("offers the prompts-only compaction", () => {
+    // Arrange / Act / Assert
+    expect(revivalGateHtml(forced(), null, NOW)).toContain(`${REVIVE_ATTR}="compactPrompts"`);
+  });
+
+  it("offers the prompts-and-responses compaction", () => {
+    // Arrange / Act / Assert
+    expect(revivalGateHtml(forced(), null, NOW)).toContain(
+      `${REVIVE_ATTR}="compactPromptsAndResponses"`,
+    );
   });
 
   it("offers the resume-as-is action", () => {
     // Arrange / Act / Assert
-    expect(revivalGateHtml(forced(), null, NOW)).toContain(REVIVE_DIRECT_ATTR);
+    expect(revivalGateHtml(forced(), null, NOW)).toContain(`${REVIVE_ATTR}="direct"`);
   });
 
-  it("offers exactly those two actions and no third", () => {
+  it("offers exactly those five actions and no sixth", () => {
     // Arrange — no dismiss: the gate is a pure function of daemon state, so a
     // dismissed gate would reappear having taught the user the block is
     // optional. And a hibernated session has nothing to cancel back to.
     const buttons = revivalGateHtml(forced(), null, NOW).match(/<button/g) ?? [];
     // Act / Assert
-    expect(buttons).toHaveLength(2);
+    expect(buttons).toHaveLength(5);
+  });
+
+  it("explains what a responses-only compaction keeps", () => {
+    // Arrange / Act / Assert — the option is a decision about what is LOST, so
+    // an unexplained button would be a blind one.
+    expect(revivalGateHtml(forced(), null, NOW)).toContain(REVIVE_COMPACT_RESPONSES_EXPLANATION);
+  });
+
+  it("explains what a prompts-only compaction keeps", () => {
+    // Arrange / Act / Assert
+    expect(revivalGateHtml(forced(), null, NOW)).toContain(REVIVE_COMPACT_PROMPTS_EXPLANATION);
+  });
+
+  it("explains what a prompts-and-responses compaction keeps", () => {
+    // Arrange / Act / Assert
+    expect(revivalGateHtml(forced(), null, NOW)).toContain(
+      REVIVE_COMPACT_PROMPTS_AND_RESPONSES_EXPLANATION,
+    );
   });
 
   it("explains what compacting first buys", () => {
@@ -217,7 +256,7 @@ describe("revivalGateHtml: the blocking card", () => {
 
   it("replaces the buttons with a pending line once compact-first is sent", () => {
     // Arrange / Act
-    const got = revivalGateHtml(forced(), "compactFirst", NOW);
+    const got = revivalGateHtml(forced(), "compactAll", NOW);
     // Assert — greying them would leave the other mode one click away while
     // the first decision is still in flight.
     expect(got).not.toContain("<button");
@@ -230,9 +269,25 @@ describe("revivalGateHtml: the blocking card", () => {
 });
 
 describe("revivePendingText: the in-flight report", () => {
-  it("says compaction is happening first on the compact path", () => {
+  it("says the whole conversation is being compacted on the compact-all path", () => {
     // Arrange / Act / Assert
-    expect(revivePendingText("compactFirst")).toContain("compacting first");
+    expect(revivePendingText("compactAll")).toContain("whole conversation");
+  });
+
+  it("names the responses when only they are being compacted", () => {
+    // Arrange / Act / Assert — a shared "compacting…" line would leave the user
+    // unable to tell which decision the click actually sent.
+    expect(revivePendingText("compactResponses")).toContain("responses");
+  });
+
+  it("names the prompts when only they are being compacted", () => {
+    // Arrange / Act / Assert
+    expect(revivePendingText("compactPrompts")).toContain("prompts");
+  });
+
+  it("names both when prompts and responses are being compacted", () => {
+    // Arrange / Act / Assert
+    expect(revivePendingText("compactPromptsAndResponses")).toContain("prompts and responses");
   });
 
   it("says the full context is being carried on the direct path", () => {
@@ -280,8 +335,8 @@ describe("reviveRefusedLog: the record of a refused revival decision", () => {
   it("names the mode the daemon turned down", () => {
     // Arrange / Act / Assert — the two modes cost different things, so which
     // one was refused is part of the fact.
-    expect(reviveRefusedLog("compactFirst", new Error("not hibernated"))).toContain(
-      "compactFirst",
+    expect(reviveRefusedLog("compactResponses", new Error("not hibernated"))).toContain(
+      "compactResponses",
     );
   });
 
@@ -334,7 +389,7 @@ describe("ReviveWatch: the exit an accepted-but-failed revival needs", () => {
   it("reads a view that dropped the hibernation field as the revival landing", () => {
     // Arrange
     const watch = new ReviveWatch();
-    watch.arm("/w", "compactFirst");
+    watch.arm("/w", "compactAll");
     // Act
     const verdict = watch.observe([gateEffect("/w", null)]);
     // Assert
@@ -355,11 +410,11 @@ describe("ReviveWatch: the exit an accepted-but-failed revival needs", () => {
   it("carries the mode the failed verdict was armed with", () => {
     // Arrange
     const watch = new ReviveWatch();
-    watch.arm("/w", "compactFirst");
+    watch.arm("/w", "compactAll");
     // Act
     const verdict = watch.observe([gateEffect("/w", forced())]);
     // Assert — the two modes cost different things, so the report names one.
-    expect(verdict.kind === "failed" && verdict.mode).toBe("compactFirst");
+    expect(verdict.kind === "failed" && verdict.mode).toBe("compactAll");
   });
 
   it("carries the detail the failing view reported, not the one it was armed on", () => {
@@ -434,16 +489,16 @@ describe("ReviveWatch: the exit an accepted-but-failed revival needs", () => {
     // Arrange
     const watch = new ReviveWatch();
     // Act
-    watch.arm("/w", "compactFirst");
+    watch.arm("/w", "compactAll");
     // Assert
-    expect(watch.pending).toBe("compactFirst");
+    expect(watch.pending).toBe("compactAll");
   });
 });
 
 describe("reviveFailedLog: the record of an accepted revival that did not take", () => {
   it("names the mode that was accepted", () => {
     // Arrange / Act / Assert
-    expect(reviveFailedLog("compactFirst", forced())).toContain("compactFirst");
+    expect(reviveFailedLog("compactAll", forced())).toContain("compactAll");
   });
 
   it("carries the cause the failing view reported", () => {
@@ -469,7 +524,7 @@ describe("the gate's failed-revival line", () => {
     // Arrange / Act
     const got = revivalGateHtml(forced(), null, NOW, REVIVE_FAILED_TEXT);
     // Assert
-    expect(got).toContain(REVIVE_COMPACT_ATTR);
+    expect(got).toContain(`${REVIVE_ATTR}="compactAll"`);
   });
 
   it("draws no failure line when there is nothing to report", () => {
@@ -501,5 +556,66 @@ describe("escaping", () => {
     const got = revivalGateHtml(idleCutoff(HOUR), null, NOW);
     // Act / Assert
     expect(got).not.toContain("<script");
+  });
+});
+
+describe("reviveOptions: the offered answers", () => {
+  it("offers every decision the wire can carry", () => {
+    // Arrange — an option missing here is a decision the daemon accepts and
+    // the user can never reach.
+    const decisions = reviveOptions(forced()).map((o) => o.decision);
+    // Act / Assert
+    expect(decisions).toEqual([
+      "compactAll",
+      "compactPromptsAndResponses",
+      "compactResponses",
+      "compactPrompts",
+      "direct",
+    ]);
+  });
+
+  it("marks resume-as-is as the costly one and nothing else", () => {
+    // Arrange / Act
+    const warned = reviveOptions(forced()).filter((o) => o.warn);
+    // Assert — the compactions all pay their cost once; only this one pays it
+    // on every later turn.
+    expect(warned.map((o) => o.decision)).toEqual(["direct"]);
+  });
+
+  it("strengthens the resume-as-is sentence when the cache is already gone", () => {
+    // Arrange / Act
+    const option = reviveOptions(cacheExpired()).find((o) => o.decision === "direct");
+    // Assert
+    expect(option?.explanation).toContain("already");
+  });
+
+  it("gives every option its own explanation", () => {
+    // Arrange — a shared sentence would make two buttons indistinguishable in
+    // the one respect that matters: what each one throws away.
+    const explanations = reviveOptions(forced()).map((o) => o.explanation);
+    // Act / Assert
+    expect(new Set(explanations).size).toBe(explanations.length);
+  });
+});
+
+describe("reviveDecisionFromAttr: reading a clicked decision", () => {
+  it("reads back every decision the gate renders", () => {
+    // Arrange
+    for (const option of reviveOptions(forced())) {
+      // Act / Assert — the render and the read are one vocabulary.
+      expect(reviveDecisionFromAttr(option.decision)).toBe(option.decision);
+    }
+  });
+
+  it("throws on an unrecognized decision rather than guessing one", () => {
+    // Arrange / Act / Assert — defaulting to direct would resume at full
+    // context a user who asked to compact; defaulting to a compaction would
+    // discard a conversation nobody consented to lose.
+    expect(() => reviveDecisionFromAttr("compactSomething")).toThrow(/unknown decision/);
+  });
+
+  it("throws on a missing attribute", () => {
+    // Arrange / Act / Assert
+    expect(() => reviveDecisionFromAttr(null)).toThrow(/unknown decision/);
   });
 });

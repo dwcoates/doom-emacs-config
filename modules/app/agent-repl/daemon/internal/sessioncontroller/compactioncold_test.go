@@ -275,7 +275,7 @@ func TestReviveCompactionIsClaimedForTheColdReadAlarm(t *testing.T) {
 	m, _, _ := reviveRig(t, registry.HibernationCauseCacheExpired)
 
 	// Act.
-	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactFirst); err != nil {
+	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactAll); err != nil {
 		t.Fatalf("ReviveSession compact_first: %v", err)
 	}
 
