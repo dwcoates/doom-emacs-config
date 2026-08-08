@@ -50,11 +50,11 @@ func TestSupersedeStaysOpenUntilTheSuccessorIsOperational(t *testing.T) {
 	// just triggered is still reported.
 	rec, _ := reg.Get("s_old")
 	item := errclass.Death(t.Logf, rec.SessionID, rec.DeathReason, rec.DeathResolvedAtMs)
-	if item.GetResolvedAtMs() != 0 {
-		t.Fatalf("resolved_at_ms = %d before the successor was up; a fresh supersede must still show its card", item.GetResolvedAtMs())
+	if errclass.ResolvedAtMs(item) != 0 {
+		t.Fatalf("resolved_at_ms = %d before the successor was up; a fresh supersede must still show its card", errclass.ResolvedAtMs(item))
 	}
-	if item.GetErrorType() != string(errclass.TypeSessionSuperseded) {
-		t.Fatalf("error_type = %q, want %s", item.GetErrorType(), errclass.TypeSessionSuperseded)
+	if errclass.TypeName(item) != string(errclass.TypeSessionSuperseded) {
+		t.Fatalf("error_type = %q, want %s", errclass.TypeName(item), errclass.TypeSessionSuperseded)
 	}
 }
 
@@ -130,18 +130,23 @@ func TestResolvedSupersedeSettlesTheSameCardItOpened(t *testing.T) {
 		registry.Record{SessionID: "s_new", CWD: "/w"},
 	)
 	open, _ := reg.Get("s_old")
-	openItem := errclass.Death(t.Logf, open.SessionID, open.DeathReason, open.DeathResolvedAtMs)
+	openUUID := errclass.DeathItemUUID(open.SessionID)
 	r := &RegistryRegistrar{Reg: reg, Now: func() int64 { return 1700 }}
 
 	// Act.
 	r.SessionOperational("/w", "s_new")
 
-	// Assert.
+	// Assert — the card's address is its ENVELOPE's now, and both edges derive
+	// it from the same session, so a settled re-push replaces the open card
+	// rather than landing beside it.
 	settled, _ := reg.Get("s_old")
-	item := errclass.Death(t.Logf, settled.SessionID, settled.DeathReason, settled.DeathResolvedAtMs)
-	if item.GetItemUuid() == "" || item.GetItemUuid() != openItem.GetItemUuid() {
+	settledUUID := errclass.DeathItemUUID(settled.SessionID)
+	if settledUUID == "" || settledUUID != openUUID {
 		t.Fatalf("settled uuid = %q, open uuid = %q; they must be the same card",
-			item.GetItemUuid(), openItem.GetItemUuid())
+			settledUUID, openUUID)
+	}
+	if !errclass.IsResolved(errclass.Death(t.Logf, settled.SessionID, settled.DeathReason, settled.DeathResolvedAtMs)) {
+		t.Fatal("the operational successor left the superseded card open")
 	}
 }
 

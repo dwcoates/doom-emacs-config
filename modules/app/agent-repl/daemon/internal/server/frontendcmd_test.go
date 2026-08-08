@@ -1271,7 +1271,7 @@ func TestSnapshotProviderIncludesSessionInits(t *testing.T) {
 	provider := &ssmSnapshotProvider{
 		workspaceCreation: newFakeWorkspaceCreation(),
 		inits: fakeInits{inits: []*frontendv1.SessionInitView{
-			{Workspace: "/w", SessionId: "s1", Init: &datav1.SystemInit{Model: "haiku"}},
+			{Workspace: "/w", Fence: "s1", Init: &datav1.SystemInit{Model: "haiku"}},
 		}},
 	}
 
@@ -1290,7 +1290,7 @@ func TestSnapshotProviderIncludesTaskCatalogsAndLogsTheirShape(t *testing.T) {
 	provider := &ssmSnapshotProvider{
 		workspaceCreation: newFakeWorkspaceCreation(),
 		catalogs: fakeCatalogs{catalogs: []*frontendv1.TaskCatalog{{
-			Workspace: "/w", SessionId: "s1",
+			Workspace: "/w", Fence: "s1",
 			Tasks: []*frontendv1.TaskEntry{{TaskId: "t1"}},
 		}}},
 		logf: func(format string, args ...any) {

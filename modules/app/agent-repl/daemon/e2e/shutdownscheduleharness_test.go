@@ -613,7 +613,7 @@ func describeHolds(draining *frontendv1.ShutdownScheduleDraining) string {
 	parts := make([]string, 0, len(draining.GetHolds()))
 	for _, hold := range draining.GetHolds() {
 		parts = append(parts, fmt.Sprintf("{ws=%s session=%s turn=%v tasks=%v}",
-			hold.GetWorkspace(), hold.GetSessionId(), hold.GetTurn(), hold.GetTasks()))
+			hold.GetWorkspace(), hold.String(), hold.GetTurn(), hold.GetTasks()))
 	}
 	return strings.Join(parts, " ")
 }
@@ -657,7 +657,7 @@ func awaitHeldEntry(t *testing.T, conn *websocket.Conn, workspace, what string) 
 	awaitAll(t, conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
 		what: func(frame *frontendv1.FrontendFrame) bool {
 			for _, entry := range queueViewFor(frame, workspace).GetEntries() {
-				if entry.GetShutdownHold() != nil {
+				if entry.GetShutdown() != nil {
 					held = entry
 					return true
 				}

@@ -985,7 +985,7 @@ func TestAnUnclassifiedEntryCarriesNoVerdictOnTheWire(t *testing.T) {
 	// Arrange
 	frame := QueueViewFrame(&frontendv1.QueueView{
 		Workspace: "w", Fence: "s",
-		Entries:   []*frontendv1.QueueEntry{{Id: "q1"}},
+		Entries: []*frontendv1.QueueEntry{{Id: "q1"}},
 	})
 	// Act
 	data, err := marshalFrame(frame)

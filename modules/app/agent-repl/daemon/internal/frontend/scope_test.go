@@ -118,7 +118,7 @@ func TestScopeFrameRoutesRotatedConversationByWorkspace(t *testing.T) {
 	// agent-repl session id in Scope. Vendor rotation must not sever the feed.
 	sc := Scope{SessionID: "s_agent", Workspace: "/w"}
 	frame := ConversationDeltaFrame(&frontendv1.ConversationDelta{
-		Fence: "550053ca-53a6-456b-97ff-0c73269ce253",
+		Fence:     "550053ca-53a6-456b-97ff-0c73269ce253",
 		Workspace: "/w",
 	})
 

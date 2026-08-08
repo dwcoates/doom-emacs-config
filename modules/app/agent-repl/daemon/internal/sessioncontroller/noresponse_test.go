@@ -28,9 +28,7 @@ func assistantTextItem(uuid, model string, texts ...string) *frontendv1.Conversa
 	}
 	return &frontendv1.ConversationItem{
 		Uuid: uuid,
-		Item: &frontendv1.ConversationItem_AssistantMessage{
-			AssistantMessage: &datav1.ApiAssistantMessage{Model: model, Content: blocks},
-		},
+		Item: &frontendv1.ConversationItem_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{Body: &datav1.ApiAssistantMessage{Model: model, Content: blocks}}}}},
 	}
 }
 
@@ -60,7 +58,7 @@ func (h *queueHarness) assistantTurns() []*frontendv1.ConversationItem {
 	var out []*frontendv1.ConversationItem
 	for _, cd := range h.push.convo {
 		for _, it := range cd.GetItems() {
-			if it.GetAssistantMessage() != nil {
+			if it.GetAgent().GetResponse().GetBody() != nil {
 				out = append(out, it)
 			}
 		}
@@ -115,11 +113,10 @@ func TestIsNoResponsePlaceholder(t *testing.T) {
 			name: "a synthetic record whose sole block is not text",
 			item: &frontendv1.ConversationItem{
 				Uuid: "a1",
-				Item: &frontendv1.ConversationItem_AssistantMessage{
-					AssistantMessage: &datav1.ApiAssistantMessage{Model: syntheticModel, Content: []*datav1.ContentBlock{
-						{Block: &datav1.ContentBlock_ToolUse{ToolUse: &datav1.ToolUseBlock{Id: "t1", Name: "Read"}}},
-					}},
-				},
+				Item: &frontendv1.ConversationItem_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{Body: &datav1.ApiAssistantMessage{Model: syntheticModel, Content: []*datav1.ContentBlock{
+					{Block: &datav1.ContentBlock_ToolUse{ToolUse: &datav1.ToolUseBlock{Id: "t1", Name: "Read"}}},
+				}},
+				}}}},
 			},
 			want: false,
 		},
