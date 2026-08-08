@@ -986,6 +986,8 @@ abnormal turn conclusion.")
 ;; a verdict on any one workspace.  Its source is
 ;; `agent-repl-uds-link-health', which frontend-uds.el owns.
 (declare-function agent-repl-uds-link-health "frontend-uds" ())
+(declare-function agent-repl--frontend-expected-restart-covering-initiator
+                  "daemon" (&optional as-of))
 
 (defface agent-repl-daemon-link-degraded
   `((t :background ,agent-repl--color-thinking-red
@@ -2462,9 +2464,30 @@ caller is told to proceed."
                               agent-repl-state-stale-threshold)
     t)
    (t
-    (agent-repl--warn nil "update-in-flight-p: stale flag (%.2fs old), force-clearing"
-                      (- (float-time) agent-repl--update-in-flight))
-    (setq agent-repl--update-in-flight nil)
+    ;; The CLEAR is unconditional; only the reporting is classified.  A chain
+    ;; that was in flight when Emacs bounced the daemon stalls for as long as
+    ;; the daemon is away, so it crosses the threshold on essentially every
+    ;; deploy — and the flag left behind is just as wedged as any other, so
+    ;; it must still be force-cleared here or the tick that follows the
+    ;; restart never runs.
+    ;;
+    ;; What that restart does not justify is spending the warn.  This warn is
+    ;; the in-flight-flag LEAK detector, and its value is that it fires only
+    ;; when a chain genuinely failed to finalize; letting a deploy fire it
+    ;; every time would train every reader to scroll past it.  So a stale flag
+    ;; stamped inside an expected-restart window is recorded at info naming
+    ;; the initiator, and a stale flag with no window covering it keeps the
+    ;; warn verbatim.
+    (let ((initiator (agent-repl--frontend-expected-restart-covering-initiator
+                      agent-repl--update-in-flight))
+          (age (- (float-time) agent-repl--update-in-flight)))
+      (setq agent-repl--update-in-flight nil)
+      (if initiator
+          (agent-repl--info nil
+                            "update-in-flight-p: stale flag (%.2fs old) from the %s restart, force-clearing"
+                            age initiator)
+        (agent-repl--warn nil "update-in-flight-p: stale flag (%.2fs old), force-clearing"
+                          age)))
     nil)))
 
 (defun agent-repl--update-one-workspace-state (ws do-git-p)
