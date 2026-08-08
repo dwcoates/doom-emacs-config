@@ -1683,6 +1683,13 @@ func (c *QueueCoordinator) driveTestFix(ctx context.Context, repo string, req Re
 func (c *QueueCoordinator) failTestGate(repo string, req, driven Request, release func(), preHead string, res Result) bool {
 	cause := fmt.Sprintf("test suite failed after cherry-picking %s and the one resolution attempt did not fix it: %s",
 		res.FailingCommit, dlog.Clamp(res.TestFailureTail, testFailureCauseBytes))
+	// The tail is clamped twice over and, for a runner that keeps going after a
+	// suite fails, often carries no trace of the failure itself. The archive is
+	// the only complete record, so the cause names it rather than leaving the
+	// reader to go hunting through a rotated daemon log for it.
+	if res.TestFailureOutputPath != "" {
+		cause += fmt.Sprintf(" (full suite output: %s)", res.TestFailureOutputPath)
+	}
 	switch {
 	case preHead == "":
 		// No rollback point was recorded, which no merge.Driver Merge omits.
