@@ -3041,6 +3041,37 @@ describe("UdsSession displaced-turn terminal", () => {
     expect(evt.payload.value.recovered).toBe(true);
   });
 
+  it("surfaces a synthesized terminal the store refused", async () => {
+    // Arrange: the synthesized end is written, and the store rejects it. A
+    // throw here would be an unhandled rejection out of a timer callback,
+    // which tells nobody the turn's end is not durable.
+    const { daemon, store } = await rig({
+      storeSessionId: "vendor-uuid",
+      interruptTerminalGraceMs: 5,
+    });
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
+    await store.peer().next(StoreWriteSchema);
+    await daemon.next(AckSchema);
+    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1" }));
+    await daemon.next(AckSchema);
+    const synthesized = await store.peer().next(StoreWriteSchema);
+    expect(synthesized.batch!.events.map((event) => event.payload.case)).toEqual([
+      "accountUsageObservation",
+      "turnEnded",
+    ]);
+    // Act
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { error: "terminal disk full" }));
+    // Assert: an UNCONTAINED degradation — unlike the synthesis itself, this
+    // one was not absorbed.
+    let evt = await daemon.next(EventSchema);
+    while (evt.payload.case !== "degradedState" || !evt.payload.value.reason.includes("was not durably stored")) {
+      evt = await daemon.next(EventSchema);
+    }
+    expect(evt.payload.value.component).toBe("claude-shim-turn-lifecycle");
+    expect(evt.payload.value.reason).toContain("terminal disk full");
+    expect(evt.payload.value.recovered).toBe(false);
+  });
+
   it("keeps an SDK result that arrives after the synthesized terminal", async () => {
     // Arrange: the terminal was synthesized, then the overdue result lands.
     const { daemon, query, store } = await rig({
