@@ -1066,7 +1066,7 @@ func (p *fakeProgress) Apply(workspace, sessionID string, ev *corev1.Event) erro
 }
 func (p *fakeProgress) SetCounts(string, int64, int64) {}
 func (p *fakeProgress) NoteTurnAccepted(workspace, sessionID string) *frontendv1.ProgressView {
-	return &frontendv1.ProgressView{Workspace: workspace, SessionId: sessionID}
+	return &frontendv1.ProgressView{Workspace: workspace, Fence: sessionID}
 }
 
 // NoteTurnRejected records the clock closures a failed submit produced, so a
@@ -1430,8 +1430,8 @@ func TestConsumeHeartbeatProgressStampsWorkspaceAndSession(t *testing.T) {
 
 	// Assert.
 	hv := push.heartbeats[0]
-	if hv.GetWorkspace() != "ws" || hv.GetSessionId() != "s1" {
-		t.Errorf("heartbeat identity = %q/%q, want ws/s1", hv.GetWorkspace(), hv.GetSessionId())
+	if hv.GetWorkspace() != "ws" || hv.GetFence() != "s1" {
+		t.Errorf("heartbeat identity = %q/%q, want ws/s1", hv.GetWorkspace(), hv.GetFence())
 	}
 }
 
@@ -1599,11 +1599,11 @@ func TestApplyFiresOnSessionStarted(t *testing.T) {
 
 // failureItems returns the system-failure items among a fake pusher's
 // conversation deltas, which is where the degraded account now lives.
-func failureItems(push *fakePusher) []*frontendv1.SystemFailureItem {
-	var out []*frontendv1.SystemFailureItem
+func failureItems(push *fakePusher) []*frontendv1.FailureCardView {
+	var out []*frontendv1.FailureCardView
 	for _, cd := range push.convo {
 		for _, item := range cd.GetItems() {
-			if f := item.GetSystemFailure(); f != nil {
+			if f := item.GetFailureCard(); f != nil {
 				out = append(out, f)
 			}
 		}
@@ -1616,7 +1616,7 @@ func failureUUIDs(push *fakePusher) []string {
 	var out []string
 	for _, cd := range push.convo {
 		for _, item := range cd.GetItems() {
-			if item.GetSystemFailure() != nil {
+			if item.GetFailureCard() != nil {
 				out = append(out, item.GetUuid())
 			}
 		}
@@ -1637,8 +1637,8 @@ func TestDegradedStateBecomesAFailureCard(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("failure cards = %d, want 1", len(got))
 	}
-	if got[0].GetErrorType() != string(errclass.TypeShimStoreWriteRejected) {
-		t.Fatalf("error_type = %q, want %q", got[0].GetErrorType(), errclass.TypeShimStoreWriteRejected)
+	if errclass.TypeName(got[0]) != string(errclass.TypeShimStoreWriteRejected) {
+		t.Fatalf("error_type = %q, want %q", errclass.TypeName(got[0]), errclass.TypeShimStoreWriteRejected)
 	}
 }
 
@@ -1651,7 +1651,7 @@ func TestDegradedStateCardCarriesTheDroppedCount(t *testing.T) {
 	c.Degraded("s1", nil, &corev1.DegradedState{Component: "store", Reason: "down", DroppedCount: 12})
 
 	// Assert.
-	if got := failureItems(push)[0].GetSourceDetail(); !strings.Contains(got, "dropped=12") {
+	if got := failureItems(push)[0].GetDetail(); !strings.Contains(got, "dropped=12") {
 		t.Fatalf("source_detail = %q, want the dropped count", got)
 	}
 }
@@ -1733,8 +1733,9 @@ func TestTheOpeningEdgeIsUnresolved(t *testing.T) {
 	c.ConnectionDegraded("s1", "no traffic")
 
 	// Assert.
-	if got := failureItems(push)[0].GetResolvedAtMs(); got != 0 {
-		t.Fatalf("resolved_at_ms = %d, want 0 while the window is open", got)
+	if failureItems(push)[0].GetOpen() == nil {
+		t.Fatalf("lifecycle = %T, want the open arm while the window is open",
+			failureItems(push)[0].GetLifecycle())
 	}
 }
 
@@ -1748,8 +1749,8 @@ func TestTheClosingEdgeStampsResolution(t *testing.T) {
 	c.ConnectionRecovered("s1")
 
 	// Assert: a settled card, not a permanent alarm about something that ended.
-	if got := failureItems(push)[1].GetResolvedAtMs(); got == 0 {
-		t.Fatal("resolved_at_ms = 0 on the closing edge; the card would stand as a permanent alarm")
+	if !errclass.IsResolved(failureItems(push)[1]) {
+		t.Fatal("the closing edge left the card open; it would stand as a permanent alarm")
 	}
 }
 
@@ -1769,13 +1770,15 @@ func TestAResyncReplaysTheSettledCard(t *testing.T) {
 	if len(replayed) != 1 {
 		t.Fatalf("replayed failure cards = %d, want 1", len(replayed))
 	}
-	if replayed[0].GetResolvedAtMs() == 0 {
+	if !errclass.IsResolved(replayed[0]) {
 		t.Fatal("the resync re-opened a window that had already closed")
 	}
 }
 
-func TestAFailureCardCarriesItsOwnAddressing(t *testing.T) {
-	// Arrange: what lets a footer row scroll the feed to this card.
+func TestAFailureCardIsAddressedByItsEnvelope(t *testing.T) {
+	// Arrange: what lets a footer row scroll the feed to this card. The address
+	// used to be repeated onto the card itself; it is the ENVELOPE's alone now,
+	// so there is exactly one copy of it and nothing to keep in step.
 	push := &fakePusher{}
 	c := newTestConsumer(push, &fakeApplier{})
 
@@ -1783,8 +1786,8 @@ func TestAFailureCardCarriesItsOwnAddressing(t *testing.T) {
 	c.ConnectionDegraded("s1", "no traffic")
 
 	// Assert.
-	if got := failureItems(push)[0].GetItemUuid(); got != failureUUIDs(push)[0] {
-		t.Fatalf("item_uuid = %q, want it to match the envelope uuid %q", got, failureUUIDs(push)[0])
+	if got := failureUUIDs(push)[0]; got == "" {
+		t.Fatal("the pushed failure card has no envelope uuid, so no surface can address it")
 	}
 }
 
@@ -2058,8 +2061,8 @@ func TestBackgroundTasksChangedRepublishesTheTaskCatalog(t *testing.T) {
 	if len(push.catalog) != 1 {
 		t.Fatalf("task catalog pushes = %d, want 1", len(push.catalog))
 	}
-	if got := push.catalog[0].GetTasks()[0].GetStatus(); got != "lost" {
-		t.Fatalf("ghost status = %q, want lost", got)
+	if push.catalog[0].GetTasks()[0].GetLost() == nil {
+		t.Fatalf("ghost status = %T, want the lost arm", push.catalog[0].GetTasks()[0].GetStatus())
 	}
 }
 
@@ -2265,7 +2268,7 @@ func TestUserTurnReceiptIgnoresNonUserItems(t *testing.T) {
 	// Arrange — an assistant-only delta.
 	cd := &frontendv1.ConversationDelta{Items: []*frontendv1.ConversationItem{{
 		RequestId: "fe-5-0000",
-		Item:      &frontendv1.ConversationItem_AssistantMessage{AssistantMessage: &datav1.ApiAssistantMessage{}},
+		Item:      &frontendv1.ConversationItem_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{Body: &datav1.ApiAssistantMessage{}}}}},
 	}}}
 	// Act
 	_, textLen := userTurnReceipt(cd)
@@ -2739,10 +2742,7 @@ func TestSystemFailureCardTakesTheWarnChannel(t *testing.T) {
 	c := degradedAccountingConsumer(logs)
 
 	// Act.
-	c.pushFailure("failure-1", &frontendv1.SystemFailureItem{
-		ErrorType:    frontendv1.ErrorClass_ERROR_CLASS_INTERNAL.String(),
-		SourceDetail: "the shim died",
-	})
+	c.pushFailure("failure-1", errclass.Card(errclass.TypeSessionShimDied, "the shim died"))
 
 	// Assert.
 	if !strings.Contains(strings.Join(logs.warn, "\n"), "system failure session=") {
@@ -2758,11 +2758,9 @@ func TestResolvedSystemFailureCardTakesTheInfoChannel(t *testing.T) {
 	c := degradedAccountingConsumer(logs)
 
 	// Act.
-	c.pushFailure("failure-1", &frontendv1.SystemFailureItem{
-		ErrorType:    frontendv1.ErrorClass_ERROR_CLASS_INTERNAL.String(),
-		SourceDetail: "the store link recovered",
-		ResolvedAtMs: 1720000000000,
-	})
+	settled := errclass.Card(errclass.TypeShimStoreWriteRejected, "the store link recovered")
+	errclass.Resolve(settled, 1720000000000)
+	c.pushFailure("failure-1", settled)
 
 	// Assert.
 	if strings.Contains(strings.Join(logs.warn, "\n"), "system failure session=") {

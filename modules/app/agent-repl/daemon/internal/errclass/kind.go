@@ -374,3 +374,14 @@ func KindName(kind *frontendv1.FailureKind) string {
 	}
 	return string(t)
 }
+
+// CardTone is the tone a card resolves to: the color a surface renders it in.
+// A card whose kind names no daemon type reads as "", which no surface matches,
+// rather than defaulting into one of the two sides.
+func CardTone(card *frontendv1.FailureCardView) string {
+	t, ok := TypeOf(card.GetKind())
+	if !ok {
+		return ""
+	}
+	return Tone(t)
+}

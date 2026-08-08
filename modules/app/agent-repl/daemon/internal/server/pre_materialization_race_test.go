@@ -147,7 +147,7 @@ func newPreMaterializationRaceHarness(t *testing.T) (*AgentShim, *progress.Manag
 		SessionDeaths:     stubSessionDeaths{},
 		SessionCommands:   &SessionCommandBinding{},
 		Sessions:          fakeSessions{views: []*frontendv1.SessionView{{Workspace: raceWorkspace, SessionId: raceSession}}},
-		Inits:             fakeInits{inits: []*frontendv1.SessionInitView{{Workspace: raceWorkspace, SessionId: raceSession}}},
+		Inits:             fakeInits{inits: []*frontendv1.SessionInitView{{Workspace: raceWorkspace, Fence: raceSession}}},
 		WorkspaceCreation: bridge,
 		MergeLease:        stubMergeLease{},
 		MergeQueue:        newTestMergeQueue(t),
@@ -290,7 +290,7 @@ func TestPreMaterializationPublicationGateDrainsEveryOrdering(t *testing.T) {
 	// release must queue after the authoritative snapshot.  The synchronous
 	// completion receipt makes the ordering a property of the handshake rather
 	// than a race between the worker and the frontend goroutine.
-	shim.Server.PushConversationDelta(&frontendv1.ConversationDelta{Workspace: raceWorkspace, SessionId: raceSession})
+	shim.Server.PushConversationDelta(&frontendv1.ConversationDelta{Workspace: raceWorkspace, Fence: raceSession})
 	prog.SetCounts(raceWorkspace, 5, 4)
 
 	raceAssertAuthoritativeRelease(t, conn)
@@ -328,7 +328,7 @@ func raceAssertAuthoritativeRelease(t *testing.T, conn *websocket.Conn) {
 		if len(snapshot.GetSessions()) != 1 || snapshot.GetSessions()[0].GetSessionId() != raceSession {
 			t.Fatalf("post-ACK snapshot sessions = %v, want the released session", snapshot.GetSessions())
 		}
-		if len(snapshot.GetInits()) != 1 || snapshot.GetInits()[0].GetSessionId() != raceSession {
+		if len(snapshot.GetInits()) != 1 || snapshot.GetInits()[0].GetFence() != raceSession {
 			t.Fatalf("post-ACK snapshot inits = %v, want the released session init", snapshot.GetInits())
 		}
 		return

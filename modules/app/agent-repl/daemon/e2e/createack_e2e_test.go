@@ -19,6 +19,7 @@
 package e2e
 
 import (
+	"claude-repld/internal/errclass"
 	"fmt"
 	"strings"
 	"testing"
@@ -131,7 +132,7 @@ func TestE2ECreateNacksLoudlyOnAWedgedBringUp(t *testing.T) {
 	if !strings.Contains(ack.GetError(), "never completed its handshake") {
 		t.Fatalf("nack error = %q, want it to name the pending handshake link", ack.GetError())
 	}
-	if got := ack.GetFailure().GetErrorType(); got != "shim.handshake_incomplete" {
+	if got := errclass.KindName(ack.GetFailure()); got != "shim.handshake_incomplete" {
 		t.Fatalf("nack failure type = %q, want shim.handshake_incomplete", got)
 	}
 }

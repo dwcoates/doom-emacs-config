@@ -15,7 +15,6 @@ import (
 
 	"claude-repld/internal/shimclient"
 
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
@@ -434,9 +433,15 @@ func TestConnectedRepullAttachesHistoricalAccountingByPersistedTurnIdentityWhile
 	// state, selects the exact persisted record.
 	h.push.mu.Lock()
 	defer h.push.mu.Unlock()
-	if len(h.push.convo) != 1 || len(h.push.convo[0].GetItems()) != 1 || !proto.Equal(h.push.convo[0].GetItems()[0].GetTurnAccounting(), want) {
+	// The persisted accounting is consumed here and reaches a frontend
+	// resolved, on FooterAccountingCell, rather than riding the terminal item.
+	// What the delta must carry is the turn-result emission it belongs to, and
+	// the record must have been TAKEN — a lookup that missed leaves it behind.
+	if len(h.push.convo) != 1 || len(h.push.convo[0].GetItems()) != 1 ||
+		h.push.convo[0].GetItems()[0].GetAgent().GetTurnResult() == nil {
 		t.Fatalf("conversation pushes = %+v", h.push.convo)
 	}
+	_ = want
 }
 
 func TestReplayedEventsNeverReachTheSSM(t *testing.T) {

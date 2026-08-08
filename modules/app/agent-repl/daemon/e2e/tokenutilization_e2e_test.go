@@ -14,6 +14,8 @@ import (
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"claude-repld/internal/errclass"
+	"claude-repld/internal/frontend"
+	"claude-repld/internal/statedb"
 
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -64,7 +66,7 @@ func TestE2ETokenUtilizationPairsResponseUsageWithTiming(t *testing.T) {
 
 	writeCmd(t, conn, `{"requestId":"e2e-token-main","submitPrompt":{"text":"measure response timing","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
 	awaitItem(t, conn, cwd, "the completed assistant response", func(item *frontendv1.ConversationItem) bool {
-		return isFakeTurnMessage(item.GetAssistantMessage().GetId(), 1)
+		return isFakeTurnMessage(item.GetAgent().GetResponse().GetBody().GetId(), 1)
 	})
 	// A file-plane assistant item can be pushed before its stream-plane
 	// message_start timing reaches the correlator. The terminal result is the
@@ -76,7 +78,7 @@ func TestE2ETokenUtilizationPairsResponseUsageWithTiming(t *testing.T) {
 	replay := replayItems(t, fresh, state, cwd, "e2e-token-replay")
 	var replayed *frontendv1.ConversationItem
 	for _, candidate := range replay {
-		if isFakeTurnMessage(candidate.GetAssistantMessage().GetId(), 1) {
+		if isFakeTurnMessage(candidate.GetAgent().GetResponse().GetBody().GetId(), 1) {
 			replayed = candidate
 			break
 		}
@@ -84,14 +86,19 @@ func TestE2ETokenUtilizationPairsResponseUsageWithTiming(t *testing.T) {
 	if replayed == nil {
 		t.Fatal("replay omitted the assistant response carrying token utilization")
 	}
-	usage := requireSingleTokenUtilization(t, replayed, "replayed assistant response")
+	usage := requireSingleTokenUtilization(t, h, id, replayed.GetAgent().GetResponse().GetBody().GetId(), "replayed assistant response")
+	// The wire's half of the same fact: the bubble's corner shows what the
+	// daemon resolved from this record, and it must be the record's own output.
+	if stamp := requireResponseStamp(t, replayed, "replayed assistant response"); stamp.GetOutputTokens() != usage.GetUsage().GetOutputTokens() {
+		t.Errorf("resolved stamp output_tokens = %d, want the durable record's %d", stamp.GetOutputTokens(), usage.GetUsage().GetOutputTokens())
+	}
 	if got, want := usage.GetAgentReplSessionId(), id; got != want {
 		t.Errorf("token utilization agent_repl_session_id = %q, want session %q", got, want)
 	}
 	if usage.GetClaudeSessionId() == "" {
 		t.Error("token utilization claude_session_id is empty: response ownership must survive the shim-to-daemon boundary")
 	}
-	if got, want := usage.GetApiMessageId(), replayed.GetAssistantMessage().GetId(); got != want {
+	if got, want := usage.GetApiMessageId(), replayed.GetAgent().GetResponse().GetBody().GetId(); got != want {
 		t.Errorf("token utilization api_message_id = %q, want the response's own message id %q", got, want)
 	}
 	if usage.GetMainAgent() == nil || usage.GetSubagent() != nil {
@@ -108,13 +115,45 @@ func TestE2ETokenUtilizationPairsResponseUsageWithTiming(t *testing.T) {
 	}
 }
 
-func requireSingleTokenUtilization(t *testing.T, item *frontendv1.ConversationItem, source string) *frontendv1.TokenUtilization {
+// requireSingleTokenUtilization reads the ONE durable utilization record a
+// response produced, from the ledger that owns it.
+//
+// The record left the conversation item: the feed carries the RESOLVED stamp
+// the bubble's corner renders, and the vendor-faithful evidence stays in the
+// durable layer. Both are still asserted — this reads the evidence, and
+// requireResponseStamp below reads what the wire resolved from it.
+func requireSingleTokenUtilization(t *testing.T, h *e2eHarness, sessionID, apiMessageID, source string) *frontendv1.TokenUtilization {
 	t.Helper()
-	records := item.GetTokenUtilization()
+	ledger, err := statedb.NewTokenUtilizations(h.stateDB)
+	if err != nil {
+		t.Fatalf("open durable token-utilization ledger: %v", err)
+	}
+	all, err := ledger.List(sessionID)
+	if err != nil {
+		t.Fatalf("list durable token-utilization ledger: %v", err)
+	}
+	var records []*frontendv1.TokenUtilization
+	for _, record := range all {
+		if record.GetApiMessageId() == apiMessageID {
+			records = append(records, record)
+		}
+	}
 	if len(records) != 1 {
 		t.Fatalf("%s token utilization records = %d, want exactly one API-response record", source, len(records))
 	}
 	return records[0]
+}
+
+// requireResponseStamp reads the resolved figures a response's bubble renders.
+// They are the daemon's own derivation from the durable record above, so a
+// stamp that disagrees with it is the two halves drifting apart.
+func requireResponseStamp(t *testing.T, item *frontendv1.ConversationItem, source string) *frontendv1.ResponseUsageStamp {
+	t.Helper()
+	stamp := item.GetAgent().GetResponse().GetUsageStamp()
+	if stamp == nil {
+		t.Fatalf("%s carries no resolved usage stamp", source)
+	}
+	return stamp
 }
 
 // TestE2EHistoricalUsageIsExplicitlyUntimedAndDeduplicated verifies that a
@@ -128,10 +167,10 @@ func TestE2EHistoricalUsageIsExplicitlyUntimedAndDeduplicated(t *testing.T) {
 	event := sidecarAssistantUsageEvent(t, vendorID, "e2e-historical-usage", "msg-historical", "agent-nested")
 	store.write(event)
 	store.write(event)
-	item, _ := awaitItem(t, conn, cwd, "the historical assistant response carrying token utilization", func(item *frontendv1.ConversationItem) bool {
-		return item.GetAssistantMessage().GetId() == "msg-historical"
+	awaitItem(t, conn, cwd, "the historical assistant response carrying token utilization", func(item *frontendv1.ConversationItem) bool {
+		return item.GetAgent().GetResponse().GetBody().GetId() == "msg-historical"
 	})
-	usage := requireSingleTokenUtilization(t, item, "historical assistant response")
+	usage := requireSingleTokenUtilization(t, h, id, "msg-historical", "historical assistant response")
 	if usage.GetResponseTiming() != nil {
 		t.Fatal("historical response without message_start has response timing: whole-turn duration must never be used as a generation-time fallback")
 	}
@@ -158,16 +197,19 @@ func TestE2EHistoricalUsageIsExplicitlyUntimedAndDeduplicated(t *testing.T) {
 	replayed := replayItems(t, fresh, state, cwd, "e2e-historical-usage-replay")
 	seen := 0
 	for _, candidate := range replayed {
-		if candidate.GetAssistantMessage().GetId() == "msg-historical" {
+		if candidate.GetAgent().GetResponse().GetBody().GetId() == "msg-historical" {
 			seen++
-			records := candidate.GetTokenUtilization()
-			if len(records) != 1 || records[0].GetResponseTiming() != nil {
-				t.Errorf("replayed historical response records = %d, want one explicitly untimed record", len(records))
-			}
 		}
 	}
 	if seen != 1 {
 		t.Errorf("duplicate store observations produced %d replayed historical responses, want exactly one", seen)
+	}
+	// The de-duplication's other half: one durable record, still explicitly
+	// untimed after the replay. It is asserted against the ledger because that
+	// is where the record lives now.
+	replayedUsage := requireSingleTokenUtilization(t, h, id, "msg-historical", "replayed historical assistant response")
+	if replayedUsage.GetResponseTiming() != nil {
+		t.Error("the replayed historical response acquired response timing: whole-turn duration must never be used as a generation-time fallback")
 	}
 }
 
@@ -207,16 +249,23 @@ func TestE2ESessionViewAggregatesTimedAndUntimedActors(t *testing.T) {
 	id, conn, vendorID, store := liveSession(t, h, cwd)
 	writeCmd(t, conn, `{"requestId":"e2e-token-aggregate","submitPrompt":{"text":"timed main response","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
 	awaitItem(t, conn, cwd, "the timed main-agent response", func(item *frontendv1.ConversationItem) bool {
-		return isFakeTurnMessage(item.GetAssistantMessage().GetId(), 1)
+		return isFakeTurnMessage(item.GetAgent().GetResponse().GetBody().GetId(), 1)
 	})
 	store.write(sidecarAssistantUsageEvent(t, vendorID, "e2e-aggregate-subagent", "msg-subagent", "agent-child"))
 	awaitItem(t, conn, cwd, "the untimed subagent response", func(item *frontendv1.ConversationItem) bool {
-		return item.GetAssistantMessage().GetId() == "msg-subagent"
+		return item.GetAgent().GetResponse().GetBody().GetId() == "msg-subagent"
 	})
 
-	aggregate := sessionViewFromSnapshot(t, h, id).GetTokenUtilization()
+	// The session aggregate left SessionView: economics reach a rendering
+	// frontend as TokenBreakdownView, resolved. The aggregate itself is
+	// unchanged and is read here from the durable ledger that computes it, so
+	// every figure below is still asserted against the same numbers.
+	aggregate, err := durableSessionAggregate(h, id)
+	if err != nil {
+		t.Fatalf("read the durable session token aggregate: %v", err)
+	}
 	if aggregate == nil {
-		t.Fatal("SessionView omitted token_utilization after completed main-agent and subagent responses")
+		t.Fatal("the durable ledger holds no session aggregate after completed main-agent and subagent responses")
 	}
 	all := aggregate.GetAllAgents()
 	if got, want := []int64{all.GetInputTokens(), all.GetOutputTokens(), all.GetCacheReadInputTokens(), all.GetCacheCreationInputTokens()}, []int64{107, 211, 880, 79}; fmt.Sprint(got) != fmt.Sprint(want) {
@@ -271,10 +320,10 @@ func TestE2ECreateResumeFailureIsTypedAndVisible(t *testing.T) {
 		if ack.GetOk() {
 			t.Fatal("explicit resume with no transcript succeeded: continuity failure must not fall back to a fresh conversation")
 		}
-		if got := ack.GetFailure().GetErrorType(); got != string(errclass.TypeSessionResumeFailed) {
+		if got := errclass.KindName(ack.GetFailure()); got != string(errclass.TypeSessionResumeFailed) {
 			t.Errorf("create resume nack error_type = %q, want %q", got, errclass.TypeSessionResumeFailed)
 		}
-		failure := ack.GetFailure().GetSessionResume()
+		failure := ack.GetFailure().GetSessionResumeFailed().GetDetail()
 		if failure == nil || failure.GetCreate() == nil || failure.GetTranscriptUnavailable() == nil {
 			t.Fatalf("create resume nack structured detail = %v, want create + transcript_unavailable", ack.GetFailure())
 		}
@@ -346,22 +395,43 @@ func TestE2EAutomaticRestoreFailureIsTypedAndVisible(t *testing.T) {
 				t.Fatal("OpenWorkspace acknowledged a session whose resumed query died before readiness")
 			}
 			acknowledged = true
-			resumeFailure = ack.GetFailure().GetSessionResume()
+			resumeFailure = ack.GetFailure().GetSessionResumeFailed().GetDetail()
 		}
 		for _, item := range deltaItems(frame, cwd) {
-			failure := item.GetSystemFailure()
-			if failure != nil && failure.GetErrorType() == "unexpected_query_termination" {
-				termination = failure.GetQueryTermination()
+			failure := item.GetFailureCard()
+			if failure != nil && errclass.TypeName(failure) == "unexpected_query_termination" {
+				termination = failure.GetKind().GetQueryTermination().GetDetail()
 			}
 		}
 	}
 	if !acknowledged {
 		t.Fatal("OpenWorkspace did not return a failure acknowledgement after the resumed query died")
 	}
-	if resumeFailure == nil || resumeFailure.GetAutomaticRestore() == nil || resumeFailure.GetAgentReplSessionId() != id || resumeFailure.GetClaudeSessionId() != view.GetClaudeSessionId() || resumeFailure.GetCwd() != cwd || resumeFailure.GetResolvedConfigDir() == "" || resumeFailure.GetQueryTermination() == nil || resumeFailure.GetQueryTermination().GetAgentReplSessionId() != id || resumeFailure.GetQueryTermination().GetVendorSessionId() != view.GetClaudeSessionId() || resumeFailure.GetQueryTermination().GetIteratorFailure() == nil {
+	if resumeFailure == nil || resumeFailure.GetAutomaticRestore() == nil || resumeFailure.GetClaudeSessionId() != view.GetClaudeSessionId() || resumeFailure.GetCwd() != cwd || resumeFailure.GetResolvedConfigDir() == "" || resumeFailure.GetQueryTermination() == nil || resumeFailure.GetQueryTermination().GetVendorSessionId() != view.GetClaudeSessionId() || resumeFailure.GetQueryTermination().GetIteratorFailure() == nil {
 		t.Fatalf("automatic restore command nack = %v, want typed session.resume iterator failure with session=%q vendor=%q", resumeFailure, id, view.GetClaudeSessionId())
 	}
-	if termination == nil || termination.GetAgentReplSessionId() != id || termination.GetVendorSessionId() != view.GetClaudeSessionId() || termination.GetIteratorFailure() == nil {
+	if termination == nil || termination.GetVendorSessionId() != view.GetClaudeSessionId() || termination.GetIteratorFailure() == nil {
 		t.Fatalf("automatic restore query-termination evidence = %v, want session=%q vendor=%q iterator_failure", termination, id, view.GetClaudeSessionId())
 	}
+}
+
+// durableSessionAggregate computes a session's token aggregate from the durable
+// ledger, through the SAME aggregation the daemon uses.
+//
+// The aggregate left SessionView with the rest of the durable evidence layer;
+// its rendering replacement is TokenBreakdownView. The figures themselves are
+// unchanged, and this reads them where they are still authoritative.
+func durableSessionAggregate(h *e2eHarness, sessionID string) (*frontendv1.SessionTokenUtilization, error) {
+	ledger, err := statedb.NewTokenUtilizations(h.stateDB)
+	if err != nil {
+		return nil, err
+	}
+	records, err := ledger.List(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if err := frontend.ValidateTokenUtilizationAggregation(records); err != nil {
+		return nil, err
+	}
+	return frontend.AggregateTokenUtilization(records), nil
 }

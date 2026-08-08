@@ -136,11 +136,10 @@ func TestAnAssistantItemIsNeverMachinery(t *testing.T) {
 	// Arrange: only the user_message arm carries this markup.
 	item := &frontendv1.ConversationItem{
 		Uuid: "a1",
-		Item: &frontendv1.ConversationItem_AssistantMessage{
-			AssistantMessage: &datav1.ApiAssistantMessage{Content: []*datav1.ContentBlock{
-				{Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: "<command-name>/compact</command-name>"}}},
-			}},
-		},
+		Item: &frontendv1.ConversationItem_Agent{Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{Response: &frontendv1.AgentResponse{Body: &datav1.ApiAssistantMessage{Content: []*datav1.ContentBlock{
+			{Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: "<command-name>/compact</command-name>"}}},
+		}},
+		}}}},
 	}
 
 	// Act

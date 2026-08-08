@@ -27,7 +27,7 @@ func excludeItem(uuid, requestID string, tsMs int64) *frontendv1.ConversationIte
 }
 
 func excludeDelta(items ...*frontendv1.ConversationItem) *frontendv1.ConversationDelta {
-	return &frontendv1.ConversationDelta{Workspace: "ws", SessionId: "s1", Items: items, ThroughSeq: 7}
+	return &frontendv1.ConversationDelta{Workspace: "ws", Fence: "s1", Items: items, ThroughSeq: 7}
 }
 
 func itemUUIDs(cd *frontendv1.ConversationDelta) []string {

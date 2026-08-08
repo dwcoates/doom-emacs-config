@@ -56,12 +56,15 @@ func TestResumeEstablishmentAuthorityClassifiesCreateAndAutomaticRestore(t *test
 				t.Fatalf("wrapped error = %v, want ResumeTranscriptMissingError preserved", err)
 			}
 			failure := errclass.Command(nil, err)
-			detail := failure.GetSessionResume()
-			if failure.GetErrorType() != string(errclass.TypeSessionResumeFailed) || detail == nil || detail.GetTranscriptUnavailable() == nil {
+			detail := failure.GetKind().GetSessionResumeFailed().GetDetail()
+			if errclass.TypeName(failure) != string(errclass.TypeSessionResumeFailed) || detail == nil || detail.GetTranscriptUnavailable() == nil {
 				t.Fatalf("classified failure = %v", failure)
 			}
-			if got := detail.GetAgentReplSessionId(); got != tc.sessionID {
-				t.Fatalf("agent_repl_session_id = %q, want %q", got, tc.sessionID)
+			// The evidence no longer names the agent-repl session — a rendering
+			// frontend has no vocabulary for it — so what identifies the failure
+			// here is the VENDOR conversation, which is content the card shows.
+			if got := detail.GetClaudeSessionId(); got != missing.ResumeID {
+				t.Fatalf("claude_session_id = %q, want %q", got, missing.ResumeID)
 			}
 			if tc.automatic != (detail.GetAutomaticRestore() != nil) || (!tc.automatic) != (detail.GetCreate() != nil) {
 				t.Fatalf("attempt = %T, automatic=%t", detail.GetAttempt(), tc.automatic)
@@ -84,7 +87,7 @@ func TestAutomaticResumeEstablishmentPreservesTypedTerminationAndGenericCause(t 
 			err: &queryTerminationTestError{
 				err: errors.New("query startup failed"),
 				detail: &frontendv1.QueryTerminationFailure{
-					AgentReplSessionId: "agent-session", QueryInstanceId: "query-1", VendorIdentity: &frontendv1.QueryTerminationFailure_VendorSessionId{VendorSessionId: "claude-session"},
+					QueryInstanceId: "query-1", VendorIdentity: &frontendv1.QueryTerminationFailure_VendorSessionId{VendorSessionId: "claude-session"},
 					Reason: &frontendv1.QueryTerminationFailure_StartupFailure{StartupFailure: &agentshimcorev1.QueryStartupFailure{Cause: "resume rejected"}},
 				},
 			},
@@ -113,8 +116,8 @@ func TestAutomaticResumeEstablishmentPreservesTypedTerminationAndGenericCause(t 
 				t.Fatalf("wrapped error = %v, want original chain", got)
 			}
 			failure := errclass.Command(nil, got)
-			detail := failure.GetSessionResume()
-			if failure.GetErrorType() != string(errclass.TypeSessionResumeFailed) || detail == nil || detail.GetAutomaticRestore() == nil || detail.GetAgentReplSessionId() != rec.SessionID || detail.GetClaudeSessionId() != rec.ClaudeSessionID || detail.GetCwd() != rec.CWD || detail.GetConfigDir() != rec.ConfigDir || detail.GetResolvedConfigDir() == "" {
+			detail := failure.GetKind().GetSessionResumeFailed().GetDetail()
+			if errclass.TypeName(failure) != string(errclass.TypeSessionResumeFailed) || detail == nil || detail.GetAutomaticRestore() == nil || detail.GetClaudeSessionId() != rec.ClaudeSessionID || detail.GetCwd() != rec.CWD || detail.GetConfigDir() != rec.ConfigDir || detail.GetResolvedConfigDir() == "" {
 				t.Fatalf("classified resume failure = %v", failure)
 			}
 			tc.check(t, detail)
@@ -132,8 +135,7 @@ func TestResumeEstablishmentAuthorityLeavesFreshErrorsUnchanged(t *testing.T) {
 
 func TestResumeEstablishmentAuthorityPreservesOwnerTypedIdentityMismatch(t *testing.T) {
 	cause := &exactResumeTestError{detail: &frontendv1.SessionResumeFailure{
-		AgentReplSessionId: "agent-session",
-		ClaudeSessionId:    "requested-vendor-session",
+		ClaudeSessionId: "requested-vendor-session",
 		Attempt: &frontendv1.SessionResumeFailure_AutomaticRestore{
 			AutomaticRestore: &frontendv1.SessionResumeFailureAutomaticRestore{},
 		},
@@ -149,7 +151,7 @@ func TestResumeEstablishmentAuthorityPreservesOwnerTypedIdentityMismatch(t *test
 	if !errors.Is(got, cause) {
 		t.Fatalf("classified error = %v, want exact mismatch in chain", got)
 	}
-	detail := errclass.Command(nil, got).GetSessionResume()
+	detail := errclass.Command(nil, got).GetKind().GetSessionResumeFailed().GetDetail()
 	if detail.GetIdentityMismatch().GetReplacementClaudeSessionId() != "replacement-vendor-session" || detail.GetClaudeSessionId() != "requested-vendor-session" {
 		t.Fatalf("classified detail = %v", detail)
 	}

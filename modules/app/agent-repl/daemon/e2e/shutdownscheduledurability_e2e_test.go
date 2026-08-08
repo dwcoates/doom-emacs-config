@@ -110,7 +110,7 @@ func TestE2EAScheduledShutdownSurvivesADaemonBounceMidDrain(t *testing.T) {
 		t.Errorf("after the bounce the queue for %s no longer carries the held entry %q: a held prompt is delayed, never lost", cwdB, held.GetId())
 	}
 	if restored != nil {
-		if got, want := restored.GetShutdownHold().GetScheduleId(), draining.GetScheduleId(); got != want {
+		if got, want := restored.GetShutdown().GetScheduleId(), draining.GetScheduleId(); got != want {
 			t.Errorf("the restored entry names schedule_id %q, want %q: it must still be joined to the lease still holding it", got, want)
 		}
 	}
@@ -200,10 +200,12 @@ func TestE2EAPromptHeldByAnExecutedDrainIsDeliveredAfterTheSwap(t *testing.T) {
 			}
 			return false
 		},
-		"the successor daemon's complete terminal accounting evidence": func(frame *frontendv1.FrontendFrame) bool {
+		// The accounting no longer rides the terminal item; the item's ARRIVAL
+		// is the signal that the successor daemon finished the turn, and the
+		// evidence itself is read from the durable ledger below.
+		"the successor daemon's terminal result": func(frame *frontendv1.FrontendFrame) bool {
 			for _, item := range deltaItems(frame, cwdB) {
-				if item.GetTurnAccounting() != nil {
-					terminal = item.GetTurnAccounting()
+				if item.GetAgent().GetTurnResult() != nil {
 					return true
 				}
 			}

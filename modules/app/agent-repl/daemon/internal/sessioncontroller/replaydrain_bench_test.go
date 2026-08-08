@@ -74,13 +74,13 @@ type benchPusher struct {
 }
 
 func (p *benchPusher) PushConversationDelta(*frontendv1.ConversationDelta) { p.conversations.Add(1) }
-func (p *benchPusher) PushTypingDelta(*frontendv1.TypingDelta)            { p.typing.Add(1) }
-func (p *benchPusher) PushTaskCatalog(*frontendv1.TaskCatalog)            { p.catalogs.Add(1) }
-func (p *benchPusher) PushWorkspaceState(*frontendv1.WorkspaceState)      { p.states.Add(1) }
-func (p *benchPusher) PushSessionInitView(*frontendv1.SessionInitView)    { p.inits.Add(1) }
-func (p *benchPusher) PushHeartbeatView(*frontendv1.HeartbeatView)        { p.heartbeats.Add(1) }
-func (p *benchPusher) PushQueueView(*frontendv1.QueueView)                { p.queues.Add(1) }
-func (p *benchPusher) PushProgressView(*frontendv1.ProgressView)          { p.progress.Add(1) }
+func (p *benchPusher) PushTypingDelta(*frontendv1.TypingDelta)             { p.typing.Add(1) }
+func (p *benchPusher) PushTaskCatalog(*frontendv1.TaskCatalog)             { p.catalogs.Add(1) }
+func (p *benchPusher) PushWorkspaceState(*frontendv1.WorkspaceState)       { p.states.Add(1) }
+func (p *benchPusher) PushSessionInitView(*frontendv1.SessionInitView)     { p.inits.Add(1) }
+func (p *benchPusher) PushHeartbeatView(*frontendv1.HeartbeatView)         { p.heartbeats.Add(1) }
+func (p *benchPusher) PushQueueView(*frontendv1.QueueView)                 { p.queues.Add(1) }
+func (p *benchPusher) PushProgressView(*frontendv1.ProgressView)           { p.progress.Add(1) }
 
 // benchKeepAliveWindows is the same adapter production wires
 // (server.KeepAliveWindowStore), restated here because the server package

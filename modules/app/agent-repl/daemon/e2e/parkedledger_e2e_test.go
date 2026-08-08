@@ -78,7 +78,7 @@ func describeQueue(view *frontendv1.QueueView) string {
 	parts := make([]string, 0, len(view.GetEntries()))
 	for _, entry := range view.GetEntries() {
 		parts = append(parts, fmt.Sprintf("{id=%s text=%q hold=%v accepted=%v}",
-			entry.GetId(), entry.GetText(), entry.GetShutdownHold() != nil, entry.GetAccepted()))
+			entry.GetId(), entry.GetText(), entry.GetShutdown() != nil, entry.GetHoldForTurnEnd().GetAccepted()))
 	}
 	return strings.Join(parts, " ")
 }
@@ -355,7 +355,7 @@ func TestE2EAForcedParkedPromptIsNotMaterializedByTheSuccessor(t *testing.T) {
 func TestE2EAcceptOnAMaterializedEntryIsHonored(t *testing.T) {
 	// Arrange
 	fx := newMaterializedEntry(t, "deploy that replaced the shim bundle", "accepted-while-unwired")
-	if fx.entry.GetAccepted() {
+	if fx.entry.GetHoldForTurnEnd().GetAccepted() {
 		t.Fatalf("the materialized entry %q arrived already accepted, so this test could not tell an honored accept from the arrangement", fx.entry.GetId())
 	}
 
@@ -379,7 +379,7 @@ func TestE2EAcceptOnAMaterializedEntryIsHonored(t *testing.T) {
 		},
 		"a QueueView for the workspace carrying the entry as accepted": func(frame *frontendv1.FrontendFrame) bool {
 			entry := entryInQueue(queueViewFor(frame, fx.cwd), fx.entry.GetId())
-			if entry == nil || !entry.GetAccepted() {
+			if entry == nil || !entry.GetHoldForTurnEnd().GetAccepted() {
 				return false
 			}
 			accepted = entry
@@ -442,7 +442,7 @@ func TestE2EForceOnAnUnwiredMaterializedEntryIsATypedNack(t *testing.T) {
 		t.Errorf("the refused force carries no classified failure at all (error=%q): CommandAck.failure is what both frontends render, so a refusal without one is a failure the webapp shows as nothing",
 			ack.GetError())
 	}
-	if got := ack.GetFailure().GetErrorType(); got == string(errclass.TypeInternalUnclassified) {
+	if got := errclass.KindName(ack.GetFailure()); got == string(errclass.TypeInternalUnclassified) {
 		t.Errorf("the refused force is classified %s: this refusal is one the daemon deliberately produces and knows the cause of, so falling through to the unclassified door renders an ordinary 'the session is not up yet' as an internal error",
 			got)
 	} else if got == "" {

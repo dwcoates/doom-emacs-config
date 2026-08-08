@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/keepalive"
@@ -378,7 +377,7 @@ func TestPromptDuringAPingIsHeldAndUnclassified(t *testing.T) {
 	if entries[0].keepAliveHoldTurnID != turnID {
 		t.Fatalf("hold turn = %q, want the in-flight ping %q", entries[0].keepAliveHoldTurnID, turnID)
 	}
-	if entries[0].classification != frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD {
+	if entries[0].classification != VerdictHold {
 		t.Fatalf("classification = %s, want HOLD; PENDING would claim a classifier is running that never will",
 			entries[0].classification)
 	}
@@ -407,7 +406,7 @@ func TestKeepAliveHoldIsProjectedOntoTheQueueView(t *testing.T) {
 	if len(view.GetEntries()) != 1 {
 		t.Fatalf("%d view entries, want one", len(view.GetEntries()))
 	}
-	if got := view.GetEntries()[0].GetKeepAliveHold().GetTurnId(); got != turnID {
+	if got := view.GetEntries()[0].GetKeepAlive().GetTurnId(); got != turnID {
 		t.Fatalf("keep_alive_hold.turn_id = %q, want %q", got, turnID)
 	}
 }
@@ -488,7 +487,7 @@ func TestReleaseKeepAliveHoldRestoresAnOrdinaryEntry(t *testing.T) {
 	q := &promptQueue{}
 	q.add(&queueEntry{
 		id: "q1", keepAliveHoldTurnID: "ka_1",
-		classification: frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD,
+		classification: VerdictHold,
 	})
 
 	// Act.
@@ -501,7 +500,7 @@ func TestReleaseKeepAliveHoldRestoresAnOrdinaryEntry(t *testing.T) {
 	if q.entries[0].keepAliveHeld() {
 		t.Fatal("the entry is still held after its ping ended")
 	}
-	if q.entries[0].classification != frontendv1.QueueClassification_QUEUE_CLASSIFICATION_PENDING {
+	if q.entries[0].classification != VerdictPending {
 		t.Fatalf("classification = %s after release, want PENDING", q.entries[0].classification)
 	}
 }
@@ -624,7 +623,7 @@ func TestAbandonKeepAlivePingReleasesTheClaimAndItsHoldsTogether(t *testing.T) {
 	d.turn = turnRecord{phase: turnPhaseNamed, turnID: "t1"}
 	d.queue.add(&queueEntry{
 		id: "q1", keepAliveHoldTurnID: "ka_1",
-		classification: frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD,
+		classification: VerdictHold,
 	})
 	m.mu.Unlock()
 
@@ -728,7 +727,7 @@ func pushedFailureType(m *Manager, errorType string) bool {
 	defer p.mu.Unlock()
 	for _, cd := range p.convo {
 		for _, item := range cd.GetItems() {
-			if item.GetSystemFailure().GetErrorType() == errorType {
+			if errclass.TypeName(item.GetFailureCard()) == errorType {
 				return true
 			}
 		}
