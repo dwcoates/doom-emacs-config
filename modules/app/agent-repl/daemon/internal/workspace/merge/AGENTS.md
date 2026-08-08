@@ -103,9 +103,18 @@ conflicting commits, and the one whose shim the coordinator already holds the
   server's `PromptRouter` so the fleet that serves the user's prompts is
   necessarily the fleet a merge drives. This package never imports the session
   controller.
+- The wait is TWO PHASES, BIND then WORK. The turn must START within a short
+  bind bound (`sessioncontroller.mergeResolutionTurnBindBound`); only a turn
+  that started gets the long one. A prompt that produced no turn — parked on the
+  queue because the workspace is BUSY with a turn of the user's own, or
+  forwarded to a shim that never began one — fails within the bind bound with a
+  cause naming the submit's own disposition, instead of holding the merge and
+  the workspace's shim lease for a window sized for an agent that is working.
+  A busy workspace's parked prompt is taken back off the queue with the failure,
+  so it cannot be delivered after the merge has been rolled back.
 - EXACTLY ONE attempt. A resolver error, a refused submit, a turn that never
-  ends, or a resume that is still conflicted all leave the park STANDING for the
-  human path (`conflict_resolved_continue`, or abandonment by closing the
+  starts, a turn that never ends, or a resume that is still conflicted all leave
+  the park STANDING for the human path (`conflict_resolved_continue`, or abandonment by closing the
   workspace). Nothing is ever marked merged on a failed attempt.
 - The attempt's resume rides the same `park.calls` rendezvous a human's resume
   does, so a human resume or an abandon arriving mid-attempt is serialized
