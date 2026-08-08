@@ -105,8 +105,25 @@ afterEach(() => {
   stores.splice(0).forEach((s) => s.close());
 });
 
-async function connectedClient(store: FakeStore, sink?: (e: Event) => void, degraded?: (d: DegradedState) => void): Promise<StoreClient> {
-  const client = new StoreClient({ socketPath: store.socketPath, sessionId: "sess-1", producer: "claude-shim:sess-1", heartbeatIntervalMs: 0 });
+/**
+ * `relinkReportAfterMs` collapses the relink retry budget for a test that
+ * asserts the OUTAGE behaviour: a link-loss report then lands on the next tick
+ * instead of after the real budget. Deterministic even against a store that is
+ * still up, because the budget's expiry is armed BEFORE the relink attempt is.
+ */
+async function connectedClient(
+  store: FakeStore,
+  sink?: (e: Event) => void,
+  degraded?: (d: DegradedState) => void,
+  relinkReportAfterMs?: number,
+): Promise<StoreClient> {
+  const client = new StoreClient({
+    socketPath: store.socketPath,
+    sessionId: "sess-1",
+    producer: "claude-shim:sess-1",
+    heartbeatIntervalMs: 0,
+    ...(relinkReportAfterMs !== undefined ? { relinkReportAfterMs } : {}),
+  });
   clients.push(client);
   if (sink) client.onMerged(sink);
   if (degraded) client.onDegraded(degraded);
@@ -316,12 +333,13 @@ describe("StoreClient subscription connection (single-role store)", () => {
     expect(write.producer).toBe("claude-shim:sess-1");
   });
 
-  it("reports DegradedState but stays write-connected when the subscription drops", async () => {
-    // Arrange
+  it("reports DegradedState but stays write-connected when the subscription drops for longer than the relink budget", async () => {
+    // Arrange: budget 0, i.e. a subscription that is given no time at all to
+    // come back — the outage behaviour, unchanged.
     const store = await fakeStore();
     stores.push(store);
     const degradations: DegradedState[] = [];
-    const client = await connectedClient(store, undefined, (d) => degradations.push(d));
+    const client = await connectedClient(store, undefined, (d) => degradations.push(d), 0);
     client.subscribe(0n);
     await until(() => store.count() === 2);
     await store.latest().next(SubscribeSchema);
@@ -332,6 +350,28 @@ describe("StoreClient subscription connection (single-role store)", () => {
     // Assert
     expect(degradations[0]!.reason).toContain("subscription");
     expect(client.isConnected()).toBe(true);
+  });
+
+  it("reports nothing when a dropped subscription is reopened inside the relink budget", async () => {
+    // The fleet-wide storm this budget exists for: a store bounce drops every
+    // live shim's subscription at once, the relink reopens each one at
+    // resumeSeq with the gap replayed, and nothing was ever degraded — so a
+    // DegradedState here would alarm about a self-healing event.
+    const store = await fakeStore();
+    stores.push(store);
+    const degradations: DegradedState[] = [];
+    const client = await connectedClient(store, undefined, (d) => degradations.push(d));
+    client.subscribe(0n);
+    await until(() => store.count() === 2);
+    await store.latest().next(SubscribeSchema);
+    await awaitSubscriptionReady(client);
+    // Act: the tail drops, and the relink reopens it against the live store.
+    store.latest().destroy();
+    await until(() => store.count() === 3, "subscription reopened by the relink");
+    await store.latest().next(SubscribeSchema);
+    await awaitSubscriptionReady(client);
+    // Assert
+    expect(degradations).toHaveLength(0);
   });
 
   it("re-subscribing replaces the subscription connection without a degrade", async () => {
@@ -581,7 +621,7 @@ describe("StoreClient store link recovery", () => {
    * BOUNDS are the only thing a test needs to shrink: every wait below is on a
    * connection or a report, never on a duration.
    */
-  async function linkRig(store: FakeStore): Promise<LinkRig> {
+  async function linkRig(store: FakeStore, relinkReportAfterMs?: number): Promise<LinkRig> {
     const reports: DegradedState[] = [];
     const forwarded: Event[] = [];
     const forwardWaiters: Array<{ n: number; resolve: () => void }> = [];
@@ -596,6 +636,10 @@ describe("StoreClient store link recovery", () => {
       heartbeatIntervalMs: 0,
       relinkBackoffMinMs: 2,
       relinkBackoffMaxMs: 10,
+      // Left at the client's real default unless a test asks otherwise: a rig
+      // with the default budget is how the SELF-HEALING bounce is observed,
+      // and `0` is how the genuine outage's degraded/recovered pair is.
+      ...(relinkReportAfterMs !== undefined ? { relinkReportAfterMs } : {}),
     });
     clients.push(client);
     client.onDegraded((d) => {
@@ -633,12 +677,13 @@ describe("StoreClient store link recovery", () => {
     return restarted;
   }
 
-  it("reports recovery once both connections are back after a store restart", async () => {
+  it("reports recovery once both connections are back after an outage that outlasted the relink budget", async () => {
     // Arrange: a fully wired link — producer connection plus the daemon's
-    // standing subscription.
+    // standing subscription — whose retry budget is collapsed to zero, so the
+    // drop is reported and a fault window is genuinely opened.
     const store = await fakeStore();
     stores.push(store);
-    const rig = await linkRig(store);
+    const rig = await linkRig(store, 0);
     await rig.client.subscribe(0n);
     await (await store.nextConn()).next(SubscribeSchema);
 
@@ -650,6 +695,73 @@ describe("StoreClient store link recovery", () => {
     const report = await rig.recovered;
     expect(report.component).toBe("shim-store-client");
     expect(report.recovered).toBe(true);
+  });
+
+  it("reports neither degradation nor recovery for a restart the relink absorbs", async () => {
+    // THE DEPLOY'S OWN STORE KICKSTART. Both connections drop and both come
+    // back, nothing is lost, and the daemon hears about none of it — the pair
+    // of DegradedState reports this used to emit per shim (plus the recovery
+    // that settled them) was a fleet-wide warn storm over a self-healing event.
+    const store = await fakeStore();
+    stores.push(store);
+    const rig = await linkRig(store);
+    await rig.client.subscribe(0n);
+    await (await store.nextConn()).next(SubscribeSchema);
+
+    // Act
+    const restarted = await restart(store);
+    await restarted.nextConn(); // the relinked producer connection
+    await (await restarted.nextConn()).next(SubscribeSchema);
+    // A full write round-trip on the recovered link, so the assertion stands
+    // after the client has gone on working rather than mid-relink.
+    const ackP = rig.client.write([create(EventSchema, { sessionId: "sess-1", seq: 1n })]);
+    await restarted.peer().next(StoreWriteSchema);
+    restarted.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { accepted: 1n }));
+    await ackP;
+
+    // Assert
+    expect(rig.reports).toHaveLength(0);
+  });
+
+  it("reports the degradation when the store never comes back within the budget", async () => {
+    // The genuine outage, unchanged: the budget expires with the link still
+    // down, and the report is exactly the one the first drop used to send.
+    const store = await fakeStore();
+    stores.push(store);
+    const rig = await linkRig(store, 1);
+    await rig.client.subscribe(0n);
+    await (await store.nextConn()).next(SubscribeSchema);
+
+    // Act: gone for good — nothing rebinds the socket.
+    store.close();
+
+    // Assert
+    await until(() => rig.reports.length >= 1, "the budget expired with the link down");
+    expect(rig.reports[0]!.component).toBe("shim-store-client");
+    expect(rig.reports[0]!.recovered).toBe(false);
+    expect(rig.reports[0]!.reason).toMatch(/store (connection|subscription) closed/);
+  });
+
+  it("reports one degradation for an outage that dropped both connections", async () => {
+    // Both edges fire within a tick of each other and describe the SAME outage
+    // of the SAME component, for which the daemon holds one fault row and one
+    // card — so the second report was only ever a duplicate warn.
+    const store = await fakeStore();
+    stores.push(store);
+    const rig = await linkRig(store, 1);
+    await rig.client.subscribe(0n);
+    await (await store.nextConn()).next(SubscribeSchema);
+
+    // Act: both edges drop, and both are observed down before anything is
+    // asserted — so the single report below is a merge of two losses rather
+    // than a race that only one of them reached.
+    store.close();
+    await until(() => !rig.client.isConnected() && !rig.client.isSubscribed(),
+      "both store connections observed down");
+    await until(() => rig.reports.length >= 1, "the budget expired with the link down");
+
+    // Assert
+    expect(rig.reports.filter((r) => !r.recovered)).toHaveLength(1);
   });
 
   it("reopens the subscription after the last forwarded seq so the gap replays", async () => {
@@ -696,10 +808,11 @@ describe("StoreClient store link recovery", () => {
   it("recovers on the producer connection alone when the daemon never subscribed", async () => {
     // Arrange: a session whose bring-up gate has not run yet still loses its
     // producer connection to a store restart, and still owes the daemon the
-    // recovery that closes the fault.
+    // recovery that closes the fault. Budget 0, so the loss is reported and
+    // there is a fault window for the recovery to close.
     const store = await fakeStore();
     stores.push(store);
-    const rig = await linkRig(store);
+    const rig = await linkRig(store, 0);
 
     // Act
     const restarted = await restart(store);
@@ -714,10 +827,11 @@ describe("StoreClient store link recovery", () => {
   it("reports one recovery for an outage that dropped both connections", async () => {
     // Arrange: a restart drops the producer AND the subscription, so both
     // report the outage — but the daemon holds ONE fault row per component and
-    // rejects a second close of a window that is no longer open.
+    // rejects a second close of a window that is no longer open. Budget 0, so
+    // the outage is reported and a window is genuinely open.
     const store = await fakeStore();
     stores.push(store);
-    const rig = await linkRig(store);
+    const rig = await linkRig(store, 0);
     await rig.client.subscribe(0n);
     await (await store.nextConn()).next(SubscribeSchema);
 
