@@ -14,7 +14,6 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/frontend"
-	"claude-repld/internal/keepalive"
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/ssm"
 	"claude-repld/internal/statedb"
@@ -467,20 +466,23 @@ type consumer struct {
 	// Called on the shim read-loop goroutine, with the same non-blocking
 	// obligation onTurn carries.
 	onTurnStarted func(turnID string, atMs int64)
-	// onTurnResultCost reports one turn's terminal UNCACHED input cost — what
-	// the turn fed the model NEW rather than read from the prompt cache — named
-	// by the turn the accounting reducer just attributed the result to.
+	// onTurnResultCost reports what one turn's terminal result measured, named
+	// by the turn the accounting reducer just attributed that result to.
 	//
-	// IT MATTERS FOR EXACTLY ONE KIND OF TURN. A keep-alive ping is a dozen
-	// tokens of prompt, so a ping that paid for the whole conversation is the
-	// cache's absence MEASURED rather than predicted, and that measurement is
-	// what puts the session to sleep (keepalivecold.go). Every other turn's cost
-	// is a cost report and is rendered as one by the progress footer. The
-	// session controller decides which is which; this reports the figure.
+	// IT MATTERS FOR EXACTLY THREE KINDS OF TURN, and ONE reduction serves all
+	// three so they can never disagree about one result. A keep-alive ping is a
+	// dozen tokens of prompt, so a ping that paid for the whole conversation is
+	// the cache's absence MEASURED rather than predicted, and that measurement
+	// is what puts the session to sleep (keepalivecold.go). A DAEMON-INITIATED
+	// COMPACTION that paid the same way is a pure cost defect and trips the
+	// cold-read alarm (compactioncold.go). And every turn's TOTAL input is the
+	// figure the warm-compaction size floor is judged against (warmcompact.go).
+	// Every other turn's cost is a cost report and is rendered as one by the
+	// progress footer.
 	//
 	// Called on the shim read-loop goroutine, with the same non-blocking
 	// obligation onTurn carries.
-	onTurnResultCost func(turnID string, uncachedInputTokens int64)
+	onTurnResultCost func(cost turnResultCost)
 	// onContextCompacted reports that a compaction COMPLETED — the compacting
 	// axis closing, which is the only first-class report the vendor gives.
 	// A compact-first revival waits on it before it will accept prompts.
@@ -1371,8 +1373,11 @@ func (c *consumer) Consume(ev *corev1.Event) error {
 	// vendor result would be asking a question no lifecycle event can answer.
 	if result := resultFromVendor(ev.GetVendor()); result != nil && c.onTurnResultCost != nil {
 		if usage := result.GetUsage(); usage != nil {
-			c.onTurnResultCost(c.accounting.activeTurn(),
-				keepalive.UncachedInputTokens(usage.GetInputTokens(), usage.GetCacheCreationInputTokens()))
+			// THE RESULT'S OWN USAGE, never an assistant record's. A compaction's
+			// synthetic assistant message carries a zero usage by construction;
+			// the real figures ride the terminal result, which is what this
+			// reduces and what every consumer of the hook is judged on.
+			c.onTurnResultCost(newTurnResultCost(c.accounting.activeTurn(), usage))
 		}
 	}
 	if historicalQueryLifecycle {
@@ -2363,6 +2368,14 @@ func (c *consumer) keepAliveWindowUnclosedUUID(turnID string) string {
 // identity would let one replace the other on screen.
 func (c *consumer) keepAliveWindowInvertedUUID(turnID string) string {
 	return "keep_alive_window_inverted:" + c.sessionID + ":" + turnID
+}
+
+// coldCompactionUUID is the stable card identity for ONE daemon compaction that
+// read the conversation at the uncached rate. Keyed by the compaction's own turn
+// id so a session that pays this cost twice shows two cards: each is a separate
+// charge, and collapsing them under one identity would hide the second.
+func (c *consumer) coldCompactionUUID(turnID string) string {
+	return "compaction_cold_read:" + c.sessionID + ":" + turnID
 }
 
 // resync replays the retained conversation deltas from fromSeq (0 = from the

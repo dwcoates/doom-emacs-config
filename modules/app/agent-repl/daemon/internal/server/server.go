@@ -2053,6 +2053,36 @@ func (s *Server) applyKeepAlivePolicy(rec registry.Record, nowMs int64) (owned b
 				rec.SessionID, rec.CWD, decision.ElapsedMs, decision.RemainingMs, err)
 		}
 		return true
+	case keepalive.ActionWarmCompact:
+		// COMPACT WHILE THE CACHE IS STILL ALIVE. The whole-conversation read a
+		// compaction costs is served from the prompt cache here and would be
+		// re-ingested at full price once the cache dies — which is exactly what
+		// a compact-first revival used to pay, measured at 1.5 million uncached
+		// input tokens for one session.
+		//
+		// The submit RE-CHECKS eligibility under the manager mutex, and it is
+		// where the size floor and the once-per-cache-window anchor live; this
+		// tick's reading of the registry is already stale by the time it can be
+		// acted on. The anchor it is given is the SAME durable instant this
+		// decision was taken against, so the whole span of ticks the arm is due
+		// across produces exactly one attempt.
+		if _, err := s.controller.SubmitWarmCompaction(context.Background(), rec.CWD, rec.LastTurnEndMs); err != nil {
+			if errors.Is(err, sessioncontroller.ErrWarmCompactNotEligible) {
+				// The overwhelmingly common outcome: the attempt for this cache
+				// window has already been made, or the conversation is too small
+				// to be worth compacting. Not a failure, and the submit logged
+				// which it was.
+				return true
+			}
+			// A FAILED WARM COMPACTION CHANGES NOTHING ELSE ABOUT THE LIFECYCLE.
+			// The keep-alive arms still fire for this session on later ticks and
+			// it still hibernates on time; all that is lost is the cheap
+			// compaction, and the revival that eventually pays for the expensive
+			// one is watched by the cold-read alarm.
+			s.logf("session %s: warm compaction FAILED (ws %s) elapsed_ms=%d remaining_ms=%d: %v — the session keeps today's behavior for this cache window: keep-alive pings, then hibernation, then a compact-first revival that pays the full-context read",
+				rec.SessionID, rec.CWD, decision.ElapsedMs, decision.RemainingMs, err)
+		}
+		return true
 	case keepalive.ActionAwaitExpiry:
 		// THE RETRY FLOOR, and there is deliberately no submit in this arm.
 		// The policy decided it, so no reading of this switch can ping inside

@@ -197,6 +197,15 @@ const (
 	// What it reports is a disagreement between the clock that stamped the
 	// start and the clock that stamped the end.
 	TypeKeepAliveWindowInverted Type = "keep_alive.window_inverted"
+	// TypeCompactionColdRead — a compaction the DAEMON submitted read the whole
+	// conversation at the UNCACHED rate instead of from the prompt cache. It is
+	// a NAMED failure rather than a log line because it is a pure cost defect
+	// and is otherwise invisible on every surface: the compaction succeeded, the
+	// conversation is smaller, and nothing tells the user they were just billed
+	// for the full-context re-ingest the feature exists to avoid. The live
+	// incident it was built for read 1.5 MILLION uncached input tokens for one
+	// revival compaction.
+	TypeCompactionColdRead Type = "compaction.cold_read"
 	// TypeClientLogIdentityStale — a browser log record named an agent-repl or
 	// Claude session that is not the one the daemon registry holds for the
 	// command's workspace, so the record was refused rather than persisted
@@ -322,6 +331,7 @@ var prose = map[Type]string{
 	TypeSessionHibernated:              "the session is hibernated; choose how to revive it before sending prompts",
 	TypeKeepAliveWindowUnclosed:        "a cache keep-alive window could not be closed, so new conversation is being withheld until it is repaired",
 	TypeKeepAliveWindowInverted:        "a cache keep-alive window ended before it began, so the daemon's own keep-alive turn may appear in the conversation",
+	TypeCompactionColdRead:             "a compaction the daemon ran re-read the whole conversation at the uncached rate instead of from the prompt cache, which is the cost it exists to avoid",
 	TypeClientLogIdentityStale:         "a browser log record named a session this workspace no longer runs, so it was not recorded",
 	TypeInternalUnclassified:           "the command failed",
 
@@ -790,6 +800,26 @@ func KeepAliveWindowInverted(reason string) *frontendv1.SystemFailureItem {
 	}
 }
 
+// ColdCompaction classifies a daemon-initiated compaction that read the
+// conversation at the uncached rate.
+//
+// It is INTERNAL rather than API-classed because nothing the vendor did is
+// wrong here: the request succeeded and was priced exactly as asked. What
+// failed is the daemon's own scheduling — it submitted a full-context read at a
+// moment when the prompt cache could not serve it — and that is a defect in
+// this program, which is what the internal class names.
+//
+// reason carries the raw usage breakdown, so the card a human opens shows the
+// arithmetic that tripped it rather than only the verdict.
+func ColdCompaction(reason string) *frontendv1.SystemFailureItem {
+	return &frontendv1.SystemFailureItem{
+		ErrorClass:   frontendv1.ErrorClass_ERROR_CLASS_INTERNAL,
+		ErrorType:    string(TypeCompactionColdRead),
+		Message:      prose[TypeCompactionColdRead],
+		SourceDetail: reason,
+	}
+}
+
 // Degraded classifies a shim-reported DegradedState — the store-write
 // rejection path, whose reason is a StoreWriteAck error the shim wrapped.
 //
@@ -883,6 +913,7 @@ func AllTypes() []Type {
 		TypeSessionHibernated,
 		TypeKeepAliveWindowUnclosed,
 		TypeKeepAliveWindowInverted,
+		TypeCompactionColdRead,
 		TypeClientLogIdentityStale,
 		TypeInternalUnclassified,
 		TypeAPIAuthenticationFailed,
