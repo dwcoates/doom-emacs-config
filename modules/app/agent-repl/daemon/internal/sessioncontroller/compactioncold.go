@@ -121,7 +121,7 @@ func (m *Manager) noteDaemonCompactionCost(d *sessionController, cost turnResult
 	kind := claim.kind
 	m.mu.Unlock()
 
-	if !keepalive.ColdCompaction(cost.uncachedInputTokens) {
+	if !keepalive.ColdCompaction(cost.usage) {
 		// THE WARM CASE IS RECORDED TOO, and deliberately. The alarm's silence is
 		// otherwise indistinguishable from the alarm never having been asked, and
 		// this line is the evidence that the feature is working — a compaction

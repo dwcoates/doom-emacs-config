@@ -30,6 +30,27 @@ func coldCompactionRig(t *testing.T, kind compactionKind, turnID string) (*Manag
 
 // usageOf is one result's usage in the SDK's three disjoint input buckets, in
 // the order the Usage contract states them.
+// costOf builds one turn's reduced result cost directly from the canonical
+// buckets, for a case that is about a THRESHOLD rather than about the vendor
+// conversion. The conversion itself is proved by newTurnResultCost's own tests.
+func costOf(turnID string, freshInput, cacheWrite, cacheRead uint64) turnResultCost {
+	return turnResultCost{turnID: turnID, usage: &frontendv1.TokenUsage{
+		InputHits:   &frontendv1.TokenCacheHits{Read: cacheRead},
+		InputMisses: &frontendv1.TokenCacheMisses{Written: cacheWrite, Unwritten: freshInput},
+	}}
+}
+
+// mustTurnResultCost converts one vendor usage and fails the test if the vendor
+// reported a counter the canonical shape cannot hold.
+func mustTurnResultCost(t *testing.T, turnID string, usage *datav1.Usage) turnResultCost {
+	t.Helper()
+	cost, err := newTurnResultCost(turnID, usage)
+	if err != nil {
+		t.Fatalf("newTurnResultCost(%q) = %v", turnID, err)
+	}
+	return cost
+}
+
 func usageOf(input, cacheCreation, cacheRead int64) *datav1.Usage {
 	return &datav1.Usage{
 		InputTokens:              input,
@@ -53,10 +74,7 @@ func TestColdCompactionPushesAFailureCard(t *testing.T) {
 	m, d, _ := coldCompactionRig(t, compactionWarm, turnID)
 
 	// Act.
-	m.noteDaemonCompactionCost(d, turnResultCost{
-		turnID:              turnID,
-		uncachedInputTokens: keepalive.ColdCompactionUncachedTokens + 1,
-	})
+	m.noteDaemonCompactionCost(d, costOf(turnID, uint64(keepalive.ColdCompactionUncachedTokens + 1), 0, 0))
 
 	// Assert.
 	card := retainedCard(d, d.consumer.coldCompactionUUID(turnID))
@@ -80,7 +98,7 @@ func TestColdCompactionCardCarriesTheUsageBreakdown(t *testing.T) {
 	m, d, _ := coldCompactionRig(t, compactionWarm, turnID)
 
 	// Act.
-	m.noteDaemonCompactionCost(d, newTurnResultCost(turnID, usageOf(11, 1_500_000, 40)))
+	m.noteDaemonCompactionCost(d, mustTurnResultCost(t, turnID, usageOf(11, 1_500_000, 40)))
 
 	// Assert.
 	detail := retainedCard(d, d.consumer.coldCompactionUUID(turnID)).GetSourceDetail()
@@ -106,10 +124,7 @@ func TestColdCompactionRecordsTheSessionAndWorkspaceIdentity(t *testing.T) {
 	m, d, capture := coldCompactionRig(t, compactionWarm, turnID)
 
 	// Act.
-	m.noteDaemonCompactionCost(d, turnResultCost{
-		turnID:              turnID,
-		uncachedInputTokens: keepalive.ColdCompactionUncachedTokens + 1,
-	})
+	m.noteDaemonCompactionCost(d, costOf(turnID, uint64(keepalive.ColdCompactionUncachedTokens + 1), 0, 0))
 
 	// Assert.
 	if !capture.contains("DAEMON COMPACTION READ COLD") {
@@ -130,10 +145,7 @@ func TestWarmCompactionAtTheThresholdRaisesNoCard(t *testing.T) {
 	m, d, capture := coldCompactionRig(t, compactionWarm, turnID)
 
 	// Act.
-	m.noteDaemonCompactionCost(d, turnResultCost{
-		turnID:              turnID,
-		uncachedInputTokens: keepalive.ColdCompactionUncachedTokens,
-	})
+	m.noteDaemonCompactionCost(d, costOf(turnID, uint64(keepalive.ColdCompactionUncachedTokens), 0, 0))
 
 	// Assert.
 	if card := retainedCard(d, d.consumer.coldCompactionUUID(turnID)); card != nil {
@@ -154,7 +166,7 @@ func TestWarmCompactionRecordsItsWarmRead(t *testing.T) {
 	m, d, capture := coldCompactionRig(t, compactionWarm, turnID)
 
 	// Act.
-	m.noteDaemonCompactionCost(d, newTurnResultCost(turnID, usageOf(4, 0, 1_500_000)))
+	m.noteDaemonCompactionCost(d, mustTurnResultCost(t, turnID, usageOf(4, 0, 1_500_000)))
 
 	// Assert.
 	if !capture.contains("daemon compaction read WARM") {
@@ -171,7 +183,7 @@ func TestColdReviveCompactionRaisesTheSameAlarm(t *testing.T) {
 	m, d, capture := coldCompactionRig(t, compactionRevive, turnID)
 
 	// Act.
-	m.noteDaemonCompactionCost(d, newTurnResultCost(turnID, usageOf(2, 1_500_000, 0)))
+	m.noteDaemonCompactionCost(d, mustTurnResultCost(t, turnID, usageOf(2, 1_500_000, 0)))
 
 	// Assert.
 	if retainedCard(d, d.consumer.coldCompactionUUID(turnID)) == nil {
@@ -192,10 +204,7 @@ func TestColdReadAlarmIgnoresAResultForAnotherTurn(t *testing.T) {
 	m, d, capture := coldCompactionRig(t, compactionWarm, turnID)
 
 	// Act: an expensive USER turn while the compaction is claimed.
-	m.noteDaemonCompactionCost(d, turnResultCost{
-		turnID:              "req_user",
-		uncachedInputTokens: keepalive.ColdCompactionUncachedTokens * 100,
-	})
+	m.noteDaemonCompactionCost(d, costOf("req_user", uint64(keepalive.ColdCompactionUncachedTokens * 100), 0, 0))
 
 	// Assert.
 	if capture.contains("DAEMON COMPACTION READ COLD") {
@@ -211,10 +220,7 @@ func TestColdReadAlarmIgnoresAResultWithNoCompactionClaimed(t *testing.T) {
 	d := controllerFor(t, m)
 
 	// Act.
-	m.noteDaemonCompactionCost(d, turnResultCost{
-		turnID:              "some-turn",
-		uncachedInputTokens: keepalive.ColdCompactionUncachedTokens * 100,
-	})
+	m.noteDaemonCompactionCost(d, costOf("some-turn", uint64(keepalive.ColdCompactionUncachedTokens * 100), 0, 0))
 
 	// Assert.
 	if capture.contains("DAEMON COMPACTION READ COLD") {

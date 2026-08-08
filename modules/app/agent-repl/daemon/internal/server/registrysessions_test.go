@@ -43,7 +43,7 @@ func TestSessionTokenUtilizationRejectsPoisonedDurableModelBeforeFrameConstructi
 		ClaudeSessionId:    "claude-session",
 		ApiMessageId:       "api-message",
 		Model:              " \n ",
-		Usage:              &frontendv1.TokenUsage{InputTokens: 1},
+		Usage:              &frontendv1.VendorTokenUsage{InputTokens: 1},
 	}
 	defer func() {
 		if recover() == nil {
@@ -125,8 +125,8 @@ func TestRegistrySessionViewsCarriesDurableCompletedUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 	records := []*frontendv1.TokenUtilization{
-		{ApiMessageId: "m1", Model: "fable", Actor: &frontendv1.TokenUtilization_MainAgent{MainAgent: &frontendv1.TokenUtilizationMainAgent{}}, Usage: &frontendv1.TokenUsage{InputTokens: 3}},
-		{ApiMessageId: "m2", Model: "opus", Actor: &frontendv1.TokenUtilization_Subagent{Subagent: &frontendv1.TokenUtilizationSubagent{AgentId: "agent"}}, Usage: &frontendv1.TokenUsage{CacheReadInputTokens: 7}},
+		{ApiMessageId: "m1", Model: "fable", Actor: &frontendv1.TokenUtilization_MainAgent{MainAgent: &frontendv1.TokenUtilizationMainAgent{}}, Usage: &frontendv1.VendorTokenUsage{InputTokens: 3}},
+		{ApiMessageId: "m2", Model: "opus", Actor: &frontendv1.TokenUtilization_Subagent{Subagent: &frontendv1.TokenUtilizationSubagent{AgentId: "agent"}}, Usage: &frontendv1.VendorTokenUsage{CacheReadInputTokens: 7}},
 	}
 	views := RegistrySessions{Reg: reg, TokenUsage: fixedSessionTokenUsageSource{records: records}}.SessionViews()
 	usage := views[0].GetTokenUtilization()

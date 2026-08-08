@@ -3,8 +3,11 @@ package sessioncontroller
 import (
 	"time"
 
+	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+
 	"claude-repld/internal/keepalive"
 	"claude-repld/internal/registry"
+	"claude-repld/internal/tokenusage"
 )
 
 // keepalivecold.go — THE PING THAT CAME BACK COLD.
@@ -63,8 +66,11 @@ type keepAlivePingMeasurement struct {
 	// ttlMs is the cache lifetime that elapsed was believed to be inside. It is
 	// the threshold the account reports having been wrong about.
 	ttlMs int64
-	// uncachedInputTokens is what the ping's terminal result actually paid.
-	uncachedInputTokens int64
+	// usage is what the ping's terminal result actually paid, in the canonical
+	// shape. The verdict reads the expensive sum off it rather than being handed
+	// a pre-reduced number, so the one place a bucket could be substituted for
+	// the sum does not exist.
+	usage *frontendv1.TokenUsage
 	// resultObserved separates "the result reported nothing" from "no result
 	// arrived at all". A ping whose turn ended without a terminal result is not
 	// evidence of a warm cache and must not be read as one.
@@ -126,7 +132,7 @@ func (m *Manager) noteKeepAlivePingCost(d *sessionController, cost turnResultCos
 		m.mu.Unlock()
 		return
 	}
-	measurement.uncachedInputTokens = cost.uncachedInputTokens
+	measurement.usage = cost.usage
 	measurement.resultObserved = true
 	elapsedMs, ttlMs := measurement.elapsedMs, measurement.ttlMs
 	m.mu.Unlock()
@@ -145,7 +151,7 @@ func (m *Manager) actOnColdKeepAlivePing(d *sessionController, measurement *keep
 		return
 	}
 	cfg := m.keepAliveConfig()
-	if !cfg.CameBackCold(measurement.uncachedInputTokens) {
+	if !cfg.CameBackCold(measurement.usage) {
 		return
 	}
 	if promptsWaiting {
@@ -156,7 +162,7 @@ func (m *Manager) actOnColdKeepAlivePing(d *sessionController, measurement *keep
 		// rewind was on its way to deliver. The finding is still reported: a cold
 		// ping is a fact about the policy whether or not it is acted on.
 		m.logf("session-controller: cache keep-alive came back COLD but prompts are WAITING ws=%q session=%s turn_id=%s uncached_input_tokens=%d threshold=%d — the held prompts are released instead and their turn re-warms the cache, so no hibernation is taken and the user is not sent to the revival gate mid-work",
-			d.workspace, d.sessionID, measurement.turnID, measurement.uncachedInputTokens, cfg.UncachedCostAlertTokens)
+			d.workspace, d.sessionID, measurement.turnID, tokenusage.ExpensiveInput(measurement.usage), cfg.UncachedCostAlertTokens)
 		return
 	}
 	// DISPATCHED OFF THE SHIM READ LOOP. The transition stops and reaps the shim,
@@ -190,11 +196,11 @@ func (m *Manager) hibernateOnColdKeepAlivePing(d *sessionController, measurement
 		TTLMs:     measurement.ttlMs,
 	}
 	m.logf("session-controller: CACHE KEEP-ALIVE CAME BACK COLD ws=%q session=%s turn_id=%s uncached_input_tokens=%d threshold=%d elapsed_ms=%d ttl_ms=%d — the ping is a dozen tokens of prompt and it paid for the whole conversation, so the cache it was sent to refresh was already gone; the policy's prediction is overruled by its own measurement and the session hibernates with cause %s so the user is offered a compaction",
-		d.workspace, d.sessionID, measurement.turnID, measurement.uncachedInputTokens,
+		d.workspace, d.sessionID, measurement.turnID, tokenusage.ExpensiveInput(measurement.usage),
 		cfg.UncachedCostAlertTokens, measurement.elapsedMs, measurement.ttlMs, keepalive.CauseCacheExpired)
 	if err := m.hibernateWithCause(d.workspace, account, evidenceObserved); err != nil {
 		m.logf("session-controller: COLD KEEP-ALIVE HIBERNATION FAILED ws=%q session=%s turn_id=%s uncached_input_tokens=%d threshold=%d elapsed_ms=%d ttl_ms=%d error=%v — the prompt cache is provably gone and the session stays AWAKE with nothing recording it, so the next prompt pays a full context re-ingest without the user ever being offered the compaction",
-			d.workspace, d.sessionID, measurement.turnID, measurement.uncachedInputTokens,
+			d.workspace, d.sessionID, measurement.turnID, tokenusage.ExpensiveInput(measurement.usage),
 			cfg.UncachedCostAlertTokens, measurement.elapsedMs, measurement.ttlMs, err)
 	}
 }

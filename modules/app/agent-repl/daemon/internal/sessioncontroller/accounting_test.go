@@ -352,7 +352,7 @@ func TestAccountingQueryIdentityContradictionOnApplyStaysFatal(t *testing.T) {
 	}
 }
 
-func TestTokenUsageFromAPIPreservesEveryRawUsageField(t *testing.T) {
+func TestVendorTokenUsageFromAPIPreservesEveryRawUsageField(t *testing.T) {
 	cache, _ := structpb.NewStruct(map[string]any{"ephemeral_5m_input_tokens": 11, "ephemeral_1h_input_tokens": 12})
 	tools, _ := structpb.NewStruct(map[string]any{"web_search_requests": 2, "web_fetch_requests": 3})
 	fallback, _ := structpb.NewStruct(map[string]any{"accepted": true})
@@ -361,13 +361,17 @@ func TestTokenUsageFromAPIPreservesEveryRawUsageField(t *testing.T) {
 	diagnostic, _ := structpb.NewStruct(map[string]any{"cache_miss_reason": "tools_changed", "cache_missed_input_tokens": 17})
 	iterations, _ := structpb.NewList([]any{map[string]any{"type": "fallback", "model": "fallback-model", "input_tokens": 1, "output_tokens": 2, "cache_read_input_tokens": 3, "cache_creation_input_tokens": 4, "cache_creation": map[string]any{"ephemeral_5m_input_tokens": 4}}})
 	want := &datav1.ApiUsage{InputTokens: 1, OutputTokens: 2, CacheReadInputTokens: 3, CacheCreationInputTokens: 4, CacheCreation: cache, ServerToolUse: tools, ServiceTier: "priority", Iterations: iterations, Speed: "fast", InferenceGeo: "us", FallbackCredit: fallback, OutputTokensDetails: output, UnmodeledUsage: unmodeled, CacheDiagnostic: diagnostic}
-	rates := &datav1.PromptCacheRates{TotalPromptInputTokens: 18, CacheHitRate: 0.125, CacheWriteRate: 0.25, UncachedInputRate: 0.625}
-	got := tokenUsageFromAPI(want, rates)
+	got := vendorTokenUsageFromAPI(want)
 	if got.GetCacheCreation().GetEphemeral_5MInputTokens() != 11 || got.GetCacheCreation().GetEphemeral_1HInputTokens() != 12 || got.GetServerToolUse().GetWebFetchRequests() != 3 || got.GetOutputDetails().GetThinkingTokens() != 9 || got.GetFallbackCredit().GetFields()["accepted"].GetBoolValue() != true || got.GetUnmodeledUsage().GetFields()["future_counter"].GetNumberValue() != 4 || got.GetCacheDiagnostic().GetToolsChanged().GetCacheMissedInputTokens() != 17 || got.GetIterations()[0].GetFallback().GetModel() != "fallback-model" || !proto.Equal(got.GetRawUsage(), want) {
 		t.Fatalf("usage = %+v", got)
 	}
-	if got.GetCacheRates().GetTotalPromptInputTokens() != 18 || got.GetCacheRates().GetCacheHitRate() != 0.125 || got.GetCacheRates().GetCacheWriteRate() != 0.25 || got.GetCacheRates().GetUncachedInputRate() != 0.625 {
-		t.Fatalf("cache rates = %+v, want exact shim-owned values", got.GetCacheRates())
+	// THE DURABLE-LEGACY RATES ARE COMPUTED HERE, from this response's own three
+	// counters (1 fresh + 3 read + 4 written = 8), reproducing exactly what the
+	// shim's retired PromptCacheRates used to ship. A persisted row written
+	// before the retirement must still replay byte-identically, which is the only
+	// reason the field survives at all.
+	if got.GetCacheRates().GetTotalPromptInputTokens() != 8 || got.GetCacheRates().GetCacheHitRate() != 0.375 || got.GetCacheRates().GetCacheWriteRate() != 0.5 || got.GetCacheRates().GetUncachedInputRate() != 0.125 {
+		t.Fatalf("cache rates = %+v, want the daemon-derived partition of this response's own counters", got.GetCacheRates())
 	}
 }
 
@@ -979,7 +983,7 @@ func TestReplayOnlyUnexpectedQueryDegradedStateSurfacesOnce(t *testing.T) {
 func TestDurableReplayAttachesByteEquivalentPersistedAccounting(t *testing.T) {
 	push := &fakePusher{}
 	c := newConsumer("ws", "s", push, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, t.Logf, nil, nil, nil, nil, nil)
-	wantUsage := &frontendv1.TokenUtilization{ApiMessageId: "m", Usage: &frontendv1.TokenUsage{InputTokens: 7}}
+	wantUsage := &frontendv1.TokenUtilization{ApiMessageId: "m", Usage: &frontendv1.VendorTokenUsage{InputTokens: 7}}
 	want := &frontendv1.TurnAccounting{TurnId: "t", QueryInstanceId: "q", Responses: []*frontendv1.TokenUtilization{wantUsage}, Verdict: &frontendv1.TurnAccounting_Complete{Complete: &frontendv1.TurnAccountingComplete{}}}
 	c.replayedAccounting["t"] = want
 	c.replayedResponses["m"] = wantUsage
@@ -996,7 +1000,7 @@ func TestDurableReplayAttachesByteEquivalentPersistedAccounting(t *testing.T) {
 func TestHistoricalConversationNeverFallsBackToLiveReducerAccounting(t *testing.T) {
 	push := &fakePusher{}
 	c := newConsumer("ws", "s", push, &fakeApplier{}, nil, newFakeClearCompactStore(), emptyTurnAccountingStore{}, t.Logf, nil, nil, nil, nil, nil)
-	liveUsage := &frontendv1.TokenUtilization{ApiMessageId: "m", Usage: &frontendv1.TokenUsage{InputTokens: 99}}
+	liveUsage := &frontendv1.TokenUtilization{ApiMessageId: "m", Usage: &frontendv1.VendorTokenUsage{InputTokens: 99}}
 	c.accounting.activeTurnID = "live-turn"
 	c.accounting.turns["live-turn"] = &accountingTurn{responses: []*frontendv1.TokenUtilization{liveUsage}}
 	ev := accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{Uuid: "assistant-record", Message: &datav1.ApiAssistantMessage{Id: "m", Content: []*datav1.ContentBlock{{Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: "hello"}}}}}}}})

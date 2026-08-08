@@ -25,7 +25,7 @@ func commandDB(t *testing.T) string {
 	if _, err := statedb.NewTokenUtilizations(db); err != nil {
 		t.Fatal(err)
 	}
-	record := &frontendv1.TokenUtilization{AgentReplSessionId: "session", ClaudeSessionId: "claude", RootTurnId: "turn", ApiMessageId: "message", Model: " \t", Actor: &frontendv1.TokenUtilization_MainAgent{MainAgent: &frontendv1.TokenUtilizationMainAgent{}}, Usage: &frontendv1.TokenUsage{OutputTokens: 1}}
+	record := &frontendv1.TokenUtilization{AgentReplSessionId: "session", ClaudeSessionId: "claude", RootTurnId: "turn", ApiMessageId: "message", Model: " \t", Actor: &frontendv1.TokenUtilization_MainAgent{MainAgent: &frontendv1.TokenUtilizationMainAgent{}}, Usage: &frontendv1.VendorTokenUsage{OutputTokens: 1}}
 	raw, err := proto.Marshal(record)
 	if err != nil {
 		t.Fatal(err)

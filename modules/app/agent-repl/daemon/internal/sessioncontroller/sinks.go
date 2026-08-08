@@ -1377,7 +1377,18 @@ func (c *consumer) Consume(ev *corev1.Event) error {
 			// synthetic assistant message carries a zero usage by construction;
 			// the real figures ride the terminal result, which is what this
 			// reduces and what every consumer of the hook is judged on.
-			c.onTurnResultCost(newTurnResultCost(c.accounting.activeTurn(), usage))
+			// A COUNTER THE VENDOR REPORTED NEGATIVE IS SURFACED, NOT JUDGED.
+			// The canonical shape is unsigned, so converting one would hand the
+			// hibernation policy and the cold-compaction tripwire a turn costing
+			// nearly 2^64 tokens. The report is dropped loudly instead — the
+			// same degradation the accounting ledger takes above, for the same
+			// reason: bookkeeping may not gate conversation delivery.
+			cost, err := newTurnResultCost(c.accounting.activeTurn(), usage)
+			if err != nil {
+				c.warn("session-controller: turn result cost REJECTED session=%s seq=%d turn_id=%s error=%v — the vendor reported a negative token counter, so no cold-ping, cold-compaction, or conversation-size verdict is taken from this result", c.sessionID, ev.GetSeq(), c.accounting.activeTurn(), err)
+			} else {
+				c.onTurnResultCost(cost)
+			}
 		}
 	}
 	if historicalQueryLifecycle {

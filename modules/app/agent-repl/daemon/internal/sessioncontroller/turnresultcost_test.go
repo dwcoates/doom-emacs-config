@@ -51,14 +51,14 @@ func TestTurnResultCostSeparatesWhatWasPaidFromHowBigTheContextIs(t *testing.T) 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange, Act.
-			got := newTurnResultCost("turn-1", usageOf(tc.input, tc.cacheCreation, tc.cacheRead))
+			got := mustTurnResultCost(t, "turn-1", usageOf(tc.input, tc.cacheCreation, tc.cacheRead))
 
 			// Assert.
-			if got.uncachedInputTokens != tc.wantUncached {
-				t.Fatalf("uncached_input_tokens = %d, want %d", got.uncachedInputTokens, tc.wantUncached)
+			if got.expensiveInputTokens() != tc.wantUncached {
+				t.Fatalf("expensive_input_tokens = %d, want %d", got.expensiveInputTokens(), tc.wantUncached)
 			}
-			if got.contextInputTokens != tc.wantContext {
-				t.Fatalf("context_input_tokens = %d, want %d", got.contextInputTokens, tc.wantContext)
+			if got.contextInputTokens() != tc.wantContext {
+				t.Fatalf("context_input_tokens = %d, want %d", got.contextInputTokens(), tc.wantContext)
 			}
 		})
 	}
@@ -73,7 +73,7 @@ func TestNoteContextSizeRemembersTheObservedConversationSize(t *testing.T) {
 	d := controllerFor(t, m)
 
 	// Act.
-	m.noteContextSize(d, newTurnResultCost("turn-1", usageOf(10, 0, 120_000)))
+	m.noteContextSize(d, mustTurnResultCost(t, "turn-1", usageOf(10, 0, 120_000)))
 
 	// Assert.
 	m.mu.Lock()
@@ -92,10 +92,10 @@ func TestNoteContextSizeKeepsTheLastMeasurementWhenAResultReportsNoInput(t *test
 	// Arrange.
 	m, _, _, _, _ := coldPingRig(t)
 	d := controllerFor(t, m)
-	m.noteContextSize(d, newTurnResultCost("turn-1", usageOf(0, 0, keepalive.WarmCompactMinContextTokens*2)))
+	m.noteContextSize(d, mustTurnResultCost(t, "turn-1", usageOf(0, 0, keepalive.WarmCompactMinContextTokens*2)))
 
 	// Act.
-	m.noteContextSize(d, newTurnResultCost("turn-2", usageOf(0, 0, 0)))
+	m.noteContextSize(d, mustTurnResultCost(t, "turn-2", usageOf(0, 0, 0)))
 
 	// Assert.
 	m.mu.Lock()

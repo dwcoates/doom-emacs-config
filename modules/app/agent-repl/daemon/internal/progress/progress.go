@@ -47,6 +47,7 @@ import (
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/frontend"
 	"claude-repld/internal/keepalive"
+	"claude-repld/internal/tokenusage"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -771,11 +772,19 @@ func (m *Manager) applyAssistantLocked(workspace string, wp *workspaceProgress, 
 		}
 		wp.countedUsage[key] = struct{}{}
 	}
-	// THROUGH THE ONE HELPER, never restated. This live ticker and the turn's
-	// final expensive-turn verdict (applyResultCostLocked, just below) are two
-	// views of the SAME measure, and a second copy of the addition here is
+	// THROUGH THE CANONICAL SHAPE, never restated. This live ticker and the
+	// turn's final expensive-turn verdict (applyResultCostLocked, just below) are
+	// two views of the SAME measure, and a second copy of the addition here is
 	// precisely how they would come to disagree about what a turn spent.
-	add := keepalive.UncachedInputTokens(u.GetInputTokens(), u.GetCacheCreationInputTokens())
+	canonical, err := tokenusage.FromAPIUsage(u)
+	if err != nil {
+		// A NEGATIVE VENDOR COUNTER IS REPORTED, NOT TICKED. The canonical shape
+		// is unsigned, so converting one would add a figure near 2^64 to the
+		// footer's running total and leave every later turn's cell wrong.
+		m.logf("progress: assistant usage REJECTED ws=%s uuid=%s error=%v — the vendor reported a negative token counter, so this response is not added to the turn's expensive-input ticker", workspace, uuid, err)
+		return
+	}
+	add := tokenusage.ExpensiveInput(canonical)
 	if add == 0 {
 		return
 	}
@@ -787,9 +796,10 @@ func (m *Manager) applyAssistantLocked(workspace string, wp *workspaceProgress, 
 // applyResultCostLocked decides one turn's UNCACHED input cost and raises the
 // expensive-turn alert when it crosses the threshold.
 //
-// THE MEASURE IS keepalive.UncachedInputTokens, shared with the session
-// controller rather than restated here, so the footer's alert and the cold-ping
-// hibernation can never disagree about whether one turn was cold.
+// THE MEASURE IS tokenusage.ExpensiveInput over the canonical shape, shared
+// with the session controller rather than restated here, so the footer's alert
+// and the cold-ping hibernation can never disagree about whether one turn was
+// cold.
 //
 // A CACHE_KEEP_ALIVE ORIGIN HERE IS THE SHARPEST SIGNAL THE FEATURE PRODUCES.
 // The ping is a dozen tokens of prompt; if it came back having paid for the
@@ -807,7 +817,15 @@ func (m *Manager) applyResultCostLocked(workspace string, wp *workspaceProgress,
 	if usage == nil {
 		return
 	}
-	uncached := keepalive.UncachedInputTokens(usage.GetInputTokens(), usage.GetCacheCreationInputTokens())
+	canonical, err := tokenusage.FromResultUsage(usage)
+	if err != nil {
+		// Same reasoning as the ticker above: an unsigned conversion of a negative
+		// counter would raise a permanent expensive-turn alert for a turn that
+		// spent nothing.
+		m.logf("progress: result usage REJECTED ws=%s turn_id=%s error=%v — the vendor reported a negative token counter, so no expensive-turn verdict is taken for this turn", workspace, wp.turnID, err)
+		return
+	}
+	uncached := tokenusage.ExpensiveInput(canonical)
 	if uncached <= m.uncachedAlertTokens {
 		return
 	}

@@ -19,10 +19,10 @@ func warmCompactRig(t *testing.T, contextInputTokens int64) (*Manager, *logCaptu
 	t.Helper()
 	m, _, _, _, capture := coldPingRig(t)
 	if contextInputTokens > 0 {
-		m.noteContextSize(controllerFor(t, m), turnResultCost{
-			turnID:             "prior-turn",
-			contextInputTokens: contextInputTokens,
-		})
+		// The size rides the canonical shape as a CACHE HIT: the floor judges how
+		// big the standing conversation is, and a standing conversation is the
+		// prefix the cache is holding.
+		m.noteContextSize(controllerFor(t, m), costOf("prior-turn", 0, 0, uint64(contextInputTokens)))
 	}
 	return m, capture
 }
