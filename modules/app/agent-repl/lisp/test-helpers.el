@@ -408,9 +408,10 @@ work in the batch process.  Ignores every argument by design."
   (advice-add 'run-with-timer :override #'agent-repl-test--inert-timer)
   (advice-add 'run-with-idle-timer :override #'agent-repl-test--inert-timer)
 
-  ;; Load the module
-  (load (expand-file-name "config.el" (file-name-directory
-                                        (or load-file-name buffer-file-name)))
+  ;; Load the module.  config.el stays at the module ROOT (Doom resolves it
+  ;; there); this harness lives in `lisp/', hence the `..'.
+  (load (expand-file-name "../config.el" (file-name-directory
+                                           (or load-file-name buffer-file-name)))
         nil t)
 
   ;; Restore run-with-timer / run-with-idle-timer after loading
@@ -811,14 +812,22 @@ fail with `file-missing'."
 
 (defconst agent-repl-test--module-dir
   (file-name-directory (or load-file-name buffer-file-name))
-  "Absolute path of the agent-repl module directory this harness lives in.")
+  "Absolute path of the `lisp/' directory this harness and the sources live in.")
+
+(defconst agent-repl-test--module-root
+  (file-name-as-directory
+   (expand-file-name ".." (file-name-directory (or load-file-name buffer-file-name))))
+  "Absolute path of the `modules/app/agent-repl/' root.
+One level above `agent-repl-test--module-dir': the elisp lives in
+`lisp/', while `proto/', `prompts/', `webapp/', `bin/' and friends sit at
+the module root.")
 
 (defun agent-repl-test--generated-go-text (relative)
   "Return the text of RELATIVE under the checked-in `proto/gen/go/' tree.
 Signals when the file is absent — a missing generated binding means the
 vocabulary assertions would silently assert nothing."
   (let ((path (expand-file-name (concat "proto/gen/go/" relative)
-                                agent-repl-test--module-dir)))
+                                agent-repl-test--module-root)))
     (unless (file-readable-p path)
       (error "agent-repl test: generated proto binding not readable: %s" path))
     (with-temp-buffer

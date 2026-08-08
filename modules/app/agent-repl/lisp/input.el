@@ -24,10 +24,11 @@ the only path by which the guidelines ordinarily reach the agent."
   :group 'agent-repl)
 
 (defvar agent-repl-metaprompt-file
-  (expand-file-name "metaprompt.md"
+  (expand-file-name "../metaprompt.md"
                     (file-name-directory (or load-file-name buffer-file-name)))
   "Absolute path to the canonical metaprompt source file in this repository.
-The .md data file lives as plain text, edited and version-controlled
+The .md data file lives as plain text at the module root, one level above
+this file's own `lisp/' directory, edited and version-controlled
 alongside the code, and is read at session spawn by the shim.  It is
 ALSO the path the on-demand read-directive names.  Captured at file-load
 time because `load-file-name' is only bound during load.")
