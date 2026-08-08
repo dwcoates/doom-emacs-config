@@ -181,6 +181,7 @@ func TestMergeResolutionTurnThatNeverEndsIsAnError(t *testing.T) {
 // fails at the SHORT bind bound, not after the whole work bound. A test-fix
 // prompt once burned all thirty minutes bound to nothing.
 func TestMergeResolutionTurnThatNeverStartsFailsAtTheBindDeadline(t *testing.T) {
+	usePrompts(t)
 	// Arrange — the prompt is forwarded, but no turn ever starts for it.
 	h := newMergeResolveHarness(t)
 	h.m.cfg.MergeResolutionTurnBindBound = 20 * time.Millisecond
@@ -209,6 +210,7 @@ func TestMergeResolutionTurnThatNeverStartsFailsAtTheBindDeadline(t *testing.T) 
 // The failure cause names the SUBMIT'S OWN DISPOSITION, so the record states
 // what became of the prompt instead of leaving it to be reconstructed.
 func TestMergeResolutionNeverStartedCauseNamesTheSubmitDisposition(t *testing.T) {
+	usePrompts(t)
 	// Arrange.
 	h := newMergeResolveHarness(t)
 	h.m.cfg.MergeResolutionTurnBindBound = 20 * time.Millisecond
@@ -229,6 +231,7 @@ func TestMergeResolutionNeverStartedCauseNamesTheSubmitDisposition(t *testing.T)
 // session, so the merge prompt lands on the queue instead of the shim. Waiting
 // out any deadline would only be the merge competing with the user.
 func TestMergeResolutionOnABusyWorkspaceFailsWithTheBusyCause(t *testing.T) {
+	usePrompts(t)
 	// Arrange — a turn of the user's own is in flight.
 	h := newMergeResolveHarness(t)
 	h.m.cfg.MergeResolutionTurnBindBound = 30 * time.Second
@@ -257,6 +260,7 @@ func TestMergeResolutionOnABusyWorkspaceFailsWithTheBusyCause(t *testing.T) {
 // agent whenever the user's turn ended — an instruction to repair a merge that
 // has by then been failed and rolled back.
 func TestMergeResolutionOnABusyWorkspaceTakesItsParkedPromptBack(t *testing.T) {
+	usePrompts(t)
 	// Arrange — a turn of the user's own is in flight.
 	h := newMergeResolveHarness(t)
 	h.turn(true)
@@ -436,6 +440,7 @@ func TestResolveMergeTestFailureTurnThatNeverEndsIsAnError(t *testing.T) {
 // resolution's reason: it is the same wait, and a merge must not compete with
 // the user's own agent for the shim.
 func TestResolveMergeTestFailureOnABusyWorkspaceFailsWithTheBusyCause(t *testing.T) {
+	usePrompts(t)
 	// Arrange — a turn of the user's own is in flight.
 	h := newMergeResolveHarness(t)
 	h.turn(true)
