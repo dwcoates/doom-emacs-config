@@ -67,8 +67,16 @@
 #
 # Usage:  bin/deploy-all.sh [--force] [--no-bounce] [--elisp <git-range>]
 #
-#   --force        pass --force to build-frontend.sh and kickstart both
-#                  services even when they already run the installed binary
+#   --force        pass --force to build-frontend.sh. It does NOT force the
+#                  store/sidecar kickstarts: a forced rebuild reproduces a
+#                  byte-identical binary, and bouncing on that alone dropped
+#                  every live shim's store producer connection and standing
+#                  subscription for nothing. A retry loop of 15 forced deploys
+#                  on 2026-08-08 turned that into a fleet-wide warn storm. The
+#                  deployed-fingerprint stamp is the SOLE kickstart authority,
+#                  and it already bounces anything genuinely not running the
+#                  installed image (including an installed-but-never-started
+#                  binary), so nothing a force could legitimately want is lost
 #   --no-bounce    build everything, but skip service kickstarts, the daemon
 #                  restart, and any elisp reload (pure build mode). Leaves the
 #                  deployed stamps untouched, so a later real run still sees
@@ -248,7 +256,7 @@ wait_for_store_sock() {
     done
 }
 
-if [ "$STORE_STALE" -eq 1 ] || [ "$FORCE" -eq 1 ]; then
+if [ "$STORE_STALE" -eq 1 ]; then
     log "store: kickstarting $STORE_LABEL..."
     # The store's socket is unlinked on shutdown and recreated on boot, so we
     # wait for the NEW instance's socket — the recorded safe order requires
@@ -262,13 +270,17 @@ if [ "$STORE_STALE" -eq 1 ] || [ "$FORCE" -eq 1 ]; then
     # sidecar's link recovery is connection-scoped, and a fresh pair is the
     # recorded known-good state after a store restart.
     SIDECAR_STALE=1
+else
+    log "store: unchanged, kickstart skipped"
 fi
 
-if [ "$SIDECAR_STALE" -eq 1 ] || [ "$FORCE" -eq 1 ]; then
+if [ "$SIDECAR_STALE" -eq 1 ]; then
     log "sidecar: kickstarting $SIDECAR_LABEL..."
     kickstart "$SIDECAR_LABEL"
     record_deployed shim-claude-sidecar
     log "sidecar: done"
+else
+    log "sidecar: unchanged, kickstart skipped"
 fi
 
 # ---- 5. daemon bounce ------------------------------------------------------
