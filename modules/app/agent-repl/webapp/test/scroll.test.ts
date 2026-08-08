@@ -7,9 +7,11 @@ import {
   freezeOnToggle,
   inEdgeZone,
   innerScrollerAt,
+  installTailReanchor,
   isPinnedToBottom,
   isScrollBox,
   parkAtTail,
+  type ReanchorBox,
   redirectsToFeed,
   sectionFor,
   wheelAction,
@@ -427,6 +429,112 @@ describe("parkAtTail", () => {
     parkAtTail(box);
     // Assert
     expect(box.scrollTop).toBe(0);
+  });
+});
+
+/**
+ * The tail re-anchor: what keeps a workspace switch's snap from being undone
+ * by the relayout the same switch causes. Every case drives the two
+ * subscriptions by hand, so the ordering the browser would decide is the
+ * thing each test states.
+ */
+describe("installTailReanchor", () => {
+  /** A feed box plus the two triggers the re-anchor subscribed to. */
+  const armed = (
+    box: ReanchorBox,
+    pinPx?: number,
+  ): { scroll: () => void; resize: () => void } => {
+    let onScroll = (): void => {};
+    let onResize = (): void => {};
+    installTailReanchor(
+      box,
+      (cb) => {
+        onScroll = cb;
+      },
+      (cb) => {
+        onResize = cb;
+      },
+      pinPx,
+    );
+    return { scroll: () => onScroll(), resize: () => onResize() };
+  };
+
+  it("re-parks a box that was at its tail when the resize arrived", () => {
+    // Arrange — the switch snap landed first, then the webview was resized.
+    const box = { scrollTop: 700, scrollHeight: 1000, clientHeight: 300 };
+    const trigger = armed(box);
+    // Act
+    box.clientHeight = 200;
+    trigger.resize();
+    // Assert
+    expect(box.scrollTop).toBe(1000);
+  });
+
+  it("leaves a deliberately scrolled-up box where the reader put it", () => {
+    // Arrange
+    const box = { scrollTop: 120, scrollHeight: 1000, clientHeight: 300 };
+    const trigger = armed(box);
+    // Act
+    trigger.resize();
+    // Assert
+    expect(box.scrollTop).toBe(120);
+  });
+
+  it("decides on the pre-resize sample, not the geometry the resize left behind", () => {
+    // Arrange — pinned at install, then the resize itself grows the
+    // scrollable height so a fresh reading would call the box unpinned.
+    const box = { scrollTop: 700, scrollHeight: 1000, clientHeight: 300 };
+    const trigger = armed(box);
+    // Act
+    box.scrollHeight = 4000;
+    trigger.resize();
+    // Assert
+    expect(box.scrollTop).toBe(4000);
+  });
+
+  it("re-arms once the reader scrolls back to the tail", () => {
+    // Arrange — starts scrolled up, so the re-anchor is disarmed.
+    const box = { scrollTop: 120, scrollHeight: 1000, clientHeight: 300 };
+    const trigger = armed(box);
+    // Act
+    box.scrollTop = 700;
+    trigger.scroll();
+    box.scrollHeight = 1400;
+    trigger.resize();
+    // Assert
+    expect(box.scrollTop).toBe(1400);
+  });
+
+  it("disarms once the reader scrolls away from the tail", () => {
+    // Arrange — starts pinned, so the re-anchor is armed.
+    const box = { scrollTop: 700, scrollHeight: 1000, clientHeight: 300 };
+    const trigger = armed(box);
+    // Act
+    box.scrollTop = 120;
+    trigger.scroll();
+    trigger.resize();
+    // Assert
+    expect(box.scrollTop).toBe(120);
+  });
+
+  it("takes the caller's pin slack when one is given", () => {
+    // Arrange — 100px of slack: outside the default PIN_PX, inside this one.
+    const box = { scrollTop: 600, scrollHeight: 1000, clientHeight: 300 };
+    const trigger = armed(box, 200);
+    // Act
+    trigger.resize();
+    // Assert
+    expect(box.scrollTop).toBe(1000);
+  });
+
+  it("does not park before a resize has arrived", () => {
+    // Arrange — installing alone must not move a feed mid-render.
+    const box = { scrollTop: 700, scrollHeight: 1000, clientHeight: 300 };
+    const trigger = armed(box);
+    // Act
+    trigger.scroll();
+    // Assert
+    expect(box.scrollTop).toBe(700);
   });
 });
 
