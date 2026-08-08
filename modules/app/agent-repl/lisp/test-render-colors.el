@@ -26,7 +26,7 @@
 
 (defconst agent-repl-test--color-fixture
   (let* ((dir (file-name-directory (or load-file-name buffer-file-name)))
-         (path (expand-file-name "proto/vocab/render-colors.json" dir)))
+         (path (expand-file-name "../proto/vocab/render-colors.json" dir)))
     (with-temp-buffer
       (insert-file-contents path)
       (let ((json-object-type 'alist)

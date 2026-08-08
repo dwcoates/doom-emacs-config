@@ -26,7 +26,7 @@
 
 (defconst agent-repl-test--timestamp-fixture
   (let* ((dir (file-name-directory (or load-file-name buffer-file-name)))
-         (path (expand-file-name "proto/vocab/log-timestamp.json" dir)))
+         (path (expand-file-name "../proto/vocab/log-timestamp.json" dir)))
     (with-temp-buffer
       (insert-file-contents path)
       (let ((json-object-type 'alist)

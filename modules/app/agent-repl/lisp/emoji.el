@@ -363,9 +363,10 @@ recent-emojis list through `--random-commit-emoji')."
 ;;; Git hook installation
 
 (defconst agent-repl--prepare-commit-msg-hook-source
-  (expand-file-name "hooks/prepare-commit-msg-emoji.sh"
+  (expand-file-name "../hooks/prepare-commit-msg-emoji.sh"
                     (file-name-directory (or load-file-name buffer-file-name)))
-  "Absolute path to the checked-in prepare-commit-msg hook script.")
+  "Absolute path to the checked-in prepare-commit-msg hook script.
+`hooks/' sits at the module root; this file lives in `lisp/' below it.")
 
 (defun agent-repl--git-hooks-dir ()
   "Return the git hooks directory for the current repository.

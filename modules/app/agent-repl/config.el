@@ -70,6 +70,10 @@ genuine fatal condition the user must see immediately."
 
 (defmacro agent-repl--load-module (file)
   "Load FILE via `load!', recording any error for collective reporting.
+FILE names a module source WITHOUT its `lisp/' prefix and `.el' suffix:
+every source lives in `lisp/' beside this file, while config.el itself
+stays at the module root because that is the path Doom's module loader
+resolves.
 The per-file success line is background chatter and goes to the quiet sink
 via `agent-repl--boot-info'; a load FAILURE is loud, via
 `agent-repl--boot-warn'.  Both use the bootstrap helpers rather than the
@@ -77,7 +81,7 @@ core.el ladder directly because the very first expansion of this macro is
 what loads core.el."
   `(condition-case err
        (progn
-         (load! ,file)
+         (load! (concat "lisp/" ,file))
          (agent-repl--boot-info "%s.el loaded." ,file))
      (error
       (push (cons ,file err) agent-repl--load-errors)

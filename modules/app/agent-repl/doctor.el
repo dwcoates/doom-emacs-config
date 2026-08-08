@@ -18,7 +18,9 @@ not owned by a workspace."
   (when (fboundp 'agent-repl--log)
     (apply #'agent-repl--log nil fmt args)))
 
-(let ((dir (file-name-directory load-file-name))
+;; doctor.el stays at the module root (that is where `doom doctor' looks for
+;; it), but the sources it loads live in the `lisp/' subdirectory.
+(let ((dir (expand-file-name "lisp/" (file-name-directory load-file-name)))
       (sources '("install.el" "codex.el" "daemon.el")))
   (agent-repl--doctor-log
    "doctor: start dir=%s sources=%S logger-available=%s"
