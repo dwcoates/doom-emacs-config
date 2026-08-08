@@ -631,7 +631,7 @@ func (m *Manager) MarkTurnInterrupted(workspace string) error {
 	if err != nil {
 		return fmt.Errorf("ssm: MarkTurnInterrupted read turn state for %q: %w", workspace, err)
 	}
-	m.interruptedTurn[workspace] = &interruptMark{tolerateLateStart: !active}
+	m.interruptedTurn[workspace] = &interruptMark{tolerateLateStart: !active, at: m.nextAt()}
 	m.logf("ssm: interrupt marked ws=%s tolerate_late_start=%t — the turn this stop ended will report `interrupted`", workspace, !active)
 	return nil
 }
@@ -643,6 +643,50 @@ type interruptMark struct {
 	// turn's own TurnStarted came back through the store: that one late start
 	// belongs to the marked turn and must not drop the mark.
 	tolerateLateStart bool
+	// at is when the shim acked the stop, on the same clock the state log's
+	// rows carry.
+	//
+	// IT IS THE ONE PIECE OF EVIDENCE THAT AN INTERRUPT WENT UNANSWERED. The
+	// mark is spent by the stopped turn's own end and dropped by the next turn's
+	// start, so a mark that is STILL STANDING is a stop the shim acked as
+	// INTERRUPTED for which no boundary of any kind has since arrived. How long
+	// it has been standing is what turns that from a moment's latency into a
+	// contradiction the reconciliation may act on
+	// (sessioncontroller.reconcileOrphanedTurn).
+	at int64
+}
+
+// UnansweredInterruptAgeMs reports how long the workspace's standing interrupt
+// mark has gone unanswered, and whether one stands at all.
+//
+// A STANDING MARK IS A SHIM CONTRADICTING ITSELF. The shim answered a stop with
+// INTERRUPTED, which is a claim that a turn WAS live and has now been aborted;
+// the mark is then spent by that turn's own end and dropped by any later start.
+// So a mark still standing long afterwards says the shim acked a turn it then
+// never ended and never replaced — the exact shape of a phantom live turn, and
+// the only evidence available for one without asking the shim to stop something
+// again.
+//
+// It reports the AGE rather than a verdict, because how long is long enough is a
+// policy question and this package holds no policy.
+func (m *Manager) UnansweredInterruptAgeMs(workspace string) (int64, bool) {
+	if workspace == "" {
+		return 0, false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	mark := m.interruptedTurn[workspace]
+	if mark == nil || mark.at <= 0 {
+		return 0, false
+	}
+	age := m.clock() - mark.at
+	if age < 0 {
+		// A mark stamped in the future is a clock that moved backwards, not a
+		// stop answered before it was sent. Report it as freshly marked: the
+		// conservative direction is to leave the turn alone.
+		return 0, true
+	}
+	return age, true
 }
 
 // applyInterruptMarkLocked spends (or drops) a workspace's interrupt mark for

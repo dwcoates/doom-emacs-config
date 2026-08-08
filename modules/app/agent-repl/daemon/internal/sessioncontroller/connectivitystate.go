@@ -258,7 +258,15 @@ func (m *Manager) reconcileOrphanedTurn(workspace string, st *frontendv1.Workspa
 	d, live := m.byWS[workspace]
 	m.mu.Unlock()
 	if live {
-		m.logf("session-controller: orphaned-turn reconciliation DECLINED ws=%q session=%s — a live controller drives this workspace, so its turn claim is not provably stale",
+		// A LIVE CONTROLLER IS NOT AN UNCONDITIONAL SHIELD, and treating it as
+		// one is what let the deadlock stand. See reconcileUnsubstantiatedTurn:
+		// the decline holds unless the SHIM ITSELF has contradicted the claim,
+		// and it is the shim's own evidence that narrows it, never a guess about
+		// what a live controller might be doing.
+		if m.reconcileUnsubstantiatedTurn(workspace, d, st) {
+			return true
+		}
+		m.logf("session-controller: orphaned-turn reconciliation DECLINED ws=%q session=%s — a live controller drives this workspace and its shim has not contradicted the claim, so its turn claim is not provably stale",
 			workspace, d.sessionID)
 		return false
 	}
