@@ -112,6 +112,56 @@ func TestRunSuiteFailsWithTheOutputTailWhenTheEntrypointExitsNonZero(t *testing.
 	}
 }
 
+func TestRunSuiteArchivesAFailingRunsCompleteOutput(t *testing.T) {
+	// Arrange — a runner that keeps going after its failure, so the retained
+	// tail ends on the LATER suites and the failure itself is only in the
+	// archive. This is the real multi-suite entrypoint's shape.
+	repo := initTarget(t)
+	writeEntrypoint(t, repo, "#!/usr/bin/env bash\necho 'FAIL: the one that broke'\n"+
+		"head -c 5000 /dev/zero | tr '\\0' 'x'\necho\nexit 1\n")
+	r, _ := newTestSuiteRunner(t)
+
+	// Act.
+	got, err := r.RunSuite(context.Background(), repo)
+	if err != nil {
+		t.Fatalf("RunSuite() err = %v", err)
+	}
+	t.Cleanup(func() { _ = os.Remove(got.OutputPath) })
+
+	// Assert — the tail lost the failure; the archive kept it.
+	if strings.Contains(got.Tail, "FAIL: the one that broke") {
+		t.Fatalf("the arrangement did not push the failure out of the tail")
+	}
+	if got.OutputPath == "" {
+		t.Fatalf("OutputPath = %q, want the archive of the full run", got.OutputPath)
+	}
+	full, readErr := os.ReadFile(got.OutputPath)
+	if readErr != nil {
+		t.Fatalf("read the archive: %v", readErr)
+	}
+	if !strings.Contains(string(full), "FAIL: the one that broke") {
+		t.Errorf("the archive does not carry the failure the tail dropped")
+	}
+}
+
+func TestRunSuiteArchivesNothingWhenTheSuitePasses(t *testing.T) {
+	// Arrange.
+	repo := initTarget(t)
+	writeEntrypoint(t, repo, "#!/usr/bin/env bash\necho ok\n")
+	r, _ := newTestSuiteRunner(t)
+
+	// Act.
+	got, err := r.RunSuite(context.Background(), repo)
+	if err != nil {
+		t.Fatalf("RunSuite() err = %v", err)
+	}
+
+	// Assert — nothing to diagnose, nothing written.
+	if got.OutputPath != "" {
+		t.Errorf("OutputPath = %q, want none for a passing suite", got.OutputPath)
+	}
+}
+
 func TestRunSuiteResolvesTheEntrypointFromTheRepositoryToplevel(t *testing.T) {
 	// Arrange — the target dir is a SUBDIRECTORY of the checkout, which is what
 	// a real worktree path can be.
