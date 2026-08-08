@@ -21,7 +21,7 @@ const (
 	// testFence stands in for the SSM's minted staleness token. Its composition
 	// is the SSM's business; every consumer, this suite included, compares it
 	// byte-wise and never parses it.
-	testFence = "sess-1\x1fgen-1"
+	testFence = "sess-1|gen-1"
 	// atMs is the producer stamp every fixture event carries, so a window's
 	// since_ms and the turn clock are assertable exact values.
 	atMs int64 = 1_700_000_000_000

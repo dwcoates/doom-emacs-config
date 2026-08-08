@@ -295,8 +295,8 @@ func collectItems(t *testing.T, conn *websocket.Conn, workspace string, n int) [
 // without a store re-pull when the ring covers the request).
 func replayItems(t *testing.T, conn *websocket.Conn, state *frontendv1.WorkspaceState, workspace, requestID string) []*frontendv1.ConversationItem {
 	t.Helper()
-	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"resync":{"fromSeq":0,"sessionId":%q,"controllerGenerationId":%q}}`,
-		requestID, state.GetSessionId(), state.GetControllerGenerationId()))
+	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"resync":{"fromSeq":0,"fence":%q}}`,
+		requestID, state.GetFence()))
 	var out []*frontendv1.ConversationItem
 	deadline := time.Now().Add(frameTimeout)
 	for time.Now().Before(deadline) {

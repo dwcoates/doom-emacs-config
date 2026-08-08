@@ -38,8 +38,8 @@ const retiredSpaceMark = 1060
 // test.
 func replayItemsFrom(t *testing.T, conn *websocket.Conn, state *frontendv1.WorkspaceState, workspace, requestID string, fromSeq uint64) []*frontendv1.ConversationItem {
 	t.Helper()
-	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"resync":{"fromSeq":"%d","sessionId":%q,"controllerGenerationId":%q}}`,
-		requestID, fromSeq, state.GetSessionId(), state.GetControllerGenerationId()))
+	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"resync":{"fromSeq":"%d","fence":%q}}`,
+		requestID, fromSeq, state.GetFence()))
 	var out []*frontendv1.ConversationItem
 	deadline := time.Now().Add(frameTimeout)
 	for time.Now().Before(deadline) {
