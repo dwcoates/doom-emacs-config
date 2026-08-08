@@ -36,10 +36,17 @@
  *     a standing subscription, REOPENS it at {@link resumeSeq} — the last seq
  *     actually forwarded to the sink, so the store replays the gap rather than
  *     leaving it silently missing.
+ *   - The LOSS ITSELF IS NOT REPORTED YET. It waits out a retry budget
+ *     (RELINK_REPORT_AFTER_MS): a bounce that relinks inside it lost nothing,
+ *     so reporting it opened a fleet-wide alarm about a self-healing event.
+ *     A link still down when the budget expires reports exactly what it always
+ *     did, at the same severity.
  *   - Once both are live again the client reports `DegradedState{recovered:
- *     true}`, which is the close edge of the fault window the outage opened.
- *     The daemon's fault machinery closes the session_fault row on it and
- *     re-resolves the workspace, so the color leaves the blue band unaided.
+ *     true}`, which is the close edge of the fault window the outage opened —
+ *     and nothing at all when the budget never expired, because no window was
+ *     ever opened. The daemon's fault machinery closes the session_fault row on
+ *     it and re-resolves the workspace, so the color leaves the blue band
+ *     unaided.
  *
  * NONE OF THAT SOFTENS THE SAD PATH. There is still no spill buffer, a
  * rejected batch is still never retried, and a write landing during an outage
@@ -133,6 +140,11 @@ export interface StoreClientOptions {
   relinkBackoffMinMs?: number;
   /** Relink backoff ceiling; default 5000ms. */
   relinkBackoffMaxMs?: number;
+  /**
+   * How long a dropped link may stay down before it is reported as a
+   * DegradedState; default 5000ms. See {@link RELINK_REPORT_AFTER_MS}.
+   */
+  relinkReportAfterMs?: number;
 }
 
 const COMPONENT = "shim-store-client";
@@ -145,6 +157,34 @@ const HEALTH_TIMEOUT_MS = 2000;
  */
 const RELINK_BACKOFF_MIN_MS = 100;
 const RELINK_BACKOFF_MAX_MS = 5000;
+/**
+ * THE RELINK RETRY BUDGET: how long a dropped link is given to come back
+ * before it is reported as a degradation.
+ *
+ * A dropped link is not yet an outage. The store is launchd-managed, and every
+ * deploy that kickstarts it drops BOTH connections of EVERY live shim at once.
+ * Reporting on the first drop turned a self-healing bounce into a fleet-wide
+ * alarm: two `DegradedState` reports per shim (the producer connection and the
+ * standing subscription each report), each one a warn in the daemon relay and
+ * an unresolved failure card the recovery then had to settle — 246 warns over
+ * one deploy retry loop on 2026-08-08, for zero lost events.
+ *
+ * So the LINK-LOSS edge waits out this budget before it says anything. A relink
+ * that lands inside it reports NOTHING — no DegradedState, no fault window, no
+ * card — because factually nothing was degraded: no event was dropped and the
+ * subscription resumed from `resumeSeq` with the gap replayed.
+ *
+ * NONE OF THAT SOFTENS THE SAD PATH, and specifically:
+ *   - a DROPPED BATCH still degrades IMMEDIATELY and loudly (dropBatch), budget
+ *     or no budget — events actually lost are never deferred;
+ *   - a link still down when the budget expires reports exactly the report it
+ *     always did, at the same severity, with the same reason text.
+ *
+ * 5s: comfortably longer than a launchd restart of the store (deploy-all waits
+ * on the new store.sock and gives it 15s), and short enough that a genuine
+ * outage is on the daemon's log before anyone can ask why the display stalled.
+ */
+const RELINK_REPORT_AFTER_MS = 5000;
 
 export interface StoreHealth {
   healthy: boolean;
@@ -268,6 +308,19 @@ export class StoreClient {
   private relinking = false;
   private readonly relinkMinMs: number;
   private readonly relinkMaxMs: number;
+  private readonly relinkReportAfterMs: number;
+  /**
+   * The reason a link-loss report is WAITING OUT the retry budget, or null when
+   * no unreported loss is outstanding. See {@link RELINK_REPORT_AFTER_MS}.
+   *
+   * FIRST REASON WINS. A store bounce drops the producer connection and the
+   * standing subscription within the same tick, and both are the SAME outage of
+   * the SAME component: the daemon holds one fault row and one card per
+   * component, so a second report only ever duplicated the first.
+   */
+  private pendingLinkLossReason: string | null = null;
+  /** The armed budget expiry that would report `pendingLinkLossReason`. */
+  private linkLossTimer: NodeJS.Timeout | null = null;
   /**
    * The highest seq actually handed to the sink under the current store key,
    * which is where a reopened subscription must resume from.
@@ -297,6 +350,7 @@ export class StoreClient {
     this.heartbeatIntervalMs = opts.heartbeatIntervalMs ?? 5000;
     this.relinkMinMs = opts.relinkBackoffMinMs ?? RELINK_BACKOFF_MIN_MS;
     this.relinkMaxMs = opts.relinkBackoffMaxMs ?? RELINK_BACKOFF_MAX_MS;
+    this.relinkReportAfterMs = opts.relinkReportAfterMs ?? RELINK_REPORT_AFTER_MS;
     this.storeKey = opts.storeSessionId ?? opts.sessionId;
     this.vendorKnown = (opts.storeSessionId ?? "") !== "";
   }
@@ -768,6 +822,21 @@ export class StoreClient {
       this.relinking = false;
     }
     this.relinkDelayMs = 0;
+    // BOTH halves are live again. A loss still inside its retry budget is now
+    // a bounce that healed itself: it never opened a fault window, so there is
+    // nothing to close and nothing to report — one info record here is the
+    // whole account of it.
+    if (this.pendingLinkLossReason !== null) {
+      const healed = this.pendingLinkLossReason;
+      this.clearLinkLossBudget();
+      LOGGER.log({
+        agent_repl_session_id: this.opts.sessionId,
+        store_key: this.storeKey,
+        reason: healed,
+        subscribed: this.lastFromSeq !== null,
+        last_forwarded_seq: this.lastForwardedSeq,
+      }, `store link recovered inside the ${this.relinkReportAfterMs}ms relink budget, never reported as degraded: ${healed}`);
+    }
     this.reportRecovered();
   }
 
@@ -888,7 +957,7 @@ export class StoreClient {
     // rest to the state machine rather than duplicating it here: it reopens
     // the standing subscription and reports the recovery, or re-arms if the
     // store is only partly back.
-    if (this.linkDegraded) this.armRelink(0);
+    if (this.linkDegraded || this.pendingLinkLossReason !== null) this.armRelink(0);
     // Send BEFORE enqueueing: a send that throws never reached the wire, so no
     // ack will ever match it, and an entry queued first would silently steal
     // the NEXT batch's ack. Nothing can interleave, since an ack is only ever
@@ -941,6 +1010,10 @@ export class StoreClient {
       clearTimeout(this.relinkTimer);
       this.relinkTimer = null;
     }
+    // ...and with it the retry budget: a deliberate teardown drops both
+    // connections, and reporting THAT as a degradation would alarm about a
+    // shim doing exactly what it was told to do.
+    this.clearLinkLossBudget();
     this.stopHeartbeat();
     this.connected = false;
     this.dropStandingSubscription();
@@ -993,8 +1066,10 @@ export class StoreClient {
     // MessageConn already owns any causal framing/socket error. This reason
     // describes the semantic loss of the subscription without re-recording it.
     const reason = err ? "store subscription lost after a framing failure" : "store subscription closed";
-    // The daemon's view goes stale without the tail; report honestly.
-    this.degrade(reason, 0);
+    // The daemon's view goes stale without the tail — but only if the tail stays
+    // gone. A store bounce drops it and the relink resumes it at resumeSeq with
+    // the gap replayed, so the report waits out the retry budget.
+    this.degradeLinkAfterBudget(reason);
     // ...and then recover it. A dropped tail is never re-opened by anyone
     // else: the daemon only re-sends Subscribe when the daemon<->shim link
     // itself bounces, which a store restart does not touch.
@@ -1035,9 +1110,11 @@ export class StoreClient {
       this.dropBatch(p.events, reason);
       p.reject(new Error(`store-client: ${reason}`));
     }
-    // Report the outage even if nothing was in flight: the subscription is
-    // dead, so the daemon's view is now stale until the store returns.
-    this.degrade(reason, 0);
+    // Note the outage even if nothing was in flight: the subscription is dead
+    // too, so the daemon's view is stale until the store returns. Deferred by
+    // the retry budget — unlike the dropBatch calls above, which lost real
+    // events and reported immediately.
+    this.degradeLinkAfterBudget(reason);
     // A write may never come — an idle session that lost its store link would
     // sit degraded forever waiting for one — so recovery is driven by the link
     // itself rather than by the next batch that happens to need it.
@@ -1162,7 +1239,72 @@ export class StoreClient {
     });
   }
 
+  /**
+   * Note a dropped LINK and start the retry budget, reporting nothing yet.
+   *
+   * This is the deferred half of {@link degrade}, and the only caller of it
+   * that is deferred: a link that is down is not yet an outage, because a
+   * relink inside the budget loses nothing. See {@link RELINK_REPORT_AFTER_MS}.
+   *
+   * The budget is a WALL-CLOCK timer rather than a count of failed relink
+   * attempts, so the report lands at a known instant instead of wherever the
+   * backoff's doubling happens to put the next attempt.
+   */
+  private degradeLinkAfterBudget(reason: string): void {
+    if (this.closed) return;
+    // Already reported (by a dropped batch, or by an earlier expiry): the window
+    // is open and the recovery is what closes it. Nothing to defer.
+    if (this.linkDegraded) return;
+    // Same outage, second edge. First reason wins.
+    if (this.pendingLinkLossReason !== null) {
+      LOGGER.log({
+        agent_repl_session_id: this.opts.sessionId,
+        store_key: this.storeKey,
+        reason,
+        pending_reason: this.pendingLinkLossReason,
+      }, `store link edge dropped while the relink budget is already running: ${reason}`);
+      return;
+    }
+    this.pendingLinkLossReason = reason;
+    LOGGER.log({
+      agent_repl_session_id: this.opts.sessionId,
+      store_key: this.storeKey,
+      reason,
+      report_after_ms: this.relinkReportAfterMs,
+    }, `store link down, relinking; degradation reported if it is not back within ${this.relinkReportAfterMs}ms: ${reason}`);
+    this.linkLossTimer = setTimeout(() => {
+      this.linkLossTimer = null;
+      const pending = this.pendingLinkLossReason;
+      if (pending === null) return; // recovered inside the budget
+      LOGGER.log({
+        level: "error",
+        agent_repl_session_id: this.opts.sessionId,
+        store_key: this.storeKey,
+        reason: pending,
+        budget_ms: this.relinkReportAfterMs,
+      }, `store link still down after the ${this.relinkReportAfterMs}ms relink budget: ${pending}`);
+      this.degrade(pending, 0);
+    }, this.relinkReportAfterMs);
+    this.linkLossTimer.unref?.();
+  }
+
+  /**
+   * Disarm an outstanding link-loss budget, because the loss it was waiting on
+   * no longer needs a report of its own — either the link came back inside the
+   * budget, or something else already reported the outage.
+   */
+  private clearLinkLossBudget(): void {
+    if (this.linkLossTimer !== null) {
+      clearTimeout(this.linkLossTimer);
+      this.linkLossTimer = null;
+    }
+    this.pendingLinkLossReason = null;
+  }
+
   private degrade(reason: string, droppedCount: number): void {
+    // Whatever the budget was still waiting to say about this outage, the
+    // outage is now REPORTED; a later expiry would only duplicate it.
+    this.clearLinkLossBudget();
     // Opens the window reportRecovered closes. Set on EVERY degrade, including
     // a store-rejected batch: the daemon holds one fault row per component, so
     // whatever opened it, the next genuine link recovery is what closes it.

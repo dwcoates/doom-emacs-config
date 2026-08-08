@@ -404,6 +404,11 @@ async function rig(
     ...(opts.storeSessionId !== undefined ? { storeSessionId: opts.storeSessionId } : {}),
     createQuery,
     heartbeatIntervalMs: 0,
+    // A dropped store link is reported only once it fails to come back within
+    // its relink retry budget (store-client.ts RELINK_REPORT_AFTER_MS). Every
+    // test below that provokes an outage kills the store FOR GOOD, so it wants
+    // that report without waiting out the real budget.
+    storeRelinkReportAfterMs: 0,
     ...(opts.replayIdleMs !== undefined ? { replayIdleMs: opts.replayIdleMs } : {}),
     newRequestId: (() => {
       let n = 0;
