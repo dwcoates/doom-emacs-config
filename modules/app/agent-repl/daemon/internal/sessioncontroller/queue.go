@@ -1301,6 +1301,18 @@ func ledgerName(o queueEntryOwner) string {
 // have AcquireShutdownHolds write one for that entry before the removal
 // committed, and the next boot resurrects a prompt the user took back.
 func (m *Manager) CancelQueueEntry(workspace, entryID string) error {
+	return m.cancelQueueEntry(workspace, entryID, "user", "cancelled_by_user")
+}
+
+// cancelQueueEntry is CancelQueueEntry with the INITIATOR named, so a cancel the
+// daemon performs on its own behalf is not recorded as one the user asked for.
+//
+// The merge gate is the second initiator: when a merge resolution prompt is
+// parked instead of forwarded, the gate fails the merge immediately, and the
+// parked prompt must go with it. Leaving it queued would hand the agent an
+// instruction to repair a merge that has already been failed and rolled back,
+// delivered whenever the turn in front of it finally ends.
+func (m *Manager) cancelQueueEntry(workspace, entryID, initiator, tombstoneReason string) error {
 	m.mu.Lock()
 	owner, err := m.resolveQueueEntryLocked(workspace, entryID)
 	if err != nil {
@@ -1330,15 +1342,15 @@ func (m *Manager) CancelQueueEntry(workspace, entryID string) error {
 	// restore mid-flight is holding a row snapshot that predates this cancel,
 	// and its apply loop consults exactly this set before it re-adds anything
 	// (shutdownlease.go).
-	m.noteRowDroppedTombstoneLocked(workspace, entryID, "cancelled_by_user")
+	m.noteRowDroppedTombstoneLocked(workspace, entryID, tombstoneReason)
 	m.mu.Unlock()
 
 	ledger := "live"
 	if materialized {
 		ledger = "materialized"
 	}
-	m.logf("session-controller: queue entry=%s cancelled session=%s ws=%q ledger=%s drain_schedule=%q initiator=user — its durable parking row was dropped first, so nothing can bring it back",
-		entryID, sessionID, workspace, ledger, heldBy)
+	m.logf("session-controller: queue entry=%s cancelled session=%s ws=%q ledger=%s drain_schedule=%q initiator=%s — its durable parking row was dropped first, so nothing can bring it back",
+		entryID, sessionID, workspace, ledger, heldBy, initiator)
 	m.publish(sessionID, view, recs)
 	return nil
 }
