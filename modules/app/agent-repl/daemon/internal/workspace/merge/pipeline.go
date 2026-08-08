@@ -48,7 +48,7 @@ type SessionBringUp interface {
 //
 // IT IS NOT A BRING-UP FAILURE, and conflating the two is what this sentinel
 // exists to prevent. A plain worktree that nobody has ever opened a session on
-// is perfectly mergeable: the cherry-pick, the test gate and the rollback are
+// is perfectly mergeable: the rebase, the test gate and the merge commit are
 // all git, and none of them needs an agent. Failing such a merge would make
 // "has this workspace ever been opened in the editor?" a precondition of
 // merging it, which it has never been.

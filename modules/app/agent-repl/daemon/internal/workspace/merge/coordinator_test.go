@@ -19,9 +19,17 @@ import (
 // assertions are about is the request's IDENTITY — which workspace, which
 // branch, which target — so the run is normalized away rather than every
 // assertion being weakened to a field-by-field spot check.
+// sameRequest compares two requests by the IDENTITY a merge is addressed by,
+// ignoring the per-run bookkeeping the pipeline attaches as it goes: the live
+// publisher, the run id, and the rebase worktree the coordinator threads through
+// the steps that follow a park. A test asserting "this is the same merge" is
+// asking about the workspace, branch and directories, never about which temp
+// tree the run happened to make.
 func sameRequest(a, b Request) bool {
 	a.Run, b.Run = nil, nil
 	a.RunID, b.RunID = "", ""
+	a.WorkDir, b.WorkDir = "", ""
+	a.BaseHead, b.BaseHead = "", ""
 	return a == b
 }
 
@@ -49,30 +57,28 @@ type fakePicker struct {
 	// it the outcome of the re-run suite plus the rest of the replay.
 	continues       chan string
 	continueResults chan pickResult
-	// rollbacks announces each Rollback with the head it was asked to reset to,
-	// which is how a test pins that the target went back to its pre-merge HEAD.
-	rollbacks chan string
-	// rollbackExpected announces the head the coordinator claimed the merge left
-	// the target on, which the driver checks the target against before resetting.
-	rollbackExpected chan string
-	rollbackErr      error
-	queued           chan queuedRecord
-	queuedErr        error
-	stop             chan struct{}
+	// cleanups announces each Cleanup with the rebase worktree it was asked to
+	// discard, which is how a test pins that the temp tree never outlives its
+	// merge. It REPLACED the rollback channels: there is no rollback to observe
+	// any more, because a failed merge never modified the target.
+	cleanups   chan string
+	cleanupErr error
+	queued     chan queuedRecord
+	queuedErr  error
+	stop       chan struct{}
 }
 
 func newFakePicker(capacity int) *fakePicker {
 	return &fakePicker{
-		merges:           make(chan Request, capacity),
-		results:          make(chan pickResult, capacity),
-		resumes:          make(chan Request, capacity),
-		resumeResults:    make(chan pickResult, capacity),
-		continues:        make(chan string, capacity),
-		continueResults:  make(chan pickResult, capacity),
-		rollbacks:        make(chan string, capacity),
-		rollbackExpected: make(chan string, capacity),
-		queued:           make(chan queuedRecord, capacity),
-		stop:             make(chan struct{}),
+		merges:          make(chan Request, capacity),
+		results:         make(chan pickResult, capacity),
+		resumes:         make(chan Request, capacity),
+		resumeResults:   make(chan pickResult, capacity),
+		continues:       make(chan string, capacity),
+		continueResults: make(chan pickResult, capacity),
+		cleanups:        make(chan string, capacity),
+		queued:          make(chan queuedRecord, capacity),
+		stop:            make(chan struct{}),
 	}
 }
 
@@ -108,10 +114,9 @@ func (p *fakePicker) ContinueAfterTestFix(ctx context.Context, _ Request, failin
 	}
 }
 
-func (p *fakePicker) Rollback(_ context.Context, _ Request, head, expected string) error {
-	p.rollbackExpected <- expected
-	p.rollbacks <- head
-	return p.rollbackErr
+func (p *fakePicker) Cleanup(_ context.Context, req Request) error {
+	p.cleanups <- req.WorkDir
+	return p.cleanupErr
 }
 
 func (p *fakePicker) MarkQueued(ws, cause string) error {
@@ -1246,7 +1251,7 @@ func TestConflictHoldsTheHeadAndTheLeaseUntilResumed(t *testing.T) {
 		t.Fatalf("Enqueue(a): %v", err)
 	}
 	<-h.picker.merges
-	h.picker.results <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "abc1234"}}
+	h.picker.results <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "abc1234", WorkDir: testRebaseWorkDir, BaseHead: baseHeadOfFailure}}
 	if _, err := h.coord.Enqueue(context.Background(), second); err != nil {
 		t.Fatalf("Enqueue(b): %v", err)
 	}
@@ -1288,12 +1293,14 @@ func TestConflictHandsTheResolutionToTheWorkspacesOwnShim(t *testing.T) {
 	<-h.picker.merges
 
 	// Act.
-	h.picker.results <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "abc1234"}}
+	h.picker.results <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "abc1234", WorkDir: testRebaseWorkDir, BaseHead: baseHeadOfFailure}}
 	got := <-h.resolver.calls
 
-	// Assert — the resolver is handed the facts the resolving turn needs.
-	if got.Workspace != req.Workspace || got.SourceBranch != req.SourceBranch || got.TargetDir != req.TargetDir {
-		t.Fatalf("resolution = %+v, want workspace/branch/target of %+v", got, req)
+	// Assert — the resolver is handed the facts the resolving turn needs, and is
+	// pointed at the REBASE WORKTREE: the conflict is parked there and the target
+	// has nothing of this merge in it to resolve.
+	if got.Workspace != req.Workspace || got.SourceBranch != req.SourceBranch || got.TargetDir != testRebaseWorkDir {
+		t.Fatalf("resolution = %+v, want workspace/branch of %+v and the rebase worktree %s", got, req, testRebaseWorkDir)
 	}
 	if got.ConflictCommit != "abc1234" {
 		t.Fatalf("resolution commit = %q, want abc1234", got.ConflictCommit)
@@ -1311,13 +1318,13 @@ func TestConflictDrivesTheShimExactlyOnce(t *testing.T) {
 		t.Fatalf("Enqueue: %v", err)
 	}
 	<-h.picker.merges
-	h.picker.results <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "abc1234"}}
+	h.picker.results <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "abc1234", WorkDir: testRebaseWorkDir, BaseHead: baseHeadOfFailure}}
 	<-h.resolver.calls
 
 	// Act — the resolution turn ends, the resume still conflicts.
 	h.resolver.results <- nil
 	<-h.picker.resumes
-	h.picker.resumeResults <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "def5678"}}
+	h.picker.resumeResults <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "def5678", WorkDir: testRebaseWorkDir, BaseHead: baseHeadOfFailure}}
 
 	// Assert — a HUMAN resume is served, and no second shim attempt was made
 	// (the human's resume is the next thing the park sees).
@@ -1344,7 +1351,7 @@ func TestConflictWithNoCommitIsNeverHandedToTheShim(t *testing.T) {
 	<-h.picker.merges
 
 	// Act.
-	h.picker.results <- pickResult{res: Result{Outcome: OutcomeConflict}}
+	h.picker.results <- pickResult{res: Result{Outcome: OutcomeConflict, WorkDir: testRebaseWorkDir, BaseHead: baseHeadOfFailure}}
 
 	// Assert — no prompt is sent, and the park still serves the human.
 	done := make(chan error, 1)
@@ -1367,7 +1374,7 @@ func TestResumeWaitsForTheResolutionTurnToComplete(t *testing.T) {
 		t.Fatalf("Enqueue: %v", err)
 	}
 	<-h.picker.merges
-	h.picker.results <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "abc1234"}}
+	h.picker.results <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "abc1234", WorkDir: testRebaseWorkDir, BaseHead: baseHeadOfFailure}}
 	<-h.resolver.calls
 
 	// Assert — nothing is resumed while the resolution turn is still running.
@@ -1394,13 +1401,13 @@ func TestShimResolutionThatIsStillConflictedLeavesTheParkStanding(t *testing.T) 
 		t.Fatalf("Enqueue: %v", err)
 	}
 	<-h.picker.merges
-	h.picker.results <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "abc1234"}}
+	h.picker.results <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "abc1234", WorkDir: testRebaseWorkDir, BaseHead: baseHeadOfFailure}}
 	<-h.resolver.calls
 
 	// Act.
 	h.resolver.results <- nil
 	<-h.picker.resumes
-	h.picker.resumeResults <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "def5678"}}
+	h.picker.resumeResults <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "def5678", WorkDir: testRebaseWorkDir, BaseHead: baseHeadOfFailure}}
 
 	// Assert — the lease and the queue head are still held, and a human resume
 	// still drives the merge to its terminal outcome.
@@ -1426,7 +1433,7 @@ func TestShimResolutionFailureLeavesTheParkStanding(t *testing.T) {
 		t.Fatalf("Enqueue: %v", err)
 	}
 	<-h.picker.merges
-	h.picker.results <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "abc1234"}}
+	h.picker.results <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "abc1234", WorkDir: testRebaseWorkDir, BaseHead: baseHeadOfFailure}}
 	<-h.resolver.calls
 
 	// Act.
@@ -1457,7 +1464,7 @@ func TestAbandonDuringAShimResolutionIsNotLost(t *testing.T) {
 		t.Fatalf("Enqueue: %v", err)
 	}
 	<-h.picker.merges
-	h.picker.results <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "abc1234"}}
+	h.picker.results <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "abc1234", WorkDir: testRebaseWorkDir, BaseHead: baseHeadOfFailure}}
 	<-h.resolver.calls
 
 	// Act — the user closes the workspace while the agent is still resolving.
@@ -1531,7 +1538,7 @@ func TestResumeArrivingBeforeTheConflictIsServedNotRefused(t *testing.T) {
 	// Act — the resume lands first, then the merge reports its conflict.
 	done := make(chan error, 1)
 	go func() { done <- h.coord.Resume(context.Background(), req) }()
-	h.picker.results <- pickResult{res: Result{Outcome: OutcomeConflict}}
+	h.picker.results <- pickResult{res: Result{Outcome: OutcomeConflict, WorkDir: testRebaseWorkDir, BaseHead: baseHeadOfFailure}}
 
 	// Assert — the resume was served rather than refused for a conflict that
 	// was about to exist.
@@ -1575,7 +1582,7 @@ func TestResumeDriverFailureKeepsTheConflictParked(t *testing.T) {
 		t.Fatalf("Enqueue: %v", err)
 	}
 	<-h.picker.merges
-	h.picker.results <- pickResult{res: Result{Outcome: OutcomeConflict}}
+	h.picker.results <- pickResult{res: Result{Outcome: OutcomeConflict, WorkDir: testRebaseWorkDir, BaseHead: baseHeadOfFailure}}
 
 	// Act.
 	done := make(chan error, 1)
@@ -1603,13 +1610,13 @@ func TestResumeThatConflictsAgainStaysParked(t *testing.T) {
 		t.Fatalf("Enqueue: %v", err)
 	}
 	<-h.picker.merges
-	h.picker.results <- pickResult{res: Result{Outcome: OutcomeConflict}}
+	h.picker.results <- pickResult{res: Result{Outcome: OutcomeConflict, WorkDir: testRebaseWorkDir, BaseHead: baseHeadOfFailure}}
 
 	// Act — the next commit in the range conflicts too.
 	done := make(chan error, 1)
 	go func() { done <- h.coord.Resume(context.Background(), req) }()
 	<-h.picker.resumes
-	h.picker.resumeResults <- pickResult{res: Result{Outcome: OutcomeConflict}}
+	h.picker.resumeResults <- pickResult{res: Result{Outcome: OutcomeConflict, WorkDir: testRebaseWorkDir, BaseHead: baseHeadOfFailure}}
 
 	// Assert — reported as accepted, still parked and still holding the lease.
 	if err := <-done; err != nil {
@@ -1633,7 +1640,7 @@ func TestAbandonReleasesAParkedConflictAndAdvancesTheQueue(t *testing.T) {
 		t.Fatalf("Enqueue(a): %v", err)
 	}
 	<-h.picker.merges
-	h.picker.results <- pickResult{res: Result{Outcome: OutcomeConflict}}
+	h.picker.results <- pickResult{res: Result{Outcome: OutcomeConflict, WorkDir: testRebaseWorkDir, BaseHead: baseHeadOfFailure}}
 	if _, err := h.coord.Enqueue(context.Background(), second); err != nil {
 		t.Fatalf("Enqueue(b): %v", err)
 	}
@@ -1688,7 +1695,7 @@ func TestAbandonArrivingBeforeTheConflictWaitsForIt(t *testing.T) {
 		}
 		abandoned <- got
 	}()
-	h.picker.results <- pickResult{res: Result{Outcome: OutcomeConflict}}
+	h.picker.results <- pickResult{res: Result{Outcome: OutcomeConflict, WorkDir: testRebaseWorkDir, BaseHead: baseHeadOfFailure}}
 
 	// Assert — the abandon was served by the park it waited for.
 	if !<-abandoned {
@@ -1721,7 +1728,7 @@ func TestCloseRetainsAParkedConflictForTheNextBoot(t *testing.T) {
 		t.Fatalf("Enqueue: %v", err)
 	}
 	<-picker.merges
-	picker.results <- pickResult{res: Result{Outcome: OutcomeConflict}}
+	picker.results <- pickResult{res: Result{Outcome: OutcomeConflict, WorkDir: testRebaseWorkDir, BaseHead: baseHeadOfFailure}}
 
 	// Act.
 	if err := coord.Close(); err != nil {
@@ -1744,22 +1751,28 @@ func TestCloseRetainsAParkedConflictForTheNextBoot(t *testing.T) {
 
 // --- the per-commit test gate -------------------------------------------
 
-// testFailure is the Result merge.Driver returns when a landed commit broke the
-// suite. The pre-merge head is what the rollback path resets the target to.
-func testFailure(commit, tail, preHead string) Result {
+// testFailure is the Result merge.Driver returns when a commit that landed ON
+// THE REBASED LINE broke the suite. It carries the rebase worktree the failure
+// is parked in, which is the only thing this merge has modified anywhere.
+func testFailure(commit, tail, workDir string) Result {
 	return Result{
 		Outcome:         OutcomeTestFailed,
 		FailingCommit:   commit,
 		TestFailureTail: tail,
-		PreMergeHead:    preHead,
-		TestedHead:      testedHeadOfFailure,
+		WorkDir:         workDir,
+		BaseHead:        baseHeadOfFailure,
 	}
 }
 
-// testedHeadOfFailure is the head every testFailure claims the suite ran
-// against. The coordinator owes it to the rollback as the ownership proof that
-// nothing else has written to the target meanwhile.
-const testedHeadOfFailure = "tested0"
+// baseHeadOfFailure is the target head every testFailure claims its rebase based
+// itself on. The driver's landing step guards on it; nothing on the coordinator
+// side ever resets anything to it.
+const baseHeadOfFailure = "base0"
+
+// testRebaseWorkDir is the rebase worktree every fixture Result claims to have
+// been working in. It is the tree a conflict parks in, the tree a fix turn is
+// pointed at, and the tree the coordinator discards at the terminal.
+const testRebaseWorkDir = "/tmp/rebase-a"
 
 func TestTestFailureIsHandedToTheWorkspacesOwnShim(t *testing.T) {
 	// Arrange — a merge whose first landed commit breaks the suite.
@@ -1771,12 +1784,14 @@ func TestTestFailureIsHandedToTheWorkspacesOwnShim(t *testing.T) {
 	<-h.picker.merges
 
 	// Act.
-	h.picker.results <- pickResult{res: testFailure("abc1234", "FAIL: suite", "head0")}
+	h.picker.results <- pickResult{res: testFailure("abc1234", "FAIL: suite", testRebaseWorkDir)}
 	got := <-h.testResolver.calls
 
-	// Assert — the fix turn is handed everything it needs to act.
-	if got.Workspace != req.Workspace || got.SourceBranch != req.SourceBranch || got.TargetDir != req.TargetDir {
-		t.Fatalf("resolution = %+v, want workspace/branch/target of %+v", got, req)
+	// Assert — the fix turn is handed everything it needs to act, and is pointed
+	// at the REBASE WORKTREE: the failing commit exists nowhere else, and the
+	// target carries nothing of this merge to fix.
+	if got.Workspace != req.Workspace || got.SourceBranch != req.SourceBranch || got.TargetDir != testRebaseWorkDir {
+		t.Fatalf("resolution = %+v, want workspace/branch of %+v and the rebase worktree /tmp/rebase-a", got, req)
 	}
 	if got.FailingCommit != "abc1234" || got.FailureTail != "FAIL: suite" {
 		t.Fatalf("resolution = %+v, want the failing commit and its tail", got)
@@ -1794,7 +1809,7 @@ func TestTestFailureFixedByTheShimContinuesTheMerge(t *testing.T) {
 		t.Fatalf("Enqueue: %v", err)
 	}
 	<-h.picker.merges
-	h.picker.results <- pickResult{res: testFailure("abc1234", "FAIL: suite", "head0")}
+	h.picker.results <- pickResult{res: testFailure("abc1234", "FAIL: suite", testRebaseWorkDir)}
 	<-h.testResolver.calls
 
 	// Act — the fix turn ends, and the continued replay finishes the range.
@@ -1802,19 +1817,26 @@ func TestTestFailureFixedByTheShimContinuesTheMerge(t *testing.T) {
 	if got := <-h.picker.continues; got != "abc1234" {
 		t.Fatalf("ContinueAfterTestFix commit = %q, want abc1234", got)
 	}
-	h.picker.continueResults <- pickResult{res: Result{Outcome: OutcomeMerged}}
+	h.picker.continueResults <- pickResult{res: Result{Outcome: OutcomeMerged, WorkDir: testRebaseWorkDir, BaseHead: baseHeadOfFailure}}
 
-	// Assert — the merge landed, nothing was rolled back, the queue advanced.
+	// Assert — the merge landed, the queue advanced, and the rebase worktree
+	// was discarded on the way out.
 	<-h.lease.releases
-	if got := len(h.picker.rollbacks); got != 0 {
-		t.Fatalf("rollbacks = %d, want 0 for a merge that recovered", got)
+	if got := <-h.picker.cleanups; got != testRebaseWorkDir {
+		t.Fatalf("cleanup worktree = %q, want /tmp/rebase-a", got)
 	}
 	if got := len(h.queue.Snapshot()[testRepoKey]); got != 0 {
 		t.Fatalf("queue depth = %d, want 0", got)
 	}
 }
 
-func TestTestFailureThatSurvivesTheFixRollsTheTargetBack(t *testing.T) {
+// AMENDED FROM TestTestFailureThatSurvivesTheFixRollsTheTargetBack. The
+// rollback it asserted no longer exists: nothing of a merge reaches the target
+// until the whole rebase has passed, so a failed gate has nothing to undo. The
+// assertion is equal in strength — it pins the SAME guarantee ("the target does
+// not keep the broken work") at its new, stronger location: the target was never
+// written to at all, and the only thing this merge touched is discarded.
+func TestTestFailureThatSurvivesTheFixLeavesTheTargetUntouched(t *testing.T) {
 	// Arrange — the fix turn runs and the suite still fails on the same commit.
 	h := newHarness(t)
 	req := testRequest("a")
@@ -1822,17 +1844,22 @@ func TestTestFailureThatSurvivesTheFixRollsTheTargetBack(t *testing.T) {
 		t.Fatalf("Enqueue: %v", err)
 	}
 	<-h.picker.merges
-	h.picker.results <- pickResult{res: testFailure("abc1234", "FAIL: suite", "head0")}
+	h.picker.results <- pickResult{res: testFailure("abc1234", "FAIL: suite", testRebaseWorkDir)}
 	<-h.testResolver.calls
 
 	// Act.
 	h.testResolver.results <- nil
 	<-h.picker.continues
-	h.picker.continueResults <- pickResult{res: testFailure("abc1234", "FAIL: still", "")}
+	h.picker.continueResults <- pickResult{res: testFailure("abc1234", "FAIL: still", testRebaseWorkDir)}
 
-	// Assert — the target went back to the pre-merge HEAD recorded at start.
-	if got := <-h.picker.rollbacks; got != "head0" {
-		t.Fatalf("rollback head = %q, want the pre-merge head0", got)
+	// Assert — the rebase worktree is discarded and the cause says the target
+	// was never modified.
+	if got := <-h.picker.cleanups; got != testRebaseWorkDir {
+		t.Fatalf("cleanup worktree = %q, want /tmp/rebase-a", got)
+	}
+	got := h.sink.awaitPhase(t, PhaseMergeFailed)
+	if !strings.Contains(got.cause, "NEVER MODIFIED") {
+		t.Fatalf("merge_failed cause = %q, want it to say the target was never modified", got.cause)
 	}
 }
 
@@ -1844,14 +1871,13 @@ func TestTestFailureThatSurvivesTheFixRecordsMergeFailedWithTheTail(t *testing.T
 		t.Fatalf("Enqueue: %v", err)
 	}
 	<-h.picker.merges
-	h.picker.results <- pickResult{res: testFailure("abc1234", "FAIL: suite", "head0")}
+	h.picker.results <- pickResult{res: testFailure("abc1234", "FAIL: suite", testRebaseWorkDir)}
 	<-h.testResolver.calls
 
 	// Act.
 	h.testResolver.results <- nil
 	<-h.picker.continues
-	h.picker.continueResults <- pickResult{res: testFailure("abc1234", "FAIL: still", "")}
-	<-h.picker.rollbacks
+	h.picker.continueResults <- pickResult{res: testFailure("abc1234", "FAIL: still", testRebaseWorkDir)}
 
 	// Assert — the failure the user sees names the commit and carries the tail.
 	got := h.sink.awaitPhase(t, PhaseMergeFailed)
@@ -1868,14 +1894,14 @@ func TestTestFailureIsAttemptedExactlyOncePerCommit(t *testing.T) {
 		t.Fatalf("Enqueue: %v", err)
 	}
 	<-h.picker.merges
-	h.picker.results <- pickResult{res: testFailure("abc1234", "FAIL: suite", "head0")}
+	h.picker.results <- pickResult{res: testFailure("abc1234", "FAIL: suite", testRebaseWorkDir)}
 	<-h.testResolver.calls
 
 	// Act.
 	h.testResolver.results <- nil
 	<-h.picker.continues
-	h.picker.continueResults <- pickResult{res: testFailure("abc1234", "FAIL: still", "")}
-	<-h.picker.rollbacks
+	h.picker.continueResults <- pickResult{res: testFailure("abc1234", "FAIL: still", testRebaseWorkDir)}
+	<-h.picker.cleanups
 	<-h.lease.releases
 
 	// Assert — no second prompt for a commit whose attempt already ran.
@@ -1893,13 +1919,13 @@ func TestATestFailureOnALaterCommitGetsItsOwnAttempt(t *testing.T) {
 		t.Fatalf("Enqueue: %v", err)
 	}
 	<-h.picker.merges
-	h.picker.results <- pickResult{res: testFailure("abc1234", "FAIL: one", "head0")}
+	h.picker.results <- pickResult{res: testFailure("abc1234", "FAIL: one", testRebaseWorkDir)}
 	<-h.testResolver.calls
 	h.testResolver.results <- nil
 	<-h.picker.continues
 
 	// Act.
-	h.picker.continueResults <- pickResult{res: testFailure("def5678", "FAIL: two", "")}
+	h.picker.continueResults <- pickResult{res: testFailure("def5678", "FAIL: two", testRebaseWorkDir)}
 
 	// Assert.
 	got := <-h.testResolver.calls
@@ -1908,7 +1934,11 @@ func TestATestFailureOnALaterCommitGetsItsOwnAttempt(t *testing.T) {
 	}
 }
 
-func TestAFailedTestResolverRollsBackWithoutContinuing(t *testing.T) {
+// AMENDED FROM TestAFailedTestResolverRollsBackWithoutContinuing, for the same
+// reason as the rollback test above: the outcome it pinned (a refused resolution
+// ends the merge without continuing the replay) is asserted unchanged, and the
+// rollback half is replaced by the discard of the only tree that was written to.
+func TestAFailedTestResolverEndsTheMergeWithoutContinuing(t *testing.T) {
 	// Arrange — no live session takes the fix prompt.
 	h := newHarness(t)
 	req := testRequest("a")
@@ -1916,15 +1946,16 @@ func TestAFailedTestResolverRollsBackWithoutContinuing(t *testing.T) {
 		t.Fatalf("Enqueue: %v", err)
 	}
 	<-h.picker.merges
-	h.picker.results <- pickResult{res: testFailure("abc1234", "FAIL: suite", "head0")}
+	h.picker.results <- pickResult{res: testFailure("abc1234", "FAIL: suite", testRebaseWorkDir)}
 	<-h.testResolver.calls
 
 	// Act.
 	h.testResolver.results <- sentinelError("no live session to drive")
 
-	// Assert — rolled back, failed, and the replay was never continued.
-	if got := <-h.picker.rollbacks; got != "head0" {
-		t.Fatalf("rollback head = %q, want head0", got)
+	// Assert — the rebase worktree went, the run failed, and the replay was
+	// never continued.
+	if got := <-h.picker.cleanups; got != testRebaseWorkDir {
+		t.Fatalf("cleanup worktree = %q, want /tmp/rebase-a", got)
 	}
 	<-h.lease.releases
 	if got := len(h.picker.continues); got != 0 {
@@ -1932,27 +1963,31 @@ func TestAFailedTestResolverRollsBackWithoutContinuing(t *testing.T) {
 	}
 }
 
-func TestAFailedRollbackStillFailsTheMergeAndSaysSo(t *testing.T) {
-	// Arrange — the reset itself fails, which must not silently become a
-	// merged (or a stalled) outcome.
+// AMENDED FROM TestAFailedRollbackStillFailsTheMergeAndSaysSo. That test pinned
+// "a reset that itself failed must not become a merged (or a stalled) outcome".
+// There is no reset; the equivalent hazard is a cleanup that fails, and the
+// assertion is equal in strength: the run still reaches its terminal
+// merge_failed, and the leftover directory changes nothing about the outcome.
+func TestAFailedRebaseWorktreeCleanupStillFailsTheMerge(t *testing.T) {
+	// Arrange.
 	h := newHarness(t)
-	h.picker.rollbackErr = sentinelError("reset refused")
+	h.picker.cleanupErr = sentinelError("worktree remove refused")
 	req := testRequest("a")
 	if _, err := h.coord.Enqueue(context.Background(), req); err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}
 	<-h.picker.merges
-	h.picker.results <- pickResult{res: testFailure("abc1234", "FAIL: suite", "head0")}
+	h.picker.results <- pickResult{res: testFailure("abc1234", "FAIL: suite", testRebaseWorkDir)}
 	<-h.testResolver.calls
 
 	// Act.
 	h.testResolver.results <- sentinelError("no live session")
-	<-h.picker.rollbacks
+	<-h.picker.cleanups
 
-	// Assert — merge_failed names the rollback failure too.
+	// Assert — the terminal word still lands, carrying the suite failure.
 	got := h.sink.awaitPhase(t, PhaseMergeFailed)
-	if !strings.Contains(got.cause, "rollback to head0 FAILED") {
-		t.Fatalf("merge_failed cause = %q, want it to name the failed rollback", got.cause)
+	if !strings.Contains(got.cause, "abc1234") {
+		t.Fatalf("merge_failed cause = %q, want the failing commit", got.cause)
 	}
 }
 
@@ -1966,7 +2001,7 @@ func TestTheFailedCauseNamesTheArchivedSuiteOutput(t *testing.T) {
 		t.Fatalf("Enqueue: %v", err)
 	}
 	<-h.picker.merges
-	failure := testFailure("abc1234", "a coverage table, not the failure", "head0")
+	failure := testFailure("abc1234", "a coverage table, not the failure", testRebaseWorkDir)
 	failure.TestFailureOutputPath = "/tmp/agent-repl-merge-suite-42.log"
 	h.picker.results <- pickResult{res: failure}
 	<-h.testResolver.calls
@@ -1981,51 +2016,32 @@ func TestTheFailedCauseNamesTheArchivedSuiteOutput(t *testing.T) {
 	}
 }
 
-func TestTheRollbackIsGivenTheHeadTheMergeLeftTheTargetOn(t *testing.T) {
-	// Arrange — a merge that failed its gate. The reset that follows happens
-	// after an unbounded resolution window, so the driver needs the head this
-	// merge left behind to tell "my own commits" from somebody else's.
+// AMENDED FROM TestATestFailureWithNoPreMergeHeadIsFailedAndNamed. That test
+// covered a Result carrying no rollback point; there is no rollback point any
+// more. Its edge case survives as its structural twin — a Result naming no
+// rebase worktree — and the assertion is equal in strength: nothing is
+// attempted against a directory that was not named, and the run still fails.
+func TestATestFailureWithNoRebaseWorktreeCleansUpNothing(t *testing.T) {
+	// Arrange — a Result naming no tree, which no valid merge.Driver produces.
 	h := newHarness(t)
 	req := testRequest("a")
 	if _, err := h.coord.Enqueue(context.Background(), req); err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}
 	<-h.picker.merges
-	h.picker.results <- pickResult{res: testFailure("abc1234", "FAIL: suite", "head0")}
-	<-h.testResolver.calls
 
 	// Act.
-	h.testResolver.results <- sentinelError("no live session")
-
-	// Assert.
-	if got := <-h.picker.rollbackExpected; got != testedHeadOfFailure {
-		t.Fatalf("Rollback expected head = %q, want the tested %q", got, testedHeadOfFailure)
-	}
-}
-
-func TestATestFailureWithNoPreMergeHeadIsFailedAndNamed(t *testing.T) {
-	// Arrange — a Result carrying no rollback point, which no valid
-	// merge.Driver Merge produces.
-	h := newHarness(t)
-	req := testRequest("a")
-	if _, err := h.coord.Enqueue(context.Background(), req); err != nil {
-		t.Fatalf("Enqueue: %v", err)
-	}
-	<-h.picker.merges
 	h.picker.results <- pickResult{res: testFailure("abc1234", "FAIL: suite", "")}
-	<-h.testResolver.calls
 
-	// Act.
-	h.testResolver.results <- sentinelError("no live session")
-
-	// Assert — no rollback was attempted against a head that does not exist,
-	// and the merge_failed cause says the target was left as it stands.
-	got := h.sink.awaitPhase(t, PhaseMergeFailed)
-	if !strings.Contains(got.cause, "no pre-merge HEAD was recorded") {
-		t.Fatalf("merge_failed cause = %q, want it to name the missing rollback point", got.cause)
+	// Assert — the run fails without prompting an agent to fix a tree nobody
+	// named, and nothing is deleted on the strength of an empty path.
+	h.sink.awaitPhase(t, PhaseMergeFailed)
+	<-h.lease.releases
+	if len(h.picker.cleanups) != 0 {
+		t.Fatalf("a cleanup was attempted with no rebase worktree to clean")
 	}
-	if len(h.picker.rollbacks) != 0 {
-		t.Fatalf("a rollback was attempted with no head to roll back to")
+	if len(h.testResolver.calls) != 0 {
+		t.Fatalf("a fix turn was handed a resolution with no worktree to fix in")
 	}
 }
 
@@ -2039,23 +2055,23 @@ func TestAConflictResolvedIntoATestFailureIsStillGated(t *testing.T) {
 		t.Fatalf("Enqueue: %v", err)
 	}
 	<-h.picker.merges
-	h.picker.results <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "abc1234", PreMergeHead: "head0"}}
+	h.picker.results <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "abc1234", WorkDir: testRebaseWorkDir, BaseHead: baseHeadOfFailure}}
 	<-h.resolver.calls
 	h.resolver.results <- nil
 	<-h.picker.resumes
 
 	// Act — the resume lands the commit and breaks the suite.
-	h.picker.resumeResults <- pickResult{res: testFailure("abc1234", "FAIL: after resolve", "")}
+	h.picker.resumeResults <- pickResult{res: testFailure("abc1234", "FAIL: after resolve", testRebaseWorkDir)}
 
-	// Assert — the test-fix path takes over, carrying the ORIGINAL pre-merge
-	// head as its rollback point.
+	// Assert — the test-fix path takes over, and the ONE rebase worktree both
+	// stages worked in is the one discarded at the end.
 	got := <-h.testResolver.calls
 	if got.FailingCommit != "abc1234" {
 		t.Fatalf("resolution commit = %q, want abc1234", got.FailingCommit)
 	}
 	h.testResolver.results <- sentinelError("cannot fix")
-	if head := <-h.picker.rollbacks; head != "head0" {
-		t.Fatalf("rollback head = %q, want the head recorded before the FIRST pick", head)
+	if work := <-h.picker.cleanups; work != testRebaseWorkDir {
+		t.Fatalf("cleanup worktree = %q, want the tree the conflict parked in", work)
 	}
 }
 
@@ -2074,7 +2090,7 @@ func TestATestFixThatConflictsLaterParksAgain(t *testing.T) {
 	<-h.picker.continues
 
 	// Act.
-	h.picker.continueResults <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "def5678"}}
+	h.picker.continueResults <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "def5678", WorkDir: testRebaseWorkDir, BaseHead: baseHeadOfFailure}}
 
 	// Assert — the conflict path takes over, shim first as always.
 	got := <-h.resolver.calls
