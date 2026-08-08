@@ -771,7 +771,11 @@ func (m *Manager) applyAssistantLocked(workspace string, wp *workspaceProgress, 
 		}
 		wp.countedUsage[key] = struct{}{}
 	}
-	add := u.GetInputTokens() + u.GetCacheCreationInputTokens()
+	// THROUGH THE ONE HELPER, never restated. This live ticker and the turn's
+	// final expensive-turn verdict (applyResultCostLocked, just below) are two
+	// views of the SAME measure, and a second copy of the addition here is
+	// precisely how they would come to disagree about what a turn spent.
+	add := keepalive.UncachedInputTokens(u.GetInputTokens(), u.GetCacheCreationInputTokens())
 	if add == 0 {
 		return
 	}
