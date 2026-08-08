@@ -92,9 +92,14 @@ type ConflictResolver interface {
 	// agent is still editing would continue a half-staged tree.
 	//
 	// An error means no resolution happened — the lease was not held, no live
-	// session took the prompt, the submit was refused, or the turn never
-	// finished. The coordinator leaves the conflict parked for a human; it
-	// never treats a failed Resolve as a merged outcome.
+	// session took the prompt, the submit was refused, the turn never STARTED,
+	// or it started and never finished. The coordinator leaves the conflict
+	// parked for a human; it never treats a failed Resolve as a merged outcome.
+	//
+	// IT MAY FAIL FAST. A turn that never started is not an agent that is
+	// working, so it is reported at a short bind bound rather than after the
+	// long one — see merge.TestFailureResolver.Resolve, which shares this
+	// wait.
 	Resolve(ctx context.Context, res ConflictResolution) error
 }
 
