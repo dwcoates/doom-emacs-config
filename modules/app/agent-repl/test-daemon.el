@@ -1566,6 +1566,13 @@ duplication argument that skips complete daemon records does not apply."
       ;; Assert
       (should (string-match-p "-accounts is malformed" (format "%S" surfaced))))))
 
+(ert-deftest agent-repl-test-daemon-stop-grace-covers-the-daemon-drain ()
+  "The SIGTERM grace must outlast the drain it exists to allow.
+Two consecutive deploys SIGKILLed the daemon at the old 3.0s budget, which
+skips the drain that reconstructs merges and releases leases."
+  ;; Arrange / Act / Assert
+  (should (>= agent-repl-frontend-stop-grace-seconds 20.0)))
+
 (provide 'test-daemon)
 
 ;;; test-daemon.el ends here

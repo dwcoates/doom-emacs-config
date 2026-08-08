@@ -114,14 +114,26 @@ if it is not already running.  Set to nil to require the user to run
   :type 'string
   :group 'agent-repl)
 
-(defcustom agent-repl-frontend-stop-grace-seconds 3.0
+(defcustom agent-repl-frontend-stop-grace-seconds 30.0
   "Seconds to wait for `claude-repld' to exit after SIGTERM.
 The daemon's TERM handler drains its sessions and flushes the session
 registry; only when the process outlives this window does
 `agent-repl--frontend-stop-daemon' fall back to `delete-process'
 \(SIGKILL).  The registry is write-through crash-safe, so the fallback
 loses nothing durable — the grace window just lets sessions drain
-cleanly."
+cleanly.
+
+THIS BUDGET IS SIZED FROM THE DRAIN IT WAITS ON, not from how long a
+bounce feels.  `Server.ShutdownAll' first JOINS the in-flight idle sweep
+\(`<-s.sweeperDone'), then, in stop-shims mode, hibernates every
+non-terminal session one at a time.  At production roster sizes that is
+seconds of work, and the previous 3.0 could not cover it: two consecutive
+`deploy-all.sh --force' runs sent TERM, watched the daemon still running
+3.0s later, and SIGKILLed it — which is exactly the drain-skipping exit
+implicated in the orphaned-merge incident, since a killed daemon
+reconstructs no merges and releases no leases.  The escalation to SIGKILL
+is deliberately KEPT: a daemon that ignores TERM for this long is wedged,
+and leaving it holding the port would block its own replacement."
   :type 'number
   :group 'agent-repl)
 
