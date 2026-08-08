@@ -166,25 +166,22 @@ message AssistantMessage {
   string agent_id = 14;
   // The owning agent identifier attached to a nested subagent response when supplied by the SDK.
   string parent_agent_id = 15;
-  // Cache rates derived once by the shim from this response's authoritative
-  // input, cache-creation, and cache-read token counters. Absent when total
-  // prompt input is zero.
-  PromptCacheRates cache_rates = 16;
-}
-
-// Canonical prompt-cache rates for one assistant API response.
-message PromptCacheRates {
-  // Uncached input plus cache creation plus cache reads.
-  int64 total_prompt_input_tokens = 1;
-
-  // Cache-read tokens divided by total prompt input.
-  double cache_hit_rate = 2;
-
-  // Cache-creation tokens divided by total prompt input.
-  double cache_write_rate = 3;
-
-  // Uncached input tokens divided by total prompt input.
-  double uncached_input_rate = 4;
+  // RETIRED: `PromptCacheRates cache_rates = 16`.
+  //
+  // The shim used to divide this response's three token buckets into a rate
+  // partition and ship the quotients. That was TOKEN JUDGMENT taken outside the
+  // daemon, and the shim is a faithful translator: it reports the vendor's
+  // counters and derives nothing from them. Every rate a surface shows is now
+  // derived by the daemon from the canonical
+  // `agentshim.frontend.v1.TokenUsage` shape.
+  //
+  // Store events written before the retirement still carry field 16. They
+  // decode unchanged — the bytes survive as an unknown field and re-marshal
+  // byte-identically — and the daemon recomputes the same quotients from the
+  // same counters, so a replayed old event produces the identical durable
+  // record it always did.
+  reserved 16;
+  reserved "cache_rates";
 }
 
 // [sdk coreTypes.d.ts:441-474] SDKResultMessage, both variants, plus
