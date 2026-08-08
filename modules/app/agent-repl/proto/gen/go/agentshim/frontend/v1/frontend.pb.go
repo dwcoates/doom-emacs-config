@@ -944,6 +944,80 @@ func (ClientLogLevel) EnumDescriptor() ([]byte, []int) {
 	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{8}
 }
 
+// What a revival compaction is allowed to summarize away.
+//
+// EVERY ARM BUT ALL IS A STEERED COMPACTION, carried to the CLI as
+// `/compact <instructions>` — the same session command the unsteered one uses,
+// with the parts to preserve named in the instructions. There is no second
+// compaction mechanism and no local transcript surgery: the harness owns the
+// summary, and the scope is how the user aims it.
+type CompactionScope int32
+
+const (
+	// The refused zero. "No decision" must be unrepresentable, exactly as it is
+	// for the mode oneof above.
+	CompactionScope_COMPACTION_SCOPE_UNSPECIFIED CompactionScope = 0
+	// Summarize the whole conversation, sparing nothing. The original
+	// compact-first behavior, and the cheapest result.
+	CompactionScope_COMPACTION_SCOPE_ALL CompactionScope = 1
+	// Summarize only the assistant's own responses — the purple bubbles — and
+	// keep the user's prompts, the tool calls, and the tool results verbatim.
+	CompactionScope_COMPACTION_SCOPE_RESPONSES CompactionScope = 2
+	// Summarize only the user's prompts and keep everything the agent produced
+	// verbatim. For a conversation whose value is in what was DONE rather than
+	// in how it was asked for.
+	CompactionScope_COMPACTION_SCOPE_PROMPTS CompactionScope = 3
+	// Summarize the user's prompts and the assistant's responses together,
+	// keeping the tool calls and their results verbatim — the conversation's
+	// prose goes, its work survives.
+	CompactionScope_COMPACTION_SCOPE_PROMPTS_AND_RESPONSES CompactionScope = 4
+)
+
+// Enum value maps for CompactionScope.
+var (
+	CompactionScope_name = map[int32]string{
+		0: "COMPACTION_SCOPE_UNSPECIFIED",
+		1: "COMPACTION_SCOPE_ALL",
+		2: "COMPACTION_SCOPE_RESPONSES",
+		3: "COMPACTION_SCOPE_PROMPTS",
+		4: "COMPACTION_SCOPE_PROMPTS_AND_RESPONSES",
+	}
+	CompactionScope_value = map[string]int32{
+		"COMPACTION_SCOPE_UNSPECIFIED":           0,
+		"COMPACTION_SCOPE_ALL":                   1,
+		"COMPACTION_SCOPE_RESPONSES":             2,
+		"COMPACTION_SCOPE_PROMPTS":               3,
+		"COMPACTION_SCOPE_PROMPTS_AND_RESPONSES": 4,
+	}
+)
+
+func (x CompactionScope) Enum() *CompactionScope {
+	p := new(CompactionScope)
+	*p = x
+	return p
+}
+
+func (x CompactionScope) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (CompactionScope) Descriptor() protoreflect.EnumDescriptor {
+	return file_agentshim_frontend_v1_frontend_proto_enumTypes[9].Descriptor()
+}
+
+func (CompactionScope) Type() protoreflect.EnumType {
+	return &file_agentshim_frontend_v1_frontend_proto_enumTypes[9]
+}
+
+func (x CompactionScope) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use CompactionScope.Descriptor instead.
+func (CompactionScope) EnumDescriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{9}
+}
+
 // Additive (S7): session creation over UDS (replaces Emacs POST /sessions).
 // What conversation a create should land on.
 //
@@ -1013,11 +1087,11 @@ func (x ResumeMode) String() string {
 }
 
 func (ResumeMode) Descriptor() protoreflect.EnumDescriptor {
-	return file_agentshim_frontend_v1_frontend_proto_enumTypes[9].Descriptor()
+	return file_agentshim_frontend_v1_frontend_proto_enumTypes[10].Descriptor()
 }
 
 func (ResumeMode) Type() protoreflect.EnumType {
-	return &file_agentshim_frontend_v1_frontend_proto_enumTypes[9]
+	return &file_agentshim_frontend_v1_frontend_proto_enumTypes[10]
 }
 
 func (x ResumeMode) Number() protoreflect.EnumNumber {
@@ -1026,7 +1100,7 @@ func (x ResumeMode) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ResumeMode.Descriptor instead.
 func (ResumeMode) EnumDescriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{9}
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{10}
 }
 
 // A runtime fault is explanatory evidence scoped to exactly one
@@ -10317,7 +10391,8 @@ type ReviveSessionCmd_CompactFirst struct {
 	// Compact the conversation as the first order of business; prompts are
 	// accepted only after compaction lands. This pays the full-context cost
 	// ONCE (compaction is a model call over the whole history) instead of on
-	// every subsequent turn.
+	// every subsequent turn. Its own CompactionScope says how much of the
+	// conversation the compaction may summarize away.
 	CompactFirst *ReviveCompactFirst `protobuf:"bytes,1,opt,name=compact_first,json=compactFirst,proto3,oneof"`
 }
 
@@ -10331,9 +10406,21 @@ func (*ReviveSessionCmd_CompactFirst) isReviveSessionCmd_Mode() {}
 
 func (*ReviveSessionCmd_Direct) isReviveSessionCmd_Mode() {}
 
-// Marks the compact-first revival choice. Empty: the choice IS the arm.
+// The compact-first revival choice, and WHAT of the conversation the
+// compaction is allowed to summarize away.
+//
+// The arm is no longer empty because "compact" turned out not to be one
+// decision. A conversation's bulk is not evenly distributed: the assistant's
+// own responses are usually the largest part of it, the user's prompts are
+// usually the part they most want back verbatim, and the tool calls and their
+// results are the part an agent needs intact to keep working. So the scope is
+// the user's to state, and stating it is what the four arms of CompactionScope
+// are for.
 type ReviveCompactFirst struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Required; an unspecified scope is a loud nack rather than a default. The
+	// daemon does not choose what to throw away.
+	Scope         CompactionScope `protobuf:"varint,1,opt,name=scope,proto3,enum=agentshim.frontend.v1.CompactionScope" json:"scope,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -10366,6 +10453,13 @@ func (x *ReviveCompactFirst) ProtoReflect() protoreflect.Message {
 // Deprecated: Use ReviveCompactFirst.ProtoReflect.Descriptor instead.
 func (*ReviveCompactFirst) Descriptor() ([]byte, []int) {
 	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{108}
+}
+
+func (x *ReviveCompactFirst) GetScope() CompactionScope {
+	if x != nil {
+		return x.Scope
+	}
+	return CompactionScope_COMPACTION_SCOPE_UNSPECIFIED
 }
 
 // Marks the resume-verbatim revival choice. Empty: the choice IS the arm.
@@ -15620,8 +15714,9 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\x10ReviveSessionCmd\x12P\n" +
 	"\rcompact_first\x18\x01 \x01(\v2).agentshim.frontend.v1.ReviveCompactFirstH\x00R\fcompactFirst\x12=\n" +
 	"\x06direct\x18\x02 \x01(\v2#.agentshim.frontend.v1.ReviveDirectH\x00R\x06directB\x06\n" +
-	"\x04mode\"\x14\n" +
-	"\x12ReviveCompactFirst\"\x0e\n" +
+	"\x04mode\"R\n" +
+	"\x12ReviveCompactFirst\x12<\n" +
+	"\x05scope\x18\x01 \x01(\x0e2&.agentshim.frontend.v1.CompactionScopeR\x05scope\"\x0e\n" +
 	"\fReviveDirect\"\x11\n" +
 	"\x0fDaemonHealthCmd\"1\n" +
 	"\x10SessionHealthCmd\x12\x1d\n" +
@@ -16028,7 +16123,13 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\x1cCLIENT_LOG_LEVEL_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15CLIENT_LOG_LEVEL_INFO\x10\x01\x12\x19\n" +
 	"\x15CLIENT_LOG_LEVEL_WARN\x10\x02\x12\x1a\n" +
-	"\x16CLIENT_LOG_LEVEL_ERROR\x10\x03*v\n" +
+	"\x16CLIENT_LOG_LEVEL_ERROR\x10\x03*\xb7\x01\n" +
+	"\x0fCompactionScope\x12 \n" +
+	"\x1cCOMPACTION_SCOPE_UNSPECIFIED\x10\x00\x12\x18\n" +
+	"\x14COMPACTION_SCOPE_ALL\x10\x01\x12\x1e\n" +
+	"\x1aCOMPACTION_SCOPE_RESPONSES\x10\x02\x12\x1c\n" +
+	"\x18COMPACTION_SCOPE_PROMPTS\x10\x03\x12*\n" +
+	"&COMPACTION_SCOPE_PROMPTS_AND_RESPONSES\x10\x04*v\n" +
 	"\n" +
 	"ResumeMode\x12\x1b\n" +
 	"\x17RESUME_MODE_UNSPECIFIED\x10\x00\x12\x18\n" +
@@ -16047,7 +16148,7 @@ func file_agentshim_frontend_v1_frontend_proto_rawDescGZIP() []byte {
 	return file_agentshim_frontend_v1_frontend_proto_rawDescData
 }
 
-var file_agentshim_frontend_v1_frontend_proto_enumTypes = make([]protoimpl.EnumInfo, 10)
+var file_agentshim_frontend_v1_frontend_proto_enumTypes = make([]protoimpl.EnumInfo, 11)
 var file_agentshim_frontend_v1_frontend_proto_msgTypes = make([]protoimpl.MessageInfo, 173)
 var file_agentshim_frontend_v1_frontend_proto_goTypes = []any{
 	(RenderState)(0),                                       // 0: agentshim.frontend.v1.RenderState
@@ -16059,466 +16160,468 @@ var file_agentshim_frontend_v1_frontend_proto_goTypes = []any{
 	(ErrorClass)(0),                                        // 6: agentshim.frontend.v1.ErrorClass
 	(QueueClassification)(0),                               // 7: agentshim.frontend.v1.QueueClassification
 	(ClientLogLevel)(0),                                    // 8: agentshim.frontend.v1.ClientLogLevel
-	(ResumeMode)(0),                                        // 9: agentshim.frontend.v1.ResumeMode
-	(*RuntimeFault)(nil),                                   // 10: agentshim.frontend.v1.RuntimeFault
-	(*FrontendFrame)(nil),                                  // 11: agentshim.frontend.v1.FrontendFrame
-	(*DaemonView)(nil),                                     // 12: agentshim.frontend.v1.DaemonView
-	(*DaemonHealthView)(nil),                               // 13: agentshim.frontend.v1.DaemonHealthView
-	(*SessionHealthView)(nil),                              // 14: agentshim.frontend.v1.SessionHealthView
-	(*WorkspaceState)(nil),                                 // 15: agentshim.frontend.v1.WorkspaceState
-	(*MergeStatus)(nil),                                    // 16: agentshim.frontend.v1.MergeStatus
-	(*MergeStatusEnqueued)(nil),                            // 17: agentshim.frontend.v1.MergeStatusEnqueued
-	(*MergeStatusBeforeAction)(nil),                        // 18: agentshim.frontend.v1.MergeStatusBeforeAction
-	(*MergeStatusCherryPicking)(nil),                       // 19: agentshim.frontend.v1.MergeStatusCherryPicking
-	(*MergeStatusTesting)(nil),                             // 20: agentshim.frontend.v1.MergeStatusTesting
-	(*MergeStatusConflict)(nil),                            // 21: agentshim.frontend.v1.MergeStatusConflict
-	(*MergeStatusAfterAction)(nil),                         // 22: agentshim.frontend.v1.MergeStatusAfterAction
-	(*MergeStatusMerged)(nil),                              // 23: agentshim.frontend.v1.MergeStatusMerged
-	(*MergeStatusFailed)(nil),                              // 24: agentshim.frontend.v1.MergeStatusFailed
-	(*SessionView)(nil),                                    // 25: agentshim.frontend.v1.SessionView
-	(*HibernationDetail)(nil),                              // 26: agentshim.frontend.v1.HibernationDetail
-	(*HibernationIdleCutoff)(nil),                          // 27: agentshim.frontend.v1.HibernationIdleCutoff
-	(*HibernationForced)(nil),                              // 28: agentshim.frontend.v1.HibernationForced
-	(*HibernationCacheExpired)(nil),                        // 29: agentshim.frontend.v1.HibernationCacheExpired
-	(*ModelOption)(nil),                                    // 30: agentshim.frontend.v1.ModelOption
-	(*ConversationDelta)(nil),                              // 31: agentshim.frontend.v1.ConversationDelta
-	(*ConversationItem)(nil),                               // 32: agentshim.frontend.v1.ConversationItem
-	(*TurnAccounting)(nil),                                 // 33: agentshim.frontend.v1.TurnAccounting
-	(*TurnAccountingTiming)(nil),                           // 34: agentshim.frontend.v1.TurnAccountingTiming
-	(*TokenUsageReconciliation)(nil),                       // 35: agentshim.frontend.v1.TokenUsageReconciliation
-	(*TurnAccountingComplete)(nil),                         // 36: agentshim.frontend.v1.TurnAccountingComplete
-	(*TurnAccountingInvalid)(nil),                          // 37: agentshim.frontend.v1.TurnAccountingInvalid
-	(*TurnAccountingProblem)(nil),                          // 38: agentshim.frontend.v1.TurnAccountingProblem
-	(*MissingUsageBoundary)(nil),                           // 39: agentshim.frontend.v1.MissingUsageBoundary
-	(*MissingUsageBoundaryTurnStart)(nil),                  // 40: agentshim.frontend.v1.MissingUsageBoundaryTurnStart
-	(*MissingUsageBoundaryTurnEnd)(nil),                    // 41: agentshim.frontend.v1.MissingUsageBoundaryTurnEnd
-	(*UsageWindowReset)(nil),                               // 42: agentshim.frontend.v1.UsageWindowReset
-	(*TokenLedgerMismatch)(nil),                            // 43: agentshim.frontend.v1.TokenLedgerMismatch
-	(*RuntimeIdentityIncomplete)(nil),                      // 44: agentshim.frontend.v1.RuntimeIdentityIncomplete
-	(*UnmodeledUsageFields)(nil),                           // 45: agentshim.frontend.v1.UnmodeledUsageFields
-	(*TelemetryRecordMissing)(nil),                         // 46: agentshim.frontend.v1.TelemetryRecordMissing
-	(*TelemetryRecordMissingQueryLifecycle)(nil),           // 47: agentshim.frontend.v1.TelemetryRecordMissingQueryLifecycle
-	(*TelemetryRecordMissingResponseUsage)(nil),            // 48: agentshim.frontend.v1.TelemetryRecordMissingResponseUsage
-	(*TelemetryRecordMissingPersistenceReceipt)(nil),       // 49: agentshim.frontend.v1.TelemetryRecordMissingPersistenceReceipt
-	(*TokenUtilization)(nil),                               // 50: agentshim.frontend.v1.TokenUtilization
-	(*TokenUtilizationMainAgent)(nil),                      // 51: agentshim.frontend.v1.TokenUtilizationMainAgent
-	(*TokenUtilizationSubagent)(nil),                       // 52: agentshim.frontend.v1.TokenUtilizationSubagent
-	(*TokenResponseTiming)(nil),                            // 53: agentshim.frontend.v1.TokenResponseTiming
-	(*TokenUsage)(nil),                                     // 54: agentshim.frontend.v1.TokenUsage
-	(*TokenCacheHits)(nil),                                 // 55: agentshim.frontend.v1.TokenCacheHits
-	(*TokenCacheMisses)(nil),                               // 56: agentshim.frontend.v1.TokenCacheMisses
-	(*VendorTokenUsage)(nil),                               // 57: agentshim.frontend.v1.VendorTokenUsage
-	(*TokenCacheCreation)(nil),                             // 58: agentshim.frontend.v1.TokenCacheCreation
-	(*TokenServerToolUse)(nil),                             // 59: agentshim.frontend.v1.TokenServerToolUse
-	(*TokenOutputDetails)(nil),                             // 60: agentshim.frontend.v1.TokenOutputDetails
-	(*TokenCacheRates)(nil),                                // 61: agentshim.frontend.v1.TokenCacheRates
-	(*TokenUsageIteration)(nil),                            // 62: agentshim.frontend.v1.TokenUsageIteration
-	(*TokenUsageIterationSampling)(nil),                    // 63: agentshim.frontend.v1.TokenUsageIterationSampling
-	(*TokenUsageIterationCompaction)(nil),                  // 64: agentshim.frontend.v1.TokenUsageIterationCompaction
-	(*TokenUsageIterationAdvisor)(nil),                     // 65: agentshim.frontend.v1.TokenUsageIterationAdvisor
-	(*TokenUsageIterationFallback)(nil),                    // 66: agentshim.frontend.v1.TokenUsageIterationFallback
-	(*TokenCacheDiagnostic)(nil),                           // 67: agentshim.frontend.v1.TokenCacheDiagnostic
-	(*TokenCacheDiagnosticPending)(nil),                    // 68: agentshim.frontend.v1.TokenCacheDiagnosticPending
-	(*TokenCacheDiagnosticModelChanged)(nil),               // 69: agentshim.frontend.v1.TokenCacheDiagnosticModelChanged
-	(*TokenCacheDiagnosticSystemChanged)(nil),              // 70: agentshim.frontend.v1.TokenCacheDiagnosticSystemChanged
-	(*TokenCacheDiagnosticToolsChanged)(nil),               // 71: agentshim.frontend.v1.TokenCacheDiagnosticToolsChanged
-	(*TokenCacheDiagnosticMessagesChanged)(nil),            // 72: agentshim.frontend.v1.TokenCacheDiagnosticMessagesChanged
-	(*TokenCacheDiagnosticPreviousMessageUnavailable)(nil), // 73: agentshim.frontend.v1.TokenCacheDiagnosticPreviousMessageUnavailable
-	(*TokenCacheDiagnosticDiagnosticsUnavailable)(nil),     // 74: agentshim.frontend.v1.TokenCacheDiagnosticDiagnosticsUnavailable
-	(*SessionTokenUtilization)(nil),                        // 75: agentshim.frontend.v1.SessionTokenUtilization
-	(*AgentTokenUtilization)(nil),                          // 76: agentshim.frontend.v1.AgentTokenUtilization
-	(*ModelTokenUtilization)(nil),                          // 77: agentshim.frontend.v1.ModelTokenUtilization
-	(*TokenUsageTotals)(nil),                               // 78: agentshim.frontend.v1.TokenUsageTotals
-	(*TokenTimingTotals)(nil),                              // 79: agentshim.frontend.v1.TokenTimingTotals
-	(*SessionCommandItem)(nil),                             // 80: agentshim.frontend.v1.SessionCommandItem
-	(*SkillBodyItem)(nil),                                  // 81: agentshim.frontend.v1.SkillBodyItem
-	(*SystemFailureItem)(nil),                              // 82: agentshim.frontend.v1.SystemFailureItem
-	(*QueryTerminationFailure)(nil),                        // 83: agentshim.frontend.v1.QueryTerminationFailure
-	(*SessionResumeFailure)(nil),                           // 84: agentshim.frontend.v1.SessionResumeFailure
-	(*SessionResumeFailureCreate)(nil),                     // 85: agentshim.frontend.v1.SessionResumeFailureCreate
-	(*SessionResumeFailureAutomaticRestore)(nil),           // 86: agentshim.frontend.v1.SessionResumeFailureAutomaticRestore
-	(*SessionResumeFailureTranscriptUnavailable)(nil),      // 87: agentshim.frontend.v1.SessionResumeFailureTranscriptUnavailable
-	(*SessionResumeFailureIdentityMismatch)(nil),           // 88: agentshim.frontend.v1.SessionResumeFailureIdentityMismatch
-	(*SessionResumeFailureBringUpFailure)(nil),             // 89: agentshim.frontend.v1.SessionResumeFailureBringUpFailure
-	(*TypingDelta)(nil),                                    // 90: agentshim.frontend.v1.TypingDelta
-	(*HeartbeatView)(nil),                                  // 91: agentshim.frontend.v1.HeartbeatView
-	(*SessionInitView)(nil),                                // 92: agentshim.frontend.v1.SessionInitView
-	(*TaskEntry)(nil),                                      // 93: agentshim.frontend.v1.TaskEntry
-	(*TaskCatalog)(nil),                                    // 94: agentshim.frontend.v1.TaskCatalog
-	(*FrontendCommand)(nil),                                // 95: agentshim.frontend.v1.FrontendCommand
-	(*PublishWorkspaceRosterCmd)(nil),                      // 96: agentshim.frontend.v1.PublishWorkspaceRosterCmd
-	(*QueueEntry)(nil),                                     // 97: agentshim.frontend.v1.QueueEntry
-	(*QueueEntryShutdownHold)(nil),                         // 98: agentshim.frontend.v1.QueueEntryShutdownHold
-	(*QueueEntryKeepAliveHold)(nil),                        // 99: agentshim.frontend.v1.QueueEntryKeepAliveHold
-	(*QueueEntryRevivalHold)(nil),                          // 100: agentshim.frontend.v1.QueueEntryRevivalHold
-	(*QueueView)(nil),                                      // 101: agentshim.frontend.v1.QueueView
-	(*QueueForceCmd)(nil),                                  // 102: agentshim.frontend.v1.QueueForceCmd
-	(*QueueAcceptCmd)(nil),                                 // 103: agentshim.frontend.v1.QueueAcceptCmd
-	(*QueueCancelCmd)(nil),                                 // 104: agentshim.frontend.v1.QueueCancelCmd
-	(*ClientLogCmd)(nil),                                   // 105: agentshim.frontend.v1.ClientLogCmd
-	(*ShutdownCmd)(nil),                                    // 106: agentshim.frontend.v1.ShutdownCmd
-	(*ShutdownScheduleView)(nil),                           // 107: agentshim.frontend.v1.ShutdownScheduleView
-	(*ShutdownScheduleIdle)(nil),                           // 108: agentshim.frontend.v1.ShutdownScheduleIdle
-	(*ShutdownScheduleDraining)(nil),                       // 109: agentshim.frontend.v1.ShutdownScheduleDraining
-	(*ShutdownHold)(nil),                                   // 110: agentshim.frontend.v1.ShutdownHold
-	(*ShutdownHoldTurn)(nil),                               // 111: agentshim.frontend.v1.ShutdownHoldTurn
-	(*ShutdownHoldTasks)(nil),                              // 112: agentshim.frontend.v1.ShutdownHoldTasks
-	(*ScheduleShutdownCmd)(nil),                            // 113: agentshim.frontend.v1.ScheduleShutdownCmd
-	(*CancelScheduledShutdownCmd)(nil),                     // 114: agentshim.frontend.v1.CancelScheduledShutdownCmd
-	(*RestartSessionCmd)(nil),                              // 115: agentshim.frontend.v1.RestartSessionCmd
-	(*HibernateWorkspaceCmd)(nil),                          // 116: agentshim.frontend.v1.HibernateWorkspaceCmd
-	(*ReviveSessionCmd)(nil),                               // 117: agentshim.frontend.v1.ReviveSessionCmd
-	(*ReviveCompactFirst)(nil),                             // 118: agentshim.frontend.v1.ReviveCompactFirst
-	(*ReviveDirect)(nil),                                   // 119: agentshim.frontend.v1.ReviveDirect
-	(*DaemonHealthCmd)(nil),                                // 120: agentshim.frontend.v1.DaemonHealthCmd
-	(*SessionHealthCmd)(nil),                               // 121: agentshim.frontend.v1.SessionHealthCmd
-	(*CreateSessionCmd)(nil),                               // 122: agentshim.frontend.v1.CreateSessionCmd
-	(*SetModelCmd)(nil),                                    // 123: agentshim.frontend.v1.SetModelCmd
-	(*DeleteSessionCmd)(nil),                               // 124: agentshim.frontend.v1.DeleteSessionCmd
-	(*SubmitPromptCmd)(nil),                                // 125: agentshim.frontend.v1.SubmitPromptCmd
-	(*InterruptCmd)(nil),                                   // 126: agentshim.frontend.v1.InterruptCmd
-	(*PermissionAnswerCmd)(nil),                            // 127: agentshim.frontend.v1.PermissionAnswerCmd
-	(*MergeWorkspaceCmd)(nil),                              // 128: agentshim.frontend.v1.MergeWorkspaceCmd
-	(*CloseWorkspaceCmd)(nil),                              // 129: agentshim.frontend.v1.CloseWorkspaceCmd
-	(*OpenWorkspaceCmd)(nil),                               // 130: agentshim.frontend.v1.OpenWorkspaceCmd
-	(*ResyncCmd)(nil),                                      // 131: agentshim.frontend.v1.ResyncCmd
-	(*CreateWorkspaceCmd)(nil),                             // 132: agentshim.frontend.v1.CreateWorkspaceCmd
-	(*WorkspaceAvailable)(nil),                             // 133: agentshim.frontend.v1.WorkspaceAvailable
-	(*WorkspaceMaterializedCmd)(nil),                       // 134: agentshim.frontend.v1.WorkspaceMaterializedCmd
-	(*HostAction)(nil),                                     // 135: agentshim.frontend.v1.HostAction
-	(*HostWorkspaceCreateFailed)(nil),                      // 136: agentshim.frontend.v1.HostWorkspaceCreateFailed
-	(*HostSwitchWorkspace)(nil),                            // 137: agentshim.frontend.v1.HostSwitchWorkspace
-	(*HostSetRepositoryFold)(nil),                          // 138: agentshim.frontend.v1.HostSetRepositoryFold
-	(*HostSetSidebarView)(nil),                             // 139: agentshim.frontend.v1.HostSetSidebarView
-	(*HostTaskCreate)(nil),                                 // 140: agentshim.frontend.v1.HostTaskCreate
-	(*HostTaskById)(nil),                                   // 141: agentshim.frontend.v1.HostTaskById
-	(*HostLegacyCommand)(nil),                              // 142: agentshim.frontend.v1.HostLegacyCommand
-	(*HostActionCompletedCmd)(nil),                         // 143: agentshim.frontend.v1.HostActionCompletedCmd
-	(*CommandAck)(nil),                                     // 144: agentshim.frontend.v1.CommandAck
-	(*InterruptConfirmRequired)(nil),                       // 145: agentshim.frontend.v1.InterruptConfirmRequired
-	(*ProgressWindow)(nil),                                 // 146: agentshim.frontend.v1.ProgressWindow
-	(*RateLimitWindow)(nil),                                // 147: agentshim.frontend.v1.RateLimitWindow
-	(*InterruptWindow)(nil),                                // 148: agentshim.frontend.v1.InterruptWindow
-	(*ProgressView)(nil),                                   // 149: agentshim.frontend.v1.ProgressView
-	(*ContextCostAlert)(nil),                               // 150: agentshim.frontend.v1.ContextCostAlert
-	(*StateSnapshot)(nil),                                  // 151: agentshim.frontend.v1.StateSnapshot
-	(*WorkspaceRoster)(nil),                                // 152: agentshim.frontend.v1.WorkspaceRoster
-	(*RosterRepositoryView)(nil),                           // 153: agentshim.frontend.v1.RosterRepositoryView
-	(*RosterTaskView)(nil),                                 // 154: agentshim.frontend.v1.RosterTaskView
-	(*RosterRepoSection)(nil),                              // 155: agentshim.frontend.v1.RosterRepoSection
-	(*RosterTaskSection)(nil),                              // 156: agentshim.frontend.v1.RosterTaskSection
-	(*RosterSection)(nil),                                  // 157: agentshim.frontend.v1.RosterSection
-	(*RosterRow)(nil),                                      // 158: agentshim.frontend.v1.RosterRow
-	(*RosterRowStatusSubmitting)(nil),                      // 159: agentshim.frontend.v1.RosterRowStatusSubmitting
-	(*RosterRowStatusThinking)(nil),                        // 160: agentshim.frontend.v1.RosterRowStatusThinking
-	(*RosterRowStatusClearing)(nil),                        // 161: agentshim.frontend.v1.RosterRowStatusClearing
-	(*RosterRowStatusCompacting)(nil),                      // 162: agentshim.frontend.v1.RosterRowStatusCompacting
-	(*RosterRowStatusPermission)(nil),                      // 163: agentshim.frontend.v1.RosterRowStatusPermission
-	(*RosterRowStatusDone)(nil),                            // 164: agentshim.frontend.v1.RosterRowStatusDone
-	(*RosterRowStatusInterrupted)(nil),                     // 165: agentshim.frontend.v1.RosterRowStatusInterrupted
-	(*RosterRowStatusReady)(nil),                           // 166: agentshim.frontend.v1.RosterRowStatusReady
-	(*RosterRowStatusIdleAsync)(nil),                       // 167: agentshim.frontend.v1.RosterRowStatusIdleAsync
-	(*RosterRowStatusVendorBlocked)(nil),                   // 168: agentshim.frontend.v1.RosterRowStatusVendorBlocked
-	(*RosterRowStatusInit)(nil),                            // 169: agentshim.frontend.v1.RosterRowStatusInit
-	(*RosterRowStatusSevered)(nil),                         // 170: agentshim.frontend.v1.RosterRowStatusSevered
-	(*RosterRowStatusHibernated)(nil),                      // 171: agentshim.frontend.v1.RosterRowStatusHibernated
-	(*RosterRowStatusStartFailed)(nil),                     // 172: agentshim.frontend.v1.RosterRowStatusStartFailed
-	(*RosterRowStatusDegraded)(nil),                        // 173: agentshim.frontend.v1.RosterRowStatusDegraded
-	(*RosterRowStatusDead)(nil),                            // 174: agentshim.frontend.v1.RosterRowStatusDead
-	(*RosterRowStatusMergeEnqueuing)(nil),                  // 175: agentshim.frontend.v1.RosterRowStatusMergeEnqueuing
-	(*RosterRowStatusMerging)(nil),                         // 176: agentshim.frontend.v1.RosterRowStatusMerging
-	(*RosterRowStatusMergeQueued)(nil),                     // 177: agentshim.frontend.v1.RosterRowStatusMergeQueued
-	(*RosterRowStatusMergeConflict)(nil),                   // 178: agentshim.frontend.v1.RosterRowStatusMergeConflict
-	(*RosterRowStatusMergeFailed)(nil),                     // 179: agentshim.frontend.v1.RosterRowStatusMergeFailed
-	(*RosterRowStatusMerged)(nil),                          // 180: agentshim.frontend.v1.RosterRowStatusMerged
-	(*RosterRowStatusNone)(nil),                            // 181: agentshim.frontend.v1.RosterRowStatusNone
-	(*RosterRowStatusInactive)(nil),                        // 182: agentshim.frontend.v1.RosterRowStatusInactive
-	(*v1.ApiAssistantMessage)(nil),                         // 183: agentshim.data.v1.ApiAssistantMessage
-	(*v1.ApiUserMessage)(nil),                              // 184: agentshim.data.v1.ApiUserMessage
-	(*v1.ToolUseBlock)(nil),                                // 185: agentshim.data.v1.ToolUseBlock
-	(*v1.ToolResultBlock)(nil),                             // 186: agentshim.data.v1.ToolResultBlock
-	(*v1.ToolUseResult)(nil),                               // 187: agentshim.data.v1.ToolUseResult
-	(*v1.ResultMessage)(nil),                               // 188: agentshim.data.v1.ResultMessage
-	(*v11.PermissionItem)(nil),                             // 189: agentshim.core.v1.PermissionItem
-	(*v11.ContextCleared)(nil),                             // 190: agentshim.core.v1.ContextCleared
-	(*v11.ContextCompacted)(nil),                           // 191: agentshim.core.v1.ContextCompacted
-	(*v11.QueryRuntimeIdentity)(nil),                       // 192: agentshim.core.v1.QueryRuntimeIdentity
-	(*v11.AccountUsageObservation)(nil),                    // 193: agentshim.core.v1.AccountUsageObservation
-	(*structpb.Struct)(nil),                                // 194: google.protobuf.Struct
-	(*v1.ApiUsage)(nil),                                    // 195: agentshim.data.v1.ApiUsage
-	(*v11.VendorSessionIdentityUnavailable)(nil),           // 196: agentshim.core.v1.VendorSessionIdentityUnavailable
-	(*v11.UnexpectedQueryEof)(nil),                         // 197: agentshim.core.v1.UnexpectedQueryEof
-	(*v11.QueryIteratorFailure)(nil),                       // 198: agentshim.core.v1.QueryIteratorFailure
-	(*v11.QueryStartupFailure)(nil),                        // 199: agentshim.core.v1.QueryStartupFailure
-	(*v11.ContentDelta)(nil),                               // 200: agentshim.core.v1.ContentDelta
-	(*v11.HeartbeatProgress)(nil),                          // 201: agentshim.core.v1.HeartbeatProgress
-	(*v1.SystemInit)(nil),                                  // 202: agentshim.data.v1.SystemInit
-	(v11.PromptOrigin)(0),                                  // 203: agentshim.core.v1.PromptOrigin
-	(v11.InterruptOutcome)(0),                              // 204: agentshim.core.v1.InterruptOutcome
+	(CompactionScope)(0),                                   // 9: agentshim.frontend.v1.CompactionScope
+	(ResumeMode)(0),                                        // 10: agentshim.frontend.v1.ResumeMode
+	(*RuntimeFault)(nil),                                   // 11: agentshim.frontend.v1.RuntimeFault
+	(*FrontendFrame)(nil),                                  // 12: agentshim.frontend.v1.FrontendFrame
+	(*DaemonView)(nil),                                     // 13: agentshim.frontend.v1.DaemonView
+	(*DaemonHealthView)(nil),                               // 14: agentshim.frontend.v1.DaemonHealthView
+	(*SessionHealthView)(nil),                              // 15: agentshim.frontend.v1.SessionHealthView
+	(*WorkspaceState)(nil),                                 // 16: agentshim.frontend.v1.WorkspaceState
+	(*MergeStatus)(nil),                                    // 17: agentshim.frontend.v1.MergeStatus
+	(*MergeStatusEnqueued)(nil),                            // 18: agentshim.frontend.v1.MergeStatusEnqueued
+	(*MergeStatusBeforeAction)(nil),                        // 19: agentshim.frontend.v1.MergeStatusBeforeAction
+	(*MergeStatusCherryPicking)(nil),                       // 20: agentshim.frontend.v1.MergeStatusCherryPicking
+	(*MergeStatusTesting)(nil),                             // 21: agentshim.frontend.v1.MergeStatusTesting
+	(*MergeStatusConflict)(nil),                            // 22: agentshim.frontend.v1.MergeStatusConflict
+	(*MergeStatusAfterAction)(nil),                         // 23: agentshim.frontend.v1.MergeStatusAfterAction
+	(*MergeStatusMerged)(nil),                              // 24: agentshim.frontend.v1.MergeStatusMerged
+	(*MergeStatusFailed)(nil),                              // 25: agentshim.frontend.v1.MergeStatusFailed
+	(*SessionView)(nil),                                    // 26: agentshim.frontend.v1.SessionView
+	(*HibernationDetail)(nil),                              // 27: agentshim.frontend.v1.HibernationDetail
+	(*HibernationIdleCutoff)(nil),                          // 28: agentshim.frontend.v1.HibernationIdleCutoff
+	(*HibernationForced)(nil),                              // 29: agentshim.frontend.v1.HibernationForced
+	(*HibernationCacheExpired)(nil),                        // 30: agentshim.frontend.v1.HibernationCacheExpired
+	(*ModelOption)(nil),                                    // 31: agentshim.frontend.v1.ModelOption
+	(*ConversationDelta)(nil),                              // 32: agentshim.frontend.v1.ConversationDelta
+	(*ConversationItem)(nil),                               // 33: agentshim.frontend.v1.ConversationItem
+	(*TurnAccounting)(nil),                                 // 34: agentshim.frontend.v1.TurnAccounting
+	(*TurnAccountingTiming)(nil),                           // 35: agentshim.frontend.v1.TurnAccountingTiming
+	(*TokenUsageReconciliation)(nil),                       // 36: agentshim.frontend.v1.TokenUsageReconciliation
+	(*TurnAccountingComplete)(nil),                         // 37: agentshim.frontend.v1.TurnAccountingComplete
+	(*TurnAccountingInvalid)(nil),                          // 38: agentshim.frontend.v1.TurnAccountingInvalid
+	(*TurnAccountingProblem)(nil),                          // 39: agentshim.frontend.v1.TurnAccountingProblem
+	(*MissingUsageBoundary)(nil),                           // 40: agentshim.frontend.v1.MissingUsageBoundary
+	(*MissingUsageBoundaryTurnStart)(nil),                  // 41: agentshim.frontend.v1.MissingUsageBoundaryTurnStart
+	(*MissingUsageBoundaryTurnEnd)(nil),                    // 42: agentshim.frontend.v1.MissingUsageBoundaryTurnEnd
+	(*UsageWindowReset)(nil),                               // 43: agentshim.frontend.v1.UsageWindowReset
+	(*TokenLedgerMismatch)(nil),                            // 44: agentshim.frontend.v1.TokenLedgerMismatch
+	(*RuntimeIdentityIncomplete)(nil),                      // 45: agentshim.frontend.v1.RuntimeIdentityIncomplete
+	(*UnmodeledUsageFields)(nil),                           // 46: agentshim.frontend.v1.UnmodeledUsageFields
+	(*TelemetryRecordMissing)(nil),                         // 47: agentshim.frontend.v1.TelemetryRecordMissing
+	(*TelemetryRecordMissingQueryLifecycle)(nil),           // 48: agentshim.frontend.v1.TelemetryRecordMissingQueryLifecycle
+	(*TelemetryRecordMissingResponseUsage)(nil),            // 49: agentshim.frontend.v1.TelemetryRecordMissingResponseUsage
+	(*TelemetryRecordMissingPersistenceReceipt)(nil),       // 50: agentshim.frontend.v1.TelemetryRecordMissingPersistenceReceipt
+	(*TokenUtilization)(nil),                               // 51: agentshim.frontend.v1.TokenUtilization
+	(*TokenUtilizationMainAgent)(nil),                      // 52: agentshim.frontend.v1.TokenUtilizationMainAgent
+	(*TokenUtilizationSubagent)(nil),                       // 53: agentshim.frontend.v1.TokenUtilizationSubagent
+	(*TokenResponseTiming)(nil),                            // 54: agentshim.frontend.v1.TokenResponseTiming
+	(*TokenUsage)(nil),                                     // 55: agentshim.frontend.v1.TokenUsage
+	(*TokenCacheHits)(nil),                                 // 56: agentshim.frontend.v1.TokenCacheHits
+	(*TokenCacheMisses)(nil),                               // 57: agentshim.frontend.v1.TokenCacheMisses
+	(*VendorTokenUsage)(nil),                               // 58: agentshim.frontend.v1.VendorTokenUsage
+	(*TokenCacheCreation)(nil),                             // 59: agentshim.frontend.v1.TokenCacheCreation
+	(*TokenServerToolUse)(nil),                             // 60: agentshim.frontend.v1.TokenServerToolUse
+	(*TokenOutputDetails)(nil),                             // 61: agentshim.frontend.v1.TokenOutputDetails
+	(*TokenCacheRates)(nil),                                // 62: agentshim.frontend.v1.TokenCacheRates
+	(*TokenUsageIteration)(nil),                            // 63: agentshim.frontend.v1.TokenUsageIteration
+	(*TokenUsageIterationSampling)(nil),                    // 64: agentshim.frontend.v1.TokenUsageIterationSampling
+	(*TokenUsageIterationCompaction)(nil),                  // 65: agentshim.frontend.v1.TokenUsageIterationCompaction
+	(*TokenUsageIterationAdvisor)(nil),                     // 66: agentshim.frontend.v1.TokenUsageIterationAdvisor
+	(*TokenUsageIterationFallback)(nil),                    // 67: agentshim.frontend.v1.TokenUsageIterationFallback
+	(*TokenCacheDiagnostic)(nil),                           // 68: agentshim.frontend.v1.TokenCacheDiagnostic
+	(*TokenCacheDiagnosticPending)(nil),                    // 69: agentshim.frontend.v1.TokenCacheDiagnosticPending
+	(*TokenCacheDiagnosticModelChanged)(nil),               // 70: agentshim.frontend.v1.TokenCacheDiagnosticModelChanged
+	(*TokenCacheDiagnosticSystemChanged)(nil),              // 71: agentshim.frontend.v1.TokenCacheDiagnosticSystemChanged
+	(*TokenCacheDiagnosticToolsChanged)(nil),               // 72: agentshim.frontend.v1.TokenCacheDiagnosticToolsChanged
+	(*TokenCacheDiagnosticMessagesChanged)(nil),            // 73: agentshim.frontend.v1.TokenCacheDiagnosticMessagesChanged
+	(*TokenCacheDiagnosticPreviousMessageUnavailable)(nil), // 74: agentshim.frontend.v1.TokenCacheDiagnosticPreviousMessageUnavailable
+	(*TokenCacheDiagnosticDiagnosticsUnavailable)(nil),     // 75: agentshim.frontend.v1.TokenCacheDiagnosticDiagnosticsUnavailable
+	(*SessionTokenUtilization)(nil),                        // 76: agentshim.frontend.v1.SessionTokenUtilization
+	(*AgentTokenUtilization)(nil),                          // 77: agentshim.frontend.v1.AgentTokenUtilization
+	(*ModelTokenUtilization)(nil),                          // 78: agentshim.frontend.v1.ModelTokenUtilization
+	(*TokenUsageTotals)(nil),                               // 79: agentshim.frontend.v1.TokenUsageTotals
+	(*TokenTimingTotals)(nil),                              // 80: agentshim.frontend.v1.TokenTimingTotals
+	(*SessionCommandItem)(nil),                             // 81: agentshim.frontend.v1.SessionCommandItem
+	(*SkillBodyItem)(nil),                                  // 82: agentshim.frontend.v1.SkillBodyItem
+	(*SystemFailureItem)(nil),                              // 83: agentshim.frontend.v1.SystemFailureItem
+	(*QueryTerminationFailure)(nil),                        // 84: agentshim.frontend.v1.QueryTerminationFailure
+	(*SessionResumeFailure)(nil),                           // 85: agentshim.frontend.v1.SessionResumeFailure
+	(*SessionResumeFailureCreate)(nil),                     // 86: agentshim.frontend.v1.SessionResumeFailureCreate
+	(*SessionResumeFailureAutomaticRestore)(nil),           // 87: agentshim.frontend.v1.SessionResumeFailureAutomaticRestore
+	(*SessionResumeFailureTranscriptUnavailable)(nil),      // 88: agentshim.frontend.v1.SessionResumeFailureTranscriptUnavailable
+	(*SessionResumeFailureIdentityMismatch)(nil),           // 89: agentshim.frontend.v1.SessionResumeFailureIdentityMismatch
+	(*SessionResumeFailureBringUpFailure)(nil),             // 90: agentshim.frontend.v1.SessionResumeFailureBringUpFailure
+	(*TypingDelta)(nil),                                    // 91: agentshim.frontend.v1.TypingDelta
+	(*HeartbeatView)(nil),                                  // 92: agentshim.frontend.v1.HeartbeatView
+	(*SessionInitView)(nil),                                // 93: agentshim.frontend.v1.SessionInitView
+	(*TaskEntry)(nil),                                      // 94: agentshim.frontend.v1.TaskEntry
+	(*TaskCatalog)(nil),                                    // 95: agentshim.frontend.v1.TaskCatalog
+	(*FrontendCommand)(nil),                                // 96: agentshim.frontend.v1.FrontendCommand
+	(*PublishWorkspaceRosterCmd)(nil),                      // 97: agentshim.frontend.v1.PublishWorkspaceRosterCmd
+	(*QueueEntry)(nil),                                     // 98: agentshim.frontend.v1.QueueEntry
+	(*QueueEntryShutdownHold)(nil),                         // 99: agentshim.frontend.v1.QueueEntryShutdownHold
+	(*QueueEntryKeepAliveHold)(nil),                        // 100: agentshim.frontend.v1.QueueEntryKeepAliveHold
+	(*QueueEntryRevivalHold)(nil),                          // 101: agentshim.frontend.v1.QueueEntryRevivalHold
+	(*QueueView)(nil),                                      // 102: agentshim.frontend.v1.QueueView
+	(*QueueForceCmd)(nil),                                  // 103: agentshim.frontend.v1.QueueForceCmd
+	(*QueueAcceptCmd)(nil),                                 // 104: agentshim.frontend.v1.QueueAcceptCmd
+	(*QueueCancelCmd)(nil),                                 // 105: agentshim.frontend.v1.QueueCancelCmd
+	(*ClientLogCmd)(nil),                                   // 106: agentshim.frontend.v1.ClientLogCmd
+	(*ShutdownCmd)(nil),                                    // 107: agentshim.frontend.v1.ShutdownCmd
+	(*ShutdownScheduleView)(nil),                           // 108: agentshim.frontend.v1.ShutdownScheduleView
+	(*ShutdownScheduleIdle)(nil),                           // 109: agentshim.frontend.v1.ShutdownScheduleIdle
+	(*ShutdownScheduleDraining)(nil),                       // 110: agentshim.frontend.v1.ShutdownScheduleDraining
+	(*ShutdownHold)(nil),                                   // 111: agentshim.frontend.v1.ShutdownHold
+	(*ShutdownHoldTurn)(nil),                               // 112: agentshim.frontend.v1.ShutdownHoldTurn
+	(*ShutdownHoldTasks)(nil),                              // 113: agentshim.frontend.v1.ShutdownHoldTasks
+	(*ScheduleShutdownCmd)(nil),                            // 114: agentshim.frontend.v1.ScheduleShutdownCmd
+	(*CancelScheduledShutdownCmd)(nil),                     // 115: agentshim.frontend.v1.CancelScheduledShutdownCmd
+	(*RestartSessionCmd)(nil),                              // 116: agentshim.frontend.v1.RestartSessionCmd
+	(*HibernateWorkspaceCmd)(nil),                          // 117: agentshim.frontend.v1.HibernateWorkspaceCmd
+	(*ReviveSessionCmd)(nil),                               // 118: agentshim.frontend.v1.ReviveSessionCmd
+	(*ReviveCompactFirst)(nil),                             // 119: agentshim.frontend.v1.ReviveCompactFirst
+	(*ReviveDirect)(nil),                                   // 120: agentshim.frontend.v1.ReviveDirect
+	(*DaemonHealthCmd)(nil),                                // 121: agentshim.frontend.v1.DaemonHealthCmd
+	(*SessionHealthCmd)(nil),                               // 122: agentshim.frontend.v1.SessionHealthCmd
+	(*CreateSessionCmd)(nil),                               // 123: agentshim.frontend.v1.CreateSessionCmd
+	(*SetModelCmd)(nil),                                    // 124: agentshim.frontend.v1.SetModelCmd
+	(*DeleteSessionCmd)(nil),                               // 125: agentshim.frontend.v1.DeleteSessionCmd
+	(*SubmitPromptCmd)(nil),                                // 126: agentshim.frontend.v1.SubmitPromptCmd
+	(*InterruptCmd)(nil),                                   // 127: agentshim.frontend.v1.InterruptCmd
+	(*PermissionAnswerCmd)(nil),                            // 128: agentshim.frontend.v1.PermissionAnswerCmd
+	(*MergeWorkspaceCmd)(nil),                              // 129: agentshim.frontend.v1.MergeWorkspaceCmd
+	(*CloseWorkspaceCmd)(nil),                              // 130: agentshim.frontend.v1.CloseWorkspaceCmd
+	(*OpenWorkspaceCmd)(nil),                               // 131: agentshim.frontend.v1.OpenWorkspaceCmd
+	(*ResyncCmd)(nil),                                      // 132: agentshim.frontend.v1.ResyncCmd
+	(*CreateWorkspaceCmd)(nil),                             // 133: agentshim.frontend.v1.CreateWorkspaceCmd
+	(*WorkspaceAvailable)(nil),                             // 134: agentshim.frontend.v1.WorkspaceAvailable
+	(*WorkspaceMaterializedCmd)(nil),                       // 135: agentshim.frontend.v1.WorkspaceMaterializedCmd
+	(*HostAction)(nil),                                     // 136: agentshim.frontend.v1.HostAction
+	(*HostWorkspaceCreateFailed)(nil),                      // 137: agentshim.frontend.v1.HostWorkspaceCreateFailed
+	(*HostSwitchWorkspace)(nil),                            // 138: agentshim.frontend.v1.HostSwitchWorkspace
+	(*HostSetRepositoryFold)(nil),                          // 139: agentshim.frontend.v1.HostSetRepositoryFold
+	(*HostSetSidebarView)(nil),                             // 140: agentshim.frontend.v1.HostSetSidebarView
+	(*HostTaskCreate)(nil),                                 // 141: agentshim.frontend.v1.HostTaskCreate
+	(*HostTaskById)(nil),                                   // 142: agentshim.frontend.v1.HostTaskById
+	(*HostLegacyCommand)(nil),                              // 143: agentshim.frontend.v1.HostLegacyCommand
+	(*HostActionCompletedCmd)(nil),                         // 144: agentshim.frontend.v1.HostActionCompletedCmd
+	(*CommandAck)(nil),                                     // 145: agentshim.frontend.v1.CommandAck
+	(*InterruptConfirmRequired)(nil),                       // 146: agentshim.frontend.v1.InterruptConfirmRequired
+	(*ProgressWindow)(nil),                                 // 147: agentshim.frontend.v1.ProgressWindow
+	(*RateLimitWindow)(nil),                                // 148: agentshim.frontend.v1.RateLimitWindow
+	(*InterruptWindow)(nil),                                // 149: agentshim.frontend.v1.InterruptWindow
+	(*ProgressView)(nil),                                   // 150: agentshim.frontend.v1.ProgressView
+	(*ContextCostAlert)(nil),                               // 151: agentshim.frontend.v1.ContextCostAlert
+	(*StateSnapshot)(nil),                                  // 152: agentshim.frontend.v1.StateSnapshot
+	(*WorkspaceRoster)(nil),                                // 153: agentshim.frontend.v1.WorkspaceRoster
+	(*RosterRepositoryView)(nil),                           // 154: agentshim.frontend.v1.RosterRepositoryView
+	(*RosterTaskView)(nil),                                 // 155: agentshim.frontend.v1.RosterTaskView
+	(*RosterRepoSection)(nil),                              // 156: agentshim.frontend.v1.RosterRepoSection
+	(*RosterTaskSection)(nil),                              // 157: agentshim.frontend.v1.RosterTaskSection
+	(*RosterSection)(nil),                                  // 158: agentshim.frontend.v1.RosterSection
+	(*RosterRow)(nil),                                      // 159: agentshim.frontend.v1.RosterRow
+	(*RosterRowStatusSubmitting)(nil),                      // 160: agentshim.frontend.v1.RosterRowStatusSubmitting
+	(*RosterRowStatusThinking)(nil),                        // 161: agentshim.frontend.v1.RosterRowStatusThinking
+	(*RosterRowStatusClearing)(nil),                        // 162: agentshim.frontend.v1.RosterRowStatusClearing
+	(*RosterRowStatusCompacting)(nil),                      // 163: agentshim.frontend.v1.RosterRowStatusCompacting
+	(*RosterRowStatusPermission)(nil),                      // 164: agentshim.frontend.v1.RosterRowStatusPermission
+	(*RosterRowStatusDone)(nil),                            // 165: agentshim.frontend.v1.RosterRowStatusDone
+	(*RosterRowStatusInterrupted)(nil),                     // 166: agentshim.frontend.v1.RosterRowStatusInterrupted
+	(*RosterRowStatusReady)(nil),                           // 167: agentshim.frontend.v1.RosterRowStatusReady
+	(*RosterRowStatusIdleAsync)(nil),                       // 168: agentshim.frontend.v1.RosterRowStatusIdleAsync
+	(*RosterRowStatusVendorBlocked)(nil),                   // 169: agentshim.frontend.v1.RosterRowStatusVendorBlocked
+	(*RosterRowStatusInit)(nil),                            // 170: agentshim.frontend.v1.RosterRowStatusInit
+	(*RosterRowStatusSevered)(nil),                         // 171: agentshim.frontend.v1.RosterRowStatusSevered
+	(*RosterRowStatusHibernated)(nil),                      // 172: agentshim.frontend.v1.RosterRowStatusHibernated
+	(*RosterRowStatusStartFailed)(nil),                     // 173: agentshim.frontend.v1.RosterRowStatusStartFailed
+	(*RosterRowStatusDegraded)(nil),                        // 174: agentshim.frontend.v1.RosterRowStatusDegraded
+	(*RosterRowStatusDead)(nil),                            // 175: agentshim.frontend.v1.RosterRowStatusDead
+	(*RosterRowStatusMergeEnqueuing)(nil),                  // 176: agentshim.frontend.v1.RosterRowStatusMergeEnqueuing
+	(*RosterRowStatusMerging)(nil),                         // 177: agentshim.frontend.v1.RosterRowStatusMerging
+	(*RosterRowStatusMergeQueued)(nil),                     // 178: agentshim.frontend.v1.RosterRowStatusMergeQueued
+	(*RosterRowStatusMergeConflict)(nil),                   // 179: agentshim.frontend.v1.RosterRowStatusMergeConflict
+	(*RosterRowStatusMergeFailed)(nil),                     // 180: agentshim.frontend.v1.RosterRowStatusMergeFailed
+	(*RosterRowStatusMerged)(nil),                          // 181: agentshim.frontend.v1.RosterRowStatusMerged
+	(*RosterRowStatusNone)(nil),                            // 182: agentshim.frontend.v1.RosterRowStatusNone
+	(*RosterRowStatusInactive)(nil),                        // 183: agentshim.frontend.v1.RosterRowStatusInactive
+	(*v1.ApiAssistantMessage)(nil),                         // 184: agentshim.data.v1.ApiAssistantMessage
+	(*v1.ApiUserMessage)(nil),                              // 185: agentshim.data.v1.ApiUserMessage
+	(*v1.ToolUseBlock)(nil),                                // 186: agentshim.data.v1.ToolUseBlock
+	(*v1.ToolResultBlock)(nil),                             // 187: agentshim.data.v1.ToolResultBlock
+	(*v1.ToolUseResult)(nil),                               // 188: agentshim.data.v1.ToolUseResult
+	(*v1.ResultMessage)(nil),                               // 189: agentshim.data.v1.ResultMessage
+	(*v11.PermissionItem)(nil),                             // 190: agentshim.core.v1.PermissionItem
+	(*v11.ContextCleared)(nil),                             // 191: agentshim.core.v1.ContextCleared
+	(*v11.ContextCompacted)(nil),                           // 192: agentshim.core.v1.ContextCompacted
+	(*v11.QueryRuntimeIdentity)(nil),                       // 193: agentshim.core.v1.QueryRuntimeIdentity
+	(*v11.AccountUsageObservation)(nil),                    // 194: agentshim.core.v1.AccountUsageObservation
+	(*structpb.Struct)(nil),                                // 195: google.protobuf.Struct
+	(*v1.ApiUsage)(nil),                                    // 196: agentshim.data.v1.ApiUsage
+	(*v11.VendorSessionIdentityUnavailable)(nil),           // 197: agentshim.core.v1.VendorSessionIdentityUnavailable
+	(*v11.UnexpectedQueryEof)(nil),                         // 198: agentshim.core.v1.UnexpectedQueryEof
+	(*v11.QueryIteratorFailure)(nil),                       // 199: agentshim.core.v1.QueryIteratorFailure
+	(*v11.QueryStartupFailure)(nil),                        // 200: agentshim.core.v1.QueryStartupFailure
+	(*v11.ContentDelta)(nil),                               // 201: agentshim.core.v1.ContentDelta
+	(*v11.HeartbeatProgress)(nil),                          // 202: agentshim.core.v1.HeartbeatProgress
+	(*v1.SystemInit)(nil),                                  // 203: agentshim.data.v1.SystemInit
+	(v11.PromptOrigin)(0),                                  // 204: agentshim.core.v1.PromptOrigin
+	(v11.InterruptOutcome)(0),                              // 205: agentshim.core.v1.InterruptOutcome
 }
 var file_agentshim_frontend_v1_frontend_proto_depIdxs = []int32{
-	151, // 0: agentshim.frontend.v1.FrontendFrame.snapshot:type_name -> agentshim.frontend.v1.StateSnapshot
-	15,  // 1: agentshim.frontend.v1.FrontendFrame.workspace_state:type_name -> agentshim.frontend.v1.WorkspaceState
-	25,  // 2: agentshim.frontend.v1.FrontendFrame.session_view:type_name -> agentshim.frontend.v1.SessionView
-	31,  // 3: agentshim.frontend.v1.FrontendFrame.conversation_delta:type_name -> agentshim.frontend.v1.ConversationDelta
-	90,  // 4: agentshim.frontend.v1.FrontendFrame.typing_delta:type_name -> agentshim.frontend.v1.TypingDelta
-	94,  // 5: agentshim.frontend.v1.FrontendFrame.task_catalog:type_name -> agentshim.frontend.v1.TaskCatalog
-	144, // 6: agentshim.frontend.v1.FrontendFrame.command_ack:type_name -> agentshim.frontend.v1.CommandAck
-	12,  // 7: agentshim.frontend.v1.FrontendFrame.daemon_view:type_name -> agentshim.frontend.v1.DaemonView
-	92,  // 8: agentshim.frontend.v1.FrontendFrame.session_init:type_name -> agentshim.frontend.v1.SessionInitView
-	91,  // 9: agentshim.frontend.v1.FrontendFrame.heartbeat:type_name -> agentshim.frontend.v1.HeartbeatView
-	101, // 10: agentshim.frontend.v1.FrontendFrame.queue:type_name -> agentshim.frontend.v1.QueueView
-	149, // 11: agentshim.frontend.v1.FrontendFrame.progress:type_name -> agentshim.frontend.v1.ProgressView
-	133, // 12: agentshim.frontend.v1.FrontendFrame.workspace_available:type_name -> agentshim.frontend.v1.WorkspaceAvailable
-	135, // 13: agentshim.frontend.v1.FrontendFrame.host_action:type_name -> agentshim.frontend.v1.HostAction
-	13,  // 14: agentshim.frontend.v1.FrontendFrame.daemon_health:type_name -> agentshim.frontend.v1.DaemonHealthView
-	14,  // 15: agentshim.frontend.v1.FrontendFrame.session_health:type_name -> agentshim.frontend.v1.SessionHealthView
-	152, // 16: agentshim.frontend.v1.FrontendFrame.workspace_roster:type_name -> agentshim.frontend.v1.WorkspaceRoster
-	107, // 17: agentshim.frontend.v1.FrontendFrame.shutdown_schedule:type_name -> agentshim.frontend.v1.ShutdownScheduleView
+	152, // 0: agentshim.frontend.v1.FrontendFrame.snapshot:type_name -> agentshim.frontend.v1.StateSnapshot
+	16,  // 1: agentshim.frontend.v1.FrontendFrame.workspace_state:type_name -> agentshim.frontend.v1.WorkspaceState
+	26,  // 2: agentshim.frontend.v1.FrontendFrame.session_view:type_name -> agentshim.frontend.v1.SessionView
+	32,  // 3: agentshim.frontend.v1.FrontendFrame.conversation_delta:type_name -> agentshim.frontend.v1.ConversationDelta
+	91,  // 4: agentshim.frontend.v1.FrontendFrame.typing_delta:type_name -> agentshim.frontend.v1.TypingDelta
+	95,  // 5: agentshim.frontend.v1.FrontendFrame.task_catalog:type_name -> agentshim.frontend.v1.TaskCatalog
+	145, // 6: agentshim.frontend.v1.FrontendFrame.command_ack:type_name -> agentshim.frontend.v1.CommandAck
+	13,  // 7: agentshim.frontend.v1.FrontendFrame.daemon_view:type_name -> agentshim.frontend.v1.DaemonView
+	93,  // 8: agentshim.frontend.v1.FrontendFrame.session_init:type_name -> agentshim.frontend.v1.SessionInitView
+	92,  // 9: agentshim.frontend.v1.FrontendFrame.heartbeat:type_name -> agentshim.frontend.v1.HeartbeatView
+	102, // 10: agentshim.frontend.v1.FrontendFrame.queue:type_name -> agentshim.frontend.v1.QueueView
+	150, // 11: agentshim.frontend.v1.FrontendFrame.progress:type_name -> agentshim.frontend.v1.ProgressView
+	134, // 12: agentshim.frontend.v1.FrontendFrame.workspace_available:type_name -> agentshim.frontend.v1.WorkspaceAvailable
+	136, // 13: agentshim.frontend.v1.FrontendFrame.host_action:type_name -> agentshim.frontend.v1.HostAction
+	14,  // 14: agentshim.frontend.v1.FrontendFrame.daemon_health:type_name -> agentshim.frontend.v1.DaemonHealthView
+	15,  // 15: agentshim.frontend.v1.FrontendFrame.session_health:type_name -> agentshim.frontend.v1.SessionHealthView
+	153, // 16: agentshim.frontend.v1.FrontendFrame.workspace_roster:type_name -> agentshim.frontend.v1.WorkspaceRoster
+	108, // 17: agentshim.frontend.v1.FrontendFrame.shutdown_schedule:type_name -> agentshim.frontend.v1.ShutdownScheduleView
 	0,   // 18: agentshim.frontend.v1.WorkspaceState.state:type_name -> agentshim.frontend.v1.RenderState
 	1,   // 19: agentshim.frontend.v1.WorkspaceState.connectivity:type_name -> agentshim.frontend.v1.SessionConnectivity
 	2,   // 20: agentshim.frontend.v1.WorkspaceState.status:type_name -> agentshim.frontend.v1.SessionStatus
-	10,  // 21: agentshim.frontend.v1.WorkspaceState.active_faults:type_name -> agentshim.frontend.v1.RuntimeFault
-	16,  // 22: agentshim.frontend.v1.WorkspaceState.merge_status:type_name -> agentshim.frontend.v1.MergeStatus
-	17,  // 23: agentshim.frontend.v1.MergeStatus.enqueued:type_name -> agentshim.frontend.v1.MergeStatusEnqueued
-	18,  // 24: agentshim.frontend.v1.MergeStatus.before_action:type_name -> agentshim.frontend.v1.MergeStatusBeforeAction
-	19,  // 25: agentshim.frontend.v1.MergeStatus.cherry_picking:type_name -> agentshim.frontend.v1.MergeStatusCherryPicking
-	20,  // 26: agentshim.frontend.v1.MergeStatus.testing:type_name -> agentshim.frontend.v1.MergeStatusTesting
-	21,  // 27: agentshim.frontend.v1.MergeStatus.conflict:type_name -> agentshim.frontend.v1.MergeStatusConflict
-	22,  // 28: agentshim.frontend.v1.MergeStatus.after_action:type_name -> agentshim.frontend.v1.MergeStatusAfterAction
-	23,  // 29: agentshim.frontend.v1.MergeStatus.merged:type_name -> agentshim.frontend.v1.MergeStatusMerged
-	24,  // 30: agentshim.frontend.v1.MergeStatus.failed:type_name -> agentshim.frontend.v1.MergeStatusFailed
+	11,  // 21: agentshim.frontend.v1.WorkspaceState.active_faults:type_name -> agentshim.frontend.v1.RuntimeFault
+	17,  // 22: agentshim.frontend.v1.WorkspaceState.merge_status:type_name -> agentshim.frontend.v1.MergeStatus
+	18,  // 23: agentshim.frontend.v1.MergeStatus.enqueued:type_name -> agentshim.frontend.v1.MergeStatusEnqueued
+	19,  // 24: agentshim.frontend.v1.MergeStatus.before_action:type_name -> agentshim.frontend.v1.MergeStatusBeforeAction
+	20,  // 25: agentshim.frontend.v1.MergeStatus.cherry_picking:type_name -> agentshim.frontend.v1.MergeStatusCherryPicking
+	21,  // 26: agentshim.frontend.v1.MergeStatus.testing:type_name -> agentshim.frontend.v1.MergeStatusTesting
+	22,  // 27: agentshim.frontend.v1.MergeStatus.conflict:type_name -> agentshim.frontend.v1.MergeStatusConflict
+	23,  // 28: agentshim.frontend.v1.MergeStatus.after_action:type_name -> agentshim.frontend.v1.MergeStatusAfterAction
+	24,  // 29: agentshim.frontend.v1.MergeStatus.merged:type_name -> agentshim.frontend.v1.MergeStatusMerged
+	25,  // 30: agentshim.frontend.v1.MergeStatus.failed:type_name -> agentshim.frontend.v1.MergeStatusFailed
 	3,   // 31: agentshim.frontend.v1.SessionView.backfill:type_name -> agentshim.frontend.v1.BackfillState
-	82,  // 32: agentshim.frontend.v1.SessionView.death:type_name -> agentshim.frontend.v1.SystemFailureItem
-	30,  // 33: agentshim.frontend.v1.SessionView.model_options:type_name -> agentshim.frontend.v1.ModelOption
-	75,  // 34: agentshim.frontend.v1.SessionView.token_utilization:type_name -> agentshim.frontend.v1.SessionTokenUtilization
-	26,  // 35: agentshim.frontend.v1.SessionView.hibernation:type_name -> agentshim.frontend.v1.HibernationDetail
-	27,  // 36: agentshim.frontend.v1.HibernationDetail.idle_cutoff:type_name -> agentshim.frontend.v1.HibernationIdleCutoff
-	28,  // 37: agentshim.frontend.v1.HibernationDetail.forced:type_name -> agentshim.frontend.v1.HibernationForced
-	29,  // 38: agentshim.frontend.v1.HibernationDetail.cache_expired:type_name -> agentshim.frontend.v1.HibernationCacheExpired
-	32,  // 39: agentshim.frontend.v1.ConversationDelta.items:type_name -> agentshim.frontend.v1.ConversationItem
+	83,  // 32: agentshim.frontend.v1.SessionView.death:type_name -> agentshim.frontend.v1.SystemFailureItem
+	31,  // 33: agentshim.frontend.v1.SessionView.model_options:type_name -> agentshim.frontend.v1.ModelOption
+	76,  // 34: agentshim.frontend.v1.SessionView.token_utilization:type_name -> agentshim.frontend.v1.SessionTokenUtilization
+	27,  // 35: agentshim.frontend.v1.SessionView.hibernation:type_name -> agentshim.frontend.v1.HibernationDetail
+	28,  // 36: agentshim.frontend.v1.HibernationDetail.idle_cutoff:type_name -> agentshim.frontend.v1.HibernationIdleCutoff
+	29,  // 37: agentshim.frontend.v1.HibernationDetail.forced:type_name -> agentshim.frontend.v1.HibernationForced
+	30,  // 38: agentshim.frontend.v1.HibernationDetail.cache_expired:type_name -> agentshim.frontend.v1.HibernationCacheExpired
+	33,  // 39: agentshim.frontend.v1.ConversationDelta.items:type_name -> agentshim.frontend.v1.ConversationItem
 	4,   // 40: agentshim.frontend.v1.ConversationItem.source:type_name -> agentshim.frontend.v1.ConversationSource
-	183, // 41: agentshim.frontend.v1.ConversationItem.assistant_message:type_name -> agentshim.data.v1.ApiAssistantMessage
-	184, // 42: agentshim.frontend.v1.ConversationItem.user_message:type_name -> agentshim.data.v1.ApiUserMessage
-	185, // 43: agentshim.frontend.v1.ConversationItem.tool_use:type_name -> agentshim.data.v1.ToolUseBlock
-	186, // 44: agentshim.frontend.v1.ConversationItem.tool_result:type_name -> agentshim.data.v1.ToolResultBlock
-	187, // 45: agentshim.frontend.v1.ConversationItem.tool_use_result:type_name -> agentshim.data.v1.ToolUseResult
-	188, // 46: agentshim.frontend.v1.ConversationItem.result:type_name -> agentshim.data.v1.ResultMessage
-	189, // 47: agentshim.frontend.v1.ConversationItem.permission:type_name -> agentshim.core.v1.PermissionItem
-	82,  // 48: agentshim.frontend.v1.ConversationItem.system_failure:type_name -> agentshim.frontend.v1.SystemFailureItem
-	190, // 49: agentshim.frontend.v1.ConversationItem.context_cleared:type_name -> agentshim.core.v1.ContextCleared
-	191, // 50: agentshim.frontend.v1.ConversationItem.context_compacted:type_name -> agentshim.core.v1.ContextCompacted
-	81,  // 51: agentshim.frontend.v1.ConversationItem.skill_body:type_name -> agentshim.frontend.v1.SkillBodyItem
-	80,  // 52: agentshim.frontend.v1.ConversationItem.session_command:type_name -> agentshim.frontend.v1.SessionCommandItem
-	50,  // 53: agentshim.frontend.v1.ConversationItem.token_utilization:type_name -> agentshim.frontend.v1.TokenUtilization
-	33,  // 54: agentshim.frontend.v1.ConversationItem.turn_accounting:type_name -> agentshim.frontend.v1.TurnAccounting
-	192, // 55: agentshim.frontend.v1.TurnAccounting.runtime:type_name -> agentshim.core.v1.QueryRuntimeIdentity
-	34,  // 56: agentshim.frontend.v1.TurnAccounting.timing:type_name -> agentshim.frontend.v1.TurnAccountingTiming
-	193, // 57: agentshim.frontend.v1.TurnAccounting.usage_at_start:type_name -> agentshim.core.v1.AccountUsageObservation
-	193, // 58: agentshim.frontend.v1.TurnAccounting.usage_at_end:type_name -> agentshim.core.v1.AccountUsageObservation
-	50,  // 59: agentshim.frontend.v1.TurnAccounting.responses:type_name -> agentshim.frontend.v1.TokenUtilization
-	35,  // 60: agentshim.frontend.v1.TurnAccounting.reconciliation:type_name -> agentshim.frontend.v1.TokenUsageReconciliation
-	36,  // 61: agentshim.frontend.v1.TurnAccounting.complete:type_name -> agentshim.frontend.v1.TurnAccountingComplete
-	37,  // 62: agentshim.frontend.v1.TurnAccounting.invalid:type_name -> agentshim.frontend.v1.TurnAccountingInvalid
-	78,  // 63: agentshim.frontend.v1.TokenUsageReconciliation.response_all_agents:type_name -> agentshim.frontend.v1.TokenUsageTotals
-	78,  // 64: agentshim.frontend.v1.TokenUsageReconciliation.response_main_agent:type_name -> agentshim.frontend.v1.TokenUsageTotals
-	78,  // 65: agentshim.frontend.v1.TokenUsageReconciliation.result_main_agent:type_name -> agentshim.frontend.v1.TokenUsageTotals
-	77,  // 66: agentshim.frontend.v1.TokenUsageReconciliation.response_models:type_name -> agentshim.frontend.v1.ModelTokenUtilization
-	77,  // 67: agentshim.frontend.v1.TokenUsageReconciliation.result_models:type_name -> agentshim.frontend.v1.ModelTokenUtilization
-	38,  // 68: agentshim.frontend.v1.TurnAccountingInvalid.problems:type_name -> agentshim.frontend.v1.TurnAccountingProblem
-	39,  // 69: agentshim.frontend.v1.TurnAccountingProblem.missing_usage_boundary:type_name -> agentshim.frontend.v1.MissingUsageBoundary
-	42,  // 70: agentshim.frontend.v1.TurnAccountingProblem.window_reset:type_name -> agentshim.frontend.v1.UsageWindowReset
-	43,  // 71: agentshim.frontend.v1.TurnAccountingProblem.token_ledger_mismatch:type_name -> agentshim.frontend.v1.TokenLedgerMismatch
-	44,  // 72: agentshim.frontend.v1.TurnAccountingProblem.runtime_identity_incomplete:type_name -> agentshim.frontend.v1.RuntimeIdentityIncomplete
-	45,  // 73: agentshim.frontend.v1.TurnAccountingProblem.unmodeled_usage_fields:type_name -> agentshim.frontend.v1.UnmodeledUsageFields
-	46,  // 74: agentshim.frontend.v1.TurnAccountingProblem.telemetry_record_missing:type_name -> agentshim.frontend.v1.TelemetryRecordMissing
-	40,  // 75: agentshim.frontend.v1.MissingUsageBoundary.turn_start:type_name -> agentshim.frontend.v1.MissingUsageBoundaryTurnStart
-	41,  // 76: agentshim.frontend.v1.MissingUsageBoundary.turn_end:type_name -> agentshim.frontend.v1.MissingUsageBoundaryTurnEnd
-	47,  // 77: agentshim.frontend.v1.TelemetryRecordMissing.query_lifecycle:type_name -> agentshim.frontend.v1.TelemetryRecordMissingQueryLifecycle
-	48,  // 78: agentshim.frontend.v1.TelemetryRecordMissing.response_usage:type_name -> agentshim.frontend.v1.TelemetryRecordMissingResponseUsage
-	49,  // 79: agentshim.frontend.v1.TelemetryRecordMissing.persistence_receipt:type_name -> agentshim.frontend.v1.TelemetryRecordMissingPersistenceReceipt
-	51,  // 80: agentshim.frontend.v1.TokenUtilization.main_agent:type_name -> agentshim.frontend.v1.TokenUtilizationMainAgent
-	52,  // 81: agentshim.frontend.v1.TokenUtilization.subagent:type_name -> agentshim.frontend.v1.TokenUtilizationSubagent
-	57,  // 82: agentshim.frontend.v1.TokenUtilization.usage:type_name -> agentshim.frontend.v1.VendorTokenUsage
-	53,  // 83: agentshim.frontend.v1.TokenUtilization.response_timing:type_name -> agentshim.frontend.v1.TokenResponseTiming
-	55,  // 84: agentshim.frontend.v1.TokenUsage.input_hits:type_name -> agentshim.frontend.v1.TokenCacheHits
-	56,  // 85: agentshim.frontend.v1.TokenUsage.input_misses:type_name -> agentshim.frontend.v1.TokenCacheMisses
-	58,  // 86: agentshim.frontend.v1.VendorTokenUsage.cache_creation:type_name -> agentshim.frontend.v1.TokenCacheCreation
-	59,  // 87: agentshim.frontend.v1.VendorTokenUsage.server_tool_use:type_name -> agentshim.frontend.v1.TokenServerToolUse
-	60,  // 88: agentshim.frontend.v1.VendorTokenUsage.output_details:type_name -> agentshim.frontend.v1.TokenOutputDetails
-	62,  // 89: agentshim.frontend.v1.VendorTokenUsage.iterations:type_name -> agentshim.frontend.v1.TokenUsageIteration
-	67,  // 90: agentshim.frontend.v1.VendorTokenUsage.cache_diagnostic:type_name -> agentshim.frontend.v1.TokenCacheDiagnostic
-	61,  // 91: agentshim.frontend.v1.VendorTokenUsage.cache_rates:type_name -> agentshim.frontend.v1.TokenCacheRates
-	194, // 92: agentshim.frontend.v1.VendorTokenUsage.fallback_credit:type_name -> google.protobuf.Struct
-	194, // 93: agentshim.frontend.v1.VendorTokenUsage.unmodeled_usage:type_name -> google.protobuf.Struct
-	195, // 94: agentshim.frontend.v1.VendorTokenUsage.raw_usage:type_name -> agentshim.data.v1.ApiUsage
-	63,  // 95: agentshim.frontend.v1.TokenUsageIteration.sampling:type_name -> agentshim.frontend.v1.TokenUsageIterationSampling
-	64,  // 96: agentshim.frontend.v1.TokenUsageIteration.compaction:type_name -> agentshim.frontend.v1.TokenUsageIterationCompaction
-	65,  // 97: agentshim.frontend.v1.TokenUsageIteration.advisor:type_name -> agentshim.frontend.v1.TokenUsageIterationAdvisor
-	66,  // 98: agentshim.frontend.v1.TokenUsageIteration.fallback:type_name -> agentshim.frontend.v1.TokenUsageIterationFallback
-	58,  // 99: agentshim.frontend.v1.TokenUsageIterationSampling.cache_creation:type_name -> agentshim.frontend.v1.TokenCacheCreation
-	58,  // 100: agentshim.frontend.v1.TokenUsageIterationCompaction.cache_creation:type_name -> agentshim.frontend.v1.TokenCacheCreation
-	58,  // 101: agentshim.frontend.v1.TokenUsageIterationAdvisor.cache_creation:type_name -> agentshim.frontend.v1.TokenCacheCreation
-	58,  // 102: agentshim.frontend.v1.TokenUsageIterationFallback.cache_creation:type_name -> agentshim.frontend.v1.TokenCacheCreation
-	68,  // 103: agentshim.frontend.v1.TokenCacheDiagnostic.pending:type_name -> agentshim.frontend.v1.TokenCacheDiagnosticPending
-	69,  // 104: agentshim.frontend.v1.TokenCacheDiagnostic.model_changed:type_name -> agentshim.frontend.v1.TokenCacheDiagnosticModelChanged
-	70,  // 105: agentshim.frontend.v1.TokenCacheDiagnostic.system_changed:type_name -> agentshim.frontend.v1.TokenCacheDiagnosticSystemChanged
-	71,  // 106: agentshim.frontend.v1.TokenCacheDiagnostic.tools_changed:type_name -> agentshim.frontend.v1.TokenCacheDiagnosticToolsChanged
-	72,  // 107: agentshim.frontend.v1.TokenCacheDiagnostic.messages_changed:type_name -> agentshim.frontend.v1.TokenCacheDiagnosticMessagesChanged
-	73,  // 108: agentshim.frontend.v1.TokenCacheDiagnostic.previous_message_unavailable:type_name -> agentshim.frontend.v1.TokenCacheDiagnosticPreviousMessageUnavailable
-	74,  // 109: agentshim.frontend.v1.TokenCacheDiagnostic.diagnostics_unavailable:type_name -> agentshim.frontend.v1.TokenCacheDiagnosticDiagnosticsUnavailable
-	78,  // 110: agentshim.frontend.v1.SessionTokenUtilization.all_agents:type_name -> agentshim.frontend.v1.TokenUsageTotals
-	78,  // 111: agentshim.frontend.v1.SessionTokenUtilization.main_agent:type_name -> agentshim.frontend.v1.TokenUsageTotals
-	76,  // 112: agentshim.frontend.v1.SessionTokenUtilization.subagents:type_name -> agentshim.frontend.v1.AgentTokenUtilization
-	77,  // 113: agentshim.frontend.v1.SessionTokenUtilization.models:type_name -> agentshim.frontend.v1.ModelTokenUtilization
-	50,  // 114: agentshim.frontend.v1.SessionTokenUtilization.ungrouped_subagent_responses:type_name -> agentshim.frontend.v1.TokenUtilization
-	54,  // 115: agentshim.frontend.v1.SessionTokenUtilization.all_agents_tokens:type_name -> agentshim.frontend.v1.TokenUsage
-	54,  // 116: agentshim.frontend.v1.SessionTokenUtilization.main_agent_tokens:type_name -> agentshim.frontend.v1.TokenUsage
-	52,  // 117: agentshim.frontend.v1.AgentTokenUtilization.agent:type_name -> agentshim.frontend.v1.TokenUtilizationSubagent
-	78,  // 118: agentshim.frontend.v1.AgentTokenUtilization.totals:type_name -> agentshim.frontend.v1.TokenUsageTotals
-	77,  // 119: agentshim.frontend.v1.AgentTokenUtilization.models:type_name -> agentshim.frontend.v1.ModelTokenUtilization
-	54,  // 120: agentshim.frontend.v1.AgentTokenUtilization.tokens:type_name -> agentshim.frontend.v1.TokenUsage
-	78,  // 121: agentshim.frontend.v1.ModelTokenUtilization.totals:type_name -> agentshim.frontend.v1.TokenUsageTotals
-	58,  // 122: agentshim.frontend.v1.TokenUsageTotals.cache_creation:type_name -> agentshim.frontend.v1.TokenCacheCreation
-	59,  // 123: agentshim.frontend.v1.TokenUsageTotals.server_tool_use:type_name -> agentshim.frontend.v1.TokenServerToolUse
-	60,  // 124: agentshim.frontend.v1.TokenUsageTotals.output_details:type_name -> agentshim.frontend.v1.TokenOutputDetails
-	61,  // 125: agentshim.frontend.v1.TokenUsageTotals.cache_rates:type_name -> agentshim.frontend.v1.TokenCacheRates
-	79,  // 126: agentshim.frontend.v1.TokenUsageTotals.timing:type_name -> agentshim.frontend.v1.TokenTimingTotals
+	184, // 41: agentshim.frontend.v1.ConversationItem.assistant_message:type_name -> agentshim.data.v1.ApiAssistantMessage
+	185, // 42: agentshim.frontend.v1.ConversationItem.user_message:type_name -> agentshim.data.v1.ApiUserMessage
+	186, // 43: agentshim.frontend.v1.ConversationItem.tool_use:type_name -> agentshim.data.v1.ToolUseBlock
+	187, // 44: agentshim.frontend.v1.ConversationItem.tool_result:type_name -> agentshim.data.v1.ToolResultBlock
+	188, // 45: agentshim.frontend.v1.ConversationItem.tool_use_result:type_name -> agentshim.data.v1.ToolUseResult
+	189, // 46: agentshim.frontend.v1.ConversationItem.result:type_name -> agentshim.data.v1.ResultMessage
+	190, // 47: agentshim.frontend.v1.ConversationItem.permission:type_name -> agentshim.core.v1.PermissionItem
+	83,  // 48: agentshim.frontend.v1.ConversationItem.system_failure:type_name -> agentshim.frontend.v1.SystemFailureItem
+	191, // 49: agentshim.frontend.v1.ConversationItem.context_cleared:type_name -> agentshim.core.v1.ContextCleared
+	192, // 50: agentshim.frontend.v1.ConversationItem.context_compacted:type_name -> agentshim.core.v1.ContextCompacted
+	82,  // 51: agentshim.frontend.v1.ConversationItem.skill_body:type_name -> agentshim.frontend.v1.SkillBodyItem
+	81,  // 52: agentshim.frontend.v1.ConversationItem.session_command:type_name -> agentshim.frontend.v1.SessionCommandItem
+	51,  // 53: agentshim.frontend.v1.ConversationItem.token_utilization:type_name -> agentshim.frontend.v1.TokenUtilization
+	34,  // 54: agentshim.frontend.v1.ConversationItem.turn_accounting:type_name -> agentshim.frontend.v1.TurnAccounting
+	193, // 55: agentshim.frontend.v1.TurnAccounting.runtime:type_name -> agentshim.core.v1.QueryRuntimeIdentity
+	35,  // 56: agentshim.frontend.v1.TurnAccounting.timing:type_name -> agentshim.frontend.v1.TurnAccountingTiming
+	194, // 57: agentshim.frontend.v1.TurnAccounting.usage_at_start:type_name -> agentshim.core.v1.AccountUsageObservation
+	194, // 58: agentshim.frontend.v1.TurnAccounting.usage_at_end:type_name -> agentshim.core.v1.AccountUsageObservation
+	51,  // 59: agentshim.frontend.v1.TurnAccounting.responses:type_name -> agentshim.frontend.v1.TokenUtilization
+	36,  // 60: agentshim.frontend.v1.TurnAccounting.reconciliation:type_name -> agentshim.frontend.v1.TokenUsageReconciliation
+	37,  // 61: agentshim.frontend.v1.TurnAccounting.complete:type_name -> agentshim.frontend.v1.TurnAccountingComplete
+	38,  // 62: agentshim.frontend.v1.TurnAccounting.invalid:type_name -> agentshim.frontend.v1.TurnAccountingInvalid
+	79,  // 63: agentshim.frontend.v1.TokenUsageReconciliation.response_all_agents:type_name -> agentshim.frontend.v1.TokenUsageTotals
+	79,  // 64: agentshim.frontend.v1.TokenUsageReconciliation.response_main_agent:type_name -> agentshim.frontend.v1.TokenUsageTotals
+	79,  // 65: agentshim.frontend.v1.TokenUsageReconciliation.result_main_agent:type_name -> agentshim.frontend.v1.TokenUsageTotals
+	78,  // 66: agentshim.frontend.v1.TokenUsageReconciliation.response_models:type_name -> agentshim.frontend.v1.ModelTokenUtilization
+	78,  // 67: agentshim.frontend.v1.TokenUsageReconciliation.result_models:type_name -> agentshim.frontend.v1.ModelTokenUtilization
+	39,  // 68: agentshim.frontend.v1.TurnAccountingInvalid.problems:type_name -> agentshim.frontend.v1.TurnAccountingProblem
+	40,  // 69: agentshim.frontend.v1.TurnAccountingProblem.missing_usage_boundary:type_name -> agentshim.frontend.v1.MissingUsageBoundary
+	43,  // 70: agentshim.frontend.v1.TurnAccountingProblem.window_reset:type_name -> agentshim.frontend.v1.UsageWindowReset
+	44,  // 71: agentshim.frontend.v1.TurnAccountingProblem.token_ledger_mismatch:type_name -> agentshim.frontend.v1.TokenLedgerMismatch
+	45,  // 72: agentshim.frontend.v1.TurnAccountingProblem.runtime_identity_incomplete:type_name -> agentshim.frontend.v1.RuntimeIdentityIncomplete
+	46,  // 73: agentshim.frontend.v1.TurnAccountingProblem.unmodeled_usage_fields:type_name -> agentshim.frontend.v1.UnmodeledUsageFields
+	47,  // 74: agentshim.frontend.v1.TurnAccountingProblem.telemetry_record_missing:type_name -> agentshim.frontend.v1.TelemetryRecordMissing
+	41,  // 75: agentshim.frontend.v1.MissingUsageBoundary.turn_start:type_name -> agentshim.frontend.v1.MissingUsageBoundaryTurnStart
+	42,  // 76: agentshim.frontend.v1.MissingUsageBoundary.turn_end:type_name -> agentshim.frontend.v1.MissingUsageBoundaryTurnEnd
+	48,  // 77: agentshim.frontend.v1.TelemetryRecordMissing.query_lifecycle:type_name -> agentshim.frontend.v1.TelemetryRecordMissingQueryLifecycle
+	49,  // 78: agentshim.frontend.v1.TelemetryRecordMissing.response_usage:type_name -> agentshim.frontend.v1.TelemetryRecordMissingResponseUsage
+	50,  // 79: agentshim.frontend.v1.TelemetryRecordMissing.persistence_receipt:type_name -> agentshim.frontend.v1.TelemetryRecordMissingPersistenceReceipt
+	52,  // 80: agentshim.frontend.v1.TokenUtilization.main_agent:type_name -> agentshim.frontend.v1.TokenUtilizationMainAgent
+	53,  // 81: agentshim.frontend.v1.TokenUtilization.subagent:type_name -> agentshim.frontend.v1.TokenUtilizationSubagent
+	58,  // 82: agentshim.frontend.v1.TokenUtilization.usage:type_name -> agentshim.frontend.v1.VendorTokenUsage
+	54,  // 83: agentshim.frontend.v1.TokenUtilization.response_timing:type_name -> agentshim.frontend.v1.TokenResponseTiming
+	56,  // 84: agentshim.frontend.v1.TokenUsage.input_hits:type_name -> agentshim.frontend.v1.TokenCacheHits
+	57,  // 85: agentshim.frontend.v1.TokenUsage.input_misses:type_name -> agentshim.frontend.v1.TokenCacheMisses
+	59,  // 86: agentshim.frontend.v1.VendorTokenUsage.cache_creation:type_name -> agentshim.frontend.v1.TokenCacheCreation
+	60,  // 87: agentshim.frontend.v1.VendorTokenUsage.server_tool_use:type_name -> agentshim.frontend.v1.TokenServerToolUse
+	61,  // 88: agentshim.frontend.v1.VendorTokenUsage.output_details:type_name -> agentshim.frontend.v1.TokenOutputDetails
+	63,  // 89: agentshim.frontend.v1.VendorTokenUsage.iterations:type_name -> agentshim.frontend.v1.TokenUsageIteration
+	68,  // 90: agentshim.frontend.v1.VendorTokenUsage.cache_diagnostic:type_name -> agentshim.frontend.v1.TokenCacheDiagnostic
+	62,  // 91: agentshim.frontend.v1.VendorTokenUsage.cache_rates:type_name -> agentshim.frontend.v1.TokenCacheRates
+	195, // 92: agentshim.frontend.v1.VendorTokenUsage.fallback_credit:type_name -> google.protobuf.Struct
+	195, // 93: agentshim.frontend.v1.VendorTokenUsage.unmodeled_usage:type_name -> google.protobuf.Struct
+	196, // 94: agentshim.frontend.v1.VendorTokenUsage.raw_usage:type_name -> agentshim.data.v1.ApiUsage
+	64,  // 95: agentshim.frontend.v1.TokenUsageIteration.sampling:type_name -> agentshim.frontend.v1.TokenUsageIterationSampling
+	65,  // 96: agentshim.frontend.v1.TokenUsageIteration.compaction:type_name -> agentshim.frontend.v1.TokenUsageIterationCompaction
+	66,  // 97: agentshim.frontend.v1.TokenUsageIteration.advisor:type_name -> agentshim.frontend.v1.TokenUsageIterationAdvisor
+	67,  // 98: agentshim.frontend.v1.TokenUsageIteration.fallback:type_name -> agentshim.frontend.v1.TokenUsageIterationFallback
+	59,  // 99: agentshim.frontend.v1.TokenUsageIterationSampling.cache_creation:type_name -> agentshim.frontend.v1.TokenCacheCreation
+	59,  // 100: agentshim.frontend.v1.TokenUsageIterationCompaction.cache_creation:type_name -> agentshim.frontend.v1.TokenCacheCreation
+	59,  // 101: agentshim.frontend.v1.TokenUsageIterationAdvisor.cache_creation:type_name -> agentshim.frontend.v1.TokenCacheCreation
+	59,  // 102: agentshim.frontend.v1.TokenUsageIterationFallback.cache_creation:type_name -> agentshim.frontend.v1.TokenCacheCreation
+	69,  // 103: agentshim.frontend.v1.TokenCacheDiagnostic.pending:type_name -> agentshim.frontend.v1.TokenCacheDiagnosticPending
+	70,  // 104: agentshim.frontend.v1.TokenCacheDiagnostic.model_changed:type_name -> agentshim.frontend.v1.TokenCacheDiagnosticModelChanged
+	71,  // 105: agentshim.frontend.v1.TokenCacheDiagnostic.system_changed:type_name -> agentshim.frontend.v1.TokenCacheDiagnosticSystemChanged
+	72,  // 106: agentshim.frontend.v1.TokenCacheDiagnostic.tools_changed:type_name -> agentshim.frontend.v1.TokenCacheDiagnosticToolsChanged
+	73,  // 107: agentshim.frontend.v1.TokenCacheDiagnostic.messages_changed:type_name -> agentshim.frontend.v1.TokenCacheDiagnosticMessagesChanged
+	74,  // 108: agentshim.frontend.v1.TokenCacheDiagnostic.previous_message_unavailable:type_name -> agentshim.frontend.v1.TokenCacheDiagnosticPreviousMessageUnavailable
+	75,  // 109: agentshim.frontend.v1.TokenCacheDiagnostic.diagnostics_unavailable:type_name -> agentshim.frontend.v1.TokenCacheDiagnosticDiagnosticsUnavailable
+	79,  // 110: agentshim.frontend.v1.SessionTokenUtilization.all_agents:type_name -> agentshim.frontend.v1.TokenUsageTotals
+	79,  // 111: agentshim.frontend.v1.SessionTokenUtilization.main_agent:type_name -> agentshim.frontend.v1.TokenUsageTotals
+	77,  // 112: agentshim.frontend.v1.SessionTokenUtilization.subagents:type_name -> agentshim.frontend.v1.AgentTokenUtilization
+	78,  // 113: agentshim.frontend.v1.SessionTokenUtilization.models:type_name -> agentshim.frontend.v1.ModelTokenUtilization
+	51,  // 114: agentshim.frontend.v1.SessionTokenUtilization.ungrouped_subagent_responses:type_name -> agentshim.frontend.v1.TokenUtilization
+	55,  // 115: agentshim.frontend.v1.SessionTokenUtilization.all_agents_tokens:type_name -> agentshim.frontend.v1.TokenUsage
+	55,  // 116: agentshim.frontend.v1.SessionTokenUtilization.main_agent_tokens:type_name -> agentshim.frontend.v1.TokenUsage
+	53,  // 117: agentshim.frontend.v1.AgentTokenUtilization.agent:type_name -> agentshim.frontend.v1.TokenUtilizationSubagent
+	79,  // 118: agentshim.frontend.v1.AgentTokenUtilization.totals:type_name -> agentshim.frontend.v1.TokenUsageTotals
+	78,  // 119: agentshim.frontend.v1.AgentTokenUtilization.models:type_name -> agentshim.frontend.v1.ModelTokenUtilization
+	55,  // 120: agentshim.frontend.v1.AgentTokenUtilization.tokens:type_name -> agentshim.frontend.v1.TokenUsage
+	79,  // 121: agentshim.frontend.v1.ModelTokenUtilization.totals:type_name -> agentshim.frontend.v1.TokenUsageTotals
+	59,  // 122: agentshim.frontend.v1.TokenUsageTotals.cache_creation:type_name -> agentshim.frontend.v1.TokenCacheCreation
+	60,  // 123: agentshim.frontend.v1.TokenUsageTotals.server_tool_use:type_name -> agentshim.frontend.v1.TokenServerToolUse
+	61,  // 124: agentshim.frontend.v1.TokenUsageTotals.output_details:type_name -> agentshim.frontend.v1.TokenOutputDetails
+	62,  // 125: agentshim.frontend.v1.TokenUsageTotals.cache_rates:type_name -> agentshim.frontend.v1.TokenCacheRates
+	80,  // 126: agentshim.frontend.v1.TokenUsageTotals.timing:type_name -> agentshim.frontend.v1.TokenTimingTotals
 	5,   // 127: agentshim.frontend.v1.SessionCommandItem.command:type_name -> agentshim.frontend.v1.SessionCommand
 	6,   // 128: agentshim.frontend.v1.SystemFailureItem.error_class:type_name -> agentshim.frontend.v1.ErrorClass
-	84,  // 129: agentshim.frontend.v1.SystemFailureItem.session_resume:type_name -> agentshim.frontend.v1.SessionResumeFailure
-	83,  // 130: agentshim.frontend.v1.SystemFailureItem.query_termination:type_name -> agentshim.frontend.v1.QueryTerminationFailure
-	196, // 131: agentshim.frontend.v1.QueryTerminationFailure.vendor_session_identity_unavailable:type_name -> agentshim.core.v1.VendorSessionIdentityUnavailable
-	197, // 132: agentshim.frontend.v1.QueryTerminationFailure.unexpected_eof:type_name -> agentshim.core.v1.UnexpectedQueryEof
-	198, // 133: agentshim.frontend.v1.QueryTerminationFailure.iterator_failure:type_name -> agentshim.core.v1.QueryIteratorFailure
-	199, // 134: agentshim.frontend.v1.QueryTerminationFailure.startup_failure:type_name -> agentshim.core.v1.QueryStartupFailure
-	85,  // 135: agentshim.frontend.v1.SessionResumeFailure.create:type_name -> agentshim.frontend.v1.SessionResumeFailureCreate
-	86,  // 136: agentshim.frontend.v1.SessionResumeFailure.automatic_restore:type_name -> agentshim.frontend.v1.SessionResumeFailureAutomaticRestore
-	87,  // 137: agentshim.frontend.v1.SessionResumeFailure.transcript_unavailable:type_name -> agentshim.frontend.v1.SessionResumeFailureTranscriptUnavailable
-	88,  // 138: agentshim.frontend.v1.SessionResumeFailure.identity_mismatch:type_name -> agentshim.frontend.v1.SessionResumeFailureIdentityMismatch
-	83,  // 139: agentshim.frontend.v1.SessionResumeFailure.query_termination:type_name -> agentshim.frontend.v1.QueryTerminationFailure
-	89,  // 140: agentshim.frontend.v1.SessionResumeFailure.bring_up_failure:type_name -> agentshim.frontend.v1.SessionResumeFailureBringUpFailure
-	200, // 141: agentshim.frontend.v1.TypingDelta.delta:type_name -> agentshim.core.v1.ContentDelta
-	201, // 142: agentshim.frontend.v1.HeartbeatView.progress:type_name -> agentshim.core.v1.HeartbeatProgress
-	202, // 143: agentshim.frontend.v1.SessionInitView.init:type_name -> agentshim.data.v1.SystemInit
-	93,  // 144: agentshim.frontend.v1.TaskCatalog.tasks:type_name -> agentshim.frontend.v1.TaskEntry
-	125, // 145: agentshim.frontend.v1.FrontendCommand.submit_prompt:type_name -> agentshim.frontend.v1.SubmitPromptCmd
-	126, // 146: agentshim.frontend.v1.FrontendCommand.interrupt:type_name -> agentshim.frontend.v1.InterruptCmd
-	127, // 147: agentshim.frontend.v1.FrontendCommand.permission_answer:type_name -> agentshim.frontend.v1.PermissionAnswerCmd
-	128, // 148: agentshim.frontend.v1.FrontendCommand.merge_workspace:type_name -> agentshim.frontend.v1.MergeWorkspaceCmd
-	129, // 149: agentshim.frontend.v1.FrontendCommand.close_workspace:type_name -> agentshim.frontend.v1.CloseWorkspaceCmd
-	130, // 150: agentshim.frontend.v1.FrontendCommand.open_workspace:type_name -> agentshim.frontend.v1.OpenWorkspaceCmd
-	131, // 151: agentshim.frontend.v1.FrontendCommand.resync:type_name -> agentshim.frontend.v1.ResyncCmd
-	122, // 152: agentshim.frontend.v1.FrontendCommand.create_session:type_name -> agentshim.frontend.v1.CreateSessionCmd
-	124, // 153: agentshim.frontend.v1.FrontendCommand.delete_session:type_name -> agentshim.frontend.v1.DeleteSessionCmd
-	106, // 154: agentshim.frontend.v1.FrontendCommand.shutdown:type_name -> agentshim.frontend.v1.ShutdownCmd
-	105, // 155: agentshim.frontend.v1.FrontendCommand.client_log:type_name -> agentshim.frontend.v1.ClientLogCmd
-	102, // 156: agentshim.frontend.v1.FrontendCommand.queue_force:type_name -> agentshim.frontend.v1.QueueForceCmd
-	103, // 157: agentshim.frontend.v1.FrontendCommand.queue_accept:type_name -> agentshim.frontend.v1.QueueAcceptCmd
-	104, // 158: agentshim.frontend.v1.FrontendCommand.queue_cancel:type_name -> agentshim.frontend.v1.QueueCancelCmd
-	132, // 159: agentshim.frontend.v1.FrontendCommand.create_workspace:type_name -> agentshim.frontend.v1.CreateWorkspaceCmd
-	134, // 160: agentshim.frontend.v1.FrontendCommand.workspace_materialized:type_name -> agentshim.frontend.v1.WorkspaceMaterializedCmd
-	143, // 161: agentshim.frontend.v1.FrontendCommand.host_action_completed:type_name -> agentshim.frontend.v1.HostActionCompletedCmd
-	120, // 162: agentshim.frontend.v1.FrontendCommand.daemon_health:type_name -> agentshim.frontend.v1.DaemonHealthCmd
-	121, // 163: agentshim.frontend.v1.FrontendCommand.session_health:type_name -> agentshim.frontend.v1.SessionHealthCmd
-	115, // 164: agentshim.frontend.v1.FrontendCommand.restart_session:type_name -> agentshim.frontend.v1.RestartSessionCmd
-	123, // 165: agentshim.frontend.v1.FrontendCommand.set_model:type_name -> agentshim.frontend.v1.SetModelCmd
-	96,  // 166: agentshim.frontend.v1.FrontendCommand.publish_workspace_roster:type_name -> agentshim.frontend.v1.PublishWorkspaceRosterCmd
-	113, // 167: agentshim.frontend.v1.FrontendCommand.schedule_shutdown:type_name -> agentshim.frontend.v1.ScheduleShutdownCmd
-	114, // 168: agentshim.frontend.v1.FrontendCommand.cancel_scheduled_shutdown:type_name -> agentshim.frontend.v1.CancelScheduledShutdownCmd
-	116, // 169: agentshim.frontend.v1.FrontendCommand.hibernate_workspace:type_name -> agentshim.frontend.v1.HibernateWorkspaceCmd
-	117, // 170: agentshim.frontend.v1.FrontendCommand.revive_session:type_name -> agentshim.frontend.v1.ReviveSessionCmd
-	152, // 171: agentshim.frontend.v1.PublishWorkspaceRosterCmd.roster:type_name -> agentshim.frontend.v1.WorkspaceRoster
+	85,  // 129: agentshim.frontend.v1.SystemFailureItem.session_resume:type_name -> agentshim.frontend.v1.SessionResumeFailure
+	84,  // 130: agentshim.frontend.v1.SystemFailureItem.query_termination:type_name -> agentshim.frontend.v1.QueryTerminationFailure
+	197, // 131: agentshim.frontend.v1.QueryTerminationFailure.vendor_session_identity_unavailable:type_name -> agentshim.core.v1.VendorSessionIdentityUnavailable
+	198, // 132: agentshim.frontend.v1.QueryTerminationFailure.unexpected_eof:type_name -> agentshim.core.v1.UnexpectedQueryEof
+	199, // 133: agentshim.frontend.v1.QueryTerminationFailure.iterator_failure:type_name -> agentshim.core.v1.QueryIteratorFailure
+	200, // 134: agentshim.frontend.v1.QueryTerminationFailure.startup_failure:type_name -> agentshim.core.v1.QueryStartupFailure
+	86,  // 135: agentshim.frontend.v1.SessionResumeFailure.create:type_name -> agentshim.frontend.v1.SessionResumeFailureCreate
+	87,  // 136: agentshim.frontend.v1.SessionResumeFailure.automatic_restore:type_name -> agentshim.frontend.v1.SessionResumeFailureAutomaticRestore
+	88,  // 137: agentshim.frontend.v1.SessionResumeFailure.transcript_unavailable:type_name -> agentshim.frontend.v1.SessionResumeFailureTranscriptUnavailable
+	89,  // 138: agentshim.frontend.v1.SessionResumeFailure.identity_mismatch:type_name -> agentshim.frontend.v1.SessionResumeFailureIdentityMismatch
+	84,  // 139: agentshim.frontend.v1.SessionResumeFailure.query_termination:type_name -> agentshim.frontend.v1.QueryTerminationFailure
+	90,  // 140: agentshim.frontend.v1.SessionResumeFailure.bring_up_failure:type_name -> agentshim.frontend.v1.SessionResumeFailureBringUpFailure
+	201, // 141: agentshim.frontend.v1.TypingDelta.delta:type_name -> agentshim.core.v1.ContentDelta
+	202, // 142: agentshim.frontend.v1.HeartbeatView.progress:type_name -> agentshim.core.v1.HeartbeatProgress
+	203, // 143: agentshim.frontend.v1.SessionInitView.init:type_name -> agentshim.data.v1.SystemInit
+	94,  // 144: agentshim.frontend.v1.TaskCatalog.tasks:type_name -> agentshim.frontend.v1.TaskEntry
+	126, // 145: agentshim.frontend.v1.FrontendCommand.submit_prompt:type_name -> agentshim.frontend.v1.SubmitPromptCmd
+	127, // 146: agentshim.frontend.v1.FrontendCommand.interrupt:type_name -> agentshim.frontend.v1.InterruptCmd
+	128, // 147: agentshim.frontend.v1.FrontendCommand.permission_answer:type_name -> agentshim.frontend.v1.PermissionAnswerCmd
+	129, // 148: agentshim.frontend.v1.FrontendCommand.merge_workspace:type_name -> agentshim.frontend.v1.MergeWorkspaceCmd
+	130, // 149: agentshim.frontend.v1.FrontendCommand.close_workspace:type_name -> agentshim.frontend.v1.CloseWorkspaceCmd
+	131, // 150: agentshim.frontend.v1.FrontendCommand.open_workspace:type_name -> agentshim.frontend.v1.OpenWorkspaceCmd
+	132, // 151: agentshim.frontend.v1.FrontendCommand.resync:type_name -> agentshim.frontend.v1.ResyncCmd
+	123, // 152: agentshim.frontend.v1.FrontendCommand.create_session:type_name -> agentshim.frontend.v1.CreateSessionCmd
+	125, // 153: agentshim.frontend.v1.FrontendCommand.delete_session:type_name -> agentshim.frontend.v1.DeleteSessionCmd
+	107, // 154: agentshim.frontend.v1.FrontendCommand.shutdown:type_name -> agentshim.frontend.v1.ShutdownCmd
+	106, // 155: agentshim.frontend.v1.FrontendCommand.client_log:type_name -> agentshim.frontend.v1.ClientLogCmd
+	103, // 156: agentshim.frontend.v1.FrontendCommand.queue_force:type_name -> agentshim.frontend.v1.QueueForceCmd
+	104, // 157: agentshim.frontend.v1.FrontendCommand.queue_accept:type_name -> agentshim.frontend.v1.QueueAcceptCmd
+	105, // 158: agentshim.frontend.v1.FrontendCommand.queue_cancel:type_name -> agentshim.frontend.v1.QueueCancelCmd
+	133, // 159: agentshim.frontend.v1.FrontendCommand.create_workspace:type_name -> agentshim.frontend.v1.CreateWorkspaceCmd
+	135, // 160: agentshim.frontend.v1.FrontendCommand.workspace_materialized:type_name -> agentshim.frontend.v1.WorkspaceMaterializedCmd
+	144, // 161: agentshim.frontend.v1.FrontendCommand.host_action_completed:type_name -> agentshim.frontend.v1.HostActionCompletedCmd
+	121, // 162: agentshim.frontend.v1.FrontendCommand.daemon_health:type_name -> agentshim.frontend.v1.DaemonHealthCmd
+	122, // 163: agentshim.frontend.v1.FrontendCommand.session_health:type_name -> agentshim.frontend.v1.SessionHealthCmd
+	116, // 164: agentshim.frontend.v1.FrontendCommand.restart_session:type_name -> agentshim.frontend.v1.RestartSessionCmd
+	124, // 165: agentshim.frontend.v1.FrontendCommand.set_model:type_name -> agentshim.frontend.v1.SetModelCmd
+	97,  // 166: agentshim.frontend.v1.FrontendCommand.publish_workspace_roster:type_name -> agentshim.frontend.v1.PublishWorkspaceRosterCmd
+	114, // 167: agentshim.frontend.v1.FrontendCommand.schedule_shutdown:type_name -> agentshim.frontend.v1.ScheduleShutdownCmd
+	115, // 168: agentshim.frontend.v1.FrontendCommand.cancel_scheduled_shutdown:type_name -> agentshim.frontend.v1.CancelScheduledShutdownCmd
+	117, // 169: agentshim.frontend.v1.FrontendCommand.hibernate_workspace:type_name -> agentshim.frontend.v1.HibernateWorkspaceCmd
+	118, // 170: agentshim.frontend.v1.FrontendCommand.revive_session:type_name -> agentshim.frontend.v1.ReviveSessionCmd
+	153, // 171: agentshim.frontend.v1.PublishWorkspaceRosterCmd.roster:type_name -> agentshim.frontend.v1.WorkspaceRoster
 	7,   // 172: agentshim.frontend.v1.QueueEntry.classification:type_name -> agentshim.frontend.v1.QueueClassification
-	98,  // 173: agentshim.frontend.v1.QueueEntry.shutdown_hold:type_name -> agentshim.frontend.v1.QueueEntryShutdownHold
-	99,  // 174: agentshim.frontend.v1.QueueEntry.keep_alive_hold:type_name -> agentshim.frontend.v1.QueueEntryKeepAliveHold
-	100, // 175: agentshim.frontend.v1.QueueEntry.revival_hold:type_name -> agentshim.frontend.v1.QueueEntryRevivalHold
-	97,  // 176: agentshim.frontend.v1.QueueView.entries:type_name -> agentshim.frontend.v1.QueueEntry
+	99,  // 173: agentshim.frontend.v1.QueueEntry.shutdown_hold:type_name -> agentshim.frontend.v1.QueueEntryShutdownHold
+	100, // 174: agentshim.frontend.v1.QueueEntry.keep_alive_hold:type_name -> agentshim.frontend.v1.QueueEntryKeepAliveHold
+	101, // 175: agentshim.frontend.v1.QueueEntry.revival_hold:type_name -> agentshim.frontend.v1.QueueEntryRevivalHold
+	98,  // 176: agentshim.frontend.v1.QueueView.entries:type_name -> agentshim.frontend.v1.QueueEntry
 	8,   // 177: agentshim.frontend.v1.ClientLogCmd.level:type_name -> agentshim.frontend.v1.ClientLogLevel
-	194, // 178: agentshim.frontend.v1.ClientLogCmd.context:type_name -> google.protobuf.Struct
-	108, // 179: agentshim.frontend.v1.ShutdownScheduleView.idle:type_name -> agentshim.frontend.v1.ShutdownScheduleIdle
-	109, // 180: agentshim.frontend.v1.ShutdownScheduleView.draining:type_name -> agentshim.frontend.v1.ShutdownScheduleDraining
-	110, // 181: agentshim.frontend.v1.ShutdownScheduleDraining.holds:type_name -> agentshim.frontend.v1.ShutdownHold
-	111, // 182: agentshim.frontend.v1.ShutdownHold.turn:type_name -> agentshim.frontend.v1.ShutdownHoldTurn
-	112, // 183: agentshim.frontend.v1.ShutdownHold.tasks:type_name -> agentshim.frontend.v1.ShutdownHoldTasks
-	118, // 184: agentshim.frontend.v1.ReviveSessionCmd.compact_first:type_name -> agentshim.frontend.v1.ReviveCompactFirst
-	119, // 185: agentshim.frontend.v1.ReviveSessionCmd.direct:type_name -> agentshim.frontend.v1.ReviveDirect
-	9,   // 186: agentshim.frontend.v1.CreateSessionCmd.resume_mode:type_name -> agentshim.frontend.v1.ResumeMode
-	203, // 187: agentshim.frontend.v1.SubmitPromptCmd.prompt_origin:type_name -> agentshim.core.v1.PromptOrigin
-	194, // 188: agentshim.frontend.v1.PermissionAnswerCmd.updated_input:type_name -> google.protobuf.Struct
-	137, // 189: agentshim.frontend.v1.HostAction.switch_workspace:type_name -> agentshim.frontend.v1.HostSwitchWorkspace
-	138, // 190: agentshim.frontend.v1.HostAction.set_repository_fold:type_name -> agentshim.frontend.v1.HostSetRepositoryFold
-	139, // 191: agentshim.frontend.v1.HostAction.set_sidebar_view:type_name -> agentshim.frontend.v1.HostSetSidebarView
-	140, // 192: agentshim.frontend.v1.HostAction.task_create:type_name -> agentshim.frontend.v1.HostTaskCreate
-	141, // 193: agentshim.frontend.v1.HostAction.task_toggle_done:type_name -> agentshim.frontend.v1.HostTaskById
-	141, // 194: agentshim.frontend.v1.HostAction.task_open:type_name -> agentshim.frontend.v1.HostTaskById
-	141, // 195: agentshim.frontend.v1.HostAction.task_add_workspace:type_name -> agentshim.frontend.v1.HostTaskById
-	142, // 196: agentshim.frontend.v1.HostAction.legacy_command:type_name -> agentshim.frontend.v1.HostLegacyCommand
-	136, // 197: agentshim.frontend.v1.HostAction.workspace_create_failed:type_name -> agentshim.frontend.v1.HostWorkspaceCreateFailed
-	194, // 198: agentshim.frontend.v1.HostLegacyCommand.payload:type_name -> google.protobuf.Struct
-	82,  // 199: agentshim.frontend.v1.CommandAck.failure:type_name -> agentshim.frontend.v1.SystemFailureItem
-	145, // 200: agentshim.frontend.v1.CommandAck.interrupt_confirm_required:type_name -> agentshim.frontend.v1.InterruptConfirmRequired
-	204, // 201: agentshim.frontend.v1.InterruptWindow.outcome:type_name -> agentshim.core.v1.InterruptOutcome
-	0,   // 202: agentshim.frontend.v1.ProgressView.state:type_name -> agentshim.frontend.v1.RenderState
-	146, // 203: agentshim.frontend.v1.ProgressView.compacting:type_name -> agentshim.frontend.v1.ProgressWindow
-	146, // 204: agentshim.frontend.v1.ProgressView.retrying:type_name -> agentshim.frontend.v1.ProgressWindow
-	146, // 205: agentshim.frontend.v1.ProgressView.authenticating:type_name -> agentshim.frontend.v1.ProgressWindow
-	146, // 206: agentshim.frontend.v1.ProgressView.hook:type_name -> agentshim.frontend.v1.ProgressWindow
-	147, // 207: agentshim.frontend.v1.ProgressView.rate_limited:type_name -> agentshim.frontend.v1.RateLimitWindow
-	147, // 208: agentshim.frontend.v1.ProgressView.rate_limited_weekly:type_name -> agentshim.frontend.v1.RateLimitWindow
-	146, // 209: agentshim.frontend.v1.ProgressView.blocked:type_name -> agentshim.frontend.v1.ProgressWindow
-	148, // 210: agentshim.frontend.v1.ProgressView.interrupt:type_name -> agentshim.frontend.v1.InterruptWindow
-	82,  // 211: agentshim.frontend.v1.ProgressView.failure:type_name -> agentshim.frontend.v1.SystemFailureItem
-	150, // 212: agentshim.frontend.v1.ProgressView.expensive_turn:type_name -> agentshim.frontend.v1.ContextCostAlert
-	203, // 213: agentshim.frontend.v1.ContextCostAlert.prompt_origin:type_name -> agentshim.core.v1.PromptOrigin
-	15,  // 214: agentshim.frontend.v1.StateSnapshot.workspaces:type_name -> agentshim.frontend.v1.WorkspaceState
-	25,  // 215: agentshim.frontend.v1.StateSnapshot.sessions:type_name -> agentshim.frontend.v1.SessionView
-	94,  // 216: agentshim.frontend.v1.StateSnapshot.catalogs:type_name -> agentshim.frontend.v1.TaskCatalog
-	12,  // 217: agentshim.frontend.v1.StateSnapshot.daemon:type_name -> agentshim.frontend.v1.DaemonView
-	92,  // 218: agentshim.frontend.v1.StateSnapshot.inits:type_name -> agentshim.frontend.v1.SessionInitView
-	101, // 219: agentshim.frontend.v1.StateSnapshot.queues:type_name -> agentshim.frontend.v1.QueueView
-	149, // 220: agentshim.frontend.v1.StateSnapshot.progress:type_name -> agentshim.frontend.v1.ProgressView
-	133, // 221: agentshim.frontend.v1.StateSnapshot.workspace_available:type_name -> agentshim.frontend.v1.WorkspaceAvailable
-	135, // 222: agentshim.frontend.v1.StateSnapshot.host_actions:type_name -> agentshim.frontend.v1.HostAction
-	107, // 223: agentshim.frontend.v1.StateSnapshot.shutdown_schedule:type_name -> agentshim.frontend.v1.ShutdownScheduleView
-	153, // 224: agentshim.frontend.v1.WorkspaceRoster.repository:type_name -> agentshim.frontend.v1.RosterRepositoryView
-	154, // 225: agentshim.frontend.v1.WorkspaceRoster.task:type_name -> agentshim.frontend.v1.RosterTaskView
-	157, // 226: agentshim.frontend.v1.WorkspaceRoster.recently_merged:type_name -> agentshim.frontend.v1.RosterSection
-	155, // 227: agentshim.frontend.v1.RosterRepositoryView.sections:type_name -> agentshim.frontend.v1.RosterRepoSection
-	156, // 228: agentshim.frontend.v1.RosterTaskView.sections:type_name -> agentshim.frontend.v1.RosterTaskSection
-	158, // 229: agentshim.frontend.v1.RosterRepoSection.rows:type_name -> agentshim.frontend.v1.RosterRow
-	158, // 230: agentshim.frontend.v1.RosterTaskSection.rows:type_name -> agentshim.frontend.v1.RosterRow
-	158, // 231: agentshim.frontend.v1.RosterSection.rows:type_name -> agentshim.frontend.v1.RosterRow
-	159, // 232: agentshim.frontend.v1.RosterRow.submitting:type_name -> agentshim.frontend.v1.RosterRowStatusSubmitting
-	160, // 233: agentshim.frontend.v1.RosterRow.thinking:type_name -> agentshim.frontend.v1.RosterRowStatusThinking
-	161, // 234: agentshim.frontend.v1.RosterRow.clearing:type_name -> agentshim.frontend.v1.RosterRowStatusClearing
-	162, // 235: agentshim.frontend.v1.RosterRow.compacting:type_name -> agentshim.frontend.v1.RosterRowStatusCompacting
-	163, // 236: agentshim.frontend.v1.RosterRow.permission:type_name -> agentshim.frontend.v1.RosterRowStatusPermission
-	164, // 237: agentshim.frontend.v1.RosterRow.done:type_name -> agentshim.frontend.v1.RosterRowStatusDone
-	165, // 238: agentshim.frontend.v1.RosterRow.interrupted:type_name -> agentshim.frontend.v1.RosterRowStatusInterrupted
-	166, // 239: agentshim.frontend.v1.RosterRow.ready:type_name -> agentshim.frontend.v1.RosterRowStatusReady
-	167, // 240: agentshim.frontend.v1.RosterRow.idle_async:type_name -> agentshim.frontend.v1.RosterRowStatusIdleAsync
-	168, // 241: agentshim.frontend.v1.RosterRow.vendor_blocked:type_name -> agentshim.frontend.v1.RosterRowStatusVendorBlocked
-	169, // 242: agentshim.frontend.v1.RosterRow.init:type_name -> agentshim.frontend.v1.RosterRowStatusInit
-	170, // 243: agentshim.frontend.v1.RosterRow.severed:type_name -> agentshim.frontend.v1.RosterRowStatusSevered
-	171, // 244: agentshim.frontend.v1.RosterRow.hibernated:type_name -> agentshim.frontend.v1.RosterRowStatusHibernated
-	172, // 245: agentshim.frontend.v1.RosterRow.start_failed:type_name -> agentshim.frontend.v1.RosterRowStatusStartFailed
-	173, // 246: agentshim.frontend.v1.RosterRow.degraded:type_name -> agentshim.frontend.v1.RosterRowStatusDegraded
-	174, // 247: agentshim.frontend.v1.RosterRow.dead:type_name -> agentshim.frontend.v1.RosterRowStatusDead
-	175, // 248: agentshim.frontend.v1.RosterRow.merge_enqueuing:type_name -> agentshim.frontend.v1.RosterRowStatusMergeEnqueuing
-	176, // 249: agentshim.frontend.v1.RosterRow.merging:type_name -> agentshim.frontend.v1.RosterRowStatusMerging
-	177, // 250: agentshim.frontend.v1.RosterRow.merge_queued:type_name -> agentshim.frontend.v1.RosterRowStatusMergeQueued
-	178, // 251: agentshim.frontend.v1.RosterRow.merge_conflict:type_name -> agentshim.frontend.v1.RosterRowStatusMergeConflict
-	179, // 252: agentshim.frontend.v1.RosterRow.merge_failed:type_name -> agentshim.frontend.v1.RosterRowStatusMergeFailed
-	180, // 253: agentshim.frontend.v1.RosterRow.merged:type_name -> agentshim.frontend.v1.RosterRowStatusMerged
-	181, // 254: agentshim.frontend.v1.RosterRow.none:type_name -> agentshim.frontend.v1.RosterRowStatusNone
-	182, // 255: agentshim.frontend.v1.RosterRow.inactive:type_name -> agentshim.frontend.v1.RosterRowStatusInactive
-	158, // 256: agentshim.frontend.v1.RosterRow.children:type_name -> agentshim.frontend.v1.RosterRow
-	257, // [257:257] is the sub-list for method output_type
-	257, // [257:257] is the sub-list for method input_type
-	257, // [257:257] is the sub-list for extension type_name
-	257, // [257:257] is the sub-list for extension extendee
-	0,   // [0:257] is the sub-list for field type_name
+	195, // 178: agentshim.frontend.v1.ClientLogCmd.context:type_name -> google.protobuf.Struct
+	109, // 179: agentshim.frontend.v1.ShutdownScheduleView.idle:type_name -> agentshim.frontend.v1.ShutdownScheduleIdle
+	110, // 180: agentshim.frontend.v1.ShutdownScheduleView.draining:type_name -> agentshim.frontend.v1.ShutdownScheduleDraining
+	111, // 181: agentshim.frontend.v1.ShutdownScheduleDraining.holds:type_name -> agentshim.frontend.v1.ShutdownHold
+	112, // 182: agentshim.frontend.v1.ShutdownHold.turn:type_name -> agentshim.frontend.v1.ShutdownHoldTurn
+	113, // 183: agentshim.frontend.v1.ShutdownHold.tasks:type_name -> agentshim.frontend.v1.ShutdownHoldTasks
+	119, // 184: agentshim.frontend.v1.ReviveSessionCmd.compact_first:type_name -> agentshim.frontend.v1.ReviveCompactFirst
+	120, // 185: agentshim.frontend.v1.ReviveSessionCmd.direct:type_name -> agentshim.frontend.v1.ReviveDirect
+	9,   // 186: agentshim.frontend.v1.ReviveCompactFirst.scope:type_name -> agentshim.frontend.v1.CompactionScope
+	10,  // 187: agentshim.frontend.v1.CreateSessionCmd.resume_mode:type_name -> agentshim.frontend.v1.ResumeMode
+	204, // 188: agentshim.frontend.v1.SubmitPromptCmd.prompt_origin:type_name -> agentshim.core.v1.PromptOrigin
+	195, // 189: agentshim.frontend.v1.PermissionAnswerCmd.updated_input:type_name -> google.protobuf.Struct
+	138, // 190: agentshim.frontend.v1.HostAction.switch_workspace:type_name -> agentshim.frontend.v1.HostSwitchWorkspace
+	139, // 191: agentshim.frontend.v1.HostAction.set_repository_fold:type_name -> agentshim.frontend.v1.HostSetRepositoryFold
+	140, // 192: agentshim.frontend.v1.HostAction.set_sidebar_view:type_name -> agentshim.frontend.v1.HostSetSidebarView
+	141, // 193: agentshim.frontend.v1.HostAction.task_create:type_name -> agentshim.frontend.v1.HostTaskCreate
+	142, // 194: agentshim.frontend.v1.HostAction.task_toggle_done:type_name -> agentshim.frontend.v1.HostTaskById
+	142, // 195: agentshim.frontend.v1.HostAction.task_open:type_name -> agentshim.frontend.v1.HostTaskById
+	142, // 196: agentshim.frontend.v1.HostAction.task_add_workspace:type_name -> agentshim.frontend.v1.HostTaskById
+	143, // 197: agentshim.frontend.v1.HostAction.legacy_command:type_name -> agentshim.frontend.v1.HostLegacyCommand
+	137, // 198: agentshim.frontend.v1.HostAction.workspace_create_failed:type_name -> agentshim.frontend.v1.HostWorkspaceCreateFailed
+	195, // 199: agentshim.frontend.v1.HostLegacyCommand.payload:type_name -> google.protobuf.Struct
+	83,  // 200: agentshim.frontend.v1.CommandAck.failure:type_name -> agentshim.frontend.v1.SystemFailureItem
+	146, // 201: agentshim.frontend.v1.CommandAck.interrupt_confirm_required:type_name -> agentshim.frontend.v1.InterruptConfirmRequired
+	205, // 202: agentshim.frontend.v1.InterruptWindow.outcome:type_name -> agentshim.core.v1.InterruptOutcome
+	0,   // 203: agentshim.frontend.v1.ProgressView.state:type_name -> agentshim.frontend.v1.RenderState
+	147, // 204: agentshim.frontend.v1.ProgressView.compacting:type_name -> agentshim.frontend.v1.ProgressWindow
+	147, // 205: agentshim.frontend.v1.ProgressView.retrying:type_name -> agentshim.frontend.v1.ProgressWindow
+	147, // 206: agentshim.frontend.v1.ProgressView.authenticating:type_name -> agentshim.frontend.v1.ProgressWindow
+	147, // 207: agentshim.frontend.v1.ProgressView.hook:type_name -> agentshim.frontend.v1.ProgressWindow
+	148, // 208: agentshim.frontend.v1.ProgressView.rate_limited:type_name -> agentshim.frontend.v1.RateLimitWindow
+	148, // 209: agentshim.frontend.v1.ProgressView.rate_limited_weekly:type_name -> agentshim.frontend.v1.RateLimitWindow
+	147, // 210: agentshim.frontend.v1.ProgressView.blocked:type_name -> agentshim.frontend.v1.ProgressWindow
+	149, // 211: agentshim.frontend.v1.ProgressView.interrupt:type_name -> agentshim.frontend.v1.InterruptWindow
+	83,  // 212: agentshim.frontend.v1.ProgressView.failure:type_name -> agentshim.frontend.v1.SystemFailureItem
+	151, // 213: agentshim.frontend.v1.ProgressView.expensive_turn:type_name -> agentshim.frontend.v1.ContextCostAlert
+	204, // 214: agentshim.frontend.v1.ContextCostAlert.prompt_origin:type_name -> agentshim.core.v1.PromptOrigin
+	16,  // 215: agentshim.frontend.v1.StateSnapshot.workspaces:type_name -> agentshim.frontend.v1.WorkspaceState
+	26,  // 216: agentshim.frontend.v1.StateSnapshot.sessions:type_name -> agentshim.frontend.v1.SessionView
+	95,  // 217: agentshim.frontend.v1.StateSnapshot.catalogs:type_name -> agentshim.frontend.v1.TaskCatalog
+	13,  // 218: agentshim.frontend.v1.StateSnapshot.daemon:type_name -> agentshim.frontend.v1.DaemonView
+	93,  // 219: agentshim.frontend.v1.StateSnapshot.inits:type_name -> agentshim.frontend.v1.SessionInitView
+	102, // 220: agentshim.frontend.v1.StateSnapshot.queues:type_name -> agentshim.frontend.v1.QueueView
+	150, // 221: agentshim.frontend.v1.StateSnapshot.progress:type_name -> agentshim.frontend.v1.ProgressView
+	134, // 222: agentshim.frontend.v1.StateSnapshot.workspace_available:type_name -> agentshim.frontend.v1.WorkspaceAvailable
+	136, // 223: agentshim.frontend.v1.StateSnapshot.host_actions:type_name -> agentshim.frontend.v1.HostAction
+	108, // 224: agentshim.frontend.v1.StateSnapshot.shutdown_schedule:type_name -> agentshim.frontend.v1.ShutdownScheduleView
+	154, // 225: agentshim.frontend.v1.WorkspaceRoster.repository:type_name -> agentshim.frontend.v1.RosterRepositoryView
+	155, // 226: agentshim.frontend.v1.WorkspaceRoster.task:type_name -> agentshim.frontend.v1.RosterTaskView
+	158, // 227: agentshim.frontend.v1.WorkspaceRoster.recently_merged:type_name -> agentshim.frontend.v1.RosterSection
+	156, // 228: agentshim.frontend.v1.RosterRepositoryView.sections:type_name -> agentshim.frontend.v1.RosterRepoSection
+	157, // 229: agentshim.frontend.v1.RosterTaskView.sections:type_name -> agentshim.frontend.v1.RosterTaskSection
+	159, // 230: agentshim.frontend.v1.RosterRepoSection.rows:type_name -> agentshim.frontend.v1.RosterRow
+	159, // 231: agentshim.frontend.v1.RosterTaskSection.rows:type_name -> agentshim.frontend.v1.RosterRow
+	159, // 232: agentshim.frontend.v1.RosterSection.rows:type_name -> agentshim.frontend.v1.RosterRow
+	160, // 233: agentshim.frontend.v1.RosterRow.submitting:type_name -> agentshim.frontend.v1.RosterRowStatusSubmitting
+	161, // 234: agentshim.frontend.v1.RosterRow.thinking:type_name -> agentshim.frontend.v1.RosterRowStatusThinking
+	162, // 235: agentshim.frontend.v1.RosterRow.clearing:type_name -> agentshim.frontend.v1.RosterRowStatusClearing
+	163, // 236: agentshim.frontend.v1.RosterRow.compacting:type_name -> agentshim.frontend.v1.RosterRowStatusCompacting
+	164, // 237: agentshim.frontend.v1.RosterRow.permission:type_name -> agentshim.frontend.v1.RosterRowStatusPermission
+	165, // 238: agentshim.frontend.v1.RosterRow.done:type_name -> agentshim.frontend.v1.RosterRowStatusDone
+	166, // 239: agentshim.frontend.v1.RosterRow.interrupted:type_name -> agentshim.frontend.v1.RosterRowStatusInterrupted
+	167, // 240: agentshim.frontend.v1.RosterRow.ready:type_name -> agentshim.frontend.v1.RosterRowStatusReady
+	168, // 241: agentshim.frontend.v1.RosterRow.idle_async:type_name -> agentshim.frontend.v1.RosterRowStatusIdleAsync
+	169, // 242: agentshim.frontend.v1.RosterRow.vendor_blocked:type_name -> agentshim.frontend.v1.RosterRowStatusVendorBlocked
+	170, // 243: agentshim.frontend.v1.RosterRow.init:type_name -> agentshim.frontend.v1.RosterRowStatusInit
+	171, // 244: agentshim.frontend.v1.RosterRow.severed:type_name -> agentshim.frontend.v1.RosterRowStatusSevered
+	172, // 245: agentshim.frontend.v1.RosterRow.hibernated:type_name -> agentshim.frontend.v1.RosterRowStatusHibernated
+	173, // 246: agentshim.frontend.v1.RosterRow.start_failed:type_name -> agentshim.frontend.v1.RosterRowStatusStartFailed
+	174, // 247: agentshim.frontend.v1.RosterRow.degraded:type_name -> agentshim.frontend.v1.RosterRowStatusDegraded
+	175, // 248: agentshim.frontend.v1.RosterRow.dead:type_name -> agentshim.frontend.v1.RosterRowStatusDead
+	176, // 249: agentshim.frontend.v1.RosterRow.merge_enqueuing:type_name -> agentshim.frontend.v1.RosterRowStatusMergeEnqueuing
+	177, // 250: agentshim.frontend.v1.RosterRow.merging:type_name -> agentshim.frontend.v1.RosterRowStatusMerging
+	178, // 251: agentshim.frontend.v1.RosterRow.merge_queued:type_name -> agentshim.frontend.v1.RosterRowStatusMergeQueued
+	179, // 252: agentshim.frontend.v1.RosterRow.merge_conflict:type_name -> agentshim.frontend.v1.RosterRowStatusMergeConflict
+	180, // 253: agentshim.frontend.v1.RosterRow.merge_failed:type_name -> agentshim.frontend.v1.RosterRowStatusMergeFailed
+	181, // 254: agentshim.frontend.v1.RosterRow.merged:type_name -> agentshim.frontend.v1.RosterRowStatusMerged
+	182, // 255: agentshim.frontend.v1.RosterRow.none:type_name -> agentshim.frontend.v1.RosterRowStatusNone
+	183, // 256: agentshim.frontend.v1.RosterRow.inactive:type_name -> agentshim.frontend.v1.RosterRowStatusInactive
+	159, // 257: agentshim.frontend.v1.RosterRow.children:type_name -> agentshim.frontend.v1.RosterRow
+	258, // [258:258] is the sub-list for method output_type
+	258, // [258:258] is the sub-list for method input_type
+	258, // [258:258] is the sub-list for extension type_name
+	258, // [258:258] is the sub-list for extension extendee
+	0,   // [0:258] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_frontend_v1_frontend_proto_init() }
@@ -16719,7 +16822,7 @@ func file_agentshim_frontend_v1_frontend_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_frontend_v1_frontend_proto_rawDesc), len(file_agentshim_frontend_v1_frontend_proto_rawDesc)),
-			NumEnums:      10,
+			NumEnums:      11,
 			NumMessages:   173,
 			NumExtensions: 0,
 			NumServices:   0,
