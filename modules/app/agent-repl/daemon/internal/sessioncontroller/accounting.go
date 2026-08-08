@@ -11,6 +11,7 @@ import (
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/frontend"
 	"claude-repld/internal/tokenutilization"
 
@@ -39,6 +40,9 @@ type turnAccountingReducer struct {
 	// conversation's own history rather than rejected as evidence about some
 	// other conversation entirely — see isKnownVendorSession.
 	knownVendorSessionIDs map[string]struct{}
+	// logf is the consumer's session-tagged logging channel. It is never nil;
+	// newTurnAccountingReducer substitutes a discard when a caller has none.
+	logf dlog.Logf
 }
 
 type responseLatency struct {
@@ -95,8 +99,11 @@ func (e *unknownAccountingTurnError) Error() string {
 	return fmt.Sprintf("account usage observation names unknown turn %q (query_instance_id=%q boundary=%s)", e.turnID, e.queryID, e.boundary)
 }
 
-func newTurnAccountingReducer() *turnAccountingReducer {
-	return &turnAccountingReducer{turns: map[string]*accountingTurn{}, latencies: map[string]responseLatency{}, knownVendorSessionIDs: map[string]struct{}{}}
+func newTurnAccountingReducer(logf dlog.Logf) *turnAccountingReducer {
+	if logf == nil {
+		logf = func(string, ...any) {}
+	}
+	return &turnAccountingReducer{turns: map[string]*accountingTurn{}, latencies: map[string]responseLatency{}, knownVendorSessionIDs: map[string]struct{}{}, logf: logf}
 }
 
 // recordKnownVendorSession admits id into the conversation's proven vendor
@@ -536,7 +543,7 @@ func (r *turnAccountingReducer) resolveTurn(turnID string, settledAt int64) *fro
 	if turn.result == nil {
 		problems = append(problems, &frontendv1.TurnAccountingProblem{Problem: &frontendv1.TurnAccountingProblem_TelemetryRecordMissing{TelemetryRecordMissing: &frontendv1.TelemetryRecordMissing{Record: &frontendv1.TelemetryRecordMissing_PersistenceReceipt{PersistenceReceipt: &frontendv1.TelemetryRecordMissingPersistenceReceipt{TurnId: turnID}}}}})
 	}
-	reconciliation := reconcileTokenUsage(turn.responses, turn.result)
+	reconciliation := reconcileTokenUsage(turn.responses, turn.result, dlog.Tag(r.logf, "turn", turnID, "query", r.queryID))
 	reconciliation.mismatch = append(reconciliation.mismatch, turn.responseConflicts...)
 	sort.Strings(reconciliation.mismatch)
 	if len(reconciliation.mismatch) > 0 {
@@ -900,7 +907,11 @@ type reconciliationResult struct {
 	mismatch       []string
 }
 
-func reconcileTokenUsage(records []*frontendv1.TokenUtilization, result *datav1.ResultMessage) reconciliationResult {
+// reconcileTokenUsage compares the stream plane's per-response evidence against
+// the result plane's terminal usage. logf carries the resolving turn's identity
+// and is never nil — callers route it through the reducer's tagged channel.
+func reconcileTokenUsage(records []*frontendv1.TokenUtilization, result *datav1.ResultMessage, logf dlog.Logf) reconciliationResult {
+	logf("session-controller: reconciling turn token ledger (responses=%d result_present=%t)", len(records), result != nil)
 	aggregate := frontend.AggregateTokenUtilization(records)
 	apiMessageIDSet := make(map[string]struct{}, len(records))
 	for _, record := range records {
@@ -983,10 +994,22 @@ func reconcileTokenUsage(records []*frontendv1.TokenUtilization, result *datav1.
 			mismatch = append(mismatch, "model_usage."+model.GetModel())
 		}
 	}
+	unmatched := make([]string, 0, len(responseModels))
 	for model := range responseModels {
 		if resultModels[model] == nil {
-			mismatch = append(mismatch, "model_usage."+model)
+			unmatched = append(unmatched, model)
 		}
+	}
+	sort.Strings(unmatched)
+	for _, model := range unmatched {
+		// The vendor's zero-usage `<synthetic>` pseudo-model is the one
+		// stream-plane entry the result plane is contractually silent about.
+		// See tokenutilization.SyntheticModelReconciliationExcluded.
+		if tokenutilization.SyntheticModelReconciliationExcluded(model, responseModels[model].GetTotals()) {
+			logf("session-controller: token ledger reconciliation excluded the zero-usage synthetic pseudo-model from the result-plane compare (model=%s)", model)
+			continue
+		}
+		mismatch = append(mismatch, "model_usage."+model)
 	}
 	sort.Strings(mismatch)
 	return reconciliationResult{reconciliation: r, mismatch: mismatch}

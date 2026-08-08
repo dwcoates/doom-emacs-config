@@ -86,7 +86,7 @@ func newRetiredTurnRig(t *testing.T, turnID string) (*consumer, *settlingTurnAcc
 
 func TestCommitResolvedRetiresAKnownTurn(t *testing.T) {
 	// Arrange.
-	r := newTurnAccountingReducer()
+	r := newTurnAccountingReducer(nil)
 	r.turns["t"] = &accountingTurn{}
 	r.activeTurnID = "t"
 
@@ -106,7 +106,7 @@ func TestCommitResolvedRetiresAKnownTurn(t *testing.T) {
 // never take the process down with it.
 func TestCommitResolvedReportsAnUnknownTurnInsteadOfPanicking(t *testing.T) {
 	// Arrange.
-	r := newTurnAccountingReducer()
+	r := newTurnAccountingReducer(nil)
 
 	// Act.
 	err := r.commitResolved("fe-1266-4cf1")
@@ -119,7 +119,7 @@ func TestCommitResolvedReportsAnUnknownTurnInsteadOfPanicking(t *testing.T) {
 
 func TestCommitResolvedNamesTheUnknownTurnInItsError(t *testing.T) {
 	// Arrange.
-	r := newTurnAccountingReducer()
+	r := newTurnAccountingReducer(nil)
 
 	// Act.
 	err := r.commitResolved("fe-1266-4cf1")

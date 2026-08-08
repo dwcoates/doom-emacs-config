@@ -10,6 +10,9 @@ import (
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+
+	"claude-repld/internal/dlog"
+	"claude-repld/internal/tokenutilization"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -60,7 +63,7 @@ func (s replayTurnAccountingStore) List(string) ([]*frontendv1.TurnAccounting, e
 }
 
 func TestTurnAccountingReducerCompletesWithBoundaryAndMatchingLedger(t *testing.T) {
-	r := newTurnAccountingReducer()
+	r := newTurnAccountingReducer(nil)
 	r.observe(&corev1.Event{Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
 		QueryInstanceId: "q",
 		Event: &corev1.QueryLifecycle_RuntimeObserved{RuntimeObserved: &corev1.QueryRuntimeObserved{
@@ -85,7 +88,7 @@ func TestReconcileTokenUsageNamesEveryResponseInStableOrderWithoutResult(t *test
 		{ApiMessageId: "message-c"},
 		{ApiMessageId: "message-a"},
 	}
-	reconciliation := reconcileTokenUsage(records, nil).reconciliation
+	reconciliation := reconcileTokenUsage(records, nil, func(string, ...any) {}).reconciliation
 	got := reconciliation.GetApiMessageIds()
 	if reconciliation.GetResponseRecordCount() != 3 || len(got) != 3 || got[0] != "message-a" || got[1] != "message-b" || got[2] != "message-c" {
 		t.Fatalf("reconciliation = %+v, want one sorted nonempty id per response", reconciliation)
@@ -93,7 +96,7 @@ func TestReconcileTokenUsageNamesEveryResponseInStableOrderWithoutResult(t *test
 }
 
 func TestTurnAccountingReducerRejectsUsageWithoutAPIMessageID(t *testing.T) {
-	r := newTurnAccountingReducer()
+	r := newTurnAccountingReducer(nil)
 	if err := r.observe(&corev1.Event{Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "turn"}}}, "session"); err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +110,7 @@ func TestTurnAccountingReducerRejectsUsageWithoutAPIMessageID(t *testing.T) {
 }
 
 func TestResponseWithoutMessageStartRemainsExplicitlyUntimed(t *testing.T) {
-	r := newTurnAccountingReducer()
+	r := newTurnAccountingReducer(nil)
 	if err := r.observe(&corev1.Event{Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}, "s"); err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +134,7 @@ func completeRuntimeIdentity() *corev1.QueryRuntimeIdentity {
 }
 
 func TestTurnAccountingHandshakeBindsQueryAndRuntimeIdentityWithoutMutationOnRejection(t *testing.T) {
-	r := newTurnAccountingReducer()
+	r := newTurnAccountingReducer(nil)
 	runtime := completeRuntimeIdentity()
 	hello := &corev1.ShimHello{QueryInstanceId: "query-1", QueryCreatedSeq: 17, VendorSessionId: "vendor", QueryRuntimeIdentity: runtime}
 	if err := r.bindHandshakeIdentity(hello); err != nil {
@@ -449,7 +452,7 @@ func TestTokenUtilizationObservationMapsHistoricalTranscriptWithoutInventingTurn
 		t.Fatalf("historical actor = %+v, want transcript provenance", actor)
 	}
 
-	reducer := newTurnAccountingReducer()
+	reducer := newTurnAccountingReducer(nil)
 	if err := reducer.observe(event, "session"); err != nil {
 		t.Fatalf("historical observation claimed mutable live turn: %v", err)
 	}
@@ -563,7 +566,7 @@ func TestTokenUtilizationObservationRejectsLiveResponseFromAKnownPriorVendorSess
 // full accounting path — the exact path settleTurnAccounting depends on.
 func TestReducerRecordsResumeLineageAndAdmitsTheRetiredSession(t *testing.T) {
 	// Arrange.
-	reducer := newTurnAccountingReducer()
+	reducer := newTurnAccountingReducer(nil)
 	created := &corev1.Event{Seq: 1, QueryInstanceId: "q2", Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
 		QueryInstanceId: "q2",
 		Event: &corev1.QueryLifecycle_Created{Created: &corev1.QueryCreated{
@@ -616,7 +619,7 @@ func TestTokenUtilizationFromEventRejectsSessionCorrelationViolations(t *testing
 }
 
 func TestResponseUsageRejectsRootTurnMismatchBeforeReducerMutation(t *testing.T) {
-	r := newTurnAccountingReducer()
+	r := newTurnAccountingReducer(nil)
 	r.activeTurnID = "turn"
 	r.turns["turn"] = &accountingTurn{}
 	event := accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{Message: &datav1.ApiAssistantMessage{Id: "message", Model: "model", Usage: &datav1.ApiUsage{InputTokens: 1}}}}})
@@ -632,7 +635,7 @@ func TestResponseUsageRejectsRootTurnMismatchBeforeReducerMutation(t *testing.T)
 }
 
 func TestResponseUsageWithoutValidatedClaimFailsBeforeReducerMutation(t *testing.T) {
-	r := newTurnAccountingReducer()
+	r := newTurnAccountingReducer(nil)
 	event := accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{Message: &datav1.ApiAssistantMessage{Id: "message", Model: "model", Usage: &datav1.ApiUsage{InputTokens: 1}}}}})
 	err := r.observe(event, "session")
 	var claim *unattributedResponseUsageError
@@ -645,7 +648,7 @@ func TestResponseUsageWithoutValidatedClaimFailsBeforeReducerMutation(t *testing
 }
 
 func TestResponseUsageAcceptsRootTurnAdmittedByRotationBridge(t *testing.T) {
-	r := newTurnAccountingReducer()
+	r := newTurnAccountingReducer(nil)
 	bridge := &corev1.Event{
 		ProducedAtMs: 10,
 		Payload: &corev1.Event_TurnClaimBridge{TurnClaimBridge: &corev1.TurnClaimBridge{
@@ -665,7 +668,7 @@ func TestResponseUsageAcceptsRootTurnAdmittedByRotationBridge(t *testing.T) {
 }
 
 func TestResponseUsagePreservesIndependentSDKRequestIdentityUnderRootTurnClaim(t *testing.T) {
-	r := newTurnAccountingReducer()
+	r := newTurnAccountingReducer(nil)
 	r.activeTurnID = "turn"
 	r.turns["turn"] = &accountingTurn{}
 	event := accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{RequestId: proto.String("api-request"), Message: &datav1.ApiAssistantMessage{Id: "message", Model: "model", Usage: &datav1.ApiUsage{InputTokens: 1}}}}})
@@ -685,7 +688,7 @@ func TestResponseUsagePreservesIndependentSDKRequestIdentityUnderRootTurnClaim(t
 }
 
 func TestResponseUsagePreservesAbsentSDKRequestIdentityUnderActiveTurnClaim(t *testing.T) {
-	r := newTurnAccountingReducer()
+	r := newTurnAccountingReducer(nil)
 	r.activeTurnID = "turn"
 	r.turns["turn"] = &accountingTurn{}
 	stream := &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{SessionId: "vendor-session", Message: &datav1.ApiAssistantMessage{Id: "message", Model: "model", Usage: &datav1.ApiUsage{InputTokens: 1}}}}}
@@ -706,7 +709,7 @@ func TestResponseUsagePreservesAbsentSDKRequestIdentityUnderActiveTurnClaim(t *t
 }
 
 func TestResponseUsageRejectsPresentBlankSDKRequestIdentityBeforeReducerMutation(t *testing.T) {
-	r := newTurnAccountingReducer()
+	r := newTurnAccountingReducer(nil)
 	r.activeTurnID = "turn"
 	r.turns["turn"] = &accountingTurn{}
 	event := accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{RequestId: proto.String(""), Message: &datav1.ApiAssistantMessage{Id: "message", Model: "model", Usage: &datav1.ApiUsage{InputTokens: 1}}}}})
@@ -783,7 +786,7 @@ func TestUnmodeledUsageDiagnosticDoesNotLogPayloadValues(t *testing.T) {
 }
 
 func TestTurnAccountingReducerInvalidatesMissingEvidence(t *testing.T) {
-	r := newTurnAccountingReducer()
+	r := newTurnAccountingReducer(nil)
 	r.observe(&corev1.Event{Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}, "s")
 	got := r.resolve(&corev1.Event{Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "t"}}}, 30)
 	if got.GetInvalid() == nil || len(got.GetInvalid().GetProblems()) < 3 {
@@ -792,7 +795,7 @@ func TestTurnAccountingReducerInvalidatesMissingEvidence(t *testing.T) {
 }
 
 func TestTurnAccountingReducerInvalidatesIncompleteRuntimeIdentity(t *testing.T) {
-	r := newTurnAccountingReducer()
+	r := newTurnAccountingReducer(nil)
 	r.queryID = "q"
 	r.runtime = &corev1.QueryRuntimeIdentity{EffectiveModel: "model"}
 	r.observe(&corev1.Event{Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}, "s")
@@ -855,7 +858,7 @@ func containsPath(paths []string, suffix string) bool {
 }
 
 func TestTurnAccountingReducerInvalidatesUsageWindowReset(t *testing.T) {
-	r := newTurnAccountingReducer()
+	r := newTurnAccountingReducer(nil)
 	r.runtime = &corev1.QueryRuntimeIdentity{EffectiveModel: "model"}
 	r.queryID = "q"
 	r.observe(&corev1.Event{Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}, "s")
@@ -1327,7 +1330,7 @@ func TestTurnAccountingReducerAcceptsEveryUnavailableReason(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			r := newTurnAccountingReducer()
+			r := newTurnAccountingReducer(nil)
 			r.queryID = "q"
 			r.turns["t"] = &accountingTurn{}
 			observation := usageObservation("t", true)
@@ -1586,5 +1589,111 @@ func TestFailedTerminalSettlementWithoutAPersistedRowKeepsReducerState(t *testin
 	// Assert.
 	if c.accounting.turns["t"] == nil {
 		t.Fatal("a failed settlement with nothing to serve retired reducer state")
+	}
+}
+
+// resolveSyntheticReconciliationTurn drives one result-closed turn carrying the
+// canonical assistant response for "model" plus one extra response attributed
+// to extraModel, and returns the resolved accounting. The result plane's
+// main-agent usage absorbs extraUsage so the only compare that can differ is
+// the per-model one under test; the result plane names ONLY "model" in
+// model_usage, exactly as the vendor does for a model it never called.
+func resolveSyntheticReconciliationTurn(t *testing.T, logf dlog.Logf, extraModel string, extraUsage *datav1.ApiUsage) *frontendv1.TurnAccounting {
+	t.Helper()
+	r := newTurnAccountingReducer(logf)
+	r.observe(&corev1.Event{Payload: &corev1.Event_QueryLifecycle{QueryLifecycle: &corev1.QueryLifecycle{
+		QueryInstanceId: "q",
+		Event:           &corev1.QueryLifecycle_RuntimeObserved{RuntimeObserved: &corev1.QueryRuntimeObserved{Identity: completeRuntimeIdentity()}},
+	}}}, "s")
+	r.observe(&corev1.Event{ProducedAtMs: 10, Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "t"}}}, "s")
+	r.observe(&corev1.Event{RequestId: "t", Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation("t", true)}}, "s")
+	r.observe(accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{Message: &datav1.ApiAssistantMessage{Id: "m", Model: "model", Usage: &datav1.ApiUsage{InputTokens: 1, OutputTokens: 2, CacheReadInputTokens: 3, CacheCreationInputTokens: 4}}}}}), "s")
+	r.observe(accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{Message: &datav1.ApiAssistantMessage{Id: "m2", Model: extraModel, Usage: extraUsage}}}}), "s")
+	r.observe(accountingVendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Result{Result: &datav1.ResultMessage{
+		Usage: &datav1.Usage{
+			InputTokens:              1 + extraUsage.GetInputTokens(),
+			OutputTokens:             2 + extraUsage.GetOutputTokens(),
+			CacheReadInputTokens:     3 + extraUsage.GetCacheReadInputTokens(),
+			CacheCreationInputTokens: 4 + extraUsage.GetCacheCreationInputTokens(),
+		},
+		ModelUsage: map[string]*datav1.ModelUsage{"model": {InputTokens: 1, OutputTokens: 2, CacheReadInputTokens: 3, CacheCreationInputTokens: 4}},
+	}}}), "s")
+	r.observe(&corev1.Event{RequestId: "t", Payload: &corev1.Event_AccountUsageObservation{AccountUsageObservation: usageObservation("t", false)}}, "s")
+	return r.resolve(&corev1.Event{Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{TurnId: "t"}}}, 30)
+}
+
+func ledgerMismatchPaths(accounting *frontendv1.TurnAccounting) []string {
+	for _, problem := range accounting.GetInvalid().GetProblems() {
+		if mismatch := problem.GetTokenLedgerMismatch(); mismatch != nil {
+			return mismatch.GetDifferingFieldPaths()
+		}
+	}
+	return nil
+}
+
+func TestReconcileTokenUsageSyntheticPseudoModelExclusion(t *testing.T) {
+	tests := []struct {
+		name       string
+		model      string
+		usage      *datav1.ApiUsage
+		wantPaths  []string
+		wantVerdic bool // true when the turn must resolve complete
+	}{
+		{
+			name:       "zero usage synthetic entry is excluded from the compare",
+			model:      tokenutilization.SyntheticModelIdentity,
+			usage:      &datav1.ApiUsage{},
+			wantPaths:  nil,
+			wantVerdic: true,
+		},
+		{
+			name:      "synthetic entry claiming usage still mismatches",
+			model:     tokenutilization.SyntheticModelIdentity,
+			usage:     &datav1.ApiUsage{OutputTokens: 7},
+			wantPaths: []string{"model_usage." + tokenutilization.SyntheticModelIdentity},
+		},
+		{
+			name:      "a real model absent from the result plane still mismatches",
+			model:     "other-model",
+			usage:     &datav1.ApiUsage{},
+			wantPaths: []string{"model_usage.other-model"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange + Act.
+			got := resolveSyntheticReconciliationTurn(t, nil, test.model, test.usage)
+
+			// Assert.
+			if diff := strings.Join(ledgerMismatchPaths(got), ","); diff != strings.Join(test.wantPaths, ",") {
+				t.Fatalf("ledger mismatch paths = %q, want %q", diff, strings.Join(test.wantPaths, ","))
+			}
+			if test.wantVerdic && got.GetComplete() == nil {
+				t.Fatalf("accounting verdict = %+v, want complete", got.GetVerdict())
+			}
+		})
+	}
+}
+
+func TestReconcileTokenUsageLogsSyntheticExclusionWithTurnIdentity(t *testing.T) {
+	// Arrange.
+	var lines []string
+	logf := func(format string, args ...any) { lines = append(lines, fmt.Sprintf(format, args...)) }
+
+	// Act.
+	resolveSyntheticReconciliationTurn(t, logf, tokenutilization.SyntheticModelIdentity, &datav1.ApiUsage{})
+
+	// Assert.
+	var found string
+	for _, line := range lines {
+		if strings.Contains(line, "excluded the zero-usage synthetic pseudo-model") {
+			found = line
+		}
+	}
+	if found == "" {
+		t.Fatalf("no exclusion record in %q", lines)
+	}
+	if !strings.Contains(found, "turn=t") || !strings.Contains(found, "query=q") {
+		t.Fatalf("exclusion record = %q, want the resolving turn and query identity", found)
 	}
 }
