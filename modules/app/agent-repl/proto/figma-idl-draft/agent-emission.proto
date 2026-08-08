@@ -1,0 +1,68 @@
+// agent-emission.proto — THE agent-output vocabulary.
+//
+// One closed oneof naming everything an agent can produce inside a
+// conversation. It is deliberately NOT a feed message: it carries no uuid, no
+// timestamp, no ordering and no provenance, because it is used in two places
+// that stamp those differently —
+//
+//   1. the top-level feed, where ConversationItem (feed.proto) wraps it with
+//      the session's own identity/ordering/provenance stamps, and
+//   2. a detached agent's bubble, where AsyncAgentUpdate (async-bubble.proto)
+//      wraps it with a bubble id and that bubble's fold accounting.
+//
+// The same message serves both because a detached agent is not a second,
+// weaker kind of conversation — it is the same conversation happening
+// somewhere else. A renderer written for the main feed therefore renders a
+// detached agent unchanged.
+//
+
+syntax = "proto3";
+
+package agentshim.frontend.v1;
+
+import "agentshim/data/v1/stream.proto";
+import "agentshim/frontend/v1/response-bubble.proto";
+import "agentshim/frontend/v1/slash-menu.proto";
+import "agentshim/frontend/v1/tool-call.proto";
+
+option go_package = "agentrepl/proto/agentshim/frontend/v1;frontendv1";
+
+// One thing an agent produced.
+//
+// The arm payloads live in the component files that draw them
+// (response-bubble.proto, tool-call.proto, slash-menu.proto) rather than
+// here, so a component's wire shape and its picture stay in one file.
+message AgentEmission {
+  oneof emission {
+    // The assistant's spoken turn: the purple bubble, with the resolved usage
+    // figures its corner renders.
+    AgentResponse response = 1;
+    // A reasoning block: the collapsed grey block that precedes a response.
+    // Carried as its own emission rather than inside the response body — see
+    // the exclusivity invariant on AgentResponse.body, which is what keeps
+    // the two from being duplicate copies of the same reasoning.
+    AgentThinking thinking = 2;
+    // A tool invocation: the tool card's header.
+    AgentToolCall tool_call = 3;
+    // A tool's raw return value: the tool card's body.
+    AgentToolResult tool_result = 4;
+    // A tool's TYPED outcome, and the arm that carries subagent and task chip
+    // activity: agentshim.data.v1.ToolUseResult's own oneof holds
+    // AgentAsyncLaunch, AgentResult, TaskOutputResult, TaskStopResult and
+    // WorkflowLaunchResult, which are the launches and terminations a chip
+    // draws. The typed outcome IS the chip, so there is no separate chip arm.
+    AgentToolOutcome tool_outcome = 5;
+    // A skill invocation's SKILL.md body, merged into the Skill call's card by
+    // tool_use_id (see the merge contract on SkillBodyItem itself).
+    SkillBodyItem skill_body = 6;
+    // The turn's terminal result record. It is agent output rather than feed
+    // bookkeeping: a detached agent's transcript ends with exactly this
+    // record, and it is where a fold learns that the agent finished and
+    // whether it failed.
+    //
+    // A turn's ACCOUNTING VERDICT is a different thing and is not here: it is
+    // the session's ledger rather than the agent's utterance, and it reaches a
+    // frontend resolved, on FooterAccountingCell.
+    agentshim.data.v1.ResultMessage turn_result = 7;
+  }
+}

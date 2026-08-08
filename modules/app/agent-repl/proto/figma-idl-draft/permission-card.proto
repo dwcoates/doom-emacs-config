@@ -1,0 +1,19 @@
+// permission-card.proto — The permission card.
+//
+// The request arm is agentshim.core.v1.PermissionItem, carried on
+// ConversationItem in feed.proto; the answer is this package's own command.
+
+syntax = "proto3";
+
+package agentshim.frontend.v1;
+
+import "google/protobuf/struct.proto";
+
+option go_package = "agentrepl/proto/agentshim/frontend/v1;frontendv1";
+
+message PermissionAnswerCmd {
+  string permission_request_id = 1;
+  bool allow = 2;
+  google.protobuf.Struct updated_input = 3;
+  string deny_message = 4;
+}
