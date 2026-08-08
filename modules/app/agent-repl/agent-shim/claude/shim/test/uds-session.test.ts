@@ -370,6 +370,8 @@ async function rig(
     sessionSource?: SessionSource;
     storeSessionId?: string;
     replayIdleMs?: number;
+    /** Grace an acked-interrupted turn gets for the SDK's own terminal. */
+    interruptTerminalGraceMs?: number;
     queryInstanceId?: string;
     /** The `--permission-mode` argv the session is constructed with. */
     permissionMode?: PermissionMode;
@@ -418,6 +420,7 @@ async function rig(
     // that report without waiting out the real budget.
     storeRelinkReportAfterMs: 0,
     ...(opts.replayIdleMs !== undefined ? { replayIdleMs: opts.replayIdleMs } : {}),
+    ...(opts.interruptTerminalGraceMs !== undefined ? { interruptTerminalGraceMs: opts.interruptTerminalGraceMs } : {}),
     newRequestId: (() => {
       let n = 0;
       return () => `req-${++n}`;
@@ -2944,6 +2947,179 @@ describe("UdsSession interrupt outcome", () => {
     const evt = await daemon.next(EventSchema);
     if (evt.payload.case !== "degradedState") throw new Error("case");
     expect(evt.payload.value.reason).toContain("still_queued=[u-1]");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// An INTERRUPTED ack is a CLAIM that a turn was displaced, and the claim is
+// backed: the displaced turn reaches its terminal either way.
+//
+// The live defect: a turn the shim was holding open for background-task result
+// cycles is not running as far as the CLI is concerned, so `interrupt()` had
+// nothing to abort and no `result` ever followed. The shim acked INTERRUPTED
+// and then went silent for four and a half hours with turn_active latched true
+// — hibernation refused, merge resolution undeliverable, deploys blocked —
+// until the process was killed.
+// ---------------------------------------------------------------------------
+
+describe("UdsSession displaced-turn terminal", () => {
+  it("closes the displaced turn on the SDK's own result when it arrives", async () => {
+    // Arrange: a live turn, acked as displaced by an interrupt.
+    const { daemon, query, store, session } = await rig({
+      storeSessionId: "vendor-uuid",
+      interruptTerminalGraceMs: 10_000,
+    });
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
+    await store.peer().next(StoreWriteSchema);
+    await daemon.next(AckSchema);
+    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1" }));
+    expect((await daemon.next(AckSchema)).interruptOutcome).toBe(InterruptOutcome.INTERRUPTED);
+    // Act: the CLI aborts and emits the turn's result, as it normally does.
+    query.emit({
+      type: "result",
+      uuid: "r1",
+      session_id: "vendor-uuid",
+      subtype: "error_during_execution",
+    } as unknown as SdkMessageLike);
+    // Assert: the ordinary result path is still the one that closes it, with
+    // the vendor evidence the SDK actually produced in the same batch.
+    const sw = await store.peer().next(StoreWriteSchema);
+    expect(sw.batch!.events.map((event) => event.payload.case)).toEqual([
+      "vendor",
+      "accountUsageObservation",
+      "turnEnded",
+    ]);
+    await until(() => session.turnCount() === 0);
+  });
+
+  it("synthesizes the terminal when the SDK never produces one", async () => {
+    // Arrange: a live turn acked as displaced, and an SDK that stays silent —
+    // exactly the incident's shape.
+    const { daemon, store, session } = await rig({
+      storeSessionId: "vendor-uuid",
+      interruptTerminalGraceMs: 5,
+    });
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
+    await store.peer().next(StoreWriteSchema);
+    await daemon.next(AckSchema);
+    // Act
+    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1" }));
+    expect((await daemon.next(AckSchema)).interruptOutcome).toBe(InterruptOutcome.INTERRUPTED);
+    // Assert: the shim writes the end itself, in the same ordered shape the
+    // result path produces, and no vendor result is invented for it.
+    const sw = await store.peer().next(StoreWriteSchema);
+    expect(sw.batch!.events.map((event) => event.payload.case)).toEqual([
+      "accountUsageObservation",
+      "turnEnded",
+    ]);
+    const ended = sw.batch!.events[1]!;
+    expect(ended.requestId).toBe("p1");
+    if (ended.payload.case !== "turnEnded") throw new Error("case");
+    expect(ended.payload.value.turnId).toBe("p1");
+    expect(ended.payload.value.stopReason).toBe("interrupted");
+    await until(() => session.turnCount() === 0);
+  });
+
+  it("reports the synthesized terminal as a recovered degradation naming the turn", async () => {
+    // Arrange: the same silent SDK. A log line nobody reads is not how the
+    // daemon learns the SDK broke the contract the ack relied on.
+    const { daemon, store } = await rig({
+      storeSessionId: "vendor-uuid",
+      interruptTerminalGraceMs: 5,
+    });
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
+    await store.peer().next(StoreWriteSchema);
+    await daemon.next(AckSchema);
+    // Act
+    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1" }));
+    await daemon.next(AckSchema);
+    // Assert
+    const evt = await daemon.next(EventSchema);
+    if (evt.payload.case !== "degradedState") throw new Error("case");
+    expect(evt.payload.value.component).toBe("claude-shim-turn-lifecycle");
+    expect(evt.payload.value.reason).toContain("\"p1\"");
+    expect(evt.payload.value.recovered).toBe(true);
+  });
+
+  it("keeps an SDK result that arrives after the synthesized terminal", async () => {
+    // Arrange: the terminal was synthesized, then the overdue result lands.
+    const { daemon, query, store } = await rig({
+      storeSessionId: "vendor-uuid",
+      interruptTerminalGraceMs: 5,
+    });
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
+    await store.peer().next(StoreWriteSchema);
+    await daemon.next(AckSchema);
+    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1" }));
+    await daemon.next(AckSchema);
+    const synthesized = await store.peer().next(StoreWriteSchema);
+    expect(synthesized.batch!.events.map((event) => event.payload.case)).toEqual([
+      "accountUsageObservation",
+      "turnEnded",
+    ]);
+    // Act
+    query.emit({
+      type: "result",
+      uuid: "r1",
+      session_id: "vendor-uuid",
+      subtype: "error_during_execution",
+    } as unknown as SdkMessageLike);
+    // Assert: the evidence that DID arrive is stored, without a second
+    // TurnEnded that would close an already-closed turn twice.
+    const late = await store.peer().next(StoreWriteSchema);
+    expect(late.batch!.events.map((event) => event.payload.case)).toEqual(["vendor"]);
+  });
+
+  it("names the late result as the interrupted turn's overdue terminal", async () => {
+    // Arrange: as above. The generic "result has no accepted prompt turn to
+    // close" reads as an uncorrelated anomaly and would be uncontained.
+    const { daemon, query, store } = await rig({
+      storeSessionId: "vendor-uuid",
+      interruptTerminalGraceMs: 5,
+    });
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
+    await store.peer().next(StoreWriteSchema);
+    await daemon.next(AckSchema);
+    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1" }));
+    await daemon.next(AckSchema);
+    const synthesisReport = await daemon.next(EventSchema);
+    if (synthesisReport.payload.case !== "degradedState") throw new Error("case");
+    await store.peer().next(StoreWriteSchema);
+    // Act
+    query.emit({
+      type: "result",
+      uuid: "r1",
+      session_id: "vendor-uuid",
+      subtype: "error_during_execution",
+    } as unknown as SdkMessageLike);
+    // Assert
+    const evt = await daemon.next(EventSchema);
+    if (evt.payload.case !== "degradedState") throw new Error("case");
+    expect(evt.payload.value.reason).toContain("already synthesized its terminal");
+    expect(evt.payload.value.recovered).toBe(true);
+  });
+
+  it("synthesizes nothing when the ack claimed no displacement", async () => {
+    // Arrange: no turn in flight, so the ack is ALREADY_COMPLETE and claims
+    // nothing was displaced. Nothing may be closed on the strength of it.
+    // A ZERO grace, deliberately: any deadline wrongly armed here would have
+    // fired — and reported — before the provoked outage below.
+    const { daemon, query, store } = await rig({
+      storeSessionId: "vendor-uuid",
+      interruptTerminalGraceMs: 0,
+    });
+    // Act
+    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1" }));
+    expect((await daemon.next(AckSchema)).interruptOutcome).toBe(InterruptOutcome.ALREADY_COMPLETE);
+    await until(() => query.interruptCalls >= 1);
+    await tick();
+    await tick();
+    // Assert: the FIRST Event to arrive is the store outage provoked
+    // afterwards, so nothing synthesized a terminal for a turn that never was.
+    store.close();
+    const evt = await daemon.next(EventSchema);
+    if (evt.payload.case !== "degradedState") throw new Error("case");
+    expect(evt.payload.value.component).toBe("shim-store-client");
   });
 });
 
