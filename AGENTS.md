@@ -47,12 +47,12 @@ If you find yourself about to edit top-level `config.el` for a agent-repl-relate
    - A brief justification: why extraction is the right move, what it unblocks, and what the risk is of leaving it in `config.el`.
 3. Wait for the user to decide between: (a) approve the top-level edit anyway, (b) approve the extraction, (c) something else.
 
-**Never put new agent-repl code in the top-level doomdir `config.el`.** All agent-repl code — defuns, advice, hooks, keybindings, magit integration — lives under `modules/app/agent-repl/*.el`. The top-level `config.el` is not reloaded by `M-x doom/reload-lisp-config` the same way the module is, and instrumentation added there routinely fails to take effect, wasting debugging cycles.
+**Never put new agent-repl code in the top-level doomdir `config.el`.** All agent-repl code — defuns, advice, hooks, keybindings, magit integration — lives under `modules/app/agent-repl/lisp/*.el`. The top-level `config.el` is not reloaded by `M-x doom/reload-lisp-config` the same way the module is, and instrumentation added there routinely fails to take effect, wasting debugging cycles.
 
 When adding a new concern:
 
 1. Pick the right sub-file (`core.el`, `panels.el`, `status.el`, `session.el`, `sentinel.el`, `worktree.el`, `input.el`, `keybindings.el`, `magit.el`, etc.) or create a new one.
-2. If creating a new file, register it in `modules/app/agent-repl/config.el` via `(agent-repl--load-module "NAME")`.
+2. Put it in `modules/app/agent-repl/lisp/` and register it in `modules/app/agent-repl/config.el` via `(agent-repl--load-module "NAME")` — `config.el` stays at the module root (Doom resolves it there) and loads each name as `lisp/NAME`.
 3. If the feature bridges agent-repl with another package (e.g. magit), put it in a dedicated integration file like `magit.el` rather than in the doomdir `config.el` under `(after! PACKAGE ...)`.
 4. Leader-key bindings that reference a `agent-repl-*` symbol (e.g. overriding `SPC p p` to `agent-repl-switch-to-project`) belong in `keybindings.el`, not in the doomdir `config.el` — even when they shadow a pre-existing `+dwc/` binding there.
 
@@ -62,7 +62,7 @@ Naming: internals use `agent-repl--` prefix, public entry points use `agent-repl
 
 ## Workspace state encapsulation — go through `workspace.el`
 
-The `agent-repl--workspaces` hash table is owned by `modules/app/agent-repl/workspace.el`. **All new code touching workspace state must go through `workspace.el`'s wrapper API**: `agent-repl--ws-get`, `agent-repl--ws-put`, `agent-repl--ws-del`, `agent-repl--ws-live-p`, `agent-repl--ws-known-p`, `agent-repl--ws-tombstoned-p`, `agent-repl--ws-open-p`, `agent-repl--ws-render-status`, `agent-repl--live-ws-names`, `agent-repl--ws-require-known`.
+The `agent-repl--workspaces` hash table is owned by `modules/app/agent-repl/lisp/workspace.el`. **All new code touching workspace state must go through `workspace.el`'s wrapper API**: `agent-repl--ws-get`, `agent-repl--ws-put`, `agent-repl--ws-del`, `agent-repl--ws-live-p`, `agent-repl--ws-known-p`, `agent-repl--ws-tombstoned-p`, `agent-repl--ws-open-p`, `agent-repl--ws-render-status`, `agent-repl--live-ws-names`, `agent-repl--ws-require-known`.
 
 **Forbidden in any file other than `workspace.el`:** direct `gethash`, `puthash`, `maphash`, `hash-table-keys`, `hash-table-count`, `remhash`, or `clrhash` against `agent-repl--workspaces`. Doc-strings and `:argument` references to the symbol name are fine; runtime hash ops are not.
 
@@ -234,7 +234,7 @@ unless the correct resolution requires a user decision.
 You may invoke ert directly if you have a specific reason:
 
 ```bash
-emacs -batch -Q -l ert -l modules/app/agent-repl/test-agent-repl.el -f ert-run-tests-batch-and-exit
+emacs -batch -Q -l ert -l modules/app/agent-repl/lisp/test-agent-repl.el -f ert-run-tests-batch-and-exit
 ```
 
 A repo-checked-in pre-commit hook enforces this automatically: when agent-repl
@@ -333,7 +333,7 @@ There IS one secondary safety net, but it covers a DIFFERENT failure mode:
 
 #### Runtime guards (catch unmocked-WRAPPER test paths only)
 
-`modules/app/agent-repl/test-helpers.el' iterates the registry at load time and replaces every wrapper's function cell with a guard that errors with `EXTERNAL BOUNDARY UNMOCKED: ...' if invoked. Tests `cl-letf' over the guard to install their fixture; tests that forget fail loudly.
+`modules/app/agent-repl/lisp/test-helpers.el' iterates the registry at load time and replaces every wrapper's function cell with a guard that errors with `EXTERNAL BOUNDARY UNMOCKED: ...' if invoked. Tests `cl-letf' over the guard to install their fixture; tests that forget fail loudly.
 
 **test-helpers.el is batch-only.** Every dangerous load-time side effect in it (guard install, `AGENT_REPL_STATE_DIR` redirect, module reload under stubbed `file-notify-add-watch`, log/merge/defer overrides) is gated on `noninteractive`:
 
@@ -349,7 +349,7 @@ This does NOT catch: a raw `(shell-command-to-string "git ...")` in production c
 
 #### Wrapper registry (single source of truth)
 
-`agent-repl--external-boundary-functions' (defvar in `modules/app/agent-repl/core.el') is the canonical list. The runtime guards iterate it. When you introduce a new wrapper, you MUST add it to that list in the same commit — otherwise the guard never installs for it and tests can silently shell out.
+`agent-repl--external-boundary-functions' (defvar in `modules/app/agent-repl/lisp/core.el') is the canonical list. The runtime guards iterate it. When you introduce a new wrapper, you MUST add it to that list in the same commit — otherwise the guard never installs for it and tests can silently shell out.
 
 ### Maintainer rule for new external wrappers
 
@@ -534,7 +534,7 @@ instrumentation" section.
 
   Failure mode: AppKit raises an uncaught ObjC exception off-main → `objc_exception_throw` → `std::terminate` → `abort` → Emacs's fatal-signal handler. The worker then sits suspended in that handler **still holding the global Lisp lock**, so the main thread deadlocks forever on its next Lisp form (it appears as a 0%-CPU hang, blocked in `really_call_select` → `pthread_mutex_firstfit_lock_wait`). This wedged Emacs on 2026-07-12: a declined cherry-pick auto-resolve killed its resolver buffer on the merge worker thread.
 
-**Required helpers** (all in `modules/app/agent-repl/worktree.el`) — never hand-roll these in worker-reachable code:
+**Required helpers** (all in `modules/app/agent-repl/lisp/worktree.el`) — never hand-roll these in worker-reachable code:
 
 | Need | Use | Never |
 |---|---|---|
