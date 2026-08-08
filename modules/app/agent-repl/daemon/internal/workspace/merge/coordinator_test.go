@@ -1956,6 +1956,31 @@ func TestAFailedRollbackStillFailsTheMergeAndSaysSo(t *testing.T) {
 	}
 }
 
+func TestTheFailedCauseNamesTheArchivedSuiteOutput(t *testing.T) {
+	// Arrange — a test failure whose complete output was archived. The cause
+	// carries a twice-clamped tail, which for a runner that keeps going after a
+	// failure regularly holds no trace of it, so the path travels with it.
+	h := newHarness(t)
+	req := testRequest("a")
+	if _, err := h.coord.Enqueue(context.Background(), req); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	<-h.picker.merges
+	failure := testFailure("abc1234", "a coverage table, not the failure", "head0")
+	failure.TestFailureOutputPath = "/tmp/agent-repl-merge-suite-42.log"
+	h.picker.results <- pickResult{res: failure}
+	<-h.testResolver.calls
+
+	// Act.
+	h.testResolver.results <- sentinelError("no live session")
+
+	// Assert.
+	got := h.sink.awaitPhase(t, PhaseMergeFailed)
+	if !strings.Contains(got.cause, "/tmp/agent-repl-merge-suite-42.log") {
+		t.Fatalf("merge_failed cause = %q, want it to name the archived suite output", got.cause)
+	}
+}
+
 func TestTheRollbackIsGivenTheHeadTheMergeLeftTheTargetOn(t *testing.T) {
 	// Arrange — a merge that failed its gate. The reset that follows happens
 	// after an unbounded resolution window, so the driver needs the head this
