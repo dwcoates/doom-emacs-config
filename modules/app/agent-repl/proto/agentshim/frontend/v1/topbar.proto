@@ -1,0 +1,120 @@
+// topbar.proto — The topbar: title, session line, model selector, connectivity glyph.
+
+syntax = "proto3";
+
+package agentshim.frontend.v1;
+
+option go_package = "agentrepl/proto/agentshim/frontend/v1;frontendv1";
+
+// One workspace's topbar, resolved completely by the daemon. The client
+// renders these fields verbatim; nothing here is derived client-side.
+message TopbarView {
+  // The workspace this topbar describes; addressing only, never displayed
+  // differently than given.
+  string workspace = 1;
+  // The exact title line the topbar shows (workspace name, or name + branch
+  // when the daemon resolves a branch worth showing). Pre-composed so the
+  // client never concatenates identity fragments.
+  string title = 2;
+  // The session identity line shown in the hover/expanded state, verbatim.
+  string session_line = 3;
+  // The model selector's current selection, as the display string the
+  // selector button shows (e.g. "opus-5"). Empty means the selector renders
+  // its placeholder.
+  string model_display = 4;
+  // The selectable models, in display order. The selector renders exactly
+  // this list.
+  repeated ModelOption model_options = 5;
+  // The connectivity glyph, resolved: which glyph and which color class to
+  // draw, and the tooltip text. The client never maps connectivity enums.
+  TopbarConnectivity connectivity = 6;
+  // The accounting line the expanded topbar shows, composed daemon-side and
+  // rendered verbatim. The topbar's own projection of the same reconciliation
+  // the footer cell reports: it shows the sentence and never the verdict, so
+  // it takes a string where the footer takes arms. Empty means no turn has
+  // settled yet.
+  string accounting_line = 7;
+  // The workspace's staleness FENCE at the moment the daemon produced this
+  // push: an opaque token the client compares BYTE-WISE against the fence on
+  // the workspace's current WorkspaceState, and never parses, splits or
+  // interprets. Equal means current; different means stale, and a stale push
+  // is discarded whole rather than partially adopted.
+  //
+  // The daemon mints it and is the only thing that can read meaning into it.
+  // A client that learned to decode it would be depending on a fact this
+  // contract does not offer, and the token's composition is free to change.
+  string fence = 8;
+}
+
+// The topbar's connectivity indicator, fully resolved. `tone` names a color
+// class from the shared render-colors vocabulary table (the one deliberate
+// shared authority — see design note 4); `glyph` and `title` are literal.
+message TopbarConnectivity {
+  // Vocabulary color-class name (e.g. "ok", "degraded", "severed").
+  string tone = 1;
+  // The literal glyph character(s) the indicator draws.
+  string glyph = 2;
+  // Tooltip text, verbatim.
+  string title = 3;
+}
+
+message ModelOption {
+  string value = 1;
+  string display_name = 2;
+  string description = 3;
+}
+
+// A deliberate request to change an already-live session's model.  The daemon
+// forwards this to the shim and only publishes the shim-confirmed selection.
+// Bootstrap and rebind intentionally have no model field: they observe session
+// state rather than choosing it.  Creation is different — see
+// CreateSessionCmd.model, which is a starting choice, not an observation.
+message SetModelCmd {
+  string model = 1;
+}
+
+// Correlated result of the daemon-global health command.  A command ACK alone
+// is only a receipt that the daemon accepted a frame; this view is the
+// assertion Emacs waits for before restoring any workspace.  healthy=false is
+// always accompanied by a non-empty reason, so no client can mistake a failed
+// observation for readiness.
+message DaemonHealthView {
+  string request_id = 1;
+  bool healthy = 2;
+  string reason = 3;
+}
+
+// Correlated result of the session-specific health command.  The daemon sets
+// healthy=true only when the named live session controller has a handshaked
+// shim and that shim has proved its own dependency health (including its store
+// connection).
+// WORKSPACE is the absolute CWD, matching every session-routed frontend
+// command; SESSION_ID prevents an old response from satisfying a newer
+// restored binding.
+//
+// HOST SURFACE: the probe names the session it is proving a route to, so it
+// keeps session identity. The topbar's own rendered connectivity is
+// TopbarConnectivity, which is resolved and names nothing.
+message SessionHealthView {
+  string request_id = 1;
+  string workspace = 2;
+  string session_id = 3;
+  bool healthy = 4;
+  string reason = 5;
+}
+
+// Ask the daemon to assert that every boot-critical global dependency is
+// operational.  The matching DaemonHealthView, not socket existence, is the
+// success criterion.  It is a frontend command because no vendor produces or
+// consumes this daemon-local fact.
+message DaemonHealthCmd {}
+
+// Ask the daemon to prove the entire session route for one restored workspace:
+// daemon registry -> current session controller -> handshaked shim -> shim dependencies.
+// The command's outer workspace is authoritative and must equal the session's
+// CWD; SESSION_ID makes a stale response impossible to use after a rebind.
+//
+// HOST SURFACE, like its view.
+message SessionHealthCmd {
+  string session_id = 1;
+}

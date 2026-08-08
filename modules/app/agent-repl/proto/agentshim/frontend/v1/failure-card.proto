@@ -1,0 +1,69 @@
+// failure-card.proto — The feed's system-failure card.
+//
+// The only surface that renders a failure whole: its sentence, its evidence,
+// its typed detail and its resolution. Every other surface projects a subset
+// and says so in its own message.
+//
+
+syntax = "proto3";
+
+package agentshim.frontend.v1;
+
+import "agentshim/frontend/v1/errors.proto";
+
+option go_package = "agentrepl/proto/agentshim/frontend/v1;frontendv1";
+
+// A failure as a CONVERSATION ITEM rather than as chrome.
+//
+// A user whose workspace changed color needs to find out WHY from the
+// conversation itself, at the point in it where the failure happened. Chrome
+// scrolls away and carries no correlation between a report and its all-clear.
+message FailureCardView {
+  // WHAT failed, and its evidence. The card takes its color from the kind's
+  // side of the vocabulary.
+  FailureKind kind = 1;
+  // The sentence the card leads with, composed daemon-side. This is what the
+  // reader is meant to take away.
+  string message = 2;
+  // The raw account, shown beneath the sentence in a quieter register. It is
+  // evidence for whoever debugs this, not the sentence itself, and it is
+  // deliberately allowed to be empty.
+  string detail = 3;
+  // HOW this card ends, as arms, so that an open alarm and its all-clear can
+  // never be the same shape with a different number in it.
+  //
+  // A window-shaped failure is re-sent under the SAME ConversationItem.uuid
+  // with a different arm here, and the feed reconciles it in place. Appending
+  // instead would leave the alarm standing beside its own all-clear.
+  oneof lifecycle {
+    FailureCardOpen open = 10;
+    FailureCardResolved resolved = 11;
+    FailureCardTerminal terminal = 12;
+  }
+}
+
+// The failure is still happening. The card shows its alarm mark and its color.
+message FailureCardOpen {}
+
+// A window-shaped failure has closed. The card settles: it keeps its place in
+// the conversation, drops to a muted register, and stamps when it ended.
+message FailureCardResolved {
+  // When it closed, unix millis.
+  int64 resolved_at_ms = 1;
+}
+
+// The failure has no closing edge and never will — a turn that ended, a
+// refusal, an account block. Distinct from `open`, because an open card
+// invites waiting and this one does not.
+message FailureCardTerminal {}
+
+// A failure card that a surface OUTSIDE the feed needs to point at.
+//
+// It exists because a footer row and a command refusal both want to say "see
+// the card", and the card's address is the only thing they need in order to.
+message FailureCardRef {
+  // The ConversationItem.uuid of the card to reveal. Empty when the failure
+  // produced no card, and then the referring surface offers no way to reach
+  // one rather than scrolling somewhere arbitrary.
+  string card_uuid = 1;
+}

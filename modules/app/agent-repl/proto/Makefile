@@ -13,7 +13,29 @@ PROTOS := \
   agentshim/data/v1/stream.proto \
   agentshim/data/v1/transcript.proto \
   agentshim/data/v1/journal.proto \
-  agentshim/frontend/v1/frontend.proto
+  agentshim/frontend/v1/agent-emission.proto \
+  agentshim/frontend/v1/async-bubble.proto \
+  agentshim/frontend/v1/durable.proto \
+  agentshim/frontend/v1/errors.proto \
+  agentshim/frontend/v1/failure-card.proto \
+  agentshim/frontend/v1/feed.proto \
+  agentshim/frontend/v1/footer.proto \
+  agentshim/frontend/v1/frame.proto \
+  agentshim/frontend/v1/gate-revival.proto \
+  agentshim/frontend/v1/host.proto \
+  agentshim/frontend/v1/lifecycle.proto \
+  agentshim/frontend/v1/merge.proto \
+  agentshim/frontend/v1/permission-card.proto \
+  agentshim/frontend/v1/prompt-queue.proto \
+  agentshim/frontend/v1/response-bubble.proto \
+  agentshim/frontend/v1/sidebar.proto \
+  agentshim/frontend/v1/slash-menu.proto \
+  agentshim/frontend/v1/state.proto \
+  agentshim/frontend/v1/tokens-menu.proto \
+  agentshim/frontend/v1/tokens.proto \
+  agentshim/frontend/v1/tool-call.proto \
+  agentshim/frontend/v1/topbar.proto \
+  agentshim/frontend/v1/user-bubble.proto
 
 .PHONY: all go ts lint test-check-generated check-generated validate coverage clean
 
