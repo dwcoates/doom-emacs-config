@@ -396,7 +396,7 @@
 ;; module's workspace.el, which owns the persp boundary.
 
 ;; Cmd+<numeral> AND Meta+<numeral> workspace switching live in
-;; `modules/app/agent-repl/keybindings.el' via
+;; `modules/app/agent-repl/lisp/keybindings.el' via
 ;; `agent-repl--install-workspace-jump-overrides', so the merge-sentinel
 ;; reload (which only reloads the agent-repl module's `config.el') picks
 ;; them up automatically.  See that installer for the cross-talk

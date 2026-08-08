@@ -67,9 +67,10 @@
   (let ((module-dir (file-name-directory (or load-file-name
                                               buffer-file-name
                                               default-directory))))
-    (file-name-as-directory (expand-file-name "." module-dir)))
+    (file-name-as-directory (expand-file-name ".." module-dir)))
   "Absolute path to the `modules/app/agent-repl/' directory.
-Anchors the frontend build script and artifact locations.")
+Anchors the frontend build script and artifact locations.
+This file lives in `lisp/', one level below that root, hence the `..'.")
 
 (defconst agent-repl--frontend-build-script
   (expand-file-name "bin/build-frontend.sh" agent-repl--frontend-root)
