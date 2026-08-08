@@ -2167,7 +2167,8 @@ message ReviveSessionCmd {
     // Compact the conversation as the first order of business; prompts are
     // accepted only after compaction lands. This pays the full-context cost
     // ONCE (compaction is a model call over the whole history) instead of on
-    // every subsequent turn.
+    // every subsequent turn. Its own CompactionScope says how much of the
+    // conversation the compaction may summarize away.
     ReviveCompactFirst compact_first = 1;
     // Resume the conversation as-is, full accumulated context and all. The
     // deliberate "I know it's big" path.
@@ -2175,8 +2176,48 @@ message ReviveSessionCmd {
   }
 }
 
-// Marks the compact-first revival choice. Empty: the choice IS the arm.
-message ReviveCompactFirst {}
+// The compact-first revival choice, and WHAT of the conversation the
+// compaction is allowed to summarize away.
+//
+// The arm is no longer empty because "compact" turned out not to be one
+// decision. A conversation's bulk is not evenly distributed: the assistant's
+// own responses are usually the largest part of it, the user's prompts are
+// usually the part they most want back verbatim, and the tool calls and their
+// results are the part an agent needs intact to keep working. So the scope is
+// the user's to state, and stating it is what the four arms of CompactionScope
+// are for.
+message ReviveCompactFirst {
+  // Required; an unspecified scope is a loud nack rather than a default. The
+  // daemon does not choose what to throw away.
+  CompactionScope scope = 1;
+}
+
+// What a revival compaction is allowed to summarize away.
+//
+// EVERY ARM BUT ALL IS A STEERED COMPACTION, carried to the CLI as
+// `/compact <instructions>` — the same session command the unsteered one uses,
+// with the parts to preserve named in the instructions. There is no second
+// compaction mechanism and no local transcript surgery: the harness owns the
+// summary, and the scope is how the user aims it.
+enum CompactionScope {
+  // The refused zero. "No decision" must be unrepresentable, exactly as it is
+  // for the mode oneof above.
+  COMPACTION_SCOPE_UNSPECIFIED = 0;
+  // Summarize the whole conversation, sparing nothing. The original
+  // compact-first behavior, and the cheapest result.
+  COMPACTION_SCOPE_ALL = 1;
+  // Summarize only the assistant's own responses — the purple bubbles — and
+  // keep the user's prompts, the tool calls, and the tool results verbatim.
+  COMPACTION_SCOPE_RESPONSES = 2;
+  // Summarize only the user's prompts and keep everything the agent produced
+  // verbatim. For a conversation whose value is in what was DONE rather than
+  // in how it was asked for.
+  COMPACTION_SCOPE_PROMPTS = 3;
+  // Summarize the user's prompts and the assistant's responses together,
+  // keeping the tool calls and their results verbatim — the conversation's
+  // prose goes, its work survives.
+  COMPACTION_SCOPE_PROMPTS_AND_RESPONSES = 4;
+}
 
 // Marks the resume-verbatim revival choice. Empty: the choice IS the arm.
 message ReviveDirect {}
