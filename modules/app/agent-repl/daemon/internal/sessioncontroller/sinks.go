@@ -1002,10 +1002,30 @@ func (c *consumer) Apply(ev *corev1.Event) error {
 // live query() invocation disagreeing with itself about its own identity,
 // which stays exactly as fatal as it always was and is returned unchanged
 // for the caller to propagate.
+//
+// SEVERITY, AND ONLY SEVERITY, SPLITS ON EPOCH. A rejection whose row was
+// written by a RETIRED query is replayed history: the store serves it again on
+// every bring-up, so leaving it at warn meant one poisoned durable row alarming
+// forever about a fault surfaced once and already fixed at its producer. Such a
+// rejection records in full at info under a decision field. A LIVE rejection is
+// byte-identical to what it always was.
 func (c *consumer) degradeAccountingObservation(ev *corev1.Event, cause error) error {
-	c.logRejectedAccountingObservation(ev, cause)
+	// ONE classification for the whole rejection, made here and threaded down, so
+	// the three records this path emits cannot disagree about the row's epoch.
+	historical := rejectionIsHistorical(c.accounting, ev)
+	c.logRejectedAccountingObservation(ev, cause, historical)
 	if errors.Is(cause, ErrAccountingQueryIdentityContradiction) {
 		return cause
+	}
+	if historical {
+		// THE DEGRADATION ITSELF IS UNCHANGED — the evidence is still unavailable,
+		// the event is still applied, nothing is swallowed. Only the severity of
+		// the record moves, for the same reason its two companion records moved:
+		// a durable row poisoned once by a since-fixed producer would otherwise
+		// re-alarm on every boot forever, about a failure already surfaced.
+		c.logf("session-controller: ACCOUNTING DEGRADED session=%s seq=%d kind=%s historical=true decision=%s — this event's token-utilization evidence is unavailable, but the event itself is still applied and the session establishes normally: %v",
+			c.sessionID, ev.GetSeq(), stateKind(ev), historicalRejectionDecision, cause)
+		return nil
 	}
 	c.warn("session-controller: ACCOUNTING DEGRADED session=%s seq=%d kind=%s — this event's token-utilization evidence is unavailable, but the event itself is still applied and the session establishes normally: %v",
 		c.sessionID, ev.GetSeq(), stateKind(ev), cause)
@@ -1366,9 +1386,18 @@ func (c *consumer) Consume(ev *corev1.Event) error {
 	}
 	observation, utilizationErr := tokenUtilizationObservationFromEvent(ev, c.sessionID, c.accounting.isKnownVendorSession)
 	if utilizationErr != nil {
-		c.logRejectedTokenUtilization(ev, utilizationErr)
-		c.warn("session-controller: token utilization translation DEGRADED session=%s seq=%d kind=%s — invalid accounting was rejected before accounting mutation, but conversation delivery continues: %v",
-			c.sessionID, ev.GetSeq(), stateKind(ev), utilizationErr)
+		historical := rejectionIsHistorical(c.accounting, ev)
+		c.logRejectedTokenUtilization(ev, utilizationErr, historical)
+		if historical {
+			// Replayed row: same demotion as the rejection record it accompanies,
+			// so one row's three records never split across two severities. The
+			// degradation is unchanged — the observation is still discarded below.
+			c.logf("session-controller: token utilization translation DEGRADED session=%s seq=%d kind=%s historical=true decision=%s — invalid accounting was rejected before accounting mutation, but conversation delivery continues: %v",
+				c.sessionID, ev.GetSeq(), stateKind(ev), historicalRejectionDecision, utilizationErr)
+		} else {
+			c.warn("session-controller: token utilization translation DEGRADED session=%s seq=%d kind=%s — invalid accounting was rejected before accounting mutation, but conversation delivery continues: %v",
+				c.sessionID, ev.GetSeq(), stateKind(ev), utilizationErr)
+		}
 		observation = nil
 	}
 	var utilization *frontendv1.TokenUtilization
@@ -1498,7 +1527,7 @@ func (c *consumer) Consume(ev *corev1.Event) error {
 	return nil
 }
 
-// observationIsHistorical answers the rejection log's "was this replayed
+// rejectionIsHistorical answers the rejection log's "was this replayed
 // history?" question through the same classifier the reducer used, so the log
 // can never disagree with the decision it is reporting.
 //
@@ -1506,16 +1535,29 @@ func (c *consumer) Consume(ev *corev1.Event) error {
 // producer-stamped query against the bound live query. An empty stamp is live
 // (fail closed), so a rejection from an unstamped producer is reported as the
 // live contradiction it is.
-func observationIsHistorical(r *turnAccountingReducer, ev *corev1.Event, observation *corev1.AccountUsageObservation) bool {
-	if observation == nil {
-		return false
-	}
+//
+// IT ASKS ABOUT THE EVENT, NOT ABOUT ONE PAYLOAD ARM. An earlier version
+// short-circuited to false whenever the event carried no AccountUsageObservation
+// — but the rejection path is reached by ANY accounting failure, and the most
+// common one is a token-utilization record riding a plain stream response. Every
+// such rejection therefore printed historical=false no matter which query wrote
+// the row, which is how one poisoned durable row (blank model, written by a
+// retired query and fixed shim-side long ago) kept re-announcing itself at warn
+// on every boot while claiming to be live. The event's epoch is a property of
+// its envelope; no payload arm can make a replayed row live.
+func rejectionIsHistorical(r *turnAccountingReducer, ev *corev1.Event) bool {
 	_, historical := r.liveEvidenceFor(ev)
 	return historical
 }
 
-func (c *consumer) logRejectedAccountingObservation(ev *corev1.Event, cause error) {
-	c.logRejectedTokenUtilization(ev, cause)
+// historicalRejectionDecision names the branch a replayed rejection took, for
+// the record that would otherwise be a warn. It is the rejection-path sibling of
+// retain_history_no_bring_up_fault: the record is kept in full, only its
+// severity is withheld.
+const historicalRejectionDecision = "retain_history_no_live_warn"
+
+func (c *consumer) logRejectedAccountingObservation(ev *corev1.Event, cause error, historical bool) {
+	c.logRejectedTokenUtilization(ev, cause, historical)
 	observation := ev.GetAccountUsageObservation()
 	queryID, turnID, boundary := "", "", "unspecified"
 	if observation != nil {
@@ -1533,22 +1575,49 @@ func (c *consumer) logRejectedAccountingObservation(ev *corev1.Event, cause erro
 	// questions: the payload says which query the OBSERVATION is about, the
 	// envelope says which query WROTE it. A rejection cannot be told apart from
 	// a genuine contradiction without the latter.
-	c.warn("session-controller: turn accounting observation REJECTED before mutation session=%s authoritative_query_instance_id=%q query_instance_id=%q event_query_instance_id=%q seq=%d historical=%v request_id=%q turn_id=%q boundary=%s cause=%q kind=%s",
+	const record = "session-controller: turn accounting observation REJECTED before mutation session=%s authoritative_query_instance_id=%q query_instance_id=%q event_query_instance_id=%q seq=%d historical=%v request_id=%q turn_id=%q boundary=%s cause=%q kind=%s"
+	args := []any{
 		c.sessionID, c.accounting.queryID, queryID, ev.GetQueryInstanceId(), ev.GetSeq(),
-		observationIsHistorical(c.accounting, ev, observation),
-		ev.GetRequestId(), turnID, boundary, cause.Error(), stateKind(ev))
+		historical,
+		ev.GetRequestId(), turnID, boundary, cause.Error(), stateKind(ev),
+	}
+	if historical {
+		// INFO, NOT WARN, AND ONLY ON THIS ARM — the same call the typed
+		// termination and the shim degradation already make. A replayed rejection
+		// is a durable row being classified, not a fresh anomaly; the anomaly was
+		// surfaced at warn when it first occurred. The record is unchanged and
+		// complete, only its severity moved, and the decision field names the
+		// branch that moved it.
+		c.logf(record+" decision=%s", append(args, historicalRejectionDecision)...)
+		return
+	}
+	c.warn(record, args...)
 }
 
 // logRejectedTokenUtilization records canonical ingress diagnostics when a
 // token record violates a field-level evidence invariant before frame or
 // durable-state mutation.
-func (c *consumer) logRejectedTokenUtilization(ev *corev1.Event, cause error) {
+//
+// historical is the ONE classifier's verdict for this event, passed in rather
+// than re-derived so this record and the observation record beneath it can never
+// disagree about the same row's epoch.
+func (c *consumer) logRejectedTokenUtilization(ev *corev1.Event, cause error, historical bool) {
 	var invalid *tokenutilization.ValidationError
 	if !errors.As(cause, &invalid) {
 		return
 	}
-	c.warn("session-controller: token utilization REJECTED before mutation field_path=%q api_message_id=%q model=%q source_plane=%s agent_repl_session_id=%q claude_session_id=%q session=%q seq=%d error=%v",
-		invalid.FieldPath, invalid.APIMessageID, invalid.Model, ev.GetPlane().String(), invalid.AgentReplSessionID, invalid.ClaudeSessionID, c.sessionID, ev.GetSeq(), cause)
+	const record = "session-controller: token utilization REJECTED before mutation field_path=%q api_message_id=%q model=%q source_plane=%s agent_repl_session_id=%q claude_session_id=%q session=%q seq=%d error=%v"
+	args := []any{
+		invalid.FieldPath, invalid.APIMessageID, invalid.Model, ev.GetPlane().String(), invalid.AgentReplSessionID, invalid.ClaudeSessionID, c.sessionID, ev.GetSeq(), cause,
+	}
+	if historical {
+		// See the observation record above: full identity retained, severity
+		// withheld, because a replayed row's rejection is history being replayed
+		// rather than news.
+		c.logf(record+" historical=true decision=%s", append(args, historicalRejectionDecision)...)
+		return
+	}
+	c.warn(record, args...)
 }
 
 // surfaceUnexpectedQueryTermination reports an SDK query termination read off
@@ -1882,8 +1951,15 @@ func userTurnReceipt(cd *frontendv1.ConversationDelta) (requestID string, textLe
 func (c *consumer) pushConversation(ev *corev1.Event, live bool) {
 	observation, err := tokenUtilizationObservationFromEvent(ev, c.sessionID, c.accounting.isKnownVendorSession)
 	if err != nil {
-		c.logRejectedTokenUtilization(ev, err)
-		c.warn("session-controller: conversation token utilization DEGRADED session=%s seq=%d — invalid accounting attachment was rejected, but conversation translation continues: %v", c.sessionID, ev.GetSeq(), err)
+		historical := rejectionIsHistorical(c.accounting, ev)
+		c.logRejectedTokenUtilization(ev, err, historical)
+		if historical {
+			// See degradeAccountingObservation: a replayed row's rejection keeps its
+			// full record and loses only its severity.
+			c.logf("session-controller: conversation token utilization DEGRADED session=%s seq=%d historical=true decision=%s — invalid accounting attachment was rejected, but conversation translation continues: %v", c.sessionID, ev.GetSeq(), historicalRejectionDecision, err)
+		} else {
+			c.warn("session-controller: conversation token utilization DEGRADED session=%s seq=%d — invalid accounting attachment was rejected, but conversation translation continues: %v", c.sessionID, ev.GetSeq(), err)
+		}
 		observation = nil
 	}
 	var historicalUsage *frontendv1.TokenUtilization
