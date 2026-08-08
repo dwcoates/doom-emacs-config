@@ -11,7 +11,7 @@ import {
   tokenHeatHue,
   tokensMenuHtml,
   tokensOverlayHtml,
-  turnInputTokens,
+  uncachedInputTokens,
 } from "../src/tokens.js";
 import { generatedSessionUtilization, generatedUngroupedResponse, ungroupedResponse } from "./token-utilization-fixture.js";
 import {
@@ -167,10 +167,29 @@ describe("tokensOverlayHtml top-level section", () => {
     // Assert — the total first, then the resolution it is made of.
     expect(got.slice(0, 4)).toEqual([
       "input|123",
-      "uncached|100",
+      "fresh input|100",
       "cache read|3",
       "cache write|20",
     ]);
+  });
+
+  it("reports the uncached sum, not the fresh-input bucket, as the expensive figure", () => {
+    // Arrange — fresh input and cache WRITE are both nonzero, so only the sum
+    // is the cost; a reader taking "fresh input" for it would be short by 20.
+    const d = data({ topLevel: usage() });
+    // Act
+    const got = rows(tokensOverlayHtml(d));
+    // Assert
+    expect(got).toContain("uncached input|120");
+  });
+
+  it("keeps the cache read out of the uncached figure", () => {
+    // Arrange — a re-read prefix dwarfing everything the turn actually paid for.
+    const d = data({ topLevel: usage({ cache_read_input_tokens: 900_000 }) });
+    // Act
+    const got = rows(tokensOverlayHtml(d));
+    // Assert
+    expect(got).toContain("uncached input|120");
   });
 
   it("carries the top-level output tokens as their own row", () => {
@@ -201,11 +220,12 @@ describe("tokensOverlayHtml whole-tree totals", () => {
     const html = tokensOverlayHtml(d);
     const afterTotals = rows(html.slice(html.indexOf("all agents")));
     // Assert
-    expect(afterTotals.slice(0, 5)).toEqual([
+    expect(afterTotals.slice(0, 6)).toEqual([
       "input|50",
-      "uncached|40",
+      "fresh input|40",
       "cache read|4",
       "cache write|6",
+      "uncached input|46",
       "output|20",
     ]);
   });
@@ -312,15 +332,15 @@ describe("tokensOverlayHtml ungrouped subagent responses", () => {
       "parent agent|parent-agent",
       "subagent type|research",
       "task|inspect evidence",
-      "uncached|11",
+      "fresh input|11",
     ]));
-    expect(rows(firstSection)).not.toContain("uncached|22");
+    expect(rows(firstSection)).not.toContain("fresh input|22");
     expect(rows(secondSection)).toEqual(expect.arrayContaining([
       "API message ID|message-two",
       "parent agent|parent-agent",
-      "uncached|22",
+      "fresh input|22",
     ]));
-    expect(rows(secondSection)).not.toContain("uncached|11");
+    expect(rows(secondSection)).not.toContain("fresh input|11");
   });
 
   it("fails loudly if an ungrouped response lacks subagent lineage", () => {
@@ -407,33 +427,33 @@ describe("tokensOverlayHtml generated session accounting", () => {
   });
 });
 
-describe("turnInputTokens: the NEW input a turn fed the model", () => {
+describe("uncachedInputTokens: the NEW input a turn fed the model", () => {
   it("sums the uncached input and the cache write", () => {
     // Arrange
     const u = usage({ input_tokens: 100, cache_creation_input_tokens: 20 });
     // Act + Assert
-    expect(turnInputTokens(u)).toBe(120);
+    expect(uncachedInputTokens(u)).toBe(120);
   });
 
   it("excludes the cache read, which is the standing prefix presented again", () => {
     // Arrange — a re-read prefix dwarfing everything the turn actually added.
     const u = usage({ input_tokens: 100, cache_creation_input_tokens: 20, cache_read_input_tokens: 900_000 });
     // Act + Assert
-    expect(turnInputTokens(u)).toBe(120);
+    expect(uncachedInputTokens(u)).toBe(120);
   });
 
   it("excludes the output tokens, this being an INPUT figure", () => {
     // Arrange
     const u = usage({ input_tokens: 100, cache_creation_input_tokens: 20, output_tokens: 5_000 });
     // Act + Assert
-    expect(turnInputTokens(u)).toBe(120);
+    expect(uncachedInputTokens(u)).toBe(120);
   });
 
   it("treats an absent cache-write field as no cache write", () => {
     // Arrange — the dimension is optional on the wire.
     const u: Usage = { input_tokens: 100, output_tokens: 40 };
     // Act + Assert
-    expect(turnInputTokens(u)).toBe(100);
+    expect(uncachedInputTokens(u)).toBe(100);
   });
 });
 

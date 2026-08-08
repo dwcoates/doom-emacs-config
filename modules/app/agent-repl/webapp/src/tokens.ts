@@ -90,20 +90,45 @@ export function timingRows(timing: TokenTimingTotals | undefined): Array<[string
 }
 
 /**
- * The NEW input tokens a turn fed the model: uncached input plus the prefix
- * it wrote to cache. This is the figure the progress footer tickers up during
- * a turn and the final-response bubble stamps when it lands, computed here
- * from a result's own turn-scoped `usage` so the two agree.
+ * THE WEBAPP'S ONE DERIVATION of uncached (expensive) input:
+ * `input_tokens` + `cache_creation_input_tokens`.
  *
- * THE CACHE READ IS NOT NEW INPUT and is deliberately excluded. It is the same
- * standing prefix presented to the model again on every request of the turn,
- * so counting it reports the conversation's size times the request count — a
- * 94-request turn against a 500k prefix reads as 47M "input tokens", which is
- * the inflation this exclusion removes. Output is excluded for the same reason
- * it is excluded from the footer: this is an INPUT figure.
+ * THE THREE SDK INPUT BUCKETS ARE DISJOINT and their names describe where the
+ * tokens went, not what they cost. `cache_read_input_tokens` is the ONLY cheap
+ * one; `cache_creation_input_tokens` was processed fresh at full price PLUS the
+ * cache-write premium, and `input_tokens` was processed fresh and never cached
+ * at all — so both of the latter are uncached in every economic sense, and the
+ * sum is the only honest answer to "what did this turn pay for". Reading
+ * `input_tokens` alone reports near zero for a COLD full-context re-ingest,
+ * which is the single case a cost figure exists to catch (module AGENTS.md,
+ * "Uncached input tokens are a SUM, and the field names lie about it").
+ *
+ * THE CACHE READ IS EXCLUDED, and that exclusion is the other half of the
+ * point. It is the same standing prefix presented to the model again on every
+ * request of the turn, so counting it reports the conversation's size times the
+ * request count — a 94-request turn against a 500k prefix reads as 47M "input
+ * tokens". Output is excluded for the same reason it is excluded from the
+ * footer: this is an INPUT figure.
+ *
+ * This is what the response bubble stamps and what `tokenHeatHue` colors; the
+ * progress footer's live ticker is the daemon's side of the SAME arithmetic
+ * (`ProgressView.input_tokens`, from `internal/keepalive.UncachedInputTokens`),
+ * so the live cell converges on the stamp the turn lands with.
  */
-export function turnInputTokens(u: Usage): number {
+export function uncachedInputTokens(u: UncachedInputCounters): number {
   return u.input_tokens + (u.cache_creation_input_tokens ?? 0);
+}
+
+/**
+ * The two counters the derivation needs, and no more. Typing the helper on this
+ * rather than on `Usage` is what lets the breakdown rows — which carry
+ * `UsageDims`, not a wire payload — reach the SAME function instead of
+ * restating the addition, which is the second-derivation defect the contract
+ * names.
+ */
+export interface UncachedInputCounters {
+  input_tokens: number;
+  cache_creation_input_tokens?: number;
 }
 
 /**
@@ -129,8 +154,9 @@ const TOKEN_HEAT_STOPS: readonly (readonly [number, number])[] = [
 ];
 
 /**
- * The hue for a turn's uncached input figure, for the corner stamp and the
- * footer's token cell.
+ * The hue for a turn's UNCACHED input figure (`uncachedInputTokens` — the sum,
+ * never `input_tokens` alone), for the corner stamp and the footer's token
+ * cell. Coloring a single bucket would leave a cold re-ingest reading green.
  *
  * ONLY THE HUE IS COMPUTED HERE. Saturation and lightness belong to the
  * stylesheet, which has to pick different ones for the light and the dark
@@ -233,15 +259,23 @@ function section(title: string, rows: string[]): string {
 
 /**
  * The stat rows one usage payload expands into: the input-side total the
- * chip's convention headlines, its three constituents indented under it,
- * then the output side.
+ * chip's convention headlines, its three DISJOINT buckets indented under it,
+ * the uncached (expensive) sum of two of them, then the output side.
+ *
+ * THE BUCKET ROW IS NAMED "fresh input", NOT "uncached". It is the
+ * `input_tokens` bucket alone, and labeling that "uncached" told the reader the
+ * cheap-versus-expensive split was one row above where it is: cache WRITES are
+ * uncached too. The sum gets its own unindented row so the figure the footer
+ * headlines and heats is present here as a figure rather than as an addition
+ * the reader is left to perform.
  */
 function usageRows(d: UsageDims): string[] {
   return [
     row("input", formatTokens(d.input + d.cacheRead + d.cacheCreation)),
-    row("uncached", formatTokens(d.input), true),
+    row("fresh input", formatTokens(d.input), true),
     row("cache read", formatTokens(d.cacheRead), true),
     row("cache write", formatTokens(d.cacheCreation), true),
+    row("uncached input", formatTokens(uncachedInputTokens({ input_tokens: d.input, cache_creation_input_tokens: d.cacheCreation }))),
     row("output", formatTokens(d.output)),
   ];
 }
@@ -274,7 +308,10 @@ function ungroupedResponseRows(response: TokenUtilization): string[] {
     ...usageRows(dimsOfResponseUsage(usage)),
     row("cache hit rate", percentage(usage.cacheRates?.cacheHitRate)),
     row("cache write rate", percentage(usage.cacheRates?.cacheWriteRate)),
-    row("uncached rate", percentage(usage.cacheRates?.uncachedInputRate)),
+    // "fresh input rate", not "uncached rate": the three rates partition the
+    // prompt input, so this one is the input_tokens BUCKET's share and the
+    // expensive share is this plus the cache-write rate.
+    row("fresh input rate", percentage(usage.cacheRates?.uncachedInputRate)),
     row("service tier", usage.serviceTier || "unavailable"),
     row("speed", usage.speed || "unavailable"),
     row("inference geo", usage.inferenceGeo || "unavailable"),
@@ -309,7 +346,7 @@ function generatedUsageRows(totals: TokenUsageTotals, where: string): string[] {
     row("total prompt input", totals.cacheRates === undefined ? "unavailable" : formatTokens(generatedInt(totals.cacheRates.totalPromptInputTokens, `${where}.cacheRates.totalPromptInputTokens`))),
     row("cache hit rate", totals.cacheRates === undefined ? "unavailable" : percentage(totals.cacheRates.cacheHitRate)),
     row("cache write rate", totals.cacheRates === undefined ? "unavailable" : percentage(totals.cacheRates.cacheWriteRate)),
-    row("uncached rate", totals.cacheRates === undefined ? "unavailable" : percentage(totals.cacheRates.uncachedInputRate)),
+    row("fresh input rate", totals.cacheRates === undefined ? "unavailable" : percentage(totals.cacheRates.uncachedInputRate)),
     row("web searches", totals.serverToolUse === undefined ? "unavailable" : formatTokens(generatedInt(totals.serverToolUse.webSearchRequests, `${where}.serverToolUse.webSearchRequests`))),
     row("web fetches", totals.serverToolUse === undefined ? "unavailable" : formatTokens(generatedInt(totals.serverToolUse.webFetchRequests, `${where}.serverToolUse.webFetchRequests`))),
     row("thinking tokens", totals.outputDetails === undefined ? "unavailable" : formatTokens(generatedInt(totals.outputDetails.thinkingTokens, `${where}.outputDetails.thinkingTokens`))),
