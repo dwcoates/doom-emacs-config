@@ -1,4 +1,15 @@
-/** Canonical validation and normalization for one assistant Messages API usage block. */
+/**
+ * Validation and normalization for one assistant Messages API usage block.
+ *
+ * TRANSLATION ONLY. This module proves the vendor's usage object can be carried
+ * on the typed wire without losing or coercing anything, and it stops there. It
+ * derives no figure from the counters it validates: not the expensive sum, not
+ * the cache-rate partition, not a threshold verdict. Every one of those is the
+ * daemon's, taken from the canonical agentshim.frontend.v1.TokenUsage shape
+ * (the daemon's internal/tokenusage), because a system with two owners of a
+ * cost judgment is a system where the two can disagree about what one turn
+ * spent.
+ */
 import type { JsonObject, JsonValue } from "@bufbuild/protobuf";
 
 const MODELED_API_USAGE_FIELDS = new Set([
@@ -51,49 +62,6 @@ export interface NormalizedApiUsage {
   cacheCreation5mInputTokens: number;
   cacheCreation1hInputTokens: number;
   unknownUsageFields: JsonObject;
-  /**
-   * BUCKET SHARES, NOT A COST MEASURE. The three rates partition the prompt
-   * input and sum to 1, one per disjoint SDK bucket, so `uncachedInputRate` is
-   * the `input_tokens` bucket's share ALONE — NOT the module's "uncached
-   * input", which is the sum `uncachedInputTokens` computes. The EXPENSIVE
-   * share is `uncachedInputRate + cacheWriteRate`.
-   */
-  promptCache:
-    | { case: "empty"; totalPromptInputTokens: 0 }
-    | {
-        case: "rates";
-        totalPromptInputTokens: number;
-        cacheHitRate: number;
-        cacheWriteRate: number;
-        uncachedInputRate: number;
-      };
-}
-
-/**
- * THE SHIM'S ONE DERIVATION of uncached (expensive) input:
- * `input_tokens` + `cache_creation_input_tokens`.
- *
- * The SDK's three input buckets are DISJOINT and their names describe where the
- * tokens went, not what they cost. `cache_read_input_tokens` is the ONLY cheap
- * one; `cache_creation_input_tokens` was processed fresh at full price PLUS the
- * cache-write premium, and `input_tokens` was processed fresh and never cached
- * at all. So both of the latter are uncached in every economic sense.
- *
- * THE SECOND TERM IS WHY THIS IS A FUNCTION. The CLI marks nearly all input
- * cacheable, so a COLD prompt — a full context re-ingest, the most expensive
- * thing that can happen — surfaces as cache CREATION while `input_tokens` stays
- * near zero. Reading `input_tokens` alone reports almost nothing for exactly
- * the case a cost signal exists to catch.
- *
- * See the module AGENTS.md section "Uncached input tokens are a SUM, and the
- * field names lie about it"; the daemon's peer is
- * `internal/keepalive.UncachedInputTokens` and the webapp's is
- * `uncachedInputTokens` in `webapp/src/tokens.ts`.
- */
-export function uncachedInputTokens(
-  usage: Pick<NormalizedApiUsage, "inputTokens" | "cacheCreationInputTokens">,
-): number {
-  return usage.inputTokens + usage.cacheCreationInputTokens;
 }
 
 /** Validate one raw assistant API usage object without defaults for invalid shapes. */
@@ -109,7 +77,6 @@ export function normalizeApiUsage(rawValue: unknown): NormalizedApiUsage {
   const outputTokens = requiredCounter(raw, "output_tokens", ["output_tokens", "outputTokens"]);
   const cacheReadInputTokens = nullableCounter(raw, "cache_read_input_tokens", ["cache_read_input_tokens", "cacheReadInputTokens"]);
   const cacheCreationInputTokens = nullableCounter(raw, "cache_creation_input_tokens", ["cache_creation_input_tokens", "cacheCreationInputTokens"]);
-  const totalPromptInputTokens = inputTokens + cacheReadInputTokens + cacheCreationInputTokens;
   const cacheCreation = nullableObject(raw, "cache_creation", ["cache_creation", "cacheCreation"]);
   const serverToolUse = nullableObject(raw, "server_tool_use", ["server_tool_use", "serverToolUse"]);
   const explicitUnmodeled = nullableObject(raw, "unmodeled_usage", ["unmodeled_usage", "unmodeledUsage"]);
@@ -140,15 +107,6 @@ export function normalizeApiUsage(rawValue: unknown): NormalizedApiUsage {
     cacheCreation5mInputTokens: nestedOptionalCounter(raw, cacheCreation, "cache_creation.ephemeral_5m_input_tokens", "ephemeral_5m_input_tokens"),
     cacheCreation1hInputTokens: nestedOptionalCounter(raw, cacheCreation, "cache_creation.ephemeral_1h_input_tokens", "ephemeral_1h_input_tokens"),
     unknownUsageFields,
-    promptCache: totalPromptInputTokens === 0
-      ? { case: "empty", totalPromptInputTokens: 0 }
-      : {
-          case: "rates",
-            totalPromptInputTokens,
-            cacheHitRate: cacheReadInputTokens / totalPromptInputTokens,
-            cacheWriteRate: cacheCreationInputTokens / totalPromptInputTokens,
-            uncachedInputRate: inputTokens / totalPromptInputTokens,
-        },
   };
 }
 
