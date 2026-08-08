@@ -395,6 +395,11 @@ func compositeWorkspaceState(workspace string, projection resolved, composite Co
 	msg.Connectivity = connectivityProto(composite.Connectivity)
 	msg.Status = statusProto(composite.Status)
 	msg.ControllerGenerationId = string(composite.ControllerGenerationID)
+	// The fence is the renderer-facing PROJECTION of the two identities above.
+	// WorkspaceState remains the sole authority; every per-workspace push
+	// carries a copy of this token so a client can compare and discard a stale
+	// one without ever learning what a session is.
+	msg.Fence = Fence(composite.AgentReplSessionID, string(composite.ControllerGenerationID))
 	switch {
 	// THE STATUS AXIS WON THE RENDER STATE, so the frame's cause, instant and
 	// turn flag come from the row that won it. Keyed on the RESOLVED state

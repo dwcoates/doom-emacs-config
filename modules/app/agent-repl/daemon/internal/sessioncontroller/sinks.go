@@ -17,6 +17,7 @@ import (
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/ssm"
 	"claude-repld/internal/statedb"
+	"claude-repld/internal/tokenusage"
 	"claude-repld/internal/tokenutilization"
 
 	"google.golang.org/protobuf/proto"
@@ -958,7 +959,7 @@ func (c *consumer) Apply(ev *corev1.Event) error {
 	}
 	switch ev.GetPayload().(type) {
 	case *corev1.Event_TaskStarted, *corev1.Event_TaskEnded:
-		catalog := frontend.BuildTaskCatalog(c.workspace, c.sessionID, c.snapshotRing(), c.logf)
+		catalog := frontend.BuildTaskCatalog(c.workspace, c.sessionID, c.fence(), c.snapshotRing(), c.logf)
 		c.logf("session-controller: task catalog push session=%s ws=%s seq=%d event=%s tasks=%d",
 			c.sessionID, c.workspace, ev.GetSeq(), stateKind(ev), len(catalog.GetTasks()))
 		c.push.PushTaskCatalog(catalog)
@@ -1395,7 +1396,7 @@ func (c *consumer) Consume(ev *corev1.Event) error {
 		c.logf("session-controller: historical query lifecycle ACCEPTED without accounting rebind session=%s seq=%d historical_query_instance_id=%q live_query_instance_id=%q lifecycle=%T decision=retain_history_keep_live_handshake_authority",
 			c.sessionID, ev.GetSeq(), historicalQueryID, c.accounting.queryID, ev.GetQueryLifecycle().GetEvent())
 	}
-	terminationFailure, err := frontend.SystemFailureItemFromQueryTermination(c.sessionID, ev.GetQueryLifecycle(), ev.GetQueryLifecycle().GetObservedAtMs())
+	terminationFailure, err := frontend.FailureCardFromQueryTermination(c.sessionID, ev.GetQueryLifecycle(), ev.GetQueryLifecycle().GetObservedAtMs())
 	if err != nil {
 		c.warn("session-controller: typed query termination REJECTED before mutation session=%s seq=%d query_instance_id=%q vendor_session_id=%q vendor_identity_unavailable=%v observed_at_ms=%d error=%v", c.sessionID, ev.GetSeq(), ev.GetQueryLifecycle().GetQueryInstanceId(), ev.GetQueryLifecycle().GetTerminated().GetVendorSessionId(), ev.GetQueryLifecycle().GetTerminated().GetVendorSessionIdentityUnavailable() != nil, ev.GetQueryLifecycle().GetObservedAtMs(), err)
 		return fmt.Errorf("session-controller: translate typed query termination before frame mutation: %w", err)
@@ -1485,7 +1486,7 @@ func (c *consumer) Consume(ev *corev1.Event) error {
 			// Emacs GET /commands HTTP menu.
 			c.push.PushSessionInitView(&frontendv1.SessionInitView{
 				Workspace: c.workspace,
-				SessionId: c.sessionID,
+				Fence:     c.fence(),
 				Init:      si,
 			})
 		}
@@ -1499,7 +1500,7 @@ func (c *consumer) Consume(ev *corev1.Event) error {
 			if refreshed := c.applyCommandsChanged(cc); refreshed != nil {
 				c.push.PushSessionInitView(&frontendv1.SessionInitView{
 					Workspace: c.workspace,
-					SessionId: c.sessionID,
+					Fence:     c.fence(),
 					Init:      refreshed,
 				})
 			}
@@ -1659,10 +1660,10 @@ func (c *consumer) logRejectedTokenUtilization(ev *corev1.Event, cause error, hi
 // duplicate-suppression latch (which would swallow a genuine LIVE termination
 // arriving later through Degraded). The card is still pushed, under the same
 // stable identity, so nothing the user could see is lost.
-func (c *consumer) surfaceUnexpectedQueryTermination(ev *corev1.Event, item *frontendv1.SystemFailureItem, historical bool) {
+func (c *consumer) surfaceUnexpectedQueryTermination(ev *corev1.Event, item *frontendv1.FailureCardView, historical bool) {
 	lifecycle := ev.GetQueryLifecycle()
 	terminated := lifecycle.GetTerminated()
-	detail := item.GetQueryTermination()
+	detail := item.GetKind().GetQueryTermination().GetDetail()
 	reason, cause := "unexpected_eof", ""
 	if failure := terminated.GetIteratorFailure(); failure != nil {
 		reason, cause = "iterator_failure", failure.GetCause()
@@ -1812,7 +1813,7 @@ func (c *consumer) reconcileTasks(ev *corev1.Event, btc *datav1.BackgroundTasksC
 	if err := c.ssm.ReconcileTasks(ev.GetSessionId(), ids); err != nil {
 		c.logf("session-controller: task reconciliation failed session=%s seq=%d: %v", c.sessionID, ev.GetSeq(), err)
 	}
-	c.push.PushTaskCatalog(frontend.BuildTaskCatalog(c.workspace, c.sessionID, c.snapshotRing(), c.logf))
+	c.push.PushTaskCatalog(frontend.BuildTaskCatalog(c.workspace, c.sessionID, c.fence(), c.snapshotRing(), c.logf))
 }
 
 // Backfill states persisted on the registry record and mapped onto
@@ -1982,7 +1983,7 @@ func (c *consumer) pushConversation(ev *corev1.Event, live bool) {
 	if observation != nil && observation.historical {
 		historicalUsage = observation.record
 	}
-	cd, envs, err := frontend.ConversationDeltaFromEvent(c.workspace, ev)
+	cd, envs, err := frontend.ConversationDeltaFromEvent(c.workspace, c.fence(), ev)
 	if err != nil {
 		c.logf("session-controller: conversation translate failed session=%s seq=%d: %v", c.sessionID, ev.GetSeq(), err)
 		return
@@ -1991,7 +1992,8 @@ func (c *consumer) pushConversation(ev *corev1.Event, live bool) {
 		return // known-but-non-conversational vendor payload
 	}
 	for _, item := range cd.GetItems() {
-		assistant := item.GetAssistantMessage()
+		response := item.GetAgent().GetResponse()
+		assistant := response.GetBody()
 		if assistant == nil {
 			continue
 		}
@@ -2010,44 +2012,44 @@ func (c *consumer) pushConversation(ev *corev1.Event, live bool) {
 			// It must never infer identity from the reducer's mutable live turn.
 			utilization = c.accounting.response(assistant.GetId())
 		}
-		if utilization != nil {
-			item.TokenUtilization = append(item.TokenUtilization, proto.Clone(utilization).(*frontendv1.TokenUtilization))
-			if utilization == historicalUsage {
-				c.logf("session-controller: historical token utilization attached session=%s seq=%d api_message_id=%s root_turn_id=absent response_timing=absent", c.sessionID, ev.GetSeq(), utilization.GetApiMessageId())
-			}
+		if utilization == nil {
+			continue
+		}
+		// The DURABLE record no longer rides the feed item; the bubble carries
+		// the RESOLVED figures its corner renders, derived once here. The
+		// evidence layer is untouched — it is still persisted and still
+		// vendor-faithful; what changed is that a renderer is handed the answer
+		// rather than the arithmetic.
+		stamp, err := tokenusage.ResponseStamp(utilization)
+		if err != nil {
+			// Never swallowed and never zero-filled: a stamp the daemon cannot
+			// derive is a defect in the durable record, and a fabricated zero
+			// would read as a free response.
+			c.warn("session-controller: response usage stamp REJECTED session=%s seq=%d api_message_id=%s branch=stamp_omitted error=%v",
+				c.sessionID, ev.GetSeq(), utilization.GetApiMessageId(), err)
+			continue
+		}
+		response.UsageStamp = stamp
+		if utilization == historicalUsage {
+			c.logf("session-controller: historical token utilization attached session=%s seq=%d api_message_id=%s root_turn_id=absent response_timing=absent", c.sessionID, ev.GetSeq(), utilization.GetApiMessageId())
 		}
 	}
+	// TURN ACCOUNTING NO LONGER RIDES THE FEED ITEM. The contract removed the
+	// durable turn_accounting record from ConversationItem: a turn's verdict is
+	// the session's ledger rather than the agent's utterance, and it reaches a
+	// frontend RESOLVED, on FooterAccountingCell. The reconciliation that
+	// produces that cell is not wired yet, so the accounting is consumed here
+	// and rendered nowhere.
+	//
+	// The PRESENCE CHECK stays, unchanged and still fatal. It never asserted
+	// anything about the wire — it asserts that a terminal accounting record
+	// found the turn-result emission it belongs to, which is the invariant that
+	// catches an accounting attributed to the wrong turn.
 	if accounting := c.terminalAccounting[ev.GetSeq()]; accounting != nil {
-		attached := false
-		for _, item := range cd.GetItems() {
-			if item.GetResult() != nil {
-				item.TurnAccounting = accounting
-				attached = true
-			}
-		}
-		if !attached {
+		if !hasTurnResult(cd) {
 			panic(fmt.Sprintf("session-controller: accounting terminal seq=%d had no result item", ev.GetSeq()))
 		}
 		delete(c.terminalAccounting, ev.GetSeq())
-	}
-	c.mu.Lock()
-	completedTerminal := c.completedTerminalBySeq[ev.GetSeq()]
-	c.mu.Unlock()
-	if accounting := completedTerminal; accounting != nil {
-		for _, item := range cd.GetItems() {
-			if item.GetResult() != nil {
-				item.TurnAccounting = accounting
-			}
-		}
-	}
-	if resultFromVendor(ev.GetVendor()) != nil && ev.GetRequestId() != "" {
-		if accounting := c.replayedAccounting[ev.GetRequestId()]; accounting != nil {
-			for _, item := range cd.GetItems() {
-				if item.GetResult() != nil {
-					item.TurnAccounting = accounting
-				}
-			}
-		}
 	}
 	// The harness's isMeta records — a launched skill's body and the notices
 	// around it — become the skill card they belong to, or nothing at all
@@ -2184,7 +2186,7 @@ func (c *consumer) Degraded(_ string, ev *corev1.Event, ds *corev1.DegradedState
 	} else {
 		c.applyRuntimeFault(ds.GetComponent(), classification, !ds.GetRecovered(), faultCauseKind(ds))
 	}
-	item := frontend.SystemFailureItemFromDegradedState(ds, c.now())
+	item := frontend.FailureCardFromDegradedState(ds, c.now())
 	if item == nil {
 		return shimclient.DegradationLive
 	}
@@ -2220,7 +2222,7 @@ func (c *consumer) withholdHistoricalDegradation(ev *corev1.Event, ds *corev1.De
 	c.logf("session-controller: shim degradation WITHHELD from the bring-up gate session=%s ws=%q replayed_query_instance_id=%s live_query_instance_id=%q component=%s reason=%q recovered=%v dropped_count=%d seq=%d decision=retain_history_no_bring_up_fault",
 		c.sessionID, c.workspace, ev.GetQueryInstanceId(), c.accounting.queryID,
 		ds.GetComponent(), ds.GetReason(), ds.GetRecovered(), ds.GetDroppedCount(), ev.GetSeq())
-	item := frontend.SystemFailureItemFromDegradedState(ds, c.now())
+	item := frontend.FailureCardFromDegradedState(ds, c.now())
 	if item == nil {
 		return
 	}
@@ -2254,7 +2256,7 @@ func (c *consumer) withholdHistoricalDegradation(ev *corev1.Event, ds *corev1.De
 // A pair whose retired query id is EMPTY is pushed unlatched. An unkeyed latch
 // would collapse every unidentified replay into one card, and losing a card is
 // worse than logging one twice.
-func (c *consumer) pushHistoricalTerminationCard(retiredQueryID string, item *frontendv1.SystemFailureItem) {
+func (c *consumer) pushHistoricalTerminationCard(retiredQueryID string, item *frontendv1.FailureCardView) {
 	if retiredQueryID != "" {
 		if _, seen := c.historicalTerminationPairs[retiredQueryID]; seen {
 			c.logf("session-controller: replayed termination pair already carded session=%s retired_query_instance_id=%s uuid=%s decision=single_card_per_replayed_pair",
@@ -2313,7 +2315,7 @@ func (c *consumer) ConnectionDegraded(_ string, reason string) {
 func (c *consumer) ConnectionRecovered(_ string) {
 	c.applyRuntimeFault(connectionComponent, faultClassifications[connectionComponent], false, "heartbeat_resumed")
 	item := errclass.ConnectionDegraded("")
-	item.ResolvedAtMs = c.now()
+	errclass.Resolve(item, c.now())
 	c.pushFailure(c.degradedUUID(connectionComponent), item)
 }
 
@@ -2502,7 +2504,7 @@ func (c *consumer) pushLocalItem(item *frontendv1.ConversationItem) {
 	}
 	c.push.PushConversationDelta(&frontendv1.ConversationDelta{
 		Workspace: c.workspace,
-		SessionId: c.sessionID,
+		Fence:     c.fence(),
 		Items:     []*frontendv1.ConversationItem{item},
 	})
 }
@@ -2524,7 +2526,7 @@ func (c *consumer) pushLocalItem(item *frontendv1.ConversationItem) {
 func (c *consumer) pushReplayedReceipt(item *frontendv1.ConversationItem) bool {
 	cd := &frontendv1.ConversationDelta{
 		Workspace: c.workspace,
-		SessionId: c.sessionID,
+		Fence:     c.fence(),
 		Items:     []*frontendv1.ConversationItem{item},
 	}
 	if !c.stampConversationProvenance(cd) {
@@ -2541,7 +2543,7 @@ func (c *consumer) pushReplayedReceipt(item *frontendv1.ConversationItem) bool {
 // edge REPLACES the retained item with its resolved twin, so a resync replays
 // the settled card rather than re-opening an alarm about something that
 // already ended.
-func (c *consumer) pushFailure(uuid string, failure *frontendv1.SystemFailureItem) {
+func (c *consumer) pushFailure(uuid string, failure *frontendv1.FailureCardView) {
 	c.retainFailure(uuid, failure)
 	// THE TWO EDGES ARE NOT THE SAME NEWS, and recording both at warn made the
 	// good one as loud as the bad one: every store bounce that resolved itself
@@ -2552,11 +2554,11 @@ func (c *consumer) pushFailure(uuid string, failure *frontendv1.SystemFailureIte
 	// The record itself is unchanged in wording and in identity, so the open
 	// edge is byte-identical to what it always was.
 	emit := c.warn
-	if failure.GetResolvedAtMs() != 0 {
+	if errclass.IsResolved(failure) {
 		emit = c.logf
 	}
 	emit("session-controller: system failure session=%s uuid=%s type=%s resolved=%v: %s",
-		c.sessionID, uuid, failure.GetErrorType(), failure.GetResolvedAtMs() != 0, failure.GetSourceDetail())
+		c.sessionID, uuid, failureType(failure), errclass.IsResolved(failure), failure.GetDetail())
 	c.pushLocalItem(c.retainedFailure(uuid))
 }
 
@@ -2568,15 +2570,16 @@ func (c *consumer) pushFailure(uuid string, failure *frontendv1.SystemFailureIte
 // successor wired is ordinary progress, and routing that through pushFailure
 // would put a second, differently-worded record on the same edge — the very
 // double-record shape the replayed pair already had.
-func (c *consumer) retainFailure(uuid string, failure *frontendv1.SystemFailureItem) {
+func (c *consumer) retainFailure(uuid string, failure *frontendv1.FailureCardView) {
+	// The ENVELOPE is the card's only address now. It used to be repeated onto
+	// the failure itself so an out-of-feed surface could name the card; the
+	// contract carries that address as FailureCardRef instead, so there is one
+	// copy of it and nothing to keep in step with the envelope.
 	item := &frontendv1.ConversationItem{
 		Uuid: uuid,
 		TsMs: c.now(),
-		Item: &frontendv1.ConversationItem_SystemFailure{SystemFailure: failure},
+		Item: &frontendv1.ConversationItem_FailureCard{FailureCard: failure},
 	}
-	// The failure carries its own addressing so a surface reached OUTSIDE the
-	// feed (a footer row) can still scroll to this card.
-	failure.ItemUuid = uuid
 
 	c.mu.Lock()
 	if c.failItems == nil {
@@ -2611,10 +2614,10 @@ func (c *consumer) retainedFailure(uuid string) *frontendv1.ConversationItem {
 // degradation card for a RETIRED query sat on a healthy session forever — the
 // row is durable, so it came back at every boot and never had a closing edge,
 // which misrepresents a session that is working.
-func (c *consumer) pushWithheldFailure(uuid string, failure *frontendv1.SystemFailureItem) {
+func (c *consumer) pushWithheldFailure(uuid string, failure *frontendv1.FailureCardView) {
 	c.retainFailure(uuid, failure)
 	c.logf("session-controller: system failure session=%s uuid=%s type=%s resolved=%v origin=withheld_replay: %s",
-		c.sessionID, uuid, failure.GetErrorType(), failure.GetResolvedAtMs() != 0, failure.GetSourceDetail())
+		c.sessionID, uuid, failureType(failure), errclass.IsResolved(failure), failure.GetDetail())
 	c.mu.Lock()
 	if c.withheldCards == nil {
 		c.withheldCards = map[string]struct{}{}
@@ -2648,9 +2651,9 @@ func (c *consumer) resolveWithheldDegradations(reason string) {
 	for uuid := range c.withheldCards {
 		uuids = append(uuids, uuid)
 	}
-	items := make(map[string]*frontendv1.SystemFailureItem, len(uuids))
+	items := make(map[string]*frontendv1.FailureCardView, len(uuids))
 	for _, uuid := range uuids {
-		items[uuid] = c.failItems[uuid].GetSystemFailure()
+		items[uuid] = c.failItems[uuid].GetFailureCard()
 	}
 	c.withheldCards = nil
 	c.mu.Unlock()
@@ -2667,14 +2670,14 @@ func (c *consumer) resolveWithheldDegradations(reason string) {
 				c.sessionID, uuid, reason)
 			continue
 		}
-		if failure.GetResolvedAtMs() != 0 {
+		if errclass.IsResolved(failure) {
 			continue
 		}
-		resolved := proto.Clone(failure).(*frontendv1.SystemFailureItem)
-		resolved.ResolvedAtMs = c.now()
+		resolved := proto.Clone(failure).(*frontendv1.FailureCardView)
+		errclass.Resolve(resolved, c.now())
 		c.retainFailure(uuid, resolved)
 		c.logf("session-controller: withheld degradation card RESOLVED session=%s uuid=%s type=%s resolved_at_ms=%d reason=%s decision=live_successor_healthy",
-			c.sessionID, uuid, resolved.GetErrorType(), resolved.GetResolvedAtMs(), reason)
+			c.sessionID, uuid, failureType(resolved), errclass.ResolvedAtMs(resolved), reason)
 		c.pushLocalItem(c.retainedFailure(uuid))
 	}
 }

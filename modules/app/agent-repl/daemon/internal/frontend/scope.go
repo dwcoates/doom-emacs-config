@@ -66,18 +66,22 @@ func scopeFrame(frame *frontendv1.FrontendFrame, sc Scope) (*frontendv1.Frontend
 		return frame, sc.matchesAgentSession(f.SessionView.GetSessionId(), f.SessionView.GetWorkspace())
 	case *frontendv1.FrontendFrame_ConversationDelta:
 		return frame, sc.matchesWorkspace(f.ConversationDelta.GetWorkspace())
+	// The FENCED pushes below carry no session id at all: the contract replaced
+	// it with an opaque staleness token a renderer compares byte-wise and never
+	// parses. There is therefore no id to match a scope's against, and every one
+	// of them routes by workspace exactly as ConversationDelta already did.
 	case *frontendv1.FrontendFrame_TypingDelta:
-		return frame, sc.matchesAgentSession(f.TypingDelta.GetSessionId(), f.TypingDelta.GetWorkspace())
+		return frame, sc.matchesWorkspace(f.TypingDelta.GetWorkspace())
 	case *frontendv1.FrontendFrame_TaskCatalog:
-		return frame, sc.matchesAgentSession(f.TaskCatalog.GetSessionId(), f.TaskCatalog.GetWorkspace())
+		return frame, sc.matchesWorkspace(f.TaskCatalog.GetWorkspace())
 	case *frontendv1.FrontendFrame_SessionInit:
-		return frame, sc.matchesAgentSession(f.SessionInit.GetSessionId(), f.SessionInit.GetWorkspace())
+		return frame, sc.matchesWorkspace(f.SessionInit.GetWorkspace())
 	case *frontendv1.FrontendFrame_Heartbeat:
-		return frame, sc.matchesAgentSession(f.Heartbeat.GetSessionId(), f.Heartbeat.GetWorkspace())
+		return frame, sc.matchesWorkspace(f.Heartbeat.GetWorkspace())
 	case *frontendv1.FrontendFrame_Queue:
-		return frame, sc.matchesAgentSession(f.Queue.GetSessionId(), f.Queue.GetWorkspace())
+		return frame, sc.matchesWorkspace(f.Queue.GetWorkspace())
 	case *frontendv1.FrontendFrame_Progress:
-		return frame, sc.matchesAgentSession(f.Progress.GetSessionId(), f.Progress.GetWorkspace())
+		return frame, sc.matchesWorkspace(f.Progress.GetWorkspace())
 	case *frontendv1.FrontendFrame_ShutdownSchedule:
 		// DAEMON-GLOBAL, listed explicitly rather than left to the default arm.
 		// There is exactly one drain lease for the whole daemon, it carries no
@@ -104,6 +108,12 @@ type scopedView interface {
 	GetWorkspace() string
 }
 
+// workspaceView is a FENCED view: it carries a workspace and no session
+// identity, so its workspace is the only routing key there is.
+type workspaceView interface {
+	GetWorkspace() string
+}
+
 // filterScopedViews retains each session-bearing view only for its exact
 // session scope. A sessionless view may instead route by workspace. The protos
 // themselves remain shared and read-only; only the slice is new.
@@ -111,6 +121,17 @@ func filterScopedViews[T scopedView](views []T, sc Scope) []T {
 	var out []T
 	for _, view := range views {
 		if sc.matchesAgentSession(view.GetSessionId(), view.GetWorkspace()) {
+			out = append(out, view)
+		}
+	}
+	return out
+}
+
+// filterWorkspaceViews retains each fenced view for its workspace alone.
+func filterWorkspaceViews[T workspaceView](views []T, sc Scope) []T {
+	var out []T
+	for _, view := range views {
+		if sc.matchesWorkspace(view.GetWorkspace()) {
 			out = append(out, view)
 		}
 	}
@@ -127,10 +148,10 @@ func filterSnapshot(snap *frontendv1.StateSnapshot, sc Scope) *frontendv1.StateS
 	return &frontendv1.StateSnapshot{
 		Workspaces: filterScopedViews(snap.GetWorkspaces(), sc),
 		Sessions:   filterScopedViews(snap.GetSessions(), sc),
-		Catalogs:   filterScopedViews(snap.GetCatalogs(), sc),
-		Inits:      filterScopedViews(snap.GetInits(), sc),
-		Queues:     filterScopedViews(snap.GetQueues(), sc),
-		Progress:   filterScopedViews(snap.GetProgress(), sc),
+		Catalogs:   filterWorkspaceViews(snap.GetCatalogs(), sc),
+		Inits:      filterWorkspaceViews(snap.GetInits(), sc),
+		Queues:     filterWorkspaceViews(snap.GetQueues(), sc),
+		Progress:   filterWorkspaceViews(snap.GetProgress(), sc),
 		// Daemon identity is connection-global, not workspace-scoped. Dropping
 		// it here handed every scoped client a snapshot with an empty boot id,
 		// which the webapp's version-skew gate rejects on EVERY adoption —

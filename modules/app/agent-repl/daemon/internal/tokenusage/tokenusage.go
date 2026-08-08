@@ -153,3 +153,30 @@ func DeriveRates(u *frontendv1.TokenUsage) (Rates, bool) {
 		FreshInputRate:         float64(u.GetInputMisses().GetUnwritten()) / float64(total),
 	}, true
 }
+
+// ResponseStamp resolves one durable utilization record into the figures an
+// assistant bubble's corner renders.
+//
+// It is the daemon doing the arithmetic ONCE, at the boundary, exactly as every
+// other judgment in this package is: the client renders these four values
+// verbatim and derives nothing. The durable record stays vendor-faithful and is
+// not mutated — the stamp is produced from it, never stored beside it.
+//
+// A nil utilization yields a nil stamp: the response carried no usage record,
+// and the contract says the stamp is ABSENT in that case rather than fabricated
+// as zeros.
+func ResponseStamp(u *frontendv1.TokenUtilization) (*frontendv1.ResponseUsageStamp, error) {
+	if u == nil {
+		return nil, nil
+	}
+	canonical, err := FromVendorUsage(u.GetUsage())
+	if err != nil {
+		return nil, fmt.Errorf("tokenusage: response stamp for api_message_id=%q: %w", u.GetApiMessageId(), err)
+	}
+	return &frontendv1.ResponseUsageStamp{
+		ExpensiveInputTokens: ExpensiveInput(canonical),
+		CacheReadTokens:      int64(canonical.GetInputHits().GetRead()),
+		OutputTokens:         int64(canonical.GetOutputTokens()),
+		Model:                u.GetModel(),
+	}, nil
+}

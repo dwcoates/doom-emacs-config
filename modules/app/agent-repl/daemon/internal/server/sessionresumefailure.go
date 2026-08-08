@@ -145,12 +145,15 @@ func (a resumeEstablishmentAuthority) classify(err error) error {
 }
 
 func sessionResumeFailureDetail(context sessionResumeCommandContext) *frontendv1.SessionResumeFailure {
+	// The agent-repl session id is deliberately absent: a rendering frontend
+	// has no session vocabulary to read it with. What the card shows is the
+	// VENDOR conversation and where it was looked for, all of which is content
+	// and all of which is carried.
 	detail := &frontendv1.SessionResumeFailure{
-		AgentReplSessionId: context.agentReplSessionID,
-		ClaudeSessionId:    context.claudeSessionID,
-		Cwd:                context.cwd,
-		ConfigDir:          context.configDir,
-		ResolvedConfigDir:  context.resolvedConfigDir,
+		ClaudeSessionId:   context.claudeSessionID,
+		Cwd:               context.cwd,
+		ConfigDir:         context.configDir,
+		ResolvedConfigDir: context.resolvedConfigDir,
 	}
 	if context.automaticRestore {
 		detail.Attempt = &frontendv1.SessionResumeFailure_AutomaticRestore{

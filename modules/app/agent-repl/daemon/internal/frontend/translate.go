@@ -201,13 +201,13 @@ func WorkspaceRosterFrame(r *frontendv1.WorkspaceRoster) *frontendv1.FrontendFra
 // round-trip. It is a faithful passthrough — the curation of what streams lives
 // upstream (the shim only emits deltas worth previewing), so this layer never
 // re-types the delta into per-arm strings.
-func TypingDeltaFromContentDelta(workspace, sessionID string, cd *corev1.ContentDelta) *frontendv1.TypingDelta {
+func TypingDeltaFromContentDelta(workspace, fence string, cd *corev1.ContentDelta) *frontendv1.TypingDelta {
 	if cd == nil {
 		return nil
 	}
 	return &frontendv1.TypingDelta{
 		Workspace: workspace,
-		SessionId: sessionID,
+		Fence:     fence,
 		Delta:     cd,
 	}
 }
@@ -224,22 +224,22 @@ func TypingDeltaFromContentDelta(workspace, sessionID string, cd *corev1.Content
 //
 // Returns nil for a nil progress so the caller pushes nothing rather than an
 // empty frame.
-func HeartbeatViewFromProgress(workspace, sessionID string, hp *corev1.HeartbeatProgress) *frontendv1.HeartbeatView {
+func HeartbeatViewFromProgress(workspace, fence string, hp *corev1.HeartbeatProgress) *frontendv1.HeartbeatView {
 	if hp == nil {
 		return nil
 	}
 	return &frontendv1.HeartbeatView{
 		Workspace: workspace,
-		SessionId: sessionID,
+		Fence:     fence,
 		Progress:  hp,
 	}
 }
 
 // ---------------------------------------------------------------------------
-// DegradedState -> SystemFailureItem
+// DegradedState -> FailureCardView
 // ---------------------------------------------------------------------------
 
-// SystemFailureItemFromDegradedState classifies a shim-reported DegradedState
+// FailureCardFromDegradedState classifies a shim-reported DegradedState
 // as a conversation card (F4), replacing the DegradedNotice banner (RETIRED,
 // step 11).
 //
@@ -251,27 +251,27 @@ func HeartbeatViewFromProgress(workspace, sessionID string, hp *corev1.Heartbeat
 // dropped_count finally survives. The banner discarded it, which meant the
 // single most useful fact about a store outage — how much conversation was
 // lost — reached no surface at all.
-func SystemFailureItemFromDegradedState(ds *corev1.DegradedState, atMs int64) *frontendv1.SystemFailureItem {
+func FailureCardFromDegradedState(ds *corev1.DegradedState, atMs int64) *frontendv1.FailureCardView {
 	if ds == nil {
 		return nil
 	}
-	var item *frontendv1.SystemFailureItem
+	var item *frontendv1.FailureCardView
 	if ds.GetComponent() == "claude-shim-sdk" && ds.GetReason() == "unexpected_query_termination" {
 		item = errclass.UnexpectedQueryTermination(ds.GetComponent(), ds.GetReason())
 	} else {
 		item = errclass.Degraded(ds.GetComponent(), ds.GetReason(), int64(ds.GetDroppedCount()))
 	}
 	if ds.GetRecovered() {
-		item.ResolvedAtMs = atMs
+		errclass.Resolve(item, atMs)
 	}
 	return item
 }
 
-// SystemFailureItemFromQueryTermination translates the durable typed query
+// FailureCardFromQueryTermination translates the durable typed query
 // lifecycle record directly into the dedicated frontend failure detail. The
 // generic failure vocabulary remains populated, while every diagnostic field
 // retains the lifecycle record's exact identity and typed cause.
-func SystemFailureItemFromQueryTermination(sessionID string, lifecycle *corev1.QueryLifecycle, observedAtMs int64) (*frontendv1.SystemFailureItem, error) {
+func FailureCardFromQueryTermination(sessionID string, lifecycle *corev1.QueryLifecycle, observedAtMs int64) (*frontendv1.FailureCardView, error) {
 	if lifecycle == nil || lifecycle.GetTerminated() == nil {
 		return nil, nil
 	}
@@ -282,10 +282,14 @@ func SystemFailureItemFromQueryTermination(sessionID string, lifecycle *corev1.Q
 	if sessionID == "" || lifecycle.GetQueryInstanceId() == "" || observedAtMs <= 0 {
 		return nil, fmt.Errorf("typed query termination missing identity session=%q query_instance_id=%q observed_at_ms=%d", sessionID, lifecycle.GetQueryInstanceId(), observedAtMs)
 	}
+	// sessionID is still REQUIRED above and still names the record in every
+	// error below; it simply no longer rides the wire. The contract retired
+	// agent_repl_session_id from this evidence because a rendering frontend has
+	// no session vocabulary to read it with — what it needs is the VENDOR
+	// conversation, which is content, and that is carried unchanged.
 	detail := &frontendv1.QueryTerminationFailure{
-		AgentReplSessionId: sessionID,
-		QueryInstanceId:    lifecycle.GetQueryInstanceId(),
-		ObservedAtMs:       observedAtMs,
+		QueryInstanceId: lifecycle.GetQueryInstanceId(),
+		ObservedAtMs:    observedAtMs,
 	}
 	switch identity := terminated.GetVendorIdentity().(type) {
 	case *corev1.QueryTerminated_VendorSessionId:
@@ -321,7 +325,7 @@ func SystemFailureItemFromQueryTermination(sessionID string, lifecycle *corev1.Q
 		return nil, fmt.Errorf("typed query termination has no unexpected reason session=%q query_instance_id=%q", sessionID, lifecycle.GetQueryInstanceId())
 	}
 	item := errclass.UnexpectedQueryTermination("claude-shim-sdk", "unexpected_query_termination")
-	item.StructuredDetail = &frontendv1.SystemFailureItem_QueryTermination{QueryTermination: detail}
+	item.GetKind().GetQueryTermination().Detail = detail
 	return item, nil
 }
 
@@ -354,7 +358,7 @@ func SystemFailureItemFromQueryTermination(sessionID string, lifecycle *corev1.Q
 // deliberately does not acquire one: a curator that re-derived provenance from
 // live state would produce a different answer on a resync than it did on the
 // original push, which is the exact failure the persisted ledger prevents.
-func ConversationDeltaFromEvent(workspace string, ev *corev1.Event) (*frontendv1.ConversationDelta, map[string]RecordEnvelope, error) {
+func ConversationDeltaFromEvent(workspace, fence string, ev *corev1.Event) (*frontendv1.ConversationDelta, map[string]RecordEnvelope, error) {
 	if ev == nil {
 		return nil, nil, nil
 	}
@@ -382,7 +386,7 @@ func ConversationDeltaFromEvent(workspace string, ev *corev1.Event) (*frontendv1
 	}
 	return &frontendv1.ConversationDelta{
 		Workspace:  workspace,
-		SessionId:  ev.GetSessionId(),
+		Fence:      fence,
 		Items:      items,
 		ThroughSeq: ev.GetSeq(),
 	}, envs, nil
@@ -585,14 +589,18 @@ func systemLineItems(sl *datav1.SystemLine, tsMs int64, requestID string) []*fro
 		// card stays stable and addressable across a resync. The raw api_error
 		// passthrough this arm used to also emit alongside the card is retired
 		// (step 11): both frontends now read the card only.
-		failure := ApiFailureFromLine(sub.ApiError, uuid)
+		failure := ApiFailureFromLine(sub.ApiError)
 		if failure == nil {
 			return nil
 		}
+		// The card's address is the ENVELOPE's uuid now. It used to be repeated
+		// on the failure itself so an out-of-feed surface could still name the
+		// card; the contract carries that address as FailureCardRef instead, so
+		// there is exactly one copy of it and it is derived here.
 		return []*frontendv1.ConversationItem{{
-			Uuid: failure.GetItemUuid(), TsMs: tsMs, RequestId: requestID,
+			Uuid: FailureUUID(uuid), TsMs: tsMs, RequestId: requestID,
 			Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-			Item:   &frontendv1.ConversationItem_SystemFailure{SystemFailure: failure},
+			Item:   &frontendv1.ConversationItem_FailureCard{FailureCard: failure},
 		}}
 	default:
 		return nil
@@ -614,11 +622,11 @@ func FailureUUID(itemUUID string) string {
 // line the SDK will try again is not a failure to report, because the turn is
 // still in flight. Reporting it as one is how a working session came to look
 // broken between attempts.
-func ApiFailureFromLine(ae *datav1.ApiErrorLine, itemUUID string) *frontendv1.SystemFailureItem {
+func ApiFailureFromLine(ae *datav1.ApiErrorLine) *frontendv1.FailureCardView {
 	if ae == nil || errclass.Retrying(ae) {
 		return nil
 	}
-	return errclass.APIError(ae, FailureUUID(itemUUID))
+	return errclass.APIError(ae)
 }
 
 // --- assistant / user / result / compaction items --------------------------
@@ -630,18 +638,67 @@ func assistantItems(a *datav1.AssistantMessage, tsMs int64, requestID string) []
 	return assistantMessageItem(a.GetUuid(), tsMs, requestID, a.GetMessage())
 }
 
-// assistantMessageItem passes an ApiAssistantMessage (text / thinking / tool_use
-// blocks) through into the assistant_message arm. An assistant message with no
-// content blocks has no visual value and is dropped rather than pushed empty.
+// assistantMessageItem curates an ApiAssistantMessage into agent emissions: its
+// reasoning blocks as AgentThinking emissions, in order, and everything else as
+// the AgentResponse that follows them. An assistant message with no content
+// blocks has no visual value and is dropped rather than pushed empty.
+//
+// THE SPLIT IS THE CONTRACT'S EXCLUSIVITY INVARIANT (AgentResponse.body):
+// reasoning is carried once, as its own emission, and stripped from the
+// response body. Carrying it in both is how a frontend that draws both arms
+// draws the agent's reasoning twice; carrying it in neither loses it.
 func assistantMessageItem(uuid string, tsMs int64, requestID string, msg *datav1.ApiAssistantMessage) []*frontendv1.ConversationItem {
 	if msg == nil || len(msg.GetContent()) == 0 {
 		return nil
 	}
-	return []*frontendv1.ConversationItem{{
+	thinking, body := splitThinking(msg)
+	items := make([]*frontendv1.ConversationItem, 0, len(thinking)+1)
+	for i, t := range thinking {
+		items = append(items, &frontendv1.ConversationItem{
+			// Each emission needs its own address, derived from the message's so
+			// it is stable across a resync rather than freshly minted per push.
+			Uuid: fmt.Sprintf("%s#thinking:%d", uuid, i), TsMs: tsMs, RequestId: requestID,
+			Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
+			Item: &frontendv1.ConversationItem_Agent{Agent: &frontendv1.AgentEmission{
+				Emission: &frontendv1.AgentEmission_Thinking{
+					Thinking: &frontendv1.AgentThinking{Body: t},
+				},
+			}},
+		})
+	}
+	if len(body.GetContent()) == 0 {
+		// Reasoning only. There is no response to draw, and pushing an empty one
+		// beside the thinking blocks would put a blank purple bubble under every
+		// reasoning block the model emits on its own.
+		return items
+	}
+	return append(items, &frontendv1.ConversationItem{
 		Uuid: uuid, TsMs: tsMs, RequestId: requestID,
 		Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-		Item:   &frontendv1.ConversationItem_AssistantMessage{AssistantMessage: msg},
-	}}
+		Item: &frontendv1.ConversationItem_Agent{Agent: &frontendv1.AgentEmission{
+			Emission: &frontendv1.AgentEmission_Response{
+				Response: &frontendv1.AgentResponse{Body: body},
+			},
+		}},
+	})
+}
+
+// splitThinking separates an assistant message's reasoning blocks from the rest
+// of its body. The returned message is a copy: the durable original is evidence
+// and is never mutated to make a rendering decision.
+func splitThinking(msg *datav1.ApiAssistantMessage) ([]*datav1.ThinkingBlock, *datav1.ApiAssistantMessage) {
+	var thinking []*datav1.ThinkingBlock
+	body := proto.Clone(msg).(*datav1.ApiAssistantMessage)
+	kept := body.GetContent()[:0]
+	for _, block := range body.GetContent() {
+		if t := block.GetThinking(); t != nil {
+			thinking = append(thinking, t)
+			continue
+		}
+		kept = append(kept, block)
+	}
+	body.Content = kept
+	return thinking, body
 }
 
 func userItems(u *datav1.UserMessage, tsMs int64, requestID string) []*frontendv1.ConversationItem {
@@ -680,7 +737,8 @@ func hasUserContent(msg *datav1.ApiUserMessage) bool {
 	}
 }
 
-// resultItems passes an end-of-turn ResultMessage through into the result arm.
+// resultItems passes an end-of-turn ResultMessage through as the agent's
+// terminal result emission.
 func resultItems(r *datav1.ResultMessage, tsMs int64, requestID string) []*frontendv1.ConversationItem {
 	if r == nil {
 		return nil
@@ -688,7 +746,9 @@ func resultItems(r *datav1.ResultMessage, tsMs int64, requestID string) []*front
 	return []*frontendv1.ConversationItem{{
 		TsMs: tsMs, RequestId: requestID,
 		Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
-		Item:   &frontendv1.ConversationItem_Result{Result: r},
+		Item: &frontendv1.ConversationItem_Agent{Agent: &frontendv1.AgentEmission{
+			Emission: &frontendv1.AgentEmission_TurnResult{TurnResult: r},
+		}},
 	}}
 }
 
@@ -717,7 +777,7 @@ func resultItems(r *datav1.ResultMessage, tsMs int64, requestID string) []*front
 // validating decoder, and because a retained catalog is replayed into every
 // connect snapshot for its session, one such entry used to make the workspace
 // unrenderable forever rather than costing one task's row.
-func BuildTaskCatalog(workspace, sessionID string, events []*corev1.Event, logf dlog.Logf) *frontendv1.TaskCatalog {
+func BuildTaskCatalog(workspace, sessionID, fence string, events []*corev1.Event, logf dlog.Logf) *frontendv1.TaskCatalog {
 	if logf == nil {
 		panic("frontend: BuildTaskCatalog requires a logger")
 	}
@@ -737,18 +797,18 @@ func BuildTaskCatalog(workspace, sessionID string, events []*corev1.Event, logf 
 		case *corev1.Event_TaskStarted:
 			ts := p.TaskStarted
 			e := get(ts.GetTaskId())
-			e.Kind = taskKindString(ts.GetKind())
+			setTaskKind(e, ts.GetKind())
 			e.Description = ts.GetDescription()
 			e.OutputPath = ts.GetOutputPath()
-			e.Status = "running"
+			setTaskRunning(e)
 			e.StartedAtMs = ev.GetProducedAtMs()
 		case *corev1.Event_TaskEnded:
 			te := p.TaskEnded
 			e := get(te.GetTaskId())
-			if e.Kind == "" {
-				e.Kind = taskKindString(te.GetKind())
+			if e.GetKind() == nil {
+				setTaskKind(e, te.GetKind())
 			}
-			e.Status = terminalStatusString(te.GetStatus())
+			setTerminalStatus(e, te.GetStatus())
 			e.EndedAtMs = ev.GetProducedAtMs()
 			if op := te.GetOutputPath(); op != "" {
 				e.OutputPath = op
@@ -759,12 +819,17 @@ func BuildTaskCatalog(workspace, sessionID string, events []*corev1.Event, logf 
 			}
 		}
 	}
-	catalog := &frontendv1.TaskCatalog{Workspace: workspace, SessionId: sessionID}
+	catalog := &frontendv1.TaskCatalog{Workspace: workspace, Fence: fence}
 	for _, id := range order {
 		entry := index[id]
-		if !isFrontendTaskKind(entry.GetKind()) {
-			logf("frontend: REFUSING task %q from the catalog of workspace=%s session=%s — its kind %q is not in the frontend contract's vocabulary (%s); the entry is omitted rather than sent, because one out-of-vocabulary entry makes the whole snapshot undecodable",
-				id, workspace, sessionID, entry.GetKind(), strings.Join(frontendTaskKinds[:], " | "))
+		if entry.GetKind() == nil {
+			logf("frontend: REFUSING task %q from the catalog of workspace=%s session=%s — nothing in the event stream named a kind for it that maps into the frontend contract's vocabulary (%s); the entry is omitted rather than sent kindless",
+				id, workspace, sessionID, strings.Join(frontendTaskKinds[:], " | "))
+			continue
+		}
+		if entry.GetStatus() == nil {
+			logf("frontend: REFUSING task %q from the catalog of workspace=%s session=%s kind=%s — its lifecycle ended with a status the shim left unspecified, and an entry with no status arm is a malformed frame; the entry is omitted rather than drawn as running",
+				id, workspace, sessionID, taskKindName(entry))
 			continue
 		}
 		catalog.Tasks = append(catalog.Tasks, entry)
@@ -821,8 +886,8 @@ func applyBackgroundTasks(
 		if _, ok := live[id]; ok {
 			continue
 		}
-		if e.GetStatus() == "running" {
-			e.Status = terminalStatusString(corev1.TerminalStatus_TERMINAL_STATUS_LOST)
+		if e.GetRunning() != nil {
+			setTerminalStatus(e, corev1.TerminalStatus_TERMINAL_STATUS_LOST)
 			e.EndedAtMs = atMs
 		}
 	}
@@ -834,14 +899,12 @@ func applyBackgroundTasks(
 		if e.GetStartedAtMs() == 0 {
 			e.StartedAtMs = atMs
 		}
-		if e.GetKind() == "" {
+		if e.GetKind() == nil {
 			// The ref carries the SHIM's task_type vocabulary. It is a different
 			// vocabulary from the frontend contract's kind and must be translated
 			// here; copying it through is what put `local_agent` into a retained
 			// catalog and made every snapshot for that session undecodable.
-			if kind, ok := frontendTaskKindFromTaskType(ref.GetTaskType()); ok {
-				e.Kind = kind
-			} else {
+			if !setTaskKindFromTaskType(e, ref.GetTaskType()) {
 				logf("frontend: task %q was referenced with an UNRECOGNIZED shim task_type %q — it maps to no frontend task kind (%s), so the entry stays kindless and is refused by the catalog rather than passed through",
 					ref.GetTaskId(), ref.GetTaskType(), strings.Join(frontendTaskKinds[:], " | "))
 			}
@@ -849,7 +912,7 @@ func applyBackgroundTasks(
 		if e.GetDescription() == "" {
 			e.Description = ref.GetDescription()
 		}
-		e.Status = "running"
+		setTaskRunning(e)
 		e.EndedAtMs = 0
 	}
 }
@@ -910,19 +973,28 @@ func applyResultUsage(view *frontendv1.SessionView, a *anypb.Any) {
 // lowercase strings; conversation payloads carry their typed enums through)
 // ---------------------------------------------------------------------------
 
-// frontendTaskKinds is the CLOSED vocabulary frontendv1.TaskEntry.kind may
-// name (proto/agentshim/frontend/v1/frontend.proto). The webapp's validating
-// decoder rejects a frame carrying anything else, so nothing outside this set
-// may be written into a TaskEntry.
+// frontendTaskKinds names the kinds a daemon-built TaskEntry may carry. The
+// contract's kind oneof has a fourth arm (unclassified), which this builder
+// never mints: the shim vocabulary it translates from has exactly these three
+// members, and naming a fourth would be inventing evidence.
 var frontendTaskKinds = [...]string{"agent", "shell", "workflow"}
 
-func isFrontendTaskKind(kind string) bool {
-	for _, known := range frontendTaskKinds {
-		if kind == known {
-			return true
-		}
+// taskKindName is the display word for an entry's kind arm, for log lines
+// only. A kindless entry reads as "" — the absence itself is what the line
+// reports.
+func taskKindName(e *frontendv1.TaskEntry) string {
+	switch e.GetKind().(type) {
+	case *frontendv1.TaskEntry_Agent:
+		return "agent"
+	case *frontendv1.TaskEntry_Shell:
+		return "shell"
+	case *frontendv1.TaskEntry_Workflow:
+		return "workflow"
+	case *frontendv1.TaskEntry_Unclassified:
+		return "unclassified"
+	default:
+		return ""
 	}
-	return false
 }
 
 // frontendTaskKindFromTaskType translates the SHIM's background-task
@@ -933,47 +1005,62 @@ func isFrontendTaskKind(kind string) bool {
 // BackgroundTaskRef carries only the raw string, so the translation lands here.
 // The second result is false for anything the shim vocabulary does not name —
 // never a guessed kind.
-func frontendTaskKindFromTaskType(taskType string) (string, bool) {
+// The kind and status oneof arms are set THROUGH the entry rather than
+// returned, because protoc-gen-go keeps a oneof's wrapper interface unexported:
+// no function outside the generated package can name the arm type it would have
+// to return. Setting takes the entry and reports whether it named anything.
+func setTaskKindFromTaskType(e *frontendv1.TaskEntry, taskType string) bool {
 	switch taskType {
 	case "local_agent":
-		return "agent", true
+		e.Kind = &frontendv1.TaskEntry_Agent{Agent: &frontendv1.TaskKindAgent{}}
 	case "local_bash":
-		return "shell", true
+		e.Kind = &frontendv1.TaskEntry_Shell{Shell: &frontendv1.TaskKindShell{}}
 	case "local_workflow":
-		return "workflow", true
+		e.Kind = &frontendv1.TaskEntry_Workflow{Workflow: &frontendv1.TaskKindWorkflow{}}
 	default:
-		return "", false
+		return false
 	}
+	return true
 }
 
-func taskKindString(k corev1.TaskKind) string {
+// setTaskKind sets the entry's kind arm from a typed shim TaskKind. UNSPECIFIED
+// leaves the entry KINDLESS — the enum being unset is the ABSENCE of a kind, so
+// the catalog refuses the entry rather than drawing a guess.
+func setTaskKind(e *frontendv1.TaskEntry, k corev1.TaskKind) {
 	switch k {
 	case corev1.TaskKind_TASK_KIND_AGENT:
-		return "agent"
+		e.Kind = &frontendv1.TaskEntry_Agent{Agent: &frontendv1.TaskKindAgent{}}
 	case corev1.TaskKind_TASK_KIND_SHELL:
-		return "shell"
+		e.Kind = &frontendv1.TaskEntry_Shell{Shell: &frontendv1.TaskKindShell{}}
 	case corev1.TaskKind_TASK_KIND_WORKFLOW:
-		return "workflow"
-	default:
-		return "unspecified"
+		e.Kind = &frontendv1.TaskEntry_Workflow{Workflow: &frontendv1.TaskKindWorkflow{}}
 	}
 }
 
-func terminalStatusString(s corev1.TerminalStatus) string {
+// setTerminalStatus sets the entry's status arm from a typed shim
+// TerminalStatus. An UNSPECIFIED status leaves the entry STATUSLESS rather than
+// substituting a stand-in ending: a statusless entry is refused loudly, where a
+// substituted one would be a fabricated ending nobody could tell from a real
+// one.
+func setTerminalStatus(e *frontendv1.TaskEntry, s corev1.TerminalStatus) {
 	switch s {
 	case corev1.TerminalStatus_TERMINAL_STATUS_DONE:
-		return "done"
+		e.Status = &frontendv1.TaskEntry_Done{Done: &frontendv1.TaskStatusDone{}}
 	case corev1.TerminalStatus_TERMINAL_STATUS_ERROR:
-		return "error"
+		e.Status = &frontendv1.TaskEntry_Error{Error: &frontendv1.TaskStatusError{}}
 	case corev1.TerminalStatus_TERMINAL_STATUS_KILLED:
-		return "killed"
+		e.Status = &frontendv1.TaskEntry_Killed{Killed: &frontendv1.TaskStatusKilled{}}
 	case corev1.TerminalStatus_TERMINAL_STATUS_STOPPED:
-		return "stopped"
+		e.Status = &frontendv1.TaskEntry_Stopped{Stopped: &frontendv1.TaskStatusStopped{}}
 	case corev1.TerminalStatus_TERMINAL_STATUS_LOST:
-		return "lost"
-	default:
-		return "unspecified"
+		e.Status = &frontendv1.TaskEntry_Lost{Lost: &frontendv1.TaskStatusLost{}}
 	}
+}
+
+// setTaskRunning marks the entry running, minting a fresh status message so no
+// two entries share one.
+func setTaskRunning(e *frontendv1.TaskEntry) {
+	e.Status = &frontendv1.TaskEntry_Running{Running: &frontendv1.TaskStatusRunning{}}
 }
 
 // ---------------------------------------------------------------------------

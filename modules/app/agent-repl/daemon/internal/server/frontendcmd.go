@@ -1054,14 +1054,20 @@ func (h *commandHandler) OpenWorkspace(ctx context.Context, workspace, requestID
 // A nil resyncer is a construction error, not a degraded mode: the command
 // exists, so something must answer it.
 func (h *commandHandler) Resync(_ context.Context, workspace, requestID string, cmd *frontendv1.ResyncCmd) error {
-	h.logf("frontend cmd: resync ws=%s request_id=%s session=%s generation=%s from_seq=%d", workspace, requestID, cmd.GetSessionId(), cmd.GetControllerGenerationId(), cmd.GetFromSeq())
+	// The client echoes ONE token. It held two identities in agreement before,
+	// which is exactly what the fence removed; the daemon still needs both,
+	// because its eligibility ladder distinguishes a stale session under a
+	// current generation from a stale generation, and it reads them back
+	// through the inverse of the function that minted them.
+	sessionID, generationID := ssm.SplitFence(cmd.GetFence())
+	h.logf("frontend cmd: resync ws=%s request_id=%s session=%s generation=%s from_seq=%d", workspace, requestID, sessionID, generationID, cmd.GetFromSeq())
 	if h.resyncer == nil {
 		h.logf("frontend cmd: resync ws=%s request_id=%s session=%s generation=%s from_seq=%d FAILED — no resyncer is wired, so the conversation replay cannot be served at all (the snapshot half alone would render an empty feed)",
-			workspace, requestID, cmd.GetSessionId(), cmd.GetControllerGenerationId(), cmd.GetFromSeq())
+			workspace, requestID, sessionID, generationID, cmd.GetFromSeq())
 		return fmt.Errorf("frontend cmd: resync ws=%s request_id=%s: no resyncer wired for the conversation replay", workspace, requestID)
 	}
-	if err := h.resyncer.ResyncForGeneration(workspace, cmd.GetSessionId(), cmd.GetControllerGenerationId(), cmd.GetFromSeq()); err != nil {
-		h.logf("frontend cmd: resync ws=%s request_id=%s session=%s generation=%s from_seq=%d FAILED: %v", workspace, requestID, cmd.GetSessionId(), cmd.GetControllerGenerationId(), cmd.GetFromSeq(), err)
+	if err := h.resyncer.ResyncForGeneration(workspace, sessionID, generationID, cmd.GetFromSeq()); err != nil {
+		h.logf("frontend cmd: resync ws=%s request_id=%s session=%s generation=%s from_seq=%d FAILED: %v", workspace, requestID, sessionID, generationID, cmd.GetFromSeq(), err)
 		return err
 	}
 	return nil
@@ -1573,10 +1579,14 @@ func (p *ssmSnapshotProvider) Snapshot() *frontendv1.StateSnapshot {
 	publicationAllowed := sessionPublicationGate(p.workspaceCreation, p.logf)
 	snap.Workspaces = filterPublishedSessionViews(snap.Workspaces, publicationAllowed, p.logf)
 	snap.Sessions = filterPublishedSessionViews(snap.Sessions, publicationAllowed, p.logf)
-	snap.Inits = filterPublishedSessionViews(snap.Inits, publicationAllowed, p.logf)
-	snap.Catalogs = filterPublishedSessionViews(snap.Catalogs, publicationAllowed, p.logf)
-	snap.Queues = filterPublishedSessionViews(snap.Queues, publicationAllowed, p.logf)
-	snap.Progress = filterPublishedSessionViews(snap.Progress, publicationAllowed, p.logf)
+	// The FENCED views carry no session id. The materialization latch is a
+	// per-WORKSPACE decision and still holds them back exactly as before; the
+	// gate simply has no session to name in its record, which it already
+	// tolerates for every sessionless frame.
+	snap.Inits = filterPublishedWorkspaceViews(snap.Inits, publicationAllowed, p.logf)
+	snap.Catalogs = filterPublishedWorkspaceViews(snap.Catalogs, publicationAllowed, p.logf)
+	snap.Queues = filterPublishedWorkspaceViews(snap.Queues, publicationAllowed, p.logf)
+	snap.Progress = filterPublishedWorkspaceViews(snap.Progress, publicationAllowed, p.logf)
 	hostWork := p.workspaceCreation.SnapshotHostWork()
 	snap.WorkspaceAvailable = hostWork.WorkspaceAvailable
 	snap.HostActions = hostWork.HostActions
@@ -1595,6 +1605,33 @@ func (p *ssmSnapshotProvider) Snapshot() *frontendv1.StateSnapshot {
 type sessionPublicationView interface {
 	GetWorkspace() string
 	GetSessionId() string
+}
+
+// workspacePublicationView is a FENCED view: it carries a workspace and no
+// session identity.
+type workspacePublicationView interface {
+	GetWorkspace() string
+}
+
+// filterPublishedWorkspaceViews is filterPublishedSessionViews for the fenced
+// views, asking the same gate the same per-workspace question with no session
+// to name.
+func filterPublishedWorkspaceViews[T workspacePublicationView](views []T, allow func(workspace, sessionID string) (bool, error), logf func(string, ...any)) []T {
+	filtered := make([]T, 0, len(views))
+	for _, view := range views {
+		allowed, err := allow(view.GetWorkspace(), "")
+		if err != nil {
+			if logf != nil {
+				logf("server: SESSION PUBLICATION INVARIANT VIOLATION snapshot workspace=%q session=%q error=%v", view.GetWorkspace(), "", err)
+			}
+			panic(fmt.Sprintf("server: session publication snapshot invariant workspace=%q session=%q: %v", view.GetWorkspace(), "", err))
+		}
+		if !allowed {
+			continue
+		}
+		filtered = append(filtered, view)
+	}
+	return filtered
 }
 
 func filterPublishedSessionViews[T sessionPublicationView](views []T, allow func(workspace, sessionID string) (bool, error), logf func(string, ...any)) []T {
