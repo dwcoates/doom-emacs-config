@@ -120,6 +120,52 @@ export function parkAtTail(box: ScrollTail): void {
   box.scrollTop = box.scrollHeight;
 }
 
+/** Registering a listener for a box's own scroll events. */
+export type SubscribeScroll = (onScroll: () => void) => void;
+
+/** Registering a listener for a box's own size changes. */
+export type SubscribeResize = (onResize: () => void) => void;
+
+/** Everything the tail re-anchor reads and writes on the box it guards. */
+export type ReanchorBox = ScrollTail & ScrollPosition;
+
+/**
+ * Keep BOX parked at its tail across every resize of BOX itself.
+ *
+ * A workspace switch relayouts the feed: Emacs re-displays the webview's
+ * window alongside the input panel, and the WKWebView is resized to the new
+ * geometry. That resize is asynchronous relative to the lisp that triggered
+ * it, so the host's switch snap (`agentReplParkAtTail`, host.ts) and the
+ * resize can land in either order — and a snap that lands FIRST is undone by
+ * the resize, which grows the scrollable height under a scrollTop that stays
+ * put and leaves the feed short of the bottom.
+ *
+ * Re-anchoring on the resize event itself removes the ordering question
+ * rather than betting on one order: snap-then-resize re-parks here, and
+ * resize-then-snap parks against the settled layout. Neither needs the
+ * resize to have finished by any particular moment.
+ *
+ * The decision is the pre-resize sample of `isPinnedToBottom`, not a fresh
+ * one: by the time the resize fires, the new geometry has already moved the
+ * box off its tail, so reading it then would answer about the damage instead
+ * of about what the reader wanted. A box the user had deliberately scrolled
+ * up in keeps its place, exactly as it does under streaming output.
+ */
+export function installTailReanchor(
+  box: ReanchorBox,
+  subscribeScroll: SubscribeScroll,
+  subscribeResize: SubscribeResize,
+  pinPx: number = PIN_PX,
+): void {
+  let pinned = isPinnedToBottom(box, pinPx);
+  subscribeScroll(() => {
+    pinned = isPinnedToBottom(box, pinPx);
+  });
+  subscribeResize(() => {
+    if (pinned) parkAtTail(box);
+  });
+}
+
 /** Where a revealed node lands: flush with the top, or as little as possible. */
 export type RevealBlock = "start" | "nearest";
 
