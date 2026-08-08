@@ -376,7 +376,11 @@ func (c *QueueCoordinator) Drain(_ context.Context) error {
 		c.logf("merge: drain resuming {repo=%s depth=%d head_ws=%s}", repo, len(reqs), reqs[0].Workspace)
 		c.startDrain(repo)
 	}
-	return c.sweepEnqueuing(snap)
+	// BOTH SWEEPS ALWAYS RUN. They answer different questions over the same
+	// snapshot, and a failure in one says nothing about the other — joining
+	// their errors surfaces every workspace a boot could not un-pin rather than
+	// letting the first failure hide the second sweep entirely.
+	return errors.Join(c.sweepEnqueuing(snap), c.sweepOrphanedMerges(snap))
 }
 
 // enqueuingLostCause is what an orphaned merge_enqueuing is failed with. It is
@@ -431,6 +435,111 @@ func (c *QueueCoordinator) sweepEnqueuing(snap map[string][]Request) error {
 		}
 	}
 	return failed
+}
+
+// orphanablePhases are the non-terminal merge phases a workspace can be left
+// resting on by a daemon that died mid-merge, in the order they are swept.
+//
+// merge_after_action is DELIBERATELY ABSENT. Every commit is on the target
+// before that phase is published, so failing it would say a merge that
+// demonstrably happened did not — the same reason a failed after-action rides
+// the terminal `merged` status instead of replacing it. merge_enqueuing is
+// absent too: it has its own sweep, whose retention rule (the durable entry
+// alone) is narrower than this one's.
+var orphanablePhases = []Phase{
+	PhaseMergeQueued,
+	PhaseMerging,
+	PhaseMergeBeforeAction,
+	PhaseMergeConflict,
+}
+
+// orphanedMergeCause is what an orphaned non-terminal merge is failed with. It
+// names the phase and every input the decision resolved, because it is the only
+// account a user gets of a merge that stopped existing between two daemons.
+func orphanedMergeCause(phase Phase) string {
+	return fmt.Sprintf("orphaned_by_restart: the merge was left at %s by a daemon that is gone; "+
+		"its run, its shim lease and its durable queue entry are all gone with it, so nothing can advance this merge", phase)
+}
+
+// sweepOrphanedMerges publishes a terminal merge_failed for every workspace
+// resting on a non-terminal merge phase that NOTHING can advance any more.
+//
+// WHY IT IS NEEDED. merge_enqueuing is not the only phase that can outlive its
+// merge. A daemon killed while a cherry-pick was parked on a conflict leaves the
+// workspace at merge_conflict; the drain's lease release and the queue's own
+// retirement both belong to a process that no longer exists, and if the durable
+// entry went with it there is no replay either. The axis then rests non-terminal
+// forever: prompts are refused against a merge that is not running, the revive
+// path fails its synchronous-prompt invariant, and the kill guard refuses to
+// tear the workspace down because its merge never reached a terminal state.
+// Observed live, on a workspace whose conflict was a NO-OP pick.
+//
+// WHY IT IS CONSERVATIVE. Three separate facts each mean the merge is still
+// accounted for, and ANY ONE of them retains the workspace:
+//   - A DURABLE QUEUE ENTRY. The entry is dropped only by a terminal
+//     retirement, so an entry that survived is a merge this very boot replays.
+//   - AN OPEN LEASE. A lease outliving its daemon is reconstructed by the drain
+//     rather than dropped, and preempting that reconstruction here would fail a
+//     merge that is about to be finished properly.
+//   - A LIVE RUN. Drain is a boot verb but not exclusively one, and a merge this
+//     coordinator is driving right now is the opposite of orphaned.
+//
+// Every decision is loud-logged, retentions as well as failures: a merge
+// reclassified at boot is exactly the event a user later needs to find in the
+// log, and the retentions are what make a sweep that did nothing legible.
+func (c *QueueCoordinator) sweepOrphanedMerges(snap map[string][]Request) error {
+	queued := map[string]struct{}{}
+	for _, reqs := range snap {
+		for _, req := range reqs {
+			queued[req.Workspace] = struct{}{}
+		}
+	}
+	var failed error
+	for _, phase := range orphanablePhases {
+		pinned, err := c.phases.WorkspacesAtPhase(phase)
+		if err != nil {
+			// The sweep could not run for this phase. That is not "nothing to
+			// sweep": any workspace resting there stays wedged, so the boot
+			// says so and keeps sweeping the phases it still can.
+			c.logf("merge: drain orphan sweep FAILED to read the workspaces at %s: %v — any workspace the previous daemon left there stays pinned, and its prompts stay refused", phase, err)
+			failed = errors.Join(failed, fmt.Errorf("merge: drain: read workspaces at %s: %w", phase, err))
+			continue
+		}
+		for _, ws := range pinned {
+			if _, ok := queued[ws]; ok {
+				c.logf("merge: drain orphan sweep RETAINED {ws=%s phase=%s reason=durable_queue_entry} — the merge is replayed by this boot's drain", ws, phase)
+				continue
+			}
+			if c.lease.Held(ws) {
+				c.logf("merge: drain orphan sweep RETAINED {ws=%s phase=%s reason=open_merge_lease} — the lease is reconstructed by the drain, which owns finishing that merge", ws, phase)
+				continue
+			}
+			if c.hasLiveRun(ws) {
+				c.logf("merge: drain orphan sweep RETAINED {ws=%s phase=%s reason=live_run} — this coordinator is driving that merge right now", ws, phase)
+				continue
+			}
+			c.logf("merge: drain orphan sweep FAILING {ws=%s phase=%s} — a non-terminal merge phase with NO durable queue entry, NO open lease and NO live run: the merge is orphaned and nothing will ever advance it, so the axis is cleared to merge_failed", ws, phase)
+			if err := c.emit.emit(ws, PhaseMergeFailed, orphanedMergeCause(phase)); err != nil {
+				c.logf("merge: drain orphan sweep merge_failed record FAILED {ws=%s phase=%s}: %v — the workspace stays pinned", ws, phase, err)
+				failed = errors.Join(failed, err)
+			}
+		}
+	}
+	return failed
+}
+
+// hasLiveRun reports whether this coordinator is currently driving a merge for
+// ws. The park is installed before the cherry-pick starts and removed as the
+// run leaves the coordinator, so it spans exactly the window a merge is live.
+func (c *QueueCoordinator) hasLiveRun(ws string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, park := range c.parks {
+		if park.req.Workspace == ws {
+			return true
+		}
+	}
+	return false
 }
 
 // Resume continues a merge parked on a conflict its human has resolved (the
