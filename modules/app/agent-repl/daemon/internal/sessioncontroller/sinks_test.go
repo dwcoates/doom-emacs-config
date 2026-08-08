@@ -2749,3 +2749,26 @@ func TestSystemFailureCardTakesTheWarnChannel(t *testing.T) {
 		t.Fatalf("warn = %v, want the failure card recorded at warn", logs.warn)
 	}
 }
+
+func TestResolvedSystemFailureCardTakesTheInfoChannel(t *testing.T) {
+	// Arrange -- the CLOSING edge of a failure window. It settles a card the
+	// opening edge already warned about, and warning again made every
+	// self-healing recovery as loud, fleet-wide, as the outage it was not.
+	logs := &levelSplitLogs{}
+	c := degradedAccountingConsumer(logs)
+
+	// Act.
+	c.pushFailure("failure-1", &frontendv1.SystemFailureItem{
+		ErrorType:    frontendv1.ErrorClass_ERROR_CLASS_INTERNAL.String(),
+		SourceDetail: "the store link recovered",
+		ResolvedAtMs: 1720000000000,
+	})
+
+	// Assert.
+	if strings.Contains(strings.Join(logs.warn, "\n"), "system failure session=") {
+		t.Fatalf("warn = %v, want a settled card kept off the warn channel", logs.warn)
+	}
+	if !strings.Contains(strings.Join(logs.info, "\n"), "system failure session=") {
+		t.Fatalf("info = %v, want the settled card recorded at info", logs.info)
+	}
+}
