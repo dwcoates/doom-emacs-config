@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/prompts"
 )
 
 // This file is merge.Coordinator's outbound port onto the AGENT that owns the
@@ -66,28 +67,32 @@ func (r TestFailureResolution) validate() error {
 	return nil
 }
 
-// Prompt is the instruction the resolving agent receives.
+// TestFailurePromptFile is the prompt file this resolution's brief is read
+// from.
 //
-// IT LIVES IN THE MERGE PACKAGE ON PURPOSE, for the same reason
-// merge.ConflictResolution.Prompt does: what the agent may do with a
-// half-landed merge is merge-subsystem knowledge. The daemon commits the staged
-// fix itself as a FOLLOW-UP commit, so an agent that committed, amended, or
-// reset would either duplicate that commit or rewrite the very SHA the
-// already-incorporated probe keys the rest of the replay on.
-func (r TestFailureResolution) Prompt() string {
-	return fmt.Sprintf(`Commit %s from branch %s was just cherry-picked into the worktree at %s, and the repository's test suite now FAILS there.
+// THE TEXT MOVED TO prompts/ so it can be customized without a rebuild, and
+// this constant still binds it to the machinery, for the same reason
+// merge.ConflictPromptFile does: what the agent may do with a half-landed merge
+// is merge-subsystem knowledge. The daemon commits the staged fix itself as a
+// FOLLOW-UP commit, so an agent that committed, amended, or reset would either
+// duplicate that commit or rewrite the very SHA the already-incorporated probe
+// keys the rest of the replay on.
+const TestFailurePromptFile = "merge-test-failure-resolve.md"
 
-Failing output (tail):
----
-%s
----
-
-Fix it in that worktree: change the tests or the code so the suite passes again, and stage every fix with `+"`git add`"+`.
-
-Then STOP. Do NOT commit, do NOT amend, do NOT run `+"`git reset`"+`, `+"`git rebase`"+`, `+"`git cherry-pick`"+`, or any other history-rewriting command. The daemon commits your staged fix as a follow-up commit and re-runs the suite as soon as your turn ends.
-
-You get EXACTLY ONE attempt. If the suite still fails after it, the merge is failed and the target is rolled back to where it was before the merge started — your branch keeps all of its work either way. If you cannot fix it, say so plainly.`,
-		r.FailingCommit, r.SourceBranch, r.TargetDir, dlog.Clamp(r.FailureTail, testFailureTailPromptBytes))
+// Prompt is the instruction the resolving agent receives, read from
+// prompts/TestFailurePromptFile at EVERY use.
+//
+// An error means no prompt could be composed and the caller fails the fix
+// attempt. It never degrades to a partial prompt: the failing output is the
+// whole reason the agent can act at all, so a brief missing it would spend the
+// single permitted attempt on a guess.
+func (r TestFailureResolution) Prompt() (string, error) {
+	return prompts.Render(TestFailurePromptFile, map[string]string{
+		"failing_commit": r.FailingCommit,
+		"source_branch":  r.SourceBranch,
+		"target_dir":     r.TargetDir,
+		"failure_tail":   dlog.Clamp(r.FailureTail, testFailureTailPromptBytes),
+	})
 }
 
 // TestFailureResolver drives the merging workspace's OWN shim to fix a test
