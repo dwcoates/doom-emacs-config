@@ -140,6 +140,40 @@ Both gates in `Server.sweepable` are load-bearing, and neither is redundant:
 Raise `-idle-timeout` when a machine has headroom and bring-up latency is the
 annoyance; lower it when memory is the constraint.
 
+## Uncached input tokens are a SUM, and the field names lie about it
+
+Every cost decision in this module (the compaction cold-read tripwire, token
+accounting, any future budget gate) derives "uncached input" the same way, and
+getting it wrong silently misses the expensive bucket.
+
+The vendor SDK's `Usage` contract (`@anthropic-ai/sdk`
+`resources/messages/messages.d.ts`, mirrored by the agent SDK's `apiUsage`)
+states: "Total input tokens in a request is the summation of `input_tokens`,
+`cache_creation_input_tokens`, and `cache_read_input_tokens`." The three
+buckets are DISJOINT, and their names do not describe their economics:
+
+- `cache_read_input_tokens` — served from the prompt cache. The ONLY cheap
+  bucket (~0.1x the input rate).
+- `cache_creation_input_tokens` — processed fresh at full price PLUS the
+  cache-write premium (~1.25x). "Cache" in the name means the tokens are being
+  written INTO the cache, not served from it.
+- `input_tokens` — processed fresh and never written to the cache at all.
+  These are uncached in every economic sense; they carry no cache label only
+  because they never even entered the cache.
+
+Therefore:
+
+- **uncached input = `input_tokens` + `cache_creation_input_tokens`** — always
+  the sum, never `input_tokens` alone, and never "anything without a cache
+  prefix is cached".
+- A request whose input is dominated by `cache_read_input_tokens` is cheap
+  regardless of size; a request with large `input_tokens` OR large
+  `cache_creation_input_tokens` paid full price for that portion, and a
+  compaction or resume showing either at scale means the prompt cache was cold
+  when it should not have been.
+- Code deriving this uses one named helper with this contract in its doc
+  comment; a second independent derivation is a defect.
+
 ## Committing to master means bouncing what you changed
 
 Every component here is a built artifact, and every running process keeps
