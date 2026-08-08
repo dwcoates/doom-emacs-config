@@ -332,9 +332,17 @@ function userLine(message: ApiUserMessage): TranscriptLine {
 }
 
 /** A merged store Event wrapping a data.v1.TranscriptLine as its vendor payload. */
-function transcriptEvent(seq: bigint, line: TranscriptLine): Event {
+/**
+ * A merged store Event wrapping a data.v1.TranscriptLine (file plane).
+ *
+ * `storeKey` names the seq space the event is filed under, and it matters: the
+ * session positions file-plane evidence against its own QueryCreated store
+ * coordinate, so a rig that resumed under `vendor-uuid` must send merged events
+ * under that key rather than under the shim's `--session-id`.
+ */
+function transcriptEvent(seq: bigint, line: TranscriptLine, storeKey = "sess-1"): Event {
   return create(EventSchema, {
-    sessionId: "sess-1",
+    sessionId: storeKey,
     seq,
     payload: { case: "vendor", value: anyPack(TranscriptLineSchema, line) },
   });
@@ -1015,7 +1023,7 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
           content: queuedNotification,
         }),
       },
-    })));
+    }), "vendor-uuid"));
     await daemon.next(EventSchema);
 
     query.emit({
@@ -1083,7 +1091,7 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
           content: queuedNotification,
         }),
       },
-    })));
+    }), "vendor-uuid"));
     await daemon.next(EventSchema);
 
     query.emit({
@@ -1133,6 +1141,204 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
         duplicate_terminal_sdk_task_ids: ["agent-python"],
         live_sdk_task_ids: ["agent-go"],
         decision: "retain_vendor_message_without_duplicate_task_end",
+      },
+    });
+  });
+
+  it("ignores a task-notification queue transition that predates its own QueryCreated", async () => {
+    // Arrange: a revived conversation replays its whole transcript, so a
+    // `<task-notification>` enqueue from a retired process epoch arrives on the
+    // merged feed BELOW this query's QueryCreated coordinate (seq 1).
+    const { query, store, daemon, session } = await rig({ storeSessionId: "vendor-uuid" });
+    const log = captureLog();
+    store.latest().send(EventSchema, transcriptEvent(1n, create(TranscriptLineSchema, {
+      line: {
+        case: "queueOperation",
+        value: create(QueueOperationLineSchema, {
+          operation: QueueOp.ENQUEUE,
+          content: "<task-notification>stale-epoch</task-notification>",
+        }),
+      },
+    }), "vendor-uuid"));
+    await daemon.next(EventSchema);
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, {
+      requestId: "p1",
+      text: "/compact",
+      promptOrigin: PromptOrigin.USER_SENT,
+    }));
+    const start = await store.peer().next(StoreWriteSchema);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(start.batch!.events.length),
+      lastSeq: 8n,
+    }));
+    await daemon.next(AckSchema);
+
+    // Act
+    query.emit({
+      type: "result",
+      uuid: "compaction-result",
+      session_id: "vendor-uuid",
+      subtype: "success",
+      duration_ms: 100,
+    } as unknown as SdkMessageLike);
+
+    // Assert: the pre-epoch entry retained nothing, so the result closes the turn.
+    const terminal = await store.peer().next(StoreWriteSchema);
+    expect(terminal.batch!.events.map((event) => event.payload.case)).toEqual([
+      "vendor",
+      "accountUsageObservation",
+      "turnEnded",
+    ]);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(terminal.batch!.events.length),
+      lastSeq: 12n,
+    }));
+    await until(() => session.turnCount() === 0);
+  });
+
+  it("releases a turn whose only retention is task notifications no SDK task of this query backs", async () => {
+    // Arrange: an in-epoch enqueue with no task lifecycle behind it at all —
+    // nothing this query instance ran can ever drive its result cycle.
+    const { query, store, daemon, session } = await rig({ storeSessionId: "vendor-uuid" });
+    const log = captureLog();
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, {
+      requestId: "p1",
+      text: "/compact",
+      promptOrigin: PromptOrigin.USER_SENT,
+    }));
+    const start = await store.peer().next(StoreWriteSchema);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(start.batch!.events.length),
+      lastSeq: 8n,
+    }));
+    await daemon.next(AckSchema);
+    store.latest().send(EventSchema, transcriptEvent(9n, create(TranscriptLineSchema, {
+      line: {
+        case: "queueOperation",
+        value: create(QueueOperationLineSchema, {
+          operation: QueueOp.ENQUEUE,
+          content: "<task-notification>unbacked</task-notification>",
+        }),
+      },
+    }), "vendor-uuid"));
+    await daemon.next(EventSchema);
+
+    // Act
+    query.emit({
+      type: "result",
+      uuid: "compaction-result",
+      session_id: "vendor-uuid",
+      subtype: "success",
+      duration_ms: 100,
+    } as unknown as SdkMessageLike);
+
+    // Assert: released rather than retained forever, and said out loud.
+    const terminal = await store.peer().next(StoreWriteSchema);
+    expect(terminal.batch!.events.map((event) => event.payload.case)).toEqual([
+      "vendor",
+      "accountUsageObservation",
+      "turnEnded",
+    ]);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(terminal.batch!.events.length),
+      lastSeq: 12n,
+    }));
+    await until(() => session.turnCount() === 0);
+    expect(log.record("pending task notifications are backed by no SDK task this query instance ever ran")).toMatchObject({
+      level: "warn",
+      request_id: "p1",
+      context: {
+        live_sdk_task_count: 0,
+        sdk_task_count: 0,
+        completed_sdk_task_count: 0,
+        pending_task_notification_count: 1,
+        decision: "release_turn_over_unresolvable_task_notifications",
+      },
+    });
+  });
+
+  it("retains a turn for an in-epoch task notification a completed SDK task backs", async () => {
+    // Arrange: one task of THIS query ran to completion, so its queued
+    // notification can still drive another internal result cycle.
+    const { query, store, daemon, session } = await rig({ storeSessionId: "vendor-uuid" });
+    const log = captureLog();
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, {
+      requestId: "p1",
+      text: "fan out",
+      promptOrigin: PromptOrigin.USER_SENT,
+    }));
+    const start = await store.peer().next(StoreWriteSchema);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(start.batch!.events.length),
+      lastSeq: 8n,
+    }));
+    await daemon.next(AckSchema);
+    query.emit({
+      type: "system",
+      subtype: "task_started",
+      uuid: "task-start-1",
+      session_id: "vendor-uuid",
+      task_id: "agent-go",
+      task_type: "local_agent",
+      tool_use_id: "tool-agent-go",
+      description: "Go hello world",
+    } as unknown as SdkMessageLike);
+    const taskStart = await store.peer().next(StoreWriteSchema);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(taskStart.batch!.events.length),
+      lastSeq: 10n,
+    }));
+    query.emit({
+      type: "system",
+      subtype: "task_notification",
+      uuid: "task-end-1",
+      session_id: "vendor-uuid",
+      task_id: "agent-go",
+      tool_use_id: "tool-agent-go",
+      status: "completed",
+      output_file: "/tmp/agent-go.output",
+      summary: "done",
+    } as unknown as SdkMessageLike);
+    const taskEnd = await store.peer().next(StoreWriteSchema);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(taskEnd.batch!.events.length),
+      lastSeq: 12n,
+    }));
+    store.latest().send(EventSchema, transcriptEvent(13n, create(TranscriptLineSchema, {
+      line: {
+        case: "queueOperation",
+        value: create(QueueOperationLineSchema, {
+          operation: QueueOp.ENQUEUE,
+          content: "<task-notification>agent-go</task-notification>",
+        }),
+      },
+    }), "vendor-uuid"));
+    await daemon.next(EventSchema);
+
+    // Act
+    query.emit({
+      type: "result",
+      uuid: "parent-result",
+      session_id: "vendor-uuid",
+      subtype: "success",
+      duration_ms: 100,
+      origin: { kind: "task_notification" },
+    } as unknown as SdkMessageLike);
+
+    // Assert: no turn end, the turn is still the shim's claim.
+    const retained = await store.peer().next(StoreWriteSchema);
+    expect(retained.batch!.events.map((event) => event.payload.case)).toEqual(["vendor"]);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: 1n,
+      lastSeq: 14n,
+    }));
+    expect(session.turnCount()).toBe(1);
+    expect(log.record("SDK result retained while background-task result cycles remain outstanding")).toMatchObject({
+      request_id: "p1",
+      context: {
+        pending_task_notification_count: 1,
+        sdk_task_count: 1,
+        decision: "retain_turn_for_sdk_task_cycles",
       },
     });
   });
