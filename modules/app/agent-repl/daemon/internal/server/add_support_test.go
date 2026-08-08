@@ -52,6 +52,7 @@ func postAddSupport(t *testing.T, h *harness, id, body string) *http.Response {
 }
 
 func TestAddSupportEmitsACreateForEmacs(t *testing.T) {
+	usePrompts(t)
 	// Arrange.
 	root := t.TempDir()
 	t.Setenv("AGENT_REPL_STATE_DIR", root)
@@ -78,6 +79,7 @@ func TestAddSupportEmitsACreateForEmacs(t *testing.T) {
 }
 
 func TestAddSupportUsesTheSessionCwdAsGitRoot(t *testing.T) {
+	usePrompts(t)
 	// Arrange.
 	root := t.TempDir()
 	t.Setenv("AGENT_REPL_STATE_DIR", root)
@@ -98,6 +100,7 @@ func TestAddSupportUsesTheSessionCwdAsGitRoot(t *testing.T) {
 }
 
 func TestAddSupportPromptNamesTheSessionConfigDir(t *testing.T) {
+	usePrompts(t)
 	// Arrange.
 	root := t.TempDir()
 	t.Setenv("AGENT_REPL_STATE_DIR", root)
@@ -119,6 +122,7 @@ func TestAddSupportPromptNamesTheSessionConfigDir(t *testing.T) {
 }
 
 func TestAddSupportRefusesAnUnknownSession(t *testing.T) {
+	usePrompts(t)
 	// Arrange.
 	root := t.TempDir()
 	t.Setenv("AGENT_REPL_STATE_DIR", root)
@@ -137,6 +141,7 @@ func TestAddSupportRefusesAnUnknownSession(t *testing.T) {
 }
 
 func TestAddSupportRefusesAnInvalidCommand(t *testing.T) {
+	usePrompts(t)
 	// Arrange.
 	root := t.TempDir()
 	t.Setenv("AGENT_REPL_STATE_DIR", root)
@@ -156,6 +161,7 @@ func TestAddSupportRefusesAnInvalidCommand(t *testing.T) {
 }
 
 func TestAddSupportRefusesAnEmptyCommand(t *testing.T) {
+	usePrompts(t)
 	// Arrange.
 	root := t.TempDir()
 	t.Setenv("AGENT_REPL_STATE_DIR", root)
@@ -172,6 +178,7 @@ func TestAddSupportRefusesAnEmptyCommand(t *testing.T) {
 }
 
 func TestAddSupportRefusesAMalformedBody(t *testing.T) {
+	usePrompts(t)
 	// Arrange.
 	root := t.TempDir()
 	t.Setenv("AGENT_REPL_STATE_DIR", root)
@@ -188,6 +195,7 @@ func TestAddSupportRefusesAMalformedBody(t *testing.T) {
 }
 
 func TestAddSupportRefusesASessionWithNoWorkingDirectory(t *testing.T) {
+	usePrompts(t)
 	// Arrange.
 	root := t.TempDir()
 	t.Setenv("AGENT_REPL_STATE_DIR", root)
@@ -205,5 +213,27 @@ func TestAddSupportRefusesASessionWithNoWorkingDirectory(t *testing.T) {
 	}
 	if got := emittedCommands(t, root); len(got) != 0 {
 		t.Errorf("emitted %d creates for a cwd-less session, want 0", len(got))
+	}
+}
+
+func TestAddSupportRefusesWhenThePromptFileIsUnreadable(t *testing.T) {
+	// Arrange — an empty prompts directory stands for a deleted or misnamed
+	// prompt file. Opening a workspace around an empty brief would burn a
+	// worktree, a branch, and a session on nothing, so the request is refused.
+	t.Setenv("AGENT_REPL_PROMPTS_DIR", t.TempDir())
+	root := t.TempDir()
+	t.Setenv("AGENT_REPL_STATE_DIR", root)
+	h := newHarness(t)
+	id := createSession(t, h, `{"cwd":"/w"}`)
+
+	// Act.
+	resp := postAddSupport(t, h, id, `{"command":"status"}`)
+
+	// Assert.
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", resp.StatusCode)
+	}
+	if got := emittedCommands(t, root); len(got) != 0 {
+		t.Fatalf("emitted %d creates, want none when the brief could not be composed", len(got))
 	}
 }
