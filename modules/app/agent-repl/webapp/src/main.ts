@@ -227,6 +227,14 @@ async function boot(): Promise<void> {
   // correlate CommandAcks by requestId and a createSession's pushed SessionView.
   const dispatcher = new CommandDispatcher({
     send: (raw) => (ws as WsClient | undefined)?.send(raw) ?? false,
+    // A command the user pressed for ESTABLISHES the connection it needs. A
+    // hidden Emacs webview has its timers suspended, so the socket's own
+    // scheduled reconnect can still be pending when the user switches to the
+    // workspace and clicks — "Compact first" on a hibernated workspace reported
+    // the daemon down while the daemon was serving every other page.
+    ensureConnected: () => (ws as WsClient | undefined)?.ensureConnected(),
+    whenCurrent: (timeoutMs) =>
+      (ws as WsClient | undefined)?.whenCurrent(timeoutMs) ?? Promise.resolve(false),
     // A REJECTED clientLog cannot be reported through `log`: that forwards
     // another clientLog, earns another rejection, and loops. It still has to be
     // SEEN, so it goes to the logger's local-only path — the same injected
@@ -1329,6 +1337,14 @@ async function boot(): Promise<void> {
       });
       // Its OWN dispatcher is bound to this bootstrap socket so the live
       // session's dispatcher is never repointed at a socket about to close.
+      //
+      // Deliberately NO dial-on-demand here. This socket's lifetime is the
+      // create itself: the boot path opens it, sends exactly one command from
+      // inside the snapshot it just adopted (so the transport is current by
+      // construction at every send), and `finish` closes it. A refused send
+      // therefore means the boot already failed, and re-dialing a socket this
+      // scope is about to close would race its own 15s deadline instead of
+      // recovering anything.
       const bootDispatcher = new CommandDispatcher({
         send: (raw) => bootWs.send(raw),
         logLocal: (message) => log("error", message, { operation: "webapp.bootstrap-client-log-rejected", localOnly: true }),
