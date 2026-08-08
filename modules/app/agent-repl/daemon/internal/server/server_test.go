@@ -61,6 +61,11 @@ type fakeSpawner struct {
 	// stopErr, when set, makes every StopShim report it. A test arranges it
 	// after the sessions whose bring-up it needs are already up.
 	stopErr error
+	// stopHook, when set, runs after the call is recorded and OUTSIDE mu, so a
+	// test may block inside it without serializing every other stop behind this
+	// fake's own bookkeeping lock. It stands in for the real spawner's wait on
+	// the shim's exit, which is what the shutdown drain overlaps.
+	stopHook func(sessionID string)
 }
 
 func (f *fakeSpawner) EnsureShim(_ context.Context, sessionID string) (sessioncontroller.SpawnResult, error) {
@@ -79,10 +84,14 @@ func (f *fakeSpawner) DropResume(sessionID string) (string, error) {
 
 func (f *fakeSpawner) StopShim(sessionID string, _ int32, by shim.Stop) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.stopped = append(f.stopped, sessionID)
 	f.stopBy = append(f.stopBy, by)
-	return f.stopErr
+	hook, err := f.stopHook, f.stopErr
+	f.mu.Unlock()
+	if hook != nil {
+		hook(sessionID)
+	}
+	return err
 }
 
 // stopAttributions returns the attribution each stop carried, so a server-level
@@ -176,7 +185,7 @@ func (f *fakeLegacyTurnEnds) StampLegacyTurnEnd(string, string) (int64, bool) {
 	return f.atMs, f.atMs > 0
 }
 
-func newHarness(t *testing.T) *harness {
+func newHarness(t testing.TB) *harness {
 	return newHarnessWith(t, Config{})
 }
 
@@ -184,7 +193,7 @@ func newHarness(t *testing.T) *harness {
 // fields (RequestShutdown, Accounts, Logins, WidgetAssetsDir,
 // BinaryMTime, IdleSweepTicks). Registry, Controller, SSM, and Frontend are always
 // wired.
-func newHarnessWith(t *testing.T, extra Config) *harness {
+func newHarnessWith(t testing.TB, extra Config) *harness {
 	t.Helper()
 	logf := func(string, ...any) {}
 	reg := registry.Open(filepath.Join(t.TempDir(), "sessions.db"), logf)
@@ -262,7 +271,7 @@ func newHarnessWith(t *testing.T, extra Config) *harness {
 // the createSession FrontendCommand routes to now that POST /sessions is gone.
 // body is the historical JSON request shape, kept because it reads compactly at
 // the call sites; it decodes straight into CreateOpts.
-func createSession(t *testing.T, h *harness, body string) string {
+func createSession(t testing.TB, h *harness, body string) string {
 	t.Helper()
 	id, err := createSessionErr(t, h, body)
 	if err != nil {
@@ -275,7 +284,7 @@ func createSession(t *testing.T, h *harness, body string) string {
 // The harness deliberately has no shim connection, so tests whose precondition
 // is an established route must close the exact generated controller edge
 // themselves rather than reviving the retired legacy wiring projection.
-func markControllerOperational(t *testing.T, h *harness, workspace string) {
+func markControllerOperational(t testing.TB, h *harness, workspace string) {
 	t.Helper()
 	state, found, err := h.ssm.Composite(workspace)
 	if err != nil || !found {
@@ -304,7 +313,7 @@ func markControllerOperational(t *testing.T, h *harness, workspace string) {
 
 // createSessionErr is createSession without the fatal, for the tests that
 // assert on a typed create failure.
-func createSessionErr(t *testing.T, h *harness, body string) (string, error) {
+func createSessionErr(t testing.TB, h *harness, body string) (string, error) {
 	t.Helper()
 	var opts CreateOpts
 	if err := json.Unmarshal([]byte(body), &opts); err != nil {
