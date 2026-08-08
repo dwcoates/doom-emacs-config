@@ -19,7 +19,7 @@ func completeUtilization(sessionID, claudeSessionID, turnID, messageID string) *
 		ApiMessageId:       messageID,
 		Model:              "model",
 		Actor:              &frontendv1.TokenUtilization_MainAgent{MainAgent: &frontendv1.TokenUtilizationMainAgent{}},
-		Usage:              &frontendv1.TokenUsage{OutputTokens: 4},
+		Usage:              &frontendv1.VendorTokenUsage{OutputTokens: 4},
 	}
 }
 

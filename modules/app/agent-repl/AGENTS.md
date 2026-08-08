@@ -140,39 +140,84 @@ Both gates in `Server.sweepable` are load-bearing, and neither is redundant:
 Raise `-idle-timeout` when a machine has headroom and bring-up latency is the
 annoyance; lower it when memory is the constraint.
 
-## Uncached input tokens are a SUM, and the field names lie about it
+## One canonical token shape, and the daemon owns every judgment taken from it
 
-Every cost decision in this module (the compaction cold-read tripwire, token
-accounting, any future budget gate) derives "uncached input" the same way, and
-getting it wrong silently misses the expensive bucket.
+Every cost decision in this module — the compaction cold-read tripwire, the
+cold-ping hibernation, the progress footer's expensive-turn alert, token
+accounting, any future budget gate — reads ONE representation, and it is the
+one that states the economics rather than the vendor's field names.
 
-The vendor SDK's `Usage` contract (`@anthropic-ai/sdk`
-`resources/messages/messages.d.ts`, mirrored by the agent SDK's `apiUsage`)
-states: "Total input tokens in a request is the summation of `input_tokens`,
-`cache_creation_input_tokens`, and `cache_read_input_tokens`." The three
-buckets are DISJOINT, and their names do not describe their economics:
+```proto
+message TokenUsage {
+  TokenCacheHits   input_hits    = 1; // served from the prompt cache — the cheap bucket
+  TokenCacheMisses input_misses  = 2; // processed fresh — the expensive buckets
+  uint64           output_tokens = 3; // there is no output cache; plain total
+}
+message TokenCacheHits  { uint64 read = 1; }
+message TokenCacheMisses {
+  uint64 written   = 1; // entered the cache as it was processed (vendor cache_creation, 1.25x)
+  uint64 unwritten = 2; // never entered the cache at all (vendor input_tokens, 1x)
+}
+```
 
-- `cache_read_input_tokens` — served from the prompt cache. The ONLY cheap
-  bucket (~0.1x the input rate).
-- `cache_creation_input_tokens` — processed fresh at full price PLUS the
-  cache-write premium (~1.25x). "Cache" in the name means the tokens are being
-  written INTO the cache, not served from it.
-- `input_tokens` — processed fresh and never written to the cache at all.
-  These are uncached in every economic sense; they carry no cache label only
-  because they never even entered the cache.
+**The expensive sum is structural, not an addition anyone has to remember.**
+`input_misses` IS what the request paid for at uncached rates, because both of
+its fields missed the cache. That is the entire reason for the nesting. The
+vendor's three counters are disjoint (`@anthropic-ai/sdk`
+`resources/messages/messages.d.ts`: "Total input tokens in a request is the
+summation of `input_tokens`, `cache_creation_input_tokens`, and
+`cache_read_input_tokens`"), and their names describe WHERE the tokens went,
+not what they cost:
 
-Therefore:
+- `cache_read_input_tokens` → `input_hits.read`. Served from the prompt cache;
+  the ONLY cheap bucket (~0.1x the input rate).
+- `cache_creation_input_tokens` → `input_misses.written`. Processed fresh at
+  full price PLUS the cache-write premium (~1.25x). "Cache" in the vendor name
+  means the tokens were being written INTO the cache, not served from it.
+- `input_tokens` → `input_misses.unwritten`. Processed fresh and never written
+  to the cache at all. Uncached in every economic sense; it carries no cache
+  label only because it never entered the cache.
 
-- **uncached input = `input_tokens` + `cache_creation_input_tokens`** — always
-  the sum, never `input_tokens` alone, and never "anything without a cache
-  prefix is cached".
-- A request whose input is dominated by `cache_read_input_tokens` is cheap
-  regardless of size; a request with large `input_tokens` OR large
-  `cache_creation_input_tokens` paid full price for that portion, and a
-  compaction or resume showing either at scale means the prompt cache was cold
-  when it should not have been.
-- Code deriving this uses one named helper with this contract in its doc
-  comment; a second independent derivation is a defect.
+Reading either miss ALONE misses the case the whole apparatus exists to catch:
+the CLI marks nearly all input cacheable, so a cold prompt — a full context
+re-ingest, the most expensive thing that can happen — surfaces almost entirely
+as `written` while `unwritten` stays near zero, and a deliberately uncacheable
+prefix surfaces the other way round.
+
+**Rates are DERIVED, never stored.** The cache-hit / cache-write / fresh-input
+partition is three quotients over these same counters. It is computed at the
+point of use (`daemon/internal/tokenusage.DeriveRates`) and never persisted
+beside the counters it comes from. The three sum to 1, one per disjoint bucket,
+so the fresh-input rate is a SHARE and the expensive share is fresh + write.
+
+### Who does what
+
+- **The shim is a faithful translator and nothing more.** It converts vendor SDK
+  usage into canonical counters at the boundary and does NO token-based
+  processing, gating, flagging, or derived-figure computation. Its usage log
+  carries the raw vendor buckets, verbatim; it derives no sum, no total, no
+  rate, and raises no threshold warning about tokens. (The one warning it does
+  raise is about a usage key the typed contract cannot express, which is a
+  TRANSLATION defect and therefore its own business.)
+- **The daemon is the sole owner of token judgment.** One boundary conversion
+  (`daemon/internal/tokenusage`) produces the canonical shape, and one accessor
+  answers each question: `ExpensiveInput` (both misses), `ContextInput` (misses
+  plus the hit), `DeriveRates`. A second independent derivation anywhere is a
+  defect — that is precisely how two subsystems come to disagree about whether
+  one turn was cold.
+- **The webapp renders what the daemon resolved.** `ProgressView.input_tokens`
+  and the session / per-subagent canonical totals are daemon figures, rendered
+  verbatim, and their absence is a loud failure rather than a cue to re-derive.
+- **Durable evidence stays vendor-faithful, and that is where the mapping
+  happens.** The statedb `token_utilization` and `turn_accounting` rows persist
+  `VendorTokenUsage` and `TokenUsageTotals` as binary protobuf, and a replayed
+  durable stream must reproduce a persisted row BYTE FOR BYTE (`proto.Equal`
+  in `statedb`). Those shapes are therefore FROZEN: adding a populated field,
+  removing one, or changing what one holds breaks the replay of every row an
+  earlier build wrote. The canonical shape is produced FROM them at read time —
+  it is never stored beside them, and the database is not migrated.
+  - `TokenCacheRates` is the one surviving stored rate, kept and kept populated
+    for exactly that reason, and read by no judgment. New code must not read it.
 
 ## Committing to master means bouncing what you changed
 

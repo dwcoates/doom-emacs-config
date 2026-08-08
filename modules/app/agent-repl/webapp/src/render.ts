@@ -21,7 +21,8 @@ import {
   formatTokens,
   TOKEN_HEAT_CLASS,
   tokenHeatStyle,
-  uncachedInputTokens,
+  canonicalTokens,
+  expensiveInput,
 } from "./tokens.js";
 import { formatAge, formatDuration, formatDurationCeil, formatElapsed } from "./duration.js";
 import {
@@ -2023,7 +2024,7 @@ function formatTokenDelta(n: number): string {
  *   is the span the footer's clock cell measured, rather than the span since
  *   the PREVIOUS turn ended (that would bill this turn for however long the
  *   user spent reading before sending the prompt);
- * - the tokens are `uncachedInputTokens(usage)` — a result's `usage` is that
+ * - the tokens are the canonical shape's expensive input — a result's `usage` is that
  *   turn's own usage, not a session-cumulative snapshot, which is exactly the
  *   scope the footer's ticker has.
  *
@@ -2037,7 +2038,15 @@ function resultMeta(chip: ResultItem): string {
   if (chip.durationMs >= 1000) {
     parts.push(`<span class="turn-dur">${escapeHtml(formatDurationCeil(chip.durationMs))}</span>`);
   }
-  const input = uncachedInputTokens(chip.usage);
+  // THROUGH THE CANONICAL SHAPE. A result conversation item is durable evidence
+  // and arrives as vendor buckets, so it passes through the webapp's one
+  // translation rather than having the addition restated here.
+  const input = expensiveInput(canonicalTokens({
+    input: chip.usage.input_tokens,
+    cacheCreation: chip.usage.cache_creation_input_tokens ?? 0,
+    cacheRead: chip.usage.cache_read_input_tokens ?? 0,
+    output: chip.usage.output_tokens,
+  }));
   if (input > 0) {
     // The figure carries its own heat (see tokenHeatHue): a turn's uncached
     // input is the number this corner exists to make noticeable, and a bare

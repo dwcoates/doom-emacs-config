@@ -1,9 +1,19 @@
-/** Canonical accounting logs for completed Anthropic Messages API responses. */
+/**
+ * Raw accounting logs for completed Anthropic Messages API responses.
+ *
+ * THE VENDOR'S BUCKETS, AND NOTHING DERIVED FROM THEM. This log used to carry
+ * an expensive-input sum and a cache-rate partition, and to raise its own
+ * low-reuse warning. All three were token JUDGMENT taken outside the daemon.
+ * The daemon owns every such figure now (its internal/tokenusage, over the
+ * canonical agentshim.frontend.v1.TokenUsage), and it raises the expensive-turn
+ * alert and the cold-ping alarm from it. What is kept here is the raw fidelity:
+ * every counter the vendor reported, verbatim, so the evidence behind the
+ * daemon's verdict is on disk beside it.
+ */
 import { bindLog, type LogFields } from "./uds/log.js";
-import { uncachedInputTokens, type NormalizedApiUsage } from "./api-usage.js";
+import { type NormalizedApiUsage } from "./api-usage.js";
 
 const LOGGER = bindLog({ component: "claude-shim-usage", operation: "shim.usage.assistant_api_response" });
-const CACHE_HIT_RATE_WARNING_THRESHOLD = 0.80;
 function object(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 }
@@ -22,23 +32,16 @@ export function logAssistantApiResponseUsage(
   const outputTokens = usage.outputTokens;
   const cacheReadInputTokens = usage.cacheReadInputTokens;
   const cacheCreationInputTokens = usage.cacheCreationInputTokens;
-  const cacheRates = usage.promptCache.case === "rates" ? usage.promptCache : undefined;
   const fields: LogFields = {
     agent_repl_session_id: agentReplSessionId, claude_session_id: string(sdkMessage["session_id"]), api_message_id: string(message["id"]), api_request_id: optionalString(sdkMessage["request_id"]), model: string(message["model"]),
     input_tokens: inputTokens, output_tokens: outputTokens, cache_read_input_tokens: cacheReadInputTokens, cache_creation_input_tokens: cacheCreationInputTokens,
-    cache_creation_5m_input_tokens: usage.cacheCreation5mInputTokens, cache_creation_1h_input_tokens: usage.cacheCreation1hInputTokens, total_prompt_input_tokens: usage.promptCache.totalPromptInputTokens,
-    // The EXPENSIVE input, logged as its own figure because no bucket carries
-    // it: a reader adding up the per-bucket fields by eye reaches for
-    // input_tokens, which is near zero on exactly the cold re-ingests that cost
-    // the most (see uncachedInputTokens).
-    uncached_input_tokens: uncachedInputTokens(usage),
-    cache_hit_rate: cacheRates?.cacheHitRate, cache_write_rate: cacheRates?.cacheWriteRate, uncached_input_rate: cacheRates?.uncachedInputRate,
+    cache_creation_5m_input_tokens: usage.cacheCreation5mInputTokens, cache_creation_1h_input_tokens: usage.cacheCreation1hInputTokens,
     service_tier: usage.serviceTier, speed: usage.speed, inference_geo: usage.inferenceGeo,
     cache_creation: usage.cacheCreation, server_tool_use: usage.serverToolUse, iterations: usage.iterations, output_tokens_details: usage.outputTokensDetails, cache_diagnostic: usage.cacheDiagnostic, fallback_credit: usage.fallbackCredit, unmodeled_usage: usage.unmodeledUsage, unmodeled_usage_fields: usage.unknownUsageFields,
   };
   const hasUnmodeledUsage = Object.keys(usage.unknownUsageFields).length !== 0;
+  // THE ONE WARNING LEFT IS NOT ABOUT TOKENS. An unmodeled usage field means
+  // the vendor sent something this typed contract cannot express, which is a
+  // TRANSLATION defect and therefore the shim's own business.
   LOGGER.log({ ...fields, ...(hasUnmodeledUsage ? { level: "warn" } : {}) }, hasUnmodeledUsage ? "completed assistant API response usage includes unmodeled fields" : "completed assistant API response usage");
-  if (cacheRates !== undefined && cacheRates.cacheHitRate < CACHE_HIT_RATE_WARNING_THRESHOLD) {
-    LOGGER.log({ ...fields, level: "warn", cache_hit_rate_threshold: CACHE_HIT_RATE_WARNING_THRESHOLD }, "completed assistant API response cache hit rate below threshold");
-  }
 }
