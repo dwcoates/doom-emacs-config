@@ -148,6 +148,7 @@ func TestMergeResolutionSurfacesASubmitRefusal(t *testing.T) {
 // A turn that BINDS and then goes quiet keeps the long bound: the agent is
 // working, and the bind deadline has nothing left to say about it.
 func TestMergeResolutionTurnThatNeverEndsIsAnError(t *testing.T) {
+	usePrompts(t)
 	// Arrange — the resolution turn STARTS and then never reports its end. The
 	// bind bound is left generous so only the work bound can be what fires.
 	h := newMergeResolveHarness(t)
@@ -273,6 +274,7 @@ func TestMergeResolutionOnABusyWorkspaceTakesItsParkedPromptBack(t *testing.T) {
 }
 
 func TestResolveMergeConflictSubmitsThePromptAndCompletesOnItsTurn(t *testing.T) {
+	usePrompts(t)
 	// Arrange.
 	h := newMergeResolveHarness(t)
 	submitted := submitHook(h)
@@ -307,6 +309,7 @@ func TestResolveMergeConflictSubmitsThePromptAndCompletesOnItsTurn(t *testing.T)
 }
 
 func TestResolveMergeConflictRejectsAnIncompleteResolution(t *testing.T) {
+	usePrompts(t)
 	tests := []struct {
 		name string
 		res  merge.ConflictResolution
@@ -337,6 +340,7 @@ func TestResolveMergeConflictRejectsAnIncompleteResolution(t *testing.T) {
 // --- test-failure resolution --------------------------------------------
 
 func TestResolveMergeTestFailureSubmitsThePromptAndCompletesOnItsTurn(t *testing.T) {
+	usePrompts(t)
 	// Arrange.
 	h := newMergeResolveHarness(t)
 	submitted := submitHook(h)
@@ -371,6 +375,7 @@ func TestResolveMergeTestFailureSubmitsThePromptAndCompletesOnItsTurn(t *testing
 }
 
 func TestResolveMergeTestFailureRejectsAnIncompleteResolution(t *testing.T) {
+	usePrompts(t)
 	tests := []struct {
 		name string
 		res  merge.TestFailureResolution
@@ -399,6 +404,7 @@ func TestResolveMergeTestFailureRejectsAnIncompleteResolution(t *testing.T) {
 }
 
 func TestResolveMergeTestFailureTurnThatNeverEndsIsAnError(t *testing.T) {
+	usePrompts(t)
 	// Arrange — a fix turn that STARTS and then never reports its end.
 	h := newMergeResolveHarness(t)
 	h.m.cfg.MergeResolutionTurnBound = time.Second

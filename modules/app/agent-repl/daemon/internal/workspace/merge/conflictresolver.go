@@ -5,6 +5,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+
+	"claude-repld/internal/prompts"
 )
 
 // This file is merge.Coordinator's outbound port onto the AGENT that owns the
@@ -59,24 +61,34 @@ func (r ConflictResolution) validate() error {
 	return nil
 }
 
-// Prompt is the instruction the resolving agent receives.
+// ConflictPromptFile is the prompt file this resolution's brief is read from.
 //
-// IT LIVES IN THE MERGE PACKAGE ON PURPOSE. What the agent may and may not do
-// with a paused cherry-pick is merge-subsystem knowledge, not session-controller
-// knowledge: the coordinator resumes the pick itself (picker.Resume runs
-// `git add -u` + `git cherry-pick --continue`), so an agent that continues or
-// commits on its own would leave the coordinator resuming a pick that is no
-// longer paused — merge.Driver.Resume fails loudly on exactly that. Keeping the
-// text here keeps the instruction and the machinery it describes in one place.
-func (r ConflictResolution) Prompt() string {
-	return fmt.Sprintf(`A cherry-pick of commit %s from branch %s is CONFLICTED in the worktree at %s.
+// THE TEXT MOVED TO prompts/ so it can be customized without a rebuild, and
+// this constant is what still binds the instruction to the machinery it
+// describes. What the agent may and may not do with a paused cherry-pick is
+// merge-subsystem knowledge: the coordinator resumes the pick itself
+// (picker.Resume runs `git add -u` + `git cherry-pick --continue`), so an agent
+// that continues or commits on its own would leave the coordinator resuming a
+// pick that is no longer paused — merge.Driver.Resume fails loudly on exactly
+// that. The file's header names this call site so whoever edits the text can
+// find the machinery behind it.
+const ConflictPromptFile = "merge-conflict-resolve.md"
 
-Resolve every conflict in that worktree and stage each resolution with `+"`git add`"+`.
-
-Then STOP. Do NOT run `+"`git cherry-pick --continue`"+`, do NOT commit, do NOT amend, and do NOT run `+"`git cherry-pick --abort`"+` or `+"`git reset`"+`. The daemon resumes the pick itself as soon as your turn ends, and it can only do that against a cherry-pick that is still paused.
-
-If the conflicts cannot be resolved, say so plainly and leave the tree as you found it — a human takes it from there.`,
-		r.ConflictCommit, r.SourceBranch, r.TargetDir)
+// Prompt is the instruction the resolving agent receives, read from
+// prompts/ConflictPromptFile at EVERY use so an edit takes effect on the next
+// conflict without a rebuild or a daemon restart.
+//
+// An error means no prompt could be composed — the file is missing, unreadable,
+// or its placeholders no longer match this call site. The caller fails the
+// resolution rather than sending an approximation: an agent pointed at the
+// wrong worktree, or handed a literal "{{target_dir}}", would corrupt the very
+// merge it was summoned to repair.
+func (r ConflictResolution) Prompt() (string, error) {
+	return prompts.Render(ConflictPromptFile, map[string]string{
+		"conflict_commit": r.ConflictCommit,
+		"source_branch":   r.SourceBranch,
+		"target_dir":      r.TargetDir,
+	})
 }
 
 // ConflictResolver drives the ORIGINAL workspace's own shim to resolve a merge
