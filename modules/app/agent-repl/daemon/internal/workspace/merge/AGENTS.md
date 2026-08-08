@@ -66,6 +66,24 @@ and re-runs the suite.
   cause names the failed reset. A merge whose Result carries no pre-merge head
   (which no valid `merge.Driver` Merge produces) is failed with that absence
   named rather than papered over.
+- **THE ROLLBACK IS GUARDED AGAINST WRITERS THIS SUBSYSTEM DOES NOT CONTROL.**
+  The reset fires at the END of the resolution window, which is an agent turn
+  and therefore unbounded, and nothing here keeps the target still meanwhile:
+  the merge lease claims the merging workspace's SESSION
+  (`internal/ssm/mergelease.go`), and the queue only serializes merges against
+  each other, so a human or another agent committing straight into the target
+  checkout is a write the pipeline neither excludes nor sees. So the failing
+  gate records the head it tested (`Result.TestedHead`) and
+  `merge.Driver.Rollback` REFUSES to reset a target that has moved off it. A
+  refused rollback leaves the target carrying the commits that failed the
+  suite — worse than a clean rollback, and far better than making somebody
+  else's commit unreachable from every ref.
+- **THE SUITE'S COMPLETE OUTPUT IS ARCHIVED, and the cause names the file.**
+  The tail is clamped, and the repository's entrypoint keeps running suites
+  after one fails, so the retained bytes are routinely the LAST suites'
+  coverage tables rather than the failure. `merge.SuiteRunner` writes the whole
+  run to a file and reports its path on `SuiteResult.OutputPath`; an archive
+  that cannot be written is logged loudly and named in the tail, never dropped.
 
 ## Conflict resolution is shim-driven first, human second
 
