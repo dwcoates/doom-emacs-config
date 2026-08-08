@@ -303,3 +303,95 @@ func TestInterruptedIsRankedInThePrecedenceTable(t *testing.T) {
 		t.Fatalf("resolve = (found %v, %s), want a found INTERRUPTED — the token is unranked", got.found, renderName(got.state))
 	}
 }
+
+// ---------------------------------------------------------------------------
+// THE MARK AS EVIDENCE. A standing mark is a shim contradicting its own ack: it
+// answered a stop with INTERRUPTED, which claims a turn was live and has been
+// aborted, and the mark is spent by that turn's end and dropped by any later
+// start. So one still standing says no boundary of any kind has arrived since.
+// ---------------------------------------------------------------------------
+
+// The age is measured from the ack, so a caller can tell a moment's latency
+// apart from a stop that was never answered at all.
+func TestUnansweredInterruptAgeGrowsWithTheClock(t *testing.T) {
+	// Arrange.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
+		t.Fatalf("turn started: %v", err)
+	}
+	if err := m.MarkTurnInterrupted("ws1"); err != nil {
+		t.Fatalf("mark: %v", err)
+	}
+	marked := m.lastAt
+
+	// Act — the clock moves five minutes past the ack.
+	m.clock = func() int64 { return marked + 300_000 }
+	age, standing := m.UnansweredInterruptAgeMs("ws1")
+
+	// Assert.
+	if !standing || age != 300_000 {
+		t.Fatalf("UnansweredInterruptAgeMs = (%d, %v), want (300000, true)", age, standing)
+	}
+}
+
+// A WORKSPACE WITH NO STANDING STOP HAS NOTHING TO CONTRADICT. Reporting an age
+// for one would invent evidence against a claim nobody has questioned.
+func TestUnansweredInterruptAgeReportsNoStandingMark(t *testing.T) {
+	// Arrange.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+
+	// Act.
+	age, standing := m.UnansweredInterruptAgeMs("ws1")
+
+	// Assert.
+	if standing || age != 0 {
+		t.Fatalf("UnansweredInterruptAgeMs = (%d, %v), want (0, false) for a workspace no stop was ever acked on", age, standing)
+	}
+}
+
+// THE MARK IS SPENT BY THE TURN IT STOPPED. Once that end arrives the shim has
+// answered, and nothing is outstanding for a reconciliation to act on.
+func TestUnansweredInterruptAgeClearsWhenTheStoppedTurnEnds(t *testing.T) {
+	// Arrange.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
+		t.Fatalf("turn started: %v", err)
+	}
+	if err := m.MarkTurnInterrupted("ws1"); err != nil {
+		t.Fatalf("mark: %v", err)
+	}
+
+	// Act.
+	if err := applyTest(m, evTurnEndedReason("s1", 2, "aborted", true)); err != nil {
+		t.Fatalf("turn ended: %v", err)
+	}
+	_, standing := m.UnansweredInterruptAgeMs("ws1")
+
+	// Assert.
+	if standing {
+		t.Fatal("a mark stands after the stopped turn's own end arrived; the shim answered, so there is nothing left unanswered")
+	}
+}
+
+// A MARK STAMPED IN THE FUTURE IS A CLOCK THAT MOVED, not a stop answered before
+// it was sent. The conservative direction is to report it as freshly marked.
+func TestUnansweredInterruptAgeSurvivesABackwardsClock(t *testing.T) {
+	// Arrange.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	if err := applyTest(m, evTurnStarted("s1", 1)); err != nil {
+		t.Fatalf("turn started: %v", err)
+	}
+	if err := m.MarkTurnInterrupted("ws1"); err != nil {
+		t.Fatalf("mark: %v", err)
+	}
+	marked := m.lastAt
+
+	// Act.
+	m.clock = func() int64 { return marked - 60_000 }
+	age, standing := m.UnansweredInterruptAgeMs("ws1")
+
+	// Assert.
+	if !standing || age != 0 {
+		t.Fatalf("UnansweredInterruptAgeMs = (%d, %v), want (0, true); a backwards clock must not age a mark negatively", age, standing)
+	}
+}

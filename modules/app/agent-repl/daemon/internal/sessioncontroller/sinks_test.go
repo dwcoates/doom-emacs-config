@@ -246,6 +246,17 @@ type fakeApplier struct {
 	// different proof again from either close above.
 	originTurnCloses []originTurnCloseCall
 	originTurnErr    error
+	// unansweredInterrupt is the standing INTERRUPTED ack the shim never
+	// honoured, in millis of age. A zero age with marked unset is the ordinary
+	// case: no stop is outstanding.
+	unansweredInterruptMs int64
+	unansweredInterrupt   bool
+	// lastActivity is when anything last happened on the workspace.
+	// lastActivityKnown unset models a workspace with no history at all, which
+	// is UNKNOWN rather than idle.
+	lastActivityMs    int64
+	lastActivityKnown bool
+	lastActivityErr   error
 	// mergeLeases names the workspaces merge.Coordinator holds the exclusivity
 	// lease on. Empty is the ordinary case: no merge is running.
 	mergeLeases map[string]bool
@@ -720,6 +731,20 @@ func (f *fakeApplier) recordedOriginTurnCloses() []originTurnCloseCall {
 	f.reconcMutex.Lock()
 	defer f.reconcMutex.Unlock()
 	return append([]originTurnCloseCall(nil), f.originTurnCloses...)
+}
+
+// UnansweredInterruptAgeMs answers with whatever standing stop the test set.
+func (f *fakeApplier) UnansweredInterruptAgeMs(string) (int64, bool) {
+	f.reconcMutex.Lock()
+	defer f.reconcMutex.Unlock()
+	return f.unansweredInterruptMs, f.unansweredInterrupt
+}
+
+// LastActivityMs answers with whatever activity record the test set.
+func (f *fakeApplier) LastActivityMs(string) (int64, bool, error) {
+	f.reconcMutex.Lock()
+	defer f.reconcMutex.Unlock()
+	return f.lastActivityMs, f.lastActivityKnown, f.lastActivityErr
 }
 
 // CloseOrphanedTurn records the orphan reconciliation. The zero value answers
