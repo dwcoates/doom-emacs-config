@@ -110,7 +110,12 @@ import { SessionRebase, claudeSessionIdOf } from "./session-rebase.js";
 import { requestSupportWorkspace } from "./unsupported.js";
 import { statusSnapshotFromInit } from "./status.js";
 import { compactionBannerHtml, FeedRenderer, lastUserTurnId, modelOptionsHtml } from "./render.js";
-import { installEdgeScroll, isPinnedToBottom, parkAtTail } from "./scroll.js";
+import {
+  installEdgeScroll,
+  installTailReanchor,
+  isPinnedToBottom,
+  parkAtTail,
+} from "./scroll.js";
 import { FeedSearch, type SearchHost, installSearchHook } from "./search.js";
 import {
   WorkspaceSidebar,
@@ -336,6 +341,15 @@ async function boot(): Promise<void> {
   // The Emacs host snaps the feed to its newest message through this hook
   // whenever the user switches to the workspace holding this webview.
   installHostTailHook(window as unknown as HostGlobal, feedEl);
+  // ...and the switch relayouts the webview around that snap, in an order
+  // neither side controls. A feed that was at its tail is put back there on
+  // the resize itself, so the switched-to workspace shows its newest output
+  // whether the resize landed before or after the host's snap.
+  installTailReanchor(
+    feedEl,
+    (onScroll) => feedEl.addEventListener("scroll", onScroll),
+    (onResize) => new ResizeObserver(onResize).observe(feedEl),
+  );
   // The Emacs host dials the feed's text size up or down through this hook,
   // sizing the document root's font so every rem-based run of text scales
   // together (the interactive text-size commands in frontend.el fire it).
