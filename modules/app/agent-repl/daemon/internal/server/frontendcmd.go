@@ -88,7 +88,7 @@ type SessionRestarter interface {
 }
 
 // SessionHibernator is the user-facing hibernation surface: the forced sleep
-// and the two revival modes. Satisfied by *sessioncontroller.Manager.
+// and the revival modes. Satisfied by *sessioncontroller.Manager.
 //
 // It is separate from SessionRestarter because a restart and a hibernation are
 // opposite intents about the same shim — one replaces the process and keeps the
@@ -1248,9 +1248,9 @@ func (h *commandHandler) HibernateWorkspace(_ context.Context, workspace, reques
 // choice they were being asked to make.
 func (h *commandHandler) ReviveSession(ctx context.Context, workspace, requestID string, cmd *frontendv1.ReviveSessionCmd) error {
 	var mode sessioncontroller.ReviveMode
-	switch cmd.GetMode().(type) {
+	switch arm := cmd.GetMode().(type) {
 	case *frontendv1.ReviveSessionCmd_CompactFirst:
-		mode = sessioncontroller.ReviveModeCompactFirst
+		mode = reviveModeForScope(arm.CompactFirst.GetScope())
 	case *frontendv1.ReviveSessionCmd_Direct:
 		mode = sessioncontroller.ReviveModeDirect
 	}
@@ -1259,13 +1259,36 @@ func (h *commandHandler) ReviveSession(ctx context.Context, workspace, requestID
 		return fmt.Errorf("server: session revival not supported by this daemon")
 	}
 	if mode == sessioncontroller.ReviveModeUnset {
-		return fmt.Errorf("server: reviving workspace %q: the command carries no revival mode; the choice between compacting first and resuming as-is is the user's and the daemon has no default for it", workspace)
+		return fmt.Errorf("server: reviving workspace %q: the command carries no revival mode, or a compact-first arm with no compaction scope; the choice between resuming as-is and compacting — and, when compacting, of what the summary may swallow — is the user's, and the daemon has no default for either", workspace)
 	}
 	if err := h.hibernations.ReviveSession(ctx, workspace, mode); err != nil {
 		return fmt.Errorf("server: reviving the session for workspace %q: %w", workspace, err)
 	}
 	h.logf("frontend cmd: revive-session ws=%s request_id=%s mode=%s ACCEPTED", workspace, requestID, mode)
 	return nil
+}
+
+// reviveModeForScope maps the wire's compaction scope onto the controller's
+// revival mode.
+//
+// AN UNRECOGNIZED SCOPE RESOLVES TO UNSET, and the caller's nack is what the
+// user hears. Defaulting an unknown scope to the whole-conversation compaction
+// would answer a request the daemon did not understand by discarding more of
+// the conversation than any arm of the enum asks for — the one outcome that
+// cannot be undone.
+func reviveModeForScope(scope frontendv1.CompactionScope) sessioncontroller.ReviveMode {
+	switch scope {
+	case frontendv1.CompactionScope_COMPACTION_SCOPE_ALL:
+		return sessioncontroller.ReviveModeCompactAll
+	case frontendv1.CompactionScope_COMPACTION_SCOPE_RESPONSES:
+		return sessioncontroller.ReviveModeCompactResponses
+	case frontendv1.CompactionScope_COMPACTION_SCOPE_PROMPTS:
+		return sessioncontroller.ReviveModeCompactPrompts
+	case frontendv1.CompactionScope_COMPACTION_SCOPE_PROMPTS_AND_RESPONSES:
+		return sessioncontroller.ReviveModeCompactPromptsAndResponses
+	default:
+		return sessioncontroller.ReviveModeUnset
+	}
 }
 
 // Shutdown begins the daemon's graceful teardown — the same func POST /shutdown

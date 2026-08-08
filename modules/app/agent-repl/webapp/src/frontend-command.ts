@@ -31,7 +31,9 @@ import {
   PROMPT_ORIGIN_WEBAPP_CARD_ACTION,
   PROMPT_ORIGIN_WEBAPP_USER_SENT,
   RESYNC_FIELD,
+  REVIVE_COMPACT_SCOPE,
   REVIVE_MODE,
+  compactionScopeName,
 } from "./proto-names.js";
 
 // The webapp hand-types protojson for the same module-resolution reason as
@@ -205,11 +207,11 @@ export interface HibernateWorkspaceBody {
 export interface ReviveSessionBody {
   case: "reviveSession";
   /**
-   * `compactFirst`: compact before accepting any prompt, paying the full
-   * -context cost once. `direct`: resume as-is, the deliberate "I know it's
-   * big" path.
+   * The user's whole answer to the gate: resume as-is, or compact first at a
+   * stated scope. One value, because the two halves are not independent — a
+   * scope means nothing to a direct resume.
    */
-  mode: ReviveMode;
+  decision: ReviveDecision;
 }
 
 /**
@@ -218,6 +220,33 @@ export interface ReviveSessionBody {
  * the daemon reads cannot become two different strings.
  */
 export type ReviveMode = (typeof REVIVE_MODE)[keyof typeof REVIVE_MODE];
+
+/**
+ * The COMPACTING decisions, each mapped to the protojson `CompactionScope` name
+ * its command carries.
+ *
+ * THE TABLE IS THE ONLY MAPPING. A decision the gate can offer but this table
+ * cannot spell is a compile error at the union below, so an option added to the
+ * card can never reach the socket as a scope the daemon refuses.
+ */
+export const COMPACT_DECISION_SCOPE = {
+  compactAll: compactionScopeName("ALL"),
+  compactResponses: compactionScopeName("RESPONSES"),
+  compactPrompts: compactionScopeName("PROMPTS"),
+  compactPromptsAndResponses: compactionScopeName("PROMPTS_AND_RESPONSES"),
+} as const;
+
+/** A decision that compacts, named by what the compaction is allowed to eat. */
+export type CompactDecision = keyof typeof COMPACT_DECISION_SCOPE;
+
+/**
+ * The whole revival vocabulary: the four compactions and the direct resume.
+ *
+ * MODELED AS ONE CLOSED UNION rather than a mode beside an optional scope,
+ * because "resume as-is, summarizing the prompts" has no meaning and should not
+ * be a value anything has to rule out.
+ */
+export type ReviveDecision = CompactDecision | "direct";
 
 export type FrontendCommandBody =
   | SubmitPromptBody
@@ -307,10 +336,16 @@ function encodeBody(b: FrontendCommandBody): Record<string, unknown> {
       // second thing to say. `{}` is the canonical protojson for it.
       return {};
     case "reviveSession":
-      // The oneof arm's own value is an empty message, so the arm KEY is the
-      // whole decision — which is exactly why the contract made it a oneof
-      // rather than a bool.
-      return { [b.mode]: {} };
+      // The DIRECT arm's value is still empty — the arm key is the whole
+      // decision — while a compaction additionally states its scope, which the
+      // daemon nacks rather than defaults if it is missing.
+      return b.decision === "direct"
+        ? { [REVIVE_MODE.direct]: {} }
+        : {
+            [REVIVE_MODE.compactFirst]: {
+              [REVIVE_COMPACT_SCOPE]: COMPACT_DECISION_SCOPE[b.decision],
+            },
+          };
   }
 }
 

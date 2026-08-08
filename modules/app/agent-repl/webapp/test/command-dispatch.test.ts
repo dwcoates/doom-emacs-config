@@ -680,11 +680,11 @@ describe("hibernate and revive dispatch", () => {
     // Arrange
     const { dispatcher, sent } = newDispatcher();
     // Act
-    const p = dispatcher.reviveSession("/w", "compactFirst");
+    const p = dispatcher.reviveSession("/w", "compactAll");
     dispatcher.observe(ackFrame("r1", true));
     await p;
     // Assert
-    expect(JSON.parse(sent[0]).reviveSession).toEqual({ compactFirst: {} });
+    expect(JSON.parse(sent[0]).reviveSession).toEqual({ compactFirst: { scope: "COMPACTION_SCOPE_ALL" } });
   });
 
   it("sends the direct revival decision", async () => {
@@ -789,7 +789,7 @@ describe("hibernate and revive dispatch", () => {
     // so this rejection shape has no other route to a human.
     const { dispatcher, failures } = newFailureDispatcher(false);
     // Act
-    await dispatcher.reviveSession("/w", "compactFirst").catch(() => {});
+    await dispatcher.reviveSession("/w", "compactAll").catch(() => {});
     // Assert
     expect(failureKindName(cardOf(failures[0]).view.kind)).toBe("commandUnsent");
   });
@@ -862,7 +862,7 @@ describe("dispatch dial-on-demand", () => {
     // Arrange
     const h = newDeferringDispatcher({ dialOpens: true });
     // Act
-    const p = h.dispatcher.reviveSession("/w", "compactFirst");
+    const p = h.dispatcher.reviveSession("/w", "compactAll");
     await vi.waitFor(() => expect(h.sent).toHaveLength(1));
     h.dispatcher.observe(ackFrame("r1", true));
     // Assert
@@ -874,7 +874,7 @@ describe("dispatch dial-on-demand", () => {
     // Arrange
     const h = newDeferringDispatcher({ dialOpens: true });
     // Act
-    const p = h.dispatcher.reviveSession("/w", "compactFirst");
+    const p = h.dispatcher.reviveSession("/w", "compactAll");
     await vi.waitFor(() => expect(h.sent).toHaveLength(1));
     h.dispatcher.observe(ackFrame("r1", true));
     await p;
@@ -900,7 +900,7 @@ describe("dispatch dial-on-demand", () => {
     // Arrange — the dial never opens the transport.
     const h = newDeferringDispatcher({ dialOpens: false });
     // Act / Assert — exactly today's refusal.
-    await expect(h.dispatcher.reviveSession("/w", "compactFirst")).rejects.toThrow(/socket not open/);
+    await expect(h.dispatcher.reviveSession("/w", "compactAll")).rejects.toThrow(/socket not open/);
     expect(failureKindName(cardOf(h.failures[0]).view.kind)).toBe("commandUnsent");
   });
 
@@ -908,7 +908,7 @@ describe("dispatch dial-on-demand", () => {
     // Arrange
     const h = newDeferringDispatcher({ dialOpens: false });
     // Act
-    await h.dispatcher.reviveSession("/w", "compactFirst").catch(() => {});
+    await h.dispatcher.reviveSession("/w", "compactAll").catch(() => {});
     // Assert
     expect(h.records).toContainEqual(expect.objectContaining({
       operation: "command-dispatch.dispatch-rejected",
@@ -920,7 +920,7 @@ describe("dispatch dial-on-demand", () => {
     // Arrange
     const h = newDeferringDispatcher({ dialOpens: false });
     // Act
-    await h.dispatcher.reviveSession("/w", "compactFirst").catch(() => {});
+    await h.dispatcher.reviveSession("/w", "compactAll").catch(() => {});
     // Assert
     expect(h.pendingCount()).toBe(0);
   });
