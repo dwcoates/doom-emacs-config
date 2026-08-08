@@ -146,6 +146,7 @@ func TestMergeResolutionSurfacesASubmitRefusal(t *testing.T) {
 }
 
 func TestMergeResolutionTurnThatNeverEndsIsAnError(t *testing.T) {
+	usePrompts(t)
 	// Arrange — a resolution turn that never reports its end.
 	h := newMergeResolveHarness(t)
 	h.m.cfg.MergeResolutionTurnBound = 20 * time.Millisecond
@@ -166,6 +167,7 @@ func TestMergeResolutionTurnThatNeverEndsIsAnError(t *testing.T) {
 }
 
 func TestResolveMergeConflictSubmitsThePromptAndCompletesOnItsTurn(t *testing.T) {
+	usePrompts(t)
 	// Arrange.
 	h := newMergeResolveHarness(t)
 	submitted := submitHook(h)
@@ -200,6 +202,7 @@ func TestResolveMergeConflictSubmitsThePromptAndCompletesOnItsTurn(t *testing.T)
 }
 
 func TestResolveMergeConflictRejectsAnIncompleteResolution(t *testing.T) {
+	usePrompts(t)
 	tests := []struct {
 		name string
 		res  merge.ConflictResolution
@@ -230,6 +233,7 @@ func TestResolveMergeConflictRejectsAnIncompleteResolution(t *testing.T) {
 // --- test-failure resolution --------------------------------------------
 
 func TestResolveMergeTestFailureSubmitsThePromptAndCompletesOnItsTurn(t *testing.T) {
+	usePrompts(t)
 	// Arrange.
 	h := newMergeResolveHarness(t)
 	submitted := submitHook(h)
@@ -264,6 +268,7 @@ func TestResolveMergeTestFailureSubmitsThePromptAndCompletesOnItsTurn(t *testing
 }
 
 func TestResolveMergeTestFailureRejectsAnIncompleteResolution(t *testing.T) {
+	usePrompts(t)
 	tests := []struct {
 		name string
 		res  merge.TestFailureResolution
@@ -292,6 +297,7 @@ func TestResolveMergeTestFailureRejectsAnIncompleteResolution(t *testing.T) {
 }
 
 func TestResolveMergeTestFailureTurnThatNeverEndsIsAnError(t *testing.T) {
+	usePrompts(t)
 	// Arrange — a fix turn that never reports its end.
 	h := newMergeResolveHarness(t)
 	h.m.cfg.MergeResolutionTurnBound = 20 * time.Millisecond

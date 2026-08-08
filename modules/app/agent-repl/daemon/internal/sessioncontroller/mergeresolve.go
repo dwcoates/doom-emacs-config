@@ -225,9 +225,20 @@ func (m *Manager) ResolveMergeConflict(ctx context.Context, res merge.ConflictRe
 	m.logf("session-controller: merge conflict resolution ws=%q request_id=%s commit=%s branch=%s target=%q — driving the workspace's own session under the merge lease",
 		res.Workspace, res.RequestID, res.ConflictCommit, res.SourceBranch, res.TargetDir)
 
+	// The brief is read from prompts/ per use, so it can fail. A conflict whose
+	// instruction cannot be composed is left PARKED for a human, exactly as a
+	// refused submit would leave it — never resolved by an agent working from a
+	// half-formed brief.
+	prompt, err := res.Prompt()
+	if err != nil {
+		m.logf("session-controller: merge conflict resolution FAILED ws=%q request_id=%s commit=%s — prompt unavailable: %v",
+			res.Workspace, res.RequestID, res.ConflictCommit, err)
+		return err
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, m.mergeResolutionBound())
 	defer cancel()
-	if err := m.SubmitMergePromptAwaitingTurn(ctx, res.Workspace, res.RequestID, res.Prompt(), mergeResolutionPermissionMode, corev1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR); err != nil {
+	if err := m.SubmitMergePromptAwaitingTurn(ctx, res.Workspace, res.RequestID, prompt, mergeResolutionPermissionMode, corev1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR); err != nil {
 		m.logf("session-controller: merge conflict resolution FAILED ws=%q request_id=%s commit=%s: %v",
 			res.Workspace, res.RequestID, res.ConflictCommit, err)
 		return err
@@ -256,9 +267,18 @@ func (m *Manager) ResolveMergeTestFailure(ctx context.Context, res merge.TestFai
 	m.logf("session-controller: merge test-failure resolution ws=%q request_id=%s commit=%s branch=%s target=%q — driving the workspace's own session under the merge lease",
 		res.Workspace, res.RequestID, res.FailingCommit, res.SourceBranch, res.TargetDir)
 
+	// As on the conflict path: an uncomposable brief fails the fix attempt
+	// outright rather than spending the single permitted attempt on a guess.
+	prompt, err := res.Prompt()
+	if err != nil {
+		m.logf("session-controller: merge test-failure resolution FAILED ws=%q request_id=%s commit=%s — prompt unavailable: %v",
+			res.Workspace, res.RequestID, res.FailingCommit, err)
+		return err
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, m.mergeResolutionBound())
 	defer cancel()
-	if err := m.SubmitMergePromptAwaitingTurn(ctx, res.Workspace, res.RequestID, res.Prompt(), mergeResolutionPermissionMode, corev1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR); err != nil {
+	if err := m.SubmitMergePromptAwaitingTurn(ctx, res.Workspace, res.RequestID, prompt, mergeResolutionPermissionMode, corev1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR); err != nil {
 		m.logf("session-controller: merge test-failure resolution FAILED ws=%q request_id=%s commit=%s: %v",
 			res.Workspace, res.RequestID, res.FailingCommit, err)
 		return err
