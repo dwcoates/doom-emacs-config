@@ -804,3 +804,159 @@ describe("hibernate and revive dispatch", () => {
     await expect(p).rejects.toThrow(/reviveSession rejected: session is not hibernated/);
   });
 });
+
+/**
+ * Dial-on-demand: a refused send establishes the connection and retries once
+ * before the command is reported unsent. A hidden Emacs webview's timers are
+ * suspended, so the socket's own scheduled reconnect can still be pending when
+ * the user switches to the workspace and clicks.
+ */
+describe("dispatch dial-on-demand", () => {
+  /**
+   * A dispatcher whose transport starts closed. `open()` makes further sends
+   * succeed; `ensureConnected` records the dial and, when `dialOpens`, opens
+   * the transport and answers the currentness wait.
+   */
+  function newDeferringDispatcher(opts: { dialOpens: boolean }) {
+    const sent: string[] = [];
+    const failures: SystemFailure[] = [];
+    const { records } = installLogging();
+    let open = false;
+    let dials = 0;
+    let n = 0;
+    const dispatcher = new CommandDispatcher({
+      send: (raw) => {
+        if (!open) return false;
+        sent.push(raw);
+        return true;
+      },
+      newRequestId: () => `r${++n}`,
+      logLocal: (message) => records.push({ local_only: message }),
+      onFailure: (f) => failures.push(f),
+      ensureConnected: () => {
+        dials += 1;
+        if (opts.dialOpens) open = true;
+      },
+      whenCurrent: () => Promise.resolve(open),
+    });
+    return {
+      dispatcher,
+      sent,
+      failures,
+      records,
+      dials: () => dials,
+      pendingCount: () => dispatcher.pendingCount(),
+    };
+  }
+
+  it("dials and sends the command once the connection becomes current", async () => {
+    // Arrange
+    const h = newDeferringDispatcher({ dialOpens: true });
+    // Act
+    const p = h.dispatcher.reviveSession("/w", "compactFirst");
+    await vi.waitFor(() => expect(h.sent).toHaveLength(1));
+    h.dispatcher.observe(ackFrame("r1", true));
+    // Assert
+    await expect(p).resolves.toBeUndefined();
+    expect(h.dials()).toBe(1);
+  });
+
+  it("records the deferral before it dials", async () => {
+    // Arrange
+    const h = newDeferringDispatcher({ dialOpens: true });
+    // Act
+    const p = h.dispatcher.reviveSession("/w", "compactFirst");
+    await vi.waitFor(() => expect(h.sent).toHaveLength(1));
+    h.dispatcher.observe(ackFrame("r1", true));
+    await p;
+    // Assert
+    expect(h.records).toContainEqual(expect.objectContaining({
+      operation: "command-dispatch.dispatch-deferred",
+      context: expect.objectContaining({ command: "reviveSession", workspace: "/w", wait_budget_ms: 10_000 }),
+    }));
+  });
+
+  it("correlates the ack of a command that was sent only after the dial", async () => {
+    // Arrange
+    const h = newDeferringDispatcher({ dialOpens: true });
+    const p = h.dispatcher.hibernateWorkspace("/w");
+    await vi.waitFor(() => expect(h.sent).toHaveLength(1));
+    // Act — the daemon refuses the deferred command.
+    h.dispatcher.observe(ackFrame("r1", false, "a turn is live"));
+    // Assert — the refusal reaches the caller, so correlation survived.
+    await expect(p).rejects.toThrow(/hibernateWorkspace rejected: a turn is live/);
+  });
+
+  it("reports the command unsent when currentness never arrives", async () => {
+    // Arrange — the dial never opens the transport.
+    const h = newDeferringDispatcher({ dialOpens: false });
+    // Act / Assert — exactly today's refusal.
+    await expect(h.dispatcher.reviveSession("/w", "compactFirst")).rejects.toThrow(/socket not open/);
+    expect(h.failures[0]?.errorType).toBe("client.command_unsent");
+  });
+
+  it("logs the original rejection record when the dial does not help", async () => {
+    // Arrange
+    const h = newDeferringDispatcher({ dialOpens: false });
+    // Act
+    await h.dispatcher.reviveSession("/w", "compactFirst").catch(() => {});
+    // Assert
+    expect(h.records).toContainEqual(expect.objectContaining({
+      operation: "command-dispatch.dispatch-rejected",
+      context: expect.objectContaining({ command: "reviveSession", cause: "socket not open" }),
+    }));
+  });
+
+  it("leaves no pending entry behind when a deferred command ends unsent", async () => {
+    // Arrange
+    const h = newDeferringDispatcher({ dialOpens: false });
+    // Act
+    await h.dispatcher.reviveSession("/w", "compactFirst").catch(() => {});
+    // Assert
+    expect(h.pendingCount()).toBe(0);
+  });
+
+  it("surfaces a dial that throws instead of swallowing it", async () => {
+    // Arrange
+    const { records } = installLogging();
+    const dispatcher = new CommandDispatcher({
+      send: () => false,
+      newRequestId: () => "r1",
+      logLocal: () => undefined,
+      ensureConnected: () => {
+        throw new Error("no transport");
+      },
+      whenCurrent: () => Promise.resolve(true),
+    });
+    // Act
+    await dispatcher.reviveSession("/w", "direct").catch(() => {});
+    // Assert
+    expect(records).toContainEqual(expect.objectContaining({
+      operation: "command-dispatch.dispatch-connect-failed",
+      context: expect.objectContaining({ command: "reviveSession", cause: "no transport" }),
+    }));
+  });
+
+  it("defers each of two concurrent commands on its own request id", async () => {
+    // Arrange
+    const h = newDeferringDispatcher({ dialOpens: true });
+    // Act
+    const first = h.dispatcher.hibernateWorkspace("/w");
+    const second = h.dispatcher.reviveSession("/w", "direct");
+    await vi.waitFor(() => expect(h.sent).toHaveLength(2));
+    h.dispatcher.observe(ackFrame("r2", true));
+    h.dispatcher.observe(ackFrame("r1", true));
+    // Assert — acks correlate by id, in either order.
+    await expect(Promise.all([first, second])).resolves.toEqual([undefined, undefined]);
+  });
+
+  it("refuses immediately when no dial hook is wired", async () => {
+    // Arrange — the bootstrap dispatcher's shape: no ensureConnected.
+    const { dispatcher, records } = newDispatcher(false);
+    // Act / Assert
+    await expect(dispatcher.reviveSession("/w", "direct")).rejects.toThrow(/socket not open/);
+    expect(records).not.toContainEqual(expect.objectContaining({
+      operation: "command-dispatch.dispatch-deferred",
+    }));
+  });
+});

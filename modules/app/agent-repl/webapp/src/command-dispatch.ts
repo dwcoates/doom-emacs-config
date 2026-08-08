@@ -59,6 +59,21 @@ const MAX_TRACKED_CLIENT_LOGS = 256;
  */
 const MAX_CONSECUTIVE_CLIENT_LOG_REJECTIONS = 20;
 
+/**
+ * How long a deferred command waits for the transport to become current before
+ * it is reported unsent.
+ *
+ * A refused send is not proof the daemon is down. Emacs suspends a hidden
+ * webview's timers, so the socket's own scheduled reconnect may not have run
+ * while the workspace was off-screen — the user switches to it, clicks, and the
+ * first thing that touches the transport in minutes is the click itself. The
+ * budget covers a dial plus the daemon's snapshot (socket-open alone is not
+ * enough to send: `WsClient.send` requires adopted state), and stays short
+ * enough that a genuinely unreachable daemon still lands the failure card while
+ * the user is looking at the button they pressed.
+ */
+const CONNECTION_ESTABLISH_TIMEOUT_MS = 10_000;
+
 function asError(value: unknown): Error {
   return value instanceof Error ? value : new Error(String(value));
 }
@@ -207,6 +222,20 @@ export interface DispatchOptions {
    * being an acceptable disposition for a rejected prompt.
    */
   onFailure?: (failure: SystemFailure) => void;
+  /**
+   * Dial the daemon NOW because a user action needs the transport (WsClient's
+   * `ensureConnected`). Optional: a dispatcher bound to a socket with a
+   * different lifetime — the bootstrap socket, which the boot path opens,
+   * uses and closes itself — supplies neither this nor `whenCurrent` and keeps
+   * the immediate-refusal behavior.
+   */
+  ensureConnected?: () => void;
+  /**
+   * Resolve true once the transport carries authoritative state, false at the
+   * bound. Paired with `ensureConnected`; both must be present for a refused
+   * send to be retried at all.
+   */
+  whenCurrent?: (timeoutMs: number) => Promise<boolean>;
 }
 
 interface PendingAck {
@@ -410,20 +439,70 @@ export class CommandDispatcher {
     });
     return new Promise<void>((resolve, reject) => {
       this.pending.set(requestId, { command: body.case, resolve: () => resolve(), reject });
-      if (!this.opts.send(encodeFrontendCommand({ requestId, workspace, body }))) {
-        this.pending.delete(requestId);
-        log("error", "command dispatcher command send was rejected", {
-          operation: "command-dispatch.dispatch-rejected",
-          context: { request_id: requestId, workspace, command: body.case, pending_count: this.pending.size, cause: "socket not open" },
-        });
-        // A REFUSED SEND is a rejection shape too, and the one no ack will ever
-        // arrive for. Surfaced through the same sink so a command that never
-        // left the page is as visible as one the daemon turned down — log once
-        // (above), render once (here).
-        this.opts.onFailure?.(commandUnsentFailure(body.case));
-        reject(new Error(`${body.case}: socket not open`));
-      }
+      const raw = encodeFrontendCommand({ requestId, workspace, body });
+      if (this.opts.send(raw)) return;
+      // A REFUSED SEND is not yet a verdict: the transport may simply be idle
+      // (a hidden webview's reconnect timer never ran). Establish it and try
+      // once more before reporting the command unsent.
+      void this.dispatchAfterConnecting(requestId, workspace, body.case, raw, reject);
     });
+  }
+
+  /**
+   * The deferred half of `dispatch`: dial, wait for currentness within the
+   * bound, retry the send exactly once, and otherwise fall through to the
+   * ORIGINAL refusal — same log record, same failure card, same rejection.
+   *
+   * The pending entry stays registered across the wait (nothing can ack a frame
+   * that never left) and is removed on every terminal path here, so a deferred
+   * command that ends unsent leaks nothing; a deferred command that ends SENT
+   * keeps its entry and correlates its ack normally. Concurrent defers are
+   * independent — acks correlate by request id, so no ordering is implied.
+   */
+  private async dispatchAfterConnecting(
+    requestId: string,
+    workspace: string,
+    command: string,
+    raw: string,
+    reject: (err: Error) => void,
+  ): Promise<void> {
+    const { ensureConnected, whenCurrent } = this.opts;
+    if (ensureConnected !== undefined && whenCurrent !== undefined) {
+      log("info", "command dispatcher deferred a command while the daemon connection is established", {
+        operation: "command-dispatch.dispatch-deferred",
+        context: { request_id: requestId, workspace, command, pending_count: this.pending.size, wait_budget_ms: CONNECTION_ESTABLISH_TIMEOUT_MS },
+      });
+      let current = false;
+      try {
+        ensureConnected();
+        current = await whenCurrent(CONNECTION_ESTABLISH_TIMEOUT_MS);
+      } catch (err) {
+        // The dial itself threw. That is evidence, not a reason to go quiet:
+        // record it and let the ordinary unsent path below report to the user.
+        log("error", "command dispatcher connection establishment threw while a command waited", {
+          operation: "command-dispatch.dispatch-connect-failed",
+          context: { request_id: requestId, workspace, command, cause: asError(err).message },
+        });
+      }
+      if (current && this.opts.send(raw)) {
+        log("info", "command dispatcher sent a deferred command once the connection was established", {
+          operation: "command-dispatch.dispatch-deferred-sent",
+          context: { request_id: requestId, workspace, command, pending_count: this.pending.size },
+        });
+        return;
+      }
+    }
+    this.pending.delete(requestId);
+    log("error", "command dispatcher command send was rejected", {
+      operation: "command-dispatch.dispatch-rejected",
+      context: { request_id: requestId, workspace, command, pending_count: this.pending.size, cause: "socket not open" },
+    });
+    // A REFUSED SEND is a rejection shape too, and the one no ack will ever
+    // arrive for. Surfaced through the same sink so a command that never
+    // left the page is as visible as one the daemon turned down — log once
+    // (above), render once (here).
+    this.opts.onFailure?.(commandUnsentFailure(command));
+    reject(new Error(`${command}: socket not open`));
   }
 
   /**
@@ -455,6 +534,14 @@ export class CommandDispatcher {
     const sent = this.opts.send(encodeFrontendCommand({ requestId, workspace, body }));
     if (sent) this.rememberClientLog(requestId);
     return sent;
+  }
+
+  /**
+   * Commands awaiting an acknowledgement. A dispatch that ends unsent — after
+   * a deferred dial included — must leave this back where it found it.
+   */
+  pendingCount(): number {
+    return this.pending.size;
   }
 
   /** Number of client-log acknowledgements retained for correlation. */

@@ -344,6 +344,114 @@ describe("WsClient", () => {
     }));
   });
 
+  it("ensureConnected dials immediately instead of waiting out the backoff", () => {
+    // Arrange — a drop schedules a reconnect 10ms out that has not fired.
+    const { client } = newClient();
+    client.connect();
+    FakeWebSocket.instances[0].open();
+    FakeWebSocket.instances[0].close();
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    // Act — the user clicks before the timer runs.
+    client.ensureConnected();
+    // Assert — dialed now, and the cancelled timer opens no third socket.
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    vi.advanceTimersByTime(1000);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+  });
+
+  it("ensureConnected re-dials after a session-gone verdict stopped the loop", async () => {
+    // Arrange — one probe reports the session gone, which is terminal for the
+    // automatic loop.
+    const client = new WsClient({
+      url: "ws://x/sessions/s1/stream",
+      onMessage: () => undefined,
+      wsFactory: (url) => new FakeWebSocket(url) as unknown as WebSocket,
+      backoffMs: [10],
+      sessionExists: async () => false,
+      onGone: () => undefined,
+    });
+    client.connect();
+    FakeWebSocket.instances[0].open();
+    FakeWebSocket.instances[0].close();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    // Act — an explicit user action after the terminal verdict.
+    client.ensureConnected();
+    // Assert — a stale "gone" reading is not permanent against a user action.
+    expect(FakeWebSocket.instances).toHaveLength(2);
+  });
+
+  it("ensureConnected does nothing while state is already current", () => {
+    // Arrange
+    const { client } = newClient();
+    client.connect();
+    FakeWebSocket.instances[0].open();
+    client.adoptSnapshot();
+    // Act
+    client.ensureConnected();
+    // Assert — no second socket alongside the live one.
+    expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+
+  it("ensureConnected leaves an in-flight dial alone", () => {
+    // Arrange — connecting, socket not yet open.
+    const { client } = newClient();
+    client.connect();
+    // Act
+    client.ensureConnected();
+    // Assert — the in-flight attempt is not abandoned for a fresh one.
+    expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+
+  it("whenCurrent resolves true on the transition into current", async () => {
+    // Arrange
+    const { client } = newClient();
+    client.connect();
+    const waited = client.whenCurrent(1000);
+    // Act
+    FakeWebSocket.instances[0].open();
+    client.adoptSnapshot();
+    // Assert
+    await expect(waited).resolves.toBe(true);
+  });
+
+  it("whenCurrent resolves true immediately when state is already current", async () => {
+    const { client } = newClient();
+    client.connect();
+    FakeWebSocket.instances[0].open();
+    client.adoptSnapshot();
+    await expect(client.whenCurrent(1000)).resolves.toBe(true);
+  });
+
+  it("whenCurrent resolves false when currentness never arrives within the bound", async () => {
+    // Arrange — socket opens but no snapshot is ever adopted.
+    const records = captureCanonicalLogs();
+    const { client } = newClient();
+    client.connect();
+    FakeWebSocket.instances[0].open();
+    const waited = client.whenCurrent(50);
+    // Act
+    await vi.advanceTimersByTimeAsync(50);
+    // Assert
+    await expect(waited).resolves.toBe(false);
+    expect(records).toContainEqual(expect.objectContaining({
+      operation: "ws.when-current-timeout",
+      context: expect.objectContaining({ timeout_ms: 50, freshness: "awaiting_snapshot" }),
+    }));
+  });
+
+  it("whenCurrent resolves false at once when the user closes the connection", async () => {
+    // Arrange
+    const { client } = newClient();
+    client.connect();
+    FakeWebSocket.instances[0].open();
+    const waited = client.whenCurrent(60_000);
+    // Act
+    client.close();
+    // Assert — no waiting out the bound against a connection nobody reopens.
+    await expect(waited).resolves.toBe(false);
+  });
+
   it("does not reconnect after a user-initiated close", () => {
     // Arrange
     const { client } = newClient();

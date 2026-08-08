@@ -64,6 +64,13 @@ export class WsClient {
   private freshness: WsStateFreshness = "disconnected";
   private pendingReachable = false;
   /**
+   * Callers parked in `whenCurrent`, resolved by the transition INTO "current"
+   * (never by polling). Each entry owns its own timeout, and settling either
+   * way removes it, so a waiter can never be resolved twice or retained after
+   * it has answered.
+   */
+  private readonly currentWaiters = new Set<(current: boolean) => void>();
+  /**
    * Connection epoch: bumped by every connect() and close(). Scheduled
    * reconnects and in-flight existence probes capture the epoch they
    * were started under and abort when it has moved on — otherwise a
@@ -215,7 +222,91 @@ export class WsClient {
       operation: "ws.freshness-changed",
       context: { previous, next, ...context },
     });
+    if (next === "current") this.settleCurrentWaiters(true);
     this.opts.onFreshnessChange?.(next);
+  }
+
+  private settleCurrentWaiters(current: boolean): void {
+    if (this.currentWaiters.size === 0) return;
+    const waiters = [...this.currentWaiters];
+    this.currentWaiters.clear();
+    for (const waiter of waiters) waiter(current);
+  }
+
+  /**
+   * Resolve true once state is current, false when `timeoutMs` elapses first.
+   *
+   * Driven by the freshness transition itself, so a caller that dialed via
+   * `ensureConnected` learns the socket carries authoritative state — the same
+   * bar `send` enforces — rather than merely that the socket opened.
+   */
+  whenCurrent(timeoutMs: number): Promise<boolean> {
+    if (this.freshness === "current") return Promise.resolve(true);
+    return new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => {
+        this.currentWaiters.delete(waiter);
+        log("warn", "websocket currentness wait expired", {
+          operation: "ws.when-current-timeout",
+          context: { epoch: this.epoch, freshness: this.freshness, timeout_ms: timeoutMs },
+        });
+        resolve(false);
+      }, timeoutMs);
+      const waiter = (current: boolean): void => {
+        clearTimeout(timer);
+        resolve(current);
+      };
+      this.currentWaiters.add(waiter);
+    });
+  }
+
+  /**
+   * Dial NOW on an explicit user action, if a dial is what the state calls for.
+   *
+   * Emacs suspends a hidden webview's timers, so a scheduled reconnect may
+   * simply never run while the user is looking elsewhere; they then switch to
+   * the workspace and click, and the socket is still closed under a healthy
+   * daemon. This is the entry point that closes that window — the caller pairs
+   * it with `whenCurrent` and retries.
+   *
+   * - "current": nothing to do.
+   * - "connecting"/"awaiting_snapshot": a dial is already in flight, and a
+   *   second `connect()` would abandon it for no gain; the caller waits.
+   * - "disconnected"/"expired": cancel any pending backoff timer and connect.
+   *   `connect()` bumps the epoch, so the cancelled timer's callback, any
+   *   in-flight existence probe, and the old socket's callbacks all abort on
+   *   their epoch check instead of racing a second socket into existence.
+   *
+   * This deliberately re-dials after `onGone` too. That verdict is one probe's
+   * reading of GET /sessions, which a mid-restart registry can get wrong, and
+   * making it permanent against an explicit user action leaves reloading the
+   * page as the only recovery. The bypass is not permanent either: if this
+   * connection drops, the ordinary `scheduleReconnect` path probes again and a
+   * truly-gone session reaches the same terminal verdict.
+   */
+  ensureConnected(): void {
+    if (this.freshness === "current" || this.freshness === "connecting" || this.freshness === "awaiting_snapshot") {
+      log("info", "websocket dial-on-demand found no dial was needed", {
+        operation: "ws.ensure-connected-noop",
+        context: { epoch: this.epoch, freshness: this.freshness },
+      });
+      return;
+    }
+    const hadReconnectTimer = this.reconnectTimer !== null;
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    log("info", "websocket dial-on-demand connecting for a user action", {
+      operation: "ws.ensure-connected-dialing",
+      context: {
+        epoch: this.epoch,
+        freshness: this.freshness,
+        had_reconnect_timer: hadReconnectTimer,
+        closed_by_user: this.closedByUser,
+        reconnect_attempt_count: this.attempts,
+      },
+    });
+    this.connect();
   }
 
   private snapshotTimeoutMs(): number {
@@ -334,6 +425,9 @@ export class WsClient {
     this.ws = null;
     if (wasCurrent) this.opts.onStatusChange?.(false);
     this.transitionFreshness("disconnected", { epoch: this.epoch, owner: "user" });
+    // A user-requested close answers every parked `whenCurrent` NOW rather than
+    // leaving it to time out against a connection nobody intends to reopen.
+    this.settleCurrentWaiters(false);
     ws?.close();
   }
 }
