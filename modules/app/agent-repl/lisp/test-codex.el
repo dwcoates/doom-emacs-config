@@ -315,7 +315,7 @@ The git-check skip is mandatory: headless spawns run from
 
 (defconst agent-repl-test--codex-repo-hooks-dir
   ;; Captured at LOAD time — `load-file-name' is nil inside ERT test bodies.
-  (expand-file-name "hooks/"
+  (expand-file-name "../hooks/"
                     (file-name-directory (or load-file-name buffer-file-name)))
   "Absolute path to the checked-in `hooks/' directory.")
 

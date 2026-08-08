@@ -101,9 +101,10 @@ func classifyOne(p string) (Component, bool) {
 			return rule.component, true
 		}
 	}
-	// Elisp is matched by extension rather than by directory: the stack's .el
-	// files sit at the top of modules/app/agent-repl/ rather than in a
-	// component directory of their own.
+	// Elisp is matched by extension rather than by directory: the sources sit
+	// in modules/app/agent-repl/lisp/, while config.el, packages.el and
+	// doctor.el stay at the module root where Doom's loader resolves them, so
+	// neither location is a component directory the prefix rules can name.
 	if strings.HasPrefix(p, stackPrefix) && strings.HasSuffix(p, ".el") {
 		// test-*.el is the batch-only ERT harness. Loading one into the live
 		// Emacs is the recorded way to poison that Emacs, and deploy-all.sh

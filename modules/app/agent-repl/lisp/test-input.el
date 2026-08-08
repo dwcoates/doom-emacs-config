@@ -1136,12 +1136,13 @@ has previously done so during the session and even if it has not changed."
   (should (equal (file-name-nondirectory agent-repl-metaprompt-file)
                  "metaprompt.md")))
 
-(ert-deftest agent-repl-test-metaprompt-file-lives-beside-input-el ()
+(ert-deftest agent-repl-test-metaprompt-file-lives-in-the-module-root ()
   "`agent-repl-metaprompt-file' must resolve inside the agent-repl module.
-The metaprompt is version-controlled alongside the code that sends it, so
-the directory the agent is pointed at is the one holding input.el itself."
+The metaprompt is version-controlled alongside the code that sends it: it
+sits at the module root, one level above the `lisp/' directory holding
+input.el, so the directory it names must contain `lisp/input.el'."
   (should (file-readable-p
-           (expand-file-name "input.el"
+           (expand-file-name "lisp/input.el"
                              (file-name-directory agent-repl-metaprompt-file)))))
 
 (ert-deftest agent-repl-test-command-prefix-matches-md-file-content ()
