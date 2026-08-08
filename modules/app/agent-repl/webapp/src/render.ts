@@ -21,7 +21,7 @@ import {
   formatTokens,
   TOKEN_HEAT_CLASS,
   tokenHeatStyle,
-  turnInputTokens,
+  uncachedInputTokens,
 } from "./tokens.js";
 import { formatAge, formatDuration, formatDurationCeil, formatElapsed } from "./duration.js";
 import {
@@ -2023,7 +2023,7 @@ function formatTokenDelta(n: number): string {
  *   is the span the footer's clock cell measured, rather than the span since
  *   the PREVIOUS turn ended (that would bill this turn for however long the
  *   user spent reading before sending the prompt);
- * - the tokens are `turnInputTokens(usage)` — a result's `usage` is that
+ * - the tokens are `uncachedInputTokens(usage)` — a result's `usage` is that
  *   turn's own usage, not a session-cumulative snapshot, which is exactly the
  *   scope the footer's ticker has.
  *
@@ -2037,7 +2037,7 @@ function resultMeta(chip: ResultItem): string {
   if (chip.durationMs >= 1000) {
     parts.push(`<span class="turn-dur">${escapeHtml(formatDurationCeil(chip.durationMs))}</span>`);
   }
-  const input = turnInputTokens(chip.usage);
+  const input = uncachedInputTokens(chip.usage);
   if (input > 0) {
     // The figure carries its own heat (see tokenHeatHue): a turn's uncached
     // input is the number this corner exists to make noticeable, and a bare

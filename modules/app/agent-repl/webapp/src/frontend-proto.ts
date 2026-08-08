@@ -1074,7 +1074,12 @@ export interface ProgressView {
   /** 0 = no turn in flight. */
   turnStartedAtMs: number;
   thinkingTokens: number;
-  /** THIS turn's cumulative cached + uncached input tokens. */
+  /**
+   * THIS turn's cumulative UNCACHED input tokens: `input_tokens` +
+   * `cache_creation_input_tokens`, summed daemon-side across the turn's
+   * assistant messages. Cache READS are excluded — see `uncachedInputTokens`
+   * in `tokens.ts` for the contract this figure is the daemon's side of.
+   */
   inputTokens: number;
   ttftMs: number;
   /** Absent = the window is closed. */
