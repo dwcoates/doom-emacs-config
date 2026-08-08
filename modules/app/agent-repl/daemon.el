@@ -28,6 +28,7 @@
 (require 'cl-lib)
 
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--log-verbose "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
@@ -36,8 +37,8 @@
 (declare-function agent-repl--logfile-path "agent-repl-core" ())
 (declare-function agent-repl--doctor-log "agent-repl-doctor" (fmt &rest args))
 (declare-function agent-repl--frontend-turn-active-sessions "agent-repl-frontend-client" ())
-(declare-function agent-repl-runtime-restart "services" (&optional stop-shims))
-(declare-function agent-repl-runtime-restart-await "services" (&optional stop-shims timeout))
+(declare-function agent-repl-runtime-restart "services" (&optional stop-shims initiator))
+(declare-function agent-repl-runtime-restart-await "services" (&optional stop-shims timeout initiator))
 (declare-function agent-repl--uds-connected-p "frontend-uds" ())
 (declare-function agent-repl-uds-probe-async "frontend-uds" (path on-open on-failure))
 (declare-function agent-repl--uds-run-timer "frontend-uds" (seconds function &rest args))
@@ -46,6 +47,13 @@
 (declare-function agent-repl--frontend-daemon-view-binary-mtime-seconds "frontend-state" ())
 (declare-function agent-repl-frontend-shutdown-schedule "frontend-state" ())
 (declare-function agent-repl-frontend-scheduled-shutdown-id "frontend-state" ())
+(declare-function agent-repl-failure-local "failure" (type message &optional detail))
+(declare-function agent-repl-failure-surface "failure" (workspace failure))
+
+;; Forward declaration: the connection lifecycle hook lives in frontend-uds.el,
+;; which loads AFTER this file.  `add-hook' copes with an unbound symbol; this
+;; only keeps byte-compilation from reporting a free variable.
+(defvar agent-repl-uds-connected-functions)
 
 ;; Forward declaration: this defcustom lives in session.el, which loads
 ;; AFTER this file.  Declared here so byte-compilation doesn't warn about a
@@ -688,6 +696,175 @@ Assumes the artifacts are already built; call
                                  agent-repl-frontend-daemon-addr)
       proc)))
 
+;;;; ---- The expected-restart window --------------------------------------
+;;
+;; A deploy restarts the daemon THROUGH EMACS: `bin/deploy-all.sh' calls
+;; `agent-repl-frontend-daemon-restart-await' over emacsclient, and the
+;; coordinator in services.el stops the daemon itself.  The exit that follows
+;; is therefore the one Emacs just ordered — yet the sentinel classified it as
+;; `client.daemon_exited', so every single deploy produced a WARNING plus a
+;; transient failure card for a death Emacs had orchestrated.
+;;
+;; This window is what separates "Emacs ordered this exit" from "the daemon
+;; died".  Three properties make it safe to suppress on:
+;;
+;;   1. It is armed only by the restart coordinator, immediately before the
+;;      bounce, and only when a daemon is actually there to be stopped.
+;;   2. It is BOUNDED.  A daemon that dies and STAYS dead surfaces exactly the
+;;      card and the warn it surfaces today, when the window expires without a
+;;      replacement.  The suppressed failure is retained, never dropped.
+;;   3. It closes the moment the replacement daemon's link comes back.
+;;
+;; An exit with NO window armed is untouched: that path is the daemon's only
+;; failure surfacing anywhere, because the process that composes every other
+;; failure card is the one that just died.
+
+(defcustom agent-repl-frontend-expected-restart-window-seconds 180.0
+  "Seconds a deliberate restart may suppress the daemon-exit failure card.
+Armed by the runtime restart coordinator just before it stops the daemon,
+and closed as soon as the replacement daemon's UDS link opens.  A daemon
+that never comes back inside this window has its suppressed
+`client.daemon_exited' failure surfaced when the window expires, so the
+suppression can delay that card but can never cancel it."
+  :type 'number
+  :group 'agent-repl)
+
+(defvar agent-repl--frontend-expected-restart nil
+  "State of the armed expected-restart window, or nil when none is armed.
+A plist: `:initiator' (who ordered the restart), `:armed-at' (`float-time'),
+`:timer' (the expiry timer), and — once an exit has been observed inside the
+window — `:exit' (the withheld failure), `:event' and `:tail' (its echo
+material).")
+
+(defun agent-repl--frontend-expected-restart-cancel-timer ()
+  "Cancel the armed window's expiry timer, if it still holds one."
+  (let ((timer (plist-get agent-repl--frontend-expected-restart :timer)))
+    (when (timerp timer)
+      (cancel-timer timer))))
+
+(defun agent-repl--frontend-expected-restart-expire ()
+  "Close the window on its bound, surfacing whatever it withheld.
+A daemon that exited inside the window and never returned is a daemon that
+is simply DOWN, so its `client.daemon_exited' failure is surfaced here
+exactly as an unexpected exit surfaces it — same echo, same warn, same
+card — only later.  A window that expires having observed no exit at all
+closes quietly: there is nothing to report."
+  (let ((state agent-repl--frontend-expected-restart))
+    (if (null state)
+        (agent-repl--log nil "expected-restart: expiry fired with no window armed")
+      (agent-repl--frontend-expected-restart-cancel-timer)
+      (setq agent-repl--frontend-expected-restart nil)
+      (let ((initiator (plist-get state :initiator))
+            (elapsed (- (float-time) (plist-get state :armed-at)))
+            (exit (plist-get state :exit)))
+        (if (null exit)
+            (agent-repl--log nil
+                             "expected-restart: window closed unused initiator=%s elapsed=%.3fs"
+                             initiator elapsed)
+          (agent-repl--warn nil
+                            "expected-restart: window EXPIRED with no replacement daemon initiator=%s elapsed=%.3fs; surfacing the withheld exit"
+                            initiator elapsed)
+          (agent-repl--backend-phase nil "daemon exited (%s): %s — full output in %s"
+                                     (plist-get state :event)
+                                     (plist-get state :tail)
+                                     (agent-repl--logfile-path))
+          (agent-repl-failure-surface nil exit))))))
+
+(defun agent-repl--frontend-arm-expected-restart (initiator)
+  "Arm the expected-restart window on behalf of INITIATOR.
+INITIATOR names the control-plane caller that ordered the restart and rides
+every record the window produces; a blank one is refused, because a window
+that cannot say who opened it is indistinguishable from one opened by
+accident.
+
+Re-arming REPLACES the window rather than nesting inside it, and carries any
+already-withheld exit across: a second restart ordered before the first one's
+replacement arrived is a fresh deliberate act with a fresh bound, but the exit
+the first window withheld is still owed to the user if nothing ever comes back."
+  (unless (and (stringp initiator) (not (string-empty-p (string-trim initiator))))
+    (agent-repl--log nil "expected-restart: REFUSING blank initiator=%S" initiator)
+    (error "agent-repl: an expected-restart window needs an initiator"))
+  (let ((prior agent-repl--frontend-expected-restart))
+    (agent-repl--frontend-expected-restart-cancel-timer)
+    (setq agent-repl--frontend-expected-restart
+          (list :initiator initiator
+                :armed-at (float-time)
+                :timer nil
+                :exit (plist-get prior :exit)
+                :event (plist-get prior :event)
+                :tail (plist-get prior :tail)))
+    (setq agent-repl--frontend-expected-restart
+          (plist-put agent-repl--frontend-expected-restart
+                     :timer
+                     (agent-repl--uds-run-timer
+                      agent-repl-frontend-expected-restart-window-seconds
+                      #'agent-repl--frontend-expected-restart-expire)))
+    (agent-repl--log nil
+                     "expected-restart: ARMED initiator=%s window=%.1fs carried-exit=%s"
+                     initiator agent-repl-frontend-expected-restart-window-seconds
+                     (if (plist-get prior :exit) "t" "nil"))
+    initiator))
+
+(defun agent-repl--frontend-expected-restart-initiator ()
+  "Return the initiator of the LIVE expected-restart window, or nil.
+
+Nil once the window's bound has elapsed, WHETHER OR NOT its timer got to
+run: an elisp hot-reload runs `agent-repl--cancel-all-timers', and a window
+whose only bound was a cancelled timer would suppress daemon exits forever.
+An elapsed window is expired here instead, which surfaces anything it had
+withheld rather than dropping it."
+  (let ((state agent-repl--frontend-expected-restart))
+    (when state
+      (if (>= (- (float-time) (plist-get state :armed-at))
+              agent-repl-frontend-expected-restart-window-seconds)
+          (progn
+            (agent-repl--frontend-expected-restart-expire)
+            nil)
+        (plist-get state :initiator)))))
+
+(defun agent-repl--frontend-expected-restart-withhold-exit (failure event tail)
+  "Retain FAILURE, with its EVENT and TAIL echo material, in the armed window.
+Withheld, never dropped: `agent-repl--frontend-expected-restart-expire'
+surfaces it if no replacement daemon ever arrives."
+  (unless agent-repl--frontend-expected-restart
+    (agent-repl--log nil "expected-restart: REFUSING to withhold an exit with no window armed")
+    (error "agent-repl: no expected-restart window is armed"))
+  (setq agent-repl--frontend-expected-restart
+        (plist-put agent-repl--frontend-expected-restart :exit failure))
+  (setq agent-repl--frontend-expected-restart
+        (plist-put agent-repl--frontend-expected-restart :event event))
+  (setq agent-repl--frontend-expected-restart
+        (plist-put agent-repl--frontend-expected-restart :tail tail))
+  (agent-repl--log nil
+                   "expected-restart: WITHHELD daemon exit initiator=%s event=%s"
+                   (plist-get agent-repl--frontend-expected-restart :initiator)
+                   event)
+  failure)
+
+(defun agent-repl--frontend-expected-restart-note-reconnect ()
+  "Close the expected-restart window once the replacement daemon is reachable.
+
+Only an OBSERVED exit closes it.  The restart coordinator dials the OUTGOING
+daemon while it is still serving (its readiness preflight runs before the
+bounce), so treating any connect as the replacement's arrival would disarm the
+window before the exit it exists to classify ever happened."
+  (let ((state agent-repl--frontend-expected-restart))
+    (when state
+      (if (plist-get state :exit)
+          (progn
+            (agent-repl--frontend-expected-restart-cancel-timer)
+            (setq agent-repl--frontend-expected-restart nil)
+            (agent-repl--info nil
+                              "expected-restart: replacement daemon connected; window CLOSED initiator=%s elapsed=%.3fs"
+                              (plist-get state :initiator)
+                              (- (float-time) (plist-get state :armed-at))))
+        (agent-repl--log nil
+                         "expected-restart: link opened before any daemon exit; window stays armed initiator=%s"
+                         (plist-get state :initiator))))))
+
+(add-hook 'agent-repl-uds-connected-functions
+          #'agent-repl--frontend-expected-restart-note-reconnect)
+
 (defun agent-repl--frontend-daemon-sentinel (proc event)
   "Clear the tracked process when PROC dies; EVENT is the status change.
 
@@ -720,15 +897,31 @@ under the reserved `client.\=' prefix."
                          "claude-repld exited: tracked=%s event=%s output=%s"
                          tracked trimmed-event
                          (if (string-empty-p output) "<empty>" output))
-        (agent-repl--backend-phase nil "daemon exited (%s): %s — full output in %s"
-                                   trimmed-event tail
-                                   (agent-repl--logfile-path))
-        (agent-repl-failure-surface
-         nil
-         (agent-repl-failure-local
-          "client.daemon_exited"
-          "the agent-repl daemon exited"
-          (format "%s: %s" trimmed-event tail)))))))
+        (let ((failure (agent-repl-failure-local
+                        "client.daemon_exited"
+                        "the agent-repl daemon exited"
+                        (format "%s: %s" trimmed-event tail)))
+              (initiator (agent-repl--frontend-expected-restart-initiator)))
+          (if initiator
+              ;; The exit Emacs itself ordered.  It is a PHASE of the restart,
+              ;; so it reads as one: the echo names the initiator and the
+              ;; replacement it is waiting for, the record lands at info, and
+              ;; no card opens.  The failure is withheld rather than
+              ;; discarded — if no replacement ever arrives, the window's
+              ;; expiry surfaces exactly this.
+              (progn
+                (agent-repl--info nil
+                                  "claude-repld exited inside the expected-restart window: initiator=%s event=%s"
+                                  initiator trimmed-event)
+                (agent-repl--backend-phase
+                 nil "daemon exited for the %s restart (%s); awaiting the replacement…"
+                 initiator trimmed-event)
+                (agent-repl--frontend-expected-restart-withhold-exit
+                 failure trimmed-event tail))
+            (agent-repl--backend-phase nil "daemon exited (%s): %s — full output in %s"
+                                       trimmed-event tail
+                                       (agent-repl--logfile-path))
+            (agent-repl-failure-surface nil failure)))))))
 
 ;;;; ---- Entry point ------------------------------------------------------
 
@@ -1352,7 +1545,11 @@ the asynchronous interactive command `agent-repl-frontend-daemon-restart'."
   ;; that has simply stopped responding.
   (agent-repl--backend-phase nil "deploy-driven restart requested (stop-shims=%s)"
                              (if stop-shims "t" "nil"))
-  (agent-repl-runtime-restart-await (and stop-shims t) timeout))
+  ;; Named as the initiator so the daemon exit this restart is about to cause
+  ;; is recorded — and echoed — as the deploy's own doing rather than as the
+  ;; daemon dying.  See `agent-repl--frontend-arm-expected-restart'.
+  (agent-repl-runtime-restart-await (and stop-shims t) timeout
+                                    "deploy (emacsclient)"))
 
 ;;;###autoload
 (defun agent-repl-frontend-daemon-restart-scheduled (reason &optional stop-shims)

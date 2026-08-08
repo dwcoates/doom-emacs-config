@@ -855,12 +855,25 @@ whenever a real session happened to be mid-turn."
   "The deployment restart surface forwards mode and timeout exactly once."
   (let (args)
     (cl-letf (((symbol-function 'agent-repl-runtime-restart-await)
-               (lambda (&optional stop-shims timeout)
+               (lambda (&optional stop-shims timeout _initiator)
                  (setq args (list stop-shims timeout))
                  "runtime-restart-complete")))
       (should (equal "runtime-restart-complete"
                      (agent-repl-frontend-daemon-restart-await '(4) 17.0)))
       (should (equal args '(t 17.0))))))
+
+(ert-deftest agent-repl-test-daemon-restart-await-names-the-deploy-as-initiator ()
+  "The deploy names itself, so the exit it causes is recorded as its doing."
+  ;; Arrange
+  (let (initiator)
+    (cl-letf (((symbol-function 'agent-repl-runtime-restart-await)
+               (lambda (&optional _stop-shims _timeout who)
+                 (setq initiator who)
+                 "runtime-restart-complete")))
+      ;; Act
+      (agent-repl-frontend-daemon-restart-await)
+      ;; Assert
+      (should (equal initiator "deploy (emacsclient)")))))
 
 (ert-deftest agent-repl-test-foreign-shutdown-omits-stop-shims-by-default ()
   "`ShutdownCmd' carries no payload unless stop-shims was asked for."
@@ -1565,6 +1578,179 @@ duplication argument that skips complete daemon records does not apply."
       (agent-repl--frontend-daemon-sentinel 'proc "exited abnormally with code 1\n")
       ;; Assert
       (should (string-match-p "-accounts is malformed" (format "%S" surfaced))))))
+
+;;;; ---- the expected-restart window -----------------------------------------
+
+(defmacro agent-repl-test--with-expected-restart (records &rest body)
+  "Run BODY over a clean expected-restart window, collecting log RECORDS.
+Each collected record is (LEVEL FMT ARGS).  The window's expiry timer is
+captured rather than armed and the echo area is silenced, so nothing here
+escapes the test."
+  (declare (indent 1))
+  `(let ((agent-repl--frontend-expected-restart nil)
+         (agent-repl-frontend-expected-restart-window-seconds 180.0)
+         (,records nil))
+     (with-current-buffer (get-buffer-create agent-repl--frontend-daemon-buffer)
+       (erase-buffer))
+     (cl-letf (((symbol-function 'agent-repl--uds-run-timer)
+                (lambda (_delay _fn) 'agent-repl-test--fake-timer))
+               ((symbol-function 'agent-repl--emit-message) #'ignore)
+               ((symbol-function 'agent-repl--persist-log-record)
+                (lambda (_ws level _verbosity fmt args)
+                  (push (list level fmt args) ,records))))
+       ,@body)))
+
+(defun agent-repl-test--records-matching (records level substring)
+  "Return the RECORDS at LEVEL whose format string contains SUBSTRING."
+  (cl-remove-if-not
+   (lambda (record)
+     (and (equal (nth 0 record) level)
+          (stringp (nth 1 record))
+          (string-match-p (regexp-quote substring) (nth 1 record))))
+   records))
+
+(ert-deftest agent-repl-test-daemon-expected-restart-exit-opens-no-card ()
+  "An exit inside an armed window opens no failure card."
+  ;; Arrange
+  (agent-repl-test--with-expected-restart records
+    (let (surfaced)
+      (cl-letf (((symbol-function 'process-live-p) (lambda (_p) nil))
+                ((symbol-function 'agent-repl-failure-surface)
+                 (lambda (_ws failure) (setq surfaced failure))))
+        (agent-repl--frontend-arm-expected-restart "deploy (emacsclient)")
+        ;; Act
+        (agent-repl--frontend-daemon-sentinel 'proc "killed: 9\n")
+        ;; Assert
+        (should-not surfaced))
+      (ignore records))))
+
+(ert-deftest agent-repl-test-daemon-expected-restart-exit-emits-no-warn ()
+  "An exit inside an armed window records no warning about the daemon."
+  ;; Arrange
+  (agent-repl-test--with-expected-restart records
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_p) nil))
+              ((symbol-function 'agent-repl-failure-surface) #'ignore))
+      (agent-repl--frontend-arm-expected-restart "deploy (emacsclient)")
+      ;; Act
+      (agent-repl--frontend-daemon-sentinel 'proc "killed: 9\n"))
+    ;; Assert
+    (should-not (agent-repl-test--records-matching records "warn" ""))))
+
+(ert-deftest agent-repl-test-daemon-expected-restart-exit-records-the-initiator ()
+  "The suppressed exit is recorded at info, naming who ordered the restart."
+  ;; Arrange
+  (agent-repl-test--with-expected-restart records
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_p) nil))
+              ((symbol-function 'agent-repl-failure-surface) #'ignore))
+      (agent-repl--frontend-arm-expected-restart "deploy (emacsclient)")
+      ;; Act
+      (agent-repl--frontend-daemon-sentinel 'proc "killed: 9\n"))
+    ;; Assert
+    (let ((info (agent-repl-test--records-matching
+                 records "info" "exited inside the expected-restart window")))
+      (should (= (length info) 1))
+      (should (member "deploy (emacsclient)" (nth 2 (car info)))))))
+
+(ert-deftest agent-repl-test-daemon-expected-restart-expiry-surfaces-the-withheld-exit ()
+  "A window that expires with no replacement surfaces the exit it withheld."
+  ;; Arrange
+  (agent-repl-test--with-expected-restart records
+    (let (surfaced)
+      (cl-letf (((symbol-function 'process-live-p) (lambda (_p) nil))
+                ((symbol-function 'agent-repl-failure-surface)
+                 (lambda (_ws failure) (setq surfaced failure))))
+        (agent-repl--frontend-arm-expected-restart "deploy (emacsclient)")
+        (agent-repl--frontend-daemon-sentinel 'proc "killed: 9\n")
+        ;; Act
+        (agent-repl--frontend-expected-restart-expire)
+        ;; Assert
+        (should (equal (plist-get surfaced :type) "client.daemon_exited")))
+      (ignore records))))
+
+(ert-deftest agent-repl-test-daemon-expected-restart-expiry-warns ()
+  "The expiry that surfaces a withheld exit also warns about the window."
+  ;; Arrange
+  (agent-repl-test--with-expected-restart records
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_p) nil))
+              ((symbol-function 'agent-repl-failure-surface) #'ignore))
+      (agent-repl--frontend-arm-expected-restart "deploy (emacsclient)")
+      (agent-repl--frontend-daemon-sentinel 'proc "killed: 9\n")
+      ;; Act
+      (agent-repl--frontend-expected-restart-expire))
+    ;; Assert
+    (should (agent-repl-test--records-matching
+             records "warn" "window EXPIRED with no replacement daemon"))))
+
+(ert-deftest agent-repl-test-daemon-exit-without-a-window-still-opens-a-card ()
+  "With no window armed the daemon exit surfaces exactly as it always has."
+  ;; Arrange
+  (agent-repl-test--with-expected-restart records
+    (let (surfaced)
+      (cl-letf (((symbol-function 'process-live-p) (lambda (_p) nil))
+                ((symbol-function 'agent-repl-failure-surface)
+                 (lambda (_ws failure) (setq surfaced failure))))
+        ;; Act
+        (agent-repl--frontend-daemon-sentinel 'proc "killed: 9\n")
+        ;; Assert
+        (should (equal (plist-get surfaced :type) "client.daemon_exited")))
+      (ignore records))))
+
+(ert-deftest agent-repl-test-daemon-expected-restart-closes-on-reconnect ()
+  "The replacement daemon's link closes the window and drops the withheld exit."
+  ;; Arrange
+  (agent-repl-test--with-expected-restart records
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_p) nil))
+              ((symbol-function 'agent-repl-failure-surface) #'ignore))
+      (agent-repl--frontend-arm-expected-restart "deploy (emacsclient)")
+      (agent-repl--frontend-daemon-sentinel 'proc "killed: 9\n")
+      ;; Act
+      (agent-repl--frontend-expected-restart-note-reconnect)
+      ;; Assert
+      (should-not agent-repl--frontend-expected-restart))
+    (ignore records)))
+
+(ert-deftest agent-repl-test-daemon-expected-restart-survives-a-preflight-connect ()
+  "A link that opens before any exit leaves the window armed.
+The coordinator dials the OUTGOING daemon during its readiness preflight,
+so that connect must not be mistaken for the replacement's arrival."
+  ;; Arrange
+  (agent-repl-test--with-expected-restart records
+    (agent-repl--frontend-arm-expected-restart "deploy (emacsclient)")
+    ;; Act
+    (agent-repl--frontend-expected-restart-note-reconnect)
+    ;; Assert
+    (should (equal (plist-get agent-repl--frontend-expected-restart :initiator)
+                   "deploy (emacsclient)"))
+    (ignore records)))
+
+(ert-deftest agent-repl-test-daemon-expected-restart-refuses-a-blank-initiator ()
+  "A window that cannot name who opened it is refused rather than armed."
+  ;; Arrange / Act / Assert
+  (agent-repl-test--with-expected-restart records
+    (should-error (agent-repl--frontend-arm-expected-restart "   "))
+    (ignore records)))
+
+(ert-deftest agent-repl-test-daemon-expected-restart-elapsed-window-stops-suppressing ()
+  "An elapsed window suppresses nothing even if its timer never fired.
+A hot-reload cancels every module timer, so elapsed time — not the timer —
+is what bounds the suppression."
+  ;; Arrange
+  (agent-repl-test--with-expected-restart records
+    (let (surfaced)
+      (cl-letf (((symbol-function 'process-live-p) (lambda (_p) nil))
+                ((symbol-function 'agent-repl-failure-surface)
+                 (lambda (_ws failure) (setq surfaced failure))))
+        (agent-repl--frontend-arm-expected-restart "deploy (emacsclient)")
+        (setq agent-repl--frontend-expected-restart
+              (plist-put agent-repl--frontend-expected-restart :armed-at
+                         (- (float-time)
+                            agent-repl-frontend-expected-restart-window-seconds
+                            1.0)))
+        ;; Act
+        (agent-repl--frontend-daemon-sentinel 'proc "killed: 9\n")
+        ;; Assert
+        (should (equal (plist-get surfaced :type) "client.daemon_exited")))
+      (ignore records))))
 
 (ert-deftest agent-repl-test-daemon-stop-grace-covers-the-daemon-drain ()
   "The SIGTERM grace must outlast the drain it exists to allow.
