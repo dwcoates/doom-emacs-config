@@ -44,6 +44,19 @@ type SuiteResult struct {
 	// what the resolution prompt and the merge_failed cause carry, so it is the
 	// only thing a user may ever see about why the merge was refused.
 	Tail string
+	// OutputPath names the file holding the failing run's COMPLETE output.
+	//
+	// THE TAIL ALONE CANNOT ANSWER "WHICH TEST FAILED". A multi-suite runner
+	// keeps going after a suite fails, so by the time it exits, the failure's
+	// own output is thousands of lines back and the retained tail is whatever
+	// the LAST suites printed — coverage tables, timing summaries. The verdict
+	// survives, the diagnosis does not. Archiving the whole run and naming the
+	// file is what makes the failure reconstructible after the fact rather than
+	// only re-runnable.
+	//
+	// It is empty when the run passed, was skipped, or could not be archived;
+	// an archive failure is logged loudly and named in Tail, never swallowed.
+	OutputPath string
 }
 
 // SuiteRunner runs the target repository's test suite in the target worktree.
@@ -140,8 +153,41 @@ func (r *RepoSuiteRunner) RunSuite(ctx context.Context, targetDir string) (Suite
 		return SuiteResult{}, fmt.Errorf("merge: run test suite %s in %s: %w", rel, top, runErr)
 	}
 	tail := tailOf(out.String(), suiteTailBytes)
-	r.logf("merge: suite FAILED {target=%s entrypoint=%s exit=%d} tail:\n%s", targetDir, rel, exitErr.ExitCode(), tail)
-	return SuiteResult{Passed: false, Tail: tail}, nil
+	path, archiveErr := archiveSuiteOutput(out.Bytes())
+	if archiveErr != nil {
+		// The verdict is real and must stand; failing the gate because a
+		// diagnostic file could not be written would turn a test failure into
+		// an unrunnable suite. So the archive's absence is reported where the
+		// failure itself is read, rather than dropped.
+		r.logf("merge: suite output ARCHIVE FAILED {target=%s entrypoint=%s}: %v — only the clamped tail survives this failure",
+			targetDir, rel, archiveErr)
+		tail += fmt.Sprintf("\n[merge] the full output could NOT be archived: %v\n", archiveErr)
+	}
+	r.logf("merge: suite FAILED {target=%s entrypoint=%s exit=%d full_output=%s} tail:\n%s",
+		targetDir, rel, exitErr.ExitCode(), path, tail)
+	return SuiteResult{Passed: false, Tail: tail, OutputPath: path}, nil
+}
+
+// suiteOutputPattern names the archive of one failing suite run. It lands in
+// the process temp directory, which is where the daemon already keeps the
+// per-workspace logs a workspace's .claude/emacs symlinks point at.
+const suiteOutputPattern = "agent-repl-merge-suite-*.log"
+
+// archiveSuiteOutput writes a failing run's complete output and returns the
+// file's path.
+func archiveSuiteOutput(out []byte) (string, error) {
+	f, err := os.CreateTemp("", suiteOutputPattern)
+	if err != nil {
+		return "", fmt.Errorf("merge: create the suite output archive: %w", err)
+	}
+	if _, err := f.Write(out); err != nil {
+		f.Close()
+		return "", fmt.Errorf("merge: write the suite output archive %s: %w", f.Name(), err)
+	}
+	if err := f.Close(); err != nil {
+		return "", fmt.Errorf("merge: close the suite output archive %s: %w", f.Name(), err)
+	}
+	return f.Name(), nil
 }
 
 // toplevel resolves the repository root that owns dir.
