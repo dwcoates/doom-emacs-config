@@ -1539,19 +1539,32 @@ function convertApiUserMessage(raw: Record<string, unknown>) {
   return create(ApiUserMessageSchema, { content: { case: undefined } });
 }
 
+// A `<synthetic>` model on an assistant record is EVIDENCE, NOT A SELECTION,
+// and it is carried through verbatim.
+//
+// `normalizeModel` exists for the model-SELECTION paths — launch options,
+// set-model, the model the session reports as chosen — where `<synthetic>`
+// names no model and must read as "unspecified". An assistant record is the
+// opposite kind of fact: it states WHO PRODUCED IT, and the CLI stamps
+// `<synthetic>` on the records IT wrote itself (the "No response requested."
+// turn closer, terminal API-failure cards, the compaction boundary). Blanking
+// that marker destroys the only identity those records have, and two consumers
+// depend on it:
+//
+//   - the daemon's token-utilization ingress rejects a blank model outright
+//     (tokenutilization.ValidateModelIdentity), so a compaction on revive
+//     degraded its accounting instead of recording `<synthetic>` usage — the
+//     defect this comment exists for;
+//   - the daemon's no-response-placeholder curator keys on the marker
+//     (sessioncontroller/noresponse.go), and silently never matched.
+//
+// The shim's own usage log already records the raw value, so preserving it here
+// makes the proto path agree with the accounting log rather than contradict it.
 function convertApiAssistantMessage(raw: Record<string, unknown>, usage: NormalizedApiUsage) {
   const content = Array.isArray(raw["content"]) ? convertBlocks(raw["content"]) : [];
-  const rawModel = strOf(raw["model"]);
-  const model = normalizeModel(rawModel);
-  if (model !== rawModel) {
-    LOGGER.log(
-      { message_id: strOf(raw["id"]), reported_model: rawModel, normalized_model: model },
-      "normalized empty-equivalent assistant model",
-    );
-  }
   return create(ApiAssistantMessageSchema, {
     id: strOf(raw["id"]),
-    model,
+    model: strOf(raw["model"]),
     content,
     stopReason: strOf(raw["stop_reason"]),
     stopSequence: strOf(raw["stop_sequence"]),

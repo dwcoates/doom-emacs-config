@@ -207,10 +207,30 @@ describe("assistant", () => {
     expect(m.msg.value.cacheRates).toBeUndefined();
   });
 
-  it("normalizes a synthetic assistant model to empty", () => {
+  // The CLI stamps `<synthetic>` on the assistant records it authors itself —
+  // the compaction boundary a revived session replays among them. Blanking it
+  // is what made the daemon reject the record's token utilization for a blank
+  // model, so the marker is evidence and travels through verbatim.
+  it("preserves a synthetic assistant model", () => {
     const raw = loadStream("assistant");
     raw.message = { ...(raw.message as Record<string, unknown>), model: "<synthetic>" };
     const m = vendor(convert(raw));
+    if (m.msg.case !== "assistant") throw new Error("case");
+    expect(m.msg.value.message!.model).toBe("<synthetic>");
+  });
+
+  it("preserves the synthetic model on a zero-usage compaction record", () => {
+    const m = vendor(convert(assistantRecord({}, {
+      model: "<synthetic>",
+      stop_reason: "stop_sequence",
+      content: [{ type: "text", text: "No response requested." }],
+    })));
+    if (m.msg.case !== "assistant") throw new Error("case");
+    expect(m.msg.value.message!.model).toBe("<synthetic>");
+  });
+
+  it("leaves an assistant record that reports no model at all blank", () => {
+    const m = vendor(convert(assistantRecord({}, { model: "" })));
     if (m.msg.case !== "assistant") throw new Error("case");
     expect(m.msg.value.message!.model).toBe("");
   });
