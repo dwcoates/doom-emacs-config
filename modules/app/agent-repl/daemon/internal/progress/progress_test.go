@@ -18,6 +18,10 @@ import (
 const (
 	testWS  = "ws-alpha"
 	testSID = "sess-1"
+	// testFence stands in for the SSM's minted staleness token. Its composition
+	// is the SSM's business; every consumer, this suite included, compares it
+	// byte-wise and never parses it.
+	testFence = "sess-1\x1fgen-1"
 	// atMs is the producer stamp every fixture event carries, so a window's
 	// since_ms and the turn clock are assertable exact values.
 	atMs int64 = 1_700_000_000_000
@@ -1027,14 +1031,16 @@ func TestExhaustedApiErrorSetsTheClassifiedFailure(t *testing.T) {
 	}
 }
 
-func TestExhaustedApiErrorFailureIsApiClass(t *testing.T) {
+func TestExhaustedApiErrorFailureTakesTheVendorTone(t *testing.T) {
 	// Arrange: the vendor concluded the work; agent-repl's machinery is fine.
+	// The class enum that said so left the wire, and the footer row carries the
+	// resolved tone in its place.
 	h := newHarness(t)
 	// Act
 	h.apply(vendorEvent(t, apiErrorLine("e9", "overloaded", 10, 10)))
 	// Assert
-	if got := h.last().GetFailure().GetErrorClass(); got != frontendv1.ErrorClass_ERROR_CLASS_API {
-		t.Fatalf("class = %v, want API", got)
+	if got := h.last().GetFailure().GetTone(); got != errclass.ToneVendor {
+		t.Fatalf("tone = %q, want %q", got, errclass.ToneVendor)
 	}
 }
 
@@ -1045,8 +1051,8 @@ func TestExhaustedApiErrorFailureAddressesTheCard(t *testing.T) {
 	// Act
 	h.apply(vendorEvent(t, apiErrorLine("e9", "boom", 10, 10)))
 	// Assert
-	if got := h.last().GetFailure().GetItemUuid(); got != frontend.FailureUUID("e9") {
-		t.Fatalf("item_uuid = %q, want the card's uuid %q", got, frontend.FailureUUID("e9"))
+	if got := h.last().GetFailure().GetCard().GetCardUuid(); got != frontend.FailureUUID("e9") {
+		t.Fatalf("card_uuid = %q, want the card's uuid %q", got, frontend.FailureUUID("e9"))
 	}
 }
 
@@ -1084,8 +1090,12 @@ func TestAnErroredTurnEndSetsTheClassifiedFailure(t *testing.T) {
 		TurnEnded: &corev1.TurnEnded{IsError: true, StopReason: "error_max_turns"},
 	}})
 	// Assert
-	if got := h.last().GetFailure().GetErrorType(); got != string(errclass.TypeAPIMaxTurns) {
-		t.Fatalf("error_type = %q, want %q", got, errclass.TypeAPIMaxTurns)
+	// The row carries the SENTENCE, not the type: it renders one line and has
+	// no use for typed evidence. The sentence is the classifier's own, so it is
+	// still that classification being asserted.
+	want := errclass.TurnEnd(&corev1.TurnEnded{IsError: true, StopReason: "error_max_turns"}).GetMessage()
+	if got := h.last().GetFailure().GetMessage(); got != want {
+		t.Fatalf("message = %q, want %q (the %s sentence)", got, want, errclass.TypeAPIMaxTurns)
 	}
 }
 
@@ -1524,9 +1534,17 @@ const vendorSID = "f59e9d4b-a7c1-4b5f-baec-981de8aa872c"
 // A store event carries the VENDOR conversation uuid on its envelope; the view
 // it moves must still carry the daemon session id, because the frontend's
 // agent-session scope filter compares that id for exact equality.
-func TestApplyStampsTheDaemonSessionIdOnAVendorStampedEvent(t *testing.T) {
-	// Arrange
+func TestApplyLeavesTheWorkspaceFenceUntouchedByAVendorStampedEvent(t *testing.T) {
+	// Arrange: the view carries the workspace's FENCE, adopted from the one
+	// authority on it. An event's own session id is the VENDOR conversation's
+	// and rotates on its own schedule, so nothing on the event may reach the
+	// staleness token a client compares against.
 	h := newHarness(t)
+	if err := h.m.ObserveWorkspaceState(&frontendv1.WorkspaceState{
+		Workspace: testWS, Fence: testFence,
+	}); err != nil {
+		t.Fatalf("ObserveWorkspaceState: %v", err)
+	}
 	ev := &corev1.Event{
 		SessionId: vendorSID, ProducedAtMs: atMs,
 		Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{}},
@@ -1536,18 +1554,24 @@ func TestApplyStampsTheDaemonSessionIdOnAVendorStampedEvent(t *testing.T) {
 		t.Fatalf("Apply: %v", err)
 	}
 	// Assert
-	if got := h.last().GetSessionId(); got != testSID {
-		t.Fatalf("sessionId = %q, want the daemon id %q", got, testSID)
+	if got := h.last().GetFence(); got != testFence {
+		t.Fatalf("fence = %q, want the workspace's %q", got, testFence)
 	}
 }
 
-// THE LIVE DEFECT, in its exact shape: mid-turn the daemon-local accept had
-// stamped the daemon id, then each vendor-stamped token update overwrote it,
-// and every one of those pushes was dropped by the scope filter — so the
-// footer's input-token count never moved.
-func TestApplyKeepsTheDaemonSessionIdOnAVendorStampedTokenUpdate(t *testing.T) {
-	// Arrange — a daemon-local path stamps first, as the accept does live.
+// THE LIVE DEFECT, in its exact shape: mid-turn each vendor-stamped token
+// update overwrote the view's identity with the vendor conversation's, and
+// every one of those pushes was dropped by the scope filter — so the footer's
+// input-token count never moved. The fence is now the only identity on the
+// view and nothing on an event can reach it.
+func TestApplyKeepsTheWorkspaceFenceOnAVendorStampedTokenUpdate(t *testing.T) {
+	// Arrange
 	h := newHarness(t)
+	if err := h.m.ObserveWorkspaceState(&frontendv1.WorkspaceState{
+		Workspace: testWS, Fence: testFence,
+	}); err != nil {
+		t.Fatalf("ObserveWorkspaceState: %v", err)
+	}
 	h.openTurn()
 	ev := streamEvent(t, assistantWithUsage("m1", &datav1.ApiUsage{InputTokens: 500}))
 	ev.SessionId = vendorSID
@@ -1557,23 +1581,29 @@ func TestApplyKeepsTheDaemonSessionIdOnAVendorStampedTokenUpdate(t *testing.T) {
 	}
 	// Assert
 	got := h.last()
-	if got.GetSessionId() != testSID {
-		t.Fatalf("sessionId = %q, want the daemon id %q still", got.GetSessionId(), testSID)
+	if got.GetFence() != testFence {
+		t.Fatalf("fence = %q, want the workspace's %q still", got.GetFence(), testFence)
 	}
 	if got.GetInputTokens() != 500 {
 		t.Fatalf("inputTokens = %d, want 500 (the fold itself must be unaffected)", got.GetInputTokens())
 	}
 }
 
-// The daemon-local paths keep stamping the daemon id they are handed.
-func TestNoteTurnAcceptedStampsTheDaemonSessionId(t *testing.T) {
+// The daemon-local paths leave the fence to the one authority on it rather
+// than stamping an identity of their own beside it.
+func TestNoteTurnAcceptedKeepsTheWorkspaceFence(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
+	if err := h.m.ObserveWorkspaceState(&frontendv1.WorkspaceState{
+		Workspace: testWS, Fence: testFence,
+	}); err != nil {
+		t.Fatalf("ObserveWorkspaceState: %v", err)
+	}
 	// Act
 	h.m.NoteTurnAccepted(testWS, testSID)
 	// Assert
-	if got := h.last().GetSessionId(); got != testSID {
-		t.Fatalf("sessionId = %q, want %q", got, testSID)
+	if got := h.last().GetFence(); got != testFence {
+		t.Fatalf("fence = %q, want %q", got, testFence)
 	}
 }
 
