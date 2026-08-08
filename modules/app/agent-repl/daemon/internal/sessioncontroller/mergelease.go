@@ -150,8 +150,21 @@ func (m *Manager) guardMergeLease(workspace string, who submitter, requestID, or
 // conversation items it produces are stamped CONVERSATION_SOURCE_MERGE off the
 // lease ledger by the ordinary provenance path (provenance.go).
 func (m *Manager) SubmitMergePrompt(ctx context.Context, workspace, requestID, text, permissionMode string, promptOrigin corev1.PromptOrigin) error {
+	_, err := m.submitMergePrompt(ctx, workspace, requestID, text, permissionMode, promptOrigin)
+	return err
+}
+
+// submitMergePrompt is SubmitMergePrompt REPORTING THE SUBMIT'S FATE — forwarded
+// to the shim, or parked on the queue behind a turn already in flight.
+//
+// The waiting caller (SubmitMergePromptAwaitingTurn) needs that distinction and
+// the error alone cannot carry it: a parked merge prompt returns nil, because
+// parking is a success for every OTHER submitter. For the merge it is not, and
+// treating it as one is what let a resolution wait out its whole bound on a
+// prompt the shim was never handed.
+func (m *Manager) submitMergePrompt(ctx context.Context, workspace, requestID, text, permissionMode string, promptOrigin corev1.PromptOrigin) (promptDisposition, error) {
 	if requestID == "" {
-		return fmt.Errorf("session-controller: a merge prompt for workspace %q needs a request id; it is what the prompt receipt and the durable transcript line reconcile on", workspace)
+		return promptDisposition{}, fmt.Errorf("session-controller: a merge prompt for workspace %q needs a request id; it is what the prompt receipt and the durable transcript line reconcile on", workspace)
 	}
 	return m.submitPromptAs(ctx, workspace, requestID, text, permissionMode, "merge:"+requestID, promptOrigin, submitterMergeLeaseHolder)
 }
@@ -247,6 +260,7 @@ func (m *Manager) ResumeDisplacedTurn(ctx context.Context, workspace string, tur
 	requestID := "merge-resume:" + newQueueEntryID()
 	m.logf("session-controller: resuming the turn the merge lease displaced ws=%q request_id=%s permission_mode=%q",
 		workspace, requestID, turn.PermissionMode)
-	return m.submitPromptAs(ctx, workspace, requestID, turn.Prompt, turn.PermissionMode,
+	_, err := m.submitPromptAs(ctx, workspace, requestID, turn.Prompt, turn.PermissionMode,
 		"merge-resume:"+requestID, corev1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME, submitterUser)
+	return err
 }
