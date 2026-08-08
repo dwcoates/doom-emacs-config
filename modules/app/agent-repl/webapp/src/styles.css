@@ -1100,6 +1100,11 @@ pre {
      means the animation never triggers layout — box-shadow and everything
      else in `.bubble` stays untouched by it.
 
+     The period is duplicated in `BUBBLE_BREATH_PERIOD_MS` (breathing.ts),
+     which every render uses to emit a negative `animation-delay` inline: a
+     rebuilt bubble node would otherwise restart this animation at 0% and snap
+     visibly back to the deflated end mid-cycle. The two MUST stay equal.
+
      NOTHING INSIDE THE BUBBLE CARRIES ITS OWN COPY OF THIS ANIMATION. The
      body is a child of this transformed element, so it is already scaled by
      this rule; a second `bubble-breath` on `.bubble-body` MULTIPLIED the two
@@ -2391,8 +2396,12 @@ pre {
   }
   /* The prompt bubble's breath is pure ambience, not a progress or liveness
      signal (unlike the spinner and footer breath above), so it simply stops
-     rather than slowing. The body needs no entry — it never had an animation
-     of its own, only this element's inherited transform. */
+     rather than slowing. Stopping rather than re-timing also keeps the period
+     a single constant: the negative `animation-delay` each bubble renders
+     with is computed against one `BUBBLE_BREATH_PERIOD_MS`, and a reduced
+     motion override that merely LENGTHENED the cycle would leave that delay
+     seeking to the wrong phase here. The body needs no entry — it never had
+     an animation of its own, only this element's inherited transform. */
   .bubble.user {
     animation: none;
   }
