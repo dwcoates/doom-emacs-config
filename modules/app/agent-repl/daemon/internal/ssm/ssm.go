@@ -346,6 +346,16 @@ func (m *Manager) warm() error {
 	if err := m.releasePersistedPermissionsLocked(); err != nil {
 		return err
 	}
+	// Same placement and the same reason: a workspace still latched behind a
+	// compact-first revival's turn — whose compaction the log shows completed —
+	// must be healed before it resolves, or the restored WorkspaceState carries
+	// a turn band nothing is running and the restart guard refuses the workspace
+	// all over again. Open is the one moment this is honest: nothing is wired to
+	// a daemon that has just started (see hibernateEveryWorkspaceLocked below),
+	// so no claim here can belong to a turn that is genuinely live.
+	if err := m.reconcileCompletedCompactionClaimsLocked(); err != nil {
+		return err
+	}
 	// NOTHING IS WIRED TO A DAEMON THAT HAS JUST STARTED. The session-status lifecycle
 	// history survives the restart and the shim connections do not, so every
 	// restored workspace is hibernated until something wires it again — which is
