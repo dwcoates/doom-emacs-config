@@ -66,6 +66,16 @@ type keepAlivePingMeasurement struct {
 	// ttlMs is the cache lifetime that elapsed was believed to be inside. It is
 	// the threshold the account reports having been wrong about.
 	ttlMs int64
+	// submittedAtMs is when this ping was claimed, on the daemon's own clock.
+	//
+	// IT IS WHAT THE DEADLINE IS MEASURED FROM (keepalivedeadline.go). A ping's
+	// turn end is the only thing that clears its claim, so a ping whose end never
+	// arrives holds the claim, declines every later ping, parks real prompts
+	// behind it and reads as a live turn to hibernation and to every restart
+	// guard — for as long as the daemon lives. The instant is remembered here,
+	// with the claim it belongs to, because that is the only record of when the
+	// ping began that survives to be compared against.
+	submittedAtMs int64
 	// usage is what the ping's terminal result actually paid, in the canonical
 	// shape. The verdict reads the expensive sum off it rather than being handed
 	// a pre-reduced number, so the one place a bucket could be substituted for
@@ -93,6 +103,11 @@ func (m *Manager) measureKeepAlivePing(workspace, turnID string) keepAlivePingMe
 	measurement := keepAlivePingMeasurement{
 		turnID: turnID,
 		ttlMs:  int64(cfg.CacheTTL / time.Millisecond),
+		// STAMPED BEFORE ANY OF THE READS BELOW CAN FAIL. The deadline must
+		// cover a ping whose measurement could not be completed just as much as
+		// one whose could — an unmeasurable session is not a licence to hold a
+		// claim forever — so this is the one field taken unconditionally.
+		submittedAtMs: m.now(),
 	}
 	if m.cfg.Hibernations == nil {
 		return measurement

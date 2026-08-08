@@ -78,6 +78,28 @@ const RetryFloor = time.Minute
 // say nothing about how much cache lifetime is actually left.
 const WarmCompactMargin = 5 * time.Minute
 
+// PingDeadlineShare is the fraction of the interval between pings that a
+// SUBMITTED ping's turn is allowed to stay open before the policy judges that
+// its end is never coming.
+//
+// IT IS A SHARE RATHER THAN A DURATION because both edges of the bound move with
+// the configuration, and a fixed figure would be wrong at one edge or the other
+// for any configuration but the default:
+//
+//   - the LOWER edge is a real ping. A ping is one model call answering a dozen
+//     tokens with a single character, so it completes in seconds. A quarter of
+//     the inter-ping interval is two orders of magnitude past that at the
+//     defaults, and stays far past it under a compressed test configuration.
+//   - the UPPER edge is the NEXT ping's window, and it is what makes the bound
+//     load-bearing. A ping's claim declines the next ping outright
+//     (keepAliveEligibleLocked, `keep_alive_in_flight`), holds real prompts
+//     behind it, and reads as a live turn to hibernation and to every restart
+//     guard. A deadline reaching the next window would let ONE dead ping disable
+//     the feature for the life of the daemon rather than for a single window —
+//     which is exactly the observed leak, a `ka_` claim open for hours behind a
+//     ping that finishes in seconds.
+const PingDeadlineShare = 4
+
 // WarmCompactMinContextTokens is the conversation size below which a warm
 // compaction is NOT worth submitting.
 //
@@ -169,6 +191,10 @@ func (c Config) Validate() error {
 	if c.WarmCompactAt() >= c.CacheTTL-c.Leeway {
 		return fmt.Errorf("keepalive: leeway %s must be shorter than the retry floor %s plus the warm-compaction margin %s; otherwise the warm compaction is due at or after the ping window opens and the ping arm swallows it, leaving the compaction silently inert",
 			c.Leeway, RetryFloor, WarmCompactMargin)
+	}
+	if c.PingDeadline() <= c.SweepInterval(0) {
+		return fmt.Errorf("keepalive: the ping deadline %s must exceed the sweep interval %s; otherwise a ping can be judged overdue before the sweep that would have observed its end ever runs",
+			c.PingDeadline(), c.SweepInterval(0))
 	}
 	if c.IdleCutoff <= 0 {
 		return fmt.Errorf("keepalive: idle cutoff must be positive, got %s", c.IdleCutoff)
@@ -358,6 +384,41 @@ func (c Config) Evaluate(nowMs, lastTurnEndMs int64) Decision {
 		}
 	}
 	return Decision{Action: ActionNone, ElapsedMs: elapsedMs}
+}
+
+// PingDeadline is how long a submitted ping's turn may stay open before the
+// policy judges that its end is never coming: PingDeadlineShare of the interval
+// at which pings become due. Validate refuses any configuration whose answer
+// here does not exceed the sweep interval that would evaluate it.
+func (c Config) PingDeadline() time.Duration {
+	return (c.CacheTTL - c.Leeway) / PingDeadlineShare
+}
+
+// PingOverdue reports whether a ping submitted at submittedAtMs has stood open
+// past PingDeadline, and how long it has actually been open.
+//
+// IT IS A TIME-SINCE COMPARISON, NOT A TIMER, for the same reason every other
+// decision in this package is one (see the package doc). A timer dies with the
+// daemon, does not advance across a laptop sleep, and cannot tell "the ping is
+// overdue" from "the deadline was missed while the machine was asleep". The
+// comparison answers all three from an instant the caller remembered.
+//
+// A ping with no recorded submit instant is NOT overdue. Every unknown answers
+// no, the same rule the sweeper's own gates follow: an undated ping is one the
+// policy knows nothing about, and closing a live turn on absent evidence is the
+// failure this whole apparatus exists to avoid.
+func (c Config) PingOverdue(nowMs, submittedAtMs int64) (time.Duration, bool) {
+	if submittedAtMs <= 0 {
+		return 0, false
+	}
+	open := time.Duration(nowMs-submittedAtMs) * time.Millisecond
+	if open < 0 {
+		// A submit instant in the future is a clock that moved backwards, not a
+		// ping that has been open for negative time. Treat it as freshly
+		// submitted: the conservative direction is to leave the turn alone.
+		return 0, false
+	}
+	return open, open >= c.PingDeadline()
 }
 
 // durationEnv reads a millisecond-valued environment variable.
