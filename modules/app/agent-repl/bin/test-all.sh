@@ -100,6 +100,9 @@ is_known_suite() {
 
 parse_suites() {
     local spec="$1" name
+    # Rendered BEFORE the comma IFS below, so the error message lists the roster
+    # space-separated rather than in the same shape as the argument that failed.
+    local roster="${ALL_SUITES[*]}"
     [ -n "$spec" ] ||
         die "--suites needs at least one suite name"
     local IFS=,
@@ -107,7 +110,7 @@ parse_suites() {
         [ -n "$name" ] ||
             die "--suites contains an empty suite name: '$spec'"
         is_known_suite "$name" ||
-            die "--suites names an unknown suite '$name'; known suites: ${ALL_SUITES[*]}"
+            die "--suites names an unknown suite '$name'; known suites: $roster"
         SELECTED+=("$name")
     done
     [ "${#SELECTED[@]}" -gt 0 ] ||
