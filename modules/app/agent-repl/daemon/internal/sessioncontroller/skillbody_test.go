@@ -98,7 +98,7 @@ func (h *queueHarness) skillBodies() []*frontendv1.SkillBodyItem {
 	var out []*frontendv1.SkillBodyItem
 	for _, cd := range h.push.convo {
 		for _, it := range cd.GetItems() {
-			if sb := it.GetSkillBody(); sb != nil {
+			if sb := it.GetAgent().GetSkillBody(); sb != nil {
 				out = append(out, sb)
 			}
 		}

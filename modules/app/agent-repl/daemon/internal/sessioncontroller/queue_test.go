@@ -306,7 +306,7 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 }
 
 // waitEntryClass waits until the single queued entry reaches cls.
-func (h *queueHarness) waitEntryClass(cls frontendv1.QueueClassification) {
+func (h *queueHarness) waitEntryClass(cls Verdict) {
 	h.t.Helper()
 	waitFor(h.t, "classification "+cls.String(), func() bool {
 		es := h.entries()
@@ -390,7 +390,7 @@ func TestQueuedEntryStartsPending(t *testing.T) {
 
 	// Assert.
 	if es := h.entries(); len(es) != 1 ||
-		es[0].classification != frontendv1.QueueClassification_QUEUE_CLASSIFICATION_PENDING {
+		es[0].classification != VerdictPending {
 		t.Fatalf("entries = %+v, want one PENDING", es)
 	}
 	close(cls.release)
@@ -529,7 +529,7 @@ func TestDeliveryFailureRequeuesTheEntryAsError(t *testing.T) {
 	waitFor(t, "the requeue", func() bool {
 		es := h.entries()
 		return len(es) == 1 &&
-			es[0].classification == frontendv1.QueueClassification_QUEUE_CLASSIFICATION_ERROR
+			es[0].classification == VerdictError
 	})
 	if got := h.entries()[0].text; got != "later" {
 		t.Fatalf("requeued text = %q, want later", got)
@@ -541,7 +541,7 @@ func TestDeliveryFailureRequeuesTheEntryAsError(t *testing.T) {
 func TestHoldVerdictLeavesTheEntryQueued(t *testing.T) {
 	// Arrange.
 	cls := &fakeClassifier{res: ClassifyResult{
-		Classification: frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD,
+		Classification: VerdictHold,
 		Rationale:      "unrelated",
 	}}
 	h := newQueueHarness(t, cls)
@@ -551,7 +551,7 @@ func TestHoldVerdictLeavesTheEntryQueued(t *testing.T) {
 	_ = h.submit("later")
 
 	// Assert — HOLD does not interrupt and does not deliver.
-	h.waitEntryClass(frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD)
+	h.waitEntryClass(VerdictHold)
 	if h.client.interruptCount() != 0 {
 		t.Fatal("a HOLD verdict must not interrupt")
 	}
@@ -560,7 +560,7 @@ func TestHoldVerdictLeavesTheEntryQueued(t *testing.T) {
 func TestHoldVerdictCarriesItsRationale(t *testing.T) {
 	// Arrange.
 	cls := &fakeClassifier{res: ClassifyResult{
-		Classification: frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD,
+		Classification: VerdictHold,
 		Rationale:      "unrelated to the running turn",
 	}}
 	h := newQueueHarness(t, cls)
@@ -570,7 +570,7 @@ func TestHoldVerdictCarriesItsRationale(t *testing.T) {
 	_ = h.submit("later")
 
 	// Assert.
-	h.waitEntryClass(frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD)
+	h.waitEntryClass(VerdictHold)
 	if got := h.entries()[0].rationale; got != "unrelated to the running turn" {
 		t.Fatalf("rationale = %q", got)
 	}
@@ -587,7 +587,7 @@ func TestClassifierFailureBecomesErrorNotHold(t *testing.T) {
 	_ = h.submit("later")
 
 	// Assert.
-	h.waitEntryClass(frontendv1.QueueClassification_QUEUE_CLASSIFICATION_ERROR)
+	h.waitEntryClass(VerdictError)
 }
 
 func TestClassifierFailureSurfacesItsReason(t *testing.T) {
@@ -600,7 +600,7 @@ func TestClassifierFailureSurfacesItsReason(t *testing.T) {
 	_ = h.submit("later")
 
 	// Assert.
-	h.waitEntryClass(frontendv1.QueueClassification_QUEUE_CLASSIFICATION_ERROR)
+	h.waitEntryClass(VerdictError)
 	if got := h.entries()[0].rationale; got != "answered with both tokens" {
 		t.Fatalf("rationale = %q, want the classifier's own reason", got)
 	}
@@ -612,7 +612,7 @@ func TestErroredEntryIsStillDeliveredAtTurnEnd(t *testing.T) {
 	h := newQueueHarness(t, cls)
 	h.turn(true)
 	_ = h.submit("later")
-	h.waitEntryClass(frontendv1.QueueClassification_QUEUE_CLASSIFICATION_ERROR)
+	h.waitEntryClass(VerdictError)
 
 	// Act.
 	h.turn(false)
@@ -631,12 +631,12 @@ func TestNoClassifierConfiguredMarksTheEntryError(t *testing.T) {
 	_ = h.submit("later")
 
 	// Assert.
-	h.waitEntryClass(frontendv1.QueueClassification_QUEUE_CLASSIFICATION_ERROR)
+	h.waitEntryClass(VerdictError)
 }
 
 func TestClassifierIsGivenTheRunningPrompt(t *testing.T) {
 	// Arrange — the classifier judges the new prompt AGAINST the running one.
-	cls := &fakeClassifier{res: ClassifyResult{Classification: frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD}}
+	cls := &fakeClassifier{res: ClassifyResult{Classification: VerdictHold}}
 	h := newQueueHarness(t, cls)
 	_ = h.submit("the running work") // forwarded while idle; becomes runningText
 	h.turn(true)
@@ -655,7 +655,7 @@ func TestClassifierIsGivenTheRunningPrompt(t *testing.T) {
 func TestVerdictForAnAlreadyDeliveredEntryIsMoot(t *testing.T) {
 	// Arrange — the turn ends (draining the entry) while the classifier runs.
 	cls := &fakeClassifier{
-		res:     ClassifyResult{Classification: frontendv1.QueueClassification_QUEUE_CLASSIFICATION_INTERJECT},
+		res:     ClassifyResult{Classification: VerdictInterject},
 		release: make(chan struct{}),
 	}
 	h := newQueueHarness(t, cls)
@@ -679,7 +679,7 @@ func TestVerdictForAnAlreadyDeliveredEntryIsMoot(t *testing.T) {
 
 func TestInterjectVerdictInterruptsTheRunningTurn(t *testing.T) {
 	// Arrange.
-	cls := &fakeClassifier{res: ClassifyResult{Classification: frontendv1.QueueClassification_QUEUE_CLASSIFICATION_INTERJECT}}
+	cls := &fakeClassifier{res: ClassifyResult{Classification: VerdictInterject}}
 	h := newQueueHarness(t, cls)
 	h.turn(true)
 
@@ -693,7 +693,7 @@ func TestInterjectVerdictInterruptsTheRunningTurn(t *testing.T) {
 func TestInterjectDoesNotSubmitBeforeTheTurnEnds(t *testing.T) {
 	// Arrange — THE race the evented sequence exists to prevent: submitting
 	// into a turn that is still tearing down.
-	cls := &fakeClassifier{res: ClassifyResult{Classification: frontendv1.QueueClassification_QUEUE_CLASSIFICATION_INTERJECT}}
+	cls := &fakeClassifier{res: ClassifyResult{Classification: VerdictInterject}}
 	h := newQueueHarness(t, cls)
 	h.turn(true)
 
@@ -709,7 +709,7 @@ func TestInterjectDoesNotSubmitBeforeTheTurnEnds(t *testing.T) {
 
 func TestInterjectSubmitsOnTheObservedTurnEnd(t *testing.T) {
 	// Arrange.
-	cls := &fakeClassifier{res: ClassifyResult{Classification: frontendv1.QueueClassification_QUEUE_CLASSIFICATION_INTERJECT}}
+	cls := &fakeClassifier{res: ClassifyResult{Classification: VerdictInterject}}
 	h := newQueueHarness(t, cls)
 	h.turn(true)
 	_ = h.submit("stop, wrong file")
@@ -728,13 +728,13 @@ func TestInterjectSubmitsOnTheObservedTurnEnd(t *testing.T) {
 func TestInterjectJumpsAheadOfAnEarlierHoldEntry(t *testing.T) {
 	// Arrange — an entry that interjects is delivered before an earlier FIFO
 	// entry, which is the whole point of interjecting.
-	cls := &fakeClassifier{res: ClassifyResult{Classification: frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD}}
+	cls := &fakeClassifier{res: ClassifyResult{Classification: VerdictHold}}
 	h := newQueueHarness(t, cls)
 	h.turn(true)
 	_ = h.submit("first, unrelated")
-	h.waitEntryClass(frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD)
+	h.waitEntryClass(VerdictHold)
 	cls.mu.Lock()
-	cls.res = ClassifyResult{Classification: frontendv1.QueueClassification_QUEUE_CLASSIFICATION_INTERJECT}
+	cls.res = ClassifyResult{Classification: VerdictInterject}
 	cls.mu.Unlock()
 	_ = h.submit("second, urgent")
 	waitFor(t, "the interrupt", func() bool { return h.client.interruptCount() == 1 })
@@ -753,7 +753,7 @@ func TestInterjectVerdictAfterTheTurnEndedDeliversWithoutInterrupting(t *testing
 	// Arrange — the verdict is moot as an INTERRUPT (nothing is running) but
 	// the prompt must still reach the agent.
 	cls := &fakeClassifier{
-		res:     ClassifyResult{Classification: frontendv1.QueueClassification_QUEUE_CLASSIFICATION_INTERJECT},
+		res:     ClassifyResult{Classification: VerdictInterject},
 		release: make(chan struct{}),
 	}
 	h := newQueueHarness(t, cls)
@@ -783,11 +783,11 @@ func TestInterjectVerdictAfterTheTurnEndedDeliversWithoutInterrupting(t *testing
 
 func TestForceRunsTheInterjectSequence(t *testing.T) {
 	// Arrange.
-	cls := &fakeClassifier{res: ClassifyResult{Classification: frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD}}
+	cls := &fakeClassifier{res: ClassifyResult{Classification: VerdictHold}}
 	h := newQueueHarness(t, cls)
 	h.turn(true)
 	_ = h.submit("later")
-	h.waitEntryClass(frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD)
+	h.waitEntryClass(VerdictHold)
 
 	// Act.
 	if err := h.m.ForceQueueEntry("ws", h.entries()[0].id); err != nil {
@@ -803,7 +803,7 @@ func TestForceDeliversOnTheTurnEnd(t *testing.T) {
 	h := newQueueHarness(t, nil)
 	h.turn(true)
 	_ = h.submit("later")
-	h.waitEntryClass(frontendv1.QueueClassification_QUEUE_CLASSIFICATION_ERROR)
+	h.waitEntryClass(VerdictError)
 	if err := h.m.ForceQueueEntry("ws", h.entries()[0].id); err != nil {
 		t.Fatalf("force: %v", err)
 	}
@@ -958,21 +958,20 @@ func TestQueueViewsIncludeAnEmptyQueue(t *testing.T) {
 func TestQueueViewCarriesTheClassificationAndRationale(t *testing.T) {
 	// Arrange.
 	cls := &fakeClassifier{res: ClassifyResult{
-		Classification: frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD,
+		Classification: VerdictHold,
 		Rationale:      "independent",
 	}}
 	h := newQueueHarness(t, cls)
 	h.turn(true)
 	_ = h.submit("later")
-	h.waitEntryClass(frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD)
+	h.waitEntryClass(VerdictHold)
 
 	// Act.
 	v := h.m.QueueViews()[0]
 
 	// Assert.
 	e := v.GetEntries()[0]
-	if e.GetClassification() != frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD ||
-		e.GetRationale() != "independent" {
+	if e.GetHoldForTurnEnd() == nil || e.GetHoldForTurnEnd().GetRationale() != "independent" {
 		t.Fatalf("entry = %+v", e)
 	}
 }
@@ -1071,7 +1070,7 @@ func TestQueueViewOfAnEmptyQueueStillCarriesIdentity(t *testing.T) {
 	q := &promptQueue{}
 	v := q.view("ws", "s1")
 	// Assert — "the queue is empty" is a value, not an absence.
-	if v.GetWorkspace() != "ws" || v.GetSessionId() != "s1" || len(v.GetEntries()) != 0 {
+	if v.GetWorkspace() != "ws" || v.GetFence() != "s1" || len(v.GetEntries()) != 0 {
 		t.Fatalf("view = %+v", v)
 	}
 }
@@ -1176,7 +1175,7 @@ func TestInterjectMootPathDoesNotSubmitIntoATurnThatStartedMeanwhile(t *testing.
 			return false
 		}
 		for _, e := range v.GetEntries() {
-			if e.GetClassification() == frontendv1.QueueClassification_QUEUE_CLASSIFICATION_PENDING {
+			if e.GetPending() != nil {
 				return false
 			}
 		}
@@ -1323,7 +1322,7 @@ func TestReleaseRevivalHoldRestoresAnOrdinaryEntry(t *testing.T) {
 	q := &promptQueue{}
 	q.add(&queueEntry{
 		id: "q1", revivalHoldSessionID: "s1",
-		classification: frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD,
+		classification: VerdictHold,
 	})
 
 	// Act.
@@ -1336,7 +1335,7 @@ func TestReleaseRevivalHoldRestoresAnOrdinaryEntry(t *testing.T) {
 	if q.entries[0].revivalHeld() {
 		t.Fatal("the entry is still held after its revival's compaction landed")
 	}
-	if q.entries[0].classification != frontendv1.QueueClassification_QUEUE_CLASSIFICATION_PENDING {
+	if q.entries[0].classification != VerdictPending {
 		t.Fatalf("classification = %s after release, want PENDING", q.entries[0].classification)
 	}
 }
@@ -1387,15 +1386,18 @@ func TestViewProjectsTheRevivalHoldSessionID(t *testing.T) {
 	q := &promptQueue{}
 	q.add(&queueEntry{
 		id: "q1", revivalHoldSessionID: "s1",
-		classification: frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD,
+		classification: VerdictHold,
 	})
 
 	// Act.
 	view := q.view("ws", "s1")
 
 	// Assert.
-	if got := view.GetEntries()[0].GetRevivalHold().GetSessionId(); got != "s1" {
-		t.Fatalf("revival_hold.session_id = %q, want the parking session %q", got, "s1")
+	// The arm's PRESENCE is the whole fact. It named the session being revived
+	// before; a revival is a workspace-level event and the entry already rides
+	// its workspace's queue, so the id joined the bubble to nothing.
+	if view.GetEntries()[0].GetRevival() == nil {
+		t.Fatalf("hold = %T, want the revival arm", view.GetEntries()[0].GetHold())
 	}
 }
 
@@ -1406,7 +1408,7 @@ func TestViewOmitsTheRevivalHoldOnceReleased(t *testing.T) {
 	q := &promptQueue{}
 	q.add(&queueEntry{
 		id: "q1", revivalHoldSessionID: "s1",
-		classification: frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD,
+		classification: VerdictHold,
 	})
 	q.releaseRevivalHold("s1")
 
@@ -1414,7 +1416,7 @@ func TestViewOmitsTheRevivalHoldOnceReleased(t *testing.T) {
 	view := q.view("ws", "s1")
 
 	// Assert.
-	if hold := view.GetEntries()[0].GetRevivalHold(); hold != nil {
+	if hold := view.GetEntries()[0].GetRevival(); hold != nil {
 		t.Fatalf("revival_hold = %v after release, want it gone", hold)
 	}
 }
@@ -1430,9 +1432,9 @@ func TestViewProjectsARevivalHoldWithoutTheOtherHolds(t *testing.T) {
 	entry := q.view("ws", "s1").GetEntries()[0]
 
 	// Assert.
-	if entry.GetShutdownHold() != nil || entry.GetKeepAliveHold() != nil {
+	if entry.GetShutdown() != nil || entry.GetKeepAlive() != nil {
 		t.Fatalf("shutdown_hold=%v keep_alive_hold=%v, want a revival hold alone",
-			entry.GetShutdownHold(), entry.GetKeepAliveHold())
+			entry.GetShutdown(), entry.GetKeepAlive())
 	}
 }
 

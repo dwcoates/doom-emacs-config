@@ -146,13 +146,13 @@ func (r *faultRig) activeFaults() []*frontendv1.RuntimeFault {
 }
 
 // cards returns every system-failure item the consumer pushed, in push order.
-func (r *faultRig) cards() []*frontendv1.SystemFailureItem {
+func (r *faultRig) cards() []*frontendv1.FailureCardView {
 	r.push.mu.Lock()
 	defer r.push.mu.Unlock()
-	var out []*frontendv1.SystemFailureItem
+	var out []*frontendv1.FailureCardView
 	for _, d := range r.push.convo {
 		for _, it := range d.GetItems() {
-			if f := it.GetSystemFailure(); f != nil {
+			if f := it.GetFailureCard(); f != nil {
 				out = append(out, f)
 			}
 		}
@@ -168,7 +168,7 @@ func (r *faultRig) cardUUIDs() []string {
 	var out []string
 	for _, d := range r.push.convo {
 		for _, it := range d.GetItems() {
-			if it.GetSystemFailure() != nil {
+			if it.GetFailureCard() != nil {
 				out = append(out, it.GetUuid())
 			}
 		}
@@ -270,8 +270,8 @@ func TestShimDeathClassifiesAsInternal(t *testing.T) {
 	item := errclass.Death(t.Logf, "s_fault", rig.death[0], 0)
 
 	// Assert
-	if item.GetErrorClass() != frontendv1.ErrorClass_ERROR_CLASS_INTERNAL {
-		t.Fatalf("death class = %s, want ERROR_CLASS_INTERNAL", item.GetErrorClass())
+	if errclass.CardTone(item) != errclass.ToneLocal {
+		t.Fatalf("death class = %s, want ERROR_CLASS_INTERNAL", errclass.CardTone(item))
 	}
 }
 
@@ -292,8 +292,8 @@ func TestShimConnectionLossMidTurnFilesAnInternalCard(t *testing.T) {
 	if len(cards) != 1 {
 		t.Fatalf("pushed %d failure card(s), want exactly 1", len(cards))
 	}
-	if cards[0].GetErrorClass() != frontendv1.ErrorClass_ERROR_CLASS_INTERNAL {
-		t.Fatalf("card class = %s, want ERROR_CLASS_INTERNAL", cards[0].GetErrorClass())
+	if errclass.CardTone(cards[0]) != errclass.ToneLocal {
+		t.Fatalf("card class = %s, want ERROR_CLASS_INTERNAL", errclass.CardTone(cards[0]))
 	}
 }
 
@@ -336,8 +336,8 @@ func TestStoreOutageFilesAnInternalCard(t *testing.T) {
 	if len(cards) != 1 {
 		t.Fatalf("pushed %d failure card(s), want exactly 1", len(cards))
 	}
-	if cards[0].GetErrorClass() != frontendv1.ErrorClass_ERROR_CLASS_INTERNAL {
-		t.Fatalf("card class = %s, want ERROR_CLASS_INTERNAL", cards[0].GetErrorClass())
+	if errclass.CardTone(cards[0]) != errclass.ToneLocal {
+		t.Fatalf("card class = %s, want ERROR_CLASS_INTERNAL", errclass.CardTone(cards[0]))
 	}
 }
 
@@ -353,7 +353,7 @@ func TestStoreOutageOpensUnresolved(t *testing.T) {
 	rig.cons.Degraded(rig.sid, nil, &corev1.DegradedState{Component: "store-client", Reason: "store socket closed"})
 
 	// Assert
-	if got := rig.cards()[0].GetResolvedAtMs(); got != 0 {
+	if got := errclass.ResolvedAtMs(rig.cards()[0]); got != 0 {
 		t.Fatalf("resolved_at_ms = %d on the opening edge, want 0", got)
 	}
 }
@@ -381,7 +381,7 @@ func TestStoreRecoveryResolvesTheSameCardInPlace(t *testing.T) {
 	if len(retained) != 1 {
 		t.Fatalf("retained %d card(s), want exactly 1 (the settled one)", len(retained))
 	}
-	if got := retained[0].GetSystemFailure().GetResolvedAtMs(); got != recoveredAt {
+	if got := errclass.ResolvedAtMs(retained[0].GetFailureCard()); got != recoveredAt {
 		t.Fatalf("retained resolved_at_ms = %d, want %d", got, recoveredAt)
 	}
 }
@@ -434,7 +434,7 @@ func TestConnectionRecoveryResolvesTheSameCardInPlace(t *testing.T) {
 	if len(retained) != 1 {
 		t.Fatalf("retained %d card(s), want exactly 1 (the settled one)", len(retained))
 	}
-	if got := retained[0].GetSystemFailure().GetResolvedAtMs(); got != recoveredAt {
+	if got := errclass.ResolvedAtMs(retained[0].GetFailureCard()); got != recoveredAt {
 		t.Fatalf("retained resolved_at_ms = %d, want %d", got, recoveredAt)
 	}
 }
@@ -607,8 +607,8 @@ func TestAuthFailureClassifiesAsAPI(t *testing.T) {
 	item := errclass.TurnEnd(te)
 
 	// Assert
-	if item.GetErrorClass() != frontendv1.ErrorClass_ERROR_CLASS_API {
-		t.Fatalf("auth failure class = %s, want ERROR_CLASS_API", item.GetErrorClass())
+	if errclass.CardTone(item) != errclass.ToneVendor {
+		t.Fatalf("auth failure class = %s, want ERROR_CLASS_API", errclass.CardTone(item))
 	}
 }
 
@@ -622,11 +622,11 @@ func TestAuthApiErrorLineClassifiesAsAPI(t *testing.T) {
 	}
 
 	// Act
-	item := errclass.APIError(line, "item-1")
+	item := errclass.APIError(line)
 
 	// Assert
-	if item.GetErrorClass() != frontendv1.ErrorClass_ERROR_CLASS_API {
-		t.Fatalf("401 class = %s, want ERROR_CLASS_API", item.GetErrorClass())
+	if errclass.CardTone(item) != errclass.ToneVendor {
+		t.Fatalf("401 class = %s, want ERROR_CLASS_API", errclass.CardTone(item))
 	}
 }
 
@@ -662,11 +662,11 @@ func TestRateLimitApiErrorClassifiesAsAPI(t *testing.T) {
 	}
 
 	// Act
-	item := errclass.APIError(line, "item-2")
+	item := errclass.APIError(line)
 
 	// Assert
-	if item.GetErrorClass() != frontendv1.ErrorClass_ERROR_CLASS_API {
-		t.Fatalf("429 class = %s, want ERROR_CLASS_API", item.GetErrorClass())
+	if errclass.CardTone(item) != errclass.ToneVendor {
+		t.Fatalf("429 class = %s, want ERROR_CLASS_API", errclass.CardTone(item))
 	}
 }
 
@@ -786,8 +786,8 @@ func TestUndeliverableInterruptClassifiesAsInternal(t *testing.T) {
 	item := errclass.Command(t.Logf, err)
 
 	// Assert
-	if item.GetErrorClass() != frontendv1.ErrorClass_ERROR_CLASS_INTERNAL {
-		t.Fatalf("undeliverable interrupt class = %s, want ERROR_CLASS_INTERNAL", item.GetErrorClass())
+	if errclass.CardTone(item) != errclass.ToneLocal {
+		t.Fatalf("undeliverable interrupt class = %s, want ERROR_CLASS_INTERNAL", errclass.CardTone(item))
 	}
 }
 

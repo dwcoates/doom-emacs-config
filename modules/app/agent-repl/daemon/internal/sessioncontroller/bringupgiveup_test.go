@@ -82,8 +82,8 @@ func TestGivingUpPublishesTheAccountOnTheStandingFailureCard(t *testing.T) {
 	// permanence the park no longer has, and a card that tells a user their
 	// workspace is finished when it will retry on its own is the wrong report.
 	last := cards[len(cards)-1]
-	if !strings.Contains(last.GetSourceDetail(), "not being respawned yet") {
-		t.Fatalf("last failure card detail = %q, want it to name the give-up", last.GetSourceDetail())
+	if !strings.Contains(last.GetDetail(), "not being respawned yet") {
+		t.Fatalf("last failure card detail = %q, want it to name the give-up", last.GetDetail())
 	}
 	if !h.log.contains("bring-up GIVING UP") {
 		t.Fatal("the give-up was not logged")

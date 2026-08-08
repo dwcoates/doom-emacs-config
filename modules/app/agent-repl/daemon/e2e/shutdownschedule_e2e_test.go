@@ -191,8 +191,8 @@ func TestE2EScheduleWithALiveTurnBroadcastsATurnHold(t *testing.T) {
 	if hold == nil {
 		t.Fatalf("the drain lists no hold for workspace %s, whose turn is in flight; holds=%s", cwd, describeHolds(draining))
 	}
-	if hold.GetSessionId() != id {
-		t.Errorf("hold session_id = %q, want %q: a hold must name the OWNING session so it cannot be attributed to a successor", hold.GetSessionId(), id)
+	if hold.String() != id {
+		t.Errorf("hold session_id = %q, want %q: a hold must name the OWNING session so it cannot be attributed to a successor", hold.String(), id)
 	}
 	if hold.GetTurn() == nil {
 		t.Fatalf("the hold on %s carries no turn, but its turn is in flight; hold=%v", cwd, hold)
@@ -261,8 +261,8 @@ func TestE2EScheduleWithLiveTasksBroadcastsATasksHold(t *testing.T) {
 	if hold == nil {
 		t.Fatalf("the drain lists no hold for %s, which has a live task; holds=%s", cwd, describeHolds(draining))
 	}
-	if hold.GetSessionId() != id {
-		t.Errorf("hold session_id = %q, want %q", hold.GetSessionId(), id)
+	if hold.String() != id {
+		t.Errorf("hold session_id = %q, want %q", hold.String(), id)
 	}
 	// The tasks arm and the ABSENCE of a turn arm are independent facts about
 	// the same hold, so a missing tasks arm is reported rather than fatal. The
@@ -348,7 +348,7 @@ func TestE2EAPromptUnderTheLeaseIsHeldWithTheScheduleIdAndStartsNoTurn(t *testin
 	awaitAll(t, fx.connB, reject, map[string]func(*frontendv1.FrontendFrame) bool{
 		"a QueueEntry bearing shutdown_hold": func(frame *frontendv1.FrontendFrame) bool {
 			for _, entry := range queueViewFor(frame, fx.cwdB).GetEntries() {
-				if entry.GetShutdownHold() != nil {
+				if entry.GetShutdown() != nil {
 					held = entry
 					return true
 				}
@@ -356,16 +356,13 @@ func TestE2EAPromptUnderTheLeaseIsHeldWithTheScheduleIdAndStartsNoTurn(t *testin
 			return false
 		},
 	})
-	if got, want := held.GetShutdownHold().GetScheduleId(), fx.draining.GetScheduleId(); got != want {
+	if got, want := held.GetShutdown().GetScheduleId(), fx.draining.GetScheduleId(); got != want {
 		t.Errorf("the held entry names schedule_id %q, want the live schedule %q: the bubble must join to the lease it explains", got, want)
 	}
-	switch got := held.GetClassification(); got {
-	case frontendv1.QueueClassification_QUEUE_CLASSIFICATION_PENDING,
-		frontendv1.QueueClassification_QUEUE_CLASSIFICATION_INTERJECT,
-		frontendv1.QueueClassification_QUEUE_CLASSIFICATION_ERROR:
-		t.Errorf("the lease-held entry's classification is %s: that state is only reachable by running the classifier, which never runs on a lease-held entry", got)
+	if arm := held.GetClassification(); held.GetPending() != nil || held.GetInterject() != nil || held.GetError() != nil {
+		t.Errorf("the lease-held entry's classification is %T: that state is only reachable by running the classifier, which never runs on a lease-held entry", arm)
 	}
-	if got := held.GetRationale(); got != "" {
+	if got := held.GetHoldForTurnEnd().GetRationale(); got != "" {
 		t.Errorf("the lease-held entry carries a classifier rationale %q: the classifier never runs on such an entry", got)
 	}
 }
@@ -595,7 +592,7 @@ func TestE2ECancelingTheScheduleReleasesHeldEntriesIntoOrdinaryDelivery(t *testi
 			}
 			for _, entry := range view.GetEntries() {
 				if entry.GetId() == held.GetId() {
-					return entry.GetShutdownHold() == nil
+					return entry.GetShutdown() == nil
 				}
 			}
 			// Gone from the queue entirely means it was delivered, which is

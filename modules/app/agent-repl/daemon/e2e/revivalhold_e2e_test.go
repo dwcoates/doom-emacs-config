@@ -88,11 +88,11 @@ func TestE2EAPromptHeldByARevivalNamesTheSessionBeingRevived(t *testing.T) {
 	held := heldByPendingCompaction(t, s, "held-by-the-revival")
 
 	// Assert
-	hold := held.entry.GetRevivalHold()
+	hold := held.entry.GetRevival()
 	if hold == nil {
 		t.Fatalf("the entry for a prompt typed during a pending compact-first revival carries no revival_hold: the webapp has nothing to draw but the classifier bubble, and no classifier ran on it")
 	}
-	if got := hold.GetSessionId(); got != s.sessionID {
+	if got := hold.String(); got != s.sessionID {
 		t.Errorf("revival_hold session_id = %q, want the session being revived %q", got, s.sessionID)
 	}
 }
@@ -109,7 +109,7 @@ func TestE2EAPromptHeldByARevivalIsNotHeldByAKeepAlivePing(t *testing.T) {
 	held := heldByPendingCompaction(t, s, "held-and-not-by-a-ping")
 
 	// Assert
-	if hold := held.entry.GetKeepAliveHold(); hold != nil {
+	if hold := held.entry.GetKeepAlive(); hold != nil {
 		t.Errorf("the revival-held entry carries keep_alive_hold (turn %q): nothing pinged this session, and the revival's compaction is what holds the entry", hold.GetTurnId())
 	}
 }
@@ -145,7 +145,7 @@ func TestE2EALandedCompactionReleasesTheRevivalHold(t *testing.T) {
 			}
 			for _, e := range view.GetEntries() {
 				if e.GetId() == held.entry.GetId() {
-					return e.GetRevivalHold() == nil
+					return e.GetRevival() == nil
 				}
 			}
 			return true
