@@ -139,6 +139,10 @@ test can override readiness without restating the whole coordinator."
               (lambda (ok _fail) (funcall ok) :pending))
              ((symbol-function 'agent-repl--frontend-rebind-workspaces-after-restart)
               (lambda (ok _fail) (funcall ok 0) :pending))
+             ;; A `:tracked' bounce arms the expected-restart window for real,
+             ;; which would leave a live 180s timer behind in the batch process.
+             ((symbol-function 'agent-repl--frontend-arm-expected-restart)
+              #'ignore)
              ,@bindings)
      ,@body))
 
@@ -179,7 +183,7 @@ test can override readiness without restating the whole coordinator."
   "The deployment surface returns only after its success continuation runs."
   (let (finish pumps)
     (cl-letf (((symbol-function 'agent-repl--runtime-prepare)
-               (lambda (_rebind on-success _on-failure &optional _stop-shims)
+               (lambda (_rebind on-success _on-failure &optional _stop-shims _initiator)
                  (setq finish on-success)
                  :pending))
               ((symbol-function 'agent-repl--runtime-pump-events)
@@ -197,7 +201,7 @@ test can override readiness without restating the whole coordinator."
         (agent-repl-uds-command-ack-deadline 10.0)
         seen-health seen-ready seen-ack)
     (cl-letf (((symbol-function 'agent-repl--runtime-prepare)
-               (lambda (_rebind on-success _on-failure &optional _stop-shims)
+               (lambda (_rebind on-success _on-failure &optional _stop-shims _initiator)
                  (setq seen-health agent-repl-frontend-health-timeout
                        seen-ready agent-repl-frontend-ready-attempts
                        seen-ack agent-repl-uds-command-ack-deadline)
@@ -216,7 +220,7 @@ test can override readiness without restating the whole coordinator."
   "A short terminal timeout still leaves an earlier health failure boundary."
   (let (seen-health seen-ready seen-ack)
     (cl-letf (((symbol-function 'agent-repl--runtime-prepare)
-               (lambda (_rebind on-success _on-failure &optional _stop-shims)
+               (lambda (_rebind on-success _on-failure &optional _stop-shims _initiator)
                  (setq seen-health agent-repl-frontend-health-timeout
                        seen-ready agent-repl-frontend-ready-attempts
                        seen-ack agent-repl-uds-command-ack-deadline)
@@ -343,6 +347,97 @@ test can override readiness without restating the whole coordinator."
     ;; Assert
     (should (agent-repl-services-test--phase-line-p
              lines "backend startup complete"))))
+
+;;;; ---- arming the expected-restart window ----------------------------------
+
+(defmacro agent-repl-services-test--with-armed-window (state armed &rest body)
+  "Run BODY over a coordinated bounce from preflight STATE, collecting ARMED.
+ARMED accumulates every initiator the coordinator arms a window with, newest
+first, so a test can assert both what was armed and that nothing was."
+  (declare (indent 2))
+  `(let ((,armed nil))
+     (cl-letf (((symbol-function 'agent-repl--frontend-runtime-bounce-preflight-async)
+                (lambda (callback) (funcall callback ,state)))
+               ((symbol-function 'agent-repl--frontend-all-turn-active-workspaces)
+                (lambda () nil))
+               ((symbol-function 'agent-repl--shim-services-assert-launchd-loaded) #'ignore)
+               ((symbol-function 'agent-repl--frontend-build-if-stale) #'ignore)
+               ((symbol-function 'agent-repl--shim-services-build-and-bounce)
+                (lambda (_preflight ok _fail) (funcall ok) :pending))
+               ((symbol-function 'agent-repl--frontend-bounce-after-build)
+                (lambda (_state _stop on-complete) (funcall on-complete 'started)))
+               ((symbol-function 'agent-repl--runtime-retire-bounced-link) #'ignore)
+               ((symbol-function 'agent-repl--frontend-after-ready)
+                (lambda (ok _fail &optional _ws) (funcall ok) :pending))
+               ((symbol-function 'agent-repl--frontend-after-daemon-healthy)
+                (lambda (ok _fail) (funcall ok) :pending))
+               ((symbol-function 'agent-repl--frontend-rebind-workspaces-after-restart)
+                (lambda (ok _fail) (funcall ok 0) :pending))
+               ((symbol-function 'agent-repl--frontend-arm-expected-restart)
+                (lambda (initiator) (push initiator ,armed) initiator)))
+       ,@body)))
+
+(ert-deftest agent-repl-services-test-runtime-arms-the-window-with-its-initiator ()
+  "A deploy-driven bounce arms the window under the name the deploy gave it."
+  ;; Arrange
+  (agent-repl-services-test--with-armed-window :tracked armed
+    ;; Act
+    (agent-repl--runtime-prepare t #'ignore #'error nil "deploy (emacsclient)")
+    ;; Assert
+    (should (equal armed '("deploy (emacsclient)")))))
+
+(ert-deftest agent-repl-services-test-runtime-names-an-anonymous-restart ()
+  "An interactive restart names itself by mode rather than arming anonymously."
+  ;; Arrange
+  (agent-repl-services-test--with-armed-window :tracked armed
+    ;; Act
+    (agent-repl--runtime-prepare t #'ignore #'error)
+    ;; Assert
+    (should (equal armed '("runtime-restart")))))
+
+(ert-deftest agent-repl-services-test-runtime-arms-nothing-when-no-daemon-is-stopped ()
+  "An absent daemon is stopped by nobody, so no window suppresses its exits."
+  ;; Arrange
+  (agent-repl-services-test--with-armed-window :absent armed
+    ;; Act
+    (agent-repl--runtime-prepare t #'ignore #'error nil "deploy (emacsclient)")
+    ;; Assert
+    (should-not armed)))
+
+(ert-deftest agent-repl-services-test-runtime-arms-nothing-when-the-turn-guard-refuses ()
+  "A restart refused before any bounce leaves no window armed behind it."
+  ;; Arrange
+  (let (armed failure)
+    (cl-letf (((symbol-function 'agent-repl--frontend-runtime-bounce-preflight-async)
+               (lambda (callback) (funcall callback :tracked)))
+              ((symbol-function 'agent-repl--frontend-after-ready)
+               (lambda (ok _fail &optional _ws) (funcall ok)))
+              ((symbol-function 'agent-repl--frontend-all-turn-active-workspaces)
+               (lambda () '("/w-busy")))
+              ((symbol-function 'agent-repl--frontend-arm-expected-restart)
+               (lambda (initiator) (push initiator armed) initiator)))
+      ;; Act
+      (agent-repl--runtime-prepare
+       t (lambda () (error "unexpected success"))
+       (lambda (detail) (setq failure detail))
+       nil "deploy (emacsclient)")
+      ;; Assert
+      (should (string-match-p "turn in flight" failure))
+      (should-not armed))))
+
+(ert-deftest agent-repl-services-test-runtime-restart-await-forwards-its-initiator ()
+  "The synchronous deploy surface hands its initiator to the coordinator."
+  ;; Arrange
+  (let (initiator)
+    (cl-letf (((symbol-function 'agent-repl--runtime-prepare)
+               (lambda (_rebind on-success _on-failure &optional _stop-shims who)
+                 (setq initiator who)
+                 (funcall on-success)
+                 :pending)))
+      ;; Act
+      (agent-repl-runtime-restart-await nil 5.0 "deploy (emacsclient)")
+      ;; Assert
+      (should (equal initiator "deploy (emacsclient)")))))
 
 (provide 'test-services)
 
