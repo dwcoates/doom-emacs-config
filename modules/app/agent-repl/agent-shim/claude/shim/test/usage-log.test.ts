@@ -52,6 +52,25 @@ describe("logAssistantApiResponseUsage", () => {
     } });
   });
 
+  it("logs the uncached input as the SUM of the two expensive buckets", () => {
+    // Arrange — a cold re-ingest: input_tokens is a rounding error beside the
+    // cache creation, so a log carrying only the buckets reads as cheap.
+    const out = records();
+    // Act
+    log({ input_tokens: 12, output_tokens: 3, cache_read_input_tokens: 0, cache_creation_input_tokens: 500_000 });
+    // Assert
+    expect(out[0].context).toMatchObject({ uncached_input_tokens: 500_012 });
+  });
+
+  it("keeps the cache read out of the logged uncached input", () => {
+    // Arrange — a large standing prefix presented again costs ~a tenth.
+    const out = records();
+    // Act
+    log({ input_tokens: 10, output_tokens: 3, cache_read_input_tokens: 900_000, cache_creation_input_tokens: 20 });
+    // Assert
+    expect(out[0].context).toMatchObject({ uncached_input_tokens: 30 });
+  });
+
   it("warns below but not at the eighty percent cache-hit boundary", () => {
     const out = records();
     log({ input_tokens: 21, output_tokens: 1, cache_read_input_tokens: 79, cache_creation_input_tokens: 0 });

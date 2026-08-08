@@ -51,6 +51,13 @@ export interface NormalizedApiUsage {
   cacheCreation5mInputTokens: number;
   cacheCreation1hInputTokens: number;
   unknownUsageFields: JsonObject;
+  /**
+   * BUCKET SHARES, NOT A COST MEASURE. The three rates partition the prompt
+   * input and sum to 1, one per disjoint SDK bucket, so `uncachedInputRate` is
+   * the `input_tokens` bucket's share ALONE — NOT the module's "uncached
+   * input", which is the sum `uncachedInputTokens` computes. The EXPENSIVE
+   * share is `uncachedInputRate + cacheWriteRate`.
+   */
   promptCache:
     | { case: "empty"; totalPromptInputTokens: 0 }
     | {
@@ -60,6 +67,33 @@ export interface NormalizedApiUsage {
         cacheWriteRate: number;
         uncachedInputRate: number;
       };
+}
+
+/**
+ * THE SHIM'S ONE DERIVATION of uncached (expensive) input:
+ * `input_tokens` + `cache_creation_input_tokens`.
+ *
+ * The SDK's three input buckets are DISJOINT and their names describe where the
+ * tokens went, not what they cost. `cache_read_input_tokens` is the ONLY cheap
+ * one; `cache_creation_input_tokens` was processed fresh at full price PLUS the
+ * cache-write premium, and `input_tokens` was processed fresh and never cached
+ * at all. So both of the latter are uncached in every economic sense.
+ *
+ * THE SECOND TERM IS WHY THIS IS A FUNCTION. The CLI marks nearly all input
+ * cacheable, so a COLD prompt — a full context re-ingest, the most expensive
+ * thing that can happen — surfaces as cache CREATION while `input_tokens` stays
+ * near zero. Reading `input_tokens` alone reports almost nothing for exactly
+ * the case a cost signal exists to catch.
+ *
+ * See the module AGENTS.md section "Uncached input tokens are a SUM, and the
+ * field names lie about it"; the daemon's peer is
+ * `internal/keepalive.UncachedInputTokens` and the webapp's is
+ * `uncachedInputTokens` in `webapp/src/tokens.ts`.
+ */
+export function uncachedInputTokens(
+  usage: Pick<NormalizedApiUsage, "inputTokens" | "cacheCreationInputTokens">,
+): number {
+  return usage.inputTokens + usage.cacheCreationInputTokens;
 }
 
 /** Validate one raw assistant API usage object without defaults for invalid shapes. */
