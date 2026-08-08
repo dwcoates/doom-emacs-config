@@ -1622,12 +1622,30 @@ describe("thinking spinner", () => {
 });
 
 const breathUserBubble = blockAfter(css, ".bubble.user {");
-const breathBubbleBody = blockAfter(css, ".bubble.user > .bubble-body {");
 const bubbleBreathKeyframes = blockAfter(css, "@keyframes bubble-breath {");
 const reducedBubbleBreath = blockAfter(
   blockAfter(css, "@media (prefers-reduced-motion: reduce)"),
-  ".bubble.user,",
+  ".bubble.user {",
 );
+
+/**
+ * Every rule block in the stylesheet whose selector mentions the prompt
+ * bubble's body. jsdom resolves no stylesheet, so "the body carries no
+ * animation of its own" is asserted against the source: it is a claim about
+ * which declarations EXIST, which the source answers exactly.
+ */
+function promptBodyRules(): string[] {
+  const blocks: string[] = [];
+  // Both the child form the breath rule used and the descendant form the
+  // bubble's other body rules use.
+  for (const marker of [".bubble.user > .bubble-body", ".bubble.user .bubble-body"]) {
+    for (let at = css.indexOf(marker); at !== -1; at = css.indexOf(marker, at + 1)) {
+      blocks.push(blockAfter(css.slice(at), marker));
+    }
+  }
+  if (blocks.length === 0) throw new Error("stylesheet has no prompt-body rules");
+  return blocks;
+}
 
 /** The two `scale(N)` factors a `0%, 100% { ... } 50% { ... }` keyframes block swings between. */
 function scaleSwing(keyframes: string): [number, number] {
@@ -1644,20 +1662,24 @@ describe("prompt bubble breath", () => {
     expect(breathUserBubble).toMatch(/animation:\s*bubble-breath\s+[\d.]+s\s+ease-in-out\s+infinite/);
   });
 
-  it("breathes the body text with the same bubble-breath keyframes as the bubble", () => {
-    // Arrange / Act — the .bubble.user > .bubble-body rule.
-    // Assert
-    expect(breathBubbleBody).toMatch(
-      /animation:\s*bubble-breath\s+[\d.]+s\s+ease-in-out\s+infinite/,
-    );
+  it("gives the body no animation of its own, which would compound with the bubble's", () => {
+    // Arrange — the body is a child of the transformed bubble, so it is
+    // already scaled by the bubble's own animation. A second copy of
+    // bubble-breath on the body MULTIPLIED the two scales and swung the text
+    // at roughly twice the bubble's amplitude.
+    const bodies = promptBodyRules();
+    // Act / Assert — bubble and text are locked by the inherited transform,
+    // not by a matched second declaration.
+    for (const rule of bodies) expect(rule).not.toMatch(/animation/);
   });
 
-  it("keeps the bubble and its text breathing in the same phase", () => {
-    // Arrange — the duration each animation shorthand declares.
-    const bubbleDuration = breathUserBubble.match(/animation:\s*bubble-breath\s+([\d.]+)s/)?.[1];
-    const textDuration = breathBubbleBody.match(/animation:\s*bubble-breath\s+([\d.]+)s/)?.[1];
-    // Act / Assert — one shared period, so neither drifts out of sync with the other.
-    expect(textDuration).toBe(bubbleDuration);
+  it("declares the breath exactly once, on the bubble itself", () => {
+    // Arrange — one animated element under the prompt bubble, so there is
+    // nothing for a second phase to drift against.
+    const declarations = css.match(/animation:\s*bubble-breath/g) ?? [];
+    // Act / Assert
+    expect(declarations.length).toBe(1);
+    expect(breathUserBubble).toMatch(/animation:\s*bubble-breath/);
   });
 
   it("swings the bubble's own scale gently around 1", () => {
@@ -1669,13 +1691,12 @@ describe("prompt bubble breath", () => {
     expect(peak - rest).toBeLessThan(0.02);
   });
 
-  it("swings the text's scale at the same rate as the bubble's, so the two stay relatively the same size", () => {
-    // Arrange — both rules share the same bubble-breath keyframes, so a
-    // single scale swing governs bubble and text alike.
-    const [rest, peak] = scaleSwing(bubbleBreathKeyframes);
-    // Act / Assert — no separate, wider text swing exists to diverge from it.
-    expect(breathBubbleBody).toMatch(/animation:\s*bubble-breath\s/);
-    expect(peak - rest).toBeLessThan(0.02);
+  it("scales the text only through the bubble's transform, so the two are locked", () => {
+    // Arrange — the body declares no transform-origin of its own either;
+    // anything it declared would be a second, independent transform.
+    const bodies = promptBodyRules();
+    // Act / Assert
+    for (const rule of bodies) expect(rule).not.toMatch(/transform/);
   });
 
   it("scales from the bubble's own center, not a corner, so the breath reads as symmetric growth", () => {
