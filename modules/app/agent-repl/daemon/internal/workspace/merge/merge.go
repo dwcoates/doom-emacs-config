@@ -224,6 +224,12 @@ type Result struct {
 	// when Outcome is OutcomeTestFailed. It travels into the resolution prompt
 	// and into the merge_failed cause.
 	TestFailureTail string
+	// TestFailureOutputPath names the file holding the failing suite's COMPLETE
+	// output, set when Outcome is OutcomeTestFailed and the run could be
+	// archived. The tail the cause carries is clamped and, for a multi-suite
+	// runner, frequently does not contain the failure at all — so the path is
+	// what makes the failure diagnosable after the merge is over.
+	TestFailureOutputPath string
 	// TestedHead is the target's HEAD as it stood when the failing suite ran,
 	// set when Outcome is OutcomeTestFailed.
 	//
@@ -519,10 +525,11 @@ func (e *Driver) gateOnSuite(ctx context.Context, req Request, progress, short s
 		return nil, err
 	}
 	return &Result{
-		Outcome:         OutcomeTestFailed,
-		FailingCommit:   short,
-		TestFailureTail: sr.Tail,
-		TestedHead:      tested,
+		Outcome:               OutcomeTestFailed,
+		FailingCommit:         short,
+		TestFailureTail:       sr.Tail,
+		TestFailureOutputPath: sr.OutputPath,
+		TestedHead:            tested,
 	}, nil
 }
 
