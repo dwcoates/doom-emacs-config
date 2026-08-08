@@ -1,6 +1,6 @@
 # agent-repl/
 
-The Claude REPL: an Emacs frontend (`*.el`), a resident Go daemon (`daemon/`), a
+The Claude REPL: an Emacs frontend (`lisp/*.el`), a resident Go daemon (`daemon/`), a
 per-session TypeScript shim driving the Claude SDK (`agent-shim/claude/shim/`), a
 browser GUI (`webapp/`), and two OS-managed services carrying the file plane
 (`agent-shim/shim-store/`, `agent-shim/claude/shim-sidecar/`).
@@ -8,6 +8,28 @@ browser GUI (`webapp/`), and two OS-managed services carrying the file plane
 The repo-wide rules in the top-level `AGENTS.md` apply here in full; this file
 covers deploying and running THIS module, plus the color vocabulary every one
 of its surfaces shares.
+
+## Elisp layout
+
+Every elisp source and every ERT suite lives in `lisp/`. Exactly three files
+stay at the module root, because Doom's module loader resolves them by exact
+path and would not find them anywhere else:
+
+- `config.el` — the module loader Doom loads for an enabled module. It
+  `load!`s each source as `lisp/<name>`.
+- `packages.el` — read by Doom's package manager at the module root.
+- `doctor.el` — loaded by `doom doctor`; it loads `lisp/install.el`,
+  `lisp/codex.el` and `lisp/daemon.el` for their check functions.
+
+Sources resolve module-root siblings (`prompts/`, `images/`, `hooks/`, `bin/`,
+`skills/`, `metaprompt.md`, `webapp/`) by climbing one level out of `lisp/`.
+
+The canonical suite invocation, from `modules/app/agent-repl/`:
+
+```bash
+emacs -batch -Q -l ert -l lisp/test-agent-repl.el -f ert-run-tests-batch-and-exit   # everything
+emacs -batch -Q -l ert -l lisp/test-<module>.el   -f ert-run-tests-batch-and-exit   # one suite
+```
 
 ## Runtime investigations go through one skill
 

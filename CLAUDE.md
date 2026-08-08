@@ -103,12 +103,13 @@ Set these environment variables for full functionality:
 
 ## Testing
 
-- Test suites exist for `modules/app/agent-repl/` and can be run with:
+- Test suites exist for `modules/app/agent-repl/` and can be run from that directory with:
   ```bash
-  emacs -batch -Q -l ert -l test-<module>.el -f ert-run-tests-batch-and-exit
+  emacs -batch -Q -l ert -l lisp/test-<module>.el -f ert-run-tests-batch-and-exit
   ```
+  Every elisp source and suite lives in `lisp/`; only `config.el`, `packages.el`, and `doctor.el` stay at the module root, because Doom's module loader resolves those three by exact path.
   For the `webapp/` (TypeScript/Vitest), tests run with `npm test` and type-checks with `npm run typecheck` from `modules/app/agent-repl/webapp/`. Prefer those npm scripts over `npx vitest`/`npx tsc`: a `pretest`/`pretypecheck` hook runs `npm ci` automatically when `node_modules` is absent, so a fresh worktree self-bootstraps its webapp deps on first run.
 - **Every new addition or change must have corresponding test cases.** New functions get new tests. Changed behavior requires updated or new tests that cover the change. One test per edge case -- no test should cover more than one edge case.
-- **One test file per source module.** Tests for `status.el` go in `test-status.el`, tests for `sentinel.el` go in `test-sentinel.el`, etc.
+- **One test file per source module.** Tests for `lisp/status.el` go in `lisp/test-status.el`, tests for `lisp/sentinel.el` go in `lisp/test-sentinel.el`, etc.
 
 DO NOT MAKE CHANGES TO CODE UNLESS EXPLICITLY ASKED OR SUGGESTED. If the prompt is a question or aside, do not come to own conclusions on changes to make -- answer question and, if you feel like it, suggest the change inferred while answering.
