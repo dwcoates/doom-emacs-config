@@ -351,3 +351,26 @@ func FooterRow(card *frontendv1.FailureCardView, cardUUID string) *frontendv1.Fo
 		Card:    &frontendv1.FailureCardRef{CardUuid: cardUUID},
 	}
 }
+
+// TypeName is TypeOf as a plain string, for records and assertions that want
+// the failure named rather than matched. A card whose kind the daemon did not
+// mint reads as "" — the absence is the fact, and it is not dressed up as a
+// type nobody classified.
+func TypeName(card *frontendv1.FailureCardView) string {
+	t, ok := TypeOf(card.GetKind())
+	if !ok {
+		return ""
+	}
+	return string(t)
+}
+
+// KindName is TypeName for a bare kind — the shape a CommandAck carries, which
+// is the classification WITHOUT the card. A kind naming no daemon type reads as
+// "", for the same reason.
+func KindName(kind *frontendv1.FailureKind) string {
+	t, ok := TypeOf(kind)
+	if !ok {
+		return ""
+	}
+	return string(t)
+}

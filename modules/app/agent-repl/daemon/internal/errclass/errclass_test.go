@@ -8,7 +8,6 @@ import (
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
-	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 )
 
 // capture returns a logf that records every line, so the LOUDNESS of a
@@ -146,8 +145,8 @@ func TestCommandClassifiesASentinel(t *testing.T) {
 	// Act.
 	got := Command(logf, ErrShimNotConnected)
 	// Assert.
-	if got.GetErrorType() != string(TypeShimNotConnected) {
-		t.Fatalf("error_type = %q, want %q", got.GetErrorType(), TypeShimNotConnected)
+	if TypeName(got) != string(TypeShimNotConnected) {
+		t.Fatalf("error_type = %q, want %q", TypeName(got), TypeShimNotConnected)
 	}
 	if len(*lines) != 0 {
 		t.Fatalf("a classified error logged %v; only the fallthrough is loud", *lines)
@@ -161,8 +160,8 @@ func TestCommandCarriesTheRawTextInSourceDetail(t *testing.T) {
 	// Act.
 	got := Command(logf, wrapped)
 	// Assert: the raw evidence survives beside the prose rather than replacing it.
-	if !strings.Contains(got.GetSourceDetail(), "store rejected batch") {
-		t.Fatalf("source_detail = %q, want it to carry the raw reason", got.GetSourceDetail())
+	if !strings.Contains(got.GetDetail(), "store rejected batch") {
+		t.Fatalf("source_detail = %q, want it to carry the raw reason", got.GetDetail())
 	}
 }
 
@@ -184,8 +183,8 @@ func TestCommandFallsThroughLoudlyForAnUnknownError(t *testing.T) {
 	// Act.
 	got := Command(logf, fmt.Errorf("some handler blew up"))
 	// Assert.
-	if got.GetErrorType() != string(TypeInternalUnclassified) {
-		t.Fatalf("error_type = %q, want %q", got.GetErrorType(), TypeInternalUnclassified)
+	if TypeName(got) != string(TypeInternalUnclassified) {
+		t.Fatalf("error_type = %q, want %q", TypeName(got), TypeInternalUnclassified)
 	}
 	if len(*lines) == 0 {
 		t.Fatal("the unclassified fallthrough was SILENT; a silent fallthrough lets the vocabulary rot unnoticed")
@@ -198,8 +197,8 @@ func TestCommandKeepsTheRawTextOnTheFallthrough(t *testing.T) {
 	// Act.
 	got := Command(logf, fmt.Errorf("some handler blew up"))
 	// Assert.
-	if got.GetSourceDetail() != "some handler blew up" {
-		t.Fatalf("source_detail = %q, want the raw text preserved", got.GetSourceDetail())
+	if got.GetDetail() != "some handler blew up" {
+		t.Fatalf("source_detail = %q, want the raw text preserved", got.GetDetail())
 	}
 }
 
@@ -214,15 +213,17 @@ func TestCommandReturnsNilForNoError(t *testing.T) {
 	}
 }
 
-func TestCommandIsAlwaysInternalClass(t *testing.T) {
+func TestCommandIsAlwaysTheLocalSide(t *testing.T) {
 	// Arrange: a command refusal is agent-repl machinery by construction —
-	// nothing about the account is implicated.
+	// nothing about the account is implicated. The class enum that used to say
+	// so left the wire; the side is now carried by the kind arm, and the tone
+	// is what a surface reads off it.
 	logf, _ := capture()
 	// Act.
 	got := Command(logf, ErrRepullTruncated)
 	// Assert.
-	if got.GetErrorClass() != frontendv1.ErrorClass_ERROR_CLASS_INTERNAL {
-		t.Fatalf("class = %v, want INTERNAL", got.GetErrorClass())
+	if tone := Tone(Type(TypeName(got))); tone != ToneLocal {
+		t.Fatalf("tone = %q, want %q", tone, ToneLocal)
 	}
 }
 
@@ -242,8 +243,8 @@ func TestInterruptErrorFailedClassifiesAsUndelivered(t *testing.T) {
 	// Act.
 	got := Command(logf, InterruptError(corev1.InterruptOutcome_INTERRUPT_OUTCOME_FAILED))
 	// Assert.
-	if got.GetErrorType() != string(TypeInterruptUndelivered) {
-		t.Fatalf("error_type = %q, want %q", got.GetErrorType(), TypeInterruptUndelivered)
+	if TypeName(got) != string(TypeInterruptUndelivered) {
+		t.Fatalf("error_type = %q, want %q", TypeName(got), TypeInterruptUndelivered)
 	}
 }
 
@@ -299,10 +300,10 @@ func TestAPIErrorClassifiesByStatus(t *testing.T) {
 			// Arrange.
 			ae := &datav1.ApiErrorLine{Error: &datav1.ApiErrorDetail{Status: tc.status}}
 			// Act.
-			got := APIError(ae, "item-1")
+			got := APIError(ae)
 			// Assert.
-			if got.GetErrorType() != string(tc.want) {
-				t.Fatalf("status %d classified %q, want %q", tc.status, got.GetErrorType(), tc.want)
+			if TypeName(got) != string(tc.want) {
+				t.Fatalf("status %d classified %q, want %q", tc.status, TypeName(got), tc.want)
 			}
 		})
 	}
@@ -312,10 +313,10 @@ func TestAPIErrorClassifiesAnUnlistedServerStatusAsServerError(t *testing.T) {
 	// Arrange: a 5xx outside the exact table is still the server failing.
 	ae := &datav1.ApiErrorLine{Error: &datav1.ApiErrorDetail{Status: 503}}
 	// Act.
-	got := APIError(ae, "item-1")
+	got := APIError(ae)
 	// Assert.
-	if got.GetErrorType() != string(TypeAPIServerError) {
-		t.Fatalf("503 classified %q, want %q", got.GetErrorType(), TypeAPIServerError)
+	if TypeName(got) != string(TypeAPIServerError) {
+		t.Fatalf("503 classified %q, want %q", TypeName(got), TypeAPIServerError)
 	}
 }
 
@@ -323,10 +324,10 @@ func TestAPIErrorClassifiesANeverDeliveredRequestAsNetworkDown(t *testing.T) {
 	// Arrange: no status at all, because the request never got a response.
 	ae := &datav1.ApiErrorLine{Error: &datav1.ApiErrorDetail{IsNetworkDown: true}}
 	// Act.
-	got := APIError(ae, "item-1")
+	got := APIError(ae)
 	// Assert.
-	if got.GetErrorType() != string(TypeAPINetworkDown) {
-		t.Fatalf("network-down classified %q, want %q", got.GetErrorType(), TypeAPINetworkDown)
+	if TypeName(got) != string(TypeAPINetworkDown) {
+		t.Fatalf("network-down classified %q, want %q", TypeName(got), TypeAPINetworkDown)
 	}
 }
 
@@ -335,32 +336,47 @@ func TestAPIErrorFallsBackToRequestFailedWithNoEvidence(t *testing.T) {
 	// guess at something more specific.
 	ae := &datav1.ApiErrorLine{Error: &datav1.ApiErrorDetail{Message: "boom"}}
 	// Act.
-	got := APIError(ae, "item-1")
+	got := APIError(ae)
 	// Assert.
-	if got.GetErrorType() != string(TypeAPIRequestFailed) {
-		t.Fatalf("evidence-free line classified %q, want %q", got.GetErrorType(), TypeAPIRequestFailed)
+	if TypeName(got) != string(TypeAPIRequestFailed) {
+		t.Fatalf("evidence-free line classified %q, want %q", TypeName(got), TypeAPIRequestFailed)
 	}
 }
 
-func TestAPIErrorIsAlwaysAPIClass(t *testing.T) {
+func TestAPIErrorIsAlwaysTheVendorSide(t *testing.T) {
 	// Arrange.
 	ae := &datav1.ApiErrorLine{Error: &datav1.ApiErrorDetail{Status: 500}}
 	// Act.
-	got := APIError(ae, "item-1")
+	got := APIError(ae)
 	// Assert.
-	if got.GetErrorClass() != frontendv1.ErrorClass_ERROR_CLASS_API {
-		t.Fatalf("class = %v, want API", got.GetErrorClass())
+	if tone := Tone(Type(TypeName(got))); tone != ToneVendor {
+		t.Fatalf("tone = %q, want %q", tone, ToneVendor)
 	}
 }
 
-func TestAPIErrorCarriesTheAddressingItemUuid(t *testing.T) {
-	// Arrange.
+func TestFooterRowCarriesTheCardAddress(t *testing.T) {
+	// Arrange: the card's address left the failure itself and became a
+	// FailureCardRef on the surfaces that point AT the card. This is what lets
+	// a footer row scroll the feed to it.
 	ae := &datav1.ApiErrorLine{Error: &datav1.ApiErrorDetail{Status: 500}}
 	// Act.
-	got := APIError(ae, "item-42")
-	// Assert: this is what lets a footer row scroll the feed to the card.
-	if got.GetItemUuid() != "item-42" {
-		t.Fatalf("item_uuid = %q, want %q", got.GetItemUuid(), "item-42")
+	row := FooterRow(APIError(ae), "item-42")
+	// Assert.
+	if got := row.GetCard().GetCardUuid(); got != "item-42" {
+		t.Fatalf("card_uuid = %q, want %q", got, "item-42")
+	}
+}
+
+func TestFooterRowLeavesTheAddressEmptyForAnUnaddressableFailure(t *testing.T) {
+	// Arrange: a turn-end account produces no item of its own, so there is
+	// nothing for the row to reveal.
+	ae := &datav1.ApiErrorLine{Error: &datav1.ApiErrorDetail{Status: 500}}
+	// Act.
+	row := FooterRow(APIError(ae), "")
+	// Assert: the row states that it is not clickable rather than pointing
+	// somewhere arbitrary to look useful.
+	if got := row.GetCard().GetCardUuid(); got != "" {
+		t.Fatalf("card_uuid = %q, want it empty", got)
 	}
 }
 
@@ -371,7 +387,7 @@ func TestAPIErrorReportsTheAttemptCountInTheMessage(t *testing.T) {
 		MaxRetries: 3,
 	}
 	// Act.
-	got := APIError(ae, "item-1")
+	got := APIError(ae)
 	// Assert.
 	if !strings.Contains(got.GetMessage(), "after 3 attempts") {
 		t.Fatalf("message = %q, want the exhausted attempt count", got.GetMessage())
@@ -382,7 +398,7 @@ func TestAPIErrorFallsBackToProseWhenTheLineCarriedNoMessage(t *testing.T) {
 	// Arrange: a typed status but no human text.
 	ae := &datav1.ApiErrorLine{Error: &datav1.ApiErrorDetail{Status: 429}}
 	// Act.
-	got := APIError(ae, "item-1")
+	got := APIError(ae)
 	// Assert.
 	if got.GetMessage() != prose[TypeAPIRateLimit] {
 		t.Fatalf("message = %q, want the rate-limit prose", got.GetMessage())
@@ -393,10 +409,10 @@ func TestAPIErrorPutsTheStructuredEvidenceInSourceDetail(t *testing.T) {
 	// Arrange.
 	ae := &datav1.ApiErrorLine{Error: &datav1.ApiErrorDetail{Status: 500, RequestId: "req-9"}}
 	// Act.
-	got := APIError(ae, "item-1")
+	got := APIError(ae)
 	// Assert.
-	if !strings.Contains(got.GetSourceDetail(), "request_id=req-9") {
-		t.Fatalf("source_detail = %q, want the request id", got.GetSourceDetail())
+	if !strings.Contains(got.GetDetail(), "request_id=req-9") {
+		t.Fatalf("source_detail = %q, want the request id", got.GetDetail())
 	}
 }
 
@@ -425,8 +441,8 @@ func TestTurnEndClassifiesEachBlockingStopReason(t *testing.T) {
 			if got == nil {
 				t.Fatalf("TurnEnd(%q) = nil; the SSM blocks on it, so it must have a name", tc.stop)
 			}
-			if got.GetErrorType() != string(tc.want) {
-				t.Fatalf("TurnEnd(%q) = %q, want %q", tc.stop, got.GetErrorType(), tc.want)
+			if TypeName(got) != string(tc.want) {
+				t.Fatalf("TurnEnd(%q) = %q, want %q", tc.stop, TypeName(got), tc.want)
 			}
 		})
 	}
@@ -462,7 +478,7 @@ func TestTurnEndClassifiesAnUnrecognizedErrorEndAsTurnFailed(t *testing.T) {
 	// Act.
 	got := TurnEnd(te)
 	// Assert.
-	if got == nil || got.GetErrorType() != string(TypeAPITurnFailed) {
+	if got == nil || TypeName(got) != string(TypeAPITurnFailed) {
 		t.Fatalf("TurnEnd(unknown error end) = %v, want %q", got, TypeAPITurnFailed)
 	}
 }
@@ -473,8 +489,8 @@ func TestTurnEndKeepsTheStopReasonAsEvidence(t *testing.T) {
 	// Act.
 	got := TurnEnd(te)
 	// Assert.
-	if !strings.Contains(got.GetSourceDetail(), "refusal") {
-		t.Fatalf("source_detail = %q, want the raw stop reason", got.GetSourceDetail())
+	if !strings.Contains(got.GetDetail(), "refusal") {
+		t.Fatalf("source_detail = %q, want the raw stop reason", got.GetDetail())
 	}
 }
 
@@ -495,8 +511,8 @@ func TestDeathClassifiesEachPersistedLiteral(t *testing.T) {
 			// Act.
 			got := Death(logf, "s_1", tc.reason, 0)
 			// Assert.
-			if got.GetErrorType() != string(tc.want) {
-				t.Fatalf("Death(%q) = %q, want %q", tc.reason, got.GetErrorType(), tc.want)
+			if TypeName(got) != string(tc.want) {
+				t.Fatalf("Death(%q) = %q, want %q", tc.reason, TypeName(got), tc.want)
 			}
 			if len(*lines) != 0 {
 				t.Fatalf("a known death reason logged %v; only the unknown default is loud", *lines)
@@ -512,8 +528,8 @@ func TestDeathClassifiesALegacyStringLoudly(t *testing.T) {
 	// Act.
 	got := Death(logf, "s_1", "some ancient reason", 0)
 	// Assert.
-	if got.GetErrorType() != string(TypeSessionEndedUnclassified) {
-		t.Fatalf("error_type = %q, want %q", got.GetErrorType(), TypeSessionEndedUnclassified)
+	if TypeName(got) != string(TypeSessionEndedUnclassified) {
+		t.Fatalf("error_type = %q, want %q", TypeName(got), TypeSessionEndedUnclassified)
 	}
 	if len(*lines) == 0 {
 		t.Fatal("an unknown death reason passed through SILENTLY; the default must be loud")
@@ -526,8 +542,8 @@ func TestDeathKeepsALegacyStringVerbatim(t *testing.T) {
 	// Act.
 	got := Death(logf, "s_1", "some ancient reason", 0)
 	// Assert: the raw value is preserved rather than guessed at.
-	if got.GetSourceDetail() != "some ancient reason" {
-		t.Fatalf("source_detail = %q, want the raw string", got.GetSourceDetail())
+	if got.GetDetail() != "some ancient reason" {
+		t.Fatalf("source_detail = %q, want the raw string", got.GetDetail())
 	}
 }
 
@@ -538,8 +554,11 @@ func TestDeathCarriesTheResolutionItWasGiven(t *testing.T) {
 	// Act.
 	got := Death(logf, "s_1", DeathReasonSuperseded, 4242)
 	// Assert.
-	if got.GetResolvedAtMs() != 4242 {
-		t.Fatalf("resolved_at_ms = %d, want 4242", got.GetResolvedAtMs())
+	if !IsResolved(got) {
+		t.Fatalf("card lifecycle = %T, want the resolved arm", got.GetLifecycle())
+	}
+	if ResolvedAtMs(got) != 4242 {
+		t.Fatalf("resolved_at_ms = %d, want 4242", ResolvedAtMs(got))
 	}
 }
 
@@ -548,36 +567,36 @@ func TestDeathIsOpenWithoutAResolution(t *testing.T) {
 	logf, _ := capture()
 	// Act.
 	got := Death(logf, "s_1", DeathReasonSuperseded, 0)
-	// Assert.
-	if got.GetResolvedAtMs() != 0 {
-		t.Fatalf("resolved_at_ms = %d, want 0", got.GetResolvedAtMs())
+	// Assert: OPEN is an arm now, not a zero timestamp — the magic zero the
+	// old field carried is exactly what the lifecycle oneof removed.
+	if got.GetOpen() == nil {
+		t.Fatalf("card lifecycle = %T, want the open arm", got.GetLifecycle())
 	}
 }
 
 func TestDeathKeysTheCardOnTheSession(t *testing.T) {
 	// Arrange: a resolved re-push must SETTLE the open card rather than land
-	// beside it, which needs a stable per-session item uuid.
-	logf, _ := capture()
+	// beside it, which needs a stable per-session item uuid. The address is the
+	// ENVELOPE's now, minted here rather than repeated onto the card.
 	// Act.
-	open := Death(logf, "s_1", DeathReasonSuperseded, 0)
-	settled := Death(logf, "s_1", DeathReasonSuperseded, 4242)
+	open := DeathItemUUID("s_1")
+	settled := DeathItemUUID("s_1")
 	// Assert.
-	if open.GetItemUuid() != settled.GetItemUuid() || open.GetItemUuid() == "" {
+	if open != settled || open == "" {
 		t.Fatalf("open uuid %q, settled uuid %q; want one non-empty shared identity",
-			open.GetItemUuid(), settled.GetItemUuid())
+			open, settled)
 	}
 }
 
 func TestDeathGivesTwoSessionsDistinctCards(t *testing.T) {
 	// Arrange: two sessions of one workspace both die; neither may settle the
 	// other's card.
-	logf, _ := capture()
 	// Act.
-	first := Death(logf, "s_1", DeathReasonSuperseded, 0)
-	second := Death(logf, "s_2", DeathReasonSuperseded, 0)
+	first := DeathItemUUID("s_1")
+	second := DeathItemUUID("s_2")
 	// Assert.
-	if first.GetItemUuid() == second.GetItemUuid() {
-		t.Fatalf("both sessions share item uuid %q", first.GetItemUuid())
+	if first == second {
+		t.Fatalf("both sessions share item uuid %q", first)
 	}
 }
 
@@ -598,8 +617,8 @@ func TestDegradedKeepsTheDroppedCount(t *testing.T) {
 	// Act.
 	got := Degraded("shim-store", "store rejected batch", 17)
 	// Assert.
-	if !strings.Contains(got.GetSourceDetail(), "dropped=17") {
-		t.Fatalf("source_detail = %q, want the dropped count", got.GetSourceDetail())
+	if !strings.Contains(got.GetDetail(), "dropped=17") {
+		t.Fatalf("source_detail = %q, want the dropped count", got.GetDetail())
 	}
 }
 
@@ -608,18 +627,18 @@ func TestDegradedNamesTheComponent(t *testing.T) {
 	// Act.
 	got := Degraded("shim-store", "store rejected batch", 0)
 	// Assert.
-	if !strings.Contains(got.GetSourceDetail(), "component=shim-store") {
-		t.Fatalf("source_detail = %q, want the component", got.GetSourceDetail())
+	if !strings.Contains(got.GetDetail(), "component=shim-store") {
+		t.Fatalf("source_detail = %q, want the component", got.GetDetail())
 	}
 }
 
-func TestDegradedIsInternalClass(t *testing.T) {
+func TestDegradedIsTheLocalSide(t *testing.T) {
 	// Arrange: a store outage is agent-repl's own machinery.
 	// Act.
 	got := Degraded("shim-store", "boom", 0)
 	// Assert.
-	if got.GetErrorClass() != frontendv1.ErrorClass_ERROR_CLASS_INTERNAL {
-		t.Fatalf("class = %v, want INTERNAL", got.GetErrorClass())
+	if tone := Tone(Type(TypeName(got))); tone != ToneLocal {
+		t.Fatalf("tone = %q, want %q", tone, ToneLocal)
 	}
 }
 
@@ -628,8 +647,8 @@ func TestConnectionDegradedCarriesTheHeartbeatReason(t *testing.T) {
 	// Act.
 	got := ConnectionDegraded("no shim traffic for 30s (>20s window)")
 	// Assert.
-	if got.GetSourceDetail() != "no shim traffic for 30s (>20s window)" {
-		t.Fatalf("source_detail = %q, want the raw window reason", got.GetSourceDetail())
+	if got.GetDetail() != "no shim traffic for 30s (>20s window)" {
+		t.Fatalf("source_detail = %q, want the raw window reason", got.GetDetail())
 	}
 }
 
@@ -638,8 +657,8 @@ func TestConnectionDegradedIsTheShimDegradedType(t *testing.T) {
 	// Act.
 	got := ConnectionDegraded("no traffic")
 	// Assert.
-	if got.GetErrorType() != string(TypeShimDegraded) {
-		t.Fatalf("error_type = %q, want %q", got.GetErrorType(), TypeShimDegraded)
+	if TypeName(got) != string(TypeShimDegraded) {
+		t.Fatalf("error_type = %q, want %q", TypeName(got), TypeShimDegraded)
 	}
 }
 
