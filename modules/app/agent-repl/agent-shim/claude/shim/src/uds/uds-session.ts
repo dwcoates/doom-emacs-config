@@ -1830,9 +1830,49 @@ export class UdsSession {
           : undefined;
         taskNotificationResult = origin?.kind === "task_notification" || origin?.kind === "task-notification";
         const taskCount = this.turnSdkTaskIds.get(claimedTurnId)?.size ?? 0;
-        retainResultTurn = this.liveSdkTaskIds.size > 0
-          || (taskCount > 0 && !taskNotificationResult)
-          || this.pendingTaskNotificationQueue.size > 0;
+        const retainForLiveTasks = this.liveSdkTaskIds.size > 0
+          || (taskCount > 0 && !taskNotificationResult);
+        // THE PENDING QUEUE MAY ONLY RETAIN A TURN THIS QUERY CAN STILL ADVANCE.
+        // A queued `<task-notification>` drives another internal agent cycle,
+        // and that cycle exists only because a background task of THIS query
+        // instance produced the notification. So when this query has never seen
+        // a single SDK task — none live, none launched by this turn, none
+        // completed at all — a pending entry names work no cycle here can
+        // consume, and retaining on it would hold the turn open for the whole
+        // life of the process.
+        //
+        // The escape RELEASES, it does not discard: the entries stay queued and
+        // are named in the record below, and the daemon is told through a
+        // recovered DegradedState so a residue nobody can drain is visible
+        // rather than silently absorbed.
+        const notificationsCanAdvance = this.liveSdkTaskIds.size > 0
+          || taskCount > 0
+          || this.completedSdkTaskIds.size > 0;
+        const abandonedNotifications = !retainForLiveTasks
+          && this.pendingTaskNotificationQueue.size > 0
+          && !notificationsCanAdvance;
+        retainResultTurn = retainForLiveTasks
+          || (this.pendingTaskNotificationQueue.size > 0 && notificationsCanAdvance);
+        if (abandonedNotifications) {
+          LOGGER.log({
+            level: "warn",
+            agent_repl_session_id: this.deps.sessionId,
+            request_id: claimedTurnId,
+            turn_id: claimedTurnId,
+            live_sdk_task_count: this.liveSdkTaskIds.size,
+            sdk_task_count: taskCount,
+            completed_sdk_task_count: this.completedSdkTaskIds.size,
+            task_notification_result: taskNotificationResult,
+            pending_task_notification_count: this.pendingTaskNotificationQueue.size,
+            turns_in_flight: this.activeTurnIds.length,
+            decision: "release_turn_over_unresolvable_task_notifications",
+          }, "pending task notifications are backed by no SDK task this query instance ever ran; releasing the turn rather than retaining it forever");
+          this.reportDegraded(
+            "claude-shim-turn-lifecycle",
+            `${this.pendingTaskNotificationQueue.size} pending task notification(s) are backed by no SDK task this query instance ran; the turn is released and the notifications are abandoned rather than retaining the turn forever`,
+            { recovered: true, level: "warn" },
+          );
+        }
       }
       if (claimedTurnId !== undefined && retainResultTurn) {
         retainResultTurn = true;
@@ -2238,13 +2278,64 @@ export class UdsSession {
       `user prompt event forwarded to daemon`);
   }
 
-  /** Track the durable file-plane queue that feeds task-notification cycles. */
+  /**
+   * Whether a merged store event belongs to THIS query invocation's own epoch,
+   * rather than to the conversation history that preceded it.
+   *
+   * THE BOUNDARY IS ALREADY WRITTEN DOWN. `persistQueryCreated` records the
+   * store coordinate of the one QueryCreated this shim owns, and the protocol
+   * already treats it as the epoch line (`queryCreatedSeq` on ShimHello). This
+   * reuses that same coordinate rather than inventing a second notion of "new".
+   *
+   *   - No position yet means the QueryCreated has not been acknowledged, so
+   *     nothing observed can be after it. FAIL CLOSED — pre-epoch.
+   *   - An event in the boundary's OWN seq space compares by seq.
+   *   - An event in the CURRENT store key when that key is not the boundary's
+   *     is in a space minted by a rotation that happened AFTER the boundary,
+   *     so all of it is in-epoch.
+   *   - Anything else is a retired seq space: history by construction.
+   */
+  private isWithinQueryEpoch(evt: Event): boolean {
+    const position = this.queryCreatedPosition;
+    if (position === null) return false;
+    if (evt.sessionId === position.storeKey) return evt.seq > position.seq;
+    return evt.sessionId === this.store.storeSessionId();
+  }
+
+  /**
+   * Track the durable file-plane queue that feeds task-notification cycles.
+   *
+   * ONLY THIS EPOCH'S QUEUE OPERATIONS COUNT, and that restriction is the whole
+   * point. The merged feed replays the vendor transcript's WHOLE history on
+   * every bring-up, so a revived conversation re-delivers every
+   * `<task-notification>` enqueue it ever made — including entries whose
+   * matching dequeue was consumed by a process epoch that no longer exists.
+   * Those entries are unresolvable by construction: no live SDK task backs
+   * them and no cycle will ever drain them. Folded into the pending queue they
+   * became a permanent retention against the NEXT result
+   * (`retain_turn_for_sdk_task_cycles`), which is how a compact-first
+   * revival's `/compact` turn ended with its result stored and its turn never
+   * closed — the claim stayed open, the workspace stayed red, and the restart
+   * guard refused the workspace for as long as the daemon ran.
+   */
   private observeTaskNotificationQueue(evt: Event): void {
     if (evt.payload.case !== "vendor" || !envelopeIs(evt.payload.value, TranscriptLineSchema)) return;
     const line = unpackAs(evt.payload.value, TranscriptLineSchema);
     if (line?.line.case !== "queueOperation") return;
     const queue = line.line.value;
     if (!queue.content.startsWith("<task-notification>")) return;
+    if (!this.isWithinQueryEpoch(evt)) {
+      LOGGER.logVerbose({
+        agent_repl_session_id: this.deps.sessionId,
+        queue_operation: QueueOp[queue.operation],
+        seq: evt.seq,
+        store_key: evt.sessionId,
+        query_created_seq: this.queryCreatedPosition?.seq ?? null,
+        pending_task_notification_count: this.pendingTaskNotificationQueue.size,
+        decision: "ignore_pre_epoch_task_notification_queue_transition",
+      }, "task-notification queue transition predates this query invocation; it belongs to a retired process epoch and can drive no result cycle here");
+      return;
+    }
     if (queue.operation === QueueOp.ENQUEUE) {
       this.pendingTaskNotificationQueue.add(queue.content);
     } else if (queue.operation === QueueOp.DEQUEUE || queue.operation === QueueOp.REMOVE) {
