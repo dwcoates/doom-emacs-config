@@ -68,11 +68,28 @@ make_tree() {
              "$root/webapp/node_modules"
 }
 
+# write_webapp_index PATH [HASH] — write an index.html shaped like the one Vite
+# actually emits.
+#
+# THE SHAPE IS LOAD-BEARING, not decoration. build-frontend.sh takes the webapp
+# BUILD ID from the content hash Vite fingerprints the entry bundle with, by
+# reading the `src="/assets/index-<hash>.js"` reference straight out of this
+# file, and it FAILS THE BUILD when the reference is absent. A fixture that
+# wrote a bare marker here therefore did not model a built webapp at all: it
+# modelled a corrupt one, and every fixture that reached the webapp path died on
+# it. Every place this harness fakes a built webapp goes through here so the
+# shape can never drift in one of them again.
+write_webapp_index() {
+    local path="$1" hash="${2:-BuiltHash0}"
+    printf '<!doctype html><html><head><script type="module" crossorigin src="/assets/index-%s.js"></script></head><body><div id="root"></div></body></html>\n' \
+           "$hash" > "$path"
+}
+
 # Fresh artifacts: newer than every source so nothing is stale.
 make_fresh_artifacts() {
     local root="$1"
     echo built > "$root/agent-shim/claude/shim/dist/main.js"
-    echo built > "$root/webapp/dist/index.html"
+    write_webapp_index "$root/webapp/dist/index.html"
     echo built > "$root/daemon/bin/claude-repld"
     mkdir -p "$root/home/.cache/agent-repl/bin"
     echo built > "$root/home/.cache/agent-repl/bin/shim-store"
@@ -102,10 +119,16 @@ if [ -d src ] && [ -f package.json ]; then
     if [ -d dist ] || mkdir -p dist; then :; fi
     if grep -q webapp <<<"$PWD" 2>/dev/null || [ -f webapp.marker ]; then :; fi
 fi
-# Touch the conventional artifact for the cwd project.
+# Touch the conventional artifact for the cwd project. The webapp's index.html
+# carries a Vite-shaped entry-bundle reference because build-frontend.sh reads
+# the build id out of it and fails the build when it is missing.
 case "$PWD" in
     *shim*)   mkdir -p dist; echo built > dist/main.js ;;
-    *webapp*) mkdir -p dist; echo built > dist/index.html ;;
+    *webapp*)
+        mkdir -p dist
+        printf '<!doctype html><script type="module" crossorigin src="/assets/index-%s.js"></script>\n' \
+               "${WEBAPP_ENTRY_HASH:-BuiltHash0}" > dist/index.html
+        ;;
 esac
 exit 0
 EOF
@@ -725,7 +748,11 @@ case "${1:-}" in
 esac
 case "$PWD" in
     *shim*)   mkdir -p dist; printf '%s' "${SHIM_BUILD_SHA:-unset}" > dist/main.js ;;
-    *webapp*) mkdir -p dist; echo built > dist/index.html ;;
+    *webapp*)
+        mkdir -p dist
+        printf '<!doctype html><script type="module" crossorigin src="/assets/index-%s.js"></script>\n' \
+               "${WEBAPP_ENTRY_HASH:-BuiltHash0}" > dist/index.html
+        ;;
 esac
 exit 0
 EOF
@@ -763,6 +790,64 @@ t_build_mjs_stales_the_shim() {
     rm -rf "$root"
 }
 t_build_mjs_stales_the_shim
+
+# --- the webapp build id is the entry bundle's own content hash --------------
+# The webview's URL carries this value, so a build that did not record it leaves
+# the artifact standing beside it unaddressable.
+t_webapp_build_id_is_the_entry_hash() {
+    local root got; root="$(mktemp -d)"
+    make_tree "$root"; make_stubs "$root/stubs"; git_tree "$root"
+    WEBAPP_ENTRY_HASH=CafeBabe01 run_script "$root" webapp >/dev/null
+    got="$(cat "$root/webapp/dist/.build-id" 2>/dev/null || echo MISSING)"
+    if [ "$got" = "CafeBabe01" ]; then
+        pass "webapp: the build id is the entry bundle's content hash"
+    else
+        fail "webapp: the build id is the entry bundle's content hash" \
+             "want=CafeBabe01 got=$got"
+    fi
+    rm -rf "$root"
+}
+t_webapp_build_id_is_the_entry_hash
+
+# A SKIPPED build still owes the id: the artifact standing there is the one the
+# webview must address, and a stamp missing beside it leaves that address
+# unbuildable.
+t_webapp_build_id_written_by_a_skipped_build() {
+    local root got; root="$(mktemp -d)"
+    make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
+    write_webapp_index "$root/webapp/dist/index.html" FreshHash7
+    : > "$root/stub.log"
+    run_script "$root" webapp >/dev/null
+    got="$(cat "$root/webapp/dist/.build-id" 2>/dev/null || echo MISSING)"
+    if [ "$got" = "FreshHash7" ] && ! grep -q "npm run build" "$root/stub.log"; then
+        pass "webapp: a skipped build still stamps the build id"
+    else
+        fail "webapp: a skipped build still stamps the build id" \
+             "want=FreshHash7 got=$got stubs=$(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+t_webapp_build_id_written_by_a_skipped_build
+
+# An index.html with no entry reference is a CORRUPT artifact, not a buildable
+# one. Continuing past it would deploy a webapp whose url addresses nothing.
+t_webapp_build_id_missing_entry_fails_loudly() {
+    local root out rc; root="$(mktemp -d)"
+    make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
+    echo "no entry bundle here" > "$root/webapp/dist/index.html"
+    set +e
+    out="$(run_script "$root" webapp 2>&1)"
+    rc=$?
+    set -e
+    if [ "$rc" -ne 0 ] && grep -q "FAILED to read the entry bundle hash" <<<"$out"; then
+        pass "webapp: an index.html with no entry bundle fails the build loudly"
+    else
+        fail "webapp: an index.html with no entry bundle fails the build loudly" \
+             "rc=$rc out=$out"
+    fi
+    rm -rf "$root"
+}
+t_webapp_build_id_missing_entry_fails_loudly
 
 echo "-----"
 echo "passed: $PASS  failed: $FAIL"

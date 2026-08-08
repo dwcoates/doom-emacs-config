@@ -187,6 +187,14 @@ module with statement coverage, both TypeScript projects with statement and
 branch coverage, and proto validation. It reports wall-clock duration for each
 suite. Every suite must pass.
 
+`--suites a,b,c` narrows the run to a subset, and an unknown name is a hard
+error rather than a silently empty run. It exists for the MERGE GATE, which
+derives the subset from the paths a merge touches
+(`daemon/internal/workspace/merge/suiteselect.go`) so a webapp-only merge is not
+denied by a suite that shares no code with it. Local verification should still
+be argument-less: a human does not always know what their change can reach, and
+an unmapped path is exactly the case the gate answers by running everything.
+
 The ERT safety wrapper remains available for a focused selector:
 
 ```bash

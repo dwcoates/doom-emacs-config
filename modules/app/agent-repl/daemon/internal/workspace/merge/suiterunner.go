@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/gitexec"
@@ -56,7 +57,37 @@ type SuiteResult struct {
 	//
 	// It is empty when the run passed, was skipped, or could not be archived;
 	// an archive failure is logged loudly and named in Tail, never swallowed.
+	//
+	// A RE-RUN IS ARCHIVED WHATEVER ITS VERDICT (SuiteRun.Attempt > 1), because a
+	// flake's evidence is the PAIR: the failing run's output alone cannot show
+	// what the passing one did differently, and the passing one is exactly the
+	// run nothing would otherwise keep.
 	OutputPath string
+	// Duration is how long the run took. It is what makes a flake report legible
+	// — a suite that failed in 4s and passed in 90s on the same tree is a
+	// different story from one where the two runs took the same time.
+	Duration time.Duration
+}
+
+// SuiteRun is one request to run the target repository's suite.
+type SuiteRun struct {
+	// Suites narrows the run to these suite names, which the entrypoint receives
+	// as `--suites a,b,c`. EMPTY MEANS EVERY SUITE, which is the entrypoint's own
+	// default and the answer for any repository whose paths the selection does
+	// not recognize — so a foreign repository, whose entrypoint may know no such
+	// flag, is never handed one.
+	Suites []string
+	// Attempt is 1 for the gate's first run and 2 for its single re-run. It is
+	// carried rather than inferred because the runner's archiving policy depends
+	// on it: see SuiteResult.OutputPath.
+	Attempt int
+}
+
+func (r SuiteRun) validate() error {
+	if r.Attempt < 1 {
+		return fmt.Errorf("merge: SuiteRun Attempt must be 1 or more, got %d", r.Attempt)
+	}
+	return validateSuiteNames(r.Suites)
 }
 
 // SuiteRunner runs the target repository's test suite in the target worktree.
@@ -73,7 +104,7 @@ type SuiteRunner interface {
 	// could not be resolved, the process could not be spawned). A suite that
 	// ran and failed is (SuiteResult{Passed: false}, nil) — a verdict, not an
 	// error.
-	RunSuite(ctx context.Context, targetDir string) (SuiteResult, error)
+	RunSuite(ctx context.Context, targetDir string, run SuiteRun) (SuiteResult, error)
 }
 
 // suiteEntrypoints are the repository-relative test entrypoints the production
@@ -115,9 +146,12 @@ func NewRepoSuiteRunner(logf dlog.Logf) (*RepoSuiteRunner, error) {
 // than against targetDir, because targetDir is a worktree directory that may be
 // any depth inside the checkout, while the suite is declared once per
 // repository.
-func (r *RepoSuiteRunner) RunSuite(ctx context.Context, targetDir string) (SuiteResult, error) {
+func (r *RepoSuiteRunner) RunSuite(ctx context.Context, targetDir string, run SuiteRun) (SuiteResult, error) {
 	if targetDir == "" {
 		return SuiteResult{}, fmt.Errorf("merge: RunSuite needs a target directory")
+	}
+	if err := run.validate(); err != nil {
+		return SuiteResult{}, err
 	}
 	top, err := r.toplevel(ctx, targetDir)
 	if err != nil {
@@ -131,8 +165,10 @@ func (r *RepoSuiteRunner) RunSuite(ctx context.Context, targetDir string) (Suite
 		return SuiteResult{Skipped: true, Reason: reason}, nil
 	}
 
-	r.logf("merge: suite RUNNING {target=%s toplevel=%s entrypoint=%s}", targetDir, top, rel)
-	cmd := exec.CommandContext(ctx, entry)
+	args := suiteArgs(run.Suites)
+	r.logf("merge: suite RUNNING {target=%s toplevel=%s entrypoint=%s attempt=%d suites=%s}",
+		targetDir, top, rel, run.Attempt, selectionLabel(run.Suites))
+	cmd := exec.CommandContext(ctx, entry, args...)
 	cmd.Dir = top
 	// The daemon may be running under a git hook, whose exported repository
 	// bindings would point the suite's own git at the WRONG repository. The
@@ -141,10 +177,19 @@ func (r *RepoSuiteRunner) RunSuite(ctx context.Context, targetDir string) (Suite
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
+	started := time.Now()
 	runErr := cmd.Run()
+	elapsed := time.Since(started)
 	if runErr == nil {
-		r.logf("merge: suite PASSED {target=%s entrypoint=%s}", targetDir, rel)
-		return SuiteResult{Passed: true}, nil
+		res := SuiteResult{Passed: true, Duration: elapsed}
+		if run.Attempt > 1 {
+			// The re-run's output is the half of a flake's evidence nothing else
+			// keeps; see SuiteResult.OutputPath.
+			res.OutputPath = r.archive(targetDir, rel, out.Bytes(), &res.Tail)
+		}
+		r.logf("merge: suite PASSED {target=%s entrypoint=%s attempt=%d suites=%s duration=%s full_output=%s}",
+			targetDir, rel, run.Attempt, selectionLabel(run.Suites), elapsed.Round(time.Millisecond), res.OutputPath)
+		return res, nil
 	}
 	var exitErr *exec.ExitError
 	if !errors.As(runErr, &exitErr) {
@@ -153,19 +198,46 @@ func (r *RepoSuiteRunner) RunSuite(ctx context.Context, targetDir string) (Suite
 		return SuiteResult{}, fmt.Errorf("merge: run test suite %s in %s: %w", rel, top, runErr)
 	}
 	tail := tailOf(out.String(), suiteTailBytes)
-	path, archiveErr := archiveSuiteOutput(out.Bytes())
-	if archiveErr != nil {
-		// The verdict is real and must stand; failing the gate because a
-		// diagnostic file could not be written would turn a test failure into
-		// an unrunnable suite. So the archive's absence is reported where the
-		// failure itself is read, rather than dropped.
-		r.logf("merge: suite output ARCHIVE FAILED {target=%s entrypoint=%s}: %v — only the clamped tail survives this failure",
-			targetDir, rel, archiveErr)
-		tail += fmt.Sprintf("\n[merge] the full output could NOT be archived: %v\n", archiveErr)
+	path := r.archive(targetDir, rel, out.Bytes(), &tail)
+	r.logf("merge: suite FAILED {target=%s entrypoint=%s attempt=%d suites=%s exit=%d duration=%s full_output=%s} tail:\n%s",
+		targetDir, rel, run.Attempt, selectionLabel(run.Suites), exitErr.ExitCode(), elapsed.Round(time.Millisecond), path, tail)
+	return SuiteResult{Passed: false, Tail: tail, OutputPath: path, Duration: elapsed}, nil
+}
+
+// archive writes out to the run archive and returns its path, appending the
+// failure to tail when it cannot.
+//
+// The verdict is real and must stand; failing the gate because a diagnostic file
+// could not be written would turn a test failure into an unrunnable suite. So the
+// archive's absence is reported where the run itself is read, rather than dropped.
+func (r *RepoSuiteRunner) archive(targetDir, rel string, out []byte, tail *string) string {
+	path, err := archiveSuiteOutput(out)
+	if err == nil {
+		return path
 	}
-	r.logf("merge: suite FAILED {target=%s entrypoint=%s exit=%d full_output=%s} tail:\n%s",
-		targetDir, rel, exitErr.ExitCode(), path, tail)
-	return SuiteResult{Passed: false, Tail: tail, OutputPath: path}, nil
+	r.logf("merge: suite output ARCHIVE FAILED {target=%s entrypoint=%s}: %v — only the clamped tail survives this run",
+		targetDir, rel, err)
+	*tail += fmt.Sprintf("\n[merge] the full output could NOT be archived: %v\n", err)
+	return ""
+}
+
+// suiteArgs renders a selection as the entrypoint's arguments. An empty
+// selection passes NO arguments at all, which is both the entrypoint's own
+// "everything" default and the only shape a foreign repository's entrypoint is
+// guaranteed to accept.
+func suiteArgs(suites []string) []string {
+	if len(suites) == 0 {
+		return nil
+	}
+	return []string{"--suites", strings.Join(suites, ",")}
+}
+
+// selectionLabel names a selection for the log.
+func selectionLabel(suites []string) string {
+	if len(suites) == 0 {
+		return "ALL"
+	}
+	return strings.Join(suites, ",")
 }
 
 // suiteOutputPattern names the archive of one failing suite run. It lands in

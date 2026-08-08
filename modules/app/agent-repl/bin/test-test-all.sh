@@ -281,6 +281,110 @@ test_big_regression_is_surfaced() {
     fi
 }
 
+# --- --suites narrowing -----------------------------------------------------
+
+test_suites_runs_only_the_named_suites() {
+    local tree="$TMP/suites-subset"
+    make_tree "$tree"
+    run_test_all "$tree" --suites webapp,build-frontend-harness
+
+    if [ "$RUN_RC" -eq 0 ] &&
+        [ "$(wc -l <"$tree/stub.log" | tr -d ' ')" -eq 2 ] &&
+        grep -q '^webapp$' "$tree/stub.log" &&
+        grep -q '^build-frontend-harness$' "$tree/stub.log" &&
+        ! grep -q '^daemon$' "$tree/stub.log" &&
+        grep -q "daemon: not selected" "$tree/stdout" &&
+        grep -q "selected agent-repl suites passed: webapp build-frontend-harness" "$tree/stdout"; then
+        pass "--suites runs only the named suites"
+    else
+        fail "--suites runs only the named suites"
+    fi
+}
+
+test_no_suites_argument_still_runs_everything() {
+    local tree="$TMP/suites-absent"
+    make_tree "$tree"
+    run_test_all "$tree"
+
+    if [ "$RUN_RC" -eq 0 ] &&
+        [ "$(wc -l <"$tree/stub.log" | tr -d ' ')" -eq 18 ] &&
+        ! grep -q "not selected" "$tree/stdout"; then
+        pass "an absent --suites leaves the run at every suite"
+    else
+        fail "an absent --suites leaves the run at every suite"
+    fi
+}
+
+# An unknown name must never be waved through: a caller that misspells a suite
+# would otherwise be told the suite it named passed.
+test_unknown_suite_fails_before_running_suites() {
+    local tree="$TMP/suites-unknown"
+    make_tree "$tree"
+    run_test_all "$tree" --suites webapp,webbapp
+
+    if [ "$RUN_RC" -ne 0 ] &&
+        grep -q "unknown suite 'webbapp'" "$tree/stderr" &&
+        [ ! -s "$tree/stub.log" ]; then
+        pass "an unknown --suites name fails before running suites"
+    else
+        fail "an unknown --suites name fails before running suites"
+    fi
+}
+
+test_empty_suites_list_fails_before_running_suites() {
+    local tree="$TMP/suites-empty"
+    make_tree "$tree"
+    run_test_all "$tree" --suites ""
+
+    if [ "$RUN_RC" -ne 0 ] &&
+        grep -q "needs at least one suite name" "$tree/stderr" &&
+        [ ! -s "$tree/stub.log" ]; then
+        pass "an empty --suites list fails before running suites"
+    else
+        fail "an empty --suites list fails before running suites"
+    fi
+}
+
+test_suites_records_only_the_suites_it_ran() {
+    local tree="$TMP/suites-record"
+    make_tree "$tree"
+    run_test_all "$tree" --record --suites daemon,proto
+
+    if [ "$RUN_RC" -eq 0 ] &&
+        [ "$(wc -l <"$tree/modules/app/agent-repl/test_time.csv" | tr -d ' ')" -eq 3 ] &&
+        grep -q ',master,daemon,' "$tree/modules/app/agent-repl/test_time.csv" &&
+        grep -q ',master,proto,' "$tree/modules/app/agent-repl/test_time.csv" &&
+        ! grep -q ',master,ert,' "$tree/modules/app/agent-repl/test_time.csv"; then
+        pass "--record with --suites records only the suites that ran"
+    else
+        fail "--record with --suites records only the suites that ran"
+    fi
+}
+
+# The roster and the run block are two lists that can disagree, and a name in
+# one but not the other is exactly the drift that makes --suites lie: an
+# undeclared name is rejected as unknown, a declared name nothing runs reports a
+# green run of nothing.
+test_roster_matches_the_run_block() {
+    local declared invoked
+    declared="$(sed -n '/^ALL_SUITES=(/,/^)/p' "$SCRIPT_SRC" |
+        sed -e '1d' -e '$d' -e 's/[[:space:]]//g' | sort)"
+    invoked="$(grep -E '^run_timed ' "$SCRIPT_SRC" | awk '{print $2}' |
+        sed 's/^"//; s/"$//' | sort -u)"
+    # The per-component loop names its suites through a variable, so its list is
+    # read from the loop header rather than from the run_timed line.
+    invoked="$(printf '%s\n%s\n' "$invoked" \
+        "$(sed -n 's/^for component in \(.*\); do$/\1/p' "$SCRIPT_SRC" | tr ' ' '\n')" |
+        grep -v '^\$' | grep -v '^$' | sort -u)"
+
+    if [ "$declared" = "$invoked" ]; then
+        pass "ALL_SUITES declares exactly the suites the run block invokes"
+    else
+        fail "ALL_SUITES declares exactly the suites the run block invokes"
+        printf '  declared:\n%s\n  invoked:\n%s\n' "$declared" "$invoked" >&2
+    fi
+}
+
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/agent-repl-test-all-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -293,6 +397,12 @@ test_unknown_argument_fails_before_running_suites
 test_malformed_csv_fails_before_running_suites
 test_git_failure_fails_before_running_suites
 test_big_regression_is_surfaced
+test_suites_runs_only_the_named_suites
+test_no_suites_argument_still_runs_everything
+test_unknown_suite_fails_before_running_suites
+test_empty_suites_list_fails_before_running_suites
+test_suites_records_only_the_suites_it_ran
+test_roster_matches_the_run_block
 
 printf 'Passed: %d  Failed: %d\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

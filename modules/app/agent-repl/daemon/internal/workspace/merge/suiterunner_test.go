@@ -50,7 +50,7 @@ func TestRunSuiteSkipsARepositoryWithNoEntrypoint(t *testing.T) {
 	r, logged := newTestSuiteRunner(t)
 
 	// Act.
-	got, err := r.RunSuite(context.Background(), repo)
+	got, err := r.RunSuite(context.Background(), repo, SuiteRun{Attempt: 1})
 
 	// Assert — skipped, not passed, and named out loud.
 	if err != nil {
@@ -80,7 +80,7 @@ func TestRunSuitePassesWhenTheEntrypointSucceeds(t *testing.T) {
 	r, _ := newTestSuiteRunner(t)
 
 	// Act.
-	got, err := r.RunSuite(context.Background(), repo)
+	got, err := r.RunSuite(context.Background(), repo, SuiteRun{Attempt: 1})
 
 	// Assert.
 	if err != nil {
@@ -98,7 +98,7 @@ func TestRunSuiteFailsWithTheOutputTailWhenTheEntrypointExitsNonZero(t *testing.
 	r, _ := newTestSuiteRunner(t)
 
 	// Act.
-	got, err := r.RunSuite(context.Background(), repo)
+	got, err := r.RunSuite(context.Background(), repo, SuiteRun{Attempt: 1})
 
 	// Assert — a verdict, never an error, carrying what failed.
 	if err != nil {
@@ -122,7 +122,7 @@ func TestRunSuiteArchivesAFailingRunsCompleteOutput(t *testing.T) {
 	r, _ := newTestSuiteRunner(t)
 
 	// Act.
-	got, err := r.RunSuite(context.Background(), repo)
+	got, err := r.RunSuite(context.Background(), repo, SuiteRun{Attempt: 1})
 	if err != nil {
 		t.Fatalf("RunSuite() err = %v", err)
 	}
@@ -151,7 +151,7 @@ func TestRunSuiteArchivesNothingWhenTheSuitePasses(t *testing.T) {
 	r, _ := newTestSuiteRunner(t)
 
 	// Act.
-	got, err := r.RunSuite(context.Background(), repo)
+	got, err := r.RunSuite(context.Background(), repo, SuiteRun{Attempt: 1})
 	if err != nil {
 		t.Fatalf("RunSuite() err = %v", err)
 	}
@@ -171,7 +171,7 @@ func TestRunSuiteResolvesTheEntrypointFromTheRepositoryToplevel(t *testing.T) {
 	r, _ := newTestSuiteRunner(t)
 
 	// Act.
-	got, err := r.RunSuite(context.Background(), sub)
+	got, err := r.RunSuite(context.Background(), sub, SuiteRun{Attempt: 1})
 
 	// Assert.
 	if err != nil {
@@ -193,7 +193,7 @@ func TestRunSuiteRunsTheEntrypointFromTheRepositoryToplevel(t *testing.T) {
 	writeEntrypoint(t, repo, "#!/usr/bin/env bash\npwd\nexit 1\n")
 
 	// Act.
-	got, err := r.RunSuite(context.Background(), repo)
+	got, err := r.RunSuite(context.Background(), repo, SuiteRun{Attempt: 1})
 
 	// Assert.
 	if err != nil {
@@ -213,7 +213,7 @@ func TestRunSuiteRequiresATargetDirectory(t *testing.T) {
 	r, _ := newTestSuiteRunner(t)
 
 	// Act.
-	_, err := r.RunSuite(context.Background(), "")
+	_, err := r.RunSuite(context.Background(), "", SuiteRun{Attempt: 1})
 
 	// Assert.
 	if err == nil {
@@ -226,7 +226,7 @@ func TestRunSuiteSurfacesAnUnresolvableRepository(t *testing.T) {
 	r, _ := newTestSuiteRunner(t)
 
 	// Act.
-	_, err := r.RunSuite(context.Background(), t.TempDir())
+	_, err := r.RunSuite(context.Background(), t.TempDir(), SuiteRun{Attempt: 1})
 
 	// Assert — the toplevel probe's failure is surfaced, never reported as a
 	// skipped (and therefore harmless) gate.
@@ -251,7 +251,7 @@ func TestRunSuiteIgnoresANonExecutableEntrypoint(t *testing.T) {
 	r, _ := newTestSuiteRunner(t)
 
 	// Act.
-	got, err := r.RunSuite(context.Background(), repo)
+	got, err := r.RunSuite(context.Background(), repo, SuiteRun{Attempt: 1})
 
 	// Assert.
 	if err != nil {
@@ -275,5 +275,125 @@ func TestTailOfKeepsTheEndOfTheOutput(t *testing.T) {
 	}
 	if !strings.Contains(got, "truncated") {
 		t.Errorf("tailOf() = %q, want the elision named", got)
+	}
+}
+
+// --- suite selection reaches the entrypoint ---------------------------------
+
+func TestRunSuitePassesTheSelectionAsSuitesArgument(t *testing.T) {
+	// Arrange — an entrypoint that reports the arguments it was handed.
+	repo := initTarget(t)
+	writeEntrypoint(t, repo, "#!/usr/bin/env bash\necho \"args:$*\"\nexit 1\n")
+	r, _ := newTestSuiteRunner(t)
+
+	// Act.
+	got, err := r.RunSuite(context.Background(), repo, SuiteRun{Suites: []string{"webapp", "daemon"}, Attempt: 1})
+	if err != nil {
+		t.Fatalf("RunSuite() err = %v", err)
+	}
+	t.Cleanup(func() { _ = os.Remove(got.OutputPath) })
+
+	// Assert.
+	if !strings.Contains(got.Tail, "args:--suites webapp,daemon") {
+		t.Fatalf("entrypoint args = %q, want --suites webapp,daemon", got.Tail)
+	}
+}
+
+// An empty selection means EVERY suite, and it must reach the entrypoint as no
+// arguments at all — a foreign repository's entrypoint may know no such flag.
+func TestRunSuitePassesNoArgumentsForAnEmptySelection(t *testing.T) {
+	// Arrange.
+	repo := initTarget(t)
+	writeEntrypoint(t, repo, "#!/usr/bin/env bash\necho \"argc:$#\"\nexit 1\n")
+	r, _ := newTestSuiteRunner(t)
+
+	// Act.
+	got, err := r.RunSuite(context.Background(), repo, SuiteRun{Attempt: 1})
+	if err != nil {
+		t.Fatalf("RunSuite() err = %v", err)
+	}
+	t.Cleanup(func() { _ = os.Remove(got.OutputPath) })
+
+	// Assert.
+	if !strings.Contains(got.Tail, "argc:0") {
+		t.Fatalf("entrypoint argc = %q, want 0 for an empty selection", got.Tail)
+	}
+}
+
+func TestRunSuiteRefusesASelectionNamingAnUnknownSuite(t *testing.T) {
+	// Arrange.
+	repo := initTarget(t)
+	writeEntrypoint(t, repo, "#!/usr/bin/env bash\nexit 0\n")
+	r, _ := newTestSuiteRunner(t)
+
+	// Act.
+	_, err := r.RunSuite(context.Background(), repo, SuiteRun{Suites: []string{"nope"}, Attempt: 1})
+
+	// Assert — a mapping typo is a construction error here, not an unrunnable
+	// gate at the entrypoint.
+	if err == nil || !strings.Contains(err.Error(), "nope") {
+		t.Fatalf("RunSuite() err = %v, want the unknown suite named", err)
+	}
+}
+
+func TestRunSuiteRefusesARunWithNoAttempt(t *testing.T) {
+	// Arrange.
+	repo := initTarget(t)
+	writeEntrypoint(t, repo, "#!/usr/bin/env bash\nexit 0\n")
+	r, _ := newTestSuiteRunner(t)
+
+	// Act.
+	_, err := r.RunSuite(context.Background(), repo, SuiteRun{})
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "Attempt") {
+		t.Fatalf("RunSuite() err = %v, want a refusal naming Attempt", err)
+	}
+}
+
+// A flake's evidence is the PAIR of runs, and the passing half is the one
+// nothing would otherwise keep.
+func TestRunSuiteArchivesAPassingRerun(t *testing.T) {
+	// Arrange.
+	repo := initTarget(t)
+	writeEntrypoint(t, repo, "#!/usr/bin/env bash\necho 'the quiet run'\nexit 0\n")
+	r, _ := newTestSuiteRunner(t)
+
+	// Act.
+	got, err := r.RunSuite(context.Background(), repo, SuiteRun{Attempt: 2})
+	if err != nil {
+		t.Fatalf("RunSuite() err = %v", err)
+	}
+	t.Cleanup(func() { _ = os.Remove(got.OutputPath) })
+
+	// Assert.
+	if got.OutputPath == "" {
+		t.Fatalf("OutputPath = %q, want the re-run's output archived whatever its verdict", got.OutputPath)
+	}
+	full, readErr := os.ReadFile(got.OutputPath)
+	if readErr != nil {
+		t.Fatalf("read the archive: %v", readErr)
+	}
+	if !strings.Contains(string(full), "the quiet run") {
+		t.Errorf("the re-run archive = %q, want the run's own output", string(full))
+	}
+}
+
+func TestRunSuiteReportsTheRunsDuration(t *testing.T) {
+	// Arrange.
+	repo := initTarget(t)
+	writeEntrypoint(t, repo, "#!/usr/bin/env bash\nexit 0\n")
+	r, _ := newTestSuiteRunner(t)
+
+	// Act.
+	got, err := r.RunSuite(context.Background(), repo, SuiteRun{Attempt: 1})
+	if err != nil {
+		t.Fatalf("RunSuite() err = %v", err)
+	}
+
+	// Assert — a flake report is a comparison of two durations, so neither may
+	// be zero-valued.
+	if got.Duration <= 0 {
+		t.Fatalf("Duration = %v, want the measured run time", got.Duration)
 	}
 }

@@ -5,15 +5,24 @@
 # Usage:
 #   bin/test-all.sh
 #   bin/test-all.sh --record
+#   bin/test-all.sh --suites webapp,build-frontend-harness
 #
 # The default run is read-only with respect to the canonical timing history.
 # --record atomically appends one successful timing row per suite to
 # ../test_time.csv, then compares the run with recent entries on the same
 # branch. Failed runs never update the timing history.
 #
-# Every suite runs on every invocation. A failing suite is reported loudly the
-# moment it fails, the run continues through the remaining suites, and the run
-# ends with a summary of every failure plus a non-zero exit status.
+# --suites narrows the run to a comma-separated subset. WITHOUT IT EVERY SUITE
+# RUNS, which is the default this script has always had and the only safe answer
+# for a caller that does not know what it changed. An unknown suite name is a
+# hard error rather than a silently empty run: a caller that misspells a suite
+# must not be told the suite passed. The merge gate is the flag's reason for
+# existing — see daemon/internal/workspace/merge/suiteselect.go, which maps the
+# paths a merge touches onto these names.
+#
+# A failing suite is reported loudly the moment it fails, the run continues
+# through the remaining suites, and the run ends with a summary of every failure
+# plus a non-zero exit status.
 set -euo pipefail
 
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -31,6 +40,35 @@ FAILED_SUITES=()
 FAILED_DURATIONS=()
 FAILED_CODES=()
 FAILURE_COUNT=0
+# SELECTED is the --suites narrowing. EMPTY MEANS EVERY SUITE.
+SELECTED=()
+SKIPPED_SUITES=()
+
+# ALL_SUITES is the declared roster, in run order. It is the list --suites is
+# validated against and the list the merge gate's mapping is written against, so
+# it must name exactly the suites the run block below invokes — a name here that
+# nothing runs would be accepted by --suites and then silently run nothing.
+# t_roster_matches_the_run_block in test-test-all.sh holds the two together.
+ALL_SUITES=(
+    orchestrator-harness
+    coverage-harness
+    logging-density-harness
+    build-frontend-harness
+    deploy-harness
+    readiness-harness
+    doctor-harness
+    precommit-harness
+    ert
+    daemon
+    sidecar
+    store
+    wire
+    logging
+    webapp
+    shim
+    proto
+    logging-density
+)
 
 cleanup() {
     [ -z "$CSV_TMP" ] || rm -f "$CSV_TMP"
@@ -52,15 +90,58 @@ die() {
     exit 1
 }
 
-case "$#" in
-    0) ;;
-    1)
-        [ "$1" = "--record" ] ||
-            die "unknown argument '$1', expected --record"
-        RECORD=1
-        ;;
-    *) die "expected no arguments or exactly --record" ;;
-esac
+is_known_suite() {
+    local candidate="$1" known
+    for known in "${ALL_SUITES[@]}"; do
+        [ "$known" = "$candidate" ] && return 0
+    done
+    return 1
+}
+
+parse_suites() {
+    local spec="$1" name
+    # Rendered BEFORE the comma IFS below, so the error message lists the roster
+    # space-separated rather than in the same shape as the argument that failed.
+    local roster="${ALL_SUITES[*]}"
+    [ -n "$spec" ] ||
+        die "--suites needs at least one suite name"
+    local IFS=,
+    for name in $spec; do
+        [ -n "$name" ] ||
+            die "--suites contains an empty suite name: '$spec'"
+        is_known_suite "$name" ||
+            die "--suites names an unknown suite '$name'; known suites: $roster"
+        SELECTED+=("$name")
+    done
+    [ "${#SELECTED[@]}" -gt 0 ] ||
+        die "--suites selected no suites: '$spec'"
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --record) RECORD=1 ;;
+        --suites)
+            [ "$#" -ge 2 ] ||
+                die "--suites needs a comma-separated suite list"
+            parse_suites "$2"
+            shift
+            ;;
+        --suites=*) parse_suites "${1#--suites=}" ;;
+        *) die "unknown argument '$1', expected --record or --suites <list>" ;;
+    esac
+    shift
+done
+
+# suite_selected NAME — is NAME part of this run? An empty selection is every
+# suite, which keeps an argument-less invocation exactly what it has always been.
+suite_selected() {
+    local name="$1" chosen
+    [ "${#SELECTED[@]}" -eq 0 ] && return 0
+    for chosen in "${SELECTED[@]}"; do
+        [ "$chosen" = "$name" ] && return 0
+    done
+    return 1
+}
 
 validate_timing_csv() {
     local header
@@ -82,6 +163,14 @@ run_timed() {
     local timing_file="$RUN_TMP/$suite.time"
     local duration rc
     shift
+
+    is_known_suite "$suite" ||
+        die "run_timed invoked for '$suite', which ALL_SUITES does not declare"
+    if ! suite_selected "$suite"; then
+        SKIPPED_SUITES+=("$suite")
+        log "$suite: not selected by --suites, skipping"
+        return 0
+    fi
 
     log "$suite: starting"
     TIMEFORMAT='%3R'
@@ -286,4 +375,9 @@ else
     log "timings were not recorded, pass --record only for a canonical history run"
 fi
 
-log "all agent-repl tests and coverage suites passed"
+if [ "${#SELECTED[@]}" -eq 0 ]; then
+    log "all agent-repl tests and coverage suites passed"
+else
+    log "selected agent-repl suites passed: ${SELECTED[*]}"
+    log "not selected, NOT run: ${SKIPPED_SUITES[*]-none}"
+fi
