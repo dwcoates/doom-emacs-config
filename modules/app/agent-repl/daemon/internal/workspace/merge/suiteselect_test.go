@@ -64,7 +64,7 @@ func TestSelectSuitesMapsPathsToSuites(t *testing.T) {
 		},
 		{
 			name:  "top-level elisp takes the ert suites",
-			paths: []string{"modules/app/agent-repl/status.el", "modules/app/agent-repl/test-status.el"},
+			paths: []string{"modules/app/agent-repl/lisp/status.el", "modules/app/agent-repl/lisp/test-status.el"},
 			want:  []string{"ert"},
 		},
 		{

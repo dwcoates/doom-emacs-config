@@ -331,7 +331,7 @@ else
     # must be stopped even when this checkout's own before/after fingerprint is
     # unchanged.
     ROOT_B64="$(printf '%s' "$ROOT" | base64 | tr -d '\n')"
-    PRELOAD_FORM="(let* ((root (file-name-as-directory (decode-coding-string (base64-decode-string \"$ROOT_B64\") 'utf-8))) (before (and (boundp 'agent-repl--frontend-root) agent-repl--frontend-root))) (load (expand-file-name \"daemon.el\" root) nil t) (load (expand-file-name \"frontend-client.el\" root) nil t) (load (expand-file-name \"services.el\" root) nil t) (unless (equal agent-repl--frontend-root root) (error \"agent-repl deploy root mismatch: expected %S got %S\" root agent-repl--frontend-root)) (if (equal before root) \"artifact-root-same\" \"artifact-root-changed\"))"
+    PRELOAD_FORM="(let* ((root (file-name-as-directory (decode-coding-string (base64-decode-string \"$ROOT_B64\") 'utf-8))) (before (and (boundp 'agent-repl--frontend-root) agent-repl--frontend-root))) (load (expand-file-name \"lisp/daemon.el\" root) nil t) (load (expand-file-name \"lisp/frontend-client.el\" root) nil t) (load (expand-file-name \"lisp/services.el\" root) nil t) (unless (equal agent-repl--frontend-root root) (error \"agent-repl deploy root mismatch: expected %S got %S\" root agent-repl--frontend-root)) (if (equal before root) \"artifact-root-same\" \"artifact-root-changed\"))"
     PRELOAD_OUT="$("$EMACSCLIENT" --eval "$PRELOAD_FORM" 2>&1)" || {
         echo "[deploy-all] daemon control-plane preload failed: $PRELOAD_OUT" >&2
         exit 3
@@ -425,12 +425,14 @@ verify_webapp_revision
 # the running Emacs for that assertion's result and reports it.
 
 # Emit the canonical module set as repo-relative paths, in load order.
+# config.el stays at the module ROOT (that is where Doom's loader resolves
+# it), while every source it names lives in `lisp/'.
 canonical_module_files() {
     local m
     sed -n 's/^(agent-repl--load-module "\([^"]*\)").*/\1/p' "$ROOT/config.el" \
     | while IFS= read -r m; do
-        [ -f "$ROOT/$m.el" ] || continue
-        printf '%s\n' "$MOD_REL/$m.el"
+        [ -f "$ROOT/lisp/$m.el" ] || continue
+        printf '%s\n' "$MOD_REL/lisp/$m.el"
     done
 }
 
@@ -439,13 +441,17 @@ if [ -n "$ELISP_RANGE" ] && [ "$EMACS_AVAILABLE" -eq 1 ]; then
 
     CHANGED=()
     CORE_IN_SET=0
+    # Two pathspecs: the sources live in `$MOD_REL/lisp/', while config.el /
+    # packages.el / doctor.el stay at `$MOD_REL/' where Doom's module loader
+    # resolves them.
     while IFS= read -r rel; do
         base="$(basename "$rel")"
         case "$base" in test-*.el) continue ;; esac   # batch-only harness files
         [ -f "$REPO_ROOT/$rel" ] || continue          # deleted in range
         [ "$base" = "core.el" ] && CORE_IN_SET=1
         CHANGED+=("$rel")
-    done < <(git -C "$REPO_ROOT" diff --name-only "$ELISP_RANGE" -- "$MOD_REL/*.el")
+    done < <(git -C "$REPO_ROOT" diff --name-only "$ELISP_RANGE" \
+                 -- "$MOD_REL/*.el" "$MOD_REL/lisp/*.el")
 
     LOAD_LIST=()
     if [ "$CORE_IN_SET" -eq 1 ]; then
