@@ -363,7 +363,7 @@ func newParkedEntry(id, requestID, text, permissionMode string, promptOrigin cor
 		permissionMode: permissionMode,
 		promptOrigin:   promptOrigin,
 		queuedAtMs:     queuedAtMs,
-		classification: frontendv1.QueueClassification_QUEUE_CLASSIFICATION_HOLD,
+		classification: VerdictHold,
 		rationale:      "",
 	}
 }

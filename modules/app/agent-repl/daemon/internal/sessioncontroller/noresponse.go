@@ -58,7 +58,7 @@ const noResponseRequestedText = "No response requested."
 // and neither is one carrying a second block. Surrounding whitespace is the
 // only latitude given.
 func isNoResponsePlaceholder(it *frontendv1.ConversationItem) bool {
-	am := it.GetAssistantMessage()
+	am := it.GetAgent().GetResponse().GetBody()
 	if am == nil || am.GetModel() != syntheticModel {
 		return false
 	}
