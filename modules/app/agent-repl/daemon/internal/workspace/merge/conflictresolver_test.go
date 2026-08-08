@@ -108,11 +108,17 @@ func TestResolutionRequestIDsAreUnique(t *testing.T) {
 	}
 }
 
-// TestConflictResolutionPromptMatchesTheGolden pins the extracted file's text
-// against the wording that lived in this file before the prompt moved to
-// prompts/merge-conflict-resolve.md. The move is a RELOCATION, so any drift
-// from this literal is either an intentional edit that should update the
-// golden or an accident that must not reach an agent unnoticed.
+// TestConflictResolutionPromptMatchesTheGolden pins the text of
+// prompts/merge-conflict-resolve.md, so any drift from this literal is either
+// an intentional edit that should update the golden or an accident that must
+// not reach an agent unnoticed.
+//
+// AMENDED for the rebase pipeline. The previous golden described a cherry-pick
+// into the merge TARGET, which is no longer what happens: the conflict parks in
+// a temporary rebase worktree and the target is untouched. A golden that still
+// said "cherry-pick" would be pinning an instruction that sends the agent to
+// the wrong tree. The assertion is unchanged in strength — one literal, exact
+// equality.
 func TestConflictResolutionPromptMatchesTheGolden(t *testing.T) {
 	// Arrange.
 	usePrompts(t)
@@ -120,11 +126,13 @@ func TestConflictResolutionPromptMatchesTheGolden(t *testing.T) {
 		Workspace: "/ws/a", RequestID: "merge_resolve_1",
 		ConflictCommit: "abc1234", SourceBranch: "feature/a", TargetDir: "/target",
 	}
-	want := "A cherry-pick of commit abc1234 from branch feature/a is CONFLICTED in the worktree at /target.\n" +
+	want := "A rebase of commit abc1234 from branch feature/a onto the merge target is CONFLICTED in the worktree at /target.\n" +
+		"\n" +
+		"That worktree is a TEMPORARY REBASE WORKTREE, not the merge target and not your own workspace. The merge target has not been modified at all and will not be until every commit of this rebase has landed and passed the test suite, so nothing you do here can break the tree anybody else is working from.\n" +
 		"\n" +
 		"Resolve every conflict in that worktree and stage each resolution with `git add`.\n" +
 		"\n" +
-		"Then STOP. Do NOT run `git cherry-pick --continue`, do NOT commit, do NOT amend, and do NOT run `git cherry-pick --abort` or `git reset`. The daemon resumes the pick itself as soon as your turn ends, and it can only do that against a cherry-pick that is still paused.\n" +
+		"Then STOP. Do NOT run `git cherry-pick --continue` or `git rebase --continue`, do NOT commit, do NOT amend, and do NOT run `git cherry-pick --abort`, `git rebase --abort` or `git reset`. The daemon continues the rebase itself as soon as your turn ends, and it can only do that against a replay that is still paused.\n" +
 		"\n" +
 		"If the conflicts cannot be resolved, say so plainly and leave the tree as you found it — a human takes it from there."
 
@@ -133,7 +141,7 @@ func TestConflictResolutionPromptMatchesTheGolden(t *testing.T) {
 
 	// Assert.
 	if got != want {
-		t.Fatalf("prompt drifted from the pre-extraction text.\n got: %q\nwant: %q", got, want)
+		t.Fatalf("prompt drifted from its golden.\n got: %q\nwant: %q", got, want)
 	}
 }
 
