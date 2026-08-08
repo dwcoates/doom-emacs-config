@@ -57,6 +57,8 @@
 (declare-function agent-repl-connection-notice-echo "connection-notice" (text))
 (declare-function agent-repl--frontend-invalidate-daemon-view "frontend-state" (reason))
 (declare-function agent-repl--frontend-expected-restart-initiator "daemon" ())
+(declare-function agent-repl--frontend-expected-restart-covering-initiator
+                  "daemon" (&optional as-of))
 
 ;;;; ---- Configuration ---------------------------------------------------
 
@@ -314,6 +316,27 @@ believing they had freed memory they still hold.
 is its ONLY publisher: Emacs owns the workspace model, so the roster is
 authored here and handed to the daemon to retain and rebroadcast, which
 is what replaced the per-webview execute-script injection.")
+
+(defconst agent-repl--uds-republished-command-fields
+  '("publishWorkspaceRoster")
+  "Command fields whose loss on the wire is recovered by re-publication.
+
+Membership is a claim about the SENDER, not about the command: the
+sender must re-send the same state unprompted after a reconnect, so a
+frame that never reached the daemon is superseded rather than lost.
+`publishWorkspaceRoster' qualifies — sidebar.el republishes the whole
+roster on every tick and again from
+`agent-repl--sidebar-publish-on-connect', and the reconnect publish
+carries a FRESHER roster than the frame that failed to go out.
+
+Everything else is one-shot.  A `submitPrompt', `permissionAnswer' or
+`shutdown' that dies in the socket buffer is gone: nothing re-sends it,
+and several of those send sites pass no `:on-failure', which makes the
+transport's own warn their only surfacing.  So only fields listed here
+are eligible for the expected-restart demotion in
+`agent-repl--uds-write-frame'; a lost one-shot keeps its warn even when
+Emacs ordered the restart that lost it, because the loss is real
+whether or not the restart was wanted.")
 
 (defvar agent-repl--uds-frame-handlers nil
   "Alist mapping a `FrontendFrame' oneof field name (string) to a handler fn.
@@ -892,6 +915,26 @@ length of a drain batch and re-signals it afterwards."
 
 ;;;; ---- Outbound commands -----------------------------------------------
 
+(defun agent-repl--uds-write-failure-link-down-p (proc err)
+  "Return non-nil when ERR, raised writing to PROC, is the link being down.
+
+Structural first: a PROC whose status is no longer live could not have
+taken the bytes whatever the message says.  The message check is the
+fallback for the case the evidence actually showed — Emacs raising
+\"process ... no longer connected\" for a socket the daemon closed
+underneath the write — and for a PROC object that is already gone.
+
+Deliberately narrow.  Anything this does not recognize is treated as an
+ordinary write failure and keeps the unsoftened warn, because a failure
+nobody understands is exactly the one worth reading."
+  (or (and (processp proc)
+           (not (memq (process-status proc) '(open run connect))))
+      (and (string-match-p
+            (concat "no longer connected\\|not running\\|broken pipe"
+                    "\\|connection broken\\|connection reset")
+            (downcase (error-message-string err)))
+           t)))
+
 (defun agent-repl--uds-write-frame (proc entry)
   "Write queued ENTRY to open PROC and log completion or owned failure."
   (let ((ws (agent-repl--frontend-ws-name (plist-get entry :workspace)))
@@ -904,9 +947,33 @@ length of a drain batch and re-signals it afterwards."
                            (- (float-time) started)
                            (- started (plist-get entry :enqueued-at))))
       (error
-       (agent-repl--warn ws "uds-send-command: FAILED field=%s request-id=%s error=%s"
-                        (plist-get entry :field) (plist-get entry :request-id)
-                        (error-message-string err))
+       ;; Classified exactly as the link-down report above it is, and for the
+       ;; same reason: a write that lost its socket five seconds after Emacs
+       ;; TERMed the daemon failed BECAUSE of the restart Emacs ordered, so
+       ;; it is a phase of that restart rather than news.  Both conditions
+       ;; must hold — the failure has to be the link going down, and an
+       ;; expected-restart window has to cover the moment it went down — and
+       ;; the field has to be one re-published after reconnect, so nothing
+       ;; that is lost for good is quieted.
+       ;;
+       ;; The failure itself is NOT softened.  `handle-command-ack' runs with
+       ;; `:ok nil' in both branches, so every caller's `:on-failure' fires
+       ;; identically; this chooses the log level of the transport's own
+       ;; line, nothing else.
+       (let ((initiator
+              (and (member (plist-get entry :field)
+                           agent-repl--uds-republished-command-fields)
+                   (agent-repl--uds-write-failure-link-down-p proc err)
+                   (agent-repl--frontend-expected-restart-covering-initiator
+                    (float-time)))))
+         (if initiator
+             (agent-repl--info ws
+                               "uds-send-command: field=%s request-id=%s not sent — link down for the %s restart; the reconnect publish supersedes it"
+                               (plist-get entry :field) (plist-get entry :request-id)
+                               initiator)
+           (agent-repl--warn ws "uds-send-command: FAILED field=%s request-id=%s error=%s"
+                             (plist-get entry :field) (plist-get entry :request-id)
+                             (error-message-string err))))
        (agent-repl--uds-handle-command-ack
         (list :requestId (plist-get entry :request-id) :ok nil
               :error (error-message-string err)))))))
