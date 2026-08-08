@@ -18,7 +18,7 @@ func validationRecord(rootTurnID string) *frontendv1.TokenUtilization {
 		ApiMessageId:       "message",
 		Model:              "model",
 		Actor:              &frontendv1.TokenUtilization_MainAgent{MainAgent: &frontendv1.TokenUtilizationMainAgent{}},
-		Usage:              &frontendv1.TokenUsage{InputTokens: 1},
+		Usage:              &frontendv1.VendorTokenUsage{InputTokens: 1},
 	}
 }
 
@@ -127,7 +127,7 @@ func TestValidateHistoricalAgainstLiveAllowsOnlyProvenanceAndTimingEnrichment(t 
 	// protoimpl.MessageState (a sync.Mutex), which go vet's copylocks check
 	// forbids copying by value.
 	usageConflict := proto.Clone(live).(*frontendv1.TokenUtilization)
-	usageConflict.Usage = &frontendv1.TokenUsage{InputTokens: 2}
+	usageConflict.Usage = &frontendv1.VendorTokenUsage{InputTokens: 2}
 	if err := ValidateHistoricalAgainstLive(historical, usageConflict); err == nil || !strings.Contains(err.Error(), "payloads disagree") {
 		t.Fatalf("usage conflict error = %v", err)
 	}

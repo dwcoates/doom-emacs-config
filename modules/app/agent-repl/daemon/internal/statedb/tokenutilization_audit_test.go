@@ -13,7 +13,7 @@ import (
 )
 
 func auditUtilization(sessionID, messageID, model string) *frontendv1.TokenUtilization {
-	return &frontendv1.TokenUtilization{AgentReplSessionId: sessionID, ClaudeSessionId: "claude-" + sessionID, RootTurnId: "turn-" + messageID, ApiMessageId: messageID, Model: model, Actor: &frontendv1.TokenUtilization_MainAgent{MainAgent: &frontendv1.TokenUtilizationMainAgent{}}, Usage: &frontendv1.TokenUsage{OutputTokens: 1}}
+	return &frontendv1.TokenUtilization{AgentReplSessionId: sessionID, ClaudeSessionId: "claude-" + sessionID, RootTurnId: "turn-" + messageID, ApiMessageId: messageID, Model: model, Actor: &frontendv1.TokenUtilization_MainAgent{MainAgent: &frontendv1.TokenUtilizationMainAgent{}}, Usage: &frontendv1.VendorTokenUsage{OutputTokens: 1}}
 }
 
 func insertAuditUtilization(t *testing.T, db *sql.DB, record *frontendv1.TokenUtilization) {
