@@ -93,6 +93,30 @@ func TestShutdownStopShimsModeStopsThem(t *testing.T) {
 	}
 }
 
+// The drain's join on the idle sweeper is only as short as the sweep it joins,
+// and a sweep is a serial walk that hibernates whatever it reaches. Once
+// teardown has begun the sweep abandons its remainder — the shutdown drain
+// hibernates those sessions itself.
+func TestIdleSweepAbandonsItsRemainderOnceTeardownBegins(t *testing.T) {
+	// Arrange — the same fixture TestIdleSweepPersistsAnIdleCutoffHibernation
+	// proves this sweep DOES hibernate, with teardown already begun.
+	h, id := legacySweptWorkspace(t, time.Minute)
+	h.srv.stopOnce.Do(func() { close(h.srv.stopped) })
+
+	// Act.
+	h.srv.sweepIdle()
+
+	// Assert.
+	rec, ok := h.reg.Get(id)
+	if !ok {
+		t.Fatalf("session %s has no record after the sweep", id)
+	}
+	if rec.Hibernation.Cause != "" {
+		t.Fatalf("the sweep hibernated session %s (cause %q) after teardown began; it must abandon its remainder so the shutdown drain is not held behind a serial walk",
+			id, rec.Hibernation.Cause)
+	}
+}
+
 // A shutdown NEVER marks a record terminal, in either mode: a stopped shim's
 // session is merely unwired, not dead, and the next boot must still find it.
 func TestShutdownLeavesRecordsNonTerminal(t *testing.T) {
