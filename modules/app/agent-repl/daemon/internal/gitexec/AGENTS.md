@@ -49,7 +49,7 @@ package.
 
 ## Consumers
 
-- `internal/workspace/merge` (`merge.Driver`'s cherry-pick driver)
+- `internal/workspace/merge` (`merge.Driver`'s rebase-and-merge driver)
 - `internal/workspace/geometry` (branch and main-worktree derivation)
 - `internal/workspace/postmerge` (worktree/trunk probing)
 - `internal/reload`

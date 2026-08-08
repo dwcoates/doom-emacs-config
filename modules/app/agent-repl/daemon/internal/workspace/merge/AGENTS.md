@@ -3,32 +3,131 @@
 The workspace-merge subsystem. Two components, with strictly separated
 responsibilities:
 
-- `merge.Driver` — the git cherry-pick layer (`git -C <dir>`): replay the range
-  COMMIT BY COMMIT, run the target repository's test suite after each landing,
-  detect conflicts, finalize a merged workspace, resume after a resolution.
-  Stateless per call, and the ONLY component that shells out to git.
+- `merge.Driver` — the git rebase-and-merge layer (`git -C <dir>`): rebase the
+  branch's commits onto the target's head IN A TEMPORARY WORKTREE, commit by
+  commit, run the target repository's test suite after each landing, detect
+  conflicts, and then move the target EXACTLY ONCE with a `--no-ff` merge
+  commit. Stateless per call, and the ONLY component that shells out to git.
 - `merge.Coordinator` — the per-repository singleton that owns the merge
   QUEUE, the shim exclusivity lease, and conflict resolution. It is the only
   caller of `merge.Driver`.
 
+## THE TARGET IS NOT THE WORKBENCH
+
+This is the load-bearing decision of the whole subsystem, and everything below
+is downstream of it.
+
+`merge.Driver` used to cherry-pick the branch's commits INTO THE TARGET
+CHECKOUT one at a time and `reset --hard` it back when the gate failed. Two
+consequences followed, and both were structural rather than incidental:
+
+- the tree every other workspace cuts from CARRIED UNTESTED COMMITS for the
+  whole of a merge, including for the length of an agent turn spent resolving a
+  conflict or fixing a suite;
+- the rollback was a `reset --hard` fired at the end of that unbounded window,
+  and it TWICE DESTROYED unrelated commits that had reached the target
+  meanwhile. Guarding it with the head the merge left (`Result.TestedHead`)
+  converted the hazard into a refusal; it did not remove it.
+
+THE REBASE REMOVES BOTH. `merge.Driver.Merge` creates a TEMPORARY WORKTREE of
+the target's repository at the target's current head (`git worktree add
+--detach`), replays `merge-base..branch` into it commit by commit, and gates
+each landing there. Nothing reaches the target until every commit has landed and
+passed. The choreography:
+
+1. PRECONDITIONS, before any transition: the source worktree is clean, the
+   branch exists, and the target carries neither sequencer residue nor an
+   unfinished merge of its own.
+2. STALE TREES ARE PRUNED. Merges are serialized per REPOSITORY, so any rebase
+   worktree still registered when one starts belongs to a daemon that died
+   mid-merge. It is removed and loud-logged — otherwise a bounce leaks one
+   registration per interrupted merge.
+3. THE REBASE, in the temp worktree, gated per commit (below).
+4. THE ONE TARGET MOVE (`landOnTarget`), and only if the rebase reached the end:
+   - THE GUARD. The target must still be on `Request.BaseHead`, the head the
+     rebase based itself on. Everything the gate certified was certified against
+     that head. A target that moved is `errTargetMoved`, and `Merge` answers it
+     by RE-REBASING ONCE onto the new head (`rebaseAttempts = 2`); a second
+     occurrence fails loudly rather than spinning a full suite run per attempt.
+   - THE BRANCH REF MOVES to the rebased line, compare-and-swap against the
+     value this merge read, logged with both SHAs, and the source worktree is
+     re-synced onto it. That is what makes the merge commit's SECOND PARENT the
+     workspace's BRANCH rather than an anonymous commit, so `git log --graph` on
+     the target shows the workspace by name. A source worktree that became dirty
+     meanwhile FAILS the merge here, before the target is touched.
+   - `git merge --no-ff`. It cannot conflict — the target is on the head the
+     rebased line descends from — so a non-zero exit is the target holding work
+     of its own the merge would overwrite. That aborts the half-made merge,
+     RESTORES the branch ref, and is reported as a terminal `merge_failed`
+     (`errMergeRefused`), with the target still holding exactly what it held.
+5. AN EMPTY BRANCH NO-OPS. A rebase that produces nothing over the target head
+   is marked merged WITHOUT a merge commit: an empty merge commit would record a
+   topology saying work arrived when none did.
+
+**THERE IS NO ROLLBACK, AND ITS ABSENCE IS THE POINT.** `merge.Driver.Rollback`
+is RETIRED. A failure at any pre-merge stage — an unresolved conflict, a suite
+that failed twice, an abandoned merge, a daemon bounce — leaves the target
+BYTE-FOR-BYTE as the merge found it, so there is nothing to reset and no window
+in which resetting could destroy somebody else's work. The refusal logic did not
+disappear with it: it MIGRATED to `landOnTarget`'s `BaseHead` guard, where what
+was a last-resort protection against a destructive reset is now a precondition
+of a purely additive one. Every terminal failure cause says "the target was
+NEVER MODIFIED", because that is the fact a user needs.
+
+**THE TEMPORARY WORKTREE IS CLEANED UP ON EVERY PATH.** `merge.Driver` removes
+its own on any outcome it does not park (`Cleanup` — `git worktree remove
+--force`, then the directory, then `git worktree prune`, with every failure
+reported and none swallowed). A PARKED outcome hands the tree to
+`merge.Coordinator` along with the responsibility, which discharges it from a
+`defer` over `settle` — the one function that owns the whole of a merge's life
+after `Merge` returns, so no exit path (terminal, abandon, shutdown, panic
+unwinding) can miss it. A cleanup failure can never un-merge a merge; it is
+loud-logged and nothing more.
+
+**THE REBASE WORKTREE TRAVELS ON `Request.WorkDir` / `Request.BaseHead`**, set
+by `Merge` on the `Result` and echoed back by `merge.Coordinator` into `Resume`,
+`ContinueAfterTestFix` and `Cleanup`. Neither is part of the DURABLE queue
+payload: a temp worktree does not survive the process that made it, so a boot
+replay starts a fresh rebase rather than resuming into a directory that is gone.
+The steps that work inside an existing rebase REFUSE to run without it
+(`validateRebase`) — falling back to the target is precisely the behavior this
+design removed.
+
+**THE WIRE IS UNCHANGED.** `MergeStatus`'s `cherry_picking` oneof arm and its
+fields (`current_sha`, `current_subject`, `commits_total`, `commits_landed`)
+carry the REBASE's progress: the figures map one-for-one, and a rebase is
+replaying the same planned commits the picks did. Only the human-readable cause
+text changed (`rebasing 3/7: abc123`). Renaming the arm would have been a
+schema change every frontend had to land in lockstep for no new information.
+
 ## The replay is per-commit, and every landing is tested
 
-`merge.Driver` picks the range one commit at a time (`rev-list --reverse
---no-merges`, then `cherry-pick -x <sha>` each) and runs the target
-repository's test suite after each commit lands. A single whole-range pick
-could only be tested once, at the end, which names no culprit and gives a
-resolution attempt nothing narrower than the whole range to reason about.
+`merge.Driver` replays the range one commit at a time (`rev-list --reverse
+--no-merges`, then `cherry-pick -x <sha>` each) IN THE REBASE WORKTREE and runs
+the target repository's test suite after each commit lands there. A single
+whole-range replay could only be tested once, at the end, which names no culprit
+and gives a resolution attempt nothing narrower than the whole range to reason
+about.
 
-- THE SUITE IS A PORT. `merge.SuiteRunner` (`suiterunner.go`) resolves the
-  TARGET repository's own entrypoint — `modules/app/agent-repl/bin/test-all.sh`
-  relative to its toplevel. A target that declares none SKIPS the gate with a
+`cherry-pick -x` is HOW A REBASE IS SPELLED here, not a leftover. `git rebase`
+is itself a sequence of picks and offers no point between two commits at which
+this pipeline could run a suite, hand a conflict to an agent, and come back. The
+`-x` annotation is retained because the loop's own restartability reads it and
+because it records which branch commit each rebased commit came from.
+
+- THE SUITE IS A PORT, AND IT RUNS IN THE REBASE WORKTREE.
+  `merge.SuiteRunner` (`suiterunner.go`) resolves the repository's own
+  entrypoint — `modules/app/agent-repl/bin/test-all.sh` relative to its
+  toplevel — in the tree it is handed, which is a full checkout of exactly the
+  content the merge proposes to land. A target that declares none SKIPS the gate with a
   loud log naming the absence; this machinery serves repositories that have no
   agent-repl suite, and a skip is never reported as a pass.
 - THE LOOP IS RESTARTABLE BY CONSTRUCTION. It derives its work from git alone
-  (the cherry-pick base, which advances past every `-x` annotation, plus a
-  per-commit patch-id probe), so re-entering it after a resume, a test fix, or a
-  whole daemon bounce skips what already landed. That is what makes the durable
-  queue's boot replay a no-op for the commits the previous daemon got through.
+  (the rebase base, which advances past every `-x` annotation, plus a per-commit
+  patch-id probe), so re-entering it after a resume or a test fix skips what
+  already landed. A whole daemon BOUNCE is different now: the temp worktree died
+  with the process and the target kept nothing, so the boot replay re-rebases the
+  range from scratch onto a target that is exactly where it was.
 - MERGE COMMITS ARE FLATTENED. `--no-merges` drops them: a merge commit carries
   no patch of its own and both of its sides are already in the range. The
   whole-range driver this replaced failed outright on such a branch, because
@@ -68,45 +167,29 @@ resolution attempt nothing narrower than the whole range to reason about.
   TARGET, which is the tree everyone else works from. The hook now runs only the
   grep-only external-boundary lint.
 
-## A test failure gets ONE agent attempt, then the target is ROLLED BACK
+## A test failure gets ONE agent attempt, and the target never sees it
 
 A suite that fails after a landing parks exactly the way a conflict does, and
 the merging workspace's OWN session is asked to fix it through
-`merge.TestFailureResolver` (`testfailureresolver.go`). `merge.Coordinator`
-then commits whatever that turn staged as a FOLLOW-UP commit (never an amend:
-an amend would rewrite the `-x` annotation the replay's restartability keys on)
-and re-runs the suite.
+`merge.TestFailureResolver` (`testfailureresolver.go`), IN THE REBASE WORKTREE.
+`merge.Coordinator` then commits whatever that turn staged as a FOLLOW-UP commit
+(never an amend: an amend would rewrite the `-x` annotation the replay's
+restartability keys on) and re-runs the suite.
 
-- EXACTLY ONE ATTEMPT PER FAILING COMMIT. A repeat failure on the same commit,
-  a resolver error, and a driver error all go straight to the rollback path. A
-  failure on a LATER commit is a different failure and earns its own attempt.
-- **THE TARGET IS ROLLED BACK TO ITS PRE-MERGE HEAD.** `merge.Driver.Merge`
-  records that head before it lands anything and returns it on every Result;
-  `merge.Coordinator` resets the target to it, emits `merge_failed` carrying the
-  failing commit and the suite's output tail, and releases everything per the
-  ordinary terminal path. This is the load-bearing decision of the whole test
-  gate: the target worktree is what every other workspace cuts from and merges
-  into, so leaving it carrying commits that break its suite converts one
-  workspace's failure into everyone else's. Nothing is lost — the source branch
+- EXACTLY ONE ATTEMPT PER FAILING COMMIT. A repeat failure on the same commit, a
+  resolver error, and a driver error all fail the merge. A failure on a LATER
+  commit is a different failure and earns its own attempt.
+- **THE TARGET IS NEVER MODIFIED.** The failing commit exists only on the
+  rebased line in the temp worktree; the target carries not one line of it. The
+  run emits `merge_failed` carrying the failing commit and the suite's output
+  tail, says so in the cause, discards the temp worktree, and releases
+  everything per the ordinary terminal path. Nothing is lost — the source branch
   still holds every commit and the merge can be retried once the work is fixed
-  there. The rollback deliberately does NOT `git clean`: untracked files in the
-  target may be a human's own work.
-- A ROLLBACK THAT ITSELF FAILS still fails the merge, and the `merge_failed`
-  cause names the failed reset. A merge whose Result carries no pre-merge head
-  (which no valid `merge.Driver` Merge produces) is failed with that absence
-  named rather than papered over.
-- **THE ROLLBACK IS GUARDED AGAINST WRITERS THIS SUBSYSTEM DOES NOT CONTROL.**
-  The reset fires at the END of the resolution window, which is an agent turn
-  and therefore unbounded, and nothing here keeps the target still meanwhile:
-  the merge lease claims the merging workspace's SESSION
-  (`internal/ssm/mergelease.go`), and the queue only serializes merges against
-  each other, so a human or another agent committing straight into the target
-  checkout is a write the pipeline neither excludes nor sees. So the failing
-  gate records the head it tested (`Result.TestedHead`) and
-  `merge.Driver.Rollback` REFUSES to reset a target that has moved off it. A
-  refused rollback leaves the target carrying the commits that failed the
-  suite — worse than a clean rollback, and far better than making somebody
-  else's commit unreachable from every ref.
+  there.
+- THE AGENT IS POINTED AT THE REBASE WORKTREE, in the resolution prompt and in
+  `TestFailureResolution.TargetDir`. That field keeps its name because the
+  user-editable prompt's `{{target_dir}}` placeholder is what it fills; its
+  documentation says plainly which tree it names.
 - **THE SUITE'S COMPLETE OUTPUT IS ARCHIVED, and the cause names the file.**
   The tail is clamped, and the repository's entrypoint keeps running suites
   after one fails, so the retained bytes are routinely the LAST suites'
@@ -116,17 +199,19 @@ and re-runs the suite.
 
 ## Conflict resolution is shim-driven first, human second
 
-When a cherry-pick conflicts, `merge.Coordinator` parks it AND hands the
-conflict to the merging workspace's OWN agent session — the one that wrote the
+When the replay conflicts, `merge.Coordinator` parks it IN THE REBASE WORKTREE
+AND hands the conflict to the merging workspace's OWN agent session — the one that wrote the
 conflicting commits, and the one whose shim the coordinator already holds the
 `merge.Lease` over. That handoff goes through `merge.ConflictResolver`
 (`conflictresolver.go`), the package's outbound port:
 
 - `merge.ConflictResolution` carries the facts (workspace, request id, conflict
-  commit, source branch, target dir) and OWNS the prompt text (`Prompt()`),
-  because what the agent may do with a paused cherry-pick is merge-subsystem
-  knowledge: resolve and `git add`, never `--continue` and never commit — the
-  coordinator resumes the pick itself.
+  commit, source branch, and the REBASE WORKTREE the conflict is parked in) and
+  OWNS the prompt text (`Prompt()`), because what the agent may do with a paused
+  replay is merge-subsystem knowledge: resolve and `git add`, never `--continue`
+  and never commit — the coordinator resumes the replay itself. A conflict a
+  human abandons leaves the temp tree to be discarded with the run; the target
+  was never touched, so there is nothing to clean up there.
 - `Resolve` returns only once the resolution TURN HAS ENDED. The implementation
   is `(*sessioncontroller.Manager).ResolveMergeConflict`, reached through the
   server's `PromptRouter` so the fleet that serves the user's prompts is
@@ -140,7 +225,7 @@ conflicting commits, and the one whose shim the coordinator already holds the
   cause naming the submit's own disposition, instead of holding the merge and
   the workspace's shim lease for a window sized for an agent that is working.
   A busy workspace's parked prompt is taken back off the queue with the failure,
-  so it cannot be delivered after the merge has been rolled back.
+  so it cannot be delivered after the merge has already failed.
 - EXACTLY ONE attempt. A resolver error, a refused submit, a turn that never
   starts, a turn that never ends, or a resume that is still conflicted all leave
   the park STANDING for the human path (`conflict_resolved_continue`, or abandonment by closing the
@@ -204,7 +289,7 @@ The two are now retired together.
 - THE NEXT BOOT REPLAYS THE WORD, NOT THE MERGE. A marked entry belongs to a run
   whose outcome was already reached, so `merge.Coordinator` publishes the
   recorded status under the id the entry was admitted with and retires it. No
-  lease, no session bring-up, no cherry-pick: every one of those would redo work
+  lease, no session bring-up, no rebase: every one of those would redo work
   that is over. The post-merge hook fires there for the first time, because the
   entry was never dropped before.
 - A REPLAY THAT ITSELF CANNOT PUBLISH CHANGES NOTHING. The entry stays marked and
@@ -224,7 +309,7 @@ names the deletion.
 Every merge-state transition (`merge_enqueuing`, `merging`, `merge_queued`,
 `merge_conflict`, `merge_failed`, `merged`) is written to the SSM. The
 per-commit loop reuses `merging` rather than adding vocabulary: its cause
-strings carry the progress (`testing 3/7 after cherry-pick of abc123def456`), so
+strings carry the progress (`testing 3/7 after rebasing abc123def456`), so
 a user watching a merge sees where it is without a new phase or a new proto
 enum value. Transitions are written to the SSM — never to
 the shim-store, which is agent-interaction-only.
@@ -244,7 +329,7 @@ outbound port.
 carries a SECOND sweep beside it: every workspace resting on `merge_queued`,
 `merging`, `merge_before_action` or `merge_conflict` with NO durable queue
 entry, NO open `merge.Lease` and NO live run gets a terminal `merge_failed`
-naming `orphaned_by_restart`. A daemon killed while a cherry-pick was parked on
+naming `orphaned_by_restart`. A daemon killed while a replay was parked on
 a conflict leaves exactly that state, and a non-terminal merge axis refuses
 every later prompt, fails the revive path's synchronous-prompt invariant, and
 holds the workspace's teardown guard shut forever. ANY ONE of the three facts
@@ -266,7 +351,7 @@ reaches the shim.
 
 - ONLY WAITING ENTRIES GO. `DurableQueue.EvictWaiting` never touches a
   repository's HEAD: that entry has already been handed to the drain, holds the
-  shim lease, and may be mid-cherry-pick, so removing its record would strand a
+  shim lease, and may be mid-rebase, so removing its record would strand a
   running merge with nothing left to `Complete`. The verbs for a merge in flight
   are unchanged — resolve it, or close the workspace, which abandons it.
 - EACH REPOSITORY IS EVICTED UNDER ITS ADVANCE GATE, the mutex `Enqueue` holds
@@ -282,10 +367,11 @@ reaches the shim.
   `enqueued` status the user is looking at carried, so the admission and its
   removal are one run rather than two unrelated events.
 
-The queue is keyed by REPOSITORY, not by worktree: sibling worktrees of one
-repo cherry-pick into the same target, so one queue serializes them all.
-Single ownership is what makes a same-target cherry-pick race structurally
-impossible rather than merely improbable.
+The queue is keyed by REPOSITORY, not by worktree: sibling worktrees of one repo
+merge into the same target, so one queue serializes them all. Single ownership
+is what makes a same-target merge race structurally impossible rather than
+merely improbable, and it is also what lets a starting merge conclude that any
+rebase worktree it finds registered is abandoned.
 
 Emacs owns NOTHING here: no geometry, no handler resolution, no queue, no
 merge state. It is informed of status by the daemon and renders it.
