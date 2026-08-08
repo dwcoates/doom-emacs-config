@@ -424,18 +424,49 @@ else
     fail "--elisp hot-loads changed .el, skipping test-*.el and deleted files" "rc=$RC log: $(cat "$STUB_LOG")"
 fi
 
-# --- 8. --force kickstarts both services despite identical binaries ---------
-d="$TMP/t8"; mkdir -p "$d/h/.cache/agent-repl/bin"
-printf 'bin-v1' > "$d/h/.cache/agent-repl/bin/shim-store"
-printf 'bin-v1' > "$d/h/.cache/agent-repl/bin/shim-claude-sidecar"
+# --- 8. --force propagates to build-frontend ---------------------------------
+d="$TMP/t8"; mkdir -p "$d"
+seed_deployed "$d" shim-store bin-v0
+seed_deployed "$d" shim-claude-sidecar bin-v0
+RUN_ENV="" run_deploy "$d" --force
+if [ "$RC" -eq 0 ] && log_has "build-frontend --force"; then
+    pass "--force propagates to build-frontend"
+else
+    fail "--force propagates to build-frontend" "rc=$RC log: $(cat "$STUB_LOG")"
+fi
+
+# --- 8b. --force does NOT kickstart services already on the installed image --
+# A forced rebuild reproduces a byte-identical binary, so bouncing on the force
+# alone dropped every live shim's store producer connection and standing
+# subscription for nothing — a fleet-wide warn storm per deploy retry. The
+# deployed-fingerprint stamp is the sole kickstart authority.
+d="$TMP/t8b"
+seed_deployed "$d" shim-store bin-v1
+seed_deployed "$d" shim-claude-sidecar bin-v1
 RUN_ENV="" run_deploy "$d" --force
 if [ "$RC" -eq 0 ] \
-   && log_has "build-frontend --force" \
+   && ! log_has "kickstart -k gui/.*shim-store" \
+   && ! log_has "kickstart -k gui/.*shim-claude-sidecar" \
+   && grep -q "store: unchanged, kickstart skipped" "$d/stdout" \
+   && grep -q "sidecar: unchanged, kickstart skipped" "$d/stdout"; then
+    pass "--force leaves services already running the installed binary un-bounced"
+else
+    fail "--force leaves services already running the installed binary un-bounced" \
+         "rc=$RC stdout: $(cat "$d/stdout") log: $(cat "$STUB_LOG")"
+fi
+
+# --- 8c. --force still bounces a service whose installed image genuinely moved
+d="$TMP/t8c"
+seed_deployed "$d" shim-store bin-v0
+seed_deployed "$d" shim-claude-sidecar bin-v0
+RUN_ENV="" run_deploy "$d" --force
+if [ "$RC" -eq 0 ] \
    && log_has "kickstart -k gui/.*shim-store" \
    && log_has "kickstart -k gui/.*shim-claude-sidecar"; then
-    pass "--force propagates to build-frontend and kickstarts both services"
+    pass "--force still kickstarts a service that is not running the installed binary"
 else
-    fail "--force propagates to build-frontend and kickstarts both services" "rc=$RC log: $(cat "$STUB_LOG")"
+    fail "--force still kickstarts a service that is not running the installed binary" \
+         "rc=$RC log: $(cat "$STUB_LOG")"
 fi
 
 # --- 9. no Emacs server defers restart and elisp reload ---------------------
