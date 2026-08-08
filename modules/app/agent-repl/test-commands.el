@@ -1333,6 +1333,36 @@ is handed back."
     (agent-repl-copy-reference)
     (should (equal (car kill-ring) "src/foo.el:42"))))
 
+;;;; ---- agent-repl-copy-workspace-name ----
+
+(ert-deftest agent-repl-cmd-test-copy-workspace-name/copies-to-kill-ring ()
+  "copy-workspace-name puts the current workspace name on the kill ring."
+  (let ((kill-ring '("pre-existing")))
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
+      (agent-repl-copy-workspace-name)
+      (should (equal (car kill-ring) "ws1")))))
+
+(ert-deftest agent-repl-cmd-test-copy-workspace-name/errors-without-workspace ()
+  "copy-workspace-name signals user-error when there is no current workspace."
+  (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil)))
+    (should-error (agent-repl-copy-workspace-name) :type 'user-error)))
+
+(ert-deftest agent-repl-cmd-test-copy-workspace-name/leaves-kill-ring-on-error ()
+  "copy-workspace-name does not touch the kill ring when it errors."
+  (let ((kill-ring '("pre-existing")))
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil)))
+      (ignore-errors (agent-repl-copy-workspace-name))
+      (should (equal kill-ring '("pre-existing"))))))
+
+(ert-deftest agent-repl-cmd-test-copy-workspace-name/logs-the-copy ()
+  "copy-workspace-name records the copy through the canonical log helper."
+  (let (logged)
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+              ((symbol-function 'agent-repl--log)
+               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+      (agent-repl-copy-workspace-name)
+      (should (equal logged '("copy-workspace-name: ws=ws1 outcome=copied"))))))
+
 ;;;; ---- agent-repl-paste-clipboard ----
 
 (ert-deftest agent-repl-cmd-test-paste-clipboard/inserts-at-point ()
