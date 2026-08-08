@@ -87,6 +87,7 @@ import {
   SessionStartedSchema,
   ShimReadySchema,
   TurnClaimBridgeSchema,
+  TurnEndedSchema,
   TurnStartedSchema,
   AccountUsageObservationSchema,
   AccountUsageAvailableSchema,
@@ -233,6 +234,15 @@ export interface UdsSessionDeps {
    * writes back to back. Default 5000ms; tests shorten it.
    */
   replayIdleMs?: number;
+  /**
+   * How long a turn this session ACKED as interrupted may stay open waiting for
+   * the SDK's own terminal result before the session closes it itself.
+   *
+   * A FAILURE bound, not a pace: the CLI answers an interrupt by aborting the
+   * turn and emitting its result promptly, so anything past this bound is the
+   * terminal never coming. Default 15000ms; tests compress it.
+   */
+  interruptTerminalGraceMs?: number;
 }
 
 /**
@@ -366,6 +376,31 @@ export class UdsSession {
   private readonly turnSdkTaskIds = new Map<string, Set<string>>();
   /** File-plane task notifications queued for an internal SDK result cycle. */
   private readonly pendingTaskNotificationQueue = new Set<string>();
+  /**
+   * Deadlines for the turns this session ACKED as interrupted.
+   *
+   * An `INTERRUPT_OUTCOME_INTERRUPTED` ack is a claim that a turn was stopped,
+   * and a turn that was stopped must reach its terminal. The SDK normally
+   * supplies that terminal itself — the CLI aborts and emits a `result`, which
+   * closes the turn through the ordinary path. When it does not (a turn the
+   * shim was retaining for background-task cycles is not running as far as the
+   * CLI is concerned, so the interrupt has nothing to abort and no result ever
+   * follows), the turn would stay latched open for the life of the process and
+   * every consumer of `turn_active` — hibernation, merge resolution, the
+   * restart turn-guard — waits on a turn that will never end.
+   *
+   * So the claim is BACKED: whichever terminal arrives first wins, and if none
+   * arrives within the grace this session writes it (`closeDisplacedTurn`).
+   */
+  private readonly displacedTurnDeadlines = new Map<string, ReturnType<typeof setTimeout>>();
+  /**
+   * Turns whose terminal this session synthesized, oldest first.
+   *
+   * A late SDK result for one of them is still durable vendor evidence and is
+   * stored as such; the entry exists only so that result is reported as the
+   * known late terminal it is rather than as an uncorrelated result.
+   */
+  private readonly synthesizedTurnEndIds: string[] = [];
   private intentionalShutdownReason: string | null = null;
   private readonly intentionalShutdownStarted = completionLatch();
   private shutdownPromise: Promise<void> | null = null;
@@ -376,6 +411,8 @@ export class UdsSession {
   private pumpStarted = false;
   /** Idle bound for a bounded replay's store subscription (see deps). */
   private readonly replayIdleMs: number;
+  /** Grace an acked-interrupted turn gets to receive its SDK terminal (see deps). */
+  private readonly interruptTerminalGraceMs: number;
   /**
    * Which assistant message the SDK is currently streaming. Deltas carry no
    * message identity of their own, so this supplies the one consumers
@@ -423,6 +460,7 @@ export class UdsSession {
       this.queryIdentity = { case: "fresh-unconfirmed" };
     }
     this.replayIdleMs = deps.replayIdleMs ?? 5000;
+    this.interruptTerminalGraceMs = deps.interruptTerminalGraceMs ?? 15000;
     this.effectivePermissionMode = deps.permissionMode ?? "default";
     LOGGER.log({ agent_repl_session_id: deps.sessionId, uds_socket: deps.udsSocketPath, store_socket: deps.storeSocketPath, session_source: deps.sessionSource, store_key_known: deps.storeSessionId !== undefined && deps.storeSessionId !== "", permission_mode: this.effectivePermissionMode }, "constructed UDS shim session");
     const target: SdkControlTarget = {
@@ -517,6 +555,10 @@ export class UdsSession {
         // watching for the turn's `aborted` result sees the stop and the
         // turn end as two unordered events.
         const wasLive = this.activeTurnIds.length > 0;
+        // Read in the same synchronous breath as the verdict: these are the
+        // turns the INTERRUPTED ack is a claim ABOUT, so they are exactly the
+        // turns whose terminal this session now owes.
+        const displacedTurnIds = [...this.activeTurnIds];
         LOGGER.log({
           agent_repl_session_id: this.deps.sessionId,
           active_turn_ids: this.activeTurnIds,
@@ -553,6 +595,11 @@ export class UdsSession {
             // collapsing the two would put a stale verdict on the wire.
             this.reportDegraded("claude-shim-interrupt", `interrupt failed: ${errMsg(err)}`);
           });
+        // THE ACK IS BACKED, NOT MERELY ASSERTED. Arming happens on the same
+        // path that returns INTERRUPTED, so the two cannot disagree: every
+        // turn this ack calls displaced now has a deadline by which its
+        // terminal exists.
+        if (wasLive) this.armDisplacedTurnTerminals(displacedTurnIds);
         return wasLive ? InterruptOutcome.INTERRUPTED : InterruptOutcome.ALREADY_COMPLETE;
       },
       setModel: async ({ requestId, model }): Promise<string> => {
@@ -1097,6 +1144,10 @@ export class UdsSession {
   /** Close non-SDK resources once regardless of which terminal path won. */
   private closeResources(): Promise<void> {
     if (this.resourcesClosePromise === null) {
+      // A dying session cannot write a synthesized end, and the process exit
+      // itself closes every open claim (the daemon's own stop reconciliation).
+      for (const timer of this.displacedTurnDeadlines.values()) clearTimeout(timer);
+      this.displacedTurnDeadlines.clear();
       this.resourcesClosePromise = (async (): Promise<void> => {
         try {
           await this.server.close();
@@ -1828,10 +1879,32 @@ export class UdsSession {
     if (msg.type === "result") {
       const claimedTurnId = this.activeTurnIds[0];
       if (claimedTurnId === undefined) {
-        this.reportDegraded(
-          "claude-shim-turn-lifecycle",
-          "SDK result has no accepted prompt turn to close",
-        );
+        // A LATE TERMINAL IS NOT AN ANOMALY OF UNKNOWN ORIGIN. When this
+        // session already synthesized the end for a turn it acked as
+        // displaced, a result arriving afterwards is that turn's own overdue
+        // terminal. It closes nothing (the turn is closed), it is still stored
+        // as vendor evidence by the batch below, and it is named as what it is
+        // instead of being reported as an uncorrelated result.
+        const lateFor = this.synthesizedTurnEndIds.shift();
+        if (lateFor !== undefined) {
+          LOGGER.log({
+            level: "warn",
+            agent_repl_session_id: this.deps.sessionId,
+            request_id: lateFor,
+            turn_id: lateFor,
+            decision: "retain_late_result_after_synthesized_turn_end",
+          }, "SDK result arrived after the shim synthesized the interrupted turn's terminal; keeping the vendor evidence without reopening or re-closing the turn");
+          this.reportDegraded(
+            "claude-shim-turn-lifecycle",
+            `SDK result for interrupted turn ${JSON.stringify(lateFor)} arrived after the shim had already synthesized its terminal; the result is kept as vendor evidence and closes no turn`,
+            { recovered: true, level: "warn" },
+          );
+        } else {
+          this.reportDegraded(
+            "claude-shim-turn-lifecycle",
+            "SDK result has no accepted prompt turn to close",
+          );
+        }
       } else {
         const origin = typeof msg.origin === "object" && msg.origin !== null
           ? msg.origin as Record<string, unknown>
@@ -1903,6 +1976,9 @@ export class UdsSession {
         if (terminalTurnId !== claimedTurnId) {
           throw new Error(`accepted turn FIFO changed while closing ${JSON.stringify(claimedTurnId)}`);
         }
+        // The SDK supplied the terminal an interrupt ack was owed, so the
+        // watchdog has nothing left to cover.
+        this.disarmDisplacedTurn(terminalTurnId);
         turnStart = this.activeTurnStarts.get(terminalTurnId);
         this.pendingTurnEndIds.push(terminalTurnId);
         terminalBoundaryAtMs = this.now();
@@ -2185,6 +2261,168 @@ export class UdsSession {
         cause,
       }, "persistent SDK event batch did not receive a durable store receipt");
       throw cause;
+    }
+  }
+
+  /**
+   * Give every turn an INTERRUPTED ack claimed as displaced a deadline by which
+   * its terminal exists.
+   *
+   * The deadline is DISARMED, never merely ignored, when the SDK supplies the
+   * terminal itself (`disarmDisplacedTurn`), so the ordinary result path stays
+   * the one that closes an interrupted turn in every case where it can.
+   */
+  private armDisplacedTurnTerminals(turnIds: string[]): void {
+    const armed: string[] = [];
+    for (const turnId of turnIds) {
+      if (this.displacedTurnDeadlines.has(turnId)) continue;
+      const timer = setTimeout(() => {
+        this.displacedTurnDeadlines.delete(turnId);
+        void this.closeDisplacedTurn(turnId);
+      }, this.interruptTerminalGraceMs);
+      // The deadline must never be the reason this process stays alive; it is
+      // a watchdog over work the process is already doing.
+      timer.unref?.();
+      this.displacedTurnDeadlines.set(turnId, timer);
+      armed.push(turnId);
+    }
+    if (armed.length === 0) return;
+    LOGGER.log({
+      agent_repl_session_id: this.deps.sessionId,
+      query_instance_id: this.queryInstanceId,
+      displaced_turn_ids: armed,
+      grace_ms: this.interruptTerminalGraceMs,
+      decision: "arm_displaced_turn_terminal_deadline",
+    }, "acked an interrupt as INTERRUPTED; the displaced turn owes a terminal within the grace");
+  }
+
+  /** Retire a displaced turn's deadline because its terminal has arrived. */
+  private disarmDisplacedTurn(turnId: string): void {
+    const timer = this.displacedTurnDeadlines.get(turnId);
+    if (timer === undefined) return;
+    clearTimeout(timer);
+    this.displacedTurnDeadlines.delete(turnId);
+    LOGGER.log({
+      agent_repl_session_id: this.deps.sessionId,
+      request_id: turnId,
+      turn_id: turnId,
+      decision: "displaced_turn_terminal_observed",
+    }, "the SDK closed the displaced turn within its grace; nothing is synthesized");
+  }
+
+  /**
+   * Write the terminal an acked-interrupted turn never received from the SDK.
+   *
+   * It converges on the SAME shape the ordinary result path produces — the
+   * ordered turn-end boundary (`AccountUsageObservation` then `TurnEnded`) in
+   * the turn's own store-key space, tracked through `pendingTurnEndIds` so the
+   * handshake keeps claiming the turn until the end is durably observable. What
+   * it does NOT do is invent a vendor `ResultMessage`: the SDK produced no
+   * result, and manufacturing one would put evidence on the wire that never
+   * existed. The end is a lifecycle fact this session owns; the result is not.
+   *
+   * It is LOUD. A synthesized terminal means the SDK broke the contract the ack
+   * relied on, so it goes out as a warn line AND a recovered DegradedState
+   * naming the turn, rather than quietly papering the gap over.
+   */
+  private async closeDisplacedTurn(turnId: string): Promise<void> {
+    const index = this.activeTurnIds.indexOf(turnId);
+    if (index < 0) {
+      // Belt to the disarm's braces: the turn already reached its terminal.
+      LOGGER.log({
+        agent_repl_session_id: this.deps.sessionId,
+        request_id: turnId,
+        turn_id: turnId,
+        decision: "displaced_turn_terminal_observed",
+      }, "displaced-turn deadline fired on a turn that is no longer in flight; nothing is synthesized");
+      return;
+    }
+    this.activeTurnIds.splice(index, 1);
+    this.synthesizedTurnEndIds.push(turnId);
+    const boundaryAtMs = this.now();
+    const turnStart = this.activeTurnStarts.get(turnId);
+    // The turn's OWN store-key space: a rotation between the prompt and now
+    // moved the retained carrier, and the end belongs where the start is.
+    const storeKey = turnStart?.sessionId ?? this.store.storeSessionId();
+    LOGGER.log({
+      level: "warn",
+      agent_repl_session_id: this.deps.sessionId,
+      query_instance_id: this.queryInstanceId,
+      request_id: turnId,
+      turn_id: turnId,
+      grace_ms: this.interruptTerminalGraceMs,
+      live_sdk_task_count: this.liveSdkTaskIds.size,
+      pending_task_notification_count: this.pendingTaskNotificationQueue.size,
+      turns_in_flight: this.activeTurnIds.length,
+      store_key: storeKey,
+      decision: "synthesize_interrupted_turn_end",
+    }, "the SDK never produced a terminal for a turn acked as interrupted; the shim writes the end itself rather than leaving the turn latched open");
+    this.reportDegraded(
+      "claude-shim-turn-lifecycle",
+      `turn ${JSON.stringify(turnId)} was acknowledged as interrupted but the SDK produced no terminal result within ${this.interruptTerminalGraceMs}ms; the shim closed the turn itself so it cannot stay open forever`,
+      { recovered: true, level: "warn" },
+    );
+    const usage = await this.captureFiveHourUsage("turn_end", turnId, this.turnStartUsage.get(turnId));
+    this.turnStartUsage.delete(turnId);
+    const usageEvent = this.accountUsageObservationEvent("turn_end", turnId, boundaryAtMs, usage, storeKey);
+    const durationMs = turnStart === undefined
+      ? 0n
+      : BigInt(Math.max(0, boundaryAtMs - Number(turnStart.producedAtMs)));
+    const turnEnded = create(EventSchema, {
+      sessionId: storeKey,
+      seq: 0n,
+      plane: Plane.STREAM,
+      class: EventClass.PERSISTENT,
+      requestId: turnId,
+      queryInstanceId: this.queryInstanceId,
+      producedAtMs: BigInt(boundaryAtMs),
+      payload: {
+        case: "turnEnded",
+        value: create(TurnEndedSchema, {
+          stopReason: "interrupted",
+          durationMs,
+          isError: false,
+          turnId,
+        }),
+      },
+    });
+    this.pendingTurnEndIds.push(turnId);
+    this.activeTurnStarts.delete(turnId);
+    this.turnSdkTaskIds.delete(turnId);
+    try {
+      const ack = await this.store.write([usageEvent, turnEnded]);
+      const pendingIndex = this.pendingTurnEndIds.indexOf(turnId);
+      if (pendingIndex >= 0) this.pendingTurnEndIds.splice(pendingIndex, 1);
+      LOGGER.log({
+        agent_repl_session_id: this.deps.sessionId,
+        request_id: turnId,
+        turn_id: turnId,
+        store_last_seq: ack.lastSeq,
+        pending_turn_end_ids: this.pendingTurnEndIds,
+        decision: "retire_durable_turn_end_claim",
+      }, "synthesized TurnEnded is durably observable; retired its handshake claim");
+    } catch (cause) {
+      // A throw out of a timer callback would become an unhandled rejection
+      // and tell nobody, so the failure is surfaced on the channel a daemon
+      // actually reads. The claim stays in pendingTurnEndIds: the end is NOT
+      // durable, and the handshake must keep saying so.
+      LOGGER.log({
+        level: "error",
+        operation: "shim.uds-session.persistent-evidence",
+        agent_repl_session_id: this.deps.sessionId,
+        claude_session_id: storeKey,
+        query_instance_id: this.queryInstanceId,
+        request_id: turnId,
+        turn_id: turnId,
+        evidence_kind: "synthesized_terminal_turn_batch",
+        failed_operation: "store.write.synthesized_terminal_turn_batch",
+        outcome: "fatal_missing_persistent_evidence_receipt",
+        cause,
+      }, "synthesized interrupted-turn terminal did not receive a durable store receipt");
+      this.reportDegraded(
+        "claude-shim-turn-lifecycle",
+        `the synthesized terminal for interrupted turn ${JSON.stringify(turnId)} was not durably stored: ${errMsg(cause)}`,
+      );
     }
   }
 
