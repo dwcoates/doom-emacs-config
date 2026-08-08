@@ -117,7 +117,6 @@ import {
   ModelUsageSchema,
   PermissionDenialSchema,
   PluginRefSchema,
-  PromptCacheRatesSchema,
   RateLimitEventSchema,
   RateLimitInfoSchema,
   RawMessageStreamEventSchema,
@@ -830,14 +829,6 @@ function buildAssistant(message: Record<string, unknown>, r: Reader): Built {
     taskDescription: r.str("task_description", "taskDescription"),
     agentId: r.str("agent_id", "agentId"),
     parentAgentId: r.str("parent_agent_id", "parentAgentId"),
-    cacheRates: assistantApiUsage.promptCache.case === "empty"
-      ? undefined
-      : create(PromptCacheRatesSchema, {
-          totalPromptInputTokens: BigInt(assistantApiUsage.promptCache.totalPromptInputTokens),
-          cacheHitRate: assistantApiUsage.promptCache.cacheHitRate,
-          cacheWriteRate: assistantApiUsage.promptCache.cacheWriteRate,
-          uncachedInputRate: assistantApiUsage.promptCache.uncachedInputRate,
-        }),
   });
   return { csm: csm({ case: "assistant", value: assistantMsg }), lifecyclePayloads: [], typeLabel: "assistant", ephemeral: false, assistantApiUsage };
 }
