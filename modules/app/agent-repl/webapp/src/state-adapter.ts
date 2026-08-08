@@ -353,11 +353,11 @@ export interface ProgressInput {
   turnStartedAtMs: number;
   thinkingTokens: number;
   /**
-   * THIS turn's cumulative UNCACHED input tokens (`input_tokens` +
-   * `cache_creation_input_tokens`, cache reads excluded), resolved daemon-side.
-   * The footer's token cell renders and HEATS this figure, and it is the same
-   * measure `uncachedInputTokens` (tokens.ts) computes for the response
-   * bubble's stamp, so the live cell converges on the stamp it becomes.
+   * THIS turn's cumulative EXPENSIVE input tokens, resolved daemon-side: the
+   * canonical TokenUsage.input_misses total, cache reads excluded. The footer's
+   * token cell renders and HEATS this figure, and it is the same measure
+   * `expensiveInput` (tokens.ts) reads off the response bubble's own record, so
+   * the live cell converges on the stamp it becomes.
    */
   inputTokens: number;
   ttftMs: number;
