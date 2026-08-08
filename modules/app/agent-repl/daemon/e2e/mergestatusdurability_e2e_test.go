@@ -81,11 +81,16 @@ func TestE2EMergePipelineStatusStreamResumesAfterADaemonBounce(t *testing.T) {
 	_ = firstConn.Close()
 	first.bounce()
 
-	resolveConflict(t, repo, "resolved by the acceptance gate\n")
 	second := bootMergeDaemon(t, stateFile)
 	secondConn := second.dialFrontend(t)
 	defer secondConn.Close()
 	w2 := newMergeWatch(t, secondConn)
+	// AMENDED for the rebase pipeline, exactly as its sibling in
+	// mergedurability was: the boot replay re-parks the conflict in a fresh
+	// rebase worktree, so the resolution waits for that park and is written
+	// there. Every assertion below is unchanged.
+	w2.awaitStatusArm(parkedDir, armConflict)
+	resolveConflict(t, repo, "resolved by the acceptance gate\n")
 	sendMergeResume(t, secondConn, "r-status-resume-parked", parkedCmd)
 	w2.awaitOKAck("r-status-resume-parked")
 	w2.awaitStatusArm(parkedDir, armMerged)
