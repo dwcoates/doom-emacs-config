@@ -617,6 +617,33 @@ type sessionController struct {
 	// the next ping's turn end as though it were that ping's own. Read and
 	// written only under Manager.mu (keepalivecold.go).
 	keepAlivePing *keepAlivePingMeasurement
+	// daemonCompaction is the DAEMON-INITIATED compaction in flight for this
+	// session — a warm pre-expiry one or a compact-first revival's own — and nil
+	// when none is. It is what the cold-read alarm matches a terminal result
+	// against, and what stops a warm compaction being submitted twice for one
+	// cache window. Read and written only under Manager.mu (compactioncold.go).
+	daemonCompaction *daemonCompaction
+	// warmCompactAnchorMs is the durable last-turn-end the most recent warm
+	// compaction ATTEMPT was decided against, zero when none has been made.
+	//
+	// It is the exactly-once guarantee for one cache window. The warm-compaction
+	// arm is due across a whole span of elapsed idleness, which the idle sweeper
+	// crosses many times; a successful compaction ends a turn and moves the
+	// anchor forward on its own, but a failed one does not, and without this the
+	// same failure would be re-attempted every tick until the cache died. Read
+	// and written only under Manager.mu (warmcompact.go).
+	warmCompactAnchorMs int64
+	// lastContextInputTokens is the TOTAL input the session's most recent
+	// terminal result presented to the model: the uncached buckets plus the
+	// cache read. It is the only figure this daemon holds about how big the
+	// standing conversation actually is, and it is what the warm-compaction size
+	// floor is judged against — compacting a small conversation costs a
+	// full-history model call and buys back nothing (warmcompact.go).
+	//
+	// Zero means NO RESULT HAS BEEN OBSERVED in this daemon's lifetime for this
+	// session, which is an unknown and not a small conversation. Every unknown
+	// answers none. Read and written only under Manager.mu.
+	lastContextInputTokens int64
 	// runningText is the prompt that started the turn now in flight, as far as
 	// this daemon saw it. It is the classifier's "what is already running"
 	// context, and is empty when the turn predates this daemon.
@@ -2310,13 +2337,16 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 			m.cfg.Hibernations.TurnEndObserved(sessionID, atMs)
 		}
 	}
-	// THE KEEP-ALIVE PING'S OWN VERDICT on the cache it was sent to refresh.
-	// Bound before Run, so a ping's terminal result can never reach the consumer
-	// with nothing to latch it in: the result is the ONE observation the feature
-	// makes about its own premise, and it arrives exactly once
-	// (keepalivecold.go).
-	cons.onTurnResultCost = func(turnID string, uncachedInputTokens int64) {
-		m.noteKeepAlivePingCost(d, turnID, uncachedInputTokens)
+	// WHAT EVERY TURN'S TERMINAL RESULT MEASURED, routed to the three decisions
+	// that read it: the keep-alive ping's own verdict on the cache it was sent
+	// to refresh (keepalivecold.go), the daemon compaction's cold-read alarm
+	// (compactioncold.go), and the conversation size the warm-compaction floor
+	// is judged against (warmcompact.go). Bound before Run, so a result can
+	// never reach the consumer with nothing to latch it in: for the ping it is
+	// the ONE observation the feature makes about its own premise, and it
+	// arrives exactly once.
+	cons.onTurnResultCost = func(cost turnResultCost) {
+		m.noteTurnResultCost(d, cost)
 	}
 	// Every PERSISTENT store event names the conversation it belongs to.
 	// Keeping the record current off the live stream is what gives a later

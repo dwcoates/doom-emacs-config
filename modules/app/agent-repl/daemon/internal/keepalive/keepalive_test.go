@@ -32,9 +32,13 @@ func TestEvaluateAction(t *testing.T) {
 			wantAction:    ActionNone,
 		},
 		{
-			name:          "one millisecond before the window opens does not ping",
+			// AMENDED for warm compaction. What this row has always been about —
+			// this instant is not a ping — is unchanged; the instant now falls
+			// inside the warm-compaction span, which by construction ends
+			// exactly where the ping window begins.
+			name:          "one millisecond before the ping window opens warm-compacts rather than pinging",
 			lastTurnEndMs: msAgo(DefaultCacheTTL - DefaultLeeway - time.Millisecond),
-			wantAction:    ActionNone,
+			wantAction:    ActionWarmCompact,
 		},
 		{
 			name:          "the instant the window opens pings",
@@ -284,5 +288,110 @@ func TestSweepInterval(t *testing.T) {
 				t.Fatalf("SweepInterval(%s) = %s, want %s", tc.existing, got, tc.want)
 			}
 		})
+	}
+}
+
+// THE WARM-COMPACTION INSTANT IS ANCHORED ON THE LAST SUBMITTABLE ONE. It is
+// WarmCompactMargin ahead of CacheTTL-RetryFloor, which is where the policy
+// stops submitting anything at all — not ahead of the ping window's opening
+// edge, which moves with Leeway and says nothing about remaining cache life.
+func TestWarmCompactAtIsTheMarginAheadOfTheLastSubmittableInstant(t *testing.T) {
+	// Arrange.
+	cfg := DefaultConfig()
+
+	// Act.
+	got := cfg.WarmCompactAt()
+
+	// Assert.
+	want := cfg.CacheTTL - RetryFloor - WarmCompactMargin
+	if got != want {
+		t.Fatalf("WarmCompactAt() = %s, want %s (TTL %s less the %s floor and the %s margin)",
+			got, want, cfg.CacheTTL, RetryFloor, WarmCompactMargin)
+	}
+}
+
+// THE WARM COMPACTION IS DUE AT ITS OWN INSTANT AND NOT ONE MILLISECOND
+// EARLIER. Both edges are asserted because a decision taken early is a
+// compaction submitted with more cache life left than the policy claims, and
+// one taken late is the feature silently not existing.
+func TestEvaluateWarmCompactsFromItsDueInstant(t *testing.T) {
+	cfg := DefaultConfig()
+	const now = int64(10_000_000_000)
+	msAgo := func(d time.Duration) int64 { return now - int64(d/time.Millisecond) }
+
+	tests := []struct {
+		name string
+		idle time.Duration
+		want Action
+	}{
+		{
+			name: "one millisecond before the warm-compaction instant does nothing",
+			idle: cfg.WarmCompactAt() - time.Millisecond,
+			want: ActionNone,
+		},
+		{
+			name: "exactly at the warm-compaction instant compacts",
+			idle: cfg.WarmCompactAt(),
+			want: ActionWarmCompact,
+		},
+		{
+			name: "inside the span and short of the ping window still compacts",
+			idle: cfg.CacheTTL - cfg.Leeway - time.Second,
+			want: ActionWarmCompact,
+		},
+		{
+			name: "the ping window's opening edge pings rather than compacting",
+			idle: cfg.CacheTTL - cfg.Leeway,
+			want: ActionPing,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got := cfg.Evaluate(now, msAgo(tc.idle))
+
+			// Assert.
+			if got.Action != tc.want {
+				t.Fatalf("Evaluate(idle=%s) = %s, want %s", tc.idle, got.Action, tc.want)
+			}
+		})
+	}
+}
+
+// A CACHE TTL WITH NO ROOM FOR A WARM COMPACTION IS REFUSED AT STARTUP rather
+// than silently running a policy whose compaction arm can never be reached.
+func TestValidateRefusesACacheTTLWithNoWarmCompactionInstant(t *testing.T) {
+	// Arrange: a TTL shorter than the floor plus the margin puts the instant at
+	// or before the turn that opened the window.
+	cfg := DefaultConfig()
+	cfg.CacheTTL = RetryFloor + WarmCompactMargin
+	cfg.Leeway = 30 * time.Second
+
+	// Act.
+	err := cfg.Validate()
+
+	// Assert.
+	if err == nil {
+		t.Fatalf("Validate() accepted a %s cache TTL, which leaves no warm-compaction instant at all", cfg.CacheTTL)
+	}
+}
+
+// A LEEWAY WIDE ENOUGH TO SWALLOW THE WARM COMPACTION IS REFUSED AT STARTUP.
+// The ping arm is tested first, so a compaction due at or after the ping window
+// opens is one no session could ever reach — a silently inert feature, which is
+// exactly what the startup refusal exists to prevent.
+func TestValidateRefusesALeewayThatSwallowsTheWarmCompaction(t *testing.T) {
+	// Arrange.
+	cfg := DefaultConfig()
+	cfg.Leeway = RetryFloor + WarmCompactMargin
+
+	// Act.
+	err := cfg.Validate()
+
+	// Assert.
+	if err == nil {
+		t.Fatalf("Validate() accepted a %s leeway against a %s floor and a %s margin; the ping arm would swallow every warm compaction",
+			cfg.Leeway, RetryFloor, WarmCompactMargin)
 	}
 }
