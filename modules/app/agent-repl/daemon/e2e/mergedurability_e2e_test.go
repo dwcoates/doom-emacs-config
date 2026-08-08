@@ -287,11 +287,17 @@ func TestE2EAQueuedMergeSurvivesADaemonBounce(t *testing.T) {
 	_ = firstConn.Close()
 	first.bounce()
 
-	resolveConflict(t, repo, "resolved by the e2e harness\n")
 	second := bootMergeDaemon(t, stateFile)
 	secondConn := second.dialFrontend(t)
 	defer secondConn.Close()
 	w2 := newMergeWatch(t, secondConn)
+	// AMENDED for the rebase pipeline: the rebase worktree the conflict was
+	// parked in died with the first daemon, so the boot replay re-parks the
+	// conflict in a FRESH one, and the resolution has to wait for it and be
+	// written there. The guarantee under test is untouched — the QUEUED entry
+	// nobody re-submits drains on the far side of a bounce.
+	w2.awaitPhase(parkedDir, phaseMergeConflict)
+	resolveConflict(t, repo, "resolved by the e2e harness\n")
 	sendMergeResume(t, secondConn, "r-resume-parked", parkedCmd)
 	w2.awaitOKAck("r-resume-parked")
 	w2.awaitPhase(parkedDir, phaseMerged)
@@ -323,7 +329,35 @@ func TestE2EAQueuedMergeSurvivesADaemonBounce(t *testing.T) {
 // continue. It deliberately does NOT stage the file — `git add -u` is
 // merge.Driver.Resume's own first step, and doing it here would hide a
 // regression in that step.
+//
+// AMENDED for the rebase pipeline: it writes into the REBASE WORKTREE, because
+// that is where the conflict is. The pipeline replays commits in a temporary
+// worktree and touches the target exactly once, at the end, so a resolution
+// written into the target would resolve nothing and would additionally leave
+// the target dirty for the merge commit that follows.
 func resolveConflict(t *testing.T, repo *mergeRepo, content string) {
 	t.Helper()
-	writeMergeFile(t, repo.target, "shared.txt", content)
+	writeMergeFile(t, rebaseWorktreeOf(t, repo), "shared.txt", content)
+}
+
+// rebaseWorktreeOf finds the temporary rebase worktree a parked merge is
+// holding open in repo, by asking git which worktrees the repository has.
+//
+// IT INSISTS ON EXACTLY ONE. Zero means no merge is parked (so a test about to
+// resolve a conflict is about to resolve nothing), and more than one means a
+// previous run leaked its tree — either is a fixture that would make the
+// assertion after it meaningless.
+func rebaseWorktreeOf(t *testing.T, repo *mergeRepo) string {
+	t.Helper()
+	var found []string
+	for _, line := range strings.Split(mergeGit(t, repo.target, "worktree", "list", "--porcelain"), "\n") {
+		path, ok := strings.CutPrefix(strings.TrimSpace(line), "worktree ")
+		if ok && strings.Contains(path, "agent-repl-merge-rebase-") {
+			found = append(found, path)
+		}
+	}
+	if len(found) != 1 {
+		t.Fatalf("the repository has %d rebase worktrees (%v), want exactly the one a parked merge holds open", len(found), found)
+	}
+	return found[0]
 }
