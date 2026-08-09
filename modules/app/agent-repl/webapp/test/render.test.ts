@@ -49,6 +49,9 @@ import { DEFERRED_CLASS, HEIGHT_VAR, PLACEHOLDER_CLASS } from "../src/lazy-item.
 import { StubIntersectionObserver, withIntersectionObserver } from "./intersection-stub.js";
 import { META_CLOSE, META_OPEN } from "../src/meta.js";
 import { AsyncSource } from "../src/protocol.js";
+import type { UnwrappedEmission } from "../src/agent-emission.js";
+import type { AsyncBubble } from "../src/async-bubble.js";
+import { AsyncBubbleRegistry } from "../src/async-routing.js";
 import {
   ContextClearedItem,
   ContextCompactedItem,
@@ -4552,6 +4555,9 @@ function watcher(taskId = "bg1", over: Partial<ToolItem> = {}): ToolItem {
     inputJson: "{}",
     input: { command: "poll.sh" },
     inputDone: true,
+    // THE CLASSIFICATION VERDICT is what makes this a member now — the result
+    // prose below is spool evidence the card renders, never an identity.
+    spawnedBubbleId: taskId,
     result: { isError: false, content: `Command running in background with ID: ${taskId}. Output is being written to: /tmp/claude-1/s/tasks/${taskId}.output` },
     ...over,
   };
@@ -6207,5 +6213,105 @@ describe("FeedRenderer: defers the heavy render of off-tail replay", () => {
     feed.render(state);
     // Assert — a permanent placeholder would be worse than the cost it saves.
     expect(container.querySelectorAll(`.${PLACEHOLDER_CLASS}`).length).toBe(0);
+  });
+});
+
+// --- async bubbles attached to their originating tool card ------------------
+
+describe("a tool card's detached work", () => {
+  /** A registry holding BUBBLES, opened through the normal push path. */
+  function registryOf(...bubbles: AsyncBubble[]): AsyncBubbleRegistry {
+    const registry = new AsyncBubbleRegistry();
+    registry.applyDelta({ workspace: "/w", opened: bubbles, updates: [], throughSeq: 1, fence: "f" });
+    return registry;
+  }
+
+  const LIVE = { case: "live", value: { lastActivityMs: 0 } } as const;
+
+  function agentBubble(id: string, emissions: UnwrappedEmission[] = []): AsyncBubble {
+    return {
+      id,
+      originToolUseId: "w1",
+      parentBubbleId: "",
+      label: "detached work",
+      startedAtMs: 0,
+      liveness: LIVE,
+      kind: { case: "agent", value: { emissions, fold: { droppedBefore: 0, tailCap: 0 } } },
+    };
+  }
+
+  /** A spawning card carrying the daemon's verdict, plus the registry to match in. */
+  function panelsWith(registry: AsyncBubbleRegistry, open: readonly string[] = []): PanelContext {
+    return { children: new Map(), isOpen: (id) => open.includes(id), asyncBubbles: registry };
+  }
+
+  it("draws the bubble its verdict names, attached to the card", () => {
+    // Arrange
+    const item = { ...watcher("bg1"), spawnedBubbleId: "b1" };
+    const registry = registryOf(agentBubble("b1"));
+
+    // Act
+    const html = renderItem(item, undefined, undefined, panelsWith(registry));
+
+    // Assert
+    expect(html).toContain("detached work");
+  });
+
+  it("attaches by origin_tool_use_id, the other end of the same daemon fact", () => {
+    // Arrange — no verdict on the card; the BUBBLE names the call instead.
+    const item = { ...watcher("bg1"), spawnedBubbleId: undefined };
+    const registry = registryOf(agentBubble("b1"));
+
+    // Act
+    const html = renderItem(item, undefined, undefined, panelsWith(registry));
+
+    // Assert — w1 is the card's toolUseId and the bubble's originToolUseId.
+    expect(html).toContain("detached work");
+  });
+
+  it("draws no bubble for a card whose call detached nothing", () => {
+    // Arrange — no verdict on the card AND no bubble naming it, which together
+    // are the only reading of "detached nothing".
+    const item = { ...watcher("bg1"), spawnedBubbleId: undefined };
+    const registry = registryOf({ ...agentBubble("b1"), originToolUseId: "someone-else" });
+
+    // Act
+    const html = renderItem(item, undefined, undefined, panelsWith(registry));
+
+    // Assert
+    expect(html).not.toContain("detached work");
+  });
+
+  it("draws no bubble when the page holds no registry to match against", () => {
+    // Arrange
+    const item = { ...watcher("bg1"), spawnedBubbleId: "b1" };
+
+    // Act
+    const html = renderItem(item, undefined, undefined, { children: new Map(), isOpen: () => false });
+
+    // Assert — no bubble fold is mounted; the card's own legacy stream fold
+    // (keyed `async:<toolUseId>`) is a different thing and is unaffected.
+    expect(html).not.toContain('data-panel-toggle="bubble:b1"');
+  });
+
+  it("renders a detached agent's emissions with the FEED's own item renderer", () => {
+    // Arrange — one assistant text block, the shape the top-level feed draws
+    // as a purple bubble. Nothing here is bubble-specific.
+    const emissions: UnwrappedEmission[] = [
+      {
+        emission: "response",
+        arm: "assistantMessage",
+        payload: { id: "m9", content: [{ text: { text: "from the detached agent" } }] },
+      },
+    ];
+    const registry = registryOf(agentBubble("b1", emissions));
+    const item = { ...watcher("bg1"), spawnedBubbleId: "b1" };
+
+    // Act — the bubble's fold open, so its body is mounted.
+    const html = renderItem(item, undefined, undefined, panelsWith(registry, ["bubble:b1"]));
+
+    // Assert — the feed's own .feed-child shell around the feed's own bubble.
+    expect(html).toContain("from the detached agent");
+    expect(html).toContain('<div class="feed-child">');
   });
 });

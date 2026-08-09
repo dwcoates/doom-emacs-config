@@ -120,7 +120,6 @@ import {
   WorkspaceGateViewSchema,
 } from "../../proto/gen/ts/agentshim/frontend/v1/gate-revival_pb";
 import { FooterFailureRowSchema } from "../../proto/gen/ts/agentshim/frontend/v1/footer_pb";
-import { ResponseUsageStampSchema } from "../../proto/gen/ts/agentshim/frontend/v1/response-bubble_pb";
 import { fromJson, toJson, type JsonValue } from "@bufbuild/protobuf";
 import {
   FAILURE_CARD_LIFECYCLE_ARM,
@@ -135,6 +134,26 @@ import {
   QUEUE_HOLD_ARM,
   REVIVAL_HOLD_FIELDS,
 } from "./proto-names.js";
+import {
+  decodeAsyncBubble,
+  decodeAsyncBubbleDelta,
+  type AsyncBubble,
+  type AsyncBubbleDelta,
+} from "./async-bubble.js";
+import { unwrapAgentEmission, type ResponseUsageStamp } from "./agent-emission.js";
+import {
+  EMPTY_KEY_SET,
+  bool,
+  ensureArray,
+  ensureObject,
+  generatedFieldSet,
+  int64,
+  num,
+  oneof,
+  rejectUnknown,
+  str,
+  type Obj,
+} from "./proto-scalars.js";
 import { ApiUsageSchema } from "../../proto/gen/ts/agentshim/data/v1/tools_pb";
 import {
   AccountUsageAvailableSchema,
@@ -149,13 +168,6 @@ import {
   type EvidenceFingerprint as GeneratedEvidenceFingerprint,
   type QueryRuntimeIdentity as GeneratedQueryRuntimeIdentity,
 } from "../../proto/gen/ts/agentshim/core/v1/core_pb";
-
-/** Exact generated field lists: omission and invention are both type errors. */
-function generatedFieldSet<Fields extends string>() {
-  return <const Keys extends readonly Fields[]>(
-    ...keys: Keys & (Exclude<Fields, Keys[number]> extends never ? unknown : ["missing generated field", Exclude<Fields, Keys[number]>])
-  ): ReadonlySet<string> => new Set<string>(keys);
-}
 
 // --- enums ------------------------------------------------------------------
 
@@ -688,6 +700,12 @@ export const CONVERSATION_ITEM_ARMS = [
   "failureCard",
   "skillBody",
   "sessionCommand",
+  // A piece of DETACHED WORK, anchored in the feed at the point it was
+  // launched. What rides here is the bubble's OPENING state; everything it
+  // produces afterwards arrives as `AsyncBubbleUpdate` on its own delta, so a
+  // detached agent emitting a thousand lines inserts ONE row here, not a
+  // thousand.
+  "asyncBubble",
 ] as const;
 export type ConversationItemArm = (typeof CONVERSATION_ITEM_ARMS)[number];
 
@@ -815,6 +833,29 @@ export interface ConversationItemFrame {
    * renders no figures rather than zeros.
    */
   usageStamp?: ResponseUsageStamp;
+  /**
+   * THE CLASSIFICATION VERDICT this item published: the id of the
+   * `AsyncBubble` its tool call detached, as the DAEMON resolved it
+   * (`AgentToolCall.spawned_bubble_id` / `AgentToolOutcome.spawned_bubble_id`).
+   *
+   * Present only on the `toolUse`/`toolUseResult` arms, and only when the
+   * daemon actually set it. ABSENT means "this call detached nothing", and
+   * that is the ONLY reading of absent. A frontend MATCHES this string against
+   * `AsyncBubble.id`; it never derives one, because the evidence a derivation
+   * would read is a mix of tool metadata, completion notifications and
+   * free-text prose that two frontends would eventually read differently.
+   */
+  spawnedBubbleId?: string;
+  /**
+   * The DETACHED WORK this item anchors, decoded. Present exactly on the
+   * `asyncBubble` arm.
+   *
+   * Decoded here rather than left in `payload` because `AsyncBubble` is a
+   * `frontend.v1`-owned message — the strict half of the validation contract —
+   * so it gets the same loud treatment every other frontend-owned message
+   * does, instead of the by-shape adoption reserved for data.v1 payloads.
+   */
+  asyncBubble?: AsyncBubble;
 }
 
 /** Durable evidence used to compare one completed turn with another client. */
@@ -1252,6 +1293,15 @@ export interface StateSnapshot {
   daemon?: DaemonView;
   /** Retained per-session SystemInits (S9); absent on a pre-S9 daemon. */
   inits: SessionInitView[];
+  /**
+   * Every async bubble the session still holds, FOLDED TO DATE, so a
+   * reconnecting client resumes detached work rather than re-deriving it.
+   *
+   * A bubble here REPLACES whatever copy the client already had: the snapshot
+   * is the daemon's complete statement, and merging it with stale local state
+   * would produce a fold neither end vouches for.
+   */
+  asyncBubbles: AsyncBubble[];
   /** Each live session's held-prompt queue (E4); empty on a pre-E4 daemon. */
   queues: QueueView[];
   /** Each workspace's resolved progress view (F1); empty on a pre-F1 daemon. */
@@ -1692,20 +1742,11 @@ export interface FooterFailureRow {
   card?: FailureCardRef;
 }
 
-/**
- * The figures an assistant bubble's corner renders, resolved daemon-side.
- *
- * ABSENCE IS ABSENCE: a response that carried no usage record has no stamp, and
- * the bubble then renders NO figures. Zeros are never fabricated in its place.
- */
-export interface ResponseUsageStamp {
-  /** The headline: canonical `input_misses` total (written + unwritten). */
-  expensiveInputTokens: number;
-  cacheReadTokens: number;
-  outputTokens: number;
-  /** Display form; empty for synthetic records (never fabricated). */
-  model: string;
-}
+// `ResponseUsageStamp` and its decoder live in `agent-emission.ts`, because the
+// stamp rides the `AgentResponse` envelope and a DETACHED agent's responses
+// carry the same one. Re-exported here so this module stays the single import
+// surface every frontend.v1 consumer already reads.
+export { decodeResponseUsageStamp, type ResponseUsageStamp } from "./agent-emission.js";
 
 /** The push-channel oneof wrapper (FrontendFrame.frame). */
 export type FrontendFrame = {
@@ -1714,6 +1755,7 @@ export type FrontendFrame = {
     | { case: "workspaceState"; value: WorkspaceState }
     | { case: "sessionView"; value: SessionView }
     | { case: "conversationDelta"; value: ConversationDelta }
+    | { case: "asyncBubbleDelta"; value: AsyncBubbleDelta }
     | { case: "typingDelta"; value: TypingDelta }
     | { case: "taskCatalog"; value: TaskCatalog }
     | { case: "commandAck"; value: CommandAck }
@@ -1784,7 +1826,6 @@ function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-type Obj = Record<string, unknown>;
 
 /** Decode ONE raw protojson `FrontendFrame` string, validating loudly. */
 export function decodeFrontendFrame(json: string): FrontendFrame {
@@ -1827,6 +1868,7 @@ const FRAME_DECODERS: ReadonlyMap<string, (v: unknown) => FrontendFrame["frame"]
   ["workspaceState", (v: unknown) => ({ case: "workspaceState" as const, value: decodeWorkspaceState(v) })],
   ["sessionView", (v: unknown) => ({ case: "sessionView" as const, value: decodeSessionView(v) })],
   ["conversationDelta", (v: unknown) => ({ case: "conversationDelta" as const, value: decodeConversationDelta(v) })],
+  ["asyncBubbleDelta", (v: unknown) => ({ case: "asyncBubbleDelta" as const, value: decodeAsyncBubbleDelta(v) })],
   ["typingDelta", (v: unknown) => ({ case: "typingDelta" as const, value: decodeTypingDelta(v) })],
   ["taskCatalog", (v: unknown) => ({ case: "taskCatalog" as const, value: decodeTaskCatalog(v) })],
   ["commandAck", (v: unknown) => ({ case: "commandAck" as const, value: decodeCommandAck(v) })],
@@ -2365,85 +2407,14 @@ const CONVERSATION_ITEM_ARM_SET: ReadonlySet<string> = new Set(CONVERSATION_ITEM
 const AGENT_EMISSION_ENVELOPE = "agent";
 
 /**
- * `AgentEmission` arm key → the flat decoded arm it unwraps to, and the field
- * of the emission that carries the payload the adapter reads.
- *
- * `usageStamp` on an `AgentResponse` IS carried through, beside the payload
- * rather than inside it (see `ConversationItemFrame.usageStamp`): it is a
- * daemon-resolved figure for the bubble's corner, and the response BODY is
- * verbatim durable evidence that must not grow a field the vendor never sent.
+ * `agent-emission.ts` owns the emission unwrap, because a DETACHED agent's
+ * emissions are the SAME message and must be read by the same code (see that
+ * module's header). Its `AgentEmissionArm` is structurally a subset of
+ * `ConversationItemArm`, which the assignment in `decodeConversationItem`
+ * below type-checks: an emission arm that stopped being a conversation item
+ * fails this build rather than reaching the adapter's switch as an unhandled
+ * string.
  */
-const AGENT_EMISSION_ARMS: Readonly<Record<string, { arm: ConversationItemArm; body: string }>> = {
-  response: { arm: "assistantMessage", body: "body" },
-  thinking: { arm: "thinking", body: "body" },
-  toolCall: { arm: "toolUse", body: "call" },
-  toolResult: { arm: "toolResult", body: "result" },
-  toolOutcome: { arm: "toolUseResult", body: "structured" },
-  skillBody: { arm: "skillBody", body: "" },
-  turnResult: { arm: "result", body: "" },
-};
-
-/**
- * Unwrap the `agent` envelope into one flat arm + its payload.
- *
- * The emission oneof is validated STRICTLY here — an empty, multiple or
- * unrecognized arm throws — because it is a `frontend.v1`-owned message. Only
- * the payload BELOW it is adopted by shape.
- */
-function unwrapAgentEmission(
-  v: unknown,
-  ctx: string,
-): {
-  arm: ConversationItemArm;
-  payload: JsonObject;
-  thinkingOrigin?: { apiMessageId: string; blockIndex: number };
-  usageStamp?: ResponseUsageStamp;
-} {
-  const emission = ensureObject(v, `${ctx}.agent`);
-  const keys = Object.keys(emission);
-  if (keys.length === 0) {
-    throw new Error(`frontend-proto: ${ctx}.agent carries no emission (empty oneof)`);
-  }
-  if (keys.length > 1) {
-    throw new Error(`frontend-proto: ${ctx}.agent sets multiple emissions: ${keys.join(", ")}`);
-  }
-  const mapped = AGENT_EMISSION_ARMS[keys[0]];
-  if (mapped === undefined) {
-    throw new Error(`frontend-proto: ${ctx}.agent has unrecognized emission '${keys[0]}'`);
-  }
-  const value = ensureObject(emission[keys[0]], `${ctx}.agent.${keys[0]}`);
-  // An emission whose whole content IS the payload (skillBody, turnResult)
-  // names no inner field; the others wrap theirs one level down.
-  const payload = mapped.body === "" ? value : ensureObject(value[mapped.body], `${ctx}.agent.${keys[0]}.${mapped.body}`);
-  if (mapped.arm === "thinking") {
-    // The emission's statement about the block it carries: the message it was
-    // stripped from and the position it held there. Carried up beside the
-    // payload; see `ConversationItemFrame.thinkingOrigin`.
-    return {
-      arm: mapped.arm,
-      payload,
-      thinkingOrigin: {
-        apiMessageId: str(value, "apiMessageId", `${ctx}.agent.thinking`),
-        blockIndex: num(value, "blockIndex", `${ctx}.agent.thinking`),
-      },
-    };
-  }
-  if (mapped.arm === "assistantMessage") {
-    // ABSENT STAMP STAYS ABSENT. A response that carried no usage record gets
-    // no stamp field here, and the bubble corner then renders no figures —
-    // never zeros, which would read as a response that cost nothing.
-    const stamp = value.usageStamp;
-    if (stamp !== undefined && stamp !== null) {
-      return {
-        arm: mapped.arm,
-        payload,
-        usageStamp: decodeResponseUsageStamp(stamp, `${ctx}.agent.response.usageStamp`),
-      };
-    }
-  }
-  return { arm: mapped.arm, payload };
-}
-
 function decodeConversationItem(v: unknown, i: number): ConversationItemFrame {
   const ctx = `ConversationItem[${i}]`;
   const o = ensureObject(v, ctx);
@@ -2466,8 +2437,14 @@ function decodeConversationItem(v: unknown, i: number): ConversationItemFrame {
   if (armKeys.length > 1) {
     throw new Error(`frontend-proto: ${ctx} sets multiple item variants: ${armKeys.join(", ")}`);
   }
-  const selected = armKeys[0] === AGENT_EMISSION_ENVELOPE
-    ? unwrapAgentEmission(o[AGENT_EMISSION_ENVELOPE], ctx)
+  const selected: {
+    arm: ConversationItemArm;
+    payload: JsonObject;
+    thinkingOrigin?: { apiMessageId: string; blockIndex: number };
+    spawnedBubbleId?: string;
+    usageStamp?: ResponseUsageStamp;
+  } = armKeys[0] === AGENT_EMISSION_ENVELOPE
+    ? unwrapAgentEmission(o[AGENT_EMISSION_ENVELOPE], `${ctx}.agent`)
     // Adopt the typed payload by shape (see file-top §5.1 boundary note).
     : { arm: armKeys[0] as ConversationItemArm, payload: ensureObject(o[armKeys[0]], `${ctx}.${armKeys[0]}`) };
   const arm = selected.arm;
@@ -2481,26 +2458,31 @@ function decodeConversationItem(v: unknown, i: number): ConversationItemFrame {
     tokenUtilization: o.tokenUtilization === undefined ? [] : ensureArray(o.tokenUtilization, `${ctx}.tokenUtilization`).map((entry, index) => decodeTokenUtilization(entry, `${ctx}.tokenUtilization[${index}]`)),
   };
   if (selected.thinkingOrigin !== undefined) frame.thinkingOrigin = selected.thinkingOrigin;
+  // The RESOLVED figures for this response's bubble corner. ABSENT STAYS
+  // ABSENT: a response that carried no usage record gets no stamp, and the
+  // corner then renders no figures rather than zeros.
   if (selected.usageStamp !== undefined) frame.usageStamp = selected.usageStamp;
+  // THE CLASSIFICATION VERDICT, carried through whole. A tool card learns the
+  // bubble it spawned by MATCHING this string against `AsyncBubble.id`; it
+  // never derives one. Empty means "this call detached nothing", so it is
+  // carried only when the daemon actually set it — an empty string on the
+  // frame would be indistinguishable from an arm that cannot carry a verdict
+  // at all.
+  if (selected.spawnedBubbleId !== undefined && selected.spawnedBubbleId !== "") {
+    frame.spawnedBubbleId = selected.spawnedBubbleId;
+  }
+  // A bubble ANCHORED in the feed at the point its work was launched. Decoded
+  // eagerly and strictly (it is a frontend.v1-owned message, not an adopted
+  // data.v1 payload), and carried decoded so no consumer re-parses the raw
+  // JSON the payload still holds.
+  if (arm === "asyncBubble") {
+    frame.asyncBubble = decodeAsyncBubble(selected.payload, `${ctx}.asyncBubble`);
+  }
   if (o.turnAccounting !== undefined) {
     if (arm !== "result") throw new Error(`frontend-proto: ${ctx}.turnAccounting is valid only on result`);
     frame.turnAccounting = decodeTurnAccounting(o.turnAccounting, `${ctx}.turnAccounting`);
   }
   return frame;
-}
-
-function int64(o: JsonObject, key: string, where: string): number {
-  const value = o[key];
-  if (typeof value !== "string" && typeof value !== "number") throw new Error(`frontend-proto: ${where}.${key} must be an int64 string`);
-  const parsed = Number(value);
-  if (!Number.isSafeInteger(parsed)) throw new Error(`frontend-proto: ${where}.${key} must be a safe integer`);
-  return parsed;
-}
-
-function oneof(o: JsonObject, keys: readonly string[], where: string): string {
-  const found = keys.filter((key) => o[key] !== undefined);
-  if (found.length !== 1) throw new Error(`frontend-proto: ${where} requires exactly one of ${keys.join(", ")}`);
-  return found[0];
 }
 
 const FINGERPRINT_KEYS = generatedFieldSet<keyof typeof EvidenceFingerprintSchema.field>()("sha256", "unavailable");
@@ -3657,6 +3639,7 @@ const STATE_SNAPSHOT_KEYS = new Set([
   "catalogs",
   "daemon",
   "inits",
+  "asyncBubbles",
   "queues",
   "progress",
   "workspaceAvailable",
@@ -3686,6 +3669,10 @@ function decodeStateSnapshot(v: unknown): StateSnapshot {
       ? []
       : ensureArray(o.inits, "StateSnapshot.inits")
     ).map(decodeSessionInitView),
+    asyncBubbles: (o.asyncBubbles === undefined || o.asyncBubbles === null
+      ? []
+      : ensureArray(o.asyncBubbles, "StateSnapshot.asyncBubbles")
+    ).map((b, i) => decodeAsyncBubble(b, `StateSnapshot.asyncBubbles[${i}]`)),
     queues: (o.queues === undefined || o.queues === null
       ? []
       : ensureArray(o.queues, "StateSnapshot.queues")
@@ -4020,9 +4007,6 @@ function decodeRosterRowStatus(o: Obj, ctx: string): RosterRow["status"] {
   rejectUnknown(ensureObject(o[arm], `${ctx}.${arm}`), EMPTY_KEY_SET, `${ctx}.${arm}`);
   return { case: arm };
 }
-
-/** The allowed-key set for a message with no fields at all. */
-const EMPTY_KEY_SET: ReadonlySet<string> = new Set<string>();
 
 // --- resolved component views ------------------------------------------------
 //
@@ -4412,84 +4396,6 @@ export function decodeFooterFailureRow(v: unknown, where: string): FooterFailure
     row.card = decodeFailureCardRef(o.card, `${where}.card`);
   }
   return row;
-}
-
-const RESPONSE_USAGE_STAMP_KEYS = generatedFieldSet<
-  keyof typeof ResponseUsageStampSchema.field
->()("expensiveInputTokens", "cacheReadTokens", "outputTokens", "model");
-
-/**
- * Decode a `ResponseUsageStamp`.
- *
- * Called only where the wire CARRIES one. An absent stamp is never synthesized
- * here — the caller keeps the absence, and the bubble corner renders nothing,
- * because zeros would read as a response that cost nothing.
- */
-export function decodeResponseUsageStamp(v: unknown, where: string): ResponseUsageStamp {
-  const o = ensureObject(v, where);
-  rejectUnknown(o, RESPONSE_USAGE_STAMP_KEYS, where);
-  return {
-    expensiveInputTokens: num(o, "expensiveInputTokens", where),
-    cacheReadTokens: num(o, "cacheReadTokens", where),
-    outputTokens: num(o, "outputTokens", where),
-    model: str(o, "model", where),
-  };
-}
-
-// --- primitive readers (loud, protojson-aware) ------------------------------
-
-function ensureObject(v: unknown, ctx: string): Obj {
-  if (typeof v !== "object" || v === null || Array.isArray(v)) {
-    throw new Error(`frontend-proto: ${ctx} must be a JSON object`);
-  }
-  return v as Obj;
-}
-
-function ensureArray(v: unknown, ctx: string): unknown[] {
-  if (!Array.isArray(v)) {
-    throw new Error(`frontend-proto: ${ctx} must be a JSON array`);
-  }
-  return v;
-}
-
-function rejectUnknown(o: Obj, allowed: ReadonlySet<string>, ctx: string): void {
-  const bad = Object.keys(o).filter((k) => !allowed.has(k));
-  if (bad.length > 0) {
-    throw new Error(`frontend-proto: ${ctx} has unrecognized field(s): ${bad.join(", ")}`);
-  }
-}
-
-function str(o: Obj, key: string, ctx: string): string {
-  const v = o[key];
-  if (v === undefined || v === null) return "";
-  if (typeof v !== "string") {
-    throw new Error(`frontend-proto: ${ctx}.${key} must be a string (got ${typeof v})`);
-  }
-  return v;
-}
-
-/** A proto3 numeric scalar: a JSON number, or (int64/uint64) a numeric string. */
-function num(o: Obj, key: string, ctx: string): number {
-  const v = o[key];
-  if (v === undefined || v === null) return 0;
-  if (typeof v === "number") return v;
-  if (typeof v === "string") {
-    const n = Number(v);
-    if (!Number.isFinite(n)) {
-      throw new Error(`frontend-proto: ${ctx}.${key} is not a numeric string ('${v}')`);
-    }
-    return n;
-  }
-  throw new Error(`frontend-proto: ${ctx}.${key} must be a number or numeric string (got ${typeof v})`);
-}
-
-function bool(o: Obj, key: string, ctx: string): boolean {
-  const v = o[key];
-  if (v === undefined || v === null) return false;
-  if (typeof v !== "boolean") {
-    throw new Error(`frontend-proto: ${ctx}.${key} must be a boolean (got ${typeof v})`);
-  }
-  return v;
 }
 
 /**

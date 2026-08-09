@@ -10,47 +10,67 @@
  * to the spawning tool items so the renderer can border it, catalog it, and
  * fold each member's live tail into it.
  *
- * DERIVE-DON'T-TRACK, like agents.ts and partition.ts: the spawn ids are
- * already in the store (a spawning call's result / notification, read by
- * `spawnedTaskIds`), so this is a projection of `items` rather than a
- * second copy. Turn-SCOPED on purpose: it lists every member a bubble's
- * turn spawned, because matching the prose wording ("the pickup watcher")
- * back to a raw id is not reliable, whereas the turn's spawn set is exact.
+ * # ONE TIER. THE DAEMON'S.
+ *
+ * This module used to walk a THREE-TIER IDENTITY LADDER: a classification
+ * first, then a landed notification's task id, then an announcement parsed out
+ * of paired result prose. It is gone, and it is not kept as a fallback.
+ *
+ * A ladder is a staged-probabilistic identity. Each rung is individually
+ * plausible and the whole is usually right, but "usually right" is the property
+ * the architecture forbids here: the lower rungs read evidence — completion
+ * notifications, free-text prose — that two frontends parse differently and
+ * that the same frontend parses differently as prose changes. When a ladder
+ * picks wrong it does so silently, and the wrong answer is an IDENTITY, so
+ * every later update addressed to it lands on the wrong work.
+ *
+ * THE DAEMON'S CLASSIFICATION replaced all of it. The daemon links one tool
+ * call to one piece of detached work and publishes that link from both ends —
+ * `AsyncBubble.origin_tool_use_id` on the bubble, `AgentToolCall`/
+ * `AgentToolOutcome.spawned_bubble_id` on the call — so a frontend MATCHES a
+ * daemon-minted id by exact string equality and never derives one.
+ *
+ * Consulting both ends is not a two-rung ladder. They are the same fact
+ * written twice: `AsyncBubbleRegistry.bubbleForCall` CHECKS that they agree
+ * and refuses both when they do not, rather than preferring whichever is
+ * listed first. What differs between them is only WHEN each is on the wire.
+ * Absent or empty on either end means "this call detached nothing", which is
+ * the only reading of empty and specifically not an invitation to go looking
+ * elsewhere.
  */
-import { spawnedTaskIds } from "./partition.js";
+import type { AsyncBubbleRegistry } from "./async-routing.js";
 import { ConversationItem, ToolItem } from "./store.js";
 
-/** Which evidence tier established a watcher's identity, for bookkeeping. */
-export type WatcherOrigin = "classified" | "notification" | "announced";
-
-/** A watcher's single authoritative task id, plus the tier that proved it. */
-export interface WatcherRef {
-  id: string;
-  origin: WatcherOrigin;
-}
+/**
+ * The registry surface this projection needs: one lookup, nothing more.
+ *
+ * Narrowed to the single method so a membership question can never reach for
+ * the registry's mutating side, and so a test can answer it without standing
+ * up a whole push pipeline.
+ */
+export type AsyncClassification = Pick<AsyncBubbleRegistry, "bubbleForCall">;
 
 /**
- * The detached work ITEM owns, as ONE id with its evidence tier — or null
- * when the call spawned nothing detached, which is the membership verdict
- * every async surface keys off. The ladder is most-structural-first: the
- * classification (a live card's async-source frame, a parsed card's
- * toolUseResult sidecar), then a landed notification's id, then the
- * paired-prose announcement tier that survives only for pre-structured
- * history (see spawnedTaskIds). A bare id-like token in result prose sits
- * on NO tier, so a finished sync agent's `agentId:` completion handle can
- * no longer manufacture a live-forever member.
+ * The bubble ITEM's call detached, or null when it detached nothing.
+ *
+ * This is the membership verdict every async surface keys off, and its inputs
+ * are exactly the daemon's two statements of one classification. BUBBLES is
+ * what resolves `origin_tool_use_id`; without it only a call carrying its own
+ * `spawned_bubble_id` can be recognized, which is the honest answer for a page
+ * that holds no async plane rather than a reason to guess.
  */
-export function watcherRef(item: ConversationItem): WatcherRef | null {
+export function watcherRef(item: ConversationItem, bubbles?: AsyncClassification): string | null {
   if (item.kind !== "tool") return null;
-  if (item.asyncSource) return { id: item.asyncSource.source_id, origin: "classified" };
-  if (item.notification?.taskId) return { id: item.notification.taskId, origin: "notification" };
-  const ids = spawnedTaskIds(item);
-  return ids.length > 0 ? { id: ids[0], origin: "announced" } : null;
+  if (bubbles === undefined) {
+    const verdict = item.spawnedBubbleId;
+    return verdict === undefined || verdict === "" ? null : verdict;
+  }
+  return bubbles.bubbleForCall(item.toolUseId, item.spawnedBubbleId)?.id ?? null;
 }
 
-/** A tool call is an async member when some evidence tier proved detached work. */
-export function isWatcher(item: ConversationItem): item is ToolItem {
-  return watcherRef(item) !== null;
+/** A tool call is an async member exactly when the daemon says it detached work. */
+export function isWatcher(item: ConversationItem, bubbles?: AsyncClassification): item is ToolItem {
+  return watcherRef(item, bubbles) !== null;
 }
 
 /**
@@ -75,6 +95,7 @@ export function isWatcher(item: ConversationItem): item is ToolItem {
  */
 export function asyncByBubble(
   items: readonly ConversationItem[],
+  bubbles?: AsyncClassification,
 ): Map<string, ToolItem[]> {
   const byBubble = new Map<string, ToolItem[]>();
   let members: ToolItem[] = [];
@@ -100,7 +121,7 @@ export function asyncByBubble(
       // that turn's survivors on its own bubble before the new turn opens.
       flush();
       promptId = item.requestId;
-    } else if (isWatcher(item)) {
+    } else if (isWatcher(item, bubbles)) {
       members.push(item);
     } else if (item.kind === "text" && item.parentToolUseId === undefined) {
       lastText = item.blockId;
