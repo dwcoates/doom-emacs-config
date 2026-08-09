@@ -171,6 +171,17 @@ type QueueCoordinator struct {
 	cancels  map[string]func()
 	gates    map[string]*sync.Mutex
 	parks    map[string]*conflictPark
+	// rebaseWork names, per repository, the rebase worktree the merge in flight
+	// there is working in RIGHT NOW — including one parked on a conflict, whose
+	// tree is the resolution's workbench and must survive every sweep.
+	//
+	// IT IS THE ORPHAN SWEEP'S RETENTION SET, and it exists because the sweep
+	// works from $TMPDIR, where a live merge's directory and a dead daemon's
+	// leftovers are indistinguishable by name. Deriving the set from anything
+	// else — the durable entries, the parks' requests — would be deriving it
+	// from records that deliberately do NOT carry a temp worktree (see the note
+	// on Request.WorkDir).
+	rebaseWork map[string]string
 
 	// postMergeMu guards the retained hook-failure record. It is deliberately
 	// its own mutex: the hook runs off the drain goroutine, and recording its
@@ -288,6 +299,8 @@ func NewCoordinator(cfg CoordinatorConfig) (*QueueCoordinator, error) {
 		cancels:  map[string]func(){},
 		gates:    map[string]*sync.Mutex{},
 		parks:    map[string]*conflictPark{},
+
+		rebaseWork: map[string]string{},
 	}, nil
 }
 
@@ -1474,8 +1487,14 @@ func (c *QueueCoordinator) runBeforeAction(repo string, req Request) *terminalFa
 // LIVE one: every Result the loop takes carries the worktree the step it came
 // from was working in, and `driven` is updated from it before the loop turns.
 func (c *QueueCoordinator) settle(repo string, req, driven Request, park *conflictPark, release func(), res Result) bool {
-	driven.WorkDir, driven.BaseHead = res.WorkDir, res.BaseHead
-	defer func() { c.cleanupRebase(repo, driven) }()
+	c.adoptRebaseWorktree(repo, &driven, res)
+	defer func() {
+		// TEARDOWN FIRST, DE-REGISTRATION SECOND. While the funnel is running,
+		// the directory is still this merge's, so a sweep racing the terminal
+		// must not be told it is free.
+		c.cleanupRebase(repo, driven)
+		c.releaseRebaseWorktree(repo)
+	}()
 	for {
 		switch res.Outcome {
 		case OutcomeConflict:
@@ -1486,7 +1505,7 @@ func (c *QueueCoordinator) settle(repo string, req, driven Request, park *confli
 				return cont
 			}
 			res = next
-			driven.WorkDir, driven.BaseHead = res.WorkDir, res.BaseHead
+			c.adoptRebaseWorktree(repo, &driven, res)
 		case OutcomeTestFailed:
 			c.logf("merge: test gate failed {repo=%s ws=%s name=%s commit=%s}", repo, req.Workspace, req.Name, res.FailingCommit)
 			next, handled, cont := c.awaitTestFix(repo, req, driven, park, release, res)
@@ -1494,7 +1513,7 @@ func (c *QueueCoordinator) settle(repo string, req, driven Request, park *confli
 				return cont
 			}
 			res = next
-			driven.WorkDir, driven.BaseHead = res.WorkDir, res.BaseHead
+			c.adoptRebaseWorktree(repo, &driven, res)
 		default:
 			c.logf("merge: terminal {repo=%s ws=%s name=%s run=%s outcome=%s}", repo, req.Workspace, req.Name, driven.Run.RunID(), res.Outcome)
 			// THE AFTER-ACTION RUNS BEFORE THE MERGE IS RETIRED, because it is a
