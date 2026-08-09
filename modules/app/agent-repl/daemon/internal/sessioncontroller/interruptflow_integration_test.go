@@ -503,14 +503,15 @@ func TestAnAlreadyCompleteStopNeverRepaintsTheCleanTurn(t *testing.T) {
 	}
 }
 
-// --- 4. machinery stays invisible -------------------------------------------
+// --- 4. an interject is a stop, on every surface -----------------------------
 
 // ADVERSARIAL, AND THE WHOLE ROUTING CLAIM. An interject sends the SAME
-// Interrupt to the same shim on a held prompt's behalf. End to end, none of
-// the three user-stop consequences may appear on any frontend surface: no
-// window frame, no `interrupted` state, and no pause — the drain must carry
-// straight on through the boundary.
-func TestAnInterjectsStopReachesNoFrontendSurface(t *testing.T) {
+// Interrupt to the same shim, and it is the user's own stop expressed by
+// submitting a prompt rather than by pressing a key. End to end, all three
+// user-stop consequences must appear on the frontend surfaces exactly as a
+// pressed stop's do — the window frame, the `interrupted` state, and the pause
+// the interject's own prompt then jumps as a head jump.
+func TestAnInterjectsStopReachesEveryFrontendSurface(t *testing.T) {
 	// Arrange — a running turn with a prompt held behind it.
 	rig := newInterruptFlowRig(t)
 	rig.settleReady()
@@ -527,27 +528,35 @@ func TestAnInterjectsStopReachesNoFrontendSurface(t *testing.T) {
 		t.Fatalf("force: %v", err)
 	}
 	waitFor(t, "the interject's stop to reach the shim", func() bool { return rig.client.interruptCount() == 1 })
+	waitForSettled(t, "the interject's stop to pause the queue", func() bool { return rig.paused() })
 	rig.apply(&corev1.TurnEnded{StopReason: "aborted"})
 
-	// Assert — the held prompt was delivered by the ordinary drain...
+	// Assert — the prompt that caused the stop was delivered as the paused
+	// queue's head jump...
 	waitFor(t, "the held prompt to be delivered", func() bool {
 		got := rig.client.promptTexts()
 		return len(got) == 1 && got[0] == "later"
 	})
-	if rig.paused() {
-		t.Fatal("an interject must not pause the queue")
-	}
-	// ...and neither fan-out reported a user stop.
-	for _, v := range rig.allViews() {
-		if v.GetInterrupt().GetActive() {
-			t.Fatalf("a progress frame carried an interrupt window: %+v", v.GetInterrupt())
+	// ...and both fan-outs reported the stop.
+	waitFor(t, "a progress frame to carry the interrupt window", func() bool {
+		for _, v := range rig.allViews() {
+			if v.GetInterrupt().GetActive() {
+				return true
+			}
 		}
-	}
-	for _, s := range rig.allStates() {
-		if s.GetState() == frontendv1.RenderState_RENDER_STATE_INTERRUPTED {
-			t.Fatal("a state frame reported INTERRUPTED for a stop the user never commanded")
+		return false
+	})
+	// Scanned across every frame rather than read off the latest one: the head
+	// jump is submitted the instant the boundary lands, so `interrupted` is a
+	// frame the frontend receives and then moves past, not a resting state.
+	waitFor(t, "a state frame to report INTERRUPTED", func() bool {
+		for _, s := range rig.allStates() {
+			if s.GetState() == frontendv1.RenderState_RENDER_STATE_INTERRUPTED {
+				return true
+			}
 		}
-	}
+		return false
+	})
 }
 
 // --- 5. the queue, through frames and deliveries ----------------------------

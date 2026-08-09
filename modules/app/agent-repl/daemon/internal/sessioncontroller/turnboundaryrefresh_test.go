@@ -180,7 +180,7 @@ func TestTheArmedLeaseFiresTheRefreshWhenTheTurnIsInterrupted(t *testing.T) {
 	h.reattach("sha-old", true, []string{"turn-1"})
 	d := h.controller()
 	h.m.mu.Lock()
-	d.interruptedTurn = true
+	d.stoppedTurn = true
 	h.m.mu.Unlock()
 
 	// Act.
