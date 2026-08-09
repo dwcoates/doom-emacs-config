@@ -693,12 +693,33 @@ skipping complete daemon records does not hold for this one."
     (unless (string-empty-p partial)
       (agent-repl--log nil "claude-repld output: %s" partial))))
 
+(defconst agent-repl--frontend-daemon-output-tail-chars 16384
+  "Characters of the daemon capture `agent-repl--frontend-daemon-output' returns.
+
+The capture buffer is already capped, but this bound does not depend on
+that one: the buffer can predate the cap, and nothing else guarantees a
+caller of the exit path never meets a buffer someone else filled.  A
+panic with its goroutine dump fits comfortably; the complete record
+lives in `agent-repl--frontend-daemon-log-path' either way.")
+
 (defun agent-repl--frontend-daemon-output ()
-  "Return the captured `claude-repld' terminal output, trimmed.
+  "Return the TAIL of the captured `claude-repld' terminal output, trimmed.
+
+At most `agent-repl--frontend-daemon-output-tail-chars' characters, read
+directly out of the buffer's final region rather than by materializing
+the whole capture.  That distinction is the incident: taking
+`buffer-string' of a multi-megabyte capture and handing it onward froze
+Emacs for over ten minutes inside a sentinel, where quit is inhibited.
+
 Empty string when the capture buffer was never created."
   (let ((buffer (get-buffer agent-repl--frontend-daemon-buffer)))
     (if (buffer-live-p buffer)
-        (with-current-buffer buffer (string-trim-right (buffer-string)))
+        (with-current-buffer buffer
+          (string-trim-right
+           (buffer-substring-no-properties
+            (max (point-min)
+                 (- (point-max) agent-repl--frontend-daemon-output-tail-chars))
+            (point-max))))
       "")))
 
 (defun agent-repl--frontend-spawn-daemon ()
@@ -1004,12 +1025,20 @@ under the reserved `client.\=' prefix."
              (tail (agent-repl--backend-output-tail output)))
         ;; The exit EVENT alone ("exited abnormally with code 1") never says
         ;; why.  The reason is whatever the daemon printed on its way out, so
-        ;; the full capture rides the durable record and its tail rides both
-        ;; the failure card and the echo line.
+        ;; the capture TAIL rides the durable record and its shorter tail
+        ;; rides both the failure card and the echo line.
+        ;;
+        ;; The tail, not the capture.  This record used to splice the whole
+        ;; capture into one format call, which is how a buffer nobody bounded
+        ;; became a multi-megabyte log line.  What the tail leaves out is not
+        ;; lost: the daemon's own structured records are durable in
+        ;; `agent-repl--frontend-daemon-log-path', which the record now names
+        ;; so the reader can go there.
         (agent-repl--log nil
-                         "claude-repld exited: tracked=%s event=%s output=%s"
+                         "claude-repld exited: tracked=%s event=%s output-tail=%s daemon-log=%s"
                          tracked trimmed-event
-                         (if (string-empty-p output) "<empty>" output))
+                         (if (string-empty-p output) "<empty>" output)
+                         (agent-repl--frontend-daemon-log-path))
         (let ((failure (agent-repl-failure-local
                         "client.daemon_exited"
                         "the agent-repl daemon exited"
@@ -1031,9 +1060,14 @@ under the reserved `client.\=' prefix."
                  initiator trimmed-event)
                 (agent-repl--frontend-expected-restart-withhold-exit
                  failure trimmed-event tail))
-            (agent-repl--backend-phase nil "daemon exited (%s): %s — full output in %s"
+            ;; Both paths, because the record is genuinely split: the
+            ;; unstructured dying lines (panics, Go runtime output) were
+            ;; mirrored into agent-repl's own log by the filter, while the
+            ;; daemon's structured records only ever land in its own.
+            (agent-repl--backend-phase nil "daemon exited (%s): %s — full output in %s and %s"
                                        trimmed-event tail
-                                       (agent-repl--logfile-path))
+                                       (agent-repl--logfile-path)
+                                       (agent-repl--frontend-daemon-log-path))
             (agent-repl-failure-surface nil failure)))))))
 
 ;;;; ---- Entry point ------------------------------------------------------
