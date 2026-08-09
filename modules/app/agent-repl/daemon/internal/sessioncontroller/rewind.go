@@ -221,12 +221,16 @@ func (m *Manager) releaseKeepAliveHolds(d *sessionController, pingTurnID string,
 	// drop and nothing to persist nil over.
 	owned := m.takeQueueForRewind(d)
 
-	rewound := false
+	// THE TWO FACTS ARE SEPARATE AND ARE KEPT SEPARATE. `rewound` is whether a
+	// CUT was taken, which is what the log lines below report; `debtDischarged`
+	// is whether the transcript is now free of keep-alive turns, which is what
+	// the residue ledger asks. A tail that held nothing droppable discharges the
+	// debt without a cut, and reporting that as "rewound" would claim a
+	// truncation that never happened (keepaliveresidue.go).
+	rewound, debtDischarged := false, false
 	if _, err := m.rewindKeepAliveTurns(m.rootCtx, workspace, sessionID, []string{pingTurnID}); err != nil {
 		if errors.Is(err, session.ErrNoRewindNeeded) {
-			// THE TRANSCRIPT SAYS THE DEBT IS ALREADY PAID, which discharges it
-			// as surely as a cut would: nothing droppable stands at the tail.
-			rewound = true
+			debtDischarged = true
 			m.logf("session-controller: keep-alive rewind SKIPPED ws=%q session=%s turn_id=%s — the transcript tail holds no keep-alive turns to drop",
 				workspace, sessionID, pingTurnID)
 		} else {
@@ -234,7 +238,7 @@ func (m *Manager) releaseKeepAliveHolds(d *sessionController, pingTurnID string,
 				workspace, sessionID, pingTurnID, err)
 		}
 	} else {
-		rewound = true
+		rewound, debtDischarged = true, true
 	}
 
 	// THE LIVE CONTROLLER IS RE-RESOLVED. A successful rewind replaced the one
@@ -254,7 +258,7 @@ func (m *Manager) releaseKeepAliveHolds(d *sessionController, pingTurnID string,
 	// run of droppable turns (session.PlanRewind), so a ping recorded by an
 	// earlier end went with it; keeping its row would make every later path
 	// re-run a rewind against a clean transcript forever (keepaliveresidue.go).
-	if rewound {
+	if debtDischarged {
 		m.clearKeepAliveResidueLocked(workspace)
 	}
 	live, ok := m.byWS[workspace]
