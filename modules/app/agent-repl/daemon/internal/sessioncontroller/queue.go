@@ -10,7 +10,6 @@ import (
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
-	"claude-repld/internal/errclass"
 	"claude-repld/internal/registry"
 )
 
@@ -816,8 +815,8 @@ func (m *Manager) onTurnBoundary(d *sessionController, active bool, endedAtMs in
 	// The turn that just ended: was it one a user-commanded stop was delivered
 	// to, and was it the lone prompt running against a paused queue? Both are
 	// consumed here, whatever the boundary goes on to decide.
-	wasInterrupted, wasLoneRunner := d.interruptedTurn, d.pausedRunner
-	d.interruptedTurn, d.pausedRunner = false, false
+	wasStopped, wasLoneRunner := d.stoppedTurn, d.pausedRunner
+	d.stoppedTurn, d.pausedRunner = false, false
 
 	// A DAEMON COMPACTION'S CLAIM IS RETIRED AT ITS OWN TURN'S END, matched on
 	// the ending turn's name for the keep-alive claim's reason: a late end for
@@ -905,9 +904,9 @@ func (m *Manager) onTurnBoundary(d *sessionController, active bool, endedAtMs in
 
 	// THE PAUSE RESUMES on the clean end of a prompt that ran alone. The user
 	// stopped the agent, ran one thing, and that thing finished — which is the
-	// signal that the work they stopped may continue. An interrupted lone
-	// runner is the opposite signal, so the pause stands.
-	if d.paused && wasLoneRunner && !wasInterrupted {
+	// signal that the work they stopped may continue. A lone runner a stop was
+	// delivered to is the opposite signal, so the pause stands.
+	if d.paused && wasLoneRunner && !wasStopped {
 		d.paused = false
 		m.logf("session-controller: queue RESUMED session=%s ws=%q — the prompt that ran alone finished cleanly; draining %d retained entr(ies) in their original order",
 			d.sessionID, d.workspace, len(d.queue.entries))
@@ -1166,9 +1165,20 @@ func (m *Manager) runClassifier(d *sessionController, runningPrompt, queuedPromp
 	})
 }
 
-// beginInterject starts the interject sequence for an entry: mark it, push the
-// state, interrupt the running turn, and then WAIT. The submit itself happens
-// in onTurnBoundary when the real TurnEnded arrives — never here.
+// beginInterject starts the interject sequence for an entry: mark it as the
+// head jump a stop entitles it to, push the state, STOP the running turn
+// exactly as the user's own stop does (stopTurn), and then WAIT. The submit
+// itself happens in onTurnBoundary when the real TurnEnded arrives — never
+// here.
+//
+// IT HAS NO PAUSED SPECIAL CASE. A queue already paused by an earlier stop used
+// to refuse to interrupt for an interject at all, on the reasoning that an
+// interject's stop was machinery that must not overrule the user's. The result
+// was that a classified interrupt did nothing — the turn ran on, and the user
+// had to press stop by hand for the prompt they had already typed to go. An
+// interject IS the user's stop, expressed by submitting a prompt instead of by
+// pressing a key, so it overrules an earlier one for the same reason a second
+// press of stop does.
 //
 // A verdict that lands after the turn already ended is MOOT: there is nothing
 // to interrupt, and the ordinary drain either already delivered the entry or is
@@ -1233,20 +1243,13 @@ func (m *Manager) beginInterject(d *sessionController, entryID, source string) {
 	if source == "user" {
 		e.rationale = "run now, requested by the user"
 	}
-	if d.paused {
-		// The user has stopped this session, and the turn now running is the
-		// one prompt they allowed through. An interject's stop is MACHINERY —
-		// it interrupts on a held prompt's behalf — and it must not overrule
-		// the stop the user commanded, so it becomes a head jump and waits for
-		// the boundary instead of sending an Interrupt of its own.
-		e.headJump = true
-		view, recs := m.publishQueueLocked(d)
-		m.mu.Unlock()
-		m.logf("session-controller: queue interject entry=%s (%s) session=%s NOT interrupting — the queue is paused by a user interrupt; the entry jumps the head and runs at the next boundary",
-			entryID, source, d.sessionID)
-		m.publish(d.sessionID, view, recs)
-		return
-	}
+	// AN INTERJECT IS A STOP PLUS A HEAD JUMP, in exactly the shape the user
+	// produces by hand when they press stop and then type something: the stop
+	// below pauses the queue, and a paused queue's ONE deliverable is a head
+	// jump. Marking it here, before the stop goes out, is what makes the
+	// boundary that stop produces find the entry already claiming the position
+	// it is entitled to — rather than racing to set the flag afterwards.
+	e.headJump = true
 	view, recs := m.publishQueueLocked(d)
 	m.mu.Unlock()
 
@@ -1257,23 +1260,32 @@ func (m *Manager) beginInterject(d *sessionController, entryID, source string) {
 	m.logf("session-controller: queue interjecting entry=%s (%s) session=%s — interrupting, will submit on TurnEnded",
 		entryID, source, d.sessionID)
 	go func() {
+		// THE SAME STOP THE USER PRESSES, through the same function, and that
+		// is the point: an interject is the user asking for the running turn to
+		// end so their prompt can go — which is what a stop IS. It therefore
+		// gets the stop's every consequence (stopTurn), including the pause the
+		// head jump above is entitled to and the boundary an ALREADY_COMPLETE
+		// synthesizes.
+		//
+		// THE REQUEST ID NAMES THE ENTRY, so the log can still tell the two
+		// gestures apart even though the operation is one. That is a matter of
+		// account, never of behavior.
+		//
 		// An interject's stop is only a failure if the shim says it could not
 		// deliver it. ALREADY_COMPLETE means the turn we were racing had
 		// already ended, which is the outcome the interject wanted.
-		// THE INTERJECT'S OWN ENTRY, not a user request. This stop is pure
-		// machinery -- the user asked for a prompt to run sooner, not for the
-		// turn to end -- and naming the entry is what keeps it distinguishable
-		// in the log from the user-commanded stop.
-		outcome, err := d.client.Interrupt(m.rootCtx, "interject:"+entryID)
-		if err == nil {
-			err = errclass.InterruptError(outcome)
-		}
+		outcome, err := m.stopTurn(m.rootCtx, d, "interject:"+entryID)
 		if err != nil {
 			m.logf("session-controller: queue interject interrupt FAILED entry=%s session=%s outcome=%s: %v",
 				entryID, d.sessionID, outcome, err)
 			m.mu.Lock()
 			if cur := d.queue.get(entryID); cur != nil {
 				cur.interjecting = false
+				// The head-jump claim goes with the stop that would have earned
+				// it. A stop that never landed leaves the queue unpaused, and an
+				// entry keeping the claim would jump the retained prompts at the
+				// next boundary on the strength of an interrupt that failed.
+				cur.headJump = false
 				cur.classification = VerdictError
 				cur.rationale = fmt.Sprintf("interrupt failed: %v", err)
 			}
@@ -1281,15 +1293,6 @@ func (m *Manager) beginInterject(d *sessionController, entryID, source string) {
 			m.mu.Unlock()
 			m.publish(d.sessionID, view, recs)
 			return
-		}
-		if outcome == corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE {
-			// THE ACK IS THE BOUNDARY. This interject is waiting for a TurnEnded
-			// before it submits, and the shim has just answered that there is no
-			// foreground turn to end — so the wait it is holding can never be
-			// satisfied by the stream. Both authorities are reconciled to the
-			// Ack and the boundary is delivered here (phantomturn.go), which is
-			// what actually submits the prompt the user typed.
-			m.settleInterjectAlreadyComplete(d, entryID)
 		}
 	}()
 }

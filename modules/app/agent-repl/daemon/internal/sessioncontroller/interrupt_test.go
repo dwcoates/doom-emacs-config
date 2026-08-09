@@ -102,10 +102,11 @@ func TestOnlyAnInterruptedAckMarksTheTurn(t *testing.T) {
 	}
 }
 
-// THE ROUTING BOUNDARY. An interject sends the SAME Interrupt to the same
-// shim, and none of the user-stop consequences may follow it: it is machinery
-// acting on a held prompt's behalf, not the user asking for the turn to stop.
-func TestAnInterjectOpensNoWindowAndMarksNoTurn(t *testing.T) {
+// THE INVARIANT: an interject's stop IS the user's stop. It goes out through
+// the same stopTurn, so it carries every consequence a pressed stop carries —
+// the interrupt window, the `interrupted` turn outcome, and the queue pause —
+// and there is no second kind of stop that could carry fewer.
+func TestAnInterjectsStopCarriesEveryUserStopConsequence(t *testing.T) {
 	// Arrange — a turn is running with a held prompt behind it.
 	h := newQueueHarness(t, nil)
 	h.turn(true)
@@ -120,17 +121,50 @@ func TestAnInterjectOpensNoWindowAndMarksNoTurn(t *testing.T) {
 		t.Fatalf("force: %v", err)
 	}
 	waitFor(t, "the interject's stop to reach the shim", func() bool { return h.client.interruptCount() == 1 })
+	waitForSettled(t, "the interject's stop to pause the queue", func() bool { return h.paused() })
 
 	// Assert.
-	if got := h.prog.interruptNotes(); len(got) != 0 {
-		t.Fatalf("interrupt windows = %+v, want none from an interject", got)
+	if got := h.prog.interruptNotes(); len(got) != 1 || got[0].workspace != "ws" {
+		t.Fatalf("interrupt windows = %+v, want one opened by the interject's stop", got)
 	}
-	if got := h.applier.interruptMarked(); len(got) != 0 {
-		t.Fatalf("turn marks = %v, want none from an interject", got)
+	if got := h.applier.interruptMarked(); len(got) != 1 {
+		t.Fatalf("turn marks = %v, want the stopped turn marked interrupted", got)
 	}
-	if h.paused() {
-		t.Fatal("an interject must not pause the queue")
+}
+
+// THE REPORTED DEFECT. A queue already paused by an earlier stop used to refuse
+// to interrupt for an interject, so a classified interrupt did nothing at all
+// and the user had to press stop by hand for the prompt they had already typed
+// to go. An interject is the user's stop, so it stops the turn either way.
+func TestAnInterjectStopsTheTurnEvenWhenTheQueueIsAlreadyPaused(t *testing.T) {
+	// Arrange — the user stops the session, then runs one prompt alone against
+	// the paused queue, and types a second one while that one is in flight.
+	h := newQueueHarness(t, nil)
+	h.turn(true)
+	if err := h.interrupt(); err != nil {
+		t.Fatalf("interrupt: %v", err)
 	}
+	h.turn(false)
+	if !h.paused() {
+		t.Fatal("arrange: the user's stop must have paused the queue")
+	}
+	h.turn(true)
+	if err := h.submit("run this now"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	waitFor(t, "the prompt to be queued", func() bool { return len(h.entries()) == 1 })
+	id := h.entries()[0].id
+	before := h.client.interruptCount()
+
+	// Act.
+	if err := h.m.ForceQueueEntry("ws", id); err != nil {
+		t.Fatalf("force: %v", err)
+	}
+
+	// Assert — the stop went out rather than being swallowed by the pause.
+	waitFor(t, "the interject's stop to reach the shim", func() bool {
+		return h.client.interruptCount() == before+1
+	})
 }
 
 // --- the queue pause --------------------------------------------------------
