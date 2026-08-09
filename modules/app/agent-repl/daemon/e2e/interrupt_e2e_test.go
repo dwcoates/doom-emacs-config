@@ -155,13 +155,21 @@ func echoOf(prompt string) string { return fmt.Sprintf("echo: %s [mode=", prompt
 // INTERRUPTED") is enforced over the same read loop rather than by sleeping.
 func awaitAll(t *testing.T, conn *websocket.Conn, reject func(*frontendv1.FrontendFrame) string, want map[string]func(*frontendv1.FrontendFrame) bool) {
 	t.Helper()
+	awaitAllWithin(t, conn, frameTimeout, reject, want)
+}
+
+// awaitAllWithin is awaitAll under an explicit budget. It exists for the awaits
+// whose bound is something other than the suite's frame budget, and every
+// caller must say in its own comment what that bound is.
+func awaitAllWithin(t *testing.T, conn *websocket.Conn, within time.Duration, reject func(*frontendv1.FrontendFrame) string, want map[string]func(*frontendv1.FrontendFrame) bool) {
+	t.Helper()
 	pending := make(map[string]func(*frontendv1.FrontendFrame) bool, len(want))
 	for name, match := range want {
 		pending[name] = match
 	}
-	deadline := time.Now().Add(frameTimeout)
+	deadline := time.Now().Add(within)
 	for len(pending) > 0 && time.Now().Before(deadline) {
-		frame := readFrame(t, conn)
+		frame := readFrameWithin(t, conn, within)
 		if reject != nil {
 			if why := reject(frame); why != "" {
 				t.Fatalf("forbidden frame: %s", why)
