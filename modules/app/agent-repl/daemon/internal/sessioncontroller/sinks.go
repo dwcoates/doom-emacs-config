@@ -60,7 +60,11 @@ type StateApplier interface {
 	// before DaemonHello opens its standing store subscription. closed names the
 	// PHANTOM claims it synthesized an end for — turns the returning shim says
 	// do not exist — which is what the caller releases its prompt queue on.
-	ReconcileTurnHandshake(workspace, claimantSessionID string, ids []string, legacyActive bool) (before, after, closed []string, err error)
+	//
+	// durablyEnded names turns the caller has PROVED already carry a terminal
+	// event in the store. Those are never cut: the store's record outranks the
+	// hello, and their own replayed boundary settles them COMPLETED.
+	ReconcileTurnHandshake(workspace, claimantSessionID string, ids []string, legacyActive bool, durablyEnded []string) (before, after, closed []string, err error)
 	// ActiveTurnIDs names every turn claim the session still holds OPEN in the
 	// durable ledger. It is how a drain hold whose prompt was ACCEPTED but whose
 	// TurnStarted has not been observed yet still names the turn it is waiting
@@ -398,6 +402,13 @@ type consumer struct {
 	// empty for a session that has not been rehydrated, and an empty record has
 	// nothing for the announcement to differ from.
 	onVendorSessionID func(vendorSessionID string)
+	// durableTurnEnds reads the STORE for the terminal events of the turn claims
+	// a returning shim's hello contradicts. It is the only authority that can
+	// tell a turn CUT by a daemon gap from one that FINISHED inside it, and it
+	// is consulted before any claim is cut (durableturnevidence.go). Nil on a
+	// consumer built without a durable history source, and the judgment site
+	// says so out loud rather than silently assuming interruption.
+	durableTurnEnds durableTurnEndProbe
 	// onDegraded reports a shim-sourced DegradedState to the session controller, which is
 	// what lets a bring-up still waiting on the handshake learn that the shim
 	// has already given up. Assigned after construction, like the hook above.

@@ -2449,6 +2449,10 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 		m.noteBringUpTermination(d, detail)
 	}
 	cons.onDegraded = func(ds *corev1.DegradedState) { m.noteBringUpFault(d, ds) }
+	// Bound BEFORE Run, because the first thing a reattaching shim does is say
+	// hello — and that hello is where a turn is judged cut or completed. A probe
+	// bound any later would be nil at the one moment it decides anything.
+	m.bindDurableTurnEndProbe(cons, workspace, sessionID)
 	d.consumer = cons
 	// Settle the backfill for a REOPENED session before any event flows.
 	//
