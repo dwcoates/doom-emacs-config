@@ -534,8 +534,8 @@ func (r *turnAccountingReducer) resolveTurn(turnID string, settledAt int64) *fro
 	if turn.endUsage == nil || turn.endUsage.GetAvailable() == nil {
 		problems = append(problems, missingUsageProblem(false))
 	}
-	if turn.startUsage != nil && turn.endUsage != nil && turn.startUsage.GetAvailable() != nil && turn.endUsage.GetAvailable() != nil && turn.startUsage.GetAvailable().GetFiveHour().GetResetsAtMs() != turn.endUsage.GetAvailable().GetFiveHour().GetResetsAtMs() {
-		problems = append(problems, &frontendv1.TurnAccountingProblem{Problem: &frontendv1.TurnAccountingProblem_WindowReset{WindowReset: &frontendv1.UsageWindowReset{StartResetsAtMs: turn.startUsage.GetAvailable().GetFiveHour().GetResetsAtMs(), EndResetsAtMs: turn.endUsage.GetAvailable().GetFiveHour().GetResetsAtMs()}}})
+	if startWindow, endWindow := turn.startUsage.GetAvailable().GetFiveHour(), turn.endUsage.GetAvailable().GetFiveHour(); startWindow != nil && endWindow != nil && usageWindowRolledOver(startWindow.GetResetsAtMs(), endWindow.GetResetsAtMs()) {
+		problems = append(problems, &frontendv1.TurnAccountingProblem{Problem: &frontendv1.TurnAccountingProblem_WindowReset{WindowReset: &frontendv1.UsageWindowReset{StartResetsAtMs: startWindow.GetResetsAtMs(), EndResetsAtMs: endWindow.GetResetsAtMs()}}})
 	}
 	if missing := incompleteRuntimeIdentityPaths(r.runtime); len(missing) > 0 {
 		problems = append(problems, runtimeIdentityProblem(r.queryID, missing))
@@ -1029,6 +1029,44 @@ func cloneOptional[T any](value *T) *T {
 	}
 	cloned := *value
 	return &cloned
+}
+
+// usageWindowRolloverFloorMs is the smallest movement of the five-hour window's
+// resets_at that can mean the window ROLLED OVER rather than that the vendor
+// re-projected the same boundary slightly differently between two samples.
+//
+// WHY A FLOOR AT ALL. The check used to be raw inequality, and raw inequality
+// is self-refuting on live evidence: every settled turn in the stack was
+// condemned for a "reset" where the END boundary landed 693ms EARLIER than the
+// start's. A window that has rolled over resets LATER, never sooner, and never
+// by a fraction of a second. What the two samples actually disagreed about was
+// the projection of one unchanged boundary — the vendor recomputes resets_at
+// per request from its own clock, so two samples of the SAME window differ by
+// request-to-request skew, on the order of milliseconds.
+//
+// WHY FIVE MINUTES. A genuine rollover advances the boundary by a full window,
+// five hours (18,000,000ms). The jitter this must ignore is sub-second. Any
+// floor strictly between those discriminates; five minutes sits three orders of
+// magnitude above the noise and two orders below the signal, so neither a
+// pathologically skewed projection nor a rollover shortened by vendor-side
+// window accounting can cross into the wrong answer.
+//
+// IT IS A MAGNITUDE, NOT A DIRECTION. A forward move past the floor is the
+// rollover the design already flagged. A BACKWARD move past the floor is not a
+// rollover, but it is the same thing the finding exists to state: the turn's two
+// boundaries were measured against windows that are not the same window, so the
+// quota delta between them is not a delta. It stays a stated invalidity rather
+// than being filtered out with the jitter.
+const usageWindowRolloverFloorMs = 5 * 60 * 1000
+
+// usageWindowRolledOver reports whether a turn's two five-hour-window samples
+// name different windows, as opposed to the same window projected twice.
+func usageWindowRolledOver(startResetsAtMs, endResetsAtMs int64) bool {
+	delta := endResetsAtMs - startResetsAtMs
+	if delta < 0 {
+		delta = -delta
+	}
+	return delta >= usageWindowRolloverFloorMs
 }
 
 func missingUsageProblem(start bool) *frontendv1.TurnAccountingProblem {
