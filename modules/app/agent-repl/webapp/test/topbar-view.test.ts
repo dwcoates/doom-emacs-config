@@ -7,11 +7,12 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  tokensDisclosureHtml,
   topbarConnectivityHtml,
   topbarModelOptionsHtml,
   topbarViewHtml,
 } from "../src/topbar-view.js";
-import type { TopbarView } from "../src/frontend-proto.js";
+import type { TokenBreakdownView, TopbarView } from "../src/frontend-proto.js";
 
 function view(over: Partial<TopbarView> = {}): TopbarView {
   return {
@@ -149,5 +150,57 @@ describe("the model selector", () => {
     );
     // Assert
     expect(html).not.toContain("<img");
+  });
+});
+
+// --- the tokens disclosure, which replaced the old strip's tokens chip ------
+
+describe("tokensDisclosureHtml", () => {
+  function breakdown(over: Partial<TokenBreakdownView> = {}): TokenBreakdownView {
+    return {
+      workspace: "/ws",
+      fence: "f1",
+      sections: [
+        { label: "session", rows: [{ label: "input", tokens: 10, sharePermille: 1000, emphasized: true, depth: 0 }] },
+      ],
+      ...over,
+    };
+  }
+
+  it("renders NOTHING when no breakdown has been published", () => {
+    // Arrange / Act — a control over a breakdown that does not exist invites
+    // the click that proves it does not exist.
+    const html = tokensDisclosureHtml(null, false);
+    // Assert
+    expect(html).toBe("");
+  });
+
+  it("renders the chip once a breakdown has been published", () => {
+    // Arrange / Act
+    const html = tokensDisclosureHtml(breakdown(), false);
+    // Assert
+    expect(html).toContain("data-tokens-toggle");
+  });
+
+  it("withholds the menu while the disclosure is closed", () => {
+    // Arrange / Act
+    const html = tokensDisclosureHtml(breakdown(), false);
+    // Assert
+    expect(html).not.toContain("tb-menu");
+  });
+
+  it("renders the resolved menu when the disclosure is open", () => {
+    // Arrange / Act
+    const html = tokensDisclosureHtml(breakdown(), true);
+    // Assert
+    expect(html).toContain("tb-menu");
+  });
+
+  it("labels the chip with the word alone, composing no figure of its own", () => {
+    // Arrange / Act — every candidate source for a figure here is a client-side
+    // recomposition of a number the breakdown itself already resolves.
+    const html = tokensDisclosureHtml(breakdown(), false);
+    // Assert
+    expect(html).toContain(">tokens <span");
   });
 });
