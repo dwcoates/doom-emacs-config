@@ -193,6 +193,16 @@ export interface ToolItem extends FeedOrderedItem {
    * stream, which is what the async fold keys off.
    */
   asyncSource?: AsyncSource;
+  /**
+   * THE CLASSIFICATION VERDICT: the id of the `AsyncBubble` this call detached,
+   * as the DAEMON resolved it (`AgentToolCall.spawned_bubble_id`).
+   *
+   * The card MATCHES this string against a bubble in the async registry; it
+   * never derives one. ABSENT means "this call detached nothing", and that is
+   * the only reading of absent — there is no second tier of evidence to fall
+   * back to, by design (see `watchers.ts`).
+   */
+  spawnedBubbleId?: string;
   /** Streamed output of the detached task this call spawned. */
   taskOutput?: string;
   /**
@@ -687,6 +697,11 @@ function mergeToolItem(existing: ToolItem, incoming: ToolItem): ToolItem {
   if (incoming.notification !== undefined) merged.notification = incoming.notification;
   if (incoming.resultTs !== undefined) merged.resultTs = incoming.resultTs;
   if (incoming.asyncSource !== undefined) merged.asyncSource = incoming.asyncSource;
+  // The verdict arrives on the CALL and is restated on the outcome, so a later
+  // half of the pair that carries it merges in. It is never cleared by a half
+  // that does not carry it: the two are the same string whenever both are set,
+  // and "the outcome did not restate it" is not a retraction.
+  if (incoming.spawnedBubbleId !== undefined) merged.spawnedBubbleId = incoming.spawnedBubbleId;
   if (incoming.taskOutput !== undefined) merged.taskOutput = incoming.taskOutput;
   if (incoming.skillBody !== undefined) merged.skillBody = incoming.skillBody;
   if (incoming.result !== undefined) merged.result = incoming.result;

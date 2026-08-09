@@ -53,6 +53,13 @@ function push(opened: AsyncBubble[], updates: AsyncBubbleUpdate[] = []): AsyncBu
   return { workspace: "/w", opened, updates, throughSeq: 1, fence: "f1" };
 }
 
+/** The kind of an open bubble, or a loud failure — never a silently skipped assert. */
+function kindOf(registry: AsyncBubbleRegistry, id: string): AsyncBubble["kind"] {
+  const held = registry.get(id);
+  if (held === null) throw new Error(`test: bubble '${id}' is not open`);
+  return held.kind;
+}
+
 /** A registry seeded through the normal open path, as a live one would be. */
 function seeded(...bubbles: AsyncBubble[]): AsyncBubbleRegistry {
   const registry = new AsyncBubbleRegistry();
@@ -262,7 +269,8 @@ describe("I4 — spool continuity", () => {
       push([], [{ bubbleId: "b1", update: { case: "shell", value: { text: "XX", fromOffset: 3 } } }]),
     );
 
-    expect(registry.get("b1")?.kind.case === "shell" && registry.get("b1")?.kind.value).toEqual({
+    const kind = kindOf(registry, "b1");
+    expect(kind.case === "shell" && kind.value).toEqual({
       command: "make",
       output: { text: "abcdef", throughOffset: 6 },
     });
@@ -276,7 +284,8 @@ describe("I4 — spool continuity", () => {
       push([], [{ bubbleId: "b1", update: { case: "shell", value: { text: "é", fromOffset: 0 } } }]),
     );
 
-    expect(registry.get("b1")?.kind.case === "shell" && registry.get("b1")?.kind.value.output.throughOffset).toBe(2);
+    const kind = kindOf(registry, "b1");
+    expect(kind.case === "shell" && kind.value.output.throughOffset).toBe(2);
   });
 
   it("applies an unclassified append on the same continuity rule", () => {
@@ -286,10 +295,8 @@ describe("I4 — spool continuity", () => {
       push([], [{ bubbleId: "b1", update: { case: "unclassified", value: { text: "b", fromOffset: 1 } } }]),
     );
 
-    expect(registry.get("b1")?.kind.case === "unclassified" && registry.get("b1")?.kind.value.output).toEqual({
-      text: "ab",
-      throughOffset: 2,
-    });
+    const kind = kindOf(registry, "b1");
+    expect(kind.case === "unclassified" && kind.value.output).toEqual({ text: "ab", throughOffset: 2 });
   });
 
   it("rejects a gapped unclassified append on the same continuity rule", () => {
@@ -325,7 +332,8 @@ describe("applying matched updates", () => {
       ),
     );
 
-    expect(registry.get("b1")?.kind.case === "agent" && registry.get("b1")?.kind.value.emissions).toHaveLength(1);
+    const kind = kindOf(registry, "b1");
+    expect(kind.case === "agent" && kind.value.emissions).toHaveLength(1);
   });
 
   it("RESTATES the fold accounting rather than accumulating it", () => {
@@ -338,7 +346,8 @@ describe("applying matched updates", () => {
       push([], [{ bubbleId: "b1", update: { case: "agent", value: { emissions: [], fold: { droppedBefore: 7, tailCap: 20 } } } }]),
     );
 
-    expect(registry.get("b1")?.kind.case === "agent" && registry.get("b1")?.kind.value.fold.droppedBefore).toBe(7);
+    const kind = kindOf(registry, "b1");
+    expect(kind.case === "agent" && kind.value.fold.droppedBefore).toBe(7);
   });
 
   it("appends journal rows without rewriting the ones already logged", () => {
@@ -351,10 +360,8 @@ describe("applying matched updates", () => {
       push([], [{ bubbleId: "b1", update: { case: "journal", value: { rows: [{ label: "s", detail: "ok", status: "done" }], fold: NO_FOLD } } }]),
     );
 
-    expect(registry.get("b1")?.kind.case === "journal" && registry.get("b1")?.kind.value.rows.map((r) => r.status)).toEqual([
-      "running",
-      "done",
-    ]);
+    const kind = kindOf(registry, "b1");
+    expect(kind.case === "journal" && kind.value.rows.map((r) => r.status)).toEqual(["running", "done"]);
   });
 
   it("lands a liveness transition on a bubble of ANY kind", () => {
