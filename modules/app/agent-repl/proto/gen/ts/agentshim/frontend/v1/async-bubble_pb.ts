@@ -26,7 +26,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentshim/frontend/v1/async-bubble.proto.
  */
 export const file_agentshim_frontend_v1_async_bubble: GenFile = /*@__PURE__*/
-  fileDesc("CihhZ2VudHNoaW0vZnJvbnRlbmQvdjEvYXN5bmMtYnViYmxlLnByb3RvEhVhZ2VudHNoaW0uZnJvbnRlbmQudjEixAMKC0FzeW5jQnViYmxlEgoKAmlkGAEgASgJEhoKEm9yaWdpbl90b29sX3VzZV9pZBgCIAEoCRIYChBwYXJlbnRfYnViYmxlX2lkGAMgASgJEg0KBWxhYmVsGAQgASgJEhUKDXN0YXJ0ZWRfYXRfbXMYBSABKAMSNgoIbGl2ZW5lc3MYBiABKAsyJC5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQXN5bmNMaXZlbmVzcxI4CgVhZ2VudBgKIAEoCzInLmFnZW50c2hpbS5mcm9udGVuZC52MS5Bc3luY0FnZW50QnViYmxlSAASPgoHam91cm5hbBgLIAEoCzIrLmFnZW50c2hpbS5mcm9udGVuZC52MS5Bc3luY1dvcmtmbG93Sm91cm5hbEgAEjgKBXNoZWxsGAwgASgLMicuYWdlbnRzaGltLmZyb250ZW5kLnYxLkFzeW5jU2hlbGxCdWJibGVIABJGCgx1bmNsYXNzaWZpZWQYDSABKAsyLi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQXN5bmNVbmNsYXNzaWZpZWRCdWJibGVIABIRCgl3b3Jrc3BhY2UYByABKAlCBgoEa2luZCJ7ChBBc3luY0FnZW50QnViYmxlEjcKCWVtaXNzaW9ucxgBIAMoCzIkLmFnZW50c2hpbS5mcm9udGVuZC52MS5BZ2VudEVtaXNzaW9uEi4KBGZvbGQYAiABKAsyIC5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQXN5bmNGb2xkIoQBChRBc3luY1dvcmtmbG93Sm91cm5hbBI8CgRyb3dzGAEgAygLMi4uYWdlbnRzaGltLmZyb250ZW5kLnYxLkFzeW5jV29ya2Zsb3dKb3VybmFsUm93Ei4KBGZvbGQYAiABKAsyIC5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQXN5bmNGb2xkIlwKEEFzeW5jU2hlbGxCdWJibGUSDwoHY29tbWFuZBgBIAEoCRI3CgZvdXRwdXQYAiABKAsyJy5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQXN5bmNPdXRwdXRTcG9vbCJlChdBc3luY1VuY2xhc3NpZmllZEJ1YmJsZRIRCgl0b29sX25hbWUYASABKAkSNwoGb3V0cHV0GAIgASgLMicuYWdlbnRzaGltLmZyb250ZW5kLnYxLkFzeW5jT3V0cHV0U3Bvb2wiOAoQQXN5bmNPdXRwdXRTcG9vbBIMCgR0ZXh0GAEgASgJEhYKDnRocm91Z2hfb2Zmc2V0GAIgASgEIoYCChdBc3luY1dvcmtmbG93Sm91cm5hbFJvdxINCgVsYWJlbBgBIAEoCRIOCgZkZXRhaWwYAiABKAkSQgoHcnVubmluZxgKIAEoCzIvLmFnZW50c2hpbS5mcm9udGVuZC52MS5Bc3luY1dvcmtmbG93U3RlcFJ1bm5pbmdIABI8CgRkb25lGAsgASgLMiwuYWdlbnRzaGltLmZyb250ZW5kLnYxLkFzeW5jV29ya2Zsb3dTdGVwRG9uZUgAEkAKBmZhaWxlZBgMIAEoCzIuLmFnZW50c2hpbS5mcm9udGVuZC52MS5Bc3luY1dvcmtmbG93U3RlcEZhaWxlZEgAQggKBnN0YXR1cyIaChhBc3luY1dvcmtmbG93U3RlcFJ1bm5pbmciFwoVQXN5bmNXb3JrZmxvd1N0ZXBEb25lIhkKF0FzeW5jV29ya2Zsb3dTdGVwRmFpbGVkIoIBCg1Bc3luY0xpdmVuZXNzEjAKBGxpdmUYASABKAsyIC5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQXN5bmNMaXZlSAASNgoHc2V0dGxlZBgCIAEoCzIjLmFnZW50c2hpbS5mcm9udGVuZC52MS5Bc3luY1NldHRsZWRIAEIHCgVzdGF0ZSIlCglBc3luY0xpdmUSGAoQbGFzdF9hY3Rpdml0eV9tcxgBIAEoAyKcAgoMQXN5bmNTZXR0bGVkEhUKDXNldHRsZWRfYXRfbXMYASABKAMSOQoKc2hlbGxfZXhpdBgCIAEoCzIlLmFnZW50c2hpbS5mcm9udGVuZC52MS5Bc3luY1NoZWxsRXhpdBI3CgRkb25lGAogASgLMicuYWdlbnRzaGltLmZyb250ZW5kLnYxLkFzeW5jT3V0Y29tZURvbmVIABI5CgVlcnJvchgLIAEoCzIoLmFnZW50c2hpbS5mcm9udGVuZC52MS5Bc3luY091dGNvbWVFcnJvckgAEjsKBmtpbGxlZBgMIAEoCzIpLmFnZW50c2hpbS5mcm9udGVuZC52MS5Bc3luY091dGNvbWVLaWxsZWRIAEIJCgdvdXRjb21lIh4KDkFzeW5jU2hlbGxFeGl0EgwKBGNvZGUYASABKAUiEgoQQXN5bmNPdXRjb21lRG9uZSIkChFBc3luY091dGNvbWVFcnJvchIPCgdtZXNzYWdlGAEgASgJIiQKEkFzeW5jT3V0Y29tZUtpbGxlZBIOCgZyZWFzb24YASABKAkiNQoJQXN5bmNGb2xkEhYKDmRyb3BwZWRfYmVmb3JlGAEgASgDEhAKCHRhaWxfY2FwGAIgASgFIu0CChFBc3luY0J1YmJsZVVwZGF0ZRIRCglidWJibGVfaWQYASABKAkSOAoFYWdlbnQYCiABKAsyJy5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQXN5bmNBZ2VudFVwZGF0ZUgAEkQKB2pvdXJuYWwYCyABKAsyMS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQXN5bmNXb3JrZmxvd0pvdXJuYWxVcGRhdGVIABI5CgVzaGVsbBgMIAEoCzIoLmFnZW50c2hpbS5mcm9udGVuZC52MS5Bc3luY091dHB1dEFwcGVuZEgAEkAKDHVuY2xhc3NpZmllZBgNIAEoCzIoLmFnZW50c2hpbS5mcm9udGVuZC52MS5Bc3luY091dHB1dEFwcGVuZEgAEj4KCGxpdmVuZXNzGA4gASgLMiouYWdlbnRzaGltLmZyb250ZW5kLnYxLkFzeW5jTGl2ZW5lc3NVcGRhdGVIAEIICgZ1cGRhdGUiewoQQXN5bmNBZ2VudFVwZGF0ZRI3CgllbWlzc2lvbnMYASADKAsyJC5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQWdlbnRFbWlzc2lvbhIuCgRmb2xkGAIgASgLMiAuYWdlbnRzaGltLmZyb250ZW5kLnYxLkFzeW5jRm9sZCKKAQoaQXN5bmNXb3JrZmxvd0pvdXJuYWxVcGRhdGUSPAoEcm93cxgBIAMoCzIuLmFnZW50c2hpbS5mcm9udGVuZC52MS5Bc3luY1dvcmtmbG93Sm91cm5hbFJvdxIuCgRmb2xkGAIgASgLMiAuYWdlbnRzaGltLmZyb250ZW5kLnYxLkFzeW5jRm9sZCI2ChFBc3luY091dHB1dEFwcGVuZBIMCgR0ZXh0GAEgASgJEhMKC2Zyb21fb2Zmc2V0GAIgASgEIk0KE0FzeW5jTGl2ZW5lc3NVcGRhdGUSNgoIbGl2ZW5lc3MYASABKAsyJC5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQXN5bmNMaXZlbmVzcyLKAQoQQXN5bmNCdWJibGVEZWx0YRIRCgl3b3Jrc3BhY2UYASABKAkSMgoGb3BlbmVkGAMgAygLMiIuYWdlbnRzaGltLmZyb250ZW5kLnYxLkFzeW5jQnViYmxlEjkKB3VwZGF0ZXMYBCADKAsyKC5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQXN5bmNCdWJibGVVcGRhdGUSEwoLdGhyb3VnaF9zZXEYBSABKAQSDQoFZmVuY2UYBiABKAlKBAgCEANSCnNlc3Npb25faWRCMlowYWdlbnRyZXBsL3Byb3RvL2FnZW50c2hpbS9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM", [file_agentshim_frontend_v1_agent_emission]);
+  fileDesc("CihhZ2VudHNoaW0vZnJvbnRlbmQvdjEvYXN5bmMtYnViYmxlLnByb3RvEhVhZ2VudHNoaW0uZnJvbnRlbmQudjEi/gMKC0FzeW5jQnViYmxlEgoKAmlkGAEgASgJEhoKEm9yaWdpbl90b29sX3VzZV9pZBgCIAEoCRIYChBwYXJlbnRfYnViYmxlX2lkGAMgASgJEg0KBWxhYmVsGAQgASgJEhUKDXN0YXJ0ZWRfYXRfbXMYBSABKAMSNgoIbGl2ZW5lc3MYBiABKAsyJC5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQXN5bmNMaXZlbmVzcxI4CgVhZ2VudBgKIAEoCzInLmFnZW50c2hpbS5mcm9udGVuZC52MS5Bc3luY0FnZW50QnViYmxlSAASPgoHam91cm5hbBgLIAEoCzIrLmFnZW50c2hpbS5mcm9udGVuZC52MS5Bc3luY1dvcmtmbG93Sm91cm5hbEgAEjgKBXNoZWxsGAwgASgLMicuYWdlbnRzaGltLmZyb250ZW5kLnYxLkFzeW5jU2hlbGxCdWJibGVIABJGCgx1bmNsYXNzaWZpZWQYDSABKAsyLi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQXN5bmNVbmNsYXNzaWZpZWRCdWJibGVIABI4CgVtZXJnZRgOIAEoCzInLmFnZW50c2hpbS5mcm9udGVuZC52MS5Bc3luY01lcmdlQnViYmxlSAASEQoJd29ya3NwYWNlGAcgASgJQgYKBGtpbmQiewoQQXN5bmNBZ2VudEJ1YmJsZRI3CgllbWlzc2lvbnMYASADKAsyJC5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQWdlbnRFbWlzc2lvbhIuCgRmb2xkGAIgASgLMiAuYWdlbnRzaGltLmZyb250ZW5kLnYxLkFzeW5jRm9sZCJ7ChBBc3luY01lcmdlQnViYmxlEjcKCWVtaXNzaW9ucxgBIAMoCzIkLmFnZW50c2hpbS5mcm9udGVuZC52MS5BZ2VudEVtaXNzaW9uEi4KBGZvbGQYAiABKAsyIC5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQXN5bmNGb2xkIoQBChRBc3luY1dvcmtmbG93Sm91cm5hbBI8CgRyb3dzGAEgAygLMi4uYWdlbnRzaGltLmZyb250ZW5kLnYxLkFzeW5jV29ya2Zsb3dKb3VybmFsUm93Ei4KBGZvbGQYAiABKAsyIC5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQXN5bmNGb2xkIlwKEEFzeW5jU2hlbGxCdWJibGUSDwoHY29tbWFuZBgBIAEoCRI3CgZvdXRwdXQYAiABKAsyJy5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQXN5bmNPdXRwdXRTcG9vbCJlChdBc3luY1VuY2xhc3NpZmllZEJ1YmJsZRIRCgl0b29sX25hbWUYASABKAkSNwoGb3V0cHV0GAIgASgLMicuYWdlbnRzaGltLmZyb250ZW5kLnYxLkFzeW5jT3V0cHV0U3Bvb2wiOAoQQXN5bmNPdXRwdXRTcG9vbBIMCgR0ZXh0GAEgASgJEhYKDnRocm91Z2hfb2Zmc2V0GAIgASgEIoYCChdBc3luY1dvcmtmbG93Sm91cm5hbFJvdxINCgVsYWJlbBgBIAEoCRIOCgZkZXRhaWwYAiABKAkSQgoHcnVubmluZxgKIAEoCzIvLmFnZW50c2hpbS5mcm9udGVuZC52MS5Bc3luY1dvcmtmbG93U3RlcFJ1bm5pbmdIABI8CgRkb25lGAsgASgLMiwuYWdlbnRzaGltLmZyb250ZW5kLnYxLkFzeW5jV29ya2Zsb3dTdGVwRG9uZUgAEkAKBmZhaWxlZBgMIAEoCzIuLmFnZW50c2hpbS5mcm9udGVuZC52MS5Bc3luY1dvcmtmbG93U3RlcEZhaWxlZEgAQggKBnN0YXR1cyIaChhBc3luY1dvcmtmbG93U3RlcFJ1bm5pbmciFwoVQXN5bmNXb3JrZmxvd1N0ZXBEb25lIhkKF0FzeW5jV29ya2Zsb3dTdGVwRmFpbGVkIoIBCg1Bc3luY0xpdmVuZXNzEjAKBGxpdmUYASABKAsyIC5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQXN5bmNMaXZlSAASNgoHc2V0dGxlZBgCIAEoCzIjLmFnZW50c2hpbS5mcm9udGVuZC52MS5Bc3luY1NldHRsZWRIAEIHCgVzdGF0ZSIlCglBc3luY0xpdmUSGAoQbGFzdF9hY3Rpdml0eV9tcxgBIAEoAyKcAgoMQXN5bmNTZXR0bGVkEhUKDXNldHRsZWRfYXRfbXMYASABKAMSOQoKc2hlbGxfZXhpdBgCIAEoCzIlLmFnZW50c2hpbS5mcm9udGVuZC52MS5Bc3luY1NoZWxsRXhpdBI3CgRkb25lGAogASgLMicuYWdlbnRzaGltLmZyb250ZW5kLnYxLkFzeW5jT3V0Y29tZURvbmVIABI5CgVlcnJvchgLIAEoCzIoLmFnZW50c2hpbS5mcm9udGVuZC52MS5Bc3luY091dGNvbWVFcnJvckgAEjsKBmtpbGxlZBgMIAEoCzIpLmFnZW50c2hpbS5mcm9udGVuZC52MS5Bc3luY091dGNvbWVLaWxsZWRIAEIJCgdvdXRjb21lIh4KDkFzeW5jU2hlbGxFeGl0EgwKBGNvZGUYASABKAUiEgoQQXN5bmNPdXRjb21lRG9uZSIkChFBc3luY091dGNvbWVFcnJvchIPCgdtZXNzYWdlGAEgASgJIiQKEkFzeW5jT3V0Y29tZUtpbGxlZBIOCgZyZWFzb24YASABKAkiNQoJQXN5bmNGb2xkEhYKDmRyb3BwZWRfYmVmb3JlGAEgASgDEhAKCHRhaWxfY2FwGAIgASgFIu0CChFBc3luY0J1YmJsZVVwZGF0ZRIRCglidWJibGVfaWQYASABKAkSOAoFYWdlbnQYCiABKAsyJy5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQXN5bmNBZ2VudFVwZGF0ZUgAEkQKB2pvdXJuYWwYCyABKAsyMS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQXN5bmNXb3JrZmxvd0pvdXJuYWxVcGRhdGVIABI5CgVzaGVsbBgMIAEoCzIoLmFnZW50c2hpbS5mcm9udGVuZC52MS5Bc3luY091dHB1dEFwcGVuZEgAEkAKDHVuY2xhc3NpZmllZBgNIAEoCzIoLmFnZW50c2hpbS5mcm9udGVuZC52MS5Bc3luY091dHB1dEFwcGVuZEgAEj4KCGxpdmVuZXNzGA4gASgLMiouYWdlbnRzaGltLmZyb250ZW5kLnYxLkFzeW5jTGl2ZW5lc3NVcGRhdGVIAEIICgZ1cGRhdGUiewoQQXN5bmNBZ2VudFVwZGF0ZRI3CgllbWlzc2lvbnMYASADKAsyJC5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQWdlbnRFbWlzc2lvbhIuCgRmb2xkGAIgASgLMiAuYWdlbnRzaGltLmZyb250ZW5kLnYxLkFzeW5jRm9sZCKKAQoaQXN5bmNXb3JrZmxvd0pvdXJuYWxVcGRhdGUSPAoEcm93cxgBIAMoCzIuLmFnZW50c2hpbS5mcm9udGVuZC52MS5Bc3luY1dvcmtmbG93Sm91cm5hbFJvdxIuCgRmb2xkGAIgASgLMiAuYWdlbnRzaGltLmZyb250ZW5kLnYxLkFzeW5jRm9sZCI2ChFBc3luY091dHB1dEFwcGVuZBIMCgR0ZXh0GAEgASgJEhMKC2Zyb21fb2Zmc2V0GAIgASgEIk0KE0FzeW5jTGl2ZW5lc3NVcGRhdGUSNgoIbGl2ZW5lc3MYASABKAsyJC5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQXN5bmNMaXZlbmVzcyLKAQoQQXN5bmNCdWJibGVEZWx0YRIRCgl3b3Jrc3BhY2UYASABKAkSMgoGb3BlbmVkGAMgAygLMiIuYWdlbnRzaGltLmZyb250ZW5kLnYxLkFzeW5jQnViYmxlEjkKB3VwZGF0ZXMYBCADKAsyKC5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQXN5bmNCdWJibGVVcGRhdGUSEwoLdGhyb3VnaF9zZXEYBSABKAQSDQoFZmVuY2UYBiABKAlKBAgCEANSCnNlc3Npb25faWRCMlowYWdlbnRyZXBsL3Byb3RvL2FnZW50c2hpbS9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM", [file_agentshim_frontend_v1_agent_emission]);
 
 /**
  * One piece of detached work, and the unit every later update is addressed to.
@@ -99,11 +99,13 @@ export type AsyncBubble = Message<"agentshim.frontend.v1.AsyncBubble"> & {
    * A newly opened bubble carries an empty body; a bubble arriving in a
    * reconnect snapshot carries everything the daemon has folded to date.
    *
-   * A skill invocation is deliberately absent: it is a synchronous card
-   * (AgentEmission.skill_body), never detached work. Should skills ever
-   * detach, they arrive as a new arm here. Nothing is pre-declared for that,
-   * because a speculative arm is a shape no producer has to honour and no
-   * consumer can test against.
+   * Skill invocations are synchronous cards (AgentEmission.skill_body), not
+   * detached work — with one exception, `merge`: the daemon intercepts the
+   * merge skill's invocation and opens it as a bubble, because what follows is
+   * a whole conversation rather than a card. Should any other skill detach, it
+   * arrives as its own new arm here. Nothing is pre-declared for that, because
+   * a speculative arm is a shape no producer has to honour and no consumer can
+   * test against.
    *
    * @generated from oneof agentshim.frontend.v1.AsyncBubble.kind
    */
@@ -131,6 +133,12 @@ export type AsyncBubble = Message<"agentshim.frontend.v1.AsyncBubble"> & {
      */
     value: AsyncUnclassifiedBubble;
     case: "unclassified";
+  } | {
+    /**
+     * @generated from field: agentshim.frontend.v1.AsyncMergeBubble merge = 14;
+     */
+    value: AsyncMergeBubble;
+    case: "merge";
   } | { case: undefined; value?: undefined };
 
   /**
@@ -183,6 +191,45 @@ export const AsyncAgentBubbleSchema: GenMessage<AsyncAgentBubble> = /*@__PURE__*
   messageDesc(file_agentshim_frontend_v1_async_bubble, 1);
 
 /**
+ * A merge run: the conversation a merge drives through this workspace's own
+ * session, folded exactly like a detached agent's.
+ *
+ * DAEMON-AUTHORED. No tool spawns it: the daemon opens it when it classifies
+ * the Skill invocation `/create-or-update-workspace merge`, and every
+ * subsequent emission of the session folds here as a child until the user's
+ * own next prompt or an interrupt settles it. Membership is TEMPORAL — the
+ * window between that classification and the user taking the session back —
+ * not a join key.
+ *
+ * @generated from message agentshim.frontend.v1.AsyncMergeBubble
+ */
+export type AsyncMergeBubble = Message<"agentshim.frontend.v1.AsyncMergeBubble"> & {
+  /**
+   * The merge conversation so far, in emission order, in EXACTLY the
+   * vocabulary the top-level feed uses (the same shape as
+   * AsyncAgentBubble.emissions, deliberately: a frontend's renderer for a
+   * response bubble, a thinking block or a tool card is the same code here).
+   *
+   * @generated from field: repeated agentshim.frontend.v1.AgentEmission emissions = 1;
+   */
+  emissions: AgentEmission[];
+
+  /**
+   * Tail-cap accounting for `emissions`. See AsyncFold.
+   *
+   * @generated from field: agentshim.frontend.v1.AsyncFold fold = 2;
+   */
+  fold?: AsyncFold | undefined;
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.AsyncMergeBubble.
+ * Use `create(AsyncMergeBubbleSchema)` to create a new message.
+ */
+export const AsyncMergeBubbleSchema: GenMessage<AsyncMergeBubble> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_async_bubble, 2);
+
+/**
  * A Workflow run's journal: the step log a Workflow launch writes.
  *
  * ONE PRODUCER. This kind exists for the Workflow tool and nothing else — its
@@ -213,7 +260,7 @@ export type AsyncWorkflowJournal = Message<"agentshim.frontend.v1.AsyncWorkflowJ
  * Use `create(AsyncWorkflowJournalSchema)` to create a new message.
  */
 export const AsyncWorkflowJournalSchema: GenMessage<AsyncWorkflowJournal> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_async_bubble, 2);
+  messageDesc(file_agentshim_frontend_v1_async_bubble, 3);
 
 /**
  * A backgrounded shell command: an opaque byte spool with a command line.
@@ -243,7 +290,7 @@ export type AsyncShellBubble = Message<"agentshim.frontend.v1.AsyncShellBubble">
  * Use `create(AsyncShellBubbleSchema)` to create a new message.
  */
 export const AsyncShellBubbleSchema: GenMessage<AsyncShellBubble> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_async_bubble, 3);
+  messageDesc(file_agentshim_frontend_v1_async_bubble, 4);
 
 /**
  * A spawn whose tool the daemon does not recognize.
@@ -282,7 +329,7 @@ export type AsyncUnclassifiedBubble = Message<"agentshim.frontend.v1.AsyncUnclas
  * Use `create(AsyncUnclassifiedBubbleSchema)` to create a new message.
  */
 export const AsyncUnclassifiedBubbleSchema: GenMessage<AsyncUnclassifiedBubble> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_async_bubble, 4);
+  messageDesc(file_agentshim_frontend_v1_async_bubble, 5);
 
 /**
  * A verbatim byte spool and its delivery cursor.
@@ -317,7 +364,7 @@ export type AsyncOutputSpool = Message<"agentshim.frontend.v1.AsyncOutputSpool">
  * Use `create(AsyncOutputSpoolSchema)` to create a new message.
  */
 export const AsyncOutputSpoolSchema: GenMessage<AsyncOutputSpool> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_async_bubble, 5);
+  messageDesc(file_agentshim_frontend_v1_async_bubble, 6);
 
 /**
  * One logged step of a Workflow run: a dot, a name and a detail line.
@@ -373,7 +420,7 @@ export type AsyncWorkflowJournalRow = Message<"agentshim.frontend.v1.AsyncWorkfl
  * Use `create(AsyncWorkflowJournalRowSchema)` to create a new message.
  */
 export const AsyncWorkflowJournalRowSchema: GenMessage<AsyncWorkflowJournalRow> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_async_bubble, 6);
+  messageDesc(file_agentshim_frontend_v1_async_bubble, 7);
 
 /**
  * The step is still executing.
@@ -388,7 +435,7 @@ export type AsyncWorkflowStepRunning = Message<"agentshim.frontend.v1.AsyncWorkf
  * Use `create(AsyncWorkflowStepRunningSchema)` to create a new message.
  */
 export const AsyncWorkflowStepRunningSchema: GenMessage<AsyncWorkflowStepRunning> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_async_bubble, 7);
+  messageDesc(file_agentshim_frontend_v1_async_bubble, 8);
 
 /**
  * The step completed successfully.
@@ -403,7 +450,7 @@ export type AsyncWorkflowStepDone = Message<"agentshim.frontend.v1.AsyncWorkflow
  * Use `create(AsyncWorkflowStepDoneSchema)` to create a new message.
  */
 export const AsyncWorkflowStepDoneSchema: GenMessage<AsyncWorkflowStepDone> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_async_bubble, 8);
+  messageDesc(file_agentshim_frontend_v1_async_bubble, 9);
 
 /**
  * The step failed. The failure text is the row's `detail`; this arm carries no
@@ -419,7 +466,7 @@ export type AsyncWorkflowStepFailed = Message<"agentshim.frontend.v1.AsyncWorkfl
  * Use `create(AsyncWorkflowStepFailedSchema)` to create a new message.
  */
 export const AsyncWorkflowStepFailedSchema: GenMessage<AsyncWorkflowStepFailed> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_async_bubble, 9);
+  messageDesc(file_agentshim_frontend_v1_async_bubble, 10);
 
 /**
  * Live-or-settled, expressed as arms so that "settled" and "settled with what
@@ -452,7 +499,7 @@ export type AsyncLiveness = Message<"agentshim.frontend.v1.AsyncLiveness"> & {
  * Use `create(AsyncLivenessSchema)` to create a new message.
  */
 export const AsyncLivenessSchema: GenMessage<AsyncLiveness> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_async_bubble, 10);
+  messageDesc(file_agentshim_frontend_v1_async_bubble, 11);
 
 /**
  * The work is still running.
@@ -476,7 +523,7 @@ export type AsyncLive = Message<"agentshim.frontend.v1.AsyncLive"> & {
  * Use `create(AsyncLiveSchema)` to create a new message.
  */
 export const AsyncLiveSchema: GenMessage<AsyncLive> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_async_bubble, 11);
+  messageDesc(file_agentshim_frontend_v1_async_bubble, 12);
 
 /**
  * The work has finished, one way or another.
@@ -541,7 +588,7 @@ export type AsyncSettled = Message<"agentshim.frontend.v1.AsyncSettled"> & {
  * Use `create(AsyncSettledSchema)` to create a new message.
  */
 export const AsyncSettledSchema: GenMessage<AsyncSettled> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_async_bubble, 12);
+  messageDesc(file_agentshim_frontend_v1_async_bubble, 13);
 
 /**
  * A process's exit status.
@@ -564,7 +611,7 @@ export type AsyncShellExit = Message<"agentshim.frontend.v1.AsyncShellExit"> & {
  * Use `create(AsyncShellExitSchema)` to create a new message.
  */
 export const AsyncShellExitSchema: GenMessage<AsyncShellExit> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_async_bubble, 13);
+  messageDesc(file_agentshim_frontend_v1_async_bubble, 14);
 
 /**
  * Finished successfully. For a process, the daemon resolved this from an exit
@@ -580,7 +627,7 @@ export type AsyncOutcomeDone = Message<"agentshim.frontend.v1.AsyncOutcomeDone">
  * Use `create(AsyncOutcomeDoneSchema)` to create a new message.
  */
 export const AsyncOutcomeDoneSchema: GenMessage<AsyncOutcomeDone> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_async_bubble, 14);
+  messageDesc(file_agentshim_frontend_v1_async_bubble, 15);
 
 /**
  * Finished by failing. For a process, the daemon resolved this from a nonzero
@@ -604,7 +651,7 @@ export type AsyncOutcomeError = Message<"agentshim.frontend.v1.AsyncOutcomeError
  * Use `create(AsyncOutcomeErrorSchema)` to create a new message.
  */
 export const AsyncOutcomeErrorSchema: GenMessage<AsyncOutcomeError> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_async_bubble, 15);
+  messageDesc(file_agentshim_frontend_v1_async_bubble, 16);
 
 /**
  * Stopped from outside before it finished: an explicit stop, a cancellation,
@@ -628,7 +675,7 @@ export type AsyncOutcomeKilled = Message<"agentshim.frontend.v1.AsyncOutcomeKill
  * Use `create(AsyncOutcomeKilledSchema)` to create a new message.
  */
 export const AsyncOutcomeKilledSchema: GenMessage<AsyncOutcomeKilled> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_async_bubble, 16);
+  messageDesc(file_agentshim_frontend_v1_async_bubble, 17);
 
 /**
  * Tail-cap accounting for a bubble whose folded content is capped.
@@ -667,7 +714,7 @@ export type AsyncFold = Message<"agentshim.frontend.v1.AsyncFold"> & {
  * Use `create(AsyncFoldSchema)` to create a new message.
  */
 export const AsyncFoldSchema: GenMessage<AsyncFold> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_async_bubble, 17);
+  messageDesc(file_agentshim_frontend_v1_async_bubble, 18);
 
 /**
  * One incremental push to one bubble: the id routes it, the arm types it.
@@ -738,7 +785,7 @@ export type AsyncBubbleUpdate = Message<"agentshim.frontend.v1.AsyncBubbleUpdate
  * Use `create(AsyncBubbleUpdateSchema)` to create a new message.
  */
 export const AsyncBubbleUpdateSchema: GenMessage<AsyncBubbleUpdate> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_async_bubble, 18);
+  messageDesc(file_agentshim_frontend_v1_async_bubble, 19);
 
 /**
  * New output from a detached agent.
@@ -771,7 +818,7 @@ export type AsyncAgentUpdate = Message<"agentshim.frontend.v1.AsyncAgentUpdate">
  * Use `create(AsyncAgentUpdateSchema)` to create a new message.
  */
 export const AsyncAgentUpdateSchema: GenMessage<AsyncAgentUpdate> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_async_bubble, 19);
+  messageDesc(file_agentshim_frontend_v1_async_bubble, 20);
 
 /**
  * New steps in a Workflow run's journal.
@@ -805,7 +852,7 @@ export type AsyncWorkflowJournalUpdate = Message<"agentshim.frontend.v1.AsyncWor
  * Use `create(AsyncWorkflowJournalUpdateSchema)` to create a new message.
  */
 export const AsyncWorkflowJournalUpdateSchema: GenMessage<AsyncWorkflowJournalUpdate> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_async_bubble, 20);
+  messageDesc(file_agentshim_frontend_v1_async_bubble, 21);
 
 /**
  * New bytes on a spool.
@@ -836,7 +883,7 @@ export type AsyncOutputAppend = Message<"agentshim.frontend.v1.AsyncOutputAppend
  * Use `create(AsyncOutputAppendSchema)` to create a new message.
  */
 export const AsyncOutputAppendSchema: GenMessage<AsyncOutputAppend> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_async_bubble, 21);
+  messageDesc(file_agentshim_frontend_v1_async_bubble, 22);
 
 /**
  * A liveness transition: live to settled, or a settled outcome changing (a
@@ -858,7 +905,7 @@ export type AsyncLivenessUpdate = Message<"agentshim.frontend.v1.AsyncLivenessUp
  * Use `create(AsyncLivenessUpdateSchema)` to create a new message.
  */
 export const AsyncLivenessUpdateSchema: GenMessage<AsyncLivenessUpdate> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_async_bubble, 22);
+  messageDesc(file_agentshim_frontend_v1_async_bubble, 23);
 
 /**
  * The async push frame: bubbles that opened, and updates to bubbles already
@@ -915,5 +962,5 @@ export type AsyncBubbleDelta = Message<"agentshim.frontend.v1.AsyncBubbleDelta">
  * Use `create(AsyncBubbleDeltaSchema)` to create a new message.
  */
 export const AsyncBubbleDeltaSchema: GenMessage<AsyncBubbleDelta> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_async_bubble, 23);
+  messageDesc(file_agentshim_frontend_v1_async_bubble, 24);
 
