@@ -63,23 +63,33 @@ func feedProse(items []*frontendv1.ConversationItem) []string {
 	return out
 }
 
-// mergeProse returns every assistant utterance any delivery of bubbleID
-// carried. A merge bubble advances by whole-bubble re-delivery, so the LAST
-// delivery is the complete fold and earlier ones are its prefixes.
+// mergeProse returns every assistant utterance the merge window delivered for
+// bubbleID: the fold the OPEN carried, plus every MERGE-ARM update appended to
+// it since.
+//
+// AMENDED: this used to read the last whole-bubble re-delivery, which was how a
+// merge window advanced before the contract had an arm for it. The update
+// oneof's own rule — "Never a re-send of the whole bubble" — retires that route,
+// so the fold a client holds is now the open plus its appends, and that is what
+// this reconstructs.
 func mergeProse(seen asyncTraffic, bubbleID string) []string {
 	var out []string
-	for _, b := range seen.bubbles() {
-		if b.GetId() != bubbleID || b.GetMerge() == nil {
-			continue
-		}
-		out = out[:0]
-		for _, em := range b.GetMerge().GetEmissions() {
+	appendEmissions := func(ems []*frontendv1.AgentEmission) {
+		for _, em := range ems {
 			for _, block := range em.GetResponse().GetBody().GetContent() {
 				if text := block.GetText().GetText(); text != "" {
 					out = append(out, text)
 				}
 			}
 		}
+	}
+	for _, b := range seen.bubbles() {
+		if b.GetId() == bubbleID && b.GetMerge() != nil {
+			appendEmissions(b.GetMerge().GetEmissions())
+		}
+	}
+	for _, u := range seen.updatesFor(bubbleID) {
+		appendEmissions(u.GetMerge().GetEmissions())
 	}
 	return out
 }

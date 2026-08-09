@@ -135,25 +135,22 @@ func (c *consumer) pushAsync(push asyncPush, ev *corev1.Event) {
 			}},
 		})
 	}
-	if len(push.Opened) == 0 && len(push.Redelivered) == 0 && len(push.Updates) == 0 {
+	if len(push.Opened) == 0 && len(push.Updates) == 0 {
 		return
 	}
 	// THE BUBBLE IDS, NOT JUST THEIR COUNT. An update is addressed to a bubble
 	// by id, so a push reporting only "updates=1" cannot be matched to the
 	// bubble it filled — which is precisely the question asked of this record.
-	c.logf("session-controller: async bubble push session=%s ws=%q seq=%d opened=%d redelivered=%d updates=%d opened_bubbles=%s redelivered_bubbles=%s updated_bubbles=%s",
-		c.sessionID, c.workspace, ev.GetSeq(), len(push.Opened), len(push.Redelivered), len(push.Updates),
-		openedBubbleIDs(push.Opened), openedBubbleIDs(push.Redelivered), updatedBubbleIDs(push.Updates))
-	// ANCHORS FOR FIRST-TIME OPENS ONLY. A re-delivered bubble already has its
-	// place in the conversation; anchoring it again would draw the same launch
-	// twice — see asyncPush.Redelivered.
+	c.logf("session-controller: async bubble push session=%s ws=%q seq=%d opened=%d updates=%d opened_bubbles=%s updated_bubbles=%s",
+		c.sessionID, c.workspace, ev.GetSeq(), len(push.Opened), len(push.Updates),
+		openedBubbleIDs(push.Opened), updatedBubbleIDs(push.Updates))
+	// ONE ANCHOR PER OPEN. Everything else an event produced for an already-open
+	// bubble is an update, so this list cannot re-anchor a bubble it anchored
+	// before.
 	c.pushAnchors(push.Opened, ev)
 	c.push.PushAsyncBubbleDelta(&frontendv1.AsyncBubbleDelta{
-		Workspace: c.workspace,
-		// BOTH LISTS RIDE `opened`, which the contract defines as replacing a
-		// bubble the receiver already knows. That is the merge kind's only route
-		// for new content, since AsyncBubbleUpdate has no arm for it.
-		Opened:     append(append([]*frontendv1.AsyncBubble{}, push.Opened...), push.Redelivered...),
+		Workspace:  c.workspace,
+		Opened:     push.Opened,
 		Updates:    push.Updates,
 		ThroughSeq: ev.GetSeq(),
 		Fence:      c.fence(),

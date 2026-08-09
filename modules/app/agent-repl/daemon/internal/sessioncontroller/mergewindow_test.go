@@ -122,8 +122,9 @@ func openWindow(t *testing.T, s *asyncBubbleStore) *frontendv1.AsyncBubble {
 	return b
 }
 
-// mergeBubbles returns every merge-kind bubble the frontend was pushed, across
-// first delivery and re-delivery alike.
+// mergeBubbles returns every merge-kind bubble the frontend was OPENED with.
+// A merge bubble is opened once and advances by its update arm thereafter, so
+// this list has one entry per merge run.
 func (h *queueHarness) mergeBubbles() []*frontendv1.AsyncBubble {
 	h.push.mu.Lock()
 	defer h.push.mu.Unlock()
@@ -132,6 +133,31 @@ func (h *queueHarness) mergeBubbles() []*frontendv1.AsyncBubble {
 		for _, b := range d.GetOpened() {
 			if b.GetMerge() != nil {
 				out = append(out, b)
+			}
+		}
+	}
+	return out
+}
+
+// mergeAppends returns the assistant prose every MERGE-ARM update addressed to
+// bubbleID carried, in order. It reads the wire arm rather than the store's own
+// bubble object, which is the only way to tell an update that shipped from a
+// fold that merely happened.
+func (h *queueHarness) mergeAppends(bubbleID string) []string {
+	h.push.mu.Lock()
+	defer h.push.mu.Unlock()
+	var out []string
+	for _, d := range h.push.bubbles {
+		for _, u := range d.GetUpdates() {
+			if u.GetBubbleId() != bubbleID || u.GetMerge() == nil {
+				continue
+			}
+			for _, em := range u.GetMerge().GetEmissions() {
+				for _, block := range em.GetResponse().GetBody().GetContent() {
+					if text := block.GetText().GetText(); text != "" {
+						out = append(out, text)
+					}
+				}
 			}
 		}
 	}
@@ -289,7 +315,11 @@ func TestFoldMergeEmissionsFoldsIntoTheOpenBubble(t *testing.T) {
 	}
 }
 
-func TestFoldMergeEmissionsRedeliversTheWholeBubble(t *testing.T) {
+// AMENDED: this test pinned whole-bubble re-delivery, the interim shape the
+// window advanced by before the contract had an arm for it. The update oneof's
+// own rule — "Never a re-send of the whole bubble" — is what retires that
+// mechanism, and `merge = 15` is the arm it names instead.
+func TestFoldMergeEmissionsDeliversOnTheMergeUpdateArm(t *testing.T) {
 	// Arrange
 	s := newAsyncBubbleStore("/ws", nil)
 	b := openWindow(t, s)
@@ -300,10 +330,12 @@ func TestFoldMergeEmissionsRedeliversTheWholeBubble(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Assert: the contract gives AsyncBubbleUpdate no merge arm, so new content
-	// reaches a client only by replacing the bubble it already holds.
-	if got != b {
-		t.Fatalf("the fold returned %v, want the bubble itself for re-delivery through AsyncBubbleDelta.opened", got)
+	// Assert
+	if got.GetMerge() == nil {
+		t.Fatalf("the fold delivered on arm %T, want the merge arm", got.GetUpdate())
+	}
+	if got.GetBubbleId() != b.GetId() {
+		t.Fatalf("the update is addressed to %q, want the open window %q", got.GetBubbleId(), b.GetId())
 	}
 }
 
@@ -319,7 +351,7 @@ func TestFoldMergeEmissionsReportsNothingWithNoWindowOpen(t *testing.T) {
 
 	// Assert
 	if got != nil {
-		t.Fatalf("with no window open the session's emissions belong to the feed, got a fold into %q", got.GetId())
+		t.Fatalf("with no window open the session's emissions belong to the feed, got a fold into %q", got.GetBubbleId())
 	}
 }
 
@@ -451,19 +483,28 @@ func TestANonMergeSkillInvocationOpensNoBubble(t *testing.T) {
 	}
 }
 
+// AMENDED: this read the fold off the bubble the store had already handed the
+// pusher by pointer, which a re-delivery mechanism made meaningful and an append
+// mechanism does not — the store's object grows whether or not anything shipped.
+// It now reads the merge-arm update, which is what the client actually applies.
 func TestTheSessionsEmissionsFoldIntoTheOpenMergeBubble(t *testing.T) {
 	// Arrange
 	h := newQueueHarness(t, nil)
 	h.controller().consumer.Consume(mergeSkillCallEvent(t, 10, "a-merge", mergeOriginCall, "create-or-update-workspace", "merge"))
+	bubbleID := h.mergeBubbles()[0].GetId()
 
 	// Act
 	h.controller().consumer.Consume(assistantTextEvent(t, 11, "a-inside", "cherry-picking the workspace"))
 
 	// Assert
-	bubbles := h.mergeBubbles()
-	last := bubbles[len(bubbles)-1]
-	if got := len(last.GetMerge().GetEmissions()); got == 0 {
-		t.Fatalf("the merge bubble folded nothing; the merge run's own utterance never reached it")
+	var folded bool
+	for _, text := range h.mergeAppends(bubbleID) {
+		if text == "cherry-picking the workspace" {
+			folded = true
+		}
+	}
+	if !folded {
+		t.Fatalf("the merge bubble was appended %v; the merge run's own utterance never reached it on the merge arm", h.mergeAppends(bubbleID))
 	}
 }
 

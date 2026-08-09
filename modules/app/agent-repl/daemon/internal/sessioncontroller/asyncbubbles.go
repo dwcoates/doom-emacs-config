@@ -111,20 +111,14 @@ func newAsyncBubbleStore(workspace string, logf dlog.Logf) *asyncBubbleStore {
 // be turned into either.
 type asyncPush struct {
 	// Opened are bubbles opening for the first time.
+	//
+	// NOTHING ELSE RIDES AsyncBubbleDelta.opened. A bubble already open advances
+	// by its own update arm — including the window kinds, whose `merge` arm the
+	// contract added precisely so that new content is an APPEND rather than the
+	// whole-bubble re-send AsyncBubbleUpdate forbids. That keeps "every opened
+	// bubble gets exactly one anchor" (pushAnchors) a property of this one list
+	// rather than of a dedup kept beside it.
 	Opened []*frontendv1.AsyncBubble
-	// Redelivered are bubbles already open being re-sent WHOLE, which
-	// AsyncBubbleDelta.opened defines as replacing the copy the receiver holds.
-	//
-	// IT IS A SEPARATE LIST FROM Opened ON PURPOSE. Both ride the delta's
-	// `opened` field, but only a FIRST-TIME open earns a feed anchor — "every
-	// opened bubble gets exactly one anchor" is a property of the Opened list
-	// (pushAnchors), and folding re-delivery into it would re-anchor the same
-	// bubble on every batch.
-	//
-	// Only the merge kind travels this way, and only because the contract gave
-	// AsyncMergeBubble no update arm to advance by. See
-	// frontend.AppendMergeEmissions.
-	Redelivered []*frontendv1.AsyncBubble
 	// Updates are incremental pushes to bubbles already open, in order.
 	Updates []*frontendv1.AsyncBubbleUpdate
 	// Faults are detachments the daemon could not attribute or classify. They
@@ -148,7 +142,7 @@ type asyncFault struct {
 }
 
 func (p *asyncPush) empty() bool {
-	return len(p.Opened) == 0 && len(p.Redelivered) == 0 && len(p.Updates) == 0 && len(p.Faults) == 0
+	return len(p.Opened) == 0 && len(p.Updates) == 0 && len(p.Faults) == 0
 }
 
 // absorb folds another event-half's async effect into this one, preserving each
@@ -156,7 +150,6 @@ func (p *asyncPush) empty() bool {
 // classifiers contribute to it — the detached-work half and the merge window's.
 func (p *asyncPush) absorb(other asyncPush) {
 	p.Opened = append(p.Opened, other.Opened...)
-	p.Redelivered = append(p.Redelivered, other.Redelivered...)
 	p.Updates = append(p.Updates, other.Updates...)
 	p.Faults = append(p.Faults, other.Faults...)
 }
