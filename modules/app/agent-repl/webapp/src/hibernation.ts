@@ -36,13 +36,20 @@
  * so the mode that is usually the cheap one is not. Collapsing them into
  * "session hibernated" would hide the only fact that changes the answer.
  *
+ * WHY THE SIZE IS SAID OUT LOUD TOO. The decision is how much context to carry,
+ * and a card that never names the amount asks it in the abstract: "the whole
+ * accumulated context" is the same sentence for a 12k session and a 400k one,
+ * which are opposite answers. So the gate states the session's standing input
+ * tokens (see `revivalContextSizeText`) above the options.
+ *
  * NOTHING HERE IS DERIVED. The daemon resolved the cause, the cutoff, the
- * elapsed time and the TTL; this module renders them and clears the gate when a
- * pushed `SessionView` drops the field.
+ * elapsed time, the TTL and the token total; this module renders them and
+ * clears the gate when a pushed `SessionView` drops the field.
  */
 
 import { formatAge } from "./duration.js";
 import { escapeHtml } from "./highlight.js";
+import { formatTokens } from "./tokens.js";
 import type { ReviveDecision } from "./frontend-command.js";
 import type { HibernationDetail, WorkspaceGateView } from "./frontend-proto.js";
 import type { AdapterEffect } from "./state-adapter.js";
@@ -124,6 +131,49 @@ export function reviveDirectWarning(hibernation: HibernationDetail): string {
   return (
     "Resume as-is: the whole accumulated context, carried by every turn from here on. " +
     "The deliberate choice when you know the conversation is worth its size."
+  );
+}
+
+/**
+ * The line printed when the daemon has reported no token total for the
+ * session.
+ *
+ * IT SAYS UNKNOWN RATHER THAN ZERO. A gate that printed `0 input tokens` for a
+ * session whose totals have not landed would recommend `direct` on the exact
+ * evidence it does not have — the one reading of the figure that is never
+ * recoverable by looking harder, because a free conversation and an
+ * unmeasured one would print the same sentence.
+ */
+export const REVIVAL_CONTEXT_UNKNOWN_TEXT =
+  "The daemon has reported no token total for this session yet, so how much context a " +
+  "resume would carry is unknown.";
+
+/**
+ * WHAT THE DECISION IS ABOUT, IN TOKENS — the session's standing context size,
+ * stated before the options are read.
+ *
+ * WHY IT IS ON THE CARD AT ALL. Every option below is a trade between what the
+ * conversation keeps and what the next turn pays, and until this sentence
+ * existed the card described the trade without ever naming its size: "the whole
+ * accumulated context" reads identically at 12k and at 400k, and those two
+ * sessions have opposite right answers. The figure is the one fact that decides
+ * whether foregoing a compaction is thrift or an expensive mistake.
+ *
+ * IT IS THE INPUT SIDE, CACHED AND UNCACHED TOGETHER, because that is what a
+ * resumed turn re-presents to the model: the cache hit and both misses are the
+ * same standing prefix, and which bucket it lands in is a fact about the cache
+ * at that moment, not about the size of the conversation. `SessionView.total_tokens`
+ * — the daemon's fold of the last result's usage, and the same figure the
+ * topbar chip prints — is that measure.
+ *
+ * NOTHING IS DERIVED HERE. The daemon resolved the total; this states it.
+ */
+export function revivalContextSizeText(contextTokens: number | null): string {
+  if (contextTokens === null) return REVIVAL_CONTEXT_UNKNOWN_TEXT;
+  return (
+    `This session carries ${formatTokens(contextTokens)} input tokens of context, cached and ` +
+    `uncached together. Every option below that does not compact or clear carries all of ` +
+    `them into the next turn, which re-ingests them.`
   );
 }
 
@@ -532,6 +582,35 @@ export function reviveFailedLog(
 }
 
 /**
+ * Everything the gate is drawn from.
+ *
+ * IT IS A RECORD RATHER THAN POSITIONALS, and `contextTokens` is why. The
+ * three optional arguments this used to trail had accumulated to the point
+ * where a fourth would have been a required value sitting behind three
+ * defaulted ones — impossible to express, so the size of the conversation
+ * would have had to become optional too, and an omitted one would have
+ * silently printed {@link REVIVAL_CONTEXT_UNKNOWN_TEXT} at a caller that knew
+ * the number perfectly well. A required FIELD makes the omission a compile
+ * error instead.
+ */
+export interface RevivalGateInput {
+  /** The daemon's hibernation detail, or null for an awake session. */
+  hibernation: HibernationDetail | null;
+  /**
+   * The session's standing context size (`SessionView.total_tokens`), or null
+   * when the daemon has reported none. NULL IS ABSENCE, never a zero: see
+   * {@link REVIVAL_CONTEXT_UNKNOWN_TEXT}.
+   */
+  contextTokens: number | null;
+  /** A decision already sent and not yet ruled on, which replaces the buttons. */
+  pending?: RevivePending;
+  /** The clock the "asleep for" age is measured against. */
+  now?: number;
+  /** The failed-revival line, or "" when no accepted decision has failed. */
+  failure?: string;
+}
+
+/**
  * The revival gate card, or "" when the session is awake.
  *
  * THE ACTIONS ARE THE REVIVAL DECISIONS AND NOTHING ELSE. There is no "dismiss": the gate is a pure function
@@ -544,12 +623,8 @@ export function reviveFailedLog(
  * that drops the field, so the honest report is "waiting", and leaving two
  * greyed buttons on screen would invite a second click on the other one.
  */
-export function revivalGateHtml(
-  hibernation: HibernationDetail | null,
-  pending: RevivePending = null,
-  now: number = Date.now(),
-  failure = "",
-): string {
+export function revivalGateHtml(input: RevivalGateInput): string {
+  const { hibernation, contextTokens, pending = null, now = Date.now(), failure = "" } = input;
   if (hibernation === null) return "";
   const since =
     hibernation.sinceMs > 0
@@ -592,6 +667,7 @@ export function revivalGateHtml(
       </div>
       ${failed}
       <div class="hibernation-cause">${escapeHtml(hibernationCauseText(hibernation))}</div>
+      <div class="hibernation-context">${escapeHtml(revivalContextSizeText(contextTokens))}</div>
       ${actions}
     </div>`;
 }

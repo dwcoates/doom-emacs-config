@@ -3167,6 +3167,15 @@ pre {
 /* WHY it is asleep, in the daemon's own terms. It leads because it is the
    fact that decides which of the buttons below is the right one. */
 .hibernation-cause { margin-top: 0.25rem; }
+/* HOW BIG the conversation is, in the token color the rest of the app spends
+   on cost. It sits between the cause and the options because it is the size of
+   the thing every button below trades against, and it is not muted: an
+   unmissable figure is the whole reason it is on the card. */
+.hibernation-context {
+  margin-top: 0.35rem;
+  color: var(--info-tokens);
+  font-variant-numeric: tabular-nums;
+}
 /* One ROW per option: its button, and the sentence saying what that option
    keeps. Stacked rather than laid out side by side, because five buttons in a
    row with their explanations elsewhere would be paired up by position — and a
