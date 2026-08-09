@@ -301,6 +301,163 @@ func TestRecordCommandLatencyOverdueContextReportsElapsedRatherThanAVerdict(t *t
 	}
 }
 
+// classifiedSampleFor is a slow delivery the transport could EXPLAIN: it was
+// delivered inside the connection's connect-snapshot drain window.
+func classifiedSampleFor(workspace string, ack time.Duration) frontend.CommandLatencySample {
+	sample := sampleFor(workspace, ack, 2*time.Second)
+	sample.Decision = frontend.BootSnapshotDrainDecision
+	return sample
+}
+
+func TestRecordCommandLatencyClassifiesAnExplainedSlowDeliveryAsInfo(t *testing.T) {
+	// Arrange. The boot-drain window is the transport working, not failing: the
+	// cost is real and the record still reports it at normal verbosity, but it
+	// is not an operator's problem to chase.
+	workspace := t.TempDir()
+	recorder, _, _ := newTestLatencyRecorder(t)
+
+	// Act.
+	if err := recorder.RecordCommandLatency(classifiedSampleFor(workspace, 4*time.Second)); err != nil {
+		t.Fatalf("RecordCommandLatency = %v, want nil", err)
+	}
+
+	// Assert.
+	record := readWorkspaceDaemonRecords(t, workspace)[0]
+	if record.Level != dlog.LevelInfo || record.Verbosity != dlog.Normal {
+		t.Fatalf("record level/verbosity = %s/%s, want %s/%s",
+			record.Level, record.Verbosity, dlog.LevelInfo, dlog.Normal)
+	}
+}
+
+func TestRecordCommandLatencyNamesTheWindowItClassifiedBy(t *testing.T) {
+	// Arrange.
+	workspace := t.TempDir()
+	recorder, _, _ := newTestLatencyRecorder(t)
+
+	// Act.
+	if err := recorder.RecordCommandLatency(classifiedSampleFor(workspace, 4*time.Second)); err != nil {
+		t.Fatalf("RecordCommandLatency = %v, want nil", err)
+	}
+
+	// Assert. A record quieter than a warning must say why, or it is
+	// indistinguishable from an alarm that was simply turned down.
+	record := readWorkspaceDaemonRecords(t, workspace)[0]
+	if got := record.Context["decision"]; got != frontend.BootSnapshotDrainDecision {
+		t.Fatalf("context[decision] = %#v, want %q", got, frontend.BootSnapshotDrainDecision)
+	}
+}
+
+func TestRecordCommandLatencyKeepsEveryFigureOnAClassifiedRecord(t *testing.T) {
+	// Arrange. Classification changes the SEVERITY and nothing else: the cost
+	// is still fully measurable from the record.
+	workspace := t.TempDir()
+	recorder, _, _ := newTestLatencyRecorder(t)
+
+	// Act.
+	if err := recorder.RecordCommandLatency(classifiedSampleFor(workspace, 4*time.Second)); err != nil {
+		t.Fatalf("RecordCommandLatency = %v, want nil", err)
+	}
+
+	// Assert.
+	record := readWorkspaceDaemonRecords(t, workspace)[0]
+	want := map[string]any{
+		"duration_ms":   float64(4000),
+		"enqueue_ms":    float64(3000),
+		"processing_ms": float64(2000),
+		"threshold_ms":  float64(2000),
+		"queue_depth":   float64(3),
+		"delivered":     true,
+		"ok":            true,
+	}
+	for key, value := range want {
+		if record.Context[key] != value {
+			t.Fatalf("context[%q] = %#v, want %#v", key, record.Context[key], value)
+		}
+	}
+}
+
+func TestRecordCommandLatencyKeepsAClassifiedRecordOnTheCompletionOperation(t *testing.T) {
+	// Arrange. Operators query the operation; a classified completion is still
+	// a completion and must stay countable as one.
+	workspace := t.TempDir()
+	recorder, _, _ := newTestLatencyRecorder(t)
+
+	// Act.
+	if err := recorder.RecordCommandLatency(classifiedSampleFor(workspace, 4*time.Second)); err != nil {
+		t.Fatalf("RecordCommandLatency = %v, want nil", err)
+	}
+
+	// Assert.
+	if got := readWorkspaceDaemonRecords(t, workspace)[0].Operation; got != CommandLatencyOperation {
+		t.Fatalf("operation = %q, want %q", got, CommandLatencyOperation)
+	}
+}
+
+func TestRecordCommandLatencyLeavesAnUnexplainedSlowDeliveryUntouched(t *testing.T) {
+	// Arrange. Outside every structural window the record is exactly what it
+	// always was — warn, with no decision key at all.
+	workspace := t.TempDir()
+	recorder, _, _ := newTestLatencyRecorder(t)
+
+	// Act.
+	if err := recorder.RecordCommandLatency(sampleFor(workspace, 4*time.Second, 2*time.Second)); err != nil {
+		t.Fatalf("RecordCommandLatency = %v, want nil", err)
+	}
+
+	// Assert.
+	record := readWorkspaceDaemonRecords(t, workspace)[0]
+	if record.Level != dlog.LevelWarn || record.Verbosity != dlog.Normal {
+		t.Fatalf("record level/verbosity = %s/%s, want %s/%s",
+			record.Level, record.Verbosity, dlog.LevelWarn, dlog.Normal)
+	}
+	if _, present := record.Context["decision"]; present {
+		t.Fatalf("context[decision] = %#v, want it absent from an unexplained record", record.Context["decision"])
+	}
+}
+
+func TestRecordCommandLatencyKeepsAnUndeliverableAckLoudInsideTheWindow(t *testing.T) {
+	// Arrange. An ack that will never reach the client is a different class
+	// from a slow one, and no window explains it away.
+	workspace := t.TempDir()
+	recorder, _, _ := newTestLatencyRecorder(t)
+	sample := classifiedSampleFor(workspace, 4*time.Second)
+	sample.Delivered = false
+	sample.DeliveryError = "frontend: write frame: broken pipe"
+
+	// Act.
+	if err := recorder.RecordCommandLatency(sample); err != nil {
+		t.Fatalf("RecordCommandLatency = %v, want nil", err)
+	}
+
+	// Assert.
+	record := readWorkspaceDaemonRecords(t, workspace)[0]
+	if record.Level != dlog.LevelWarn || record.Verbosity != dlog.Normal {
+		t.Fatalf("record level/verbosity = %s/%s, want %s/%s",
+			record.Level, record.Verbosity, dlog.LevelWarn, dlog.Normal)
+	}
+}
+
+func TestRecordCommandLatencyKeepsAnOverdueCommandLoudInsideTheWindow(t *testing.T) {
+	// Arrange. A command that has not finished is not a completed-but-slow one,
+	// and a bring-up does not make an unfinished command acceptable.
+	workspace := t.TempDir()
+	recorder, _, _ := newTestLatencyRecorder(t)
+	sample := overdueSampleFor(workspace, 90*time.Second)
+	sample.Decision = frontend.BootSnapshotDrainDecision
+
+	// Act.
+	if err := recorder.RecordCommandLatency(sample); err != nil {
+		t.Fatalf("RecordCommandLatency = %v, want nil", err)
+	}
+
+	// Assert.
+	record := readWorkspaceDaemonRecords(t, workspace)[0]
+	if record.Level != dlog.LevelWarn || record.Verbosity != dlog.Normal {
+		t.Fatalf("record level/verbosity = %s/%s, want %s/%s",
+			record.Level, record.Verbosity, dlog.LevelWarn, dlog.Normal)
+	}
+}
+
 func TestNewTargetCommandLatencyRecorderRequiresItsDependencies(t *testing.T) {
 	tests := []struct {
 		name     string
