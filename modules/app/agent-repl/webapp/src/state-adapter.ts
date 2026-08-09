@@ -54,14 +54,15 @@ import type { CounterEntry, CounterStatus } from "./counter-menu.js";
 import type { ContentBlock, ModelInfo, ModelUsage, ResultSubtype, Usage } from "./protocol.js";
 import { mergeStatusLogValue } from "./merge-status.js";
 import { previewBlockId, recordBlockIdentity } from "./streaming.js";
+import type { FencedView } from "./fence.js";
 import type {
   ContextClearedItem,
   ContextCompactedItem,
   ConversationItem,
+  FailureCardItem,
   PermissionItem,
   ResultItem,
   SessionCommandItem,
-  SystemFailureCard,
   TextItem,
   ThinkingItem,
   ToolItem,
@@ -69,8 +70,7 @@ import type {
 } from "./store.js";
 import {
   ConversationSource,
-  ERROR_CLASSES,
-  decodeSystemFailure,
+  decodeFailureCardView,
   RenderState,
   sessionCommandOf,
   SessionConnectivity,
@@ -79,9 +79,8 @@ import {
   type ConversationDelta,
   type ConversationItemArm,
   type ConversationItemFrame,
-  type ErrorClass,
+  type FooterFailureRow,
   type MergeStatus,
-  type SystemFailure,
   type FrontendFrame,
   type HeartbeatView,
   type InterruptOutcome,
@@ -151,6 +150,12 @@ export type WebSessionStatus =
 export interface WorkspaceStatusInput {
   workspace: string;
   sessionId: string;
+  /**
+   * THE workspace's authoritative staleness fence — the value every fenced push
+   * is compared against, byte-wise and never parsed. Adopting it is what makes
+   * the fence gate able to answer at all.
+   */
+  fence: string;
   state: WebRenderState;
   /** SSM resolution input, surfaced for debuggability (the tail row reads it). */
   turnActive: boolean;
@@ -222,12 +227,12 @@ export interface SessionViewInput {
   /** SDK-published menu; the browser renders it but never owns selection. */
   models: ModelInfo[];
   tokenUtilization?: import("./frontend-proto.js").SessionTokenUtilization;
-  /**
-   * The typed account of why this session is asleep, or `null` when it is
-   * awake. Carried as the DECODED DETAIL rather than a flattened boolean: the
-   * revival gate's job is to name the cause, and a bool cannot.
-   */
-  hibernation: import("./frontend-proto.js").HibernationDetail | null;
+  // NO HIBERNATION HERE. The revival gate reads `WorkspaceGateView` — a fenced,
+  // per-WORKSPACE view — and this per-SESSION catalog entry no longer feeds it.
+  // A catalog answers "what is true of session X" and leaves the reader to work
+  // out which X is current; a connect snapshot carries several entries for one
+  // workspace, in no authority order, so a gate fed from here could be raised
+  // by a retired session's last known state.
 }
 
 /**
@@ -399,12 +404,14 @@ export interface ProgressInput {
    */
   interrupt: InterruptInput | null;
   /**
-   * The CLASSIFIED error state (F4). The footer takes its color from the
-   * failure's class rather than from a hardcoded red no other surface
-   * consulted, and addresses the card through the failure's own uuid.
-   * `null` = no error standing.
+   * The footer's failure ROW, resolved: the sentence, the tone it is drawn in,
+   * and the card to reveal when it is activated. `null` = no error standing.
+   *
+   * The row's TONE is the daemon's, so the footer no longer takes its color
+   * from a hardcoded red no other surface consulted — and no longer classifies
+   * a failure itself in order to pick one.
    */
-  failure: SystemFailureCard | null;
+  failure: FooterFailureRow | null;
   /**
    * The daemon's uncached-input alert for the turn just ended (`null` when the
    * turn was cache-efficient). Carried VERBATIM, origin included, because the
@@ -475,6 +482,18 @@ export type AdapterEffect =
    * one layer further down.
    */
   | { kind: "shutdown-schedule"; value: ShutdownScheduleView }
+  /**
+   * ONE resolved, FENCED component view — the topbar, the token breakdown or
+   * the revival gate.
+   *
+   * The three share ONE effect kind on purpose. They are gated identically and
+   * they must be gated identically, so giving each its own effect would give
+   * each its own store case and its own opportunity to skip the gate. With one
+   * kind there is exactly one ingestion case in the store, and that case calls
+   * `admitFenced` (fence.ts) before it touches a slice. See fence.ts for the
+   * whole rule.
+   */
+  | { kind: "fenced-view"; value: FencedView }
   | { kind: "ignored"; shape: string };
 
 export type AdapterLogLevel = "debug" | "info" | "warn" | "error";
@@ -531,6 +550,18 @@ export function userTurnReceipt(effects: AdapterEffect[], lastSeq: number): User
   return null;
 }
 
+/**
+ * Wrap ONE resolved component view as the single fenced-view effect.
+ *
+ * A free function rather than three methods, so every producer — the connect
+ * snapshot's fan-out and each of the three standalone frames — spells the same
+ * one thing and none of them can invent a second effect kind that bypasses the
+ * gate.
+ */
+function fencedEffect(view: FencedView): AdapterEffect {
+  return { kind: "fenced-view", value: view };
+}
+
 // --- the adapter ------------------------------------------------------------
 
 export class StateAdapter {
@@ -567,6 +598,19 @@ export class StateAdapter {
           ...(s.shutdownSchedule === undefined
             ? []
             : [this.shutdownScheduleEffect(s.shutdownSchedule)]),
+          // The resolved component views come LAST in the batch, AFTER the
+          // workspaces above. That order is load-bearing: the fence gate
+          // measures each view against the store's current
+          // `WorkspaceState.fence`, and a view folded before the ruling that
+          // establishes what "current" means would be discarded as stale on
+          // the very snapshot that carries both.
+          ...s.topbars.map((view) => fencedEffect({ case: "topbar", value: view })),
+          ...s.tokenBreakdowns.map((view) =>
+            fencedEffect({ case: "tokenBreakdown", value: view }),
+          ),
+          ...s.workspaceGates.map((view) =>
+            fencedEffect({ case: "workspaceGate", value: view }),
+          ),
         ];
       }
       case "workspaceState":
@@ -606,6 +650,14 @@ export class StateAdapter {
         return [this.rosterEffect(frame.frame.value)];
       case "shutdownSchedule":
         return [this.shutdownScheduleEffect(frame.frame.value)];
+      // The three resolved component views. Each becomes the SAME effect kind,
+      // so all three reach the store through the one fence gate; see fence.ts.
+      case "topbar":
+        return [fencedEffect({ case: "topbar", value: frame.frame.value })];
+      case "tokenBreakdown":
+        return [fencedEffect({ case: "tokenBreakdown", value: frame.frame.value })];
+      case "workspaceGate":
+        return [fencedEffect({ case: "workspaceGate", value: frame.frame.value })];
       default: {
         // Exhaustiveness guard: a new frame variant is a compile error here,
         // never a silent skip.
@@ -643,6 +695,7 @@ export class StateAdapter {
       value: {
         workspace: ws.workspace,
         sessionId: ws.sessionId,
+        fence: ws.fence,
         state,
         turnActive: ws.turnActive,
         liveTaskCount: Number(ws.liveTaskCount),
@@ -684,7 +737,6 @@ export class StateAdapter {
           description: model.description,
         })),
         tokenUtilization: sv.tokenUtilization,
-        hibernation: sv.hibernation ?? null,
       },
     };
   }
@@ -780,7 +832,9 @@ export class StateAdapter {
         // whether either is newsworthy enough to claim the activity cell.
         rateLimited: openRateLimit(pv.rateLimited),
         rateLimitedWeekly: openRateLimit(pv.rateLimitedWeekly),
-        failure: pv.failure === undefined ? null : systemFailureFrom(pv.failure),
+        // Carried VERBATIM. The row arrives resolved — sentence, tone and card
+        // ref — so there is nothing here to classify or recolor.
+        failure: pv.failure ?? null,
         expensiveTurn: pv.expensiveTurn ?? null,
         pendingPermissions: pv.pendingPermissions,
         queueDepth: pv.queueDepth,
@@ -1109,8 +1163,8 @@ function itemsFromFrame(frame: ConversationItemFrame): { items: ConversationItem
       return { items: [contextCompactedItem(frame.payload, frame.uuid)], ignores: [] };
     case "permission":
       return { items: [permissionItemFrom(frame.payload, frame.uuid)], ignores: [] };
-    case "systemFailure":
-      return { items: [systemFailureCard(frame.payload, frame.uuid)], ignores: [] };
+    case "failureCard":
+      return { items: [failureCardItem(frame.payload, frame.uuid)], ignores: [] };
     case "skillBody":
       return { items: [skillBodyToolItem(frame.payload, frame.uuid, tsFromMs(frame.tsMs))], ignores: [] };
     case "sessionCommand":
@@ -1480,47 +1534,30 @@ function contextCompactedItem(c: Obj, uuid: string): ContextCompactedItem {
 }
 
 /**
- * Adopt a daemon-classified failure as a conversation card.
+ * Adopt a RESOLVED `FailureCardView` as a conversation card.
  *
  * It is an ADOPTION, not a derivation. What it replaces re-decided, on this
  * side of the wire, whether an ApiErrorLine was retrying (by a different test
  * than the daemon's), whether it was fatal (by a third test nothing rendered),
  * and what to call it (a hardcoded "api_error" code and a hardcoded
- * `recoverable: false`, neither fed by anything). Every field below is the
- * daemon's, unexamined.
+ * `recoverable: false`, neither fed by anything). The view below is the
+ * daemon's, unexamined — the kind arm, the sentence, the evidence and the
+ * lifecycle alike.
  *
- * UUID is the item envelope's, carried onto the card so the progress footer's
- * error row can scroll the feed to it.
+ * A MALFORMED KIND THROWS out of the decoder rather than reaching the feed. It
+ * is not rendered as a generic error: the resync/failure path is where a frame
+ * this end cannot read belongs.
+ *
+ * UUID is the item envelope's, carried onto the card so the footer's failure
+ * row can reveal it and so a window-shaped failure's later arm RECONCILES onto
+ * the same card instead of appending beside it.
  */
-function systemFailureCard(e: Obj, uuid: string): SystemFailureCard {
-  return systemFailureCardFromDecoded(decodeSystemFailure(e, `ConversationItem.systemFailure`), uuid);
-}
-
-/** Preserve every decoded field while assigning the conversation envelope identity. */
-function systemFailureCardFromDecoded(f: SystemFailure, uuid: string): SystemFailureCard {
+function failureCardItem(e: Obj, uuid: string): FailureCardItem {
   return {
     kind: "failure",
-    errorClass: f.errorClass,
-    errorType: f.errorType,
-    message: f.message,
-    sourceDetail: f.sourceDetail,
-    resolvedAtMs: f.resolvedAtMs,
     uuid,
-    detail: f.detail,
+    view: decodeFailureCardView(e, "ConversationItem.failureCard"),
   };
-}
-
-/**
- * Adopt an already-DECODED `SystemFailure` (from a `ProgressView` or a
- * `CommandAck`) as the store's card shape.
- *
- * The decoder validated the class, so unlike `systemFailureCard` — which
- * adopts a raw conversation-item payload — this one has nothing left to
- * check. Both exist because a failure reaches this end through two different
- * doors, and neither may re-interpret what the daemon decided.
- */
-export function systemFailureFrom(f: SystemFailure): SystemFailureCard {
-  return systemFailureCardFromDecoded(f, f.itemUuid);
 }
 
 /**
@@ -1539,21 +1576,6 @@ function sessionCommandItem(e: Obj, uuid: string): SessionCommandItem {
     command: sessionCommandOf(pstr(e, "command"), "SessionCommandItem"),
     uuid,
   };
-}
-
-/**
- * `frontend.v1.ErrorClass` name → the store's class.
- *
- * An unrecognized class THROWS rather than defaulting. The class decides the
- * card's color, so guessing one would paint a failure the wrong color —
- * quietly, and in a way that contradicts the workspace colored beside it.
- */
-function errorClassOf(name: string): ErrorClass {
-  const known = ERROR_CLASSES.find((c) => name === c || name === `ERROR_CLASS_${c}`);
-  if (known === undefined) {
-    throw new Error(`state-adapter: SystemFailureItem has unrecognized error_class '${name}'`);
-  }
-  return known;
 }
 
 /** core.v1.PermissionItem.Resolution (proto enum name) → the store shape. */
