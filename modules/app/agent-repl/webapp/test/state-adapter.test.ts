@@ -850,13 +850,12 @@ describe("systemFailure arm", () => {
         errorClass: "ERROR_CLASS_INTERNAL",
         errorType: "unexpected_query_termination",
         message: "query ended",
-        queryTermination: { agentReplSessionId: "session-1", queryInstanceId: "query-1", vendorSessionId: "claude-1", observedAtMs: "1700000000000", unexpectedEof: {} },
+        queryTermination: { queryInstanceId: "query-1", vendorSessionId: "claude-1", observedAtMs: "1700000000000", unexpectedEof: {} },
       },
     });
     const detail = (items[0] as SystemFailureCard).detail;
     expect(detail.kind).toBe("queryTermination");
     if (detail.kind !== "queryTermination") throw new Error("wrong detail");
-    expect(detail.value.agentReplSessionId).toBe("session-1");
     expect(detail.value.queryInstanceId).toBe("query-1");
     expect(detail.value.vendorIdentity).toEqual({ case: "vendorSessionId", value: "claude-1" });
     expect(detail.value.observedAtMs).toBe(1700000000000n);
@@ -871,9 +870,9 @@ describe("systemFailure arm", () => {
       sourceDetail: "iterator stopped",
       resolvedAtMs: 0,
       itemUuid: "failure:termination",
-      detail: { kind: "queryTermination", value: create(QueryTerminationFailureSchema, { agentReplSessionId: "session-1", queryInstanceId: "query-1", vendorIdentity: { case: "vendorSessionId", value: "claude-1" }, observedAtMs: 1700000000000n, reason: { case: "startupFailure", value: create(QueryStartupFailureSchema, { cause: "spawn refused" }) } }) },
+      detail: { kind: "queryTermination", value: create(QueryTerminationFailureSchema, { queryInstanceId: "query-1", vendorIdentity: { case: "vendorSessionId", value: "claude-1" }, observedAtMs: 1700000000000n, reason: { case: "startupFailure", value: create(QueryStartupFailureSchema, { cause: "spawn refused" }) } }) },
     });
-    expect(card.detail).toEqual({ kind: "queryTermination", value: create(QueryTerminationFailureSchema, { agentReplSessionId: "session-1", queryInstanceId: "query-1", vendorIdentity: { case: "vendorSessionId", value: "claude-1" }, observedAtMs: 1700000000000n, reason: { case: "startupFailure", value: create(QueryStartupFailureSchema, { cause: "spawn refused" }) } }) });
+    expect(card.detail).toEqual({ kind: "queryTermination", value: create(QueryTerminationFailureSchema, { queryInstanceId: "query-1", vendorIdentity: { case: "vendorSessionId", value: "claude-1" }, observedAtMs: 1700000000000n, reason: { case: "startupFailure", value: create(QueryStartupFailureSchema, { cause: "spawn refused" }) } }) });
   });
 
   it("carries the resolution stamp that settles a window", () => {

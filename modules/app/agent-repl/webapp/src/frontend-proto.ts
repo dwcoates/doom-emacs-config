@@ -753,7 +753,6 @@ export type SystemFailureDetail =
 
 /** Typed evidence for a failed authoritative-conversation resume. */
 export interface SessionResumeFailure {
-  agentReplSessionId: string;
   claudeSessionId: string;
   cwd: string;
   configDir: string;
@@ -2944,7 +2943,7 @@ function decodeTaskCatalog(v: unknown): TaskCatalog {
 }
 
 const SYSTEM_FAILURE_KEYS = generatedFieldSet<keyof typeof SystemFailureItemSchema.field>()("errorClass", "errorType", "message", "sourceDetail", "resolvedAtMs", "itemUuid", "sessionResume", "queryTermination");
-const SESSION_RESUME_KEYS = generatedFieldSet<keyof typeof SessionResumeFailureSchema.field>()("agentReplSessionId", "claudeSessionId", "cwd", "configDir", "resolvedConfigDir", "create", "automaticRestore", "transcriptUnavailable", "identityMismatch", "queryTermination", "bringUpFailure");
+const SESSION_RESUME_KEYS = generatedFieldSet<keyof typeof SessionResumeFailureSchema.field>()("claudeSessionId","cwd", "configDir", "resolvedConfigDir", "create", "automaticRestore", "transcriptUnavailable", "identityMismatch", "queryTermination", "bringUpFailure");
 const SESSION_RESUME_CREATE_KEYS = generatedFieldSet<keyof typeof SessionResumeFailureCreateSchema.field>()();
 const SESSION_RESUME_AUTOMATIC_KEYS = generatedFieldSet<keyof typeof SessionResumeFailureAutomaticRestoreSchema.field>()();
 const SESSION_RESUME_TRANSCRIPT_KEYS = generatedFieldSet<keyof typeof SessionResumeFailureTranscriptUnavailableSchema.field>()("searchedPaths");
@@ -2999,7 +2998,7 @@ function decodeSessionResumeFailure(v: unknown, where: string): SessionResumeFai
   if (attempts.length !== 1 || causes.length !== 1) throw new Error(`frontend-proto: ${where} requires exactly one attempt and cause`);
   const attemptValue = ensureObject(o[attempts[0]], `${where}.${attempts[0]}`);
   rejectUnknown(attemptValue, attempts[0] === "create" ? SESSION_RESUME_CREATE_KEYS : SESSION_RESUME_AUTOMATIC_KEYS, `${where}.${attempts[0]}`);
-  const base = { agentReplSessionId: str(o, "agentReplSessionId", where), claudeSessionId: str(o, "claudeSessionId", where), cwd: str(o, "cwd", where), configDir: str(o, "configDir", where), resolvedConfigDir: str(o, "resolvedConfigDir", where), attempt: attempts[0] as "create" | "automaticRestore" };
+  const base = { claudeSessionId: str(o, "claudeSessionId", where), cwd: str(o, "cwd", where), configDir: str(o, "configDir", where), resolvedConfigDir: str(o, "resolvedConfigDir", where), attempt: attempts[0] as "create" | "automaticRestore" };
   if (causes[0] === "identityMismatch") {
     const cause = ensureObject(o.identityMismatch, `${where}.identityMismatch`);
     rejectUnknown(cause, SESSION_RESUME_IDENTITY_KEYS, `${where}.identityMismatch`);
@@ -3027,8 +3026,13 @@ function decodeQueryTerminationFailure(v: unknown, where: string): QueryTerminat
   } catch (error) {
     throw new Error(`frontend-proto: ${where} violates the generated QueryTerminationFailure contract: ${error instanceof Error ? error.message : String(error)}`);
   }
-  if (generated.agentReplSessionId === "" || generated.queryInstanceId === "" || generated.observedAtMs <= 0n) {
-    throw new Error(`frontend-proto: ${where} requires session, query, and observed-time identity`);
+  // The agent-repl session id left this message in the figma-idl reshape: the
+  // push that carries the failure is fenced, so the session is the fence's,
+  // and a second copy here could disagree with it. Query and observed-time
+  // identity are still required — an evidence record that names neither the
+  // query() invocation nor when it died corroborates nothing.
+  if (generated.queryInstanceId === "" || generated.observedAtMs <= 0n) {
+    throw new Error(`frontend-proto: ${where} requires query and observed-time identity`);
   }
   if (generated.vendorIdentity.case === undefined) throw new Error(`frontend-proto: ${where} requires explicit vendor identity evidence`);
   if (generated.vendorIdentity.case === "vendorSessionId" && generated.vendorIdentity.value === "") {
