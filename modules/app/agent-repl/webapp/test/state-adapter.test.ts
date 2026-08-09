@@ -1638,6 +1638,28 @@ describe("progress (F1): the consolidated footer's whole input", () => {
     expect(got.interrupt).toBeNull();
   });
 
+  it("carries the daemon's turn-accounting cell VERBATIM", () => {
+    // Arrange / Act — the daemon reconciled the turn and composed the prose;
+    // the adapter re-derives none of it.
+    const got = progressOf(
+      progressFrame({
+        accounting: { summary: "12.3s · 41.2k in", incomplete: { missing: ["turn start"] } },
+      }),
+    );
+    // Assert
+    expect(got.accounting).toEqual({
+      summary: "12.3s · 41.2k in",
+      verdict: { kind: "incomplete", missing: ["turn start"] },
+    });
+  });
+
+  it("flattens an absent accounting cell to null rather than inventing a verdict", () => {
+    // Arrange / Act — absence means no turn has settled yet.
+    const got = progressOf(progressFrame());
+    // Assert
+    expect(got.accounting).toBeNull();
+  });
+
   it("fans a snapshot's progress views out into per-workspace effects", () => {
     // Arrange / Act
     const effects = applyOne({

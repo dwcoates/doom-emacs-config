@@ -119,7 +119,15 @@ import {
   WorkspaceGateOpenSchema,
   WorkspaceGateViewSchema,
 } from "../../proto/gen/ts/agentshim/frontend/v1/gate-revival_pb";
-import { FooterFailureRowSchema } from "../../proto/gen/ts/agentshim/frontend/v1/footer_pb";
+import {
+  AccountingCompleteSchema,
+  AccountingIncompleteSchema,
+  AccountingInvalidSchema,
+  FooterAccountingCellSchema,
+  FooterFailureRowSchema,
+  FooterMergeChipSchema,
+  FooterPhaseSchema,
+} from "../../proto/gen/ts/agentshim/frontend/v1/footer_pb";
 import { fromJson, toJson, type JsonValue } from "@bufbuild/protobuf";
 import {
   FAILURE_CARD_LIFECYCLE_ARM,
@@ -1241,6 +1249,25 @@ export interface ProgressView {
   pendingPermissions: number;
   queueDepth: number;
   liveTaskCount: number;
+  /**
+   * The footer's phase cell, resolved daemon-side into the word, tone and
+   * animation flag it draws. Absent = nothing to draw in that cell.
+   *
+   * Note this is NOT the deprecated `state` mirror above: it is the footer's
+   * own projection of the phase, not a second copy of the SSM's verdict.
+   */
+  phase?: FooterPhase;
+  /**
+   * The footer's merge chip, resolved: its text and its tooltip. Absent = no
+   * merge run is publishing, and there is therefore no chip to draw.
+   */
+  mergeChip?: FooterMergeChip;
+  /**
+   * The turn-accounting cell, resolved: the composed summary and the verdict
+   * that classes it. Absent = no turn has settled yet, which is the only
+   * reading of absence.
+   */
+  accounting?: FooterAccountingCell;
 }
 
 /**
@@ -1740,6 +1767,62 @@ export interface FooterFailureRow {
   message: string;
   tone: string;
   card?: FailureCardRef;
+}
+
+/**
+ * The footer phase cell's resolved PROPS.
+ *
+ * Not a state: the state lives on `WorkspaceState`, and the daemon projects it
+ * into the exact word, tone and animation flag the cell draws. The client holds
+ * no RenderState→word table, so it renders these verbatim and maps nothing.
+ */
+export interface FooterPhase {
+  /** The word the cell renders, verbatim (e.g. "thinking", "compacting"). */
+  word: string;
+  /** Vocabulary color-class name from the shared render-colors table. */
+  tone: string;
+  /** Whether the word carries the breathing animation. */
+  breathing: boolean;
+}
+
+/**
+ * The footer merge chip's resolved PROPS: the composed text and its tooltip.
+ *
+ * Absence of the whole message is "no chip" — which is why a PRESENT chip with
+ * no text is a daemon fault rather than an empty chip to draw.
+ */
+export interface FooterMergeChip {
+  /** Chip text, verbatim. */
+  text: string;
+  /** Tooltip, verbatim; may be empty. */
+  title: string;
+}
+
+/**
+ * WHETHER a turn's accounting reconciled, as ARMS rather than a flag.
+ *
+ * The verdict and the evidence it implies arrive together, so a client cannot
+ * render "invalid" with nothing to say about why. The phrases are display-ready
+ * prose composed daemon-side: they are concatenated and rendered, never parsed.
+ */
+export type FooterAccountingVerdict =
+  | { kind: "complete" }
+  | { kind: "incomplete"; missing: string[] }
+  | { kind: "invalid"; problems: string[] };
+
+/**
+ * The footer's turn-accounting cell, fully resolved.
+ *
+ * A turn's accounting is a RECONCILIATION the DAEMON performed: it compared the
+ * usage each response reported against the totals the terminal result claimed.
+ * The comparison, the verdict and the prose are all its own — this side renders
+ * the summary string and picks a class from the verdict arm.
+ */
+export interface FooterAccountingCell {
+  /** The cell's text and tooltip, composed daemon-side, rendered verbatim. */
+  summary: string;
+  /** Whether the reconciliation held, with its evidence. */
+  verdict: FooterAccountingVerdict;
 }
 
 // `ResponseUsageStamp` and its decoder live in `agent-emission.ts`, because the
@@ -3474,6 +3557,9 @@ const PROGRESS_VIEW_KEYS = new Set([
   "pendingPermissions",
   "queueDepth",
   "liveTaskCount",
+  "phase",
+  "mergeChip",
+  "accounting",
 ]);
 const CONTEXT_COST_ALERT_KEYS = new Set([
   "turnId",
@@ -3524,6 +3610,17 @@ function decodeProgressView(v: unknown): ProgressView {
   // the input-token counter beside it.
   if (o.expensiveTurn !== undefined && o.expensiveTurn !== null) {
     pv.expensiveTurn = decodeContextCostAlert(o.expensiveTurn);
+  }
+  // Each of the three footer cells below is a MESSAGE, so absence is the cell
+  // having nothing to draw rather than a default to materialize here.
+  if (o.phase !== undefined && o.phase !== null) {
+    pv.phase = decodeFooterPhase(o.phase, "ProgressView.phase");
+  }
+  if (o.mergeChip !== undefined && o.mergeChip !== null) {
+    pv.mergeChip = decodeFooterMergeChip(o.mergeChip, "ProgressView.mergeChip");
+  }
+  if (o.accounting !== undefined && o.accounting !== null) {
+    pv.accounting = decodeFooterAccountingCell(o.accounting, "ProgressView.accounting");
   }
   // Without a workspace the view addresses nothing: the footer could not tell
   // which session it is describing.
@@ -4396,6 +4493,119 @@ export function decodeFooterFailureRow(v: unknown, where: string): FooterFailure
     row.card = decodeFailureCardRef(o.card, `${where}.card`);
   }
   return row;
+}
+
+const FOOTER_PHASE_KEYS = generatedFieldSet<keyof typeof FooterPhaseSchema.field>()(
+  "word",
+  "tone",
+  "breathing",
+);
+
+/**
+ * Decode a `FooterPhase`.
+ *
+ * The word is REQUIRED. Absence of the whole message is "no phase cell"; a
+ * present cell with nothing to say is a daemon fault, and drawing an empty word
+ * in the phase slot would report a phase this side invented.
+ */
+export function decodeFooterPhase(v: unknown, where: string): FooterPhase {
+  const o = ensureObject(v, where);
+  rejectUnknown(o, FOOTER_PHASE_KEYS, where);
+  const word = str(o, "word", where);
+  if (word === "") {
+    throw new Error(`frontend-proto: ${where} requires a non-empty \`word\``);
+  }
+  return { word, tone: str(o, "tone", where), breathing: bool(o, "breathing", where) };
+}
+
+const FOOTER_MERGE_CHIP_KEYS = generatedFieldSet<keyof typeof FooterMergeChipSchema.field>()(
+  "text",
+  "title",
+);
+
+/**
+ * Decode a `FooterMergeChip`.
+ *
+ * The text is REQUIRED for the same reason the phase's word is: absence of the
+ * message means no chip, so a present chip with no text is a daemon fault
+ * rather than a chip drawn blank. The `title` may legitimately be empty.
+ */
+export function decodeFooterMergeChip(v: unknown, where: string): FooterMergeChip {
+  const o = ensureObject(v, where);
+  rejectUnknown(o, FOOTER_MERGE_CHIP_KEYS, where);
+  const text = str(o, "text", where);
+  if (text === "") {
+    throw new Error(`frontend-proto: ${where} requires a non-empty \`text\``);
+  }
+  return { text, title: str(o, "title", where) };
+}
+
+const FOOTER_ACCOUNTING_CELL_KEYS = generatedFieldSet<
+  keyof typeof FooterAccountingCellSchema.field
+>()("summary", "complete", "incomplete", "invalid");
+const ACCOUNTING_COMPLETE_KEYS = generatedFieldSet<keyof typeof AccountingCompleteSchema.field>()();
+const ACCOUNTING_INCOMPLETE_KEYS = generatedFieldSet<
+  keyof typeof AccountingIncompleteSchema.field
+>()("missing");
+const ACCOUNTING_INVALID_KEYS = generatedFieldSet<keyof typeof AccountingInvalidSchema.field>()(
+  "problems",
+);
+
+/**
+ * Decode a `FooterAccountingCell`.
+ *
+ * The verdict oneof is REQUIRED: the arm decides the cell's class, and a cell
+ * with no arm would be drawn as though it had reconciled without the daemon
+ * ever having said so. The evidence lists are required NON-EMPTY on the two
+ * arms that carry them, because an incompleteness or a contradiction with
+ * nothing to name is a daemon fault rather than a renderable state.
+ */
+export function decodeFooterAccountingCell(v: unknown, where: string): FooterAccountingCell {
+  const o = ensureObject(v, where);
+  rejectUnknown(o, FOOTER_ACCOUNTING_CELL_KEYS, where);
+  const summary = str(o, "summary", where);
+  if (summary === "") {
+    throw new Error(`frontend-proto: ${where} requires a non-empty \`summary\``);
+  }
+  return { summary, verdict: decodeFooterAccountingVerdict(o, where) };
+}
+
+function decodeFooterAccountingVerdict(o: Obj, where: string): FooterAccountingVerdict {
+  // protojson carries the SET arm as a present key — `complete` arrives as an
+  // empty object rather than as an absence, which is what makes the three
+  // distinguishable at all.
+  if (o.complete !== undefined && o.complete !== null) {
+    const inner = `${where}.complete`;
+    rejectUnknown(ensureObject(o.complete, inner), ACCOUNTING_COMPLETE_KEYS, inner);
+    return { kind: "complete" };
+  }
+  if (o.incomplete !== undefined && o.incomplete !== null) {
+    const inner = `${where}.incomplete`;
+    const arm = ensureObject(o.incomplete, inner);
+    rejectUnknown(arm, ACCOUNTING_INCOMPLETE_KEYS, inner);
+    return { kind: "incomplete", missing: accountingPhrases(arm.missing, `${inner}.missing`) };
+  }
+  if (o.invalid !== undefined && o.invalid !== null) {
+    const inner = `${where}.invalid`;
+    const arm = ensureObject(o.invalid, inner);
+    rejectUnknown(arm, ACCOUNTING_INVALID_KEYS, inner);
+    return { kind: "invalid", problems: accountingPhrases(arm.problems, `${inner}.problems`) };
+  }
+  throw new Error(`frontend-proto: ${where} requires a verdict oneof`);
+}
+
+/** The display-ready phrase list an incomplete or invalid verdict must carry. */
+function accountingPhrases(v: unknown, where: string): string[] {
+  const entries = ensureArray(v ?? [], where);
+  if (entries.length === 0) {
+    throw new Error(`frontend-proto: ${where} must not be empty`);
+  }
+  return entries.map((entry, index) => {
+    if (typeof entry !== "string") {
+      throw new Error(`frontend-proto: ${where}[${index}] must be a string (got ${typeof entry})`);
+    }
+    return entry;
+  });
 }
 
 /**
