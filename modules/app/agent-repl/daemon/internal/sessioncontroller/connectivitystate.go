@@ -200,6 +200,48 @@ var unsettledStates = func() map[frontendv1.RenderState]bool {
 // nothing can ever report its end.
 const staleTurnReasonOrphaned = "orphaned_turn_no_live_shim"
 
+// workspaceSettled is THE settledness verdict, read off a snapshot the SSM
+// produced: no turn in flight (including the durable claims the lease's
+// snapshot folds into TurnActive) and no resolved state that means the
+// workspace is still working.
+//
+// It is a function rather than an expression inlined in the lease because it is
+// now asked by TWO callers — the hibernation lease and the stale-shim refresh's
+// turn-boundary lease (turnboundaryrefresh.go) — and a second copy of "what
+// settled means" is exactly the drift that would let one of them stop a shim
+// mid-turn while the other refused to.
+func workspaceSettled(st *frontendv1.WorkspaceState) bool {
+	return !st.GetTurnActive() && !unsettledStates[st.GetState()]
+}
+
+// workspaceSettledNow answers the settledness question ALONE, through the same
+// authority and the same exclusion the hibernation lease is built on: it takes
+// the lease, reads its verdict, and releases it immediately.
+//
+// It exists for the callers that need the VERDICT rather than the exclusion —
+// the turn-boundary refresh, whose own stop is a hard restart and whose respawn
+// takes a controller registration the SSM refuses while a hibernation lease is
+// held, so the lease provably cannot be the thing it holds across the bounce
+// (rewind.go makes the same observation about its own release placement).
+//
+// A refusal is reported as settled=false with NO error: "the workspace is
+// working" is an ordinary answer, not a failure. Anything else IS a failure and
+// is returned, because an unknown settledness must never be read as either
+// verdict — a caller that treated it as settled would stop a shim mid-turn, and
+// one that treated it as unsettled would wait for a boundary that may never
+// come.
+func (m *Manager) workspaceSettledNow(workspace string) (bool, error) {
+	release, err := m.acquireSettledHibernationLease(workspace)
+	if err != nil {
+		if errors.Is(err, ErrNotSettled) {
+			return false, nil
+		}
+		return false, fmt.Errorf("session-controller: reading settledness for workspace %q: %w", workspace, err)
+	}
+	release()
+	return true, nil
+}
+
 // acquireSettledHibernationLease returns ErrNotSettled when the workspace is
 // working and otherwise excludes every new prompt/turn start until its release
 // function runs. The SSM owns the snapshot and exclusion under one lock, so no
@@ -317,7 +359,7 @@ func (m *Manager) acquireSettledHibernationLeaseAfter(workspace string, reconcil
 		return nil, fmt.Errorf("%w: workspace %q has no resolved state", ErrNotSettled, workspace)
 	}
 	state := st.GetState()
-	if !st.GetTurnActive() && !unsettledStates[state] {
+	if workspaceSettled(st) {
 		return release, nil
 	}
 	release()
