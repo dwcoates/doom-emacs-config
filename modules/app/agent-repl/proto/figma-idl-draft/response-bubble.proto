@@ -36,6 +36,17 @@ message AgentResponse {
 message AgentThinking {
   // The reasoning block, verbatim durable evidence (text + signature).
   agentshim.data.v1.ThinkingBlock body = 1;
+  // The API message this block was stripped from, verbatim. A live preview is
+  // keyed by the message id its typing deltas carried; this is the resolved
+  // fact that lets the settled block replace its preview instead of appending
+  // beside it. The daemon states it because the daemon did the stripping — a
+  // client that inferred it would be matching "the earliest same-kind
+  // preview", which is exactly the derivation this contract removes.
+  string api_message_id = 2;
+  // The block's position in that message's original content array, so two
+  // reasoning blocks from one message settle onto their own previews rather
+  // than both onto the first.
+  int32 block_index = 3;
 }
 
 // The per-response usage stamp rendered on an assistant bubble's corner.

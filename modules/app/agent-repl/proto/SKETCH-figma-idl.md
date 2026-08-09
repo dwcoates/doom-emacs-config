@@ -1158,3 +1158,17 @@ content of `figma-idl-draft/*.proto` at the master commit tagged
 baseline the implementation lands on). Every implementation agent receives
 the draft files verbatim and may not deviate; a deviation or follow-on proto
 change is surfaced to the ORCHESTRATOR, who alone approves or revises it.
+
+### Part 5 addendum — amendment 1 (post-freeze, orchestrator-approved)
+
+`AgentThinking` gains `api_message_id = 2` and `block_index = 3`. Found
+independently by the shim and webapp build-resolution agents: the daemon
+strips reasoning out of the response body into its own emission, but the
+emission carried no identity, so a live preview keyed `messageId:blockIndex`
+(from TypingDelta) could never settle onto the final block — the exact
+re-derivation bug the stream-contract fixture exists to catch, caused this
+time by the contract itself. The daemon resolves both fields at the strip
+site (translate.go assistantMessageItem). The alternative — reasoning back in
+the response body — would have reopened the settled round-2 exclusivity
+decision. Approved under the orchestrator proto-change gate; the integration
+agent lands it (proto + bindings + daemon population + webapp settlement).
