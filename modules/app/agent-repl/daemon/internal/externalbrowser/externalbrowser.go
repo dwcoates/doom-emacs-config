@@ -41,10 +41,10 @@ const (
 	// --profile-directory takes — not the account address.
 	ProfileDirectory = "Profile 6"
 
-	// App is the application name used to raise the browser once the URL has
-	// been handed over. Handing Chrome a URL creates the tab but leaves window
-	// activation to the window server, so the browser is activated explicitly
-	// and the user lands on the page they clicked.
+	// App is the application name used to raise the browser BEFORE the URL is
+	// handed over. Chrome raises the profile window it puts a new tab in, but
+	// it never brings itself to the front, so the browser is activated
+	// explicitly — see Open for why the activation goes first.
 	App = "Google Chrome"
 )
 
@@ -89,21 +89,29 @@ func ActivateArgv() []string {
 	return []string{"-e", fmt.Sprintf("tell application %q to activate", App)}
 }
 
-// Open hands url to the pinned Chrome profile through run and then raises the
-// browser. A refused URL, a failed hand-off, and a failed raise are three
+// Open raises the browser through run and then hands url to the pinned Chrome
+// profile. A refused URL, a failed raise, and a failed hand-off are three
 // distinct errors: a link the user clicked that silently went nowhere is worse
 // than a loud failure, and the caller logs which of the three happened.
+//
+// ORDER MATTERS, and it is the reason focus lands on the right WINDOW. Chrome
+// raises the profile window it puts the new tab in, but it does not bring
+// itself to the front; activating afterwards would instead restore whichever
+// window was frontmost before, which is routinely a window of the other
+// profile. Activating FIRST makes the outcome independent of how long Chrome
+// takes to process the hand-off: the app is already frontmost, so the window
+// Chrome raises for the tab is the window the user ends up looking at.
 func Open(url string, run Runner) error {
 	if err := Validate(url); err != nil {
 		return err
 	}
+	if err := run("osascript", ActivateArgv()...); err != nil {
+		return fmt.Errorf("externalbrowser: raising %q before opening %s: %w",
+			App, url, err)
+	}
 	if err := run(Binary, LaunchArgv(url)...); err != nil {
 		return fmt.Errorf("externalbrowser: opening %s in profile %q: %w",
 			url, ProfileDirectory, err)
-	}
-	if err := run("osascript", ActivateArgv()...); err != nil {
-		return fmt.Errorf("externalbrowser: raising %q after opening %s: %w",
-			App, url, err)
 	}
 	return nil
 }

@@ -97,12 +97,16 @@ harness guards it (else a test could launch a real browser)."
     (agent-repl-test--with-browser-exits nil
       (agent-repl-open-external-url "https://example.com/x"))
     ;; Assert.
-    (should (equal (car agent-repl-test--browser-calls)
+    (should (equal (length agent-repl-test--browser-calls) 2))
+    (should (equal (nth 1 agent-repl-test--browser-calls)
                    '("/chrome" "--profile-directory=Profile 6"
                      "https://example.com/x")))))
 
-(ert-deftest agent-repl-test-open-external-url-activates-after-launching ()
-  "Focus is taken by a SECOND call, after the URL has been handed over."
+(ert-deftest agent-repl-test-open-external-url-activates-before-launching ()
+  "Focus is taken FIRST, which is what lands it on the right window.
+Chrome raises the profile window it puts the tab in but never fronts
+itself, so an activation that came second would restore whichever window
+was frontmost before -- routinely the other profile's."
   ;; Arrange.
   (let ((agent-repl-external-browser-binary "/chrome")
         (agent-repl-external-browser-app "Google Chrome"))
@@ -110,8 +114,7 @@ harness guards it (else a test could launch a real browser)."
     (agent-repl-test--with-browser-exits nil
       (agent-repl-open-external-url "https://example.com/x"))
     ;; Assert.
-    (should (equal (length agent-repl-test--browser-calls) 2))
-    (should (equal (nth 1 agent-repl-test--browser-calls)
+    (should (equal (car agent-repl-test--browser-calls)
                    '("osascript" "-e"
                      "tell application \"Google Chrome\" to activate")))))
 
@@ -165,22 +168,22 @@ harness guards it (else a test could launch a real browser)."
 (ert-deftest agent-repl-test-open-external-url-signals-on-a-failed-launch ()
   "A non-zero Chrome exit is surfaced, never swallowed into a dead click."
   ;; Arrange/Act/Assert.
+  (agent-repl-test--with-browser-exits '(0 1)
+    (should-error (agent-repl-open-external-url "https://example.com/"))))
+
+(ert-deftest agent-repl-test-open-external-url-signals-on-a-failed-activate ()
+  "Losing focus is a failure of the contract, so it is surfaced too."
+  ;; Arrange/Act/Assert.
   (agent-repl-test--with-browser-exits '(1)
     (should-error (agent-repl-open-external-url "https://example.com/"))))
 
-(ert-deftest agent-repl-test-open-external-url-does-not-activate-a-failed-launch ()
-  "Nothing is raised when the URL never reached the browser."
+(ert-deftest agent-repl-test-open-external-url-does-not-launch-after-a-failed-activate ()
+  "No URL is handed over when the browser could not be raised."
   ;; Arrange/Act.
   (agent-repl-test--with-browser-exits '(1)
     (should-error (agent-repl-open-external-url "https://example.com/")))
   ;; Assert.
   (should (equal (length agent-repl-test--browser-calls) 1)))
-
-(ert-deftest agent-repl-test-open-external-url-signals-on-a-failed-activate ()
-  "Losing focus is a failure of the contract, so it is surfaced too."
-  ;; Arrange/Act/Assert.
-  (agent-repl-test--with-browser-exits '(0 1)
-    (should-error (agent-repl-open-external-url "https://example.com/"))))
 
 ;;;; ---- browse-url entry point -----------------------------------------------
 
@@ -192,7 +195,7 @@ harness guards it (else a test could launch a real browser)."
     (agent-repl-test--with-browser-exits nil
       (agent-repl-browse-url-external "https://example.com/"))
     ;; Assert.
-    (should (equal (car (car agent-repl-test--browser-calls)) "/chrome"))))
+    (should (equal (car (nth 1 agent-repl-test--browser-calls)) "/chrome"))))
 
 (ert-deftest agent-repl-test-browse-url-external-ignores-browse-url-extra-args ()
   "`browse-url' passes a NEW-WINDOW argument that has no meaning here."
