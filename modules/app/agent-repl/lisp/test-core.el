@@ -3454,3 +3454,129 @@ survives into the rest of the batch run."
       (agent-repl--backend-phase nil "daemon up (pid %s)" 41)
       ;; Assert
       (should (equal emitted (cons "agent-repl: daemon up (pid 41)" t))))))
+
+;;;; ---- Tests: the registration window is classified, not warned about ----
+;;
+;; A workspace is created before it is registered, and its creator logs
+;; throughout that window.  Those records correctly name a workspace that owns
+;; no sink yet, so a perfectly normal creation used to warn about its own
+;; prologue.  The window is declared by its creator and classified here.
+
+(ert-deftest agent-repl-test-preregistration-record-emits-no-warning ()
+  "A record inside the declared registration window is not an anomaly."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      ;; Arrange
+      (let ((agent-repl--log-preregistration-workspace "being-created")
+            (agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal))
+            (agent-repl--preregistration-log-workspaces (make-hash-table :test #'equal)))
+        ;; Act
+        (cl-letf (((symbol-function 'message) #'ignore))
+          (agent-repl--log "being-created" "creation prologue probe"))
+        ;; Assert
+        (with-temp-buffer
+          (insert-file-contents path)
+          (should-not (string-match-p "unroutable log workspace" (buffer-string))))))))
+
+(ert-deftest agent-repl-test-preregistration-record-reaches-the-global-sink ()
+  "Classifying the attribution must not drop the record."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      ;; Arrange
+      (let ((agent-repl--log-preregistration-workspace "being-created")
+            (agent-repl--preregistration-log-workspaces (make-hash-table :test #'equal)))
+        ;; Act
+        (cl-letf (((symbol-function 'message) #'ignore))
+          (agent-repl--log "being-created" "must still be recorded"))
+        ;; Assert
+        (with-temp-buffer
+          (insert-file-contents path)
+          (should (string-match-p "must still be recorded" (buffer-string))))))))
+
+(ert-deftest agent-repl-test-preregistration-window-is-announced-once ()
+  "The window is announced, and only once, so the sink question has an answer."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      ;; Arrange
+      (let ((agent-repl--log-preregistration-workspace "being-created")
+            (agent-repl--preregistration-log-workspaces (make-hash-table :test #'equal)))
+        ;; Act
+        (cl-letf (((symbol-function 'message) #'ignore))
+          (dotimes (_ 5) (agent-repl--log "being-created" "repeated probe")))
+        ;; Assert — counted per RECORD; each JSONL line carries the text twice.
+        (with-temp-buffer
+          (insert-file-contents path)
+          (should (= 1 (cl-count-if
+                        (lambda (l) (string-match-p "pre-registration log workspace" l))
+                        (split-string (buffer-string) "\n" t)))))))))
+
+(ert-deftest agent-repl-test-preregistration-announcement-is-not-a-warning ()
+  "The global sink is where these records BELONG, so this is info, not warn."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      ;; Arrange
+      (let ((agent-repl--log-preregistration-workspace "being-created")
+            (agent-repl--preregistration-log-workspaces (make-hash-table :test #'equal)))
+        ;; Act
+        (cl-letf (((symbol-function 'message) #'ignore))
+          (agent-repl--log "being-created" "probe"))
+        ;; Assert
+        (with-temp-buffer
+          (insert-file-contents path)
+          (let ((line (car (cl-remove-if-not
+                            (lambda (l) (string-match-p "pre-registration log workspace" l))
+                            (split-string (buffer-string) "\n" t)))))
+            (should line)
+            (should (string-match-p "\"level\":\"info\"" line))))))))
+
+(ert-deftest agent-repl-test-preregistration-window-covers-only-its-own-name ()
+  "An unrelated unregistered workspace still warns while a window is open."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      ;; Arrange
+      (let ((agent-repl--log-preregistration-workspace "being-created")
+            (agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal))
+            (agent-repl--preregistration-log-workspaces (make-hash-table :test #'equal)))
+        ;; Act
+        (cl-letf (((symbol-function 'message) #'ignore))
+          (agent-repl--log "some-other-ws" "probe"))
+        ;; Assert
+        (with-temp-buffer
+          (insert-file-contents path)
+          (should (string-match-p "unroutable log workspace" (buffer-string))))))))
+
+(ert-deftest agent-repl-test-record-after-the-window-closes-still-warns ()
+  "The classification lasts exactly as long as the creator holds the binding."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      ;; Arrange
+      (let ((agent-repl--log-preregistration-workspace nil)
+            (agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal))
+            (agent-repl--preregistration-log-workspaces (make-hash-table :test #'equal)))
+        ;; Act
+        (cl-letf (((symbol-function 'message) #'ignore))
+          (agent-repl--log "being-created" "probe after the window"))
+        ;; Assert
+        (with-temp-buffer
+          (insert-file-contents path)
+          (should (string-match-p "unroutable log workspace" (buffer-string))))))))
+
+(ert-deftest agent-repl-test-registered-workspace-ignores-an-open-window ()
+  "A workspace that owns a sink routes to it, window open or not."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let* ((project (make-temp-file "agent-repl-window-routed-" t))
+           (agent-repl-log-to-file nil)
+           (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "routed-ws" :project-dir project)
+            ;; Act
+            (let ((agent-repl-log-to-file t)
+                  (agent-repl--log-preregistration-workspace "routed-ws"))
+              (cl-letf (((symbol-function 'message) #'ignore))
+                (agent-repl--log "routed-ws" "owned line")))
+            ;; Assert
+            (should (plist-get (gethash "routed-ws" agent-repl--workspace-log-targets)
+                               :target)))
+        (delete-directory project t)))))
