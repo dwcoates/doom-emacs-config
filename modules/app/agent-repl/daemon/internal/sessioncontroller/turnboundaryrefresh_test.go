@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -87,6 +88,28 @@ func (h *queueHarness) reattach(build string, turnInFlight bool, activeTurnIDs [
 
 // armedSession reports the session an armed turn-boundary lease names.
 func (h *queueHarness) armedSession() (string, bool) { return h.m.staleRefreshArmedFor("ws") }
+
+// awaitLeaseCleared blocks until "ws" holds no turn-boundary arm, which is how
+// a FIRED lease's aftermath is known to have finished.
+//
+// THE BUILD LATCH IS NOT THAT SIGNAL. runStaleRefresh sets the latch and
+// returns, and only then does runStaleRefreshAtBoundary retake the lock to
+// clear the arm — deliberately, since the arm has to span the restart so no
+// prompt is admitted into a session being SIGTERMed. A test that waited on the
+// latch and then asked whether anything was armed was reading the FIRST lease
+// mid-teardown and calling it a second lease.
+//
+// A rendezvous with the manager's own bookkeeping, in waitForBuildLatch's
+// style, rather than a poll of a side effect the clearing happens to produce.
+func (h *queueHarness) awaitLeaseCleared() {
+	h.t.Helper()
+	for {
+		if _, armed := h.armedSession(); !armed {
+			return
+		}
+		runtime.Gosched()
+	}
+}
 
 // A STALE SHIM THAT REATTACHES MID-TURN IS NOT INTERRUPTED. This is the whole
 // defect: an automatic stop firing at ShimReady threw away the turn the user
@@ -336,6 +359,7 @@ func TestTheAtMostOnceLatchHoldsAcrossTheLeasePath(t *testing.T) {
 	h.reattach("sha-old", true, []string{"turn-1"})
 	h.turn(false)
 	waitForBuildLatch(h.m, "s1", true)
+	h.awaitLeaseCleared()
 	stopsAfterFirst := len(h.spawner.stoppedSessions())
 
 	// Act — the replacement reports the same stale identity, mid-turn again.
@@ -371,4 +395,3 @@ func TestAControllerExitDisarmsAnArmedLease(t *testing.T) {
 		t.Fatalf("the lease for %q outlived the controller that could have fired it", session)
 	}
 }
-
