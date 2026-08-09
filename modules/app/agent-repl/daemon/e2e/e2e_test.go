@@ -62,7 +62,21 @@ import (
 	"claude-repld/internal/workspace/merge"
 )
 
-var frameTimeout = 30 * time.Second
+// frameTimeout is the WAIT BUDGET a test allows for a frame it has already
+// caused to be produced. It is not a hang backstop — `go test -timeout` is —
+// so it is deliberately short: every await in this suite is gated on a signal
+// (a socket read, a readiness record, an injected clock advance), and a wait
+// that needs tens of seconds is a test synchronizing by generosity rather than
+// by signal.
+//
+// FIVE SECONDS, AND THE FIGURE IS MEASURED. The awaits this bounds are
+// dominated by one real node shim spawn plus a turn through the real
+// shim-store, measured at ~0.65s per await, so five is roughly an 8x margin.
+// Raising it to ten was tried and bought nothing: the residual full-package
+// failures are awaits whose frame the daemon provably PUSHED and an earlier
+// await in the same test consumed and discarded, so they burn whatever budget
+// they are given. Those tests need the combined-await fix, not a bigger number.
+var frameTimeout = 5 * time.Second
 
 // durableReplayIdle is the quiet window used by E2E readers of the in-process
 // shim-store. The production reader keeps its multi-second bound, while these
@@ -192,7 +206,7 @@ func startShimStore(t *testing.T, bin, sock string) {
 	}
 	// Registered BEFORE anything below can call t.Fatalf: a readiness failure
 	// unwinds through t.Cleanup, but a SIGPIPE while waiting for readiness does
-	// not, and that window is long enough to matter (10s).
+	// not, and that window is long enough to matter (5s).
 	registerChild(cmd.Process.Pid)
 	// cmd.Wait (not Process.Wait) is what drains the stderr copier. childExit
 	// retains one immutable outcome behind a closed-channel latch, so readiness
@@ -210,7 +224,7 @@ func startShimStore(t *testing.T, bin, sock string) {
 	case <-ready:
 	case <-exited.done:
 		t.Fatalf("shim-store exited before it began listening on %s: %v", sock, exited.err)
-	case <-time.After(10 * time.Second):
+	case <-time.After(frameTimeout):
 		t.Fatalf("shim-store never reported listening on %s", sock)
 	}
 }
@@ -1178,7 +1192,15 @@ func (h *e2eHarness) dial(t *testing.T, sessionID string) *websocket.Conn {
 // readFrame reads one frontend.v1 protojson FrontendFrame off the socket.
 func readFrame(t *testing.T, conn *websocket.Conn) *frontendv1.FrontendFrame {
 	t.Helper()
-	if err := conn.SetReadDeadline(time.Now().Add(frameTimeout)); err != nil {
+	return readFrameWithin(t, conn, frameTimeout)
+}
+
+// readFrameWithin is readFrame under an explicit budget, for the few awaits
+// that are bounded by something other than the suite's frame budget. Every
+// caller must name the bound it is waiting on; "be generous" is not a bound.
+func readFrameWithin(t *testing.T, conn *websocket.Conn, within time.Duration) *frontendv1.FrontendFrame {
+	t.Helper()
+	if err := conn.SetReadDeadline(time.Now().Add(within)); err != nil {
 		t.Fatalf("deadline: %v", err)
 	}
 	_, data, err := conn.ReadMessage()
