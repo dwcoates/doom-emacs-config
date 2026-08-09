@@ -1679,6 +1679,115 @@ only the buffer side of the filter is under test."
     (should (equal (with-current-buffer buffer (buffer-string))
                    "refusing to start\n"))))
 
+;;;; ---- the bounded at-exit consumption --------------------------------------
+
+(defmacro agent-repl-test--with-daemon-capture-content (content &rest body)
+  "Run BODY with the real capture buffer holding CONTENT."
+  (declare (indent 1))
+  `(progn
+     (with-current-buffer (get-buffer-create agent-repl--frontend-daemon-buffer)
+       (erase-buffer)
+       (insert ,content))
+     (unwind-protect (progn ,@body)
+       (with-current-buffer agent-repl--frontend-daemon-buffer (erase-buffer)))))
+
+(ert-deftest agent-repl-test-daemon-output-bounds-a-huge-capture ()
+  "The at-exit read never materializes more than its tail bound."
+  ;; Arrange — larger than the buffer cap, as a pre-cap buffer could be.
+  (agent-repl-test--with-daemon-capture-content
+      (concat (make-string (* 4 1024 1024) ?x) "\n")
+    ;; Act
+    (let ((output (agent-repl--frontend-daemon-output)))
+      ;; Assert
+      (should (<= (length output)
+                  agent-repl--frontend-daemon-output-tail-chars)))))
+
+(ert-deftest agent-repl-test-daemon-output-keeps-the-final-lines ()
+  "The bounded read returns the END of the capture, which is the evidence."
+  ;; Arrange
+  (agent-repl-test--with-daemon-capture-content
+      (concat (make-string (* 2 1024 1024) ?x) "\npanic: nil map write\n")
+    ;; Act
+    (let ((output (agent-repl--frontend-daemon-output)))
+      ;; Assert
+      (should (string-suffix-p "panic: nil map write" output)))))
+
+(ert-deftest agent-repl-test-daemon-output-is-empty-without-a-capture-buffer ()
+  "A capture buffer that never existed reads as an empty capture."
+  ;; Arrange
+  (when (get-buffer agent-repl--frontend-daemon-buffer)
+    (kill-buffer agent-repl--frontend-daemon-buffer))
+  ;; Act / Assert
+  (should (equal (agent-repl--frontend-daemon-output) "")))
+
+(ert-deftest agent-repl-test-daemon-exit-record-omits-the-full-capture ()
+  "A multi-megabyte capture never reaches the exit log record whole."
+  ;; Arrange
+  (let (records)
+    (agent-repl-test--with-daemon-capture-content
+        (concat (make-string (* 3 1024 1024) ?x) "\npanic: nil map write\n")
+      (cl-letf (((symbol-function 'agent-repl--persist-log-record)
+                 (lambda (_ws _level _verbosity fmt args)
+                   (push (apply #'format fmt args) records)))
+                ((symbol-function 'agent-repl--emit-message) #'ignore)
+                ((symbol-function 'process-live-p) (lambda (_proc) nil))
+                ((symbol-function 'agent-repl-failure-surface) #'ignore))
+        ;; Act
+        (agent-repl--frontend-daemon-sentinel 'proc "exited abnormally with code 2\n")))
+    ;; Assert
+    (let ((exit (car (seq-filter
+                      (lambda (r) (string-prefix-p "claude-repld exited:" r))
+                      records))))
+      (should exit)
+      (should (< (length exit) (* 64 1024))))))
+
+(ert-deftest agent-repl-test-daemon-exit-record-carries-the-output-tail ()
+  "The bounded tail still reaches the exit record, so the exit stays loud."
+  ;; Arrange
+  (let (records)
+    (agent-repl-test--with-daemon-capture-content
+        (concat (make-string (* 3 1024 1024) ?x) "\npanic: nil map write\n")
+      (cl-letf (((symbol-function 'agent-repl--persist-log-record)
+                 (lambda (_ws _level _verbosity fmt args)
+                   (push (apply #'format fmt args) records)))
+                ((symbol-function 'agent-repl--emit-message) #'ignore)
+                ((symbol-function 'process-live-p) (lambda (_proc) nil))
+                ((symbol-function 'agent-repl-failure-surface) #'ignore))
+        ;; Act
+        (agent-repl--frontend-daemon-sentinel 'proc "exited abnormally with code 2\n")))
+    ;; Assert
+    (should (seq-find (lambda (r)
+                        (and (string-prefix-p "claude-repld exited:" r)
+                             (string-match-p "panic: nil map write" r)))
+                      records))))
+
+(ert-deftest agent-repl-test-daemon-exit-record-names-the-durable-log ()
+  "What the tail leaves out is reachable: the record names claude-repld.log."
+  ;; Arrange
+  (let (records)
+    (agent-repl-test--with-daemon-capture-content "panic: nil map write\n"
+      (cl-letf (((symbol-function 'agent-repl--persist-log-record)
+                 (lambda (_ws _level _verbosity fmt args)
+                   (push (apply #'format fmt args) records)))
+                ((symbol-function 'agent-repl--emit-message) #'ignore)
+                ((symbol-function 'process-live-p) (lambda (_proc) nil))
+                ((symbol-function 'agent-repl-failure-surface) #'ignore))
+        ;; Act
+        (agent-repl--frontend-daemon-sentinel 'proc "exited abnormally with code 2\n")))
+    ;; Assert
+    (should (seq-find (lambda (r)
+                        (and (string-prefix-p "claude-repld exited:" r)
+                             (string-match-p
+                              (regexp-quote (agent-repl--frontend-daemon-log-path)) r)))
+                      records))))
+
+(ert-deftest agent-repl-test-daemon-log-path-sits-under-the-state-root ()
+  "The durable daemon log is named where the daemon actually writes it."
+  ;; Arrange / Act
+  (let ((path (agent-repl--frontend-daemon-log-path)))
+    ;; Assert
+    (should (equal path (agent-repl--global-state-file "claude-repld.log")))))
+
 (ert-deftest agent-repl-test-daemon-exit-carries-the-captured-output ()
   "The daemon's dying words ride its failure card, not only its exit event."
   ;; Arrange
