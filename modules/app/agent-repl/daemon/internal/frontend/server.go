@@ -1027,6 +1027,54 @@ func snapshotRevisions(snapshot *frontendv1.StateSnapshot) string {
 	return strings.Join(parts, ",")
 }
 
+// writeFrameWatched writes one frame with an alarm on the write ITSELF.
+//
+// The two-lane outbox bounds how many frames sit AHEAD of a correlated reply,
+// and that is all it can bound. It cannot preempt a write already in progress:
+// there is one socket and one writer goroutine, so a consumer that stops
+// reading blocks the writer inside a single writeFrame call and every queued
+// ack waits behind it no matter which lane it is on.
+//
+// That is not hypothetical. Emacs is single-threaded and blocks its own event
+// loop for seconds at a time restoring workspaces at startup; one observed boot
+// blocked this writer for ~13s and then delivered eighteen acks within a
+// millisecond of the host reading again. Nothing said so. The commands' own
+// overdue records fired, which named eighteen slow commands and not the one
+// blocked write they were all waiting on, and an operator had to infer the
+// fault from a small enqueue_ms under a large duration_ms.
+//
+// So the write announces itself while it is stuck rather than only in
+// retrospect, exactly as an overdue command does. The alarm never interferes
+// with the write: it observes, and the write's own error handling is untouched.
+func (s *Server) writeFrameWatched(c conn, cl *client, f outFrame) error {
+	started := time.Now()
+	var reported atomic.Bool
+	alarm := time.AfterFunc(s.ackDeadline, func() {
+		reported.Store(true)
+		s.logf("frontend: OUTBOUND WRITER BLOCKED client_kind=%s lane=%s blocked_ms=%d — the consumer is not reading; every queued reply, including acks, waits behind this one write",
+			cl.kind, laneName(f.control), s.ackDeadline.Milliseconds())
+	})
+	err := c.writeFrame(f.data)
+	alarm.Stop()
+	if reported.Load() {
+		// The stall is over one way or the other, and the record that announced
+		// it owes a resolution: "blocked" with no end is indistinguishable from
+		// a daemon that exited still blocked.
+		s.logf("frontend: outbound writer UNBLOCKED client_kind=%s lane=%s blocked_ms=%d ok=%t",
+			cl.kind, laneName(f.control), time.Since(started).Milliseconds(), err == nil)
+	}
+	return err
+}
+
+// laneName names the lane a frame left by, for the records above. The bool is
+// which queue it came off; the word is what an operator can read.
+func laneName(control bool) string {
+	if control {
+		return "control"
+	}
+	return "bulk"
+}
+
 func (s *Server) writeLoop(c conn, cl *client) {
 	defer func() {
 		if err := c.close(); err != nil {
@@ -1045,7 +1093,7 @@ func (s *Server) writeLoop(c conn, cl *client) {
 				if !ok {
 					break
 				}
-				if err := c.writeFrame(f.data); err != nil {
+				if err := s.writeFrameWatched(c, cl, f); err != nil {
 					// The frame never reached the socket. Its sender is told
 					// so before the teardown, so a failed write is never
 					// mistaken for a delivery that simply had not been timed

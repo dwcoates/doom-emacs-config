@@ -2762,6 +2762,166 @@ caught three vanished `mergeWorkspace' commands."
                               (string-match-p "mergeWorkspace" line)))
                        logged)))))
 
+;; An Emacs that blocked its own event loop through a workspace restore reads
+;; nothing, so the daemon's writer blocks mid-write and every ack it produced
+;; is delivered in one burst the instant Emacs becomes responsive.  At that
+;; instant the due alarms and the arrived bytes are both ready and nothing
+;; orders them, so an alarm could card a command whose successful ack it was
+;; about to read.  The alarm now looks at the link first.
+
+(ert-deftest agent-repl-test-uds-deadline-drain-settles-an-arrived-ack ()
+  "An ack already on the link at alarm time opens no failure card."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (surfaced)
+      (agent-repl-test--with-captured-deadline expire
+        (cl-letf (((symbol-function 'agent-repl-failure-surface)
+                   (lambda (_ws failure) (push failure surfaced)))
+                  ((symbol-function 'agent-repl--uds-drain-input)
+                   (lambda ()
+                     (agent-repl--uds-handle-command-ack
+                      '(:requestId "req-arrived" :ok t))
+                     t)))
+          (agent-repl-test--pend "req-arrived" "openWorkspace" "ws1")
+          ;; Act — the alarm fires on bytes Emacs had not yet looked at.
+          (funcall expire)))
+      ;; Assert
+      (should-not surfaced))))
+
+(ert-deftest agent-repl-test-uds-deadline-drain-keeps-the-link-healthy ()
+  "A command settled by the pre-verdict drain never degrades the link."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl-test--with-captured-deadline expire
+      (cl-letf (((symbol-function 'agent-repl-failure-surface) (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--uds-drain-input)
+                 (lambda ()
+                   (agent-repl--uds-handle-command-ack
+                    '(:requestId "req-healthy" :ok t))
+                   t)))
+        (agent-repl-test--pend "req-healthy" "openWorkspace" "ws1")
+        ;; Act
+        (funcall expire)))
+    ;; Assert
+    (should (eq (agent-repl-uds-link-health) :healthy))))
+
+(ert-deftest agent-repl-test-uds-deadline-drain-runs-the-success-callback ()
+  "The drained ack runs `:on-success' rather than abandoning it.
+The presentation gate resolves openWorkspace on that callback, so an
+abandoned one strands the mount until its own separate timeout."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (ran)
+      (agent-repl-test--with-captured-deadline expire
+        (cl-letf (((symbol-function 'agent-repl-failure-surface) (lambda (&rest _) nil))
+                  ((symbol-function 'agent-repl--uds-drain-input)
+                   (lambda ()
+                     (agent-repl--uds-handle-command-ack
+                      '(:requestId "req-cb" :ok t))
+                     t)))
+          (agent-repl-test--pend "req-cb" "openWorkspace" "ws1"
+                                 nil (lambda () (setq ran t)))
+          ;; Act
+          (funcall expire)))
+      ;; Assert
+      (should ran))))
+
+(ert-deftest agent-repl-test-uds-deadline-drain-empty-still-declares-the-loss ()
+  "A drain that finds nothing leaves the loud loss path exactly as it was."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (surfaced)
+      (agent-repl-test--with-captured-deadline expire
+        (cl-letf (((symbol-function 'agent-repl-failure-surface)
+                   (lambda (_ws failure) (push failure surfaced)))
+                  ((symbol-function 'agent-repl--uds-drain-input) (lambda () nil)))
+          (agent-repl-test--pend "req-really-lost" "mergeWorkspace" "ws1")
+          ;; Act
+          (funcall expire)))
+      ;; Assert
+      (should (= (length surfaced) 1))
+      (should (equal (plist-get (car surfaced) :type) "client.command_unacked")))))
+
+(ert-deftest agent-repl-test-uds-deadline-drain-error-still-declares-the-loss ()
+  "A drain that SIGNALS is never read as evidence the command survived."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (surfaced)
+      (agent-repl-test--with-captured-deadline expire
+        (cl-letf (((symbol-function 'agent-repl-failure-surface)
+                   (lambda (_ws failure) (push failure surfaced)))
+                  ((symbol-function 'agent-repl--uds-drain-input)
+                   (lambda () (error "filter handler blew up"))))
+          (agent-repl-test--pend "req-drain-err" "mergeWorkspace" "ws1")
+          ;; Act
+          (funcall expire)))
+      ;; Assert
+      (should (= (length surfaced) 1))
+      (should (equal (plist-get (car surfaced) :type) "client.command_unacked")))))
+
+(ert-deftest agent-repl-test-uds-deadline-drain-error-is-logged ()
+  "The failed drain is recorded, never silently passed over."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (logged)
+      (agent-repl-test--with-captured-deadline expire
+        (cl-letf (((symbol-function 'agent-repl-failure-surface) (lambda (&rest _) nil))
+                  ((symbol-function 'agent-repl--log)
+                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged)))
+                  ((symbol-function 'agent-repl--uds-drain-input)
+                   (lambda () (error "filter handler blew up"))))
+          (agent-repl-test--pend "req-drain-log" "mergeWorkspace" "ws1")
+          ;; Act
+          (funcall expire)))
+      ;; Assert
+      (should (cl-some (lambda (line)
+                         (and (string-match-p "pre-verdict drain ERROR" line)
+                              (string-match-p "req-drain-log" line)))
+                       logged)))))
+
+(ert-deftest agent-repl-test-uds-deadline-drain-does-not-nest ()
+  "An alarm reached from inside a drain does not start a second read."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let ((reads 0))
+      (agent-repl-test--with-captured-deadline expire
+        (cl-letf (((symbol-function 'agent-repl-failure-surface) (lambda (&rest _) nil))
+                  ((symbol-function 'agent-repl--uds-drain-input)
+                   (lambda ()
+                     (setq reads (1+ reads))
+                     ;; The filter dispatched a frame, and a second due alarm
+                     ;; ran reentrantly off the same read.
+                     (agent-repl--uds-command-deadline-expired "req-inner")
+                     nil)))
+          (agent-repl-test--pend "req-outer" "mergeWorkspace" "ws1")
+          (agent-repl-test--pend "req-inner" "mergeWorkspace" "ws2")
+          ;; Act
+          (funcall expire)))
+      ;; Assert
+      (should (= reads 1)))))
+
+(ert-deftest agent-repl-test-uds-drain-input-skips-a-dead-link ()
+  "A disconnected link has nothing to drain and is not an error."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let ((agent-repl--uds-process nil))
+      ;; Act / Assert
+      (should-not (agent-repl--uds-drain-input)))))
+
+(ert-deftest agent-repl-test-uds-drain-input-reads-a-live-link ()
+  "A live link is read with a ZERO timeout, so no deadline is extended."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let ((agent-repl--uds-process 'fake-proc)
+          timeout)
+      (cl-letf (((symbol-function 'process-live-p) (lambda (p) (eq p 'fake-proc)))
+                ((symbol-function 'accept-process-output)
+                 (lambda (_proc secs) (setq timeout secs) t)))
+        ;; Act
+        (should (agent-repl--uds-drain-input))
+        ;; Assert
+        (should (equal timeout 0))))))
+
 (ert-deftest agent-repl-test-uds-untrack-still-cleans-an-aborted-wait ()
   "An aborted synchronous wait can still retire its own registration."
   ;; Arrange

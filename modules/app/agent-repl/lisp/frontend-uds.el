@@ -1191,6 +1191,75 @@ sentinel instead of a real timer object."
     (when (timerp timer)
       (cancel-timer timer))))
 
+(defvar agent-repl--uds-ack-drain-active nil
+  "Non-nil while a deadline alarm is draining the link before its verdict.
+The drain runs the process filter, which may dispatch frames, which may
+let another due alarm run reentrantly.  The inner alarm has nothing left
+to look for — the outer drain is already reading the same socket — so it
+skips its own drain rather than nesting one read inside another.")
+
+(defun agent-repl--uds-drain-input ()
+  "Injectable seam: consume link bytes the kernel ALREADY holds, without waiting.
+
+Calls `accept-process-output' with a ZERO timeout, so it runs the process
+filter over whatever has already arrived and returns immediately.  It can
+therefore never extend a deadline by any wall-clock time; it only makes
+the link's already-delivered bytes visible before a verdict is taken on
+them.
+
+A dead or absent process is not an error: a disconnected link has nothing
+to drain, and the caller's unchanged loss path is exactly right for it.
+Isolated as a seam so batch tests can settle a command without a real
+socket, the same way `agent-repl--uds-run-timer' is isolated."
+  (when (process-live-p agent-repl--uds-process)
+    (accept-process-output agent-repl--uds-process 0)))
+
+(defun agent-repl--uds-drain-before-verdict (request-id)
+  "Read what the link already holds before REQUEST-ID is declared lost.
+
+THE DEADLINE IS NOT EXTENDED AND NOT WEAKENED.  It still expires at the
+same instant, and a command whose ack genuinely has not arrived takes the
+unchanged loud path below.  What this removes is a verdict passed on
+bytes Emacs had been GIVEN but had not yet looked at.
+
+Emacs is single-threaded and blocks its own event loop for seconds at a
+time restoring workspaces at startup.  While it is blocked it reads
+nothing, so the daemon's writer blocks mid-write on a socket nobody is
+draining and every ack it has produced waits — the observed boot stalled
+eighteen acks and then delivered all of them within one millisecond of
+Emacs becoming responsive again.  At that instant the due alarms and the
+pending socket bytes are BOTH ready, and nothing orders them: an alarm
+that runs first declares a command lost whose successful ack is sitting
+in the kernel buffer it is about to read.  That is the whole
+`client.command_unacked' residue — a card and a link degrade for commands
+that had succeeded, filed by a client against a daemon for latency the
+client itself caused.
+
+So the alarm looks at the socket before it accuses anyone.  If the ack
+was already there, `agent-repl--uds-filter' dispatches it through the
+ordinary ack path — callbacks run, the deadline timer is cancelled, the
+link stays healthy — and the caller then finds nothing pending.
+
+A drain that SIGNALS is never read as \"nothing arrived is fine\".  The
+filter loud-logs a handler failure at the moment it records it and
+re-signals afterwards, so the failure is already on the record; this end
+logs that the verdict is being taken without the drain's evidence and
+then proceeds to the unchanged loss path.  Returns non-nil when output
+was consumed."
+  (if agent-repl--uds-ack-drain-active
+      (agent-repl--log-verbose
+       nil "uds-ack-deadline: drain already active request-id=%s — no nested read"
+       request-id)
+    (let ((agent-repl--uds-ack-drain-active t))
+      (condition-case drain-err
+          (agent-repl--uds-drain-input)
+        (error
+         (agent-repl--log
+          nil
+          "uds-ack-deadline: pre-verdict drain ERROR request-id=%s error-type=%s — taking the verdict without it"
+          request-id (car drain-err))
+         nil)))))
+
 (defun agent-repl--uds-command-superseded-p (request-id field workspace on-timeout)
   "Ask ON-TIMEOUT whether losing REQUEST-ID still matters.
 
@@ -1234,7 +1303,11 @@ command, and a superseded-question answered no, takes the unchanged loud
 path.
 
 A request-id already settled between the alarm firing and this body
-running is not lost at all, and is recorded only in the verbose trace."
+running is not lost at all, and is recorded only in the verbose trace.
+That window is deliberately widened by one socket read first: see
+`agent-repl--uds-drain-before-verdict' for why an alarm must look at the
+bytes the link already holds before it declares anything lost."
+  (agent-repl--uds-drain-before-verdict request-id)
   (let ((pending (gethash request-id agent-repl--uds-pending-commands)))
     (if (null pending)
         (agent-repl--log-verbose
