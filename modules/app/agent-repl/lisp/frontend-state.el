@@ -513,6 +513,60 @@ fails loudly."
                                phase (plist-get status :runId) parsed)
       parsed)))
 
+(defconst agent-repl--frontend-merge-dequeue-standings
+  '((:waiting . :waiting)
+    (:running . :running))
+  "Map each `MergeDequeueOffer' oneof arm (its protojson key) to a keyword.
+Closed by construction, exactly as
+`agent-repl--frontend-merge-status-arms' is: the arm set IS the standing
+vocabulary, so an offer carrying no arm or more than one is a malformed
+frame rather than a standing to narrate.")
+
+(defun agent-repl--frontend-parse-merge-dequeue-offer (offer workspace)
+  "Decode `MergeDequeueOffer' plist OFFER into Emacs's offer plist.
+Returns nil when OFFER is absent — the daemon rides the submessage only
+while a question stands, and inventing one for its absence would narrate
+a card that is not on screen.
+
+The result is `(:offer-id S :run-id S :standing KW :ahead N :position N
+:depth N)', with the queue figures present only on the `:waiting'
+standing.  WORKSPACE threads log metadata.
+
+EMACS NARRATES THE QUESTION, IT DOES NOT ASK IT.  The card and its two
+buttons are the webapp's (design: the host draws no cards), so the
+`:running' arm's nested `MergeStatus' is deliberately NOT decoded here —
+Emacs already holds that run's status on `:pushed-merge-status', and a
+second copy of it would be a second thing to keep in step."
+  (when offer
+    (let ((present (cl-remove-if-not
+                    (lambda (cell) (plist-member offer (car cell)))
+                    agent-repl--frontend-merge-dequeue-standings)))
+      (unless (= 1 (length present))
+        (agent-repl--log workspace
+                         "frontend-parse-merge-dequeue-offer: EXPECTED exactly one standing arm, got %d (%S) — no fallback"
+                         (length present) (mapcar #'car present))
+        (error "agent-repl frontend: MergeDequeueOffer carries %d oneof arms"
+               (length present)))
+      (let* ((wire (car (car present)))
+             (standing (cdr (car present)))
+             (body (plist-get offer wire))
+             (parsed (list :offer-id (plist-get offer :offerId)
+                           :run-id (plist-get offer :runId)
+                           :standing standing)))
+        (when (eq standing :waiting)
+          (setq parsed
+                (append parsed
+                        (list :ahead (agent-repl--frontend-int64
+                                      (plist-get body :ahead))
+                              :position (agent-repl--frontend-int64
+                                         (plist-get body :position))
+                              :depth (agent-repl--frontend-int64
+                                      (plist-get body :depth))))))
+        (agent-repl--log-verbose workspace
+                                 "frontend-parse-merge-dequeue-offer: offer=%s standing=%s parsed=%S"
+                                 (plist-get offer :offerId) standing parsed)
+        parsed))))
+
 (defun agent-repl--frontend-apply-workspace-state (ws-state)
   "Apply a `WorkspaceState' frame WS-STATE (a plist).
 Handler for the `workspaceState' oneof arm.  Maps the pushed RenderState
@@ -525,7 +579,11 @@ transition.  The frame's `mergedAtMs' is retained separately, on the
 durable `:merge-completed-at' key
 \(`agent-repl--frontend-retain-merged-at'), and its structured
 `mergeStatus' lands on `:pushed-merge-status'
-\(`agent-repl--frontend-parse-merge-status').  Returns the applied keyword.
+\(`agent-repl--frontend-parse-merge-status').  Its `mergeDequeueOffer' —
+the question an interrupt raised over a queued merge — lands on
+`:pushed-merge-dequeue-offer'
+\(`agent-repl--frontend-parse-merge-dequeue-offer').  Returns the applied
+keyword.
 
 Fails loudly on a missing/blank `workspace' (invariant violation)."
   (let ((raw-workspace (plist-get ws-state :workspace))
@@ -563,7 +621,13 @@ Fails loudly on a missing/blank `workspace' (invariant violation)."
            ;; rather than land a render state whose merge half was dropped.
            (merge-status
             (agent-repl--frontend-parse-merge-status
-             (plist-get ws-state :mergeStatus) diagnostic-workspace)))
+             (plist-get ws-state :mergeStatus) diagnostic-workspace))
+           ;; Decoded beside the status and for the same reason: a malformed
+           ;; offer must reject the whole frame rather than land a render
+           ;; state whose outstanding question was dropped.
+           (dequeue-offer
+            (agent-repl--frontend-parse-merge-dequeue-offer
+             (plist-get ws-state :mergeDequeueOffer) diagnostic-workspace)))
       ;; Validate every precondition before retaining the raw frame or mutating
       ;; workspace state, so a malformed composite verdict cannot partially
       ;; land.
@@ -635,6 +699,11 @@ Fails loudly on a missing/blank `workspace' (invariant violation)."
       ;; sent would leave the narrator (merge-handlers.el) describing a phase
       ;; the daemon has already moved past.
       (agent-repl--ws-put workspace :pushed-merge-status merge-status)
+      ;; Stored VERBATIM, absence included, exactly as the status above is.
+      ;; The daemon clears the offer to take the card down, so retaining the
+      ;; last one it sent would leave the narrator announcing a question the
+      ;; user has already answered.
+      (agent-repl--ws-put workspace :pushed-merge-dequeue-offer dequeue-offer)
       (agent-repl--log workspace
                        "frontend-apply-workspace-state: %s -> %s connectivity=%s status=%s session=%S generation=%S faults=%S cause=%s seq=%s turn-active=%S live-tasks=%s merged-at=%s merge-status-phase=%s merge-status-run=%s"
                        previous keyword connectivity session-status session-id
@@ -642,6 +711,10 @@ Fails loudly on a missing/blank `workspace' (invariant violation)."
                        live-tasks merged-at
                        (plist-get merge-status :phase)
                        (plist-get merge-status :run-id))
+      (agent-repl--log-verbose workspace
+                               "frontend-apply-workspace-state: merge-dequeue-offer=%s standing=%s"
+                               (or (plist-get dequeue-offer :offer-id) "none")
+                               (plist-get dequeue-offer :standing))
       ;; Session-ready latch (design §10 cutover gap): the SessionStart
       ;; managed hook that used to set the `:agent-ready' half of the
       ;; ws-fully-loaded latch was deleted in S2, orphaning

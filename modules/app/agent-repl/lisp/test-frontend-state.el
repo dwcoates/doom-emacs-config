@@ -441,6 +441,61 @@ the whole contract, so a broken arm must name itself in the failure."
 (agent-repl-test--deftest-merge-phase merged :merged :merged)
 (agent-repl-test--deftest-merge-phase failed :failed :failed)
 
+(ert-deftest agent-repl-test-dequeue-offer-absent-is-nil ()
+  "No `mergeDequeueOffer' on the frame decodes to nil, never an invented one.
+The daemon clears the field to take the card down, so absence must not be
+narrated as a question that is still standing."
+  ;; Act / Assert
+  (should-not (agent-repl--frontend-parse-merge-dequeue-offer nil nil)))
+
+(ert-deftest agent-repl-test-dequeue-offer-decodes-the-waiting-standing ()
+  "A waiting offer carries the standing keyword and its queue figures."
+  ;; Arrange / Act
+  (let ((parsed (agent-repl--frontend-parse-merge-dequeue-offer
+                 '(:offerId "offer-1" :runId "run-7"
+                   :waiting (:ahead "2" :position "3" :depth "5"))
+                 nil)))
+    ;; Assert
+    (should (eq (plist-get parsed :standing) :waiting))
+    (should (equal (list (plist-get parsed :ahead)
+                         (plist-get parsed :position)
+                         (plist-get parsed :depth))
+                   '(2 3 5)))))
+
+(ert-deftest agent-repl-test-dequeue-offer-decodes-the-running-standing ()
+  "A running offer carries the standing keyword and NO queue figures.
+The card that shows the run's stage is the webapp's; Emacs already holds
+that run's status on `:pushed-merge-status', so a second copy of it here
+would be a second thing to keep in step."
+  ;; Arrange / Act
+  (let ((parsed (agent-repl--frontend-parse-merge-dequeue-offer
+                 '(:offerId "offer-1" :runId "run-7" :running nil) nil)))
+    ;; Assert
+    (should (eq (plist-get parsed :standing) :running))
+    (should-not (plist-member parsed :position))))
+
+(ert-deftest agent-repl-test-dequeue-offer-keeps-the-offer-id ()
+  "The offer id rides every decoded offer — it is what an answer names."
+  ;; Act / Assert
+  (should (equal (plist-get (agent-repl--frontend-parse-merge-dequeue-offer
+                             '(:offerId "offer-9" :runId "run-7" :running nil) nil)
+                            :offer-id)
+                 "offer-9")))
+
+(ert-deftest agent-repl-test-dequeue-offer-no-arm-errors ()
+  "An offer with no standing arm is malformed and fails loudly."
+  ;; Act / Assert
+  (should-error (agent-repl--frontend-parse-merge-dequeue-offer
+                 '(:offerId "offer-1" :runId "run-7") nil)))
+
+(ert-deftest agent-repl-test-dequeue-offer-two-arms-error ()
+  "An offer with two standing arms is malformed and fails loudly."
+  ;; Act / Assert
+  (should-error (agent-repl--frontend-parse-merge-dequeue-offer
+                 '(:offerId "offer-1" :runId "run-7"
+                   :waiting (:ahead "1" :position "2" :depth "2") :running nil)
+                 nil)))
+
 (ert-deftest agent-repl-test-merge-status-absent-is-nil ()
   "No `mergeStatus' on the frame decodes to nil, never an invented phase."
   ;; Act / Assert
