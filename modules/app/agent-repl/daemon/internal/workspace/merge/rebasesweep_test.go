@@ -246,6 +246,40 @@ func TestARetiredRunNoLongerRetainsItsRebaseWorktree(t *testing.T) {
 	}
 }
 
+func TestEvictionLeavesTheRunningMergesWorktreeStanding(t *testing.T) {
+	// Arrange — the head is parked on a conflict and a second merge of the same
+	// workspace waits behind it. An interrupt evicts only the WAITING one, which
+	// never had a worktree to tear down.
+	h := newHarness(t)
+	first, second := testRequest("a"), testRequest("a")
+	second.Name = "a2"
+	if _, err := h.coord.Enqueue(context.Background(), first); err != nil {
+		t.Fatalf("Enqueue(a): %v", err)
+	}
+	<-h.picker.merges
+	h.picker.results <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "abc1234", WorkDir: testRebaseWorkDir, BaseHead: baseHeadOfFailure}}
+	<-h.resolver.calls
+	if _, err := h.coord.Enqueue(context.Background(), second); err != nil {
+		t.Fatalf("Enqueue(a2): %v", err)
+	}
+	h.sink.awaitPhase(t, PhaseMergeQueued)
+
+	// Act
+	evicted, err := h.coord.Evict(context.Background(), first.Workspace)
+	if err != nil {
+		t.Fatalf("Evict: %v", err)
+	}
+
+	// Assert — the parked tree still belongs to the merge that is holding it, so
+	// a sweep racing the interrupt cannot take the resolution's workbench away.
+	if evicted != 1 {
+		t.Fatalf("evicted = %d, want only the waiting entry", evicted)
+	}
+	if got := h.coord.RetainedRebaseWorktrees(); len(got) != 1 || got[0] != testRebaseWorkDir {
+		t.Fatalf("retained = %v, want the running merge's worktree %s still held", got, testRebaseWorkDir)
+	}
+}
+
 func TestRebaseWorktreeRepoReadsTheRepositoryOffTheOrphan(t *testing.T) {
 	tests := []struct {
 		name    string
