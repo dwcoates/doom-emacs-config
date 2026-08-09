@@ -26,12 +26,14 @@ type Config struct {
 	// Sink receives every merge-state transition. Bound to the SSM at stitch.
 	// Required.
 	Sink StateSink
-	// Suite runs the target repository's test suite after each cherry-picked
-	// commit. Required, on the same footing as the rest: the whole point of
-	// picking commit by commit is the gate between the picks, and a driver
-	// constructed without one would silently land untested work on the target.
-	// A target repository with no test entrypoint is the RUNNER's business to
-	// report (SuiteResult.Skipped), not a reason to omit the dependency.
+	// Suite runs the target repository's test suite ONCE PER MERGE, on the fully
+	// rebased head, immediately before the target moves. Required, on the same
+	// footing as the rest: that gate is the only thing standing between a
+	// workspace's branch and the tree every other workspace cuts from, and a
+	// driver constructed without one would silently land untested work on the
+	// target. A target repository with no test entrypoint is the RUNNER's
+	// business to report (SuiteResult.Skipped), not a reason to omit the
+	// dependency.
 	Suite SuiteRunner
 }
 
@@ -268,8 +270,13 @@ type Result struct {
 	// outcome. It is the guard the single target-mutating step checks — see
 	// Request.BaseHead.
 	BaseHead string
-	// FailingCommit is the short SHA of the commit whose landing broke the test
-	// suite, set when Outcome is OutcomeTestFailed.
+	// FailingCommit is the short SHA the broken test gate is ATTRIBUTED to, set
+	// when Outcome is OutcomeTestFailed. The gate runs once, on the fully rebased
+	// head, so it is that head's sha — and it is deliberately STABLE across the
+	// one resolution attempt: a re-gate after a committed fix reports the same
+	// sha the first failure did, which is what keeps merge.Coordinator's
+	// one-attempt-per-failure accounting from handing out a fresh attempt every
+	// time a fix moves the head.
 	FailingCommit string
 	// TestFailureTail is the clamped tail of the failing suite's output, set
 	// when Outcome is OutcomeTestFailed. It travels into the resolution prompt
@@ -312,9 +319,29 @@ var errMergeRefused = errors.New("merge: git refused the merge commit")
 // turning one merge into an unbounded sequence of full test-suite runs.
 const rebaseAttempts = 2
 
+// headGate is what the merge's ONE test gate needs beyond the Request. It
+// travels with a re-entered replay so the gate at the end of it judges the same
+// merge the gate before it judged.
+type headGate struct {
+	// failingCommit PINS the identity a head-gate failure is attributed to,
+	// empty on the first pass through a merge (where the rebased head's own sha
+	// is used). It is set only by ContinueAfterTestFix, which re-gates a head the
+	// resolution turn has moved: reporting the new head would look to
+	// merge.Coordinator like a brand-new failure and earn a second resolution
+	// attempt, and then a third, for as long as the agent keeps committing
+	// something that does not fix the suite.
+	failingCommit string
+	// extraPaths widens the suite selection beyond the merge's own range. A
+	// resolution turn may have edited a file no replayed commit touched, and a
+	// selection made from the range alone would then run nothing that covers the
+	// fix. The selection can only widen.
+	extraPaths []string
+}
+
 // Merge REBASES the branch's commits onto the target's head IN A TEMPORARY
-// WORKTREE, gates every landing on the repository's test suite there, and then
-// moves the target exactly ONCE — a `git merge --no-ff` of the rebased branch.
+// WORKTREE, gates the fully rebased head on the repository's test suite there,
+// and then moves the target exactly ONCE — a `git merge --no-ff` of the rebased
+// branch.
 //
 // THE TARGET IS NOT THE WORKBENCH. The driver this replaced cherry-picked
 // commit by commit INTO the target checkout and reset it back on failure, so
@@ -331,7 +358,8 @@ const rebaseAttempts = 2
 // links back to the branch.
 //
 // It emits one `merging` per landed commit (naming the commit and its position
-// in the range), then exactly one of merged / merge_conflict / merge_failed — or
+// in the range) and one more for the head gate, then exactly one of
+// merged / merge_conflict / merge_failed — or
 // nothing further when the run ends on OutcomeTestFailed, which is the
 // coordinator's to classify.
 //
@@ -420,8 +448,9 @@ func (e *Driver) assertMergeable(ctx context.Context, req Request) error {
 }
 
 // rebaseOnto runs ONE rebase attempt: a fresh temporary worktree based on the
-// target's current head, the gated per-commit replay in it, and — when the
-// replay reaches the end — the single target move.
+// target's current head, the per-commit replay in it, the single test gate on
+// the head the replay produced, and — when that gate passes — the single target
+// move.
 //
 // THE TEMP WORKTREE IS CLEANED UP ON EVERY PATH THIS CALL OWNS. It survives
 // exactly one way: a parked outcome (conflict or test failure), which hands it
@@ -462,7 +491,7 @@ func (e *Driver) rebaseOnto(ctx context.Context, req Request, attempt int) (res 
 	if err != nil {
 		return Result{}, err
 	}
-	res, err = e.rebaseLoop(ctx, req, base, false)
+	res, err = e.rebaseLoop(ctx, req, base, false, headGate{})
 	if err != nil {
 		return Result{}, err
 	}
@@ -583,25 +612,35 @@ func (e *Driver) Cleanup(ctx context.Context, req Request) error {
 }
 
 // rebaseLoop replays base..SourceBranch onto the rebase worktree's head ONE
-// COMMIT AT A TIME, running the repository's test suite after each commit lands.
+// COMMIT AT A TIME and then runs the repository's test suite ONCE, on the head
+// the replay produced.
+//
+// THE REPLAY IS PER-COMMIT; THE GATE IS NOT, and the two facts have different
+// reasons. The replay is per-commit because a conflict has to be PARKED on the
+// commit that caused it — that is what a resolver is handed and what Resume
+// continues — and because the loop's restartability is derived from the `-x`
+// annotation each pick leaves behind. The gate runs once at the head because the
+// user chose ONE suite run per merge over per-commit attribution: a full suite
+// per replayed commit is the merge's whole cost, and the tree that actually
+// reaches the target is the head, not any intermediate.
 //
 // IT IS A REBASE, and `cherry-pick -x` is how it is spelled. `git rebase` is
 // itself a sequence of picks, and driving them individually is what makes the
-// gate, the conflict park and the resume possible at all: `git rebase` offers no
-// point between two commits at which this pipeline could run a suite, hand a
-// conflict to an agent, and come back. The `-x` annotation is retained because
-// the loop's own restartability reads it (see below) and because it records
-// which commit of the workspace's branch each rebased commit came from.
+// conflict park and the resume possible at all: `git rebase` offers no point
+// between two commits at which this pipeline could hand a conflict to an agent
+// and come back. The `-x` annotation is retained because the loop's own
+// restartability reads it (see below) and because it records which commit of the
+// workspace's branch each rebased commit came from.
 //
-// COMMIT BY COMMIT IS THE WHOLE POINT. Replaying the range in one step could
-// only be tested once, at the end, which tells a user that "the merge broke the
-// suite" without saying which commit did it and leaves a resolution attempt
-// nothing narrower than the whole range to reason about.
-//
-// IT IS RESTARTABLE BY CONSTRUCTION. The loop derives its work from git alone —
+// IT IS RESTARTABLE BY CONSTRUCTION, GATE INCLUDED. The loop derives its work
+// from git alone —
 // the rebase base (which advances past every `-x` annotation already on the
 // rebased line) plus a per-commit patch-id probe — so re-entering it after a
-// resume or a test fix skips what already landed rather than replaying it.
+// resume or a test fix skips what already landed rather than replaying it. A
+// re-entry that finds the whole range already replayed therefore lands on the
+// gate directly: the gate is the loop's tail, not a step inside it, so "the
+// replay is done but the gate never passed" re-enters where it left off without
+// a single byte of side-channel state.
 //
 // MERGE COMMITS ARE FLATTENED. `--no-merges` drops them: a merge commit carries
 // no patch of its own, and every commit on both of its sides is already in the
@@ -610,8 +649,11 @@ func (e *Driver) Cleanup(ctx context.Context, req Request) error {
 // landedEarlier tells the loop whether work has ALREADY landed on the rebased
 // line during this merge (a resolved conflict, a committed test fix). It is what
 // keeps a re-entered loop that finds nothing left to do from reporting the
-// merge as a no-op when it plainly was not one.
-func (e *Driver) rebaseLoop(ctx context.Context, req Request, base string, landedEarlier bool) (Result, error) {
+// merge as a no-op when it plainly was not one — and it is what tells the tail
+// that a replay with nothing left still owes the target a gated head.
+//
+// gate carries the head gate's own context across a re-entry (see headGate).
+func (e *Driver) rebaseLoop(ctx context.Context, req Request, base string, landedEarlier bool, gate headGate) (Result, error) {
 	rng := base + ".." + req.SourceBranch
 	plan, err := e.plan(ctx, req.WorkDir, rng)
 	if err != nil {
@@ -635,10 +677,12 @@ func (e *Driver) rebaseLoop(ctx context.Context, req Request, base string, lande
 	}
 	commits := plan.Commits
 	if len(commits) == 0 {
-		// The workspace's contribution is already on the target by ancestry —
-		// a successful no-op merge.
-		e.logf("merge: range %s empty — nothing left to replay {ws=%s}", rng, req.Name)
-		return e.finalizeMerged(ctx, req, !landedEarlier)
+		// NOTHING LEFT TO REPLAY IS NOT NOTHING LEFT TO DO. On a FIRST pass it is
+		// the no-op merge (the workspace's contribution is already on the target by
+		// ancestry) and the tail below short-circuits it without a suite run. On a
+		// RE-ENTRY it is a replay that finished, whose head has not passed the gate
+		// yet — so the tail runs the gate rather than the loop.
+		e.logf("merge: range %s empty — nothing left to replay {ws=%s landed_earlier=%t}", rng, req.Name, landedEarlier)
 	}
 
 	landed := 0
@@ -724,21 +768,38 @@ func (e *Driver) rebaseLoop(ctx context.Context, req Request, base string, lande
 		}
 		landed++
 		req.Run.CommitLanded()
-
-		failure, err := e.gateOnSuite(ctx, req, progress+" after rebasing "+short, short, nil)
-		if err != nil {
-			return Result{}, err
-		}
-		if failure != nil {
-			return *failure, nil
-		}
 	}
-	return e.finalizeMerged(ctx, req, landed == 0 && !landedEarlier)
+
+	// THE GATE IS THE LOOP'S TAIL. Every commit of the range is on the rebased
+	// line now, so the tree the suite judges is exactly the tree `git merge
+	// --no-ff` is about to put on the target.
+	if landed == 0 && !landedEarlier {
+		// Nothing this merge did changed the rebased line's TREE: every planned
+		// commit was already incorporated, or carried no change against it. There
+		// is nothing for a suite to testify about that the target has not already
+		// been carrying, and the pre-existing no-op path is the honest answer.
+		return e.finalizeMerged(ctx, req, true)
+	}
+	failure, err := e.gateHead(ctx, req, gate)
+	if err != nil {
+		return Result{}, err
+	}
+	if failure != nil {
+		return *failure, nil
+	}
+	return e.finalizeMerged(ctx, req, false)
 }
 
-// gateOnSuite runs the target repository's test suite for the commit that just
-// landed ON THE REBASED LINE and reports a test failure as a Result, or nil when
-// the merge may continue.
+// gateHead runs the target repository's test suite ONCE, on the HEAD of the
+// rebase worktree, and reports a test failure as a Result or nil when the merge
+// may proceed to the target move.
+//
+// ONE RUN PER MERGE, ON THE TREE THAT ACTUALLY LANDS. The gate used to run after
+// every replayed commit, which spent a full suite per commit to attribute a
+// failure to one of them. The user chose the cheaper contract: the head is the
+// only tree `git merge --no-ff` puts on the target, so the head is what the
+// suite has to testify about, and an intermediate commit that would have failed
+// on its own is not a fact about what the target receives.
 //
 // IT RUNS IN THE REBASE WORKTREE, which is a full checkout of the repository at
 // exactly the tree the merge proposes to make. Running it there rather than in
@@ -746,22 +807,28 @@ func (e *Driver) rebaseLoop(ctx context.Context, req Request, base string, lande
 // code out of it — for the whole of the merge.
 //
 // The `merging` transition is emitted BEFORE the run, not after, because the
-// run is the slow part: a user watching a merge should see "testing 3/7 after
-// cherry-pick of abc123" while it happens rather than only once it is over.
+// run is the slow part: a user watching a merge should see "testing the rebased
+// head abc123 after 7 commits" while it happens rather than only once it is
+// over.
 //
 // A SKIPPED suite continues the merge. That is the documented behavior for a
 // target repository that declares no test entrypoint — the merge subsystem
 // serves repositories that have no agent-repl suite — and it is loud-logged by
 // the runner AND here, because a merge landing untested is precisely the fact a
 // user later needs to find in the log.
-func (e *Driver) gateOnSuite(ctx context.Context, req Request, progress, short string, extraPaths []string) (*Result, error) {
-	sel, err := e.selectSuites(ctx, req, extraPaths)
+func (e *Driver) gateHead(ctx context.Context, req Request, gate headGate) (*Result, error) {
+	head, err := e.gitString(ctx, req.WorkDir, "rev-parse", "--short", "HEAD")
 	if err != nil {
 		return nil, err
 	}
-	// The testing phase carries the SAME commit context the cherry_picking phase
-	// just did — the run holds it, so the two cannot disagree — which is what
-	// lets a frontend render one progress figure across both. It also carries the
+	sel, err := e.selectSuites(ctx, req, gate.extraPaths)
+	if err != nil {
+		return nil, err
+	}
+	progress := fmt.Sprintf("the rebased head %s after %d commits", head, req.Run.CommitsLanded())
+	// The testing phase carries the SAME commit context the cherry_picking phases
+	// did — the run holds it, so the two cannot disagree — which is what lets a
+	// frontend render one progress figure across both. It also carries the
 	// SELECTION, which is the merge's own record of which suites were asked to
 	// testify about it.
 	if err := req.Run.Testing("testing " + progress + " [" + selectionLabel(sel.Suites) + "]"); err != nil {
@@ -769,24 +836,24 @@ func (e *Driver) gateOnSuite(ctx context.Context, req Request, progress, short s
 	}
 	sr, err := e.suite.RunSuite(ctx, req.WorkDir, SuiteRun{Suites: sel.Suites, Attempt: 1})
 	if err != nil {
-		e.logf("merge: test gate UNRUNNABLE after rebasing %s {ws=%s work=%s}: %v", short, req.Name, req.WorkDir, err)
-		return nil, fmt.Errorf("merge: test gate for %q after rebasing %s: %w", req.Name, short, err)
+		e.logf("merge: test gate UNRUNNABLE at the rebased head %s {ws=%s work=%s}: %v", head, req.Name, req.WorkDir, err)
+		return nil, fmt.Errorf("merge: test gate for %q at the rebased head %s: %w", req.Name, head, err)
 	}
 	if sr.Skipped {
-		e.logf("merge: test gate SKIPPED after rebasing %s {ws=%s work=%s}: %s — this merge lands UNTESTED",
-			short, req.Name, req.WorkDir, sr.Reason)
+		e.logf("merge: test gate SKIPPED at the rebased head %s {ws=%s work=%s}: %s — this merge lands UNTESTED",
+			head, req.Name, req.WorkDir, sr.Reason)
 		return nil, nil
 	}
 	if sr.Passed {
-		e.logf("merge: test gate PASSED after rebasing %s (%s) {ws=%s suites=%s duration=%s}",
-			short, progress, req.Name, selectionLabel(sel.Suites), sr.Duration.Round(time.Millisecond))
+		e.logf("merge: test gate PASSED at the rebased head %s (%s) {ws=%s suites=%s duration=%s}",
+			head, progress, req.Name, selectionLabel(sel.Suites), sr.Duration.Round(time.Millisecond))
 		return nil, nil
 	}
-	e.logf("merge: test gate FAILED after rebasing %s (%s) {ws=%s work=%s suites=%s duration=%s full_output=%s} tail:\n%s",
-		short, progress, req.Name, req.WorkDir, selectionLabel(sel.Suites),
+	e.logf("merge: test gate FAILED at the rebased head %s (%s) {ws=%s work=%s suites=%s duration=%s full_output=%s} tail:\n%s",
+		head, progress, req.Name, req.WorkDir, selectionLabel(sel.Suites),
 		sr.Duration.Round(time.Millisecond), sr.OutputPath, sr.Tail)
 
-	rerun, err := e.rerunAfterFailure(ctx, req, sel, progress, short, sr)
+	rerun, err := e.rerunAfterFailure(ctx, req, sel, progress, head, sr)
 	if err != nil {
 		return nil, err
 	}
@@ -795,9 +862,16 @@ func (e *Driver) gateOnSuite(ctx context.Context, req Request, progress, short s
 		return nil, nil
 	}
 	sr = *rerun
+	// A RE-GATE AFTER A RESOLUTION TURN KEEPS THE ORIGINAL IDENTITY. See headGate:
+	// the head has moved by the fix commit, and reporting the new sha would earn
+	// the merge a second resolution attempt it is not entitled to.
+	failing := gate.failingCommit
+	if failing == "" {
+		failing = head
+	}
 	return &Result{
 		Outcome:               OutcomeTestFailed,
-		FailingCommit:         short,
+		FailingCommit:         failing,
 		TestFailureTail:       sr.Tail,
 		TestFailureOutputPath: sr.OutputPath,
 		WorkDir:               req.WorkDir,
@@ -823,33 +897,33 @@ func (e *Driver) gateOnSuite(ctx context.Context, req Request, progress, short s
 //
 // It returns (nil, nil) for a flake — the gate proceeds — and the SECOND run's
 // result for a genuine failure.
-func (e *Driver) rerunAfterFailure(ctx context.Context, req Request, sel SuiteSelection, progress, short string, first SuiteResult) (*SuiteResult, error) {
-	e.logf("merge: test gate RE-RUNNING once on the SAME tree to separate a flake from a genuine failure {ws=%s work=%s suites=%s commit=%s}",
-		req.Name, req.WorkDir, selectionLabel(sel.Suites), short)
+func (e *Driver) rerunAfterFailure(ctx context.Context, req Request, sel SuiteSelection, progress, head string, first SuiteResult) (*SuiteResult, error) {
+	e.logf("merge: test gate RE-RUNNING once on the SAME tree to separate a flake from a genuine failure {ws=%s work=%s suites=%s head=%s}",
+		req.Name, req.WorkDir, selectionLabel(sel.Suites), head)
 	if err := req.Run.Testing("re-testing " + progress + " [" + selectionLabel(sel.Suites) + "] after a failure"); err != nil {
 		return nil, err
 	}
 	second, err := e.suite.RunSuite(ctx, req.WorkDir, SuiteRun{Suites: sel.Suites, Attempt: 2})
 	if err != nil {
-		e.logf("merge: test gate RE-RUN UNRUNNABLE after rebasing %s {ws=%s work=%s}: %v", short, req.Name, req.WorkDir, err)
-		return nil, fmt.Errorf("merge: test gate re-run for %q after rebasing %s: %w", req.Name, short, err)
+		e.logf("merge: test gate RE-RUN UNRUNNABLE at the rebased head %s {ws=%s work=%s}: %v", head, req.Name, req.WorkDir, err)
+		return nil, fmt.Errorf("merge: test gate re-run for %q at the rebased head %s: %w", req.Name, head, err)
 	}
 	if second.Skipped {
 		// The first run produced a verdict, so the entrypoint was there. Its
 		// disappearance between the two runs is a contradiction, not a skip to
 		// wave through.
-		return nil, fmt.Errorf("merge: test gate re-run for %q after rebasing %s reported the suite SKIPPED (%s) when the first run had a verdict",
-			req.Name, short, second.Reason)
+		return nil, fmt.Errorf("merge: test gate re-run for %q at the rebased head %s reported the suite SKIPPED (%s) when the first run had a verdict",
+			req.Name, head, second.Reason)
 	}
 	if second.Passed {
-		e.logf("merge: test gate FLAKE after rebasing %s (%s) {ws=%s work=%s suites=%s} — FAILED in %s then PASSED in %s on the UNCHANGED tree; the merge proceeds. first_output=%s rerun_output=%s",
-			short, progress, req.Name, req.WorkDir, selectionLabel(sel.Suites),
+		e.logf("merge: test gate FLAKE at the rebased head %s (%s) {ws=%s work=%s suites=%s} — FAILED in %s then PASSED in %s on the UNCHANGED tree; the merge proceeds. first_output=%s rerun_output=%s",
+			head, progress, req.Name, req.WorkDir, selectionLabel(sel.Suites),
 			first.Duration.Round(time.Millisecond), second.Duration.Round(time.Millisecond),
 			first.OutputPath, second.OutputPath)
 		return nil, nil
 	}
-	e.logf("merge: test gate FAILED TWICE after rebasing %s (%s) {ws=%s work=%s suites=%s} — %s then %s, a genuine failure. first_output=%s rerun_output=%s",
-		short, progress, req.Name, req.WorkDir, selectionLabel(sel.Suites),
+	e.logf("merge: test gate FAILED TWICE at the rebased head %s (%s) {ws=%s work=%s suites=%s} — %s then %s, a genuine failure. first_output=%s rerun_output=%s",
+		head, progress, req.Name, req.WorkDir, selectionLabel(sel.Suites),
 		first.Duration.Round(time.Millisecond), second.Duration.Round(time.Millisecond),
 		first.OutputPath, second.OutputPath)
 	// The re-run's tail is the freshest evidence and is what the resolution turn
@@ -865,13 +939,12 @@ func (e *Driver) rerunAfterFailure(ctx context.Context, req Request, sel SuiteSe
 // from the paths the merge's own range touches plus any extra paths the caller
 // knows about.
 //
-// THE RANGE, NOT THE COMMIT. The gate runs after each landing, but the suites it
-// picks are the ones the WHOLE merge can affect: narrowing per commit would let
-// commit 1 of a webapp-and-daemon branch be gated on the webapp alone, and the
-// commit that breaks the daemon is then judged by a suite chosen for it. Using
-// the range also makes the selection identical across a merge's every gate,
-// which is what lets a re-entered replay reach the same answer as the run that
-// started it.
+// THE RANGE, NOT THE HEAD COMMIT. The suites are the ones the WHOLE merge can
+// affect: selecting from the head commit alone would let a webapp-and-daemon
+// branch whose last commit touches the webapp be gated on the webapp suite,
+// while the daemon change it also carries goes untested. Using the range also
+// makes the selection identical across a re-gate after a resolution turn, which
+// is what lets the second gate answer the same question the first one did.
 func (e *Driver) selectSuites(ctx context.Context, req Request, extraPaths []string) (SuiteSelection, error) {
 	base, err := e.gitString(ctx, req.WorkDir, "merge-base", "HEAD", req.SourceBranch)
 	if err != nil {
@@ -925,10 +998,11 @@ func (e *Driver) changedPaths(ctx context.Context, dir string, revArgs ...string
 // the target is still exactly as the merge found it and stays that way until the
 // whole rebase has passed its gates.
 //
-// It emits merging (the conflict is clearing), runs the test gate on the
-// commit the continue landed, and then RE-ENTERS the per-commit replay for
-// whatever is left of the range — so a resume is not the end of a merge, it is
-// the middle of one.
+// It emits merging (the conflict is clearing) and then RE-ENTERS the per-commit
+// replay for whatever is left of the range — so a resume is not the end of a
+// merge, it is the middle of one. The resolved commit is NOT gated on its own:
+// the merge's single suite run happens at the head the re-entered replay
+// produces, which necessarily contains it.
 func (e *Driver) Resume(ctx context.Context, req Request) (Result, error) {
 	if err := req.validateRebase(); err != nil {
 		return Result{}, err
@@ -987,7 +1061,7 @@ func (e *Driver) Resume(ctx context.Context, req Request) (Result, error) {
 			return Result{}, err
 		}
 		req.Run.CommitLanded()
-		return e.continueRange(ctx, req)
+		return e.continueRange(ctx, req, headGate{})
 	}
 
 	// -c core.editor=true + --no-edit keep the original commit message
@@ -1010,25 +1084,30 @@ func (e *Driver) Resume(ctx context.Context, req Request) (Result, error) {
 		return e.markFailed(ctx, req, fmt.Sprintf("rebase replay --continue exited %d with no conflict to resolve", exit))
 	}
 
-	// The resolved commit is now the rebased line's HEAD, and it is subject to
-	// the same gate every other landing is: a conflict a human (or an agent) hand
-	// resolved is exactly the kind of landing that breaks a suite.
+	// The resolved commit is now the rebased line's HEAD. It is NOT gated here:
+	// a hand-resolved conflict is exactly the kind of landing that breaks a
+	// suite, and the merge's one gate — which runs at the head the re-entered
+	// replay finishes on — is where that shows up. Gating here as well would be
+	// the per-commit gate this pipeline no longer runs, reintroduced for one
+	// commit.
 	resumed, err := e.gitString(ctx, req.WorkDir, "rev-parse", "--short", "HEAD")
 	if err != nil {
 		return Result{}, err
 	}
-	failure, err := e.gateOnSuite(ctx, req, "the resumed rebase of "+resumed, resumed, nil)
-	if err != nil {
-		return Result{}, err
-	}
-	if failure != nil {
-		return *failure, nil
-	}
-	return e.continueRange(ctx, req)
+	e.logf("merge: rebase replay RESOLVED and committed {ws=%s work=%s head=%s} — re-entering the replay; the suite runs once, at the head it reaches",
+		req.Name, req.WorkDir, resumed)
+	return e.continueRange(ctx, req, headGate{})
 }
 
 // ContinueAfterTestFix commits whatever the resolution turn staged in the
-// REBASE WORKTREE and re-runs the suite, then continues the per-commit replay.
+// REBASE WORKTREE and re-enters the replay, which re-runs the suite on the head
+// the fix produced.
+//
+// THIS IS THE REMEDIATION LOOP'S RETURN EDGE. The gate that failed judged the
+// head; the fix commit moves the head; the re-entered loop replays anything the
+// range still owes and gates the NEW head. The loop turns until the gate passes
+// or merge.Coordinator's one-attempt accounting fails the merge, and the
+// identity that accounting keys on is carried across (see headGate).
 //
 // THE FIX LANDS AS A FOLLOW-UP COMMIT, NOT AN AMEND. Both would work, and the
 // follow-up is the mechanically simpler of the two:
@@ -1067,14 +1146,7 @@ func (e *Driver) ContinueAfterTestFix(ctx context.Context, req Request, failingC
 	if err != nil {
 		return Result{}, err
 	}
-	failure, err := e.gateOnSuite(ctx, req, "again after the resolution attempt on "+failingCommit, failingCommit, fixPaths)
-	if err != nil {
-		return Result{}, err
-	}
-	if failure != nil {
-		return *failure, nil
-	}
-	return e.continueRange(ctx, req)
+	return e.continueRange(ctx, req, headGate{failingCommit: failingCommit, extraPaths: fixPaths})
 }
 
 // commitTestFix stages everything the resolution turn touched and commits it as
@@ -1108,14 +1180,16 @@ func (e *Driver) commitTestFix(ctx context.Context, req Request, failingCommit s
 }
 
 // continueRange re-enters the per-commit replay for whatever is left of the
-// range. The base is recomputed rather than carried, which is what lets the
-// resumed loop skip every commit that already landed.
-func (e *Driver) continueRange(ctx context.Context, req Request) (Result, error) {
+// range, and — because the gate is the replay's tail — for the head gate the
+// merge still owes even when nothing is left. The base is recomputed rather than
+// carried, which is what lets the resumed loop skip every commit that already
+// landed.
+func (e *Driver) continueRange(ctx context.Context, req Request, gate headGate) (Result, error) {
 	base, err := e.cherryPickBase(ctx, req.WorkDir, req.SourceBranch)
 	if err != nil {
 		return Result{}, err
 	}
-	return e.rebaseLoop(ctx, req, base, true)
+	return e.rebaseLoop(ctx, req, base, true, gate)
 }
 
 // remainingPlan is what the replay still has to land: the range from the
