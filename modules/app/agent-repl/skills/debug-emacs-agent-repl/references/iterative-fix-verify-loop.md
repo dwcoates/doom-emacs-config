@@ -120,6 +120,22 @@ Then inspect:
 Use `identity-correlation.md` to tie any rejection back to a workspace,
 session, or connection before treating it as a class of failure.
 
+### Verify the logging, not only the logs
+
+Every path this loop verifies must have its needed logging PRESENT, not
+merely quiet: before crediting a path as healthy, confirm the canonical log
+records that path is supposed to emit actually exist in the code and were
+actually hit in the observation window.
+
+When the verification target is a HAPPY PATH, the absence of error records
+proves nothing — a dead path and a healthy one are equally silent in the
+error stream. Verify that the necessary DEBUG logging exists for the path,
+enable debug logging mode for the window, and use those debug records as the
+evidence during the investigation: the expected debug records, present and in
+order, are what a passing happy path looks like. A happy path whose debug
+records are missing is an observability finding to remediate, exactly as a
+failure would be.
+
 ## 3. Cap every wait at five minutes
 
 Never wait more than five minutes for startup. Reaching five minutes is not a
