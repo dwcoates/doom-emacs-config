@@ -312,20 +312,24 @@ An unregistered live push is an impossible pre-WorkspaceAvailable frame and
 must reject loudly.")
 
 (defun agent-repl--frontend-reject-unmaterialized-session-frame
-    (frame job-id path session-id)
+    (frame job-id path identity)
   "Reject a session FRAME that arrived before host materialization.
 JOB-ID is the creation job identity when the frame protocol carries one;
 the current session-state frames do not, so callers must pass the explicit
-wire-contract marker `unavailable'.  PATH and SESSION-ID identify the
+wire-contract marker `unavailable'.  PATH and IDENTITY identify the
 impossible frame in the canonical global log.  This function never mutates
-workspace or frontend state."
+workspace or frontend state.
+
+IDENTITY is whatever the arm names itself by: a HOST frame passes its
+`session_id', a FENCED push its opaque `fence' (`session_id' is reserved on
+every one of those).  It is a diagnostic here — logged, never parsed."
   (agent-repl--log
    nil
-   "frontend-session-frame: REJECTED pre-materialization frame=%s job-id=%s path=%S session-id=%S"
-   frame job-id path session-id)
+   "frontend-session-frame: REJECTED pre-materialization frame=%s job-id=%s path=%S identity=%S"
+   frame job-id path identity)
   (user-error
-   "agent-repl frontend: %s arrived before WorkspaceAvailable materialized path %s (job %s session %s)"
-   frame path job-id session-id))
+   "agent-repl frontend: %s arrived before WorkspaceAvailable materialized path %s (job %s identity %s)"
+   frame path job-id identity))
 
 (defun agent-repl--frontend-tombstoned-dir-owner (path)
   "Return PATH's tombstoned workspace owner, or nil for live and unknown paths."

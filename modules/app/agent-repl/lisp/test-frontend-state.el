@@ -379,7 +379,9 @@ a wire shape; clearing on it would erase a restored merge."
           (should (string-match-p "frame=WorkspaceState" (cadr entry)))
           (should (string-match-p "job-id=unannounced" (cadr entry)))
           (should (string-match-p "path=\\\"/pending/new\\\"" (cadr entry)))
-          (should (string-match-p "session-id=\\\"s_pending\\\"" (cadr entry))))
+          ;; A HOST frame still names itself by its session id, which is what
+          ;; reaches the rejection as its identity.
+          (should (string-match-p "identity=\\\"s_pending\\\"" (cadr entry))))
         (should (zerop (hash-table-count agent-repl--frontend-workspace-state-views)))
         (should-not (agent-repl--ws-known-p "/pending/new"))))))
 
