@@ -2243,7 +2243,7 @@ function queryTerminationFailureHtml(failure: import("./frontend-proto.js").Quer
     : failure.vendorIdentity.case === "vendorSessionIdentityUnavailable"
       ? "unavailable before SDK initialization"
       : "missing vendor identity evidence";
-  return `<div class="failure-detail">query termination: ${escapeHtml(reason)}<br>agent-repl session: ${escapeHtml(failure.agentReplSessionId)}<br>query instance: ${escapeHtml(failure.queryInstanceId)}<br>vendor session: ${escapeHtml(vendor)}<br>observed_at_ms: ${String(failure.observedAtMs)}</div>`;
+  return `<div class="failure-detail">query termination: ${escapeHtml(reason)}<br>query instance: ${escapeHtml(failure.queryInstanceId)}<br>vendor session: ${escapeHtml(vendor)}<br>observed_at_ms: ${String(failure.observedAtMs)}</div>`;
 }
 
 /** Render resume-continuity evidence without reducing it to a generic death. */
