@@ -3,10 +3,12 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
+	"claude-repld/internal/errclass"
 	"claude-repld/internal/frontend"
 )
 
@@ -150,6 +152,33 @@ func TestATurnSourceErrorSurfaces(t *testing.T) {
 	// Assert.
 	if got == nil || !errors.Is(got, p.turnErr) {
 		t.Fatalf("Interrupt = %v, want the turn source's own error", got)
+	}
+}
+
+// A turn source that reports the workspace UNWIRED is not a refusal: the gate
+// has nothing to challenge about, and the delivery path is the one that owns
+// whether a turn is running behind the missing session controller. Refusing
+// here made that recovery unreachable, so a stop pressed while a daemon was
+// still reattaching a surviving shim was answered "no live session" about a
+// turn that was still running.
+func TestAnUnwiredTurnSourceStillDeliversTheStop(t *testing.T) {
+	// Arrange.
+	p := &fakePrompts{turnErr: fmt.Errorf("session-controller: no live session for workspace %q: %w", "/ws1", errclass.ErrNoLiveSessionController)}
+	h, err := newCommandHandler(p, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil,
+		CommandHandlerConfig{Interrupt: InterruptGateConfig{Turns: p, LiveTasks: fakeLiveTasks{count: 2}}})
+	if err != nil {
+		t.Fatalf("newCommandHandler: %v", err)
+	}
+
+	// Act.
+	got := h.Interrupt(context.Background(), "/ws1", "r1", &frontendv1.InterruptCmd{})
+
+	// Assert.
+	if got != nil {
+		t.Fatalf("Interrupt = %v, want the unwired turn source classified rather than returned", got)
+	}
+	if len(p.interrupts) != 1 {
+		t.Fatalf("interrupts = %v, want the stop delivered so the delivery path can decide whether a turn is running", p.interrupts)
 	}
 }
 

@@ -1500,6 +1500,8 @@ func (m *Manager) recoverSessionControllerForInterrupt(ctx context.Context, work
 		return nil, absent
 	}
 	if !found || (!st.GetTurnActive() && !redStates[st.GetState()]) {
+		m.logf("session-controller: interrupt recovery DECLINED ws=%s found=%v state=%s turn_active=%v branch=nothing_to_stop — the log shows no turn in flight behind the missing session controller, so the honest refusal stands rather than paying a bring-up to stop an idle session",
+			workspace, found, st.GetState(), st.GetTurnActive())
 		return nil, absent
 	}
 	m.logf("session-controller: INVARIANT VIOLATION RECOVERY ws=%s — a user-commanded stop arrived for a workspace with NO live session controller whose log still shows a turn in flight (state=%s turn_active=%v). Bringing the session up FIRST so the stop has somewhere to land, then interrupting",

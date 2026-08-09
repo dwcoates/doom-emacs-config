@@ -787,6 +787,31 @@ func (h *commandHandler) interruptChallenge(workspace, requestID string) (error,
 			h.turns != nil, h.liveTasks != nil, workspace)
 	}
 	active, err := h.turns.TurnActive(workspace)
+	if isUnwiredWorkspace(err) {
+		// THE GATE HAS NO OPINION ABOUT A WORKSPACE IT CANNOT SEE, and it must
+		// not become the refusal for one.
+		//
+		// The turn source answers off the LIVE session controller, so a
+		// workspace whose controller is missing — a daemon that has just come
+		// back and has not finished reattaching the surviving shim — makes it
+		// return the unwired sentinel. Returning that here refused the stop
+		// before it reached the delivery path, and the delivery path is the
+		// one that OWNS this case: it recovers the session when the log still
+		// shows a turn in flight behind the missing controller
+		// (recoverSessionControllerForInterrupt) and keeps the honest refusal
+		// when it does not. So the gate that exists to protect subagent work
+		// was pre-empting the recovery that exists to reach a running turn,
+		// and a user pressing stop during a reattach was answered "no live
+		// session" about a turn that was still burning tokens.
+		//
+		// NOTHING IS SWALLOWED: the sentinel is the ONE classified answer, it
+		// is recorded here, and the delivery attempt that follows returns its
+		// own error — including that same refusal when there really is nothing
+		// to stop. Every other failure still aborts the command below.
+		h.logf("frontend cmd: interrupt ws=%s request_id=%s confirm gate has NO LIVE SESSION CONTROLLER to read a turn from (%v); delivering unchallenged so the stop reaches the delivery path, which owns whether a turn is running behind the missing controller",
+			workspace, requestID, err)
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
