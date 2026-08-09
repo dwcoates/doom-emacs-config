@@ -219,8 +219,7 @@ func newBouncedHarness(t *testing.T) *bouncedHarness {
 		Registry:      reg,
 		ModelCatalogs: server.NewSessionModelCatalogs(),
 		Controller:    controller,
-		SSM:           ssmMgr,
-		Frontend:      agentShim.Server,
+		AgentShim:     agentShim,
 		Logf:          t.Logf,
 	})
 	binding.SetTarget(srv)

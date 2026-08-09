@@ -329,8 +329,7 @@ func (w *shutdownWorld) bootRecordingStops(t *testing.T) *stopCauseBoot {
 		Registry:      reg,
 		ModelCatalogs: modelCatalogs,
 		Controller:    controller,
-		SSM:           ssmMgr,
-		Frontend:      agentShim.Server,
+		AgentShim:     agentShim,
 		Logf:          logf,
 	})
 	binding.SetTarget(srv)
