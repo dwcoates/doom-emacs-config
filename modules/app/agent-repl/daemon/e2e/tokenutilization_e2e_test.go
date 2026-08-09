@@ -251,7 +251,26 @@ func TestE2ESessionViewAggregatesTimedAndUntimedActors(t *testing.T) {
 	awaitItem(t, conn, cwd, "the timed main-agent response", func(item *frontendv1.ConversationItem) bool {
 		return isFakeTurnMessage(item.GetAgent().GetResponse().GetBody().GetId(), 1)
 	})
+	// THE MAIN-AGENT RESPONSE ITEM IS NOT THE MAIN-AGENT LEDGER ROW. A live,
+	// timed response reaches the durable token_utilization table only when its
+	// TURN SETTLES: statedb.TurnAccountings.Record writes the turn's response
+	// rows and the turn's accounting in one transaction, and the only caller is
+	// settleTurnAccounting on TurnEnded. The assistant item is pushed long
+	// before that, so a read taken on the item's arrival was reading the ledger
+	// mid-turn and saw the main agent's row only when the settlement happened to
+	// win the race — which it stops doing once the machine is loaded by the rest
+	// of the package.
+	//
+	// The terminal result is the signal, because the SAME settlement that writes
+	// the rows releases it (sessioncontroller/sinks.go: Record, then
+	// publishHeldTerminalResult). It is awaited HERE, before the subagent event
+	// is written, so this wait cannot consume the subagent item it would
+	// otherwise have to skip past.
+	awaitItem(t, conn, cwd, "the main-agent turn's terminal result", isResult)
 	store.write(sidecarAssistantUsageEvent(t, vendorID, "e2e-aggregate-subagent", "msg-subagent", "agent-child"))
+	// The subagent's row needs no equivalent wait: a file-plane, rootless usage
+	// record is persisted by RecordHistorical BEFORE the same delivery pushes its
+	// conversation item, so the item's arrival already implies the row.
 	awaitItem(t, conn, cwd, "the untimed subagent response", func(item *frontendv1.ConversationItem) bool {
 		return item.GetAgent().GetResponse().GetBody().GetId() == "msg-subagent"
 	})
