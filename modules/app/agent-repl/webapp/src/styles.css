@@ -3210,6 +3210,15 @@ pre {
   font-weight: 700;
 }
 .hibernation-actions button.hibernation-direct { border-color: var(--info-tokens); }
+/* The one DESTRUCTIVE option, outlined in the error color and never filled: it
+   must be reachable and must never be the button a stray click lands on. The
+   color is not "clearing is a fault" — it is the only option on the card whose
+   result cannot be undone, and it sits one click from four that keep a
+   summary. */
+.hibernation-actions button.hibernation-clear {
+  border-color: var(--err);
+  color: var(--err);
+}
 /* A decision in flight REPLACES the buttons rather than greying them, so a
    second click on the other mode is not on offer while the first is pending. */
 .hibernation-pending {
