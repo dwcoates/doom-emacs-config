@@ -163,7 +163,8 @@ type Request struct {
 	// based itself on, and refusing the merge unless the target is still on it,
 	// is what turns "no one else should be writing here" into something the
 	// pipeline can actually verify. A refusal is recoverable rather than fatal:
-	// merge.Driver.Merge re-rebases ONCE onto the new head.
+	// merge.Driver.Merge restarts the whole cycle on the target's new head, for
+	// as many times as the target moves.
 	BaseHead string
 }
 
@@ -318,9 +319,9 @@ var cherryPickAnnotationRE = regexp.MustCompile(`\(cherry picked from commit ([0
 // never tested against what the target now carries.
 //
 // IT IS A RECOVERABLE REFUSAL, not a failure, which is why it is a sentinel
-// rather than a plain error: Merge answers it by re-rebasing ONCE onto the new
-// head. A second occurrence is a target being written to faster than a gated
-// merge can keep up with, and that fails loudly rather than spinning.
+// rather than a plain error: Merge answers it by RESTARTING the whole cycle on
+// the target's new head, as many times as the target moves. It never surfaces
+// to a caller — the loop either lands or exits on some other, real, reason.
 var errTargetMoved = errors.New("merge: the target moved off the head this rebase based itself on")
 
 // errMergeRefused reports that git would not make the merge commit. It cannot
@@ -331,12 +332,19 @@ var errTargetMoved = errors.New("merge: the target moved off the head this rebas
 // keeps whatever it was holding.
 var errMergeRefused = errors.New("merge: git refused the merge commit")
 
-// rebaseAttempts bounds Merge's re-rebase loop. TWO: the first rebase, plus
-// exactly ONE automatic re-rebase for a target that moved underneath it while
-// the gate ran. The bound is what keeps a repository with a busy target from
-// turning one merge into an unbounded sequence of full test-suite runs.
-const rebaseAttempts = 2
-
+// THE RE-REBASE LOOP IS UNBOUNDED, and its unboundedness is the design rather
+// than an oversight. It used to be capped at two cycles — the first rebase plus
+// exactly one re-rebase — on the theory that a bound keeps a busy target from
+// turning one merge into an unending sequence of full suite runs. What the bound
+// actually did on a busy queue was fail merges for the one reason that is not
+// the merging workspace's fault: somebody else landed something first. A target
+// that moved is not a defect in the branch, it is the ordinary condition of a
+// repository with more than one writer, and the answer to it is to rebase onto
+// what is there now and test again. So Merge restarts the entire cycle — fresh
+// rebase worktree on the new head, replay, suite selection, suite, land — every
+// time the target moves, and stops only when it lands or fails for a REAL reason
+// (a conflict, a gate the resolving agent escalated, a refused merge commit, a
+// cancelled context).
 // headGate is what the merge's ONE test gate needs beyond the Request. It
 // travels with a re-entered replay so the gate at the end of it judges the same
 // merge the gate before it judged.
@@ -411,23 +419,24 @@ func (e *Driver) Merge(ctx context.Context, req Request) (Result, error) {
 		return Result{}, err
 	}
 
-	var moved error
-	for attempt := 1; attempt <= rebaseAttempts; attempt++ {
-		res, err := e.rebaseOnto(ctx, req, attempt)
+	for cycle := 1; ; cycle++ {
+		// A cancelled context is the loop's only NON-outcome exit, and it is
+		// checked rather than left to the next git child so a shutdown mid-restart
+		// is reported as the shutdown it is instead of as whatever git says when
+		// its context is already dead.
+		if err := ctx.Err(); err != nil {
+			return Result{}, fmt.Errorf("merge: %q abandoned before rebase cycle %d; the target was NOT MODIFIED: %w", req.Name, cycle, err)
+		}
+		res, err := e.rebaseOnto(ctx, req, cycle)
 		if err == nil {
 			return res, nil
 		}
 		if !errors.Is(err, errTargetMoved) {
 			return Result{}, err
 		}
-		moved = err
-		if attempt < rebaseAttempts {
-			e.logf("merge: target MOVED under the rebase, RE-REBASING once {ws=%s target=%s attempt=%d/%d}: %v",
-				req.Name, req.TargetDir, attempt, rebaseAttempts, err)
-		}
+		e.logf("merge: target MOVED under the rebase — RESTARTING the merge on the target's new head {ws=%s target=%s cycle=%d}: %v",
+			req.Name, req.TargetDir, cycle, err)
 	}
-	return Result{}, fmt.Errorf("merge: %q rebased onto the target %d times and the target moved every time — the target is being written to faster than a gated merge can land; the target was NEVER MODIFIED: %w",
-		req.Name, rebaseAttempts, moved)
 }
 
 // assertMergeable runs every precondition of a rebase merge, before the first
@@ -473,15 +482,16 @@ func (e *Driver) assertMergeable(ctx context.Context, req Request) error {
 	return nil
 }
 
-// rebaseOnto runs ONE rebase attempt: a fresh temporary worktree based on the
-// target's current head, the per-commit replay in it, the single test gate on
-// the head the replay produced, and — when that gate passes — the single target
-// move.
+// rebaseOnto runs ONE full cycle: a fresh temporary worktree based on the
+// target's CURRENT head — re-read here, on every cycle, so a restart bases
+// itself on where the target is now rather than on where it was when the merge
+// began — the per-commit replay in it, the single test gate on the head the
+// replay produced, and, when that gate passes, the single target move.
 //
 // THE TEMP WORKTREE IS CLEANED UP ON EVERY PATH THIS CALL OWNS. It survives
 // exactly one way: a parked outcome (conflict or test failure), which hands it
 // to merge.Coordinator along with the responsibility to Cleanup it.
-func (e *Driver) rebaseOnto(ctx context.Context, req Request, attempt int) (res Result, err error) {
+func (e *Driver) rebaseOnto(ctx context.Context, req Request, cycle int) (res Result, err error) {
 	baseHead, err := e.gitString(ctx, req.TargetDir, "rev-parse", "HEAD")
 	if err != nil {
 		return Result{}, err
@@ -491,8 +501,8 @@ func (e *Driver) rebaseOnto(ctx context.Context, req Request, attempt int) (res 
 		return Result{}, err
 	}
 	req.WorkDir, req.BaseHead = work, baseHead
-	e.logf("merge: REBASE WORKTREE created {ws=%s attempt=%d/%d work=%s base=%s target=%s} — the target is NOT touched until every commit has landed and passed",
-		req.Name, attempt, rebaseAttempts, work, shortSHA(baseHead), req.TargetDir)
+	e.logf("merge: REBASE WORKTREE created {ws=%s cycle=%d work=%s base=%s target=%s} — the target is NOT touched until every commit has landed and passed",
+		req.Name, cycle, work, shortSHA(baseHead), req.TargetDir)
 
 	defer func() {
 		// A parked outcome keeps the tree; anything else has no further use for
@@ -1548,7 +1558,8 @@ func (e *Driver) finalizeMerged(ctx context.Context, req Request, alreadyIncorpo
 //     rebase based itself on. Everything the gate certified was certified
 //     against that head, so a target that moved has never been tested against
 //     this line at all. A moved target is errTargetMoved — recoverable, and
-//     merge.Driver.Merge answers it by re-rebasing once.
+//     merge.Driver.Merge answers it by restarting the cycle on the new head, as
+//     often as the target moves.
 //
 //  2. THE BRANCH REF MOVES TO THE REBASED LINE, compare-and-swap against the
 //     value it is expected to hold, and logged with both SHAs. This is what

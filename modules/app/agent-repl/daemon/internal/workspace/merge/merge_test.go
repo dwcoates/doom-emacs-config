@@ -2,6 +2,7 @@ package merge
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -2056,9 +2057,9 @@ func TestAnEmptyBranchNoOpsWithoutAnEmptyMergeCommit(t *testing.T) {
 	}
 }
 
-func TestAMovedTargetIsAnsweredByOneAutomaticReRebase(t *testing.T) {
+func TestAMovedTargetIsAnsweredByAnAutomaticRestart(t *testing.T) {
 	// A target that moves while the gate runs invalidates everything the gate
-	// certified, so the merge re-bases onto the new head rather than merging a
+	// certified, so the merge restarts on the new head rather than merging a
 	// line nothing tested against it.
 	// Arrange — the suite advances the target the FIRST time it runs, and never
 	// again, so exactly one re-rebase is needed.
@@ -2088,10 +2089,10 @@ func TestAMovedTargetIsAnsweredByOneAutomaticReRebase(t *testing.T) {
 	// Assert — the merge landed on the SECOND attempt, over the external commit,
 	// which is still reachable.
 	if err != nil || res.Outcome != OutcomeMerged {
-		t.Fatalf("Merge() res=%+v err=%v, want merged after one re-rebase", res, err)
+		t.Fatalf("Merge() res=%+v err=%v, want merged after one restart", res, err)
 	}
 	if runs != 2 {
-		t.Errorf("suite runs = %d, want 2 (the first attempt, then the re-rebase)", runs)
+		t.Errorf("suite runs = %d, want 2 (the first cycle, then the restart)", runs)
 	}
 	if _, statErr := os.Stat(filepath.Join(target, "external.txt")); statErr != nil {
 		t.Errorf("the external commit was lost by the re-rebase: %v", statErr)
@@ -2101,9 +2102,16 @@ func TestAMovedTargetIsAnsweredByOneAutomaticReRebase(t *testing.T) {
 	}
 }
 
-func TestATargetThatKeepsMovingFailsLoudlyAtTheBound(t *testing.T) {
-	// Arrange — the suite moves the target on EVERY run, so no attempt can ever
-	// land. The loop is bounded at rebaseAttempts and must fail rather than spin.
+// moves is how many consecutive times the target is stolen out from under the
+// cycle in the tests below. THREE is chosen because the pipeline used to cap the
+// restarts at two: a merge that survives three consecutive moves cannot be
+// passing by an off-by-one in a bound.
+const moves = 3
+
+func TestATargetThatKeepsMovingIsFollowedUntilItHoldsStill(t *testing.T) {
+	// Arrange — the suite lands an external commit on the target on each of its
+	// first three runs, then leaves it alone. There is no attempt cap, so the
+	// merge follows the target until it holds still.
 	target := initTarget(t)
 	featureDir := addFeatureWorktree(t, target)
 	writeFile(t, featureDir, "feature.txt", "hello\n")
@@ -2114,24 +2122,119 @@ func TestATargetThatKeepsMovingFailsLoudlyAtTheBound(t *testing.T) {
 	var runs int
 	suite := suiteFunc(func(_ context.Context, _ string, _ SuiteRun) (SuiteResult, error) {
 		runs++
+		if runs <= moves {
+			writeFile(t, target, fmt.Sprintf("external-%d.txt", runs), "somebody else\n")
+			gitRun(t, target, "add", ".")
+			gitRun(t, target, "commit", "-q", "-m", fmt.Sprintf("external commit %d", runs))
+		}
+		return SuiteResult{Passed: true}, nil
+	})
+	e := newTestDriverWithSuite(t, sink, suite)
+	req := withRun(t, sink, Request{Workspace: "/ws/chase-ws", Name: "chase-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+
+	// Act.
+	res, err := e.Merge(context.Background(), req)
+
+	// Assert — it landed on the final, stable head, having run one cycle per
+	// move plus the one that stuck, and nothing anybody else landed was lost.
+	if err != nil || res.Outcome != OutcomeMerged {
+		t.Fatalf("Merge() res=%+v err=%v, want merged after %d restarts", res, err, moves)
+	}
+	if runs != moves+1 {
+		t.Errorf("suite runs = %d, want %d (one per move, plus the cycle that landed)", runs, moves+1)
+	}
+	if _, statErr := os.Stat(filepath.Join(target, "feature.txt")); statErr != nil {
+		t.Errorf("the merged work did not reach the target: %v", statErr)
+	}
+	for i := 1; i <= moves; i++ {
+		name := fmt.Sprintf("external-%d.txt", i)
+		if _, statErr := os.Stat(filepath.Join(target, name)); statErr != nil {
+			t.Errorf("external commit %d was lost by a restart: %v", i, statErr)
+		}
+	}
+}
+
+func TestEachRestartRebasesOntoTheTargetsCurrentHead(t *testing.T) {
+	// Arrange — the same chasing target, but this run watches what each cycle
+	// BASED ITSELF ON: a restart that re-read the target's head carries every
+	// external commit landed so far into its rebase worktree, and one that reused
+	// the original base carries none of them.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "feature.txt", "hello\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
+
+	sink := &recordingSink{}
+	var runs int
+	var carried []int
+	suite := suiteFunc(func(_ context.Context, workDir string, _ SuiteRun) (SuiteResult, error) {
+		runs++
+		var seen int
+		for i := 1; i < runs; i++ {
+			if _, statErr := os.Stat(filepath.Join(workDir, fmt.Sprintf("external-%d.txt", i))); statErr == nil {
+				seen++
+			}
+		}
+		carried = append(carried, seen)
+		if runs <= moves {
+			writeFile(t, target, fmt.Sprintf("external-%d.txt", runs), "somebody else\n")
+			gitRun(t, target, "add", ".")
+			gitRun(t, target, "commit", "-q", "-m", fmt.Sprintf("external commit %d", runs))
+		}
+		return SuiteResult{Passed: true}, nil
+	})
+	e := newTestDriverWithSuite(t, sink, suite)
+	req := withRun(t, sink, Request{Workspace: "/ws/rebase-ws", Name: "rebase-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+
+	// Act.
+	res, err := e.Merge(context.Background(), req)
+
+	// Assert — cycle N was based on a head carrying all N-1 commits that had
+	// landed before it started.
+	if err != nil || res.Outcome != OutcomeMerged {
+		t.Fatalf("Merge() res=%+v err=%v, want merged", res, err)
+	}
+	for cycle, seen := range carried {
+		if seen != cycle {
+			t.Errorf("cycle %d rebased onto a head carrying %d of the %d external commits landed before it — every restart must re-read the target's CURRENT head", cycle+1, seen, cycle)
+		}
+	}
+}
+
+func TestARestartLoopStopsOnACancelledContext(t *testing.T) {
+	// Arrange — a target that moves on EVERY run can never land, so the loop's
+	// only way out is the context. Cancelling it once the first cycle has been
+	// observed is what proves the loop is answerable rather than a spin.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "feature.txt", "hello\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sink := &recordingSink{}
+	var runs int
+	suite := suiteFunc(func(_ context.Context, _ string, _ SuiteRun) (SuiteResult, error) {
+		runs++
 		writeFile(t, target, fmt.Sprintf("external-%d.txt", runs), "somebody else\n")
 		gitRun(t, target, "add", ".")
 		gitRun(t, target, "commit", "-q", "-m", "an external commit")
+		cancel()
 		return SuiteResult{Passed: true}, nil
 	})
 	e := newTestDriverWithSuite(t, sink, suite)
 	req := withRun(t, sink, Request{Workspace: "/ws/spin-ws", Name: "spin-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
 
 	// Act.
-	_, err := e.Merge(context.Background(), req)
+	_, err := e.Merge(ctx, req)
 
-	// Assert — a loud failure naming the bound, and nothing of the merge on the
-	// target.
-	if err == nil {
-		t.Fatalf("Merge() err = nil; want a loud failure after %d attempts", rebaseAttempts)
-	}
-	if runs != rebaseAttempts {
-		t.Errorf("suite runs = %d, want exactly %d — the loop must be bounded", runs, rebaseAttempts)
+	// Assert — a loud failure carrying the cancellation, and nothing of the
+	// merge on a target it never tested against.
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Merge() err = %v, want it to carry context.Canceled", err)
 	}
 	if _, statErr := os.Stat(filepath.Join(target, "feature.txt")); statErr == nil {
 		t.Errorf("the merge landed on a target it never tested against")

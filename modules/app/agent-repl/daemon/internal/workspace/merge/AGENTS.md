@@ -50,8 +50,13 @@ and the head has passed. The choreography:
    - THE GUARD. The target must still be on `Request.BaseHead`, the head the
      rebase based itself on. Everything the gate certified was certified against
      that head. A target that moved is `errTargetMoved`, and `Merge` answers it
-     by RE-REBASING ONCE onto the new head (`rebaseAttempts = 2`); a second
-     occurrence fails loudly rather than spinning a full suite run per attempt.
+     by RESTARTING THE WHOLE CYCLE on the target's new head — fresh rebase
+     worktree, replay, suite selection, suite, land — UNBOUNDEDLY, as often as
+     the target moves. There is no attempt cap: a moved target is another writer
+     landing first, which is the ordinary condition of a shared repository
+     rather than a defect in the branch. The loop exits only by landing, by a
+     REAL failure (conflict, escalated gate, refused merge commit), or by a
+     cancelled context.
    - THE BRANCH REF MOVES to the rebased line, compare-and-swap against the
      value this merge read, logged with both SHAs, and the source worktree is
      re-synced onto it. That is what makes the merge commit's SECOND PARENT the
