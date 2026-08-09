@@ -141,6 +141,7 @@ import {
   QUEUE_CLASSIFICATION_ARM,
   QUEUE_HOLD_ARM,
   REVIVAL_HOLD_FIELDS,
+  BUILD_REFRESH_HOLD_FIELDS,
 } from "./proto-names.js";
 import {
   decodeAsyncBubble,
@@ -1521,6 +1522,14 @@ export interface QueueEntryKeepAliveHold {
  */
 export type QueueEntryRevivalHold = Record<string, never>;
 
+/**
+ * Present when this entry waits for its session's shim to restart onto the
+ * current build at the turn boundary (automatic stale-shim refresh). A bare
+ * marker: the arm being set is the whole claim, and the entry is delivered in
+ * order the moment the restarted shim reports ready.
+ */
+export type QueueEntryBuildRefreshHold = Record<string, never>;
+
 /** One prompt the daemon is holding (E4). */
 export interface QueueEntry {
   id: string;
@@ -1547,6 +1556,11 @@ export interface QueueEntry {
    * selects the revival bubble over the classifier bubble.
    */
   revivalHold?: QueueEntryRevivalHold;
+  /**
+   * Set ONLY while a turn-boundary build refresh holds this prompt. Absence is
+   * the real answer "no build refresh is holding this", not a missing field.
+   */
+  buildRefreshHold?: QueueEntryBuildRefreshHold;
 }
 
 /** The `idle` arm's payload: deliberately empty — the arm IS the state. */
@@ -2949,6 +2963,7 @@ const QUEUE_ENTRY_KEYS = new Set([
 const QUEUE_ENTRY_SHUTDOWN_HOLD_KEYS = new Set(["scheduleId"]);
 const QUEUE_ENTRY_KEEP_ALIVE_HOLD_KEYS = new Set([KEEP_ALIVE_HOLD_TURN_ID]);
 const QUEUE_ENTRY_REVIVAL_HOLD_KEYS = new Set(REVIVAL_HOLD_FIELDS);
+const QUEUE_ENTRY_BUILD_REFRESH_HOLD_KEYS = new Set(BUILD_REFRESH_HOLD_FIELDS);
 const QUEUE_CLASSIFICATION_PENDING_KEYS = new Set<string>();
 const QUEUE_CLASSIFICATION_INTERJECT_KEYS = new Set(["rationale"]);
 const QUEUE_CLASSIFICATION_HOLD_KEYS = new Set(["rationale", "accepted"]);
@@ -3019,8 +3034,20 @@ function decodeQueueEntry(v: unknown): QueueEntry {
     e.keepAliveHold = decodeQueueEntryKeepAliveHold(o[QUEUE_HOLD_ARM.keepAlive]);
   } else if (holds[0] === QUEUE_HOLD_ARM.revival) {
     e.revivalHold = decodeQueueEntryRevivalHold(o[QUEUE_HOLD_ARM.revival]);
+  } else if (holds[0] === QUEUE_HOLD_ARM.buildRefresh) {
+    e.buildRefreshHold = decodeQueueEntryBuildRefreshHold(o[QUEUE_HOLD_ARM.buildRefresh]);
   }
   return e;
+}
+
+function decodeQueueEntryBuildRefreshHold(v: unknown): QueueEntryBuildRefreshHold {
+  const o = ensureObject(v, "QueueEntryBuildRefreshHold");
+  // A BARE MARKER, exactly as the revival hold is: the arm being set is the
+  // whole claim, so rejecting unknown keys against an empty set is the entire
+  // validation and is what makes a field the daemon starts sending here fail
+  // loudly instead of being dropped.
+  rejectUnknown(o, QUEUE_ENTRY_BUILD_REFRESH_HOLD_KEYS, "QueueEntryBuildRefreshHold");
+  return {};
 }
 
 function decodeQueueEntryRevivalHold(v: unknown): QueueEntryRevivalHold {
