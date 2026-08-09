@@ -132,6 +132,10 @@ func bootGeometryDaemon(t *testing.T) *geometryBoot {
 		t.Fatalf("build merge lease: %v", err)
 	}
 	agentShim, err := server.WireAgentShim(server.AgentShimConfig{
+		// The boot orphan sweep scans THIS directory and no other: a test that
+		// let it resolve the process temp dir deleted the live daemon's rebase
+		// worktrees mid-merge.
+		RebaseRoot:        t.TempDir(),
 		Resumes:           &server.ConversationResolver{Reg: reg, Logf: t.Logf},
 		SSM:               ssmMgr,
 		Progress:          progressMgr,

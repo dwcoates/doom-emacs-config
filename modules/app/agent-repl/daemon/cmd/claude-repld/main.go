@@ -943,6 +943,11 @@ func main() {
 	agentShim, err := server.WireAgentShim(server.AgentShimConfig{
 		SSM:      ssmMgr,
 		Progress: progressMgr,
+		// THE PRODUCTION REBASE ROOT. Rebase worktrees are created under it and
+		// the boot orphan sweep scans it — ONE injected path for both, so no
+		// other process (a test above all) can sweep the directory this daemon
+		// is merging in.
+		RebaseRoot: os.TempDir(),
 		// Prompts is BOTH the frontend's submit path and merge.Coordinator's
 		// conflict-resolution path (the controller implements
 		// merge.ConflictResolver), so the session a merge drives is necessarily
