@@ -41,10 +41,18 @@ func (l *rebaseLog) matching(needle string) []string {
 	return out
 }
 
-// newLoggingDriver builds a driver whose log this test can read back.
+// newLoggingDriver builds a driver whose log this test can read back, rooted in
+// this test's own temp dir.
 func newLoggingDriver(t *testing.T, log *rebaseLog) *Driver {
 	t.Helper()
-	e, err := NewDriver(Config{Logf: log.logf, Sink: &recordingSink{}, Suite: skippingSuite()})
+	return newLoggingDriverRooted(t, log, t.TempDir())
+}
+
+// newLoggingDriverRooted is newLoggingDriver with the injected rebase root the
+// caller names — the sweep's summary tests plant orphans in it.
+func newLoggingDriverRooted(t *testing.T, log *rebaseLog, root string) *Driver {
+	t.Helper()
+	e, err := NewDriver(Config{Logf: log.logf, Sink: &recordingSink{}, Suite: skippingSuite(), RebaseRoot: root})
 	if err != nil {
 		t.Fatalf("NewDriver: %v", err)
 	}

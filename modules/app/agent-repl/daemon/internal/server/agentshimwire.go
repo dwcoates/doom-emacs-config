@@ -9,6 +9,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
@@ -30,6 +31,17 @@ type AgentShimConfig struct {
 	// read/write it. WireAgentShim does NOT close it — main does (the same SSM
 	// is shared with the per-session controller, so one owner closes it once).
 	SSM *ssm.Manager
+	// RebaseRoot is the directory merge rebase worktrees are created under and
+	// the ONLY directory the boot orphan sweep scans. REQUIRED, with no default:
+	// production passes the process temp dir, and every test passes t.TempDir().
+	//
+	// It is a required field precisely because it fired in production. The sweep
+	// used to resolve os.TempDir() at sweep time, so a test that constructed
+	// this wiring swept the real temp dir with a test coordinator's retention
+	// set — which knows nothing about the live daemon's merges — and deleted the
+	// production rebase worktree a merge gate's own `go test ./...` was running
+	// inside. A defaulted root would make that state representable again.
+	RebaseRoot string
 	// Progress is the progress-footer resolver (F1), a sibling of the SSM. It is
 	// created and owned by the caller for the same reason the SSM is: the
 	// per-session controller folds events into it too. Required.
@@ -491,6 +503,8 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 		return nil, fmt.Errorf("server: WireAgentShim needs a SessionDeaths source (without it a merge cannot tell a hibernated session from one the user deleted, and would resurrect the second while rehydrating the first)")
 	case cfg.Prompts == nil:
 		return nil, fmt.Errorf("server: WireAgentShim needs a PromptRouter (it is both the frontend's submit path and merge.Coordinator's conflict-resolution path)")
+	case strings.TrimSpace(cfg.RebaseRoot) == "":
+		return nil, fmt.Errorf("server: WireAgentShim needs a RebaseRoot (production: the process temp dir; tests: t.TempDir()). It is NOT defaulted to os.TempDir(), because a wiring that resolved the root itself ran the boot sweep over the LIVE daemon's temp dir from a TEST process and deleted production rebase worktrees mid-merge")
 	}
 	mgr := cfg.SSM
 
@@ -501,7 +515,7 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 	if err != nil {
 		return nil, fmt.Errorf("server: build merge suite runner: %w", err)
 	}
-	driver, err := merge.NewDriver(merge.Config{Logf: logf, Sink: mergeSink{mgr}, Suite: suite})
+	driver, err := merge.NewDriver(merge.Config{Logf: logf, Sink: mergeSink{mgr}, Suite: suite, RebaseRoot: cfg.RebaseRoot})
 	if err != nil {
 		return nil, fmt.Errorf("server: build merge driver: %w", err)
 	}
@@ -572,7 +586,13 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 	//
 	// IT NEVER FAILS THE BOOT. A directory that would not delete is a leak, not
 	// a reason to refuse to start, so it is loud-logged and the daemon comes up.
-	if err := driver.SweepOrphanRebaseWorktrees(context.Background(), coordinator.RetainedRebaseWorktrees()); err != nil {
+	//
+	// IT SWEEPS cfg.RebaseRoot AND NOTHING ELSE, and it removes only leftovers
+	// whose own `.git` file names a repository this coordinator manages.
+	if err := driver.SweepOrphanRebaseWorktrees(context.Background(), merge.SweepScope{
+		Retained: coordinator.RetainedRebaseWorktrees(),
+		Repos:    coordinator.ManagedRepos(),
+	}); err != nil {
 		logf("server: orphaned rebase worktree sweep reported failures: %v — the leftovers it could not remove are left for a human; the daemon starts either way", err)
 	}
 

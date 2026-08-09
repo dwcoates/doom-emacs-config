@@ -282,6 +282,10 @@ func (w *shutdownWorld) bootRecordingStops(t *testing.T) *stopCauseBoot {
 	}
 
 	agentShim, err := server.WireAgentShim(server.AgentShimConfig{
+		// The boot orphan sweep scans THIS directory and no other: a test that
+		// let it resolve the process temp dir deleted the live daemon's rebase
+		// worktrees mid-merge.
+		RebaseRoot:        t.TempDir(),
 		Resumes:           &server.ConversationResolver{Reg: reg, Logf: logf},
 		SSM:               ssmMgr,
 		Progress:          progressMgr,

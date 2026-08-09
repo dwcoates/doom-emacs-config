@@ -446,6 +446,10 @@ func (w *receiptWorld) restart(t *testing.T) *bouncedFrontend {
 
 	binding := &server.SessionCommandBinding{Logf: t.Logf}
 	agentShim, err := server.WireAgentShim(server.AgentShimConfig{
+		// The boot orphan sweep scans THIS directory and no other: a test that
+		// let it resolve the process temp dir deleted the live daemon's rebase
+		// worktrees mid-merge.
+		RebaseRoot:        t.TempDir(),
 		SSM:               ssmMgr,
 		Progress:          progressMgr,
 		Prompts:           controller,
