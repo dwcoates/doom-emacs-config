@@ -472,10 +472,12 @@ func TestPingOverdueReportsHowLongThePingHasBeenOpen(t *testing.T) {
 	}
 }
 
-// A DEADLINE THE SWEEP CANNOT REACH IS REFUSED AT STARTUP. A ping judged overdue
-// before the sweep that would have observed its end ever runs would kill live
-// pings, which is the opposite of what the deadline is for.
-func TestValidateRefusesADeadlineTheSweepCannotReach(t *testing.T) {
+// A DEADLINE SHORTER THAN ONE SWEEP INTERVAL IS REFUSED AT STARTUP. A ping
+// judged dead on the very next tick after its submit would kill live pings,
+// which is the opposite of what the deadline is for. The boundary case --
+// exactly one interval -- is VALID, because the deadline is measured from the
+// submit instant rather than counted in ticks.
+func TestValidateRefusesADeadlineShorterThanOneSweepInterval(t *testing.T) {
 	// Arrange — a leeway almost as wide as the TTL leaves a deadline of nearly
 	// nothing while the sweep interval stays a quarter of that wide leeway.
 	cfg := DefaultConfig()
@@ -487,7 +489,7 @@ func TestValidateRefusesADeadlineTheSweepCannotReach(t *testing.T) {
 
 	// Assert.
 	if err == nil {
-		t.Fatalf("Validate() accepted a %s ping deadline against a %s sweep interval; a ping would be judged overdue before any sweep could observe its end",
+		t.Fatalf("Validate() accepted a %s ping deadline against a %s sweep interval; a ping would be judged dead on the tick after its submit",
 			cfg.PingDeadline(), cfg.SweepInterval(0))
 	}
 }
