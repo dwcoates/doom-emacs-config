@@ -358,7 +358,7 @@ describe("QueuedCard — keep-alive dispatch", () => {
 
 /** A held prompt parked behind a pending compact-first revival. */
 function revivalHeld(over: Partial<QueuedItem> = {}): QueuedItem {
-  return queued({ revivalHold: { sessionId: "sess-4" }, ...over });
+  return queued({ revivalHold: {}, ...over });
 }
 
 describe("QueuedCard — revival dispatch", () => {
@@ -425,9 +425,11 @@ describe("QueuedCard — revival dispatch", () => {
     expect(html).not.toContain("independent work");
   });
 
-  it("joins the bubble to the session whose compaction releases it", () => {
-    // Arrange / Act / Assert
-    expect(QueuedCard(revivalHeld())).toContain('data-revival-session-id="sess-4"');
+  it("names no session, because the hold is a bare marker after the reshape", () => {
+    // Arrange / Act / Assert — QueueEntryRevivalHold carries no session id, and
+    // the workspace's owning session is WorkspaceState's to state, not this
+    // card's to copy.
+    expect(QueuedCard(revivalHeld())).not.toContain("data-revival-session-id");
   });
 
   it("renders the user's prompt text", () => {
@@ -438,11 +440,6 @@ describe("QueuedCard — revival dispatch", () => {
   it("escapes markup in the prompt text", () => {
     // Arrange / Act / Assert
     expect(QueuedCard(revivalHeld({ text: "<script>x</script>" }))).not.toContain("<script>");
-  });
-
-  it("escapes markup in the session id it puts in a data attribute", () => {
-    // Arrange / Act / Assert
-    expect(QueuedCard(revivalHeld({ revivalHold: { sessionId: 's"1' } }))).toContain("s&quot;1");
   });
 
   it("lets the drain lease outrank the revival hold when both are set", () => {

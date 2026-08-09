@@ -565,11 +565,17 @@ export const KEEP_ALIVE_HELD_REASON =
  * prompt at all — forcing it would have nowhere to deliver to. Its exits are
  * delivery once the compaction lands and the gate opens, a loud drop if the
  * revival fails, and Cancel — so Cancel is the only control on screen.
+ *
+ * NO SESSION ATTRIBUTE. The hold used to name the session being revived and the
+ * card published it as `data-revival-session-id`. The figma-idl reshape made
+ * `QueueEntryRevivalHold` a bare marker: the queue push is fenced and its
+ * workspace has exactly one session, so the id is `WorkspaceState`'s to state
+ * and copying it onto the card here would be a second source for it.
  */
-export function RevivalHeldCard(item: QueuedItem, sessionId: string): string {
+export function RevivalHeldCard(item: QueuedItem): string {
   const qid = escapeHtml(item.id);
   return `
-    <div class="queued-card revival-card" data-revival-session-id="${escapeHtml(sessionId)}">
+    <div class="queued-card revival-card">
       <div class="queued-head">
         <span class="queued-badge revival">held — waiting on the revival's compaction</span>
       </div>
@@ -605,7 +611,7 @@ export function QueuedCard(item: QueuedItem): string {
   // classifier never ran on an entry held by a pending revival, so its
   // classification field carries no verdict this card could honestly show.
   if (item.revivalHold !== undefined) {
-    return RevivalHeldCard(item, item.revivalHold.sessionId);
+    return RevivalHeldCard(item);
   }
   const badge = queuedBadge(item);
   const qid = escapeHtml(item.id);
@@ -2243,7 +2249,7 @@ function queryTerminationFailureHtml(failure: import("./frontend-proto.js").Quer
     : failure.vendorIdentity.case === "vendorSessionIdentityUnavailable"
       ? "unavailable before SDK initialization"
       : "missing vendor identity evidence";
-  return `<div class="failure-detail">query termination: ${escapeHtml(reason)}<br>agent-repl session: ${escapeHtml(failure.agentReplSessionId)}<br>query instance: ${escapeHtml(failure.queryInstanceId)}<br>vendor session: ${escapeHtml(vendor)}<br>observed_at_ms: ${String(failure.observedAtMs)}</div>`;
+  return `<div class="failure-detail">query termination: ${escapeHtml(reason)}<br>query instance: ${escapeHtml(failure.queryInstanceId)}<br>vendor session: ${escapeHtml(vendor)}<br>observed_at_ms: ${String(failure.observedAtMs)}</div>`;
 }
 
 /** Render resume-continuity evidence without reducing it to a generic death. */

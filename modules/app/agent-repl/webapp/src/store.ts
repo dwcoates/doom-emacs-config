@@ -1003,12 +1003,13 @@ export class ConversationStore {
       ) {
         const reveal = effect.value;
         this.failIngestInvariant(
-          `input_json delta missing stable tool identity workspace=${reveal.workspace} session=${reveal.sessionId} ` +
+          `input_json delta missing stable tool identity workspace=${reveal.workspace} ` +
+            `session=${this.state.sessionId || "none"} fence=${reveal.fence} ` +
             `message=${reveal.messageId} block_index=${reveal.blockIndex} chunk_length=${reveal.delta.length}`,
           {
             operation: "conversation-store.tool-input",
             workspace: reveal.workspace,
-            agent_repl_session_id: reveal.sessionId,
+            agent_repl_session_id: this.state.sessionId,
             ...(this.state.claudeSessionId === "" ? {} : { claude_session_id: this.state.claudeSessionId }),
             api_message_id: reveal.messageId,
             block_index: reveal.blockIndex,
@@ -1144,7 +1145,7 @@ export class ConversationStore {
     if (previousInterrupt !== nextInterrupt) {
       this.log(
         "info",
-        `progress interrupt adopted workspace=${p.workspace} session=${p.sessionId} ` +
+        `progress interrupt adopted workspace=${p.workspace} fence=${p.fence} ` +
           `outcome=${previousInterrupt ?? "none"}->${nextInterrupt ?? "none"} ` +
           `since_ms=${p.interrupt?.sinceMs ?? 0} turn_started_at_ms=${p.turnStartedAtMs}`,
       );
@@ -1465,7 +1466,7 @@ export class ConversationStore {
     const outcomeContext: ClientLogContext = {
       operation: "conversation-store.tool-input",
       workspace: reveal.workspace,
-      agent_repl_session_id: reveal.sessionId,
+      agent_repl_session_id: this.state.sessionId,
       ...(this.state.claudeSessionId === "" ? {} : { claude_session_id: this.state.claudeSessionId }),
       api_message_id: reveal.messageId,
       block_index: reveal.blockIndex,
