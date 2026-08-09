@@ -179,6 +179,10 @@ type fakeClient struct {
 	// INTERRUPTED, so a test that does not care about the outcome gets the
 	// ordinary successful stop.
 	interruptOutcome corev1.InterruptOutcome
+	// interruptErr, when non-nil, is what the interrupt fails with — an
+	// unreachable shim, a nack, or an ack that never came. It is the fake's
+	// stand-in for every route by which a stop cannot be delivered at all.
+	interruptErr error
 	// notReady, when non-nil, blocks AwaitReady until it is closed — the
 	// fake's stand-in for a shim that has not finished handshaking yet. Nil
 	// (the default) means the connection is already usable, so tests that do
@@ -304,8 +308,12 @@ func (c *fakeClient) Interrupt(_ context.Context) (corev1.InterruptOutcome, erro
 	c.mu.Lock()
 	c.interrupts++
 	outcome := c.interruptOutcome
+	failure := c.interruptErr
 	c.mu.Unlock()
 	notifyTestActivity()
+	if failure != nil {
+		return corev1.InterruptOutcome_INTERRUPT_OUTCOME_UNSPECIFIED, failure
+	}
 	if outcome == corev1.InterruptOutcome_INTERRUPT_OUTCOME_UNSPECIFIED {
 		outcome = corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED
 	}
