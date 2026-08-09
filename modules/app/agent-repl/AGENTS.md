@@ -106,6 +106,19 @@ rather than colors so they never spend one of the six, and the Recently Merged
 disc borrows the `--info-agents` violet as a section tint, not as a claim about
 the vendor.
 
+## The "expanded footer" is what the progress footer's detail section is called
+
+The progress footer's expandable detail section — the `FooterDisclosure.expanded`
+surface `webapp/src/progress-footer.ts` draws — is the **expanded footer**. Use
+that name in code, comments, tests and prose; "sheet", "expansion", and "detail
+panel" are the older names it replaces, and one surface answering to four is how
+a change lands on the wrong one.
+
+It is also the ONLY surface that carries the session's subagent roster. The
+agents chip opens and closes it rather than dropping a roster of its own, and
+the per-bubble agent strips inside feed cards are a different thing entirely:
+they are scoped to one bubble's own call.
+
 ## Hibernation is the memory knob, and it is gated on real elapsed quiet
 
 A live session costs a node+CLI process pair of roughly 500MB, and dozens of
