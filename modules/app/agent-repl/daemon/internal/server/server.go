@@ -36,6 +36,7 @@ import (
 	"claude-repld/internal/addsupport"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/errclass"
+	"claude-repld/internal/externalbrowser"
 	"claude-repld/internal/frontend"
 	"claude-repld/internal/keepalive"
 	"claude-repld/internal/login"
@@ -244,6 +245,10 @@ type Server struct {
 	viewsMu     sync.RWMutex
 	viewsClosed bool
 
+	// openExternalURL backs POST /open-external: it hands a hyperlink to the
+	// pinned external browser profile. Always non-nil (New defaults it).
+	openExternalURL func(url string) error
+
 	mu sync.Mutex
 }
 
@@ -313,6 +318,10 @@ type Config struct {
 	// IdleSweepTicks overrides the sweeper's clock. Nil mints a real ticker;
 	// tests inject a channel so a sweep runs on demand.
 	IdleSweepTicks <-chan time.Time
+	// OpenExternalURL hands a hyperlink to the external browser for POST
+	// /open-external. Nil takes the production opener (externalbrowser);
+	// tests inject one so a route test cannot launch a browser.
+	OpenExternalURL func(url string) error
 }
 
 // Account is one canonical config root the daemon can name and switch
@@ -339,6 +348,12 @@ func New(cfg Config) *Server {
 	if now == nil {
 		now = time.Now
 	}
+	openExternalURL := cfg.OpenExternalURL
+	if openExternalURL == nil {
+		openExternalURL = func(url string) error {
+			return externalbrowser.Open(url, externalbrowser.Exec)
+		}
+	}
 	s := &Server{
 		daemonVersion:   cfg.DaemonVersion,
 		bootID:          newBootID(),
@@ -357,6 +372,7 @@ func New(cfg Config) *Server {
 		idleTimeout:     cfg.IdleTimeout,
 		idleSweepTicks:  cfg.IdleSweepTicks,
 		keepAlive:       cfg.KeepAlive,
+		openExternalURL: openExternalURL,
 		stopped:         make(chan struct{}),
 		sweeperDone:     make(chan struct{}),
 		upgrader: websocket.Upgrader{
@@ -438,6 +454,7 @@ var APIPrefixes = []string{
 	"/capabilities",
 	"/workspace-command",
 	"/workspace-stream",
+	"/open-external",
 }
 
 // routes is the daemon's full HTTP surface.
@@ -473,7 +490,37 @@ func (s *Server) routes() []route {
 		{"POST /sessions/{id}/add-support", s.handleAddSupport},
 		{"POST /workspace-command", s.handleWorkspaceCommand},
 		{"GET /workspace-stream", s.handleWorkspaceStream},
+		{"POST /open-external", s.handleOpenExternal},
 	}
+}
+
+// handleOpenExternal opens one hyperlink in the pinned external browser
+// profile. The webapp cancels an anchor click before WebKit can navigate the
+// xwidget and posts the URL here, so this route is the ONLY thing standing
+// between a clicked link and nothing happening at all — a failure is answered
+// with a status, never absorbed.
+func (s *Server) handleOpenExternal(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		URL string `json:"url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		httpError(w, http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
+		return
+	}
+	if err := externalbrowser.Validate(body.URL); err != nil {
+		s.logf("open-external: refused url=%q: %v", body.URL, err)
+		httpError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := s.openExternalURL(body.URL); err != nil {
+		s.logf("open-external: opening url=%q in profile %q failed: %v",
+			body.URL, externalbrowser.ProfileDirectory, err)
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.logf("open-external: opened url=%q in profile %q",
+		body.URL, externalbrowser.ProfileDirectory)
+	writeJSON(w, s.logf, map[string]string{"opened": body.URL})
 }
 
 // ---------------------------------------------------------------------------

@@ -139,6 +139,7 @@ import {
   type ClientLogLevel,
 } from "./wslog.js";
 import { fetchTaskTail } from "./watcher-poll.js";
+import { installExternalLinkInterceptor, makeExternalOpener } from "./external-link.js";
 import "./styles.css";
 
 function must<T extends HTMLElement>(id: string): T {
@@ -152,6 +153,15 @@ async function boot(): Promise<void> {
   const daemon = params.get("daemon") ?? location.host;
   const httpBase = `${location.protocol === "https:" ? "https" : "http"}://${daemon}`;
   const wsBase = `${location.protocol === "https:" ? "wss" : "ws"}://${daemon}`;
+
+  // Claim every hyperlink for the external browser before ANY markup that can
+  // carry one is rendered. Installed here rather than beside the other
+  // document listeners further down so there is no window in which a rendered
+  // anchor could navigate the webview away from this page.
+  installExternalLinkInterceptor(
+    document,
+    makeExternalOpener(httpBase, (input, init) => fetch(input, init)),
+  );
 
   // What this page renders (address.ts). A malformed address throws here,
   // before anything connects, rather than surfacing as a failed handshake.
