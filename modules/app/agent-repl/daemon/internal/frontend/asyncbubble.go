@@ -347,8 +347,12 @@ func AppendAsyncOutputThrough(b *frontendv1.AsyncBubble, whole string, atMs int6
 	}
 	through := spool.GetThroughOffset()
 	if uint64(len(whole)) < through {
-		return nil, fmt.Errorf("frontend: async bubble %q output REWOUND — the source restated %d bytes where its spool cursor already stands at %d, which is a gap rather than an append and is refused",
-			b.GetId(), len(whole), through)
+		return nil, &AsyncGapError{
+			BubbleID: b.GetId(),
+			Gap:      AsyncGapSpoolRewind,
+			Detail: fmt.Sprintf("frontend: async bubble %q output REWOUND — the source restated %d bytes where its spool cursor already stands at %d, which is a gap rather than an append and is refused",
+				b.GetId(), len(whole), through),
+		}
 	}
 	return AppendAsyncOutput(b, whole[through:], atMs)
 }
@@ -479,8 +483,12 @@ func outputSpool(b *frontendv1.AsyncBubble) (*frontendv1.AsyncOutputSpool, error
 // handed is not the kind that update belongs to. It names BOTH kinds, because
 // the useful fact is the disagreement, not either half of it.
 func kindMismatch(b *frontendv1.AsyncBubble, want DetachKind) error {
-	return fmt.Errorf("frontend: async bubble %q is kind %s, so a %s update addressed to it is a daemon bug and is rejected rather than coerced",
-		b.GetId(), AsyncBubbleKind(b), want)
+	return &AsyncGapError{
+		BubbleID: b.GetId(),
+		Gap:      AsyncGapKindMismatch,
+		Detail: fmt.Sprintf("frontend: async bubble %q is kind %s, so a %s update addressed to it is a daemon bug and is rejected rather than coerced",
+			b.GetId(), AsyncBubbleKind(b), want),
+	}
 }
 
 // capTail applies the tail cap to an item-counted fold, keeping the NEWEST

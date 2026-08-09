@@ -19,16 +19,26 @@ import (
 // observeAsync folds one curated event's detached content into the session's
 // bubbles.
 //
-// A FOLD FAILURE DEGRADES THE ASYNC PLANE ONLY. It is recorded at warn — the
-// user can see the consequence, a bubble that stops growing — and the
-// conversation push continues, because the feed's correctness does not depend
-// on the bubble's. It is never swallowed: the record names the session, the
-// event, and the refusal the apparatus returned.
+// A FOLD FAILURE DEGRADES THE ASYNC PLANE ONLY. The conversation push
+// continues, because the feed's correctness does not depend on the bubble's,
+// and the failure is never swallowed: the record names the session, the event,
+// and the refusal the apparatus returned.
+//
+// A CLASSIFIED DAEMON BUG IS A FAILURE CARD, not a warn. Every refusal the
+// async plane calls a daemon bug — an update whose arm contradicts its bubble's
+// kind, a source that rewound under an append-only fold — has one user-visible
+// consequence: a bubble that stops growing, which is exactly what a quiet agent
+// looks like. Nobody watching the screen can tell those apart from a log line,
+// so those refusals are routed to the same card path an unattributable
+// detachment takes, carrying the very sentence this warn would have carried.
+// What is left over is still warned about here.
 func (c *consumer) observeAsync(curated frontend.Curation, ev *corev1.Event) asyncPush {
 	push, err := c.bubbles.observeCuration(curated, c.asyncInstant(ev))
-	if err != nil {
+	gaps, residual := splitAsyncGaps(err)
+	push.Faults = append(push.Faults, gaps...)
+	if residual != nil {
 		c.warn("session-controller: ASYNC BUBBLE FOLD DEGRADED session=%s ws=%q seq=%d — detached work could not be folded and its bubble will not show the affected records, but the conversation push is unaffected: %v",
-			c.sessionID, c.workspace, ev.GetSeq(), err)
+			c.sessionID, c.workspace, ev.GetSeq(), residual)
 	}
 	for _, uuid := range curated.WithheldDetached {
 		c.logf("session-controller: detached record WITHHELD session=%s seq=%d uuid=%s — it belongs to a detached agent and has no emission arm to carry it, so it is withheld from the bubble rather than promoted to the top-level feed",
@@ -37,7 +47,9 @@ func (c *consumer) observeAsync(curated frontend.Curation, ev *corev1.Event) asy
 	return push
 }
 
-// observeAsyncTask folds a task-lifecycle event into the session's bubbles.
+// observeAsyncTask folds a task-lifecycle event into the session's bubbles. It
+// classifies its refusals exactly as observeAsync does: a daemon bug earns the
+// card, everything else the degraded warn.
 func (c *consumer) observeAsyncTask(ev *corev1.Event) asyncPush {
 	var push asyncPush
 	var err error
@@ -49,9 +61,11 @@ func (c *consumer) observeAsyncTask(ev *corev1.Event) asyncPush {
 	default:
 		return asyncPush{}
 	}
-	if err != nil {
+	gaps, residual := splitAsyncGaps(err)
+	push.Faults = append(push.Faults, gaps...)
+	if residual != nil {
 		c.warn("session-controller: ASYNC BUBBLE LIFECYCLE DEGRADED session=%s ws=%q seq=%d kind=%s — the detachment's bubble could not be updated, but the task catalog and the conversation are unaffected: %v",
-			c.sessionID, c.workspace, ev.GetSeq(), stateKind(ev), err)
+			c.sessionID, c.workspace, ev.GetSeq(), stateKind(ev), residual)
 	}
 	return push
 }
