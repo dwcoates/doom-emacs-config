@@ -2748,3 +2748,60 @@ describe("async-bubble decode entry points", () => {
     expect(frame.frame.case === "conversationDelta" && "spawnedBubbleId" in frame.frame.value.items[0]).toBe(false);
   });
 });
+
+describe("the build-refresh queue hold", () => {
+  const ENTRY = {
+    id: "q1",
+    text: "hi",
+    queuedAtMs: "1",
+    holdForTurnEnd: { rationale: "later" },
+  };
+
+  it("decodes the hold as its own arm", () => {
+    // Arrange / Act
+    const frame = decode({
+      queue: { workspace: "ws", fence: "s1", entries: [{ ...ENTRY, buildRefresh: {} }] },
+    });
+
+    // Assert
+    expect(frame.frame.case === "queue" && frame.frame.value.entries[0].buildRefreshHold).toEqual(
+      {},
+    );
+  });
+
+  it("leaves the hold ABSENT on an ordinary classifier-held entry", () => {
+    // Arrange / Act
+    const frame = decode({ queue: { workspace: "ws", fence: "s1", entries: [ENTRY] } });
+
+    // Assert
+    expect(
+      frame.frame.case === "queue" && "buildRefreshHold" in frame.frame.value.entries[0],
+    ).toBe(false);
+  });
+
+  it("refuses an entry that sets the build refresh beside another hold", () => {
+    // Arrange / Act / Assert
+    expect(() =>
+      decode({
+        queue: {
+          workspace: "ws",
+          fence: "s1",
+          entries: [{ ...ENTRY, buildRefresh: {}, revival: {} }],
+        },
+      }),
+    ).toThrow(/sets multiple holds/);
+  });
+
+  it("refuses a field on the bare build-refresh marker", () => {
+    // Arrange / Act / Assert
+    expect(() =>
+      decode({
+        queue: {
+          workspace: "ws",
+          fence: "s1",
+          entries: [{ ...ENTRY, buildRefresh: { sessionId: "s1" } }],
+        },
+      }),
+    ).toThrow(/QueueEntryBuildRefreshHold/);
+  });
+});
