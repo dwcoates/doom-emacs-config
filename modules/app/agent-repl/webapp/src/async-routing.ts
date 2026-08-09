@@ -351,6 +351,41 @@ function routeUpdate(
         gap: null,
       };
     }
+    case "merge": {
+      // The SAME payload as `agent`, applied by the same rule: a merge run's
+      // emissions arrive exactly as a detached agent's do.
+      if (target.kind.case !== "merge") return unreachableKind(target, arm, update.bubbleId);
+      const value = update.update.value;
+      return {
+        bubble: {
+          ...target,
+          kind: {
+            case: "merge",
+            value: {
+              emissions: [...target.kind.value.emissions, ...value.emissions],
+              fold: value.fold,
+            },
+          },
+        },
+        gap: null,
+      };
+    }
+    case "skill": {
+      if (target.kind.case !== "skill") return unreachableKind(target, arm, update.bubbleId);
+      const inner = update.update.value;
+      const current = target.kind.value;
+      // Body resolution REPLACES the body whole; emissions append. Two arms,
+      // two lifetimes, and neither one touches the other's field.
+      const value =
+        inner.case === "body"
+          ? { ...current, body: inner.value }
+          : {
+              ...current,
+              emissions: [...current.emissions, ...inner.value.emissions],
+              fold: inner.value.fold,
+            };
+      return { bubble: { ...target, kind: { case: "skill", value } }, gap: null };
+    }
     case "journal": {
       if (target.kind.case !== "journal") return unreachableKind(target, arm, update.bubbleId);
       const value = update.update.value;
