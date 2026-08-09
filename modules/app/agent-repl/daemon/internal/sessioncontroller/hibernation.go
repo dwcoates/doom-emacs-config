@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/keepalive"
 	"claude-repld/internal/registry"
@@ -69,6 +71,23 @@ var ErrHibernationNoLongerIdle = errors.New("session-controller: the session is 
 // prompts would then be nacked by. The forced path keeps its earlier, friendlier
 // nack; this is the one no route goes around.
 var ErrHibernationMergeLeaseHeld = errors.New("session-controller: the workspace's session is held by a merge exclusivity lease and cannot be hibernated")
+
+// ErrHibernationMergeQueued reports an AUTOMATIC hibernation refused because the
+// workspace is waiting in the merge queue.
+//
+// A QUEUED WORKSPACE IS NOT A QUIET ONE. Both automatic causes read idleness off
+// the clock and cannot see the difference between "nobody wants this workspace"
+// and "this workspace is waiting its turn for the merge lock", and the second is
+// PENDING WORK — the queue exists precisely because somebody asked for it. The
+// cost of getting it wrong is not cosmetic: the workspace was hibernated while
+// queued, and the conflict resolution that eventually ran against it re-ingested
+// the whole conversation at the uncached rate.
+//
+// THE FORCED CAUSE IS NOT REFUSED HERE. A user hibernating a queued workspace has
+// looked at it and decided; the merge lease's gate above outranks even that,
+// because there the shim is genuinely being driven, but nothing is being driven
+// here and the user's own decision is not a stale clock reading.
+var ErrHibernationMergeQueued = errors.New("session-controller: the workspace is waiting in the merge queue and cannot be hibernated by an automatic cause")
 
 // ErrHibernated reports an operation refused because the session is
 // hibernated and the user has not made a revival choice. Every prompt path
@@ -179,6 +198,15 @@ func (m *Manager) hibernateWithCause(workspace string, account registry.Hibernat
 			workspace, account.Cause)
 		return fmt.Errorf("%w: workspace %q, cause %s", ErrHibernationMergeLeaseHeld, workspace, account.Cause)
 	}
+	// THE MERGE QUEUE OUTRANKS THE TWO AUTOMATIC CAUSES, and it is asked HERE
+	// for the lease gate's reason: every route into a sleep funnels through this
+	// one transition, so a gate placed here is one a new caller cannot forget.
+	// The cache-cold arm (keepalivecold.go), the idle sweep, the keep-alive
+	// policy's own hibernate arms and the acceptance-time stale-record check all
+	// reach it, and each of them decides on nothing but a clock.
+	if err := m.refuseAutomaticHibernationWhileQueued(workspace, account); err != nil {
+		return err
+	}
 	sessionID, ok := m.cfg.Locator.Locate(workspace)
 	if !ok {
 		return fmt.Errorf("session-controller: workspace %q has no session to hibernate", workspace)
@@ -223,6 +251,43 @@ func (m *Manager) hibernateWithCause(workspace string, account registry.Hibernat
 	m.logf("session-controller: hibernation transition COMPLETE ws=%q session=%s cause=%s since_ms=%d — the session is stopped, durably marked, and by construction outside the keep-alive loop",
 		workspace, sessionID, account.Cause, account.SinceMs)
 	return nil
+}
+
+// refuseAutomaticHibernationWhileQueued refuses the two clock-driven causes for
+// a workspace resting on RENDER_STATE_MERGE_QUEUED.
+//
+// ONLY THE AUTOMATIC CAUSES ARE GATED. The idle cutoff and the expired cache are
+// both readings of how long nothing has happened, and neither can tell "nobody
+// wants this workspace" from "this workspace is queued behind another one's
+// merge". A forced sleep is the user's own decision about a workspace they are
+// looking at, and it is not a stale clock reading, so it passes.
+//
+// A READ FAILURE REFUSES THE TRANSITION rather than being logged past. This gate
+// is the only thing standing between a queued workspace and a teardown, and a
+// hibernation taken because the daemon could not find out whether it was queued
+// is the exact outcome the gate exists to prevent. A workspace with NO resolved
+// state is not queued — a queue membership is a state row, and there is none —
+// so that answers no rather than refusing every hibernation on a stateless
+// workspace.
+func (m *Manager) refuseAutomaticHibernationWhileQueued(workspace string, account registry.HibernationDetail) error {
+	switch account.Cause {
+	case registry.HibernationCauseIdleCutoff, registry.HibernationCauseCacheExpired:
+	default:
+		return nil
+	}
+	state, found, err := m.cfg.SSM.Current(workspace)
+	if err != nil {
+		m.logf("session-controller: hibernation transition REFUSED ws=%q cause=%s error=%v — the workspace's resolved state could not be read, so whether it is waiting in the merge queue is unknown; nothing was stopped and nothing was persisted",
+			workspace, account.Cause, err)
+		return fmt.Errorf("session-controller: reading the resolved state of workspace %q before an automatic %s hibernation: %w",
+			workspace, account.Cause, err)
+	}
+	if !found || state.GetState() != frontendv1.RenderState_RENDER_STATE_MERGE_QUEUED {
+		return nil
+	}
+	m.logf("session-controller: hibernation transition REFUSED ws=%q cause=%s state=%s — the workspace is WAITING IN THE MERGE QUEUE, which is pending work rather than quiet; hibernating it here is what made a later conflict resolution re-ingest the whole conversation at the uncached rate. Nothing was stopped and nothing was persisted",
+		workspace, account.Cause, state.GetState())
+	return fmt.Errorf("%w: workspace %q, cause %s", ErrHibernationMergeQueued, workspace, account.Cause)
 }
 
 // hibernationStopCause maps a hibernation cause onto the shim-stop vocabulary,
