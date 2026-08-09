@@ -86,10 +86,19 @@ type shutdownWorld struct {
 	stateDir string
 }
 
-func newShutdownWorld(t *testing.T) *shutdownWorld {
+func newShutdownWorld(t *testing.T, options ...worldOption) *shutdownWorld {
 	t.Helper()
+	var tuning worldTuning
+	for _, opt := range options {
+		opt(&tuning)
+	}
 	node := nodePath(t)
-	script := buildShim(t, node, "")
+	// The BUNDLE'S OWN build identity, baked in by build.mjs exactly as
+	// bin/build-frontend.sh does it. Empty is the ordinary case (no identity,
+	// so no staleness question); a world that bakes one is arranging a shim
+	// that can OUTLIVE A DEPLOY, which is what the bounce-resilience suite's
+	// stale-refresh tests are about.
+	script := buildShim(t, node, tuning.shimBuildSHA)
 	storeBin := buildShimStore(t)
 	// Not t.TempDir(): the test-name-derived path exceeds the 104-byte
 	// sun_path limit, so bind(2) fails on macOS (e2e_test.go, same reason).
@@ -169,6 +178,13 @@ type shutdownBoot struct {
 type bootTuning struct {
 	idleSweeper bool
 	idleTimeout time.Duration
+	// shimBuildSHA is what THIS boot believes the current bundle to be
+	// (sessioncontroller.Config.ShimBuildSHA). Empty is the ordinary case and
+	// makes every staleness comparison unresolvable, which is never a
+	// mismatch. A boot that sets it differently from the world's baked
+	// identity is a daemon that came up after a deploy the surviving shim
+	// missed.
+	shimBuildSHA string
 }
 
 type bootOption func(*bootTuning)
@@ -353,7 +369,7 @@ func (w *shutdownWorld) boot(t *testing.T, options ...bootOption) *shutdownBoot 
 		ModelCatalogs:   registrar,
 		DaemonVersion:   "0.1.0-e2e-drain",
 		ProtocolVersion: "1",
-		ShimBuildSHA:    func() string { return "" },
+		ShimBuildSHA:    func() string { return tuning.shimBuildSHA },
 		Logf:            t.Logf,
 	})
 	if err != nil {
