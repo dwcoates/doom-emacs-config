@@ -185,13 +185,24 @@ describe("encodeFrontendCommand — deleteSession", () => {
 });
 
 describe("encodeFrontendCommand — resync", () => {
-  it("renders the workspace snapshot identity and uint64 fromSeq", () => {
+  it("renders the workspace snapshot fence and uint64 fromSeq", () => {
     const w = wire({
       requestId: "r1",
       workspace: "ws",
-      body: { case: "resync", fromSeq: 42, sessionId: "s1", controllerGenerationId: "g7" },
+      body: { case: "resync", fromSeq: 42, fence: "f7" },
     });
-    expect(w.resync).toEqual({ fromSeq: "42", sessionId: "s1", controllerGenerationId: "g7" });
+    expect(w.resync).toEqual({ fromSeq: "42", fence: "f7" });
+  });
+
+  it("emits no field the reserved identity pair used to occupy", () => {
+    // `session_id`/`controller_generation_id` are RESERVED in ResyncCmd, and
+    // canonical protojson decoding rejects the whole frame on an unknown field.
+    const w = wire({
+      requestId: "r1",
+      workspace: "ws",
+      body: { case: "resync", fromSeq: 42, fence: "f7" },
+    });
+    expect(Object.keys(w.resync as Record<string, unknown>).sort()).toEqual(["fence", "fromSeq"]);
   });
 });
 

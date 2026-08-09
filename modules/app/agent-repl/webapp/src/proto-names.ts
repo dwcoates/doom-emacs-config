@@ -40,7 +40,10 @@
  * outside this module's reach entirely.
  */
 
-import type { FrontendCommand as GeneratedFrontendCommand } from "../../proto/gen/ts/agentshim/frontend/v1/frame_pb";
+import type {
+  FrontendCommand as GeneratedFrontendCommand,
+  ResyncCmd as GeneratedResyncCmd,
+} from "../../proto/gen/ts/agentshim/frontend/v1/frame_pb";
 import type {
   HibernationDetail as GeneratedHibernationDetail,
   ReviveSessionCmd as GeneratedReviveSessionCmd,
@@ -140,6 +143,22 @@ export const QUEUE_HOLD_ARM = {
   keepAlive: "keepAlive",
   revival: "revival",
 } as const satisfies Record<string, ArmKeys<GeneratedQueueEntry["hold"]>>;
+
+/**
+ * `ResyncCmd`'s FIELD names — the replay watermark and the fence echo.
+ *
+ * This table exists because the encoder drifted from the message once already:
+ * `ResyncCmd` carried `session_id` + `controller_generation_id`, those two were
+ * reserved in favour of a single `fence`, and the hand-written encoder kept
+ * emitting the old pair. Canonical protojson decoding is STRICT about unknown
+ * fields, so the daemon rejected every resync outright and the client's replay
+ * request silently never happened. Binding the spellings to the generated
+ * message makes the same drift a build failure here instead.
+ */
+export const RESYNC_FIELD = {
+  fromSeq: "fromSeq",
+  fence: "fence",
+} as const satisfies Record<FieldKeys<GeneratedResyncCmd>, FieldKeys<GeneratedResyncCmd>>;
 
 /** The keep-alive hold's only field: the ping turn whose end releases it. */
 export const KEEP_ALIVE_HOLD_TURN_ID: FieldKeys<GeneratedQueueEntryKeepAliveHold> = "turnId";
