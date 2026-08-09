@@ -53,6 +53,9 @@ import {
   AsyncSettledSchema,
   AsyncShellBubbleSchema,
   AsyncShellExitSchema,
+  AsyncSkillBodyResolvedSchema,
+  AsyncSkillBubbleSchema,
+  AsyncSkillUpdateSchema,
   AsyncUnclassifiedBubbleSchema,
   AsyncWorkflowJournalRowSchema,
   AsyncWorkflowJournalSchema,
@@ -64,6 +67,7 @@ import {
   type AsyncBubbleUpdate as GeneratedAsyncBubbleUpdate,
   type AsyncLiveness as GeneratedAsyncLiveness,
   type AsyncSettled as GeneratedAsyncSettled,
+  type AsyncSkillUpdate as GeneratedAsyncSkillUpdate,
   type AsyncWorkflowJournalRow as GeneratedAsyncWorkflowJournalRow,
 } from "../../proto/gen/ts/agentshim/frontend/v1/async-bubble_pb";
 import { unwrapAgentEmission, type UnwrappedEmission } from "./agent-emission.js";
@@ -191,6 +195,28 @@ export interface AsyncMergeBubble {
   fold: AsyncFold;
 }
 
+/**
+ * A skill invocation as detached-style work: the invocation card the feed used
+ * to render flat, now a bubble that owns its window.
+ *
+ * DAEMON-AUTHORED. The daemon classifies the Skill tool call, resolves the
+ * skill file's contents as the bubble's own `body` — the SKILL's content, not a
+ * response of the conversation — and folds the session's subsequent emissions
+ * here until the user takes the session back, the same temporal membership
+ * {@link AsyncMergeBubble} uses.
+ */
+export interface AsyncSkillBubble {
+  /** The skill's name as invoked, verbatim. */
+  skillName: string;
+  /** The invocation's arguments, verbatim; empty when none were given. */
+  args: string;
+  /** The skill file's contents, empty until resolution delivers them. */
+  body: string;
+  /** The window's conversation so far, in the top-level feed's vocabulary. */
+  emissions: UnwrappedEmission[];
+  fold: AsyncFold;
+}
+
 /** A spawn whose tool the daemon does not recognize — an ARM, not a fallback. */
 export interface AsyncUnclassifiedBubble {
   /** The tool that spawned the work, verbatim as the agent named it. */
@@ -204,7 +230,8 @@ export type AsyncBubbleKind =
   | { case: "journal"; value: AsyncWorkflowJournal }
   | { case: "shell"; value: AsyncShellBubble }
   | { case: "unclassified"; value: AsyncUnclassifiedBubble }
-  | { case: "merge"; value: AsyncMergeBubble };
+  | { case: "merge"; value: AsyncMergeBubble }
+  | { case: "skill"; value: AsyncSkillBubble };
 
 /** The kind discriminators a bubble may carry. */
 export type AsyncBubbleKindCase = AsyncBubbleKind["case"];
@@ -259,13 +286,27 @@ export interface AsyncOutputAppend {
   fromOffset: number;
 }
 
+/**
+ * One incremental push to a skill bubble.
+ *
+ * Body resolution and emission appends are different events with different
+ * lifetimes, so they are ARMS rather than co-set fields.
+ */
+export type AsyncSkillUpdateArm =
+  /** The skill file's contents, resolved — replaces the bubble's `body` whole. */
+  | { case: "body"; value: string }
+  /** Emissions appended to the window, exactly as a detached agent's. */
+  | { case: "emissions"; value: AsyncAgentUpdate };
+
 /** WHAT changed on a bubble. The arm MUST match the bubble's kind. */
 export type AsyncBubbleUpdateArm =
   | { case: "agent"; value: AsyncAgentUpdate }
   | { case: "journal"; value: AsyncWorkflowJournalUpdate }
   | { case: "shell"; value: AsyncOutputAppend }
   | { case: "unclassified"; value: AsyncOutputAppend }
-  | { case: "liveness"; value: AsyncLiveness };
+  | { case: "liveness"; value: AsyncLiveness }
+  | { case: "merge"; value: AsyncAgentUpdate }
+  | { case: "skill"; value: AsyncSkillUpdateArm };
 
 /** The update arm discriminators. `liveness` is the kind-independent one. */
 export type AsyncBubbleUpdateCase = AsyncBubbleUpdateArm["case"];
@@ -303,13 +344,16 @@ export interface AsyncBubbleDelta {
  * `shell` and `unclassified` map to their own kinds and to nothing else even
  * though both carry the SAME payload message. The arm names which kind the
  * update is for; the two kinds differ in what they ARE, not in how their output
- * arrives.
+ * arrives. `merge` and `agent` are the same pairing for the same reason: a merge
+ * run's emissions arrive precisely as a detached agent's do.
  */
 export const UPDATE_ARM_KIND: Readonly<Record<Exclude<AsyncBubbleUpdateCase, "liveness">, AsyncBubbleKindCase>> = {
   agent: "agent",
   journal: "journal",
   shell: "shell",
   unclassified: "unclassified",
+  merge: "merge",
+  skill: "skill",
 };
 
 // --- anchored key sets ------------------------------------------------------
@@ -321,12 +365,13 @@ export const UPDATE_ARM_KIND: Readonly<Record<Exclude<AsyncBubbleUpdateCase, "li
  * a field the daemon had started sending. `workspace` is spelled here now that
  * the generated stub actually has it, which is what invariant I5 requires.
  */
-const BUBBLE_KEYS = generatedFieldSet<keyof typeof AsyncBubbleSchema.field>()("id", "workspace", "originToolUseId", "parentBubbleId", "label", "startedAtMs", "liveness", "agent", "journal", "shell", "unclassified", "merge");
+const BUBBLE_KEYS = generatedFieldSet<keyof typeof AsyncBubbleSchema.field>()("id", "workspace", "originToolUseId", "parentBubbleId", "label", "startedAtMs", "liveness", "agent", "journal", "shell", "unclassified", "merge", "skill");
 const AGENT_BUBBLE_KEYS = generatedFieldSet<keyof typeof AsyncAgentBubbleSchema.field>()("emissions", "fold");
 const JOURNAL_KEYS = generatedFieldSet<keyof typeof AsyncWorkflowJournalSchema.field>()("rows", "fold");
 const SHELL_BUBBLE_KEYS = generatedFieldSet<keyof typeof AsyncShellBubbleSchema.field>()("command", "output");
 const UNCLASSIFIED_BUBBLE_KEYS = generatedFieldSet<keyof typeof AsyncUnclassifiedBubbleSchema.field>()("toolName", "output");
 const MERGE_BUBBLE_KEYS = generatedFieldSet<keyof typeof AsyncMergeBubbleSchema.field>()("emissions", "fold");
+const SKILL_BUBBLE_KEYS = generatedFieldSet<keyof typeof AsyncSkillBubbleSchema.field>()("skillName", "args", "body", "emissions", "fold");
 const SPOOL_KEYS = generatedFieldSet<keyof typeof AsyncOutputSpoolSchema.field>()("text", "throughOffset");
 const JOURNAL_ROW_KEYS = generatedFieldSet<keyof typeof AsyncWorkflowJournalRowSchema.field>()("label", "detail", "running", "done", "failed");
 const LIVENESS_KEYS = generatedFieldSet<keyof typeof AsyncLivenessSchema.field>()("live", "settled");
@@ -336,8 +381,10 @@ const SHELL_EXIT_KEYS = generatedFieldSet<keyof typeof AsyncShellExitSchema.fiel
 const OUTCOME_ERROR_KEYS = generatedFieldSet<keyof typeof AsyncOutcomeErrorSchema.field>()("message");
 const OUTCOME_KILLED_KEYS = generatedFieldSet<keyof typeof AsyncOutcomeKilledSchema.field>()("reason");
 const FOLD_KEYS = generatedFieldSet<keyof typeof AsyncFoldSchema.field>()("droppedBefore", "tailCap");
-const UPDATE_KEYS = generatedFieldSet<keyof typeof AsyncBubbleUpdateSchema.field>()("bubbleId", "agent", "journal", "shell", "unclassified", "liveness");
+const UPDATE_KEYS = generatedFieldSet<keyof typeof AsyncBubbleUpdateSchema.field>()("bubbleId", "agent", "journal", "shell", "unclassified", "liveness", "merge", "skill");
 const AGENT_UPDATE_KEYS = generatedFieldSet<keyof typeof AsyncAgentUpdateSchema.field>()("emissions", "fold");
+const SKILL_UPDATE_KEYS = generatedFieldSet<keyof typeof AsyncSkillUpdateSchema.field>()("body", "emissions");
+const SKILL_BODY_RESOLVED_KEYS = generatedFieldSet<keyof typeof AsyncSkillBodyResolvedSchema.field>()("contents");
 const JOURNAL_UPDATE_KEYS = generatedFieldSet<keyof typeof AsyncWorkflowJournalUpdateSchema.field>()("rows", "fold");
 const OUTPUT_APPEND_KEYS = generatedFieldSet<keyof typeof AsyncOutputAppendSchema.field>()("text", "fromOffset");
 const LIVENESS_UPDATE_KEYS = generatedFieldSet<keyof typeof AsyncLivenessUpdateSchema.field>()("liveness");
@@ -366,9 +413,11 @@ const JOURNAL_STATUS_KEYS: Readonly<Record<AsyncWorkflowJournalRow["status"], Re
 };
 
 /** The bubble `kind` arm keys, typed against the generated oneof. */
-const BUBBLE_KIND_ARMS = ["agent", "journal", "shell", "unclassified", "merge"] as const satisfies readonly ArmKeys<GeneratedAsyncBubble["kind"]>[];
+const BUBBLE_KIND_ARMS = ["agent", "journal", "shell", "unclassified", "merge", "skill"] as const satisfies readonly ArmKeys<GeneratedAsyncBubble["kind"]>[];
 /** The update arm keys, typed against the generated oneof. */
-const UPDATE_ARMS = ["agent", "journal", "shell", "unclassified", "liveness"] as const satisfies readonly ArmKeys<GeneratedAsyncBubbleUpdate["update"]>[];
+const UPDATE_ARMS = ["agent", "journal", "shell", "unclassified", "liveness", "merge", "skill"] as const satisfies readonly ArmKeys<GeneratedAsyncBubbleUpdate["update"]>[];
+/** The skill update's own arm keys, typed against the generated oneof. */
+const SKILL_UPDATE_ARMS = ["body", "emissions"] as const satisfies readonly ArmKeys<GeneratedAsyncSkillUpdate["update"]>[];
 /** The liveness state arms, typed against the generated oneof. */
 const LIVENESS_ARMS = ["live", "settled"] as const satisfies readonly ArmKeys<GeneratedAsyncLiveness["state"]>[];
 /** The settled outcome arms, typed against the generated oneof. */
@@ -532,6 +581,20 @@ function decodeBubbleKind(o: Obj, ctx: string): AsyncBubbleKind {
         },
       };
     }
+    case "skill": {
+      const s = ensureObject(o.skill, `${ctx}.skill`);
+      rejectUnknown(s, SKILL_BUBBLE_KEYS, `${ctx}.skill`);
+      return {
+        case: "skill",
+        value: {
+          skillName: str(s, "skillName", `${ctx}.skill`),
+          args: str(s, "args", `${ctx}.skill`),
+          body: str(s, "body", `${ctx}.skill`),
+          emissions: decodeEmissions(s.emissions, `${ctx}.skill.emissions`),
+          fold: decodeFold(s.fold, `${ctx}.skill.fold`),
+        },
+      };
+    }
     default: {
       const u = ensureObject(o.unclassified, `${ctx}.unclassified`);
       rejectUnknown(u, UNCLASSIFIED_BUBBLE_KEYS, `${ctx}.unclassified`);
@@ -578,20 +641,38 @@ function decodeOutputAppend(v: unknown, ctx: string): AsyncOutputAppend {
   return { text: str(o, "text", ctx), fromOffset: offset(o, "fromOffset", ctx) };
 }
 
+function decodeAgentUpdate(v: unknown, ctx: string): AsyncAgentUpdate {
+  const a = ensureObject(v, ctx);
+  rejectUnknown(a, AGENT_UPDATE_KEYS, ctx);
+  return {
+    emissions: decodeEmissions(a.emissions, `${ctx}.emissions`),
+    fold: decodeFold(a.fold, `${ctx}.fold`),
+  };
+}
+
+function decodeSkillUpdateArm(v: unknown, ctx: string): AsyncSkillUpdateArm {
+  const s = ensureObject(v, ctx);
+  rejectUnknown(s, SKILL_UPDATE_KEYS, ctx);
+  const arm = oneof(s, SKILL_UPDATE_ARMS, `${ctx}.update`);
+  if (arm === "body") {
+    const b = ensureObject(s.body, `${ctx}.body`);
+    rejectUnknown(b, SKILL_BODY_RESOLVED_KEYS, `${ctx}.body`);
+    return { case: "body", value: str(b, "contents", `${ctx}.body`) };
+  }
+  return { case: "emissions", value: decodeAgentUpdate(s.emissions, `${ctx}.emissions`) };
+}
+
 function decodeUpdateArm(o: Obj, ctx: string): AsyncBubbleUpdateArm {
   const arm = oneof(o, UPDATE_ARMS, `${ctx}.update`);
   switch (arm) {
-    case "agent": {
-      const a = ensureObject(o.agent, `${ctx}.agent`);
-      rejectUnknown(a, AGENT_UPDATE_KEYS, `${ctx}.agent`);
-      return {
-        case: "agent",
-        value: {
-          emissions: decodeEmissions(a.emissions, `${ctx}.agent.emissions`),
-          fold: decodeFold(a.fold, `${ctx}.agent.fold`),
-        },
-      };
-    }
+    case "agent":
+      return { case: "agent", value: decodeAgentUpdate(o.agent, `${ctx}.agent`) };
+    case "merge":
+      // The SAME payload as `agent`: a merge run's emissions arrive exactly as
+      // a detached agent's do, so the arm names the kind and nothing else.
+      return { case: "merge", value: decodeAgentUpdate(o.merge, `${ctx}.merge`) };
+    case "skill":
+      return { case: "skill", value: decodeSkillUpdateArm(o.skill, `${ctx}.skill`) };
     case "journal": {
       const j = ensureObject(o.journal, `${ctx}.journal`);
       rejectUnknown(j, JOURNAL_UPDATE_KEYS, `${ctx}.journal`);
