@@ -22,6 +22,8 @@
 package e2e
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -263,17 +265,88 @@ func awaitFrame(t *testing.T, conn *websocket.Conn, what string, match func(*fro
 	return nil
 }
 
-// spawningCall finds the tool_call emission for toolUseID among top-level
-// items, which is where the daemon publishes its classification verdict
-// (tool-call.proto AgentToolCall.spawned_bubble_id).
-func spawningCall(items []*frontendv1.ConversationItem, toolUseID string) *frontendv1.AgentToolCall {
-	for _, item := range items {
-		call := item.GetAgent().GetToolCall()
-		if call.GetCall().GetId() == toolUseID {
-			return call
+// anchorsFor returns the feed anchors naming toolUseID as their launching call.
+//
+// WHY THE ANCHOR AND NOT THE TOOL CARD. The daemon publishes its classification
+// verdict in two places by contract — AgentToolCall.spawned_bubble_id on the
+// card, and AsyncBubble.origin_tool_use_id on the anchor. The tool_call
+// EMISSION producer is deferred past this wave by orchestrator ruling (it needs
+// a second carve-out on AgentResponse.body, a contract-semantics change not
+// being rushed), so the anchor is the verdict this wave actually publishes.
+//
+// The gate moves; the guarantees do not. Everything downstream still reads the
+// bubble id the daemon minted, and still holds it to the same routing,
+// settlement and cursor contracts.
+func anchorsFor(items []*frontendv1.ConversationItem, toolUseID string) []*frontendv1.AsyncBubble {
+	var out []*frontendv1.AsyncBubble
+	for _, bubble := range asyncBubbleItems(items) {
+		if bubble.GetOriginToolUseId() == toolUseID {
+			out = append(out, bubble)
 		}
 	}
-	return nil
+	return out
+}
+
+// gateOnAnchor resolves the bubble id a launching call detached work under,
+// through the feed anchor, and fatals with the contract reason when the daemon
+// published no verdict at all.
+//
+// It is the FIRST GATE of every downstream async assertion, so its failure text
+// has to distinguish "the daemon classified nothing" from "the daemon
+// classified it as detaching nothing" — those are different defects with
+// different fixes, and a single "not found" would conflate them.
+func gateOnAnchor(t *testing.T, seen asyncTraffic, toolUseID string) string {
+	t.Helper()
+	anchors := anchorsFor(seen.items, toolUseID)
+	if len(anchors) > 1 {
+		t.Fatalf("%d anchors name the launching call %q, want exactly 1: one launch detached one piece of work, and a second anchor means a frontend draws the same bubble twice",
+			len(anchors), toolUseID)
+	}
+	if len(anchors) == 1 {
+		bubbleID := anchors[0].GetId()
+		if bubbleID == "" {
+			t.Fatalf("the anchor for the launching call %q carries an EMPTY bubble id: async-bubble.proto states the id is never empty, and an update carrying no address can never be routed", toolUseID)
+		}
+		return bubbleID
+	}
+
+	// NO ANCHOR. This is a REPORTED FAILURE, not a skip — the anchor is what
+	// gives a bubble a place in the conversation that started it, and without
+	// one a frontend has a live agent it cannot draw anywhere.
+	//
+	// But it is deliberately NOT fatal when the daemon opened the bubble on the
+	// async push anyway. Fatalling there would park every downstream guarantee —
+	// routing, settlement, cursor continuity — behind this one gap and report
+	// nothing about whether they hold. Falling through to the pushed bubble's
+	// own id keeps the anchor gap on the record AND lets the rest of the
+	// specification run, so one wave's evidence covers all of it.
+	t.Errorf("no ConversationItem.async_bubble anchored the launching call %q in the feed (saw %d conversation items, %d anchors in total, %d async pushes which opened %s): the bubble has no place in the conversation that started it",
+		toolUseID, len(seen.items), len(asyncBubbleItems(seen.items)), len(seen.deltas), describeOpenedBubbles(seen))
+
+	for _, bubble := range seen.bubbles() {
+		if bubble.GetOriginToolUseId() == toolUseID && bubble.GetId() != "" {
+			t.Logf("continuing against the bubble id %q the async push opened, so the downstream assertions are exercised despite the missing anchor", bubble.GetId())
+			return bubble.GetId()
+		}
+	}
+	t.Fatalf("the launching call %q produced neither a feed anchor nor an opened bubble naming it (%d async pushes opened %s): the daemon never published its classification verdict at all, so nothing downstream has a bubble to be routed to",
+		toolUseID, len(seen.deltas), describeOpenedBubbles(seen))
+	return ""
+}
+
+// describeOpenedBubbles renders every bubble a drain's async pushes opened, as
+// id/origin pairs, for a failure that needs to say what DID arrive rather than
+// only what did not.
+func describeOpenedBubbles(seen asyncTraffic) string {
+	opened := seen.bubbles()
+	if len(opened) == 0 {
+		return "no bubbles"
+	}
+	parts := make([]string, 0, len(opened))
+	for _, bubble := range opened {
+		parts = append(parts, fmt.Sprintf("{id=%q origin_tool_use_id=%q}", bubble.GetId(), bubble.GetOriginToolUseId()))
+	}
+	return strings.Join(parts, " ")
 }
 
 // openedBubble finds the bubble with id among a drain's opened bubbles.

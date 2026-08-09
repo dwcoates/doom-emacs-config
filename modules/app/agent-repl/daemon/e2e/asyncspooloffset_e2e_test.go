@@ -68,14 +68,7 @@ func TestE2EAShellBubblesAppendsAreContiguousThroughTheSnapshotCursor(t *testing
 		return it.GetUserMessage().GetContentString() == barrierPrompt
 	})
 
-	call := spawningCall(seen.items, launchToolUseID)
-	if call == nil {
-		t.Fatalf("no top-level tool_call item for the backgrounding call %q arrived: the daemon never published its classification verdict", launchToolUseID)
-	}
-	bubbleID := call.GetSpawnedBubbleId()
-	if bubbleID == "" {
-		t.Fatalf("the backgrounding call %q carries an empty spawned_bubble_id: no append can be routed to a bubble that was never minted", launchToolUseID)
-	}
+	bubbleID := gateOnAnchor(t, seen, launchToolUseID)
 
 	appends := shellAppends(seen, bubbleID)
 	if len(appends) == 0 {

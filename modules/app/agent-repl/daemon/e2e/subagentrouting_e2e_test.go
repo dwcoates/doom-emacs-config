@@ -60,14 +60,7 @@ func TestE2EASubagentResponseIsRoutedToItsBubbleAndNeverToTheFeed(t *testing.T) 
 		return it.GetUserMessage().GetContentString() == barrierPrompt
 	})
 
-	call := spawningCall(seen.items, toolUseID)
-	if call == nil {
-		t.Fatalf("no top-level tool_call item for the dispatching call %q arrived: the daemon never published its classification verdict", toolUseID)
-	}
-	bubbleID := call.GetSpawnedBubbleId()
-	if bubbleID == "" {
-		t.Fatalf("the dispatching call %q carries an empty spawned_bubble_id: the daemon classified a Task launch as detaching nothing, so no update can ever be routed", toolUseID)
-	}
+	bubbleID := gateOnAnchor(t, seen, toolUseID)
 
 	// THE POSITIVE HALF: the utterance is inside the bubble's agent-arm updates.
 	routed := false
