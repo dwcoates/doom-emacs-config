@@ -30,6 +30,7 @@ import {
   type CommandStruct,
   type FrontendCommandBody,
   PromptOrigin,
+  type ReviveDecision,
 } from "./frontend-command.js";
 import {
   clientFailureUuid,
@@ -489,11 +490,12 @@ export class CommandDispatcher {
   }
 
   /**
-   * Answer the revival gate. Exactly one mode, because the wire's oneof leaves
-   * "no decision" unrepresentable and this signature does too.
+   * Answer the revival gate. Exactly one decision, because the wire leaves both
+   * "no mode" and "compact first, scope unstated" unrepresentable — and this
+   * signature does too.
    */
-  reviveSession(workspace: string, mode: "compactFirst" | "direct"): Promise<void> {
-    return this.dispatch(workspace, { case: "reviveSession", mode });
+  reviveSession(workspace: string, decision: ReviveDecision): Promise<void> {
+    return this.dispatch(workspace, { case: "reviveSession", decision });
   }
 
   private dispatch(workspace: string, body: FrontendCommandBody): Promise<void> {

@@ -46,8 +46,8 @@ import {
 } from "./merge-gate.js";
 import {
   HIBERNATED_BODY_CLASS,
-  REVIVE_COMPACT_ATTR,
-  REVIVE_DIRECT_ATTR,
+  REVIVE_ATTR,
+  reviveDecisionFromAttr,
   hibernateRefusedNotice,
   hibernationBlocked,
   hibernationBlockedLog,
@@ -104,7 +104,7 @@ import { StateAdapter, userTurnReceipt } from "./state-adapter.js";
 import { CommandDispatcher, ModelSelectionRejectedError, surfaceRefusal } from "./command-dispatch.js";
 import { ConnectResync } from "./connect-resync.js";
 import { captureResyncSnapshot } from "./resync-snapshot.js";
-import type { CommandStruct } from "./frontend-command.js";
+import type { CommandStruct, ReviveDecision } from "./frontend-command.js";
 import { PendingPermissionMode } from "./pending-mode.js";
 import { ungatedBannerHtml, ungatedModeOf, unswitchableModeOptionHtml } from "./ungated.js";
 import { DRAINING_BODY_CLASS, drainBannerHtml } from "./drain.js";
@@ -238,7 +238,7 @@ async function boot(): Promise<void> {
     // A command the user pressed for ESTABLISHES the connection it needs. A
     // hidden Emacs webview has its timers suspended, so the socket's own
     // scheduled reconnect can still be pending when the user switches to the
-    // workspace and clicks — "Compact first" on a hibernated workspace reported
+    // workspace and clicks — "Compact everything" on a hibernated workspace reported
     // the daemon down while the daemon was serving every other page.
     ensureConnected: () => (ws as WsClient | undefined)?.ensureConnected(),
     whenCurrent: (timeoutMs) =>
@@ -796,8 +796,8 @@ async function boot(): Promise<void> {
     renderChrome();
   });
 
-  // THE REVIVAL GATE's two verbs. Delegated off the slot rather than bound to
-  // the buttons, which every renderChrome rewrites.
+  // THE REVIVAL GATE's verbs. Delegated off the slot rather than bound to the
+  // buttons, which every renderChrome rewrites.
   //
   // The pending mark is set BEFORE the send and cleared on a rejection, so the
   // gate reports "waking…" only while a decision is genuinely outstanding. It
@@ -806,7 +806,7 @@ async function boot(): Promise<void> {
   // the promise means the daemon ACCEPTED the decision, not that the session is
   // up — the bring-up follows, and taking the gate down on the ack would put a
   // live composer in front of a session that has no shim yet.
-  const sendRevive = (mode: "compactFirst" | "direct"): void => {
+  const sendRevive = (mode: ReviveDecision): void => {
     const workspace = cmdWorkspace();
     revivePending = mode;
     // A previous attempt's complaint is not this attempt's news.
@@ -834,11 +834,13 @@ async function boot(): Promise<void> {
     });
   };
   revivalGateEl.addEventListener("click", (e) => {
-    const el = (e.target as HTMLElement).closest(
-      `[${REVIVE_COMPACT_ATTR}], [${REVIVE_DIRECT_ATTR}]`,
-    );
+    const el = (e.target as HTMLElement).closest(`[${REVIVE_ATTR}]`);
     if (el === null) return;
-    sendRevive(el.hasAttribute(REVIVE_COMPACT_ATTR) ? "compactFirst" : "direct");
+    // The decision is READ from the attribute, never inferred from which
+    // attribute is present: with five options, "not the compact button" is no
+    // longer the same statement as "resume as-is", and an unrecognized value
+    // throws rather than resolving to whichever mode the reader guessed.
+    sendRevive(reviveDecisionFromAttr(el.getAttribute(REVIVE_ATTR)));
   });
 
   // The reveal half of a roster-row click: dismiss the roster either way so
