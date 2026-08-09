@@ -192,11 +192,43 @@ func TestE2EAMergeWindowReturnsTheFeedToTheUserAfterItSettles(t *testing.T) {
 		feedProse(seen.items))
 }
 
-// TestE2EANonMergeVerbOfTheSameSkillOpensNoBubble is the near-miss the
-// classifier exists for: /create-or-update-workspace has seven verbs and only
-// `merge` detaches. A window opened by any other one would swallow the user's
-// whole conversation into a bubble.
-func TestE2EANonMergeVerbOfTheSameSkillOpensNoBubble(t *testing.T) {
+// skillProse returns every assistant utterance a SKILL bubble was delivered:
+// the fold its open carried, plus every skill-arm emissions update since.
+func skillProse(seen asyncTraffic, bubbleID string) []string {
+	var out []string
+	appendEmissions := func(ems []*frontendv1.AgentEmission) {
+		for _, em := range ems {
+			for _, block := range em.GetResponse().GetBody().GetContent() {
+				if text := block.GetText().GetText(); text != "" {
+					out = append(out, text)
+				}
+			}
+		}
+	}
+	for _, b := range seen.bubbles() {
+		if b.GetId() == bubbleID && b.GetSkill() != nil {
+			appendEmissions(b.GetSkill().GetEmissions())
+		}
+	}
+	for _, u := range seen.updatesFor(bubbleID) {
+		appendEmissions(u.GetSkill().GetEmissions().GetEmissions())
+	}
+	return out
+}
+
+// TestE2EANonMergeVerbOfTheSameSkillOpensASkillBubbleNotAMergeOne is the
+// near-miss the classifier exists for: /create-or-update-workspace has seven
+// verbs and only `merge` is the merge run. The other six are skill invocations
+// like any other, and a MERGE bubble opened by one of them would render the
+// wrong thing entirely.
+//
+// AMENDED: this asserted that the `create` verb opened no bubble at all and that
+// its reply reached the top-level feed. Both were true while the merge skill was
+// the only bubble-forming one. async-bubble.proto now says "Skill invocations
+// are bubble-forming … `merge` is the one skill with an arm of its own; every
+// other skill arrives as `skill`", so the reply belongs to the skill bubble and
+// what must not happen is a MERGE bubble.
+func TestE2EANonMergeVerbOfTheSameSkillOpensASkillBubbleNotAMergeOne(t *testing.T) {
 	// Arrange
 	h := newUDSHarness(t)
 	cwd := t.TempDir()
@@ -218,13 +250,19 @@ func TestE2EANonMergeVerbOfTheSameSkillOpensNoBubble(t *testing.T) {
 	})
 	for _, b := range seen.bubbles() {
 		if b.GetMerge() != nil {
-			t.Errorf("the `create` verb opened merge bubble %q: every verb but `merge` is an ordinary skill card", b.GetId())
+			t.Errorf("the `create` verb opened merge bubble %q: every verb but `merge` is an ordinary skill invocation", b.GetId())
 		}
 	}
-	for _, text := range feedProse(seen.items) {
+	bubbleID := gateOnAnchor(t, seen, toolUseID)
+	opened := openedBubble(seen.bubbles(), bubbleID)
+	if opened.GetSkill() == nil {
+		t.Fatalf("the `create` verb opened a bubble of arm %T, want the skill arm every non-merge skill arrives on", opened.GetKind())
+	}
+	for _, text := range skillProse(seen, bubbleID) {
 		if text == after {
 			return
 		}
 	}
-	t.Fatalf("the reply following a non-merge skill invocation never reached the feed (feed carried %v)", feedProse(seen.items))
+	t.Fatalf("the reply following the skill invocation never reached its bubble (bubble carried %v, feed carried %v)",
+		skillProse(seen, bubbleID), feedProse(seen.items))
 }
