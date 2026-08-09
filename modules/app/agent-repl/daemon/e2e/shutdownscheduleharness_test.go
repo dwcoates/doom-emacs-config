@@ -63,6 +63,7 @@ import (
 	"claude-repld/internal/shimlisten"
 	"claude-repld/internal/ssm"
 	"claude-repld/internal/statedb"
+	"claude-repld/internal/storehistory"
 	"claude-repld/internal/workspace/geometry"
 	"claude-repld/internal/workspace/merge"
 )
@@ -243,6 +244,18 @@ type shutdownBoot struct {
 	ts    *httptest.Server
 	world *shutdownWorld
 
+	// t is the test this daemon was booted by, and the only sink its records
+	// go to. It is held so `logf` can be handed to the daemon's every logging
+	// seam and still report through the test's own output.
+	t *testing.T
+
+	// logMu guards watchers, which are the test-side rendezvous points on this
+	// daemon's OWN records (watchLog), and retired, which is set once the test
+	// this daemon belongs to is finished with it (see logf).
+	logMu    sync.Mutex
+	watchers []*logWatch
+	retired  bool
+
 	// stateDB is the durable state database THIS boot opened over the world's
 	// state directory — the same file every other boot opens. It is carried so
 	// harness() can hand it to the shared e2eHarness helpers that read the
@@ -348,25 +361,29 @@ func (w *shutdownWorld) boot(t *testing.T, options ...bootOption) *shutdownBoot 
 	for _, opt := range options {
 		opt(&tuning)
 	}
-	b := &shutdownBoot{world: w, executed: make(chan bool, 4), recheck: make(chan time.Time, 1)}
+	b := &shutdownBoot{t: t, world: w, executed: make(chan bool, 4), recheck: make(chan time.Time, 1)}
+	// REGISTERED FIRST SO IT RUNS LAST (cleanups are LIFO): every other cleanup
+	// this boot adds — the teardown above all — still reports through the test,
+	// and only records emitted after all of them are treated as late.
+	t.Cleanup(b.retireLogging)
 
 	stateStore, err := statedb.Open(filepath.Join(w.stateDir, "state.db"))
 	if err != nil {
 		t.Fatalf("open state store: %v", err)
 	}
 	b.stateDB = stateStore
-	reg := registry.OpenWith(registry.Options{DB: stateStore, Logf: t.Logf})
+	reg := registry.OpenWith(registry.Options{DB: stateStore, Logf: b.logf})
 	ssmMgr, err := ssm.Open(ssm.Options{
 		DB:       stateStore,
 		Resolver: server.NewRegistryResolver(reg),
-		Logf:     t.Logf,
+		Logf:     b.logf,
 	})
 	if err != nil {
 		t.Fatalf("open ssm: %v", err)
 	}
 
-	forwarder := &server.PushForwarder{Logf: t.Logf}
-	shimListener := shimlisten.New(t.Logf)
+	forwarder := &server.PushForwarder{Logf: b.logf}
+	shimListener := shimlisten.New(b.logf)
 	if err := shimListener.Listen(w.shimSock); err != nil {
 		t.Fatalf("listen for shims: %v", err)
 	}
@@ -418,10 +435,10 @@ func (w *shutdownWorld) boot(t *testing.T, options ...bootOption) *shutdownBoot 
 		t.Fatalf("build the UDS spawner: %v", err)
 	}
 
-	seqStore := server.NewRegistrySeqStore(reg, t.Logf)
+	seqStore := server.NewRegistrySeqStore(reg, b.logf)
 	modelCatalogs := server.NewSessionModelCatalogs()
-	registrar := &server.RegistryRegistrar{Reg: reg, Logf: t.Logf, ModelCatalogs: modelCatalogs}
-	progressMgr := progress.New(progress.Options{Logf: t.Logf})
+	registrar := &server.RegistryRegistrar{Reg: reg, Logf: b.logf, ModelCatalogs: modelCatalogs}
+	progressMgr := progress.New(progress.Options{Logf: b.logf})
 	// The drain lease's durable record, opened over the SAME state store the
 	// world owns — so a bounce reads back the schedule its predecessor wrote
 	// rather than starting idle.
@@ -455,17 +472,44 @@ func (w *shutdownWorld) boot(t *testing.T, options ...bootOption) *shutdownBoot 
 		Push:              forwarder,
 		SSM:               ssmMgr,
 		Progress:          progressMgr,
-		Spawner:           fakeShimSpawner(reg, shimListener, udsSpawn, t.Logf),
+		Spawner:           fakeShimSpawner(reg, shimListener, udsSpawn, b.logf),
 		Locator:           &server.SessionLocator{Reg: reg},
 		Source:            &server.ShimConnSource{Listener: shimListener},
 		FileDiagnostics:   fileDiagnostics,
 		SeqStore:          seqStore,
 		ClearCompactStore: seqStore,
 		TurnAccountings:   turnAccountings,
-		Hibernations:      registrar,
-		VendorSessions:    registrar,
-		KeepAliveWindows:  server.KeepAliveWindowStore{Windows: keepAliveWindows},
-		KeepAlive:         kaCfg,
+		// THE DURABLE ROUTE TO THE CONVERSATION, wired exactly as main.go wires
+		// it and keyed by the vendor uuid the store files the seq space under.
+		//
+		// A bounce world is the one place where a daemon routinely faces a
+		// workspace whose history exists ONLY in the store: the shim outlived
+		// the process that was reading it, and the successor's frontends resync
+		// against a workspace nothing has re-wired yet. Without this the
+		// successor refuses every such resync ("no durable history source is
+		// wired") and the handshake reconciliation has no way to tell a turn
+		// that FINISHED during the gap from one the restart cut — both of which
+		// are production capabilities, not test conveniences, so leaving it
+		// unset made this world a strictly weaker daemon than the shipped one.
+		DurableHistory: &storehistory.Reader{
+			Socket: w.storeSock,
+			Vendor: func(sessionID string) (string, bool) {
+				rec, ok := reg.Get(sessionID)
+				if !ok {
+					return "", false
+				}
+				return rec.ClaudeSessionID, rec.ClaudeSessionID != ""
+			},
+			// The suite's short drain window: the production default waits
+			// five seconds of quiet, which is the whole frame budget every
+			// wait in this suite is bounded by.
+			Idle: durableReplayIdle,
+			Logf: b.logf,
+		},
+		Hibernations:     registrar,
+		VendorSessions:   registrar,
+		KeepAliveWindows: server.KeepAliveWindowStore{Windows: keepAliveWindows},
+		KeepAlive:        kaCfg,
 		VendorSessionOf: func(sessionID string) (string, bool) {
 			rec, ok := reg.Get(sessionID)
 			if !ok || rec.ClaudeSessionID == "" {
@@ -480,16 +524,16 @@ func (w *shutdownWorld) boot(t *testing.T, options ...bootOption) *shutdownBoot 
 		DaemonVersion:   "0.1.0-e2e-drain",
 		ProtocolVersion: "1",
 		ShimBuildSHA:    func() string { return tuning.shimBuildSHA },
-		Logf:            t.Logf,
+		Logf:            b.logf,
 	})
 	if err != nil {
 		t.Fatalf("build controller: %v", err)
 	}
 
-	binding := &server.SessionCommandBinding{Logf: t.Logf}
+	binding := &server.SessionCommandBinding{Logf: b.logf}
 	// Beside the state store, not in a per-boot temp dir: a bounce must find
 	// what the previous boot published.
-	mergeQueue, err := merge.NewFileQueue(filepath.Join(w.stateDir, "merge-queue"), t.Logf)
+	mergeQueue, err := merge.NewFileQueue(filepath.Join(w.stateDir, "merge-queue"), b.logf)
 	if err != nil {
 		t.Fatalf("open merge queue: %v", err)
 	}
@@ -499,7 +543,7 @@ func (w *shutdownWorld) boot(t *testing.T, options ...bootOption) *shutdownBoot 
 	if err != nil {
 		t.Fatalf("build merge lease: %v", err)
 	}
-	geometryStore, err := geometry.Open(stateStore, t.Logf)
+	geometryStore, err := geometry.Open(stateStore, b.logf)
 	if err != nil {
 		t.Fatalf("open geometry: %v", err)
 	}
@@ -526,7 +570,7 @@ func (w *shutdownWorld) boot(t *testing.T, options ...bootOption) *shutdownBoot 
 	}
 
 	agentShim, err := server.WireAgentShim(server.AgentShimConfig{
-		Resumes:       &server.ConversationResolver{Reg: reg, Logf: t.Logf},
+		Resumes:       &server.ConversationResolver{Reg: reg, Logf: b.logf},
 		SSM:           ssmMgr,
 		Progress:      progressMgr,
 		Prompts:       controller,
@@ -534,14 +578,14 @@ func (w *shutdownWorld) boot(t *testing.T, options ...bootOption) *shutdownBoot 
 		Health:        controller,
 		Hibernations:  controller,
 		Restarts:      controller,
-		Lifecycle:     &server.WorkspaceOpener{Reg: reg, Ensurer: controller, Logf: t.Logf},
+		Lifecycle:     &server.WorkspaceOpener{Reg: reg, Ensurer: controller, Logf: b.logf},
 		SessionDeaths: server.RegistrySessionDeaths{Reg: reg},
 		Resyncer:      controller,
 		Catalogs:      controller,
 		// The registry-backed SessionView source main.go wires, so a connect
 		// snapshot taken mid-drain lists the registry's sessions rather than
 		// nothing at all.
-		Sessions: server.RegistrySessions{Reg: reg, Controller: controller, ModelCatalogs: modelCatalogs, Logf: t.Logf},
+		Sessions: server.RegistrySessions{Reg: reg, Controller: controller, ModelCatalogs: modelCatalogs, Logf: b.logf},
 		// The queue backend, and therefore the force and cancel EXITS a parked
 		// prompt has. Without it the daemon refuses to construct at all: a lease
 		// that can park prompts it cannot release is not shippable.
@@ -564,8 +608,8 @@ func (w *shutdownWorld) boot(t *testing.T, options ...bootOption) *shutdownBoot 
 		MergeLease:    mergeLease,
 		MergeQueue:    mergeQueue,
 		MergeGeometry: geometryStore,
-		Logf:          t.Logf,
-		LogVerbosef:   t.Logf,
+		Logf:          b.logf,
+		LogVerbosef:   b.logf,
 	})
 	if err != nil {
 		t.Fatalf("WireAgentShim: %v", err)
@@ -608,7 +652,7 @@ func (w *shutdownWorld) boot(t *testing.T, options ...bootOption) *shutdownBoot 
 		IdleTimeout:    tuning.idleTimeout,
 		KeepAlive:      kaCfg,
 		Now:            nowFn,
-		Logf:           t.Logf,
+		Logf:           b.logf,
 	})
 	binding.SetTarget(srv)
 	mux := http.NewServeMux()
@@ -645,7 +689,7 @@ func (w *shutdownWorld) boot(t *testing.T, options ...bootOption) *shutdownBoot 
 		Connected: shimListener.Connected,
 		Held:      sessionlock.Held,
 		Ensurer:   controller,
-		Logf:      t.Logf,
+		Logf:      b.logf,
 		Recheck:   b.recheck,
 	}).Run(sweepCtx)
 
@@ -669,6 +713,85 @@ func (w *shutdownWorld) boot(t *testing.T, options ...bootOption) *shutdownBoot 
 // bounce shuts this daemon down. Idempotent, so a test may bounce explicitly
 // and still leave the cleanup registered.
 func (b *shutdownBoot) bounce() { b.stopOnce.Do(b.stop) }
+
+// --- rendezvous on this daemon's own records ---------------------------------
+
+// logWatch is one armed rendezvous: the record fragment it is waiting for, and
+// the channel closed by the emitter that writes it.
+type logWatch struct {
+	substring string
+	hit       chan struct{}
+}
+
+// logf is the sink every logging seam of this daemon is wired to. It reports
+// through the test AND releases any watcher whose fragment the record carries.
+//
+// A RETIRED BOOT STILL REPORTS, IT JUST STOPS REPORTING THROUGH THE TEST. A
+// daemon's goroutines can outlive the test that booted it — the boot sweeper's
+// per-session reconcile is already running when its context is cancelled — and
+// testing.T PANICS on a Logf after its test has completed, which turns a
+// late record into a dead package rather than a line. Past retirement the line
+// goes to stderr, named as late, so nothing is swallowed.
+func (b *shutdownBoot) logf(format string, args ...any) {
+	line := fmt.Sprintf(format, args...)
+	b.logMu.Lock()
+	defer b.logMu.Unlock()
+	if b.retired {
+		fmt.Fprintf(os.Stderr, "[boot retired after %s completed] %s\n", b.t.Name(), line)
+	} else {
+		b.t.Logf("%s", line)
+	}
+	kept := b.watchers[:0]
+	for _, w := range b.watchers {
+		if strings.Contains(line, w.substring) {
+			close(w.hit)
+			continue
+		}
+		kept = append(kept, w)
+	}
+	b.watchers = kept
+}
+
+// retireLogging closes this boot's records to the test's own sink. It is the
+// LAST cleanup this boot runs, so everything the teardown itself emits is still
+// reported normally.
+func (b *shutdownBoot) retireLogging() {
+	b.logMu.Lock()
+	defer b.logMu.Unlock()
+	b.retired = true
+}
+
+// watchLog arms a rendezvous on a record this daemon has NOT emitted yet, and
+// must be called BEFORE the command that provokes it.
+//
+// WHY A DAEMON RECORD IS THE RIGHT RENDEZVOUS HERE. Some of what a bounce test
+// must sequence against happens BETWEEN two processes and is reported by
+// neither frame stream: the permission response leaving the daemon for the shim
+// is the case this exists for. It is dispatched from a goroutine parked inside
+// HandlePermission and is DROPPED when the connection's context is already
+// cancelled, so a test that answers and bounces in the same breath silently
+// arranges nothing at all. The daemon's own "sent permission response" record is
+// the only statement that the answer left the process, and waiting on it is
+// waiting on the fact rather than on a scheduling hope.
+func (b *shutdownBoot) watchLog(substring string) <-chan struct{} {
+	w := &logWatch{substring: substring, hit: make(chan struct{})}
+	b.logMu.Lock()
+	defer b.logMu.Unlock()
+	b.watchers = append(b.watchers, w)
+	return w.hit
+}
+
+// awaitLogged waits for an armed watchLog rendezvous, bounded by the suite's
+// frame budget so a record that never comes is a named failure rather than a
+// hang.
+func awaitLogged(t *testing.T, hit <-chan struct{}, what string) {
+	t.Helper()
+	select {
+	case <-hit:
+	case <-time.After(frameTimeout):
+		t.Fatalf("the daemon never emitted the record this step waits on: %s", what)
+	}
+}
 
 // harness adapts this boot to the shape e2e_test.go's session helpers take.
 // createSession, dial and liveSession read nothing but the httptest server, and
