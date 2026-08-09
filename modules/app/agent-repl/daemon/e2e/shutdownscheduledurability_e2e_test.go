@@ -190,7 +190,6 @@ func TestE2EAPromptHeldByAnExecutedDrainIsDeliveredAfterTheSwap(t *testing.T) {
 	// that claims it. Fired on the OBSERVED redial rather than on test phase
 	// order, so it cannot land before there is anything to claim.
 	second.sweepRecheckWhenParked(t, sessionB)
-	var terminal *frontendv1.TurnAccounting
 	awaitAll(t, afterConn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
 		"the held prompt's own reply, from the daemon on the other side of the bounce": func(frame *frontendv1.FrontendFrame) bool {
 			for _, item := range deltaItems(frame, cwdB) {
@@ -212,7 +211,22 @@ func TestE2EAPromptHeldByAnExecutedDrainIsDeliveredAfterTheSwap(t *testing.T) {
 			return false
 		},
 	})
-	if terminal == nil || terminal.GetQueryInstanceId() == "" || terminal.GetRuntime() == nil || terminal.GetRuntime().GetVendorSessionId() == "" || terminal.GetUsageAtStart() == nil || terminal.GetUsageAtEnd() == nil || len(terminal.GetResponses()) == 0 {
+	// THE EVIDENCE ITSELF, read from the ledger that owns it. The terminal
+	// item's arrival above is the ordering signal and nothing more: the
+	// accounting row is persisted by settleTurnAccounting BEFORE that same
+	// settlement releases the held terminal result for publication
+	// (sessioncontroller/sinks.go), so a read taken once the item has arrived
+	// cannot precede the write. That is a sequence the production code
+	// establishes, not a timing the test hopes for.
+	accountings, err := durableTurnAccountings(second.harness(), sessionB)
+	if err != nil {
+		t.Fatalf("read the successor daemon's durable turn accounting for session %s: %v", sessionB, err)
+	}
+	if len(accountings) == 0 {
+		t.Fatalf("the successor daemon published the held prompt's terminal result but its durable ledger holds no accounting for session %s", sessionB)
+	}
+	terminal := accountings[len(accountings)-1]
+	if terminal.GetQueryInstanceId() == "" || terminal.GetRuntime() == nil || terminal.GetRuntime().GetVendorSessionId() == "" || terminal.GetUsageAtStart() == nil || terminal.GetUsageAtEnd() == nil || len(terminal.GetResponses()) == 0 {
 		t.Fatalf("post-restart turn accounting omitted reconstructed query/runtime/usage evidence: %+v", terminal)
 	}
 	for _, problem := range terminal.GetInvalid().GetProblems() {
