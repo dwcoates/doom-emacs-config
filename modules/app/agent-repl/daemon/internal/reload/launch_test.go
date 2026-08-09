@@ -140,7 +140,7 @@ func TestLaunchRecordsTheDeployOutputUnderTheStateRoot(t *testing.T) {
 	plan := Plan{Workspace: "/ws", Components: []Component{ComponentDaemon}, Range: "aaa..bbb"}
 
 	// Act.
-	if err := s.Launch(context.Background(), plan); err != nil {
+	if err := s.Launch(context.Background(), plan, func() {}); err != nil {
 		t.Fatalf("Launch: %v", err)
 	}
 
@@ -168,7 +168,7 @@ func TestLaunchSurfacesAStartFailure(t *testing.T) {
 	}
 
 	// Act.
-	err = s.Launch(context.Background(), Plan{Workspace: "/ws", Components: []Component{ComponentDaemon}})
+	err = s.Launch(context.Background(), Plan{Workspace: "/ws", Components: []Component{ComponentDaemon}}, func() {})
 
 	// Assert — surfaced to the caller AND in the canonical log.
 	if err == nil {
@@ -197,7 +197,7 @@ func TestLaunchSurfacesAnUnusableLogDirectory(t *testing.T) {
 	}
 
 	// Act.
-	err = s.Launch(context.Background(), Plan{Workspace: "/ws", Components: []Component{ComponentDaemon}})
+	err = s.Launch(context.Background(), Plan{Workspace: "/ws", Components: []Component{ComponentDaemon}}, func() {})
 
 	// Assert.
 	if err == nil {
@@ -205,6 +205,55 @@ func TestLaunchSurfacesAnUnusableLogDirectory(t *testing.T) {
 	}
 	if !rec.contains("redeploy log dir FAILED") {
 		t.Fatalf("Launch left no canonical failure record; got %v", rec.lines)
+	}
+}
+
+// A deploy that exits WITHOUT bouncing the daemon reports so, which is what
+// re-arms the caller's reload latch.
+func TestLaunchReportsADeployThatExitedWithoutBouncingTheDaemon(t *testing.T) {
+	// Arrange — an inert script that exits immediately.
+	s, _ := newTestScript(t, fakeScript(t, "exit 0\n"))
+	exited := make(chan struct{})
+
+	// Act.
+	if err := s.Launch(context.Background(),
+		Plan{Workspace: "/ws", Components: []Component{ComponentDaemon}},
+		func() { close(exited) }); err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+
+	// Assert — the reaper fires the callback once the child is gone.
+	<-exited
+}
+
+// A FAILED deploy reports its exit too: it did not bounce the daemon either,
+// and a latch left held would disable self-redeploy for this whole lifetime.
+func TestLaunchReportsAFailedDeployExit(t *testing.T) {
+	// Arrange — a script that exits non-zero.
+	s, _ := newTestScript(t, fakeScript(t, "exit 7\n"))
+	exited := make(chan struct{})
+
+	// Act.
+	if err := s.Launch(context.Background(),
+		Plan{Workspace: "/ws", Components: []Component{ComponentDaemon}},
+		func() { close(exited) }); err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+
+	// Assert.
+	<-exited
+}
+
+func TestLaunchRefusesAMissingExitCallback(t *testing.T) {
+	// Arrange.
+	s, _ := newTestScript(t, fakeScript(t, "exit 0\n"))
+
+	// Act.
+	err := s.Launch(context.Background(), Plan{Workspace: "/ws", Components: []Component{ComponentDaemon}}, nil)
+
+	// Assert.
+	if err == nil {
+		t.Fatalf("Launch(nil callback) error = nil, want a refusal")
 	}
 }
 
