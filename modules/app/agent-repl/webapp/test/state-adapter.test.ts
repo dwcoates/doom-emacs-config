@@ -13,6 +13,8 @@ import { QueryStartupFailureSchema } from "../../proto/gen/ts/agentshim/core/v1/
 import { decodeFrontendFrame } from "../src/frontend-proto.js";
 import {
   StateAdapter,
+  asyncAgentItems,
+  systemFailureFrom,
   userTurnReceipt,
   type AdapterEffect,
   type AdapterLogLevel,
@@ -398,7 +400,21 @@ describe("StateSnapshot mapping", () => {
         inits: [{ workspace: "w", fence: "s", init: { model: "m" } }],
       },
     });
-    expect(effects.map((e) => e.kind)).toEqual(["workspace-state", "session-view", "task-catalog", "session-init"]);
+    // The async-bubbles snapshot rides EVERY snapshot, including this one that
+    // carries none: an empty list is the daemon stating that no detached work
+    // is open, which is what retires bubbles a reconnecting client still holds.
+    expect(effects.map((e) => e.kind)).toEqual([
+      "workspace-state",
+      "session-view",
+      "task-catalog",
+      "session-init",
+      "async-bubbles-snapshot",
+    ]);
+  });
+
+  it("carries an empty bubble list when the snapshot names no detached work", () => {
+    const effects = applyOne({ snapshot: {} });
+    expect(effects).toEqual([{ kind: "async-bubbles-snapshot", bubbles: [] }]);
   });
 });
 
@@ -1800,7 +1816,6 @@ describe("shutdown schedule", () => {
   });
 });
 
-
 // --- the resolved component views route through ONE effect kind -------------
 //
 // The three views share one `fenced-view` effect ON PURPOSE: the store has one
@@ -1906,5 +1921,150 @@ describe("the fenced-view routing", () => {
     adapter.apply(decodeFrontendFrame(JSON.stringify({ topbar: TOPBAR })));
     // Assert
     expect(adapter.ignoredCounts().size).toBe(0);
+  });
+});
+
+// --- detached work: the seam and the shared decomposition -------------------
+
+describe("async bubble effects", () => {
+  const BUBBLE = { id: "b1", liveness: { live: {} }, agent: {} };
+
+  it("forwards an async push WHOLE, unprojected and unsplit", () => {
+    // Arrange / Act
+    const effects = applyOne({
+      asyncBubbleDelta: { workspace: "/w", fence: "f1", opened: [BUBBLE], throughSeq: "7" },
+    });
+
+    // Assert
+    expect(effects).toEqual([
+      {
+        kind: "async-bubble-delta",
+        value: {
+          workspace: "/w",
+          fence: "f1",
+          opened: [expect.objectContaining({ id: "b1" })],
+          updates: [],
+          throughSeq: 7,
+        },
+      },
+    ]);
+  });
+
+  it("lifts a feed-anchored bubble onto the async seam instead of the item list", () => {
+    // Arrange / Act
+    const effects = applyOne({
+      conversationDelta: {
+        workspace: "ws",
+        fence: "s1",
+        throughSeq: "3",
+        items: [{ uuid: "u1", tsMs: "1", source: "CONVERSATION_SOURCE_USER", asyncBubble: BUBBLE }],
+      },
+    });
+
+    // Assert — the conversation effect carries NO item for it.
+    const items = effects.find((e) => e.kind === "conversation-items");
+    expect(items?.kind === "conversation-items" && items.items).toEqual([]);
+  });
+
+  it("shapes the anchored bubbles as a push carrying the delta's own fence", () => {
+    // Arrange / Act
+    const effects = applyOne({
+      conversationDelta: {
+        workspace: "ws",
+        fence: "s1",
+        throughSeq: "3",
+        items: [{ uuid: "u1", tsMs: "1", source: "CONVERSATION_SOURCE_USER", asyncBubble: BUBBLE }],
+      },
+    });
+
+    // Assert
+    const anchored = effects.find((e) => e.kind === "async-bubble-anchored");
+    expect(anchored?.kind === "async-bubble-anchored" && anchored.value.fence).toBe("s1");
+  });
+
+  it("emits NO anchored effect for a delta that anchored nothing", () => {
+    // Arrange / Act
+    const effects = applyOne({
+      conversationDelta: { workspace: "ws", fence: "s1", throughSeq: "3", items: [] },
+    });
+
+    // Assert
+    expect(effects.some((e) => e.kind === "async-bubble-anchored")).toBe(false);
+  });
+});
+
+describe("asyncAgentItems — a detached agent decomposed by the FEED's own path", () => {
+  it("produces the same store item a top-level assistant message would", () => {
+    // Arrange
+    const emissions = [
+      {
+        emission: "response" as const,
+        arm: "assistantMessage" as const,
+        payload: { id: "m1", content: [{ text: { text: "hello" } }] },
+      },
+    ];
+
+    // Act
+    const built = asyncAgentItems(emissions, "b1", 1700000000000);
+
+    // Assert
+    expect(built.items.map((i) => i.kind)).toEqual(["text"]);
+  });
+
+  it("scopes the synthesized uuid to the bubble and the emission's position", () => {
+    // Arrange
+    const emissions = [
+      { emission: "toolCall" as const, arm: "toolUse" as const, payload: { id: "tu1", name: "Read" } },
+    ];
+
+    // Act
+    const built = asyncAgentItems(emissions, "b1", 0);
+
+    // Assert — two bubbles' emissions can never collide on a store key.
+    expect(built.items[0].kind === "tool" && built.items[0].messageId).toBe("b1#0");
+  });
+
+  it("carries a NESTED spawn's verdict through, so a child bubble attaches inside", () => {
+    // Arrange
+    const emissions = [
+      {
+        emission: "toolCall" as const,
+        arm: "toolUse" as const,
+        payload: { id: "tu1", name: "Task" },
+        spawnedBubbleId: "b2",
+      },
+    ];
+
+    // Act
+    const built = asyncAgentItems(emissions, "b1", 0);
+
+    // Assert
+    expect(built.items[0].kind === "tool" && built.items[0].spawnedBubbleId).toBe("b2");
+  });
+
+  it("takes the emission's timestamp from the BUBBLE's launch stamp", () => {
+    // Arrange
+    const emissions = [
+      { emission: "toolCall" as const, arm: "toolUse" as const, payload: { id: "tu1", name: "Read" } },
+    ];
+
+    // Act
+    const built = asyncAgentItems(emissions, "b1", 1700000000000);
+
+    // Assert
+    expect(built.items[0].kind === "tool" && built.items[0].ts).toBe(new Date(1700000000000).toISOString());
+  });
+
+  it("routes an emission with no webapp visual down the explicit-ignore path", () => {
+    // Arrange — a typed outcome has no correlation key on the arm.
+    const emissions = [
+      { emission: "toolOutcome" as const, arm: "toolUseResult" as const, payload: {} },
+    ];
+
+    // Act
+    const built = asyncAgentItems(emissions, "b1", 0);
+
+    // Assert
+    expect(built).toEqual({ items: [], ignores: ["conversation-item:toolUseResult"] });
   });
 });

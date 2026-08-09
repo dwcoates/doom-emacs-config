@@ -43,6 +43,8 @@ import type {
   WebSessionStatus,
   WorkspaceStatusInput,
 } from "./state-adapter.js";
+import type { AsyncBubbleDelta } from "./async-bubble.js";
+import { AsyncBubbleRegistry, type AsyncApplyResult, type AsyncGap } from "./async-routing.js";
 import { mergeStatusLogValue } from "./merge-status.js";
 import { applyStreamDelta, blockKey, insertBySeq, settleStreamedBlock } from "./streaming.js";
 import type { ClientLogContext } from "./protocol.js";
@@ -198,6 +200,16 @@ export interface ToolItem extends FeedOrderedItem {
    * stream, which is what the async fold keys off.
    */
   asyncSource?: AsyncSource;
+  /**
+   * THE CLASSIFICATION VERDICT: the id of the `AsyncBubble` this call detached,
+   * as the DAEMON resolved it (`AgentToolCall.spawned_bubble_id`).
+   *
+   * The card MATCHES this string against a bubble in the async registry; it
+   * never derives one. ABSENT means "this call detached nothing", and that is
+   * the only reading of absent — there is no second tier of evidence to fall
+   * back to, by design (see `watchers.ts`).
+   */
+  spawnedBubbleId?: string;
   /** Streamed output of the detached task this call spawned. */
   taskOutput?: string;
   /**
@@ -681,6 +693,18 @@ function workspaceStateFingerprint(ws: WorkspaceStatusInput): string {
 export interface IngestResult {
   /** Whether visible state changed (render needed). */
   changed: boolean;
+  /**
+   * THE ASYNC GAP this batch hit, if any: an async push named a bubble that is
+   * not open, carried an arm mismatching its bubble's kind, or appended bytes
+   * at an offset the spool is not at.
+   *
+   * Reported UP rather than handled here, because the answer to a gap is a
+   * resync, and the resync trigger lives with the socket. It is never a
+   * warning to ride out: nothing of the push was applied (the registry stages
+   * and commits atomically), so the client's async state is exactly as stale
+   * as it was, and only a fresh snapshot makes it current again.
+   */
+  asyncGap?: AsyncGap;
 }
 
 /**
@@ -715,6 +739,11 @@ function mergeToolItem(existing: ToolItem, incoming: ToolItem): ToolItem {
   if (incoming.notification !== undefined) merged.notification = incoming.notification;
   if (incoming.resultTs !== undefined) merged.resultTs = incoming.resultTs;
   if (incoming.asyncSource !== undefined) merged.asyncSource = incoming.asyncSource;
+  // The verdict arrives on the CALL and is restated on the outcome, so a later
+  // half of the pair that carries it merges in. It is never cleared by a half
+  // that does not carry it: the two are the same string whenever both are set,
+  // and "the outcome did not restate it" is not a retraction.
+  if (incoming.spawnedBubbleId !== undefined) merged.spawnedBubbleId = incoming.spawnedBubbleId;
   if (incoming.taskOutput !== undefined) merged.taskOutput = incoming.taskOutput;
   if (incoming.skillBody !== undefined) merged.skillBody = incoming.skillBody;
   if (incoming.result !== undefined) merged.result = incoming.result;
@@ -802,6 +831,20 @@ export class ConversationStore {
   taskRoster: CounterEntry[] = [];
 
   /**
+   * THE OPEN ASYNC BUBBLES, keyed by id — the session's detached work.
+   *
+   * Kept beside `state` for the same reason `taskRoster` is (the render
+   * input's shape stays unchanged for its many consumers), and kept as the
+   * registry OBJECT rather than a plain map because id-only routing and spool
+   * continuity are its invariants to enforce, not the store's to re-implement.
+   *
+   * It is NOT cleared by `rebaseSeqSpace`: a vendor session uuid rotating
+   * invalidates the conversation's seq space, not the processes still running
+   * on the machine. `reset` and a snapshot adopt are what retire bubbles.
+   */
+  readonly asyncBubbles = new AsyncBubbleRegistry();
+
+  /**
    * The consolidated progress footer's input (F1), adopted wholesale from the
    * daemon's `ProgressView`. `null` before the first one lands, which is the
    * footer's own "nothing resolved yet" state rather than a fabricated blank.
@@ -854,6 +897,10 @@ export class ConversationStore {
   reset(): void {
     this.state = initialState();
     this.taskRoster = [];
+    // Adopting an EMPTY set is how the registry is emptied — the same path a
+    // snapshot naming no open work takes, rather than a second clear method
+    // that could drift from it.
+    this.asyncBubbles.adoptSnapshot([]);
     this.progress = null;
     this.sessionIdAuthoritative = false;
   }
@@ -888,8 +935,31 @@ export class ConversationStore {
   ingest(effects: readonly AdapterEffect[]): IngestResult {
     this.validateIngest(effects);
     let changed = false;
+    let asyncGap: AsyncGap | undefined;
     for (const effect of effects) {
       switch (effect.kind) {
+        case "async-bubbles-snapshot":
+          // REPLACES the held set: the snapshot is the daemon's complete
+          // statement of what is still open, so a bubble missing from it is
+          // one the daemon no longer holds.
+          this.asyncBubbles.adoptSnapshot(effect.bubbles);
+          changed = true;
+          break;
+        case "async-bubble-delta":
+        case "async-bubble-anchored": {
+          // THE FENCE CHOKE POINT connects here: a push whose fence does not
+          // match the workspace's current one is stale and must be discarded
+          // whole BEFORE this line, never partially adopted. The routing below
+          // is deliberately separate from that question — it decides WHERE an
+          // update lands, not whether the push is current.
+          const routed = this.applyAsyncBubbleDelta(effect.value);
+          if (routed.ok) changed = changed || routed.opened > 0 || routed.updated > 0;
+          // The FIRST gap wins and the rest of the batch is still walked: a
+          // resync re-delivers everything anyway, and a second gap report
+          // would only ask for the same snapshot twice.
+          else asyncGap = asyncGap ?? routed.gap;
+          break;
+        }
         case "workspace-state":
           changed = this.applyWorkspaceState(effect.value) || changed;
           break;
@@ -936,7 +1006,19 @@ export class ConversationStore {
           break;
       }
     }
-    return { changed };
+    return asyncGap === undefined ? { changed } : { changed, asyncGap };
+  }
+
+  /**
+   * THE ONE PLACE an async push is routed — a thin pass-through to the
+   * registry, which owns id-only routing and spool continuity.
+   *
+   * It exists as a named method rather than an inline call so the fence gate
+   * and any future push source have one seam to connect to, and so the store
+   * never grows a second, subtly different apply path beside the registry's.
+   */
+  private applyAsyncBubbleDelta(delta: AsyncBubbleDelta): AsyncApplyResult {
+    return this.asyncBubbles.applyDelta(delta);
   }
 
   /**

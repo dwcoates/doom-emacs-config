@@ -2528,3 +2528,105 @@ describe("AgentResponse.usage_stamp", () => {
     ).toThrow(/unrecognized field\(s\): totalTokens/);
   });
 });
+
+// --- async bubbles: the three places the wire carries detached work ---------
+
+describe("async-bubble decode entry points", () => {
+  const BUBBLE = { id: "b1", liveness: { live: {} }, agent: {} };
+
+  it("decodes the asyncBubbleDelta frame variant", () => {
+    // Arrange / Act
+    const frame = decode({ asyncBubbleDelta: { workspace: "/w", fence: "f1", opened: [BUBBLE] } });
+
+    // Assert
+    expect(frame.frame.case === "asyncBubbleDelta" && frame.frame.value.opened[0].id).toBe("b1");
+  });
+
+  it("decodes StateSnapshot.asyncBubbles, the reconnect resume set", () => {
+    // Arrange / Act
+    const frame = decode({ snapshot: { asyncBubbles: [BUBBLE] } });
+
+    // Assert
+    expect(frame.frame.case === "snapshot" && frame.frame.value.asyncBubbles.map((b) => b.id)).toEqual(["b1"]);
+  });
+
+  it("decodes ConversationItem.asyncBubble, the feed-anchored opening state", () => {
+    // Arrange / Act
+    const frame = decode({
+      conversationDelta: {
+        workspace: "ws",
+        fence: "s1",
+        throughSeq: "1",
+        items: [{ uuid: "u1", tsMs: "1", source: "CONVERSATION_SOURCE_USER", asyncBubble: BUBBLE }],
+      },
+    });
+
+    // Assert
+    expect(frame.frame.case === "conversationDelta" && frame.frame.value.items[0].asyncBubble?.id).toBe("b1");
+  });
+
+  it("rejects a feed-anchored bubble with no kind arm, loudly, at decode", () => {
+    // Arrange / Act / Assert
+    expect(() =>
+      decode({
+        conversationDelta: {
+          workspace: "ws",
+          fence: "s1",
+          throughSeq: "1",
+          items: [
+            {
+              uuid: "u1",
+              tsMs: "1",
+              source: "CONVERSATION_SOURCE_USER",
+              asyncBubble: { id: "b1", liveness: { live: {} } },
+            },
+          ],
+        },
+      }),
+    ).toThrow(/requires exactly one of agent, journal, shell, unclassified/);
+  });
+
+  it("carries a tool call's spawned_bubble_id through as the classification verdict", () => {
+    // Arrange / Act
+    const frame = decode({
+      conversationDelta: {
+        workspace: "ws",
+        fence: "s1",
+        throughSeq: "1",
+        items: [
+          {
+            uuid: "u1",
+            tsMs: "1",
+            source: "CONVERSATION_SOURCE_USER",
+            agent: { toolCall: { call: { id: "tu1", name: "Task" }, spawnedBubbleId: "b1" } },
+          },
+        ],
+      },
+    });
+
+    // Assert
+    expect(frame.frame.case === "conversationDelta" && frame.frame.value.items[0].spawnedBubbleId).toBe("b1");
+  });
+
+  it("leaves spawnedBubbleId ABSENT when the call detached nothing", () => {
+    // Arrange / Act
+    const frame = decode({
+      conversationDelta: {
+        workspace: "ws",
+        fence: "s1",
+        throughSeq: "1",
+        items: [
+          {
+            uuid: "u1",
+            tsMs: "1",
+            source: "CONVERSATION_SOURCE_USER",
+            agent: { toolCall: { call: { id: "tu1", name: "Read" } } },
+          },
+        ],
+      },
+    });
+
+    // Assert
+    expect(frame.frame.case === "conversationDelta" && "spawnedBubbleId" in frame.frame.value.items[0]).toBe(false);
+  });
+});
