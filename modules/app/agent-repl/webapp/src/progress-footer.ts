@@ -755,26 +755,30 @@ export function sheetHtml(input: FooterInput, nowMs: number): string {
 }
 
 /**
- * The error row: a persistent line carrying the daemon's classified failure,
- * standing until the next turn starts. When the failure names a feed item the
- * row is a button, because clicking it scrolls the feed to that card — the row
- * is the only way to find a failure that has already scrolled away.
+ * The error row: the resolved `FooterFailureRow`, standing until the next turn
+ * starts.
  *
- * Its color is the failure's CLASS, from the same five-color assignment the
- * card and the workspace dot take. It used to be a hardcoded red no other
- * surface consulted, so the footer could contradict the very card it pointed
- * at.
+ * EVERYTHING IN IT IS THE DAEMON'S. The sentence is the same one the card leads
+ * with, and the TONE is a color-class name from the shared render-colors
+ * vocabulary — so this row cannot contradict the very card it points at, and
+ * the footer no longer classifies a failure in order to pick a color. It used
+ * to be a hardcoded red no other surface consulted.
+ *
+ * The row is a button ONLY when the row carries a card to reveal. An empty ref
+ * means the failure produced no card, and the row then offers no click rather
+ * than scrolling somewhere arbitrary to look useful.
  */
 export function errorRowHtml(p: ProgressInput): string {
   const f = p.failure;
   if (f === null) return "";
-  const addressable = f.uuid !== "";
+  const cardUuid = f.card?.cardUuid ?? "";
+  const addressable = cardUuid !== "";
   const attrs = addressable
-    ? ` role="button" tabindex="0" data-pfooter-error-uuid="${escapeHtml(f.uuid)}" title="show the error in the feed"`
+    ? ` role="button" tabindex="0" data-pfooter-error-uuid="${escapeHtml(cardUuid)}" title="show the error in the feed"`
     : "";
-  const classes = ["pfooter-error", `failure-${f.errorClass.toLowerCase()}`];
+  const classes = ["pfooter-error", `tone-${f.tone}`];
   if (addressable) classes.push("addressable");
-  return `<div class="${classes.join(" ")}"${attrs}>${escapeHtml(f.message)}</div>`;
+  return `<div class="${escapeHtml(classes.join(" "))}"${attrs}>${escapeHtml(f.message)}</div>`;
 }
 
 /**

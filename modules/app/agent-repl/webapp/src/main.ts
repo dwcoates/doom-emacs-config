@@ -94,11 +94,11 @@ import {
   daemonReachableFailure,
   daemonUnreachableFailure,
   frameUndecodableFailure,
-  sessionGoneFailure,
+  workspaceGoneFailure,
   staleBundleFailure,
 } from "./local-failure.js";
-import { StateAdapter, systemFailureFrom, userTurnReceipt } from "./state-adapter.js";
-import { CommandDispatcher, ModelSelectionRejectedError } from "./command-dispatch.js";
+import { StateAdapter, userTurnReceipt } from "./state-adapter.js";
+import { CommandDispatcher, ModelSelectionRejectedError, surfaceRefusal } from "./command-dispatch.js";
 import { ConnectResync } from "./connect-resync.js";
 import { captureResyncSnapshot } from "./resync-snapshot.js";
 import type { CommandStruct } from "./frontend-command.js";
@@ -251,9 +251,21 @@ async function boot(): Promise<void> {
     // this it reached a human through nothing at all: the ack's text went to
     // a local log and the promise it rejected was swallowed by every caller,
     // so a rejected prompt looked exactly like a prompt that was never sent.
-    onFailure: (failure) => {
-      if (store.addFailure(systemFailureFrom(failure))) frames.schedule();
-    },
+    // A REVEAL IS NOT A SECOND CARD. When the daemon already filed the
+    // refusal in the feed and told us the card's address, the affordance is to
+    // scroll to that card; restating the account inline would put one failure
+    // on screen twice, worded two different ways. A reveal that finds nothing
+    // falls back to filing the refusal, so a card the feed never received
+    // cannot leave the refusal invisible. `surfaceRefusal` owns that rule, so
+    // every branch here ends in a card the user can see.
+    onFailure: (refusal) =>
+      surfaceRefusal(refusal, {
+        reveal: (cardUuid) => feed.revealError(cardUuid),
+        file: (card) => {
+          if (store.addFailure(card)) frames.schedule();
+        },
+        log: (message) => clog("warn", message, { operation: "command-dispatch.reveal-missing" }),
+      }),
   });
   // The workspace a runtime command names — the live session's cwd, as the
   // pushed `SessionView` reports it. The daemon stamps the URL-scoped
@@ -1259,7 +1271,7 @@ async function boot(): Promise<void> {
         ? {
             sessionExists: makeSessionExistsProbe(httpBase, connectionAddress.sessionId),
             onGone: (): void => {
-              if (store.addFailure(sessionGoneFailure(connectionAddress.sessionId))) frames.schedule();
+              if (store.addFailure(workspaceGoneFailure(store.state.cwd))) frames.schedule();
               statusEl.textContent = "session gone";
               statusEl.classList.remove("ok");
               // A vanished session is terminal for this page. Keep the failure

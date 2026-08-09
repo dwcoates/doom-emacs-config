@@ -35,7 +35,8 @@ import {
 import { IDLE_LABEL } from "../src/timer.js";
 import type { ContextCostAlert } from "../src/frontend-proto.js";
 import type { MergeStatus, ProgressInput } from "../src/state-adapter.js";
-import { ConversationItem, SystemFailureCard, ToolItem } from "../src/store.js";
+import { ConversationItem, ToolItem } from "../src/store.js";
+import type { FooterFailureRow } from "../src/frontend-proto.js";
 
 const NOW = Date.parse("2024-05-01T12:00:00.000Z");
 
@@ -44,17 +45,12 @@ const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 
-/** A daemon-classified failure, defaulted to an addressable API failure. */
-function failureCard(over: Partial<SystemFailureCard> = {}): SystemFailureCard {
+/** The resolved footer row, defaulted to an addressable vendor-side failure. */
+function failureRow(over: Partial<FooterFailureRow> = {}): FooterFailureRow {
   return {
-    kind: "failure",
-    errorClass: "API",
-    errorType: "api.overloaded",
     message: "the API is overloaded",
-    sourceDetail: "status=529",
-    resolvedAtMs: 0,
-    uuid: "failure:e9",
-    detail: { kind: "none" },
+    tone: "purple",
+    card: { cardUuid: "failure:e9" },
     ...over,
   };
 }
@@ -1063,7 +1059,7 @@ describe("errorRowHtml: the persistent error line", () => {
   it("carries the daemon's classified message", () => {
     // Arrange / Act
     const got = errorRowHtml(
-      progress({ failure: failureCard({ message: "overloaded (529) after 10 attempts" }) }),
+      progress({ failure: failureRow({ message: "overloaded (529) after 10 attempts" }) }),
     );
     // Assert
     expect(got).toContain("overloaded (529) after 10 attempts");
@@ -1071,35 +1067,46 @@ describe("errorRowHtml: the persistent error line", () => {
 
   it("addresses the card it names, so the row can scroll to it", () => {
     // Arrange / Act
-    const got = errorRowHtml(progress({ failure: failureCard({ uuid: "failure:e9" }) }));
+    const got = errorRowHtml(
+      progress({ failure: failureRow({ card: { cardUuid: "failure:e9" } }) }),
+    );
     // Assert
     expect(got).toContain('data-pfooter-error-uuid="failure:e9"');
   });
 
   it("is not clickable when the failure names no card", () => {
-    // Arrange / Act — a turn-end error carries no ApiErrorLine of its own.
-    const got = errorRowHtml(progress({ failure: failureCard({ uuid: "" }) }));
+    // Arrange / Act — an empty ref is the daemon saying the failure produced no
+    // card, and the row never scrolls somewhere arbitrary to look useful.
+    const got = errorRowHtml(progress({ failure: failureRow({ card: { cardUuid: "" } }) }));
     // Assert
     expect(got).not.toContain("addressable");
   });
 
-  it("takes the API class's color rather than a red of its own", () => {
-    // Arrange / Act — the footer must not contradict the card it points at.
-    const got = errorRowHtml(progress({ failure: failureCard({ errorClass: "API" }) }));
+  it("draws the daemon's tone rather than a red of its own", () => {
+    // Arrange / Act — the footer must not contradict the card it points at, so
+    // it renders the resolved tone and classifies nothing.
+    const got = errorRowHtml(progress({ failure: failureRow({ tone: "purple" }) }));
     // Assert
-    expect(got).toContain("failure-api");
+    expect(got).toContain("tone-purple");
   });
 
-  it("takes the INTERNAL class's color for a machinery failure", () => {
+  it("draws the machinery tone when that is what the daemon resolved", () => {
     // Arrange / Act
-    const got = errorRowHtml(progress({ failure: failureCard({ errorClass: "INTERNAL" }) }));
+    const got = errorRowHtml(progress({ failure: failureRow({ tone: "blue" }) }));
     // Assert
-    expect(got).toContain("failure-internal");
+    expect(got).toContain("tone-blue");
+  });
+
+  it("omits the reveal affordance when no card ref is carried at all", () => {
+    // Arrange / Act
+    const got = errorRowHtml(progress({ failure: failureRow({ card: undefined }) }));
+    // Assert
+    expect(got).not.toContain("data-pfooter-error-uuid");
   });
 
   it("escapes the message", () => {
     // Arrange / Act
-    const got = errorRowHtml(progress({ failure: failureCard({ message: "<img src=x>" }) }));
+    const got = errorRowHtml(progress({ failure: failureRow({ message: "<img src=x>" }) }));
     // Assert
     expect(got).not.toContain("<img");
   });
@@ -2075,7 +2082,7 @@ describe("expensiveTurnRowHtml: the uncached-input alert", () => {
     // Arrange — the two are different facts with the same lifetime, and a
     // failed expensive turn must show both.
     const got = footerHtml(
-      input({ progress: progress({ failure: failureCard(), expensiveTurn: alert({ promptOrigin: "PROMPT_ORIGIN_CACHE_KEEP_ALIVE" }) }) }),
+      input({ progress: progress({ failure: failureRow(), expensiveTurn: alert({ promptOrigin: "PROMPT_ORIGIN_CACHE_KEEP_ALIVE" }) }) }),
       CLOSED,
       NOW,
     );
