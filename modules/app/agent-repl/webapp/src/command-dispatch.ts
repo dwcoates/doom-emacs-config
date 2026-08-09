@@ -246,6 +246,25 @@ export class ModelSelectionRejectedError extends Error {
   }
 }
 
+/**
+ * One submitted prompt: the daemon's eventual verdict on it, and the id the
+ * command carried.
+ *
+ * The pair travels together because neither half is usable alone here — the
+ * ack says WHETHER the prompt was accepted, the id says WHICH bubble that
+ * verdict is about — and the caller needs both before the ack arrives.
+ */
+export interface SubmittedPrompt {
+  /**
+   * The correlation id the `SubmitPromptCmd` went out under, and the id the
+   * daemon's prompt receipt comes back carrying. EMPTY only when no command
+   * was sent at all, which is the one case with no bubble to file.
+   */
+  requestId: string;
+  /** Resolves on the daemon's `CommandAck`; rejects on any refusal. */
+  ack: Promise<void>;
+}
+
 export interface CreateSessionArgs {
   cwd: string;
   permissionMode: string;
@@ -396,11 +415,30 @@ export class CommandDispatcher {
 
   // --- ack-correlated commands ----------------------------------------------
 
-  submitPrompt(workspace: string, text: string, promptOrigin: PromptOrigin, permissionMode = ""): Promise<void> {
+  /**
+   * Submit one prompt, handing back the ACK PROMISE and the REQUEST ID the
+   * command went out under.
+   *
+   * The id is returned — alone among the ack-correlated commands — because the
+   * prompt is the one command whose consequence the frontend draws before the
+   * daemon answers: the local prompt bubble is filed under this id, and the
+   * daemon's receipt for the same submit carries it back, which is what lets
+   * the two reconcile onto one bubble instead of being matched by their text
+   * (see `Store.addLocalPrompt`).
+   */
+  submitPrompt(
+    workspace: string,
+    text: string,
+    promptOrigin: PromptOrigin,
+    permissionMode = "",
+  ): SubmittedPrompt {
     if (!Object.values(PromptOrigin).includes(promptOrigin)) {
-      return Promise.reject(new Error("command dispatcher: submitPrompt requires an explicit prompt origin"));
+      return {
+        requestId: "",
+        ack: Promise.reject(new Error("command dispatcher: submitPrompt requires an explicit prompt origin")),
+      };
     }
-    return this.dispatch(workspace, { case: "submitPrompt", text, permissionMode, promptOrigin });
+    return this.dispatchIdentified(workspace, { case: "submitPrompt", text, permissionMode, promptOrigin });
   }
 
   interrupt(workspace: string, confirmAgents = false): Promise<void> {
@@ -499,12 +537,24 @@ export class CommandDispatcher {
   }
 
   private dispatch(workspace: string, body: FrontendCommandBody): Promise<void> {
+    return this.dispatchIdentified(workspace, body).ack;
+  }
+
+  /**
+   * `dispatch`, with the correlation id it minted handed back beside the ack.
+   *
+   * ONE dispatch path, not two: a caller that must name the command it just
+   * sent — today only `submitPrompt`, whose bubble is filed under this id —
+   * reads the id off the same send every other command makes, so there is no
+   * second sending path that could drift from this one.
+   */
+  private dispatchIdentified(workspace: string, body: FrontendCommandBody): SubmittedPrompt {
     const requestId = this.newId();
     log("info", "command dispatcher dispatching acknowledgement-correlated command", {
       operation: "command-dispatch.dispatch",
       context: { request_id: requestId, workspace, command: body.case, pending_count: this.pending.size },
     });
-    return new Promise<void>((resolve, reject) => {
+    const ack = new Promise<void>((resolve, reject) => {
       this.pending.set(requestId, { command: body.case, resolve: () => resolve(), reject });
       const raw = encodeFrontendCommand({ requestId, workspace, body });
       if (this.opts.send(raw)) return;
@@ -513,6 +563,7 @@ export class CommandDispatcher {
       // once more before reporting the command unsent.
       void this.dispatchAfterConnecting(requestId, workspace, body.case, raw, reject);
     });
+    return { requestId, ack };
   }
 
   /**
