@@ -2167,6 +2167,38 @@ describe("the footer's structured merge status", () => {
     expect(got).toBe("");
   });
 
+  it("clears a stopped merge's whole account once the frame reports the agent", () => {
+    // THE STALE FAILURE, AT THE SURFACE THE USER READS. A merge that stopped
+    // keeps a row on the daemon's merge axis forever, so the daemon withholds
+    // its status from every frame that reports the live agent instead. This
+    // footer draws the merge from that field alone, which is what makes the
+    // absence enough: the phase word, the count chip and the failure note all
+    // go, and the agent's own phase takes the cell back.
+    // Arrange — the failure the previous frame carried, then the next frame.
+    const failed = input({
+      renderState: "merge_failed",
+      mergeStatus: merge({
+        case: "failed",
+        value: {
+          cause: "tests failed",
+          commitsTotal: 4,
+          commitsLanded: 3,
+          failingSha: "fee1234",
+          failingSubject: "break it",
+          failedJson: "",
+        },
+      }),
+    });
+    expect(footerHtml(failed, CLOSED, NOW)).toContain("merge failed");
+    // Act
+    const got = footerHtml(input({ renderState: "thinking", mergeStatus: null }), CLOSED, NOW);
+    // Assert
+    expect(got).not.toContain("merge failed");
+    expect(got).not.toContain("tests failed");
+    expect(got).not.toContain("pfooter-merge-note");
+    expect(phaseCell(got)).toContain("thinking");
+  });
+
   it("shows the structured count as the ONLY merge arithmetic", () => {
     // REWRITTEN: this pair used to assert the structured chip superseded a flat
     // one, and that the flat one remained the fallback. The flat path is gone,
