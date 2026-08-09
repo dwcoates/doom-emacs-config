@@ -419,6 +419,183 @@ func TestTheStrippedBodyKeepsTheBlocksTheEmissionsLeftBehind(t *testing.T) {
 	}
 }
 
+// --- the interrupt sentinel never reaches a frontend ------------------------
+//
+// `[Request interrupted by user]` is a CLI placeholder for a turn the user
+// stopped, not something anybody said. The turn's own terminal already reports
+// the stop (the aborted result, drawn as the yellow `interrupted` chip), so the
+// sentinel is a second denotation of the same fact phrased as speech, and the
+// curation drops it before it is ever pushed.
+
+// textBlocks builds an assistant message body out of plain text blocks.
+func textBlocks(texts ...string) *datav1.ApiAssistantMessage {
+	msg := &datav1.ApiAssistantMessage{Id: "msg_sentinel"}
+	for _, text := range texts {
+		msg.Content = append(msg.Content, &datav1.ContentBlock{
+			Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: text}},
+		})
+	}
+	return msg
+}
+
+// assistantResponseBodies curates an assistant message and returns the text of
+// every response emission's surviving blocks.
+func assistantResponseBodies(t *testing.T, msg *datav1.ApiAssistantMessage) []string {
+	t.Helper()
+	ev := &corev1.Event{
+		SessionId: "s1", Seq: 20, ProducedAtMs: producedMs,
+		Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.AssistantMessage{
+			Uuid: "env-1", Message: msg,
+		})},
+	}
+	got, _, err := conversationDeltaFromEvent("ws", "s1", ev)
+	if err != nil {
+		t.Fatalf("conversationDeltaFromEvent: %v", err)
+	}
+	var out []string
+	for _, item := range got.GetItems() {
+		r := item.GetAgent().GetResponse()
+		if r == nil {
+			continue
+		}
+		for _, block := range r.GetBody().GetContent() {
+			out = append(out, block.GetText().GetText())
+		}
+	}
+	return out
+}
+
+// userMessageBodies curates a user message and returns the item count plus the
+// surviving text, so a dropped item and an emptied one are distinguishable.
+func userMessageBodies(t *testing.T, msg *datav1.ApiUserMessage) (int, []string) {
+	t.Helper()
+	ev := &corev1.Event{
+		SessionId: "s1", Seq: 21, ProducedAtMs: producedMs,
+		Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.UserMessage{
+			Uuid: "env-2", Message: msg,
+		})},
+	}
+	got, _, err := conversationDeltaFromEvent("ws", "s1", ev)
+	if err != nil {
+		t.Fatalf("conversationDeltaFromEvent: %v", err)
+	}
+	var out []string
+	for _, item := range got.GetItems() {
+		for _, block := range item.GetUserMessage().GetContentBlocks().GetBlocks() {
+			out = append(out, block.GetText().GetText())
+		}
+	}
+	return len(got.GetItems()), out
+}
+
+func TestAnAssistantBodyThatIsNothingButTheInterruptSentinelIsDropped(t *testing.T) {
+	// Arrange / Act
+	got := assistantResponseBodies(t, textBlocks("[Request interrupted by user]"))
+
+	// Assert: no response emission at all, so no bubble is drawn for it.
+	if len(got) != 0 {
+		t.Errorf("bodies = %v, want none", got)
+	}
+}
+
+func TestTheToolUseInterruptSentinelIsDroppedToo(t *testing.T) {
+	// Arrange / Act — the variant the CLI emits when a tool call was in flight.
+	got := assistantResponseBodies(t, textBlocks("[Request interrupted by user for tool use]"))
+
+	// Assert
+	if len(got) != 0 {
+		t.Errorf("bodies = %v, want none", got)
+	}
+}
+
+func TestAnInterruptSentinelPaddedWithWhitespaceIsStillDropped(t *testing.T) {
+	// Arrange / Act — a trailing newline must not smuggle it past.
+	got := assistantResponseBodies(t, textBlocks("  [Request interrupted by user]\n"))
+
+	// Assert
+	if len(got) != 0 {
+		t.Errorf("bodies = %v, want none", got)
+	}
+}
+
+func TestAPartialAnswerBesideTheSentinelSurvivesIt(t *testing.T) {
+	// Arrange / Act — the words the agent DID produce before the stop are the
+	// user's, and dropping them with the placeholder would lose real output.
+	got := assistantResponseBodies(t, textBlocks("here is what I found", "[Request interrupted by user]"))
+
+	// Assert
+	if len(got) != 1 || got[0] != "here is what I found" {
+		t.Errorf("bodies = %v, want the partial answer alone", got)
+	}
+}
+
+func TestAnAnswerQuotingTheSentinelMidSentenceIsUntouched(t *testing.T) {
+	// Arrange / Act — a real reply discussing the wording is not the placeholder.
+	body := "the CLI prints [Request interrupted by user] on abort"
+	got := assistantResponseBodies(t, textBlocks(body))
+
+	// Assert
+	if len(got) != 1 || got[0] != body {
+		t.Errorf("bodies = %v, want the answer verbatim", got)
+	}
+}
+
+func TestAUserRecordThatIsNothingButTheSentinelIsDropped(t *testing.T) {
+	// Arrange — the harness writes the stop into the transcript as a user
+	// record, which would otherwise render as a prompt the user never typed.
+	msg := &datav1.ApiUserMessage{
+		Content: &datav1.ApiUserMessage_ContentString{ContentString: "[Request interrupted by user]"},
+	}
+
+	// Act
+	items, _ := userMessageBodies(t, msg)
+
+	// Assert
+	if items != 0 {
+		t.Errorf("items = %d, want 0", items)
+	}
+}
+
+func TestAUserRecordKeepsEverythingBesideTheSentinelBlock(t *testing.T) {
+	// Arrange — a tool_result feedback message that happens to carry a sentinel
+	// block beside it is still the tool's own output.
+	msg := &datav1.ApiUserMessage{
+		Content: &datav1.ApiUserMessage_ContentBlocks{ContentBlocks: &datav1.ApiContentBlocks{Blocks: []*datav1.ContentBlock{
+			{Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: "[Request interrupted by user]"}}},
+			{Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: "real feedback"}}},
+		}}},
+	}
+
+	// Act
+	items, bodies := userMessageBodies(t, msg)
+
+	// Assert
+	if items != 1 {
+		t.Fatalf("items = %d, want 1", items)
+	}
+	if len(bodies) != 1 || bodies[0] != "real feedback" {
+		t.Errorf("bodies = %v, want the surviving block alone", bodies)
+	}
+}
+
+func TestTheDurableUserRecordIsNotEditedByTheDrop(t *testing.T) {
+	// Arrange — the record is evidence; a rendering decision never writes to it.
+	msg := &datav1.ApiUserMessage{
+		Content: &datav1.ApiUserMessage_ContentBlocks{ContentBlocks: &datav1.ApiContentBlocks{Blocks: []*datav1.ContentBlock{
+			{Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: "[Request interrupted by user]"}}},
+			{Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: "real feedback"}}},
+		}}},
+	}
+
+	// Act
+	userMessageBodies(t, msg)
+
+	// Assert
+	if got := len(msg.GetContentBlocks().GetBlocks()); got != 2 {
+		t.Errorf("original block count = %d, want 2 — the curation mutated the record", got)
+	}
+}
+
 func TestConversationDeltaFromEventTranscriptApiErrorMidBackoffCuratesToNothing(t *testing.T) {
 	// Arrange: a MID-BACKOFF api_error line. The retrying window (internal/
 	// progress) is what covers it, so the curator emits no conversation item

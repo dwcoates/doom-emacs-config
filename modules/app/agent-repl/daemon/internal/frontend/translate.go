@@ -719,6 +719,49 @@ func ApiFailureFromLine(ae *datav1.ApiErrorLine) *frontendv1.FailureCardView {
 
 // --- assistant / user / result / compaction items --------------------------
 
+// interruptSentinels are the CLI's PLACEHOLDER bodies for a turn the user
+// stopped. Claude Code injects one as a standalone text block when a request is
+// interrupted, in two forms depending on whether a tool call was in flight, and
+// writes the same body into the transcript record it leaves behind.
+//
+// It is not conversation. Nobody said it, it carries no answer, and the turn's
+// own terminal already states the outcome — the result named
+// RESULT_SUBTYPE_ABORTED, which the feed draws as the yellow `interrupted`
+// chip. Pushing the sentinel as well puts a second, prose denotation of the
+// same fact into the conversation, phrased as if the agent had spoken it.
+//
+// So it never reaches a frontend: the curation drops it here rather than
+// leaving every renderer to recognize a CLI placeholder by its exact wording.
+var interruptSentinels = map[string]bool{
+	"[Request interrupted by user]":              true,
+	"[Request interrupted by user for tool use]": true,
+}
+
+// isInterruptSentinel reports whether a body is NOTHING BUT an interrupt
+// sentinel. The match is on the trimmed body, so a trailing newline cannot
+// smuggle one past, and a real answer that merely quotes the wording mid
+// sentence is untouched — it is a partial reply the user is owed.
+func isInterruptSentinel(text string) bool {
+	return interruptSentinels[strings.TrimSpace(text)]
+}
+
+// stripInterruptSentinels removes the interrupt-sentinel text blocks from a
+// content array, returning the survivors and whether anything was dropped.
+//
+// The input slice is never written through: callers hand it the content of a
+// CLONE (assistant) or read the survivors into a fresh slice (user), because
+// the durable original is evidence and a rendering decision never edits it.
+func stripInterruptSentinels(blocks []*datav1.ContentBlock) ([]*datav1.ContentBlock, bool) {
+	kept := make([]*datav1.ContentBlock, 0, len(blocks))
+	for _, block := range blocks {
+		if t := block.GetText(); t != nil && isInterruptSentinel(t.GetText()) {
+			continue
+		}
+		kept = append(kept, block)
+	}
+	return kept, len(kept) != len(blocks)
+}
+
 func assistantItems(a *datav1.AssistantMessage, tsMs int64, requestID string) []*frontendv1.ConversationItem {
 	if a == nil {
 		return nil
@@ -740,6 +783,11 @@ func assistantMessageItem(uuid string, tsMs int64, requestID string, msg *datav1
 		return nil
 	}
 	thinking, body := splitThinking(msg)
+	// The interrupt sentinel leaves with the reasoning, and for the same
+	// reason: `body` is already the clone, and a body that was nothing but the
+	// sentinel now has no content, so the empty-response check below drops the
+	// bubble outright instead of drawing a placeholder nobody said.
+	body.Content, _ = stripInterruptSentinels(body.GetContent())
 	items := make([]*frontendv1.ConversationItem, 0, len(thinking)+1)
 	for i, t := range thinking {
 		items = append(items, &frontendv1.ConversationItem{
@@ -819,7 +867,12 @@ func userItems(u *datav1.UserMessage, tsMs int64, requestID string) []*frontendv
 // content (empty string, no blocks) has no visual value and is dropped; a pure
 // tool_result feedback message still carries its blocks, so it is pushed and the
 // webapp renders only the tool result (no user bubble).
+// The interrupt sentinel reaches the feed on this side too — the harness
+// writes the stop into the transcript as a user record — so it is dropped here
+// on the same terms it is dropped from an assistant body: the user did not type
+// it, and the turn's aborted result already says what it says.
 func userMessageItem(uuid string, tsMs int64, requestID string, msg *datav1.ApiUserMessage) []*frontendv1.ConversationItem {
+	msg = withoutInterruptSentinels(msg)
 	if !hasUserContent(msg) {
 		return nil
 	}
@@ -828,6 +881,36 @@ func userMessageItem(uuid string, tsMs int64, requestID string, msg *datav1.ApiU
 		Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
 		Item:   &frontendv1.ConversationItem_UserMessage{UserMessage: msg},
 	}}
+}
+
+// withoutInterruptSentinels returns the user message with its interrupt
+// sentinels removed: a string body that IS one empties the message, and a block
+// body loses the sentinel blocks while keeping everything else (a tool_result
+// that happens to sit beside one is still the tool's own output).
+//
+// The original is returned UNCHANGED when nothing matched, so the ordinary path
+// allocates nothing; a message that does carry one is cloned before editing,
+// because the durable record is evidence.
+func withoutInterruptSentinels(msg *datav1.ApiUserMessage) *datav1.ApiUserMessage {
+	switch c := msg.GetContent().(type) {
+	case *datav1.ApiUserMessage_ContentString:
+		if !isInterruptSentinel(c.ContentString) {
+			return msg
+		}
+		out := proto.Clone(msg).(*datav1.ApiUserMessage)
+		out.Content = &datav1.ApiUserMessage_ContentString{ContentString: ""}
+		return out
+	case *datav1.ApiUserMessage_ContentBlocks:
+		kept, dropped := stripInterruptSentinels(c.ContentBlocks.GetBlocks())
+		if !dropped {
+			return msg
+		}
+		out := proto.Clone(msg).(*datav1.ApiUserMessage)
+		out.GetContentBlocks().Blocks = kept
+		return out
+	default:
+		return msg
+	}
 }
 
 // hasUserContent reports whether a user message carries any renderable content:

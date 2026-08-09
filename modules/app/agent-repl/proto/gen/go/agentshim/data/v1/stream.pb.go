@@ -134,6 +134,22 @@ const (
 	ResultSubtype_RESULT_SUBTYPE_ERROR_MAX_TURNS                     ResultSubtype = 3
 	ResultSubtype_RESULT_SUBTYPE_ERROR_MAX_BUDGET_USD                ResultSubtype = 4
 	ResultSubtype_RESULT_SUBTYPE_ERROR_MAX_STRUCTURED_OUTPUT_RETRIES ResultSubtype = 5
+	// THE SHIM'S OWN MEMBER, not one the SDK ever sends. A turn the user
+	// stopped comes back from the SDK wearing whatever error flavor the abort
+	// happened to produce — usually `error_during_execution` — which reads as a
+	// failure the session must recover from. It is not: the user asked for the
+	// stop, and the shim is the party that acked it, so the shim names the
+	// outcome here rather than letting a downstream renderer infer an interrupt
+	// from an error it cannot distinguish from a real one.
+	//
+	// It is the same word the stdio transport's Layer-1 protocol has always
+	// used for an interrupt-ended turn (`ResultSubtype = "aborted"` in
+	// shim/src/protocol.ts), so both transports state the outcome identically.
+	//
+	// The VENDOR'S own account is not overwritten to make room for it:
+	// ResultMessage.stop_reason still carries the SDK's verbatim word, so the
+	// record loses nothing by being named honestly.
+	ResultSubtype_RESULT_SUBTYPE_ABORTED ResultSubtype = 6
 )
 
 // Enum value maps for ResultSubtype.
@@ -145,6 +161,7 @@ var (
 		3: "RESULT_SUBTYPE_ERROR_MAX_TURNS",
 		4: "RESULT_SUBTYPE_ERROR_MAX_BUDGET_USD",
 		5: "RESULT_SUBTYPE_ERROR_MAX_STRUCTURED_OUTPUT_RETRIES",
+		6: "RESULT_SUBTYPE_ABORTED",
 	}
 	ResultSubtype_value = map[string]int32{
 		"RESULT_SUBTYPE_UNSPECIFIED":                         0,
@@ -153,6 +170,7 @@ var (
 		"RESULT_SUBTYPE_ERROR_MAX_TURNS":                     3,
 		"RESULT_SUBTYPE_ERROR_MAX_BUDGET_USD":                4,
 		"RESULT_SUBTYPE_ERROR_MAX_STRUCTURED_OUTPUT_RETRIES": 5,
+		"RESULT_SUBTYPE_ABORTED":                             6,
 	}
 )
 
@@ -8216,14 +8234,15 @@ const file_agentshim_data_v1_stream_proto_rawDesc = "" +
 	"\"ASSISTANT_MESSAGE_ERROR_OVERLOADED\x10\b\x12+\n" +
 	"'ASSISTANT_MESSAGE_ERROR_MODEL_NOT_FOUND\x10\t\x12-\n" +
 	")ASSISTANT_MESSAGE_ERROR_MAX_OUTPUT_TOKENS\x10\n" +
-	"*\xfb\x01\n" +
+	"*\x97\x02\n" +
 	"\rResultSubtype\x12\x1e\n" +
 	"\x1aRESULT_SUBTYPE_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16RESULT_SUBTYPE_SUCCESS\x10\x01\x12)\n" +
 	"%RESULT_SUBTYPE_ERROR_DURING_EXECUTION\x10\x02\x12\"\n" +
 	"\x1eRESULT_SUBTYPE_ERROR_MAX_TURNS\x10\x03\x12'\n" +
 	"#RESULT_SUBTYPE_ERROR_MAX_BUDGET_USD\x10\x04\x126\n" +
-	"2RESULT_SUBTYPE_ERROR_MAX_STRUCTURED_OUTPUT_RETRIES\x10\x05*\xcd\x01\n" +
+	"2RESULT_SUBTYPE_ERROR_MAX_STRUCTURED_OUTPUT_RETRIES\x10\x05\x12\x1a\n" +
+	"\x16RESULT_SUBTYPE_ABORTED\x10\x06*\xcd\x01\n" +
 	"\x0eMcpServerState\x12 \n" +
 	"\x1cMCP_SERVER_STATE_UNSPECIFIED\x10\x00\x12\x1e\n" +
 	"\x1aMCP_SERVER_STATE_CONNECTED\x10\x01\x12\x1b\n" +

@@ -803,6 +803,33 @@ describe("result arm", () => {
     const items = itemsFrom({ uuid: "m1", result: { subtype: "RESULT_SUBTYPE_ERROR_MAX_TURNS" } });
     expect((items[0] as ResultItem).subtype).toBe("error_max_turns");
   });
+
+  it("maps the ABORTED subtype to the interrupt the chip is drawn from", () => {
+    // Arrange + Act — the shim's own member for a turn the user stopped.
+    const items = itemsFrom({ uuid: "m1", result: { subtype: "RESULT_SUBTYPE_ABORTED" } });
+    // Assert
+    expect((items[0] as ResultItem).subtype).toBe("aborted");
+  });
+
+  it("keeps an aborted result out of the error bucket even when is_error rides it", () => {
+    // Arrange + Act — the SDK still marks an abort as an error; the outcome is
+    // the subtype's word, and folding it into the default arm is what drew a
+    // red `error_during_execution` badge for a stop the user asked for.
+    const items = itemsFrom({
+      uuid: "m1",
+      result: { subtype: "RESULT_SUBTYPE_ABORTED", isError: true },
+    });
+    // Assert
+    expect((items[0] as ResultItem).subtype).toBe("aborted");
+    expect((items[0] as ResultItem).isError).toBe(true);
+  });
+
+  it("still reads an unrecognized subtype as a during-execution error", () => {
+    // Arrange + Act — the default arm is unchanged for everything else.
+    const items = itemsFrom({ uuid: "m1", result: { subtype: "RESULT_SUBTYPE_ERROR_MAX_BUDGET_USD" } });
+    // Assert
+    expect((items[0] as ResultItem).subtype).toBe("error_during_execution");
+  });
 });
 
 describe("contextCleared / contextCompacted arms", () => {
