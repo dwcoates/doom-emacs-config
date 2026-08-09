@@ -13,7 +13,7 @@ import (
 // something else does not restate the whole spec.
 func openKind(t *testing.T, kind DetachKind) *frontendv1.AsyncBubble {
 	t.Helper()
-	spec := BubbleSpec{TaskID: "t1", Kind: kind, OriginToolUseID: "tu1", StartedAtMs: 5}
+	spec := BubbleSpec{TaskID: "t1", Workspace: "/ws", Kind: kind, OriginToolUseID: "tu1", StartedAtMs: 5}
 	if kind == DetachUnrecognized {
 		spec.ToolName = "Frobnicate"
 	}
@@ -49,28 +49,28 @@ func TestOpenAsyncBubbleNeverMintsABlankId(t *testing.T) {
 }
 
 func TestOpenAsyncBubbleRefusesADetachmentWithNoTaskId(t *testing.T) {
-	_, err := OpenAsyncBubble(BubbleSpec{Kind: DetachAgent, OriginToolUseID: "tu1"})
+	_, err := OpenAsyncBubble(BubbleSpec{Workspace: "/ws", Kind: DetachAgent, OriginToolUseID: "tu1"})
 	if err == nil {
 		t.Fatal("a detachment with no task id has nothing to mint an id from and must be refused")
 	}
 }
 
 func TestOpenAsyncBubbleRefusesADetachmentItCannotAttributeToACall(t *testing.T) {
-	_, err := OpenAsyncBubble(BubbleSpec{TaskID: "t1", Kind: DetachAgent})
+	_, err := OpenAsyncBubble(BubbleSpec{TaskID: "t1", Workspace: "/ws", Kind: DetachAgent})
 	if err == nil {
 		t.Fatal("an unattributable detachment is a daemon fault, never a bubble with a blank origin")
 	}
 }
 
 func TestOpenAsyncBubbleRefusesAnUnresolvedKind(t *testing.T) {
-	_, err := OpenAsyncBubble(BubbleSpec{TaskID: "t1", Kind: DetachUnresolved, OriginToolUseID: "tu1"})
+	_, err := OpenAsyncBubble(BubbleSpec{TaskID: "t1", Workspace: "/ws", Kind: DetachUnresolved, OriginToolUseID: "tu1"})
 	if err == nil {
 		t.Fatal("a kindless bubble carries no body a renderer can draw and must be refused")
 	}
 }
 
 func TestOpenAsyncBubbleRefusesAnUnclassifiedSpawnThatNamesNoTool(t *testing.T) {
-	_, err := OpenAsyncBubble(BubbleSpec{TaskID: "t1", Kind: DetachUnrecognized, OriginToolUseID: "tu1"})
+	_, err := OpenAsyncBubble(BubbleSpec{TaskID: "t1", Workspace: "/ws", Kind: DetachUnrecognized, OriginToolUseID: "tu1"})
 	if err == nil {
 		t.Fatal("the unclassified arm exists to NAME the tool it could not classify; an anonymous one must be refused")
 	}
@@ -83,7 +83,7 @@ func TestOpenAsyncBubbleCarriesTheToolNameOnTheUnclassifiedArm(t *testing.T) {
 }
 
 func TestOpenAsyncBubbleCarriesTheCommandOnTheShellArm(t *testing.T) {
-	b, err := OpenAsyncBubble(BubbleSpec{TaskID: "t1", Kind: DetachShell, OriginToolUseID: "tu1", Command: "sleep 9"})
+	b, err := OpenAsyncBubble(BubbleSpec{TaskID: "t1", Workspace: "/ws", Kind: DetachShell, OriginToolUseID: "tu1", Command: "sleep 9"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestOpenAsyncBubbleStatesTheTailCapOnAnItemCountedFold(t *testing.T) {
 }
 
 func TestOpenAsyncBubbleCarriesTheParentPointerForANestedDispatch(t *testing.T) {
-	b, err := OpenAsyncBubble(BubbleSpec{TaskID: "t2", Kind: DetachAgent, OriginToolUseID: "tu2", ParentBubbleID: "bubble:t1"})
+	b, err := OpenAsyncBubble(BubbleSpec{TaskID: "t2", Workspace: "/ws", Kind: DetachAgent, OriginToolUseID: "tu2", ParentBubbleID: "bubble:t1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -590,9 +590,41 @@ func TestAnAsyncBubbleDeltaIsWithheldFromAnotherWorkspacesClient(t *testing.T) {
 	}
 }
 
-func TestAScopedSnapshotKeepsItsAsyncBubbles(t *testing.T) {
-	snap := &frontendv1.StateSnapshot{AsyncBubbles: []*frontendv1.AsyncBubble{{Id: "bubble:t1"}}}
+func TestAScopedSnapshotKeepsItsOwnWorkspacesBubbles(t *testing.T) {
+	snap := &frontendv1.StateSnapshot{AsyncBubbles: []*frontendv1.AsyncBubble{{Id: "bubble:t1", Workspace: "/ws"}}}
 	if got := len(filterSnapshot(snap, Scope{Workspace: "/ws"}).GetAsyncBubbles()); got != 1 {
 		t.Fatalf("a scoped client that lost its bubbles would reconnect with detached work missing, got %d", got)
+	}
+}
+
+func TestAScopedSnapshotDropsAnotherWorkspacesBubbles(t *testing.T) {
+	snap := &frontendv1.StateSnapshot{AsyncBubbles: []*frontendv1.AsyncBubble{{Id: "bubble:t1", Workspace: "/other"}}}
+	if got := len(filterSnapshot(snap, Scope{Workspace: "/ws"}).GetAsyncBubbles()); got != 0 {
+		t.Fatalf("a bubble belonging to another workspace must not reach this client, got %d", got)
+	}
+}
+
+func TestAScopedSnapshotKeepsOnlyTheClientsWorkspaceAmongSeveral(t *testing.T) {
+	snap := &frontendv1.StateSnapshot{AsyncBubbles: []*frontendv1.AsyncBubble{
+		{Id: "bubble:a", Workspace: "/ws"},
+		{Id: "bubble:b", Workspace: "/other"},
+		{Id: "bubble:c", Workspace: "/ws"},
+	}}
+	got := filterSnapshot(snap, Scope{Workspace: "/ws"}).GetAsyncBubbles()
+	if len(got) != 2 || got[0].GetId() != "bubble:a" || got[1].GetId() != "bubble:c" {
+		t.Fatalf("want only /ws's bubbles in order, got %v", got)
+	}
+}
+
+func TestABubbleCarriesTheWorkspaceItWasOpenedFor(t *testing.T) {
+	if got := openKind(t, DetachAgent).GetWorkspace(); got != "/ws" {
+		t.Fatalf("want workspace=%q, got %q", "/ws", got)
+	}
+}
+
+func TestOpenAsyncBubbleRefusesABubbleThatNamesNoWorkspace(t *testing.T) {
+	_, err := OpenAsyncBubble(BubbleSpec{TaskID: "t1", Kind: DetachAgent, OriginToolUseID: "tu1"})
+	if err == nil {
+		t.Fatal("the workspace is the only routing key a snapshot has, and a bubble without one reaches every scoped client")
 	}
 }

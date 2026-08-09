@@ -120,6 +120,11 @@ type BubbleSpec struct {
 	// what the bubble id is derived from, so the same detachment resolves to
 	// the same bubble across a replay instead of accumulating twins.
 	TaskID string
+	// Workspace is the workspace the work runs under. Required: it is the only
+	// routing key a snapshot has for a bubble, and a bubble that carried none
+	// would be delivered to every scoped client — which is the leak the
+	// contract's workspace field exists to close.
+	Workspace string
 	// Kind is the resolved classification. DetachUnresolved is refused.
 	Kind DetachKind
 	// OriginToolUseID is the tool_use id of the call that detached the work.
@@ -174,8 +179,12 @@ func OpenAsyncBubble(spec BubbleSpec) (*frontendv1.AsyncBubble, error) {
 	if spec.Kind == DetachUnrecognized && spec.ToolName == "" {
 		return nil, fmt.Errorf("frontend: async bubble refused for task %q — an unclassified spawn must name the tool it could not classify, and an anonymous one tells a maintainer nothing", spec.TaskID)
 	}
+	if spec.Workspace == "" {
+		return nil, fmt.Errorf("frontend: async bubble refused for task %q — it named no workspace, which is the only routing key a snapshot has for a bubble; a workspace-less bubble would be delivered to every scoped client", spec.TaskID)
+	}
 	b := &frontendv1.AsyncBubble{
 		Id:              mintBubbleID(spec.TaskID),
+		Workspace:       spec.Workspace,
 		OriginToolUseId: spec.OriginToolUseID,
 		ParentBubbleId:  spec.ParentBubbleID,
 		Label:           spec.Label,

@@ -198,6 +198,19 @@ func TestASecondDetachedRecordFoldsWithoutReopeningItsBubble(t *testing.T) {
 	}
 }
 
+func TestABubbleNamesTheSameWorkspaceItsDeltaDoes(t *testing.T) {
+	push := &fakePusher{}
+	c := newTestConsumer(push, &fakeApplier{})
+	c.pushConversation(sidechainAssistantEvent(t, 1, "u1", "tu_task", "x"), true)
+	push.mu.Lock()
+	defer push.mu.Unlock()
+	delta := push.bubbles[0]
+	if delta.GetOpened()[0].GetWorkspace() != delta.GetWorkspace() {
+		t.Fatalf("the bubble and its envelope must always name one workspace: bubble=%q delta=%q",
+			delta.GetOpened()[0].GetWorkspace(), delta.GetWorkspace())
+	}
+}
+
 func TestABubbleTheSessionOpenedReachesTheReconnectSnapshot(t *testing.T) {
 	push := &fakePusher{}
 	c := newTestConsumer(push, &fakeApplier{})

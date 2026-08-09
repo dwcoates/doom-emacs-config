@@ -1580,7 +1580,7 @@ func (p *ssmSnapshotProvider) Snapshot() *frontendv1.StateSnapshot {
 		snap.Catalogs = p.catalogs.TaskCatalogs()
 	}
 	if p.bubbles != nil {
-		snap.AsyncBubbles = p.bubbles.AsyncBubbles()
+		snap.AsyncBubbles = refuseWorkspacelessBubbles(p.bubbles.AsyncBubbles(), p.logf)
 	}
 	if p.queues != nil {
 		snap.Queues = p.queues.QueueViews()
@@ -1637,6 +1637,34 @@ type workspacePublicationView interface {
 // filterPublishedWorkspaceViews is filterPublishedSessionViews for the fenced
 // views, asking the same gate the same per-workspace question with no session
 // to name.
+// refuseWorkspacelessBubbles drops any async bubble that names no workspace,
+// loudly.
+//
+// It is DEFENCE IN DEPTH, not the primary guard: frontend.OpenAsyncBubble
+// refuses to mint a workspace-less bubble at all, so reaching this is a daemon
+// defect. It is still checked here because the workspace is the ONLY routing
+// key a snapshot has for a bubble, and one that slipped through would be
+// delivered to every scoped client — a cross-workspace leak that the scope pass
+// downstream cannot detect, since an unroutable bubble and a correctly-routed
+// one are indistinguishable to it.
+//
+// It refuses rather than panics: the bubble is one piece of detached work, and
+// a connect snapshot that aborts costs the client its whole session view.
+func refuseWorkspacelessBubbles(bubbles []*frontendv1.AsyncBubble, logf func(string, ...any)) []*frontendv1.AsyncBubble {
+	filtered := make([]*frontendv1.AsyncBubble, 0, len(bubbles))
+	for _, bubble := range bubbles {
+		if bubble.GetWorkspace() == "" {
+			if logf != nil {
+				logf("server: REFUSING async bubble %q from the connect snapshot — it names no workspace, which is the only routing key a snapshot has for a bubble, so it would reach every scoped client; the bubble is omitted rather than leaked",
+					bubble.GetId())
+			}
+			continue
+		}
+		filtered = append(filtered, bubble)
+	}
+	return filtered
+}
+
 func filterPublishedWorkspaceViews[T workspacePublicationView](views []T, allow func(workspace, sessionID string) (bool, error), logf func(string, ...any)) []T {
 	filtered := make([]T, 0, len(views))
 	for _, view := range views {
