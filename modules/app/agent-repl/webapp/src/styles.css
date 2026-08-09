@@ -3066,24 +3066,33 @@ pre {
   font-variant-numeric: tabular-nums;
 }
 /* WHY it is asleep, in the daemon's own terms. It leads because it is the
-   fact that decides which of the two buttons below is the right one. */
+   fact that decides which of the buttons below is the right one. */
 .hibernation-cause { margin-top: 0.25rem; }
-.hibernation-choice {
-  margin-top: 0.45rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-.hibernation-option { color: var(--muted); font-size: 0.8rem; }
-/* The direct-resume line carries a COST, so it is not muted into the same
-   grey as the compact line beside it — the two options must not read as
-   equally weighted when one of them is paid for on every later turn. */
-.hibernation-option.warn { color: var(--info-tokens); }
+/* One ROW per option: its button, and the sentence saying what that option
+   keeps. Stacked rather than laid out side by side, because five buttons in a
+   row with their explanations elsewhere would be paired up by position — and a
+   mispairing here picks what the conversation loses. */
 .hibernation-actions {
   margin-top: 0.55rem;
   display: flex;
-  gap: 0.5rem;
+  flex-direction: column;
+  gap: 0.4rem;
 }
+.hibernation-option {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+/* The button keeps its own width regardless of how long its sentence is, so
+   the column of labels reads as one list. */
+.hibernation-option > button { flex: 0 0 auto; }
+.hibernation-option-text { flex: 1 1 auto; }
+/* The direct-resume row carries a COST, so it is not muted into the same
+   grey as the compacting rows above it — the options must not read as
+   equally weighted when one of them is paid for on every later turn. */
+.hibernation-option.warn { color: var(--info-tokens); }
 .hibernation-actions button {
   font: inherit;
   padding: 0.25rem 0.7rem;
@@ -3093,8 +3102,8 @@ pre {
   background: var(--bg);
   color: var(--fg);
 }
-/* The cheaper path is the filled one. The costlier path stays outlined
-   rather than being disabled or hidden: it is a legitimate deliberate
+/* The compacting paths are the filled ones. The costlier resume-as-is stays
+   outlined rather than being disabled or hidden: it is a legitimate deliberate
    choice, and the UI's job is to make it deliberate, not unavailable. */
 .hibernation-actions button.hibernation-compact {
   background: var(--hibernated);

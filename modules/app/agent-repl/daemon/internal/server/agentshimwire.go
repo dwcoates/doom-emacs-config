@@ -51,7 +51,7 @@ type AgentShimConfig struct {
 	// command). Nil makes that command a loud failing ack.
 	Restarts SessionRestarter
 	// Hibernations backs hibernateWorkspace and reviveSession — the user-forced
-	// sleep and the two revival modes. Nil is a loud unsupported capability.
+	// sleep and the revival modes. Nil is a loud unsupported capability.
 	Hibernations SessionHibernator
 	// EstablishTimeout bounds one createSession establishment round. Zero takes
 	// the package default; only a harness sets it.
