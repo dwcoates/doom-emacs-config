@@ -325,3 +325,143 @@ func TestBootSweepBoundsItsConcurrency(t *testing.T) {
 		t.Fatalf("ensured %d workspaces, want all 6", len(got))
 	}
 }
+
+// --- the unwired classification --------------------------------------------
+
+// unwiredCalls records what the classifier was handed, and can be made to fail
+// so the error path is a case rather than a hope.
+type unwiredCalls struct {
+	mu    sync.Mutex
+	calls []string
+	err   error
+}
+
+func (u *unwiredCalls) note(workspace, sessionID, verdict string) error {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.calls = append(u.calls, fmt.Sprintf("%s|%s|%s", workspace, sessionID, verdict))
+	return u.err
+}
+
+func (u *unwiredCalls) seen() []string {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return append([]string(nil), u.calls...)
+}
+
+// EVERY BRANCH THAT LEAVES A SESSION UNWIRED HANDS IT OVER, named by the
+// verdict that left it that way — one row per conclusion the sweep can reach.
+func TestBootSweepClassifiesEveryUnwiredVerdict(t *testing.T) {
+	tests := []struct {
+		name      string
+		connected func(string) (bool, error)
+		held      func(string) (bool, error)
+		want      string
+	}{
+		{
+			name:      "no live shim at all",
+			connected: func(string) (bool, error) { return false, nil },
+			held:      func(string) (bool, error) { return false, nil },
+			want:      BootSweepUnwiredNoLiveShim,
+		},
+		{
+			name:      "a lock held with nothing dialled in",
+			connected: func(string) (bool, error) { return false, nil },
+			held:      func(string) (bool, error) { return true, nil },
+			want:      BootSweepUnwiredLockHeldWithoutConnection,
+		},
+		{
+			name:      "a parked-connection probe that never answered",
+			connected: func(string) (bool, error) { return false, errors.New("listener unreadable") },
+			held:      func(string) (bool, error) { return false, nil },
+			want:      BootSweepUnwiredProbeFailed,
+		},
+		{
+			name:      "a lock probe that never answered",
+			connected: func(string) (bool, error) { return false, nil },
+			held:      func(string) (bool, error) { return false, errors.New("lock dir unreadable") },
+			want:      BootSweepUnwiredLockProbeFailed,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange — the re-check is released by the first pass, so both
+			// passes happen because the first finished rather than on a timer.
+			s, _, _ := sweepRig(t, "/w")
+			recheck := make(chan time.Time, 1)
+			s.Recheck = recheck
+			s.Held = tc.held
+			var once sync.Once
+			s.Connected = func(id string) (bool, error) {
+				once.Do(func() { recheck <- time.Time{} })
+				return tc.connected(id)
+			}
+			seen := &unwiredCalls{}
+			s.Unwired = seen.note
+
+			// Act.
+			s.Run(context.Background())
+
+			// Assert.
+			want := "/w|s_/w|" + tc.want
+			for _, got := range seen.seen() {
+				if got == want {
+					return
+				}
+			}
+			t.Fatalf("classified %v, want one entry %q: a conclusion the sweep reached about a session the user owns cannot be a log line only", seen.seen(), want)
+		})
+	}
+}
+
+// A WIRED session is not classified: the sweep did not finish with it, it
+// claimed it, and reporting a reattached workspace as unwired would be a
+// verdict the sweep never reached.
+func TestBootSweepClassifiesNothingForAReattachedSession(t *testing.T) {
+	// Arrange.
+	s, _, _ := sweepRig(t, "/w")
+	s.Connected = func(string) (bool, error) { return true, nil }
+	seen := &unwiredCalls{}
+	s.Unwired = seen.note
+
+	// Act.
+	s.Run(context.Background())
+
+	// Assert.
+	if got := seen.seen(); len(got) != 0 {
+		t.Fatalf("classified %v, want nothing for a session that was REATTACHED", got)
+	}
+}
+
+// A CLASSIFIER THAT FAILED IS LOUD. The record never reached the user, which is
+// precisely the silence the classification exists to end, so it may not be
+// swallowed into the ordinary unwired line.
+func TestBootSweepReportsAFailedClassification(t *testing.T) {
+	// Arrange.
+	s, _, lines := sweepRig(t, "/w")
+	seen := &unwiredCalls{err: errors.New("state store closed")}
+	s.Unwired = seen.note
+
+	// Act.
+	s.Run(context.Background())
+
+	// Assert.
+	if !logged(lines, "could NOT be classified") {
+		t.Fatalf("a failed classification was not surfaced; lines: %v", *lines)
+	}
+}
+
+// WITH NO CLASSIFIER WIRED the verdict still says, in its own line, that it
+// reached the user nowhere. An unclaimed hook is a known gap, not a quiet one.
+func TestBootSweepSaysWhenAVerdictIsNotClassified(t *testing.T) {
+	// Arrange — the rig wires no classifier, which is today's daemon.
+	s, _, lines := sweepRig(t, "/w")
+
+	// Act.
+	s.Run(context.Background())
+
+	// Assert.
+	if !logged(lines, "is NOT CLASSIFIED") {
+		t.Fatalf("an unclassified verdict was silent; lines: %v", *lines)
+	}
+}
