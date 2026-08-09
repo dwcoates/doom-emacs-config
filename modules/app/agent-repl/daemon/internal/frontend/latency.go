@@ -113,6 +113,19 @@ type CommandLatencySample struct {
 	// sample to its own operation name so a count of completions is never
 	// inflated by one.
 	Overdue bool
+	// Decision names the structural window that EXPLAINS this sample's delivery
+	// latency, or is empty when nothing does.
+	//
+	// It is a classification, not a threshold and not a mute. The figures are
+	// unchanged and complete either way; what the name buys is the difference
+	// between "an ack took four seconds and nobody knows why" and "an ack took
+	// four seconds behind the connect snapshot this connection was still
+	// draining". The first is a warning. The second is a boot.
+	//
+	// The one value today is BootSnapshotDrainDecision. A sample with no
+	// explanation carries none, and its record is byte-for-byte what it always
+	// was.
+	Decision string
 }
 
 // Slow reports whether this sample's ack DELIVERY reached its threshold.
