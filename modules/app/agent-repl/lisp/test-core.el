@@ -3580,3 +3580,259 @@ survives into the rest of the batch run."
             (should (plist-get (gethash "routed-ws" agent-repl--workspace-log-targets)
                                :target)))
         (delete-directory project t)))))
+
+;;;; ---- Tests: user-facing minibuffer copy ----
+;;
+;; The policy these cover: the echo area carries ONE short sentence, the log
+;; carries that sentence AND the verbose counterpart, and no raw daemon error
+;; chain ever reaches the minibuffer.
+
+(ert-deftest agent-repl-test-user-message-echoes-prefixed-user-copy ()
+  "`agent-repl--user-message' echoes the user copy under the module prefix."
+  ;; Arrange
+  (let ((echoed nil))
+    (cl-letf (((symbol-function 'agent-repl--emit-message)
+               (lambda (text &optional _echo) (setq echoed text)))
+              ((symbol-function 'agent-repl--log) #'ignore))
+      ;; Act
+      (agent-repl--user-message nil "prompt refused — %s" '("queued for a merge"))
+      ;; Assert
+      (should (equal echoed
+                     "agent-repl: prompt refused — queued for a merge")))))
+
+(ert-deftest agent-repl-test-user-message-reaches-the-echo-area ()
+  "The user line is the LOUD sink: it is emitted with ECHO non-nil."
+  ;; Arrange
+  (let ((echo-flag 'unset))
+    (cl-letf (((symbol-function 'agent-repl--emit-message)
+               (lambda (_text &optional echo) (setq echo-flag echo)))
+              ((symbol-function 'agent-repl--log) #'ignore))
+      ;; Act
+      (agent-repl--user-message nil "something happened" nil)
+      ;; Assert
+      (should echo-flag))))
+
+(ert-deftest agent-repl-test-user-message-does-not-double-prefix ()
+  "Copy that already carries the prefix is echoed unchanged."
+  ;; Arrange
+  (let ((echoed nil))
+    (cl-letf (((symbol-function 'agent-repl--emit-message)
+               (lambda (text &optional _echo) (setq echoed text)))
+              ((symbol-function 'agent-repl--log) #'ignore))
+      ;; Act
+      (agent-repl--user-message nil "agent-repl: already prefixed" nil)
+      ;; Assert
+      (should (equal echoed "agent-repl: already prefixed")))))
+
+(ert-deftest agent-repl-test-user-message-files-both-lines-globally ()
+  "A nil-workspace call files the user line AND the detail to the global sink."
+  ;; Arrange
+  (let* ((tmpdir (make-temp-file "agent-repl-user-message-" t))
+         (logpath (expand-file-name ".agent-repl.log" tmpdir))
+         (agent-repl-log-to-file t))
+    (unwind-protect
+        (cl-letf (((symbol-function 'agent-repl--logfile-path) (lambda () logpath))
+                  ((symbol-function 'agent-repl--emit-message) #'ignore))
+          ;; Act
+          (agent-repl--user-message nil "prompt refused — queued for a merge" nil
+                                    :detail "ssm: invariant failed state=RENDER_STATE_MERGE_QUEUED")
+          ;; Assert
+          (let ((contents (with-temp-buffer
+                            (insert-file-contents logpath)
+                            (buffer-string))))
+            (should (string-match-p "prompt refused — queued for a merge" contents))
+            (should (string-match-p "RENDER_STATE_MERGE_QUEUED" contents))))
+      (delete-directory tmpdir t))))
+
+(ert-deftest agent-repl-test-user-message-files-both-lines-for-a-workspace ()
+  "A workspace-scoped call files both lines through that workspace's own sink."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let* ((project (make-temp-file "agent-repl-user-message-ws-" t))
+           (ws "user-copy-ws")
+           (agent-repl-log-to-file nil)
+           (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put ws :project-dir project)
+            ;; Act
+            (let ((agent-repl-log-to-file t))
+              (cl-letf (((symbol-function 'agent-repl--emit-message) #'ignore))
+                (agent-repl--user-message ws "prompt refused — queued for a merge" nil
+                                          :detail "state=RENDER_STATE_MERGE_QUEUED turn_active=true")))
+            ;; Assert
+            (let* ((target (plist-get (gethash ws agent-repl--workspace-log-targets) :target))
+                   (contents (with-temp-buffer
+                               (insert-file-contents target)
+                               (buffer-string))))
+              (should (string-match-p "prompt refused — queued for a merge" contents))
+              (should (string-match-p "state=RENDER_STATE_MERGE_QUEUED turn_active=true"
+                                      contents))))
+        (delete-directory project t)))))
+
+(ert-deftest agent-repl-test-user-message-nil-detail-files-only-the-user-line ()
+  "With no DETAIL there is no second record to write."
+  ;; Arrange
+  (let ((logged nil))
+    (cl-letf (((symbol-function 'agent-repl--emit-message) #'ignore)
+              ((symbol-function 'agent-repl--log)
+               (lambda (ws fmt &rest args) (push (list ws (apply #'format fmt args)) logged))))
+      ;; Act
+      (agent-repl--user-message "ws" "nothing verbose here" nil)
+      ;; Assert
+      (should (equal logged '(("ws" "user-message: agent-repl: nothing verbose here")))))))
+
+(ert-deftest agent-repl-test-user-message-empty-detail-files-only-the-user-line ()
+  "An empty DETAIL string is treated as no detail, not as a blank record."
+  ;; Arrange
+  (let ((logged nil))
+    (cl-letf (((symbol-function 'agent-repl--emit-message) #'ignore)
+              ((symbol-function 'agent-repl--log)
+               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+      ;; Act
+      (agent-repl--user-message nil "terse" nil :detail "")
+      ;; Assert
+      (should (= 1 (length logged))))))
+
+(ert-deftest agent-repl-test-user-message-non-string-format-is-captured-not-signalled ()
+  "A caller bug is captured the way the logging ladder captures it, not signalled."
+  ;; Arrange
+  (let ((captured nil)
+        (echoed nil))
+    (cl-letf (((symbol-function 'agent-repl--log-format-capture-bug)
+               (lambda (fmt) (setq captured fmt)))
+              ((symbol-function 'agent-repl--log) #'ignore)
+              ((symbol-function 'agent-repl--emit-message)
+               (lambda (text &optional _echo) (setq echoed text))))
+      ;; Act
+      (agent-repl--user-message nil '(not a string) nil)
+      ;; Assert
+      (should (equal captured '(not a string)))
+      (should (string-prefix-p "agent-repl: " echoed)))))
+
+;;;; ---- Tests: daemon-error translation ----
+
+(ert-deftest agent-repl-test-user-copy-translates-a-merge-queued-refusal ()
+  "The observed merge-queued nack becomes the queued-for-a-merge sentence."
+  ;; Arrange
+  (let ((raw (concat "session-controller: synchronous state publication failed before "
+                     "submitting for workspace \"/tmp/ws\" session \"s_ea\" request \"fe-79\": "
+                     "ssm: synchronous prompt state invariant failed for workspace \"/tmp/ws\" "
+                     "session \"s_ea\" request \"fe-79\": "
+                     "state=RENDER_STATE_MERGE_QUEUED turn_active=true")))
+    ;; Act
+    (let ((copy (agent-repl--user-copy-for-error raw "prompt")))
+      ;; Assert
+      (should (equal copy
+                     (concat "prompt refused — this workspace is queued for a merge; "
+                             "wait for the merge to finish or interrupt it"))))))
+
+(ert-deftest agent-repl-test-user-copy-never-quotes-the-raw-chain ()
+  "The translated sentence carries none of the raw chain's evidence."
+  ;; Arrange
+  (let ((raw "ssm: invariant failed for workspace \"/tmp/ws\": state=RENDER_STATE_MERGE_QUEUED"))
+    ;; Act
+    (let ((copy (agent-repl--user-copy-for-error raw "prompt")))
+      ;; Assert
+      (should-not (string-match-p "RENDER_STATE" copy))
+      (should-not (string-match-p "ssm:" copy)))))
+
+(ert-deftest agent-repl-test-user-copy-translates-a-merge-lease-refusal ()
+  "A merge-lease refusal says a merge run owns the session."
+  ;; Arrange
+  (let ((raw (concat "session-controller: the workspace's session is held by a merge "
+                     "exclusivity lease and cannot be hibernated: workspace \"/tmp/ws\"")))
+    ;; Act
+    (let ((copy (agent-repl--user-copy-for-error raw "hibernate")))
+      ;; Assert
+      (should (equal copy
+                     (concat "hibernate refused — a merge run owns this session; "
+                             "wait for the merge to finish or interrupt it"))))))
+
+(ert-deftest agent-repl-test-user-copy-translates-a-not-live-refusal ()
+  "A workspace with no live session gets the not-live sentence."
+  ;; Act
+  (let ((copy (agent-repl--user-copy-for-error
+               "shimclient: request nacked: workspace \"doom\" has no live session to drive"
+               "prompt")))
+    ;; Assert
+    (should (equal copy
+                   "prompt refused — this workspace is not live; start or wake it first"))))
+
+(ert-deftest agent-repl-test-user-copy-translates-a-reconnect-supersession ()
+  "A superseded reconnect promises a resync rather than reporting a fault."
+  ;; Act
+  (let ((copy (agent-repl--user-copy-for-error
+               "session-controller: command superseded by the current workspace generation"
+               "reconnect")))
+    ;; Assert
+    (should (equal copy
+                   (concat "reconnect superseded — a newer connection owns this "
+                           "workspace; the view will resync")))))
+
+(ert-deftest agent-repl-test-user-copy-translates-a-missing-transcript-refusal ()
+  "A resume target with no transcript names the transcript, not the daemon."
+  ;; Act
+  (let ((copy (agent-repl--user-copy-for-error
+               "createSession: resume target s_1 has no transcript" "resume")))
+    ;; Assert
+    (should (equal copy
+                   (concat "resume refused — the conversation being resumed has no "
+                           "transcript on disk")))))
+
+(ert-deftest agent-repl-test-user-copy-falls-back-to-the-generic-sentence ()
+  "An unrecognized error names the verb and points at the log."
+  ;; Act
+  (let ((copy (agent-repl--user-copy-for-error
+               "shimclient: dial unix /tmp/x.sock: connect: connection refused"
+               "hibernate")))
+    ;; Assert
+    (should (equal copy "hibernate failed — see the workspace log for detail"))))
+
+(ert-deftest agent-repl-test-user-copy-generic-sentence-omits-the-raw-chain ()
+  "The generic sentence never quotes the error it could not classify."
+  ;; Arrange
+  (let ((raw "shimclient: dial unix /tmp/x.sock: connect: connection refused"))
+    ;; Act
+    (let ((copy (agent-repl--user-copy-for-error raw "hibernate")))
+      ;; Assert
+      (should-not (string-match-p "shimclient" copy)))))
+
+(ert-deftest agent-repl-test-user-copy-degrades-a-missing-verb ()
+  "A nil VERB yields a whole sentence rather than one with a hole in it."
+  ;; Act
+  (let ((copy (agent-repl--user-copy-for-error "unclassifiable" nil)))
+    ;; Assert
+    (should (equal copy "the command failed — see the workspace log for detail"))))
+
+(ert-deftest agent-repl-test-user-copy-classifies-nil-error-text-generically ()
+  "A refusal with no error text at all still produces the generic sentence."
+  ;; Act
+  (let ((copy (agent-repl--user-copy-for-error nil "prompt")))
+    ;; Assert
+    (should (equal copy "prompt failed — see the workspace log for detail"))))
+
+(ert-deftest agent-repl-test-user-copy-matches-case-insensitively ()
+  "Pattern matching does not depend on the daemon's capitalization."
+  ;; Act
+  (let ((copy (agent-repl--user-copy-for-error "Workspace has NO LIVE SESSION" "prompt")))
+    ;; Assert
+    (should (equal copy
+                   "prompt refused — this workspace is not live; start or wake it first"))))
+
+(ert-deftest agent-repl-test-user-message-for-error-echoes-copy-and-files-the-chain ()
+  "The composition echoes only the sentence and files the raw chain beside it."
+  ;; Arrange
+  (let ((echoed nil)
+        (logged nil))
+    (cl-letf (((symbol-function 'agent-repl--emit-message)
+               (lambda (text &optional _echo) (setq echoed text)))
+              ((symbol-function 'agent-repl--log)
+               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+      ;; Act
+      (agent-repl--user-message-for-error
+       "ws" "prompt" "ssm: invariant failed: state=RENDER_STATE_MERGE_QUEUED turn_active=true")
+      ;; Assert
+      (should-not (string-match-p "RENDER_STATE" echoed))
+      (should (seq-find (lambda (line) (string-match-p "RENDER_STATE_MERGE_QUEUED" line))
+                        logged)))))
