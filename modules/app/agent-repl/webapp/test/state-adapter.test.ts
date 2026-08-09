@@ -14,7 +14,6 @@ import { decodeFrontendFrame } from "../src/frontend-proto.js";
 import {
   StateAdapter,
   asyncAgentItems,
-  systemFailureFrom,
   userTurnReceipt,
   type AdapterEffect,
   type AdapterLogLevel,
