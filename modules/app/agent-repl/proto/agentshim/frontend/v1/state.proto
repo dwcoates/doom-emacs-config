@@ -340,6 +340,16 @@ message WorkspaceState {
   // never spoken for it, or its axis is cleared. It is never a zero-valued
   // status standing in for absence.
   MergeStatus merge_status = 18;
+  // THE OUTSTANDING QUESTION about taking this workspace's merge off the
+  // queue. See MergeDequeueOffer: an interrupt no longer performs the queue
+  // half, it asks, and this is where the asking lives.
+  //
+  // UNSET means there is nothing to answer — no offer was ever raised, or the
+  // one that was has been answered, superseded by the merge reaching its own
+  // terminal, or dropped because the merge left the queue on its own. A
+  // frontend draws the card if and only if this field is set, so clearing it
+  // IS how the card comes down; there is no second dismissal channel.
+  MergeDequeueOffer merge_dequeue_offer = 20;
 }
 
 // A PER-SESSION CATALOG ENTRY, not a statement about who owns a workspace.
