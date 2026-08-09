@@ -13,17 +13,28 @@ import (
 )
 
 // fakeLauncher records what it was asked to deploy and never spawns anything.
+// It retains the exit callback so a test can play the deploy's ending itself.
 type fakeLauncher struct {
 	mu    sync.Mutex
 	plans []Plan
+	exits []func()
 	err   error
 }
 
-func (f *fakeLauncher) Launch(_ context.Context, plan Plan) error {
+func (f *fakeLauncher) Launch(_ context.Context, plan Plan, onExitWithoutBounce func()) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.plans = append(f.plans, plan)
+	f.exits = append(f.exits, onExitWithoutBounce)
 	return f.err
+}
+
+// reportExit plays the reaper for the launch at index i.
+func (f *fakeLauncher) reportExit(i int) {
+	f.mu.Lock()
+	exit := f.exits[i]
+	f.mu.Unlock()
+	exit()
 }
 
 func (f *fakeLauncher) calls() []Plan {
@@ -217,6 +228,33 @@ func TestAfterMergedReleasesTheLatchWhenTheLaunchFailed(t *testing.T) {
 	}
 	if calls := launcher.calls(); len(calls) != 2 {
 		t.Fatalf("launcher calls = %d, want the failed launch to have released the latch", len(calls))
+	}
+}
+
+// A deploy that came back without bouncing the daemon must not disable
+// self-redeploy for the rest of that daemon's life.
+func TestAfterMergedRearmsTheLatchWhenTheDeployExitedWithoutBouncing(t *testing.T) {
+	// Arrange — one self-merge launched, and its deploy then ends.
+	dir := mergedFixture(t, "feature", map[string]string{
+		"modules/app/agent-repl/daemon/internal/reload/reload.go": "package reload\n",
+	})
+	launcher := &fakeLauncher{}
+	trigger := newTestTrigger(t, fixtureSelf(t, dir), launcher)
+	req := selfMergeRequest(dir, "feature")
+	if err := trigger.AfterMerged(context.Background(), req); err != nil {
+		t.Fatalf("first AfterMerged: %v", err)
+	}
+	launcher.reportExit(0)
+
+	// Act.
+	err := trigger.AfterMerged(context.Background(), req)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("second AfterMerged: %v", err)
+	}
+	if calls := launcher.calls(); len(calls) != 2 {
+		t.Fatalf("launcher calls = %d, want the re-armed latch to permit a second redeploy", len(calls))
 	}
 }
 

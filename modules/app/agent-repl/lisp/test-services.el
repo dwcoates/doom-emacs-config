@@ -51,7 +51,9 @@
                  (cl-position agent-repl--shim-sidecar-label (reverse events)))))))
 
 (ert-deftest agent-repl-services-test-runtime-refuses-active-turn-before-mutation ()
-  "An active turn reaches failure before build or service mutation."
+  "A STOP-SHIMS restart reaches failure before build or service mutation.
+Stopping the shims ends the process running the turn, so this is the one
+bounce mode an active turn still refuses."
   (let (mutated failure)
     (cl-letf (((symbol-function 'agent-repl--frontend-runtime-bounce-preflight-async)
                (lambda (callback) (funcall callback :absent)))
@@ -61,9 +63,41 @@
                (lambda () (setq mutated t))))
       (agent-repl--runtime-prepare
        t (lambda () (error "unexpected success"))
-       (lambda (detail) (setq failure detail)))
+       (lambda (detail) (setq failure detail))
+       t)
       (should (string-match-p "turn in flight" failure))
       (should-not mutated))))
+
+(ert-deftest agent-repl-services-test-runtime-preserving-bounce-proceeds-with-an-active-turn ()
+  "A shim-PRESERVING restart runs even while a turn is in flight.
+The shim outlives the daemon and its events stay durable in the store, so
+the bounce loses nothing and a daemon-only deploy must not be blocked by
+whatever happens to be thinking."
+  (let (mutated failure completed)
+    (cl-letf (((symbol-function 'agent-repl--frontend-runtime-bounce-preflight-async)
+               (lambda (callback) (funcall callback :absent)))
+              ((symbol-function 'agent-repl--frontend-all-turn-active-workspaces)
+               (lambda () '("/w-busy")))
+              ((symbol-function 'agent-repl--shim-services-assert-launchd-loaded)
+               (lambda () (setq mutated t)))
+              ((symbol-function 'agent-repl--frontend-build-if-stale) #'ignore)
+              ((symbol-function 'agent-repl--shim-services-build-and-bounce)
+               (lambda (_preflight on-success _on-failure) (funcall on-success)))
+              ((symbol-function 'agent-repl--frontend-bounce-after-build)
+               (lambda (_state _stop on-complete) (funcall on-complete 'proc)))
+              ((symbol-function 'agent-repl--runtime-retire-bounced-link) #'ignore)
+              ((symbol-function 'agent-repl--frontend-after-ready)
+               (lambda (ok _fail &optional _ws) (funcall ok)))
+              ((symbol-function 'agent-repl--frontend-after-daemon-healthy)
+               (lambda (ok _fail) (funcall ok)))
+              ((symbol-function 'agent-repl--frontend-rebind-workspaces-after-restart)
+               (lambda (ok _fail) (funcall ok))))
+      (agent-repl--runtime-prepare
+       t (lambda () (setq completed t))
+       (lambda (detail) (setq failure detail)))
+      (should-not failure)
+      (should mutated)
+      (should completed))))
 
 (ert-deftest agent-repl-services-test-runtime-orders-async-stages ()
   "Runtime completion follows readiness, health, and rebind continuations."
@@ -316,7 +350,7 @@ test can override readiness without restating the whole coordinator."
                (lambda () '("/w-busy"))))
       ;; Act
       (agent-repl--runtime-prepare
-       t (lambda () (error "unexpected success")) #'ignore))
+       t (lambda () (error "unexpected success")) #'ignore t))
     ;; Assert
     (should (agent-repl-services-test--phase-line-p
              lines "backend restart FAILED" "turn in flight"
@@ -420,7 +454,7 @@ first, so a test can assert both what was armed and that nothing was."
       (agent-repl--runtime-prepare
        t (lambda () (error "unexpected success"))
        (lambda (detail) (setq failure detail))
-       nil "deploy (emacsclient)")
+       t "operator (stop-shims)")
       ;; Assert
       (should (string-match-p "turn in flight" failure))
       (should-not armed))))

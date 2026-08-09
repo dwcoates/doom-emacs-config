@@ -161,6 +161,24 @@ export class SessionServer {
   private reconnectDelayMs: number;
   /** Resolves connect()'s promise on the first successful dial. */
   private resolveFirstConnect: (() => void) | null = null;
+  /**
+   * The connection each in-flight ReplayRequest arrived on.
+   *
+   * A REPLAY'S LIFETIME IS ITS CONNECTION'S. The request is a question one
+   * daemon connection asked; when that connection dies the question dies with
+   * it, and the daemon already knows — it retires every in-flight replay on
+   * teardown (shimclient replayRegistry.failAll -> ErrReplayLinkLost) and
+   * re-issues the one it still wants the moment this shim's next ShimReady
+   * lands (sessioncontroller rearmResyncAfterReattach / runPendingResync).
+   *
+   * Without this map the shim's own replay loop kept going and wrote its
+   * remaining ReplayEvents — and its ReplayDone — onto whatever connection
+   * happened to be up by then, where the daemon could only drop them as an
+   * unknown request id. Those frames interleaved with a live bring-up for no
+   * possible benefit. The entry is what makes "this connection's replay"
+   * checkable rather than assumed.
+   */
+  private readonly replayConns = new Map<string, MessageConn>();
 
   constructor(
     private readonly opts: SessionServerOptions,
@@ -334,26 +352,48 @@ export class SessionServer {
    * confuse replayed history for live state even by mistake (core.proto).
    */
   sendReplayEvent(requestId: string, evt: Event): void {
-    if (!this.isConnected()) {
-      // A hole punched in a replay the daemon explicitly asked for: it
-      // receives a history it believes complete, so the gap is silent on the
-      // receiving end and this record is the only place it exists.
-      LOGGER.log({ level: "warn", agent_repl_session_id: this.opts.sessionId, request_id: requestId, seq: evt.seq }, `no daemon attached; replay event not forwarded and the replay the daemon receives is short by it`);
-      return;
-    }
+    if (!this.replayIsLive(requestId, { seq: evt.seq })) return;
     this.conn!.send(ReplayEventSchema, create(ReplayEventSchema, { requestId, event: evt }));
   }
 
-  /** Close a replay. Exactly one per ReplayRequest, whatever the outcome. */
+  /**
+   * Close a replay. Exactly one per ReplayRequest ON ITS OWN CONNECTION.
+   *
+   * The old contract was "exactly one, whatever the outcome", which a dropped
+   * frame broke: the daemon's request never terminated. It terminates
+   * deterministically either way now — this frame when the connection is still
+   * the one that asked, and the daemon's own connection-teardown retirement
+   * when it is not. There is no outcome in which the request stays in flight.
+   */
   sendReplayDone(done: ReplayDone): void {
-    if (!this.isConnected()) {
-      // "Exactly one per ReplayRequest, whatever the outcome" is the contract
-      // this drop breaks: the daemon's request never terminates and stays
-      // indistinguishable from one still in flight.
-      LOGGER.log({ level: "warn", agent_repl_session_id: this.opts.sessionId, request_id: done.requestId }, `no daemon attached; replay completion not forwarded and the daemon's replay request never terminates`);
-      return;
-    }
+    const live = this.replayIsLive(done.requestId, { delivered: done.delivered, truncated: done.truncated });
+    this.replayConns.delete(done.requestId);
+    if (!live) return;
     this.conn!.send(ReplayDoneSchema, done);
+  }
+
+  /**
+   * Whether requestId's replay may still write to the CURRENT connection.
+   *
+   * False covers both ways a replay can be stranded, and says which: no daemon
+   * at all, or a daemon that is not the one that asked. Neither is a warning
+   * any more — the daemon terminates the request itself on the teardown and
+   * re-issues it after the next ShimReady, so a stranded frame is an expected
+   * consequence of a reattach rather than a hole nobody will notice.
+   */
+  private replayIsLive(requestId: string, detail: Record<string, unknown>): boolean {
+    const origin = this.replayConns.get(requestId);
+    if (!this.isConnected()) {
+      LOGGER.log({ ...detail, agent_repl_session_id: this.opts.sessionId, request_id: requestId },
+        `no daemon attached; replay frame dropped — the daemon retired this request when the connection died and re-issues it after the next ShimReady`);
+      return false;
+    }
+    if (origin !== this.conn) {
+      LOGGER.log({ ...detail, agent_repl_session_id: this.opts.sessionId, request_id: requestId },
+        `replay frame belongs to a SUPERSEDED daemon connection; dropped rather than written to the current one, which never asked this question`);
+      return false;
+    }
+    return true;
   }
 
   /**
@@ -428,6 +468,7 @@ export class SessionServer {
       this.conn = null;
     }
     this.handshaked = false;
+    this.replayConns.clear();
     LOGGER.log({ agent_repl_session_id: this.opts.sessionId }, "daemon UDS connection closed");
     return Promise.resolve();
   }
@@ -521,6 +562,9 @@ export class SessionServer {
     }
     const replay = unpackAs(msg, ReplayRequestSchema);
     if (replay) {
+      // Bound to THIS connection before the handler can emit a single frame:
+      // the replay may only ever answer the connection that asked it.
+      this.replayConns.set(replay.requestId, this.conn!);
       LOGGER.log({ agent_repl_session_id: this.opts.sessionId, request_id: replay.requestId, from_seq: replay.fromSeq, to_seq: replay.toSeq },
         `daemon requested a bounded history replay`);
       this.handlers.onReplayRequest(replay);
@@ -647,6 +691,16 @@ export class SessionServer {
     this.conn = null;
     this.handshaked = false;
     this.stopHeartbeat();
+    // Every in-flight replay was asked by the connection that just died, and
+    // the daemon has already retired them all on its own side. Forgetting them
+    // here is what keeps a later frame from being matched against a stale
+    // entry; replayIsLive then reports it as stranded rather than sending it.
+    const stranded = [...this.replayConns.keys()];
+    this.replayConns.clear();
+    if (stranded.length > 0) {
+      LOGGER.log({ agent_repl_session_id: this.opts.sessionId, request_ids: stranded },
+        `daemon connection closed under ${stranded.length} in-flight replay request(s); each is retired with the connection and re-issued by the daemon after the next ShimReady`);
+    }
     if (err) {
       // MessageConn owns and already recorded the causal transport failure.
       // This layer records only the semantic state transition.

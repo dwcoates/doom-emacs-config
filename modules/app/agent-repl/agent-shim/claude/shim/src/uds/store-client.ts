@@ -300,6 +300,16 @@ export class StoreClient {
    * error in its log rather than a no-op.
    */
   private linkDegraded = false;
+  /**
+   * The report that OPENED the current degraded window, retained verbatim so
+   * the window can be re-announced to a daemon that never heard it.
+   *
+   * Non-null exactly while {@link linkDegraded} is true. It is the same object
+   * the reporter was handed, because a re-report must be the SAME assertion —
+   * a second, differently-worded one would look to the daemon like a second
+   * outage rather than the one it missed.
+   */
+  private openDegradedWindow: DegradedState | null = null;
   /** The armed relink attempt, or null when none is pending. */
   private relinkTimer: NodeJS.Timeout | null = null;
   /** The delay the NEXT relink attempt waits; 0 means immediate. */
@@ -524,6 +534,23 @@ export class StoreClient {
   /** Route degraded reports to `reporter`. */
   onDegraded(reporter: DegradedReporter): void {
     this.reporter = reporter;
+  }
+
+  /**
+   * The degraded window currently OPEN on this client, or null when the store
+   * link is healthy.
+   *
+   * It exists for the REATTACH re-report (uds-session completeWiring). A
+   * DegradedState travels to the daemon as a SYNTHETIC/EPHEMERAL event, and an
+   * ephemeral event sent while no daemon is attached is gone for good — it is
+   * never written to the store, so nothing replays it. A session that degraded
+   * while the daemon was down therefore came back looking perfectly healthy to
+   * the daemon that replaced it, with an open fault nobody would ever be told
+   * about. Asking for the CURRENT state and re-announcing it is how the daemon
+   * converges on the truth without ephemerals having to be replayable.
+   */
+  openDegradedReport(): DegradedState | null {
+    return this.openDegradedWindow;
   }
 
   /** Connect to the store socket. Rejects loudly if the connect fails. */
@@ -852,6 +879,7 @@ export class StoreClient {
   private reportRecovered(): void {
     if (!this.linkDegraded) return;
     this.linkDegraded = false;
+    this.openDegradedWindow = null;
     const resumed = this.lastFromSeq !== null;
     const reason = resumed
       ? `store link recovered: producer connection re-established and the standing subscription resumed`
@@ -1315,6 +1343,7 @@ export class StoreClient {
       droppedCount: BigInt(droppedCount),
       recovered: false,
     });
+    this.openDegradedWindow = report;
     if (this.reporter) {
       this.reporter(report);
     } else {

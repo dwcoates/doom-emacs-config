@@ -99,11 +99,19 @@ func New(cfg Config) (*Trigger, error) {
 // about this process's lifetime and nothing longer. A durable latch would be
 // strictly worse — it would survive the very bounce that makes it meaningless
 // and would have to be cleared by whatever came back up, turning a two-line
-// guard into another piece of durable state to get wrong. The latch is never
-// released after a successful launch: the launch's own success ends this
-// lifetime, and a launch that instead fails LOUDLY (deploy-all.sh exiting
-// non-zero, logged by the reaper) is a broken deploy path that re-running on
-// the next merge would only break again.
+// guard into another piece of durable state to get wrong.
+//
+// WHAT THE LATCH IS AND IS NOT. It guards against two deploys running AT ONCE,
+// and against nothing else. It used to be held for the rest of the process's
+// life once a launch succeeded, on the reasoning that a successful launch ends
+// that life — but a launch is only the START of a deploy, and a deploy can end
+// without bouncing anything (the script exits non-zero, or defers its bounce
+// because no Emacs is running). Every such deploy permanently disabled
+// self-redeploy for a daemon that then went on running superseded code with no
+// further merge able to correct it. So the latch is RE-ARMED by
+// {@link Trigger.rearm}, which the launcher calls from the reaper that already
+// detects exactly this case. A deploy that DID bounce the daemon never calls
+// it: the process is gone and its replacement boots with a fresh latch.
 // AfterAction implements merge.PostMergeHook. The self-reload trigger delivers
 // no prompt to any session — it redeploys a binary — so it reports none. It is
 // an explicit empty answer rather than an absent method so a hook that DOES
@@ -141,11 +149,25 @@ func (t *Trigger) AfterMerged(ctx context.Context, req merge.Request) error {
 		t.launched.Store(false)
 		return err
 	}
-	if err := t.launcher.Launch(ctx, plan); err != nil {
+	if err := t.launcher.Launch(ctx, plan, func() { t.rearm(req.Workspace) }); err != nil {
 		t.launched.Store(false)
 		return fmt.Errorf("reload: launch redeploy for %s: %w", req.Workspace, err)
 	}
 	return nil
+}
+
+// rearm releases the latch for a deploy that ended without bouncing this
+// daemon, so the next self-merge tries again instead of being skipped forever.
+//
+// It is idempotent by construction: the launcher calls it at most once per
+// launch, and a redundant release only returns the latch to the state a process
+// with no deploy in flight is already in.
+func (t *Trigger) rearm(workspace string) {
+	if !t.launched.CompareAndSwap(true, false) {
+		t.logf("reload: redeploy exit reported with no launch latched {ws=%s}", workspace)
+		return
+	}
+	t.logf("reload: the redeploy launched for %s ENDED without bouncing this daemon, so the reload latch is RE-ARMED; the next self-merge will try again", workspace)
 }
 
 // plan derives what the merge landed and what it touched. The bool reports
