@@ -429,6 +429,33 @@ describe("StoreClient sad path (no spill, no retry)", () => {
     expect(degradations[0]!.droppedCount).toBe(2n);
   });
 
+  it("has no open degraded window while the store link is healthy", async () => {
+    // Arrange — a connected client that has never degraded.
+    const store = await fakeStore();
+    stores.push(store);
+    const client = await connectedClient(store);
+    // Act / Assert — a healthy session must never manufacture a fault to
+    // re-announce on reattach.
+    expect(client.openDegradedReport()).toBeNull();
+  });
+
+  it("retains the OPEN degraded window so a reattaching daemon can be told about it", async () => {
+    // Arrange — a DegradedState is EPHEMERAL: one raised while no daemon is
+    // attached is never written to the store and never replayed, so the state
+    // itself has to remain askable.
+    const store = await fakeStore();
+    stores.push(store);
+    const degradations: DegradedState[] = [];
+    const client = await connectedClient(store, undefined, (d) => degradations.push(d));
+    // Act
+    const writeP = client.write([create(EventSchema, { sessionId: "sess-1", seq: 1n })]);
+    await store.peer().next(StoreWriteSchema);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { error: "disk full" }));
+    await expect(writeP).rejects.toThrow(/disk full/);
+    // Assert — the SAME assertion the reporter received, not a re-worded one.
+    expect(client.openDegradedReport()).toBe(degradations[0]);
+  });
+
   it("rejects an in-flight write and reports degraded when the store drops", async () => {
     // Arrange
     const store = await fakeStore();
@@ -695,6 +722,23 @@ describe("StoreClient store link recovery", () => {
     const report = await rig.recovered;
     expect(report.component).toBe("shim-store-client");
     expect(report.recovered).toBe(true);
+  });
+
+  it("closes the retained degraded window on recovery, so nothing stale is re-announced", async () => {
+    // Arrange — an outage that outlasted the budget, so a window is genuinely
+    // open and retained.
+    const store = await fakeStore();
+    stores.push(store);
+    const rig = await linkRig(store, 0);
+    await rig.client.subscribe(0n);
+    await (await store.nextConn()).next(SubscribeSchema);
+    await restart(store);
+
+    // Act
+    await rig.recovered;
+
+    // Assert — a reattach after this must announce nothing.
+    expect(rig.client.openDegradedReport()).toBeNull();
   });
 
   it("reports neither degradation nor recovery for a restart the relink absorbs", async () => {
