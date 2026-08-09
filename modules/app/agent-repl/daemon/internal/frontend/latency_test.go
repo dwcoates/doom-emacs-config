@@ -74,15 +74,8 @@ func (r *concurrentLogs) all() []string {
 // completion rather than with elapsed time.
 func runOneCommand(t *testing.T, cfg Config, cmd *frontendv1.FrontendCommand) *Server {
 	t.Helper()
-	return runOneCommandOnClient(t, cfg, cmd, newClient(defaultClientBuffer, nil, ClientKindHost))
-}
-
-// runOneCommandOnClient is runOneCommand over a client the caller built, so a
-// test can put the connection into a specific state — a connect-snapshot drain
-// still open, say — before the command is read.
-func runOneCommandOnClient(t *testing.T, cfg Config, cmd *frontendv1.FrontendCommand, cl *client) *Server {
-	t.Helper()
 	s := New(cfg)
+	cl := newClient(defaultClientBuffer, nil, ClientKindHost)
 	s.clients[cl] = struct{}{}
 	c := newScriptedConn()
 	c.cmds <- cmd
