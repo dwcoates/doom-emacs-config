@@ -163,6 +163,24 @@ describe("decodeAsyncBubble — kind", () => {
       /unrecognized emission 'nope'/,
     );
   });
+
+  it("rejects an emission that sets no arm at all", () => {
+    expect(() => decodeAsyncBubble(openedAgent({ agent: { emissions: [{}] } }), "b")).toThrow(
+      /carries no emission \(empty oneof\)/,
+    );
+  });
+
+  it("rejects an emission that sets two arms, never picking one", () => {
+    expect(() =>
+      decodeAsyncBubble(openedAgent({ agent: { emissions: [{ response: { body: {} }, thinking: { body: {} } }] } }), "b"),
+    ).toThrow(/sets multiple emissions/);
+  });
+
+  it("names the emission's own position, so a bad one deep in a fold is findable", () => {
+    expect(() =>
+      decodeAsyncBubble(openedAgent({ agent: { emissions: [{ response: { body: {} } }, { nope: {} }] } }), "b"),
+    ).toThrow(/b\.agent\.emissions\[1\]/);
+  });
 });
 
 describe("decodeAsyncBubble — fold", () => {
