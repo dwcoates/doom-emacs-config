@@ -184,6 +184,11 @@ type client struct {
 	closeOnce sync.Once
 	scope     *Scope
 	kind      ClientKind
+	// drain is this connection's connect-snapshot drain window (bootdrain.go):
+	// the interval its initial StateSnapshot spent between the outbound queue
+	// and the socket. A slow ack delivered inside it is explained by the
+	// bring-up rather than by the command path.
+	drain snapshotDrain
 }
 
 // newClient builds a client with a bounded outbox of the given size. The HOST
@@ -849,9 +854,20 @@ func (s *Server) serveClient(c conn, scope *Scope, kind ClientKind) {
 		// delta can slip ahead of this first FIFO frame after validation.
 		s.nextClientID++
 		cl.id = s.nextClientID
+		// THE BOOT-DRAIN WINDOW OPENS HERE and closes on this frame's own
+		// disposition (bootdrain.go). Opening before the push is what keeps the
+		// window from ever being closed before it was open: the writer may take
+		// this frame on another goroutine the instant it is queued.
+		cl.drain.open(time.Now())
 		// A fresh outbox is empty, so this first FIFO frame always fits; a
 		// refusal here would be a programmer error, not a slow consumer.
-		if res := enqueueLocked(cl, outFrame{data: snap}); !res.queued {
+		if res := enqueueLocked(cl, outFrame{data: snap, notify: cl.drain.snapshotDisposed}); !res.queued {
+			// The window opened and no write will ever close it, so close it
+			// here: a drain left open would classify a connection that never
+			// drained anything. enqueueLocked already notified a frame refused
+			// by a CLOSED queue, and closeAt is idempotent, so both paths end
+			// the window exactly once.
+			cl.drain.closeAt(time.Now())
 			s.mu.Unlock()
 			s.warn("frontend: connect snapshot rejected by an empty outbox kind=%s scope_workspace=%q scope_session=%q",
 				kind, scopeWorkspace(scope), scopeSession(scope))
@@ -1268,6 +1284,15 @@ func (s *Server) recordCommandLatency(rec commandLatencyRecord) {
 		Threshold:  s.ackWarn,
 		Ok:         rec.ack.GetOk(),
 		Overdue:    rec.overdue,
+	}
+	// THE CLASSIFICATION IS A MEASUREMENT, taken from the two events that define
+	// the window rather than from this command's own numbers: the sample's
+	// delivery interval is receipt through the ack reaching the socket, and the
+	// window is the connect snapshot's own enqueue-through-write. Overlap means
+	// the ack was waiting while this connection was still draining its
+	// bring-up. What the recorder does with that name is the recorder's policy.
+	if t.cl.drain.overlaps(t.received, t.received.Add(rec.delivery)) {
+		sample.Decision = BootSnapshotDrainDecision
 	}
 	if rec.deliveryErr != nil {
 		sample.DeliveryError = rec.deliveryErr.Error()
