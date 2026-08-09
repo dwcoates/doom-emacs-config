@@ -1032,11 +1032,14 @@ same fact classified, so it can finally be shown."
     ;; a name.  The raw wire value stays in the message text, since that is the
     ;; field an operator correlates against the daemon.
     (agent-repl--log (agent-repl--frontend-ws-name workspace)
-                     "frontend-apply-session-view: ws=%s terminal=%S claude-id=%s pending=%s token-utilization=%S"
+                     ;; `token_utilization' left SessionView with the component
+                     ;; reshape — it was a persistence record carried verbatim
+                     ;; to a renderer that had to digest it — so the trace no
+                     ;; longer claims to report a field the wire cannot carry.
+                     "frontend-apply-session-view: ws=%s terminal=%S claude-id=%s pending=%s"
                      workspace (plist-get view :terminal)
                      (or (plist-get view :claudeSessionId) "nil")
-                     (or (plist-get view :pendingPermissions) "0")
-                     (and (plist-get view :tokenUtilization) t))
+                     (or (plist-get view :pendingPermissions) "0"))
     (agent-repl--frontend-surface-session-death workspace view)
     workspace))
 
@@ -1067,10 +1070,13 @@ classified death, or has already been reported."
       nil)
      (t
       (puthash key item agent-repl--frontend-surfaced-deaths)
-      (agent-repl--log workspace
-                       "frontend-surface-session-death: ws=%s outcome=surface error-class=%s error-type=%s"
-                       key (plist-get item :errorClass) (plist-get item :errorType))
-      (agent-repl-failure-surface workspace (agent-repl-failure-from-wire item))))))
+      ;; `death' is a `FailureCardView' carried OUTSIDE the feed, so it was
+      ;; never filed under a ConversationItem and has no uuid to pass on.
+      (let ((failure (agent-repl-failure-from-wire item)))
+        (agent-repl--log workspace
+                         "frontend-surface-session-death: ws=%s outcome=surface class=%s kind=%s"
+                         key (plist-get failure :class) (plist-get failure :type))
+        (agent-repl-failure-surface workspace failure))))))
 
 ;;;; ---- SessionInit store (slash-command menu source) -------------------
 ;;
