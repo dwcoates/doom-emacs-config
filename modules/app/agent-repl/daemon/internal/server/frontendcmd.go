@@ -1537,6 +1537,11 @@ type ssmSnapshotProvider struct {
 	// catalogs supplies every live session's complete detached-task roster, so
 	// reconnect restores or clears the webapp's roster before later deltas.
 	catalogs TaskCatalogSource
+	// bubbles supplies every live session's open async bubbles, folded to date,
+	// so a reconnecting frontend restores detached work it can no longer be
+	// sent the opening delta for. Nil-safe: a nil source leaves
+	// snapshot.async_bubbles empty.
+	bubbles AsyncBubbleSource
 	// queues supplies each live session's held-prompt queue (E4). Nil-safe: a
 	// nil source leaves snapshot.queues empty.
 	queues QueueSource
@@ -1591,6 +1596,14 @@ type SessionInitSource interface {
 // they clear stale frontend roster state.
 type TaskCatalogSource interface {
 	TaskCatalogs() []*frontendv1.TaskCatalog
+}
+
+// AsyncBubbleSource supplies every live session's open async bubbles, folded to
+// date, for the connect/resync snapshot. Satisfied by
+// *sessioncontroller.Manager. A session with no detached work contributes
+// nothing, which is how a frontend learns its previous bubbles are gone.
+type AsyncBubbleSource interface {
+	AsyncBubbles() []*frontendv1.AsyncBubble
 }
 
 // QueueSource supplies every live session's held-prompt queue (E4) for the
@@ -1649,6 +1662,9 @@ func (p *ssmSnapshotProvider) Snapshot() *frontendv1.StateSnapshot {
 	if p.catalogs != nil {
 		snap.Catalogs = p.catalogs.TaskCatalogs()
 	}
+	if p.bubbles != nil {
+		snap.AsyncBubbles = refuseWorkspacelessBubbles(p.bubbles.AsyncBubbles(), p.logf)
+	}
 	if p.queues != nil {
 		snap.Queues = p.queues.QueueViews()
 	}
@@ -1683,6 +1699,12 @@ func (p *ssmSnapshotProvider) Snapshot() *frontendv1.StateSnapshot {
 	snap.Topbars = filterPublishedWorkspaceViews(snap.Topbars, publicationAllowed, p.logf)
 	snap.TokenBreakdowns = filterPublishedWorkspaceViews(snap.TokenBreakdowns, publicationAllowed, p.logf)
 	snap.WorkspaceGates = filterPublishedWorkspaceViews(snap.WorkspaceGates, publicationAllowed, p.logf)
+	// A bubble is a per-workspace family like any other, and the latch holds it
+	// back for the same reason: its label, its command line and its spooled
+	// output are the contents of work running in a workspace the client has not
+	// been told exists yet. It carries no session id of its own — the workspace
+	// IS its routing key — so it asks the gate the fenced question.
+	snap.AsyncBubbles = filterPublishedWorkspaceViews(snap.AsyncBubbles, publicationAllowed, p.logf)
 	hostWork := p.workspaceCreation.SnapshotHostWork()
 	snap.WorkspaceAvailable = hostWork.WorkspaceAvailable
 	snap.HostActions = hostWork.HostActions
@@ -1691,8 +1713,8 @@ func (p *ssmSnapshotProvider) Snapshot() *frontendv1.StateSnapshot {
 		for _, catalog := range snap.GetCatalogs() {
 			taskCount += len(catalog.GetTasks())
 		}
-		p.logf("frontend: connect snapshot workspaces=%d sessions=%d catalogs=%d tasks=%d inits=%d queues=%d progress=%d workspace_available=%d host_actions=%d daemon=%t",
-			len(snap.GetWorkspaces()), len(snap.GetSessions()), len(snap.GetCatalogs()), taskCount,
+		p.logf("frontend: connect snapshot workspaces=%d sessions=%d catalogs=%d tasks=%d async_bubbles=%d inits=%d queues=%d progress=%d workspace_available=%d host_actions=%d daemon=%t",
+			len(snap.GetWorkspaces()), len(snap.GetSessions()), len(snap.GetCatalogs()), taskCount, len(snap.GetAsyncBubbles()),
 			len(snap.GetInits()), len(snap.GetQueues()), len(snap.GetProgress()), len(snap.GetWorkspaceAvailable()), len(snap.GetHostActions()), snap.GetDaemon() != nil)
 	}
 	return snap
@@ -1707,6 +1729,34 @@ type sessionPublicationView interface {
 // session identity.
 type workspacePublicationView interface {
 	GetWorkspace() string
+}
+
+// refuseWorkspacelessBubbles drops any async bubble that names no workspace,
+// loudly.
+//
+// It is DEFENCE IN DEPTH, not the primary guard: frontend.OpenAsyncBubble
+// refuses to mint a workspace-less bubble at all, so reaching this is a daemon
+// defect. It is still checked here because the workspace is the ONLY routing
+// key a snapshot has for a bubble, and one that slipped through would be
+// delivered to every scoped client — a cross-workspace leak that the scope pass
+// downstream cannot detect, since an unroutable bubble and a correctly-routed
+// one are indistinguishable to it.
+//
+// It refuses rather than panics: the bubble is one piece of detached work, and
+// a connect snapshot that aborts costs the client its whole session view.
+func refuseWorkspacelessBubbles(bubbles []*frontendv1.AsyncBubble, logf func(string, ...any)) []*frontendv1.AsyncBubble {
+	filtered := make([]*frontendv1.AsyncBubble, 0, len(bubbles))
+	for _, bubble := range bubbles {
+		if bubble.GetWorkspace() == "" {
+			if logf != nil {
+				logf("server: REFUSING async bubble %q from the connect snapshot — it names no workspace, which is the only routing key a snapshot has for a bubble, so it would reach every scoped client; the bubble is omitted rather than leaked",
+					bubble.GetId())
+			}
+			continue
+		}
+		filtered = append(filtered, bubble)
+	}
+	return filtered
 }
 
 // filterPublishedWorkspaceViews is filterPublishedSessionViews for the fenced

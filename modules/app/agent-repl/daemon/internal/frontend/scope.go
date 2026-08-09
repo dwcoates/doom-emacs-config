@@ -72,6 +72,8 @@ func scopeFrame(frame *frontendv1.FrontendFrame, sc Scope) (*frontendv1.Frontend
 	// of them routes by workspace exactly as ConversationDelta already did.
 	case *frontendv1.FrontendFrame_TypingDelta:
 		return frame, sc.matchesWorkspace(f.TypingDelta.GetWorkspace())
+	case *frontendv1.FrontendFrame_AsyncBubbleDelta:
+		return frame, sc.matchesWorkspace(f.AsyncBubbleDelta.GetWorkspace())
 	case *frontendv1.FrontendFrame_TaskCatalog:
 		return frame, sc.matchesWorkspace(f.TaskCatalog.GetWorkspace())
 	case *frontendv1.FrontendFrame_SessionInit:
@@ -163,6 +165,11 @@ func filterSnapshot(snap *frontendv1.StateSnapshot, sc Scope) *frontendv1.StateS
 		Topbars:         filterWorkspaceViews(snap.GetTopbars(), sc),
 		TokenBreakdowns: filterWorkspaceViews(snap.GetTokenBreakdowns(), sc),
 		WorkspaceGates:  filterWorkspaceViews(snap.GetWorkspaceGates(), sc),
+		// Async bubbles scope by workspace exactly as every other per-workspace
+		// family does. AsyncBubble.workspace is the same key its delta carries
+		// on the envelope, so a client's reconnect restatement and the pushes
+		// it then receives are filtered by one rule rather than two.
+		AsyncBubbles: filterWorkspaceViews(snap.GetAsyncBubbles(), sc),
 		// Daemon identity is connection-global, not workspace-scoped. Dropping
 		// it here handed every scoped client a snapshot with an empty boot id,
 		// which the webapp's version-skew gate rejects on EVERY adoption —

@@ -23,9 +23,9 @@ func TestContextClearedCuratesIntoItsArm(t *testing.T) {
 	}
 
 	// Act.
-	got, _, err := ConversationDeltaFromEvent("ws", "", ev)
+	got, _, err := conversationDeltaFromEvent("ws", "", ev)
 	if err != nil {
-		t.Fatalf("ConversationDeltaFromEvent: %v", err)
+		t.Fatalf("conversationDeltaFromEvent: %v", err)
 	}
 
 	// Assert.
@@ -57,9 +57,9 @@ func TestContextCompactedCuratesIntoItsArm(t *testing.T) {
 	}
 
 	// Act.
-	got, _, err := ConversationDeltaFromEvent("ws", "", ev)
+	got, _, err := conversationDeltaFromEvent("ws", "", ev)
 	if err != nil {
-		t.Fatalf("ConversationDeltaFromEvent: %v", err)
+		t.Fatalf("conversationDeltaFromEvent: %v", err)
 	}
 
 	// Assert.
@@ -84,7 +84,7 @@ func TestClearCarriesTheEventEnvelopeOntoItsItem(t *testing.T) {
 	}
 
 	// Act.
-	got, _, _ := ConversationDeltaFromEvent("ws", "", ev)
+	got, _, _ := conversationDeltaFromEvent("ws", "", ev)
 
 	// Assert.
 	item := got.GetItems()[0]
@@ -103,7 +103,7 @@ func TestClearThroughSeqIsTheEventSeq(t *testing.T) {
 	}
 
 	// Act.
-	got, _, _ := ConversationDeltaFromEvent("ws", "", ev)
+	got, _, _ := conversationDeltaFromEvent("ws", "", ev)
 
 	// Assert.
 	if got.GetThroughSeq() != 41 {
@@ -120,7 +120,7 @@ func TestClearUUIDIsTheDedupKey(t *testing.T) {
 	}
 
 	// Act.
-	got, _, _ := ConversationDeltaFromEvent("ws", "", ev)
+	got, _, _ := conversationDeltaFromEvent("ws", "", ev)
 
 	// Assert.
 	if uuid := got.GetItems()[0].GetUuid(); uuid != "clear:u-1" {
@@ -136,7 +136,7 @@ func TestCompactUUIDIsTheDedupKey(t *testing.T) {
 	}
 
 	// Act.
-	got, _, _ := ConversationDeltaFromEvent("ws", "", ev)
+	got, _, _ := conversationDeltaFromEvent("ws", "", ev)
 
 	// Assert.
 	if uuid := got.GetItems()[0].GetUuid(); uuid != "compact:b-1" {
@@ -155,7 +155,7 @@ func TestClearWithoutADedupKeyDerivesAStableUUID(t *testing.T) {
 	}
 
 	// Act.
-	got, _, _ := ConversationDeltaFromEvent("ws", "", ev)
+	got, _, _ := conversationDeltaFromEvent("ws", "", ev)
 
 	// Assert.
 	if uuid := got.GetItems()[0].GetUuid(); uuid != "clear:s1:41" {
@@ -172,7 +172,7 @@ func TestCompactWithoutADedupKeyDerivesACompactPrefixedUUID(t *testing.T) {
 	}
 
 	// Act.
-	got, _, _ := ConversationDeltaFromEvent("ws", "", ev)
+	got, _, _ := conversationDeltaFromEvent("ws", "", ev)
 
 	// Assert.
 	if uuid := got.GetItems()[0].GetUuid(); uuid != "compact:s1:41" {
@@ -188,7 +188,7 @@ func TestAClearArmWithNoMessageCuratesToNothing(t *testing.T) {
 	}
 
 	// Act.
-	got, _, err := ConversationDeltaFromEvent("ws", "", ev)
+	got, _, err := conversationDeltaFromEvent("ws", "", ev)
 
 	// Assert.
 	if err != nil || got != nil {
@@ -204,7 +204,7 @@ func TestACompactArmWithNoMessageCuratesToNothing(t *testing.T) {
 	}
 
 	// Act.
-	got, _, err := ConversationDeltaFromEvent("ws", "", ev)
+	got, _, err := conversationDeltaFromEvent("ws", "", ev)
 
 	// Assert.
 	if err != nil || got != nil {
