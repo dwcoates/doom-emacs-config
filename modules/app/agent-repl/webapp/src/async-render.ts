@@ -12,6 +12,12 @@
  *   `renderItem`. There is no second, weaker transcript renderer here — the
  *   feed's is injected (see {@link AsyncRenderContext.renderEmissions}), which
  *   is what makes "the same code" checkable rather than aspirational;
+ * - a MERGE bubble is the same conversation shape, through the same injected
+ *   feed renderer, because that identity is what AsyncMergeBubble states in the
+ *   contract. What it does NOT share is its chrome: the daemon opened it by
+ *   classifying a merge, so its face says `merge` and its fold carries the
+ *   merge kind class, which the stylesheet dresses in the SAME amber the Merge
+ *   status card and the bounce-lease card wear;
  * - a WORKFLOW JOURNAL is a row table with a status arm per row, because a
  *   journal is a record log rather than a conversation;
  * - a SHELL and an UNCLASSIFIED bubble are byte SPOOLS with a header naming the
@@ -33,6 +39,7 @@
 
 import type {
   AsyncBubble,
+  AsyncBubbleKindCase,
   AsyncFold,
   AsyncLiveness,
   AsyncOutputSpool,
@@ -105,6 +112,37 @@ function livenessFace(liveness: AsyncLiveness): string {
 /** What a bubble calls itself: its label, or its id when the daemon had none. */
 export function bubbleLabel(bubble: AsyncBubble): string {
   return bubble.label !== "" ? bubble.label : bubble.id;
+}
+
+/**
+ * The WORD each kind wears on its collapsed face.
+ *
+ * A total `Record` over the arm cases rather than the arm string interpolated
+ * raw: a kind added to the contract stops compiling here until someone decides
+ * what it calls itself, which is the difference between a face that names the
+ * work and one that happens to spell whatever the proto field was called. The
+ * words are the arm names today because those ARE what this work is called —
+ * `merge` included, since the daemon's own classification is what opened it.
+ */
+export const BUBBLE_KIND_WORD: Readonly<Record<AsyncBubbleKindCase, string>> = {
+  agent: "agent",
+  journal: "journal",
+  shell: "shell",
+  unclassified: "unclassified",
+  merge: "merge",
+};
+
+/**
+ * The kind marker class a bubble's fold carries, so the stylesheet can dress
+ * one kind without the renderer branching on colour.
+ *
+ * It is what lets a merge bubble wear the MERGE AMBER (`--merge-border`) the
+ * Merge status card and the bounce-lease card already wear, instead of the
+ * async teal every other bubble's chrome takes — one merge vocabulary across
+ * the surfaces, resolved in CSS rather than by a second face string here.
+ */
+export function bubbleKindClass(bubble: AsyncBubble): string {
+  return `async-kind-${bubble.kind.case}`;
 }
 
 /**
@@ -206,7 +244,7 @@ export function AsyncBubbleCard(
   const open = ctx.isOpen?.(id) ?? false;
   const dot = livenessDot(bubble.liveness);
   const arc = bubble.liveness.case === "live" ? `<span class="tool-spinner" aria-hidden="true"></span>` : "";
-  const face = `${bubble.kind.case} · ${capLabel(bubbleLabel(bubble), 60)} · ${livenessFace(bubble.liveness)}`;
+  const face = `${BUBBLE_KIND_WORD[bubble.kind.case]} · ${capLabel(bubbleLabel(bubble), 60)} · ${livenessFace(bubble.liveness)}`;
   // Children are resolved by POINTER through the registry — one lookup, no
   // walk into any payload.
   const children = ctx.registry
@@ -215,7 +253,7 @@ export function AsyncBubbleCard(
     .join("");
   return Fold({
     id,
-    foldClass: "async-fold",
+    foldClass: `async-fold ${bubbleKindClass(bubble)}`,
     tickerClass: "async-ticker",
     ticker: `${arc}<span class="agent-dot agent-${dot}" aria-hidden="true">●</span> ${escapeHtml(face)}`,
     body: () => `${bubbleBody(bubble, ctx)}${children}`,
