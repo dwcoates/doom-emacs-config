@@ -26,6 +26,12 @@
 ;; Resolved at call time from sibling modules in the same feature.
 (declare-function agent-repl--frontend-ws-command-key "frontend-client" (ws))
 
+;; Owned by core.el.  Declared here so the `let' below binds it DYNAMICALLY:
+;; under `lexical-binding' a `let' over a symbol the compiler does not know is
+;; special would create a lexical binding instead, and the logging ladder would
+;; never see the window this file opens.
+(defvar agent-repl--log-preregistration-workspace)
+
 (defun agent-repl--workspace-create-log-payload-shape (payload)
   "Return a value-free structural summary of wire PAYLOAD for diagnostics."
   (cond
@@ -385,7 +391,25 @@ it and failed — and until this line existed the Emacs log could not tell
 them apart: every other line here is emitted after validation, so a
 malformed or unreachable request left no trace at all.  It pairs with the
 daemon's own `MATERIALIZATION REQUESTED'/`UNDELIVERED' lines, and the two
-logs together locate the break on one side or the other."
+logs together locate the break on one side or the other.
+
+EVERY RECORD BELOW THE MATERIALIZATION IS ATTRIBUTED TO A WORKSPACE THAT
+DOES NOT EXIST YET.  That is correct — the records are about that
+workspace — but it is also exactly the shape
+`agent-repl--note-unroutable-log-workspace' shouts about, so a perfectly
+normal creation warned about its own prologue once per workspace.  The
+window is DECLARED here, around the whole handler, so the ladder can
+classify those records instead of degrading them; it closes on its own
+when `agent-repl--ws-materialize-daemon-workspace' commits the
+registration and the workspace starts routing to its own sink."
+  (let ((agent-repl--log-preregistration-workspace
+         (plist-get available :finalName)))
+    (agent-repl--workspace-create-handle-available-1 available)))
+
+(defun agent-repl--workspace-create-handle-available-1 (available)
+  "Body of `agent-repl--workspace-create-handle-available'.
+Split out so the registration-window binding wraps the ENTIRE handler,
+including the validation that can signal before any workspace exists."
   (agent-repl--log
    (plist-get available :finalName)
    "workspace-available: MATERIALIZATION REQUEST RECEIVED job-id=%s final-name=%s worktree=%s session=%s"
