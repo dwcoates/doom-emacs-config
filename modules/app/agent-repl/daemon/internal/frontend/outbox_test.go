@@ -159,11 +159,11 @@ func TestOutboxCompactionKeepsOnlyTheNewestRoster(t *testing.T) {
 	}
 	var drained []string
 	for {
-		data, ok := o.pop()
+		f, ok := o.pop()
 		if !ok {
 			break
 		}
-		drained = append(drained, string(data))
+		drained = append(drained, string(f.data))
 	}
 	if len(drained) != 2 || drained[0] != "r2" || drained[1] != "r3" {
 		t.Fatalf("queue drained to %v, want the oldest roster dropped and [r2 r3] left", drained)
@@ -208,11 +208,11 @@ func TestCoalesceKeySeparatesWorkspaces(t *testing.T) {
 func drain(o *outbox) []string {
 	var out []string
 	for {
-		data, ok := o.pop()
+		f, ok := o.pop()
 		if !ok {
 			return out
 		}
-		out = append(out, string(data))
+		out = append(out, string(f.data))
 	}
 }
 
