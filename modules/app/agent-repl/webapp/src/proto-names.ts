@@ -317,6 +317,7 @@ export const FAILURE_KIND_SIDE = {
   keepAliveWindowInverted: "machinery",
   compactionColdRead: "machinery",
   clientLogIdentityStale: "machinery",
+  promptRefusedByMergeState: "machinery",
   internalUnclassified: "machinery",
 
   // ---- VENDOR (purple): the SDK or the vendor refused or concluded it. ----

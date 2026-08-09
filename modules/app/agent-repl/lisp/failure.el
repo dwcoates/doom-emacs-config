@@ -156,7 +156,8 @@ a mis-colored failure rather than a missing one."
     "historyRepullInFlight" "historyReplayTruncated" "interruptUndelivered"
     "queueEntryUnwired" "queueEntryKeepAliveHeld" "sessionHibernated"
     "keepAliveWindowUnclosed" "keepAliveWindowInverted" "compactionColdRead"
-    "clientLogIdentityStale" "internalUnclassified")
+    "clientLogIdentityStale" "promptRefusedByMergeState"
+    "internalUnclassified")
   "The `FailureKind' arms naming agent-repl's OWN machinery failing.
 Nothing about the account is implicated and no amount of waiting or
 re-authenticating helps, so they classify `:internal' and the shared color
