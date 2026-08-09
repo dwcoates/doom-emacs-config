@@ -287,6 +287,18 @@ export const UPDATE_ARM_KIND: Readonly<Record<Exclude<AsyncBubbleUpdateCase, "li
 
 // --- anchored key sets ------------------------------------------------------
 
+/**
+ * PENDING CONTRACT AMENDMENT 2 adds `AsyncBubble.workspace = 7`. This worktree's
+ * generated stub predates it, so the field is deliberately NOT hand-declared
+ * here: spelling a key the stub does not have would be exactly the un-anchored
+ * decode table invariant I5 forbids, and would go on "working" if the amendment
+ * were later dropped or renamed.
+ *
+ * The anchor is what makes that safe to defer. Regenerating the stubs turns
+ * this line into a BUILD FAILURE naming the missing field, so integration
+ * cannot forget to add it — a decoder that silently ignored the new field is
+ * the one outcome this cannot produce.
+ */
 const BUBBLE_KEYS = generatedFieldSet<keyof typeof AsyncBubbleSchema.field>()("id", "originToolUseId", "parentBubbleId", "label", "startedAtMs", "liveness", "agent", "journal", "shell", "unclassified");
 const AGENT_BUBBLE_KEYS = generatedFieldSet<keyof typeof AsyncAgentBubbleSchema.field>()("emissions", "fold");
 const JOURNAL_KEYS = generatedFieldSet<keyof typeof AsyncWorkflowJournalSchema.field>()("rows", "fold");

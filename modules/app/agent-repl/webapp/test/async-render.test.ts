@@ -351,29 +351,67 @@ describe("the spawn tree", () => {
   });
 });
 
-describe("AsyncBubbleForCall — attachment by the daemon's verdict", () => {
-  it("draws the bubble a card's verdict names", () => {
-    const registry = seeded(bubble({ id: "b1", kind: agentKind, label: "detached" }));
+describe("AsyncBubbleForCall — attachment by the daemon's classification", () => {
+  it("draws the bubble whose origin_tool_use_id names the card", () => {
+    const registry = seeded(
+      bubble({ id: "b1", kind: agentKind, label: "detached", originToolUseId: "tu1" }),
+    );
 
-    expect(AsyncBubbleForCall("b1", ctxFor(registry))).toContain("detached");
+    expect(AsyncBubbleForCall("tu1", undefined, ctxFor(registry))).toContain("detached");
   });
 
-  it("draws nothing for an ABSENT verdict — the call detached nothing", () => {
+  it("draws the bubble a card's verdict names when no bubble names the card", () => {
+    const registry = seeded(bubble({ id: "b1", kind: agentKind, label: "detached" }));
+
+    expect(AsyncBubbleForCall("tu1", "b1", ctxFor(registry))).toContain("detached");
+  });
+
+  it("draws EVERY bubble the daemon attributed to one call, hiding none", () => {
+    const registry = seeded(
+      bubble({ id: "b1", kind: agentKind, label: "first", originToolUseId: "tu1" }),
+      bubble({ id: "b2", kind: agentKind, label: "second", originToolUseId: "tu1" }),
+    );
+
+    const html = AsyncBubbleForCall("tu1", undefined, ctxFor(registry));
+
+    expect([html.includes("first"), html.includes("second")]).toEqual([true, true]);
+  });
+
+  it("draws nothing when the two ends of the classification DISAGREE", () => {
+    // Arrange — the bubble says it came from tu1; the card's verdict names a
+    // different bubble. Neither statement is preferred over the other.
+    const registry = seeded(
+      bubble({ id: "b1", kind: agentKind, label: "by origin", originToolUseId: "tu1" }),
+      bubble({ id: "b2", kind: agentKind, label: "by verdict" }),
+    );
+
+    expect(AsyncBubbleForCall("tu1", "b2", ctxFor(registry))).toBe("");
+  });
+
+  it("draws the bubble when the two ends AGREE", () => {
+    const registry = seeded(
+      bubble({ id: "b1", kind: agentKind, label: "agreed", originToolUseId: "tu1" }),
+    );
+
+    expect(AsyncBubbleForCall("tu1", "b1", ctxFor(registry))).toContain("agreed");
+  });
+
+  it("draws nothing for a card no bubble names and no verdict on it", () => {
     const registry = seeded(bubble({ id: "b1", kind: agentKind }));
 
-    expect(AsyncBubbleForCall(undefined, ctxFor(registry))).toBe("");
+    expect(AsyncBubbleForCall("tu1", undefined, ctxFor(registry))).toBe("");
   });
 
   it("draws nothing for an EMPTY verdict, never going looking for a candidate", () => {
     const registry = seeded(bubble({ id: "b1", kind: agentKind }));
 
-    expect(AsyncBubbleForCall("", ctxFor(registry))).toBe("");
+    expect(AsyncBubbleForCall("tu1", "", ctxFor(registry))).toBe("");
   });
 
   it("draws nothing, and no placeholder, for a verdict naming an unopened bubble", () => {
     const registry = seeded(bubble({ id: "b1", kind: agentKind }));
 
-    expect(AsyncBubbleForCall("b9", ctxFor(registry))).toBe("");
+    expect(AsyncBubbleForCall("tu1", "b9", ctxFor(registry))).toBe("");
   });
 });
 
