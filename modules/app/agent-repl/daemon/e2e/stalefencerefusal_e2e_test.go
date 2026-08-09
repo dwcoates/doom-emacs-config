@@ -65,8 +65,20 @@ func TestE2EAResyncCarryingAStaleFenceIsRefusedWithoutReplay(t *testing.T) {
 	if ack.GetOk() {
 		t.Fatalf("the daemon ACCEPTED a resync carrying the stale fence %q: a delayed request has silently rebound itself to the current generation and asked for a replay nobody wanted", staleFence)
 	}
+	// THE ARM IS NAMED, not merely counted. Per the coordinator's ruling, a
+	// stale-fence refusal classifies as reconnect_superseded — the specific
+	// "this view is behind: the replay it asked for would have come from a
+	// generation it never saw" arm (errors.proto 94-95) — and NOT as
+	// workspace_not_live, which says the workspace has no live session at all.
+	// The two resolve differently for the reader: one asks the client to catch
+	// up, the other says there is nothing to catch up to. Asserting only that
+	// SOME arm is set would let them be swapped silently.
 	if ack.GetFailure() == nil {
-		t.Errorf("the stale-fence refusal arrived with no classified failure: CommandAck.failure is the reader-facing account, and a bare error string reaches the webapp as nothing at all")
+		t.Fatalf("the stale-fence refusal arrived with no classified failure: CommandAck.failure is the reader-facing account, and a bare error string reaches the webapp as nothing at all")
+	}
+	if ack.GetFailure().GetReconnectSuperseded() == nil {
+		t.Errorf("the stale-fence refusal classified as %T, want the reconnect_superseded arm: the client is told its workspace is unusable instead of being told to catch up",
+			ack.GetFailure().GetKind())
 	}
 	if len(replayed) > 0 {
 		t.Errorf("the daemon replayed %d conversation items alongside its refusal of the stale fence %q: the proto states it must refuse BEFORE replaying anything, or the client renders a splice of two generations",
