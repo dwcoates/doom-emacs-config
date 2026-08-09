@@ -721,6 +721,22 @@ func (m *Manager) process(ctx context.Context, id string) error {
 			// recovery can repeat the prompt.  The inverse (marking it first) can
 			// lose a prompt, so it is forbidden.
 			m.cfg.Logf("workspace-create: submitting initial prompt id=%s name=%q session=%s prompt_len=%d origin=workspace-create:%s delivery=at-least-once checkpoint=after-shim-ack crash_window=may-duplicate-never-lose", job.ID, job.Request.Name, job.SessionID, len(job.Request.Prompt), job.ID)
+			// A FAILED SUBMIT CAN LEAVE A TURN CLAIM OPEN, and this job does NOT
+			// close it. Delivery is at-least-once, so the shim may have accepted
+			// the prompt and opened `workspace-create:<id>` before the error came
+			// back, and nothing here would ever observe that turn's end.
+			//
+			// The edge was considered and deliberately not taken. Its honest form
+			// is the FAILURE edge only — reaching `StateReady` is the instant the
+			// initial prompt's turn legitimately BEGINS, so a close on settle
+			// would kill live work — which leaves one call site to justify a new
+			// port through `InitialPromptSubmitter`. The coverage that actually
+			// closes the observed leak lives in the shim instead: its
+			// turn-liveness watchdog (`agent-shim/claude/shim/src/uds/uds-session.ts`,
+			// `checkTurnQuiet`) writes the terminal for ANY turn whose SDK query
+			// died without producing one, whatever opened it. That is what
+			// retired the `workspace-create:…:0` claim observed open for four
+			// hours, and it needs no per-origin port at all.
 			if err := m.cfg.Prompts.SubmitInitialPrompt(ctx, job); err != nil {
 				return m.fail(ctx, id, "submit initial prompt", err)
 			}
