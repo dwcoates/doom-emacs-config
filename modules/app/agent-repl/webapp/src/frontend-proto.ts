@@ -2942,7 +2942,22 @@ function decodeTaskCatalog(v: unknown): TaskCatalog {
   return tc;
 }
 
-const SYSTEM_FAILURE_KEYS = generatedFieldSet<keyof typeof SystemFailureItemSchema.field>()("errorClass", "errorType", "message", "sourceDetail", "resolvedAtMs", "itemUuid", "sessionResume", "queryTermination");
+/**
+ * UNANCHORED, DELIBERATELY — and the only key set here that is.
+ *
+ * Every other set in this file is checked against a generated message's field
+ * manifest, so a renamed daemon field fails this build. `SystemFailureItem`
+ * has no manifest left to check against: the figma-idl reshape retired the
+ * message, replacing `error_class` + free-text `error_type` with the
+ * `FailureKind` arm vocabulary carried by `FailureCardView`, which the daemon
+ * resolves and the webapp does not yet read.
+ *
+ * So this set is a plain literal until the FailureCardView decoder lands. The
+ * RUNTIME guarantee is unchanged — `rejectUnknown` still refuses an
+ * unrecognized key loudly — but the compile-time one is gone, which is exactly
+ * why this comment is here rather than a silent `new Set`.
+ */
+const SYSTEM_FAILURE_KEYS: ReadonlySet<string> = new Set(["errorClass", "errorType", "message", "sourceDetail", "resolvedAtMs", "itemUuid", "sessionResume", "queryTermination"]);
 const SESSION_RESUME_KEYS = generatedFieldSet<keyof typeof SessionResumeFailureSchema.field>()("claudeSessionId","cwd", "configDir", "resolvedConfigDir", "create", "automaticRestore", "transcriptUnavailable", "identityMismatch", "queryTermination", "bringUpFailure");
 const SESSION_RESUME_CREATE_KEYS = generatedFieldSet<keyof typeof SessionResumeFailureCreateSchema.field>()();
 const SESSION_RESUME_AUTOMATIC_KEYS = generatedFieldSet<keyof typeof SessionResumeFailureAutomaticRestoreSchema.field>()();
