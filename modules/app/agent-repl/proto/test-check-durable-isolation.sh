@@ -140,9 +140,78 @@ mkdir -p "$missing"
 printf 'syntax = "proto3";\n' >"$missing/only.proto"
 expect 2 "a component directory with no durable schema is a setup failure rather than a pass" "$missing"
 
+# --- the gate is wired to CODEGEN, not only to lint --------------------------
+#
+# A gate whose header promises "generated bindings cannot be produced from a
+# schema that has already drifted" is only telling the truth if the targets that
+# EMIT bindings depend on it. Hanging it off `lint` alone leaves `make go`,
+# `make ts`, and `make all` free to emit from a coupled schema, and those are
+# the invocations a developer actually types. So the dependency edge itself is
+# asserted here, by driving the real Makefile against a drifted fixture through
+# COMPONENT_DIR — the same targets, not a stand-in for them.
+
+# drifted materializes a component tree whose sibling names a durable type.
+driftedTree="$(newFixture drifted-codegen-tree)"
+cat >"$driftedTree/drifted.proto" <<'EOF'
+syntax = "proto3";
+package agentshim.frontend.v1;
+message DriftedView {
+  DurableRecord record = 1;
+}
+EOF
+
+# expectMakeRefuses runs one real Makefile target against the drifted fixture
+# and requires that it fail AS THE GATE. A nonzero status alone would also be
+# produced by a missing protoc, so the gate's own refusal must appear in the
+# output, and protoc must never have been reached.
+expectMakeRefuses() {
+    local target="$1"
+    local out rc
+    out="$(make -C "$THIS_DIR" "$target" COMPONENT_DIR="$driftedTree" DURABLE_SCHEMA=durable.proto 2>&1)"
+    rc=$?
+    if [ "$rc" -eq 0 ]; then
+        printf 'FAIL make %s emitted from a drifted schema (exited 0). Output:\n%s\n' "$target" "$out" >&2
+        failures=$((failures + 1))
+        return
+    fi
+    case "$out" in
+        *'INVARIANT I6 VIOLATED'*) ;;
+        *)
+            printf 'FAIL make %s failed for some reason other than the durable-isolation gate. Output:\n%s\n' "$target" "$out" >&2
+            failures=$((failures + 1))
+            return
+            ;;
+    esac
+    case "$out" in
+        *'--go_out'*|*'--es_out'*|*'--descriptor_set_out'*)
+            printf 'FAIL make %s ran protoc despite the drifted schema, so the gate is not a PREREQUISITE of codegen. Output:\n%s\n' "$target" "$out" >&2
+            failures=$((failures + 1))
+            return
+            ;;
+    esac
+    printf 'ok make %s refuses a drifted schema before invoking protoc\n' "$target"
+}
+
+expectMakeRefuses go
+expectMakeRefuses ts
+expectMakeRefuses all
+expectMakeRefuses lint
+
+# The rows above would all pass vacuously if the gate refused every tree, so the
+# shared gate target is also asserted to ACCEPT the clean fixture. It is driven
+# here rather than through `make go`, which would then run protoc over this
+# repository's own schemas and make the self-test depend on them.
+gateOut="$(make -C "$THIS_DIR" codegen-gate COMPONENT_DIR="$clean" DURABLE_SCHEMA=durable.proto 2>&1)"
+if [ $? -ne 0 ]; then
+    printf 'FAIL make codegen-gate rejected a clean component tree. Output:\n%s\n' "$gateOut" >&2
+    failures=$((failures + 1))
+else
+    printf 'ok make codegen-gate accepts a clean component tree\n'
+fi
+
 if [ "$failures" -ne 0 ]; then
     printf '%d durable-isolation gate self-test row(s) failed\n' "$failures" >&2
     exit 1
 fi
 
-printf 'durable-isolation gate accepts a clean component tree and refuses every spelling of the coupling\n'
+printf 'durable-isolation gate accepts a clean component tree, refuses every spelling of the coupling, and blocks every Makefile codegen path\n'

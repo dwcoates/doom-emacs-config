@@ -37,15 +37,28 @@ PROTOS := \
   agentshim/frontend/v1/topbar.proto \
   agentshim/frontend/v1/user-bubble.proto
 
-.PHONY: all go ts lint durable-isolation test-check-durable-isolation test-check-generated check-generated validate coverage clean
+# The component tree the structural gates scan. Overridable so the gate
+# self-tests can drive the REAL targets against a fixture tree; the default is
+# the schema tree this Makefile generates from.
+COMPONENT_DIR ?= agentshim/frontend/v1
+DURABLE_SCHEMA ?= durable.proto
+
+.PHONY: all go ts lint codegen-gate durable-isolation test-check-durable-isolation test-check-generated check-generated validate coverage clean
 
 all: go ts
 
-go:
+# EVERY path that emits bindings passes through this target. The structural
+# invariants below are not review notes, they are preconditions on codegen: a
+# schema that has already drifted must not be able to produce bindings by any
+# Makefile route, so `go`, `ts`, `all`, and `lint` all depend on this rather
+# than on `lint` alone. New structural gates are added here, once.
+codegen-gate: durable-isolation
+
+go: codegen-gate
 	mkdir -p gen/go
 	protoc -I . --go_out=gen/go --go_opt=paths=source_relative $(PROTOS)
 
-ts:
+ts: codegen-gate
 	mkdir -p gen/ts
 	npx --yes @bufbuild/protoc-gen-es --version >/dev/null
 	protoc -I . \
@@ -54,16 +67,16 @@ ts:
 
 # Syntax-check every proto without emitting code, then enforce the structural
 # invariants the syntax check cannot see.
-lint: durable-isolation
+lint: codegen-gate
 	protoc -I . --descriptor_set_out=/dev/null $(PROTOS)
 
 # INVARIANT I6. durable.proto is the persistence evidence layer and no other
-# component schema may import it or name a type it declares. This hangs off
-# lint, and therefore off validate, so codegen REFUSES a schema that has already
-# drifted rather than emitting bindings for the coupling and leaving the refusal
-# to review.
+# component schema may import it or name a type it declares. It hangs off
+# codegen-gate, which `go`, `ts`, and `lint` all require, so EVERY Makefile
+# route to bindings REFUSES a schema that has already drifted rather than
+# emitting bindings for the coupling and leaving the refusal to review.
 durable-isolation:
-	./check-durable-isolation.sh
+	./check-durable-isolation.sh $(COMPONENT_DIR) $(DURABLE_SCHEMA)
 
 test-check-durable-isolation:
 	./test-check-durable-isolation.sh
