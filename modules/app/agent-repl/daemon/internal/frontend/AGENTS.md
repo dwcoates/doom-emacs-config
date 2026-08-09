@@ -84,6 +84,28 @@ as strict as they were, and a control frame is refused at the ceiling like any
 other. What changed is that a refused, stranded or unwritable frame now reports
 itself UNDELIVERED to whoever queued it, rather than vanishing.
 
+The control lane bounds how many frames sit AHEAD of a correlated reply, and
+that is ALL it can bound. It cannot preempt a write already in progress: there
+is one socket and one writer goroutine, so a consumer that stops reading blocks
+the writer inside a single `writeFrame` and every queued ack waits behind it
+whichever lane it is on. Emacs blocks its own event loop for seconds restoring
+workspaces at startup, and one observed boot blocked this writer ~13s and then
+delivered eighteen `open_workspace` acks within one millisecond of the host
+reading again — five of them past the client's 10s deadline, each carded as
+`client.command_unacked` against a daemon that had answered every one of them
+successfully in under 4s.
+
+Nothing said so. The commands' own overdue records named eighteen slow commands
+and not the one blocked write they were all waiting on. So the write announces
+itself WHILE it is stuck (`writeFrameWatched`, `server.go`), on the same
+`ackDeadline` budget, naming `client_kind` and the held frame's lane, and it
+reports its resolution — a stall announced with no end is indistinguishable
+from a daemon that exited still blocked. The alarm only observes; the write's
+error handling is untouched. The client end of the same mechanism is
+`agent-repl--uds-drain-before-verdict` in `lisp/frontend-uds.el`: an ack alarm
+reads the link before it declares anything lost, so a verdict is never passed
+on bytes Emacs had been given but had not yet looked at.
+
 The daemon's slow-ack alarm was measuring the wrong interval: it stopped at the
 ack's ENQUEUE, so the dominant term — the drain — was invisible to the exact
 alarm built to catch it. A latency sample now carries both numbers. `Enqueue` is

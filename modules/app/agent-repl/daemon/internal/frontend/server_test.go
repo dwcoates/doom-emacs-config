@@ -2,6 +2,7 @@ package frontend
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -1340,4 +1341,189 @@ func mustMarshal(t *testing.T, frame *frontendv1.FrontendFrame) []byte {
 		t.Fatalf("marshal frame: %v", err)
 	}
 	return data
+}
+
+// ---------------------------------------------------------------------------
+// The blocked-writer alarm
+// ---------------------------------------------------------------------------
+
+// capturedLogf records every line the server logs, so a test can assert on the
+// record itself rather than on the fact that something was logged somewhere.
+type capturedLogf struct {
+	mu    sync.Mutex
+	lines []string
+	saw   chan string
+}
+
+func newCapturedLogf() *capturedLogf {
+	return &capturedLogf{saw: make(chan string, 64)}
+}
+
+func (c *capturedLogf) logf(format string, args ...any) {
+	line := fmt.Sprintf(format, args...)
+	c.mu.Lock()
+	c.lines = append(c.lines, line)
+	c.mu.Unlock()
+	select {
+	case c.saw <- line:
+	default:
+	}
+}
+
+// awaitLine blocks until a logged line contains want, so a test rendezvouses
+// with the alarm rather than guessing when it fired.
+func (c *capturedLogf) awaitLine(t *testing.T, want string) string {
+	t.Helper()
+	deadline := time.After(ticketTestDeadline)
+	for {
+		select {
+		case line := <-c.saw:
+			if strings.Contains(line, want) {
+				return line
+			}
+		case <-deadline:
+			c.mu.Lock()
+			defer c.mu.Unlock()
+			t.Fatalf("no logged line contained %q; saw %q", want, c.lines)
+			return ""
+		}
+	}
+}
+
+func (c *capturedLogf) contains(want string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, line := range c.lines {
+		if strings.Contains(line, want) {
+			return true
+		}
+	}
+	return false
+}
+
+// newStallServer builds a server whose blocked-writer alarm fires after
+// deadline, with every log line captured.
+func newStallServer(t *testing.T, log *capturedLogf, deadline time.Duration) *Server {
+	t.Helper()
+	return New(Config{
+		Logf: log.logf, LogVerbosef: log.logf,
+		State: staticState{snap: sampleSnapshot()}, Handler: &mockHandler{},
+		AckWarnThreshold: time.Hour, AckDeadline: deadline,
+	})
+}
+
+func TestWriterBlockedInOneWriteAnnouncesItselfWhileItIsBlocked(t *testing.T) {
+	// Arrange: a consumer that has stopped reading, which is what Emacs looks
+	// like while it blocks its event loop restoring workspaces. The writer
+	// parks inside writeFrame and nothing queued behind it can move.
+	log := newCapturedLogf()
+	s := newStallServer(t, log, time.Millisecond)
+	cl := newClient(defaultClientBuffer, nil, ClientKindHost)
+	c := newGatedConn()
+	go s.writeLoop(c, cl)
+
+	// Act.
+	s.enqueue(cl, outFrame{data: []byte(`{"bulk":true}`)})
+	c.awaitWrite(t)
+
+	// Assert: the fault is named WHILE it is happening, and it names the
+	// consumer rather than the commands that were waiting on it.
+	line := log.awaitLine(t, "OUTBOUND WRITER BLOCKED")
+	if !strings.Contains(line, "client_kind=host") {
+		t.Fatalf("blocked record does not name the consumer: %q", line)
+	}
+	c.release <- nil
+	c.close()
+}
+
+func TestWriterBlockedRecordNamesTheLaneTheHeldFrameLeftBy(t *testing.T) {
+	// Arrange: control-lane priority cannot preempt a write already in
+	// progress, so which lane the blocking frame was on is load-bearing.
+	log := newCapturedLogf()
+	s := newStallServer(t, log, time.Millisecond)
+	cl := newClient(defaultClientBuffer, nil, ClientKindHost)
+	c := newGatedConn()
+	go s.writeLoop(c, cl)
+
+	// Act.
+	s.enqueue(cl, outFrame{control: true, data: []byte(`{"ack":true}`)})
+	c.awaitWrite(t)
+
+	// Assert.
+	line := log.awaitLine(t, "OUTBOUND WRITER BLOCKED")
+	if !strings.Contains(line, "lane=control") {
+		t.Fatalf("blocked record does not name the lane: %q", line)
+	}
+	c.release <- nil
+	c.close()
+}
+
+func TestWriterStallReportsItsResolution(t *testing.T) {
+	// Arrange: a stall announced with no end is indistinguishable from a
+	// daemon that exited still blocked.
+	log := newCapturedLogf()
+	s := newStallServer(t, log, time.Millisecond)
+	cl := newClient(defaultClientBuffer, nil, ClientKindHost)
+	c := newGatedConn()
+	go s.writeLoop(c, cl)
+	s.enqueue(cl, outFrame{data: []byte(`{"bulk":true}`)})
+	c.awaitWrite(t)
+	log.awaitLine(t, "OUTBOUND WRITER BLOCKED")
+
+	// Act: the consumer reads again.
+	c.release <- nil
+
+	// Assert.
+	line := log.awaitLine(t, "outbound writer UNBLOCKED")
+	if !strings.Contains(line, "ok=true") {
+		t.Fatalf("resolution does not report the write's outcome: %q", line)
+	}
+	c.close()
+}
+
+func TestWriterStallResolutionReportsAFailedWrite(t *testing.T) {
+	// Arrange: a stall that ends in a broken connection must not read as a
+	// delivery — the frame never reached the socket.
+	log := newCapturedLogf()
+	s := newStallServer(t, log, time.Millisecond)
+	cl := newClient(defaultClientBuffer, nil, ClientKindHost)
+	c := newGatedConn()
+	go s.writeLoop(c, cl)
+	s.enqueue(cl, outFrame{data: []byte(`{"bulk":true}`)})
+	c.awaitWrite(t)
+	log.awaitLine(t, "OUTBOUND WRITER BLOCKED")
+
+	// Act.
+	c.release <- errors.New("frontend test: consumer went away")
+
+	// Assert.
+	line := log.awaitLine(t, "outbound writer UNBLOCKED")
+	if !strings.Contains(line, "ok=false") {
+		t.Fatalf("resolution reports a failed write as delivered: %q", line)
+	}
+	c.close()
+}
+
+func TestAWriteThatCompletesPromptlyIsNotAnnouncedAtAll(t *testing.T) {
+	// Arrange: the alarm is for a stall. A healthy consumer must produce no
+	// record at all, or the signal is worthless at the rate a boot writes.
+	log := newCapturedLogf()
+	s := newStallServer(t, log, time.Hour)
+	cl := newClient(defaultClientBuffer, nil, ClientKindHost)
+	c := newGatedConn()
+	go s.writeLoop(c, cl)
+
+	// Act: two frames written and released without delay.
+	s.enqueue(cl, outFrame{data: []byte(`{"bulk":true}`)})
+	c.awaitWrite(t)
+	c.release <- nil
+	s.enqueue(cl, outFrame{data: []byte(`{"bulk":false}`)})
+	c.awaitWrite(t)
+	c.release <- nil
+
+	// Assert.
+	if log.contains("OUTBOUND WRITER BLOCKED") {
+		t.Fatal("a prompt write was announced as a stall")
+	}
+	c.close()
 }
