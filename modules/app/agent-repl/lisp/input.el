@@ -5,8 +5,9 @@
 ;;; Metaprompt on-demand re-read
 
 ;; THE METAPROMPT IS THE SESSION'S SYSTEM PROMPT, and nothing here injects it.
-;; The shim reads `metaprompt.md' out of the session's own cwd and hands it to
-;; the SDK as a `claude_code' preset append (agent-shim/claude/shim/src/
+;; The shim reads `metaprompt.md' out of the canonical doom checkout at
+;; `~/.config/doom' — never out of the session's own cwd — and hands it to the
+;; SDK as a `claude_code' preset append (agent-shim/claude/shim/src/
 ;; metaprompt.ts), so the guidelines are re-sent with every request and survive
 ;; `/clear', `/compact', and resume without anyone re-establishing them.
 ;;
