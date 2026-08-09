@@ -53,14 +53,7 @@ func TestE2EASettledShellBubbleCarriesItsOutcomeAndExitStatus(t *testing.T) {
 		return it.GetUserMessage().GetContentString() == barrierPrompt
 	})
 
-	call := spawningCall(seen.items, launchToolUseID)
-	if call == nil {
-		t.Fatalf("no top-level tool_call item for the backgrounding call %q arrived: the daemon never published its classification verdict", launchToolUseID)
-	}
-	bubbleID := call.GetSpawnedBubbleId()
-	if bubbleID == "" {
-		t.Fatalf("the backgrounding call %q carries an empty spawned_bubble_id: a Bash whose BashResult.background_task_id is set detached work and must have a bubble", launchToolUseID)
-	}
+	bubbleID := gateOnAnchor(t, seen, launchToolUseID)
 
 	settled := lastSettledLiveness(seen, bubbleID)
 	if settled == nil {
