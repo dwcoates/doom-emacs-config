@@ -160,6 +160,7 @@ message FrontendCommand {
     PauseMergeQueueCmd pause_merge_queue = 30;
     ResumeMergeQueueCmd resume_merge_queue = 31;
     EvictMergeCmd evict_merge = 32;
+    AnswerMergeDequeueCmd answer_merge_dequeue = 33;
   }
 }
 

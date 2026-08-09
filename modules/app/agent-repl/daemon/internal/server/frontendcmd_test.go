@@ -139,13 +139,77 @@ func newGatedHandler(t *testing.T, turnActive bool, tasks LiveTaskSource) (*comm
 // so a gate test and an eviction test cannot end up wiring different handlers.
 func newGatedHandlerWithMerges(t *testing.T, turnActive bool, tasks LiveTaskSource, merges *fakeMerges) (*commandHandler, *fakePrompts, *fakeMerges) {
 	t.Helper()
+	h, p, _, offers := newGatedHandlerWithOffers(t, turnActive, tasks, merges, &fakeDequeueOffers{})
+	_ = offers
+	return h, p, merges
+}
+
+// newGatedHandlerWithOffers is newGatedHandlerWithMerges plus the dequeue offer
+// store, for the tests that assert on the interrupt's queue half.
+func newGatedHandlerWithOffers(t *testing.T, turnActive bool, tasks LiveTaskSource, merges *fakeMerges, offers MergeDequeueOfferStore) (*commandHandler, *fakePrompts, *fakeMerges, MergeDequeueOfferStore) {
+	t.Helper()
 	p := &fakePrompts{turnActive: turnActive}
 	h, err := newCommandHandler(p, merges, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil,
-		CommandHandlerConfig{Interrupt: InterruptGateConfig{Turns: p, LiveTasks: tasks}})
+		CommandHandlerConfig{
+			Interrupt:          InterruptGateConfig{Turns: p, LiveTasks: tasks},
+			MergeDequeueOffers: offers,
+		})
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
 	}
-	return h, p, merges
+	return h, p, merges, offers
+}
+
+// fakeDequeueOffers records the dequeue questions the handler raises, answers,
+// and reads back. A zero value holds no outstanding offer, which is what
+// MergeDequeueOfferID reports until something is raised.
+type fakeDequeueOffers struct {
+	// raised records the standing of every offer raised, in order.
+	raised []merge.Standing
+	// cleared records the `why` of every clear, in order.
+	cleared []string
+	// outstanding is what MergeDequeueOfferID answers with; outstandingOK gates
+	// whether it reports one at all.
+	outstanding   string
+	outstandingOK bool
+	// mintedID is the offer id a raise reports. Empty takes a fixed default, so
+	// the common test never has to state one.
+	mintedID string
+	raiseErr error
+	clearErr error
+	// onRaise runs INSIDE the raise, before it answers, so a test can read what
+	// the handler had already done at that instant rather than assume ordering.
+	onRaise func()
+}
+
+func (f *fakeDequeueOffers) RaiseMergeDequeueOffer(_ string, standing merge.Standing) (*frontendv1.MergeDequeueOffer, error) {
+	if f.onRaise != nil {
+		f.onRaise()
+	}
+	if f.raiseErr != nil {
+		return nil, f.raiseErr
+	}
+	f.raised = append(f.raised, standing)
+	id := f.mintedID
+	if id == "" {
+		id = "offer-1"
+	}
+	f.outstanding, f.outstandingOK = id, true
+	return &frontendv1.MergeDequeueOffer{OfferId: id, RunId: standing.RunID}, nil
+}
+
+func (f *fakeDequeueOffers) ClearMergeDequeueOffer(_, why string) (bool, error) {
+	if f.clearErr != nil {
+		return false, f.clearErr
+	}
+	f.cleared = append(f.cleared, why)
+	had := f.outstandingOK
+	f.outstanding, f.outstandingOK = "", false
+	return had, nil
+}
+
+func (f *fakeDequeueOffers) MergeDequeueOfferID(_ string) (string, bool) {
+	return f.outstanding, f.outstandingOK
 }
 
 func (f *fakePrompts) SubmitPrompt(_ context.Context, ws, requestID, text, _ string, promptOrigin corev1.PromptOrigin) error {
@@ -198,6 +262,20 @@ type fakeMerges struct {
 	// what was already recorded at the instant the coordinator was asked, which
 	// is the only way to observe the mark's ordering rather than assume it.
 	onEnqueue func()
+	// standing is what Standing reports, and standingQueued whether it reports
+	// anything at all. The zero values are the common "this workspace has no
+	// merge on the queue" answer, which raises no dequeue offer.
+	standing       merge.Standing
+	standingQueued bool
+	// dequeued records every workspace Dequeue was asked about, dequeueCount is
+	// what it reports having removed, and dequeueErr makes it fail.
+	dequeued     []string
+	dequeueCount int
+	dequeueErr   error
+	// onDequeue runs INSIDE Dequeue, before it answers, exactly as onEvict
+	// does: it is how a test reads what the handler had already done at the
+	// instant the dequeue was asked for rather than assuming the ordering.
+	onDequeue func()
 }
 
 func (f *fakeMerges) Enqueue(_ context.Context, req merge.Request) (merge.Position, error) {
@@ -231,6 +309,21 @@ func (f *fakeMerges) Evict(_ context.Context, workspace string) (int, error) {
 		return 0, f.evictErr
 	}
 	return f.evictCount, nil
+}
+
+func (f *fakeMerges) Standing(_ string) (merge.Standing, bool) {
+	return f.standing, f.standingQueued
+}
+
+func (f *fakeMerges) Dequeue(_ context.Context, workspace string) (int, error) {
+	if f.onDequeue != nil {
+		f.onDequeue()
+	}
+	f.dequeued = append(f.dequeued, workspace)
+	if f.dequeueErr != nil {
+		return 0, f.dequeueErr
+	}
+	return f.dequeueCount, nil
 }
 
 // mergedWorkspaces returns just the workspace names of the recorded merges, for

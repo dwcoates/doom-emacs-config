@@ -64,6 +64,7 @@ function workspaceEffect(over: Partial<WorkspaceStatusInput> = {}): AdapterEffec
       activeFaults: [],
       mergeLeaseHeld: false,
       mergeStatus: null,
+      mergeDequeueOffer: null,
       ...over,
     },
   };
@@ -388,6 +389,68 @@ describe("ingest workspace-state", () => {
     ).toThrow(/revision conflicted/);
   });
 
+  it("adopts the dequeue offer the interrupt raised", () => {
+    // Arrange — the card is drawn if and only if this field is held, so
+    // adopting it IS what puts the question on screen.
+    const store = new ConversationStore();
+    // Act
+    store.ingest([
+      workspaceEffect({
+        state: "merge_queued",
+        mergeDequeueOffer: {
+          offerId: "offer-1",
+          runId: "run-7",
+          raisedAtMs: 1000,
+          standing: { case: "waiting", value: { ahead: 2, position: 3, depth: 5 } },
+        },
+      }),
+    ]);
+    // Assert
+    expect(store.state.mergeDequeueOffer?.offerId).toBe("offer-1");
+  });
+
+  it("drops the dequeue offer when the daemon clears it", () => {
+    // Arrange — clearing the field is the ONLY way the card comes down, so a
+    // revision without it must take the question with it.
+    const store = new ConversationStore();
+    store.ingest([
+      workspaceEffect({
+        state: "merge_queued",
+        mergeDequeueOffer: {
+          offerId: "offer-1",
+          runId: "run-7",
+          raisedAtMs: 1000,
+          standing: { case: "waiting", value: { ahead: 2, position: 3, depth: 5 } },
+        },
+      }),
+    ]);
+    // Act
+    store.ingest([workspaceEffect({ state: "merged", causeSeq: 2, atMs: 2000 })]);
+    // Assert
+    expect(store.state.mergeDequeueOffer).toBeNull();
+  });
+
+  it("drops the dequeue offer when frontend state is invalidated", () => {
+    // Arrange — the answer travels over the socket this invalidation says is
+    // gone, so a card left standing would invite a click that reaches nobody.
+    const store = new ConversationStore();
+    store.ingest([
+      workspaceEffect({
+        state: "merge_queued",
+        mergeDequeueOffer: {
+          offerId: "offer-1",
+          runId: "run-7",
+          raisedAtMs: 1000,
+          standing: { case: "waiting", value: { ahead: 2, position: 3, depth: 5 } },
+        },
+      }),
+    ]);
+    // Act
+    store.invalidateFrontendState("websocket_disconnected");
+    // Assert
+    expect(store.state.mergeDequeueOffer).toBeNull();
+  });
+
   it("drops the merge status when frontend state is invalidated", () => {
     // Arrange — a status that outlived its freshness lease would keep a merge
     // on screen that nothing current claims.
@@ -503,7 +566,7 @@ describe("ingest workspace-state", () => {
       expect.stringContaining(
         "state=none->ready connectivity=none->operational status=none->thinking generation=g1 " +
           "turn_active=false->false live_tasks=0 faults=none " +
-          "merge_lease_held=false merge_status=none cause_kind=session_started cause_seq=7 at_ms=1234",
+          "merge_lease_held=false merge_status=none merge_dequeue_offer=none cause_kind=session_started cause_seq=7 at_ms=1234",
       ),
     ]);
   });

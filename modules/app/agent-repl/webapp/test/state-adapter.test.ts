@@ -105,6 +105,7 @@ describe("WorkspaceState mapping", () => {
           activeFaults: [],
           mergeLeaseHeld: false,
           mergeStatus: null,
+          mergeDequeueOffer: null,
         },
       },
     ]);
@@ -128,7 +129,7 @@ describe("WorkspaceState mapping", () => {
     expect(lines).toEqual([
       expect.stringContaining(
         "connectivity=operational status=ready proto=READY keyword=ready turn_active=false live_tasks=0 " +
-          "merge_lease_held=false merge_status=none " +
+          "merge_lease_held=false merge_status=none merge_dequeue_offer=none " +
           "faults=none cause_kind=session_started cause_seq=9 at_ms=1234",
       ),
     ]);

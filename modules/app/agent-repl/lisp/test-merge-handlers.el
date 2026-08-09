@@ -410,6 +410,95 @@ workspace entry."
              ((symbol-function 'agent-repl--ws-put) (lambda (&rest _) nil)))
      ,@body))
 
+(defmacro agent-repl-test--with-dequeue-echo (offer last put &rest body)
+  "Run BODY with the dequeue narrator's workspace reads stubbed.
+OFFER is what `:pushed-merge-dequeue-offer' answers and LAST what
+`:merge-dequeue-echo-last' answers.  PUT names a variable bound to a list
+the stubbed `agent-repl--ws-put' records `(KEY . VALUE)' pairs onto, so a
+test can assert on the mark the narrator leaves without a real workspace
+entry."
+  (declare (indent 3))
+  `(let ((,put nil))
+     (cl-letf (((symbol-function 'agent-repl--ws-get)
+                (lambda (_ws key)
+                  (pcase key
+                    (:pushed-merge-dequeue-offer ,offer)
+                    (:merge-dequeue-echo-last ,last))))
+               ((symbol-function 'agent-repl--ws-put)
+                (lambda (_ws key value) (push (cons key value) ,put))))
+       ,@body)))
+
+(defconst agent-repl-test--waiting-offer
+  '(:offer-id "offer-1" :run-id "run-7" :standing :waiting
+    :ahead 2 :position 3 :depth 5)
+  "A decoded dequeue offer for a merge queued behind two others.")
+
+(defconst agent-repl-test--running-offer
+  '(:offer-id "offer-1" :run-id "run-7" :standing :running)
+  "A decoded dequeue offer for the merge in flight.")
+
+(ert-deftest agent-repl-test-dequeue-echo-announces-a-waiting-offer ()
+  "A raised offer over a WAITING merge names its place and how many are ahead."
+  (agent-repl-test--with-captured-messages msgs
+    (agent-repl-test--with-dequeue-echo agent-repl-test--waiting-offer nil puts
+      (agent-repl--merge-echo-dequeue-offer "ws1" :merge-queued :merging))
+    (should (equal msgs
+                   '("agent-repl: ws1 interrupted — its merge is queued 3 of 5 with 2 ahead — answer in the gui panel")))))
+
+(ert-deftest agent-repl-test-dequeue-echo-announces-a-running-offer ()
+  "A raised offer over the merge IN FLIGHT says the answer aborts it."
+  (agent-repl-test--with-captured-messages msgs
+    (agent-repl-test--with-dequeue-echo agent-repl-test--running-offer nil puts
+      (agent-repl--merge-echo-dequeue-offer "ws1" :merging :merging))
+    (should (equal msgs
+                   '("agent-repl: ws1 interrupted — its merge is RUNNING — answer in the gui panel to abort it, or leave it")))))
+
+(ert-deftest agent-repl-test-dequeue-echo-records-the-announced-offer ()
+  "The announced offer id is marked, which is what makes the echo once-only."
+  (agent-repl-test--with-captured-messages _msgs
+    (agent-repl-test--with-dequeue-echo agent-repl-test--waiting-offer nil puts
+      (agent-repl--merge-echo-dequeue-offer "ws1" :merge-queued :merging)
+      (should (equal (assq :merge-dequeue-echo-last puts)
+                     '(:merge-dequeue-echo-last . "offer-1"))))))
+
+(ert-deftest agent-repl-test-dequeue-echo-skips-an-unchanged-question ()
+  "A re-push carrying the SAME question is silent."
+  (agent-repl-test--with-captured-messages msgs
+    (agent-repl-test--with-dequeue-echo agent-repl-test--waiting-offer "offer-1" puts
+      (agent-repl--merge-echo-dequeue-offer "ws1" :merge-queued :merge-queued))
+    (should-not msgs)))
+
+(ert-deftest agent-repl-test-dequeue-echo-announces-a-second-question ()
+  "A NEW offer after the first was answered is announced again."
+  (agent-repl-test--with-captured-messages msgs
+    (agent-repl-test--with-dequeue-echo
+        '(:offer-id "offer-2" :run-id "run-8" :standing :running) "offer-1" puts
+      (agent-repl--merge-echo-dequeue-offer "ws1" :merging :merging))
+    (should (= 1 (length msgs)))))
+
+(ert-deftest agent-repl-test-dequeue-echo-is-silent-when-the-card-comes-down ()
+  "A cleared offer echoes nothing — the merge's own terminal narration says it."
+  (agent-repl-test--with-captured-messages msgs
+    (agent-repl-test--with-dequeue-echo nil "offer-1" puts
+      (agent-repl--merge-echo-dequeue-offer "ws1" :merge-failed :merging))
+    (should-not msgs)))
+
+(ert-deftest agent-repl-test-dequeue-echo-drops-the-mark-when-cleared ()
+  "A cleared offer drops the mark, so a later question announces itself."
+  (agent-repl-test--with-captured-messages _msgs
+    (agent-repl-test--with-dequeue-echo nil "offer-1" puts
+      (agent-repl--merge-echo-dequeue-offer "ws1" :merge-failed :merging)
+      (should (equal (assq :merge-dequeue-echo-last puts)
+                     '(:merge-dequeue-echo-last . nil))))))
+
+(ert-deftest agent-repl-test-dequeue-echo-does-nothing-without-a-question ()
+  "A workspace that never had an offer leaves no mark to drop."
+  (agent-repl-test--with-captured-messages msgs
+    (agent-repl-test--with-dequeue-echo nil nil puts
+      (agent-repl--merge-echo-dequeue-offer "ws1" :merging :merge-queued)
+      (should-not puts))
+    (should-not msgs)))
+
 (ert-deftest agent-repl-test-merge-echo-narrates-a-merge-phase ()
   "A pushed merge-phase transition is echoed in the minibuffer."
   (agent-repl-test--with-captured-messages msgs

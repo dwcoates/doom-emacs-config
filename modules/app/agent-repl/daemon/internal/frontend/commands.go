@@ -105,6 +105,13 @@ type CommandHandler interface {
 	// — never that the compaction has landed. The gate's release travels on its
 	// own channel, the SessionView the cleared hibernation publishes.
 	ReviveSession(ctx context.Context, workspace, requestID string, cmd *frontendv1.ReviveSessionCmd) error
+	// AnswerMergeDequeue resolves the workspace's outstanding merge dequeue
+	// offer — the question an interrupt raises instead of silently taking a
+	// queued merge off the queue. A `dequeue` arm evicts the waiting merges and
+	// aborts a running one; a `keep` arm only takes the card down. An offer id
+	// that is not the outstanding one is a loud nack, so a click on a
+	// superseded card cannot dequeue the merge its replacement is asking about.
+	AnswerMergeDequeue(ctx context.Context, workspace, requestID string, cmd *frontendv1.AnswerMergeDequeueCmd) error
 }
 
 // Dispatch routes a FrontendCommand to the handler and returns the CommandAck to
@@ -179,6 +186,8 @@ func DispatchWithResponse(ctx context.Context, logf dlog.Logf, h CommandHandler,
 		err = h.HibernateWorkspace(ctx, ws, reqID, c.HibernateWorkspace)
 	case *frontendv1.FrontendCommand_ReviveSession:
 		err = h.ReviveSession(ctx, ws, reqID, c.ReviveSession)
+	case *frontendv1.FrontendCommand_AnswerMergeDequeue:
+		err = h.AnswerMergeDequeue(ctx, ws, reqID, c.AnswerMergeDequeue)
 	case *frontendv1.FrontendCommand_SetModel:
 		selectedModel, err = h.SetModel(ctx, ws, reqID, c.SetModel)
 	case *frontendv1.FrontendCommand_PublishWorkspaceRoster:

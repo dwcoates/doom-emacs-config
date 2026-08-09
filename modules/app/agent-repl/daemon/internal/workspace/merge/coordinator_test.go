@@ -82,21 +82,30 @@ func newFakePicker(capacity int) *fakePicker {
 	}
 }
 
-func (p *fakePicker) Merge(_ context.Context, req Request) (Result, error) {
+// Merge HONORS ITS CONTEXT, exactly as merge.Driver does: every git command
+// and every suite the real one runs is ctx-bound, so a cancelled run stops
+// where it is. Without that case here a dequeue of a running merge would
+// deadlock against a fake that only the test can release, and the abort path
+// could not be exercised at all.
+func (p *fakePicker) Merge(ctx context.Context, req Request) (Result, error) {
 	p.merges <- req
 	select {
 	case r := <-p.results:
 		return r.res, r.err
+	case <-ctx.Done():
+		return Result{}, ctx.Err()
 	case <-p.stop:
 		return Result{}, errStopped
 	}
 }
 
-func (p *fakePicker) Resume(_ context.Context, req Request) (Result, error) {
+func (p *fakePicker) Resume(ctx context.Context, req Request) (Result, error) {
 	p.resumes <- req
 	select {
 	case r := <-p.resumeResults:
 		return r.res, r.err
+	case <-ctx.Done():
+		return Result{}, ctx.Err()
 	case <-p.stop:
 		return Result{}, errStopped
 	}

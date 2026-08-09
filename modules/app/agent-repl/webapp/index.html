@@ -79,6 +79,14 @@
            SessionView, re-rendered on every chrome frame, and it clears when
            a pushed view drops the hibernation field. -->
       <div id="revival-gate"></div>
+      <!-- The merge dequeue offer's slot: the question an interrupt raises
+           over a workspace whose merge is on the queue. Like the revival gate
+           above it carries NO dismiss control and is a pure function of the
+           daemon's live WorkspaceState — the daemon clears the offer to take
+           it down, so there is no local decision to fall out of step. It is
+           ringed in the alarm red rather than the picker yellow because its
+           confirm button aborts work rather than choosing a harmless answer. -->
+      <div id="merge-dequeue"></div>
       <!-- RETIRED (F4): the degraded-state banner lived here. Degradation is
            now a self-resolving failure card IN the feed, because a user whose
            workspace changed color needs to find out why from the conversation

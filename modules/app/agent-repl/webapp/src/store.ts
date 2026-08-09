@@ -17,6 +17,7 @@ import type { CounterEntry } from "./counter-menu.js";
 import type {
   FailureCardView,
   HibernationDetail,
+  MergeDequeueOffer,
   MergeStatus,
   ResponseUsageStamp,
   RuntimeFault,
@@ -587,6 +588,16 @@ export interface StoreState {
    */
   mergeStatus: MergeStatus | null;
   /**
+   * THE outstanding question about taking this workspace's merge off the
+   * queue, raised by an interrupt, or null when there is nothing to answer.
+   *
+   * It is a WorkspaceState fact like the two merge fields above, and it is
+   * held rather than derived for the same reason: the daemon owns whether the
+   * question stands, and the card is drawn if and only if this is non-null. A
+   * locally remembered dismissal would be a second owner of that fact.
+   */
+  mergeDequeueOffer: MergeDequeueOffer | null;
+  /**
    * THE daemon-global scheduled-shutdown drain lease, or null when no bounce
    * is pending. Not a per-workspace fact: while it is held no new turn starts
    * anywhere, so it paints one global banner rather than a per-session chip.
@@ -672,6 +683,7 @@ function initialState(): StoreState {
     activeFaults: [],
     mergeLeaseHeld: false,
     mergeStatus: null,
+    mergeDequeueOffer: null,
     shutdownSchedule: null,
     hibernation: null,
     fences: new Map(),
@@ -703,6 +715,11 @@ function workspaceStateFingerprint(ws: WorkspaceStatusInput): string {
     // genuinely different merge readings identically, so the equal-revision
     // conflict check could no longer tell a real duplicate from a tick.
     mergeStatus: ws.mergeStatus,
+    // The offer is PART of the revision's identity too: raising and clearing a
+    // question move nothing else on the message, so a fingerprint without it
+    // would read the frame that puts the card up as a duplicate of the one
+    // before it.
+    mergeDequeueOffer: ws.mergeDequeueOffer,
   });
 }
 
@@ -1090,6 +1107,7 @@ export class ConversationStore {
       s.turnInFlight ||
       s.mergeLeaseHeld ||
       s.mergeStatus !== null ||
+      s.mergeDequeueOffer !== null ||
       s.shutdownSchedule !== null ||
       this.progress !== null;
     this.log(
@@ -1109,6 +1127,10 @@ export class ConversationStore {
     // after the state that claimed it stopped being current.
     s.mergeLeaseHeld = false;
     s.mergeStatus = null;
+    // The question goes with them. It is answered by a command over the socket
+    // this invalidation says is gone, so a card left standing would invite a
+    // click that can reach nobody.
+    s.mergeDequeueOffer = null;
     // THE DRAIN LEASE IS A LIVE DAEMON FACT, held by a daemon this client can
     // no longer hear from. A banner announcing a pending bounce that may
     // already have happened is exactly the stale claim this invalidation
@@ -1204,6 +1226,7 @@ export class ConversationStore {
       activeFaults: this.state.activeFaults,
       mergeLeaseHeld: this.state.mergeLeaseHeld,
       mergeStatus: this.state.mergeStatus,
+      mergeDequeueOffer: this.state.mergeDequeueOffer,
     });
   }
 
@@ -1269,6 +1292,7 @@ export class ConversationStore {
     // footer's merge chip and its phase word can never disagree.
     s.mergeLeaseHeld = ws.mergeLeaseHeld;
     s.mergeStatus = ws.mergeStatus;
+    s.mergeDequeueOffer = ws.mergeDequeueOffer;
     s.workspaceStateAtMs = ws.atMs;
     s.workspaceStateCauseSeq = ws.causeSeq;
     const wasActive = s.turnInFlight;
@@ -1288,7 +1312,8 @@ export class ConversationStore {
         `turn_active=${previousActive}->${ws.turnActive} live_tasks=${ws.liveTaskCount} ` +
         `faults=${ws.activeFaults.map((fault) => `${fault.component}/${fault.faultType}`).join(",") || "none"} ` +
         `merge_lease_held=${ws.mergeLeaseHeld} ` +
-        `merge_status=${mergeStatusLogValue(ws.mergeStatus)} cause_kind=${ws.causeKind} ` +
+        `merge_status=${mergeStatusLogValue(ws.mergeStatus)} ` +
+        `merge_dequeue_offer=${ws.mergeDequeueOffer?.offerId ?? "none"} cause_kind=${ws.causeKind} ` +
         `cause_seq=${ws.causeSeq} at_ms=${ws.atMs}`,
     );
     return true;

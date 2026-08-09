@@ -1219,3 +1219,33 @@ describe("surfaceRefusal", () => {
     expect([s.revealed, s.filed]).toEqual([[], [card]]);
   });
 });
+
+describe("answering the merge dequeue offer", () => {
+  it("sends the offer id and the dequeue arm", async () => {
+    // Arrange
+    const { dispatcher, sent } = newDispatcher();
+    // Act
+    const p = dispatcher.answerMergeDequeue("/w", "offer-1", "dequeue");
+    dispatcher.observe(ackFrame("r1", true));
+    await p;
+    // Assert
+    expect(JSON.parse(sent[0])).toMatchObject({
+      workspace: "/w",
+      answerMergeDequeue: { offerId: "offer-1", dequeue: {} },
+    });
+  });
+
+  it("sends keep as a real answer rather than staying silent", async () => {
+    // Arrange — the daemon clearing the offer is what takes the card down, so
+    // a decline that sent nothing would leave the question outstanding.
+    const { dispatcher, sent } = newDispatcher();
+    // Act
+    const p = dispatcher.answerMergeDequeue("/w", "offer-1", "keep");
+    dispatcher.observe(ackFrame("r1", true));
+    await p;
+    // Assert
+    expect(JSON.parse(sent[0])).toMatchObject({
+      answerMergeDequeue: { offerId: "offer-1", keep: {} },
+    });
+  });
+});

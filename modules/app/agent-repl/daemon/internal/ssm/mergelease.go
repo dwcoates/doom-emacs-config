@@ -604,6 +604,10 @@ func (m *Manager) stampMergeFactsLocked(workspace string, r resolved, msg *front
 	// It is the ONLY queue surface on the message now that the flat
 	// merge_queue_position / merge_queue_depth pair is retired.
 	m.stampMergeStatusLocked(workspace, r.mergePhase, msg)
+	// The outstanding dequeue question rides the same funnel as the facts above
+	// for the same reason they do: it is a field of the message, and a message
+	// built anywhere else would be a card that silently fails to appear.
+	m.stampMergeDequeueOfferLocked(workspace, msg)
 }
 
 // pushCurrentLocked re-resolves the workspace and pushes it unconditionally.
