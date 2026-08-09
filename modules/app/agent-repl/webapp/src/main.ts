@@ -6,7 +6,11 @@
  *   ?workspace=<dir>    render this workspace (absolute path, URL-encoded)
  *   ?session=<id>       render this one session (else one is created)
  *   ?fake=1             create the session against the offline fake SDK
- *   ?parent_ws=<name>   parent workspace basename shown in the topbar
+ *
+ * RETIRED: `?parent_ws`. The header's identity is the daemon's resolved
+ * `TopbarView.title` now, composed by the one authority on what a workspace is
+ * called; a parent name pasted in from the URL was a second composer of the
+ * same fact, and the caller that read it is gone.
  *
  * `?workspace` and `?session` are the two page ADDRESSES; address.ts owns
  * reading them and the scoped daemon socket each one opens. The URL is read
@@ -16,11 +20,9 @@
 import {
   TOPBAR_AGENT_ATTR,
   runningAgentClocks,
-  sessionAccountingLabel,
-  sessionTopbarDatapoints,
   topbarClickAction,
-  topbarInfoHtml,
 } from "./topbar.js";
+import { tokensDisclosureHtml, topbarViewHtml } from "./topbar-view.js";
 import { addressLabel, pageAddress, scopedStreamUrl, type PageAddress } from "./address.js";
 import { AgentClock } from "./agent-clock.js";
 import { AGENTS_SPEC, sessionSubagents } from "./agents.js";
@@ -544,7 +546,6 @@ async function boot(): Promise<void> {
   const loginAccountEl = must("login-account");
   const loginTermEl = must("login-term");
   const loginCloseEl = must<HTMLButtonElement>("login-close");
-  const parentWs = params.get("parent_ws");
 
   // Whether the topbar's tokens breakdown is open. It lives HERE rather than
   // in the DOM because renderChrome rewrites the whole topbar on every frame,
@@ -587,19 +588,21 @@ async function boot(): Promise<void> {
   let lastFooterStateSignature = "";
   const renderChrome = (): void => {
     const s = store.state;
-    // topbarInfoHtml escapes every value it interpolates. The same strip
-    // renderer draws the agent-scoped bubble topbars (see topbar.ts).
-    infoEl.innerHTML = topbarInfoHtml(sessionTopbarDatapoints(s, parentWs), {
-      // The header strip carries NO roster chips any more (they relocated into
-      // the footer's counters cluster), so only the tokens disclosure can open.
-      agentsOpen: false,
-      tasksOpen: false,
-      tokensOpen: tokensMenuOpen,
-    });
-    const accounting = sessionAccountingLabel(s);
-    if (accounting !== null) {
-      infoEl.innerHTML += `<span class="session-accounting">${escapeHtml(accounting)}</span>`;
-    }
+    // THE HEADER IS THE DAEMON'S RESOLVED VIEW NOW. The title, the session
+    // line, the model selector, the connectivity glyph and the accounting line
+    // all arrive composed on `TopbarView`, and the token figures arrive
+    // resolved on `TokenBreakdownView`. Both renderers escape every value they
+    // interpolate.
+    //
+    // ABSENCE RENDERS ABSENCE (I3). Before either view has been published for
+    // this workspace the header is EMPTY — there is deliberately no fallback
+    // that pieces a title together from whatever else the store holds, because
+    // a client-composed stand-in is indistinguishable on screen from a real
+    // resolution. The daemon and this webapp deploy together, so the views
+    // arrive as soon as the daemon does.
+    const ws = s.cwd;
+    infoEl.innerHTML =
+      topbarViewHtml(store.topbar(ws)) + tokensDisclosureHtml(store.tokenBreakdown(ws), tokensMenuOpen);
     // The idle-with-live-async signal breathes as the sidebar's amber dot on
     // this session's own row rather than as strip text. The flag is the feed
     // renderer's own gate reading (idle + live async), read back here so the
