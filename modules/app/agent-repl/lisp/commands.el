@@ -2923,6 +2923,56 @@ revival path that bypasses the Doom hook to preserve the exact ws name."
             (agent-repl--picker-open-selection sel))
         (agent-repl--log (agent-repl--ws-current-log-name) "switch-to-project: picker cancelled-or-empty")))))
 
+(defun agent-repl--main-worktree-source-dir ()
+  "Return the directory the main-worktree lookup starts from.
+The current workspace's `:project-dir' when it has one — a workspace's
+panel buffers can carry a foreign `default-directory', so the recorded
+project dir is the authoritative statement of which repo the workspace
+belongs to.  Falls back to `default-directory' when there is no current
+workspace or it has no project dir recorded (e.g. a plain Doom
+perspective that agent-repl never created)."
+  (let ((current (ignore-errors (agent-repl--ws-current-name))))
+    (or (and current (agent-repl--ws-get current :project-dir))
+        default-directory)))
+
+(defun agent-repl-switch-to-main-worktree-workspace ()
+  "Switch to the workspace of the current repo's main worktree (`SPC o m').
+
+From any workspace on a linked worktree of, say, the doom repository,
+this lands on the `doom' workspace — the one rooted at the main
+checkout.  The main worktree is derived from the git common-dir via
+`agent-repl--main-worktree-dir', so it is correct regardless of branch,
+directory naming, or how the worktree was created.
+
+When a live workspace already owns that directory, switches to it by
+name.  Otherwise routes through `agent-repl-switch-to-project', which
+creates or activates the persp keyed on the project basename — the same
+path any not-yet-open project takes.
+
+Signals `user-error' when the current directory belongs to no
+repository, or when the repository is bare and therefore has no main
+checkout."
+  (interactive)
+  (let* ((source (agent-repl--main-worktree-source-dir))
+         (main-dir (agent-repl--main-worktree-dir source))
+         (log-ws (agent-repl--ws-current-log-name)))
+    (unless main-dir
+      (agent-repl--log log-ws
+                       "switch-to-main-worktree: REJECT source=%s reason=no-main-worktree"
+                       source)
+      (user-error "No main worktree for %s (not a repository, or bare)" source))
+    (let ((owner (agent-repl--ws-dir-owner main-dir)))
+      (if owner
+          (progn
+            (agent-repl--log log-ws
+                             "switch-to-main-worktree: source=%s main-dir=%s route=live-workspace ws=%s"
+                             source main-dir owner)
+            (agent-repl--ws-switch owner))
+        (agent-repl--log log-ws
+                         "switch-to-main-worktree: source=%s main-dir=%s route=switch-to-project"
+                         source main-dir)
+        (agent-repl-switch-to-project main-dir)))))
+
 ;;;; Workspace cycling
 
 (defun agent-repl--workspace-cycle (n)

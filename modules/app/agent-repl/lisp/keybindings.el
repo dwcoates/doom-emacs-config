@@ -700,6 +700,10 @@ so a chord wins key lookup regardless of which evil state is current.")
       ;; the process back to the machine and keeps the conversation
       ;; rehydratable.  Neither loses the conversation.
       :desc "Hibernate session (reclaim its memory)" "o z" #'agent-repl-hibernate-workspace
+      ;; SPC o m -- go home.  Every worktree workspace of a repo has exactly one
+      ;; main checkout behind it, so this is a jump with no picker: from any
+      ;; workspace on a linked worktree of the doom repo, `o m' lands on `doom'.
+      :desc "Switch to main worktree workspace" "o m" #'agent-repl-switch-to-main-worktree-workspace
       :desc "Toggle hide-project-dirs (ChessCom workspaces)" "o H" #'agent-repl-toggle-hide-project-dirs)
 
 (map! :leader
