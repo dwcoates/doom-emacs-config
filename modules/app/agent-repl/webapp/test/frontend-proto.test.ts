@@ -91,10 +91,9 @@ describe("SystemFailure typed query termination", () => {
   const base = { errorClass: "ERROR_CLASS_INTERNAL", errorType: "unexpected_query_termination", message: "query ended", sourceDetail: "sdk iterator ended", resolvedAtMs: "0", itemUuid: "failure-1" };
 
   it("preserves every identity field and typed iterator cause", () => {
-    const got = decodeSystemFailure({ ...base, queryTermination: { agentReplSessionId: "session-1", queryInstanceId: "query-1", vendorSessionId: "claude-1", observedAtMs: "1700000000000", iteratorFailure: { cause: "child exited 137" } } }, "failure");
+    const got = decodeSystemFailure({ ...base, queryTermination: { queryInstanceId: "query-1", vendorSessionId: "claude-1", observedAtMs: "1700000000000", iteratorFailure: { cause: "child exited 137" } } }, "failure");
     expect(got.detail.kind).toBe("queryTermination");
     if (got.detail.kind !== "queryTermination") throw new Error("wrong detail");
-    expect(got.detail.value.agentReplSessionId).toBe("session-1");
     expect(got.detail.value.queryInstanceId).toBe("query-1");
     expect(got.detail.value.vendorIdentity).toEqual({ case: "vendorSessionId", value: "claude-1" });
     expect(got.detail.value.observedAtMs).toBe(1700000000000n);
@@ -104,17 +103,25 @@ describe("SystemFailure typed query termination", () => {
   });
 
   it("rejects missing termination identity", () => {
-    expect(() => decodeSystemFailure({ ...base, queryTermination: { agentReplSessionId: "session-1", queryInstanceId: "", vendorSessionId: "claude-1", observedAtMs: "1700000000000", unexpectedEof: {} } }, "failure")).toThrow(/requires session, query, and observed-time identity/);
+    expect(() => decodeSystemFailure({ ...base, queryTermination: { queryInstanceId: "", vendorSessionId: "claude-1", observedAtMs: "1700000000000", unexpectedEof: {} } }, "failure")).toThrow(/requires query and observed-time identity/);
+  });
+
+  it("rejects a query termination that still carries the retired agent-repl session id", () => {
+    // Arrange - the figma-idl reshape moved session identity onto the carrying
+    // push's fence, so a producer still stamping it here is out of contract.
+    const queryTermination = { agentReplSessionId: "session-1", queryInstanceId: "query-1", vendorSessionId: "claude-1", observedAtMs: "1700000000000", unexpectedEof: {} };
+    // Act / Assert
+    expect(() => decodeSystemFailure({ ...base, queryTermination }, "failure")).toThrow(/agentReplSessionId/);
   });
 
   it("rejects competing structured failure details", () => {
-    const sessionResume = { agentReplSessionId: "session-1", claudeSessionId: "claude-1", cwd: "/repo", configDir: "", resolvedConfigDir: "/config", create: {}, transcriptUnavailable: { searchedPaths: [] } };
-    const queryTermination = { agentReplSessionId: "session-1", queryInstanceId: "query-1", vendorSessionId: "claude-1", observedAtMs: "1700000000000", unexpectedEof: {} };
+    const sessionResume = { claudeSessionId: "claude-1", cwd: "/repo", configDir: "", resolvedConfigDir: "/config", create: {}, transcriptUnavailable: { searchedPaths: [] } };
+    const queryTermination = { queryInstanceId: "query-1", vendorSessionId: "claude-1", observedAtMs: "1700000000000", unexpectedEof: {} };
     expect(() => decodeSystemFailure({ ...base, sessionResume, queryTermination }, "failure")).toThrow(/at most one structured detail/);
   });
 
   it("preserves exact query termination inside session-resume evidence", () => {
-    const sessionResume = { agentReplSessionId: "session-1", claudeSessionId: "claude-1", cwd: "/repo", configDir: "", resolvedConfigDir: "/config", automaticRestore: {}, queryTermination: { agentReplSessionId: "session-1", queryInstanceId: "query-1", vendorSessionId: "claude-1", observedAtMs: "1700000000000", startupFailure: { cause: "resume rejected" } } };
+    const sessionResume = { claudeSessionId: "claude-1", cwd: "/repo", configDir: "", resolvedConfigDir: "/config", automaticRestore: {}, queryTermination: { queryInstanceId: "query-1", vendorSessionId: "claude-1", observedAtMs: "1700000000000", startupFailure: { cause: "resume rejected" } } };
     const got = decodeSystemFailure({ ...base, sessionResume }, "failure");
     expect(got.detail.kind).toBe("sessionResume");
     if (got.detail.kind !== "sessionResume" || got.detail.value.cause.case !== "queryTermination") throw new Error("wrong detail");
@@ -122,7 +129,7 @@ describe("SystemFailure typed query termination", () => {
   });
 
   it("preserves a non-query bring-up cause and rejects present blank", () => {
-    const sessionResume = { agentReplSessionId: "session-1", claudeSessionId: "claude-1", cwd: "/repo", configDir: "", resolvedConfigDir: "/config", automaticRestore: {}, bringUpFailure: { cause: "shim readiness timed out" } };
+    const sessionResume = { claudeSessionId: "claude-1", cwd: "/repo", configDir: "", resolvedConfigDir: "/config", automaticRestore: {}, bringUpFailure: { cause: "shim readiness timed out" } };
     const got = decodeSystemFailure({ ...base, sessionResume }, "failure");
     expect(got.detail.kind).toBe("sessionResume");
     if (got.detail.kind !== "sessionResume") throw new Error("wrong detail");
