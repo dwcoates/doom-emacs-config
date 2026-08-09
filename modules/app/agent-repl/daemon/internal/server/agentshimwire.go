@@ -268,7 +268,12 @@ func sessionPublicationGate(bridge WorkspaceCreationBridge, logf func(string, ..
 		if decision.Materialized {
 			return true, nil
 		}
-		logf("server: session publication HELD job_id=%q worktree=%q session=%q frame_session=%q reason=awaiting_workspace_materialization", decision.JobID, decision.WorktreePath, decision.SessionID, sessionID)
+		// The hold is still a hold without a sink for its record: a focused
+		// unit construction may pass no logf, and dropping the FRAME is the
+		// part that must never depend on the logging.
+		if logf != nil {
+			logf("server: session publication HELD job_id=%q worktree=%q session=%q frame_session=%q reason=awaiting_workspace_materialization", decision.JobID, decision.WorktreePath, decision.SessionID, sessionID)
+		}
 		return false, nil
 	}
 }
