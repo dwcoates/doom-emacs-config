@@ -221,9 +221,16 @@ func (m *Manager) releaseKeepAliveHolds(d *sessionController, pingTurnID string,
 	// drop and nothing to persist nil over.
 	owned := m.takeQueueForRewind(d)
 
-	rewound := false
+	// THE TWO FACTS ARE SEPARATE AND ARE KEPT SEPARATE. `rewound` is whether a
+	// CUT was taken, which is what the log lines below report; `debtDischarged`
+	// is whether the transcript is now free of keep-alive turns, which is what
+	// the residue ledger asks. A tail that held nothing droppable discharges the
+	// debt without a cut, and reporting that as "rewound" would claim a
+	// truncation that never happened (keepaliveresidue.go).
+	rewound, debtDischarged := false, false
 	if _, err := m.rewindKeepAliveTurns(m.rootCtx, workspace, sessionID, []string{pingTurnID}); err != nil {
 		if errors.Is(err, session.ErrNoRewindNeeded) {
+			debtDischarged = true
 			m.logf("session-controller: keep-alive rewind SKIPPED ws=%q session=%s turn_id=%s — the transcript tail holds no keep-alive turns to drop",
 				workspace, sessionID, pingTurnID)
 		} else {
@@ -231,7 +238,7 @@ func (m *Manager) releaseKeepAliveHolds(d *sessionController, pingTurnID string,
 				workspace, sessionID, pingTurnID, err)
 		}
 	} else {
-		rewound = true
+		rewound, debtDischarged = true, true
 	}
 
 	// THE LIVE CONTROLLER IS RE-RESOLVED. A successful rewind replaced the one
@@ -246,6 +253,14 @@ func (m *Manager) releaseKeepAliveHolds(d *sessionController, pingTurnID string,
 	// including the abandoned one: a claim that outlived its rewind would hold
 	// every later prompt on the workspace forever.
 	m.releaseKeepAliveRewindLocked(workspace, pingTurnID)
+	// THE WORKSPACE'S WHOLE DEBT IS DISCHARGED BY A REWIND THAT LANDED, not
+	// only the turn this aftermath named. The cut removes the entire trailing
+	// run of droppable turns (session.PlanRewind), so a ping recorded by an
+	// earlier end went with it; keeping its row would make every later path
+	// re-run a rewind against a clean transcript forever (keepaliveresidue.go).
+	if debtDischarged {
+		m.clearKeepAliveResidueLocked(workspace)
+	}
 	live, ok := m.byWS[workspace]
 	if !ok {
 		// NOTHING IS DISCARDED HERE EITHER. The workspace has no controller to

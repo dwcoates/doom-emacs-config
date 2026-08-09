@@ -137,6 +137,18 @@ func (m *Manager) warmCompactEligibleLocked(d *sessionController, anchorTurnEndM
 //
 // Returns ErrWarmCompactNotEligible when the re-check under the mutex declines.
 func (m *Manager) SubmitWarmCompaction(ctx context.Context, workspace string, anchorTurnEndMs int64) (turnID string, err error) {
+	// THE KEEP-ALIVE DEBT IS SETTLED FIRST, for the compact-first revival's
+	// reason and with the same permanence: a compaction reads the whole
+	// conversation and writes back a SUMMARY of it, so keep-alive turns standing
+	// at the transcript tail when it runs are folded into the conversation
+	// itself, where no later rewind can reach them.
+	//
+	// It runs OUTSIDE the mutex and BEFORE the eligibility read on purpose: it
+	// may bounce the shim, and the decision below re-reads everything under the
+	// mutex anyway. A ping in flight makes the settle decline and the
+	// eligibility check refuse, which is the same answer reached twice.
+	m.settleKeepAliveResidue(ctx, workspace, "warm-compaction")
+
 	m.mu.Lock()
 	d, live := m.byWS[workspace]
 	if !live {
