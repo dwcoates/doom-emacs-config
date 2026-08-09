@@ -121,7 +121,25 @@ func TestMergeSkillCallIgnoresACallWithNoInput(t *testing.T) {
 	}
 }
 
-func TestMergeSkillCallInItemFindsTheCallAmongAnItemsCalls(t *testing.T) {
+// AMENDED: MergeSkillCallInItem is gone, because a per-item pass that answered
+// only "is this the merge call" would have to be run beside a second pass
+// answering "is this some other skill", and the two could disagree about one
+// call. SkillToolCallsInItem + SkillCall is the ONE pass, and each invocation
+// carries its own merge verdict.
+
+// classifyItem is the pass the consumer makes: every Skill call in the item,
+// each one classified once.
+func classifyItem(item *frontendv1.ConversationItem) []SkillInvocation {
+	var out []SkillInvocation
+	for _, use := range SkillToolCallsInItem(item) {
+		if inv, ok := SkillCall(use); ok {
+			out = append(out, inv)
+		}
+	}
+	return out
+}
+
+func TestClassifyingAnItemFindsTheMergeInvocationAmongAnItemsCalls(t *testing.T) {
 	// Arrange
 	item := &frontendv1.ConversationItem{Item: &frontendv1.ConversationItem_Agent{
 		Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{
@@ -133,32 +151,143 @@ func TestMergeSkillCallInItemFindsTheCallAmongAnItemsCalls(t *testing.T) {
 	}}
 
 	// Act
-	toolUseID, label, ok := MergeSkillCallInItem(item)
+	got := classifyItem(item)
 
 	// Assert
-	if !ok {
-		t.Fatal("the item made the merge invocation and the classifier missed it")
+	var merge *SkillInvocation
+	for i := range got {
+		if got[i].IsMerge {
+			merge = &got[i]
+		}
 	}
-	if toolUseID != "toolu_merge" {
-		t.Errorf("tool_use_id = %q, want the merge call's own id", toolUseID)
+	if merge == nil {
+		t.Fatalf("the item made the merge invocation and the classifier reported %d invocation(s), none of them the merge", len(got))
 	}
-	if label != "/create-or-update-workspace merge now" {
-		t.Errorf("label = %q, want the invocation verbatim", label)
+	if merge.ToolUseID != "toolu_merge" {
+		t.Errorf("tool_use_id = %q, want the merge call's own id", merge.ToolUseID)
+	}
+	if merge.Label != "/create-or-update-workspace merge now" {
+		t.Errorf("label = %q, want the invocation verbatim", merge.Label)
 	}
 }
 
-func TestMergeSkillCallInItemReportsNothingForAnOrdinaryItem(t *testing.T) {
+func TestClassifyingAnItemReportsEveryInvocationInOrder(t *testing.T) {
+	// Arrange: a near-miss skill and the merge, both real invocations.
+	item := &frontendv1.ConversationItem{Item: &frontendv1.ConversationItem_Agent{
+		Agent: &frontendv1.AgentEmission{Emission: &frontendv1.AgentEmission_Response{
+			Response: &frontendv1.AgentResponse{Body: &datav1.ApiAssistantMessage{Content: []*datav1.ContentBlock{
+				{Block: &datav1.ContentBlock_ToolUse{ToolUse: skillCall(t, "Skill", "create-or-update-pr", "merge")}},
+				{Block: &datav1.ContentBlock_ToolUse{ToolUse: skillCall(t, "Skill", "create-or-update-workspace", "merge now")}},
+			}}},
+		}},
+	}}
+
+	// Act
+	got := classifyItem(item)
+
+	// Assert: every Skill call is an invocation of something; only one of them
+	// is the merge.
+	if len(got) != 2 {
+		t.Fatalf("classified %d invocations, want both of the item's Skill calls", len(got))
+	}
+	if got[0].SkillName != "create-or-update-pr" {
+		t.Errorf("the first invocation is %q, want the item's first Skill call", got[0].SkillName)
+	}
+}
+
+func TestClassifyingAnItemReportsNothingForAnOrdinaryItem(t *testing.T) {
 	// Arrange
 	item := &frontendv1.ConversationItem{Item: &frontendv1.ConversationItem_UserMessage{
 		UserMessage: &datav1.ApiUserMessage{Content: &datav1.ApiUserMessage_ContentString{ContentString: "merge the workspace please"}},
 	}}
 
 	// Act
-	_, _, ok := MergeSkillCallInItem(item)
+	got := classifyItem(item)
+
+	// Assert
+	if len(got) != 0 {
+		t.Fatal("a user asking in prose for a merge is not a Skill invocation and must open no bubble")
+	}
+}
+
+// --- the skill reading ------------------------------------------------------
+
+func TestSkillCallClassifiesANonMergeInvocationAsASkill(t *testing.T) {
+	// Arrange
+	use := skillCall(t, "Skill", "demo", "run it")
+
+	// Act
+	inv, ok := SkillCall(use)
+
+	// Assert
+	if !ok {
+		t.Fatal("every Skill call that names a skill is an invocation")
+	}
+	if inv.IsMerge {
+		t.Fatal("a skill that is not /create-or-update-workspace merge is never the merge run")
+	}
+}
+
+func TestSkillCallCarriesTheSkillNameVerbatim(t *testing.T) {
+	// Arrange, Act
+	inv, _ := SkillCall(skillCall(t, "Skill", "demo", "run it"))
+
+	// Assert
+	if inv.SkillName != "demo" {
+		t.Fatalf("skill name = %q, want the input's own value", inv.SkillName)
+	}
+}
+
+func TestSkillCallCarriesTheArgsVerbatim(t *testing.T) {
+	// Arrange: the args carry padding a label would tidy away.
+	inv, _ := SkillCall(skillCall(t, "Skill", "demo", "  run it  "))
+
+	// Assert
+	if inv.Args != "  run it  " {
+		t.Fatalf("args = %q, want the input's own value untouched: the contract says verbatim", inv.Args)
+	}
+}
+
+func TestSkillCallLabelsAnInvocationAsTheAgentWroteIt(t *testing.T) {
+	// Arrange, Act
+	inv, _ := SkillCall(skillCall(t, "Skill", "demo", "run it"))
+
+	// Assert
+	if inv.Label != "/demo run it" {
+		t.Fatalf("label = %q, want the invocation as written", inv.Label)
+	}
+}
+
+func TestSkillCallLabelsAnArglessInvocationWithoutATrailingSpace(t *testing.T) {
+	// Arrange, Act
+	inv, _ := SkillCall(skillCall(t, "Skill", "demo", ""))
+
+	// Assert
+	if inv.Label != "/demo" {
+		t.Fatalf("label = %q, want %q: a skill invoked with no arguments has no arguments to render", inv.Label, "/demo")
+	}
+}
+
+func TestSkillCallIgnoresANonSkillTool(t *testing.T) {
+	// Arrange, Act
+	_, ok := SkillCall(skillCall(t, "Task", "demo", "run it"))
 
 	// Assert
 	if ok {
-		t.Fatal("a user asking in prose for a merge is not a Skill invocation and must open no bubble")
+		t.Fatal("a tool that is not Skill invokes no skill, whatever its input happens to carry")
+	}
+}
+
+func TestSkillCallRefusesACallThatNamesNoSkill(t *testing.T) {
+	// Arrange
+	use := &datav1.ToolUseBlock{Id: "toolu_bare", Name: "Skill"}
+
+	// Act
+	_, ok := SkillCall(use)
+
+	// Assert
+	if ok {
+		t.Fatal("a Skill call naming no skill has nothing to label a bubble with and must not be classified as an invocation")
 	}
 }
 
