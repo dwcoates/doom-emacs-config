@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
+  FailureKindSchema,
   QueryTerminationFailureSchema,
 } from "../../proto/gen/ts/agentshim/frontend/v1/errors_pb";
 import {
@@ -55,7 +56,7 @@ import {
   ConversationStore,
   ResultItem,
   StoreState,
-  SystemFailureCard,
+  FailureCardItem,
   TextItem,
   ThinkingItem,
   ToolItem,
@@ -5550,20 +5551,34 @@ describe("a heartbeat alone puts elapsed on a plain running tool (MEDIUM)", () =
 // gets one per edge case, because it is now the only place a user learns why a
 // workspace changed color.
 
-/** A daemon-classified failure, defaulted to an open API failure. */
-function failure(over: Partial<SystemFailureCard> = {}): SystemFailureCard {
+/** A resolved failure card, defaulted to an OPEN vendor-side failure. */
+function failure(
+  over: Partial<FailureCardItem["view"]> = {},
+  uuid = "failure:e9",
+): FailureCardItem {
   return {
     kind: "failure",
-    errorClass: "API",
-    errorType: "api.overloaded",
-    message: "the API is overloaded",
-    sourceDetail: "status=529",
-    resolvedAtMs: 0,
-    uuid: "failure:e9",
-    detail: { kind: "none" },
-    ...over,
+    uuid,
+    view: {
+      kind: create(FailureKindSchema, {
+        kind: { case: "apiOverloaded", value: { httpStatus: 529, attempts: 10 } },
+      }),
+      message: "the API is overloaded",
+      detail: "status=529",
+      lifecycle: { case: "open" },
+      ...over,
+    },
   };
 }
+
+/** A machinery-side kind, for the tests that need the other side. */
+function machineryKind() {
+  return create(FailureKindSchema, {
+    kind: { case: "shimDegraded", value: { component: "connection" } },
+  });
+}
+
+const RESOLVED_AT = Date.parse("2026-05-24T09:05:00Z");
 
 function queryTerminationFailure(kind: "unexpectedEof" | "iteratorFailure" | "startupFailure") {
   const reason = kind === "unexpectedEof"
@@ -5587,30 +5602,30 @@ describe("the system-failure card", () => {
     expect(html).toContain("the API is overloaded");
   });
 
-  it("shows the raw account beside the prose rather than instead of it", () => {
+  it("shows the evidence beside the prose rather than instead of it", () => {
     // Arrange / Act — the structured evidence is for whoever debugs this.
     const html = renderItem(failure());
     // Assert
     expect(html).toContain("status=529");
   });
 
-  it("omits the detail block when the source gave none", () => {
-    // Arrange / Act
-    const html = renderItem(failure({ sourceDetail: "" }));
+  it("omits the detail block when the daemon gave none", () => {
+    // Arrange / Act — the proto states outright that detail may be empty.
+    const html = renderItem(failure({ detail: "" }));
     // Assert
     expect(html).not.toContain("failure-detail");
   });
 
-  it("takes the API class's color", () => {
+  it("takes the VENDOR side's color", () => {
     // Arrange / Act — a vendor block, which resolves the workspace purple.
-    const html = renderItem(failure({ errorClass: "API" }));
+    const html = renderItem(failure());
     // Assert
     expect(html).toContain("failure-api");
   });
 
-  it("takes the INTERNAL class's color", () => {
-    // Arrange / Act — our own machinery, which resolves the workspace blue.
-    const html = renderItem(failure({ errorClass: "INTERNAL", errorType: "shim.degraded" }));
+  it("takes the MACHINERY side's color", () => {
+    // Arrange / Act — our own plumbing, which resolves the workspace blue.
+    const html = renderItem(failure({ kind: machineryKind() }));
     // Assert
     expect(html).toContain("failure-internal");
   });
@@ -5625,30 +5640,44 @@ describe("the system-failure card", () => {
   it("marks a RESOLVED failure with a check instead", () => {
     // Arrange / Act — the window ended; a card still shouting would be lying
     // about the present to be accurate about the past.
-    const html = renderItem(failure({ resolvedAtMs: Date.parse("2026-05-24T09:05:00Z") }));
+    const html = renderItem(
+      failure({ lifecycle: { case: "resolved", resolvedAtMs: RESOLVED_AT } }),
+    );
     // Assert
     expect(html).toContain("✓");
   });
 
   it("adds the settled class to a resolved failure", () => {
     // Arrange / Act
-    const html = renderItem(failure({ resolvedAtMs: Date.parse("2026-05-24T09:05:00Z") }));
+    const html = renderItem(
+      failure({ lifecycle: { case: "resolved", resolvedAtMs: RESOLVED_AT } }),
+    );
     // Assert
     expect(html).toContain("resolved");
   });
 
   it("stamps the time a resolved window closed", () => {
     // Arrange / Act
-    const html = renderItem(failure({ resolvedAtMs: Date.parse("2026-05-24T09:05:00Z") }));
+    const html = renderItem(
+      failure({ lifecycle: { case: "resolved", resolvedAtMs: RESOLVED_AT } }),
+    );
     // Assert
     expect(html).toContain("failure-resolved");
   });
 
-  it("carries the error type as data, so a test or a stylesheet can key on it", () => {
+  it("carries the KIND ARM as data, so a test or a stylesheet can key on it", () => {
     // Arrange / Act
-    const html = renderItem(failure({ errorType: "shim.rejected" }));
+    const html = renderItem(failure({ kind: machineryKind() }));
     // Assert
-    expect(html).toContain('data-error-type="shim.rejected"');
+    expect(html).toContain('data-failure-kind="shimDegraded"');
+  });
+
+  it("marks a TERMINAL failure as terminal rather than as open", () => {
+    // Arrange / Act — a terminal card has no closing edge and never will, so
+    // rendering it like an open one would leave a reader waiting.
+    const html = renderItem(failure({ lifecycle: { case: "terminal" } }));
+    // Assert
+    expect(html).toContain("failure-terminal");
   });
 
   it("escapes the message", () => {
@@ -5658,9 +5687,9 @@ describe("the system-failure card", () => {
     expect(html).not.toContain("<img");
   });
 
-  it("escapes the source detail", () => {
+  it("escapes the detail", () => {
     // Arrange / Act
-    const html = renderItem(failure({ sourceDetail: "<script>x</script>" }));
+    const html = renderItem(failure({ detail: "<script>x</script>" }));
     // Assert
     expect(html).not.toContain("<script>");
   });
@@ -5670,7 +5699,13 @@ describe("the system-failure card", () => {
     ["iteratorFailure" as const, "iterator failure: child exited 137"],
     ["startupFailure" as const, "startup failure: spawn refused"],
   ])("renders every query-termination identity and the %s cause", (kind, causeText) => {
-    const html = renderItem(failure({ detail: { kind: "queryTermination", value: queryTerminationFailure(kind) } }));
+    const html = renderItem(
+      failure({
+        kind: create(FailureKindSchema, {
+          kind: { case: "queryTermination", value: { detail: queryTerminationFailure(kind) } },
+        }),
+      }),
+    );
     expect(html).toContain(causeText);
     expect(html).toContain("query instance: query-1");
     expect(html).toContain("vendor session: claude-1");
@@ -5678,20 +5713,53 @@ describe("the system-failure card", () => {
   });
 
   it("renders exact query evidence nested inside an automatic-resume failure", () => {
-    const html = renderItem(failure({ detail: { kind: "sessionResume", value: {
-      claudeSessionId: "claude-1", cwd: "/repo", configDir: "", resolvedConfigDir: "/config", attempt: "automaticRestore",
-      cause: { case: "queryTermination", value: queryTerminationFailure("startupFailure") },
-    } } }));
+    const html = renderItem(
+      failure({
+        kind: create(FailureKindSchema, {
+          kind: {
+            case: "sessionResumeFailed",
+            value: {
+              detail: {
+                claudeSessionId: "claude-1",
+                cwd: "/repo",
+                configDir: "",
+                resolvedConfigDir: "/config",
+                attempt: { case: "automaticRestore", value: {} },
+                cause: {
+                  case: "queryTermination",
+                  value: queryTerminationFailure("startupFailure"),
+                },
+              },
+            },
+          },
+        }),
+      }),
+    );
     expect(html).toContain("resume blocked during automatic restoration");
     expect(html).toContain("startup failure: spawn refused");
     expect(html).toContain("query instance: query-1");
   });
 
   it("renders a non-query exact-resume bring-up cause", () => {
-    const html = renderItem(failure({ detail: { kind: "sessionResume", value: {
-      claudeSessionId: "claude-1", cwd: "/repo", configDir: "", resolvedConfigDir: "/config", attempt: "automaticRestore",
-      cause: { case: "bringUpFailure", cause: "readiness timed out" },
-    } } }));
+    const html = renderItem(
+      failure({
+        kind: create(FailureKindSchema, {
+          kind: {
+            case: "sessionResumeFailed",
+            value: {
+              detail: {
+                claudeSessionId: "claude-1",
+                cwd: "/repo",
+                configDir: "",
+                resolvedConfigDir: "/config",
+                attempt: { case: "automaticRestore", value: {} },
+                cause: { case: "bringUpFailure", value: { cause: "readiness timed out" } },
+              },
+            },
+          },
+        }),
+      }),
+    );
     expect(html).toContain("bring-up failure: readiness timed out");
   });
 });
@@ -5701,15 +5769,15 @@ describe("failure card identity", () => {
     // Arrange / Act — an index key would strand the two edges on separate
     // DOM nodes, leaving the alarm standing beside its own all-clear.
     const open = itemKey(failure(), 3);
-    const closed = itemKey(failure({ resolvedAtMs: 123 }), 7);
+    const closed = itemKey(failure({ lifecycle: { case: "resolved", resolvedAtMs: 123 } }), 7);
     // Assert
     expect(open).toBe(closed);
   });
 
   it("gives two DIFFERENT failures different keys", () => {
     // Arrange / Act
-    const a = itemKey(failure({ uuid: "failure:e1" }), 0);
-    const b = itemKey(failure({ uuid: "failure:e2" }), 0);
+    const a = itemKey(failure({}, "failure:e1"), 0);
+    const b = itemKey(failure({}, "failure:e2"), 0);
     // Assert
     expect(a).not.toBe(b);
   });

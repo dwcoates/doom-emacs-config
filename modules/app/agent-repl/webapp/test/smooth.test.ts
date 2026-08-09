@@ -75,6 +75,10 @@ function state(items: ConversationItem[]): StoreState {
     mergeStatus: null,
     shutdownSchedule: null,
     hibernation: null,
+    fences: new Map(),
+    topbars: new Map(),
+    tokenBreakdowns: new Map(),
+    gates: new Map(),
     workspaceStateCauseSeq: 0,
   };
 }

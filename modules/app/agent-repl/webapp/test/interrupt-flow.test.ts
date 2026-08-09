@@ -43,7 +43,7 @@ import { ConversationStore } from "../src/store.js";
 import { ForwardingLogger, resetLoggingForTests, setLogger } from "../src/wslog.js";
 
 afterEach(() => resetLoggingForTests());
-import type { SystemFailure } from "../src/frontend-proto.js";
+import type { CommandRefusal } from "../src/command-dispatch.js";
 
 import mainSource from "../src/main.ts?raw";
 
@@ -380,7 +380,7 @@ describe("the interrupt confirmation challenge as one arriving frame", () => {
     // must reach the conversation as NOTHING — a refusal card here would show
     // the user an error for a question.
     const sent: string[] = [];
-    const failures: SystemFailure[] = [];
+    const failures: CommandRefusal[] = [];
     setLogger(new ForwardingLogger(() => true, () => {}));
     const dispatcher = new CommandDispatcher({
       send: (raw) => {

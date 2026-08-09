@@ -59,8 +59,12 @@ interface Client {
   resyncs: number[];
   /** Fold one `ConversationDelta` carrying ITEMS at THROUGHSEQ. */
   delta(items: readonly WireItem[], throughSeq: number): void;
-  /** Fold one `SessionView` announcing CLAUDESESSIONID, optionally asleep. */
+  /** Fold one `SessionView` announcing CLAUDESESSIONID. */
   announce(claudeSessionId: string, hibernation?: Record<string, unknown>): void;
+  /** Fold the workspace's ruling, which is what mints the fence views match. */
+  workspaceState(fence: string): void;
+  /** Fold one fenced `WorkspaceGateView` reporting the workspace asleep. */
+  hibernateGate(fence: string): void;
 }
 
 function client(): Client {
@@ -118,6 +122,40 @@ function client(): Client {
             claudeSessionId,
             cwd: "/ws",
             configDir: "",
+          },
+        }),
+      );
+    },
+    workspaceState(fence) {
+      fold(
+        JSON.stringify({
+          workspaceState: {
+            workspace: "/ws",
+            sessionId: "s1",
+            fence,
+            state: "RENDER_STATE_IDLE",
+            turnActive: false,
+            liveTaskCount: "0",
+            causeKind: "boot",
+            causeSeq: "0",
+            atMs: String(TS_MS),
+            connectivity: "SESSION_CONNECTIVITY_OPERATIONAL",
+            status: "SESSION_STATUS_READY",
+            controllerGenerationId: "g1",
+            activeFaults: [],
+            mergeLeaseHeld: false,
+            mergedAtMs: "0",
+          },
+        }),
+      );
+    },
+    hibernateGate(fence) {
+      fold(
+        JSON.stringify({
+          workspaceGate: {
+            workspace: "/ws",
+            fence,
+            hibernated: { detail: { sinceMs: String(TS_MS), forced: {} } },
           },
         }),
       );
@@ -198,12 +236,17 @@ describe("a vendor session uuid rotating under a drawn conversation", () => {
     expect(c.container.textContent).toContain("the rebased conversation");
   });
 
-  it("adopts the gate from a view that rotates and hibernates at once", () => {
-    // Arrange — same frame, the other field. The wipe must not cost the store
-    // the reason the session is now asleep, which is the whole gate's input.
+  it("keeps the fenced gate across a vendor-uuid rotation", () => {
+    // Arrange — a /clear rotates the VENDOR conversation, not the owning
+    // session, so the workspace's fence is unchanged and the gate the daemon
+    // published still describes this workspace. The seq-space wipe must not
+    // cost the store the reason the session is asleep, which is the gate's
+    // whole input.
     const c = drawnConversation();
+    c.workspaceState("f1");
+    c.hibernateGate("f1");
     // Act
-    c.announce("uuid-b", { sinceMs: String(TS_MS), forced: {} });
+    c.announce("uuid-b");
     // Assert
     expect(c.store.state.hibernation?.cause.case).toBe("forced");
   });

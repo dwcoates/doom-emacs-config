@@ -8,11 +8,13 @@ import {
   InterruptConfirmRequiredError,
   ModelSelectionRejectedError,
   type CreateSessionArgs,
+  type CommandRefusal,
 } from "../src/command-dispatch.js";
+import { failureKindName } from "../src/failure-card.js";
+import type { FailureCardItem } from "../src/store.js";
 import {
   decodeFrontendFrame,
   type FrontendFrame,
-  type SystemFailure,
 } from "../src/frontend-proto.js";
 import { ForwardingLogger, resetLoggingForTests, setLogger } from "../src/wslog.js";
 import { PromptOrigin } from "../src/frontend-command.js";
@@ -51,7 +53,7 @@ function newDispatcher(sendReturns = true) {
 
 /** A dispatcher whose classified-refusal sink is captured, ids `r1`, `r2`, … */
 function newFailureDispatcher(sendReturns = true) {
-  const failures: SystemFailure[] = [];
+  const failures: CommandRefusal[] = [];
   const { records } = installLogging();
   let n = 0;
   const dispatcher = new CommandDispatcher({
@@ -61,6 +63,20 @@ function newFailureDispatcher(sendReturns = true) {
     onFailure: (f) => failures.push(f),
   });
   return { dispatcher, failures };
+}
+
+/**
+ * The card arm of a refusal.
+ *
+ * Asserting through it rather than casting keeps a test that expected a card
+ * and got a REVEAL failing loudly: the two are genuinely different dispositions
+ * and a test that silently accepted either would assert nothing.
+ */
+function cardOf(refusal: CommandRefusal | undefined): FailureCardItem {
+  if (refusal === undefined || refusal.kind !== "card") {
+    throw new Error(`expected a card refusal, got ${JSON.stringify(refusal)}`);
+  }
+  return refusal.card;
 }
 
 function ackFrame(requestId: string, ok: boolean, error = "", selectedModel = ""): FrontendFrame {
@@ -641,11 +657,7 @@ describe("hibernate and revive dispatch", () => {
             requestId: "r1",
             ok: false,
             error: "workspace is not settled",
-            failure: {
-              errorClass: "ERROR_CLASS_INTERNAL",
-              errorType: "hibernate.not_settled",
-              message: "a turn is in flight",
-            },
+            failure: { sessionHibernated: { sinceMs: "1700000000000" } },
           },
         }),
       ),
@@ -707,18 +719,20 @@ describe("hibernate and revive dispatch", () => {
     dispatcher.observe(ackFrame("r1", false, "session is not hibernated"));
     await p.catch(() => {});
     // Assert
-    expect(failures[0]?.message).toBe("session is not hibernated");
+    expect(cardOf(failures[0]).view.message).toBe("session is not hibernated");
   });
 
-  it("names an unclassified nack in the frontend's reserved namespace", async () => {
-    // Arrange — the classification is this end's, so the type says so.
+  it("names an unclassified nack with the frontend's own arm", async () => {
+    // Arrange — the classification is this end's, so the arm says so.
     const { dispatcher, failures } = newFailureDispatcher();
     const p = dispatcher.hibernateWorkspace("/w");
     // Act
     dispatcher.observe(ackFrame("r1", false, "merge lease held"));
     await p.catch(() => {});
     // Assert
-    expect(failures[0]?.errorType).toBe("client.command_rejection_unclassified");
+    expect(failureKindName(cardOf(failures[0]).view.kind)).toBe(
+      "commandRejectionUnclassified",
+    );
   });
 
   it("reconciles repeated refusals of one command onto a single card", async () => {
@@ -732,7 +746,7 @@ describe("hibernate and revive dispatch", () => {
     dispatcher.observe(ackFrame("r2", false, "merge lease held"));
     await second.catch(() => {});
     // Assert
-    expect(failures[0]?.itemUuid).toBe(failures[1]?.itemUuid);
+    expect(cardOf(failures[0]).uuid).toBe(cardOf(failures[1]).uuid);
   });
 
   it("keeps two different refused commands as two cards", async () => {
@@ -746,7 +760,7 @@ describe("hibernate and revive dispatch", () => {
     dispatcher.observe(ackFrame("r2", false, "not hibernated"));
     await revive.catch(() => {});
     // Assert
-    expect(failures[0]?.itemUuid).not.toBe(failures[1]?.itemUuid);
+    expect(cardOf(failures[0]).uuid).not.toBe(cardOf(failures[1]).uuid);
   });
 
   it("prefers the daemon's classified failure over the locally-named one", async () => {
@@ -761,18 +775,14 @@ describe("hibernate and revive dispatch", () => {
             requestId: "r1",
             ok: false,
             error: "workspace is not settled",
-            failure: {
-              errorClass: "ERROR_CLASS_INTERNAL",
-              errorType: "hibernate.not_settled",
-              message: "a turn is in flight",
-            },
+            failure: { sessionHibernated: { sinceMs: "1700000000000" } },
           },
         }),
       ),
     );
     await p.catch(() => {});
     // Assert
-    expect(failures[0]?.errorType).toBe("hibernate.not_settled");
+    expect(failureKindName(cardOf(failures[0]).view.kind)).toBe("sessionHibernated");
   });
 
   it("surfaces a revive the socket refused to send", async () => {
@@ -782,7 +792,7 @@ describe("hibernate and revive dispatch", () => {
     // Act
     await dispatcher.reviveSession("/w", "compactFirst").catch(() => {});
     // Assert
-    expect(failures[0]?.errorType).toBe("client.command_unsent");
+    expect(failureKindName(cardOf(failures[0]).view.kind)).toBe("commandUnsent");
   });
 
   it("says the connection is down on a refused send, not that the daemon refused", async () => {
@@ -791,7 +801,7 @@ describe("hibernate and revive dispatch", () => {
     // Act
     await dispatcher.hibernateWorkspace("/w").catch(() => {});
     // Assert
-    expect(failures[0]?.message).toContain("connection to the daemon is down");
+    expect(cardOf(failures[0]).view.message).toContain("connection to the daemon is down");
   });
 
   it("rejects a revive the daemon refused, so the gate can offer the choice again", async () => {
@@ -819,7 +829,7 @@ describe("dispatch dial-on-demand", () => {
    */
   function newDeferringDispatcher(opts: { dialOpens: boolean }) {
     const sent: string[] = [];
-    const failures: SystemFailure[] = [];
+    const failures: CommandRefusal[] = [];
     const { records } = installLogging();
     let open = false;
     let dials = 0;
@@ -892,7 +902,7 @@ describe("dispatch dial-on-demand", () => {
     const h = newDeferringDispatcher({ dialOpens: false });
     // Act / Assert — exactly today's refusal.
     await expect(h.dispatcher.reviveSession("/w", "compactFirst")).rejects.toThrow(/socket not open/);
-    expect(h.failures[0]?.errorType).toBe("client.command_unsent");
+    expect(failureKindName(cardOf(h.failures[0]).view.kind)).toBe("commandUnsent");
   });
 
   it("logs the original rejection record when the dial does not help", async () => {

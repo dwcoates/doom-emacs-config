@@ -4,6 +4,7 @@
  * explicit-ignore path for unsupported shapes. One edge per test (AAA).
  */
 import { describe, expect, it } from "vitest";
+import { failureSide } from "../src/failure-card.js";
 import { create } from "@bufbuild/protobuf";
 import {
   QueryTerminationFailureSchema,
@@ -12,7 +13,6 @@ import { QueryStartupFailureSchema } from "../../proto/gen/ts/agentshim/core/v1/
 import { decodeFrontendFrame } from "../src/frontend-proto.js";
 import {
   StateAdapter,
-  systemFailureFrom,
   userTurnReceipt,
   type AdapterEffect,
   type AdapterLogLevel,
@@ -23,7 +23,7 @@ import type {
   ConversationItem,
   PermissionItem,
   ResultItem,
-  SystemFailureCard,
+  FailureCardItem,
   TextItem,
   ThinkingItem,
   ToolItem,
@@ -91,6 +91,7 @@ describe("WorkspaceState mapping", () => {
         value: {
           workspace: "ws-a",
           sessionId: "s1",
+          fence: "",
           state: "thinking",
           turnActive: true,
           liveTaskCount: 2,
@@ -271,11 +272,9 @@ describe("SessionView mapping", () => {
           configDir: "/home/u/.claude",
           models: [{ value: "claude-opus", displayName: "Opus", description: "highest capability" }],
           tokenUtilization: undefined,
-          // An awake session carries no hibernation detail, and the adapter
-          // normalizes that absence to an explicit null rather than leaving the
-          // key off: the store adopts this field WHOLESALE, so "awake" has to
-          // be a value it can write, not a key it never sees.
-          hibernation: null,
+          // NO HIBERNATION. The gate is the fenced, per-workspace
+          // WorkspaceGateView; this per-session catalog entry no longer feeds
+          // it, so the key is gone rather than normalized to null.
         },
       },
     ]);
@@ -855,120 +854,143 @@ describe("apiError arm: RETIRED (step 11)", () => {
   });
 });
 
-describe("systemFailure arm", () => {
-  it("adopts the daemon's classified failure as a card", () => {
+describe("failureCard arm", () => {
+  it("adopts the daemon's resolved card, kind arm and all", () => {
     // Arrange / Act
     const items = itemsFrom({
       uuid: "failure:e9",
-      systemFailure: {
-        errorClass: "ERROR_CLASS_API",
-        errorType: "api.overloaded",
+      failureCard: {
+        kind: { apiOverloaded: { httpStatus: 529, attempts: 10 } },
         message: "the API is overloaded",
-        sourceDetail: "status=529",
+        detail: "status=529",
+        open: {},
       },
     });
     // Assert
-    const expected: SystemFailureCard = {
-      kind: "failure",
-      errorClass: "API",
-      errorType: "api.overloaded",
-      message: "the API is overloaded",
-      sourceDetail: "status=529",
-      resolvedAtMs: 0,
-      uuid: "failure:e9",
-      detail: { kind: "none" },
-    };
-    expect(items).toEqual([expected]);
+    const card = items[0] as FailureCardItem;
+    expect(card.view.message).toBe("the API is overloaded");
   });
 
-  it("adopts an INTERNAL class unchanged", () => {
+  it("puts a vendor arm on the vendor side", () => {
+    // Arrange / Act — the side decides the card's color, and it comes from the
+    // arm rather than from a class field that could disagree with it.
+    const items = itemsFrom({
+      uuid: "failure:e9",
+      failureCard: {
+        kind: { apiOverloaded: {} },
+        message: "the API is overloaded",
+        terminal: {},
+      },
+    });
+    // Assert
+    expect(failureSide((items[0] as FailureCardItem).view.kind)).toBe("vendor");
+  });
+
+  it("puts a machinery arm on the machinery side", () => {
     // Arrange / Act
     const items = itemsFrom({
       uuid: "degraded:s1:shim-connection",
-      systemFailure: {
-        errorClass: "ERROR_CLASS_INTERNAL",
-        errorType: "shim.degraded",
+      failureCard: {
+        kind: { shimDegraded: { component: "connection" } },
         message: "no traffic",
+        open: {},
       },
     });
     // Assert
-    expect((items[0] as SystemFailureCard).errorClass).toBe("INTERNAL");
+    expect(failureSide((items[0] as FailureCardItem).view.kind)).toBe("machinery");
   });
 
-  it("preserves query-termination evidence through the conversation-item path", () => {
+  it("preserves query-termination evidence on the arm that carries it", () => {
+    // Arrange / Act
     const items = itemsFrom({
       uuid: "failure:termination",
-      systemFailure: {
-        errorClass: "ERROR_CLASS_INTERNAL",
-        errorType: "unexpected_query_termination",
+      failureCard: {
+        kind: {
+          queryTermination: {
+            detail: {
+              queryInstanceId: "query-1",
+              vendorSessionId: "claude-1",
+              observedAtMs: "1700000000000",
+              unexpectedEof: {},
+            },
+          },
+        },
         message: "query ended",
-        queryTermination: { queryInstanceId: "query-1", vendorSessionId: "claude-1", observedAtMs: "1700000000000", unexpectedEof: {} },
+        terminal: {},
       },
     });
-    const detail = (items[0] as SystemFailureCard).detail;
-    expect(detail.kind).toBe("queryTermination");
-    if (detail.kind !== "queryTermination") throw new Error("wrong detail");
-    expect(detail.value.queryInstanceId).toBe("query-1");
-    expect(detail.value.vendorIdentity).toEqual({ case: "vendorSessionId", value: "claude-1" });
-    expect(detail.value.observedAtMs).toBe(1700000000000n);
-    expect(detail.value.reason.case).toBe("unexpectedEof");
-  });
-
-  it("preserves query-termination evidence through the decoded failure path", () => {
-    const card = systemFailureFrom({
-      errorClass: "INTERNAL",
-      errorType: "unexpected_query_termination",
-      message: "query ended",
-      sourceDetail: "iterator stopped",
-      resolvedAtMs: 0,
-      itemUuid: "failure:termination",
-      detail: { kind: "queryTermination", value: create(QueryTerminationFailureSchema, { queryInstanceId: "query-1", vendorIdentity: { case: "vendorSessionId", value: "claude-1" }, observedAtMs: 1700000000000n, reason: { case: "startupFailure", value: create(QueryStartupFailureSchema, { cause: "spawn refused" }) } }) },
-    });
-    expect(card.detail).toEqual({ kind: "queryTermination", value: create(QueryTerminationFailureSchema, { queryInstanceId: "query-1", vendorIdentity: { case: "vendorSessionId", value: "claude-1" }, observedAtMs: 1700000000000n, reason: { case: "startupFailure", value: create(QueryStartupFailureSchema, { cause: "spawn refused" }) } }) });
+    // Assert
+    const kind = (items[0] as FailureCardItem).view.kind.kind;
+    if (kind.case !== "queryTermination") throw new Error("wrong arm");
+    expect(kind.value.detail?.queryInstanceId).toBe("query-1");
   });
 
   it("carries the resolution stamp that settles a window", () => {
     // Arrange / Act — the closing edge of a degraded window.
     const items = itemsFrom({
       uuid: "degraded:s1:shim-connection",
-      systemFailure: {
-        errorClass: "ERROR_CLASS_INTERNAL",
-        errorType: "shim.degraded",
+      failureCard: {
+        kind: { shimDegraded: { component: "connection" } },
         message: "no traffic",
-        resolvedAtMs: "1700000000000",
+        resolved: { resolvedAtMs: "1700000000000" },
       },
     });
     // Assert
-    expect((items[0] as SystemFailureCard).resolvedAtMs).toBe(1700000000000);
+    expect((items[0] as FailureCardItem).view.lifecycle).toEqual({
+      case: "resolved",
+      resolvedAtMs: 1700000000000,
+    });
   });
 
-  it("carries the item uuid so the footer's error row can address it", () => {
+  it("carries the item uuid so the footer's failure row can reveal it", () => {
     // Arrange / Act
     const items = itemsFrom({
       uuid: "failure:e9",
-      systemFailure: {
-        errorClass: "ERROR_CLASS_API",
-        errorType: "api.overloaded",
-        message: "boom",
-      },
+      failureCard: { kind: { apiOverloaded: {} }, message: "boom", terminal: {} },
     });
     // Assert
-    expect((items[0] as SystemFailureCard).uuid).toBe("failure:e9");
+    expect((items[0] as FailureCardItem).uuid).toBe("failure:e9");
   });
 
-  it("throws on an unrecognized class rather than guessing a color", () => {
-    // Arrange / Act / Assert — the class decides the card's color, so a
-    // default would paint a failure the wrong color, quietly.
+  it("throws on an UNSET kind rather than rendering a generic error", () => {
+    // Arrange / Act / Assert — a card that cannot say what failed is malformed,
+    // and a generic error card is worse than a loud refusal because it looks
+    // like an answer.
+    expect(() =>
+      itemsFrom({ uuid: "f1", failureCard: { kind: {}, message: "y", terminal: {} } }),
+    ).toThrow(/sets no failure kind/);
+  });
+
+  it("throws on a DOUBLE-SET kind rather than picking one", () => {
+    // Arrange / Act / Assert
     expect(() =>
       itemsFrom({
         uuid: "f1",
-        systemFailure: {
-          errorClass: "ERROR_CLASS_SOMETHING_NEW",
-          errorType: "x",
+        failureCard: {
+          kind: { apiOverloaded: {}, shimDegraded: {} },
           message: "y",
+          terminal: {},
         },
       }),
-    ).toThrow(/error_class has unrecognized value/);
+    ).toThrow(/FailureKind contract/);
+  });
+
+  it("throws when the lifecycle arm is missing", () => {
+    // Arrange / Act / Assert — an open alarm and a settled one are different
+    // news, and neither may be assumed.
+    expect(() =>
+      itemsFrom({ uuid: "f1", failureCard: { kind: { apiOverloaded: {} }, message: "y" } }),
+    ).toThrow(/exactly one lifecycle arm/);
+  });
+
+  it("throws when TWO lifecycle arms are set", () => {
+    // Arrange / Act / Assert
+    expect(() =>
+      itemsFrom({
+        uuid: "f1",
+        failureCard: { kind: { apiOverloaded: {} }, message: "y", open: {}, terminal: {} },
+      }),
+    ).toThrow(/exactly one lifecycle arm/);
   });
 });
 
