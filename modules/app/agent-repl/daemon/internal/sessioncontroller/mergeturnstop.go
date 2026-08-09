@@ -82,7 +82,7 @@ func (m *Manager) stopAbandonedMergeTurn(d *sessionController, workspace, reques
 	bound := m.drainTimeout()
 	ctx, cancel := context.WithTimeout(context.Background(), bound)
 	defer cancel()
-	outcome, err := d.client.Interrupt(ctx)
+	outcome, err := d.client.Interrupt(ctx, requestID)
 	if err == nil {
 		m.logf("session-controller: abandoned merge turn INTERRUPTED ws=%q session=%s request_id=%s turn_id=%q outcome=%s — the run is over and its turn had no consumer left, so the shim's own terminal closes the claim through the ordinary lifecycle",
 			workspace, d.sessionID, requestID, turnID, outcome)
