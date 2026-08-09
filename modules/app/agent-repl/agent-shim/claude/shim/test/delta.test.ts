@@ -5,11 +5,16 @@ import {
   isEphemeral,
   streamEventToContentDelta,
   streamEventToMessageLatency,
+  streamEventToResponseUsage,
   toEphemeralEvent,
   toPersistentEvent,
   toolProgressToHeartbeat,
 } from "../src/proto/delta.js";
 import { EventClass, Plane } from "../src/uds/proto.js";
+import { createRegistry } from "@bufbuild/protobuf";
+import { anyUnpack } from "@bufbuild/protobuf/wkt";
+import { ClaudeStreamMessageSchema } from "../../../../proto/gen/ts/agentshim/data/v1/stream_pb.js";
+import type { ClaudeStreamMessage } from "../../../../proto/gen/ts/agentshim/data/v1/stream_pb.js";
 
 function loadStream(name: string): Record<string, unknown> {
   const line = readFileSync(new URL(`../../../../testdata/corpus/stream/${name}.jsonl`, import.meta.url), "utf8").split("\n")[0]!;
@@ -281,10 +286,80 @@ describe("toEphemeralEvent / toPersistentEvent / isEphemeral", () => {
     expect(toEphemeralEvent(loadStream("assistant"))).toBeNull();
   });
 
+  it("routes a message_delta to a persistent response usage relay", () => {
+    // Arrange: the frame that used to be dropped, with the message id the
+    // tracker holds for the message currently streaming.
+    const msg = loadStream("stream_event-message_delta");
+    // Act
+    const evt = toPersistentEvent(msg, { messageId: "msg_011CdKQJaCBXrp4nizdg3fXW" });
+    // Assert
+    expect(evt?.payload.case).toBe("vendor");
+    expect(evt?.class).toBe(EventClass.PERSISTENT);
+    expect(evt?.plane).toBe(Plane.STREAM);
+  });
+
   it("isEphemeral true for stream_event and tool_progress only", () => {
     expect(isEphemeral({ type: "stream_event" })).toBe(true);
     expect(isEphemeral({ type: "tool_progress" })).toBe(true);
     expect(isEphemeral({ type: "assistant" })).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// stream_event(message_delta) → the response's FINAL vendor usage.
+//
+// The assistant message the daemon's per-response ledger is built from carries
+// the message_start usage SNAPSHOT: settled input and cache counters, interim
+// output. The final output_tokens are reported on this frame and nowhere else,
+// which is why the turn ledger could not be made to agree with the terminal
+// result on output.
+// ---------------------------------------------------------------------------
+
+describe("streamEventToResponseUsage", () => {
+  const messageId = "msg_011CdKQJaCBXrp4nizdg3fXW";
+
+  function relayed(msg: Record<string, unknown>, opts?: { messageId?: string }) {
+    const evt = streamEventToResponseUsage(msg, opts ?? { messageId });
+    if (evt === null) return null;
+    if (evt.payload.case !== "vendor") throw new Error("not a vendor payload");
+    const csm = anyUnpack(evt.payload.value, createRegistry(ClaudeStreamMessageSchema)) as ClaudeStreamMessage;
+    if (csm.msg.case !== "streamEvent") throw new Error("not a stream event");
+    const inner = csm.msg.value.event?.event;
+    if (inner?.case !== "messageDelta") throw new Error("not a message delta");
+    return inner.value;
+  }
+
+  it("carries the corpus delta's final output_tokens", () => {
+    // Arrange: the same message the corpus assistant snapshot reports as 3.
+    // Act
+    const delta = relayed(loadStream("stream_event-message_delta"));
+    // Assert
+    expect(delta?.vendorUsage?.outputTokens).toBe(36n);
+  });
+
+  it("carries the thinking tokens the narrow legacy usage cannot hold", () => {
+    const delta = relayed(loadStream("stream_event-message_delta"));
+    expect(delta?.vendorUsage?.outputTokensDetails?.["thinking_tokens"]).toBe(30);
+  });
+
+  it("names the message the correction belongs to", () => {
+    const delta = relayed(loadStream("stream_event-message_delta"));
+    expect(delta?.apiMessageId).toBe(messageId);
+  });
+
+  it("refuses to relay a correction it cannot attribute to a message", () => {
+    // Arrange: no message_start has opened a message, so the tracker holds none.
+    // Act / Assert: an unattributed correction is not evidence.
+    expect(relayed(loadStream("stream_event-message_delta"), { messageId: "" })).toBeNull();
+  });
+
+  it("returns null for a message_delta carrying no usage", () => {
+    const msg = { type: "stream_event", session_id: "s", event: { type: "message_delta", delta: {} } };
+    expect(relayed(msg)).toBeNull();
+  });
+
+  it("returns null for any frame that is not a message_delta", () => {
+    expect(relayed(loadStream("stream_event-message_stop"))).toBeNull();
   });
 });
 
