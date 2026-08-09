@@ -1421,6 +1421,17 @@ pre {
   background: var(--card);
   color: var(--muted);
 }
+/* A MERGE bubble's fold (async-render.ts bubbleKindClass): the same fold
+   geometry every async bubble wears, in the merge amber rather than the
+   neutral card grey. --merge-border is already what the Merge status card and
+   the bounce-lease card take, so a merge run reads as the same thing wherever
+   it appears in the feed — and specifically not as the teal a spawned agent's
+   conversation wears, since the two are different work. Only the chrome
+   differs: the body is the feed's own renderer, exactly as an agent's is. */
+.async-fold.async-kind-merge > .async-ticker {
+  border-color: var(--merge-border);
+  color: var(--merge-border);
+}
 /* The child-feed panel is itself a bubble laid on the main-GUI background,
    NOT on the card's async teal: the nested response bubbles (assistant
    purple, user blue, tool grey) sit on --bg exactly as they do at the top
