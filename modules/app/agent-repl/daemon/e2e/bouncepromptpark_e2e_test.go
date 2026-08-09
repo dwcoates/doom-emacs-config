@@ -118,20 +118,41 @@ func TestE2EPromptsTypedDuringAShimBounceAreDeliveredInOrder(t *testing.T) {
 // told so. A park that is invisible is indistinguishable from a prompt that
 // vanished, which is the failure the park exists to prevent.
 func TestE2EAPromptParkedAcrossAShimBounceIsVisibleWhileItWaits(t *testing.T) {
-	// Arrange
+	// Arrange — a stale shim that reattached MID-TURN, which is the arrangement
+	// in which a prompt has a bounce to be parked across at all.
+	//
+	// THE WINDOW HAS TO BE OPEN WHEN THE PROMPT IS TYPED, and on a session this
+	// daemon brings up from scratch it cannot be: an immediate refresh RETIRES
+	// the source generation's readiness, and create_session's establish probe
+	// follows the replacement (followBuildRefresh), so the create is only
+	// ACKNOWLEDGED once the whole bounce is over. A prompt submitted after that
+	// ack has nothing left to wait for and is delivered straight through, which
+	// is a workspace with an empty queue rather than a park the user cannot see.
+	//
+	// The survivor's window is the real one and it is HELD OPEN by the turn:
+	// the lease is armed at the reattach and fires at that turn's boundary, so a
+	// prompt typed while the turn runs is parked behind it for as long as the
+	// user's own work lasts — which is exactly the delay this test says must be
+	// visible. Tempdirs before the world: cleanups run LIFO.
 	cwd := t.TempDir()
-	h := newUDSHarness(t, withStaleShimBuild("sha-old", "sha-new"))
-	id := h.createSession(t, cwd)
-	conn := h.dial(t, id)
-	if first := readFrame(t, conn); first.GetSnapshot() == nil {
-		t.Fatalf("first frame = %T, want a StateSnapshot", first.GetFrame())
-	}
+	world, first := staleReattachWorld(t)
+	_, conn, _, _ := liveSession(t, first.harness(), cwd)
+	holdTurnOpen(t, conn, cwd, "r-hold", "sleep e2e-park-visible")
+	first.bounce()
+	second := world.boot(t, withBootShimBuild("sha-new"))
+	_, afterConn, _ := reattached(t, second, cwd)
+	awaitAll(t, afterConn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
+		"a WorkspaceState from the successor reporting the turn ACTIVE — the reattach that arms the lease this prompt parks behind": func(frame *frontendv1.FrontendFrame) bool {
+			state := workspaceStateFor(frame, cwd)
+			return state != nil && state.GetTurnActive()
+		},
+	})
 
 	// Act
-	submitPrompt(t, conn, "r-parked-visible", "waiting on the replacement shim")
+	submitPrompt(t, afterConn, "r-parked-visible", "waiting on the replacement shim")
 
 	// Assert — the workspace's queue accounts for it while it waits.
-	awaitAll(t, conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
+	awaitAll(t, afterConn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
 		"a QueueView carrying the prompt parked behind the shim bounce — a held prompt the user cannot see is indistinguishable from one that was dropped": func(frame *frontendv1.FrontendFrame) bool {
 			return len(queueViewFor(frame, cwd).GetEntries()) > 0
 		},
