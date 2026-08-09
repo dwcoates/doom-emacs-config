@@ -172,6 +172,24 @@ reason this reader can ask for one key."
         ;; Assert
         (should (string-match-p "not allowed" (or echoed "")))))))
 
+(ert-deftest agent-repl-test-permission-denied-files-the-request-identity ()
+  "The denial's request id is filed rather than echoed: the reason is the copy."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :permission-prompt-active '(:request-id "r1" :tool-name "Bash"))
+    (let (logged)
+      (cl-letf (((symbol-function 'agent-repl--emit-message) #'ignore)
+                ((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+        ;; Act
+        (agent-repl--frontend-apply-conversation-delta
+         (list :workspace "ws1"
+               :items (list (agent-repl-test--perm-item "r1" "Bash" "RESOLUTION_DENIED" "not allowed"))))
+        ;; Assert
+        (should (cl-find-if (lambda (line)
+                              (string-match-p "permission-clear ws=ws1 request=r1" line))
+                            logged))))))
+
 (ert-deftest agent-repl-test-permission-abandoned-clears-silently ()
   "A RESOLUTION_ABANDONED update clears the prompt WITHOUT echoing a message."
   ;; Arrange

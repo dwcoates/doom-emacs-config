@@ -897,8 +897,13 @@ receives every catalog but has no per-task roster."
         (agent-repl--warn nil
                          "frontend-apply-snapshot: %d item(s) FAILED during snapshot resync — see the per-item lines above; resync completed for the rest"
                          failures)
-        (message "agent-repl: %d item(s) FAILED during snapshot resync (see the agent-repl log)"
-                 failures)))
+        (agent-repl--user-message
+         nil "%d item(s) failed to resync — see the agent-repl log for detail"
+         (list failures)
+         :detail (format (concat "frontend-apply-snapshot failures=%d workspaces=%d "
+                                 "sessions=%d inits=%d available=%d host-actions=%d")
+                         failures (length workspaces) (length sessions)
+                         (length inits) (length available) (length host-actions)))))
     ;; THE RECONNECT IS DONE HERE, and nowhere earlier.  Every subscriber that
     ;; needs the state of the world as of reconnection — the recovery sweep
     ;; that re-ensures each workspace, the retraction that takes the outage
