@@ -21,12 +21,33 @@
 
 ;;;; ---- Helpers -----------------------------------------------------------
 
+(defconst agent-repl-test--frontend-build-id "bid1"
+  "Artifact identity every webview URL in this suite is addressed by.
+
+`agent-repl--frontend-build-id' reads the real stamp
+\(`webapp/dist/.build-id') and — deliberately — signals when it is
+absent, because a URL without the artifact's identity is the
+stale-cache bug.  That makes the stamp a BUILD ARTIFACT the suite
+would otherwise depend on: a clean checkout has no `webapp/dist', so
+every URL-building test failed for want of a `bin/build-frontend.sh'
+run rather than for anything about the code under test.
+
+The stamp itself is not this suite's subject — reading it and refusing
+a missing one are covered directly, against the real file, by
+`agent-repl-test-frontend-build-id-reads-the-stamp' and
+`agent-repl-test-frontend-build-id-refuses-a-missing-stamp' in
+test-frontend-client.el, which is where that boundary belongs.")
+
 (defmacro agent-repl-test--with-frontend-ws (ws plist &rest body)
-  "Register workspace WS with PLIST for BODY, cleaning buffers after."
+  "Register workspace WS with PLIST for BODY, cleaning buffers after.
+Also pins the webapp build id (see
+`agent-repl-test--frontend-build-id'), so the URLs BODY builds are
+independent of whether the webapp has been built in this checkout."
   (declare (indent 2))
   `(progn
      (unwind-protect
-         (progn
+         (cl-letf (((symbol-function 'agent-repl--frontend-build-id)
+                    (lambda () agent-repl-test--frontend-build-id)))
            (puthash ,ws (copy-sequence ,plist) agent-repl--workspaces)
            ,@body)
        (let ((buf (agent-repl--ws-get ,ws :frontend-buffer)))
@@ -1312,6 +1333,37 @@ exact failure seen live in the fresh instance."
         ;; Assert
         (should (equal ensured "ws1"))
         (should (eq displayed 'fake-buffer))))))
+
+(ert-deftest agent-repl-test-frontend-open-mounts-in-the-target-perspective ()
+  "The DEFERRED webview mount runs with the TARGET workspace activated.
+Establishment is asynchronous, so the continuation fires after the user
+may have moved on; without the background-workspace anchor the mount
+would lay out the frame of whichever perspective is current then."
+  ;; Arrange — establishment is stashed, not run, so the user \"moves\" first.
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((current "other")
+          (continuation nil)
+          (mounted-in nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p)
+                 (lambda () t))
+                ((symbol-function 'agent-repl--ws-current-name)
+                 (lambda () current))
+                ((symbol-function 'agent-repl--ws-switch)
+                 (lambda (ws &rest _) (setq current ws)))
+                ((symbol-function 'agent-repl--restore-focus)
+                 (lambda (persp &rest _) (setq current persp)))
+                ((symbol-function 'agent-repl--frontend-after-ensure-session)
+                 (lambda (_ws ok _fail) (setq continuation ok) :pending))
+                ((symbol-function 'agent-repl--frontend-ensure-webview-buffer)
+                 (lambda (_ws _url) 'fake-buffer))
+                ((symbol-function 'agent-repl--frontend-display-webview)
+                 (lambda (_ws _buf) (setq mounted-in current))))
+        ;; Act
+        (agent-repl--gui-open "ws1")
+        (funcall continuation)
+        ;; Assert
+        (should (equal mounted-in "ws1"))
+        (should (equal current "other"))))))
 
 (ert-deftest agent-repl-test-frontend-open-carries-parent-ws-param ()
   "gui-open appends parent_ws (url-encoded :source-ws-dir basename) to the URL.

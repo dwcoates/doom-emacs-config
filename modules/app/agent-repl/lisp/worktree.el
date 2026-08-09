@@ -1093,6 +1093,38 @@ file intake."
        (when (buffer-live-p out-buf) (kill-buffer out-buf))
        nil))))
 
+(defun agent-repl--call-in-background-workspace (ws fn)
+  "Call FN with WS transiently activated, then restore the caller's focus.
+
+The single anchor every \"do this IN WS's perspective, whoever is
+looking at whatever\" caller goes through: `agent-repl--eager-open-panels'
+for a background workspace's whole panel build, and the gui frontend's
+DEFERRED webview mount (`agent-repl--gui-open'), whose continuation runs
+long after its caller's dynamic extent ended and would otherwise mount
+WS's webview into whichever perspective happens to be current then.
+
+Anchoring on WS rather than on the caller's timing is what makes that
+mis-mount unrepresentable instead of merely unlikely: the switch-in
+happens at the moment FN runs, so no amount of user switching in between
+can land WS's panels in someone else's frame.
+
+The switch-in is skipped when WS is ALREADY current (the ordinary
+`SPC o c' case), and `agent-repl--with-preserved-focus' then restores
+nothing, so the anchor costs the foreground path no persp traffic at
+all — the same equality screen `agent-repl--restore-focus' applies on
+the way out.
+`agent-repl--eager-open-in-progress' is bound around the whole dance so
+the activation-reactive hooks that must not fire for a background
+workspace are suppressed — see that variable's docstring for why the
+async `--on-workspace-switch' schedule and the workspace-history record
+would misfire here.  Those hooks only run on a real persp activation, so
+the binding is inert when WS is already current."
+  (let ((agent-repl--eager-open-in-progress t))
+    (agent-repl--with-preserved-focus
+      (unless (equal ws (agent-repl--ws-current-name))
+        (agent-repl--ws-switch ws))
+      (funcall fn))))
+
 (defun agent-repl--eager-open-panels (ws)
   "Build WS's REPL panels into WS's OWN perspective without stealing focus.
 
@@ -1114,18 +1146,23 @@ window configuration when the unwind switches away from WS, so the first
 real switch to WS displays the built layout (with its webview already
 mounted) instead of mounting it then.
 
-`agent-repl--eager-open-in-progress' is bound around the whole dance so
-the activation-reactive hooks that must not fire for a background
-workspace are suppressed — see that variable's docstring for why the
-async `--on-workspace-switch' schedule and the workspace-history record
-would misfire here."
+The transient switch, the focus restoration, and the
+`agent-repl--eager-open-in-progress' binding all come from the shared
+`agent-repl--call-in-background-workspace' anchor.
+
+The `:pending-show-panels' drain is the one that makes the workspace
+come up OPEN: `agent-repl--workspace-create-settle-request' arms that
+flag on every fresh materialization, so a generated workspace's panels
+are mounted here and its tab paints the full state color immediately,
+rather than waiting for the user to press `SPC o c' after switching to
+it."
   (agent-repl--log ws "eager-open-panels: ws=%s building panels in own perspective" ws)
-  (let ((agent-repl--eager-open-in-progress t))
-    (agent-repl--with-preserved-focus
-      (agent-repl--ws-switch ws)
-      (agent-repl--drain-pending-magit ws)
-      (agent-repl--drain-pending-initial-buffers ws)
-      (agent-repl--drain-pending-show-panels ws))))
+  (agent-repl--call-in-background-workspace
+   ws
+   (lambda ()
+     (agent-repl--drain-pending-magit ws)
+     (agent-repl--drain-pending-initial-buffers ws)
+     (agent-repl--drain-pending-show-panels ws))))
 
 (defun agent-repl--remove-doom-dashboard ()
   "Remove the Doom dashboard buffer from the current workspace.

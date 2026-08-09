@@ -248,13 +248,21 @@ just as completely but stays silent: the user did not ask for a context
 switch they did not initiate."
   (let* ((pending (agent-repl--workspace-create-take-request job-id))
          (jump (and pending (plist-get pending :jump))))
-    ;; The two deferred UI drains a worktree workspace has always been born
-    ;; with.  They are set OUTSIDE the daemon metadata envelope on purpose:
-    ;; they are mutable local flags the drains clear, and the envelope is the
+    ;; The three deferred UI drains a worktree workspace is born with.  They
+    ;; are set OUTSIDE the daemon metadata envelope on purpose: they are
+    ;; mutable local flags the drains clear, and the envelope is the
     ;; immutable creation fact a reconnect replay is compared against.
+    ;;
+    ;; `:pending-show-panels' is what makes a created workspace come up OPEN
+    ;; rather than running-but-headless.  Both settle paths below drain it —
+    ;; the jump switch through `--on-workspace-switch', the background one
+    ;; through `--eager-open-panels' — so the workspace's tab paints the full
+    ;; state color from the moment it materializes and the user finds its
+    ;; panels already mounted on the first switch, with no `SPC o c'.
     (when (eq result 'created)
       (agent-repl--ws-put ws :pending-magit t)
-      (agent-repl--ws-put ws :pending-initial-buffers t))
+      (agent-repl--ws-put ws :pending-initial-buffers t)
+      (agent-repl--ws-put ws :pending-show-panels t))
     (if (null pending)
         (agent-repl--log
          ws
