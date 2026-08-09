@@ -187,8 +187,7 @@ func bootMergeDaemon(t *testing.T, stateFile string) *mergeBoot {
 		Registry:      reg,
 		ModelCatalogs: modelCatalogs,
 		Controller:    controller,
-		SSM:           ssmMgr,
-		Frontend:      agentShim.Server,
+		AgentShim:     agentShim,
 		Logf:          t.Logf,
 	})
 	binding.SetTarget(srv)

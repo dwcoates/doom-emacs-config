@@ -23,7 +23,6 @@ import {
   agentTopbarHtml,
   nextCounterMenu,
   runningAgentClocks,
-  sessionTopbarDatapoints,
   topbarClickAction,
   topbarInfoHtml,
 } from "../src/topbar.js";
@@ -108,6 +107,10 @@ function storeState(over: Partial<StoreState> = {}): StoreState {
     mergeStatus: null,
     shutdownSchedule: null,
     hibernation: null,
+    fences: new Map(),
+    topbars: new Map(),
+    tokenBreakdowns: new Map(),
+    gates: new Map(),
     workspaceStateCauseSeq: 0,
     ...over,
   };
@@ -451,147 +454,20 @@ describe("topbarInfoHtml", () => {
   });
 });
 
-describe("sessionTopbarDatapoints", () => {
-  it("projects the session's cumulative usage into the tokens dropdown", () => {
-    // Arrange — the last result's session-cumulative snapshot.
-    const state = storeState({ resultUsage: { input_tokens: 10, output_tokens: 20 } });
-    // Act
-    const d = sessionTopbarDatapoints(state, null);
-    // Assert
-    expect(d.tokenMenu?.topLevel).toEqual({ input_tokens: 10, output_tokens: 20 });
-  });
-
-  it("projects the standing context size as the chip's figure", () => {
-    // Arrange — the store's current context size feeds the chip.
-    const state = storeState({ contextTokens: 132_576 });
-    // Act
-    const d = sessionTopbarDatapoints(state, null);
-    // Assert
-    expect(d.tokenMenu?.contextSize).toBe(132_576);
-  });
-
-  it("hands the whole-tree per-model map to the dropdown", () => {
-    // Arrange
-    const modelUsage = {
-      m: {
-        input_tokens: 1,
-        output_tokens: 1,
-        cache_creation_input_tokens: 0,
-        cache_read_input_tokens: 0,
-        web_search_requests: 0,
-        cost_usd: 0.01,
-        context_window: 1,
-      },
-    };
-    // Act
-    const d = sessionTopbarDatapoints(storeState({ modelUsage }), null);
-    // Assert
-    expect(d.tokenMenu?.models).toEqual(modelUsage);
-  });
-
-  it("hands ungrouped subagent responses to the dropdown without combining them", () => {
-    const responses = [
-      generatedUngroupedResponse({ apiMessageId: "message-one", usage: { ...ungroupedResponse().usage, inputTokens: 11 } }),
-      generatedUngroupedResponse({ apiMessageId: "message-two", usage: { ...ungroupedResponse().usage, inputTokens: 22 } }),
-    ];
-    const tokenUtilization = generatedSessionUtilization(responses);
-
-    const d = sessionTopbarDatapoints(storeState({ tokenUtilization }), null);
-
-    expect(d.tokenMenu?.sessionUtilization).toBe(tokenUtilization);
-    expect(d.tokenMenu?.sessionUtilization?.ungroupedSubagentResponses.map((response) => response.apiMessageId))
-      .toEqual(["message-one", "message-two"]);
-  });
-
-  it("projects no plain standing, which stays in the store for the result chips", () => {
-    // Arrange + Act — the strip's session tokens datapoint is the
-    // dropdown; a standing here would render nothing anyway.
-    const d = sessionTopbarDatapoints(storeState({ contextTokens: 200_000 }), null);
-    // Assert
-    expect(d.contextTokens).toBeNull();
-  });
-
-  it("passes the parent workspace through", () => {
-    // Arrange + Act + Assert
-    expect(sessionTopbarDatapoints(storeState(), "ws").parentWs).toBe("ws");
-  });
-
-  it("carries no timer, its turn clock having moved to the feed-tail row", () => {
-    // Arrange + Act + Assert — a null timerLabel makes the strip omit the
-    // `time:` datapoint; the running clock lives beside the progress
-    // indicator now (the progress footer).
-    expect(sessionTopbarDatapoints(storeState(), null).timerLabel).toBeNull();
-  });
-
-  it("carries NO subagent roster, that chip having relocated into the footer", () => {
-    // Arrange — a session with a live subagent, which used to put a chip here.
-    const state = storeState({ items: [agentItem()] });
-    // Act + Assert — the roster is the progress footer's counters cluster now.
-    expect(sessionTopbarDatapoints(state, null).agents).toEqual([]);
-  });
-
-  it("carries NO task roster, that chip having relocated into the footer", () => {
-    // Arrange + Act + Assert — same relocation: tasks live and die within a
-    // session, so they belong beside the rest of the ephemeral state.
-    expect(sessionTopbarDatapoints(storeState(), null).tasks).toEqual([]);
-  });
-
-  it("renders no roster chips at all in the header strip", () => {
-    // Arrange
-    const state = storeState({ items: [agentItem()] });
-    // Act
-    const html = topbarInfoHtml(sessionTopbarDatapoints(state, null), {
-      agentsOpen: false,
-      tasksOpen: false,
-      tokensOpen: false,
-    });
-    // Assert
-    expect(html).not.toContain("data-agents-toggle");
-    expect(html).not.toContain("data-tasks-toggle");
-  });
-
-  it("lights up the overlay's per-model sections once a result has landed", () => {
-    // Arrange — the store's map, fed from a landed result's `model_usage`.
-    const modelUsage = {
-      "claude-opus-4": {
-        input_tokens: 100,
-        output_tokens: 200,
-        cache_creation_input_tokens: 0,
-        cache_read_input_tokens: 0,
-        web_search_requests: 0,
-        cost_usd: 0.5,
-        context_window: 200_000,
-      },
-    };
-    // A landed result feeds BOTH sources at once (see `adoptResultUsage`).
-    const resultUsage = { input_tokens: 10, output_tokens: 20 };
-    // Act — the strip with its tokens overlay open.
-    const state = storeState({ modelUsage, resultUsage });
-    const html = topbarInfoHtml(sessionTopbarDatapoints(state, null), {
-      agentsOpen: false,
-      tasksOpen: false,
-      tokensOpen: true,
-    });
-    // Assert — the sections that used to render as dashes now carry figures:
-    // the model gets its own section, and the whole-tree totals are summed
-    // from the map rather than showing the unknown-source dashes.
-    expect(html).toContain("claude-opus-4");
-    expect(html).toContain("all agents");
-    expect(html).toContain("200,000");
-    expect(html).not.toContain(`<span class="tokens-value">—</span>`);
-  });
-
-  it("keeps the session tokens chip, which is NOT ephemeral state", () => {
-    // Arrange + Act — session-scoped token usage stays topbar territory.
-    const html = topbarInfoHtml(sessionTopbarDatapoints(storeState(), null), {
-      agentsOpen: false,
-      tasksOpen: false,
-      tokensOpen: false,
-    });
-    // Assert
-    expect(html).toContain("data-tokens-toggle");
-  });
-});
+// RETIRED with the function it covered: the `sessionTopbarDatapoints` suite.
+//
+// Every test in it asserted how store state was PROJECTED into the session
+// header strip — the cumulative usage behind the tokens dropdown, the standing
+// context size on its chip, the whole-tree per-model map, the parent workspace,
+// and the rosters and clock that had already relocated. That projection no
+// longer happens: the session header renders the daemon's resolved TopbarView
+// and TokenBreakdownView, so there is no client-side composition left to assert
+// and no fallback path to pin (invariant I3, absence renders absence).
+//
+// The replacement behavior is covered where it now lives — test/topbar-view.ts
+// for the strip and its tokens disclosure, test/token-breakdown-view.ts for the
+// menu's rows, sections and shares. The tests below are UNTOUCHED because they
+// cover the per-AGENT bubble strip, which still composes its datapoints here.
 
 describe("agentElapsedLabel", () => {
   it("counts a running agent from its start stamp to now", () => {

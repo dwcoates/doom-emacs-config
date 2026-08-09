@@ -956,8 +956,14 @@ func main() {
 		Lifecycle:    opener,
 		// The registry's own record of a deliberate deletion, exposed so a merge
 		// can tell a hibernated session (rehydrate) from a deleted one (refuse).
-		SessionDeaths:     server.RegistrySessionDeaths{Reg: sessionRegistry},
-		Sessions:          server.RegistrySessions{Reg: sessionRegistry, Controller: controller, ModelCatalogs: modelCatalogs, TokenUsage: tokenUtilizations, Logf: legacyLog},
+		SessionDeaths: server.RegistrySessionDeaths{Reg: sessionRegistry},
+		Sessions:      server.RegistrySessions{Reg: sessionRegistry, Controller: controller, ModelCatalogs: modelCatalogs, TokenUsage: tokenUtilizations, Logf: legacyLog},
+		// The two per-session facts the resolved-view publisher reads: the
+		// owning session's durable record and its published model menu. Both
+		// are the SAME instances every other reader here takes, so the topbar
+		// and the session view can never name different models.
+		SessionRecords:    sessionRegistry,
+		ModelCatalogs:     modelCatalogs,
 		Inits:             controller,
 		Catalogs:          controller,
 		Queues:            controller,
@@ -1047,8 +1053,13 @@ func main() {
 		WidgetAssetsDir: *widgetAssets,
 		DaemonAddr:      *addr,
 		Controller:      controller,
-		SSM:             ssmMgr,
-		Frontend:        agentShim.Server,
+		// THE FRONTEND SURFACE WHOLE: the same state machine, the same frame
+		// fan-out and the SAME resolved-view publisher the SSM's state
+		// subscription drives, so the breakdown the SessionView push resolves
+		// and the topbar the state push resolves are retained together and
+		// snapshot together. Handing over one of the three and forgetting
+		// another is not expressible.
+		AgentShim: agentShim,
 	})
 	// Bind the session-command surface now that the *Server exists (createSession
 	// /deleteSession UDS commands and the snapshot DaemonView delegate to it).

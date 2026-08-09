@@ -24,8 +24,14 @@ import {
   QueueEntrySchema,
 } from "../../proto/gen/ts/agentshim/frontend/v1/prompt-queue_pb";
 import { PromptOriginSchema } from "../../proto/gen/ts/agentshim/core/v1/core_pb";
+import { FailureKindSchema } from "../../proto/gen/ts/agentshim/frontend/v1/errors_pb";
+import { FailureCardViewSchema } from "../../proto/gen/ts/agentshim/frontend/v1/failure-card_pb";
+import { WorkspaceGateViewSchema } from "../../proto/gen/ts/agentshim/frontend/v1/gate-revival_pb";
 import {
   COMMAND_ARM,
+  FAILURE_CARD_LIFECYCLE_ARM,
+  FAILURE_KIND_ARMS,
+  FAILURE_KIND_SIDE,
   HIBERNATION_CAUSE,
   KEEP_ALIVE_HOLD_TURN_ID,
   PROMPT_ORIGIN_CACHE_KEEP_ALIVE,
@@ -36,6 +42,7 @@ import {
   QUEUE_HOLD_ARM,
   REVIVAL_HOLD_FIELDS,
   REVIVE_MODE,
+  WORKSPACE_GATE_ARM,
 } from "../src/proto-names.js";
 
 /** The protojson keys of one generated oneof's arms, as the wire spells them. */
@@ -176,5 +183,69 @@ describe("PromptOrigin names: the one part no type can spell", () => {
   it("builds the card-action origin name", () => {
     // Arrange / Act / Assert
     expect(PROMPT_ORIGIN_NAMES.has(PROMPT_ORIGIN_WEBAPP_CARD_ACTION)).toBe(true);
+  });
+});
+
+
+describe("the WorkspaceGateView.gate arms", () => {
+  it("names only arms the generated gate oneof declares", () => {
+    // Arrange / Act — a mis-spelled arm would make the decoder refuse a frame
+    // the daemon considers well-formed.
+    const generated = new Set(oneofJsonNames(WorkspaceGateViewSchema, "gate"));
+    const unknown = Object.values(WORKSPACE_GATE_ARM).filter((arm) => !generated.has(arm));
+    // Assert
+    expect(unknown).toEqual([]);
+  });
+
+  it("names EVERY arm the generated gate oneof declares", () => {
+    // Arrange / Act — a missing arm is a gate the client silently cannot read.
+    const spelled = new Set<string>(Object.values(WORKSPACE_GATE_ARM));
+    const missing = oneofJsonNames(WorkspaceGateViewSchema, "gate").filter(
+      (arm) => !spelled.has(arm),
+    );
+    // Assert
+    expect(missing).toEqual([]);
+  });
+});
+
+describe("the FailureCardView.lifecycle arms", () => {
+  it("names EVERY lifecycle arm the generated oneof declares", () => {
+    // Arrange / Act — an unspelled arm would be rejected as "no lifecycle arm"
+    // on a card the daemon considers complete.
+    const spelled = new Set<string>(Object.values(FAILURE_CARD_LIFECYCLE_ARM));
+    const missing = oneofJsonNames(FailureCardViewSchema, "lifecycle").filter(
+      (arm) => !spelled.has(arm),
+    );
+    // Assert
+    expect(missing).toEqual([]);
+  });
+});
+
+describe("the FailureKind side table", () => {
+  it("assigns a side to EVERY arm the generated oneof declares", () => {
+    // Arrange / Act — an arm with no side is a failure whose color this end
+    // would have to invent.
+    const missing = oneofJsonNames(FailureKindSchema, "kind").filter(
+      (arm) => FAILURE_KIND_SIDE[arm as keyof typeof FAILURE_KIND_SIDE] === undefined,
+    );
+    // Assert
+    expect(missing).toEqual([]);
+  });
+
+  it("names no arm the generated oneof does not declare", () => {
+    // Arrange / Act — the other direction: a stale arm here would be dead
+    // vocabulary nothing can ever match.
+    const generated = new Set(oneofJsonNames(FailureKindSchema, "kind"));
+    const unknown = FAILURE_KIND_ARMS.filter((arm) => !generated.has(arm));
+    // Assert
+    expect(unknown).toEqual([]);
+  });
+
+  it("puts every daemon-minted arm on exactly one side", () => {
+    // Arrange / Act — the machinery/vendor distinction is carried BY THE ARM,
+    // so a side that was not one of the two would be a third reading.
+    const sides = new Set(Object.values(FAILURE_KIND_SIDE));
+    // Assert
+    expect([...sides].sort()).toEqual(["machinery", "vendor"]);
   });
 });

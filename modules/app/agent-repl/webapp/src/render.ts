@@ -34,7 +34,12 @@ import {
   expandedKeys,
   sectionsIn,
 } from "./expand.js";
+import { AsyncBubbleForCall, type AsyncRenderContext } from "./async-render.js";
+import type { AsyncBubbleRegistry } from "./async-routing.js";
+import { Fold, capLabel } from "./fold.js";
+import { asyncAgentItems } from "./state-adapter.js";
 import { animatedEllipsis, escapeHtml, highlightCode, languageForPath } from "./highlight.js";
+import { failureKindName, failureToneClass } from "./failure-card.js";
 import { partitionFeed } from "./partition.js";
 import {
   mayNest,
@@ -78,7 +83,7 @@ import { freezeOnScroll, freezeOnToggle, isPinnedToBottom, parkAtTail, revealNod
 import { blocksToText, userTurnText } from "./turn.js";
 import { clearOrCompactKey, itemsFromClearOrCompact } from "./clear-compact.js";
 import { gnsFolds } from "./gns.js";
-import { asyncByBubble, isWatcher, watcherRef } from "./watchers.js";
+import { asyncByBubble, isWatcher, watcherRef, type AsyncClassification } from "./watchers.js";
 import { TaskTail, WatcherPoller } from "./watcher-poll.js";
 import {
   ContextClearedItem,
@@ -87,7 +92,7 @@ import {
   PermissionItem,
   ResultItem,
   SessionCommandItem,
-  SystemFailureCard,
+  FailureCardItem,
   StoreState,
   SystemItem,
   TextItem,
@@ -843,6 +848,14 @@ export interface PanelContext {
    * ancestor's own id renders no fold (see `mayNest`).
    */
   seenSources?: ReadonlySet<string>;
+  /**
+   * The DETACHED WORK registry — every open `AsyncBubble`, keyed by id.
+   *
+   * A tool card draws the bubble its own `spawnedBubbleId` NAMES, matched
+   * here; it never derives one. Absent leaves cards drawing no bubbles at
+   * all, which is what a page that has received no async push should show.
+   */
+  asyncBubbles?: AsyncBubbleRegistry;
 }
 
 /** True when the child renders something the panel and ticker count. */
@@ -912,11 +925,6 @@ function memberCtx(panels?: PanelContext): MemberContext {
     children: (id) => (panels?.children.get(id) ?? []).filter(visibleChild),
     taskTail: (id) => panels?.taskTail?.(id),
   };
-}
-
-/** The one truncation rule every face label wears. */
-function capLabel(label: string, max: number): string {
-  return label.length > max ? `${label.slice(0, max - 1)}…` : label;
 }
 
 /**
@@ -996,37 +1004,9 @@ export function activityTicker(children: readonly ConversationItem[]): string {
  * renderItem the top level uses — exists in the HTML only while the
  * card is open, so a hundred buffered children cost nothing while
  * closed. Open state lives in the RENDERER (like question selections),
- * because the fold must survive the card's own re-renders.
+ * because the fold must survive the card's own re-renders. The fold skeleton
+ * it renders through lives in `fold.ts`, shared with the async-bubble surface.
  */
-/**
- * The shared skeleton of a click-to-open fold: a pill ticker as the
- * collapsed face and a panel body that exists in the HTML only while open,
- * with open state carried on the wrapper's class and a `data-panel-toggle`
- * the FeedRenderer's delegated handler flips. The activity fold on a
- * spawning card (ActivitySection) and the watcher fold on a final-response
- * bubble (WatcherPanel) both render through this, differing only in their
- * classes, ticker face, and body.
- *
- * BODY is a thunk, not a string: it is called only when the fold is open,
- * so a hundred buffered children (or watcher tails) cost nothing to render
- * while the fold stays closed.
- */
-function Fold(opts: {
-  id: string;
-  foldClass: string;
-  tickerClass: string;
-  ticker: string;
-  body: () => string;
-  open: boolean;
-}): string {
-  const panel = opts.open ? `<div class="agent-panel">${opts.body()}</div>` : "";
-  return `<div class="${opts.foldClass}${opts.open ? " open" : ""}" data-panel-toggle="${escapeHtml(opts.id)}">
-      <div class="${opts.tickerClass}">${opts.ticker} <span class="agent-caret" aria-hidden="true">${
-        opts.open ? "▴" : "▾"
-      }</span></div>${panel}
-    </div>`;
-}
-
 /**
  * The shared body of every fold panel: children rendered through the
  * very renderItem the top level uses, each in its .feed-child shell —
@@ -1101,7 +1081,47 @@ function ToolCard(
       ${tabBar}
       <div class="tool-head"><span class="tool-name">${escapeHtml(item.toolName)}</span>${status}${permBadge}${faceSide(member)}</div>
       ${cardContent(item, { item, member, progress, panels })}
+      ${asyncBubbleForCard(item, panels)}
     </div>`;
+}
+
+/**
+ * The `AsyncBubble` this card's call detached, drawn attached to the card that
+ * launched it.
+ *
+ * The attachment is a MATCH on the daemon's classification and nothing else,
+ * from whichever end of it the wire carries: `AsyncBubble.origin_tool_use_id`
+ * against this card's tool_use id, and `AgentToolCall.spawned_bubble_id`
+ * against the bubble's id. Empty on both ends means the call detached nothing
+ * — never a prompt to go find a plausible candidate. A card with no registry
+ * to match against draws nothing, which is the honest state of a page that has
+ * received no async push.
+ */
+function asyncBubbleForCard(item: ToolItem, panels?: PanelContext): string {
+  const registry = panels?.asyncBubbles;
+  if (registry === undefined) return "";
+  return AsyncBubbleForCall(item.toolUseId, item.spawnedBubbleId, asyncRenderContext(registry, panels));
+}
+
+/**
+ * The async renderer's context, wired to THIS renderer's own item renderer.
+ *
+ * `renderEmissions` decomposes a detached agent's emissions with the adapter's
+ * one decomposition and draws the result with `feedChildren` — literally the
+ * function the top-level feed nests everything through. That is what makes "a
+ * renderer written for the main feed renders a detached agent unchanged" a
+ * fact about this code rather than a claim in a proto comment.
+ */
+function asyncRenderContext(registry: AsyncBubbleRegistry, panels?: PanelContext): AsyncRenderContext {
+  return {
+    registry,
+    isOpen: (id) => panels?.isOpen(id) ?? false,
+    renderEmissions: (emissions, bubbleId) => {
+      const bubble = registry.get(bubbleId);
+      const built = asyncAgentItems(emissions, bubbleId, bubble?.startedAtMs ?? 0);
+      return feedChildren(built.items, panels);
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1400,10 +1420,10 @@ function statusDot(status: MemberStatus): "running" | "done" | "error" {
   return status === "running" ? "running" : status === "done" ? "done" : "error";
 }
 
-/** A member's badge label: its tool name and its one watcher id, capped. */
-function asyncBadgeLabel(item: ToolItem): string {
-  const ref = watcherRef(item);
-  const label = ref !== null ? `${item.toolName} · ${ref.id}` : item.toolName;
+/** A member's badge label: its tool name and its one bubble id, capped. */
+function asyncBadgeLabel(item: ToolItem, panels?: PanelContext): string {
+  const bubbleId = watcherRef(item, panels?.asyncBubbles);
+  const label = bubbleId !== null ? `${item.toolName} · ${bubbleId}` : item.toolName;
   return capLabel(label, 24);
 }
 
@@ -1436,7 +1456,7 @@ function AsyncBadge(hostId: string, item: ToolItem, panels?: PanelContext): stri
       : "";
   return `<div class="async-badge${settled ? " settled" : ""}${
     open ? " active" : ""
-  }" data-panel-toggle="${escapeHtml(id)}"><span class="agent-dot agent-${dot}" aria-hidden="true">●</span> ${escapeHtml(asyncBadgeLabel(item))}${tokens}</div>`;
+  }" data-panel-toggle="${escapeHtml(id)}"><span class="agent-dot agent-${dot}" aria-hidden="true">●</span> ${escapeHtml(asyncBadgeLabel(item, panels))}${tokens}</div>`;
 }
 
 /**
@@ -2186,57 +2206,81 @@ function CompactDivider(item: ContextCompactedItem): string {
 }
 
 /**
- * A daemon-classified failure, as a bordered card in the feed.
+ * A daemon-resolved failure, as a bordered card in the feed.
  *
  * It is where a user whose workspace changed color finds out WHY. Before it
  * there was nowhere for that account to live: the degraded banner was chrome
  * that scrolled away, a refused command rendered nothing at all, and an API
  * failure rendered a one-line grey badge built from a code no one set.
  *
- * The border color comes from the failure's CLASS, from the same table the
- * workspace takes its color from — so a purple workspace can never be
- * explained by a card of some other color.
+ * THE COLOR COMES FROM THE KIND'S SIDE, through `failure-card.ts` and the one
+ * shared render-colors table the workspace dot reads — so a purple workspace
+ * can never be explained by a card of some other color.
  *
- * A RESOLVED card renders as settled: a check, the closing time, and the
- * alarm styling dropped. The window ended, and a card that went on shouting
- * about it would be lying about the present to be accurate about the past.
+ * A RESOLVED card renders as settled: a check, the closing time, and the alarm
+ * styling dropped. The window ended, and a card that went on shouting about it
+ * would be lying about the present to be accurate about the past. A TERMINAL
+ * card keeps the alarm mark and gets no stamp — it has no closing edge and
+ * never will, and rendering it like an open one would leave a reader waiting
+ * for an all-clear that is not coming.
  */
-function SystemFailureBubble(item: SystemFailureCard): string {
-  const resolved = item.resolvedAtMs > 0;
-  const cls = `failure-card failure-${item.errorClass.toLowerCase()}${resolved ? " resolved" : ""}`;
-  const mark = resolved ? "✓" : "✕";
-  const detail = item.sourceDetail
-    ? `<div class="failure-detail">${escapeHtml(item.sourceDetail)}</div>`
+function FailureCardBubble(item: FailureCardItem): string {
+  const view = item.view;
+  const resolved = view.lifecycle.case === "resolved";
+  const cls =
+    `failure-card ${failureToneClass(view.kind)} ` +
+    `failure-${view.lifecycle.case}${resolved ? " resolved" : ""}`;
+  const mark = resolved ? "\u2713" : "\u2715";
+  const detail = view.detail
+    ? `<div class="failure-detail">${escapeHtml(view.detail)}</div>`
     : "";
-  const stamp = resolved
-    ? `<div class="failure-resolved">resolved ${escapeHtml(formatClockTime(item.resolvedAtMs))}</div>`
-    : "";
-  const structured = failureDetailHtml(item.detail);
+  const stamp =
+    view.lifecycle.case === "resolved"
+      ? `<div class="failure-resolved">resolved ${escapeHtml(formatClockTime(view.lifecycle.resolvedAtMs))}</div>`
+      : "";
   return (
-    `<div class="${cls}" data-error-type="${escapeHtml(item.errorType)}">` +
+    `<div class="${cls}" data-failure-kind="${escapeHtml(failureKindName(view.kind))}" ` +
+    `data-failure-uuid="${escapeHtml(item.uuid)}">` +
     `<div class="failure-head"><span class="failure-mark">${mark}</span>` +
-    `<span class="failure-message">${escapeHtml(item.message)}</span></div>` +
+    `<span class="failure-message">${escapeHtml(view.message)}</span></div>` +
     detail +
-    structured +
+    failureEvidenceHtml(view.kind) +
     stamp +
     `</div>`
   );
 }
 
-/** Render the structurally complete detail union carried by every failure card. */
-function failureDetailHtml(detail: SystemFailureCard["detail"]): string {
-  switch (detail.kind) {
-    case "none":
-      return "";
-    case "sessionResume":
-      return resumeFailureHtml(detail.value);
-    case "queryTermination":
-      return queryTerminationFailureHtml(detail.value);
+/**
+ * The TYPED evidence a kind carries, for the two arms that carry a whole
+ * machine-readable record rather than a field or two.
+ *
+ * Every other arm's evidence is already inside the daemon's `detail` prose, so
+ * rendering it twice would be this end restating what it was handed. These two
+ * are different: they carry structured lifecycle records whose parts a reader
+ * debugging a resume or a query death needs named individually.
+ */
+function failureEvidenceHtml(kind: import("./frontend-proto.js").FailureKind): string {
+  if (kind.kind.case === "queryTermination" && kind.kind.value.detail !== undefined) {
+    return queryTerminationFailureHtml(kind.kind.value.detail);
   }
+  if (kind.kind.case === "sessionResumeFailed" && kind.kind.value.detail !== undefined) {
+    return resumeFailureHtml(kind.kind.value.detail);
+  }
+  return "";
 }
 
-/** Render every query identity and the exact typed termination cause. */
-function queryTerminationFailureHtml(failure: import("./frontend-proto.js").QueryTerminationFailure): string {
+/**
+ * Render every query identity and the exact typed termination cause.
+ *
+ * The "missing …" arms below are UNREACHABLE and KEPT: `decodeFailureKind`
+ * refuses a query-termination record with no reason and no vendor identity, so
+ * a decoded record always names both. They stay because the guarantee lives one
+ * module away — a decoder that stopped enforcing it must show up as visible
+ * prose here, never as a blank line beside real evidence.
+ */
+function queryTerminationFailureHtml(
+  failure: import("../../proto/gen/ts/agentshim/frontend/v1/errors_pb").QueryTerminationFailure,
+): string {
   const reason = failure.reason.case === "unexpectedEof"
     ? "unexpected EOF"
     : failure.reason.case === "iteratorFailure"
@@ -2252,18 +2296,28 @@ function queryTerminationFailureHtml(failure: import("./frontend-proto.js").Quer
   return `<div class="failure-detail">query termination: ${escapeHtml(reason)}<br>query instance: ${escapeHtml(failure.queryInstanceId)}<br>vendor session: ${escapeHtml(vendor)}<br>observed_at_ms: ${String(failure.observedAtMs)}</div>`;
 }
 
-/** Render resume-continuity evidence without reducing it to a generic death. */
-function resumeFailureHtml(failure: import("./frontend-proto.js").SessionResumeFailure): string {
-  const attempt = failure.attempt === "create" ? "session creation" : "automatic restoration";
-  const header = `<div class="failure-detail">resume blocked during ${escapeHtml(attempt)}<br>conversation: ${escapeHtml(failure.claudeSessionId)}</div>`;
+/**
+ * Render resume-continuity evidence without reducing it to a generic death.
+ *
+ * The "missing resume-continuity cause" arm is UNREACHABLE and KEPT for the
+ * same reason as `queryTerminationFailureHtml`'s: `decodeFailureKind` requires
+ * exactly one attempt and exactly one cause on every decoded record.
+ */
+function resumeFailureHtml(
+  failure: import("../../proto/gen/ts/agentshim/frontend/v1/errors_pb").SessionResumeFailure,
+): string {
+  const attempt = failure.attempt.case === "create" ? "session creation" : "automatic restoration";
   if (failure.cause.case === "queryTermination") {
+    const header = `<div class="failure-detail">resume blocked during ${escapeHtml(attempt)}<br>conversation: ${escapeHtml(failure.claudeSessionId)}</div>`;
     return `${header}${queryTerminationFailureHtml(failure.cause.value)}`;
   }
   const cause = failure.cause.case === "transcriptUnavailable"
-    ? `transcript unavailable: ${failure.cause.searchedPaths.join(" | ") || "no readable transcript path"}`
+    ? `transcript unavailable: ${failure.cause.value.searchedPaths.join(" | ") || "no readable transcript path"}`
     : failure.cause.case === "identityMismatch"
-      ? `identity mismatch: ${failure.cause.replacementClaudeSessionId || "recovery would start a fresh conversation"}`
-      : `bring-up failure: ${failure.cause.cause}`;
+      ? `identity mismatch: ${failure.cause.value.replacementClaudeSessionId || "recovery would start a fresh conversation"}`
+      : failure.cause.case === "bringUpFailure"
+        ? `bring-up failure: ${failure.cause.value.cause}`
+        : "missing resume-continuity cause";
   return `<div class="failure-detail">resume blocked during ${escapeHtml(attempt)}<br>${escapeHtml(cause)}<br>conversation: ${escapeHtml(failure.claudeSessionId)}</div>`;
 }
 
@@ -2403,7 +2457,7 @@ export function renderItem(
     case "session-command":
       return SessionCommandChip(item);
     case "failure":
-      return SystemFailureBubble(item);
+      return FailureCardBubble(item);
     case "system":
       return SystemNote(item);
   }
@@ -2767,10 +2821,11 @@ export function panelSeedsOnOpen(id: string): string[] {
 export function asyncMembersByBubble(
   visible: readonly ConversationItem[],
   gnsByBubble: ReadonlyMap<string, readonly ConversationItem[]>,
+  bubbles?: AsyncClassification,
 ): Map<string, ToolItem[]> {
-  const byBubble = asyncByBubble(visible);
+  const byBubble = asyncByBubble(visible, bubbles);
   for (const [host, folded] of gnsByBubble) {
-    const members = folded.filter(isWatcher);
+    const members = folded.filter((item) => isWatcher(item, bubbles));
     if (members.length === 0) continue;
     const list = byBubble.get(host) ?? [];
     list.push(...members);
@@ -2811,7 +2866,7 @@ export function anyLiveAsync(
   items: readonly ConversationItem[],
   panels?: PanelContext,
 ): boolean {
-  return items.some((i) => isWatcher(i) && memberLive(i, panels));
+  return items.some((i) => isWatcher(i, panels?.asyncBubbles) && memberLive(i, panels));
 }
 
 /**
@@ -2853,6 +2908,16 @@ export class FeedRenderer {
   /** Half-typed agent messages, keyed by agent id (see agentComposer). */
   private msgDrafts = new Map<string, string>();
   private lastState: StoreState | null = null;
+  /**
+   * The store's open-bubble registry, so a tool card can MATCH its
+   * classification verdict against the detached work the daemon pushed.
+   *
+   * Wired once at mount and held by reference — the registry is a live object
+   * the store mutates in place, so there is nothing per-render to re-read and
+   * no second copy to fall behind. Null until wired, which leaves cards
+   * drawing no bubbles: the honest state of a page with no async plane.
+   */
+  asyncBubbles: AsyncBubbleRegistry | null = null;
   /**
    * Whether the session is IDLE yet live async continues somewhere in the
    * feed — the amber monitoring signal, now the sidebar's breathing dot on
@@ -3164,6 +3229,7 @@ export class FeedRenderer {
       drafts: this.msgDrafts,
       watchers,
       gnsFolds: gnsFoldsByBubble,
+      ...(this.asyncBubbles === null ? {} : { asyncBubbles: this.asyncBubbles }),
       taskTail: (id) => this.watcherPoller?.tail(id),
       supportPhases: this.supportPhases,
       canAddSupport: this.actions.addSupport !== undefined,
@@ -3552,7 +3618,7 @@ export class FeedRenderer {
     const visible = items.filter((i) => !gns.folded.has(i));
     const part = partitionFeed(items);
     const top = part.top.filter((i) => !gns.folded.has(i));
-    const watchers = asyncMembersByBubble(visible, gns.byBubble);
+    const watchers = asyncMembersByBubble(visible, gns.byBubble, this.asyncBubbles ?? undefined);
     const panels = this.panelContext(part.children, watchers, gns.byBubble);
     this.syncWatcherPolls(watchers, panels);
     const finals = finalResponses(visible);
@@ -3753,7 +3819,7 @@ export class FeedRenderer {
     const visible = items.filter((i) => !gns.folded.has(i));
     const part = partitionFeed(items);
     const top = part.top.filter((i) => !gns.folded.has(i));
-    const watchers = asyncMembersByBubble(visible, gns.byBubble);
+    const watchers = asyncMembersByBubble(visible, gns.byBubble, this.asyncBubbles ?? undefined);
     const panels = this.panelContext(part.children, watchers, gns.byBubble);
     this.syncWatcherPolls(watchers, panels);
     const finals = finalResponses(visible);

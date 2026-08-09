@@ -474,8 +474,7 @@ func (w *receiptWorld) restart(t *testing.T) *bouncedFrontend {
 		Registry:      reg,
 		ModelCatalogs: server.NewSessionModelCatalogs(),
 		Controller:    controller,
-		SSM:           ssmMgr,
-		Frontend:      agentShim.Server,
+		AgentShim:     agentShim,
 		Logf:          t.Logf,
 	})
 	binding.SetTarget(srv)

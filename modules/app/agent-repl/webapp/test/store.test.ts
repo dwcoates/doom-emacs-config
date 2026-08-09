@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  CONNECTIVITY_WINDOW_FAILURE_TYPES,
   ConversationStore,
   contextTokens,
   liveContextDelta,
@@ -10,11 +9,12 @@ import {
   type ConversationItem,
   type ResultItem,
   type StoreState,
-  type SystemFailureCard,
+  type FailureCardItem,
   type TextItem,
   type ThinkingItem,
   type ToolItem,
 } from "../src/store.js";
+import type { AsyncBubble, AsyncBubbleDelta, AsyncBubbleUpdate } from "../src/async-bubble.js";
 import type {
   AdapterEffect,
   MergeStatus,
@@ -33,6 +33,9 @@ import type {
 } from "../src/frontend-proto.js";
 import type { CounterEntry } from "../src/counter-menu.js";
 import type { ModelUsage, Usage } from "../src/protocol.js";
+import { create } from "@bufbuild/protobuf";
+import { FailureKindSchema } from "../../proto/gen/ts/agentshim/frontend/v1/errors_pb";
+import { CONNECTIVITY_WINDOW_KINDS } from "../src/failure-card.js";
 import { generatedSessionUtilization, generatedUngroupedResponse, ungroupedResponse } from "./token-utilization-fixture.js";
 
 // The store's ONLY ingestion path after the agent-shim cutover: it folds
@@ -48,6 +51,7 @@ function workspaceEffect(over: Partial<WorkspaceStatusInput> = {}): AdapterEffec
     value: {
       workspace: "ws",
       sessionId: "s1",
+      fence: "f1",
       state: "thinking",
       turnActive: true,
       liveTaskCount: 0,
@@ -83,7 +87,6 @@ function sessionEffect(over: Partial<SessionViewInput> = {}): AdapterEffect {
       cwd: "",
       configDir: "",
       models: [],
-      hibernation: null,
       ...over,
     },
   };
@@ -154,18 +157,17 @@ function textItem(over: Partial<TextItem> = {}): TextItem {
   return { kind: "text", blockId: "b1", messageId: "m1", text: "hello", done: true, ts: TS, ...over };
 }
 
-function failureCard(over: Partial<SystemFailureCard> = {}): SystemFailureCard {
-  return {
-    kind: "failure",
-    errorClass: "INTERNAL",
-    errorType: "client.daemon_unreachable",
+function failureCard(over: Partial<FailureCardItem["view"]> = {}, uuid?: string): FailureCardItem {
+  const view: FailureCardItem["view"] = {
+    kind: create(FailureKindSchema, {
+      kind: { case: "daemonUnreachable", value: { closeCode: 1005, closeReason: "" } },
+    }),
     message: "lost the connection to the daemon; reconnecting",
-    sourceDetail: "close=1005",
-    resolvedAtMs: 0,
-    uuid: "local:client.daemon_unreachable",
-    detail: { kind: "none" },
+    detail: "close=1005",
+    lifecycle: { case: "open" },
     ...over,
   };
+  return { kind: "failure", uuid: uuid ?? "local:daemonUnreachable", view };
 }
 
 function toolItem(over: Partial<ToolItem> = {}): ToolItem {
@@ -694,18 +696,14 @@ describe("session identity authority", () => {
     expect(store.state.sessionId).toBe("s_live");
   });
 
-  it("leaves hibernation untouched when a non-owning session view reports it", () => {
-    // Arrange — a retired session's catalog entry must not flip the composer
-    // and revival gates the live session owns.
+  it("never lets a session view touch the gate at all", () => {
+    // Arrange — the catalog entry a retired session leaves behind used to flip
+    // the composer and revival gates the live session owns. It no longer feeds
+    // them: the gate is the fenced, per-workspace `WorkspaceGateView`.
     const store = new ConversationStore();
     store.ingest([workspaceEffect({ sessionId: "s_live" })]);
     // Act
-    store.ingest([
-      sessionEffect({
-        sessionId: "s_retired",
-        hibernation: { sinceMs: 1, cause: { case: "forced", value: {} } },
-      }),
-    ]);
+    store.ingest([sessionEffect({ sessionId: "s_retired" })]);
     // Assert
     expect(store.state.hibernation).toBeNull();
   });
@@ -2058,12 +2056,36 @@ describe("the tokens overlay's cumulative usage sources", () => {
 // "reconnecting" card reads as a standing fault to anyone who misses the small
 // resolved stamp beneath it.
 describe("resolved connectivity failures", () => {
+  /** A kind for one arm, so a test can name the window it is exercising. */
+  function kindOf(arm: "daemonUnreachable" | "shimDegraded" | "shimStoreWriteRejected") {
+    if (arm === "daemonUnreachable") {
+      return create(FailureKindSchema, {
+        kind: { case: "daemonUnreachable", value: { closeCode: 1005, closeReason: "" } },
+      });
+    }
+    if (arm === "shimDegraded") {
+      return create(FailureKindSchema, {
+        kind: { case: "shimDegraded", value: { component: "connection" } },
+      });
+    }
+    return create(FailureKindSchema, {
+      kind: {
+        case: "shimStoreWriteRejected",
+        value: { component: "store", reason: "closed", droppedCount: 3n },
+      },
+    });
+  }
+
+  const RESOLVED = { case: "resolved", resolvedAtMs: 1700000000000 } as const;
+
   it("removes the open card when the local daemon-unreachable window closes", () => {
     // Arrange
     const store = new ConversationStore();
     store.addFailure(failureCard());
     // Act
-    store.addFailure(failureCard({ message: "reconnected to the daemon", sourceDetail: "", resolvedAtMs: 1700000000000 }));
+    store.addFailure(
+      failureCard({ message: "reconnected to the daemon", detail: "", lifecycle: RESOLVED }),
+    );
     // Assert
     expect(store.state.items).toEqual([]);
   });
@@ -2071,10 +2093,12 @@ describe("resolved connectivity failures", () => {
   it("removes the open card when the daemon's shim-degraded window closes", () => {
     // Arrange
     const store = new ConversationStore();
-    const open = failureCard({ errorType: "shim.degraded", uuid: "degraded:s1:connection" });
+    const open = failureCard({ kind: kindOf("shimDegraded") }, "degraded:s1:connection");
     store.ingest([itemsEffect([open], 4)]);
     // Act
-    store.ingest([itemsEffect([{ ...open, resolvedAtMs: 1700000000000 }], 5)]);
+    store.ingest([
+      itemsEffect([{ ...open, view: { ...open.view, lifecycle: RESOLVED } }], 5),
+    ]);
     // Assert
     expect(store.state.items).toEqual([]);
   });
@@ -2083,7 +2107,7 @@ describe("resolved connectivity failures", () => {
     // Arrange — a view that loaded after the drop never held the opening card.
     const store = new ConversationStore();
     // Act
-    store.addFailure(failureCard({ resolvedAtMs: 1700000000000 }));
+    store.addFailure(failureCard({ lifecycle: RESOLVED }));
     // Assert
     expect(store.state.items).toEqual([]);
   });
@@ -2094,10 +2118,10 @@ describe("resolved connectivity failures", () => {
     const store = new ConversationStore((_level, message) => lines.push(message));
     store.addFailure(failureCard());
     // Act
-    store.addFailure(failureCard({ resolvedAtMs: 1700000000000 }));
+    store.addFailure(failureCard({ lifecycle: RESOLVED }));
     // Assert
     expect(lines).toContainEqual(
-      "retracted the resolved connectivity card failure:local:client.daemon_unreachable (client.daemon_unreachable)",
+      "retracted the resolved connectivity card failure:local:daemonUnreachable (daemonUnreachable)",
     );
   });
 
@@ -2106,10 +2130,11 @@ describe("resolved connectivity failures", () => {
     const lines: string[] = [];
     const store = new ConversationStore((_level, message) => lines.push(message));
     // Act
-    store.addFailure(failureCard({ resolvedAtMs: 1700000000000 }));
+    store.addFailure(failureCard({ lifecycle: RESOLVED }));
     // Assert
     expect(lines).toContainEqual(
-      "connectivity window client.daemon_unreachable closed with no open card to retract (failure:local:client.daemon_unreachable)",
+      "connectivity window daemonUnreachable closed with no open card " +
+        "to retract (failure:local:daemonUnreachable)",
     );
   });
 
@@ -2119,18 +2144,24 @@ describe("resolved connectivity failures", () => {
     // Act
     store.addFailure(failureCard());
     // Assert
-    expect(store.state.items).toEqual([expect.objectContaining({ uuid: "local:client.daemon_unreachable" })]);
+    expect(store.state.items).toEqual([
+      expect.objectContaining({ uuid: "local:daemonUnreachable" }),
+    ]);
   });
 
   it("settles a resolved store-outage card in place rather than retracting it", () => {
     // Arrange — dropped conversation is permanently gone, so its record stays.
     const store = new ConversationStore();
-    const open = failureCard({ errorType: "shim.store_write_rejected", uuid: "degraded:s1:store" });
+    const open = failureCard({ kind: kindOf("shimStoreWriteRejected") }, "degraded:s1:store");
     store.ingest([itemsEffect([open], 4)]);
     // Act
-    store.ingest([itemsEffect([{ ...open, resolvedAtMs: 1700000000000 }], 5)]);
+    store.ingest([
+      itemsEffect([{ ...open, view: { ...open.view, lifecycle: RESOLVED } }], 5),
+    ]);
     // Assert
-    expect(store.state.items).toEqual([expect.objectContaining({ resolvedAtMs: 1700000000000 })]);
+    expect(store.state.items).toEqual([
+      expect.objectContaining({ view: expect.objectContaining({ lifecycle: RESOLVED }) }),
+    ]);
   });
 
   it("retracts only the named window, leaving neighbouring items alone", () => {
@@ -2139,17 +2170,14 @@ describe("resolved connectivity failures", () => {
     store.ingest([itemsEffect([textItem()], 3)]);
     store.addFailure(failureCard());
     // Act
-    store.addFailure(failureCard({ resolvedAtMs: 1700000000000 }));
+    store.addFailure(failureCard({ lifecycle: RESOLVED }));
     // Assert
     expect(store.state.items).toEqual([expect.objectContaining({ kind: "text" })]);
   });
 
   it("names both transport windows and nothing else", () => {
     // Arrange / Act / Assert — the closed set the retraction rule keys on.
-    expect(CONNECTIVITY_WINDOW_FAILURE_TYPES).toEqual([
-      "client.daemon_unreachable",
-      "shim.degraded",
-    ]);
+    expect(CONNECTIVITY_WINDOW_KINDS).toEqual(["daemonUnreachable", "shimDegraded"]);
   });
 });
 
@@ -2279,33 +2307,161 @@ describe("ingest shutdown schedule", () => {
   });
 });
 
-describe("hibernation adoption (the revival gate's source of truth)", () => {
+describe("the revival gate (fenced WorkspaceGateView, the only source)", () => {
   const ASLEEP = { sinceMs: 1700000000000, cause: { case: "forced" as const, value: {} } };
 
-  it("adopts the pushed hibernation detail so the gate can name the cause", () => {
+  function gateEffect(
+    gate: { case: "open" } | { case: "hibernated"; detail: typeof ASLEEP },
+    fence = "f1",
+  ): AdapterEffect {
+    return {
+      kind: "fenced-view",
+      value: { case: "workspaceGate", value: { workspace: "ws", fence, gate } },
+    };
+  }
+
+  it("adopts a hibernated gate so the card can name the cause", () => {
     // Arrange
     const store = new ConversationStore();
+    store.ingest([workspaceEffect()]);
     // Act
-    store.ingest([sessionEffect({ hibernation: ASLEEP })]);
+    store.ingest([gateEffect({ case: "hibernated", detail: ASLEEP })]);
     // Assert
     expect(store.state.hibernation).toEqual(ASLEEP);
   });
 
-  it("clears the detail when a later view reports the session awake", () => {
+  it("clears the detail when a later gate reports the workspace open", () => {
     // Arrange — the revive landed, and only the daemon can say so.
     const store = new ConversationStore();
-    store.ingest([sessionEffect({ hibernation: ASLEEP })]);
+    store.ingest([workspaceEffect()]);
+    store.ingest([gateEffect({ case: "hibernated", detail: ASLEEP })]);
     // Act
-    store.ingest([sessionEffect({ hibernation: null })]);
+    store.ingest([gateEffect({ case: "open" })]);
     // Assert
     expect(store.state.hibernation).toBeNull();
   });
 
-  it("starts null, so a session with no view yet is never gated as asleep", () => {
+  it("starts null, so a workspace with no gate yet is never gated as asleep", () => {
     // Arrange / Act
     const store = new ConversationStore();
     // Assert
     expect(store.state.hibernation).toBeNull();
+  });
+
+  it("retains the gate view itself, keyed by workspace", () => {
+    // Arrange
+    const store = new ConversationStore();
+    store.ingest([workspaceEffect()]);
+    // Act
+    store.ingest([gateEffect({ case: "open" })]);
+    // Assert
+    expect(store.workspaceGate("ws")?.gate).toEqual({ case: "open" });
+  });
+
+  it("renders absence as absence for a workspace no gate has been published for", () => {
+    // Arrange / Act — never a client-composed stand-in.
+    const store = new ConversationStore();
+    // Assert
+    expect(store.workspaceGate("ws")).toBeNull();
+  });
+});
+
+describe("the fence gate (the one choke point every fenced view passes)", () => {
+  const TOPBAR = {
+    workspace: "ws",
+    title: "ws · main",
+    sessionLine: "session line",
+    modelDisplay: "opus-5",
+    modelOptions: [],
+    accountingLine: "",
+    fence: "f1",
+  };
+
+  function topbarEffect(fence: string): AdapterEffect {
+    return { kind: "fenced-view", value: { case: "topbar", value: { ...TOPBAR, fence } } };
+  }
+
+  it("adopts a view whose fence matches the workspace's current fence", () => {
+    // Arrange
+    const store = new ConversationStore();
+    store.ingest([workspaceEffect({ fence: "f1" })]);
+    // Act
+    store.ingest([topbarEffect("f1")]);
+    // Assert
+    expect(store.topbar("ws")?.title).toBe("ws · main");
+  });
+
+  it("discards a STALE push whole, adopting no part of it", () => {
+    // Arrange — half a stale view is a view that disagrees with itself.
+    const store = new ConversationStore();
+    store.ingest([workspaceEffect({ fence: "f2" })]);
+    // Act
+    store.ingest([topbarEffect("f1")]);
+    // Assert
+    expect(store.topbar("ws")).toBeNull();
+  });
+
+  it("reports no change when it discards, so nothing re-renders on a stale push", () => {
+    // Arrange
+    const store = new ConversationStore();
+    store.ingest([workspaceEffect({ fence: "f2" })]);
+    // Act
+    const result = store.ingest([topbarEffect("f1")]);
+    // Assert
+    expect(result.changed).toBe(false);
+  });
+
+  it("logs the discard with both fences side by side", () => {
+    // Arrange — a silently dropped frame is indistinguishable from a daemon
+    // that never sent one.
+    const lines: string[] = [];
+    const store = new ConversationStore((_level, message) => lines.push(message));
+    store.ingest([workspaceEffect({ fence: "f2" })]);
+    // Act
+    store.ingest([topbarEffect("f1")]);
+    // Assert
+    expect(lines).toContainEqual(
+      "stale fenced view discarded whole: topbar for workspace=ws carried fence=f1 " +
+        "while the workspace's current fence is f2 (no part of it was adopted)",
+    );
+  });
+
+  it("logs the discard with structured context naming the view", () => {
+    // Arrange
+    const contexts: unknown[] = [];
+    const store = new ConversationStore((_level, _message, context) => contexts.push(context));
+    store.ingest([workspaceEffect({ fence: "f2" })]);
+    // Act
+    store.ingest([topbarEffect("f1")]);
+    // Assert
+    expect(contexts).toContainEqual(
+      expect.objectContaining({
+        operation: "fence.stale-view",
+        view: "topbar",
+        pushed_fence: "f1",
+        current_fence: "f2",
+      }),
+    );
+  });
+
+  it("discards a view that arrives before any WorkspaceState has ruled", () => {
+    // Arrange / Act — nothing has established what "current" means for this
+    // workspace, so nothing can be shown to be current.
+    const store = new ConversationStore();
+    store.ingest([topbarEffect("f1")]);
+    // Assert
+    expect(store.topbar("ws")).toBeNull();
+  });
+
+  it("drops the chrome a ROTATION invalidated rather than leaving it standing", () => {
+    // Arrange — the adopted view describes a session that is now gone.
+    const store = new ConversationStore();
+    store.ingest([workspaceEffect({ fence: "f1" })]);
+    store.ingest([topbarEffect("f1")]);
+    // Act
+    store.ingest([workspaceEffect({ fence: "f2", atMs: 2000 })]);
+    // Assert
+    expect(store.topbar("ws")).toBeNull();
   });
 });
 
@@ -2347,5 +2503,207 @@ describe("revival hold adoption (the queue bubble's source of truth)", () => {
     store.ingest([queueEffect([queueEntry()])]);
     // Assert
     expect(store.state.queued[0].revivalHold).toBeUndefined();
+  });
+});
+
+// --- the async-bubble ingest seam -------------------------------------------
+
+describe("async bubble ingestion", () => {
+  const LIVE = { case: "live", value: { lastActivityMs: 0 } } as const;
+
+  function agentBubble(id: string, over: Partial<AsyncBubble> = {}): AsyncBubble {
+    return {
+      id,
+      workspace: "/w",
+      originToolUseId: "",
+      parentBubbleId: "",
+      label: "",
+      startedAtMs: 0,
+      liveness: LIVE,
+      kind: { case: "agent", value: { emissions: [], fold: { droppedBefore: 0, tailCap: 0 } } },
+      ...over,
+    };
+  }
+
+  function delta(opened: AsyncBubble[], updates: AsyncBubbleUpdate[] = []): AsyncBubbleDelta {
+    return { workspace: "/w", opened, updates, throughSeq: 1, fence: "f1" };
+  }
+
+  /**
+   * A store that has already adopted `/w`'s current fence.
+   *
+   * An async push is FENCED like every other resolved push, so a store holding
+   * no fence for the workspace admits none of them. These tests are about
+   * routing, not staleness, so they establish what current means first; the
+   * stale path has its own tests below.
+   */
+  function storeAtFence(fence = "f1", log?: ConstructorParameters<typeof ConversationStore>[0]) {
+    const store = new ConversationStore(log);
+    store.ingest([workspaceEffect({ workspace: "/w", fence })]);
+    return store;
+  }
+
+  it("opens a pushed bubble into the store's registry", () => {
+    // Arrange
+    const store = storeAtFence();
+
+    // Act
+    store.ingest([{ kind: "async-bubble-delta", value: delta([agentBubble("b1")]) }]);
+
+    // Assert
+    expect(store.asyncBubbles.get("b1")?.id).toBe("b1");
+  });
+
+  it("opens a FEED-ANCHORED bubble through the very same seam", () => {
+    // Arrange — the anchored arm carries a push whose `opened` list is the
+    // bubbles the conversation delta anchored.
+    const store = storeAtFence();
+
+    // Act
+    store.ingest([{ kind: "async-bubble-anchored", value: delta([agentBubble("b1")]) }]);
+
+    // Assert
+    expect(store.asyncBubbles.get("b1")?.id).toBe("b1");
+  });
+
+  it("reports a gap when a push names a bubble that is not open", () => {
+    // Arrange
+    const store = storeAtFence();
+
+    // Act
+    const result = store.ingest([
+      { kind: "async-bubble-delta", value: delta([], [{ bubbleId: "ghost", update: { case: "liveness", value: LIVE } }]) },
+    ]);
+
+    // Assert
+    expect(result.asyncGap?.kind).toBe("unknown-bubble");
+  });
+
+  it("reports no gap for a push that lands cleanly", () => {
+    // Arrange
+    const store = storeAtFence();
+
+    // Act
+    const result = store.ingest([{ kind: "async-bubble-delta", value: delta([agentBubble("b1")]) }]);
+
+    // Assert
+    expect("asyncGap" in result).toBe(false);
+  });
+
+  it("REPLACES the registry from a snapshot rather than merging into it", () => {
+    // Arrange
+    const store = storeAtFence();
+    store.ingest([{ kind: "async-bubble-delta", value: delta([agentBubble("b1")]) }]);
+
+    // Act
+    store.ingest([{ kind: "async-bubbles-snapshot", bubbles: [agentBubble("b2")] }]);
+
+    // Assert
+    expect(store.asyncBubbles.all().map((b) => b.id)).toEqual(["b2"]);
+  });
+
+  it("retires every bubble on an empty snapshot, which is a real daemon statement", () => {
+    // Arrange
+    const store = storeAtFence();
+    store.ingest([{ kind: "async-bubble-delta", value: delta([agentBubble("b1")]) }]);
+
+    // Act
+    store.ingest([{ kind: "async-bubbles-snapshot", bubbles: [] }]);
+
+    // Assert
+    expect(store.asyncBubbles.size).toBe(0);
+  });
+
+  it("empties the registry on reset", () => {
+    // Arrange
+    const store = storeAtFence();
+    store.ingest([{ kind: "async-bubble-delta", value: delta([agentBubble("b1")]) }]);
+
+    // Act
+    store.reset();
+
+    // Assert
+    expect(store.asyncBubbles.size).toBe(0);
+  });
+
+  it("KEEPS bubbles across a seq-space rebase, which retires a conversation, not a process", () => {
+    // Arrange
+    const store = storeAtFence();
+    store.ingest([{ kind: "async-bubble-delta", value: delta([agentBubble("b1")]) }]);
+
+    // Act
+    store.rebaseSeqSpace();
+
+    // Assert
+    expect(store.asyncBubbles.get("b1")?.id).toBe("b1");
+  });
+});
+
+// --- the async push is FENCED, by the same gate and the same rule -----------
+//
+// A detached-work push describes a session's work. One stamped with a fence the
+// workspace has moved past describes a session that is gone, so it gets the
+// component views' treatment exactly: discarded whole, reported once.
+
+describe("a stale async push", () => {
+  const LIVE = { case: "live", value: { lastActivityMs: 0 } } as const;
+
+  function bubble(id: string): AsyncBubble {
+    return {
+      id,
+      workspace: "/w",
+      originToolUseId: "",
+      parentBubbleId: "",
+      label: "",
+      startedAtMs: 0,
+      liveness: LIVE,
+      kind: { case: "agent", value: { emissions: [], fold: { droppedBefore: 0, tailCap: 0 } } },
+    };
+  }
+
+  function stalePush(): AdapterEffect {
+    return {
+      kind: "async-bubble-delta",
+      value: { workspace: "/w", opened: [bubble("b1")], updates: [], throughSeq: 1, fence: "f1" },
+    };
+  }
+
+  it("is discarded WHOLE, opening none of the bubbles it carried", () => {
+    // Arrange — the workspace has rotated past the fence the push carries.
+    const store = new ConversationStore();
+    store.ingest([workspaceEffect({ workspace: "/w", fence: "f2" })]);
+
+    // Act
+    store.ingest([stalePush()]);
+
+    // Assert
+    expect(store.asyncBubbles.size).toBe(0);
+  });
+
+  it("is reported EXACTLY ONCE, so a discard is never silent nor doubled", () => {
+    // Arrange
+    const lines: string[] = [];
+    const store = new ConversationStore((_level, message) => lines.push(message));
+    store.ingest([workspaceEffect({ workspace: "/w", fence: "f2" })]);
+
+    // Act
+    store.ingest([stalePush()]);
+
+    // Assert
+    expect(
+      lines.filter((line) => line.includes("stale fenced view discarded whole: asyncBubbleDelta")),
+    ).toHaveLength(1);
+  });
+
+  it("raises no gap, so a retired session's seq space never triggers a resync", () => {
+    // Arrange — `throughSeq` counts a sequence the gone session owned.
+    const store = new ConversationStore();
+    store.ingest([workspaceEffect({ workspace: "/w", fence: "f2" })]);
+
+    // Act
+    const result = store.ingest([stalePush()]);
+
+    // Assert
+    expect("asyncGap" in result).toBe(false);
   });
 });

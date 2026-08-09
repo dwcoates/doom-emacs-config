@@ -74,12 +74,23 @@ type AgentShimConfig struct {
 	SessionDeaths SessionDeaths
 	// Sessions supplies SessionView metadata (model/slug/title) for snapshots.
 	Sessions SessionMetaSource
+	// SessionRecords and ModelCatalogs are the two per-session facts the
+	// RESOLVED-VIEW publisher reads that no other binding here carries: the
+	// owning session's durable record (its model, its vendor conversation, and
+	// its hibernation account) and its published model menu. Nil-safe — a
+	// topbar then renders no model and the gate reads a workspace with no
+	// session as open, which is what a workspace between sessions is.
+	SessionRecords SessionRecordSource
+	ModelCatalogs  *SessionModelCatalogs
 	// Inits supplies the retained SystemInit of every live session as
 	// SessionInitViews for the connect snapshot (S9). Nil-safe: a nil source
 	// leaves snapshot.inits empty. Satisfied by *sessioncontroller.Manager.
 	Inits SessionInitSource
-	// Catalogs supplies every live session's complete detached-task roster for
-	// connect/resync snapshots. Satisfied by *sessioncontroller.Manager.
+	// Catalogs supplies every live session's DETACHED WORK for connect/resync
+	// snapshots: the complete task roster AND the open bubbles folded to date.
+	// Satisfied by *sessioncontroller.Manager. It used to be two fields, and a
+	// caller that wired the roster and forgot the bubbles got a reconnect
+	// snapshot that silently served none — see TaskCatalogSource.
 	Catalogs TaskCatalogSource
 	// Queues is the prompt-queue backend (E4): the force/accept/cancel command
 	// half and the snapshot half. Nil makes each queue command a loud failing
@@ -197,6 +208,13 @@ type AgentShim struct {
 	// ShutdownScheduler is the daemon-global drain lease, or nil when the
 	// capability is unconfigured. main calls Restore on it once, at boot.
 	ShutdownScheduler *ShutdownScheduler
+	// WorkspaceViews publishes the three RESOLVED per-workspace views — the
+	// topbar, the token-breakdown menu and the revival gate — and retains the
+	// last of each for the connect snapshot. main hands it to server.New so the
+	// SessionView push, which is where the durable token aggregate is already
+	// read, can publish the breakdown through the same publisher the SSM's
+	// state subscription publishes the other two through.
+	WorkspaceViews *WorkspaceViews
 
 	cancelPush                       func()
 	cancelProgress                   func()
@@ -264,7 +282,12 @@ func sessionPublicationGate(bridge WorkspaceCreationBridge, logf func(string, ..
 		if decision.Materialized {
 			return true, nil
 		}
-		logf("server: session publication HELD job_id=%q worktree=%q session=%q frame_session=%q reason=awaiting_workspace_materialization", decision.JobID, decision.WorktreePath, decision.SessionID, sessionID)
+		// The hold is still a hold without a sink for its record: a focused
+		// unit construction may pass no logf, and dropping the FRAME is the
+		// part that must never depend on the logging.
+		if logf != nil {
+			logf("server: session publication HELD job_id=%q worktree=%q session=%q frame_session=%q reason=awaiting_workspace_materialization", decision.JobID, decision.WorktreePath, decision.SessionID, sessionID)
+		}
 		return false, nil
 	}
 }
@@ -609,6 +632,10 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 		catalogs: cfg.Catalogs, queues: cfg.Queues, daemon: cfg.SessionCommands,
 		progress: cfg.Progress, workspaceCreation: cfg.WorkspaceCreation, logf: logf,
 	}
+	// THE RESOLVED-VIEW PUBLISHER, constructed before the frontend server it
+	// pushes through is bound below: it takes the server itself as its push,
+	// so it is built immediately after and handed to both the state
+	// subscription and the snapshot provider in the same construction.
 	srv := frontend.New(frontend.Config{
 		Logf:                      logf,
 		Warnf:                     cfg.Warnf,
@@ -619,6 +646,13 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 		CommandLatency:            cfg.CommandLatency,
 		AckWarnThreshold:          cfg.AckWarnThreshold,
 	})
+	workspaceViews := NewWorkspaceViews(logf, srv, cfg.SessionRecords, cfg.ModelCatalogs, cfg.Progress, cfg.MergeGeometry, mgr)
+	snapshots.workspaceViews = workspaceViews
+	// THE CLOSE RELEASES THESE RETENTIONS, so the command handler is bound to
+	// the same publisher the snapshot serves from. The binding is here rather
+	// than in CommandHandlerConfig because the publisher is built on top of the
+	// frontend server, which is built on top of the handler.
+	handler.workspaceViews = workspaceViews
 
 	// THE DRAIN LEASE, constructed last because it needs the frontend server to
 	// broadcast through and the fleet to bind to, and bound into the handler and
@@ -691,6 +725,12 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 				ws.GetCauseKind(),
 				ws.GetCauseSeq())
 			srv.PushWorkspaceState(ws)
+			// THE TOPBAR AND THE GATE ride this same subscription, for the
+			// same reason the progress resolver's phase does: the state is the
+			// authority for the fence, the connectivity and which session owns
+			// the workspace, and a second trigger would refresh them against a
+			// different clock than the state they describe.
+			workspaceViews.PublishState(ws)
 			if err := prog.ObserveWorkspaceState(ws); err != nil {
 				logf("server: progress observe workspace state: %v", err)
 			}
@@ -723,6 +763,16 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 	go func() {
 		for v := range views {
 			srv.PushProgressView(v)
+			// THE TOPBAR RIDES THIS SUBSCRIPTION TOO, because the accounting
+			// line is a topbar fact that moves on the PROGRESS resolver's clock
+			// rather than the SSM's. PublishState above runs before
+			// ObserveWorkspaceState has absorbed the transition, so the topbar
+			// it published carries the accounting the resolver had beforehand;
+			// nothing else would ever refresh it, and a client connecting after
+			// the last transition would be served — from the retention — a
+			// topbar whose accounting line never settles. proto.Equal keeps a
+			// republication that changed nothing off the wire.
+			workspaceViews.RepublishAccounting(v.GetWorkspace())
 		}
 	}()
 
@@ -740,6 +790,7 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 	return &AgentShim{
 		Server: srv, SSM: mgr, Progress: prog, Merge: driver, MergeCoordinator: coordinator, MergeDispatch: mergeDispatch,
 		ShutdownScheduler: scheduler,
+		WorkspaceViews:    workspaceViews,
 		cancelPush:        cancel, cancelProgress: cancelProgress,
 		cancelWorkspaceAvailable: cancelWorkspaceAvailable, cancelHostActions: cancelHostActions, logf: logf,
 		cancelSessionPublicationReleases: cancelPublicationReleases,

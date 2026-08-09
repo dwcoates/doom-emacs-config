@@ -234,8 +234,7 @@ func bootRosterDaemon(t *testing.T, stateDir string) *rosterDaemon {
 		Registry:      reg,
 		ModelCatalogs: modelCatalogs,
 		Controller:    controller,
-		SSM:           ssmMgr,
-		Frontend:      agentShim.Server,
+		AgentShim:     agentShim,
 		Logf:          t.Logf,
 	})
 	binding.SetTarget(srv)

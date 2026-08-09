@@ -6,7 +6,11 @@
  *   ?workspace=<dir>    render this workspace (absolute path, URL-encoded)
  *   ?session=<id>       render this one session (else one is created)
  *   ?fake=1             create the session against the offline fake SDK
- *   ?parent_ws=<name>   parent workspace basename shown in the topbar
+ *
+ * RETIRED: `?parent_ws`. The header's identity is the daemon's resolved
+ * `TopbarView.title` now, composed by the one authority on what a workspace is
+ * called; a parent name pasted in from the URL was a second composer of the
+ * same fact, and the caller that read it is gone.
  *
  * `?workspace` and `?session` are the two page ADDRESSES; address.ts owns
  * reading them and the scoped daemon socket each one opens. The URL is read
@@ -16,11 +20,9 @@
 import {
   TOPBAR_AGENT_ATTR,
   runningAgentClocks,
-  sessionAccountingLabel,
-  sessionTopbarDatapoints,
   topbarClickAction,
-  topbarInfoHtml,
 } from "./topbar.js";
+import { tokensDisclosureHtml, topbarViewHtml } from "./topbar-view.js";
 import { addressLabel, pageAddress, scopedStreamUrl, type PageAddress } from "./address.js";
 import { AgentClock } from "./agent-clock.js";
 import { AGENTS_SPEC, sessionSubagents } from "./agents.js";
@@ -94,11 +96,11 @@ import {
   daemonReachableFailure,
   daemonUnreachableFailure,
   frameUndecodableFailure,
-  sessionGoneFailure,
+  workspaceGoneFailure,
   staleBundleFailure,
 } from "./local-failure.js";
-import { StateAdapter, systemFailureFrom, userTurnReceipt } from "./state-adapter.js";
-import { CommandDispatcher, ModelSelectionRejectedError } from "./command-dispatch.js";
+import { StateAdapter, userTurnReceipt } from "./state-adapter.js";
+import { CommandDispatcher, ModelSelectionRejectedError, surfaceRefusal } from "./command-dispatch.js";
 import { ConnectResync } from "./connect-resync.js";
 import { captureResyncSnapshot } from "./resync-snapshot.js";
 import type { CommandStruct } from "./frontend-command.js";
@@ -251,9 +253,21 @@ async function boot(): Promise<void> {
     // this it reached a human through nothing at all: the ack's text went to
     // a local log and the promise it rejected was swallowed by every caller,
     // so a rejected prompt looked exactly like a prompt that was never sent.
-    onFailure: (failure) => {
-      if (store.addFailure(systemFailureFrom(failure))) frames.schedule();
-    },
+    // A REVEAL IS NOT A SECOND CARD. When the daemon already filed the
+    // refusal in the feed and told us the card's address, the affordance is to
+    // scroll to that card; restating the account inline would put one failure
+    // on screen twice, worded two different ways. A reveal that finds nothing
+    // falls back to filing the refusal, so a card the feed never received
+    // cannot leave the refusal invisible. `surfaceRefusal` owns that rule, so
+    // every branch here ends in a card the user can see.
+    onFailure: (refusal) =>
+      surfaceRefusal(refusal, {
+        reveal: (cardUuid) => feed.revealError(cardUuid),
+        file: (card) => {
+          if (store.addFailure(card)) frames.schedule();
+        },
+        log: (message) => clog("warn", message, { operation: "command-dispatch.reveal-missing" }),
+      }),
   });
   // The workspace a runtime command names — the live session's cwd, as the
   // pushed `SessionView` reports it. The daemon stamps the URL-scoped
@@ -532,7 +546,6 @@ async function boot(): Promise<void> {
   const loginAccountEl = must("login-account");
   const loginTermEl = must("login-term");
   const loginCloseEl = must<HTMLButtonElement>("login-close");
-  const parentWs = params.get("parent_ws");
 
   // Whether the topbar's tokens breakdown is open. It lives HERE rather than
   // in the DOM because renderChrome rewrites the whole topbar on every frame,
@@ -545,6 +558,12 @@ async function boot(): Promise<void> {
   // just that one span rather than re-rendering the dock — and emphatically not
   // the FEED, which is what the nuked stats row's ancestor once cost. The
   // footer skips the write when no span is mounted (before the first
+  // The open-bubble registry, wired ONCE by reference. The store mutates it in
+  // place as async pushes land, so a tool card matching its classification
+  // verdict always reads the current set — there is no per-render copy to fall
+  // behind, and no second registry a stale update could land in.
+  feed.asyncBubbles = store.asyncBubbles;
+
   // ProgressView, or during a replay-only paint), and bakes the last reading
   // into every render so a fresh dock never blinks empty.
   const timer = new TaskTimer(windowHost(window), (label) => {
@@ -569,19 +588,21 @@ async function boot(): Promise<void> {
   let lastFooterStateSignature = "";
   const renderChrome = (): void => {
     const s = store.state;
-    // topbarInfoHtml escapes every value it interpolates. The same strip
-    // renderer draws the agent-scoped bubble topbars (see topbar.ts).
-    infoEl.innerHTML = topbarInfoHtml(sessionTopbarDatapoints(s, parentWs), {
-      // The header strip carries NO roster chips any more (they relocated into
-      // the footer's counters cluster), so only the tokens disclosure can open.
-      agentsOpen: false,
-      tasksOpen: false,
-      tokensOpen: tokensMenuOpen,
-    });
-    const accounting = sessionAccountingLabel(s);
-    if (accounting !== null) {
-      infoEl.innerHTML += `<span class="session-accounting">${escapeHtml(accounting)}</span>`;
-    }
+    // THE HEADER IS THE DAEMON'S RESOLVED VIEW NOW. The title, the session
+    // line, the model selector, the connectivity glyph and the accounting line
+    // all arrive composed on `TopbarView`, and the token figures arrive
+    // resolved on `TokenBreakdownView`. Both renderers escape every value they
+    // interpolate.
+    //
+    // ABSENCE RENDERS ABSENCE (I3). Before either view has been published for
+    // this workspace the header is EMPTY — there is deliberately no fallback
+    // that pieces a title together from whatever else the store holds, because
+    // a client-composed stand-in is indistinguishable on screen from a real
+    // resolution. The daemon and this webapp deploy together, so the views
+    // arrive as soon as the daemon does.
+    const ws = s.cwd;
+    infoEl.innerHTML =
+      topbarViewHtml(store.topbar(ws)) + tokensDisclosureHtml(store.tokenBreakdown(ws), tokensMenuOpen);
     // The idle-with-live-async signal breathes as the sidebar's amber dot on
     // this session's own row rather than as strip text. The flag is the feed
     // renderer's own gate reading (idle + live async), read back here so the
@@ -1197,6 +1218,23 @@ async function boot(): Promise<void> {
             .resync(resyncSnapshot.workspace, resyncSnapshot)
             .catch(consumeOwnedDispatchFailure);
         }
+        // AN ASYNC GAP IS A RESYNC, not a warning to ride out. The push named
+        // a bubble that is not open, carried an arm mismatching its bubble's
+        // kind, or appended bytes at an offset the spool is not at — and none
+        // of it was applied, so nothing local can be repaired incrementally.
+        // Asking from zero has the daemon restate every open bubble in full,
+        // which is the only thing that makes this end current again.
+        if (result.asyncGap !== undefined) {
+          const gap = result.asyncGap;
+          clog(
+            "error",
+            `async bubble gap kind=${gap.kind} bubble=${gap.bubbleId} arm=${gap.arm} ` +
+              `bubble_kind=${gap.bubbleKind ?? "none"} through_offset=${gap.throughOffset ?? "n/a"} ` +
+              `from_offset=${gap.fromOffset ?? "n/a"} decision=resync detail=${gap.detail}`,
+          );
+          const gapResync = currentResyncSnapshot(0);
+          void dispatcher.resync(gapResync.workspace, gapResync).catch(consumeOwnedDispatchFailure);
+        }
         if (result.changed) {
           // One paint per animation frame, however many effects land before
           // it. The coalescer decides chrome-only vs full feed when it fires.
@@ -1259,7 +1297,7 @@ async function boot(): Promise<void> {
         ? {
             sessionExists: makeSessionExistsProbe(httpBase, connectionAddress.sessionId),
             onGone: (): void => {
-              if (store.addFailure(sessionGoneFailure(connectionAddress.sessionId))) frames.schedule();
+              if (store.addFailure(workspaceGoneFailure(store.state.cwd))) frames.schedule();
               statusEl.textContent = "session gone";
               statusEl.classList.remove("ok");
               // A vanished session is terminal for this page. Keep the failure

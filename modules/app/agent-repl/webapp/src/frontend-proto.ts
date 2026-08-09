@@ -92,19 +92,41 @@ import {
   type VendorTokenUsage as GeneratedVendorTokenUsage,
 } from "../../proto/gen/ts/agentshim/frontend/v1/durable_pb";
 import {
-  QueryTerminationFailureSchema,
-  SessionResumeFailureAutomaticRestoreSchema,
-  SessionResumeFailureBringUpFailureSchema,
-  SessionResumeFailureCreateSchema,
-  SessionResumeFailureIdentityMismatchSchema,
-  SessionResumeFailureSchema,
-  SessionResumeFailureTranscriptUnavailableSchema,
+  FailureKindSchema,
+  type FailureKind as GeneratedFailureKind,
   type QueryTerminationFailure as GeneratedQueryTerminationFailure,
+  type SessionResumeFailure as GeneratedSessionResumeFailure,
 } from "../../proto/gen/ts/agentshim/frontend/v1/errors_pb";
+import {
+  FailureCardRefSchema,
+  FailureCardResolvedSchema,
+  FailureCardTerminalSchema,
+  FailureCardOpenSchema,
+  FailureCardViewSchema,
+} from "../../proto/gen/ts/agentshim/frontend/v1/failure-card_pb";
+import {
+  ModelOptionSchema,
+  TopbarConnectivitySchema,
+  TopbarViewSchema,
+} from "../../proto/gen/ts/agentshim/frontend/v1/topbar_pb";
+import {
+  TokenBreakdownRowSchema,
+  TokenBreakdownSectionSchema,
+  TokenBreakdownViewSchema,
+} from "../../proto/gen/ts/agentshim/frontend/v1/tokens-menu_pb";
+import {
+  WorkspaceGateHibernatedSchema,
+  WorkspaceGateOpenSchema,
+  WorkspaceGateViewSchema,
+} from "../../proto/gen/ts/agentshim/frontend/v1/gate-revival_pb";
+import { FooterFailureRowSchema } from "../../proto/gen/ts/agentshim/frontend/v1/footer_pb";
 import { fromJson, toJson, type JsonValue } from "@bufbuild/protobuf";
 import {
+  FAILURE_CARD_LIFECYCLE_ARM,
+  FAILURE_KIND_SIDE,
   HIBERNATION_CAUSE,
   KEEP_ALIVE_HOLD_TURN_ID,
+  WORKSPACE_GATE_ARM,
   PROMPT_ORIGIN_CACHE_KEEP_ALIVE,
   PROMPT_ORIGIN_PREFIX,
   PROMPT_ORIGIN_UNSPECIFIED,
@@ -112,6 +134,26 @@ import {
   QUEUE_HOLD_ARM,
   REVIVAL_HOLD_FIELDS,
 } from "./proto-names.js";
+import {
+  decodeAsyncBubble,
+  decodeAsyncBubbleDelta,
+  type AsyncBubble,
+  type AsyncBubbleDelta,
+} from "./async-bubble.js";
+import { unwrapAgentEmission, type ResponseUsageStamp } from "./agent-emission.js";
+import {
+  EMPTY_KEY_SET,
+  bool,
+  ensureArray,
+  ensureObject,
+  generatedFieldSet,
+  int64,
+  num,
+  oneof,
+  rejectUnknown,
+  str,
+  type Obj,
+} from "./proto-scalars.js";
 import { ApiUsageSchema } from "../../proto/gen/ts/agentshim/data/v1/tools_pb";
 import {
   AccountUsageAvailableSchema,
@@ -126,13 +168,6 @@ import {
   type EvidenceFingerprint as GeneratedEvidenceFingerprint,
   type QueryRuntimeIdentity as GeneratedQueryRuntimeIdentity,
 } from "../../proto/gen/ts/agentshim/core/v1/core_pb";
-
-/** Exact generated field lists: omission and invention are both type errors. */
-function generatedFieldSet<Fields extends string>() {
-  return <const Keys extends readonly Fields[]>(
-    ...keys: Keys & (Exclude<Fields, Keys[number]> extends never ? unknown : ["missing generated field", Exclude<Fields, Keys[number]>])
-  ): ReadonlySet<string> => new Set<string>(keys);
-}
 
 // --- enums ------------------------------------------------------------------
 
@@ -371,6 +406,18 @@ export interface RuntimeFault {
 export interface WorkspaceState {
   workspace: string;
   sessionId: string;
+  /**
+   * THE workspace's authoritative staleness fence — the value every fenced push
+   * is compared against, and the only fence in this webapp that is an ANSWER
+   * rather than a question.
+   *
+   * OPAQUE: compared byte-wise, never parsed, split or interpreted. It is this
+   * message's projection of the owning session's identity, re-minted whenever
+   * that session or its controller generation rotates, which is what lets a
+   * rendering frontend answer current-vs-stale while holding no session
+   * vocabulary at all.
+   */
+  fence: string;
   state: RenderState;
   turnActive: boolean;
   liveTaskCount: number;
@@ -537,9 +584,9 @@ export interface SessionView {
    * death), absent while the session lives. Emacs surfaces it as a failure
    * card (frontend-state.el); the webapp decodes it so a terminal push never
    * breaks the strict decoder, and card rendering rides the feed's own
-   * SystemFailureItem.
+   * resolved failure card.
    */
-  death?: SystemFailure;
+  death?: FailureCardView;
   tokenUtilization?: SessionTokenUtilization;
   /**
    * Present IFF the session is hibernated — the typed account behind the
@@ -647,9 +694,18 @@ export const CONVERSATION_ITEM_ARMS = [
   "contextCleared",
   "contextCompacted",
   "permission",
-  "systemFailure",
+  // The RESOLVED failure card. It replaced `systemFailure`, whose
+  // `errorClass` + free-text `errorType` pair the daemon has retired in favor
+  // of the `FailureKind` arm vocabulary this arm carries.
+  "failureCard",
   "skillBody",
   "sessionCommand",
+  // A piece of DETACHED WORK, anchored in the feed at the point it was
+  // launched. What rides here is the bubble's OPENING state; everything it
+  // produces afterwards arrives as `AsyncBubbleUpdate` on its own delta, so a
+  // detached agent emitting a thousand lines inserts ONE row here, not a
+  // thousand.
+  "asyncBubble",
 ] as const;
 export type ConversationItemArm = (typeof CONVERSATION_ITEM_ARMS)[number];
 
@@ -718,69 +774,19 @@ export function sessionCommandOf(name: string, where: string): SessionCommand {
   return known;
 }
 
-/**
- * `frontend.v1.ErrorClass` — the SEMANTIC class of a system failure.
- *
- * It says what KIND of thing failed, never what color to draw: INTERNAL is
- * agent-repl's own machinery (shim down, store outage, a refused command) and
- * API is the vendor or the account stopping the work. Each frontend maps class
- * to color from the shared table, so a wire that spoke in colors would make
- * every future frontend inherit this one's palette.
- */
-export const ERROR_CLASSES = ["INTERNAL", "API"] as const;
-export type ErrorClass = (typeof ERROR_CLASSES)[number];
-
-/**
- * A daemon-classified failure (`frontend.v1.SystemFailureItem`).
- *
- * Every render-bound error in the tree arrives as one of these. Nothing here
- * is re-interpreted frontend-side: the class, the type and the prose are the
- * daemon's verdict, and this end renders them.
- */
-export interface SystemFailure {
-  errorClass: ErrorClass;
-  /** The specific failure within the class ("shim.rejected", "api.rate_limit"). */
-  errorType: string;
-  /** The plain-language explanation the card renders. */
-  message: string;
-  /** The raw structured account, shown beside the prose rather than replacing it. */
-  sourceDetail: string;
-  /**
-   * Wall-clock ms a WINDOW-shaped failure closed; 0 means still open. The card
-   * is re-sent under the SAME uuid with this set, so the feed reconciles it in
-   * place and shows a settled card rather than a standing alarm.
-   */
-  resolvedAtMs: number;
-  /**
-   * The conversation item this failure was filed under. It is how a failure
-   * reached OUTSIDE the feed (a footer row, an ack) addresses its card.
-   */
-  itemUuid: string;
-  detail: SystemFailureDetail;
-}
-
-/** The only structured evidence a system failure can carry. */
-export type SystemFailureDetail =
-  | { kind: "none" }
-  | { kind: "sessionResume"; value: SessionResumeFailure }
-  | { kind: "queryTermination"; value: QueryTerminationFailure };
-
-/** Typed evidence for a failed authoritative-conversation resume. */
-export interface SessionResumeFailure {
-  claudeSessionId: string;
-  cwd: string;
-  configDir: string;
-  resolvedConfigDir: string;
-  attempt: "create" | "automaticRestore";
-  cause:
-    | { case: "transcriptUnavailable"; searchedPaths: string[] }
-    | { case: "identityMismatch"; replacementClaudeSessionId: string }
-    | { case: "queryTermination"; value: QueryTerminationFailure }
-    | { case: "bringUpFailure"; cause: string };
-}
-
-/** Exact generated evidence for an SDK query that ended unexpectedly. */
-export type QueryTerminationFailure = GeneratedQueryTerminationFailure;
+// RETIRED: `ErrorClass`, `SystemFailure`, `SystemFailureDetail` and the
+// hand-written `SessionResumeFailure` mirror stood here.
+//
+// They described `SystemFailureItem`: an `error_class` enum beside a free-text
+// `error_type`, from which this end derived a color and a severity by rules the
+// daemon did not share. A free-text type is a vocabulary with no members, so a
+// consumer meeting an unfamiliar one silently rendered it as something else.
+//
+// `FailureKind` replaced all of it — one closed oneof, each arm carrying the
+// evidence that arm actually has — and `FailureCardView` carries it. See
+// `decodeFailureKind` below and `failure-card.ts` for the arm-to-side-to-tone
+// reading. Deleted rather than deprecated, following this repo's style for
+// retired frontend surface: no live frontend commitment survives the change.
 
 /** Exact generated cumulative usage for an agent-repl session. */
 export type SessionTokenUtilization = GeneratedSessionTokenUtilization;
@@ -816,6 +822,40 @@ export interface ConversationItemFrame {
    * fields are the emission's statement ABOUT that block, not part of it.
    */
   thinkingOrigin?: { apiMessageId: string; blockIndex: number };
+  /**
+   * The RESOLVED figures this response's bubble corner renders
+   * (`AgentResponse.usage_stamp`). Present only on the `assistantMessage` arm,
+   * and only when the response carried a usage record.
+   *
+   * Carried beside the payload for the same reason as `thinkingOrigin`: the
+   * payload is the assistant API message, verbatim durable evidence, and the
+   * stamp is the daemon's resolution ABOUT it. ABSENT MEANS ABSENT — the corner
+   * renders no figures rather than zeros.
+   */
+  usageStamp?: ResponseUsageStamp;
+  /**
+   * THE CLASSIFICATION VERDICT this item published: the id of the
+   * `AsyncBubble` its tool call detached, as the DAEMON resolved it
+   * (`AgentToolCall.spawned_bubble_id` / `AgentToolOutcome.spawned_bubble_id`).
+   *
+   * Present only on the `toolUse`/`toolUseResult` arms, and only when the
+   * daemon actually set it. ABSENT means "this call detached nothing", and
+   * that is the ONLY reading of absent. A frontend MATCHES this string against
+   * `AsyncBubble.id`; it never derives one, because the evidence a derivation
+   * would read is a mix of tool metadata, completion notifications and
+   * free-text prose that two frontends would eventually read differently.
+   */
+  spawnedBubbleId?: string;
+  /**
+   * The DETACHED WORK this item anchors, decoded. Present exactly on the
+   * `asyncBubble` arm.
+   *
+   * Decoded here rather than left in `payload` because `AsyncBubble` is a
+   * `frontend.v1`-owned message — the strict half of the validation contract —
+   * so it gets the same loud treatment every other frontend-owned message
+   * does, instead of the by-shape adoption reserved for data.v1 payloads.
+   */
+  asyncBubble?: AsyncBubble;
 }
 
 /** Durable evidence used to compare one completed turn with another client. */
@@ -1027,12 +1067,19 @@ export interface CommandAck {
   /** Shim-confirmed current model for a SetModel receipt, including rejection. */
   selectedModel: string;
   /**
-   * The CLASSIFIED refusal (F4). `error` above is the raw handler text this
-   * end never rendered at all; this is the same failure run through the
-   * daemon's one classifier, which is what lets a rejected prompt become a
-   * visible card instead of a console log. Absent when `ok`.
+   * The CLASSIFIED refusal. `error` above is the raw handler text this end
+   * never rendered at all; this is the same failure run through the daemon's
+   * one classifier, as a `FailureKind` — the arm names WHAT was refused and
+   * carries that kind's own evidence. Absent when `ok`.
    */
-  failure?: SystemFailure;
+  failure?: FailureKind;
+  /**
+   * The feed card this refusal was filed under, when it produced one, so the
+   * client can offer to REVEAL it instead of restating the account inline.
+   * Absent — or present with an empty `cardUuid` — means there is no card, and
+   * the client then offers no reveal.
+   */
+  failureCard?: FailureCardRef;
   /**
    * The interrupt confirmation CHALLENGE (I1). NOT a failure and NOT an error:
    * the command was understood and deliberately not performed, because no turn
@@ -1175,12 +1222,15 @@ export interface ProgressView {
    */
   interrupt?: InterruptWindow;
   /**
-   * The CLASSIFIED error state (F4). Persists until the next turn starts; its
-   * own `itemUuid` is the feed item the error row scrolls to. Carrying the
-   * class is what lets the footer take its color from the shared table
-   * instead of the hardcoded red no other surface consulted.
+   * The footer's failure ROW, resolved: the sentence, the tone it is drawn in,
+   * and the card to reveal when it is activated. Persists until the next turn
+   * starts. Absent = no failure standing.
+   *
+   * It is a ROW and not the failure itself. The card renders a failure whole;
+   * this projects the one line the footer has room for, which is why it takes a
+   * resolved tone rather than a `FailureKind` it would have to classify here.
    */
-  failure?: SystemFailure;
+  failure?: FooterFailureRow;
   /**
    * Set when a turn's UNCACHED input cost crossed the alert threshold — the
    * loud "this prompt re-ingested context" signal. Persists until the next
@@ -1243,6 +1293,15 @@ export interface StateSnapshot {
   daemon?: DaemonView;
   /** Retained per-session SystemInits (S9); absent on a pre-S9 daemon. */
   inits: SessionInitView[];
+  /**
+   * Every async bubble the session still holds, FOLDED TO DATE, so a
+   * reconnecting client resumes detached work rather than re-deriving it.
+   *
+   * A bubble here REPLACES whatever copy the client already had: the snapshot
+   * is the daemon's complete statement, and merging it with stale local state
+   * would produce a fold neither end vouches for.
+   */
+  asyncBubbles: AsyncBubble[];
   /** Each live session's held-prompt queue (E4); empty on a pre-E4 daemon. */
   queues: QueueView[];
   /** Each workspace's resolved progress view (F1); empty on a pre-F1 daemon. */
@@ -1258,6 +1317,18 @@ export interface StateSnapshot {
    * INFORMATION — never a claim that the lease is idle.
    */
   shutdownSchedule?: ShutdownScheduleView;
+  /**
+   * The RESOLVED component views, one per workspace, so a connecting client
+   * draws its chrome without waiting for each view's first push.
+   *
+   * Empty is empty: a workspace with no entry here has NO topbar, no breakdown
+   * and no gate published yet, and the client renders that absence rather than
+   * composing a stand-in from the session catalog (which is exactly what these
+   * views replaced).
+   */
+  topbars: TopbarView[];
+  tokenBreakdowns: TokenBreakdownView[];
+  workspaceGates: WorkspaceGateView[];
 }
 
 /** The daemon's authoritative, shim-ready workspace descriptor for the Emacs host. */
@@ -1520,6 +1591,163 @@ export interface QueueView {
   entries: QueueEntry[];
 }
 
+// --- resolved component views (21/22/23, snapshot 12/13/14) -----------------
+
+/**
+ * The topbar's connectivity indicator, RESOLVED.
+ *
+ * `tone` names a color class from the shared render-colors vocabulary, and it
+ * is carried as the daemon spelled it. The client never maps a connectivity
+ * enum onto a color here — that mapping is precisely what this view removed.
+ */
+export interface TopbarConnectivity {
+  tone: string;
+  glyph: string;
+  title: string;
+}
+
+/**
+ * ONE workspace's topbar, resolved completely by the daemon.
+ *
+ * EVERY STRING HERE IS RENDERED VERBATIM. `title` is already the composed
+ * identity line (name, or name plus branch) — the client does not concatenate
+ * identity fragments, because the composition rule is the daemon's and a second
+ * copy of it drifts.
+ */
+export interface TopbarView {
+  workspace: string;
+  title: string;
+  sessionLine: string;
+  /** Empty means the selector renders its placeholder, never a guessed model. */
+  modelDisplay: string;
+  modelOptions: ModelOption[];
+  /** Absent means the daemon published no glyph; the client draws none. */
+  connectivity?: TopbarConnectivity;
+  /** Empty means no turn has settled yet. */
+  accountingLine: string;
+  /**
+   * The workspace's staleness FENCE, compared BYTE-WISE against
+   * `WorkspaceState.fence` and never parsed. See `fence.ts` for the one gate
+   * every fenced push passes through.
+   */
+  fence: string;
+}
+
+/**
+ * One row of the token-breakdown menu. Every number is resolved daemon-side:
+ * the share is precomputed in permille and the client performs NO arithmetic
+ * over these rows — not a sum, not a percentage, not a total.
+ */
+export interface TokenBreakdownRow {
+  label: string;
+  tokens: number;
+  /** Permille (0-1000), already rounded. -1 = no share applies; omit it. */
+  sharePermille: number;
+  emphasized: boolean;
+  depth: number;
+}
+
+/** One titled section of the breakdown menu, rows in display order. */
+export interface TokenBreakdownSection {
+  label: string;
+  rows: TokenBreakdownRow[];
+}
+
+/** One workspace's token-breakdown menu, fully resolved and fenced. */
+export interface TokenBreakdownView {
+  workspace: string;
+  sections: TokenBreakdownSection[];
+  /** Opaque staleness fence; see {@link TopbarView.fence}. */
+  fence: string;
+}
+
+/**
+ * WHETHER prompts may be sent, as arms — so a closed gate always arrives with
+ * the account the revival card needs, and "closed with nothing to say" is not
+ * representable.
+ */
+export type WorkspaceGate =
+  | { case: "open" }
+  | { case: "hibernated"; detail: HibernationDetail };
+
+/**
+ * One workspace's revival gate, resolved and fenced.
+ *
+ * THIS, not a session catalog entry, is where a rendering frontend reads its
+ * gate. The catalog answers "what is true of session X" and makes the reader
+ * work out which X is current; this answers "what is true of this workspace
+ * now", which is the only question a gate has.
+ */
+export interface WorkspaceGateView {
+  workspace: string;
+  /** Opaque staleness fence; see {@link TopbarView.fence}. */
+  fence: string;
+  gate: WorkspaceGate;
+}
+
+// --- the failure vocabulary (FailureKind / FailureCardView) ------------------
+
+/**
+ * WHAT failed — the generated closed oneof, adopted as-is.
+ *
+ * The decoder guarantees `kind.case` is DEFINED: an unset or double-set kind is
+ * a malformed frame and is thrown, never rendered as a generic error. Which
+ * SIDE of the vocabulary an arm belongs to is stated once, in
+ * `proto-names.ts`'s `FAILURE_KIND_SIDE`, and read through `failure-card.ts`.
+ */
+export type FailureKind = GeneratedFailureKind;
+
+/**
+ * HOW a failure card ends, as arms.
+ *
+ * A window-shaped failure re-arrives under the SAME `ConversationItem.uuid`
+ * with a different arm, and the feed reconciles it IN PLACE. Appending would
+ * leave the alarm standing beside its own all-clear.
+ */
+export type FailureCardLifecycle =
+  | { case: "open" }
+  | { case: "resolved"; resolvedAtMs: number }
+  | { case: "terminal" };
+
+/** A failure as a CONVERSATION ITEM: its kind, its sentence, its evidence. */
+export interface FailureCardView {
+  kind: FailureKind;
+  /** The sentence the card leads with, composed daemon-side. */
+  message: string;
+  /** The raw account, deliberately allowed to be empty. */
+  detail: string;
+  lifecycle: FailureCardLifecycle;
+}
+
+/**
+ * A failure card a surface OUTSIDE the feed points at.
+ *
+ * An empty `cardUuid` means the failure produced no card, and the referring
+ * surface then offers no way to reach one rather than scrolling somewhere
+ * arbitrary.
+ */
+export interface FailureCardRef {
+  cardUuid: string;
+}
+
+/**
+ * The footer's one-line failure row, resolved.
+ *
+ * It carries a TONE rather than the kind: the row renders one line and has no
+ * use for typed evidence. `card` is absent when the row is not clickable.
+ */
+export interface FooterFailureRow {
+  message: string;
+  tone: string;
+  card?: FailureCardRef;
+}
+
+// `ResponseUsageStamp` and its decoder live in `agent-emission.ts`, because the
+// stamp rides the `AgentResponse` envelope and a DETACHED agent's responses
+// carry the same one. Re-exported here so this module stays the single import
+// surface every frontend.v1 consumer already reads.
+export { decodeResponseUsageStamp, type ResponseUsageStamp } from "./agent-emission.js";
+
 /** The push-channel oneof wrapper (FrontendFrame.frame). */
 export type FrontendFrame = {
   frame:
@@ -1527,6 +1755,7 @@ export type FrontendFrame = {
     | { case: "workspaceState"; value: WorkspaceState }
     | { case: "sessionView"; value: SessionView }
     | { case: "conversationDelta"; value: ConversationDelta }
+    | { case: "asyncBubbleDelta"; value: AsyncBubbleDelta }
     | { case: "typingDelta"; value: TypingDelta }
     | { case: "taskCatalog"; value: TaskCatalog }
     | { case: "commandAck"; value: CommandAck }
@@ -1538,7 +1767,10 @@ export type FrontendFrame = {
     | { case: "workspaceAvailable"; value: WorkspaceAvailable }
     | { case: "hostAction"; value: HostAction }
     | { case: "workspaceRoster"; value: WorkspaceRoster }
-    | { case: "shutdownSchedule"; value: ShutdownScheduleView };
+    | { case: "shutdownSchedule"; value: ShutdownScheduleView }
+    | { case: "topbar"; value: TopbarView }
+    | { case: "tokenBreakdown"; value: TokenBreakdownView }
+    | { case: "workspaceGate"; value: WorkspaceGateView };
 };
 
 /** The frame-variant discriminators FrontendFrame.frame.case may hold. */
@@ -1594,7 +1826,6 @@ function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-type Obj = Record<string, unknown>;
 
 /** Decode ONE raw protojson `FrontendFrame` string, validating loudly. */
 export function decodeFrontendFrame(json: string): FrontendFrame {
@@ -1637,6 +1868,7 @@ const FRAME_DECODERS: ReadonlyMap<string, (v: unknown) => FrontendFrame["frame"]
   ["workspaceState", (v: unknown) => ({ case: "workspaceState" as const, value: decodeWorkspaceState(v) })],
   ["sessionView", (v: unknown) => ({ case: "sessionView" as const, value: decodeSessionView(v) })],
   ["conversationDelta", (v: unknown) => ({ case: "conversationDelta" as const, value: decodeConversationDelta(v) })],
+  ["asyncBubbleDelta", (v: unknown) => ({ case: "asyncBubbleDelta" as const, value: decodeAsyncBubbleDelta(v) })],
   ["typingDelta", (v: unknown) => ({ case: "typingDelta" as const, value: decodeTypingDelta(v) })],
   ["taskCatalog", (v: unknown) => ({ case: "taskCatalog" as const, value: decodeTaskCatalog(v) })],
   ["commandAck", (v: unknown) => ({ case: "commandAck" as const, value: decodeCommandAck(v) })],
@@ -1661,6 +1893,15 @@ const FRAME_DECODERS: ReadonlyMap<string, (v: unknown) => FrontendFrame["frame"]
       value: decodeShutdownScheduleView(v),
     }),
   ],
+  ["topbar", (v: unknown) => ({ case: "topbar" as const, value: decodeTopbarView(v) })],
+  [
+    "tokenBreakdown",
+    (v: unknown) => ({ case: "tokenBreakdown" as const, value: decodeTokenBreakdownView(v) }),
+  ],
+  [
+    "workspaceGate",
+    (v: unknown) => ({ case: "workspaceGate" as const, value: decodeWorkspaceGateView(v) }),
+  ],
 ]);
 
 // --- per-message decoders (strict: reject unknown fields, validate required) -
@@ -1668,6 +1909,7 @@ const FRAME_DECODERS: ReadonlyMap<string, (v: unknown) => FrontendFrame["frame"]
 const WORKSPACE_STATE_KEYS = new Set([
   "workspace",
   "sessionId",
+  "fence",
   "state",
   "turnActive",
   "liveTaskCount",
@@ -1688,6 +1930,7 @@ function decodeWorkspaceState(v: unknown): WorkspaceState {
   const ws: WorkspaceState = {
     workspace: str(o, "workspace", "WorkspaceState"),
     sessionId: str(o, "sessionId", "WorkspaceState"),
+    fence: str(o, "fence", "WorkspaceState"),
     state: enumRenderState(o, "state", "WorkspaceState"),
     turnActive: bool(o, "turnActive", "WorkspaceState"),
     liveTaskCount: num(o, "liveTaskCount", "WorkspaceState"),
@@ -2102,11 +2345,11 @@ function decodeSessionView(v: unknown): SessionView {
     // `unspecified` — the same "nothing to backfill" a fresh workspace has.
     backfill: decodeBackfillState(o.backfill),
   };
-  // F4 terminal-session classification: optional, present only once the
-  // session died. Decoded strictly (an unknown class still throws) rather
+  // Terminal-session classification: optional, present only once the session
+  // died. Decoded STRICTLY (an unset or double-set kind still throws) rather
   // than skipped, so a malformed death is loud while an absent one is normal.
   if (o.death !== undefined) {
-    sv.death = decodeSystemFailure(o.death, "SessionView.death");
+    sv.death = decodeFailureCardView(o.death, "SessionView.death");
   }
   if (o.tokenUtilization !== undefined) sv.tokenUtilization = decodeSessionTokenUtilization(o.tokenUtilization);
   // ABSENCE IS "THE SESSION IS AWAKE", and that is its only reading. Decoded
@@ -2164,67 +2407,14 @@ const CONVERSATION_ITEM_ARM_SET: ReadonlySet<string> = new Set(CONVERSATION_ITEM
 const AGENT_EMISSION_ENVELOPE = "agent";
 
 /**
- * `AgentEmission` arm key → the flat decoded arm it unwraps to, and the field
- * of the emission that carries the payload the adapter reads.
- *
- * `usageStamp` on an `AgentResponse` is NOT carried through: it is a resolved
- * figure for the bubble's corner that this end does not render yet. It is
- * dropped here rather than smuggled into the payload so that whoever wires the
- * stamp up finds one place to add it.
+ * `agent-emission.ts` owns the emission unwrap, because a DETACHED agent's
+ * emissions are the SAME message and must be read by the same code (see that
+ * module's header). Its `AgentEmissionArm` is structurally a subset of
+ * `ConversationItemArm`, which the assignment in `decodeConversationItem`
+ * below type-checks: an emission arm that stopped being a conversation item
+ * fails this build rather than reaching the adapter's switch as an unhandled
+ * string.
  */
-const AGENT_EMISSION_ARMS: Readonly<Record<string, { arm: ConversationItemArm; body: string }>> = {
-  response: { arm: "assistantMessage", body: "body" },
-  thinking: { arm: "thinking", body: "body" },
-  toolCall: { arm: "toolUse", body: "call" },
-  toolResult: { arm: "toolResult", body: "result" },
-  toolOutcome: { arm: "toolUseResult", body: "structured" },
-  skillBody: { arm: "skillBody", body: "" },
-  turnResult: { arm: "result", body: "" },
-};
-
-/**
- * Unwrap the `agent` envelope into one flat arm + its payload.
- *
- * The emission oneof is validated STRICTLY here — an empty, multiple or
- * unrecognized arm throws — because it is a `frontend.v1`-owned message. Only
- * the payload BELOW it is adopted by shape.
- */
-function unwrapAgentEmission(
-  v: unknown,
-  ctx: string,
-): { arm: ConversationItemArm; payload: JsonObject; thinkingOrigin?: { apiMessageId: string; blockIndex: number } } {
-  const emission = ensureObject(v, `${ctx}.agent`);
-  const keys = Object.keys(emission);
-  if (keys.length === 0) {
-    throw new Error(`frontend-proto: ${ctx}.agent carries no emission (empty oneof)`);
-  }
-  if (keys.length > 1) {
-    throw new Error(`frontend-proto: ${ctx}.agent sets multiple emissions: ${keys.join(", ")}`);
-  }
-  const mapped = AGENT_EMISSION_ARMS[keys[0]];
-  if (mapped === undefined) {
-    throw new Error(`frontend-proto: ${ctx}.agent has unrecognized emission '${keys[0]}'`);
-  }
-  const value = ensureObject(emission[keys[0]], `${ctx}.agent.${keys[0]}`);
-  // An emission whose whole content IS the payload (skillBody, turnResult)
-  // names no inner field; the others wrap theirs one level down.
-  const payload = mapped.body === "" ? value : ensureObject(value[mapped.body], `${ctx}.agent.${keys[0]}.${mapped.body}`);
-  if (mapped.arm === "thinking") {
-    // The emission's statement about the block it carries: the message it was
-    // stripped from and the position it held there. Carried up beside the
-    // payload; see `ConversationItemFrame.thinkingOrigin`.
-    return {
-      arm: mapped.arm,
-      payload,
-      thinkingOrigin: {
-        apiMessageId: str(value, "apiMessageId", `${ctx}.agent.thinking`),
-        blockIndex: num(value, "blockIndex", `${ctx}.agent.thinking`),
-      },
-    };
-  }
-  return { arm: mapped.arm, payload };
-}
-
 function decodeConversationItem(v: unknown, i: number): ConversationItemFrame {
   const ctx = `ConversationItem[${i}]`;
   const o = ensureObject(v, ctx);
@@ -2247,8 +2437,14 @@ function decodeConversationItem(v: unknown, i: number): ConversationItemFrame {
   if (armKeys.length > 1) {
     throw new Error(`frontend-proto: ${ctx} sets multiple item variants: ${armKeys.join(", ")}`);
   }
-  const selected = armKeys[0] === AGENT_EMISSION_ENVELOPE
-    ? unwrapAgentEmission(o[AGENT_EMISSION_ENVELOPE], ctx)
+  const selected: {
+    arm: ConversationItemArm;
+    payload: JsonObject;
+    thinkingOrigin?: { apiMessageId: string; blockIndex: number };
+    spawnedBubbleId?: string;
+    usageStamp?: ResponseUsageStamp;
+  } = armKeys[0] === AGENT_EMISSION_ENVELOPE
+    ? unwrapAgentEmission(o[AGENT_EMISSION_ENVELOPE], `${ctx}.agent`)
     // Adopt the typed payload by shape (see file-top §5.1 boundary note).
     : { arm: armKeys[0] as ConversationItemArm, payload: ensureObject(o[armKeys[0]], `${ctx}.${armKeys[0]}`) };
   const arm = selected.arm;
@@ -2262,25 +2458,31 @@ function decodeConversationItem(v: unknown, i: number): ConversationItemFrame {
     tokenUtilization: o.tokenUtilization === undefined ? [] : ensureArray(o.tokenUtilization, `${ctx}.tokenUtilization`).map((entry, index) => decodeTokenUtilization(entry, `${ctx}.tokenUtilization[${index}]`)),
   };
   if (selected.thinkingOrigin !== undefined) frame.thinkingOrigin = selected.thinkingOrigin;
+  // The RESOLVED figures for this response's bubble corner. ABSENT STAYS
+  // ABSENT: a response that carried no usage record gets no stamp, and the
+  // corner then renders no figures rather than zeros.
+  if (selected.usageStamp !== undefined) frame.usageStamp = selected.usageStamp;
+  // THE CLASSIFICATION VERDICT, carried through whole. A tool card learns the
+  // bubble it spawned by MATCHING this string against `AsyncBubble.id`; it
+  // never derives one. Empty means "this call detached nothing", so it is
+  // carried only when the daemon actually set it — an empty string on the
+  // frame would be indistinguishable from an arm that cannot carry a verdict
+  // at all.
+  if (selected.spawnedBubbleId !== undefined && selected.spawnedBubbleId !== "") {
+    frame.spawnedBubbleId = selected.spawnedBubbleId;
+  }
+  // A bubble ANCHORED in the feed at the point its work was launched. Decoded
+  // eagerly and strictly (it is a frontend.v1-owned message, not an adopted
+  // data.v1 payload), and carried decoded so no consumer re-parses the raw
+  // JSON the payload still holds.
+  if (arm === "asyncBubble") {
+    frame.asyncBubble = decodeAsyncBubble(selected.payload, `${ctx}.asyncBubble`);
+  }
   if (o.turnAccounting !== undefined) {
     if (arm !== "result") throw new Error(`frontend-proto: ${ctx}.turnAccounting is valid only on result`);
     frame.turnAccounting = decodeTurnAccounting(o.turnAccounting, `${ctx}.turnAccounting`);
   }
   return frame;
-}
-
-function int64(o: JsonObject, key: string, where: string): number {
-  const value = o[key];
-  if (typeof value !== "string" && typeof value !== "number") throw new Error(`frontend-proto: ${where}.${key} must be an int64 string`);
-  const parsed = Number(value);
-  if (!Number.isSafeInteger(parsed)) throw new Error(`frontend-proto: ${where}.${key} must be a safe integer`);
-  return parsed;
-}
-
-function oneof(o: JsonObject, keys: readonly string[], where: string): string {
-  const found = keys.filter((key) => o[key] !== undefined);
-  if (found.length !== 1) throw new Error(`frontend-proto: ${where} requires exactly one of ${keys.join(", ")}`);
-  return found[0];
 }
 
 const FINGERPRINT_KEYS = generatedFieldSet<keyof typeof EvidenceFingerprintSchema.field>()("sha256", "unavailable");
@@ -3136,29 +3338,6 @@ function decodeTaskCatalog(v: unknown): TaskCatalog {
   return tc;
 }
 
-/**
- * UNANCHORED, DELIBERATELY — and the only key set here that is.
- *
- * Every other set in this file is checked against a generated message's field
- * manifest, so a renamed daemon field fails this build. `SystemFailureItem`
- * has no manifest left to check against: the figma-idl reshape retired the
- * message, replacing `error_class` + free-text `error_type` with the
- * `FailureKind` arm vocabulary carried by `FailureCardView`, which the daemon
- * resolves and the webapp does not yet read.
- *
- * So this set is a plain literal until the FailureCardView decoder lands. The
- * RUNTIME guarantee is unchanged — `rejectUnknown` still refuses an
- * unrecognized key loudly — but the compile-time one is gone, which is exactly
- * why this comment is here rather than a silent `new Set`.
- */
-const SYSTEM_FAILURE_KEYS: ReadonlySet<string> = new Set(["errorClass", "errorType", "message", "sourceDetail", "resolvedAtMs", "itemUuid", "sessionResume", "queryTermination"]);
-const SESSION_RESUME_KEYS = generatedFieldSet<keyof typeof SessionResumeFailureSchema.field>()("claudeSessionId","cwd", "configDir", "resolvedConfigDir", "create", "automaticRestore", "transcriptUnavailable", "identityMismatch", "queryTermination", "bringUpFailure");
-const SESSION_RESUME_CREATE_KEYS = generatedFieldSet<keyof typeof SessionResumeFailureCreateSchema.field>()();
-const SESSION_RESUME_AUTOMATIC_KEYS = generatedFieldSet<keyof typeof SessionResumeFailureAutomaticRestoreSchema.field>()();
-const SESSION_RESUME_TRANSCRIPT_KEYS = generatedFieldSet<keyof typeof SessionResumeFailureTranscriptUnavailableSchema.field>()("searchedPaths");
-const SESSION_RESUME_IDENTITY_KEYS = generatedFieldSet<keyof typeof SessionResumeFailureIdentityMismatchSchema.field>()("replacementClaudeSessionId");
-const SESSION_RESUME_BRING_UP_KEYS = generatedFieldSet<keyof typeof SessionResumeFailureBringUpFailureSchema.field>()("cause");
-
 function decodeSessionTokenUtilization(v: unknown): SessionTokenUtilization {
   let generated: SessionTokenUtilization;
   try {
@@ -3199,102 +3378,18 @@ function requireModelTokenUtilization(model: GeneratedModelTokenUtilization, whe
   }
 }
 
-function decodeSessionResumeFailure(v: unknown, where: string): SessionResumeFailure {
-  const o = ensureObject(v, where);
-  rejectUnknown(o, SESSION_RESUME_KEYS, where);
-  const attempts = ["create", "automaticRestore"].filter((key) => o[key] !== undefined);
-  const causes = ["transcriptUnavailable", "identityMismatch", "queryTermination", "bringUpFailure"].filter((key) => o[key] !== undefined);
-  if (attempts.length !== 1 || causes.length !== 1) throw new Error(`frontend-proto: ${where} requires exactly one attempt and cause`);
-  const attemptValue = ensureObject(o[attempts[0]], `${where}.${attempts[0]}`);
-  rejectUnknown(attemptValue, attempts[0] === "create" ? SESSION_RESUME_CREATE_KEYS : SESSION_RESUME_AUTOMATIC_KEYS, `${where}.${attempts[0]}`);
-  const base = { claudeSessionId: str(o, "claudeSessionId", where), cwd: str(o, "cwd", where), configDir: str(o, "configDir", where), resolvedConfigDir: str(o, "resolvedConfigDir", where), attempt: attempts[0] as "create" | "automaticRestore" };
-  if (causes[0] === "identityMismatch") {
-    const cause = ensureObject(o.identityMismatch, `${where}.identityMismatch`);
-    rejectUnknown(cause, SESSION_RESUME_IDENTITY_KEYS, `${where}.identityMismatch`);
-    return { ...base, cause: { case: "identityMismatch", replacementClaudeSessionId: str(cause, "replacementClaudeSessionId", `${where}.identityMismatch`) } };
-  }
-  if (causes[0] === "queryTermination") {
-    return { ...base, cause: { case: "queryTermination", value: decodeQueryTerminationFailure(o.queryTermination, `${where}.queryTermination`) } };
-  }
-  if (causes[0] === "bringUpFailure") {
-    const cause = ensureObject(o.bringUpFailure, `${where}.bringUpFailure`);
-    rejectUnknown(cause, SESSION_RESUME_BRING_UP_KEYS, `${where}.bringUpFailure`);
-    const message = str(cause, "cause", `${where}.bringUpFailure`);
-    if (message.trim() === "") throw new Error(`frontend-proto: ${where}.bringUpFailure.cause must be nonblank`);
-    return { ...base, cause: { case: "bringUpFailure", cause: message } };
-  }
-  const cause = ensureObject(o.transcriptUnavailable, `${where}.transcriptUnavailable`);
-  rejectUnknown(cause, SESSION_RESUME_TRANSCRIPT_KEYS, `${where}.transcriptUnavailable`);
-  return { ...base, cause: { case: "transcriptUnavailable", searchedPaths: ensureArray(cause.searchedPaths, `${where}.transcriptUnavailable.searchedPaths`).map((path, i) => { if (typeof path !== "string") throw new Error(`frontend-proto: ${where}.transcriptUnavailable.searchedPaths[${i}] must be a string`); return path; }) } };
-}
-
-function decodeQueryTerminationFailure(v: unknown, where: string): QueryTerminationFailure {
-  let generated: QueryTerminationFailure;
-  try {
-    generated = fromJson(QueryTerminationFailureSchema, ensureObject(v, where) as JsonValue);
-  } catch (error) {
-    throw new Error(`frontend-proto: ${where} violates the generated QueryTerminationFailure contract: ${error instanceof Error ? error.message : String(error)}`);
-  }
-  // The agent-repl session id left this message in the figma-idl reshape: the
-  // push that carries the failure is fenced, so the session is the fence's,
-  // and a second copy here could disagree with it. Query and observed-time
-  // identity are still required — an evidence record that names neither the
-  // query() invocation nor when it died corroborates nothing.
-  if (generated.queryInstanceId === "" || generated.observedAtMs <= 0n) {
-    throw new Error(`frontend-proto: ${where} requires query and observed-time identity`);
-  }
-  if (generated.vendorIdentity.case === undefined) throw new Error(`frontend-proto: ${where} requires explicit vendor identity evidence`);
-  if (generated.vendorIdentity.case === "vendorSessionId" && generated.vendorIdentity.value === "") {
-    throw new Error(`frontend-proto: ${where}.vendorSessionId must be nonblank`);
-  }
-  if (generated.reason.case === undefined) {
-    throw new Error(`frontend-proto: ${where} requires an unexpected termination reason`);
-  }
-  if ((generated.reason.case === "iteratorFailure" || generated.reason.case === "startupFailure") && generated.reason.value.cause.trim() === "") {
-    throw new Error(`frontend-proto: ${where}.${generated.reason.case}.cause must be nonblank`);
-  }
-  return generated;
-}
-
-/**
- * Decode a `SystemFailureItem`.
- *
- * An UNSPECIFIED or unrecognized class THROWS rather than defaulting: the
- * class decides the card's color, so guessing one would paint a failure the
- * wrong color — quietly, and in a way that contradicts the workspace beside
- * it. A frame that cannot say what kind of failure it carries is malformed.
- */
-export function decodeSystemFailure(v: unknown, where: string): SystemFailure {
-  const o = ensureObject(v, where);
-  rejectUnknown(o, SYSTEM_FAILURE_KEYS, where);
-  const cls = str(o, "errorClass", where);
-  const known = ERROR_CLASSES.find((c) => cls === c || cls === `ERROR_CLASS_${c}`);
-  if (known === undefined) {
-    throw new Error(`frontend-proto: ${where}.error_class has unrecognized value '${cls}'`);
-  }
-  const failure: SystemFailure = {
-    errorClass: known,
-    errorType: str(o, "errorType", where),
-    message: str(o, "message", where),
-    sourceDetail: str(o, "sourceDetail", where),
-    resolvedAtMs: num(o, "resolvedAtMs", where),
-    itemUuid: str(o, "itemUuid", where),
-    detail: { kind: "none" },
-  };
-  const structured = ["sessionResume", "queryTermination"].filter((key) => o[key] !== undefined);
-  if (structured.length > 1) throw new Error(`frontend-proto: ${where} requires at most one structured detail`);
-  if (o.sessionResume !== undefined) failure.detail = { kind: "sessionResume", value: decodeSessionResumeFailure(o.sessionResume, `${where}.sessionResume`) };
-  if (o.queryTermination !== undefined) failure.detail = { kind: "queryTermination", value: decodeQueryTerminationFailure(o.queryTermination, `${where}.queryTermination`) };
-  return failure;
-}
-
 const COMMAND_ACK_KEYS = new Set([
   "requestId",
   "ok",
   "error",
   "failure",
+  "failureCard",
   "interruptConfirmRequired",
   "selectedModel",
+  // FOR OBSERVABILITY ONLY, and never persisted or fed back: the vendor uuid a
+  // created session landed on. Accepted so a CreateSession ack does not take
+  // the whole frame down; deliberately not carried onto `CommandAck`.
+  "observedClaudeSessionId",
 ]);
 const INTERRUPT_CONFIRM_KEYS = new Set(["liveTasks"]);
 function decodeCommandAck(v: unknown): CommandAck {
@@ -3307,7 +3402,10 @@ function decodeCommandAck(v: unknown): CommandAck {
     selectedModel: str(o, "selectedModel", "CommandAck"),
   };
   if (o.failure !== undefined && o.failure !== null) {
-    ack.failure = decodeSystemFailure(o.failure, "CommandAck.failure");
+    ack.failure = decodeFailureKind(o.failure, "CommandAck.failure");
+  }
+  if (o.failureCard !== undefined && o.failureCard !== null) {
+    ack.failureCard = decodeFailureCardRef(o.failureCard, "CommandAck.failureCard");
   }
   if (o.interruptConfirmRequired !== undefined && o.interruptConfirmRequired !== null) {
     const where = "CommandAck.interruptConfirmRequired";
@@ -3419,7 +3517,7 @@ function decodeProgressView(v: unknown): ProgressView {
     pv.interrupt = decodeInterruptWindow(o.interrupt);
   }
   if (o.failure !== undefined && o.failure !== null) {
-    pv.failure = decodeSystemFailure(o.failure, "ProgressView.failure");
+    pv.failure = decodeFooterFailureRow(o.failure, "ProgressView.failure");
   }
   // Absent = the last turn was cache-efficient. Decoded when present so the
   // alert is the daemon's own observation rather than anything re-derived from
@@ -3541,11 +3639,15 @@ const STATE_SNAPSHOT_KEYS = new Set([
   "catalogs",
   "daemon",
   "inits",
+  "asyncBubbles",
   "queues",
   "progress",
   "workspaceAvailable",
   "hostActions",
   "shutdownSchedule",
+  "topbars",
+  "tokenBreakdowns",
+  "workspaceGates",
 ]);
 function decodeStateSnapshot(v: unknown): StateSnapshot {
   const o = ensureObject(v, "StateSnapshot");
@@ -3567,6 +3669,10 @@ function decodeStateSnapshot(v: unknown): StateSnapshot {
       ? []
       : ensureArray(o.inits, "StateSnapshot.inits")
     ).map(decodeSessionInitView),
+    asyncBubbles: (o.asyncBubbles === undefined || o.asyncBubbles === null
+      ? []
+      : ensureArray(o.asyncBubbles, "StateSnapshot.asyncBubbles")
+    ).map((b, i) => decodeAsyncBubble(b, `StateSnapshot.asyncBubbles[${i}]`)),
     queues: (o.queues === undefined || o.queues === null
       ? []
       : ensureArray(o.queues, "StateSnapshot.queues")
@@ -3583,6 +3689,18 @@ function decodeStateSnapshot(v: unknown): StateSnapshot {
       ? []
       : ensureArray(o.hostActions, "StateSnapshot.hostActions")
     ).map(decodeHostAction),
+    topbars: (o.topbars === undefined || o.topbars === null
+      ? []
+      : ensureArray(o.topbars, "StateSnapshot.topbars")
+    ).map(decodeTopbarView),
+    tokenBreakdowns: (o.tokenBreakdowns === undefined || o.tokenBreakdowns === null
+      ? []
+      : ensureArray(o.tokenBreakdowns, "StateSnapshot.tokenBreakdowns")
+    ).map(decodeTokenBreakdownView),
+    workspaceGates: (o.workspaceGates === undefined || o.workspaceGates === null
+      ? []
+      : ensureArray(o.workspaceGates, "StateSnapshot.workspaceGates")
+    ).map(decodeWorkspaceGateView),
   };
   // The daemon block is optional (absent on a pre-S7 daemon). Decode it when
   // present rather than defaulting it away.
@@ -3890,63 +4008,394 @@ function decodeRosterRowStatus(o: Obj, ctx: string): RosterRow["status"] {
   return { case: arm };
 }
 
-/** The allowed-key set for a message with no fields at all. */
-const EMPTY_KEY_SET: ReadonlySet<string> = new Set<string>();
+// --- resolved component views ------------------------------------------------
+//
+// EVERY key set below is anchored to the GENERATED field manifest through
+// `generatedFieldSet`, so a daemon-side rename or addition fails `npm run
+// typecheck` here rather than surfacing as a frame the client silently refuses
+// (or, worse, silently accepts with a field it never reads).
 
-// --- primitive readers (loud, protojson-aware) ------------------------------
+const TOPBAR_VIEW_KEYS = generatedFieldSet<keyof typeof TopbarViewSchema.field>()(
+  "workspace",
+  "title",
+  "sessionLine",
+  "modelDisplay",
+  "modelOptions",
+  "connectivity",
+  "accountingLine",
+  "fence",
+);
+const TOPBAR_CONNECTIVITY_KEYS = generatedFieldSet<keyof typeof TopbarConnectivitySchema.field>()(
+  "tone",
+  "glyph",
+  "title",
+);
+const TOPBAR_MODEL_OPTION_KEYS = generatedFieldSet<keyof typeof ModelOptionSchema.field>()(
+  "value",
+  "displayName",
+  "description",
+);
 
-function ensureObject(v: unknown, ctx: string): Obj {
-  if (typeof v !== "object" || v === null || Array.isArray(v)) {
-    throw new Error(`frontend-proto: ${ctx} must be a JSON object`);
+/**
+ * Decode a `TopbarView` (frame 21 / snapshot 12).
+ *
+ * `fence` is REQUIRED and nonblank: an unfenced resolved view cannot be
+ * compared against anything, so adopting one would be adopting a push whose
+ * currency nobody can establish — exactly what the fence exists to prevent.
+ */
+function decodeTopbarView(v: unknown): TopbarView {
+  const where = "TopbarView";
+  const o = ensureObject(v, where);
+  rejectUnknown(o, TOPBAR_VIEW_KEYS, where);
+  const view: TopbarView = {
+    workspace: str(o, "workspace", where),
+    title: str(o, "title", where),
+    sessionLine: str(o, "sessionLine", where),
+    modelDisplay: str(o, "modelDisplay", where),
+    modelOptions: ensureArray(o.modelOptions ?? [], `${where}.modelOptions`).map((entry, i) => {
+      const inner = `${where}.modelOptions[${i}]`;
+      const opt = ensureObject(entry, inner);
+      rejectUnknown(opt, TOPBAR_MODEL_OPTION_KEYS, inner);
+      return {
+        value: str(opt, "value", inner),
+        displayName: str(opt, "displayName", inner),
+        description: str(opt, "description", inner),
+      };
+    }),
+    accountingLine: str(o, "accountingLine", where),
+    fence: str(o, "fence", where),
+  };
+  if (view.fence === "") throw new Error(`frontend-proto: ${where} missing required \`fence\``);
+  // ABSENT CONNECTIVITY IS ABSENCE. The client draws no glyph rather than a
+  // neutral placeholder, because a placeholder is a claim about connectivity
+  // that the daemon did not make.
+  if (o.connectivity !== undefined && o.connectivity !== null) {
+    const inner = `${where}.connectivity`;
+    const c = ensureObject(o.connectivity, inner);
+    rejectUnknown(c, TOPBAR_CONNECTIVITY_KEYS, inner);
+    view.connectivity = {
+      tone: str(c, "tone", inner),
+      glyph: str(c, "glyph", inner),
+      title: str(c, "title", inner),
+    };
   }
-  return v as Obj;
+  return view;
 }
 
-function ensureArray(v: unknown, ctx: string): unknown[] {
-  if (!Array.isArray(v)) {
-    throw new Error(`frontend-proto: ${ctx} must be a JSON array`);
-  }
-  return v;
+const TOKEN_BREAKDOWN_VIEW_KEYS = generatedFieldSet<
+  keyof typeof TokenBreakdownViewSchema.field
+>()("workspace", "sections", "fence");
+const TOKEN_BREAKDOWN_SECTION_KEYS = generatedFieldSet<
+  keyof typeof TokenBreakdownSectionSchema.field
+>()("label", "rows");
+const TOKEN_BREAKDOWN_ROW_KEYS = generatedFieldSet<keyof typeof TokenBreakdownRowSchema.field>()(
+  "label",
+  "tokens",
+  "sharePermille",
+  "emphasized",
+  "depth",
+);
+
+/**
+ * Decode a `TokenBreakdownView` (frame 22 / snapshot 13).
+ *
+ * Every figure arrives resolved — the share is already permille and already
+ * rounded — so this decoder validates and carries, and NOTHING downstream sums,
+ * divides or re-rounds a row.
+ */
+function decodeTokenBreakdownView(v: unknown): TokenBreakdownView {
+  const where = "TokenBreakdownView";
+  const o = ensureObject(v, where);
+  rejectUnknown(o, TOKEN_BREAKDOWN_VIEW_KEYS, where);
+  const view: TokenBreakdownView = {
+    workspace: str(o, "workspace", where),
+    sections: ensureArray(o.sections ?? [], `${where}.sections`).map((entry, i) => {
+      const sectionWhere = `${where}.sections[${i}]`;
+      const section = ensureObject(entry, sectionWhere);
+      rejectUnknown(section, TOKEN_BREAKDOWN_SECTION_KEYS, sectionWhere);
+      return {
+        label: str(section, "label", sectionWhere),
+        rows: ensureArray(section.rows ?? [], `${sectionWhere}.rows`).map((rowEntry, j) => {
+          const rowWhere = `${sectionWhere}.rows[${j}]`;
+          const row = ensureObject(rowEntry, rowWhere);
+          rejectUnknown(row, TOKEN_BREAKDOWN_ROW_KEYS, rowWhere);
+          return {
+            label: str(row, "label", rowWhere),
+            tokens: num(row, "tokens", rowWhere),
+            sharePermille: num(row, "sharePermille", rowWhere),
+            emphasized: bool(row, "emphasized", rowWhere),
+            depth: num(row, "depth", rowWhere),
+          };
+        }),
+      };
+    }),
+    fence: str(o, "fence", where),
+  };
+  if (view.fence === "") throw new Error(`frontend-proto: ${where} missing required \`fence\``);
+  return view;
 }
 
-function rejectUnknown(o: Obj, allowed: ReadonlySet<string>, ctx: string): void {
-  const bad = Object.keys(o).filter((k) => !allowed.has(k));
-  if (bad.length > 0) {
-    throw new Error(`frontend-proto: ${ctx} has unrecognized field(s): ${bad.join(", ")}`);
+const WORKSPACE_GATE_VIEW_KEYS = generatedFieldSet<keyof typeof WorkspaceGateViewSchema.field>()(
+  "workspace",
+  "fence",
+  "open",
+  "hibernated",
+);
+const WORKSPACE_GATE_OPEN_KEYS = generatedFieldSet<keyof typeof WorkspaceGateOpenSchema.field>()();
+const WORKSPACE_GATE_HIBERNATED_KEYS = generatedFieldSet<
+  keyof typeof WorkspaceGateHibernatedSchema.field
+>()("detail");
+
+/**
+ * Decode a `WorkspaceGateView` (frame 23 / snapshot 14).
+ *
+ * The GATE ARM IS REQUIRED, and exactly one of them. A view with no arm says
+ * nothing about whether prompts may be sent, and defaulting it either way is a
+ * decision this end has no standing to make: defaulting open would let a prompt
+ * go to a sleeping session, defaulting closed would lock a live composer.
+ */
+function decodeWorkspaceGateView(v: unknown): WorkspaceGateView {
+  const where = "WorkspaceGateView";
+  const o = ensureObject(v, where);
+  rejectUnknown(o, WORKSPACE_GATE_VIEW_KEYS, where);
+  const fence = str(o, "fence", where);
+  if (fence === "") throw new Error(`frontend-proto: ${where} missing required \`fence\``);
+  const arms = [WORKSPACE_GATE_ARM.open, WORKSPACE_GATE_ARM.hibernated].filter(
+    (key) => o[key] !== undefined && o[key] !== null,
+  );
+  if (arms.length !== 1) {
+    throw new Error(
+      `frontend-proto: ${where} requires exactly one gate arm (got ${arms.length === 0 ? "none" : arms.join(", ")})`,
+    );
+  }
+  const workspace = str(o, "workspace", where);
+  if (arms[0] === WORKSPACE_GATE_ARM.open) {
+    const inner = `${where}.open`;
+    rejectUnknown(ensureObject(o.open, inner), WORKSPACE_GATE_OPEN_KEYS, inner);
+    return { workspace, fence, gate: { case: "open" } };
+  }
+  const inner = `${where}.hibernated`;
+  const hibernated = ensureObject(o.hibernated, inner);
+  rejectUnknown(hibernated, WORKSPACE_GATE_HIBERNATED_KEYS, inner);
+  if (hibernated.detail === undefined || hibernated.detail === null) {
+    throw new Error(`frontend-proto: ${inner} requires \`detail\``);
+  }
+  return {
+    workspace,
+    fence,
+    gate: { case: "hibernated", detail: decodeHibernationDetail(hibernated.detail) },
+  };
+}
+
+// --- the failure vocabulary --------------------------------------------------
+
+/**
+ * Decode a `FailureKind`.
+ *
+ * The generated descriptor does the arm validation: `fromJson` refuses an
+ * unknown field and refuses TWO arms of one oneof. What it cannot refuse is an
+ * EMPTY oneof — proto3 has no way to require one — so that check is here, and
+ * it THROWS. `errors.proto` states the rule outright: an unset FailureKind is a
+ * malformed frame and must be rejected rather than rendered as a generic error,
+ * because a generic error is a claim about what failed that nobody made.
+ */
+export function decodeFailureKind(v: unknown, where: string): FailureKind {
+  let generated: FailureKind;
+  try {
+    generated = fromJson(FailureKindSchema, ensureObject(v, where) as JsonValue);
+  } catch (error) {
+    throw new Error(
+      `frontend-proto: ${where} violates the generated FailureKind contract: ${errMsg(error)}`,
+    );
+  }
+  if (generated.kind.case === undefined) {
+    throw new Error(
+      `frontend-proto: ${where} sets no failure kind; an unset kind is a malformed frame`,
+    );
+  }
+  if (!(generated.kind.case in FAILURE_KIND_SIDE)) {
+    throw new Error(
+      `frontend-proto: ${where} names failure kind '${generated.kind.case}', which has no side`,
+    );
+  }
+  // The two arms that carry a whole machine-readable lifecycle record are held
+  // to that record's OWN invariants, the ones the retired
+  // decodeQueryTerminationFailure/decodeSessionResumeFailure enforced. The
+  // generated descriptor cannot state them: it accepts an absent detail
+  // message, an empty oneof and a blank string alike. Renderers read these
+  // records field by field, so an evidence record that names no query, no
+  // instant, no vendor conversation or no cause is refused HERE rather than
+  // reaching the card as "missing …" prose describing evidence nobody supplied.
+  if (generated.kind.case === "queryTermination") {
+    requireQueryTerminationEvidence(generated.kind.value.detail, `${where}.queryTermination.detail`);
+  }
+  if (generated.kind.case === "sessionResumeFailed") {
+    requireSessionResumeEvidence(generated.kind.value.detail, `${where}.sessionResumeFailed.detail`);
+  }
+  return generated;
+}
+
+/**
+ * Hold a `QueryTerminationFailure` to the evidence it claims to be.
+ *
+ * The agent-repl session id left this message in the figma-idl reshape — the
+ * push that carries the failure is fenced, so the session is the fence's, and a
+ * second copy here could disagree with it. Query and observed-time identity are
+ * still required: an evidence record that names neither the query() invocation
+ * nor when it died corroborates nothing.
+ */
+function requireQueryTerminationEvidence(
+  detail: GeneratedQueryTerminationFailure | undefined,
+  where: string,
+): void {
+  if (detail === undefined) {
+    throw new Error(`frontend-proto: ${where} requires query-termination evidence`);
+  }
+  if (detail.queryInstanceId.trim() === "") {
+    throw new Error(`frontend-proto: ${where} requires a nonblank \`query_instance_id\``);
+  }
+  if (detail.observedAtMs <= 0n) {
+    throw new Error(`frontend-proto: ${where} requires a positive \`observed_at_ms\``);
+  }
+  if (detail.vendorIdentity.case === undefined) {
+    throw new Error(`frontend-proto: ${where} requires explicit vendor identity evidence`);
+  }
+  if (detail.vendorIdentity.case === "vendorSessionId" && detail.vendorIdentity.value.trim() === "") {
+    throw new Error(`frontend-proto: ${where}.vendorSessionId must be nonblank`);
+  }
+  if (detail.reason.case === undefined) {
+    throw new Error(`frontend-proto: ${where} requires an unexpected termination reason`);
   }
 }
 
-function str(o: Obj, key: string, ctx: string): string {
-  const v = o[key];
-  if (v === undefined || v === null) return "";
-  if (typeof v !== "string") {
-    throw new Error(`frontend-proto: ${ctx}.${key} must be a string (got ${typeof v})`);
+/**
+ * Hold a `SessionResumeFailure` to the evidence it claims to be.
+ *
+ * Both oneofs are required: the attempt says WHICH operation's continuity
+ * requirement could not be met and the cause says WHY, and a card that renders
+ * one without the other states a refusal nobody accounted for. A cause that is
+ * itself a query death carries the query record's own invariants with it.
+ */
+function requireSessionResumeEvidence(
+  detail: GeneratedSessionResumeFailure | undefined,
+  where: string,
+): void {
+  if (detail === undefined) {
+    throw new Error(`frontend-proto: ${where} requires resume-continuity evidence`);
   }
-  return v;
+  if (detail.attempt.case === undefined) {
+    throw new Error(`frontend-proto: ${where} requires exactly one attempt`);
+  }
+  if (detail.cause.case === undefined) {
+    throw new Error(`frontend-proto: ${where} requires exactly one cause`);
+  }
+  if (detail.cause.case === "queryTermination") {
+    requireQueryTerminationEvidence(detail.cause.value, `${where}.queryTermination`);
+  }
 }
 
-/** A proto3 numeric scalar: a JSON number, or (int64/uint64) a numeric string. */
-function num(o: Obj, key: string, ctx: string): number {
-  const v = o[key];
-  if (v === undefined || v === null) return 0;
-  if (typeof v === "number") return v;
-  if (typeof v === "string") {
-    const n = Number(v);
-    if (!Number.isFinite(n)) {
-      throw new Error(`frontend-proto: ${ctx}.${key} is not a numeric string ('${v}')`);
-    }
-    return n;
+const FAILURE_CARD_VIEW_KEYS = generatedFieldSet<keyof typeof FailureCardViewSchema.field>()(
+  "kind",
+  "message",
+  "detail",
+  "open",
+  "resolved",
+  "terminal",
+);
+const FAILURE_CARD_OPEN_KEYS = generatedFieldSet<keyof typeof FailureCardOpenSchema.field>()();
+const FAILURE_CARD_RESOLVED_KEYS = generatedFieldSet<
+  keyof typeof FailureCardResolvedSchema.field
+>()("resolvedAtMs");
+const FAILURE_CARD_TERMINAL_KEYS = generatedFieldSet<
+  keyof typeof FailureCardTerminalSchema.field
+>()();
+const FAILURE_CARD_REF_KEYS = generatedFieldSet<keyof typeof FailureCardRefSchema.field>()(
+  "cardUuid",
+);
+
+/**
+ * Decode a `FailureCardView`.
+ *
+ * BOTH oneofs are required. The kind decides the card's color and the lifecycle
+ * decides whether the card invites waiting; a card missing either would render
+ * a failure whose colour and whose finality were invented here.
+ */
+export function decodeFailureCardView(v: unknown, where: string): FailureCardView {
+  const o = ensureObject(v, where);
+  rejectUnknown(o, FAILURE_CARD_VIEW_KEYS, where);
+  if (o.kind === undefined || o.kind === null) {
+    throw new Error(`frontend-proto: ${where} requires \`kind\``);
   }
-  throw new Error(`frontend-proto: ${ctx}.${key} must be a number or numeric string (got ${typeof v})`);
+  const lifecycleArms = [
+    FAILURE_CARD_LIFECYCLE_ARM.open,
+    FAILURE_CARD_LIFECYCLE_ARM.resolved,
+    FAILURE_CARD_LIFECYCLE_ARM.terminal,
+  ].filter((key) => o[key] !== undefined && o[key] !== null);
+  if (lifecycleArms.length !== 1) {
+    throw new Error(
+      `frontend-proto: ${where} requires exactly one lifecycle arm (got ${lifecycleArms.length === 0 ? "none" : lifecycleArms.join(", ")})`,
+    );
+  }
+  return {
+    kind: decodeFailureKind(o.kind, `${where}.kind`),
+    message: str(o, "message", where),
+    detail: str(o, "detail", where),
+    lifecycle: decodeFailureCardLifecycle(o, lifecycleArms[0], where),
+  };
 }
 
-function bool(o: Obj, key: string, ctx: string): boolean {
-  const v = o[key];
-  if (v === undefined || v === null) return false;
-  if (typeof v !== "boolean") {
-    throw new Error(`frontend-proto: ${ctx}.${key} must be a boolean (got ${typeof v})`);
+function decodeFailureCardLifecycle(
+  o: Obj,
+  arm: string,
+  where: string,
+): FailureCardLifecycle {
+  if (arm === FAILURE_CARD_LIFECYCLE_ARM.open) {
+    const inner = `${where}.open`;
+    rejectUnknown(ensureObject(o.open, inner), FAILURE_CARD_OPEN_KEYS, inner);
+    return { case: "open" };
   }
-  return v;
+  if (arm === FAILURE_CARD_LIFECYCLE_ARM.terminal) {
+    const inner = `${where}.terminal`;
+    rejectUnknown(ensureObject(o.terminal, inner), FAILURE_CARD_TERMINAL_KEYS, inner);
+    return { case: "terminal" };
+  }
+  const inner = `${where}.resolved`;
+  const resolved = ensureObject(o.resolved, inner);
+  rejectUnknown(resolved, FAILURE_CARD_RESOLVED_KEYS, inner);
+  return { case: "resolved", resolvedAtMs: num(resolved, "resolvedAtMs", inner) };
+}
+
+/** Decode a `FailureCardRef` — the address of a card another surface reveals. */
+export function decodeFailureCardRef(v: unknown, where: string): FailureCardRef {
+  const o = ensureObject(v, where);
+  rejectUnknown(o, FAILURE_CARD_REF_KEYS, where);
+  return { cardUuid: str(o, "cardUuid", where) };
+}
+
+const FOOTER_FAILURE_ROW_KEYS = generatedFieldSet<keyof typeof FooterFailureRowSchema.field>()(
+  "message",
+  "tone",
+  "card",
+);
+
+/**
+ * Decode a `FooterFailureRow`.
+ *
+ * The row carries a resolved TONE, not a kind: it draws one line and has no use
+ * for typed evidence. An ABSENT `card` means the row is not clickable, and the
+ * client then offers no reveal rather than scrolling somewhere arbitrary.
+ */
+export function decodeFooterFailureRow(v: unknown, where: string): FooterFailureRow {
+  const o = ensureObject(v, where);
+  rejectUnknown(o, FOOTER_FAILURE_ROW_KEYS, where);
+  const row: FooterFailureRow = {
+    message: str(o, "message", where),
+    tone: str(o, "tone", where),
+  };
+  if (o.card !== undefined && o.card !== null) {
+    row.card = decodeFailureCardRef(o.card, `${where}.card`);
+  }
+  return row;
 }
 
 /**

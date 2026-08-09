@@ -548,6 +548,8 @@ func frameSessionIdentity(frame *frontendv1.FrontendFrame) (workspace, sessionID
 		return f.ConversationDelta.GetWorkspace(), "", true
 	case *frontendv1.FrontendFrame_TypingDelta:
 		return f.TypingDelta.GetWorkspace(), "", true
+	case *frontendv1.FrontendFrame_AsyncBubbleDelta:
+		return f.AsyncBubbleDelta.GetWorkspace(), "", true
 	case *frontendv1.FrontendFrame_TaskCatalog:
 		return f.TaskCatalog.GetWorkspace(), "", true
 	case *frontendv1.FrontendFrame_SessionInit:
@@ -558,6 +560,19 @@ func frameSessionIdentity(frame *frontendv1.FrontendFrame) (workspace, sessionID
 		return f.Queue.GetWorkspace(), "", true
 	case *frontendv1.FrontendFrame_Progress:
 		return f.Progress.GetWorkspace(), "", true
+	// THE THREE RESOLVED VIEWS are fenced-family frames like the ones above and
+	// are latched for the same reason. They were missing here while the SNAPSHOT
+	// side latched them (the snapshot provider runs all three through
+	// filterPublishedWorkspaceViews), so a workspace the latch was holding back
+	// had its topbar, its breakdown menu and its gate PUSHED to a client the
+	// snapshot would then refuse to tell about that workspace at all. Push and
+	// snapshot must answer the same question the same way.
+	case *frontendv1.FrontendFrame_Topbar:
+		return f.Topbar.GetWorkspace(), "", true
+	case *frontendv1.FrontendFrame_TokenBreakdown:
+		return f.TokenBreakdown.GetWorkspace(), "", true
+	case *frontendv1.FrontendFrame_WorkspaceGate:
+		return f.WorkspaceGate.GetWorkspace(), "", true
 	default:
 		return "", "", false
 	}
@@ -644,6 +659,9 @@ func (s *Server) PushSessionView(v *frontendv1.SessionView) { s.Broadcast(Sessio
 func (s *Server) PushConversationDelta(c *frontendv1.ConversationDelta) {
 	s.Broadcast(ConversationDeltaFrame(c))
 }
+func (s *Server) PushAsyncBubbleDelta(d *frontendv1.AsyncBubbleDelta) {
+	s.Broadcast(AsyncBubbleDeltaFrame(d))
+}
 func (s *Server) PushTypingDelta(t *frontendv1.TypingDelta) { s.Broadcast(TypingDeltaFrame(t)) }
 func (s *Server) PushTaskCatalog(c *frontendv1.TaskCatalog) { s.Broadcast(TaskCatalogFrame(c)) }
 func (s *Server) PushSessionInitView(v *frontendv1.SessionInitView) {
@@ -655,6 +673,13 @@ func (s *Server) PushHeartbeatView(h *frontendv1.HeartbeatView) {
 func (s *Server) PushQueueView(q *frontendv1.QueueView) { s.Broadcast(QueueViewFrame(q)) }
 func (s *Server) PushProgressView(p *frontendv1.ProgressView) {
 	s.Broadcast(ProgressViewFrame(p))
+}
+func (s *Server) PushTopbarView(v *frontendv1.TopbarView) { s.Broadcast(TopbarViewFrame(v)) }
+func (s *Server) PushTokenBreakdownView(v *frontendv1.TokenBreakdownView) {
+	s.Broadcast(TokenBreakdownViewFrame(v))
+}
+func (s *Server) PushWorkspaceGateView(v *frontendv1.WorkspaceGateView) {
+	s.Broadcast(WorkspaceGateViewFrame(v))
 }
 
 // PushWorkspaceAvailable and PushHostAction carry HOST-ONLY work, and both

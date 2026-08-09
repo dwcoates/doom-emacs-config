@@ -6,14 +6,15 @@
 // It is SPEC ITEM 7 of the merge-pipeline acceptance gate whose helper home is
 // mergepipeline_e2e_test.go: a `merge' entry in a workspace-command file is a
 // FIRST-CLASS REQUEST TO MERGE, and an entry that cannot name a real repository
-// is REFUSED rather than accepted-and-forgotten. The producer is being built on
-// sibling branches, so everything here is EXPECTED TO FAIL until that work
-// lands, and it is deliberately neither skipped nor build-tagged: the gate runs
-// as
+// is REFUSED rather than accepted-and-forgotten. THE PRODUCER HAS LANDED, so
+// both tests here are now REQUIRED TO PASS and carry no acceptance-gate marker:
+// a failure below is a regression in the dispatch route, not unbuilt work. The
+// gate still runs as
 //
 //	go test ./e2e/ -count=1 -run TestE2EMergePipeline
 //
-// and a gate that passes vacuously is not a gate.
+// and it is deliberately neither skipped nor build-tagged, because a gate that
+// passes vacuously is not a gate.
 // ============================================================================
 //
 // WHY THIS ROUTE NEEDS ITS OWN FILE. Every other merge suite beside it drives
@@ -273,6 +274,11 @@ func newDispatchInbox(t *testing.T, h *e2eHarness) *dispatchInbox {
 		Publication: dispatchStubPublication{t: t},
 		HostActions: d.sink,
 		Logf:        d.log.logf,
+		// The error-level logger goes to the SAME capture as the normal one. The
+		// gate's "rejected loudly" assertions read one stream, and splitting the
+		// severities across two sinks here would let a refusal announced at error
+		// level look, to this file, like a refusal announced nowhere.
+		Errorf: d.log.logf,
 	})
 	if err != nil {
 		t.Fatalf("build the workspace-create manager: %v", err)
@@ -372,8 +378,6 @@ func mergeDispatchEntry(workspace, projectDir string) string {
 // is deliberately discarded, because the whole question here is whether the
 // JSON route can do what the wire route does.
 func TestE2EMergePipelineDispatchJSONMergeReachesTheQueue(t *testing.T) {
-	acceptanceGate(t)
-
 	// Arrange — a target declaring a passing suite, a sibling with commits that
 	// collide with nothing, its geometry recorded, and a frontend watching before
 	// anything is dropped into the inbox.
@@ -444,8 +448,6 @@ func TestE2EMergePipelineDispatchJSONMergeReachesTheQueue(t *testing.T) {
 // would have to exist, so an empty store is a POSITIVE statement that nothing
 // was accepted, checked at a moment when acceptance would already have happened.
 func TestE2EMergePipelineDispatchJSONUnusableProjectDirIsRejected(t *testing.T) {
-	acceptanceGate(t)
-
 	tests := []struct {
 		name string
 		// projectDir is the entry's project_dir field. Empty OMITS the field
@@ -476,8 +478,6 @@ func TestE2EMergePipelineDispatchJSONUnusableProjectDirIsRejected(t *testing.T) 
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			acceptanceGate(t)
-
 			// Arrange — a real repository whose worktree is genuinely mergeable,
 			// so the ONLY thing wrong with the entry is its project_dir. A fixture
 			// that was unmergeable for some other reason could not distinguish a

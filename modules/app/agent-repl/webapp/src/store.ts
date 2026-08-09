@@ -15,16 +15,21 @@
  */
 import type { CounterEntry } from "./counter-menu.js";
 import type {
-  ErrorClass,
+  FailureCardView,
   HibernationDetail,
   MergeStatus,
+  ResponseUsageStamp,
   RuntimeFault,
   SessionCommand,
   SessionTokenUtilization,
   ShutdownScheduleDraining,
   ShutdownScheduleView,
-  SystemFailureDetail,
+  TokenBreakdownView,
+  TopbarView,
+  WorkspaceGateView,
 } from "./frontend-proto.js";
+import { admitFenced, type FencedComponentView, type FencedView } from "./fence.js";
+import { CONNECTIVITY_WINDOW_KINDS, failureKindName, failureResolvedAtMs } from "./failure-card.js";
 import type {
   AdapterEffect,
   ProgressInput,
@@ -38,6 +43,8 @@ import type {
   WebSessionStatus,
   WorkspaceStatusInput,
 } from "./state-adapter.js";
+import type { AsyncBubbleDelta } from "./async-bubble.js";
+import { AsyncBubbleRegistry, type AsyncApplyResult, type AsyncGap } from "./async-routing.js";
 import { mergeStatusLogValue } from "./merge-status.js";
 import { applyStreamDelta, blockKey, insertBySeq, settleStreamedBlock } from "./streaming.js";
 import type { ClientLogContext } from "./protocol.js";
@@ -193,6 +200,16 @@ export interface ToolItem extends FeedOrderedItem {
    * stream, which is what the async fold keys off.
    */
   asyncSource?: AsyncSource;
+  /**
+   * THE CLASSIFICATION VERDICT: the id of the `AsyncBubble` this call detached,
+   * as the DAEMON resolved it (`AgentToolCall.spawned_bubble_id`).
+   *
+   * The card MATCHES this string against a bubble in the async registry; it
+   * never derives one. ABSENT means "this call detached nothing", and that is
+   * the only reading of absent — there is no second tier of evidence to fall
+   * back to, by design (see `watchers.ts`).
+   */
+  spawnedBubbleId?: string;
   /** Streamed output of the detached task this call spawned. */
   taskOutput?: string;
   /**
@@ -303,27 +320,21 @@ export interface ContextCompactedItem extends FeedOrderedItem {
  * "api_error" and a hardcoded `recoverable` of false — neither fed by
  * anything. Every field here is the daemon's verdict, adopted unchanged.
  */
-export interface SystemFailureCard extends FeedOrderedItem {
+export interface FailureCardItem extends FeedOrderedItem {
   kind: "failure";
-  /** SEMANTIC, never chromatic: the color comes from the shared table. */
-  errorClass: ErrorClass;
-  errorType: string;
-  message: string;
-  /** The raw account, shown beside the prose rather than replacing it. */
-  sourceDetail: string;
   /**
-   * Wall-clock ms a WINDOW-shaped failure closed; 0 while open. A resolved
-   * card renders as settled rather than as a standing alarm, which is the
-   * whole reason the two edges reconcile onto one uuid.
-   */
-  resolvedAtMs: number;
-  /**
-   * The daemon's uuid for this card. It is the ADDRESS the progress footer's
-   * error row scrolls to, which is the only way to find a failure that has
-   * already scrolled off.
+   * The daemon's uuid for this card. It is the ADDRESS the footer's failure row
+   * reveals, and it is the identity a window-shaped failure's later lifecycle
+   * arm RECONCILES onto — which is the only way an alarm and its own all-clear
+   * end up as one card rather than two.
    */
   uuid: string;
-  detail: SystemFailureDetail;
+  /**
+   * The resolved view, VERBATIM: the kind arm, the sentence, the evidence and
+   * the lifecycle. Held whole rather than flattened into local fields, so this
+   * end cannot quietly grow a derived one beside them.
+   */
+  view: FailureCardView;
 }
 export interface SystemItem extends FeedOrderedItem {
   kind: "system";
@@ -428,7 +439,7 @@ export type ConversationItem =
   | ContextClearedItem
   | ContextCompactedItem
   | SessionCommandItem
-  | SystemFailureCard
+  | FailureCardItem
   | SystemItem;
 
 // --- store state -----------------------------------------------------------------
@@ -582,6 +593,31 @@ export interface StoreState {
    * both consumers: neither may block a live session on the absence of news.
    */
   hibernation: HibernationDetail | null;
+  /**
+   * Each workspace's authoritative staleness fence, from `WorkspaceState`.
+   *
+   * It is the ANSWER every fenced push is measured against, and the only thing
+   * in this store that a fenced view is compared to. Keyed by workspace because
+   * the fence is a per-workspace fact; a workspace with no entry has had no
+   * ruling yet, and nothing can be shown to be current for it.
+   */
+  fences: Map<string, string>;
+  /**
+   * The resolved TOPBAR per workspace, adopted only through the fence gate.
+   *
+   * ABSENT MEANS ABSENT: a workspace with no entry renders no topbar, never a
+   * title composed here from whatever else the store holds.
+   */
+  topbars: Map<string, TopbarView>;
+  /** The resolved TOKEN BREAKDOWN per workspace; absence renders nothing. */
+  tokenBreakdowns: Map<string, TokenBreakdownView>;
+  /**
+   * The resolved REVIVAL GATE per workspace; absence renders no gate.
+   *
+   * This is where {@link StoreState.hibernation} comes from, and the only place
+   * it comes from.
+   */
+  gates: Map<string, WorkspaceGateView>;
   /** Monotonic SSM revision of the adopted WorkspaceState. */
   workspaceStateAtMs: number;
   /** Store sequence that caused the adopted state, or zero for daemon-local. */
@@ -621,6 +657,10 @@ function initialState(): StoreState {
     mergeStatus: null,
     shutdownSchedule: null,
     hibernation: null,
+    fences: new Map(),
+    topbars: new Map(),
+    tokenBreakdowns: new Map(),
+    gates: new Map(),
     workspaceStateAtMs: 0,
     workspaceStateCauseSeq: 0,
   };
@@ -653,6 +693,18 @@ function workspaceStateFingerprint(ws: WorkspaceStatusInput): string {
 export interface IngestResult {
   /** Whether visible state changed (render needed). */
   changed: boolean;
+  /**
+   * THE ASYNC GAP this batch hit, if any: an async push named a bubble that is
+   * not open, carried an arm mismatching its bubble's kind, or appended bytes
+   * at an offset the spool is not at.
+   *
+   * Reported UP rather than handled here, because the answer to a gap is a
+   * resync, and the resync trigger lives with the socket. It is never a
+   * warning to ride out: nothing of the push was applied (the registry stages
+   * and commits atomically), so the client's async state is exactly as stale
+   * as it was, and only a fresh snapshot makes it current again.
+   */
+  asyncGap?: AsyncGap;
 }
 
 /**
@@ -687,6 +739,11 @@ function mergeToolItem(existing: ToolItem, incoming: ToolItem): ToolItem {
   if (incoming.notification !== undefined) merged.notification = incoming.notification;
   if (incoming.resultTs !== undefined) merged.resultTs = incoming.resultTs;
   if (incoming.asyncSource !== undefined) merged.asyncSource = incoming.asyncSource;
+  // The verdict arrives on the CALL and is restated on the outcome, so a later
+  // half of the pair that carries it merges in. It is never cleared by a half
+  // that does not carry it: the two are the same string whenever both are set,
+  // and "the outcome did not restate it" is not a retraction.
+  if (incoming.spawnedBubbleId !== undefined) merged.spawnedBubbleId = incoming.spawnedBubbleId;
   if (incoming.taskOutput !== undefined) merged.taskOutput = incoming.taskOutput;
   if (incoming.skillBody !== undefined) merged.skillBody = incoming.skillBody;
   if (incoming.result !== undefined) merged.result = incoming.result;
@@ -719,39 +776,17 @@ export function userTurnKey(item: UserTurnItem): string | null {
 }
 
 /**
- * The failure types whose window CLOSING means the card DISAPPEARS, rather
- * than settling in place with a "resolved" stamp.
- *
- * Every one of them reports a transport link that was momentarily down and is
- * now up again. Once the link is back there is nothing left for the reader to
- * do about it and nothing left for it to explain: the card names a condition
- * that no longer exists, beside a feed that is once again live. A settled
- * "lost the connection to the daemon; reconnecting (close=1005)" is worse than
- * no card at all — it reads as a standing fault to anyone who does not notice
- * the small resolved timestamp under it, and a flapping link leaves one such
- * ghost per drop.
- *
- * This is deliberately NOT the rule for every window-shaped failure. A
- * resolved `shim.store_write_rejected` carries `dropped=N` — conversation that
- * is permanently gone — and a resolved rate limit explains a gap in the
- * transcript. Those settle; only the pure connectivity windows vanish.
- */
-export const CONNECTIVITY_WINDOW_FAILURE_TYPES: readonly string[] = [
-  /** This end's own socket to the daemon closed and then came back. */
-  "client.daemon_unreachable",
-  /** The daemon's missed-heartbeat window to the shim, since resumed. */
-  "shim.degraded",
-];
-
-/**
  * Reports whether ITEM is a connectivity window that has CLOSED — the arrival
  * whose meaning is "take the notice down".
+ *
+ * WHICH kinds retract rather than settle is stated once, in `failure-card.ts`'s
+ * `CONNECTIVITY_WINDOW_KINDS`, beside the rest of the failure vocabulary.
  */
-export function isSettledConnectivityFailure(item: ConversationItem): item is SystemFailureCard {
+export function isSettledConnectivityFailure(item: ConversationItem): item is FailureCardItem {
   return (
     item.kind === "failure" &&
-    item.resolvedAtMs > 0 &&
-    CONNECTIVITY_WINDOW_FAILURE_TYPES.includes(item.errorType)
+    item.view.lifecycle.case === "resolved" &&
+    CONNECTIVITY_WINDOW_KINDS.includes(failureKindName(item.view.kind))
   );
 }
 
@@ -794,6 +829,20 @@ export class ConversationStore {
    * input's shape is unchanged for its many consumers.
    */
   taskRoster: CounterEntry[] = [];
+
+  /**
+   * THE OPEN ASYNC BUBBLES, keyed by id — the session's detached work.
+   *
+   * Kept beside `state` for the same reason `taskRoster` is (the render
+   * input's shape stays unchanged for its many consumers), and kept as the
+   * registry OBJECT rather than a plain map because id-only routing and spool
+   * continuity are its invariants to enforce, not the store's to re-implement.
+   *
+   * It is NOT cleared by `rebaseSeqSpace`: a vendor session uuid rotating
+   * invalidates the conversation's seq space, not the processes still running
+   * on the machine. `reset` and a snapshot adopt are what retire bubbles.
+   */
+  readonly asyncBubbles = new AsyncBubbleRegistry();
 
   /**
    * The consolidated progress footer's input (F1), adopted wholesale from the
@@ -848,6 +897,10 @@ export class ConversationStore {
   reset(): void {
     this.state = initialState();
     this.taskRoster = [];
+    // Adopting an EMPTY set is how the registry is emptied — the same path a
+    // snapshot naming no open work takes, rather than a second clear method
+    // that could drift from it.
+    this.asyncBubbles.adoptSnapshot([]);
     this.progress = null;
     this.sessionIdAuthoritative = false;
   }
@@ -882,8 +935,37 @@ export class ConversationStore {
   ingest(effects: readonly AdapterEffect[]): IngestResult {
     this.validateIngest(effects);
     let changed = false;
+    let asyncGap: AsyncGap | undefined;
     for (const effect of effects) {
       switch (effect.kind) {
+        case "async-bubbles-snapshot":
+          // REPLACES the held set: the snapshot is the daemon's complete
+          // statement of what is still open, so a bubble missing from it is
+          // one the daemon no longer holds.
+          this.asyncBubbles.adoptSnapshot(effect.bubbles);
+          changed = true;
+          break;
+        case "async-bubble-delta":
+        case "async-bubble-anchored": {
+          // THE FENCE CHOKE POINT, connected. A push whose fence does not match
+          // the workspace's current one describes a session that is gone, so it
+          // is discarded WHOLE here — before the registry sees one bubble of it
+          // — and reported once. Routing below is deliberately a separate
+          // question: it decides WHERE an update lands, not whether the push is
+          // current, and it never runs for a push the gate refused.
+          const admitted = this.gateFenced({ case: "asyncBubbleDelta" as const, value: effect.value });
+          if (admitted === null) break;
+          // A STALE PUSH RAISES NO GAP. `throughSeq` counts a sequence the
+          // retired session owned, so measuring the live registry against it
+          // would report a hole that does not exist and trigger a resync for it.
+          const routed = this.applyAsyncBubbleDelta(admitted.value);
+          if (routed.ok) changed = changed || routed.opened > 0 || routed.updated > 0;
+          // The FIRST gap wins and the rest of the batch is still walked: a
+          // resync re-delivers everything anyway, and a second gap report
+          // would only ask for the same snapshot twice.
+          else asyncGap = asyncGap ?? routed.gap;
+          break;
+        }
         case "workspace-state":
           changed = this.applyWorkspaceState(effect.value) || changed;
           break;
@@ -915,6 +997,11 @@ export class ConversationStore {
         case "session-init":
           changed = this.applySessionInit(effect.value) || changed;
           break;
+        // THE ONLY WAY a fenced component view reaches this store. See
+        // `applyFencedView` and `fence.ts`.
+        case "fenced-view":
+          changed = this.applyFencedView(effect.value) || changed;
+          break;
         case "workspace-roster":
           // The rail is not store state: it holds its own roster under its own
           // revision lease, and main.ts hands this effect straight to it. The
@@ -925,7 +1012,19 @@ export class ConversationStore {
           break;
       }
     }
-    return { changed };
+    return asyncGap === undefined ? { changed } : { changed, asyncGap };
+  }
+
+  /**
+   * THE ONE PLACE an async push is routed — a thin pass-through to the
+   * registry, which owns id-only routing and spool continuity.
+   *
+   * It exists as a named method rather than an inline call so the fence gate
+   * and any future push source have one seam to connect to, and so the store
+   * never grows a second, subtly different apply path beside the registry's.
+   */
+  private applyAsyncBubbleDelta(delta: AsyncBubbleDelta): AsyncApplyResult {
+    return this.asyncBubbles.applyDelta(delta);
   }
 
   /**
@@ -1093,6 +1192,24 @@ export class ConversationStore {
       s.sessionId = ws.sessionId;
       this.sessionIdAuthoritative = true;
     }
+    // THE FENCE, adopted before anything else this revision carries. It is the
+    // answer every fenced push is measured against, and a workspace with no
+    // entry here has had no ruling yet — which is why the gate treats an
+    // absent fence as "nothing can be shown to be current" rather than as a
+    // wildcard.
+    //
+    // A ROTATION INVALIDATES THE VIEWS IT FENCED. The resolved chrome that
+    // matched the old fence describes a session that is gone, so it is dropped
+    // rather than left standing to be quietly re-adopted by a comparison
+    // against the new fence it can never match.
+    const previousFence = s.fences.get(ws.workspace);
+    if (previousFence !== ws.fence) {
+      s.topbars.delete(ws.workspace);
+      s.tokenBreakdowns.delete(ws.workspace);
+      s.gates.delete(ws.workspace);
+      if (previousFence !== undefined) s.hibernation = null;
+    }
+    s.fences.set(ws.workspace, ws.fence);
     // THE workspace's phase, kept so the footer reads the same authority the
     // tab bar does.
     s.renderState = ws.state;
@@ -1212,12 +1329,89 @@ export class ConversationStore {
     // Empty identity values never clobber a filled record.
     if (sv.claudeSessionId !== "") s.claudeSessionId = sv.claudeSessionId;
     if (sv.cwd !== "") s.cwd = sv.cwd;
-    // ADOPTED WHOLESALE, including the clear. Absence on a SessionView is the
-    // daemon saying the session is awake, and that is exactly the edge the
-    // revival gate closes on: the gate stands until a pushed view drops the
-    // field, so nothing local has to decide when a revive "probably" landed.
-    s.hibernation = sv.hibernation;
+    // THE GATE IS NOT WRITTEN HERE, AND NO LONGER CAN BE. It is adopted from
+    // the fenced `WorkspaceGateView` (see `applyFencedView`), which is a
+    // statement about THIS WORKSPACE NOW rather than about one entry in a
+    // catalog that also carries retired and superseded sessions.
     return true;
+  }
+
+  /**
+   * THE SINGLE CHOKE POINT for every fenced component view.
+   *
+   * One method, one call to {@link admitFenced}, and only then a slice write.
+   * The three views share one effect kind precisely so this method is the only
+   * store code that can write `topbars`, `tokenBreakdowns` or `gates` — those
+   * maps are written nowhere else, and no other public method exposes them, so
+   * "route it through the gate" is structural rather than a convention a future
+   * call site can forget.
+   *
+   * A STALE PUSH IS DISCARDED WHOLE. Not partially, not "the safe half": the
+   * method returns before any slice is touched, and the discard is reported
+   * once through the store's canonical log channel with the two fences side by
+   * side.
+   */
+  /**
+   * THE ONE PLACE this store asks {@link admitFenced} anything.
+   *
+   * Every fenced push — the three resolved component views and the detached-work
+   * delta alike — reaches the gate through here, so "what does stale mean" has
+   * one answer and one discard record. Returns `null` for a stale push, having
+   * already reported it ONCE through the canonical log channel; the caller then
+   * has no admitted value to act on, which is how discard-whole is enforced
+   * rather than merely intended.
+   */
+  private gateFenced<T extends FencedView>(view: T): T | null {
+    const verdict = admitFenced(view, this.state.fences.get(view.value.workspace) ?? "");
+    if (verdict.kind === "discard") {
+      this.log("warn", verdict.report.message, verdict.report.context);
+      return null;
+    }
+    // `admitFenced` hands back the very view it admitted, so this narrows to
+    // the caller's arm without widening the union it may then act on.
+    return verdict.view as T;
+  }
+
+  private applyFencedView(view: FencedComponentView): boolean {
+    const admitted = this.gateFenced(view);
+    if (admitted === null) return false;
+    switch (admitted.case) {
+      case "topbar":
+        this.state.topbars.set(admitted.value.workspace, admitted.value);
+        return true;
+      case "tokenBreakdown":
+        this.state.tokenBreakdowns.set(admitted.value.workspace, admitted.value);
+        return true;
+      case "workspaceGate": {
+        this.state.gates.set(admitted.value.workspace, admitted.value);
+        // The gate's HIBERNATED arm carries the account the revival card
+        // renders; `open` clears it. The arm IS the answer, so there is nothing
+        // here that could report a gate closed with nothing to say.
+        this.state.hibernation =
+          admitted.value.gate.case === "hibernated" ? admitted.value.gate.detail : null;
+        return true;
+      }
+      default: {
+        // A new fenced view is a compile error here, never a silent skip.
+        const never: never = admitted;
+        throw new Error(`store: unhandled fenced view ${JSON.stringify(never)}`);
+      }
+    }
+  }
+
+  /** The workspace's resolved topbar, or null when none has been published. */
+  topbar(workspace: string): TopbarView | null {
+    return this.state.topbars.get(workspace) ?? null;
+  }
+
+  /** The workspace's resolved token breakdown, or null when none is published. */
+  tokenBreakdown(workspace: string): TokenBreakdownView | null {
+    return this.state.tokenBreakdowns.get(workspace) ?? null;
+  }
+
+  /** The workspace's resolved revival gate, or null when none is published. */
+  workspaceGate(workspace: string): WorkspaceGateView | null {
+    return this.state.gates.get(workspace) ?? null;
   }
 
   /**
@@ -1239,7 +1433,7 @@ export class ConversationStore {
    * miss. Keyed by uuid like every other item, so a re-delivery replaces
    * rather than duplicates.
    */
-  addFailure(failure: SystemFailureCard): boolean {
+  addFailure(failure: FailureCardItem): boolean {
     // A locally-minted card has no delta seq; the high-water mark ranks it at
     // the feed's live tail, where a fault report belongs.
     this.mergeItem(failure, this.state.lastSeq);
@@ -1347,19 +1541,23 @@ export class ConversationStore {
    * deliberately not an insertion — filing an all-clear for an alarm the
    * reader never saw is exactly the noise this removes.
    */
-  private retractConnectivityCard(item: SystemFailureCard, key: string | null): void {
+  private retractConnectivityCard(item: FailureCardItem, key: string | null): void {
     // Structurally impossible: `itemKey` keys every failure on its uuid.
     if (key === null) throw new Error("store: failure card reached the feed with no key");
     const idx = this.state.items.findIndex((i) => itemKey(i) === key);
     if (idx === -1) {
       this.log(
         "info",
-        `connectivity window ${item.errorType} closed with no open card to retract (${key})`,
+        `connectivity window ${failureKindName(item.view.kind)} closed with no open card ` +
+          `to retract (${key})`,
       );
       return;
     }
     this.state.items.splice(idx, 1);
-    this.log("info", `retracted the resolved connectivity card ${key} (${item.errorType})`);
+    this.log(
+      "info",
+      `retracted the resolved connectivity card ${key} (${failureKindName(item.view.kind)})`,
+    );
   }
 
   /**

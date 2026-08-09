@@ -45,9 +45,30 @@ user-facing representation of an interject, whose MECHANISM (`Interrupt` then
 `make` generates Go (`gen/go`, consumed by `daemon/`,
 `agent-shim/shim-store/`, `agent-shim/claude/shim-sidecar/`) and TS
 (`gen/ts`, consumed by `agent-shim/claude/shim/`, `webapp/`). `make lint`
-syntax-checks without emitting.
+syntax-checks without emitting. The structural invariants protoc cannot see
+(below) are enforced by `codegen-gate`, a prerequisite of `go`, `ts`, and
+`lint` alike.
 
 Dependencies: protoc, protoc-gen-go, @bufbuild/protoc-gen-es.
+
+## Enforced structural invariants
+
+**I6 — durable isolation.** `frontend/v1/durable.proto` is the persistence
+evidence layer. No other `frontend/v1` schema may import it or name a message
+it declares; what a frontend needs from that evidence reaches it already
+resolved (`ResponseUsageStamp`, `FooterAccountingCell`, `TokenBreakdownView`).
+`check-durable-isolation.sh` enforces it as the `codegen-gate` target, which
+`make go`, `make ts`, and `make lint` all require — so every Makefile route to
+bindings refuses a drifted schema instead of emitting for the coupling, not just
+the linting one. Prose is unconstrained — comments are stripped before matching,
+because naming the durable types is how the files that must not use them explain
+why. `test-check-durable-isolation.sh` (run by `make validate`) drives the gate
+against fixture trees in both directions and drives the real codegen targets
+against a drifted tree through `COMPONENT_DIR`, so neither the gate nor its
+dependency edge can silently degrade.
+
+New structural gates hang off `codegen-gate`, so they inherit that coverage
+without each having to be wired into every emitting target.
 
 ## Validation and coverage
 

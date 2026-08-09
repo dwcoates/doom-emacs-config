@@ -1534,6 +1534,16 @@ pre {
    live it ticks with the stream, settled it reads the run's total. */
 .async-badge-tokens { color: var(--muted); font-size: 0.7rem; }
 
+/* A bubble whose parent_bubble_id names work that never arrived. It is drawn
+   — it is real work the user started — but set off by a dashed rule rather
+   than promoted into the root list, because "top level" is a tree position
+   the daemon never claimed for it. */
+.async-orphan {
+  border-left: 1px dashed var(--border);
+  padding-left: 0.5rem;
+  margin-top: 0.35rem;
+}
+
 /* A closed card with a child permission still waiting must stay loud. */
 .badge.perm { color: var(--accent); }
 /* Consecutive like-cards collapse into one tabbed group: the chip row

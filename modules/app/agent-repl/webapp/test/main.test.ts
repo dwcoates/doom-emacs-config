@@ -362,6 +362,17 @@ describe("session-addressed side-calls at mount", () => {
   });
 });
 
+// A refused command must reach the user. The dispatcher's `onFailure` sink is
+// boot-scope closure state with no importable seam, so the delegation is pinned
+// here; the rule it delegates to is tested in command-dispatch.test.ts.
+describe("the refusal sink", () => {
+  it("delegates every refusal to the one surfacing rule", () => {
+    // Assert — an inline branch here is how a missed reveal came to log and
+    // return, leaving the refusal on screen nowhere at all.
+    expect(main).toContain("onFailure: (refusal) =>\n      surfaceRefusal(refusal, {");
+  });
+});
+
 // A workspace switch relayouts the webview around the host's tail snap, in an
 // order neither Emacs nor the page controls, so the feed's return to its tail
 // hangs on the resize event rather than on the snap winning that race. The
