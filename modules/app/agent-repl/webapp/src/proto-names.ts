@@ -40,14 +40,16 @@
  * outside this module's reach entirely.
  */
 
+import type { FrontendCommand as GeneratedFrontendCommand } from "../../proto/gen/ts/agentshim/frontend/v1/frame_pb";
 import type {
-  FrontendCommand as GeneratedFrontendCommand,
   HibernationDetail as GeneratedHibernationDetail,
+  ReviveSessionCmd as GeneratedReviveSessionCmd,
+} from "../../proto/gen/ts/agentshim/frontend/v1/gate-revival_pb";
+import type {
   QueueEntry as GeneratedQueueEntry,
   QueueEntryKeepAliveHold as GeneratedQueueEntryKeepAliveHold,
   QueueEntryRevivalHold as GeneratedQueueEntryRevivalHold,
-  ReviveSessionCmd as GeneratedReviveSessionCmd,
-} from "../../proto/gen/ts/agentshim/frontend/v1/frontend_pb";
+} from "../../proto/gen/ts/agentshim/frontend/v1/prompt-queue_pb";
 import { PromptOrigin as GeneratedPromptOrigin } from "../../proto/gen/ts/agentshim/core/v1/core_pb";
 
 /** A generated oneof's arm keys, with protobuf-es's "nothing set" arm dropped. */

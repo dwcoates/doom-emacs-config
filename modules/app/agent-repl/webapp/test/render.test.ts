@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
-import { QueryTerminationFailureSchema } from "../../proto/gen/ts/agentshim/frontend/v1/frontend_pb";
+import {
+  QueryTerminationFailureSchema,
+} from "../../proto/gen/ts/agentshim/frontend/v1/errors_pb";
 import {
   QueryIteratorFailureSchema,
   QueryStartupFailureSchema,
