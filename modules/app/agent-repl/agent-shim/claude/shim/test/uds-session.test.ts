@@ -1266,6 +1266,78 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
     });
   });
 
+  it("releases a turn whose only SDK task ended without queueing a notification", async () => {
+    // Arrange: the turn ran one subagent task whose result was consumed inline,
+    // so by the time the parent's terminal arrives the task has ended and the
+    // durable queue holds no `<task-notification>` — nothing can drive a
+    // further internal cycle.
+    const { query, store, daemon, session } = await rig({ storeSessionId: "vendor-uuid" });
+    const log = captureLog();
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, {
+      requestId: "p1",
+      text: "use a subagent",
+      promptOrigin: PromptOrigin.USER_SENT,
+    }));
+    const start = await store.peer().next(StoreWriteSchema);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(start.batch!.events.length),
+      lastSeq: 8n,
+    }));
+    await daemon.next(AckSchema);
+    query.emit({
+      type: "system",
+      subtype: "task_started",
+      uuid: "task-start-1",
+      session_id: "vendor-uuid",
+      task_id: "agent-python",
+      task_type: "local_agent",
+      tool_use_id: "tool-agent-python",
+      description: "Python hello world",
+    } as unknown as SdkMessageLike);
+    const taskStart = await store.peer().next(StoreWriteSchema);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(taskStart.batch!.events.length),
+      lastSeq: 10n,
+    }));
+    query.emit({
+      type: "system",
+      subtype: "task_notification",
+      uuid: "task-end-1",
+      session_id: "vendor-uuid",
+      task_id: "agent-python",
+      tool_use_id: "tool-agent-python",
+      status: "completed",
+      output_file: "/tmp/agent-python.output",
+      summary: "done",
+    } as unknown as SdkMessageLike);
+    const taskEnd = await store.peer().next(StoreWriteSchema);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(taskEnd.batch!.events.length),
+      lastSeq: 12n,
+    }));
+
+    // Act: the parent's terminal, from an ordinary cycle rather than a
+    // task-notification one.
+    query.emit({
+      type: "result",
+      uuid: "parent-result",
+      session_id: "vendor-uuid",
+      subtype: "success",
+      duration_ms: 100,
+    } as unknown as SdkMessageLike);
+
+    // Assert: the turn closes on its own terminal instead of latching open for
+    // a cycle that can never arrive.
+    const terminal = await store.peer().next(StoreWriteSchema);
+    expect(terminal.batch!.events.map((event) => event.payload.case)).toContain("turnEnded");
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, {
+      accepted: BigInt(terminal.batch!.events.length),
+      lastSeq: 16n,
+    }));
+    await until(() => session.turnCount() === 0);
+    expect(log.count("SDK result retained while background-task result cycles remain outstanding")).toBe(0);
+  });
+
   it("retains a turn for an in-epoch task notification a completed SDK task backs", async () => {
     // Arrange: one task of THIS query ran to completion, so its queued
     // notification can still drive another internal result cycle.
