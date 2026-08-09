@@ -139,7 +139,27 @@ message HostAction {
     HostTaskById task_add_workspace = 8;
     HostLegacyCommand legacy_command = 9;
     HostWorkspaceCreateFailed workspace_create_failed = 10;
+    HostBootSweepSessionUnwired boot_sweep_session_unwired = 11;
   }
+}
+
+// The boot sweep finished with this session left UNWIRED: its shim never
+// redialed inside the recheck window, its liveness probe failed twice, or it
+// was neither connected nor lock-held. The session is not torn down — the
+// record stays revivable and an on-demand open still brings it up — but a
+// human should know the survivor did not come back on its own. It rides the
+// same retained-until-completed HostAction envelope every other host action
+// uses, exactly as HostWorkspaceCreateFailed does: the daemon job it reports
+// is already over, and the record is delivered, replayed across reconnects,
+// and acknowledged.
+message HostBootSweepSessionUnwired {
+  // The workspace the session belongs to (project dir).
+  string workspace = 1;
+  // The session left unwired.
+  string session_id = 2;
+  // WHY it was left, as one display-ready sentence composed by the sweep
+  // (which verdict fired, with its evidence). Rendered verbatim.
+  string reason = 3;
 }
 
 // A durably-failed workspace-creation job. It rides the same
