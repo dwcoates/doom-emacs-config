@@ -82,13 +82,9 @@ func (s *asyncBubbleStore) windowsOpen() bool {
 	return len(s.windows) > 0
 }
 
-// mergeWindowOpen reports whether a MERGE run is among the open windows.
-func (s *asyncBubbleStore) mergeWindowOpen() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.mergeWindowLocked() != nil
-}
-
+// mergeWindowLocked reports the open MERGE window, nil when none is open. It is
+// the merge kind's own query because the merge kind has its own opening rule —
+// one at a time — and nothing else on the stack constrains that.
 func (s *asyncBubbleStore) mergeWindowLocked() *asyncWindow {
 	for i := range s.windows {
 		if s.windows[i].kind == frontend.DetachMerge {

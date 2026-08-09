@@ -434,7 +434,7 @@ func TestSettleWindowsClosesTheWindow(t *testing.T) {
 	}
 
 	// Assert
-	if s.mergeWindowOpen() {
+	if s.windowsOpen() {
 		t.Fatal("a settled window must claim no further emissions")
 	}
 }
@@ -643,7 +643,7 @@ func TestAnUndeliverableInterruptLeavesTheMergeWindowOpen(t *testing.T) {
 	_ = h.m.Interrupt(context.Background(), "ws", "fe-merge-stop")
 
 	// Assert
-	if !h.controller().consumer.bubbles.mergeWindowOpen() {
+	if !h.controller().consumer.bubbles.windowsOpen() {
 		t.Fatal("a stop that was never delivered took nothing back from the merge, so its window must still stand")
 	}
 }
