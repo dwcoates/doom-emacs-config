@@ -53,6 +53,11 @@ const compactSummary = blockAfter(css, ".bubble.assistant.compact-summary");
 const scrollZone = blockAfter(css, ".scroll-zone {");
 const scrollZoneBox = blockAfter(css, ".scroll-zone-box");
 const revivalGate = blockAfter(css, "\n#revival-gate {");
+const mergeDequeue = blockAfter(css, "\n#merge-dequeue {");
+const mergeDequeueConfirm = blockAfter(
+  css,
+  "\n.merge-dequeue-actions button.merge-dequeue-confirm {",
+);
 
 /** The red, green and blue channels of a `#rrggbb` literal, each 0-255. */
 function channels(hex: string): [number, number, number] {
@@ -3648,5 +3653,36 @@ describe("revival gate", () => {
     const readable = luminance(fill) > luminance(fg);
     // Assert
     expect(readable).toBe(true);
+  });
+});
+
+/**
+ * The merge dequeue card's frame.
+ *
+ * Its colors are the whole reason it is not just another picker: the confirm
+ * button aborts or discards someone's merge, so the card wears the alarm red
+ * every failure surface uses rather than the yellow --q-border that rings a
+ * harmless question.
+ */
+describe("the merge dequeue offer's frame", () => {
+  it("rings the card in the alarm red rather than the picker yellow", () => {
+    // Arrange / Act — the #merge-dequeue rule.
+    // Assert
+    expect(mergeDequeue).toMatch(/border:\s*1px solid var\(--err\)/);
+    expect(mergeDequeue).not.toMatch(/--q-border/);
+  });
+
+  it("washes the fill rather than blanking the conversation behind it", () => {
+    // Arrange / Act — unlike the revival gate, this card does not block the
+    // composer, so hiding the feed behind it would overstate the question.
+    // Assert
+    expect(mergeDequeue).toMatch(/background:\s*color-mix\(in srgb, var\(--err\)/);
+  });
+
+  it("fills the destructive button in the alarm red", () => {
+    // Arrange / Act — the confirm button is not the safe default and must not
+    // look like one.
+    // Assert
+    expect(mergeDequeueConfirm).toMatch(/background:\s*var\(--err\)/);
   });
 });

@@ -82,6 +82,7 @@ import {
   type ConversationItemFrame,
   type FooterAccountingCell,
   type FooterFailureRow,
+  type MergeDequeueOffer,
   type MergeStatus,
   type FrontendFrame,
   type HeartbeatView,
@@ -191,6 +192,15 @@ export interface WorkspaceStatusInput {
    * cutover; this only ADDS the facts a phase word cannot carry.
    */
   mergeStatus: MergeStatus | null;
+  /**
+   * THE OUTSTANDING QUESTION about taking this workspace's merge off the queue
+   * (`WorkspaceState.merge_dequeue_offer`), or null when there is none.
+   *
+   * The card is drawn if and only if this is set, so the daemon clearing the
+   * field IS the dismissal — the webapp keeps no local dismissed-flag that
+   * could fall out of step with the question the daemon still holds.
+   */
+  mergeDequeueOffer: MergeDequeueOffer | null;
 }
 
 /**
@@ -759,6 +769,7 @@ export class StateAdapter {
         `live_tasks=${String(ws.liveTaskCount)} ` +
         `merge_lease_held=${ws.mergeLeaseHeld} ` +
         `merge_status=${mergeStatusLogValue(ws.mergeStatus ?? null)} ` +
+        `merge_dequeue_offer=${ws.mergeDequeueOffer?.offerId ?? "none"} ` +
         `faults=${ws.activeFaults.map((fault) => `${fault.component}/${fault.faultType}`).join(",") || "none"} ` +
         `cause_kind=${ws.causeKind} cause_seq=${String(ws.causeSeq)} at_ms=${String(ws.atMs)}`,
     );
@@ -782,6 +793,7 @@ export class StateAdapter {
         // Absent on the wire is "no merge run", which every consumer tests as
         // one null check rather than by interrogating a phase arm.
         mergeStatus: ws.mergeStatus ?? null,
+        mergeDequeueOffer: ws.mergeDequeueOffer ?? null,
       },
     };
   }
