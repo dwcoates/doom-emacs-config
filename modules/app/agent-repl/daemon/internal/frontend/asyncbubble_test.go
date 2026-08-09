@@ -575,3 +575,24 @@ func TestAsyncBubbleDeltaFrameWrapsTheDeltaInItsArm(t *testing.T) {
 		t.Fatalf("want the delta on frame arm 20, got %v", got)
 	}
 }
+
+func TestAnAsyncBubbleDeltaRoutesToItsOwnWorkspace(t *testing.T) {
+	frame := AsyncBubbleDeltaFrame(&frontendv1.AsyncBubbleDelta{Workspace: "/ws"})
+	if _, ok := scopeFrame(frame, Scope{Workspace: "/ws"}); !ok {
+		t.Fatal("a fenced push routes by workspace, exactly as ConversationDelta does")
+	}
+}
+
+func TestAnAsyncBubbleDeltaIsWithheldFromAnotherWorkspacesClient(t *testing.T) {
+	frame := AsyncBubbleDeltaFrame(&frontendv1.AsyncBubbleDelta{Workspace: "/ws"})
+	if _, ok := scopeFrame(frame, Scope{Workspace: "/other"}); ok {
+		t.Fatal("without a case of its own the delta would fall to the connection-global default and leak across workspaces")
+	}
+}
+
+func TestAScopedSnapshotKeepsItsAsyncBubbles(t *testing.T) {
+	snap := &frontendv1.StateSnapshot{AsyncBubbles: []*frontendv1.AsyncBubble{{Id: "bubble:t1"}}}
+	if got := len(filterSnapshot(snap, Scope{Workspace: "/ws"}).GetAsyncBubbles()); got != 1 {
+		t.Fatalf("a scoped client that lost its bubbles would reconnect with detached work missing, got %d", got)
+	}
+}
