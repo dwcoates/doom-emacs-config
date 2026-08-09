@@ -403,7 +403,8 @@ the log with its workspace and buffer."
     (agent-repl--log nil "refresh-webviews: sweep done refreshed=%d candidates=%d"
                      refreshed (length bufs))
     (when (called-interactively-p 'interactive)
-      (message "agent-repl: refreshed %d of %d webview(s)" refreshed (length bufs)))
+      (agent-repl--user-message nil "refreshed %d of %d webview(s)"
+                                (list refreshed (length bufs))))
     refreshed))
 
 ;;;; ---- Copying the webview's highlighted text --------------------------------
@@ -427,10 +428,11 @@ silent data loss."
   (if (or (null text) (string-empty-p (string-trim text)))
       (progn
         (agent-repl--log ws "copy-selection: outcome=empty")
-        (message "agent-repl: nothing highlighted in the webview"))
+        (agent-repl--user-message ws "nothing highlighted in the webview" nil))
     (kill-new text)
     (agent-repl--log ws "copy-selection: outcome=copied chars=%d" (length text))
-    (message "agent-repl: copied %d chars from the webview" (length text))))
+    (agent-repl--user-message ws "copied %d chars from the webview"
+                              (list (length text)))))
 
 ;;;###autoload
 (defun agent-repl-frontend-copy-selection ()
@@ -1038,7 +1040,7 @@ the current workspace."
       (user-error "agent-repl: no current workspace"))
     (unless (agent-repl--frontend-remount-webview ws)
       (user-error "agent-repl: no webview open for workspace %s" ws))
-    (message "agent-repl: webview reloaded")))
+    (agent-repl--user-message ws "webview reloaded" nil)))
 
 ;;;###autoload
 (defun agent-repl-restart-session ()
@@ -1070,7 +1072,7 @@ the shared command-ack handler rather than read as success."
       (user-error "agent-repl: no current workspace"))
     (agent-repl--log ws "restart-session: begin")
     (agent-repl--frontend-restart-session ws)
-    (message "agent-repl: restarting the session for %s..." ws)))
+    (agent-repl--user-message ws "restarting the session for %s..." (list ws))))
 
 ;;;###autoload
 (defun agent-repl-hibernate-workspace ()
@@ -1096,7 +1098,7 @@ Signals when there is no current workspace."
       (user-error "agent-repl: no current workspace"))
     (agent-repl--log ws "hibernate-workspace: begin")
     (agent-repl--frontend-hibernate-workspace ws)
-    (message "agent-repl: hibernating %s..." ws)))
+    (agent-repl--user-message ws "hibernating %s..." (list ws))))
 
 (defun agent-repl--frontend-parent-ws-name (ws)
   "Return the basename of WS's recorded parent worktree, or nil.
@@ -1229,7 +1231,7 @@ workspace nuke path (`agent-repl-ws-del-hook')."
     (agent-repl--log ws "close-panel: killing buf=%s" (buffer-name buf))
     (agent-repl--frontend-kill-webview buf)
     (agent-repl--ws-put ws :frontend-buffer nil)
-    (message "agent-repl: webview closed (session kept)")))
+    (agent-repl--user-message ws "webview closed (session kept)" nil)))
 
 ;;;; ---- Workspace teardown -----------------------------------------------------
 

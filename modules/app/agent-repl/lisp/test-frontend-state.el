@@ -1154,14 +1154,15 @@ Only a DIFFERENT session's terminal view is a superseded predecessor."
        ;; Assert
        (should (null echoed))))))
 
-(ert-deftest agent-repl-test-session-death-carries-the-raw-reason ()
-  "The death's source detail rides the surfaced text as evidence."
+(ert-deftest agent-repl-test-session-death-echoes-the-daemon-prose ()
+  "The death's own sentence is what the user reads."
   ;; Arrange
   (agent-repl-test--with-clean-state
    (clrhash agent-repl--frontend-surfaced-deaths)
    (let (echoed)
-     (cl-letf (((symbol-function 'message)
-                (lambda (fmt &rest args) (setq echoed (apply #'format fmt args)))))
+     (cl-letf (((symbol-function 'agent-repl--warn) #'ignore)
+               ((symbol-function 'agent-repl--emit-message)
+                (lambda (text &optional _echo) (setq echoed text))))
        ;; Act
        (agent-repl--frontend-apply-session-view
         '(:sessionId "s1" :workspace "/w" :terminal t
@@ -1170,7 +1171,47 @@ Only a DIFFERENT session's terminal view is a superseded predecessor."
                   :detail "some ancient reason"
                   :terminal ())))
        ;; Assert
-       (should (string-match-p "some ancient reason" echoed))))))
+       (should (equal echoed "agent-repl: the session ended"))))))
+
+(ert-deftest agent-repl-test-session-death-keeps-the-raw-reason-off-the-echo ()
+  "The death's source detail is evidence, and evidence does not reach the echo."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+   (clrhash agent-repl--frontend-surfaced-deaths)
+   (let (echoed)
+     (cl-letf (((symbol-function 'agent-repl--warn) #'ignore)
+               ((symbol-function 'agent-repl--emit-message)
+                (lambda (text &optional _echo) (setq echoed text))))
+       ;; Act
+       (agent-repl--frontend-apply-session-view
+        '(:sessionId "s1" :workspace "/w" :terminal t
+          :death (:kind (:sessionEndedUnclassified ())
+                  :message "the session ended"
+                  :detail "some ancient reason"
+                  :terminal ())))
+       ;; Assert
+       (should-not (string-match-p "some ancient reason" echoed))))))
+
+(ert-deftest agent-repl-test-session-death-files-the-raw-reason ()
+  "The evidence the echo dropped still reaches the canonical log."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+   (clrhash agent-repl--frontend-surfaced-deaths)
+   (let (logged)
+     (cl-letf (((symbol-function 'agent-repl--warn) #'ignore)
+               ((symbol-function 'agent-repl--emit-message) #'ignore)
+               ((symbol-function 'agent-repl--log)
+                (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+       ;; Act
+       (agent-repl--frontend-apply-session-view
+        '(:sessionId "s1" :workspace "/w" :terminal t
+          :death (:kind (:sessionEndedUnclassified ())
+                  :message "the session ended"
+                  :detail "some ancient reason"
+                  :terminal ())))
+       ;; Assert
+       (should (cl-find-if (lambda (line) (string-match-p "some ancient reason" line))
+                           logged))))))
 
 (ert-deftest agent-repl-test-open-supersede-death-surfaces ()
   "A supersede whose successor is not yet up still announces itself."
@@ -1861,6 +1902,22 @@ first."
           ;; Assert
           (should (seq-find (lambda (m) (string-match-p "FAILED during snapshot resync" m))
                             messages)))))))
+
+(ert-deftest agent-repl-test-snapshot-resync-failure-echoes-user-copy ()
+  "The resync failure the user reads is a sentence, and it points at the log."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-clean-lease
+      (let (echoed)
+        (cl-letf (((symbol-function 'agent-repl--warn) #'ignore)
+                  ((symbol-function 'agent-repl--emit-message)
+                   (lambda (text &optional _echo) (setq echoed text))))
+          ;; Act
+          (agent-repl-test--apply-snapshot '(:workspaces nil :shutdownSchedule nil))
+          ;; Assert
+          (should (equal echoed
+                         (concat "agent-repl: 1 item(s) failed to resync — see the "
+                                 "agent-repl log for detail"))))))))
 
 (ert-deftest agent-repl-test-snapshot-tolerates-a-queue-entry-shutdown-hold ()
   "A snapshot whose queues carry a lease hold applies without choking."

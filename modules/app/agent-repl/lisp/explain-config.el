@@ -422,7 +422,9 @@ priming state change only after a new SessionView has been correlated."
       (progn
         (agent-repl--log nil
                          "explain-config: ensure-session FAILED frontend daemon did not start")
-        (message "agent-repl: explain-config failed: frontend daemon did not start")
+        (agent-repl--user-message
+         nil "explain-config needs the frontend daemon; it did not start" nil
+         :detail "explain-config: ensure-session FAILED frontend daemon did not start")
         (funcall on-failure
                  "frontend daemon not started (auto-start disabled or init inhibited)"))
     (agent-repl--frontend-after-ready
