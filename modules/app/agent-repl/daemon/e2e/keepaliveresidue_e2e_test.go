@@ -40,6 +40,19 @@ func pingCompletedWithNothingWaiting(t *testing.T, s *keepAliveSession) string {
 	s.store.await(t, "the keep-alive ping's turn end", func(ev *corev1.Event) bool {
 		return turnEndedOf(ev, turnID)
 	})
+	// THE STORE'S TurnEnded IS NOT THE BARRIER THESE TESTS NEED. It says the
+	// shim reported the end; it does not say the DAEMON has processed it. Until
+	// the daemon's own boundary has run, the ping's claim still stands and a
+	// prompt arriving would be HELD by it — which drives the pre-existing
+	// held-prompt rewind and would make every assertion below pass for the
+	// wrong reason. The workspace publishing itself un-busy is the daemon's own
+	// statement that the boundary is behind it.
+	awaitAll(t, s.conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
+		"the daemon publishing the workspace un-busy after the ping": func(frame *frontendv1.FrontendFrame) bool {
+			state := workspaceStateFor(frame, s.cwd)
+			return state != nil && !state.GetTurnActive()
+		},
+	})
 	return turnID
 }
 
