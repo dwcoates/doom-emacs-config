@@ -17,6 +17,7 @@ func TestCardWithFactsSetsExactlyOneKindArm(t *testing.T) {
 		RequestID: "r1", Reason: "no", Cause: "boom", Component: "c",
 		WaitedMs: 1, DroppedCount: 2, HTTPStatus: 500, Attempts: 3,
 		Model: "m", StopReason: "s", UncachedInputTokens: 4, RawReason: "raw", SinceMs: 5,
+		Remedy: "reload",
 		Vendor: &frontendv1.VendorFailureContext{ApiRequestId: "req"},
 	}
 	for _, typ := range AllTypes() {
@@ -118,6 +119,57 @@ func TestAnUnnamedTurnFailureCarriesTheVendorsOwnStopReason(t *testing.T) {
 	// Assert.
 	if card.GetKind().GetApiTurnFailed().GetStopReason() != "weird_stop" {
 		t.Fatalf("stop reason = %q", card.GetKind().GetApiTurnFailed().GetStopReason())
+	}
+}
+
+func TestASupersededReconnectCarriesTheRemedyItWasOffered(t *testing.T) {
+	// Arrange + Act.
+	card := CardWithFacts(TypeSessionReconnectSuperseded, "d", Facts{Remedy: "reload this view"})
+	// Assert.
+	if card.GetKind().GetReconnectSuperseded().GetRemedy() != "reload this view" {
+		t.Fatalf("remedy = %q", card.GetKind().GetReconnectSuperseded().GetRemedy())
+	}
+}
+
+// remedyError is a refusing site that offers an action, the way the resync
+// command path does.
+type remedyError struct{ err error }
+
+func (e remedyError) Error() string         { return e.err.Error() }
+func (e remedyError) Unwrap() error         { return e.err }
+func (e remedyError) FailureRemedy() string { return "remount the view" }
+
+func TestCommandTakesTheRemedyFromTheRefusingSite(t *testing.T) {
+	// Arrange — the classifier owns the vocabulary; the site owns the evidence.
+	logf, _ := capture()
+	// Act.
+	card := Command(logf, remedyError{err: ErrSessionSuperseded})
+	// Assert.
+	if card.GetKind().GetReconnectSuperseded().GetRemedy() != "remount the view" {
+		t.Fatalf("remedy = %q", card.GetKind().GetReconnectSuperseded().GetRemedy())
+	}
+}
+
+func TestAnExplicitRemedyOutranksTheOneInTheChain(t *testing.T) {
+	// Arrange — a handler that already knows its own command's remedy is closer
+	// to it than anything the chain carries.
+	logf, _ := capture()
+	// Act.
+	card := CommandWithFacts(logf, remedyError{err: ErrSessionSuperseded}, Facts{Remedy: "do this instead"})
+	// Assert.
+	if card.GetKind().GetReconnectSuperseded().GetRemedy() != "do this instead" {
+		t.Fatalf("remedy = %q", card.GetKind().GetReconnectSuperseded().GetRemedy())
+	}
+}
+
+func TestAnErrorThatOffersNoRemedyLeavesTheArmEmpty(t *testing.T) {
+	// Arrange — empty is "not clickable", not a missing string.
+	logf, _ := capture()
+	// Act.
+	card := Command(logf, ErrSessionSuperseded)
+	// Assert.
+	if got := card.GetKind().GetReconnectSuperseded().GetRemedy(); got != "" {
+		t.Fatalf("remedy = %q, want none", got)
 	}
 }
 

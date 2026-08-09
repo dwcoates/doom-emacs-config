@@ -1078,27 +1078,51 @@ func (h *commandHandler) Resync(_ context.Context, workspace, requestID string, 
 	return nil
 }
 
-// classifyStaleFenceResync names a resync the eligibility ladder refused
-// because the fence the client echoed is no longer the workspace's.
+// staleFenceResync carries the REMEDY for a resync the eligibility ladder
+// refused because the fence the client echoed is no longer the workspace's.
 //
-// THE ACK MUST CARRY A KIND, and the right kind here is `workspace_not_live`:
-// the command addressed something this workspace no longer runs, and the arm's
-// own contract says the staleness IS the whole fact because the fence already
-// told the client it was behind. Left unwrapped the refusal classified as
-// `reconnect_superseded`, which asserts more than the ladder proved — a
-// mismatch equally means a new controller generation for the SAME conversation,
-// which is the ordinary shape after any bring-up.
+// THE CLASSIFICATION IS NOT CHANGED HERE, deliberately. `ErrSessionSuperseded`
+// already classifies as `reconnect_superseded`, and that arm is exactly this
+// case: the contract defines it as a view whose replay would have come from a
+// generation it never saw. It is the more specific true statement than
+// `workspace_not_live`.
 //
-// BOTH SENTINELS ARE WRAPPED, so nothing is lost: the superseded anchor stays
-// in the chain for every caller that already reads it, and the ladder resolves
-// the pair to the not-live type because it is the earlier rung. Every other
-// error passes through untouched.
+// THE RESYNC IS THE ONLY FENCE-DRIVEN COMMAND REFUSAL THIS DAEMON HAS. The
+// resync is the one command that echoes a fence at all, so it is the one place
+// a stale fence can refuse anything. `workspace_not_live` is minted from
+// `ErrNotLiveSession`, whose single live producer refuses a hibernate whose
+// named SESSION is not the one controlling the workspace — a session-identity
+// mismatch, not a fence comparison. If a driving command (a submit, an
+// interrupt) ever grows a fence, its stale-fence refusal is a different
+// statement from this one and gets its own classification then; nothing here
+// anticipates it.
+//
+// What this adds is the one thing the ladder cannot know: `remedy`, the action
+// to offer. A resync is a VIEW's only recovery mechanism, so a refused one
+// leaves the client permanently behind unless it is told to remount — which is
+// the sentence below. It reaches the arm through the same door
+// SessionResumeFailureDetailer uses: the funnel classifies, and the refusing
+// site supplies the evidence only it holds.
+type staleFenceResync struct{ err error }
+
+func (e *staleFenceResync) Error() string { return e.err.Error() }
+func (e *staleFenceResync) Unwrap() error { return e.err }
+
+// FailureRemedy is the action offered to a client whose resync was refused.
+// The daemon composes it because the ladder's verdict is what decides there is
+// an action at all; the wording is host-neutral because the daemon does not
+// know which frontend is asking.
+func (e *staleFenceResync) FailureRemedy() string {
+	return "reload this view: its replay would have come from a session generation it never saw"
+}
+
+// classifyStaleFenceResync attaches that remedy, leaving every other error —
+// and the superseded sentinel's own classification — exactly as it was.
 func classifyStaleFenceResync(err error) error {
 	if err == nil || !errors.Is(err, errclass.ErrSessionSuperseded) {
 		return err
 	}
-	return fmt.Errorf("%w: the resync echoed a fence this workspace no longer runs: %w",
-		errclass.ErrNotLiveSession, err)
+	return &staleFenceResync{err: err}
 }
 
 // isUnwiredWorkspace reports whether err is the "this workspace has no live

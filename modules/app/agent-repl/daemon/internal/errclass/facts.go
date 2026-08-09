@@ -73,6 +73,10 @@ type Facts struct {
 	RawReason string
 	// SinceMs is when a hibernation began, unix millis.
 	SinceMs int64
+	// Remedy is what the user can do about a failure that has an action to
+	// offer. Empty means there is none, and the arm carrying it says so
+	// explicitly — a card never invents an instruction to look useful.
+	Remedy string
 }
 
 // CardWithFacts is Card plus the occurrence's typed evidence.
@@ -115,6 +119,8 @@ func populate(kind *frontendv1.FailureKind, f Facts) {
 		arm.ShimUnhealthy.RequestId = f.RequestID
 		arm.ShimUnhealthy.Component = f.Component
 		arm.ShimUnhealthy.Reason = f.Reason
+	case *frontendv1.FailureKind_ReconnectSuperseded:
+		arm.ReconnectSuperseded.Remedy = f.Remedy
 	case *frontendv1.FailureKind_SessionNotEstablished:
 		arm.SessionNotEstablished.Cause = f.Cause
 	case *frontendv1.FailureKind_SessionStartFailed:

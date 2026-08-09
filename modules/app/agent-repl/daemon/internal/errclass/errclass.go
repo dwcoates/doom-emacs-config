@@ -502,6 +502,24 @@ type SessionResumeFailureDetailer interface {
 	SessionResumeFailureDetail() *frontendv1.SessionResumeFailure
 }
 
+// FailureRemedyOfferer exposes the ACTION a refusing site can offer the user,
+// for the arms that carry one.
+//
+// It follows SessionResumeFailureDetailer's precedent for the same reason: the
+// classifier owns the common vocabulary, and the site that refused owns the
+// evidence only it holds. Whether a refusal has a remedy at all is a property
+// of WHY it was refused — a resync refused for a stale fence leaves the view
+// permanently behind unless it remounts, while the same sentinel from a
+// different caller may leave nothing to do — so the ladder cannot answer it and
+// does not try.
+//
+// An error that offers none simply does not implement this, and the arm's
+// remedy stays empty, which its own contract defines as "not clickable" rather
+// than as a missing string.
+type FailureRemedyOfferer interface {
+	FailureRemedy() string
+}
+
 // Command classifies an error returned by a frontend command handler — the
 // single funnel through which every handler failure used to become raw
 // CommandAck.error text.
@@ -530,6 +548,13 @@ func CommandWithFacts(logf dlog.Logf, err error, f Facts) *frontendv1.FailureCar
 	}
 	if f.Cause == "" {
 		f.Cause = err.Error()
+	}
+	// The refusing site's own offer, when it made one. An explicit fact from
+	// the caller wins: a handler that already knows the remedy for its own
+	// command is closer to it than anything the chain carries.
+	var remedy FailureRemedyOfferer
+	if f.Remedy == "" && errors.As(err, &remedy) {
+		f.Remedy = remedy.FailureRemedy()
 	}
 	var resume SessionResumeFailureDetailer
 	if errors.As(err, &resume) {
