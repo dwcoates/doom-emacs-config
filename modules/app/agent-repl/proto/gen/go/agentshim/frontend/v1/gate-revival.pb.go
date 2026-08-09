@@ -361,8 +361,9 @@ func (x *HibernationCacheExpired) GetTtlMs() int64 {
 // model use can precede this choice — a rendering frontend draws the gate
 // from WorkspaceGateView (the host draws it from its session catalog) and
 // sends exactly one of these. The daemon brings
-// the session up along the ordinary create/resume path and, under
-// compact_first, drives compaction to completion before accepting any prompt.
+// the session up along the ordinary create/resume path and, under either
+// gated mode — compact_first or clear — drives that context cut to completion
+// before accepting any prompt.
 type ReviveSessionCmd struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The choice is a oneof of empty messages, not a bool: "no decision" must
@@ -373,6 +374,7 @@ type ReviveSessionCmd struct {
 	//
 	//	*ReviveSessionCmd_CompactFirst
 	//	*ReviveSessionCmd_Direct
+	//	*ReviveSessionCmd_Clear
 	Mode          isReviveSessionCmd_Mode `protobuf_oneof:"mode"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -433,6 +435,15 @@ func (x *ReviveSessionCmd) GetDirect() *ReviveDirect {
 	return nil
 }
 
+func (x *ReviveSessionCmd) GetClear() *ReviveClear {
+	if x != nil {
+		if x, ok := x.Mode.(*ReviveSessionCmd_Clear); ok {
+			return x.Clear
+		}
+	}
+	return nil
+}
+
 type isReviveSessionCmd_Mode interface {
 	isReviveSessionCmd_Mode()
 }
@@ -452,9 +463,20 @@ type ReviveSessionCmd_Direct struct {
 	Direct *ReviveDirect `protobuf:"bytes,2,opt,name=direct,proto3,oneof"`
 }
 
+type ReviveSessionCmd_Clear struct {
+	// Discard the conversation outright as the first order of business:
+	// `/clear`, and nothing else. Prompts are accepted only after the clear
+	// lands, on the same gate compact_first stays behind — a prompt answered
+	// ahead of it would pay for the whole context the clear is about to throw
+	// away.
+	Clear *ReviveClear `protobuf:"bytes,3,opt,name=clear,proto3,oneof"`
+}
+
 func (*ReviveSessionCmd_CompactFirst) isReviveSessionCmd_Mode() {}
 
 func (*ReviveSessionCmd_Direct) isReviveSessionCmd_Mode() {}
+
+func (*ReviveSessionCmd_Clear) isReviveSessionCmd_Mode() {}
 
 // The compact-first revival choice, and WHAT of the conversation the
 // compaction is allowed to summarize away.
@@ -549,6 +571,46 @@ func (*ReviveDirect) Descriptor() ([]byte, []int) {
 	return file_agentshim_frontend_v1_gate_revival_proto_rawDescGZIP(), []int{6}
 }
 
+// The discard-the-conversation revival choice. Empty, and deliberately WITHOUT
+// a CompactionScope: a clear keeps nothing, so there is nothing to scope. A
+// revival that wants to keep part of the conversation is a compact_first with
+// the scope that says which part.
+type ReviveClear struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReviveClear) Reset() {
+	*x = ReviveClear{}
+	mi := &file_agentshim_frontend_v1_gate_revival_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReviveClear) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReviveClear) ProtoMessage() {}
+
+func (x *ReviveClear) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_gate_revival_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReviveClear.ProtoReflect.Descriptor instead.
+func (*ReviveClear) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_gate_revival_proto_rawDescGZIP(), []int{7}
+}
+
 // The workspace's revival gate, resolved and fenced: whether prompts may be
 // sent right now, and if not, what the user must decide first.
 //
@@ -579,7 +641,7 @@ type WorkspaceGateView struct {
 
 func (x *WorkspaceGateView) Reset() {
 	*x = WorkspaceGateView{}
-	mi := &file_agentshim_frontend_v1_gate_revival_proto_msgTypes[7]
+	mi := &file_agentshim_frontend_v1_gate_revival_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -591,7 +653,7 @@ func (x *WorkspaceGateView) String() string {
 func (*WorkspaceGateView) ProtoMessage() {}
 
 func (x *WorkspaceGateView) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_gate_revival_proto_msgTypes[7]
+	mi := &file_agentshim_frontend_v1_gate_revival_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -604,7 +666,7 @@ func (x *WorkspaceGateView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceGateView.ProtoReflect.Descriptor instead.
 func (*WorkspaceGateView) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_gate_revival_proto_rawDescGZIP(), []int{7}
+	return file_agentshim_frontend_v1_gate_revival_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *WorkspaceGateView) GetWorkspace() string {
@@ -672,7 +734,7 @@ type WorkspaceGateOpen struct {
 
 func (x *WorkspaceGateOpen) Reset() {
 	*x = WorkspaceGateOpen{}
-	mi := &file_agentshim_frontend_v1_gate_revival_proto_msgTypes[8]
+	mi := &file_agentshim_frontend_v1_gate_revival_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -684,7 +746,7 @@ func (x *WorkspaceGateOpen) String() string {
 func (*WorkspaceGateOpen) ProtoMessage() {}
 
 func (x *WorkspaceGateOpen) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_gate_revival_proto_msgTypes[8]
+	mi := &file_agentshim_frontend_v1_gate_revival_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -697,7 +759,7 @@ func (x *WorkspaceGateOpen) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceGateOpen.ProtoReflect.Descriptor instead.
 func (*WorkspaceGateOpen) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_gate_revival_proto_rawDescGZIP(), []int{8}
+	return file_agentshim_frontend_v1_gate_revival_proto_rawDescGZIP(), []int{9}
 }
 
 // The workspace's session is asleep and will not take a prompt until the user
@@ -712,7 +774,7 @@ type WorkspaceGateHibernated struct {
 
 func (x *WorkspaceGateHibernated) Reset() {
 	*x = WorkspaceGateHibernated{}
-	mi := &file_agentshim_frontend_v1_gate_revival_proto_msgTypes[9]
+	mi := &file_agentshim_frontend_v1_gate_revival_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -724,7 +786,7 @@ func (x *WorkspaceGateHibernated) String() string {
 func (*WorkspaceGateHibernated) ProtoMessage() {}
 
 func (x *WorkspaceGateHibernated) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_gate_revival_proto_msgTypes[9]
+	mi := &file_agentshim_frontend_v1_gate_revival_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -737,7 +799,7 @@ func (x *WorkspaceGateHibernated) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceGateHibernated.ProtoReflect.Descriptor instead.
 func (*WorkspaceGateHibernated) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_gate_revival_proto_rawDescGZIP(), []int{9}
+	return file_agentshim_frontend_v1_gate_revival_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *WorkspaceGateHibernated) GetDetail() *HibernationDetail {
@@ -766,14 +828,16 @@ const file_agentshim_frontend_v1_gate_revival_proto_rawDesc = "" +
 	"\x17HibernationCacheExpired\x12\x1d\n" +
 	"\n" +
 	"elapsed_ms\x18\x01 \x01(\x03R\telapsedMs\x12\x15\n" +
-	"\x06ttl_ms\x18\x02 \x01(\x03R\x05ttlMs\"\xab\x01\n" +
+	"\x06ttl_ms\x18\x02 \x01(\x03R\x05ttlMs\"\xe7\x01\n" +
 	"\x10ReviveSessionCmd\x12P\n" +
 	"\rcompact_first\x18\x01 \x01(\v2).agentshim.frontend.v1.ReviveCompactFirstH\x00R\fcompactFirst\x12=\n" +
-	"\x06direct\x18\x02 \x01(\v2#.agentshim.frontend.v1.ReviveDirectH\x00R\x06directB\x06\n" +
+	"\x06direct\x18\x02 \x01(\v2#.agentshim.frontend.v1.ReviveDirectH\x00R\x06direct\x12:\n" +
+	"\x05clear\x18\x03 \x01(\v2\".agentshim.frontend.v1.ReviveClearH\x00R\x05clearB\x06\n" +
 	"\x04mode\"R\n" +
 	"\x12ReviveCompactFirst\x12<\n" +
 	"\x05scope\x18\x01 \x01(\x0e2&.agentshim.frontend.v1.CompactionScopeR\x05scope\"\x0e\n" +
-	"\fReviveDirect\"\xe1\x01\n" +
+	"\fReviveDirect\"\r\n" +
+	"\vReviveClear\"\xe1\x01\n" +
 	"\x11WorkspaceGateView\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x14\n" +
 	"\x05fence\x18\x02 \x01(\tR\x05fence\x12>\n" +
@@ -806,7 +870,7 @@ func file_agentshim_frontend_v1_gate_revival_proto_rawDescGZIP() []byte {
 }
 
 var file_agentshim_frontend_v1_gate_revival_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_agentshim_frontend_v1_gate_revival_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_agentshim_frontend_v1_gate_revival_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_agentshim_frontend_v1_gate_revival_proto_goTypes = []any{
 	(CompactionScope)(0),            // 0: agentshim.frontend.v1.CompactionScope
 	(*HibernationDetail)(nil),       // 1: agentshim.frontend.v1.HibernationDetail
@@ -816,9 +880,10 @@ var file_agentshim_frontend_v1_gate_revival_proto_goTypes = []any{
 	(*ReviveSessionCmd)(nil),        // 5: agentshim.frontend.v1.ReviveSessionCmd
 	(*ReviveCompactFirst)(nil),      // 6: agentshim.frontend.v1.ReviveCompactFirst
 	(*ReviveDirect)(nil),            // 7: agentshim.frontend.v1.ReviveDirect
-	(*WorkspaceGateView)(nil),       // 8: agentshim.frontend.v1.WorkspaceGateView
-	(*WorkspaceGateOpen)(nil),       // 9: agentshim.frontend.v1.WorkspaceGateOpen
-	(*WorkspaceGateHibernated)(nil), // 10: agentshim.frontend.v1.WorkspaceGateHibernated
+	(*ReviveClear)(nil),             // 8: agentshim.frontend.v1.ReviveClear
+	(*WorkspaceGateView)(nil),       // 9: agentshim.frontend.v1.WorkspaceGateView
+	(*WorkspaceGateOpen)(nil),       // 10: agentshim.frontend.v1.WorkspaceGateOpen
+	(*WorkspaceGateHibernated)(nil), // 11: agentshim.frontend.v1.WorkspaceGateHibernated
 }
 var file_agentshim_frontend_v1_gate_revival_proto_depIdxs = []int32{
 	2,  // 0: agentshim.frontend.v1.HibernationDetail.idle_cutoff:type_name -> agentshim.frontend.v1.HibernationIdleCutoff
@@ -826,15 +891,16 @@ var file_agentshim_frontend_v1_gate_revival_proto_depIdxs = []int32{
 	4,  // 2: agentshim.frontend.v1.HibernationDetail.cache_expired:type_name -> agentshim.frontend.v1.HibernationCacheExpired
 	6,  // 3: agentshim.frontend.v1.ReviveSessionCmd.compact_first:type_name -> agentshim.frontend.v1.ReviveCompactFirst
 	7,  // 4: agentshim.frontend.v1.ReviveSessionCmd.direct:type_name -> agentshim.frontend.v1.ReviveDirect
-	0,  // 5: agentshim.frontend.v1.ReviveCompactFirst.scope:type_name -> agentshim.frontend.v1.CompactionScope
-	9,  // 6: agentshim.frontend.v1.WorkspaceGateView.open:type_name -> agentshim.frontend.v1.WorkspaceGateOpen
-	10, // 7: agentshim.frontend.v1.WorkspaceGateView.hibernated:type_name -> agentshim.frontend.v1.WorkspaceGateHibernated
-	1,  // 8: agentshim.frontend.v1.WorkspaceGateHibernated.detail:type_name -> agentshim.frontend.v1.HibernationDetail
-	9,  // [9:9] is the sub-list for method output_type
-	9,  // [9:9] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	8,  // 5: agentshim.frontend.v1.ReviveSessionCmd.clear:type_name -> agentshim.frontend.v1.ReviveClear
+	0,  // 6: agentshim.frontend.v1.ReviveCompactFirst.scope:type_name -> agentshim.frontend.v1.CompactionScope
+	10, // 7: agentshim.frontend.v1.WorkspaceGateView.open:type_name -> agentshim.frontend.v1.WorkspaceGateOpen
+	11, // 8: agentshim.frontend.v1.WorkspaceGateView.hibernated:type_name -> agentshim.frontend.v1.WorkspaceGateHibernated
+	1,  // 9: agentshim.frontend.v1.WorkspaceGateHibernated.detail:type_name -> agentshim.frontend.v1.HibernationDetail
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_frontend_v1_gate_revival_proto_init() }
@@ -850,8 +916,9 @@ func file_agentshim_frontend_v1_gate_revival_proto_init() {
 	file_agentshim_frontend_v1_gate_revival_proto_msgTypes[4].OneofWrappers = []any{
 		(*ReviveSessionCmd_CompactFirst)(nil),
 		(*ReviveSessionCmd_Direct)(nil),
+		(*ReviveSessionCmd_Clear)(nil),
 	}
-	file_agentshim_frontend_v1_gate_revival_proto_msgTypes[7].OneofWrappers = []any{
+	file_agentshim_frontend_v1_gate_revival_proto_msgTypes[8].OneofWrappers = []any{
 		(*WorkspaceGateView_Open)(nil),
 		(*WorkspaceGateView_Hibernated)(nil),
 	}
@@ -861,7 +928,7 @@ func file_agentshim_frontend_v1_gate_revival_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_frontend_v1_gate_revival_proto_rawDesc), len(file_agentshim_frontend_v1_gate_revival_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   10,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

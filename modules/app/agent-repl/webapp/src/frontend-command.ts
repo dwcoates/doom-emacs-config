@@ -207,9 +207,9 @@ export interface HibernateWorkspaceBody {
 export interface ReviveSessionBody {
   case: "reviveSession";
   /**
-   * The user's whole answer to the gate: resume as-is, or compact first at a
-   * stated scope. One value, because the two halves are not independent — a
-   * scope means nothing to a direct resume.
+   * The user's whole answer to the gate: resume as-is, clear, or compact first
+   * at a stated scope. One value, because the halves are not independent — a
+   * scope means nothing to a direct resume and nothing to a clear.
    */
   decision: ReviveDecision;
 }
@@ -240,13 +240,16 @@ export const COMPACT_DECISION_SCOPE = {
 export type CompactDecision = keyof typeof COMPACT_DECISION_SCOPE;
 
 /**
- * The whole revival vocabulary: the four compactions and the direct resume.
+ * The whole revival vocabulary: the four compactions, the direct resume, and
+ * the clear.
  *
  * MODELED AS ONE CLOSED UNION rather than a mode beside an optional scope,
  * because "resume as-is, summarizing the prompts" has no meaning and should not
- * be a value anything has to rule out.
+ * be a value anything has to rule out. `clear` is in the union for the same
+ * reason it is not a fifth scope: a scope says what a summary KEEPS, and a
+ * clear keeps nothing.
  */
-export type ReviveDecision = CompactDecision | "direct";
+export type ReviveDecision = CompactDecision | "direct" | "clear";
 
 /**
  * The three merge-queue runtime controls.
@@ -359,16 +362,16 @@ function encodeBody(b: FrontendCommandBody): Record<string, unknown> {
       // second thing to say. `{}` is the canonical protojson for it.
       return {};
     case "reviveSession":
-      // The DIRECT arm's value is still empty — the arm key is the whole
+      // The DIRECT and CLEAR arms' values are empty — the arm key is the whole
       // decision — while a compaction additionally states its scope, which the
       // daemon nacks rather than defaults if it is missing.
-      return b.decision === "direct"
-        ? { [REVIVE_MODE.direct]: {} }
-        : {
-            [REVIVE_MODE.compactFirst]: {
-              [REVIVE_COMPACT_SCOPE]: COMPACT_DECISION_SCOPE[b.decision],
-            },
-          };
+      if (b.decision === "direct") return { [REVIVE_MODE.direct]: {} };
+      if (b.decision === "clear") return { [REVIVE_MODE.clear]: {} };
+      return {
+        [REVIVE_MODE.compactFirst]: {
+          [REVIVE_COMPACT_SCOPE]: COMPACT_DECISION_SCOPE[b.decision],
+        },
+      };
     case "pauseMergeQueue":
     case "resumeMergeQueue":
       // Empty messages: the verb IS the arm, and the queue is daemon-global,

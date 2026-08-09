@@ -50,14 +50,14 @@ func TestScopedCompactCommandsAreStillTheCompactSessionCommand(t *testing.T) {
 	for _, tc := range scopedModeCases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange / Act
-			text, err := tc.mode.compactCommand()
+			cut, err := tc.mode.cut()
 
 			// Assert
 			if err != nil {
-				t.Fatalf("compactCommand for %s = %v, want a command", tc.mode, err)
+				t.Fatalf("cut for %s = %v, want a command", tc.mode, err)
 			}
-			if !strings.HasPrefix(text, compactCommandText+" ") {
-				t.Fatalf("compactCommand for %s = %q, want it steered from %q", tc.mode, text, compactCommandText)
+			if !strings.HasPrefix(cut.text, compactCommandText+" ") {
+				t.Fatalf("cut text for %s = %q, want it steered from %q", tc.mode, cut.text, compactCommandText)
 			}
 		})
 	}
@@ -71,17 +71,17 @@ func TestScopedCompactCommandsAreRecognizedAsSessionCommands(t *testing.T) {
 	for _, tc := range scopedModeCases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
-			text, err := tc.mode.compactCommand()
+			cut, err := tc.mode.cut()
 			if err != nil {
-				t.Fatalf("compactCommand for %s: %v", tc.mode, err)
+				t.Fatalf("cut for %s: %v", tc.mode, err)
 			}
 
 			// Act
-			got := lookupSessionCommand(text)
+			got := lookupSessionCommand(cut.text)
 
 			// Assert
 			if got.String() != "SESSION_COMMAND_COMPACT" {
-				t.Fatalf("lookupSessionCommand(%q) = %s, want SESSION_COMMAND_COMPACT", text, got)
+				t.Fatalf("lookupSessionCommand(%q) = %s, want SESSION_COMMAND_COMPACT", cut.text, got)
 			}
 		})
 	}
@@ -92,21 +92,20 @@ func TestScopedCompactCommandsAreRecognizedAsSessionCommands(t *testing.T) {
 // only narrow what the user asked to be rid of.
 func TestCompactAllSubmitsTheBareCompactCommand(t *testing.T) {
 	// Arrange / Act
-	text, err := ReviveModeCompactAll.compactCommand()
+	cut, err := ReviveModeCompactAll.cut()
 
 	// Assert
 	if err != nil {
-		t.Fatalf("compactCommand for compact_all = %v, want a command", err)
+		t.Fatalf("cut for compact_all = %v, want a command", err)
 	}
-	if text != compactCommandText {
-		t.Fatalf("compactCommand for compact_all = %q, want exactly %q", text, compactCommandText)
+	if cut.text != compactCommandText {
+		t.Fatalf("cut text for compact_all = %q, want exactly %q", cut.text, compactCommandText)
 	}
 }
 
-// A NON-COMPACTING MODE HAS NO COMPACTION COMMAND, and asking for one is a
-// routing failure that fails hard rather than defaulting to the compaction that
-// discards the most.
-func TestCompactCommandRefusesANonCompactingMode(t *testing.T) {
+// A NON-CUTTING MODE HAS NO CUT, and asking for one is a routing failure that
+// fails hard rather than defaulting to the compaction that discards the most.
+func TestCutRefusesANonCuttingMode(t *testing.T) {
 	tests := []struct {
 		name string
 		mode ReviveMode
@@ -117,22 +116,22 @@ func TestCompactCommandRefusesANonCompactingMode(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange / Act
-			text, err := tc.mode.compactCommand()
+			cut, err := tc.mode.cut()
 
 			// Assert
 			if err == nil {
-				t.Fatalf("compactCommand for %s = %q, want a refusal", tc.mode, text)
+				t.Fatalf("cut for %s = %q, want a refusal", tc.mode, cut.text)
 			}
-			if text != "" {
-				t.Fatalf("compactCommand for %s returned %q alongside its error", tc.mode, text)
+			if cut.text != "" {
+				t.Fatalf("cut for %s returned %q alongside its error", tc.mode, cut.text)
 			}
 		})
 	}
 }
 
-// `compacts` IS THE COMPACTION PATH'S ONLY MEMBERSHIP TEST, so a new scope is
-// on it by construction rather than by being added to a list.
-func TestCompactsCoversEveryModeButDirectAndUnset(t *testing.T) {
+// `cuts` IS THE GATED PATH'S ONLY MEMBERSHIP TEST, so a new scope — or a new
+// cut — is on it by construction rather than by being added to a list.
+func TestCutsCoversEveryModeButDirectAndUnset(t *testing.T) {
 	tests := []struct {
 		name string
 		mode ReviveMode
@@ -144,11 +143,12 @@ func TestCompactsCoversEveryModeButDirectAndUnset(t *testing.T) {
 		{"responses", ReviveModeCompactResponses, true},
 		{"prompts", ReviveModeCompactPrompts, true},
 		{"prompts and responses", ReviveModeCompactPromptsAndResponses, true},
+		{"clear", ReviveModeClear, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := tc.mode.compacts(); got != tc.want {
-				t.Fatalf("%s.compacts() = %v, want %v", tc.mode, got, tc.want)
+			if got := tc.mode.cuts(); got != tc.want {
+				t.Fatalf("%s.cuts() = %v, want %v", tc.mode, got, tc.want)
 			}
 		})
 	}
@@ -166,6 +166,7 @@ func TestReviveModeNamesAreDistinct(t *testing.T) {
 		ReviveModeCompactResponses,
 		ReviveModeCompactPrompts,
 		ReviveModeCompactPromptsAndResponses,
+		ReviveModeClear,
 	}
 
 	// Act
@@ -236,5 +237,77 @@ func TestReviveSessionScopedStaysGatedUntilCompactionLands(t *testing.T) {
 			// Assert
 			awaitGateReleased(t, hib, "s1")
 		})
+	}
+}
+
+// THE CLEAR CUT SUBMITS `/clear`, WITH NO ARGUMENT. sessioncommand.go
+// recognizes the command only as the ENTIRE prompt — deliberately, because
+// mistaking a sentence for it would discard the conversation — so a clear
+// revival that steered its text the way the scoped compactions do would lose
+// the bubble suppression and, worse, stop being the command at all.
+func TestClearCutSubmitsTheBareClearSessionCommand(t *testing.T) {
+	// Arrange / Act
+	cut, err := ReviveModeClear.cut()
+
+	// Assert
+	if err != nil {
+		t.Fatalf("cut for clear = %v, want a command", err)
+	}
+	if cut.text != clearCommandText {
+		t.Fatalf("cut text for clear = %q, want exactly %q", cut.text, clearCommandText)
+	}
+	if got := lookupSessionCommand(cut.text); got.String() != "SESSION_COMMAND_CLEAR" {
+		t.Fatalf("lookupSessionCommand(%q) = %s, want SESSION_COMMAND_CLEAR", cut.text, got)
+	}
+}
+
+// ONLY THE COMPACTIONS TAKE THE COLD-READ CLAIM. `/clear` is not a model call,
+// so a claim over it would hand the NEXT turn's input cost to a turn that read
+// nothing — the exact misattribution the claim exists to prevent.
+func TestOnlyCompactingCutsClaimTheColdReadAlarm(t *testing.T) {
+	tests := []struct {
+		name string
+		mode ReviveMode
+		want bool
+	}{
+		{"all", ReviveModeCompactAll, true},
+		{"responses", ReviveModeCompactResponses, true},
+		{"prompts", ReviveModeCompactPrompts, true},
+		{"prompts and responses", ReviveModeCompactPromptsAndResponses, true},
+		{"clear", ReviveModeClear, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cut, err := tc.mode.cut()
+			if err != nil {
+				t.Fatalf("cut for %s: %v", tc.mode, err)
+			}
+			if cut.claimsCompaction != tc.want {
+				t.Fatalf("%s claimsCompaction = %v, want %v", tc.mode, cut.claimsCompaction, tc.want)
+			}
+		})
+	}
+}
+
+// THE TWO CUTS HAVE SEPARATE WAITER SLOTS, so a compaction closing its axis can
+// never release a revival that asked for a clear, or the reverse. Sharing one
+// slot would make either cut a valid answer to the other's question.
+func TestCompactionAndClearWaitOnSeparateSlots(t *testing.T) {
+	// Arrange
+	c := &consumer{}
+
+	// Act
+	compact, err := ReviveModeCompactAll.cut()
+	if err != nil {
+		t.Fatalf("cut for compact_all: %v", err)
+	}
+	clear, err := ReviveModeClear.cut()
+	if err != nil {
+		t.Fatalf("cut for clear: %v", err)
+	}
+
+	// Assert
+	if compact.waiter(c) == clear.waiter(c) {
+		t.Fatal("the compaction and the clear resolve to the SAME waiter slot; either cut would then release a revival that asked for the other")
 	}
 }

@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentshim/frontend/v1/gate-revival.proto.
  */
 export const file_agentshim_frontend_v1_gate_revival: GenFile = /*@__PURE__*/
-  fileDesc("CihhZ2VudHNoaW0vZnJvbnRlbmQvdjEvZ2F0ZS1yZXZpdmFsLnByb3RvEhVhZ2VudHNoaW0uZnJvbnRlbmQudjEi+AEKEUhpYmVybmF0aW9uRGV0YWlsEhAKCHNpbmNlX21zGAEgASgDEkMKC2lkbGVfY3V0b2ZmGAogASgLMiwuYWdlbnRzaGltLmZyb250ZW5kLnYxLkhpYmVybmF0aW9uSWRsZUN1dG9mZkgAEjoKBmZvcmNlZBgLIAEoCzIoLmFnZW50c2hpbS5mcm9udGVuZC52MS5IaWJlcm5hdGlvbkZvcmNlZEgAEkcKDWNhY2hlX2V4cGlyZWQYDCABKAsyLi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuSGliZXJuYXRpb25DYWNoZUV4cGlyZWRIAEIHCgVjYXVzZSIqChVIaWJlcm5hdGlvbklkbGVDdXRvZmYSEQoJY3V0b2ZmX21zGAEgASgDIhMKEUhpYmVybmF0aW9uRm9yY2VkIj0KF0hpYmVybmF0aW9uQ2FjaGVFeHBpcmVkEhIKCmVsYXBzZWRfbXMYASABKAMSDgoGdHRsX21zGAIgASgDIpUBChBSZXZpdmVTZXNzaW9uQ21kEkIKDWNvbXBhY3RfZmlyc3QYASABKAsyKS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUmV2aXZlQ29tcGFjdEZpcnN0SAASNQoGZGlyZWN0GAIgASgLMiMuYWdlbnRzaGltLmZyb250ZW5kLnYxLlJldml2ZURpcmVjdEgAQgYKBG1vZGUiSwoSUmV2aXZlQ29tcGFjdEZpcnN0EjUKBXNjb3BlGAEgASgOMiYuYWdlbnRzaGltLmZyb250ZW5kLnYxLkNvbXBhY3Rpb25TY29wZSIOCgxSZXZpdmVEaXJlY3QivQEKEVdvcmtzcGFjZUdhdGVWaWV3EhEKCXdvcmtzcGFjZRgBIAEoCRINCgVmZW5jZRgCIAEoCRI4CgRvcGVuGAogASgLMiguYWdlbnRzaGltLmZyb250ZW5kLnYxLldvcmtzcGFjZUdhdGVPcGVuSAASRAoKaGliZXJuYXRlZBgLIAEoCzIuLmFnZW50c2hpbS5mcm9udGVuZC52MS5Xb3Jrc3BhY2VHYXRlSGliZXJuYXRlZEgAQgYKBGdhdGUiEwoRV29ya3NwYWNlR2F0ZU9wZW4iUwoXV29ya3NwYWNlR2F0ZUhpYmVybmF0ZWQSOAoGZGV0YWlsGAEgASgLMiguYWdlbnRzaGltLmZyb250ZW5kLnYxLkhpYmVybmF0aW9uRGV0YWlsKrcBCg9Db21wYWN0aW9uU2NvcGUSIAocQ09NUEFDVElPTl9TQ09QRV9VTlNQRUNJRklFRBAAEhgKFENPTVBBQ1RJT05fU0NPUEVfQUxMEAESHgoaQ09NUEFDVElPTl9TQ09QRV9SRVNQT05TRVMQAhIcChhDT01QQUNUSU9OX1NDT1BFX1BST01QVFMQAxIqCiZDT01QQUNUSU9OX1NDT1BFX1BST01QVFNfQU5EX1JFU1BPTlNFUxAEQjJaMGFnZW50cmVwbC9wcm90by9hZ2VudHNoaW0vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z");
+  fileDesc("CihhZ2VudHNoaW0vZnJvbnRlbmQvdjEvZ2F0ZS1yZXZpdmFsLnByb3RvEhVhZ2VudHNoaW0uZnJvbnRlbmQudjEi+AEKEUhpYmVybmF0aW9uRGV0YWlsEhAKCHNpbmNlX21zGAEgASgDEkMKC2lkbGVfY3V0b2ZmGAogASgLMiwuYWdlbnRzaGltLmZyb250ZW5kLnYxLkhpYmVybmF0aW9uSWRsZUN1dG9mZkgAEjoKBmZvcmNlZBgLIAEoCzIoLmFnZW50c2hpbS5mcm9udGVuZC52MS5IaWJlcm5hdGlvbkZvcmNlZEgAEkcKDWNhY2hlX2V4cGlyZWQYDCABKAsyLi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuSGliZXJuYXRpb25DYWNoZUV4cGlyZWRIAEIHCgVjYXVzZSIqChVIaWJlcm5hdGlvbklkbGVDdXRvZmYSEQoJY3V0b2ZmX21zGAEgASgDIhMKEUhpYmVybmF0aW9uRm9yY2VkIj0KF0hpYmVybmF0aW9uQ2FjaGVFeHBpcmVkEhIKCmVsYXBzZWRfbXMYASABKAMSDgoGdHRsX21zGAIgASgDIsoBChBSZXZpdmVTZXNzaW9uQ21kEkIKDWNvbXBhY3RfZmlyc3QYASABKAsyKS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUmV2aXZlQ29tcGFjdEZpcnN0SAASNQoGZGlyZWN0GAIgASgLMiMuYWdlbnRzaGltLmZyb250ZW5kLnYxLlJldml2ZURpcmVjdEgAEjMKBWNsZWFyGAMgASgLMiIuYWdlbnRzaGltLmZyb250ZW5kLnYxLlJldml2ZUNsZWFySABCBgoEbW9kZSJLChJSZXZpdmVDb21wYWN0Rmlyc3QSNQoFc2NvcGUYASABKA4yJi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQ29tcGFjdGlvblNjb3BlIg4KDFJldml2ZURpcmVjdCINCgtSZXZpdmVDbGVhciK9AQoRV29ya3NwYWNlR2F0ZVZpZXcSEQoJd29ya3NwYWNlGAEgASgJEg0KBWZlbmNlGAIgASgJEjgKBG9wZW4YCiABKAsyKC5hZ2VudHNoaW0uZnJvbnRlbmQudjEuV29ya3NwYWNlR2F0ZU9wZW5IABJECgpoaWJlcm5hdGVkGAsgASgLMi4uYWdlbnRzaGltLmZyb250ZW5kLnYxLldvcmtzcGFjZUdhdGVIaWJlcm5hdGVkSABCBgoEZ2F0ZSITChFXb3Jrc3BhY2VHYXRlT3BlbiJTChdXb3Jrc3BhY2VHYXRlSGliZXJuYXRlZBI4CgZkZXRhaWwYASABKAsyKC5hZ2VudHNoaW0uZnJvbnRlbmQudjEuSGliZXJuYXRpb25EZXRhaWwqtwEKD0NvbXBhY3Rpb25TY29wZRIgChxDT01QQUNUSU9OX1NDT1BFX1VOU1BFQ0lGSUVEEAASGAoUQ09NUEFDVElPTl9TQ09QRV9BTEwQARIeChpDT01QQUNUSU9OX1NDT1BFX1JFU1BPTlNFUxACEhwKGENPTVBBQ1RJT05fU0NPUEVfUFJPTVBUUxADEioKJkNPTVBBQ1RJT05fU0NPUEVfUFJPTVBUU19BTkRfUkVTUE9OU0VTEARCMlowYWdlbnRyZXBsL3Byb3RvL2FnZW50c2hpbS9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM");
 
 /**
  * Why and since when a session is hibernated. Exists so the revival gate can
@@ -144,8 +144,9 @@ export const HibernationCacheExpiredSchema: GenMessage<HibernationCacheExpired> 
  * model use can precede this choice — a rendering frontend draws the gate
  * from WorkspaceGateView (the host draws it from its session catalog) and
  * sends exactly one of these. The daemon brings
- * the session up along the ordinary create/resume path and, under
- * compact_first, drives compaction to completion before accepting any prompt.
+ * the session up along the ordinary create/resume path and, under either
+ * gated mode — compact_first or clear — drives that context cut to completion
+ * before accepting any prompt.
  *
  * @generated from message agentshim.frontend.v1.ReviveSessionCmd
  */
@@ -178,6 +179,18 @@ export type ReviveSessionCmd = Message<"agentshim.frontend.v1.ReviveSessionCmd">
      */
     value: ReviveDirect;
     case: "direct";
+  } | {
+    /**
+     * Discard the conversation outright as the first order of business:
+     * `/clear`, and nothing else. Prompts are accepted only after the clear
+     * lands, on the same gate compact_first stays behind — a prompt answered
+     * ahead of it would pay for the whole context the clear is about to throw
+     * away.
+     *
+     * @generated from field: agentshim.frontend.v1.ReviveClear clear = 3;
+     */
+    value: ReviveClear;
+    case: "clear";
   } | { case: undefined; value?: undefined };
 };
 
@@ -235,6 +248,24 @@ export const ReviveDirectSchema: GenMessage<ReviveDirect> = /*@__PURE__*/
   messageDesc(file_agentshim_frontend_v1_gate_revival, 6);
 
 /**
+ * The discard-the-conversation revival choice. Empty, and deliberately WITHOUT
+ * a CompactionScope: a clear keeps nothing, so there is nothing to scope. A
+ * revival that wants to keep part of the conversation is a compact_first with
+ * the scope that says which part.
+ *
+ * @generated from message agentshim.frontend.v1.ReviveClear
+ */
+export type ReviveClear = Message<"agentshim.frontend.v1.ReviveClear"> & {
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.ReviveClear.
+ * Use `create(ReviveClearSchema)` to create a new message.
+ */
+export const ReviveClearSchema: GenMessage<ReviveClear> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_gate_revival, 7);
+
+/**
  * The workspace's revival gate, resolved and fenced: whether prompts may be
  * sent right now, and if not, what the user must decide first.
  *
@@ -288,7 +319,7 @@ export type WorkspaceGateView = Message<"agentshim.frontend.v1.WorkspaceGateView
  * Use `create(WorkspaceGateViewSchema)` to create a new message.
  */
 export const WorkspaceGateViewSchema: GenMessage<WorkspaceGateView> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_gate_revival, 7);
+  messageDesc(file_agentshim_frontend_v1_gate_revival, 8);
 
 /**
  * Prompts may be sent. The composer is live and no revival decision is
@@ -304,7 +335,7 @@ export type WorkspaceGateOpen = Message<"agentshim.frontend.v1.WorkspaceGateOpen
  * Use `create(WorkspaceGateOpenSchema)` to create a new message.
  */
 export const WorkspaceGateOpenSchema: GenMessage<WorkspaceGateOpen> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_gate_revival, 8);
+  messageDesc(file_agentshim_frontend_v1_gate_revival, 9);
 
 /**
  * The workspace's session is asleep and will not take a prompt until the user
@@ -326,7 +357,7 @@ export type WorkspaceGateHibernated = Message<"agentshim.frontend.v1.WorkspaceGa
  * Use `create(WorkspaceGateHibernatedSchema)` to create a new message.
  */
 export const WorkspaceGateHibernatedSchema: GenMessage<WorkspaceGateHibernated> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_gate_revival, 9);
+  messageDesc(file_agentshim_frontend_v1_gate_revival, 10);
 
 /**
  * What a revival compaction is allowed to summarize away.

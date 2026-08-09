@@ -325,6 +325,14 @@ describe("the hibernation command arms", () => {
     expect(w.reviveSession).toEqual({ direct: {} });
   });
 
+  it("encodes the clear revival as its own oneof arm", () => {
+    // Arrange / Act
+    const w = wire({ requestId: "r1", workspace: "ws", body: { case: "reviveSession", decision: "clear" } });
+    // Assert — an empty message, like the direct arm: the arm IS the decision,
+    // and a clear has nothing to scope because it keeps nothing.
+    expect(w.reviveSession).toEqual({ clear: {} });
+  });
+
   it("never lets a revive frame set both modes at once", () => {
     // Arrange / Act
     const w = wire({ requestId: "r1", workspace: "ws", body: { case: "reviveSession", decision: "direct" } });

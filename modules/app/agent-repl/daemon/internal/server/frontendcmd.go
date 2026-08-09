@@ -1282,6 +1282,8 @@ func (h *commandHandler) ReviveSession(ctx context.Context, workspace, requestID
 		mode = reviveModeForScope(arm.CompactFirst.GetScope())
 	case *frontendv1.ReviveSessionCmd_Direct:
 		mode = sessioncontroller.ReviveModeDirect
+	case *frontendv1.ReviveSessionCmd_Clear:
+		mode = sessioncontroller.ReviveModeClear
 	}
 	h.logf("frontend cmd: revive-session ws=%s request_id=%s mode=%s", workspace, requestID, mode)
 	if h.hibernations == nil {
