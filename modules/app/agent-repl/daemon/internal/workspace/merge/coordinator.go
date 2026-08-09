@@ -237,6 +237,24 @@ type conflictPark struct {
 	// next boot to replay, a dequeue drops it — so the run has to be able to
 	// tell them apart at the point it unwinds.
 	aborted atomic.Bool
+
+	// handed records every conflict COMMIT this park has already handed to the
+	// workspace's shim, and it is what makes "exactly one attempt" mean one
+	// attempt PER CONFLICT rather than one attempt per park.
+	//
+	// The distinction is the whole point. A resume that comes back conflicted
+	// on the SAME commit is the agent failing to resolve the conflict it was
+	// given: re-prompting it is a spin, so the park is left standing for the
+	// human. A resume that comes back conflicted on a DIFFERENT commit is the
+	// agent having SUCCEEDED — the pick replayed past the resolved commit and
+	// stopped on the next one the range still owes — and that is a conflict no
+	// agent has ever been asked about. Conflating the two is what let a run
+	// park silent and stall every merge queued behind it.
+	//
+	// It is owned by the drain goroutine. The park is created there, and
+	// handOffConflict — the only reader and the only writer — is called only
+	// from awaitResolution, which runs on that same goroutine.
+	handed map[string]struct{}
 }
 
 type resumeCall struct {
@@ -1191,6 +1209,7 @@ func (c *QueueCoordinator) runOne(repo string, req Request) bool {
 		abandons: make(chan abandonCall),
 		ended:    make(chan struct{}),
 		abort:    abortRun,
+		handed:   map[string]struct{}{},
 	}
 	c.mu.Lock()
 	c.parks[repo] = park
@@ -1540,7 +1559,7 @@ func (c *QueueCoordinator) settle(ctx context.Context, repo string, req, driven 
 		case OutcomeConflict:
 			c.logf("merge: parked on conflict {repo=%s ws=%s name=%s commit=%s work=%s} — the target is untouched and stays that way while this is parked",
 				repo, req.Workspace, req.Name, res.ConflictCommit, driven.WorkDir)
-			next, handled, cont := c.awaitResolution(ctx, repo, req, driven, park, release, res.ConflictCommit)
+			next, handled, cont := c.awaitResolution(ctx, repo, req, &driven, park, release, res.ConflictCommit)
 			if handled {
 				return cont
 			}
@@ -1583,11 +1602,13 @@ func (c *QueueCoordinator) settle(ctx context.Context, repo string, req, driven 
 // terminal outcome. The lease and the queue head are both held throughout,
 // because a target worktree with a paused cherry-pick can host no other merge.
 //
-// The FIRST resolution attempt is the workspace's own shim (driveShimResolution
-// below), and it reaches this loop through the very same park.calls rendezvous a
-// human's conflict_resolved_continue uses. That is what serializes the two: a
-// human Resume or an Abandon arriving mid-attempt is not racing the shim, it is
-// queueing behind (or ahead of) it at this one select.
+// EVERY resolution attempt is the workspace's own shim, dispatched through the
+// ONE funnel handOffConflict below — the conflict this loop is entered on, and
+// equally the next conflict a successful resume uncovers further down the same
+// range. The attempt reaches this loop back through the very same park.calls
+// rendezvous a human's conflict_resolved_continue uses. That is what serializes
+// the two: a human Resume or an Abandon arriving mid-attempt is not racing the
+// shim, it is queueing behind (or ahead of) it at this one select.
 // It returns (next, handled, cont). handled=true means the merge was RETIRED
 // inside this call (abandoned, or the coordinator shut down) and cont is the
 // drain verdict. handled=false means the resume produced a non-conflict Result
@@ -1598,8 +1619,8 @@ func (c *QueueCoordinator) settle(ctx context.Context, repo string, req, driven 
 // (a suite run, a resolution turn, more picks) is reported through the pushed
 // merge state, and blocking a frontend command on it would make
 // conflict_resolved_continue hang for the length of a test suite.
-func (c *QueueCoordinator) awaitResolution(ctx context.Context, repo string, req, driven Request, park *conflictPark, release func(), conflictCommit string) (Result, bool, bool) {
-	c.driveShimResolution(ctx, repo, driven, park, conflictCommit)
+func (c *QueueCoordinator) awaitResolution(ctx context.Context, repo string, req Request, driven *Request, park *conflictPark, release func(), conflictCommit string) (Result, bool, bool) {
+	c.handOffConflict(ctx, repo, *driven, park, conflictCommit)
 	for {
 		select {
 		case <-ctx.Done():
@@ -1613,7 +1634,7 @@ func (c *QueueCoordinator) awaitResolution(ctx context.Context, repo string, req
 				// leaves it there.
 				c.logf("merge: conflict park DEQUEUED {repo=%s ws=%s name=%s} — the conflicted cherry-pick is left in the target tree for hand cleanup",
 					repo, req.Workspace, req.Name)
-				return Result{}, true, c.retireDequeued(repo, req, driven, release)
+				return Result{}, true, c.retireDequeued(repo, req, *driven, release)
 			}
 			// Shutdown with the conflict still in the tree. The lease goes
 			// back (it must never outlive its holder), and the entry stays
@@ -1651,6 +1672,18 @@ func (c *QueueCoordinator) awaitResolution(ctx context.Context, repo string, req
 			if res.Outcome == OutcomeConflict {
 				c.logf("merge: still conflicted after resume {repo=%s ws=%s commit=%s}", repo, req.Workspace, res.ConflictCommit)
 				call.reply <- nil
+				// THE RESUME'S OWN WORKTREE IS ADOPTED BEFORE THE HANDOFF. The
+				// conflict now parked is the one this Result describes, and the
+				// agent has to be sent to the tree that Result names — and
+				// settle's teardown, which reads the very same request, has to
+				// remove that tree and not the one the park was entered with.
+				c.adoptRebaseWorktree(repo, driven, res)
+				// A NEW conflict commit means the previous handoff SUCCEEDED and
+				// the replay walked on to a commit nothing has been asked about
+				// yet, so it goes through the funnel exactly like the first one.
+				// The same commit coming back is the agent failing at what it was
+				// already given, and handOffConflict declines to re-prompt it.
+				c.handOffConflict(ctx, repo, *driven, park, res.ConflictCommit)
 				continue
 			}
 			c.logf("merge: resume classified {repo=%s ws=%s outcome=%s}", repo, req.Workspace, res.Outcome)
@@ -1838,8 +1871,40 @@ func (c *QueueCoordinator) cleanupRebase(ctx context.Context, repo string, drive
 // the merge_failed cause the frontends render.
 const testFailureCauseBytes = 1200
 
+// handOffConflict is THE ONE FUNNEL every conflict that parks a run passes
+// through on its way to the workspace's shim, and the only caller of
+// driveShimResolution.
+//
+// WHY A FUNNEL RATHER THAN A DISPATCH AT EACH SITE. There are three ways a run
+// arrives at a parked conflict — the first conflict of a cherry-pick, a
+// conflict a successful in-process resolution uncovered further down the same
+// range, and a conflict a boot Drain replays into — and the second of those
+// used to have no dispatch at all. It parked, logged "still conflicted after
+// resume", and waited for a human who had no reason to know it was waiting,
+// holding the lease and the queue head for as long as that took. Routing all
+// three through one call is what makes "a parked conflict is a conflict some
+// agent has been asked about" a property of the code rather than of remembering
+// to dispatch at each new site.
+//
+// IT DEDUPLICATES BY CONFLICT COMMIT, which is what preserves the one-attempt
+// rule the shim path is built on without letting it swallow a genuinely new
+// conflict. See conflictPark.handed.
+func (c *QueueCoordinator) handOffConflict(ctx context.Context, repo string, req Request, park *conflictPark, conflictCommit string) {
+	if _, already := park.handed[conflictCommit]; already {
+		// The agent has already had this exact conflict and did not resolve
+		// it. A second identical attempt is a spin, not a strategy, so the
+		// park stands for the human path.
+		c.logf("merge: conflict resolution NOT RE-HANDED to the shim {repo=%s ws=%s name=%s commit=%s} — this commit was already handed to the agent once and came back conflicted; the conflict stays parked for a human (conflict_resolved_continue or workspace close)",
+			repo, req.Workspace, req.Name, conflictCommit)
+		return
+	}
+	park.handed[conflictCommit] = struct{}{}
+	c.driveShimResolution(ctx, repo, req, park, conflictCommit)
+}
+
 // driveShimResolution hands the parked conflict to the merging workspace's OWN
-// agent session, EXACTLY ONCE, and then asks the park to resume the pick.
+// agent session and then asks the park to resume the pick. It is reached only
+// through handOffConflict, which is what bounds it to ONE attempt per conflict.
 //
 // WHY THE WORKSPACE'S OWN SHIM. The session that produced the conflicting
 // commits is the one party that already holds their context, and the
@@ -1847,12 +1912,14 @@ const testFailureCauseBytes = 1200
 // precisely so it can drive it. Parking on a human while that session sits idle
 // under a lease taken to use it is the state this exists to end.
 //
-// EXACTLY ONE ATTEMPT. A resume that is still conflicted, an attempt that
-// errors, and a submit that is refused all end the same way: loud logging, no
-// state claimed, and the park LEFT STANDING for the human path
-// (conflict_resolved_continue, or abandonment by closing the workspace). The
-// coordinator does not re-prompt an agent that already failed to resolve the
-// conflict — a second identical attempt is a spin, not a strategy.
+// EXACTLY ONE ATTEMPT PER CONFLICT. A resume still conflicted ON THE SAME
+// COMMIT, an attempt that errors, and a submit that is refused all end the same
+// way: loud logging, no state claimed, and the park LEFT STANDING for the human
+// path (conflict_resolved_continue, or abandonment by closing the workspace).
+// The coordinator does not re-prompt an agent that already failed to resolve
+// the conflict it was given — a second identical attempt is a spin, not a
+// strategy. A resume conflicted on a DIFFERENT commit is not that case at all;
+// it is a new conflict, and handOffConflict dispatches it.
 //
 // It runs on its own goroutine because the drain goroutine is the one that
 // serves park.calls: driving the resolution inline would mean waiting for a
