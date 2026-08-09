@@ -171,6 +171,10 @@ func TestWireAgentShimBindsThePostMergeHook(t *testing.T) {
 
 	// Act.
 	shim, err := WireAgentShim(AgentShimConfig{
+		// The boot orphan sweep scans THIS directory and no other: a test that
+		// let it resolve the process temp dir deleted the live daemon's rebase
+		// worktrees mid-merge.
+		RebaseRoot:        t.TempDir(),
 		Resumes:           &fakeResumes{},
 		SSM:               openTestSSM(t, reg),
 		Progress:          progress.New(progress.Options{Logf: func(string, ...any) {}}),

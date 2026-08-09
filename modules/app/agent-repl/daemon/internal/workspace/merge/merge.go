@@ -35,6 +35,19 @@ type Config struct {
 	// business to report (SuiteResult.Skipped), not a reason to omit the
 	// dependency.
 	Suite SuiteRunner
+	// RebaseRoot is the ONE directory rebase worktrees are created under and the
+	// ONLY directory the boot sweep is allowed to look at. Required, and
+	// deliberately NOT defaulted to os.TempDir(): a sweep that resolved its own
+	// root at sweep time read the REAL process temp dir, so any test reaching
+	// the sweep — directly or through the daemon's boot wiring — swept the LIVE
+	// daemon's temp dir with a test coordinator's retention set and deleted
+	// production rebase worktrees, including the tree a merge gate's own test
+	// run was executing inside.
+	//
+	// Creation and sweep read this SAME field, so the directory worktrees are
+	// made in and the directory the sweep scans cannot diverge. Production
+	// passes the process temp dir; every test passes t.TempDir().
+	RebaseRoot string
 }
 
 // Driver runs cherry-pick merges via `git -C <dir>` and emits every
@@ -44,6 +57,9 @@ type Driver struct {
 	logf  dlog.Logf
 	emit  *stateEmitter
 	suite SuiteRunner
+	// rebaseRoot is the injected authority for BOTH createRebaseWorktree and
+	// SweepOrphanRebaseWorktrees. See Config.RebaseRoot.
+	rebaseRoot string
 }
 
 // NewDriver validates cfg and returns the driver, or an error when a
@@ -58,10 +74,14 @@ func NewDriver(cfg Config) (*Driver, error) {
 	if cfg.Suite == nil {
 		return nil, fmt.Errorf("merge: Suite runner is required")
 	}
+	if strings.TrimSpace(cfg.RebaseRoot) == "" {
+		return nil, fmt.Errorf("merge: RebaseRoot is required — the rebase worktree root must be INJECTED (production: the process temp dir; tests: t.TempDir()), because a driver that resolved it itself swept the live daemon's temp dir from a test and deleted production rebase worktrees")
+	}
 	return &Driver{
-		logf:  cfg.Logf,
-		emit:  &stateEmitter{sink: cfg.Sink, logf: cfg.Logf},
-		suite: cfg.Suite,
+		logf:       cfg.Logf,
+		emit:       &stateEmitter{sink: cfg.Sink, logf: cfg.Logf},
+		suite:      cfg.Suite,
+		rebaseRoot: filepath.Clean(cfg.RebaseRoot),
 	}, nil
 }
 
@@ -581,9 +601,12 @@ func (e *Driver) pruneStaleRebaseWorktrees(ctx context.Context, req Request) err
 // name, and what makes the resulting commits already present in the target's
 // repository when the merge commit finally references them.
 func (e *Driver) createRebaseWorktree(ctx context.Context, req Request, baseHead string) (string, error) {
-	parent, err := os.MkdirTemp("", rebaseWorktreeMarker)
+	// THE ROOT IS THE INJECTED ONE, never os.TempDir(): it is the same field the
+	// boot sweep scans, so what this creates and what that removes are one
+	// directory by construction.
+	parent, err := os.MkdirTemp(e.rebaseRoot, rebaseWorktreeMarker)
 	if err != nil {
-		return "", fmt.Errorf("merge: creating the rebase worktree's parent directory for %q: %w", req.Name, err)
+		return "", fmt.Errorf("merge: creating the rebase worktree's parent directory for %q under %s: %w", req.Name, e.rebaseRoot, err)
 	}
 	// git refuses to add a worktree at an existing non-empty path, and it
 	// creates the leaf itself. The parent is what this owns and removes.
