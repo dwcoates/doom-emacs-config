@@ -78,11 +78,11 @@ func sampleSnapshot() *frontendv1.StateSnapshot {
 // test when nothing is waiting.
 func mustPop(t *testing.T, cl *client) []byte {
 	t.Helper()
-	data, ok := cl.out.pop()
+	f, ok := cl.out.pop()
 	if !ok {
 		t.Fatalf("client %d outbox is empty, want a queued frame", cl.id)
 	}
-	return data
+	return f.data
 }
 
 func newTestServer(t *testing.T, buf int) (*Server, *mockHandler) {
@@ -633,12 +633,12 @@ func TestDeliverCompactsSupersededWorkspaceStatesForASlowConsumer(t *testing.T) 
 	}
 	var revisions []int64
 	for {
-		data, ok := cl.out.pop()
+		f, ok := cl.out.pop()
 		if !ok {
 			break
 		}
 		frame := &frontendv1.FrontendFrame{}
-		if err := protojson.Unmarshal(data, frame); err != nil {
+		if err := protojson.Unmarshal(f.data, frame); err != nil {
 			t.Fatalf("decode compacted state: %v", err)
 		}
 		revisions = append(revisions, frame.GetWorkspaceState().GetAtMs())
@@ -693,12 +693,12 @@ func TestDeliverKeepsEveryFrameForAFastConsumer(t *testing.T) {
 	// Assert: nothing was coalesced — a consumer keeping up sees every frame.
 	var revisions []int64
 	for {
-		data, ok := cl.out.pop()
+		f, ok := cl.out.pop()
 		if !ok {
 			break
 		}
 		frame := &frontendv1.FrontendFrame{}
-		if err := protojson.Unmarshal(data, frame); err != nil {
+		if err := protojson.Unmarshal(f.data, frame); err != nil {
 			t.Fatalf("decode state: %v", err)
 		}
 		revisions = append(revisions, frame.GetWorkspaceState().GetAtMs())

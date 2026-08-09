@@ -123,8 +123,8 @@ func TestReadLoopRecordsOneLatencySamplePerCommand(t *testing.T) {
 				t.Fatalf("latency samples = %d, want exactly one per completed command", len(latency.samples))
 			}
 			if got := latency.samples[0].Slow(); got != tc.wantSlow {
-				t.Fatalf("sample.Slow() with threshold %s = %v, want %v (ack=%s)",
-					tc.threshold, got, tc.wantSlow, latency.samples[0].Ack)
+				t.Fatalf("sample.Slow() with threshold %s = %v, want %v (delivery=%s)",
+					tc.threshold, got, tc.wantSlow, latency.samples[0].Delivery)
 			}
 		})
 	}

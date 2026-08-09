@@ -48,11 +48,22 @@ func AckWarnFromEnv() (time.Duration, error) {
 
 // CommandLatencySample is one completed frontend command's lifecycle timing.
 //
-// The two durations are deliberately separate. Ack is what the CLIENT waits
-// for — receipt of the command through the moment its ack was handed to the
-// connection's outbound queue — and Processing is the handler's share of it.
-// A large Ack with a small Processing is queueing or a saturated outbox; a
-// large Ack that IS its Processing is the handler itself.
+// THREE durations, deliberately separate, because they answer three different
+// questions and the one that matters used to be missing:
+//
+//   - Delivery is receipt through the ack's bytes reaching the SOCKET. It is
+//     what the client's deadline measures, and the only one of the three that
+//     can be compared against it.
+//   - Enqueue is receipt through the ack being handed to the outbound queue —
+//     the daemon's own share, and everything the old measurement covered.
+//   - Processing is the handler's share of Enqueue.
+//
+// Reading them together names the fault directly. Delivery ≈ Enqueue ≈
+// Processing is a slow handler. Delivery ≈ Enqueue with a small Processing is
+// queueing on the command's own path. A small Enqueue with a large Delivery is
+// the outbound queue: the ack was ready and the writer had a backlog in front
+// of it. That last shape is the head-of-line class this sample exists to make
+// visible, and it was invisible while the record stopped at the enqueue.
 type CommandLatencySample struct {
 	// Workspace is the command's workspace directory, empty for the
 	// workspace-less commands (daemon health, shutdown, roster publication).
@@ -67,9 +78,22 @@ type CommandLatencySample struct {
 	// the moment this one was received, INCLUDING this one. One means it had
 	// the daemon's command path to itself.
 	QueueDepth int64
-	// Ack is receipt through ack enqueue: exactly what the client waits out.
-	Ack time.Duration
-	// Processing is the dispatch call's share of Ack.
+	// Enqueue is receipt through the ack being handed to the connection's
+	// outbound queue: the daemon's own share of the round trip.
+	Enqueue time.Duration
+	// Delivery is receipt through the ack's bytes reaching the socket: exactly
+	// what the client waits out, and what the threshold below judges.
+	//
+	// On an OVERDUE sample it is how long the command has been waiting so far,
+	// which is a lower bound on a delivery that has not happened.
+	Delivery time.Duration
+	// Delivered reports whether the ack reached the socket at all. False with a
+	// DeliveryError set means the client is never going to see this ack.
+	Delivered bool
+	// DeliveryError names why an ack never reached the socket. Empty when it
+	// did, and empty on an overdue sample, whose delivery is merely pending.
+	DeliveryError string
+	// Processing is the dispatch call's share of Enqueue.
 	Processing time.Duration
 	// Threshold is the resolved ack-latency warning threshold this sample was
 	// judged against, carried so a record is readable without knowing the
@@ -83,19 +107,27 @@ type CommandLatencySample struct {
 	// finishing, and this is the evidence emitted while it is still running.
 	//
 	// An overdue sample has no verdict and no final processing share yet — Ok
-	// is false and Processing is zero because neither exists — and Ack is how
-	// long the command has been running so far. The command's ONE completion
+	// is false and Processing is zero because neither exists — and Delivery is
+	// how long the command has been running so far. The command's ONE completion
 	// sample still follows when it finishes. The recorder routes an overdue
 	// sample to its own operation name so a count of completions is never
 	// inflated by one.
 	Overdue bool
 }
 
-// Slow reports whether this sample's ack latency reached its threshold. An
-// overdue sample is past the ack deadline by construction, and the deadline is
-// a multiple of the threshold, so it is always slow.
+// Slow reports whether this sample's ack DELIVERY reached its threshold.
+//
+// Delivery, not Enqueue, and that is the whole alarm. The warn exists to name a
+// slow ack while the client is still waiting on it, and what the client waits
+// on is the socket write. Judging the enqueue instead called a command fast
+// while its ack sat fifteen seconds deep in a queue — the alarm stayed silent
+// through the exact failure it was built for, and the client's own
+// deadline-expiry record was the first evidence anything was wrong.
+//
+// An overdue sample is past the ack deadline by construction, and the deadline
+// is a multiple of the threshold, so it is always slow.
 func (s CommandLatencySample) Slow() bool {
-	return s.Threshold > 0 && s.Ack >= s.Threshold
+	return s.Threshold > 0 && s.Delivery >= s.Threshold
 }
 
 // CommandLatencyRecorder persists one completed command's lifecycle timing

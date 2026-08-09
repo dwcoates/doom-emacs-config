@@ -72,11 +72,18 @@ func (r *targetCommandLatencyRecorder) RecordCommandLatency(sample frontend.Comm
 		Message:   "frontend command completed",
 		RequestID: sample.RequestID,
 		Context: map[string]any{
-			"command":         sample.Command,
-			"client_kind":     sample.ClientKind,
-			"workspace":       sample.Workspace,
-			"queue_depth":     sample.QueueDepth,
-			"duration_ms":     sample.Ack.Milliseconds(),
+			"command":     sample.Command,
+			"client_kind": sample.ClientKind,
+			"workspace":   sample.Workspace,
+			"queue_depth": sample.QueueDepth,
+			// duration_ms is the DELIVERED latency — receipt through the ack's
+			// bytes reaching the socket — because that is the interval the
+			// client's deadline measures. enqueue_ms is the daemon's own share
+			// of it, and the two together separate a slow daemon from a
+			// backlogged outbound queue without any further correlation.
+			"duration_ms":     sample.Delivery.Milliseconds(),
+			"enqueue_ms":      sample.Enqueue.Milliseconds(),
+			"delivered":       sample.Delivered,
 			"processing_ms":   sample.Processing.Milliseconds(),
 			"ack_deadline_ms": frontend.CommandAckDeadline.Milliseconds(),
 			"threshold_ms":    sample.Threshold.Milliseconds(),
@@ -86,6 +93,14 @@ func (r *targetCommandLatencyRecorder) RecordCommandLatency(sample frontend.Comm
 	if sample.Slow() {
 		event.Level = dlog.LevelWarn
 		event.Message = "frontend command ack exceeded its latency threshold"
+	}
+	// An ack that never reached the socket is a command the client will never
+	// see answered. It is louder than slow, and it names the reason rather than
+	// leaving a fast-looking record behind.
+	if sample.DeliveryError != "" {
+		event.Level = dlog.LevelWarn
+		event.Message = "frontend command ack never reached the client"
+		event.Context["delivery_error"] = sample.DeliveryError
 	}
 	// An overdue sample reports a command that has NOT finished. It carries no
 	// verdict and no final processing share, so those two keys are replaced by
@@ -99,9 +114,10 @@ func (r *targetCommandLatencyRecorder) RecordCommandLatency(sample frontend.Comm
 		delete(event.Context, "processing_ms")
 		delete(event.Context, "ok")
 		delete(event.Context, "duration_ms")
-		event.Context["elapsed_ms"] = sample.Ack.Milliseconds()
+		delete(event.Context, "enqueue_ms")
+		event.Context["elapsed_ms"] = sample.Delivery.Milliseconds()
 	}
-	loud := sample.Slow() || sample.Overdue
+	loud := sample.Slow() || sample.Overdue || sample.DeliveryError != ""
 	if sample.Workspace == "" {
 		return r.emitGlobal(event, loud)
 	}
