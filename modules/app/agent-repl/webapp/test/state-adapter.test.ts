@@ -415,6 +415,36 @@ describe("StateSnapshot mapping", () => {
     const effects = applyOne({ snapshot: {} });
     expect(effects).toEqual([{ kind: "async-bubbles-snapshot", bubbles: [] }]);
   });
+
+  // A snapshot's bubbles go through the SAME strict decode a push's do, so a
+  // kind the snapshot path had not been taught would wedge the whole
+  // reconnect rather than one bubble. `merge` is taught: the folded run
+  // arrives whole, emissions and tail-cap accounting together.
+  it("ingests a snapshot's folded MERGE bubble whole", () => {
+    const effects = applyOne({
+      snapshot: {
+        asyncBubbles: [
+          {
+            id: "b1",
+            liveness: { live: {} },
+            merge: {
+              emissions: [{ response: { body: { role: "assistant" } } }],
+              fold: { droppedBefore: "3", tailCap: 200 },
+            },
+          },
+        ],
+      },
+    });
+
+    const snapshot = effects.find((e) => e.kind === "async-bubbles-snapshot");
+    expect(snapshot?.kind === "async-bubbles-snapshot" && snapshot.bubbles[0].kind).toEqual({
+      case: "merge",
+      value: {
+        emissions: [{ emission: "response", arm: "assistantMessage", payload: { role: "assistant" } }],
+        fold: { droppedBefore: 3, tailCap: 200 },
+      },
+    });
+  });
 });
 
 // --- ConversationItem arms → the store's bubble/card vocabulary -------------
