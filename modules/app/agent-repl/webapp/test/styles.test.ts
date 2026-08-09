@@ -2046,6 +2046,16 @@ describe("activity fold", () => {
     expect(css).toMatch(/\.agent-activity,\s*\n\.async-fold\s*\{/);
   });
 
+  it("dresses a merge bubble's ticker in the merge amber, not a colour of its own", () => {
+    // Arrange / Act — the Merge status card and the bounce-lease card already
+    // wear --merge-border, so the merge bubble takes the same variable rather
+    // than introducing a second merge hue.
+    // Assert
+    expect(blockAfter(css, ".async-fold.async-kind-merge > .async-ticker")).toMatch(
+      /border-color:\s*var\(--merge-border\)/,
+    );
+  });
+
   it("keeps the gns fold's roomier spacing as its own rule", () => {
     // Arrange / Act — the gns fold sets off answer prose rather than card
     // chrome, so it alone keeps the roomier 0.5rem spacing.

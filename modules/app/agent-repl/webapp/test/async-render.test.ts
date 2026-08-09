@@ -58,6 +58,7 @@ function seeded(...bubbles: AsyncBubble[]): AsyncBubbleRegistry {
 }
 
 const agentKind: AsyncBubble["kind"] = { case: "agent", value: { emissions: [], fold: NO_FOLD } };
+const mergeKind: AsyncBubble["kind"] = { case: "merge", value: { emissions: [], fold: NO_FOLD } };
 
 describe("bubbleLabel", () => {
   it("uses the daemon's label as the collapsed face", () => {
@@ -210,6 +211,44 @@ describe("the merge kind", () => {
     const html = AsyncBubbleCard(registry.get("b1")!, ctxFor(registry, [bubbleFoldId("b1")]));
 
     expect(html).toContain('<div class="stub-emissions" data-bubble="b1">2</div>');
+  });
+
+  it("says MERGE on the collapsed face, with the daemon's label verbatim", () => {
+    const registry = seeded(bubble({ id: "b1", kind: mergeKind, label: "merge feat/x into master" }));
+
+    expect(AsyncBubbleCard(registry.get("b1")!, ctxFor(registry))).toContain(
+      "merge · merge feat/x into master · running",
+    );
+  });
+
+  it("marks the fold with the merge kind class the merge amber hangs off", () => {
+    const registry = seeded(bubble({ id: "b1", kind: mergeKind }));
+
+    expect(AsyncBubbleCard(registry.get("b1")!, ctxFor(registry))).toContain("async-fold async-kind-merge");
+  });
+
+  it("renders a settled merge run exactly as a settled agent run reads", () => {
+    const settled: AsyncLiveness = { case: "settled", value: { settledAtMs: 1, outcome: { case: "done" } } };
+    const registry = seeded(bubble({ id: "b1", kind: mergeKind, label: "l", liveness: settled }));
+
+    expect(AsyncBubbleCard(registry.get("b1")!, ctxFor(registry))).toContain("merge · l · done");
+  });
+
+  it("nests a subagent bubble parented under the merge bubble", () => {
+    const registry = seeded(
+      bubble({ id: "b1", kind: mergeKind }),
+      bubble({ id: "b2", kind: agentKind, label: "conflict resolver", parentBubbleId: "b1" }),
+    );
+
+    const html = AsyncBubbleCard(registry.get("b1")!, ctxFor(registry, [bubbleFoldId("b1")]));
+
+    expect(html).toContain("conflict resolver");
+  });
+
+  it("draws NO merge chrome for a feed whose bubbles are not merges", () => {
+    const registry = seeded(bubble({ id: "b1", kind: agentKind, label: "unrelated" }));
+
+    expect(AsyncBubbleForest(ctxFor(registry))).not.toContain("merge");
   });
 });
 
