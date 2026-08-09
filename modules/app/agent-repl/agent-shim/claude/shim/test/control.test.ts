@@ -64,12 +64,26 @@ function recorder(
   };
 }
 
-function dispatch(rec: Recorder, sent: PermissionRequest[], ids: string[] = []): ControlDispatch {
+interface DispatchOpts {
+  /** Delivery verdict the injected sender reports; defaults to attached. */
+  delivered?: () => boolean;
+  /** Turn-liveness predicate; omitted, the dispatch has no turn owner bound. */
+  isTurnLive?: () => boolean;
+}
+
+function dispatch(rec: Recorder, sent: PermissionRequest[], ids: string[] = [], opts: DispatchOpts = {}): ControlDispatch {
   let i = 0;
+  const delivered = opts.delivered ?? ((): boolean => true);
   return new ControlDispatch(
     rec.target,
-    (req) => sent.push(req),
-    { newRequestId: () => ids[i++] ?? `auto-${i}` },
+    (req) => {
+      sent.push(req);
+      return delivered();
+    },
+    {
+      newRequestId: () => ids[i++] ?? `auto-${i}`,
+      ...(opts.isTurnLive !== undefined ? { isTurnLive: opts.isTurnLive } : {}),
+    },
   );
 }
 
@@ -428,6 +442,200 @@ describe("ControlDispatch.requestPermission round-trip", () => {
     expect(cancelled[0]).toMatchObject({
       level: "warn",
       context: { pending_count: 2, reason: "interrupted", request_ids: ["a", "b"] },
+    });
+  });
+});
+
+describe("ControlDispatch.resendPending", () => {
+  it("keeps an undeliverable request pending instead of failing the tool call", async () => {
+    // Arrange: no daemon attached, so the sender reports non-delivery.
+    const sent: PermissionRequest[] = [];
+    const d = dispatch(recorder(), sent, ["req-1"], { delivered: () => false });
+    // Act
+    let settled = false;
+    void d.requestPermission("Bash", { command: "ls" }).then(() => {
+      settled = true;
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    // Assert
+    expect(settled).toBe(false);
+    expect(d.pendingCount()).toBe(1);
+  });
+
+  it("logs an undeliverable request as an error naming the re-send recovery", () => {
+    // Arrange
+    const sent: PermissionRequest[] = [];
+    const d = dispatch(recorder(), sent, ["req-1"], { delivered: () => false });
+    vi.mocked(writeSync).mockClear();
+    // Act
+    void d.requestPermission("Bash", { command: "ls" });
+    // Assert
+    const errors = persistedLogs().filter((r) => r["level"] === "error");
+    expect(errors).toHaveLength(1);
+    expect(String(errors[0]!["message"])).toContain("re-sent on reattach");
+  });
+
+  it("re-sends the identical frame for an unanswered request", () => {
+    // Arrange
+    const sent: PermissionRequest[] = [];
+    const d = dispatch(recorder(), sent, ["req-1"]);
+    void d.requestPermission("Bash", { command: "ls" });
+    // Act
+    d.resendPending("daemon reattach");
+    // Assert: same identity, same tool, same input.
+    expect(sent).toHaveLength(2);
+    expect(sent[1]).toEqual(sent[0]);
+  });
+
+  it("re-sends multiple pending requests in their original order", () => {
+    // Arrange
+    const sent: PermissionRequest[] = [];
+    const d = dispatch(recorder(), sent, ["a", "b", "c"]);
+    void d.requestPermission("Bash", { command: "1" });
+    void d.requestPermission("Read", { file_path: "/x" });
+    void d.requestPermission("Write", { file_path: "/y" });
+    sent.length = 0;
+    // Act
+    d.resendPending("daemon reattach");
+    // Assert
+    expect(sent.map((req) => req.requestId)).toEqual(["a", "b", "c"]);
+  });
+
+  it("does not re-send a request the user answered before the reattach", () => {
+    // Arrange: the answer lands first, so the request is no longer open.
+    const sent: PermissionRequest[] = [];
+    const d = dispatch(recorder(), sent, ["req-1"]);
+    void d.requestPermission("Bash", { command: "ls" });
+    d.handlePermissionResponse(create(PermissionResponseSchema, { requestId: "req-1", decision: PermissionDecision.ALLOW }));
+    sent.length = 0;
+    // Act
+    d.resendPending("daemon reattach");
+    // Assert
+    expect(sent).toEqual([]);
+  });
+
+  it("resolves a request answered immediately after its re-send exactly once", async () => {
+    // Arrange
+    const sent: PermissionRequest[] = [];
+    const d = dispatch(recorder(), sent, ["req-1"]);
+    const resolutions: ToolPermissionResult[] = [];
+    void d.requestPermission("Bash", { command: "ls" }).then((r) => resolutions.push(r));
+    // Act: the reattach races the answer; the answer arrives just after.
+    d.resendPending("daemon reattach");
+    d.handlePermissionResponse(create(PermissionResponseSchema, { requestId: "req-1", decision: PermissionDecision.ALLOW }));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    // Assert
+    expect(resolutions).toHaveLength(1);
+    expect(d.pendingCount()).toBe(0);
+  });
+
+  it("re-sends the same frame again across two quick reconnects", () => {
+    // Arrange
+    const sent: PermissionRequest[] = [];
+    const d = dispatch(recorder(), sent, ["req-1"]);
+    void d.requestPermission("Bash", { command: "ls" });
+    // Act
+    d.resendPending("first reattach");
+    d.resendPending("second reattach");
+    // Assert: three identical frames, one open question.
+    expect(sent).toHaveLength(3);
+    expect(new Set(sent.map((req) => req.requestId))).toEqual(new Set(["req-1"]));
+    expect(d.pendingCount()).toBe(1);
+  });
+
+  it("cancels rather than re-asks when no turn is in flight", async () => {
+    // Arrange: the turn that raised the ask was interrupted meanwhile.
+    const sent: PermissionRequest[] = [];
+    const d = dispatch(recorder(), sent, ["req-1"], { isTurnLive: () => false });
+    const p = d.requestPermission("Bash", { command: "ls" });
+    sent.length = 0;
+    // Act
+    d.resendPending("daemon reattach");
+    // Assert
+    expect(sent).toEqual([]);
+    expect((await p).behavior).toBe("deny");
+  });
+
+  it("re-sends when a turn is in flight", () => {
+    // Arrange
+    const sent: PermissionRequest[] = [];
+    const d = dispatch(recorder(), sent, ["req-1"], { isTurnLive: () => true });
+    void d.requestPermission("Bash", { command: "ls" });
+    sent.length = 0;
+    // Act
+    d.resendPending("daemon reattach");
+    // Assert
+    expect(sent.map((req) => req.requestId)).toEqual(["req-1"]);
+  });
+
+  it("sends nothing when no request is pending", () => {
+    // Arrange
+    const sent: PermissionRequest[] = [];
+    const d = dispatch(recorder(), sent, []);
+    // Act
+    d.resendPending("daemon reattach");
+    // Assert
+    expect(sent).toEqual([]);
+  });
+
+  it("keeps a request pending when its re-send finds no daemon attached", () => {
+    // Arrange
+    const sent: PermissionRequest[] = [];
+    let attached = true;
+    const d = dispatch(recorder(), sent, ["req-1"], { delivered: () => attached });
+    void d.requestPermission("Bash", { command: "ls" });
+    attached = false;
+    // Act
+    d.resendPending("daemon reattach");
+    // Assert
+    expect(d.pendingCount()).toBe(1);
+  });
+
+  it("keeps a request pending when its re-send throws", () => {
+    // Arrange
+    const sent: PermissionRequest[] = [];
+    let boom = false;
+    const d = new ControlDispatch(
+      recorder().target,
+      (req) => {
+        if (boom) throw new Error("socket gone");
+        sent.push(req);
+        return true;
+      },
+      { newRequestId: () => "req-1" },
+    );
+    void d.requestPermission("Bash", { command: "ls" });
+    boom = true;
+    // Act
+    d.resendPending("daemon reattach");
+    // Assert
+    expect(d.pendingCount()).toBe(1);
+  });
+
+  it("logs the re-send failure as an error naming the request", () => {
+    // Arrange: the first send succeeds, so a request is open; the re-send throws.
+    const sent: PermissionRequest[] = [];
+    let attempts = 0;
+    const d = new ControlDispatch(
+      recorder().target,
+      (req) => {
+        attempts += 1;
+        if (attempts > 1) throw new Error("socket gone");
+        sent.push(req);
+        return true;
+      },
+      { newRequestId: () => "req-1" },
+    );
+    void d.requestPermission("Bash", { command: "ls" });
+    vi.mocked(writeSync).mockClear();
+    // Act
+    d.resendPending("daemon reattach");
+    // Assert
+    const errors = persistedLogs().filter((r) => r["level"] === "error");
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({
+      request_id: "req-1",
+      message: "permission request re-send failed: socket gone",
     });
   });
 });

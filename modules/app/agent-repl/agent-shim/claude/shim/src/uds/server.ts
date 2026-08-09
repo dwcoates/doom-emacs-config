@@ -356,13 +356,22 @@ export class SessionServer {
     this.conn!.send(ReplayDoneSchema, done);
   }
 
-  /** Send a canUseTool PermissionRequest to the daemon. */
-  sendPermissionRequest(req: PermissionRequest): void {
+  /**
+   * Send a canUseTool PermissionRequest to the daemon, reporting whether it
+   * reached a live connection.
+   *
+   * The caller (ControlDispatch) owns the open question and keeps it pending on
+   * a `false`, re-sending on the next reattach. Reporting the miss rather than
+   * only logging it is what lets that owner distinguish "asked" from "not yet
+   * asked" instead of inferring delivery from silence.
+   */
+  sendPermissionRequest(req: PermissionRequest): boolean {
     if (!this.isConnected()) {
-      LOGGER.log({ level: "error", agent_repl_session_id: this.opts.sessionId, request_id: req.requestId }, `no daemon attached; permission request cannot be delivered`);
-      return;
+      LOGGER.log({ level: "error", agent_repl_session_id: this.opts.sessionId, request_id: req.requestId }, `no daemon attached; permission request cannot be delivered now and awaits re-send on reattach`);
+      return false;
     }
     this.conn!.send(PermissionRequestSchema, req);
+    return true;
   }
 
   /**
