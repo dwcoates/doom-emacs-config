@@ -193,6 +193,29 @@ func awaitAllWithin(t *testing.T, conn *websocket.Conn, within time.Duration, re
 
 // --- the stop sequence ------------------------------------------------------
 
+// holdTurnOpenAskingNothing submits a `!hold` prompt and returns once the turn
+// is provably IN FLIGHT: the fake parks it until the session is interrupted,
+// with no question asked (fake-query.ts runHoldTurn).
+//
+// IT IS THE HOLD FOR CALLERS THAT THEN SUBMIT PROMPTS. holdTurnOpen's `!tool`
+// parks a canUseTool question, and a prompt typed over a parked question is
+// itself an answer: it declines the question and stops the turn
+// (sessioncontroller/permdecline.go). A caller queueing prompts behind a live
+// turn would therefore stop the very turn it was queueing behind.
+//
+// The receipt is the SSM's turn_active, which is what holdTurnOpen falls back
+// on too — see its own comment for what that does and does not prove.
+func holdTurnOpenAskingNothing(t *testing.T, conn *websocket.Conn, workspace, requestID string) {
+	t.Helper()
+	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"submitPrompt":{"text":"!hold","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`, requestID))
+	awaitAll(t, conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
+		"the daemon's observation of the held turn (turn_active)": func(frame *frontendv1.FrontendFrame) bool {
+			state := workspaceStateFor(frame, workspace)
+			return state != nil && state.GetTurnActive()
+		},
+	})
+}
+
 // holdTurnOpen submits a `!tool` prompt and returns once the turn is provably
 // IN FLIGHT and parked: the fake is awaiting canUseTool, which reached the
 // frontend as a PENDING permission item. See this file's header for why an
@@ -517,7 +540,10 @@ func TestE2EInterruptedQueueRunsTheNextPromptAlone(t *testing.T) {
 	cwd := t.TempDir()
 	h := newUDSHarness(t)
 	_, conn, _, _ := liveSession(t, h, cwd)
-	holdTurnOpen(t, conn, cwd, "r-hold", "sleep e2e-queue")
+	// The hold that asks NOTHING: prompts are queued behind this turn, and a
+	// prompt submitted over a parked question would decline it and stop the very
+	// turn they are meant to queue behind.
+	holdTurnOpenAskingNothing(t, conn, cwd, "r-hold")
 	writeCmd(t, conn, `{"requestId":"r-q1","submitPrompt":{"text":"queued-one","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
 	writeCmd(t, conn, `{"requestId":"r-q2","submitPrompt":{"text":"queued-two","promptOrigin":"PROMPT_ORIGIN_USER_SENT"}}`)
 	// Both prompts must be HELD before the stop lands, or the stop can outrun
