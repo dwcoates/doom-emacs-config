@@ -128,6 +128,92 @@ default at restart and shouldn't pin behavior."
 ;; the palette tab-bar wiring + the `--ws-display-state' panel-
 ;; visibility layer that sits on top of the unified render-state.
 
+;;;; ---- Tests: the palette-row builder ----
+
+(ert-deftest agent-repl-test-tab-palette-row-carries-the-face ()
+  "The builder puts the caller\='s face on the row."
+  ;; Arrange
+  (let ((row (agent-repl--tab-palette-row 'agent-repl-tab-done "#123456" "white")))
+    ;; Act / Assert
+    (should (eq 'agent-repl-tab-done (plist-get row :face)))))
+
+(ert-deftest agent-repl-test-tab-palette-row-unselected-paints-the-color ()
+  "The unselected look takes the state color as its background."
+  ;; Arrange
+  (let ((row (agent-repl--tab-palette-row 'agent-repl-tab-done "#123456" "white")))
+    ;; Act / Assert
+    (should (equal "#123456" (plist-get (plist-get row :unselected) :bg)))))
+
+(ert-deftest agent-repl-test-tab-palette-row-unselected-takes-the-given-foreground ()
+  "The unselected foreground is the caller\='s, since no luminance rule
+picks the right one for all six colors."
+  ;; Arrange
+  (let ((row (agent-repl--tab-palette-row 'agent-repl-tab-done "#123456" "black")))
+    ;; Act / Assert
+    (should (equal "black" (plist-get (plist-get row :unselected) :fg)))))
+
+(ert-deftest agent-repl-test-tab-palette-row-unselected-bracket-numeral-is-the-default ()
+  "Every unselected bracket numeral is `agent-repl--color-default-bracket\='."
+  ;; Arrange
+  (let ((row (agent-repl--tab-palette-row 'agent-repl-tab-done "#123456" "white")))
+    ;; Act / Assert
+    (should (equal agent-repl--color-default-bracket
+                   (plist-get (plist-get row :unselected) :bracket-fg)))))
+
+(ert-deftest agent-repl-test-tab-palette-row-omitted-bracket-bg-is-absent ()
+  "With no bracket background the unselected look has NO `:bracket-bg\='.
+The renderer falls back to `:bg\=' only when the key is absent, so an
+explicit nil would paint an entry that is not one color end to end."
+  ;; Arrange
+  (let ((row (agent-repl--tab-palette-row 'agent-repl-tab-done "#123456" "white")))
+    ;; Act / Assert
+    (should-not (plist-member (plist-get row :unselected) :bracket-bg))))
+
+(ert-deftest agent-repl-test-tab-palette-row-bracket-bg-lands-on-the-unselected-look ()
+  "A supplied bracket background colors the unselected [N] alone."
+  ;; Arrange
+  (let ((row (agent-repl--tab-palette-row 'agent-repl-tab-done "#123456" "white" "#abcdef")))
+    ;; Act / Assert
+    (should (equal "#abcdef" (plist-get (plist-get row :unselected) :bracket-bg)))))
+
+(ert-deftest agent-repl-test-tab-palette-row-bracket-bg-leaves-the-selected-look-alone ()
+  "A supplied bracket background never reaches the SELECTED look.
+Selection dims the name to the shared grey, so the bracket there is the
+only place the state color can still be read."
+  ;; Arrange
+  (let ((row (agent-repl--tab-palette-row 'agent-repl-tab-done "#123456" "white" "#abcdef")))
+    ;; Act / Assert
+    (should (equal "#123456" (plist-get (plist-get row :selected) :bracket-bg)))))
+
+(ert-deftest agent-repl-test-tab-palette-row-selected-takes-the-shared-grey ()
+  "The selected look\='s background is the shared grey for every state."
+  ;; Arrange
+  (let ((row (agent-repl--tab-palette-row 'agent-repl-tab-done "#123456" "white")))
+    ;; Act / Assert
+    (should (equal agent-repl--color-selected-bg
+                   (plist-get (plist-get row :selected) :bg)))))
+
+(ert-deftest agent-repl-test-tab-palette-row-weight-is-the-shared-one ()
+  "Both looks take `agent-repl--tab-weight\=', which no row has ever varied."
+  ;; Arrange
+  (let ((row (agent-repl--tab-palette-row 'agent-repl-tab-done "#123456" "white")))
+    ;; Act / Assert
+    (should (equal agent-repl--tab-weight
+                   (plist-get (plist-get row :unselected) :weight)))
+    (should (equal agent-repl--tab-weight
+                   (plist-get (plist-get row :selected) :weight)))))
+
+(ert-deftest agent-repl-test-tab-palette-every-row-has-the-builder-shape ()
+  "Every palette row carries its state color on BOTH looks.
+The selected bracket repeats the unselected background for all twenty
+rows, which is the shape the builder guarantees and the thing a
+hand-written row could silently drop."
+  ;; Act / Assert
+  (dolist (entry agent-repl--tab-palette)
+    (let ((row (cdr entry)))
+      (should (equal (plist-get (plist-get row :unselected) :bg)
+                     (plist-get (plist-get row :selected) :bracket-bg))))))
+
 (ert-deftest agent-repl-test-tab-palette-has-no-merge-conflict-entry ()
   "`:merge-conflict' has no palette row: a conflict is waiting on the USER,
 which is the opposite of the in-flight claim the merging states' red makes."
