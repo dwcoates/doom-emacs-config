@@ -1986,8 +1986,20 @@ export class UdsSession {
           : undefined;
         taskNotificationResult = origin?.kind === "task_notification" || origin?.kind === "task-notification";
         const taskCount = this.turnSdkTaskIds.get(claimedTurnId)?.size ?? 0;
+        // A TURN MAY ONLY BE RETAINED FOR A CYCLE THAT CAN STILL ARRIVE. That
+        // is the same rule the pending queue is held to below, and having
+        // LAUNCHED an SDK task is not evidence of it: once every task this turn
+        // started has terminated and the durable queue holds no
+        // `<task-notification>`, there is no internal agent cycle left to
+        // produce the task-notification result this clause waits for. Retaining
+        // on the bare launch count latched the turn open until the quiet
+        // watchdog synthesized its end a full grace period later, which is how a
+        // subagent turn whose Task result was consumed inline rendered as
+        // `thinking` for ten minutes after the agent had already answered.
+        const taskCycleOutstanding = this.liveSdkTaskIds.size > 0
+          || this.pendingTaskNotificationQueue.size > 0;
         const retainForLiveTasks = this.liveSdkTaskIds.size > 0
-          || (taskCount > 0 && !taskNotificationResult);
+          || (taskCount > 0 && !taskNotificationResult && taskCycleOutstanding);
         // THE PENDING QUEUE MAY ONLY RETAIN A TURN THIS QUERY CAN STILL ADVANCE.
         // A queued `<task-notification>` drives another internal agent cycle,
         // and that cycle exists only because a background task of THIS query
