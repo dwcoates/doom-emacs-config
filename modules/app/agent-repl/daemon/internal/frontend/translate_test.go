@@ -293,6 +293,132 @@ func TestConversationDeltaFromEventTranscriptAssistantUsesEnvelopeTs(t *testing.
 	}
 }
 
+// --- the strip site states where each reasoning block came from -------------
+//
+// The daemon does the stripping, so the daemon is the only hop that still knows
+// which message a reasoning block left and which slot it held there. A client
+// that re-derived either would be matching by resemblance, which is exactly the
+// derivation `AgentThinking.api_message_id`/`.block_index` exist to remove.
+
+// thinkingEmissions translates one assistant message and returns the reasoning
+// emissions it curated to, in order.
+func thinkingEmissions(t *testing.T, msg *datav1.ApiAssistantMessage) []*frontendv1.AgentThinking {
+	t.Helper()
+	ev := &corev1.Event{
+		SessionId: "s1", Seq: 20, ProducedAtMs: producedMs,
+		Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.AssistantMessage{
+			Uuid: "env-1", Message: msg,
+		})},
+	}
+	got, _, err := ConversationDeltaFromEvent("ws", "s1", ev)
+	if err != nil {
+		t.Fatalf("ConversationDeltaFromEvent: %v", err)
+	}
+	var out []*frontendv1.AgentThinking
+	for _, item := range got.GetItems() {
+		if th := item.GetAgent().GetThinking(); th != nil {
+			out = append(out, th)
+		}
+	}
+	return out
+}
+
+// twoThinkingBlocks is a message whose reasoning sits at content indices 0 and
+// 2, so a stated index that merely counted the reasoning blocks (0 and 1) is
+// distinguishable from one that names the real content slot.
+func twoThinkingBlocks() *datav1.ApiAssistantMessage {
+	return &datav1.ApiAssistantMessage{
+		Id: "msg_01ABC",
+		Content: []*datav1.ContentBlock{
+			{Block: &datav1.ContentBlock_Thinking{Thinking: &datav1.ThinkingBlock{Thinking: "first"}}},
+			{Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: "prose"}}},
+			{Block: &datav1.ContentBlock_Thinking{Thinking: &datav1.ThinkingBlock{Thinking: "second"}}},
+		},
+	}
+}
+
+func TestAThinkingEmissionStatesTheMessageItWasStrippedFrom(t *testing.T) {
+	// Arrange / Act
+	got := thinkingEmissions(t, twoThinkingBlocks())
+
+	// Assert
+	if len(got) != 2 {
+		t.Fatalf("got %d thinking emissions, want 2", len(got))
+	}
+	for i, th := range got {
+		if th.GetApiMessageId() != "msg_01ABC" {
+			t.Errorf("emission %d api_message_id = %q, want %q", i, th.GetApiMessageId(), "msg_01ABC")
+		}
+	}
+}
+
+func TestAThinkingEmissionStatesItsPreStripContentIndex(t *testing.T) {
+	// Arrange / Act
+	got := thinkingEmissions(t, twoThinkingBlocks())
+
+	// Assert: the CONTENT slots, not the ordinal among reasoning blocks.
+	if len(got) != 2 {
+		t.Fatalf("got %d thinking emissions, want 2", len(got))
+	}
+	if want := []int32{0, 2}; got[0].GetBlockIndex() != want[0] || got[1].GetBlockIndex() != want[1] {
+		t.Errorf("block indices = [%d %d], want %v", got[0].GetBlockIndex(), got[1].GetBlockIndex(), want)
+	}
+}
+
+func TestAThinkingEmissionStatesAnEmptyMessageIdWhenTheRecordCarriesNone(t *testing.T) {
+	// A record without an id cannot be given one here; fabricating one would key
+	// every id-less reasoning block in the session onto the same preview.
+	// Arrange
+	msg := &datav1.ApiAssistantMessage{
+		Content: []*datav1.ContentBlock{
+			{Block: &datav1.ContentBlock_Thinking{Thinking: &datav1.ThinkingBlock{Thinking: "hmm"}}},
+		},
+	}
+
+	// Act
+	got := thinkingEmissions(t, msg)
+
+	// Assert
+	if len(got) != 1 {
+		t.Fatalf("got %d thinking emissions, want 1", len(got))
+	}
+	if got[0].GetApiMessageId() != "" {
+		t.Errorf("api_message_id = %q, want empty", got[0].GetApiMessageId())
+	}
+}
+
+func TestTheStrippedBodyKeepsTheBlocksTheEmissionsLeftBehind(t *testing.T) {
+	// The strip is the other half of the exclusivity invariant: what the
+	// emissions state about their origin must not change what the body keeps.
+	// Arrange
+	ev := &corev1.Event{
+		SessionId: "s1", Seq: 20, ProducedAtMs: producedMs,
+		Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.AssistantMessage{
+			Uuid: "env-1", Message: twoThinkingBlocks(),
+		})},
+	}
+
+	// Act
+	got, _, err := ConversationDeltaFromEvent("ws", "s1", ev)
+	if err != nil {
+		t.Fatalf("ConversationDeltaFromEvent: %v", err)
+	}
+
+	// Assert
+	var body *datav1.ApiAssistantMessage
+	for _, item := range got.GetItems() {
+		if r := item.GetAgent().GetResponse(); r != nil {
+			body = r.GetBody()
+		}
+	}
+	if body == nil {
+		t.Fatal("no response emission; the text block must still be drawn")
+	}
+	if len(body.GetContent()) != 1 || body.GetContent()[0].GetText().GetText() != "prose" {
+		t.Errorf("stripped body = %v, want the single text block", body.GetContent())
+	}
+}
+
 func TestConversationDeltaFromEventTranscriptApiErrorMidBackoffCuratesToNothing(t *testing.T) {
 	// Arrange: a MID-BACKOFF api_error line. The retrying window (internal/
 	// progress) is what covers it, so the curator emits no conversation item
