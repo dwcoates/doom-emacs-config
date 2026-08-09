@@ -399,7 +399,21 @@ describe("StateSnapshot mapping", () => {
         inits: [{ workspace: "w", fence: "s", init: { model: "m" } }],
       },
     });
-    expect(effects.map((e) => e.kind)).toEqual(["workspace-state", "session-view", "task-catalog", "session-init"]);
+    // The async-bubbles snapshot rides EVERY snapshot, including this one that
+    // carries none: an empty list is the daemon stating that no detached work
+    // is open, which is what retires bubbles a reconnecting client still holds.
+    expect(effects.map((e) => e.kind)).toEqual([
+      "workspace-state",
+      "session-view",
+      "task-catalog",
+      "session-init",
+      "async-bubbles-snapshot",
+    ]);
+  });
+
+  it("carries an empty bubble list when the snapshot names no detached work", () => {
+    const effects = applyOne({ snapshot: {} });
+    expect(effects).toEqual([{ kind: "async-bubbles-snapshot", bubbles: [] }]);
   });
 });
 
