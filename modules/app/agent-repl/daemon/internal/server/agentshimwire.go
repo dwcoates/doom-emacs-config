@@ -81,6 +81,10 @@ type AgentShimConfig struct {
 	// Catalogs supplies every live session's complete detached-task roster for
 	// connect/resync snapshots. Satisfied by *sessioncontroller.Manager.
 	Catalogs TaskCatalogSource
+	// AsyncBubbles supplies every live session's open detached-work bubbles,
+	// folded to date, for connect/resync snapshots. Satisfied by
+	// *sessioncontroller.Manager.
+	AsyncBubbles AsyncBubbleSource
 	// Queues is the prompt-queue backend (E4): the force/accept/cancel command
 	// half and the snapshot half. Nil makes each queue command a loud failing
 	// ack and leaves snapshot.queues empty.
@@ -606,7 +610,7 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 
 	snapshots := &ssmSnapshotProvider{
 		ssm: mgr, sessions: cfg.Sessions, inits: cfg.Inits,
-		catalogs: cfg.Catalogs, queues: cfg.Queues, daemon: cfg.SessionCommands,
+		catalogs: cfg.Catalogs, bubbles: cfg.AsyncBubbles, queues: cfg.Queues, daemon: cfg.SessionCommands,
 		progress: cfg.Progress, workspaceCreation: cfg.WorkspaceCreation, logf: logf,
 	}
 	srv := frontend.New(frontend.Config{

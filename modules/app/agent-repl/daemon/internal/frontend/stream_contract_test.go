@@ -142,9 +142,9 @@ func TestStreamContractRecordKeepsEnvelopeUUID(t *testing.T) {
 					Message: recordBodyFor(t, item, fx.MessageID),
 				})},
 			}
-			got, _, err := ConversationDeltaFromEvent(fx.Workspace, "", ev)
+			got, _, err := conversationDeltaFromEvent(fx.Workspace, "", ev)
 			if err != nil {
-				t.Fatalf("ConversationDeltaFromEvent: %v", err)
+				t.Fatalf("conversationDeltaFromEvent: %v", err)
 			}
 
 			// Assert
@@ -204,9 +204,9 @@ func TestStreamContractThinkingNamesThePreviewItSettlesOnto(t *testing.T) {
 			}
 
 			// Act
-			got, _, err := ConversationDeltaFromEvent(fx.Workspace, fx.SessionID, ev)
+			got, _, err := conversationDeltaFromEvent(fx.Workspace, fx.SessionID, ev)
 			if err != nil {
-				t.Fatalf("ConversationDeltaFromEvent: %v", err)
+				t.Fatalf("conversationDeltaFromEvent: %v", err)
 			}
 
 			// Assert
@@ -266,9 +266,9 @@ func TestStreamContractOneStreamCarriesOneFence(t *testing.T) {
 					Message: recordBodyFor(t, item, fx.MessageID),
 				})},
 			}
-			got, _, err := ConversationDeltaFromEvent(fx.Workspace, fence, ev)
+			got, _, err := conversationDeltaFromEvent(fx.Workspace, fence, ev)
 			if err != nil {
-				t.Fatalf("ConversationDeltaFromEvent: %v", err)
+				t.Fatalf("conversationDeltaFromEvent: %v", err)
 			}
 			if got.GetFence() != fence {
 				t.Errorf("conversation frame fence = %q, want %q", got.GetFence(), fence)

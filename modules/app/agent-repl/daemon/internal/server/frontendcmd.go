@@ -1460,6 +1460,11 @@ type ssmSnapshotProvider struct {
 	// catalogs supplies every live session's complete detached-task roster, so
 	// reconnect restores or clears the webapp's roster before later deltas.
 	catalogs TaskCatalogSource
+	// bubbles supplies every live session's open async bubbles, folded to date,
+	// so a reconnecting frontend restores detached work it can no longer be
+	// sent the opening delta for. Nil-safe: a nil source leaves
+	// snapshot.async_bubbles empty.
+	bubbles AsyncBubbleSource
 	// queues supplies each live session's held-prompt queue (E4). Nil-safe: a
 	// nil source leaves snapshot.queues empty.
 	queues QueueSource
@@ -1508,6 +1513,14 @@ type SessionInitSource interface {
 // they clear stale frontend roster state.
 type TaskCatalogSource interface {
 	TaskCatalogs() []*frontendv1.TaskCatalog
+}
+
+// AsyncBubbleSource supplies every live session's open async bubbles, folded to
+// date, for the connect/resync snapshot. Satisfied by
+// *sessioncontroller.Manager. A session with no detached work contributes
+// nothing, which is how a frontend learns its previous bubbles are gone.
+type AsyncBubbleSource interface {
+	AsyncBubbles() []*frontendv1.AsyncBubble
 }
 
 // QueueSource supplies every live session's held-prompt queue (E4) for the
@@ -1566,6 +1579,9 @@ func (p *ssmSnapshotProvider) Snapshot() *frontendv1.StateSnapshot {
 	if p.catalogs != nil {
 		snap.Catalogs = p.catalogs.TaskCatalogs()
 	}
+	if p.bubbles != nil {
+		snap.AsyncBubbles = p.bubbles.AsyncBubbles()
+	}
 	if p.queues != nil {
 		snap.Queues = p.queues.QueueViews()
 	}
@@ -1600,8 +1616,8 @@ func (p *ssmSnapshotProvider) Snapshot() *frontendv1.StateSnapshot {
 		for _, catalog := range snap.GetCatalogs() {
 			taskCount += len(catalog.GetTasks())
 		}
-		p.logf("frontend: connect snapshot workspaces=%d sessions=%d catalogs=%d tasks=%d inits=%d queues=%d progress=%d workspace_available=%d host_actions=%d daemon=%t",
-			len(snap.GetWorkspaces()), len(snap.GetSessions()), len(snap.GetCatalogs()), taskCount,
+		p.logf("frontend: connect snapshot workspaces=%d sessions=%d catalogs=%d tasks=%d async_bubbles=%d inits=%d queues=%d progress=%d workspace_available=%d host_actions=%d daemon=%t",
+			len(snap.GetWorkspaces()), len(snap.GetSessions()), len(snap.GetCatalogs()), taskCount, len(snap.GetAsyncBubbles()),
 			len(snap.GetInits()), len(snap.GetQueues()), len(snap.GetProgress()), len(snap.GetWorkspaceAvailable()), len(snap.GetHostActions()), snap.GetDaemon() != nil)
 	}
 	return snap
