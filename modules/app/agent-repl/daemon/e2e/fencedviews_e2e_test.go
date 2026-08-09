@@ -44,11 +44,21 @@ func TestE2ETheResolvedComponentViewsArriveFencedAndInTheConnectSnapshot(t *test
 		t.Fatalf("the authoritative WorkspaceState for %q carries an empty fence: there is no token for a fenced view to be compared against", cwd)
 	}
 
-	// Act — a real turn, so every view has a reason to be pushed: the topbar's
-	// accounting line, the breakdown's figures and the gate's state all move.
+	// Act — a real turn, so the turn-moved views have a reason to be pushed:
+	// the topbar's accounting line and the breakdown's figures both move.
+	//
+	// The GATE is deliberately absent from the push assertions below: an
+	// ordinary turn is not a gate transition (the gate stays `open`
+	// throughout), and the publisher's stated invariant is push-on-change
+	// judged on the rendered view — demanding an unchanged gate be re-pushed
+	// would assert against that invariant, not against the contract. The
+	// gate's delivery guarantee is the SNAPSHOT half below, which every
+	// joining client exercises; its push-on-transition guarantee belongs to a
+	// hibernation-transition stimulus, not to this test. (Orchestrator ruling
+	// during the figma→idl e2e loop.)
 	submitPrompt(t, conn, "e2e-fenced-views", "hello fenced views")
 
-	// Assert — collect all three off ONE drain, then judge each.
+	// Assert — collect the turn-moved views off ONE drain, then judge each.
 	fences := drainComponentViewFences(t, conn, cwd)
 	for _, view := range []struct {
 		what string
@@ -56,7 +66,6 @@ func TestE2ETheResolvedComponentViewsArriveFencedAndInTheConnectSnapshot(t *test
 	}{
 		{"TopbarView", "topbar (frame arm 21)"},
 		{"TokenBreakdownView", "token_breakdown (frame arm 22)"},
-		{"WorkspaceGateView", "workspace_gate (frame arm 23)"},
 	} {
 		got, arrived := fences[view.what]
 		if !arrived {
@@ -99,7 +108,10 @@ func drainComponentViewFences(t *testing.T, conn *websocket.Conn, workspace stri
 	t.Helper()
 	fences := map[string]string{}
 	deadline := time.Now().Add(frameTimeout)
-	for len(fences) < 3 && time.Now().Before(deadline) {
+	// Drains until the two TURN-MOVED views arrive (the gate is push-on-
+	// transition and an ordinary turn is not one — see the caller); a gate
+	// frame that does arrive is still recorded.
+	for len(fences) < 2 && time.Now().Before(deadline) {
 		frame := readFrame(t, conn)
 		if v := frame.GetTopbar(); v != nil && v.GetWorkspace() == workspace {
 			fences["TopbarView"] = v.GetFence()
