@@ -106,6 +106,46 @@ func TestReviveSessionStillCarriesDirect(t *testing.T) {
 	}
 }
 
+// CLEAR CARRIES AS ITS OWN MODE, and takes no scope: a scope says what a
+// summary keeps, and a clear keeps nothing. An arm that decoded to a compaction
+// here would summarize a conversation the user asked to discard.
+func TestReviveSessionCarriesClear(t *testing.T) {
+	// Arrange
+	h, hib := newRevivalHandler(t)
+	cmd := &frontendv1.ReviveSessionCmd{
+		Mode: &frontendv1.ReviveSessionCmd_Clear{Clear: &frontendv1.ReviveClear{}},
+	}
+
+	// Act
+	if err := h.ReviveSession(context.Background(), "/ws", "r-1", cmd); err != nil {
+		t.Fatalf("ReviveSession(clear) = %v, want it accepted", err)
+	}
+
+	// Assert
+	if len(hib.modes) != 1 || hib.modes[0] != sessioncontroller.ReviveModeClear {
+		t.Fatalf("revival modes = %v, want exactly [clear]", hib.modes)
+	}
+}
+
+// A COMMAND WITH NO ARM AT ALL IS A NACK. The wire makes "no decision"
+// unrepresentable precisely so the daemon never invents one, and a mode that
+// fell through the decode would reach the controller as unset.
+func TestReviveSessionRefusesACommandWithNoMode(t *testing.T) {
+	// Arrange
+	h, hib := newRevivalHandler(t)
+
+	// Act
+	err := h.ReviveSession(context.Background(), "/ws", "r-1", &frontendv1.ReviveSessionCmd{})
+
+	// Assert
+	if err == nil {
+		t.Fatal("ReviveSession with no mode arm = nil, want a nack")
+	}
+	if len(hib.modes) != 0 {
+		t.Fatalf("revival modes = %v, want the revival never to have been attempted", hib.modes)
+	}
+}
+
 // AN UNSPECIFIED SCOPE IS A NACK, NOT A WHOLE-CONVERSATION COMPACTION. The
 // daemon has no default for what it may discard, and inventing one would answer
 // an unstated request by throwing away the most it possibly could.

@@ -15,6 +15,7 @@ import {
   HIBERNATION_COMPOSER_NOTICE,
   REVIVAL_GATE_HEADING,
   REVIVE_ATTR,
+  REVIVE_CLEAR_EXPLANATION,
   REVIVE_COMPACT_EXPLANATION,
   REVIVE_COMPACT_PROMPTS_AND_RESPONSES_EXPLANATION,
   REVIVE_COMPACT_PROMPTS_EXPLANATION,
@@ -207,13 +208,24 @@ describe("revivalGateHtml: the blocking card", () => {
     expect(revivalGateHtml(forced(), null, NOW)).toContain(`${REVIVE_ATTR}="direct"`);
   });
 
-  it("offers exactly those five actions and no sixth", () => {
+  it("offers the clear action", () => {
+    // Arrange / Act / Assert
+    expect(revivalGateHtml(forced(), null, NOW)).toContain(`${REVIVE_ATTR}="clear"`);
+  });
+
+  it("offers exactly the revival decisions and nothing else", () => {
     // Arrange — no dismiss: the gate is a pure function of daemon state, so a
     // dismissed gate would reappear having taught the user the block is
     // optional. And a hibernated session has nothing to cancel back to.
     const buttons = revivalGateHtml(forced(), null, NOW).match(/<button/g) ?? [];
     // Act / Assert
-    expect(buttons).toHaveLength(5);
+    expect(buttons).toHaveLength(reviveOptions(forced()).length);
+  });
+
+  it("explains that clearing discards the conversation", () => {
+    // Arrange / Act / Assert — it sits one click from four options that all
+    // keep something, so the sentence has to say that this one does not.
+    expect(revivalGateHtml(forced(), null, NOW)).toContain(REVIVE_CLEAR_EXPLANATION);
   });
 
   it("explains what a responses-only compaction keeps", () => {
@@ -252,6 +264,20 @@ describe("revivalGateHtml: the blocking card", () => {
     const got = revivalGateHtml({ sinceMs: 0, cause: { case: "forced", value: {} } }, null, NOW);
     // Act / Assert
     expect(got).not.toContain("asleep for");
+  });
+
+  it("replaces the buttons with a pending line once clear is sent", () => {
+    // Arrange / Act
+    const got = revivalGateHtml(forced(), "clear", NOW);
+    // Assert — the destructive option must not stay one click away while the
+    // decision that produced it is still in flight.
+    expect(got).not.toContain("<button");
+  });
+
+  it("gives clear its own button class, so it is not styled as the cheap path", () => {
+    // Arrange / Act / Assert — the filled `hibernation-compact` style reads as
+    // the recommended option, which the one unrecoverable choice must not.
+    expect(revivalGateHtml(forced(), null, NOW)).toContain('class="hibernation-clear"');
   });
 
   it("replaces the buttons with a pending line once compact-first is sent", () => {
@@ -293,6 +319,20 @@ describe("revivePendingText: the in-flight report", () => {
   it("says the full context is being carried on the direct path", () => {
     // Arrange / Act / Assert
     expect(revivePendingText("direct")).toContain("full context");
+  });
+
+  it("says the conversation is being cleared on the clear path", () => {
+    // Arrange / Act / Assert — a line borrowed from a compaction would report
+    // a summary being made where nothing is being kept.
+    expect(revivePendingText("clear")).toContain("clearing the conversation");
+  });
+
+  it("gives every decision a line of its own", () => {
+    // Arrange — the pending line is all the user has while a decision is in
+    // flight, so two decisions sharing one would make the click unverifiable.
+    const lines = reviveOptions(forced()).map((o) => revivePendingText(o.decision));
+    // Act / Assert
+    expect(new Set(lines).size).toBe(lines.length);
   });
 });
 
@@ -571,15 +611,33 @@ describe("reviveOptions: the offered answers", () => {
       "compactResponses",
       "compactPrompts",
       "direct",
+      "clear",
     ]);
   });
 
-  it("marks resume-as-is as the costly one and nothing else", () => {
+  it("marks the two options that are not ordinary compactions", () => {
     // Arrange / Act
     const warned = reviveOptions(forced()).filter((o) => o.warn);
-    // Assert — the compactions all pay their cost once; only this one pays it
-    // on every later turn.
-    expect(warned.map((o) => o.decision)).toEqual(["direct"]);
+    // Assert — the compactions all pay their cost once and keep a summary.
+    // Resume-as-is pays it on every later turn, and clear keeps nothing at
+    // all; both are consequences a scoped compaction does not carry.
+    expect(warned.map((o) => o.decision)).toEqual(["direct", "clear"]);
+  });
+
+  it("offers clear last, off the keep-more axis the other options sit on", () => {
+    // Arrange — the four compactions and the direct resume answer "how much of
+    // this is worth carrying". Clear answers "none of it", so it must not read
+    // as the cheap end of that axis.
+    const decisions = reviveOptions(forced()).map((o) => o.decision);
+    // Act / Assert
+    expect(decisions[decisions.length - 1]).toBe("clear");
+  });
+
+  it("says clear DISCARDS rather than describing it as a smaller compaction", () => {
+    // Arrange / Act
+    const clear = reviveOptions(forced()).find((o) => o.decision === "clear");
+    // Assert
+    expect(clear?.explanation).toContain("discard the conversation entirely");
   });
 
   it("strengthens the resume-as-is sentence when the cache is already gone", () => {
