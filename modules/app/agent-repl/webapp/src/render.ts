@@ -2250,7 +2250,15 @@ function failureEvidenceHtml(kind: import("./frontend-proto.js").FailureKind): s
   return "";
 }
 
-/** Render every query identity and the exact typed termination cause. */
+/**
+ * Render every query identity and the exact typed termination cause.
+ *
+ * The "missing …" arms below are UNREACHABLE and KEPT: `decodeFailureKind`
+ * refuses a query-termination record with no reason and no vendor identity, so
+ * a decoded record always names both. They stay because the guarantee lives one
+ * module away — a decoder that stopped enforcing it must show up as visible
+ * prose here, never as a blank line beside real evidence.
+ */
 function queryTerminationFailureHtml(
   failure: import("../../proto/gen/ts/agentshim/frontend/v1/errors_pb").QueryTerminationFailure,
 ): string {
@@ -2269,7 +2277,13 @@ function queryTerminationFailureHtml(
   return `<div class="failure-detail">query termination: ${escapeHtml(reason)}<br>query instance: ${escapeHtml(failure.queryInstanceId)}<br>vendor session: ${escapeHtml(vendor)}<br>observed_at_ms: ${String(failure.observedAtMs)}</div>`;
 }
 
-/** Render resume-continuity evidence without reducing it to a generic death. */
+/**
+ * Render resume-continuity evidence without reducing it to a generic death.
+ *
+ * The "missing resume-continuity cause" arm is UNREACHABLE and KEPT for the
+ * same reason as `queryTerminationFailureHtml`'s: `decodeFailureKind` requires
+ * exactly one attempt and exactly one cause on every decoded record.
+ */
 function resumeFailureHtml(
   failure: import("../../proto/gen/ts/agentshim/frontend/v1/errors_pb").SessionResumeFailure,
 ): string {
