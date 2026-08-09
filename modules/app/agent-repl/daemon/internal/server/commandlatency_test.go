@@ -59,7 +59,11 @@ func sampleFor(workspace string, ack, threshold time.Duration) frontend.CommandL
 		Command:    "open_workspace",
 		ClientKind: "host",
 		QueueDepth: 3,
-		Ack:        ack,
+		// The sample is judged on its DELIVERY, so that is what these arms
+		// vary; the enqueue share rides along as the daemon's own number.
+		Delivery:   ack,
+		Enqueue:    ack * 3 / 4,
+		Delivered:  true,
 		Processing: ack / 2,
 		Threshold:  threshold,
 		Ok:         true,

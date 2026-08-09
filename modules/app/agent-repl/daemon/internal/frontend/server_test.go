@@ -78,11 +78,11 @@ func sampleSnapshot() *frontendv1.StateSnapshot {
 // test when nothing is waiting.
 func mustPop(t *testing.T, cl *client) []byte {
 	t.Helper()
-	data, ok := cl.out.pop()
+	f, ok := cl.out.pop()
 	if !ok {
 		t.Fatalf("client %d outbox is empty, want a queued frame", cl.id)
 	}
-	return data
+	return f.data
 }
 
 func newTestServer(t *testing.T, buf int) (*Server, *mockHandler) {
@@ -633,12 +633,12 @@ func TestDeliverCompactsSupersededWorkspaceStatesForASlowConsumer(t *testing.T) 
 	}
 	var revisions []int64
 	for {
-		data, ok := cl.out.pop()
+		f, ok := cl.out.pop()
 		if !ok {
 			break
 		}
 		frame := &frontendv1.FrontendFrame{}
-		if err := protojson.Unmarshal(data, frame); err != nil {
+		if err := protojson.Unmarshal(f.data, frame); err != nil {
 			t.Fatalf("decode compacted state: %v", err)
 		}
 		revisions = append(revisions, frame.GetWorkspaceState().GetAtMs())
@@ -693,12 +693,12 @@ func TestDeliverKeepsEveryFrameForAFastConsumer(t *testing.T) {
 	// Assert: nothing was coalesced — a consumer keeping up sees every frame.
 	var revisions []int64
 	for {
-		data, ok := cl.out.pop()
+		f, ok := cl.out.pop()
 		if !ok {
 			break
 		}
 		frame := &frontendv1.FrontendFrame{}
-		if err := protojson.Unmarshal(data, frame); err != nil {
+		if err := protojson.Unmarshal(f.data, frame); err != nil {
 			t.Fatalf("decode state: %v", err)
 		}
 		revisions = append(revisions, frame.GetWorkspaceState().GetAtMs())
@@ -1231,4 +1231,113 @@ func TestFrameSessionIdentityScopesTheWorkspaceGateToItsWorkspace(t *testing.T) 
 		t.Fatalf("frameSessionIdentity(workspace_gate) = (%q, %q, %t), want (\"/ws\", \"\", true)",
 			workspace, sessionID, scoped)
 	}
+}
+
+// --- which lane a command's answer takes ------------------------------------
+
+// popFrames drains a client's outbox into decoded frames, oldest first.
+func popFrames(t *testing.T, cl *client) []*frontendv1.FrontendFrame {
+	t.Helper()
+	var frames []*frontendv1.FrontendFrame
+	for {
+		f, ok := cl.out.pop()
+		if !ok {
+			return frames
+		}
+		frame := &frontendv1.FrontendFrame{}
+		if err := protojson.Unmarshal(f.data, frame); err != nil {
+			t.Fatalf("decode queued frame: %v", err)
+		}
+		frames = append(frames, frame)
+	}
+}
+
+func TestCommandAckOvertakesAQueuedBulkBacklog(t *testing.T) {
+	// Arrange: the incident's shape — a connect-sized bulk backlog already
+	// queued when a command finishes.
+	s, _ := newTestServer(t, 16)
+	cl := newClient(defaultClientBuffer, nil, ClientKindHost)
+	for range 4 {
+		s.enqueue(cl, outFrame{data: mustMarshal(t, SnapshotFrame(sampleSnapshot()))})
+	}
+
+	// Act.
+	s.processCommand(s.newCommandTicket(cl, openCmd("r-1", "/ws/a"), time.Now(), s.inflight.Add(1)))
+
+	// Assert: the ack is the FIRST frame out, so the client's wait is bounded
+	// by write throughput rather than by the backlog's depth.
+	frames := popFrames(t, cl)
+	if len(frames) != 5 {
+		t.Fatalf("queued frames = %d, want the backlog plus one ack", len(frames))
+	}
+	if frames[0].GetCommandAck().GetRequestId() != "r-1" {
+		t.Fatalf("first frame = %v, want the ack for r-1", frames[0].GetFrame())
+	}
+}
+
+func TestResyncAckStillFollowsItsSnapshot(t *testing.T) {
+	// Arrange: the ONE ordering pair the control lane must not break. A
+	// resync's answer IS the snapshot, so an ack that arrived first would
+	// report the client current while it still held the state it asked to
+	// replace.
+	s, _ := newTestServer(t, 16)
+	cl := newClient(defaultClientBuffer, nil, ClientKindHost)
+	cmd := &frontendv1.FrontendCommand{
+		RequestId: "r-resync", Workspace: "/ws/a",
+		Command: &frontendv1.FrontendCommand_Resync{Resync: &frontendv1.ResyncCmd{}},
+	}
+
+	// Act.
+	s.processCommand(s.newCommandTicket(cl, cmd, time.Now(), s.inflight.Add(1)))
+
+	// Assert.
+	frames := popFrames(t, cl)
+	if len(frames) != 2 {
+		t.Fatalf("queued frames = %d, want the snapshot and its ack", len(frames))
+	}
+	if frames[0].GetSnapshot() == nil {
+		t.Fatalf("first frame = %v, want the resync snapshot", frames[0].GetFrame())
+	}
+	if frames[1].GetCommandAck().GetRequestId() != "r-resync" {
+		t.Fatalf("second frame = %v, want the resync ack behind its snapshot", frames[1].GetFrame())
+	}
+}
+
+func TestAResyncAckDoesNotOvertakeTheDeltasQueuedBeforeIt(t *testing.T) {
+	// Arrange: a bulk backlog, then a resync. The snapshot and the ack both
+	// belong behind that backlog, because a snapshot adopted ahead of the
+	// deltas queued before it would have the client apply stale deltas onto
+	// fresh state.
+	s, _ := newTestServer(t, 16)
+	cl := newClient(defaultClientBuffer, nil, ClientKindHost)
+	s.enqueue(cl, outFrame{data: mustMarshal(t, ConversationDeltaFrame(&frontendv1.ConversationDelta{Workspace: "/ws/a"}))})
+	cmd := &frontendv1.FrontendCommand{
+		RequestId: "r-resync", Workspace: "/ws/a",
+		Command: &frontendv1.FrontendCommand_Resync{Resync: &frontendv1.ResyncCmd{}},
+	}
+
+	// Act.
+	s.processCommand(s.newCommandTicket(cl, cmd, time.Now(), s.inflight.Add(1)))
+
+	// Assert.
+	frames := popFrames(t, cl)
+	if len(frames) != 3 {
+		t.Fatalf("queued frames = %d, want the delta, the snapshot and the ack", len(frames))
+	}
+	if frames[0].GetConversationDelta() == nil {
+		t.Fatalf("first frame = %v, want the delta queued before the resync", frames[0].GetFrame())
+	}
+	if frames[1].GetSnapshot() == nil || frames[2].GetCommandAck() == nil {
+		t.Fatalf("frames = %v/%v, want the snapshot then its ack", frames[1].GetFrame(), frames[2].GetFrame())
+	}
+}
+
+// mustMarshal encodes a frame the way the delivery path does.
+func mustMarshal(t *testing.T, frame *frontendv1.FrontendFrame) []byte {
+	t.Helper()
+	data, err := marshalFrame(frame)
+	if err != nil {
+		t.Fatalf("marshal frame: %v", err)
+	}
+	return data
 }
