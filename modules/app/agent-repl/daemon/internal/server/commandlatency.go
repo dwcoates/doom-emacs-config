@@ -94,6 +94,23 @@ func (r *targetCommandLatencyRecorder) RecordCommandLatency(sample frontend.Comm
 		event.Level = dlog.LevelWarn
 		event.Message = "frontend command ack exceeded its latency threshold"
 	}
+	// A SLOW DELIVERY INSIDE A STRUCTURAL WINDOW IS CLASSIFIED, NOT SILENCED.
+	//
+	// The record keeps every figure it had and stays at normal verbosity, so an
+	// operator sees the cost without having enabled anything; what changes is
+	// that it says WHY. The alternative to naming the window is either raising
+	// the threshold — which blinds the alarm to the same latency outside a boot
+	// — or dropping the record, which loses the evidence that the bring-up is
+	// expensive. Neither is acceptable, and neither is what this does.
+	//
+	// It applies only to a plain slow delivery. An ack that never arrived and a
+	// command still in flight are different classes, and the two branches below
+	// take the level back to warn for them.
+	if sample.Slow() && sample.Decision != "" {
+		event.Level = dlog.LevelInfo
+		event.Message = "frontend command ack drained behind an expected window"
+		event.Context["decision"] = sample.Decision
+	}
 	// An ack that never reached the socket is a command the client will never
 	// see answered. It is louder than slow, and it names the reason rather than
 	// leaving a fast-looking record behind.
