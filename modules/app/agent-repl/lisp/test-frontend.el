@@ -1313,6 +1313,37 @@ exact failure seen live in the fresh instance."
         (should (equal ensured "ws1"))
         (should (eq displayed 'fake-buffer))))))
 
+(ert-deftest agent-repl-test-frontend-open-mounts-in-the-target-perspective ()
+  "The DEFERRED webview mount runs with the TARGET workspace activated.
+Establishment is asynchronous, so the continuation fires after the user
+may have moved on; without the background-workspace anchor the mount
+would lay out the frame of whichever perspective is current then."
+  ;; Arrange — establishment is stashed, not run, so the user \"moves\" first.
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((current "other")
+          (continuation nil)
+          (mounted-in nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p)
+                 (lambda () t))
+                ((symbol-function 'agent-repl--ws-current-name)
+                 (lambda () current))
+                ((symbol-function 'agent-repl--ws-switch)
+                 (lambda (ws &rest _) (setq current ws)))
+                ((symbol-function 'agent-repl--restore-focus)
+                 (lambda (persp &rest _) (setq current persp)))
+                ((symbol-function 'agent-repl--frontend-after-ensure-session)
+                 (lambda (_ws ok _fail) (setq continuation ok) :pending))
+                ((symbol-function 'agent-repl--frontend-ensure-webview-buffer)
+                 (lambda (_ws _url) 'fake-buffer))
+                ((symbol-function 'agent-repl--frontend-display-webview)
+                 (lambda (_ws _buf) (setq mounted-in current))))
+        ;; Act
+        (agent-repl--gui-open "ws1")
+        (funcall continuation)
+        ;; Assert
+        (should (equal mounted-in "ws1"))
+        (should (equal current "other"))))))
+
 (ert-deftest agent-repl-test-frontend-open-carries-parent-ws-param ()
   "gui-open appends parent_ws (url-encoded :source-ws-dir basename) to the URL.
 The webapp status bar renders it in its topbar."
