@@ -99,7 +99,18 @@ func (x *AgentResponse) GetUsageStamp() *ResponseUsageStamp {
 type AgentThinking struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The reasoning block, verbatim durable evidence (text + signature).
-	Body          *v1.ThinkingBlock `protobuf:"bytes,1,opt,name=body,proto3" json:"body,omitempty"`
+	Body *v1.ThinkingBlock `protobuf:"bytes,1,opt,name=body,proto3" json:"body,omitempty"`
+	// The API message this block was stripped from, verbatim. A live preview is
+	// keyed by the message id its typing deltas carried; this is the resolved
+	// fact that lets the settled block replace its preview instead of appending
+	// beside it. The daemon states it because the daemon did the stripping — a
+	// client that inferred it would be matching "the earliest same-kind
+	// preview", which is exactly the derivation this contract removes.
+	ApiMessageId string `protobuf:"bytes,2,opt,name=api_message_id,json=apiMessageId,proto3" json:"api_message_id,omitempty"`
+	// The block's position in that message's original content array, so two
+	// reasoning blocks from one message settle onto their own previews rather
+	// than both onto the first.
+	BlockIndex    int32 `protobuf:"varint,3,opt,name=block_index,json=blockIndex,proto3" json:"block_index,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -139,6 +150,20 @@ func (x *AgentThinking) GetBody() *v1.ThinkingBlock {
 		return x.Body
 	}
 	return nil
+}
+
+func (x *AgentThinking) GetApiMessageId() string {
+	if x != nil {
+		return x.ApiMessageId
+	}
+	return ""
+}
+
+func (x *AgentThinking) GetBlockIndex() int32 {
+	if x != nil {
+		return x.BlockIndex
+	}
+	return 0
 }
 
 // The per-response usage stamp rendered on an assistant bubble's corner.
@@ -226,9 +251,12 @@ const file_agentshim_frontend_v1_response_bubble_proto_rawDesc = "" +
 	"\rAgentResponse\x12:\n" +
 	"\x04body\x18\x01 \x01(\v2&.agentshim.data.v1.ApiAssistantMessageR\x04body\x12J\n" +
 	"\vusage_stamp\x18\x02 \x01(\v2).agentshim.frontend.v1.ResponseUsageStampR\n" +
-	"usageStamp\"E\n" +
+	"usageStamp\"\x8c\x01\n" +
 	"\rAgentThinking\x124\n" +
-	"\x04body\x18\x01 \x01(\v2 .agentshim.data.v1.ThinkingBlockR\x04body\"\xb1\x01\n" +
+	"\x04body\x18\x01 \x01(\v2 .agentshim.data.v1.ThinkingBlockR\x04body\x12$\n" +
+	"\x0eapi_message_id\x18\x02 \x01(\tR\fapiMessageId\x12\x1f\n" +
+	"\vblock_index\x18\x03 \x01(\x05R\n" +
+	"blockIndex\"\xb1\x01\n" +
 	"\x12ResponseUsageStamp\x124\n" +
 	"\x16expensive_input_tokens\x18\x01 \x01(\x03R\x14expensiveInputTokens\x12*\n" +
 	"\x11cache_read_tokens\x18\x02 \x01(\x03R\x0fcacheReadTokens\x12#\n" +
