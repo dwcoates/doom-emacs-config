@@ -8,6 +8,7 @@ import {
   InterruptConfirmRequiredError,
   ModelSelectionRejectedError,
   type CreateSessionArgs,
+  commandRefusal,
   type CommandRefusal,
 } from "../src/command-dispatch.js";
 import { failureKindName } from "../src/failure-card.js";
@@ -968,5 +969,104 @@ describe("dispatch dial-on-demand", () => {
     expect(records).not.toContainEqual(expect.objectContaining({
       operation: "command-dispatch.dispatch-deferred",
     }));
+  });
+});
+
+
+// --- the refusal disposition: reveal a filed card, or file one --------------
+//
+// `CommandAck.failure_card` exists so a refusal that ALREADY produced a feed
+// card is pointed at rather than restated. Getting this wrong puts one failure
+// on screen twice, worded two different ways.
+
+describe("commandRefusal", () => {
+  function ack(over: Record<string, unknown> = {}) {
+    const frame = decodeFrontendFrame(
+      JSON.stringify({ commandAck: { requestId: "r1", ok: false, ...over } }),
+    );
+    if (frame.frame.case !== "commandAck") throw new Error("wrong variant");
+    return frame.frame.value;
+  }
+
+  it("reveals the card the daemon filed the refusal under", () => {
+    // Arrange / Act
+    const refusal = commandRefusal("hibernateWorkspace", ack({
+      failure: { sessionHibernated: { sinceMs: "1" } },
+      failureCard: { cardUuid: "failure:e9" },
+    }));
+    // Assert
+    expect(refusal).toEqual({
+      kind: "reveal",
+      cardUuid: "failure:e9",
+      failure: expect.anything(),
+    });
+  });
+
+  it("files a card when the ref is EMPTY, which means no card was produced", () => {
+    // Arrange / Act — an empty ref is why the field is a message wrapping a
+    // string rather than a bare string that would make "" ambiguous.
+    const refusal = commandRefusal("hibernateWorkspace", ack({
+      failure: { sessionHibernated: { sinceMs: "1" } },
+      failureCard: { cardUuid: "" },
+      error: "already asleep",
+    }));
+    // Assert
+    expect(refusal.kind).toBe("card");
+  });
+
+  it("carries the DAEMON's kind verbatim onto a filed card", () => {
+    // Arrange / Act — this end adds the sentence and nothing else.
+    const refusal = commandRefusal("hibernateWorkspace", ack({
+      failure: { sessionHibernated: { sinceMs: "1" } },
+    }));
+    // Assert
+    expect(failureKindName(cardOf(refusal).view.kind)).toBe("sessionHibernated");
+  });
+
+  it("classifies a refusal the daemon carried no kind for", () => {
+    // Arrange / Act — somebody has to name it, or the refusal reaches the user
+    // through nothing at all.
+    const refusal = commandRefusal("hibernateWorkspace", ack({ error: "merge lease held" }));
+    // Assert
+    expect(failureKindName(cardOf(refusal).view.kind)).toBe("commandRejectionUnclassified");
+  });
+
+  it("files a card when a card ref arrives with NO classified failure beside it", () => {
+    // Arrange / Act — a ref alone names a card whose account this end never
+    // received; restating the refusal is better than revealing on faith.
+    const refusal = commandRefusal("hibernateWorkspace", ack({
+      failureCard: { cardUuid: "failure:e9" },
+      error: "merge lease held",
+    }));
+    // Assert
+    expect(refusal.kind).toBe("card");
+  });
+
+  it("leads a filed card with the daemon's error text", () => {
+    // Arrange / Act
+    const refusal = commandRefusal("hibernateWorkspace", ack({
+      failure: { sessionHibernated: { sinceMs: "1" } },
+      error: "already asleep",
+    }));
+    // Assert
+    expect(cardOf(refusal).view.message).toBe("already asleep");
+  });
+
+  it("names the command when the daemon sent no error text at all", () => {
+    // Arrange / Act
+    const refusal = commandRefusal("hibernateWorkspace", ack({
+      failure: { sessionHibernated: { sinceMs: "1" } },
+    }));
+    // Assert
+    expect(cardOf(refusal).view.message).toBe("hibernateWorkspace was refused");
+  });
+
+  it("makes a filed refusal card TERMINAL, since a refusal has no closing edge", () => {
+    // Arrange / Act
+    const refusal = commandRefusal("hibernateWorkspace", ack({
+      failure: { sessionHibernated: { sinceMs: "1" } },
+    }));
+    // Assert
+    expect(cardOf(refusal).view.lifecycle).toEqual({ case: "terminal" });
   });
 });
