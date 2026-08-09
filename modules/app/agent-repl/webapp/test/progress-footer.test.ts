@@ -63,7 +63,7 @@ function failureCard(over: Partial<SystemFailureCard> = {}): SystemFailureCard {
 function progress(over: Partial<ProgressInput> = {}): ProgressInput {
   return {
     workspace: "/w",
-    sessionId: "s1",
+    fence: "s1",
     turnStartedAtMs: 0,
     thinkingTokens: 0,
     inputTokens: 0,
