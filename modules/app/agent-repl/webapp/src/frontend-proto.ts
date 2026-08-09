@@ -622,9 +622,23 @@ export interface DaemonView {
   daemonVersion: string;
 }
 
-/** The protojson arm keys a `ConversationItem` oneof may set (S9). */
+/**
+ * The DECODED item vocabulary — flat, one arm per thing the feed can draw.
+ *
+ * It is no longer the wire's own arm set. The figma-idl reshape folded every
+ * agent-produced item under a single `agent` (`AgentEmission`) arm, so the
+ * decoder UNWRAPS that envelope into the flat names below; see
+ * {@link AGENT_EMISSION_ARMS}. Keeping the decoded vocabulary flat is what lets
+ * the state-adapter keep one switch over one closed set instead of two nested
+ * ones.
+ *
+ * `thinking` is new, and it is the reshape's other half: reasoning is its OWN
+ * emission now, stripped from the response body so a renderer that draws both
+ * arms cannot draw it twice.
+ */
 export const CONVERSATION_ITEM_ARMS = [
   "assistantMessage",
+  "thinking",
   "userMessage",
   "toolUse",
   "toolResult",
@@ -2135,13 +2149,68 @@ function decodeConversationDelta(v: unknown): ConversationDelta {
 
 const CONVERSATION_ITEM_ENVELOPE_KEYS = new Set(["uuid", "tsMs", "requestId", "source", "tokenUtilization", "turnAccounting"]);
 const CONVERSATION_ITEM_ARM_SET: ReadonlySet<string> = new Set(CONVERSATION_ITEM_ARMS);
+
+/** The `AgentEmission` arm key that wraps every agent-produced item. */
+const AGENT_EMISSION_ENVELOPE = "agent";
+
+/**
+ * `AgentEmission` arm key → the flat decoded arm it unwraps to, and the field
+ * of the emission that carries the payload the adapter reads.
+ *
+ * `usageStamp` on an `AgentResponse` is NOT carried through: it is a resolved
+ * figure for the bubble's corner that this end does not render yet. It is
+ * dropped here rather than smuggled into the payload so that whoever wires the
+ * stamp up finds one place to add it.
+ */
+const AGENT_EMISSION_ARMS: Readonly<Record<string, { arm: ConversationItemArm; body: string }>> = {
+  response: { arm: "assistantMessage", body: "body" },
+  thinking: { arm: "thinking", body: "body" },
+  toolCall: { arm: "toolUse", body: "call" },
+  toolResult: { arm: "toolResult", body: "result" },
+  toolOutcome: { arm: "toolUseResult", body: "structured" },
+  skillBody: { arm: "skillBody", body: "" },
+  turnResult: { arm: "result", body: "" },
+};
+
+/**
+ * Unwrap the `agent` envelope into one flat arm + its payload.
+ *
+ * The emission oneof is validated STRICTLY here — an empty, multiple or
+ * unrecognized arm throws — because it is a `frontend.v1`-owned message. Only
+ * the payload BELOW it is adopted by shape.
+ */
+function unwrapAgentEmission(v: unknown, ctx: string): { arm: ConversationItemArm; payload: JsonObject } {
+  const emission = ensureObject(v, `${ctx}.agent`);
+  const keys = Object.keys(emission);
+  if (keys.length === 0) {
+    throw new Error(`frontend-proto: ${ctx}.agent carries no emission (empty oneof)`);
+  }
+  if (keys.length > 1) {
+    throw new Error(`frontend-proto: ${ctx}.agent sets multiple emissions: ${keys.join(", ")}`);
+  }
+  const mapped = AGENT_EMISSION_ARMS[keys[0]];
+  if (mapped === undefined) {
+    throw new Error(`frontend-proto: ${ctx}.agent has unrecognized emission '${keys[0]}'`);
+  }
+  const value = ensureObject(emission[keys[0]], `${ctx}.agent.${keys[0]}`);
+  // An emission whose whole content IS the payload (skillBody, turnResult)
+  // names no inner field; the others wrap theirs one level down.
+  const payload = mapped.body === "" ? value : ensureObject(value[mapped.body], `${ctx}.agent.${keys[0]}.${mapped.body}`);
+  return { arm: mapped.arm, payload };
+}
+
 function decodeConversationItem(v: unknown, i: number): ConversationItemFrame {
   const ctx = `ConversationItem[${i}]`;
   const o = ensureObject(v, ctx);
   const keys = Object.keys(o);
-  const armKeys = keys.filter((k) => CONVERSATION_ITEM_ARM_SET.has(k));
+  const armKeys = keys.filter(
+    (k) => CONVERSATION_ITEM_ARM_SET.has(k) || k === AGENT_EMISSION_ENVELOPE,
+  );
   const unknown = keys.filter(
-    (k) => !CONVERSATION_ITEM_ENVELOPE_KEYS.has(k) && !CONVERSATION_ITEM_ARM_SET.has(k),
+    (k) =>
+      !CONVERSATION_ITEM_ENVELOPE_KEYS.has(k) &&
+      !CONVERSATION_ITEM_ARM_SET.has(k) &&
+      k !== AGENT_EMISSION_ENVELOPE,
   );
   if (unknown.length > 0) {
     throw new Error(`frontend-proto: ${ctx} has unrecognized field(s): ${unknown.join(", ")}`);
@@ -2152,15 +2221,18 @@ function decodeConversationItem(v: unknown, i: number): ConversationItemFrame {
   if (armKeys.length > 1) {
     throw new Error(`frontend-proto: ${ctx} sets multiple item variants: ${armKeys.join(", ")}`);
   }
-  const arm = armKeys[0] as ConversationItemArm;
+  const selected = armKeys[0] === AGENT_EMISSION_ENVELOPE
+    ? unwrapAgentEmission(o[AGENT_EMISSION_ENVELOPE], ctx)
+    // Adopt the typed payload by shape (see file-top §5.1 boundary note).
+    : { arm: armKeys[0] as ConversationItemArm, payload: ensureObject(o[armKeys[0]], `${ctx}.${armKeys[0]}`) };
+  const arm = selected.arm;
   const frame: ConversationItemFrame = {
     uuid: str(o, "uuid", ctx),
     tsMs: num(o, "tsMs", ctx),
     requestId: str(o, "requestId", ctx),
     source: enumConversationSource(o, "source", ctx),
     arm,
-    // Adopt the typed payload by shape (see file-top §5.1 boundary note).
-    payload: ensureObject(o[arm], `${ctx}.${arm}`),
+    payload: selected.payload,
     tokenUtilization: o.tokenUtilization === undefined ? [] : ensureArray(o.tokenUtilization, `${ctx}.tokenUtilization`).map((entry, index) => decodeTokenUtilization(entry, `${ctx}.tokenUtilization[${index}]`)),
   };
   if (o.turnAccounting !== undefined) {
