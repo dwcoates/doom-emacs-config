@@ -72,11 +72,13 @@ type AsyncBubble struct {
 	// A newly opened bubble carries an empty body; a bubble arriving in a
 	// reconnect snapshot carries everything the daemon has folded to date.
 	//
-	// A skill invocation is deliberately absent: it is a synchronous card
-	// (AgentEmission.skill_body), never detached work. Should skills ever
-	// detach, they arrive as a new arm here. Nothing is pre-declared for that,
-	// because a speculative arm is a shape no producer has to honour and no
-	// consumer can test against.
+	// Skill invocations are synchronous cards (AgentEmission.skill_body), not
+	// detached work — with one exception, `merge`: the daemon intercepts the
+	// merge skill's invocation and opens it as a bubble, because what follows is
+	// a whole conversation rather than a card. Should any other skill detach, it
+	// arrives as its own new arm here. Nothing is pre-declared for that, because
+	// a speculative arm is a shape no producer has to honour and no consumer can
+	// test against.
 	//
 	// Types that are valid to be assigned to Kind:
 	//
@@ -84,6 +86,7 @@ type AsyncBubble struct {
 	//	*AsyncBubble_Journal
 	//	*AsyncBubble_Shell
 	//	*AsyncBubble_Unclassified
+	//	*AsyncBubble_Merge
 	Kind isAsyncBubble_Kind `protobuf_oneof:"kind"`
 	// The workspace this bubble's work runs under — the same key every
 	// workspace-scoped frame carries. It exists so a snapshot can scope
@@ -210,6 +213,15 @@ func (x *AsyncBubble) GetUnclassified() *AsyncUnclassifiedBubble {
 	return nil
 }
 
+func (x *AsyncBubble) GetMerge() *AsyncMergeBubble {
+	if x != nil {
+		if x, ok := x.Kind.(*AsyncBubble_Merge); ok {
+			return x.Merge
+		}
+	}
+	return nil
+}
+
 func (x *AsyncBubble) GetWorkspace() string {
 	if x != nil {
 		return x.Workspace
@@ -237,6 +249,10 @@ type AsyncBubble_Unclassified struct {
 	Unclassified *AsyncUnclassifiedBubble `protobuf:"bytes,13,opt,name=unclassified,proto3,oneof"`
 }
 
+type AsyncBubble_Merge struct {
+	Merge *AsyncMergeBubble `protobuf:"bytes,14,opt,name=merge,proto3,oneof"`
+}
+
 func (*AsyncBubble_Agent) isAsyncBubble_Kind() {}
 
 func (*AsyncBubble_Journal) isAsyncBubble_Kind() {}
@@ -244,6 +260,8 @@ func (*AsyncBubble_Journal) isAsyncBubble_Kind() {}
 func (*AsyncBubble_Shell) isAsyncBubble_Kind() {}
 
 func (*AsyncBubble_Unclassified) isAsyncBubble_Kind() {}
+
+func (*AsyncBubble_Merge) isAsyncBubble_Kind() {}
 
 // A detached agent: a whole conversation happening elsewhere.
 type AsyncAgentBubble struct {
@@ -302,6 +320,72 @@ func (x *AsyncAgentBubble) GetFold() *AsyncFold {
 	return nil
 }
 
+// A merge run: the conversation a merge drives through this workspace's own
+// session, folded exactly like a detached agent's.
+//
+// DAEMON-AUTHORED. No tool spawns it: the daemon opens it when it classifies
+// the Skill invocation `/create-or-update-workspace merge`, and every
+// subsequent emission of the session folds here as a child until the user's
+// own next prompt or an interrupt settles it. Membership is TEMPORAL — the
+// window between that classification and the user taking the session back —
+// not a join key.
+type AsyncMergeBubble struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The merge conversation so far, in emission order, in EXACTLY the
+	// vocabulary the top-level feed uses (the same shape as
+	// AsyncAgentBubble.emissions, deliberately: a frontend's renderer for a
+	// response bubble, a thinking block or a tool card is the same code here).
+	Emissions []*AgentEmission `protobuf:"bytes,1,rep,name=emissions,proto3" json:"emissions,omitempty"`
+	// Tail-cap accounting for `emissions`. See AsyncFold.
+	Fold          *AsyncFold `protobuf:"bytes,2,opt,name=fold,proto3" json:"fold,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AsyncMergeBubble) Reset() {
+	*x = AsyncMergeBubble{}
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AsyncMergeBubble) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AsyncMergeBubble) ProtoMessage() {}
+
+func (x *AsyncMergeBubble) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AsyncMergeBubble.ProtoReflect.Descriptor instead.
+func (*AsyncMergeBubble) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *AsyncMergeBubble) GetEmissions() []*AgentEmission {
+	if x != nil {
+		return x.Emissions
+	}
+	return nil
+}
+
+func (x *AsyncMergeBubble) GetFold() *AsyncFold {
+	if x != nil {
+		return x.Fold
+	}
+	return nil
+}
+
 // A Workflow run's journal: the step log a Workflow launch writes.
 //
 // ONE PRODUCER. This kind exists for the Workflow tool and nothing else — its
@@ -320,7 +404,7 @@ type AsyncWorkflowJournal struct {
 
 func (x *AsyncWorkflowJournal) Reset() {
 	*x = AsyncWorkflowJournal{}
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[2]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -332,7 +416,7 @@ func (x *AsyncWorkflowJournal) String() string {
 func (*AsyncWorkflowJournal) ProtoMessage() {}
 
 func (x *AsyncWorkflowJournal) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[2]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -345,7 +429,7 @@ func (x *AsyncWorkflowJournal) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AsyncWorkflowJournal.ProtoReflect.Descriptor instead.
 func (*AsyncWorkflowJournal) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{2}
+	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *AsyncWorkflowJournal) GetRows() []*AsyncWorkflowJournalRow {
@@ -377,7 +461,7 @@ type AsyncShellBubble struct {
 
 func (x *AsyncShellBubble) Reset() {
 	*x = AsyncShellBubble{}
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[3]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -389,7 +473,7 @@ func (x *AsyncShellBubble) String() string {
 func (*AsyncShellBubble) ProtoMessage() {}
 
 func (x *AsyncShellBubble) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[3]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -402,7 +486,7 @@ func (x *AsyncShellBubble) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AsyncShellBubble.ProtoReflect.Descriptor instead.
 func (*AsyncShellBubble) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{3}
+	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *AsyncShellBubble) GetCommand() string {
@@ -443,7 +527,7 @@ type AsyncUnclassifiedBubble struct {
 
 func (x *AsyncUnclassifiedBubble) Reset() {
 	*x = AsyncUnclassifiedBubble{}
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[4]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -455,7 +539,7 @@ func (x *AsyncUnclassifiedBubble) String() string {
 func (*AsyncUnclassifiedBubble) ProtoMessage() {}
 
 func (x *AsyncUnclassifiedBubble) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[4]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -468,7 +552,7 @@ func (x *AsyncUnclassifiedBubble) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AsyncUnclassifiedBubble.ProtoReflect.Descriptor instead.
 func (*AsyncUnclassifiedBubble) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{4}
+	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *AsyncUnclassifiedBubble) GetToolName() string {
@@ -505,7 +589,7 @@ type AsyncOutputSpool struct {
 
 func (x *AsyncOutputSpool) Reset() {
 	*x = AsyncOutputSpool{}
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[5]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -517,7 +601,7 @@ func (x *AsyncOutputSpool) String() string {
 func (*AsyncOutputSpool) ProtoMessage() {}
 
 func (x *AsyncOutputSpool) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[5]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -530,7 +614,7 @@ func (x *AsyncOutputSpool) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AsyncOutputSpool.ProtoReflect.Descriptor instead.
 func (*AsyncOutputSpool) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{5}
+	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *AsyncOutputSpool) GetText() string {
@@ -571,7 +655,7 @@ type AsyncWorkflowJournalRow struct {
 
 func (x *AsyncWorkflowJournalRow) Reset() {
 	*x = AsyncWorkflowJournalRow{}
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[6]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -583,7 +667,7 @@ func (x *AsyncWorkflowJournalRow) String() string {
 func (*AsyncWorkflowJournalRow) ProtoMessage() {}
 
 func (x *AsyncWorkflowJournalRow) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[6]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -596,7 +680,7 @@ func (x *AsyncWorkflowJournalRow) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AsyncWorkflowJournalRow.ProtoReflect.Descriptor instead.
 func (*AsyncWorkflowJournalRow) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{6}
+	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *AsyncWorkflowJournalRow) GetLabel() string {
@@ -678,7 +762,7 @@ type AsyncWorkflowStepRunning struct {
 
 func (x *AsyncWorkflowStepRunning) Reset() {
 	*x = AsyncWorkflowStepRunning{}
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[7]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -690,7 +774,7 @@ func (x *AsyncWorkflowStepRunning) String() string {
 func (*AsyncWorkflowStepRunning) ProtoMessage() {}
 
 func (x *AsyncWorkflowStepRunning) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[7]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -703,7 +787,7 @@ func (x *AsyncWorkflowStepRunning) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AsyncWorkflowStepRunning.ProtoReflect.Descriptor instead.
 func (*AsyncWorkflowStepRunning) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{7}
+	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{8}
 }
 
 // The step completed successfully.
@@ -715,7 +799,7 @@ type AsyncWorkflowStepDone struct {
 
 func (x *AsyncWorkflowStepDone) Reset() {
 	*x = AsyncWorkflowStepDone{}
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[8]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -727,7 +811,7 @@ func (x *AsyncWorkflowStepDone) String() string {
 func (*AsyncWorkflowStepDone) ProtoMessage() {}
 
 func (x *AsyncWorkflowStepDone) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[8]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -740,7 +824,7 @@ func (x *AsyncWorkflowStepDone) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AsyncWorkflowStepDone.ProtoReflect.Descriptor instead.
 func (*AsyncWorkflowStepDone) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{8}
+	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{9}
 }
 
 // The step failed. The failure text is the row's `detail`; this arm carries no
@@ -753,7 +837,7 @@ type AsyncWorkflowStepFailed struct {
 
 func (x *AsyncWorkflowStepFailed) Reset() {
 	*x = AsyncWorkflowStepFailed{}
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[9]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -765,7 +849,7 @@ func (x *AsyncWorkflowStepFailed) String() string {
 func (*AsyncWorkflowStepFailed) ProtoMessage() {}
 
 func (x *AsyncWorkflowStepFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[9]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -778,7 +862,7 @@ func (x *AsyncWorkflowStepFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AsyncWorkflowStepFailed.ProtoReflect.Descriptor instead.
 func (*AsyncWorkflowStepFailed) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{9}
+	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{10}
 }
 
 // Live-or-settled, expressed as arms so that "settled" and "settled with what
@@ -797,7 +881,7 @@ type AsyncLiveness struct {
 
 func (x *AsyncLiveness) Reset() {
 	*x = AsyncLiveness{}
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[10]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -809,7 +893,7 @@ func (x *AsyncLiveness) String() string {
 func (*AsyncLiveness) ProtoMessage() {}
 
 func (x *AsyncLiveness) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[10]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -822,7 +906,7 @@ func (x *AsyncLiveness) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AsyncLiveness.ProtoReflect.Descriptor instead.
 func (*AsyncLiveness) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{10}
+	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *AsyncLiveness) GetState() isAsyncLiveness_State {
@@ -880,7 +964,7 @@ type AsyncLive struct {
 
 func (x *AsyncLive) Reset() {
 	*x = AsyncLive{}
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[11]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -892,7 +976,7 @@ func (x *AsyncLive) String() string {
 func (*AsyncLive) ProtoMessage() {}
 
 func (x *AsyncLive) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[11]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -905,7 +989,7 @@ func (x *AsyncLive) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AsyncLive.ProtoReflect.Descriptor instead.
 func (*AsyncLive) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{11}
+	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *AsyncLive) GetLastActivityMs() int64 {
@@ -948,7 +1032,7 @@ type AsyncSettled struct {
 
 func (x *AsyncSettled) Reset() {
 	*x = AsyncSettled{}
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[12]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -960,7 +1044,7 @@ func (x *AsyncSettled) String() string {
 func (*AsyncSettled) ProtoMessage() {}
 
 func (x *AsyncSettled) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[12]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -973,7 +1057,7 @@ func (x *AsyncSettled) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AsyncSettled.ProtoReflect.Descriptor instead.
 func (*AsyncSettled) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{12}
+	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *AsyncSettled) GetSettledAtMs() int64 {
@@ -1059,7 +1143,7 @@ type AsyncShellExit struct {
 
 func (x *AsyncShellExit) Reset() {
 	*x = AsyncShellExit{}
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[13]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1071,7 +1155,7 @@ func (x *AsyncShellExit) String() string {
 func (*AsyncShellExit) ProtoMessage() {}
 
 func (x *AsyncShellExit) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[13]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1084,7 +1168,7 @@ func (x *AsyncShellExit) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AsyncShellExit.ProtoReflect.Descriptor instead.
 func (*AsyncShellExit) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{13}
+	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *AsyncShellExit) GetCode() int32 {
@@ -1104,7 +1188,7 @@ type AsyncOutcomeDone struct {
 
 func (x *AsyncOutcomeDone) Reset() {
 	*x = AsyncOutcomeDone{}
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[14]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1116,7 +1200,7 @@ func (x *AsyncOutcomeDone) String() string {
 func (*AsyncOutcomeDone) ProtoMessage() {}
 
 func (x *AsyncOutcomeDone) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[14]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1129,7 +1213,7 @@ func (x *AsyncOutcomeDone) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AsyncOutcomeDone.ProtoReflect.Descriptor instead.
 func (*AsyncOutcomeDone) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{14}
+	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{15}
 }
 
 // Finished by failing. For a process, the daemon resolved this from a nonzero
@@ -1146,7 +1230,7 @@ type AsyncOutcomeError struct {
 
 func (x *AsyncOutcomeError) Reset() {
 	*x = AsyncOutcomeError{}
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[15]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1158,7 +1242,7 @@ func (x *AsyncOutcomeError) String() string {
 func (*AsyncOutcomeError) ProtoMessage() {}
 
 func (x *AsyncOutcomeError) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[15]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1171,7 +1255,7 @@ func (x *AsyncOutcomeError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AsyncOutcomeError.ProtoReflect.Descriptor instead.
 func (*AsyncOutcomeError) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{15}
+	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *AsyncOutcomeError) GetMessage() string {
@@ -1195,7 +1279,7 @@ type AsyncOutcomeKilled struct {
 
 func (x *AsyncOutcomeKilled) Reset() {
 	*x = AsyncOutcomeKilled{}
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[16]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1207,7 +1291,7 @@ func (x *AsyncOutcomeKilled) String() string {
 func (*AsyncOutcomeKilled) ProtoMessage() {}
 
 func (x *AsyncOutcomeKilled) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[16]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1220,7 +1304,7 @@ func (x *AsyncOutcomeKilled) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AsyncOutcomeKilled.ProtoReflect.Descriptor instead.
 func (*AsyncOutcomeKilled) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{16}
+	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *AsyncOutcomeKilled) GetReason() string {
@@ -1254,7 +1338,7 @@ type AsyncFold struct {
 
 func (x *AsyncFold) Reset() {
 	*x = AsyncFold{}
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[17]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1266,7 +1350,7 @@ func (x *AsyncFold) String() string {
 func (*AsyncFold) ProtoMessage() {}
 
 func (x *AsyncFold) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[17]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1279,7 +1363,7 @@ func (x *AsyncFold) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AsyncFold.ProtoReflect.Descriptor instead.
 func (*AsyncFold) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{17}
+	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *AsyncFold) GetDroppedBefore() int64 {
@@ -1330,7 +1414,7 @@ type AsyncBubbleUpdate struct {
 
 func (x *AsyncBubbleUpdate) Reset() {
 	*x = AsyncBubbleUpdate{}
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[18]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1342,7 +1426,7 @@ func (x *AsyncBubbleUpdate) String() string {
 func (*AsyncBubbleUpdate) ProtoMessage() {}
 
 func (x *AsyncBubbleUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[18]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1355,7 +1439,7 @@ func (x *AsyncBubbleUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AsyncBubbleUpdate.ProtoReflect.Descriptor instead.
 func (*AsyncBubbleUpdate) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{18}
+	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *AsyncBubbleUpdate) GetBubbleId() string {
@@ -1469,7 +1553,7 @@ type AsyncAgentUpdate struct {
 
 func (x *AsyncAgentUpdate) Reset() {
 	*x = AsyncAgentUpdate{}
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[19]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1481,7 +1565,7 @@ func (x *AsyncAgentUpdate) String() string {
 func (*AsyncAgentUpdate) ProtoMessage() {}
 
 func (x *AsyncAgentUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[19]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1494,7 +1578,7 @@ func (x *AsyncAgentUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AsyncAgentUpdate.ProtoReflect.Descriptor instead.
 func (*AsyncAgentUpdate) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{19}
+	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *AsyncAgentUpdate) GetEmissions() []*AgentEmission {
@@ -1530,7 +1614,7 @@ type AsyncWorkflowJournalUpdate struct {
 
 func (x *AsyncWorkflowJournalUpdate) Reset() {
 	*x = AsyncWorkflowJournalUpdate{}
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[20]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1542,7 +1626,7 @@ func (x *AsyncWorkflowJournalUpdate) String() string {
 func (*AsyncWorkflowJournalUpdate) ProtoMessage() {}
 
 func (x *AsyncWorkflowJournalUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[20]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1555,7 +1639,7 @@ func (x *AsyncWorkflowJournalUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AsyncWorkflowJournalUpdate.ProtoReflect.Descriptor instead.
 func (*AsyncWorkflowJournalUpdate) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{20}
+	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *AsyncWorkflowJournalUpdate) GetRows() []*AsyncWorkflowJournalRow {
@@ -1588,7 +1672,7 @@ type AsyncOutputAppend struct {
 
 func (x *AsyncOutputAppend) Reset() {
 	*x = AsyncOutputAppend{}
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[21]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1600,7 +1684,7 @@ func (x *AsyncOutputAppend) String() string {
 func (*AsyncOutputAppend) ProtoMessage() {}
 
 func (x *AsyncOutputAppend) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[21]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1613,7 +1697,7 @@ func (x *AsyncOutputAppend) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AsyncOutputAppend.ProtoReflect.Descriptor instead.
 func (*AsyncOutputAppend) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{21}
+	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *AsyncOutputAppend) GetText() string {
@@ -1642,7 +1726,7 @@ type AsyncLivenessUpdate struct {
 
 func (x *AsyncLivenessUpdate) Reset() {
 	*x = AsyncLivenessUpdate{}
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[22]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1654,7 +1738,7 @@ func (x *AsyncLivenessUpdate) String() string {
 func (*AsyncLivenessUpdate) ProtoMessage() {}
 
 func (x *AsyncLivenessUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[22]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1667,7 +1751,7 @@ func (x *AsyncLivenessUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AsyncLivenessUpdate.ProtoReflect.Descriptor instead.
 func (*AsyncLivenessUpdate) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{22}
+	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *AsyncLivenessUpdate) GetLiveness() *AsyncLiveness {
@@ -1705,7 +1789,7 @@ type AsyncBubbleDelta struct {
 
 func (x *AsyncBubbleDelta) Reset() {
 	*x = AsyncBubbleDelta{}
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[23]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1717,7 +1801,7 @@ func (x *AsyncBubbleDelta) String() string {
 func (*AsyncBubbleDelta) ProtoMessage() {}
 
 func (x *AsyncBubbleDelta) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[23]
+	mi := &file_agentshim_frontend_v1_async_bubble_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1730,7 +1814,7 @@ func (x *AsyncBubbleDelta) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AsyncBubbleDelta.ProtoReflect.Descriptor instead.
 func (*AsyncBubbleDelta) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{23}
+	return file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *AsyncBubbleDelta) GetWorkspace() string {
@@ -1772,7 +1856,7 @@ var File_agentshim_frontend_v1_async_bubble_proto protoreflect.FileDescriptor
 
 const file_agentshim_frontend_v1_async_bubble_proto_rawDesc = "" +
 	"\n" +
-	"(agentshim/frontend/v1/async-bubble.proto\x12\x15agentshim.frontend.v1\x1a*agentshim/frontend/v1/agent-emission.proto\"\xb7\x04\n" +
+	"(agentshim/frontend/v1/async-bubble.proto\x12\x15agentshim.frontend.v1\x1a*agentshim/frontend/v1/agent-emission.proto\"\xf8\x04\n" +
 	"\vAsyncBubble\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12+\n" +
 	"\x12origin_tool_use_id\x18\x02 \x01(\tR\x0foriginToolUseId\x12(\n" +
@@ -1784,10 +1868,14 @@ const file_agentshim_frontend_v1_async_bubble_proto_rawDesc = "" +
 	" \x01(\v2'.agentshim.frontend.v1.AsyncAgentBubbleH\x00R\x05agent\x12G\n" +
 	"\ajournal\x18\v \x01(\v2+.agentshim.frontend.v1.AsyncWorkflowJournalH\x00R\ajournal\x12?\n" +
 	"\x05shell\x18\f \x01(\v2'.agentshim.frontend.v1.AsyncShellBubbleH\x00R\x05shell\x12T\n" +
-	"\funclassified\x18\r \x01(\v2..agentshim.frontend.v1.AsyncUnclassifiedBubbleH\x00R\funclassified\x12\x1c\n" +
+	"\funclassified\x18\r \x01(\v2..agentshim.frontend.v1.AsyncUnclassifiedBubbleH\x00R\funclassified\x12?\n" +
+	"\x05merge\x18\x0e \x01(\v2'.agentshim.frontend.v1.AsyncMergeBubbleH\x00R\x05merge\x12\x1c\n" +
 	"\tworkspace\x18\a \x01(\tR\tworkspaceB\x06\n" +
 	"\x04kind\"\x8c\x01\n" +
 	"\x10AsyncAgentBubble\x12B\n" +
+	"\temissions\x18\x01 \x03(\v2$.agentshim.frontend.v1.AgentEmissionR\temissions\x124\n" +
+	"\x04fold\x18\x02 \x01(\v2 .agentshim.frontend.v1.AsyncFoldR\x04fold\"\x8c\x01\n" +
+	"\x10AsyncMergeBubble\x12B\n" +
 	"\temissions\x18\x01 \x03(\v2$.agentshim.frontend.v1.AgentEmissionR\temissions\x124\n" +
 	"\x04fold\x18\x02 \x01(\v2 .agentshim.frontend.v1.AsyncFoldR\x04fold\"\x90\x01\n" +
 	"\x14AsyncWorkflowJournal\x12B\n" +
@@ -1880,72 +1968,76 @@ func file_agentshim_frontend_v1_async_bubble_proto_rawDescGZIP() []byte {
 	return file_agentshim_frontend_v1_async_bubble_proto_rawDescData
 }
 
-var file_agentshim_frontend_v1_async_bubble_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
+var file_agentshim_frontend_v1_async_bubble_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
 var file_agentshim_frontend_v1_async_bubble_proto_goTypes = []any{
 	(*AsyncBubble)(nil),                // 0: agentshim.frontend.v1.AsyncBubble
 	(*AsyncAgentBubble)(nil),           // 1: agentshim.frontend.v1.AsyncAgentBubble
-	(*AsyncWorkflowJournal)(nil),       // 2: agentshim.frontend.v1.AsyncWorkflowJournal
-	(*AsyncShellBubble)(nil),           // 3: agentshim.frontend.v1.AsyncShellBubble
-	(*AsyncUnclassifiedBubble)(nil),    // 4: agentshim.frontend.v1.AsyncUnclassifiedBubble
-	(*AsyncOutputSpool)(nil),           // 5: agentshim.frontend.v1.AsyncOutputSpool
-	(*AsyncWorkflowJournalRow)(nil),    // 6: agentshim.frontend.v1.AsyncWorkflowJournalRow
-	(*AsyncWorkflowStepRunning)(nil),   // 7: agentshim.frontend.v1.AsyncWorkflowStepRunning
-	(*AsyncWorkflowStepDone)(nil),      // 8: agentshim.frontend.v1.AsyncWorkflowStepDone
-	(*AsyncWorkflowStepFailed)(nil),    // 9: agentshim.frontend.v1.AsyncWorkflowStepFailed
-	(*AsyncLiveness)(nil),              // 10: agentshim.frontend.v1.AsyncLiveness
-	(*AsyncLive)(nil),                  // 11: agentshim.frontend.v1.AsyncLive
-	(*AsyncSettled)(nil),               // 12: agentshim.frontend.v1.AsyncSettled
-	(*AsyncShellExit)(nil),             // 13: agentshim.frontend.v1.AsyncShellExit
-	(*AsyncOutcomeDone)(nil),           // 14: agentshim.frontend.v1.AsyncOutcomeDone
-	(*AsyncOutcomeError)(nil),          // 15: agentshim.frontend.v1.AsyncOutcomeError
-	(*AsyncOutcomeKilled)(nil),         // 16: agentshim.frontend.v1.AsyncOutcomeKilled
-	(*AsyncFold)(nil),                  // 17: agentshim.frontend.v1.AsyncFold
-	(*AsyncBubbleUpdate)(nil),          // 18: agentshim.frontend.v1.AsyncBubbleUpdate
-	(*AsyncAgentUpdate)(nil),           // 19: agentshim.frontend.v1.AsyncAgentUpdate
-	(*AsyncWorkflowJournalUpdate)(nil), // 20: agentshim.frontend.v1.AsyncWorkflowJournalUpdate
-	(*AsyncOutputAppend)(nil),          // 21: agentshim.frontend.v1.AsyncOutputAppend
-	(*AsyncLivenessUpdate)(nil),        // 22: agentshim.frontend.v1.AsyncLivenessUpdate
-	(*AsyncBubbleDelta)(nil),           // 23: agentshim.frontend.v1.AsyncBubbleDelta
-	(*AgentEmission)(nil),              // 24: agentshim.frontend.v1.AgentEmission
+	(*AsyncMergeBubble)(nil),           // 2: agentshim.frontend.v1.AsyncMergeBubble
+	(*AsyncWorkflowJournal)(nil),       // 3: agentshim.frontend.v1.AsyncWorkflowJournal
+	(*AsyncShellBubble)(nil),           // 4: agentshim.frontend.v1.AsyncShellBubble
+	(*AsyncUnclassifiedBubble)(nil),    // 5: agentshim.frontend.v1.AsyncUnclassifiedBubble
+	(*AsyncOutputSpool)(nil),           // 6: agentshim.frontend.v1.AsyncOutputSpool
+	(*AsyncWorkflowJournalRow)(nil),    // 7: agentshim.frontend.v1.AsyncWorkflowJournalRow
+	(*AsyncWorkflowStepRunning)(nil),   // 8: agentshim.frontend.v1.AsyncWorkflowStepRunning
+	(*AsyncWorkflowStepDone)(nil),      // 9: agentshim.frontend.v1.AsyncWorkflowStepDone
+	(*AsyncWorkflowStepFailed)(nil),    // 10: agentshim.frontend.v1.AsyncWorkflowStepFailed
+	(*AsyncLiveness)(nil),              // 11: agentshim.frontend.v1.AsyncLiveness
+	(*AsyncLive)(nil),                  // 12: agentshim.frontend.v1.AsyncLive
+	(*AsyncSettled)(nil),               // 13: agentshim.frontend.v1.AsyncSettled
+	(*AsyncShellExit)(nil),             // 14: agentshim.frontend.v1.AsyncShellExit
+	(*AsyncOutcomeDone)(nil),           // 15: agentshim.frontend.v1.AsyncOutcomeDone
+	(*AsyncOutcomeError)(nil),          // 16: agentshim.frontend.v1.AsyncOutcomeError
+	(*AsyncOutcomeKilled)(nil),         // 17: agentshim.frontend.v1.AsyncOutcomeKilled
+	(*AsyncFold)(nil),                  // 18: agentshim.frontend.v1.AsyncFold
+	(*AsyncBubbleUpdate)(nil),          // 19: agentshim.frontend.v1.AsyncBubbleUpdate
+	(*AsyncAgentUpdate)(nil),           // 20: agentshim.frontend.v1.AsyncAgentUpdate
+	(*AsyncWorkflowJournalUpdate)(nil), // 21: agentshim.frontend.v1.AsyncWorkflowJournalUpdate
+	(*AsyncOutputAppend)(nil),          // 22: agentshim.frontend.v1.AsyncOutputAppend
+	(*AsyncLivenessUpdate)(nil),        // 23: agentshim.frontend.v1.AsyncLivenessUpdate
+	(*AsyncBubbleDelta)(nil),           // 24: agentshim.frontend.v1.AsyncBubbleDelta
+	(*AgentEmission)(nil),              // 25: agentshim.frontend.v1.AgentEmission
 }
 var file_agentshim_frontend_v1_async_bubble_proto_depIdxs = []int32{
-	10, // 0: agentshim.frontend.v1.AsyncBubble.liveness:type_name -> agentshim.frontend.v1.AsyncLiveness
+	11, // 0: agentshim.frontend.v1.AsyncBubble.liveness:type_name -> agentshim.frontend.v1.AsyncLiveness
 	1,  // 1: agentshim.frontend.v1.AsyncBubble.agent:type_name -> agentshim.frontend.v1.AsyncAgentBubble
-	2,  // 2: agentshim.frontend.v1.AsyncBubble.journal:type_name -> agentshim.frontend.v1.AsyncWorkflowJournal
-	3,  // 3: agentshim.frontend.v1.AsyncBubble.shell:type_name -> agentshim.frontend.v1.AsyncShellBubble
-	4,  // 4: agentshim.frontend.v1.AsyncBubble.unclassified:type_name -> agentshim.frontend.v1.AsyncUnclassifiedBubble
-	24, // 5: agentshim.frontend.v1.AsyncAgentBubble.emissions:type_name -> agentshim.frontend.v1.AgentEmission
-	17, // 6: agentshim.frontend.v1.AsyncAgentBubble.fold:type_name -> agentshim.frontend.v1.AsyncFold
-	6,  // 7: agentshim.frontend.v1.AsyncWorkflowJournal.rows:type_name -> agentshim.frontend.v1.AsyncWorkflowJournalRow
-	17, // 8: agentshim.frontend.v1.AsyncWorkflowJournal.fold:type_name -> agentshim.frontend.v1.AsyncFold
-	5,  // 9: agentshim.frontend.v1.AsyncShellBubble.output:type_name -> agentshim.frontend.v1.AsyncOutputSpool
-	5,  // 10: agentshim.frontend.v1.AsyncUnclassifiedBubble.output:type_name -> agentshim.frontend.v1.AsyncOutputSpool
-	7,  // 11: agentshim.frontend.v1.AsyncWorkflowJournalRow.running:type_name -> agentshim.frontend.v1.AsyncWorkflowStepRunning
-	8,  // 12: agentshim.frontend.v1.AsyncWorkflowJournalRow.done:type_name -> agentshim.frontend.v1.AsyncWorkflowStepDone
-	9,  // 13: agentshim.frontend.v1.AsyncWorkflowJournalRow.failed:type_name -> agentshim.frontend.v1.AsyncWorkflowStepFailed
-	11, // 14: agentshim.frontend.v1.AsyncLiveness.live:type_name -> agentshim.frontend.v1.AsyncLive
-	12, // 15: agentshim.frontend.v1.AsyncLiveness.settled:type_name -> agentshim.frontend.v1.AsyncSettled
-	13, // 16: agentshim.frontend.v1.AsyncSettled.shell_exit:type_name -> agentshim.frontend.v1.AsyncShellExit
-	14, // 17: agentshim.frontend.v1.AsyncSettled.done:type_name -> agentshim.frontend.v1.AsyncOutcomeDone
-	15, // 18: agentshim.frontend.v1.AsyncSettled.error:type_name -> agentshim.frontend.v1.AsyncOutcomeError
-	16, // 19: agentshim.frontend.v1.AsyncSettled.killed:type_name -> agentshim.frontend.v1.AsyncOutcomeKilled
-	19, // 20: agentshim.frontend.v1.AsyncBubbleUpdate.agent:type_name -> agentshim.frontend.v1.AsyncAgentUpdate
-	20, // 21: agentshim.frontend.v1.AsyncBubbleUpdate.journal:type_name -> agentshim.frontend.v1.AsyncWorkflowJournalUpdate
-	21, // 22: agentshim.frontend.v1.AsyncBubbleUpdate.shell:type_name -> agentshim.frontend.v1.AsyncOutputAppend
-	21, // 23: agentshim.frontend.v1.AsyncBubbleUpdate.unclassified:type_name -> agentshim.frontend.v1.AsyncOutputAppend
-	22, // 24: agentshim.frontend.v1.AsyncBubbleUpdate.liveness:type_name -> agentshim.frontend.v1.AsyncLivenessUpdate
-	24, // 25: agentshim.frontend.v1.AsyncAgentUpdate.emissions:type_name -> agentshim.frontend.v1.AgentEmission
-	17, // 26: agentshim.frontend.v1.AsyncAgentUpdate.fold:type_name -> agentshim.frontend.v1.AsyncFold
-	6,  // 27: agentshim.frontend.v1.AsyncWorkflowJournalUpdate.rows:type_name -> agentshim.frontend.v1.AsyncWorkflowJournalRow
-	17, // 28: agentshim.frontend.v1.AsyncWorkflowJournalUpdate.fold:type_name -> agentshim.frontend.v1.AsyncFold
-	10, // 29: agentshim.frontend.v1.AsyncLivenessUpdate.liveness:type_name -> agentshim.frontend.v1.AsyncLiveness
-	0,  // 30: agentshim.frontend.v1.AsyncBubbleDelta.opened:type_name -> agentshim.frontend.v1.AsyncBubble
-	18, // 31: agentshim.frontend.v1.AsyncBubbleDelta.updates:type_name -> agentshim.frontend.v1.AsyncBubbleUpdate
-	32, // [32:32] is the sub-list for method output_type
-	32, // [32:32] is the sub-list for method input_type
-	32, // [32:32] is the sub-list for extension type_name
-	32, // [32:32] is the sub-list for extension extendee
-	0,  // [0:32] is the sub-list for field type_name
+	3,  // 2: agentshim.frontend.v1.AsyncBubble.journal:type_name -> agentshim.frontend.v1.AsyncWorkflowJournal
+	4,  // 3: agentshim.frontend.v1.AsyncBubble.shell:type_name -> agentshim.frontend.v1.AsyncShellBubble
+	5,  // 4: agentshim.frontend.v1.AsyncBubble.unclassified:type_name -> agentshim.frontend.v1.AsyncUnclassifiedBubble
+	2,  // 5: agentshim.frontend.v1.AsyncBubble.merge:type_name -> agentshim.frontend.v1.AsyncMergeBubble
+	25, // 6: agentshim.frontend.v1.AsyncAgentBubble.emissions:type_name -> agentshim.frontend.v1.AgentEmission
+	18, // 7: agentshim.frontend.v1.AsyncAgentBubble.fold:type_name -> agentshim.frontend.v1.AsyncFold
+	25, // 8: agentshim.frontend.v1.AsyncMergeBubble.emissions:type_name -> agentshim.frontend.v1.AgentEmission
+	18, // 9: agentshim.frontend.v1.AsyncMergeBubble.fold:type_name -> agentshim.frontend.v1.AsyncFold
+	7,  // 10: agentshim.frontend.v1.AsyncWorkflowJournal.rows:type_name -> agentshim.frontend.v1.AsyncWorkflowJournalRow
+	18, // 11: agentshim.frontend.v1.AsyncWorkflowJournal.fold:type_name -> agentshim.frontend.v1.AsyncFold
+	6,  // 12: agentshim.frontend.v1.AsyncShellBubble.output:type_name -> agentshim.frontend.v1.AsyncOutputSpool
+	6,  // 13: agentshim.frontend.v1.AsyncUnclassifiedBubble.output:type_name -> agentshim.frontend.v1.AsyncOutputSpool
+	8,  // 14: agentshim.frontend.v1.AsyncWorkflowJournalRow.running:type_name -> agentshim.frontend.v1.AsyncWorkflowStepRunning
+	9,  // 15: agentshim.frontend.v1.AsyncWorkflowJournalRow.done:type_name -> agentshim.frontend.v1.AsyncWorkflowStepDone
+	10, // 16: agentshim.frontend.v1.AsyncWorkflowJournalRow.failed:type_name -> agentshim.frontend.v1.AsyncWorkflowStepFailed
+	12, // 17: agentshim.frontend.v1.AsyncLiveness.live:type_name -> agentshim.frontend.v1.AsyncLive
+	13, // 18: agentshim.frontend.v1.AsyncLiveness.settled:type_name -> agentshim.frontend.v1.AsyncSettled
+	14, // 19: agentshim.frontend.v1.AsyncSettled.shell_exit:type_name -> agentshim.frontend.v1.AsyncShellExit
+	15, // 20: agentshim.frontend.v1.AsyncSettled.done:type_name -> agentshim.frontend.v1.AsyncOutcomeDone
+	16, // 21: agentshim.frontend.v1.AsyncSettled.error:type_name -> agentshim.frontend.v1.AsyncOutcomeError
+	17, // 22: agentshim.frontend.v1.AsyncSettled.killed:type_name -> agentshim.frontend.v1.AsyncOutcomeKilled
+	20, // 23: agentshim.frontend.v1.AsyncBubbleUpdate.agent:type_name -> agentshim.frontend.v1.AsyncAgentUpdate
+	21, // 24: agentshim.frontend.v1.AsyncBubbleUpdate.journal:type_name -> agentshim.frontend.v1.AsyncWorkflowJournalUpdate
+	22, // 25: agentshim.frontend.v1.AsyncBubbleUpdate.shell:type_name -> agentshim.frontend.v1.AsyncOutputAppend
+	22, // 26: agentshim.frontend.v1.AsyncBubbleUpdate.unclassified:type_name -> agentshim.frontend.v1.AsyncOutputAppend
+	23, // 27: agentshim.frontend.v1.AsyncBubbleUpdate.liveness:type_name -> agentshim.frontend.v1.AsyncLivenessUpdate
+	25, // 28: agentshim.frontend.v1.AsyncAgentUpdate.emissions:type_name -> agentshim.frontend.v1.AgentEmission
+	18, // 29: agentshim.frontend.v1.AsyncAgentUpdate.fold:type_name -> agentshim.frontend.v1.AsyncFold
+	7,  // 30: agentshim.frontend.v1.AsyncWorkflowJournalUpdate.rows:type_name -> agentshim.frontend.v1.AsyncWorkflowJournalRow
+	18, // 31: agentshim.frontend.v1.AsyncWorkflowJournalUpdate.fold:type_name -> agentshim.frontend.v1.AsyncFold
+	11, // 32: agentshim.frontend.v1.AsyncLivenessUpdate.liveness:type_name -> agentshim.frontend.v1.AsyncLiveness
+	0,  // 33: agentshim.frontend.v1.AsyncBubbleDelta.opened:type_name -> agentshim.frontend.v1.AsyncBubble
+	19, // 34: agentshim.frontend.v1.AsyncBubbleDelta.updates:type_name -> agentshim.frontend.v1.AsyncBubbleUpdate
+	35, // [35:35] is the sub-list for method output_type
+	35, // [35:35] is the sub-list for method input_type
+	35, // [35:35] is the sub-list for extension type_name
+	35, // [35:35] is the sub-list for extension extendee
+	0,  // [0:35] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_frontend_v1_async_bubble_proto_init() }
@@ -1959,22 +2051,23 @@ func file_agentshim_frontend_v1_async_bubble_proto_init() {
 		(*AsyncBubble_Journal)(nil),
 		(*AsyncBubble_Shell)(nil),
 		(*AsyncBubble_Unclassified)(nil),
+		(*AsyncBubble_Merge)(nil),
 	}
-	file_agentshim_frontend_v1_async_bubble_proto_msgTypes[6].OneofWrappers = []any{
+	file_agentshim_frontend_v1_async_bubble_proto_msgTypes[7].OneofWrappers = []any{
 		(*AsyncWorkflowJournalRow_Running)(nil),
 		(*AsyncWorkflowJournalRow_Done)(nil),
 		(*AsyncWorkflowJournalRow_Failed)(nil),
 	}
-	file_agentshim_frontend_v1_async_bubble_proto_msgTypes[10].OneofWrappers = []any{
+	file_agentshim_frontend_v1_async_bubble_proto_msgTypes[11].OneofWrappers = []any{
 		(*AsyncLiveness_Live)(nil),
 		(*AsyncLiveness_Settled)(nil),
 	}
-	file_agentshim_frontend_v1_async_bubble_proto_msgTypes[12].OneofWrappers = []any{
+	file_agentshim_frontend_v1_async_bubble_proto_msgTypes[13].OneofWrappers = []any{
 		(*AsyncSettled_Done)(nil),
 		(*AsyncSettled_Error)(nil),
 		(*AsyncSettled_Killed)(nil),
 	}
-	file_agentshim_frontend_v1_async_bubble_proto_msgTypes[18].OneofWrappers = []any{
+	file_agentshim_frontend_v1_async_bubble_proto_msgTypes[19].OneofWrappers = []any{
 		(*AsyncBubbleUpdate_Agent)(nil),
 		(*AsyncBubbleUpdate_Journal)(nil),
 		(*AsyncBubbleUpdate_Shell)(nil),
@@ -1987,7 +2080,7 @@ func file_agentshim_frontend_v1_async_bubble_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_frontend_v1_async_bubble_proto_rawDesc), len(file_agentshim_frontend_v1_async_bubble_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   24,
+			NumMessages:   25,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
