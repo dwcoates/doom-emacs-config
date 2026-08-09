@@ -326,6 +326,11 @@ That is naming what was refused, not composing prose for it."
       (list :class (agent-repl-failure-kind-class type)
             :type type
             :message message
+            ;; WHETHER `:message' IS PROSE OR EVIDENCE.  The wire card path
+            ;; carries a sentence the daemon composed for a human; this path
+            ;; may carry the raw `err.Error()' chain instead, and the echo area
+            ;; must translate the second rather than print it.
+            :message-raw (and (stringp err) (not (string-empty-p err)) t)
             :detail ""
             ;; A refusal is a decision, not a window: nothing closes it.
             :resolved nil
@@ -521,8 +526,37 @@ a reader gets the sentence and a debugger still gets the evidence."
                        text)
       text)))
 
-(defun agent-repl-failure-surface (workspace failure)
+(defun agent-repl-failure--echo-copy (failure text verb)
+  "Return the ONE user-facing sentence FAILURE may put in the echo area.
+
+TEXT is `agent-repl-failure-text''s full account.  That account JOINS the
+prose and the raw evidence, which makes it the right thing to log and the
+wrong thing to echo, so this narrows it.
+
+VERB names the command that earned the failure, for the cases where copy
+has to be composed rather than adopted.
+
+Three sources, in order of how ready they are to be read:
+
+  1. a typed resume failure composes its own actionable prose and never
+     admits the raw account into it — TEXT already IS the sentence;
+  2. a wire card carries a daemon-composed sentence in `:message' — the
+     daemon wrote it for a human, so it is used verbatim;
+  3. a legacy ack whose `:message' is the raw `err.Error()' chain
+     \(`:message-raw'), which is translated, never printed."
+  (let ((message (plist-get failure :message)))
+    (cond
+     ((plist-get failure :session-resume) text)
+     ((plist-get failure :message-raw)
+      (agent-repl--user-copy-for-error message verb))
+     ((and (stringp message) (not (string-empty-p message))) message)
+     (t (agent-repl--user-copy-for-error nil verb)))))
+
+(defun agent-repl-failure-surface (workspace failure &optional verb)
   "Log FAILURE for WORKSPACE and echo it.
+
+VERB names the command the failure answers (\"prompt\", \"hibernate\"),
+used only when copy has to be composed because the failure carried none.
 
 The single surfacing point for a classified failure, so the log line and
 the echo can never describe it differently.  A RESOLVED failure (one whose
@@ -555,7 +589,15 @@ re-announce a closed window as a live alarm."
                        (plist-get failure :resolved-at)
                        (plist-get failure :item-uuid)
                        text)
-      (message "agent-repl: %s" text)
+      ;; THE ECHO IS THE DAEMON'S OWN PROSE, AND ONLY THAT.  A classified
+      ;; failure arrives display-ready: `:message' is a sentence the daemon
+      ;; composed for a human, so it is passed through verbatim rather than
+      ;; re-translated.  `:detail' is the raw account behind it and belongs on
+      ;; the log line, not in the echo area — `agent-repl-failure-text' still
+      ;; joins the two for every consumer that wants the whole account.
+      (agent-repl--user-message workspace "%s"
+                                (list (agent-repl-failure--echo-copy failure text verb))
+                                :detail text)
       text)))
 
 (provide 'failure)

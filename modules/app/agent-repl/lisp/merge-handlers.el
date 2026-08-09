@@ -105,7 +105,9 @@ other command; the DISPLAY name rides `:workspaceName'."
        (agent-repl--warn ws
                         "merge-dispatch-over-uds: ws=%s request-id=%s command REJECTED err=%s"
                         ws req err)
-       (message "agent-repl: merge of %s refused: %s" ws err))
+       (agent-repl--user-message-for-error
+        ws "merge" err
+        :detail (format "mergeWorkspace ws=%s request-id=%s err=%s" ws req err)))
      :on-success
      (lambda ()
        (agent-repl--host-action-settle req t nil)
@@ -115,7 +117,9 @@ other command; the DISPLAY name rides `:workspaceName'."
     (agent-repl--log ws
                      "merge-dispatch-over-uds: ws=%s command-issued request-id=%s"
                      ws req)
-    (message "agent-repl: merge of %s requested — the daemon reports each phase here" ws)
+    (agent-repl--user-message
+     ws "merge of %s requested — the daemon reports each phase here" (list ws)
+     :detail (format "mergeWorkspace request-id=%s" req))
     req))
 
 (defun agent-repl--merge-resume-over-uds (ws)
@@ -288,8 +292,12 @@ creates a second question."
                            ws previous new phase landed
                            (plist-get status :run-id)
                            state-edge phase-edge tick cause facts)
-          (message "agent-repl: %s %s%s" ws word
-                   (if facts (format " — %s" (string-join facts ", ")) "")))))))
+          (agent-repl--user-message
+           ws "%s %s%s"
+           (list ws word (if facts (format " — %s" (string-join facts ", ")) ""))
+           :detail (format "merge phase edge %s -> %s phase=%s landed=%s run-id=%s cause=%S"
+                           previous new phase landed
+                           (plist-get status :run-id) cause)))))))
 
 ;; Registered here (merge-handlers.el is the merge surface) though the hook
 ;; variable is defined in frontend-state.el: `add-hook' auto-vivifies the

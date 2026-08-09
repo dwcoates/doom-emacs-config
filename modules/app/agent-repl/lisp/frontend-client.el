@@ -235,7 +235,10 @@ Returns `:pending' when readiness is asynchronous, otherwise `:ready'."
                               outcome attempt (- (float-time) started) detail)
              (if (eq outcome 'ready)
                  (funcall on-ready)
-               (message "agent-repl: frontend readiness failed: %s" detail)
+               (agent-repl--user-message
+                ws "the frontend daemon is not responding; check that claude-repld is running"
+                nil :detail (format "frontend readiness failed after %d attempt(s): %s"
+                                    attempt detail))
                (funcall on-failure detail))))
          (tick ()
            (cond
@@ -255,12 +258,37 @@ Returns `:pending' when readiness is asynchronous, otherwise `:ready'."
     (if (agent-repl--frontend-daemon-ready-p) (progn (finish 'ready) :ready)
       (tick) :pending))))
 
+(defconst agent-repl--frontend-operation-verbs
+  '(("openWorkspace"     . "open")
+    ("createSession"     . "session start")
+    ("ensure-session"    . "session setup")
+    ("gui-adopt-session" . "conversation resume")
+    ("daemon"            . "daemon health check"))
+  "The user-facing verb naming each async frontend OPERATION label.
+The labels are internal and several CARRY IDENTIFIERS — the session health
+probe's label is \"session ws=… id=…\" — so a label is mapped to copy
+rather than printed into the echo area.")
+
+(defun agent-repl--frontend-operation-verb (operation)
+  "Return the user-facing verb naming OPERATION, or nil when there is none.
+An unmapped label yields nil, which `agent-repl--user-copy-for-error'
+renders as \"the command\" rather than leaking the label."
+  (and (stringp operation)
+       (or (cdr (assoc operation agent-repl--frontend-operation-verbs))
+           (and (string-prefix-p "session " operation) "session health check"))))
+
 (defun agent-repl--frontend-async-fail (ws operation request-id started on-failure detail)
   "Log and surface OPERATION failure, then deliver DETAIL to ON-FAILURE."
   (agent-repl--log ws
                    "frontend-async: FAILED operation=%s request-id=%s elapsed=%.3fs detail=%s"
                    operation request-id (- (float-time) started) detail)
-  (message "agent-repl: %s failed: %s" operation detail)
+  ;; DETAIL is whatever the daemon said — routinely a wrapped Go chain naming
+  ;; the workspace, the session and the request.  The echo area gets the
+  ;; translated sentence; DETAIL is filed and still handed to ON-FAILURE, so
+  ;; nothing downstream loses the evidence.
+  (agent-repl--user-message-for-error
+   ws (agent-repl--frontend-operation-verb operation) detail
+   :detail (format "%s failed request-id=%s detail=%s" operation request-id detail))
   (funcall on-failure detail))
 
 (defun agent-repl--frontend-after-health-command
@@ -599,7 +627,10 @@ unreachable, or has no recorded id."
      ws session-id
      (lambda ()
        (agent-repl--log ws "session-health command: HEALTHY session-id=%s" session-id)
-       (message "agent-repl: %s session %s is healthy" ws session-id))
+       ;; The user asked this question interactively, so the answer is theirs;
+       ;; the session id is evidence and belongs on the log line beside it.
+       (agent-repl--user-message ws "%s has a healthy session" (list ws)
+                                 :detail (format "sessionHealth session-id=%s" session-id)))
      (lambda (detail)
        (agent-repl--warn ws "session-health command: FAILED session-id=%s detail=%s"
                         session-id detail)))
@@ -1044,7 +1075,9 @@ failed must never read as a session that came back."
      :on-success
      (lambda ()
        (agent-repl--log ws "restart-session: ws=%s complete request-id=%s" ws req)
-       (message "agent-repl: session restarted (same conversation, fresh shim)")))
+       (agent-repl--user-message
+        ws "session restarted (same conversation, fresh shim)" nil
+        :detail (format "restartSession request-id=%s key=%s" req key))))
     (agent-repl--log ws "restart-session: dispatched ws=%s key=%s request-id=%s" ws key req)
     req))
 
@@ -1068,11 +1101,14 @@ handler and echoed here as well."
      :on-failure
      (lambda (err)
        (agent-repl--warn ws "hibernate-workspace: ws=%s REJECTED: %s" ws err)
-       (message "agent-repl: hibernate refused for %s: %s" ws err))
+       ;; ERR is the daemon's wrapped chain — a turn still in flight or the
+       ;; merge lease held.  Translated for the echo area, filed whole.
+       (agent-repl--user-message-for-error ws "hibernate" err))
      :on-success
      (lambda ()
        (agent-repl--log ws "hibernate-workspace: ws=%s complete request-id=%s" ws req)
-       (message "agent-repl: %s hibernated (session reclaimable, conversation kept)" ws)))
+       (agent-repl--user-message
+        ws "%s hibernated (session reclaimable, conversation kept)" (list ws))))
     (agent-repl--log ws "hibernate-workspace: dispatched ws=%s key=%s request-id=%s" ws key req)
     req))
 

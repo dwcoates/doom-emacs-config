@@ -334,7 +334,9 @@ otherwise settle an action nothing had yet deferred."
                      msgs))))
 
 (ert-deftest agent-repl-test-merge-dispatch-echoes-a-rejection ()
-  "A rejected merge command's error reaches the minibuffer."
+  "A rejected merge command reaches the minibuffer as user copy.
+The refusal is still loud; what no longer reaches the echo area is the
+daemon's own error text, which is filed instead."
   (agent-repl-test--with-captured-messages msgs
     (let (call)
       (cl-letf (((symbol-function 'agent-repl--uds-send-command)
@@ -349,7 +351,48 @@ otherwise settle an action nothing had yet deferred."
         (agent-repl--merge-dispatch-over-uds "ws1")
         (funcall (plist-get call :on-failure) "lease unavailable")))
     (should (cl-some (lambda (m)
-                       (string-match-p "merge of ws1 refused: lease unavailable" m))
+                       (string-match-p "merge failed — see the workspace log for detail" m))
+                     msgs))))
+
+(ert-deftest agent-repl-test-merge-dispatch-keeps-the-rejection-text-off-the-echo ()
+  "The daemon's rejection text is evidence, and evidence is not echoed."
+  (agent-repl-test--with-captured-messages msgs
+    (let (call)
+      (cl-letf (((symbol-function 'agent-repl--uds-send-command)
+                 (agent-repl-test--send-command-stub
+                  "req-1" (lambda (c) (setq call c))))
+                ((symbol-function 'agent-repl--frontend-ws-command-key)
+                 (lambda (ws) ws))
+                ((symbol-function 'agent-repl--host-action-defer)
+                 (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--host-action-settle)
+                 (lambda (&rest _) nil))
+                ;; The warn rung is the QUIET sink (*Messages*, never the echo
+                ;; area) and keeps the rejection text on the record.  Silence it
+                ;; here so what remains captured is the echo alone.
+                ((symbol-function 'agent-repl--warn) (lambda (&rest _) nil)))
+        (agent-repl--merge-dispatch-over-uds "ws1")
+        (funcall (plist-get call :on-failure) "lease unavailable")))
+    (should-not (cl-some (lambda (m) (string-match-p "lease unavailable" m)) msgs))))
+
+(ert-deftest agent-repl-test-merge-dispatch-translates-a-merge-lease-rejection ()
+  "A refusal the translator recognizes says what to do about it."
+  (agent-repl-test--with-captured-messages msgs
+    (let (call)
+      (cl-letf (((symbol-function 'agent-repl--uds-send-command)
+                 (agent-repl-test--send-command-stub
+                  "req-1" (lambda (c) (setq call c))))
+                ((symbol-function 'agent-repl--frontend-ws-command-key)
+                 (lambda (ws) ws))
+                ((symbol-function 'agent-repl--host-action-defer)
+                 (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--host-action-settle)
+                 (lambda (&rest _) nil)))
+        (agent-repl--merge-dispatch-over-uds "ws1")
+        (funcall (plist-get call :on-failure)
+                 "session-controller: held by a merge exclusivity lease")))
+    (should (cl-some (lambda (m)
+                       (string-match-p "merge refused — a merge run owns this session" m))
                      msgs))))
 
 (defmacro agent-repl-test--with-merge-echo (status last &rest body)

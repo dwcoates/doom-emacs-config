@@ -679,11 +679,19 @@ something the user may never have seen the start of is noise."
       (agent-repl-failure-surface
        "ws-a" '(:class :internal :type "shimRejected" :message "rejected"
                 :detail "" :resolved t :resolved-at 17 :item-uuid "resolved-17"))
-      ;; Assert
-      (should (string-match-p "RESOLVED.*resolved-at=17.*item-uuid=\\\"resolved-17\\\""
-                       (cadr (car logs))))
-      (should (string-match-p "OPEN.*resolved-at=0.*item-uuid=\\\"open-1\\\""
-                       (cadr (caddr logs))))
+      ;; Assert.  Records are located by CONTENT, not by position: surfacing
+      ;; also files the user-copy line and its detail through the same helper,
+      ;; and an additive record must not be able to break this assertion.
+      (should (cl-find-if
+               (lambda (entry)
+                 (string-match-p "RESOLVED.*resolved-at=17.*item-uuid=\\\"resolved-17\\\""
+                                 (cadr entry)))
+               logs))
+      (should (cl-find-if
+               (lambda (entry)
+                 (string-match-p "OPEN.*resolved-at=0.*item-uuid=\\\"open-1\\\""
+                                 (cadr entry)))
+               logs))
       (should (cl-every (lambda (entry) (equal (car entry) "ws-a")) logs)))))
 
 (ert-deftest agent-repl-test-failure-surface-open-records-at-the-warn-rung ()
@@ -705,6 +713,91 @@ on the debug rung."
                 :detail "" :resolved-at 0 :item-uuid "open-1"))
       ;; Assert
       (should (equal levels '("warn"))))))
+
+;;;; ---- Echo copy: prose is adopted, evidence is translated ---------------
+
+(ert-deftest agent-repl-test-failure-echo-copy-adopts-daemon-prose-verbatim ()
+  "A wire card's sentence was composed for a human, so it is echoed unchanged."
+  ;; Arrange
+  (let ((failure '(:type "shimRejected" :message "The shim refused the prompt."
+                   :detail "shimclient: nacked")))
+    ;; Act / Assert
+    (should (equal (agent-repl-failure--echo-copy failure "ignored" "prompt")
+                   "The shim refused the prompt."))))
+
+(ert-deftest agent-repl-test-failure-echo-copy-translates-a-raw-ack-message ()
+  "A legacy ack's `:message' IS the Go chain, so it is translated, not printed."
+  ;; Arrange
+  (let ((failure '(:type "shimRejected" :message-raw t
+                   :message "ssm: invariant failed: state=RENDER_STATE_MERGE_QUEUED")))
+    ;; Act
+    (let ((copy (agent-repl-failure--echo-copy failure "ignored" "prompt")))
+      ;; Assert
+      (should (equal copy
+                     (concat "prompt refused — this workspace is queued for a merge; "
+                             "wait for the merge to finish or interrupt it"))))))
+
+(ert-deftest agent-repl-test-failure-echo-copy-keeps-typed-resume-prose ()
+  "A typed resume failure already composed actionable prose; it is used as-is."
+  ;; Arrange
+  (let ((failure '(:type "sessionResumeFailed" :session-resume (:claudeSessionId "s1"))))
+    ;; Act / Assert
+    (should (equal (agent-repl-failure--echo-copy failure "resume prose here" "resume")
+                   "resume prose here"))))
+
+(ert-deftest agent-repl-test-failure-echo-copy-composes-copy-for-an-empty-message ()
+  "A failure carrying no sentence gets one composed around the verb."
+  ;; Act / Assert
+  (should (equal (agent-repl-failure--echo-copy '(:type "shimRejected" :message "")
+                                                "ignored" "prompt")
+                 "prompt failed — see the workspace log for detail")))
+
+(ert-deftest agent-repl-test-failure-from-ack-marks-a-raw-error-message ()
+  "An ack whose message came from the Go error string is flagged as evidence."
+  ;; Act
+  (let ((failure (agent-repl-failure-from-ack
+                  '(:failure (:shimRejected (:x 1)) :error "shimclient: nacked"))))
+    ;; Assert
+    (should (plist-get failure :message-raw))))
+
+(ert-deftest agent-repl-test-failure-from-ack-leaves-an-arm-name-unflagged ()
+  "With no error text the arm NAME is the message, and it is not raw evidence."
+  ;; Act
+  (let ((failure (agent-repl-failure-from-ack '(:failure (:shimRejected (:x 1))))))
+    ;; Assert
+    (should-not (plist-get failure :message-raw))))
+
+(ert-deftest agent-repl-test-failure-surface-keeps-the-detail-out-of-the-echo ()
+  "The raw account is filed, never echoed: the echo area gets the prose alone."
+  ;; Arrange
+  (let (echoed)
+    (cl-letf (((symbol-function 'agent-repl--log) #'ignore)
+              ((symbol-function 'agent-repl--warn) #'ignore)
+              ((symbol-function 'agent-repl--emit-message)
+               (lambda (text &optional _echo) (setq echoed text))))
+      ;; Act
+      (agent-repl-failure-surface
+       "ws-a" '(:class :internal :type "shimRejected" :message "The shim refused."
+                :detail "shimclient: request nacked" :resolved nil :resolved-at 0))
+      ;; Assert
+      (should (equal echoed "agent-repl: The shim refused.")))))
+
+(ert-deftest agent-repl-test-failure-surface-files-the-detail-with-the-user-line ()
+  "The verbose account still reaches the log, beside the line the user read."
+  ;; Arrange
+  (let (logged)
+    (cl-letf (((symbol-function 'agent-repl--log)
+               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged)))
+              ((symbol-function 'agent-repl--warn) #'ignore)
+              ((symbol-function 'agent-repl--emit-message) #'ignore))
+      ;; Act
+      (agent-repl-failure-surface
+       "ws-a" '(:class :internal :type "shimRejected" :message "The shim refused."
+                :detail "shimclient: request nacked" :resolved nil :resolved-at 0))
+      ;; Assert
+      (should (cl-find-if (lambda (line)
+                            (string-match-p "shimclient: request nacked" line))
+                          logged)))))
 
 (provide 'test-failure)
 ;;; test-failure.el ends here

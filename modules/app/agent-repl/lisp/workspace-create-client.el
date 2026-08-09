@@ -471,8 +471,13 @@ and redelivered forever, replacing a visible failure with a loop."
      "workspace-create: JOB FAILED job-id=%s requested-name=%s requested-by-emacs=%S command-file=%s error=%s"
      job-id name (not (null pending))
      (or (plist-get pending :command-file) "nil") text)
-    (message "agent-repl: workspace creation FAILED for '%s' (job %s): %s"
-             name job-id text)
+    ;; The job id and the daemon's error text are evidence; the user needs to
+    ;; know the workspace does not exist and where to read why.
+    (agent-repl--user-message
+     name "workspace '%s' was not created — see the workspace log for detail"
+     (list name)
+     :detail (format "workspaceCreateFailed job-id=%s requested-name=%s error=%s"
+                     job-id name text))
     t))
 
 (defconst agent-repl--host-action-arms
