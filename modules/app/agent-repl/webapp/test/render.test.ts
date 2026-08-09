@@ -712,6 +712,37 @@ describe("renderItem", () => {
     clock.mockRestore();
   });
 
+  it("draws a prompt the daemon has not acknowledged as an ordinary bubble", () => {
+    // Arrange — the webapp's own bubble for a submit still in flight.
+    const item = { ...userTurnAt(14, 32, "do the thing"), unacked: true } as ConversationItem;
+    // Act
+    const html = renderItem(item);
+    // Assert — the words are there on the frame the user hit send.
+    expect(html).toContain("<pre>do the thing</pre>");
+    expect(html).toContain('class="bubble user unacked"');
+  });
+
+  it("holds an unacknowledged prompt bubble still", () => {
+    // Arrange — the breath means the daemon has the prompt, so a bubble it has
+    // not answered yet must not carry one.
+    const item = { ...userTurnAt(14, 32, "do the thing"), unacked: true } as ConversationItem;
+    // Act
+    const el = htmlToElement(renderItem(item)).querySelector<HTMLElement>(".bubble.user");
+    // Assert — no phase to seek, so no delay is stamped either.
+    expect(el?.getAttribute("style")).toBeNull();
+  });
+
+  it("starts the breath on the bubble the daemon's receipt replaced it with", () => {
+    // Arrange — the receipt carries no unacked marking (store.mergeItem
+    // whole-item replaces the local bubble with it).
+    const item = userTurnAt(14, 32, "do the thing");
+    // Act
+    const el = htmlToElement(renderItem(item)).querySelector<HTMLElement>(".bubble.user");
+    // Assert
+    expect(el?.classList.contains("unacked")).toBe(false);
+    expect(el?.style.animationDelay).toMatch(/^-\d+ms$/);
+  });
+
   it("leaves the prompt body without a delay of its own to fall out of phase", () => {
     // Arrange — the body inherits the bubble's transform; it carries no
     // animation, so a delay on it would be meaningless drift.
@@ -4803,6 +4834,21 @@ describe("async-quiescence border (the invariant)", () => {
     // Assert
     expect(html).toContain("bubble user async-live");
     expect(html).toContain(`data-panel-toggle="member:r1:w1"`);
+  });
+
+  it("keeps the amber border on a prompt bubble the daemon has not acknowledged", () => {
+    // Arrange — live async and acknowledgement are independent facts, and the
+    // one class list has to carry both without either dropping the other.
+    const panels: PanelContext = {
+      children: new Map(),
+      isOpen: () => false,
+      watchers: new Map([["r1", [watcher()]]]),
+    };
+    const item = { ...userTurnAt(9, 0), unacked: true } as ConversationItem;
+    // Act
+    const html = renderItem(item, undefined, undefined, panels);
+    // Assert
+    expect(html).toContain(`class="bubble user async-live unacked"`);
   });
 });
 
