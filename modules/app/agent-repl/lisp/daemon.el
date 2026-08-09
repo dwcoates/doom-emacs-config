@@ -35,6 +35,7 @@
 (declare-function agent-repl--backend-phase "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--backend-output-tail "agent-repl-core" (output &optional lines))
 (declare-function agent-repl--logfile-path "agent-repl-core" ())
+(declare-function agent-repl--global-state-file "agent-repl-core" (relative))
 (declare-function agent-repl--doctor-log "agent-repl-doctor" (fmt &rest args))
 (declare-function agent-repl--frontend-turn-active-sessions "agent-repl-frontend-client" ())
 (declare-function agent-repl-runtime-restart "services" (&optional stop-shims initiator))
@@ -295,6 +296,19 @@ alongside the install and codex checks."
 (defconst agent-repl--frontend-daemon-buffer "*claude-repld*"
   "Buffer capturing the daemon process's stdout/stderr.")
 
+(defconst agent-repl--frontend-daemon-buffer-max-chars (* 512 1024)
+  "Characters of daemon output `*claude-repld*' retains before trimming.
+
+The buffer is a CRASH TAIL, never an archive.  Everything structured the
+daemon prints it has already written durably to
+`agent-repl--frontend-daemon-log-path', so an unbounded buffer is
+duplication that only grows: across one long-lived daemon it reached
+tens of megabytes, and at exit that string was formatted whole into a
+log line and split line-by-line, freezing Emacs for over ten minutes.
+
+512KB is far more than any panic, goroutine dump or flag error needs and
+small enough that consuming the whole of it stays cheap.")
+
 (defvar agent-repl--frontend-daemon-line-accumulator ""
   "Trailing PARTIAL line of daemon output, held until its newline arrives.
 
@@ -544,6 +558,49 @@ compares against."
   (format "personal=,work=%s"
           (expand-file-name agent-repl-multi-repo-config-dir)))
 
+(defun agent-repl--frontend-daemon-log-path ()
+  "Return the daemon's own durable structured log, `claude-repld.log'.
+The daemon writes it itself under the shared state root; every record
+the capture buffer trims away is still there, which is what makes
+trimming the buffer a loss of duplication rather than a loss of
+evidence."
+  (agent-repl--global-state-file "claude-repld.log"))
+
+(defun agent-repl--frontend-daemon-trim-capture (proc)
+  "Trim the current buffer to the newest daemon output, keeping PROC's mark sane.
+
+Retains at most `agent-repl--frontend-daemon-buffer-max-chars', cut
+FORWARD to a line boundary so the surviving region starts on a whole
+line rather than mid-record."
+  (let ((cap agent-repl--frontend-daemon-buffer-max-chars))
+    (when (> (- (point-max) (point-min)) cap)
+      ;; Undo would re-accumulate everything the cap just discarded, so the
+      ;; buffer would stay bounded while its undo list did not.  A process
+      ;; capture buffer is never edited by hand; there is nothing to undo.
+      (unless (eq buffer-undo-list t)
+        (setq buffer-undo-list t))
+      (let ((inhibit-read-only t))
+        (save-excursion
+          (goto-char (- (point-max) cap))
+          (let ((cut (if (bolp) (point) (line-beginning-position 2))))
+            ;; `line-beginning-position' 2 answers `point-max' when no newline
+            ;; lies ahead — one line longer than the whole cap.  Keeping a
+            ;; WHOLE line would then mean keeping nothing, so cut mid-line
+            ;; instead: the newest output outranks the alignment.
+            (when (>= cut (point-max))
+              (setq cut (- (point-max) cap)))
+            (delete-region (point-min) cut))))
+      ;; `delete-region' relocates any marker inside the deleted span to its
+      ;; start, so a process mark that had fallen behind the retained region
+      ;; now sits at `point-min' instead of at the insertion point the next
+      ;; chunk must extend.  Re-anchor it at the end of what survived.
+      (when (processp proc)
+        (let ((mark (process-mark proc)))
+          (when (and (markerp mark)
+                     (marker-position mark)
+                     (< (marker-position mark) (point-max)))
+            (set-marker mark (point-max))))))))
+
 (defun agent-repl--frontend-daemon-filter (proc chunk)
   "Capture CHUNK from PROC into its buffer AND the durable structured log.
 
@@ -577,7 +634,12 @@ So:
   relayed `sidecar' and `webapp' records, whose ONLY durable home is
   this mirror, and every unstructured line — panics, goroutine dumps,
   flag errors, Go runtime output — which is the failure evidence this
-  filter was built for."
+  filter was built for.
+
+The capture buffer is trimmed to
+`agent-repl--frontend-daemon-buffer-max-chars' after every chunk, so a
+daemon that runs for days cannot turn it into the tens-of-megabytes
+string that froze Emacs at exit."
   (when (buffer-live-p (process-buffer proc))
     (with-current-buffer (process-buffer proc)
       (let ((moving (= (point) (process-mark proc))))
@@ -585,7 +647,8 @@ So:
           (goto-char (process-mark proc))
           (insert chunk)
           (set-marker (process-mark proc) (point)))
-        (when moving (goto-char (process-mark proc))))))
+        (when moving (goto-char (process-mark proc))))
+      (agent-repl--frontend-daemon-trim-capture proc)))
   (let* ((pending (concat agent-repl--frontend-daemon-line-accumulator
                           (or chunk "")))
          (parts (split-string pending "\n"))
@@ -630,12 +693,33 @@ skipping complete daemon records does not hold for this one."
     (unless (string-empty-p partial)
       (agent-repl--log nil "claude-repld output: %s" partial))))
 
+(defconst agent-repl--frontend-daemon-output-tail-chars 16384
+  "Characters of the daemon capture `agent-repl--frontend-daemon-output' returns.
+
+The capture buffer is already capped, but this bound does not depend on
+that one: the buffer can predate the cap, and nothing else guarantees a
+caller of the exit path never meets a buffer someone else filled.  A
+panic with its goroutine dump fits comfortably; the complete record
+lives in `agent-repl--frontend-daemon-log-path' either way.")
+
 (defun agent-repl--frontend-daemon-output ()
-  "Return the captured `claude-repld' terminal output, trimmed.
+  "Return the TAIL of the captured `claude-repld' terminal output, trimmed.
+
+At most `agent-repl--frontend-daemon-output-tail-chars' characters, read
+directly out of the buffer's final region rather than by materializing
+the whole capture.  That distinction is the incident: taking
+`buffer-string' of a multi-megabyte capture and handing it onward froze
+Emacs for over ten minutes inside a sentinel, where quit is inhibited.
+
 Empty string when the capture buffer was never created."
   (let ((buffer (get-buffer agent-repl--frontend-daemon-buffer)))
     (if (buffer-live-p buffer)
-        (with-current-buffer buffer (string-trim-right (buffer-string)))
+        (with-current-buffer buffer
+          (string-trim-right
+           (buffer-substring-no-properties
+            (max (point-min)
+                 (- (point-max) agent-repl--frontend-daemon-output-tail-chars))
+            (point-max))))
       "")))
 
 (defun agent-repl--frontend-spawn-daemon ()
@@ -941,12 +1025,20 @@ under the reserved `client.\=' prefix."
              (tail (agent-repl--backend-output-tail output)))
         ;; The exit EVENT alone ("exited abnormally with code 1") never says
         ;; why.  The reason is whatever the daemon printed on its way out, so
-        ;; the full capture rides the durable record and its tail rides both
-        ;; the failure card and the echo line.
+        ;; the capture TAIL rides the durable record and its shorter tail
+        ;; rides both the failure card and the echo line.
+        ;;
+        ;; The tail, not the capture.  This record used to splice the whole
+        ;; capture into one format call, which is how a buffer nobody bounded
+        ;; became a multi-megabyte log line.  What the tail leaves out is not
+        ;; lost: the daemon's own structured records are durable in
+        ;; `agent-repl--frontend-daemon-log-path', which the record now names
+        ;; so the reader can go there.
         (agent-repl--log nil
-                         "claude-repld exited: tracked=%s event=%s output=%s"
+                         "claude-repld exited: tracked=%s event=%s output-tail=%s daemon-log=%s"
                          tracked trimmed-event
-                         (if (string-empty-p output) "<empty>" output))
+                         (if (string-empty-p output) "<empty>" output)
+                         (agent-repl--frontend-daemon-log-path))
         (let ((failure (agent-repl-failure-local
                         "client.daemon_exited"
                         "the agent-repl daemon exited"
@@ -968,9 +1060,14 @@ under the reserved `client.\=' prefix."
                  initiator trimmed-event)
                 (agent-repl--frontend-expected-restart-withhold-exit
                  failure trimmed-event tail))
-            (agent-repl--backend-phase nil "daemon exited (%s): %s — full output in %s"
+            ;; Both paths, because the record is genuinely split: the
+            ;; unstructured dying lines (panics, Go runtime output) were
+            ;; mirrored into agent-repl's own log by the filter, while the
+            ;; daemon's structured records only ever land in its own.
+            (agent-repl--backend-phase nil "daemon exited (%s): %s — full output in %s and %s"
                                        trimmed-event tail
-                                       (agent-repl--logfile-path))
+                                       (agent-repl--logfile-path)
+                                       (agent-repl--frontend-daemon-log-path))
             (agent-repl-failure-surface nil failure)))))))
 
 ;;;; ---- Entry point ------------------------------------------------------
