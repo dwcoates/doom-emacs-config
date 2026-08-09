@@ -50,6 +50,10 @@ function journalBubble(id: string): AsyncBubble {
   return bubble({ id, kind: { case: "journal", value: { rows: [], fold: NO_FOLD } } });
 }
 
+function mergeBubble(id: string, over: Partial<AsyncBubble> = {}): AsyncBubble {
+  return bubble({ id, kind: { case: "merge", value: { emissions: [], fold: NO_FOLD } }, ...over });
+}
+
 function push(opened: AsyncBubble[], updates: AsyncBubbleUpdate[] = []): AsyncBubbleDelta {
   return { workspace: "/w", opened, updates, throughSeq: 1, fence: "f1" };
 }
@@ -385,6 +389,67 @@ describe("applying matched updates", () => {
     );
 
     expect(result).toEqual({ ok: true, opened: 1, updated: 1 });
+  });
+});
+
+describe("the merge kind", () => {
+  it("lands a liveness update on a merge bubble by ID ALONE", () => {
+    const registry = seeded(mergeBubble("b1"));
+    const settled: AsyncLiveness = {
+      case: "settled",
+      value: { settledAtMs: 9, outcome: { case: "done" } },
+    };
+
+    registry.applyDelta(push([], [{ bubbleId: "b1", update: { case: "liveness", value: settled } }]));
+
+    expect(registry.get("b1")?.liveness).toEqual(settled);
+  });
+
+  it("REPLACES a merge bubble re-delivered in full under the same id", () => {
+    const registry = seeded(mergeBubble("b1"));
+
+    registry.applyDelta(
+      push([
+        mergeBubble("b1", {
+          kind: {
+            case: "merge",
+            value: {
+              emissions: [{ emission: "response", arm: "assistantMessage", payload: { role: "assistant" } }],
+              fold: NO_FOLD,
+            },
+          },
+        }),
+      ]),
+    );
+
+    const kind = kindOf(registry, "b1");
+    expect([registry.size, kind.case === "merge" && kind.value.emissions.length]).toEqual([1, 1]);
+  });
+
+  it("rejects an agent update addressed to a merge bubble — the contract has no merge arm", () => {
+    const registry = seeded(mergeBubble("b1"));
+
+    const result = registry.applyDelta(
+      push([], [{ bubbleId: "b1", update: { case: "agent", value: { emissions: [], fold: NO_FOLD } } }]),
+    );
+
+    expect(result.ok === false && result.gap.kind).toBe("kind-mismatch");
+  });
+
+  it("does not coerce a merge bubble into the agent kind the rejected arm named", () => {
+    const registry = seeded(mergeBubble("b1"));
+
+    registry.applyDelta(
+      push([], [{ bubbleId: "b1", update: { case: "agent", value: { emissions: [], fold: NO_FOLD } } }]),
+    );
+
+    expect(registry.get("b1")?.kind.case).toBe("merge");
+  });
+
+  it("parents a nested bubble under the merge bubble it was spawned from", () => {
+    const registry = seeded(mergeBubble("b1"), agentBubble("b2", { parentBubbleId: "b1" }));
+
+    expect(registry.children("b1").map((b) => b.id)).toEqual(["b2"]);
   });
 });
 

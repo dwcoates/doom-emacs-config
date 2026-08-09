@@ -2604,6 +2604,26 @@ describe("async bubble ingestion", () => {
     expect(store.asyncBubbles.all().map((b) => b.id)).toEqual(["b2"]);
   });
 
+  it("adopts a snapshot's folded MERGE bubble whole, emissions and all", () => {
+    // Arrange
+    const store = storeAtFence();
+    const merge = agentBubble("b1", {
+      kind: {
+        case: "merge",
+        value: {
+          emissions: [{ emission: "response", arm: "assistantMessage", payload: {} }],
+          fold: { droppedBefore: 3, tailCap: 200 },
+        },
+      },
+    });
+
+    // Act
+    store.ingest([{ kind: "async-bubbles-snapshot", bubbles: [merge] }]);
+
+    // Assert
+    expect(store.asyncBubbles.get("b1")?.kind).toEqual(merge.kind);
+  });
+
   it("retires every bubble on an empty snapshot, which is a real daemon statement", () => {
     // Arrange
     const store = storeAtFence();
