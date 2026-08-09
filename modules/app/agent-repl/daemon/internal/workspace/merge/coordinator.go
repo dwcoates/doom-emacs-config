@@ -1460,11 +1460,11 @@ func (c *QueueCoordinator) runBeforeAction(repo string, req Request) *terminalFa
 // draining continues.
 //
 // IT IS A LOOP BECAUSE THE TWO PARKING OUTCOMES FEED EACH OTHER. A conflict
-// resolved by a resume continues the per-commit replay, which can break the
-// suite; a test fix continues the same replay, which can conflict on a later
-// commit. Expressing that as one loop over a Result — rather than as recursion
-// between the conflict path and the test path — is what keeps "how did this
-// merge end" answerable in one place.
+// resolved by a resume continues the per-commit replay, whose head gate can
+// fail; a test fix re-enters the same replay, which can conflict on a commit the
+// range still owes. Expressing that as one loop over a Result — rather than as
+// recursion between the conflict path and the test path — is what keeps "how did
+// this merge end" answerable in one place.
 //
 // THE REBASE WORKTREE IS CLEANED UP HERE, ON EVERY EXIT, through a defer. This
 // function owns the whole of a merge's life after merge.Driver.Merge returns —
@@ -1476,9 +1476,9 @@ func (c *QueueCoordinator) runBeforeAction(repo string, req Request) *terminalFa
 func (c *QueueCoordinator) settle(repo string, req, driven Request, park *conflictPark, release func(), res Result) bool {
 	driven.WorkDir, driven.BaseHead = res.WorkDir, res.BaseHead
 	defer func() { c.cleanupRebase(repo, driven) }()
-	// attempted records which failing commits have already had their ONE
-	// resolution attempt, so a suite that fails again on the same commit fails
-	// the merge instead of re-prompting an agent that already tried.
+	// attempted records which failures have already had their ONE resolution
+	// attempt, so a suite that fails again under the same identity fails the
+	// merge instead of re-prompting an agent that already tried.
 	attempted := map[string]bool{}
 	for {
 		switch res.Outcome {
@@ -1596,10 +1596,13 @@ func (c *QueueCoordinator) awaitResolution(repo string, req, driven Request, par
 // awaitTestFix drives the ONE resolution attempt a broken test suite gets, and
 // reports what the merge should do next.
 //
-// EXACTLY ONE ATTEMPT PER FAILING COMMIT. A second identical prompt to an agent
-// that already failed to fix the suite is a spin, not a strategy, so a repeat
-// failure on the same commit fails the merge outright. A failure on a
-// LATER commit is a different failure and gets its own attempt.
+// EXACTLY ONE ATTEMPT PER FAILURE, keyed on Result.FailingCommit. A second
+// identical prompt to an agent that already failed to fix the suite is a spin,
+// not a strategy, so a repeat failure under the same identity fails the merge
+// outright. The gate runs once per merge, at the rebased head, and the driver
+// holds that identity STABLE across the re-gate the fix triggers — the fix
+// commit moves the head, and a fresh sha per attempt would make this map hand
+// out attempts without bound.
 //
 // THE ATTEMPT RUNS ON ITS OWN GOROUTINE even though nothing else needs to serve
 // the park meanwhile. That is what keeps an Abandon responsive: closing the
@@ -1705,7 +1708,7 @@ func (c *QueueCoordinator) driveTestFix(ctx context.Context, repo string, req Re
 // function reset the target to its pre-merge head, which is the hazard the
 // rebase design removed rather than guarded.
 func (c *QueueCoordinator) failTestGate(repo string, req, driven Request, release func(), res Result) bool {
-	cause := fmt.Sprintf("test suite failed after rebasing %s and the one resolution attempt did not fix it: %s",
+	cause := fmt.Sprintf("test suite failed on the rebased head %s and the one resolution attempt did not fix it: %s",
 		res.FailingCommit, dlog.Clamp(res.TestFailureTail, testFailureCauseBytes))
 	// The tail is clamped twice over and, for a runner that keeps going after a
 	// suite fails, often carries no trace of the failure itself. The archive is
