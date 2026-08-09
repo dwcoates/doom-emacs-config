@@ -1040,17 +1040,13 @@ func main() {
 	srv := server.New(server.Config{
 		Logf: legacyLog,
 		// One authority with the session controller's hibernation gate.
-		Now:           nowFn,
-		DaemonVersion: daemonVersion,
-		BinaryMTime:   binaryMTime,
-		ForceFake:     *fake,
-		Registry:      sessionRegistry,
-		ModelCatalogs: modelCatalogs,
-		TokenUsage:    tokenUtilizations,
-		// The SAME publisher the SSM's state subscription drives, so the
-		// breakdown the SessionView push resolves and the topbar the state push
-		// resolves are retained together and snapshot together.
-		WorkspaceViews:  agentShim.WorkspaceViews,
+		Now:             nowFn,
+		DaemonVersion:   daemonVersion,
+		BinaryMTime:     binaryMTime,
+		ForceFake:       *fake,
+		Registry:        sessionRegistry,
+		ModelCatalogs:   modelCatalogs,
+		TokenUsage:      tokenUtilizations,
 		Logins:          logins,
 		Accounts:        accounts,
 		IdleTimeout:     *idleTimeout,
@@ -1058,8 +1054,13 @@ func main() {
 		WidgetAssetsDir: *widgetAssets,
 		DaemonAddr:      *addr,
 		Controller:      controller,
-		SSM:             ssmMgr,
-		Frontend:        agentShim.Server,
+		// THE FRONTEND SURFACE WHOLE: the same state machine, the same frame
+		// fan-out and the SAME resolved-view publisher the SSM's state
+		// subscription drives, so the breakdown the SessionView push resolves
+		// and the topbar the state push resolves are retained together and
+		// snapshot together. Handing over one of the three and forgetting
+		// another is not expressible.
+		AgentShim: agentShim,
 	})
 	// Bind the session-command surface now that the *Server exists (createSession
 	// /deleteSession UDS commands and the snapshot DaemonView delegate to it).

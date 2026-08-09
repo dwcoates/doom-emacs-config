@@ -264,24 +264,32 @@ type Config struct {
 	// Controller consumes each session's UDS shim (prompt/interrupt/permission,
 	// plus /status, /commands, /tasks introspection). Required in production.
 	Controller *sessioncontroller.Manager
-	// SSM resolves per-workspace render state (turn-active, live tasks).
-	// Required in production.
-	SSM *ssm.Manager
-	// Frontend fans frontend.v1 frames to the per-session /stream WebSocket.
-	// Required in production.
-	Frontend *frontend.Server
+	// AgentShim is the frontend surface this server publishes through, WHOLE.
+	//
+	// IT IS ONE FIELD BECAUSE IT IS ONE THING. The state machine, the frame
+	// fan-out and the resolved-view publisher are built together by
+	// WireAgentShim and are only meaningful together: the topbar the publisher
+	// resolves is fenced off the state machine's state and delivered by the
+	// fan-out. They used to be three fields — SSM, Frontend, WorkspaceViews —
+	// which meant a caller could hand over two and forget the third, and every
+	// harness in the tree did exactly that: server.New got Frontend and SSM but
+	// no WorkspaceViews, so PublishTokenBreakdown's only call site sat behind a
+	// guard that could never open and the breakdown menu could never arrive.
+	// Nothing said so, because a nil publisher published nothing.
+	//
+	// Taking the shim itself makes the omission unrepresentable rather than
+	// merely refused: there is no way to supply the fan-out without also
+	// supplying the publisher that pushes through it.
+	//
+	// Nil is a server with no frontend surface at all — a focused harness
+	// testing the HTTP routes alone — which is a coherent whole rather than a
+	// half-wired one.
+	AgentShim *AgentShim
 	// Registry persists session records across daemon restarts. Required: it
 	// is the source of truth for which sessions exist.
 	Registry      *registry.Registry
 	ModelCatalogs *SessionModelCatalogs
 	TokenUsage    SessionTokenUsageSource
-	// WorkspaceViews publishes the three RESOLVED per-workspace views. The
-	// SessionView push hands it the durable token aggregate it has already
-	// read, which is what the token-breakdown menu is resolved from; the
-	// topbar and the gate are published from the SSM's own state subscription.
-	// Nil-safe: an unwired publisher publishes nothing, which only a focused
-	// harness does.
-	WorkspaceViews *WorkspaceViews
 	// Logins owns the interactive Claude login terminals; nil disables the
 	// login routes.
 	Logins *login.Manager
@@ -341,14 +349,11 @@ func New(cfg Config) *Server {
 		widgetAssetsDir: cfg.WidgetAssetsDir,
 		daemonAddr:      cfg.DaemonAddr,
 		controller:      cfg.Controller,
-		ssm:             cfg.SSM,
-		frontend:        cfg.Frontend,
 		logins:          cfg.Logins,
 		accounts:        cfg.Accounts,
 		registry:        cfg.Registry,
 		modelCatalogs:   cfg.ModelCatalogs,
 		tokenUsage:      cfg.TokenUsage,
-		workspaceViews:  cfg.WorkspaceViews,
 		idleTimeout:     cfg.IdleTimeout,
 		idleSweepTicks:  cfg.IdleSweepTicks,
 		keepAlive:       cfg.KeepAlive,
@@ -360,6 +365,15 @@ func New(cfg Config) *Server {
 			// permissive by design.
 			CheckOrigin: func(*http.Request) bool { return true },
 		},
+	}
+	// THE THREE HALVES OF THE FRONTEND SURFACE ARE TAKEN TOGETHER OR NOT AT
+	// ALL. Deriving them here rather than accepting them separately is what
+	// makes "the publisher is wired whenever the fan-out is" true by
+	// construction: there is no assignment a caller can omit.
+	if cfg.AgentShim != nil {
+		s.ssm = cfg.AgentShim.SSM
+		s.frontend = cfg.AgentShim.Server
+		s.workspaceViews = cfg.AgentShim.WorkspaceViews
 	}
 	s.idleSweep = s.sweepIdle
 	if s.idleTimeout > 0 || s.idleSweepTicks != nil {
@@ -1673,7 +1687,22 @@ func (s *Server) pushSessionView(id string) {
 // from a stale one, which is the whole job of the token. The withholding is
 // recorded; it is never silent.
 func (s *Server) publishSessionDerivedViews(workspace, sessionID string, usage *frontendv1.SessionTokenUtilization) {
-	if s.workspaceViews == nil || s.ssm == nil || workspace == "" {
+	// NEVER SILENT. This guard used to return with no record at all, which made
+	// an unwired frontend surface indistinguishable from a workspace that
+	// simply had nothing to publish — and since this function holds the only
+	// call site of PublishTokenBreakdown, an unwired publisher meant the
+	// breakdown menu could never arrive and nothing anywhere said why. The
+	// wiring itself is now taken whole (see Config.AgentShim), so the first two
+	// arms are a server with no frontend surface; the third is a session with
+	// no workspace to key its views on.
+	switch {
+	case s.workspaceViews == nil || s.ssm == nil:
+		s.logf("server: token breakdown and revival gate NOT PUBLISHED ws=%q session=%q — this server was built with no frontend surface (Config.AgentShim), so there is no publisher to resolve them through and no state machine to fence them with",
+			workspace, sessionID)
+		return
+	case workspace == "":
+		s.logf("server: token breakdown and revival gate NOT PUBLISHED session=%q — the session names no workspace, which is the only routing key either view has",
+			sessionID)
 		return
 	}
 	state, found, err := s.ssm.Current(workspace)
