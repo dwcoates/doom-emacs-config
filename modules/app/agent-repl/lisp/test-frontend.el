@@ -21,12 +21,33 @@
 
 ;;;; ---- Helpers -----------------------------------------------------------
 
+(defconst agent-repl-test--frontend-build-id "bid1"
+  "Artifact identity every webview URL in this suite is addressed by.
+
+`agent-repl--frontend-build-id' reads the real stamp
+\(`webapp/dist/.build-id') and — deliberately — signals when it is
+absent, because a URL without the artifact's identity is the
+stale-cache bug.  That makes the stamp a BUILD ARTIFACT the suite
+would otherwise depend on: a clean checkout has no `webapp/dist', so
+every URL-building test failed for want of a `bin/build-frontend.sh'
+run rather than for anything about the code under test.
+
+The stamp itself is not this suite's subject — reading it and refusing
+a missing one are covered directly, against the real file, by
+`agent-repl-test-frontend-build-id-reads-the-stamp' and
+`agent-repl-test-frontend-build-id-refuses-a-missing-stamp' in
+test-frontend-client.el, which is where that boundary belongs.")
+
 (defmacro agent-repl-test--with-frontend-ws (ws plist &rest body)
-  "Register workspace WS with PLIST for BODY, cleaning buffers after."
+  "Register workspace WS with PLIST for BODY, cleaning buffers after.
+Also pins the webapp build id (see
+`agent-repl-test--frontend-build-id'), so the URLs BODY builds are
+independent of whether the webapp has been built in this checkout."
   (declare (indent 2))
   `(progn
      (unwind-protect
-         (progn
+         (cl-letf (((symbol-function 'agent-repl--frontend-build-id)
+                    (lambda () agent-repl-test--frontend-build-id)))
            (puthash ,ws (copy-sequence ,plist) agent-repl--workspaces)
            ,@body)
        (let ((buf (agent-repl--ws-get ,ws :frontend-buffer)))
