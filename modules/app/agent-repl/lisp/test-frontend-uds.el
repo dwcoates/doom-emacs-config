@@ -1421,9 +1421,10 @@ as a user-visible malformed-frame error on every roster publish."
   (agent-repl-test--with-uds
     ;; Act / Assert
     (should-not (agent-repl--uds-dispatch-frame
-                 '(:queue (:workspace "ws1" :sessionId "s1"
+                 '(:queue (:workspace "ws1" :fence "f1"
                            :entries ((:id "q1" :text "hi"
-                                      :shutdownHold (:scheduleId "sch-1")))))))))
+                                      :pending ()
+                                      :shutdown (:scheduleId "sch-1")))))))))
 
 (ert-deftest agent-repl-test-uds-schedule-shutdown-is-a-known-command ()
   "The drain lease's `scheduleShutdown' arm is an accepted outbound command."
