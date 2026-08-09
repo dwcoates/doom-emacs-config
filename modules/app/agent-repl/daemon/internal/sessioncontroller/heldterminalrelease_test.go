@@ -36,6 +36,7 @@ type releaseRecordingPusher struct {
 	afterCancel []bool
 }
 
+func (p *releaseRecordingPusher) PushAsyncBubbleDelta(*frontendv1.AsyncBubbleDelta) {}
 func (p *releaseRecordingPusher) PushConversationDelta(cd *frontendv1.ConversationDelta) {
 	p.mu.Lock()
 	p.afterCancel = append(p.afterCancel, p.cancelled.Load())

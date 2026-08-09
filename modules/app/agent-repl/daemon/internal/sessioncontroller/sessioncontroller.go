@@ -961,6 +961,25 @@ func (m *Manager) TaskCatalogs() []*frontendv1.TaskCatalog {
 	return catalogs
 }
 
+// AsyncBubbles returns every async bubble every live session still holds,
+// folded to date, for the connect/resync snapshot.
+//
+// The bubbles come from the SAME store the deltas were produced from, so a
+// reconnecting client is handed exactly the fold its pushes had been building —
+// never a second, separately derived account of the same detached work. Order
+// is by workspace and then by launch, so two consecutive snapshots of an
+// unchanged session are byte-identical.
+func (m *Manager) AsyncBubbles() []*frontendv1.AsyncBubble {
+	controllers := m.snapshotSessionControllers()
+	sort.Slice(controllers, func(i, j int) bool { return controllers[i].workspace < controllers[j].workspace })
+	var out []*frontendv1.AsyncBubble
+	for _, d := range controllers {
+		out = append(out, d.consumer.bubbles.snapshot()...)
+	}
+	m.logf("session-controller: async bubble snapshot sessions=%d bubbles=%d", len(controllers), len(out))
+	return out
+}
+
 // TaskEntry returns the frontend TaskEntry (including its output_path) for a
 // detached task on the workspace's live session, rebuilt from the retained
 // event ring. ok=false when the workspace has no live session controller or no such task.

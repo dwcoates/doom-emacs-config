@@ -548,6 +548,8 @@ func frameSessionIdentity(frame *frontendv1.FrontendFrame) (workspace, sessionID
 		return f.ConversationDelta.GetWorkspace(), "", true
 	case *frontendv1.FrontendFrame_TypingDelta:
 		return f.TypingDelta.GetWorkspace(), "", true
+	case *frontendv1.FrontendFrame_AsyncBubbleDelta:
+		return f.AsyncBubbleDelta.GetWorkspace(), "", true
 	case *frontendv1.FrontendFrame_TaskCatalog:
 		return f.TaskCatalog.GetWorkspace(), "", true
 	case *frontendv1.FrontendFrame_SessionInit:
@@ -643,6 +645,9 @@ func (s *Server) disconnectAll(clients []*client) {
 func (s *Server) PushSessionView(v *frontendv1.SessionView) { s.Broadcast(SessionViewFrame(v)) }
 func (s *Server) PushConversationDelta(c *frontendv1.ConversationDelta) {
 	s.Broadcast(ConversationDeltaFrame(c))
+}
+func (s *Server) PushAsyncBubbleDelta(d *frontendv1.AsyncBubbleDelta) {
+	s.Broadcast(AsyncBubbleDeltaFrame(d))
 }
 func (s *Server) PushTypingDelta(t *frontendv1.TypingDelta) { s.Broadcast(TypingDeltaFrame(t)) }
 func (s *Server) PushTaskCatalog(c *frontendv1.TaskCatalog) { s.Broadcast(TaskCatalogFrame(c)) }
