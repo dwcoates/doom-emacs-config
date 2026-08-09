@@ -7,8 +7,17 @@
  * and — the part the user actually has to decide — the woken conversation
  * carries its whole accumulated context, which every subsequent turn then pays
  * for. So revival is LAZY and GATED: the daemon nacks `SubmitPromptCmd` on a
- * hibernated session, the webapp renders this gate from
- * `SessionView.hibernation`, and exactly one `ReviveSessionCmd` answers it.
+ * hibernated session, the webapp renders this gate from the fenced
+ * `WorkspaceGateView`, and exactly one `ReviveSessionCmd` answers it.
+ *
+ * THE GATE IS READ FROM THE WORKSPACE, NOT FROM A SESSION CATALOG. It used to
+ * come off `SessionView.hibernation`, which answers "what is true of session X"
+ * and left this end to work out which X was current — while a connect snapshot
+ * carries several entries per workspace, in no authority order, including
+ * retired ones. `WorkspaceGateView` answers "what is true of this workspace
+ * now", which is the only question a gate has, and it is fenced, so a view from
+ * a session that has since rotated is discarded before it can raise a gate over
+ * a workspace that is already awake.
  *
  * WHY A BLOCKING GATE RATHER THAN A NOTICE. The two revival modes are not a
  * preference — `compactFirst` pays the full-context cost ONCE and `direct` pays
@@ -34,8 +43,8 @@
 
 import { formatAge } from "./duration.js";
 import { escapeHtml } from "./highlight.js";
-import type { HibernationDetail } from "./frontend-proto.js";
-import type { AdapterEffect, SessionViewInput } from "./state-adapter.js";
+import type { HibernationDetail, WorkspaceGateView } from "./frontend-proto.js";
+import type { AdapterEffect } from "./state-adapter.js";
 
 /** The document-wide marker the chrome paints against while the gate stands. */
 export const HIBERNATED_BODY_CLASS = "hibernated";
@@ -274,23 +283,27 @@ export class ReviveWatch {
   observe(effects: readonly AdapterEffect[]): ReviveWatchVerdict {
     const armed = this.armed;
     if (armed === null) return { kind: "waiting" };
-    let latest: SessionViewInput | null = null;
+    let latest: WorkspaceGateView | null = null;
     for (const effect of effects) {
-      if (effect.kind !== "session-view") continue;
-      const sv = effect.value;
-      if (armed.workspace !== "" && sv.workspace !== "" && sv.workspace !== armed.workspace) {
+      // THE GATE, not a session view. The catalog entry this used to read is a
+      // per-session fact that a snapshot carries several of per workspace, in
+      // no authority order; the gate is a per-workspace fact and is fenced, so
+      // a stale one never reaches this batch at all.
+      if (effect.kind !== "fenced-view" || effect.value.case !== "workspaceGate") continue;
+      const gate = effect.value.value;
+      if (armed.workspace !== "" && gate.workspace !== "" && gate.workspace !== armed.workspace) {
         continue;
       }
-      latest = sv;
+      latest = gate;
     }
     if (latest === null) return { kind: "waiting" };
     this.armed = null;
     // The failed arm CARRIES its evidence rather than leaving the caller to
     // re-read the store for it: a verdict whose report depends on a second
     // lookup is a verdict that can be reported about the wrong state.
-    return latest.hibernation === null
+    return latest.gate.case === "open"
       ? { kind: "revived", mode: armed.mode }
-      : { kind: "failed", mode: armed.mode, hibernation: latest.hibernation };
+      : { kind: "failed", mode: armed.mode, hibernation: latest.gate.detail };
   }
 }
 

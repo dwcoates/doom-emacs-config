@@ -50,29 +50,26 @@ function cacheExpired(elapsedMs = 4 * HOUR, ttlMs = HOUR): HibernationDetail {
   return { sinceMs: NOW - HOUR, cause: { case: "cacheExpired", value: { elapsedMs, ttlMs } } };
 }
 
-/** One pushed `SessionView` for a workspace, as an ingest-batch effect. */
-function sessionViewEffect(
-  workspace: string,
-  hibernation: HibernationDetail | null,
-): AdapterEffect {
+/**
+ * One pushed `WorkspaceGateView` for a workspace, as an ingest-batch effect.
+ *
+ * The gate — not a session catalog entry — is what the watch rules on: a
+ * snapshot carries several session views per workspace, in no authority order,
+ * so a verdict taken from one could be taken from a retired session.
+ */
+function gateEffect(workspace: string, hibernation: HibernationDetail | null): AdapterEffect {
   return {
-    kind: "session-view",
+    kind: "fenced-view",
     value: {
-      workspace,
-      sessionId: "s1",
-      model: "",
-      slug: "",
-      title: "",
-      totalTokens: 0,
-      totalCostUsd: 0,
-      contextWindow: 0,
-      permissionMode: "",
-      shimAttached: true,
-      claudeSessionId: "",
-      cwd: workspace,
-      configDir: "",
-      models: [],
-      hibernation,
+      case: "workspaceGate",
+      value: {
+        workspace,
+        fence: "f1",
+        gate:
+          hibernation === null
+            ? { case: "open" }
+            : { case: "hibernated", detail: hibernation },
+      },
     },
   };
 }
@@ -339,7 +336,7 @@ describe("ReviveWatch: the exit an accepted-but-failed revival needs", () => {
     const watch = new ReviveWatch();
     watch.arm("/w", "compactFirst");
     // Act
-    const verdict = watch.observe([sessionViewEffect("/w", null)]);
+    const verdict = watch.observe([gateEffect("/w", null)]);
     // Assert
     expect(verdict.kind).toBe("revived");
   });
@@ -350,7 +347,7 @@ describe("ReviveWatch: the exit an accepted-but-failed revival needs", () => {
     const watch = new ReviveWatch();
     watch.arm("/w", "direct");
     // Act
-    const verdict = watch.observe([sessionViewEffect("/w", forced())]);
+    const verdict = watch.observe([gateEffect("/w", forced())]);
     // Assert
     expect(verdict.kind).toBe("failed");
   });
@@ -360,7 +357,7 @@ describe("ReviveWatch: the exit an accepted-but-failed revival needs", () => {
     const watch = new ReviveWatch();
     watch.arm("/w", "compactFirst");
     // Act
-    const verdict = watch.observe([sessionViewEffect("/w", forced())]);
+    const verdict = watch.observe([gateEffect("/w", forced())]);
     // Assert — the two modes cost different things, so the report names one.
     expect(verdict.kind === "failed" && verdict.mode).toBe("compactFirst");
   });
@@ -371,7 +368,7 @@ describe("ReviveWatch: the exit an accepted-but-failed revival needs", () => {
     const watch = new ReviveWatch();
     watch.arm("/w", "direct");
     // Act
-    const verdict = watch.observe([sessionViewEffect("/w", cacheExpired())]);
+    const verdict = watch.observe([gateEffect("/w", cacheExpired())]);
     // Assert
     expect(verdict.kind === "failed" && verdict.hibernation.cause.case).toBe("cacheExpired");
   });
@@ -380,9 +377,9 @@ describe("ReviveWatch: the exit an accepted-but-failed revival needs", () => {
     // Arrange — the question was answered; a later view is not a re-judgement.
     const watch = new ReviveWatch();
     watch.arm("/w", "direct");
-    watch.observe([sessionViewEffect("/w", forced())]);
+    watch.observe([gateEffect("/w", forced())]);
     // Act / Assert
-    expect(watch.observe([sessionViewEffect("/w", forced())]).kind).toBe("waiting");
+    expect(watch.observe([gateEffect("/w", forced())]).kind).toBe("waiting");
   });
 
   it("rules on the LAST view in a batch, as the store does", () => {
@@ -392,8 +389,8 @@ describe("ReviveWatch: the exit an accepted-but-failed revival needs", () => {
     watch.arm("/w", "direct");
     // Act
     const verdict = watch.observe([
-      sessionViewEffect("/w", forced()),
-      sessionViewEffect("/w", null),
+      gateEffect("/w", forced()),
+      gateEffect("/w", null),
     ]);
     // Assert
     expect(verdict.kind).toBe("revived");
@@ -404,7 +401,7 @@ describe("ReviveWatch: the exit an accepted-but-failed revival needs", () => {
     const watch = new ReviveWatch();
     watch.arm("/w", "direct");
     // Act / Assert
-    expect(watch.observe([sessionViewEffect("/other", null)]).kind).toBe("waiting");
+    expect(watch.observe([gateEffect("/other", null)]).kind).toBe("waiting");
   });
 
   it("settles on a pre-init view that names no workspace", () => {
@@ -413,14 +410,14 @@ describe("ReviveWatch: the exit an accepted-but-failed revival needs", () => {
     const watch = new ReviveWatch();
     watch.arm("/w", "direct");
     // Act / Assert
-    expect(watch.observe([sessionViewEffect("", null)]).kind).toBe("revived");
+    expect(watch.observe([gateEffect("", null)]).kind).toBe("revived");
   });
 
   it("rules on nothing until a decision is armed", () => {
     // Arrange — an ordinary view on a session nobody asked to wake.
     const watch = new ReviveWatch();
     // Act / Assert
-    expect(watch.observe([sessionViewEffect("/w", forced())]).kind).toBe("waiting");
+    expect(watch.observe([gateEffect("/w", forced())]).kind).toBe("waiting");
   });
 
   it("drops the expectation on disarm, so a rejected ack is owed no verdict", () => {
@@ -430,7 +427,7 @@ describe("ReviveWatch: the exit an accepted-but-failed revival needs", () => {
     // Act
     watch.disarm();
     // Assert
-    expect(watch.observe([sessionViewEffect("/w", forced())]).kind).toBe("waiting");
+    expect(watch.observe([gateEffect("/w", forced())]).kind).toBe("waiting");
   });
 
   it("reports the armed decision while one is outstanding", () => {

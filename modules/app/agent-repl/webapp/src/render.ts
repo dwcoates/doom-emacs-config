@@ -35,6 +35,7 @@ import {
   sectionsIn,
 } from "./expand.js";
 import { animatedEllipsis, escapeHtml, highlightCode, languageForPath } from "./highlight.js";
+import { failureKindName, failureToneClass } from "./failure-card.js";
 import { partitionFeed } from "./partition.js";
 import {
   mayNest,
@@ -87,7 +88,7 @@ import {
   PermissionItem,
   ResultItem,
   SessionCommandItem,
-  SystemFailureCard,
+  FailureCardItem,
   StoreState,
   SystemItem,
   TextItem,
@@ -2186,57 +2187,81 @@ function CompactDivider(item: ContextCompactedItem): string {
 }
 
 /**
- * A daemon-classified failure, as a bordered card in the feed.
+ * A daemon-resolved failure, as a bordered card in the feed.
  *
  * It is where a user whose workspace changed color finds out WHY. Before it
  * there was nowhere for that account to live: the degraded banner was chrome
  * that scrolled away, a refused command rendered nothing at all, and an API
  * failure rendered a one-line grey badge built from a code no one set.
  *
- * The border color comes from the failure's CLASS, from the same table the
- * workspace takes its color from — so a purple workspace can never be
- * explained by a card of some other color.
+ * THE COLOR COMES FROM THE KIND'S SIDE, through `failure-card.ts` and the one
+ * shared render-colors table the workspace dot reads — so a purple workspace
+ * can never be explained by a card of some other color.
  *
- * A RESOLVED card renders as settled: a check, the closing time, and the
- * alarm styling dropped. The window ended, and a card that went on shouting
- * about it would be lying about the present to be accurate about the past.
+ * A RESOLVED card renders as settled: a check, the closing time, and the alarm
+ * styling dropped. The window ended, and a card that went on shouting about it
+ * would be lying about the present to be accurate about the past. A TERMINAL
+ * card keeps the alarm mark and gets no stamp — it has no closing edge and
+ * never will, and rendering it like an open one would leave a reader waiting
+ * for an all-clear that is not coming.
  */
-function SystemFailureBubble(item: SystemFailureCard): string {
-  const resolved = item.resolvedAtMs > 0;
-  const cls = `failure-card failure-${item.errorClass.toLowerCase()}${resolved ? " resolved" : ""}`;
-  const mark = resolved ? "✓" : "✕";
-  const detail = item.sourceDetail
-    ? `<div class="failure-detail">${escapeHtml(item.sourceDetail)}</div>`
+function FailureCardBubble(item: FailureCardItem): string {
+  const view = item.view;
+  const resolved = view.lifecycle.case === "resolved";
+  const cls =
+    `failure-card ${failureToneClass(view.kind)} ` +
+    `failure-${view.lifecycle.case}${resolved ? " resolved" : ""}`;
+  const mark = resolved ? "\u2713" : "\u2715";
+  const detail = view.detail
+    ? `<div class="failure-detail">${escapeHtml(view.detail)}</div>`
     : "";
-  const stamp = resolved
-    ? `<div class="failure-resolved">resolved ${escapeHtml(formatClockTime(item.resolvedAtMs))}</div>`
-    : "";
-  const structured = failureDetailHtml(item.detail);
+  const stamp =
+    view.lifecycle.case === "resolved"
+      ? `<div class="failure-resolved">resolved ${escapeHtml(formatClockTime(view.lifecycle.resolvedAtMs))}</div>`
+      : "";
   return (
-    `<div class="${cls}" data-error-type="${escapeHtml(item.errorType)}">` +
+    `<div class="${cls}" data-failure-kind="${escapeHtml(failureKindName(view.kind))}" ` +
+    `data-failure-uuid="${escapeHtml(item.uuid)}">` +
     `<div class="failure-head"><span class="failure-mark">${mark}</span>` +
-    `<span class="failure-message">${escapeHtml(item.message)}</span></div>` +
+    `<span class="failure-message">${escapeHtml(view.message)}</span></div>` +
     detail +
-    structured +
+    failureEvidenceHtml(view.kind) +
     stamp +
     `</div>`
   );
 }
 
-/** Render the structurally complete detail union carried by every failure card. */
-function failureDetailHtml(detail: SystemFailureCard["detail"]): string {
-  switch (detail.kind) {
-    case "none":
-      return "";
-    case "sessionResume":
-      return resumeFailureHtml(detail.value);
-    case "queryTermination":
-      return queryTerminationFailureHtml(detail.value);
+/**
+ * The TYPED evidence a kind carries, for the two arms that carry a whole
+ * machine-readable record rather than a field or two.
+ *
+ * Every other arm's evidence is already inside the daemon's `detail` prose, so
+ * rendering it twice would be this end restating what it was handed. These two
+ * are different: they carry structured lifecycle records whose parts a reader
+ * debugging a resume or a query death needs named individually.
+ */
+function failureEvidenceHtml(kind: import("./frontend-proto.js").FailureKind): string {
+  if (kind.kind.case === "queryTermination" && kind.kind.value.detail !== undefined) {
+    return queryTerminationFailureHtml(kind.kind.value.detail);
   }
+  if (kind.kind.case === "sessionResumeFailed" && kind.kind.value.detail !== undefined) {
+    return resumeFailureHtml(kind.kind.value.detail);
+  }
+  return "";
 }
 
-/** Render every query identity and the exact typed termination cause. */
-function queryTerminationFailureHtml(failure: import("./frontend-proto.js").QueryTerminationFailure): string {
+/**
+ * Render every query identity and the exact typed termination cause.
+ *
+ * The "missing …" arms below are UNREACHABLE and KEPT: `decodeFailureKind`
+ * refuses a query-termination record with no reason and no vendor identity, so
+ * a decoded record always names both. They stay because the guarantee lives one
+ * module away — a decoder that stopped enforcing it must show up as visible
+ * prose here, never as a blank line beside real evidence.
+ */
+function queryTerminationFailureHtml(
+  failure: import("../../proto/gen/ts/agentshim/frontend/v1/errors_pb").QueryTerminationFailure,
+): string {
   const reason = failure.reason.case === "unexpectedEof"
     ? "unexpected EOF"
     : failure.reason.case === "iteratorFailure"
@@ -2252,18 +2277,28 @@ function queryTerminationFailureHtml(failure: import("./frontend-proto.js").Quer
   return `<div class="failure-detail">query termination: ${escapeHtml(reason)}<br>query instance: ${escapeHtml(failure.queryInstanceId)}<br>vendor session: ${escapeHtml(vendor)}<br>observed_at_ms: ${String(failure.observedAtMs)}</div>`;
 }
 
-/** Render resume-continuity evidence without reducing it to a generic death. */
-function resumeFailureHtml(failure: import("./frontend-proto.js").SessionResumeFailure): string {
-  const attempt = failure.attempt === "create" ? "session creation" : "automatic restoration";
-  const header = `<div class="failure-detail">resume blocked during ${escapeHtml(attempt)}<br>conversation: ${escapeHtml(failure.claudeSessionId)}</div>`;
+/**
+ * Render resume-continuity evidence without reducing it to a generic death.
+ *
+ * The "missing resume-continuity cause" arm is UNREACHABLE and KEPT for the
+ * same reason as `queryTerminationFailureHtml`'s: `decodeFailureKind` requires
+ * exactly one attempt and exactly one cause on every decoded record.
+ */
+function resumeFailureHtml(
+  failure: import("../../proto/gen/ts/agentshim/frontend/v1/errors_pb").SessionResumeFailure,
+): string {
+  const attempt = failure.attempt.case === "create" ? "session creation" : "automatic restoration";
   if (failure.cause.case === "queryTermination") {
+    const header = `<div class="failure-detail">resume blocked during ${escapeHtml(attempt)}<br>conversation: ${escapeHtml(failure.claudeSessionId)}</div>`;
     return `${header}${queryTerminationFailureHtml(failure.cause.value)}`;
   }
   const cause = failure.cause.case === "transcriptUnavailable"
-    ? `transcript unavailable: ${failure.cause.searchedPaths.join(" | ") || "no readable transcript path"}`
+    ? `transcript unavailable: ${failure.cause.value.searchedPaths.join(" | ") || "no readable transcript path"}`
     : failure.cause.case === "identityMismatch"
-      ? `identity mismatch: ${failure.cause.replacementClaudeSessionId || "recovery would start a fresh conversation"}`
-      : `bring-up failure: ${failure.cause.cause}`;
+      ? `identity mismatch: ${failure.cause.value.replacementClaudeSessionId || "recovery would start a fresh conversation"}`
+      : failure.cause.case === "bringUpFailure"
+        ? `bring-up failure: ${failure.cause.value.cause}`
+        : "missing resume-continuity cause";
   return `<div class="failure-detail">resume blocked during ${escapeHtml(attempt)}<br>${escapeHtml(cause)}<br>conversation: ${escapeHtml(failure.claudeSessionId)}</div>`;
 }
 
@@ -2403,7 +2438,7 @@ export function renderItem(
     case "session-command":
       return SessionCommandChip(item);
     case "failure":
-      return SystemFailureBubble(item);
+      return FailureCardBubble(item);
     case "system":
       return SystemNote(item);
   }
