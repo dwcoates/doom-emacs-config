@@ -613,7 +613,7 @@ func describeHolds(draining *frontendv1.ShutdownScheduleDraining) string {
 	parts := make([]string, 0, len(draining.GetHolds()))
 	for _, hold := range draining.GetHolds() {
 		parts = append(parts, fmt.Sprintf("{ws=%s session=%s turn=%v tasks=%v}",
-			hold.GetWorkspace(), hold.String(), hold.GetTurn(), hold.GetTasks()))
+			hold.GetWorkspace(), hold.GetSessionId(), hold.GetTurn(), hold.GetTasks()))
 	}
 	return strings.Join(parts, " ")
 }
