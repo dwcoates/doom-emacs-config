@@ -2889,6 +2889,86 @@ describe("UdsSession permission round-trip", () => {
     if (evt.payload.case !== "degradedState") throw new Error("case");
     expect(evt.payload.value.component).toBe("shim-store-client");
   });
+
+  it("re-sends an unanswered permission request to the daemon that reattaches", async () => {
+    // Arrange: a live turn with an outstanding permission the first daemon
+    // received but never answered.
+    const { query, session, daemon, daemonListener, store } = await rig();
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
+    await daemon.next(AckSchema);
+    await until(() => session.turnCount() === 1);
+    const ac = new AbortController();
+    void query.canUseTool("Bash", { command: "ls" }, { signal: ac.signal });
+    const first = await daemon.next(PermissionRequestSchema);
+
+    // Act: the daemon dies holding the ask; a replacement wires the session up.
+    daemon.destroy();
+    await until(() => !session.isConnected());
+    const daemon2 = await daemonListener.next();
+    cleanups.push(() => daemon2.destroy());
+    await daemon2.next(ShimHelloSchema);
+    daemon2.send(DaemonHelloSchema, create(DaemonHelloSchema, { daemonVersion: "d2", fromSeq: 2n }));
+    await until(() => store.count() >= 3);
+    await daemon2.next(ShimReadySchema);
+
+    // Assert: the SAME question, restated on the same identity.
+    const resent = await daemon2.next(PermissionRequestSchema);
+    expect(resent.requestId).toBe(first.requestId);
+    expect(resent.toolName).toBe("Bash");
+    expect(resent.input).toEqual({ command: "ls" });
+  });
+
+  it("re-asks only after the bring-up gate closes, never before ShimReady", async () => {
+    // Arrange: as above, an outstanding permission across a daemon death.
+    const { query, session, daemon, daemonListener, store } = await rig();
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
+    await daemon.next(AckSchema);
+    await until(() => session.turnCount() === 1);
+    const ac = new AbortController();
+    void query.canUseTool("Bash", { command: "ls" }, { signal: ac.signal });
+    await daemon.next(PermissionRequestSchema);
+    daemon.destroy();
+    await until(() => !session.isConnected());
+
+    // Act: accept the redial but hold the hello back for a beat.
+    const daemon2 = await daemonListener.next();
+    cleanups.push(() => daemon2.destroy());
+    await daemon2.next(ShimHelloSchema);
+    // Assert: nothing is re-asked of a daemon that has not wired the session.
+    expect(daemon2.count(PermissionRequestSchema)).toBe(0);
+    daemon2.send(DaemonHelloSchema, create(DaemonHelloSchema, { daemonVersion: "d2", fromSeq: 2n }));
+    await until(() => store.count() >= 3);
+    await daemon2.next(ShimReadySchema);
+    await daemon2.next(PermissionRequestSchema);
+  });
+
+  it("does not re-ask a permission whose turn was interrupted before the reattach", async () => {
+    // Arrange: a live turn with an outstanding permission.
+    const { query, session, daemon, daemonListener, store } = await rig();
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go", promptOrigin: PromptOrigin.USER_SENT }));
+    await daemon.next(AckSchema);
+    await until(() => session.turnCount() === 1);
+    const ac = new AbortController();
+    const decision: Promise<PermissionResultLike> = query.canUseTool("Bash", { command: "rm" }, { signal: ac.signal });
+    await daemon.next(PermissionRequestSchema);
+
+    // Act: the user interrupts, which force-denies the ask, and only then does
+    // the daemon die and a replacement attach.
+    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1" }));
+    await daemon.next(AckSchema);
+    expect((await decision).behavior).toBe("deny");
+    daemon.destroy();
+    await until(() => !session.isConnected());
+    const daemon2 = await daemonListener.next();
+    cleanups.push(() => daemon2.destroy());
+    await daemon2.next(ShimHelloSchema);
+    daemon2.send(DaemonHelloSchema, create(DaemonHelloSchema, { daemonVersion: "d2", fromSeq: 2n }));
+    await until(() => store.count() >= 3);
+    await daemon2.next(ShimReadySchema);
+
+    // Assert: the dead turn's question is not put back in front of the user.
+    expect(daemon2.count(PermissionRequestSchema)).toBe(0);
+  });
 });
 
 // ---------------------------------------------------------------------------

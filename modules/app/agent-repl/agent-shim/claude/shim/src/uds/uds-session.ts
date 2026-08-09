@@ -706,7 +706,15 @@ export class UdsSession {
     this.control = new ControlDispatch(
       target,
       (req) => this.server.sendPermissionRequest(req),
-      this.deps.newRequestId !== undefined ? { newRequestId: this.deps.newRequestId } : {},
+      {
+        ...(this.deps.newRequestId !== undefined ? { newRequestId: this.deps.newRequestId } : {}),
+        // activeTurnIds, not handshakeTurnIds: a blocked canUseTool belongs to
+        // a turn the SDK is still RUNNING. A turn whose terminal is merely
+        // owed (pendingTurnEndIds) has no tool call left to unblock, so
+        // counting it live would let a reattach re-ask a question nothing is
+        // waiting on.
+        isTurnLive: () => this.activeTurnIds.length > 0,
+      },
     );
 
     this.store = new StoreClient({
@@ -1071,6 +1079,13 @@ export class UdsSession {
       fromSeq,
       vendorSessionId: this.store.storeSessionId(),
     }));
+    // THE OPEN QUESTION IS RE-ASKED, LAST, ONCE THE GATE IS CLOSED. A pending
+    // canUseTool is the one piece of session state no daemon can reconstruct:
+    // the first daemon may never have received it, or may have died holding it,
+    // and either way only this shim still has the blocked promise. Re-sending
+    // it after ShimReady means the daemon it lands on is wired for the session
+    // and can route the ask to the frontend.
+    this.control.resendPending("daemon reattach");
     this.publishModelCatalog();
   }
 
