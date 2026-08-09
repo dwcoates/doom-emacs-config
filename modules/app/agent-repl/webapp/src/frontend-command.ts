@@ -248,6 +248,26 @@ export type CompactDecision = keyof typeof COMPACT_DECISION_SCOPE;
  */
 export type ReviveDecision = CompactDecision | "direct";
 
+/**
+ * The three merge-queue runtime controls.
+ *
+ * Pause and resume are DAEMON-GLOBAL and carry nothing: the envelope's
+ * workspace is ignored, and both are idempotent. Evict names ONE waiting run
+ * by the run id the roster and every `MergeStatus` already carry; the daemon
+ * refuses it for the running head, because only that run's drain goroutine may
+ * retire it.
+ */
+export interface PauseMergeQueueBody {
+  case: "pauseMergeQueue";
+}
+export interface ResumeMergeQueueBody {
+  case: "resumeMergeQueue";
+}
+export interface EvictMergeBody {
+  case: "evictMerge";
+  runId: string;
+}
+
 export type FrontendCommandBody =
   | SubmitPromptBody
   | InterruptBody
@@ -261,7 +281,10 @@ export type FrontendCommandBody =
   | QueueAcceptBody
   | QueueCancelBody
   | HibernateWorkspaceBody
-  | ReviveSessionBody;
+  | ReviveSessionBody
+  | PauseMergeQueueBody
+  | ResumeMergeQueueBody
+  | EvictMergeBody;
 
 /** The command envelope: correlation id + workspace + exactly one command arm. */
 export interface FrontendCommand {
@@ -346,6 +369,13 @@ function encodeBody(b: FrontendCommandBody): Record<string, unknown> {
               [REVIVE_COMPACT_SCOPE]: COMPACT_DECISION_SCOPE[b.decision],
             },
           };
+    case "pauseMergeQueue":
+    case "resumeMergeQueue":
+      // Empty messages: the verb IS the arm, and the queue is daemon-global,
+      // so there is nothing for the body to name.
+      return {};
+    case "evictMerge":
+      return { runId: b.runId };
   }
 }
 

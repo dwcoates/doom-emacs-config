@@ -363,6 +363,7 @@ type QueueEntry struct {
 	//	*QueueEntry_Shutdown
 	//	*QueueEntry_KeepAlive
 	//	*QueueEntry_Revival
+	//	*QueueEntry_BuildRefresh
 	Hold          isQueueEntry_Hold `protobuf_oneof:"hold"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -496,6 +497,15 @@ func (x *QueueEntry) GetRevival() *QueueEntryRevivalHold {
 	return nil
 }
 
+func (x *QueueEntry) GetBuildRefresh() *QueueEntryBuildRefreshHold {
+	if x != nil {
+		if x, ok := x.Hold.(*QueueEntry_BuildRefresh); ok {
+			return x.BuildRefresh
+		}
+	}
+	return nil
+}
+
 type isQueueEntry_Classification interface {
 	isQueueEntry_Classification()
 }
@@ -562,11 +572,21 @@ type QueueEntry_Revival struct {
 	Revival *QueueEntryRevivalHold `protobuf:"bytes,9,opt,name=revival,proto3,oneof"`
 }
 
+type QueueEntry_BuildRefresh struct {
+	// Held because the session's shim is being restarted onto the current
+	// build at the turn boundary (automatic stale-shim refresh). Like the
+	// other holds, the classifier never runs on such an entry; the exit is
+	// delivery the moment the restarted shim reports ready.
+	BuildRefresh *QueueEntryBuildRefreshHold `protobuf:"bytes,14,opt,name=build_refresh,json=buildRefresh,proto3,oneof"`
+}
+
 func (*QueueEntry_Shutdown) isQueueEntry_Hold() {}
 
 func (*QueueEntry_KeepAlive) isQueueEntry_Hold() {}
 
 func (*QueueEntry_Revival) isQueueEntry_Hold() {}
+
+func (*QueueEntry_BuildRefresh) isQueueEntry_Hold() {}
 
 // A scheduled shutdown's drain lease, holding a queue entry.
 type QueueEntryShutdownHold struct {
@@ -699,6 +719,45 @@ func (*QueueEntryRevivalHold) Descriptor() ([]byte, []int) {
 	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{9}
 }
 
+// The entry waits for its session's shim to restart onto the current build
+// at the turn boundary (automatic stale-shim refresh). Delivered in order
+// the moment the restarted shim reports ready.
+type QueueEntryBuildRefreshHold struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *QueueEntryBuildRefreshHold) Reset() {
+	*x = QueueEntryBuildRefreshHold{}
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QueueEntryBuildRefreshHold) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueueEntryBuildRefreshHold) ProtoMessage() {}
+
+func (x *QueueEntryBuildRefreshHold) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueueEntryBuildRefreshHold.ProtoReflect.Descriptor instead.
+func (*QueueEntryBuildRefreshHold) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{10}
+}
+
 // The session's queue, pushed on EVERY change and carried in StateSnapshot.
 // An empty entries list is a meaningful value (the queue drained, or the
 // session died), not an absent one.
@@ -722,7 +781,7 @@ type QueueView struct {
 
 func (x *QueueView) Reset() {
 	*x = QueueView{}
-	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[10]
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -734,7 +793,7 @@ func (x *QueueView) String() string {
 func (*QueueView) ProtoMessage() {}
 
 func (x *QueueView) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[10]
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -747,7 +806,7 @@ func (x *QueueView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueueView.ProtoReflect.Descriptor instead.
 func (*QueueView) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{10}
+	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *QueueView) GetWorkspace() string {
@@ -782,7 +841,7 @@ type QueueForceCmd struct {
 
 func (x *QueueForceCmd) Reset() {
 	*x = QueueForceCmd{}
-	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[11]
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -794,7 +853,7 @@ func (x *QueueForceCmd) String() string {
 func (*QueueForceCmd) ProtoMessage() {}
 
 func (x *QueueForceCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[11]
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -807,7 +866,7 @@ func (x *QueueForceCmd) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueueForceCmd.ProtoReflect.Descriptor instead.
 func (*QueueForceCmd) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{11}
+	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *QueueForceCmd) GetEntryId() string {
@@ -828,7 +887,7 @@ type QueueAcceptCmd struct {
 
 func (x *QueueAcceptCmd) Reset() {
 	*x = QueueAcceptCmd{}
-	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[12]
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -840,7 +899,7 @@ func (x *QueueAcceptCmd) String() string {
 func (*QueueAcceptCmd) ProtoMessage() {}
 
 func (x *QueueAcceptCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[12]
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -853,7 +912,7 @@ func (x *QueueAcceptCmd) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueueAcceptCmd.ProtoReflect.Descriptor instead.
 func (*QueueAcceptCmd) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{12}
+	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *QueueAcceptCmd) GetEntryId() string {
@@ -873,7 +932,7 @@ type QueueCancelCmd struct {
 
 func (x *QueueCancelCmd) Reset() {
 	*x = QueueCancelCmd{}
-	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[13]
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -885,7 +944,7 @@ func (x *QueueCancelCmd) String() string {
 func (*QueueCancelCmd) ProtoMessage() {}
 
 func (x *QueueCancelCmd) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[13]
+	mi := &file_agentshim_frontend_v1_prompt_queue_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -898,7 +957,7 @@ func (x *QueueCancelCmd) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueueCancelCmd.ProtoReflect.Descriptor instead.
 func (*QueueCancelCmd) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{13}
+	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *QueueCancelCmd) GetEntryId() string {
@@ -926,7 +985,7 @@ const file_agentshim_frontend_v1_prompt_queue_proto_rawDesc = "" +
 	"\trationale\x18\x01 \x01(\tR\trationale\x12\x1a\n" +
 	"\baccepted\x18\x02 \x01(\bR\baccepted\"2\n" +
 	"\x18QueueClassificationError\x12\x16\n" +
-	"\x06detail\x18\x01 \x01(\tR\x06detail\"\xd5\x05\n" +
+	"\x06detail\x18\x01 \x01(\tR\x06detail\"\xaf\x06\n" +
 	"\n" +
 	"QueueEntry\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
@@ -941,7 +1000,8 @@ const file_agentshim_frontend_v1_prompt_queue_proto_rawDesc = "" +
 	"\bshutdown\x18\a \x01(\v2-.agentshim.frontend.v1.QueueEntryShutdownHoldH\x01R\bshutdown\x12O\n" +
 	"\n" +
 	"keep_alive\x18\b \x01(\v2..agentshim.frontend.v1.QueueEntryKeepAliveHoldH\x01R\tkeepAlive\x12H\n" +
-	"\arevival\x18\t \x01(\v2,.agentshim.frontend.v1.QueueEntryRevivalHoldH\x01R\arevivalB\x10\n" +
+	"\arevival\x18\t \x01(\v2,.agentshim.frontend.v1.QueueEntryRevivalHoldH\x01R\arevival\x12X\n" +
+	"\rbuild_refresh\x18\x0e \x01(\v21.agentshim.frontend.v1.QueueEntryBuildRefreshHoldH\x01R\fbuildRefreshB\x10\n" +
 	"\x0eclassificationB\x06\n" +
 	"\x04holdJ\x04\b\x04\x10\x05J\x04\b\x05\x10\x06J\x04\b\x06\x10\aR\x0eclassificationR\trationaleR\baccepted\"9\n" +
 	"\x16QueueEntryShutdownHold\x12\x1f\n" +
@@ -950,7 +1010,8 @@ const file_agentshim_frontend_v1_prompt_queue_proto_rawDesc = "" +
 	"\x17QueueEntryKeepAliveHold\x12\x17\n" +
 	"\aturn_id\x18\x01 \x01(\tR\x06turnId\")\n" +
 	"\x15QueueEntryRevivalHoldJ\x04\b\x01\x10\x02R\n" +
-	"session_id\"\x8e\x01\n" +
+	"session_id\"\x1c\n" +
+	"\x1aQueueEntryBuildRefreshHold\"\x8e\x01\n" +
 	"\tQueueView\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12;\n" +
 	"\aentries\x18\x03 \x03(\v2!.agentshim.frontend.v1.QueueEntryR\aentries\x12\x14\n" +
@@ -975,7 +1036,7 @@ func file_agentshim_frontend_v1_prompt_queue_proto_rawDescGZIP() []byte {
 	return file_agentshim_frontend_v1_prompt_queue_proto_rawDescData
 }
 
-var file_agentshim_frontend_v1_prompt_queue_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_agentshim_frontend_v1_prompt_queue_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_agentshim_frontend_v1_prompt_queue_proto_goTypes = []any{
 	(*SubmitPromptCmd)(nil),              // 0: agentshim.frontend.v1.SubmitPromptCmd
 	(*InterruptCmd)(nil),                 // 1: agentshim.frontend.v1.InterruptCmd
@@ -987,14 +1048,15 @@ var file_agentshim_frontend_v1_prompt_queue_proto_goTypes = []any{
 	(*QueueEntryShutdownHold)(nil),       // 7: agentshim.frontend.v1.QueueEntryShutdownHold
 	(*QueueEntryKeepAliveHold)(nil),      // 8: agentshim.frontend.v1.QueueEntryKeepAliveHold
 	(*QueueEntryRevivalHold)(nil),        // 9: agentshim.frontend.v1.QueueEntryRevivalHold
-	(*QueueView)(nil),                    // 10: agentshim.frontend.v1.QueueView
-	(*QueueForceCmd)(nil),                // 11: agentshim.frontend.v1.QueueForceCmd
-	(*QueueAcceptCmd)(nil),               // 12: agentshim.frontend.v1.QueueAcceptCmd
-	(*QueueCancelCmd)(nil),               // 13: agentshim.frontend.v1.QueueCancelCmd
-	(v1.PromptOrigin)(0),                 // 14: agentshim.core.v1.PromptOrigin
+	(*QueueEntryBuildRefreshHold)(nil),   // 10: agentshim.frontend.v1.QueueEntryBuildRefreshHold
+	(*QueueView)(nil),                    // 11: agentshim.frontend.v1.QueueView
+	(*QueueForceCmd)(nil),                // 12: agentshim.frontend.v1.QueueForceCmd
+	(*QueueAcceptCmd)(nil),               // 13: agentshim.frontend.v1.QueueAcceptCmd
+	(*QueueCancelCmd)(nil),               // 14: agentshim.frontend.v1.QueueCancelCmd
+	(v1.PromptOrigin)(0),                 // 15: agentshim.core.v1.PromptOrigin
 }
 var file_agentshim_frontend_v1_prompt_queue_proto_depIdxs = []int32{
-	14, // 0: agentshim.frontend.v1.SubmitPromptCmd.prompt_origin:type_name -> agentshim.core.v1.PromptOrigin
+	15, // 0: agentshim.frontend.v1.SubmitPromptCmd.prompt_origin:type_name -> agentshim.core.v1.PromptOrigin
 	2,  // 1: agentshim.frontend.v1.QueueEntry.pending:type_name -> agentshim.frontend.v1.QueueClassificationPending
 	3,  // 2: agentshim.frontend.v1.QueueEntry.interject:type_name -> agentshim.frontend.v1.QueueClassificationInterject
 	4,  // 3: agentshim.frontend.v1.QueueEntry.hold_for_turn_end:type_name -> agentshim.frontend.v1.QueueClassificationHold
@@ -1002,12 +1064,13 @@ var file_agentshim_frontend_v1_prompt_queue_proto_depIdxs = []int32{
 	7,  // 5: agentshim.frontend.v1.QueueEntry.shutdown:type_name -> agentshim.frontend.v1.QueueEntryShutdownHold
 	8,  // 6: agentshim.frontend.v1.QueueEntry.keep_alive:type_name -> agentshim.frontend.v1.QueueEntryKeepAliveHold
 	9,  // 7: agentshim.frontend.v1.QueueEntry.revival:type_name -> agentshim.frontend.v1.QueueEntryRevivalHold
-	6,  // 8: agentshim.frontend.v1.QueueView.entries:type_name -> agentshim.frontend.v1.QueueEntry
-	9,  // [9:9] is the sub-list for method output_type
-	9,  // [9:9] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	10, // 8: agentshim.frontend.v1.QueueEntry.build_refresh:type_name -> agentshim.frontend.v1.QueueEntryBuildRefreshHold
+	6,  // 9: agentshim.frontend.v1.QueueView.entries:type_name -> agentshim.frontend.v1.QueueEntry
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_frontend_v1_prompt_queue_proto_init() }
@@ -1023,6 +1086,7 @@ func file_agentshim_frontend_v1_prompt_queue_proto_init() {
 		(*QueueEntry_Shutdown)(nil),
 		(*QueueEntry_KeepAlive)(nil),
 		(*QueueEntry_Revival)(nil),
+		(*QueueEntry_BuildRefresh)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1030,7 +1094,7 @@ func file_agentshim_frontend_v1_prompt_queue_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_frontend_v1_prompt_queue_proto_rawDesc), len(file_agentshim_frontend_v1_prompt_queue_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   14,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
