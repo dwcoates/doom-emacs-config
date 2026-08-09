@@ -166,6 +166,10 @@ message FailureKind {
     // The turn ended abnormally for a reason with no more specific kind.
     FailureApiTurnFailed api_turn_failed = 59;
 
+    // ---- MACHINERY, continued. ----
+    // The daemon refused a user prompt because the workspace's merge machinery holds the session.
+    FailurePromptRefusedByMergeState prompt_refused_by_merge_state = 60;
+
     // ---- CLIENT-LOCAL failures: the one part of this vocabulary a frontend
     // mints itself. See the note on FailureKind. All resolve BLUE, because a
     // frontend can only ever observe its own machinery failing.
@@ -624,6 +628,21 @@ message FailureApiTurnFailed {
   // The vendor's own stop reason, verbatim, since this kind is exactly the
   // case where it did not map to a named one.
   string stop_reason = 2;
+}
+
+// The daemon refused a USER prompt because the workspace's merge machinery
+// holds the session: it is queued for, running, or resolving a merge. The
+// prompt was not lost and nothing is broken — the session answers again when
+// the merge resolves, or when the user interrupts/evicts it. Machinery
+// prompts (cache keep-alive, warm compaction) are exempt while the workspace
+// is merely queued and never produce this failure.
+//
+// Resolves the workspace BLUE.
+message FailurePromptRefusedByMergeState {
+  // The merge phase that owned the session at refusal, as the composite
+  // render-state name, verbatim (e.g. "RENDER_STATE_MERGE_QUEUED") — display
+  // evidence, never parsed.
+  string state = 1;
 }
 
 // The connection to the daemon dropped and the frontend is reconnecting.
