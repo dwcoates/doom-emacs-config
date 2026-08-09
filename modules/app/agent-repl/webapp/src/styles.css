@@ -1131,6 +1131,16 @@ pre {
   animation: bubble-breath 5.2s ease-in-out infinite;
   transform-origin: center;
 }
+/* A prompt the webapp has drawn but the daemon has not yet acknowledged holds
+   still. The bubble appears the instant the user hits send — that is the whole
+   point of minting it locally — and the breath above is what the daemon's
+   receipt adds to it, so the motion starting is the acknowledgement itself
+   rather than an ornament that happens to arrive with it. `animation: none`
+   rather than a paused state: there is no phase worth preserving, and the
+   render emits no `animation-delay` for such a bubble either. */
+.bubble.user.unacked {
+  animation: none;
+}
 @keyframes bubble-breath {
   0%, 100% { transform: scale(0.995); }
   50% { transform: scale(1.005); }
@@ -2430,9 +2440,13 @@ pre {
     width: 100%;
     opacity: 0.5;
   }
-  /* The prompt bubble's breath is pure ambience, not a progress or liveness
-     signal (unlike the spinner and footer breath above), so it simply stops
-     rather than slowing. Stopping rather than re-timing also keeps the period
+  /* The prompt bubble's breath marks one fact — the daemon has the prompt —
+     which the feed goes on to state in full a moment later (the turn runs, the
+     footer moves, the answer arrives), so it simply stops here rather than
+     slowing, as the spinner and footer breath above do for signals nothing
+     else restates. A reader in this mode therefore cannot tell an unacked
+     bubble from an acknowledged one, and loses nothing that the rest of the
+     feed does not say. Stopping rather than re-timing also keeps the period
      a single constant: the negative `animation-delay` each bubble renders
      with is computed against one `BUBBLE_BREATH_PERIOD_MS`, and a reduced
      motion override that merely LENGTHENED the cycle would leave that delay

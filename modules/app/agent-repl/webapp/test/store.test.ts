@@ -2729,3 +2729,170 @@ describe("a stale async push", () => {
     expect("asyncGap" in result).toBe(false);
   });
 });
+
+// --- the local prompt bubble -------------------------------------------------
+//
+// The webapp files its own bubble for a submit the daemon has not answered yet,
+// so the user's words appear on the frame they hit send rather than one round
+// trip later. The daemon's receipt for the same request id then supersedes it,
+// and that supersession is what the breath renders off (`UserTurnItem.unacked`).
+
+describe("addLocalPrompt", () => {
+  /** The daemon's receipt for a submit: same request id, no unacked marking. */
+  function receipt(requestId: string, text: string): ConversationItem {
+    return {
+      kind: "user-turn",
+      requestId,
+      uuid: `prompt-echo:${requestId}`,
+      content: [{ type: "text", text }],
+      ts: TS,
+    };
+  }
+
+  it("files the submitted prompt as an unacked bubble", () => {
+    // Arrange
+    const store = new ConversationStore();
+    // Act
+    store.addLocalPrompt("r1", "hello");
+    // Assert
+    expect(store.state.items).toHaveLength(1);
+    const item = store.state.items[0] as Extract<ConversationItem, { kind: "user-turn" }>;
+    expect(item.kind).toBe("user-turn");
+    expect(item.requestId).toBe("r1");
+    expect(item.unacked).toBe(true);
+  });
+
+  it("carries the prompt text the submit sent", () => {
+    // Arrange
+    const store = new ConversationStore();
+    // Act
+    store.addLocalPrompt("r1", "hello");
+    // Assert
+    const item = store.state.items[0] as Extract<ConversationItem, { kind: "user-turn" }>;
+    expect(item.content).toEqual([{ type: "text", text: "hello" }]);
+  });
+
+  it("stamps the bubble from the store's clock", () => {
+    // Arrange — an injected clock, so the stamp is the store's and not the wall's.
+    const store = new ConversationStore(() => {}, () => 1700000000000);
+    // Act
+    store.addLocalPrompt("r1", "hello");
+    // Assert
+    const item = store.state.items[0] as Extract<ConversationItem, { kind: "user-turn" }>;
+    expect(item.ts).toBe(new Date(1700000000000).toISOString());
+  });
+
+  it("ranks the bubble at the feed tail", () => {
+    // Arrange — history up to seq 10.
+    const store = new ConversationStore();
+    store.ingest([itemsEffect([textItem({ blockId: "h1", uuid: "h1:0" })], 10)]);
+    // Act
+    store.addLocalPrompt("r1", "hello");
+    // Assert — a prompt just sent belongs below everything already there.
+    expect(store.state.items.map((i) => i.kind)).toEqual(["text", "user-turn"]);
+  });
+
+  it("reports a visible change", () => {
+    // Arrange
+    const store = new ConversationStore();
+    // Act / Assert — the caller schedules a render off this.
+    expect(store.addLocalPrompt("r1", "hello")).toBe(true);
+  });
+
+  it("refuses a prompt with no request id to key its receipt on", () => {
+    // Arrange — a bubble filed under no id could never be superseded.
+    const store = new ConversationStore();
+    // Act / Assert
+    expect(() => store.addLocalPrompt("", "hello")).toThrow(/request id/);
+  });
+
+  it("drops the unacked marking when the daemon's receipt lands", () => {
+    // Arrange
+    const store = new ConversationStore();
+    store.addLocalPrompt("r1", "hello");
+    // Act
+    store.ingest([itemsEffect([receipt("r1", "hello")], 0)]);
+    // Assert — one bubble, now acknowledged: this is what starts the breath.
+    expect(store.state.items).toHaveLength(1);
+    const item = store.state.items[0] as Extract<ConversationItem, { kind: "user-turn" }>;
+    expect(item.unacked).toBeUndefined();
+  });
+
+  it("keeps the acknowledged bubble where the local one already sat", () => {
+    // Arrange — history, the local bubble, then a later item above nothing.
+    const store = new ConversationStore();
+    store.ingest([itemsEffect([textItem({ blockId: "h1", uuid: "h1:0" })], 10)]);
+    store.addLocalPrompt("r1", "hello");
+    // Act — the receipt arrives with a real seq of its own.
+    store.ingest([itemsEffect([receipt("r1", "hello")], 11)]);
+    // Assert — replaced in place, never re-ranked.
+    expect(store.state.items.map((i) => i.kind)).toEqual(["text", "user-turn"]);
+  });
+
+  it("keeps two concurrent submits on their own bubbles", () => {
+    // Arrange / Act — two prompts sent before either is acknowledged.
+    const store = new ConversationStore();
+    store.addLocalPrompt("r1", "first");
+    store.addLocalPrompt("r2", "second");
+    // Assert
+    expect(store.state.items).toHaveLength(2);
+  });
+});
+
+describe("dropUnackedPrompt", () => {
+  it("removes the bubble for a refused submit", () => {
+    // Arrange
+    const store = new ConversationStore();
+    store.addLocalPrompt("r1", "hello");
+    // Act — the daemon refused the command, so no turn ever started.
+    const dropped = store.dropUnackedPrompt("r1");
+    // Assert
+    expect(dropped).toBe(true);
+    expect(store.state.items).toEqual([]);
+  });
+
+  it("leaves an already-acknowledged bubble standing", () => {
+    // Arrange — the receipt landed, so the prompt demonstrably reached the daemon.
+    const store = new ConversationStore();
+    store.addLocalPrompt("r1", "hello");
+    store.ingest([
+      itemsEffect(
+        [
+          {
+            kind: "user-turn",
+            requestId: "r1",
+            uuid: "prompt-echo:r1",
+            content: [{ type: "text", text: "hello" }],
+            ts: TS,
+          },
+        ],
+        0,
+      ),
+    ]);
+    // Act — a late refusal must not take down a prompt the daemon has.
+    const dropped = store.dropUnackedPrompt("r1");
+    // Assert
+    expect(dropped).toBe(false);
+    expect(store.state.items).toHaveLength(1);
+  });
+
+  it("leaves another submit's bubble alone", () => {
+    // Arrange
+    const store = new ConversationStore();
+    store.addLocalPrompt("r1", "first");
+    store.addLocalPrompt("r2", "second");
+    // Act
+    store.dropUnackedPrompt("r1");
+    // Assert
+    const item = store.state.items[0] as Extract<ConversationItem, { kind: "user-turn" }>;
+    expect(store.state.items).toHaveLength(1);
+    expect(item.requestId).toBe("r2");
+  });
+
+  it("reports no removal when nothing was standing", () => {
+    // Arrange — a refusal for a submit whose bubble was never filed.
+    const store = new ConversationStore();
+    // Act / Assert
+    expect(store.dropUnackedPrompt("r1")).toBe(false);
+  });
+});

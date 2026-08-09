@@ -1624,6 +1624,7 @@ describe("thinking spinner", () => {
 
 const breathUserBubble = blockAfter(css, ".bubble.user {");
 const bubbleBreathKeyframes = blockAfter(css, "@keyframes bubble-breath {");
+const unackedBubble = blockAfter(css, ".bubble.user.unacked {");
 const reducedBubbleBreath = blockAfter(
   blockAfter(css, "@media (prefers-reduced-motion: reduce)"),
   ".bubble.user {",
@@ -1716,11 +1717,25 @@ describe("prompt bubble breath", () => {
 
   it("stops breathing under reduced motion rather than merely slowing", () => {
     // Arrange / Act — the reduced-motion override, unlike the spinner and
-    // footer breath above, drops the animation outright: this breath is
-    // pure ambience, not a progress or liveness signal reduced motion must
-    // still convey.
+    // footer breath above, drops the animation outright: the rest of the feed
+    // restates what this breath says, so nothing is lost by stopping it.
     // Assert
     expect(reducedBubbleBreath).toMatch(/animation:\s*none/);
+  });
+
+  it("holds a prompt the daemon has not acknowledged still", () => {
+    // Arrange / Act — the breath says the daemon has the prompt, so the
+    // bubble the webapp mints for its own submit must not carry one until
+    // the daemon's receipt supersedes it.
+    // Assert
+    expect(unackedBubble).toMatch(/animation:\s*none/);
+  });
+
+  it("suppresses the breath only for the unacknowledged bubble", () => {
+    // Arrange — the suppression rule must not reach an ordinary prompt
+    // bubble, which would stop every breath in the feed.
+    // Act / Assert
+    expect(css).toContain(".bubble.user.unacked {");
   });
 });
 
