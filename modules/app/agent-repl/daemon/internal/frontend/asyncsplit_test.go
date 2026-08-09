@@ -278,3 +278,112 @@ func TestCurateEventMarksAnOutcomeProducedInsideADetachedAgent(t *testing.T) {
 		t.Fatal("a detachment launched inside a bubble is a nested dispatch and must be marked as one")
 	}
 }
+
+// --- the STREAM plane's half of the same split -----------------------------
+//
+// A Task dispatch's subagent conversation reaches the daemon on the stream
+// plane, where there is no transcript envelope and the detachment is stated by
+// parent_tool_use_id instead. These assert the split reads it there too:
+// without them a subagent renders inside its bubble off the file plane and at
+// the top level off the stream plane, which is what shipped.
+
+// streamAssistantEvent wraps a stream-plane assistant message as the store
+// event a consumer sees. An empty parentToolUseID is the main agent speaking.
+func streamAssistantEvent(t *testing.T, uuid, text, parentToolUseID string) *corev1.Event {
+	t.Helper()
+	return &corev1.Event{
+		Seq:          9,
+		ProducedAtMs: producedMs,
+		SessionId:    "s1",
+		Payload: &corev1.Event_Vendor{Vendor: mustAny(t, &datav1.ClaudeStreamMessage{
+			Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{
+				Uuid:            uuid,
+				ParentToolUseId: parentToolUseID,
+				Message: &datav1.ApiAssistantMessage{
+					Id: "msg_" + uuid,
+					Content: []*datav1.ContentBlock{
+						{Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: text}}},
+					},
+				},
+			}},
+		})},
+	}
+}
+
+func TestAStreamPlaneSubagentEmissionIsNotAFeedItem(t *testing.T) {
+	c, err := CurateEvent("/ws", "f1", streamAssistantEvent(t, "u1", "subagent speaking", "toolu_launch"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(c.Feed.GetItems()); got != 0 {
+		t.Fatalf("a subagent's stream-plane output must never reach a frontend as a top-level item, got %d feed items", got)
+	}
+}
+
+func TestAStreamPlaneSubagentEmissionReachesItsBubble(t *testing.T) {
+	c, err := CurateEvent("/ws", "f1", streamAssistantEvent(t, "u1", "subagent speaking", "toolu_launch"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Detached) != 1 || len(c.Detached[0].Emissions) != 1 {
+		t.Fatalf("a subagent's stream-plane output must be routed to its bubble, got %d folds", len(c.Detached))
+	}
+}
+
+func TestAStreamPlaneSubagentFoldNamesTheCallThatLaunchedIt(t *testing.T) {
+	c, err := CurateEvent("/ws", "f1", streamAssistantEvent(t, "u1", "x", "toolu_launch"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Detached[0].SourceToolUseID; got != "toolu_launch" {
+		t.Fatalf("the fold must be addressed by the launching call so it lands in that call's bubble, got %q", got)
+	}
+}
+
+func TestAStreamPlaneMainAgentEmissionStaysOnTheFeed(t *testing.T) {
+	c, err := CurateEvent("/ws", "f1", streamAssistantEvent(t, "u1", "main agent speaking", ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Feed.GetItems()) != 1 {
+		t.Fatalf("an empty parent_tool_use_id is not a detachment, got %d feed items", len(c.Feed.GetItems()))
+	}
+}
+
+func TestAStreamPlaneMainAgentEmissionIsNotRoutedToAnyBubble(t *testing.T) {
+	c, err := CurateEvent("/ws", "f1", streamAssistantEvent(t, "u1", "main agent speaking", ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Detached) != 0 {
+		t.Fatalf("nothing the main agent said is detached work, got %d folds", len(c.Detached))
+	}
+}
+
+func TestAStreamPlaneSubagentLaunchPromptIsWithheldRatherThanPromotedToTheFeed(t *testing.T) {
+	ev := &corev1.Event{
+		Seq:          9,
+		ProducedAtMs: producedMs,
+		SessionId:    "s1",
+		Payload: &corev1.Event_Vendor{Vendor: mustAny(t, &datav1.ClaudeStreamMessage{
+			Msg: &datav1.ClaudeStreamMessage_User{User: &datav1.UserMessage{
+				Uuid:            "u1",
+				ParentToolUseId: "toolu_launch",
+				Message: &datav1.ApiUserMessage{
+					Content: &datav1.ApiUserMessage_ContentBlocks{ContentBlocks: &datav1.ApiContentBlocks{
+						Blocks: []*datav1.ContentBlock{
+							{Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: "write a hello world"}}},
+						},
+					}},
+				},
+			}},
+		})},
+	}
+	c, err := CurateEvent("/ws", "f1", ev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(c.Feed.GetItems()); got != 0 {
+		t.Fatalf("the launch prompt the harness writes for a subagent must not render as the user's own turn, got %d feed items", got)
+	}
+}
