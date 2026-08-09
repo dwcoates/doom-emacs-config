@@ -219,8 +219,15 @@ func (v *WorkspaceViews) PublishTokenBreakdown(workspace, fence string, usage *f
 	}
 }
 
-// Forget drops a closed workspace's retained views so the connect snapshot
-// stops carrying a topbar for a workspace nothing runs.
+// Forget drops a closed workspace's retained views AND its memoized branch, so
+// the connect snapshot stops carrying a topbar for a workspace nothing runs.
+//
+// IT IS CALLED FROM THE CLOSE, beside the log-target eviction, which is what
+// binds these retentions' lifetime to the workspace that owns them. The branch
+// memo has to go with them: a workspace re-created at the same path is a
+// different worktree on a possibly different branch, and inheriting its dead
+// predecessor's memo would render the OLD branch under a genuinely current
+// fence — a lie no client gate can reject.
 func (v *WorkspaceViews) Forget(workspace string) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
