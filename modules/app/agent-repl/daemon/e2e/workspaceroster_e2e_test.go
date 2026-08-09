@@ -414,18 +414,31 @@ func dialRosterWS(t *testing.T, url string) *websocket.Conn {
 // established by waiting is only ever probable. This establishes it by ORDERING
 // instead. The server enqueues a connecting client's snapshot frames while
 // accepting the connection, BEFORE its read loop has consumed a single inbound
-// byte, and one writer drains that outbox in FIFO order. So a command sent
-// after the dial is answered strictly AFTER every frame the connect produced:
-// reading up to that ack has, by construction, read the whole connect burst.
+// byte, and one writer drains each lane of that outbox in push order. So a
+// command whose ack shares the connect burst's lane is answered strictly AFTER
+// every frame the connect produced: reading up to that ack has, by
+// construction, read the whole connect burst.
 //
-// The barrier command carries an empty command oneof, which frontend.Dispatch
-// answers with a loud failing ack. That refusal is the point — it is a reply
-// that changes no daemon state and needs no capability, so it can never be
-// mistaken for part of what is under test.
+// # Why the barrier is a RESYNC
+//
+// The lane is the whole of it. The outbox has two — a bulk lane carrying state
+// (the connect snapshot and the retained roster ride it) and a control lane
+// carrying correlated request-keyed replies, which is drained FIRST so an ack
+// never queues behind a large backlog. An ordinary command's ack therefore
+// OVERTAKES the connect burst, and a barrier built on one reported "no roster"
+// for a roster still sitting in the bulk lane — observed as a ~40% failure rate
+// under repetition.
+//
+// `resync` is the one command whose ack rides the BULK lane, because its real
+// answer is the snapshot it enqueues there (see the ackLane note in
+// frontend/server.go). Its ack cannot overtake the burst, which is what makes
+// this barrier structural rather than probable. The resync's own extra
+// StateSnapshot is ignored below, and it enqueues no roster of its own, so the
+// only roster frame this can ever return is the connect burst's.
 func connectRoster(t *testing.T, conn *websocket.Conn) *frontendv1.WorkspaceRoster {
 	t.Helper()
 	const barrierID = "roster-connect-barrier"
-	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q}`, barrierID))
+	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"resync":{"fromSeq":"0","fence":""}}`, barrierID))
 	var received *frontendv1.WorkspaceRoster
 	for {
 		frame := readFrame(t, conn)
