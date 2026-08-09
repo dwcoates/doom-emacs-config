@@ -298,7 +298,7 @@ function packageVersion(spec: string): string {
  *   allowlists, hooks), project settings, and CLAUDE.md — the posture
  *   every vterm-era workflow assumes.
  *
- * The preset additionally carries the session's metaprompt as an
+ * The preset additionally carries the canonical metaprompt as an
  * `append` (metaprompt.ts), which is how the harness's guidelines reach
  * the agent at all: they are part of the system prompt the SDK re-sends
  * on every request, not a directive injected into the conversation.
@@ -313,7 +313,7 @@ export function realQueryOptions(
     canUseTool: canUseTool as never,
     includePartialMessages: true,
     permissionMode: args.permissionMode,
-    systemPrompt: systemPromptOption(args.cwd),
+    systemPrompt: systemPromptOption(),
     settingSources: ["user", "project", "local"],
     ...(args.claudeBin !== undefined
       ? { pathToClaudeCodeExecutable: args.claudeBin }
@@ -597,7 +597,7 @@ export async function runUdsMode(
     // canUseTool passed here exists only to satisfy the builder's signature and
     // is never invoked: fingerprinting an options object does not run a turn.
     effectiveQueryOptions: realQueryOptions(args, fingerprintCanUseTool),
-    contextPrefix: systemPromptOption(args.cwd),
+    contextPrefix: systemPromptOption(),
     // `--resume <uuid>` IS the vendor session id the store keys events by, so
     // a resumed session can subscribe correctly from its very first Subscribe
     // instead of waiting for the SDK to reveal the uuid.
