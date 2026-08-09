@@ -58,14 +58,14 @@ type answerFn func(t *testing.T, reg *permRegistry, requestID string)
 
 func allowIt(t *testing.T, reg *permRegistry, requestID string) {
 	t.Helper()
-	if err := reg.answer(requestID, true, "", nil); err != nil {
+	if err := reg.answerAllow(requestID, nil); err != nil {
 		t.Fatalf("answer(allow): %v", err)
 	}
 }
 
 func denyIt(t *testing.T, reg *permRegistry, requestID string) {
 	t.Helper()
-	if err := reg.answer(requestID, false, "no", nil); err != nil {
+	if err := reg.answerDecline(requestID, "no"); err != nil {
 		t.Fatalf("answer(deny): %v", err)
 	}
 }

@@ -15,7 +15,7 @@ func TestPermRegistryAnswerAllow(t *testing.T) {
 	defer release()
 
 	// Act.
-	if err := reg.answer("r1", true, "", nil); err != nil {
+	if err := reg.answerAllow("r1", nil); err != nil {
 		t.Fatalf("answer: %v", err)
 	}
 
@@ -40,7 +40,7 @@ func TestPermRegistryAnswerDenyCarriesMessage(t *testing.T) {
 	defer release()
 
 	// Act.
-	if err := reg.answer("r2", false, "nope", nil); err != nil {
+	if err := reg.answerDecline("r2", "nope"); err != nil {
 		t.Fatalf("answer: %v", err)
 	}
 
@@ -56,7 +56,7 @@ func TestPermRegistryAnswerDenyCarriesMessage(t *testing.T) {
 
 func TestPermRegistryAnswerUnknownIsError(t *testing.T) {
 	reg := newPermRegistry(nil)
-	if err := reg.answer("ghost", true, "", nil); err == nil {
+	if err := reg.answerAllow("ghost", nil); err == nil {
 		t.Fatal("answering an unknown request_id must be a loud error, not swallowed")
 	}
 }
@@ -91,7 +91,7 @@ func TestPermRegistryResentRequestJoinsTheSameRendezvous(t *testing.T) {
 	defer releaseSecond()
 
 	// Act.
-	if err := reg.answer("r5", true, "", nil); err != nil {
+	if err := reg.answerAllow("r5", nil); err != nil {
 		t.Fatalf("answer: %v", err)
 	}
 
@@ -167,38 +167,48 @@ func TestPermRegistryFailReleasesEveryJoinedCaller(t *testing.T) {
 	}
 }
 
-func TestPermRegistryRecall(t *testing.T) {
-	tests := []struct {
-		name      string
-		answer    bool
-		denyMsg   string
-		wantFound bool
-		want      corev1.PermissionDecision
-	}{
-		{name: "allow is recalled", answer: true, wantFound: true, want: corev1.PermissionDecision_PERMISSION_DECISION_ALLOW},
-		{name: "deny is recalled", answer: false, denyMsg: "nope", wantFound: true, want: corev1.PermissionDecision_PERMISSION_DECISION_DENY},
+func TestPermRegistryRecallsAGrant(t *testing.T) {
+	// Arrange.
+	reg := newPermRegistry(nil)
+	_, release := reg.await("r9", "ws")
+	defer release()
+
+	// Act.
+	if err := reg.answerAllow("r9", nil); err != nil {
+		t.Fatalf("answerAllow: %v", err)
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange.
-			reg := newPermRegistry(nil)
-			_, release := reg.await("r9", "ws")
-			defer release()
+	resp, ok := reg.recall("r9")
 
-			// Act.
-			if err := reg.answer("r9", tc.answer, tc.denyMsg, nil); err != nil {
-				t.Fatalf("answer: %v", err)
-			}
-			resp, ok := reg.recall("r9")
+	// Assert: a re-send of a granted request is served the grant rather than
+	// asking the human a question they already answered.
+	if !ok {
+		t.Fatal("recall must report the grant the human already made")
+	}
+	if resp.GetDecision() != corev1.PermissionDecision_PERMISSION_DECISION_ALLOW {
+		t.Errorf("decision: got %v, want ALLOW", resp.GetDecision())
+	}
+}
 
-			// Assert.
-			if ok != tc.wantFound {
-				t.Fatalf("recall found = %v, want %v", ok, tc.wantFound)
-			}
-			if resp.GetDecision() != tc.want {
-				t.Errorf("decision: got %v, want %v", resp.GetDecision(), tc.want)
-			}
-		})
+func TestPermRegistryDoesNotRecallADecline(t *testing.T) {
+	// Arrange — a declined request. A decline is not an answer to replay: it
+	// is a stop, and nothing was ever sent to the shim for it
+	// (permdecline.go).
+	reg := newPermRegistry(nil)
+	_, release := reg.await("r9-declined", "ws")
+	defer release()
+
+	// Act.
+	if err := reg.answerDecline("r9-declined", "nope"); err != nil {
+		t.Fatalf("answerDecline: %v", err)
+	}
+	_, ok := reg.recall("r9-declined")
+
+	// Assert: a shim re-asking a declined request is one whose canUseTool
+	// outlived the stop. Serving it the denial would unblock the tool call and
+	// let the agent carry on, so it is RE-ASKED and the fresh answer stops the
+	// turn again.
+	if ok {
+		t.Fatal("a decline must not be recallable: replaying it would answer a question whose whole point was to stop the turn")
 	}
 }
 
@@ -222,7 +232,7 @@ func TestPermRegistryFailKeepsRecordedAnswers(t *testing.T) {
 	// Arrange: answered, then the connection tears down.
 	reg := newPermRegistry(nil)
 	_, release := reg.await("r11", "ws")
-	if err := reg.answer("r11", true, "", nil); err != nil {
+	if err := reg.answerAllow("r11", nil); err != nil {
 		t.Fatalf("answer: %v", err)
 	}
 	release()
@@ -245,7 +255,7 @@ func TestPermRegistryAnsweredMemoryIsBounded(t *testing.T) {
 		id := fmt.Sprintf("bounded-%d", i)
 		ids = append(ids, id)
 		_, release := reg.await(id, "ws")
-		if err := reg.answer(id, true, "", nil); err != nil {
+		if err := reg.answerAllow(id, nil); err != nil {
 			t.Fatalf("answer %s: %v", id, err)
 		}
 		release()
@@ -272,10 +282,10 @@ func TestPermRegistryAnswerIsOneShot(t *testing.T) {
 	defer release()
 
 	// Act + Assert: first answer wins; a second is a loud error.
-	if err := reg.answer("r4", true, "", nil); err != nil {
+	if err := reg.answerAllow("r4", nil); err != nil {
 		t.Fatalf("first answer: %v", err)
 	}
-	if err := reg.answer("r4", true, "", nil); err == nil {
+	if err := reg.answerAllow("r4", nil); err == nil {
 		t.Fatal("second answer for the same request_id must error")
 	}
 }

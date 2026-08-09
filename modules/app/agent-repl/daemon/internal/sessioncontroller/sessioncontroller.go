@@ -1072,7 +1072,13 @@ func (m *Manager) SubmitPrompt(ctx context.Context, workspace, requestID, text, 
 	if strings.TrimSpace(requestID) == "" {
 		return fmt.Errorf("session-controller: submit prompt for workspace %q needs a non-empty request id", workspace)
 	}
-	return m.submitPrompt(ctx, workspace, requestID, text, permissionMode, "frontend", promptOrigin)
+	// SUPERSEDES is true HERE and nowhere else: a prompt the human just wrote
+	// at a frontend is the only kind that answers a question by being typed
+	// (permdecline.go). A queued prompt being drained, a merge's own prompt and
+	// the daemon's keep-alive ping all reach submitPromptAs too, and none of
+	// them is the user turning away from the question.
+	_, err := m.submitPromptAs(ctx, workspace, requestID, text, permissionMode, "frontend", promptOrigin, submitterUser, supersedesParkedPermissions)
+	return err
 }
 
 // SetModel forwards a deliberate model request to the live shim, then persists
@@ -1120,7 +1126,7 @@ func (m *Manager) SubmitWorkspaceInitialPrompt(ctx context.Context, workspace, j
 }
 
 func (m *Manager) submitPrompt(ctx context.Context, workspace, requestID, text, permissionMode, origin string, promptOrigin corev1.PromptOrigin) error {
-	_, err := m.submitPromptAs(ctx, workspace, requestID, text, permissionMode, origin, promptOrigin, submitterUser)
+	_, err := m.submitPromptAs(ctx, workspace, requestID, text, permissionMode, origin, promptOrigin, submitterUser, leavesParkedPermissions)
 	return err
 }
 
@@ -1162,7 +1168,17 @@ func (p promptDisposition) String() string {
 // parked on the queue of a leased session would be delivered into the middle of
 // merge.Coordinator's conflict resolution the moment its turn ended, which is
 // the silent drop-shaped failure the loud refusal replaces.
-func (m *Manager) submitPromptAs(ctx context.Context, workspace, requestID, text, permissionMode, origin string, promptOrigin corev1.PromptOrigin, who submitter) (promptDisposition, error) {
+// SUPERSEDING is the caller's answer to a second question: does this prompt
+// DECLINE what the workspace has parked (permdecline.go)? It is asked of the
+// caller for the reason `who` is — the fact is the submitter's, not something
+// to be sniffed off a free-form origin string — and only the frontend's own
+// SubmitPrompt answers yes.
+//
+// It is applied AFTER the refusal guards above it and never before: a prompt
+// the lease or the hibernation gate turns away changes nothing, and declining a
+// question on behalf of a prompt that is then refused would answer for the user
+// while leaving them nothing to show for it.
+func (m *Manager) submitPromptAs(ctx context.Context, workspace, requestID, text, permissionMode, origin string, promptOrigin corev1.PromptOrigin, who submitter, supersedes permissionSupersession) (promptDisposition, error) {
 	if err := validatePromptOrigin(promptOrigin); err != nil {
 		m.logf("session-controller: prompt REFUSED ws=%q request_id=%s origin=%q prompt_origin=%d error=%v — no session or queue state was touched", workspace, requestID, origin, promptOrigin, err)
 		return promptDisposition{}, err
@@ -1188,6 +1204,17 @@ func (m *Manager) submitPromptAs(ctx context.Context, workspace, requestID, text
 			return promptDisposition{}, err
 		}
 	}
+	// THE PROMPT IS THE ANSWER, when the caller says it is. It stops the turn
+	// before the submit below, so the prompt then takes the ordinary
+	// post-interrupt path a manual decline would have left for it. A failed
+	// decline is returned rather than submitted past: the prompt would
+	// otherwise land behind a turn the user believes they stopped.
+	if supersedes == supersedesParkedPermissions {
+		if err := m.declinePendingPermissionsForPrompt(ctx, workspace, requestID); err != nil {
+			return promptDisposition{}, err
+		}
+	}
+
 	// THE KEEP-ALIVE DEBT IS SETTLED BEFORE THE SHIM IS RESOLVED, and this is
 	// the placement the gap demanded. A ping that finished with nothing waiting
 	// leaves its turns at the transcript tail; submitting on top of them puts
@@ -1444,6 +1471,11 @@ func (m *Manager) Interrupt(ctx context.Context, workspace, requestID string) er
 		}
 		return err
 	}
+	// The shim acknowledged the stop, which means it has already force-denied
+	// every canUseTool it had parked. The daemon's own rendezvous follows it
+	// here so the two cannot disagree about what is still being asked
+	// (permdecline.go).
+	m.releaseParkedPermissionsOnStop(workspace, requestID)
 	if err := m.noteUserInterrupt(d, outcome); err != nil {
 		return err
 	}
@@ -1716,9 +1748,20 @@ func (m *Manager) healthController(ctx context.Context, d *sessionController, re
 // AnswerPermission delivers a frontend permission answer to the parked
 // canUseTool round-trip (keyed by permissionRequestID). A stale/duplicate
 // answer is a loud error, never swallowed.
-func (m *Manager) AnswerPermission(_ context.Context, workspace, permissionRequestID string, allow bool, denyMessage string, updatedInput *structpb.Struct) error {
-	m.logf("session-controller: permission answer ws=%s request_id=%s allow=%v", workspace, permissionRequestID, allow)
-	return m.reg.answer(permissionRequestID, allow, denyMessage, updatedInput)
+//
+// THE TWO ANSWERS ARE NOT SYMMETRIC. A grant releases the round-trip and the
+// turn carries on, which is the whole of it. A DECLINE is the user taking the
+// session back, so it goes through the decline funnel and stops the turn —
+// see permdecline.go for why that stop is the decline's only delivery.
+//
+// requestID is the FRONTEND COMMAND'S OWN id, carried through so the stop a
+// decline issues is nameable end to end, exactly as Interrupt's is.
+func (m *Manager) AnswerPermission(ctx context.Context, workspace, requestID, permissionRequestID string, allow bool, denyMessage string, updatedInput *structpb.Struct) error {
+	m.logf("session-controller: permission answer ws=%s request_id=%s permission_request_id=%s allow=%v", workspace, requestID, permissionRequestID, allow)
+	if !allow {
+		return m.declinePermissions(ctx, workspace, requestID, denyMessage, []string{permissionRequestID})
+	}
+	return m.reg.answerAllow(permissionRequestID, updatedInput)
 }
 
 // Resync replays the workspace session's retained conversation deltas from
@@ -3233,10 +3276,22 @@ func (h permHandler) HandlePermission(sessionID string, req *corev1.PermissionRe
 		h.cons.pushPermission(permissionItem(req, corev1.PermissionItem_RESOLUTION_ABANDONED, ""))
 		return nil
 	}
-	res := corev1.PermissionItem_RESOLUTION_ALLOWED
 	if resp.GetDecision() == corev1.PermissionDecision_PERMISSION_DECISION_DENY {
-		res = corev1.PermissionItem_RESOLUTION_DENIED
+		// A DECLINE IS RECORDED HERE AND DELIVERED BY THE STOP. Nothing is
+		// returned to the shim: the interrupt that every decline carries
+		// force-denies this very round-trip on the shim's own side
+		// (uds-session.ts interrupt → control.cancelAll) and then ends the
+		// turn, so answering here as well would put a second, unordered message
+		// on the wire for one decision. See permdecline.go.
+		//
+		// The deny message rides the pushed item as the RECORDED reason. It is
+		// deliberately not agent-visible: the turn that could have read it is
+		// over by the time this returns.
+		h.logf("session-controller: permission DECLINED ws=%s session=%s request_id=%s — no response is sent to the shim; the stop that accompanies the decline releases and ends the turn",
+			h.cons.workspace, sessionID, req.GetRequestId())
+		h.cons.pushPermission(permissionItem(req, corev1.PermissionItem_RESOLUTION_DENIED, resp.GetDenyMessage()))
+		return nil
 	}
-	h.cons.pushPermission(permissionItem(req, res, resp.GetDenyMessage()))
+	h.cons.pushPermission(permissionItem(req, corev1.PermissionItem_RESOLUTION_ALLOWED, ""))
 	return resp
 }
