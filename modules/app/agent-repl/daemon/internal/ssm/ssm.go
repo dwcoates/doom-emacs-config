@@ -1079,7 +1079,7 @@ func (m *Manager) appendMergeTransition(workspace, token, causeKind string, stat
 		// The axis is cleared: the run is over and nothing it reported is true
 		// any more, so the retained status goes with it rather than describing a
 		// run no frontend should still be rendering.
-		m.clearPipelineStatusLocked(workspace)
+		m.retirePipelineStatusLocked(workspace, causeKind)
 	}
 
 	at := m.nextAt()
