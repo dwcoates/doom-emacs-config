@@ -2338,6 +2338,43 @@ in the same shape (still leftmost, nil-name still at head)."
   "`--repo-label' returns nil for a nil KEY."
   (should (null (agent-repl--repo-label nil))))
 
+;;;; ---- Tests: agent-repl--main-worktree-dir ----
+
+(ert-deftest agent-repl-test-main-worktree-dir-from-linked-worktree ()
+  "`--main-worktree-dir' returns the common-dir's parent, the main checkout."
+  (let* ((main (make-temp-file "agent-repl-main-worktree-" t))
+         (common (expand-file-name ".git" main)))
+    (unwind-protect
+        (progn
+          (make-directory common)
+          (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
+                     (lambda (&rest _) common)))
+            (should (equal (agent-repl--main-worktree-dir "/tmp/linked-worktree/")
+                           (directory-file-name
+                            (file-name-directory
+                             (directory-file-name
+                              (agent-repl--path-canonical common))))))))
+      (delete-directory main t))))
+
+(ert-deftest agent-repl-test-main-worktree-dir-no-repo ()
+  "`--main-worktree-dir' returns nil when DIR belongs to no repository."
+  (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
+             (lambda (&rest _) "fatal: not a git repository")))
+    (should (null (agent-repl--main-worktree-dir "/tmp/nowhere/")))))
+
+(ert-deftest agent-repl-test-main-worktree-dir-bare-repo ()
+  "`--main-worktree-dir' returns nil when the common-dir parent does not exist.
+That is the bare-repository shape: no main checkout to switch to."
+  (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
+             (lambda (&rest _) "/nonexistent-agent-repl-parent/repo.git")))
+    (should (null (agent-repl--main-worktree-dir "/tmp/ws/")))))
+
+(ert-deftest agent-repl-test-main-worktree-dir-nil-dir ()
+  "`--main-worktree-dir' returns nil for a nil DIR without shelling out."
+  (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
+             (lambda (&rest _) (error "must not shell out for nil dir"))))
+    (should (null (agent-repl--main-worktree-dir nil)))))
+
 (ert-deftest agent-repl-test-toggle-repo-fold-folds ()
   "`--toggle-repo-fold' on an unfolded repo folds it."
   (agent-repl-test--with-clean-state
