@@ -1071,7 +1071,44 @@ export class UdsSession {
       fromSeq,
       vendorSessionId: this.store.storeSessionId(),
     }));
+    this.reannounceDegradedState();
     this.publishModelCatalog();
+  }
+
+  /**
+   * Re-announce this session's CURRENT degraded state to a daemon that has
+   * just (re)attached.
+   *
+   * EPHEMERAL VERSUS STATE — the whole reason this exists. Two kinds of thing
+   * travel to the daemon while it is absent, and only one of them can be
+   * recovered afterwards:
+   *
+   *   - PERSISTENT events are durable in the store. Whatever the daemon missed
+   *     it replays from the from_seq its next DaemonHello carries, so nothing
+   *     is owed here.
+   *   - EPHEMERAL events are not written anywhere. A ContentDelta or a typing
+   *     frame dropped into the gap is gone, and that is BY DESIGN: it described
+   *     an instant that has passed, and re-sending it later would be a lie
+   *     about when it happened.
+   *
+   * A DegradedState rides the ephemeral path but is not an instant — it is a
+   * STATE that is either still true or no longer true right now. Losing it
+   * meant a session that degraded while the daemon was down came back looking
+   * healthy, with an open store outage nobody was ever told about. So rather
+   * than making ephemerals replayable, the shim re-reports the state it is IN,
+   * read fresh at the moment the link is proven usable. A healthy session
+   * reports nothing, which is what keeps this from manufacturing faults.
+   */
+  private reannounceDegradedState(): void {
+    const open = this.store.openDegradedReport();
+    if (open === null) return;
+    LOGGER.log({
+      level: "warn",
+      agent_repl_session_id: this.deps.sessionId,
+      component: open.component,
+      reason: open.reason,
+    }, "re-announcing this session's OPEN degraded window to the reattached daemon: a DegradedState is ephemeral, so one raised while no daemon was attached reaches this one only by being re-reported");
+    this.server.sendEvent(this.degradedEvent(open));
   }
 
   /** Publish the query-owned selectable-model menu after the daemon gate closes. */
