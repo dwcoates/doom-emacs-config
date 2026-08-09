@@ -35,19 +35,19 @@ const SESSION_VIEW = {
   contextWindow: "200000",
   modelOptions: [],
 };
-const TYPING = { workspace: "ws", sessionId: "s1", delta: { uuid: "u1", blockIndex: 0, text: "hi" } };
+const TYPING = { workspace: "ws", fence: "s1", delta: { uuid: "u1", blockIndex: 0, text: "hi" } };
 const TASK_CATALOG = {
   workspace: "ws",
-  sessionId: "s1",
+  fence: "s1",
   tasks: [{ taskId: "t1", kind: "agent", description: "d", status: "running" }],
 };
 const CONV_DELTA = {
   workspace: "ws",
-  sessionId: "s1",
+  fence: "s1",
   throughSeq: "5",
   items: [{ uuid: "u1", tsMs: "1700000000000", assistantMessage: { content: [{ text: { text: "hi" } }] } }],
 };
-const SESSION_INIT = { workspace: "ws", sessionId: "s1", init: { model: "claude", cwd: "/w" } };
+const SESSION_INIT = { workspace: "ws", fence: "s1", init: { model: "claude", cwd: "/w" } };
 const COMMAND_ACK = { requestId: "r1", ok: true };
 const DAEMON_VIEW = {
   bootId: "b_abc",
@@ -57,19 +57,18 @@ const DAEMON_VIEW = {
 };
 const HEARTBEAT = {
   workspace: "ws",
-  sessionId: "s1",
+  fence: "s1",
   progress: { toolUseId: "tu1", toolName: "Bash", elapsedSeconds: 12.5 },
 };
 const QUEUE = {
   workspace: "ws",
-  sessionId: "s1",
+  fence: "s1",
   entries: [
     {
       id: "q1",
       text: "run this later",
       queuedAtMs: "1700000000000",
-      classification: "QUEUE_CLASSIFICATION_HOLD",
-      rationale: "independent",
+      holdForTurnEnd: { rationale: "independent" },
     },
   ],
 };
@@ -499,7 +498,7 @@ describe("decodeFrontendFrame — SessionView S7 parity fields", () => {
 
 describe("decodeFrontendFrame — ConversationItem envelope", () => {
   function itemOf(item: unknown): ReturnType<typeof decodeFrontendFrame> {
-    return decode({ conversationDelta: { sessionId: "s1", items: [item] } });
+    return decode({ conversationDelta: { fence: "s1", items: [item] } });
   }
 
   it("decodes the envelope + selected arm", () => {
@@ -554,7 +553,7 @@ describe("decodeFrontendFrame — ConversationItem envelope", () => {
 
 describe("decodeFrontendFrame — TypingDelta embeds ContentDelta", () => {
   it("normalizes the inputJson arm to the input_json kind", () => {
-    const frame = decode({ typingDelta: { sessionId: "s1", delta: { uuid: "u1", blockIndex: 2, inputJson: '{"a":' } } });
+    const frame = decode({ typingDelta: { fence: "s1", delta: { uuid: "u1", blockIndex: 2, inputJson: '{"a":' } } });
     if (frame.frame.case !== "typingDelta") throw new Error("wrong variant");
     expect(frame.frame.value.kind).toBe("input_json");
     expect(frame.frame.value.blockIndex).toBe(2);
@@ -562,54 +561,54 @@ describe("decodeFrontendFrame — TypingDelta embeds ContentDelta", () => {
   });
 
   it("carries the optional input_json tool-use identity", () => {
-    const frame = decode({ typingDelta: { sessionId: "s1", delta: { uuid: "u1", blockIndex: 2, inputJson: "{", toolUseId: "toolu_1" } } });
+    const frame = decode({ typingDelta: { fence: "s1", delta: { uuid: "u1", blockIndex: 2, inputJson: "{", toolUseId: "toolu_1" } } });
     if (frame.frame.case !== "typingDelta") throw new Error("wrong variant");
     expect(frame.frame.value).toMatchObject({ kind: "input_json", toolUseId: "toolu_1" });
   });
 
   it("rejects a tool-use identity on a non-input delta", () => {
-    expect(() => decode({ typingDelta: { sessionId: "s1", delta: { uuid: "u1", text: "x", toolUseId: "toolu_1" } } })).toThrow(
+    expect(() => decode({ typingDelta: { fence: "s1", delta: { uuid: "u1", text: "x", toolUseId: "toolu_1" } } })).toThrow(
       /toolUseId is only valid for input_json/,
     );
   });
 
   it("decodes a thinking delta with its estimatedTokens int64 string", () => {
-    const frame = decode({ typingDelta: { sessionId: "s1", delta: { uuid: "u1", thinking: "hmm", estimatedTokens: "12" } } });
+    const frame = decode({ typingDelta: { fence: "s1", delta: { uuid: "u1", thinking: "hmm", estimatedTokens: "12" } } });
     if (frame.frame.case !== "typingDelta") throw new Error("wrong variant");
     expect(frame.frame.value.kind).toBe("thinking");
     expect(frame.frame.value.estimatedTokens).toBe(12);
   });
 
   it("decodes a signature delta", () => {
-    const frame = decode({ typingDelta: { sessionId: "s1", delta: { uuid: "u1", signature: "sig" } } });
+    const frame = decode({ typingDelta: { fence: "s1", delta: { uuid: "u1", signature: "sig" } } });
     if (frame.frame.case !== "typingDelta") throw new Error("wrong variant");
     expect(frame.frame.value.kind).toBe("signature");
   });
 
   it("rejects a TypingDelta with no delta", () => {
-    expect(() => decode({ typingDelta: { sessionId: "s1" } })).toThrow(/TypingDelta missing required `delta`/);
+    expect(() => decode({ typingDelta: { fence: "s1" } })).toThrow(/TypingDelta missing required `delta`/);
   });
 
   it("rejects a ContentDelta with no content arm (empty oneof)", () => {
-    expect(() => decode({ typingDelta: { sessionId: "s1", delta: { uuid: "u1", blockIndex: 0 } } })).toThrow(
+    expect(() => decode({ typingDelta: { fence: "s1", delta: { uuid: "u1", blockIndex: 0 } } })).toThrow(
       /carries no content delta/,
     );
   });
 
   it("rejects a ContentDelta that sets two content arms", () => {
     expect(() =>
-      decode({ typingDelta: { sessionId: "s1", delta: { uuid: "u1", text: "a", thinking: "b" } } }),
+      decode({ typingDelta: { fence: "s1", delta: { uuid: "u1", text: "a", thinking: "b" } } }),
     ).toThrow(/sets multiple content deltas/);
   });
 
   it("rejects a ContentDelta with an unrecognized field", () => {
     expect(() =>
-      decode({ typingDelta: { sessionId: "s1", delta: { uuid: "u1", text: "a", bogus: 1 } } }),
+      decode({ typingDelta: { fence: "s1", delta: { uuid: "u1", text: "a", bogus: 1 } } }),
     ).toThrow(/unrecognized field/);
   });
 
   it("rejects a ContentDelta without a uuid", () => {
-    expect(() => decode({ typingDelta: { sessionId: "s1", delta: { text: "a" } } })).toThrow(
+    expect(() => decode({ typingDelta: { fence: "s1", delta: { text: "a" } } })).toThrow(
       /TypingDelta.delta missing required `uuid`/,
     );
   });
@@ -623,7 +622,7 @@ describe("decodeFrontendFrame — SessionInitView (S9)", () => {
   });
 
   it("defaults an absent init to an empty object", () => {
-    const frame = decode({ sessionInit: { sessionId: "s1" } });
+    const frame = decode({ sessionInit: { fence: "s1" } });
     if (frame.frame.case !== "sessionInit") throw new Error("wrong variant");
     expect(frame.frame.value.init).toEqual({});
   });
@@ -632,9 +631,11 @@ describe("decodeFrontendFrame — SessionInitView (S9)", () => {
     expect(() => decode({ sessionInit: { ...SESSION_INIT, bogus: 1 } })).toThrow(/unrecognized field/);
   });
 
-  it("rejects a SessionInitView without a session id", () => {
+  it("rejects a SessionInitView without a fence", () => {
+    // The push is fenced since the figma-idl reshape: `session_id` is reserved,
+    // and an unfenced push cannot be tested for staleness at all.
     expect(() => decode({ sessionInit: { workspace: "ws", init: {} } })).toThrow(
-      /SessionInitView missing required `session_id`/,
+      /SessionInitView missing required `fence`/,
     );
   });
 
@@ -730,21 +731,23 @@ describe("decodeFrontendFrame — required-field validation is loud", () => {
     );
   });
 
-  it("rejects a ConversationDelta without a session id", () => {
+  it("rejects a ConversationDelta without a fence", () => {
+    // The push is fenced since the figma-idl reshape: `session_id` is reserved,
+    // and an unfenced push cannot be tested for staleness at all.
     expect(() => decode({ conversationDelta: { workspace: "ws", items: [] } })).toThrow(
-      /ConversationDelta missing required `session_id`/,
+      /ConversationDelta missing required `fence`/,
     );
   });
 
   it("rejects a TaskEntry with an unknown kind", () => {
     expect(() =>
-      decode({ taskCatalog: { sessionId: "s1", tasks: [{ taskId: "t1", kind: "wat", status: "running" }] } }),
+      decode({ taskCatalog: { fence: "s1", tasks: [{ taskId: "t1", kind: "wat", status: "running" }] } }),
     ).toThrow(/unknown kind 'wat'/);
   });
 
   it("rejects a TaskEntry with an unknown status", () => {
     expect(() =>
-      decode({ taskCatalog: { sessionId: "s1", tasks: [{ taskId: "t1", kind: "agent", status: "wat" }] } }),
+      decode({ taskCatalog: { fence: "s1", tasks: [{ taskId: "t1", kind: "agent", status: "wat" }] } }),
     ).toThrow(/unknown status 'wat'/);
   });
 
@@ -792,7 +795,7 @@ describe("decodeFrontendFrame — HeartbeatView (E4)", () => {
     if (frame.frame.case !== "heartbeat") throw new Error("wrong variant");
     expect(frame.frame.value).toEqual({
       workspace: "ws",
-      sessionId: "s1",
+      fence: "s1",
       toolUseId: "tu1",
       toolName: "Bash",
       parentToolUseId: "",
@@ -812,7 +815,7 @@ describe("decodeFrontendFrame — HeartbeatView (E4)", () => {
 
   it("rejects a heartbeat with no progress", () => {
     // Arrange / Act / Assert
-    expect(() => decode({ heartbeat: { workspace: "ws", sessionId: "s1" } })).toThrow(
+    expect(() => decode({ heartbeat: { workspace: "ws", fence: "s1" } })).toThrow(
       /missing required `progress`/,
     );
   });
@@ -855,59 +858,59 @@ describe("decodeFrontendFrame — QueueView (E4)", () => {
 
   it("decodes an empty queue as an empty entries list", () => {
     // Arrange / Act — "the queue is empty" is a value, not an absence.
-    const frame = decode({ queue: { workspace: "ws", sessionId: "s1" } });
+    const frame = decode({ queue: { workspace: "ws", fence: "s1" } });
     // Assert
     if (frame.frame.case !== "queue") throw new Error("wrong variant");
     expect(frame.frame.value.entries).toEqual([]);
   });
 
-  it("rejects a missing classification rather than defaulting it to pending", () => {
-    // Arrange / Act / Assert — protojson omits an enum at its zero value, and
-    // the zero is now UNSPECIFIED, which the daemon never sends. Reading it as
-    // `pending` would invent the very claim the wire declined to make.
+  it("rejects an unset classification arm rather than defaulting it to pending", () => {
+    // Arrange / Act / Assert — the verdict is a oneof since the figma-idl
+    // reshape, so an unset arm is the only spelling of "nothing decided".
+    // Reading it as `pending` would invent the claim the wire declined to make.
     expect(() =>
-      decode({ queue: { sessionId: "s1", entries: [{ id: "q1", text: "x" }] } }),
-    ).toThrow(/no classification/);
+      decode({ queue: { fence: "s1", entries: [{ id: "q1", text: "x" }] } }),
+    ).toThrow(/no classification arm/);
   });
 
-  it("rejects an explicit UNSPECIFIED classification", () => {
-    // Arrange / Act / Assert — the spelled-out zero is the same wire fact as
-    // an absent field and gets the same loud rejection.
+  it("rejects two classification arms at once, which have no single badge", () => {
+    // Arrange / Act / Assert
     expect(() =>
       decode({
         queue: {
-          sessionId: "s1",
-          entries: [{ id: "q1", classification: "QUEUE_CLASSIFICATION_UNSPECIFIED" }],
+          fence: "s1",
+          entries: [{ id: "q1", pending: {}, interject: { rationale: "now" } }],
         },
       }),
-    ).toThrow(/UNSPECIFIED/);
+    ).toThrow(/sets multiple classifications/);
   });
 
   it("decodes each real classification the daemon sends", () => {
     // Arrange
-    const cases: Array<[string, string]> = [
-      ["QUEUE_CLASSIFICATION_PENDING", "pending"],
-      ["QUEUE_CLASSIFICATION_INTERJECT", "interject"],
-      ["QUEUE_CLASSIFICATION_HOLD", "hold"],
-      ["QUEUE_CLASSIFICATION_ERROR", "error"],
+    const cases: Array<[Record<string, unknown>, string]> = [
+      [{ pending: {} }, "pending"],
+      [{ interject: { rationale: "now" } }, "interject"],
+      [{ holdForTurnEnd: { rationale: "after" } }, "hold"],
+      [{ error: { detail: "classifier died" } }, "error"],
     ];
-    for (const [wire, want] of cases) {
+    for (const [arm, want] of cases) {
       // Act
-      const frame = decode({ queue: { sessionId: "s1", entries: [{ id: "q1", classification: wire }] } });
+      const frame = decode({ queue: { fence: "s1", entries: [{ id: "q1", ...arm }] } });
       // Assert
       if (frame.frame.case !== "queue") throw new Error("wrong variant");
       expect(frame.frame.value.entries[0].classification).toBe(want);
     }
   });
 
-  it("rejects an unrecognized classification rather than defaulting it", () => {
+  it("rejects an unrecognized classification arm rather than defaulting it", () => {
     // Arrange / Act / Assert — rendering an unknown verdict as `pending` would
-    // tell the user their prompt is being judged when it is not.
+    // tell the user their prompt is being judged when it is not. An arm this
+    // build does not know is an unrecognized FIELD on the entry.
     expect(() =>
       decode({
-        queue: { sessionId: "s1", entries: [{ id: "q1", classification: "QUEUE_CLASSIFICATION_XX" }] },
+        queue: { fence: "s1", entries: [{ id: "q1", pending: {}, xxVerdict: {} }] },
       }),
-    ).toThrow(/unrecognized classification/);
+    ).toThrow(/unrecognized field/);
   });
 
   it("rejects an entry with no id, whose controls would all be dead", () => {
@@ -916,8 +919,8 @@ describe("decodeFrontendFrame — QueueView (E4)", () => {
     expect(() =>
       decode({
         queue: {
-          sessionId: "s1",
-          entries: [{ text: "x", classification: "QUEUE_CLASSIFICATION_PENDING" }],
+          fence: "s1",
+          entries: [{ text: "x", pending: {} }],
         },
       }),
     ).toThrow(/missing required `id`/);
@@ -926,7 +929,7 @@ describe("decodeFrontendFrame — QueueView (E4)", () => {
   it("rejects an unrecognized field on an entry", () => {
     // Arrange / Act / Assert
     expect(() =>
-      decode({ queue: { sessionId: "s1", entries: [{ id: "q1", bogus: 1 }] } }),
+      decode({ queue: { fence: "s1", entries: [{ id: "q1", bogus: 1 }] } }),
     ).toThrow(/unrecognized field/);
   });
 
@@ -1072,7 +1075,7 @@ describe("ProgressView decoding (F1)", () => {
   /** A minimal well-formed ProgressView frame body. */
   function pv(over: Record<string, unknown> = {}): string {
     return JSON.stringify({
-      progress: { workspace: "/w", sessionId: "s1", state: "RENDER_STATE_THINKING", ...over },
+      progress: { workspace: "/w", fence: "s1", state: "RENDER_STATE_THINKING", ...over },
     });
   }
 
@@ -1103,7 +1106,7 @@ describe("ProgressView decoding (F1)", () => {
   it("rejects a view with no workspace", () => {
     // Arrange / Act / Assert — it would address no session.
     expect(() =>
-      decodeFrontendFrame(JSON.stringify({ progress: { sessionId: "s1", state: "RENDER_STATE_IDLE" } })),
+      decodeFrontendFrame(JSON.stringify({ progress: { fence: "s1", state: "RENDER_STATE_IDLE" } })),
     ).toThrow(/missing required `workspace`/);
   });
 
@@ -1227,7 +1230,7 @@ describe("ProgressView decoding (F1)", () => {
     // Arrange / Act
     const got = decodeFrontendFrame(
       JSON.stringify({
-        snapshot: { progress: [{ workspace: "/w", sessionId: "s1", state: "RENDER_STATE_IDLE" }] },
+        snapshot: { progress: [{ workspace: "/w", fence: "s1", state: "RENDER_STATE_IDLE" }] },
       }),
     );
     // Assert
@@ -1668,13 +1671,13 @@ describe("decodeFrontendFrame — QueueEntry.shutdownHold", () => {
   function entryWith(hold: unknown): ReturnType<typeof decodeFrontendFrame> {
     return decode({
       queue: {
-        sessionId: "s1",
+        fence: "s1",
         entries: [
           {
             id: "q1",
             text: "later",
-            classification: "QUEUE_CLASSIFICATION_PENDING",
-            shutdownHold: hold,
+            pending: {},
+            shutdown: hold,
           },
         ],
       },
@@ -1788,9 +1791,9 @@ describe("decodeFrontendFrame — QueueEntry.keepAliveHold", () => {
   function entryWith(hold: unknown): ReturnType<typeof decodeFrontendFrame> {
     return decode({
       queue: {
-        sessionId: "s1",
+        fence: "s1",
         entries: [
-          { id: "q1", text: "later", classification: "QUEUE_CLASSIFICATION_PENDING", keepAliveHold: hold },
+          { id: "q1", text: "later", pending: {}, keepAlive: hold },
         ],
       },
     });
@@ -1830,9 +1833,9 @@ describe("decodeFrontendFrame — QueueEntry.revivalHold", () => {
   function entryWith(hold: unknown): ReturnType<typeof decodeFrontendFrame> {
     return decode({
       queue: {
-        sessionId: "s1",
+        fence: "s1",
         entries: [
-          { id: "q1", text: "later", classification: "QUEUE_CLASSIFICATION_PENDING", revivalHold: hold },
+          { id: "q1", text: "later", pending: {}, revival: hold },
         ],
       },
     });
@@ -1844,9 +1847,10 @@ describe("decodeFrontendFrame — QueueEntry.revivalHold", () => {
     return frame.frame.value.entries[0];
   }
 
-  it("decodes the revived session holding a parked prompt", () => {
-    // Arrange / Act / Assert
-    expect(entryOf(entryWith({ sessionId: "sess-4" })).revivalHold?.sessionId).toBe("sess-4");
+  it("decodes the bare marker that parks a prompt behind a revival", () => {
+    // Arrange / Act / Assert — the hold names nothing after the figma-idl
+    // reshape; its PRESENCE is the whole claim.
+    expect(entryOf(entryWith({})).revivalHold).toEqual({});
   });
 
   it("leaves the hold absent on an ordinary classifier-held entry", () => {
@@ -1854,14 +1858,17 @@ describe("decodeFrontendFrame — QueueEntry.revivalHold", () => {
     expect(entryOf(decode({ queue: QUEUE })).revivalHold).toBeUndefined();
   });
 
-  it("rejects a hold that names no session", () => {
-    // Arrange / Act / Assert
-    expect(() => entryWith({})).toThrow(/QueueEntryRevivalHold missing required `sessionId`/);
+  it("rejects the retired session id the hold used to carry", () => {
+    // Arrange / Act / Assert — a producer still stamping it is out of contract,
+    // and dropping it silently would hide that.
+    expect(() => entryWith({ sessionId: "sess-4" })).toThrow(
+      /QueueEntryRevivalHold has unrecognized field\(s\): sessionId/,
+    );
   });
 
   it("rejects an unrecognized field on the hold", () => {
     // Arrange / Act / Assert
-    expect(() => entryWith({ sessionId: "s1", turnId: "t" })).toThrow(
+    expect(() => entryWith({ turnId: "t" })).toThrow(
       /QueueEntryRevivalHold has unrecognized field\(s\): turnId/,
     );
   });
@@ -1878,7 +1885,7 @@ describe("decodeFrontendFrame — ProgressView.expensiveTurn", () => {
 
   /** Decode a ProgressView carrying the given context-cost alert. */
   function pvWith(expensiveTurn: unknown): ReturnType<typeof decodeFrontendFrame> {
-    return decode({ progress: { workspace: "/w", sessionId: "s1", expensiveTurn } });
+    return decode({ progress: { workspace: "/w", fence: "s1", expensiveTurn } });
   }
 
   /** The decoded ProgressView of a progress frame. */
@@ -1903,7 +1910,7 @@ describe("decodeFrontendFrame — ProgressView.expensiveTurn", () => {
 
   it("leaves the alert absent after a cache-efficient turn", () => {
     // Arrange / Act
-    const got = progressOf(decode({ progress: { workspace: "/w", sessionId: "s1" } }));
+    const got = progressOf(decode({ progress: { workspace: "/w", fence: "s1" } }));
     // Assert
     expect(got.expensiveTurn).toBeUndefined();
   });

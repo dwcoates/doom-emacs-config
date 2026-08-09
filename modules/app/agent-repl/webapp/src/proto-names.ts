@@ -110,17 +110,47 @@ export const COMMAND_ARM = {
   reviveSession: "reviveSession",
 } as const satisfies Record<string, ArmKeys<GeneratedFrontendCommand["command"]>>;
 
-/** The `QueueEntry` field naming the keep-alive turn that holds an entry. */
-export const QUEUE_ENTRY_KEEP_ALIVE_HOLD: FieldKeys<GeneratedQueueEntry> = "keepAliveHold";
+/**
+ * The `QueueEntry.classification` arm keys — the verdict IS the arm.
+ *
+ * These were one `QueueClassification` enum before the figma-idl reshape. As
+ * arms they carry their own payloads (a rationale, an acceptance flag, a
+ * failure detail), so a verdict can no longer be spelled without the evidence
+ * that belongs to it.
+ */
+export const QUEUE_CLASSIFICATION_ARM = {
+  pending: "pending",
+  interject: "interject",
+  holdForTurnEnd: "holdForTurnEnd",
+  error: "error",
+} as const satisfies Record<string, ArmKeys<GeneratedQueueEntry["classification"]>>;
+
+/**
+ * The `QueueEntry.hold` arm keys — WHAT is holding an entry, when something
+ * other than a running turn is.
+ *
+ * These were three independent optional fields before the reshape. As one
+ * oneof, two holds at once is unrepresentable rather than merely unexpected.
+ */
+export const QUEUE_HOLD_ARM = {
+  shutdown: "shutdown",
+  keepAlive: "keepAlive",
+  revival: "revival",
+} as const satisfies Record<string, ArmKeys<GeneratedQueueEntry["hold"]>>;
 
 /** The keep-alive hold's only field: the ping turn whose end releases it. */
 export const KEEP_ALIVE_HOLD_TURN_ID: FieldKeys<GeneratedQueueEntryKeepAliveHold> = "turnId";
 
-/** The `QueueEntry` field naming the pending revival that holds an entry. */
-export const QUEUE_ENTRY_REVIVAL_HOLD: FieldKeys<GeneratedQueueEntry> = "revivalHold";
-
-/** The revival hold's only field: the session whose compaction releases it. */
-export const REVIVAL_HOLD_SESSION_ID: FieldKeys<GeneratedQueueEntryRevivalHold> = "sessionId";
+/**
+ * The revival hold carries NOTHING: it is a bare marker arm.
+ *
+ * It named the session being revived before the reshape. That field is gone —
+ * the queue push is fenced and the workspace it belongs to has exactly one
+ * session, so a second copy of the session id here could only disagree with
+ * `WorkspaceState`. Spelled as an empty tuple so that a field ADDED to the
+ * message fails this build rather than being silently ignored.
+ */
+export const REVIVAL_HOLD_FIELDS: readonly FieldKeys<GeneratedQueueEntryRevivalHold>[] = [];
 
 /**
  * The `core.v1.PromptOrigin` prefix protobuf-es strips from its enum members.
