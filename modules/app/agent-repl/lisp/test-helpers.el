@@ -436,6 +436,35 @@ work in the batch process.  Ignores every argument by design."
   (advice-add 'agent-repl--defer-to-main-thread :override
               (lambda (thunk) (funcall thunk))))
 
+;; Point the built-webapp directory at a throwaway temp dir carrying a
+;; `.build-id' stamp, for the ENTIRE batch session.
+;;
+;; `agent-repl--frontend-build-id' reads that stamp out of `webapp/dist'
+;; and SIGNALS when it is absent, which is right in production (a URL
+;; without the artifact's identity is the stale-cache bug) and fatal here:
+;; every webview URL a test builds then depends on whether whoever ran the
+;; suite happened to have built the webapp, so the frontend URL tests pass
+;; in a developer's worktree and fail in a fresh checkout, a temporary
+;; merge-rebase worktree, and CI alike.
+;;
+;; The redirect is of the DIRECTORY, not of `agent-repl--frontend-build-id'
+;; itself: the production function still runs, still reads a real stamp off
+;; disk, and test-frontend-client.el's own tests of a missing and of a
+;; well-formed stamp keep exercising it by rebinding this same variable.
+;; Overriding the function would have taken the reader out of the suite.
+;;
+;; Batch-gated like the state-dir redirect above: in a live session this
+;; would address the webview at a temp directory the daemon serves nothing
+;; from.
+(when (and noninteractive (boundp 'agent-repl--frontend-webapp-dir))
+  (let ((test-webapp-dir
+         (expand-file-name (format "agent-repl-test-webapp-%d" (emacs-pid))
+                           temporary-file-directory)))
+    (make-directory test-webapp-dir t)
+    (with-temp-file (expand-file-name ".build-id" test-webapp-dir)
+      (insert "test-build-id\n"))
+    (setq agent-repl--frontend-webapp-dir test-webapp-dir)))
+
 ;; Disable file-logging during tests so the unconditional file-write path
 ;; (always-on after the core.el log refactor) does not append every
 ;; test-emitted line to the user's real OS-temporary agent-repl logfile.
