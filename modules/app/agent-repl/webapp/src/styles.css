@@ -594,9 +594,10 @@ body::after {
   line-height: 1;
 }
 
-/* Merge lifecycle: the recycle glyph — spinning while the merge is in
-   flight, still while queued, error-red when a conflict or failure needs a
-   human.  `merged` is NOT here: a settled merge has left the pipeline and
+/* Merge lifecycle: the recycle glyph — spinning while the run is the queue's
+   active one (a clean apply in flight, or a conflict being resolved under the
+   same lease), still while merely queued or once the run has failed, and
+   error-red when a conflict or failure involves a human.  `merged` is NOT here: a settled merge has left the pipeline and
    renders in the Recently Merged section, where the recycle mark would
    misread as still-queued, so it takes the purple disc below instead. */
 #ws-sidebar .st-merge-enqueuing,
@@ -627,7 +628,14 @@ body::after {
 }
 #ws-sidebar .st-merge-conflict,
 #ws-sidebar .st-merge-failed { color: var(--err); }
-#ws-sidebar .st-merging { animation: ws-spin 1.4s linear infinite; }
+/* SPINNING: the workspace is the merge queue's ACTIVE one. `merging` is the
+   daemon driving the cherry-pick; `merge-conflict` is the same run still in
+   hand, holding the same lease, with the resolution now the work in flight —
+   so it turns exactly like `merging` does, and only the red says the work is a
+   conflict rather than a clean apply. `merge-failed` stays still: that run is
+   over. */
+#ws-sidebar .st-merging,
+#ws-sidebar .st-merge-conflict { animation: ws-spin 1.4s linear infinite; }
 #ws-sidebar .st-merged { background: var(--info-agents); }
 
 /* Recently Merged: settled history rather than live work, so it is set off
