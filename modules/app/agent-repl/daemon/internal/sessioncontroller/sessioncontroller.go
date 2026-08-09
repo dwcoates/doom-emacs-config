@@ -1501,16 +1501,16 @@ func (m *Manager) noteUserInterrupt(d *sessionController, outcome corev1.Interru
 
 	m.progress().NoteInterrupt(d.workspace, d.sessionID, outcome)
 
-	// A USER-COMMANDED STOP CLOSES AN OPEN MERGE WINDOW. It is one of the two
-	// boundaries async-bubble.proto names for a Merge bubble, and this is the
-	// one place a user's stop is known — an interject's machinery stop calls
-	// d.client.Interrupt directly and therefore cannot reach it, which is
-	// exactly right: machinery did not take the session back from the merge.
+	// A USER-COMMANDED STOP CLOSES EVERY OPEN WINDOW. It is one of the two
+	// boundaries async-bubble.proto names for a Merge or Skill bubble, and this
+	// is the one place a user's stop is known — an interject's machinery stop
+	// calls d.client.Interrupt directly and therefore cannot reach it, which is
+	// exactly right: machinery did not take the session back from the work.
 	//
 	// A FAILED stop delivered nothing and moves no window; the other two both
 	// mean the user has the session again.
 	if errclass.InterruptError(outcome) == nil {
-		d.consumer.settleMergeWindowOnInterrupt(fmt.Sprintf("user interrupt (%s)", outcome))
+		d.consumer.settleWindowsOnInterrupt(fmt.Sprintf("user interrupt (%s)", outcome))
 	}
 
 	if outcome == corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED {
