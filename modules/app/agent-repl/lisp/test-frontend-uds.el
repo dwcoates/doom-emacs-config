@@ -1275,7 +1275,7 @@ a known arm with no handler is a logged gap rather than an error."
   (agent-repl-test--with-uds
     ;; Act / Assert
     (should-not (agent-repl--uds-dispatch-frame
-                 '(:progress (:workspace "ws1" :sessionId "s1" :liveTaskCount 0))))))
+                 '(:progress (:workspace "ws1" :fence "f1" :liveTaskCount 0))))))
 
 (ert-deftest agent-repl-test-uds-progress-has-a-registered-handler ()
   "A progress frame reaches a handler, so it never logs unfinished wiring.
