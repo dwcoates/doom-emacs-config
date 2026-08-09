@@ -19,8 +19,8 @@
  * a session that has since rotated is discarded before it can raise a gate over
  * a workspace that is already awake.
  *
- * WHY A BLOCKING GATE RATHER THAN A NOTICE. The two revival modes are not a
- * preference — `compactFirst` pays the full-context cost ONCE and `direct` pays
+ * WHY A BLOCKING GATE RATHER THAN A NOTICE. The revival decisions are not a
+ * preference — a compaction pays the full-context cost ONCE and `direct` pays
  * it on every turn afterwards — and a notice beside a live composer would let
  * the expensive one happen by default, chosen by nobody. The composer is
  * therefore disabled while the gate stands, on the same principle as the merge
@@ -43,15 +43,25 @@
 
 import { formatAge } from "./duration.js";
 import { escapeHtml } from "./highlight.js";
+import type { ReviveDecision } from "./frontend-command.js";
 import type { HibernationDetail, WorkspaceGateView } from "./frontend-proto.js";
 import type { AdapterEffect } from "./state-adapter.js";
 
 /** The document-wide marker the chrome paints against while the gate stands. */
 export const HIBERNATED_BODY_CLASS = "hibernated";
 
-/** The gate's two actions, as the click vocabulary the delegation reads. */
-export const REVIVE_COMPACT_ATTR = "data-revive-compact";
-export const REVIVE_DIRECT_ATTR = "data-revive-direct";
+/**
+ * The gate's actions, as the click vocabulary the delegation reads.
+ *
+ * ONE ATTRIBUTE CARRYING THE DECISION, not one attribute per button. With five
+ * options a per-button attribute set would make "the button nobody wired up"
+ * indistinguishable from "the button that means resume as-is": the old
+ * two-button reader resolved anything-that-is-not-compact to `direct`, which
+ * with a third option present would silently resume a conversation at full
+ * context when the user asked to compact it. Reading the decision OUT of the
+ * attribute, and refusing a value that is not one, removes that fallback.
+ */
+export const REVIVE_ATTR = "data-revive";
 
 /**
  * Whether a prompt may be submitted right now.
@@ -117,10 +127,39 @@ export function reviveDirectWarning(hibernation: HibernationDetail): string {
   );
 }
 
-/** What "compact first" buys, said the same way on every cause. */
+/** What compacting EVERYTHING buys, said the same way on every cause. */
 export const REVIVE_COMPACT_EXPLANATION =
-  "Compact first: summarize the conversation before anything else runs. This pays the " +
-  "full-context cost once, instead of on every turn afterwards.";
+  "Compact everything: summarize the whole conversation before anything else runs. This " +
+  "pays the full-context cost once, instead of on every turn afterwards, and keeps the " +
+  "least.";
+
+/**
+ * The three SCOPED compactions.
+ *
+ * WHY THEY EXIST. "Compact" was one button for a decision that is really two:
+ * how much to spend, and what to lose. A long agent conversation is not evenly
+ * made of anything — the replies are usually its bulk, the prompts are usually
+ * what the user most wants back word for word, and the tool calls and their
+ * results are what the agent needs intact to carry on the work. Compacting all
+ * of it to reclaim context spent from one of those had no way to be asked for.
+ *
+ * EACH LINE SAYS WHAT SURVIVES, not only what goes. What is kept is the part
+ * the user is deciding about; what is summarized is the consequence.
+ */
+export const REVIVE_COMPACT_RESPONSES_EXPLANATION =
+  "Compact responses only: summarize what the agent said back, and keep your prompts, the " +
+  "tool calls and their results word for word. The replies are usually the bulk of a long " +
+  "conversation.";
+
+export const REVIVE_COMPACT_PROMPTS_EXPLANATION =
+  "Compact prompts only: summarize what you asked for, and keep everything the agent " +
+  "produced word for word. For a conversation whose value is in the work rather than in " +
+  "how it was requested.";
+
+export const REVIVE_COMPACT_PROMPTS_AND_RESPONSES_EXPLANATION =
+  "Compact prompts and responses: summarize the conversation on both sides, and keep the " +
+  "tool calls and their results word for word. The work survives; the talking about it " +
+  "does not.";
 
 /** The heading, so the gate is recognizable without parsing the prose below it. */
 export const REVIVAL_GATE_HEADING = "This session is asleep";
@@ -199,13 +238,121 @@ function causeText(cause: unknown): string {
 }
 
 /** Whether a revive has been sent and no cleared `SessionView` has landed yet. */
-export type RevivePending = "compactFirst" | "direct" | null;
+export type RevivePending = ReviveDecision | null;
 
-/** The pending line, so a sent decision never reads as nothing having happened. */
+/**
+ * One offered answer to the gate: the decision it sends, the button's words,
+ * and the sentence explaining what it costs and what it keeps.
+ */
+export interface ReviveOption {
+  decision: ReviveDecision;
+  label: string;
+  explanation: string;
+  /** Rendered as the warning variant — the option that keeps the whole bill. */
+  warn: boolean;
+}
+
+/**
+ * The gate's offered answers, in the order they are shown.
+ *
+ * ORDERED CHEAPEST-KEPT TO MOST-KEPT, so the list reads as one axis: compacting
+ * everything keeps the least, resuming as-is keeps all of it, and the scoped
+ * three sit between. A user scanning it is choosing a point on that axis rather
+ * than picking between five unrelated buttons.
+ *
+ * DERIVED FROM THE DETAIL, because the direct option's sentence is stronger on
+ * `cacheExpired` — the cache is already known to be gone there — and a table of
+ * constants could not say so.
+ */
+export function reviveOptions(hibernation: HibernationDetail): ReviveOption[] {
+  return [
+    {
+      decision: "compactAll",
+      label: "Compact everything",
+      explanation: REVIVE_COMPACT_EXPLANATION,
+      warn: false,
+    },
+    {
+      decision: "compactPromptsAndResponses",
+      label: "Compact prompts + responses",
+      explanation: REVIVE_COMPACT_PROMPTS_AND_RESPONSES_EXPLANATION,
+      warn: false,
+    },
+    {
+      decision: "compactResponses",
+      label: "Compact responses only",
+      explanation: REVIVE_COMPACT_RESPONSES_EXPLANATION,
+      warn: false,
+    },
+    {
+      decision: "compactPrompts",
+      label: "Compact prompts only",
+      explanation: REVIVE_COMPACT_PROMPTS_EXPLANATION,
+      warn: false,
+    },
+    {
+      decision: "direct",
+      label: "Resume as-is",
+      explanation: reviveDirectWarning(hibernation),
+      warn: true,
+    },
+  ];
+}
+
+/**
+ * The decision a clicked button carries, or a THROWN error when the attribute
+ * holds something that is not one.
+ *
+ * IT THROWS RATHER THAN DEFAULTING. Every value it can legitimately see is put
+ * there by {@link reviveOptions} a few lines above it, so anything else is this
+ * module having broken — and the two ways of coping with that quietly are both
+ * worse than a crash: falling back to `direct` resumes at full context a user
+ * who asked to compact, and falling back to `compactAll` summarizes away a
+ * conversation nobody consented to lose.
+ */
+export function reviveDecisionFromAttr(value: string | null): ReviveDecision {
+  if (value !== null && (REVIVE_DECISIONS as readonly string[]).includes(value)) {
+    return value as ReviveDecision;
+  }
+  throw new Error(
+    `hibernation: the revival gate produced an unknown decision ${JSON.stringify(value)}; ` +
+      `expected one of ${REVIVE_DECISIONS.join(", ")}`,
+  );
+}
+
+/** Every decision the gate can send, as the recognized attribute vocabulary. */
+const REVIVE_DECISIONS = [
+  "compactAll",
+  "compactPromptsAndResponses",
+  "compactResponses",
+  "compactPrompts",
+  "direct",
+] as const satisfies readonly ReviveDecision[];
+
+/**
+ * The pending line, so a sent decision never reads as nothing having happened.
+ *
+ * EXHAUSTIVE by construction, on the same discipline as
+ * {@link hibernationCauseText}: a sixth decision fails to compile here rather
+ * than falling through to a line that describes a different one.
+ */
 export function revivePendingText(pending: Exclude<RevivePending, null>): string {
-  return pending === "compactFirst"
-    ? "Waking the session and compacting first…"
-    : "Waking the session with its full context…";
+  switch (pending) {
+    case "compactAll":
+      return "Waking the session and compacting the whole conversation…";
+    case "compactPromptsAndResponses":
+      return "Waking the session and compacting its prompts and responses…";
+    case "compactResponses":
+      return "Waking the session and compacting its responses…";
+    case "compactPrompts":
+      return "Waking the session and compacting its prompts…";
+    case "direct":
+      return "Waking the session with its full context…";
+    default: {
+      const unhandled: never = pending;
+      throw new Error(`hibernation: unhandled revival decision ${JSON.stringify(unhandled)}`);
+    }
+  }
 }
 
 /**
@@ -340,7 +487,7 @@ export function reviveFailedLog(
 /**
  * The revival gate card, or "" when the session is awake.
  *
- * TWO actions and no third. There is no "dismiss": the gate is a pure function
+ * FIVE actions and no sixth. There is no "dismiss": the gate is a pure function
  * of the daemon's live state, so a dismissed gate would reappear on the next
  * frame while having taught the user that the block is optional. And there is
  * no "cancel" — a hibernated session has nothing to cancel back to.
@@ -363,12 +510,26 @@ export function revivalGateHtml(
           formatAge(now - hibernation.sinceMs),
         )}</span>`
       : "";
+  // THE OPTIONS ARE ONE LIST, each button beside the sentence that explains it.
+  // Splitting the labels from the explanations — which is what the two-option
+  // card did — stops working the moment the explanations outnumber the fingers
+  // of one hand: the reader has to pair them by position, and a mispaired
+  // reading here chooses what a conversation loses.
+  const options = reviveOptions(hibernation);
   const actions =
     pending === null
       ? `
-      <div class="hibernation-actions">
-        <button ${REVIVE_COMPACT_ATTR}="1" class="hibernation-compact">Compact first</button>
-        <button ${REVIVE_DIRECT_ATTR}="1" class="hibernation-direct">Resume as-is</button>
+      <div class="hibernation-actions">${options
+        .map(
+          (option) => `
+        <div class="hibernation-option${option.warn ? " warn" : ""}">
+          <button ${REVIVE_ATTR}="${escapeHtml(option.decision)}" class="${
+            option.decision === "direct" ? "hibernation-direct" : "hibernation-compact"
+          }">${escapeHtml(option.label)}</button>
+          <span class="hibernation-option-text">${escapeHtml(option.explanation)}</span>
+        </div>`,
+        )
+        .join("")}
       </div>`
       : `<div class="hibernation-pending">${escapeHtml(revivePendingText(pending))}</div>`;
   // The failed-revival line sits ABOVE the cause, because it is the newer news:
@@ -384,10 +545,6 @@ export function revivalGateHtml(
       </div>
       ${failed}
       <div class="hibernation-cause">${escapeHtml(hibernationCauseText(hibernation))}</div>
-      <div class="hibernation-choice">
-        <div class="hibernation-option">${escapeHtml(REVIVE_COMPACT_EXPLANATION)}</div>
-        <div class="hibernation-option warn">${escapeHtml(reviveDirectWarning(hibernation))}</div>
-      </div>
       ${actions}
     </div>`;
 }

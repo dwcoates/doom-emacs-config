@@ -8,12 +8,17 @@
 // resume — so SubmitPromptCmd on a hibernated session is nacked, loudly, and
 // exactly one ReviveSessionCmd opens it.
 //
-// The two revival modes are the two ways that conversation can be worth
-// resuming. `direct` says "I know it's big, resume it verbatim".
-// `compact_first` pays the full-context cost ONCE, in a compaction, instead of
-// on every subsequent turn — and until that compaction lands, the gate stays
-// shut, because a prompt admitted early would pay exactly the cost the choice
-// exists to avoid.
+// The revival modes are the ways that conversation can be worth resuming.
+// `direct` says "I know it's big, resume it verbatim". `compact_first` pays the
+// full-context cost ONCE, in a compaction, instead of on every subsequent turn
+// — and until that compaction lands, the gate stays shut, because a prompt
+// admitted early would pay exactly the cost the choice exists to avoid.
+//
+// A COMPACTION ALSO CARRIES A SCOPE, which says how much of the conversation it
+// may summarize away: everything, only the assistant's responses, only the
+// user's prompts, or both of those while the tool calls and their results
+// survive. The scope reaches the CLI as `/compact <instructions>` and nothing
+// else, so these tests assert on the text the vendor actually received.
 //
 // WHY THE COMPACTION IS INJECTED. The shim-claude-sidecar is the sole producer
 // of ContextCompacted and it produces it by tailing a real vendor transcript,
@@ -270,6 +275,96 @@ func TestE2EACompactionThatNeverLandsKeepsTheGateShut(t *testing.T) {
 			return false
 		},
 	})
+}
+
+// --- scoped compact-first revival ---------------------------------------------
+
+// scopedCompactCases is the wire scope paired with the phrase its submitted
+// instruction must carry. The phrase is the part a user would check: what the
+// compaction is told to LEAVE ALONE.
+var scopedCompactCases = []struct {
+	name  string
+	scope string
+	// want is a substring of the text the daemon submits, distinctive enough
+	// that no other scope's instruction contains it.
+	want string
+}{
+	{
+		name:  "responses only",
+		scope: "COMPACTION_SCOPE_RESPONSES",
+		want:  "Summarize ONLY the assistant's own response messages.",
+	},
+	{
+		name:  "prompts only",
+		scope: "COMPACTION_SCOPE_PROMPTS",
+		want:  "Summarize ONLY the user's prompt messages. Preserve every assistant response",
+	},
+	{
+		name:  "prompts and responses",
+		scope: "COMPACTION_SCOPE_PROMPTS_AND_RESPONSES",
+		want:  "Summarize ONLY the user's prompt messages and the assistant's own response messages.",
+	},
+}
+
+// TestE2EAScopedCompactFirstRevivalSubmitsItsSteeredCompact covers the WHOLE
+// POINT of the scope: it must reach the CLI as steering on the compaction the
+// daemon submits, not as a daemon-side preference nothing acts on. A scope that
+// changed no submitted text would compact the entire conversation while the
+// user was told only their responses were going.
+func TestE2EAScopedCompactFirstRevivalSubmitsItsSteeredCompact(t *testing.T) {
+	for _, tc := range scopedCompactCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			s := newKeepAliveSession(t, testKeepAlivePolicy())
+			s.hibernate(t, "r-hibernate")
+
+			// Act
+			sendReviveCompactScoped(t, s.conn, "r-revive", tc.scope)
+			if ack := awaitAck(t, s.conn, "r-revive", "the scoped compact-first revival"); !ack.GetOk() {
+				t.Fatalf("reviveSession(%s) nacked: %s", tc.scope, ack.GetError())
+			}
+
+			// Assert
+			// The fake vendor echoes the WHOLE prompt it received, so the reply
+			// carries both facts at once: that the turn was a `/compact`, and
+			// that the instructions the scope adds travelled with it. The exact
+			// wording is the session controller's own unit test; what an e2e can
+			// prove is that the CLI got it.
+			awaitAll(t, s.conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
+				"a turn carrying the steered " + compactCommand: func(frame *frontendv1.FrontendFrame) bool {
+					for _, item := range deltaItems(frame, s.cwd) {
+						text := assistantText(item)
+						if strings.Contains(text, "echo: "+compactCommand+" ") && strings.Contains(text, tc.want) {
+							return true
+						}
+					}
+					return false
+				},
+			})
+		})
+	}
+}
+
+// TestE2EACompactFirstRevivalWithNoScopeIsNacked covers the REFUSED ZERO over
+// the real wire: an omitted scope is a compact-first arm that never said what
+// it may summarize away, and answering it by compacting everything would
+// discard the conversation on nobody's instruction.
+func TestE2EACompactFirstRevivalWithNoScopeIsNacked(t *testing.T) {
+	// Arrange
+	s := newKeepAliveSession(t, testKeepAlivePolicy())
+	s.hibernate(t, "r-hibernate")
+
+	// Act
+	sendReviveCompactNoScope(t, s.conn, "r-revive")
+
+	// Assert
+	ack := awaitAck(t, s.conn, "r-revive", "the scopeless compact-first revival")
+	if ack.GetOk() {
+		t.Fatal("reviveSession(compact_first with no scope) was accepted, want a nack: the daemon has no default for what a compaction may swallow")
+	}
+	if !strings.Contains(ack.GetError(), "scope") {
+		t.Fatalf("nack error = %q, want it to name the missing scope", ack.GetError())
+	}
 }
 
 // revivedVendorID reports the conversation uuid the store files this session

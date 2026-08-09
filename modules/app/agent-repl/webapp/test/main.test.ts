@@ -249,7 +249,7 @@ describe("the revival gate's chrome wiring", () => {
 });
 
 describe("the revival decision's dispatch", () => {
-  const sendRevive = blocksAfter(main, 'const sendRevive = (mode: "compactFirst" | "direct"): void => {')[0]!;
+  const sendRevive = blocksAfter(main, "const sendRevive = (mode: ReviveDecision): void => {")[0]!;
 
   it("sends exactly one ReviveSessionCmd for the chosen mode", () => {
     // Assert
@@ -289,6 +289,13 @@ describe("the revival decision's dispatch", () => {
     // Assert — a rejected ack never reached the daemon's revival path, so no
     // view is judging it.
     expect(sendRevive).toContain("reviveWatch.disarm()");
+  });
+
+  it("reads the clicked decision out of its attribute rather than inferring one", () => {
+    // Assert — with five options, "not the compact button" is no longer the
+    // same statement as "resume as-is", so an inferred decision would resume a
+    // conversation at full context that the user asked to compact.
+    expect(main).toContain("sendRevive(reviveDecisionFromAttr(el.getAttribute(REVIVE_ATTR)))");
   });
 
   it("drops a previous attempt's complaint before sending a new decision", () => {

@@ -112,7 +112,7 @@ func TestReviveSessionCompactFirstAcksOnceTheCompactionIsSubmitted(t *testing.T)
 	m, _, _ := reviveRig(t, registry.HibernationCauseIdleCutoff)
 
 	// Act: the revival returns without anything ever signalling completion.
-	err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactFirst)
+	err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactAll)
 
 	// Assert.
 	if err != nil {
@@ -134,7 +134,7 @@ func TestReviveSessionCompactFirstAcksOnceTheCompactionIsSubmitted(t *testing.T)
 func TestReviveSessionCompactFirstStaysGatedUntilCompactionLands(t *testing.T) {
 	// Arrange.
 	m, _, hib := reviveRig(t, registry.HibernationCauseIdleCutoff)
-	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactFirst); err != nil {
+	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactAll); err != nil {
 		t.Fatalf("ReviveSession compact_first: %v", err)
 	}
 	signal := awaitCompactionWaiter(t, m, "ws")
@@ -157,13 +157,13 @@ func TestReviveSessionCompactFirstStaysGatedUntilCompactionLands(t *testing.T) {
 func TestReviveSessionCompactFirstHoldsTheClaimWhileTheCompactionIsPending(t *testing.T) {
 	// Arrange.
 	m, _, _ := reviveRig(t, registry.HibernationCauseIdleCutoff)
-	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactFirst); err != nil {
+	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactAll); err != nil {
 		t.Fatalf("ReviveSession compact_first: %v", err)
 	}
 	awaitCompactionWaiter(t, m, "ws")
 
 	// Act.
-	err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactFirst)
+	err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactAll)
 
 	// Assert.
 	if !errors.Is(err, ErrRevivalInFlight) {
@@ -177,7 +177,7 @@ func TestReviveSessionCompactFirstHoldsTheClaimWhileTheCompactionIsPending(t *te
 func TestReviveSessionCompactFirstReleasesTheClaimWhenTheCompactionLands(t *testing.T) {
 	// Arrange.
 	m, _, _ := reviveRig(t, registry.HibernationCauseIdleCutoff)
-	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactFirst); err != nil {
+	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactAll); err != nil {
 		t.Fatalf("ReviveSession compact_first: %v", err)
 	}
 	signal := awaitCompactionWaiter(t, m, "ws")
@@ -205,7 +205,7 @@ func TestReviveSessionCompactFirstSubmitsUnderAFreshRequestIDEachTime(t *testing
 	// Act: two full compact-first revivals of the SAME session.
 	for range 2 {
 		hib.setAsleep("s1", registry.HibernationDetail{Cause: registry.HibernationCauseIdleCutoff, SinceMs: 42})
-		if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactFirst); err != nil {
+		if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactAll); err != nil {
 			t.Fatalf("ReviveSession compact_first: %v", err)
 		}
 		awaitCompactionWaiter(t, m, "ws")()
@@ -239,7 +239,7 @@ func TestReviveSessionCompactFirstStaysGatedWhenTheCompactionTimesOut(t *testing
 	m.mu.Unlock()
 
 	// Act: never signal completion, so the bound is what ends the wait.
-	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactFirst); err != nil {
+	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactAll); err != nil {
 		t.Fatalf("ReviveSession compact_first: %v", err)
 	}
 	awaitClaimFree(t, m, "ws")
@@ -259,7 +259,7 @@ func TestReviveSessionCompactFirstReleasesTheClaimWhenTheCompactionTimesOut(t *t
 	m.mu.Lock()
 	m.reviveCompactBoundOverride = time.Millisecond
 	m.mu.Unlock()
-	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactFirst); err != nil {
+	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactAll); err != nil {
 		t.Fatalf("ReviveSession compact_first: %v", err)
 	}
 
@@ -283,7 +283,7 @@ func TestReviveSessionCompactFirstDisarmsTheWaiterWhenTheCompactionTimesOut(t *t
 	m.mu.Lock()
 	m.reviveCompactBoundOverride = time.Millisecond
 	m.mu.Unlock()
-	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactFirst); err != nil {
+	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactAll); err != nil {
 		t.Fatalf("ReviveSession compact_first: %v", err)
 	}
 	awaitClaimFree(t, m, "ws")
@@ -313,7 +313,7 @@ func TestReviveSessionCompactFirstStaysGatedWhenTheSubmitFails(t *testing.T) {
 	c.mu.Unlock()
 
 	// Act.
-	err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactFirst)
+	err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactAll)
 
 	// Assert.
 	if err == nil {
@@ -333,7 +333,7 @@ func TestReviveSessionCompactFirstReleasesTheClaimWhenTheSubmitFails(t *testing.
 	c.mu.Lock()
 	c.submitErrOnce = errors.New("shim refused the compaction")
 	c.mu.Unlock()
-	_ = m.ReviveSession(context.Background(), "ws", ReviveModeCompactFirst)
+	_ = m.ReviveSession(context.Background(), "ws", ReviveModeCompactAll)
 
 	// Act.
 	release, _, err := m.claimRevival("ws", "s1")
@@ -361,7 +361,7 @@ func TestReviveSessionCompactFirstRefusesTheHandoffWhenTheManagerIsClosing(t *te
 	c.mu.Unlock()
 
 	// Act.
-	err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactFirst)
+	err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactAll)
 
 	// Assert.
 	if err == nil {
@@ -376,7 +376,7 @@ func TestReviveSessionCompactFirstRefusesTheHandoffWhenTheManagerIsClosing(t *te
 func TestReviveSessionCompactFirstStaysGatedWhenTheDaemonShutsDownMidCompaction(t *testing.T) {
 	// Arrange.
 	m, _, hib := reviveRig(t, registry.HibernationCauseIdleCutoff)
-	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactFirst); err != nil {
+	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactAll); err != nil {
 		t.Fatalf("ReviveSession compact_first: %v", err)
 	}
 	awaitCompactionWaiter(t, m, "ws")
@@ -396,7 +396,7 @@ func TestReviveSessionCompactFirstStaysGatedWhenTheDaemonShutsDownMidCompaction(
 func TestReviveSessionCompactFirstStaysGatedWhenTheGateReleaseFails(t *testing.T) {
 	// Arrange.
 	m, _, hib := reviveRig(t, registry.HibernationCauseIdleCutoff)
-	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactFirst); err != nil {
+	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactAll); err != nil {
 		t.Fatalf("ReviveSession compact_first: %v", err)
 	}
 	signal := awaitCompactionWaiter(t, m, "ws")
@@ -660,7 +660,7 @@ func awaitGateReleased(t *testing.T, hib *fakeHibernations, sessionID string) {
 func revivalParkRig(t *testing.T) (*Manager, *fakeHibernations) {
 	t.Helper()
 	m, _, hib := reviveRig(t, registry.HibernationCauseIdleCutoff)
-	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactFirst); err != nil {
+	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactAll); err != nil {
 		t.Fatalf("ReviveSession compact_first: %v", err)
 	}
 	awaitCompactionWaiter(t, m, "ws")
@@ -777,7 +777,7 @@ func TestARevivalParkedPromptIsNeverClassified(t *testing.T) {
 	m, _, _ := reviveRig(t, registry.HibernationCauseIdleCutoff)
 	cls := &fakeClassifier{}
 	m.cfg.Classifier = cls
-	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactFirst); err != nil {
+	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactAll); err != nil {
 		t.Fatalf("ReviveSession compact_first: %v", err)
 	}
 	awaitCompactionWaiter(t, m, "ws")
@@ -873,7 +873,7 @@ func TestACompactionThatTimesOutDropsTheRevivalParkedPrompt(t *testing.T) {
 	parkDuringCompactionSubmit(t, m, "req-1", "typed-during-compaction")
 
 	// Act.
-	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactFirst); err != nil {
+	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactAll); err != nil {
 		t.Fatalf("ReviveSession compact_first: %v", err)
 	}
 	awaitClaimFree(t, m, "ws")
@@ -894,7 +894,7 @@ func TestACompactionThatTimesOutNeverSubmitsTheParkedPrompt(t *testing.T) {
 	m.reviveCompactBoundOverride = time.Millisecond
 	m.mu.Unlock()
 	parkDuringCompactionSubmit(t, m, "req-1", "typed-during-compaction")
-	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactFirst); err != nil {
+	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactAll); err != nil {
 		t.Fatalf("ReviveSession compact_first: %v", err)
 	}
 	awaitClaimFree(t, m, "ws")
@@ -927,7 +927,7 @@ func TestARefusedCompactionSubmitDropsTheRevivalParkedPrompt(t *testing.T) {
 	c.mu.Unlock()
 
 	// Act.
-	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactFirst); err == nil {
+	if err := m.ReviveSession(context.Background(), "ws", ReviveModeCompactAll); err == nil {
 		t.Fatal("a refused compaction submit reported success")
 	}
 

@@ -269,23 +269,65 @@ describe("the hibernation command arms", () => {
     expect(w.hibernateWorkspace).toEqual({});
   });
 
-  it("encodes the compact-first revival as its own oneof arm", () => {
+  it("encodes the whole-conversation compaction with its own scope", () => {
     // Arrange / Act
-    const w = wire({ requestId: "r1", workspace: "ws", body: { case: "reviveSession", mode: "compactFirst" } });
-    // Assert — the ARM is the whole decision, which is why it is not a bool.
-    expect(w.reviveSession).toEqual({ compactFirst: {} });
+    const w = wire({ requestId: "r1", workspace: "ws", body: { case: "reviveSession", decision: "compactAll" } });
+    // Assert — the arm says compact, the scope says how much.
+    expect(w.reviveSession).toEqual({ compactFirst: { scope: "COMPACTION_SCOPE_ALL" } });
+  });
+
+  it("encodes the responses-only compaction with its own scope", () => {
+    // Arrange / Act
+    const w = wire({ requestId: "r1", workspace: "ws", body: { case: "reviveSession", decision: "compactResponses" } });
+    // Assert
+    expect(w.reviveSession).toEqual({ compactFirst: { scope: "COMPACTION_SCOPE_RESPONSES" } });
+  });
+
+  it("encodes the prompts-only compaction with its own scope", () => {
+    // Arrange / Act
+    const w = wire({ requestId: "r1", workspace: "ws", body: { case: "reviveSession", decision: "compactPrompts" } });
+    // Assert
+    expect(w.reviveSession).toEqual({ compactFirst: { scope: "COMPACTION_SCOPE_PROMPTS" } });
+  });
+
+  it("encodes the prompts-and-responses compaction with its own scope", () => {
+    // Arrange / Act
+    const w = wire({
+      requestId: "r1",
+      workspace: "ws",
+      body: { case: "reviveSession", decision: "compactPromptsAndResponses" },
+    });
+    // Assert
+    expect(w.reviveSession).toEqual({
+      compactFirst: { scope: "COMPACTION_SCOPE_PROMPTS_AND_RESPONSES" },
+    });
+  });
+
+  it("never sends a compaction without a scope", () => {
+    // Arrange — an unstated scope is nacked by the daemon rather than
+    // defaulted, so a scopeless encode would take every compacting option on
+    // the gate out of service at once.
+    const decisions = ["compactAll", "compactResponses", "compactPrompts", "compactPromptsAndResponses"] as const;
+    for (const decision of decisions) {
+      // Act
+      const w = wire({ requestId: "r1", workspace: "ws", body: { case: "reviveSession", decision } });
+      const arm = (w.reviveSession as Record<string, Record<string, unknown>>).compactFirst;
+      // Assert
+      expect(arm.scope).toMatch(/^COMPACTION_SCOPE_[A-Z_]+$/);
+      expect(arm.scope).not.toBe("COMPACTION_SCOPE_UNSPECIFIED");
+    }
   });
 
   it("encodes the direct revival as its own oneof arm", () => {
     // Arrange / Act
-    const w = wire({ requestId: "r1", workspace: "ws", body: { case: "reviveSession", mode: "direct" } });
-    // Assert
+    const w = wire({ requestId: "r1", workspace: "ws", body: { case: "reviveSession", decision: "direct" } });
+    // Assert — the direct arm has nothing to scope, so it stays empty.
     expect(w.reviveSession).toEqual({ direct: {} });
   });
 
   it("never lets a revive frame set both modes at once", () => {
     // Arrange / Act
-    const w = wire({ requestId: "r1", workspace: "ws", body: { case: "reviveSession", mode: "direct" } });
+    const w = wire({ requestId: "r1", workspace: "ws", body: { case: "reviveSession", decision: "direct" } });
     // Assert — "no decision" and "both decisions" are equally unrepresentable.
     expect(Object.keys(w.reviveSession as Record<string, unknown>)).toEqual(["direct"]);
   });

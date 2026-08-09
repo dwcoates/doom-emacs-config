@@ -543,9 +543,26 @@ func sendReviveDirect(t *testing.T, conn *websocket.Conn, requestID string) {
 	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"reviveSession":{"direct":{}}}`, requestID))
 }
 
-// sendReviveCompactFirst writes a ReviveSessionCmd choosing `compact_first`:
-// compaction is the first order of business and prompts wait for it.
+// sendReviveCompactFirst writes a ReviveSessionCmd choosing `compact_first`
+// over the WHOLE conversation: compaction is the first order of business and
+// prompts wait for it.
 func sendReviveCompactFirst(t *testing.T, conn *websocket.Conn, requestID string) {
+	t.Helper()
+	sendReviveCompactScoped(t, conn, requestID, "COMPACTION_SCOPE_ALL")
+}
+
+// sendReviveCompactScoped writes a compact-first ReviveSessionCmd naming the
+// CompactionScope by its wire spelling, which is how a scope the daemon does
+// not recognize can be sent at all.
+func sendReviveCompactScoped(t *testing.T, conn *websocket.Conn, requestID, scope string) {
+	t.Helper()
+	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"reviveSession":{"compactFirst":{"scope":%q}}}`, requestID, scope))
+}
+
+// sendReviveCompactNoScope writes a compact-first ReviveSessionCmd with NO
+// scope at all — the omitted-field shape an older frontend produces — so the
+// daemon's refusal of an unstated scope is exercised over the real wire.
+func sendReviveCompactNoScope(t *testing.T, conn *websocket.Conn, requestID string) {
 	t.Helper()
 	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"reviveSession":{"compactFirst":{}}}`, requestID))
 }
