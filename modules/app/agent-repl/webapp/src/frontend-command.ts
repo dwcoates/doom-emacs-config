@@ -28,6 +28,7 @@
  */
 import {
   COMMAND_ARM,
+  MERGE_DEQUEUE_ANSWER,
   PROMPT_ORIGIN_WEBAPP_CARD_ACTION,
   PROMPT_ORIGIN_WEBAPP_USER_SENT,
   RESYNC_FIELD,
@@ -271,6 +272,23 @@ export interface EvictMergeBody {
   runId: string;
 }
 
+/**
+ * The answer to a workspace's outstanding merge dequeue offer.
+ *
+ * It names the OFFER, never the run: a run id still resolves after its offer
+ * was answered or superseded, so a click on a stale card would dequeue a merge
+ * the user never saw the question for. The daemon refuses an id that is not
+ * the outstanding one.
+ *
+ * `keep` is a real answer rather than the absence of one, and sending it is
+ * what takes the card down — there is no local dismissal.
+ */
+export interface AnswerMergeDequeueBody {
+  case: "answerMergeDequeue";
+  offerId: string;
+  answer: "dequeue" | "keep";
+}
+
 export type FrontendCommandBody =
   | SubmitPromptBody
   | InterruptBody
@@ -287,7 +305,8 @@ export type FrontendCommandBody =
   | ReviveSessionBody
   | PauseMergeQueueBody
   | ResumeMergeQueueBody
-  | EvictMergeBody;
+  | EvictMergeBody
+  | AnswerMergeDequeueBody;
 
 /** The command envelope: correlation id + workspace + exactly one command arm. */
 export interface FrontendCommand {
@@ -379,6 +398,11 @@ function encodeBody(b: FrontendCommandBody): Record<string, unknown> {
       return {};
     case "evictMerge":
       return { runId: b.runId };
+    case "answerMergeDequeue":
+      // The answer is a oneof of EMPTY messages, so the arm key IS the
+      // decision and its value carries nothing. Encoding a bool instead would
+      // make "no answer" representable, which is the state the schema refuses.
+      return { offerId: b.offerId, [MERGE_DEQUEUE_ANSWER[b.answer]]: {} };
   }
 }
 

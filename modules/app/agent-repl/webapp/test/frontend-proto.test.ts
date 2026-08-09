@@ -1690,6 +1690,131 @@ describe("ProgressView decoding (F1)", () => {
   });
 });
 
+describe("WorkspaceState.mergeDequeueOffer decoding", () => {
+  /** A dequeue offer carrying `standing`, wrapped as a workspaceState frame. */
+  function withOffer(standing: Record<string, unknown>): ReturnType<typeof decodeFrontendFrame> {
+    return decode({
+      workspaceState: {
+        ...WS_STATE,
+        mergeDequeueOffer: {
+          offerId: "offer-1",
+          runId: "run-1",
+          raisedAtMs: "1700000000000",
+          ...standing,
+        },
+      },
+    });
+  }
+
+  /** The decoded offer, or a thrown error when the frame carried none. */
+  function offerOf(frame: ReturnType<typeof decodeFrontendFrame>) {
+    if (frame.frame.case !== "workspaceState") throw new Error("wrong variant");
+    const offer = frame.frame.value.mergeDequeueOffer;
+    if (offer === undefined) throw new Error("no dequeue offer decoded");
+    return offer;
+  }
+
+  it("reads a workspace with no question as an ABSENT offer", () => {
+    // Arrange / Act
+    const frame = decode({ workspaceState: WS_STATE });
+    // Assert — absence is what tells a frontend there is no card to draw.
+    if (frame.frame.case !== "workspaceState") throw new Error("wrong variant");
+    expect(frame.frame.value.mergeDequeueOffer).toBeUndefined();
+  });
+
+  it("decodes the offer id an answer must name", () => {
+    // Arrange / Act
+    const offer = offerOf(withOffer({ waiting: { ahead: 2, position: 3, depth: 5 } }));
+    // Assert
+    expect(offer.offerId).toBe("offer-1");
+  });
+
+  it("decodes the waiting standing's queue figures", () => {
+    // Arrange / Act
+    const offer = offerOf(withOffer({ waiting: { ahead: 2, position: 3, depth: 5 } }));
+    // Assert
+    if (offer.standing.case !== "waiting") throw new Error("wrong standing");
+    expect(offer.standing.value).toEqual({ ahead: 2, position: 3, depth: 5 });
+  });
+
+  it("decodes the running standing's status", () => {
+    // Arrange / Act
+    const offer = offerOf(
+      withOffer({
+        running: {
+          status: {
+            runId: "run-1",
+            phaseStartedAtMs: "1",
+            updatedAtMs: "2",
+            cherryPicking: {
+              commitsTotal: 7,
+              commitsLanded: 3,
+              currentSha: "abc123",
+              currentSubject: "fix the parser",
+            },
+          },
+        },
+      }),
+    );
+    // Assert
+    if (offer.standing.case !== "running") throw new Error("wrong standing");
+    expect(offer.standing.value.status?.phase.case).toBe("cherryPicking");
+  });
+
+  it("decodes a running standing whose run has published nothing", () => {
+    // A head observed before its first status is a real state, not a gap.
+    // Arrange / Act
+    const offer = offerOf(withOffer({ running: {} }));
+    // Assert
+    if (offer.standing.case !== "running") throw new Error("wrong standing");
+    expect(offer.standing.value.status).toBeUndefined();
+  });
+
+  it("rejects an offer that names no standing", () => {
+    // WHICH member is set IS the standing, so an offer naming none asks a
+    // question no card could phrase.
+    expect(() =>
+      decode({
+        workspaceState: {
+          ...WS_STATE,
+          mergeDequeueOffer: { offerId: "offer-1", runId: "run-1", raisedAtMs: "1" },
+        },
+      }),
+    ).toThrow(/sets no standing/);
+  });
+
+  it("rejects an offer that names two standings", () => {
+    expect(() =>
+      withOffer({ waiting: { ahead: 1, position: 2, depth: 2 }, running: {} }),
+    ).toThrow(/sets multiple standings/);
+  });
+
+  it("rejects an offer with no offer id", () => {
+    // An offer nothing can name is a question whose every answer the daemon
+    // refuses, which is a card the user cannot get out of.
+    expect(() =>
+      decode({
+        workspaceState: {
+          ...WS_STATE,
+          mergeDequeueOffer: { runId: "run-1", raisedAtMs: "1", running: {} },
+        },
+      }),
+    ).toThrow(/missing required `offerId`/);
+  });
+
+  it("rejects a negative queue figure", () => {
+    expect(() => withOffer({ waiting: { ahead: -1, position: 3, depth: 5 } })).toThrow(
+      /negative queue figure/,
+    );
+  });
+
+  it("rejects a standing this build has never heard of", () => {
+    expect(() => withOffer({ paused: {} })).toThrow(
+      /MergeDequeueOffer has unrecognized field\(s\): paused/,
+    );
+  });
+});
+
 describe("WorkspaceState.mergeStatus decoding", () => {
   /** A merge status carrying `phase`, wrapped as a workspaceState frame. */
   function withStatus(phase: Record<string, unknown>): ReturnType<typeof decodeFrontendFrame> {

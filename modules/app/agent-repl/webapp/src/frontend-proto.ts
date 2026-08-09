@@ -149,7 +149,10 @@ import {
   type AsyncBubble,
   type AsyncBubbleDelta,
 } from "./async-bubble.js";
-import { unwrapAgentEmission, type ResponseUsageStamp } from "./agent-emission.js";
+import {
+  unwrapAgentEmission,
+  type ResponseUsageStamp,
+} from "./agent-emission.js";
 import {
   EMPTY_KEY_SET,
   bool,
@@ -234,7 +237,9 @@ export enum ConversationSource {
   MERGE = 2,
 }
 
-const CONVERSATION_SOURCE_BY_NAME: Readonly<Record<string, ConversationSource>> = {
+const CONVERSATION_SOURCE_BY_NAME: Readonly<
+  Record<string, ConversationSource>
+> = {
   CONVERSATION_SOURCE_UNSPECIFIED: ConversationSource.UNSPECIFIED,
   CONVERSATION_SOURCE_USER: ConversationSource.USER,
   CONVERSATION_SOURCE_MERGE: ConversationSource.MERGE,
@@ -318,7 +323,9 @@ export type RosterRowStatusCase =
  * added to the union without a keyword here is a compile error, not a status
  * that silently renders as `undefined`.
  */
-export const ROSTER_ROW_STATUS_KEYWORD: Readonly<Record<RosterRowStatusCase, string>> = {
+export const ROSTER_ROW_STATUS_KEYWORD: Readonly<
+  Record<RosterRowStatusCase, string>
+> = {
   submitting: "submitting",
   thinking: "thinking",
   clearing: "clearing",
@@ -349,11 +356,12 @@ export const ROSTER_ROW_STATUS_KEYWORD: Readonly<Record<RosterRowStatusCase, str
  * Every status arm name, derived from the keyword table so the two can never
  * disagree about the vocabulary's size.
  */
-export const ROSTER_ROW_STATUS_CASES: readonly RosterRowStatusCase[] = Object.keys(
-  ROSTER_ROW_STATUS_KEYWORD,
-) as RosterRowStatusCase[];
+export const ROSTER_ROW_STATUS_CASES: readonly RosterRowStatusCase[] =
+  Object.keys(ROSTER_ROW_STATUS_KEYWORD) as RosterRowStatusCase[];
 
-const ROSTER_ROW_STATUS_CASE_SET: ReadonlySet<string> = new Set(ROSTER_ROW_STATUS_CASES);
+const ROSTER_ROW_STATUS_CASE_SET: ReadonlySet<string> = new Set(
+  ROSTER_ROW_STATUS_CASES,
+);
 
 /** Daemon-resolved reliability of the current session-controller generation. */
 export enum SessionConnectivity {
@@ -365,7 +373,9 @@ export enum SessionConnectivity {
   UNAVAILABLE = 5,
 }
 
-const SESSION_CONNECTIVITY_BY_NAME: Readonly<Record<string, SessionConnectivity>> = {
+const SESSION_CONNECTIVITY_BY_NAME: Readonly<
+  Record<string, SessionConnectivity>
+> = {
   SESSION_CONNECTIVITY_UNSPECIFIED: SessionConnectivity.UNSPECIFIED,
   SESSION_CONNECTIVITY_HIBERNATED: SessionConnectivity.HIBERNATED,
   SESSION_CONNECTIVITY_CONNECTING: SessionConnectivity.CONNECTING,
@@ -462,6 +472,60 @@ export interface WorkspaceState {
    * decoder rejects as unknown, not one it silently prefers a field of.
    */
   mergeStatus?: MergeStatus;
+  /**
+   * THE OUTSTANDING QUESTION about taking this workspace's merge off the queue,
+   * or `undefined` when there is nothing to answer.
+   *
+   * A frontend draws the dequeue card if and only if this is set, so the field
+   * going away IS how the card comes down; there is no second dismissal
+   * channel and no local dismissed-flag to keep in step with it.
+   */
+  mergeDequeueOffer?: MergeDequeueOffer;
+}
+
+/**
+ * The question an interrupt raises instead of silently taking a workspace's
+ * merge off the queue.
+ *
+ * WHICH member `standing` names IS where the merge sits, exactly as
+ * `MergeStatus.phase` names the phase. The two standings are answered by
+ * different machinery and read as different questions, so a renderer never has
+ * to work out whether position 1 means the head.
+ */
+export interface MergeDequeueOffer {
+  /**
+   * The ONLY thing an answer may name. Not the run id: a run id still resolves
+   * after its offer was answered or superseded, so a stale card's click would
+   * dequeue a merge the user never saw the question for.
+   */
+  offerId: string;
+  /** The run the question is about, the same id its `MergeStatus` carries. */
+  runId: string;
+  raisedAtMs: number;
+  standing:
+    | { case: "waiting"; value: MergeDequeueWaiting }
+    | { case: "running"; value: MergeDequeueRunning };
+}
+
+/** The merge is queued BEHIND another one and nothing of it has run. */
+export interface MergeDequeueWaiting {
+  /** How many merges are in front of it. Always >= 1. */
+  ahead: number;
+  /** 1-based place in its repository's queue, and that queue's depth. */
+  position: number;
+  depth: number;
+}
+
+/**
+ * The merge IS the head and its run is in flight. Dequeuing it aborts that run.
+ */
+export interface MergeDequeueRunning {
+  /**
+   * WHAT the run is doing, or `undefined` for a head that has published nothing
+   * yet — which is a real state, not a gap: a run publishes its first status as
+   * it starts, so the arm alone is what a card says in the meantime.
+   */
+  status?: MergeStatus;
 }
 
 /**
@@ -664,9 +728,15 @@ export interface HibernationDetail {
   // The arm keys are the spelling table's (proto-names.ts), which is checked
   // against the generated oneof — so this union cannot drift from the wire.
   cause:
-    | { case: typeof HIBERNATION_CAUSE.idleCutoff; value: HibernationIdleCutoff }
+    | {
+        case: typeof HIBERNATION_CAUSE.idleCutoff;
+        value: HibernationIdleCutoff;
+      }
     | { case: typeof HIBERNATION_CAUSE.forced; value: HibernationForced }
-    | { case: typeof HIBERNATION_CAUSE.cacheExpired; value: HibernationCacheExpired };
+    | {
+        case: typeof HIBERNATION_CAUSE.cacheExpired;
+        value: HibernationCacheExpired;
+      };
 }
 
 /** Automatic hibernation at the idle cutoff. */
@@ -699,7 +769,12 @@ export interface ModelOption {
  * The never-blue backfill vocabulary (F2). `unspecified` is a REAL answer —
  * "no transcript on disk, nothing to backfill" — not an unknown.
  */
-export const BACKFILL_STATES = ["unspecified", "pending", "done", "failed"] as const;
+export const BACKFILL_STATES = [
+  "unspecified",
+  "pending",
+  "done",
+  "failed",
+] as const;
 export type BackfillState = (typeof BACKFILL_STATES)[number];
 
 /** protojson enum name -> the webapp's keyword. */
@@ -819,9 +894,13 @@ export type SessionCommand = (typeof SESSION_COMMANDS)[number];
  * a guessed one would tell the user they ran something they did not.
  */
 export function sessionCommandOf(name: string, where: string): SessionCommand {
-  const known = SESSION_COMMANDS.find((c) => name === c || name === `SESSION_COMMAND_${c}`);
+  const known = SESSION_COMMANDS.find(
+    (c) => name === c || name === `SESSION_COMMAND_${c}`,
+  );
   if (known === undefined) {
-    throw new Error(`frontend-proto: ${where}.command has unrecognized value '${name}'`);
+    throw new Error(
+      `frontend-proto: ${where}.command has unrecognized value '${name}'`,
+    );
   }
   return known;
 }
@@ -936,20 +1015,100 @@ export interface InvalidTurnAccounting extends TurnAccountingEvidence {
   reconciliation?: TokenUsageReconciliation;
 }
 export type TurnAccounting = CompleteTurnAccounting | InvalidTurnAccounting;
-export interface TurnAccountingTiming { promptAdmittedAtMs: number; resultReceivedAtMs: number; accountingSettledAtMs: number; promptToResultMs: number; resultToSettlementMs: number; }
-export interface QueryRuntimeIdentity { vendorSessionId: string; effectiveModel: string; sdkVersion: string; claudeCodeVersion: string; shimBuildSha: string; authSource: string; subscriptionType: string; fastModeState: string; fastModeReason: string; effectiveOptions?: EvidenceFingerprint; settings?: EvidenceFingerprint; tools?: EvidenceFingerprint; mcp?: EvidenceFingerprint; contextPrefix?: EvidenceFingerprint; }
-export type EvidenceFingerprint = { kind: "sha256"; value: string } | { kind: "unavailable"; cause: string };
-export interface AccountUsageObservation { queryInstanceId: string; turnId: string; boundaryAtMs: number; observedAtMs: number; sampleLatencyMs: number; subscriptionType: string; boundary?: "turnStart" | "turnEnd"; outcome?: { kind: "available"; utilizationPercent: number; resetsAtMs: number } | { kind: "unavailable"; reason: string }; }
-export interface TokenUsageReconciliation { responseRecordCount: number; responseAllAgents?: UsageTotals; responseMainAgent?: UsageTotals; resultMainAgent?: UsageTotals; responseModels: ModelUsageTotals[]; resultModels: ModelUsageTotals[]; apiMessageIds: string[]; }
-export interface UsageTotals { inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens: number; cacheCreation5m?: number; cacheCreation1h?: number; webSearchRequests?: number; webFetchRequests?: number; thinkingTokens?: number; cacheRates?: { totalPromptInputTokens: number; cacheHitRate: number; cacheWriteRate: number; uncachedInputRate: number }; timing?: { outputTokensWithGenerationDuration: number; outputGenerationDurationMs: number; responsesWithGenerationDuration: number; responsesWithoutGenerationDuration: number; totalTimeToFirstTokenMs: number; responsesWithTimeToFirstToken: number; responsesWithoutTimeToFirstToken: number }; }
-export interface ModelUsageTotals { model: string; canonicalModel?: string; provider?: string; totals?: UsageTotals; contextWindow?: number; maxOutputTokens?: number; costUsd?: number; }
+export interface TurnAccountingTiming {
+  promptAdmittedAtMs: number;
+  resultReceivedAtMs: number;
+  accountingSettledAtMs: number;
+  promptToResultMs: number;
+  resultToSettlementMs: number;
+}
+export interface QueryRuntimeIdentity {
+  vendorSessionId: string;
+  effectiveModel: string;
+  sdkVersion: string;
+  claudeCodeVersion: string;
+  shimBuildSha: string;
+  authSource: string;
+  subscriptionType: string;
+  fastModeState: string;
+  fastModeReason: string;
+  effectiveOptions?: EvidenceFingerprint;
+  settings?: EvidenceFingerprint;
+  tools?: EvidenceFingerprint;
+  mcp?: EvidenceFingerprint;
+  contextPrefix?: EvidenceFingerprint;
+}
+export type EvidenceFingerprint =
+  { kind: "sha256"; value: string } | { kind: "unavailable"; cause: string };
+export interface AccountUsageObservation {
+  queryInstanceId: string;
+  turnId: string;
+  boundaryAtMs: number;
+  observedAtMs: number;
+  sampleLatencyMs: number;
+  subscriptionType: string;
+  boundary?: "turnStart" | "turnEnd";
+  outcome?:
+    | { kind: "available"; utilizationPercent: number; resetsAtMs: number }
+    | { kind: "unavailable"; reason: string };
+}
+export interface TokenUsageReconciliation {
+  responseRecordCount: number;
+  responseAllAgents?: UsageTotals;
+  responseMainAgent?: UsageTotals;
+  resultMainAgent?: UsageTotals;
+  responseModels: ModelUsageTotals[];
+  resultModels: ModelUsageTotals[];
+  apiMessageIds: string[];
+}
+export interface UsageTotals {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadInputTokens: number;
+  cacheCreationInputTokens: number;
+  cacheCreation5m?: number;
+  cacheCreation1h?: number;
+  webSearchRequests?: number;
+  webFetchRequests?: number;
+  thinkingTokens?: number;
+  cacheRates?: {
+    totalPromptInputTokens: number;
+    cacheHitRate: number;
+    cacheWriteRate: number;
+    uncachedInputRate: number;
+  };
+  timing?: {
+    outputTokensWithGenerationDuration: number;
+    outputGenerationDurationMs: number;
+    responsesWithGenerationDuration: number;
+    responsesWithoutGenerationDuration: number;
+    totalTimeToFirstTokenMs: number;
+    responsesWithTimeToFirstToken: number;
+    responsesWithoutTimeToFirstToken: number;
+  };
+}
+export interface ModelUsageTotals {
+  model: string;
+  canonicalModel?: string;
+  provider?: string;
+  totals?: UsageTotals;
+  contextWindow?: number;
+  maxOutputTokens?: number;
+  costUsd?: number;
+}
 export type TurnAccountingProblem =
   | { kind: "missingUsageBoundary"; boundary: "turnStart" | "turnEnd" }
   | { kind: "windowReset"; startResetsAtMs: number; endResetsAtMs: number }
   | { kind: "tokenLedgerMismatch"; differingFieldPaths: string[] }
   | { kind: "runtimeIdentityIncomplete"; missingFieldPaths: string[] }
   | { kind: "unmodeledUsageFields"; sourceFieldPaths: string[] }
-  | { kind: "telemetryRecordMissing"; record: { kind: "queryLifecycle"; queryInstanceId: string } | { kind: "responseUsage"; apiMessageId: string } | { kind: "persistenceReceipt"; turnId: string } };
+  | {
+      kind: "telemetryRecordMissing";
+      record:
+        | { kind: "queryLifecycle"; queryInstanceId: string }
+        | { kind: "responseUsage"; apiMessageId: string }
+        | { kind: "persistenceReceipt"; turnId: string };
+    };
 
 /** Response-level usage associated with one rendered assistant response. */
 export interface TokenUtilization {
@@ -960,16 +1119,44 @@ export interface TokenUtilization {
   apiMessageId: string;
   model: string;
   actor: "mainAgent" | "subagent";
-  subagent?: { agentId: string; parentToolUseId: string; parentAgentId: string; subagentType: string; taskDescription: string };
+  subagent?: {
+    agentId: string;
+    parentToolUseId: string;
+    parentAgentId: string;
+    subagentType: string;
+    taskDescription: string;
+  };
   usage: ResponseTokenUsage;
-  responseTiming?: { timeToFirstTokenMs?: number; outputGenerationDurationMs?: number };
+  responseTiming?: {
+    timeToFirstTokenMs?: number;
+    outputGenerationDurationMs?: number;
+  };
 }
 
-export interface TokenCacheCreation { ephemeral5mInputTokens: number; ephemeral1hInputTokens: number; }
-export interface TokenServerToolUse { webSearchRequests: number; webFetchRequests: number; }
-export interface TokenOutputDetails { thinkingTokens: number; }
-export interface TokenCacheRates { totalPromptInputTokens: number; cacheHitRate: number; cacheWriteRate: number; uncachedInputRate: number; }
-export interface TokenUsageIterationCounters { inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens: number; cacheCreation?: TokenCacheCreation; }
+export interface TokenCacheCreation {
+  ephemeral5mInputTokens: number;
+  ephemeral1hInputTokens: number;
+}
+export interface TokenServerToolUse {
+  webSearchRequests: number;
+  webFetchRequests: number;
+}
+export interface TokenOutputDetails {
+  thinkingTokens: number;
+}
+export interface TokenCacheRates {
+  totalPromptInputTokens: number;
+  cacheHitRate: number;
+  cacheWriteRate: number;
+  uncachedInputRate: number;
+}
+export interface TokenUsageIterationCounters {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadInputTokens: number;
+  cacheCreationInputTokens: number;
+  cacheCreation?: TokenCacheCreation;
+}
 export type TokenUsageIteration =
   | ({ kind: "sampling"; model: string } & TokenUsageIterationCounters)
   | ({ kind: "compaction" } & TokenUsageIterationCounters)
@@ -1018,7 +1205,12 @@ export interface ConversationDelta {
 }
 
 /** The content-delta kinds a `TypingDelta`'s embedded `ContentDelta` may set. */
-export const CONTENT_DELTA_KINDS = ["text", "thinking", "input_json", "signature"] as const;
+export const CONTENT_DELTA_KINDS = [
+  "text",
+  "thinking",
+  "input_json",
+  "signature",
+] as const;
 export type ContentDeltaKind = (typeof CONTENT_DELTA_KINDS)[number];
 
 /**
@@ -1187,7 +1379,11 @@ export interface RateLimitWindow {
  * failure anywhere. Deriving this downstream is what once painted a turn that
  * had already ended as a stop that had failed.
  */
-export const INTERRUPT_OUTCOMES = ["interrupted", "already_complete", "failed"] as const;
+export const INTERRUPT_OUTCOMES = [
+  "interrupted",
+  "already_complete",
+  "failed",
+] as const;
 export type InterruptOutcome = (typeof INTERRUPT_OUTCOMES)[number];
 
 /** protojson enum name -> the webapp's keyword. */
@@ -1534,7 +1730,12 @@ export type HostAction = {
  * judged; `error` = NOTHING decided it (the classifier failed, or answered
  * unreadably) and is deliberately distinct from a real verdict.
  */
-export const QUEUE_CLASSIFICATIONS = ["pending", "interject", "hold", "error"] as const;
+export const QUEUE_CLASSIFICATIONS = [
+  "pending",
+  "interject",
+  "hold",
+  "error",
+] as const;
 export type QueueClassification = (typeof QUEUE_CLASSIFICATIONS)[number];
 
 /**
@@ -1757,8 +1958,7 @@ export interface TokenBreakdownView {
  * representable.
  */
 export type WorkspaceGate =
-  | { case: "open" }
-  | { case: "hibernated"; detail: HibernationDetail };
+  { case: "open" } | { case: "hibernated"; detail: HibernationDetail };
 
 /**
  * One workspace's revival gate, resolved and fenced.
@@ -1892,7 +2092,10 @@ export interface FooterAccountingCell {
 // stamp rides the `AgentResponse` envelope and a DETACHED agent's responses
 // carry the same one. Re-exported here so this module stays the single import
 // surface every frontend.v1 consumer already reads.
-export { decodeResponseUsageStamp, type ResponseUsageStamp } from "./agent-emission.js";
+export {
+  decodeResponseUsageStamp,
+  type ResponseUsageStamp,
+} from "./agent-emission.js";
 
 /** The push-channel oneof wrapper (FrontendFrame.frame). */
 export type FrontendFrame = {
@@ -1926,11 +2129,23 @@ export type FrameCase = FrontendFrame["frame"]["case"];
 // --- vocabularies -----------------------------------------------------------
 
 /** The kinds a `TaskEntry.kind` may name. */
-export const TASK_KINDS = ["agent", "shell", "workflow", "unclassified"] as const;
+export const TASK_KINDS = [
+  "agent",
+  "shell",
+  "workflow",
+  "unclassified",
+] as const;
 export type TaskKind = (typeof TASK_KINDS)[number];
 
 /** The statuses a `TaskEntry.status` may name. */
-export const TASK_STATUSES = ["running", "done", "error", "killed", "stopped", "lost"] as const;
+export const TASK_STATUSES = [
+  "running",
+  "done",
+  "error",
+  "killed",
+  "stopped",
+  "lost",
+] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 
 /**
@@ -1943,7 +2158,10 @@ export type TaskStatus = (typeof TASK_STATUSES)[number];
  * `signature` content delta, an image content block) are ignored dynamically
  * by the adapter the same way, since that set is the daemon's to grow.
  */
-export const UNSUPPORTED_SHAPES: ReadonlyMap<string, string> = new Map<string, string>([
+export const UNSUPPORTED_SHAPES: ReadonlyMap<string, string> = new Map<
+  string,
+  string
+>([
   [
     "commandAck",
     "control-plane command receipt (agentshim.frontend.v1.CommandAck); the " +
@@ -1972,7 +2190,6 @@ export function isVisuallySupportedFrame(frameCase: FrameCase): boolean {
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
-
 
 /** Decode ONE raw protojson `FrontendFrame` string, validating loudly. */
 export function decodeFrontendFrame(json: string): FrontendFrame {
@@ -2007,31 +2224,118 @@ export function decodeFrontendFrame(json: string): FrontendFrame {
   return { frame: FRAME_DECODERS.get(key)!(o[key]) };
 }
 
-const FRAME_DECODERS: ReadonlyMap<string, (v: unknown) => FrontendFrame["frame"]> = new Map<
+const FRAME_DECODERS: ReadonlyMap<
   string,
   (v: unknown) => FrontendFrame["frame"]
->([
-  ["snapshot", (v: unknown) => ({ case: "snapshot" as const, value: decodeStateSnapshot(v) })],
-  ["workspaceState", (v: unknown) => ({ case: "workspaceState" as const, value: decodeWorkspaceState(v) })],
-  ["sessionView", (v: unknown) => ({ case: "sessionView" as const, value: decodeSessionView(v) })],
-  ["conversationDelta", (v: unknown) => ({ case: "conversationDelta" as const, value: decodeConversationDelta(v) })],
-  ["asyncBubbleDelta", (v: unknown) => ({ case: "asyncBubbleDelta" as const, value: decodeAsyncBubbleDelta(v) })],
-  ["typingDelta", (v: unknown) => ({ case: "typingDelta" as const, value: decodeTypingDelta(v) })],
-  ["taskCatalog", (v: unknown) => ({ case: "taskCatalog" as const, value: decodeTaskCatalog(v) })],
-  ["commandAck", (v: unknown) => ({ case: "commandAck" as const, value: decodeCommandAck(v) })],
-  ["daemonView", (v: unknown) => ({ case: "daemonView" as const, value: decodeDaemonView(v) })],
-  ["sessionInit", (v: unknown) => ({ case: "sessionInit" as const, value: decodeSessionInitView(v) })],
-  ["heartbeat", (v: unknown) => ({ case: "heartbeat" as const, value: decodeHeartbeatView(v) })],
-  ["queue", (v: unknown) => ({ case: "queue" as const, value: decodeQueueView(v) })],
-  ["progress", (v: unknown) => ({ case: "progress" as const, value: decodeProgressView(v) })],
+> = new Map<string, (v: unknown) => FrontendFrame["frame"]>([
+  [
+    "snapshot",
+    (v: unknown) => ({
+      case: "snapshot" as const,
+      value: decodeStateSnapshot(v),
+    }),
+  ],
+  [
+    "workspaceState",
+    (v: unknown) => ({
+      case: "workspaceState" as const,
+      value: decodeWorkspaceState(v),
+    }),
+  ],
+  [
+    "sessionView",
+    (v: unknown) => ({
+      case: "sessionView" as const,
+      value: decodeSessionView(v),
+    }),
+  ],
+  [
+    "conversationDelta",
+    (v: unknown) => ({
+      case: "conversationDelta" as const,
+      value: decodeConversationDelta(v),
+    }),
+  ],
+  [
+    "asyncBubbleDelta",
+    (v: unknown) => ({
+      case: "asyncBubbleDelta" as const,
+      value: decodeAsyncBubbleDelta(v),
+    }),
+  ],
+  [
+    "typingDelta",
+    (v: unknown) => ({
+      case: "typingDelta" as const,
+      value: decodeTypingDelta(v),
+    }),
+  ],
+  [
+    "taskCatalog",
+    (v: unknown) => ({
+      case: "taskCatalog" as const,
+      value: decodeTaskCatalog(v),
+    }),
+  ],
+  [
+    "commandAck",
+    (v: unknown) => ({
+      case: "commandAck" as const,
+      value: decodeCommandAck(v),
+    }),
+  ],
+  [
+    "daemonView",
+    (v: unknown) => ({
+      case: "daemonView" as const,
+      value: decodeDaemonView(v),
+    }),
+  ],
+  [
+    "sessionInit",
+    (v: unknown) => ({
+      case: "sessionInit" as const,
+      value: decodeSessionInitView(v),
+    }),
+  ],
+  [
+    "heartbeat",
+    (v: unknown) => ({
+      case: "heartbeat" as const,
+      value: decodeHeartbeatView(v),
+    }),
+  ],
+  [
+    "queue",
+    (v: unknown) => ({ case: "queue" as const, value: decodeQueueView(v) }),
+  ],
+  [
+    "progress",
+    (v: unknown) => ({
+      case: "progress" as const,
+      value: decodeProgressView(v),
+    }),
+  ],
   [
     "workspaceAvailable",
-    (v: unknown) => ({ case: "workspaceAvailable" as const, value: decodeWorkspaceAvailable(v) }),
+    (v: unknown) => ({
+      case: "workspaceAvailable" as const,
+      value: decodeWorkspaceAvailable(v),
+    }),
   ],
-  ["hostAction", (v: unknown) => ({ case: "hostAction" as const, value: decodeHostAction(v) })],
+  [
+    "hostAction",
+    (v: unknown) => ({
+      case: "hostAction" as const,
+      value: decodeHostAction(v),
+    }),
+  ],
   [
     "workspaceRoster",
-    (v: unknown) => ({ case: "workspaceRoster" as const, value: decodeWorkspaceRoster(v) }),
+    (v: unknown) => ({
+      case: "workspaceRoster" as const,
+      value: decodeWorkspaceRoster(v),
+    }),
   ],
   [
     "shutdownSchedule",
@@ -2040,18 +2344,30 @@ const FRAME_DECODERS: ReadonlyMap<string, (v: unknown) => FrontendFrame["frame"]
       value: decodeShutdownScheduleView(v),
     }),
   ],
-  ["topbar", (v: unknown) => ({ case: "topbar" as const, value: decodeTopbarView(v) })],
+  [
+    "topbar",
+    (v: unknown) => ({ case: "topbar" as const, value: decodeTopbarView(v) }),
+  ],
   [
     "tokenBreakdown",
-    (v: unknown) => ({ case: "tokenBreakdown" as const, value: decodeTokenBreakdownView(v) }),
+    (v: unknown) => ({
+      case: "tokenBreakdown" as const,
+      value: decodeTokenBreakdownView(v),
+    }),
   ],
   [
     "workspaceGate",
-    (v: unknown) => ({ case: "workspaceGate" as const, value: decodeWorkspaceGateView(v) }),
+    (v: unknown) => ({
+      case: "workspaceGate" as const,
+      value: decodeWorkspaceGateView(v),
+    }),
   ],
   [
     "mergeQueueRoster",
-    (v: unknown) => ({ case: "mergeQueueRoster" as const, value: decodeMergeQueueRoster(v) }),
+    (v: unknown) => ({
+      case: "mergeQueueRoster" as const,
+      value: decodeMergeQueueRoster(v),
+    }),
   ],
 ]);
 
@@ -2074,6 +2390,7 @@ const WORKSPACE_STATE_KEYS = new Set([
   "mergeLeaseHeld",
   "mergedAtMs",
   "mergeStatus",
+  "mergeDequeueOffer",
 ]);
 function decodeWorkspaceState(v: unknown): WorkspaceState {
   const o = ensureObject(v, "WorkspaceState");
@@ -2091,9 +2408,10 @@ function decodeWorkspaceState(v: unknown): WorkspaceState {
     connectivity: enumSessionConnectivity(o, "connectivity", "WorkspaceState"),
     status: enumSessionStatus(o, "status", "WorkspaceState"),
     controllerGenerationId: str(o, "controllerGenerationId", "WorkspaceState"),
-    activeFaults: ensureArray(o.activeFaults ?? [], "WorkspaceState.activeFaults").map(
-      decodeRuntimeFault,
-    ),
+    activeFaults: ensureArray(
+      o.activeFaults ?? [],
+      "WorkspaceState.activeFaults",
+    ).map(decodeRuntimeFault),
     mergeLeaseHeld: bool(o, "mergeLeaseHeld", "WorkspaceState"),
     mergedAtMs: num(o, "mergedAtMs", "WorkspaceState"),
   };
@@ -2103,8 +2421,16 @@ function decodeWorkspaceState(v: unknown): WorkspaceState {
   if (o.mergeStatus !== undefined && o.mergeStatus !== null) {
     ws.mergeStatus = decodeMergeStatus(o.mergeStatus);
   }
+  // ABSENCE IS THE ABSENCE OF A QUESTION, on the same reading: the daemon
+  // clears the field to take the card down, so an unset one is never a
+  // zero-valued offer the renderer would have to recognize as empty.
+  if (o.mergeDequeueOffer !== undefined && o.mergeDequeueOffer !== null) {
+    ws.mergeDequeueOffer = decodeMergeDequeueOffer(o.mergeDequeueOffer);
+  }
   if (ws.workspace === "") {
-    throw new Error("frontend-proto: WorkspaceState missing required `workspace`");
+    throw new Error(
+      "frontend-proto: WorkspaceState missing required `workspace`",
+    );
   }
   if (ws.state === RenderState.UNSPECIFIED) {
     throw new Error(
@@ -2152,10 +2478,10 @@ const MERGE_STATUS_KEYS = new Set([
  * merge as "nothing in particular" is exactly the silence the status exists to
  * end.
  */
-const MERGE_PHASE_DECODERS: ReadonlyMap<string, (v: unknown) => MergeStatus["phase"]> = new Map<
+const MERGE_PHASE_DECODERS: ReadonlyMap<
   string,
   (v: unknown) => MergeStatus["phase"]
->([
+> = new Map<string, (v: unknown) => MergeStatus["phase"]>([
   [
     "enqueued",
     (v: unknown) => {
@@ -2245,7 +2571,10 @@ const MERGE_PHASE_DECODERS: ReadonlyMap<string, (v: unknown) => MergeStatus["pha
   [
     "merged",
     (v: unknown) => {
-      const o = phaseObject(v, "MergeStatusMerged", ["commitsTotal", "afterActionError"]);
+      const o = phaseObject(v, "MergeStatusMerged", [
+        "commitsTotal",
+        "afterActionError",
+      ]);
       return {
         case: "merged" as const,
         value: {
@@ -2321,7 +2650,9 @@ function decodeMergeStatus(v: unknown): MergeStatus {
     );
   }
   if (phaseKeys.length > 1) {
-    throw new Error(`frontend-proto: MergeStatus sets multiple phases: ${phaseKeys.join(", ")}`);
+    throw new Error(
+      `frontend-proto: MergeStatus sets multiple phases: ${phaseKeys.join(", ")}`,
+    );
   }
   const status: MergeStatus = {
     runId: str(o, "runId", "MergeStatus"),
@@ -2335,9 +2666,98 @@ function decodeMergeStatus(v: unknown): MergeStatus {
   return status;
 }
 
+const MERGE_DEQUEUE_OFFER_KEYS = new Set([
+  "offerId",
+  "runId",
+  "raisedAtMs",
+  "waiting",
+  "running",
+]);
+const MERGE_DEQUEUE_STANDING_ARMS = ["waiting", "running"] as const;
+
+/**
+ * The dequeue offer, whose `standing` oneof is decoded by NAME for the same
+ * reason `MergeStatus.phase` is: the arm set IS the answer to "where is this
+ * merge", and a wire that sets none says nothing a card could ask about.
+ */
+function decodeMergeDequeueOffer(v: unknown): MergeDequeueOffer {
+  const o = ensureObject(v, "MergeDequeueOffer");
+  rejectUnknown(o, MERGE_DEQUEUE_OFFER_KEYS, "MergeDequeueOffer");
+  const armKeys = MERGE_DEQUEUE_STANDING_ARMS.filter(
+    (k) => o[k] !== undefined && o[k] !== null,
+  );
+  if (armKeys.length === 0) {
+    throw new Error(
+      "frontend-proto: MergeDequeueOffer sets no standing (WHICH member of the oneof is set IS the standing)",
+    );
+  }
+  if (armKeys.length > 1) {
+    throw new Error(
+      `frontend-proto: MergeDequeueOffer sets multiple standings: ${armKeys.join(", ")}`,
+    );
+  }
+  const offerId = str(o, "offerId", "MergeDequeueOffer");
+  if (offerId === "") {
+    // An offer nothing can name is a question with no answerable form: the
+    // command carries the id and the daemon checks it, so an empty one would
+    // draw a card whose every click is refused.
+    throw new Error(
+      "frontend-proto: MergeDequeueOffer missing required `offerId`",
+    );
+  }
+  return {
+    offerId,
+    runId: str(o, "runId", "MergeDequeueOffer"),
+    raisedAtMs: num(o, "raisedAtMs", "MergeDequeueOffer"),
+    standing:
+      armKeys[0] === "waiting"
+        ? {
+            case: "waiting" as const,
+            value: decodeMergeDequeueWaiting(o.waiting),
+          }
+        : {
+            case: "running" as const,
+            value: decodeMergeDequeueRunning(o.running),
+          },
+  };
+}
+
+function decodeMergeDequeueWaiting(v: unknown): MergeDequeueWaiting {
+  const o = phaseObject(v, "MergeDequeueWaiting", [
+    "ahead",
+    "position",
+    "depth",
+  ]);
+  const waiting: MergeDequeueWaiting = {
+    ahead: num(o, "ahead", "MergeDequeueWaiting"),
+    position: num(o, "position", "MergeDequeueWaiting"),
+    depth: num(o, "depth", "MergeDequeueWaiting"),
+  };
+  if (waiting.ahead < 0 || waiting.position < 0 || waiting.depth < 0) {
+    throw new Error(
+      `frontend-proto: MergeDequeueWaiting has a negative queue figure ` +
+        `(ahead=${waiting.ahead} position=${waiting.position} depth=${waiting.depth})`,
+    );
+  }
+  return waiting;
+}
+
+function decodeMergeDequeueRunning(v: unknown): MergeDequeueRunning {
+  const o = phaseObject(v, "MergeDequeueRunning", ["status"]);
+  const running: MergeDequeueRunning = {};
+  if (o.status !== undefined && o.status !== null) {
+    running.status = decodeMergeStatus(o.status);
+  }
+  return running;
+}
+
 const MERGE_QUEUE_ROSTER_KEYS = new Set(["paused", "updatedAtMs", "repos"]);
 const MERGE_REPO_QUEUE_KEYS = new Set(["repoKey", "entries"]);
-const MERGE_QUEUE_HEAD_ARMS = ["running", "pausedWaiting", "terminalOwed"] as const;
+const MERGE_QUEUE_HEAD_ARMS = [
+  "running",
+  "pausedWaiting",
+  "terminalOwed",
+] as const;
 const MERGE_QUEUE_ENTRY_KEYS = new Set([
   "runId",
   "workspace",
@@ -2380,7 +2800,9 @@ function decodeMergeRepoQueue(v: unknown): MergeRepoQueue {
   // Without a repo key the group names no queue, so nothing it holds can be
   // attributed to the repository whose drain order it claims to be.
   if (q.repoKey === "") {
-    throw new Error("frontend-proto: MergeRepoQueue missing required `repoKey`");
+    throw new Error(
+      "frontend-proto: MergeRepoQueue missing required `repoKey`",
+    );
   }
   return q;
 }
@@ -2399,7 +2821,9 @@ function decodeMergeQueueEntry(v: unknown): MergeQueueEntry {
   if (e.runId === "") {
     throw new Error("frontend-proto: MergeQueueEntry missing required `runId`");
   }
-  const heads = MERGE_QUEUE_HEAD_ARMS.filter((arm) => o[arm] !== undefined && o[arm] !== null);
+  const heads = MERGE_QUEUE_HEAD_ARMS.filter(
+    (arm) => o[arm] !== undefined && o[arm] !== null,
+  );
   if (heads.length > 1) {
     throw new Error(
       `frontend-proto: MergeQueueEntry '${e.runId}' sets multiple head arms: ${heads.join(", ")}`,
@@ -2432,7 +2856,9 @@ function decodeRuntimeFault(v: unknown): RuntimeFault {
     openedAtMs: num(o, "openedAtMs", "RuntimeFault"),
   };
   if (fault.component === "" || fault.faultType === "" || fault.impact === "") {
-    throw new Error("frontend-proto: RuntimeFault missing component, faultType, or impact");
+    throw new Error(
+      "frontend-proto: RuntimeFault missing component, faultType, or impact",
+    );
   }
   return fault;
 }
@@ -2473,15 +2899,24 @@ const HIBERNATION_CAUSE_ARM_DECODERS = new Map<
 >([
   [
     HIBERNATION_CAUSE.idleCutoff,
-    (v) => ({ case: HIBERNATION_CAUSE.idleCutoff, value: decodeHibernationIdleCutoff(v) }),
+    (v) => ({
+      case: HIBERNATION_CAUSE.idleCutoff,
+      value: decodeHibernationIdleCutoff(v),
+    }),
   ],
   [
     HIBERNATION_CAUSE.forced,
-    (v) => ({ case: HIBERNATION_CAUSE.forced, value: decodeHibernationForced(v) }),
+    (v) => ({
+      case: HIBERNATION_CAUSE.forced,
+      value: decodeHibernationForced(v),
+    }),
   ],
   [
     HIBERNATION_CAUSE.cacheExpired,
-    (v) => ({ case: HIBERNATION_CAUSE.cacheExpired, value: decodeHibernationCacheExpired(v) }),
+    (v) => ({
+      case: HIBERNATION_CAUSE.cacheExpired,
+      value: decodeHibernationCacheExpired(v),
+    }),
   ],
 ]);
 
@@ -2496,12 +2931,18 @@ const HIBERNATION_CAUSE_ARM_DECODERS = new Map<
 function decodeHibernationDetail(v: unknown): HibernationDetail {
   const ctx = "SessionView.hibernation";
   const o = ensureObject(v, ctx);
-  const arms = Object.keys(o).filter((k) => HIBERNATION_CAUSE_ARM_DECODERS.has(k));
+  const arms = Object.keys(o).filter((k) =>
+    HIBERNATION_CAUSE_ARM_DECODERS.has(k),
+  );
   const unknown = Object.keys(o).filter(
-    (k) => !HIBERNATION_DETAIL_ENVELOPE_KEYS.has(k) && !HIBERNATION_CAUSE_ARM_DECODERS.has(k),
+    (k) =>
+      !HIBERNATION_DETAIL_ENVELOPE_KEYS.has(k) &&
+      !HIBERNATION_CAUSE_ARM_DECODERS.has(k),
   );
   if (unknown.length > 0) {
-    throw new Error(`frontend-proto: ${ctx} has unrecognized field(s): ${unknown.join(", ")}`);
+    throw new Error(
+      `frontend-proto: ${ctx} has unrecognized field(s): ${unknown.join(", ")}`,
+    );
   }
   if (arms.length === 0) {
     throw new Error(
@@ -2510,7 +2951,9 @@ function decodeHibernationDetail(v: unknown): HibernationDetail {
     );
   }
   if (arms.length > 1) {
-    throw new Error(`frontend-proto: ${ctx} sets multiple causes: ${arms.join(", ")}`);
+    throw new Error(
+      `frontend-proto: ${ctx} sets multiple causes: ${arms.join(", ")}`,
+    );
   }
   return {
     sinceMs: num(o, "sinceMs", ctx),
@@ -2567,10 +3010,13 @@ function decodeSessionView(v: unknown): SessionView {
     configDir: str(o, "configDir", "SessionView"),
     modelOptions: (() => {
       if (o.modelOptions === undefined || o.modelOptions === null) {
-        throw new Error("frontend-proto: SessionView missing required `modelOptions`");
+        throw new Error(
+          "frontend-proto: SessionView missing required `modelOptions`",
+        );
       }
-      return ensureArray(o.modelOptions, "SessionView.modelOptions")
-        .map((model, i) => decodeModelOption(model, i));
+      return ensureArray(o.modelOptions, "SessionView.modelOptions").map(
+        (model, i) => decodeModelOption(model, i),
+      );
     })(),
     // F2 never-blue signal; absent on a pre-F2 daemon, which reads as
     // `unspecified` — the same "nothing to backfill" a fresh workspace has.
@@ -2582,7 +3028,8 @@ function decodeSessionView(v: unknown): SessionView {
   if (o.death !== undefined) {
     sv.death = decodeFailureCardView(o.death, "SessionView.death");
   }
-  if (o.tokenUtilization !== undefined) sv.tokenUtilization = decodeSessionTokenUtilization(o.tokenUtilization);
+  if (o.tokenUtilization !== undefined)
+    sv.tokenUtilization = decodeSessionTokenUtilization(o.tokenUtilization);
   // ABSENCE IS "THE SESSION IS AWAKE", and that is its only reading. Decoded
   // when present rather than synthesized from the `hibernated` bool: the bool
   // is the compatibility projection of this message, so deriving one from the
@@ -2592,7 +3039,9 @@ function decodeSessionView(v: unknown): SessionView {
     sv.hibernation = decodeHibernationDetail(o.hibernation);
   }
   if (sv.sessionId === "") {
-    throw new Error("frontend-proto: SessionView missing required `session_id`");
+    throw new Error(
+      "frontend-proto: SessionView missing required `session_id`",
+    );
   }
   return sv;
 }
@@ -2607,12 +3056,19 @@ function decodeModelOption(v: unknown, i: number): ModelOption {
     description: str(o, "description", `SessionView.modelOptions[${i}]`),
   };
   if (model.value === "" || model.value.trim() === "<synthetic>") {
-    throw new Error(`frontend-proto: SessionView.modelOptions[${i}] has no selectable model value`);
+    throw new Error(
+      `frontend-proto: SessionView.modelOptions[${i}] has no selectable model value`,
+    );
   }
   return model;
 }
 
-const CONVERSATION_DELTA_KEYS = new Set(["workspace", "fence", "items", "throughSeq"]);
+const CONVERSATION_DELTA_KEYS = new Set([
+  "workspace",
+  "fence",
+  "items",
+  "throughSeq",
+]);
 function decodeConversationDelta(v: unknown): ConversationDelta {
   const o = ensureObject(v, "ConversationDelta");
   rejectUnknown(o, CONVERSATION_DELTA_KEYS, "ConversationDelta");
@@ -2626,13 +3082,24 @@ function decodeConversationDelta(v: unknown): ConversationDelta {
     throughSeq: num(o, "throughSeq", "ConversationDelta"),
   };
   if (cd.fence === "") {
-    throw new Error("frontend-proto: ConversationDelta missing required `fence`");
+    throw new Error(
+      "frontend-proto: ConversationDelta missing required `fence`",
+    );
   }
   return cd;
 }
 
-const CONVERSATION_ITEM_ENVELOPE_KEYS = new Set(["uuid", "tsMs", "requestId", "source", "tokenUtilization", "turnAccounting"]);
-const CONVERSATION_ITEM_ARM_SET: ReadonlySet<string> = new Set(CONVERSATION_ITEM_ARMS);
+const CONVERSATION_ITEM_ENVELOPE_KEYS = new Set([
+  "uuid",
+  "tsMs",
+  "requestId",
+  "source",
+  "tokenUtilization",
+  "turnAccounting",
+]);
+const CONVERSATION_ITEM_ARM_SET: ReadonlySet<string> = new Set(
+  CONVERSATION_ITEM_ARMS,
+);
 
 /** The `AgentEmission` arm key that wraps every agent-produced item. */
 const AGENT_EMISSION_ENVELOPE = "agent";
@@ -2660,13 +3127,19 @@ function decodeConversationItem(v: unknown, i: number): ConversationItemFrame {
       k !== AGENT_EMISSION_ENVELOPE,
   );
   if (unknown.length > 0) {
-    throw new Error(`frontend-proto: ${ctx} has unrecognized field(s): ${unknown.join(", ")}`);
+    throw new Error(
+      `frontend-proto: ${ctx} has unrecognized field(s): ${unknown.join(", ")}`,
+    );
   }
   if (armKeys.length === 0) {
-    throw new Error(`frontend-proto: ${ctx} carries no item variant (empty or unrecognized oneof)`);
+    throw new Error(
+      `frontend-proto: ${ctx} carries no item variant (empty or unrecognized oneof)`,
+    );
   }
   if (armKeys.length > 1) {
-    throw new Error(`frontend-proto: ${ctx} sets multiple item variants: ${armKeys.join(", ")}`);
+    throw new Error(
+      `frontend-proto: ${ctx} sets multiple item variants: ${armKeys.join(", ")}`,
+    );
   }
   const selected: {
     arm: ConversationItemArm;
@@ -2674,10 +3147,14 @@ function decodeConversationItem(v: unknown, i: number): ConversationItemFrame {
     thinkingOrigin?: { apiMessageId: string; blockIndex: number };
     spawnedBubbleId?: string;
     usageStamp?: ResponseUsageStamp;
-  } = armKeys[0] === AGENT_EMISSION_ENVELOPE
-    ? unwrapAgentEmission(o[AGENT_EMISSION_ENVELOPE], `${ctx}.agent`)
-    // Adopt the typed payload by shape (see file-top §5.1 boundary note).
-    : { arm: armKeys[0] as ConversationItemArm, payload: ensureObject(o[armKeys[0]], `${ctx}.${armKeys[0]}`) };
+  } =
+    armKeys[0] === AGENT_EMISSION_ENVELOPE
+      ? unwrapAgentEmission(o[AGENT_EMISSION_ENVELOPE], `${ctx}.agent`)
+      : // Adopt the typed payload by shape (see file-top §5.1 boundary note).
+        {
+          arm: armKeys[0] as ConversationItemArm,
+          payload: ensureObject(o[armKeys[0]], `${ctx}.${armKeys[0]}`),
+        };
   const arm = selected.arm;
   const frame: ConversationItemFrame = {
     uuid: str(o, "uuid", ctx),
@@ -2686,9 +3163,19 @@ function decodeConversationItem(v: unknown, i: number): ConversationItemFrame {
     source: enumConversationSource(o, "source", ctx),
     arm,
     payload: selected.payload,
-    tokenUtilization: o.tokenUtilization === undefined ? [] : ensureArray(o.tokenUtilization, `${ctx}.tokenUtilization`).map((entry, index) => decodeTokenUtilization(entry, `${ctx}.tokenUtilization[${index}]`)),
+    tokenUtilization:
+      o.tokenUtilization === undefined
+        ? []
+        : ensureArray(o.tokenUtilization, `${ctx}.tokenUtilization`).map(
+            (entry, index) =>
+              decodeTokenUtilization(
+                entry,
+                `${ctx}.tokenUtilization[${index}]`,
+              ),
+          ),
   };
-  if (selected.thinkingOrigin !== undefined) frame.thinkingOrigin = selected.thinkingOrigin;
+  if (selected.thinkingOrigin !== undefined)
+    frame.thinkingOrigin = selected.thinkingOrigin;
   // The RESOLVED figures for this response's bubble corner. ABSENT STAYS
   // ABSENT: a response that carried no usage record gets no stamp, and the
   // corner then renders no figures rather than zeros.
@@ -2699,7 +3186,10 @@ function decodeConversationItem(v: unknown, i: number): ConversationItemFrame {
   // carried only when the daemon actually set it — an empty string on the
   // frame would be indistinguishable from an arm that cannot carry a verdict
   // at all.
-  if (selected.spawnedBubbleId !== undefined && selected.spawnedBubbleId !== "") {
+  if (
+    selected.spawnedBubbleId !== undefined &&
+    selected.spawnedBubbleId !== ""
+  ) {
     frame.spawnedBubbleId = selected.spawnedBubbleId;
   }
   // A bubble ANCHORED in the feed at the point its work was launched. Decoded
@@ -2707,231 +3197,919 @@ function decodeConversationItem(v: unknown, i: number): ConversationItemFrame {
   // data.v1 payload), and carried decoded so no consumer re-parses the raw
   // JSON the payload still holds.
   if (arm === "asyncBubble") {
-    frame.asyncBubble = decodeAsyncBubble(selected.payload, `${ctx}.asyncBubble`);
+    frame.asyncBubble = decodeAsyncBubble(
+      selected.payload,
+      `${ctx}.asyncBubble`,
+    );
   }
   if (o.turnAccounting !== undefined) {
-    if (arm !== "result") throw new Error(`frontend-proto: ${ctx}.turnAccounting is valid only on result`);
-    frame.turnAccounting = decodeTurnAccounting(o.turnAccounting, `${ctx}.turnAccounting`);
+    if (arm !== "result")
+      throw new Error(
+        `frontend-proto: ${ctx}.turnAccounting is valid only on result`,
+      );
+    frame.turnAccounting = decodeTurnAccounting(
+      o.turnAccounting,
+      `${ctx}.turnAccounting`,
+    );
   }
   return frame;
 }
 
-const FINGERPRINT_KEYS = generatedFieldSet<keyof typeof EvidenceFingerprintSchema.field>()("sha256", "unavailable");
-const FINGERPRINT_UNAVAILABLE_KEYS = generatedFieldSet<keyof typeof FingerprintUnavailableSchema.field>()("cause");
-const RUNTIME_IDENTITY_KEYS = generatedFieldSet<keyof typeof QueryRuntimeIdentitySchema.field>()("vendorSessionId", "effectiveModel", "sdkVersion", "claudeCodeVersion", "shimBuildSha", "authSource", "subscriptionType", "fastModeState", "fastModeReason", "effectiveOptions", "settings", "tools", "mcp", "contextPrefix");
-const USAGE_OBSERVATION_KEYS = generatedFieldSet<keyof typeof AccountUsageObservationSchema.field>()("queryInstanceId", "turnId", "boundaryAtMs", "observedAtMs", "sampleLatencyMs", "subscriptionType", "turnStart", "turnEnd", "available", "unavailable");
-const USAGE_AVAILABLE_KEYS = generatedFieldSet<keyof typeof AccountUsageAvailableSchema.field>()("fiveHour");
-const USAGE_WINDOW_KEYS = generatedFieldSet<keyof typeof UsageWindowSchema.field>()("utilizationPercent", "resetsAtMs");
-const USAGE_UNAVAILABLE_KEYS = generatedFieldSet<keyof typeof AccountUsageUnavailableSchema.field>()("serviceUnavailable", "windowUnavailable", "utilizationUnavailable", "samplingFailure");
-const USAGE_SAMPLING_FAILURE_KEYS = generatedFieldSet<keyof typeof UsageSamplingFailureSchema.field>()("cause");
+const FINGERPRINT_KEYS = generatedFieldSet<
+  keyof typeof EvidenceFingerprintSchema.field
+>()("sha256", "unavailable");
+const FINGERPRINT_UNAVAILABLE_KEYS =
+  generatedFieldSet<keyof typeof FingerprintUnavailableSchema.field>()("cause");
+const RUNTIME_IDENTITY_KEYS = generatedFieldSet<
+  keyof typeof QueryRuntimeIdentitySchema.field
+>()(
+  "vendorSessionId",
+  "effectiveModel",
+  "sdkVersion",
+  "claudeCodeVersion",
+  "shimBuildSha",
+  "authSource",
+  "subscriptionType",
+  "fastModeState",
+  "fastModeReason",
+  "effectiveOptions",
+  "settings",
+  "tools",
+  "mcp",
+  "contextPrefix",
+);
+const USAGE_OBSERVATION_KEYS = generatedFieldSet<
+  keyof typeof AccountUsageObservationSchema.field
+>()(
+  "queryInstanceId",
+  "turnId",
+  "boundaryAtMs",
+  "observedAtMs",
+  "sampleLatencyMs",
+  "subscriptionType",
+  "turnStart",
+  "turnEnd",
+  "available",
+  "unavailable",
+);
+const USAGE_AVAILABLE_KEYS =
+  generatedFieldSet<keyof typeof AccountUsageAvailableSchema.field>()(
+    "fiveHour",
+  );
+const USAGE_WINDOW_KEYS = generatedFieldSet<
+  keyof typeof UsageWindowSchema.field
+>()("utilizationPercent", "resetsAtMs");
+const USAGE_UNAVAILABLE_KEYS = generatedFieldSet<
+  keyof typeof AccountUsageUnavailableSchema.field
+>()(
+  "serviceUnavailable",
+  "windowUnavailable",
+  "utilizationUnavailable",
+  "samplingFailure",
+);
+const USAGE_SAMPLING_FAILURE_KEYS =
+  generatedFieldSet<keyof typeof UsageSamplingFailureSchema.field>()("cause");
 
 function fingerprint(v: unknown, where: string): EvidenceFingerprint {
-  const o = ensureObject(v, where); rejectUnknown(o, FINGERPRINT_KEYS, where);
+  const o = ensureObject(v, where);
+  rejectUnknown(o, FINGERPRINT_KEYS, where);
   const arm = oneof(o, [...FINGERPRINT_KEYS], where);
-  return arm === "sha256" ? { kind: "sha256", value: str(o, "sha256", where) } : (() => { const unavailable = ensureObject(o.unavailable, `${where}.unavailable`); rejectUnknown(unavailable, FINGERPRINT_UNAVAILABLE_KEYS, `${where}.unavailable`); return { kind: "unavailable" as const, cause: str(unavailable, "cause", `${where}.unavailable`) }; })();
+  return arm === "sha256"
+    ? { kind: "sha256", value: str(o, "sha256", where) }
+    : (() => {
+        const unavailable = ensureObject(o.unavailable, `${where}.unavailable`);
+        rejectUnknown(
+          unavailable,
+          FINGERPRINT_UNAVAILABLE_KEYS,
+          `${where}.unavailable`,
+        );
+        return {
+          kind: "unavailable" as const,
+          cause: str(unavailable, "cause", `${where}.unavailable`),
+        };
+      })();
 }
 
 function decodeRuntime(v: unknown, where: string): QueryRuntimeIdentity {
-  const o = ensureObject(v, where); rejectUnknown(o, RUNTIME_IDENTITY_KEYS, where);
-  return { vendorSessionId: str(o, "vendorSessionId", where), effectiveModel: str(o, "effectiveModel", where), sdkVersion: str(o, "sdkVersion", where), claudeCodeVersion: str(o, "claudeCodeVersion", where), shimBuildSha: str(o, "shimBuildSha", where), authSource: str(o, "authSource", where), subscriptionType: str(o, "subscriptionType", where), fastModeState: str(o, "fastModeState", where), fastModeReason: str(o, "fastModeReason", where), effectiveOptions: fingerprint(o.effectiveOptions, `${where}.effectiveOptions`), settings: fingerprint(o.settings, `${where}.settings`), tools: fingerprint(o.tools, `${where}.tools`), mcp: fingerprint(o.mcp, `${where}.mcp`), contextPrefix: fingerprint(o.contextPrefix, `${where}.contextPrefix`) };
+  const o = ensureObject(v, where);
+  rejectUnknown(o, RUNTIME_IDENTITY_KEYS, where);
+  return {
+    vendorSessionId: str(o, "vendorSessionId", where),
+    effectiveModel: str(o, "effectiveModel", where),
+    sdkVersion: str(o, "sdkVersion", where),
+    claudeCodeVersion: str(o, "claudeCodeVersion", where),
+    shimBuildSha: str(o, "shimBuildSha", where),
+    authSource: str(o, "authSource", where),
+    subscriptionType: str(o, "subscriptionType", where),
+    fastModeState: str(o, "fastModeState", where),
+    fastModeReason: str(o, "fastModeReason", where),
+    effectiveOptions: fingerprint(
+      o.effectiveOptions,
+      `${where}.effectiveOptions`,
+    ),
+    settings: fingerprint(o.settings, `${where}.settings`),
+    tools: fingerprint(o.tools, `${where}.tools`),
+    mcp: fingerprint(o.mcp, `${where}.mcp`),
+    contextPrefix: fingerprint(o.contextPrefix, `${where}.contextPrefix`),
+  };
 }
 
-function decodeUsageObservation(v: unknown, where: string): AccountUsageObservation {
-  const o = ensureObject(v, where); rejectUnknown(o, USAGE_OBSERVATION_KEYS, where);
-  const boundary = oneof(o, ["turnStart", "turnEnd"], where); const outcome = oneof(o, ["available", "unavailable"], where);
-  const common = { queryInstanceId: str(o, "queryInstanceId", where), turnId: str(o, "turnId", where), boundaryAtMs: int64(o, "boundaryAtMs", where), observedAtMs: int64(o, "observedAtMs", where), sampleLatencyMs: int64(o, "sampleLatencyMs", where), subscriptionType: str(o, "subscriptionType", where), boundary: boundary as "turnStart" | "turnEnd" };
-  if (outcome === "available") { const available = ensureObject(o.available, `${where}.available`); rejectUnknown(available, USAGE_AVAILABLE_KEYS, `${where}.available`); const five = ensureObject(available.fiveHour, `${where}.available.fiveHour`); rejectUnknown(five, USAGE_WINDOW_KEYS, `${where}.available.fiveHour`); return { ...common, outcome: { kind: "available", utilizationPercent: num(five, "utilizationPercent", `${where}.available.fiveHour`), resetsAtMs: int64(five, "resetsAtMs", `${where}.available.fiveHour`) } }; }
-  const unavailable = ensureObject(o.unavailable, `${where}.unavailable`); rejectUnknown(unavailable, USAGE_UNAVAILABLE_KEYS, `${where}.unavailable`); const reason = oneof(unavailable, [...USAGE_UNAVAILABLE_KEYS], `${where}.unavailable`); if (reason === "samplingFailure") { const failure = ensureObject(unavailable.samplingFailure, `${where}.unavailable.samplingFailure`); rejectUnknown(failure, USAGE_SAMPLING_FAILURE_KEYS, `${where}.unavailable.samplingFailure`); return { ...common, outcome: { kind: "unavailable", reason: `${reason}:${str(failure, "cause", `${where}.unavailable.samplingFailure`)}` } }; } return { ...common, outcome: { kind: "unavailable", reason } };
+function decodeUsageObservation(
+  v: unknown,
+  where: string,
+): AccountUsageObservation {
+  const o = ensureObject(v, where);
+  rejectUnknown(o, USAGE_OBSERVATION_KEYS, where);
+  const boundary = oneof(o, ["turnStart", "turnEnd"], where);
+  const outcome = oneof(o, ["available", "unavailable"], where);
+  const common = {
+    queryInstanceId: str(o, "queryInstanceId", where),
+    turnId: str(o, "turnId", where),
+    boundaryAtMs: int64(o, "boundaryAtMs", where),
+    observedAtMs: int64(o, "observedAtMs", where),
+    sampleLatencyMs: int64(o, "sampleLatencyMs", where),
+    subscriptionType: str(o, "subscriptionType", where),
+    boundary: boundary as "turnStart" | "turnEnd",
+  };
+  if (outcome === "available") {
+    const available = ensureObject(o.available, `${where}.available`);
+    rejectUnknown(available, USAGE_AVAILABLE_KEYS, `${where}.available`);
+    const five = ensureObject(
+      available.fiveHour,
+      `${where}.available.fiveHour`,
+    );
+    rejectUnknown(five, USAGE_WINDOW_KEYS, `${where}.available.fiveHour`);
+    return {
+      ...common,
+      outcome: {
+        kind: "available",
+        utilizationPercent: num(
+          five,
+          "utilizationPercent",
+          `${where}.available.fiveHour`,
+        ),
+        resetsAtMs: int64(five, "resetsAtMs", `${where}.available.fiveHour`),
+      },
+    };
+  }
+  const unavailable = ensureObject(o.unavailable, `${where}.unavailable`);
+  rejectUnknown(unavailable, USAGE_UNAVAILABLE_KEYS, `${where}.unavailable`);
+  const reason = oneof(
+    unavailable,
+    [...USAGE_UNAVAILABLE_KEYS],
+    `${where}.unavailable`,
+  );
+  if (reason === "samplingFailure") {
+    const failure = ensureObject(
+      unavailable.samplingFailure,
+      `${where}.unavailable.samplingFailure`,
+    );
+    rejectUnknown(
+      failure,
+      USAGE_SAMPLING_FAILURE_KEYS,
+      `${where}.unavailable.samplingFailure`,
+    );
+    return {
+      ...common,
+      outcome: {
+        kind: "unavailable",
+        reason: `${reason}:${str(failure, "cause", `${where}.unavailable.samplingFailure`)}`,
+      },
+    };
+  }
+  return { ...common, outcome: { kind: "unavailable", reason } };
 }
 
-const USAGE_TOTALS_KEYS = generatedFieldSet<keyof typeof TokenUsageTotalsSchema.field>()("inputTokens", "outputTokens", "cacheReadInputTokens", "cacheCreationInputTokens", "cacheCreation", "serverToolUse", "outputDetails", "cacheRates", "timing");
-const RECONCILIATION_KEYS = generatedFieldSet<keyof typeof TokenUsageReconciliationSchema.field>()("responseRecordCount", "responseAllAgents", "responseMainAgent", "resultMainAgent", "responseModels", "resultModels", "apiMessageIds");
-const CACHE_CREATION_KEYS = generatedFieldSet<keyof typeof TokenCacheCreationSchema.field>()("ephemeral5mInputTokens", "ephemeral1hInputTokens");
-const SERVER_TOOL_USE_KEYS = generatedFieldSet<keyof typeof TokenServerToolUseSchema.field>()("webSearchRequests", "webFetchRequests");
-const OUTPUT_DETAILS_KEYS = generatedFieldSet<keyof typeof TokenOutputDetailsSchema.field>()("thinkingTokens");
-const CACHE_RATES_KEYS = generatedFieldSet<keyof typeof TokenCacheRatesSchema.field>()("totalPromptInputTokens", "cacheHitRate", "cacheWriteRate", "uncachedInputRate");
-const TOKEN_TIMING_TOTALS_KEYS = generatedFieldSet<keyof typeof TokenTimingTotalsSchema.field>()("outputTokensWithGenerationDuration", "outputGenerationDurationMs", "responsesWithGenerationDuration", "responsesWithoutGenerationDuration", "totalTimeToFirstTokenMs", "responsesWithTimeToFirstToken", "responsesWithoutTimeToFirstToken");
-const MODEL_UTILIZATION_KEYS = generatedFieldSet<keyof typeof ModelTokenUtilizationSchema.field>()("model", "canonicalModel", "provider", "totals", "contextWindow", "maxOutputTokens", "costUsd");
+const USAGE_TOTALS_KEYS = generatedFieldSet<
+  keyof typeof TokenUsageTotalsSchema.field
+>()(
+  "inputTokens",
+  "outputTokens",
+  "cacheReadInputTokens",
+  "cacheCreationInputTokens",
+  "cacheCreation",
+  "serverToolUse",
+  "outputDetails",
+  "cacheRates",
+  "timing",
+);
+const RECONCILIATION_KEYS = generatedFieldSet<
+  keyof typeof TokenUsageReconciliationSchema.field
+>()(
+  "responseRecordCount",
+  "responseAllAgents",
+  "responseMainAgent",
+  "resultMainAgent",
+  "responseModels",
+  "resultModels",
+  "apiMessageIds",
+);
+const CACHE_CREATION_KEYS = generatedFieldSet<
+  keyof typeof TokenCacheCreationSchema.field
+>()("ephemeral5mInputTokens", "ephemeral1hInputTokens");
+const SERVER_TOOL_USE_KEYS = generatedFieldSet<
+  keyof typeof TokenServerToolUseSchema.field
+>()("webSearchRequests", "webFetchRequests");
+const OUTPUT_DETAILS_KEYS =
+  generatedFieldSet<keyof typeof TokenOutputDetailsSchema.field>()(
+    "thinkingTokens",
+  );
+const CACHE_RATES_KEYS = generatedFieldSet<
+  keyof typeof TokenCacheRatesSchema.field
+>()(
+  "totalPromptInputTokens",
+  "cacheHitRate",
+  "cacheWriteRate",
+  "uncachedInputRate",
+);
+const TOKEN_TIMING_TOTALS_KEYS = generatedFieldSet<
+  keyof typeof TokenTimingTotalsSchema.field
+>()(
+  "outputTokensWithGenerationDuration",
+  "outputGenerationDurationMs",
+  "responsesWithGenerationDuration",
+  "responsesWithoutGenerationDuration",
+  "totalTimeToFirstTokenMs",
+  "responsesWithTimeToFirstToken",
+  "responsesWithoutTimeToFirstToken",
+);
+const MODEL_UTILIZATION_KEYS = generatedFieldSet<
+  keyof typeof ModelTokenUtilizationSchema.field
+>()(
+  "model",
+  "canonicalModel",
+  "provider",
+  "totals",
+  "contextWindow",
+  "maxOutputTokens",
+  "costUsd",
+);
 
-function projectAccountingFingerprint(value: GeneratedEvidenceFingerprint, where: string): EvidenceFingerprint {
+function projectAccountingFingerprint(
+  value: GeneratedEvidenceFingerprint,
+  where: string,
+): EvidenceFingerprint {
   switch (value.evidence.case) {
-    case "sha256": return { kind: "sha256", value: value.evidence.value };
-    case "unavailable": return { kind: "unavailable", cause: value.evidence.value.cause };
-    case undefined: throw new Error(`frontend-proto: ${where} requires a generated evidence oneof`);
+    case "sha256":
+      return { kind: "sha256", value: value.evidence.value };
+    case "unavailable":
+      return { kind: "unavailable", cause: value.evidence.value.cause };
+    case undefined:
+      throw new Error(
+        `frontend-proto: ${where} requires a generated evidence oneof`,
+      );
   }
   return unreachableGeneratedCase(value.evidence, where);
 }
 
-function projectAccountingRuntime(value: GeneratedQueryRuntimeIdentity, where: string): QueryRuntimeIdentity {
+function projectAccountingRuntime(
+  value: GeneratedQueryRuntimeIdentity,
+  where: string,
+): QueryRuntimeIdentity {
   return {
-    vendorSessionId: value.vendorSessionId, effectiveModel: value.effectiveModel, sdkVersion: value.sdkVersion,
-    claudeCodeVersion: value.claudeCodeVersion, shimBuildSha: value.shimBuildSha, authSource: value.authSource,
-    subscriptionType: value.subscriptionType, fastModeState: value.fastModeState, fastModeReason: value.fastModeReason,
-    ...(value.effectiveOptions === undefined ? {} : { effectiveOptions: projectAccountingFingerprint(value.effectiveOptions, `${where}.effectiveOptions`) }),
-    ...(value.settings === undefined ? {} : { settings: projectAccountingFingerprint(value.settings, `${where}.settings`) }),
-    ...(value.tools === undefined ? {} : { tools: projectAccountingFingerprint(value.tools, `${where}.tools`) }),
-    ...(value.mcp === undefined ? {} : { mcp: projectAccountingFingerprint(value.mcp, `${where}.mcp`) }),
-    ...(value.contextPrefix === undefined ? {} : { contextPrefix: projectAccountingFingerprint(value.contextPrefix, `${where}.contextPrefix`) }),
+    vendorSessionId: value.vendorSessionId,
+    effectiveModel: value.effectiveModel,
+    sdkVersion: value.sdkVersion,
+    claudeCodeVersion: value.claudeCodeVersion,
+    shimBuildSha: value.shimBuildSha,
+    authSource: value.authSource,
+    subscriptionType: value.subscriptionType,
+    fastModeState: value.fastModeState,
+    fastModeReason: value.fastModeReason,
+    ...(value.effectiveOptions === undefined
+      ? {}
+      : {
+          effectiveOptions: projectAccountingFingerprint(
+            value.effectiveOptions,
+            `${where}.effectiveOptions`,
+          ),
+        }),
+    ...(value.settings === undefined
+      ? {}
+      : {
+          settings: projectAccountingFingerprint(
+            value.settings,
+            `${where}.settings`,
+          ),
+        }),
+    ...(value.tools === undefined
+      ? {}
+      : { tools: projectAccountingFingerprint(value.tools, `${where}.tools`) }),
+    ...(value.mcp === undefined
+      ? {}
+      : { mcp: projectAccountingFingerprint(value.mcp, `${where}.mcp`) }),
+    ...(value.contextPrefix === undefined
+      ? {}
+      : {
+          contextPrefix: projectAccountingFingerprint(
+            value.contextPrefix,
+            `${where}.contextPrefix`,
+          ),
+        }),
   };
 }
 
-function projectAccountingUsageObservation(value: GeneratedAccountUsageObservation, where: string): AccountUsageObservation {
-  const boundary = value.boundary.case === undefined ? undefined : value.boundary.case;
+function projectAccountingUsageObservation(
+  value: GeneratedAccountUsageObservation,
+  where: string,
+): AccountUsageObservation {
+  const boundary =
+    value.boundary.case === undefined ? undefined : value.boundary.case;
   let outcome: AccountUsageObservation["outcome"];
   switch (value.outcome.case) {
     case "available":
-      if (value.outcome.value.fiveHour === undefined) throw new Error(`frontend-proto: ${where}.outcome.available requires fiveHour`);
-      outcome = { kind: "available", utilizationPercent: value.outcome.value.fiveHour.utilizationPercent, resetsAtMs: safeGeneratedInt64(value.outcome.value.fiveHour.resetsAtMs, `${where}.outcome.available.fiveHour.resetsAtMs`) };
+      if (value.outcome.value.fiveHour === undefined)
+        throw new Error(
+          `frontend-proto: ${where}.outcome.available requires fiveHour`,
+        );
+      outcome = {
+        kind: "available",
+        utilizationPercent: value.outcome.value.fiveHour.utilizationPercent,
+        resetsAtMs: safeGeneratedInt64(
+          value.outcome.value.fiveHour.resetsAtMs,
+          `${where}.outcome.available.fiveHour.resetsAtMs`,
+        ),
+      };
       break;
     case "unavailable":
-      outcome = value.outcome.value.reason.case === "samplingFailure"
-        ? { kind: "unavailable", reason: `samplingFailure:${value.outcome.value.reason.value.cause}` }
-        : value.outcome.value.reason.case === undefined
-          ? (() => { throw new Error(`frontend-proto: ${where}.outcome.unavailable requires a reason`); })()
-          : { kind: "unavailable", reason: value.outcome.value.reason.case };
+      outcome =
+        value.outcome.value.reason.case === "samplingFailure"
+          ? {
+              kind: "unavailable",
+              reason: `samplingFailure:${value.outcome.value.reason.value.cause}`,
+            }
+          : value.outcome.value.reason.case === undefined
+            ? (() => {
+                throw new Error(
+                  `frontend-proto: ${where}.outcome.unavailable requires a reason`,
+                );
+              })()
+            : { kind: "unavailable", reason: value.outcome.value.reason.case };
       break;
-    case undefined: outcome = undefined; break;
+    case undefined:
+      outcome = undefined;
+      break;
   }
   return {
-    queryInstanceId: value.queryInstanceId, turnId: value.turnId,
-    boundaryAtMs: safeGeneratedInt64(value.boundaryAtMs, `${where}.boundaryAtMs`),
-    observedAtMs: safeGeneratedInt64(value.observedAtMs, `${where}.observedAtMs`),
-    sampleLatencyMs: safeGeneratedInt64(value.sampleLatencyMs, `${where}.sampleLatencyMs`),
+    queryInstanceId: value.queryInstanceId,
+    turnId: value.turnId,
+    boundaryAtMs: safeGeneratedInt64(
+      value.boundaryAtMs,
+      `${where}.boundaryAtMs`,
+    ),
+    observedAtMs: safeGeneratedInt64(
+      value.observedAtMs,
+      `${where}.observedAtMs`,
+    ),
+    sampleLatencyMs: safeGeneratedInt64(
+      value.sampleLatencyMs,
+      `${where}.sampleLatencyMs`,
+    ),
     subscriptionType: value.subscriptionType,
-    ...(boundary === undefined ? {} : { boundary }), ...(outcome === undefined ? {} : { outcome }),
+    ...(boundary === undefined ? {} : { boundary }),
+    ...(outcome === undefined ? {} : { outcome }),
   };
 }
 
-function projectAccountingUsageTotals(value: GeneratedTokenUsageTotals, where: string): UsageTotals {
+function projectAccountingUsageTotals(
+  value: GeneratedTokenUsageTotals,
+  where: string,
+): UsageTotals {
   return {
-    inputTokens: safeGeneratedInt64(value.inputTokens, `${where}.inputTokens`), outputTokens: safeGeneratedInt64(value.outputTokens, `${where}.outputTokens`),
-    cacheReadInputTokens: safeGeneratedInt64(value.cacheReadInputTokens, `${where}.cacheReadInputTokens`), cacheCreationInputTokens: safeGeneratedInt64(value.cacheCreationInputTokens, `${where}.cacheCreationInputTokens`),
-    ...(value.cacheCreation === undefined ? {} : { cacheCreation5m: safeGeneratedInt64(value.cacheCreation.ephemeral5mInputTokens, `${where}.cacheCreation.ephemeral5mInputTokens`), cacheCreation1h: safeGeneratedInt64(value.cacheCreation.ephemeral1hInputTokens, `${where}.cacheCreation.ephemeral1hInputTokens`) }),
-    ...(value.serverToolUse === undefined ? {} : { webSearchRequests: safeGeneratedInt64(value.serverToolUse.webSearchRequests, `${where}.serverToolUse.webSearchRequests`), webFetchRequests: safeGeneratedInt64(value.serverToolUse.webFetchRequests, `${where}.serverToolUse.webFetchRequests`) }),
-    ...(value.outputDetails === undefined ? {} : { thinkingTokens: safeGeneratedInt64(value.outputDetails.thinkingTokens, `${where}.outputDetails.thinkingTokens`) }),
-    ...(value.cacheRates === undefined ? {} : { cacheRates: { totalPromptInputTokens: safeGeneratedInt64(value.cacheRates.totalPromptInputTokens, `${where}.cacheRates.totalPromptInputTokens`), cacheHitRate: value.cacheRates.cacheHitRate, cacheWriteRate: value.cacheRates.cacheWriteRate, uncachedInputRate: value.cacheRates.uncachedInputRate } }),
-    ...(value.timing === undefined ? {} : { timing: { outputTokensWithGenerationDuration: safeGeneratedInt64(value.timing.outputTokensWithGenerationDuration, `${where}.timing.outputTokensWithGenerationDuration`), outputGenerationDurationMs: safeGeneratedInt64(value.timing.outputGenerationDurationMs, `${where}.timing.outputGenerationDurationMs`), responsesWithGenerationDuration: safeGeneratedInt64(value.timing.responsesWithGenerationDuration, `${where}.timing.responsesWithGenerationDuration`), responsesWithoutGenerationDuration: safeGeneratedInt64(value.timing.responsesWithoutGenerationDuration, `${where}.timing.responsesWithoutGenerationDuration`), totalTimeToFirstTokenMs: safeGeneratedInt64(value.timing.totalTimeToFirstTokenMs, `${where}.timing.totalTimeToFirstTokenMs`), responsesWithTimeToFirstToken: safeGeneratedInt64(value.timing.responsesWithTimeToFirstToken, `${where}.timing.responsesWithTimeToFirstToken`), responsesWithoutTimeToFirstToken: safeGeneratedInt64(value.timing.responsesWithoutTimeToFirstToken, `${where}.timing.responsesWithoutTimeToFirstToken`) } }),
+    inputTokens: safeGeneratedInt64(value.inputTokens, `${where}.inputTokens`),
+    outputTokens: safeGeneratedInt64(
+      value.outputTokens,
+      `${where}.outputTokens`,
+    ),
+    cacheReadInputTokens: safeGeneratedInt64(
+      value.cacheReadInputTokens,
+      `${where}.cacheReadInputTokens`,
+    ),
+    cacheCreationInputTokens: safeGeneratedInt64(
+      value.cacheCreationInputTokens,
+      `${where}.cacheCreationInputTokens`,
+    ),
+    ...(value.cacheCreation === undefined
+      ? {}
+      : {
+          cacheCreation5m: safeGeneratedInt64(
+            value.cacheCreation.ephemeral5mInputTokens,
+            `${where}.cacheCreation.ephemeral5mInputTokens`,
+          ),
+          cacheCreation1h: safeGeneratedInt64(
+            value.cacheCreation.ephemeral1hInputTokens,
+            `${where}.cacheCreation.ephemeral1hInputTokens`,
+          ),
+        }),
+    ...(value.serverToolUse === undefined
+      ? {}
+      : {
+          webSearchRequests: safeGeneratedInt64(
+            value.serverToolUse.webSearchRequests,
+            `${where}.serverToolUse.webSearchRequests`,
+          ),
+          webFetchRequests: safeGeneratedInt64(
+            value.serverToolUse.webFetchRequests,
+            `${where}.serverToolUse.webFetchRequests`,
+          ),
+        }),
+    ...(value.outputDetails === undefined
+      ? {}
+      : {
+          thinkingTokens: safeGeneratedInt64(
+            value.outputDetails.thinkingTokens,
+            `${where}.outputDetails.thinkingTokens`,
+          ),
+        }),
+    ...(value.cacheRates === undefined
+      ? {}
+      : {
+          cacheRates: {
+            totalPromptInputTokens: safeGeneratedInt64(
+              value.cacheRates.totalPromptInputTokens,
+              `${where}.cacheRates.totalPromptInputTokens`,
+            ),
+            cacheHitRate: value.cacheRates.cacheHitRate,
+            cacheWriteRate: value.cacheRates.cacheWriteRate,
+            uncachedInputRate: value.cacheRates.uncachedInputRate,
+          },
+        }),
+    ...(value.timing === undefined
+      ? {}
+      : {
+          timing: {
+            outputTokensWithGenerationDuration: safeGeneratedInt64(
+              value.timing.outputTokensWithGenerationDuration,
+              `${where}.timing.outputTokensWithGenerationDuration`,
+            ),
+            outputGenerationDurationMs: safeGeneratedInt64(
+              value.timing.outputGenerationDurationMs,
+              `${where}.timing.outputGenerationDurationMs`,
+            ),
+            responsesWithGenerationDuration: safeGeneratedInt64(
+              value.timing.responsesWithGenerationDuration,
+              `${where}.timing.responsesWithGenerationDuration`,
+            ),
+            responsesWithoutGenerationDuration: safeGeneratedInt64(
+              value.timing.responsesWithoutGenerationDuration,
+              `${where}.timing.responsesWithoutGenerationDuration`,
+            ),
+            totalTimeToFirstTokenMs: safeGeneratedInt64(
+              value.timing.totalTimeToFirstTokenMs,
+              `${where}.timing.totalTimeToFirstTokenMs`,
+            ),
+            responsesWithTimeToFirstToken: safeGeneratedInt64(
+              value.timing.responsesWithTimeToFirstToken,
+              `${where}.timing.responsesWithTimeToFirstToken`,
+            ),
+            responsesWithoutTimeToFirstToken: safeGeneratedInt64(
+              value.timing.responsesWithoutTimeToFirstToken,
+              `${where}.timing.responsesWithoutTimeToFirstToken`,
+            ),
+          },
+        }),
   };
 }
 
-function projectAccountingModel(value: GeneratedModelTokenUtilization, where: string): ModelUsageTotals {
-  return { model: value.model, ...(value.canonicalModel === undefined ? {} : { canonicalModel: value.canonicalModel }), ...(value.provider === undefined ? {} : { provider: value.provider }), ...(value.totals === undefined ? {} : { totals: projectAccountingUsageTotals(value.totals, `${where}.totals`) }), ...(value.contextWindow === undefined ? {} : { contextWindow: safeGeneratedInt64(value.contextWindow, `${where}.contextWindow`) }), ...(value.maxOutputTokens === undefined ? {} : { maxOutputTokens: safeGeneratedInt64(value.maxOutputTokens, `${where}.maxOutputTokens`) }), ...(value.costUsd === undefined ? {} : { costUsd: value.costUsd }) };
+function projectAccountingModel(
+  value: GeneratedModelTokenUtilization,
+  where: string,
+): ModelUsageTotals {
+  return {
+    model: value.model,
+    ...(value.canonicalModel === undefined
+      ? {}
+      : { canonicalModel: value.canonicalModel }),
+    ...(value.provider === undefined ? {} : { provider: value.provider }),
+    ...(value.totals === undefined
+      ? {}
+      : {
+          totals: projectAccountingUsageTotals(value.totals, `${where}.totals`),
+        }),
+    ...(value.contextWindow === undefined
+      ? {}
+      : {
+          contextWindow: safeGeneratedInt64(
+            value.contextWindow,
+            `${where}.contextWindow`,
+          ),
+        }),
+    ...(value.maxOutputTokens === undefined
+      ? {}
+      : {
+          maxOutputTokens: safeGeneratedInt64(
+            value.maxOutputTokens,
+            `${where}.maxOutputTokens`,
+          ),
+        }),
+    ...(value.costUsd === undefined ? {} : { costUsd: value.costUsd }),
+  };
 }
 
-function projectAccountingReconciliation(value: GeneratedTokenUsageReconciliation, where: string): TokenUsageReconciliation {
-  return { responseRecordCount: safeGeneratedInt64(value.responseRecordCount, `${where}.responseRecordCount`), ...(value.responseAllAgents === undefined ? {} : { responseAllAgents: projectAccountingUsageTotals(value.responseAllAgents, `${where}.responseAllAgents`) }), ...(value.responseMainAgent === undefined ? {} : { responseMainAgent: projectAccountingUsageTotals(value.responseMainAgent, `${where}.responseMainAgent`) }), ...(value.resultMainAgent === undefined ? {} : { resultMainAgent: projectAccountingUsageTotals(value.resultMainAgent, `${where}.resultMainAgent`) }), responseModels: value.responseModels.map((model, index) => projectAccountingModel(model, `${where}.responseModels[${index}]`)), resultModels: value.resultModels.map((model, index) => projectAccountingModel(model, `${where}.resultModels[${index}]`)), apiMessageIds: [...value.apiMessageIds] };
+function projectAccountingReconciliation(
+  value: GeneratedTokenUsageReconciliation,
+  where: string,
+): TokenUsageReconciliation {
+  return {
+    responseRecordCount: safeGeneratedInt64(
+      value.responseRecordCount,
+      `${where}.responseRecordCount`,
+    ),
+    ...(value.responseAllAgents === undefined
+      ? {}
+      : {
+          responseAllAgents: projectAccountingUsageTotals(
+            value.responseAllAgents,
+            `${where}.responseAllAgents`,
+          ),
+        }),
+    ...(value.responseMainAgent === undefined
+      ? {}
+      : {
+          responseMainAgent: projectAccountingUsageTotals(
+            value.responseMainAgent,
+            `${where}.responseMainAgent`,
+          ),
+        }),
+    ...(value.resultMainAgent === undefined
+      ? {}
+      : {
+          resultMainAgent: projectAccountingUsageTotals(
+            value.resultMainAgent,
+            `${where}.resultMainAgent`,
+          ),
+        }),
+    responseModels: value.responseModels.map((model, index) =>
+      projectAccountingModel(model, `${where}.responseModels[${index}]`),
+    ),
+    resultModels: value.resultModels.map((model, index) =>
+      projectAccountingModel(model, `${where}.resultModels[${index}]`),
+    ),
+    apiMessageIds: [...value.apiMessageIds],
+  };
 }
 
-function projectAccountingProblem(value: GeneratedTurnAccountingProblem, where: string): TurnAccountingProblem {
+function projectAccountingProblem(
+  value: GeneratedTurnAccountingProblem,
+  where: string,
+): TurnAccountingProblem {
   switch (value.problem.case) {
     case "missingUsageBoundary": {
       const boundary = value.problem.value.boundary.case;
-      if (boundary === undefined) throw new Error(`frontend-proto: ${where}.missingUsageBoundary requires a generated boundary oneof`);
+      if (boundary === undefined)
+        throw new Error(
+          `frontend-proto: ${where}.missingUsageBoundary requires a generated boundary oneof`,
+        );
       return { kind: "missingUsageBoundary", boundary };
     }
-    case "windowReset": return { kind: "windowReset", startResetsAtMs: safeGeneratedInt64(value.problem.value.startResetsAtMs, `${where}.windowReset.startResetsAtMs`), endResetsAtMs: safeGeneratedInt64(value.problem.value.endResetsAtMs, `${where}.windowReset.endResetsAtMs`) };
-    case "tokenLedgerMismatch": return { kind: "tokenLedgerMismatch", differingFieldPaths: [...value.problem.value.differingFieldPaths] };
-    case "runtimeIdentityIncomplete": return { kind: "runtimeIdentityIncomplete", missingFieldPaths: [...value.problem.value.missingFieldPaths] };
-    case "unmodeledUsageFields": return { kind: "unmodeledUsageFields", sourceFieldPaths: [...value.problem.value.sourceFieldPaths] };
+    case "windowReset":
+      return {
+        kind: "windowReset",
+        startResetsAtMs: safeGeneratedInt64(
+          value.problem.value.startResetsAtMs,
+          `${where}.windowReset.startResetsAtMs`,
+        ),
+        endResetsAtMs: safeGeneratedInt64(
+          value.problem.value.endResetsAtMs,
+          `${where}.windowReset.endResetsAtMs`,
+        ),
+      };
+    case "tokenLedgerMismatch":
+      return {
+        kind: "tokenLedgerMismatch",
+        differingFieldPaths: [...value.problem.value.differingFieldPaths],
+      };
+    case "runtimeIdentityIncomplete":
+      return {
+        kind: "runtimeIdentityIncomplete",
+        missingFieldPaths: [...value.problem.value.missingFieldPaths],
+      };
+    case "unmodeledUsageFields":
+      return {
+        kind: "unmodeledUsageFields",
+        sourceFieldPaths: [...value.problem.value.sourceFieldPaths],
+      };
     case "telemetryRecordMissing": {
       switch (value.problem.value.record.case) {
-        case "queryLifecycle": return { kind: "telemetryRecordMissing", record: { kind: "queryLifecycle", queryInstanceId: value.problem.value.record.value.queryInstanceId } };
-        case "responseUsage": return { kind: "telemetryRecordMissing", record: { kind: "responseUsage", apiMessageId: value.problem.value.record.value.apiMessageId } };
-        case "persistenceReceipt": return { kind: "telemetryRecordMissing", record: { kind: "persistenceReceipt", turnId: value.problem.value.record.value.turnId } };
-        case undefined: throw new Error(`frontend-proto: ${where}.telemetryRecordMissing requires a generated record oneof`);
+        case "queryLifecycle":
+          return {
+            kind: "telemetryRecordMissing",
+            record: {
+              kind: "queryLifecycle",
+              queryInstanceId: value.problem.value.record.value.queryInstanceId,
+            },
+          };
+        case "responseUsage":
+          return {
+            kind: "telemetryRecordMissing",
+            record: {
+              kind: "responseUsage",
+              apiMessageId: value.problem.value.record.value.apiMessageId,
+            },
+          };
+        case "persistenceReceipt":
+          return {
+            kind: "telemetryRecordMissing",
+            record: {
+              kind: "persistenceReceipt",
+              turnId: value.problem.value.record.value.turnId,
+            },
+          };
+        case undefined:
+          throw new Error(
+            `frontend-proto: ${where}.telemetryRecordMissing requires a generated record oneof`,
+          );
       }
-      return unreachableGeneratedCase(value.problem.value.record, `${where}.telemetryRecordMissing`);
+      return unreachableGeneratedCase(
+        value.problem.value.record,
+        `${where}.telemetryRecordMissing`,
+      );
     }
-    case undefined: throw new Error(`frontend-proto: ${where} requires a generated accounting-problem oneof`);
+    case undefined:
+      throw new Error(
+        `frontend-proto: ${where} requires a generated accounting-problem oneof`,
+      );
   }
   return unreachableGeneratedCase(value.problem, where);
 }
 
-function projectAccountingTiming(value: GeneratedTurnAccountingTiming, where: string): TurnAccountingTiming {
-  return { promptAdmittedAtMs: safeGeneratedInt64(value.promptAdmittedAtMs, `${where}.promptAdmittedAtMs`), resultReceivedAtMs: safeGeneratedInt64(value.resultReceivedAtMs, `${where}.resultReceivedAtMs`), accountingSettledAtMs: safeGeneratedInt64(value.accountingSettledAtMs, `${where}.accountingSettledAtMs`), promptToResultMs: safeGeneratedInt64(value.promptToResultMs, `${where}.promptToResultMs`), resultToSettlementMs: safeGeneratedInt64(value.resultToSettlementMs, `${where}.resultToSettlementMs`) };
+function projectAccountingTiming(
+  value: GeneratedTurnAccountingTiming,
+  where: string,
+): TurnAccountingTiming {
+  return {
+    promptAdmittedAtMs: safeGeneratedInt64(
+      value.promptAdmittedAtMs,
+      `${where}.promptAdmittedAtMs`,
+    ),
+    resultReceivedAtMs: safeGeneratedInt64(
+      value.resultReceivedAtMs,
+      `${where}.resultReceivedAtMs`,
+    ),
+    accountingSettledAtMs: safeGeneratedInt64(
+      value.accountingSettledAtMs,
+      `${where}.accountingSettledAtMs`,
+    ),
+    promptToResultMs: safeGeneratedInt64(
+      value.promptToResultMs,
+      `${where}.promptToResultMs`,
+    ),
+    resultToSettlementMs: safeGeneratedInt64(
+      value.resultToSettlementMs,
+      `${where}.resultToSettlementMs`,
+    ),
+  };
 }
 
 function decodeTurnAccounting(v: unknown, where: string): TurnAccounting {
   let value: GeneratedTurnAccounting;
-  try { value = fromJson(TurnAccountingSchema, ensureObject(v, where) as JsonValue); }
-  catch (error) { throw new Error(`frontend-proto: ${where} violates the generated TurnAccounting contract: ${error instanceof Error ? error.message : String(error)}`); }
-  const consumed = { turnId: value.turnId, queryInstanceId: value.queryInstanceId, runtime: value.runtime, timing: value.timing, usageAtStart: value.usageAtStart, usageAtEnd: value.usageAtEnd, responses: value.responses, reconciliation: value.reconciliation, verdict: value.verdict } satisfies { [K in Exclude<keyof GeneratedTurnAccounting, "$typeName" | "$unknown">]: GeneratedTurnAccounting[K] };
-  const evidence = { ...(consumed.runtime === undefined ? {} : { runtime: projectAccountingRuntime(consumed.runtime, `${where}.runtime`) }), ...(consumed.timing === undefined ? {} : { timing: projectAccountingTiming(consumed.timing, `${where}.timing`) }), ...(consumed.usageAtStart === undefined ? {} : { usageAtStart: projectAccountingUsageObservation(consumed.usageAtStart, `${where}.usageAtStart`) }), ...(consumed.usageAtEnd === undefined ? {} : { usageAtEnd: projectAccountingUsageObservation(consumed.usageAtEnd, `${where}.usageAtEnd`) }), responses: consumed.responses.map((response, index) => decodeTokenUtilization(toJson(TokenUtilizationSchema, response), `${where}.responses[${index}]`)), ...(consumed.reconciliation === undefined ? {} : { reconciliation: projectAccountingReconciliation(consumed.reconciliation, `${where}.reconciliation`) }) };
+  try {
+    value = fromJson(TurnAccountingSchema, ensureObject(v, where) as JsonValue);
+  } catch (error) {
+    throw new Error(
+      `frontend-proto: ${where} violates the generated TurnAccounting contract: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  const consumed = {
+    turnId: value.turnId,
+    queryInstanceId: value.queryInstanceId,
+    runtime: value.runtime,
+    timing: value.timing,
+    usageAtStart: value.usageAtStart,
+    usageAtEnd: value.usageAtEnd,
+    responses: value.responses,
+    reconciliation: value.reconciliation,
+    verdict: value.verdict,
+  } satisfies {
+    [
+      K in Exclude<keyof GeneratedTurnAccounting, "$typeName" | "$unknown">
+    ]: GeneratedTurnAccounting[K];
+  };
+  const evidence = {
+    ...(consumed.runtime === undefined
+      ? {}
+      : {
+          runtime: projectAccountingRuntime(
+            consumed.runtime,
+            `${where}.runtime`,
+          ),
+        }),
+    ...(consumed.timing === undefined
+      ? {}
+      : {
+          timing: projectAccountingTiming(consumed.timing, `${where}.timing`),
+        }),
+    ...(consumed.usageAtStart === undefined
+      ? {}
+      : {
+          usageAtStart: projectAccountingUsageObservation(
+            consumed.usageAtStart,
+            `${where}.usageAtStart`,
+          ),
+        }),
+    ...(consumed.usageAtEnd === undefined
+      ? {}
+      : {
+          usageAtEnd: projectAccountingUsageObservation(
+            consumed.usageAtEnd,
+            `${where}.usageAtEnd`,
+          ),
+        }),
+    responses: consumed.responses.map((response, index) =>
+      decodeTokenUtilization(
+        toJson(TokenUtilizationSchema, response),
+        `${where}.responses[${index}]`,
+      ),
+    ),
+    ...(consumed.reconciliation === undefined
+      ? {}
+      : {
+          reconciliation: projectAccountingReconciliation(
+            consumed.reconciliation,
+            `${where}.reconciliation`,
+          ),
+        }),
+  };
   switch (consumed.verdict.case) {
-    case "complete": return { turnId: consumed.turnId, queryInstanceId: consumed.queryInstanceId, ...evidence, verdict: { kind: "complete" } };
-    case "invalid": return { turnId: consumed.turnId, queryInstanceId: consumed.queryInstanceId, ...evidence, verdict: { kind: "invalid", problems: consumed.verdict.value.problems.map((problem, index) => projectAccountingProblem(problem, `${where}.invalid.problems[${index}]`)) } };
-    case undefined: throw new Error(`frontend-proto: ${where} requires a generated verdict oneof`);
+    case "complete":
+      return {
+        turnId: consumed.turnId,
+        queryInstanceId: consumed.queryInstanceId,
+        ...evidence,
+        verdict: { kind: "complete" },
+      };
+    case "invalid":
+      return {
+        turnId: consumed.turnId,
+        queryInstanceId: consumed.queryInstanceId,
+        ...evidence,
+        verdict: {
+          kind: "invalid",
+          problems: consumed.verdict.value.problems.map((problem, index) =>
+            projectAccountingProblem(
+              problem,
+              `${where}.invalid.problems[${index}]`,
+            ),
+          ),
+        },
+      };
+    case undefined:
+      throw new Error(
+        `frontend-proto: ${where} requires a generated verdict oneof`,
+      );
   }
   return unreachableGeneratedCase(consumed.verdict, where);
 }
 
 function safeGeneratedInt64(value: bigint, where: string): number {
   const projected = Number(value);
-  if (!Number.isSafeInteger(projected)) throw new Error(`frontend-proto: ${where} exceeds the webapp's safe integer range`);
+  if (!Number.isSafeInteger(projected))
+    throw new Error(
+      `frontend-proto: ${where} exceeds the webapp's safe integer range`,
+    );
   return projected;
 }
 
 function unreachableGeneratedCase(value: never, where: string): never {
-  throw new Error(`frontend-proto: ${where} has an unsupported generated oneof case ${JSON.stringify(value)}`);
+  throw new Error(
+    `frontend-proto: ${where} has an unsupported generated oneof case ${JSON.stringify(value)}`,
+  );
 }
 
-function projectCacheCreation(value: GeneratedTokenCacheCreation, where: string): TokenCacheCreation {
+function projectCacheCreation(
+  value: GeneratedTokenCacheCreation,
+  where: string,
+): TokenCacheCreation {
   return {
-    ephemeral5mInputTokens: safeGeneratedInt64(value.ephemeral5mInputTokens, `${where}.ephemeral5mInputTokens`),
-    ephemeral1hInputTokens: safeGeneratedInt64(value.ephemeral1hInputTokens, `${where}.ephemeral1hInputTokens`),
+    ephemeral5mInputTokens: safeGeneratedInt64(
+      value.ephemeral5mInputTokens,
+      `${where}.ephemeral5mInputTokens`,
+    ),
+    ephemeral1hInputTokens: safeGeneratedInt64(
+      value.ephemeral1hInputTokens,
+      `${where}.ephemeral1hInputTokens`,
+    ),
   };
 }
 
-function projectServerToolUse(value: GeneratedTokenServerToolUse, where: string): TokenServerToolUse {
+function projectServerToolUse(
+  value: GeneratedTokenServerToolUse,
+  where: string,
+): TokenServerToolUse {
   return {
-    webSearchRequests: safeGeneratedInt64(value.webSearchRequests, `${where}.webSearchRequests`),
-    webFetchRequests: safeGeneratedInt64(value.webFetchRequests, `${where}.webFetchRequests`),
+    webSearchRequests: safeGeneratedInt64(
+      value.webSearchRequests,
+      `${where}.webSearchRequests`,
+    ),
+    webFetchRequests: safeGeneratedInt64(
+      value.webFetchRequests,
+      `${where}.webFetchRequests`,
+    ),
   };
 }
 
-function projectOutputDetails(value: GeneratedTokenOutputDetails, where: string): TokenOutputDetails {
-  return { thinkingTokens: safeGeneratedInt64(value.thinkingTokens, `${where}.thinkingTokens`) };
+function projectOutputDetails(
+  value: GeneratedTokenOutputDetails,
+  where: string,
+): TokenOutputDetails {
+  return {
+    thinkingTokens: safeGeneratedInt64(
+      value.thinkingTokens,
+      `${where}.thinkingTokens`,
+    ),
+  };
 }
 
-function projectCacheRates(value: GeneratedTokenCacheRates, where: string): TokenCacheRates {
+function projectCacheRates(
+  value: GeneratedTokenCacheRates,
+  where: string,
+): TokenCacheRates {
   return {
-    totalPromptInputTokens: safeGeneratedInt64(value.totalPromptInputTokens, `${where}.totalPromptInputTokens`),
+    totalPromptInputTokens: safeGeneratedInt64(
+      value.totalPromptInputTokens,
+      `${where}.totalPromptInputTokens`,
+    ),
     cacheHitRate: value.cacheHitRate,
     cacheWriteRate: value.cacheWriteRate,
     uncachedInputRate: value.uncachedInputRate,
   };
 }
 
-type GeneratedIterationValue = Exclude<GeneratedTokenUsageIteration["iteration"], { case: undefined }>["value"];
+type GeneratedIterationValue = Exclude<
+  GeneratedTokenUsageIteration["iteration"],
+  { case: undefined }
+>["value"];
 
-function projectIterationCounters(value: GeneratedIterationValue, where: string): TokenUsageIterationCounters {
+function projectIterationCounters(
+  value: GeneratedIterationValue,
+  where: string,
+): TokenUsageIterationCounters {
   return {
     inputTokens: safeGeneratedInt64(value.inputTokens, `${where}.inputTokens`),
-    outputTokens: safeGeneratedInt64(value.outputTokens, `${where}.outputTokens`),
-    cacheReadInputTokens: safeGeneratedInt64(value.cacheReadInputTokens, `${where}.cacheReadInputTokens`),
-    cacheCreationInputTokens: safeGeneratedInt64(value.cacheCreationInputTokens, `${where}.cacheCreationInputTokens`),
-    ...(value.cacheCreation === undefined ? {} : { cacheCreation: projectCacheCreation(value.cacheCreation, `${where}.cacheCreation`) }),
+    outputTokens: safeGeneratedInt64(
+      value.outputTokens,
+      `${where}.outputTokens`,
+    ),
+    cacheReadInputTokens: safeGeneratedInt64(
+      value.cacheReadInputTokens,
+      `${where}.cacheReadInputTokens`,
+    ),
+    cacheCreationInputTokens: safeGeneratedInt64(
+      value.cacheCreationInputTokens,
+      `${where}.cacheCreationInputTokens`,
+    ),
+    ...(value.cacheCreation === undefined
+      ? {}
+      : {
+          cacheCreation: projectCacheCreation(
+            value.cacheCreation,
+            `${where}.cacheCreation`,
+          ),
+        }),
   };
 }
 
-function projectUsageIteration(value: GeneratedTokenUsageIteration, where: string): TokenUsageIteration {
+function projectUsageIteration(
+  value: GeneratedTokenUsageIteration,
+  where: string,
+): TokenUsageIteration {
   const arm = value.iteration;
   switch (arm.case) {
     case "sampling":
-      return { kind: "sampling", ...projectIterationCounters(arm.value, `${where}.sampling`), model: arm.value.model };
+      return {
+        kind: "sampling",
+        ...projectIterationCounters(arm.value, `${where}.sampling`),
+        model: arm.value.model,
+      };
     case "compaction":
-      return { kind: "compaction", ...projectIterationCounters(arm.value, `${where}.compaction`) };
+      return {
+        kind: "compaction",
+        ...projectIterationCounters(arm.value, `${where}.compaction`),
+      };
     case "advisor":
-      return { kind: "advisor", ...projectIterationCounters(arm.value, `${where}.advisor`), model: arm.value.model };
+      return {
+        kind: "advisor",
+        ...projectIterationCounters(arm.value, `${where}.advisor`),
+        model: arm.value.model,
+      };
     case "fallback":
-      return { kind: "fallback", ...projectIterationCounters(arm.value, `${where}.fallback`), model: arm.value.model };
+      return {
+        kind: "fallback",
+        ...projectIterationCounters(arm.value, `${where}.fallback`),
+        model: arm.value.model,
+      };
     case undefined:
-      throw new Error(`frontend-proto: ${where} requires a generated iteration oneof`);
+      throw new Error(
+        `frontend-proto: ${where} requires a generated iteration oneof`,
+      );
   }
   return unreachableGeneratedCase(arm, where);
 }
 
-function projectCacheDiagnostic(value: GeneratedTokenCacheDiagnostic, where: string): TokenCacheDiagnostic {
+function projectCacheDiagnostic(
+  value: GeneratedTokenCacheDiagnostic,
+  where: string,
+): TokenCacheDiagnostic {
   const arm = value.reason;
   switch (arm.case) {
     case "pending":
@@ -2942,50 +4120,112 @@ function projectCacheDiagnostic(value: GeneratedTokenCacheDiagnostic, where: str
     case "systemChanged":
     case "toolsChanged":
     case "messagesChanged":
-      return { kind: arm.case, cacheMissedInputTokens: safeGeneratedInt64(arm.value.cacheMissedInputTokens, `${where}.${arm.case}.cacheMissedInputTokens`) };
+      return {
+        kind: arm.case,
+        cacheMissedInputTokens: safeGeneratedInt64(
+          arm.value.cacheMissedInputTokens,
+          `${where}.${arm.case}.cacheMissedInputTokens`,
+        ),
+      };
     case undefined:
-      throw new Error(`frontend-proto: ${where} requires a generated cache-diagnostic oneof`);
+      throw new Error(
+        `frontend-proto: ${where} requires a generated cache-diagnostic oneof`,
+      );
   }
   return unreachableGeneratedCase(arm, where);
 }
 
-function projectResponseTokenUsage(value: GeneratedVendorTokenUsage, where: string): ResponseTokenUsage {
-  if (value.rawUsage === undefined) throw new Error(`frontend-proto: ${where}.rawUsage is required`);
-  const rawUsage = ensureObject(toJson(ApiUsageSchema, value.rawUsage), `${where}.rawUsage`);
+function projectResponseTokenUsage(
+  value: GeneratedVendorTokenUsage,
+  where: string,
+): ResponseTokenUsage {
+  if (value.rawUsage === undefined)
+    throw new Error(`frontend-proto: ${where}.rawUsage is required`);
+  const rawUsage = ensureObject(
+    toJson(ApiUsageSchema, value.rawUsage),
+    `${where}.rawUsage`,
+  );
   const projected = {
     inputTokens: safeGeneratedInt64(value.inputTokens, `${where}.inputTokens`),
-    outputTokens: safeGeneratedInt64(value.outputTokens, `${where}.outputTokens`),
-    cacheReadInputTokens: safeGeneratedInt64(value.cacheReadInputTokens, `${where}.cacheReadInputTokens`),
-    cacheCreationInputTokens: safeGeneratedInt64(value.cacheCreationInputTokens, `${where}.cacheCreationInputTokens`),
-    cacheCreation: value.cacheCreation === undefined ? undefined : projectCacheCreation(value.cacheCreation, `${where}.cacheCreation`),
-    serverToolUse: value.serverToolUse === undefined ? undefined : projectServerToolUse(value.serverToolUse, `${where}.serverToolUse`),
+    outputTokens: safeGeneratedInt64(
+      value.outputTokens,
+      `${where}.outputTokens`,
+    ),
+    cacheReadInputTokens: safeGeneratedInt64(
+      value.cacheReadInputTokens,
+      `${where}.cacheReadInputTokens`,
+    ),
+    cacheCreationInputTokens: safeGeneratedInt64(
+      value.cacheCreationInputTokens,
+      `${where}.cacheCreationInputTokens`,
+    ),
+    cacheCreation:
+      value.cacheCreation === undefined
+        ? undefined
+        : projectCacheCreation(value.cacheCreation, `${where}.cacheCreation`),
+    serverToolUse:
+      value.serverToolUse === undefined
+        ? undefined
+        : projectServerToolUse(value.serverToolUse, `${where}.serverToolUse`),
     serviceTier: value.serviceTier,
     speed: value.speed,
     inferenceGeo: value.inferenceGeo,
-    outputDetails: value.outputDetails === undefined ? undefined : projectOutputDetails(value.outputDetails, `${where}.outputDetails`),
-    iterations: value.iterations.map((entry, index) => projectUsageIteration(entry, `${where}.iterations[${index}]`)),
-    cacheDiagnostic: value.cacheDiagnostic === undefined ? undefined : projectCacheDiagnostic(value.cacheDiagnostic, `${where}.cacheDiagnostic`),
-    cacheRates: value.cacheRates === undefined ? undefined : projectCacheRates(value.cacheRates, `${where}.cacheRates`),
+    outputDetails:
+      value.outputDetails === undefined
+        ? undefined
+        : projectOutputDetails(value.outputDetails, `${where}.outputDetails`),
+    iterations: value.iterations.map((entry, index) =>
+      projectUsageIteration(entry, `${where}.iterations[${index}]`),
+    ),
+    cacheDiagnostic:
+      value.cacheDiagnostic === undefined
+        ? undefined
+        : projectCacheDiagnostic(
+            value.cacheDiagnostic,
+            `${where}.cacheDiagnostic`,
+          ),
+    cacheRates:
+      value.cacheRates === undefined
+        ? undefined
+        : projectCacheRates(value.cacheRates, `${where}.cacheRates`),
     fallbackCredit: value.fallbackCredit,
     unmodeledUsage: value.unmodeledUsage,
     rawUsage,
-  } satisfies { [K in Exclude<keyof GeneratedVendorTokenUsage, "$typeName" | "$unknown">]-?: K extends keyof ResponseTokenUsage ? ResponseTokenUsage[K] : never };
+  } satisfies {
+    [
+      K in Exclude<keyof GeneratedVendorTokenUsage, "$typeName" | "$unknown">
+    ]-?: K extends keyof ResponseTokenUsage ? ResponseTokenUsage[K] : never;
+  };
   return {
     inputTokens: projected.inputTokens,
     outputTokens: projected.outputTokens,
     cacheReadInputTokens: projected.cacheReadInputTokens,
     cacheCreationInputTokens: projected.cacheCreationInputTokens,
-    ...(projected.cacheCreation === undefined ? {} : { cacheCreation: projected.cacheCreation }),
-    ...(projected.serverToolUse === undefined ? {} : { serverToolUse: projected.serverToolUse }),
+    ...(projected.cacheCreation === undefined
+      ? {}
+      : { cacheCreation: projected.cacheCreation }),
+    ...(projected.serverToolUse === undefined
+      ? {}
+      : { serverToolUse: projected.serverToolUse }),
     serviceTier: projected.serviceTier,
     speed: projected.speed,
     inferenceGeo: projected.inferenceGeo,
-    ...(projected.outputDetails === undefined ? {} : { outputDetails: projected.outputDetails }),
+    ...(projected.outputDetails === undefined
+      ? {}
+      : { outputDetails: projected.outputDetails }),
     iterations: projected.iterations,
-    ...(projected.cacheDiagnostic === undefined ? {} : { cacheDiagnostic: projected.cacheDiagnostic }),
-    ...(projected.cacheRates === undefined ? {} : { cacheRates: projected.cacheRates }),
-    ...(projected.fallbackCredit === undefined ? {} : { fallbackCredit: projected.fallbackCredit }),
-    ...(projected.unmodeledUsage === undefined ? {} : { unmodeledUsage: projected.unmodeledUsage }),
+    ...(projected.cacheDiagnostic === undefined
+      ? {}
+      : { cacheDiagnostic: projected.cacheDiagnostic }),
+    ...(projected.cacheRates === undefined
+      ? {}
+      : { cacheRates: projected.cacheRates }),
+    ...(projected.fallbackCredit === undefined
+      ? {}
+      : { fallbackCredit: projected.fallbackCredit }),
+    ...(projected.unmodeledUsage === undefined
+      ? {}
+      : { unmodeledUsage: projected.unmodeledUsage }),
     rawUsage: projected.rawUsage,
   };
 }
@@ -2997,7 +4237,9 @@ function decodeTokenUtilization(v: unknown, where: string): TokenUtilization {
   try {
     generated = fromJson(TokenUtilizationSchema, o as JsonValue);
   } catch (error) {
-    throw new Error(`frontend-proto: ${where} violates the generated TokenUtilization contract: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(
+      `frontend-proto: ${where} violates the generated TokenUtilization contract: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
   const consumed = {
     agentReplSessionId: generated.agentReplSessionId,
@@ -3009,14 +4251,21 @@ function decodeTokenUtilization(v: unknown, where: string): TokenUtilization {
     actor: generated.actor,
     usage: generated.usage,
     responseTiming: generated.responseTiming,
-  } satisfies { [K in Exclude<keyof GeneratedTokenUtilization, "$typeName" | "$unknown">]: GeneratedTokenUtilization[K] };
-  if (consumed.usage === undefined) throw new Error(`frontend-proto: ${where}.usage is required`);
+  } satisfies {
+    [
+      K in Exclude<keyof GeneratedTokenUtilization, "$typeName" | "$unknown">
+    ]: GeneratedTokenUtilization[K];
+  };
+  if (consumed.usage === undefined)
+    throw new Error(`frontend-proto: ${where}.usage is required`);
   const actor = consumed.actor;
   const result: TokenUtilization = {
     agentReplSessionId: consumed.agentReplSessionId,
     claudeSessionId: consumed.claudeSessionId,
     rootTurnId: consumed.rootTurnId,
-    ...(consumed.apiRequestId === undefined ? {} : { apiRequestId: consumed.apiRequestId }),
+    ...(consumed.apiRequestId === undefined
+      ? {}
+      : { apiRequestId: consumed.apiRequestId }),
     apiMessageId: consumed.apiMessageId,
     model: consumed.model,
     actor: actor.case === "subagent" ? "subagent" : "mainAgent",
@@ -3028,26 +4277,53 @@ function decodeTokenUtilization(v: unknown, where: string): TokenUtilization {
     ["rootTurnId", result.rootTurnId],
     ["apiMessageId", result.apiMessageId],
   ] as const) {
-    if (value === "") throw new Error(`frontend-proto: ${where}.${field} must be nonblank`);
+    if (value === "")
+      throw new Error(`frontend-proto: ${where}.${field} must be nonblank`);
   }
-  if (result.model.trim() === "") throw new Error(`frontend-proto: ${where}.model must be nonblank`);
-  if (result.apiRequestId === "") throw new Error(`frontend-proto: ${where}.apiRequestId must be absent or nonblank`);
+  if (result.model.trim() === "")
+    throw new Error(`frontend-proto: ${where}.model must be nonblank`);
+  if (result.apiRequestId === "")
+    throw new Error(
+      `frontend-proto: ${where}.apiRequestId must be absent or nonblank`,
+    );
   switch (actor.case) {
     case "mainAgent":
       break;
     case "subagent":
-      result.subagent = { agentId: actor.value.agentId, parentToolUseId: actor.value.parentToolUseId, parentAgentId: actor.value.parentAgentId, subagentType: actor.value.subagentType, taskDescription: actor.value.taskDescription };
+      result.subagent = {
+        agentId: actor.value.agentId,
+        parentToolUseId: actor.value.parentToolUseId,
+        parentAgentId: actor.value.parentAgentId,
+        subagentType: actor.value.subagentType,
+        taskDescription: actor.value.taskDescription,
+      };
       break;
     case undefined:
-      throw new Error(`frontend-proto: ${where} requires a generated actor oneof`);
+      throw new Error(
+        `frontend-proto: ${where} requires a generated actor oneof`,
+      );
     default:
       unreachableGeneratedCase(actor, where);
   }
   if (consumed.responseTiming !== undefined) {
     const timing = consumed.responseTiming;
     result.responseTiming = {
-      ...(timing.timeToFirstTokenMs === undefined ? {} : { timeToFirstTokenMs: safeGeneratedInt64(timing.timeToFirstTokenMs, `${where}.responseTiming.timeToFirstTokenMs`) }),
-      ...(timing.outputGenerationDurationMs === undefined ? {} : { outputGenerationDurationMs: safeGeneratedInt64(timing.outputGenerationDurationMs, `${where}.responseTiming.outputGenerationDurationMs`) }),
+      ...(timing.timeToFirstTokenMs === undefined
+        ? {}
+        : {
+            timeToFirstTokenMs: safeGeneratedInt64(
+              timing.timeToFirstTokenMs,
+              `${where}.responseTiming.timeToFirstTokenMs`,
+            ),
+          }),
+      ...(timing.outputGenerationDurationMs === undefined
+        ? {}
+        : {
+            outputGenerationDurationMs: safeGeneratedInt64(
+              timing.outputGenerationDurationMs,
+              `${where}.responseTiming.outputGenerationDurationMs`,
+            ),
+          }),
     };
   }
   return result;
@@ -3065,7 +4341,9 @@ function decodeHeartbeatView(v: unknown): HeartbeatView {
   const o = ensureObject(v, "HeartbeatView");
   rejectUnknown(o, HEARTBEAT_VIEW_KEYS, "HeartbeatView");
   if (o.progress === undefined || o.progress === null) {
-    throw new Error("frontend-proto: HeartbeatView missing required `progress`");
+    throw new Error(
+      "frontend-proto: HeartbeatView missing required `progress`",
+    );
   }
   const p = ensureObject(o.progress, "HeartbeatView.progress");
   rejectUnknown(p, HEARTBEAT_PROGRESS_KEYS, "HeartbeatView.progress");
@@ -3080,7 +4358,9 @@ function decodeHeartbeatView(v: unknown): HeartbeatView {
   // Without a tool_use_id there is no call to attribute the liveness to, so the
   // frame is unusable rather than merely empty.
   if (hv.toolUseId === "") {
-    throw new Error("frontend-proto: HeartbeatView.progress missing required `toolUseId`");
+    throw new Error(
+      "frontend-proto: HeartbeatView.progress missing required `toolUseId`",
+    );
   }
   return hv;
 }
@@ -3164,22 +4444,32 @@ function decodeQueueEntry(v: unknown): QueueEntry {
   if (holds[0] === QUEUE_HOLD_ARM.shutdown) {
     e.shutdownHold = decodeQueueEntryShutdownHold(o[QUEUE_HOLD_ARM.shutdown]);
   } else if (holds[0] === QUEUE_HOLD_ARM.keepAlive) {
-    e.keepAliveHold = decodeQueueEntryKeepAliveHold(o[QUEUE_HOLD_ARM.keepAlive]);
+    e.keepAliveHold = decodeQueueEntryKeepAliveHold(
+      o[QUEUE_HOLD_ARM.keepAlive],
+    );
   } else if (holds[0] === QUEUE_HOLD_ARM.revival) {
     e.revivalHold = decodeQueueEntryRevivalHold(o[QUEUE_HOLD_ARM.revival]);
   } else if (holds[0] === QUEUE_HOLD_ARM.buildRefresh) {
-    e.buildRefreshHold = decodeQueueEntryBuildRefreshHold(o[QUEUE_HOLD_ARM.buildRefresh]);
+    e.buildRefreshHold = decodeQueueEntryBuildRefreshHold(
+      o[QUEUE_HOLD_ARM.buildRefresh],
+    );
   }
   return e;
 }
 
-function decodeQueueEntryBuildRefreshHold(v: unknown): QueueEntryBuildRefreshHold {
+function decodeQueueEntryBuildRefreshHold(
+  v: unknown,
+): QueueEntryBuildRefreshHold {
   const o = ensureObject(v, "QueueEntryBuildRefreshHold");
   // A BARE MARKER, exactly as the revival hold is: the arm being set is the
   // whole claim, so rejecting unknown keys against an empty set is the entire
   // validation and is what makes a field the daemon starts sending here fail
   // loudly instead of being dropped.
-  rejectUnknown(o, QUEUE_ENTRY_BUILD_REFRESH_HOLD_KEYS, "QueueEntryBuildRefreshHold");
+  rejectUnknown(
+    o,
+    QUEUE_ENTRY_BUILD_REFRESH_HOLD_KEYS,
+    "QueueEntryBuildRefreshHold",
+  );
   return {};
 }
 
@@ -3201,7 +4491,9 @@ function decodeQueueEntryKeepAliveHold(v: unknown): QueueEntryKeepAliveHold {
   // completion releases this entry. A hold naming no turn would claim the
   // prompt is waiting on something nothing else on screen can corroborate.
   if (turnId === "") {
-    throw new Error("frontend-proto: QueueEntryKeepAliveHold missing required `turnId`");
+    throw new Error(
+      "frontend-proto: QueueEntryKeepAliveHold missing required `turnId`",
+    );
   }
   return { turnId };
 }
@@ -3214,7 +4506,9 @@ function decodeQueueEntryShutdownHold(v: unknown): QueueEntryShutdownHold {
   // lease view that explains it. A hold that names no schedule would render a
   // bubble claiming a bounce nothing on screen can corroborate.
   if (scheduleId === "") {
-    throw new Error("frontend-proto: QueueEntryShutdownHold missing required `scheduleId`");
+    throw new Error(
+      "frontend-proto: QueueEntryShutdownHold missing required `scheduleId`",
+    );
   }
   return { scheduleId };
 }
@@ -3262,7 +4556,9 @@ const SHUTDOWN_SCHEDULE_ARM_DECODERS: ReadonlyMap<
 function decodeShutdownScheduleView(v: unknown): ShutdownScheduleView {
   const o = ensureObject(v, "ShutdownScheduleView");
   rejectUnknown(o, SHUTDOWN_SCHEDULE_VIEW_KEYS, "ShutdownScheduleView");
-  const arms = Object.keys(o).filter((k) => SHUTDOWN_SCHEDULE_ARM_DECODERS.has(k));
+  const arms = Object.keys(o).filter((k) =>
+    SHUTDOWN_SCHEDULE_ARM_DECODERS.has(k),
+  );
   if (arms.length === 0) {
     throw new Error(
       "frontend-proto: ShutdownScheduleView sets no state " +
@@ -3294,7 +4590,9 @@ function decodeShutdownScheduleDraining(v: unknown): ShutdownScheduleDraining {
   // joined to it, so every control the banner and the lease bubble draw would
   // be aimed at nothing.
   if (draining.scheduleId === "") {
-    throw new Error("frontend-proto: ShutdownScheduleDraining missing required `scheduleId`");
+    throw new Error(
+      "frontend-proto: ShutdownScheduleDraining missing required `scheduleId`",
+    );
   }
   // The banner's elapsed clock counts from this stamp. A zero (proto3's
   // omitted value) would render the drain as decades old, which is a
@@ -3331,7 +4629,9 @@ function decodeShutdownHold(v: unknown): ShutdownHold {
     // the turn ledger have to name the same turn), so an unnamed one is
     // malformed rather than merely terse.
     if (turnId === "") {
-      throw new Error("frontend-proto: ShutdownHoldTurn missing required `turnId`");
+      throw new Error(
+        "frontend-proto: ShutdownHoldTurn missing required `turnId`",
+      );
     }
     hold.turn = { turnId };
   }
@@ -3352,7 +4652,9 @@ function decodeShutdownHold(v: unknown): ShutdownHold {
   // session id is what keeps a hold from being pinned on a later independent
   // session of the same workspace.
   if (hold.workspace === "" || hold.sessionId === "") {
-    throw new Error("frontend-proto: ShutdownHold missing `workspace` or `sessionId`");
+    throw new Error(
+      "frontend-proto: ShutdownHold missing `workspace` or `sessionId`",
+    );
   }
   // AT LEAST ONE reason is always set. A hold that names neither says the
   // drain is waiting on this workspace for no expressible reason, which the
@@ -3402,12 +4704,20 @@ function decodeQueueClassification(o: JsonObject): {
   const arm = arms[0];
   if (arm === QUEUE_CLASSIFICATION_ARM.pending) {
     const value = ensureObject(o[arm], "QueueView.entries[].pending");
-    rejectUnknown(value, QUEUE_CLASSIFICATION_PENDING_KEYS, "QueueView.entries[].pending");
+    rejectUnknown(
+      value,
+      QUEUE_CLASSIFICATION_PENDING_KEYS,
+      "QueueView.entries[].pending",
+    );
     return { classification: "pending", rationale: "", accepted: false };
   }
   if (arm === QUEUE_CLASSIFICATION_ARM.interject) {
     const value = ensureObject(o[arm], "QueueView.entries[].interject");
-    rejectUnknown(value, QUEUE_CLASSIFICATION_INTERJECT_KEYS, "QueueView.entries[].interject");
+    rejectUnknown(
+      value,
+      QUEUE_CLASSIFICATION_INTERJECT_KEYS,
+      "QueueView.entries[].interject",
+    );
     return {
       classification: "interject",
       rationale: str(value, "rationale", "QueueView.entries[].interject"),
@@ -3416,7 +4726,11 @@ function decodeQueueClassification(o: JsonObject): {
   }
   if (arm === QUEUE_CLASSIFICATION_ARM.holdForTurnEnd) {
     const value = ensureObject(o[arm], "QueueView.entries[].holdForTurnEnd");
-    rejectUnknown(value, QUEUE_CLASSIFICATION_HOLD_KEYS, "QueueView.entries[].holdForTurnEnd");
+    rejectUnknown(
+      value,
+      QUEUE_CLASSIFICATION_HOLD_KEYS,
+      "QueueView.entries[].holdForTurnEnd",
+    );
     return {
       classification: "hold",
       rationale: str(value, "rationale", "QueueView.entries[].holdForTurnEnd"),
@@ -3424,7 +4738,11 @@ function decodeQueueClassification(o: JsonObject): {
     };
   }
   const value = ensureObject(o[arm], "QueueView.entries[].error");
-  rejectUnknown(value, QUEUE_CLASSIFICATION_ERROR_KEYS, "QueueView.entries[].error");
+  rejectUnknown(
+    value,
+    QUEUE_CLASSIFICATION_ERROR_KEYS,
+    "QueueView.entries[].error",
+  );
   // The error arm's `detail` IS this entry's displayed reason: it says what
   // went wrong instead of what was decided, and the badge already tells the
   // reader which of the two it is looking at.
@@ -3463,7 +4781,9 @@ function decodeTypingDelta(v: unknown): TypingDelta {
   rejectUnknown(d, CONTENT_DELTA_KEYS, "TypingDelta.delta");
   const armKeys = Object.keys(d).filter((k) => k in CONTENT_DELTA_ARM_KIND);
   if (armKeys.length === 0) {
-    throw new Error("frontend-proto: TypingDelta.delta carries no content delta (empty oneof)");
+    throw new Error(
+      "frontend-proto: TypingDelta.delta carries no content delta (empty oneof)",
+    );
   }
   if (armKeys.length > 1) {
     throw new Error(
@@ -3481,14 +4801,20 @@ function decodeTypingDelta(v: unknown): TypingDelta {
     estimatedTokens: num(d, "estimatedTokens", "TypingDelta.delta"),
   };
   if (td.uuid === "") {
-    throw new Error("frontend-proto: TypingDelta.delta missing required `uuid`");
+    throw new Error(
+      "frontend-proto: TypingDelta.delta missing required `uuid`",
+    );
   }
   if (d.toolUseId !== undefined) {
     if (typeof d.toolUseId !== "string") {
-      throw new Error("frontend-proto: TypingDelta.delta.toolUseId must be a string");
+      throw new Error(
+        "frontend-proto: TypingDelta.delta.toolUseId must be a string",
+      );
     }
     if (td.kind !== "input_json") {
-      throw new Error("frontend-proto: TypingDelta.delta.toolUseId is only valid for input_json");
+      throw new Error(
+        "frontend-proto: TypingDelta.delta.toolUseId is only valid for input_json",
+      );
     }
     td.toolUseId = d.toolUseId;
   }
@@ -3503,7 +4829,10 @@ function decodeSessionInitView(v: unknown): SessionInitView {
     workspace: str(o, "workspace", "SessionInitView"),
     fence: str(o, "fence", "SessionInitView"),
     // The SystemInit is adopted by shape (large, additive); an absent init is {}.
-    init: o.init === undefined || o.init === null ? {} : ensureObject(o.init, "SessionInitView.init"),
+    init:
+      o.init === undefined || o.init === null
+        ? {}
+        : ensureObject(o.init, "SessionInitView.init"),
   };
   if (siv.fence === "") {
     throw new Error("frontend-proto: SessionInitView missing required `fence`");
@@ -3531,7 +4860,12 @@ const TASK_ENTRY_KEYS = new Set<string>([
  * defaulted — a task drawn under a guessed kind or status is a claim nothing
  * made.
  */
-function taskArm(o: JsonObject, arms: readonly string[], taskId: string, what: string): string {
+function taskArm(
+  o: JsonObject,
+  arms: readonly string[],
+  taskId: string,
+  what: string,
+): string {
   const set = arms.filter((arm) => o[arm] !== undefined && o[arm] !== null);
   if (set.length === 0) {
     throw new Error(
@@ -3572,9 +4906,10 @@ function decodeTaskCatalog(v: unknown): TaskCatalog {
   const tc: TaskCatalog = {
     workspace: str(o, "workspace", "TaskCatalog"),
     fence: str(o, "fence", "TaskCatalog"),
-    tasks: (o.tasks === undefined || o.tasks === null ? [] : ensureArray(o.tasks, "TaskCatalog.tasks")).map(
-      (t, i) => decodeTaskEntry(t, i),
-    ),
+    tasks: (o.tasks === undefined || o.tasks === null
+      ? []
+      : ensureArray(o.tasks, "TaskCatalog.tasks")
+    ).map((t, i) => decodeTaskEntry(t, i)),
   };
   if (tc.fence === "") {
     throw new Error("frontend-proto: TaskCatalog missing required `fence`");
@@ -3585,40 +4920,80 @@ function decodeTaskCatalog(v: unknown): TaskCatalog {
 function decodeSessionTokenUtilization(v: unknown): SessionTokenUtilization {
   let generated: SessionTokenUtilization;
   try {
-    generated = fromJson(SessionTokenUtilizationSchema, ensureObject(v, "SessionTokenUtilization") as JsonValue);
+    generated = fromJson(
+      SessionTokenUtilizationSchema,
+      ensureObject(v, "SessionTokenUtilization") as JsonValue,
+    );
   } catch (error) {
-    throw new Error(`frontend-proto: SessionTokenUtilization violates its generated contract: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(
+      `frontend-proto: SessionTokenUtilization violates its generated contract: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
   if (generated.allAgents === undefined || generated.mainAgent === undefined) {
-    throw new Error("frontend-proto: SessionTokenUtilization requires allAgents and mainAgent totals");
+    throw new Error(
+      "frontend-proto: SessionTokenUtilization requires allAgents and mainAgent totals",
+    );
   }
   for (const [index, entry] of generated.subagents.entries()) {
     if (entry.agent === undefined || entry.totals === undefined) {
-      throw new Error(`frontend-proto: SessionTokenUtilization.subagents[${index}] requires agent and totals`);
+      throw new Error(
+        `frontend-proto: SessionTokenUtilization.subagents[${index}] requires agent and totals`,
+      );
     }
     if (entry.agent.agentId === "" && entry.agent.parentToolUseId === "") {
-      throw new Error(`frontend-proto: SessionTokenUtilization.subagents[${index}] lacks a stable invocation identity`);
+      throw new Error(
+        `frontend-proto: SessionTokenUtilization.subagents[${index}] lacks a stable invocation identity`,
+      );
     }
     for (const [modelIndex, model] of entry.models.entries()) {
-      requireModelTokenUtilization(model, `SessionTokenUtilization.subagents[${index}].models[${modelIndex}]`);
+      requireModelTokenUtilization(
+        model,
+        `SessionTokenUtilization.subagents[${index}].models[${modelIndex}]`,
+      );
     }
   }
   for (const [index, model] of generated.models.entries()) {
-    requireModelTokenUtilization(model, `SessionTokenUtilization.models[${index}]`);
+    requireModelTokenUtilization(
+      model,
+      `SessionTokenUtilization.models[${index}]`,
+    );
   }
   const seenApiMessageIds = new Set<string>();
-  for (const [index, response] of generated.ungroupedSubagentResponses.entries()) {
-    if (response.actor.case !== "subagent") throw new Error(`frontend-proto: SessionTokenUtilization.ungroupedSubagentResponses[${index}] must be a subagent response`);
-    if (response.actor.value.agentId !== "" || response.actor.value.parentToolUseId !== "") throw new Error(`frontend-proto: SessionTokenUtilization.ungroupedSubagentResponses[${index}] has a stable invocation identity`);
-    if (response.apiMessageId === "" || seenApiMessageIds.has(response.apiMessageId)) throw new Error(`frontend-proto: SessionTokenUtilization.ungroupedSubagentResponses has missing or repeated apiMessageId ${response.apiMessageId}`);
+  for (const [
+    index,
+    response,
+  ] of generated.ungroupedSubagentResponses.entries()) {
+    if (response.actor.case !== "subagent")
+      throw new Error(
+        `frontend-proto: SessionTokenUtilization.ungroupedSubagentResponses[${index}] must be a subagent response`,
+      );
+    if (
+      response.actor.value.agentId !== "" ||
+      response.actor.value.parentToolUseId !== ""
+    )
+      throw new Error(
+        `frontend-proto: SessionTokenUtilization.ungroupedSubagentResponses[${index}] has a stable invocation identity`,
+      );
+    if (
+      response.apiMessageId === "" ||
+      seenApiMessageIds.has(response.apiMessageId)
+    )
+      throw new Error(
+        `frontend-proto: SessionTokenUtilization.ungroupedSubagentResponses has missing or repeated apiMessageId ${response.apiMessageId}`,
+      );
     seenApiMessageIds.add(response.apiMessageId);
   }
   return generated;
 }
 
-function requireModelTokenUtilization(model: GeneratedModelTokenUtilization, where: string): void {
+function requireModelTokenUtilization(
+  model: GeneratedModelTokenUtilization,
+  where: string,
+): void {
   if (model.model.trim() === "" || model.totals === undefined) {
-    throw new Error(`frontend-proto: ${where} requires model identity and totals`);
+    throw new Error(
+      `frontend-proto: ${where} requires model identity and totals`,
+    );
   }
 }
 
@@ -3649,9 +5024,15 @@ function decodeCommandAck(v: unknown): CommandAck {
     ack.failure = decodeFailureKind(o.failure, "CommandAck.failure");
   }
   if (o.failureCard !== undefined && o.failureCard !== null) {
-    ack.failureCard = decodeFailureCardRef(o.failureCard, "CommandAck.failureCard");
+    ack.failureCard = decodeFailureCardRef(
+      o.failureCard,
+      "CommandAck.failureCard",
+    );
   }
-  if (o.interruptConfirmRequired !== undefined && o.interruptConfirmRequired !== null) {
+  if (
+    o.interruptConfirmRequired !== undefined &&
+    o.interruptConfirmRequired !== null
+  ) {
     const where = "CommandAck.interruptConfirmRequired";
     const c = ensureObject(o.interruptConfirmRequired, where);
     rejectUnknown(c, INTERRUPT_CONFIRM_KEYS, where);
@@ -3688,11 +5069,15 @@ function decodeDaemonView(v: unknown): DaemonView {
 function decodeBackfillState(v: unknown): BackfillState {
   if (v === undefined || v === null) return "unspecified";
   if (typeof v !== "string") {
-    throw new Error(`frontend-proto: SessionView.backfill must be a string (got ${typeof v})`);
+    throw new Error(
+      `frontend-proto: SessionView.backfill must be a string (got ${typeof v})`,
+    );
   }
   const mapped = BACKFILL_STATE_BY_NAME[v];
   if (mapped === undefined) {
-    throw new Error(`frontend-proto: SessionView.backfill has unrecognized value '${v}'`);
+    throw new Error(
+      `frontend-proto: SessionView.backfill has unrecognized value '${v}'`,
+    );
   }
   return mapped;
 }
@@ -3731,7 +5116,12 @@ const CONTEXT_COST_ALERT_KEYS = new Set([
 ]);
 const PROGRESS_WINDOW_KEYS = new Set(["active", "sinceMs", "detail"]);
 const INTERRUPT_WINDOW_KEYS = new Set(["active", "sinceMs", "outcome"]);
-const RATE_LIMIT_WINDOW_KEYS = new Set(["active", "resetsAt", "utilization", "status"]);
+const RATE_LIMIT_WINDOW_KEYS = new Set([
+  "active",
+  "resetsAt",
+  "utilization",
+  "status",
+]);
 
 function decodeProgressView(v: unknown): ProgressView {
   const o = ensureObject(v, "ProgressView");
@@ -3749,16 +5139,28 @@ function decodeProgressView(v: unknown): ProgressView {
   };
   // A window is a message: absent means CLOSED, which is why each is decoded
   // only when present rather than materialized as an inactive placeholder.
-  for (const key of ["compacting", "retrying", "authenticating", "hook", "blocked"] as const) {
+  for (const key of [
+    "compacting",
+    "retrying",
+    "authenticating",
+    "hook",
+    "blocked",
+  ] as const) {
     if (o[key] !== undefined && o[key] !== null) {
       pv[key] = decodeProgressWindow(o[key], `ProgressView.${key}`);
     }
   }
   if (o.rateLimited !== undefined && o.rateLimited !== null) {
-    pv.rateLimited = decodeRateLimitWindow(o.rateLimited, "ProgressView.rateLimited");
+    pv.rateLimited = decodeRateLimitWindow(
+      o.rateLimited,
+      "ProgressView.rateLimited",
+    );
   }
   if (o.rateLimitedWeekly !== undefined && o.rateLimitedWeekly !== null) {
-    pv.rateLimitedWeekly = decodeRateLimitWindow(o.rateLimitedWeekly, "ProgressView.rateLimitedWeekly");
+    pv.rateLimitedWeekly = decodeRateLimitWindow(
+      o.rateLimitedWeekly,
+      "ProgressView.rateLimitedWeekly",
+    );
   }
   if (o.interrupt !== undefined && o.interrupt !== null) {
     pv.interrupt = decodeInterruptWindow(o.interrupt);
@@ -3781,12 +5183,17 @@ function decodeProgressView(v: unknown): ProgressView {
     pv.mergeChip = decodeFooterMergeChip(o.mergeChip, "ProgressView.mergeChip");
   }
   if (o.accounting !== undefined && o.accounting !== null) {
-    pv.accounting = decodeFooterAccountingCell(o.accounting, "ProgressView.accounting");
+    pv.accounting = decodeFooterAccountingCell(
+      o.accounting,
+      "ProgressView.accounting",
+    );
   }
   // Without a workspace the view addresses nothing: the footer could not tell
   // which session it is describing.
   if (pv.workspace === "") {
-    throw new Error("frontend-proto: ProgressView missing required `workspace`");
+    throw new Error(
+      "frontend-proto: ProgressView missing required `workspace`",
+    );
   }
   return pv;
 }
@@ -3861,7 +5268,11 @@ function decodeInterruptWindow(v: unknown): InterruptWindow {
   rejectUnknown(o, INTERRUPT_WINDOW_KEYS, ctx);
   const active = bool(o, "active", ctx);
   const raw = o.outcome;
-  if (raw === undefined || raw === null || raw === "INTERRUPT_OUTCOME_UNSPECIFIED") {
+  if (
+    raw === undefined ||
+    raw === null ||
+    raw === "INTERRUPT_OUTCOME_UNSPECIFIED"
+  ) {
     if (active) {
       throw new Error(
         `frontend-proto: ${ctx} is open with no outcome ` +
@@ -3871,11 +5282,15 @@ function decodeInterruptWindow(v: unknown): InterruptWindow {
     return { active, sinceMs: num(o, "sinceMs", ctx), outcome: null };
   }
   if (typeof raw !== "string") {
-    throw new Error(`frontend-proto: ${ctx}.outcome must be a string (got ${typeof raw})`);
+    throw new Error(
+      `frontend-proto: ${ctx}.outcome must be a string (got ${typeof raw})`,
+    );
   }
   const known = INTERRUPT_OUTCOME_BY_NAME[raw];
   if (known === undefined) {
-    throw new Error(`frontend-proto: ${ctx}.outcome has unrecognized value '${raw}'`);
+    throw new Error(
+      `frontend-proto: ${ctx}.outcome has unrecognized value '${raw}'`,
+    );
   }
   return { active, sinceMs: num(o, "sinceMs", ctx), outcome: known };
 }
@@ -3940,7 +5355,8 @@ function decodeStateSnapshot(v: unknown): StateSnapshot {
       ? []
       : ensureArray(o.progress, "StateSnapshot.progress")
     ).map(decodeProgressView),
-    workspaceAvailable: (o.workspaceAvailable === undefined || o.workspaceAvailable === null
+    workspaceAvailable: (o.workspaceAvailable === undefined ||
+    o.workspaceAvailable === null
       ? []
       : ensureArray(o.workspaceAvailable, "StateSnapshot.workspaceAvailable")
     ).map(decodeWorkspaceAvailable),
@@ -3952,7 +5368,8 @@ function decodeStateSnapshot(v: unknown): StateSnapshot {
       ? []
       : ensureArray(o.topbars, "StateSnapshot.topbars")
     ).map(decodeTopbarView),
-    tokenBreakdowns: (o.tokenBreakdowns === undefined || o.tokenBreakdowns === null
+    tokenBreakdowns: (o.tokenBreakdowns === undefined ||
+    o.tokenBreakdowns === null
       ? []
       : ensureArray(o.tokenBreakdowns, "StateSnapshot.tokenBreakdowns")
     ).map(decodeTokenBreakdownView),
@@ -4016,8 +5433,15 @@ function decodeWorkspaceAvailable(v: unknown): WorkspaceAvailable {
     model: str(o, "model", "WorkspaceAvailable"),
     initialPromptQueued: bool(o, "initialPromptQueued", "WorkspaceAvailable"),
   };
-  if (available.jobId === "" || available.finalName === "" || available.worktreePath === "" || available.sessionId === "") {
-    throw new Error("frontend-proto: WorkspaceAvailable missing jobId, finalName, worktreePath, or sessionId");
+  if (
+    available.jobId === "" ||
+    available.finalName === "" ||
+    available.worktreePath === "" ||
+    available.sessionId === ""
+  ) {
+    throw new Error(
+      "frontend-proto: WorkspaceAvailable missing jobId, finalName, worktreePath, or sessionId",
+    );
   }
   return available;
 }
@@ -4046,26 +5470,45 @@ function decodeHostAction(v: unknown): HostAction {
   const o = ensureObject(v, "HostAction");
   rejectUnknown(o, HOST_ACTION_KEYS, "HostAction");
   const actionId = str(o, "actionId", "HostAction");
-  if (actionId === "") throw new Error("frontend-proto: HostAction missing required `actionId`");
-  const arms = HOST_ACTION_ARMS.filter((arm) => o[arm] !== undefined && o[arm] !== null);
+  if (actionId === "")
+    throw new Error("frontend-proto: HostAction missing required `actionId`");
+  const arms = HOST_ACTION_ARMS.filter(
+    (arm) => o[arm] !== undefined && o[arm] !== null,
+  );
   if (arms.length !== 1) {
-    throw new Error(`frontend-proto: HostAction must set exactly one action arm (got ${arms.join(", ") || "none"})`);
+    throw new Error(
+      `frontend-proto: HostAction must set exactly one action arm (got ${arms.join(", ") || "none"})`,
+    );
   }
   const arm = arms[0];
   const payload = ensureObject(o[arm], `HostAction.${arm}`);
   switch (arm) {
     case "switchWorkspace":
       rejectUnknown(payload, new Set(["dir"]), `HostAction.${arm}`);
-      return { actionId, action: { case: arm, dir: str(payload, "dir", `HostAction.${arm}`) } };
-    case "setRepositoryFold":
-      rejectUnknown(payload, new Set(["repoKey", "folded"]), `HostAction.${arm}`);
       return {
         actionId,
-        action: { case: arm, repoKey: str(payload, "repoKey", `HostAction.${arm}`), folded: bool(payload, "folded", `HostAction.${arm}`) },
+        action: { case: arm, dir: str(payload, "dir", `HostAction.${arm}`) },
+      };
+    case "setRepositoryFold":
+      rejectUnknown(
+        payload,
+        new Set(["repoKey", "folded"]),
+        `HostAction.${arm}`,
+      );
+      return {
+        actionId,
+        action: {
+          case: arm,
+          repoKey: str(payload, "repoKey", `HostAction.${arm}`),
+          folded: bool(payload, "folded", `HostAction.${arm}`),
+        },
       };
     case "setSidebarView":
       rejectUnknown(payload, new Set(["view"]), `HostAction.${arm}`);
-      return { actionId, action: { case: arm, view: str(payload, "view", `HostAction.${arm}`) } };
+      return {
+        actionId,
+        action: { case: arm, view: str(payload, "view", `HostAction.${arm}`) },
+      };
     case "taskCreate":
       rejectUnknown(payload, new Set(), `HostAction.${arm}`);
       return { actionId, action: { case: arm } };
@@ -4073,7 +5516,10 @@ function decodeHostAction(v: unknown): HostAction {
     case "taskOpen":
     case "taskAddWorkspace":
       rejectUnknown(payload, new Set(["id"]), `HostAction.${arm}`);
-      return { actionId, action: { case: arm, id: str(payload, "id", `HostAction.${arm}`) } };
+      return {
+        actionId,
+        action: { case: arm, id: str(payload, "id", `HostAction.${arm}`) },
+      };
   }
 }
 
@@ -4115,7 +5561,9 @@ function decodeWorkspaceRoster(v: unknown): WorkspaceRoster {
   const hasRepository = o.repository !== undefined && o.repository !== null;
   const hasTask = o.task !== undefined && o.task !== null;
   if (hasRepository && hasTask) {
-    throw new Error("frontend-proto: WorkspaceRoster sets both view arms (repository, task)");
+    throw new Error(
+      "frontend-proto: WorkspaceRoster sets both view arms (repository, task)",
+    );
   }
   if (!hasRepository && !hasTask) {
     throw new Error(
@@ -4136,7 +5584,10 @@ function decodeWorkspaceRoster(v: unknown): WorkspaceRoster {
     recentlyMerged:
       o.recentlyMerged === undefined || o.recentlyMerged === null
         ? { rows: [], folded: false, label: "" }
-        : decodeRosterSection(o.recentlyMerged, "WorkspaceRoster.recentlyMerged"),
+        : decodeRosterSection(
+            o.recentlyMerged,
+            "WorkspaceRoster.recentlyMerged",
+          ),
     currentDir: str(o, "currentDir", "WorkspaceRoster"),
     navDir: str(o, "navDir", "WorkspaceRoster"),
   };
@@ -4145,22 +5596,36 @@ function decodeWorkspaceRoster(v: unknown): WorkspaceRoster {
 function decodeRosterRepositoryView(v: unknown): RosterRepositoryView {
   const o = ensureObject(v, "RosterRepositoryView");
   rejectUnknown(o, new Set(["sections"]), "RosterRepositoryView");
-  return { sections: rosterArray(o.sections, "RosterRepositoryView.sections").map(decodeRosterRepoSection) };
+  return {
+    sections: rosterArray(o.sections, "RosterRepositoryView.sections").map(
+      decodeRosterRepoSection,
+    ),
+  };
 }
 
 function decodeRosterTaskView(v: unknown): RosterTaskView {
   const o = ensureObject(v, "RosterTaskView");
   rejectUnknown(o, new Set(["sections"]), "RosterTaskView");
-  return { sections: rosterArray(o.sections, "RosterTaskView.sections").map(decodeRosterTaskSection) };
+  return {
+    sections: rosterArray(o.sections, "RosterTaskView.sections").map(
+      decodeRosterTaskSection,
+    ),
+  };
 }
 
 function decodeRosterRepoSection(v: unknown): RosterRepoSection {
   const o = ensureObject(v, "RosterRepoSection");
-  rejectUnknown(o, new Set(["repoKey", "folded", "rows", "label"]), "RosterRepoSection");
+  rejectUnknown(
+    o,
+    new Set(["repoKey", "folded", "rows", "label"]),
+    "RosterRepoSection",
+  );
   return {
     repoKey: str(o, "repoKey", "RosterRepoSection"),
     folded: bool(o, "folded", "RosterRepoSection"),
-    rows: rosterArray(o.rows, "RosterRepoSection.rows").map((r) => decodeRosterRow(r, "RosterRepoSection.rows")),
+    rows: rosterArray(o.rows, "RosterRepoSection.rows").map((r) =>
+      decodeRosterRow(r, "RosterRepoSection.rows"),
+    ),
     // Display only, and optional: absent is the proto3 empty string, meaning
     // the author offered no label. The fold identity is repoKey regardless.
     label: str(o, "label", "RosterRepoSection"),
@@ -4169,12 +5634,18 @@ function decodeRosterRepoSection(v: unknown): RosterRepoSection {
 
 function decodeRosterTaskSection(v: unknown): RosterTaskSection {
   const o = ensureObject(v, "RosterTaskSection");
-  rejectUnknown(o, new Set(["taskId", "title", "done", "rows"]), "RosterTaskSection");
+  rejectUnknown(
+    o,
+    new Set(["taskId", "title", "done", "rows"]),
+    "RosterTaskSection",
+  );
   return {
     taskId: str(o, "taskId", "RosterTaskSection"),
     title: str(o, "title", "RosterTaskSection"),
     done: bool(o, "done", "RosterTaskSection"),
-    rows: rosterArray(o.rows, "RosterTaskSection.rows").map((r) => decodeRosterRow(r, "RosterTaskSection.rows")),
+    rows: rosterArray(o.rows, "RosterTaskSection.rows").map((r) =>
+      decodeRosterRow(r, "RosterTaskSection.rows"),
+    ),
   };
 }
 
@@ -4182,7 +5653,9 @@ function decodeRosterSection(v: unknown, ctx: string): RosterSection {
   const o = ensureObject(v, ctx);
   rejectUnknown(o, new Set(["rows", "folded", "label"]), ctx);
   return {
-    rows: rosterArray(o.rows, `${ctx}.rows`).map((r) => decodeRosterRow(r, `${ctx}.rows`)),
+    rows: rosterArray(o.rows, `${ctx}.rows`).map((r) =>
+      decodeRosterRow(r, `${ctx}.rows`),
+    ),
     // Both optional with proto3 zeros: an unfolded, unlabeled section is a
     // legal thing for the author to publish, so absence defaults rather than
     // throwing. A wrong TYPE still throws — that is a wire bug, not a default.
@@ -4254,7 +5727,9 @@ function rosterArray(v: unknown, ctx: string): unknown[] {
  * no more a lifecycle than none, and picking one would be a silent guess.
  */
 function decodeRosterRowStatus(o: Obj, ctx: string): RosterRow["status"] {
-  const armKeys = Object.keys(o).filter((k) => ROSTER_ROW_STATUS_CASE_SET.has(k));
+  const armKeys = Object.keys(o).filter((k) =>
+    ROSTER_ROW_STATUS_CASE_SET.has(k),
+  );
   if (armKeys.length === 0) {
     throw new Error(
       `frontend-proto: ${ctx} sets no status arm, which is not a lifecycle ` +
@@ -4262,13 +5737,19 @@ function decodeRosterRowStatus(o: Obj, ctx: string): RosterRow["status"] {
     );
   }
   if (armKeys.length > 1) {
-    throw new Error(`frontend-proto: ${ctx} sets multiple status arms: ${armKeys.join(", ")}`);
+    throw new Error(
+      `frontend-proto: ${ctx} sets multiple status arms: ${armKeys.join(", ")}`,
+    );
   }
   const arm = armKeys[0] as RosterRowStatusCase;
   // Every status message is empty by contract, so the arm's payload must be an
   // object with nothing in it. A field inside is a wire this build does not
   // understand, and accepting it would silently drop whatever it carried.
-  rejectUnknown(ensureObject(o[arm], `${ctx}.${arm}`), EMPTY_KEY_SET, `${ctx}.${arm}`);
+  rejectUnknown(
+    ensureObject(o[arm], `${ctx}.${arm}`),
+    EMPTY_KEY_SET,
+    `${ctx}.${arm}`,
+  );
   return { case: arm };
 }
 
@@ -4279,7 +5760,9 @@ function decodeRosterRowStatus(o: Obj, ctx: string): RosterRow["status"] {
 // typecheck` here rather than surfacing as a frame the client silently refuses
 // (or, worse, silently accepts with a field it never reads).
 
-const TOPBAR_VIEW_KEYS = generatedFieldSet<keyof typeof TopbarViewSchema.field>()(
+const TOPBAR_VIEW_KEYS = generatedFieldSet<
+  keyof typeof TopbarViewSchema.field
+>()(
   "workspace",
   "title",
   "sessionLine",
@@ -4289,16 +5772,12 @@ const TOPBAR_VIEW_KEYS = generatedFieldSet<keyof typeof TopbarViewSchema.field>(
   "accountingLine",
   "fence",
 );
-const TOPBAR_CONNECTIVITY_KEYS = generatedFieldSet<keyof typeof TopbarConnectivitySchema.field>()(
-  "tone",
-  "glyph",
-  "title",
-);
-const TOPBAR_MODEL_OPTION_KEYS = generatedFieldSet<keyof typeof ModelOptionSchema.field>()(
-  "value",
-  "displayName",
-  "description",
-);
+const TOPBAR_CONNECTIVITY_KEYS = generatedFieldSet<
+  keyof typeof TopbarConnectivitySchema.field
+>()("tone", "glyph", "title");
+const TOPBAR_MODEL_OPTION_KEYS = generatedFieldSet<
+  keyof typeof ModelOptionSchema.field
+>()("value", "displayName", "description");
 
 /**
  * Decode a `TopbarView` (frame 21 / snapshot 12).
@@ -4316,7 +5795,10 @@ function decodeTopbarView(v: unknown): TopbarView {
     title: str(o, "title", where),
     sessionLine: str(o, "sessionLine", where),
     modelDisplay: str(o, "modelDisplay", where),
-    modelOptions: ensureArray(o.modelOptions ?? [], `${where}.modelOptions`).map((entry, i) => {
+    modelOptions: ensureArray(
+      o.modelOptions ?? [],
+      `${where}.modelOptions`,
+    ).map((entry, i) => {
       const inner = `${where}.modelOptions[${i}]`;
       const opt = ensureObject(entry, inner);
       rejectUnknown(opt, TOPBAR_MODEL_OPTION_KEYS, inner);
@@ -4329,7 +5811,8 @@ function decodeTopbarView(v: unknown): TopbarView {
     accountingLine: str(o, "accountingLine", where),
     fence: str(o, "fence", where),
   };
-  if (view.fence === "") throw new Error(`frontend-proto: ${where} missing required \`fence\``);
+  if (view.fence === "")
+    throw new Error(`frontend-proto: ${where} missing required \`fence\``);
   // ABSENT CONNECTIVITY IS ABSENCE. The client draws no glyph rather than a
   // neutral placeholder, because a placeholder is a claim about connectivity
   // that the daemon did not make.
@@ -4352,13 +5835,9 @@ const TOKEN_BREAKDOWN_VIEW_KEYS = generatedFieldSet<
 const TOKEN_BREAKDOWN_SECTION_KEYS = generatedFieldSet<
   keyof typeof TokenBreakdownSectionSchema.field
 >()("label", "rows");
-const TOKEN_BREAKDOWN_ROW_KEYS = generatedFieldSet<keyof typeof TokenBreakdownRowSchema.field>()(
-  "label",
-  "tokens",
-  "sharePermille",
-  "emphasized",
-  "depth",
-);
+const TOKEN_BREAKDOWN_ROW_KEYS = generatedFieldSet<
+  keyof typeof TokenBreakdownRowSchema.field
+>()("label", "tokens", "sharePermille", "emphasized", "depth");
 
 /**
  * Decode a `TokenBreakdownView` (frame 22 / snapshot 13).
@@ -4373,42 +5852,46 @@ function decodeTokenBreakdownView(v: unknown): TokenBreakdownView {
   rejectUnknown(o, TOKEN_BREAKDOWN_VIEW_KEYS, where);
   const view: TokenBreakdownView = {
     workspace: str(o, "workspace", where),
-    sections: ensureArray(o.sections ?? [], `${where}.sections`).map((entry, i) => {
-      const sectionWhere = `${where}.sections[${i}]`;
-      const section = ensureObject(entry, sectionWhere);
-      rejectUnknown(section, TOKEN_BREAKDOWN_SECTION_KEYS, sectionWhere);
-      return {
-        label: str(section, "label", sectionWhere),
-        rows: ensureArray(section.rows ?? [], `${sectionWhere}.rows`).map((rowEntry, j) => {
-          const rowWhere = `${sectionWhere}.rows[${j}]`;
-          const row = ensureObject(rowEntry, rowWhere);
-          rejectUnknown(row, TOKEN_BREAKDOWN_ROW_KEYS, rowWhere);
-          return {
-            label: str(row, "label", rowWhere),
-            tokens: num(row, "tokens", rowWhere),
-            sharePermille: num(row, "sharePermille", rowWhere),
-            emphasized: bool(row, "emphasized", rowWhere),
-            depth: num(row, "depth", rowWhere),
-          };
-        }),
-      };
-    }),
+    sections: ensureArray(o.sections ?? [], `${where}.sections`).map(
+      (entry, i) => {
+        const sectionWhere = `${where}.sections[${i}]`;
+        const section = ensureObject(entry, sectionWhere);
+        rejectUnknown(section, TOKEN_BREAKDOWN_SECTION_KEYS, sectionWhere);
+        return {
+          label: str(section, "label", sectionWhere),
+          rows: ensureArray(section.rows ?? [], `${sectionWhere}.rows`).map(
+            (rowEntry, j) => {
+              const rowWhere = `${sectionWhere}.rows[${j}]`;
+              const row = ensureObject(rowEntry, rowWhere);
+              rejectUnknown(row, TOKEN_BREAKDOWN_ROW_KEYS, rowWhere);
+              return {
+                label: str(row, "label", rowWhere),
+                tokens: num(row, "tokens", rowWhere),
+                sharePermille: num(row, "sharePermille", rowWhere),
+                emphasized: bool(row, "emphasized", rowWhere),
+                depth: num(row, "depth", rowWhere),
+              };
+            },
+          ),
+        };
+      },
+    ),
     fence: str(o, "fence", where),
   };
-  if (view.fence === "") throw new Error(`frontend-proto: ${where} missing required \`fence\``);
+  if (view.fence === "")
+    throw new Error(`frontend-proto: ${where} missing required \`fence\``);
   return view;
 }
 
-const WORKSPACE_GATE_VIEW_KEYS = generatedFieldSet<keyof typeof WorkspaceGateViewSchema.field>()(
-  "workspace",
-  "fence",
-  "open",
-  "hibernated",
-);
-const WORKSPACE_GATE_OPEN_KEYS = generatedFieldSet<keyof typeof WorkspaceGateOpenSchema.field>()();
-const WORKSPACE_GATE_HIBERNATED_KEYS = generatedFieldSet<
-  keyof typeof WorkspaceGateHibernatedSchema.field
->()("detail");
+const WORKSPACE_GATE_VIEW_KEYS = generatedFieldSet<
+  keyof typeof WorkspaceGateViewSchema.field
+>()("workspace", "fence", "open", "hibernated");
+const WORKSPACE_GATE_OPEN_KEYS =
+  generatedFieldSet<keyof typeof WorkspaceGateOpenSchema.field>()();
+const WORKSPACE_GATE_HIBERNATED_KEYS =
+  generatedFieldSet<keyof typeof WorkspaceGateHibernatedSchema.field>()(
+    "detail",
+  );
 
 /**
  * Decode a `WorkspaceGateView` (frame 23 / snapshot 14).
@@ -4423,7 +5906,8 @@ function decodeWorkspaceGateView(v: unknown): WorkspaceGateView {
   const o = ensureObject(v, where);
   rejectUnknown(o, WORKSPACE_GATE_VIEW_KEYS, where);
   const fence = str(o, "fence", where);
-  if (fence === "") throw new Error(`frontend-proto: ${where} missing required \`fence\``);
+  if (fence === "")
+    throw new Error(`frontend-proto: ${where} missing required \`fence\``);
   const arms = [WORKSPACE_GATE_ARM.open, WORKSPACE_GATE_ARM.hibernated].filter(
     (key) => o[key] !== undefined && o[key] !== null,
   );
@@ -4447,7 +5931,10 @@ function decodeWorkspaceGateView(v: unknown): WorkspaceGateView {
   return {
     workspace,
     fence,
-    gate: { case: "hibernated", detail: decodeHibernationDetail(hibernated.detail) },
+    gate: {
+      case: "hibernated",
+      detail: decodeHibernationDetail(hibernated.detail),
+    },
   };
 }
 
@@ -4466,7 +5953,10 @@ function decodeWorkspaceGateView(v: unknown): WorkspaceGateView {
 export function decodeFailureKind(v: unknown, where: string): FailureKind {
   let generated: FailureKind;
   try {
-    generated = fromJson(FailureKindSchema, ensureObject(v, where) as JsonValue);
+    generated = fromJson(
+      FailureKindSchema,
+      ensureObject(v, where) as JsonValue,
+    );
   } catch (error) {
     throw new Error(
       `frontend-proto: ${where} violates the generated FailureKind contract: ${errMsg(error)}`,
@@ -4491,10 +5981,16 @@ export function decodeFailureKind(v: unknown, where: string): FailureKind {
   // instant, no vendor conversation or no cause is refused HERE rather than
   // reaching the card as "missing …" prose describing evidence nobody supplied.
   if (generated.kind.case === "queryTermination") {
-    requireQueryTerminationEvidence(generated.kind.value.detail, `${where}.queryTermination.detail`);
+    requireQueryTerminationEvidence(
+      generated.kind.value.detail,
+      `${where}.queryTermination.detail`,
+    );
   }
   if (generated.kind.case === "sessionResumeFailed") {
-    requireSessionResumeEvidence(generated.kind.value.detail, `${where}.sessionResumeFailed.detail`);
+    requireSessionResumeEvidence(
+      generated.kind.value.detail,
+      `${where}.sessionResumeFailed.detail`,
+    );
   }
   return generated;
 }
@@ -4513,22 +6009,37 @@ function requireQueryTerminationEvidence(
   where: string,
 ): void {
   if (detail === undefined) {
-    throw new Error(`frontend-proto: ${where} requires query-termination evidence`);
+    throw new Error(
+      `frontend-proto: ${where} requires query-termination evidence`,
+    );
   }
   if (detail.queryInstanceId.trim() === "") {
-    throw new Error(`frontend-proto: ${where} requires a nonblank \`query_instance_id\``);
+    throw new Error(
+      `frontend-proto: ${where} requires a nonblank \`query_instance_id\``,
+    );
   }
   if (detail.observedAtMs <= 0n) {
-    throw new Error(`frontend-proto: ${where} requires a positive \`observed_at_ms\``);
+    throw new Error(
+      `frontend-proto: ${where} requires a positive \`observed_at_ms\``,
+    );
   }
   if (detail.vendorIdentity.case === undefined) {
-    throw new Error(`frontend-proto: ${where} requires explicit vendor identity evidence`);
+    throw new Error(
+      `frontend-proto: ${where} requires explicit vendor identity evidence`,
+    );
   }
-  if (detail.vendorIdentity.case === "vendorSessionId" && detail.vendorIdentity.value.trim() === "") {
-    throw new Error(`frontend-proto: ${where}.vendorSessionId must be nonblank`);
+  if (
+    detail.vendorIdentity.case === "vendorSessionId" &&
+    detail.vendorIdentity.value.trim() === ""
+  ) {
+    throw new Error(
+      `frontend-proto: ${where}.vendorSessionId must be nonblank`,
+    );
   }
   if (detail.reason.case === undefined) {
-    throw new Error(`frontend-proto: ${where} requires an unexpected termination reason`);
+    throw new Error(
+      `frontend-proto: ${where} requires an unexpected termination reason`,
+    );
   }
 }
 
@@ -4545,7 +6056,9 @@ function requireSessionResumeEvidence(
   where: string,
 ): void {
   if (detail === undefined) {
-    throw new Error(`frontend-proto: ${where} requires resume-continuity evidence`);
+    throw new Error(
+      `frontend-proto: ${where} requires resume-continuity evidence`,
+    );
   }
   if (detail.attempt.case === undefined) {
     throw new Error(`frontend-proto: ${where} requires exactly one attempt`);
@@ -4554,28 +6067,26 @@ function requireSessionResumeEvidence(
     throw new Error(`frontend-proto: ${where} requires exactly one cause`);
   }
   if (detail.cause.case === "queryTermination") {
-    requireQueryTerminationEvidence(detail.cause.value, `${where}.queryTermination`);
+    requireQueryTerminationEvidence(
+      detail.cause.value,
+      `${where}.queryTermination`,
+    );
   }
 }
 
-const FAILURE_CARD_VIEW_KEYS = generatedFieldSet<keyof typeof FailureCardViewSchema.field>()(
-  "kind",
-  "message",
-  "detail",
-  "open",
-  "resolved",
-  "terminal",
-);
-const FAILURE_CARD_OPEN_KEYS = generatedFieldSet<keyof typeof FailureCardOpenSchema.field>()();
-const FAILURE_CARD_RESOLVED_KEYS = generatedFieldSet<
-  keyof typeof FailureCardResolvedSchema.field
->()("resolvedAtMs");
-const FAILURE_CARD_TERMINAL_KEYS = generatedFieldSet<
-  keyof typeof FailureCardTerminalSchema.field
->()();
-const FAILURE_CARD_REF_KEYS = generatedFieldSet<keyof typeof FailureCardRefSchema.field>()(
-  "cardUuid",
-);
+const FAILURE_CARD_VIEW_KEYS = generatedFieldSet<
+  keyof typeof FailureCardViewSchema.field
+>()("kind", "message", "detail", "open", "resolved", "terminal");
+const FAILURE_CARD_OPEN_KEYS =
+  generatedFieldSet<keyof typeof FailureCardOpenSchema.field>()();
+const FAILURE_CARD_RESOLVED_KEYS =
+  generatedFieldSet<keyof typeof FailureCardResolvedSchema.field>()(
+    "resolvedAtMs",
+  );
+const FAILURE_CARD_TERMINAL_KEYS =
+  generatedFieldSet<keyof typeof FailureCardTerminalSchema.field>()();
+const FAILURE_CARD_REF_KEYS =
+  generatedFieldSet<keyof typeof FailureCardRefSchema.field>()("cardUuid");
 
 /**
  * Decode a `FailureCardView`.
@@ -4584,7 +6095,10 @@ const FAILURE_CARD_REF_KEYS = generatedFieldSet<keyof typeof FailureCardRefSchem
  * decides whether the card invites waiting; a card missing either would render
  * a failure whose colour and whose finality were invented here.
  */
-export function decodeFailureCardView(v: unknown, where: string): FailureCardView {
+export function decodeFailureCardView(
+  v: unknown,
+  where: string,
+): FailureCardView {
   const o = ensureObject(v, where);
   rejectUnknown(o, FAILURE_CARD_VIEW_KEYS, where);
   if (o.kind === undefined || o.kind === null) {
@@ -4620,27 +6134,35 @@ function decodeFailureCardLifecycle(
   }
   if (arm === FAILURE_CARD_LIFECYCLE_ARM.terminal) {
     const inner = `${where}.terminal`;
-    rejectUnknown(ensureObject(o.terminal, inner), FAILURE_CARD_TERMINAL_KEYS, inner);
+    rejectUnknown(
+      ensureObject(o.terminal, inner),
+      FAILURE_CARD_TERMINAL_KEYS,
+      inner,
+    );
     return { case: "terminal" };
   }
   const inner = `${where}.resolved`;
   const resolved = ensureObject(o.resolved, inner);
   rejectUnknown(resolved, FAILURE_CARD_RESOLVED_KEYS, inner);
-  return { case: "resolved", resolvedAtMs: num(resolved, "resolvedAtMs", inner) };
+  return {
+    case: "resolved",
+    resolvedAtMs: num(resolved, "resolvedAtMs", inner),
+  };
 }
 
 /** Decode a `FailureCardRef` — the address of a card another surface reveals. */
-export function decodeFailureCardRef(v: unknown, where: string): FailureCardRef {
+export function decodeFailureCardRef(
+  v: unknown,
+  where: string,
+): FailureCardRef {
   const o = ensureObject(v, where);
   rejectUnknown(o, FAILURE_CARD_REF_KEYS, where);
   return { cardUuid: str(o, "cardUuid", where) };
 }
 
-const FOOTER_FAILURE_ROW_KEYS = generatedFieldSet<keyof typeof FooterFailureRowSchema.field>()(
-  "message",
-  "tone",
-  "card",
-);
+const FOOTER_FAILURE_ROW_KEYS = generatedFieldSet<
+  keyof typeof FooterFailureRowSchema.field
+>()("message", "tone", "card");
 
 /**
  * Decode a `FooterFailureRow`.
@@ -4649,7 +6171,10 @@ const FOOTER_FAILURE_ROW_KEYS = generatedFieldSet<keyof typeof FooterFailureRowS
  * for typed evidence. An ABSENT `card` means the row is not clickable, and the
  * client then offers no reveal rather than scrolling somewhere arbitrary.
  */
-export function decodeFooterFailureRow(v: unknown, where: string): FooterFailureRow {
+export function decodeFooterFailureRow(
+  v: unknown,
+  where: string,
+): FooterFailureRow {
   const o = ensureObject(v, where);
   rejectUnknown(o, FOOTER_FAILURE_ROW_KEYS, where);
   const row: FooterFailureRow = {
@@ -4662,11 +6187,9 @@ export function decodeFooterFailureRow(v: unknown, where: string): FooterFailure
   return row;
 }
 
-const FOOTER_PHASE_KEYS = generatedFieldSet<keyof typeof FooterPhaseSchema.field>()(
-  "word",
-  "tone",
-  "breathing",
-);
+const FOOTER_PHASE_KEYS = generatedFieldSet<
+  keyof typeof FooterPhaseSchema.field
+>()("word", "tone", "breathing");
 
 /**
  * Decode a `FooterPhase`.
@@ -4682,13 +6205,16 @@ export function decodeFooterPhase(v: unknown, where: string): FooterPhase {
   if (word === "") {
     throw new Error(`frontend-proto: ${where} requires a non-empty \`word\``);
   }
-  return { word, tone: str(o, "tone", where), breathing: bool(o, "breathing", where) };
+  return {
+    word,
+    tone: str(o, "tone", where),
+    breathing: bool(o, "breathing", where),
+  };
 }
 
-const FOOTER_MERGE_CHIP_KEYS = generatedFieldSet<keyof typeof FooterMergeChipSchema.field>()(
-  "text",
-  "title",
-);
+const FOOTER_MERGE_CHIP_KEYS = generatedFieldSet<
+  keyof typeof FooterMergeChipSchema.field
+>()("text", "title");
 
 /**
  * Decode a `FooterMergeChip`.
@@ -4697,7 +6223,10 @@ const FOOTER_MERGE_CHIP_KEYS = generatedFieldSet<keyof typeof FooterMergeChipSch
  * message means no chip, so a present chip with no text is a daemon fault
  * rather than a chip drawn blank. The `title` may legitimately be empty.
  */
-export function decodeFooterMergeChip(v: unknown, where: string): FooterMergeChip {
+export function decodeFooterMergeChip(
+  v: unknown,
+  where: string,
+): FooterMergeChip {
   const o = ensureObject(v, where);
   rejectUnknown(o, FOOTER_MERGE_CHIP_KEYS, where);
   const text = str(o, "text", where);
@@ -4710,13 +6239,12 @@ export function decodeFooterMergeChip(v: unknown, where: string): FooterMergeChi
 const FOOTER_ACCOUNTING_CELL_KEYS = generatedFieldSet<
   keyof typeof FooterAccountingCellSchema.field
 >()("summary", "complete", "incomplete", "invalid");
-const ACCOUNTING_COMPLETE_KEYS = generatedFieldSet<keyof typeof AccountingCompleteSchema.field>()();
-const ACCOUNTING_INCOMPLETE_KEYS = generatedFieldSet<
-  keyof typeof AccountingIncompleteSchema.field
->()("missing");
-const ACCOUNTING_INVALID_KEYS = generatedFieldSet<keyof typeof AccountingInvalidSchema.field>()(
-  "problems",
-);
+const ACCOUNTING_COMPLETE_KEYS =
+  generatedFieldSet<keyof typeof AccountingCompleteSchema.field>()();
+const ACCOUNTING_INCOMPLETE_KEYS =
+  generatedFieldSet<keyof typeof AccountingIncompleteSchema.field>()("missing");
+const ACCOUNTING_INVALID_KEYS =
+  generatedFieldSet<keyof typeof AccountingInvalidSchema.field>()("problems");
 
 /**
  * Decode a `FooterAccountingCell`.
@@ -4727,36 +6255,54 @@ const ACCOUNTING_INVALID_KEYS = generatedFieldSet<keyof typeof AccountingInvalid
  * arms that carry them, because an incompleteness or a contradiction with
  * nothing to name is a daemon fault rather than a renderable state.
  */
-export function decodeFooterAccountingCell(v: unknown, where: string): FooterAccountingCell {
+export function decodeFooterAccountingCell(
+  v: unknown,
+  where: string,
+): FooterAccountingCell {
   const o = ensureObject(v, where);
   rejectUnknown(o, FOOTER_ACCOUNTING_CELL_KEYS, where);
   const summary = str(o, "summary", where);
   if (summary === "") {
-    throw new Error(`frontend-proto: ${where} requires a non-empty \`summary\``);
+    throw new Error(
+      `frontend-proto: ${where} requires a non-empty \`summary\``,
+    );
   }
   return { summary, verdict: decodeFooterAccountingVerdict(o, where) };
 }
 
-function decodeFooterAccountingVerdict(o: Obj, where: string): FooterAccountingVerdict {
+function decodeFooterAccountingVerdict(
+  o: Obj,
+  where: string,
+): FooterAccountingVerdict {
   // protojson carries the SET arm as a present key — `complete` arrives as an
   // empty object rather than as an absence, which is what makes the three
   // distinguishable at all.
   if (o.complete !== undefined && o.complete !== null) {
     const inner = `${where}.complete`;
-    rejectUnknown(ensureObject(o.complete, inner), ACCOUNTING_COMPLETE_KEYS, inner);
+    rejectUnknown(
+      ensureObject(o.complete, inner),
+      ACCOUNTING_COMPLETE_KEYS,
+      inner,
+    );
     return { kind: "complete" };
   }
   if (o.incomplete !== undefined && o.incomplete !== null) {
     const inner = `${where}.incomplete`;
     const arm = ensureObject(o.incomplete, inner);
     rejectUnknown(arm, ACCOUNTING_INCOMPLETE_KEYS, inner);
-    return { kind: "incomplete", missing: accountingPhrases(arm.missing, `${inner}.missing`) };
+    return {
+      kind: "incomplete",
+      missing: accountingPhrases(arm.missing, `${inner}.missing`),
+    };
   }
   if (o.invalid !== undefined && o.invalid !== null) {
     const inner = `${where}.invalid`;
     const arm = ensureObject(o.invalid, inner);
     rejectUnknown(arm, ACCOUNTING_INVALID_KEYS, inner);
-    return { kind: "invalid", problems: accountingPhrases(arm.problems, `${inner}.problems`) };
+    return {
+      kind: "invalid",
+      problems: accountingPhrases(arm.problems, `${inner}.problems`),
+    };
   }
   throw new Error(`frontend-proto: ${where} requires a verdict oneof`);
 }
@@ -4769,7 +6315,9 @@ function accountingPhrases(v: unknown, where: string): string[] {
   }
   return entries.map((entry, index) => {
     if (typeof entry !== "string") {
-      throw new Error(`frontend-proto: ${where}[${index}] must be a string (got ${typeof entry})`);
+      throw new Error(
+        `frontend-proto: ${where}[${index}] must be a string (got ${typeof entry})`,
+      );
     }
     return entry;
   });
@@ -4784,7 +6332,11 @@ function accountingPhrases(v: unknown, where: string): string[] {
  * item's uuid, arm and session — that makes the malformed item findable. The
  * conversation layer owns that error (see `state-adapter.ts`).
  */
-function enumConversationSource(o: Obj, key: string, ctx: string): ConversationSource {
+function enumConversationSource(
+  o: Obj,
+  key: string,
+  ctx: string,
+): ConversationSource {
   return enumValue(
     o,
     key,
@@ -4796,10 +6348,21 @@ function enumConversationSource(o: Obj, key: string, ctx: string): ConversationS
 }
 
 function enumRenderState(o: Obj, key: string, ctx: string): RenderState {
-  return enumValue(o, key, ctx, RenderState, RENDER_STATE_BY_NAME, RenderState.UNSPECIFIED);
+  return enumValue(
+    o,
+    key,
+    ctx,
+    RenderState,
+    RENDER_STATE_BY_NAME,
+    RenderState.UNSPECIFIED,
+  );
 }
 
-function enumSessionConnectivity(o: Obj, key: string, ctx: string): SessionConnectivity {
+function enumSessionConnectivity(
+  o: Obj,
+  key: string,
+  ctx: string,
+): SessionConnectivity {
   return enumValue(
     o,
     key,
@@ -4811,7 +6374,14 @@ function enumSessionConnectivity(o: Obj, key: string, ctx: string): SessionConne
 }
 
 function enumSessionStatus(o: Obj, key: string, ctx: string): SessionStatus {
-  return enumValue(o, key, ctx, SessionStatus, SESSION_STATUS_BY_NAME, SessionStatus.UNSPECIFIED);
+  return enumValue(
+    o,
+    key,
+    ctx,
+    SessionStatus,
+    SESSION_STATUS_BY_NAME,
+    SessionStatus.UNSPECIFIED,
+  );
 }
 
 function enumValue<T extends number>(
@@ -4826,16 +6396,22 @@ function enumValue<T extends number>(
   if (v === undefined || v === null) return unspecified;
   if (typeof v === "number") {
     if (numericNames[v] === undefined) {
-      throw new Error(`frontend-proto: ${ctx}.${key} has unknown enum value ${v}`);
+      throw new Error(
+        `frontend-proto: ${ctx}.${key} has unknown enum value ${v}`,
+      );
     }
     return v as T;
   }
   if (typeof v === "string") {
     const mapped = names[v];
     if (mapped === undefined) {
-      throw new Error(`frontend-proto: ${ctx}.${key} has unknown enum value '${v}'`);
+      throw new Error(
+        `frontend-proto: ${ctx}.${key} has unknown enum value '${v}'`,
+      );
     }
     return mapped;
   }
-  throw new Error(`frontend-proto: ${ctx}.${key} must be an enum name or number`);
+  throw new Error(
+    `frontend-proto: ${ctx}.${key} must be an enum name or number`,
+  );
 }
