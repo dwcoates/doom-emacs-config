@@ -29,22 +29,22 @@ import (
 //     gone the moment the record is written, and the session behaves exactly as
 //     any other live session does.
 //
-//   - EVERY COMPACTING MODE brings up while the record STILL SAYS HIBERNATED,
-//     drives a compaction to completion, and only then clears. Keeping the
-//     record is what keeps the gate standing, so "prompts are refused until
-//     compaction lands" is the same mechanism that refused them before the
-//     revival began rather than a second, parallel gate that could disagree
-//     with it.
+//   - EVERY CUTTING MODE brings up while the record STILL SAYS HIBERNATED,
+//     drives its context cut to completion, and only then clears. Keeping the
+//     record is what keeps the gate standing, so "prompts are refused until the
+//     cut lands" is the same mechanism that refused them before the revival
+//     began rather than a second, parallel gate that could disagree with it.
 //
-// THE COMPACTING MODES DIFFER ONLY IN THEIR SUBMITTED TEXT. All four submit one
-// `/compact`, wait on one completion axis, and clear one record; the scoped
-// three carry instructions naming what the summary must leave verbatim. There
-// is no second compaction machinery, which is why a new scope is a new command
-// string and nothing else.
+// THE CUTTING MODES ARE ONE PATH, parameterized by reviveCut. The four
+// compacting modes differ only in their submitted text — the scoped three carry
+// instructions naming what the summary must leave verbatim — and CLEAR differs
+// additionally in the axis it waits on and in taking no compaction claim, since
+// `/clear` keeps nothing and reads nothing. There is no second cut machinery,
+// which is why a new scope is a new command string and nothing else.
 //
-// AND THAT IS WHY A FAILED COMPACTION LEAVES THE SESSION GATED. The clear is
-// the LAST step and happens only on the completion signal; there is no path in
-// which a compaction that errored, timed out, or never reported completion ends
+// AND THAT IS WHY A FAILED CUT LEAVES THE SESSION GATED. The hibernation clear
+// is the LAST step and happens only on the completion signal; there is no path
+// in which a cut that errored, timed out, or never reported completion ends
 // with an ungated session. The session limps into nothing — it stays asleep,
 // loudly, and the user can choose again.
 
@@ -84,6 +84,12 @@ const (
 		" Preserve every tool call and every tool result verbatim."
 )
 
+// clearCommandText is the prompt a CLEAR revival submits, on exactly the terms
+// compactCommandText is submitted under. It carries no argument and must not:
+// sessioncommand.go recognizes `/clear` only as the ENTIRE prompt, because the
+// command discards the conversation rather than summarizing it.
+const clearCommandText = "/clear"
+
 // ReviveMode is the user's revival choice. It has no zero value that means
 // anything: the wire oneof makes "no decision" unrepresentable, and so does
 // this — Revive refuses a mode it was not given.
@@ -114,6 +120,12 @@ const (
 	// ReviveModeCompactPromptsAndResponses summarizes the conversation's prose —
 	// prompts and responses both — and keeps the work verbatim.
 	ReviveModeCompactPromptsAndResponses
+	// ReviveModeClear discards the conversation before accepting any prompt. It
+	// pays the full-context cost NEVER: nothing is summarized and nothing is
+	// carried, so the woken session starts from an empty conversation in the
+	// same workspace. It is not a fifth scope — a scope says what a summary
+	// keeps, and this keeps nothing.
+	ReviveModeClear
 )
 
 func (m ReviveMode) String() string {
@@ -128,37 +140,105 @@ func (m ReviveMode) String() string {
 		return "compact_prompts"
 	case ReviveModeCompactPromptsAndResponses:
 		return "compact_prompts_and_responses"
+	case ReviveModeClear:
+		return "clear"
 	default:
 		return "unset"
 	}
 }
 
-// compacts reports whether the mode revives by compacting first. Every mode but
-// direct does, which is why the compaction path is reached by exclusion rather
-// than by a list that a fifth scope could be forgotten from.
-func (m ReviveMode) compacts() bool {
+// cutWaiter is ONE gated revival's one-shot expectation of a context cut: the
+// func the closing edge fires, and the token that identifies whose expectation
+// it is.
+//
+// The token exists because funcs are not comparable in Go, so a disarm has no
+// other way to tell its own waiter from a later one, and clearing whatever it
+// happens to find would retire a revival that is still waiting.
+type cutWaiter struct {
+	fire  func()
+	token *struct{}
+}
+
+// fireCutWaiter delivers one closing edge to whatever revival is waiting on it,
+// and is a no-op when none is. It exists so the two closing edges in
+// noteCutCompleted (sinks.go) state the same thing the same way rather than
+// each carrying its own nil check.
+func (c *consumer) fireCutWaiter(w *cutWaiter) {
+	if w.fire != nil {
+		w.fire()
+	}
+}
+
+// reviveCut is the context cut ONE gated revival mode drives, and the whole of
+// what differs between the gated modes.
+//
+// IT IS A DESCRIPTOR RATHER THAN A BRANCH so that adding a cut cannot add a
+// second copy of the bring-up-arm-submit-hand-off sequence. Everything that
+// sequence guarantees — the gate stands until the closing edge, every failing
+// exit drops what it parked, the claim outlives the ack — is written once.
+type reviveCut struct {
+	// text is the session command submitted as ordinary prompt text.
+	text string
+	// requestIDPrefix names the submitted turn on the wire and in the log.
+	requestIDPrefix string
+	// claimsCompaction takes the cold-read alarm's claim over the submitted
+	// turn. TRUE for every compaction: a revival compaction runs after the
+	// cache has expired by construction, which makes it the likeliest cold read
+	// in the daemon. FALSE for `/clear`, which is not a model call at all — it
+	// reads nothing, so claiming it would hand the NEXT turn's input cost to a
+	// turn that read nothing, the exact misattribution the claim prevents.
+	claimsCompaction bool
+	// waiter selects the consumer field this cut's own closing edge fires
+	// (sinks.go, noteCutCompleted). A compaction and a clear close DIFFERENT
+	// axes, and the fields are separate so a cut of one kind can never release
+	// a revival that asked for the other.
+	waiter func(*consumer) *cutWaiter
+}
+
+// compactionCut is the shared shape of all four compacting modes: same waiter,
+// same claim, same id prefix, differing only in the steering text.
+func compactionCut(text string) reviveCut {
+	return reviveCut{
+		text:             text,
+		requestIDPrefix:  "revive-compact:",
+		claimsCompaction: true,
+		waiter:           func(c *consumer) *cutWaiter { return &c.compactedWaiter },
+	}
+}
+
+// cuts reports whether the mode revives by cutting the context first. Every
+// mode but direct does, which is why the gated path is reached by exclusion
+// rather than by a list a fifth scope could be forgotten from.
+func (m ReviveMode) cuts() bool {
 	return m != ReviveModeUnset && m != ReviveModeDirect
 }
 
-// compactCommand is the prompt this mode's compaction submits.
+// cut is the context cut this mode drives.
 //
-// A NON-COMPACTING MODE IS AN INVARIANT VIOLATION, not a case to default: the
-// only caller reaches here after ReviveSession has already routed direct and
-// unset elsewhere, so a mode arriving here that has no compaction text is the
-// routing having broken, and it says so rather than quietly submitting a
-// whole-conversation `/compact` the user never asked for.
-func (m ReviveMode) compactCommand() (string, error) {
+// A NON-CUTTING MODE IS AN INVARIANT VIOLATION, not a case to default: the only
+// caller reaches here after ReviveSession has already routed direct and unset
+// elsewhere, so a mode arriving here with no cut is the routing having broken,
+// and it says so rather than quietly submitting a whole-conversation `/compact`
+// the user never asked for.
+func (m ReviveMode) cut() (reviveCut, error) {
 	switch m {
 	case ReviveModeCompactAll:
-		return compactCommandText, nil
+		return compactionCut(compactCommandText), nil
 	case ReviveModeCompactResponses:
-		return compactResponsesCommandText, nil
+		return compactionCut(compactResponsesCommandText), nil
 	case ReviveModeCompactPrompts:
-		return compactPromptsCommandText, nil
+		return compactionCut(compactPromptsCommandText), nil
 	case ReviveModeCompactPromptsAndResponses:
-		return compactPromptsAndResponsesCommandText, nil
+		return compactionCut(compactPromptsAndResponsesCommandText), nil
+	case ReviveModeClear:
+		return reviveCut{
+			text:             clearCommandText,
+			requestIDPrefix:  "revive-clear:",
+			claimsCompaction: false,
+			waiter:           func(c *consumer) *cutWaiter { return &c.clearedWaiter },
+		}, nil
 	default:
-		return "", fmt.Errorf("session-controller: revival mode %s has no compaction command; only a compacting mode reaches the compaction path", m)
+		return reviveCut{}, fmt.Errorf("session-controller: revival mode %s has no context cut; only a cutting mode reaches the gated path", m)
 	}
 }
 
@@ -174,17 +254,17 @@ func (m ReviveMode) compactCommand() (string, error) {
 // held.
 var ErrRevivalInFlight = errors.New("session-controller: a revival is already in flight for this workspace")
 
-// newReviveCompactRequestID mints the identity ONE revival compaction submits
+// newReviveCutRequestID mints the identity ONE revival's context cut submits
 // under. The session id is carried for readability; the random suffix is what
 // makes the id unique across the repeated hibernate/revive cycles a single
 // session goes through, and an entropy failure is surfaced rather than papered
 // over with a weaker id (newSecureControllerGenerationID's discipline).
-func newReviveCompactRequestID(sessionID string) (string, error) {
+func newReviveCutRequestID(prefix, sessionID string) (string, error) {
 	var raw [8]byte
 	if _, err := rand.Read(raw[:]); err != nil {
-		return "", fmt.Errorf("session-controller: mint revive compaction request id for session %s: %w", sessionID, err)
+		return "", fmt.Errorf("session-controller: mint revive cut request id for session %s: %w", sessionID, err)
 	}
-	return "revive-compact:" + sessionID + ":" + hex.EncodeToString(raw[:]), nil
+	return prefix + sessionID + ":" + hex.EncodeToString(raw[:]), nil
 }
 
 // ReviveSession brings a hibernated workspace back under the user's chosen
@@ -204,7 +284,7 @@ func newReviveCompactRequestID(sessionID string) (string, error) {
 // still nacked until the compaction lands or its bound expires.
 func (m *Manager) ReviveSession(ctx context.Context, workspace string, mode ReviveMode) error {
 	if mode == ReviveModeUnset {
-		return fmt.Errorf("session-controller: refusing to revive workspace %q with no revival mode; the choice between compacting and resuming as-is is the user's and the daemon does not have a default for it", workspace)
+		return fmt.Errorf("session-controller: refusing to revive workspace %q with no revival mode; the choice between compacting, clearing and resuming as-is is the user's and the daemon does not have a default for it", workspace)
 	}
 	if m.cfg.Hibernations == nil {
 		return fmt.Errorf("session-controller: cannot revive workspace %q: no hibernation registrar is wired", workspace)
@@ -230,7 +310,7 @@ func (m *Manager) ReviveSession(ctx context.Context, workspace string, mode Revi
 			// failure — and this release is the last thing that knows a revival
 			// was ever in flight. Dropping here is what keeps a refused submit
 			// or a closing manager from leaving an entry no path can deliver.
-			m.dropRevivalHolds(workspace, sessionID, "the revival did not reach its compaction")
+			m.dropRevivalHolds(workspace, sessionID, "the revival did not reach its context cut")
 			release()
 		}
 	}()
@@ -260,14 +340,13 @@ func (m *Manager) ReviveSession(ctx context.Context, workspace string, mode Revi
 		return nil
 	}
 
-	// COMPACT-FIRST: bring up while the record STILL SAYS HIBERNATED, so the
+	// A GATED MODE: bring up while the record STILL SAYS HIBERNATED, so the
 	// gate that has been refusing prompts keeps refusing them for free.
 	//
-	// THE COMMAND TEXT IS RESOLVED BEFORE THE BRING-UP. A mode with no
-	// compaction text is a routing failure, and discovering it after the session
-	// is up would leave a session brought up for a compaction that can never be
-	// submitted.
-	commandText, err := mode.compactCommand()
+	// THE CUT IS RESOLVED BEFORE THE BRING-UP. A mode with no cut is a routing
+	// failure, and discovering it after the session is up would leave a session
+	// brought up for a cut that can never be submitted.
+	cut, err := mode.cut()
 	if err != nil {
 		m.errorf("session-controller: revive REFUSED ws=%q session=%s mode=%s error=%v — nothing was brought up and the session STAYS GATED",
 			workspace, sessionID, mode, err)
@@ -289,9 +368,9 @@ func (m *Manager) ReviveSession(ctx context.Context, workspace string, mode Revi
 	m.settleKeepAliveResidue(ctx, workspace, "revive:compact-first")
 	d, err := m.ensure(ctx, workspace)
 	if err != nil {
-		return fmt.Errorf("session-controller: reviving session %s (ws %q) for compaction: bringing the rewound conversation up: %w", sessionID, workspace, err)
+		return fmt.Errorf("session-controller: reviving session %s (ws %q) for its %s: bringing the rewound conversation up: %w", sessionID, workspace, cut.text, err)
 	}
-	compacted, disarm, err := m.armCompactionWait(d)
+	cutLanded, disarm, err := m.armCutWait(d, cut)
 	if err != nil {
 		return err
 	}
@@ -304,9 +383,9 @@ func (m *Manager) ReviveSession(ctx context.Context, workspace string, mode Revi
 		}
 	}()
 	m.logf("session-controller: revive ws=%q session=%s mode=%s — the session is up and STILL GATED; submitting %q before any prompt is accepted",
-		workspace, sessionID, mode, commandText)
+		workspace, sessionID, mode, cut.text)
 
-	// THE REVIVAL'S OWN COMPACTION IS THE ONE THING THE GATE LETS THROUGH. It
+	// THE REVIVAL'S OWN CUT IS THE ONE THING THE GATE LETS THROUGH. It
 	// is submitted as submitterRevival, which guardHibernation admits precisely
 	// so that the record can stay hibernated — and therefore keep gating the
 	// user's prompts — while the compaction runs.
@@ -319,7 +398,7 @@ func (m *Manager) ReviveSession(ctx context.Context, workspace string, mode Revi
 	// durable prompt receipt, keyed by request id, would already have taken.
 	// The session id stays in the id so a log line still says which session's
 	// revival it belongs to without a lookup.
-	compactRequestID, err := newReviveCompactRequestID(sessionID)
+	cutRequestID, err := newReviveCutRequestID(cut.requestIDPrefix, sessionID)
 	if err != nil {
 		return err
 	}
@@ -332,34 +411,41 @@ func (m *Manager) ReviveSession(ctx context.Context, workspace string, mode Revi
 	// and covering only the warm path would leave the measured 1.5-million-token
 	// case silent. The claim is released on submit failure and at the turn's own
 	// end (queue.go), the same lifecycle the keep-alive ping's claim has.
-	m.mu.Lock()
-	claimErr := m.claimDaemonCompactionLocked(d, daemonCompaction{turnID: compactRequestID, kind: compactionRevive})
-	m.mu.Unlock()
-	if claimErr != nil {
-		m.errorf("session-controller: revive compaction NOT CLAIMED ws=%q session=%s turn_id=%s error=%v — the session STAYS GATED and nothing was submitted",
-			workspace, sessionID, compactRequestID, claimErr)
-		return claimErr
+	//
+	// A CLEAR TAKES NO CLAIM, for the reason reviveCut.claimsCompaction states:
+	// `/clear` is not a model call, so there is no input cost to attribute.
+	if cut.claimsCompaction {
+		m.mu.Lock()
+		claimErr := m.claimDaemonCompactionLocked(d, daemonCompaction{turnID: cutRequestID, kind: compactionRevive})
+		m.mu.Unlock()
+		if claimErr != nil {
+			m.errorf("session-controller: revive compaction NOT CLAIMED ws=%q session=%s turn_id=%s error=%v — the session STAYS GATED and nothing was submitted",
+				workspace, sessionID, cutRequestID, claimErr)
+			return claimErr
+		}
 	}
-	if err := m.forwardPrompt(ctx, d, compactRequestID, commandText,
-		"revive-compact:"+sessionID, "", corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, submitterRevival); err != nil {
+	if err := m.forwardPrompt(ctx, d, cutRequestID, cut.text,
+		cut.requestIDPrefix+sessionID, "", corev1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, submitterRevival); err != nil {
 		// The claim goes with the compaction that never ran. Leaving it standing
 		// would hand the NEXT turn's cost to a compaction that was never
 		// submitted, which is the misattribution the claim exists to prevent.
-		m.mu.Lock()
-		m.releaseDaemonCompactionLocked(d, compactRequestID)
-		m.mu.Unlock()
-		m.logf("session-controller: revive COMPACTION SUBMIT FAILED ws=%q session=%s error=%v — the session STAYS GATED; it was not left half-revived and accepting prompts",
-			workspace, sessionID, err)
-		return fmt.Errorf("session-controller: reviving session %s (ws %q): submitting the compaction: %w", sessionID, workspace, err)
+		if cut.claimsCompaction {
+			m.mu.Lock()
+			m.releaseDaemonCompactionLocked(d, cutRequestID)
+			m.mu.Unlock()
+		}
+		m.logf("session-controller: revive CUT SUBMIT FAILED ws=%q session=%s mode=%s cut=%q error=%v — the session STAYS GATED; it was not left half-revived and accepting prompts",
+			workspace, sessionID, mode, cut.text, err)
+		return fmt.Errorf("session-controller: reviving session %s (ws %q): submitting %q: %w", sessionID, workspace, cut.text, err)
 	}
 
-	// THE HANDOFF. The compaction is submitted, which is everything the ack
-	// reports; the wait for it to land runs on without the command context.
+	// THE HANDOFF. The cut is submitted, which is everything the ack reports;
+	// the wait for it to land runs on without the command context.
 	m.mu.Lock()
 	if m.closed {
 		m.mu.Unlock()
-		m.logf("session-controller: revive COMPACTION WAIT REFUSED ws=%q session=%s — the manager is closing, so nothing will observe the compaction; the session STAYS GATED and can be revived again",
-			workspace, sessionID)
+		m.logf("session-controller: revive CUT WAIT REFUSED ws=%q session=%s mode=%s — the manager is closing, so nothing will observe the cut; the session STAYS GATED and can be revived again",
+			workspace, sessionID, mode)
 		return fmt.Errorf("session-controller: reviving session %s (ws %q): the manager is closing; the session remains hibernated and can be revived again", sessionID, workspace)
 	}
 	// Registered with the same WaitGroup Close joins, so the wait cannot
@@ -367,10 +453,10 @@ func (m *Manager) ReviveSession(ctx context.Context, workspace string, mode Revi
 	m.exits.Add(1)
 	detached = true
 	m.mu.Unlock()
-	go m.awaitReviveCompaction(workspace, sessionID, compactRequestID, compacted, disarm, release)
+	go m.awaitReviveCut(workspace, sessionID, mode, cut, cutRequestID, cutLanded, disarm, release)
 
 	m.logf("session-controller: revive ACCEPTED ws=%q session=%s mode=%s — %q is submitted and the session STAYS GATED until it lands",
-		workspace, sessionID, mode, commandText)
+		workspace, sessionID, mode, cut.text)
 	return nil
 }
 
@@ -410,22 +496,22 @@ func (m *Manager) ReviveForMerge(ctx context.Context, workspace string) error {
 	return nil
 }
 
-// awaitReviveCompaction is the compact-first revival's completion half, run
-// detached from the command context that accepted the revival.
+// awaitReviveCut is a GATED revival's completion half, run detached from the
+// command context that accepted the revival.
 //
-// IT OWNS THE CLAIM AND THE WAITER for as long as the compaction is pending.
-// Releasing them at the ack instead would let a second ReviveSessionCmd arm a
-// second waiter over this one's, which is precisely the strand
-// armCompactionWait refuses.
+// IT OWNS THE CLAIM AND THE WAITER for as long as the cut is pending. Releasing
+// them at the ack instead would let a second ReviveSessionCmd arm a second
+// waiter over this one's, which is precisely the strand armCutWait refuses.
 //
 // ITS BOUND IS THE DAEMON'S, NOT A CALLER'S. compactFirstBound and the root
 // context are what end the wait, so a webapp that disconnected the instant it
-// got its ack does not abandon a compaction the session is still gated on.
+// got its ack does not abandon a cut the session is still gated on.
 //
-// EVERY FAILING EXIT LEAVES THE RECORD UNTOUCHED. The clear is reached only on
-// the completion signal, which is what makes "a failed compaction leaves the
-// session gated" structural rather than a promise each error path has to keep.
-func (m *Manager) awaitReviveCompaction(workspace, sessionID, compactRequestID string, compacted <-chan struct{}, disarm, release func()) {
+// EVERY FAILING EXIT LEAVES THE RECORD UNTOUCHED. The hibernation clear is
+// reached only on the completion signal, which is what makes "a failed cut
+// leaves the session gated" structural rather than a promise each error path
+// has to keep.
+func (m *Manager) awaitReviveCut(workspace, sessionID string, mode ReviveMode, cut reviveCut, cutRequestID string, landed <-chan struct{}, disarm, release func()) {
 	defer m.exits.Done()
 	defer release()
 	defer disarm()
@@ -439,45 +525,51 @@ func (m *Manager) awaitReviveCompaction(workspace, sessionID, compactRequestID s
 	// bound expiring, the daemon shutting down mid-compaction — would leave the
 	// claim standing, and the NEXT revival of this session would then be refused
 	// its own claim by a compaction that is long over.
-	defer func() {
-		m.mu.Lock()
-		defer m.mu.Unlock()
-		if d, live := m.byWS[workspace]; live {
-			m.releaseDaemonCompactionLocked(d, compactRequestID)
-		}
-	}()
+	//
+	// A cut that took no claim releases none: it has nothing of its own to
+	// retire, and a release aimed at a turn id it never claimed under would be
+	// aimed at whatever the session IS running.
+	if cut.claimsCompaction {
+		defer func() {
+			m.mu.Lock()
+			defer m.mu.Unlock()
+			if d, live := m.byWS[workspace]; live {
+				m.releaseDaemonCompactionLocked(d, cutRequestID)
+			}
+		}()
+	}
 	bound := m.reviveCompactBound()
 	select {
-	case <-compacted:
-		m.logf("session-controller: revive compaction LANDED ws=%q session=%s — releasing the gate", workspace, sessionID)
+	case <-landed:
+		m.logf("session-controller: revive cut LANDED ws=%q session=%s mode=%s cut=%q — releasing the gate", workspace, sessionID, mode, cut.text)
 	case <-m.rootCtx.Done():
-		m.logf("session-controller: revive compaction ABANDONED ws=%q session=%s error=%v — the session STAYS GATED",
-			workspace, sessionID, m.rootCtx.Err())
-		m.dropRevivalHolds(workspace, sessionID, "the daemon shut down before the compaction landed")
+		m.logf("session-controller: revive cut ABANDONED ws=%q session=%s mode=%s cut=%q error=%v — the session STAYS GATED",
+			workspace, sessionID, mode, cut.text, m.rootCtx.Err())
+		m.dropRevivalHolds(workspace, sessionID, "the daemon shut down before "+cut.text+" landed")
 		return
 	case <-time.After(bound):
-		m.logf("session-controller: revive compaction TIMED OUT ws=%q session=%s bound=%s — the session STAYS GATED rather than limping into accepting prompts on a conversation that was never compacted",
-			workspace, sessionID, bound)
-		m.dropRevivalHolds(workspace, sessionID, "the compaction did not land within its bound")
+		m.logf("session-controller: revive cut TIMED OUT ws=%q session=%s mode=%s cut=%q bound=%s — the session STAYS GATED rather than limping into accepting prompts on a conversation that was never cut",
+			workspace, sessionID, mode, cut.text, bound)
+		m.dropRevivalHolds(workspace, sessionID, cut.text+" did not land within its bound")
 		return
 	}
 
-	// THE CLEAR IS THE LAST STEP, reached only on the completion signal. Its
-	// own failure is logged by clearHibernation and leaves the gate standing:
-	// there is no caller left to return it to, and a gate that could not be
-	// retired is the safe direction.
+	// THE HIBERNATION CLEAR IS THE LAST STEP, reached only on the completion
+	// signal. Its own failure is logged by clearHibernation and leaves the gate
+	// standing: there is no caller left to return it to, and a gate that could
+	// not be retired is the safe direction.
 	if err := m.clearHibernation(workspace, sessionID); err != nil {
-		m.logf("session-controller: revive GATE RELEASE FAILED ws=%q session=%s error=%v — the compaction landed but the record still claims a sleep; the session STAYS GATED and can be revived again",
-			workspace, sessionID, err)
-		m.dropRevivalHolds(workspace, sessionID, "the gate could not be released after the compaction landed")
+		m.logf("session-controller: revive GATE RELEASE FAILED ws=%q session=%s mode=%s error=%v — %q landed but the record still claims a sleep; the session STAYS GATED and can be revived again",
+			workspace, sessionID, mode, err, cut.text)
+		m.dropRevivalHolds(workspace, sessionID, "the gate could not be released after "+cut.text+" landed")
 		return
 	}
 	// THE PARKED PROMPTS ARE RELEASED AFTER THE CLEAR AND NOWHERE ELSE. This is
 	// the second half of the delayed-never-dropped contract: the gate refused
-	// nothing during the compaction, it DELAYED — and this is the instant the
-	// delay is over (queue.go, revivalHoldSessionID).
+	// nothing during the cut, it DELAYED — and this is the instant the delay is
+	// over (queue.go, revivalHoldSessionID).
 	m.releaseRevivalHolds(workspace, sessionID)
-	m.logf("session-controller: revive COMPLETE ws=%q session=%s mode=compact_first", workspace, sessionID)
+	m.logf("session-controller: revive COMPLETE ws=%q session=%s mode=%s", workspace, sessionID, mode)
 }
 
 // revivalHoldSessionLocked reports the session whose in-flight compact-first
@@ -672,7 +764,7 @@ func (m *Manager) claimRevival(workspace, sessionID string) (release func(), det
 	}, detail, nil
 }
 
-// armCompactionWait installs the one-shot completion signal a compact-first
+// armCutWait installs the one-shot completion signal a compact-first
 // revival waits on, and returns the channel it closes plus the disarm that
 // retires it.
 //
@@ -686,7 +778,7 @@ func (m *Manager) claimRevival(workspace, sessionID string) (release func(), det
 // ever becomes reachable again: overwriting would strand the first revival on a
 // channel nothing will ever close, which is exactly the silent hang the bound
 // above cannot distinguish from a slow compaction.
-func (m *Manager) armCompactionWait(d *sessionController) (<-chan struct{}, func(), error) {
+func (m *Manager) armCutWait(d *sessionController, cut reviveCut) (<-chan struct{}, func(), error) {
 	done := make(chan struct{})
 	var once bool
 	armed := func() {
@@ -700,23 +792,24 @@ func (m *Manager) armCompactionWait(d *sessionController) (<-chan struct{}, func
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if d.consumer.onContextCompacted != nil {
-		m.logf("session-controller: revive ARM REFUSED ws=%q session=%s — a compaction completion waiter is already installed; overwriting it would strand the revival that owns it on a signal nothing will deliver",
-			d.workspace, d.sessionID)
-		return nil, nil, fmt.Errorf("session-controller: refusing to arm a second compaction waiter for workspace %q session %s: one is already installed", d.workspace, d.sessionID)
+	waiter := cut.waiter(d.consumer)
+	if waiter.fire != nil {
+		m.logf("session-controller: revive ARM REFUSED ws=%q session=%s cut=%q — a completion waiter for this cut is already installed; overwriting it would strand the revival that owns it on a signal nothing will deliver",
+			d.workspace, d.sessionID, cut.text)
+		return nil, nil, fmt.Errorf("session-controller: refusing to arm a second %q waiter for workspace %q session %s: one is already installed", cut.text, d.workspace, d.sessionID)
 	}
 	// The token identifies this arm. Funcs are not comparable in Go, and the
 	// disarm must be able to tell its own waiter from a later one rather than
 	// clearing whatever it finds.
 	token := new(struct{})
-	d.consumer.onContextCompacted, d.consumer.contextCompactedToken = armed, token
+	*waiter = cutWaiter{fire: armed, token: token}
 	disarm := func() {
 		m.mu.Lock()
 		defer m.mu.Unlock()
 		// Cleared only while it is still OURS. A waiter belonging to somebody
 		// else is not this revival's to retire.
-		if d.consumer.contextCompactedToken == token {
-			d.consumer.onContextCompacted, d.consumer.contextCompactedToken = nil, nil
+		if waiter.token == token {
+			*waiter = cutWaiter{}
 		}
 	}
 	return done, disarm, nil
