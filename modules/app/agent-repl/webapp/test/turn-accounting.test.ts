@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { accountingSummary, latestTurnAccounting } from "../src/turn-accounting.js";
+import { accountingFacts, accountingFactsLine, latestTurnAccounting } from "../src/turn-accounting.js";
 import type { TurnAccounting } from "../src/frontend-proto.js";
 import type { ClientLogCmd } from "../src/protocol.js";
 import { ForwardingLogger, bindLogContext, setLogger } from "../src/wslog.js";
@@ -62,17 +62,54 @@ beforeEach(() => {
 
 describe("turn accounting projection", () => {
   it("renders the carried aggregate cache rate rather than recomputing response data", () => {
-    expect(accountingSummary(accounting)).toContain("5h 10.0%→12.5% (2.5pp) · 2s · in 11 · out 22 · read 73 · write 9 · hit 25.0% · 1 subagent · 11.0 tok/s");
+    expect(accountingFacts(accounting)).toEqual([
+      { label: "5h quota", value: "10.0% → 12.5% (2.5pp)" },
+      { label: "duration", value: "2s" },
+      { label: "input", value: "11" },
+      { label: "output", value: "22" },
+      { label: "cache read", value: "73" },
+      { label: "cache write", value: "9" },
+      { label: "cache hit", value: "25.0%" },
+      { label: "subagents", value: "1" },
+      { label: "generation", value: "11.0 tok/s" },
+    ]);
+  });
+  it("reports the quota unavailable when either boundary sample carries no outcome", () => {
+    expect(accountingFacts({ ...accounting, usageAtEnd: { ...accounting.usageAtEnd!, outcome: { kind: "unavailable", reason: "no sample" } } })[0])
+      .toEqual({ label: "5h quota", value: "unavailable" });
+  });
+  it("reports the generation rate unavailable when the turn measured no duration", () => {
+    const facts = accountingFacts({ ...accounting, timing: { ...accounting.timing!, promptToResultMs: 0 } });
+    expect(facts.find((fact) => fact.label === "generation")).toEqual({ label: "generation", value: "unavailable" });
+  });
+  it("reports the cache hit rate unavailable when the reconciliation carries none", () => {
+    const reconciliation = { ...accounting.reconciliation!, responseAllAgents: { ...accounting.reconciliation!.responseAllAgents!, cacheRates: undefined } };
+    const facts = accountingFacts({ ...accounting, reconciliation });
+    expect(facts.find((fact) => fact.label === "cache hit")).toEqual({ label: "cache hit", value: "unavailable" });
   });
   it("makes invalid accounting loud without requiring absent partial evidence", () => {
-    expect(accountingSummary(invalidAccounting)).toContain("INVALID ACCOUNTING: tokenLedgerMismatch · runtime absent");
+    expect(accountingFacts(invalidAccounting)).toEqual([
+      { label: "verdict", value: "INVALID ACCOUNTING" },
+      { label: "problems", value: "tokenLedgerMismatch" },
+      { label: "missing evidence", value: "runtime, timing, usage start, usage end, reconciliation" },
+    ]);
     expect(latestTurnAccounting([{ kind: "result", subtype: "success", durationMs: 0, numTurns: 0, totalCostUsd: 0, usage: { input_tokens: 0, output_tokens: 0 }, isError: false, context: null, turnAccounting: accounting }])).toBe(accounting);
+  });
+  it("names only the evidence an incomplete turn is actually missing", () => {
+    expect(accountingFacts({ ...accounting, reconciliation: undefined })).toEqual([
+      { label: "verdict", value: "INCOMPLETE ACCOUNTING" },
+      { label: "missing evidence", value: "reconciliation" },
+    ]);
+  });
+  it("joins the facts into one line for a record that cannot carry a grid", () => {
+    expect(accountingFactsLine([{ label: "input", value: "11" }, { label: "output", value: "22" }]))
+      .toBe("input 11 · output 22");
   });
 });
 
 describe("the degraded-accounting log record", () => {
   it("warns once with the turn identity when an invalid verdict is drawn", () => {
-    accountingSummary(invalidAccounting);
+    accountingFacts(invalidAccounting);
 
     expect(records()).toEqual([{
       level: "warn",
@@ -87,7 +124,7 @@ describe("the degraded-accounting log record", () => {
   });
 
   it("names the absent evidence when an incomplete verdict is drawn", () => {
-    accountingSummary({ ...accounting, reconciliation: undefined });
+    accountingFacts({ ...accounting, reconciliation: undefined });
 
     expect(records()).toEqual([{
       level: "warn",
@@ -101,22 +138,22 @@ describe("the degraded-accounting log record", () => {
   });
 
   it("does not repeat the record when the same verdict re-renders", () => {
-    accountingSummary(invalidAccounting);
-    accountingSummary(invalidAccounting);
-    accountingSummary(invalidAccounting);
+    accountingFacts(invalidAccounting);
+    accountingFacts(invalidAccounting);
+    accountingFacts(invalidAccounting);
 
     expect(records()).toHaveLength(1);
   });
 
   it("records again when the same turn's verdict changes", () => {
-    accountingSummary({ ...accounting, reconciliation: undefined });
-    accountingSummary(invalidAccounting);
+    accountingFacts({ ...accounting, reconciliation: undefined });
+    accountingFacts(invalidAccounting);
 
     expect(records().map((record) => record.verdict)).toEqual(["incomplete", "invalid"]);
   });
 
   it("keeps a complete verdict off the warning channel", () => {
-    accountingSummary(accounting);
+    accountingFacts(accounting);
 
     expect(records()).toEqual([]);
   });
