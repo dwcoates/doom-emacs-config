@@ -58,7 +58,6 @@ import { mergeStatusLogValue } from "./merge-status.js";
 import { previewBlockId, recordBlockIdentity } from "./streaming.js";
 import type { FencedComponentView } from "./fence.js";
 import type {
-  ContextClearedItem,
   ContextCompactedItem,
   ConversationItem,
   FailureCardItem,
