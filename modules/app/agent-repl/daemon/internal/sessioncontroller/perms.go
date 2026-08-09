@@ -163,18 +163,48 @@ func (p *permRegistry) idsForWorkspace(workspace string) []string {
 	return ids
 }
 
-// answer delivers a decision to every caller parked on requestID, returning an
-// error when no such request is pending (a stale or double answer — surfaced,
-// never swallowed). allow selects ALLOW vs DENY; denyMessage and updatedInput
-// ride along per the canUseTool contract. The decision is also recorded, so a
-// re-send that crosses the answer is served it rather than re-asked.
-func (p *permRegistry) answer(requestID string, allow bool, denyMessage string, updatedInput *structpb.Struct) error {
-	resp := buildPermissionResponse(requestID, allow, denyMessage, updatedInput)
+// answerAllow releases the parked waiter for requestID as a GRANT.
+// updatedInput rides along as the allow-with-edits Struct per the canUseTool
+// contract. A stale or duplicate answer is a loud error, never swallowed.
+func (p *permRegistry) answerAllow(requestID string, updatedInput *structpb.Struct) error {
+	return p.resolve(requestID, buildPermissionResponse(requestID, true, "", updatedInput))
+}
+
+// answerDecline releases the parked waiter for requestID as a DENIAL, carrying
+// denyMessage as the recorded reason. A stale or duplicate answer is a loud
+// error, never swallowed.
+//
+// A DECLINE SENDS NOTHING TO THE SHIM. permHandler returns a nil response for a
+// denied request, so this call resolves the daemon's own bookkeeping and
+// nothing else; the shim's canUseTool is released by the STOP that accompanies
+// every decline, which is what makes a decline mean what an interrupt means
+// (permdecline.go). Calling this without that stop would leave the shim blocked
+// on a question nobody is going to answer, which is why declinePermissions is
+// its only caller.
+func (p *permRegistry) answerDecline(requestID, denyMessage string) error {
+	return p.resolve(requestID, buildPermissionResponse(requestID, false, denyMessage, nil))
+}
+
+// resolve hands resp to EVERY caller parked on requestID, returning an error
+// when no such request is pending (a stale or double answer — surfaced, never
+// swallowed). A GRANT is also recorded, so a re-send that crosses the answer is
+// served it rather than re-asked.
+//
+// ONLY A GRANT IS RECORDED. A decline is not an answer to replay: it is a stop
+// (permdecline.go), and nothing was sent to the shim for it. A shim re-asking a
+// declined request is one whose canUseTool outlived the stop — the stop failed
+// to reach it, or a daemon died between the two — and serving it the recorded
+// denial would unblock the tool call and let the agent carry on, which is the
+// exact behavior the decline exists to end. It is re-asked instead, so the user
+// answers a live question and their answer stops the turn again.
+func (p *permRegistry) resolve(requestID string, resp *corev1.PermissionResponse) error {
 	p.mu.Lock()
 	w, ok := p.waiters[requestID]
 	if ok {
 		delete(p.waiters, requestID)
-		p.rememberAnswered(requestID, resp)
+		if resp.GetDecision() == corev1.PermissionDecision_PERMISSION_DECISION_ALLOW {
+			p.rememberAnswered(requestID, resp)
+		}
 	}
 	p.mu.Unlock()
 	if !ok {
