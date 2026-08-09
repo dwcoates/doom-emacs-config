@@ -1041,7 +1041,7 @@ Only a DIFFERENT session's terminal view is a superseded predecessor."
     (clrhash agent-repl--frontend-session-inits)
     ;; Act
     (agent-repl--frontend-apply-session-init
-     '(:sessionId "s_1" :workspace "/w" :init (:slashCommands ("commit" "review"))))
+     '(:fence "f_1" :workspace "/w" :init (:slashCommands ("commit" "review"))))
     ;; Assert
     (should (equal (plist-get (agent-repl--frontend-session-init "/w") :slashCommands)
                    '("commit" "review")))))
@@ -1050,7 +1050,7 @@ Only a DIFFERENT session's terminal view is a superseded predecessor."
   "A SessionInitView with no workspace fails loudly (No-Silent-Fallbacks)."
   ;; Arrange / Act / Assert
   (should-error (agent-repl--frontend-store-session-init
-                 '(:sessionId "s_1" :init (:slashCommands ())))))
+                 '(:fence "f_1" :init (:slashCommands ())))))
 
 (ert-deftest agent-repl-test-session-init-nil-for-unknown ()
   "The session-init accessor returns nil for a session with no pushed init."
@@ -1408,7 +1408,7 @@ first."
       (clrhash agent-repl--frontend-session-inits)
       ;; Act / Assert
       (should (agent-repl--frontend-apply-session-init
-               '(:sessionId "s_init_unowned" :workspace "/nowhere/unowned"
+               '(:fence "f_init_unowned" :workspace "/nowhere/unowned"
                  :init (:slashCommands nil :skills nil)))))))
 
 (provide 'test-frontend-state)
