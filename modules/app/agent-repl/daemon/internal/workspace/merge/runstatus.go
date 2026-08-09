@@ -372,13 +372,27 @@ func (r *RunStatus) CommitsLanded() int32 {
 }
 
 // Testing publishes the testing phase for the run's landed commits, gated as one
-// tree at the rebased head. It carries the SAME commit context cherry_picking
-// did, which is what lets a frontend render one progress figure across both.
-func (r *RunStatus) Testing(cause string) error {
+// tree at the rebased head, and records that head as the run's current commit.
+//
+// THE ARM NAMES THE HEAD THE GATE JUDGES. It used to carry whatever commit
+// cherry_picking last named — the last PLANNED pick — on the reasoning that the
+// two share one cursor. They do share the counts, and those are unchanged here.
+// They do not share the commit: the gate runs on the rebased HEAD, and after a
+// remediation turn's fix commit that head is not the last planned pick at all, so
+// the arm pointed at a commit the suite was demonstrably not run on. The head the
+// caller hands in is the same one its cause text describes, so the arm's
+// current_subject and the sentence beside it can never name two commits.
+func (r *RunStatus) Testing(head PlannedCommit, cause string) error {
+	r.mu.Lock()
+	r.currentShort, r.currentSubject = head.Short, head.Subject
+	r.mu.Unlock()
 	return r.publish(PhaseMerging, cause, func(s *frontendv1.MergeStatus) {
 		s.Phase = &frontendv1.MergeStatus_Testing{Testing: &frontendv1.MergeStatusTesting{
-			CommitsTotal:   r.commitsTotal,
-			CommitsLanded:  r.commitsLanded,
+			CommitsTotal:  r.commitsTotal,
+			CommitsLanded: r.commitsLanded,
+			// current_sha is the INTERNAL correlation handle for the gated head;
+			// current_subject is what any sentence about it says. A frontend that
+			// renders the sha into prose is rendering the wrong field.
 			CurrentSha:     r.currentShort,
 			CurrentSubject: r.currentSubject,
 		}}
@@ -432,6 +446,14 @@ func (r *RunStatus) Merged(afterActionErr, cause string) error {
 
 // Failed publishes the TERMINAL failed phase, carrying the commit context the
 // run died with so a user can see how far it got.
+//
+// THE COMMIT IT NAMES IS WHATEVER THE RUN WAS LAST WORKING ON, and that is now
+// the right commit at the moment it matters most. A run that dies at its test
+// gate is the common case, and Testing above records the gated HEAD — so the
+// failed arm names the tree the suite actually judged rather than the last
+// planned pick, which after a fix commit is neither the failing tree nor
+// anything the user can act on. failing_sha is the correlation handle;
+// failing_subject is what the cause and every rendering of it say.
 func (r *RunStatus) Failed(cause string) error {
 	return r.publish(PhaseMergeFailed, cause, func(s *frontendv1.MergeStatus) {
 		s.Phase = &frontendv1.MergeStatus_Failed{Failed: &frontendv1.MergeStatusFailed{

@@ -1476,10 +1476,6 @@ func (c *QueueCoordinator) runBeforeAction(repo string, req Request) *terminalFa
 func (c *QueueCoordinator) settle(repo string, req, driven Request, park *conflictPark, release func(), res Result) bool {
 	driven.WorkDir, driven.BaseHead = res.WorkDir, res.BaseHead
 	defer func() { c.cleanupRebase(repo, driven) }()
-	// attempted records which failures have already had their ONE resolution
-	// attempt, so a suite that fails again under the same identity fails the
-	// merge instead of re-prompting an agent that already tried.
-	attempted := map[string]bool{}
 	for {
 		switch res.Outcome {
 		case OutcomeConflict:
@@ -1493,7 +1489,7 @@ func (c *QueueCoordinator) settle(repo string, req, driven Request, park *confli
 			driven.WorkDir, driven.BaseHead = res.WorkDir, res.BaseHead
 		case OutcomeTestFailed:
 			c.logf("merge: test gate failed {repo=%s ws=%s name=%s commit=%s}", repo, req.Workspace, req.Name, res.FailingCommit)
-			next, handled, cont := c.awaitTestFix(repo, req, driven, park, release, res, attempted)
+			next, handled, cont := c.awaitTestFix(repo, req, driven, park, release, res)
 			if handled {
 				return cont
 			}
@@ -1593,16 +1589,22 @@ func (c *QueueCoordinator) awaitResolution(repo string, req, driven Request, par
 	}
 }
 
-// awaitTestFix drives the ONE resolution attempt a broken test suite gets, and
-// reports what the merge should do next.
+// awaitTestFix drives ONE remediation turn for a broken test suite and reports
+// what the merge should do next. settle calls it again for every subsequent
+// failure, so the pair of them IS the remediation loop.
 //
-// EXACTLY ONE ATTEMPT PER FAILURE, keyed on Result.FailingCommit. A second
-// identical prompt to an agent that already failed to fix the suite is a spin,
-// not a strategy, so a repeat failure under the same identity fails the merge
-// outright. The gate runs once per merge, at the rebased head, and the driver
-// holds that identity STABLE across the re-gate the fix triggers — the fix
-// commit moves the head, and a fresh sha per attempt would make this map hand
-// out attempts without bound.
+// THERE IS NO ATTEMPT BUDGET, and its absence is the contract. The loop used to
+// grant exactly one attempt per failure identity, which is a counter standing in
+// for a judgement: it refused a second honest try at a failure the agent had
+// half-fixed, and it would have granted a hundredth pointless one at a failure
+// nothing short of a redesign can fix. So the loop turns until the gate PASSES or
+// until the resolving agent ESCALATES — Result.TestFailureEscalation, the agent's
+// own statement that a correct fix needs non-trivial architectural work — which
+// is the one party that can tell those two cases apart. A turn that neither fixes
+// nor escalates is simply one more iteration: the tree is re-gated as it stands,
+// the same failure re-prompts, and the merge is bounded by the agent's judgement
+// and by the session controller's turn-liveness bounds rather than by a number
+// chosen here.
 //
 // THE ATTEMPT RUNS ON ITS OWN GOROUTINE even though nothing else needs to serve
 // the park meanwhile. That is what keeps an Abandon responsive: closing the
@@ -1610,13 +1612,12 @@ func (c *QueueCoordinator) awaitResolution(repo string, req, driven Request, par
 // the re-run finish. The attempt's context is cancelled on that abandon, so the
 // cancelled fix cannot go on cherry-picking into a target the merge has already
 // given up.
-func (c *QueueCoordinator) awaitTestFix(repo string, req, driven Request, park *conflictPark, release func(), res Result, attempted map[string]bool) (Result, bool, bool) {
-	if attempted[res.FailingCommit] {
-		c.logf("merge: test failure NOT RE-ATTEMPTED {repo=%s ws=%s name=%s commit=%s} — its one resolution attempt already ran and the suite still fails",
-			repo, req.Workspace, req.Name, res.FailingCommit)
+func (c *QueueCoordinator) awaitTestFix(repo string, req, driven Request, park *conflictPark, release func(), res Result) (Result, bool, bool) {
+	if res.TestFailureEscalation != "" {
+		c.logf("merge: test failure ESCALATED {repo=%s ws=%s name=%s} — the resolving agent judges a correct fix to need non-trivial architectural work, so the loop stops on its judgement rather than on a counter: %s",
+			repo, req.Workspace, req.Name, dlog.Clamp(res.TestFailureEscalation, testFailureCauseBytes))
 		return Result{}, true, c.failTestGate(repo, req, driven, release, res)
 	}
-	attempted[res.FailingCommit] = true
 
 	fix := TestFailureResolution{
 		Workspace:     req.Workspace,
@@ -1708,8 +1709,23 @@ func (c *QueueCoordinator) driveTestFix(ctx context.Context, repo string, req Re
 // function reset the target to its pre-merge head, which is the hazard the
 // rebase design removed rather than guarded.
 func (c *QueueCoordinator) failTestGate(repo string, req, driven Request, release func(), res Result) bool {
-	cause := fmt.Sprintf("test suite failed on the rebased head %s and the one resolution attempt did not fix it: %s",
-		res.FailingCommit, dlog.Clamp(res.TestFailureTail, testFailureCauseBytes))
+	// THE CAUSE NAMES THE SUBJECT AND NEVER A SHA. This is the sentence a user
+	// reads when their merge dies, and a twelve-character prefix names nothing to
+	// them; the commit's own subject line does. The sha rides the failed status's
+	// failing_sha field, which is where a tool reads it.
+	var cause string
+	switch {
+	case res.TestFailureEscalation != "":
+		// THE AGENT'S OWN WORDS ARE THE CAUSE. It is the only party that examined
+		// the failure, and paraphrasing its verdict into a house sentence would
+		// throw away the one piece of information the user needs: WHY a correct
+		// fix needs architectural work.
+		cause = fmt.Sprintf("the test suite failed on the rebased head (%s) and the resolving agent escalated rather than fixing it: %s",
+			res.FailingSubject, dlog.Clamp(res.TestFailureEscalation, testFailureCauseBytes))
+	default:
+		cause = fmt.Sprintf("test suite failed on the rebased head (%s): %s",
+			res.FailingSubject, dlog.Clamp(res.TestFailureTail, testFailureCauseBytes))
+	}
 	// The tail is clamped twice over and, for a runner that keeps going after a
 	// suite fails, often carries no trace of the failure itself. The archive is
 	// the only complete record, so the cause names it rather than leaving the
