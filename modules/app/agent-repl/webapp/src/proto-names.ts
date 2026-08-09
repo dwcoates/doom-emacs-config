@@ -44,7 +44,10 @@ import type { FrontendCommand as GeneratedFrontendCommand } from "../../proto/ge
 import type {
   HibernationDetail as GeneratedHibernationDetail,
   ReviveSessionCmd as GeneratedReviveSessionCmd,
+  WorkspaceGateView as GeneratedWorkspaceGateView,
 } from "../../proto/gen/ts/agentshim/frontend/v1/gate-revival_pb";
+import type { FailureKind as GeneratedFailureKind } from "../../proto/gen/ts/agentshim/frontend/v1/errors_pb";
+import type { FailureCardView as GeneratedFailureCardView } from "../../proto/gen/ts/agentshim/frontend/v1/failure-card_pb";
 import type {
   QueueEntry as GeneratedQueueEntry,
   QueueEntryKeepAliveHold as GeneratedQueueEntryKeepAliveHold,
@@ -185,3 +188,122 @@ export const PROMPT_ORIGIN_WEBAPP_USER_SENT = promptOriginName("WEBAPP_USER_SENT
 
 /** A prompt a card's own control sent on the user's behalf. */
 export const PROMPT_ORIGIN_WEBAPP_CARD_ACTION = promptOriginName("WEBAPP_CARD_ACTION");
+
+/**
+ * `WorkspaceGateView.gate` arm keys — WHETHER prompts may be sent right now.
+ *
+ * The arm IS the gate: there is no boolean beside it that could disagree, and a
+ * view with neither arm is a malformed frame rather than an implied "open".
+ */
+export const WORKSPACE_GATE_ARM = {
+  open: "open",
+  hibernated: "hibernated",
+} as const satisfies Record<
+  ArmKeys<GeneratedWorkspaceGateView["gate"]>,
+  ArmKeys<GeneratedWorkspaceGateView["gate"]>
+>;
+
+/**
+ * `FailureCardView.lifecycle` arm keys — HOW a failure card ends.
+ *
+ * A window-shaped failure re-arrives under the SAME `ConversationItem.uuid`
+ * with a different arm here, and the feed reconciles it in place, so an alarm
+ * and its own all-clear can never stand beside each other.
+ */
+export const FAILURE_CARD_LIFECYCLE_ARM = {
+  open: "open",
+  resolved: "resolved",
+  terminal: "terminal",
+} as const satisfies Record<
+  ArmKeys<GeneratedFailureCardView["lifecycle"]>,
+  ArmKeys<GeneratedFailureCardView["lifecycle"]>
+>;
+
+/**
+ * Which SIDE of the failure vocabulary a `FailureKind` arm belongs to.
+ *
+ * `errors.proto` states the rule in prose — every arm belongs to exactly one
+ * side, machinery or vendor, and each arm's comment names the color that side
+ * resolves the workspace to. This is that rule as data, and it is the ONLY
+ * place the webapp decides a failure's side.
+ *
+ * It is keyed by the generated `FailureKind.kind` case union, so the record is
+ * EXHAUSTIVE by construction: a new arm on the wire fails `npm run typecheck`
+ * here until somebody states which side it is on, rather than falling through
+ * to a neutral tone that would paint a vendor block in the machinery's color.
+ *
+ * The CLIENT-LOCAL arms (100+) are machinery too: a frontend can only ever
+ * observe its OWN plumbing failing.
+ */
+export type FailureSide = "machinery" | "vendor";
+
+export const FAILURE_KIND_SIDE = {
+  // ---- MACHINERY (blue): agent-repl's own plumbing did not work. ----
+  shimNotConnected: "machinery",
+  shimRejected: "machinery",
+  shimAckTimeout: "machinery",
+  shimVersionMismatch: "machinery",
+  shimSeqRegression: "machinery",
+  shimDegraded: "machinery",
+  shimStoreWriteRejected: "machinery",
+  queryTermination: "machinery",
+  shimNotSpawned: "machinery",
+  shimHandshakeIncomplete: "machinery",
+  shimUnhealthy: "machinery",
+  sessionNotEstablished: "machinery",
+  workspaceNotLive: "machinery",
+  sessionDeleted: "machinery",
+  sessionSuperseded: "machinery",
+  reconnectSuperseded: "machinery",
+  sessionShimDied: "machinery",
+  sessionStartFailed: "machinery",
+  sessionResumeFailed: "machinery",
+  conversationUnresumable: "machinery",
+  resumeModeRetired: "machinery",
+  sessionEndedUnclassified: "machinery",
+  historyRepullInFlight: "machinery",
+  historyReplayTruncated: "machinery",
+  interruptUndelivered: "machinery",
+  queueEntryUnwired: "machinery",
+  queueEntryKeepAliveHeld: "machinery",
+  sessionHibernated: "machinery",
+  keepAliveWindowUnclosed: "machinery",
+  keepAliveWindowInverted: "machinery",
+  compactionColdRead: "machinery",
+  clientLogIdentityStale: "machinery",
+  internalUnclassified: "machinery",
+
+  // ---- VENDOR (purple): the SDK or the vendor refused or concluded it. ----
+  apiAuthenticationFailed: "vendor",
+  apiBillingError: "vendor",
+  apiRateLimit: "vendor",
+  apiInvalidRequest: "vendor",
+  apiServerError: "vendor",
+  apiOverloaded: "vendor",
+  apiOauthOrgNotAllowed: "vendor",
+  apiModelNotFound: "vendor",
+  apiNetworkDown: "vendor",
+  apiRequestFailed: "vendor",
+  apiUnknown: "vendor",
+  apiMaxOutputTokens: "vendor",
+  apiMaxTurns: "vendor",
+  apiMaxBudget: "vendor",
+  apiExecutionError: "vendor",
+  apiRefusal: "vendor",
+  apiTurnFailed: "vendor",
+
+  // ---- CLIENT-LOCAL (blue): the frontend's own machinery. ----
+  daemonUnreachable: "machinery",
+  workspaceGone: "machinery",
+  bootFailed: "machinery",
+  controlPlaneFailed: "machinery",
+  frameUndecodable: "machinery",
+  staleBundle: "machinery",
+  commandUnsent: "machinery",
+  commandRejectionUnclassified: "machinery",
+} as const satisfies Record<ArmKeys<GeneratedFailureKind["kind"]>, FailureSide>;
+
+/** Every `FailureKind` arm key the daemon or this frontend may set. */
+export const FAILURE_KIND_ARMS: readonly ArmKeys<GeneratedFailureKind["kind"]>[] = Object.keys(
+  FAILURE_KIND_SIDE,
+) as ArmKeys<GeneratedFailureKind["kind"]>[];
