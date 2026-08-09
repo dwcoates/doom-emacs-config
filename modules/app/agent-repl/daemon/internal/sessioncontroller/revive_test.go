@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -153,7 +154,7 @@ func TestReviveSessionCompactFirstStaysGatedUntilCompactionLands(t *testing.T) {
 
 // THE CLAIM IS HELD PAST THE ACK. The compaction is still pending, so a second
 // ReviveSessionCmd must still be nacked: admitting it would arm a second waiter
-// over the first one's, which is the strand armCompactionWait refuses.
+// over the first one's, which is the strand armCutWait refuses.
 func TestReviveSessionCompactFirstHoldsTheClaimWhileTheCompactionIsPending(t *testing.T) {
 	// Arrange.
 	m, _, _ := reviveRig(t, registry.HibernationCauseIdleCutoff)
@@ -292,11 +293,11 @@ func TestReviveSessionCompactFirstDisarmsTheWaiterWhenTheCompactionTimesOut(t *t
 	m.mu.Lock()
 	d := m.byWS["ws"]
 	m.mu.Unlock()
-	_, disarm, err := m.armCompactionWait(d)
+	_, disarm, err := m.armCutWait(d, mustCut(ReviveModeCompactAll))
 
 	// Assert.
 	if err != nil {
-		t.Fatalf("armCompactionWait after a timed-out compaction = %v, want the slot free", err)
+		t.Fatalf("armCutWait after a timed-out compaction = %v, want the slot free", err)
 	}
 	disarm()
 }
@@ -411,6 +412,169 @@ func TestReviveSessionCompactFirstStaysGatedWhenTheGateReleaseFails(t *testing.T
 	// Assert.
 	if detail, asleep := hib.HibernationOf("s1"); !asleep || detail.Cause == "" {
 		t.Fatalf("hibernation detail = %+v after a failed gate release, want the session STILL gated", detail)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// CLEAR: the third revival mode, and the second GATED one
+// ---------------------------------------------------------------------------
+//
+// It is compact-first's shape with a different cut: bring up while the record
+// still says hibernated, submit `/clear`, and release the gate only when the
+// CLEARING axis closes. What it must NOT share is the compaction's cold-read
+// claim — `/clear` is not a model call — and the compacted waiter, which
+// belongs to a decision the user did not make.
+
+// TestReviveSessionClearSubmitsTheClearCommand pins the submitted text. The
+// mode's whole content is which session command it runs, so a `/compact`
+// submitted here would summarize a conversation the user asked to discard.
+func TestReviveSessionClearSubmitsTheClearCommand(t *testing.T) {
+	// Arrange.
+	m, _, _ := reviveRig(t, registry.HibernationCauseIdleCutoff)
+
+	// Act.
+	if err := m.ReviveSession(context.Background(), "ws", ReviveModeClear); err != nil {
+		t.Fatalf("ReviveSession clear: %v", err)
+	}
+
+	// Assert.
+	if got := lastPromptText(t, m, "ws"); got != clearCommandText {
+		t.Fatalf("submitted prompt = %q, want %q", got, clearCommandText)
+	}
+}
+
+// The submitted turn carries the clear revival's OWN id prefix, so a log line
+// and the durable ledger both say which revival produced the turn.
+func TestReviveSessionClearSubmitsUnderItsOwnRequestIDPrefix(t *testing.T) {
+	// Arrange.
+	m, _, _ := reviveRig(t, registry.HibernationCauseIdleCutoff)
+
+	// Act.
+	if err := m.ReviveSession(context.Background(), "ws", ReviveModeClear); err != nil {
+		t.Fatalf("ReviveSession clear: %v", err)
+	}
+
+	// Assert.
+	got := lastPromptRequestID(t, m, "ws")
+	if !strings.HasPrefix(got, "revive-clear:") {
+		t.Fatalf("request id = %q, want the revive-clear prefix", got)
+	}
+}
+
+// CLEAR STAYS GATED UNTIL THE CLEAR LANDS, on compact-first's mechanism: the
+// durable record is what stands the gate up, so a prompt cannot slip in ahead
+// of the cut and be answered against the whole context the cut discards.
+func TestReviveSessionClearStaysGatedUntilTheClearLands(t *testing.T) {
+	// Arrange.
+	m, _, hib := reviveRig(t, registry.HibernationCauseIdleCutoff)
+	if err := m.ReviveSession(context.Background(), "ws", ReviveModeClear); err != nil {
+		t.Fatalf("ReviveSession clear: %v", err)
+	}
+	signal := awaitCutWaiter(t, m, "ws", ReviveModeClear)
+
+	// Assert the gate before the clear is reported.
+	if detail, asleep := hib.HibernationOf("s1"); !asleep || detail.Cause == "" {
+		t.Fatalf("hibernation detail = %+v while the clear is still running, want the session STILL gated", detail)
+	}
+
+	// Act.
+	signal()
+
+	// Assert.
+	awaitGateReleased(t, hib, "s1")
+}
+
+// THE TWO CUTS DO NOT RELEASE EACH OTHER. A compaction completing while a CLEAR
+// revival is pending is some other producer's compaction, and letting it open
+// the gate would admit prompts against a conversation `/clear` never discarded.
+func TestReviveSessionClearIgnoresACompactionCompletion(t *testing.T) {
+	// Arrange.
+	m, _, hib := reviveRig(t, registry.HibernationCauseIdleCutoff)
+	if err := m.ReviveSession(context.Background(), "ws", ReviveModeClear); err != nil {
+		t.Fatalf("ReviveSession clear: %v", err)
+	}
+	awaitCutWaiter(t, m, "ws", ReviveModeClear)
+
+	// Act — the COMPACTED axis closes, which no clear revival asked about.
+	if fire := cutWaiterFor(m, "ws", ReviveModeCompactAll); fire != nil {
+		t.Fatal("a clear revival armed the compaction waiter; the two cuts must not share a slot")
+	}
+
+	// Assert.
+	if detail, asleep := hib.HibernationOf("s1"); !asleep || detail.Cause == "" {
+		t.Fatalf("hibernation detail = %+v, want the clear revival STILL gated", detail)
+	}
+}
+
+// A CLEAR TAKES NO COLD-READ CLAIM. `/clear` reads nothing, so a claim over it
+// would hand the NEXT turn's input cost to a turn that never read the
+// conversation — the exact misattribution the claim exists to prevent.
+func TestReviveSessionClearTakesNoCompactionClaim(t *testing.T) {
+	// Arrange.
+	m, _, _ := reviveRig(t, registry.HibernationCauseIdleCutoff)
+
+	// Act.
+	if err := m.ReviveSession(context.Background(), "ws", ReviveModeClear); err != nil {
+		t.Fatalf("ReviveSession clear: %v", err)
+	}
+
+	// Assert.
+	m.mu.Lock()
+	claim := m.byWS["ws"].daemonCompaction
+	m.mu.Unlock()
+	if claim != nil {
+		t.Fatalf("daemon compaction claim = %+v after a clear revival, want none", claim)
+	}
+}
+
+// A CLEAR THAT NEVER LANDS LEAVES THE SESSION GATED, on the same last-step
+// ordering compact-first has: the record is cleared only on the completion
+// signal, so a `/clear` the CLI never carried out cannot end ungated.
+func TestReviveSessionClearStaysGatedWhenTheClearTimesOut(t *testing.T) {
+	// Arrange.
+	m, _, hib := reviveRig(t, registry.HibernationCauseIdleCutoff)
+	m.mu.Lock()
+	m.reviveCompactBoundOverride = time.Millisecond
+	m.mu.Unlock()
+
+	// Act — never signal completion, so the bound is what ends the wait.
+	if err := m.ReviveSession(context.Background(), "ws", ReviveModeClear); err != nil {
+		t.Fatalf("ReviveSession clear: %v", err)
+	}
+	awaitClaimFree(t, m, "ws")
+
+	// Assert.
+	if detail, asleep := hib.HibernationOf("s1"); !asleep || detail.Cause == "" {
+		t.Fatalf("hibernation detail = %+v after a clear that timed out, want the session STILL gated", detail)
+	}
+}
+
+// A SUBMIT THAT FAILED NEVER REACHES THE ACK, so the caller learns the session
+// is still asleep instead of being told a clear ran that never did.
+func TestReviveSessionClearStaysGatedWhenTheSubmitFails(t *testing.T) {
+	// Arrange.
+	m, _, hib := reviveRig(t, registry.HibernationCauseIdleCutoff)
+	c := fakeClientFor(t, m, "ws")
+	c.mu.Lock()
+	c.submitErrOnce = errors.New("shim refused the clear")
+	c.mu.Unlock()
+
+	// Act.
+	err := m.ReviveSession(context.Background(), "ws", ReviveModeClear)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("a refused clear submit reported success; a clear revival must never ack a clear that was never submitted")
+	}
+	if detail, asleep := hib.HibernationOf("s1"); !asleep || detail.Cause == "" {
+		t.Fatalf("hibernation detail = %+v after a refused submit, want the session STILL gated", detail)
+	}
+}
+
+// The mode's own name, which every revival log line carries.
+func TestReviveModeClearString(t *testing.T) {
+	if got := ReviveModeClear.String(); got != "clear" {
+		t.Fatalf("ReviveModeClear.String() = %q, want %q", got, "clear")
 	}
 }
 
@@ -540,76 +704,98 @@ func TestReviveSessionReleasesTheClaim(t *testing.T) {
 // A SECOND ARM IS A LOUD REFUSAL, not an overwrite. The claim above makes this
 // unreachable; it is kept as the fail-hard detection, because overwriting would
 // strand the first revival on a channel nothing will ever close.
-func TestArmCompactionWaitRefusesToOverwriteAnExistingWaiter(t *testing.T) {
+func TestArmCutWaitRefusesToOverwriteAnExistingWaiter(t *testing.T) {
 	// Arrange.
 	m, _, _ := reviveRig(t, registry.HibernationCauseIdleCutoff)
 	m.mu.Lock()
 	d := m.byWS["ws"]
 	m.mu.Unlock()
-	if _, _, err := m.armCompactionWait(d); err != nil {
-		t.Fatalf("first armCompactionWait: %v", err)
+	if _, _, err := m.armCutWait(d, mustCut(ReviveModeCompactAll)); err != nil {
+		t.Fatalf("first armCutWait: %v", err)
 	}
 
 	// Act.
-	_, _, err := m.armCompactionWait(d)
+	_, _, err := m.armCutWait(d, mustCut(ReviveModeCompactAll))
 
 	// Assert.
 	if err == nil {
-		t.Fatal("a second armCompactionWait = nil, want a refusal; overwriting strands the revival that owns the first waiter")
+		t.Fatal("a second armCutWait = nil, want a refusal; overwriting strands the revival that owns the first waiter")
 	}
 }
 
 // THE DISARM RETIRES THE WAITER, so a later revival of the same session can arm
 // its own. A refusal that never cleared would make the first compact-first
 // revival the only one this controller could ever serve.
-func TestArmCompactionWaitDisarmFreesTheSlot(t *testing.T) {
+func TestArmCutWaitDisarmFreesTheSlot(t *testing.T) {
 	// Arrange.
 	m, _, _ := reviveRig(t, registry.HibernationCauseIdleCutoff)
 	m.mu.Lock()
 	d := m.byWS["ws"]
 	m.mu.Unlock()
-	_, disarm, err := m.armCompactionWait(d)
+	_, disarm, err := m.armCutWait(d, mustCut(ReviveModeCompactAll))
 	if err != nil {
-		t.Fatalf("first armCompactionWait: %v", err)
+		t.Fatalf("first armCutWait: %v", err)
 	}
 	disarm()
 
 	// Act.
-	_, _, err = m.armCompactionWait(d)
+	_, _, err = m.armCutWait(d, mustCut(ReviveModeCompactAll))
 
 	// Assert.
 	if err != nil {
-		t.Fatalf("armCompactionWait after a disarm = %v, want the slot free", err)
+		t.Fatalf("armCutWait after a disarm = %v, want the slot free", err)
 	}
 }
 
-// awaitCompactionWaiter blocks until the revival has armed its compaction wait
-// and returns the func that fires the completion signal.
+// mustCut is MODE's context cut, or a panic: every caller here names a mode the
+// table has, so an error means the test named something that is not a gated
+// revival at all — a fault in the test, not a case to handle.
+func mustCut(mode ReviveMode) reviveCut {
+	cut, err := mode.cut()
+	if err != nil {
+		panic(err)
+	}
+	return cut
+}
+
+// awaitCutWaiter blocks until the revival has armed the wait for MODE's context
+// cut and returns the func that fires that cut's completion signal.
 //
 // It rendezvouses on the ARMED CALLBACK rather than on a clock: the callback is
-// installed under the manager mutex before the compaction is submitted, so its
+// installed under the manager mutex before the cut is submitted, so its
 // presence is the exact moment the revival is waiting, and nothing else has to
 // be timed.
-func awaitCompactionWaiter(t *testing.T, m *Manager, workspace string) func() {
+func awaitCutWaiter(t *testing.T, m *Manager, workspace string, mode ReviveMode) func() {
 	t.Helper()
 	for {
-		if signal := compactionWaiter(m, workspace); signal != nil {
+		if signal := cutWaiterFor(m, workspace, mode); signal != nil {
 			return signal
 		}
 		runtime.Gosched()
 	}
 }
 
-// compactionWaiter reports the armed completion callback, or nil when none is
-// installed. It is the single read awaitCompactionWaiter spins on.
-func compactionWaiter(m *Manager, workspace string) func() {
+// cutWaiterFor reports the armed completion callback for MODE's cut, or nil
+// when none is installed. It is the single read awaitCutWaiter spins on.
+func cutWaiterFor(m *Manager, workspace string, mode ReviveMode) func() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	d, live := m.byWS[workspace]
 	if !live || d.consumer == nil {
 		return nil
 	}
-	return d.consumer.onContextCompacted
+	return mustCut(mode).waiter(d.consumer).fire
+}
+
+// awaitCompactionWaiter and compactionWaiter name the compact-first cut, which
+// is the one the bulk of this suite drives.
+func awaitCompactionWaiter(t *testing.T, m *Manager, workspace string) func() {
+	t.Helper()
+	return awaitCutWaiter(t, m, workspace, ReviveModeCompactAll)
+}
+
+func compactionWaiter(m *Manager, workspace string) func() {
+	return cutWaiterFor(m, workspace, ReviveModeCompactAll)
 }
 
 // awaitClaimFree blocks until the workspace's revival claim is released.
