@@ -84,7 +84,112 @@ type shutdownWorld struct {
 	// stateDir holds the state database AND the merge queue, so a second boot
 	// finds what the first wrote.
 	stateDir string
+	// shimLog is the world's tap on the stderr of every shim its daemons spawn.
+	// A bounce test that must destroy a daemon AT a particular point in the
+	// shim's own processing has no other vantage: the daemon-side ack for the
+	// command it is racing does not exist yet by construction.
+	shimLog *shimLogTap
 }
+
+// shimLogTap forwards shim stderr to the test log AND lets a test wait for a
+// line the shim emits.
+//
+// WHY A TEST NEEDS THIS. A frontend command is written and dispatched
+// ASYNCHRONOUSLY: `writeCmd` returns as soon as the websocket write completes,
+// long before the daemon has read the frame, let alone forwarded it to the
+// shim. A test that writes a command and immediately destroys the daemon is
+// therefore not arranging "the daemon died with the request in flight" — it is
+// racing the daemon's read loop, and when it loses, the command is nacked
+// ("session-controller: manager closed", "no live session for workspace") and
+// the scenario under test never happened at all. The shim's own record of
+// having RECEIVED the work is the only evidence available before the bounce,
+// because the daemon-side ack for that same command is precisely what the test
+// is arranging to lose.
+//
+// It is a rendezvous with a line the shim writes synchronously on the path
+// being arranged, not a delay: nothing here waits out a duration, and a line
+// that never comes fails at the suite's frame budget with a named reason.
+type shimLogTap struct {
+	mu      sync.Mutex
+	t       *testing.T
+	done    bool
+	seen    []string
+	waiters map[chan struct{}]string
+}
+
+func newShimLogTap(t *testing.T) *shimLogTap {
+	return &shimLogTap{t: t, waiters: make(map[chan struct{}]string)}
+}
+
+// line records one shim stderr line and releases every waiter it satisfies.
+func (tap *shimLogTap) line(format string, args ...any) {
+	text := fmt.Sprintf(format, args...)
+	tap.mu.Lock()
+	defer tap.mu.Unlock()
+	if tap.done {
+		return
+	}
+	tap.t.Logf("%s", text)
+	tap.seen = append(tap.seen, text)
+	for ch, want := range tap.waiters {
+		if strings.Contains(text, want) {
+			close(ch)
+			delete(tap.waiters, ch)
+		}
+	}
+}
+
+// finish stops the tap, for the same reason e2eSpawnLog.finish exists: the
+// stderr scanner outlives the test function and t.Logf then panics.
+func (tap *shimLogTap) finish() {
+	tap.mu.Lock()
+	defer tap.mu.Unlock()
+	tap.done = true
+	for ch := range tap.waiters {
+		close(ch)
+		delete(tap.waiters, ch)
+	}
+}
+
+// await blocks until some shim has emitted a line containing want, bounded by
+// the suite's frame budget. A line already seen satisfies it immediately, so
+// the caller cannot lose the very event it is waiting for by arriving late.
+func (tap *shimLogTap) await(t *testing.T, want, what string) {
+	t.Helper()
+	ch := make(chan struct{})
+	tap.mu.Lock()
+	for _, text := range tap.seen {
+		if strings.Contains(text, want) {
+			tap.mu.Unlock()
+			return
+		}
+	}
+	tap.waiters[ch] = want
+	tap.mu.Unlock()
+	select {
+	case <-ch:
+	case <-time.After(frameTimeout):
+		tap.mu.Lock()
+		delete(tap.waiters, ch)
+		tap.mu.Unlock()
+		t.Fatalf("no shim ever logged a line containing %q before the deadline: %s", want, what)
+	}
+}
+
+// awaitShimLog is the world-scoped form of the tap's wait.
+func (w *shutdownWorld) awaitShimLog(t *testing.T, want, what string) {
+	t.Helper()
+	w.shimLog.await(t, want, what)
+}
+
+// tapShimLogger feeds one shim's stderr into the world's tap.
+type tapShimLogger struct{ tap *shimLogTap }
+
+func (l tapShimLogger) Log(format string, args ...any) { l.tap.line(format, args...) }
+
+func (l tapShimLogger) LogVerbose(format string, args ...any) { l.tap.line(format, args...) }
+
+func (l tapShimLogger) LogLifecycle(format string, args ...any) { l.tap.line(format, args...) }
 
 func newShutdownWorld(t *testing.T, options ...worldOption) *shutdownWorld {
 	t.Helper()
@@ -92,6 +197,11 @@ func newShutdownWorld(t *testing.T, options ...worldOption) *shutdownWorld {
 	for _, opt := range options {
 		opt(&tuning)
 	}
+	// Registered before anything else the world owns, so its LIFO cleanup runs
+	// LAST: the shim stderr scanners keep producing lines throughout every
+	// boot's teardown, and the tap must still be accepting them then.
+	tap := newShimLogTap(t)
+	t.Cleanup(tap.finish)
 	node := nodePath(t)
 	// The BUNDLE'S OWN build identity, baked in by build.mjs exactly as
 	// bin/build-frontend.sh does it. Empty is the ordinary case (no identity,
@@ -114,7 +224,7 @@ func newShutdownWorld(t *testing.T, options ...worldOption) *shutdownWorld {
 	shimSock := isolatedShimSocket(t, sockDir)
 	storeSock := filepath.Join(sockDir, "store.sock")
 	startShimStore(t, storeBin, storeSock)
-	return &shutdownWorld{node: node, script: script, shimSock: shimSock, storeSock: storeSock, stateDir: sockDir}
+	return &shutdownWorld{node: node, script: script, shimSock: shimSock, storeSock: storeSock, stateDir: sockDir, shimLog: tap}
 }
 
 // --- one boot of the daemon --------------------------------------------------
@@ -281,7 +391,7 @@ func (w *shutdownWorld) boot(t *testing.T, options ...bootOption) *shutdownBoot 
 		ShimSocket: w.shimSock,
 		ForceFake:  true,
 		ExtraArgv:  []string{"--store-socket", w.storeSock},
-		Logger:     func(dlog.Workspace, string) shim.Logger { return testShimLogger{t: t} },
+		Logger:     func(dlog.Workspace, string) shim.Logger { return tapShimLogger{tap: w.shimLog} },
 		Event:      spawnLog.event,
 		Spawned: func(s server.SpawnedShim) {
 			tracked := &trackedShim{workspace: s.Workspace.Directory, proc: s.Proc, exited: make(chan struct{})}
