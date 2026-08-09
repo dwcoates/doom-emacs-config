@@ -322,13 +322,40 @@ describe("statusDotHtml", () => {
     expect(statusDotHtml("thinking", true)).toContain(`class="st st-thinking"`);
   });
 
-  it("only spins the in-flight merge, never the queued one", () => {
+  it("spins the in-flight merge", () => {
     // Arrange + Act — the motion lives in the stylesheet, so it is pinned there.
-    const spinning = css.match(/#ws-sidebar \.st-merging \{[^}]*animation: ws-spin/);
+    const spinning = css.match(/#ws-sidebar \.st-merging,[^{]*\{[^}]*animation: ws-spin/);
     // Assert
     expect(spinning).not.toBeNull();
+  });
+
+  it("spins the conflicting merge like the in-flight one", () => {
+    // Arrange + Act — the conflict is the active run, so it keeps turning.
+    const spinning = css.match(/#ws-sidebar \.st-merge-conflict \{[^}]*animation: ws-spin/);
+    // Assert
+    expect(spinning).not.toBeNull();
+  });
+
+  it("colors the conflicting merge with the error hue", () => {
+    // Arrange + Act — red is the ONLY thing separating a conflict from a merge.
+    const colored = css.match(/#ws-sidebar \.st-merge-conflict,\n#ws-sidebar \.st-merge-failed \{[^}]*color: var\(--err\)/);
+    // Assert
+    expect(colored).not.toBeNull();
+  });
+
+  it("never spins the queued merge", () => {
+    // Arrange + Act + Assert — nothing is in flight for a queued workspace.
     expect(css).not.toMatch(/\.st-merge-queued[^{]*\{[^}]*animation/);
+  });
+
+  it("never spins the enqueuing merge", () => {
+    // Arrange + Act + Assert
     expect(css).not.toMatch(/\.st-merge-enqueuing[^{]*\{[^}]*animation/);
+  });
+
+  it("never spins the failed merge", () => {
+    // Arrange + Act + Assert — a failed run is over, so its glyph rests.
+    expect(css).not.toMatch(/\.st-merge-failed[^{]*\{[^}]*animation/);
   });
 });
 
