@@ -53,7 +53,7 @@
 import type { CounterEntry, CounterStatus } from "./counter-menu.js";
 import type { ContentBlock, ModelInfo, ModelUsage, ResultSubtype, Usage } from "./protocol.js";
 import { mergeStatusLogValue } from "./merge-status.js";
-import { recordBlockIdentity } from "./streaming.js";
+import { previewBlockId, recordBlockIdentity } from "./streaming.js";
 import type {
   ContextClearedItem,
   ContextCompactedItem,
@@ -1152,23 +1152,31 @@ function contentBlockArm(block: Obj): { arm: string; value: Obj } {
  * Reasoning left the response body in the figma-idl reshape and became its own
  * item, so it is built here rather than off a content block.
  *
- * IT STATES NO MESSAGE ID. `AgentThinking` carries a `ThinkingBlock` and
- * nothing else — no API message id, no block index — so this item cannot name
- * the message its live preview was keyed on, and `messageId` falls back to the
- * emission's own envelope uuid. That is what the contract says, not a guess:
- * inventing a message id here is exactly the re-derivation `streaming.ts`
- * exists to prevent. The consequence is that a reasoning block does not settle
- * onto its own preview; see the report accompanying this adaptation.
+ * IT STATES WHERE IT CAME FROM. `AgentThinking` carries `api_message_id` and
+ * `block_index` — the message the daemon stripped the block from and the
+ * position it held in that message's content array. That pair is exactly the
+ * key a live preview is opened under, so this item can NAME its preview
+ * (`previewBlockId`) instead of being matched to one by resemblance. The daemon
+ * states it because the daemon did the stripping; deriving it here is the
+ * re-derivation `streaming.ts` exists to prevent.
+ *
+ * A record that states no message id — the shape this emission had before the
+ * contract carried one — keeps its envelope uuid as `messageId` and names no
+ * preview. It then stands on its own rather than claiming some other block's:
+ * an unnamed preview is not matched by resemblance instead.
  */
 function thinkingItemFrom(frame: ConversationItemFrame): ThinkingItem {
-  const messageId = frame.uuid;
+  const origin = frame.thinkingOrigin;
+  const stated = origin !== undefined && origin.apiMessageId !== "";
+  const messageId = stated ? origin.apiMessageId : frame.uuid;
   const item: ThinkingItem = {
     kind: "thinking",
-    ...recordBlockIdentity(frame.uuid, messageId, 0),
+    ...recordBlockIdentity(frame.uuid, messageId, stated ? origin.blockIndex : 0),
     messageId,
     text: pstr(frame.payload, "thinking"),
     done: true,
   };
+  if (stated) item.previewBlockId = previewBlockId(origin.apiMessageId, origin.blockIndex);
   const sig = pstr(frame.payload, "signature");
   if (sig !== "") item.signature = sig;
   return item;
