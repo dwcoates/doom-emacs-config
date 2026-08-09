@@ -17,8 +17,12 @@ import {
   CounterEntry,
   CounterSpec,
   CounterStatus,
+  countLabel,
   counterMenuHtml,
+  dropdownChipHtml,
+  isActive,
 } from "./counter-menu.js";
+import { escapeHtml } from "./highlight.js";
 import { ConversationItem, ToolItem, stringField } from "./store.js";
 import { itemsSinceClearOrCompact } from "./clear-compact.js";
 
@@ -103,4 +107,29 @@ export function agentsMenuHtml(
   open: boolean,
 ): string {
   return counterMenuHtml(AGENTS_SPEC, agents, open);
+}
+
+/**
+ * The subagent counter as the EXPANDED FOOTER's toggle: the chip alone, with
+ * no overlay of its own.
+ *
+ * The footer is the only surface that carries the session roster, and the
+ * expanded footer is where it renders — so this chip drops the dropdown it
+ * used to own rather than showing the same rows a second way. EXPANDED is the
+ * expanded footer's state, which the caret and `aria-expanded` report, so the
+ * chip says what its click will do.
+ */
+export function agentsToggleHtml(
+  agents: readonly CounterEntry[],
+  expanded: boolean,
+): string {
+  const visible = agents.filter(isActive);
+  if (visible.length === 0) return "";
+  return dropdownChipHtml(
+    AGENTS_SPEC.menu,
+    escapeHtml(countLabel(AGENTS_SPEC.noun, visible.length)),
+    "session subagents — show or hide the expanded footer",
+    expanded,
+    () => "",
+  );
 }
