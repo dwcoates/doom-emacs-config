@@ -1967,6 +1967,7 @@ introducing a sibling raw `make-process' site."
     agent-repl--frontend-webview-execute-script-1
     agent-repl--frontend-webview-live-widget
     agent-repl--frontend-webview-reload-widget
+    agent-repl--frontend-webview-uri
     agent-repl--uds-connect
     agent-repl--uds-probe
     agent-repl--image-call-process
